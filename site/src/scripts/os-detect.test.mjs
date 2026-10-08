@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detectDesktopOS, detectPlatform } from "./os-detect.js";
+import { detectDesktopOS, detectPlatform, detectWindowsArm64 } from "./os-detect.js";
 
 const UA = {
   win: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36",
@@ -56,4 +56,21 @@ test("Linux on ARM gets no amd64 recommendation", () => {
 test("unknown agents and missing UAs show every build", () => {
   assert.deepEqual(detectPlatform("curl/8.0"), { os: "", reason: "unknown" });
   assert.deepEqual(detectPlatform(undefined), { os: "", reason: "unknown" });
+});
+
+const hints = (platform, architecture, bitness) => ({
+  platform,
+  getHighEntropyValues: async () => ({ architecture, bitness }),
+});
+
+test("Windows ARM64 is told apart only through client hints", async () => {
+  assert.equal(await detectWindowsArm64(hints("Windows", "arm", "64")), true);
+  assert.equal(await detectWindowsArm64(hints("Windows", "x86", "64")), false);
+  assert.equal(await detectWindowsArm64(hints("macOS", "arm", "64")), false);
+  assert.equal(await detectWindowsArm64(undefined), false);
+  assert.equal(await detectWindowsArm64({ platform: "Windows" }), false);
+  assert.equal(await detectWindowsArm64({
+    platform: "Windows",
+    getHighEntropyValues: async () => { throw new Error("blocked"); },
+  }), false);
 });

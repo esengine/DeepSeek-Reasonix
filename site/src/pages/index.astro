@@ -333,8 +333,10 @@ const ld = {
           </div>
           <div class="os-card" data-os="win">
             <h4>Windows</h4>
-            <span class="meta"><span class="l-en">Installer · Windows 10+ · x64</span><span class="l-zh">安装器 · Windows 10+ · x64</span></span>
-            <a class="btn btn-light" href={studioReleases} data-studio-asset="ReasonixStudio-windows-amd64-installer.exe"><span class="l-en">Download · <span data-release-version="studio">latest</span></span><span class="l-zh">下载 · <span data-release-version="studio">latest</span></span></a>
+            <span class="meta"><span class="l-en">Installer · Windows 10+ · x64<span data-arm-offered hidden> or ARM64</span></span><span class="l-zh">安装器 · Windows 10+ · x64<span data-arm-offered hidden> 或 ARM64</span></span></span>
+            <a class="btn btn-light" href={studioReleases} data-studio-asset="ReasonixStudio-windows-amd64-installer.exe"><span class="l-en"><span data-arm-offered hidden>x64 · </span>Download · <span data-release-version="studio">latest</span></span><span class="l-zh"><span data-arm-offered hidden>x64 · </span>下载 · <span data-release-version="studio">latest</span></span></a>
+            <a class="btn btn-light" href={studioReleases} data-studio-asset="ReasonixStudio-windows-arm64-installer.exe" data-studio-optional hidden><span class="l-en">ARM64 · Download · <span data-release-version="studio">latest</span><span data-arm-rec hidden> · recommended</span></span><span class="l-zh">ARM64 · 下载 · <span data-release-version="studio">latest</span><span data-arm-rec hidden> · 推荐</span></span></a>
+            <p class="alt" data-arm-pending hidden><span class="l-en">Windows on ARM devices run the x64 installer through emulation. A native ARM64 build is coming soon.</span><span class="l-zh">ARM 设备上的 Windows 可通过模拟运行 x64 安装器，原生 ARM64 版即将提供。</span></p>
           </div>
           <div class="os-card" data-os="linux">
             <h4>Linux</h4>

@@ -625,3 +625,42 @@ test("Desktop JSON fetch continues after an invalid 200 response", async () => {
   assert.deepEqual(calls, ["https://one.invalid", "https://two.invalid"]);
   assert.equal(result.version, "v1.17.21");
 });
+
+const ARM = "ReasonixStudio-windows-arm64-installer.exe";
+
+test("Studio offers the Windows ARM64 installer only when the manifest attests it", () => {
+  const without = studioReleaseModel(studioManifest("v2.23.0", "dl"));
+  assert.ok(without);
+  assert.equal(ARM in without.assets, false);
+
+  const manifest = studioManifest("v2.23.0", "dl");
+  const url = `https://dl.reasonix.io/studio-v2.23.0/${ARM}`;
+  manifest.downloads[ARM] = { url, sig: `${url}.minisig`, size: 42, sha256: desktopSHA256 };
+  assert.equal(studioReleaseModel(manifest)?.assets[ARM], url);
+});
+
+test("a malformed ARM64 entry drops only that build, never the release", () => {
+  const manifest = studioManifest("v2.23.0", "dl");
+  const url = `https://dl.reasonix.io/studio-v2.23.0/${ARM}`;
+  manifest.downloads[ARM] = { url, sig: "", size: 42, sha256: desktopSHA256 };
+  const model = studioReleaseModel(manifest);
+  assert.ok(model);
+  assert.equal(ARM in model.assets, false);
+
+  const foreign = studioManifest("v2.23.0", "dl");
+  const evil = `https://github.com/esengine/DeepSeek-Reasonix/releases/download/studio-v2.23.0/${ARM}`;
+  foreign.downloads[ARM] = { url: evil, sig: `${evil}.minisig`, size: 42, sha256: desktopSHA256 };
+  assert.equal(ARM in (studioReleaseModel(foreign)?.assets ?? {}), false);
+});
+
+test("the GitHub fallback lists ARM64 when present and tolerates a bad entry", () => {
+  const release = studioGitHubRelease();
+  assert.equal(ARM in studioGitHubReleaseModel(release).assets, false);
+  const tag = release.tag_name;
+  release.assets.push({ name: ARM, browser_download_url: `https://github.com/esengine/DeepSeek-Reasonix/releases/download/${tag}/${ARM}`, size: 42 });
+  assert.ok(studioGitHubReleaseModel(release).assets[ARM]);
+  release.assets.at(-1).size = 0;
+  const model = studioGitHubReleaseModel(release);
+  assert.ok(model);
+  assert.equal(ARM in model.assets, false);
+});

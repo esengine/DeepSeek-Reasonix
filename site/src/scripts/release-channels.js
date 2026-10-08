@@ -26,6 +26,11 @@ const STUDIO_ASSETS = [
   ["downloads", "ReasonixStudio-windows-amd64-installer.exe", "ReasonixStudio-windows-amd64-installer.exe"],
   ["native_packages", "linux-amd64", "ReasonixStudio-linux-amd64.deb"],
 ];
+// Offered only when the manifest carries a fully valid entry; a release without
+// it (or with a malformed one) is still a complete release.
+const STUDIO_OPTIONAL_ASSETS = [
+  ["downloads", "ReasonixStudio-windows-arm64-installer.exe", "ReasonixStudio-windows-arm64-installer.exe"],
+];
 
 // Keep in lockstep with workers/crash-report CLI asset gate.
 export const CLI_RELEASE_ASSETS = [
@@ -267,27 +272,31 @@ export function studioReleaseModel(manifest) {
 
   const assets = {};
   let selectedBase = "";
-  for (const [group, key, name] of STUDIO_ASSETS) {
+  const attested = (group, key, name) => {
     const asset = manifest?.[group]?.[key];
     const rawURL = typeof asset?.url === "string" ? asset.url : "";
     const url = safeHTTPSURL(rawURL);
     const base = assetBases.find((candidate) => rawURL === candidate + name);
-    if (
-      !url ||
-      !base ||
-      (selectedBase && selectedBase !== base) ||
-      url.href !== rawURL ||
-      asset.sig !== `${rawURL}.minisig` ||
-      !Number.isSafeInteger(asset.size) ||
-      asset.size <= 0 ||
-      asset.size > MAX_RELEASE_ASSET_SIZE ||
-      typeof asset.sha256 !== "string" ||
-      !SHA256.test(asset.sha256)
-    ) {
-      return null;
-    }
-    selectedBase = base;
-    assets[name] = rawURL;
+    const valid = Boolean(url && base) &&
+      (!selectedBase || selectedBase === base) &&
+      url.href === rawURL &&
+      asset.sig === `${rawURL}.minisig` &&
+      Number.isSafeInteger(asset.size) &&
+      asset.size > 0 &&
+      asset.size <= MAX_RELEASE_ASSET_SIZE &&
+      typeof asset.sha256 === "string" &&
+      SHA256.test(asset.sha256);
+    return valid ? { rawURL, base } : null;
+  };
+  for (const [group, key, name] of STUDIO_ASSETS) {
+    const found = attested(group, key, name);
+    if (!found) return null;
+    selectedBase = found.base;
+    assets[name] = found.rawURL;
+  }
+  for (const [group, key, name] of STUDIO_OPTIONAL_ASSETS) {
+    const found = attested(group, key, name);
+    if (found) assets[name] = found.rawURL;
   }
   return {
     version,
@@ -306,7 +315,7 @@ export function studioGitHubReleaseModel(release) {
   const tag = release.tag_name;
   const found = {};
   const seen = new Set();
-  const names = new Set(STUDIO_ASSETS.map(([, , name]) => name));
+  const names = new Set([...STUDIO_ASSETS, ...STUDIO_OPTIONAL_ASSETS].map(([, , name]) => name));
   for (const asset of Array.isArray(release.assets) ? release.assets : []) {
     const name = String(asset?.name || "");
     if (!names.has(name)) continue;
@@ -322,7 +331,10 @@ export function studioGitHubReleaseModel(release) {
       !Number.isSafeInteger(asset?.size) ||
       asset.size <= 0 ||
       asset.size > MAX_RELEASE_ASSET_SIZE
-    ) return null;
+    ) {
+      if (STUDIO_OPTIONAL_ASSETS.some(([, , optional]) => optional === name)) continue;
+      return null;
+    }
     found[name] = rawURL;
   }
   if (STUDIO_ASSETS.some(([, , name]) => !found[name])) return null;

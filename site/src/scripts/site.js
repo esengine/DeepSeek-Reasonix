@@ -8,7 +8,7 @@ import {
   fetchFirstJSON,
   releaseVersionLabel,
 } from "./release-channels.js";
-import { detectPlatform } from "./os-detect.js";
+import { detectPlatform, detectWindowsArm64 } from "./os-detect.js";
 import { initTheme } from "./theme.js";
 import { initMobileNav } from "./mobile-nav.js";
 
@@ -284,6 +284,32 @@ import { initMobileNav } from "./mobile-nav.js";
     return releasesPage;
   };
 
+  // A native ARM64 installer is offered only once the release carries it.
+  // Until then an ARM64 visitor is told the x64 installer runs emulated.
+  let windowsArm = false;
+  const renderWindowsArm = () => {
+    const offered = Boolean(releaseModels.studio?.assets?.["ReasonixStudio-windows-arm64-installer.exe"]);
+    document.querySelectorAll("[data-arm-offered]").forEach((element) => { element.hidden = !offered; });
+    document.querySelectorAll("[data-arm-pending]").forEach((element) => { element.hidden = offered || !windowsArm; });
+    document.querySelectorAll('.os-card[data-os="win"]').forEach((card) => {
+      const arm = card.querySelector("[data-studio-optional]");
+      const x64 = card.querySelector('[data-studio-asset="ReasonixStudio-windows-amd64-installer.exe"]');
+      if (!arm || !x64) return;
+      const preferArm = offered && windowsArm;
+      arm.classList.toggle("btn-dark", preferArm);
+      arm.classList.toggle("btn-light", !preferArm);
+      arm.querySelectorAll("[data-arm-rec]").forEach((element) => { element.hidden = !preferArm; });
+      if (preferArm) x64.before(arm);
+      else x64.after(arm);
+    });
+  };
+  if (os === "win") {
+    detectWindowsArm64(navigator.userAgentData).then((isArm) => {
+      windowsArm = isArm;
+      renderWindowsArm();
+    });
+  }
+
   const renderReleaseSurface = (surface) => {
     const model = releaseModels[surface];
     document.querySelectorAll('[data-release-version="' + surface + '"]').forEach((element) => {
@@ -303,11 +329,19 @@ import { initMobileNav } from "./mobile-nav.js";
     const assetAttribute = "data-" + surface + "-asset";
     document.querySelectorAll("[" + assetAttribute + "]").forEach((link) => {
       const asset = link.getAttribute(assetAttribute);
+      if (link.hasAttribute("data-studio-optional")) {
+        const offered = Boolean(model?.assets?.[asset]);
+        link.hidden = !offered;
+        if (offered) { link.href = model.assets[asset]; link.setAttribute("download", ""); }
+        return;
+      }
       const target = model?.assets?.[asset] || fallbackReleaseURL(surface);
       link.href = target;
       if (!model?.assets?.[asset]) link.removeAttribute("download");
       else link.setAttribute("download", "");
     });
+
+    if (surface === "studio") renderWindowsArm();
 
     if (surface === "cli") {
       const command = cliUpgradeCommand();
