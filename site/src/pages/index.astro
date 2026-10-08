@@ -43,7 +43,7 @@ const ld = {
 <Base
   title="Reasonix — an AI coding assistant you stay in control of"
   titleEn="Reasonix — an AI coding assistant you stay in control of"
-  titleZh="Reasonix — 放权多少你来定的 AI 编程助手"
+  titleZh="Reasonix — 你说了算的 AI 编程助手"
   description={desc}>
 
   <script type="application/ld+json" set:html={JSON.stringify(ld)} slot="head" is:inline />
@@ -53,26 +53,26 @@ const ld = {
   <main>
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · runs on your computer, with your own model account</span><span class="l-zh">开源 · MIT · 程序在你电脑上运行，用你自己的模型账号</span></div>
+      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · runs on your computer, with your own model account</span><span class="l-zh">开源 · MIT · 程序跑在你电脑上，模型用你自己的账号</span></div>
       <h1 class="reveal" style="--d:0.06s">
-        <span class="l-en">An AI coding assistant<br />that <span class="tt">you control</span>,<br />and can rewind.</span>
-        <span class="l-zh">帮你写代码的 AI 助手：<br /><span class="tt">放权多少你来定</span>，<br />改错能撤回。</span>
+        <span class="l-en">Say what you want done.<br />It <span class="tt">gets to work</span><br />in your project.</span>
+        <span class="l-zh">说一句要做什么，<br />它在你的项目里<span class="tt" style="white-space:nowrap">动手</span>。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
-        <span class="l-en">Tell it what you want. It reads your project, edits files and runs commands. Have it ask before every step, or let it act on its own within set limits. Files it changed can be rewound to how they were.</span>
-        <span class="l-zh">告诉它要做什么，它会读你的项目、改文件、运行命令。你可以让它每一步都先问你，也可以让它在限定范围内自己做；改错的文件，可以退回到之前的样子。</span>
+        <span class="l-en">It reads your code, edits files and runs commands, and shows you each step. You decide how often it checks with you first. If it gets a file wrong, you can put it back.</span>
+        <span class="l-zh">它会读代码、改文件、跑命令，做了什么一步步摆给你看。要不要先问你、能自己做到哪，由你定；文件改错了，可以退回去。</span>
       </p>
       <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
         <div class="install-option install-option--desktop">
           <canvas class="particle-canvas"></canvas>
           <span class="install-kicker"><span class="l-en">Reasonix Studio · recommended</span><span class="l-zh">Reasonix Studio · 推荐</span></span>
-          <strong><span class="l-en">The desktop app. The easiest place to start.</span><span class="l-zh">桌面应用，图形界面，第一次用推荐从这里开始。</span></strong>
+          <strong><span class="l-en">The desktop app. The easiest way in.</span><span class="l-zh">桌面应用，有图形界面，第一次用就从这里开始。</span></strong>
           <a class="btn btn-dark" data-os-dl data-goto="studio" href="#start"><span class="l-en">Download Studio<span class="os-for" hidden> for <span class="os-name"></span></span></span><span class="l-zh">下载 Studio<span class="os-for" hidden>（<span class="os-name"></span>）</span></span></a>
         </div>
         <div class="install-option install-option--cli">
           <canvas class="particle-canvas"></canvas>
           <span class="install-kicker"><span class="l-en">Command line (<span class="keep-case">2.x</span>)</span><span class="l-zh">命令行（<span class="keep-case">2.x</span>）</span></span>
-          <strong><span class="l-en">For the terminal, on the same 2.x line as Studio.</span><span class="l-zh">在终端里使用，与 Studio 同属 2.x 版本线。</span></strong>
+          <strong><span class="l-en">For the terminal, on the same 2.x line as Studio.</span><span class="l-zh">在终端里用，和 Studio 同属 2.x 版本线。</span></strong>
           <span class="install"><span class="ps1">$</span><span class="install-command">npm i -g reasonix</span><button data-copy="npm i -g reasonix">Copy</button></span>
         </div>
       </div>
@@ -122,41 +122,41 @@ const ld = {
     <div class="wrap">
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Features</span><span class="l-zh">特性</span></span>
-        <h2><span class="l-en">You decide how much it does <span class="em">on its own.</span></span><span class="l-zh">它能自己做多少，<span class="em">由你来定。</span></span></h2>
-        <p><span class="l-en">Handing work to an AI is only comfortable if you can see what it did and take back what you do not want. These are the controls for that.</span><span class="l-zh">把活交给 AI，前提是你能看清它做了什么，并撤回不想要的部分。下面是为此准备的几项控制。</span></p>
+        <h2><span class="l-en">You decide how much it does <span class="em">on its own.</span></span><span class="l-zh">能放手多少，<span class="em">你来定。</span></span></h2>
+        <p><span class="l-en">Handing work to an AI only feels OK if you can see what it did and take back what you do not want. Here is how.</span><span class="l-zh">把活交给 AI，得先看得见它做了什么，不想要的还能收回来。办法在下面。</span></p>
       </div>
       <div class="feat-grid">
         <div class="feat reveal">
           <span class="tag">01 / permissions</span>
           <h3><span class="l-en">You choose when it asks</span><span class="l-zh">什么时候问你，你来选</span></h3>
-          <p><span class="l-en">Be asked before every write and command, or let everyday actions run on their own. Rules you set to forbid something always hold. On macOS and Linux, commands also run in a sandbox that limits where they can write.</span><span class="l-zh">可以每次写文件、运行命令都先问你，也可以让日常操作自动放行；你设的禁止规则始终生效。在 macOS 和 Linux 上，命令还运行在沙箱里，写入范围受限。</span></p>
+          <p><span class="l-en">Be asked before every write and command, or let everyday actions run on their own. Rules you set to forbid something always hold. On macOS and Linux, commands also run in a sandbox that limits where they can write.</span><span class="l-zh">写文件、跑命令可以每次都先问你，也可以让日常操作自动放行。你设的禁止规则一直有效。macOS 和 Linux 上，命令还跑在沙箱里，能写的位置有限。</span></p>
           <code class="feat-chip">$ allow edit internal/net/client.go? [y/n/always]</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
           <span class="tag">02 / checkpoints</span>
           <h3><span class="l-en">Rewind its file edits</span><span class="l-zh">改错的文件能退回</span></h3>
-          <p><span class="l-en">It snapshots a file before changing it, outside git, so you can rewind by conversation turn without touching your commit history. Snapshots cover files changed by its edit tools, not what a shell command did.</span><span class="l-zh">它改文件之前先留一份快照（不走 git），可按对话轮次退回，不动你的提交历史。快照只覆盖它用编辑工具改的文件，不包括命令行命令造成的改动。</span></p>
+          <p><span class="l-en">It snapshots a file before changing it, outside git, so you can rewind by conversation turn without touching your commit history. Snapshots cover files changed by its edit tools, not what a shell command did.</span><span class="l-zh">它改文件之前先存一份快照（不走 git），可以按对话轮次退回，不碰你的提交历史。只管它用编辑工具改的文件；命令行里跑出来的改动退不回来。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.04s">
           <span class="tag">03 / plan mode</span>
           <h3><span class="l-en">See the plan first</span><span class="l-zh">先看计划，再动手</span></h3>
-          <p><span class="l-en">In plan mode it drafts a plan and waits. It starts the work only after you approve.</span><span class="l-zh">计划模式下，它先写出计划并等你；你批准之后才开始动手。</span></p>
+          <p><span class="l-en">In plan mode it drafts a plan and waits. It starts the work only after you approve.</span><span class="l-zh">开了计划模式，它先写计划，等你点头才开始动手。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
           <span class="tag">04 / mcp + skills</span>
           <h3><span class="l-en">Add more tools</span><span class="l-zh">可以接入更多工具</span></h3>
-          <p><span class="l-en">Connect outside tools through MCP, a common plug-in standard. Add your own skills as Markdown files, and hand side tasks such as research or review to helper agents.</span><span class="l-zh">通过 MCP（常见的工具接入标准）接入外部工具；用 Markdown 文件添加自己的技能，也可以把调研、审查之类的支线任务交给辅助智能体。</span></p>
+          <p><span class="l-en">Connect outside tools through MCP, a common plug-in standard. Add your own skills as Markdown files, and hand side tasks such as research or review to helper agents.</span><span class="l-zh">用 MCP（一种通用的工具接入标准）接外部工具；用 Markdown 文件加自己的技能；调研、审查这类支线活，可以交给辅助智能体。</span></p>
           <code class="feat-chip">$ reasonix mcp add · ~/.reasonix/skills/</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
           <span class="tag">05 / single binary</span>
           <h3><span class="l-en">Nothing else to install</span><span class="l-zh">不用另外装环境</span></h3>
-          <p><span class="l-en">The command-line tool is a single self-contained program for macOS, Linux and Windows, on Intel/AMD and ARM chips.</span><span class="l-zh">命令行版是一个自包含的程序，支持 macOS、Linux、Windows，Intel/AMD 与 ARM 芯片均可。</span></p>
+          <p><span class="l-en">The command-line tool is a single self-contained program for macOS, Linux and Windows, on Intel/AMD and ARM chips.</span><span class="l-zh">命令行版就是一个独立的程序，macOS、Linux、Windows 都有，Intel/AMD 和 ARM 芯片都行。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
           <span class="tag">06 / local-first</span>
           <h3><span class="l-en">Your key, your model account</span><span class="l-zh">你的密钥，你的模型账号</span></h3>
-          <p><span class="l-en">Bring your own model key; DeepSeek is built in, and other OpenAI-compatible services work too. The program runs on your computer; your prompts and the files it reads go to the model service you set up, unless you point it at a local model. MIT licensed, developed in public.</span><span class="l-zh">自带模型密钥：内置 DeepSeek，其他兼容 OpenAI 接口的服务也能用。程序在你的电脑上运行；你的提示词和它读到的文件会发给你配置的模型服务，除非你接的是本地模型。MIT 许可，公开开发。</span></p>
+          <p><span class="l-en">Bring your own model key; DeepSeek is built in, and other OpenAI-compatible services work too. The program runs on your computer; your prompts and the files it reads go to the model service you set up, unless you point it at a local model. MIT licensed, developed in public.</span><span class="l-zh">自带模型密钥：内置 DeepSeek，其他兼容 OpenAI 接口的服务也能用。程序跑在你的电脑上；提示词和它读到的文件会发给你配置的模型服务，接本地模型的话除外。MIT 许可，公开开发。</span></p>
         </div>
       </div>
     </div>
@@ -168,8 +168,8 @@ const ld = {
     <div class="wrap">
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Surfaces</span><span class="l-zh">使用形态</span></span>
-        <h2><span class="l-en">Four ways to use it. <span class="em">Pick your habit.</span></span><span class="l-zh">四种用法，<span class="em">按你的习惯选。</span></span></h2>
-        <p><span class="l-en">Four ways to use Reasonix, all running the same program. Studio and the command line are both on the 2.x line; the 1.x desktop app is the previous line.</span><span class="l-zh">四种使用 Reasonix 的方式，运行的是同一套程序。Studio 与命令行同属 2.x 版本线；1.x 桌面端是上一代版本线。</span></p>
+        <h2><span class="l-en">Four ways to use it. <span class="em">Take the one that fits.</span></span><span class="l-zh">四种用法，<span class="em">哪个顺手用哪个。</span></span></h2>
+        <p><span class="l-en">Four ways to use Reasonix, all running the same program. Studio and the command line are both on the 2.x line; the 1.x desktop app is the previous line.</span><span class="l-zh">四种用法，背后是同一套程序。Studio 与命令行同属 2.x 版本线；1.x 桌面端是上一代版本线。</span></p>
       </div>
       <div class="surf-grid">
         <div class="surf reveal">
@@ -180,7 +180,7 @@ const ld = {
             </span>
           </div>
           <h3><span class="l-en">Desktop app · Studio</span><span class="l-zh">桌面端 · Studio</span></h3>
-          <p><span class="l-en">A graphical app: several sessions side by side, approvals, settings, auto-update.</span><span class="l-zh">图形界面：多个会话并列、确认操作、设置、自动更新。</span></p>
+          <p><span class="l-en">A graphical app: several sessions side by side, approvals, settings, auto-update.</span><span class="l-zh">图形界面：多个会话并排，确认操作、改设置、自动更新。</span></p>
           <code><span class="l-en">macOS (Apple Silicon, Intel) · Windows x64 · Linux amd64 (.deb)</span><span class="l-zh">macOS（Apple Silicon、Intel）· Windows x64 · Linux amd64（.deb）</span></code>
         </div>
         <div class="surf reveal" style="--d:0.06s">
@@ -191,7 +191,7 @@ const ld = {
             </span>
           </div>
           <h3><span class="l-en">Terminal · 2.x</span><span class="l-zh">终端 · 2.x</span></h3>
-          <p><span class="l-en">A full-screen text interface: review changes, approve actions, use slash commands.</span><span class="l-zh">全屏文字界面：查看改动、确认操作、使用斜杠命令。</span></p>
+          <p><span class="l-en">A full-screen text interface: review changes, approve actions, use slash commands.</span><span class="l-zh">全屏文字界面：看改动、确认操作、用斜杠命令。</span></p>
           <code>reasonix</code>
         </div>
         <div class="surf reveal" style="--d:0.12s">
@@ -202,7 +202,7 @@ const ld = {
             </span>
           </div>
           <h3><span class="l-en">Browser</span><span class="l-zh">浏览器</span></h3>
-          <p><span class="l-en">A web page served from your own machine. Turn on a password or token before sharing it.</span><span class="l-zh">在你自己的机器上提供的网页界面。分享给别人之前，先开启密码或令牌。</span></p>
+          <p><span class="l-en">A web page served from your own machine. Turn on a password or token before sharing it.</span><span class="l-zh">在你自己的机器上开的网页界面。要分享给别人，先开密码或令牌。</span></p>
           <code>reasonix serve</code>
         </div>
         <div class="surf reveal" style="--d:0.18s">
@@ -213,7 +213,7 @@ const ld = {
             </span>
           </div>
           <h3><span class="l-en">Your editor</span><span class="l-zh">你的编辑器</span></h3>
-          <p><span class="l-en">VS Code and VSCodium via the extension. Other editors that support ACP (Agent Client Protocol, a common way for editors to connect to an AI assistant) can connect too.</span><span class="l-zh">VS Code 与 VSCodium 装扩展即可。其他支持 ACP（编辑器接入 AI 助手的通用约定）的编辑器也可以连接。</span></p>
+          <p><span class="l-en">VS Code and VSCodium via the extension. Other editors that support ACP (Agent Client Protocol, a common way for editors to connect to an AI assistant) can connect too.</span><span class="l-zh">VS Code 和 VSCodium 装个扩展就行。别的编辑器只要支持 ACP（编辑器接入 AI 助手的通用约定），也能连上。</span></p>
           <code>reasonix acp</code>
         </div>
       </div>
@@ -235,19 +235,19 @@ const ld = {
         <div class="step reveal" style="--d:0.08s">
           <span class="num">02</span>
           <h3><span class="l-en">Open your project</span><span class="l-zh">打开你的项目</span></h3>
-          <p><span class="l-en">Open a project folder in Studio, or run it from a terminal inside the folder. Then write what you want done.</span><span class="l-zh">在 Studio 里打开项目文件夹，或在终端里进入该文件夹运行。然后写下你想做的事。</span></p>
+          <p><span class="l-en">Open a project folder in Studio, or run it from a terminal inside the folder. Then write what you want done.</span><span class="l-zh">在 Studio 里打开项目文件夹，或在终端里进到该文件夹再运行。然后写下想做的事。</span></p>
           <code>cd your-project &amp;&amp; reasonix</code>
         </div>
         <div class="step reveal" style="--d:0.16s">
           <span class="num">03</span>
           <h3><span class="l-en">Or use the browser</span><span class="l-zh">或者用浏览器</span></h3>
-          <p><span class="l-en">Keep it on your machine, or turn on a token or password before sharing it over a tunnel or remote port.</span><span class="l-zh">只在本机用就保持默认；要通过隧道或远程端口分享时，先开启令牌或密码。</span></p>
+          <p><span class="l-en">Keep it on your machine, or turn on a token or password before sharing it over a tunnel or remote port.</span><span class="l-zh">只在本机用，保持默认就行；要通过隧道或远程端口分享，先开令牌或密码。</span></p>
           <code>reasonix serve --auth token</code>
         </div>
         <div class="step reveal" style="--d:0.24s">
           <span class="num">04</span>
-          <h3><span class="l-en">Review and continue</span><span class="l-zh">查看结果，接着做</span></h3>
-          <p><span class="l-en">Queue follow-up tasks, review the changes, and pick a session up again later.</span><span class="l-zh">排上后续任务，查看改动，之后随时接着上次的会话继续。</span></p>
+          <h3><span class="l-en">Review and continue</span><span class="l-zh">看结果，接着做</span></h3>
+          <p><span class="l-en">Queue follow-up tasks, review the changes, and pick a session up again later.</span><span class="l-zh">接着排任务，看改动，改天也能回到这个会话继续。</span></p>
           <code>› refactor the auth flow</code>
         </div>
       </div>
@@ -295,7 +295,7 @@ const ld = {
   </section>
 
   <section class="cta" id="start">
-    <h2 class="reveal"><span class="l-en">Try it on a <span class="em">real project.</span></span><span class="l-zh">拿一个<span class="em">真实项目</span>试试。</span></h2>
+    <h2 class="reveal"><span class="l-en">Try it on a <span class="em">real project.</span></span><span class="l-zh">拿个<span class="em">真项目</span>试试。</span></h2>
     <p class="reveal" style="--d:0.08s"><span class="l-en">Open source under MIT. Bring your own model API key; your prompts go to the model service you choose.</span><span class="l-zh">MIT 开源。用你自己的模型密钥，提示词只发给你选的模型服务。</span></p>
 
     <div class="dl reveal" style="--d:0.14s">
@@ -485,7 +485,7 @@ const ld = {
       </nav>
     </div>
     <div class="foot-sub">
-      <span><span class="l-en">An AI coding assistant you stay in control of.</span><span class="l-zh">放权多少你来定的 AI 编程助手。</span></span>
+      <span><span class="l-en">An AI coding assistant you stay in control of.</span><span class="l-zh">你说了算的 AI 编程助手。</span></span>
       <span class="ver"><span class="rxv">{goVer}</span> · official</span>
     </div>
   </footer>
