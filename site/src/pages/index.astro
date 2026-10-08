@@ -26,7 +26,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open-source AI coding assistant. The program runs on your computer and uses the model account you configure. Describe a task; it reads your project, edits files and runs commands. You decide how much it does alone, and can rewind files it changed. Use it as a desktop app, in the terminal, in the browser or in your editor. MIT.";
+const desc = "Open-source coding agent for your terminal, desktop, browser and editor. The program runs on your computer and uses the model account you configure. Describe a task; it reads your project, edits files and runs commands. You choose how often it asks, and files its edit tools changed can be rewound. Use it as a desktop app, in the terminal, in the browser or in your editor. MIT.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -41,9 +41,9 @@ const ld = {
 };
 ---
 <Base
-  title="Reasonix — an AI coding assistant you stay in control of"
-  titleEn="Reasonix — an AI coding assistant you stay in control of"
-  titleZh="Reasonix — 你说了算的 AI 编程助手"
+  title="Reasonix — an open-source coding agent for your terminal, desktop, browser and editor"
+  titleEn="Reasonix — an open-source coding agent for your terminal, desktop, browser and editor"
+  titleZh="Reasonix — 终端、桌面、浏览器、编辑器里都能用的 AI 编程助手"
   description={desc}>
 
   <script type="application/ld+json" set:html={JSON.stringify(ld)} slot="head" is:inline />
@@ -53,14 +53,14 @@ const ld = {
   <main>
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · runs on your computer, with your own model account</span><span class="l-zh">开源 · MIT · 程序跑在你电脑上，模型用你自己的账号</span></div>
+      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · runs on your computer, model of your choice</span><span class="l-zh">开源 · MIT · 程序跑在你电脑上，模型自选</span></div>
       <h1 class="reveal" style="--d:0.06s">
-        <span class="l-en">Say what you want done.<br />It <span class="tt">gets to work</span><br />in your project.</span>
-        <span class="l-zh">说一句要做什么，<br />它在你的项目里<span class="tt" style="white-space:nowrap">动手</span>。</span>
+        <span class="l-en">An open-source <span class="tt">coding agent</span><br />for your terminal, desktop,<br />browser and editor.</span>
+        <span class="l-zh" style="font-size:0.82em"><span style="white-space:nowrap">终端、</span><span style="white-space:nowrap">桌面、</span><span style="white-space:nowrap">浏览器、</span><span style="white-space:nowrap">编辑器里</span><span style="white-space:nowrap">都能用的</span> <span class="tt" style="white-space:nowrap">AI 编程助手</span>。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
-        <span class="l-en">It reads your code, edits files and runs commands, and shows you each step. You decide how often it checks with you first. If it gets a file wrong, you can put it back.</span>
-        <span class="l-zh">它会读代码、改文件、跑命令，做了什么一步步摆给你看。要不要先问你、能自己做到哪，由你定；文件改错了，可以退回去。</span>
+        <span class="l-en">It reads your project, edits files and runs commands and tests. Have it ask before each step, or work on its own within limits you set. Files its edit tools changed can be rewound. New here? Start with the Studio desktop app.</span>
+        <span class="l-zh">它会读你的项目、改文件、跑命令和测试。每一步先问你，或在你划定的范围内自己做，由你选；它用编辑工具改过的文件可以退回去。第一次用，从桌面应用 Studio 开始。</span>
       </p>
       <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
         <div class="install-option install-option--desktop">
@@ -122,30 +122,30 @@ const ld = {
     <div class="wrap">
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Features</span><span class="l-zh">特性</span></span>
-        <h2><span class="l-en">You decide how much it does <span class="em">on its own.</span></span><span class="l-zh">能放手多少，<span class="em">你来定。</span></span></h2>
-        <p><span class="l-en">Handing work to an AI only feels OK if you can see what it did and take back what you do not want. Here is how.</span><span class="l-zh">把活交给 AI，得先看得见它做了什么，不想要的还能收回来。办法在下面。</span></p>
+        <h2><span class="l-en">You set the permissions. <span class="em">File edits can be rewound.</span></span><span class="l-zh">权限你来定，<span class="em" style="white-space:nowrap">改过的文件能退回。</span></span></h2>
+        <p><span class="l-en">Read and edit files, run commands and tests, with you in control of each step.</span><span class="l-zh">读文件、改文件、跑命令和测试，每一步由你掌控。</span></p>
       </div>
       <div class="feat-grid">
         <div class="feat reveal">
           <span class="tag">01 / permissions</span>
-          <h3><span class="l-en">You choose when it asks</span><span class="l-zh">什么时候问你，你来选</span></h3>
-          <p><span class="l-en">Be asked before every write and command, or let everyday actions run on their own. Rules you set to forbid something always hold. On macOS and Linux, commands also run in a sandbox that limits where they can write.</span><span class="l-zh">写文件、跑命令可以每次都先问你，也可以让日常操作自动放行。你设的禁止规则一直有效。macOS 和 Linux 上，命令还跑在沙箱里，能写的位置有限。</span></p>
+          <h3><span class="l-en">Permission levels</span><span class="l-zh">权限分档</span></h3>
+          <p><span class="l-en">Ask before every write and command, or let everyday actions run on their own. Your forbid rules always hold. On macOS and Linux, commands also run in a sandbox that limits where they can write.</span><span class="l-zh">每次写文件、跑命令都先问你，或让日常操作自动放行。你设的禁止规则始终有效。macOS 和 Linux 上，命令还跑在沙箱里，可写的位置受限。</span></p>
           <code class="feat-chip">$ allow edit internal/net/client.go? [y/n/always]</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
           <span class="tag">02 / checkpoints</span>
-          <h3><span class="l-en">Rewind its file edits</span><span class="l-zh">改错的文件能退回</span></h3>
-          <p><span class="l-en">It snapshots a file before changing it, outside git, so you can rewind by conversation turn without touching your commit history. Snapshots cover files changed by its edit tools, not what a shell command did.</span><span class="l-zh">它改文件之前先存一份快照（不走 git），可以按对话轮次退回，不碰你的提交历史。只管它用编辑工具改的文件；命令行里跑出来的改动退不回来。</span></p>
+          <h3><span class="l-en">Rewind file edits</span><span class="l-zh">文件改动可回退</span></h3>
+          <p><span class="l-en">A snapshot is saved before each file change, outside git. Rewind by conversation turn without touching your commit history. Only files changed by its edit tools are covered, not what a shell command did.</span><span class="l-zh">改文件前先存快照（不走 git），按对话轮次回退，不动提交历史。只覆盖编辑工具改的文件，命令行命令造成的改动不在内。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.04s">
           <span class="tag">03 / plan mode</span>
-          <h3><span class="l-en">See the plan first</span><span class="l-zh">先看计划，再动手</span></h3>
-          <p><span class="l-en">In plan mode it drafts a plan and waits. It starts the work only after you approve.</span><span class="l-zh">开了计划模式，它先写计划，等你点头才开始动手。</span></p>
+          <h3><span class="l-en">Plan mode</span><span class="l-zh">计划模式</span></h3>
+          <p><span class="l-en">It drafts a plan and waits. Work starts only after you approve.</span><span class="l-zh">先出计划并等你。批准之后才开始动手。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
           <span class="tag">04 / mcp + skills</span>
-          <h3><span class="l-en">Add more tools</span><span class="l-zh">可以接入更多工具</span></h3>
-          <p><span class="l-en">Connect outside tools through MCP, a common plug-in standard. Add your own skills as Markdown files, and hand side tasks such as research or review to helper agents.</span><span class="l-zh">用 MCP（一种通用的工具接入标准）接外部工具；用 Markdown 文件加自己的技能；调研、审查这类支线活，可以交给辅助智能体。</span></p>
+          <h3><span class="l-en">More tools</span><span class="l-zh">接入更多工具</span></h3>
+          <p><span class="l-en">Connect outside tools through MCP, a common plug-in standard. Write your own skills as Markdown files, and hand side tasks such as research or review to helper agents.</span><span class="l-zh">用 MCP（通用的工具接入标准）接外部工具，用 Markdown 文件写自己的技能，调研、审查这类支线任务交给辅助智能体。</span></p>
           <code class="feat-chip">$ reasonix mcp add · ~/.reasonix/skills/</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
@@ -168,7 +168,7 @@ const ld = {
     <div class="wrap">
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Surfaces</span><span class="l-zh">使用形态</span></span>
-        <h2><span class="l-en">Four ways to use it. <span class="em">Take the one that fits.</span></span><span class="l-zh">四种用法，<span class="em">哪个顺手用哪个。</span></span></h2>
+        <h2><span class="l-en">Four ways to use it. <span class="em">Same program.</span></span><span class="l-zh">四种用法，<span class="em">同一套程序。</span></span></h2>
         <p><span class="l-en">Four ways to use Reasonix, all running the same program. Studio and the command line are both on the 2.x line; the 1.x desktop app is the previous line.</span><span class="l-zh">四种用法，背后是同一套程序。Studio 与命令行同属 2.x 版本线；1.x 桌面端是上一代版本线。</span></p>
       </div>
       <div class="surf-grid">
@@ -485,7 +485,7 @@ const ld = {
       </nav>
     </div>
     <div class="foot-sub">
-      <span><span class="l-en">An AI coding assistant you stay in control of.</span><span class="l-zh">你说了算的 AI 编程助手。</span></span>
+      <span><span class="l-en">An open-source coding agent for terminal, desktop, browser and editor.</span><span class="l-zh">终端、桌面、浏览器、编辑器里都能用的 AI 编程助手。</span></span>
       <span class="ver"><span class="rxv">{goVer}</span> · official</span>
     </div>
   </footer>
