@@ -26,7 +26,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open-source AI coding assistant that runs on your own computer. Describe a task; it reads your project, edits files and runs commands. You decide how much it does alone, and can rewind files it changed. Use it as a desktop app, in the terminal, in the browser or in your editor. MIT.";
+const desc = "Open-source AI coding assistant. The program runs on your computer and uses the model account you configure. Describe a task; it reads your project, edits files and runs commands. You decide how much it does alone, and can rewind files it changed. Use it as a desktop app, in the terminal, in the browser or in your editor. MIT.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -53,7 +53,7 @@ const ld = {
   <main>
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · runs on your own computer</span><span class="l-zh">开源 · MIT · 在你自己的电脑上运行</span></div>
+      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · runs on your computer, with your own model account</span><span class="l-zh">开源 · MIT · 程序在你电脑上运行，用你自己的模型账号</span></div>
       <h1 class="reveal" style="--d:0.06s">
         <span class="l-en">An AI coding assistant<br />that <span class="tt">you control</span>,<br />and can rewind.</span>
         <span class="l-zh">帮你写代码的 AI 助手：<br /><span class="tt">放权多少你来定</span>，<br />改错能撤回。</span>
@@ -155,8 +155,8 @@ const ld = {
         </div>
         <div class="feat reveal" style="--d:0.1s">
           <span class="tag">06 / local-first</span>
-          <h3><span class="l-en">Your key, your computer</span><span class="l-zh">你的密钥，你的电脑</span></h3>
-          <p><span class="l-en">Bring your own model key; DeepSeek is built in, and other OpenAI-compatible services work too. Reasonix runs on your computer, and your prompts go to the model service you set up. MIT licensed, developed in public.</span><span class="l-zh">自带模型密钥：内置 DeepSeek，其他兼容 OpenAI 接口的服务也能用。Reasonix 在你的电脑上运行，你的提示词发往你配置的模型服务。MIT 许可，公开开发。</span></p>
+          <h3><span class="l-en">Your key, your model account</span><span class="l-zh">你的密钥，你的模型账号</span></h3>
+          <p><span class="l-en">Bring your own model key; DeepSeek is built in, and other OpenAI-compatible services work too. The program runs on your computer; your prompts and the files it reads go to the model service you set up, unless you point it at a local model. MIT licensed, developed in public.</span><span class="l-zh">自带模型密钥：内置 DeepSeek，其他兼容 OpenAI 接口的服务也能用。程序在你的电脑上运行；你的提示词和它读到的文件会发给你配置的模型服务，除非你接的是本地模型。MIT 许可，公开开发。</span></p>
         </div>
       </div>
     </div>
@@ -169,7 +169,7 @@ const ld = {
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Surfaces</span><span class="l-zh">使用形态</span></span>
         <h2><span class="l-en">Four ways to use it. <span class="em">Pick your habit.</span></span><span class="l-zh">四种用法，<span class="em">按你的习惯选。</span></span></h2>
-        <p><span class="l-en">Four ways to use Reasonix, all running the same local program. Studio and the command line are both on the 2.x line; the 1.x desktop app is the previous line.</span><span class="l-zh">四种使用 Reasonix 的方式，运行的是同一套本地程序。Studio 与命令行同属 2.x 版本线；1.x 桌面端是上一代版本线。</span></p>
+        <p><span class="l-en">Four ways to use Reasonix, all running the same program. Studio and the command line are both on the 2.x line; the 1.x desktop app is the previous line.</span><span class="l-zh">四种使用 Reasonix 的方式，运行的是同一套程序。Studio 与命令行同属 2.x 版本线；1.x 桌面端是上一代版本线。</span></p>
       </div>
       <div class="surf-grid">
         <div class="surf reveal">
