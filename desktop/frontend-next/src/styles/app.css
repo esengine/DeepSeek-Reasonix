@@ -2644,19 +2644,21 @@
     border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--surface);
     transition: border-color var(--t-card) var(--ease-out), box-shadow var(--t-card) var(--ease-out);
   }
-  .advset > summary {
+  .advset:not(.appearance-advanced) > summary {
     display: flex; align-items: center; gap: 10px; padding: 16px 0; cursor: pointer;
     color: var(--muted); list-style: none;
   }
   .advset > summary::-webkit-details-marker { display: none }
-  .advset > summary::after {
+  .advset:not(.appearance-advanced) > summary::after,
+  .appearance-advanced > summary > h3::after {
     content: ""; margin-left: auto; flex: none; width: 10px; height: 10px;
     color: var(--ghost); background: currentColor; transform: rotate(90deg);
     -webkit-mask: var(--chev) center / contain no-repeat; mask: var(--chev) center / contain no-repeat;
     transition: transform var(--m-line) ;
   }
-  .advset[open] > summary::after { transform: rotate(270deg) }
-  .advset > summary:hover { color: var(--text) }
+  .advset:not(.appearance-advanced)[open] > summary::after,
+  .appearance-advanced[open] > summary > h3::after { transform: rotate(270deg) }
+  .advset:not(.appearance-advanced) > summary:hover { color: var(--text) }
   @media (hover: hover) {
     .advset:hover { border-color: color-mix(in srgb, var(--accent) 20%, var(--border)) }
   }
@@ -2664,19 +2666,20 @@
     border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 7%, transparent);
   }
-  .advset > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs) }
-  .advset > summary .tx { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
-  .advset > summary .lb { font: var(--w-reg) var(--fs-ui) var(--ui); color: inherit }
-  .advset > summary .ds { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
-  .advset[open] > summary { margin-bottom: 0; border-bottom: 1px solid var(--hair) }
-  .advset > .grp {
+  .advset:not(.appearance-advanced) > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs) }
+  .advset:not(.appearance-advanced) > summary .tx { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+  .advset:not(.appearance-advanced) > summary .lb { font: var(--w-reg) var(--fs-ui) var(--ui); color: inherit }
+  .advset:not(.appearance-advanced) > summary .ds { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
+  .advset:not(.appearance-advanced)[open] > summary { margin-bottom: 0; border-bottom: 1px solid var(--hair) }
+  .advset:not(.appearance-advanced) > .grp {
     margin: 0; padding: 18px 0; border: 0; border-bottom: 1px solid var(--hair);
     border-radius: 0; background: transparent; box-shadow: none;
   }
-  .advset > .grp:last-child { border-bottom: 0 }
+  .advset:not(.appearance-advanced) > .grp:last-child { border-bottom: 0 }
   .grp-hd { display: flex; align-items: baseline; gap: 12px }
 
-  .grp > .grp-hd h3 { margin: 0; font: var(--w-semi) var(--fs-lead)/1.35 var(--ui); color: var(--text); letter-spacing: -.005em }
+  .grp > .grp-hd h3,
+  .grp > h3.grp-hd { margin: 0; font: var(--w-semi) var(--fs-lead)/1.35 var(--ui); color: var(--text); letter-spacing: -.005em }
   .grp .now {
     margin-left: auto; flex: none; padding: 2px 7px; border-radius: var(--r-pill);
     background: var(--overlay); font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint);

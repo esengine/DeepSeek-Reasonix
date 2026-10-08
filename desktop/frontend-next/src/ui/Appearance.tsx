@@ -532,12 +532,10 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           once, not that any one control is obscure. The summary says what is
           folded and whether it has been changed — a disclosure hiding a value
           somebody set is a screen disagreeing with the window itself. */}
-      <details className="advset">
-        <summary>
-          <span className="tx">
-            <span className="lb">{t("高级外观")}</span>
-            <span className="ds">{changed.length ? t("已修改：{list}", { list: changed.join(" · ") }) : t("字体、文字粗细、文字对比度")}</span>
-          </span>
+      <details className="advset appearance-advanced">
+        <summary className="grp">
+          <h3 className="grp-hd"><span>{t("高级外观")}</span></h3>
+          <span className="hint">{changed.length ? t("已修改：{list}", { list: changed.join(" · ") }) : t("字体、文字粗细、文字对比度")}</span>
         </summary>
         <section className="grp" id="set-font" data-setting="font">
           <div className="grp-hd">

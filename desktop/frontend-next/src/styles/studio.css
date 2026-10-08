@@ -3443,7 +3443,7 @@ body { font-size: 14px; line-height: 1.75; }
 .grp:focus-within {
   background: color-mix(in srgb, var(--float) 94%, var(--accent-wash)) !important;
 }
-.advset > .grp { background: transparent !important; box-shadow: none; }
+.advset:not(.appearance-advanced) > .grp { background: transparent !important; box-shadow: none; }
 :root[data-theme="light"] .prefs {
   background: color-mix(in srgb, var(--page) 66%, transparent) !important;
 }
@@ -3642,6 +3642,11 @@ body { font-size: 14px; line-height: 1.75; }
   background: color-mix(in srgb, var(--raised) 94%, var(--accent-wash)) !important;
 }
 
+:root .advset.appearance-advanced { padding: 0; border: 0; margin-bottom: 0; background: transparent !important; box-shadow: none; }
+.appearance-advanced > summary { cursor: pointer; list-style: none; }
+.appearance-advanced > summary > .hint { display: block; }
+.appearance-advanced > summary:focus-visible { outline: 2px solid var(--focus); }
+
 /* Three levels across every settings page: heading, body, evidence. They are
    rungs of the window's own ladder rather than a private one — a sheet written
    half a pixel off every other surface is what made it read as a second app. */
@@ -3667,7 +3672,8 @@ body { font-size: 14px; line-height: 1.75; }
 .apply { font-size: var(--prefs-meta); }
 .prefs-intro h2 { font-size: var(--prefs-title); }
 .prefs-intro-meta strong { font-family: var(--ui); font-size: var(--fs-ui); }
-.grp > .grp-hd h3 { font-size: var(--fs-lead); }
+.grp > .grp-hd h3,
+.grp > h3.grp-hd { font-size: var(--fs-lead); }
 .grp .hint,
 .grp .note,
 .opt .lb,
