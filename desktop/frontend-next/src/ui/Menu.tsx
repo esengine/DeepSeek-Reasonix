@@ -22,6 +22,8 @@ export interface MenuItem {
   // through twice.
   header?: boolean;
   disabled?: boolean;
+  // A letter chip leading the row or heading, standing in for a vendor mark.
+  mono?: { letter: string; tone: number };
   // A switch rather than a choice: picking it flips this state, and the row
   // says which state it is in instead of being marked as the current value.
   toggle?: boolean;
@@ -55,13 +57,17 @@ interface Props {
   // Opening is when the reader asks what the choices are, so a menu whose rows
   // come from elsewhere re-reads them here rather than showing its mount's copy.
   onOpen?: () => void;
+  // The field is the menu's way in rather than its answer to length: a model
+  // list is searched for by name however few entries it has.
+  searchAlways?: boolean;
+  searchPlaceholder?: string;
 }
 
 // data-* rides through to the item that raises the pick, the way Switch and Seg
 // carry theirs: the action's identity is written at the call site, and the
 // answer this menu gives is the item's own value.
 export function Picker({
-  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, wrapClassName, menuClassName, menuTitle, onOpen, ...id
+  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, ...id
 }: Props & { [K in `data-${string}`]?: string }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -71,11 +77,12 @@ export function Picker({
   const find = useRef<HTMLInputElement>(null);
 
   const choosable = items.filter((it) => !it.header && !it.plain).length;
-  const filtering = choosable > FILTER_FROM;
+  const filtering = searchAlways || choosable > FILTER_FROM;
   const shown = useMemo(() => (filtering ? matching(items, query) : items), [filtering, items, query]);
   // What Enter takes while the field still has focus. Only shown once the
   // query narrows something, or every menu would open pre-selected.
-  const lead = query ? shown.find((it) => !it.header)?.value : undefined;
+  const lead = query ? shown.find((it) => !it.header && !it.plain)?.value : undefined;
+  const none = filtering && !shown.some((it) => !it.header && !it.plain);
 
   useEffect(() => {
     if (!open) {
@@ -84,6 +91,7 @@ export function Picker({
     }
     if (filtering) find.current?.focus();
     else menu.current?.querySelector<HTMLElement>("button.mi")?.focus();
+    menu.current?.querySelector<HTMLElement>("button.mi[data-on]")?.scrollIntoView({ block: "nearest" });
     // The menu is not inside the wrapper any more, so without asking it too a
     // press on one of its own rows would read as a press outside.
     const onDown = (e: MouseEvent) => {
@@ -140,6 +148,11 @@ export function Picker({
   // Headings are divs and never take focus, so walking the buttons is what
   // keeps one arrow press from landing on nothing.
   const arrows = (e: React.KeyboardEvent) => {
+    const typed = e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (filtering && typed && e.target !== find.current) {
+      find.current?.focus();
+      return;
+    }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     const all = [...(menu.current?.querySelectorAll<HTMLElement>("button.mi") ?? [])];
     if (!all.length) return;
@@ -152,6 +165,11 @@ export function Picker({
       return;
     }
     const to = e.key === "ArrowDown" ? i + 1 : i - 1;
+    if (to < 0 && filtering) {
+      e.preventDefault();
+      find.current?.focus();
+      return;
+    }
     if (to < 0 || to >= all.length) return;
     e.preventDefault();
     all[to].focus();
@@ -200,7 +218,7 @@ export function Picker({
               ref={find}
               className="mfind"
               value={query}
-              placeholder={t("筛选 {n} 项", { n: choosable })}
+              placeholder={searchPlaceholder ?? t("筛选 {n} 项", { n: choosable })}
               aria-label={t("筛选")}
               spellCheck={false}
               onChange={(e) => setQuery(e.target.value)}
@@ -211,11 +229,13 @@ export function Picker({
               }}
             />
           )}
+          {none && <div className="mnone">{t("没有匹配的项")}</div>}
           {shown.map((it, i) => (
             <Fragment key={it.value}>
               {it.divide && i > 0 && <div className="div" />}
               {it.header ? (
                 <div className="mi head">
+                  {it.mono && <Mono {...it.mono} />}
                   <span className="lb">{it.label}</span>
                   {it.right && <span className="rt">{it.right}</span>}
                 </div>
@@ -233,7 +253,7 @@ export function Picker({
                   data-recommended={it.recommended ? "" : undefined}
                   onClick={() => take(it.value)}
                 >
-                  <span className="dot" />
+                  {it.mono ? <Mono {...it.mono} /> : <span className="dot" />}
                   <span className="tx">
                     <span className="studio-item-line">
                       <span className="lb">{it.label}</span>
@@ -253,12 +273,15 @@ export function Picker({
               )}
             </Fragment>
           ))}
-          {filtering && shown.length === 0 && <div className="mnone">{t("没有匹配的项")}</div>}
         </div>,
         document.body,
       )}
     </div>
   );
+}
+
+function Mono({ letter, tone }: { letter: string; tone: number }) {
+  return <i className="mi-mono" data-tone={tone} style={{ "--tone": `var(--cat-${tone + 1})` } as React.CSSProperties} aria-hidden="true">{letter}</i>;
 }
 
 // Group order is kept rather than ranked by relevance: a list that reorders
@@ -277,7 +300,7 @@ function matching(items: MenuItem[], query: string): MenuItem[] {
     // Actions are not data — filtering them out would take "打开其他目录…"
     // away exactly when the query found nothing and the user needs it.
     if (it.plain) return false;
-    const hay = `${head}|${normalize(`${it.label} ${it.right ?? ""} ${it.desc ?? ""}`)}`;
+    const hay = `${head}|${normalize(`${it.label} ${it.right ?? ""} ${it.meta ?? ""} ${it.desc ?? ""}`)}`;
     return words.every((w) => hay.includes(w));
   });
   return items.filter((it, i) => {

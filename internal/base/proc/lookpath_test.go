@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -29,10 +28,12 @@ func TestLookPathInSkipsRelativeEntriesAndFindsTheSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := "relative" + string(filepath.ListSeparator) + dir
-	if got, ok := LookPathIn("mcp", path, ".CMD", true); !ok || !strings.EqualFold(got, filepath.Join(dir, "mcp.cmd")) {
+	// The extension is spelled as the file is: Windows lookups ignore case, this
+	// test's filesystem may not.
+	if got, ok := LookPathIn("mcp", path, ".cmd", true); !ok || got != filepath.Join(dir, "mcp.cmd") {
 		t.Fatalf("LookPathIn = %q, %v", got, ok)
 	}
-	if _, ok := LookPathIn("mcp", path, ".CMD", false); ok {
+	if _, ok := LookPathIn("mcp", path, ".cmd", false); ok {
 		t.Fatal("found an extension sibling where the platform does not probe one")
 	}
 }

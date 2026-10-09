@@ -312,7 +312,7 @@ export function App({ hub }: { hub: HubPort }) {
   }, [setup, welcomed]);
 
   const running = report.run === "running";
-  const { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, look, onLook, pack, reloadThemes } =
+  const { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, effects, look, onLook, pack, reloadThemes } =
     usePaint(hub, runtimes, running, fail);
   // A pane with no session file has never been written to — the empty one every
   // window opens with. Opening a conversation takes it over instead of parking
@@ -582,7 +582,7 @@ export function App({ hub }: { hub: HubPort }) {
         hub={hub} onError={fail}
       />
 
-      {pack?.sky && <Sky />}
+      {pack?.sky && effects !== "reduced" && <Sky />}
 
       <div className="cols">
         {navRail.drawn && (

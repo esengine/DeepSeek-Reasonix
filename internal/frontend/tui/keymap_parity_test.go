@@ -297,3 +297,25 @@ func TestCtrlNAndCtrlPMoveThePickerSelection(t *testing.T) {
 		t.Fatalf("picker after two Ctrl+P = sel %d, query %q; want 0 and no filter", m.picker.sel, m.picker.query)
 	}
 }
+
+// Ctrl+Enter steers a running turn, as 1.x did and docs/GUIDE.md says; idle it
+// sends nothing, so a press meant as a newline never submits the draft.
+func TestCtrlEnterSteersOnlyARunningTurn(t *testing.T) {
+	m, k := testModel(t)
+	ctrlEnter := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl}
+	typeText(m, "hello")
+	run(m, m.keyCmd(ctrlEnter))
+	if calledWith(k, "POST /submit") || m.composer.Value() != "hello" {
+		t.Fatalf("idle Ctrl+Enter sent or changed the draft (composer %q):\n%s", m.composer.Value(), strings.Join(k.seen(), "\n"))
+	}
+	m.composer.Reset()
+	startTurn(m)
+	typeText(m, "use make")
+	run(m, m.keyCmd(ctrlEnter))
+	if calls := strings.Join(k.seen(), "\n"); !strings.Contains(calls, `POST /inbox/items {"input":"use make","intent":"steer"}`) {
+		t.Fatalf("Ctrl+Enter during a turn did not steer:\n%s", calls)
+	}
+	if m.composer.Value() != "" {
+		t.Fatalf("the steered text stayed in the composer: %q", m.composer.Value())
+	}
+}

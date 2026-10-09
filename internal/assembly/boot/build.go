@@ -582,7 +582,6 @@ func (b *builder) freeze(ctrl *control.Controller) (*BuildResult, error) {
 		onWarning:          ext.warn,
 		onSidecarDown:      ext.sidecarDown,
 		skipPromptStrategy: shouldSkipPromptStrategy(b.opts.PreviousPlan),
-		previousDispatcher: b.opts.PreviousDispatcher,
 	}, ext.mgr)
 	// Assembly owns the sidecars on every path: closed inside, or in the runtime set.
 	b.pendingMgr = nil

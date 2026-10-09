@@ -57,6 +57,10 @@
 
 <br/>
 
+## ❤️Sponsor
+
+<table><tr><td width="180"><a href="https://www.packyapi.ai/register?aff=rIbQ" target="_blank" rel="sponsored noopener noreferrer"><picture><source media="(prefers-color-scheme: dark)" srcset="./.github/sponsor/packycode-dark.svg"><img src="./.github/sponsor/packycode-light.svg" alt="PackyCode" width="150"></picture></a></td><td>Thanks to PackyCode for sponsoring this project! Access leading AI models through PackyCode with one API endpoint and one API key, with automatic failover and dedicated high-speed routes for Codex and Claude Code.</td></tr></table>
+
 ## What it is
 
 Reasonix is an open-source AI coding assistant. The program runs on your computer; the AI model is a service you configure, which receives what it reads. You describe a task in plain language; it reads code, edits files and runs commands and tests inside the project folder you choose, and shows you each step.

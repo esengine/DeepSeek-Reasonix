@@ -2,7 +2,7 @@ module reasonix/desktop
 
 go 1.26.0
 
-toolchain go1.26.8
+toolchain go1.26.9
 
 // The desktop tools are a nested module so their CGO build never touches the
 // CLI's CGO_ENABLED=0 single-static-binary guarantee. The replace lets them
@@ -27,7 +27,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/zalando/go-keyring v0.2.8 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	mvdan.cc/sh/v3 v3.14.1 // indirect
 )

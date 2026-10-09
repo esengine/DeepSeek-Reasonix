@@ -416,7 +416,7 @@ export const EN: Record<string, string> = {
   // ── 高级外观 ─────────────────────────────────────────────────────
   "高级外观": "Advanced appearance",
   "已修改：{list}": "Changed: {list}",
-  "字体、文字粗细、文字对比度": "Fonts, text weight, text contrast",
+  "字体、文字粗细、文字对比度、视觉效果": "Fonts, text weight, text contrast, visual effects",
 
   // ── 明暗与配色 ───────────────────────────────────────────────────
   "明暗": "Light and dark",
@@ -436,6 +436,11 @@ export const EN: Record<string, string> = {
   "已设置自定义壁纸": "Custom wallpaper set",
   "壁纸与背景位置": "Wallpaper and background position",
   "文字粗细": "Text weight",
+  "视觉效果": "Visual effects",
+  "窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空和颗粒这几层。": "If the window keeps your GPU busy, choose Reduced: the layout stays as it is, only frosted glass, the animated sky and the grain layer go.",
+  "节能": "Reduced",
+  "背景模糊、动态天空与颗粒质感全部开启": "Background blur, the animated sky and the grain layer are all on",
+  "关闭背景模糊、动态天空与颗粒质感，集成显卡或老旧电脑上更省电": "Turns off background blur, the animated sky and the grain layer; lighter on integrated graphics and older machines",
   "调整文字的笔画粗细。中文笔画密集，在小字号下加粗有助于提升清晰度。": "Adjusts stroke weight. Dense Chinese glyphs lose definition first at small sizes, and more weight recovers it.",
   "图形渲染": "Graphics",
   "随系统": "System default",
@@ -809,6 +814,7 @@ export const EN: Record<string, string> = {
   // ── 其余 ─────────────────────────────────────────────────────────
   "没有打开的会话": "No session open",
   "没有匹配的项": "Nothing matches",
+  "搜索模型或服务商…": "Search models or providers…",
   "筛选": "Filter",
   "补全": "Completions",
   "交还给插件": "Hand back to the extension",

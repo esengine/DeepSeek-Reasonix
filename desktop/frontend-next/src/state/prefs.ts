@@ -110,6 +110,38 @@ export function setSoftwareRendering(on: boolean): void {
   softwareListeners.forEach((fn) => fn());
 }
 
+// "reduced" drops the layers that cost the GPU a frame each time the page
+// moves: frosted glass, the animated sky, the grain. Anything else is "full".
+const EFFECTS_KEY = "rx-effects";
+
+export type EffectsMode = "full" | "reduced";
+
+const effectsListeners = new Set<() => void>();
+
+export function effectsMode(): EffectsMode {
+  try {
+    return localStorage.getItem(EFFECTS_KEY) === "reduced" ? "reduced" : "full";
+  } catch {
+    return "full";
+  }
+}
+
+export function onEffectsChange(fn: () => void): () => void {
+  effectsListeners.add(fn);
+  return () => {
+    effectsListeners.delete(fn);
+  };
+}
+
+export function setEffectsMode(mode: EffectsMode): void {
+  try {
+    localStorage.setItem(EFFECTS_KEY, mode);
+  } catch {
+    /* a private window keeps the default, which is the same answer it gives */
+  }
+  effectsListeners.forEach((fn) => fn());
+}
+
 // When the icon column beside the workspace rail is drawn: "on" always, "collapsed"
 // only while the workspace rail is closed, "off" never. A phone-width window
 // never draws it, whatever this says. "on" and "off" are the two values the

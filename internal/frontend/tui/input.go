@@ -131,6 +131,8 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.send(false)
 	case "ctrl+s":
 		return m, m.send(true)
+	case "ctrl+enter":
+		return m, m.steerRunning()
 	case "esc":
 		return m, m.escape(empty)
 	case "ctrl+c":
@@ -161,12 +163,8 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.shell = true
 			return m, nil
 		}
-	case "up":
-		if m.composer.Line() == 0 && m.recall(true) {
-			return m, nil
-		}
-	case "down":
-		if m.composer.Line() == m.composer.LineCount()-1 && m.recall(false) {
+	case "up", "down":
+		if m.recallAtEdge(msg.String() == "up") {
 			return m, nil
 		}
 	}
@@ -177,6 +175,24 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, m.refreshMenu())
 	}
 	return m, cmd
+}
+
+// steerRunning sends the draft as a steer, but only while a turn runs: idle, a
+// press meant as a newline must not submit it.
+func (m *model) steerRunning() tea.Cmd {
+	if !m.tr.Running {
+		return nil
+	}
+	return m.send(true)
+}
+
+// recallAtEdge recalls history only when the cursor sits on the composer's
+// first line (older) or last line (newer), so multi-line editing keeps the arrows.
+func (m *model) recallAtEdge(older bool) bool {
+	if older {
+		return m.composer.Line() == 0 && m.recall(true)
+	}
+	return m.composer.Line() == m.composer.LineCount()-1 && m.recall(false)
 }
 
 // shortcutKey takes the keys that act without touching the composer: the

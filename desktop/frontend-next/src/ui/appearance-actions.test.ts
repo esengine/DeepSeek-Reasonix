@@ -78,7 +78,7 @@ describe("what the appearance page says a person is doing", () => {
   it("keeps neighbouring intents apart", () => {
     const ids = new Set(ACTIONS.map((a) => a.id));
     for (const id of ["theme.activate", "wallpaper.change", "wallpaper.remove", "appearance.scheme", "appearance.background",
-      "appearance.weight", "appearance.contrast"]) {
+      "appearance.weight", "appearance.contrast", "appearance.effects"]) {
       expect(ids.has(id), `${id} is missing`).toBe(true);
     }
   });

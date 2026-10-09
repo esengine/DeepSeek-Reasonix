@@ -10,6 +10,7 @@ import { MockHub } from "../src/port/mock_hub";
 import { MockPort } from "../src/port/mock";
 import { fromHistory } from "../src/state/session";
 import type { AgentPort, Appearance, HistoryMessage } from "../src/port/port";
+import type { ThemePack } from "../src/port/look";
 import type { RuntimeView, TreeWorkspace } from "../src/port/hub";
 import type { WireEvent } from "../src/port/wire";
 
@@ -23,8 +24,37 @@ let peakInFlight = 0;
 
 // A port whose event stream the driver owns outright: the fixture's scripted
 // beats never reach the UI, so a measurement times exactly the frames it fed.
+// ?pack=sky opens on a pack with the live sky; ?pack=photo on one with a
+// picture. Both are the states where the shell goes translucent over a backdrop.
+const PACK = new URLSearchParams(location.search).get("pack");
+
+function benchPack(): ThemePack | null {
+  const tokens = {
+    light: { bg: "#F2F6F8", bgSoft: "#F9FCFD", panel: "#FFFFFF", border: "#CBD9E0", fg: "#12191C", fgDim: "#4E5D65", accent: "#0E6E82" },
+    dark: { bg: "#080D10", bgSoft: "#0C1316", panel: "#131C21", border: "#23333A", fg: "#E4EEF2", fgDim: "#8298A2", accent: "#4FB6CE" },
+  };
+  if (PACK === "sky") {
+    return {
+      id: "bench-sky", name: "Bench sky", active: true, tokens,
+      sky: { ray: "rgba(255,216,142,.55)", cloud: "255,240,212", cloudLit: "242,206,140", rayAlpha: 0.85, cloudAlpha: 0.4 },
+    };
+  }
+  if (PACK === "photo") {
+    return {
+      id: "bench-photo", name: "Bench photo", active: true, tokens,
+      background: { image: true, focusX: 0.5, focusY: 0.5, homeOpacity: 0.9, taskOpacity: 0.5, overlayStrength: 0.4 },
+    };
+  }
+  return null;
+}
+
 class BenchPort extends MockPort {
   private readonly subs = new Set<(e: WireEvent) => void>();
+
+  async themes(): Promise<ThemePack[]> {
+    const pack = benchPack();
+    return pack ? [pack] : super.themes();
+  }
 
   async saveAppearance(look: Appearance) {
     saves.push(look);

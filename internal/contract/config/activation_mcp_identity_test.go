@@ -178,12 +178,15 @@ func TestEnableCoversPathextSiblingsOnEveryOS(t *testing.T) {
 	assertPathextSiblingBound(t)
 }
 
+// withWindowsNames turns on Windows name probing on any OS. The extensions are
+// spelled as the fixtures are: Windows file lookups ignore case, a Linux
+// filesystem does not, and the seam fakes only the probing, not the filesystem.
 func withWindowsNames(t *testing.T) {
 	t.Helper()
 	saved := commandNamesWindows
 	commandNamesWindows = true
 	t.Cleanup(func() { commandNamesWindows = saved })
-	t.Setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+	t.Setenv("PATHEXT", ".com;.exe;.bat;.cmd")
 }
 
 // Windows env keys ignore case, so a declaration may spell PATH twice. The
@@ -230,5 +233,30 @@ func TestEnableCoversThePathextSiblingOfADottedCommand(t *testing.T) {
 	writeProjectFiles(t, root, map[string]string{"scripts/mcp.v2.cmd": "@echo swapped\r\n"})
 	if on, _ := store.IsEnabled(declaredServer(t, root, "srv"), root); on {
 		t.Fatal("scripts/mcp.v2.cmd changed and the enable still holds")
+	}
+}
+
+// Off Windows nothing probes extensions, so a .cmd beside the command is not
+// what runs and changing it asks nothing; the command file itself still does.
+func TestPathextSiblingIsNotBoundWhereNothingProbesIt(t *testing.T) {
+	saved := commandNamesWindows
+	commandNamesWindows = false
+	t.Cleanup(func() { commandNamesWindows = saved })
+	store, root := bindingHome(t)
+	writeProjectFiles(t, root, map[string]string{
+		".mcp.json":       mcpJSON(t, map[string]any{"command": "./scripts/mcp"}),
+		"scripts/mcp":     "#!/bin/sh\n",
+		"scripts/mcp.cmd": "@echo approved\r\n",
+	})
+	if err := store.SetServerEnabled(declaredServer(t, root, "srv"), root, ActivationProject, true); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFiles(t, root, map[string]string{"scripts/mcp.cmd": "@echo other\r\n"})
+	if on, _ := store.IsEnabled(declaredServer(t, root, "srv"), root); !on {
+		t.Fatal("a sibling no launcher on this OS runs revoked the enable")
+	}
+	writeProjectFiles(t, root, map[string]string{"scripts/mcp": "#!/bin/sh\necho swapped\n"})
+	if on, _ := store.IsEnabled(declaredServer(t, root, "srv"), root); on {
+		t.Fatal("the command file changed and the enable still holds")
 	}
 }

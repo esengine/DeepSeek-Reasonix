@@ -48,7 +48,6 @@
     position: absolute; top: -32%; left: 54%; width: 54vw; aspect-ratio: 1;
     border-radius: 50%; filter: blur(84px);
     background: radial-gradient(circle, var(--ray, rgb(255 216 142 / .55)), transparent 68%);
-    animation: sunpulse 28s ease-in-out infinite;
   }
   .sky .shafts {
     position: absolute; left: -20%; right: -20%; top: -30%; height: 150%;
@@ -60,12 +59,6 @@
     transform: rotate(var(--r)); transform-origin: 50% 0%;
     -webkit-mask-image: linear-gradient(180deg, #000 0 30%, transparent 92%);
     mask-image: linear-gradient(180deg, #000 0 30%, transparent 92%);
-    animation: breathe var(--dur) ease-in-out var(--del) infinite;
-  }
-  @keyframes sunpulse { 0%, 100% { opacity: .8 } 50% { opacity: 1 } }
-  @keyframes breathe { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
-  @media (prefers-reduced-motion: reduce) {
-    .sky .sun, .sky .shaft { animation: none }
   }
 
   :root[data-sky] .app { background: transparent }
@@ -79,14 +72,12 @@
 
   :root[data-bg] .rail, :root[data-bg] .side,
   :root[data-bg] .nav, :root[data-bg] .chrome {
-    background: color-mix(in srgb, var(--page) 20%, transparent);
-    -webkit-backdrop-filter: blur(8px) saturate(1.35); backdrop-filter: blur(8px) saturate(1.35);
+    background: color-mix(in srgb, var(--page) 62%, transparent);
     text-shadow: 0 1px 2px color-mix(in srgb, var(--page) 88%, transparent),
                  0 0 6px color-mix(in srgb, var(--page) 70%, transparent);
   }
   :root[data-bg] .tabs {
-    background: color-mix(in srgb, var(--surface) 22%, transparent);
-    -webkit-backdrop-filter: blur(8px) saturate(1.35); backdrop-filter: blur(8px) saturate(1.35);
+    background: color-mix(in srgb, var(--surface) 62%, transparent);
     text-shadow: 0 1px 2px color-mix(in srgb, var(--page) 88%, transparent);
   }
 
@@ -107,8 +98,10 @@
 
   .app::after {
     content: ""; position: fixed; inset: 0; z-index: 9; pointer-events: none;
-    background-image: var(--grain); opacity: var(--grain-a); mix-blend-mode: overlay;
+    background-image: var(--grain); opacity: var(--grain-a);
   }
+  :root:root:root[data-effects="reduced"] * { -webkit-backdrop-filter: none; backdrop-filter: none; text-shadow: none }
+  :root[data-effects="reduced"] .app::after { display: none }
   .app {
     --chrome-h: 45px;
     --lights-w: 0px;

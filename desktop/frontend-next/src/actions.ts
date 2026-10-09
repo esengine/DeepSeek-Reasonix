@@ -442,6 +442,7 @@ export const ACTIONS: UIAction[] = [
   { id: "appearance.scheme", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.weight", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.contrast", kind: "view", target: "none", proof: "browser" },
+  { id: "appearance.effects", kind: "view", target: "none", proof: "browser" },
   { id: "pane.close", kind: "destructive", target: "none", proof: "authority-effect" },
   { id: "settings.section", kind: "navigation", target: "none", proof: "interaction" },
   // Finding a setting changes what is on screen and nothing else: it reaches

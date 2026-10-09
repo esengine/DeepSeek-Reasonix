@@ -715,6 +715,8 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
             current={status?.modelRef}
             items={modelMenu(models, providerOrder)}
             menuClassName="studio-model-menu"
+            searchAlways
+            searchPlaceholder={t("搜索模型或服务商…")}
             menuTitle={<><b>{t("选择模型")}</b><small>{t("用于后续任务")}</small></>}
             onOpen={loadModels}
             pending={busy["model"]}

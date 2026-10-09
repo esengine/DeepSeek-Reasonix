@@ -1848,9 +1848,7 @@ body { background: var(--page) !important; }
   background-color: transparent !important;
 }
 :root[data-bg] :is(.rail, .chrome) {
-  background: color-mix(in srgb, var(--page) 72%, transparent) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(1.15);
-  backdrop-filter: blur(12px) saturate(1.15);
+  background: color-mix(in srgb, var(--page) 80%, transparent) !important;
 }
 
 .hero .rmark {
@@ -2458,6 +2456,7 @@ body { font-size: 14px; line-height: 1.75; }
 }
 .studio-model-menu,
 .studio-effort-menu { width: 310px; max-width: calc(100vw - 24px); }
+.studio-model-menu { width: 340px; max-height: min(calc((100vh - 160px) / var(--zoom, 1)), 640px); }
 .studio-effort-menu {
   width: 350px;
   padding: 8px;
@@ -2474,15 +2473,18 @@ body { font-size: 14px; line-height: 1.75; }
 }
 .studio-picker-title b { color: var(--text); font: 600 11px/1 var(--ui); }
 .studio-picker-title small { color: var(--ghost); font: 500 9px/1 var(--ui); }
-.studio-model-menu .mfind { top: -8px; margin: -3px -8px 5px; width: calc(100% + 16px); padding-inline: 17px; border-radius: 0; }
+.studio-model-menu .mfind { top: -8px; margin: -3px -8px 5px; width: calc(100% + 16px); padding-inline: 17px; border-radius: 0; background: inherit; }
 .portmenu .mi { min-height: 48px; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; }
+.studio-model-menu .mi { min-height: 34px; padding-block: 4px; }
+.studio-model-menu .mi.head { position: sticky; top: 27px; z-index: 1; background: inherit; }
+.mi-mono { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; background: color-mix(in srgb, var(--tone) 16%, transparent); color: color-mix(in srgb, var(--tone) 65%, var(--text)); font: 600 10px/1 var(--ui); }
 .portmenu .mi .lb { color: var(--text); font: 600 11px/1.35 var(--ui); }
 .portmenu .mi .ds { margin-top: 3px; color: var(--ghost); font: 500 9px/1.45 var(--ui); }
 .portmenu .mi .dot { display: none; }
 .portmenu .mi[data-on] { background: var(--hair); }
 .portmenu .mi[data-on]::before { display: none; }
 .portmenu .mi[data-on]::after { content: "✓"; align-self: center; margin-left: 8px; color: var(--text); font: 600 11px/1 var(--ui); }
-.portmenu .mi.head { min-height: 34px; align-items: center; padding-bottom: 8px; margin-bottom: 3px; border-bottom: 1px solid var(--border); border-radius: 0; }
+.portmenu .mi.head { gap: 8px; min-height: 34px; align-items: center; padding-bottom: 8px; margin-bottom: 3px; border-bottom: 1px solid var(--border); border-radius: 0; }
 .portmenu .mi.head .lb { color: var(--text); font-size: 11px; }
 .portmenu .mi.head .rt { color: var(--ghost); font: 500 9px/1 var(--ui); }
 .portmenu .mi.head:last-child { min-height: 32px; margin: 4px 0 0; padding-top: 9px; padding-bottom: 4px; border-top: 1px solid var(--border); border-bottom: 0; }
@@ -2503,9 +2505,9 @@ body { font-size: 14px; line-height: 1.75; }
   padding: 8px 9px;
 }
 .studio-effort-menu .mi:not(.head) .tx { min-width: 0; }
-.studio-effort-menu .studio-item-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.studio-effort-menu .studio-item-meta { color: var(--ghost); font: 500 9px/1 var(--mono); }
-.studio-effort-menu .studio-item-badge {
+:is(.studio-effort-menu, .studio-model-menu) .studio-item-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+:is(.studio-effort-menu, .studio-model-menu) .studio-item-meta { color: var(--ghost); font: 500 9px/1 var(--mono); }
+:is(.studio-effort-menu, .studio-model-menu) .studio-item-badge {
   padding: 2px 5px;
   border-radius: 4px;
   background: var(--border);
@@ -3299,8 +3301,6 @@ body { font-size: 14px; line-height: 1.75; }
 .pane > .tabs {
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   border-bottom-color: var(--border);
-  -webkit-backdrop-filter: blur(14px) saturate(1.02);
-  backdrop-filter: blur(14px) saturate(1.02);
 }
 .pane > .tabs .tab { color: var(--muted); }
 .pane > .tabs .tab:hover { color: var(--text); background: var(--overlay); }
@@ -3326,9 +3326,7 @@ body { font-size: 14px; line-height: 1.75; }
 .studio-user-foot .acctrow:hover,
 .studio-settings:hover { background: var(--accent-wash); color: var(--text); }
 :root[data-bg] .railfoot {
-  background: color-mix(in srgb, var(--surface) 72%, transparent) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(1.12);
-  backdrop-filter: blur(12px) saturate(1.12);
+  background: color-mix(in srgb, var(--surface) 80%, transparent) !important;
 }
 :root[data-theme="light"][data-bg] :is(.rail, .chrome) {
   background: color-mix(in srgb, var(--page) 86%, transparent) !important;

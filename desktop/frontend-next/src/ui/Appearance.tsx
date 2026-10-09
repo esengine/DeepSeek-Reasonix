@@ -1,5 +1,6 @@
 import { ApplyNote } from "./Group";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { effectsMode, onEffectsChange, setEffectsMode, type EffectsMode } from "../state/prefs";
 import type { AgentPort, Appearance as Look, ThemePack } from "../port/port";
 import { MONO_FAMILIES, UI_FAMILIES, installed, readSizeOf, readSteps } from "./look";
 import { STORAGE as LANG_KEY, t } from "../i18n";
@@ -77,6 +78,11 @@ const MEASURES: [string, string, string][] = [
   ["full", "铺满窗口", "正文跟随窗口宽度，宽屏上不留两侧空白"],
 ];
 
+const EFFECTS: [EffectsMode, string, string][] = [
+  ["full", "完整", "背景模糊、动态天空与颗粒质感全部开启"],
+  ["reduced", "节能", "关闭背景模糊、动态天空与颗粒质感，集成显卡或老旧电脑上更省电"],
+];
+
 const CONTRASTS: [string, string, string][] = [
   ["", "跟随系统", "系统已开启「增强对比度」时使用最强档"],
   ["soft", "柔和", "正文不易刺眼，长时间阅读更省力"],
@@ -124,6 +130,7 @@ function useCrop(url: string | undefined, box: HTMLElement | null) {
 
 export function Appearance({ port, theme, onTheme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
   const { packs, unread, load } = useThemeInventory(port);
+  const effects = useSyncExternalStore(onEffectsChange, effectsMode);
 
   // Activating repaints through App's own theme effect, so this only refreshes
   // the list and asks App to re-read which pack is active.
@@ -215,6 +222,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
     look.fontUi ? t("字体") : "",
     weight ? t("文字粗细") : "",
     contrast ? t("文字对比度") : "",
+    effects === "reduced" ? t("视觉效果") : "",
   ].filter(Boolean);
 
   return (
@@ -538,7 +546,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
         <summary>
           <span className="tx">
             <span className="lb">{t("高级外观")}</span>
-            <span className="ds">{changed.length ? t("已修改：{list}", { list: changed.join(" · ") }) : t("字体、文字粗细、文字对比度")}</span>
+            <span className="ds">{changed.length ? t("已修改：{list}", { list: changed.join(" · ") }) : t("字体、文字粗细、文字对比度、视觉效果")}</span>
           </span>
         </summary>
         <section className="grp" id="set-font" data-setting="font">
@@ -574,6 +582,23 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             </div>
           </div>
           <ApplyNote id="weight" />
+        </section>
+
+        <section className="grp" id="set-effects" data-setting="effects">
+          <div className="grp-hd">
+            <h3>{t("视觉效果")}</h3>
+          </div>
+          <p className="hint">{t("窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空和颗粒这几层。")}</p>
+          <div className="grp-items">
+            <div className="seg" data-text role="group" aria-label={t("视觉效果")}>
+              {EFFECTS.map(([id, name, why]) => (
+                <button key={id} data-action="appearance.effects" data-value={id} aria-pressed={effects === id} title={t(why)} onClick={() => setEffectsMode(id)}>
+                  {t(name)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <ApplyNote id="effects" />
         </section>
 
         <section className="grp" id="set-contrast" data-setting="contrast">
