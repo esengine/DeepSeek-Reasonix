@@ -116,8 +116,7 @@ func TestExpectDigestRefusesUnpinnableSource(t *testing.T) {
 	}
 }
 
-// A plugin's digest is its commit: a source that moved on is refused rather
-// than installed at whatever the branch holds now.
+// Git revision identity remains part of approval even for identical snapshots.
 func TestExpectDigestPinsPluginCommit(t *testing.T) {
 	src := testenv.TempDir(t)
 	writeFile(t, filepath.Join(src, ".claude-plugin", "plugin.json"), `{"name": "pwf", "version": "1.0.0"}`)
@@ -141,8 +140,8 @@ func TestExpectDigestPinsPluginCommit(t *testing.T) {
 		t.Fatalf("moved commit: err = %v, want ErrDigestMismatch", err)
 	}
 	commit = ""
-	if _, err := execRaw(t, tl, args); !errors.Is(err, ErrNotPinnable) {
-		t.Fatalf("no commit: err = %v, want ErrNotPinnable", err)
+	if _, err := execRaw(t, tl, args); !errors.Is(err, ErrDigestMismatch) {
+		t.Fatalf("changed snapshot identity: err = %v, want ErrDigestMismatch", err)
 	}
 }
 

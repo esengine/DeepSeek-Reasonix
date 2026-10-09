@@ -28,10 +28,8 @@ type digestPart struct {
 	Entry   json.RawMessage `json:"entry,omitempty"`
 }
 
-// contentDigest fingerprints what a plan installs. It answers "" when any
-// action's material is not immutable by construction — a local path, a linked
-// tree, a plugin with no resolved commit — because a digest over a pointer to
-// something that can still change pins nothing.
+// contentDigest fingerprints material captured by a plan. Copied plugins hash
+// their snapshot; linked trees and uncaptured local skills remain unpinnable.
 func contentDigest(actions []action) string {
 	if len(actions) == 0 {
 		return ""
@@ -65,10 +63,13 @@ func digestPartFor(a action) (digestPart, bool) {
 		return digestPart{Kind: a.Kind, Name: a.Name, Content: hex.EncodeToString(sum[:])}, true
 	case a.Kind == "plugin" && a.Action == "install_plugin_package":
 		commit := strings.ToLower(strings.TrimSpace(a.Commit))
-		if !fullGitSHA.MatchString(commit) || !isURL(a.Source) || a.Mode == "link" {
+		if a.Mode == "link" {
 			return digestPart{}, false
 		}
-		return digestPart{Kind: a.Kind, Name: a.Name, Source: a.Source, Commit: commit}, true
+		if a.treeDigest != "" {
+			return digestPart{Kind: a.Kind, Name: a.Name, Source: a.Source, Commit: commit, Content: a.treeDigest}, true
+		}
+		return digestPart{}, false
 	case a.Kind == "mcp" && a.Action == "install_mcp_server":
 		if !isURL(a.Source) && !LooksLikePackage(a.Source) {
 			return digestPart{}, false

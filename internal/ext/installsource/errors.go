@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/ext/pluginpkg"
 )
 
 // RiskLevel classifies how dangerous an action is. The install-capability skill
@@ -81,6 +82,22 @@ func (e *errKind) DiagnosticFacts() string { return e.Error() }
 
 func newErr(sentinel error, format string, args ...any) error {
 	return &errKind{sentinel: sentinel, detailBytes: len(fmt.Sprintf(format, args...))}
+}
+
+// ErrorCode projects an origin-owned failure identity onto the result wire.
+func ErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrDigestMismatch):
+		return "install.digest_mismatch"
+	case errors.Is(err, pluginpkg.ErrPublicationFailed):
+		return "install.publication_failed"
+	case errors.Is(err, ErrApprovalDenied):
+		return "install.approval_denied"
+	case errors.Is(err, ErrNotPinnable):
+		return "install.not_pinnable"
+	default:
+		return ""
+	}
 }
 
 // hostFactError carries a sentence the host composed from its own counts; no

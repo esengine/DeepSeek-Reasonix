@@ -314,6 +314,15 @@ func (t *Tool) pluginSource(ctx context.Context, source, mode string) (string, s
 }
 
 func (t *Tool) pluginPackageAction(req request, pkg pluginpkg.Package, source string) (action, error) {
+	var digest string
+	if modeForPlugin(req.Mode) == "copy" {
+		snapshot, hash, cleanup, err := snapshotPlugin(pkg)
+		if err != nil {
+			return action{}, err
+		}
+		defer cleanup()
+		pkg, digest = snapshot, hash
+	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		name = pkg.Manifest.Name
@@ -332,6 +341,7 @@ func (t *Tool) pluginPackageAction(req request, pkg pluginpkg.Package, source st
 		agentNames = append(agentNames, agent.Name)
 	}
 	a := action{
+		treeDigest:          digest,
 		Kind:                "plugin",
 		Action:              "install_plugin_package",
 		Name:                name,
@@ -411,6 +421,17 @@ func (t *Tool) applyInstallPluginPackage(ctx context.Context, req request, act *
 		return newErr(ErrInvalidManifest, "invalid plugin name %q", act.Name)
 	}
 	target := pluginpkg.InstallRoot(t.reasonixHome, act.Name)
+	if _, found, err := pluginpkg.FindInstalled(t.reasonixHome, act.Name); err != nil {
+		return err
+	} else if found && !req.Replace {
+		return newErr(ErrAlreadyExists, "plugin package already exists: %s; use replace=true to update it", act.Name)
+	}
+	var discardCopy func()
+	defer func() {
+		if discardCopy != nil {
+			discardCopy()
+		}
+	}()
 	sourceRoot, commit, cleanup := act.preparedRoot, act.Commit, func() {}
 	if sourceRoot == "" {
 		var err error
@@ -457,7 +478,11 @@ func (t *Tool) applyInstallPluginPackage(ctx context.Context, req request, act *
 			return err
 		}
 	} else {
-		if err := installCopiedPlugin(pkg, sourceRoot, target, req.Replace); err != nil {
+		if act.treeDigest == "" {
+			return newErr(ErrApprovalDenied, "copy installation requires an approved content snapshot")
+		}
+		target, discardCopy, err = installPluginCopy(pkg, sourceRoot, target, req.Replace, act.treeDigest)
+		if err != nil {
 			return err
 		}
 	}
@@ -474,9 +499,18 @@ func (t *Tool) applyInstallPluginPackage(ctx context.Context, req request, act *
 	if act.Mode == "link" {
 		installed.Root = sourceRoot
 	}
-	if err := pluginpkg.Upsert(t.reasonixHome, installed); err != nil {
-		return err
+	var publishErr error
+	if act.Mode == "link" {
+		publishErr = pluginpkg.Upsert(t.reasonixHome, installed)
+	} else {
+		publishErr = pluginpkg.UpsertValidated(t.reasonixHome, installed, func() error {
+			return verifyPluginDigest(target, act.treeDigest)
+		})
 	}
+	if publishErr != nil {
+		return publishErr
+	}
+	discardCopy = nil
 	act.Target = target
 	act.ManifestKind = pkg.ManifestKind
 	act.Version = pkg.Manifest.Version
@@ -633,43 +667,17 @@ func pluginGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	return gitcmd.CommandWithConfig(ctx, "", []string{"core.autocrlf=false"}, args...)
 }
 
-// installCopiedPlugin copies sourceRoot into a staging directory next to
-// target, verifies the staged tree resolves to the capability set the plan
-// approved, and only then swaps it into place with a backup-protected rename.
-// Any failure before the swap — copy error, capability mismatch — leaves an
-// existing installation completely intact, so a bad update can never destroy
-// the working version it was meant to replace.
-func installCopiedPlugin(pkg pluginpkg.Package, sourceRoot, target string, replace bool) error {
+// Validation must finish before the previous installation can be displaced.
+func installCopiedPlugin(pkg pluginpkg.Package, sourceRoot, target string, replace bool, expected ...string) error {
 	if _, err := os.Lstat(target); err == nil && !replace {
 		return newErr(ErrAlreadyExists, "plugin package already exists at %s; retry with replace=true to update it", target)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	staging, err := os.MkdirTemp(filepath.Dir(target), "."+filepath.Base(target)+".staging-")
+	staging, err := stagePluginCopy(pkg, sourceRoot, target, expected...)
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(staging)
-	if err := copyDir(sourceRoot, staging, tarballTotalLimit); err != nil {
-		return err
-	}
-	// Fail closed when the copied tree resolves to a different capability set
-	// than the plan the user approved — e.g. a symlink copyDir could not
-	// materialize safely. A silent gap here would install less than reviewed.
-	if err := verifyCopiedCapabilities(pkg, staging); err != nil {
-		return err
-	}
-	if err := os.Chmod(staging, 0o755); err != nil { // MkdirTemp creates 0700
-		return err
-	}
-	// Swap staged tree into place. The backup rename keeps the previous
-	// install restorable until the new tree has landed; both renames stay on
-	// one filesystem (same parent dir), so each is atomic. The backup name
-	// derives from the staging dir: dot-prefixed and randomized, it can never
-	// pass IsValidName, so it cannot collide with a sibling plugin's install
-	// dir (plugin names may legally contain dots, e.g. "foo.pre-replace") and
-	// needs no pre-cleanup that could delete such a neighbor.
+	// A dot-prefixed random backup cannot collide with a valid plugin name.
 	backup := staging + ".old"
 	hadOld := false
 	if _, err := os.Lstat(target); err == nil {

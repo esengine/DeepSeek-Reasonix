@@ -36,9 +36,13 @@ func TestDuplicatePluginHintOffersApprovedReplacement(t *testing.T) {
 	if installed := apply(); !installed.OK || installed.Status != "done" {
 		t.Fatalf("first install = %+v", installed)
 	}
-	target := filepath.Join(pluginpkg.InstallRoot(filepath.Join(home, ".reasonix"), "recovery-kit"), path)
 	check := func(want string) {
 		t.Helper()
+		installed, found, err := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "recovery-kit")
+		if err != nil || !found {
+			t.Fatalf("registration = %+v, found=%t, error=%v", installed, found, err)
+		}
+		target := filepath.Join(pluginpkg.ResolveRoot(filepath.Join(home, ".reasonix"), installed.Root), path)
 		body, err := os.ReadFile(target)
 		if err != nil || string(body) != want {
 			t.Fatalf("installed note = %q, %v; want %q", body, err, want)

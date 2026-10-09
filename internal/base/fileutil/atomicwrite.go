@@ -37,7 +37,7 @@ func Crash(op, path string) {
 // copy on Windows filter-driver EXDEV; callers that cannot tolerate that must
 // use AtomicWriteFileStrict.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	return atomicWriteFile(path, data, perm, true)
+	return atomicWriteFile(path, data, perm, true, nil)
 }
 
 // AtomicWriteFileStrict publishes only via atomic rename (no EXDEV copy).
@@ -47,7 +47,14 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 // (callers that roll back in-memory state on error would otherwise fork from
 // the on-disk pointer).
 func AtomicWriteFileStrict(path string, data []byte, perm os.FileMode) error {
-	return atomicWriteFile(path, data, perm, false)
+	return AtomicWriteFileStrictValidated(path, data, perm, nil)
+}
+
+// AtomicWriteFileStrictValidated checks dependent material after preparing the
+// durable pointer and before every rename attempt; a failed check aborts without
+// further retries and its error is returned unchanged.
+func AtomicWriteFileStrictValidated(path string, data []byte, perm os.FileMode, validate func() error) error {
+	return atomicWriteFile(path, data, perm, false, validate)
 }
 
 // syncParentDirFn is the post-publish parent-dir fsync implementation.
@@ -66,13 +73,13 @@ func SetSyncParentDirForTest(fn func(path string) error) (restore func()) {
 	return func() { syncParentDirFn = prev }
 }
 
-func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool) error {
+func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool, validate func() error) error {
 	Crash("atomic-write", path)
 	tmpPath, err := writeAtomicTemp(path, data, perm)
 	if err != nil {
 		return err
 	}
-	if err := replaceFile(tmpPath, path, allowCrossDeviceCopy); err != nil {
+	if err := replaceFile(tmpPath, path, allowCrossDeviceCopy, validate); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
@@ -215,12 +222,17 @@ func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error)
 // A missing tmp means the write itself failed and no retry can help.
 func ReplaceFile(tmp, dest string) error {
 	Crash("replace", dest)
-	return replaceFile(tmp, dest, true)
+	return replaceFile(tmp, dest, true, nil)
 }
 
-func replaceFile(tmp, dest string, allowCrossDeviceCopy bool) error {
+func replaceFile(tmp, dest string, allowCrossDeviceCopy bool, validate func() error) error {
 	var err error
 	for attempt := 0; ; attempt++ {
+		if validate != nil {
+			if verr := validate(); verr != nil {
+				return verr
+			}
+		}
 		if err = renameFile(tmp, dest); err == nil {
 			return nil
 		}
