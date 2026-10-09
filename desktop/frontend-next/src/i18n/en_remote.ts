@@ -174,6 +174,8 @@ export const EN_REMOTE: Record<string, string> = {
   "允许手机访问": "Allow phones to connect",
   "这台电脑现在没有局域网地址，连上 Wi-Fi 或网线后再试。": "This computer has no private network address right now. Connect to Wi-Fi or Ethernet and try again.",
   "手机和这台电脑在同一个网络里，扫码后就能看会话、发消息、批准操作。关闭或退出 Studio 会断开所有手机。": "A phone on the same network as this computer can scan a code to follow sessions, send messages and approve actions. Turning this off or quitting Studio disconnects every phone.",
+  "记住配对的手机": "Remember paired phones",
+  "开启后，重启 Studio 会重新打开手机访问，已配对的手机不必重新扫码。主动关闭手机访问仍会清空配对。": "When on, a restart reopens phone access and the phones that paired need no new scan. Closing phone access on purpose still unpairs them.",
   "虚拟网卡": "virtual adapter",
   "换网络会断开已连接的手机，它们需要扫新的二维码。": "Switching networks disconnects the connected phones; they will need to scan the new code.",
   "留空则每次开启时由系统随机选择，范围 1024–65535。更改端口后，手机需要重新扫码配对。": "Leave empty to let the system pick a port each time, or choose one from 1024 to 65535. After changing the port, phones need to scan a new code to pair again.",

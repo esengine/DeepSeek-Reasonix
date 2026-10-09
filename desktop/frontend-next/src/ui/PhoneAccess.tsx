@@ -36,6 +36,7 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
   const [cloudOffer, setCloudOffer] = useState<CloudShareOffer | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState("");
+  const [remember, setRemember] = useState<boolean | null>(null);
 
   const read = useCallback(
     () =>
@@ -79,6 +80,15 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
       }
     },
     [onError],
+  );
+
+  useEffect(() => {
+    hub.shareRemember().then((r) => setRemember(r?.remember ?? false)).catch(() => setRemember(null));
+  }, [hub]);
+
+  const saveRemember = useCallback(
+    (on: boolean) => run(async () => setRemember((await hub.setShareRemember(on)).remember)),
+    [run, hub],
   );
 
   // The code and the status that knows it is on offer land together; set one
@@ -135,12 +145,12 @@ export function useShare(hub: HubPort, onError: (e: unknown) => void, watch = tr
       await mint();
     });
 
-  return { st, ip, pick, savePort, offer, cloudOffer, busy, confirm, setConfirm, newCode, newCloudCode, toggle, revoke, refresh: read };
+  return { st, ip, pick, savePort, offer, cloudOffer, busy, confirm, setConfirm, newCode, newCloudCode, toggle, revoke, remember, saveRemember, refresh: read };
 }
 
 /** The switch, the network, the code and the paired phones. */
 export function ShareBody({ share }: { share: Share }) {
-  const { st, ip, pick, savePort, offer, busy, confirm, setConfirm, newCode, toggle, revoke } = share;
+  const { st, ip, pick, savePort, offer, busy, confirm, setConfirm, newCode, toggle, revoke, remember, saveRemember } = share;
   const [copied, setCopied] = useState<"" | "done" | "failed">("");
   const [portDraft, setPortDraft] = useState<string | null>(null);
   if (!st) return null;
@@ -172,6 +182,16 @@ export function ShareBody({ share }: { share: Share }) {
           </span>
         </span>
         <Switch data-action="share.toggle" on={st.open} busy={busy || noNetwork} label={t("允许手机访问")} onClick={() => void toggle()} />
+      </div>
+
+      <div className="lrow">
+        <span className="tx">
+          <span className="lb">{t("记住配对的手机")}</span>
+          <span className="ds">
+            {t("开启后，重启 Studio 会重新打开手机访问，已配对的手机不必重新扫码。主动关闭手机访问仍会清空配对。")}
+          </span>
+        </span>
+        <Switch data-action="share.remember" on={remember ?? false} busy={busy || remember === null} label={t("记住配对的手机")} onClick={() => void saveRemember(!(remember ?? false))} />
       </div>
 
       {st.addresses.length > 1 && (

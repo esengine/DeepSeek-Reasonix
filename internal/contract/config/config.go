@@ -680,6 +680,10 @@ type ServeConfig struct {
 	// SharePort fixes the port of the phone-access LAN link; zero picks a free
 	// one each time the door opens. User-global like the rest of [serve].
 	SharePort int `toml:"share_port"`
+	// RememberPairedDevices keeps paired phones across restarts: the next process
+	// reopens the share where it was and adopts the devices that paired against it.
+	// Off by default, like every other promise about a device you are not holding.
+	RememberPairedDevices bool `toml:"remember_paired_devices"`
 }
 
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,

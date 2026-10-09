@@ -17,7 +17,15 @@ const status = (open: boolean): ShareStatus => ({
 function hubWith(reads: ShareStatus[], offerShare: () => Promise<unknown>) {
   let at = 0;
   const shareStatus = vi.fn(async () => reads[Math.min(at++, reads.length - 1)]);
-  return { hub: { shareStatus, offerShare: vi.fn(offerShare) } as unknown as HubPort, shareStatus };
+  return {
+    hub: {
+      shareStatus,
+      offerShare: vi.fn(offerShare),
+      shareRemember: vi.fn(async () => ({ remember: false })),
+      setShareRemember: vi.fn(async (on: boolean) => ({ remember: on })),
+    } as unknown as HubPort,
+    shareStatus,
+  };
 }
 
 const closed = new HttpError(409, "share closed", { code: "share.closed" });
@@ -55,6 +63,7 @@ it("disconnects an Internet controller after the same two-step confirmation", as
     shareStatus: vi.fn(async () => remote),
     offerShare: vi.fn(),
     revokeDevice,
+    shareRemember: vi.fn(async () => ({ remember: false })),
   } as unknown as HubPort;
   render(<PhonePop hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
@@ -79,6 +88,7 @@ it("shows the account-gated Internet QR before the optional LAN pairing code", a
     shareStatus: vi.fn(async () => remote),
     offerCloudShare,
     offerShare,
+    shareRemember: vi.fn(async () => ({ remember: false })),
   } as unknown as HubPort;
   render(<PhonePop hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
@@ -108,7 +118,7 @@ it("labels Internet controllers by their ordinal, not their list position", asyn
   const now = new Date().toISOString();
   const cloud = (id: string, ordinal: number) => ({ id, name: "Web Studio", connectedAt: now, lastSeen: now, ordinal });
   const remote = { ...status(false), cloudDevices: [cloud("b", 2), cloud("c", 3)] };
-  const hub = { shareStatus: vi.fn(async () => remote), offerShare: vi.fn(), revokeDevice: vi.fn() } as unknown as HubPort;
+  const hub = { shareStatus: vi.fn(async () => remote), offerShare: vi.fn(), revokeDevice: vi.fn(), shareRemember: vi.fn(async () => ({ remember: false })) } as unknown as HubPort;
   render(<PhonePop hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
   await screen.findByText("设备 2");

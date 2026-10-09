@@ -9,14 +9,15 @@ import (
 )
 
 const (
-	codeShareAddress   = "share.address_rejected"
-	codeShareClosed    = "share.closed"
-	codeShareCloud     = "share.cloud_unavailable"
-	codeShareListen    = "share.listen_failed"
-	codeSharePortInUse = "share.port_in_use"
-	codeSharePortRange = "share.port_out_of_range"
-	codeSharePortSave  = "share.port_save_failed"
-	codeShareUnknown   = "share.device_unknown"
+	codeShareAddress      = "share.address_rejected"
+	codeShareClosed       = "share.closed"
+	codeShareCloud        = "share.cloud_unavailable"
+	codeShareListen       = "share.listen_failed"
+	codeSharePortInUse    = "share.port_in_use"
+	codeSharePortRange    = "share.port_out_of_range"
+	codeSharePortSave     = "share.port_save_failed"
+	codeShareRememberSave = "share.remember_save_failed"
+	codeShareUnknown      = "share.device_unknown"
 )
 
 // registerShareRoutes is registered only where a window holds a share, and
@@ -33,6 +34,8 @@ func (h *Hub) registerShareRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /share/offer", h.shareOffer)
 	mux.HandleFunc("POST /share/cloud-offer", h.shareCloudOffer)
 	mux.HandleFunc("POST /share/revoke", h.shareRevoke)
+	mux.HandleFunc("GET /share/remember", h.shareRememberGet)
+	mux.HandleFunc("POST /share/remember", h.shareRememberSave)
 }
 
 func (h *Hub) shareCloudOffer(w http.ResponseWriter, _ *http.Request) {
@@ -88,6 +91,30 @@ func (h *Hub) shareSetPort(w http.ResponseWriter, r *http.Request) {
 		saveFailed(w, http.StatusInternalServerError, codeSharePortSave, err)
 	default:
 		writeJSON(w, h.opts.Share.Status())
+	}
+}
+
+func (h *Hub) shareRememberGet(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, struct {
+		Remember bool `json:"remember"`
+	}{Remember: rememberPairedDevices()})
+}
+
+func (h *Hub) shareRememberSave(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Remember *bool `json:"remember"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil || body.Remember == nil {
+		missingField(w, "remember")
+		return
+	}
+	switch err := h.opts.Share.SetRemember(*body.Remember); {
+	case err != nil:
+		saveFailed(w, http.StatusInternalServerError, codeShareRememberSave, err)
+	default:
+		writeJSON(w, struct {
+			Remember bool `json:"remember"`
+		}{Remember: *body.Remember})
 	}
 }
 
