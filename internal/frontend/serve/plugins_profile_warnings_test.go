@@ -67,7 +67,11 @@ func TestInstalledPluginReportsRejectedProfileDeclarations(t *testing.T) {
 	}
 	checkRuntime := func(corrected bool) {
 		t.Helper()
-		root := pluginpkg.InstallRoot(home, "profile-warning-kit")
+		installed, ok, err := pluginpkg.FindInstalled(home, "profile-warning-kit")
+		if err != nil || !ok {
+			t.Fatalf("plugin not registered: %v, %v", ok, err)
+		}
+		root := pluginpkg.ResolveRoot(home, installed.Root)
 		skRoot, agentRoot := filepath.Join(root, "skills"), filepath.Join(root, "agents")
 		skKey, agentKey := config.CanonicalSkillPath(skRoot), config.CanonicalSkillPath(agentRoot)
 		st := skill.New(skill.Options{
