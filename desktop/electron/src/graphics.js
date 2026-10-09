@@ -2,6 +2,12 @@
 
 const PREF_KEY = "rx-hw-accel";
 
+// A launch-only override for a window that will not draw: the environment
+// variable or the flag, neither of which is written back to the preferences.
+function shouldDisableGpu({ prefs, env, argv }) {
+  return accelerationOff(prefs) || env?.REASONIX_DISABLE_GPU === "1" || (argv ?? []).includes("--disable-gpu");
+}
+
 // Chromium reads this before the app is ready, so a saved "off" only reaches
 // the launch after the one that saved it.
 function accelerationOff(prefs) {
@@ -20,4 +26,8 @@ function graphicsReport(app, launchedOff) {
   return { launchedOff, compositing };
 }
 
-module.exports = { PREF_KEY, accelerationOff, graphicsReport };
+function graphicsHandler(app, fromWindow, launchedOff) {
+  return (event) => (fromWindow(event) ? graphicsReport(app, launchedOff) : null);
+}
+
+module.exports = { graphicsHandler, PREF_KEY, accelerationOff, shouldDisableGpu, graphicsReport };

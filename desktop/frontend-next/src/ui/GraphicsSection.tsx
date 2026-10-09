@@ -13,9 +13,8 @@ function modeSaid(g: GraphicsInfo): string {
 /** Which way the window is drawn this launch, and the one switch the shell can
  *  honour: Chromium fixes its GPU use before the app is ready, so a change is
  *  saved now and applies on the next launch. Absent in a browser tab. */
-export function GraphicsSection() {
+export function useShellGraphics(): GraphicsInfo | null {
   const [now, setNow] = useState<GraphicsInfo | null>(null);
-  const software = useSyncExternalStore(onSoftwareRenderingChange, wantsSoftwareRendering, wantsSoftwareRendering);
   useEffect(() => {
     let live = true;
     host().graphics().then((g) => live && setNow(g)).catch(() => live && setNow(null));
@@ -23,13 +22,19 @@ export function GraphicsSection() {
       live = false;
     };
   }, []);
+  return now;
+}
+
+export function GraphicsSection() {
+  const now = useShellGraphics();
+  const software = useSyncExternalStore(onSoftwareRenderingChange, wantsSoftwareRendering, wantsSoftwareRendering);
   if (!now) return null;
   const pending = software !== now.launchedOff;
   return (
     <Group
       id="graphics"
       title={t("图形渲染")}
-      hint={t("窗口一直占用显卡、或界面花屏时，可改为「仅软件渲染」：改用 CPU 绘制，显卡不再参与。设置保存后，需退出并重新打开 Studio 才会生效。")}
+      hint={t("窗口一直占用显卡、或界面花屏时，先试「视觉效果：节能」，不行再改为「仅软件渲染」：改用 CPU 绘制，显卡不再参与。设置保存后，需退出并重新打开 Studio 才会生效。")}
     >
       <div className="seg" data-text role="group" aria-label={t("图形渲染")}>
         {([false, true] as const).map((off) => (

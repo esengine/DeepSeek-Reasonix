@@ -1722,7 +1722,7 @@ test("the window ground follows the stored theme and, for auto, the system", () 
   assert.equal(groundFor(undefined, true), GROUND.dark);
 });
 
-const { accelerationOff, graphicsReport, PREF_KEY: GPU_PREF } = require("../src/graphics.js");
+const { accelerationOff, shouldDisableGpu, graphicsReport, graphicsHandler, PREF_KEY: GPU_PREF } = require("../src/graphics.js");
 
 test("hardware acceleration is off only when the saved preference says exactly that", () => {
   assert.equal(GPU_PREF, "rx-hw-accel");
@@ -1738,4 +1738,32 @@ test("the graphics report says what this launch is running, not what is saved", 
   assert.deepEqual(graphicsReport(app("enabled"), false), { launchedOff: false, compositing: "enabled" });
   assert.deepEqual(graphicsReport(app("disabled_software"), true), { launchedOff: true, compositing: "disabled_software" });
   assert.deepEqual(graphicsReport({ getGPUFeatureStatus: () => { throw new Error("not ready"); } }, false), { launchedOff: false, compositing: "" });
+});
+
+test("the GPU is disabled by the saved preference, the environment or the flag, and only then", () => {
+  const off = (over) => shouldDisableGpu({ prefs: {}, env: {}, argv: [], ...over });
+  assert.equal(off({}), false);
+  assert.equal(off({ prefs: { "rx-hw-accel": "off" } }), true);
+  assert.equal(off({ prefs: { "rx-hw-accel": "on" } }), false);
+  assert.equal(off({ prefs: undefined }), false);
+  assert.equal(off({ env: { REASONIX_DISABLE_GPU: "1" } }), true);
+  assert.equal(off({ env: { REASONIX_DISABLE_GPU: "0" } }), false);
+  assert.equal(off({ argv: ["studio", "--disable-gpu"] }), true);
+  assert.equal(off({ argv: ["--disable-gpu-sandbox"] }), false);
+});
+
+test("a prefs file that is missing or corrupt keeps hardware acceleration", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gpu-"));
+  const file = path.join(dir, "window-prefs.json");
+  assert.equal(shouldDisableGpu({ prefs: loadPrefs(file), env: {}, argv: [] }), false);
+  fs.writeFileSync(file, "{ not json");
+  assert.equal(shouldDisableGpu({ prefs: loadPrefs(file), env: {}, argv: [] }), false);
+});
+
+test("the graphics report is refused to any sender that is not the Studio window", () => {
+  const app = { getGPUFeatureStatus: () => ({ gpu_compositing: "enabled" }) };
+  const win = { id: "studio" };
+  const handle = graphicsHandler(app, (event) => (event.sender === "studio" ? win : null), true);
+  assert.deepEqual(handle({ sender: "studio" }), { launchedOff: true, compositing: "enabled" });
+  assert.equal(handle({ sender: "agent-browser-page" }), null);
 });

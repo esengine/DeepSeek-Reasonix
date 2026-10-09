@@ -27,7 +27,7 @@ const { BrowserViews } = require("./browserviews");
 const { startBrowserRelay } = require("./browserrelay");
 const { groundFor } = require("./ground");
 const { loadPrefs, prefsFile, registerPrefs } = require("./prefs");
-const { accelerationOff, graphicsReport } = require("./graphics");
+const { shouldDisableGpu, graphicsHandler } = require("./graphics");
 const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
 
@@ -347,7 +347,7 @@ nativeTheme.on("updated", () => {
   if (win && !win.isDestroyed()) win.setBackgroundColor(ground());
 });
 
-ipcMain.handle("shell:graphics", (event) => (fromWindow(event) ? graphicsReport(app, softwareOnly) : null));
+ipcMain.handle("shell:graphics", (event) => graphicsHandler(app, fromWindow, softwareOnly)(event));
 
 ipcMain.handle("window:minimise", (event) => {
   fromWindow(event)?.minimize();
@@ -439,7 +439,7 @@ const identity = instanceID(hostBinary);
 app.setPath("userData", profileFor(app.getPath("userData"), identity));
 // Chromium decides on the GPU before the app is ready, so this is the last
 // point a saved choice can still reach it.
-const softwareOnly = accelerationOff(loadPrefs(prefsFile(app.getPath("userData"))));
+const softwareOnly = shouldDisableGpu({ prefs: loadPrefs(prefsFile(app.getPath("userData"))), env: process.env, argv: process.argv });
 if (softwareOnly) app.disableHardwareAcceleration();
 // A launch from a shortcut has no console, so this file is the only place a
 // failure before the window can be read back from.
