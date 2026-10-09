@@ -378,7 +378,7 @@ describe("admin flow", () => {
     expect(((await (await call("/v1/admin/feedback/pending", { headers: admin })).json()) as { items: unknown[] }).items).toHaveLength(0);
     expect((await status(r, { status: "in_progress" })).status).toBe(200);
     const open = (await (await call("/v1/admin/feedback/open", { headers: admin })).json()) as { items: { receipt: string; issueNumber: number }[] };
-    expect(open.items).toEqual([expect.objectContaining({ receipt: r, issueNumber: 7 })]);
+    expect(open.items).toEqual([expect.objectContaining({ receipt: r, issueNumber: 7, resolvedVersion: null })]);
     expect((await status(r, { status: "fixed" })).status).toBe(400);
     expect((await status(r, { status: "fixed", resolvedVersion: "next" })).status).toBe(200);
     const row = await env.DB.prepare("SELECT contact FROM feedback WHERE receipt = ?").bind(r).first<{ contact: string }>();
@@ -392,6 +392,7 @@ describe("admin flow", () => {
     await status(r, { status: "fixed", resolvedVersion: "next" });
     const open = async () => ((await (await call("/v1/admin/feedback/open", { headers: admin })).json()) as { items: { receipt: string }[] }).items;
     expect(await open()).toEqual([expect.objectContaining({ receipt: r })]);
+    expect(await open()).toEqual([expect.objectContaining({ receipt: r, status: "fixed", resolvedVersion: "next" })]);
     expect(await errCode(await status(r, { status: "fixed", resolvedVersion: "latest" }))).toBe("feedback.bad_transition");
     expect((await status(r, { status: "fixed", resolvedVersion: "v2.25.0" })).status).toBe(200);
     expect(await open()).toHaveLength(0);
