@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import CommunityJoin from '../components/CommunityJoin.astro';
+import SponsorSlot from '../components/SponsorSlot.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
@@ -150,6 +151,7 @@ const desc = "Browse, publish, and install community skills, plugins, and MCP se
         <a href="/login/?next=%2Fskills%2F"><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>
       </nav>
     </div>
+    <SponsorSlot />
   </footer>
 
   <style is:global>

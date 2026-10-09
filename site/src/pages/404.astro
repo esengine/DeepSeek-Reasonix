@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import CommunityJoin from '../components/CommunityJoin.astro';
+import SponsorSlot from '../components/SponsorSlot.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
@@ -38,5 +39,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
   <footer>
     <CommunityJoin />
+    <SponsorSlot />
   </footer>
 </Base>
