@@ -51,9 +51,18 @@ func AtomicWriteFileStrict(path string, data []byte, perm os.FileMode) error {
 }
 
 // AtomicWriteFileStrictValidated checks dependent material after preparing the
-// durable pointer and immediately before its atomic publication.
+// durable pointer and before every rename attempt; a failed check aborts without
+// further retries and its error is returned unchanged.
 func AtomicWriteFileStrictValidated(path string, data []byte, perm os.FileMode, validate func() error) error {
 	return atomicWriteFile(path, data, perm, false, validate)
+}
+
+// SetRenameForTest replaces the rename ReplaceFile retries. Restore with the
+// returned function. Production must leave the default in place.
+func SetRenameForTest(fn func(oldpath, newpath string) error) (restore func()) {
+	prev := renameFile
+	renameFile = fn
+	return func() { renameFile = prev }
 }
 
 // syncParentDirFn is the post-publish parent-dir fsync implementation.
@@ -78,13 +87,7 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDevic
 	if err != nil {
 		return err
 	}
-	if validate != nil {
-		if err := validate(); err != nil {
-			os.Remove(tmpPath)
-			return err
-		}
-	}
-	if err := replaceFile(tmpPath, path, allowCrossDeviceCopy); err != nil {
+	if err := replaceFile(tmpPath, path, allowCrossDeviceCopy, validate); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
@@ -227,12 +230,17 @@ func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error)
 // A missing tmp means the write itself failed and no retry can help.
 func ReplaceFile(tmp, dest string) error {
 	Crash("replace", dest)
-	return replaceFile(tmp, dest, true)
+	return replaceFile(tmp, dest, true, nil)
 }
 
-func replaceFile(tmp, dest string, allowCrossDeviceCopy bool) error {
+func replaceFile(tmp, dest string, allowCrossDeviceCopy bool, validate func() error) error {
 	var err error
 	for attempt := 0; ; attempt++ {
+		if validate != nil {
+			if verr := validate(); verr != nil {
+				return verr
+			}
+		}
 		if err = renameFile(tmp, dest); err == nil {
 			return nil
 		}

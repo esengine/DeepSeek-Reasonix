@@ -13,6 +13,7 @@ import (
 
 func revisionPlugin(t *testing.T) (*Tool, string) {
 	t.Helper()
+	forceSiblingPublication(t)
 	home := testenv.TempDir(t)
 	source := testenv.TempDir(t)
 	writeFile(t, filepath.Join(source, ".claude-plugin", "plugin.json"), `{"name":"approved"}`)

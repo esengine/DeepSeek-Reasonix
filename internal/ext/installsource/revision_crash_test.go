@@ -15,6 +15,7 @@ func TestRevisionCrashHelper(t *testing.T) {
 	if root == "" {
 		t.Skip("subprocess helper")
 	}
+	siblingPublication = true
 	tool := NewTool(Options{HomeDir: root, ProjectRoot: root})
 	source := os.Getenv("REASONIX_REVISION_CRASH_SOURCE")
 	phase := os.Getenv("REASONIX_REVISION_CRASH_PHASE")

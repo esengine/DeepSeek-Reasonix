@@ -98,8 +98,10 @@ Installed plugin state is stored in:
 ~/.reasonix/plugins/<name>/
 ```
 
-Copied replacements are validated in a fresh sibling directory
+On Windows, copied replacements are validated in a fresh sibling directory
 under `plugins/`, then published by updating the package's recorded `root`.
+On other platforms the validated copy is swapped into the existing directory
+with a backup-protected rename and the recorded `root` does not change.
 
 Directory watches from another process cannot block a rename of the old tree
 because that tree is left intact. Failed publication discards the new copy.
@@ -116,7 +118,7 @@ Copy-mode preview parses a bounded, materialized snapshot. Its file-content
 hashes contribute to `contentDigest` and the approval `planId`.
 
 - Apply checks the copied tree against that snapshot before installation and
-  immediately before entering registry publication.
+  before every registry rename attempt; a failed check ends publication.
 - The digest covers all copied bytes: skills, hooks, runtime binaries, prompts,
   themes and assets. `.git` is excluded.
 - Internal regular-file links are materialized by the existing copy rules.
@@ -149,7 +151,7 @@ keeps the old root active; an exit after rename loads the new root.
 
 Publication-time digest checks do not prevent later edits or confine a
 same-authority external writer that can replace directories or alter bytes after
-the final check, including while registry publication retries a blocked rename.
+the last check that precedes the successful rename.
 
 ### Manage From CLI
 

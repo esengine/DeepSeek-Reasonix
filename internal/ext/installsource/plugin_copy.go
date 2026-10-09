@@ -3,14 +3,22 @@ package installsource
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"reasonix/internal/ext/pluginpkg"
 )
 
+// siblingPublication is true where a directory held open by another process
+// cannot be renamed, so a replacement is published beside the old tree.
+var siblingPublication = runtime.GOOS == "windows"
+
 func installPluginCopy(pkg pluginpkg.Package, sourceRoot, target string, replace bool, expected string) (string, func(), error) {
-	if !replace {
-		if err := installCopiedPlugin(pkg, sourceRoot, target, false, expected); err != nil {
+	if !replace || !siblingPublication {
+		if err := installCopiedPlugin(pkg, sourceRoot, target, replace, expected); err != nil {
 			return "", nil, err
+		}
+		if replace {
+			return target, func() {}, nil
 		}
 		return target, func() { _ = os.RemoveAll(target) }, nil
 	}
