@@ -35,7 +35,9 @@ func TestTitleCacheInvalidatesWhenFirstMessageChanges(t *testing.T) {
 
 func TestTitleCachePersistsAcrossInstances(t *testing.T) {
 	dir := testenv.TempDir(t)
-	newTitleCache(dir).put("a.jsonl", "Persisted", "first prompt", 7)
+	c := newTitleCache(dir)
+	c.put("a.jsonl", "Persisted", "first prompt", 7)
+	c.flush()
 
 	if _, err := os.Stat(filepath.Join(dir, ".session-titles.json")); err != nil {
 		t.Fatalf("cache file not written: %v", err)
@@ -62,7 +64,9 @@ func TestTitleCacheReadsLegacyMtimeEntries(t *testing.T) {
 
 func TestTitleCacheWritesRemainReadableByOlderVersions(t *testing.T) {
 	dir := testenv.TempDir(t)
-	newTitleCache(dir).put("a.jsonl", "Compatible", "first prompt", 7)
+	c := newTitleCache(dir)
+	c.put("a.jsonl", "Compatible", "first prompt", 7)
+	c.flush()
 	data, err := os.ReadFile(filepath.Join(dir, ".session-titles.json"))
 	if err != nil {
 		t.Fatal(err)

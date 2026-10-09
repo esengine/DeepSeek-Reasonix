@@ -4564,14 +4564,14 @@
 
   .sessrow:hover .sessmeta, .sessrow[data-on] .sessmeta { color: var(--faint) }
 
-  .sesscopies {
+  .sesscopies, .sesslegacy {
     flex: none; padding: 0 5px; height: 15px;
     border: 1px solid var(--border); border-radius: var(--r-xs);
     background: transparent; color: var(--ghost); cursor: pointer;
     font: var(--w-reg) var(--fs-micro) var(--mono);
   }
-  .sesscopies:hover { border-color: var(--warn); color: var(--warn-ink) }
-  .sesscopies[aria-expanded="true"] { border-color: var(--warn); color: var(--warn-ink) }
+  .sesscopies:hover, .sesscopies[aria-expanded="true"] { border-color: var(--warn); color: var(--warn-ink) }
+  .sesslegacy { cursor: default; display: inline-flex; align-items: center; font: var(--w-reg) var(--fs-micro) var(--ui) }
   .sessrow.sesscopy { padding-left: 34px }
   .sessrow.sesscopy .sesstitle { color: var(--ghost); font-style: italic }
 .sessrow .wsdel { opacity: .45 }

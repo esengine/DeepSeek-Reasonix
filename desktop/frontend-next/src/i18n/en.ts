@@ -286,6 +286,7 @@ export const EN: Record<string, string> = {
 
   // ── 会话树 ───────────────────────────────────────────────────────
   "新会话": "New session",
+  "由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话": "Kept by Reasonix 1.x: Studio opens it read-only, and continuing it saves a new session",
   "新会话 {n}": "New session {n}",
   "从左栏选择，或在当前文件夹新建": "Pick one on the left, or start a new one in this folder",
   "新建会话": "Start a new session",

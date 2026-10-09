@@ -3,24 +3,16 @@ package serve
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"os"
 	"path/filepath"
-	"sync"
-
-	fileencoding "reasonix/internal/base/fileutil/encoding"
 )
 
 // titleCache persists generated session titles to <dir>/.session-titles.json.
 // Entries are keyed by file name and the first user message: appending turns
 // changes the transcript mtime without invalidating the title, while replacing
 // the first turn (for example by rewinding turn zero) produces a cache miss.
-// Persistence is best-effort: a missing or unreadable cache just regenerates.
+// Persistence itself lives in stampFile: load once, write once per batch.
 type titleCache struct {
-	mu      sync.Mutex
-	dir     string
-	loaded  bool
-	entries map[string]titleEntry
+	file *stampFile[titleEntry]
 }
 
 type titleEntry struct {
@@ -30,31 +22,14 @@ type titleEntry struct {
 }
 
 func newTitleCache(dir string) *titleCache {
-	return &titleCache{dir: dir, entries: map[string]titleEntry{}}
+	return &titleCache{file: newStampFile[titleEntry](filepath.Join(dir, ".session-titles.json"))}
 }
 
 // setDir repoints the cache at another session directory and drops what was
-// loaded from the previous one: entries are keyed by file name, which is unique
-// within a project and not across them.
+// loaded from the previous one: entries are keyed by file name, which is
+// unique within a project and not across them.
 func (c *titleCache) setDir(dir string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.dir == dir {
-		return
-	}
-	c.dir = dir
-	c.loaded = false
-	c.entries = map[string]titleEntry{}
-}
-
-func (c *titleCache) load() {
-	if c.loaded {
-		return
-	}
-	c.loaded = true
-	if data, err := fileencoding.ReadFileUTF8(filepath.Join(c.dir, ".session-titles.json")); err == nil {
-		_ = json.Unmarshal(data, &c.entries)
-	}
+	c.file.setPath(filepath.Join(dir, ".session-titles.json"))
 }
 
 func titleSourceHash(source string) string {
@@ -63,10 +38,7 @@ func titleSourceHash(source string) string {
 }
 
 func (c *titleCache) get(name, source string, mod int64) (string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.load()
-	e, ok := c.entries[name]
+	e, ok := c.file.entry(name)
 	if !ok {
 		return "", false
 	}
@@ -86,11 +58,10 @@ func (c *titleCache) get(name, source string, mod int64) (string, bool) {
 }
 
 func (c *titleCache) put(name, title, source string, mod int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.load()
-	c.entries[name] = titleEntry{Title: title, Mod: mod, SourceHash: titleSourceHash(source)}
-	if data, err := json.Marshal(c.entries); err == nil {
-		_ = os.WriteFile(filepath.Join(c.dir, ".session-titles.json"), data, 0o644)
-	}
+	c.file.record(name, titleEntry{Title: title, Mod: mod, SourceHash: titleSourceHash(source)})
+}
+
+// flush writes the file at most once per batch of generated titles.
+func (c *titleCache) flush() {
+	c.file.flush()
 }
