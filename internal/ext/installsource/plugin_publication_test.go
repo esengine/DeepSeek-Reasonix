@@ -1,13 +1,11 @@
 package installsource
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"reasonix/internal/base/fileutil"
 	"reasonix/internal/ext/pluginpkg"
 )
 
@@ -48,34 +46,5 @@ func TestReplaceKeepsInPlaceSwapWhereDirectoriesCanBeRenamed(t *testing.T) {
 	entries, err := os.ReadDir(pluginpkg.PluginsDir(tool.reasonixHome))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("plugins dir holds %d entries (%v), want only the installed tree", len(entries), err)
-	}
-}
-
-func TestPublicationRetryWindowRechecksTheApprovedBytes(t *testing.T) {
-	tool, source := revisionPlugin(t)
-	args := map[string]any{"source": source, "kind": "plugin", "mode": "copy", "replace": true}
-	plan := execInstall(t, tool, args)
-	calls := 0
-	restore := fileutil.SetRenameForTest(func(oldpath, newpath string) error {
-		calls++
-		entries, _ := os.ReadDir(pluginpkg.PluginsDir(tool.reasonixHome))
-		for _, entry := range entries {
-			if entry.IsDir() {
-				writeFile(t, filepath.Join(pluginpkg.PluginsDir(tool.reasonixHome), entry.Name(), "skills", "neutral", "SKILL.md"), "ALTERED IN THE RETRY WINDOW")
-			}
-		}
-		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: errors.New("transient sharing violation")}
-	})
-	t.Cleanup(restore)
-	args["apply"], args["planId"] = true, plan.PlanID
-	done := execInstall(t, tool, args)
-	if done.Status != "failed" || len(done.Actions) != 1 || done.Actions[0].ErrorCode != "install.digest_mismatch" {
-		t.Fatalf("response = %+v, want a failed action with the digest-mismatch code", done)
-	}
-	if calls != 1 {
-		t.Fatalf("rename attempts = %d, want 1: a failed re-check must stop the retries", calls)
-	}
-	if st, err := pluginpkg.LoadState(tool.reasonixHome); err != nil || len(st.Plugins) != 0 {
-		t.Fatalf("altered tree registered: %+v, %v", st, err)
 	}
 }

@@ -57,14 +57,6 @@ func AtomicWriteFileStrictValidated(path string, data []byte, perm os.FileMode, 
 	return atomicWriteFile(path, data, perm, false, validate)
 }
 
-// SetRenameForTest replaces the rename ReplaceFile retries. Restore with the
-// returned function. Production must leave the default in place.
-func SetRenameForTest(fn func(oldpath, newpath string) error) (restore func()) {
-	prev := renameFile
-	renameFile = fn
-	return func() { renameFile = prev }
-}
-
 // syncParentDirFn is the post-publish parent-dir fsync implementation.
 // Tests replace it via SetSyncParentDirForTest.
 var syncParentDirFn = syncParentDir

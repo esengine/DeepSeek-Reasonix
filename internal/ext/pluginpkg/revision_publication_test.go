@@ -1,6 +1,8 @@
 package pluginpkg
 
 import (
+	"errors"
+	"os"
 	"reasonix/internal/base/fileutil"
 	"reasonix/internal/base/testenv"
 	"testing"
@@ -34,5 +36,31 @@ func TestRevisionStateUsesStrictPublication(t *testing.T) {
 	st, err = LoadState(home)
 	if err != nil || len(st.Plugins) != 0 {
 		t.Fatalf("remove restart: %+v, %v", st, err)
+	}
+}
+
+func TestRevisionPublicationRechecksAfterABlockedRename(t *testing.T) {
+	home := testenv.TempDir(t)
+	if err := SaveState(home, State{Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	errChanged := errors.New("approved bytes changed")
+	checks := 0
+	err := UpsertValidated(home, InstalledPlugin{Name: "neutral", Root: "plugins/neutral", Enabled: true}, func() error {
+		checks++
+		if checks == 1 {
+			// A directory in the registry's place makes every rename fail.
+			if err := os.Remove(StatePath(home)); err != nil {
+				return err
+			}
+			return os.Mkdir(StatePath(home), 0o755)
+		}
+		return errChanged
+	})
+	if !errors.Is(err, errChanged) || !errors.Is(err, ErrPublicationFailed) {
+		t.Fatalf("err = %v, want the re-check failure carrying the publication identity", err)
+	}
+	if checks != 2 {
+		t.Fatalf("checks = %d, want 2: one before each rename attempt, none after a failure", checks)
 	}
 }
