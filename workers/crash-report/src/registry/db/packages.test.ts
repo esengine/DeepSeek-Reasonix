@@ -76,6 +76,19 @@ function pluginInput() {
 }
 
 describe("PackageRepo.publish", () => {
+  it.each([
+    ["2.7.0", "2.7.1"], ["2.7.0-rc.1", "0.1.0"], ["release-2026", "0.1.0"],
+  ])("generates %s's blank update version as %s", async (latest, next) => {
+    const input = PublishSchema.parse({ ...pluginInput(), version: latest });
+    expect(input.version).toBe(latest);
+    const { db, updates } = fakePackageDB([
+      { ...existing, latest_version: latest }, { ...existing, latest_version: next },
+    ]);
+    const result = await new PackageRepo(db).publish(user, { ...input, version: "" }, now);
+    expect(result.version).toBe(next);
+    expect(updates[0].values[8]).toBe(next);
+  });
+
   it("persists a kind change when an owned pending package is republished as a plugin", async () => {
     const updated: PackageRow = { ...existing, kind: "plugin", install_kind: "plugin", latest_version: "2.7.1" };
     const { db, updates } = fakePackageDB([existing, updated]);

@@ -3,8 +3,11 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/base/i18n"
 	"reasonix/internal/base/testenv"
@@ -134,6 +137,34 @@ func TestClsRedrawsWithoutTouchingTheConversation(t *testing.T) {
 	}
 	if submitted(k) != "" {
 		t.Fatal("/cls reached the kernel")
+	}
+}
+
+// Ctrl+L is /cls from the keyboard, as in 1.x and the guide; being a key, it
+// leaves a half-typed line where it was.
+func TestCtrlLClearsTheScreenAndKeepsTheDraft(t *testing.T) {
+	m, k, _ := miscModel(t)
+	m.tr.AddUser("hello")
+	m.commit()
+	m.todos = []TodoItem{{Content: "fix", Status: "in_progress"}}
+	typeText(m, "half typed")
+	ctrlL := tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
+	m.Update(ctrlL)
+	for _, it := range m.tr.Items {
+		if it.Kind == ItemUser {
+			t.Fatal("Ctrl+L kept the old turn on screen")
+		}
+	}
+	if len(m.todos) != 1 || m.composer.Value() != "half typed" || submitted(k) != "" {
+		t.Fatalf("after Ctrl+L: todos %d, draft %q, submitted %q", len(m.todos), m.composer.Value(), submitted(k))
+	}
+
+	m.tr.AddUser("again")
+	m.commit()
+	startTurn(m)
+	m.Update(ctrlL)
+	if !slices.ContainsFunc(m.tr.Items, func(it Item) bool { return it.Kind == ItemUser }) {
+		t.Fatal("Ctrl+L cleared the screen under a running turn, which /cls refuses")
 	}
 }
 

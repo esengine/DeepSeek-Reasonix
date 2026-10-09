@@ -22,6 +22,12 @@ func (m *model) bottomLines() bottom {
 	rows = append(rows, m.todoLines()...)
 	open := m.tr.OpenPrompt()
 	switch {
+	case m.skills != nil:
+		rows = append(rows, m.skillsPanel()...)
+	case m.quick != nil:
+		rows = append(rows, m.quickPanel()...)
+	case m.mcp != nil:
+		rows = append(rows, m.mcpPanelLines()...)
 	case m.picker != nil:
 		rows = append(rows, m.pickerPanel()...)
 	case m.rewind != nil:
@@ -43,11 +49,18 @@ func (m *model) bottomLines() bottom {
 		rows = append(rows, w)
 	}
 	at := -1
-	if m.picker == nil && m.rewind == nil && m.copying == nil && m.clearing == nil && m.setup == nil && (open == nil || (open.Kind == ItemAsk && m.ask != nil && m.ask.entering())) {
+	if m.composerShown() {
 		at = len(rows)
 		rows = append(rows, m.composerLines()...)
 	}
 	return bottom{rows: append(rows, m.statusBlock()...), composerAt: at}
+}
+
+// composerShown reports whether the composer is drawn: no panel holds the
+// bottom region, or the open ask card is taking a typed answer.
+func (m *model) composerShown() bool {
+	open := m.tr.OpenPrompt()
+	return m.picker == nil && m.skills == nil && m.quick == nil && m.mcp == nil && m.rewind == nil && m.copying == nil && m.clearing == nil && m.setup == nil && (open == nil || (open.Kind == ItemAsk && m.ask != nil && m.ask.entering()))
 }
 
 // View draws the frame. Full screen, the transcript is a viewport above the

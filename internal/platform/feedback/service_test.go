@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,7 @@ type stub struct {
 	postFn   func(n int, w http.ResponseWriter, r *http.Request) bool
 	mineBody string
 	mineCode int
+	held     bool
 	rows     []stubRow
 }
 
@@ -74,7 +76,7 @@ func (s *stub) admit(w http.ResponseWriter, r *http.Request, b wireSubmit) bool 
 		count++
 		if row.key == b.IdempotencyKey {
 			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, `{"receipt":"`+row.receipt+`","status":"received","installToken":"`+stubToken(b.InstallID)+`","createdAt":"`+row.at+`"}`)
+			_, _ = io.WriteString(w, `{"receipt":"`+row.receipt+`","status":"received","underReview":`+strconv.FormatBool(s.held)+`,"installToken":"`+stubToken(b.InstallID)+`","createdAt":"`+row.at+`"}`)
 			return true
 		}
 	}
@@ -100,7 +102,7 @@ func (s *stub) admit(w http.ResponseWriter, r *http.Request, b wireSubmit) bool 
 	at := "2026-09-30T08:0" + string(rune('0'+len(s.rows)%10)) + ":00Z"
 	s.rows = append(s.rows, stubRow{b.InstallID, b.IdempotencyKey, receipt, at})
 	w.WriteHeader(http.StatusCreated)
-	_, _ = io.WriteString(w, `{"receipt":"`+receipt+`","status":"received","installToken":"`+stubToken(b.InstallID)+`","createdAt":"`+at+`"}`)
+	_, _ = io.WriteString(w, `{"receipt":"`+receipt+`","status":"received","underReview":`+strconv.FormatBool(s.held)+`,"installToken":"`+stubToken(b.InstallID)+`","createdAt":"`+at+`"}`)
 	return true
 }
 
@@ -573,6 +575,28 @@ func TestListMineSendsIdentityAndMergesServerState(t *testing.T) {
 	h := st.gets[0]
 	if h.Get("X-Install-Id") != st.posts[0].InstallID || h.Get("X-Install-Token") != stubToken(st.posts[0].InstallID) {
 		t.Fatalf("headers = %v", h)
+	}
+}
+
+func TestUnderReviewCrossesTheWire(t *testing.T) {
+	st := &stub{held: true, mineBody: `{"items":[{"receipt":"FB-7K3M-9QX2","category":"bug","titleSnippet":"x","status":"received","underReview":true,"needsInput":false,"createdAt":"2026-09-30T08:00:00Z","updatedAt":"2026-09-30T08:00:00Z"},{"receipt":"FB-2H8P-4WD1","category":"bug","titleSnippet":"y","status":"received","createdAt":"2026-09-29T08:00:00Z","updatedAt":"2026-09-29T08:00:00Z"}]}`}
+	svc, _ := setup(t, st)
+	rec, err := svc.Submit(context.Background(), draft())
+	if err != nil || rec.Status != StatusReceived || !rec.UnderReview {
+		t.Fatalf("receipt = %+v %v", rec, err)
+	}
+	got, err := svc.ListMine(context.Background())
+	if err != nil || len(got.Items) != 2 || !got.Items[0].UnderReview || got.Items[1].UnderReview {
+		t.Fatalf("mine = %+v %v", got, err)
+	}
+	raw, _ := json.Marshal(got.Items[0])
+	if !bytes.Contains(raw, []byte(`"underReview":true`)) {
+		t.Fatalf("item json = %s", raw)
+	}
+	st.mineCode = http.StatusBadGateway
+	off, err := svc.ListMine(context.Background())
+	if err != nil || !off.Offline || !off.Items[0].UnderReview {
+		t.Fatalf("offline = %+v %v", off, err)
 	}
 }
 

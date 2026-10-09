@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"reasonix/internal/platform/browser"
 )
 
 // browserOpen opens a page in the session's browser. The window's own tabs and
@@ -25,7 +27,20 @@ func (s *Server) browserOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	tab, err := s.ctl().BrowserOpen(r.Context(), body.URL, body.Tab, body.NewTab)
 	if err != nil {
-		refuse(w, http.StatusBadRequest, "browser.open_failed", err.Error(), map[string]any{"url": body.URL})
+		params := map[string]any{"url": body.URL, "error": err.Error()}
+		if tab.ID != "" {
+			params["tab"] = tab.ID
+		}
+		switch browser.CodeOf(err) {
+		case browser.CodeEngineMissing:
+			refuse(w, http.StatusBadRequest, "browser.engine_missing", err.Error(), params)
+		case browser.CodeEngineFailed:
+			refuse(w, http.StatusBadRequest, "browser.engine_failed", err.Error(), params)
+		case browser.CodeProfileBusy:
+			refuse(w, http.StatusBadRequest, "browser.profile_busy", err.Error(), params)
+		default:
+			refuse(w, http.StatusBadRequest, "browser.open_failed", err.Error(), params)
+		}
 		return
 	}
 	writeJSON(w, tab)

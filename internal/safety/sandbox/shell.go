@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"reasonix/internal/base/proc"
@@ -303,12 +304,44 @@ func probeBash(path string) bool {
 	if runtime.GOOS != "windows" {
 		return true
 	}
+	return probeBashMemo(path, runBashProbe)
+}
+
+func runBashProbe(path string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "-c", "true")
 	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	return cmd.Run() == nil
+}
+
+// bashProbeIdentity is the file a successful probe vouched for. The same path
+// with the same size and mtime is the same executable, so it is not launched
+// again; a failure is never kept, because a timeout may be transient.
+type bashProbeIdentity struct {
+	path    string
+	size    int64
+	modTime int64
+}
+
+// provenBash lives for the process and holds successes only.
+var provenBash sync.Map
+
+func probeBashMemo(path string, run func(string) bool) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return run(path)
+	}
+	id := bashProbeIdentity{path: path, size: fi.Size(), modTime: fi.ModTime().UnixNano()}
+	if _, ok := provenBash.Load(id); ok {
+		return true
+	}
+	if !run(path) {
+		return false
+	}
+	provenBash.Store(id, struct{}{})
+	return true
 }
 
 func fileExists(p string) bool {

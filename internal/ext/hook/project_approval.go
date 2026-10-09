@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -128,7 +129,9 @@ func projectProgramApproved(opts LoadOptions, program config.ProjectProgram) boo
 }
 
 // refuseChangedHook records, instead of running, a project hook whose approval
-// no longer holds because a file it names changed after loading.
+// no longer holds because a file it names changed after loading. A gating hook
+// blocks: the script that guards an action is the one thing the agent could
+// otherwise edit to switch the guard off.
 func refuseChangedHook(report *Report, h ResolvedHook) bool {
 	if h.approval == nil {
 		return false
@@ -137,6 +140,7 @@ func refuseChangedHook(report *Report, h ResolvedHook) bool {
 	if err == nil {
 		return false
 	}
-	report.Outcomes = append(report.Outcomes, Outcome{Hook: h, Decision: DecisionError, ExitCode: -1, Stderr: err.Error(), Refusal: err})
+	recordUnevaluable(report, h, fmt.Errorf("%w: %w", ErrApprovalChanged, err))
+	report.Outcomes[len(report.Outcomes)-1].Refusal = err
 	return true
 }

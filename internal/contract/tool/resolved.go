@@ -53,3 +53,10 @@ type ResolvedCall struct {
 type CallResolver interface {
 	ResolveCall(ctx context.Context, args json.RawMessage) (ResolvedCall, error)
 }
+
+// TargetArgsReader is implemented by a proxy tool that can say, without
+// resolving the call, which arguments it forwards to its target. Replaying a
+// stored transcript needs it because resolution has effects of its own.
+type TargetArgsReader interface {
+	TargetArgs(args json.RawMessage) json.RawMessage
+}

@@ -33,7 +33,8 @@ type mcpManager struct {
 	defaultCallTimeout time.Duration
 	// sealed, once set, refuses every connection. It is written before the
 	// controller is handed to a caller and only read after.
-	sealed error
+	sealed         error
+	promptFailures promptFailureDebt
 }
 
 // seal makes the manager refuse to connect or register any server.

@@ -47,10 +47,12 @@ func UpsertValidated(reasonixHome string, p InstalledPlugin, validate func() err
 	}
 	for i := range st.Plugins {
 		if st.Plugins[i].Name == p.Name {
+			p.Generation = st.Plugins[i].Generation + 1
 			st.Plugins[i] = p
 			return saveStateValidated(reasonixHome, st, validate)
 		}
 	}
+	p.Generation = 1
 	st.Plugins = append(st.Plugins, p)
 	return saveStateValidated(reasonixHome, st, validate)
 }

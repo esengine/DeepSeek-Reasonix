@@ -288,10 +288,38 @@ Context Engine v2 upgrades existing stores without requiring setup:
 No vector database, embedding service, setup wizard, or re-index command is
 required.
 
+### Legacy migration backups
+
+Before rewriting a legacy fact, migration saves its exact original bytes under
+`<memory-store>/.migration-backup/<original-filename>`. `manifest.json` records
+the first backup time (UTC) and app version.
+
+Backups are never overwritten or automatically pruned. They are retained
+indefinitely and are excluded from active memory listings, recall, the prompt
+prefix, and configuration backup exports.
+
+The migrated fact still starts at revision 1; these copies are outside revision
+history and cannot be selected by `/memory restore`.
+
+To recover manually:
+
+1. Close sessions using the store. Copy the current fact and its migration backup
+   to a separate recovery directory before editing either.
+2. Open the backup copy to recover unknown metadata, original formatting, or
+   content. Merge needed content into the active fact, retaining its current ID
+   and revision, or use the normal memory update flow for an audited revision.
+3. For an exact original-file recovery, copy the backup over the active file while
+   the app is closed. The next boot migrates it again; the first backup remains.
+   Keep the separate recovery copy if exact legacy bytes must remain available.
+
+If preservation fails, boot warns with `memory.migration_backup` and leaves that
+fact untouched. Correct the storage problem and restart to retry migration.
+
 ## Cache and privacy contract
 
-- Standing instructions and the derived memory index join the stable prefix at
-  session start.
+- Standing instructions and pinned memory bodies join the stable prefix at
+  session start. The derived fact index does not: it is reached through the
+  `memory` tool.
 - Provider-visible instruction provenance uses stable `workspace/...` and
   `user/...` labels; absolute source and store paths stay in local diagnostics.
 - Provider-visible memory tool results use stable `project/<name>.md` and `global/<name>.md` references.

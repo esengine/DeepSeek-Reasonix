@@ -3,6 +3,7 @@ package installsource
 import (
 	"encoding/json"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/pluginpkg"
 )
@@ -62,6 +63,7 @@ type response struct {
 	// ContentDigest is what a reviewer records to pin this exact material;
 	// empty when the plan's material cannot be pinned.
 	ContentDigest string `json:"contentDigest,omitempty"`
+	failure       error
 }
 
 // kindTally reports per-kind counts. It is a struct (not a map) so the JSON
@@ -136,6 +138,7 @@ type action struct {
 	preparedRoot string
 	cleanup      func()
 	treeDigest   string
+	failure      error
 }
 
 // RuntimePlanInfo describes a plugin package's declared runtime process in
@@ -191,6 +194,15 @@ func publicActions(in []action) []action {
 	out := make([]action, len(in))
 	for i := range in {
 		out[i] = in[i]
+		out[i].Source = secrets.RedactConfigValue("", in[i].Source)
+		out[i].Target = secrets.RedactConfigValue("", in[i].Target)
+		out[i].URL = secrets.RedactEndpoint(in[i].URL)
+		out[i].Command = secrets.RedactConfigValue("", in[i].Command)
+		out[i].Args = secrets.RedactArgs(in[i].Args)
+		out[i].Env = secrets.RedactConfigMap(in[i].Env)
+		out[i].Headers = secrets.RedactConfigMap(in[i].Headers)
+		out[i].Error = publicFailure(in[i].failure, in[i].Error)
+		out[i].failure = nil
 		out[i].entry = config.PluginEntry{}
 		out[i].skill = skillCandidate{}
 		out[i].preparedRoot = ""
@@ -200,6 +212,18 @@ func publicActions(in []action) []action {
 }
 
 func marshalJSON(v any) string {
+	if result, ok := v.(response); ok {
+		result.Source = secrets.RedactConfigValue("", result.Source)
+		result.Error = publicFailure(result.failure, result.Error)
+		v = result
+	}
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+func publicFailure(failure error, text string) string {
+	if failure != nil {
+		return secrets.DiagnosticError(failure).Error()
+	}
+	return secrets.OmittedText(text)
 }

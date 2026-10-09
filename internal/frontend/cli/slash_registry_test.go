@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestBuiltinSlashRegistryHasUniqueNamesAndAliases(t *testing.T) {
 	seen := map[string]string{}
@@ -39,5 +42,17 @@ func TestBuiltinSlashCompletionAndHelpComeFromRegistry(t *testing.T) {
 		if helpNames[spec.name] != spec.showInHelp {
 			t.Fatalf("help visibility for %q = %v, want %v", spec.name, helpNames[spec.name], spec.showInHelp)
 		}
+	}
+}
+
+func TestQuitCommandsCarryTheRegistryAliases(t *testing.T) {
+	got := builtinSlashNames("/quit")
+	for _, want := range []string{"/quit", "/exit"} {
+		if !slices.Contains(got, want) {
+			t.Fatalf("builtinSlashNames(/quit) = %v, missing %s", got, want)
+		}
+	}
+	if builtinSlashNames("/no-such-command") != nil {
+		t.Fatal("an unknown command resolved to names")
 	}
 }

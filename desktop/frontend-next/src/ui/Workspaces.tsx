@@ -8,6 +8,8 @@ import { pinToViewport } from "./place";
 import { useRailQuery } from "./railsearch";
 import { StudioIcon } from "./StudioIcon";
 import { Cross } from "./glyphs";
+import { copyText } from "./CopyButton";
+import { sessionInfoText } from "./sessionInfo";
 import { download } from "../port/download";
 import { host } from "../port/host";
 import { useTreeKeys } from "./tree";
@@ -16,6 +18,8 @@ import { asksDelete } from "./keys";
 import { clearDraftForSession } from "./drafts";
 import { WorkspaceOrder, workspaceMenuKeys } from "./WorkspaceOrder";
 import { WorkspaceReveal } from "./WorkspaceReveal";
+import { Confirm, removeHint } from "./WorkspaceConfirm";
+import { UnreadCount, UnreadDot } from "./UnreadMark";
 
 const parentOf = (root: string) => root.replace(/[/\\]+$/, "").split(/[/\\]/).slice(-2, -1)[0] ?? "";
 
@@ -31,6 +35,9 @@ interface Props {
   folded: Set<string>;
   onFold: (root: string, folded: boolean) => void;
   reload: () => Promise<void>;
+  // The session path being opened, or empty. The row shows it selected and busy
+  // before the kernel answers; the owner clears it on failure.
+  opening?: string;
   onOpen: (req: { root?: string; sessionPath?: string }) => Promise<void>;
   onFocus: (id: string) => void;
   onClose: (ids: string[]) => Promise<void>;
@@ -64,7 +71,7 @@ const SHOWN = 30;
 const rowLabel = (session: TreeSession) =>
   session.title || (session.runtimeId && !session.turns ? t("新会话") : session.name);
 
-function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload, onFold, onOpen, onFocus, onClose, liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onArchive = async () => {}, onRename, onError, adder, children }: Props) {
+function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload, onFold, opening = "", onOpen, onFocus, onClose, liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onArchive = async () => {}, onRename, onError, adder, children }: Props) {
   const [busy, setBusy] = useState("");
   // Folding a machine is the reader's own preference, held the way a host row
   // holds it.
@@ -146,13 +153,10 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
       onFocus(session.runtimeId);
       return;
     }
-    setBusy(session.path);
     try {
       await onOpen({ root: ws.root, sessionPath: session.path });
     } catch (e) {
       onError(e);
-    } finally {
-      setBusy("");
     }
   };
 
@@ -364,6 +368,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       {t("{n} 会话", { n: ws.sessions.length })}
                     </span>
                     <span className="wsacts">
+                      {shut && <UnreadCount n={ws.sessions.filter((x) => x.unread).length} />}
                       <button
                         data-action="session.new"
                         className="wsadd"
@@ -427,7 +432,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                 {!shut && (
                   <div className="kids">
                 {(whole.has(ws.root) ? ws.sessions : ws.sessions.slice(0, SHOWN)).map((session) => {
-                    const on = session.runtimeId === active;
+                    const on = opening ? session.path === opening : session.runtimeId === active;
                     const run = session.runtimeId ? runs[session.runtimeId]?.run : undefined;
                     if (confirm === session.path) {
                       return (
@@ -461,8 +466,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         data-on={on ? "" : undefined}
                         data-live={session.runtimeId ? "" : undefined}
                         data-run={run === "idle" ? undefined : run}
+                        data-unread={session.unread ? "" : undefined}
                         data-just-done={session.runtimeId && justDone.has(session.runtimeId) ? "" : undefined}
-                        data-busy={busy === session.path ? "" : undefined}
+                        data-busy={opening === session.path ? "" : undefined}
                         onClick={() => void pick(ws, session)}
                         onContextMenu={(ev) => {
                           if ((ev.target as HTMLElement).closest("input, textarea, [role='menu']")) return;
@@ -517,6 +523,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         ) : (
                           <span className="sesstitle" title={rowLabel(session)}><span>{rowLabel(session)}</span></span>
                         )}
+                        {session.unread && <UnreadDot kind="row" />}
                         {kept.length > 0 && (
                           <button
                             className="sesscopies"
@@ -591,6 +598,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                             </div>
                             <div className="session-pop-divider" />
                             <div className="session-pop-group">
+                              <button role="menuitem" data-action="session.copy-info" data-target={session.path} onClick={() => { void copyText(sessionInfoText(session, ws.root)).catch(onError); setSessionMenu(""); }}>
+                                <StudioIcon name="copy" /><span>{t("复制会话信息")}</span>
+                              </button>
                               <button role="menuitem" data-action="session.export" data-target={session.path} disabled={busy === "export:" + session.path} onClick={() => void saveSession(session)}>
                                 <StudioIcon name="download" /><span>{t("导出会话")}</span><small>JSON</small>
                               </button>
@@ -625,7 +635,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                               key={copy.path}
                               className="sessrow sesscopy"
                               role="treeitem"
-                              data-busy={busy === copy.path ? "" : undefined}
+                              aria-selected={opening === copy.path}
+                              data-on={opening === copy.path ? "" : undefined}
+                              data-busy={opening === copy.path ? "" : undefined}
                               onClick={() => void pick(ws, copy)}
                               tabIndex={0}
                               onKeyDown={(ev) => {
@@ -728,57 +740,4 @@ export function newlyDone(
     before[id] = st.run;
   }
   return fresh;
-}
-
-// Removing a folder closes its panes, and closing one stops what it is running.
-// That price is said here rather than discovered afterwards — the kernel refuses
-// the removal either way, and a refusal names no pane the reader can go find.
-export function removeHint(panes: number, live: number): string {
-  if (panes === 0) return t("不会删除任何文件");
-  if (live === 0) return t("将先关闭 {n} 个面板；不会删除任何文件", { n: panes });
-  return t("其中 {live} 个对话正在运行，停止后才能移除", { live });
-}
-
-// 确认不跟原来那行抢位置：把「×」换成「移除」两个字，宽度一变就把文件夹名挤扁
-// 了。整行换成一条问句，取消永远在手边，误点的代价是零。
-export function Confirm({
-  what,
-  hint,
-  go,
-  danger,
-  onGo,
-  onCancel,
-}: {
-  what: string;
-  hint?: string;
-  go: string;
-  danger?: boolean;
-  onGo: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div
-      className="wsconfirm"
-      role="alertdialog"
-      aria-label={what}
-      data-action-keydown="layer.dismiss"
-      onKeyDown={(ev) => {
-        if (ev.key !== "Escape") return;
-        // Dismissing the question is not stopping the run behind it.
-        ev.stopPropagation();
-        onCancel();
-      }}
-    >
-      <div className="wsconfirm-t">
-        <span className="q">{what}</span>
-        {hint && <span className="h">{hint}</span>}
-      </div>
-      <div className="wsconfirm-a">
-        <button data-action="layer.dismiss" onClick={onCancel}>{t("取消")}</button>
-        <button autoFocus data-action="workspace.remove" data-danger={danger ? "" : undefined} onClick={onGo}>
-          {go}
-        </button>
-      </div>
-    </div>
-  );
 }

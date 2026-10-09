@@ -21,47 +21,45 @@ export function useRuntimeReload(port: AgentPort, onDone: () => void) {
   const currentConnection = useRef(connection);
   currentConnection.current = connection;
   const attempts = useRef(0);
-  const [state, setState] = useState<State>("");
-  const [note, setNote] = useState("");
+  const [feedback, setFeedback] = useState<{ state: State; note: string }>({ state: "", note: "" });
+  const { state, note } = feedback;
   if (connection.port !== port) {
     setConnection({ port });
-    setState("");
-    setNote("");
+    setFeedback({ state: "", note: "" });
   }
 
   const go = useCallback(async () => {
     const attempt = ++attempts.current;
-    setState("run");
-    setNote(t("正在重启常驻进程，重新扫描技能、命令和钩子…"));
+    setFeedback({ state: "run", note: t("正在重启常驻进程，重新扫描技能、命令和钩子…") });
     try {
       await port.reloadExtensions();
       if (currentConnection.current !== connection || attempts.current !== attempt) return;
-      setState("ok");
-      setNote(t("已生效，下一轮开始用新的扩展"));
+      setFeedback({ state: "ok", note: t("已生效，下一轮开始用新的扩展") });
       onDone();
     } catch (e) {
       if (currentConnection.current !== connection || attempts.current !== attempt) return;
       // A refusal is the kernel's, and it knows why: a turn in flight, a
       // background job, a session that moved. Say its reason, not a generic one.
-      setState("bad");
-      setNote(reason(e));
+      setFeedback({ state: "bad", note: reason(e) });
     }
   }, [port, onDone, connection]);
 
   useEffect(() => {
-    if (state !== "ok") return;
+    if (feedback.state !== "ok") return;
     const id = setTimeout(() => {
-      setState("");
-      setNote("");
+      setFeedback({ state: "", note: "" });
     }, SETTLED_MS);
     return () => clearTimeout(id);
-  }, [state]);
+  }, [feedback]);
 
   return {
+    applied: () => {
+      attempts.current++;
+      setFeedback({ state: "ok", note: t("已生效，下一轮开始用新的扩展") });
+    },
     report: (message: string) => {
       attempts.current++;
-      setState("bad");
-      setNote(t("更改已保存，运行时未重载：{reason}。请用「重载运行时」重试。", { reason: message }));
+      setFeedback({ state: "bad", note: t("更改已保存，运行时未重载：{reason}。请用「重载运行时」重试。", { reason: message }) });
     },
     action: (
       <button className="act reload" data-action="extensions.reload" data-s={state || undefined} disabled={state === "run"} onClick={go}>

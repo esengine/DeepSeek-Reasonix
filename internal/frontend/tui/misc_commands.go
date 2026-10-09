@@ -16,11 +16,7 @@ import (
 func (m *model) miscSlash(display string) (tea.Cmd, bool) {
 	name, arg, _ := strings.Cut(display, " ")
 	switch name {
-	case "/cls", "/todo", "/verbose", "/diff-fold":
-		if arg != "" {
-			return nil, false
-		}
-	case "/theme":
+	case "/cls", "/todo", "/verbose", "/diff-fold", "/theme":
 	default:
 		return nil, false
 	}

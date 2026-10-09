@@ -2,6 +2,8 @@ package boot
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,7 +18,9 @@ import (
 // snapshot tests in internal/platform/environment; this test pins the rest of the
 // composition (memory, skills index, output style, workspace line, policies).
 func TestBuildComposesByteStableSystemPrompt(t *testing.T) {
-	isolateConfigHome(t)
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+	t.Setenv("REASONIX_STATE_HOME", "")
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 
@@ -36,7 +40,8 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	approveWorkspace(t, dir)
 	writeFile(t, dir, "REASONIX.md", "Project rule: keep the prompt prefix stable.")
 
-	first, err := Build(context.Background(), Options{})
+	opts := Options{Home: os.Getenv("REASONIX_HOME"), WorkspaceRoot: dir, resolvedShell: pinnedEffectShell()}
+	first, err := Build(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("first Build: %v", err)
 	}
@@ -46,7 +51,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 		t.Fatal("first Build composed an empty system prompt")
 	}
 
-	second, err := Build(context.Background(), Options{})
+	second, err := Build(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("second Build: %v", err)
 	}

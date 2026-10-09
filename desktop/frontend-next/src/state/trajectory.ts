@@ -183,6 +183,9 @@ function record(ev: WireEvent): Made | null {
           { n: `${ev.retryAttempt ?? 0}/${ev.retryMax ?? 0}` },
           { t: " · scope=" },
           { b: ev.retryScope ?? "stream" },
+          ...(ev.retryCause
+            ? [{ t: " · cause=" }, { b: ev.retryCause }, ...(ev.retryStatus ? [{ t: ` ${ev.retryStatus}` }] : [])]
+            : []),
         ],
       };
 

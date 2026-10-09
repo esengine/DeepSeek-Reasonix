@@ -16,6 +16,7 @@ type slashDoneMsg struct{ level, text string }
 // statusReportMsg carries the fresh status a /status report is drawn from.
 type statusReportMsg struct {
 	s   Status
+	git *GitInfo
 	err error
 }
 
@@ -40,10 +41,30 @@ func (m *model) queueSlash(display string) (tea.Cmd, bool) {
 	case "/takeover":
 		running := m.tr.Running
 		run = func() tea.Msg { return m.takeover(fields[1:], running) }
+	case "/resume":
+		if len(fields) != 2 {
+			return nil, false
+		}
+		idx, err := strconv.Atoi(fields[1])
+		if err != nil {
+			return nil, false
+		}
+		running := m.tr.Running
+		run = func() tea.Msg { return m.resumeByIndex(idx, running) }
+	case "/rename":
+		idx, title, ok := renameByIndexArgs(fields, rest)
+		if !ok {
+			return nil, false
+		}
+		run = func() tea.Msg { return m.renameSession(idx, title) }
 	case "/status":
 		run = func() tea.Msg {
 			s, err := m.client.Status(m.ctx)
-			return statusReportMsg{s: s, err: err}
+			msg := statusReportMsg{s: s, err: err}
+			if g, gerr := m.client.WorkspaceGit(m.ctx); gerr == nil {
+				msg.git = &g
+			}
+			return msg
 		}
 	case "/export":
 		run = m.exportSession()
@@ -72,20 +93,70 @@ func (m *model) takeover(args []string, running bool) tea.Msg {
 	}
 	target := args[0]
 	if idx, err := strconv.Atoi(target); err == nil {
-		list, err := m.client.Sessions(m.ctx)
-		if err != nil {
-			return slashDoneMsg{level: "error", text: "takeover: " + err.Error()}
+		s, refused := m.savedSession("takeover", idx)
+		if refused != nil {
+			return *refused
 		}
-		if idx < 1 || idx > len(list) {
-			return slashDoneMsg{level: "info", text: fmt.Sprintf(i18n.M.ResumeBadIndexFmt, len(list))}
-		}
-		if list[idx-1].Current {
+		if s.Current {
 			return slashDoneMsg{level: "info", text: i18n.M.ResumeAlreadyActive}
 		}
-		target = list[idx-1].Path
+		target = s.Path
 	}
 	err := m.client.Resume(m.ctx, target)
 	return takeoverMsg{err: err, text: i18n.M.TakeoverNoSteal}
+}
+
+// resumeByIndex continues the session at idx in the session list in place, as
+// 1.x's "/resume <n>" does; a bare /resume opens the picker instead.
+func (m *model) resumeByIndex(idx int, running bool) tea.Msg {
+	if running {
+		return slashDoneMsg{level: "warn", text: i18n.M.ResumeBusy}
+	}
+	s, refused := m.savedSession("resume", idx)
+	if refused != nil {
+		return *refused
+	}
+	if s.Current {
+		return slashDoneMsg{level: "info", text: i18n.M.ResumeAlreadyActive}
+	}
+	return resumedMsg{err: m.client.Resume(m.ctx, s.Path)}
+}
+
+// savedSession is the session listed at the 1-based idx, or the notice that
+// says why there is none.
+func (m *model) savedSession(cmd string, idx int) (SessionInfo, *slashDoneMsg) {
+	list, err := m.client.Sessions(m.ctx)
+	if err != nil {
+		return SessionInfo{}, &slashDoneMsg{level: "error", text: cmd + ": " + err.Error()}
+	}
+	if idx < 1 || idx > len(list) {
+		return SessionInfo{}, &slashDoneMsg{level: "info", text: fmt.Sprintf(i18n.M.ResumeBadIndexFmt, len(list))}
+	}
+	return list[idx-1], nil
+}
+
+// renameByIndexArgs recognises "/rename <n> <title>", the form that names a
+// saved session by its position; any other shape is the current session's.
+func renameByIndexArgs(fields []string, rest string) (idx int, title string, ok bool) {
+	if len(fields) < 3 {
+		return 0, "", false
+	}
+	idx, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, "", false
+	}
+	return idx, strings.TrimSpace(strings.TrimPrefix(rest, fields[1])), true
+}
+
+func (m *model) renameSession(idx int, title string) tea.Msg {
+	s, refused := m.savedSession("rename", idx)
+	if refused != nil {
+		return *refused
+	}
+	if err := m.client.RenameSession(m.ctx, s.Name, title); err != nil {
+		return slashDoneMsg{level: "error", text: "rename: " + err.Error()}
+	}
+	return slashDoneMsg{level: "info", text: fmt.Sprintf(i18n.M.RenameDoneFmt, title)}
 }
 
 func (m *model) onSlashDone(msg slashDoneMsg) tea.Cmd {
@@ -104,6 +175,9 @@ func (m *model) onTakeover(msg takeoverMsg) tea.Cmd {
 func (m *model) onStatusReport(msg statusReportMsg) tea.Cmd {
 	if msg.err == nil {
 		m.status = msg.s
+	}
+	if msg.git != nil {
+		m.git = *msg.git
 	}
 	return m.onSlashDone(slashDoneMsg{level: "info", text: m.statusDetails()})
 }

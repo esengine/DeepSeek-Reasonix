@@ -21,6 +21,7 @@ import (
 )
 
 func TestEffectSupportingWritesWithoutChecksMayFinish(t *testing.T) {
+	const scanLimit = 64
 	for _, tc := range []struct {
 		name       string
 		code       bool
@@ -71,7 +72,7 @@ func TestEffectSupportingWritesWithoutChecksMayFinish(t *testing.T) {
 				extra = robustTempDir(t)
 			}
 			if tc.incomplete {
-				for i := range 50_001 {
+				for i := range scanLimit + 1 {
 					writeFile(t, dir, fmt.Sprintf("note-%05d.md", i), "")
 				}
 			}
@@ -122,7 +123,7 @@ func TestEffectSupportingWritesWithoutChecksMayFinish(t *testing.T) {
 				preset = AgentPresetDelivery
 			}
 			sink := &bundleAuditSink{}
-			opts := Options{Home: home, WorkspaceRoot: dir, AgentPreset: preset, Sink: sink, HeadlessApprovalMode: control.ToolApprovalAuto}
+			opts := Options{Home: home, WorkspaceRoot: dir, AgentPreset: preset, Sink: sink, HeadlessApprovalMode: control.ToolApprovalAuto, WorkspaceScanLimit: scanLimit}
 			if tc.outside {
 				opts.AdditionalDirs = []string{extra}
 			}

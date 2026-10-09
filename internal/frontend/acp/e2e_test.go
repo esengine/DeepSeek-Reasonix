@@ -346,11 +346,7 @@ func TestE2ESessionListResumeAndDelete(t *testing.T) {
 	if resumeResp.Error != nil {
 		t.Fatalf("session/resume errored: %+v", resumeResp.Error)
 	}
-	select {
-	case n := <-client2.notifs:
-		t.Fatalf("session/resume replayed an unexpected notification: %+v", n)
-	default:
-	}
+	assertResumeReplaysNoTranscript(t, client2, nr.SessionID, cwd)
 
 	deleteResp := client2.call(t, "session/delete", SessionDeleteParams{SessionID: nr.SessionID})
 	if deleteResp.Error != nil {
@@ -636,5 +632,52 @@ func (t blockingTool) Execute(ctx context.Context, _ json.RawMessage) (string, e
 		return "", ctx.Err()
 	case <-t.release:
 		return "released", nil
+	}
+}
+
+// assertResumeReplaysNoTranscript holds the resume invariant: session metadata
+// may be published after the response, but no history notification may be.
+func assertResumeReplaysNoTranscript(t *testing.T, c *rpcClient, sessionID, cwd string) {
+	t.Helper()
+	metadataKinds := map[string]bool{"available_commands_update": true, "usage_update": true}
+	var sawStatus bool
+	check := func(n frame) {
+		switch n.Method {
+		case sessionMCPStatusUpdateMethod:
+			var status ReasonixMCPStatus
+			if err := json.Unmarshal(n.Params, &status); err != nil {
+				t.Fatalf("resume MCP status: %v", err)
+			}
+			if status.SchemaVersion != mcpStatusSchemaVersion || status.SessionID != sessionID || status.Servers == nil {
+				t.Fatalf("resume MCP status = %+v, want schema %d for %s with a servers list", status, mcpStatusSchemaVersion, sessionID)
+			}
+			sawStatus = true
+		case "session/update":
+			if kind := updateKind(t, n); !metadataKinds[kind] {
+				t.Fatalf("session/resume replayed transcript update %q: %s", kind, n.Params)
+			}
+		default:
+			t.Fatalf("session/resume sent unexpected notification %q", n.Method)
+		}
+	}
+	deadline := time.After(testenv.Budget(t))
+	for !sawStatus {
+		select {
+		case n := <-c.notifs:
+			check(n)
+		case <-deadline:
+			t.Fatal("session/resume did not publish its MCP status")
+		}
+	}
+	if resp := c.call(t, "session/list", SessionListParams{Cwd: cwd}); resp.Error != nil {
+		t.Fatalf("session/list barrier: %+v", resp.Error)
+	}
+	for {
+		select {
+		case n := <-c.notifs:
+			check(n)
+		default:
+			return
+		}
 	}
 }

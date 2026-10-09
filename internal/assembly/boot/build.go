@@ -123,12 +123,12 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	return b.freeze(ctrl)
 }
 
-// retireUnownedSidecars closes the preflighted sidecars when the build fails
-// before the extension snapshot takes ownership: no process outlives a failed build.
+// retireUnownedSidecars restores adopted clients and closes fresh sidecars when
+// the build fails before the extension snapshot takes ownership.
 func (b *builder) retireUnownedSidecars() {
 	if b.pendingMgr != nil {
 		close(b.ext.failed)
-		_ = b.pendingMgr.Close()
+		b.pendingMgr.RollbackPlanStart(b.opts.Extensions)
 	}
 }
 
@@ -212,7 +212,11 @@ func (b *builder) load() error {
 		return err
 	}
 	b.timer.mark("provider")
-	b.shell = resolveShellWithNotice(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, b.stderr, b.sink)
+	if opts.resolvedShell != nil {
+		b.shell = *opts.resolvedShell
+	} else {
+		b.shell = resolveShellWithNotice(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, b.stderr, b.sink)
+	}
 	// Record the resolved interpreter for diagnostics, staying at Debug because
 	// headless `run` must leave stderr empty unless --debug is passed. A launch
 	// failure emits an always-on Warn with the same kind/path/source fields.
@@ -307,13 +311,20 @@ func (b *builder) wireTools() error {
 	t.roles = roleWiring{cfg: cfg, roots: b.roots, resolver: b.providers.effective, extension: b.providers.extension,
 		proxy: b.proxy, sink: b.sink, gate: t.gate, reg: t.reg, keep: b.keep, hooks: t.hookRunner}
 	t.sub = newSubagentConfig(opts, cfg, b.model.entry, b.model.name, b.providers.effective, b.proxy, b.prompt.skillStore)
+	if t.sub.inheritedEffortDropped {
+		report(b.sink, event.Event{
+			Level:  event.LevelWarn,
+			Text:   "Ignored the inherited subagent effort for the selected model.",
+			Detail: fmt.Sprintf("agent.subagent_effort = %q is not supported by the current execution model %q; subagents that follow it will use the provider/model default effort. The persisted setting was not changed.", cfg.Agent.SubagentEffort, b.model.ref),
+		})
+	}
 	t.taskTool, t.skillRun = t.roles.delegation(delegationInputs{opts: opts, sub: t.sub, exec: b.execProv, entry: b.model.entry,
 		modelName: b.model.name, root: root, maxSteps: t.maxSteps, delivery: b.model.delivery, store: subagentStore,
 		session: b.session, bashEnforced: env.bash.Enforce})
 	b.addIsolation()
 	registerSessionTools(t.reg, opts.Ablation, b.roots, b.session.dir, b.prompt.memory.Store)
 
-	t.runners = skillRunners{readOnly: t.skillRun.runReadOnly, run: t.skillRun.run, profile: skillProfile(cfg)}
+	t.runners = skillRunners{readOnly: t.skillRun.runReadOnly, run: t.skillRun.run, profile: skillProfile(cfg, t.sub.inheritedFor)}
 	t.cmds = loadCommands(opts, root)
 	addInstallSourceTool(b.ctx, t.reg, t.host, root, b.balanceClient, t.specOptions, opts.Stderr)
 	registerSkillTools(t.reg, opts.Ablation, b.prompt.skillStore, b.prompt.implicitSkills, t.runners, t.cmds)
@@ -351,6 +362,7 @@ func (b *builder) wireMCP() {
 		OAuthHTTPClient:       b.balanceClient,
 	}
 	t.mcp = resolveMCPSpecs(opts, cfg, root, t.specOptions)
+	reportProjectMCPAwaitingApproval(b.sink, cfg, root)
 	t.configSpecs, t.mcpSchemaKnown = registerMCPTools(b.ctx, t.host, t.reg, t.mcp, b.sink)
 	b.cleanup = t.host.Close
 	if opts.SharedHost != nil {
@@ -423,7 +435,7 @@ func (b *builder) executor() *agent.Agent {
 		// Reserving writes at the executor entry covers every writer, late MCP
 		// adds included, without wrapping tool schemas.
 		WriteScheduler:     t.sub.scheduler,
-		WriteWorkspaceRoot: b.root, WorkspaceVCS: b.prompt.workspaceVCS, RenderRoot: renderRoot(t.browser, entry, b.root),
+		WriteWorkspaceRoot: b.root, WorkspaceScanLimit: b.opts.WorkspaceScanLimit, WorkspaceVCS: b.prompt.workspaceVCS, RenderRoot: renderRoot(t.browser, entry, b.root),
 		ProjectChecks: b.prompt.projectChecks, ProjectSensitivePaths: b.prompt.sensitivePaths,
 		EvidenceSeal:                 t.env.evidenceSeal,
 		AgentPreset:                  b.model.preset,
@@ -475,6 +487,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		Effort:                         providerIdentity.Effort,
 		ProviderFingerprint:            providerIdentity.Fingerprint,
 		ModelModes:                     config.RequestModes(entry),
+		ModelEntry:                     entry,
 		SystemPrompt:                   b.prompt.prompt,
 		SessionDir:                     b.session.dir,
 		Host:                           t.host,
@@ -545,6 +558,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		RecoveryHeadless: recoveryHeadlessMode(opts),
 		GoalEvaluator:    goalEvaluator(cfg, b.model.ref, b.proxy, b.sink),
 		PromptRefiner:    promptRefiner(entry, b.proxy, b.sink),
+		CommitMessenger:  commitMessenger(entry, b.proxy, b.sink),
 	}
 }
 
@@ -566,8 +580,8 @@ func (b *builder) freeze(ctrl *control.Controller) (*BuildResult, error) {
 		session:            ext.session(),
 		ui:                 ext.hub,
 		onWarning:          ext.warn,
+		onSidecarDown:      ext.sidecarDown,
 		skipPromptStrategy: shouldSkipPromptStrategy(b.opts.PreviousPlan),
-		previousDispatcher: b.opts.PreviousDispatcher,
 	}, ext.mgr)
 	// Assembly owns the sidecars on every path: closed inside, or in the runtime set.
 	b.pendingMgr = nil
@@ -582,6 +596,7 @@ func (b *builder) freeze(ctrl *control.Controller) (*BuildResult, error) {
 		// The failed assembly already retired the sidecars; bind neither hub nor manager.
 		extensionMgr = nil
 	}
+	installSidecarStreamRouters(extensionMgr, b.providers.extension)
 	providerResolver := b.providers.base
 	if b.providers.extension != nil {
 		providerResolver = b.providers.extension

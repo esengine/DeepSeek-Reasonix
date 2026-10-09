@@ -86,6 +86,13 @@ func TestCLIGateBlocksEveryCLIChannel(t *testing.T) {
 			t.Fatalf("%s does not wait for cli-tag", name)
 		}
 	}
+	found := false
+	for _, n := range mappingValue(mappingValue(jobs, "cli-channels"), "needs").Content {
+		found = found || n.Value == "cli-pointer"
+	}
+	if !found {
+		t.Fatal("cli-channels does not wait for cli-pointer: the cask would name archives that may not exist yet")
+	}
 }
 
 var releaseTagSecrets = []string{"RELEASE_TAG_TOKEN"}

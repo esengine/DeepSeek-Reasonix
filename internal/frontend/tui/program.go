@@ -40,6 +40,9 @@ type Options struct {
 	// CommandMode gives the composer a vi command mode: Esc enters command
 	// mode, a running turn or not, and only Ctrl+C interrupts.
 	CommandMode bool
+	// QuitCommands are the slash names that end the session, from the
+	// command catalogue the completion menu offers.
+	QuitCommands []string
 	// Statusline, when set, turns the footer's context JSON into one line
 	// that replaces the telemetry row; "" keeps the built-in row.
 	Statusline func(ctx context.Context, stdin string) string
@@ -111,6 +114,9 @@ type model struct {
 	copying       *copyPicker
 	clearing      *clearConfirm
 	setup         *connectionSetup
+	skills        *skillPicker
+	quick         *quickPicker
+	mcp           *mcpPanel
 	lastEsc       time.Time // an idle Esc on an empty composer, arming the second
 	// frameRows is how tall the last inline frame was: a print has only the
 	// rows above it to land in.
@@ -130,6 +136,10 @@ type (
 	actionMsg struct {
 		what string
 		err  error
+	}
+	sentMsg struct {
+		display string
+		err     error
 	}
 	queuedMsg struct {
 		row    int
@@ -305,6 +315,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// than apply a frame that follows a hole.
 				return m, tea.Batch(m.fetchHistory(false), rearm)
 			}
+			m.dropSpentTodos(u.Event.Kind)
 			m.tr.Apply(u.Event)
 			if u.Event.Kind == "turn_done" {
 				turnDone = true
@@ -360,9 +371,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.commit()
 	case todosMsg:
-		if msg.err == nil {
-			m.todos = msg.items
-		}
+		m.onTodos(msg)
 		return m, nil
 	case completionMsg:
 		m.onCompletion(msg)
@@ -385,6 +394,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // clipboard, the session list, the mouse and its timers.
 func (m *model) onScreenMsg(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case sentMsg:
+		return m.onSent(msg), true
 	case urlAnswerMsg:
 		return m.onURLAnswer(msg), true
 	case clipImageMsg:
@@ -401,6 +412,18 @@ func (m *model) onScreenMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return m.onConnectionTested(msg), true
 	case connectionSavedMsg:
 		return m.onConnectionSaved(msg), true
+	case skillsMsg:
+		return m.onSkills(msg), true
+	case skillsSavedMsg:
+		return m.onSkillsSaved(msg), true
+	case modelsMsg:
+		return m.onModels(msg), true
+	case modelSwitchedMsg:
+		return m.onModelSwitched(msg), true
+	case mcpMsg:
+		return m.onMCP(msg), true
+	case mcpActionErrMsg:
+		return m.onMCPActionErr(msg), true
 	case sessionsMsg:
 		return m.onSessions(msg), true
 	case resumedMsg:
@@ -513,11 +536,11 @@ func (m *model) settledChunk(it *Item) (settledPrint, bool) {
 	p := settledPrint{render: func(w int, hideRail bool) string {
 		return withThought(&row, shown, w, renderSayPart(row.Text[shown:end], shown == 0, w, hideRail))
 	}}
-	if m.scr != nil && shown == 0 && row.Reasoning != "" {
+	if m.scr != nil && shown == 0 && hasThought(row.Reasoning) {
 		row.Fold = foldShut
 		p.row = &row
 	}
-	if m.verbose && shown == 0 && row.Reasoning != "" {
+	if m.verbose && shown == 0 && hasThought(row.Reasoning) {
 		row.Fold = m.verboseFold()
 	}
 	return p, true

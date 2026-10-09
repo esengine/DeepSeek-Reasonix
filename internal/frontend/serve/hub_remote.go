@@ -148,6 +148,9 @@ type RemoteHostView struct {
 	// Forwards are set from the CLI and have no control here; the count is
 	// shown so an edit does not look like it silently dropped them.
 	Forwards int `json:"forwards,omitempty"`
+	// Disabled is a row kept in the book but not dialed. It is reported so the
+	// settings page can draw the switch, and so the sidebar can leave it out.
+	Disabled bool `json:"disabled,omitempty"`
 
 	Attempt int    `json:"attempt,omitempty"`
 	Step    string `json:"step,omitempty"`
@@ -173,6 +176,7 @@ func (h *Hub) listRemoteHosts(w http.ResponseWriter, _ *http.Request) {
 			Name:          entry.Name,
 			Target:        remoteTarget(entry),
 			Status:        "idle",
+			Disabled:      entry.Disabled,
 			Host:          entry.Host,
 			Port:          entry.Port,
 			User:          entry.User,
@@ -308,6 +312,13 @@ func (h *Hub) openRemoteRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.opts.Remote == nil {
 		refuseNoRemote(w)
+		return
+	}
+	if err := h.remoteHostDialable(req.Host); errors.Is(err, errRemoteDisabled) {
+		refuse(w, http.StatusConflict, "remote.disabled", "this machine is turned off in the host book", map[string]any{"host": req.Host})
+		return
+	} else if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	ep, release, err := h.opts.Remote.Attach(operationContext(r), req.Host, req.Workspace)

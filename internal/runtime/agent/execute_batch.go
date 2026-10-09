@@ -60,9 +60,10 @@ type toolOutcome struct {
 	errMsg    string
 	// refusalCode is the identity of a host refusal, carried beside the words
 	// rather than recovered from them. Empty when the call was not refused.
-	refusalCode string
-	bound       event.OutputBound
-	truncMsg    string
+	refusalCode    string
+	workspaceLease *event.WorkspaceLease
+	bound          event.OutputBound
+	truncMsg       string
 	// provenance is where the result's content came from, read after the call
 	// ran; only the provider-bound message is labelled with it.
 	provenance   tool.Provenance
@@ -315,13 +316,12 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			ResolvedName: c.ResolvedName,
 			CapabilityID: c.CapabilityID,
 			Output:       o.output, Images: o.images,
-			Err:         o.errMsg,
-			RefusalCode: o.refusalCode,
-			ReadOnly:    readOnly,
-			Bound:       o.bound,
-			DurationMs:  durations[i],
-			Execution:   toEventShellExecution(o.execution, durations[i]),
-			Issuer:      event.IssuedByModel, Executed: o.executed,
+			Err: o.errMsg, RefusalCode: o.refusalCode, WorkspaceLease: o.workspaceLease,
+			ReadOnly:   readOnly,
+			Bound:      o.bound,
+			DurationMs: durations[i],
+			Execution:  toEventShellExecution(o.execution, durations[i]),
+			Issuer:     event.IssuedByModel, Executed: o.executed,
 		}
 		if startedAt[i] > 0 {
 			tr.StartedAt = startedAt[i]

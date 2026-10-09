@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
-import type { AccountState, AgentPort, MarketDetail, MarketKind, MarketPackage, MarketPlan } from "../port/port";
+import type { AccountState, AgentPort, MarketCache, MarketDetail, MarketKind, MarketPackage, MarketPlan } from "../port/port";
 import { Outcome } from "./AddPlugin";
+import { CacheNotice } from "./MarketCache";
 import { Group } from "./Group";
 import { PlanConfirm } from "./MarketConfirm";
 import { MyPackages, PublishForm } from "./MarketPublish";
 import { MarketVote, approvalLabel } from "./MarketVote";
-import { arrowTabs } from "./tablist";
+import { arrowRadios, arrowTabs } from "./tablist";
 
 const KINDS: [MarketKind | "", string][] = [["", "全部"], ["skill", "技能"], ["plugin", "插件"], ["mcp", "MCP 服务"], ["theme", "主题"]];
 type Sort = "recommended" | "trending" | "installs" | "new";
@@ -17,6 +18,7 @@ const KIND_NAME: Record<string, string> = { skill: "技能", plugin: "插件", m
 
 interface Props {
   port: AgentPort;
+  account?: AccountState | null;
   onInstalled: () => void;
   onViewInstalled?: (kind: string, name: string) => void;
   onSignIn?: () => void;
@@ -25,7 +27,7 @@ interface Props {
 // The market is one more place a source comes from. It lists what reviewers let
 // through and hands the approved version to the same plan-then-install every
 // pasted address goes through; the kernel holds the pin, this only shows it.
-export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) {
+export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }: Props) {
   const [connection, setConnection] = useState({ port, generation: 0 });
   const currentConnection = useRef(connection);
   currentConnection.current = connection;
@@ -36,6 +38,7 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
   const [rows, setRows] = useState<MarketPackage[] | null>(null);
   const [more, setMore] = useState(false);
   const [error, setError] = useState("");
+  const [cached, setCached] = useState<MarketCache | null>(null);
   const [filterUnsupported, setFilterUnsupported] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [open, setOpen] = useState("");
@@ -48,21 +51,23 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
     setRows(null);
     setMore(false);
     setError("");
+    setCached(null);
     setFilterUnsupported(false);
     setLoadingMore(false);
   }
 
-  const load = (offset: number) => {
+  const load = (offset: number, refresh = false) => {
     const n = ++asked.current;
     setError("");
     setFilterUnsupported(false);
     if (offset > 0) setLoadingMore(true);
     else setMore(false);
     port
-      .marketList({ kind, q: q.trim(), sort, offset, pinned })
+      .marketList({ kind, q: q.trim(), sort, offset, pinned, ...(refresh ? { refresh } : {}) })
       .then((page) => {
         if (n !== asked.current || currentConnection.current !== connection) return;
         nextOffset.current = offset + page.packages.length;
+        setCached((prev) => page.cache ?? (offset === 0 ? null : prev));
         setRows((prev) => {
           if (offset === 0 || !prev) return page.packages;
           const seen = new Set(prev.map((p) => p.slug));
@@ -74,6 +79,7 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
       .catch((e) => {
         if (n !== asked.current || currentConnection.current !== connection) return;
         setError(reason(e));
+        if (offset === 0) setCached(null);
         setFilterUnsupported(pinned && e instanceof HttpError && e.reason?.code === "market.filter_unsupported");
         setLoadingMore(false);
         if (offset === 0) setRows([]);
@@ -86,6 +92,7 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
     setMore(false);
     nextOffset.current = 0;
     setError("");
+    setCached(null);
     setLoadingMore(false);
     const timer = setTimeout(() => load(0), q ? 250 : 0);
     return () => { clearTimeout(timer); ++asked.current; };
@@ -96,6 +103,7 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
       <Entry
         key={connection.generation}
         port={port}
+        account={account}
         slug={open}
         onSignIn={onSignIn}
         onViewInstalled={onViewInstalled}
@@ -121,16 +129,16 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
           aria-label={t("搜索社区市场")}
           onChange={(e) => setQ(e.target.value)}
         />
-        <div className="seg" data-text role="radiogroup" aria-label={t("类型")}>
+        <div className="seg" data-text role="radiogroup" aria-label={t("类型")} data-action-keydown="market.kind" onKeyDown={arrowRadios}>
           {KINDS.map(([id, name]) => (
-            <button key={id || "all"} role="radio" aria-checked={kind === id} data-action="market.kind" data-value={id || "all"} onClick={() => setKind(id)}>
+            <button key={id || "all"} role="radio" aria-checked={kind === id} tabIndex={kind === id ? 0 : -1} data-action="market.kind" data-value={id || "all"} onClick={() => setKind(id)}>
               {t(name)}
             </button>
           ))}
         </div>
-        <div className="seg" data-text role="radiogroup" aria-label={t("排序")}>
+        <div className="seg" data-text role="radiogroup" aria-label={t("排序")} data-action-keydown="market.sort" onKeyDown={arrowRadios}>
           {SORTS.map(([id, name]) => (
-            <button key={id} role="radio" aria-checked={sort === id} data-action="market.sort" data-value={id} onClick={() => setSort(id)}>
+            <button key={id} role="radio" aria-checked={sort === id} tabIndex={sort === id ? 0 : -1} data-action="market.sort" data-value={id} onClick={() => setSort(id)}>
               {t(name)}
             </button>
           ))}
@@ -146,10 +154,11 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
           <span className="why">{error}</span>
           {(filterUnsupported || rows?.length === 0) && <div className="acts">
             {filterUnsupported && <button className="act" data-action="market.show-all" onClick={() => { panel.current?.focus(); setPinned(false); }}>{t("查看全部包")}</button>}
-            {!filterUnsupported && <button className="act" data-action="market.retry" onClick={() => { panel.current?.focus(); setRows(null); load(0); }}>{t("重试")}</button>}
+            {!filterUnsupported && <button className="act" data-action="market.retry" onClick={() => { panel.current?.focus(); setRows(null); load(0, true); }}>{t("重试")}</button>}
           </div>}
         </div>
       )}
+      {cached && !error && <CacheNotice cache={cached} action="market.retry" onRetry={() => { panel.current?.focus(); load(0, true); }} />}
       {rows === null && !error && <div className="empty" role="status">{t("正在读取…")}</div>}
       {rows?.length === 0 && !error && <div className="empty">{t(pinned ? "没有找到已固定内容的包。可关闭筛选查看全部包。" : "没有找到匹配的包。")}</div>}
       <ul className="mkt-list">
@@ -189,10 +198,10 @@ export function Market({ port, onInstalled, onViewInstalled, onSignIn }: Props) 
   );
 }
 
-function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: { port: AgentPort; slug: string; onBack: () => void; onInstalled: () => void; onViewInstalled?: (kind: string, name: string) => void; onSignIn?: () => void }) {
+function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSignIn }: { port: AgentPort; account?: AccountState | null; slug: string; onBack: () => void; onInstalled: () => void; onViewInstalled?: (kind: string, name: string) => void; onSignIn?: () => void }) {
   const [d, setD] = useState<MarketDetail | null>(null);
   const [plan, setPlan] = useState<MarketPlan | null>(null);
-  const [done, setDone] = useState<MarketPlan | null>(null);
+  const [result, setResult] = useState<{ plan: MarketPlan; stage: "done" | "retry" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -202,7 +211,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
     let live = true;
     setD(null);
     setError("");
-    port.marketDetail(slug)
+    port.marketDetail(slug, ...(attempt > 0 ? [{ refresh: true }] : []))
       .then((detail) => { if (live) setD(detail); })
       .catch((e) => { if (live) setError(reason(e)); });
     return () => { live = false; };
@@ -215,7 +224,9 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
     setBusy(true);
     setError("");
     try {
-      setPlan(await port.planMarket({ slug, replace: update, ...(trust ? { trust } : {}) }));
+      const p = await port.planMarket({ slug, replace: update, ...(trust ? { trust } : {}) });
+      if (!p.ok) setError(p.error || p.next || t("该来源中没有可安装的内容"));
+      else setPlan(p);
     } catch (e) {
       setError(reason(e));
     } finally {
@@ -229,7 +240,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
     try {
       const pin = plan.unreviewed ? { trust: true, digest: plan.contentDigest } : {};
       const out = await port.installMarket({ slug, version: plan.version, planId: plan.planId, replace: update, ...pin });
-      setDone(out);
+      setResult({ plan: out, stage: "done" });
       if (out.applied) onInstalled();
     } catch (e) {
       setError(reason(e));
@@ -244,16 +255,18 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
     </button>
   );
 
+  const done = result?.stage === "done" ? result.plan : null;
   if (done) {
     const installed = done.applied ? done.actions?.filter((action) => action.status === "done" && action.name) ?? [] : [];
     const location = d?.package.kind === "plugin" || d?.package.kind === "theme"
       ? installed.find((action) => action.kind === "plugin") : installed[0];
     return (
-      <div className="mkt addpkg" data-stage="done">
+      <div className="mkt addpkg" data-stage="done" ref={panel} role="region" aria-label={slug} tabIndex={-1}>
         <Outcome plan={done} />
         {installed.length > 0 && <ul className="mkt-installed">{installed.map((action, i) => <li key={`${action.kind}:${action.name}:${i}`}>{action.name}</li>)}</ul>}
         <div className="acts">
           {back}
+          {!done.ok && <button className="act" data-action="market.detail-retry" onClick={() => { panel.current?.focus(); setResult(done.applied ? { plan: done, stage: "retry" } : null); setPlan(null); setD(null); setAttempt((n) => n + 1); }}>{t("重试")}</button>}
           {location && onViewInstalled && (
             <button className="act" data-action="market.view-installed" onClick={() => onViewInstalled(location.kind, location.name!)}>{t("查看已安装能力")}</button>
           )}
@@ -287,7 +300,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
 
   const p = d.package;
   const v = d.approved;
-  const current = !!d.installed && !update;
+  const current = !!d.installed && !update && result?.stage !== "retry";
   // A copied skill is never overwritten in place, so an update has to start
   // from its removal rather than fail at the last step.
   const stuck = update && p.kind === "skill";
@@ -298,6 +311,7 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
         <span className="mkt-kind">{t(KIND_NAME[p.kind] ?? p.kind)}</span>
         {p.verified && <span className="mkt-badge" data-tone="ok">{t("管理员标记可信")}</span>}
       </div>
+      {d.cache && <CacheNotice cache={d.cache} action="market.detail-retry" onRetry={() => { panel.current?.focus(); setAttempt((n) => n + 1); }} />}
       {p.summary && <p className="mkt-sum">{p.summary}</p>}
       {p.description && <p className="mkt-desc">{p.description}</p>}
       {!d.pinned && !current && (
@@ -328,10 +342,13 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
           </>
         )}
       </dl>
-      <MarketVote port={port} pkg={p} onSignIn={onSignIn} />
+      <MarketVote key={account?.signedIn ? `signed-in:${account.user?.handle ?? ""}` : "signed-out"} port={port} pkg={p} onSignIn={onSignIn} />
+      {result?.stage === "retry" && <Outcome plan={result.plan} />}
       <div className="acts">
         <span className="note">
-          {current
+          {d.cache
+            ? t("当前显示的是缓存数据，安装需要连接市场")
+            : current
             ? t("已安装 {version}", { version: d.installed!.version })
             : stuck
               ? t("技能不会被原地覆盖：先在「已安装」里移除旧版本，再回来安装")
@@ -339,17 +356,17 @@ function Entry({ port, slug, onBack, onInstalled, onViewInstalled, onSignIn }: {
         </span>
         {back}
         {!current && !stuck && d.pinned && (
-          <button className="act" data-action="market.inspect" data-primary disabled={busy} onClick={() => void look()}>
+          <button className="act" data-action="market.inspect" data-primary disabled={busy || !!d.cache} onClick={() => void look()}>
             {t(busy ? "读取中…" : update ? "查看更新内容" : "查看将安装的内容")}
           </button>
         )}
         {!current && !stuck && !d.pinned && (
-          <button className="act" data-action="market.trust" data-primary disabled={busy} onClick={() => void look(true)}>
+          <button className="act" data-action="market.trust" data-primary disabled={busy || !!d.cache} onClick={() => void look(true)}>
             {t(busy ? "读取中…" : "信任并安装")}
           </button>
         )}
       </div>
-      {error && <div className="why">{error}</div>}
+      {error && <div className="why" role="alert">{error}</div>}
     </div>
   );
 }
@@ -375,9 +392,9 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
     <Group id="market" title={t("社区市场")}
       hint={t("社区发布、经过审核的技能、插件、MCP 服务与主题。固定了审核内容的版本按审核时的内容安装，未固定的需要你信任发布者；安装前都会列出将写入的全部内容，与粘贴地址安装走同一套确认。")}>
       {handle ? (
-        <div className="seg mkt-views" data-text role="radiogroup" aria-label={t("社区市场")}>
+        <div className="seg mkt-views" data-text role="radiogroup" aria-label={t("社区市场")} data-action-keydown="market.view" onKeyDown={arrowRadios}>
           {VIEWS.map(([id, name]) => (
-            <button key={id} role="radio" aria-checked={at === id} disabled={applying} data-action="market.view" data-value={id} onClick={() => { if (id === "publish" && at !== "publish") setDraft(null); setView(id); }}>
+            <button key={id} role="radio" aria-checked={at === id} tabIndex={at === id ? 0 : -1} disabled={applying} data-action="market.view" data-value={id} onClick={() => { if (id === "publish" && at !== "publish") setDraft(null); setView(id); }}>
               {t(name)}
             </button>
           ))}
@@ -392,14 +409,14 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
           </div>
         )
       )}
-      {at === "browse" && <Market port={port} onInstalled={onInstalled} onViewInstalled={onViewInstalled} onSignIn={onSignIn} />}
+      {at === "browse" && <Market port={port} account={account} onInstalled={onInstalled} onViewInstalled={onViewInstalled} onSignIn={onSignIn} />}
       {at === "mine" && <MyPackages key={handle} port={port} onInstalled={() => {
         if (connection.current === owner) onInstalled();
       }} onViewInstalled={onViewInstalled} onApplying={applyingChanged} onPublish={(pkg) => {
         if (!handle) return;
         setDraft({ port, handle, pkg }); setView("publish");
       }} />}
-      {at === "publish" && handle && <PublishForm port={port} handle={handle} initial={draft?.pkg} onMine={() => { setDraft(null); setView("mine"); }} />}
+      {at === "publish" && handle && <PublishForm port={port} handle={handle} initial={draft?.pkg} onApplying={applyingChanged} onMine={() => { setDraft(null); setView("mine"); }} />}
     </Group>
   );
 }

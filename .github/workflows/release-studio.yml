@@ -5,10 +5,12 @@ run-name: Release Studio ${{ inputs.tag || github.ref_name }}
 # (studio-v*), its own environment gate, and its own rollback catalog at
 # dl.reasonix.io/studio/versions.json.
 #
-# What it must never touch: the repository-wide "latest" release (every Studio
-# release is a prerelease) and the root dl.reasonix.io/versions.json, which is
-# the desktop line's catalog. Studio artifacts land under the tag prefix, which
-# cannot collide because the tag name itself differs.
+# What it must never touch: the root dl.reasonix.io/versions.json, which is the
+# desktop line's catalog. Studio artifacts land under the tag prefix, which
+# cannot collide because the tag name itself differs. The highest stable tag
+# is the repository's GitHub latest and a candidate is a prerelease; the GitHub
+# release carries no root latest.json, because the 1.x updaters' last-resort
+# URL is releases/latest/download/latest.json and must keep answering 404.
 #
 # Windows artifacts are Authenticode-signed with a Certum SimplySign cloud
 # certificate in two stages: every PE file in the application tree, then the
@@ -74,8 +76,7 @@ jobs:
           fi
           version="${tag#studio-}"
           # Semver's prerelease segment, group 4, read from the grammar rather
-          # than the spelling. Every Studio release carries GitHub's prerelease
-          # flag, so the tag-level distinction needs a name of its own.
+          # than the spelling.
           candidate=false
           if [[ "${version#v}" =~ $semver ]] && [ -n "${BASH_REMATCH[4]}" ]; then
             candidate=true
@@ -148,10 +149,21 @@ jobs:
         # vocabularies disagree (x64 / amd64) and a reviewer has to see both.
         # Absent means the runner's own, which is what Windows and Linux build.
         # artifact is the exact name publish downloads this leg's packages by.
+        # goarch and unpacked belong to the Windows legs: the release
+        # architecture the package is named for, and the directory
+        # electron-builder leaves its bundle in (win-unpacked for x64 alone).
         include:
           - platform: windows/amd64
             runner: windows-latest
+            goarch: amd64
+            unpacked: win-unpacked
             artifact: studio-build-windows-amd64
+          - platform: windows/arm64
+            runner: windows-11-arm
+            ebarch: arm64
+            goarch: arm64
+            unpacked: win-arm64-unpacked
+            artifact: studio-build-windows-arm64
           - platform: darwin/amd64
             runner: macos-latest
             ebarch: x64
@@ -266,6 +278,7 @@ jobs:
         # kernel on a remote machine, and those routes name a release by it.
         env:
           REASONIX_VERSION: ${{ needs.resolve.outputs.version }}
+          REASONIX_GOARCH: ${{ matrix.goarch }}
         run: pnpm install --frozen-lockfile && pnpm run build:host
 
       # The helper the Linux self-update runs under pkexec, staged where the
@@ -287,6 +300,14 @@ jobs:
           arch=""
           if [ -n "${{ matrix.ebarch }}" ]; then arch="--${{ matrix.ebarch }}"; fi
           pnpm exec electron-builder --dir $arch -c.extraMetadata.version="${version#v}"
+
+      # An emulated x64 program runs on ARM64 Windows, so a bundle that starts
+      # proves nothing about its architecture: every PE image in it has to be
+      # built for the architecture the package is named for.
+      - name: Every PE image is built for the package's architecture
+        if: runner.os == 'Windows'
+        shell: bash
+        run: node desktop/electron/packaging/pe.js "dist/${{ matrix.unpacked }}" "${{ matrix.goarch }}"
 
       # Notarization happens to the bundle, so it sits between the two packaging
       # steps the way Authenticode does on Windows. Stapling here is what lets a
@@ -344,8 +365,8 @@ jobs:
         if: runner.os == 'Windows' && env.SIGN_WINDOWS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: unsigned-studio-windows-bundle
-          path: dist/win-unpacked
+          name: unsigned-studio-windows-${{ matrix.goarch }}-bundle
+          path: dist/${{ matrix.unpacked }}
           if-no-files-found: error
           retention-days: 1
 
@@ -356,17 +377,24 @@ jobs:
         if: runner.os == 'Windows' && env.SIGN_WINDOWS != 'true'
         working-directory: desktop/electron
         shell: bash
+        env:
+          # The arm64 installer has to be packed with the BCJ filter: 7-Zip
+          # applies an ARM64 filter to ARM64 executables by default, the NSIS
+          # extractor cannot decode it, and the installer then exits 0 with
+          # every executable missing.
+          ELECTRON_BUILDER_7Z_FILTER: ${{ matrix.goarch == 'arm64' && 'BCJ' || '' }}
         run: |
           version="${{ needs.resolve.outputs.version }}"
+          arch="--${{ matrix.ebarch || 'x64' }}"
           rm -rf ../../zip-src ../../dist-zip
-          cp -r ../../dist/win-unpacked ../../zip-src
-          pnpm exec electron-builder --prepackaged ../../zip-src --win zip \
+          cp -r ../../dist/${{ matrix.unpacked }} ../../zip-src
+          pnpm exec electron-builder --prepackaged ../../zip-src --win zip $arch \
             -c.extraMetadata.version="${version#v}" -c.directories.output=../../dist-zip &
           zip_pid=$!
-          pnpm exec electron-builder --prepackaged ../../dist/win-unpacked --win nsis \
+          pnpm exec electron-builder --prepackaged ../../dist/${{ matrix.unpacked }} --win nsis $arch \
             -c.extraMetadata.version="${version#v}"
           wait "$zip_pid"
-          mv ../../dist-zip/ReasonixStudio-windows-amd64.zip ../../dist/
+          mv ../../dist-zip/ReasonixStudio-windows-${{ matrix.goarch }}.zip ../../dist/
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: runner.os != 'Windows' || env.SIGN_WINDOWS != 'true'
@@ -382,22 +410,36 @@ jobs:
   # package check run between them on their own runners with no secrets. Both
   # signing jobs share one group with the Studio smoke test, so no two runs
   # drive the same SimplySign account at once.
+  #
+  # Each signing stage is a matrix over the Windows architectures with one tree
+  # per job. max-parallel: 1 keeps the legs strictly serial, which the shared
+  # certum-signing group needs: a group holds one running and one waiting job,
+  # so two legs started together would have the waiting one cancelled by the
+  # next arrival. A failed leg reruns alone; the others' results are kept.
   windows-sign-payload:
-    name: sign the Windows PE files (Certum)
+    name: sign the Windows PE files (Certum, ${{ matrix.arch }})
     needs: [resolve, signing-contract, build]
     if: vars.STUDIO_SIGNING_ENABLED == 'true'
     runs-on: windows-2022
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        arch: [amd64, arm64]
     environment: studio-release
     permissions:
       contents: read
     concurrency:
       group: certum-signing
       cancel-in-progress: false
+    # One output per architecture, because matrix legs share a job's output map:
+    # a leg writes only its own and an empty value never replaces another's.
     # Recorded here because no later job can write this job's outputs: the
     # installer signing job refuses a payload artifact that no longer hashes to it.
     outputs:
-      payload-digest: ${{ steps.verify.outputs.digest }}
+      payload-digest-amd64: ${{ matrix.arch == 'amd64' && steps.verify.outputs.digest || '' }}
+      payload-digest-arm64: ${{ matrix.arch == 'arm64' && steps.verify.outputs.digest || '' }}
     steps:
       # Only the workflow's own commit is checked out: these jobs run the signer
       # and its checks, never anything the release tag builds.
@@ -438,7 +480,7 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: unsigned-studio-windows-bundle
+          name: unsigned-studio-windows-${{ matrix.arch }}-bundle
           path: signing/app
 
       # Stage one: every PE file in the application tree that Microsoft has
@@ -485,6 +527,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           ./scripts/verify-windows-authenticode.ps1 `
             -PayloadDirectory signing/app `
+            -Architecture ${{ matrix.arch }} `
             -DigestPath "$env:RUNNER_TEMP/payload-digest" `
             -ExpectedThumbprint $env:CERTUM_KEY_ID `
             -ExpectedSubject $env:EXPECTED_SUBJECT
@@ -492,7 +535,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: signed-studio-windows-payload
+          name: signed-studio-windows-payload-${{ matrix.arch }}
           path: signing/app
           if-no-files-found: error
           retention-days: 1
@@ -500,10 +543,20 @@ jobs:
   # No environment and no secrets: electron-builder and its dependencies run
   # here, on a runner that never held a signing session.
   windows-package:
-    name: package Windows from the signed tree
+    name: package Windows from the signed tree (${{ matrix.arch }})
     needs: [resolve, windows-sign-payload]
     runs-on: windows-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            ebarch: x64
+            unpacked: win-unpacked
+          - arch: arm64
+            ebarch: arm64
+            unpacked: win-arm64-unpacked
     permissions:
       contents: read
     steps:
@@ -536,8 +589,8 @@ jobs:
       # The signed payload is the whole bundle, so it is packaged as it came.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: signed-studio-windows-payload
-          path: dist/win-unpacked
+          name: signed-studio-windows-payload-${{ matrix.arch }}
+          path: dist/${{ matrix.unpacked }}
 
       # Both packages come from the signed tree, so the archive carries the
       # signed files too rather than a second unsigned copy. The zip is packed
@@ -545,24 +598,27 @@ jobs:
       - name: Package Windows from the signed bundle
         working-directory: desktop/electron
         shell: bash
+        env:
+          # See the build job: the arm64 installer must be packed with BCJ.
+          ELECTRON_BUILDER_7Z_FILTER: ${{ matrix.arch == 'arm64' && 'BCJ' || '' }}
         run: |
           version="${{ needs.resolve.outputs.version }}"
           rm -rf ../../zip-src ../../dist-zip
-          cp -r ../../dist/win-unpacked ../../zip-src
-          pnpm exec electron-builder --prepackaged ../../zip-src --win zip \
+          cp -r ../../dist/${{ matrix.unpacked }} ../../zip-src
+          pnpm exec electron-builder --prepackaged ../../zip-src --win zip --${{ matrix.ebarch }} \
             -c.extraMetadata.version="${version#v}" -c.directories.output=../../dist-zip &
           zip_pid=$!
-          pnpm exec electron-builder --prepackaged ../../dist/win-unpacked --win nsis \
+          pnpm exec electron-builder --prepackaged ../../dist/${{ matrix.unpacked }} --win nsis --${{ matrix.ebarch }} \
             -c.extraMetadata.version="${version#v}"
           wait "$zip_pid"
-          mv ../../dist-zip/ReasonixStudio-windows-amd64.zip ../../dist/
+          mv ../../dist-zip/ReasonixStudio-windows-${{ matrix.arch }}.zip ../../dist/
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: packaged-studio-windows
+          name: packaged-studio-windows-${{ matrix.arch }}
           path: |
-            dist/ReasonixStudio-windows-amd64-installer.exe
-            dist/ReasonixStudio-windows-amd64.zip
+            dist/ReasonixStudio-windows-${{ matrix.arch }}-installer.exe
+            dist/ReasonixStudio-windows-${{ matrix.arch }}.zip
           if-no-files-found: error
           retention-days: 1
 
@@ -571,15 +627,21 @@ jobs:
   # secrets, never in a job that holds the Certum credentials. Its outputs are
   # the hashes of the two files it checked, which the signing job requires.
   windows-verify-package:
-    name: check the Windows packages against the signed tree
+    name: check the Windows packages against the signed tree (${{ matrix.arch }})
     needs: [resolve, windows-sign-payload, windows-package]
     runs-on: windows-2022
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     permissions:
       contents: read
     outputs:
-      installer-sha256: ${{ steps.check.outputs.installer-sha256 }}
-      archive-sha256: ${{ steps.check.outputs.archive-sha256 }}
+      installer-sha256-amd64: ${{ matrix.arch == 'amd64' && steps.check.outputs.installer-sha256 || '' }}
+      installer-sha256-arm64: ${{ matrix.arch == 'arm64' && steps.check.outputs.installer-sha256 || '' }}
+      archive-sha256-amd64: ${{ matrix.arch == 'amd64' && steps.check.outputs.archive-sha256 || '' }}
+      archive-sha256-arm64: ${{ matrix.arch == 'arm64' && steps.check.outputs.archive-sha256 || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -588,12 +650,12 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: signed-studio-windows-payload
+          name: signed-studio-windows-payload-${{ matrix.arch }}
           path: payload
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: packaged-studio-windows
+          name: packaged-studio-windows-${{ matrix.arch }}
           path: dist
 
       # 7-Zip is the runner image's, not the tag's.
@@ -601,20 +663,26 @@ jobs:
         id: check
         shell: pwsh
         env:
-          PAYLOAD_DIGEST: ${{ needs.windows-sign-payload.outputs.payload-digest }}
+          PAYLOAD_DIGEST: ${{ needs.windows-sign-payload.outputs[format('payload-digest-{0}', matrix.arch)] }}
         run: |
           ./scripts/verify-windows-package.ps1 `
             -PayloadDirectory payload `
             -ExpectedPayloadDigest $env:PAYLOAD_DIGEST `
-            -InstallerPath "dist/ReasonixStudio-windows-amd64-installer.exe" `
-            -PortableArchivePath "dist/ReasonixStudio-windows-amd64.zip" `
-            -OutputPath $env:GITHUB_OUTPUT
+            -InstallerPath "dist/ReasonixStudio-windows-${{ matrix.arch }}-installer.exe" `
+            -PortableArchivePath "dist/ReasonixStudio-windows-${{ matrix.arch }}.zip" `
+            -OutputPath $env:GITHUB_OUTPUT `
+            -Architecture ${{ matrix.arch }}
 
   windows-sign-installer:
-    name: sign the Windows installer (Certum)
+    name: sign the Windows installer (Certum, ${{ matrix.arch }})
     needs: [resolve, windows-package, windows-verify-package]
     runs-on: windows-2022
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        arch: [amd64, arm64]
     environment: studio-release
     permissions:
       contents: read
@@ -623,7 +691,8 @@ jobs:
       cancel-in-progress: false
     # The signed installer's hash, which publish requires of what it downloads.
     outputs:
-      installer-sha256: ${{ steps.signed.outputs.installer-sha256 }}
+      installer-sha256-amd64: ${{ matrix.arch == 'amd64' && steps.signed.outputs.installer-sha256 || '' }}
+      installer-sha256-arm64: ${{ matrix.arch == 'arm64' && steps.signed.outputs.installer-sha256 || '' }}
     steps:
       # Only the workflow's own commit is checked out: these jobs run the signer
       # and its checks, never anything the release tag builds.
@@ -664,7 +733,7 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: packaged-studio-windows
+          name: packaged-studio-windows-${{ matrix.arch }}
           path: dist
 
       # Only the two files windows-verify-package checked, byte for byte. This
@@ -673,13 +742,13 @@ jobs:
       - name: Require the checked packages
         shell: pwsh
         env:
-          INSTALLER_SHA256: ${{ needs.windows-verify-package.outputs.installer-sha256 }}
-          ARCHIVE_SHA256: ${{ needs.windows-verify-package.outputs.archive-sha256 }}
+          INSTALLER_SHA256: ${{ needs.windows-verify-package.outputs[format('installer-sha256-{0}', matrix.arch)] }}
+          ARCHIVE_SHA256: ${{ needs.windows-verify-package.outputs[format('archive-sha256-{0}', matrix.arch)] }}
         run: |
           $ErrorActionPreference = 'Stop'
           $expected = [ordered]@{
-            'ReasonixStudio-windows-amd64-installer.exe' = $env:INSTALLER_SHA256
-            'ReasonixStudio-windows-amd64.zip'           = $env:ARCHIVE_SHA256
+            'ReasonixStudio-windows-${{ matrix.arch }}-installer.exe' = $env:INSTALLER_SHA256
+            'ReasonixStudio-windows-${{ matrix.arch }}.zip'           = $env:ARCHIVE_SHA256
           }
           $present = @(Get-ChildItem -LiteralPath dist -Recurse -Force | ForEach-Object { $_.Name })
           if (Compare-Object -CaseSensitive @($expected.Keys) $present) { throw "dist holds $($present -join ', ')" }
@@ -701,7 +770,7 @@ jobs:
         shell: pwsh
         env:
           CERTUM_KEY_ID: ${{ secrets.CERTUM_KEY_ID }}
-        run: ./scripts/sign-certum.ps1 -FilePath dist/ReasonixStudio-windows-amd64-installer.exe
+        run: ./scripts/sign-certum.ps1 -FilePath dist/ReasonixStudio-windows-${{ matrix.arch }}-installer.exe
 
       # The session signs for any process on the runner while it is up.
       - name: Disconnect from Certum
@@ -717,7 +786,7 @@ jobs:
           EXPECTED_SUBJECT: ${{ vars.STUDIO_SIGNING_SUBJECT }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = 'dist/ReasonixStudio-windows-amd64-installer.exe'
+          $installer = 'dist/ReasonixStudio-windows-${{ matrix.arch }}-installer.exe'
           ./scripts/verify-windows-authenticode.ps1 `
             -FilePath $installer `
             -ExpectedThumbprint $env:CERTUM_KEY_ID `
@@ -727,10 +796,59 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: studio-windows-signed
+          name: studio-windows-signed-${{ matrix.arch }}
           path: dist/ReasonixStudio-*
           if-no-files-found: error
           retention-days: 7
+
+  # Installs each Windows installer where it is meant to run (the same script
+  # the Studio workflow runs on pull requests, against the unsigned installer).
+  # The package check unpacks with the runner's modern 7-Zip, which reads
+  # archives the NSIS extractor cannot, so only running the installer shows that
+  # it installs every executable. No environment and no secrets.
+  windows-install-smoke:
+    name: install the Windows package (${{ matrix.arch }})
+    needs: [resolve, build, windows-sign-installer]
+    if: >-
+      ${{ !cancelled() && needs.resolve.result == 'success' && needs.build.result == 'success' &&
+      (needs.windows-sign-installer.result == 'success' ||
+      (vars.STUDIO_SIGNING_ENABLED != 'true' && needs.windows-sign-installer.result == 'skipped')) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.windows-sign-installer.result == 'success'
+        with:
+          name: studio-windows-signed-${{ matrix.arch }}
+          path: dist
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.windows-sign-installer.result != 'success'
+        with:
+          name: studio-build-windows-${{ matrix.arch }}
+          path: dist
+
+      - name: Install, check and uninstall
+        shell: pwsh
+        run: |
+          ./scripts/install-smoke.ps1 `
+            -Installer "dist/ReasonixStudio-windows-${{ matrix.arch }}-installer.exe" `
+            -Architecture ${{ matrix.arch }}
 
   # The kernel a Studio installs on another machine. This line publishes it
   # under its own tag, because the install routes name a release by the version
@@ -757,14 +875,18 @@ jobs:
       - name: Cross-compile and archive
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
+          SHA: ${{ needs.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p dist
+          built="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          pkg=reasonix/internal/tools/productdocs
           for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
             os="${target%/*}"; arch="${target#*/}"; ext=""
             [ "$os" = windows ] && ext=".exe"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION" -o "reasonix$ext" ./cmd/reasonix
+              -ldflags "-s -w -X main.version=$VERSION -X main.gitCommit=${SHA:0:12} -X main.buildTimeUTC=$built -X $pkg.linkedVersion=$VERSION -X $pkg.linkedRevision=$SHA" \
+              -o "reasonix$ext" ./cmd/reasonix
             if [ "$os" = windows ]; then
               zip -qj "dist/reasonix-$os-$arch.zip" "reasonix$ext"
             else
@@ -798,12 +920,13 @@ jobs:
 
   publish:
     name: sign, publish and mirror
-    needs: [resolve, build, cli, windows-sign-payload, windows-package, windows-verify-package, windows-sign-installer]
+    needs: [resolve, build, cli, windows-sign-payload, windows-package, windows-verify-package, windows-sign-installer, windows-install-smoke]
     # The Windows signing jobs may be skipped only while the switch is off; with
     # it on, any of them failing, cancelled or absent blocks the release.
     if: >-
       ${{ !cancelled() && needs.resolve.result == 'success' && needs.build.result == 'success' &&
-      needs.cli.result == 'success' && ((needs.windows-sign-payload.result == 'success' &&
+      needs.cli.result == 'success' && needs.windows-install-smoke.result == 'success' &&
+      ((needs.windows-sign-payload.result == 'success' &&
       needs.windows-package.result == 'success' && needs.windows-verify-package.result == 'success' &&
       needs.windows-sign-installer.result == 'success') ||
       (vars.STUDIO_SIGNING_ENABLED != 'true' && needs.windows-sign-payload.result == 'skipped' &&
@@ -865,43 +988,63 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: needs.windows-sign-installer.result == 'success'
         with:
-          name: studio-windows-signed
-          path: staging/studio-windows
+          name: studio-windows-signed-amd64
+          path: staging/studio-windows-amd64
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.windows-sign-installer.result == 'success'
+        with:
+          name: studio-windows-signed-arm64
+          path: staging/studio-windows-arm64
 
       # Any job can upload an artifact, so the signed Windows packages are
-      # taken only if they are the bytes the signing jobs recorded: the
-      # installer as signed, the zip as windows-verify-package checked it.
+      # taken only if they are the bytes the signing jobs recorded: each
+      # installer as signed, each zip as windows-verify-package checked it.
       - name: Require the recorded Windows packages
         if: needs.windows-sign-installer.result == 'success'
         env:
-          INSTALLER_SHA256: ${{ needs.windows-sign-installer.outputs.installer-sha256 }}
-          ARCHIVE_SHA256: ${{ needs.windows-verify-package.outputs.archive-sha256 }}
+          INSTALLER_SHA256_AMD64: ${{ needs.windows-sign-installer.outputs[format('installer-sha256-{0}', 'amd64')] }}
+          ARCHIVE_SHA256_AMD64: ${{ needs.windows-verify-package.outputs[format('archive-sha256-{0}', 'amd64')] }}
+          INSTALLER_SHA256_ARM64: ${{ needs.windows-sign-installer.outputs[format('installer-sha256-{0}', 'arm64')] }}
+          ARCHIVE_SHA256_ARM64: ${{ needs.windows-verify-package.outputs[format('archive-sha256-{0}', 'arm64')] }}
         run: |
           check() {
-            local file="staging/studio-windows/$1" want="$2" got
+            local file="$1/$2" want="$3" got
             if [[ ! "$want" =~ ^[0-9a-f]{64}$ ]]; then
-              echo "::error title=studio-signing.package-hash-missing::no recorded SHA-256 for $1"
+              echo "::error title=studio-signing.package-hash-missing::no recorded SHA-256 for $2"
               return 1
             fi
             got="$(sha256sum "$file" | awk '{print $1}')" || return 1
             if [ "$got" != "$want" ]; then
-              echo "::error title=studio-signing.package-hash-mismatch::$1 is $got, the signing jobs recorded $want"
+              echo "::error title=studio-signing.package-hash-mismatch::$2 is $got, the signing jobs recorded $want"
               return 1
             fi
           }
-          files="$(cd staging/studio-windows && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')"
-          if [ "$files" != "ReasonixStudio-windows-amd64-installer.exe ReasonixStudio-windows-amd64.zip " ]; then
-            echo "::error title=studio-signing.package-set-mismatch::studio-windows-signed holds: $files"
-            exit 1
-          fi
-          check ReasonixStudio-windows-amd64-installer.exe "$INSTALLER_SHA256"
-          check ReasonixStudio-windows-amd64.zip "$ARCHIVE_SHA256"
+          for arch in amd64 arm64; do
+            dir="staging/studio-windows-$arch"
+            files="$(cd "$dir" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')"
+            if [ "$files" != "ReasonixStudio-windows-$arch-installer.exe ReasonixStudio-windows-$arch.zip " ]; then
+              echo "::error title=studio-signing.package-set-mismatch::studio-windows-signed-$arch holds: $files"
+              exit 1
+            fi
+            upper="${arch^^}"
+            installer="INSTALLER_SHA256_$upper"
+            archive="ARCHIVE_SHA256_$upper"
+            check "$dir" "ReasonixStudio-windows-$arch-installer.exe" "${!installer}"
+            check "$dir" "ReasonixStudio-windows-$arch.zip" "${!archive}"
+          done
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: needs.windows-sign-installer.result != 'success'
         with:
           name: studio-build-windows-amd64
-          path: staging/studio-windows
+          path: staging/studio-windows-amd64
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.windows-sign-installer.result != 'success'
+        with:
+          name: studio-build-windows-arm64
+          path: staging/studio-windows-arm64
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -924,13 +1067,13 @@ jobs:
           done < <(find staging/studio-* -type f -name 'ReasonixStudio-*' -print0
             find staging/cli-archives -type f -print0)
           ls -la dist
-          # Two Windows artifacts (installer, portable zip), two per macOS
-          # architecture (dmg, zip) and the Linux .deb. Fewer means an artifact
-          # was lost between jobs, and a partial release is worse than a failed
-          # one.
+          # Two Windows artifacts (installer, portable zip) per architecture,
+          # two per macOS architecture (dmg, zip) and the Linux .deb. Fewer
+          # means an artifact was lost between jobs, and a partial release is
+          # worse than a failed one.
           count=$(find dist -type f -name 'ReasonixStudio-*' | wc -l)
-          if [ "$count" -lt 7 ]; then
-            echo "::error::expected 7 artifacts (Windows installer + zip, macOS dmg + zip per architecture, Linux .deb), found $count"
+          if [ "$count" -lt 9 ]; then
+            echo "::error::expected 9 artifacts (Windows installer + zip per architecture, macOS dmg + zip per architecture, Linux .deb), found $count"
             exit 1
           fi
           # Each platform's update channel, and there is exactly one per
@@ -941,7 +1084,11 @@ jobs:
           # Each macOS architecture by name, not darwin-*: a glob passes on
           # whichever one shipped, and the missing one is a platform left on
           # the version it is running with nothing saying so.
-          for required in 'ReasonixStudio-linux-*.deb' 'ReasonixStudio-windows-*-installer.exe' \
+          # Each Windows architecture by name for the same reason: a glob passes
+          # on whichever installer shipped.
+          for required in 'ReasonixStudio-linux-*.deb' \
+            'ReasonixStudio-windows-amd64-installer.exe' 'ReasonixStudio-windows-arm64-installer.exe' \
+            'ReasonixStudio-windows-amd64.zip' 'ReasonixStudio-windows-arm64.zip' \
             'ReasonixStudio-darwin-amd64.zip' 'ReasonixStudio-darwin-arm64.zip'; do
             find dist -type f -name "$required" | grep -q . || {
               echo "::error::no $required in the release; its packager did not run"
@@ -990,12 +1137,14 @@ jobs:
           if [ "$HAS_R2" = "true" ]; then delta_dir=../delta; fi
           go run ./cmd/studio-manifest ../dist "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.tag }}" $delta_dir
 
-      # Always a prerelease: this line is not the public product line, and
-      # GitHub never promotes a prerelease to the repository-wide "latest".
+      # The manifest stays out of the GitHub release (it is mirrored to R2
+      # under <tag>/ below), and a stable release takes the repository's latest
+      # only when it is the highest stable studio tag.
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
+          CANDIDATE: ${{ needs.resolve.outputs.candidate }}
           VERSION: ${{ needs.resolve.outputs.version }}
           SIGNED_WINDOWS: ${{ needs.windows-sign-installer.result == 'success' }}
         run: |
@@ -1036,15 +1185,20 @@ jobs:
             printf "**macOS** 已用 Developer ID 签名并公证，打开时不需要清除隔离属性。%s**Linux** 从 \`.deb\` 安装。\n\n" "$windows"
             printf '%s\n' '三个平台都能自更新：Linux 走自己的包，Windows 运行下一个安装器，macOS 替换自身 bundle。'
           } >> "$notes"
+          assets=()
+          for f in dist/*; do
+            [ "$(basename "$f")" = latest.json ] || assets+=("$f")
+          done
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file "$notes"
-            gh release upload "$TAG" dist/* --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" dist/* \
+            decided="$(git tag -l 'studio-v*' | bash scripts/studio-release-flags.sh "$TAG" "$CANDIDATE")"
+            mapfile -t flags <<<"$decided"
+            gh release create "$TAG" "${assets[@]}" \
               --title "Reasonix Studio $VERSION" \
               --notes-file "$notes" \
-              --prerelease \
-              --latest=false
+              "${flags[@]}"
           fi
 
       - name: Mirror to R2 and update the Studio catalog
@@ -1088,6 +1242,22 @@ jobs:
             exit 0
           fi
 
+          # The notes object goes up before the catalog entry that names it, so
+          # no client reads a pointer to an object that is not there yet. Notes
+          # are optional: a failure here publishes the version without a pointer
+          # rather than keeping the new version out of the catalog.
+          notes_key="studio/notes/${VERSION#v}.md"
+          notes_arg=()
+          if aws s3 cp "$RUNNER_TEMP/version-notes.md" "s3://${R2_BUCKET}/${notes_key}" \
+              --endpoint-url "$endpoint" \
+              --content-type "text/markdown; charset=utf-8" \
+              --cache-control "public, max-age=31536000, immutable" &&
+            aws s3api head-object --bucket "$R2_BUCKET" --key "$notes_key" --endpoint-url "$endpoint" >/dev/null; then
+            notes_arg=(20 "https://dl.reasonix.io/${notes_key}")
+          else
+            echo "::warning::release notes for ${VERSION} were not uploaded to the mirror; the catalog entry is published without notes"
+          fi
+
           # Studio's own catalog. Writing the ROOT versions.json here would hand
           # desktop users Studio releases, so the prefix is not optional.
           current=/tmp/studio-versions-current.json
@@ -1099,7 +1269,7 @@ jobs:
             echo "no existing Studio catalog; starting a new one"
           fi
           bash scripts/update-versions-index.sh "$source" "$VERSION" "$TAG" studio \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$next"
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${notes_arg[@]}" > "$next"
           jq -e --arg v "$VERSION" '.versions | map(select(.version == $v)) | length == 1' "$next" >/dev/null
           aws s3 cp "$next" "s3://${R2_BUCKET}/studio/versions.json" \
             --endpoint-url "$endpoint" \
@@ -1211,13 +1381,13 @@ jobs:
 
   # The CLI's install channels, npm's `reasonix` and the Homebrew tap. The 1.x
   # line owns them until this one takes the CLI over; the repository variable
-  # STUDIO_PUBLISHES_CLI=true hands them here. They run once the release
-  # exists, because the cask points at its archives. A candidate goes to npm's
-  # `next` tag and leaves the tap alone: brew has no prerelease channel, so a
-  # candidate cask would become the default install.
+  # STUDIO_PUBLISHES_CLI=true hands them here. They run once cli-pointer has
+  # created the CLI release, because the cask points at its archives. A candidate
+  # goes to npm's `next` tag and leaves the tap alone: brew has no prerelease
+  # channel, so a candidate cask would become the default install.
   cli-channels:
     name: publish the CLI to npm and Homebrew
-    needs: [resolve, publish, cli-gate, cli-tag]
+    needs: [resolve, publish, cli-gate, cli-tag, cli-pointer]
     if: vars.STUDIO_PUBLISHES_CLI == 'true'
     runs-on: ubuntu-latest
     # id-token lets npm publish --provenance attach a Sigstore attestation; the
@@ -1256,6 +1426,18 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/esengine/homebrew-reasonix.git" tap
+          decision="$(node scripts/brew-cask-guard.mjs tap/Casks/reasonix.rb "${VERSION#v}")"
+          case "$decision" in
+            write) ;;
+            skip)
+              echo "the tap's cask is newer than ${VERSION#v}; leaving it"
+              exit 0
+              ;;
+            *)
+              echo "::error::unexpected cask guard decision: '$decision'"
+              exit 1
+              ;;
+          esac
           bash scripts/render-brew-cask.sh "${VERSION#v}" "$TAG" cli-archives/SHA256SUMS > tap/Casks/reasonix.rb
           cd tap
           git add Casks/reasonix.rb

@@ -90,7 +90,7 @@ it.each(["success", "failure"])("does not let an older manual reload %s overwrit
   expect(onChanged).toHaveBeenCalledTimes(2);
 });
 
-it("does not report a previous connection's applied removal in the current runtime", async () => {
+it.each([undefined, refusal])("does not report a previous connection's applied removal in the current runtime (reloadError=%s)", async (reloadError) => {
   const port = new MockPort() as unknown as AgentPort;
   const next = new MockPort() as unknown as AgentPort;
   let finish!: (result: PluginPlan) => void;
@@ -100,9 +100,10 @@ it("does not report a previous connection's applied removal in the current runti
   await removePackage();
   view.rerender(draw(next, onChanged));
   await screen.findByText("review-kit");
-  await act(async () => finish({ ok: true, status: "done", applied: true, reloadError: refusal }));
+  await act(async () => finish({ ok: true, status: "done", applied: true, reloadError }));
   expect(row()).not.toBeNull();
   expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
+  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
   expect(onChanged).not.toHaveBeenCalled();
 });
 
@@ -112,7 +113,64 @@ it.each(["success", "denied"])("does not report a reload warning for a removal w
   render(draw(port));
   await removePackage();
   expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载运行时") }).disabled).toBe(false);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t(outcome === "denied" ? "重载运行时" : "已生效") }).disabled).toBe(false);
   if (outcome === "denied") expect(screen.getByRole("alert").textContent).toBe("removal denied");
   else expect(row()).toBeNull();
+});
+
+it.each(["zh", "en"])("replaces a previous reload warning when removal applies successfully (%s)", async (lang) => {
+  localStorage.setItem(STORAGE, lang);
+  boot();
+  const port = new MockPort() as unknown as AgentPort;
+  const toggle = port.setPluginEnabled.bind(port);
+  vi.spyOn(port, "setPluginEnabled").mockImplementation(async (name, enabled) => ({
+    ...await toggle(name, enabled), reloadError: refusal,
+  }));
+  const changed = vi.fn();
+  render(draw(port, changed));
+  await screen.findByText("review-kit");
+  await userEvent.click(within(row() as HTMLElement).getByRole("switch"));
+  expect(await screen.findByText(t(warning, { reason: refusal }))).toBeTruthy();
+  await removePackage();
+  expect(row()).toBeNull();
+  expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
+  const note = screen.getByText(t("已生效，下一轮开始用新的扩展"));
+  expect(note.getAttribute("role")).toBe("status");
+  expect(note.getAttribute("data-s")).toBe("ok");
+  expect(changed).toHaveBeenCalledTimes(2);
+});
+
+it.each(["success", "failure"])("ignores an older manual reload's %s after removal has applied", async (outcome) => {
+  const port = new MockPort() as unknown as AgentPort;
+  const old = deferReload(port);
+  const changed = vi.fn();
+  render(draw(port, changed));
+  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
+  await removePackage();
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.queryByRole("button", { name: t("重载中") })).toBeNull();
+  await act(async () => old.settle(outcome));
+  expect(screen.queryByText("older reload failed")).toBeNull();
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(changed).toHaveBeenCalledTimes(1);
+});
+
+it.each(["denied", "no-op", "rejected", "export"])("keeps a previous reload failure when %s does not apply a change", async (operation) => {
+  const port = new MockPort() as unknown as AgentPort;
+  vi.spyOn(port, "reloadExtensions").mockRejectedValueOnce(new Error("previous reload failed"));
+  if (operation === "denied") vi.spyOn(port, "removePlugin").mockResolvedValue({ ok: false, status: "denied", applied: false, error: "removal denied" });
+  if (operation === "no-op") vi.spyOn(port, "removePlugin").mockResolvedValue({ ok: true, status: "done", applied: false });
+  if (operation === "rejected") vi.spyOn(port, "removePlugin").mockRejectedValue(new Error("removal failed"));
+  render(draw(port));
+  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
+  expect(await screen.findByText("previous reload failed")).toBeTruthy();
+  if (operation === "export") {
+    await screen.findByText("review-kit");
+    await userEvent.click(within(row() as HTMLElement).getByRole("button", { name: t("导出") }));
+  } else await removePackage();
+  expect(screen.getByText("previous reload failed").getAttribute("data-s")).toBe("bad");
+  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(row()).not.toBeNull();
+  if (operation === "denied") expect(screen.getByRole("alert").textContent).toBe("removal denied");
+  if (operation === "rejected") expect(screen.getByRole("alert").textContent).toBe("removal failed");
 });

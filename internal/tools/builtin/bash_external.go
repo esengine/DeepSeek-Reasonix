@@ -1,11 +1,14 @@
 package builtin
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"reasonix/internal/contract/tool"
 )
+
+var errExternalReference = errors.New("external reference is not a shell path")
 
 // refuseExternalRef stops a command naming a folder mounted read-only from
 // outside the workspace. The token is not a path — the mapping lives in the
@@ -17,8 +20,8 @@ func (b bash) refuseExternalRef(command string) error {
 	if len(hits) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s is this session's read-only reference to a folder outside the workspace, "+
-		"not a path on disk — bash cannot reach it. read_file, ls, glob and grep resolve these; use one of them", hits[0])
+	return fmt.Errorf("%w: %s is this session's read-only reference to a folder outside the workspace, "+
+		"not a path on disk — bash cannot reach it. read_file, ls, glob and grep resolve these; use one of them", errExternalReference, hits[0])
 }
 
 // notRun ends a call that never reached the shell. The four preflight refusals

@@ -48,7 +48,7 @@ func (r Report) phase(name string) {
 // catalog is the only way in: an entry names that release's <tag>/latest.json,
 // which never moves, so an older version resolves exactly as the newest does.
 func (u *Updater) ManifestFor(ctx context.Context, version string) (*Manifest, error) {
-	idx, err := FetchIndex(ctx, u.opts.HTTP, u.opts.IndexURL)
+	idx, err := FetchIndex(ctx, u.opts.HTTP, u.opts.IndexURL, u.opts.UserAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (u *Updater) ManifestFor(ctx context.Context, version string) (*Manifest, e
 		if !SameVersion(e.Version, version) {
 			continue
 		}
-		m, err := FetchManifestAt(ctx, u.opts.HTTP, e.Manifest)
+		m, err := FetchManifestAt(ctx, u.opts.HTTP, e.Manifest, u.opts.UserAgent)
 		if err != nil {
 			return nil, err
 		}

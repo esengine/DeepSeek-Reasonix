@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { effortMenu, routeEffortPick } from "./effort";
+import { t } from "../i18n";
+import { cheapestEffort, effortMenu, forcesThinkingFor, routeEffortPick } from "./effort";
+import type { ModelEntry } from "../port/model";
 
 describe("a ladder that carries every OpenAI rung", () => {
   const ladder = ["auto", "none", "low", "medium", "high", "xhigh", "max"];
@@ -39,5 +41,38 @@ describe("a mode row in the effort menu", () => {
     routeEffortPick("__effort-declare", [pro], act);
     routeEffortPick("high", [pro], act);
     expect(calls).toEqual(["mode:pro", "mode:", "declare", "effort:high"]);
+  });
+});
+
+describe("a model that cannot switch thinking off", () => {
+  const ladder = ["auto", "low", "high", "max"];
+  const desc = (rows: ReturnType<typeof effortMenu>, value: string) => rows.find((row) => row.value === value)?.desc;
+  const plain = effortMenu(ladder, "glm-5.3", "__declare");
+  const forced = effortMenu(ladder, "glm-5.3", "__declare", [], true);
+
+  it("says so on its cheapest level, which is where a saved off lands", () => {
+    expect(desc(forced, "low")).toContain(t("思考仍开启并计费，该模型无法关闭思考"));
+    expect(desc(forced, "low")).not.toBe(desc(plain, "low"));
+  });
+
+  it("leaves the other rungs reading as they did", () => {
+    for (const value of ["auto", "high", "max"]) {
+      expect(desc(forced, value)).toBe(desc(plain, value));
+    }
+  });
+
+  it("names the cheapest rung as the first one past auto", () => {
+    expect(cheapestEffort(ladder)).toBe("low");
+    expect(cheapestEffort(["auto"])).toBe("");
+  });
+
+  it("reads the flag off the model in hand, and only from a true one", () => {
+    const models = [
+      { ref: "zai/glm-5.3", provider: "zai", model: "glm-5.3", forcesThinking: true },
+      { ref: "zai/glm-5.2", provider: "zai", model: "glm-5.2" },
+    ] as ModelEntry[];
+    expect(forcesThinkingFor(models, "zai/glm-5.3")).toBe(true);
+    expect(forcesThinkingFor(models, "zai/glm-5.2")).toBe(false);
+    expect(forcesThinkingFor(models, "gone/ref")).toBe(false);
   });
 });

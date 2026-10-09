@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -335,7 +334,7 @@ func (c *capability) updater(target, cacheDir, kind string) (*update.Updater, er
 		Kind:     kind,
 		// Go's default user agent is what release-edge bot protection scores
 		// worst (#6005), and a 403 there looks like "no versions" to the panel.
-		UserAgent:      fmt.Sprintf("Reasonix-Studio/%s (%s/%s)", c.opts.Running, goruntime.GOOS, goruntime.GOARCH),
+		UserAgent:      update.UserAgent(c.opts.Running),
 		AttemptTimeout: 5 * time.Second,
 		StallTimeout:   stallTimeout,
 	}), nil

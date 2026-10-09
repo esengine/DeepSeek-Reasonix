@@ -72,7 +72,7 @@ func TestProseScanRejectsExecutableFile(t *testing.T) {
 	if err := os.Chmod(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if scanWorkspace(t.Context(), root).proseOnly() {
+	if scanWorkspace(t.Context(), root).proseOnly(workspaceScanLimit) {
 		t.Fatal("executable prose waived verification")
 	}
 }
@@ -192,10 +192,10 @@ func TestProseScanRejectsIncompleteObservation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if scanWorkspaceTo(t.Context(), root, 1).proseOnly() {
+	if scanWorkspaceTo(t.Context(), root, 1).proseOnly(workspaceScanLimit) {
 		t.Fatal("incomplete observation waived verification")
 	}
-	if !scanWorkspace(t.Context(), root).proseOnly() {
+	if !scanWorkspace(t.Context(), root).proseOnly(workspaceScanLimit) {
 		t.Fatal("complete prose observation rejected")
 	}
 }
@@ -209,7 +209,7 @@ func TestProseScanRejectsLinks(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "alias.md")); err != nil {
 		t.Skipf("symlink creation unavailable (Windows requires privilege or Developer Mode): %v", err)
 	}
-	if scanWorkspace(t.Context(), root).proseOnly() {
+	if scanWorkspace(t.Context(), root).proseOnly(workspaceScanLimit) {
 		t.Fatal("prose alias to external code waived verification")
 	}
 }

@@ -49,6 +49,23 @@ func TestHistoryLeavesASuccessUnmarked(t *testing.T) {
 	}
 }
 
+// A background start records a non-completed execution state and no failure,
+// so a reopened session has nothing to mark.
+func TestHistoryDoesNotMarkABackgroundStartFailed(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c1", Name: "bash"}}},
+		{
+			Role: provider.RoleTool, ToolCallID: "c1", Name: "bash", Content: "Started background job",
+			ToolExecution: &provider.ToolExecution{State: "background_started"},
+		},
+	}
+	for _, hm := range historyMessages(msgs) {
+		if hm.Role == "tool" && hm.ToolFailed {
+			t.Fatalf("a background start was marked failed: %+v", hm)
+		}
+	}
+}
+
 // A steer is stored the way the turn sent it: the host's transient blocks first,
 // then the steer prefix, then the person's words. Reopening the session has to
 // show the words. While the recogniser missed a block, a reopened transcript

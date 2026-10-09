@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 const item = (over: Partial<FeedbackItem>): FeedbackItem => ({
-  receipt: "FB-AAAA-0001", category: "bug", titleSnippet: "snippet", status: "received", needsInput: false, replies: [], unreadReplies: 0, createdAt: "2026-09-20T00:00:00Z", updatedAt: "2026-09-21T00:00:00Z", ...over,
+  receipt: "FB-AAAA-0001", category: "bug", titleSnippet: "snippet", status: "received", needsInput: false, underReview: false, replies: [], unreadReplies: 0, createdAt: "2026-09-20T00:00:00Z", updatedAt: "2026-09-21T00:00:00Z", ...over,
 });
 
 function portWith(answer: Mine | Error) {

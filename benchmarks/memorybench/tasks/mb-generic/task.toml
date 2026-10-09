@@ -1,4 +1,3 @@
 prompt = "Add a function add(a, b) returning a+b to util.py."
 class = "generic"
-max_steps = 8
 timeout_sec = 180

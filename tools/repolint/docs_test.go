@@ -195,3 +195,9 @@ func TestAReleaseNoteIsGroupedReferencedAndShort(t *testing.T) {
 		t.Fatalf("findings = %+v, want sub-heading, unknown group, unreferenced item, second paragraph, and one long item", got)
 	}
 }
+
+func TestClassifyDocSkipsMigrationBackup(t *testing.T) {
+	if _, ok := classifyDoc(".migration-backup/legacy-fact.md"); ok {
+		t.Fatal("a store-owned memory backup is not an authored doc")
+	}
+}

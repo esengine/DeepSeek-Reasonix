@@ -9,7 +9,9 @@ export const EN_STORAGE: Record<string, string> = {
   "选择旧版数据目录…": "Choose older data folder…",
   "正在扫描…": "Scanning…",
   "已找回 {n} 个会话。": "Recovered {n} sessions.",
-  "没有发现尚未导入的旧会话。": "No sessions remain to be imported.",
+  "没有发现尚未导入的旧会话。": "Nothing new to import.",
+  "这个文件夹里没有找到旧版会话。请选择 Reasonix 的数据文件夹（里面有 sessions、projects 或 desktop-sessions-v5）。":
+    "No older sessions were found in this folder. Pick the Reasonix data folder (the one holding sessions, projects or desktop-sessions-v5).",
   "有 {n} 项无法读取。": "{n} items could not be read.",
   "未能扫描这个文件夹。请确认它是旧版 Reasonix 的数据目录。": "This folder could not be scanned. Make sure it is an older Reasonix data folder.",
   存储: "Storage",

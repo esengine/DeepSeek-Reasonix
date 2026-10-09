@@ -59,7 +59,9 @@ func (l *projectionEventLog) saw(kind event.Kind) bool {
 
 func newProjectionHarness(t *testing.T, kind, agentConfig, providerConfig string) *projectionHarness {
 	t.Helper()
-	isolateConfigHome(t)
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+	t.Setenv("REASONIX_STATE_HOME", "")
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	rec := &effectRecordingProvider{}
@@ -90,7 +92,10 @@ model = "x"
 
 func (h *projectionHarness) build() {
 	h.t.Helper()
-	ctrl, err := Build(context.Background(), Options{Sink: h.events})
+	ctrl, err := Build(context.Background(), Options{
+		Sink: h.events, Home: os.Getenv("REASONIX_HOME"), WorkspaceRoot: h.dir,
+		resolvedShell: pinnedEffectShell(),
+	})
 	if err != nil {
 		h.t.Fatalf("Build: %v", err)
 	}

@@ -54,7 +54,7 @@ func TestInboxMutationsReachTheEventStream(t *testing.T) {
 
 func waitForKind(t *testing.T, sink *noticeSink, kind event.Kind, want int) {
 	t.Helper()
-	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+	for deadline := time.Now().Add(testenv.Budget(t)); time.Now().Before(deadline); {
 		if countKind(sink, kind) >= want {
 			return
 		}

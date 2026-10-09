@@ -280,6 +280,36 @@ func ResolveModelEffort(configModel, configEffort, callModel, callEffort, profil
 	return model, effort
 }
 
+func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
+	model = strings.TrimSpace(model)
+	effort = strings.TrimSpace(effort)
+	if model == "" {
+		model = strings.TrimSpace(t.subagentModel)
+	}
+	if effort == "" {
+		effort = t.defaultEffort(model)
+	}
+	return model, effort
+}
+
+func (t *TaskTool) defaultEffort(model string) string {
+	if e := strings.TrimSpace(t.subagentEffort); e != "" {
+		return e
+	}
+	if t.inheritedEffort != nil {
+		return strings.TrimSpace(t.inheritedEffort(model))
+	}
+	return ""
+}
+
+func (t *TaskTool) resolveModelEffort(configModel, configEffort, callModel, callEffort, profileModel, profileEffort string) (string, string) {
+	model, effort := ResolveModelEffort(configModel, configEffort, callModel, callEffort, profileModel, profileEffort, t.subagentModel, "")
+	if effort == "" {
+		effort = t.defaultEffort(model)
+	}
+	return model, effort
+}
+
 func firstNonBlank(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {

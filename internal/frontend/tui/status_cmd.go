@@ -16,9 +16,9 @@ import (
 func (m *model) statusDetails() string {
 	s := m.status
 	lines := []string{termrender.Accent("Session status"), "  mode       " + m.modeText()}
-	model := s.Label
+	model := s.ModelRef
 	if model == "" {
-		model = modelName(s.ModelRef)
+		model = s.Label
 	}
 	if model != "" {
 		lines = append(lines, "  model      "+model)
@@ -26,11 +26,16 @@ func (m *model) statusDetails() string {
 	if tag := contextText(s.Used, s.Window, m.compaction); tag != "" {
 		lines = append(lines, "  context    "+tag)
 	}
-	if s.Effort != "" {
-		lines = append(lines, "  effort     effort "+s.Effort)
+	effort := s.Effort
+	if effort == "" {
+		effort = "auto"
 	}
+	lines = append(lines, "  effort     effort "+effort)
 	if body, _, ok := cacheStatus(s); ok {
 		lines = append(lines, "  cache      "+body)
+	}
+	if git := m.gitText(); git != "" {
+		lines = append(lines, "  git        "+git)
 	}
 	if n := len(s.Jobs); n > 0 {
 		lines = append(lines, fmt.Sprintf("  jobs       ⚙ %d", n))

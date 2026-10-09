@@ -73,8 +73,14 @@ func TestWorkspaceLeaseHelperProcess(t *testing.T) {
 		o.SetHolder(func() string { return name })
 	}
 	o.BeginRun()
-	if err := o.AcquireWrite(context.Background()); err != nil {
-		t.Fatal(err)
+	var acquireErr error
+	if path := os.Getenv("REASONIX_WORKSPACE_LEASE_PATH"); path != "" {
+		acquireErr = o.AcquirePaths(context.Background(), []string{path})
+	} else {
+		acquireErr = o.AcquireWrite(context.Background())
+	}
+	if acquireErr != nil {
+		t.Fatal(acquireErr)
 	}
 	if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
 		t.Fatal(err)
@@ -321,11 +327,11 @@ func TestStateReportsWaitingAndAcquiredWithoutIdentity(t *testing.T) {
 
 func TestIndependentWorkspacesDoNotBlockEachOther(t *testing.T) {
 	locks := testenv.TempDir(t)
-	first, err := New(testenv.TempDir(t), locks, nil)
+	first, err := New(pathLeaseRoot(t), locks, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := New(testenv.TempDir(t), locks, nil)
+	second, err := New(pathLeaseRoot(t), locks, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

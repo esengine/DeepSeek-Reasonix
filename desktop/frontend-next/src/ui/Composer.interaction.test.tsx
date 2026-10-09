@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "./testkit";
 import { Composer } from "./Composer";
 import { MockPort } from "../port/mock";
+import { DeliveryError, HttpError } from "../port/port";
 import type { AgentPort, ApprovalMode, Attachment, Completion, ModelEntry, Preset, SessionStatus } from "../port/port";
 import { draftKey } from "./drafts";
 
@@ -278,6 +279,63 @@ describe("composer run controls", () => {
   });
 });
 
+describe("composer stop under a starved window", () => {
+  const props = (port: MockPort, over: Partial<{ onError: (e: unknown) => void; onChanged: () => void }> = {}) => ({
+    port: port as unknown as AgentPort,
+    focus: 0,
+    onSubmit: vi.fn(async () => true),
+    onChanged: over.onChanged ?? vi.fn(),
+    onError: over.onError ?? vi.fn(),
+  });
+
+  it("ends a stop the kernel confirmed when the turn-done event never arrives", async () => {
+    const port = new MockPort();
+    vi.spyOn(port, "cancel").mockResolvedValue();
+    const p = props(port);
+    const view = render(<Composer {...p} status={status({ running: true })} running />);
+    fireEvent.click(screen.getByRole("button", { name: "停下" }));
+    await screen.findByRole("button", { name: "正在停止…" });
+    await waitFor(() => expect(p.onChanged).toHaveBeenCalled());
+    view.rerender(<Composer {...p} status={status({ running: false })} running />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "正在停止…" })).toBeNull());
+    expect((screen.getByRole("button", { name: "停下" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not end a stop while the kernel still reports the turn live", async () => {
+    const port = new MockPort();
+    vi.spyOn(port, "cancel").mockResolvedValue();
+    const p = props(port);
+    const view = render(<Composer {...p} status={status({ running: true })} running />);
+    fireEvent.click(screen.getByRole("button", { name: "停下" }));
+    await screen.findByRole("button", { name: "正在停止…" });
+    view.rerender(<Composer {...p} status={status({ running: true, plan: true })} running />);
+    expect(screen.getByRole("button", { name: "正在停止…" })).toBeTruthy();
+  });
+
+  it.each(["kernel_busy", "unreachable", "ui_stalled"] as const)("hands back an unconfirmed stop as a %s fault instead of staying pending", async (fault) => {
+    const port = new MockPort();
+    const err = new DeliveryError(fault);
+    vi.spyOn(port, "cancel").mockRejectedValue(err);
+    const p = props(port);
+    render(<Composer {...p} status={status({ running: true })} running />);
+    fireEvent.click(screen.getByRole("button", { name: "停下" }));
+    await waitFor(() => expect(p.onError).toHaveBeenCalledWith(err));
+    expect((screen.getByRole("button", { name: "停下" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(p.onChanged).not.toHaveBeenCalled();
+  });
+
+  it("lets a stop be asked again after it was left unconfirmed", async () => {
+    const port = new MockPort();
+    const cancel = vi.spyOn(port, "cancel").mockRejectedValueOnce(new DeliveryError("ui_stalled")).mockResolvedValue();
+    const p = props(port);
+    render(<Composer {...p} status={status({ running: true })} running />);
+    fireEvent.click(screen.getByRole("button", { name: "停下" }));
+    await waitFor(() => expect(p.onError).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "停下" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe("composer menus", () => {
   it("shows that slash skills are loading until the catalog answers", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -417,8 +475,32 @@ describe("composer attachments", () => {
     });
     expect(await screen.findByText("good.txt")).toBeTruthy();
     expect(await screen.findByRole("button", { name: "添加失败 · 重试" })).toBeTruthy();
+    expect(screen.getByText("too large")).toBeTruthy();
     expect(screen.getByRole("button", { name: "移除 bad.txt" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows why an attachment failed on the chip, in the window's language, and retries it", async () => {
+    const port = new MockPort();
+    const attach = vi
+      .fn<(blob: Blob, name: string) => Promise<Attachment>>()
+      .mockRejectedValueOnce(
+        new HttpError(415, "pasted data is not a supported image", {
+          code: "attachment.unsupported_image",
+          params: { format: ".ico", supported: "PNG, JPEG, GIF, WebP" },
+        }),
+      )
+      .mockResolvedValue({ path: ".reasonix/attachments/a.png", ref: "@.reasonix/attachments/a.png", image: true });
+    (port as unknown as { attach: typeof attach }).attach = attach;
+    const { container } = draw({ port });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["x"], "favicon.ico", { type: "image/x-icon" })] } });
+    const why = await screen.findByText("这个文件的格式暂不支持（.ico）。支持的图片格式：PNG, JPEG, GIF, WebP。可以先转换格式再添加。");
+    expect(why.closest("li")?.querySelector("button.retry")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "添加失败 · 重试" }));
+    await waitFor(() => expect(screen.queryByText(/格式暂不支持/)).toBeNull());
+    expect(attach).toHaveBeenCalledTimes(2);
   });
 
   it("keeps image routing guidance outside the horizontal attachment rail", async () => {
@@ -534,7 +616,8 @@ describe("a line taken back from the queue", () => {
 
   it("restores the same text twice when it is taken back twice", () => {
     const p = props();
-    const view = render(<Composer {...p} restore={{ n: 1, text: "甲" }} />);
+    const view = render(<Composer {...p} />);
+    view.rerender(<Composer {...p} restore={{ n: 1, text: "甲" }} />);
     const box = view.container.querySelector("textarea") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "", selectionStart: 0 } });
     view.rerender(<Composer {...p} restore={{ n: 2, text: "甲" }} />);

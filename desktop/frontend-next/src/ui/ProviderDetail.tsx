@@ -6,6 +6,7 @@ import type { Account, Port } from "./Providers";
 import { KIND_LABEL } from "./vendors";
 import { PROVIDER_EDIT_DISABLED, reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
+import { checkFailure } from "./provider_check";
 import { StudioIcon } from "./StudioIcon";
 
 // How a turn's context reaches the next one. Auto is vendor detection, which is
@@ -27,19 +28,22 @@ const CONTINUATION_WHY: Record<string, string> = {
 // than a fact on a row, because both entries are the same key at the same host;
 // 测试连接 is what turns "which protocol did we record" back into a finding.
 export function ProviderDetail({
-  a, port, busy, setBusy, kind, onProtocol, onRemove, onRename, onEdited, onFailed, declare,
+  a, port, busy, setBusy, kind, onProtocol, onRemove, onRename, onEdited, onFailed, onDirty, declare,
 }: {
   a: Account; port: Port; busy: string; setBusy: (b: string) => void;
   kind: string; onProtocol: (kind: string) => void; onRemove: (name: string) => void; onRename: () => void;
-  onEdited: () => void; onFailed: (why: string) => void; declare?: string;
+  onEdited: () => void | Promise<void>; onFailed: (why: string) => void; onDirty: (dirty: boolean) => void; declare?: string;
 }) {
   const [found, setFound] = useState<ProviderCheck | null>(null);
   // A refusal is not a failed probe. The kernel withholds these routes from a
   // server reachable over the network, because adding a source writes a key
   // into the credential store of the machine running the kernel.
   const [refused, setRefused] = useState("");
-  // Cancel and save both hand the form a fresh start from what is stored.
+  const [unanswered, setUnanswered] = useState("");
+  // Revert and save both hand the form a fresh start from what is stored, so
+  // the form remounts only once the list holds what the kernel has.
   const [revision, setRevision] = useState(0);
+  const [saved, setSaved] = useState("");
   const entry = a.byKind[kind] ?? a.byKind[a.kinds[0]];
   const checking = busy === `check:${entry.name}`;
   const inUse = a.kinds.some((k) => a.byKind[k].inUse);
@@ -60,6 +64,7 @@ export function ProviderDetail({
   const check = async () => {
     setBusy(`check:${entry.name}`);
     setFound(null);
+    setUnanswered("");
     setRefused("");
     try {
       setFound(await port.checkProvider(entry.name));
@@ -67,7 +72,7 @@ export function ProviderDetail({
       // Read off the code the kernel sent, never the status: 403 is also what a
       // gateway in front of it answers, and that is a different thing to do next.
       if (e instanceof HttpError && e.reason?.code === PROVIDER_EDIT_DISABLED) setRefused(reason(e));
-      else setFound({ ok: false, error: reason(e) });
+      else setUnanswered(reason(e));
     } finally {
       setBusy("");
     }
@@ -104,6 +109,12 @@ export function ProviderDetail({
           <span className="why">{t("模型来源要在运行内核的那台机器上配置。")}</span>
         </div>
       )}
+      {unanswered && (
+        <div className="find" data-lvl="warn" role="status">
+          <span className="t">{t("无法连接")}</span>
+          <span className="why">{unanswered}</span>
+        </div>
+      )}
       {found && (
         <div className="find" data-lvl={found.ok ? "ok" : "warn"} role="status">
           <span className="t">
@@ -112,13 +123,14 @@ export function ProviderDetail({
               : t("无法连接")}
           </span>
           <span className="why">
-            {!found.ok && found.error}
+            {!found.ok && checkFailure(found)}
             {found.ok && found.matches === false &&
               t("记的是 {had}，但它答的是 {got}。", { had: t(KIND_LABEL[entry.kind] ?? entry.kind), got: t(KIND_LABEL[found.kind ?? ""] ?? found.kind ?? "") })}
             {found.ok && found.matches !== false && t("key 有效，协议也对得上。")}
+            {found.ok && found.baseUrl && " " + t("读取可用模型时，模型列表只在 {url} 下响应。聊天若能正常使用就不用改；可选：把接口地址改成它。", { url: found.baseUrl })}
             {found.ok && found.noProxy && " " + t("走代理连不上、直连可以。")}
             {found.ok && unlisted.length > 0 &&
-              " " + t("这个端点还有 {n} 个模型不在列表里：{names}。点「刷新模型目录」把它们加进来。", {
+              " " + t("这个端点还有 {n} 个模型不在列表里：{names}。点「从服务商读取可用模型」把它们加进来。", {
                 n: unlisted.length,
                 names: unlisted.slice(0, 3).join("、") + (unlisted.length > 3 ? "…" : ""),
               })}
@@ -202,9 +214,16 @@ export function ProviderDetail({
         busy={busy}
         setBusy={setBusy}
         declare={!!declare && entry.name === declare}
-        onDone={() => {
+        justSaved={saved === entry.name}
+        onDirty={onDirty}
+        onDone={async () => {
+          await onEdited();
+          setSaved(entry.name);
           setRevision((r) => r + 1);
-          onEdited();
+        }}
+        onRevert={() => {
+          setSaved("");
+          setRevision((r) => r + 1);
         }}
         onSaved={onEdited}
       />

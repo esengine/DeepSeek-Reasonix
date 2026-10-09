@@ -19,8 +19,16 @@ const bridge = {
   hideBrowserView: vi.fn(async () => {}),
   freezeBrowserView: vi.fn(async () => PICTURE),
   controlBrowserView: vi.fn(async () => {}),
-  navigateBrowserView: vi.fn(async () => true),
+  navigateBrowserView: vi.fn(async (_target: string, _address: string): Promise<string> => ""),
+  onBrowserLoadState: vi.fn((listener: LoadState) => {
+    loadState = listener;
+    return () => {};
+  }),
+  openExternal: vi.fn(),
 };
+
+type LoadState = (state: { targetId: string; failure: { url: string; code: number; reason: string } | null }) => void;
+let loadState: LoadState = () => {};
 
 const tabs: BrowserTab[] = [
   { id: "t1", target: "view-a", url: "http://127.0.0.1:5173/", title: "App", active: true },
@@ -58,6 +66,7 @@ async function panel(props: { tabs: BrowserTab[]; shown: boolean }) {
 
 beforeEach(() => {
   for (const fn of [bridge.showBrowserView, bridge.hideBrowserView, bridge.freezeBrowserView, bridge.controlBrowserView, bridge.navigateBrowserView]) fn.mockClear();
+  bridge.navigateBrowserView.mockImplementation(async () => "");
   bridge.freezeBrowserView.mockImplementation(async () => PICTURE);
   above = [];
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"], shouldAdvanceTime: true });
@@ -120,6 +129,55 @@ describe("which page the shell draws, and where", () => {
   it("never tells the person the page is paused", async () => {
     await panel({ tabs, shown: true });
     expect(document.querySelector(".bview")?.textContent).toBe("");
+  });
+});
+
+describe("an address that names a file", () => {
+  async function type(text: string) {
+    await panel({ tabs, shown: true });
+    const field = screen.getByRole("textbox", { name: "网址" });
+    await userEvent.clear(field);
+    await userEvent.type(field, text.replace(/[{[]/g, "$&$&") + "{Enter}");
+  }
+
+  it("hands a Windows path to the shell untouched, whatever the separators", async () => {
+    await type("D:\\DevCode\\页面 1.html");
+    expect(bridge.navigateBrowserView).toHaveBeenCalledWith("view-a", "D:\\DevCode\\页面 1.html");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says a network share is not opened, rather than calling it a bad web address", async () => {
+    bridge.navigateBrowserView.mockImplementation(async () => "network_file");
+    await type("\\\\nas\\share\\x.html");
+    expect(screen.getByRole("alert").textContent).toContain("网络共享路径");
+  });
+
+  it("keeps the http and https hint for a scheme the shell never opens", async () => {
+    bridge.navigateBrowserView.mockImplementation(async () => "scheme");
+    await type("javascript://x");
+    expect(screen.getByRole("alert").textContent).toContain("http 或 https");
+  });
+
+  it("clears the refusal once the person edits the address", async () => {
+    bridge.navigateBrowserView.mockImplementation(async () => "network_file");
+    await type("\\\\nas\\x");
+    await userEvent.type(screen.getByRole("textbox", { name: "网址" }), "a");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("retries a file that did not load, and offers no external opener for it", async () => {
+    await panel({ tabs, shown: true });
+    await act(async () => loadState({ targetId: "view-a", failure: { url: "file:///D:/a/b.html", code: -6, reason: "ERR_FILE_NOT_FOUND" } }));
+    expect(screen.getByRole("alert").textContent).toContain("找不到这个文件");
+    expect(screen.queryByRole("button", { name: "在外部浏览器打开" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(bridge.navigateBrowserView).toHaveBeenLastCalledWith("view-a", "file:///D:/a/b.html");
+  });
+
+  it("still offers the external opener for a web page that did not load", async () => {
+    await panel({ tabs, shown: true });
+    await act(async () => loadState({ targetId: "view-a", failure: { url: "https://example.com/", code: -105, reason: "ERR_NAME_NOT_RESOLVED" } }));
+    expect(screen.getByRole("button", { name: "在外部浏览器打开" })).toBeTruthy();
   });
 });
 

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { current, t } from "../i18n";
-import { FEEDBACK_CODE, FEEDBACK_REPO_ISSUES, FEEDBACK_REPLYABLE, type FeedbackItem, type FeedbackReply } from "../port/feedback";
+import { FEEDBACK_CODE, FEEDBACK_REPO_ISSUES, FEEDBACK_REPLYABLE, isUnderReview, type FeedbackItem, type FeedbackReply } from "../port/feedback";
 import type { AgentPort } from "../port/port";
 import { replyFailure, type FeedbackFailure } from "./feedbackfailure";
 import { StudioIcon } from "./StudioIcon";
@@ -60,6 +60,15 @@ export function FeedbackThread({ item, fresh, onShowAll }: ThreadProps) {
         ))}
       </ol>
     </section>
+  );
+}
+
+export function FeedbackReviewNote({ item }: { item: FeedbackItem }) {
+  if (!isUnderReview(item)) return null;
+  return (
+    <p className="fbk-hint fbk-review" data-review="" role="status">
+      {t("维护者正在查看这份反馈，可能会回复你。现在还不能回复；维护者回复后，这里会出现回复框。")}
+    </p>
   );
 }
 

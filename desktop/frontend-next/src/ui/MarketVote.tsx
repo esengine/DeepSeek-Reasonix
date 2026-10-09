@@ -59,6 +59,9 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
       setVote(await port.voteMarket(pkg.slug, mine === value ? 0 : value));
     } catch (e) {
       setError(reason(e));
+      if (e instanceof HttpError && e.reason?.code === "market.signed_out") {
+        setVote((current) => ({ ...current, signedIn: false, value: 0 }));
+      }
     } finally {
       setBusy(false);
     }

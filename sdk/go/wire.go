@@ -141,6 +141,7 @@ type conn struct {
 	closeMu      sync.Mutex
 	closeErr     error
 	handlerSlots chan struct{}
+	nmu          sync.RWMutex
 	notifyQueue  chan []byte
 }
 
@@ -166,7 +167,7 @@ func (c *conn) serve(ctx context.Context) error {
 	defer cancel()
 
 	c.wg.Add(1)
-	go c.serveOutboundNotifications()
+	go c.serveOutboundNotifications(c.notifyQueue)
 
 	// Unblock a read parked on ctx cancellation: closing the reader is the
 	// only reliable way to interrupt it.
@@ -202,7 +203,10 @@ func (c *conn) serve(ctx context.Context) error {
 	}
 
 	cancel()
+	c.nmu.Lock()
 	close(c.notifyQueue)
+	c.notifyQueue = nil
+	c.nmu.Unlock()
 	c.wg.Wait()
 	// A connection that was failed or shut down deliberately makes the
 	// resulting read error a consequence, not the cause: report the recorded
@@ -223,9 +227,9 @@ func (c *conn) serve(ctx context.Context) error {
 // serveOutboundNotifications is the single ordered writer for fire-and-forget
 // notifications (provider stream chunks). The queue is bounded; a full queue
 // fails the connection instead of dropping a frame.
-func (c *conn) serveOutboundNotifications() {
+func (c *conn) serveOutboundNotifications(queue <-chan []byte) {
 	defer c.wg.Done()
-	for frame := range c.notifyQueue {
+	for frame := range queue {
 		if err := c.writeFrame(frame); err != nil {
 			c.fail(err)
 			return
@@ -549,6 +553,11 @@ func (c *conn) notify(method string, params any) error {
 	if buf.Len() > FrameBytes {
 		return &FrameTooLargeError{Direction: "outbound", Size: buf.Len(), Limit: FrameBytes}
 	}
+	c.nmu.RLock()
+	defer c.nmu.RUnlock()
+	if c.notifyQueue == nil {
+		return c.closedError()
+	}
 	select {
 	case <-c.closed:
 		return c.closedError()
@@ -566,6 +575,9 @@ func (c *conn) notify(method string, params any) error {
 
 // call sends a request and waits for its response, cancellation, or closure.
 func (c *conn) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, err

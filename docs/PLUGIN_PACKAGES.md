@@ -27,6 +27,13 @@ OpenAPI inputs, a reference checker, and a source-linked guide format.
 The [stdio MCP example](../examples/mcp-line-counter-kit/README.md) bundles a
 local Go server with build, connection, tool-call, and lifecycle checks.
 
+The [Studio theme author guide](THEME_AUTHOR_GUIDE.md) uses a copyable pure-theme
+package, the current token vocabulary, and Appearance activation and cleanup.
+
+The [compatible command example](../examples/command-notes-kit/README.md) shows
+a copied Claude- or Codex-format package, qualified command names, argument
+substitution, and the disable, re-enable and removal checks.
+
 ## CLI Mode
 
 Use `reasonix plugin` when installing or managing plugin packages from a
@@ -273,6 +280,18 @@ Expand a plugin row to manage it:
   run `reasonix plugin doctor <name>`; there is no per-package Doctor button.
 - **Export** packages the plugin for sharing, with credentials stripped.
 - **Remove** uninstalls the package after confirmation.
+
+MCP displays mask userinfo, credential query/fragment values, credential path
+suffixes, and opaque fragments. Credential-bearing or uncertain shell text is
+hidden in display; operational install values remain intact. Parse errors redact
+input values. Approval tickets bind operational credentials before projection.
+
+| Surface | Values |
+| --- | --- |
+| Operator MCP parse/install | `url`, `env`, `headers`, `command`, `args`: operational values for the install round-trip. |
+| MCP confirmation UI | Render only `displayUrl`, `displayEnv`, `displayHeaders`, `displayCommand`, `displayArgs`. |
+| Public install plans and package inventories | Display values; operational entries stay internal. |
+| Export | Mask URL credentials and credential flag arguments; replace placeholders before connecting. Env/header literals remain environment references. |
 
 ### Use Installed Plugins From Desktop
 

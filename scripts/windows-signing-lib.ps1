@@ -32,6 +32,14 @@ $script:InstallerOwnedFiles = @{
     "resources/elevate.exe" = "9b1fbf0c11c520ae714af8aa9af12cfd48503eedecd7398d8992ee94d1b4dc37"
 }
 
+# 32-bit images the installer writes into an installed tree on every
+# architecture: the elevation helper and the uninstaller. They are the only
+# images exempt from the architecture check, by exact path.
+$script:InstallerWrittenX86Pe = @(
+    "resources/elevate.exe",
+    "Uninstall Reasonix Studio.exe"
+)
+
 function Get-TreeFiles {
     param([Parameter(Mandatory = $true)][string]$Root)
 
@@ -118,6 +126,49 @@ function Assert-DeclaredPeSet {
     if ($unexpected.Count -gt 0 -or $missing.Count -gt 0) {
         throw "PE files under $Root differ from the declared set"
     }
+}
+
+# The machine field of a PE image's COFF header, read from the bytes: an
+# emulated x64 program runs on ARM64 Windows, so what a package claims to be
+# built for has to come from the files themselves.
+function Get-PeMachine {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $dos = New-Object byte[] 64
+        if ($stream.Read($dos, 0, 64) -ne 64 -or $dos[0] -ne 0x4D -or $dos[1] -ne 0x5A) { throw "Not a PE image: $Path" }
+        [void]$stream.Seek([BitConverter]::ToInt32($dos, 0x3C), [IO.SeekOrigin]::Begin)
+        $header = New-Object byte[] 6
+        if ($stream.Read($header, 0, 6) -ne 6 -or $header[0] -ne 0x50 -or $header[1] -ne 0x45 -or $header[2] -ne 0 -or $header[3] -ne 0) {
+            throw "No PE signature: $Path"
+        }
+        [BitConverter]::ToUInt16($header, 4)
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+# Every PE image under Root must be built for Architecture; the 32-bit images
+# the installer writes (InstallerWrittenX86Pe) are the only exception, by path.
+function Assert-PeArchitecture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][ValidateSet("amd64", "arm64")][string]$Architecture
+    )
+
+    $want = @{ amd64 = 0x8664; arm64 = 0xAA64 }[$Architecture]
+    $wrong = @()
+    foreach ($name in Get-PeFiles -Root $Root) {
+        $expected = if ($script:InstallerWrittenX86Pe -ccontains $name) { 0x014C } else { $want }
+        $machine = Get-PeMachine -Path (Join-Path $Root $name)
+        if ($machine -ne $expected) {
+            Write-Host "::error title=studio-signing.wrong-architecture::$name is machine 0x$($machine.ToString('x')), want 0x$($expected.ToString('x')) for $Architecture"
+            $wrong += $name
+        }
+    }
+    if ($wrong.Count -gt 0) { throw "PE files under $Root are not all $Architecture`: $($wrong -join ', ')" }
 }
 
 function Get-SignTool {

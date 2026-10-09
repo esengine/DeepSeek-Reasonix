@@ -116,3 +116,61 @@ func TestStdioErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestToolArgumentsMatchDeclaredSchema(t *testing.T) {
+	var listed bytes.Buffer
+	if err := serve(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`+"\n"), &listed); err != nil {
+		t.Fatal(err)
+	}
+	var declaration struct {
+		Result struct {
+			Tools []struct {
+				InputSchema struct {
+					AdditionalProperties bool `json:"additionalProperties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(listed.Bytes(), &declaration); err != nil || len(declaration.Result.Tools) != 1 || declaration.Result.Tools[0].InputSchema.AdditionalProperties {
+		t.Fatalf("tool declaration = %s, err=%v", listed.String(), err)
+	}
+	for _, tc := range []struct {
+		name string
+		args string
+		ok   bool
+	}{
+		{"text", `{"text":"one\ntwo\n"}`, true},
+		{"empty text", `{"text":""}`, true},
+		{"unicode", `{"text":"一\r\n二\r\n"}`, true},
+		{"unknown number", `{"text":"one","limit":1}`, false},
+		{"unknown null", `{"text":"one","limit":null}`, false},
+		{"unknown object", `{"text":"one","options":{}}`, false},
+		{"upper case", `{"TEXT":"one"}`, false},
+		{"title case", `{"Text":"one"}`, false},
+		{"case collision", `{"text":"one","TEXT":"two"}`, false},
+		{"missing text", `{}`, false},
+		{"null text", `{"text":null}`, false},
+		{"number text", `{"text":1}`, false},
+		{"array arguments", `[]`, false},
+		{"null arguments", `null`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := `{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"count_lines","_meta":{"progressToken":"p"},"arguments":` + tc.args + `}}`
+			var out bytes.Buffer
+			if err := serve(strings.NewReader(input+"\n"), &out); err != nil {
+				t.Fatal(err)
+			}
+			var resp response
+			if err := json.Unmarshal(out.Bytes(), &resp); err != nil || string(resp.ID) != `"call"` {
+				t.Fatalf("response = %s, err=%v", out.String(), err)
+			}
+			if tc.ok {
+				if resp.Error != nil || resp.Result == nil {
+					t.Fatalf("valid arguments returned %s", out.String())
+				}
+			} else if resp.Error == nil || resp.Error.Code != -32602 || resp.Result != nil {
+				t.Fatalf("arguments outside the declared schema returned %s", out.String())
+			}
+		})
+	}
+}

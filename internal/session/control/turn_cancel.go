@@ -106,6 +106,7 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	// refresh the inbox from that event and must not observe already-consumed
 	// steers in the completed turn. Dispatch still waits for finishing to clear.
 	c.onInboxTurnDone()
+	c.recordTurnFinished(done.Cancelled)
 	c.sink.Emit(done)
 }
 

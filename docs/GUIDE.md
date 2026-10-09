@@ -207,12 +207,17 @@ after consent are silent and never change stdout, stderr, or the process exit
 code; unsent counters stay in a bounded local queue for a later invocation.
 
 The ping contains a dedicated random 128-bit CLI install ID, CLI version, OS,
-architecture, and the `cli` surface marker. Counter batches use that same ID for
-daily active-install deduplication and contain only fixed buckets such as CLI
-mode/profile, permission/session mode, turn latency, finish reason, cache-hit
-range, generic Provider/tool error class, compaction, recovery counters, and
-normalized UI language. This ID is separate from the desktop install ID and is
-not an account, hardware, repository, or session identifier.
+architecture, and the `cli` surface marker. This ID is separate from the desktop
+install ID and is not an account, hardware, repository, or session identifier.
+
+Counter batches use that same ID for daily active-install deduplication and
+contain only fixed buckets such as CLI mode/profile, permission/session mode,
+turn latency, finish reason, cache-hit range, generic Provider/tool error class,
+compaction, recovery counters, per-turn token-volume buckets, workspace-lease
+contention buckets, and normalized UI language.
+
+Closing the prompt without answering (end of input, Ctrl+D) stores nothing and
+uploads nothing; it asks again the next time.
 
 Reasonix never uploads prompts, answers, reasoning, tool names/arguments/output,
 paths, repositories/branches, session IDs, exact token or cost values,
@@ -476,6 +481,29 @@ remote window open;
 the desktop reconnects in the background, re-attaches its loopback forward, and
 reloads the window against the recovered Serve. An authentication or host-key
 failure is terminal and closes the unusable remote window instead.
+
+### Lifetime of the remote serve
+
+- The `reasonix serve` process on the host is persistent. Quitting the desktop
+  or losing the link does not terminate it, and the next connect attaches to it.
+- A pane's session on that serve does not outlive the desktop. Each pane drives
+  its own runtime there; closing the pane or quitting the desktop makes Studio
+  call `POST /runtimes/{id}/close` on the remote serve before it takes the
+  tunnel down.
+- That close cancels a turn in flight and releases the session lease, so another
+  window can open the session. Only the pane's runtime is closed: the serve
+  process keeps running and the next connect can attach to it. Runtimes opened
+  by other clients are left alone too, whichever way the serve was started.
+- `provider = "remote"` decides only where model credentials come from. It does
+  not detach a pane from the desktop.
+- A serve already running for the workspace is attached to, never replaced,
+  whether `reasonix remote serve start`, another window or a hand-started
+  `reasonix serve --port-file` launched it. A later connect never deletes its
+  port or pid files and never stops it.
+- `serve start` uses no broker, so a host with `provider = "local"` cannot
+  attach to it. That connect fails with an explanation and leaves the serve
+  running. Set the host to `provider = "remote"` (it then needs its own
+  credentials), or stop the serve with `reasonix remote serve stop <host>`.
 
 ## Custom OpenAI-compatible providers
 
@@ -889,8 +917,9 @@ Chat and transcript shortcuts:
 | Composer text selection | Selects, copies, or replaces draft text | Releasing an in-app drag copies the selection through the same verified clipboard path as transcript text. Typing or pasting replaces the selection; arrow keys collapse it. |
 | Right-click with no active selection | Pastes clipboard text locally | In a local session with in-app mouse capture on, Reasonix reads text only and routes it through the normal bracketed-paste handling. Over SSH, use the terminal paste shortcut because the remote process cannot read the local clipboard; `/mouse` restores the terminal's native right-click menu. Right-click with an active selection still copies that selection. |
 | `/mouse` | Toggles in-app mouse capture | Off hands the mouse back to your terminal, restoring its native click-drag selection and right-click context menu, at the cost of in-app drag-select, the transcript scrollbar, and wheel-scroll. Set `REASONIX_DISABLE_MOUSE=1` to start every session with it off. Remote (SSH) sessions start with capture off so native selection works out of the box; `REASONIX_DISABLE_MOUSE=0` forces capture on everywhere. |
-| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript or composer selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
-| `Ctrl+D` | Quits the TUI | Immediate quit. |
+| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript or composer selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. A second press while a cancelled turn is still stopping quits too. |
+| `Ctrl+D` | Quits the TUI | Immediate quit on an empty idle composer. |
+| `/quit` or `/exit` | Quits the TUI | Runs at once, also while a turn is running. Typing a bare `exit`, `quit` or `:q` sends it to the model as a normal message. |
 | Your terminal's text-paste shortcut | Pastes text | Text stays on the terminal's bracketed-paste path (`Cmd+V` on macOS, commonly `Ctrl+Shift+V` on Linux, and the terminal's configured shortcut elsewhere). Reasonix consumes the resulting paste event and never probes for an image first. |
 | `Ctrl+V` on macOS/Linux; `Alt+V` on Windows | Pastes a clipboard image | Image paste is a separate application action. The footer shows `Pasting image…` while the clipboard is read, then inserts an editable `[image #N]` token at the cursor. |
 | `/paste-image` | Pastes a clipboard image | Command form of the same image-only action. |

@@ -9,14 +9,13 @@ import (
 	"reasonix/internal/runtime/writeclaim"
 	"testing"
 
-	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/permission"
 )
 
 func fenceFixture(t *testing.T, gate Gate) (root string, writer tool.Tool, inner *recordingWriter) {
 	t.Helper()
-	root = testenv.TempDir(t)
+	root = canonicalTempDir(t)
 	if err := os.MkdirAll(filepath.Join(root, "auth"), 0o755); err != nil {
 		t.Fatal(err)
 	}

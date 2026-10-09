@@ -3,8 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"path/filepath"
+	"reasonix/internal/base/fileutil"
 	"reasonix/internal/runtime/writeclaim"
 	"strings"
 
@@ -75,6 +76,7 @@ func (w pathBoundWriter) Name() string            { return w.inner.Name() }
 func (w pathBoundWriter) Description() string     { return w.inner.Description() }
 func (w pathBoundWriter) Schema() json.RawMessage { return w.inner.Schema() }
 func (w pathBoundWriter) ReadOnly() bool          { return w.inner.ReadOnly() }
+func (w pathBoundWriter) WritesNamedPaths() bool  { return tool.WritesNamedPaths(w.inner) }
 func (w pathBoundWriter) PlanModeSafe() bool {
 	if p, ok := w.inner.(interface{ PlanModeSafe() bool }); ok {
 		return p.PlanModeSafe()
@@ -88,8 +90,8 @@ func (w pathBoundWriter) PlanModeSafe() bool {
 // parent: a model approving its own reach is not a fence. Paths are the
 // resolved ones, so a symlink names the file the write would really land on.
 func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	paths, err := extractWritePathsFromArgs(w.inner.Name(), w.workDir, args)
-	if err != nil {
+	paths, err := w.WritePaths(args)
+	if err != nil && (!errors.Is(err, fileutil.ErrAmbiguousPath) || len(paths) == 0) {
 		return "", err
 	}
 	declared := w.grant.Declared()
@@ -119,6 +121,13 @@ func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (str
 		held = append(held, release)
 	}
 	return w.inner.Execute(ctx, args)
+}
+
+func (w pathBoundWriter) WritePaths(args json.RawMessage) ([]string, error) {
+	if writer, ok := w.inner.(tool.WritePathResolver); ok {
+		return writer.WritePaths(args)
+	}
+	return extractWritePathsFromArgs(w.inner.Name(), w.workDir, args)
 }
 
 // askToWiden puts one path to the user and records the answer. With no gate
@@ -256,70 +265,23 @@ func parentWriteReservation(workDir, toolName string, args json.RawMessage) (wri
 		if err != nil {
 			return writeclaim.WritePathSet{}, fmt.Errorf("could not parse %s path for write reservation: %w", toolName, err)
 		}
-		// NormalizeWritePaths accepts relative paths against the workspace.
-		// Absolute paths already inside the workspace also work.
-		raw := make([]string, 0, len(paths))
-		for _, p := range paths {
-			raw = append(raw, resolveMaybeRelative(workDir, p))
-		}
-		set, err := writeclaim.NormalizeWritePaths(workDir, raw)
-		if err != nil {
-			// Outside workspace: still take a whole-workspace reservation so we
-			// cannot race background writers while writing managed paths outside
-			// roots (config write approval path).
-			whole, werr := writeclaim.WholeWorkspaceWriteClaim(workDir)
-			if werr != nil {
-				return writeclaim.WritePathSet{}, err
-			}
-			return whole, nil
-		}
-		return set, nil
+		return parentResolvedWriteReservation(workDir, paths)
 	}
 	// Bash and MCP/custom writers.
 	return writeclaim.WholeWorkspaceWriteClaim(workDir)
 }
 
 func extractWritePathsFromArgs(toolName, workDir string, args json.RawMessage) ([]string, error) {
-	switch toolName {
-	case "move_file":
-		var p struct {
-			SourcePath      string `json:"source_path"`
-			DestinationPath string `json:"destination_path"`
-		}
-		if err := json.Unmarshal(args, &p); err != nil {
-			return nil, fmt.Errorf("invalid args: %w", err)
-		}
-		if strings.TrimSpace(p.SourcePath) == "" || strings.TrimSpace(p.DestinationPath) == "" {
-			return nil, fmt.Errorf("source_path and destination_path are required")
-		}
-		return []string{
-			resolveMaybeRelative(workDir, p.SourcePath),
-			resolveMaybeRelative(workDir, p.DestinationPath),
-		}, nil
-	default:
-		var p struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(args, &p); err != nil {
-			return nil, fmt.Errorf("invalid args: %w", err)
-		}
-		if strings.TrimSpace(p.Path) == "" {
-			return nil, fmt.Errorf("path is required")
-		}
-		return []string{resolveMaybeRelative(workDir, p.Path)}, nil
-	}
+	return builtin.ResolveWritePaths(workDir, nil, []string{workDir}, args, toolName == "move_file")
 }
 
-func resolveMaybeRelative(workDir, path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return path
+func parentResolvedWriteReservation(workDir string, paths []string) (writeclaim.WritePathSet, error) {
+	if len(paths) == 0 {
+		return writeclaim.WholeWorkspaceWriteClaim(workDir)
 	}
-	if filepath.IsAbs(path) {
-		return path
+	set, err := writeclaim.NormalizeWritePaths(workDir, paths)
+	if err != nil {
+		return writeclaim.WholeWorkspaceWriteClaim(workDir)
 	}
-	if strings.TrimSpace(workDir) == "" {
-		return path
-	}
-	return filepath.Join(workDir, path)
+	return set, nil
 }

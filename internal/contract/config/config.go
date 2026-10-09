@@ -632,7 +632,7 @@ func NormalizeReasoningLanguage(lang string) string {
 	}
 }
 
-// DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
+// DesktopTelemetry reports whether the desktop sends the anonymous daily ping.
 // It carries no conversation, key, or file data — see desktop/README.md.
 func (c *Config) DesktopTelemetry() bool {
 	if c == nil || c.Desktop.Telemetry == nil {
@@ -677,6 +677,9 @@ type ServeConfig struct {
 	// rate-limiting and Secure-cookie decisions. When false (default), they
 	// are ignored — an attacker can otherwise forge them.
 	BehindProxy bool `toml:"behind_proxy"`
+	// SharePort fixes the port of the phone-access LAN link; zero picks a free
+	// one each time the door opens. User-global like the rest of [serve].
+	SharePort int `toml:"share_port"`
 }
 
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,

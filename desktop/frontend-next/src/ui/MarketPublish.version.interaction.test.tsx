@@ -22,11 +22,11 @@ const field = (key: string) => screen.getByLabelText<HTMLInputElement | HTMLText
 const existingTags = () => screen.getAllByRole<HTMLInputElement>("textbox", { name: new RegExp(`^${t("已有标签 {n}", { n: "" })}`) });
 const draw = (port: AgentPort, handle = "demo") => <MarketGroup port={port} account={{ signedIn: true, user: { handle, email: `${handle}@example.com`, label: handle } }} onInstalled={() => {}} onSignIn={() => {}} />;
 
-async function fixture(kind: MarketKind = "plugin", status = "private") {
+async function fixture(kind: MarketKind = "plugin", status = "private", latestVersion = "1.4.9") {
   const port = new MockPort() as unknown as AgentPort;
   const base = (await port.myMarket())[0]!;
   const pkg: MarketPackage = {
-    ...base, kind, status, name: "release-kit", handle: "demo", slug: "demo/release-kit", latestVersion: "1.4.9",
+    ...base, kind, status, name: "release-kit", handle: "demo", slug: "demo/release-kit", latestVersion,
     summary: "Existing summary", description: "Existing description\nwith a second line.",
     repoUrl: "https://github.com/demo/releases", tags: ["ui,ux", "文档，示例", "tools"], installed: undefined,
   };
@@ -49,6 +49,31 @@ const nameHint = {
   zh: "要发布这个包的新版本，请保持名称不变；改名会发布为另一个包。",
   en: "Keep this name to publish a new version of this package. Changing it publishes a different package.",
 };
+
+it.each(["zh", "en"].flatMap((lang) => ["1.4.9-rc.1", "release-2026"].map((latest) => ({ lang, latest }))))(
+  "explains blank-version limits and preserves a corrected $latest update in $lang", async ({ lang, latest }) => {
+    localStorage.setItem(STORAGE, lang); boot();
+    const f = await fixture("plugin", "active", latest);
+    f.publish.mockRejectedValueOnce(new Error("That version is already published"));
+    await openDraft(f.row);
+    const version = field("版本");
+    const hint = within(version.closest("label")!).getByText(lang === "zh"
+      ? "留空时新包为 0.1.0；更新只自动递增纯数字三段版本的补丁号，其他版本请明确填写。"
+      : "Blank starts a new package at 0.1.0. Updates auto-increment only a numeric three-part version; enter other versions explicitly.");
+    expect(version.value).toBe("");
+    fillSource();
+    await userEvent.click(screen.getByRole("button", { name: t("提交审核") }));
+    await screen.findByText("That version is already published");
+    expect(f.publish).toHaveBeenLastCalledWith(expect.objectContaining({ version: "", source }));
+    fireEvent.change(version, { target: { value: `${latest}.next` } });
+    await userEvent.click(screen.getByRole("button", { name: t("提交审核") }));
+    expect(f.publish).toHaveBeenLastCalledWith({
+      kind: f.pkg.kind, name: f.pkg.name, source, summary: f.pkg.summary, description: f.pkg.description,
+      repoUrl: f.pkg.repoUrl, version: `${latest}.next`, tags: f.pkg.tags, visibility: "public",
+    });
+    expect(hint).toBeTruthy();
+  },
+);
 
 it.each(["zh", "en"] as const)("explains the name choice and submits the author's edited name in %s", async (lang) => {
   localStorage.setItem(STORAGE, lang); boot();
@@ -85,6 +110,10 @@ it.each([
   expect(field("来源地址").value).toBe("");
   expect(document.activeElement).toBe(field("来源地址"));
   expect(screen.getByRole<HTMLInputElement>("checkbox").checked).toBe(status === "private");
+  expect(screen.getByText(t("从 {slug} 复用发布资料；请填写本次发布的来源地址。", { slug: f.pkg.slug }))).toBeTruthy();
+  expect(screen.getByText(t(status === "private"
+    ? "以 @{handle} 的名义保存，仅自己可见，不提交审核。只收来源地址，不上传文件。"
+    : "以 @{handle} 的名义提交，审核通过后公开。只收来源地址，不上传文件。", { handle: "demo" }))).toBeTruthy();
   const names = { skill: "技能", plugin: "插件", mcp: "MCP 服务", theme: "主题" };
   expect(screen.getByRole("radio", { name: t(names[kind]) }).getAttribute("aria-checked")).toBe("true");
   expect(screen.getByRole<HTMLButtonElement>("button", { name: t(status === "private" ? "保存为私有" : "提交审核") }).disabled).toBe(true);
@@ -196,7 +225,7 @@ it.each(["success", "failure"])("reads the replacement account's release list wh
   expect(screen.queryByText("old list unavailable")).toBeNull();
   await openDraft(screen.getByText("other-kit").closest("li")!);
   expect(field("名称").value).toBe("other-kit");
-  expect(screen.getByText(/以 @other 的名义提交/)).toBeTruthy();
+  expect(screen.getByText(t("以 @{handle} 的名义保存，仅自己可见，不提交审核。只收来源地址，不上传文件。", { handle: "other" }))).toBeTruthy();
 });
 
 it.each(["zh", "en"])("keeps prefilled comma-containing tags when adding a tag in %s", async (lang) => {

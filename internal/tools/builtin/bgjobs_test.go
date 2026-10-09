@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/planmode"
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/tools/jobs"
 )
@@ -256,5 +258,74 @@ func TestBackgroundToolsNoManager(t *testing.T) {
 	}
 	if _, err := (bash{}).Execute(ctx, []byte(`{"command":"echo hi","run_in_background":true}`)); err == nil {
 		t.Error("background bash without a manager should error")
+	}
+}
+
+// A background start is reported as its own state, with no exit status and no
+// error: the command has not finished, so nothing about it has failed.
+func TestBackgroundStartReportsStateWithoutErrorOrExitCode(t *testing.T) {
+	m := jobs.NewManager(event.Discard)
+	defer m.Close()
+	ctx := jobs.WithManager(context.Background(), m)
+
+	res, err := bash{}.ExecuteDetailed(ctx, []byte(`{"command":"sleep 0.2","run_in_background":true}`))
+	if err != nil {
+		t.Fatalf("background start returned an error: %v", err)
+	}
+	if res.Execution == nil || res.Execution.State != tool.ShellStateBackgroundStarted {
+		t.Fatalf("execution = %+v, want state %q", res.Execution, tool.ShellStateBackgroundStarted)
+	}
+	if res.Execution.ExitCode != nil {
+		t.Errorf("exit code = %d, want none before the job finishes", *res.Execution.ExitCode)
+	}
+}
+
+// A job that ended as failed makes the read that reports it a failed call, so
+// the activity panel and the model see one outcome; the output still comes back
+// with it. A job that finished, was killed or is still running is not a failure.
+func TestReadingAFailedJobIsAFailedCall(t *testing.T) {
+	m := jobs.NewManager(event.Discard)
+	defer m.Close()
+	ctx := jobs.WithSession(jobs.WithManager(context.Background(), m), "session")
+	failed := m.StartForSession("session", "bash", "make test", func(context.Context, io.Writer) (string, error) {
+		return "2 tests failed", errors.New("exit status 2")
+	})
+	done := m.StartForSession("session", "bash", "echo ok", func(context.Context, io.Writer) (string, error) {
+		return "all good", nil
+	})
+
+	out, err := waitJob{}.Execute(ctx, []byte(`{"job_ids":["`+failed.ID+`","`+done.ID+`"]}`))
+	if !errors.Is(err, errJobFailed) || !strings.Contains(err.Error(), failed.ID) || strings.Contains(err.Error(), done.ID) {
+		t.Fatalf("wait error = %v, want %v naming only %s", err, errJobFailed, failed.ID)
+	}
+	if !strings.Contains(out, "2 tests failed") || !strings.Contains(out, "all good") {
+		t.Fatalf("wait output = %q, want both jobs' output", out)
+	}
+
+	out, err = bashOutput{}.Execute(ctx, []byte(`{"job_id":"`+failed.ID+`"}`))
+	if !errors.Is(err, errJobFailed) || !strings.Contains(out, "failed") {
+		t.Fatalf("bash_output = %q, %v; want the failed status with %v", out, err, errJobFailed)
+	}
+	if _, err := (bashOutput{}).Execute(ctx, []byte(`{"job_id":"`+done.ID+`"}`)); err != nil {
+		t.Fatalf("bash_output on a finished job: %v", err)
+	}
+
+	release := make(chan struct{})
+	defer close(release)
+	running := m.StartForSession("session", "bash", "sleep", func(jobCtx context.Context, _ io.Writer) (string, error) {
+		select {
+		case <-release:
+		case <-jobCtx.Done():
+		}
+		return "", jobCtx.Err()
+	})
+	if _, err := (waitJob{}).Execute(ctx, []byte(`{"job_ids":["`+running.ID+`"],"timeout_seconds":1}`)); err != nil {
+		t.Fatalf("wait on a running job: %v", err)
+	}
+	if _, err := (killShell{}).Execute(ctx, []byte(`{"job_id":"`+running.ID+`"}`)); err != nil {
+		t.Fatalf("kill_shell: %v", err)
+	}
+	if _, err := (bashOutput{}).Execute(ctx, []byte(`{"job_id":"`+running.ID+`"}`)); err != nil {
+		t.Fatalf("bash_output on a killed job: %v", err)
 	}
 }

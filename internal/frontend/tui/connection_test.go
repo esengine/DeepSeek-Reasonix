@@ -31,6 +31,38 @@ func TestSetupOpensItselfWhenAKeyIsOwed(t *testing.T) {
 	}
 }
 
+// The first-run panel says why it opened, naming the model that lacks a key.
+func TestSetupExplainsTheMissingKey(t *testing.T) {
+	m, _ := testModel(t)
+	run(m, m.checkSetup())
+	var found bool
+	for _, it := range m.tr.Items {
+		found = found || strings.Contains(it.Text, "beta/b1")
+	}
+	if !found {
+		t.Fatalf("no notice naming the model: %+v", m.tr.Items)
+	}
+}
+
+// A line refused for want of a key comes back to the composer instead of being
+// lost, with a notice that nothing was sent.
+func TestKeylessSendReturnsTheLineToTheComposer(t *testing.T) {
+	m, k := testModel(t)
+	k.keyless = true
+	typeText(m, "hello there")
+	run(m, press(m, "enter"))
+	if got := m.composer.Value(); got != "hello there" {
+		t.Fatalf("composer = %q, want the refused line back", got)
+	}
+	var told bool
+	for _, it := range m.tr.Items {
+		told = told || it.Text == i18n.M.SetupTurnRefused
+	}
+	if !told {
+		t.Fatalf("no notice that nothing was sent: %+v", m.tr.Items)
+	}
+}
+
 // /setup and its /auth alias open the panel at any time, and the composer
 // stays out of the way until it closes.
 func TestSetupAndAuthOpenThePanel(t *testing.T) {

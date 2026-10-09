@@ -125,6 +125,9 @@ func (s *CostQuoteSink) Emit(e Event) {
 	if s == nil {
 		return
 	}
+	if e.Kind == Notice && e.Code == NoticeCodeDisplayCurrency {
+		s.Ctx.SetDisplay(e.Detail)
+	}
 	if e.Kind == Usage && e.Usage != nil && e.CostQuote == nil {
 		e.CostQuote = EnsureCostQuote(e, s.Ctx)
 	}

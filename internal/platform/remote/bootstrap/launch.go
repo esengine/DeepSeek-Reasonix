@@ -55,13 +55,11 @@ type LaunchSpec struct {
 // It echoes the shell's $! so the caller can record the pid immediately.
 func LaunchCommand(spec LaunchSpec, p StatePaths) string {
 	return fmt.Sprintf(
-		"mkdir -p %s && cd %s && rm -f %s %s && umask 077 && : >>%s && chmod 600 %s && "+
+		"mkdir -p %s && cd %s && umask 077 && : >>%s && chmod 600 %s && "+
 			"SX=; command -v setsid >/dev/null 2>&1 && SX=setsid; "+
 			"$SX nohup %s serve --addr 127.0.0.1:0 --auth token --token-file %s --port-file %s --pid-file %s%s </dev/null >>%s 2>&1 & echo $!",
 		shellQuote(p.Dir),
 		shellQuote(spec.Workspace),
-		shellQuote(p.PortFile),
-		shellQuote(p.PidFile),
 		shellQuote(p.LogFile),
 		shellQuote(p.LogFile),
 		shellQuote(spec.Bin),
@@ -90,7 +88,7 @@ func posixBrokerArgs(spec LaunchSpec, p StatePaths) string {
 func StopCommand(pid int, p StatePaths) string {
 	return fmt.Sprintf(
 		"T=%s; P=%s; ours() { A=$(ps -p %d -o args= 2>/dev/null || ps -p %d -o command= 2>/dev/null); "+
-			"case \"$A\" in *reasonix*serve*\"$T\"*\"$P\"*) return 0;; *) return 1;; esac; }; "+
+			"case \"$A\" in *reasonix*serve*) case \"$A\" in *\"$T\"*) case \"$A\" in *\"$P\"*) return 0;; esac;; esac;; esac; return 1; }; "+
 			"ours || exit 0; kill -TERM %d 2>/dev/null; "+
 			"for i in 1 2 3 4 5; do kill -0 %d 2>/dev/null || exit 0; ours || exit 0; sleep 1; done; "+
 			"ours && kill -KILL %d 2>/dev/null; exit 0",
@@ -106,8 +104,19 @@ func ServeAliveCommand(pid int, p StatePaths) string {
 	return fmt.Sprintf(
 		"T=%s; P=%s; kill -0 %d 2>/dev/null || { echo 0; exit 0; }; "+
 			"A=$(ps -p %d -o args= 2>/dev/null || ps -p %d -o command= 2>/dev/null); "+
-			"case \"$A\" in *reasonix*serve*\"$T\"*\"$P\"*) echo 1;; *) echo 0;; esac",
+			"case \"$A\" in *reasonix*serve*) case \"$A\" in *\"$T\"*) case \"$A\" in *\"$P\"*) echo 1; exit 0;; esac;; esac;; esac; echo 0",
 		shellQuote(p.TokenFile), shellQuote(p.PortFile), pid, pid, pid,
+	)
+}
+
+// ServeVersionCommand prints what the binary behind a running serve reports for
+// --version, or nothing when that binary cannot be named or run.
+func ServeVersionCommand(pid int) string {
+	return fmt.Sprintf(
+		"E=$(readlink /proc/%d/exe 2>/dev/null); "+
+			"[ -n \"$E\" ] || E=$(ps -p %d -o args= 2>/dev/null | awk '{print $1}'); "+
+			"[ -x \"$E\" ] && \"$E\" --version 2>/dev/null | head -n 1; exit 0",
+		pid, pid,
 	)
 }
 

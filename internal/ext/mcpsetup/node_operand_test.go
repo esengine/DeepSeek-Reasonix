@@ -18,6 +18,16 @@ func TestNodeServerNameUsesScriptEntryPoint(t *testing.T) {
 		{[]string{"--import", "./preload.mjs", "reasonix_server.js", "client-mode"}, "reasonix-server"},
 		{[]string{"--import=./preload.mjs", "reasonix_server.js", "client-mode"}, "reasonix-server"},
 		{[]string{"--require", "./preload.cjs", "--import", "./preload.mjs", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"--env-file", "config.env", "reasonix_server.js", "client-mode"}, "reasonix-server"},
+		{[]string{"--env-file-if-exists", "config.env", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"--conditions", "development", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"-C", "development", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"--env-file=config.env", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"--env-file-if-exists=config.env", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"--conditions=development", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"--env-file", "config.env", "--require", "./preload.cjs", "-C", "development", "reasonix_server.js"}, "reasonix-server"},
+		{[]string{"--", "reasonix_server.js", "--env-file", "config.env"}, "reasonix-server"},
+		{[]string{"reasonix_server.js", "--conditions", "development"}, "reasonix-server"},
 		{[]string{"--", "reasonix_server.js", "--require", "client-mode"}, "reasonix-server"},
 		{[]string{"-e", "0", "client-mode"}, "mcp-server"},
 		{[]string{"--eval", "0", "client-mode"}, "mcp-server"},
@@ -29,6 +39,10 @@ func TestNodeServerNameUsesScriptEntryPoint(t *testing.T) {
 		{[]string{"-", "client-mode"}, "mcp-server"},
 		{[]string{"--require", "./preload.cjs"}, "mcp-server"},
 		{[]string{"--require"}, "mcp-server"},
+		{[]string{"--env-file", "config.env"}, "mcp-server"},
+		{[]string{"--env-file-if-exists", "config.env"}, "mcp-server"},
+		{[]string{"--conditions", "development"}, "mcp-server"},
+		{[]string{"-C", "development"}, "mcp-server"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			if got := NameFromArgv("node", tc.args); got != tc.name {
@@ -41,6 +55,10 @@ func TestNodeServerNameUsesScriptEntryPoint(t *testing.T) {
 			explicit, err := ParseArgs(append([]string{"manual", "--", "node"}, tc.args...))
 			if err != nil || explicit.Name != "manual" || !reflect.DeepEqual(explicit.Args, tc.args) {
 				t.Errorf("explicit entry = %+v, err=%v", explicit, err)
+			}
+			draft, err := Parse("node " + strings.Join(tc.args, " "))
+			if err != nil || len(draft.Entries) != 1 || draft.Entries[0].Name != tc.name || !reflect.DeepEqual(draft.Entries[0].Args, tc.args) {
+				t.Errorf("pasted draft = %+v, err=%v", draft, err)
 			}
 		})
 	}

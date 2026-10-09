@@ -251,7 +251,7 @@ func (m *model) onRewound(msg rewoundMsg) tea.Cmd {
 	note := m.emit(func(int, bool) string {
 		return "\n" + termrender.Dim(fmt.Sprintf("  -- rewound to turn %d --", msg.turn.Turn+1))
 	})
-	return tea.Sequence(note, m.greet(), m.fetchHistory(true), tea.Batch(m.fetchStatus(), m.fetchTodos(), m.fetchMeters()))
+	return tea.Sequence(note, m.greet(), m.fetchHistory(true), tea.Batch(m.fetchStatus(), m.fetchTodosForRebuild(), m.fetchMeters()))
 }
 
 func (m *model) rewindPanel() []string {

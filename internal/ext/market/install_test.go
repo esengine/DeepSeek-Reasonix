@@ -273,7 +273,7 @@ func TestNPMPackageAcceptsOnlyPackageNames(t *testing.T) {
 		"C:x": false, "@scope/../x": false, "": false, strings.Repeat("a", 65): false,
 		"@playwright/mcp@0.0.83": true, "name@1.2.3": true, "name@1.2.3-beta.1": true,
 		"name@latest": false, "name@^1.2.3": false, "name@": false, "a@b@c": false,
-		"-y": false, "--help": false, "-y@1.2.3": false, "@a/..": false, "@a/..@1.2.3": false,
+		"-y": false, "--help": false, "-y@1.2.3": false, "@a/..": false, "@a/..@1.2.3": false, "@a/.b": false, "x.tgz": false, "_a": false, "a.b": true,
 	} {
 		if npmPackage(s) != want {
 			t.Errorf("npmPackage(%q) = %v", s, !want)

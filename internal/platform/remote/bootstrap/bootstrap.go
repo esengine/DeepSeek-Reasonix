@@ -131,7 +131,11 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	paths := target.Paths(home, workspace)
 
 	// 2. Reuse a live process if the recorded pid is still running.
-	if st, tok, ok := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, false, opts.clock(), workspace); ok {
+	st, tok, ok, err := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, false, opts.clock(), workspace)
+	if err != nil {
+		return Result{}, err
+	}
+	if ok {
 		opts.progress("reuse", st.Addr)
 		return Result{State: st, Token: tok, Reused: true, Workspace: target.NativePath(st.Workspace)}, nil
 	}
@@ -153,7 +157,11 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	defer lock.release()
-	if st, tok, ok := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, true, opts.clock(), workspace); ok {
+	st, tok, ok, err = tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, true, opts.clock(), workspace)
+	if err != nil {
+		return Result{}, err
+	}
+	if ok {
 		opts.progress("reuse", st.Addr)
 		return Result{State: st, Token: tok, Reused: true, Workspace: target.NativePath(st.Workspace)}, nil
 	}
@@ -161,7 +169,15 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	// about to be replaced. Stop it here or nothing ever will: the pid would
 	// outlive the only note this side keeps of it.
 	retireReplaced(ctx, conn, target, fs, paths)
+	if err := clearDeadEndpoint(ctx, conn, target, fs, paths); err != nil {
+		return Result{}, err
+	}
 
+	return launchServe(ctx, conn, target, fs, paths, opts, bin, version, workspace)
+}
+
+// launchServe starts a detached serve under the held lock and records it.
+func launchServe(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, paths StatePaths, opts Options, bin, version, workspace string) (Result, error) {
 	// 5. Generate token, write it 0600, and launch detached serve.
 	token, err := generateToken()
 	if err != nil {
@@ -187,8 +203,8 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(launchRes.Stdout)))
 
-	// 6. Poll the newly-created port file for the real bound address. The launch
-	// command removes stale port/pid files before forking.
+	// 6. Poll the newly-created port file for the real bound address. Stale
+	// port/pid files were cleared above, once their serve was known dead.
 	opts.progress("health_check", "")
 	addr, err := pollPortFile(ctx, fs, paths.PortFile, opts.clock())
 	if err != nil {
@@ -323,44 +339,60 @@ func Logs(ctx context.Context, conn Conn, workspace string, n int, w io.Writer) 
 	return err
 }
 
-func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, paths StatePaths, minVersion string, broker Broker, held bool, clock func() time.Time, workspace ...string) (ServeState, string, bool) {
+// tryReuse decides what a recorded (or published) serve means for this connect.
+// ok reuses it; neither ok nor err declines it, and the caller replaces it. A
+// non-nil err is a live serve that must be neither reused nor replaced.
+func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, paths StatePaths, minVersion string, broker Broker, held bool, clock func() time.Time, workspace ...string) (ServeState, string, bool, error) {
 	st, err := readState(ctx, fs, paths.StateJSON)
-	if err != nil || st.PID <= 0 || st.Addr == "" {
-		return ServeState{}, "", false
+	if err == nil && !recordIsLive(ctx, conn, target, paths, st) {
+		err = errors.New("bootstrap: recorded serve is not running")
+	}
+	if err != nil {
+		if len(workspace) == 0 {
+			return ServeState{}, "", false, nil
+		}
+		var found bool
+		if st, found, err = adoptPublished(ctx, conn, target, fs, paths, workspace[0], minVersion, held, clock); err != nil || !found {
+			return ServeState{}, "", false, err
+		}
 	}
 	if len(workspace) > 0 && st.Workspace != workspace[0] {
-		return ServeState{}, "", false
+		return ServeState{}, "", false, nil
 	}
 	// A serve reading its broker from a file follows the latest connect; any
 	// other keeps dialling the address it started with, which may be gone.
 	follows := broker.configured() && st.BrokerFile
-	if st.Broker != broker.Addr && !follows {
-		return ServeState{}, "", false
+	mismatch := st.Broker != broker.Addr && !follows
+	// Only a serve pinned to a fixed broker address, asked to take another, is
+	// known to be a stale connect's own. Every other mismatch is a serve some
+	// other start chose how to resolve providers for.
+	if mismatch && st.Broker != "" && !st.BrokerFile && broker.configured() {
+		return ServeState{}, "", false, nil
+	}
+	if mismatch {
+		return ServeState{}, "", false, fmt.Errorf("%w: pid %d", ErrServeProviderMismatch, st.PID)
 	}
 	// Alive is not the same question as usable. Handing back a kernel from a
 	// line that has no pane hub is how a remote workspace opened onto one that
 	// answered every call a pane made with 405.
 	if !meetsMinVersion(st.Version, minVersion) {
-		return ServeState{}, "", false
-	}
-	if !validServeAddr(st.Addr) || !pidIsServe(ctx, conn, target, st.PID, paths) {
-		return ServeState{}, "", false
+		return ServeState{}, "", false, nil
 	}
 	// The state record is informational; the workspace-derived path is the
 	// authority, so a tampered record cannot make us read an arbitrary file.
 	tok, err := readToken(ctx, fs, paths.TokenFile)
 	if err != nil {
-		return ServeState{}, "", false
+		return ServeState{}, "", false, fmt.Errorf("%w: pid %d has no readable token file", ErrServeNotAttachable, st.PID)
 	}
 	if follows {
 		// Written on every reuse, not only when the address moved: a broker
 		// restarted on the same port holds a new token.
 		if st, ok := rebind(ctx, fs, paths, st, broker, held, clock); ok {
-			return st, tok, true
+			return st, tok, true, nil
 		}
-		return ServeState{}, "", false
+		return ServeState{}, "", false, nil
 	}
-	return st, tok, true
+	return st, tok, true, nil
 }
 
 // writeBroker points a serve at this connect's broker. Address and token go in
@@ -404,11 +436,8 @@ func rebind(ctx context.Context, fs *sftpfs.FS, paths StatePaths, st ServeState,
 	return st, true
 }
 
-// retireReplaced stops the kernel named by the record this launch is about to
-// overwrite. Reuse was already refused — too old, bound to a retired broker,
-// its token gone — and which of those it was does not change that the record
-// naming the pid is the only note this side keeps. Best effort: a machine that
-// will not answer is not a reason to refuse the pane the caller asked for.
+// retireReplaced stops the recorded serve only after reuse permits replacement.
+// An attachment refusal must return before this path can signal a live serve.
 func retireReplaced(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, paths StatePaths) {
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err != nil || st.PID <= 0 {

@@ -89,3 +89,16 @@ func TestEffortOverrideIgnoredWithoutDepthVocabulary(t *testing.T) {
 		t.Fatalf("thinking-disabled provider must ignore overrides, got %q", got)
 	}
 }
+
+func TestEffortOverrideLowestTierFallsBackWhereAbsent(t *testing.T) {
+	pro := newTestClient(t, "deepseek-v4", map[string]any{"reasoning_protocol": "deepseek"})
+	req := provider.Request{EffortOverride: "low", MaxTokens: 16384}
+	out := pro.buildRequest(req)
+	if out.ReasoningEffort != "high" || out.MaxTokens != 16384 {
+		t.Fatalf("no low tier: effort=%q max=%d, want configured high and the caller's cap", out.ReasoningEffort, out.MaxTokens)
+	}
+	flash := newTestClient(t, "deepseek-v4-flash", map[string]any{"reasoning_protocol": "deepseek"})
+	if got := flash.buildRequest(req).ReasoningEffort; got != "low" {
+		t.Fatalf("flash has a low tier, got %q", got)
+	}
+}

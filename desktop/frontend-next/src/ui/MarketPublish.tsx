@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, MarketKind, MarketPackage, MarketPublished } from "../port/port";
 import { OwnInstall } from "./MarketOwn";
+import { arrowRadios } from "./tablist";
 
 const KINDS: [MarketKind, string][] = [["skill", "技能"], ["plugin", "插件"], ["mcp", "MCP 服务"], ["theme", "主题"]];
 
@@ -40,7 +41,7 @@ interface Draft {
 
 const EMPTY: Draft = { kind: "skill", name: "", source: "", summary: "", description: "", repoUrl: "", version: "", tags: [], tagInput: "", private: false };
 
-interface PublishProps { port: AgentPort; handle: string; onMine: () => void; initial?: MarketPackage }
+interface PublishProps { port: AgentPort; handle: string; onMine: () => void; onApplying?: (applying: boolean) => void; initial?: MarketPackage }
 
 export function PublishForm(props: PublishProps) {
   const [owner, setOwner] = useState({ port: props.port, handle: props.handle, generation: 0 });
@@ -52,7 +53,7 @@ export function PublishForm(props: PublishProps) {
 
 // The form only collects; which sources are publishable and what the registry
 // accepts are the kernel's and the registry's answers, shown as they come back.
-function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
+function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProps) {
   const [d, setD] = useState<Draft>(() => initial ? {
     ...EMPTY, kind: initial.kind, name: initial.name, summary: initial.summary,
     description: initial.description, repoUrl: initial.repoUrl, tags: [...initial.tags],
@@ -62,6 +63,11 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
   const [error, setError] = useState("");
   const [done, setDone] = useState<MarketPublished | null>(null);
   const set = (k: keyof Draft) => (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value });
+
+  useEffect(() => {
+    onApplying?.(busy);
+    return () => onApplying?.(false);
+  }, [busy, onApplying]);
 
   const submit = async () => {
     setBusy(true);
@@ -84,7 +90,7 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
   if (done) {
     return (
       <div className="mkt mkt-pub" data-stage="done">
-        <div className="find" data-lvl="ok">
+        <div className="find" data-lvl="ok" role="status">
           {done.package.status === "private" ? (
             <>
               <span className="t">{t("已保存 {slug} {version}，仅自己可见", { slug: done.package.slug, version: done.version })}</span>
@@ -111,12 +117,17 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
 
   const ready = d.name.trim() !== "" && d.source.trim() !== "" && !busy;
   return (
-    <div className="mkt mkt-pub" aria-busy={busy}>
+    <form className="mkt mkt-pub" aria-busy={busy} data-action-submit="market.publish" data-action-keydown="market.publish"
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.nativeEvent.isComposing && event.target instanceof HTMLInputElement && event.target.dataset.value !== "name" && event.target.dataset.value !== "source") event.preventDefault();
+      }} onSubmit={(event) => { event.preventDefault(); if (ready) void submit(); }}>
       {d.origin && <p className="mkt-sum">{t("从 {slug} 复用发布资料；请填写本次发布的来源地址。", { slug: d.origin })}</p>}
-      <p className="mkt-sum">{t("以 @{handle} 的名义提交，审核通过后公开。只收来源地址，不上传文件。", { handle })}</p>
-      <div className="seg" data-text role="radiogroup" aria-label={t("类型")}>
+      <p className="mkt-sum">{t(d.private
+        ? "以 @{handle} 的名义保存，仅自己可见，不提交审核。只收来源地址，不上传文件。"
+        : "以 @{handle} 的名义提交，审核通过后公开。只收来源地址，不上传文件。", { handle })}</p>
+      <div className="seg" data-text role="radiogroup" aria-label={t("类型")} data-action-keydown="market.draft" data-value="kind" onKeyDown={arrowRadios}>
         {KINDS.map(([id, name]) => (
-          <button key={id} role="radio" aria-checked={d.kind === id} disabled={busy} data-action="market.draft" data-value="kind" onClick={() => setD({ ...d, kind: id })}>
+          <button key={id} type="button" role="radio" aria-checked={d.kind === id} tabIndex={d.kind === id ? 0 : -1} disabled={busy} data-action="market.draft" data-value="kind" onClick={() => setD({ ...d, kind: id })}>
             {t(name)}
           </button>
         ))}
@@ -132,7 +143,7 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
         <label>
           <span>{t("版本")}</span>
           <input value={d.version} disabled={busy} data-action="market.draft" data-value="version" placeholder="0.1.0" spellCheck={false} onChange={set("version")} />
-          <em className="mkt-tip">{t("留空时新包为 0.1.0，更新自动加一个补丁号。")}</em>
+          <em className="mkt-tip">{t("留空时新包为 0.1.0；更新只自动递增纯数字三段版本的补丁号，其他版本请明确填写。")}</em>
         </label>
         <label className="full">
           <span>{t("来源地址")}</span>
@@ -165,7 +176,7 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
         {t("仅自己可见：不提交审核，社区市场里只有你的账号能看到并安装")}
       </label>
       {error && (
-        <div className="find" data-lvl="err">
+        <div className="find" data-lvl="err" role="alert">
           <span className="t">{t("没有提交成功")}</span>
           <span className="why">{error}</span>
         </div>
@@ -176,11 +187,11 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
             ? t("保存后只有你能看到；要公开时在「我的发布」里提交审核。")
             : t("提交后进入审核队列；审核员会固定审核时的内容，之后只安装那一份。")}
         </span>
-        <button className="act" data-action="market.publish" data-primary disabled={!ready} onClick={() => void submit()}>
+        <button type="submit" className="act" data-action="market.publish" data-primary disabled={!ready}>
           {t(busy ? "提交中…" : d.private ? "保存为私有" : "提交审核")}
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -283,7 +294,7 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
                 {onPublish && <button className="act" data-action="market.prepare-version" data-value={p.slug} disabled={sending === p.slug} onClick={() => onPublish(p)}>{t("发布新版本")}</button>}
                 {stuck && <span className="note">{t("技能不会被原地覆盖：先在「已安装」里移除旧版本，再回来安装")}</span>}
                 {p.status === "private" && (
-                  <button className="act" data-action="market.submit" data-value={p.slug} disabled={sending === p.slug} onClick={() => void submit(p.slug)}>
+                  <button className="act" data-action="market.submit" data-value={p.slug} disabled={!!sending} onClick={() => void submit(p.slug)}>
                     {t(sending === p.slug ? "提交中…" : "提交审核")}
                   </button>
                 )}
@@ -293,7 +304,7 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
                   </button>
                 )}
               </span>
-              {sendError?.[0] === p.slug && <span className="why">{sendError[1]}</span>}
+              {sendError?.[0] === p.slug && <span className="why" role="alert">{sendError[1]}</span>}
             </li>
           );
         })}

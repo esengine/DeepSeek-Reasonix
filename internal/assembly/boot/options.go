@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/model/billing"
 	"reasonix/internal/runtime/taskmonitor"
+	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/sessiontemp"
 	"reasonix/internal/tools/builtin"
@@ -40,6 +41,9 @@ type Options struct {
 	// configured serves. Only a window sets it: it must open to be fixed, while a
 	// headless run must not move to another provider and its billing unasked.
 	OpenOnFallbackModel bool
+	// WorkspaceScanLimit is a test seam: it can only lower the walk bound.
+	// Zero is the production limit.
+	WorkspaceScanLimit int
 	// EffortOverride is a session-local reasoning effort override. Nil means use
 	// the resolved provider config; a non-nil empty string means provider default.
 	EffortOverride *string
@@ -64,6 +68,8 @@ type Options struct {
 	// empty follows the environment. It binds this assembly only — a
 	// Controller's later re-reads and the history index still read the process.
 	Home string
+	// Tests that compare prompt bytes must not depend on host discovery probes.
+	resolvedShell *sandbox.Shell
 	// StatsSource labels this frontend's usage records. Unset — or a value this
 	// build does not know — disables usage recording rather than filing turns
 	// under a label nothing can read back.

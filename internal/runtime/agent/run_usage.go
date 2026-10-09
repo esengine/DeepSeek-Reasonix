@@ -193,6 +193,7 @@ func (a *Agent) storeLatestRequestUsage(attempt *provider.Usage) {
 	a.sess.output.lastUsage.Store(&clone)
 	a.window().setPromptTokenCalibrationFromUsage(&clone)
 	a.window().noteAcceptedPromptTokens(&clone)
+	a.window().anchorProviderUsage(&clone)
 }
 
 // finalizeSamplingUsage builds the Usage event payload for consumers that

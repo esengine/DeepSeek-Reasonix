@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/pluginpkg"
 )
 
@@ -42,9 +43,9 @@ var (
 	// that escapes the expected skill roots — typically an attempt to
 	// read arbitrary host files.
 	ErrUnsafeLinkTarget = errors.New("install_source: link target escapes skill roots")
-	// ErrSourceUnreadable: a URL did not respond, returned non-2xx, or a
-	// local path was not readable.
-	ErrSourceUnreadable = errors.New("install_source: source is not readable")
+	// ErrSourceUnreadable: a URL could not supply a complete bounded response,
+	// or a local path was not readable.
+	ErrSourceUnreadable = tool.Refusal{Code: "install.source_unreadable", Message: "install_source: source is not readable"}
 	// ErrManifestMissing: a path was reachable but contained no installable
 	// artifact (no SKILL.md, no .mcp.json, no executable, etc.).
 	ErrManifestMissing = errors.New("install_source: no installable manifest")
@@ -68,18 +69,19 @@ var (
 	ErrNotPinnable = errors.New("install_source: source cannot be pinned by content")
 )
 
-// errKind wraps a sentinel with a human-readable detail so logs and the
-// `next` field stay useful.
 type errKind struct {
-	sentinel error
-	detail   string
+	sentinel    error
+	detailBytes int
 }
 
-func (e *errKind) Error() string { return fmt.Sprintf("%s: %s", e.sentinel, e.detail) }
-func (e *errKind) Unwrap() error { return e.sentinel }
+func (e *errKind) Error() string {
+	return fmt.Sprintf("%s (detail omitted; %d bytes)", e.sentinel, e.detailBytes)
+}
+func (e *errKind) Unwrap() error           { return e.sentinel }
+func (e *errKind) DiagnosticFacts() string { return e.Error() }
 
 func newErr(sentinel error, format string, args ...any) error {
-	return &errKind{sentinel: sentinel, detail: fmt.Sprintf(format, args...)}
+	return &errKind{sentinel: sentinel, detailBytes: len(fmt.Sprintf(format, args...))}
 }
 
 // ErrorCode projects an origin-owned failure identity onto the result wire.
@@ -97,3 +99,66 @@ func ErrorCode(err error) string {
 		return ""
 	}
 }
+
+// hostFactError carries a sentence the host composed from its own counts; no
+// peer-supplied text may enter it.
+type hostFactError struct {
+	sentinel error
+	facts    string
+}
+
+func (e *hostFactError) Error() string           { return fmt.Sprintf("%s: %s", e.sentinel, e.facts) }
+func (e *hostFactError) Unwrap() error           { return e.sentinel }
+func (e *hostFactError) DiagnosticFacts() string { return e.Error() }
+
+// networkSourceError carries a refusal the host composed from the source the
+// caller named, so the diagnostic wrapper keeps its cause and code for the model.
+type networkSourceError struct{ refusal tool.Refusal }
+
+func (e networkSourceError) Error() string           { return e.refusal.String() }
+func (e networkSourceError) Unwrap() error           { return e.refusal }
+func (e networkSourceError) DiagnosticFacts() string { return e.refusal.String() }
+
+type sourceHTTPError struct {
+	sentinel error
+	status   int
+}
+
+func (e *sourceHTTPError) Error() string           { return fmt.Sprintf("%s: HTTP %d", e.sentinel, e.status) }
+func (e *sourceHTTPError) Unwrap() error           { return e.sentinel }
+func (e *sourceHTTPError) DiagnosticFacts() string { return e.Error() }
+
+type sourceBoundaryCode uint8
+
+const (
+	sourceEscape sourceBoundaryCode = iota
+	sourceEntrySize
+	sourceTotalSize
+	sourceFileCount
+)
+
+type sourceBoundaryError struct {
+	code  sourceBoundaryCode
+	limit int64
+}
+
+func (e *sourceBoundaryError) Error() string {
+	switch e.code {
+	case sourceEscape:
+		return "tarball entry escapes the permitted root"
+	case sourceEntrySize:
+		return fmt.Sprintf("tarball entry is larger than %d bytes", e.limit)
+	case sourceTotalSize:
+		return fmt.Sprintf("tarball expands past %d bytes", e.limit)
+	case sourceFileCount:
+		return fmt.Sprintf("tarball holds more than %d files", e.limit)
+	}
+	return "tarball boundary refusal"
+}
+func (e *sourceBoundaryError) Unwrap() error {
+	if e.code == sourceEscape {
+		return ErrUnsupportedKind
+	}
+	return ErrSourceUnreadable
+}
+func (e *sourceBoundaryError) DiagnosticFacts() string { return e.Error() }

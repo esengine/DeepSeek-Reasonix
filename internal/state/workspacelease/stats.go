@@ -16,7 +16,7 @@ type Stats struct {
 	Reported int
 	// Waited is the total time spent waiting across Contended acquisitions.
 	Waited time.Duration
-	// Held is from the acquisition to the release.
+	// Held is from the acquisition to the release, less any time yielded.
 	Held time.Duration
 	// Idle is the part of Held after the last call to AcquireWrite — held while
 	// writing nothing. Every mutation asks, so the last ask dates the last
@@ -63,7 +63,7 @@ func (o *Owner) closeStatsLocked(now time.Time) (Stats, bool) {
 		return Stats{}, false
 	}
 	out := o.stats
-	out.Held = now.Sub(o.acquiredAt)
+	out.Held += now.Sub(o.acquiredAt)
 	// The ask that took the lease is dated before the acquisition it waited
 	// for, so the stretch runs from whichever came later. Idle is part of the
 	// hold and can never be longer than it.

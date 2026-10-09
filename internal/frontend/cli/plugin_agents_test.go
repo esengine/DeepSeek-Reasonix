@@ -16,6 +16,7 @@ func TestPluginShowAgentOnlyPackage(t *testing.T) {
 	writePluginTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{"apiVersion":"reasonix.io/plugin/v2","name":"orientation","contributes":{"agents":["agents"]}}`)
 	writePluginTestFile(t, filepath.Join(root, "agents", "map.md"), "---\nname: map\ndescription: Map the\n  selected files\n---\nRead the files.")
 	writePluginTestFile(t, filepath.Join(root, "agents", "check.md"), "---\nname: check\n---\nCheck the files.")
+	writePluginTestFile(t, filepath.Join(root, "agents", "group", "nested", "SKILL.md"), "---\ndescription: Inspect nested files\n---\nCheck the files.")
 	for _, enabled := range []bool{true, false} {
 		if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{Name: "orientation", Root: "plugins/orientation", ManifestKind: "reasonix", Enabled: enabled}); err != nil {
 			t.Fatal(err)
@@ -25,7 +26,7 @@ func TestPluginShowAgentOnlyPackage(t *testing.T) {
 				t.Fatalf("plugin show rc = %d", rc)
 			}
 		})
-		for _, want := range []string{"agents: 2", "agents:\n", "/orientation:agent:map\tMap the selected files", "/orientation:agent:check\t(no description)"} {
+		for _, want := range []string{"agents: 3", "agents:\n", "/orientation:agent:map\tMap the selected files", "/orientation:agent:check\t(no description)", "/orientation:agent:nested\tInspect nested files"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("enabled=%t: show missing %q:\n%s", enabled, want, out)
 			}

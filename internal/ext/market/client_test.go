@@ -148,7 +148,7 @@ func TestClientSortsFailuresByCause(t *testing.T) {
 }
 
 func TestSplitSlugRefusesPathTricks(t *testing.T) {
-	for _, s := range []string{"", "a", "a/b/c", "../b", "a/..", "a/b?x=1", "a/%2e%2e", `a\b/c`} {
+	for _, s := range []string{"", "a", "a/b/c", "../b", "a/..", ".b/c", "a/.b", "a/..b", "a/b?x=1", "a/%2e%2e", `a\b/c`} {
 		if _, _, err := SplitSlug(s); !errors.Is(err, ErrBadSlug) {
 			t.Errorf("SplitSlug(%q) accepted", s)
 		}

@@ -1,9 +1,11 @@
 package boot
 
 import (
+	"fmt"
 	"path/filepath"
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/state/sessionstore"
+	"slices"
 	"testing"
 
 	"reasonix/internal/contract/config"
@@ -75,7 +77,7 @@ func TestSubagentEffortRefHonorsPrecedence(t *testing.T) {
 		Name:   "review",
 		RunAs:  skill.RunSubagent,
 		Effort: "low",
-	})
+	}, nil)
 	if got != "max" {
 		t.Fatalf("per-skill effort config should override skill frontmatter and default, got %q", got)
 	}
@@ -84,12 +86,12 @@ func TestSubagentEffortRefHonorsPrecedence(t *testing.T) {
 		Name:   "custom",
 		RunAs:  skill.RunSubagent,
 		Effort: "medium",
-	})
+	}, nil)
 	if got != "medium" {
 		t.Fatalf("skill frontmatter effort should override default config, got %q", got)
 	}
 
-	got = subagentEffortRef(cfg, skill.Skill{Name: "other", RunAs: skill.RunSubagent})
+	got = subagentEffortRef(cfg, skill.Skill{Name: "other", RunAs: skill.RunSubagent}, nil)
 	if got != "high" {
 		t.Fatalf("default subagent effort = %q, want high", got)
 	}
@@ -99,7 +101,7 @@ func TestSubagentEffortRefAcceptsToolNameAliases(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agent.SubagentEfforts = map[string]string{"security_review": "max"}
 
-	got := subagentEffortRef(cfg, skill.Skill{Name: "security-review", RunAs: skill.RunSubagent})
+	got := subagentEffortRef(cfg, skill.Skill{Name: "security-review", RunAs: skill.RunSubagent}, nil)
 	if got != "max" {
 		t.Fatalf("security_review alias should configure security-review effort, got %q", got)
 	}
@@ -231,5 +233,258 @@ func TestSubagentBareModelStaysOnParentProvider(t *testing.T) {
 	}
 	if model, _ := sub.identity("shared-flash", ""); model != "relay/shared-flash" {
 		t.Fatalf("identity = %q, want relay/shared-flash", model)
+	}
+}
+
+type effortSelectionResolver struct {
+	selections   []provider.Selection
+	rejectEffort bool
+}
+
+func (r *effortSelectionResolver) Catalog() []provider.Descriptor { return nil }
+func (r *effortSelectionResolver) Resolve(selection provider.Selection) (provider.Provider, error) {
+	r.selections = append(r.selections, selection)
+	if r.rejectEffort && selection.Effort != nil && *selection.Effort != "" {
+		return nil, fmt.Errorf("provider rejected effort %q", *selection.Effort)
+	}
+	return nil, nil
+}
+
+func TestInheritedGlobalEffortDoesNotReachUnsupportedExecutionModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEffort = "max"
+	cfg.Providers = []config.ProviderEntry{{
+		Name: "custom", Kind: "openai", Models: []string{"fallback"}, Default: "fallback",
+		SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high",
+	}}
+	entry, ok := cfg.ResolveModel("custom/fallback")
+	if !ok {
+		t.Fatal("custom/fallback should resolve")
+	}
+	resolver := &effortSelectionResolver{rejectEffort: true}
+	sub := newSubagentConfig(Options{}, cfg, entry, "custom/fallback", resolver, netclient.ProxySpec{}, nil)
+
+	if sub.inheritedFor("") != "" {
+		t.Fatalf("inherited task effort = %q, want it dropped for unsupported model", sub.inheritedFor(""))
+	}
+	if cfg.Agent.SubagentEffort != "max" {
+		t.Fatalf("persistent subagent effort = %q, want max", cfg.Agent.SubagentEffort)
+	}
+	if _, _, _, err := sub.resolveProvider("", sub.inheritedFor("")); err != nil {
+		t.Fatalf("inherited effort should not make provider resolution fail: %v", err)
+	}
+	if len(resolver.selections) != 1 {
+		t.Fatalf("provider selections = %+v, want exactly one", resolver.selections)
+	}
+	if got := resolver.selections[0].Effort; got != nil && *got != entry.Effort {
+		t.Fatalf("provider effort = %q, want the parent's own effort %q", *got, entry.Effort)
+	}
+	model, effort := sub.identity("", sub.inheritedFor(""))
+	if model != "custom/fallback" || effort != "high" {
+		t.Fatalf("effective identity = %q/%q, want custom/fallback/high", model, effort)
+	}
+}
+
+func TestInheritedGlobalEffortDropsWhenCapabilityIsUnknown(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEffort = "max"
+
+	got := resolveInheritedSubagentEffort(cfg, &config.ProviderEntry{Name: "opaque", Model: "model"})
+	if got.value != "" || !got.dropped {
+		t.Fatalf("unknown effort capability = %+v, want dropped inherited default", got)
+	}
+}
+
+func TestInheritedGlobalEffortDoesNotRemapAcrossModels(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEffort = "max"
+
+	entry := &config.ProviderEntry{
+		Name:    "minimax",
+		Kind:    "openai",
+		BaseURL: "https://api.minimaxi.com/v1",
+		Model:   "MiniMax-M3",
+	}
+
+	got := resolveInheritedSubagentEffort(cfg, entry)
+	if got.value != "" || !got.dropped {
+		t.Fatalf("inherited max = %+v, want dropped instead of remapped", got)
+	}
+}
+
+func TestInheritedGlobalEffortKeepsDeepSeekContractAliases(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want string
+	}{
+		{raw: "off", want: "disabled"},
+		{raw: "medium", want: "high"},
+		{raw: "xhigh", want: "max"},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Agent.SubagentEffort = tc.raw
+			entry := &config.ProviderEntry{
+				Name:    "deepseek",
+				Kind:    "openai",
+				BaseURL: "https://api.deepseek.com/v1",
+				Model:   "deepseek-v4-pro",
+			}
+
+			got := resolveInheritedSubagentEffort(cfg, entry)
+			if got.dropped || got.value != tc.want {
+				t.Fatalf("inherited %q = %+v, want canonical %q", tc.raw, got, tc.want)
+			}
+			if cfg.Agent.SubagentEffort != tc.raw {
+				t.Fatalf("persistent subagent effort = %q, want %q", cfg.Agent.SubagentEffort, tc.raw)
+			}
+		})
+	}
+}
+
+func TestInheritedGlobalEffortKeepsSupportedExecutionModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEffort = "max"
+	cfg.Providers = []config.ProviderEntry{{
+		Name: "custom", Kind: "openai", Models: []string{"supported"}, Default: "supported",
+		SupportedEfforts: []string{"low", "high", "max"}, DefaultEffort: "high",
+	}}
+	entry, ok := cfg.ResolveModel("custom/supported")
+	if !ok {
+		t.Fatal("custom/supported should resolve")
+	}
+	resolver := &effortSelectionResolver{}
+	sub := newSubagentConfig(Options{}, cfg, entry, "custom/supported", resolver, netclient.ProxySpec{}, nil)
+
+	inherited := sub.inheritedFor("")
+	if inherited != "max" || sub.inheritedEffortDropped {
+		t.Fatalf("inherited effort state = %q/dropped=%v, want max/false", inherited, sub.inheritedEffortDropped)
+	}
+	if _, _, _, err := sub.resolveProvider("", inherited); err != nil {
+		t.Fatalf("supported inherited effort should resolve: %v", err)
+	}
+	if len(resolver.selections) != 1 || resolver.selections[0].Effort == nil || *resolver.selections[0].Effort != "max" {
+		t.Fatalf("provider selections = %+v, want max override", resolver.selections)
+	}
+	model, effort := sub.identity("", inherited)
+	if model != "custom/supported" || effort != "max" {
+		t.Fatalf("effective identity = %q/%q, want custom/supported/max", model, effort)
+	}
+	profile := skillProfile(cfg, sub.inheritedFor)(skill.Skill{Name: "review", RunAs: skill.RunSubagent})
+	if profile == nil || profile.Effort != "max" {
+		t.Fatalf("skill profile = %+v, want inherited max", profile)
+	}
+}
+
+func TestSubagentEffortOverridesRemainStrict(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEfforts = map[string]string{"task": "max"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name: "custom", Kind: "openai", Models: []string{"fallback"}, Default: "fallback",
+		SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high",
+	}}
+	entry, ok := cfg.ResolveModel("custom/fallback")
+	if !ok {
+		t.Fatal("custom/fallback should resolve")
+	}
+	resolver := &effortSelectionResolver{rejectEffort: true}
+	sub := newSubagentConfig(Options{}, cfg, entry, "custom/fallback", resolver, netclient.ProxySpec{}, nil)
+
+	if sub.taskEffort != "max" {
+		t.Fatalf("task-specific effort = %q, want max", sub.taskEffort)
+	}
+	if _, _, _, err := sub.resolveProvider("", sub.taskEffort); err == nil {
+		t.Fatal("task-specific unsupported effort should remain strict")
+	}
+	if cfg.Agent.SubagentEfforts["task"] != "max" {
+		t.Fatalf("task-specific persistent effort changed: %q", cfg.Agent.SubagentEfforts["task"])
+	}
+}
+
+func TestExplicitSubagentModelAndGlobalEffortRemainStrict(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentModel = "custom/fallback"
+	cfg.Agent.SubagentEffort = "max"
+	cfg.Providers = []config.ProviderEntry{{
+		Name: "custom", Kind: "openai", Models: []string{"fallback"}, Default: "fallback",
+		SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high",
+	}}
+	entry, ok := cfg.ResolveModel("custom/fallback")
+	if !ok {
+		t.Fatal("custom/fallback should resolve")
+	}
+	resolver := &effortSelectionResolver{rejectEffort: true}
+	sub := newSubagentConfig(Options{}, cfg, entry, "custom/fallback", resolver, netclient.ProxySpec{}, nil)
+
+	pairEffort := sub.inheritedFor(sub.taskModel)
+	if sub.taskModel != "custom/fallback" || pairEffort != "max" || sub.inheritedEffortDropped {
+		t.Fatalf("explicit pair = %q/%q/dropped=%v, want custom/fallback/max/false", sub.taskModel, pairEffort, sub.inheritedEffortDropped)
+	}
+	if _, _, _, err := sub.resolveProvider(sub.taskModel, pairEffort); err == nil {
+		t.Fatal("explicit model/effort pair should remain strict")
+	}
+}
+
+func TestSkillEffortUsesResolvedInheritedDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEffort = "max"
+	cfg.Providers = []config.ProviderEntry{{
+		Name: "custom", Kind: "openai", Models: []string{"fallback"}, Default: "fallback",
+		SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high",
+	}}
+	entry, ok := cfg.ResolveModel("custom/fallback")
+	if !ok {
+		t.Fatal("custom/fallback should resolve")
+	}
+	resolver := &effortSelectionResolver{rejectEffort: true}
+	sub := newSubagentConfig(Options{}, cfg, entry, "custom/fallback", resolver, netclient.ProxySpec{}, nil)
+	runner := &skillSubagents{
+		cfg:             cfg,
+		provider:        nil,
+		entry:           entry,
+		inheritedFor:    sub.inheritedFor,
+		resolveProvider: sub.resolveProvider,
+	}
+
+	_, _, _, modelRef, effortRef, err := runner.resolveModel(skill.Skill{Name: "review", RunAs: skill.RunSubagent})
+	if err != nil {
+		t.Fatalf("skill without own effort should use provider default: %v", err)
+	}
+	if modelRef != "" || effortRef != "" || len(resolver.selections) != 0 {
+		t.Fatalf("skill resolution = %q/%q, selections=%+v; want no override", modelRef, effortRef, resolver.selections)
+	}
+
+	_, _, _, _, _, err = runner.resolveModel(skill.Skill{Name: "review", RunAs: skill.RunSubagent, Effort: "max"})
+	if err == nil {
+		t.Fatal("explicit skill effort should remain strict")
+	}
+	if got := skillProfile(cfg, sub.inheritedFor)(skill.Skill{Name: "review", RunAs: skill.RunSubagent}); got != nil {
+		t.Fatalf("fallback skill profile = %+v, want no stale inherited effort", got)
+	}
+}
+
+// The settings page shows subagent_model; a subagent_models entry beats it for
+// its profile. The task profile is the one the generic delegate reads, so the
+// override list must name exactly the entry that decides its model.
+func TestSubagentModelOverridesNameTheEntryThatDecidesTheTaskModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentModel = "mimo-pro"
+	cfg.Agent.SubagentModels = map[string]string{"task": "deepseek-pro", "review": " ", "explore": "mimo-flash"}
+
+	got := SubagentModelOverrides(cfg)
+	want := []SubagentModelOverride{{Key: "explore", Model: "mimo-flash"}, {Key: "task", Model: "deepseek-pro"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("overrides = %+v, want %+v (blank entries override nothing)", got, want)
+	}
+	sub := newSubagentConfig(Options{}, cfg, nil, "", nil, netclient.ProxySpec{}, nil)
+	if sub.taskModel != "deepseek-pro" {
+		t.Fatalf("task model = %q, want the subagent_models.task entry the list reports", sub.taskModel)
+	}
+	if ref := subagentModelRef(cfg, skill.Skill{Name: "explore", RunAs: skill.RunSubagent}); ref != "mimo-flash" {
+		t.Fatalf("explore model = %q, want its subagent_models entry", ref)
+	}
+	cfg.Agent.SubagentModels = nil
+	if len(SubagentModelOverrides(cfg)) != 0 {
+		t.Fatal("no entries must report no overrides")
 	}
 }

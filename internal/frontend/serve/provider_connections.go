@@ -173,6 +173,10 @@ func (s *Server) connectionSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.saveConnectionCredential(r.Context(), body); err != nil {
+		if errors.Is(err, config.ErrCredentialValueUnstorable) {
+			refuse(w, http.StatusBadRequest, "provider.key_unstorable", "this key contains a character combination that cannot be stored safely; re-copy it", nil)
+			return
+		}
 		var named *coded
 		if errors.As(err, &named) {
 			writeErr(w, http.StatusInternalServerError, err)

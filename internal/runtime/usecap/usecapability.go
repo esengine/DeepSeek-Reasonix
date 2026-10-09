@@ -671,6 +671,19 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 	}
 }
 
+// TargetArgs is what a call action forwards to its target, read without
+// resolving it; every other action forwards nothing.
+func (*UseCapabilityTool) TargetArgs(args json.RawMessage) json.RawMessage {
+	var p struct {
+		Action    string          `json:"action"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if json.Unmarshal(args, &p) != nil || strings.ToLower(strings.TrimSpace(p.Action)) != "call" {
+		return nil
+	}
+	return p.Arguments
+}
+
 func (t *UseCapabilityTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	resolved, err := t.ResolveCall(ctx, args)
 	if err != nil {
@@ -1478,8 +1491,9 @@ func parseMCPCapabilityID(id string) (server, raw string, err error) {
 
 // Ensure UseCapabilityTool satisfies the tool contracts used by the agent.
 var (
-	_ tool.Tool         = (*UseCapabilityTool)(nil)
-	_ tool.CallResolver = (*UseCapabilityTool)(nil)
+	_ tool.Tool             = (*UseCapabilityTool)(nil)
+	_ tool.CallResolver     = (*UseCapabilityTool)(nil)
+	_ tool.TargetArgsReader = (*UseCapabilityTool)(nil)
 )
 
 // EmitProxyAudit is a helper for frontends: returns a notice describing the

@@ -11,6 +11,10 @@ param(
     [Parameter(ParameterSetName = "Payload")]
     [string]$DigestPath,
 
+    [Parameter(Mandatory = $true, ParameterSetName = "Payload")]
+    [ValidateSet("amd64", "arm64")]
+    [string]$Architecture,
+
     [Parameter(Mandatory = $true, ParameterSetName = "File")]
     [string]$FilePath,
 
@@ -33,6 +37,7 @@ if ($PSCmdlet.ParameterSetName -eq "File") {
 
 $root = (Resolve-Path -LiteralPath $PayloadDirectory).Path
 Assert-DeclaredPeSet -Root $root
+Assert-PeArchitecture -Root $root -Architecture $Architecture
 foreach ($name in $script:ReleaseSignedPe) {
     Assert-EmbeddedSignature -Path (Join-Path $root $name) -Thumbprint $ExpectedThumbprint -Subject $ExpectedSubject
 }

@@ -6,6 +6,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"strings"
 
+	"reasonix/internal/assembly/boot"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/store"
 )
@@ -113,6 +115,32 @@ func (s *Server) resumeInto(path string) (int, error) {
 			return http.StatusInternalServerError, refusal(http.StatusInternalServerError, "session.bind_failed", errors.New("session authority: unable to bind resumed session"), nil)
 		}
 	}
+	s.adoptSessionModelLocked(realPath)
 	s.bc.ResetSession()
 	return http.StatusNoContent, nil
+}
+
+// adoptSessionModelLocked rebuilds the runtime on the model the target session
+// last ran on, once the resume and its lease have landed. A session another
+// runtime holds cannot be rebound, so it stays on the current model.
+// A pane resolving through the hub has no local catalog to check the ref against.
+func (s *Server) adoptSessionModelLocked(path string) {
+	if s.resolver != nil {
+		return
+	}
+	cur := s.ctl()
+	cfg, err := runtimeConfig(cur)
+	if err != nil {
+		return
+	}
+	ref := boot.ModelForResume("", path, cfg)
+	if ref == "" {
+		return
+	}
+	if target, ok := runtimeTargetForModel(cur, ref); ok && runtimeSelectionMatches(cur, target) {
+		return
+	}
+	if err := s.switchModelLocked(context.Background(), ref); err != nil {
+		slog.Warn("serve: restore session model failed", "ref", ref)
+	}
 }

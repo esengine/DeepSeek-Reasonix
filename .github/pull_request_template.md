@@ -8,6 +8,34 @@ only, on `main-v2`.
 
 -
 
+## Cause
+
+-
+
+## Blast radius
+
+-
+
+## Neighbouring behaviours tested
+
+-
+
+## Why this layer
+
+-
+
+## UI changes
+
+<!--
+Delete this section if the PR touches nothing under `desktop/frontend-next/src`
+or the website pages.
+-->
+
+- Screenshots, before and after: light and dark, a wide window and a phone-width one (about 390 px). Attach them to this description.
+- Entries moved, hidden or removed: none / list each one.
+- Hiding or removing a visible control needs a linked issue and a release-notes line naming it. Do not retire UI with `display: none !important` or a feature flag.
+- If a row of `docs/STUDIO_PARITY.md` changes, update it here.
+
 ## Issues
 
 <!--
@@ -26,3 +54,7 @@ the source-to-target contract here: easing syntax, time units, callbacks,
 cancellation, reduced-motion behavior, and failure fallback. Verification must
 assert that the target API was actually called; a mock that silently skips it
 does not count.
+
+## Disclosure
+
+- [ ] AI assistance was used for this change (optional; for transparency only, it does not change how the change is reviewed)

@@ -32,8 +32,12 @@ type BranchMeta struct {
 	// Archived removes a finished conversation from the everyday session list
 	// without moving or deleting its transcript. Keeping this as metadata makes
 	// archive/unarchive atomic and preserves every sidecar needed to resume it.
-	Archived bool   `json:"archived,omitempty"`
-	Model    string `json:"model,omitempty"`
+	Archived bool `json:"archived,omitempty"`
+	// FinishedAt and ViewedAt are the two facts behind Unread. Both are optional:
+	// a sidecar written before they existed reads as seen.
+	FinishedAt time.Time `json:"finished_at,omitzero"`
+	ViewedAt   time.Time `json:"viewed_at,omitzero"`
+	Model      string    `json:"model,omitempty"`
 	// TokenMode is the legacy dual-write value (economy|full|delivery). Prefer
 	// AgentPreset (balanced|delivery) when both are present.
 	TokenMode string `json:"token_mode,omitempty"`

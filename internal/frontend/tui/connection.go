@@ -28,7 +28,9 @@ type Connection struct {
 // SetupState is whether the session still owes a key, so the panel can open
 // itself on a first run.
 type SetupState struct {
-	Required bool `json:"required"`
+	Required bool   `json:"required"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 func (c *Client) SetupState(ctx context.Context) (SetupState, error) {
@@ -109,11 +111,33 @@ func (m *model) openSetup() tea.Cmd {
 	}
 }
 
+// onSent handles a turn the kernel refused for want of a key: the line
+// returns to the composer, since nothing was sent.
+func (m *model) onSent(msg sentMsg) tea.Cmd {
+	switch {
+	case msg.err == nil:
+		return nil
+	case Code(msg.err) == CodeKeyMissing:
+		if m.composer.Value() == "" {
+			m.composer.SetValue(msg.display)
+		}
+		m.tr.AddNotice("warn", i18n.M.SetupTurnRefused)
+	default:
+		m.tr.AddNotice("error", "send: "+msg.err.Error())
+	}
+	return m.commit()
+}
+
 func (m *model) onSetupState(msg setupStateMsg) tea.Cmd {
 	if msg.err != nil || !msg.state.Required || m.setup != nil {
 		return nil
 	}
-	return m.openSetup()
+	label := msg.state.Provider
+	if msg.state.Model != "" {
+		label += "/" + msg.state.Model
+	}
+	m.tr.AddNotice("warn", fmt.Sprintf(i18n.M.SetupOwed, label))
+	return tea.Batch(m.commit(), m.openSetup())
 }
 
 func (m *model) onConnections(msg connectionsMsg) tea.Cmd {

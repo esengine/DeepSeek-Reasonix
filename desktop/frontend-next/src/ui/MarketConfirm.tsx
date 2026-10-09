@@ -36,7 +36,7 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
     (g) => g.actions.length > 0,
   );
   return (
-    <div className="mkt addpkg" data-stage="confirm">
+    <div className="mkt addpkg" data-stage="confirm" aria-busy={busy}>
       {plan.unreviewed && (own ? (
         <div className="find" data-lvl="warn" data-unreviewed="">
           <span className="t">{t("未审核 · 仅你可见")}</span>
@@ -68,7 +68,7 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
             ))}
           </ul>
           <label className="mkt-seen">
-            <input type="checkbox" data-action="market.confirm-many" checked={seen} onChange={(e) => setSeen(e.target.checked)} />
+            <input type="checkbox" data-action="market.confirm-many" disabled={busy} checked={seen} onChange={(e) => setSeen(e.target.checked)} />
             {t("我已看过这 {n} 个技能，全部安装", { n: skills.length })}
           </label>
         </div>
@@ -95,7 +95,7 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
           {t(busy ? "安装中…" : "安装")}
         </button>
       </div>
-      {error && <div className="why">{error}</div>}
+      {error && <div className="why" role="alert">{error}</div>}
     </div>
   );
 }

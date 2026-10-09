@@ -118,7 +118,7 @@ func (s *lazySpawn) run() {
 	real, err := s.host.EnsureConnectedWithLifecycle(s.ctx, startupCtx, s.spec, s.generation)
 	cancel()
 	if err != nil {
-		err = newStartupFailure("connect", started, "", err)
+		err = newStartupFailure("connect", started, 0, err)
 	}
 	var cacheTools []tool.Tool
 	s.mu.Lock()

@@ -166,6 +166,9 @@ type SessionHistory interface {
 	ContextReport() (summary, detail string)
 	SummarizeFrom(ctx context.Context, turn int) error
 	SummarizeUpTo(ctx context.Context, turn int) error
+	// MarkSessionViewed clears the session's unread mark: a turn finished since
+	// the person last looked. It writes the session sidecar only.
+	MarkSessionViewed() error
 }
 
 // MemoryControl covers session/project memory reads and mutations.
@@ -204,6 +207,7 @@ type Skills interface {
 	AllSkills() []skill.Skill
 	DisabledSkills() []skill.Skill
 	SkillEnabled(name string) bool
+	SkillActivation() func(name string) bool
 	SkillOverrideScope(name string) (config.ActivationScope, bool)
 	SetSkillEnabled(name string, scope config.ActivationScope, enabled bool) error
 	ClearSkillOverride(name string, scope config.ActivationScope) error
@@ -240,6 +244,7 @@ type MCPControl interface {
 	RemoveMCPServer(name string) (disconnected bool, err error)
 	ConfiguredMCPNames() []string
 	ConfiguredMCPServers() []MCPServerState
+	MCPServerHealth() []MCPHealth
 	MCPCatalogTools() map[string]int
 	DisconnectedMCPNames() []string
 	UnregisterMCPServerTools(name string) bool
@@ -266,6 +271,8 @@ type RuntimeSettings interface {
 	SaveBrowserToolsSettings(enabled bool) error
 	CompactionSettings() CompactionSettings
 	SaveCompactionSettings(softLimitTokens int) error
+	DisplayCurrencySettings() DisplayCurrencySettings
+	SaveDisplayCurrency(mode string) error
 	ProgressWatchSettings() ProgressWatchSettings
 	SaveProgressWatchSettings(in ProgressWatchSettings) error
 	ConfigProblem() *ConfigProblem
@@ -363,6 +370,7 @@ type Settings interface {
 	SetReasoningLanguage(lang string)
 	SetDisplayRecorder(fn func(content, display string))
 	ModelModes() []ModelModeView
+	ModelFace() (ModelFace, bool)
 	SetModelMode(id string) error
 }
 
@@ -379,6 +387,14 @@ type Provenance interface {
 // the full port names it: an editor has no prompt of its own to type one at.
 type LocalShell interface {
 	RunShellWith(command string, opts ShellRun)
+}
+
+// Commits proposes a commit message for the staged changes and records a local
+// commit once the person has confirmed the text. It never stages, pushes or
+// rewrites history.
+type Commits interface {
+	ProposeCommit(ctx context.Context) (CommitProposal, error)
+	CommitStaged(ctx context.Context, req CommitRequest) (CommitResult, error)
 }
 
 // SessionAPI is the full driving port — the composition of every sub-port, for
@@ -404,6 +420,7 @@ type SessionAPI interface {
 	LocalShell
 	DiffRendering
 	Feedback
+	Commits
 }
 
 // EditorAPI is what an editor integration drives over ACP: turns, approvals and

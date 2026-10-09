@@ -122,6 +122,7 @@ func registerSkillTools(reg *tool.Registry, set ablation.Set, store *skill.Store
 				Description: sk.Description,
 				ArgHint:     sk.ArgumentHint,
 				Skill:       true,
+				Unlisted:    func() bool { return !store.PathHits().Eligible(sk) },
 				Render: func(args []string) string {
 					cur, err := store.ForModel(name)
 					if err != nil {
@@ -182,7 +183,7 @@ func newCapabilitySurface(ctx context.Context, cfg *config.Config, root string, 
 		}
 		catOpts := capability.CatalogOptions{
 			Tools:       reg.AllContractEntries(),
-			Skills:      skill.ModelInvocable(skills.List()),
+			Skills:      skills.PathHits().Visible(skill.ModelInvocable(skills.List())),
 			Plugins:     cfg.Plugins,
 			Profile:     profile,
 			Connected:   conn,

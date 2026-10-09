@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -50,6 +51,8 @@ type DeviceShare struct {
 	live            *shareListener
 	cloudDisconnect func(string) error
 	cloudStatus     func() CloudRemoteStatus
+	port            int
+	persistPort     func(int) error
 }
 
 type shareListener struct {
@@ -85,6 +88,7 @@ var addressRank = map[AddressKind]int{AddressLAN: 0, AddressTailnet: 1, AddressV
 // ShareStatus is the whole state a window draws its sharing panel from.
 type ShareStatus struct {
 	Open         bool                  `json:"open"`
+	Port         int                   `json:"port,omitempty"`
 	Origin       string                `json:"origin,omitempty"`
 	Addresses    []ShareAddress        `json:"addresses"`
 	Devices      []DeviceView          `json:"devices"`
@@ -101,6 +105,7 @@ type CloudRemoteStatus struct {
 	Name     string `json:"name,omitempty"`
 	Online   bool   `json:"online"`
 	Error    string `json:"error,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type CloudShareOffer struct {
@@ -118,7 +123,7 @@ type ShareOffer struct {
 
 // NewDeviceShare returns a closed share serving page to devices.
 func NewDeviceShare(page fs.FS) *DeviceShare {
-	return &DeviceShare{registry: NewDeviceRegistry(), cloud: newCloudPresence(), page: page, addresses: PrivateAddresses}
+	return &DeviceShare{registry: NewDeviceRegistry(), cloud: newCloudPresence(), page: page, addresses: PrivateAddresses, persistPort: persistSharePort}
 }
 
 // Attach names the handler devices reach. The hub is built after the share it
@@ -129,8 +134,8 @@ func (s *DeviceShare) Attach(h http.Handler) {
 	s.mu.Unlock()
 }
 
-// Open listens on ip, one of the addresses Status lists, on a port the system
-// picks. A share already open is closed first, so its devices go with it.
+// Open listens on ip, one of the addresses Status lists, on the configured port
+// or one the system picks. A share already open is closed first, so its devices go with it.
 func (s *DeviceShare) Open(ip string) (ShareStatus, error) {
 	if !slices.ContainsFunc(s.addresses(), func(a ShareAddress) bool { return a.IP == ip }) {
 		return s.Status(), ErrShareAddress
@@ -144,8 +149,11 @@ func (s *DeviceShare) Open(ip string) (ShareStatus, error) {
 	if handler == nil {
 		return s.Status(), ErrShareUnattached
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort(ip, "0"))
+	ln, err := net.Listen("tcp", net.JoinHostPort(ip, s.listenPort()))
 	if err != nil {
+		if addrInUse(err) {
+			return s.Status(), fmt.Errorf("%w: %w", ErrSharePortInUse, err)
+		}
 		return s.Status(), err
 	}
 	origin := "http://" + ln.Addr().String()
@@ -252,8 +260,9 @@ func (s *DeviceShare) Status() ShareStatus {
 	s.mu.Lock()
 	live := s.live
 	cloudStatus := s.cloudStatus
+	port := s.port
 	s.mu.Unlock()
-	st := ShareStatus{Addresses: s.addresses(), Devices: s.registry.Devices(), CloudDevices: s.cloud.views()}
+	st := ShareStatus{Port: port, Addresses: s.addresses(), Devices: s.registry.Devices(), CloudDevices: s.cloud.views()}
 	if cloudStatus != nil {
 		st.CloudRemote = cloudStatus()
 	}

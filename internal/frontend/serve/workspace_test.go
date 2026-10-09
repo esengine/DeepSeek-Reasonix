@@ -35,6 +35,7 @@ func TestWorkspaceSwitchRefusedWithoutGrant(t *testing.T) {
 }
 
 func TestWorkspaceSwitchRebuildsAtNewRoot(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	dir := testenv.TempDir(t)
 	old := control.New(control.Options{})
 	replacement := control.New(control.Options{})

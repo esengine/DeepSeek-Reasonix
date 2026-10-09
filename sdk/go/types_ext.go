@@ -81,6 +81,9 @@ func (request ProviderRequest) Validate() error {
 	if request.MaxTokens < 0 {
 		return validationError("maxTokens must be non-negative")
 	}
+	if request.ResponseFormat != nil && strings.TrimSpace(request.ResponseFormat.Type) == "" {
+		return validationError("responseFormat.type must be non-empty")
+	}
 	for _, tool := range request.Tools {
 		parameters := bytes.TrimSpace(tool.Parameters)
 		if len(parameters) == 0 || parameters[0] != '{' || !json.Valid(parameters) {
@@ -92,8 +95,16 @@ func (request ProviderRequest) Validate() error {
 
 // Validate enforces chunk invariants the tags cannot express.
 func (chunk ProviderChunk) Validate() error {
+	switch chunk.Type {
+	case ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError:
+	default:
+		return validationError("chunk type must be a registered provider chunk type")
+	}
 	if chunk.ArgChars < 0 {
 		return validationError("argChars must be non-negative")
+	}
+	if call := chunk.ToolCall; call != nil && (strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.Name) == "") {
+		return validationError("tool call id and name must be non-empty")
 	}
 	if chunk.Type == ChunkError && chunk.Error == nil {
 		return validationError("error chunks require error")
@@ -103,6 +114,13 @@ func (chunk ProviderChunk) Validate() error {
 	}
 	if chunk.Type == ChunkUsage && chunk.Usage == nil {
 		return validationError("usage chunks require usage")
+	}
+	if usage := chunk.Usage; usage != nil {
+		for _, tokens := range []int{usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CacheHitTokens, usage.CacheMissTokens, usage.ReasoningTokens} {
+			if tokens < 0 {
+				return validationError("usage token counts must be non-negative")
+			}
+		}
 	}
 	return nil
 }

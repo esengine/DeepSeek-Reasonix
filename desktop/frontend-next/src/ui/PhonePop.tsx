@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { HubPort } from "../port/hub";
-import type { CloudDevice, PairedDevice } from "../port/share";
+import type { CloudDevice, CloudRemoteStatus, PairedDevice } from "../port/share";
 import { copyText } from "./CopyButton";
 import { useDismiss } from "./dismiss";
 import { clock, deviceLabel, type Share, useShare } from "./PhoneAccess";
@@ -107,6 +107,20 @@ export function cloudPresenceNote(prev: CloudDevice[], next: CloudDevice[]): str
   if (connected) return t("Web Studio 已连接");
   const disconnected = prev.find((device) => !next.some((now) => now.id === device.id));
   return disconnected ? t("Web Studio 已断开") : "";
+}
+
+function cloudRemoteNote(status: CloudRemoteStatus | undefined): string {
+  if (status?.online) {
+    return t("互联网连接需要登录同一账号，内容端到端加密；局域网直连只在可信网络中开启。");
+  }
+  switch (status?.reason) {
+    case "relay_unreachable":
+      return t("中转服务暂时无法连接，请检查网络或代理设置后重试。");
+    case "relay_refused":
+      return t("中转服务拒绝了这台设备的连接，请稍后重试。");
+    default:
+      return t("登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。");
+  }
 }
 
 /** A line under the button when a phone comes or goes, for as long as it takes
@@ -306,9 +320,7 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
       )}
 
       <p className="pc-note">
-        {st.cloudRemote?.online
-          ? t("互联网连接需要登录同一账号，内容端到端加密；局域网直连只在可信网络中开启。")
-          : t("登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。")}
+        {cloudRemoteNote(st.cloudRemote)}
       </p>
     </div>
   );

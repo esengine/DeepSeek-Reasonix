@@ -1,6 +1,7 @@
 package mcpsetup
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -53,5 +54,39 @@ func TestParseCopiedMCPAddRejectsIncompleteArguments(t *testing.T) {
 				t.Fatal("incomplete MCP add accepted as a server command")
 			}
 		})
+	}
+}
+
+func TestParseCopiedMCPAddRecognizesLaunchers(t *testing.T) {
+	for _, launcher := range []string{"reasonix", "reasonix.exe", "REASONIX.EXE", filepath.Join(".", "bin", "reasonix"), filepath.Join("My Apps", "reasonix.exe")} {
+		t.Run(launcher, func(t *testing.T) {
+			prefix := `"` + launcher + `" mcp add `
+			want := config.PluginEntry{Name: "docs", Command: "node", Args: []string{"docs_server.js", "--mode", "fixture"}, Env: map[string]string{"MODE": "fixture"}}
+			draft, err := Parse(prefix + `docs --env MODE=fixture node docs_server.js --mode fixture`)
+			if err != nil || len(draft.Entries) != 1 || !reflect.DeepEqual(draft.Entries[0], want) {
+				t.Fatalf("stdio entries=%+v, err=%v, want %+v", draft.Entries, err, want)
+			}
+			want = config.PluginEntry{Name: "docs", Type: "http", URL: "https://mcp.example.test/endpoint", Headers: map[string]string{"Authorization": "Bearer fixture-token"}}
+			draft, err = Parse(prefix + `docs --http https://mcp.example.test/endpoint --header "Authorization=Bearer fixture-token"`)
+			if err != nil || len(draft.Entries) != 1 || !reflect.DeepEqual(draft.Entries[0], want) {
+				t.Fatalf("remote entries=%+v, err=%v, want %+v", draft.Entries, err, want)
+			}
+			if hasKind(draft.Risks, "shell") || !hasKind(draft.Risks, "unknown-host") || !hasKind(draft.Risks, "secret") {
+				t.Errorf("remote risks=%+v", draft.Risks)
+			}
+			for _, arguments := range []string{"", "--", "docs --http"} {
+				if _, err := Parse(prefix + arguments); err == nil {
+					t.Errorf("incomplete %q accepted", prefix+arguments)
+				}
+			}
+			draft, err = Parse(`"` + launcher + `" --stdio`)
+			if err != nil || len(draft.Entries) != 1 || draft.Entries[0].Command != launcher || !reflect.DeepEqual(draft.Entries[0].Args, []string{"--stdio"}) {
+				t.Fatalf("bare executable entries=%+v, err=%v", draft.Entries, err)
+			}
+		})
+	}
+	draft, err := Parse(`reasonix-helper.exe mcp add -- node docs_server.js`)
+	if err != nil || len(draft.Entries) != 1 || draft.Entries[0].Command != "reasonix-helper.exe" || !reflect.DeepEqual(draft.Entries[0].Args, []string{"mcp", "add", "--", "node", "docs_server.js"}) {
+		t.Fatalf("other executable entries=%+v, err=%v", draft.Entries, err)
 	}
 }

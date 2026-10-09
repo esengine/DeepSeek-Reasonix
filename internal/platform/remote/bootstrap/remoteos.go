@@ -30,6 +30,8 @@ type remoteOS interface {
 	Downloader() string
 	Alive(pid int, p StatePaths) string
 	Stop(pid int, p StatePaths) string
+	// ServeVersion prints the --version of the binary a running pid was started from.
+	ServeVersion(pid int) string
 	Logs(logFile string, n int) string
 	Locate(uploadedBin string, flags []string) string
 	// NPMVersion asks npm what it is. Empty output means no npm, which is the

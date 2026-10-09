@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { t } from "../i18n";
-import type { ModelEntry, RoleAssignments } from "../port/port";
+import type { ModelEntry, RoleAssignments, RoleOverride } from "../port/port";
 import { activeKind, contextLabel, groupVendors, type Vendor } from "./Models";
 import { orderAccounts, useProviderOrder } from "../state/providerorder";
 
@@ -39,11 +39,14 @@ interface Props {
   protocol: Record<string, string>;
   onMain: (ref: string) => void;
   onRole: (role: string, ref: string) => void;
+  // Entries that win over a role's own row, so the row is not what runs.
+  overrides?: Record<string, RoleOverride[]>;
+  onClearOverride?: (role: string, key: string) => void;
 }
 
 // One row per job: what it is for, which model does it, and which service that
 // model is reached through.
-export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole }: Props) {
+export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole, overrides, onClearOverride }: Props) {
   const order = useProviderOrder();
   const vendors = useMemo(() => orderAccounts(groupVendors(models), order), [models, order]);
   const serviceOf = (ref?: string) => vendors.find((v) => Object.values(v.byKind).some((list) => list.some((m) => m.ref === ref)))?.label ?? "";
@@ -51,7 +54,13 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
 
   if (models.length === 0) return <div className="empty">{t("无法读取模型列表。")}</div>;
 
-  const current = byRef(main);
+  // This pane is about the configuration, so its default row shows the model the
+  // kernel starts new sessions on — the entry the catalog marks default — and not
+  // whichever model the session in front happens to be on. `main` stays that
+  // session model, which still decides each vendor's protocol.
+  const configured = models.find((m) => m.default)?.ref;
+  const shown = configured || main;
+  const shownModel = byRef(shown);
   // What an attachment reaches: the vision role if assigned, else the sub-agent
   // it would be handed to, else the main model.
   const visionRef = roles?.vision || roles?.subagent || main;
@@ -68,10 +77,10 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
         <div className="usage-row" role="row">
           <span className="usage-job" role="rowheader"><b>{t("默认模型")}</b><small>{t("当前对话和大多数任务")}</small></span>
           <span role="cell">
-            <Choices vendors={vendors} protocol={protocol} main={main} value={main ?? ""} answers="chat"
+            <Choices vendors={vendors} protocol={protocol} main={main} value={shown ?? ""} answers="chat"
               label={t("默认模型")} disabled={busy !== ""} onPick={onMain} />
           </span>
-          <span className="usage-conn" role="cell">{serviceOf(main)}<small>{traits(current)}</small></span>
+          <span className="usage-conn" role="cell">{serviceOf(shown)}<small>{traits(shownModel)}</small></span>
         </div>
         {roles && ROLES.map(([key, name, tag, answers]) => {
           const set = roles[key];
@@ -85,6 +94,18 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
                   label={t(name)} role disabled={busy !== "" || none}
                   empty={t(answers === "chat" ? "跟随主模型" : none ? "尚无可用来源" : "不使用")}
                   onPick={(ref) => onRole(key, ref)} />
+                {(overrides?.[key] ?? []).map((o) => (
+                  <span className="usage-override" key={o.key} data-scope={o.scope}>
+                    <span>{t("「{key}」已被配置固定为 {model}，这里的选择对它不起作用。", { key: o.key, model: o.model })}</span>
+                    {o.scope === "user" ? (
+                      <button type="button" data-action="roles.override.clear" disabled={busy !== ""} onClick={() => onClearOverride?.(key, o.key)}>
+                        {t("改回跟随这里")}
+                      </button>
+                    ) : (
+                      <small>{t("来自项目配置，需在项目里修改")}</small>
+                    )}
+                  </span>
+                ))}
               </span>
               <span className="usage-conn" role="cell" data-follow={!set && answers === "chat" ? "" : undefined}>
                 {set ? serviceOf(set) : answers === "chat" ? t("随主模型") : none ? t("在「模型服务」添加决策来源") : ""}

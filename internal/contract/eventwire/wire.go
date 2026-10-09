@@ -59,11 +59,15 @@ type Event struct {
 	HostAuthored bool `json:"hostAuthored,omitempty"`
 	// Which model wrote this. None means the turn's own, which a client
 	// reading it off the composer instead got wrong once the setting moved.
-	ModelRef      string         `json:"modelRef,omitempty"`
-	RetryAttempt  int            `json:"retryAttempt,omitempty"`
-	RetryMax      int            `json:"retryMax,omitempty"`
-	RetryScope    string         `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
-	StreamAttempt *StreamAttempt `json:"streamAttempt,omitempty"`
+	ModelRef         string         `json:"modelRef,omitempty"`
+	RetryAttempt     int            `json:"retryAttempt,omitempty"`
+	RetryMax         int            `json:"retryMax,omitempty"`
+	RetryScope       string         `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
+	RetryCause       string         `json:"retryCause,omitempty"`
+	RetryStatus      int            `json:"retryStatus,omitempty"`
+	RetryDelayMs     int64          `json:"retryDelayMs,omitempty"`
+	RetryTimeoutSecs int            `json:"retryTimeoutSecs,omitempty"`
+	StreamAttempt    *StreamAttempt `json:"streamAttempt,omitempty"`
 	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable
 	// session-inbox entry. Empty for legacy text-only guidance.
 	ItemID    string            `json:"itemId,omitempty"`
@@ -137,6 +141,7 @@ func ToWire(e event.Event) Event {
 	switch e.Kind {
 	case event.Notice:
 		w.Code = e.Code
+		w.WorkspaceLease = toWireWorkspaceLease(e.WorkspaceLease)
 		if e.DecisionReceipt != nil {
 			w.DecisionReceipt = ToWireDecisionReceipt(e.DecisionReceipt)
 		}
@@ -198,11 +203,7 @@ func ToWire(e event.Event) Event {
 			w.Err = e.Err.Error()
 		}
 	case event.Retrying:
-		w.RetryAttempt = e.RetryAttempt
-		w.RetryMax = e.RetryMax
-		if e.RetryScope != "" {
-			w.RetryScope = string(e.RetryScope)
-		}
+		w.setRetry(e)
 	case event.StreamAttempt:
 		w.StreamAttempt = &StreamAttempt{
 			ID:      e.StreamAttempt.ID,
@@ -359,6 +360,7 @@ type Compaction struct {
 	// declared window reads as when nothing names the boundary that fired.
 	Boundary      string `json:"boundary,omitempty"`
 	TriggerTokens int    `json:"triggerTokens,omitempty"`
+	Code          string `json:"code,omitempty"` // why a fold installed nothing
 }
 
 func toWireCompaction(c event.Compaction) *Compaction {
@@ -368,7 +370,7 @@ func toWireCompaction(c event.Compaction) *Compaction {
 		SourceTokens: c.SourceTokens, ProjectionTokens: c.ProjectionTokens,
 		CoverageRequired: c.CoverageRequired, CoverageMissing: c.CoverageMissing,
 		CoverageBackstopped: c.CoverageBackstopped,
-		Boundary:            c.Boundary, TriggerTokens: c.TriggerTokens,
+		Boundary:            c.Boundary, TriggerTokens: c.TriggerTokens, Code: c.Code,
 	}
 }
 
@@ -437,8 +439,9 @@ func toWireTool(t event.Tool) *Tool {
 		ID: t.ID, Name: t.Name, Args: t.Args,
 		ResolvedName: t.ResolvedName, CapabilityID: t.CapabilityID,
 		Output: t.Output, Images: t.Images, Err: t.Err, RefusalCode: t.RefusalCode,
-		OutputDiff: t.OutputDiff,
-		ReadOnly:   t.ReadOnly, Truncated: t.Bound.Lossy(),
+		WorkspaceLease: toWireWorkspaceLease(t.WorkspaceLease),
+		OutputDiff:     t.OutputDiff,
+		ReadOnly:       t.ReadOnly, Truncated: t.Bound.Lossy(),
 		DurationMs: t.DurationMs, ContextTokens: t.ContextTokens(),
 		Partial: t.Partial, StartedAt: t.StartedAt, EndedAt: t.EndedAt,
 		ArgChars: t.ArgChars, Refreshed: t.Refreshed,
@@ -491,7 +494,8 @@ type Tool struct {
 	// RefusalCode is the host's dotted identity for a refusal. Err is only its
 	// wording, and a reader that has to tell one refusal from another cannot
 	// use a sentence.
-	RefusalCode string `json:"refusalCode,omitempty"`
+	RefusalCode    string          `json:"refusalCode,omitempty"`
+	WorkspaceLease *WorkspaceLease `json:"workspaceLease,omitempty"`
 	// OutputDiff marks a shell result whose whole output is a unified diff, so a
 	// frontend renders it as a diff. Set only when [agent].embedded_diff_detection
 	// is on.

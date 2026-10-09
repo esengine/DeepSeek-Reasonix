@@ -84,6 +84,14 @@ export interface BrowserToolsSettings {
 
 // When a run reads as no longer moving. Only the user file holds it: a
 // project file cannot pause the user's runs.
+export type DisplayCurrencyMode = "auto" | "CNY" | "USD";
+
+// Which currency costs are shown in; the user file holds it.
+export interface DisplayCurrencySettings {
+  mode: DisplayCurrencyMode;
+  path: string;
+}
+
 export interface ProgressWatchSettings {
   pause: boolean;
   rounds: number;

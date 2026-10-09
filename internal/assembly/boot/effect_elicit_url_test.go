@@ -41,6 +41,7 @@ func TestEffectYoloURLInteractionWaitsForHumanThroughBuild(t *testing.T) {
 	defer ctrl.Close()
 	ctrl.EnableInteractiveApproval()
 	ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	waitForCond(t, "lazy MCP server swapped its real tools in", 10*time.Second, func() bool { return ctrl.MCPCatalogTools()["external"] > 0 })
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	done := make(chan error, 1)

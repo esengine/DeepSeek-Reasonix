@@ -58,18 +58,38 @@ func (s *Store) putObject(data []byte, durable bool) (Digest, error) {
 	if err != nil {
 		return "", err
 	}
-	if existing, err := os.ReadFile(path); err == nil {
-		if !bytes.Equal(existing, data) {
-			return "", fmt.Errorf("%w: object %s does not hold the bytes it is named for", ErrTampered, d)
+	if exists, err := checkObjectFile(path, data, d); exists || err != nil {
+		if err != nil {
+			return "", err
 		}
 		return d, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("%w: %w", ErrUnwritable, err)
 	}
-	if err := writeFileAtomic(path, data, durable); err != nil {
-		return "", err
+	// Linking publishes immutable bytes without replacing another writer's object.
+	if err := writeFilePublished(path, data, durable, os.Link); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return "", err
+		}
+		if exists, checkErr := checkObjectFile(path, data, d); checkErr != nil {
+			return "", checkErr
+		} else if !exists {
+			return "", err
+		}
 	}
 	return d, nil
+}
+
+func checkObjectFile(path string, data []byte, d Digest) (bool, error) {
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", ErrUnwritable, err)
+	}
+	if !bytes.Equal(existing, data) {
+		return false, fmt.Errorf("%w: object %s does not hold the bytes it is named for", ErrTampered, d)
+	}
+	return true, nil
 }
 
 // Object returns the bytes named by d after checking they still hash to d.
@@ -94,6 +114,10 @@ func (s *Store) Object(d Digest) ([]byte, error) {
 // writeFileAtomic writes through a temporary sibling and renames it into place,
 // so a reader sees the previous file or the complete new one, never a prefix.
 func writeFileAtomic(path string, data []byte, durable bool) error {
+	return writeFilePublished(path, data, durable, os.Rename)
+}
+
+func writeFilePublished(path string, data []byte, durable bool, publish func(string, string) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("%w: %w", ErrUnwritable, err)
 	}
@@ -102,6 +126,7 @@ func writeFileAtomic(path string, data []byte, durable bool) error {
 		return fmt.Errorf("%w: %w", ErrUnwritable, err)
 	}
 	name := tmp.Name()
+	defer os.Remove(name)
 	_, werr := tmp.Write(data)
 	var serr error
 	if durable {
@@ -109,11 +134,9 @@ func writeFileAtomic(path string, data []byte, durable bool) error {
 	}
 	cerr := tmp.Close()
 	if err := errors.Join(werr, serr, cerr); err != nil {
-		_ = os.Remove(name)
 		return fmt.Errorf("%w: %w", ErrUnwritable, err)
 	}
-	if err := os.Rename(name, path); err != nil {
-		_ = os.Remove(name)
+	if err := publish(name, path); err != nil {
 		return fmt.Errorf("%w: %w", ErrUnwritable, err)
 	}
 	return nil

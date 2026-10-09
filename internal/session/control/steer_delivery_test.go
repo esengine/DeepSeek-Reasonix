@@ -93,7 +93,7 @@ func TestSteerUnreadAtTurnEndIsDeliveredAsAFollowup(t *testing.T) {
 	c.Submit("write me something")
 	select {
 	case <-prov.started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("the first turn never reached the provider")
 	}
 
@@ -112,7 +112,7 @@ func TestSteerUnreadAtTurnEndIsDeliveredAsAFollowup(t *testing.T) {
 	release()
 	waitIdleAdmission(t, c)
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for !prov.sawUserText("actually use plan B") {
 		if time.Now().After(deadline) {
 			meta, _, readErr := c.ReadInboxItem(rec.ItemID)

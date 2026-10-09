@@ -1048,11 +1048,11 @@ func normalizeLegacyMimoProviderCatalogs(c *Config) bool {
 		}
 		switch officialProviderHost(p.BaseURL) {
 		case "api.xiaomimimo.com":
-			if applyLegacyMimoCatalog(p, legacyMimoAPIModels(), []string{"mimo-v2.5", "mimo-v2-omni"}, "mimo-v2.5-pro") {
+			if applyLegacyMimoCatalog(p, legacyMimoAPIModels(), []string{"mimo-v2.5", "mimo-v2-omni"}, mimoModels[0]) {
 				changed = true
 			}
 		case "token-plan-cn.xiaomimimo.com":
-			if applyLegacyMimoCatalog(p, legacyMimoTokenPlanModels(), []string{"mimo-v2.5"}, "mimo-v2.5-pro") {
+			if applyLegacyMimoCatalog(p, legacyMimoTokenPlanModels(), []string{"mimo-v2.5"}, mimoModels[0]) {
 				changed = true
 			}
 		}
@@ -1077,7 +1077,9 @@ func applyLegacyMimoCatalog(p *ProviderEntry, models, visionModels []string, fal
 		currentDefault = strings.TrimSpace(p.Model)
 	}
 	p.Models = mergeModelLists(models, p.ModelList())
-	p.Model = p.Models[0]
+	if strings.TrimSpace(p.Model) == "" {
+		p.Model = p.Models[0]
+	}
 	p.Default = firstKnownModel(currentDefault, p.Models, fallbackDefault)
 	p.VisionModels = mergeModelLists(visionModels, p.VisionModels)
 	backfillOfficialContextWindow(p, 1_048_576)
@@ -1192,9 +1194,9 @@ func legacyOfficialProviderModel(name string) string {
 	case "deepseek-pro":
 		return deepSeekProModel
 	case "mimo", "xiaomi-mimo", "xiaomi_mimo", "mimo-api", "mimo-token-plan", "mimo-pro":
-		return "mimo-v2.5-pro"
+		return mimoModels[0]
 	case "mimo-flash":
-		return "mimo-v2.5"
+		return mimoModels[1]
 	default:
 		return ""
 	}
@@ -1284,11 +1286,11 @@ func legacyMimoProviderNameForRef(ref string) string {
 }
 
 func legacyMimoAPIModels() []string {
-	return []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
+	return append(slices.Clone(mimoPAYGModels), "mimo-v2-omni")
 }
 
 func legacyMimoTokenPlanModels() []string {
-	return []string{"mimo-v2.5-pro", "mimo-v2.5"}
+	return slices.Clone(mimoModels)
 }
 
 func legacyMimoCustomProvider(name string) ProviderEntry {
@@ -1301,7 +1303,7 @@ func legacyMimoCustomProvider(name string) ProviderEntry {
 			BaseURL:       "https://api.xiaomimimo.com/v1",
 			Models:        models,
 			VisionModels:  []string{"mimo-v2.5", "mimo-v2-omni"},
-			Default:       "mimo-v2.5-pro",
+			Default:       mimoModels[0],
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
 			Prices:        mimoDomesticPrices(models),
@@ -1315,7 +1317,7 @@ func legacyMimoCustomProvider(name string) ProviderEntry {
 			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
 			Models:        models,
 			VisionModels:  []string{"mimo-v2.5"},
-			Default:       "mimo-v2.5-pro",
+			Default:       mimoModels[0],
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
 			Prices:        mimoDomesticPrices(models),

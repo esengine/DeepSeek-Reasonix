@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // queueKernel answers the routes the local commands read and records every
@@ -248,5 +249,82 @@ func TestUsageLevelComesFromTheCommandNotItsWording(t *testing.T) {
 	}
 	if got := steerCommand(context.Background(), nil, ""); got.level != "warn" {
 		t.Fatalf("steer usage level = %q", got.level)
+	}
+}
+
+// 1.x lists the work tree and an unset effort in /status too; the footer
+// shows both, so the report must not drop what it compresses.
+func TestStatusCarriesTheWorkTreeAndTheDefaultEffort(t *testing.T) {
+	m, _ := queueModel(t, map[string]any{
+		"GET /status": map[string]any{
+			"label": "deepseek-chat", "modelRef": "deepseek/deepseek-chat", "toolApprovalMode": "ask",
+		},
+		"GET /workspace/git": map[string]any{
+			"repo": true, "name": "proj", "branch": "main", "added": 2, "removed": 1, "untracked": 3,
+		},
+	})
+	queueSend(m, "/status")
+	got := ansi.Strip(queueLastNotice(m))
+	for _, want := range []string{"model      deepseek/deepseek-chat", "effort     effort auto", "git        proj@main  +2 -1 ?3"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// "/rename <n> <title>" names the nth saved session, as 1.x does; without a
+// number the kernel renames the open one.
+func TestRenameByIndexTitlesTheNthSavedSession(t *testing.T) {
+	m, k := queueModel(t, map[string]any{
+		"GET /sessions": []map[string]any{{"name": "a", "path": "/s/a.jsonl", "current": true}, {"name": "b", "path": "/s/b.jsonl"}},
+	})
+	queueSend(m, "/rename 2 Release  notes")
+	if !strings.Contains(k.seen(), `POST /sessions/rename {"id":"b","title":"Release  notes"}`) {
+		t.Fatalf("rename did not target the second session:\n%s", k.seen())
+	}
+	if got := queueLastNotice(m); got != `session renamed to "Release  notes"` {
+		t.Fatalf("notice = %q", got)
+	}
+	queueSend(m, "/rename 9 x")
+	if got := queueLastNotice(m); !strings.Contains(got, "1–2") {
+		t.Fatalf("out-of-range notice = %q", got)
+	}
+}
+
+// "/resume <n>" continues the nth saved session in place, as 1.x does; a bare
+// /resume still opens the picker.
+func TestResumeByIndexContinuesTheNthSavedSession(t *testing.T) {
+	m, k := queueModel(t, map[string]any{
+		"GET /sessions": []map[string]any{{"name": "a", "path": "/s/a.jsonl", "current": true}, {"name": "b", "path": "/s/b.jsonl"}},
+	})
+	queueSend(m, "/resume 2")
+	if !strings.Contains(k.seen(), `POST /resume {"path":"/s/b.jsonl"}`) {
+		t.Fatalf("resume did not target the second session:\n%s", k.seen())
+	}
+	if m.picker != nil {
+		t.Fatal("an indexed /resume must not open the picker")
+	}
+
+	queueSend(m, "/resume 1")
+	if got := queueLastNotice(m); got != "already in that session" {
+		t.Fatalf("current-session notice = %q", got)
+	}
+	queueSend(m, "/resume 9")
+	if got := queueLastNotice(m); !strings.Contains(got, "1–2") {
+		t.Fatalf("out-of-range notice = %q", got)
+	}
+	m.tr.Running = true
+	queueSend(m, "/resume 2")
+	m.tr.Running = false
+	if got := queueLastNotice(m); got != "finish or cancel the current turn before resuming" {
+		t.Fatalf("mid-turn notice = %q", got)
+	}
+	if n := strings.Count(k.seen(), "POST /resume"); n != 1 {
+		t.Fatalf("refused indexes still reached the kernel (%d resumes):\n%s", n, k.seen())
+	}
+
+	queueSend(m, "/resume")
+	if m.picker == nil {
+		t.Fatal("a bare /resume must open the picker")
 	}
 }

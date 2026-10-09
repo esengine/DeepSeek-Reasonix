@@ -12,14 +12,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -289,20 +287,7 @@ func chdirTo(dir string) int {
 }
 
 func modelForResumePath(modelName, resumePath string, cfg *config.Config) string {
-	if strings.TrimSpace(modelName) != "" || strings.TrimSpace(resumePath) == "" {
-		return modelName
-	}
-	sessionModel, ok := sessionstore.LoadSessionModel(resumePath)
-	if !ok {
-		return modelName
-	}
-	if cfg == nil {
-		return sessionModel
-	}
-	if _, ok := cfg.ResolveModel(sessionModel); !ok {
-		return modelName
-	}
-	return sessionModel
+	return boot.ModelForResume(modelName, resumePath, cfg)
 }
 
 func loadResumableSession(path string) (*sessionstore.Session, error) {
@@ -1218,18 +1203,32 @@ func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []
 
 // ask prints a prompt to w and returns the entered line, or def if input is empty.
 func ask(in *bufio.Scanner, w io.Writer, label, def string) string {
+	answer, err := askAnswer(in, w, label, def)
+	if err != nil {
+		return def
+	}
+	return answer
+}
+
+// askAnswer is ask for a decision that must not default when nobody answered:
+// io.EOF or the reader's error says the input ended, an empty line is an answer
+// and takes def.
+func askAnswer(in *bufio.Scanner, w io.Writer, label, def string) (string, error) {
 	if def != "" {
 		fmt.Fprintf(w, "%s [%s]: ", label, def)
 	} else {
 		fmt.Fprintf(w, "%s: ", label)
 	}
 	if !in.Scan() {
-		return def
+		if err := in.Err(); err != nil {
+			return "", err
+		}
+		return "", io.EOF
 	}
 	if v := strings.TrimSpace(in.Text()); v != "" {
-		return v
+		return v, nil
 	}
-	return def
+	return def, nil
 }
 
 // isInteractive reports whether we're attached to a real terminal on both
@@ -1602,12 +1601,11 @@ func configCompactRatioCommand(args []string) int {
 		fmt.Printf("compact_ratio = %s (%s)\n", formatCompactRatioPercent(cfg.Agent.CompactRatio), compactRatioSource())
 		return 0
 	}
-	percent, err := strconv.ParseFloat(strings.TrimSpace(rest[0]), 64)
-	if err != nil || math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 65 || percent > 85 {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "compact ratio must be a percentage between 65 and 85")
+	ratio, err := parseCLICompactRatio(rest[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	ratio := percent / 100
 	path := config.UserConfigPath()
 	scope := "user"
 	if *local {
@@ -1671,12 +1669,12 @@ func formatCompactRatioPercent(ratio float64) string {
 }
 
 func configUsage() {
-	fmt.Print(`Usage:
+	fmt.Printf(`Usage:
   reasonix config reasoning-language [--local] [auto|zh|en]
-  reasonix config compact-ratio [--local] [65..85]
+  reasonix config compact-ratio [--local] [PERCENT] (%s)
   reasonix config currency [auto|CNY|USD]
   reasonix config telemetry [auto|on|off]
-`)
+`, compactRatioPercentageRequirement())
 }
 
 func configTelemetryUsage() {
@@ -1686,9 +1684,7 @@ func configTelemetryUsage() {
 }
 
 func configCompactRatioUsage() {
-	fmt.Print(`Usage:
-  reasonix config compact-ratio [--local] [65..85]
-`)
+	fmt.Printf("Usage:\n  reasonix config compact-ratio [--local] [PERCENT] (%s)\n", compactRatioPercentageRequirement())
 }
 
 func startCLITelemetry(cfg *config.Config, opts telemetry.Options) *telemetry.Reporter {
@@ -1712,8 +1708,12 @@ func startCLITelemetryWithIO(cfg *config.Config, opts telemetry.Options, in io.R
 	scanner := bufio.NewScanner(in)
 	mode := ""
 	for mode == "" {
-		answer := strings.ToLower(strings.TrimSpace(ask(scanner, out, i18n.M.CLITelemetryConsentPrompt, "Y/n")))
-		switch answer {
+		raw, err := askAnswer(scanner, out, i18n.M.CLITelemetryConsentPrompt, "Y/n")
+		if err != nil {
+			fmt.Fprintln(out)
+			return nil
+		}
+		switch strings.ToLower(strings.TrimSpace(raw)) {
 		case "y", "yes", "y/n":
 			mode = "auto"
 		case "n", "no":

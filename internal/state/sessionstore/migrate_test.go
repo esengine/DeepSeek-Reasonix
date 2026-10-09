@@ -193,7 +193,7 @@ func TestMigrateLegacySessionsFromExplicitDirIgnoresDefaultMarkers(t *testing.T)
 	if n, err := MigrateLegacySessions(src, dest, nil); err != nil || n != 0 {
 		t.Fatalf("default migrate with markers: n=%d err=%v, want 0 nil", n, err)
 	}
-	n, err := MigrateLegacySessionsFromExplicitDir(src, dest, nil)
+	n, _, err := ImportLegacySessionsFromExplicitDir(src, dest, nil)
 	if err != nil {
 		t.Fatalf("explicit migrate: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestMigrateLegacySessionsFromExplicitDirIgnoresDefaultMarkers(t *testing.T)
 	if _, err := os.Stat(filepath.Join(dest, "custom-install.jsonl")); err != nil {
 		t.Fatalf("explicit imported session missing: %v", err)
 	}
-	if n, err := MigrateLegacySessionsFromExplicitDir(src, dest, nil); err != nil || n != 0 {
+	if n, _, err := ImportLegacySessionsFromExplicitDir(src, dest, nil); err != nil || n != 0 {
 		t.Fatalf("explicit migrate should be source-marker idempotent: n=%d err=%v", n, err)
 	}
 }

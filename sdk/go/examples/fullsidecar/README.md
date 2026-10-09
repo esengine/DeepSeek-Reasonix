@@ -48,45 +48,35 @@ your normal configured model selected for the following checks.
 
 ## Observe the installed contributions
 
-Send an ordinary prompt to start a turn. The extension publishes a status
-label, `fullsidecar online`, and a card titled `fullsidecar`. The card declares
-the `Run demo` action. In Studio, use that action to open the form; frontends
-that support extension slash actions expose it as `/full-sidecar:demo`.
+1. Send an ordinary prompt to start a turn. Expect the `fullsidecar online`
+   status and the `fullsidecar` card. Choose `Run demo` to open the form;
+   frontends with extension slash actions also expose `/full-sidecar:demo`.
 
-Enter a name and choose whether to shout the greeting. The host routes the
-answers back to the sidecar, which publishes `Hello, <name>!` as a notification
-(uppercase when shouting is selected). Dismissing the form cancels this demo
-without producing a greeting.
+2. Enter a name and choose whether to shout. The host returns the answers to
+   the sidecar, which publishes `Hello, <name>!` (uppercase when shouting).
+   Dismissing the form cancels the demo without a greeting.
 
-The strategy wraps the model's system prompt with:
+3. The strategy wraps the system prompt with
+   `You are Reasonix running under the fullsidecar demo strategy.` The
+   automated check below uses a separate recording provider to verify this
+   at the provider request.
 
-```text
-You are Reasonix running under the fullsidecar demo strategy.
-```
+4. The installed provider appears as `plugin/full-sidecar/fake/echo`. It
+   ignores the task and streams `fake-hello fake-world`, a `lookup` tool call,
+   and fixed usage numbers. This is a protocol fixture, not a model for normal
+   work.
 
-The host injects the installed plugin name, `full-sidecar`, so the provider
-appears in the merged catalog as `plugin/full-sidecar/fake/echo`. It always
-streams `fake-hello fake-world`, a `lookup` tool call, and fixed usage numbers.
+5. The `/fs ` prefix is a raw `input.receive` fixture, not a registered slash
+   command. The host composes turn context before calling the interceptor, so
+   its `text` need not begin with the user's text.
 
-It ignores the task and is a protocol fixture, not a model for normal work.
-The automated host check below uses a separate recording provider to verify
-the strategy without interpreting this fixture's output as task quality.
+6. Some frontends refuse unknown slash commands before a turn starts. Verify
+   installation through the demo action and the host checks below, rather
+   than `/fs hello` in a composer.
 
-The `/fs ` prefix in `main.go` is a raw `input.receive` protocol fixture. It
-is not a registered slash command.
-
-The host composes turn context before
-calling that interceptor, so the callback's `text` need not begin with the
-user's text; frontends can also refuse unknown slash commands before a turn
-starts.
-
-Use the demo action and the host checks below for installation
-verification, rather than treating `/fs hello` in a composer as that check.
-
-Likewise, the tool interception examples exercise protocol decisions: they
-block a tool named `dangerous_exec` and add a `sandbox` argument to a tool
-named `read`. These example names and arguments do not grant or enforce host
-sandbox authority.
+7. The tool interception fixtures block `dangerous_exec` and add a `sandbox`
+   argument to `read`. These names and arguments do not grant or enforce host
+   sandbox authority.
 
 ## Disable, restore, and remove
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ func installV2RuntimePlugin(t *testing.T, home string) string {
     "themes": ["themes/*.reasonix-theme"]
   },
   "runtime": {
-    "command": "${REASONIX_PLUGIN_ROOT}/bin/example",
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/example.exe",
     "args": ["--serve"],
     "required": true,
     "intercepts": ["input.receive", "tool.before"],
@@ -34,7 +35,10 @@ func installV2RuntimePlugin(t *testing.T, home string) string {
 }`)
 	writePluginTestFile(t, filepath.Join(root, "prompts", "plan.md"), "---\ndescription: plan\n---\nPlan $ARGUMENTS")
 	writePluginTestFile(t, filepath.Join(root, "themes", "neon.reasonix-theme"), "theme bytes")
-	writePluginTestFile(t, filepath.Join(root, "bin", "example"), "#!/bin/sh\n")
+	writePluginTestFile(t, filepath.Join(root, "bin", "example.exe"), "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "example.exe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{
 		Name: "example", Root: "plugins/example", Version: "1.0.0", ManifestKind: "reasonix", Enabled: true,
 	}); err != nil {
@@ -57,7 +61,7 @@ func TestPluginShowRendersRuntimeFullTrust(t *testing.T) {
 		"prompts: 1",
 		"themes: 1",
 		"runtime: FULL TRUST",
-		"command: ${REASONIX_PLUGIN_ROOT}/bin/example --serve",
+		"command: ${REASONIX_PLUGIN_ROOT}/bin/example.exe --serve",
 		"intercepts: input.receive, tool.before",
 		"replaces: system_prompt",
 		"capabilities: interceptors, ui",
@@ -86,12 +90,35 @@ func TestPluginDoctorValidatesV2Runtime(t *testing.T) {
 	}
 }
 
+func TestPluginDoctorFailsForNonExecutableRuntimeCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not use POSIX executable permission bits")
+	}
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	root := installV2RuntimePlugin(t, home)
+	if err := os.Chmod(filepath.Join(root, "bin", "example.exe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr string
+	out := captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			if rc := pluginCommand([]string{"doctor", "example"}); rc != 1 {
+				t.Fatalf("plugin doctor rc = %d, want 1 for a non-executable runtime command", rc)
+			}
+		})
+	})
+	if !strings.Contains(stderr, "runtime command not executable:") || strings.Contains(out, "ok: example") {
+		t.Fatalf("doctor output = %q, stderr = %q; want execution diagnostic without success", out, stderr)
+	}
+}
+
 func TestPluginDoctorFailsForMissingRuntimeCommand(t *testing.T) {
 	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	root := installV2RuntimePlugin(t, home)
 	// Remove the runtime binary so the command no longer resolves.
-	if err := os.Remove(filepath.Join(root, "bin", "example")); err != nil {
+	if err := os.Remove(filepath.Join(root, "bin", "example.exe")); err != nil {
 		t.Fatal(err)
 	}
 

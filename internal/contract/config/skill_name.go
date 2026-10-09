@@ -34,6 +34,17 @@ func IsValidSkillName(name string) bool {
 	return true
 }
 
+// ResolveSkillName selects a valid declaration and normalizes the result to NFC.
+// An ASCII stem keeps its identity when the declared name is non-ASCII.
+func ResolveSkillName(stem, declared string) string {
+	name := stem
+	if declared != "" && IsValidSkillName(declared) &&
+		(IsValidMCPServerName(declared) || !IsValidMCPServerName(stem)) {
+		name = declared
+	}
+	return norm.NFC.String(name)
+}
+
 // SkillNameKey normalizes a skill identifier for config comparisons.
 func SkillNameKey(name string) string {
 	name = strings.TrimSpace(name)

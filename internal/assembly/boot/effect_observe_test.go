@@ -54,6 +54,18 @@ func buildObserved(t *testing.T, root string, prov *testutil.MockProvider, run o
 	return ctrl, ledger
 }
 
+func firstDifference(x, y string) string {
+	n := 0
+	for n < len(x) && n < len(y) && x[n] == y[n] {
+		n++
+	}
+	window := func(s string) string {
+		lo, hi := max(n-120, 0), min(n+120, len(s))
+		return fmt.Sprintf("%q", s[lo:hi])
+	}
+	return fmt.Sprintf("lengths %d and %d, first difference at byte %d\n  first:  %s\n  second: %s", len(x), len(y), n, window(x), window(y))
+}
+
 func toolNameList(req provider.Request) []string {
 	names := make([]string, 0, len(req.Tools))
 	for _, tl := range req.Tools {
@@ -286,10 +298,10 @@ func TestEffectObserveRunContextRidesTheTurnTail(t *testing.T) {
 		t.Fatalf("requests = %d and %d, want a tool round and an answer each", len(a), len(b))
 	}
 	if systemOf(a[0]) == "" || systemOf(a[0]) != systemOf(b[0]) {
-		t.Fatal("two scheduled runs that differ only in their trigger composed different prefixes")
+		t.Fatalf("two scheduled runs that differ only in their trigger composed different prefixes:\n%s", firstDifference(systemOf(a[0]), systemOf(b[0])))
 	}
 	if systemOf(a[0]) != systemOf(a[1]) {
-		t.Fatal("the prefix moved between the rounds of one run")
+		t.Fatalf("the prefix moved between the rounds of one run:\n%s", firstDifference(systemOf(a[0]), systemOf(a[1])))
 	}
 	if strings.Contains(systemOf(a[0]), "morning") || strings.Contains(systemOf(a[0]), "t-100") {
 		t.Fatal("run context reached the cache-stable prefix")

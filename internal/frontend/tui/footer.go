@@ -280,7 +280,25 @@ func quoteText(q *CostQuote) string {
 	if err != nil || amount <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("≈%s%.4f", pricing.CurrencySymbol(money.Currency), amount)
+	text := fmt.Sprintf("≈%s%.4f", pricing.CurrencySymbol(money.Currency), amount)
+	if band := rateBandText(q.RateBand); band != "" {
+		text += " · " + band
+	}
+	return text
+}
+
+// rateBandText names the side of the vendor's peak window the spend was billed
+// on; "" for a total the kernel could not place on one.
+func rateBandText(band string) string {
+	switch band {
+	case pricing.RateBandPeak:
+		return i18n.M.RateBandPeak
+	case pricing.RateBandOffPeak:
+		return i18n.M.RateBandOffPeak
+	case pricing.RateBandMixed:
+		return i18n.M.RateBandMixed
+	}
+	return ""
 }
 
 // layoutSides puts right against the right edge of left's row, or on a row of

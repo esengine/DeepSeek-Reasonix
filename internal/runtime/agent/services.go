@@ -96,6 +96,9 @@ type agentServices struct {
 	// evidenceSeal is where the turn's shadow evidence bundle is sealed; nil
 	// seals nothing. Only the root agent's options carry it.
 	evidenceSeal *EvidenceSeal
+	// pathObserver is told which workspace files this agent's completed tool
+	// calls touched. Sub-agents have none: their reads are not the session's.
+	pathObserver PathObserver
 }
 
 // newAgentServices binds the collaborators New resolved. It exists so New stays

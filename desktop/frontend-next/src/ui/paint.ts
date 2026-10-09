@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { effectsMode, onEffectsChange, type EffectsMode } from "../state/prefs";
 import { adopt as adoptLang } from "../i18n";
 import type { Appearance as Look, ThemePack } from "../port/port";
 import type { HubPort, RuntimeView } from "../port/hub";
@@ -15,6 +16,7 @@ export interface Paint {
   setContrast: (v: string) => void;
   weight: string;
   setWeight: (v: string) => void;
+  effects: EffectsMode;
   look: Look;
   onLook: (next: Look) => void;
   pack: ThemePack | null;
@@ -33,6 +35,7 @@ export function usePaint(hub: HubPort, runtimes: RuntimeView[], running: boolean
   const [contrast, setContrast] = useState(() => localStorage.getItem("rx-contrast") ?? "");
   // 空串是「跟随语言」：中文界面本来就该比西文粗一档，样式表按 :lang 给默认。
   const [weight, setWeight] = useState(() => localStorage.getItem("rx-weight") ?? "");
+  const effects = useSyncExternalStore(onEffectsChange, effectsMode);
   const [pack, setPack] = useState<ThemePack | null>(null);
   const [look, setLook] = useState<Look>({});
 
@@ -48,8 +51,8 @@ export function usePaint(hub: HubPort, runtimes: RuntimeView[], running: boolean
     lookPort
       ?.themes()
       .then((list) => setPack(list.find((p) => p.active) ?? null))
-      .catch(() => setPack(null));
-  }, [lookPort]);
+      .catch(onError);
+  }, [lookPort, onError]);
   useEffect(reloadThemes, [reloadThemes]);
 
   useEffect(() => {
@@ -115,5 +118,10 @@ export function usePaint(hub: HubPort, runtimes: RuntimeView[], running: boolean
     localStorage.setItem("rx-weight", weight);
   }, [contrast, weight]);
 
-  return { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, look, onLook, pack, reloadThemes };
+  useEffect(() => {
+    if (effects === "reduced") document.documentElement.dataset.effects = effects;
+    else delete document.documentElement.dataset.effects;
+  }, [effects]);
+
+  return { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, effects, look, onLook, pack, reloadThemes };
 }

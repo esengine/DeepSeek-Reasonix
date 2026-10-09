@@ -11,10 +11,29 @@ import (
 	"reasonix/internal/contract/config"
 )
 
-// packageNameRe matches valid npm package-name segments. Pinned by [a-z0-9._-]
-// — exactly what npm allows. The leading character may be a digit (scoped
-// packages like @5/test are rare but valid).
+// packageNameRe is a permissive character filter for npm name segments. It is
+// not npm's full rule set (it admits uppercase); the stricter checks that keep
+// a name from resolving as a path, tag or tarball live in isPackageSegment and
+// isPackageName. The leading character may be a digit (@5/test is valid).
 var packageNameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// isPackageSegment reports whether s is an acceptable npm name segment. npm
+// treats a name starting with "." as a local path, so such segments (including
+// "." and "..") are rejected.
+func isPackageSegment(s string) bool {
+	return packageNameRe.MatchString(s) && !strings.HasPrefix(s, ".")
+}
+
+// isPackageName reports whether s is an unscoped package name. Beyond the
+// segment rules, npm reads a leading "_" as a tag and a .tgz/.tar/.tar.gz
+// suffix as a local tarball, so those are rejected.
+func isPackageName(s string) bool {
+	if !isPackageSegment(s) || strings.HasPrefix(s, "_") {
+		return false
+	}
+	l := strings.ToLower(s)
+	return !strings.HasSuffix(l, ".tgz") && !strings.HasSuffix(l, ".tar") && !strings.HasSuffix(l, ".tar.gz")
+}
 
 func isURL(s string) bool {
 	u, err := url.Parse(s)
@@ -88,9 +107,9 @@ func SplitPackageSpec(s string) (name, version string, ok bool) {
 	}
 	if strings.HasPrefix(name, "@") {
 		parts := strings.Split(name, "/")
-		ok = len(parts) == 2 && packageNameRe.MatchString(parts[0][1:]) && packageNameRe.MatchString(parts[1])
+		ok = len(parts) == 2 && isPackageSegment(parts[0][1:]) && isPackageSegment(parts[1])
 	} else {
-		ok = packageNameRe.MatchString(name)
+		ok = isPackageName(name)
 	}
 	return name, version, ok
 }

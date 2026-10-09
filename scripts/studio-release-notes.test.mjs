@@ -80,3 +80,11 @@ test("a number naming a discussion or nothing stays plain and only warns", async
   );
   assert.equal(renderStudioNotes(source, credits), source);
 });
+
+test("an item whose only author is excluded renders plain and lists no contributor", () => {
+  const credits = new Map([
+    [1, { kind: "pull", login: "owner", bot: true }],
+    [2, { kind: "issue", fixes: [{ number: 9, login: "owner", bot: true }] }],
+  ]);
+  assert.equal(renderStudioNotes("摘要。\n\n## 修复\n\n- 一 #1\n- 二 #2\n", credits), "摘要。\n\n## 修复\n\n- 一 #1\n- 二 #2 fixed in #9\n");
+});

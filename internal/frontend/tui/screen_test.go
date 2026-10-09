@@ -98,6 +98,28 @@ func TestShiftInsertPastesClipboardText(t *testing.T) {
 	}
 }
 
+// Right-click with nothing selected pastes the clipboard's text, as 1.x did and
+// docs/GUIDE.md says; over a panel that hides the composer it pastes nothing.
+func TestRightClickWithoutASelectionPastesClipboardText(t *testing.T) {
+	for _, env := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		t.Setenv(env, "")
+	}
+	m, _ := testModel(t)
+	m.View()
+	rightClick := tea.MouseClickMsg{Button: tea.MouseRight, X: 2, Y: 0}
+	_, cmd := m.Update(rightClick)
+	if cmd == nil {
+		t.Fatal("right-click with no selection did nothing")
+	}
+	if _, ok := cmd().(clipTextMsg); !ok {
+		t.Fatal("right-click with no selection did not read the clipboard's text")
+	}
+	apply(m, eventwire.Event{Kind: "approval_request", Approval: &eventwire.Approval{ID: "ap1", Tool: "bash", Subject: "rm x"}})
+	if _, cmd := m.Update(rightClick); cmd != nil {
+		t.Fatal("right-click pasted while an approval card hides the composer")
+	}
+}
+
 // Dragging the thumb to the bottom of the track lands on the last page.
 func TestScrollbarDragMovesTheView(t *testing.T) {
 	m, _ := testModel(t)

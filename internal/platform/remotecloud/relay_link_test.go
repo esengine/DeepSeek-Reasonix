@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"reasonix/internal/contract/provider"
 	"reasonix/internal/platform/account"
 )
 
@@ -282,5 +283,41 @@ func TestReplayAnswersOutliveControllerSessions(t *testing.T) {
 	host.adopt("device-b")
 	if _, ok := host.link.replay.get(key, time.Now()); ok {
 		t.Fatal("answers survived a change of device identity")
+	}
+}
+
+func TestRelayHandshakeCarriesTheClientIdentity(t *testing.T) {
+	seen := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Get("User-Agent")
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err == nil {
+			conn.Close()
+		}
+	}))
+	defer server.Close()
+	device, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := &identity{DeviceID: strings.Repeat("d", 64), DeviceCredential: strings.Repeat("e", 64)}
+	for _, tc := range []struct {
+		name   string
+		client *account.Client
+		want   string
+	}{
+		{"account identity", account.New("", "reasonix-studio/9.9.9", nil), "reasonix-studio/9.9.9"},
+		{"no account client", nil, provider.ClientUserAgent()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := &Host{
+				client: tc.client, dialer: websocket.DefaultDialer, relayURL: "ws" + strings.TrimPrefix(server.URL, "http"),
+				token: func() string { return "token" }, disconnect: make(chan controllerDisconnect),
+			}
+			_ = host.connect(t.Context(), "token", saved, device)
+			if got := <-seen; got != tc.want {
+				t.Fatalf("handshake User-Agent = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

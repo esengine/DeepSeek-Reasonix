@@ -143,3 +143,13 @@ func mergeProbeSnapshot(previous, fresh []ProbeResult) []ProbeResult {
 	sortResults(merged)
 	return merged
 }
+
+// adoptSnapshot records an answer this snapshot directory was served from
+// memory, so that when the in-memory entry expires the directory re-serves the
+// same bytes instead of probing again. An existing snapshot is left alone.
+func adoptSnapshot(dir, fingerprint string, results []ProbeResult, now time.Time) {
+	if _, ok := loadProbeSnapshot(dir, fingerprint); ok {
+		return
+	}
+	saveProbeSnapshot(dir, fingerprint, results, now)
+}

@@ -1,11 +1,12 @@
 import type { Tool } from "../../port/wire";
 import { t } from "../../i18n";
 import { say } from "../../i18n/kernel";
+import { workspaceLeaseDetail } from "../../i18n/workspace_lease";
 
+// The host sets err for every failed, timed-out, cancelled or refused call;
+// execution.state only describes the run, and a background start is no failure.
 export function toolFailed(tool: Tool): boolean {
-  if (tool.err) return true;
-  const execution = tool.execution;
-  return !!execution && ((!!execution.state && execution.state !== "completed") || (execution.exitCode ?? 0) !== 0);
+  return !!tool.err;
 }
 
 export function toolChangedFile(tool: Tool): boolean {
@@ -24,5 +25,6 @@ export function toolFailureLabel(tool: Tool): string {
 // What the host's refusal code means, in the reader's language; empty when the
 // code has no wording here and the kernel's own sentence is all there is.
 export function toolRefusalReason(tool: Tool): string {
-  return tool.refusalCode ? say({ code: tool.refusalCode }, "") : "";
+  const reason = tool.refusalCode ? say({ code: tool.refusalCode }, "") : "";
+  return tool.workspaceLease ? [reason, workspaceLeaseDetail(tool.workspaceLease)].filter(Boolean).join(" · ") : reason;
 }

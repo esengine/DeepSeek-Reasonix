@@ -9,7 +9,7 @@ import type { AgentPort, PluginPlan, SessionStatus } from "../port/port";
 import { MockPort } from "../port/mock";
 import { MockHub } from "../port/mock_hub";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 function draw(at?: string, port = new MockPort() as unknown as AgentPort) {
   const onClose = vi.fn();
@@ -113,6 +113,7 @@ describe("a package's inline update", () => {
 
   it.each(["success", "failure", "refused"])("keeps an applying update mounted through Cancel and Escape, then permits dismissal after %s", async (outcome) => {
     const port = new MockPort() as unknown as AgentPort;
+    const listeners = vi.spyOn(window, "addEventListener");
     let finish!: (value: PluginPlan) => void;
     let fail!: (error: Error) => void;
     const install = vi.spyOn(port, "installPlugin").mockImplementationOnce(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
@@ -141,25 +142,38 @@ describe("a package's inline update", () => {
     await userEvent.click(document.querySelector<HTMLElement>(".prefs")!);
     await userEvent.click(cancel);
     await userEvent.keyboard("{Escape}");
+    // The form consumes Escape in capture; verify the sheet's separate listener too.
+    const escape = [...listeners.mock.calls].reverse().find(([type, , options]) => type === "keydown" && !options)?.[1];
+    expect(typeof escape).toBe("function");
+    act(() => (escape as EventListener).call(window, new KeyboardEvent("keydown", { key: "Escape" })));
     expect(onClose).not.toHaveBeenCalled();
     expect(document.querySelector('.addpkg[data-stage="confirm"]')).toBe(panel);
     expect(within(row).getByRole<HTMLButtonElement>("switch", { name: "关闭 review-kit" }).disabled).toBe(true);
 
+    let dismiss: HTMLElement;
     if (outcome !== "failure") {
       await act(async () => finish(outcome === "success"
         ? { ok: true, applied: true, status: "done", actions: [{ kind: "plugin", action: "install_plugin_package", status: "done", name: "review-kit", riskLevel: "low" }] }
         : { ok: false, applied: false, status: "failed", error: "update refused", actions: [] }));
       const done = await screen.findByRole("button", { name: "完成" });
-      await waitFor(() => expect(document.activeElement).toBe(done));
-      await userEvent.click(done);
+      const next = outcome === "success" ? done : screen.getByRole("button", { name: "重试" });
+      await waitFor(() => expect(document.activeElement).toBe(next));
+      dismiss = done;
     } else {
       await act(async () => fail(new Error("update unavailable")));
       expect(await within(panel).findByText("update unavailable")).toBeTruthy();
       expect(cancel.disabled).toBe(false);
       expect(panel.getAttribute("aria-busy")).toBe("false");
       await waitFor(() => expect(document.activeElement).toBe(apply));
-      await userEvent.click(cancel);
+      dismiss = cancel;
     }
+    expect(document.querySelector(".addpkg")).toBeTruthy();
+    expect(close.disabled).toBe(false);
+    expect(section.disabled).toBe(false);
+    expect(market.disabled).toBe(false);
+    expect(within(row).getByRole<HTMLButtonElement>("switch", { name: "关闭 review-kit" }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "添加" }).disabled).toBe(true);
+    await userEvent.click(dismiss);
     expect(document.querySelector(".addpkg")).toBeNull();
     expect(within(row).getByRole<HTMLButtonElement>("switch", { name: "关闭 review-kit" }).disabled).toBe(false);
     expect(close.disabled).toBe(false);

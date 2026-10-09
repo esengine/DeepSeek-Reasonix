@@ -85,8 +85,6 @@ export function ToolCard({
   // and one that sits blank until the whole file arrives at once.
   const streaming = running && !tool.args && (tool.argChars ?? 0) > 0;
   const arg = tool.name === "todo_write" ? "" : streaming ? `${tokens(tool.argChars!)} 字符` : shortArgs(tool.args ?? "");
-  // A shell result carries its exit status separately from stdout, and stdout
-  // alone cannot say whether the command worked.
   const bad = toolFailed(tool);
   // The number is the actionable half; the state only says that something went
   // wrong, which the colour already says.

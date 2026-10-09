@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { fromHistory, initialState, reduce, type Item, type SessionEvent, type SessionState } from "./session";
+import { describe, expect, it, vi } from "vitest";
+import { chipLabel, fromHistory, initialState, reduce, type Item, type SessionEvent, type SessionState } from "./session";
 import type { HistoryMessage } from "../port/port";
 
 // vitest runs these in Node, where there is no localStorage. The preference
@@ -130,6 +130,14 @@ describe("rebuilding a reopened transcript", () => {
     expect(users([{ role: "user", content: "<reasoning-language>zh</reasoning-language>" }])).toHaveLength(0);
   });
 
+  it("strips a failed-MCP-prompt block from a replayed turn", () => {
+    const got = users([
+      { role: "user", content: "<mcp-prompt-failure>\nThe user invoked MCP prompt \"p\"\n</mcp-prompt-failure>\n你好" },
+    ]);
+    expect(got).toHaveLength(1);
+    expect(got[0].text).toBe("你好");
+  });
+
   it("leaves an ordinary turn as its text", () => {
     const got = users([{ role: "user", content: "第一句话" }]);
     expect(got).toHaveLength(1);
@@ -209,6 +217,17 @@ describe("a notice about the runtime rather than the conversation", () => {
     expect(s.runtime).toEqual([]);
   });
 
+  it("carries a skipped-extension notice with its code and payload, once per extension", () => {
+    const skipped = (extension: string) => ({
+      kind: "notice", audience: "operator", level: "warn", code: "extension_skipped", text: "skipped",
+      detail: JSON.stringify({ extension, point: "tool.before", reason: "no_live_sidecar" }),
+    }) as SessionEvent;
+    const s = run([skipped("a"), skipped("a"), skipped("b")]);
+    expect(notices(s)).toEqual([]);
+    expect(s.runtime.map((n) => n.code)).toEqual(["extension_skipped", "extension_skipped"]);
+    expect(s.runtime.map((n) => JSON.parse(n.detail ?? "{}").extension)).toEqual(["a", "b"]);
+  });
+
   it("keeps legacy capability proxy audits out of the transcript", () => {
     const s = run([notice(undefined, "info", "capability proxy: use_capability → web_fetch")]);
     expect(notices(s)).toEqual([]);
@@ -221,6 +240,18 @@ describe("a line that is still queued", () => {
   const rows = (st: SessionState) => st.items.filter((i): i is Extract<Item, { t: "user" }> => i.t === "user");
   const queued = (id: string, itemId: string, kind: "steer" | "followup"): SessionEvent =>
     ({ kind: "__queued", id, itemId, queued: kind }) as SessionEvent;
+
+  it("raises one held-queue notice per window, and only for a paused receipt", () => {
+    const held = (id: string, itemId: string): SessionEvent =>
+      ({ kind: "__queued", id, itemId, queued: "followup", paused: true }) as SessionEvent;
+    const plain = run([typed("row-1", "a"), queued("row-1", "inbox-1", "steer")]);
+    expect(plain.runtime).toEqual([]);
+    const st = run([typed("row-1", "a"), held("row-1", "inbox-1"), typed("row-2", "b"), held("row-2", "inbox-2")]);
+    expect(st.runtime.map((n) => n.code)).toEqual(["queue_paused_hold"]);
+    const gone = run([typed("row-1", "a"), held("row-1", "inbox-1")]);
+    const after = reduce(reduce(gone, { kind: "__runtime_seen", id: gone.runtime[0].id } as SessionEvent), held("row-1", "inbox-1"));
+    expect(after.runtime).toHaveLength(1);
+  });
 
   // The row is on screen before the kernel has answered. The receipt is what
   // gives it a name to be taken back by, and without it the card has a button
@@ -238,6 +269,11 @@ describe("a line that is still queued", () => {
     const st = run([sent, queued("row-2", "inbox-10", "followup")]);
     expect(rows(st)[0].pending).toBe(true);
     expect(rows(st)[0].queued).toBe("followup");
+  });
+
+  it("does not name a row for an entry taken back before its receipt landed", () => {
+    const st = run([typed("row-1", "x"), { kind: "__unsent", id: "inbox-9" } as SessionEvent, queued("row-1", "inbox-9", "steer")]);
+    expect(rows(st)).toEqual([]);
   });
 
   it("takes the row away once the kernel drops it", () => {
@@ -278,6 +314,19 @@ describe("waiting for another session to finish writing", () => {
   const lease = (code: string, level: string, text: string): SessionEvent =>
     ({ kind: "notice", code, level, text }) as SessionEvent;
   const cards = (st: SessionState) => st.items.filter((i): i is Extract<Item, { t: "notice" }> => i.t === "notice");
+
+  it("preserves holder and claim scope through close and event replay", () => {
+    const scope = { contended: 0, heldMs: 0, idleMs: 0, holder: "Fixture A", holderSessionId: "session-a", paths: ["src/a.go"], requestedPaths: ["src/a.go"] };
+    const opened = { ...lease("workspace_lease", "warn", "Waiting"), workspaceLease: scope } as SessionEvent;
+    const closed = { ...lease("workspace_lease_resumed", "info", "Claim granted"), workspaceLease: scope } as SessionEvent;
+    const waiting = run([opened]);
+    expect(cards(waiting)[0]).toMatchObject({ workspaceLease: scope });
+    const done = reduce(waiting, closed);
+    expect(cards(done)).toHaveLength(1);
+    expect(cards(done)[0]).toMatchObject({ id: cards(waiting)[0].id, workspaceLease: scope });
+    expect(cards(run([opened, closed]))[0]).toMatchObject({ workspaceLease: scope });
+    expect(cards(reduce(waiting, { ...closed, code: "workspace_lease_abandoned" } as SessionEvent))[0]).toMatchObject({ workspaceLease: scope });
+  });
 
   // The open used to be the whole surface: one card saying the session would
   // continue "when it is safe", still saying it long after it had.
@@ -385,10 +434,44 @@ describe("the retry line", () => {
     expect(s.waiting.retry?.attempt).toBe(1);
   });
 
-  it("times the stall from its first attempt, not its latest", () => {
-    const first = run([started(), retrying(1, "stream")]);
-    const second = reduce(first, retrying(2, "stream"));
-    expect(second.waiting.retry?.since).toBe(first.waiting.retry?.since);
+  // The notice fires when an attempt fails, so the clock it starts is the next
+  // attempt's wait: a counter that carried over would claim the whole stall as
+  // one wait.
+  it("restarts the clock for each attempt", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1000);
+      const first = run([started(), retrying(1, "headers")]);
+      vi.setSystemTime(61_000);
+      const second = reduce(first, retrying(2, "headers"));
+      expect(first.waiting.retry?.since).toBe(1000);
+      expect(second.waiting.retry?.since).toBe(61_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("carries the failure class, backoff and answer bound the kernel sent", () => {
+    const s = run([
+      started(),
+      {
+        kind: "retrying",
+        retryAttempt: 1,
+        retryMax: 10,
+        retryScope: "headers",
+        retryCause: "upstream_status",
+        retryStatus: 502,
+        retryDelayMs: 1250,
+        retryTimeoutSecs: 300,
+      } as SessionEvent,
+    ]);
+    expect(s.waiting.retry).toMatchObject({ cause: "upstream_status", status: 502, delayMs: 1250, timeoutSecs: 300 });
+  });
+
+  it("leaves the class unset for a kernel that does not send one", () => {
+    const s = run([started(), retrying(1, "headers")]);
+    expect(s.waiting.retry?.cause).toBeUndefined();
+    expect(s.waiting.retry?.delayMs).toBeUndefined();
   });
 
   it("comes down when the turn ends", () => {
@@ -600,5 +683,24 @@ describe("a receipt that arrives after the delivery it is for", () => {
 
   it("still names a line the kernel has not delivered yet", () => {
     expect(users(run([sent, receipt]))[0]).toMatchObject({ pending: true, itemId: "it1" });
+  });
+});
+
+describe("chipLabel", () => {
+  it("says the turn is running for a client that joined after turn_started", () => {
+    expect(chipLabel(initialState, true)).toBe("运行中");
+    const done = run([{ kind: "turn_started" } as SessionEvent, { kind: "turn_done" } as SessionEvent]);
+    expect(chipLabel(done, true)).toBe("运行中");
+  });
+
+  it("keeps what the stream says once it has said something", () => {
+    const s = reduce(initialState, { kind: "tool_dispatch", tool: { id: "t1", name: "bash" } } as SessionEvent);
+    expect(chipLabel(s, true)).toBe("bash");
+  });
+
+  it("leaves a settled turn and a live one alone", () => {
+    expect(chipLabel(initialState, false)).toBe("空闲");
+    const live = run([{ kind: "turn_started" } as SessionEvent]);
+    expect(chipLabel(live, true)).toBe(live.doing);
   });
 });

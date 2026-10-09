@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"reasonix/internal/assembly/boot"
 	"reasonix/internal/contract/config"
 )
 
@@ -25,6 +26,85 @@ var roleFields = map[string]func(*config.Config) *string{
 func (s *Server) registerRoleRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /roles", s.roles)
 	mux.HandleFunc("POST /roles", s.setRole)
+	mux.HandleFunc("GET /roles/overrides", s.roleOverrides)
+	mux.HandleFunc("POST /roles/overrides/clear", s.clearRoleOverride)
+}
+
+// roleOverride is a per-profile entry that outranks a role's global model.
+// Scope says which file holds it, because only the user's can be cleared here.
+type roleOverride struct {
+	Key   string `json:"key"`
+	Model string `json:"model"`
+	Scope string `json:"scope"`
+}
+
+// roleOverrides lists, per role, the entries that win over what GET /roles
+// reports for it. Only the subagent role has any: its profiles each read their
+// own subagent_models key before the global subagent_model.
+func (s *Server) roleOverrides(w http.ResponseWriter, _ *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	user := config.LoadForEdit(config.UserConfigPath()).Agent.SubagentModels
+	list := []roleOverride{}
+	for _, o := range boot.SubagentModelOverrides(cfg) {
+		scope := "project"
+		if strings.TrimSpace(user[o.Key]) != "" {
+			scope = "user"
+		}
+		list = append(list, roleOverride{Key: o.Key, Model: o.Model, Scope: scope})
+	}
+	writeJSON(w, map[string][]roleOverride{"subagent": list})
+}
+
+// clearRoleOverride removes one profile's entry, under every spelling the
+// profile answers to, from the user config and rebuilds so the global model
+// takes effect. It shares setRole's grant.
+func (s *Server) clearRoleOverride(w http.ResponseWriter, r *http.Request) {
+	if !s.grants.at(r).providerEdit {
+		refuse(w, http.StatusForbidden, "roles.editing_disabled", "role editing is not enabled on this server", nil)
+		return
+	}
+	var body struct {
+		Role string `json:"role"`
+		Key  string `json:"key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
+		badBody(w)
+		return
+	}
+	if strings.TrimSpace(body.Role) != "subagent" {
+		refuse(w, http.StatusBadRequest, "roles.unknown", "no such role", map[string]any{"role": body.Role})
+		return
+	}
+	unlock := config.LockUserConfigEdits()
+	path := config.UserConfigPath()
+	edit := config.LoadForEdit(path)
+	removed := false
+	for _, key := range boot.SubagentModelKeys(body.Key) {
+		if _, ok := edit.Agent.SubagentModels[key]; ok {
+			delete(edit.Agent.SubagentModels, key)
+			removed = true
+		}
+	}
+	if !removed {
+		unlock()
+		refuse(w, http.StatusConflict, "roles.override_not_in_user_config", "that entry is not in the user config", map[string]any{"key": body.Key})
+		return
+	}
+	err := edit.SaveTo(path)
+	unlock()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.rebuildInPlace(r.Context()); err != nil {
+		rebuildFailed(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // An empty ref is the default and means "this job rides the main model". It is
@@ -85,7 +165,7 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.rebuildInPlace(r.Context()); err != nil {
-		writeErr(w, http.StatusConflict, err)
+		rebuildFailed(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

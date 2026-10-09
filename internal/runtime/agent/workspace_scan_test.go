@@ -98,3 +98,22 @@ func TestParallelScanAnswersAsTheSequentialWalk(t *testing.T) {
 		t.Fatal("a root that does not exist was reported complete")
 	}
 }
+
+func TestWorkspaceScanLimitIsTheDocumentedBoundary(t *testing.T) {
+	if workspaceScanLimit != 50_000 {
+		t.Fatalf("workspaceScanLimit = %d; REASONIX.md documents completeness below 50k files", workspaceScanLimit)
+	}
+}
+
+func TestScanLimitOnlyTightens(t *testing.T) {
+	for _, tc := range []struct{ set, want int }{
+		{0, workspaceScanLimit},
+		{64, 64},
+		{workspaceScanLimit * 10, workspaceScanLimit},
+	} {
+		a := &Agent{agentConfig: agentConfig{workspaceScanLimit: tc.set}}
+		if got := a.scanLimit(); got != tc.want {
+			t.Errorf("set %d: scanLimit = %d, want %d", tc.set, got, tc.want)
+		}
+	}
+}

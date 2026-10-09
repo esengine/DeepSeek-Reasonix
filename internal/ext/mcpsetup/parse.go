@@ -2,8 +2,10 @@ package mcpsetup
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 )
 
@@ -43,7 +45,7 @@ func Parse(input string) (Draft, error) {
 		entries, err = parseCommandLine(stripShellPrompt(trimmed))
 	}
 	if err != nil {
-		return Draft{}, err
+		return Draft{}, secrets.DiagnosticError(err)
 	}
 	for i := range entries {
 		if strings.TrimSpace(entries[i].Name) == "" {
@@ -62,7 +64,8 @@ func parseCommandLine(line string) ([]config.PluginEntry, error) {
 	}
 	// A README's command is an argv, not a name followed by an argv. Prefixing
 	// "--" is what tells ParseArgs so, and it derives the name from the package.
-	if len(args) >= 3 && args[0] == "reasonix" && args[1] == "mcp" && args[2] == "add" {
+	launcher := strings.TrimSuffix(strings.ToLower(filepath.Base(args[0])), ".exe")
+	if len(args) >= 3 && launcher == "reasonix" && args[1] == "mcp" && args[2] == "add" {
 		args = args[3:]
 	} else if args[0] != "--" && !looksLikeRemoteURL(args[0]) {
 		args = append([]string{"--"}, args...)
@@ -94,7 +97,7 @@ func risksFor(entries []config.PluginEntry) []Risk {
 		// starts a process (or talks to a host) before judging the credential.
 		if cmd := strings.TrimSpace(e.Command); cmd != "" {
 			out = append(out, Risk{Server: e.Name, Kind: "shell", Field: "command",
-				Detail: strings.TrimSpace(cmd + " " + strings.Join(e.Args, " "))})
+				Detail: strings.TrimSpace(secrets.RedactConfigValue("", cmd) + " " + strings.Join(secrets.RedactArgs(e.Args), " "))})
 		}
 		if u := strings.TrimSpace(e.URL); u != "" {
 			out = append(out, Risk{Server: e.Name, Kind: "unknown-host", Field: "url", Detail: RedactURL(u)})

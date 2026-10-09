@@ -8,8 +8,9 @@ import { reason } from "../i18n/kernel";
 import { Market } from "./Market";
 import { MockPort } from "../port/mock";
 import { HttpError, type AgentPort, type MarketVote as Vote } from "../port/port";
+import { SsePort } from "../port/sse";
 
-afterEach(() => { cleanup(); localStorage.setItem(STORAGE, "zh"); boot(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.setItem(STORAGE, "zh"); boot(); });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -142,6 +143,76 @@ it("keeps a known vote and allows another cast after its write fails", async () 
   await userEvent.click(up());
   expect(f.cast).toHaveBeenLastCalledWith(f.pkg.slug, 0);
   expect(f.read).toHaveBeenCalledTimes(2);
+});
+
+it.each(["zh", "en"])("offers sign-in after a typed signed-out vote write in %s", async (lang) => {
+  localStorage.setItem(STORAGE, lang); boot();
+  const f = await fixture();
+  f.read.mockResolvedValueOnce(known);
+  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
+  await waitFor(() => expect(up().disabled).toBe(false));
+  const write = deferred<Vote>();
+  f.cast.mockImplementationOnce(() => write.promise);
+  await userEvent.click(up());
+  expect(up().disabled).toBe(true);
+  expect(screen.queryByRole("button", { name: t("登录后评价") })).toBeNull();
+  const failure = new HttpError(401, "expired session", { code: "market.signed_out" });
+  await act(async () => write.reject(failure));
+  expect(screen.getByRole("alert").textContent).toBe(reason(failure));
+  expect(up().disabled).toBe(true);
+  expect(up().getAttribute("aria-pressed")).toBe("false");
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: new RegExp(t("踩")) }).disabled).toBe(true);
+  expect(screen.getByText(t("好评 {pct}%（{n} 票）", { pct: 80, n: 10 }))).toBeTruthy();
+  expect(screen.queryByRole("button", { name: t("重试") })).toBeNull();
+  await userEvent.click(up());
+  expect(f.cast).toHaveBeenCalledTimes(1);
+  const signIn = screen.getByRole("button", { name: t("登录后评价") });
+  signIn.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(f.onSignIn).toHaveBeenCalledTimes(1);
+  expect(f.read).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  new HttpError(401, "unclassified upstream refusal"),
+  new HttpError(429, "slow down", { code: "market.rate_limited" }),
+  new Error("401 unauthorized: signed out"),
+])("retains the known vote after an unrelated write failure: %s", async (failure) => {
+  const f = await fixture();
+  f.read.mockResolvedValueOnce(known);
+  await userEvent.click(screen.getByRole("button", { name: "重试" }));
+  await waitFor(() => expect(up().disabled).toBe(false));
+  f.cast.mockRejectedValueOnce(failure);
+  await userEvent.click(up());
+  expect(screen.getByRole("alert").textContent).toBe(reason(failure));
+  expect(up().disabled).toBe(false);
+  expect(up().getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("button", { name: "登录后评价" })).toBeNull();
+  expect(screen.getByText("好评 80%（10 票）")).toBeTruthy();
+  await userEvent.click(up());
+  expect(f.cast).toHaveBeenLastCalledWith(f.pkg.slug, 0);
+  expect(f.cast).toHaveBeenCalledTimes(2);
+  expect(f.onSignIn).not.toHaveBeenCalled();
+});
+
+it("recovers from the signed-out refusal carried by the real HTTP port", async () => {
+  const f = await fixture();
+  f.read.mockResolvedValueOnce(known);
+  await userEvent.click(screen.getByRole("button", { name: "重试" }));
+  await waitFor(() => expect(up().disabled).toBe(false));
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ code: "market.signed_out", error: "not signed in" }, { status: 401 }));
+  vi.stubGlobal("fetch", fetcher);
+  const http = new SsePort("http://fixture.test");
+  f.cast.mockImplementation((slug, value) => http.voteMarket(slug, value));
+  await userEvent.click(up());
+  expect(await screen.findByRole("button", { name: "登录后评价" })).toBeTruthy();
+  expect(up().disabled).toBe(true);
+  expect(up().getAttribute("aria-pressed")).toBe("false");
+  expect(screen.getByText("好评 80%（10 票）")).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledWith(`http://fixture.test/market/packages/${f.pkg.slug}/vote`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ value: 0 }),
+  });
 });
 
 it.each(["success", "failure"])("ignores the old retry's %s after the market connection changes", async (outcome) => {

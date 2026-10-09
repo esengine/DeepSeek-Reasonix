@@ -406,17 +406,17 @@ func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.
 	}
 	result, err := d.Intercept(ctx, extension.PointCompactionPrepare, &payload)
 	if err != nil {
-		return nil, "", err
+		return nil, "", compactionHookRefusal(err)
 	}
 	if result.Blocked {
 		d.Event(extension.PointCompactionPrepare, payload)
-		return nil, "", extensionBlockedError(extension.PointCompactionPrepare, result.BlockReason)
+		return nil, "", compactionHookRefusal(extensionBlockedError(extension.PointCompactionPrepare, result.BlockReason))
 	}
 	// The compaction slot owner gets the final say over the chain-walked fold
 	// and guidance.
 	replaced, err := strategyReplaced(ctx, d, extension.SlotCompaction, extension.PointCompactionPrepare, &payload)
 	if err != nil {
-		return nil, "", err
+		return nil, "", compactionHookRefusal(err)
 	}
 	d.Event(extension.PointCompactionPrepare, payload)
 	if len(result.Applied) > 0 || replaced {
@@ -437,17 +437,17 @@ func (a *Agent) interceptCompactionComplete(ctx context.Context, summary string)
 	payload := dispatch.CompactionCompletePayload{Summary: summary}
 	result, err := d.Intercept(ctx, extension.PointCompactionComplete, &payload)
 	if err != nil {
-		return "", err
+		return "", compactionHookRefusal(err)
 	}
 	if result.Blocked {
 		d.Event(extension.PointCompactionComplete, payload)
-		return "", extensionBlockedError(extension.PointCompactionComplete, result.BlockReason)
+		return "", compactionHookRefusal(extensionBlockedError(extension.PointCompactionComplete, result.BlockReason))
 	}
 	// The compaction slot owner gets the final say over the chain-walked
 	// summary.
 	replaced, err := strategyReplaced(ctx, d, extension.SlotCompaction, extension.PointCompactionComplete, &payload)
 	if err != nil {
-		return "", err
+		return "", compactionHookRefusal(err)
 	}
 	d.Event(extension.PointCompactionComplete, payload)
 	if len(result.Applied) > 0 || replaced {

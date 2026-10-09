@@ -2,9 +2,14 @@ package serve
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"reasonix/internal/base/testenv"
@@ -110,5 +115,117 @@ func TestPinRouteRefusesABodyItCannotRead(t *testing.T) {
 	// The identity, not the sentence: a frontend tells refusals apart by code.
 	if body.Code != codePinRejected {
 		t.Fatalf("code = %q, want %q", body.Code, codePinRejected)
+	}
+}
+
+func notesGet(t *testing.T, srv *httptest.Server, path string) (int, map[string]any) {
+	t.Helper()
+	resp, err := http.Get(srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	return resp.StatusCode, body
+}
+
+func TestNotesRouteRefusesByNameWithoutAnInstall(t *testing.T) {
+	srv := studioServer(t, nil)
+	status, body := notesGet(t, srv, "/studio/versions/2.31.0/notes")
+	if status != http.StatusNotFound || body["code"] != codeNoInstall {
+		t.Fatalf("got %d %v, want 404 %s", status, body, codeNoInstall)
+	}
+}
+
+func TestNotesRouteSaysWhichKindOfFailureItWas(t *testing.T) {
+	srv := studioServer(t, &update.Install{Version: "2.10.0"})
+	var retry []bool
+	prev := notesReader
+	t.Cleanup(func() { notesReader = prev })
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{update.ErrNotesBadVersion, http.StatusBadRequest, codeNotesBadVersion},
+		{update.ErrNotesAbsent, http.StatusNotFound, codeNotesAbsent},
+		{fmt.Errorf("%w: GET: 403", update.ErrNotesUnreachable), http.StatusBadGateway, codeNotesUnreachable},
+		{update.ErrNotesTooLarge, http.StatusBadGateway, codeNotesTooLarge},
+	} {
+		notesReader = func(_ context.Context, _ update.Install, _ string, r bool) (update.VersionNotes, error) {
+			retry = append(retry, r)
+			return update.VersionNotes{}, tc.err
+		}
+		status, body := notesGet(t, srv, "/studio/versions/2.31.0/notes?retry=1")
+		if status != tc.status || body["code"] != tc.code {
+			t.Errorf("%v: got %d %v, want %d %s", tc.err, status, body, tc.status, tc.code)
+		}
+	}
+	if len(retry) == 0 || !retry[0] {
+		t.Fatalf("retry=1 was not passed through: %v", retry)
+	}
+}
+
+func TestNotesRouteAnswersTheDocument(t *testing.T) {
+	srv := studioServer(t, &update.Install{Version: "2.10.0"})
+	prev := notesReader
+	t.Cleanup(func() { notesReader = prev })
+	var asked string
+	notesReader = func(_ context.Context, in update.Install, v string, _ bool) (update.VersionNotes, error) {
+		asked = v
+		return update.VersionNotes{Version: "2.31.0", Markdown: "# hi", Cached: true}, nil
+	}
+	status, body := notesGet(t, srv, "/studio/versions/v2.31.0/notes")
+	if status != http.StatusOK || body["markdown"] != "# hi" || body["cached"] != true || asked != "v2.31.0" {
+		t.Fatalf("got %d %v (asked %q)", status, body, asked)
+	}
+}
+
+type stubTransport func(*http.Request) (*http.Response, error)
+
+func (f stubTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestNotesRouteKeepsADocumentOnceAndNeverAnErrorPage(t *testing.T) {
+	dir := t.TempDir()
+	var hits int
+	contentType := "text/html"
+	body := "<html>oops</html>"
+	transport := stubTransport(func(r *http.Request) (*http.Response, error) {
+		hits++
+		if r.URL.String() != "https://dl.reasonix.io/studio/notes/2.31.0.md" {
+			t.Errorf("fetched %s", r.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	srv := httptest.NewServer(operatorHandler(NewHub(HubOptions{Install: &update.Install{Version: "2.10.0"}, NotesTransport: transport, NotesDir: dir})))
+	t.Cleanup(srv.Close)
+
+	status, got := notesGet(t, srv, "/studio/versions/2.31.0/notes")
+	if status != http.StatusBadGateway || got["code"] != codeNotesUnreachable {
+		t.Fatalf("html page: got %d %v", status, got)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("the refused page was written: %v", entries)
+	}
+
+	contentType, body = "text/markdown; charset=utf-8", "# notes"
+	status, got = notesGet(t, srv, "/studio/versions/2.31.0/notes?retry=1")
+	if status != http.StatusOK || got["markdown"] != "# notes" || got["cached"] != false {
+		t.Fatalf("markdown: got %d %v", status, got)
+	}
+	before := hits
+	status, got = notesGet(t, srv, "/studio/versions/2.31.0/notes")
+	if status != http.StatusOK || got["cached"] != true || hits != before {
+		t.Fatalf("second read: got %d %v, hits %d -> %d", status, got, before, hits)
+	}
+}
+
+func TestNotesRouteRefusesAnOverlongVersion(t *testing.T) {
+	srv := studioServer(t, &update.Install{Version: "2.10.0"})
+	status, got := notesGet(t, srv, "/studio/versions/2.0.0-"+strings.Repeat("a", 80)+"/notes")
+	if status != http.StatusBadRequest || got["code"] != codeNotesBadVersion {
+		t.Fatalf("got %d %v", status, got)
 	}
 }

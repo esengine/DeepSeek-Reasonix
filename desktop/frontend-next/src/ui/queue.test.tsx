@@ -64,6 +64,25 @@ describe("why a held entry stopped", () => {
     );
   });
 
+  it("offers Retry on an uncertain entry the kernel knows was never sent", () => {
+    expect(held({ blockCode: "steer_unapplied" })).toContain('data-action="queue.retry"');
+  });
+
+  it.each(["turn_ack_failed", "turn_snapshot_failed", "owner_inactive", "manifest_salvaged", "future_code"])(
+    "offers no Retry on an uncertain %s entry, which may already have run",
+    (code) => {
+      expect(held({ blockCode: code })).not.toContain('data-action="queue.retry"');
+    },
+  );
+
+  it("offers no Retry on an uncertain entry with no code", () => {
+    expect(held({})).not.toContain('data-action="queue.retry"');
+  });
+
+  it("still offers Retry on a blocked entry", () => {
+    expect(draw(snapshot({ items: [item({ state: "blocked", intent: "followup" })] }))).toContain('data-action="queue.retry"');
+  });
+
   it("keeps the kernel's text for a code this build has no sentence for", () => {
     expect(held({ blockCode: "future_code", blockReason: "something new" })).toContain("something new");
   });

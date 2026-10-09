@@ -144,3 +144,72 @@ func TestMergeProbeSnapshotOnlyOverlaysTransientFailures(t *testing.T) {
 		t.Fatalf("not-found overlay = %+v, want definitive result adopted", r)
 	}
 }
+
+func TestProbeCacheHitPersistsSnapshotSoExpiryKeepsTheAnswer(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(1000, 0))
+	dir := testenv.TempDir(t)
+	toolPath := writeProbeTool(t, filepath.Join(dir, "hittool"), "hittool 1.0")
+	opts := ProbeOptions{Overrides: map[string]string{"hittool": toolPath}}
+	commands := []string{"hittool --version"}
+
+	opts.SnapshotDir = testenv.TempDir(t)
+	RunProbesWithOptions(context.Background(), commands, opts)
+
+	opts.SnapshotDir = testenv.TempDir(t)
+	first := RunProbesWithOptions(context.Background(), commands, opts)
+	sectionBefore := FormatSection(first, "test/os", "/bin/sh", nil)
+
+	// Past the in-memory TTL the answer must come from the snapshot this
+	// directory was served from, not from a fresh run that may differ.
+	resetProbeCacheForTest(t, time.Unix(1000, 0).Add(probeCacheTTL+time.Second))
+	if err := os.Remove(toolPath); err != nil {
+		t.Fatalf("remove tool: %v", err)
+	}
+	second := RunProbesWithOptions(context.Background(), commands, opts)
+	if sectionAfter := FormatSection(second, "test/os", "/bin/sh", nil); sectionAfter != sectionBefore {
+		t.Fatalf("environment section moved when the in-memory cache expired:\nbefore: %s\nafter:  %s", sectionBefore, sectionAfter)
+	}
+}
+
+func TestProbeCacheHitLeavesAnExistingSnapshotAlone(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(1000, 0))
+	dir := testenv.TempDir(t)
+	toolPath := writeProbeTool(t, filepath.Join(dir, "keeptool"), "keeptool 1.0")
+	opts := ProbeOptions{Overrides: map[string]string{"keeptool": toolPath}, SnapshotDir: testenv.TempDir(t)}
+	commands := []string{"keeptool --version"}
+	key := probeFingerprint(commands, opts)
+
+	saveProbeSnapshot(opts.SnapshotDir, key, []ProbeResult{{Command: commands[0], Binary: "keeptool", Found: true, Output: "keeptool 0.9", Path: toolPath}}, time.Unix(900, 0))
+	finishProbe(key, []ProbeResult{{Command: commands[0], Binary: "keeptool", Found: true, Output: "keeptool 1.0", Path: toolPath}}, time.Unix(1000, 0))
+
+	RunProbesWithOptions(context.Background(), commands, opts)
+	snap, ok := loadProbeSnapshot(opts.SnapshotDir, key)
+	if !ok || len(snap.Results) != 1 || snap.Results[0].Output != "keeptool 0.9" || !snap.StoredAt.Equal(time.Unix(900, 0)) {
+		t.Fatalf("a cache hit rewrote the snapshot it found: %+v", snap)
+	}
+}
+
+func TestProbeSharedWaitPersistsSnapshotForTheWaiter(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(1000, 0))
+	dir := testenv.TempDir(t)
+	toolPath := writeProbeTool(t, filepath.Join(dir, "waittool"), "waittool 1.0")
+	opts := ProbeOptions{Overrides: map[string]string{"waittool": toolPath}, SnapshotDir: testenv.TempDir(t)}
+	commands := []string{"waittool --version"}
+	key := probeFingerprint(commands, opts)
+
+	if _, running := beginProbe(key); running {
+		t.Fatal("key already in flight")
+	}
+	done := make(chan []ProbeResult)
+	go func() { done <- RunProbesWithOptions(context.Background(), commands, opts) }()
+	// The waiter cannot be observed blocking; a pause long enough for the goroutine to reach <-call.done.
+	time.Sleep(100 * time.Millisecond)
+	finishProbe(key, []ProbeResult{{Command: commands[0], Binary: "waittool", Found: true, Output: "waittool 1.0", Path: toolPath}}, time.Unix(1000, 0))
+	got := <-done
+	if len(got) != 1 || got[0].Output != "waittool 1.0" {
+		t.Fatalf("waiter got %+v", got)
+	}
+	if _, ok := loadProbeSnapshot(opts.SnapshotDir, key); !ok {
+		t.Fatal("the waiter's directory holds no snapshot of the answer it was served")
+	}
+}

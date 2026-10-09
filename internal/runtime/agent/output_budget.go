@@ -20,6 +20,7 @@ type outputBudgetState struct {
 	activeReqShape    atomic.Pointer[requestCalibrationShape]
 	promptCalibration atomic.Pointer[promptTokenCalibration]
 	contextUsage      atomic.Pointer[contextUsage] // gauge's memoised prompt size
+	usageAnchor       atomic.Pointer[usageAnchor]
 }
 
 type promptTokenCalibration struct {
@@ -50,6 +51,7 @@ type requestCalibrationShape struct {
 func (o *outputBudgetState) reset() {
 	o.lastUsage.Store(nil)
 	o.activeReqShape.Store(nil)
+	o.usageAnchor.Store(nil)
 }
 
 // A request that carried images was billed for pixels at a rate the host never

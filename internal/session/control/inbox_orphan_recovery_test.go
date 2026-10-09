@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -486,5 +487,25 @@ func TestSkippedAskKeepsAnUnreadableItemHeld(t *testing.T) {
 	if !snap.Paused || len(snap.Items) != 1 || snap.Items[0].State != sessioninbox.StateUncertain ||
 		snap.Items[0].BlockCode != sessioninbox.BlockSteerUnapplied {
 		t.Fatalf("an unreadable item must stay uncertain and paused, got %+v", snap)
+	}
+}
+
+func TestRecoveredInboxNoticeCarriesItsCountAsAPayload(t *testing.T) {
+	ev := inboxRecoveredNotice(3)
+	if ev.Kind != event.Notice || ev.Level != event.LevelWarn || ev.Code != event.NoticeCodeInboxRecovered {
+		t.Fatalf("notice = %+v, want a warn notice coded %q", ev, event.NoticeCodeInboxRecovered)
+	}
+	p, ok := event.DecodeInboxRecovered(ev.Detail)
+	if !ok || p.Count != 3 {
+		t.Fatalf("payload = %q, want a count of 3", ev.Detail)
+	}
+	if !strings.Contains(ev.Text, "3 pending instruction") {
+		t.Fatalf("the English fallback must stay for frontends that do not word the code: %q", ev.Text)
+	}
+	if !event.DetailIsPayload(event.NoticeCodeInboxRecovered) {
+		t.Fatal("a sink that prints Text must not print the payload again")
+	}
+	if _, ok := event.DecodeInboxRecovered("not json"); ok {
+		t.Fatal("a Detail that is not the payload must read as none")
 	}
 }

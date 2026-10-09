@@ -3,6 +3,8 @@
 export const EN_COMPOSER: Record<string, string> = {
   "↓ 回到最新": "↓ Back to latest",
   "不思考": "No reasoning",
+  "最轻量": "Minimal",
+  "比快速档更轻；GLM-5.2 会跳过思考": "Lighter than Fast; GLM-5.2 skips thinking",
   "超深入": "Extra deep",
   "不做推理直接作答，响应最快，适合简单问答": "Answers without reasoning; fastest, for simple questions",
   "比深入投入更多推理，适合困难的多步问题": "More reasoning than Deep, for hard multi-step problems",
@@ -51,6 +53,7 @@ export const EN_COMPOSER: Record<string, string> = {
   "松手 → 插入到光标处": "Release to insert at the caret",
   "工作区外的文件引用不到 · 这里放不下": "A file outside the workspace cannot be referenced — this drop has nowhere to go",
   "图片": "image",
+  "图片不可用": "Image unavailable",
   "文件": "file",
   "粘贴的文本": "pasted text",
   "{n} 行 · 展开到输入框": "{n} lines · put it back in the box",

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,7 +111,7 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	stderr := &tailBuffer{limit: 16 * 1024}
 	cmd.Stderr = stderr
 	if s.Stderr != nil {
-		cmd.Stderr = io.MultiWriter(stderr, s.Stderr)
+		cmd.Stderr = io.MultiWriter(stderr, omittedStderrWriter{sink: s.Stderr})
 	}
 
 	stdin, err := cmd.StdinPipe()
@@ -279,12 +280,10 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 				return exe, fallbackEnv, nil
 			}
 			env = fallbackEnv
-			currentPath = fallbackPath
 		}
 	}
 
-	return "", env, fmt.Errorf("stdio plugin %q: command %q not found on PATH; GUI launches and non-interactive sessions may not inherit your shell PATH. Use an absolute command path or set PATH in the MCP server env. PATH=%q",
-		s.Name, s.Command, currentPath)
+	return "", env, &commandMissingError{command: s.Command}
 }
 
 // stdioWorkingDir keeps WorkspaceRoot's roots/list role separate from process
@@ -321,56 +320,11 @@ func hasPathSeparator(s string) bool {
 func lookPathInEnv(command string, env []string) (string, bool) {
 	path, _ := envValue(env, "PATH")
 	pathext, _ := envValue(env, "PATHEXT")
-	for _, dir := range filepath.SplitList(path) {
-		if dir == "" || !filepath.IsAbs(dir) {
-			continue
-		}
-		for _, name := range executableNames(command, pathext) {
-			candidate := filepath.Join(dir, name)
-			if isExecutableFile(candidate) {
-				return candidate, true
-			}
-		}
-	}
-	return "", false
-}
-
-func executableNames(command, pathext string) []string {
-	if runtime.GOOS != "windows" || filepath.Ext(command) != "" {
-		return []string{command}
-	}
-	if strings.TrimSpace(pathext) == "" {
-		pathext = ".COM;.EXE;.BAT;.CMD"
-	}
-	names := []string{command}
-	seen := map[string]bool{strings.ToLower(command): true}
-	for ext := range strings.SplitSeq(pathext, ";") {
-		ext = strings.TrimSpace(ext)
-		if ext == "" {
-			continue
-		}
-		if !strings.HasPrefix(ext, ".") {
-			ext = "." + ext
-		}
-		name := command + ext
-		key := strings.ToLower(name)
-		if !seen[key] {
-			seen[key] = true
-			names = append(names, name)
-		}
-	}
-	return names
+	return proc.LookPathIn(command, path, pathext, runtime.GOOS == "windows")
 }
 
 func isExecutableFile(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true
-	}
-	return info.Mode().Perm()&0o111 != 0
+	return proc.IsExecutableFile(path, runtime.GOOS == "windows")
 }
 
 func windowsStdioFallbackPATH(env []string) string {
@@ -488,10 +442,12 @@ func parseShellPATH(out []byte, marker string) string {
 	return ""
 }
 
+// mergeEnv applies overrides in key order, so two spellings of one Windows
+// variable resolve the same way every time.
 func mergeEnv(base []string, overrides map[string]string) []string {
 	out := append([]string(nil), base...)
-	for k, v := range overrides {
-		out = setEnvValue(out, k, v)
+	for _, k := range slices.Sorted(maps.Keys(overrides)) {
+		out = setEnvValue(out, k, overrides[k])
 	}
 	return out
 }
@@ -569,7 +525,7 @@ func (t *stdioTransport) call(ctx context.Context, method string, params any) (j
 		t.mu.Unlock()
 		// Nothing was written for this request, so a replacement connection may
 		// carry it. The mid-flight case below stays unmarked.
-		return nil, markGone(t.withStderr(fmt.Errorf("plugin %q: read: %w", t.name, t.readErr)))
+		return nil, markGone(t.withStderr(&stdioReadFailure{cause: t.readErr}))
 	}
 	t.nextID++
 	id := t.nextID
@@ -594,7 +550,7 @@ func (t *stdioTransport) call(ctx context.Context, method string, params any) (j
 	case resp, ok := <-ch:
 		if !ok {
 			// A quiet death leaves only the startup banner, which alone misreads.
-			return nil, t.withStderr(fmt.Errorf("plugin %q: server exited while handling %s; the next call starts a fresh one: %w", t.name, method, t.readErr))
+			return nil, t.withStderr(&stdioReadFailure{method: method, cause: t.readErr})
 		}
 		if resp.Error != nil {
 			return nil, fmt.Errorf("plugin %q: %w", t.name, resp.Error)
@@ -629,21 +585,18 @@ func (t *stdioTransport) withStderr(err error) error {
 	// close), and an unbounded wait here would strand the call that is trying
 	// to report why the server went away.
 	waitWithBudget(t.wait, closeWaitBudget)
-	// This error is returned directly to callers outside startup as well as
-	// copied into diagnostics. Redact at the transport boundary so an early
-	// child exit cannot bypass the startup-specific redaction layer.
-	msg := secrets.RedactCredentials(t.stderr.String())
-	if msg == "" {
+	count := len(t.stderr.String())
+	if count == 0 {
 		return err
 	}
-	return fmt.Errorf("%w; last stderr: %s", err, msg) // the tail, not the startup log
+	return &subprocessOutputError{cause: err, bytes: count}
 }
 
-func (t *stdioTransport) startupStderr() string {
+func (t *stdioTransport) startupStderr() int {
 	if t == nil || t.stderr == nil {
-		return ""
+		return 0
 	}
-	return secrets.RedactCredentials(t.stderr.String())
+	return len(t.stderr.String())
 }
 
 // wait reaps the child exactly once; cmd.Wait blocks until the stderr-copy

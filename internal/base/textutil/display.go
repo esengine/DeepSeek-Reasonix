@@ -34,3 +34,16 @@ func SanitizeDisplay(s string) string {
 	}
 	return strings.Join(strings.Fields(b.String()), " ")
 }
+
+// SanitizeLaunch is SanitizeDisplay for a line the user is asked to approve:
+// it also drops format characters (bidi overrides, zero-width), which would
+// let the text on screen read differently from what is run.
+func SanitizeLaunch(s string) string {
+	s = SanitizeDisplay(s)
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+}

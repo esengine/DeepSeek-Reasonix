@@ -28,6 +28,13 @@ func SetSessionLineageArchived(sessionPath string, archived bool, except ...stri
 	return setSessionPathsArchivedWith(paths, archived, saveBranchMeta)
 }
 
+// RecoveryLineagePaths lists sessionPath together with the recovery copies of
+// the same conversation, minus the paths in except. It is what a row folded in
+// the sidebar stands for when the whole row is acted on.
+func RecoveryLineagePaths(sessionPath string, except ...string) ([]string, error) {
+	return recoveryArchiveLineage(sessionPath, except)
+}
+
 type branchMetaSaveFunc func(string, BranchMeta, bool) error
 
 type archivedMetaSnapshot struct {

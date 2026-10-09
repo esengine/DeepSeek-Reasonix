@@ -178,7 +178,7 @@ effort = "high"
 	c.modelRef = "relay/m1"
 	c.managementNotice("/effort")
 	got := lastNotice(t, take())
-	if !strings.HasPrefix(got, "effort for relay: high") || !strings.Contains(got, "options:") {
+	if got != fmt.Sprintf(i18n.M.EffortStatusFmt, "relay", "high", "auto", "auto|low|medium|high") {
 		t.Errorf("effort = %q", got)
 	}
 }

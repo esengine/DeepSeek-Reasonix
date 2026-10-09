@@ -23,6 +23,7 @@
   font-display: swap;
 }
 
+@property --nav-w { syntax: "<length>"; inherits: true; initial-value: 0px }
 @property --rail-w { syntax: "<length>"; inherits: true; initial-value: 264px }
 @property --side-w { syntax: "<length>"; inherits: true; initial-value: 316px }
 @property --dock-w { syntax: "<length>"; inherits: true; initial-value: 560px }
@@ -65,6 +66,8 @@
     --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
     --grain-a: .026;
     --focus: var(--net);
+    --link: var(--net); --brand: var(--net); --brand-wash: var(--net-wash);
+    --halo: var(--net); --label-agent: var(--deleg); --label-agent-wash: var(--deleg-wash);
     --lit: inset 0 1px 0 rgb(255 255 255 / .055);
     --sunk: inset 0 1px 2px rgb(0 0 0 / .16);
     --ease: cubic-bezier(.22, .68, .26, 1);
@@ -195,59 +198,59 @@
   :root[data-weight="heavy"]:lang(zh) { --w-reg: 600; --w-med: 700; --w-semi: 700 }
 
   :root, :root[data-contrast="soft"] {
-  --text: oklch(30.5% .023 85); --muted: oklch(41% .0207 85); --faint: oklch(47.5% .0207 85); --ghost: oklch(51.5% .023 85);
+  --text: #292b29; --muted: oklch(.41 .0207 85); --faint: oklch(.475 .0207 85); --ghost: oklch(.475 .0207 85);
   }
   :root[data-contrast="normal"] {
-  --text: oklch(27.5% .0218 85); --muted: oklch(37.5% .0196 85); --faint: oklch(44% .0196 85); --ghost: oklch(49.5% .0218 85);
+  --text: oklch(.245 .0218 85); --muted: oklch(.34 .0196 85); --faint: oklch(.405 .0196 85); --ghost: oklch(.405 .0196 85);
   }
   :root[data-contrast="strong"] {
-  --text: oklch(20.4% .0196 85); --muted: oklch(33.5% .0184 85); --faint: oklch(40.5% .0184 85); --ghost: oklch(46.5% .0207 85);
+  --text: oklch(.103 .0196 85); --muted: oklch(.26 .0184 85); --faint: oklch(.335 .0184 85); --ghost: oklch(.335 .0184 85);
   }
 
   @media (prefers-color-scheme: dark) {
     :root, :root[data-contrast="soft"] {
-    --text: oklch(85% .012 255); --muted: oklch(72.6% .012 255); --faint: oklch(65% .013 255); --ghost: oklch(60.5% .016 255);
+    --text: #e7e8e3; --muted: #b4b7b0; --faint: #8e9289; --ghost: #8e9289;
     }
     :root[data-contrast="normal"] {
-    --text: oklch(88.1% .012 255); --muted: oklch(76.7% .012 255); --faint: oklch(69.3% .013 255); --ghost: oklch(64.9% .016 255);
+    --text: oklch(.9588 .006756 115.3); --muted: oklch(.81 .01031 125.5); --faint: oklch(.728 .013 255); --ghost: oklch(.728 .013 255);
     }
     :root[data-contrast="strong"] {
-    --text: oklch(93.4% .010 255); --muted: oklch(81.8% .011 255); --faint: oklch(73.6% .012 255); --ghost: oklch(69.1% .014 255);
+    --text: oklch(1 .006756 115.3); --muted: oklch(.893 .011 255); --faint: oklch(.806 .012 255); --ghost: oklch(.806 .012 255);
     }
   }
 
   :root[data-theme="dark"], :root[data-theme="dark"][data-contrast="soft"] {
-  --text: oklch(85% .012 255); --muted: oklch(72.6% .012 255); --faint: oklch(65% .013 255); --ghost: oklch(60.5% .016 255);
+  --text: #e7e8e3; --muted: #b4b7b0; --faint: #8e9289; --ghost: #8e9289;
   }
   :root[data-theme="dark"][data-contrast="normal"] {
-  --text: oklch(88.1% .012 255); --muted: oklch(76.7% .012 255); --faint: oklch(69.3% .013 255); --ghost: oklch(64.9% .016 255);
+  --text: oklch(.9588 .006756 115.3); --muted: oklch(.81 .01031 125.5); --faint: oklch(.728 .013 255); --ghost: oklch(.728 .013 255);
   }
   :root[data-theme="dark"][data-contrast="strong"] {
-  --text: oklch(93.4% .010 255); --muted: oklch(81.8% .011 255); --faint: oklch(73.6% .012 255); --ghost: oklch(69.1% .014 255);
+  --text: oklch(1 .006756 115.3); --muted: oklch(.893 .011 255); --faint: oklch(.806 .012 255); --ghost: oklch(.806 .012 255);
   }
   :root[data-theme="light"], :root[data-theme="light"][data-contrast="soft"] {
-  --text: oklch(30.5% .023 85); --muted: oklch(41% .0207 85); --faint: oklch(47.5% .0207 85); --ghost: oklch(51.5% .023 85);
+  --text: #292b29; --muted: oklch(.41 .0207 85); --faint: oklch(.475 .0207 85); --ghost: oklch(.475 .0207 85);
   }
   :root[data-theme="light"][data-contrast="normal"] {
-  --text: oklch(27.5% .0218 85); --muted: oklch(37.5% .0196 85); --faint: oklch(44% .0196 85); --ghost: oklch(49.5% .0218 85);
+  --text: oklch(.245 .0218 85); --muted: oklch(.34 .0196 85); --faint: oklch(.405 .0196 85); --ghost: oklch(.405 .0196 85);
   }
   :root[data-theme="light"][data-contrast="strong"] {
-  --text: oklch(20.4% .0196 85); --muted: oklch(33.5% .0184 85); --faint: oklch(40.5% .0184 85); --ghost: oklch(46.5% .0207 85);
+  --text: oklch(.103 .0196 85); --muted: oklch(.26 .0184 85); --faint: oklch(.335 .0184 85); --ghost: oklch(.335 .0184 85);
   }
 
   @media (prefers-contrast: more) {
     :root:not([data-contrast]) {
-    --text: oklch(20.4% .0196 85); --muted: oklch(33.5% .0184 85); --faint: oklch(40.5% .0184 85); --ghost: oklch(46.5% .0207 85);
+    --text: oklch(20.4% .0196 85); --muted: oklch(33.5% .0184 85); --faint: oklch(40.5% .0184 85); --ghost: oklch(40.5% .0184 85);
     }
     :root[data-theme="dark"]:not([data-contrast]) {
-    --text: oklch(93.4% .010 255); --muted: oklch(81.8% .011 255); --faint: oklch(73.6% .012 255); --ghost: oklch(69.1% .014 255);
+    --text: oklch(93.4% .010 255); --muted: oklch(81.8% .011 255); --faint: oklch(73.6% .012 255); --ghost: oklch(73.6% .012 255);
     }
   }
   @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
     :root:not([data-contrast]) {
-    --text: oklch(93.4% .010 255); --muted: oklch(81.8% .011 255); --faint: oklch(73.6% .012 255); --ghost: oklch(69.1% .014 255);
+    --text: oklch(93.4% .010 255); --muted: oklch(81.8% .011 255); --faint: oklch(73.6% .012 255); --ghost: oklch(73.6% .012 255);
     }
     :root[data-theme="light"]:not([data-contrast]) {
-    --text: oklch(20.4% .0196 85); --muted: oklch(33.5% .0184 85); --faint: oklch(40.5% .0184 85); --ghost: oklch(46.5% .0207 85);
+    --text: oklch(20.4% .0196 85); --muted: oklch(33.5% .0184 85); --faint: oklch(40.5% .0184 85); --ghost: oklch(40.5% .0184 85);
     }
   }

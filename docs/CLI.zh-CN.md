@@ -108,7 +108,10 @@ reasonix config compact-ratio 75           # 设置用户全局默认值
 reasonix config compact-ratio --local 75   # 写入 ./reasonix.toml 项目覆盖
 ```
 
-可设置范围为 65–85%，内置默认值为 85%。数值越低越早压缩，可能降低 prompt prefix
+可设置范围为大于 0% 且小于 100%（不含端点），内置默认值为 85%。边界由
+`internal/contract/config` 的 `CompactRatioMin` 和 `CompactRatioMax` 定义；TOML 保存对应的小数比例。
+
+数值越低越早压缩，可能降低 prompt prefix
 缓存复用率；数值越高则会在压缩前保留更多上下文。项目 `reasonix.toml` 的优先级高于
 用户全局配置。修改会应用于新启动的 CLI 会话；已经运行的会话继续使用启动时加载的阈值。
 
@@ -174,7 +177,7 @@ echo "解释这段代码" | reasonix run
 - 参数可以夹在任务文字之间：`reasonix run fix --yolo bug` 以 bypassPermissions 执行任务 `fix bug`。
 - 写在 `run` 前面的参数，只有终端界面（加上 `-y`、`-p`）和 `run` 都以同样方式接受每一个时，才会移到它后面：`reasonix -y run "task"` 等同于
   `reasonix run -y "task"`。
-- 其中只要有一个是终端界面专用参数（`--inline`、`-r`、不带值的 `--resume`），整条命令行就交给终端界面。
+- 其中只要有一个是终端界面专用参数（`-r`、不带值的 `--resume`），整条命令行就交给终端界面。
 - 只有 `run` 接受的前置参数（`--output-format`、`--metrics`）也一样：整条命令行交给终端界面，由它报错。这类参数请写在 `run` 后面。
 - 前置的 `-p` 只在子命令之前才算数；写在 `run` 后面的 `-p` 属于 `run` 自己。
 - 前置参数之后的第一个词就是子命令，和不带参数时一样：`reasonix --yolo run the tests` 会无界面执行
@@ -262,7 +265,7 @@ reasonix run "运行测试" --output-format stream-json
 }
 ```
 
-`permission_denials` 列出本次运行的权限门拒绝的调用，没有被拒时为空数组；被拒不改变退出码，唯独在 `--fail-on-unverified` 下 `permission.untrusted_folder` 退出 `3`。
+`permission_denials` 列出本次运行的权限门拒绝的调用，没有被拒时为空数组；被拒一般不改变退出码；`permission.untrusted_folder` 退出 `4`（指定 `--fail-on-unverified` 时为 `3`）。
 同一个 `code` 也随被拒的工具结果出现：`stream-json` 里是 `refusalCode`，`--events-jsonl`
 里是 `refusal_code`。
 
@@ -309,7 +312,8 @@ reasonix run "运行测试" --output-format stream-json
 | `0` | 模型已结束，包括有调用被拒或就绪检查未满足的情况。 |
 | `1` | 运行失败：模型服务、配置、上限或取消。 |
 | `2` | 命令行参数无效。 |
-| `3` | 指定了 `--fail-on-unverified`，且最终就绪检查未满足，或因文件夹未被信任而所有编辑和命令都被拒绝。 |
+| `3` | 指定了 `--fail-on-unverified`，且最终就绪检查未满足，或因文件夹未被信任而编辑和命令被拒绝。 |
+| `4` | 文件夹未被信任，编辑和命令被拒绝，任务没有完成。用 `reasonix trust --dir <folder>` 信任它，或明知故犯地传 `--permission-mode`。 |
 
 ### 脱敏机器接口
 
@@ -508,7 +512,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | --- | --- |
 | `/model` | 搜索已配置模型并切换当前模型。 |
 | `/provider` | 选择 provider，再选择该 provider 下的模型。 |
-| `/resume` | 搜索最近会话并切换。 |
+| `/resume [n]` | 搜索最近会话并切换；`/resume <n>` 直接切换到列表中第 n 个会话。 |
 | `/status` | 显示模型、effort、cache、Git、后台任务，以及执行设定或余额信息。 |
 | `/preset [balanced\|delivery]` | 查看或切换 Agent 执行设定（不重建 Controller）；`/work-mode` 与 `/profile` 为兼容别名，`economy`、`light` 都解析为 `balanced`。 |
 | `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |

@@ -14,6 +14,7 @@ const (
 	CodeEngineFailed      Code = "browser.engine_failed"
 	CodeProfileBusy       Code = "browser.profile_busy"
 	CodeURLRefused        Code = "browser.url_refused"
+	CodeNetworkPath       Code = "browser.network_path"
 	CodeNavigationFailed  Code = "browser.navigation_failed"
 	CodeNavigationTimeout Code = "browser.navigation_timeout"
 	CodeNoTab             Code = "browser.no_tab"

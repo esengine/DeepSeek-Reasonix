@@ -31,6 +31,100 @@ func bookPost(t *testing.T, front *httptest.Server, path, body string) *http.Res
 	return resp
 }
 
+// Turning a machine off says nothing about what this window shows, so the row
+// keeps reporting it and the rail keeps listing it.
+func TestADisabledHostIsStillListed(t *testing.T) {
+	front := bookServer(t, &stubAttacher{})
+	bookPost(t, front, "/remotes", `{"name":"gpu-box","host":"10.0.0.4","disabled":true}`)
+
+	resp, err := http.Get(front.URL + "/remotes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var listed []struct {
+		Name     string `json:"name"`
+		Disabled bool   `json:"disabled"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].Name != "gpu-box" || !listed[0].Disabled {
+		t.Fatalf("listed = %+v, want the disabled machine reported", listed)
+	}
+}
+
+// A machine the book has turned off is not dialed at all: the refusal is typed,
+// and the link layer never hears about it.
+func TestOpeningADisabledHostIsRefusedWithoutDialing(t *testing.T) {
+	dialed := false
+	front := bookServer(t, &stubAttacher{attach: func(host, workspace string) (RemoteEndpoint, func(), error) {
+		dialed = true
+		return RemoteEndpoint{Host: host, Workspace: workspace}, func() {}, nil
+	}})
+	bookPost(t, front, "/remotes", `{"name":"gpu-box","host":"10.0.0.4","disabled":true}`)
+
+	resp := bookPost(t, front, "/remotes/open", `{"host":"gpu-box"}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("opening a disabled machine = %d, want 409", resp.StatusCode)
+	}
+	if dialed {
+		t.Fatal("a disabled machine was dialed")
+	}
+}
+
+// A question about a disabled machine is refused too, because answering it would
+// take the same link the switch exists to avoid.
+func TestAskingAboutADisabledMachineIsRefused(t *testing.T) {
+	front := bookServer(t, &stubAttacher{})
+	bookPost(t, front, "/remotes", `{"name":"gpu-box","host":"10.0.0.4","disabled":true}`)
+
+	resp, err := http.Get(front.URL + "/remotes/gpu-box/tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("tree read of a disabled machine = %d, want 409", resp.StatusCode)
+	}
+	var refused map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&refused); err != nil {
+		t.Fatal(err)
+	}
+	if refused["code"] != "remote.disabled" {
+		t.Fatalf("refusal = %v, want code remote.disabled", refused)
+	}
+}
+
+// The flag is the book's, so it round-trips and the fields the page cannot see
+// come back with it; turning it off again is an ordinary save.
+func TestDisabledSurvivesASaveAndKeepsTheRest(t *testing.T) {
+	front := bookServer(t, &stubAttacher{})
+	bookPost(t, front, "/remotes",
+		`{"name":"gpu-box","host":"10.0.0.4","workspaces":["/srv/training"],"disabled":true}`)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.RemoteHost("gpu-box")
+	if !ok {
+		t.Fatal("the host never reached the book")
+	}
+	if !entry.Disabled {
+		t.Fatalf("entry = %+v, want disabled", entry)
+	}
+	if got := entry.WorkspaceList(); len(got) != 1 || got[0] != "/srv/training" {
+		t.Fatalf("workspaces = %v, want the one the row carried", got)
+	}
+
+	resp := bookPost(t, front, "/remotes",
+		`{"name":"gpu-box","host":"10.0.0.4","workspaces":["/srv/training"],"disabled":false}`)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("turning it back on = %d, want 204", resp.StatusCode)
+	}
+}
+
 // A machine is reachable from every project on this computer, so its entry
 // belongs to the user and not to whichever folder was open when it was added.
 func TestSavingAHostWritesTheUserBook(t *testing.T) {

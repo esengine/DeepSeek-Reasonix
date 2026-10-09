@@ -65,7 +65,9 @@ func (e *startupFailure) Unwrap() error {
 	return e.Err
 }
 
-func newStartupFailure(stage string, started time.Time, stderr string, err error) error {
+func (e *startupFailure) DiagnosticFacts() string { return e.Error() }
+
+func newStartupFailure(stage string, started time.Time, stderrBytes int, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -74,11 +76,19 @@ func newStartupFailure(stage string, started time.Time, stderr string, err error
 		return err
 	}
 	elapsed := max(time.Since(started), 0)
+	stderr := ""
+	var output *subprocessOutputError
+	if errors.As(err, &output) {
+		stderrBytes = output.bytes
+	}
+	if stderrBytes > 0 {
+		stderr = fmt.Sprintf("subprocess output omitted (%d bytes)", stderrBytes)
+	}
 	return &startupFailure{
 		Stage:   strings.TrimSpace(stage),
 		Elapsed: elapsed,
-		Stderr:  secrets.RedactCredentials(strings.TrimSpace(stderr)),
-		Err:     err,
+		Stderr:  stderr,
+		Err:     secrets.DiagnosticError(err),
 	}
 }
 
@@ -109,15 +119,15 @@ func formatElapsed(elapsed time.Duration) string {
 }
 
 type startupDiagnosticTransport interface {
-	startupStderr() string
+	startupStderr() int
 }
 
-func (c *Client) startupStderr() string {
+func (c *Client) startupStderr() int {
 	if c == nil || c.t == nil {
-		return ""
+		return 0
 	}
 	if diagnostic, ok := c.t.(startupDiagnosticTransport); ok {
 		return diagnostic.startupStderr()
 	}
-	return ""
+	return 0
 }

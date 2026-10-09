@@ -6,16 +6,34 @@ import os from "node:os";
 import fs from "node:fs";
 
 const require = createRequire(import.meta.url);
-const { parse, readActs } = require("../src/host.js");
+const { parse, readActs, start } = require("../src/host.js");
 const { contextTemplate, editMenuTemplate, applicationMenuTemplate, menuInstaller } = require("../src/editmenu.js");
 const { uiLanguage } = require("../src/uilang.js");
 const { externalTarget } = require("../src/links.js");
 const { offerCleanup, ownBundle } = require("../src/legacy.js");
 const { stripPackageGrants, readReport, unpaintedWindowCause } = require("../src/packagegrants.js");
+const { groundFor, GROUND } = require("../src/ground.js");
 const { pick, loadPrefs, savePrefs, registerPrefs } = require("../src/prefs.js");
 
 const TOKEN = "a".repeat(64);
 const line = (over) => JSON.stringify({ version: 1, origin: "http://127.0.0.1:8080", token: TOKEN, ...over });
+
+test("the spawned host receives the system language and inherits explicit locale overrides", async () => {
+  const script = `console.log(${JSON.stringify(line())});
+    console.log(JSON.stringify({act: JSON.stringify({system: process.env.REASONIX_SYSTEM_LANG,
+      explicit: process.env.REASONIX_LANG})}));`;
+  const before = process.env.REASONIX_SYSTEM_LANG;
+  const explicit = process.env.REASONIX_LANG;
+  const state = new Promise((resolve) => {
+    const host = start(process.execPath, ["-e", script], {
+      systemLanguage: "zh-Hant-TW",
+      onAct: (act) => resolve(JSON.parse(act)),
+    });
+    host.ready.catch(resolve);
+  });
+  assert.deepEqual(await state, { system: "zh-Hant-TW", ...(explicit === undefined ? {} : { explicit }) });
+  assert.equal(process.env.REASONIX_SYSTEM_LANG, before);
+});
 
 test("the handshake is accepted only when every field accounts for itself", () => {
   assert.deepEqual(parse(line()), { origin: "http://127.0.0.1:8080", token: TOKEN });
@@ -665,7 +683,8 @@ test("an unpainted window is attributed only to grants the kernel could not remo
 });
 
 const { BrowserProtocol, PAGE_SESSION } = require("../src/browserprotocol.js");
-const { guestNavigationAllowed, typedAddress } = require("../src/browserguard.js");
+const { guestNavigationAllowed, typedAddress, typed } = require("../src/browserguard.js");
+const { localPath } = require("../src/localpath.js");
 const { sseData } = require("../src/browserrelay.js");
 
 function fakeBrowser() {
@@ -786,6 +805,65 @@ test("an address that names its scheme is loaded as written", () => {
   assert.deepEqual(typedAddress("about:blank"), { url: "about:blank", fallback: "" });
   assert.equal(guestNavigationAllowed(typedAddress("javascript://x%0Aalert(1)").url, "http://127.0.0.1:1"), false);
   assert.equal(guestNavigationAllowed(typedAddress("file:///C:/x").url, "http://127.0.0.1:1"), false);
+});
+
+test("a typed path on disk is the file it names, read by the table the kernel is held to", () => {
+  const table = JSON.parse(fs.readFileSync(new URL("../../../internal/platform/browser/testdata/local_paths.json", import.meta.url), "utf8"));
+  for (const { in: raw, out, kind } of table) {
+    const got = localPath(raw);
+    assert.deepEqual(got ? { url: got.url, kind: got.kind } : { url: "", kind: "" }, { url: out, kind }, JSON.stringify(raw));
+  }
+});
+
+test("a seeded corpus of hostile addresses reaches the same digest as the kernel's parser, and never accepts a share", () => {
+  const tokens = [
+    "file:", "file:/", "/", "//", "\\", ":", "%", "5C", "2F", "09", "0A", ".", "..", "#", "?",
+    "D", "c", "$", " ", "h", "x", "\t", "\n", "\r", "﻿", "\u0085", "\u0001", "\u007f",
+    "localhost", "C:", "UNC", "%5c", "%2e", "?\\", " ",
+  ];
+  let a = 12321;
+  const next = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return (t ^ (t >>> 14)) >>> 0;
+  };
+  let h = 0x811c9dc5;
+  let accepted = 0;
+  for (let i = 0; i < 30000; i++) {
+    let input = next() % 2 === 0 ? "file:" : "";
+    for (let n = 1 + (next() % 12); n > 0; n--) input += tokens[next() % tokens.length];
+    const got = localPath(input);
+    const out = got ? got.url : "";
+    const kind = got ? got.kind : "";
+    for (const byte of Buffer.from(`${input}\0${out}\0${kind}\n`, "utf8")) h = Math.imul(h ^ byte, 0x01000193) >>> 0;
+    if (kind !== "local") continue;
+    accepted++;
+    const u = new URL(out);
+    assert.ok(u.protocol === "file:" && u.hostname === "" && !u.pathname.startsWith("//"), `${JSON.stringify(input)} accepted as ${out}`);
+    assert.ok(!/[\u0000-\u001f\u007f]/.test(out), `${JSON.stringify(input)} kept a control character`);
+  }
+  assert.ok(accepted > 1000, `only ${accepted} accepted`);
+  assert.equal(h.toString(16).padStart(8, "0"), "67b363c1");
+});
+
+test("a path typed in the address bar loads as a file, not as a host named by its drive letter", () => {
+  const kernel = "http://127.0.0.1:4455";
+  const refusal = (raw) => typed(raw, kernel).refusal;
+  const reporter = typed("D:/DevCode/MyProjects/aglo/aglo.html", kernel);
+  assert.deepEqual(reporter, { url: "file:///D:/DevCode/MyProjects/aglo/aglo.html", fallback: "", refusal: "" });
+  for (const ok of ["/Users/me/页面.html", "file:///D:/x.html", "file:/tmp/x.html", "file://localhost/tmp/x.html", "localhost:3000/x"]) {
+    assert.equal(refusal(ok), "", ok);
+  }
+  for (const share of ["\\\\nas\\share\\x.html", "file://nas/share/x.html", "file:////host/x", "file://localhost//host/x", "file://///host/share", "file:///\\\\host\\x", "file:///%5C%5Chost/x", "file:///%2F%2Fhost/x", "\\\\?\\UNC\\host\\x"]) {
+    assert.deepEqual(typed(share, kernel), { url: "", fallback: "", refusal: "network_file" }, share);
+  }
+  assert.equal(refusal("javascript://x%0Aalert(1)"), "scheme");
+  assert.equal(refusal("http://127.0.0.1:4455/_studio/"), "scheme");
+  assert.equal(refusal(""), "scheme");
+  assert.deepEqual(typedAddress("localhost:3000/x"), { url: "http://localhost:3000/x", fallback: "" });
+  assert.deepEqual(typedAddress("a.b/c"), { url: "https://a.b/c", fallback: "http://a.b/c" });
 });
 
 test("the relay reads whole SSE data frames and keeps what is unfinished", () => {
@@ -1001,30 +1079,67 @@ function reloadRig(platform = "darwin") {
   return { state, send, gone, revive };
 }
 
-test("the reload key brings back a window whose page stopped drawing", () => {
-  const press = (over) => ({ type: "keyDown", key: "r", code: "KeyR", control: false, alt: false, shift: false, meta: false, isAutoRepeat: false, ...over });
-  const cases = [
-    ["darwin", { meta: true }, { control: true }],
-    ["win32", { control: true }, { meta: true }],
-    ["linux", { control: true }, { meta: true }],
-  ];
-  for (const [platform, mod, other] of cases) {
+const reloadPress = (over) => ({ type: "keyDown", key: "r", code: "KeyR", control: false, alt: false, shift: false, meta: false, isAutoRepeat: false, ...over });
+const reloadMods = [
+  ["darwin", { meta: true }, { control: true }],
+  ["win32", { control: true }, { meta: true }],
+  ["linux", { control: true }, { meta: true }],
+];
+
+test("reloadAction reads the chord, not the layout", () => {
+  const { reloadAction } = require("../src/reload.js");
+  for (const [platform, mod, other] of reloadMods) {
+    const at = (input) => reloadAction(input, platform);
+    assert.equal(at(reloadPress(mod)), "reload");
+    assert.equal(at(reloadPress({ ...mod, key: "к" })), "reload");
+    assert.equal(at(reloadPress({ key: "F5", code: "F5" })), "reload");
+    assert.equal(at(reloadPress({ ...mod, key: "p", code: "KeyR" })), null, `${platform}: a Dvorak P reloaded`);
+    assert.equal(at(reloadPress({ ...mod, key: "r", code: "KeyP" })), "reload", `${platform}: a Dvorak R did not reload`);
+    assert.equal(at(reloadPress({ ...mod, shift: true })), "hard");
+    assert.equal(at(reloadPress({ ...mod, shift: true, key: "R" })), "hard");
+    for (const input of [
+      reloadPress(), reloadPress(other), reloadPress({ ...mod, alt: true }),
+      reloadPress({ ...mod, type: "keyUp" }), reloadPress({ ...mod, isAutoRepeat: true }),
+      reloadPress({ ...mod, key: "t", code: "KeyT" }), reloadPress({ key: "F5", code: "F5", control: true }),
+      reloadPress({ key: "F5", code: "F5", shift: true }), reloadPress({ shift: true }),
+    ]) assert.equal(at(input), null, `${platform}: ${JSON.stringify(input)}`);
+  }
+});
+
+test("only the hard reload chord reloads the app window; F5 and Ctrl/Cmd+R reach the page", () => {
+  for (const [platform, mod] of reloadMods) {
     const { state, send } = reloadRig(platform);
-    send(press(mod));
-    send(press({ ...mod, key: "R" }));
-    send(press({ ...mod, key: "к" }));
-    send(press({ key: "F5", code: "F5" }));
-    assert.equal(state.reloads, 4, `${platform}: the reload keys did not reload`);
-    send(press());
-    send(press(other));
-    send(press({ ...mod, shift: true }));
-    send(press({ ...mod, alt: true }));
-    send(press({ ...mod, type: "keyUp" }));
-    send(press({ ...mod, isAutoRepeat: true }));
-    send(press({ ...mod, key: "t", code: "KeyT" }));
-    send(press({ key: "F5", code: "F5", control: true }));
-    assert.equal(state.reloads, 4, `${platform}: something other than a fresh reload press reloaded`);
-    assert.equal(state.prevented, 4);
+    send(reloadPress(mod));
+    send(reloadPress({ key: "F5", code: "F5" }));
+    assert.equal(state.reloads, 0, `${platform}: a plain reload key reloaded the UI`);
+    assert.equal(state.prevented, 0, `${platform}: a plain reload key was swallowed`);
+    send(reloadPress({ ...mod, shift: true, key: "R" }));
+    assert.equal(state.reloads, 1, `${platform}: the recovery chord did not reload`);
+    assert.equal(state.prevented, 1);
+  }
+});
+
+test("a browser pane reloads on F5 and Ctrl/Cmd+R, ignoring cache on the shifted chord, and swallows nothing else", () => {
+  const { installPaneReload } = require("../src/reload.js");
+  for (const [platform, mod] of reloadMods) {
+    let handler;
+    const calls = { reload: 0, hard: 0, prevented: 0 };
+    const contents = {
+      on: (name, fn) => { if (name === "before-input-event") handler = fn; },
+      reload: () => { calls.reload += 1; },
+      reloadIgnoringCache: () => { calls.hard += 1; },
+    };
+    installPaneReload(contents, platform);
+    const send = (input) => handler({ preventDefault: () => { calls.prevented += 1; } }, input);
+    send(reloadPress(mod));
+    send(reloadPress({ key: "F5", code: "F5" }));
+    assert.deepEqual(calls, { reload: 2, hard: 0, prevented: 2 }, platform);
+    send(reloadPress({ ...mod, shift: true, key: "R" }));
+    assert.deepEqual(calls, { reload: 2, hard: 1, prevented: 3 }, platform);
+    send(reloadPress({ ...mod, key: "f", code: "KeyF" }));
+    send(reloadPress({ key: "F12", code: "F12" }));
+    send(reloadPress({ ...mod, alt: true }));
+    assert.deepEqual(calls, { reload: 2, hard: 1, prevented: 3 }, `${platform}: another key was handled`);
   }
 });
 
@@ -1341,4 +1456,268 @@ test("the tray has a file for every Windows scale, at exactly 16 * scale pixels"
   assert.equal(trayAsset(1.8).pixels, 32);
   assert.equal(trayAsset(5).pixels, 48);
   assert.equal(trayAsset(NaN).pixels, 16);
+});
+
+function pe(machine) {
+  const b = Buffer.alloc(0x100);
+  b.writeUInt16LE(0x5a4d, 0);
+  b.writeUInt32LE(0x80, 0x3c);
+  b.writeUInt32LE(0x00004550, 0x80);
+  b.writeUInt16LE(machine, 0x84);
+  return b;
+}
+
+test("the PE check reads each image's own machine and refuses a tree of another architecture", () => {
+  const { peMachine, machines, foreign } = require("../packaging/pe.js");
+  assert.equal(peMachine(pe(0xaa64)), 0xaa64);
+  assert.throws(() => peMachine(Buffer.from("#!/bin/sh\n".repeat(10))), /not a PE/);
+  assert.throws(() => peMachine(pe(0x8664).subarray(0, 0x70)), /no PE signature/);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reasonix-pe-"));
+  try {
+    assert.throws(() => foreign(dir, "arm64"), /no PE images/);
+    fs.mkdirSync(path.join(dir, "resources", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "app.exe"), pe(0xaa64));
+    fs.writeFileSync(path.join(dir, "resources", "bin", "host.exe"), pe(0xaa64));
+    fs.writeFileSync(path.join(dir, "locales.pak"), "not an image");
+    fs.writeFileSync(path.join(dir, "noext"), pe(0xaa64));
+    assert.equal(machines(dir).length, 3);
+    assert.deepEqual(foreign(dir, "arm64"), []);
+    assert.deepEqual(foreign(dir, "amd64").map((f) => f.file), ["app.exe", "noext", "resources/bin/host.exe"]);
+    fs.writeFileSync(path.join(dir, "ffmpeg.dll"), pe(0x8664));
+    assert.deepEqual(foreign(dir, "arm64").map((f) => f.file), ["ffmpeg.dll"]);
+    assert.throws(() => foreign(dir, "x64"), /unknown architecture/);
+    fs.writeFileSync(path.join(dir, "broken.dll"), "text, not an image");
+    const broken = foreign(dir, "arm64").find((f) => f.file === "broken.dll");
+    assert.match(broken.error, /not a PE/);
+    fs.rmSync(path.join(dir, "broken.dll"));
+    fs.writeFileSync(path.join(dir, "ffmpeg.dll"), pe(0xaa64));
+    fs.writeFileSync(path.join(dir, "resources", "elevate.exe"), pe(0x14c));
+    assert.deepEqual(foreign(dir, "arm64"), []);
+    fs.writeFileSync(path.join(dir, "Uninstall Reasonix Studio.exe"), pe(0x14c));
+    assert.deepEqual(foreign(dir, "arm64"), []);
+    fs.writeFileSync(path.join(dir, "resources", "elevate.exe"), pe(0xaa64));
+    assert.deepEqual(foreign(dir, "arm64").map((f) => f.file), ["resources/elevate.exe"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const { createPowerGuard, keepsAwake, IDLE_PASSES, SILENT_PASSES } = require("../src/powerguard.js");
+
+function fakeBlocker() {
+  const live = new Set();
+  let next = 1;
+  const calls = { start: 0, stop: 0 };
+  return {
+    calls,
+    live,
+    start(kind) {
+      assert.equal(kind, "prevent-app-suspension");
+      calls.start++;
+      live.add(next);
+      return next++;
+    },
+    stop(id) {
+      calls.stop++;
+      live.delete(id);
+    },
+    isStarted: (id) => live.has(id),
+  };
+}
+
+// answer is what the kernel says next: { panes, unknown }, null for a kernel
+// that cannot answer, or an Error to throw.
+function guardOver(state) {
+  const blocker = fakeBlocker();
+  const guard = createPowerGuard({
+    blocker,
+    running: async () => {
+      if (state.answer instanceof Error) throw state.answer;
+      return state.answer;
+    },
+    enabled: () => state.enabled !== false,
+  });
+  return { blocker, guard };
+}
+const busy = (panes) => ({ panes, unknown: 0 });
+const idle = { panes: 0, unknown: 0 };
+async function times(n, guard) {
+  for (let i = 0; i < n; i++) await guard.refresh();
+}
+
+test("a running turn holds the computer awake at once, once, however many panes run", async () => {
+  const state = { answer: busy(1) };
+  const { blocker, guard } = guardOver(state);
+  await guard.refresh();
+  assert.equal(blocker.live.size, 1);
+  await guard.refresh();
+  state.answer = busy(4);
+  await guard.refresh();
+  assert.equal(blocker.calls.start, 1);
+});
+
+test("the hold is let go only after the third idle answer in a row", async () => {
+  const state = { answer: busy(2) };
+  const { blocker, guard } = guardOver(state);
+  await guard.refresh();
+  state.answer = idle;
+  await times(IDLE_PASSES - 1, guard);
+  assert.equal(blocker.live.size, 1, "two idle answers are not enough");
+  await guard.refresh();
+  assert.equal(blocker.live.size, 0);
+  assert.equal(blocker.calls.stop, 1);
+  await guard.refresh();
+  assert.equal(blocker.calls.stop, 1);
+});
+
+test("a turn showing up between idle answers starts the count again", async () => {
+  const state = { answer: busy(1) };
+  const { blocker, guard } = guardOver(state);
+  await guard.refresh();
+  state.answer = idle;
+  await times(IDLE_PASSES - 1, guard);
+  state.answer = busy(1);
+  await guard.refresh();
+  state.answer = idle;
+  await times(IDLE_PASSES - 1, guard);
+  assert.equal(blocker.live.size, 1);
+  await guard.refresh();
+  assert.equal(blocker.live.size, 0);
+});
+
+test("an idle kernel never takes the hold", async () => {
+  const { blocker, guard } = guardOver({ answer: idle });
+  await times(5, guard);
+  assert.equal(blocker.calls.start, 0);
+});
+
+test("a kernel that cannot answer, or a pane that cannot be asked, changes nothing", async () => {
+  for (const unsure of [null, new Error("kernel gone"), { panes: 0, unknown: 1 }, {}]) {
+    const state = { answer: busy(1) };
+    const { blocker, guard } = guardOver(state);
+    await guard.refresh();
+    state.answer = idle;
+    await times(IDLE_PASSES - 1, guard);
+    state.answer = unsure;
+    await times(SILENT_PASSES - 1, guard);
+    assert.equal(blocker.live.size, 1, `held through ${String(unsure)}`);
+    assert.equal(blocker.calls.stop, 0, "silence did not count as the idle answer that was missing");
+  }
+});
+
+test("silence does not take the hold either", async () => {
+  const { blocker, guard } = guardOver({ answer: null });
+  await times(3, guard);
+  assert.equal(blocker.calls.start, 0);
+});
+
+test("a hold nobody can confirm is let go after SILENT_PASSES, so it cannot leak", async () => {
+  const state = { answer: busy(1) };
+  const { blocker, guard } = guardOver(state);
+  await guard.refresh();
+  state.answer = null;
+  await times(SILENT_PASSES, guard);
+  assert.equal(blocker.live.size, 0);
+});
+
+test("turning the setting off lets go at once and keeps it off while turns run", async () => {
+  const state = { answer: busy(1) };
+  const { blocker, guard } = guardOver(state);
+  await guard.refresh();
+  state.enabled = false;
+  await guard.refresh();
+  assert.equal(blocker.live.size, 0);
+  await guard.refresh();
+  assert.equal(blocker.calls.start, 1);
+  state.enabled = true;
+  await guard.refresh();
+  assert.equal(blocker.live.size, 1);
+});
+
+test("a block the system dropped is taken again while work continues", async () => {
+  const { blocker, guard } = guardOver({ answer: busy(1) });
+  await guard.refresh();
+  blocker.live.clear();
+  await guard.refresh();
+  assert.equal(blocker.live.size, 1);
+  assert.equal(blocker.calls.start, 2);
+});
+
+test("an answer that arrives after a newer one does not overturn it", async () => {
+  const blocker = fakeBlocker();
+  const pending = [];
+  const guard = createPowerGuard({
+    blocker,
+    running: () => new Promise((resolve) => pending.push(resolve)),
+    enabled: () => true,
+  });
+  const slow = guard.refresh();
+  const fresh = guard.refresh();
+  pending[1](busy(2));
+  await fresh;
+  pending[0](idle);
+  await slow;
+  assert.equal(blocker.live.size, 1);
+});
+
+test("a refresh asked for the moment a turn is submitted takes the hold without waiting for the poll", async () => {
+  const state = { answer: idle };
+  const { blocker, guard } = guardOver(state);
+  await guard.refresh();
+  assert.equal(blocker.live.size, 0);
+  state.answer = busy(1);
+  await guard.refresh();
+  assert.equal(blocker.live.size, 1);
+});
+
+test("closing the guard releases the hold and stops the poll", async () => {
+  const timers = [];
+  const blocker = fakeBlocker();
+  const guard = createPowerGuard({
+    blocker,
+    running: async () => busy(1),
+    enabled: () => true,
+    setInterval: (fn, ms) => {
+      timers.push({ fn, ms, cleared: false });
+      return timers.at(-1);
+    },
+    clearInterval: (t) => (t.cleared = true),
+  });
+  guard.begin();
+  await guard.refresh();
+  assert.equal(blocker.live.size, 1);
+  guard.close();
+  assert.equal(blocker.live.size, 0);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].cleared, true);
+  await guard.refresh();
+  assert.equal(blocker.live.size, 0, "a closed guard takes nothing back");
+});
+
+test("keeping awake is on unless this machine said off", () => {
+  assert.equal(keepsAwake({}), true);
+  assert.equal(keepsAwake(undefined), true);
+  assert.equal(keepsAwake({ "rx-keep-awake": "on" }), true);
+  assert.equal(keepsAwake({ "rx-keep-awake": "off" }), false);
+});
+
+test("the host client asks the kernel how many panes run", async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(req.url === "/tray/running" ? 200 : 404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ panes: 3 }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const client = new StudioHost(`http://127.0.0.1:${server.address().port}`, "t");
+  assert.deepEqual(await client.trayRunning(), { panes: 3 });
+  server.close();
+  assert.equal(await client.trayRunning(), null);
+});
+
+test("the window ground follows the stored theme and, for auto, the system", () => {
+  assert.equal(groundFor({ "rx-theme": "dark" }, false), GROUND.dark);
+  assert.equal(groundFor({ "rx-theme": "light" }, true), GROUND.light);
+  assert.equal(groundFor({ "rx-theme": "auto" }, true), GROUND.dark);
+  assert.equal(groundFor({}, false), GROUND.light);
+  assert.equal(groundFor(undefined, true), GROUND.dark);
 });

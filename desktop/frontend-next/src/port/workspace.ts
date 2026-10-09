@@ -51,3 +51,35 @@ export interface WorkspaceInfo {
   recents: WorkspaceEntry[];
   isolated?: boolean;
 }
+
+export interface CommitFile {
+  path: string;
+  // git raw status letter: "A", "M", "D", "T".
+  status: string;
+  insertions?: number;
+  deletions?: number;
+  // The name marks a file that holds secrets; its diff is never sent to a model.
+  sensitive?: boolean;
+}
+
+// The staged set as read, and the message the model proposed for it.
+// fingerprint names that set: committing hands it back, and the kernel refuses
+// an index that has since changed.
+export interface CommitProposal {
+  message: string;
+  fingerprint: string;
+  files: CommitFile[];
+  truncated: boolean;
+  contentSecrets: boolean;
+}
+
+export interface CommitRequest {
+  message: string;
+  fingerprint: string;
+  acknowledgeSecrets: boolean;
+}
+
+export interface CommitResult {
+  hash: string;
+  subject: string;
+}

@@ -33,7 +33,7 @@ func TestAskFiresNotificationHook(t *testing.T) {
 
 	go func() { _, _ = c.Ask(t.Context(), askProbeQuestions()) }()
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for {
 		mu.Lock()
 		n := len(stdins)

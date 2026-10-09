@@ -26,7 +26,7 @@ const row = (model: string) => document.querySelector(`.me-row[data-model="${mod
 
 it("saves a model's own levels and leaves the others inheriting", async () => {
   const editProvider = vi.fn(async () => {});
-  render(<EditConn entry={relay()} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} declare />);
+  render(<EditConn entry={relay()} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} declare />);
 
   expect(within(row("glm-5")).getByText("继承：low · medium · high")).toBeTruthy();
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "qwen3.8-max 的推理档位" }), "own");
@@ -47,7 +47,7 @@ it("saves a model's own levels and leaves the others inheriting", async () => {
 it("turns a stored declaration back into inheritance", async () => {
   const editProvider = vi.fn(async () => {});
   const entry = relay({ modelEfforts: { "glm-5": { supportedEfforts: ["enabled", "disabled"] } } });
-  render(<EditConn entry={entry} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} declare />);
+  render(<EditConn entry={entry} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} declare />);
 
   expect(within(row("glm-5")).getByRole("button", { name: "enabled" }).getAttribute("aria-pressed")).toBe("true");
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "glm-5 的推理档位" }), "inherit");
@@ -59,7 +59,7 @@ it("turns a stored declaration back into inheritance", async () => {
 
 it("adds a level no chip names", async () => {
   const editProvider = vi.fn(async () => {});
-  render(<EditConn entry={relay()} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} declare />);
+  render(<EditConn entry={relay()} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} declare />);
 
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "glm-5 的推理档位" }), "own");
   await userEvent.type(screen.getByRole("textbox", { name: "glm-5 的其他档位" }), "Ultra{enter}");
@@ -68,14 +68,14 @@ it("adds a level no chip names", async () => {
 
 it("holds a model on a fixed-vocabulary protocol out of per-model levels", () => {
   const entry = relay({ modelProtocols: { "qwen3.8-max": "kimi-k3" } });
-  render(<EditConn entry={entry} port={{ editProvider: vi.fn() } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} declare />);
+  render(<EditConn entry={entry} port={{ editProvider: vi.fn() } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} declare />);
   const mode = screen.getByRole("combobox", { name: "qwen3.8-max 的推理档位" }) as HTMLSelectElement;
   expect(mode.disabled).toBe(true);
   expect(within(row("qwen3.8-max")).getByText("该模型的思考参数不使用自定义档位。")).toBeTruthy();
 });
 
 it("says inheritance waits on the save once the connection's levels are cleared", async () => {
-  render(<EditConn entry={relay()} port={{ editProvider: vi.fn() } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} declare />);
+  render(<EditConn entry={relay()} port={{ editProvider: vi.fn() } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} declare />);
   await userEvent.clear(screen.getByRole("textbox", { name: /^推理档位/ }));
   expect(within(row("glm-5")).getByText("继承：保存后按接入设置确定")).toBeTruthy();
 });

@@ -1,0 +1,3 @@
+alpha=QORVEX-7741
+beta=MIRALD-3208
+gamma=TESSIK-9155

@@ -5,11 +5,9 @@ import (
 	"strings"
 )
 
-// DetectLanguage selects a catalogue from override (e.g. cfg.Language) or the
-// environment and installs it as M. Returns the resolved tag ("en", "zh") so
-// callers can log or expose it.
-//
-// Priority: override > REASONIX_LANG > LC_ALL > LC_MESSAGES > LANG > "en".
+// DetectLanguage installs the catalogue for an explicit setting or locale.
+// Explicit settings and locale variables take priority over the shell's system
+// language and the native OS probe; unresolved locales fall back to English.
 func DetectLanguage(override string) string {
 	for _, c := range append([]string{override}, envCandidates()...) {
 		if tag := normalize(c); tag != "" {
@@ -24,7 +22,7 @@ func DetectLanguage(override string) string {
 var osLanguage = detectOSLanguage
 
 func envCandidates() []string {
-	keys := []string{"REASONIX_LANG", "LC_ALL", "LC_MESSAGES", "LANG"}
+	keys := []string{"REASONIX_LANG", "LC_ALL", "LC_MESSAGES", "LANG", "REASONIX_SYSTEM_LANG"}
 	out := make([]string, 0, len(keys)+1)
 	for _, k := range keys {
 		out = append(out, os.Getenv(k))
@@ -57,6 +55,9 @@ func normalize(s string) string {
 	s = strings.ReplaceAll(s, "_", "-") // zh_TW.UTF-8 → zh-tw.utf-8 (POSIX locales use underscores)
 	if s == "" {
 		return ""
+	}
+	if s == "c" || s == "posix" || strings.HasPrefix(s, "c.") || strings.HasPrefix(s, "posix.") {
+		return "en"
 	}
 	if strings.HasPrefix(s, "zh-tw") || strings.HasPrefix(s, "zh-hant") || strings.Contains(s, "chinese traditional") || strings.Contains(s, "繁體") {
 		return "zh-TW"

@@ -521,7 +521,7 @@ func TestCancelSlashSubagentStopsChildAndKeepsParentSessionUsable(t *testing.T) 
 	c.Submit("/helper inspect auth")
 	select {
 	case <-started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("slash subagent did not start")
 	}
 	c.Cancel()
@@ -543,7 +543,7 @@ func TestCancelSlashSubagentStopsChildAndKeepsParentSessionUsable(t *testing.T) 
 
 func waitForTurnEvents(t *testing.T, events <-chan event.Event) []event.Event {
 	t.Helper()
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(testenv.Budget(t))
 	var got []event.Event
 	for {
 		select {
@@ -1154,7 +1154,7 @@ func TestSubmitRefusingUnknownSlashStartsNoTurn(t *testing.T) {
 		if e.Kind != event.Notice || e.Code != event.NoticeCodeUnknownCommand || !strings.Contains(e.Text, "/definitely-not-a-command") {
 			t.Fatalf("first event = %+v, want the unknown-command notice", e)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("no notice")
 	}
 	if c.Running() || len(runner.inputs) != 0 {

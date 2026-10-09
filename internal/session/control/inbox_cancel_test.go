@@ -39,7 +39,7 @@ func steeringTurn(t *testing.T) (*Controller, *agent.Agent, *sessionstore.Sessio
 	case <-prov.started:
 	case e := <-done:
 		t.Fatalf("the turn ended before it reached the provider: %+v", e)
-	case <-time.After(10 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("the turn never started")
 	}
 	return c, exec, sess, prov, done
@@ -103,4 +103,27 @@ func TestCancellingAfterTheTurnReadItSaysSo(t *testing.T) {
 
 	prov.unblock()
 	waitForDoneWithin(t, done, 60*time.Second)
+}
+
+// Taking a line back and sending another must leave the model with the second
+// line only: nothing of the withdrawn one may ride the next admission.
+func TestSendingAfterATakeBackDeliversOnlyTheNewLine(t *testing.T) {
+	c, _, sess, prov, done := steeringTurn(t)
+	first := acceptedSteer(t, c, "the first wording")
+	if err := c.DeleteInboxItem(first); err != nil {
+		t.Fatalf("take the first line back: %v", err)
+	}
+	acceptedSteer(t, c, "the second wording")
+
+	prov.unblock()
+	waitForDoneWithin(t, done, 60*time.Second)
+
+	var firstN, secondN int
+	for _, m := range sess.Snapshot() {
+		firstN += strings.Count(m.Content, "the first wording")
+		secondN += strings.Count(m.Content, "the second wording")
+	}
+	if firstN != 0 || secondN != 1 {
+		t.Fatalf("transcript carries the withdrawn line %d times and the new one %d, want 0 and 1", firstN, secondN)
+	}
 }

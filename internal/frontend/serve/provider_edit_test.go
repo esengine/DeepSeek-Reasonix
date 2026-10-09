@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,6 +66,7 @@ func newRichProviderServerAs(t *testing.T, wrap func(control.SessionAPI) control
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{
 		Sink: bc, Label: "alpha", ModelRef: "rich/alpha", SessionDir: testenv.TempDir(t),
+		ModelEntry: richModelEntry(t),
 	})
 	s := New(wrap(ctrl), bc, config.ServeConfig{})
 	s.AllowProviderEdit()
@@ -609,4 +611,136 @@ func TestEditProviderAfterDroppingTheRunningModelSaysItIsUnlisted(t *testing.T) 
 	if entry.ContextWindow != 1000000 {
 		t.Fatalf("window on disk = %d — the refusal said it was saved, so it has to be", entry.ContextWindow)
 	}
+}
+
+func idleTimeoutOf(t *testing.T, name string) int {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.Provider(name)
+	if !ok {
+		t.Fatalf("provider %q went missing", name)
+	}
+	return entry.IdleTimeoutSeconds
+}
+
+func TestEditProviderStoresTheIdleTimeoutAndListsIt(t *testing.T) {
+	srv := newRichProviderServer(t)
+	for _, want := range []int{1, 90, 32767} {
+		resp := postProvider(t, srv.URL, "/providers/edit", fmt.Sprintf(
+			`{"name":"rich","models":["alpha"],"default":"alpha","vision":[],"idleTimeoutSeconds":%d}`, want))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("idleTimeoutSeconds=%d: status = %d", want, resp.StatusCode)
+		}
+		if got := idleTimeoutOf(t, "rich"); got != want {
+			t.Fatalf("stored %d, want %d", got, want)
+		}
+	}
+	listed, err := http.Get(srv.URL + "/providers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listed.Body.Close()
+	var rows []struct {
+		Name               string `json:"name"`
+		IdleTimeoutSeconds int    `json:"idleTimeoutSeconds"`
+		IdleTimeoutDefault int    `json:"idleTimeoutDefault"`
+	}
+	if err := json.NewDecoder(listed.Body).Decode(&rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Name == "rich" && r.IdleTimeoutDefault != 300 {
+			t.Fatalf("listed idleTimeoutDefault = %d, want the kernel's 300", r.IdleTimeoutDefault)
+		}
+		if r.Name == "rich" && r.IdleTimeoutSeconds != 32767 {
+			t.Fatalf("listed idleTimeoutSeconds = %d, want 32767", r.IdleTimeoutSeconds)
+		}
+	}
+}
+
+func TestEditProviderZeroIdleTimeoutMeansTheDefault(t *testing.T) {
+	srv := newRichProviderServer(t)
+	postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["alpha"],"default":"alpha","vision":[],"idleTimeoutSeconds":45}`).Body.Close()
+	resp := postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["alpha"],"default":"alpha","vision":[],"idleTimeoutSeconds":0}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	if got := idleTimeoutOf(t, "rich"); got != 0 {
+		t.Fatalf("stored %d, want 0 (the default)", got)
+	}
+}
+
+func TestEditProviderRefusesAnIdleTimeoutOutOfRange(t *testing.T) {
+	srv := newRichProviderServer(t)
+	postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["alpha"],"default":"alpha","vision":[],"idleTimeoutSeconds":45}`).Body.Close()
+	for _, bad := range []string{"-1", "32768", "1.5", `"abc"`} {
+		resp := postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["alpha"],"default":"alpha","vision":[],"idleTimeoutSeconds":`+bad+`}`)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("idleTimeoutSeconds=%s: status = %d, want 400", bad, resp.StatusCode)
+		}
+		var reason Reason
+		_ = json.NewDecoder(resp.Body).Decode(&reason)
+		resp.Body.Close()
+		if bad == "-1" || bad == "32768" {
+			if reason.Code != "provider.bad_idle_timeout" {
+				t.Fatalf("idleTimeoutSeconds=%s: code = %q, want provider.bad_idle_timeout", bad, reason.Code)
+			}
+		}
+		if got := idleTimeoutOf(t, "rich"); got != 45 {
+			t.Fatalf("a refused edit changed the stored value to %d", got)
+		}
+	}
+}
+
+func TestEditProviderLeavesTheIdleTimeoutAloneWhenUnsent(t *testing.T) {
+	srv := newRichProviderServer(t)
+	postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["alpha"],"default":"alpha","vision":[],"idleTimeoutSeconds":45}`).Body.Close()
+	postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["alpha"],"default":"alpha","vision":[]}`).Body.Close()
+	if got := idleTimeoutOf(t, "rich"); got != 45 {
+		t.Fatalf("an unsent field was cleared: %d", got)
+	}
+}
+
+func TestIdleTimeoutChangeReachesTheRunningConversation(t *testing.T) {
+	a, b := &config.ProviderEntry{Name: "x", BaseURL: "u"}, &config.ProviderEntry{Name: "x", BaseURL: "u", IdleTimeoutSeconds: 60}
+	if assemblyShape(a) == assemblyShape(b) {
+		t.Fatal("the idle timeout is bound at assembly, so changing it must count as a change that needs a rebuild")
+	}
+}
+
+func TestEditProviderStillRefusesNegativeLimitsAndAcceptsAZeroWindow(t *testing.T) {
+	srv := newRichProviderServer(t)
+	for field, code := range map[string]string{"contextWindow": "provider.bad_context_window", "maxOutputTokens": "provider.bad_max_output_tokens"} {
+		resp := postProvider(t, srv.URL, "/providers/edit",
+			fmt.Sprintf(`{"name":"rich","models":["alpha"],"default":"alpha","vision":[],%q:-1}`, field))
+		var reason Reason
+		_ = json.NewDecoder(resp.Body).Decode(&reason)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || reason.Code != code {
+			t.Fatalf("%s=-1: status %d code %q, want 400 %s", field, resp.StatusCode, reason.Code, code)
+		}
+	}
+	resp := postProvider(t, srv.URL, "/providers/edit", `{"name":"rich","models":["alpha"],"default":"alpha","vision":[],"contextWindow":0}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("a zero window turns compaction off and must be accepted, got %d", resp.StatusCode)
+	}
+}
+
+func richModelEntry(t *testing.T) *config.ProviderEntry {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.ResolveModel("rich/alpha")
+	if !ok {
+		t.Fatal("rich/alpha does not resolve")
+	}
+	return entry
 }

@@ -74,6 +74,26 @@ func addRememberedWorkspace(ctx context.Context, dir string) error {
 	})
 }
 
+// keepUsedWorkspace lists a folder a conversation now lives in, behind the ones
+// already there so neither the order nor the launch project moves. A pane
+// adopted at launch is no folder anyone picked, and its conversations are
+// reachable only through a row for it.
+func keepUsedWorkspace(dir string) {
+	if dir == "" {
+		return
+	}
+	err := updateWorkspaceList(context.Background(), true, func(list *workspaceList) error {
+		if slices.Contains(list.Paths, dir) || len(list.Paths) >= workspaceRecentMax {
+			return nil
+		}
+		list.Paths = append(list.Paths, dir)
+		return nil
+	})
+	if err != nil {
+		slog.Warn("serve: list the folder a conversation lives in", "err", err)
+	}
+}
+
 func forgetWorkspace(dir string) {
 	if dir == "" {
 		return

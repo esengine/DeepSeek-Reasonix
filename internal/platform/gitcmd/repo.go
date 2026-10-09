@@ -146,8 +146,9 @@ func (r Repo) CommandWithConfig(ctx context.Context, extraConfig []string, args 
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		cmd := newCommand(ctx, Args(r.Dir, extraConfig, args...), nil)
-		cmd.Err = ErrNotRepository
+		screened, refused := screen(args)
+		cmd := newCommand(ctx, Args(r.Dir, extraConfig, screened...), nil)
+		cmd.Err = errors.Join(ErrNotRepository, refused)
 		return cmd
 	}
 	return build(ctx, r.Dir, r.env(), extraConfig, args)

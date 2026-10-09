@@ -8,6 +8,9 @@ archives. What Reasonix Studio reads instead:
 - plugin themes are packs of that shape, listed as
   `plugin:<plugin>:<directory>` (see `docs/PLUGIN_PACKAGES.md`).
 
+For the current format, a directly installable starter, and its management
+lifecycle, use the [Studio theme author guide](THEME_AUTHOR_GUIDE.md).
+
 Native theme packs for the Reasonix desktop app. Packs are controlled skins:
 semantic color tokens, density/corner recipes, and optional local images for
 the home and task/workspace scenes. They **cannot** run CSS, JavaScript, fonts,
@@ -180,6 +183,8 @@ JSON Schema: [theme-pack.schema.json](./theme-pack.schema.json)
 
 `bg`, `bgSoft`, `bgElev`, `panel`, `sidebar`, `chat`, `workspace`, `workspaceFiles`,
 `border`, `borderSoft`, `fg`, `fgDim`, `fgFaint`, `accent`, `accentFg`, `ok`, `warn`, `err`
+
+Studio also reads `link`, `brand`, `halo` and `labelAgent` (hyperlinks, the product tint, hover emphasis, agent names). `net`, `deleg` and the other status colours are not tokens and are dropped with a warning.
 
 Colors must **not** include `url()`, gradients, or arbitrary CSS.
 

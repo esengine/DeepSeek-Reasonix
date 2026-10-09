@@ -201,10 +201,6 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	if p.Command == "" {
 		return notRun(ex, start, fmt.Errorf("command is required"))
 	}
-	if err := b.refuseExternalRef(p.Command); err != nil {
-		return notRun(ex, start, err)
-	}
-
 	sh := b.resolved()
 	if !sh.SupportsChaining() && (hasUnquotedSeq(p.Command, "&&") || hasUnquotedSeq(p.Command, "||")) {
 		return notRun(ex, start, fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. "+
@@ -215,7 +211,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	// Pin the session-private temporary generation before any launch path so
 	// foreground, background, and host-terminal runs share one directory, and
 	// so a failed start still releases the lease.
-	prepared, probe, lease, err := b.prepareLaunch(ctx, sh, p, args)
+	prepared, probe, lease, err := b.prepareGuardedLaunch(ctx, sh, p, args)
 	if err != nil {
 		phase := tool.ShellPhaseAuthorization
 		if errors.Is(err, errSessionTemp) {

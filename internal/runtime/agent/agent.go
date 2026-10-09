@@ -544,6 +544,7 @@ func (a *Agent) Session() *sessionstore.Session {
 // running turn (it only fires while idle); sessMu guards the pointer swap itself.
 func (a *Agent) SetSession(s *sessionstore.Session) {
 	a.sess.reset(s)
+	a.replayTouchedPaths(s)
 	// The replaced conversation's task is over, but the ledger and the bill
 	// answer to beginRunTurn's scope check rather than to this seam.
 	if s != nil {
@@ -665,6 +666,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *sessionstore.Ses
 			classifierTaskText:      opts.ClassifierTaskText,
 			writeWorkspaceRoot:      strings.TrimSpace(opts.WriteWorkspaceRoot),
 			observeRoot:             opts.observeRoot(),
+			workspaceScanLimit:      opts.WorkspaceScanLimit,
 			renderRoot:              strings.TrimSpace(opts.RenderRoot),
 			workspaceVCS:            strings.TrimSpace(opts.WorkspaceVCS),
 			subagentDepth:           subagentDepth,
@@ -791,7 +793,7 @@ func (a *Agent) reserveParentWrite(runTool tool.Tool, args json.RawMessage, read
 	if !parentWriteGuardTarget(name) {
 		return noop, nil
 	}
-	claim, err := parentWriteReservation(a.writeWorkspaceRoot, name, args)
+	claim, err := a.parentToolWriteReservation(runTool, args)
 	if err != nil {
 		return noop, err
 	}
@@ -1135,9 +1137,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) streamedT
 }
 
 func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink, frozen *samplingRequest, attemptID string) streamedTurn {
-	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
-		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max, RetryScope: event.RetryScopeHeaders})
-	})
+	ctx = provider.WithRetryNotify(ctx, headerRetryNotice(sink))
 	// Reuse a parent attempt counter when present so stream retries accumulate
 	// into one RequestCount; otherwise install a fresh counter for this call.
 	ctx = provider.WithRequestAttemptCounter(ctx)
@@ -1539,20 +1539,7 @@ func (a *Agent) emitResolvedToolDispatch(c provider.ToolCall, profile *event.Pro
 			CapabilityID: c.CapabilityID,
 		})
 	}
-	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
-		ID:           c.ID,
-		Name:         c.Name,
-		Args:         c.Arguments,
-		ResolvedName: c.ResolvedName,
-		CapabilityID: c.CapabilityID,
-		ReadOnly:     *c.ResolvedReadOnly,
-		Refreshed:    true,
-		Issuer:       event.IssuedByModel,
-		Profile:      profile,
-		FileDiff: event.FileDiff{
-			Diff: c.Diff, Added: c.Added, Removed: c.Removed,
-		},
-	}})
+	a.emitRefreshedDispatch(c, profile)
 }
 
 // refreshCurrentFileDiff recomputes a writer preview against the state left by

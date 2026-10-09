@@ -45,7 +45,7 @@ export function Extensions({
             </div>
             {panel.text && <div className="extpanel-tx">{panel.text}</div>}
             {panel.progress !== undefined && (
-              <span className="extbar" role="progressbar" aria-valuenow={Math.round(panel.progress * 100)}>
+              <span className="extbar" role="progressbar" aria-label={panel.title || p.pluginId} aria-valuenow={Math.round(panel.progress * 100)}>
                 <i style={{ width: `${Math.max(0, Math.min(1, panel.progress)) * 100}%` }} />
               </span>
             )}

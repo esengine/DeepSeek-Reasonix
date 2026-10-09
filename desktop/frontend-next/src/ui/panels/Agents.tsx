@@ -2,7 +2,7 @@ import type { Item } from "../../state/session";
 import { seconds } from "../../i18n/format";
 import { shortArgs } from "../args";
 import { t } from "../../i18n";
-import { toolFailed } from "../cards/outcome";
+import { delegateStatus, delegateStatusLabel } from "../delegation";
 
 import { agentsIn } from "./derive";
 import { Grp, Row } from "./kit";
@@ -23,18 +23,20 @@ export function Agents({ tasks, onOpen }: { tasks: Task[]; onOpen?: (taskId: str
   if (tasks.length === 0) return null;
 
   return (
-    <Grp id="agents" name={t("子代理")} aside={live ? t("{n} 个运行中", { n: live }) : undefined}>
+    <Grp id="agents" name={t("子代理")}>
       <Row
         k={t("数量")}
-        v={live ? <span className="lk">{t("{n} 并行", { n: live })}</span> : agentsIn(tasks)}
+        v={<span className={live ? "lk" : undefined}>{t("运行中 {live} / 共 {total}", { live, total: agentsIn(tasks) })}</span>}
       />
       <div className="agents">
-        {shown.map((x) => (
-          <div className="ag" key={x.id} data-status={x.running ? "running" : toolFailed(x.tool) ? "failed" : "done"}>
+        {shown.map((x) => {
+          const status = delegateStatus(x.running, x.tool);
+          return (
+          <div className="ag" key={x.id} data-status={status}>
             <i
               className="pip"
-              data-settled={x.running || toolFailed(x.tool) ? undefined : ""}
-              data-failed={!x.running && toolFailed(x.tool) ? "" : undefined}
+              data-settled={status === "done" ? "" : undefined}
+              data-failed={status === "failed" || status === "refused" ? "" : undefined}
               style={x.running ? { background: "var(--net)", animation: "tick 1.6s ease-in-out infinite" } : undefined}
             />
             <span className="nm">
@@ -42,7 +44,7 @@ export function Agents({ tasks, onOpen }: { tasks: Task[]; onOpen?: (taskId: str
               {(x.tool.profile?.count ?? 1) > 1 && <b className="mult">×{x.tool.profile?.count}</b>}
             </span>
             <span className="rt">
-              {x.running ? t("运行中") : toolFailed(x.tool) ? t("已中断") : x.tool.durationMs ? seconds(x.tool.durationMs, 0) : t("已交付")}
+              {status === "done" && x.tool.durationMs ? seconds(x.tool.durationMs, 0) : delegateStatusLabel(status)}
             </span>
             {onOpen && (
               <button
@@ -58,7 +60,8 @@ export function Agents({ tasks, onOpen }: { tasks: Task[]; onOpen?: (taskId: str
               </button>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </Grp>
   );

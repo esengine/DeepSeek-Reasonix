@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/provider"
 )
 
 // editProvider changes only the fields this panel owns and leaves the rest of
@@ -24,16 +25,20 @@ func (s *Server) editProvider(w http.ResponseWriter, r *http.Request) {
 	// empty" stay different answers: a client that does not show them must not
 	// silently clear the headers a gateway needs.
 	var body struct {
-		Name            string             `json:"name"`
-		BaseURL         string             `json:"baseUrl"`
-		APIKey          string             `json:"apiKey"`
-		Models          []string           `json:"models"`
-		Default         string             `json:"default"`
-		Vision          []string           `json:"vision"`
-		ContextWindow   *int               `json:"contextWindow"`
-		MaxOutputTokens *int               `json:"maxOutputTokens"`
-		Headers         *map[string]string `json:"headers"`
-		ExtraBody       *map[string]any    `json:"extraBody"`
+		Name            string   `json:"name"`
+		BaseURL         string   `json:"baseUrl"`
+		APIKey          string   `json:"apiKey"`
+		Models          []string `json:"models"`
+		Default         string   `json:"default"`
+		Vision          []string `json:"vision"`
+		ContextWindow   *int     `json:"contextWindow"`
+		MaxOutputTokens *int     `json:"maxOutputTokens"`
+		// Seconds the endpoint may stay silent, before its response headers or
+		// between stream events, before the call is read as dropped. Zero is
+		// the built-in default.
+		IdleTimeoutSeconds *int               `json:"idleTimeoutSeconds"`
+		Headers            *map[string]string `json:"headers"`
+		ExtraBody          *map[string]any    `json:"extraBody"`
 		// Which request shape this endpoint controls thinking with. No probe
 		// answers it — a relay forwards a vendor's models under its own name —
 		// so the declaration has to come from whoever knows what is behind it.
@@ -78,21 +83,8 @@ func (s *Server) editProvider(w http.ResponseWriter, r *http.Request) {
 	entry.Default = def
 	applyVisionSelection(entry, trimmedNonEmpty(body.Vision))
 
-	if body.ContextWindow != nil {
-		// Zero is a real answer here — it turns automatic compaction off for
-		// this source — so only a negative one is a mistake.
-		if *body.ContextWindow < 0 {
-			refuse(w, http.StatusBadRequest, "provider.bad_context_window", "context window cannot be negative", nil)
-			return
-		}
-		entry.ContextWindow = *body.ContextWindow
-	}
-	if body.MaxOutputTokens != nil {
-		if *body.MaxOutputTokens < 0 {
-			refuse(w, http.StatusBadRequest, "provider.bad_max_output_tokens", "maximum output tokens cannot be negative", nil)
-			return
-		}
-		entry.MaxOutputTokens = *body.MaxOutputTokens
+	if !applyNumericFields(w, entry, body.ContextWindow, body.MaxOutputTokens, body.IdleTimeoutSeconds) {
+		return
 	}
 	if bad := applyModelLimits(entry, models, body.ModelLimits); bad != nil {
 		refuse(w, http.StatusBadRequest, bad.code, bad.message, bad.detail)
@@ -183,7 +175,7 @@ func assemblyShape(e *config.ProviderEntry) string {
 		e.BaseURL, orNil(len(e.Models), e.Models), e.Vision, orNil(len(e.VisionModels), e.VisionModels),
 		orNil(len(e.ModelOverrides), e.ModelOverrides), e.ContextWindow, e.MaxOutputTokens,
 		orNil(len(e.Headers), e.Headers), orNil(len(e.ExtraBody), e.ExtraBody), e.ReasoningProtocol,
-		orNil(len(e.SupportedEfforts), e.SupportedEfforts), e.DefaultEffort,
+		orNil(len(e.SupportedEfforts), e.SupportedEfforts), e.DefaultEffort, e.IdleTimeoutSeconds,
 	}
 	b, err := json.Marshal(shape)
 	if err != nil {
@@ -438,4 +430,35 @@ func (s *Server) setProviderWebSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// applyNumericFields stores the three numbers a form sends as pointers, so
+// unsent leaves the stored value alone, and answers the refusal itself. Zero is
+// a real answer for the window — it turns automatic compaction off — and for the
+// idle timeout it is the built-in default, so only negatives and out-of-range
+// idle values are mistakes.
+func applyNumericFields(w http.ResponseWriter, entry *config.ProviderEntry, window, maxOut, idle *int) bool {
+	if window != nil {
+		if *window < 0 {
+			refuse(w, http.StatusBadRequest, "provider.bad_context_window", "context window cannot be negative", nil)
+			return false
+		}
+		entry.ContextWindow = *window
+	}
+	if maxOut != nil {
+		if *maxOut < 0 {
+			refuse(w, http.StatusBadRequest, "provider.bad_max_output_tokens", "maximum output tokens cannot be negative", nil)
+			return false
+		}
+		entry.MaxOutputTokens = *maxOut
+	}
+	if idle != nil {
+		if *idle != 0 && (*idle < provider.MinIdleTimeoutSeconds || *idle > provider.MaxIdleTimeoutSeconds) {
+			refuse(w, http.StatusBadRequest, "provider.bad_idle_timeout", "idle timeout is outside the allowed range",
+				map[string]any{"min": provider.MinIdleTimeoutSeconds, "max": provider.MaxIdleTimeoutSeconds})
+			return false
+		}
+		entry.IdleTimeoutSeconds = *idle
+	}
+	return true
 }

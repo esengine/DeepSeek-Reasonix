@@ -31,6 +31,8 @@ type Descriptor struct {
 	ToolCallReasoning              bool     `json:"toolCallReasoning,omitempty"`
 	ReasoningRoundTrip             bool     `json:"reasoningRoundTrip,omitempty"`
 	WarnOnMissingToolCallReasoning bool     `json:"warnOnMissingToolCallReasoning,omitempty"`
+	// ForcesThinking tells frontends that even the lowest effort still reasons.
+	ForcesThinking bool `json:"forcesThinking,omitempty"`
 	// Default marks the model a new session starts on when nobody names one.
 	// The catalog's owner decides it, because only the owner knows which of
 	// its models can answer.

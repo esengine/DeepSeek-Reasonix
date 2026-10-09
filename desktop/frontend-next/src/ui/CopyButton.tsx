@@ -7,15 +7,19 @@ import { StudioIcon } from "./StudioIcon";
 // execCommand is deprecated and is still the only path they have.
 export async function copyText(text: string) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const focused = document.activeElement;
   const carrier = document.createElement("textarea");
   carrier.value = text;
   carrier.readOnly = true;
   carrier.style.cssText = "position:fixed;top:-9999px;opacity:0";
   document.body.append(carrier);
-  carrier.select();
-  const ok = document.execCommand("copy");
-  carrier.remove();
-  if (!ok) throw new Error("copy rejected");
+  try {
+    carrier.select();
+    if (!document.execCommand("copy")) throw new Error("copy rejected");
+  } finally {
+    carrier.remove();
+    if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
+  }
 }
 
 export function CopyButton({ text, iconOnly = false, showFeedback = false, className, label: what }: { text: string; iconOnly?: boolean; showFeedback?: boolean; className?: string; label?: string }) {

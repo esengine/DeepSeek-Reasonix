@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"reasonix/internal/state/sessionstore"
 	"sync/atomic"
 
@@ -95,13 +97,26 @@ func (a *contextWindow) noteAcceptedPromptTokens(usage *provider.Usage) {
 	a.windowProbe.noteAccepted(usage.LatestPromptTokens())
 }
 
+// refusedOverWindow classifies a refusal that carries no overflow code by what
+// can be measured: the endpoint rejected the request as malformed or too large
+// (400, 413) and our own estimate of it is past the window. The wording of the
+// refusal is not read; a wrong call costs one fold, which recovery bounds.
+func (a *contextWindow) refusedOverWindow(frozen *samplingRequest, err error) bool {
+	var apiErr *provider.APIError
+	if !errors.As(err, &apiErr) || (apiErr.Status != http.StatusBadRequest && apiErr.Status != http.StatusRequestEntityTooLarge) {
+		return false
+	}
+	window := a.effectiveContextWindow()
+	return window > 0 && a.estimatedRequestTokens(frozen.req) > window
+}
+
 // recoverContextOverflow answers a provider's "this input is too long" by
 // folding the context and rebuilding the frozen request, so the round can be
 // replayed instead of failing the turn. It reports false when the fold freed
 // nothing, because resending a request the provider already refused only spends
 // another call to be told the same thing.
 func (a *contextWindow) recoverContextOverflow(ctx context.Context, frozen *samplingRequest, err error) bool {
-	if a == nil || frozen == nil || frozen.overflowFolded || !provider.IsContextOverflow(err) {
+	if a == nil || frozen == nil || frozen.overflowFolded || !(provider.IsContextOverflow(err) || a.refusedOverWindow(frozen, err)) {
 		return false
 	}
 	frozen.overflowFolded = true

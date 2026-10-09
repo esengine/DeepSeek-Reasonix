@@ -38,7 +38,11 @@ export function OwnInstall({ port, pkg, onBack, onInstalled, onViewInstalled, on
     onApplying?.(false);
     port
       .planOwnMarket({ slug: pkg.slug, replace })
-      .then((p) => live() && setPlan(p))
+      .then((p) => {
+        if (!live()) return;
+        if (!p.ok) setError(p.error || p.next || t("该来源中没有可安装的内容"));
+        else setPlan(p);
+      })
       .catch((e) => live() && setError(reason(e)))
       .finally(() => live() && setBusy(false));
     return () => {

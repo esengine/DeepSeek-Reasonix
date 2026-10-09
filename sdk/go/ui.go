@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+func uiResultBoolPresent(raw json.RawMessage, key string) bool {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return false
+	}
+	var value *bool
+	return json.Unmarshal(object[key], &value) == nil && value != nil
+}
+
 func (s *server) handleUIAction(ctx context.Context, raw json.RawMessage) (any, error) {
 	if s.opts.UI.Action == nil {
 		return nil, MustProtocolError(ErrUnknownMethod)

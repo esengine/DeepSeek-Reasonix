@@ -5,6 +5,7 @@ import "./testkit";
 import { useLinkRouting } from "./links";
 import * as hostModule from "../port/host";
 import type { AgentPort, BrowserTab } from "../port/port";
+import { HttpError } from "../port/http_error";
 
 afterEach(() => {
   cleanup();
@@ -70,5 +71,35 @@ describe("where a link in this window goes", () => {
     link.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("does not send a second copy outside when the window's tab opened and its page failed", async () => {
+    drawsViews(true);
+    const openExternal = vi.fn(async () => {});
+    const refused = new HttpError(400, "/browser/open: 400", { code: "browser.open_failed", params: { tab: "t1" } });
+    const port = { openExternal, browserOpen: vi.fn(async () => { throw refused; }) } as unknown as AgentPort;
+    function Harness() {
+      useLinkRouting(port, vi.fn(), vi.fn());
+      return <a href="https://example.com/a">go</a>;
+    }
+    const view = render(<Harness />);
+    (view.container.querySelector("a") as HTMLAnchorElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("still leaves for the machine's browser when the window opened nothing", async () => {
+    drawsViews(true);
+    const openExternal = vi.fn(async () => {});
+    const refused = new HttpError(400, "/browser/open: 400", { code: "browser.open_failed", params: {} });
+    const port = { openExternal, browserOpen: vi.fn(async () => { throw refused; }) } as unknown as AgentPort;
+    function Harness() {
+      useLinkRouting(port, vi.fn(), vi.fn());
+      return <a href="https://example.com/a">go</a>;
+    }
+    const view = render(<Harness />);
+    (view.container.querySelector("a") as HTMLAnchorElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(openExternal).toHaveBeenCalledWith("https://example.com/a");
   });
 });

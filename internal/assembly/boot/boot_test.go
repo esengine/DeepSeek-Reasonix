@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionstore"
 	"reflect"
 	"runtime"
@@ -501,7 +502,11 @@ func firstTokenProfileRequest(t *testing.T, tokenMode string) provider.Request {
 	prov := testutil.NewMock("token-profile", testutil.Turn{Text: "[]"}, testutil.Turn{Text: "done"})
 	setBootTokenProfileTestProvider(t, prov)
 
-	opts := Options{Sink: event.Discard}
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Sink: event.Discard, WorkspaceRoot: root}
 	if tokenMode != "" {
 		opts.TokenMode = tokenMode
 	}
@@ -2125,6 +2130,9 @@ model = "x"
 
 func TestBuildTokenBalancedAliasMatchesDefaultRequestPrefix(t *testing.T) {
 	isolateConfigHome(t)
+	if runtime.GOOS == "windows" {
+		writeUserConfig(t, "[tools.shell]\nprefer = \"powershell\"\n")
+	}
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 
@@ -3272,11 +3280,16 @@ func TestRememberPermissionRuleRejectsAnUnreadableRecordWithoutWriting(t *testin
 	}
 }
 
+// Every writer queues on one lock with a 5s wait, so N writers on a slow
+// filesystem need N critical sections to fit inside it. Eight is enough to
+// interleave on any machine without making the queue the thing under test.
+const rememberContendingWriters = 8
+
 func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
 	rememberHome(t)
 	workspace := robustTempDir(t)
 
-	const writers = 32
+	const writers = rememberContendingWriters
 	start := make(chan struct{})
 	results := make(chan control.RememberResult, writers)
 	var wg sync.WaitGroup
@@ -3343,7 +3356,7 @@ func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
 		}
 	})
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for worker := 0; worker < workers; {
 		if _, err := os.Stat(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker))); err == nil {
 			worker++
@@ -3394,7 +3407,7 @@ func TestRememberPermissionRuleProcessHelper(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker)), []byte("ready"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for {
 		if _, err := os.Stat(startPath); err == nil {
 			break
@@ -3947,10 +3960,20 @@ func TestSkillMCPBindingsUseOnlyValidOwnedCache(t *testing.T) {
 // else has to say so, or it becomes a test of that gate instead.
 func approveProjectServer(t *testing.T, root, name string) {
 	t.Helper()
-	entry := config.PluginEntry{Name: name, Source: config.MCPSourceProjectConfig}
-	if err := config.DefaultActivationStore().SetServerEnabled(entry, root, config.ActivationProject, true); err != nil {
-		t.Fatalf("approve %s: %v", name, err)
+	cfg, err := config.LoadForRootReadOnly(root)
+	if err != nil {
+		t.Fatalf("load %s: %v", root, err)
 	}
+	for _, entry := range cfg.Plugins {
+		if entry.Name != name {
+			continue
+		}
+		if err := config.DefaultActivationStore().SetServerEnabled(entry, root, config.ActivationProject, true); err != nil {
+			t.Fatalf("approve %s: %v", name, err)
+		}
+		return
+	}
+	t.Fatalf("approve %s: no such server declared in %s", name, root)
 }
 
 func TestBuildMigratesLegacyEagerTierToBackground(t *testing.T) {

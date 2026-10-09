@@ -9,13 +9,14 @@ interface Props {
   packages: PluginPackage[];
   onChanged: () => void;
   onReloadError?: (message: string) => void;
+  onReloaded?: () => void;
   // Only one package can be mid-update: the confirmation is a full pane, and
   // two of them open at once would be two plans competing for one answer.
   updating: string;
   onUpdate: (name: string) => void;
 }
 
-export function Packages({ port, packages, onChanged, onReloadError, updating, onUpdate }: Props) {
+export function Packages({ port, packages, onChanged, onReloadError, onReloaded, updating, onUpdate }: Props) {
   const [connection, setConnection] = useState({ port, generation: 0 });
   const currentConnection = useRef(connection);
   currentConnection.current = connection;
@@ -32,6 +33,9 @@ export function Packages({ port, packages, onChanged, onReloadError, updating, o
           }}
           onReloadError={(message) => {
             if (currentConnection.current === connection) onReloadError?.(message);
+          }}
+          onReloaded={() => {
+            if (currentConnection.current === connection) onReloaded?.();
           }}
           updating={updating}
           onUpdate={() => onUpdate(p.name)}
@@ -63,10 +67,11 @@ function summary(p: PluginPackage): string {
 }
 
 function Package({
-  p, port, onDone, onReloadError, updating, onUpdate,
+  p, port, onDone, onReloadError, onReloaded, updating, onUpdate,
 }: {
   p: PluginPackage; port: AgentPort; onDone: () => void; updating: string; onUpdate: () => void;
   onReloadError: (message: string) => void;
+  onReloaded: () => void;
 }) {
   const [busy, setBusy] = useState("");
   const [failed, setFailed] = useState("");
@@ -121,7 +126,11 @@ function Package({
         on={p.enabled}
         busy={locked}
         label={`${t(p.enabled ? "关闭" : "启用")} ${p.name}`}
-        onClick={() => void run("toggle", () => port.setPluginEnabled(p.name, !p.enabled))}
+        onClick={() => void run("toggle", async () => {
+          const out = await port.setPluginEnabled(p.name, !p.enabled);
+          if (out.reloadError) onReloadError(out.reloadError);
+          else onReloaded();
+        })}
       />
     </span>
   );
@@ -143,7 +152,10 @@ function Package({
           void run("remove", async () => {
             const out = await port.removePlugin(p.name);
             setConfirming(false);
-            if (out.applied && out.reloadError) onReloadError(out.reloadError);
+            if (out.applied) {
+              if (out.reloadError) onReloadError(out.reloadError);
+              else onReloaded();
+            }
             if (!out.ok) setFailed(out.error || out.next || t("没能删掉"));
           })
         }
@@ -209,8 +221,8 @@ function Package({
             <span className="sc">{name}</span>
           </div>
         ))}
-        {p.hooks?.map((h) => (
-          <div className="row" data-run key={h.event + h.command}>
+        {p.hooks?.map((h, index) => (
+          <div className="row" data-run key={index}>
             <span className="d">▸</span>
             <span>{h.event}</span>
             <span className="sc">{h.description || h.command || h.contextFile}</span>

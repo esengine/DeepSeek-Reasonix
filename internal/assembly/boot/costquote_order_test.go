@@ -106,3 +106,34 @@ func TestCostQuoteUsesConfiguredBillingMode(t *testing.T) {
 		t.Fatalf("billing mode = %q, want subscription_equivalent", got)
 	}
 }
+
+// The band a call was billed in reaches the frontend with the quote: DeepSeek's
+// own endpoint inside and outside the peak window, and a relay, which has no
+// official schedule to name.
+func TestCostQuoteCarriesTheRateBandToTheFrontend(t *testing.T) {
+	peak := time.Date(2026, 8, 19, 10, 0, 0, 0, time.FixedZone("", 8*3600))
+	band := func(now time.Time, catalog string) string {
+		var got string
+		sink := event.NewCostQuoteSink(event.FuncSink(func(e event.Event) {
+			if e.CostQuote != nil {
+				got = e.CostQuote.RateBand
+			}
+		}), &event.QuoteContext{Now: func() time.Time { return now }, CatalogProviderForModel: func(string) string { return catalog }})
+		sink.Emit(event.Event{
+			Kind:     event.Usage,
+			ModelRef: "deepseek-flash/deepseek-flash",
+			Usage:    &provider.Usage{PromptTokens: 1000, CompletionTokens: 1000, TotalTokens: 2000},
+			Pricing:  &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 4, Currency: "¥"},
+		})
+		return got
+	}
+	if got := band(peak, "deepseek"); got != pricing.RateBandPeak {
+		t.Fatalf("inside the window: band = %q", got)
+	}
+	if got := band(offPeak(), "deepseek"); got != pricing.RateBandOffPeak {
+		t.Fatalf("outside the window: band = %q", got)
+	}
+	if got := band(peak, ""); got != "" {
+		t.Fatalf("a relay claims band %q", got)
+	}
+}

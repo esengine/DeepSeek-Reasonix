@@ -56,11 +56,27 @@ export const EN: Record<string, string> = {
   "可读取代码、查找资料、运行工具并修改文件。完整执行过程可在「轨迹」中查看。":
     "It can read code, research, run tools, and edit files. The full run stays visible in the Trajectory.",
   "等待回包 {secs}s": "Waiting for a response · {secs}s",
-  "连接在响应头前断了，重试 {attempt}/{max} · {secs}s":
-    "Connection dropped before the headers · retry {attempt}/{max} · {secs}s",
-  "回包写到一半断了，重放 {attempt}/{max} · {secs}s":
-    "The response was cut mid-stream · replay {attempt}/{max} · {secs}s",
-  "连接已断开，重试 {attempt}/{max} · {secs}s": "Connection dropped · retry {attempt}/{max} · {secs}s",
+  "连接被中断": "Connection closed",
+  "服务器没有及时响应": "The server did not answer in time",
+  "服务器返回 HTTP {status}": "Server returned HTTP {status}",
+  "回包停住了": "The response stalled",
+  "服务器在回包中途报错": "The server reported an error mid-response",
+  "回包写到一半断了": "The response was cut mid-stream",
+  "请求没有成功": "The request did not succeed",
+  "连接已断开": "Connection dropped",
+  "{n}s 后重试 {attempt}/{max}": "next retry ({attempt}/{max}) in {n} s",
+  "{n}s 后重放 {attempt}/{max}": "next replay ({attempt}/{max}) in {n} s",
+  "重试 {attempt}/{max} · 等待服务器响应 {secs}s（超过 {limit}s 视为无响应）":
+    "Retry {attempt}/{max} · waiting for the server to answer {secs} s ({limit} s counts as no answer)",
+  "重试 {attempt}/{max} · 等待服务器响应 {secs}s": "Retry {attempt}/{max} · waiting for the server to answer {secs} s",
+  "重放 {attempt}/{max} · 等待服务器响应 {secs}s": "Replay {attempt}/{max} · waiting for the server to answer {secs} s",
+  "无响应超时": "No-answer timeout",
+  "默认 {n}": "Default {n}",
+  "秒": "s",
+  "{n} 秒无响应超时": "{n} s no-answer timeout",
+  "等待响应头、以及回包过程中无新内容超过这个时间，就按连接中断处理并重试。本地模型处理长上下文时可能需要调大。":
+    "If the server sends nothing for this long, while waiting for the response headers or in the middle of a reply, the call is treated as dropped and retried. A local model working through a long context may need it raised.",
+  "须是 {min} 到 {max} 之间的整数秒；留空使用默认值。": "Enter a whole number of seconds from {min} to {max}; leave it empty for the default.",
   "Agent": "Agent",
   "思考中…": "Thinking…",
   "思考中 {secs} 秒": "Thinking · {secs}s",
@@ -107,6 +123,7 @@ export const EN: Record<string, string> = {
   "正在处理…": "Working…",
   "已完成": "Done",
   "已中断": "Interrupted",
+  "未执行": "Not run",
   "已停止": "Stopped",
   "请求未能送达内核（HTTP {status}）": "That request never reached the kernel (HTTP {status})",
   "移动 {id} 的界面": "Move {id}'s view",
@@ -152,7 +169,7 @@ export const EN: Record<string, string> = {
   "界面大小": "Interface size",
   "正文字号": "Body text size",
   "尚未派出": "None dispatched",
-  "{n} 并行": "{n} in parallel",
+  "运行中 {live} / 共 {total}": "{live} running / {total} total",
   "已交付": "Handed back",
   "待审改动": "Pending changes",
   "改动 · 已放行": "Changes · auto-approved",
@@ -185,7 +202,6 @@ export const EN: Record<string, string> = {
   "候选要做的任务": "The attempts' task",
   "这次批准的效力超出这一次调用本身。": "This approval covers more than this one call.",
   "已处理": "Handled",
-  "本会话不再询问": "Allow for this session",
   "切换全部放行…": "Switch to full access…",
   "确认切换全部放行": "Confirm full access",
   "全部放行会跳过后续工具确认": "Full access skips future tool confirmations",
@@ -400,7 +416,7 @@ export const EN: Record<string, string> = {
   // ── 高级外观 ─────────────────────────────────────────────────────
   "高级外观": "Advanced appearance",
   "已修改：{list}": "Changed: {list}",
-  "字体、文字粗细、文字对比度": "Fonts, text weight, text contrast",
+  "字体、文字粗细、文字对比度、视觉效果": "Fonts, text weight, text contrast, visual effects",
 
   // ── 明暗与配色 ───────────────────────────────────────────────────
   "明暗": "Light and dark",
@@ -420,6 +436,11 @@ export const EN: Record<string, string> = {
   "已设置自定义壁纸": "Custom wallpaper set",
   "壁纸与背景位置": "Wallpaper and background position",
   "文字粗细": "Text weight",
+  "视觉效果": "Visual effects",
+  "窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空和颗粒这几层。": "If the window keeps your GPU busy, choose Reduced: the layout stays as it is, only frosted glass, the animated sky and the grain layer go.",
+  "节能": "Reduced",
+  "背景模糊、动态天空与颗粒质感全部开启": "Background blur, the animated sky and the grain layer are all on",
+  "关闭背景模糊、动态天空与颗粒质感，集成显卡或老旧电脑上更省电": "Turns off background blur, the animated sky and the grain layer; lighter on integrated graphics and older machines",
   "调整文字的笔画粗细。中文笔画密集，在小字号下加粗有助于提升清晰度。": "Adjusts stroke weight. Dense Chinese glyphs lose definition first at small sizes, and more weight recovers it.",
   "跟随语言": "Match the language",
   "中文界面使用中等字重，西文使用常规字重": "Medium for Chinese, regular for Latin",
@@ -449,8 +470,8 @@ export const EN: Record<string, string> = {
   "模型": "Models",
   "已启用 {on}/{all}": "{on} of {all} enabled",
   "搜索或输入完整模型 ID…": "Search or enter an exact model ID…",
-  "目录只用于发现，不是白名单。未列出的模型会按原始 ID 保存；验证会发送一次最小请求，可能产生少量 Token 费用。":
-    "The catalog is for discovery, not a whitelist. Unlisted models keep their exact ID; verification sends one minimal request and may use a small number of tokens.",
+  "目录只用于发现，不是白名单。未列出的模型会按原始 ID 保存；「测试已启用模型」会给每个已勾选的模型各发送一次小请求，可能产生少量 Token 费用。":
+    "The catalog is for discovery, not a whitelist. Unlisted models keep their exact ID; Test enabled models sends one small request per ticked model and may use a small number of tokens.",
   "搜索模型名称；列表中没有的，可直接输入名称":
     "Search the list — or type a name that is not on it",
   "搜索或添加模型": "Search or add a model",
@@ -546,14 +567,18 @@ export const EN: Record<string, string> = {
   "编辑": "Edit",
   "测试中…": "Testing…",
   "测试连接": "Test it",
-  "没保存成功": "Not saved",
+  "保存失败": "Save failed",
+  "已保存，尚未生效": "Saved, not applied yet",
+  "读取模型列表失败": "Could not read the model list",
+  "可以直接输入完整模型 ID 添加。": "You can also type the full model ID to add it.",
   "重新问一次有哪些模型": "Ask for the model list again",
-  "刷新模型目录": "Refresh model catalog",
-  "正在刷新…": "Refreshing…",
+  "从服务商读取可用模型": "Read available models from provider",
+  "没找到？从服务商读取可用模型": "Not listed? Read available models from provider",
+  "正在从服务商读取…": "Reading from provider…",
   "发现 {n} 个新模型。": "Found {n} new models. ",
   "有 {n} 个已配置模型本次未返回，已为你保留。":
     "{n} configured models were not returned this time and have been preserved.",
-  "重新向该端点获取模型列表，适用于端点新增或下架模型之后": "Ask this endpoint for its model list again — use it after the endpoint adds or removes models",
+  "用已保存或刚填的密钥向服务商读取模型列表，可直接勾选；服务商新增或下架模型后也一样": "Read the model list from the provider with the saved or newly entered key, then tick what you want — also after the provider adds or removes models",
   "探测结果如下。均为推断值，如有不符请直接修改。": "Here is what was probed. All of it is a guess; correct anything wrong.",
   "两种接入方式都能返回模型列表，仅凭列表无法区分；两者的聊天入口路径通常不同，选错会导致聊天报错。如需同时使用，请再添加一次并选择另一种。":
     "Both access methods answer with a model list, and the lists do not tell them apart; their chat endpoints usually sit on different paths, so the wrong choice makes chat fail. To use both, add the source again and pick the other one.",
@@ -614,10 +639,10 @@ export const EN: Record<string, string> = {
   // ── 卡片：批准、还原、收工 ───────────────────────────────────────
   "即将执行": "About to act",
   "允许这一次。": "Allowed once.",
-  "本会话不再询问此类操作。": "Will not ask again this session for this kind.",
+  "已允许：本会话内此类操作不再询问。": "Allowed: this kind will not ask again this session.",
   "已拒绝。": "Denied.",
-  "已保存为规则。": "Recorded as a rule.",
-  "已写入配置，后续会话也不再询问此类操作。": "Written to the config; later sessions will not ask for this kind either.",
+  "已允许：已保存为规则。": "Allowed: recorded as a rule.",
+  "已写入配置，后续会话中此类操作也始终允许，不再询问。": "Written to the config; later sessions will also always allow this kind without asking.",
   "正在提交…": "Submitting…",
   "已在其他窗口处理。": "Handled in another window.",
   "请以最新运行状态为准。": "Refer to the latest run state.",
@@ -717,6 +742,12 @@ export const EN: Record<string, string> = {
   "无法连接版本目录": "Cannot reach the version index",
   "已固定": "Pinned",
   "固定在这里": "Pin here",
+  "更新内容": "What's new",
+  "收起更新内容": "Hide what's new",
+  "{v} 的更新内容": "What's new in {v}",
+  "正在读取更新内容…": "Loading what's new…",
+  "更新内容读取失败": "What's new could not be read",
+  "在 GitHub 查看": "View on GitHub",
 
   // ── 账号 ─────────────────────────────────────────────────────────
   "正在检查登录状态…": "Checking sign-in status…",
@@ -773,6 +804,7 @@ export const EN: Record<string, string> = {
   // ── 其余 ─────────────────────────────────────────────────────────
   "没有打开的会话": "No session open",
   "没有匹配的项": "Nothing matches",
+  "搜索模型或服务商…": "Search models or providers…",
   "筛选": "Filter",
   "补全": "Completions",
   "交还给插件": "Hand back to the extension",
@@ -785,6 +817,7 @@ export const EN: Record<string, string> = {
   "打开主题目录": "Open themes folder",
   "阅读": "Read",
   "设置需要一个打开的会话。请先在左栏添加一个文件夹。": "Settings need an open session. Add a folder in the sidebar first.",
+  "反馈需要一个打开的会话。请先在左栏添加一个文件夹。": "Feedback needs an open session. Add a folder in the sidebar first.",
   "{host} 需要登录": "{host} asks you to sign in",
   "代理 {host} 需要登录": "The proxy {host} asks you to sign in",
   "用户名": "Username",
@@ -797,6 +830,8 @@ export const EN: Record<string, string> = {
   "无法建立安全连接。这个网站可能只支持 http，或者要求客户端证书。": "A secure connection could not be made. The site may serve only http, or require a client certificate.",
   "连不上系统代理。内置浏览器使用系统的代理设置，而不是 Reasonix 设置里的网络代理。": "The system proxy could not be reached. The built-in browser uses the operating system's proxy settings, not the network proxy in Reasonix settings.",
   "找不到这个地址。内网域名需要连上公司网络或 VPN 才能解析。": "This address could not be found. Intranet names resolve only on the company network or VPN.",
+  "找不到这个文件。请确认路径正确，文件没有被移动或删除。": "This file could not be found. Check the path, and that the file has not been moved or deleted.",
+  "没有权限读取这个文件。": "You do not have permission to read this file.",
   "对方拒绝了连接。请确认端口正确、服务已经启动。": "The connection was refused. Check the port and that the service is running.",
   "连接超时或地址不可达。请确认已连上公司网络或 VPN。": "The connection timed out or the address is unreachable. Check that you are on the company network or VPN.",
   "登录没有通过，请重试并检查用户名和密码。": "Sign-in failed. Check the username and password and try again.",
@@ -809,6 +844,7 @@ export const EN: Record<string, string> = {
   "已导入「{name}」。": "Imported “{name}”.",
   "立即使用": "Use now",
   "未读取：{names}": "Not read: {names}",
+  "请单独选择一个 .zip，或选择不含压缩包的 theme.json 和图片。": "Choose a single .zip on its own, or select a theme folder’s theme.json and images without a ZIP.",
   "尚未安装主题。选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。": "No themes installed. Choose a .zip, or select a theme folder’s theme.json and images together.",
   "选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。": "Choose a .zip, or select a theme folder’s theme.json and images together.",
 
@@ -833,6 +869,7 @@ export const EN: Record<string, string> = {
   "已关闭": "Disabled",
   "未连接": "Not connected",
   "待命 · 首次调用时启动": "Standby · starts on first call",
+  "待授权 · 来自项目声明": "Awaiting approval · declared by the project",
   "本地构建": "Local build",
   "只在这台机器上": "This machine only",
   "这个项目": "This project",
@@ -900,6 +937,7 @@ export const EN: Record<string, string> = {
   "增量数据下载失败，本次改为下载完整安装包。": "The changed parts could not be downloaded, so this update downloads the full package.",
   "增量数据下载太慢，本次改为下载完整安装包。": "The changed parts were downloading too slowly, so this update downloads the full package.",
   "增量数据未通过校验，本次改为下载完整安装包。": "The changed parts failed verification, so this update downloads the full package.",
+  "这次版本跨度较大，增量数据比完整安装包还多，本次改为下载完整安装包。": "This jump spans many versions and the changed parts add up to more than the full package, so this update downloads the full package.",
   "无法写入增量更新文件，本次改为下载完整安装包。": "The changed parts could not be written to disk, so this update downloads the full package.",
   "增量更新不可用，本次改为下载完整安装包。": "Updating only the changed parts is unavailable, so this update downloads the full package.",
   "校验签名…": "Verifying the signature…",
@@ -942,6 +980,8 @@ export const EN: Record<string, string> = {
   "关闭查找": "Close find",
   "回合结束时给出回执": "End a turn with a receipt",
   "列出这一轮改了什么、验了什么、哪些没有验；无话可说时不出现。下一轮起生效": "Lists what this turn changed, what it verified and what went unverified; absent when there is nothing to say. Takes effect from the next turn",
+  "任务运行时阻止系统休眠": "Keep the computer awake while tasks run",
+  "有会话正在运行时，电脑不会自动进入睡眠（电池供电时也一样）；屏幕仍按系统设置熄灭，全部空闲后恢复。合上笔记本盖子不受此项控制": "While a session is running the computer will not go to sleep on its own, on battery power too; the screen still turns off as the system says, and normal sleep resumes once everything is idle. Closing a laptop lid is not controlled by this",
   "改写这条消息": "Rewrite this message",
   "改写这条消息并重新发送": "Rewrite this message and send it again",
   "✎ 改写": "✎ Edit",
@@ -956,6 +996,21 @@ export const EN: Record<string, string> = {
   // ── 通用动作 ─────────────────────────────────────────────────────
   "取消": "Cancel",
   "保存": "Save",
+  "已保存": "Saved",
+  "没有更改": "No changes",
+  "有未保存的更改": "Unsaved changes",
+  "这个服务有未保存的更改": "This service has unsaved changes",
+  "离开后这些更改会丢失。": "They will be lost if you leave.",
+  "放弃更改并离开": "Discard changes and leave",
+  "保留编辑": "Keep editing",
+  "已停止启动新的验证：草稿已改动": "No further checks started: the draft changed",
+  "测试已启用模型（{n}）": "Test enabled models ({n})",
+  "{n} 个验证中": "{n} verifying",
+  "没有发现新模型": "No new models found",
+  "{n} 个可用": "{n} available",
+  "{n} 个不可用": "{n} unavailable",
+  "{n} 个无法确定": "{n} undetermined",
+  "{n} 个未验证": "{n} not verified",
   "关闭": "Close",
   "确定": "OK",
   "重试": "Retry",
@@ -1052,11 +1107,13 @@ export const EN: Record<string, string> = {
   "兼顾响应速度与可靠性，适合大多数任务": "Balance speed and reliability for most tasks",
   "投入更多时间分析复杂上下文与执行方案": "Spend more time analyzing complex context and execution plans",
   "用于最复杂的问题，等待时间与消耗最高": "For the hardest problems, with the longest wait and highest usage",
+  "思考仍开启并计费，该模型无法关闭思考": "Thinking stays on and is billed; this model cannot turn it off",
   "仅显示当前模型实际支持的档位。": "Only levels actually supported by this model are shown.",
   "按模型生效": "Per model",
   "查看上下文与压缩": "View context and compaction",
   "查看本轮费用": "View turn cost",
   "查看钱包余额": "View wallet balance",
+  "余额不足": "Balance is low",
   "隐藏金额": "Hide amounts",
   "显示金额": "Show amounts",
   "收起运行统计": "Collapse run statistics",
@@ -1118,6 +1175,11 @@ export const EN: Record<string, string> = {
   "读取": "Read",
   "本地工作区": "Local workspace",
   "暂停执行": "Pause run",
+  "复制会话信息": "Copy session information",
+  "会话 ID": "Session ID",
+  "会话上下文路径": "Session context path",
+  "任务路径": "Task path",
+  "任务日志": "Task log",
   "导出会话": "Export session",
   "取消置顶": "Unpin",
   "置顶会话": "Pin session",
@@ -1212,6 +1274,64 @@ export const EN: Record<string, string> = {
     "The model returned nothing; try again",
   "优化请求格式不正确":
     "The refine request was malformed",
+  "提交…":
+    "Commit…",
+  "起草提交说明":
+    "Draft commit message",
+  "读取暂存区，起草提交说明…":
+    "Reading the staged changes and drafting a message…",
+  "重新起草":
+    "Redraft",
+  "提交说明":
+    "Commit message",
+  "暂存的文件":
+    "Staged files",
+  "{n} 个文件已暂存":
+    "{n} files staged",
+  "可能含有密钥：{files}":
+    "May contain secrets: {files}",
+  "新增的内容里有形似密钥的值":
+    "Added lines contain values shaped like credentials",
+  "我确认这些内容可以提交":
+    "I confirm these can be committed",
+  "提交到本地":
+    "Commit locally",
+  "只在本地提交，不会推送":
+    "Recorded locally only; nothing is pushed",
+  "已提交 {hash}：{subject}":
+    "Committed {hash}: {subject}",
+  "改过暂存区后请重新起草":
+    "Draft again after changing what is staged",
+  "暂存区内容过长，只按前面一部分起草":
+    "The staged diff is long; the draft reads only its first part",
+  "这个工作区不是 git 仓库，无法提交":
+    "This workspace is not a git repository, so there is nothing to commit",
+  "暂存区是空的，先用 git add 暂存要提交的文件":
+    "Nothing is staged; stage the files to commit with git add first",
+  "暂存区在你确认之后又变了，请重新起草":
+    "The staged changes changed after you reviewed them; draft again",
+  "暂存的内容里有疑似密钥的文件，需要你确认后才能提交":
+    "The staged changes include likely secrets; confirm them before committing",
+  "提交说明是空的":
+    "The commit message is empty",
+  "提交说明含有无法记录的字符":
+    "The commit message contains characters git cannot record",
+  "提交说明超过 {max_bytes} 字节":
+    "The commit message is over {max_bytes} bytes",
+  "git 没有配置提交者姓名和邮箱（user.name、user.email）":
+    "git has no author name and email configured (user.name, user.email)",
+  "git 没能记录这次提交":
+    "git could not record the commit",
+  "当前会话没有可用的模型，无法起草提交说明":
+    "This session has no model to draft a commit message with",
+  "起草提交说明超时，请重试":
+    "Drafting the commit message timed out; try again",
+  "模型没有给出提交说明，请重试":
+    "The model returned no commit message; try again",
+  "读取暂存区失败":
+    "Reading the staged changes failed",
+  "提交请求格式不正确":
+    "The commit request was malformed",
   "新增工具":
     "New tools",
   "agent 可以调用，每次调用照常经过权限确认":
@@ -1229,7 +1349,22 @@ export const EN: Record<string, string> = {
   "同一段内容被逐字重复": "The same block is being repeated verbatim",
   "任务已按设置暂停：模型卡在重复输出同一段文字": "Paused by your setting: the model is stuck repeating the same text",
   "等待你的输入": "Waiting for you",
+  "已恢复 {n} 条未完成的指令。待发送已暂停，请先在输入框上方的队列里查看，再点“继续派发”": "Recovered {n} unfinished instruction(s). Sending is paused: review them in the queue above the input box, then press Release",
+  "待发送已暂停，这条消息已排入队列，点“继续派发”后才会发送": "Sending is paused. This message is queued and goes out once you press Release",
   "引导没有生效：这一轮在处理它之前就结束了。如果仍然需要，请再发送一次：": "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:",
-  "上下文已用到压缩阈值的 {percent}%，已告知模型约剩 {remaining} 个词元的空间。": "Context at {percent}% of the compaction threshold — the model was told it has about {remaining} tokens of room left.",
+  "费用显示币种已设为 {mode}": "Cost display currency set to {mode}",
   "模型卡在重复输出同一段文字，这一轮已停止；可以重试、补充引导，或换一个供应商/模型": "The model is stuck repeating the same text; this turn was stopped. Try again, add guidance, or switch provider/model.",
+  "扩展 {ext} 的配套后台程序没有运行，该扩展本次（在 {point}）已被跳过；到「工具与集成」里查看并启动它，或停用该扩展": "The companion background program of extension {ext} is not running, so the extension was skipped this time (at {point}). Open Tools and integrations to check and start it, or disable the extension.",
+  "打开「工具与集成」": "Open Tools and integrations",
+  "图表": "Chart",
+  "图表：{title}（可横向滚动）": "Chart: {title} (scrolls sideways)",
+  "没有可画的数据": "Nothing to draw",
+  "柱状图": "Bar chart",
+  "折线图": "Line chart",
+  "饼图": "Pie chart",
+  "{kind}：{title}，共 {n} 行": "{kind}: {title}, {n} rows",
+  "查看数据": "View data",
+  "收起数据": "Hide data",
+  "图表数据：{title}": "Chart data: {title}",
+  "另有 {n} 行": "and {n} more rows",
 };

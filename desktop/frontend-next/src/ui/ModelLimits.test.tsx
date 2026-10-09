@@ -18,7 +18,7 @@ const relay = (over: Partial<ProviderEntry> = {}): ProviderEntry => ({
 });
 
 const mount = (entry: ProviderEntry, editProvider = vi.fn(async () => {})) => {
-  render(<EditConn entry={entry} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} />);
+  render(<EditConn entry={entry} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} />);
   return editProvider;
 };
 
@@ -27,6 +27,7 @@ it("shows the inherited value as a placeholder and never sends it as an override
   const win = screen.getByRole("textbox", { name: "small 的上下文窗口" }) as HTMLInputElement;
   expect(win.value).toBe("");
   expect(win.placeholder).toBe("继承 131,072");
+  await userEvent.type(screen.getByRole("textbox", { name: "上下文窗口" }), "1");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(editProvider).toHaveBeenCalled());
   expect(editProvider).toHaveBeenCalledWith(expect.objectContaining({ modelLimits: {} }));
@@ -63,6 +64,7 @@ it("follows a provider-wide window typed but not yet saved", async () => {
 
 it("keeps a hand-written no-cap output limit while its field is untouched", async () => {
   const editProvider = mount(relay({ modelLimits: { small: { contextWindow: 8000, maxOutputTokens: -1 } } }));
+  await userEvent.type(screen.getByRole("textbox", { name: "上下文窗口" }), "1");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(editProvider).toHaveBeenCalled());
   expect(editProvider).toHaveBeenCalledWith(expect.objectContaining({

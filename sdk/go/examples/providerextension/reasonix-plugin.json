@@ -1,0 +1,22 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "echo-provider",
+  "version": "0.1.0",
+  "description": "Offline Go SDK provider example: echo the last user message",
+  "provides": [
+    {
+      "namespace": "plugin/echo-provider",
+      "kind": "provider",
+      "id": "offline/echo",
+      "version": "1.0.0",
+      "schemaHash": "sha256:6387b7d7ff7acb18360dec8d514dea146e65bde0f7dafcf0b5d6eeac64a13dea"
+    }
+  ],
+  "contributes": {},
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/echo-provider.exe",
+    "capabilities": [
+      "providers"
+    ]
+  }
+}
