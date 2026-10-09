@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import CommunityJoin from '../components/CommunityJoin.astro';
+import SponsorSlot from '../components/SponsorSlot.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
@@ -443,5 +444,6 @@ call_timeout_seconds = 600</div>
         <a href="https://crash.reasonix.io/stats" rel="nofollow"><span class="l-en">Stats</span><span class="l-zh">统计</span></a>
       </nav>
     </div>
+    <SponsorSlot />
   </footer>
 </Base>

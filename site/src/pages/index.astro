@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import CommunityJoin from '../components/CommunityJoin.astro';
+import SponsorSlot from '../components/SponsorSlot.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 import community from '../data/community.json';
 import { desktopDownloadVersion } from '../data/desktop-download.js';
@@ -488,6 +489,7 @@ const ld = {
       <span><span class="l-en">An open-source coding agent for terminal, desktop, browser and editor.</span><span class="l-zh">终端、桌面、浏览器、编辑器里都能用的 AI 编程助手。</span></span>
       <span class="ver"><span class="rxv">{goVer}</span> · official</span>
     </div>
+    <SponsorSlot />
   </footer>
 
   <script>
