@@ -33,6 +33,11 @@ func goalEvaluator(cfg *config.Config, modelRef string, proxy netclient.ProxySpe
 	if !ok {
 		return nil
 	}
+	if cfg.Agent.RecoveryModel == "" && cfg.Agent.GuardianModel != "" {
+		if effort := roleEffort(cfg, "guardian"); effort != nil {
+			re.Effort = *effort
+		}
+	}
 	eProv, err := NewProviderWithProxy(re, proxy)
 	if err != nil {
 		slog.Warn("goal evaluator provider construction failed — goals without an update_goal report will pause", "model", evalModel, "err", err)

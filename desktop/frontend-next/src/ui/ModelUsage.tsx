@@ -4,7 +4,7 @@ import type { ModelEntry, RoleAssignments, RoleOverride } from "../port/port";
 import { activeKind, contextLabel, groupVendors, type Vendor } from "./Models";
 import { orderAccounts, useProviderOrder } from "../state/providerorder";
 
-type RoleKey = keyof RoleAssignments;
+type RoleKey = keyof RoleAssignments["roles"];
 type Answers = "chat" | "decision";
 
 // Decision is the one job that cannot follow the main model: it asks a question
@@ -15,6 +15,7 @@ const ROLES: [RoleKey, string, string, Answers][] = [
   ["subagent", "子代理", "派发的子任务", "chat"],
   ["vision", "看图", "处理主模型无法识别的图片", "chat"],
   ["guardian", "复核", "独立复核本轮", "chat"],
+  ["title", "自动命名", "为会话生成简短标题", "chat"],
   ["decision", "决策", "system_one 询问的后端", "decision"],
 ];
 
@@ -38,7 +39,9 @@ interface Props {
   // Which protocol each account is showing, as chosen on the services page.
   protocol: Record<string, string>;
   onMain: (ref: string) => void;
-  onRole: (role: string, ref: string) => void;
+  effort?: string;
+  onEffort?: (effort: string) => void;
+  onRole: (role: string, ref: string, effort?: string) => void;
   // Entries that win over a role's own row, so the row is not what runs.
   overrides?: Record<string, RoleOverride[]>;
   onClearOverride?: (role: string, key: string) => void;
@@ -46,7 +49,7 @@ interface Props {
 
 // One row per job: what it is for, which model does it, and which service that
 // model is reached through.
-export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole, overrides, onClearOverride }: Props) {
+export function ModelUsage({ models, roles, main, busy, protocol, effort = "auto", onEffort, onMain, onRole, overrides, onClearOverride }: Props) {
   const order = useProviderOrder();
   const vendors = useMemo(() => orderAccounts(groupVendors(models), order), [models, order]);
   const serviceOf = (ref?: string) => vendors.find((v) => Object.values(v.byKind).some((list) => list.some((m) => m.ref === ref)))?.label ?? "";
@@ -54,16 +57,13 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
 
   if (models.length === 0) return <div className="empty">{t("无法读取模型列表。")}</div>;
 
-  // This pane is about the configuration, so its default row shows the model the
-  // kernel starts new sessions on — the entry the catalog marks default — and not
-  // whichever model the session in front happens to be on. `main` stays that
-  // session model, which still decides each vendor's protocol.
-  const configured = models.find((m) => m.default)?.ref;
-  const shown = configured || main;
+  const current = byRef(main);
+  const shown = models.find((m) => m.default)?.ref || main;
   const shownModel = byRef(shown);
   // What an attachment reaches: the vision role if assigned, else the sub-agent
   // it would be handed to, else the main model.
-  const visionRef = roles?.vision || roles?.subagent || main;
+  const assignments = roles?.roles;
+  const visionRef = assignments?.vision || assignments?.subagent || main;
   const visionModel = byRef(visionRef);
 
   return (
@@ -72,6 +72,7 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
         <div className="usage-row usage-hd" role="row">
           <span role="columnheader">{t("用途")}</span>
           <span role="columnheader">{t("使用模型")}</span>
+          <span role="columnheader">{t("思考强度")}</span>
           <span role="columnheader">{t("连接")}</span>
         </div>
         <div className="usage-row" role="row">
@@ -80,10 +81,14 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
             <Choices vendors={vendors} protocol={protocol} main={main} value={shown ?? ""} answers="chat"
               label={t("默认模型")} disabled={busy !== ""} onPick={onMain} />
           </span>
+          <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("思考强度")}</span><Efforts model={current} value={effort} label={t("默认模型的思考强度")}
+            action="reasoning.effort" disabled={busy !== "" || !onEffort} onPick={(level) => onEffort?.(level)} /></span>
           <span className="usage-conn" role="cell">{serviceOf(shown)}<small>{traits(shownModel)}</small></span>
         </div>
         {roles && ROLES.map(([key, name, tag, answers]) => {
-          const set = roles[key];
+          const set = roles.roles[key];
+          const roleModel = byRef(set || (key === "title" || answers === "decision" ? "" : main));
+          const roleEffort = roles.efforts?.[key] || "auto";
           const offered = models.filter((m) => answersOf(m) === answers);
           const none = answers === "decision" && offered.length === 0;
           return (
@@ -92,8 +97,8 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
               <span role="cell">
                 <Choices vendors={vendors} protocol={protocol} main={main} value={set} answers={answers}
                   label={t(name)} role disabled={busy !== "" || none}
-                  empty={t(answers === "chat" ? "跟随主模型" : none ? "尚无可用来源" : "不使用")}
-                  onPick={(ref) => onRole(key, ref)} />
+                  empty={t(key === "title" ? "不使用" : answers === "chat" ? "跟随主模型" : none ? "尚无可用来源" : "不使用")}
+                  onPick={(ref) => onRole(key, ref, "auto")} />
                 {(overrides?.[key] ?? []).map((o) => (
                   <span className="usage-override" key={o.key} data-scope={o.scope}>
                     <span>{t("「{key}」已被配置固定为 {model}，这里的选择对它不起作用。", { key: o.key, model: o.model })}</span>
@@ -107,8 +112,11 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
                   </span>
                 ))}
               </span>
-              <span className="usage-conn" role="cell" data-follow={!set && answers === "chat" ? "" : undefined}>
-                {set ? serviceOf(set) : answers === "chat" ? t("随主模型") : none ? t("在「模型服务」添加决策来源") : ""}
+              <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("思考强度")}</span><Efforts model={roleModel} value={roleEffort} label={t("{name}的思考强度", { name: t(name) })}
+                action="roles.effort" fixedOff={key === "title"} disabled={busy !== "" || answers === "decision"}
+                onPick={(level) => onRole(key, set || main || "", level)} /></span>
+              <span className="usage-conn" role="cell" data-follow={!set && answers === "chat" && key !== "title" ? "" : undefined}>
+                {set ? serviceOf(set) : key === "title" ? t("使用消息预览") : answers === "chat" ? t("随主模型") : none ? t("在「模型服务」添加决策来源") : ""}
               </span>
             </div>
           );
@@ -121,6 +129,25 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
           : t("主模型无法识别的图片当前无人处理 —— 会在发送前被丢弃。为「看图」指定一个带「读图」标签的模型即可接管。")}
       </p>
     </>
+  );
+}
+
+function Efforts({ model, value, label, action, fixedOff = false, disabled, onPick }: {
+  model?: ModelEntry; value: string; label: string; action: "roles.effort" | "reasoning.effort"; fixedOff?: boolean; disabled: boolean; onPick: (level: string) => void;
+}) {
+  const levels = [...new Set(["auto", ...(model?.efforts ?? [])])];
+  const supported = !!model?.efforts?.some((level) => level !== "auto");
+  if (fixedOff) {
+    return <select className="usage-pick" aria-label={label} data-action={action === "roles.effort" ? "roles.effort" : "reasoning.effort"} value="auto" disabled>
+      <option value="auto">{t("不适用")}</option>
+    </select>;
+  }
+  return (
+    <select className="usage-pick" aria-label={label} data-action={action === "roles.effort" ? "roles.effort" : "reasoning.effort"} value={levels.includes(value) ? value : "auto"}
+      disabled={disabled || !supported} onChange={(e) => onPick(e.target.value)}>
+      {!supported ? <option value="auto">{t("不适用")}</option>
+        : levels.map((level) => <option key={level} value={level}>{level === "auto" ? t("自动") : level}</option>)}
+    </select>
   );
 }
 

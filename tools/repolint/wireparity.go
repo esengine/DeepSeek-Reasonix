@@ -140,6 +140,7 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/frontend/serve/provider_check.go", "providerCheck", tsProviderFile, "ProviderCheck"},
 	{"internal/frontend/serve/provider_check.go", "providerModelCheck", tsProviderFile, "ProviderModelCheck"},
 	{"internal/frontend/serve/settings.go", "modelEntry", tsModelFile, "ModelEntry"},
+	{"internal/frontend/serve/roles.go", "rolesResponse", tsModelFile, "RoleAssignments"},
 	// A per-profile entry that outranks a role's global model. A scope the page
 	// cannot read offers a clear the kernel will refuse.
 	{"internal/frontend/serve/roles.go", "roleOverride", tsModelFile, "RoleOverride"},

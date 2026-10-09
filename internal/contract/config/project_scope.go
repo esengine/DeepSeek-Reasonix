@@ -122,6 +122,10 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 	}
 	h.narrowSandbox(c, ws)
 	h.narrowPermissions(c)
+	if !maps.Equal(c.Agent.RoleEfforts, h.endpoints.agent.RoleEfforts) {
+		c.ignoreProject("agent.role_efforts", renderStringMap(c.Agent.RoleEfforts), ProjectUserOnly)
+	}
+	c.Agent.RoleEfforts = maps.Clone(h.endpoints.agent.RoleEfforts)
 	if NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode) != NormalizeToolApprovalMode(h.approvalMode) {
 		c.ignoreProject("desktop.default_tool_approval_mode", c.Desktop.DefaultToolApprovalMode, ProjectUserOnly)
 	}

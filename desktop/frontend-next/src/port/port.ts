@@ -302,7 +302,7 @@ export interface AgentPort {
   roles(): Promise<RoleAssignments>;
   // Persisted, then the runtime is rebuilt: boot reads every role model while
   // assembling, so an assignment cannot reach a runtime that is already up.
-  setRole(role: string, ref: string): Promise<void>;
+  setRole(role: string, ref: string, effort?: string): Promise<void>;
   // Entries that win over a role's global model, per role. The global value
   // roles() reports is not what runs while one of these exists.
   roleOverrides(): Promise<Record<string, RoleOverride[]>>;

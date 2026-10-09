@@ -107,7 +107,7 @@ func TestEveryModelThePickerOffersIsAssignableToARole(t *testing.T) {
 				got, _ := readAllString(resp)
 				t.Fatalf("POST /roles %s = %d: %s", ref, resp.StatusCode, got)
 			}
-			if got := readRoles(t, srv.URL)["planner"]; got != ref {
+			if got := readRoles(t, srv.URL).Roles["planner"]; got != ref {
 				t.Fatalf("planner = %q after assigning %q", got, ref)
 			}
 		})

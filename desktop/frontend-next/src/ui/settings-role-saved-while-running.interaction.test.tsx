@@ -29,8 +29,8 @@ it("a role saved while the conversation is busy stays shown, since the kernel wr
   const port = new MockPort() as unknown as AgentPort;
   await port.setRole("subagent", "");
   const real = port.setRole.bind(port);
-  vi.spyOn(port, "setRole").mockImplementation(async (role, ref) => {
-    await real(role, ref);
+  vi.spyOn(port, "setRole").mockImplementation(async (role, ref, effort) => {
+    await real(role, ref, effort);
     throw new HttpError(409, "saved", { code: "runtime.saved_while_running", error: "saved" });
   });
   draw(port);
@@ -38,7 +38,7 @@ it("a role saved while the conversation is busy stays shown, since the kernel wr
   expect(select.value).toBe("");
   const other = Array.from(select.options).find((o) => o.value)!.value;
   await userEvent.selectOptions(select, other);
-  await waitFor(() => expect(port.setRole).toHaveBeenCalledWith("subagent", other));
+  await waitFor(() => expect(port.setRole).toHaveBeenCalledWith("subagent", other, "auto"));
   await waitFor(() => expect((screen.getByRole("combobox", { name: "子代理" }) as HTMLSelectElement).value).toBe(other));
 });
 
@@ -46,8 +46,8 @@ it("says a role saved while busy is saved and not applied yet, as the provider f
   const port = new MockPort() as unknown as AgentPort;
   await port.setRole("subagent", "");
   const real = port.setRole.bind(port);
-  vi.spyOn(port, "setRole").mockImplementation(async (role, ref) => {
-    await real(role, ref);
+  vi.spyOn(port, "setRole").mockImplementation(async (role, ref, effort) => {
+    await real(role, ref, effort);
     throw new HttpError(409, "saved", { code: "runtime.saved_while_running", error: "saved" });
   });
   draw(port);
@@ -88,8 +88,8 @@ it("saving one role while busy leaves the other rows and a reopened page on the 
   await port.setRole("subagent", "");
   await port.setRole("planner", "");
   const real = port.setRole.bind(port);
-  vi.spyOn(port, "setRole").mockImplementation(async (role, ref) => {
-    await real(role, ref);
+  vi.spyOn(port, "setRole").mockImplementation(async (role, ref, effort) => {
+    await real(role, ref, effort);
     throw new HttpError(409, "saved", { code: "runtime.saved_while_running", error: "saved" });
   });
   draw(port);

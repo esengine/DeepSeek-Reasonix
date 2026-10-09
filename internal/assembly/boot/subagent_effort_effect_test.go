@@ -7,6 +7,7 @@ package boot
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -75,7 +76,16 @@ func runInheritedEffortEffect(t *testing.T, supported bool) ([]inheritedEffortPr
 
 func runInheritedEffortEffectWith(t *testing.T, supported bool, agentExtra, providerExtra string) ([]inheritedEffortProviderCall, []event.Event, *config.Config) {
 	t.Helper()
+	return runInheritedEffortEffectWithUser(t, supported, agentExtra, providerExtra, "")
+}
+
+func runInheritedEffortEffectWithUser(t *testing.T, supported bool, agentExtra, providerExtra, userAgentExtra string) ([]inheritedEffortProviderCall, []event.Event, *config.Config) {
+	t.Helper()
 	isolateConfigHome(t)
+	if userAgentExtra != "" {
+		path := config.UserConfigPath()
+		writeFile(t, filepath.Dir(path), filepath.Base(path), "[agent]\n"+userAgentExtra)
+	}
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 
@@ -153,7 +163,7 @@ func TestEffectUnsupportedInheritedSubagentEffortFallsBack(t *testing.T) {
 
 	for _, e := range events {
 		if e.Kind == event.Notice && e.Level == event.LevelWarn &&
-			strings.Contains(e.Detail, "agent.subagent_effort") &&
+			e.Code == event.NoticeCodeInheritedSubagentEffortDropped &&
 			strings.Contains(e.Detail, "provider/model default") {
 			return
 		}
@@ -177,7 +187,7 @@ func TestEffectSupportedInheritedSubagentEffortReachesSubagent(t *testing.T) {
 		t.Fatalf("persisted agent.subagent_effort = %q, want max", cfg.Agent.SubagentEffort)
 	}
 	for _, e := range events {
-		if e.Kind == event.Notice && strings.Contains(e.Detail, "agent.subagent_effort") {
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeInheritedSubagentEffortDropped {
 			t.Fatalf("supported inherited effort emitted a dropped warning: %+v", e)
 		}
 	}
@@ -196,7 +206,7 @@ func TestEffectDroppedInheritedEffortFallsToParentEffort(t *testing.T) {
 	}
 	warned := false
 	for _, e := range events {
-		warned = warned || (e.Kind == event.Notice && strings.Contains(e.Detail, "agent.subagent_effort"))
+		warned = warned || (e.Kind == event.Notice && e.Code == event.NoticeCodeInheritedSubagentEffortDropped)
 	}
 	if !warned {
 		t.Fatal("dropping the inherited effort should still be announced")
@@ -243,10 +253,40 @@ func TestEffectInheritedEffortFollowsTheModelSubagentModelsTaskSelects(t *testin
 			}
 			warned := false
 			for _, e := range events {
-				warned = warned || (e.Kind == event.Notice && strings.Contains(e.Detail, "agent.subagent_effort"))
+				warned = warned || (e.Kind == event.Notice && e.Code == event.NoticeCodeInheritedSubagentEffortDropped)
 			}
 			if warned != (tc.want != "max") {
 				t.Fatalf("dropped-effort warning delivered = %v, want %v", warned, tc.want != "max")
+			}
+		})
+	}
+}
+
+func TestEffectRoleInheritedSubagentEffort(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		effort     string
+		wantEffort string
+		warned     bool
+	}{
+		{name: "unsupported role default", effort: "max", wantEffort: "high", warned: true},
+		{name: "supported role overrides legacy default", effort: "low", wantEffort: "low"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls, events, cfg := runInheritedEffortEffectWithUser(t, false, "", "",
+				fmt.Sprintf("role_efforts = { subagent = %q }", tt.effort))
+			if len(calls) < 3 || calls[1].defaultEffort != tt.wantEffort {
+				t.Fatalf("child effort did not reach the provider: calls=%+v", calls)
+			}
+			if cfg.Agent.RoleEfforts["subagent"] != tt.effort || cfg.Agent.SubagentEffort != "max" {
+				t.Fatal("inherited effort handling must not rewrite either configured default")
+			}
+			warned := false
+			for _, e := range events {
+				warned = warned || (e.Kind == event.Notice && e.Level == event.LevelWarn && e.Code == event.NoticeCodeInheritedSubagentEffortDropped)
+			}
+			if warned != tt.warned {
+				t.Fatalf("dropped-default notice = %v, want %v", warned, tt.warned)
 			}
 		})
 	}

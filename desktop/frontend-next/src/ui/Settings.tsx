@@ -264,7 +264,6 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
     setProtocol((p) => ({ ...p, [key]: kind }));
     if (plan.do === "switch") run(plan.ref, () => port.setModel(plan.ref));
   };
-  const efforts = models.find((m) => m.ref === status?.modelRef)?.efforts ?? [];
   const preset = t("自动");
   const approval = approvalName(status?.toolApprovalMode, "—");
   const broken = mcp.filter((m) => m.state === "failed").length;
@@ -539,7 +538,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
           {at === "model" && (
             <>
               <Group id="model" title={t("按用途选择模型")} now={nav.model}
-                hint={t("默认模型用于当前对话和大多数任务，其他用途默认跟随它；只有要为某件事换一个模型时才改。切换会保留对话并重建运行时，任务执行期间无法修改。")}>
+                hint={t("按用途选择模型和思考强度；自动使用模型的默认档位。未选择命名模型时显示消息预览。切换会保留对话。")}>
                 <ModelUsage models={models} roles={roles} main={status?.modelRef} busy={busy} protocol={protocol}
                   onMain={(ref) => run(ref, async () => {
                     await port.setModel(ref);
@@ -548,24 +547,10 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                     // be re-read or the controlled select snaps back.
                     loadModels();
                   })}
-                  onRole={(role, ref) => run(`role:${role}`, () => port.setRole(role, ref).finally(loadRoles))}
+                  effort={status?.effort || "auto"} onEffort={(level) => run(`effort:${level}`, () => port.setEffort(level))}
+                  onRole={(role, ref, effort) => run(`role:${role}`, () => port.setRole(role, ref, effort).finally(loadRoles))}
                   overrides={overrides} onClearOverride={(role, key) => run(`role:${role}`, () => port.clearRoleOverride(role, key).finally(loadRoles))} />
               </Group>
-              {efforts.length > 0 ? (
-                <Group id="effort" title={t("推理强度")} hint={t("以下档位由当前模型的端点支持，auto 表示使用端点自身的默认值。")}>
-                  <div className="seg" role="group" aria-label={t("推理强度")}>
-                    {efforts.map((e) => (
-                      <button key={e} data-action="reasoning.effort" data-value={e}
-                        aria-pressed={(status?.effort || "auto") === e}
-                        onClick={() => run(e, () => port.setEffort(e))}>
-                        {e}
-                      </button>
-                    ))}
-                  </div>
-                </Group>
-              ) : (
-                <Group id="effort" title={t("推理强度")} hint={t("当前模型未提供可调的推理档位，因此不显示该选项。")} />
-              )}
               <Group id="context" title={t("上下文维护")}
                 hint={t("默认按模型容量自动整理。自定义中转站若无法提供最大上下文，先按 160k 计算；你可以在这里填写实际容量。")}>
                 <Compaction port={port} onChanged={onChanged} />

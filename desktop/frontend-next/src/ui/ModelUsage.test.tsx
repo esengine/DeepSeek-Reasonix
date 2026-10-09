@@ -24,7 +24,7 @@ const MODELS: ModelEntry[] = [
   { ref: "deepseek/deepseek-flash", provider: "deepseek", vendor: "api.deepseek.com", model: "deepseek-flash", kind: "anthropic", vision: true, contextWindow: 1_000_000 },
   { ref: "deepseek/deepseek-pro", provider: "deepseek", vendor: "api.deepseek.com", model: "deepseek-pro", kind: "anthropic" },
 ];
-const ROLES: RoleAssignments = { planner: "", subagent: "deepseek/deepseek-pro", vision: "", guardian: "", decision: "" };
+const ROLES: RoleAssignments = { roles: { title: "", planner: "", subagent: "deepseek/deepseek-pro", vision: "", guardian: "", decision: "" }, efforts: {} };
 
 function draw() {
   const onMain = vi.fn();
@@ -53,7 +53,7 @@ it("says decision has no source instead of offering the chat models", () => {
 it("writes the row that changed", async () => {
   const { onMain, onRole } = draw();
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "看图" }), "deepseek/deepseek-flash");
-  expect(onRole).toHaveBeenCalledWith("vision", "deepseek/deepseek-flash");
+  expect(onRole).toHaveBeenCalledWith("vision", "deepseek/deepseek-flash", "auto");
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "默认模型" }), "deepseek/deepseek-pro");
   expect(onMain).toHaveBeenCalledWith("deepseek/deepseek-pro");
 });
@@ -68,16 +68,22 @@ it("lists services in the saved order without reordering models within one servi
     .toEqual(["deepseek/deepseek-flash", "deepseek/deepseek-pro"]);
 });
 
-// The pane in front runs the session's model, so the row has to read the
-// catalogue's default instead or it describes the wrong thing.
-it("shows the catalogue's default whatever the session is running", () => {
-  const catalogued = MODELS.map((m) => ({ ...m, default: m.ref === "deepseek/deepseek-pro" }));
-  render(<ModelUsage models={catalogued} roles={ROLES} main="deepseek/deepseek-flash" busy="" protocol={{}} onMain={() => {}} onRole={() => {}} />);
-  expect((screen.getByRole("combobox", { name: "默认模型" }) as HTMLSelectElement).value).toBe("deepseek/deepseek-pro");
-  expect(row("默认模型").textContent).toContain("deepseek-pro");
-});
-
-it("falls back to the session's model when the catalogue has no default", () => {
-  render(<ModelUsage models={MODELS} roles={ROLES} main="deepseek/deepseek-flash" busy="" protocol={{}} onMain={() => {}} onRole={() => {}} />);
-  expect((screen.getByRole("combobox", { name: "默认模型" }) as HTMLSelectElement).value).toBe("deepseek/deepseek-flash");
+it("keeps naming effort fixed off even when the model exposes effort levels", async () => {
+  const onRole = vi.fn();
+  const onEffort = vi.fn();
+  const models = MODELS.map((m) => ({ ...m, efforts: ["auto", "disabled", "high", "max"] }));
+  render(<ModelUsage models={models} roles={{ ...ROLES, roles: { ...ROLES.roles, title: models[1].ref }, efforts: { title: "high", subagent: "high" } }}
+    main={models[0].ref} effort="max" busy="" protocol={{}} onMain={() => {}} onRole={onRole} onEffort={onEffort} />);
+  const namingEffort = screen.getByRole("combobox", { name: "自动命名的思考强度" }) as HTMLSelectElement;
+  expect(namingEffort.value).toBe("auto");
+  expect(namingEffort.disabled).toBe(true);
+  expect(namingEffort.textContent).toBe("不适用");
+  expect(onRole).not.toHaveBeenCalled();
+  expect(onEffort).not.toHaveBeenCalled();
+  await userEvent.click(namingEffort);
+  await userEvent.keyboard("{ArrowDown}{Enter}");
+  expect(namingEffort.value).toBe("auto");
+  expect(onRole).not.toHaveBeenCalled();
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "子代理的思考强度" }), "max");
+  expect(onRole).toHaveBeenCalledWith("subagent", models[1].ref, "max");
 });

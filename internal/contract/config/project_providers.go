@@ -23,6 +23,7 @@ type heldEndpoints struct {
 func holdUserEndpoints(c *Config) heldEndpoints {
 	agent := c.Agent
 	agent.SubagentModels = cloneStringMap(agent.SubagentModels)
+	agent.RoleEfforts = cloneStringMap(agent.RoleEfforts)
 	return heldEndpoints{
 		providers:    slices.Clone(c.Providers),
 		defaultModel: c.DefaultModel,
@@ -88,6 +89,7 @@ func (h heldEndpoints) restoreUnresolvedModels(c *Config, heldBack []ProviderEnt
 	}{
 		{"default_model", &c.DefaultModel, h.defaultModel},
 		{"agent.planner_model", &c.Agent.PlannerModel, h.agent.PlannerModel},
+		{"agent.title_model", &c.Agent.TitleModel, h.agent.TitleModel},
 		{"agent.guardian_model", &c.Agent.GuardianModel, h.agent.GuardianModel},
 		{"agent.recovery_model", &c.Agent.RecoveryModel, h.agent.RecoveryModel},
 		{"agent.subagent_model", &c.Agent.SubagentModel, h.agent.SubagentModel},

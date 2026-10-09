@@ -12,15 +12,16 @@ type visionRoutingKey struct{}
 // visionRouting travels with the image candidates because it answers the same
 // question they raise: the parent could not read this, so who can.
 type visionRouting struct {
-	model string
-	reads func(modelRef string) bool
+	model  string
+	effort string
+	reads  func(modelRef string) bool
 }
 
 // WithVisionRouting names the model that reads image candidates a child would
 // otherwise drop on the wire, and the predicate deciding whether a ref reads
 // images at all. Without it an attachment keeps its current fate, which is to
 // reach whichever model the sub-agent already runs.
-func WithVisionRouting(ctx context.Context, model string, reads func(modelRef string) bool) context.Context {
+func WithVisionRouting(ctx context.Context, model, effort string, reads func(modelRef string) bool) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -28,7 +29,7 @@ func WithVisionRouting(ctx context.Context, model string, reads func(modelRef st
 	if model == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, visionRoutingKey{}, visionRouting{model: model, reads: reads})
+	return context.WithValue(ctx, visionRoutingKey{}, visionRouting{model: model, effort: effort, reads: reads})
 }
 
 // VisionRefFor swaps in the vision role when this turn carries images the child
@@ -48,6 +49,17 @@ func VisionRefFor(ctx context.Context, childRef string) string {
 		return childRef
 	}
 	return routing.model
+}
+
+func VisionEffortFor(ctx context.Context, childRef, childEffort string) string {
+	if VisionRefFor(ctx, childRef) == childRef {
+		return childEffort
+	}
+	routing, _ := ctx.Value(visionRoutingKey{}).(visionRouting)
+	if routing.effort != "" {
+		return routing.effort
+	}
+	return "auto"
 }
 
 // SubagentImageNote tells a delegate that the pictures ride the message it is

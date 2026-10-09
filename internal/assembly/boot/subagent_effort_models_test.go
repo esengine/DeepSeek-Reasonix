@@ -128,3 +128,21 @@ func TestExplicitUnsupportedEffortFailsWithTypedError(t *testing.T) {
 		t.Fatalf("err = %q, want it to name the model and the level", err)
 	}
 }
+
+func TestRoleEffortIsResolvedPerExecutingModel(t *testing.T) {
+	for _, tc := range []struct{ role, model, want string }{
+		{"low", "", "low"},
+		{"low", "narrow/n", "low"},
+		{"max", "wide/w", "max"},
+		{"max", "narrow/n", ""},
+	} {
+		t.Run(tc.role+"/"+tc.model, func(t *testing.T) {
+			cfg := effortModelsConfig("high")
+			cfg.Agent.RoleEfforts = map[string]string{"subagent": tc.role}
+			sub, _ := newEffortSub(t, cfg, nil)
+			if got := sub.inheritedFor(tc.model); got != tc.want {
+				t.Fatalf("role effort on %q = %q, want %q", tc.model, got, tc.want)
+			}
+		})
+	}
+}

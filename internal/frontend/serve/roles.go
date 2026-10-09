@@ -15,12 +15,18 @@ import (
 // roleFields maps a wire name onto the AgentConfig field that already decides
 // the behaviour. A role with no field behind it would be a switch that changes
 // nothing, so a name only appears here once the kernel reads it.
+type rolesResponse struct {
+	Roles   map[string]string `json:"roles"`
+	Efforts map[string]string `json:"efforts"`
+}
+
 var roleFields = map[string]func(*config.Config) *string{
 	"planner":  func(c *config.Config) *string { return &c.Agent.PlannerModel },
 	"subagent": func(c *config.Config) *string { return &c.Agent.SubagentModel },
 	"guardian": func(c *config.Config) *string { return &c.Agent.GuardianModel },
 	"vision":   func(c *config.Config) *string { return &c.Agent.VisionModel },
 	"decision": func(c *config.Config) *string { return &c.Agent.DecisionModel },
+	"title":    func(c *config.Config) *string { return &c.Agent.TitleModel },
 }
 
 func (s *Server) registerRoleRoutes(mux *http.ServeMux) {
@@ -115,11 +121,15 @@ func (s *Server) roles(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	out := make(map[string]string, len(roleFields))
+	roles := make(map[string]string, len(roleFields))
 	for name, field := range roleFields {
-		out[name] = strings.TrimSpace(*field(cfg))
+		roles[name] = strings.TrimSpace(*field(cfg))
 	}
-	writeJSON(w, out)
+	efforts := cfg.Agent.RoleEfforts
+	if efforts == nil {
+		efforts = map[string]string{}
+	}
+	writeJSON(w, rolesResponse{Roles: roles, Efforts: efforts})
 }
 
 // setRole persists one assignment and rebuilds, because boot reads every role
@@ -132,35 +142,62 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Role string `json:"role"`
-		Ref  string `json:"ref"`
+		Role   string  `json:"role"`
+		Ref    string  `json:"ref"`
+		Effort *string `json:"effort"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
 		badBody(w)
 		return
 	}
-	field, ok := roleFields[strings.TrimSpace(body.Role)]
+	role := strings.TrimSpace(body.Role)
+	field, ok := roleFields[role]
 	if !ok {
 		refuse(w, http.StatusBadRequest, "roles.unknown", "no such role", map[string]any{"role": body.Role})
 		return
 	}
 	ref := strings.TrimSpace(body.Ref)
-	if ref != "" {
-		cfg, err := config.Load()
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		// Naming a model that does not resolve would strand the role on the next
-		// build, and the failure would surface as a broken turn rather than here.
-		if !cfg.ModelRefSelectable(ref, s.ctl().ProviderCatalog()) {
-			refuse(w, http.StatusBadRequest, "roles.model_unknown", "no configured model matches that reference", map[string]any{"model": ref})
+	cfg, err := config.Load()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if ref != "" && !cfg.ModelRefSelectable(ref, s.ctl().ProviderCatalog()) {
+		refuse(w, http.StatusBadRequest, "roles.model_unknown", "no configured model matches that reference", map[string]any{"model": ref})
+		return
+	}
+	if role == "title" && ref != "" {
+		entry, ok := cfg.ResolveModel(ref)
+		if !ok || !entry.Configured() || config.AnswersFor(entry.Kind) != config.AnswersChat {
+			refuse(w, http.StatusBadRequest, "roles.model_unknown", "title generation requires a configured chat model", map[string]any{"model": ref})
 			return
 		}
 	}
-	edit := config.LoadForEdit(config.UserConfigPath())
-	*field(edit) = ref
-	if err := edit.SaveTo(config.UserConfigPath()); err != nil {
+	effort := ""
+	if body.Effort != nil {
+		effort, err = normalizeRoleEffort(cfg, role, ref, currentModelRef(s.ctl()), *body.Effort)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(config.UserConfigPath())
+		*field(edit) = ref
+		if body.Effort != nil {
+			if edit.Agent.RoleEfforts == nil {
+				edit.Agent.RoleEfforts = map[string]string{}
+			}
+			if effort == "" || role == "decision" || (role == "title" && ref == "") {
+				delete(edit.Agent.RoleEfforts, role)
+			} else {
+				edit.Agent.RoleEfforts[role] = effort
+			}
+		}
+		return edit.SaveTo(config.UserConfigPath())
+	}(); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -181,4 +218,26 @@ func (s *Server) rebuildInPlace(ctx context.Context) error {
 		return fmt.Errorf("no current model to rebuild on")
 	}
 	return s.switchModel(ctx, ref)
+}
+
+func normalizeRoleEffort(cfg *config.Config, role, ref, main, level string) (string, error) {
+	level = strings.TrimSpace(level)
+	if level == "" || level == "auto" {
+		return level, nil
+	}
+	if role == "decision" || (role == "title" && ref == "") {
+		return "", refusal(http.StatusBadRequest, "effort.not_configurable", fmt.Errorf("this role has no reasoning-effort control"), nil)
+	}
+	if ref == "" {
+		ref = main
+	}
+	entry, ok := cfg.ResolveModel(ref)
+	if !ok || !config.EffortCapabilityForEntry(entry).Supported {
+		return "", refusal(http.StatusBadRequest, "effort.not_configurable", fmt.Errorf("this role's model declares no reasoning-effort levels"), nil)
+	}
+	effort, err := config.NormalizeEffort(entry, level)
+	if err != nil {
+		return "", refusal(http.StatusBadRequest, "effort.unsupported_level", err, nil)
+	}
+	return effort, nil
 }

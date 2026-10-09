@@ -42,11 +42,11 @@ func resolveInheritedSubagentEffort(cfg *config.Config, entry *config.ProviderEn
 	if cfg == nil {
 		return inheritedSubagentEffort{}
 	}
-	raw := strings.TrimSpace(cfg.Agent.SubagentEffort)
+	raw := firstNonEmpty(cfg.Agent.RoleEfforts["subagent"], cfg.Agent.SubagentEffort)
 	if raw == "" {
 		return inheritedSubagentEffort{}
 	}
-	if strings.TrimSpace(cfg.Agent.SubagentModel) != "" {
+	if raw == "auto" || strings.TrimSpace(cfg.Agent.SubagentModel) != "" {
 		return inheritedSubagentEffort{value: raw}
 	}
 	if normalized, ok := config.NormalizeInheritedEffort(entry, raw); ok {
@@ -61,7 +61,7 @@ func resolveInheritedSubagentEffort(cfg *config.Config, entry *config.ProviderEn
 // default is announced once per model.
 func inheritedEffortFor(opts Options, cfg *config.Config, resolver provider.Resolver, parent *config.ProviderEntry, announced *sync.Map) func(string) string {
 	return func(modelRef string) string {
-		raw := strings.TrimSpace(cfg.Agent.SubagentEffort)
+		raw := firstNonEmpty(cfg.Agent.RoleEfforts["subagent"], cfg.Agent.SubagentEffort)
 		ref := strings.TrimSpace(modelRef)
 		if raw == "" {
 			return ""
@@ -82,6 +82,7 @@ func inheritedEffortFor(opts Options, cfg *config.Config, resolver provider.Reso
 		if _, seen := announced.LoadOrStore(selected, true); !seen {
 			report(opts.Sink, event.Event{
 				Level:  event.LevelWarn,
+				Code:   event.NoticeCodeInheritedSubagentEffortDropped,
 				Text:   "Ignored the inherited subagent effort for the selected model.",
 				Detail: fmt.Sprintf("agent.subagent_effort = %q is not supported by model %q; that subagent uses the provider/model default effort. The persisted setting was not changed.", raw, selected),
 			})

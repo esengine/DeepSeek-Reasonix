@@ -194,7 +194,7 @@ func subagentEffortRef(cfg *config.Config, sk skill.Skill, inheritedFor func(mod
 		if cfg == nil {
 			return ""
 		}
-		return strings.TrimSpace(cfg.Agent.SubagentEffort)
+		return firstNonEmpty(cfg.Agent.RoleEfforts["subagent"], cfg.Agent.SubagentEffort)
 	}
 	return inheritedFor(subagentModelRef(cfg, sk))
 }

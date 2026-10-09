@@ -55,7 +55,7 @@ func TestRolesReportTheSubagentEntriesThatOutrankTheGlobalModel(t *testing.T) {
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("overrides = %+v, want %+v (an empty entry overrides nothing)", got, want)
 	}
-	if v := readRoles(t, srv.URL)["subagent"]; v != "existing/model-a" {
+	if v := readRoles(t, srv.URL).Roles["subagent"]; v != "existing/model-a" {
 		t.Fatalf("GET /roles subagent = %q: the configured value must stay readable beside its overrides", v)
 	}
 }

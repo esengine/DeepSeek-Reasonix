@@ -313,9 +313,10 @@ func (b *builder) wireTools() error {
 	t.sub = newSubagentConfig(opts, cfg, b.model.entry, b.model.name, b.providers.effective, b.proxy, b.prompt.skillStore)
 	if t.sub.inheritedEffortDropped {
 		report(b.sink, event.Event{
+			Code:   event.NoticeCodeInheritedSubagentEffortDropped,
 			Level:  event.LevelWarn,
 			Text:   "Ignored the inherited subagent effort for the selected model.",
-			Detail: fmt.Sprintf("agent.subagent_effort = %q is not supported by the current execution model %q; subagents that follow it will use the provider/model default effort. The persisted setting was not changed.", cfg.Agent.SubagentEffort, b.model.ref),
+			Detail: fmt.Sprintf("Inherited subagent effort %q is not supported by the current execution model %q; subagents that follow it will use the provider/model default effort. The persisted setting was not changed.", firstNonEmpty(cfg.Agent.RoleEfforts["subagent"], cfg.Agent.SubagentEffort), b.model.ref),
 		})
 	}
 	t.taskTool, t.skillRun = t.roles.delegation(delegationInputs{opts: opts, sub: t.sub, exec: b.execProv, entry: b.model.entry,
