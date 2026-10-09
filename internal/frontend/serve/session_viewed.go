@@ -5,6 +5,7 @@ import "net/http"
 func (s *Server) registerSessionMarkRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sessions/rename", s.renameSessionAt)
 	mux.HandleFunc("POST /sessions/viewed", s.sessionViewed)
+	s.registerAutoArchiveRoutes(mux)
 }
 
 // sessionViewed clears the unread mark on the conversation this pane has open.
