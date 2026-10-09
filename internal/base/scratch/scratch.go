@@ -27,6 +27,7 @@ const (
 type Dir struct {
 	path    string
 	release func()
+	freed   sync.Once
 	once    sync.Once
 	err     error
 }
@@ -57,6 +58,14 @@ func (d *Dir) Path() string {
 	return d.path
 }
 
+// Release drops the claim and leaves the directory for the caller to delete,
+// for a caller that must move it first. Safe to call more than once.
+func (d *Dir) Release() {
+	if d != nil {
+		d.freed.Do(d.release)
+	}
+}
+
 // Remove drops the claim and deletes the directory, retrying while Windows
 // reports a file still open. A directory it cannot delete stays unclaimed, so
 // a later Sweep collects it. Safe to call more than once.
@@ -65,7 +74,7 @@ func (d *Dir) Remove() error {
 		return nil
 	}
 	d.once.Do(func() {
-		d.release()
+		d.Release()
 		d.err = removeAll(d.path)
 	})
 	return d.err

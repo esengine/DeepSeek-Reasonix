@@ -152,3 +152,23 @@ func TestCreateSweepsAbandonedSiblingsOncePerPrefix(t *testing.T) {
 		t.Fatalf("Create did not sweep the abandoned sibling: %v", err)
 	}
 }
+
+func TestReleaseLeavesTheDirectoryForSweepAndRemoveStaysSafe(t *testing.T) {
+	root := isolatedTemp(t)
+	dir, err := Create("scratch-release-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	age(t, dir.Path())
+	dir.Release()
+	dir.Release()
+	if _, err := os.Stat(dir.Path()); err != nil {
+		t.Fatalf("Release removed the directory: %v", err)
+	}
+	if got := Sweep(root, "scratch-release-"); got != 1 {
+		t.Fatalf("sweep removed %d, want the released directory", got)
+	}
+	if err := dir.Remove(); err != nil {
+		t.Fatalf("Remove after Release: %v", err)
+	}
+}

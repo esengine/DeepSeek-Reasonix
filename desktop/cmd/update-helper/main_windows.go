@@ -153,21 +153,21 @@ func run(args []string) int {
 			logger.Printf("preserving update installer staging: %v", cleanupErr)
 		}
 	}()
-	stagingDir, err := os.MkdirTemp("", "reasonix-update-stage-*")
+	staging, err := createUpdateStaging(stagePrefix)
 	if err != nil {
 		logger.Printf("create update staging: %v", err)
 		return recoverUnstarted()
 	}
-	stagingOwner, err := lstatUpdateStagingFn(stagingDir)
-	if err != nil {
-		logger.Printf("bind update staging: %v", err)
-		return recoverUnstarted()
-	}
 	defer func() {
-		if cleanupErr := cleanupOwnedWindowsUpdateDirectory(stagingDir, stagingOwner); cleanupErr != nil {
+		if cleanupErr := staging.cleanup(); cleanupErr != nil {
 			logger.Printf("preserving update staging: %v", cleanupErr)
 		}
 	}()
+	stagingDir, err := staging.payloadDir()
+	if err != nil {
+		logger.Printf("create update payload directory: %v", err)
+		return recoverUnstarted()
+	}
 	releaseInstallerExecution, err := claimInstallerExecutionFn(claimedInstaller, installerSHA256)
 	if err != nil {
 		logger.Printf("recheck staged installer: %v", err)
@@ -254,21 +254,21 @@ func runVersionedWindowsUpdate(logger *log.Logger, installer, installerSHA256, i
 			logger.Printf("preserving update installer staging: %v", cleanupErr)
 		}
 	}()
-	stagingDir, err := os.MkdirTemp("", "reasonix-update-stage-*")
+	staging, err := createUpdateStaging(stagePrefix)
 	if err != nil {
 		logger.Printf("create versioned update staging: %v", err)
 		return recoverExisting()
 	}
-	stagingOwner, err := lstatUpdateStagingFn(stagingDir)
-	if err != nil {
-		logger.Printf("bind versioned update staging: %v", err)
-		return recoverExisting()
-	}
 	defer func() {
-		if cleanupErr := cleanupOwnedWindowsUpdateDirectory(stagingDir, stagingOwner); cleanupErr != nil {
+		if cleanupErr := staging.cleanup(); cleanupErr != nil {
 			logger.Printf("preserving update staging: %v", cleanupErr)
 		}
 	}()
+	stagingDir, err := staging.payloadDir()
+	if err != nil {
+		logger.Printf("create versioned update payload directory: %v", err)
+		return recoverExisting()
+	}
 	releaseInstallerExecution, err := claimInstallerExecutionFn(claimedInstaller, installerSHA256)
 	if err != nil {
 		logger.Printf("recheck staged versioned installer: %v", err)
@@ -337,17 +337,12 @@ func stageVerifiedInstaller(sourcePath, expectedSHA256 string) (string, func() e
 	if !sourceInfo.Mode().IsRegular() {
 		return "", nil, fmt.Errorf("installer is not a regular file")
 	}
-	dir, err := os.MkdirTemp("", "reasonix-update-installer-*")
+	staging, err := createUpdateStaging(installerPrefix)
 	if err != nil {
 		return "", nil, err
 	}
-	owner, err := os.Lstat(dir)
-	if err != nil {
-		return "", nil, err
-	}
-	cleanup := func() error {
-		return cleanupOwnedWindowsUpdateDirectory(dir, owner)
-	}
+	dir := staging.root()
+	cleanup := staging.cleanup
 	fail := func(err error) (string, func() error, error) {
 		_ = cleanup()
 		return "", nil, err
@@ -528,49 +523,6 @@ func runInstaller(installer, installDir string) error {
 	// performs every live replacement through the claimed transaction.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: installerCommandLine(installer, installDir)}
 	return cmd.Run()
-}
-
-func cleanupOwnedWindowsUpdateDirectory(path string, owner os.FileInfo) error {
-	if path == "" || owner == nil || !owner.IsDir() {
-		return fmt.Errorf("Windows update cleanup identity is incomplete")
-	}
-	for attempt := range 16 {
-		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
-		from, err := windows.UTF16PtrFromString(path)
-		if err != nil {
-			return err
-		}
-		to, err := windows.UTF16PtrFromString(cleanup)
-		if err != nil {
-			return err
-		}
-		if err := windows.MoveFileEx(from, to, windows.MOVEFILE_WRITE_THROUGH); err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			if os.IsExist(err) {
-				continue
-			}
-			return err
-		}
-		actual, err := os.Lstat(cleanup)
-		if err != nil {
-			return err
-		}
-		if !os.SameFile(owner, actual) {
-			restoreFrom, fromErr := windows.UTF16PtrFromString(cleanup)
-			restoreTo, toErr := windows.UTF16PtrFromString(path)
-			if fromErr != nil || toErr != nil {
-				return fmt.Errorf("Windows update staging changed before cleanup; preserve replacement at %s", cleanup)
-			}
-			if restoreErr := windows.MoveFileEx(restoreFrom, restoreTo, windows.MOVEFILE_WRITE_THROUGH); restoreErr != nil {
-				return fmt.Errorf("Windows update staging changed before cleanup; preserve replacement at %s: %w", cleanup, restoreErr)
-			}
-			return fmt.Errorf("Windows update staging changed before cleanup")
-		}
-		return os.RemoveAll(cleanup)
-	}
-	return fmt.Errorf("cannot allocate Windows update cleanup path")
 }
 
 func startRelaunch(relaunch, installDir string) error {
