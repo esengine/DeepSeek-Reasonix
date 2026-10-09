@@ -66,6 +66,18 @@ func renderAgentDelegation(b *strings.Builder, c *Config) {
 	} else {
 		b.WriteString("# worktree_isolation = true   # task can run a writer in a git worktree; changes wait for apply_isolated\n")
 	}
+	// Written back as it stands so an unknown mode survives a save/load round
+	// trip; the strict default stays commented like every other default here,
+	// so a later default change can still reach files written today.
+	lease := strings.TrimSpace(c.Agent.WriteLease)
+	if lease == "" {
+		lease = WriteLeaseStrict
+	}
+	if lease == WriteLeaseStrict {
+		b.WriteString("# write_lease = \"strict\"   # strict: declared paths serialize, undeclared ones hold the whole workspace; optimistic: only declared paths serialize; off: no lease at all\n")
+	} else {
+		fmt.Fprintf(b, "write_lease = %q   # strict: declared paths serialize, undeclared ones hold the whole workspace; optimistic: only declared paths serialize; off: no lease at all\n", lease)
+	}
 	if c.Agent.CodeMode {
 		b.WriteString("code_mode = true   # run_script: tool calls from a short script, one round trip\n")
 	} else {

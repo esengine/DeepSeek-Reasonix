@@ -1,4 +1,4 @@
-import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
+import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings, WriteLeaseSettings } from "./port";
 import type { DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings } from "./boundary";
 import { MockShell } from "./mock_shell";
 
@@ -60,6 +60,8 @@ export class MockBoundary extends MockShell {
 
   private browser: BrowserToolsSettings = { enabled: true, effective: true, path: "/Users/you/.reasonix/config.toml" };
 
+  private lease: WriteLeaseSettings = { mode: "strict", effective: "strict", path: "/Users/you/.reasonix/config.toml" };
+
   async permissions(): Promise<PermissionRules> {
     return { ...this.rules };
   }
@@ -102,6 +104,15 @@ export class MockBoundary extends MockShell {
   async saveBrowserTools(enabled: boolean): Promise<BrowserToolsSettings> {
     this.browser = { ...this.browser, enabled, effective: enabled };
     return { ...this.browser };
+  }
+
+  async writeLease(): Promise<WriteLeaseSettings> {
+    return { ...this.lease };
+  }
+
+  async saveWriteLease(mode: string): Promise<WriteLeaseSettings> {
+    this.lease = { ...this.lease, mode, effective: mode };
+    return { ...this.lease };
   }
 
   private currency: DisplayCurrencySettings = { mode: "auto", path: "/Users/you/.reasonix/config.toml" };

@@ -29,9 +29,21 @@ func startSessionRuntime(opts Options, cfg *config.Config, root string, sink eve
 		jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds()) * time.Second),
 		jobs.WithSessionOwnershipProbe(sessionstore.SessionLeaseHeldByCurrentRuntime),
 	}
+	// The lease mode is a user setting: "off" takes no cross-session lease at
+	// all, "optimistic" stops an undeclaring writer from holding the whole
+	// workspace against other sessions, and "strict" holds it for every
+	// writer. Each runtime builds its lease with the mode it was configured
+	// with; a live runtime keeps the lease it was built with.
+	var leaseOptions []workspacelease.Option
+	switch {
+	case cfg.Agent.SkipWriteLease():
+		leaseOptions = append(leaseOptions, workspacelease.WithoutWriteSerialization())
+	case cfg.Agent.RelaxedWriteLease():
+		leaseOptions = append(leaseOptions, workspacelease.WithoutWholeWorkspaceHold())
+	}
 	lease, err := workspacelease.New(root, config.WorkspaceLeaseDir(), func(w workspacelease.Wait) {
 		sink.Emit(workspaceLeaseNotice(w))
-	})
+	}, leaseOptions...)
 	if err != nil {
 		return sessionRuntime{}, fmt.Errorf("initialize workspace write lease: %w", err)
 	}

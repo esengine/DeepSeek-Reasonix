@@ -495,6 +495,7 @@ export const ACTIONS: UIAction[] = [
   { id: "sandbox.add-write-root", kind: "kernel-mutation", target: "optional", proof: "authority-effect" },
   { id: "sandbox.remove-write-root", kind: "destructive", target: "entity", proof: "authority-effect" },
   { id: "browser-tools.enabled", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+{ id: "write-lease.mode", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // Read by the running turn at its next round, so no rebuild stands between the
   // click and the canonical change.
   // The kernel announces the change on the stream, so no rebuild stands between

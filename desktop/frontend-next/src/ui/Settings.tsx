@@ -29,6 +29,7 @@ import { ConfigTrouble } from "./ConfigTrouble";
 import { Compaction } from "./Compaction";
 import { Sandbox } from "./Sandbox";
 import { BrowserTools } from "./BrowserTools";
+import { WriteLeaseGroup } from "./WriteLease";
 import { ProgressWatch } from "./ProgressWatch";
 import { Account } from "./Account";
 import { Backup } from "./Backup";
@@ -616,6 +617,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
               >
                 <BrowserTools port={port} onChanged={onChanged} />
               </Group>
+              <WriteLeaseGroup port={port} onChanged={onChanged} />
             </>
           )}
 

@@ -1061,6 +1061,10 @@ type AgentConfig struct {
 	// WorktreeIsolation lets task run a writer in a git worktree of the
 	// workspace, its changes held until applied. Off by default.
 	WorktreeIsolation bool `toml:"worktree_isolation"`
+	// WriteLease names how far the cross-session write lease reaches: "strict"
+	// (the default), "optimistic", or "off". See write_lease.go for what each
+	// one covers.
+	WriteLease string `toml:"write_lease"`
 	// CodeMode offers run_script: a Starlark script whose tool calls each pass
 	// the ordinary checks, so dependent steps cost one round trip.
 	CodeMode bool `toml:"code_mode"`
@@ -1411,6 +1415,9 @@ func Default() *Config {
 			MaxSubagentDepth:       2,
 			MaxSubagentConcurrency: 6,
 			MaxParallelWriters:     3,
+			// Set here, not left to the zero value: an absent key must keep the
+			// strict behaviour of serializing writers that declare no paths.
+			WriteLease: WriteLeaseStrict,
 		},
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix` prompts before writers. Users add
