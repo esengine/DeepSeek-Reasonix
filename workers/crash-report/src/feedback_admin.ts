@@ -25,15 +25,15 @@ async function pending(env: Env, url: URL): Promise<Response> {
 }
 
 async function open(env: Env): Promise<Response> {
-  type Open = Pick<FeedbackRow, "receipt" | "status" | "issue_number" | "issue_url">;
-  const cols = "SELECT receipt, status, issue_number, issue_url FROM feedback";
+  type Open = Pick<FeedbackRow, "receipt" | "status" | "issue_number" | "issue_url" | "resolved_version">;
+  const cols = "SELECT receipt, status, issue_number, issue_url, resolved_version FROM feedback";
   const active = await env.DB.prepare(`${cols} WHERE status IN ('recorded','in_progress') ORDER BY created_at ASC LIMIT ?`).bind(OPEN_LIMIT).all<Open>();
   const awaitingTag = await env.DB.prepare(`${cols} WHERE status = 'fixed' AND resolved_version = 'next' ORDER BY created_at ASC LIMIT ?`)
     .bind(OPEN_LIMIT)
     .all<Open>();
   const results = [...active.results, ...awaitingTag.results].slice(0, OPEN_LIMIT);
   return jsonResponse({
-    items: results.map((r) => ({ receipt: r.receipt, status: r.status, issueNumber: r.issue_number, issueUrl: r.issue_url })),
+    items: results.map((r) => ({ receipt: r.receipt, status: r.status, issueNumber: r.issue_number, issueUrl: r.issue_url, resolvedVersion: r.resolved_version })),
   });
 }
 
