@@ -9,6 +9,7 @@ import { Notifications } from "./Notifications";
 import { Folding } from "./Folding";
 import { WindowSection } from "./WindowSection";
 import { NavRailSection } from "./NavRailSection";
+import { GraphicsSection } from "./GraphicsSection";
 import { ThemeImport } from "./ThemeImport";
 import { useThemeInventory } from "./useThemeInventory";
 
@@ -525,6 +526,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
       <WindowSection port={port} />
       <NavRailSection />
+      <GraphicsSection />
       <Folding />
       <Notifications port={port} />
 

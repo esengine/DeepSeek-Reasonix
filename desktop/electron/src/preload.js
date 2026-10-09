@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("reasonixHost", {
   toggleMaximiseWindow: () => ipcRenderer.invoke("window:toggle-maximise"),
   isWindowMaximised: () => ipcRenderer.invoke("window:is-maximised"),
   closeWindow: () => ipcRenderer.invoke("window:close"),
+  // What the shell's graphics are running as this launch.
+  graphics: () => ipcRenderer.invoke("shell:graphics"),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", String(url)),
   // A pane and a path inside its workspace; main asks the kernel where that is.
   revealPath: (base, rel) => ipcRenderer.invoke("shell:reveal", String(base), String(rel)),

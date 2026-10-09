@@ -79,6 +79,37 @@ export function setHidesAmounts(on: boolean): void {
   amountListeners.forEach((fn) => fn());
 }
 
+// Off unless this machine turned it on. The desktop shell reads the same key
+// from its saved preferences before Chromium starts, so a flip reaches it on
+// the next launch and not before.
+const SOFTWARE_KEY = "rx-hw-accel";
+
+export function wantsSoftwareRendering(): boolean {
+  try {
+    return localStorage.getItem(SOFTWARE_KEY) === "off";
+  } catch {
+    return false;
+  }
+}
+
+const softwareListeners = new Set<() => void>();
+
+export function onSoftwareRenderingChange(fn: () => void): () => void {
+  softwareListeners.add(fn);
+  return () => {
+    softwareListeners.delete(fn);
+  };
+}
+
+export function setSoftwareRendering(on: boolean): void {
+  try {
+    localStorage.setItem(SOFTWARE_KEY, on ? "off" : "on");
+  } catch {
+    /* a private window keeps the default, which is the same answer it gives */
+  }
+  softwareListeners.forEach((fn) => fn());
+}
+
 // When the icon column beside the workspace rail is drawn: "on" always, "collapsed"
 // only while the workspace rail is closed, "off" never. A phone-width window
 // never draws it, whatever this says. "on" and "off" are the two values the

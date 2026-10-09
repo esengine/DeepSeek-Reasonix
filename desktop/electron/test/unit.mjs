@@ -1721,3 +1721,21 @@ test("the window ground follows the stored theme and, for auto, the system", () 
   assert.equal(groundFor({}, false), GROUND.light);
   assert.equal(groundFor(undefined, true), GROUND.dark);
 });
+
+const { accelerationOff, graphicsReport, PREF_KEY: GPU_PREF } = require("../src/graphics.js");
+
+test("hardware acceleration is off only when the saved preference says exactly that", () => {
+  assert.equal(GPU_PREF, "rx-hw-accel");
+  assert.equal(accelerationOff({}), false);
+  assert.equal(accelerationOff(undefined), false);
+  assert.equal(accelerationOff({ "rx-hw-accel": "on" }), false);
+  assert.equal(accelerationOff({ "rx-hw-accel": "" }), false);
+  assert.equal(accelerationOff({ "rx-hw-accel": "off" }), true);
+});
+
+test("the graphics report says what this launch is running, not what is saved", () => {
+  const app = (compositing) => ({ getGPUFeatureStatus: () => ({ gpu_compositing: compositing }) });
+  assert.deepEqual(graphicsReport(app("enabled"), false), { launchedOff: false, compositing: "enabled" });
+  assert.deepEqual(graphicsReport(app("disabled_software"), true), { launchedOff: true, compositing: "disabled_software" });
+  assert.deepEqual(graphicsReport({ getGPUFeatureStatus: () => { throw new Error("not ready"); } }, false), { launchedOff: false, compositing: "" });
+});
