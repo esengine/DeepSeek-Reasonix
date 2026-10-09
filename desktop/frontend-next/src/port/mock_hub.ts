@@ -170,9 +170,9 @@ export class MockHub implements HubPort {
           i === 0
             ? [
                 { path: "/sessions/mock.jsonl", name: "mock", title: "并行会话演示", turns: 3, runtimeId: open.get("/sessions/mock.jsonl") },
-                { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12 },
+                { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12, runtimeId: open.get("/sessions/older.jsonl") },
               ]
-            : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5 }],
+            : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5, runtimeId: open.get("/sessions/site.jsonl") }],
       })),
     );
   }
@@ -221,7 +221,7 @@ export class MockHub implements HubPort {
   }
 
   importLegacySessions(_path: string, _workspace: string) {
-    return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0 });
+    return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0, recognised: true });
   }
 
   hostCapabilities() {
@@ -241,7 +241,7 @@ export class MockHub implements HubPort {
     ],
     devices: [],
     cloudDevices: [],
-    cloudRemote: { online: false },
+    cloudRemote: { online: false, reason: "signed_out" },
   };
 
   shareStatus() {

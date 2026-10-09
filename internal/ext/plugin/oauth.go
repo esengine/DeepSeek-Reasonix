@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/mcpdiag"
 )
 
@@ -494,7 +493,7 @@ func requestOAuthToken(ctx context.Context, client *http.Client, state mcpOAuthS
 		return oauthTokenResponse{}, err
 	}
 	if token.Error != "" {
-		return oauthTokenResponse{}, fmt.Errorf("%s: %s", secrets.RedactCredentials(token.Error), secrets.RedactCredentials(token.Description))
+		return oauthTokenResponse{}, errOAuthTokenResponse
 	}
 	if strings.TrimSpace(token.AccessToken) == "" {
 		return oauthTokenResponse{}, fmt.Errorf("token response has no access_token")
@@ -549,7 +548,7 @@ func oauthCallbackHandler(expect oauthCallbackExpect, result chan<- oauthCallbac
 		case !issuerMatches(query, expect):
 			callback.Err = ErrOAuthIssuerMismatch
 		case query.Get("error") != "":
-			callback.Err = fmt.Errorf("MCP OAuth authorization failed: %s: %s", secrets.RedactCredentials(query.Get("error")), secrets.RedactCredentials(query.Get("error_description")))
+			callback.Err = errOAuthAuthorizationResponse
 		case strings.TrimSpace(query.Get("code")) == "":
 			callback.Err = fmt.Errorf("MCP OAuth callback did not include an authorization code")
 		default:
@@ -711,7 +710,7 @@ func decodeLimitedJSON(r io.Reader, out any) error {
 
 func oauthHTTPError(action string, resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return fmt.Errorf("%s: HTTP %d: %s", action, resp.StatusCode, secrets.RedactCredentials(strings.TrimSpace(string(body))))
+	return fmt.Errorf("%s: %w", action, &httpStatusError{Status: resp.StatusCode, BodyBytes: len(body)})
 }
 
 func newOAuthHTTPClient(base *http.Client) *http.Client {

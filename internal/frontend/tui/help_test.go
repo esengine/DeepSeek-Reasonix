@@ -75,3 +75,22 @@ func TestCompactionWithoutADigestDrawsNoCard(t *testing.T) {
 		t.Fatalf("an empty fold drew a card:\n%s", got)
 	}
 }
+
+// A built-in named first is that built-in whatever follows it, as in 1.x:
+// the line answers here and never reaches the kernel as prose.
+func TestBuiltinWithTrailingArgumentsStaysLocal(t *testing.T) {
+	for _, line := range []string{"/help x", "/? x", "/clear x", "/version x", "/mouse x", "/resume x", "/setup x"} {
+		m, k := testModel(t)
+		typeText(m, line)
+		run(m, press(m, "enter"))
+		if strings.Contains(strings.Join(k.seen(), "\n"), "POST /submit") {
+			t.Fatalf("%q went to the kernel", line)
+		}
+	}
+	m, _ := testModel(t)
+	typeText(m, "/clear x")
+	run(m, press(m, "enter"))
+	if m.clearing == nil {
+		t.Fatal("/clear with an argument skipped its confirmation")
+	}
+}

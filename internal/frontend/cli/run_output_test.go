@@ -283,15 +283,9 @@ func TestRunDiagnosticDoesNotAppendATypedPayload(t *testing.T) {
 	var out, errOut bytes.Buffer
 	sink := newRunOutputSink(&out, runOutputText)
 	sink.errOut = &errOut
-	figures := event.ContextBudgetFigures{Percent: 83, Remaining: 21000}
-	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeContextBudget,
-		Text: "Context at 83% of the compaction threshold.", Detail: figures.Encode()})
 	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeUnappliedSteer,
 		Text: agent.UnappliedSteerNotice("use plan B"), Detail: "use plan B"})
 	got := errOut.String()
-	if strings.Contains(got, `{"percent"`) {
-		t.Fatalf("the typed payload leaked into the diagnostic: %q", got)
-	}
 	if n := strings.Count(got, "use plan B"); n != 1 {
 		t.Fatalf("the guidance must appear once, got %d in %q", n, got)
 	}

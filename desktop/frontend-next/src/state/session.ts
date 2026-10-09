@@ -18,16 +18,17 @@ import { askFromCall, promptOpen, prompted, sealByReceipt } from "./prompts";
 import { nameTurnStart, othersSteer } from "./turn_start";
 import { appendText, foldMessage, sealSay } from "./say";
 import { nextId } from "./ids";
+import { chipLabel, IDLE, RUNNING } from "./chip";
 import { foldStall } from "./stall";
 import { nameQueued } from "./queued";
 import { dropTool, foldLastRead, foldTool, isSubagentProgress, mergeReads, notePhase } from "./fold";
+export { chipLabel };
 export { quoteAmount };
 export { setShowsReceipt, showsReceipt };
 
 // doing is what the status chip prints. These two values are also read back by
 // the reducer, so they get a name: a comparison against a sentence is one copy
 // pass away from never matching again, and nothing fails when it stops.
-const RUNNING = "运行中";
 const WAITING_WORKSPACE = "等待工作区";
 // What the turn is doing between a tool finishing and the model's next packet.
 // The chip used to keep printing the tool that had already returned, so the
@@ -51,8 +52,8 @@ export const initialState: SessionState = {
     estimated: false, coverage: "none", incompleteReason: "", alt: null, turn: 0, rounds: [] },
   waiting: {},
   running: false,
-  doing: "空闲",
-  steerQueue: [], subagentPhase: {},
+  doing: IDLE,
+  steerQueue: [], takenBack: [], subagentPhase: {},
   awaitingTurnStart: [],
   queueMoved: 0,
   browserTabsMoved: 0,
@@ -198,11 +199,11 @@ export type SessionEvent =
   | WireEvent
   | { kind: "__restore"; items: Item[]; plan?: PlanStep[]; executions: Executions }
   | { kind: "__todos"; plan: PlanStep[] }
-  | { kind: "__totals"; hit: number; miss: number; cost?: number; coverage?: CostCoverage; incompleteReason?: string }
+  | { kind: "__totals"; hit: number; miss: number; cost?: number; currency?: string; coverage?: CostCoverage; incompleteReason?: string }
   | { kind: "__error"; text: string }
   | { kind: "__user"; text: string; pending: boolean; id?: string }
   | { kind: "__unsent"; id: string }
-  | { kind: "__queued"; id: string; itemId: string; queued: "steer" | "followup" }
+  | { kind: "__queued"; id: string; itemId: string; queued: "steer" | "followup"; paused?: boolean }
   | { kind: "__decided"; id: string; verdict?: string; answers?: string[][] }
   | { kind: "__forgot"; id: string }
   | { kind: "__runtime_seen"; id: string }
@@ -234,7 +235,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       items: [...s.items, { t: "user", id, text: ev.text, pending: ev.pending }],
     };
   }
-  if (ev.kind === "__queued") return nameQueued(s, ev.id, ev.itemId, ev.queued);
+  if (ev.kind === "__queued") return nameQueued(s, ev.id, ev.itemId, ev.queued, ev.paused);
   // A line the kernel never took is not part of what happened, so it leaves the
   // transcript rather than sitting there looking sent. Either name identifies
   // it: the row the composer minted, or the entry the kernel queued it as —
@@ -243,7 +244,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
     return {
       ...s,
       items: s.items.filter((i) => !(i.t === "user" && (i.id === ev.id || i.itemId === ev.id))),
-      steerQueue: s.steerQueue,
+      takenBack: [...s.takenBack, ev.id].slice(-32),
     };
   }
   // The card stays after the fact is dropped, marked: the transcript is the
@@ -267,7 +268,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
     const resumed = decided?.t === "approval" && !halted ? decided.a.tool || RUNNING : s.doing;
     return {
       ...s,
-      doing: decided?.t === "ask" ? "运行中" : resumed,
+      doing: decided?.t === "ask" ? (s.running ? RUNNING : IDLE) : resumed,
       items: s.items.map((i) =>
         i.id !== ev.id
           ? i
@@ -282,14 +283,13 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       ),
     };
   }
-  // A rebuild re-reads the record, and an open prompt is not in it: it is the
-  // run stopped, waiting on an answer only this window can give. Overwriting it
-  // left the session reading 等你决定 with nothing on screen to decide.
+  // The transcript does not contain live extension publications or pending
+  // prompts. Both belong to this pane until it is rebound to another session.
   if (ev.kind === "__restore") {
     // How the restored turns ended is not in the record; a live turn that
     // vanished mid-flight leaves null, which is a different answer.
     const terminal: TurnTerminal = ev.items.length ? { kind: "unread" } : s.terminal;
-    return { ...s, executions: ev.executions, terminal, items: [...ev.items, ...s.items.filter(promptOpen)], plan: ev.plan ? livePlan(ev.plan) : s.plan };
+    return { ...s, executions: ev.executions, terminal, items: [...ev.items, ...s.items.filter((i) => i.t === "extension" || promptOpen(i))], plan: ev.plan ? livePlan(ev.plan) : s.plan };
   }
   // The kernel's canonical task list, asked for rather than re-derived: the
   // advances are not todo_write calls, and the refused writes are.
@@ -314,6 +314,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         hit: ev.hit,
         miss: ev.miss,
         cost: ev.cost ?? s.metrics.cost,
+        currency: ev.currency || s.metrics.currency,
         coverage: ev.coverage ?? s.metrics.coverage,
         incompleteReason: ev.coverage ? ev.incompleteReason ?? "" : s.metrics.incompleteReason,
       },
@@ -501,7 +502,11 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
             attempt: ev.retryAttempt ?? 0,
             max: ev.retryMax ?? 0,
             scope: ev.retryScope,
-            since: s.waiting.retry?.since ?? Date.now(),
+            cause: ev.retryCause,
+            status: ev.retryStatus,
+            delayMs: ev.retryDelayMs,
+            timeoutSecs: ev.retryTimeoutSecs,
+            since: Date.now(),
           },
         },
       };
@@ -645,7 +650,7 @@ function withReceipt(items: Item[], r?: Receipt): Item[] {
 // eleven. The server strips these before /history now — this is what covers
 // sessions already on disk.
 const CONTROL =
-  /<(reasoning-language|response-language|execution-policy|memory-update|background-jobs|active-goal|autoresearch-runtime|hook-context|available-skills|project-instructions|capability-route|interrupted-turn-recovery|workspace|scheduled-run)[\s\S]*?<\/\1>\s*/g;
+  /<(reasoning-language|response-language|execution-policy|memory-update|background-jobs|active-goal|autoresearch-runtime|hook-context|available-skills|project-instructions|capability-route|interrupted-turn-recovery|workspace|scheduled-run|mcp-prompt-failure)[\s\S]*?<\/\1>\s*/g;
 const stripControl = (s: string) => s.replace(CONTROL, "").trim();
 
 // A plan that ran to the end is spent: struck through in the rail it reads as

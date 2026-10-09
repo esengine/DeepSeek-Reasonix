@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"reasonix/internal/base/secrets"
 )
 
 type unsupportedMarketplaceObject struct {
@@ -38,7 +40,7 @@ func (t *Tool) marketplaceObjectSource(ctx context.Context, body json.RawMessage
 	}
 	if _, ok := parseGitHubRepoSource(strings.TrimSpace(pinned.URL)); !ok {
 		return "", "", "", nil, &unsupportedMarketplaceObject{
-			message: fmt.Sprintf("pinned URL %q is not a GitHub repository", pinned.URL),
+			message: fmt.Sprintf("pinned URL %q is not a GitHub repository", secrets.RedactEndpoint(pinned.URL)),
 			warning: "pinned URL is not a GitHub repository",
 		}
 	}

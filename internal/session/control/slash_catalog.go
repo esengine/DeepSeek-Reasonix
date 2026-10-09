@@ -42,6 +42,7 @@ func SubmitSlashCommands(m i18n.Messages) []SlashItem {
 		{Label: "/reload", Insert: "/reload", Hint: m.CmdReload},
 		{Label: "/rename", Insert: "/rename ", Hint: m.CmdRename},
 		{Label: "/forget", Insert: "/forget ", Hint: m.CmdForget},
+		{Label: "/remote", Insert: "/remote", Hint: m.CmdRemote},
 		{Label: "/sandbox", Insert: "/sandbox", Hint: m.CmdSandbox},
 		{Label: "/output-style", Insert: "/output-style", Hint: m.CmdOutputStyle},
 		{Label: "/reasoning-language", Insert: "/reasoning-language ", Hint: m.CmdReasonLang, Descend: true},

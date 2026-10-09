@@ -2993,10 +2993,10 @@ command = "project-shared"
 	}
 }
 
-// A project's own server no longer starts on its own — but asking to connect it
-// is the answer it was waiting for, and the answer has to stick, or the action
-// works once and the server is off again next session.
-func TestConnectingAProjectMCPRecordsTheDecisionItRepresents(t *testing.T) {
+// A project's own server waits for the user, and connecting it by name is not
+// the answer: that act never showed the command. The connect is refused with
+// what it would run; the enable that does show it is the answer, and sticks.
+func TestConnectingAProjectMCPNeedsTheEnableThatShowsItsCommand(t *testing.T) {
 	isolateControlConfigHome(t)
 	workspace := testenv.TempDir(t)
 	var requests atomic.Int32
@@ -3059,18 +3059,31 @@ url = %q
 		},
 	})
 
-	entry := config.PluginEntry{Name: "project-docs", Source: config.MCPSourceProjectConfig}
+	loaded, err := config.LoadForRootReadOnly(workspace)
+	if err != nil || len(loaded.Plugins) != 1 {
+		t.Fatalf("load project declaration: %v (%d plugins)", err, len(loaded.Plugins))
+	}
+	entry := loaded.Plugins[0]
 	store := config.DefaultActivationStore()
 	if !store.AwaitingDecision(entry, workspace) {
 		t.Fatal("a server the repository declared should be waiting for an answer before anyone gives one")
 	}
 
+	if _, err := ctrl.ConnectConfiguredMCPServer("project-docs"); !errors.Is(err, ErrMCPApprovalOwed) || !strings.Contains(err.Error(), server.URL) {
+		t.Fatalf("connect of an unapproved project server = %v, want the approval-owed refusal with its endpoint", err)
+	}
+	if requests.Load() != 0 || !store.AwaitingDecision(entry, workspace) {
+		t.Fatalf("a refused connect contacted the server (%d requests) or recorded an answer", requests.Load())
+	}
+	if err := ctrl.SetMCPServerEnabled("project-docs", config.ActivationProject, true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
 	n, err := ctrl.ConnectConfiguredMCPServer("project-docs")
 	if err != nil {
-		t.Fatalf("ConnectConfiguredMCPServer: %v", err)
+		t.Fatalf("ConnectConfiguredMCPServer after enabling: %v", err)
 	}
 	if store.AwaitingDecision(entry, workspace) {
-		t.Fatal("connecting it left it still waiting, so the next session asks again")
+		t.Fatal("enabling it left it still waiting, so the next session asks again")
 	}
 	if enabled, err := store.IsEnabled(entry, workspace); err != nil || !enabled {
 		t.Fatalf("IsEnabled after connecting = %v (%v), want the decision recorded", enabled, err)

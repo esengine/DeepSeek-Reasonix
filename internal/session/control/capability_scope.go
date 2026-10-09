@@ -176,6 +176,7 @@ func InspectProject(root string) ProjectCapabilities {
 		state := MCPServerState{
 			Entry: entry, Enabled: enabled, LocalOverride: local[entry.Name],
 			Pending: store.AwaitingDecision(entry, root),
+			Changed: store.ServerChanged(entry, root),
 		}
 		state.Description, state.Tools, state.Stale = mcpCachedFacts(mcpIdentitySpec(entry, root))
 		out.Servers = append(out.Servers, state)

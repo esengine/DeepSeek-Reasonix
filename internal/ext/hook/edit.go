@@ -36,7 +36,7 @@ func Save(scope Scope, projectRoot string, settings Settings) error {
 	}
 	hooks, err := normalizedHooks(settings)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", path, err)
 	}
 	raw := map[string]json.RawMessage{}
 	if body, err := fileencoding.ReadFileUTF8(path); err == nil {
@@ -67,12 +67,17 @@ func normalizedHooks(settings Settings) (map[Event][]HookConfig, error) {
 		if !validEvent(event) {
 			return nil, fmt.Errorf("unknown hook event %q", event)
 		}
-		for _, cfg := range list {
+		for i, cfg := range list {
 			cmd := strings.TrimSpace(cfg.Command)
 			if cmd == "" {
 				// An empty command is a half-finished row, not a hook. Writing it
 				// would produce a file Load silently skips and Inspect flags.
 				continue
+			}
+			if UsesToolMatcher(event) {
+				if _, err := matchTool(ResolvedHook{HookConfig: cfg, Event: event}, ""); err != nil {
+					return nil, fmt.Errorf("hooks.%s[%d] match %q: %w", event, i, strings.TrimSpace(cfg.Match), err)
+				}
 			}
 			hooks[event] = append(hooks[event], HookConfig{
 				Match:       strings.TrimSpace(cfg.Match),

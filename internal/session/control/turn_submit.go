@@ -292,11 +292,11 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
 		go c.compactAndReport(strings.TrimSpace(strings.TrimPrefix(trimmed, "/compact")))
-	case trimmed == "/context":
+	case slashWord(trimmed) == "/context":
 		c.reportContext()
-	case trimmed == "/new":
+	case slashWord(trimmed) == "/new":
 		c.runSessionVerb(c.NewSession, i18n.M.SlashNewDone, i18n.M.SlashNewFailed+": ")
-	case trimmed == "/clear":
+	case slashWord(trimmed) == "/clear":
 		c.runSessionVerb(c.ClearSession, i18n.M.SlashClearDone, i18n.M.SlashClearFailed+": ")
 	case strings.HasPrefix(trimmed, "/mcp__"):
 		c.runGuarded(func(ctx context.Context) error {
@@ -410,23 +410,31 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 			})
 			return
 		}
-		c.answerUnresolvedSlash(trimmed, fields[0], tags.refuseUnknownSlash, func() { runRefTurn(input, display) })
+		c.answerUnresolvedSlash(fields[0], tags.refuseUnknownSlash, func() { runRefTurn(input, display) })
 	default:
 		runRefTurn(input, display)
 	}
+}
+
+// slashWord is the command a line names: its first space-delimited word, which
+// is all a built-in's identity rests on whatever arguments follow.
+func slashWord(line string) string {
+	word, _, _ := strings.Cut(line, " ")
+	return word
 }
 
 // answerUnresolvedSlash settles a slash line nothing resolved. Unknown slash
 // input is prose more often than a typo ("/etc/hosts looks wrong", pasted paths,
 // half-remembered commands), so it is sent as a regular message with a notice
 // that keeps real typos visible (#5756) — unless the submitter asked to refuse.
-func (c *Controller) answerUnresolvedSlash(trimmed, cmd string, refuse bool, send func()) {
+func (c *Controller) answerUnresolvedSlash(cmd string, refuse bool, send func()) {
 	if refuse {
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeUnknownCommand,
 			Text: i18n.M.SlashUnknown + ": " + cmd})
 		return
 	}
-	c.notice("unknown command: " + trimmed + " — sent as a regular message")
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeUnknownCommand,
+		Text: i18n.M.SlashUnknown + ": " + cmd + " — " + i18n.M.SlashUnknownSentAsMessage})
 	send()
 }
 

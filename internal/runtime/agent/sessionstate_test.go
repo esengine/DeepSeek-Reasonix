@@ -47,7 +47,6 @@ var windowReset = map[string]bool{
 	"cacheState":      true,
 	"compaction":      true,
 	"coveredHash":     true,
-	"budgetNotice":    true,
 }
 
 var windowCarryOver = map[string]bool{

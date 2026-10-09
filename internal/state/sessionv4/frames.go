@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"os"
+	"io/fs"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -54,8 +54,8 @@ type event struct {
 // scanCommits reads every complete batch of the log in order and hands its
 // events to visit. A frame or batch cut short at the end is a write still in
 // progress and ends the scan without error.
-func scanCommits(path string, pool contentPool, visit func([]event) error) error {
-	f, err := os.Open(path)
+func scanCommits(store fs.FS, name string, pool contentPool, visit func([]event) error) error {
+	f, err := store.Open(name)
 	if err != nil {
 		return err
 	}

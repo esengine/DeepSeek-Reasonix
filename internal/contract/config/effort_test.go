@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -215,6 +216,40 @@ func TestEffortCapabilityZhipu(t *testing.T) {
 	}
 	if cap.Default != "enabled" {
 		t.Errorf("default = %q, want enabled (GLM ships with thinking on)", cap.Default)
+	}
+}
+
+func TestZhipuDepthEffortByModel(t *testing.T) {
+	for _, tc := range []struct {
+		model          string
+		levels         string
+		legacyDisabled string
+	}{
+		{"glm-5.2", "auto|none|minimal|low|medium|high|xhigh|max", "none"},
+		{"glm-5.3", "auto|low|high|max", "low"},
+		{"glm-5.3-flash", "auto|low|high|max", "low"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			e := &ProviderEntry{Kind: "openai", BaseURL: "https://api.z.ai/api/paas/v4", Model: tc.model}
+			cap := EffortCapabilityForEntry(e)
+			if got := strings.Join(cap.Levels, "|"); got != tc.levels || cap.Default != "max" {
+				t.Fatalf("capability = %+v, want %s (default max)", cap, tc.levels)
+			}
+			if got, err := NormalizeEffort(e, "low"); err != nil || got != "low" {
+				t.Fatalf("low = %q/%v", got, err)
+			}
+			e.Effort = "disabled" // a setting saved before the depth scale existed
+			if got := EffectiveEffort(e); got != tc.legacyDisabled {
+				t.Fatalf("legacy disabled = %q, want %q", got, tc.legacyDisabled)
+			}
+			if got := EffortDisplay(e); got != tc.legacyDisabled {
+				t.Fatalf("legacy display = %q, want %q", got, tc.legacyDisabled)
+			}
+		})
+	}
+	gateway := &ProviderEntry{Kind: "openai", BaseURL: "https://gateway.example/v1", Model: "glm-5.3", ReasoningProtocol: ReasoningProtocolGLM}
+	if got := strings.Join(EffortCapabilityForEntry(gateway).Levels, "|"); got != "auto|enabled|disabled" {
+		t.Fatalf("gateway inherited unverified Zhipu depth scale: %s", got)
 	}
 }
 
@@ -596,5 +631,18 @@ func TestCuratedAnthropicPresetKeepsItsDepthContract(t *testing.T) {
 	bare.PresetID = ""
 	if got := ReasoningProtocolForEntry(&bare); got != "" {
 		t.Fatalf("bare relay protocol = %q, want none", got)
+	}
+}
+
+func TestNormalizeEffortRefusalIsTyped(t *testing.T) {
+	e := &ProviderEntry{Name: "narrow", Kind: "openai", Model: "n", SupportedEfforts: []string{"low", "high"}}
+	if _, err := NormalizeEffort(e, "max"); !errors.Is(err, ErrEffortUnsupported) {
+		t.Fatalf("unsupported level err = %v, want ErrEffortUnsupported", err)
+	}
+	if _, err := NormalizeEffort(&ProviderEntry{Name: "opaque", Model: "m"}, "high"); !errors.Is(err, ErrEffortUnsupported) {
+		t.Fatalf("not configurable err = %v, want ErrEffortUnsupported", err)
+	}
+	if got, err := NormalizeEffort(e, "LOW"); err != nil || got != "low" {
+		t.Fatalf("supported level = %q/%v, want low", got, err)
 	}
 }

@@ -50,7 +50,7 @@ func (c *mcpOAuthClient) refresh(ctx context.Context, rejected *string) error {
 	}
 	if !c.canRefresh() {
 		release()
-		return fmt.Errorf("MCP OAuth access token expired and no refresh token is available; authorize again")
+		return errOAuthRefreshMissing
 	}
 	refreshState := latest
 	generation, err := loadMCPOAuthGeneration(c.stateDir)
@@ -89,7 +89,7 @@ func (c *mcpOAuthClient) refresh(ctx context.Context, rejected *string) error {
 	}
 	if currentGeneration != generation || !sameOAuthRefreshState(current, refreshState) {
 		if currentGeneration != generation {
-			return fmt.Errorf("MCP OAuth token refresh was invalidated while contacting the token endpoint; authorize again")
+			return errOAuthRefreshInvalidated
 		}
 		if oauthAccessTokenUsable(current, time.Now()) {
 			c.state = current

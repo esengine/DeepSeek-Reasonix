@@ -22,5 +22,13 @@ it("labels an account and its rows by the display name while refs stay on the co
   const items = modelMenu(models);
   expect(items[0]).toMatchObject({ header: true, label: "公司网关", right: "relay.example" });
   expect(items[1]).toMatchObject({ value: "relay/first", label: "first" });
-  expect(items[1].desc).toContain("公司网关");
+  expect(items[1].mono?.letter).toBe("公");
+});
+
+it("always headlines the account, even a lone one, and tones it by account key", () => {
+  const items = modelMenu([{ ref: "a/x", provider: "a", vendor: "a.example", model: "x" }]);
+  expect(items[0]).toMatchObject({ header: true, right: "a.example" });
+  expect(items[0].mono).toEqual(items[1].mono);
+  expect(items[0].mono?.tone).toBeGreaterThanOrEqual(0);
+  expect(items[0].mono?.tone).toBeLessThan(5);
 });

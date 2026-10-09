@@ -372,3 +372,70 @@ func TestProviderStreamResponseFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderStreamChunkTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		chunk StreamChunk
+		valid bool
+	}{
+		{name: "zero"},
+		{name: "unknown", chunk: StreamChunk{Type: "unknown"}},
+		{name: "text", chunk: TextChunk("text"), valid: true},
+		{name: "reasoning", chunk: ReasoningChunk("thinking", "sig"), valid: true},
+		{name: "tool start", chunk: StreamChunk{Type: ChunkToolCallStart, ToolCall: &ProviderToolCall{ID: "c", Name: "lookup", Arguments: ""}}, valid: true},
+		{name: "tool delta", chunk: StreamChunk{Type: ChunkToolCallDelta, Text: `{"x":1}`, ArgChars: 7}, valid: true},
+		{name: "tool call", chunk: StreamChunk{Type: ChunkToolCall, ToolCall: &ProviderToolCall{ID: "c", Name: "lookup", Arguments: `{"x":1}`}}, valid: true},
+		{name: "usage", chunk: UsageChunk(ProviderUsage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}), valid: true},
+		{name: "done", chunk: DoneChunk(), valid: true},
+		{name: "error", chunk: ErrorChunk("upstream offline"), valid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chunks := make(chan StreamChunk, 3)
+			chunks <- TextChunk("prefix")
+			chunks <- tc.chunk
+			if !tc.valid {
+				chunks <- TextChunk("after invalid chunk")
+			}
+			close(chunks)
+			provider := &scriptProvider{makeChannel: func(StreamRequest) <-chan StreamChunk { return chunks }}
+			host, _ := startFakeHost(t, providerHandler(), Options{Provider: provider})
+			host.handshake(t)
+			resp := host.request(MethodExtensionProviderStreamOpen, openStreamRequest("stream-types"))
+			var opened StreamOpenResult
+			if resp.Err != nil || json.Unmarshal(resp.Result, &opened) != nil || !opened.Accepted {
+				t.Fatalf("stream open = %+v", resp)
+			}
+			end := host.waitStreamEnd()
+			sent, ends := host.streamNotifications()
+			wantChunks := 2
+			if !tc.valid || tc.chunk.Type == ChunkError {
+				wantChunks = 1
+			}
+			if len(sent) != wantChunks || len(ends) != 1 || end.StreamID != "stream-types" || end.LastSeq != int64(wantChunks) || end.Interrupted {
+				t.Fatalf("chunks = %+v, ends = %+v", sent, ends)
+			}
+			if sent[0].Chunk.Type != ChunkText || sent[0].Chunk.Text != "prefix" {
+				t.Fatalf("delivered prefix = %+v", sent[0])
+			}
+			for i, chunk := range sent {
+				if chunk.StreamID != "stream-types" || chunk.Seq != int64(i+1) {
+					t.Fatalf("chunk %d = %+v", i, chunk)
+				}
+			}
+			if !tc.valid {
+				if end.Error == "" {
+					t.Fatal("invalid chunk ended successfully")
+				}
+				return
+			}
+			if tc.chunk.Type == ChunkError {
+				if end.Error != "upstream offline" {
+					t.Fatalf("provider error = %q", end.Error)
+				}
+			} else if end.Error != "" || sent[1].Chunk.Type != tc.chunk.Type {
+				t.Fatalf("valid chunk = %+v, end = %+v", sent[1], end)
+			}
+		})
+	}
+}

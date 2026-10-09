@@ -39,30 +39,49 @@ var ErrUnfit = errors.New("image does not fit the vision budget")
 // never the file name: an extension is a claim, and a wrong one reaches the
 // provider as a media_type that does not match its payload.
 func DetectMime(raw []byte) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	mime := http.DetectContentType(raw[:min(len(raw), 512)])
+	mime := Sniff(raw)
 	if Ext(mime) == "" {
 		return ""
 	}
 	return mime
 }
 
+// Sniff names what the bytes look like, supported or not, without media-type
+// parameters. It is the type a refusal reports.
+func Sniff(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	mime, _, _ := strings.Cut(http.DetectContentType(raw[:min(len(raw), 512)]), ";")
+	return strings.TrimSpace(mime)
+}
+
+var formats = []struct{ mime, ext, label string }{
+	{"image/png", ".png", "PNG"},
+	{"image/jpeg", ".jpg", "JPEG"},
+	{"image/gif", ".gif", "GIF"},
+	{"image/webp", ".webp", "WebP"},
+}
+
 // Ext returns the file extension for a media type this package accepts, or ""
 // for anything else.
 func Ext(mime string) string {
-	switch strings.ToLower(strings.TrimSpace(mime)) {
-	case "image/png":
-		return ".png"
-	case "image/jpeg":
-		return ".jpg"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	for _, f := range formats {
+		if f.mime == mime {
+			return f.ext
+		}
 	}
 	return ""
+}
+
+// Labels names the accepted formats in display order.
+func Labels() []string {
+	out := make([]string, len(formats))
+	for i, f := range formats {
+		out[i] = f.label
+	}
+	return out
 }
 
 // Fit returns the bytes to send, guaranteeing both sides are within MaxDim.

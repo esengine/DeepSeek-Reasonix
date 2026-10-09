@@ -1950,14 +1950,10 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 		topicID := ""
 		topicTitle := ""
 		customTitle := ""
-		archived := false
-		recovered := false
-		recoveryReason := ""
-		recoveryDigest := ""
-		parentID := ""
+		archived, unread, recovered := false, false, false
+		recoveryReason, recoveryDigest, parentID, recoveryRootID := "", "", "", ""
 		turns := 0
 		preview := ""
-		recoveryRootID := ""
 		schemaVersion := 0
 		revision := int64(0)
 		contentDigest := ""
@@ -1977,6 +1973,7 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			topicTitle = meta.TopicTitle
 			customTitle = meta.CustomTitle
 			archived = meta.Archived
+			unread = meta.Unread()
 			recovered = meta.Recovered
 			recoveryReason = meta.RecoveryReason
 			recoveryDigest = meta.RecoveryDigest
@@ -1999,6 +1996,7 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			TopicTitle:     topicTitle,
 			CustomTitle:    customTitle,
 			Archived:       archived,
+			Unread:         unread,
 			Recovered:      recovered,
 			RecoveryReason: recoveryReason,
 			RecoveryDigest: recoveryDigest,

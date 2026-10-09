@@ -75,16 +75,17 @@ const (
 	// ToolResult for long tools like bash so a frontend can show live progress.
 	// Appended last to keep the Kind values before it wire-stable.
 	ToolProgress
-	// MCPSurfaceReady fires once per server when its background-loaded surface
-	// (prompts or resources) finishes after startup. Lets UIs refresh /mcp
-	// status without polling. Text carries "<server>: <surface> ready (<count>
-	// items)". Appended last to keep the Kind values before it wire-stable.
+	// MCPSurfaceReady fires whenever the answer to /mcp changes — a surface
+	// loads, a spawn begins, an attempt fails, a project MCP awaits approval —
+	// not once per server. Text carries "<server>: <what changed>", and a
+	// consumer re-reads the status. Appended last to keep the Kind values
+	// before it wire-stable.
 	MCPSurfaceReady
 	// Retrying fires before each backoff sleep while the provider re-attempts the
 	// connection+header phase after a transient failure (RetryAttempt of RetryMax).
 	// A frontend shows a transient "retrying (n/m)" indicator that the next stream
-	// event — or TurnDone — clears. Appended last to keep the Kind values before
-	// it wire-stable.
+	// event — or TurnDone — clears. RetryCause names why. Appended last to keep
+	// the Kind values before it wire-stable.
 	Retrying
 	// Steer fires when a mid-turn steer message is consumed from the queue and
 	// injected as a user message. Text carries the raw steer content (without the
@@ -526,6 +527,7 @@ const (
 	UsageSourceRecoveryReviewer = "recovery-reviewer"
 	UsageSourceGoalEvaluator    = "goal-evaluator"
 	UsageSourcePromptRefine     = "prompt-refine"
+	UsageSourceCommitMessage    = "commit-message"
 	UsageSourceInjectionScreen  = "injection-screen"
 	UsageSourceAdvisor          = "advisor"
 	UsageSourceBestOf           = "best-of"
@@ -580,18 +582,22 @@ type Event struct {
 	// send it has no other way to draw.
 	Via *provider.Via
 	// Steer: the host wrote this guidance, so no client draws it as the user's.
-	HostAuthored    bool
-	Compaction      Compaction          // Compaction
-	Maintenance     *ContextMaintenance // ContextMaintenanceEvent
-	TodoProgress    *TodoProgress       // TodoProgressEvent
-	ProgressWatch   *ProgressWatch      // ProgressWatchEvent
-	WorkspaceLease  *WorkspaceLease     // WorkspaceLeaseEvent
-	Guardian        GuardianResult
-	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
-	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
-	RetryMax        int                       // Retrying: total attempts before giving up
-	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
-	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
+	HostAuthored     bool
+	Compaction       Compaction          // Compaction
+	Maintenance      *ContextMaintenance // ContextMaintenanceEvent
+	TodoProgress     *TodoProgress       // TodoProgressEvent
+	ProgressWatch    *ProgressWatch      // ProgressWatchEvent
+	WorkspaceLease   *WorkspaceLease     // WorkspaceLeaseEvent
+	Guardian         GuardianResult
+	DecisionReceipt  *provider.DecisionReceipt // Notice: durable user decision receipt
+	RetryAttempt     int                       // Retrying: 1-based attempt about to be made
+	RetryMax         int                       // Retrying: total attempts before giving up
+	RetryScope       RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
+	RetryCause       provider.RetryCause       // Retrying: why the failed attempt is retried; empty when unknown
+	RetryStatus      int                       // Retrying: the HTTP status when RetryCause is upstream_status
+	RetryDelayMs     int64                     // Retrying: backoff before the next attempt starts
+	RetryTimeoutSecs int                       // Retrying: seconds the next attempt waits for headers before counting as no answer
+	StreamAttempt    StreamAttemptInfo         // StreamAttempt lifecycle
 	// ItemID correlates Steer / unapplied-steer / TurnDone with a durable
 	// session-inbox entry. Empty for legacy callers that still use text only.
 	ItemID    string

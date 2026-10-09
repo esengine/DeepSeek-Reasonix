@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -17,6 +18,9 @@ type samplingRequest struct {
 	// rejection by folding. The recovery is one-shot: a second rejection means
 	// the fold did not reach far enough, not that another one will.
 	overflowFolded bool
+	// sent is what the visible view held when this request was built, the basis
+	// the provider's reported size is later anchored to.
+	sent usageAnchor
 }
 
 func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
@@ -36,11 +40,13 @@ func (a *Agent) handleSamplingError(
 		streamSink.Discard()
 		reason := provider.StreamInterruptReason(result.err)
 		a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, reason, result.err)
+		delay := streamRetryDelay(attempt)
 		a.svc.sink.Emit(event.Event{
 			Kind: event.Retrying, RetryAttempt: attempt, RetryMax: maxStreamRecoveries,
-			RetryScope: event.RetryScopeStream,
+			RetryScope: event.RetryScopeStream, RetryCause: provider.RetryCauseOfStreamInterrupt(reason),
+			RetryDelayMs: delay.Milliseconds(),
 		})
-		if !streamRetrySleep(ctx, attempt) {
+		if !streamRetrySleep(ctx, delay) {
 			return false, streamedTurn{usage: finalizeSamplingUsage(billable, result.usage), attemptID: attemptID, interrupted: true, err: ctx.Err()}
 		}
 		return true, streamedTurn{}
@@ -85,13 +91,15 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 		}
 		shape := a.window().requestCalibrationShape(rebuilt.req)
 		a.sess.output.activeReqShape.Store(&shape)
-		return samplingRequest{req: freezeProviderRequest(rebuilt.req)}, nil
+		a.sess.output.usageAnchor.Store(&rebuilt.sent)
+		return samplingRequest{req: freezeProviderRequest(rebuilt.req), sent: rebuilt.sent}, nil
 	} else if clipped {
 		frozen.req.MaxTokens = budget
 	}
 	shape := a.window().requestCalibrationShape(frozen.req)
 	a.sess.output.activeReqShape.Store(&shape)
-	return samplingRequest{req: freezeProviderRequest(frozen.req)}, nil
+	a.sess.output.usageAnchor.Store(&frozen.sent)
+	return samplingRequest{req: freezeProviderRequest(frozen.req), sent: frozen.sent}, nil
 }
 
 func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (samplingRequest, error) {
@@ -132,7 +140,11 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	// Host-owned and set after the extension ruling: the payload it rewrites
 	// has no mode, and a replaced request must not drop the session's choice.
 	req.Mode = a.sess.mode.get()
-	return samplingRequest{req: req}, nil
+	sent := usageAnchor{
+		visible:           a.window().visibleRequestShape(prepared.Messages),
+		projectionVersion: prepared.ProjectionVersion,
+	}
+	return samplingRequest{req: req, sent: sent}, nil
 }
 
 // providerProjectionMessages applies provider-specific role compatibility to a
@@ -185,4 +197,16 @@ func freezeProviderRequest(req provider.Request) provider.Request {
 		out.ResponseFormat = &rf
 	}
 	return out
+}
+
+// headerRetryNotice turns a connection+header backoff into the Retrying event a
+// frontend words, carrying what the provider knew about why it failed.
+func headerRetryNotice(sink event.Sink) provider.RetryNotify {
+	return func(info provider.RetryInfo) {
+		sink.Emit(event.Event{
+			Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max, RetryScope: event.RetryScopeHeaders,
+			RetryCause: info.Cause, RetryStatus: info.Status,
+			RetryDelayMs: info.Delay.Milliseconds(), RetryTimeoutSecs: int(info.Timeout / time.Second),
+		})
+	}
 }

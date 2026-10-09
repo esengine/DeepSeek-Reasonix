@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,13 +20,55 @@ const maxImageAttachmentBytes = 10 * 1024 * 1024
 const maxFileAttachmentBytes = 25 * 1024 * 1024
 const maxAttachmentCreateAttempts = 1000
 
+var (
+	ErrAttachmentEmpty    = errors.New("attachment is empty")
+	ErrAttachmentTooLarge = errors.New("attachment is too large")
+	ErrAttachmentNotImage = errors.New("attachment is not a supported image")
+	ErrAttachmentWrite    = errors.New("attachment could not be saved")
+)
+
+// AttachmentError is a refused attachment with the class that refused it.
+// Kind is one of the Err sentinels; the other fields are the facts a reader
+// needs in order to act on that class.
+type AttachmentError struct {
+	Kind error
+	Msg  string
+	// LimitMB is the cap that was exceeded, for ErrAttachmentTooLarge.
+	LimitMB int
+	// Type is what the bytes (or the declared media type) were taken for, for
+	// ErrAttachmentNotImage.
+	Type  string
+	Cause error
+}
+
+func (e *AttachmentError) Error() string { return e.Msg }
+
+func (e *AttachmentError) Unwrap() []error {
+	if e.Cause != nil {
+		return []error{e.Kind, e.Cause}
+	}
+	return []error{e.Kind}
+}
+
+func attachmentSizeError(n, limit int) error {
+	if n == 0 {
+		return &AttachmentError{Kind: ErrAttachmentEmpty, Msg: "attachment is empty"}
+	}
+	mb := limit >> 20
+	return &AttachmentError{Kind: ErrAttachmentTooLarge, Msg: fmt.Sprintf("attachment is larger than %d MB", mb), LimitMB: mb}
+}
+
+func attachmentWriteError(err error) error {
+	return &AttachmentError{Kind: ErrAttachmentWrite, Msg: err.Error(), Cause: err}
+}
+
 var attachmentPathSeq atomic.Uint64
 var attachmentNow = time.Now
 var safeAttachmentExt = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
 
 func SaveAttachmentBytesInRoot(root, origName string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
-		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+		return "", attachmentSizeError(len(raw), maxFileAttachmentBytes)
 	}
 	ext := strings.ToLower(filepath.Ext(origName))
 	if !safeAttachmentExt.MatchString(ext) {
@@ -40,20 +83,28 @@ func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
 
 func SaveImageBytesInRoot(root, declaredMime string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
+		return "", attachmentSizeError(len(raw), maxImageAttachmentBytes)
 	}
 	mime := visionimage.DetectMime(raw)
 	if mime == "" {
-		return "", fmt.Errorf("pasted data is not a supported image")
+		return "", &AttachmentError{Kind: ErrAttachmentNotImage, Msg: "pasted data is not a supported image", Type: visionimage.Sniff(raw)}
 	}
 	if declaredMime != "" && visionimage.Ext(declaredMime) == "" {
-		return "", fmt.Errorf("unsupported image type: %s", declaredMime)
+		return "", &AttachmentError{Kind: ErrAttachmentNotImage, Msg: fmt.Sprintf("unsupported image type: %s", declaredMime), Type: strings.ToLower(strings.TrimSpace(declaredMime))}
 	}
 	ext := visionimage.Ext(mime)
 	return saveAttachmentBytesInRoot(root, ext, raw)
 }
 
 func saveAttachmentBytesInRoot(root, ext string, raw []byte) (string, error) {
+	rel, err := storeAttachmentBytes(root, ext, raw)
+	if err != nil {
+		return "", attachmentWriteError(err)
+	}
+	return rel, nil
+}
+
+func storeAttachmentBytes(root, ext string, raw []byte) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}

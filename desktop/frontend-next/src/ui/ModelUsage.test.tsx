@@ -67,3 +67,17 @@ it("lists services in the saved order without reordering models within one servi
   expect([...groups[1].querySelectorAll("option")].map((option) => option.value))
     .toEqual(["deepseek/deepseek-flash", "deepseek/deepseek-pro"]);
 });
+
+// The pane in front runs the session's model, so the row has to read the
+// catalogue's default instead or it describes the wrong thing.
+it("shows the catalogue's default whatever the session is running", () => {
+  const catalogued = MODELS.map((m) => ({ ...m, default: m.ref === "deepseek/deepseek-pro" }));
+  render(<ModelUsage models={catalogued} roles={ROLES} main="deepseek/deepseek-flash" busy="" protocol={{}} onMain={() => {}} onRole={() => {}} />);
+  expect((screen.getByRole("combobox", { name: "默认模型" }) as HTMLSelectElement).value).toBe("deepseek/deepseek-pro");
+  expect(row("默认模型").textContent).toContain("deepseek-pro");
+});
+
+it("falls back to the session's model when the catalogue has no default", () => {
+  render(<ModelUsage models={MODELS} roles={ROLES} main="deepseek/deepseek-flash" busy="" protocol={{}} onMain={() => {}} onRole={() => {}} />);
+  expect((screen.getByRole("combobox", { name: "默认模型" }) as HTMLSelectElement).value).toBe("deepseek/deepseek-flash");
+});

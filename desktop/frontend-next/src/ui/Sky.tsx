@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { onPresence, present } from "./presence";
 
 // Where each puff sits, how big it is, and how fast it drifts. Three bands
 // rather than one spread: parallax is what makes a flat blur read as depth,
@@ -13,7 +14,7 @@ const PUFFS = 34;
 // viewport, so drawing it at window size would cost pixels nobody can see.
 const W = 400;
 const H = 225;
-const FRAME = 1000 / 30;
+const FRAME = 1000 / 15;
 
 interface Puff {
   x: number;
@@ -87,41 +88,48 @@ export function Sky() {
     };
 
     let raf = 0;
+    let timer = 0;
     let last = 0;
-    const tick = (now: number) => {
+    // Waiting between frames on a timer, not on a rAF loop: a loop that does
+    // nothing on 3 of 4 callbacks still wakes the compositor on every one.
+    const frame = (now: number) => {
       raf = 0;
-      if (still.matches || document.hidden) return;
-      const elapsed = now - last;
-      if (elapsed >= FRAME) {
-        paint(true, Math.min(3, elapsed / (1000 / 60)));
-        last = now;
-      }
-      raf = requestAnimationFrame(tick);
+      paint(true, Math.min(6, (now - last) / (1000 / 60)));
+      last = now;
+      timer = window.setTimeout(wake, FRAME);
+    };
+    const wake = () => {
+      timer = 0;
+      raf = requestAnimationFrame(frame);
+    };
+    const halt = () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (timer) clearTimeout(timer);
+      raf = timer = 0;
     };
     const sync = () => {
-      if (still.matches || document.hidden) {
-        if (raf) cancelAnimationFrame(raf);
-        raf = 0;
+      if (still.matches || !present()) {
+        halt();
         paint(false);
         return;
       }
-      if (!raf) {
+      if (!raf && !timer) {
         last = performance.now();
-        raf = requestAnimationFrame(tick);
+        wake();
       }
     };
     const theme = new MutationObserver(() => {
       readTheme();
-      if (still.matches || document.hidden) paint(false);
+      if (still.matches || !present()) paint(false);
     });
-    theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
+    theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-pack", "style"] });
     still.addEventListener("change", sync);
-    document.addEventListener("visibilitychange", sync);
+    const unwatch = onPresence(sync);
     sync();
     return () => {
-      if (raf) cancelAnimationFrame(raf);
+      halt();
       still.removeEventListener("change", sync);
-      document.removeEventListener("visibilitychange", sync);
+      unwatch();
       theme.disconnect();
     };
   }, []);
@@ -144,11 +152,11 @@ export function Sky() {
 // differently on every mount, and a backdrop that is not the same twice is a
 // backdrop somebody notices.
 const SHAFTS = [
-  { "--x": "8%", "--w": "8%", "--r": "7deg", "--dur": "19s", "--del": "0s" },
-  { "--x": "22%", "--w": "5%", "--r": "5deg", "--dur": "23s", "--del": "-4s" },
-  { "--x": "38%", "--w": "11%", "--r": "3deg", "--dur": "17s", "--del": "-9s" },
-  { "--x": "54%", "--w": "4%", "--r": "-1deg", "--dur": "26s", "--del": "-2s" },
-  { "--x": "64%", "--w": "14%", "--r": "-3deg", "--dur": "21s", "--del": "-13s" },
-  { "--x": "81%", "--w": "6%", "--r": "-6deg", "--dur": "24s", "--del": "-6s" },
-  { "--x": "91%", "--w": "9%", "--r": "-9deg", "--dur": "18s", "--del": "-11s" },
+  { "--x": "8%", "--w": "8%", "--r": "7deg" },
+  { "--x": "22%", "--w": "5%", "--r": "5deg" },
+  { "--x": "38%", "--w": "11%", "--r": "3deg" },
+  { "--x": "54%", "--w": "4%", "--r": "-1deg" },
+  { "--x": "64%", "--w": "14%", "--r": "-3deg" },
+  { "--x": "81%", "--w": "6%", "--r": "-6deg" },
+  { "--x": "91%", "--w": "9%", "--r": "-9deg" },
 ];

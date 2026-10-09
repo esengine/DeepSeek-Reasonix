@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/state/sessionstore"
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,9 +35,19 @@ type fakeProvider struct {
 	got          []provider.Message
 	streamErr    error // when set, Stream emits a ChunkError instead of the reply
 	hang         bool  // when true, Stream returns a channel that never sends or closes
+	verbatim     bool  // when true, a summary request is answered with reply exactly as written
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
+
+// answer speaks the summary contract unless the test asks for the reply as
+// written.
+func (f *fakeProvider) answer(req provider.Request) string {
+	if f.verbatim {
+		return f.reply
+	}
+	return testutil.SummaryReply(req, f.reply)
+}
 
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	f.got = req.Messages
@@ -48,7 +60,7 @@ func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan p
 		close(ch)
 		return ch, nil
 	}
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: f.reply}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: f.answer(req)}
 	if f.promptTokens > 0 {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: f.promptTokens, TotalTokens: f.promptTokens}}
 	}
@@ -160,7 +172,7 @@ func TestPinnedPrefixLen(t *testing.T) {
 	}
 }
 
-func TestKeepIndexesKeepsSiblingToolResultsForKeptError(t *testing.T) {
+func TestKeepIndexesKeepsOnlyTheFailedCallsResult(t *testing.T) {
 	region := []provider.Message{
 		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
 			{ID: "err", Name: "bash", Arguments: `{"cmd":"bad"}`},
@@ -170,11 +182,9 @@ func TestKeepIndexesKeepsSiblingToolResultsForKeptError(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "ok", Name: "read_file", Content: "package main"},
 	}
 
-	keep, _ := (&Agent{keepPolicy: KeepErrors}).window().keepIndexes(region)
-	for i, kept := range keep {
-		if !kept {
-			t.Fatalf("keep[%d] = false, want all sibling tool-call messages kept: %v", i, keep)
-		}
+	keep, _ := (&Agent{keepPolicy: KeepErrors}).window().keepIndexes(region, KeepErrors)
+	if want := []bool{true, true, false}; !slices.Equal(keep, want) {
+		t.Fatalf("keep = %v, want %v: the failed pair stays, its sibling folds", keep, want)
 	}
 }
 
@@ -188,7 +198,7 @@ func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "new", Name: "bash", Content: "error: new failure"},
 	}
 
-	keep, _ := (&Agent{keepPolicy: KeepErrors}).window().keepIndexes(region)
+	keep, _ := (&Agent{keepPolicy: KeepErrors}).window().keepIndexes(region, KeepErrors)
 	want := []bool{false, false, false, true, true}
 	for i := range want {
 		if keep[i] != want[i] {

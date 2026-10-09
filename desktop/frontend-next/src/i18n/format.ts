@@ -31,6 +31,9 @@ export const count = (n: number) => nf({ maximumFractionDigits: 0 }).format(n);
 export const decimals = (v: number, digits: number) =>
   nf({ minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
 
+/** plain is a number kept to at most n places, with none padded on. */
+export const plain = (v: number, digits: number) => nf({ maximumFractionDigits: digits }).format(v);
+
 /** tokens abbreviates a count of tokens or characters. Under ten thousand it
  *  keeps one decimal and above it drops to none, so the field's width stays put
  *  as a turn grows. */

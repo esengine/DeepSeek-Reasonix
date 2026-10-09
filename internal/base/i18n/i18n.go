@@ -54,11 +54,16 @@ type Messages struct {
 	ReceiptChangedFmt       string // end-of-turn receipt, how many files the turn changed
 	// ReceiptGapKinds maps a completion gap kind to its short human phrase.
 	ReceiptGapKinds              map[string]string
-	NoSessionToResume            string // shown when --continue / --resume finds nothing
-	NoSessionToResumeStartingNew string // shown when --continue finds nothing and a fresh session starts
-	ResumeRequiresTTY            string // shown when --resume runs piped instead of on a terminal
-	PickSessionLabel             string // header on the --resume picker
-	AmbiguousResumeHint          string // under the sessions a --resume query matched
+	CompactionWhy                map[string]string // compaction decline/failure code -> reason; "" is the no-code decline
+	CompactionAbortedFmt         string            // card of a fold that installed nothing — %s the reason
+	NoticeCompacted              string            // /compact succeeded
+	NoticeCompactDeclinedFmt     string            // /compact declined — %s the reason
+	NoticeCompactFailedFmt       string            // /compact failed — %s the reason
+	NoSessionToResume            string            // shown when --continue / --resume finds nothing
+	NoSessionToResumeStartingNew string            // shown when --continue finds nothing and a fresh session starts
+	ResumeRequiresTTY            string            // shown when --resume runs piped instead of on a terminal
+	PickSessionLabel             string            // header on the --resume picker
+	AmbiguousResumeHint          string            // under the sessions a --resume query matched
 
 	// in-chat /resume command
 	ResumeBusy          string // shown when /resume is used mid-turn
@@ -81,10 +86,13 @@ type Messages struct {
 
 	// terminal transcript rows the kernel does not word.
 	TUIDeclinedFmt          string // an approval the user refused — %s tool, %s subject
-	NoticeContextBudgetFmt  string // the model was warned the compaction trigger is near — %d percent, %d tokens left
 	NoticeUnappliedSteerFmt string // guidance that arrived too late for its turn — %s the guidance
+	NoticeExtSkippedFmt     string // an optional extension skipped, its sidecar not running — %s extension, %s point
+	NoticeInboxRecoveredFmt string // a reopened inbox came up paused with unfinished instructions — %d count
 	TUIQuestion             string // an answered question that carried no prompt
 	TUISubagentCallsFmt     string // calls a sub-agent made under its task — %d count
+	TUIChartMoreRowsFmt     string // rows of a chart table past the preview — %d count
+	TUIChartMoreColsFmt     string // columns of a chart table that did not fit — %d count
 	TUIStallTokensFmt       string // progress watch: %d context windows (%d tokens) with nothing observable
 	TUIStallRepeating       string // progress watch: the model repeats itself
 	TUIStallIdleFmt         string // progress watch: %d tool rounds with nothing observable
@@ -129,6 +137,9 @@ type Messages struct {
 	ChatStatusJobsLabel             string
 	ChatStatusBalanceLabel          string
 	ChatStatusCostLabel             string
+	RateBandPeak                    string
+	RateBandOffPeak                 string
+	RateBandMixed                   string
 	ChatStatusCacheNowFmt           string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt           string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval          string // shortcuts hint while a plan is pending
@@ -266,6 +277,24 @@ type Messages struct {
 	SlashUnknownSentAsMessage    string // suffix: the unrecognised "/cmd" line was sent as a regular message
 	SlashPromptEmpty             string // an MCP prompt returned no text to send
 	SlashMCPNone                 string // /mcp when no MCP servers are connected
+	McpPanelTitle                string // /mcp panel title
+	McpPanelSummaryFmt           string // /mcp panel: server and enabled counts
+	McpPanelToolsFmt             string // /mcp panel row: tool count
+	McpPanelHint                 string // /mcp panel keyboard hint
+	McpPanelDetailHint           string // /mcp server detail keyboard hint
+	McpPanelNoTools              string // /mcp server detail: nothing to list
+	McpPanelOff                  string // /mcp panel row: server switched off
+	McpPanelPending              string // /mcp panel row: repository server awaiting the user's approval
+	McpPanelChanged              string // /mcp panel row: what an enabled repository server launches changed
+	McpPanelLaunchFmt            string // /mcp panel: what the selected pending server would start
+	McpToolDestructive           string // /mcp detail: tool tag
+	McpToolReadOnly              string // /mcp detail: tool tag
+	McpPanelConfirmFmt           string // /mcp: enabling a repository-declared server; server name and launch line
+	McpPanelErrFmt               string // /mcp: listing failed
+	McpActionErrFmt              string // /mcp: an action on one server failed; name and error
+	ListMoreAbove                string // panel scroll marker
+	ListMoreBelow                string // panel scroll marker
+	ListMoreFmt                  string // panel: count of rows not shown
 	CtrlCQuitHint                string // shown on first Ctrl+C while idle; second press exits
 	CompHintSlash                string // key hint footer under the slash-command menu
 	CompHintFile                 string // key hint footer under the @ file/resource menu
@@ -326,6 +355,8 @@ type Messages struct {
 	SetupTestOK          string
 	SetupTestFailed      string
 	SetupSaved           string
+	SetupOwed            string
+	SetupTurnRefused     string
 	CmdWorkMode          string // /work-mode
 	CmdDocs              string // /docs
 	CmdMemory            string // /memory
@@ -381,10 +412,16 @@ type Messages struct {
 	ArgEffortHigh        string // /effort high
 	ArgEffortXHigh       string // /effort xhigh
 	ArgEffortMax         string // /effort max
+	ArgEffortForcedOn    string // Thinking cannot be disabled at the lowest effort.
 	ArgThemeCurrent      string // /theme <style> active tag
 	ArgLanguageAuto      string // /language auto
 	ArgLanguageEn        string // /language en
 	ArgLanguageZh        string // /language zh
+
+	EffortReadErrorFmt    string
+	EffortUnknownModelFmt string
+	EffortUnsupportedFmt  string
+	EffortStatusFmt       string
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
@@ -440,6 +477,9 @@ type Messages struct {
 	WorkModeBalancedDesc         string
 	WorkModeDeliveryDesc         string
 	WorkModeUsage                string
+	PresetCurrentFmt             string // /preset with no argument: current setting and usage
+	PresetSetFmt                 string // /preset <name>: the setting now in effect
+	RemoteConnectHint            string // /remote: how to open one of the listed hosts
 	WorkModeSwitchUnavailable    string
 	WorkModeSwitchBusy           string
 	WorkModeAlreadyOnFmt         string
@@ -622,10 +662,7 @@ type Messages struct {
 	WriteEnvErr               string // "write .env:" — prefix for env-write failure
 
 	// provider HTTP error explanations — actionable, reason + fix per status code
-	ProviderErrBadRequest string // 400
-	// ProviderErrDroppedReasoning explains a refused body whose
-	// assistant thinking this host left out for want of a declared protocol.
-	ProviderErrDroppedReasoning    string
+	ProviderErrBadRequest          string // 400
 	ProviderErrAuth                string // 401 — no key configured / sent
 	ProviderErrAuthRejected        string // 401 — a key was sent but the server rejected it
 	ProviderErrDNSNotFound         string // model host name does not resolve
@@ -651,6 +688,17 @@ type Messages struct {
 	ProviderAlreadyOnFmt string // already on provider
 	ProviderUnknownFmt   string // unknown provider
 	ProviderPickLabel    string // label for provider model picker
+	SkillPickTitle       string // /skills panel title
+	SkillPickSummaryFmt  string // /skills panel: available and enabled counts
+	SkillPickSource      string // /skills panel: label before the source filter
+	SkillPickHint        string // /skills panel keyboard hint
+	SkillPickSavedFmt    string // after saving toggles: enabled and disabled counts
+	PickHint             string // keyboard hint under a searchable single-choice panel
+	PickModelTitle       string // /model panel title
+	PickProviderTitle    string // /provider panel title
+	NoConfiguredModels   string // /model or /provider with nothing configured
+	ModelProviderFmt     string // description row under a model in the /model panel
+	ProviderModelsFmt    string // description row under a provider in the /provider panel
 	ProviderNoModelsFmt  string // provider has no models
 
 	// `reasonix upgrade` / `reasonix update` — self-update
@@ -698,40 +746,9 @@ type Messages struct {
 	// usage / help
 	UsageBody             string // full multi-line help text
 	StandaloneConsoleHint string
-}
 
-// ProviderStatusMessage returns an actionable explanation for a known provider
-// HTTP status, or "" when the status has no specific guidance.
-func (m Messages) ProviderStatusMessage(status int) string {
-	switch status {
-	case 400:
-		return m.ProviderErrBadRequest
-	case 401, 403:
-		return m.ProviderErrAuth
-	case 402:
-		return m.ProviderErrInsufficientBalance
-	case 422:
-		return m.ProviderErrUnprocessable
-	case 429:
-		return m.ProviderErrRateLimited
-	case 500:
-		return m.ProviderErrServer
-	case 503:
-		return m.ProviderErrServerBusy
-	}
-	return ""
-}
-
-// ProviderHintMessage returns the next step for a refusal the requesting client
-// identified, or "" when it named none this catalogue answers. The hint arrives
-// as its bare identity: this package sits below the provider layer and must not
-// import it.
-func (m Messages) ProviderHintMessage(hint string) string {
-	switch hint {
-	case "dropped_tool_call_reasoning":
-		return m.ProviderErrDroppedReasoning
-	}
-	return ""
+	// Feedback is the /feedback list standing and refusal wording.
+	Feedback FeedbackText
 }
 
 // M is the active catalogue. DetectLanguage replaces it; English is the

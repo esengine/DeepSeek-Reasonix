@@ -678,8 +678,12 @@ func collapseSpaces(s string) string {
 
 // availableNames lists the discoverable skill names for an error message.
 func availableNames(store *Store) string {
-	skills := ModelInvocable(store.List())
+	invocable := ModelInvocable(store.List())
+	skills := store.PathHits().Visible(invocable)
 	if len(skills) == 0 {
+		if len(invocable) > 0 {
+			return "(none apply to the files touched so far)"
+		}
 		return "(none — no skills defined)"
 	}
 	names := make([]string, len(skills))

@@ -55,7 +55,9 @@ describe("hiding the amounts in the meter", () => {
   it("masks the balance and the session cost behind the eye, and keeps reading the wallet", async () => {
     const port = new MockPort();
     const balance = vi.spyOn(port, "balance");
-    const { container } = open(port);
+    let pane!: ReturnType<typeof open>;
+    await act(async () => { pane = open(port); });
+    const { container } = pane;
     await waitFor(() => expect(walletButton(container)?.textContent).toBe("¥110.00"));
     const reads = balance.mock.calls.length;
 
@@ -73,7 +75,8 @@ describe("hiding the amounts in the meter", () => {
   });
 
   it("stays hidden in the next window", async () => {
-    const first = open(new MockPort());
+    let first!: ReturnType<typeof open>;
+    await act(async () => { first = open(new MockPort()); });
     await waitFor(() => expect(walletButton(first.container)?.textContent).toBe("¥110.00"));
     fireEvent.click(screen.getByRole("button", { name: "隐藏金额" }));
     first.unmount();

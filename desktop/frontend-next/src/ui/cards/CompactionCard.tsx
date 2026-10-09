@@ -79,7 +79,7 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className={done ? "nm" : "nm shim"}>{t(!done ? "正在压缩…" : cause ? "压缩未完成" : "压缩完成")}</span>
+          <span className={done ? "nm" : "nm shim"}>{t(!done ? "正在压缩…" : aborted ? "压缩未完成" : "压缩完成")}</span>
           <span className="tag">{t("主机")}</span>
           {c.trigger && <span className="arg">{why(c)}</span>}
         </div>

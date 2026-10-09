@@ -30,7 +30,7 @@ func (p *sharedWindowTestProvider) Stream(_ context.Context, req provider.Reques
 	p.last = req
 	p.calls++
 	ch := make(chan provider.Chunk, 3)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "summary"}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nsummary"}
 	if p.finish != "" {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: p.finish}}
 	}

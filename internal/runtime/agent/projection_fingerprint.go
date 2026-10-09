@@ -16,6 +16,9 @@ type coveredHashMemo struct {
 	rewriteVersion int
 	n              int
 	hash           string
+	// progress is derived from the same covered prefix, so it is valid for
+	// exactly as long as this entry is.
+	progress *foldProgress
 }
 
 // prefixHasher returns a fingerprint function for messages captured under the

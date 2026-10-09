@@ -1,5 +1,6 @@
 import type { Tool } from "../port/wire";
 import { t } from "../i18n";
+import { toolFailed } from "./cards/outcome";
 
 // One reading of "what left this context". The kernel marks a dispatch with a
 // profile; the tool name cannot say it, because every dispatcher is reached
@@ -18,3 +19,13 @@ export function nestLabel(who: string | undefined, count: number | undefined, st
   if (who) return t("{name} 做了 {n} 步", { name: who, n: steps });
   return t("子代理做了 {n} 步", { n: steps });
 }
+
+export type DelegateStatus = "running" | "refused" | "failed" | "done";
+
+// A host refusal names a call that never started; "interrupted" is only true of
+// one that began and was cut short.
+export const delegateStatus = (running: boolean, tool: Tool): DelegateStatus =>
+  running ? "running" : tool.refusalCode ? "refused" : toolFailed(tool) ? "failed" : "done";
+
+export const delegateStatusLabel = (status: DelegateStatus): string =>
+  status === "running" ? t("运行中") : status === "refused" ? t("未执行") : status === "failed" ? t("已中断") : t("已交付");

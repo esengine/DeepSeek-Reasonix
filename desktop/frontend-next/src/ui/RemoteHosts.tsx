@@ -7,7 +7,8 @@ import { RemoteDirs } from "./RemoteDirs";
 import { workspacesOf } from "./Remotes";
 import { Cross } from "./glyphs";
 import { StudioIcon } from "./StudioIcon";
-import { Confirm } from "./Workspaces";
+import { Confirm } from "./WorkspaceConfirm";
+import { UnreadCount, UnreadDot } from "./UnreadMark";
 import { clearDraftForSession } from "./drafts";
 
 // The same ceiling the local column uses. A machine worked on for months holds
@@ -341,6 +342,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                           <span className="wsmeta">{t("{n} 会话", { n: ws.sessions.length })}</span>
                         ) : null}
                         <span className="wsacts">
+                          {folded && <UnreadCount n={ws.sessions.filter((x) => x.unread).length} />}
                           <button
                             className="wsadd"
                             data-action="session.new"
@@ -401,17 +403,19 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                               <div
                                 data-action="session.open"
                                 key={session.path}
-                                className="sessrow"
+                                className="sessrow sessrow-remote"
                                 role="treeitem"
                                 aria-level={3}
                                 aria-selected={held?.id === active}
                                 data-on={held?.id === active ? "" : undefined}
                                 data-live={held ? "" : undefined}
+                                data-unread={session.unread ? "" : undefined}
                                 data-busy={busy === host.name + session.path ? "" : undefined}
                                 onClick={() => (held ? onFocus(held.id) : void open(host, ws.root, session.path))}
                               >
                                 <i className="pip" />
                                 <span className="sesstitle">{name}</span>
+                                {session.unread && <UnreadDot kind="row" />}
                                 <span className="sessmeta">{session.turns ? t("{n} 轮", { n: session.turns }) : t("空会话")}</span>
                                 <button
                                   className="session-more sessdel"

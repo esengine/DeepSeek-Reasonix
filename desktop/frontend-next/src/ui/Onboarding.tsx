@@ -71,6 +71,7 @@ function failed(e: unknown): Failed {
 export function Onboarding({ port, setup, onDone }: Props) {
   const [pick, setPick] = useState(SHORTCUTS[0].label);
   const [url, setUrl] = useState(SHORTCUTS[0].url);
+  const [completed, setCompleted] = useState("");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<Failed | null>(setup.error ? { text: setup.error } : null);
@@ -111,6 +112,9 @@ export function Onboarding({ port, setup, onDone }: Props) {
     try {
       const probe = await port.probeProvider(at, k);
       setFound(probe);
+      const changed = !!probe.baseUrl && probe.baseUrl !== at;
+      if (changed) setUrl(probe.baseUrl!);
+      setCompleted(changed ? probe.baseUrl! : "");
       setKind(probe.kind);
       setModel(probe.default || probe.models[0] || "");
     } catch (e) {
@@ -140,6 +144,7 @@ export function Onboarding({ port, setup, onDone }: Props) {
         replace: true,
       });
       await port.setModel(`${name}/${model}`);
+      await port.setDefaultModel(`${name}/${model}`);
       onDone();
     } catch (e) {
       setErr(failed(e));
@@ -260,6 +265,9 @@ export function Onboarding({ port, setup, onDone }: Props) {
               <span>{t("连上了")}</span>
               <span className="k">{t("{n} 个模型 · key 保存在本机", { n: found.models.length })}</span>
             </div>
+            {completed !== "" && completed === url.trim() && (
+              <p className="probe-ok" role="status">{t("接口地址已补全为 {url}", { url: completed })}</p>
+            )}
             <div className="onb-field">
               <span className="lb">{t("接入方式")}</span>
               <div className="onb-protocols" role="radiogroup" aria-label={t("接入方式")}>

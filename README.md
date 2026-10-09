@@ -43,9 +43,9 @@
 
 <br/>
 
-<p align="center"><strong>Open source · MIT · a single Go binary</strong></p>
-<h3 align="center">A reliable coding agent for complex software engineering tasks.</h3>
-<p align="center">One local engine, four ways in — terminal, desktop app, browser, or your editor over ACP. Plan mode, permissions, a workspace sandbox and per-turn checkpoints keep a long autonomous run something you can still read and undo.</p>
+<p align="center"><strong>Open source · MIT · runs on your computer, model of your choice</strong></p>
+<h3 align="center">An open-source coding agent for your terminal, desktop, browser and editor.</h3>
+<p align="center">It reads your project, edits files and runs commands and tests. Have it ask before each step, or work on its own within limits you set. Files its edit tools changed can be rewound. New here? Start with the Studio desktop app.</p>
 <p align="center">Maintained by <strong>Huahui Yu</strong>.</p>
 
 > [!IMPORTANT]
@@ -57,13 +57,49 @@
 
 <br/>
 
+## ❤️Sponsor
+
+<table><tr><td width="180"><a href="https://www.packyapi.ai/register?aff=rIbQ" target="_blank" rel="sponsored noopener noreferrer"><picture><source media="(prefers-color-scheme: dark)" srcset="./.github/sponsor/packycode-dark.svg"><img src="./.github/sponsor/packycode-light.svg" alt="PackyCode" width="150"></picture></a></td><td>Thanks to PackyCode for sponsoring this project! Access leading AI models through PackyCode with one API endpoint and one API key, with automatic failover and dedicated high-speed routes for Codex and Claude Code.</td></tr></table>
+
+## What it is
+
+Reasonix is an open-source AI coding assistant. The program runs on your computer; the AI model is a service you configure, which receives what it reads. You describe a task in plain language; it reads code, edits files and runs commands and tests inside the project folder you choose, and shows you each step.
+
+You pick the model: a DeepSeek preset is built in, any OpenAI-compatible service is one config entry, and you pay the model provider directly.
+
+## What you get
+
+- **Read, edit, run.** It reads code, edits files and runs tests and commands, all inside your project folder.
+- **Permission levels.** Have it ask every time, or let everyday actions run on their own; your forbid rules always hold. To see the approach first, use plan mode: it starts work only once you approve.
+- **Rewind.** A file is saved before it changes, so you can rewind by conversation turn without touching your git history. Only files its edit tools changed are covered, not what a shell command did.
+
+## 30-second start
+
+Download, add a model key, open a project. New here? Start with the Studio desktop app.
+
+1. Download and install the desktop app, Reasonix Studio, from the [releases page](https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true).
+2. Open it and enter your model provider and key when asked.
+3. Open your project folder and write what you want, for example "add retry on failure to the http client".
+4. At the level you chose, it stops and asks before anything that needs your say-so. Allow it to continue, or refuse.
+
+Prefer a terminal? Download the `reasonix` command-line tool, run `reasonix setup` to pick a model, then run `reasonix`. See [Install](#install) and [Quick start](#quick-start).
+
+## Four ways to use it
+
+- **Desktop app (Studio).** A graphical app; the best place to start.
+- **Terminal.** A full-screen text interface; `reasonix run "task"` also works in scripts.
+- **Browser.** `reasonix web` opens a web interface on your own machine.
+- **Editor.** Install the extension in VS Code; other editors that support ACP (Agent Client Protocol, a common way for an editor to connect to an AI assistant) can connect to `reasonix acp`.
+
+All four are the same program underneath. What follows is for advanced users and contributors.
+
 ## Versions
 
 Reasonix ships on two lines. See the [version roadmap announcement](https://github.com/esengine/DeepSeek-Reasonix/discussions/10748) for the reasoning behind the split.
 
 | Line | Branch | Status | Get it |
 | --- | --- | --- | --- |
-| **Reasonix 2.x** | `studio` (this branch) | Active development, pre-release | [Studio releases](https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true) |
+| **Reasonix 2.x** | `studio` (this branch) | Active development | [Studio releases](https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true) |
 | **Reasonix 1.x** | [`main-v2`](https://github.com/esengine/DeepSeek-Reasonix/tree/main-v2) | Maintenance / stable | `npm i -g reasonix` · [desktop download](https://reasonix.io/?download=desktop#start) |
 
 - **Want something stable?** Stay on 1.x. It keeps receiving bug fixes,
@@ -81,6 +117,8 @@ or reimplemented on 2.x where they fit the new architecture.
   and the decisions still open.
 
 ## Features
+
+Technical highlights for advanced users.
 
 - **Config-driven.** Providers, the agent, enabled tools, and plugins are all
   declared in `reasonix.toml`. No hardcoded models.
@@ -106,8 +144,8 @@ Studio, and editor integrations all run the same local Reasonix engine.
 
 Download the package for your platform from the latest
 [Studio release](https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true)
-(tagged `studio-v2.*`, published as pre-releases while 2.x is in active
-development):
+(tagged `studio-v2.*`; candidates such as `-rc.N` are marked as
+pre-releases):
 
 | Platform | Package | Architecture |
 | --- | --- | --- |

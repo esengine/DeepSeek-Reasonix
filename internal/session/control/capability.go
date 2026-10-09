@@ -91,7 +91,7 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 	}
 	opts := capability.CatalogOptions{
 		Tools:   tools,
-		Skills:  skill.ModelInvocable(c.Skills()),
+		Skills:  c.skills.pathHits.Visible(skill.ModelInvocable(c.Skills())),
 		Profile: profile,
 	}
 	if c.capabilityRuntime != nil {

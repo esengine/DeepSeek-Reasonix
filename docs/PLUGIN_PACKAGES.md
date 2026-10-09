@@ -228,6 +228,18 @@ Expand a plugin row to manage it:
 - **Export** packages the plugin for sharing, with credentials stripped.
 - **Remove** uninstalls the package after confirmation.
 
+MCP displays mask userinfo, credential query/fragment values, credential path
+suffixes, and opaque fragments. Credential-bearing or uncertain shell text is
+hidden in display; operational install values remain intact. Parse errors redact
+input values. Approval tickets bind operational credentials before projection.
+
+| Surface | Values |
+| --- | --- |
+| Operator MCP parse/install | `url`, `env`, `headers`, `command`, `args`: operational values for the install round-trip. |
+| MCP confirmation UI | Render only `displayUrl`, `displayEnv`, `displayHeaders`, `displayCommand`, `displayArgs`. |
+| Public install plans and package inventories | Display values; operational entries stay internal. |
+| Export | Mask URL credentials and credential flag arguments; replace placeholders before connecting. Env/header literals remain environment references. |
+
 ### Use Installed Plugins From Desktop
 
 The desktop settings page uses the same runtime model as the CLI:

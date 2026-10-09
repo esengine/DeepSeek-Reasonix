@@ -51,6 +51,34 @@ Edit `main.go`, rebuild the binary, run `/reload`, and try again. Use
 `reasonix plugin doctor starter-extension` when the manifest or binary fails
 validation.
 
+## Verify without an API key
+
+1. Keep `starter-extension` installed, then build and install the
+   [offline provider example](../providerextension/README.md#build-and-install).
+   Review its dry-run trust block as well. This local echo provider needs no
+   API key and does not call another model or execute tools.
+2. From your workspace, run a fresh CLI turn:
+
+   ```sh
+   reasonix --model plugin/echo-provider/offline/echo -p "SDK-STARTER-CHECK hello"
+   ```
+
+   The assistant text SHOULD begin with `Offline echo: ` and include
+   `SDK-STARTER-CHECK hello` and one `[rewritten by starter-extension]` marker.
+   Additional host-composed context may appear. This checks the installed
+   interceptor's delivery to the provider, not language-model quality.
+3. Repeat the same command after each activation change below. Every `-p`
+   invocation starts a new session; inspect that invocation's assistant text,
+   not messages from an earlier session. Keep `echo-provider` enabled until
+   these checks finish.
+
+| Starter state | Expected marker count in the fresh turn's assistant text |
+| --- | --- |
+| Installed and enabled | 1 |
+| Disabled | 0 |
+| Re-enabled | 1 |
+| Removed | 0 |
+
 Disable `starter-extension` in Studio's installed-plugin list and start a new
 session to verify that the marker stops appearing. Re-enable it and start a new
 session to restore the interceptor. Remove the package when finished:
@@ -61,6 +89,12 @@ reasonix plugin remove starter-extension --yes
 
 Removing this linked installation leaves the example's source and built binary
 in place. Delete `bin/starter-extension.exe` separately if it is no longer needed.
+
+Remove the offline provider after the final marker check:
+
+```sh
+reasonix plugin remove echo-provider --yes
+```
 
 ## Next steps
 

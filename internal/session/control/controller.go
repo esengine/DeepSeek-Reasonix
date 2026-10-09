@@ -14,7 +14,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"reasonix/internal/state/sessionstore"
@@ -291,19 +290,20 @@ type Options struct {
 	// GoalEvaluator is the optional bounded Goal completion evaluator consulted
 	// when the working model submits no update_goal report. nil fails closed:
 	// the goal pauses instead of defaulting to continue.
-	GoalEvaluator goaleval.Evaluator
-	// PromptRefiner rewrites a draft before it is sent; nil refuses the ask.
-	PromptRefiner *promptrefine.Refiner
-	Sink          event.Sink
-	Policy        permission.Policy
+	GoalEvaluator   goaleval.Evaluator
+	PromptRefiner   *promptrefine.Refiner // rewrites a draft before it is sent; nil refuses the ask
+	CommitMessenger CommitDrafter         // drafts commit messages; nil refuses the ask
+	Sink            event.Sink
+	Policy          permission.Policy
 	// SubagentGate is the shared gate every headless-only sub-agent surface
 	// reads; nil disables gating there. The approval-mode setters Update it so
 	// a runtime switch reaches sub-agents, not only the executor's own gate.
 	SubagentGate *SharedHeadlessGate
 	Label        string
 	ModelRef     string
-	Effort       string             // resolved effective provider effort; not a request-scoped override
-	ModelModes   []config.ModelMode // optional modes the session's model declares
+	Effort       string                // resolved effective provider effort; not a request-scoped override
+	ModelModes   []config.ModelMode    // optional modes the session's model declares
+	ModelEntry   *config.ProviderEntry // the resolved entry the session was built on; nil leaves ModelFace unanswered
 	// ProviderFingerprint identifies resolved provider build inputs; empty fails closed.
 	ProviderFingerprint string
 	SystemPrompt        string
@@ -486,6 +486,7 @@ func New(opts Options) *Controller {
 	if c.executor != nil {
 		c.wireMutationObserver()
 		c.executor.SetMemoryQueue(c)
+		c.executor.SetPathObserver(c.skills.pathHits)
 	}
 	// Auto Guard is built into Auto. Ask and YOLO bypass it through the mode
 	// provider, so no separate enablement state is needed.
@@ -646,28 +647,6 @@ type preparedInvocationTurn struct {
 	composed         string
 	subagents        []skill.Skill
 	inlineSkillNames []string
-}
-
-// compactAndReport folds the context and says what happened. A fold the kernel
-// declined is an answer about this transcript — nothing left worth folding —
-// and reporting it as a failure sent people looking for a broken kernel.
-func (c *Controller) compactAndReport(focus string) {
-	verdict, err := c.Compact(context.Background(), agent.CompactRequest{Instructions: focus})
-	switch {
-	case err == nil && verdict.Compacted():
-		c.notice("compacted")
-		if err := c.SnapshotRewrite(); err != nil {
-			slog.Warn("controller: snapshot after compact", "err", err)
-		}
-	case err == nil:
-		// The host settled which economics declined; saying it in the kernel's
-		// own words beats a frontend inferring one from an empty result.
-		c.notice("nothing to compact — " + agent.CompactDeclineText(verdict.Reason))
-	case agent.IsCompactionDeclined(err):
-		c.notice("nothing to compact — " + agent.CompactionDeclineReason(err))
-	default:
-		c.notice("compaction failed: " + err.Error())
-	}
 }
 
 // prometheusPrompt is the strategic planner system prompt.
@@ -870,8 +849,8 @@ func (c *Controller) Compact(ctx context.Context, req agent.CompactRequest) (age
 	// The rotation gate keeps a turn from starting while a manual compaction is
 	// building and installing a new model-visible projection.
 	if err := c.beginRotation(); err != nil {
-		if errors.Is(err, errTurnRunningRotation) {
-			return agent.CompactVerdict{}, fmt.Errorf("cannot compact while a turn is running")
+		if errors.Is(err, errTurnRunningRotation) || errors.Is(err, errRotationInProgress) {
+			return agent.CompactVerdict{}, errors.Join(errCompactBusy, err)
 		}
 		return agent.CompactVerdict{}, err
 	}
@@ -1097,6 +1076,7 @@ func (c *Controller) ReloadCommands(ctx context.Context) error {
 			Description: sk.Description,
 			ArgHint:     sk.ArgumentHint,
 			Skill:       true,
+			Unlisted:    func() bool { return !c.skills.pathHits.Eligible(sk) },
 			Render: func(args []string) string {
 				cur, err := c.skills.forModel(sk)
 				if err != nil {

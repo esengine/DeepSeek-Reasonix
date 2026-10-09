@@ -1,4 +1,6 @@
 import { t } from "../i18n";
+import { FeedbackBadge } from "./feedbackentry";
+import { StudioIcon } from "./StudioIcon";
 
 // Drawn on the same 16-unit grid at the same 1.5 stroke as Sym's marks, and for
 // the same reason: an icon set pulled in from outside reads as a different hand
@@ -34,9 +36,13 @@ interface Props {
   at: string | null;
   onGo: (sec?: string) => void;
   onHome: () => void;
+  onFeedback: () => void;
+  feedbackUnread: number;
+  /** False keeps the column mounted but out of the way and out of reach. */
+  shown: boolean;
 }
 
-export function Nav({ at, onGo, onHome }: Props) {
+export function Nav({ at, onGo, onHome, onFeedback, feedbackUnread, shown }: Props) {
   const btn = ([key, label, sec]: [keyof typeof ICON, string, string | null]) => (
     <button
       key={key}
@@ -52,9 +58,16 @@ export function Nav({ at, onGo, onHome }: Props) {
     </button>
   );
   return (
-    <nav className="nav" aria-label={t("主导航")}>
+    <nav className="nav" aria-label={t("主导航")} aria-hidden={shown ? undefined : true} inert={!shown}>
       <div className="navgrp">{TO.map(btn)}</div>
-      <div className="navgrp foot">{FOOT.map(btn)}</div>
+      <div className="navgrp foot">
+        <button className="navbtn" data-action="feedback.open" onClick={onFeedback}>
+          <StudioIcon name="feedback" aria-hidden="true" />
+          <span className="navhint" role="tooltip">{t("发送反馈")}</span>
+          <FeedbackBadge unread={feedbackUnread} />
+        </button>
+        {FOOT.map(btn)}
+      </div>
     </nav>
   );
 }

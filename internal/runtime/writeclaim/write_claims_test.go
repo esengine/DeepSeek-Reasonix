@@ -1,11 +1,13 @@
 package writeclaim
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"reasonix/internal/base/fileutil"
 	"reasonix/internal/base/testenv"
 )
 
@@ -121,5 +123,20 @@ func TestWritePathSetAllowsPath(t *testing.T) {
 	outside := filepath.Join(root, "other.md")
 	if claim.AllowsPath(outside) {
 		t.Fatalf("should reject %s", outside)
+	}
+}
+
+func TestWriteClaimRefusesNetworkPathBeforeAnyLookup(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("network paths are a Windows reading of a path")
+	}
+	root := t.TempDir()
+	for _, p := range []string{`\\evil\share\x`, `//evil/share/x`, `\\127.0.0.1\C$\Windows\win.ini`} {
+		if _, err := resolveWriteClaimPath(root, p); !errors.Is(err, fileutil.ErrNetworkPathOutsideScope) {
+			t.Errorf("resolveWriteClaimPath(%q) = %v, want ErrNetworkPathOutsideScope", p, err)
+		}
+		if _, err := NormalizeWritePaths(root, []string{p}); err == nil {
+			t.Errorf("NormalizeWritePaths(%q) accepted a network path", p)
+		}
 	}
 }

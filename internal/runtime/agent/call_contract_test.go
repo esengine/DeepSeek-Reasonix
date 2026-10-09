@@ -50,6 +50,9 @@ func TestMissingRequiredArgumentSkipsApproval(t *testing.T) {
 	if ran {
 		t.Fatal("tool executed despite missing a required argument")
 	}
+	if out.refusalCode != refusalArgumentsInvalid {
+		t.Fatalf("refusal code = %q, want %q so a frontend can tell a refused call from one that ran", out.refusalCode, refusalArgumentsInvalid)
+	}
 }
 
 // The check only removes calls the schema itself rejects: a complete one still

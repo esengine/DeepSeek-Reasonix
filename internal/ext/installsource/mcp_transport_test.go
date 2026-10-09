@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
@@ -40,7 +41,7 @@ func TestRemoteMCPTransportUsesEndpointPath(t *testing.T) {
 					ProjectRoot: project, HomeDir: testenv.TempDir(t), ConnectMCP: stub.connector(), RequireApprovedPlan: true,
 					Approval: func(actions []action) error {
 						approved++
-						if len(actions) != 1 || actions[0].Transport != tc.want || actions[0].URL != tc.source {
+						if len(actions) != 1 || actions[0].Transport != tc.want || actions[0].URL != secrets.RedactEndpoint(tc.source) {
 							t.Fatalf("approved actions = %+v", actions)
 						}
 						return nil
@@ -51,8 +52,8 @@ func TestRemoteMCPTransportUsesEndpointPath(t *testing.T) {
 				if !plan.OK || plan.Status != "planned" || len(plan.Actions) != 1 || plan.PlanID == "" {
 					t.Fatalf("plan = %+v", plan)
 				}
-				if plan.Actions[0].Transport != tc.want || plan.Actions[0].URL != tc.source {
-					t.Fatalf("plan transport/url = %q %q, want %q %q", plan.Actions[0].Transport, plan.Actions[0].URL, tc.want, tc.source)
+				if shown := secrets.RedactEndpoint(tc.source); plan.Actions[0].Transport != tc.want || plan.Actions[0].URL != shown {
+					t.Fatalf("plan transport/url = %q %q, want %q %q", plan.Actions[0].Transport, plan.Actions[0].URL, tc.want, shown)
 				}
 				if approved != 0 || len(stub.connected) != 0 || len(config.LoadForEdit(filepath.Join(project, "reasonix.toml")).Plugins) != 0 {
 					t.Fatal("preview approved, connected, or persisted a server")

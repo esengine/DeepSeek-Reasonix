@@ -128,3 +128,35 @@ func TestV4ImportFollowsOnlyAnUntouchedCopy(t *testing.T) {
 		t.Fatalf("a continued copy was overwritten: last = %+v", last)
 	}
 }
+
+// The lazy entry points read the 1.x store by path; none of them may keep a
+// handle on it, which on Windows would stop 1.x renaming or removing it.
+func TestV4LazyReadsLeaveTheStoreFreeToMove(t *testing.T) {
+	s, _, sessions := v4Project(t)
+	if list, err := ListSessions(sessions); err != nil || len(list) != 1 {
+		t.Fatalf("list = %v, %v", list, err)
+	}
+	if err := PrepareSessionPath(filepath.Join(sessions, "v4-"+v4TestID+".jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(s.Root, s.Root+"-moved"); err != nil {
+		t.Fatalf("store cannot be renamed after lazy reads: %v", err)
+	}
+}
+
+func TestImportV4FromCopiesAndIsIdempotent(t *testing.T) {
+	s, _, sessions := v4Project(t)
+	root, err := os.OpenRoot(s.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	dest := filepath.Join(t.TempDir(), "ws")
+	if n, err := ImportV4From(root.FS(), dest, nil); n != 1 || err != nil {
+		t.Fatalf("first import = %d, %v", n, err)
+	}
+	if n, err := ImportV4From(root.FS(), dest, nil); n != 0 || err != nil {
+		t.Fatalf("second import = %d, %v", n, err)
+	}
+	_ = sessions
+}

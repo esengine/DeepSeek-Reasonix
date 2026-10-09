@@ -74,4 +74,20 @@ describe("capacity-based context maintenance", () => {
     expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("90000");
     expect(screen.getByText(/经济维护阈值会先到/)).toBeTruthy();
   });
+
+  it("says on the threshold field itself when the capacity guard caps it", async () => {
+    await open(port({ soft_limit_tokens: 850000, ratio: 0.5, trigger: 500000 }));
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("850000");
+    const row = screen.getByRole("textbox").closest(".threshold-row")!;
+    expect(row.textContent).toContain("500k");
+    expect(row.textContent).toContain("50%");
+    expect(row.textContent).not.toContain("达到这个用量时开始整理");
+  });
+
+  it("keeps the plain hint when the threshold is the one that applies", async () => {
+    await open(port({ soft_limit_tokens: 90000, trigger: 90000 }));
+    const row = screen.getByRole("textbox").closest(".threshold-row")!;
+    expect(row.textContent).toContain("达到这个用量时开始整理");
+    expect(row.textContent).not.toContain("容量保护");
+  });
 });

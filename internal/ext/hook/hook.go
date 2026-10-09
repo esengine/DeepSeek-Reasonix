@@ -22,7 +22,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -483,27 +482,6 @@ func cloneEnv(in map[string]string) map[string]string {
 	return out
 }
 
-// MatchesTool reports whether a hook applies to toolName. The match field is an
-// anchored regex; non-tool events always match. A malformed regex never fires
-// (safer than firing on everything).
-func MatchesTool(h ResolvedHook, toolName string) bool {
-	if !UsesToolMatcher(h.Event) {
-		return true
-	}
-	m := h.Match
-	if m == "" || m == "*" {
-		return true
-	}
-	re, err := regexp.Compile("^(?:" + m + ")$")
-	if err != nil {
-		return false
-	}
-	if h.PayloadFormat != "claude" {
-		return re.MatchString(toolName)
-	}
-	return slices.ContainsFunc(claudeMatchNames(toolName), re.MatchString)
-}
-
 // claudeToolNames maps Reasonix's own tool names to the *current* Claude Code
 // built-in tool name (https://code.claude.com/docs/en/tools-reference) — what
 // an imported hook's emitted tool_name payload field shows, and a script's own
@@ -875,7 +853,7 @@ const (
 	DecisionPass  Decision = "pass"
 	DecisionBlock Decision = "block"
 	DecisionWarn  Decision = "warn"
-	DecisionError Decision = "error" // spawn failed (ENOENT, EACCES, …)
+	DecisionError Decision = "error" // could not be evaluated or run (ENOENT, EACCES, bad matcher, …)
 )
 
 // Outcome records one hook invocation.
@@ -889,6 +867,7 @@ type Outcome struct {
 	Truncated bool
 	Duration  time.Duration
 	Refusal   error // why the host refused to run it, when it did
+	Cause     error // why it could not be evaluated: wraps an Err* sentinel
 }
 
 // Report aggregates the outcomes of running an event's hooks.
@@ -980,6 +959,9 @@ func decideOutcome(h ResolvedHook, r SpawnResult) Decision {
 	blocking := IsBlocking(h.Event) || claudePermissionBlocking(h)
 	switch {
 	case r.SpawnErr != nil:
+		if blocking {
+			return DecisionBlock
+		}
 		return DecisionError
 	case r.TimedOut:
 		if blocking {
@@ -1102,7 +1084,14 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 	event := payload.Event
 	report := Report{Event: event}
 	for _, h := range hooks {
-		if h.Event != event || !MatchesTool(h, payload.ToolName) {
+		if h.Event != event {
+			continue
+		}
+		matched, matchErr := matchTool(h, payload.ToolName)
+		if matchErr != nil && recordUnevaluable(&report, h, matchErr) {
+			break
+		}
+		if !matched {
 			continue
 		}
 		cwd := h.Cwd
@@ -1113,7 +1102,13 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 			continue
 		}
 		timeout := h.timeout()
-		stdin := marshalPayload(payload, h.PayloadFormat)
+		stdin, marshalErr := marshalPayload(payload, h.PayloadFormat)
+		if marshalErr != nil {
+			if recordUnevaluable(&report, h, fmt.Errorf("%w: %w", ErrPayloadUnserializable, marshalErr)) {
+				break
+			}
+			continue
+		}
 		input := SpawnInput{
 			Command: h.Command,
 			Args:    h.Argv,
@@ -1152,6 +1147,7 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 			TimedOut:  r.TimedOut,
 			Truncated: r.Truncated,
 			Duration:  time.Since(start),
+			Cause:     spawnCause(r),
 		})
 		if decision == DecisionBlock {
 			report.Blocked = true
@@ -1161,8 +1157,9 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 	return report
 }
 
-func marshalPayload(payload Payload, format string) string {
+func marshalPayload(payload Payload, format string) (string, error) {
 	var body []byte
+	var err error
 	if format == "claude" {
 		claude := map[string]any{
 			"hook_event_name":        payload.Event,
@@ -1184,11 +1181,14 @@ func marshalPayload(payload Payload, format string) string {
 		if payload.CallID != "" {
 			claude["tool_use_id"] = payload.CallID
 		}
-		body, _ = json.Marshal(claude)
+		body, err = json.Marshal(claude)
 	} else {
-		body, _ = json.Marshal(payload)
+		body, err = json.Marshal(payload)
 	}
-	return string(body) + "\n"
+	if err != nil {
+		return "", err
+	}
+	return string(body) + "\n", nil
 }
 
 // claudeToolResponse adapts a Reasonix tool result to the tool_response a

@@ -595,8 +595,8 @@ func TestParseSkillContentRejectsMalformedFrontmatter(t *testing.T) {
 	if err == nil {
 		t.Fatal("malformed frontmatter should fail")
 	}
-	if !strings.Contains(err.Error(), "invalid YAML") || !strings.Contains(strings.ToLower(err.Error()), "line") {
-		t.Fatalf("error = %v, want invalid YAML with location", err)
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("error = %v, want invalid manifest identity", err)
 	}
 }
 
@@ -1211,6 +1211,7 @@ func TestParseGitHubRepoSourceAcceptsCanonicalRepositoryPaths(t *testing.T) {
 	}{
 		{"https://github.com/o/r", githubRepoSource{Owner: "o", Repo: "r"}},
 		{"https://github.com/o/r.git/", githubRepoSource{Owner: "o", Repo: "r"}},
+		{"https://github.com/o/.github", githubRepoSource{Owner: "o", Repo: ".github"}},
 		{"https://github.com/o/r/tree/main", githubRepoSource{Owner: "o", Repo: "r", Branch: "main"}},
 		{"https://github.com/o/r/tree/main/plugins/demo", githubRepoSource{Owner: "o", Repo: "r", Branch: "main", Path: "plugins/demo"}},
 	}
@@ -1226,6 +1227,11 @@ func TestParseGitHubRepoSourceAcceptsCanonicalRepositoryPaths(t *testing.T) {
 
 func TestParseGitHubRepoSourceRejectsPagesAndUnsafePaths(t *testing.T) {
 	for _, source := range []string{
+		"https://github.com/o/...git",
+		"https://github.com/o/..git",
+		"https://github.com/o/.git",
+		"https://github.com/./r",
+		"https://github.com/.o/r",
 		"https://github.com/o/r/issues/1",
 		"https://github.com/o/r/blob/main/reasonix-plugin.json",
 		"https://github.com/o/r/pull/1",
@@ -2062,7 +2068,7 @@ func TestGitHubClaudeMarketplaceRejectsEscapingRelativeSource(t *testing.T) {
 		"kind":   "plugin",
 	})
 	_, err := tl.Execute(context.Background(), raw)
-	if err == nil || !strings.Contains(err.Error(), "escapes") {
+	if !errors.Is(err, ErrManifestMissing) {
 		t.Fatalf("error = %v, want marketplace path escape rejection", err)
 	}
 }
@@ -2210,7 +2216,7 @@ func TestGitHubClaudeMarketplaceSelectedUnsupportedSourceFails(t *testing.T) {
 		"name":   "external",
 	})
 	_, err := tl.Execute(context.Background(), raw)
-	if err == nil || !strings.Contains(err.Error(), "external source") {
+	if !errors.Is(err, ErrManifestMissing) {
 		t.Fatalf("error = %v, want external-source rejection for the selected plugin", err)
 	}
 }
@@ -2335,7 +2341,7 @@ func TestGitHubPluginApplyRefusesUnpinnableDrift(t *testing.T) {
 	if len(resp.Actions) != 1 || resp.Actions[0].Status != "failed" {
 		t.Fatalf("actions = %+v, want the single install action failed", resp.Actions)
 	}
-	if !strings.Contains(resp.Actions[0].Error, "approved commit cafe0001") {
+	if !strings.Contains(resp.Actions[0].Error, ErrApprovalDenied.Error()) {
 		t.Fatalf("action error = %q, want the approved-commit drift refusal", resp.Actions[0].Error)
 	}
 	if _, ok, _ := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "pwf"); ok {
@@ -2577,5 +2583,23 @@ func TestPlanMCPJSONAlwaysLoadCarriesToTheEntry(t *testing.T) {
 	}
 	if loads["pinned"] != config.MCPLoadAlways || loads["plain"] != config.MCPLoadDeferred {
 		t.Fatalf("loads = %v", loads)
+	}
+}
+
+func TestPlanClaudeModsPackageIsPartial(t *testing.T) {
+	project := testenv.TempDir(t)
+	home := testenv.TempDir(t)
+	src := filepath.Join(testenv.TempDir(t), "mod-pack")
+	writeFile(t, filepath.Join(src, ".claude-plugin", "plugin.json"), `{"name":"mod-pack"}`)
+	writeFile(t, filepath.Join(src, "skills", "greet", "SKILL.md"), "---\nname: greet\ndescription: Greets\n---\nSay hi.")
+	writeFile(t, filepath.Join(src, "hooks", "hooks.json"), `{"modules":["./register.ts"]}`)
+
+	planned := execInstall(t, NewTool(Options{ProjectRoot: project, HomeDir: home}), map[string]any{"source": src, "kind": "plugin"})
+	if len(planned.Actions) != 1 {
+		t.Fatalf("actions = %+v", planned.Actions)
+	}
+	a := planned.Actions[0]
+	if a.Compatibility != "partial" || len(a.SkippedCapabilities) != 1 || a.SkippedCapabilities[0].Capability != "modules" {
+		t.Fatalf("action = %+v, want partial with a skipped modules capability", a)
 	}
 }

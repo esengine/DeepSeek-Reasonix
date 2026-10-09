@@ -178,3 +178,15 @@ func TestAFetchedChunkThatIsNotItsNameIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want ErrChunkMismatch", err)
 	}
 }
+
+func TestWorthwhileBoundary(t *testing.T) {
+	x := Index{Files: []File{{Size: 600}, {Size: 400}}}
+	for _, tc := range []struct {
+		missing int64
+		want    bool
+	}{{0, true}, {499, true}, {500, true}, {501, false}, {1000, false}} {
+		if got := (Plan{MissingBytes: tc.missing}).Worthwhile(x); got != tc.want {
+			t.Errorf("missing %d of 1000: Worthwhile = %v, want %v", tc.missing, got, tc.want)
+		}
+	}
+}

@@ -17,6 +17,7 @@ import (
 
 	"reasonix/internal/base/fileutil"
 	"reasonix/internal/base/netclient"
+	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/surface"
 )
 
@@ -56,6 +57,11 @@ type Client struct {
 	surface   surface.Surface
 	installID string
 	http      *http.Client
+	// Both nil outside tests: wall clock and a real timer.
+	now   func() time.Time
+	sleep func(context.Context, time.Duration) bool
+	// allowed is asked before every ping attempt; nil allows.
+	allowed func() bool
 }
 
 func newClient(home, version string, from surface.Surface, proxy netclient.ProxySpec) (*Client, error) {
@@ -63,14 +69,14 @@ func newClient(home, version string, from surface.Surface, proxy netclient.Proxy
 		return nil, fmt.Errorf("telemetry: empty home")
 	}
 	client, err := netclient.NewHTTPClient(proxy, netclient.TransportOptions{
-		DialTimeout:           500 * time.Millisecond,
-		TLSHandshakeTimeout:   500 * time.Millisecond,
-		ResponseHeaderTimeout: 750 * time.Millisecond,
+		DialTimeout:           3 * time.Second,
+		TLSHandshakeTimeout:   3 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
 	})
 	if err != nil {
 		return nil, err
 	}
-	client.Timeout = time.Second
+	client.Timeout = attemptTimeout
 	id, err := installID(home)
 	if err != nil {
 		return nil, err
@@ -129,20 +135,8 @@ func validInstallID(id string) bool {
 	return err == nil
 }
 
-// backgroundFlush sends the launch ping and drains the queue. ping is separate
-// because the surfaces expose them as separate consents: a host may report
-// counters while the launch ping is declined, or the reverse.
-func (c *Client) backgroundFlush(ping bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if ping {
-		_ = c.sendDailyPing(ctx)
-	}
-	_ = c.flushPending(ctx)
-}
-
 func (c *Client) sendDailyPing(ctx context.Context) error {
-	day := time.Now().UTC().Format("2006-01-02")
+	day := c.clock().UTC().Format("2006-01-02")
 	claim := filepath.Join(c.home, c.pingPrefix()+day)
 	f, err := os.OpenFile(claim, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -151,8 +145,8 @@ func (c *Client) sendDailyPing(ctx context.Context) error {
 			if readErr == nil && strings.TrimSpace(string(state)) == "sent" {
 				return nil
 			}
-			if info, statErr := os.Stat(claim); statErr == nil && time.Since(info.ModTime()) < 2*time.Minute {
-				return nil
+			if info, statErr := os.Stat(claim); statErr == nil && c.clock().Sub(info.ModTime()) < 2*time.Minute {
+				return errPingInFlight
 			}
 			if os.Remove(claim) == nil {
 				return c.sendDailyPing(ctx)
@@ -356,6 +350,7 @@ func (c *Client) post(ctx context.Context, path string, payload any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	provider.ApplyClientIdentity(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -363,7 +358,7 @@ func (c *Client) post(ctx context.Context, path string, payload any) error {
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("telemetry: HTTP %d", resp.StatusCode)
+		return &statusError{code: resp.StatusCode}
 	}
 	return nil
 }

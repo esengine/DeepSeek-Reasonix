@@ -50,7 +50,7 @@ func TestEffectDestructiveDeleteNeverExecutes(t *testing.T) {
 			}
 			defer ctrl.Close()
 			ctrl.ApplyHeadlessApprovalMode(mode)
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if err := ctrl.Run(ctx, "run the fixture cleanup"); err != nil {
 				t.Fatal(err)

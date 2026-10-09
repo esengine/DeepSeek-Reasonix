@@ -13,7 +13,7 @@ import (
 func TestAFailureCarriesTheStatusItEndedAt(t *testing.T) {
 	h := &Host{}
 	h.RecordFailure(Spec{Name: "remote", Type: "http"},
-		fmt.Errorf("plugin %q: initialize: %w", "remote", &httpStatusError{Status: http.StatusUnauthorized, Detail: "go away"}))
+		fmt.Errorf("plugin %q: initialize: %w", "remote", &httpStatusError{Status: http.StatusUnauthorized, BodyBytes: 7}))
 
 	got := h.Failures()
 	if len(got) != 1 {
@@ -30,7 +30,7 @@ func TestAFailureCarriesTheStatusItEndedAt(t *testing.T) {
 func TestTheStatusIsNotReadOutOfTheMessage(t *testing.T) {
 	h := &Host{}
 	h.RecordFailure(Spec{Name: "a", Type: "http"},
-		fmt.Errorf("plugin %q: %w", "a", &httpStatusError{Status: http.StatusForbidden, Detail: "401 unauthorized forbidden auth please login"}))
+		fmt.Errorf("plugin %q: %w", "a", &httpStatusError{Status: http.StatusForbidden, BodyBytes: 43}))
 	h.RecordFailure(Spec{Name: "b", Type: "stdio"}, errors.New("401 unauthorized forbidden auth please login"))
 
 	by := map[string]Failure{}

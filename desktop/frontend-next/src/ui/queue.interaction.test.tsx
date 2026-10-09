@@ -100,3 +100,25 @@ describe("editing a pending entry", () => {
     expect(box()?.value).toBe(BODY);
   });
 });
+
+describe("retrying a held entry", () => {
+  it("asks the kernel to retry exactly that entry", async () => {
+    const onRetry = vi.fn();
+    render(
+      <Queue
+        queue={snapshot({ paused: true, items: [item({ id: "u1", state: "uncertain", blockCode: "steer_unapplied" })] })}
+        running={false}
+        onRead={async () => BODY}
+        onEdit={() => {}}
+        onMove={() => {}}
+        onSendNow={() => {}}
+        onCancel={() => {}}
+        onRetry={onRetry}
+        onRefresh={() => {}}
+        onPause={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(onRetry).toHaveBeenCalledWith("u1");
+  });
+});

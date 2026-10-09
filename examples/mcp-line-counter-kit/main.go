@@ -82,15 +82,17 @@ func handle(method string, params json.RawMessage) (any, *rpcError) {
 		}}}, nil
 	case "tools/call":
 		var call struct {
-			Name      string `json:"name"`
-			Arguments struct {
-				Text *string `json:"text"`
-			} `json:"arguments"`
+			Name      string                     `json:"name"`
+			Arguments map[string]json.RawMessage `json:"arguments"`
 		}
-		if err := json.Unmarshal(params, &call); err != nil || call.Name != "count_lines" || call.Arguments.Text == nil {
+		if err := json.Unmarshal(params, &call); err != nil || call.Name != "count_lines" || len(call.Arguments) != 1 {
 			return nil, &rpcError{-32602, "count_lines requires a string text argument"}
 		}
-		text := *call.Arguments.Text
+		var value *string
+		if err := json.Unmarshal(call.Arguments["text"], &value); err != nil || value == nil {
+			return nil, &rpcError{-32602, "count_lines requires a string text argument"}
+		}
+		text := *value
 		count := strings.Count(text, "\n")
 		if text != "" && !strings.HasSuffix(text, "\n") {
 			count++

@@ -6,6 +6,7 @@
 // survival, because a rebuild re-reads the record and a prompt is not in it.
 import type { Item, SessionState } from "./session_types";
 import type { Ask, AskQuestion, DecisionReceipt } from "../port/wire";
+import { IDLE, RUNNING } from "./chip";
 
 // The id the kernel correlates an answer by, which is what makes two frames one
 // prompt. Local item ids cannot: a replay mints a new one every time.
@@ -49,7 +50,7 @@ export function sealByReceipt(s: SessionState, r: DecisionReceipt): SessionState
   if (it.t === "ask") items[at] = { ...it, answered: [], answeredElsewhere: true, by: r.via ?? "window", said: r.subject };
   else if (it.t === "approval") items[at] = { ...it, verdict: verdictOf(r.outcome), by: r.via ?? "window" };
   else return s;
-  return { ...s, items };
+  return { ...s, doing: it.t === "ask" ? (s.running ? RUNNING : IDLE) : s.doing, items };
 }
 
 // verdictOf picks the sealed line from the outcome the kernel recorded. The

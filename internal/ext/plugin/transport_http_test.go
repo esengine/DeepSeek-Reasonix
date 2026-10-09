@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -390,7 +391,8 @@ func TestHTTPTransportRPCError(t *testing.T) {
 
 	ctx := context.Background()
 	_, _, err := StartAll(ctx, []Spec{{Name: "e", Type: "http", URL: srv.URL}})
-	if err == nil || !strings.Contains(err.Error(), "boom") {
+	var rpc *rpcError
+	if err == nil || !errors.As(err, &rpc) || rpc.Code != -32000 || strings.Contains(err.Error(), "boom") {
 		t.Fatalf("want initialize to fail with rpc error, got %v", err)
 	}
 }

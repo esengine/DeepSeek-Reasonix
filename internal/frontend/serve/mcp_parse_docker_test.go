@@ -17,16 +17,17 @@ func TestMCPParseDockerNameUsesImageOperand(t *testing.T) {
 	srv := httptest.NewServer(operatorHandler(New(ctrl, NewBroadcaster(), config.ServeConfig{})))
 	t.Cleanup(srv.Close)
 	for _, tc := range []struct {
-		input string
-		name  string
+		input  string
+		name   string
+		detail string
 	}{
-		{"docker run --rm -i mcp/time", "time"},
-		{"docker run --rm -i mcp/fetch:latest", "fetch"},
-		{"docker run -e MODE=test -v /data:/data mcp/filesystem /data", "filesystem"},
-		{"docker run --network none registry.example:5000/tools/time:stable", "time"},
-		{"docker container run --rm -i mcp/time@sha256:" + strings.Repeat("0123456789abcdef", 4), "time"},
-		{"docker run --unknown option-value mcp/time", "mcp-server"},
-		{"docker version", "mcp-server"},
+		{"docker run --rm -i mcp/time", "time", ""},
+		{"docker run --rm -i mcp/fetch:latest", "fetch", ""},
+		{"docker run -e MODE=test -v /data:/data mcp/filesystem /data", "filesystem", "docker run -e <redacted> -v /data:/data mcp/filesystem /data"},
+		{"docker run --network none registry.example:5000/tools/time:stable", "time", ""},
+		{"docker container run --rm -i mcp/time@sha256:" + strings.Repeat("0123456789abcdef", 4), "time", ""},
+		{"docker run --unknown option-value mcp/time", "mcp-server", ""},
+		{"docker version", "mcp-server", ""},
 	} {
 		resp := postJSON(t, srv.URL+"/mcp/parse", map[string]string{"input": tc.input})
 		var got struct {
@@ -42,7 +43,11 @@ func TestMCPParseDockerNameUsesImageOperand(t *testing.T) {
 		if entry.Name != tc.name || entry.Transport != "stdio" || entry.Command+" "+strings.Join(entry.Args, " ") != tc.input {
 			t.Errorf("preview %q = %+v, want name %q and original argv", tc.input, entry, tc.name)
 		}
-		if len(got.Risks) != 1 || got.Risks[0].Server != tc.name || got.Risks[0].Kind != "shell" || got.Risks[0].Detail != tc.input {
+		detail := tc.detail
+		if detail == "" {
+			detail = tc.input
+		}
+		if len(got.Risks) != 1 || got.Risks[0].Server != tc.name || got.Risks[0].Kind != "shell" || got.Risks[0].Detail != detail {
 			t.Errorf("preview disclosure = %+v", got.Risks)
 		}
 	}

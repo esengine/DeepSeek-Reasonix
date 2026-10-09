@@ -137,7 +137,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
                 .map((k) => (
                   <div className="risk" key={k.field} data-kind={k.kind}>
                     <span className="lb">{t(KIND_LABEL[k.kind] ?? k.kind)}</span>
-                    <span className="dt">{k.kind === "secret" ? k.field.split(".").pop() : k.detail}</span>
+                    <span className="dt">{k.kind === "secret" ? k.field.split(".").pop() : k.kind === "unknown-host" ? (s.displayUrl ?? "<redacted>") : [s.displayCommand ?? "<redacted>", ...(s.displayArgs ?? [])].join(" ")}</span>
                     {k.kind === "secret" && <span className="why">{k.detail}</span>}
                   </div>
                 ))}

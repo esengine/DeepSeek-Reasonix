@@ -103,8 +103,6 @@ func (windowsShell) Launch(spec LaunchSpec, p StatePaths) string {
 	outer := strings.Join([]string{
 		"$ErrorActionPreference='Stop'",
 		"New-Item -ItemType Directory -Force -Path " + psQuote(toShellPath(p.Dir)) + " | Out-Null",
-		"Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath " +
-			psQuote(toShellPath(p.PortFile)) + "," + psQuote(toShellPath(p.PidFile)),
 		"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=" +
 			psQuote(launch) + "; CurrentDirectory=" + psQuote(toShellPath(spec.Workspace)) + "}",
 		"if ($r.ReturnValue -ne 0) { throw \"Win32_Process.Create returned $($r.ReturnValue)\" }",
@@ -138,6 +136,11 @@ func (windowsShell) Alive(pid int, p StatePaths) string {
 		commandLineOf(pid),
 		"if (" + ownsServe(p) + ") { '1' } else { '0' }",
 	}, "; "))
+}
+
+func (windowsShell) ServeVersion(pid int) string {
+	return psCommand(fmt.Sprintf(
+		"$e = (Get-Process -Id %d -ErrorAction SilentlyContinue).Path; if ($e) { & $e --version 2>$null | Select-Object -First 1 }", pid))
 }
 
 func (windowsShell) Stop(pid int, p StatePaths) string {

@@ -124,7 +124,7 @@ export function BackupRestore({ port, backup, onClose }: { port: AgentPort; back
         <div className="bk-fields">
           <label className="grow">
             <span>{t("加密口令")}</span>
-            <input data-action="backup.passphrase" data-target="open" type="password" autoComplete="current-password" value={pass} onChange={(e) => setPass(e.target.value)} />
+            <input data-action="backup.passphrase" data-target="open" type="password" autoComplete="current-password" disabled={busy} value={pass} onChange={(e) => setPass(e.target.value)} />
           </label>
         </div>
         <div className="bk-acts">
@@ -150,7 +150,7 @@ export function BackupRestore({ port, backup, onClose }: { port: AgentPort; back
         {plan.items.map((it) => (
           <li key={it.id} className="bk-item" data-status={it.status} data-consent={it.consent ? "" : undefined}>
             <label className="take">
-              <input type="checkbox" checked={picked.has(it.id)} onChange={() => setPicked((s) => flip(s, it.id))} data-action="backup.pick" data-target={it.id} />
+              <input type="checkbox" disabled={busy} checked={picked.has(it.id)} onChange={() => setPicked((s) => flip(s, it.id))} data-action="backup.pick" data-target={it.id} />
               <span className="cat">{t(CATEGORY_LABEL[it.category])}</span>
               <span className="nm">{it.name}</span>
               <span className="st">{t(STATUS_LABEL[it.status])}</span>
@@ -168,7 +168,7 @@ export function BackupRestore({ port, backup, onClose }: { port: AgentPort; back
             {it.crossPlatform && <span className="warn">{t("来自另一种系统，可能无法运行")}</span>}
             {it.consent && picked.has(it.id) && (
               <label className="allow">
-                <input type="checkbox" checked={allowed.has(it.id)} onChange={() => setAllowed((s) => flip(s, it.id))} data-action="backup.allow" data-target={it.id} />
+                <input type="checkbox" disabled={busy} checked={allowed.has(it.id)} onChange={() => setAllowed((s) => flip(s, it.id))} data-action="backup.allow" data-target={it.id} />
                 <span>{t(CONSENT_LABEL[it.consent])}</span>
               </label>
             )}

@@ -59,11 +59,15 @@ type Event struct {
 	HostAuthored bool `json:"hostAuthored,omitempty"`
 	// Which model wrote this. None means the turn's own, which a client
 	// reading it off the composer instead got wrong once the setting moved.
-	ModelRef      string         `json:"modelRef,omitempty"`
-	RetryAttempt  int            `json:"retryAttempt,omitempty"`
-	RetryMax      int            `json:"retryMax,omitempty"`
-	RetryScope    string         `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
-	StreamAttempt *StreamAttempt `json:"streamAttempt,omitempty"`
+	ModelRef         string         `json:"modelRef,omitempty"`
+	RetryAttempt     int            `json:"retryAttempt,omitempty"`
+	RetryMax         int            `json:"retryMax,omitempty"`
+	RetryScope       string         `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
+	RetryCause       string         `json:"retryCause,omitempty"`
+	RetryStatus      int            `json:"retryStatus,omitempty"`
+	RetryDelayMs     int64          `json:"retryDelayMs,omitempty"`
+	RetryTimeoutSecs int            `json:"retryTimeoutSecs,omitempty"`
+	StreamAttempt    *StreamAttempt `json:"streamAttempt,omitempty"`
 	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable
 	// session-inbox entry. Empty for legacy text-only guidance.
 	ItemID    string            `json:"itemId,omitempty"`
@@ -199,11 +203,7 @@ func ToWire(e event.Event) Event {
 			w.Err = e.Err.Error()
 		}
 	case event.Retrying:
-		w.RetryAttempt = e.RetryAttempt
-		w.RetryMax = e.RetryMax
-		if e.RetryScope != "" {
-			w.RetryScope = string(e.RetryScope)
-		}
+		w.setRetry(e)
 	case event.StreamAttempt:
 		w.StreamAttempt = &StreamAttempt{
 			ID:      e.StreamAttempt.ID,

@@ -67,6 +67,14 @@ describe("refining a prompt before it is sent", () => {
     await waitFor(() => expect(container.querySelector(".refine-error")?.textContent).toBe("当前会话没有可用的模型，无法优化提示词"));
   });
 
+  it("describes itself by its tooltip, so the shortcut is read out", () => {
+    const { refine } = draw(async () => "x");
+    const tip = refine.querySelector('[role="tooltip"]') as HTMLElement;
+    expect(tip.id).not.toBe("");
+    expect(refine.getAttribute("aria-describedby")).toBe(tip.id);
+    expect(tip.textContent).toContain("Ctrl+Shift+E");
+  });
+
   it("answers the keyboard: Ctrl+Shift+E asks, Escape puts the card away", async () => {
     const { container, box, port } = draw(async () => "rewritten");
     fireEvent.change(box, { target: { value: "draft" } });
@@ -75,5 +83,14 @@ describe("refining a prompt before it is sent", () => {
     await waitFor(() => expect(container.querySelector(".refine-text")).toBeTruthy());
     fireEvent.keyDown(box, { key: "Escape" });
     expect(container.querySelector(".refine-card")).toBeNull();
+  });
+});
+
+describe("the refine button's tooltip", () => {
+  it("is still rendered while the button is disabled, so the control explains itself", () => {
+    const { refine } = draw(async () => "x");
+    expect(refine.disabled).toBe(true);
+    const tip = refine.querySelector('[role="tooltip"]');
+    expect(tip?.textContent).toContain("Ctrl+Shift+E");
   });
 });

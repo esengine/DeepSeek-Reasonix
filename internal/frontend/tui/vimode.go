@@ -80,8 +80,7 @@ func (m *model) viKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		// one; truly empty, it leaves command mode.
 		switch {
 		case m.tr.Running:
-			m.cancelling = true
-			return m.call("cancel", m.client.Cancel), true
+			return m.interrupt(), true
 		case !empty:
 			if draft := strings.TrimSpace(m.composer.Value()); draft != "" {
 				m.history = append(m.history, draft)

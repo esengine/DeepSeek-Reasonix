@@ -146,7 +146,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle(sessionInboxRefreshMethod, svc.sessionInboxRefresh)
 	conn.Handle(sessionReloadExtensionsMethod, svc.sessionReloadExtensions)
 	registerGoalMethods(conn, svc)
-	conn.Handle(sessionStatusMethod, svc.sessionStatus)
+	registerSessionHealthMethods(conn, svc)
 	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
 	conn.Handle("session/set_model", svc.sessionSetModel)
 	conn.Handle("session/set_mode", svc.sessionSetMode)
@@ -691,7 +691,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		updatedAt:        meta.UpdatedAt,
 		lease:            lease,
 	}
-	s.bindStatusEvents(sess)
+	s.bindSessionHealthEvents(sess)
 	if err := saveACPMeta(path, sess.meta()); err != nil {
 		sess.releaseSessionLease()
 		ctrl.Close()

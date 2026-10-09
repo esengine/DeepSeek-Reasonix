@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { ProviderCheck, ProviderEntry } from "../port/port";
-import { clearModelCheckFacts, ModelChoice, type ModelFact } from "./ModelChoice";
+import { checkedFact, clearModelCheckFacts, ModelChoice, type ModelFact } from "./ModelChoice";
 import type { Port } from "./Providers";
-import { SAVED_NOT_APPLIED, reason } from "../i18n/kernel";
+import { SAVED_NOT_APPLIED, reason, say } from "../i18n/kernel";
+import { checkFailure } from "./provider_check";
 import { HttpError } from "../port/port";
-import { THINKING, headerLines, parseEffortLevels, parseExtraBody, parseHeaders } from "./provider_compat";
+import { IDLE_TIMEOUT_MAX, IDLE_TIMEOUT_MIN, THINKING, headerLines, parseEffortLevels, parseExtraBody, parseHeaders, parseIdleTimeout } from "./provider_compat";
 import { ModelEfforts } from "./ModelEfforts";
-import type { ModelEffort, ModelLimit } from "../port/port";
+import type { ModelEffort, ModelLimit, ProviderEdit } from "../port/port";
 import { ModelLimits, limitTextOf, limitsToSend, type LimitText } from "./ModelLimits";
 
 // Only what this form owns is sent: the entry keeps its prices, effort
@@ -15,14 +16,16 @@ import { ModelLimits, limitTextOf, limitsToSend, type LimitText } from "./ModelL
 // declare opens the form on the reasoning fields: the composer sends a user
 // here when the endpoint reported no effort levels.
 export function EditConn({
-  entry, initialCheck, port, busy, setBusy, onDone, onSaved, declare = false,
+  entry, initialCheck, port, busy, setBusy, onDone, onRevert, onSaved, onDirty, declare = false, justSaved = false,
 }: {
   entry: ProviderEntry; initialCheck?: ProviderCheck; port: Port;
-  busy: string; setBusy: (b: string) => void; onDone: () => void; onSaved?: () => void; declare?: boolean;
+  busy: string; setBusy: (b: string) => void; onDone: () => void | Promise<void>; onRevert: () => void; onSaved?: () => void; onDirty?: (dirty: boolean) => void;
+  declare?: boolean; justSaved?: boolean;
 }) {
   const seededModels = [...new Set([...entry.models, ...(initialCheck?.models ?? [])])];
   const seededVision = [...new Set([...(entry.visionModels ?? []), ...(initialCheck?.vision ?? [])])];
   const [baseUrl, setBaseUrl] = useState(entry.baseUrl);
+  const [completed, setCompleted] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<string[]>(seededModels);
   const [picked, setPicked] = useState<string[]>(entry.models);
@@ -31,13 +34,19 @@ export function EditConn({
     entry.visionSettable ? [...new Set([...entry.visionSettable, ...(initialCheck?.vision ?? [])])] : undefined,
   );
   const [facts, setFacts] = useState<Record<string, ModelFact>>(() => modelFacts(entry.models, initialCheck));
-  const [diff, setDiff] = useState(() => initialCheck?.ok ? catalogDiff(entry.models, initialCheck.models ?? []) : null);
+  const [diff, setDiff] = useState(() => initialCheck?.ok ? catalogDiff(entry.models, initialCheck.models ?? [], false) : null);
   const [checkingModel, setCheckingModel] = useState("");
+  const [batch, setBatch] = useState<"idle" | "running" | "stopped">("idle");
+  const run = useRef<AbortController | null>(null);
+  const testing = checkingModel !== "" || batch === "running";
   const [def, setDef] = useState(entry.default || entry.models[0] || "");
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState<{ text: string; kind: "save" | "unapplied" } | null>(null);
+  const [refreshFail, setRefreshFail] = useState("");
   const [more, setMore] = useState(declare);
   const [win, setWin] = useState(entry.contextWindow ? String(entry.contextWindow) : "");
   const [maxOut, setMaxOut] = useState(entry.maxOutputTokens ? String(entry.maxOutputTokens) : "");
+  const [idleText, setIdleText] = useState(entry.idleTimeoutSeconds ? String(entry.idleTimeoutSeconds) : "");
+  const idle = parseIdleTimeout(idleText);
   const [limitText, setLimitText] = useState<Record<string, LimitText>>(
     () => Object.fromEntries(Object.entries(entry.modelLimits ?? {}).map(([m, l]) => [m, limitTextOf(l)])),
   );
@@ -86,23 +95,35 @@ export function EditConn({
   // provider with no credential at all, which fails before it reaches the host.
   const refetch = async () => {
     setBusy(`refresh:${entry.name}`);
-    setErr("");
+    setErr(null);
+    setRefreshFail("");
+    setDiff(null);
     try {
       const refreshed = apiKey.trim()
         ? await port.probeProvider(baseUrl.trim(), apiKey.trim())
         : await port.checkProvider(entry.name);
+      if ("ok" in refreshed && !refreshed.ok) {
+        setRefreshFail(checkFailure(refreshed));
+        return;
+      }
+      const changed = !!refreshed.baseUrl && refreshed.baseUrl !== baseUrl.trim();
+      if (changed) setBaseUrl(refreshed.baseUrl!);
+      setCompleted(changed ? refreshed.baseUrl! : "");
       const found = refreshed.models ?? [];
-      if (found.length === 0) throw new Error("这个端点没报出任何聊天模型");
+      if (found.length === 0) {
+        setRefreshFail(say({ code: "provider.probe.no_chat_models", params: { count: 0 } }));
+        return;
+      }
       const readers = refreshed.vision ?? [];
       setModels((current) => {
-        setDiff(catalogDiff(current, found));
+        setDiff(catalogDiff(current, found, true));
         setFacts((factsNow) => refreshedFacts(current, found, factsNow));
         return [...new Set([...found, ...current])];
       });
       setVision((current) => [...new Set([...current, ...readers])]);
       setVisionSettable((current) => current ? [...new Set([...current, ...readers])] : current);
     } catch (e) {
-      setErr(reason(e));
+      setRefreshFail(reason(e));
     } finally {
       setBusy("");
     }
@@ -125,7 +146,7 @@ export function EditConn({
       });
       setFacts((current) => ({
         ...current,
-        [model]: { ...(current[model] ?? { origin: "configured" }), status: got.status, reason: got.reason },
+        [model]: checkedFact(current[model], "configured", got),
       }));
     } catch {
       setFacts((current) => ({
@@ -138,6 +159,43 @@ export function EditConn({
         ...current,
         [model]: { ...(current[model] ?? { origin: "configured" }), checking: false },
       }));
+    }
+  };
+
+  const stopBatch = useCallback(() => {
+    if (!run.current) return false;
+    run.current.abort();
+    run.current = null;
+    setFacts(stopChecking);
+    setBatch("stopped");
+    return true;
+  }, []);
+
+  const testAll = async () => {
+    if (run.current || picked.length === 0) return;
+    const ctl = new AbortController();
+    run.current = ctl;
+    setBatch("running");
+    const queue = [...picked];
+    const lane = async () => {
+      for (let model = queue.shift(); model !== undefined && !ctl.signal.aborted; model = queue.shift()) {
+        const m = model;
+        setFacts((cur) => ({ ...cur, [m]: { ...(cur[m] ?? { origin: "configured" }), checking: true } }));
+        let next: (fact: ModelFact | undefined) => ModelFact;
+        try {
+          const got = await port.checkProviderModel({ name: entry.name, model: m, baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), kind: entry.kind });
+          next = (fact) => ({ ...checkedFact(fact, "configured", got), checking: false });
+        } catch {
+          next = (fact) => ({ ...(fact ?? { origin: "configured" }), status: "unknown", reason: "network", checking: false });
+        }
+        if (ctl.signal.aborted) return;
+        setFacts((cur) => ({ ...cur, [m]: next(cur[m]) }));
+      }
+    };
+    await Promise.all([lane(), lane()]);
+    if (run.current === ctl) {
+      run.current = null;
+      setBatch("idle");
     }
   };
 
@@ -168,46 +226,87 @@ export function EditConn({
     };
   };
 
+  const draft = (): ProviderEdit => ({
+    name: entry.name,
+    baseUrl: baseUrl.trim(),
+    apiKey: apiKey.trim(),
+    models: picked,
+    default: picked.includes(def) ? def : picked[0] ?? "",
+    vision: vision.filter((m) => picked.includes(m)),
+    contextWindow: Number(win.replace(/\D/g, "")) || 0,
+    maxOutputTokens: Number(maxOut.replace(/\D/g, "")) || 0,
+    idleTimeoutSeconds: idle.ok ? idle.secs : 0,
+    reasoningProtocol: think,
+    supportedEfforts: levels,
+    defaultEffort: levels.includes(defEffort) ? defEffort : "",
+    modelEfforts: Object.fromEntries(picked.filter((m) => ownEfforts[m]).map((m) => [m, ownEfforts[m]])),
+    modelLimits: limitsToSend(picked, limitText, entry.modelLimits ?? {}),
+    headers: parseHeaders(heads),
+    extraBody: parseExtraBody(extra) ?? {},
+  });
+
+  // What a save would send, with order and unparsable text normalised: ticking
+  // a row off and on again, or typing a value back, is no change.
+  const fingerprint = (readers = vision) => JSON.stringify({
+    ...draft(), models: [...picked].sort(), vision: readers.filter((m) => picked.includes(m)).sort(),
+    idle: idle.ok ? idle.secs : idleText, extra: parseExtraBody(extra) ?? extra,
+  });
+  // The baseline is the saved configuration; image support a connection test
+  // seeded into the form is a change until it is saved.
+  const [stored, setStored] = useState(() => fingerprint(entry.visionModels ?? []));
+  const draftKey = fingerprint();
+  const dirty = draftKey !== stored;
+  useEffect(() => onDirty?.(dirty), [dirty, onDirty]);
+  useEffect(() => () => onDirty?.(false), [onDirty]);
+  useEffect(() => {
+    if (!stopBatch()) setBatch((b) => (b === "stopped" ? "idle" : b));
+  }, [draftKey, stopBatch]);
+  useEffect(() => () => run.current?.abort(), []);
+  const [edited, setEdited] = useState(false);
+  if (dirty && !edited) setEdited(true);
+
+  const canSave = (dirty || err?.kind === "unapplied") && busy === "" && !testing && picked.length > 0 && !extraBad && idle.ok;
+  const phase: Phase = saving ? "saving"
+    : err?.kind === "save" && dirty ? "failed"
+      : dirty ? "dirty"
+        : err?.kind === "unapplied" ? "unapplied"
+          : justSaved && !edited ? "saved" : "clean";
+
   const save = async () => {
     setBusy(`edit:${entry.name}`);
-    setErr("");
+    setErr(null);
+    const sent = fingerprint();
     try {
-      await port.editProvider({
-        name: entry.name,
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-        models: picked,
-        default: picked.includes(def) ? def : picked[0] ?? "",
-        vision: vision.filter((m) => picked.includes(m)),
-        contextWindow: Number(win.replace(/\D/g, "")) || 0,
-        maxOutputTokens: Number(maxOut.replace(/\D/g, "")) || 0,
-        reasoningProtocol: think,
-        supportedEfforts: levels,
-        defaultEffort: levels.includes(defEffort) ? defEffort : "",
-        modelEfforts: Object.fromEntries(picked.filter((m) => ownEfforts[m]).map((m) => [m, ownEfforts[m]])),
-        modelLimits: limitsToSend(picked, limitText, entry.modelLimits ?? {}),
-        headers: parseHeaders(heads),
-        extraBody: parseExtraBody(extra) ?? {},
-      });
-      onDone();
+      await port.editProvider(draft());
+      await onDone();
     } catch (e) {
-      setErr(reason(e));
+      const unapplied = e instanceof HttpError && SAVED_NOT_APPLIED.includes(e.reason?.code ?? "");
+      setErr({ text: reason(e), kind: unapplied ? "unapplied" : "save" });
       // Saved but not yet applied: the list has to show what is on file while
       // the form stays open to say why.
-      if (e instanceof HttpError && SAVED_NOT_APPLIED.includes(e.reason?.code ?? "")) onSaved?.();
+      if (unapplied) {
+        setStored(sent);
+        onSaved?.();
+      }
     } finally {
       setBusy("");
     }
   };
 
   return (
-    <div className="addp" data-edit>
+    <fieldset className="addp" data-edit disabled={saving} data-action-keydown="provider.save" onKeyDown={(e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      if (canSave) void save();
+    }}>
       <div className="fields">
         <label className="grow full">
           <span>{t("接口地址")}</span>
           <input value={baseUrl} onChange={(e) => {
             setBaseUrl(e.target.value);
             setFacts(clearModelCheckFacts);
+            setRefreshFail("");
+            setDiff(null);
           }} disabled={busy !== "" || checkingModel !== ""} spellCheck={false} />
         </label>
         <label className="grow full">
@@ -216,6 +315,8 @@ export function EditConn({
             onChange={(e) => {
               setApiKey(e.target.value);
               setFacts(clearModelCheckFacts);
+              setRefreshFail("");
+              setDiff(null);
             }} disabled={busy !== "" || checkingModel !== ""} spellCheck={false} />
         </label>
       </div>
@@ -245,14 +346,25 @@ export function EditConn({
         <div className="mlhead">
           <span className="ttl">{t("模型")}</span>
           <span className="count">{t("已启用 {on}/{all}", { on: picked.length, all: models.length })}</span>
-          <button className="mrefresh" data-action="provider.probe" onClick={refetch} disabled={busy !== "" || checkingModel !== ""}
-            title={t("重新向该端点获取模型列表，适用于端点新增或下架模型之后")}>
-            {t(refreshing ? "正在刷新…" : "刷新模型目录")}
+          <button className="mrefresh" data-action="provider.probe" onClick={refetch} disabled={busy !== "" || testing}
+            title={t("用已保存或刚填的密钥向服务商读取模型列表，可直接勾选；服务商新增或下架模型后也一样")}>
+            {t(refreshing ? "正在从服务商读取…" : "从服务商读取可用模型")}
+          </button>
+          <button className="mrefresh" data-action="provider.model-check-all" onClick={testAll}
+            disabled={busy !== "" || testing || picked.length === 0} aria-busy={batch === "running" || undefined}>
+            {t("测试已启用模型（{n}）", { n: picked.length })}
           </button>
         </div>
         <p className="mguide">
-          {t("目录只用于发现，不是白名单。未列出的模型会按原始 ID 保存；验证会发送一次最小请求，可能产生少量 Token 费用。")}
+          {t("目录只用于发现，不是白名单。未列出的模型会按原始 ID 保存；「测试已启用模型」会给每个已勾选的模型各发送一次小请求，可能产生少量 Token 费用。")}
         </p>
+        {completed !== "" && completed === baseUrl.trim() && (
+          <p className="mdiff" role="status">{t("接口地址已补全为 {url}", { url: completed })}</p>
+        )}
+        {batch === "stopped" && <p className="mdiff" role="status">{t("已停止启动新的验证：草稿已改动")}</p>}
+        {diff && diff.fresh && diff.added === 0 && diff.missing === 0 && (
+          <p className="mdiff" role="status">{t("没有发现新模型")}</p>
+        )}
         {diff && (diff.added > 0 || diff.missing > 0) && (
           <p className="mdiff" role="status">
             {diff.added > 0 && t("发现 {n} 个新模型。", { n: diff.added })}
@@ -267,11 +379,15 @@ export function EditConn({
           facts={facts}
           visionLocked={visionLocked}
           onCheck={checkModel}
-          checkDisabled={busy !== "" || checkingModel !== ""}
+          checkDisabled={busy !== "" || testing}
           onToggle={(m) => toggle(picked, setPicked, m)}
           onVision={(m) => toggle(vision, setVision, m)}
           onDefault={setDef}
           onAdd={addModel}
+          onFetch={refetch}
+          fetching={refreshing}
+          fetchDisabled={busy !== "" || testing}
+          fetchFail={refreshFail}
         />
       </div>
 
@@ -285,7 +401,7 @@ export function EditConn({
             <small>{t("以及额外请求头、请求体。中转站的推理强度在这里声明")}</small>
           </span>
           <span className="summary-value">
-            {compatSummary(think, heads, extra, levels.length, picked.filter((m) => ownEfforts[m]?.supportedEfforts.length).length) || t("可选")}
+            {compatSummary(think, heads, extra, levels.length, picked.filter((m) => ownEfforts[m]?.supportedEfforts.length).length, idle.ok ? idle.secs : 0) || t("可选")}
           </span>
         </summary>
         {more && (
@@ -339,6 +455,26 @@ export function EditConn({
                 connProtocol={think}
               />
             )}
+            <label className="grow">
+              <span>{t("无响应超时")}</span>
+              <span className="unit-field">
+                <input
+                  aria-label={t("无响应超时")}
+                  data-action="provider.draft"
+                  data-value="idle-timeout"
+                  inputMode="numeric"
+                  value={idleText}
+                  placeholder={entry.idleTimeoutDefault ? t("默认 {n}", { n: entry.idleTimeoutDefault }) : t("默认")}
+                  aria-invalid={!idle.ok || undefined}
+                  onChange={(e) => setIdleText(e.target.value)}
+                />
+                <i>{t("秒")}</i>
+              </span>
+              <i className="tip">
+                {t("等待响应头、以及回包过程中无新内容超过这个时间，就按连接中断处理并重试。本地模型处理长上下文时可能需要调大。")}
+              </i>
+            </label>
+            {!idle.ok && <div className="why">{t("须是 {min} 到 {max} 之间的整数秒；留空使用默认值。", { min: IDLE_TIMEOUT_MIN, max: IDLE_TIMEOUT_MAX })}</div>}
             <label className="grow full">
               <span>{t("额外请求头")}</span>
               <textarea
@@ -369,20 +505,25 @@ export function EditConn({
         )}
       </details>
 
-      {err && (
-        <div className="find" data-lvl="warn">
-          <span className="t">{t("没保存成功")}</span>
-          <span className="why">{err}</span>
+      <div className="acts-bar">
+        {err && (
+          <div className="find" data-lvl={err.kind === "unapplied" ? "warn" : "err"} role={err.kind === "unapplied" ? "status" : "alert"}>
+            {err.kind === "save" && <span className="t">{t("保存失败")}</span>}
+            <span className="why">{err.text}</span>
+          </div>
+        )}
+        <div className="acts">
+          <button className="act" data-action="provider.save" data-primary onClick={save} disabled={!canSave}>
+            {t(saving ? "保存中…" : "保存")}
+          </button>
+          <button className="act" data-action="provider.revert" onClick={onRevert} disabled={!dirty || busy !== "" || testing}>{t("还原")}</button>
+          <span className="acts-state" role="status" data-state={phase}>
+            <i className="acts-dot" aria-hidden="true" />
+            {t(PHASE_TEXT[phase])}
+          </span>
         </div>
-      )}
-
-      <div className="acts">
-        <button className="act" data-action="provider.save" data-primary onClick={save} disabled={busy !== "" || checkingModel !== "" || picked.length === 0 || extraBad}>
-          {t(saving ? "保存中…" : "保存")}
-        </button>
-        <button className="act" onClick={onDone} disabled={busy !== "" || checkingModel !== ""}>{t("取消")}</button>
       </div>
-    </div>
+    </fieldset>
   );
 }
 
@@ -407,24 +548,36 @@ function refreshedFacts(models: string[], found: string[], current: Record<strin
   return out;
 }
 
-function catalogDiff(before: string[], found: string[]) {
+function catalogDiff(before: string[], found: string[], fresh: boolean) {
   const had = new Set(before);
   const now = new Set(found);
   return {
+    fresh,
     added: found.filter((model) => !had.has(model)).length,
     missing: before.filter((model) => !now.has(model)).length,
   };
 }
 
-function compatSummary(think: string, heads: string, extra: string, levels: number, ownModels: number): string {
+function compatSummary(think: string, heads: string, extra: string, levels: number, ownModels: number, idleSecs: number): string {
   const parts: string[] = [];
   const protocol = THINKING.find(([value]) => value === think);
   if (think && protocol) parts.push(t(protocol[1]));
   if (levels) parts.push(t("{n} 个档位", { n: levels }));
   if (ownModels) parts.push(t("{n} 个模型单独设置", { n: ownModels }));
+  if (idleSecs) parts.push(t("{n} 秒无响应超时", { n: idleSecs }));
   const headCount = Object.keys(parseHeaders(heads)).length;
   if (headCount) parts.push(t("{n} 个头", { n: headCount }));
   const body = parseExtraBody(extra);
   if (body && Object.keys(body).length) parts.push(t("有请求体"));
   return parts.join(" · ");
+}
+
+type Phase = "clean" | "dirty" | "saving" | "saved" | "unapplied" | "failed";
+const PHASE_TEXT: Record<Phase, string> = {
+  clean: "没有更改", dirty: "有未保存的更改", failed: "有未保存的更改", saving: "正在保存…",
+  saved: "已保存", unapplied: "已保存，尚未生效",
+};
+
+function stopChecking(facts: Record<string, ModelFact>): Record<string, ModelFact> {
+  return Object.fromEntries(Object.entries(facts).map(([model, fact]) => [model, fact.checking ? { ...fact, checking: false } : fact]));
 }

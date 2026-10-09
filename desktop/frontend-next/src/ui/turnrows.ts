@@ -1,4 +1,5 @@
 import type { Item } from "../state/session";
+import { chartOfTool } from "./chart/spec";
 
 type Row = { item: Item; activity?: Item[] } | { activity: Item[] };
 
@@ -23,7 +24,7 @@ export function transcriptRows(all: Item[]): Row[] {
     while (end < items.length && items[end].t !== "user") end++;
     const turn: Row[] = [];
     for (const item of items.slice(at, end)) {
-      const work = item.t === "tool" || item.t === "reads";
+      const work = (item.t === "tool" && !chartOfTool(item.tool)) || item.t === "reads";
       const last = turn[turn.length - 1];
       if (work && last && "activity" in last && !("item" in last)) last.activity.push(item);
       else turn.push(work ? { activity: [item] } : { item });

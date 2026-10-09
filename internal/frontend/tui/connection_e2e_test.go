@@ -39,7 +39,8 @@ func TestFirstRunSetupThroughTheInProcessKernel(t *testing.T) {
 	dir := testenv.TempDir(t)
 	t.Chdir(dir)
 	kind := "tui-setup-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return &scriptedModel{}, nil })
+	model := &scriptedModel{}
+	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return model, nil })
 	userConfig := config.UserConfigPath()
 	if err := os.MkdirAll(filepath.Dir(userConfig), 0o700); err != nil {
 		t.Fatal(err)
@@ -101,6 +102,18 @@ api_key_env = "` + setupKeyEnv + `"
 	if err := c.TestConnection(ctx, "missing", "sk"); tui.Code(err) != "provider.unknown" {
 		t.Fatalf("unknown provider test = %v, want provider.unknown", err)
 	}
+	model.mu.Lock()
+	probed := model.calls
+	model.mu.Unlock()
+	if err := c.Submit(ctx, "hello"); tui.Code(err) != tui.CodeKeyMissing {
+		t.Fatalf("keyless submit = %v, want %s", err, tui.CodeKeyMissing)
+	}
+	model.mu.Lock()
+	sent := model.calls
+	model.mu.Unlock()
+	if sent != probed {
+		t.Fatalf("the provider saw %d requests for a keyless turn", sent-probed)
+	}
 	if err := c.SaveConnection(ctx, "first-run", "sk-test-key", list.Revision); err != nil {
 		t.Fatalf("save connection: %v", err)
 	}
@@ -116,5 +129,19 @@ api_key_env = "` + setupKeyEnv + `"
 	}
 	if strings.Contains(string(after), "sk-test-key") {
 		t.Fatal("the key leaked into config.toml")
+	}
+	if err := c.Submit(ctx, "hello"); err != nil {
+		t.Fatalf("submit after the key was saved: %v", err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		model.mu.Lock()
+		sent = model.calls
+		model.mu.Unlock()
+		if sent > probed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no request reached the provider after the key was saved")
+		}
 	}
 }

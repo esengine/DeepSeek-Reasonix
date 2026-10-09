@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +17,14 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/installsource"
 	"reasonix/internal/ext/pluginpkg"
+)
+
+// A cold compile on a shared Windows runner has been seen to exceed one minute.
+const fullsidecarBuildTimeout = 5 * time.Minute
+
+var (
+	fullsidecarProviderOnce sync.Once
+	fullsidecarProvider     atomic.Pointer[effectRecordingProvider]
 )
 
 func buildFullsidecarPackage(t *testing.T) string {
@@ -31,13 +41,13 @@ func buildFullsidecarPackage(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), fullsidecarBuildTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
 	cmd.Dir = example
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build SDK fullsidecar: %v\n%s", err, out)
+		t.Fatalf("build SDK fullsidecar: %v (context: %v, bound %s)\n%s", err, ctx.Err(), fullsidecarBuildTimeout, out)
 	}
 	manifest, err := os.ReadFile(filepath.Join(example, pluginpkg.NativeManifest))
 	if err != nil {
@@ -121,7 +131,10 @@ model = "x"
 		return result.PlanID
 	}
 	rec := &effectRecordingProvider{}
-	provider.Register("boot-effect-fullsidecar", func(provider.Config) (provider.Provider, error) { return rec, nil })
+	fullsidecarProvider.Store(rec)
+	fullsidecarProviderOnce.Do(func() {
+		provider.Register("boot-effect-fullsidecar", func(provider.Config) (provider.Provider, error) { return fullsidecarProvider.Load(), nil })
+	})
 	runPhase := func(t *testing.T, enabled bool) {
 		t.Helper()
 		sink := &uiSinkRecorder{}

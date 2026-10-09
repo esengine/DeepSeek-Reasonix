@@ -249,7 +249,7 @@ func (c *client) WarnOnMissingToolCallReasoning() bool {
 }
 
 func (c *client) sendOpts() provider.SendOptions {
-	return provider.SendOptions{Provider: c.name, KeyEnv: c.keyEnv, KeySource: c.keySource, KeyPresent: c.apiKey() != "", RetryAuth: c.authed.Load()}
+	return provider.SendOptions{Provider: c.name, KeyEnv: c.keyEnv, KeySource: c.keySource, KeyPresent: c.apiKey() != "", RetryAuth: c.authed.Load(), HeaderTimeout: c.idleTimeout}
 }
 
 // ResetContext drops stateful continuation metadata. Full-input stateless mode

@@ -11,10 +11,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"reasonix/internal/safety/redirectguard"
 	"strconv"
 	"strings"
 	"time"
+
+	"reasonix/internal/contract/provider"
+	"reasonix/internal/safety/redirectguard"
 )
 
 const maxResponseBytes = 1 << 20
@@ -45,11 +47,13 @@ type wireReceipt struct {
 	Status       Status    `json:"status"`
 	InstallToken string    `json:"installToken"`
 	CreatedAt    time.Time `json:"createdAt"`
+	UnderReview  bool      `json:"underReview"`
 }
 
 type wireError struct {
 	Error struct {
-		Code string `json:"code"`
+		Code   string          `json:"code"`
+		Params json.RawMessage `json:"params"`
 	} `json:"error"`
 }
 
@@ -123,6 +127,7 @@ func (s *Service) postReply(ctx context.Context, id, token, receipt, body string
 
 // do performs one request and turns whatever came back into a sentinel.
 func (s *Service) do(req *http.Request, out any) error {
+	provider.ApplyClientIdentity(req)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		if cerr := req.Context().Err(); cerr != nil {
@@ -161,11 +166,36 @@ func refusalOf(resp *http.Response, body []byte) error {
 			return ErrUnavailable
 		}
 	}
-	if errors.Is(sentinel, ErrRateLimited) {
-		secs, _ := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
-		return &RateLimitedError{After: time.Duration(secs) * time.Second}
+	if !errors.Is(sentinel, ErrRateLimited) && !errors.Is(sentinel, ErrReplyLimit) && !errors.Is(sentinel, ErrBusy) {
+		return sentinel
 	}
-	return sentinel
+	return limitOf(sentinel, resp, we)
+}
+
+// limitOf reads the window from the body's typed params and the wait from the
+// Retry-After header, each only as well-formed as it arrived: a field that does
+// not parse is absent, never a reason to lose the refusal itself.
+func limitOf(sentinel error, resp *http.Response, we wireError) error {
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(we.Error.Params, &fields)
+	out := &LimitError{Kind: sentinel}
+	var name, at string
+	if json.Unmarshal(fields["limit"], &name) == nil {
+		out.Limit = Limit(name)
+	}
+	if json.Unmarshal(fields["resetsAt"], &at) == nil {
+		if t, err := time.Parse(time.RFC3339, at); err == nil {
+			out.ResetsAt = t
+		}
+	}
+	var secs int
+	if json.Unmarshal(fields["retryAfterSeconds"], &secs) != nil || secs <= 0 {
+		secs, _ = strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+	}
+	if secs > 0 {
+		out.After = time.Duration(secs) * time.Second
+	}
+	return out
 }
 
 // Only submits carry the idempotency key that makes replaying an ambiguous

@@ -23,6 +23,9 @@ type SlashEntry struct {
 	Render      func(args []string) string // expands the template/playbook with args
 	// Skill marks an entry the gate judges at call time; commands pass as is.
 	Skill bool
+	// Unlisted keeps an entry out of the listing the model reads without
+	// refusing a call that names it. Nil lists the entry.
+	Unlisted func() bool
 }
 
 // slashCommandTool lets the model invoke a loaded slash command by name. Unlike a
@@ -121,7 +124,11 @@ func (t *slashCommandTool) judge() func(string) error {
 func (t *slashCommandTool) allowedNames(allowed func(string) error) []string {
 	out := make([]string, 0, len(t.names))
 	for _, n := range t.names {
-		if allowed == nil || !t.entries[n].Skill || allowed(n) == nil {
+		e := t.entries[n]
+		if e.Unlisted != nil && e.Unlisted() {
+			continue
+		}
+		if allowed == nil || !e.Skill || allowed(n) == nil {
 			out = append(out, n)
 		}
 	}

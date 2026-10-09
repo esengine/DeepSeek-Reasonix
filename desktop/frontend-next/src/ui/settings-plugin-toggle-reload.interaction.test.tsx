@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Settings } from "./Settings";
@@ -12,6 +12,7 @@ import type { AgentPort, PluginPackage, SessionStatus } from "../port/port";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.setItem(STORAGE, "zh");
@@ -137,4 +138,92 @@ it("clears the earlier warning when a later saved toggle reloads successfully", 
   expect(changed).toHaveBeenCalledTimes(2);
   expect(calls.mock.calls.filter(([url]) => url.endsWith("/plugins/enabled"))).toHaveLength(2);
   expect(calls.mock.calls.filter(([url]) => url.endsWith("/extensions/reload"))).toHaveLength(0);
+});
+
+async function timedSettings() {
+  const result = fixture(true);
+  const changed = vi.fn();
+  const view = render(draw(result.port, changed));
+  await screen.findByText("notes-kit");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const click = (element: HTMLElement) => act(async () => { fireEvent.click(element); });
+  const toggle = () => click(within(row()).getByRole("switch"));
+  const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  return { ...result, changed, view, click, toggle, advance };
+}
+
+it.each(["package", "manual"])("gives a later package application its own confirmation window after %s success", async (first) => {
+  const { click, toggle, advance, changed, calls } = await timedSettings();
+  if (first === "manual") await click(screen.getByRole("button", { name: t("重载运行时") }));
+  else await toggle();
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  await advance(3500);
+  await toggle();
+  expect(changed).toHaveBeenCalledTimes(2);
+  await advance(500);
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("已生效") }).disabled).toBe(false);
+  await advance(3499);
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  await advance(1);
+  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载运行时") }).disabled).toBe(false);
+  expect(calls.mock.calls.filter(([url]) => url.endsWith("/plugins/enabled"))).toHaveLength(first === "manual" ? 1 : 2);
+  expect(calls.mock.calls.filter(([url]) => url.endsWith("/extensions/reload"))).toHaveLength(first === "manual" ? 1 : 0);
+});
+
+it("expires a single confirmation without extending it on a Settings rerender", async () => {
+  const { port, changed, view, toggle, advance } = await timedSettings();
+  await toggle();
+  await advance(3500);
+  view.rerender(draw(port, changed));
+  await advance(499);
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  await advance(1);
+  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(changed).toHaveBeenCalledTimes(1);
+});
+
+it("retains a later saved-but-not-reloaded warning past the old success expiry", async () => {
+  const { port, toggle, advance } = await timedSettings();
+  await toggle();
+  await advance(3500);
+  vi.spyOn(port, "setPluginEnabled").mockResolvedValueOnce({ reloadError: refusal });
+  await toggle();
+  await advance(10000);
+  expect(screen.getByText(t(warning, { reason: refusal }))).toBeTruthy();
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载运行时") }).disabled).toBe(false);
+});
+
+it("keeps a later manual reload pending past the old success expiry", async () => {
+  const { port, click, toggle, advance, changed } = await timedSettings();
+  await toggle();
+  await advance(3500);
+  let finish!: () => void;
+  vi.spyOn(port, "reloadExtensions").mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+  await click(screen.getByRole("button", { name: t("已生效") }));
+  await advance(10000);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载中") }).disabled).toBe(true);
+  await act(async () => finish());
+  await advance(3999);
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  await advance(1);
+  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(changed).toHaveBeenCalledTimes(2);
+});
+
+it("does not let a previous connection's confirmation expire the new connection's success", async () => {
+  const { changed, view, click, toggle, advance } = await timedSettings();
+  await toggle();
+  await advance(3500);
+  const next = new MockPort() as unknown as AgentPort;
+  vi.spyOn(next, "reloadExtensions").mockResolvedValue();
+  await act(async () => view.rerender(draw(next, changed)));
+  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  await click(screen.getByRole("button", { name: t("重载运行时") }));
+  await advance(3999);
+  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  await advance(1);
+  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(changed).toHaveBeenCalledTimes(2);
 });

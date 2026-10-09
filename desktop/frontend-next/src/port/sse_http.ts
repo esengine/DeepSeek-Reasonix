@@ -1,12 +1,27 @@
-import { HttpError } from "./port";
+import { DeliveryError, HttpError } from "./port";
 
 type Refusal = { code?: string; error?: string; params?: Record<string, string | number> };
+
+// How long a call the user is waiting on gets before control comes back.
+const ACK_WAIT_MS = 20_000;
+// Timers in a background tab are aligned to one second; a timer later than that
+// past its deadline was held up by this window's own event loop.
+const STALL_TOLERANCE_MS = 2_000;
+
+// One idempotent read per path in flight. `next` is the single re-read owed to
+// every caller that arrived while `flight` was already on the wire.
+interface ReadSlot {
+  flight: Promise<unknown>;
+  next?: Promise<unknown>;
+}
 
 // The transport half of SsePort: where the kernel is, and the five shapes every
 // call to it takes. Split out because the port itself is the whole AgentPort
 // surface — a hundred endpoint methods — and none of them should have to be
 // read past to find how a request is actually made.
 export class SseHttp {
+  private readonly reads = new Map<string, ReadSlot>();
+
   // rt names the pane this port speaks for. The shell's bus carries every
   // pane's frames, so a channel per runtime is what keeps two live
   // conversations out of each other's transcript.
@@ -56,6 +71,20 @@ export class SseHttp {
     return (await res.json()) as T;
   }
 
+  // A POST that answers with a payload only sometimes: a plain turn start has
+  // no body, a line routed through the queue carries its receipt.
+  protected async postMaybe<T>(path: string, body?: unknown): Promise<T | undefined> {
+    const res = await fetch(this.base + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) await SseHttp.fail(path, res);
+    const raw = await res.text();
+    return raw.trim() === "" ? undefined : (JSON.parse(raw) as T);
+  }
+
   // A partial update of one resource. Distinct from post because the kernel
   // reads the verb: the same path answers a different question under each.
   protected async patch(path: string, body?: unknown): Promise<void> {
@@ -96,10 +125,67 @@ export class SseHttp {
   // same fail(). It used to throw a bare Error carrying a path and a number,
   // which spent every refusal the kernel had spelled out — "this server does
   // not open account sign-in" reached the panel as "/account: 403".
-  protected async get<T>(path: string): Promise<T> {
+  // An idempotent read joins the one in flight for its path and, if it arrived
+  // late, the single trailing re-read: a slow endpoint polled faster than it
+  // answers would otherwise fill the browser's per-origin connection pool.
+  protected get<T>(path: string): Promise<T> {
+    const slot = this.reads.get(path);
+    if (!slot) return this.startRead<T>(path);
+    slot.next ??= slot.flight.then(
+      () => this.startRead<T>(path),
+      () => this.startRead<T>(path),
+    );
+    return slot.next as Promise<T>;
+  }
+
+  private startRead<T>(path: string): Promise<T> {
+    const flight = this.fetchRead<T>(path);
+    const slot: ReadSlot = { flight };
+    this.reads.set(path, slot);
+    const release = () => {
+      if (this.reads.get(path) === slot) this.reads.delete(path);
+    };
+    flight.then(release, release);
+    return flight;
+  }
+
+  private async fetchRead<T>(path: string): Promise<T> {
     const res = await fetch(this.base + path, { credentials: "same-origin" });
     if (!res.ok) await SseHttp.fail(path, res);
     return (await res.json()) as T;
+  }
+
+  // An approval, plan decision, answer or stop: the caller is waiting on this
+  // one call, so it gets a bounded wait and a typed failure it can recover from.
+  // A starved event loop runs the deadline timer before the response callback,
+  // so a deadline that fires far past its time is this window's fault, not the
+  // kernel's.
+  protected async postAcked(path: string, body?: unknown): Promise<void> {
+    const ctl = new AbortController();
+    const began = performance.now();
+    let stalled = false;
+    const timer = setTimeout(() => {
+      stalled = performance.now() - began - ACK_WAIT_MS > STALL_TOLERANCE_MS;
+      ctl.abort();
+    }, ACK_WAIT_MS);
+    let answered = false;
+    try {
+      const res = await fetch(this.base + path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: ctl.signal,
+      });
+      answered = true;
+      if (!res.ok) await SseHttp.fail(path, res);
+    } catch (e) {
+      if (!answered && ctl.signal.aborted) throw new DeliveryError(stalled ? "ui_stalled" : "kernel_busy");
+      if (!answered && e instanceof TypeError) throw new DeliveryError("unreachable");
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

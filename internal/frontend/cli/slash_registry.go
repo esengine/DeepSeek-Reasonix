@@ -104,3 +104,12 @@ func canonicalBuiltinSlashCommand(name string) string {
 	}
 	return name
 }
+
+func builtinSlashNames(name string) []string {
+	for _, spec := range builtinSlashSpecs() {
+		if spec.name == name {
+			return append([]string{spec.name}, spec.aliases...)
+		}
+	}
+	return nil
+}

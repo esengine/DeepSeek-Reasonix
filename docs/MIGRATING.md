@@ -2,7 +2,7 @@
 owner: @esengine
 backup: @SivanCola
 status: active
-reviewed: 2026-09-25
+reviewed: 2026-10-04
 ---
 
 # Moving from Reasonix 1.x to 2.x
@@ -19,7 +19,7 @@ This guide is for people who run Reasonix 1.x and want to try or move to 2.x. It
 | | Reasonix 1.x | Reasonix 2.x |
 | --- | --- | --- |
 | Branch | `main-v2` | `studio` (default) |
-| Status | Maintenance / stable | Active development, pre-release |
+| Status | Maintenance / stable | Active development |
 | Desktop app | 1.x desktop, from the [download page](https://reasonix.io/?download=desktop#start) | Reasonix Studio, from the [`studio-v2.*` releases](https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true) |
 | CLI | `npm i -g reasonix`, or `brew install esengine/reasonix/reasonix` | Archives attached to each `studio-v2.*` release |
 | Issue label | `v2` | `v3` |
@@ -64,11 +64,47 @@ Where 1.x keeps a conversation depends on the 1.x version that last saved it.
 | `reasonix`, `reasonix -c`, `reasonix -r` | The same, in a terminal. `reasonix tui` is another name for it. |
 | `--permission-mode workspace-write` | Auto |
 | `--permission-mode danger-full-access` | Yolo |
-| `--permission-mode read-only` | Ask. 2.x has no read-only mode, so this is the most careful one it has. |
+| `--permission-mode read-only` | Read only (`read-only`). Every write is refused. |
 | `--yolo`, `--permission-mode yolo` or `bypassPermissions` | Yolo. In 1.x these meant `workspace-write`; in 2.x they skip ordinary approval prompts. |
 | `reasonix run`, `serve`, `web`, `acp`, `mcp`, `setup`, `doctor` | Same names |
 | `reasonix bot` | Not in 2.x. The `[bot]` config section stays for 1.x. |
 | VS Code extension | Starts the `reasonix` found on `PATH`, so it runs whichever line's CLI comes first there. |
+
+## Behaviour that differs from 1.x
+
+### Trusting a folder
+
+When a folder is trustable, its writes are sandbox-confined and no decision is recorded yet, `reasonix` asks ``Trust this folder? (`reasonix trust --revoke` undoes it) [y/N]`` before the terminal UI starts. 1.x has no such prompt.
+
+- The answer is stored either way.
+- `reasonix trust` shows what the folder would run and approves it; `reasonix trust --revoke` undoes it.
+- The default mode is Auto where the OS sandbox confines writes and the folder is trusted, and Ask otherwise.
+
+### `reasonix run` and `-p` in a folder that is not trusted
+
+1.x wrote files and ran commands in any folder. In 2.x an untrusted folder has nobody to approve edits and shell commands, so a headless run refuses them. Nothing is loosened: the run now says so instead of looking like success.
+
+- stderr names the refused tools, the code `permission.untrusted_folder` and the remedy.
+- The process exits `4` (`3` under `--fail-on-unverified`); the work was not done.
+- `--output-format json` and `stream-json` list each refusal in `permission_denials` with its `code` and `remedy`, and set `unverified_by`.
+
+To make a script behave as it did in 1.x, trust the folder once (`reasonix trust --dir <folder>`), or pass `--permission-mode auto` or `--yolo` knowingly for that run. Other exit codes are as in 1.x: `1` for an error, `2` for a usage error.
+
+### Other differences
+
+| Area | 1.x | 2.x |
+| --- | --- | --- |
+| `reasonix config compact-ratio` | Accepts 30 to 85 | Accepts any percentage above 0 and below 100, so every 1.x value still works. The default differs from 1.x, and the status line reads `to compaction N%`. |
+| Unknown `/command` | Sent to the model as an ordinary message, with a notice that names the command | The same. |
+| Permission mode cycle | Shift+Tab cycles Workspace, YOLO, Plan, Read only | Shift+Tab cycles Auto, YOLO, Plan, Read only, Ask. Shift+Tab and Ctrl+Y enter YOLO at once, with no confirmation, as in 1.x; starting with `--yolo` or `--permission-mode yolo` asks once the first time. Auto asks first for nested or indirect shell such as `python3 -c '...'`, so expect more prompts. |
+| Status line | `workspace@branch` and a compaction threshold | Same row; the threshold reads `to compaction N%`. The footer and turn receipt name the peak or off-peak rate a spend was billed at, as 1.x does, only when the vendor's own schedule priced it. |
+| `REASONIX_CHROME` | Path of the browser the browser tool launches | Not read. Set `[browser] executable` in the config; with none set, 2.x looks for Chrome, Edge or Chromium. |
+| `REASONIX_SESSION_LOG` | `v1` switched session saves back to the schema-1 writer | Removed. 2.x writes one session format. |
+| Default permission mode | Workspace | Auto, 1.x's Workspace, where the OS sandbox confines writes and the folder is trusted; Ask otherwise. See [Trusting a folder](#trusting-a-folder). |
+| `/recover-context`, `/continue-checks` | Slash commands | Retired; 2.x has no such command. |
+| `/web` | Slash command | Not a slash command in 2.x. Run `reasonix web` from the shell. |
+| Studio-only slash commands | None | `/version`, `/feedback`, `/locate`, `/setup` and `/auth`. `/setup` and `/auth` open the setup panel; `/locate` is a built-in read-only skill that returns file and line ranges. |
+| `reasonix bot` | IM gateway | Removed. The `[bot]` config section is kept untouched. |
 
 ## Steps: run 2.x beside 1.x
 

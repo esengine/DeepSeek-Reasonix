@@ -62,7 +62,7 @@ jobs:
               # both paths must trigger the sdk job.
               if echo "$files" | grep -qE '^(sdk/|internal/ext/extension/)'; then sdk=true; fi
               # The release-note tests render every committed Studio note; npm/ holds the publish tests.
-              if echo "$files" | grep -qE '^(scripts/|npm/|release-notes/studio/)'; then scripts=true; fi
+              if echo "$files" | grep -qE '^(scripts/|npm/|release-notes/studio/|\.github/workflows/release-studio\.yml$)'; then scripts=true; fi
             fi
           fi
           { echo "code=$code"; echo "desktop=$desktop"; echo "sdk=$sdk"; echo "scripts=$scripts"; } >> "$GITHUB_OUTPUT"
@@ -80,7 +80,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
-      - run: node --test scripts/release-credits.test.mjs scripts/update-contributors.test.mjs scripts/markdown-refs.test.mjs scripts/studio-release-notes.test.mjs scripts/publish-cli-pointer.test.mjs scripts/feedback-sync.test.mjs npm/publish.test.mjs
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: node --test scripts/cli-archive-build.test.mjs scripts/release-credits.test.mjs scripts/update-contributors.test.mjs scripts/markdown-refs.test.mjs scripts/studio-release-notes.test.mjs scripts/publish-cli-pointer.test.mjs scripts/studio-release-flags.test.mjs scripts/studio-notes-publish.test.mjs scripts/brew-cask-guard.test.mjs scripts/feedback-sync.test.mjs npm/publish.test.mjs
 
   # The ruleset requires the per-OS check names (test (ubuntu-latest) etc.).
   # A matrix job skipped at job level reports no per-leg checks at all, so

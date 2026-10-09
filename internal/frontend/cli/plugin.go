@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/installsource"
 	"reasonix/internal/ext/pluginpkg"
+	"reasonix/internal/ext/skill"
 	"reasonix/internal/ext/theme"
 )
 
@@ -442,6 +443,9 @@ func pluginDoctorCommand(args []string) int {
 	}
 	warnings = append(warnings, theme.PluginWarnings(pkg)...)
 	warnings = append(warnings, hook.PackageWarnings(pkg)...)
+	for _, warning := range skill.PluginWarnings(pkg) {
+		warnings = append(warnings, warning.Error())
+	}
 	for _, warning := range warnings {
 		fmt.Println("warning:", warning)
 	}
@@ -494,11 +498,7 @@ func pluginDoctorCommand(args []string) int {
 	return 0
 }
 
-// checkRuntimeCommand verifies a Manifest v2 runtime command resolves to
-// something runnable. ${REASONIX_PLUGIN_ROOT} expands to the installed root;
-// other relative path forms resolve against the plugin root. Bare executable
-// names are looked up on PATH (a miss is a warning, not a failure — PATH
-// varies by environment).
+// Bare-name lookup failures remain warnings because PATH varies by environment.
 func checkRuntimeCommand(rt *pluginpkg.RuntimeSpec, root string) error {
 	expanded := pluginpkg.ExpandRuntimeCommand(rt.Command, root)
 	pathForm := filepath.IsAbs(expanded) || strings.ContainsRune(expanded, '/') || strings.ContainsRune(expanded, filepath.Separator)
@@ -514,6 +514,9 @@ func checkRuntimeCommand(rt *pluginpkg.RuntimeSpec, root string) error {
 	info, err := os.Stat(expanded)
 	if err != nil || info.IsDir() {
 		return fmt.Errorf("runtime command not found: %s", expanded)
+	}
+	if _, err := exec.LookPath(expanded); err != nil {
+		return fmt.Errorf("runtime command not executable: %s: %w", expanded, err)
 	}
 	return nil
 }

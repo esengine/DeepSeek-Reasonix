@@ -317,8 +317,9 @@ fact untouched. Correct the storage problem and restart to retry migration.
 
 ## Cache and privacy contract
 
-- Standing instructions and the derived memory index join the stable prefix at
-  session start.
+- Standing instructions and pinned memory bodies join the stable prefix at
+  session start. The derived fact index does not: it is reached through the
+  `memory` tool.
 - Provider-visible instruction provenance uses stable `workspace/...` and
   `user/...` labels; absolute source and store paths stay in local diagnostics.
 - Provider-visible memory tool results use stable `project/<name>.md` and `global/<name>.md` references.

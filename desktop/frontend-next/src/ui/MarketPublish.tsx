@@ -41,7 +41,7 @@ interface Draft {
 
 const EMPTY: Draft = { kind: "skill", name: "", source: "", summary: "", description: "", repoUrl: "", version: "", tags: [], tagInput: "", private: false };
 
-interface PublishProps { port: AgentPort; handle: string; onMine: () => void; initial?: MarketPackage }
+interface PublishProps { port: AgentPort; handle: string; onMine: () => void; onApplying?: (applying: boolean) => void; initial?: MarketPackage }
 
 export function PublishForm(props: PublishProps) {
   const [owner, setOwner] = useState({ port: props.port, handle: props.handle, generation: 0 });
@@ -53,7 +53,7 @@ export function PublishForm(props: PublishProps) {
 
 // The form only collects; which sources are publishable and what the registry
 // accepts are the kernel's and the registry's answers, shown as they come back.
-function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
+function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProps) {
   const [d, setD] = useState<Draft>(() => initial ? {
     ...EMPTY, kind: initial.kind, name: initial.name, summary: initial.summary,
     description: initial.description, repoUrl: initial.repoUrl, tags: [...initial.tags],
@@ -63,6 +63,11 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
   const [error, setError] = useState("");
   const [done, setDone] = useState<MarketPublished | null>(null);
   const set = (k: keyof Draft) => (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value });
+
+  useEffect(() => {
+    onApplying?.(busy);
+    return () => onApplying?.(false);
+  }, [busy, onApplying]);
 
   const submit = async () => {
     setBusy(true);
@@ -138,7 +143,7 @@ function PublishDraft({ port, handle, onMine, initial }: PublishProps) {
         <label>
           <span>{t("版本")}</span>
           <input value={d.version} disabled={busy} data-action="market.draft" data-value="version" placeholder="0.1.0" spellCheck={false} onChange={set("version")} />
-          <em className="mkt-tip">{t("留空时新包为 0.1.0，更新自动加一个补丁号。")}</em>
+          <em className="mkt-tip">{t("留空时新包为 0.1.0；更新只自动递增纯数字三段版本的补丁号，其他版本请明确填写。")}</em>
         </label>
         <label className="full">
           <span>{t("来源地址")}</span>

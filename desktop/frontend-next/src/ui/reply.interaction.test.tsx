@@ -153,3 +153,39 @@ it("hides retry when the reply has no checkpoint or a task is running", () => {
   draw(items, [checkpoint(0, 1), checkpoint(1, 5)], true);
   expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
 });
+
+function probe(initial: Item[], checkpoints: Checkpoint[]) {
+  const seen: ReturnType<typeof useReplyActions>["reply"][] = [];
+  const port = {} as unknown as AgentPort;
+  const common = { port, checkpoints, submit: async () => true, reloadSession: async () => {}, onSettings: () => {}, onRunDetail: () => {}, onError: () => {} };
+  function Probe({ items, running }: { items: Item[]; running: boolean }) {
+    seen.push(useReplyActions({ ...common, items, running }).reply);
+    return null;
+  }
+  const view = render(<Probe items={initial} running={false} />);
+  return { seen, again: (items: Item[], running = false) => view.rerender(<Probe items={items} running={running} />) };
+}
+
+const settled: Item[] = [
+  { t: "user", id: "u1", text: "问", msgIndex: 1 },
+  { t: "say", id: "a1", text: "答", done: true },
+];
+
+it("keeps the same reply actions while a streamed answer grows, so settled rows are not redrawn", () => {
+  const live: Item = { t: "say", id: "a2", text: "", done: false };
+  const { seen, again } = probe([...settled, live], [checkpoint(0, 1)]);
+  for (const text of ["一", "一二", "一二三"]) again([...settled, { ...live, text }], false);
+  expect(new Set(seen).size).toBe(1);
+});
+
+it("hands out new reply actions when what can be regenerated changes", () => {
+  const { seen, again } = probe(settled, [checkpoint(0, 1)]);
+  again(settled, true);
+  expect(seen[1]).not.toBe(seen[0]);
+  expect(seen[1].canRegenerate("a1")).toBe(false);
+  again(settled, false);
+  const next: Item[] = [...settled, { t: "user", id: "u2", text: "再问", msgIndex: 3 }, { t: "say", id: "a2", text: "答二", done: true }];
+  again(next, false);
+  expect(seen[seen.length - 1]).not.toBe(seen[seen.length - 2]);
+  expect(seen[seen.length - 1].hasLaterTurns("a1")).toBe(true);
+});

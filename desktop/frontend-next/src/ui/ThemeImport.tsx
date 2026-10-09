@@ -17,6 +17,9 @@ const ACCEPT = ".zip,.json,.webp,.png,.jpg,.jpeg";
 /** ThemeImport installs a pack from disk and shows where installed packs live,
  *  so authoring one never starts with guessing a directory. */
 export function ThemeImport({ port, empty, onImported, onUse }: Props) {
+  const [owner, setOwner] = useState({ port });
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
   const file = useRef<HTMLInputElement>(null);
   const pending = useRef(false);
   const folderRequest = useRef(0);
@@ -24,6 +27,15 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
   const [note, setNote] = useState("");
   const [landed, setLanded] = useState("");
   const [failed, setFailed] = useState("");
+  if (owner.port !== port) {
+    setOwner({ port });
+    pending.current = false;
+    folderRequest.current += 1;
+    setBusy(false);
+    setNote("");
+    setLanded("");
+    setFailed("");
+  }
 
   const take = async (files: File[]) => {
     if (files.length === 0 || pending.current) return;
@@ -35,15 +47,18 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
     setLanded("");
     try {
       const got = await port.importTheme(files);
+      if (currentOwner.current !== owner) return;
       onImported();
       const skipped = got.ignored?.length ? " " + t("未读取：{names}", { names: got.ignored.join("、") }) : "";
       setNote(t("已导入「{name}」。", { name: got.pack.name }) + skipped);
       setLanded(got.pack.id);
     } catch (e) {
-      setFailed(reason(e));
+      if (currentOwner.current === owner) setFailed(reason(e));
     } finally {
-      pending.current = false;
-      setBusy(false);
+      if (currentOwner.current === owner) {
+        pending.current = false;
+        setBusy(false);
+      }
     }
   };
 
@@ -55,10 +70,10 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
     port
       .openThemeFolder()
       .then((dir) => {
-        if (request === folderRequest.current) setNote(t("主题目录：{path}", { path: dir }));
+        if (currentOwner.current === owner && request === folderRequest.current) setNote(t("主题目录：{path}", { path: dir }));
       })
       .catch((e) => {
-        if (request === folderRequest.current) setFailed(reason(e));
+        if (currentOwner.current === owner && request === folderRequest.current) setFailed(reason(e));
       });
   };
 

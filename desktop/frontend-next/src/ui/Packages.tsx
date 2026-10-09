@@ -152,7 +152,10 @@ function Package({
           void run("remove", async () => {
             const out = await port.removePlugin(p.name);
             setConfirming(false);
-            if (out.applied && out.reloadError) onReloadError(out.reloadError);
+            if (out.applied) {
+              if (out.reloadError) onReloadError(out.reloadError);
+              else onReloaded();
+            }
             if (!out.ok) setFailed(out.error || out.next || t("没能删掉"));
           })
         }
@@ -218,8 +221,8 @@ function Package({
             <span className="sc">{name}</span>
           </div>
         ))}
-        {p.hooks?.map((h) => (
-          <div className="row" data-run key={h.event + h.command}>
+        {p.hooks?.map((h, index) => (
+          <div className="row" data-run key={index}>
             <span className="d">▸</span>
             <span>{h.event}</span>
             <span className="sc">{h.description || h.command || h.contextFile}</span>

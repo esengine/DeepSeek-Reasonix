@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 )
 
 // contentRef names one immutable object in the content pool by the SHA-256 of
@@ -19,16 +19,19 @@ type contentRef struct {
 }
 
 // contentPool is the directory 1.x keeps large payloads and images in.
-type contentPool struct{ root string }
+type contentPool struct {
+	store fs.FS
+	dir   string
+}
 
 // poolFor resolves the pool a session names, accepting only the two spellings
 // 1.x itself resolves, so a manifest cannot point a read outside the store.
-func poolFor(sessionDir, named string) contentPool {
-	root := filepath.Join(filepath.Dir(sessionDir), ".content-v1")
+func poolFor(store fs.FS, sessionName, named string) contentPool {
+	dir := ".content-v1"
 	if named == ".content-v1" {
-		root = filepath.Join(sessionDir, ".content-v1")
+		dir = path.Join(sessionName, ".content-v1")
 	}
-	return contentPool{root: root}
+	return contentPool{store: store, dir: dir}
 }
 
 // read returns an object's bytes after checking its size and digest.
@@ -39,7 +42,7 @@ func (p contentPool) read(ref contentRef) ([]byte, error) {
 	if _, err := hex.DecodeString(ref.Digest); err != nil {
 		return nil, fmt.Errorf("invalid content reference %q", ref.Digest)
 	}
-	f, err := os.Open(filepath.Join(p.root, "objects", ref.Digest[:2], ref.Digest[2:4], ref.Digest))
+	f, err := p.store.Open(path.Join(p.dir, "objects", ref.Digest[:2], ref.Digest[2:4], ref.Digest))
 	if err != nil {
 		return nil, err
 	}

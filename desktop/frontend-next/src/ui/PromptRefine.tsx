@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { AgentPort } from "../port/port";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -15,6 +15,7 @@ type Refine =
 export function usePromptRefine(port: AgentPort, text: string, adopt: (next: string) => void) {
   const [state, setState] = useState<Refine>({ phase: "idle" });
   const pending = useRef<AbortController | null>(null);
+  const tipId = useId();
   useEffect(() => () => pending.current?.abort(), []);
 
   const run = (draft: string) => {
@@ -62,12 +63,13 @@ export function usePromptRefine(port: AgentPort, text: string, adopt: (next: str
       className="mode plain studio-attach studio-refine"
       data-action="prompt.refine"
       aria-label={t("优化提示词")}
+      aria-describedby={tipId}
       aria-busy={working}
       disabled={!text.trim() || working}
       onClick={() => run(text)}
     >
       <StudioIcon name="spark" />
-      <span className="studio-control-tip" role="tooltip">
+      <span className="studio-control-tip" id={tipId} role="tooltip">
         <b>{t("优化提示词")}</b>
         <span>{t("用当前模型改写得更清楚，采用前不会替换原文 · Ctrl+Shift+E")}</span>
       </span>

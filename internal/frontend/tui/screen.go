@@ -122,10 +122,10 @@ type settledPrint struct {
 // settledRow keeps a copy of the row to draw from. Full screen, a shell
 // call's output and an answer's thinking start shut and can open later.
 func (m *model) settledRow(row Item, shown int) settledPrint {
-	if m.scr != nil && (row.Kind == ItemTool || row.Kind == ItemSay && row.Reasoning != "" && shown == 0) {
+	if m.scr != nil && (row.Kind == ItemTool || row.Kind == ItemSay && hasThought(row.Reasoning) && shown == 0) {
 		row.Fold = foldShut
 	}
-	if m.verbose && row.Kind == ItemSay && row.Reasoning != "" && shown == 0 {
+	if m.verbose && row.Kind == ItemSay && hasThought(row.Reasoning) && shown == 0 {
 		row.Fold = m.verboseFold()
 	}
 	return settledPrint{render: func(w int, hideRail bool) string { return renderItem(&row, w, shown, hideRail) }, row: &row}
@@ -189,7 +189,13 @@ func (m *model) fillScreen() tea.Cmd {
 // foldable reports a block whose shell output has more than its preview.
 func (b *block) foldable() bool {
 	r := b.row
-	if r == nil || r.Kind != ItemTool || r.Tool == nil || !termrender.IsShellTool(r.Tool.Name) {
+	if r == nil || r.Kind != ItemTool || r.Tool == nil {
+		return false
+	}
+	if spec, ok := chartOf(r); ok {
+		return len(spec.Data.Rows) > chartPreviewRows
+	}
+	if !termrender.IsShellTool(r.Tool.Name) {
 		return false
 	}
 	return strings.Count(strings.TrimRight(r.shellOutput(), "\n"), "\n")+1 > shellPreviewLines
@@ -492,8 +498,14 @@ func (m *model) onMouse(msg tea.MouseMsg) tea.Cmd {
 			m.scrollBy(wheelRows)
 		}
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseRight && s.sel.active && !s.sel.empty() {
-			return m.copySelection()
+		if msg.Button == tea.MouseRight {
+			switch {
+			case s.sel.active && !s.sel.empty():
+				return m.copySelection()
+			case m.composerShown():
+				return m.pasteClipboardText()
+			}
+			return nil
 		}
 		if msg.Button != tea.MouseLeft || mouse.Y >= h {
 			return nil

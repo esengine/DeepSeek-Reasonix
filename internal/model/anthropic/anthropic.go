@@ -233,14 +233,13 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 	}, "\x00")
 }
 
-func (c *client) sendOpts(hint provider.RequestHint) provider.SendOptions {
+func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
-		BadRequestHint: hint,
-		Provider:       c.name,
-		KeyEnv:         c.keyEnv,
-		KeySource:      c.keySource,
-		KeyPresent:     c.apiKey() != "",
-		RetryAuth:      c.authed.Load(),
+		Provider:   c.name,
+		KeyEnv:     c.keyEnv,
+		KeySource:  c.keySource,
+		KeyPresent: c.apiKey() != "",
+		RetryAuth:  c.authed.Load(), HeaderTimeout: c.idleTimeout,
 	}
 }
 
@@ -325,7 +324,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		c.headers.apply(httpReq)
 		return httpReq, nil
 	}
-	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(wireReq.reasoningHint), newReq)
+	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
 	if err != nil {
 		return nil, provider.AnnotateToolSchemaError(err, req.Tools)
 	}
@@ -344,7 +343,6 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 func (c *client) buildRequest(_ context.Context, req provider.Request) anthRequest {
 	var system []textBlock
 	var msgs []anthMessage
-	var reasoningHint provider.RequestHint
 
 	// appendBlocks adds blocks under role, merging into the previous message when
 	// it shares the role (keeps user/assistant strictly alternating).
@@ -390,10 +388,8 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 			appendBlocks("user", block)
 		case provider.RoleAssistant:
 			var blocks []contentBlock
-			if block, dropped := c.replayThinking(m); block != nil {
+			if block := c.replayThinking(m); block != nil {
 				blocks = append(blocks, *block)
-			} else if dropped {
-				reasoningHint = provider.HintDroppedToolCallReasoning
 			}
 			if m.Content != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
@@ -455,13 +451,12 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 		}
 	}
 	r := anthRequest{
-		Model:         c.model,
-		MaxTokens:     maxTokens,
-		System:        system,
-		Messages:      msgs,
-		Tools:         tools,
-		Stream:        true,
-		reasoningHint: reasoningHint,
+		Model:     c.model,
+		MaxTokens: maxTokens,
+		System:    system,
+		Messages:  msgs,
+		Tools:     tools,
+		Stream:    true,
 	}
 	// Extended thinking is provider-specific. DeepSeek defaults to enabled and
 	// accepts output_config.effort alongside its binary toggle. Adaptive reaches
@@ -758,16 +753,15 @@ type cacheControl struct {
 }
 
 type anthRequest struct {
-	Model         string               `json:"model"`
-	MaxTokens     int                  `json:"max_tokens"`
-	System        []textBlock          `json:"system,omitempty"`
-	Messages      []anthMessage        `json:"messages"`
-	Tools         []anthTool           `json:"tools,omitempty"`
-	Temperature   *float64             `json:"temperature,omitempty"`
-	Thinking      *thinkingConfig      `json:"thinking,omitempty"`
-	OutputConfig  *outputConfig        `json:"output_config,omitempty"`
-	Stream        bool                 `json:"stream"`
-	reasoningHint provider.RequestHint // host-side, never serialized: what this body left out
+	Model        string          `json:"model"`
+	MaxTokens    int             `json:"max_tokens"`
+	System       []textBlock     `json:"system,omitempty"`
+	Messages     []anthMessage   `json:"messages"`
+	Tools        []anthTool      `json:"tools,omitempty"`
+	Temperature  *float64        `json:"temperature,omitempty"`
+	Thinking     *thinkingConfig `json:"thinking,omitempty"`
+	OutputConfig *outputConfig   `json:"output_config,omitempty"`
+	Stream       bool            `json:"stream"`
 }
 
 type thinkingConfig struct {

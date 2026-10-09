@@ -19,6 +19,10 @@ const SURFACE: Record<string, string[]> = {
   fgStrong: ["--text-strong"],
   accent: ["--accent"],
   accentFg: ["--accent-fg"],
+  link: ["--link"],
+  brand: ["--brand"],
+  halo: ["--halo"],
+  labelAgent: ["--label-agent"],
   float: ["--float"],
   floatHi: ["--float-hi"],
   codeBg: ["--face-code"],
@@ -44,19 +48,17 @@ const DERIVED: [string, { source: string; paint: (t: Record<string, string>) => 
   ["sunkBg", { source: "bg", paint: (t) => t.bg }],
 ];
 
+// Tinted backgrounds that follow a decorative colour, as --accent-wash follows the accent.
+const WASHES: [string, string][] = [
+  ["brand", "--brand-wash"],
+  ["labelAgent", "--label-agent-wash"],
+];
+
 // What a pack may not touch. ok/warn/err/net/deleg encode what is happening —
 // "this broke", "this is running", "this went out to a sub-agent" — and a
 // theme that could recolour them would let a failure render as success. The
 // palette is the theme's; the meanings are the app's.
 const RESERVED = ["--ok", "--warn", "--err", "--net", "--deleg", "--add", "--del", "--focus"];
-
-// Variables the picture rides on. They are set together with the colours so a
-// pack never lands half-applied — an image over the previous palette.
-const IMAGE_VARS = ["--bg-image", "--bg-x", "--bg-y", "--bg-alpha", "--bg-overlay"];
-
-// The live backdrop's tints. Cleared with the image vars for the same reason:
-// a pack must never land half-applied.
-const SKY_VARS = ["--ray", "--ray-a", "--cloud-a", "--cloud-hi", "--cloud-gilt"];
 
 // How far each ink moves per contrast step, in OKLCH lightness points, read off
 // the built-in palette's own three steps. A pack states one set of inks, which
@@ -78,84 +80,99 @@ function ink(value: string, name: string, scheme: "light" | "dark", contrast: st
   return `oklch(from ${value} calc(l ${scheme === "light" ? "-" : "+"} ${(by / 100).toFixed(3)}) c h)`;
 }
 
+const SHEET_ID = "pack-theme";
+
+// Specificity ties the built-in contrast tiers (`:root[data-theme][data-contrast]`),
+// so the sheet wins them by coming later and a reader's or author's stylesheet
+// that comes later still wins it without `!important`.
+const SELECTOR = ":root:root[data-pack]";
+
 /** apply paints a pack onto the document, or clears back to the stylesheet.
- *  `busy` dims the picture while a turn runs: a photo that is right behind an
- *  idle window is in the way of a transcript being read. */
+ *  The pack's values are the declarations of one generated rule, written through
+ *  the CSSOM so a value the parser rejects is dropped rather than able to end
+ *  the rule. `busy` dims the picture while a turn runs: a photo that is right
+ *  behind an idle window is in the way of a transcript being read. */
 export function apply(pack: ThemePack | null, scheme: "light" | "dark", busy = false, contrast = "") {
   const root = document.documentElement;
-  for (const v of [...IMAGE_VARS, ...SKY_VARS]) root.style.removeProperty(v);
-  // The flag is what lets the page surface go transparent. It is removed first
-  // so a pack without a picture never leaves the previous one's window open.
+  // The flags are what let the page surface go transparent. They are removed
+  // first so a pack without a picture never leaves the previous one's window open.
   delete root.dataset.bg;
   delete root.dataset.sky;
-  for (const vars of Object.values(SURFACE)) {
-    for (const v of vars) root.style.removeProperty(v);
+  const paint = pack ? declarations(pack, scheme, busy, contrast) : [];
+  const owned = document.getElementById(SHEET_ID);
+  if (!pack || !paint.length) {
+    owned?.remove();
+    delete root.dataset.pack;
+    return;
   }
-  root.style.removeProperty("--accent-wash");
-  // Contrast is the reader's, so it moves the built-in inks too — not only a
-  // pack that happens to declare them. Read after the clear above, or each pass
-  // would offset the one before it.
-  const base = getComputedStyle(root);
-  for (const name of Object.keys(STEPS)) {
-    const authored = pack?.tokens[scheme]?.[name];
-    const from = authored || base.getPropertyValue(SURFACE[name][0]).trim();
-    if (!authored && from) {
-      for (const v of SURFACE[name]) root.style.setProperty(v, ink(from, name, scheme, contrast));
-    }
-  }
-  if (!pack) return;
+  root.dataset.pack = pack.id;
+  const style = place(owned as HTMLStyleElement | null);
+  const sheet = style.sheet;
+  if (!sheet) return;
+  while (sheet.cssRules.length) sheet.deleteRule(0);
+  sheet.insertRule(`${SELECTOR} {}`);
+  const decl = (sheet.cssRules[0] as CSSStyleRule).style;
+  for (const [name, value] of paint) decl.setProperty(name, value);
+  if (pack.sky) root.dataset.sky = "on";
+  if (pack.sky || pack.background?.image) root.dataset.bg = "on";
+}
 
+// Created at the end of <head> once and then left where it is: a stylesheet
+// added after it is an author's, and repainting the pack must not demote it.
+function place(existing: HTMLStyleElement | null): HTMLStyleElement {
+  if (existing) return existing;
+  const style = document.createElement("style");
+  style.id = SHEET_ID;
+  document.head.append(style);
+  return style;
+}
+
+function declarations(pack: ThemePack, scheme: "light" | "dark", busy: boolean, contrast: string): [string, string][] {
   const tokens = pack.tokens[scheme];
-  if (!tokens) return;
+  if (!tokens) return [];
+  const out: [string, string][] = [];
   for (const [name, value] of Object.entries(tokens)) {
     const paint = ink(value, name, scheme, contrast);
-    for (const v of SURFACE[name] ?? []) root.style.setProperty(v, paint);
+    for (const v of SURFACE[name] ?? []) out.push([v, paint]);
   }
   // A pack written before these grounds existed still moves them: each follows
   // the surface it sits on, instead of staying on the default palette under it.
   for (const [token, from] of DERIVED) {
     if (tokens[token] || !tokens[from.source]) continue;
-    for (const v of SURFACE[token]) root.style.setProperty(v, from.paint(tokens));
+    for (const v of SURFACE[token]) out.push([v, from.paint(tokens)]);
   }
   // The washes are tints of the accent, so a pack that moves the accent has to
   // move them too or the tinted backgrounds keep pointing at the old hue.
   if (tokens.accent) {
-    root.style.setProperty("--accent-wash", `color-mix(in srgb, ${tokens.accent} 12%, ${tokens.bg ?? "transparent"})`);
+    out.push(["--accent-wash", `color-mix(in srgb, ${tokens.accent} 12%, ${tokens.bg ?? "transparent"})`]);
+  }
+  for (const [token, wash] of WASHES) {
+    if (tokens[token]) out.push([wash, `color-mix(in srgb, ${tokens[token]} 12%, ${tokens.bg ?? "transparent"})`]);
   }
 
   // The sky is drawn rather than placed, so it is independent of the picture:
   // a pack can have either, both, or neither.
   const sky = pack.sky;
   if (sky) {
-    if (sky.ray) root.style.setProperty("--ray", sky.ray);
-    if (sky.cloud) root.style.setProperty("--cloud-hi", sky.cloud);
-    if (sky.cloudLit) root.style.setProperty("--cloud-gilt", sky.cloudLit);
-    root.style.setProperty("--ray-a", String(sky.rayAlpha));
-    root.style.setProperty("--cloud-a", String(sky.cloudAlpha));
-    root.dataset.sky = "on";
-    // data-bg is what every "let it through" rule is keyed on — the panels
-    // frost, the middle column steps aside, the text starts carrying its own
-    // shadow. Those rules are about there being something behind the window,
-    // not about it being a photograph, and a sky needs every one of them: the
-    // rail, the side and the panes together cover the whole window otherwise.
-    root.dataset.bg = "on";
+    if (sky.ray) out.push(["--ray", sky.ray]);
+    if (sky.cloud) out.push(["--cloud-hi", sky.cloud]);
+    if (sky.cloudLit) out.push(["--cloud-gilt", sky.cloudLit]);
+    out.push(["--ray-a", String(sky.rayAlpha)], ["--cloud-a", String(sky.cloudAlpha)]);
   }
 
   const bg = pack.background;
-  if (!bg?.image) return;
+  if (!bg?.image) return out;
   // The server owns freshness for this mutable URL. encodeURIComponent keeps
   // a pack id out of the CSS url() grammar.
-  root.style.setProperty("--bg-image", `url("/themes/${encodeURIComponent(pack.id)}/background")`);
-  root.style.setProperty("--bg-x", `${pct(bg.focusX)}%`);
-  root.style.setProperty("--bg-y", `${pct(bg.focusY)}%`);
-  root.style.setProperty("--bg-alpha", String(busy ? bg.taskOpacity : bg.homeOpacity));
+  out.push(["--bg-image", `url("/themes/${encodeURIComponent(pack.id)}/background")`]);
+  out.push(["--bg-x", `${pct(bg.focusX)}%`], ["--bg-y", `${pct(bg.focusY)}%`]);
+  out.push(["--bg-alpha", String(busy ? bg.taskOpacity : bg.homeOpacity)]);
   // A light palette already carries dark readable ink and pale panels. Using
   // the same opaque page-colour veil as dark mode washed illustrations into a
   // nearly white sheet, especially in the empty state. Keep a gentler scrim in
   // light mode; cards and navigation provide their own local contrast.
-  const overlay = scheme === "light" ? bg.overlayStrength * 0.58 : bg.overlayStrength;
-  root.style.setProperty("--bg-overlay", String(overlay));
-  root.dataset.bg = "on";
+  out.push(["--bg-overlay", String(scheme === "light" ? bg.overlayStrength * 0.58 : bg.overlayStrength)]);
+  return out;
 }
 
 function pct(v: number | undefined): number {

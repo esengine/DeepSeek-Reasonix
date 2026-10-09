@@ -776,7 +776,7 @@ func TestStdioFailureCapturesStderr(t *testing.T) {
 	if len(failures) != 1 {
 		t.Fatalf("failures = %+v, want one", failures)
 	}
-	if !strings.Contains(failures[0].Error, "helper stderr boom") {
+	if strings.Contains(failures[0].Error, "helper stderr boom") || !strings.Contains(failures[0].Stderr, "output omitted") {
 		t.Fatalf("failure should include stderr, got %q", failures[0].Error)
 	}
 }
@@ -801,7 +801,7 @@ func TestStdioFailureDecodesCodePageStderr(t *testing.T) {
 	if len(failures) != 1 {
 		t.Fatalf("failures = %+v, want one", failures)
 	}
-	if !strings.Contains(failures[0].Error, codePageNotFound) {
+	if strings.Contains(failures[0].Error, codePageNotFound) || !strings.Contains(failures[0].Stderr, "output omitted") {
 		t.Fatalf("failure should carry the decoded stderr, got %q", failures[0].Error)
 	}
 }
@@ -842,14 +842,14 @@ func TestStartupFailureReportsStageElapsedAndRedactedStderr(t *testing.T) {
 	if len(failures) != 1 || failures[0].Stage != "initialize" || failures[0].Elapsed <= 0 {
 		t.Fatalf("structured startup failure = %+v", failures)
 	}
-	if stderr := failures[0].Stderr; stderr != "" && !strings.Contains(stderr, "Bearer [redacted]") {
+	if stderr := failures[0].Stderr; stderr != "" && !strings.Contains(stderr, "output omitted") {
 		t.Fatalf("structured stderr was not redacted: %+v", failures[0])
 	}
 }
 
 func TestFailureSummaryRedactsCredentials(t *testing.T) {
 	got := summarizeFailureError(errors.New("startup failed: Authorization: Bearer summary-secret-value"))
-	if strings.Contains(got, "summary-secret-value") || !strings.Contains(got, "Bearer [redacted]") {
+	if strings.Contains(got, "summary-secret-value") || !strings.Contains(got, "dependency failure") {
 		t.Fatalf("failure summary was not redacted: %q", got)
 	}
 }

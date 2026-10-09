@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompactionCard } from "./CompactionCard";
 import type { Compaction } from "../../port/wire";
-import { FOLD_WHY } from "../../i18n/compaction_why";
+import { FOLD_WHY, NO_CODE_WHY } from "../../i18n/compaction_why";
 import { EN } from "../../i18n/en";
 
 const draw = (c: Compaction) => renderToStaticMarkup(<CompactionCard c={c} done />);
@@ -53,6 +53,22 @@ describe("what the card says when a fold installed nothing", () => {
     const html = draw({ trigger: "auto", code: "future_code" });
     expect(html).toContain("本次未折叠任何内容");
     expect(html).not.toContain("future_code");
+  });
+
+  it("names a cancelled compaction instead of reading as complete", () => {
+    const html = draw({ trigger: "auto", code: "cancelled" });
+    expect(html).toContain("压缩未完成");
+    expect(html).toContain("压缩被取消了");
+    expect(html).not.toContain("压缩完成");
+  });
+
+  it("never reads as complete when a fold installed nothing, whatever its code", () => {
+    expect(draw({ trigger: "auto", code: "future_code" })).not.toContain("压缩完成");
+    expect(draw({ trigger: "auto" })).not.toContain("压缩完成");
+  });
+
+  it("has an English sentence for the no-class decline", () => {
+    expect(EN[NO_CODE_WHY]).toBeTruthy();
   });
 
   it.each(Object.entries(FOLD_WHY))("%s has an English sentence", (code, zh) => {

@@ -48,11 +48,6 @@ func explainError(err error) error {
 			return errors.New(msg)
 		}
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
-		// The status says only that the body was refused. When the client that
-		// built it named what it left out, that answer is the actionable one.
-		if hint := i18n.M.ProviderHintMessage(string(apiErr.Hint)); hint != "" {
-			msg = hint
-		}
 		if msg == "" {
 			return err
 		}

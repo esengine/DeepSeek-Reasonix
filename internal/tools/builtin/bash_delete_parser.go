@@ -16,6 +16,14 @@ import (
 	"reasonix/internal/safety/sandbox"
 )
 
+// A call queued behind a cold start waits out that start, so the queue is
+// bounded by the cold budget; a warm helper answers within the warm budget.
+var (
+	deleteParserWarmBudget = 10 * time.Second
+	deleteParserColdBudget = 90 * time.Second
+	startDeleteParserFunc  = startDeleteParser
+)
+
 var errDeleteParser = errors.New("host shell parser unavailable")
 
 type deleteParserProcess struct {
@@ -35,8 +43,8 @@ var deleteParsers = struct {
 }{workers: make(map[string]*deleteParserWorker)}
 
 func analyzePowerShellDelete(ctx context.Context, sh sandbox.Shell, command string) (shellparse.DeleteAnalysis, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	queueCtx, cancelQueue := context.WithTimeout(ctx, deleteParserColdBudget)
+	defer cancelQueue()
 	deleteParsers.Lock()
 	worker := deleteParsers.workers[sh.Path]
 	if worker == nil {
@@ -46,16 +54,22 @@ func analyzePowerShellDelete(ctx context.Context, sh sandbox.Shell, command stri
 	}
 	deleteParsers.Unlock()
 	select {
-	case <-ctx.Done():
-		return shellparse.DeleteAnalysis{}, ctx.Err()
+	case <-queueCtx.Done():
+		return shellparse.DeleteAnalysis{}, queueCtx.Err()
 	case <-worker.token:
 	}
 	defer func() { worker.token <- struct{}{} }()
+	budget := deleteParserWarmBudget
+	if worker.process == nil {
+		budget = deleteParserColdBudget
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
 	if ctx.Err() != nil {
 		return shellparse.DeleteAnalysis{}, ctx.Err()
 	}
 	if worker.process == nil {
-		p, err := startDeleteParser(sh)
+		p, err := startDeleteParserFunc(sh)
 		if err != nil {
 			return shellparse.DeleteAnalysis{}, errDeleteParser
 		}
@@ -120,6 +134,9 @@ func startDeleteParser(sh sandbox.Shell) (*deleteParserProcess, error) {
 
 func stopDeleteParser(p *deleteParserProcess) {
 	_ = p.input.Close()
+	if p.cmd == nil {
+		return
+	}
 	_ = p.cmd.Process.Kill()
 	_ = p.cmd.Wait()
 }

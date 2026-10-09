@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/base/testenv"
+	"reasonix/internal/contract/provider"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -103,6 +104,9 @@ func TestSendUsesSharedProtocolWithoutDeletingLocalReport(t *testing.T) {
 		}
 		if got := req.Header.Get("Content-Type"); got != "application/json" {
 			t.Fatalf("content type = %q", got)
+		}
+		if got := req.Header.Get("User-Agent"); got != provider.ClientUserAgent() {
+			t.Fatalf("User-Agent = %q", got)
 		}
 		if err := json.NewDecoder(req.Body).Decode(&uploaded); err != nil {
 			t.Fatal(err)

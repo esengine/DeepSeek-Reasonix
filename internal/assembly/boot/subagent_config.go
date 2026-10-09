@@ -2,10 +2,13 @@ package boot
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/runtime/agent"
@@ -23,7 +26,7 @@ type subagentConfig struct {
 	profileModel           func(profile string) string
 	profileEffort          func(profile string) string
 	scheduler              *writeclaim.SubagentScheduler
-	inheritedEffort        string
+	inheritedFor           func(modelRef string) string
 	inheritedEffortDropped bool
 	taskModel              string
 	taskEffort             string
@@ -52,6 +55,41 @@ func resolveInheritedSubagentEffort(cfg *config.Config, entry *config.ProviderEn
 	return inheritedSubagentEffort{dropped: true}
 }
 
+// inheritedEffortFor resolves agent.subagent_effort against the model that will
+// execute, so a default written for the parent is never remapped onto another
+// model. An empty result means that model runs at its own default; the dropped
+// default is announced once per model.
+func inheritedEffortFor(opts Options, cfg *config.Config, resolver provider.Resolver, parent *config.ProviderEntry, announced *sync.Map) func(string) string {
+	return func(modelRef string) string {
+		raw := strings.TrimSpace(cfg.Agent.SubagentEffort)
+		ref := strings.TrimSpace(modelRef)
+		if raw == "" {
+			return ""
+		}
+		if ref != "" && ref == strings.TrimSpace(cfg.Agent.SubagentModel) {
+			return raw
+		}
+		target, selected, err := subagentModelEntry(cfg, resolver, parent, ref)
+		if err != nil {
+			return ""
+		}
+		if normalized, ok := config.NormalizeInheritedEffort(&target, raw); ok {
+			return normalized
+		}
+		if parent != nil && selected == modelRefFromEntry(parent) {
+			return ""
+		}
+		if _, seen := announced.LoadOrStore(selected, true); !seen {
+			report(opts.Sink, event.Event{
+				Level:  event.LevelWarn,
+				Text:   "Ignored the inherited subagent effort for the selected model.",
+				Detail: fmt.Sprintf("agent.subagent_effort = %q is not supported by model %q; that subagent uses the provider/model default effort. The persisted setting was not changed.", raw, selected),
+			})
+		}
+		return ""
+	}
+}
+
 func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderEntry, modelName string,
 	resolver provider.Resolver, proxy netclient.ProxySpec, skills *skill.Store) subagentConfig {
 	maxConcurrency, maxWriters := writeclaim.NormalizeConcurrencyLimits(
@@ -72,7 +110,7 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 				normalized, err := config.NormalizeEffort(&me, effort)
 				if err != nil {
 					if resolver == nil {
-						return nil, nil, 0, err
+						return nil, nil, 0, fmt.Errorf("subagent effort %q on %s: %w", effort, selectedRef, err)
 					}
 					normalized = effort
 				}
@@ -101,10 +139,10 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 		profileModel:           func(profile string) string { return firstConfigured(cfg.Agent.SubagentModels, profile) },
 		profileEffort:          func(profile string) string { return firstConfigured(cfg.Agent.SubagentEfforts, profile) },
 		scheduler:              writeclaim.NewSubagentScheduler(maxConcurrency, maxWriters),
-		inheritedEffort:        inherited.value,
+		inheritedFor:           inheritedEffortFor(opts, cfg, resolver, entry, &sync.Map{}),
 		inheritedEffortDropped: inherited.dropped,
 		taskModel:              firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel),
-		taskEffort:             firstNonEmpty(cfg.Agent.SubagentEfforts["task"], inherited.value),
+		taskEffort:             strings.TrimSpace(cfg.Agent.SubagentEfforts["task"]),
 		maxDepth:               agent.NormalizeMaxSubagentDepth(cfg.Agent.MaxSubagentDepth),
 	}
 }
@@ -148,4 +186,28 @@ func firstConfigured(values map[string]string, profile string) string {
 		}
 	}
 	return ""
+}
+
+// SubagentModelOverride is a subagent_models entry. It outranks the global
+// subagent_model for the profile it names, so a surface that shows the global
+// value has to name these beside it.
+type SubagentModelOverride struct {
+	Key   string
+	Model string
+}
+
+// SubagentModelOverrides lists the non-empty subagent_models entries in key
+// order. An empty value overrides nothing and is left out.
+func SubagentModelOverrides(cfg *config.Config) []SubagentModelOverride {
+	if cfg == nil {
+		return nil
+	}
+	var out []SubagentModelOverride
+	for key, model := range cfg.Agent.SubagentModels {
+		if m := strings.TrimSpace(model); m != "" {
+			out = append(out, SubagentModelOverride{Key: key, Model: m})
+		}
+	}
+	slices.SortFunc(out, func(a, b SubagentModelOverride) int { return strings.Compare(a.Key, b.Key) })
+	return out
 }

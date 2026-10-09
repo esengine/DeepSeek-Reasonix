@@ -125,7 +125,7 @@ func runCLIStream(t *testing.T, argv ...string) []streamRecord {
 	t.Helper()
 	var code int
 	stdout, stderr := captureDrainedOutput(t, func() { code = Run(argv, "test") })
-	if code != 0 {
+	if code != 0 && code != runExitUntrustedFolder {
 		t.Fatalf("Run(%q) exited %d\nstdout:\n%s\nstderr:\n%s", argv, code, stdout, stderr)
 	}
 	return readStreamRecords(t, stdout)

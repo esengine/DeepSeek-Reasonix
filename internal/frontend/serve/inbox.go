@@ -118,6 +118,9 @@ func (s *Server) inboxEnqueue(w http.ResponseWriter, r *http.Request) {
 // submitChips starts a chip line the way /submit starts a typed one, through
 // the inbox because the envelope is what carries the chips to the turn.
 func (s *Server) submitChips(w http.ResponseWriter, r *http.Request, line chipLine, format string) {
+	if s.refuseKeylessTurn(w) {
+		return
+	}
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	if s.inboxAPI().Running() {
@@ -141,6 +144,7 @@ func (s *Server) enqueueLocked(w http.ResponseWriter, req control.InboxRequest) 
 				sessionInUse(w, err)
 				return
 			}
+			keepUsedWorkspace(s.ctl().WorkspaceRoot())
 		}
 	}
 	if err := s.promoteSessionLease(); err != nil {

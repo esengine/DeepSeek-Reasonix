@@ -1,13 +1,28 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Item } from "../../state/session";
 import { ElicitCard } from "./ElicitCard";
 
-afterEach(cleanup);
+let inflight = 0;
 
-const pending = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
+afterEach(() => {
+  cleanup();
+  expect(inflight, "an answer outlived its test and would settle after the environment is gone").toBe(0);
+});
+
+const pending = () => {
+  inflight++;
+  return new Promise<void>((resolve) => setTimeout(resolve, 20)).finally(() => {
+    inflight--;
+  });
+};
+
+const settled = async () => {
+  await waitFor(() => expect(inflight).toBe(0));
+  await act(async () => {});
+};
 
 const form = (extra: Partial<Extract<Item, { t: "ask" }>> = {}) => ({
   t: "ask", id: "row", ...extra, ask: { id: "ask", origin: { kind: "mcp", source: "deployer", message: "Deploy settings", note: "Email is required" }, questions: [
@@ -34,6 +49,7 @@ describe("a server's form", () => {
       { questionId: "email", selected: ["ada@example.com"] },
       { questionId: "env", selected: ["dev"] },
     ]);
+    await settled();
   });
 
   it("declines with nothing given", async () => {
@@ -41,6 +57,7 @@ describe("a server's form", () => {
     render(<ElicitCard item={form()} onAnswer={answer} />);
     await userEvent.click(screen.getByRole("button", { name: "拒绝提供" }));
     expect(answer).toHaveBeenCalledWith("row", "ask", [{ questionId: "email", selected: [] }, { questionId: "env", selected: [] }]);
+    await settled();
   });
 
   it("reads back what was sent, or that it was declined", () => {
@@ -70,5 +87,6 @@ describe("a form sent back", () => {
     await userEvent.type(replicas, "3");
     await userEvent.click(screen.getByRole("button", { name: "提交" }));
     expect(answer).toHaveBeenCalledWith("row", "ask", [{ questionId: "replicas", selected: ["3"] }, { questionId: "env", selected: ["dev"] }]);
+    await settled();
   });
 });

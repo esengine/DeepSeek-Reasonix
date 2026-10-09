@@ -18,15 +18,20 @@ import (
 )
 
 type Options struct {
+	// Context ends the background reporting; nil runs until the process exits.
+	Context context.Context
 	Mode    string
 	Version string
 	// Surface is empty for the CLI, the only surface that reported before the
 	// field existed.
 	Surface surface.Surface
-	// SuppressPing withholds the daily launch ping while still reporting
+	// SuppressPing withholds the daily ping while still reporting
 	// counters. Zero sends it, which is what every surface did before the
 	// consents were separable.
-	SuppressPing   bool
+	SuppressPing bool
+	// PingAllowed, when set, is asked before every ping attempt, so a consent
+	// withdrawn while the process runs takes effect on the next one.
+	PingAllowed    func() bool
 	HomeDir        string
 	Interactive    bool
 	Proxy          netclient.ProxySpec
@@ -72,7 +77,12 @@ func Start(opts Options) *Reporter {
 			{Signal: "settings_language", Bucket: languageBucket(opts.Language), Count: 1},
 		},
 	}
-	go client.backgroundFlush(!opts.SuppressPing)
+	client.allowed = opts.PingAllowed
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go client.background(ctx, !opts.SuppressPing)
 	return r
 }
 

@@ -41,6 +41,7 @@ func catalogModelEntry(d provider.Descriptor, current string) (modelEntry, bool)
 	entry := modelEntry{
 		Ref: ref, Active: ref == current, Default: d.Default,
 		Vision: d.Vision, Efforts: d.Efforts, Effort: d.DefaultEffort, ContextWindow: d.ContextWindow,
+		ForcesThinking: d.ForcesThinking,
 	}
 	if d.InputPerMillion > 0 || d.OutputPerMillion > 0 {
 		entry.Price = &modelPrice{Input: d.InputPerMillion, Output: d.OutputPerMillion, CacheHit: d.CacheHitPerMillion, Currency: d.PricingCurrency}

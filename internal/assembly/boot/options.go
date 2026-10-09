@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/model/billing"
 	"reasonix/internal/runtime/taskmonitor"
+	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/sessiontemp"
 	"reasonix/internal/tools/builtin"
@@ -67,6 +68,8 @@ type Options struct {
 	// empty follows the environment. It binds this assembly only — a
 	// Controller's later re-reads and the history index still read the process.
 	Home string
+	// Tests that compare prompt bytes must not depend on host discovery probes.
+	resolvedShell *sandbox.Shell
 	// StatsSource labels this frontend's usage records. Unset — or a value this
 	// build does not know — disables usage recording rather than filing turns
 	// under a label nothing can read back.

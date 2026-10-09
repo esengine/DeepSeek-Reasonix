@@ -29,9 +29,10 @@ func (f *fakeRegistry) Detail(context.Context, string) (market.Detail, error) {
 
 func withRegistry(t *testing.T, reg market.Registry) {
 	t.Helper()
-	old := marketRegistry
+	old, oldBrowse := marketRegistry, marketBrowser
 	marketRegistry = func(*http.Client) market.Registry { return reg }
-	t.Cleanup(func() { marketRegistry = old })
+	marketBrowser = marketRegistry
+	t.Cleanup(func() { marketRegistry, marketBrowser = old, oldBrowse })
 }
 
 func marketCode(t *testing.T, resp *http.Response) string {

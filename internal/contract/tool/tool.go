@@ -304,10 +304,9 @@ type Paged interface {
 }
 
 // ReadTargeter is an optional capability a Tool implements when a call names the
-// one filesystem path it reads. It is how a fetch of an already-spilled result is
-// recognised, and such a fetch must never spill again — it is how the pointer
-// gets redeemed. The tool resolves the path itself because only it knows its own
-// argument shape; "" means the call names no single path, as a shell cannot.
+// one filesystem path it reads, or "" when it names none. It recognises a fetch
+// of an already-spilled result, which must never spill again, and session path
+// tracking reuses it: a completed call that names a file counts as touching it.
 type ReadTargeter interface {
 	ReadTarget(args json.RawMessage) string
 }

@@ -25,6 +25,7 @@ func init() { tool.RegisterBuiltin(globTool{}) }
 // session-scoped read aliases for external folder refs. forbidRoots lists
 // directories the tool may not search inside.
 type globTool struct {
+	netRoots    []string
 	workDir     string
 	paths       *PathResolver
 	forbidRoots []string
@@ -77,6 +78,9 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	rawPattern := p.Pattern
 	rp := resolveReadablePath(g.workDir, p.Pattern, g.paths)
 	p.Pattern = rp.Path
+	if err := rp.refuseNetwork(g.netRoots); err != nil {
+		return "", err
+	}
 	if err := confineScope(g.readRoots, globBase(p.Pattern)); err != nil {
 		return "", err
 	}

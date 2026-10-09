@@ -43,6 +43,10 @@ func (posixShell) Alive(pid int, p StatePaths) string {
 	return ServeAliveCommand(pid, p)
 }
 
+func (posixShell) ServeVersion(pid int) string {
+	return ServeVersionCommand(pid)
+}
+
 func (posixShell) Stop(pid int, p StatePaths) string {
 	return StopCommand(pid, p)
 }

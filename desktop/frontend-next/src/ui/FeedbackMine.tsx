@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { current, t } from "../i18n";
 import { tx } from "../i18n/rich";
-import { FEEDBACK_NEXT_VERSION, FEEDBACK_REPO_ISSUES, type FeedbackItem, type FeedbackMine as Mine, type FeedbackStatus } from "../port/feedback";
+import { FEEDBACK_NEXT_VERSION, FEEDBACK_REPO_ISSUES, isUnderReview, type FeedbackItem, type FeedbackMine as Mine, type FeedbackStatus } from "../port/feedback";
 import type { AgentPort } from "../port/port";
 import { CopyButton } from "./CopyButton";
+import { FeedbackLevel } from "./FeedbackLevel";
 import { feedbackFailure, type FeedbackFailure } from "./feedbackfailure";
-import { FeedbackReplyBox, FeedbackThread, foldedUnread } from "./FeedbackThread";
+import { FeedbackReplyBox, FeedbackReviewNote, FeedbackThread, foldedUnread } from "./FeedbackThread";
 import { StudioIcon, type StudioIconName } from "./StudioIcon";
 
 export const STATUS_LABEL: Record<FeedbackStatus, string> = {
@@ -31,6 +32,8 @@ const STATUS_ICON: Record<FeedbackStatus, StudioIconName> = {
   wontfix: "close",
   duplicate: "copy",
 };
+
+export const REVIEW_LABEL = "审核中";
 
 const CATEGORY_LABEL = { bug: "问题", idea: "建议", question: "疑问", other: "其他" } as const;
 
@@ -89,7 +92,7 @@ function steps(item: FeedbackItem, issue: (n: number) => ReactNode): Step[] {
             : t(STATUS_LABEL.duplicate)
           : t("已解决");
   const out: Step[] = [
-    { id: "received", label: t(STATUS_LABEL.received), state: state(0) },
+    { id: "received", label: t(isUnderReview(item) ? REVIEW_LABEL : STATUS_LABEL.received), state: state(0) },
     { id: "recorded", label: recorded, state: state(1) },
   ];
   if (item.status === "wontfix" || item.status === "duplicate") return [...out, { id: item.status, label: end, state: "done" }];
@@ -188,6 +191,12 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
         </button>
       </div>
 
+      {mine?.profile ? (
+        <FeedbackLevel profile={mine.profile} offline={mine.offline} />
+      ) : (
+        mine !== null && mine.items.length > 0 && <p className="fbk-hint fbk-level-gone">{t("等级暂时无法显示。")}</p>
+      )}
+
       {mine?.offline && (
         <div className="fbk-note" role="status" data-tone="info">
           <StudioIcon name="warning" />
@@ -231,6 +240,11 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
                     <StudioIcon name={STATUS_ICON.needs_info} />
                     {t("需要你回复")}
                   </span>
+                ) : isUnderReview(item) ? (
+                  <span className="fbk-chip" data-status="received" data-review="">
+                    <StudioIcon name="shield" />
+                    {t(REVIEW_LABEL)}
+                  </span>
                 ) : (
                   <span className="fbk-chip" data-status={item.status}>
                     <StudioIcon name={STATUS_ICON[item.status]} />
@@ -248,6 +262,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
                   </li>
                 ))}
               </ol>}
+              <FeedbackReviewNote item={item} />
               <FeedbackThread item={item} fresh={fresh[item.receipt] ?? 0} onShowAll={unfolded} />
               <FeedbackReplyBox port={port} item={item} limit={replyBytes} offline={mine.offline} onSent={sent} onFile={onFile} onStale={load} />
             </li>

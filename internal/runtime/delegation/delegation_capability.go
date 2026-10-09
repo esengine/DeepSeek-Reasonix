@@ -65,11 +65,10 @@ func (t *TaskTool) ResolveProfile(args json.RawMessage) *event.Profile {
 			configEffort = t.profileConfigEffort(name)
 		}
 	}
-	model, effort := ResolveModelEffort(
+	model, effort := t.resolveModelEffort(
 		configModel, configEffort,
 		p.Model, p.Effort,
 		profileModel, profileEffort,
-		t.subagentModel, t.subagentEffort,
 	)
 	name := strings.TrimSpace(p.Profile)
 	if name == "" {

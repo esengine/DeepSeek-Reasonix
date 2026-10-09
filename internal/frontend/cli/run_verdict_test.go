@@ -84,8 +84,12 @@ func TestRunProseOnlyFinishHasNoReadinessDebt(t *testing.T) {
 func TestRunReportsPermissionDenials(t *testing.T) {
 	runWriteFileFixture(t)
 	code, result, stderr := runCLIJSONResult(t, "run", "--output-format", "json", "write it")
-	if code != 0 {
-		t.Fatalf("exit %d, want 0\nstderr:\n%s", code, stderr)
+	wantExit := 0
+	if sandbox.Available() {
+		wantExit = runExitUntrustedFolder
+	}
+	if code != wantExit {
+		t.Fatalf("exit %d, want %d\nstderr:\n%s", code, wantExit, stderr)
 	}
 	denials, _ := result["permission_denials"].([]any)
 	if len(denials) != 1 {
@@ -103,7 +107,7 @@ func TestRunReportsPermissionDenials(t *testing.T) {
 	runWriteFileFixture(t)
 	var printCode int
 	_, printErr := captureCLIOutput(t, func() { printCode = Run([]string{"-p", "write it"}, "test") })
-	if printCode != 0 || !strings.Contains(printErr, "permission policy refused 1 tool call(s): write_file") {
+	if printCode != wantExit || !strings.Contains(printErr, "permission policy refused 1 tool call(s): write_file") {
 		t.Fatalf("-p exited %d; stderr must name the refused call:\n%s", printCode, printErr)
 	}
 

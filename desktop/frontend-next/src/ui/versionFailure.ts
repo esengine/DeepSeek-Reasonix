@@ -43,6 +43,8 @@ export function deltaSkippedCopy(code: string): string {
       return t("增量数据下载太慢，本次改为下载完整安装包。");
     case "update.delta.mismatch":
       return t("增量数据未通过校验，本次改为下载完整安装包。");
+    case "update.delta.too_large":
+      return t("这次版本跨度较大，增量数据比完整安装包还多，本次改为下载完整安装包。");
     case "update.delta.disk":
       return t("无法写入增量更新文件，本次改为下载完整安装包。");
   }

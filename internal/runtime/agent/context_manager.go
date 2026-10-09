@@ -100,7 +100,8 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 	// + role projection). Extension interceptors run only on the real sampling
 	// request so side-effecting plugins are not double-invoked; if they expand
 	// the prompt past the hard ceiling, overflow recovery still fires.
-	est := a.estimatedVisibleRequestTokens(visible)
+	visibleShape := a.visibleRequestShape(visible)
+	est := a.estimatedShapeTokens(visibleShape)
 	ownEst := est // before an observation that may count provider-injected content
 	prepared := PreparedContext{
 		Messages:          append([]provider.Message(nil), visible...),
@@ -112,12 +113,18 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 	}
 	fold := a.compactTrigger()
 	hard := a.hardInputCeiling()
+	// pressure only decides whether to fold; the hard ceiling stays on the local
+	// estimate, because a provider count no fold can lower must not end the turn.
+	pressure := est
 	if policy.ObservedInputTokens > 0 {
 		est = policy.ObservedInputTokens
 		prepared.InputTokens = est
+		pressure = est
+	} else if floor, ok := a.providerReportedFloor(visibleShape, prepared.ProjectionVersion); ok {
+		pressure = max(pressure, floor)
 	}
 	inputHash := a.contextMaintenanceInputHash(visible)
-	if blocked, reason := a.contextMaintenanceBlocked(inputHash); blocked && policy.Trigger != CompactionTriggerManual {
+	if blocked, reason := a.contextMaintenanceBlocked(inputHash, ownEst, policy.Trigger == CompactionTriggerOverflow); blocked && policy.Trigger != CompactionTriggerManual {
 		// A generation that freed nothing has nothing left to try, so the
 		// request goes out and the provider rules.
 		if policy.Trigger == CompactionTriggerOverflow {
@@ -125,7 +132,7 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 		}
 		return prepared, nil
 	}
-	if est < fold {
+	if pressure < fold {
 		a.sess.win.compaction.stuck = false
 	}
 	if a.sess.win.compaction.stuck && policy.Trigger == CompactionTriggerPressure {
@@ -138,7 +145,7 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 			policy.Trigger == CompactionTriggerOverflow || est >= hard,
 		ignoreEconomics: policy.IgnoreEconomics || policy.Trigger == CompactionTriggerOverflow || est >= hard,
 	}
-	if est < fold && !scope.ignoreThreshold {
+	if pressure < fold && !scope.ignoreThreshold {
 		return prepared, nil
 	}
 
@@ -251,14 +258,18 @@ func (m ContextManager) currentPrepared() PreparedContext {
 // ModelMessages + role projection + tool schemas. Extension interceptors are
 // intentionally omitted here (see prepareOnce) to avoid double side effects.
 func (a *contextWindow) estimatedVisibleRequestTokens(visible []provider.Message) int {
+	return a.estimatedShapeTokens(a.visibleRequestShape(visible))
+}
+
+func (a *contextWindow) visibleRequestShape(visible []provider.Message) requestCalibrationShape {
 	if a == nil {
-		return 0
+		return requestCalibrationShape{}
 	}
 	msgs := a.providerProjectionMessages(provider.ModelMessages(append([]provider.Message(nil), visible...)))
 	for i := range msgs {
 		msgs[i].CreatedAt = 0
 	}
-	return a.estimatedRequestTokens(provider.Request{
+	return a.requestCalibrationShape(provider.Request{
 		Messages:    msgs,
 		Tools:       a.estimationSurface(),
 		MaxTokens:   a.maxOutputTokens,

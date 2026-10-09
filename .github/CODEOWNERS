@@ -37,6 +37,7 @@
 /.github/workflows/studio-certum-signing-smoke.yml @esengine @SivanCola
 /.github/actions/setup-certum/            @esengine @SivanCola
 /cmd/signpath-contract/                   @esengine @SivanCola
+/scripts/install-smoke.ps1                @esengine @SivanCola
 /scripts/sign-certum.ps1                  @esengine @SivanCola
 /scripts/verify-windows-authenticode.ps1  @esengine @SivanCola
 /scripts/verify-windows-package.ps1       @esengine @SivanCola

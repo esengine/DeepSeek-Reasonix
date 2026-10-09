@@ -32,6 +32,7 @@ func init() { tool.RegisterBuiltin(readFile{}) }
 // schema. forbidRoots lists directories the tool may not read from (resolved,
 // absolute paths).
 type readFile struct {
+	netRoots    []string
 	workDir     string
 	paths       *PathResolver
 	forbidRoots []string
@@ -107,6 +108,9 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 // refuse is the read boundary: outside the read roots, or a forbidden path that
 // is answered as if it did not exist.
 func (r readFile) refuse(rp ResolvedPath) error {
+	if err := rp.refuseNetwork(r.netRoots); err != nil {
+		return err
+	}
 	if err := confineScope(r.readRoots, rp.Path); err != nil {
 		return err
 	}

@@ -25,6 +25,9 @@ export interface McpEntry {
   // differ until the next one.
   alwaysLoad?: boolean;
   inSchema?: boolean;
+  launch?: string;
+  // Why a pending server waits for the user, as the kernel's code.
+  pendingReason?: string;
 }
 
 // always puts a server's tools in every request; deferred reaches them through
@@ -87,6 +90,11 @@ export interface McpDraftServer {
   url?: string;
   env?: Record<string, string>;
   headers?: Record<string, string>;
+  displayUrl?: string;
+  displayEnv?: Record<string, string>;
+  displayHeaders?: Record<string, string>;
+  displayCommand?: string;
+  displayArgs?: string[];
 }
 
 // What the confirmation card must show: shell is the command that will run,

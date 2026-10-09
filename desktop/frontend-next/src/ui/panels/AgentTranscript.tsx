@@ -2,10 +2,9 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { seconds } from "../../i18n/format";
 import { t } from "../../i18n";
-import { nestLabel } from "../delegation";
+import { delegateStatus, delegateStatusLabel, nestLabel } from "../delegation";
 import { useEscape } from "../dismiss";
 import { listenAction } from "../listen";
-import { toolFailed } from "../cards/outcome";
 import { NestedCall } from "../cards/ToolCard";
 import { StudioIcon } from "../StudioIcon";
 import { agentName, type Task } from "./Agents";
@@ -28,7 +27,7 @@ export function AgentTranscript({ task, onClose }: { task: Task; onClose: () => 
     stops[next].focus();
   }
   const { tool, children, running } = task;
-  const status = running ? t("运行中") : toolFailed(tool) ? t("已中断") : t("已交付");
+  const status = delegateStatusLabel(delegateStatus(running, tool));
   const body = (
     <div className="agent-tx-scrim" data-action="agent.close" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="agent-tx" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("子代理完整记录：{name}", { name: agentName(task) })} data-status={running ? "running" : "done"}>

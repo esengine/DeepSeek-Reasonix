@@ -39,7 +39,7 @@ is configured.
 | `--allowed-tools RULES` | Add session-only permission allow rules. Repeatable; `--allowedTools` is an alias. |
 | `--permission-mode MODE` | Start with a specific permission posture: `read-only`, `ask`, `auto`, `acceptEdits`, `dontAsk`, `plan` or `bypassPermissions`. 1.x's `workspace-write` and `danger-full-access` also work, as Auto and Yolo. Without it, see [Default posture](#default-posture). |
 | `--yolo` | Start in YOLO mode; alias for `--dangerously-skip-permissions`. It skips approval prompts only: the sandbox, network policy and deny rules still apply. The first interactive use asks once. |
-| `--inline` | Write the conversation into the terminal's scrollback instead of taking the full screen. |
+| `--inline` | Write the conversation into the terminal's scrollback instead of taking the full screen. Only `reasonix tui --inline` takes it; a bare `reasonix --inline` is an unknown command and exits `2`. |
 
 Flags may appear before or after the prompt where applicable.
 
@@ -204,7 +204,7 @@ and `--auto` / `-y` (an alias for `--permission-mode auto`).
 - Flags written before `run` move after it only when both the terminal UI
   (plus `-y` and `-p`) and `run` take every one of them the same way:
   `reasonix -y run "task"` is `reasonix run -y "task"`.
-- A terminal-UI-only leading flag (`--inline`, `-r`, `--resume` with no value)
+- A terminal-UI-only leading flag (`-r`, `--resume` with no value)
   sends the whole command line to the terminal UI instead.
 - So does a run-only leading flag (`--output-format`, `--metrics`): the
   terminal UI then reports it. Write such flags after `run`.
@@ -312,7 +312,7 @@ empty when nothing was, and a refusal never changes the exit code. The same
 | `code` | Cause |
 | --- | --- |
 | `permission.unattended` | It needed an approval and nobody could give one. |
-| `permission.untrusted_folder` | The folder is not trusted, so it needed an approval nobody could give. The denial's `remedy` names `reasonix trust --dir <folder>`, which shows what the folder would run before approving; `--fail-on-unverified` exits `3` and the result's `unverified_by` carries the code. |
+| `permission.untrusted_folder` | The folder is not trusted, so it needed an approval nobody could give. The denial's `remedy` names `reasonix trust --dir <folder>`, which shows what the folder would run before approving; the run exits `4` (`3` under `--fail-on-unverified`) and the result's `unverified_by` carries the code. |
 | `permission.read_only` | The session is in `read-only`. |
 | `permission.deny_rule` | A deny rule matched. |
 | `permission.declined` | A person answered no. |
@@ -353,10 +353,11 @@ Exit statuses of `reasonix run`:
 
 | Status | Meaning |
 | --- | --- |
-| `0` | The model finished, including with refused calls or unmet readiness. |
+| `0` | The model finished, including with other refused calls or unmet readiness. |
 | `1` | The run failed: provider, configuration, limit, or cancellation. |
 | `2` | The command line was invalid. |
-| `3` | `--fail-on-unverified` was given and final readiness stayed unmet, or the folder is not trusted and its edits were refused. |
+| `3` | `--fail-on-unverified` was given and final readiness stayed unmet or the folder's edits were refused for lack of trust. |
+| `4` | The folder is not trusted and its edits or commands were refused, so the work was not done. Trust it with `reasonix trust --dir <folder>` or pass `--permission-mode` knowingly. |
 
 ### Redacted machine interfaces
 
@@ -600,7 +601,7 @@ the displayed list matches the commands the TUI accepts.
 | --- | --- |
 | `/model` | Search configured models and switch the active model. |
 | `/provider` | Choose a provider, then choose one of its configured models. |
-| `/resume` | Search recent sessions and switch to one. |
+| `/resume [n]` | Search recent sessions and switch to one; `/resume <n>` switches to the nth session of that list directly. |
 | `/status` | Show model, effort, cache, Git, background jobs, and execution setting or balance details. |
 | `/preset [balanced\|delivery]` | View or change the agent execution setting without rebuilding the controller. `/work-mode` and `/profile` remain compatibility aliases; `economy` and `light` resolve to `balanced`. |
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |

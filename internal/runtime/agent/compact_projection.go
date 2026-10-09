@@ -438,7 +438,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 	// The annotation rides the projection, not the canonical transcript: the
 	// original stays whole for resume and rewind.
 	region := msgs[head:start]
-	_, fold, retention, policyKeep := a.partitionFoldForProjection(region)
+	policy, fold, retention, policyKeep := a.partitionUnderCeiling(scope, stateSnapshot, canonical, fromProjection, msgs, head, start)
 	if len(fold) == 0 || (!scope.ignoreEconomics && !a.foldEconomics(fold)) {
 		return CompactionNoop, NoopFoldBelowEconomics, nil
 	}
@@ -453,7 +453,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 	sourceTokens := a.announceCompaction(trigger, len(fold), msgs)
 	// Each diagnosis is a model call, so it waits until the card is up, and only
 	// retained failures ask: a folded one never reads its selection.
-	kept, _, _, _ := a.partitionFoldForProjection(a.annotateFailureDiagnostics(ctx, region, policyKeep))
+	kept, _, _, _ := a.partitionFoldWith(a.annotateFailureDiagnostics(ctx, region, policyKeep), policy)
 	if a.svc.hooks != nil {
 		if hookInstr := a.svc.hooks.PreCompact(ctx, trigger); hookInstr != "" {
 			if instructions != "" {
@@ -564,6 +564,28 @@ func (a *contextWindow) foldedProjection(state sessionstore.CompactionState, pro
 	return checkpointProjectionMessages(msgs, head, kept, suffix, summary), boundary
 }
 
+// partitionUnderCeiling partitions the fold region and names the retention it
+// ran under. Retained failures are the one protection that can grow past what a
+// checkpoint holds, and a summary billed to fit beside them is discarded whole;
+// when they alone would exceed the ceiling they fold into the digest, whose
+// coverage guard still names each one.
+func (a *contextWindow) partitionUnderCeiling(scope compactionScope, state sessionstore.CompactionState, canonical []provider.Message, projected bool, msgs []provider.Message, head, start int) (KeepPolicy, []provider.Message, userTurnRetention, []bool) {
+	region := msgs[head:start]
+	kept, fold, retention, policyKeep := a.partitionFoldWith(region, a.keepPolicy)
+	ceiling := a.checkpointCeiling()
+	if a.keepPolicy&KeepErrors == 0 || ceiling <= 0 || scope.ignoreEconomics {
+		return a.keepPolicy, fold, retention, policyKeep
+	}
+	projMsgs, boundary := a.foldedProjection(state, projected, msgs, kept, head, start, "")
+	candidate := modelVisibleFromProjection(sessionstore.ContextProjection{Messages: projMsgs, CoveredCount: boundary.Covered}, canonical)
+	if a.estimatedPromptTokens(a.withTodoIdentityTail(candidate)) <= ceiling {
+		return a.keepPolicy, fold, retention, policyKeep
+	}
+	degraded := a.keepPolicy &^ KeepErrors
+	_, fold, retention, policyKeep = a.partitionFoldWith(region, degraded)
+	return degraded, fold, retention, policyKeep
+}
+
 // acceptCheckpointCandidate: ≤50% + smaller for auto; waiving economics may
 // exceed 50% only if still below trigger; manual below trigger accepts any
 // savings, since below the trigger the ceiling has nothing to protect.
@@ -639,13 +661,26 @@ func (a *contextWindow) planFoldRegion(msgs []provider.Message, force bool) (hea
 }
 
 func (a *contextWindow) partitionFoldForProjection(region []provider.Message) (kept, fold []provider.Message, retention userTurnRetention, policyKeep []bool) {
-	policyKeep, retention = a.keepIndexes(region)
+	return a.partitionFoldWith(region, a.keepPolicy)
+}
+
+// partitionFoldWith partitions under policy rather than the configured one, so
+// a fold can retain less than the session asks for when retaining it would
+// leave nothing for the digest to fit in.
+func (a *contextWindow) partitionFoldWith(region []provider.Message, policy KeepPolicy) (kept, fold []provider.Message, retention userTurnRetention, policyKeep []bool) {
+	policyKeep, retention = a.keepIndexes(region, policy)
 	for i, m := range region {
 		switch {
 		case m.LocalOnly: // display-only output never reaches a provider
 		case isCompactionSummary(m):
 			// Always merge prior digests into the single next summary.
 			fold = append(fold, m)
+		case policyKeep[i] && m.Role == provider.RoleAssistant:
+			stay, rest := splitKeptTurn(region, policyKeep, i)
+			kept = append(kept, stay)
+			if rest != nil {
+				fold = append(fold, *rest)
+			}
 		case policyKeep[i]:
 			kept = append(kept, a.keptForProjection(m))
 		default:
@@ -658,6 +693,9 @@ func (a *contextWindow) partitionFoldForProjection(region []provider.Message) (k
 // runCompactionSummary uses the single local summarizer path for every provider.
 func (a *contextWindow) runCompactionSummary(ctx context.Context, fold []provider.Message, instructions string) (summary, mode string, usage *provider.Usage, providerReqID string, err error) {
 	summary, usage, err = a.summarizeOnce(ctx, fold, instructions)
+	if err == nil && !hasDigestHeading(summary) {
+		err = errSummaryNotDigest
+	}
 	if err != nil {
 		return "", CompactionModeSummarized, usage, "", err
 	}

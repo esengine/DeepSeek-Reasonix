@@ -5,6 +5,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MockPort } from "../port/mock";
 import { HttpError } from "../port/port";
+import * as hostModule from "../port/host";
+import { SsePort } from "../port/sse";
 import { WorkbenchPanel } from "./WorkbenchPanel";
 
 afterEach(cleanup);
@@ -76,6 +78,90 @@ describe("WorkbenchPanel", () => {
     }
   });
 
+  describe("a browser that cannot open", () => {
+    const drawsViews = () => {
+      vi.spyOn(hostModule.host(), "drawsBrowserViews").mockReturnValue(true);
+    };
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    const KERNEL_WORDS: [string, string, string][] = [
+      ["browser.engine_missing", "no Chrome, Edge or Chromium is installed", "没有找到可用的浏览器。请安装 Chrome、Edge 或 Chromium，或在配置里用 [browser] executable 指定路径，新会话才会读到"],
+      ["browser.engine_failed", "start chrome: exec failed", "内置浏览器没能启动，稍后再试一次"],
+      ["browser.profile_busy", "another browser is already running", "内置浏览器的资料目录正被另一个浏览器占用。关掉其他 Studio 窗口或用同一资料目录的浏览器后再试"],
+      ["browser.open_failed", "this session has no browser", "打不开这个网页：this session has no browser"],
+    ];
+    const refusedLikeTheKernel = (port: MockPort, code: string, detail: string) => {
+      vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ code, error: detail, params: { url: "about:blank", error: detail } }), { status: 400 }));
+      const wire = new SsePort("", "r1");
+      vi.spyOn(port, "browserOpen").mockImplementation((url: string) => wire.browserOpen(url, true));
+    };
+
+    for (const [code, detail, words] of KERNEL_WORDS) {
+      it(`says why when the column opens and the kernel refuses with ${code}`, async () => {
+        drawsViews();
+        const port = new MockPort();
+        refusedLikeTheKernel(port, code, detail);
+        render(<WorkbenchPanel port={port} tabs={[]} manual shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
+        const alert = await screen.findByRole("alert");
+        expect(alert.textContent).toBe(words);
+        expect(alert.textContent).not.toContain("{");
+        expect(screen.getByText("从右侧选择文件，或打开浏览器")).toBeTruthy();
+      });
+
+      it(`says why when + is refused with ${code}`, async () => {
+        drawsViews();
+        const user = userEvent.setup();
+        const port = new MockPort();
+        refusedLikeTheKernel(port, code, detail);
+        render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
+        await user.click(screen.getByRole("button", { name: "新建浏览器标签" }));
+        const alert = await screen.findByRole("alert");
+        expect(alert.textContent).toBe(words);
+        expect(alert.textContent).not.toContain("{");
+      });
+    }
+
+    it("clears the reason once a file is picked", async () => {
+      drawsViews();
+      const user = userEvent.setup();
+      const port = new MockPort();
+      vi.spyOn(port, "browserOpen").mockRejectedValue(new Error("profile is in use"));
+      render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
+      await user.click(screen.getByRole("button", { name: "新建浏览器标签" }));
+      await screen.findByRole("alert");
+      await user.click(await screen.findByRole("button", { name: "README.md" }));
+      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    });
+
+    it("clears the reason when a later open succeeds", async () => {
+      drawsViews();
+      const user = userEvent.setup();
+      const port = new MockPort();
+      const open = vi.spyOn(port, "browserOpen");
+      open.mockRejectedValueOnce(new Error("profile is in use"));
+      render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
+      await user.click(screen.getByRole("button", { name: "新建浏览器标签" }));
+      await screen.findByRole("alert");
+      await user.click(screen.getByRole("button", { name: "新建浏览器标签" }));
+      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+      expect(open).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps a file's own read error on the file tab and drops it with the tab", async () => {
+      const user = userEvent.setup();
+      const port = new MockPort();
+      vi.spyOn(port, "workspaceFile").mockRejectedValue(new Error("file is gone"));
+      render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
+      await user.click(await screen.findByRole("button", { name: "README.md" }));
+      expect((await screen.findAllByRole("alert")).length).toBe(1);
+      await user.click(screen.getByRole("button", { name: "关闭 README.md" }));
+      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    });
+  });
+
   it("shows the start page only while the agent has none, and gives way to the agent's", () => {
     const props = { port: new MockPort(), manual: true, shown: false, scheme: "dark" as const, changes: [], onCloseManual: vi.fn(), onSurfaces: vi.fn(), onExternal: vi.fn() };
     const { rerender } = render(<WorkbenchPanel {...props} tabs={[]} />);
@@ -117,6 +203,21 @@ describe("WorkbenchPanel", () => {
     const { rerender } = render(<WorkbenchPanel {...props} tabs={[agent]} />);
     rerender(<WorkbenchPanel {...props} tabs={[agent, { id: "b2", target: "t2", url: "https://example.com", title: "Link", active: false }]} />);
     expect(screen.getByRole("tab", { name: "Link" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("selects a link's page again after the previous one was closed, with the agent's tab still active", async () => {
+    const user = userEvent.setup();
+    const props = { port: new MockPort(), manual: true, shown: false, scheme: "dark" as const, changes: [], onCloseManual: vi.fn(), onSurfaces: vi.fn(), onExternal: vi.fn() };
+    const agent = { id: "b1", target: "t1", url: "https://top.baidu.com", title: "Agent page", active: true };
+    const first = { id: "b2", target: "t2", url: "https://example.com", title: "First", active: false };
+    const second = { id: "b3", target: "t3", url: "https://example.org", title: "Second", active: false };
+    const { rerender } = render(<WorkbenchPanel {...props} tabs={[agent]} />);
+    rerender(<WorkbenchPanel {...props} tabs={[agent, first]} />);
+    expect(screen.getByRole("tab", { name: "First" }).getAttribute("aria-selected")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "关闭 First" }));
+    rerender(<WorkbenchPanel {...props} tabs={[agent]} />);
+    rerender(<WorkbenchPanel {...props} tabs={[agent, second]} />);
+    expect(screen.getByRole("tab", { name: "Second" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("lists dot folders only once hidden files are asked for, and remembers the choice", async () => {

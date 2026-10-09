@@ -82,6 +82,7 @@ func (c *Controller) mcpSpec(e config.PluginEntry) plugin.Spec {
 	spec.CallTimeout = controllerMCPTimeout(exp.CallTimeoutSeconds)
 	spec.ToolTimeouts = controllerMCPToolTimeouts(exp.ToolTimeoutSeconds)
 	spec.Authorized = exp.Source.UserAuthorized()
+	spec.LaunchCheck = config.DeclaredLaunchCheck(e, c.WorkspaceRoot())
 	// Explicit user installs and reconnects run as trusted host processes.
 	spec.ProcessMode = plugin.MCPProcessHost
 	if c.mcpConfigureSpec != nil {
@@ -200,7 +201,9 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	c.approveOnExplicitConnect(p)
+	if err := c.approveOnExplicitConnect(p); err != nil {
+		return 0, err
+	}
 	return c.connectMCPServer(p)
 }
 

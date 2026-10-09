@@ -78,12 +78,14 @@ func TestFailureCodeFollowsTheSentinelThroughWrapping(t *testing.T) {
 		{fmt.Errorf("x: %w", errSummaryOutputTruncated), FailSummaryTruncated},
 		{fmt.Errorf("x: %w", errCompressStaleContext), FailContextChanged},
 		{fmt.Errorf("x: %w", errSummaryTimeout), FailSummaryTimeout},
-		{fmt.Errorf("x: %w", context.DeadlineExceeded), ""},
+		{fmt.Errorf("x: %w", errSummaryCeiling), FailSummaryCeiling},
+		{fmt.Errorf("x: %w", context.DeadlineExceeded), FailUnclassified},
+		{fmt.Errorf("x: %w", context.Canceled), FailCancelled},
 		{fmt.Errorf("x: %w", errCompactionHookRefused), FailHookRefused},
 		{fmt.Errorf("x: %w", errProjectionNotPersisted), FailPersistFailed},
 		{fmt.Errorf("x: %w", errSummaryRequestFailed), FailSummaryFailed},
 		{fmt.Errorf("x: %w", errSummaryInputTooLarge), FailSummaryInputTooLarge},
-		{errors.New("unclassified"), ""},
+		{errors.New("unclassified"), FailUnclassified},
 		{rejectCheckpoint(NoopFixedPrefixAboveTrigger, "fixed prefix"), NoopFixedPrefixAboveTrigger},
 	} {
 		if got := compactionFailureCode(tc.err); got != tc.want {
@@ -137,5 +139,18 @@ func TestPersistenceFailureIsNamedNotBlamedOnTheSummary(t *testing.T) {
 	done := sink.kinds(event.CompactionDone)
 	if len(done) == 0 || done[len(done)-1].Compaction.Code != string(FailPersistFailed) {
 		t.Fatalf("aborted frame = %+v, want code %s", done, FailPersistFailed)
+	}
+}
+
+// A fold the caller cancelled is not an unexplained one: the card names it.
+func TestCancelledAutomaticFoldCarriesACancellationCode(t *testing.T) {
+	a, sink := failureFixture(t, &fakeProvider{streamErr: context.Canceled})
+	_ = prepareContext(context.Background(), a, CompactionTriggerPressure)
+	var aborted []string
+	for _, e := range sink.kinds(event.CompactionDone) {
+		aborted = append(aborted, e.Compaction.Code)
+	}
+	if len(aborted) != 1 || aborted[0] != string(FailCancelled) {
+		t.Fatalf("aborted card codes = %v, want [%s]", aborted, FailCancelled)
 	}
 }

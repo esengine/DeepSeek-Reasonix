@@ -155,8 +155,8 @@ func TestLaunchCommandDetachAndLogHardening(t *testing.T) {
 			t.Errorf("LaunchCommand missing %q:\n%s", want, cmd)
 		}
 	}
-	if !strings.Contains(cmd, "rm -f '/d/p' '/d/i'") {
-		t.Fatalf("LaunchCommand does not clear stale port/pid files before launch:\n%s", cmd)
+	if strings.Contains(cmd, "rm -f") {
+		t.Fatalf("LaunchCommand deletes files a running serve may have published:\n%s", cmd)
 	}
 	if strings.Contains(cmd, "setsid nohup") {
 		t.Errorf("setsid must be conditional, not hard-wired:\n%s", cmd)

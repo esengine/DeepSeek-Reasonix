@@ -145,13 +145,13 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
                 {item.a.allowsSession && (
                   <button className="btn" data-weak="" data-action="decision.tool" data-target={item.a.id} data-value="session"
                     disabled={!!submitting} onClick={() => void decide("session")}>
-                    {t(explicit ? "本会话不再询问" : "本会话都允许")}
+                    {t("本会话允许此类操作，不再询问")}
                   </button>
                 )}
                 {item.a.allowsPersist && (
                   <button className="btn" data-weak="" data-action="decision.tool" data-target={item.a.id} data-value="always"
                     disabled={!!submitting} onClick={() => void decide("always")}>
-                    {t("此类操作不再询问")}
+                    {t("始终允许此类操作，不再询问")}
                   </button>
                 )}
                 <button className="btn" data-deny="" data-action="decision.tool" data-target={item.a.id} data-value="deny"
@@ -180,9 +180,9 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
             {sealed && (
               <div className="apv-done">
                 {item.verdict === "session" ? (
-                  <><b>{t("本会话不再询问此类操作。")}</b>{t("内核已记入会话授权，不写入磁盘。")}</>
+                  <><b>{t("已允许：本会话内此类操作不再询问。")}</b>{t("内核已记入会话授权，不写入磁盘。")}</>
                 ) : item.verdict === "always" ? (
-                  <><b>{t("已保存为规则。")}</b>{t("已写入配置，后续会话也不再询问此类操作。")}</>
+                  <><b>{t("已允许：已保存为规则。")}</b>{t("已写入配置，后续会话中此类操作也始终允许，不再询问。")}</>
                 ) : item.verdict === "yolo" ? (
                   <><b>{t("已切换全部放行。")}</b>{t("后续工具不再请求确认；拒绝规则与沙盒边界仍然生效。")}</>
                 ) : item.verdict === "deny" ? (
@@ -203,7 +203,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
 }
 
 // A plan is not a tool call, and the generic card said so in the wrong words:
-// 「允许这一次 / 此类操作不再询问 / 拒绝」. Two of those are wrong for a plan —
+// 「允许这一次 / 始终允许此类操作，不再询问 / 拒绝」. Two of those are wrong for a plan —
 // nothing here is repeatable, so there is no class to stop asking about, and the
 // kernel refuses a remembered grant for this gate anyway. And the vocabulary hid
 // the outcome people actually wanted: denying keeps planning, which is how you

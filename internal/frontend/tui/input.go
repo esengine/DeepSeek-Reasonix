@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -102,7 +103,7 @@ func (m *model) insertPaste(text string) {
 		m.pasteIntoSetup(text)
 		return
 	}
-	if m.tr.OpenPrompt() != nil || m.picker != nil || m.rewind != nil || m.copying != nil || m.clearing != nil {
+	if m.tr.OpenPrompt() != nil || m.picker != nil || m.skills != nil || m.quick != nil || m.mcp != nil || m.rewind != nil || m.copying != nil || m.clearing != nil {
 		m.composer.InsertString(text)
 		return
 	}
@@ -130,13 +131,14 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.send(false)
 	case "ctrl+s":
 		return m, m.send(true)
+	case "ctrl+enter":
+		return m, m.steerRunning()
 	case "esc":
 		return m, m.escape(empty)
 	case "ctrl+c":
 		switch {
 		case m.tr.Running:
-			m.cancelling = true
-			return m, m.call("cancel", m.client.Cancel)
+			return m, m.interrupt()
 		case !empty:
 			m.composer.Reset()
 			m.shell = false
@@ -162,7 +164,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "up", "down":
-		if m.composer.LineCount() <= 1 && m.recall(msg.String() == "up") {
+		if m.recallAtEdge(msg.String() == "up") {
 			return m, nil
 		}
 	}
@@ -175,14 +177,34 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// steerRunning sends the draft as a steer, but only while a turn runs: idle, a
+// press meant as a newline must not submit it.
+func (m *model) steerRunning() tea.Cmd {
+	if !m.tr.Running {
+		return nil
+	}
+	return m.send(true)
+}
+
+// recallAtEdge recalls history only when the cursor sits on the composer's
+// first line (older) or last line (newer), so multi-line editing keeps the arrows.
+func (m *model) recallAtEdge(older bool) bool {
+	if older {
+		return m.composer.Line() == 0 && m.recall(true)
+	}
+	return m.composer.Line() == m.composer.LineCount()-1 && m.recall(false)
+}
+
 // shortcutKey takes the keys that act without touching the composer: the
-// approval modes and the clipboard.
+// approval modes, clearing the screen, and the clipboard.
 func (m *model) shortcutKey(k string) (tea.Cmd, bool) {
 	switch {
 	case k == "shift+tab":
 		return m.cycleMode(), true
 	case k == "ctrl+y":
 		return m.toggleYolo(), true
+	case k == "ctrl+l":
+		return m.clearDisplay(), true
 	case imagePasteKey(k):
 		return m.pasteClipboard(), true
 	case k == "shift+insert":
@@ -201,6 +223,15 @@ func (m *model) screenKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	if cmd, handled := m.setupKey(msg); handled {
+		return cmd, true
+	}
+	if cmd, handled := m.skillsKey(msg); handled {
+		return cmd, true
+	}
+	if cmd, handled := m.quickKey(msg); handled {
+		return cmd, true
+	}
+	if cmd, handled := m.mcpKey(msg); handled {
 		return cmd, true
 	}
 	if cmd, handled := m.pickerKey(msg); handled {
@@ -267,30 +298,33 @@ func (m *model) send(steer bool) tea.Cmd {
 	if cmd, ok := m.queueSlash(display); ok {
 		return cmd
 	}
+	name, _, _ := strings.Cut(display, " ")
 	switch {
-	case isHelp(display):
+	case isHelp(name):
 		m.composer.Reset()
 		m.tr.AddEcho(display)
 		return tea.Batch(m.commit(), m.showHelp())
-	case display == "/mouse" && m.scr != nil:
+	case slices.Contains(m.opts.QuitCommands, name):
+		return tea.Quit
+	case name == "/mouse" && m.scr != nil:
 		m.composer.Reset()
 		return m.toggleMouse()
-	case display == "/resume":
+	case name == "/resume":
 		m.composer.Reset()
 		return m.openPicker()
 	case display == "/rewind" && !m.tr.Running:
 		m.composer.Reset()
 		m.tr.AddEcho(display)
 		return tea.Batch(m.commit(), m.openRewind())
-	case display == "/clear" && !m.tr.Running:
+	case name == "/clear" && !m.tr.Running:
 		m.composer.Reset()
 		m.tr.AddEcho(display)
 		return tea.Batch(m.commit(), m.askClear())
-	case isSetup(display) && !m.tr.Running:
+	case isSetup(name) && !m.tr.Running:
 		m.composer.Reset()
 		m.tr.AddEcho(display)
 		return tea.Batch(m.commit(), m.openSetup())
-	case display == "/version":
+	case name == "/version":
 		m.composer.Reset()
 		version := m.opts.Version
 		if version == "" {
@@ -298,6 +332,23 @@ func (m *model) send(steer bool) tea.Cmd {
 		}
 		m.tr.AddNotice("info", "reasonix "+version)
 		return m.commit()
+	}
+	if name == "/paste-image" {
+		m.composer.Reset()
+		return m.pasteClipboard()
+	}
+	if display == "/skills" || display == "/skill" {
+		m.composer.Reset()
+		m.tr.AddEcho(display)
+		return tea.Batch(m.commit(), m.openSkills())
+	}
+	if cmd, ok := m.modelSlash(display); ok {
+		return cmd
+	}
+	if display == "/mcp" {
+		m.composer.Reset()
+		m.tr.AddEcho(display)
+		return tea.Batch(m.commit(), m.openMCP())
 	}
 	if cmd, ok := m.miscSlash(display); ok {
 		return cmd
@@ -324,7 +375,24 @@ func (m *model) send(steer bool) tea.Cmd {
 		}
 	}
 	m.tr.AddUser(display)
-	return tea.Batch(m.commit(), m.call("send", func(ctx context.Context) error { return m.client.Submit(ctx, text) }))
+	return tea.Batch(m.commit(), func() tea.Msg {
+		return sentMsg{display: display, err: m.client.Submit(m.ctx, text)}
+	})
+}
+
+// cancelTurn asks the kernel to stop the running turn.
+func (m *model) cancelTurn() tea.Cmd {
+	m.cancelling = true
+	return m.call("cancel", m.client.Cancel)
+}
+
+// interrupt is Ctrl+C on a running turn: the first press stops it, and a
+// second while it is still stopping leaves the program.
+func (m *model) interrupt() tea.Cmd {
+	if m.cancelling {
+		return tea.Quit
+	}
+	return m.cancelTurn()
 }
 
 // escape backs out of the most specific thing in progress: the running turn,
@@ -333,8 +401,7 @@ func (m *model) send(steer bool) tea.Cmd {
 func (m *model) escape(empty bool) tea.Cmd {
 	switch {
 	case m.tr.Running:
-		m.cancelling = true
-		return m.call("cancel", m.client.Cancel)
+		return m.cancelTurn()
 	case !empty:
 		m.composer.Reset()
 		return nil

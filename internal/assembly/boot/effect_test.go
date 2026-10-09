@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/runtime/agent/testutil"
 	"reflect"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ func (p *effectRecordingProvider) Stream(ctx context.Context, req provider.Reque
 	p.rawInputs = append(p.rawInputs, agent.RawUserInput(ctx, ""))
 	p.mu.Unlock()
 	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "ok"}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: testutil.SummaryReply(req, "ok")}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil
@@ -531,6 +532,10 @@ func userMessages(req provider.Request) string {
 // session on the machine shares costs every byte that follows it. The fact
 // still has to reach the model, so the turn states it either way.
 func TestEffectVersionControlRidesTheTurnNotThePrefix(t *testing.T) {
+	// Probe answers are cached per PATH for the whole process; an empty directory
+	// no other test adds keys one fresh answer both arms share, so an older one
+	// cannot expire between them and leave only the second arm re-probing.
+	t.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+robustTempDir(t))
 	plain := effectRunPrepared(t, "boot-effect-vcs-plain", "", ablation.Set{}, nil)
 	repo := effectRunPrepared(t, "boot-effect-vcs-repo", "", ablation.Set{}, func(dir string) {
 		if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
@@ -571,7 +576,9 @@ func systemOf(req provider.Request) string {
 // project instructions and the skills index, so one remember re-sent all of
 // them; the facts are reached through the memory tool instead.
 func TestEffectRememberDoesNotMoveTheCachedPrefix(t *testing.T) {
-	isolateConfigHome(t)
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+	t.Setenv("REASONIX_STATE_HOME", "")
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", effectProbeConfig)
@@ -580,7 +587,8 @@ func TestEffectRememberDoesNotMoveTheCachedPrefix(t *testing.T) {
 
 	indexPath := filepath.Join(memory.StoreFor(config.MemoryUserDir(), dir).Dir, "MEMORY.md")
 
-	first, err := Build(context.Background(), Options{Sink: event.Discard})
+	opts := Options{Sink: event.Discard, Home: os.Getenv("REASONIX_HOME"), WorkspaceRoot: dir, resolvedShell: pinnedEffectShell()}
+	first, err := Build(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("first Build: %v", err)
 	}
@@ -603,7 +611,7 @@ func TestEffectRememberDoesNotMoveTheCachedPrefix(t *testing.T) {
 		t.Fatalf("the save never reached the index this test is about:\n%s", index)
 	}
 
-	second, err := Build(context.Background(), Options{Sink: event.Discard})
+	second, err := Build(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("second Build: %v", err)
 	}

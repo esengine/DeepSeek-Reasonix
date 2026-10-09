@@ -98,7 +98,7 @@ export class MockProvider extends MockBoundary {
   // "改用…" repair exists for. The relay answers at gateway scale, which is the
   // case the model list's search and its row cap exist for.
   async checkProvider(name: string): Promise<ProviderCheck> {
-    if (name === "mimo") return { ok: false, error: "401 unauthorized: key 过期了" };
+    if (name === "mimo") return { ok: false, code: "provider.probe.unauthorized", httpStatus: 401, detail: "Invalid Authentication" };
     const models = name.startsWith("myrelay")
       ? relayCatalog()
       : ["deepseek-v4-pro", "deepseek-flash", "deepseek-flash-vision-exp"];
@@ -110,6 +110,15 @@ export class MockProvider extends MockBoundary {
     await new Promise((resolve) => setTimeout(resolve, 280));
     if (request.model.includes("missing")) {
       return { model: request.model, status: "unavailable", reason: "not_found" };
+    }
+    if (request.model.includes("refused")) {
+      return {
+        model: request.model,
+        status: "unknown",
+        reason: "rejected",
+        httpStatus: 400,
+        detail: `registry.ollama.ai/library/${request.model} does not support tools`,
+      };
     }
     return { model: request.model, status: "available" };
   }
@@ -146,6 +155,7 @@ export class MockProvider extends MockBoundary {
         ? {
             ...p, models: edit.models, default: edit.default, visionModels: edit.vision,
             contextWindow: edit.contextWindow, maxOutputTokens: edit.maxOutputTokens,
+            idleTimeoutSeconds: edit.idleTimeoutSeconds || undefined,
             headers: edit.headers, extraBody: edit.extraBody,
             reasoningProtocol: edit.reasoningProtocol, supportedEfforts: edit.supportedEfforts,
             defaultEffort: edit.defaultEffort,

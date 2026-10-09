@@ -11,6 +11,7 @@ fingerprint_files:
   - .github/workflows/release-studio.yml
   - .github/workflows/studio-certum-signing-smoke.yml
   - .github/actions/setup-certum/action.yml
+  - scripts/install-smoke.ps1
   - scripts/sign-certum.ps1
   - scripts/verify-windows-authenticode.ps1
   - scripts/verify-windows-package.ps1

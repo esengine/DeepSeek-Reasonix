@@ -141,12 +141,12 @@ type legacyAssembly struct {
 type extensionBoot struct {
 	session   protocol.SessionContext
 	onWarning func(string)
-	ui        *uihub.Hub
+	// onSidecarDown reports an optional extension skipped for want of a running sidecar.
+	onSidecarDown func(string, extension.InterceptorPoint)
+	ui            *uihub.Hub
 	// skipPromptStrategy skips system_prompt.build strategy when the RuntimePlan
 	// is a no-op (or does not affect cache), preserving the previous prompt.
 	skipPromptStrategy bool
-	// previousDispatcher reuses an interceptor chain when the plan is no-op.
-	previousDispatcher *dispatch.Dispatcher
 }
 
 func (p extensionBoot) warn(msg string) {
@@ -307,7 +307,7 @@ func assembleLegacySnapshot(ctx context.Context, in legacyAssembly, generation u
 		}
 		required := requiredRuntimeSet(managed)
 		clients := sidecarClientResolver(managed)
-		dispatchOpts := dispatch.Options{Warn: ext.warn}
+		dispatchOpts := dispatch.Options{Warn: ext.warn, SidecarDown: ext.onSidecarDown}
 		// system_prompt.build strategy: the slot's owner rules on the
 		// composed prompt before the snapshot freezes. Skipped on no-op plans
 		// so CacheHash stays stable across rebuilds.
@@ -324,11 +324,7 @@ func assembleLegacySnapshot(ctx context.Context, in legacyAssembly, generation u
 		}
 
 		postFreeze = func(snap *extension.RuntimeSnapshot) {
-			if ext.previousDispatcher != nil && ext.skipPromptStrategy {
-				dispatcher = ext.previousDispatcher
-			} else {
-				dispatcher = dispatch.New(snap.InterceptorChain(), snap.Replacements(), clients, required, dispatchOpts)
-			}
+			dispatcher = dispatch.New(snap.InterceptorChain(), snap.Replacements(), clients, required, dispatchOpts)
 			dispatcher.Event(extension.PointSystemPromptBuild, dispatch.SystemPromptPayload{
 				Prompt: prompt, WorkspaceRoot: ext.session.WorkspaceRoot,
 			})

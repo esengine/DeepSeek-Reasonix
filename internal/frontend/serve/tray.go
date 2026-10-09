@@ -1,9 +1,12 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
+	"time"
 
 	"fmt"
 	"strings"
@@ -97,6 +100,7 @@ func (h *Hub) registerTrayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tray/prefs", h.readTrayPrefs)
 	mux.HandleFunc("PUT /tray/prefs", h.writeTrayPrefs)
 	mux.HandleFunc("GET /tray/state", h.readTrayState)
+	mux.HandleFunc("GET /tray/running", h.readTrayRunning)
 }
 
 func (h *Hub) readTrayPrefs(w http.ResponseWriter, _ *http.Request) {
@@ -198,4 +202,53 @@ func (h *Hub) runningJobs() int {
 		}
 	}
 	return running
+}
+
+// TrayRunning is how many panes have a turn in flight, local or on a machine
+// this window is connected to. A shell that must keep the computer awake for
+// as long as work is being done reads it, because the answer comes from each
+// controller rather than from the event fold the icon is painted from.
+type TrayRunning struct {
+	Panes int `json:"panes"`
+	// Unknown counts panes that could not be asked, so a reader can tell that
+	// zero Panes means idle only when this is zero too.
+	Unknown int `json:"unknown"`
+}
+
+// runningProbeTimeout bounds the far-side reads: a link that has gone quiet
+// must not hold the answer for the panes that can be read.
+const runningProbeTimeout = 2 * time.Second
+
+func (h *Hub) readTrayRunning(w http.ResponseWriter, r *http.Request) {
+	panes, unknown := h.runningPanes(r.Context())
+	writeJSON(w, TrayRunning{Panes: panes, Unknown: unknown})
+}
+
+// runningPanes asks every pane at once. A pane whose link cannot answer is
+// counted apart: it is neither running nor known to be idle.
+func (h *Hub) runningPanes(ctx context.Context) (running, unknown int) {
+	ctx, cancel := context.WithTimeout(ctx, runningProbeTimeout)
+	defer cancel()
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+	for _, rt := range h.Runtimes() {
+		if rt.Local() && rt.Server == nil {
+			continue
+		}
+		wg.Go(func() {
+			busy, known := h.paneRunningKnown(ctx, rt)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case !known:
+				unknown++
+			case busy:
+				running++
+			}
+		})
+	}
+	wg.Wait()
+	return running, unknown
 }

@@ -5,12 +5,14 @@ import { arrowTabs } from "./tablist";
 import { pinToViewport } from "./place";
 import { useMarker } from "./marker";
 import { useDismiss } from "./dismiss";
+import { UnreadDot } from "./UnreadMark";
 
 export interface TabView {
   rt: RuntimeView;
   title: string;
   run: string;
   live: boolean;
+  unread?: boolean;
 }
 
 interface Props {
@@ -137,7 +139,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
 
   return (
     <div className="panetabs" ref={bar} role="tablist" aria-label={t("会话面板")} onKeyDown={arrowTabs}>
-      {tabs.map(({ rt, title, run }) => (
+      {tabs.map(({ rt, title, run, unread }) => (
         <div
           key={rt.id}
           className="ptab"
@@ -190,6 +192,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
           ) : (
             <span className="ptab-nm">{title}</span>
           )}
+          {unread && <UnreadDot kind="tab" />}
           {showRoot && <span className="ptab-ws">{rt.name}</span>}
           {/* Which machine is running this. Panes from two hosts sit side by
               side, and a command lands wherever the focused tab points. */}

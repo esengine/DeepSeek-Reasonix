@@ -28,6 +28,29 @@ func TestToWireRetryingJSON(t *testing.T) {
 	}
 }
 
+func TestToWireRetryingCarriesTheFailureClass(t *testing.T) {
+	w := ToWire(event.Event{
+		Kind: event.Retrying, RetryAttempt: 1, RetryMax: 10, RetryScope: event.RetryScopeHeaders,
+		RetryCause: provider.RetryCauseUpstreamStatus, RetryStatus: 502,
+		RetryDelayMs: 1250, RetryTimeoutSecs: 300,
+	})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"retryCause":"upstream_status"`, `"retryStatus":502`, `"retryDelayMs":1250`, `"retryTimeoutSecs":300`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("retrying JSON = %s, want it to contain %s", b, want)
+		}
+	}
+	bare, _ := json.Marshal(ToWire(event.Event{Kind: event.Retrying, RetryAttempt: 1, RetryMax: 10}))
+	for _, absent := range []string{"retryCause", "retryStatus", "retryDelayMs", "retryTimeoutSecs"} {
+		if strings.Contains(string(bare), absent) {
+			t.Fatalf("a retry with no class must omit %s: %s", absent, bare)
+		}
+	}
+}
+
 func TestToWireStreamAttemptJSON(t *testing.T) {
 	w := ToWire(event.Event{
 		Kind: event.StreamAttempt,
@@ -158,6 +181,10 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 		"retryAttempt?: number;",
 		"retryMax?: number;",
 		"retryScope?:",
+		"retryCause?:",
+		"retryStatus?: number;",
+		"retryDelayMs?: number;",
+		"retryTimeoutSecs?: number;",
 		"streamAttempt?: StreamAttempt;",
 		"export interface StreamAttempt",
 		"attemptId?: string;",

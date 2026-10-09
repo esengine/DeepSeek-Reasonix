@@ -159,6 +159,10 @@ func (st *state) mine(offline bool) Mine {
 		out.Items = append(out.Items, v)
 	}
 	out.HasNew = out.Unread > 0
+	if st.Profile != nil {
+		p := *st.Profile
+		out.Profile = &p
+	}
 	return out
 }
 

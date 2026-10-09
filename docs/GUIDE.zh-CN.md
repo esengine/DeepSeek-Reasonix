@@ -200,10 +200,13 @@ telemetry 请求之前只询问一次。提示为 `[Y/n]`：直接回车、输�
 数量和时效上限的本地队列中，等待后续启动重试。
 
 ping 包含一个 CLI 专用的随机 128-bit 安装 ID、CLI 版本、OS、架构和 `cli` surface
-标记。计数批次使用同一个 ID 做每日活跃安装去重，只包含固定 bucket，例如 CLI 模式、
+标记。这个 ID 与桌面端安装 ID 分离，不是账号、硬件、仓库或 session 标识。
+
+计数批次使用同一个 ID 做每日活跃安装去重，只包含固定 bucket，例如 CLI 模式、
 运行配置档、权限/会话模式、turn 延迟、finish reason、cache hit 区间、通用
-Provider/工具错误分类、compaction、恢复计数和归一化界面语言。这个 ID 与桌面端安装
-ID 分离，不是账号、硬件、仓库或 session 标识。
+Provider/工具错误分类、compaction、恢复计数、每轮 token 量级区间、工作区写锁争用区间和归一化界面语言。
+
+不回答就关闭提示（输入结束、Ctrl+D）不会保存任何选择，也不会上传；下次启动会再问。
 
 Reasonix 绝不会上传 prompt、回答、reasoning、工具名/参数/输出、路径、仓库/分支、
 session ID、精确 token/费用、Provider/model 名称、base URL 或环境变量。
@@ -311,7 +314,9 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板、扩展发布的 stat
 远程模块让 Reasonix 在远端主机上运行,并通过你自己的 SSH 连接访问它 —— 即 VS Code
 Remote-SSH 式的体验。它在远端主机上引导一个常驻的 headless `reasonix serve`,把本地一个
 回环端口转发过去,再经隧道打开现有的 serve Web 客户端。agent、工具与文件全部原生运行在远端
-主机上,保真度 100%,不经过有损的文件代理。V1 支持 Linux 与 macOS 远端主机。
+主机上,保真度 100%,不经过有损的文件代理。
+
+支持 Linux、macOS 与 Windows 远端主机;Windows 主机需要 PowerShell 和 OpenSSH,无论其 `DefaultShell` 指定的是 cmd、PowerShell 还是 Git Bash。
 
 主机保存在 `config.toml` 的用户级 `[remote]` 段。与 `[secrets]` 一样,项目级
 `reasonix.toml` 无法注入或覆盖远程主机 —— 克隆的仓库永远无法左右 Reasonix 向何处发起 SSH
@@ -404,6 +409,22 @@ API Key 的主机上打开工作区可以直接用。设了 `provider = "remote"
 Provider。
 短暂的 SSH 中断不会关闭远程窗口；桌面端会在后台重连、重新挂载回环转发，并让窗口重新加载已恢复的
 Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭已经不可用的远程窗口。
+
+### 远端 serve 的生命周期
+
+- 主机上的 `reasonix serve` 进程是常驻的。退出桌面或链路断开都不会终止它,下次连接会直接接入。
+- pane 在这个 serve 上的会话不会比桌面活得久。每个 pane 在远端各自驱动一个 runtime;关闭 pane
+  或退出桌面时,Studio 会先向远端 serve 发 `POST /runtimes/{id}/close`,再拆隧道。
+- 这次关闭会取消进行中的回合并释放会话租约,别的窗口随后就能打开这个会话。被关闭的只有该 pane
+  的 runtime:serve 进程继续运行,下次连接可以接入;其他客户端开的 runtime 也不受影响,无论这个
+  serve 是怎么启动的。
+- `provider = "remote"` 只决定模型凭据从哪来,不会让 pane 脱离桌面。
+- 工作区上已在运行的 serve 会被接入而不是被替换,不论它由 `reasonix remote serve start`、另一个
+  窗口还是手工执行 `reasonix serve --port-file` 启动。之后的连接不会删除它的 port 与 pid 文件,
+  也不会停掉它。
+- `serve start` 不使用 broker,所以 `provider = "local"` 的主机无法接入它:这次连接会失败并给出
+  说明,serve 保持运行。请把该主机设为 `provider = "remote"`(此时远端需自备凭据),或用
+  `reasonix remote serve stop <host>` 停掉该 serve。
 
 ## 自定义 OpenAI-compatible provider
 
@@ -704,8 +725,9 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | 输入框文本选择 | 选中、复制或替换草稿文本 | 应用内拖选松开后，会通过与 transcript 相同的可验证剪贴板路径复制；输入或粘贴会替换选区，方向键会收起选区。 |
 | 没有活动选区时右键 | 在本地会话粘贴剪贴板文本 | 本地会话开启鼠标接管时，Reasonix 只读取文本并交给正常的 bracketed-paste 处理。SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键；`/mouse` 可恢复终端原生右键菜单。存在活动选区时，右键仍优先复制该选区。 |
 | `/mouse` | 切换应用内鼠标接管 | 关闭后由终端处理原生拖选和右键菜单，但会失去应用内选区、滚动条和滚轮。可用 `REASONIX_DISABLE_MOUSE=1` 让每次会话默认关闭。远程（SSH）会话默认关闭，开箱即可原生选择；`REASONIX_DISABLE_MOUSE=0` 强制在任何环境下接管。 |
-| `Ctrl+C` | 复制、取消、清空或退出 | 有 transcript 或输入框活动选区时优先复制；否则取消运行中的 turn、清空非空输入，或在空输入下连按两次退出。 |
-| `Ctrl+D` | 退出 TUI | 立即退出。 |
+| `Ctrl+C` | 复制、取消、清空或退出 | 有 transcript 或输入框活动选区时优先复制；否则取消运行中的 turn、清空非空输入，或在空输入下连按两次退出；已取消的 turn 仍在停止时再按一次也会退出。 |
+| `Ctrl+D` | 退出 TUI | 空输入且空闲时立即退出。 |
+| `/quit` 或 `/exit` | 退出 TUI | 立即执行，运行中的 turn 也一样。直接输入 `exit`、`quit` 或 `:q` 只会作为普通消息发给模型。 |
 | 终端的文本粘贴快捷键 | 粘贴文本 | 文本保持终端原生 bracketed-paste 路径：macOS 通常是 `Cmd+V`，Linux 通常是 `Ctrl+Shift+V`，其它环境使用终端自身配置。Reasonix 只消费收到的文本粘贴事件，不会先探测图片。 |
 | macOS/Linux `Ctrl+V`；Windows `Alt+V` | 粘贴剪贴板图片 | 图片粘贴是独立的应用动作。读取期间底栏显示“正在粘贴图片…”，完成后在光标处插入可编辑的 `[image #N]` 标记。 |
 | `/paste-image` | 粘贴剪贴板图片 | 与图片快捷键相同的纯图片命令入口。 |

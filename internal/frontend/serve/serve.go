@@ -484,6 +484,9 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	if s.interceptSlash(w, r, trimmed) {
 		return
 	}
+	if !body.LocalShell && !control.IsNonTurnInput(body.Input) && s.refuseKeylessTurn(w) {
+		return
+	}
 	// Serialize turn admission with controller-generation rebuilds. Admission
 	// marks an ordinary turn running synchronously, so a reload that follows
 	// observes the busy state; a submit that follows a reload targets only the
@@ -518,6 +521,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 				sessionInUse(w, err)
 				return
 			}
+			keepUsedWorkspace(ctrl.WorkspaceRoot())
 		}
 	}
 	submitOrShell(ctrl, r, body.Input, body.Format, body.RefuseUnknownSlash, body.LocalShell)
@@ -826,7 +830,7 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 			ref := p.Name + "/" + model
 			seen[ref] = struct{}{}
 			routes = append(routes, modelRoute{
-				key:  strings.ToLower(strings.TrimRight(p.BaseURL, "/")) + "\x00" + model,
+				key:  modelRouteKey(p, model),
 				solo: len(models) == 1,
 			})
 			active := ref == current || p.Name == current

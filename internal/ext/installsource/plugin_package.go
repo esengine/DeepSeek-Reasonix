@@ -603,9 +603,9 @@ func verifyCopiedCapabilities(src pluginpkg.Package, target string) error {
 	is, ic, ih, im := installed.CapabilityCounts()
 	sa, ia := src.AgentCount(), installed.AgentCount()
 	if ss != is || sc != ic || sh != ih || sm != im || sa != ia {
-		return newErr(ErrInvalidManifest,
+		return &hostFactError{sentinel: ErrInvalidManifest, facts: fmt.Sprintf(
 			"installed copy resolves to %d skills / %d agents / %d commands / %d hooks / %d MCP servers but the approved plan counted %d/%d/%d/%d/%d — the package likely uses symlinks copy mode cannot materialize safely; retry with mode=link or fix the package layout",
-			is, ia, ic, ih, im, ss, sa, sc, sh, sm)
+			is, ia, ic, ih, im, ss, sa, sc, sh, sm)}
 	}
 	return nil
 }

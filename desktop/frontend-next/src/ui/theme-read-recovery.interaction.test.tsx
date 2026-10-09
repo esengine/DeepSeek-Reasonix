@@ -68,6 +68,9 @@ it("clears a read failure when an import refresh successfully loads the installe
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
+const packed = (name: string) =>
+  ((document.getElementById("pack-theme") as HTMLStyleElement | null)?.sheet?.cssRules[0] as CSSStyleRule | undefined)?.style.getPropertyValue(name) ?? "";
+
 it("keeps the painted pack after a failed read and clears it after a successful default selection", async () => {
   const hub = new MockHub();
   const runtimes = await hub.runtimes();
@@ -75,14 +78,14 @@ it("keeps the painted pack after a failed read and clears it after a successful 
   vi.spyOn(port, "themes").mockResolvedValueOnce([dusk]).mockRejectedValueOnce(unread).mockResolvedValue([]);
   const onError = vi.fn();
   const { result } = renderHook(() => usePaint(hub, runtimes, false, onError));
-  await waitFor(() => expect(document.documentElement.style.getPropertyValue("--page")).toBe("#F6F3EE"));
+  await waitFor(() => expect(packed("--page")).toBe("#F6F3EE"));
   await act(async () => result.current.reloadThemes());
   expect(result.current.pack?.id).toBe("dusk");
-  expect(document.documentElement.style.getPropertyValue("--page")).toBe("#F6F3EE");
+  expect(packed("--page")).toBe("#F6F3EE");
   expect(onError).toHaveBeenCalledExactlyOnceWith(unread);
   await act(async () => result.current.reloadThemes());
   expect(result.current.pack).toBeNull();
-  expect(document.documentElement.style.getPropertyValue("--page")).toBe("");
+  expect(packed("--page")).toBe("");
   expect(onError).toHaveBeenCalledTimes(1);
 });
 

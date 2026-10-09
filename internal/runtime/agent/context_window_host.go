@@ -14,6 +14,7 @@ import (
 // the session, the configuration or the services it was built with.
 type windowHost interface {
 	withTodoIdentityTail(visible []provider.Message) []provider.Message
+	withFoldProgressTail(visible []provider.Message, p *foldProgress) []provider.Message
 	withHostContextTail(visible []provider.Message) []provider.Message
 	toolFactsFor(name string) evidence.ToolFacts
 	providerProjectionMessages(msgs []provider.Message) []provider.Message

@@ -22,3 +22,17 @@ func TestTruncateGraphemesAppendsSuffixOutsideBudget(t *testing.T) {
 		t.Fatalf("TruncateGraphemes() = %q, want %q", got, want)
 	}
 }
+
+func TestHiddenControlsAreFoundAndStripped(t *testing.T) {
+	for _, s := range []string{"a\x1b]8;;http://x\x07b", "a‮b", "a\x00b", "a\u0085b", "a⁦b"} {
+		if !HasHiddenControls(s) || HasHiddenControls(StripHiddenControls(s)) {
+			t.Errorf("%q not handled", s)
+		}
+	}
+	if HasHiddenControls("line one\n\tline two ✓") {
+		t.Error("newline and tab are plain text")
+	}
+	if got := StripHiddenControls("a\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\b"); got != "alinkb" {
+		t.Errorf("got %q", got)
+	}
+}

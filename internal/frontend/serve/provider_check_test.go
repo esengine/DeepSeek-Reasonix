@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -36,8 +37,8 @@ func TestCheckProviderReportsWhatTheEndpointSaid(t *testing.T) {
 	if got.OK {
 		t.Fatalf("an unreachable endpoint reported ok: %+v", got)
 	}
-	if got.Error == "" {
-		t.Fatal("a failed probe must carry the endpoint's own words")
+	if got.Code != codeProbeUnreachable {
+		t.Fatalf("code = %q, want the typed identity of an unreachable endpoint", got.Code)
 	}
 	if len(got.Models) != 0 {
 		t.Fatalf("a failed probe reported models: %v", got.Models)
@@ -452,5 +453,87 @@ func TestClassifyProviderModelCheckUsesTypedAndStructuredFailures(t *testing.T) 
 				t.Fatalf("classify = %q/%q/%d, want %q/%q/%d", status, reason, httpStatus, tt.status, tt.reason, tt.httpStatus)
 			}
 		})
+	}
+}
+
+// relayWithOnlyV1Models answers a model list under /v1 and nothing at the bare
+// host, the shape of a relay whose chat lives under /v1 as well.
+func relayWithOnlyV1Models(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-x"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestProbeReturnsTheBaseThatAnswered(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	relay := relayWithOnlyV1Models(t)
+
+	resp := postProvider(t, srv.URL, "/providers/probe", fmt.Sprintf(`{"baseUrl":%q,"apiKey":"k"}`, relay.URL))
+	defer resp.Body.Close()
+	var got struct {
+		Kind    string `json:"kind"`
+		BaseURL string `json:"baseUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "openai" || got.BaseURL != relay.URL+"/v1" {
+		t.Fatalf("probe = %+v, want openai with baseUrl %s/v1", got, relay.URL)
+	}
+
+	save := postProvider(t, srv.URL, "/providers", fmt.Sprintf(`{"name":"relay","kind":"openai","baseUrl":%q,"apiKey":"k","models":["model-x"],"default":"model-x"}`, got.BaseURL))
+	defer save.Body.Close()
+	if save.StatusCode != http.StatusOK {
+		b, _ := readAllString(save)
+		t.Fatalf("save = %d: %s", save.StatusCode, b)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, ok := cfg.Provider("relay")
+	if !ok || saved.BaseURL != relay.URL+"/v1" {
+		t.Fatalf("saved base = %+v, want the completed %s/v1", saved, relay.URL)
+	}
+}
+
+func TestCheckReportsTheCompletedBaseWithoutWritingIt(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	relay := relayWithOnlyV1Models(t)
+	t.Setenv("EXISTING_API_KEY", "k")
+	if _, err := config.SetCredential("EXISTING_API_KEY", "k"); err != nil {
+		t.Fatal(err)
+	}
+	path := config.UserConfigPath()
+	raw, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(raw), "https://example.invalid/v1", relay.URL)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postProvider(t, srv.URL, "/providers/check", `{"name":"existing"}`)
+	defer resp.Body.Close()
+	var got providerCheck
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.OK || got.BaseURL != relay.URL+"/v1" {
+		t.Fatalf("check = %+v, want ok with baseUrl %s/v1", got, relay.URL)
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != strings.ReplaceAll(string(raw), "https://example.invalid/v1", relay.URL) {
+		t.Fatal("a check rewrote the saved config")
 	}
 }

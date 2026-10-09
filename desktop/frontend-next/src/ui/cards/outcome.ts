@@ -3,10 +3,10 @@ import { t } from "../../i18n";
 import { say } from "../../i18n/kernel";
 import { workspaceLeaseDetail } from "../../i18n/workspace_lease";
 
+// The host sets err for every failed, timed-out, cancelled or refused call;
+// execution.state only describes the run, and a background start is no failure.
 export function toolFailed(tool: Tool): boolean {
-  if (tool.err) return true;
-  const execution = tool.execution;
-  return !!execution && ((!!execution.state && execution.state !== "completed") || (execution.exitCode ?? 0) !== 0);
+  return !!tool.err;
 }
 
 export function toolChangedFile(tool: Tool): boolean {

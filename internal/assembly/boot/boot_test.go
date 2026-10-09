@@ -3960,10 +3960,20 @@ func TestSkillMCPBindingsUseOnlyValidOwnedCache(t *testing.T) {
 // else has to say so, or it becomes a test of that gate instead.
 func approveProjectServer(t *testing.T, root, name string) {
 	t.Helper()
-	entry := config.PluginEntry{Name: name, Source: config.MCPSourceProjectConfig}
-	if err := config.DefaultActivationStore().SetServerEnabled(entry, root, config.ActivationProject, true); err != nil {
-		t.Fatalf("approve %s: %v", name, err)
+	cfg, err := config.LoadForRootReadOnly(root)
+	if err != nil {
+		t.Fatalf("load %s: %v", root, err)
 	}
+	for _, entry := range cfg.Plugins {
+		if entry.Name != name {
+			continue
+		}
+		if err := config.DefaultActivationStore().SetServerEnabled(entry, root, config.ActivationProject, true); err != nil {
+			t.Fatalf("approve %s: %v", name, err)
+		}
+		return
+	}
+	t.Fatalf("approve %s: no such server declared in %s", name, root)
 }
 
 func TestBuildMigratesLegacyEagerTierToBackground(t *testing.T) {

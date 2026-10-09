@@ -95,11 +95,13 @@ func RunProbesWithOptions(ctx context.Context, commands []string, opts ProbeOpti
 	key := probeFingerprint(commands, opts)
 	now := probeNow()
 	if results, ok := cachedProbeResults(key, now); ok && reusableHere(results, opts.DenyRoots) {
+		adoptSnapshot(opts.SnapshotDir, key, results, now)
 		return results
 	}
 	if call, ok := beginProbe(key); ok {
 		<-call.done
 		if reusableHere(call.results, opts.DenyRoots) {
+			adoptSnapshot(opts.SnapshotDir, key, call.results, now)
 			return cloneProbeResults(call.results)
 		}
 		// Someone else's answer ran something this workspace will not. Its own

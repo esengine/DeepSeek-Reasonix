@@ -5,7 +5,7 @@ import type { AgentPort, ChipCall, ModelEntry, SessionStatus, Attachment } from 
 import { Picker } from "./Menu";
 import { Policy } from "./Policy";
 import { modelMenu } from "./modelmenu";
-import { effortMenu, effortReading, effortsFor, routeEffortPick } from "./effort";
+import { effortMenu, effortReading, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
 import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
@@ -154,10 +154,13 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
     queueMicrotask(() => box.current?.focus());
   }, [quote?.n]);
 
+  const restoredAt = useRef(restore?.n ?? 0);
   useEffect(() => {
-    if (!restore?.n) return;
+    if (!restore?.n || restore.n === restoredAt.current) return;
+    restoredAt.current = restore.n;
     setText((prev) => {
-      const next = prev.trim() ? `${prev.replace(/\s+$/, "")}\n${restore.text}` : restore.text;
+      const next = !prev.trim() || prev.trim() === restore.text.trim()
+        ? restore.text : `${prev.replace(/\s+$/, "")}\n${restore.text}`;
       pending.current = next.length;
       return next;
     });
@@ -180,11 +183,14 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
     if (focus) box.current?.focus();
   }, [focus]);
 
+  // The kernel's own report that no turn is live ends a stop even when the
+  // turn-done event never reached this window.
+  const kernelIdle = status?.running === false;
   useEffect(() => {
-    if (running) return;
+    if (running && !kernelIdle) return;
     stoppingRef.current = false;
     setStopping(false);
-  }, [running]);
+  }, [running, kernelIdle]);
 
   const sizeBox = useCallback(() => {
     const el = box.current;
@@ -375,6 +381,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
   // may still carry one from a model that did, and printing that would be the
   // composer answering for an endpoint that never spoke.
   const declared = efforts.length > 0;
+  const forcedThinking = forcesThinkingFor(models, status?.modelRef);
   const modelLb = status?.modelRef?.replace(/^[^/]+\//, "") ?? status?.label ?? "—";
   // A model switch rebuilds the runtime kernel-side; other controls here may
   // land at once. Each click needs its own pending state: greying the whole
@@ -451,11 +458,11 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
                     <span className="nm" title={c.a?.path ?? c.name}>{c.name}</span>
                     {c.state === "adding" && <span className="sz live">{t("正在添加…")}</span>}
                     {c.state === "ready" && <span className="sz">{isPicture(c) ? t("图片") : t("文件")}</span>}
+                    {c.state === "failed" && c.error && <span className="why" title={c.error}>{c.error}</span>}
                     {c.state === "failed" && (
         <button
                         className="retry"
                         data-action="session.attach"
-                        title={c.error}
                         onClick={() => {
                           if (!c.blob) return;
                           setShots((prev) => prev.map((x) => (x === c ? { ...c, state: "adding", error: "" } : x)));
@@ -708,6 +715,8 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
             current={status?.modelRef}
             items={modelMenu(models, providerOrder)}
             menuClassName="studio-model-menu"
+            searchAlways
+            searchPlaceholder={t("搜索模型或服务商…")}
             menuTitle={<><b>{t("选择模型")}</b><small>{t("用于后续任务")}</small></>}
             onOpen={loadModels}
             pending={busy["model"]}
@@ -727,7 +736,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
                 title={t("推理强度")}
                 current={declared ? status.effort || "auto" : ""}
                 pending={busy["effort"] || busy["mode"]}
-                items={effortMenu(efforts, modelLb, "__effort-declare", status.modes)}
+                items={effortMenu(efforts, modelLb, "__effort-declare", status.modes, forcedThinking)}
                 onPick={(value) => routeEffortPick(value, status.modes, {
                   declare: () => onSettings("providers:effort-declare"),
                   effort: (level) => change("effort", () => port.setEffort(level)),
@@ -752,7 +761,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
                 if (stoppingRef.current) return;
                 stoppingRef.current = true;
                 setStopping(true);
-                void port.cancel().catch((e: unknown) => {
+                void port.cancel().then(onChanged, (e: unknown) => {
                   stoppingRef.current = false;
                   setStopping(false);
                   onError(e);

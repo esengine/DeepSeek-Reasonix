@@ -13,8 +13,11 @@ import (
 // canonicalWriterPath is the lease and grant identity of a write target. The
 // writers themselves keep the path as the caller spelled it, so receipts, file
 // views and refusals name what the model used.
-func canonicalWriterPath(workDir string, temp *sessiontemp.Manager, path string) (string, error) {
+func canonicalWriterPath(workDir string, temp *sessiontemp.Manager, roots []string, path string) (string, error) {
 	path = resolveIn(workDir, resolveSessionTemp(temp, path))
+	if err := refuseNetworkPath(path, roots); err != nil {
+		return path, err
+	}
 	canonical, err := fileutil.CanonicalWritePath(path)
 	if err != nil {
 		return path, err
@@ -24,7 +27,7 @@ func canonicalWriterPath(workDir string, temp *sessiontemp.Manager, path string)
 
 // ResolveWritePaths returns grant targets even when their narrow lease identity
 // is ambiguous. Lease callers must retain whole-workspace exclusion on error.
-func ResolveWritePaths(workDir string, temp *sessiontemp.Manager, args json.RawMessage, move bool) ([]string, error) {
+func ResolveWritePaths(workDir string, temp *sessiontemp.Manager, roots []string, args json.RawMessage, move bool) ([]string, error) {
 	var p struct {
 		Path        string `json:"path"`
 		Source      string `json:"source_path"`
@@ -42,7 +45,7 @@ func ResolveWritePaths(workDir string, temp *sessiontemp.Manager, args json.RawM
 	}
 	var identityErr error
 	for i, path := range paths {
-		resolved, err := canonicalWriterPath(workDir, temp, path)
+		resolved, err := canonicalWriterPath(workDir, temp, roots, path)
 		if err != nil {
 			if !errors.Is(err, fileutil.ErrAmbiguousPath) {
 				return nil, err
@@ -59,23 +62,23 @@ func ResolveWritePaths(workDir string, temp *sessiontemp.Manager, args json.RawM
 }
 
 func (w writeFile) WritePaths(args json.RawMessage) ([]string, error) {
-	return ResolveWritePaths(w.workDir, w.sessionTemp, args, false)
+	return ResolveWritePaths(w.workDir, w.sessionTemp, w.roots, args, false)
 }
 func (e editFile) WritePaths(args json.RawMessage) ([]string, error) {
-	return ResolveWritePaths(e.workDir, e.sessionTemp, args, false)
+	return ResolveWritePaths(e.workDir, e.sessionTemp, e.roots, args, false)
 }
 func (m multiEdit) WritePaths(args json.RawMessage) ([]string, error) {
-	return ResolveWritePaths(m.workDir, m.sessionTemp, args, false)
+	return ResolveWritePaths(m.workDir, m.sessionTemp, m.roots, args, false)
 }
 func (n notebookEdit) WritePaths(args json.RawMessage) ([]string, error) {
-	return ResolveWritePaths(n.workDir, n.sessionTemp, args, false)
+	return ResolveWritePaths(n.workDir, n.sessionTemp, n.roots, args, false)
 }
 func (d deleteRange) WritePaths(args json.RawMessage) ([]string, error) {
-	return ResolveWritePaths(d.workDir, d.sessionTemp, args, false)
+	return ResolveWritePaths(d.workDir, d.sessionTemp, d.roots, args, false)
 }
 func (d deleteSymbol) WritePaths(args json.RawMessage) ([]string, error) {
-	return ResolveWritePaths(d.workDir, d.sessionTemp, args, false)
+	return ResolveWritePaths(d.workDir, d.sessionTemp, d.roots, args, false)
 }
 func (m moveFile) WritePaths(args json.RawMessage) ([]string, error) {
-	return ResolveWritePaths(m.workDir, m.sessionTemp, args, true)
+	return ResolveWritePaths(m.workDir, m.sessionTemp, m.roots, args, true)
 }

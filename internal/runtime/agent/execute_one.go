@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reasonix/internal/contract/event"
 	"reasonix/internal/runtime/usecap"
 	"strings"
 
@@ -57,6 +56,7 @@ type toolCallPlan struct {
 	cctx                 context.Context
 	releaseParentWrite   func()
 	releaseMutationWrite func()
+	releaseLeaseHold     func()
 
 	// pathsBefore is the state of the turn's known paths taken before an
 	// unclassifiable call ran, so its receipt can say what it actually touched.
@@ -106,6 +106,9 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		if plan.releaseMutationWrite != nil {
 			plan.releaseMutationWrite()
 		}
+		if plan.releaseLeaseHold != nil {
+			plan.releaseLeaseHold()
+		}
 		if plan.releaseParentWrite != nil {
 			plan.releaseParentWrite()
 		}
@@ -135,6 +138,9 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 	// Read after tool.before: an extension may have substituted the call, and the
 	// batch scan judged the one the model wrote.
 	defer func() { out.endsRound = out.endsRound || tool.IsDecisionBarrier(plan.tool) }()
+	if blocked, early := a.refuseNetworkToolPaths(plan); early {
+		return blocked
+	}
 	if blocked, early := a.resolveToolPolicy(ctx, turn, plan); early {
 		return blocked
 	}
@@ -553,7 +559,8 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// Hooks can write beyond a tool's paths, so permission precedes lease
 	// acquisition and hooks follow it under a conservative workspace claim.
 	if plan.mutates && a.svc.workspaceLease != nil {
-		if err := a.svc.workspaceLease.AcquirePaths(ctx, a.workspaceWritePaths(plan)); err != nil {
+		end, err := a.svc.workspaceLease.HoldPaths(ctx, a.workspaceWritePaths(plan))
+		if err != nil {
 			return toolOutcome{
 				output:         fmt.Sprintf("blocked: %v", err),
 				blocked:        true,
@@ -562,6 +569,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 				workspaceLease: workspaceLeaseConflictScope(err),
 			}, true
 		}
+		plan.releaseLeaseHold = end
 	}
 	// Hold the parent claim before PreToolUse: hooks are user shell code and may
 	// mutate the same workspace. The reservation remains live through hooks,
@@ -650,6 +658,7 @@ func toolHooksMayMutateWorkspace(hooks ToolHooks) bool {
 // post hooks and recovery observation, and truncates the model-facing result.
 func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) toolOutcome {
 	plan.executed = true
+	a.announceDelegation(plan)
 	cctx := plan.cctx
 	runTool := plan.runTool
 	runArgs := plan.runArgs
@@ -755,6 +764,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 		}
 		return out
 	}
+	a.observeTouchedPaths(runTool, runArgs)
 	result = silentSuccessDetail(evidenceName, evidenceArgs, result)
 	body, bound, truncMsg := a.boundToolOutput(result, call.Name, call.ID, call.Arguments, false)
 	out := toolOutcome{
@@ -780,16 +790,4 @@ func annotateShellSubject(execution *tool.ShellExecution, args json.RawMessage) 
 	if subject, cut := shellrun.OperativeCommand(cmd); cut {
 		execution.Subject = subject
 	}
-}
-
-// delegationProfile reports the sub-agents a call dispatches. A nil profile is
-// what says the call kept the work in this context.
-func delegationProfile(t tool.Tool, args json.RawMessage) *event.Profile {
-	pr, ok := t.(interface {
-		ResolveProfile(json.RawMessage) *event.Profile
-	})
-	if !ok {
-		return nil
-	}
-	return pr.ResolveProfile(args)
 }

@@ -48,7 +48,7 @@ func sources() []source {
 		},
 		{
 			Provider: "mimo", Currency: "CNY",
-			Models: []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-flash"},
+			Models: []string{"mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-v2.6-pro-ultraspeed", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-flash"},
 			URL:    pricing.DocMiMoPAYG,
 			Unread: "the page renders its prices in the browser; fetching it returns no table",
 		},

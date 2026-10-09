@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 )
 
@@ -66,9 +67,9 @@ func mcpActionRisk(e config.PluginEntry, reasons []string) (RiskLevel, []string)
 	level := RiskMedium
 	hasAuth := false
 	for k, v := range e.Headers {
-		if strings.EqualFold(k, "Authorization") || strings.Contains(strings.ToLower(v), "bearer") || strings.Contains(strings.ToLower(v), "token") {
+		if secrets.CredentialKey(k) || secrets.CredentialValue(v) {
 			hasAuth = true
-			reasons = append(reasons, "sends auth headers to "+e.URL)
+			reasons = append(reasons, "sends auth headers to "+secrets.RedactEndpoint(e.URL))
 		}
 	}
 	if e.Tier == "eager" {

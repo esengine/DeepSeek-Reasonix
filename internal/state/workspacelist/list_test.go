@@ -2,11 +2,13 @@ package workspacelist
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 func put(t *testing.T, path, body string) {
@@ -101,5 +103,54 @@ func TestMergeOnceRacesUpdatesWithoutLosingEntries(t *testing.T) {
 	}
 	if len(list.Paths) != 17 {
 		t.Fatalf("got %d paths %v, want 17", len(list.Paths), list.Paths)
+	}
+}
+
+func TestUpdateWaitsAsLongAsItsCallerAllows(t *testing.T) {
+	prev := defaultLockWait
+	defaultLockWait = 50 * time.Millisecond
+	t.Cleanup(func() { defaultLockWait = prev })
+	path := filepath.Join(t.TempDir(), FileName)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	const writers = 6
+	errs := make(chan error, writers)
+	for range writers {
+		go func() {
+			errs <- Update(ctx, path, false, func(l *List) error {
+				time.Sleep(30 * time.Millisecond)
+				l.Paths = append(l.Paths, "p")
+				return nil
+			})
+		}()
+	}
+	for range writers {
+		if err := <-errs; err != nil {
+			t.Fatalf("a writer queued inside its caller's deadline gave up: %v", err)
+		}
+	}
+}
+
+func TestUpdateWithoutADeadlineStillGivesUp(t *testing.T) {
+	prev := defaultLockWait
+	defaultLockWait = 50 * time.Millisecond
+	t.Cleanup(func() { defaultLockWait = prev })
+	path := filepath.Join(t.TempDir(), FileName)
+	release := make(chan struct{})
+	held := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = Update(context.Background(), path, false, func(*List) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer func() { close(release); <-done }()
+	err := Update(context.Background(), path, false, func(*List) error { return nil })
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended update without a deadline = %v, want deadline exceeded", err)
 	}
 }

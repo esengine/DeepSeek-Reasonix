@@ -73,6 +73,9 @@ const checkedOn = "2026-08-22"
 // nothing about another's and a shared date would claim that it did.
 const deepseekCheckedOn = "2026-09-13"
 
+// mimoCheckedOn is when the V2.6 rows were read off the vendor's own docs.
+const mimoCheckedOn = "2026-10-06"
+
 // CatalogSourceURLs document public pricing pages.
 const (
 	DocDeepSeekPricing   = "https://api-docs.deepseek.com/quick_start/pricing"

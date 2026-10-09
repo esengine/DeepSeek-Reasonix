@@ -184,6 +184,8 @@ JSON Schema: [theme-pack.schema.json](./theme-pack.schema.json)
 `bg`, `bgSoft`, `bgElev`, `panel`, `sidebar`, `chat`, `workspace`, `workspaceFiles`,
 `border`, `borderSoft`, `fg`, `fgDim`, `fgFaint`, `accent`, `accentFg`, `ok`, `warn`, `err`
 
+Studio also reads `link`, `brand`, `halo` and `labelAgent` (hyperlinks, the product tint, hover emphasis, agent names). `net`, `deleg` and the other status colours are not tokens and are dropped with a warning.
+
 Colors must **not** include `url()`, gradients, or arbitrary CSS.
 
 ## Engine behavior

@@ -184,7 +184,9 @@ func applyConfigItem(cfg *config.Config, it Item) error {
 			return fmt.Errorf("%w: provider %q", ErrMalformed, it.Name)
 		}
 		for _, have := range cfg.Providers {
-			if have.Name == entry.Name && endpoints(have) == endpoints(entry) {
+			if have.Name == entry.Name && endpoints(secretsRedacted(have)) == endpoints(entry) {
+				entry.BaseURL, entry.ChatURL, entry.RequestURL = have.BaseURL, have.ChatURL, have.RequestURL
+				entry.ModelsURL, entry.BalanceURL = have.ModelsURL, have.BalanceURL
 				entry.Headers = keepLocalSecrets(entry.Headers, have.Headers)
 			}
 		}
@@ -198,7 +200,8 @@ func applyConfigItem(cfg *config.Config, it Item) error {
 			return fmt.Errorf("%w: MCP server %q", ErrMalformed, it.Name)
 		}
 		for _, have := range cfg.Plugins {
-			if have.Name == entry.Name && have.URL == entry.URL && have.Command == entry.Command {
+			if holdsLocal(entry, have) {
+				entry.URL, entry.Args = have.URL, have.Args
 				entry.Env = keepLocalSecrets(entry.Env, have.Env)
 				entry.Headers = keepLocalSecrets(entry.Headers, have.Headers)
 			}

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ListQuerySchema, PublishSchema } from "./validation";
 
@@ -73,6 +74,19 @@ describe("PublishSchema source", () => {
       "-y",
     ]) {
       expect(parse({ kind: "mcp", source }).success, source).toBe(false);
+    }
+  });
+
+  // Shared with internal/ext/installsource/names_test.go so both sides agree.
+  it("matches the shared package spec cases", () => {
+    const cases = JSON.parse(
+      readFileSync(new URL("../../../../../internal/ext/installsource/testdata/package_specs.json", import.meta.url), "utf8"),
+    ) as { accept: string[]; reject: string[] };
+    for (const source of cases.reject) {
+      expect(parse({ kind: "mcp", source }).success, source).toBe(false);
+    }
+    for (const source of cases.accept) {
+      expect(parse({ kind: "mcp", source }).success, source).toBe(true);
     }
   });
 

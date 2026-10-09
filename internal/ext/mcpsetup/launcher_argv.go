@@ -126,7 +126,7 @@ var commandLaunchers = map[string]commandLauncher{
 	},
 }
 
-func launcherCommandOperand(args []string, launcher commandLauncher) string {
+func launcherCommandOperand(args []string, launcher commandLauncher) (string, int) {
 	options, needsCommand := true, len(launcher.commands) != 0
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -140,13 +140,13 @@ func launcherCommandOperand(args []string, launcher commandLauncher) string {
 		if options && strings.HasPrefix(arg, "-") {
 			kind, value, width, ok := launcherOption(arg, launcher)
 			if !ok || i+width >= len(args) {
-				return ""
+				return "", -1
 			}
 			if width != 0 {
 				value = args[i+width]
 			}
 			if kind == launcherModule {
-				return value
+				return value, i + width
 			}
 			i += width
 			continue
@@ -154,15 +154,15 @@ func launcherCommandOperand(args []string, launcher commandLauncher) string {
 		if needsCommand {
 			suffix, ok := launcher.commands[arg]
 			if !ok || i+len(suffix) >= len(args) || !slices.Equal(args[i+1:i+1+len(suffix)], suffix) {
-				return ""
+				return "", -1
 			}
 			i += len(suffix)
 			needsCommand = false
 			continue
 		}
-		return arg
+		return arg, i
 	}
-	return ""
+	return "", -1
 }
 
 func launcherOption(arg string, launcher commandLauncher) (launcherFlag, string, int, bool) {

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -211,6 +212,50 @@ func TestRegistrationPlatformUsesTheAccountContract(t *testing.T) {
 		if got := platformName(input); got != want {
 			t.Errorf("platformName(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestUnavailableReasonIsTypedInsteadOfReadFromErrorText(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want unavailableReason
+	}{
+		{"signed out", account.ErrUnauthorized, unavailableSignedOut},
+		{"relay refused", fmt.Errorf("%w: bad handshake", errRelayRefused), unavailableRelayRefused},
+		{"relay policy close", &websocket.CloseError{Code: websocket.ClosePolicyViolation}, unavailableRelayRefused},
+		{"unreachable", errors.New("dial tcp: network is unreachable"), unavailableRelayUnreachable},
+		{"same words are not an identity", errors.New("relay refused the connection"), unavailableRelayUnreachable},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := unavailableReasonFor(c.err); got != c.want {
+				t.Fatalf("reason = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRelayHandshakeRefusalCarriesTheTypedIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusForbidden)
+	}))
+	defer server.Close()
+	host := &Host{dialer: websocket.DefaultDialer, relayURL: "ws" + strings.TrimPrefix(server.URL, "http")}
+	err := host.connect(t.Context(), "token", &identity{DeviceID: "device", DeviceCredential: "credential"}, nil)
+	if !errors.Is(err, errRelayRefused) {
+		t.Fatalf("connect error = %v, want relay refusal identity", err)
+	}
+}
+
+func TestRelayServerFailureRemainsUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "later", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	host := &Host{dialer: websocket.DefaultDialer, relayURL: "ws" + strings.TrimPrefix(server.URL, "http")}
+	err := host.connect(t.Context(), "token", &identity{DeviceID: "device", DeviceCredential: "credential"}, nil)
+	if got := unavailableReasonFor(err); got != unavailableRelayUnreachable {
+		t.Fatalf("reason = %q, want %q", got, unavailableRelayUnreachable)
 	}
 }
 

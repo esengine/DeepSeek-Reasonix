@@ -30,10 +30,9 @@ func TestEnsureServeRejectsStalePortFile(t *testing.T) {
 		case strings.Contains(cmd, "command -v reasonix"):
 			return ok("bin /usr/bin/reasonix\nver reasonix v9.9.0\n" + allFlagsYes())
 		case strings.Contains(cmd, "nohup"):
-			if strings.Contains(cmd, "rm -f "+shellQuote(paths.PortFile)) {
-				_ = os.Remove(paths.PortFile) // model the generated launch command
-			}
 			return ok("12345\n") // the new serve never publishes a port
+		case strings.Contains(cmd, "ps -p 12345"):
+			return ok("1\n")
 		default:
 			return ok("")
 		}

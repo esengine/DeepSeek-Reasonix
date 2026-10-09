@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import type { AgentPort } from "../port/port";
 import { host } from "../port/host";
+import { HttpError } from "../port/http_error";
+import { openPage } from "./browser_open";
 import { listenAction } from "./listen";
 
 /** Where a link in this window goes. A webview has nowhere to put a new tab,
@@ -24,10 +26,14 @@ export function useLinkRouting(port: AgentPort | null, reveal: () => void, onErr
         void port.openExternal(href).catch(onError);
         return;
       }
+      // A kernel that opened no tab still has somewhere to send it; one that
+      // opened a tab whose page failed to load already shows the page.
+      const page = openPage(port, href);
       reveal();
-      // A kernel that cannot open one still has somewhere to send it, rather
-      // than a click that did nothing.
-      void port.browserOpen(href, true).catch(() => port.openExternal(href).catch(onError));
+      void page.catch((e) => {
+        if (e instanceof HttpError && e.reason?.params?.tab) return;
+        port.openExternal(href).catch(onError);
+      });
     };
     return listenAction(window, "click", { action: "external.open", listener: onClick as EventListener });
   }, [port, reveal, onError]);

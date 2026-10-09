@@ -52,3 +52,18 @@ export function parseEffortLevels(text: string): string[] {
   }
   return out;
 }
+
+// The kernel's own bounds for a provider's idle_timeout_seconds.
+export const IDLE_TIMEOUT_MIN = 1;
+export const IDLE_TIMEOUT_MAX = 32767;
+
+/** Empty is the default, which the kernel stores as 0; anything else has to be
+ *  a plain integer inside the bounds, because a silently coerced "1.5" would
+ *  save a different number than the one typed. */
+export function parseIdleTimeout(text: string): { ok: true; secs: number } | { ok: false } {
+  const v = text.trim();
+  if (v === "") return { ok: true, secs: 0 };
+  if (!/^[1-9]\d*$/.test(v)) return { ok: false };
+  const secs = Number(v);
+  return secs >= IDLE_TIMEOUT_MIN && secs <= IDLE_TIMEOUT_MAX ? { ok: true, secs } : { ok: false };
+}

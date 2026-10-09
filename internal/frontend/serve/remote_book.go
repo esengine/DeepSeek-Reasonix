@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -32,6 +33,7 @@ type RemoteHostEdit struct {
 	UseSSHConfig  bool     `json:"useSSHConfig"`
 	PassphraseEnv string   `json:"passphraseEnv"`
 	PasswordEnv   string   `json:"passwordEnv"`
+	Disabled      bool     `json:"disabled"`
 }
 
 func (h *Hub) saveRemoteHost(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +76,7 @@ func (h *Hub) saveRemoteHost(w http.ResponseWriter, r *http.Request) {
 		UseSSHConfig:  body.UseSSHConfig,
 		PassphraseEnv: strings.TrimSpace(body.PassphraseEnv),
 		PasswordEnv:   strings.TrimSpace(body.PasswordEnv),
+		Disabled:      body.Disabled,
 	}
 	if host == "" {
 		entry.Host = name
@@ -248,6 +251,10 @@ func (h *Hub) remoteTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ep, release, err := h.remoteLink(r, r.PathValue("host"))
+	if errors.Is(err, errRemoteDisabled) {
+		refuse(w, http.StatusConflict, "remote.disabled", "this machine is turned off in the host book", nil)
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
@@ -283,6 +290,10 @@ func (h *Hub) removeRemoteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ep, release, err := h.remoteLink(r, r.PathValue("host"))
+	if errors.Is(err, errRemoteDisabled) {
+		refuse(w, http.StatusConflict, "remote.disabled", "this machine is turned off in the host book", nil)
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
@@ -301,8 +312,36 @@ func (h *Hub) remoteLink(r *http.Request, host string) (RemoteEndpoint, func(), 
 	if ep, ok := h.anyRemotePane(host); ok {
 		return ep, func() {}, nil
 	}
-	// The far kernel outlives the link, and its book is on its own disk.
+	// The far kernel outlives the link, and its book is on its own disk. A
+	// machine the book has turned off is not reached for at all, so a question
+	// about it fails the same way opening it would.
+	if err := h.remoteHostDialable(host); err != nil {
+		return RemoteEndpoint{}, nil, err
+	}
 	return h.opts.Remote.Attach(operationContext(r), host, "")
+}
+
+// errRemoteDisabled is the typed refusal a machine the book has turned off gets,
+// so a read answers the same code an open does.
+var errRemoteDisabled = errors.New("this machine is turned off in the host book")
+
+// remoteHostDialable reports why the book will not dial name: nil when it will,
+// errRemoteDisabled when the machine is off, and the read error when the book
+// cannot be read at all — a switch that stops a machine has to keep stopping it
+// then too.
+func (h *Hub) remoteHostDialable(name string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	entry, ok := cfg.RemoteHost(name)
+	if !ok {
+		return nil
+	}
+	if !entry.IsEnabled() {
+		return errRemoteDisabled
+	}
+	return nil
 }
 
 // anyRemotePane returns an endpoint on host, for a question about the machine

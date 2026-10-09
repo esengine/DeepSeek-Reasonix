@@ -34,6 +34,9 @@ func (w writeFile) Preview(ctx context.Context, args json.RawMessage) (diff.Chan
 		return diff.Change{}, fmt.Errorf("path is required")
 	}
 	p.Path = resolveIn(w.workDir, p.Path)
+	if err := refuseNetworkPath(p.Path, w.roots); err != nil {
+		return diff.Change{}, err
+	}
 
 	old, kind := "", diff.Create
 	if src, err := readEditSource(ctx, w.overlay, p.Path); err == nil {
@@ -63,6 +66,9 @@ func (e editFile) Preview(ctx context.Context, args json.RawMessage) (diff.Chang
 		return diff.Change{}, fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
+	if err := refuseNetworkPath(p.Path, e.roots); err != nil {
+		return diff.Change{}, err
+	}
 
 	src, err := readEditSource(ctx, e.overlay, p.Path)
 	if err != nil {
@@ -102,6 +108,9 @@ func (m multiEdit) Preview(ctx context.Context, args json.RawMessage) (diff.Chan
 		return diff.Change{}, fmt.Errorf("edits must not be empty")
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
+	if err := refuseNetworkPath(p.Path, m.roots); err != nil {
+		return diff.Change{}, err
+	}
 
 	src, err := readEditSource(ctx, m.overlay, p.Path)
 	if err != nil {

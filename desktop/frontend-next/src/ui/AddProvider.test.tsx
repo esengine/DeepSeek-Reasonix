@@ -191,3 +191,26 @@ it("normalizes spaces around an ASCII name and refuses a blank one", async () =>
     name: "company-relay.1_x",
   })));
 });
+
+it("saves the address the probe resolved, not the bare host that was typed", async () => {
+  const saveProvider = vi.fn(async () => {});
+  const probeProvider = vi.fn(async () => ({
+    kind: "openai", kinds: ["openai"], baseUrl: "https://relay.example/v1", authHeader: false,
+    models: ["model-x"], default: "model-x", efforts: [], effort: "", vision: [], ambiguous: false, noProxy: false,
+  }));
+  const port = {
+    protocols: vi.fn(async () => [{ kind: "openai", discovery: "openai", serverWebSearch: false, reasoningParams: true }]),
+    saveProvider,
+    probeProvider,
+  } as unknown as Port;
+
+  render(<AddProvider port={port} taken={[]} known={[]} onDone={() => {}} onCancel={() => {}} />);
+  await userEvent.type(screen.getByLabelText("接口地址"), "https://relay.example");
+  await userEvent.type(screen.getByLabelText("API Key"), "k");
+  await userEvent.click(screen.getByRole("button", { name: /验证连接并读取/ }));
+
+  expect(await screen.findByText("接口地址已补全为 https://relay.example/v1")).toBeTruthy();
+  expect((screen.getByLabelText("接口地址") as HTMLInputElement).value).toBe("https://relay.example/v1");
+  await userEvent.click(screen.getByRole("button", { name: "添加来源" }));
+  await waitFor(() => expect(saveProvider).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://relay.example/v1" })));
+});

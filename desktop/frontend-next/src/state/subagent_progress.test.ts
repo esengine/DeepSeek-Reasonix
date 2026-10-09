@@ -64,3 +64,20 @@ describe("the reserved prefix", () => {
     expect(go.match(/SubagentProgressPrefix\s*=\s*"([^"]+)"/)?.[1]).toBe(SUBAGENT_PROGRESS_PREFIX);
   });
 });
+
+describe("a proxied sub-agent while its call is still open", () => {
+  const proxied = { kind: "tool_dispatch", tool: { id: "c1", name: "use_capability", args: "{}" } } as SessionEvent;
+  const marked = { kind: "tool_dispatch", tool: { id: "c1", name: "use_capability", args: "{}", refreshed: true, profile: prof } } as SessionEvent;
+  const step = { kind: "tool_dispatch", tool: { id: "c1/s1", parentId: "c1", name: "read_file" } } as SessionEvent;
+
+  it("is no task before the kernel marks it, and a running one the moment it does", () => {
+    expect(liveTasks(after([proxied, step]))).toBe(0);
+    const s = after([proxied, marked, step]);
+    expect(liveTasks(s)).toBe(1);
+    expect(card(s).children).toHaveLength(1);
+  });
+
+  it("keeps the one card when the mark arrives", () => {
+    expect(after([proxied, marked, step]).items.filter((i) => i.t === "tool")).toHaveLength(1);
+  });
+});

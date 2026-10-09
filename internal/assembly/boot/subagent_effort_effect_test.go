@@ -17,6 +17,7 @@ import (
 )
 
 type inheritedEffortProviderCall struct {
+	model         string
 	defaultEffort string
 	request       provider.Request
 }
@@ -27,6 +28,7 @@ type inheritedEffortEffectProvider struct {
 }
 
 type inheritedEffortEffectProviderInstance struct {
+	model         string
 	owner         *inheritedEffortEffectProvider
 	defaultEffort string
 }
@@ -39,6 +41,7 @@ func (p *inheritedEffortEffectProviderInstance) Stream(_ context.Context, req pr
 	p.owner.mu.Lock()
 	call := len(p.owner.calls)
 	p.owner.calls = append(p.owner.calls, inheritedEffortProviderCall{
+		model:         p.model,
 		defaultEffort: p.defaultEffort,
 		request:       req,
 	})
@@ -80,7 +83,7 @@ func runInheritedEffortEffectWith(t *testing.T, supported bool, agentExtra, prov
 	recorder := &inheritedEffortEffectProvider{}
 	provider.Register(providerKind, func(cfg provider.Config) (provider.Provider, error) {
 		defaultEffort, _ := cfg.Extra["effort"].(string)
-		return &inheritedEffortEffectProviderInstance{owner: recorder, defaultEffort: defaultEffort}, nil
+		return &inheritedEffortEffectProviderInstance{owner: recorder, model: cfg.Model, defaultEffort: defaultEffort}, nil
 	})
 
 	supportedEfforts := `["low", "high"]`
@@ -105,7 +108,7 @@ model = "x"
 supported_efforts = %s
 default_effort = "high"
 %s
-`, agentExtra, providerKind, supportedEfforts, providerExtra))
+`, agentExtra, providerKind, supportedEfforts, strings.ReplaceAll(providerExtra, "%KIND%", providerKind)))
 	approveWorkspace(t, dir)
 
 	var sinkMu sync.Mutex
@@ -197,5 +200,54 @@ func TestEffectDroppedInheritedEffortFallsToParentEffort(t *testing.T) {
 	}
 	if !warned {
 		t.Fatal("dropping the inherited effort should still be announced")
+	}
+}
+
+const otherModelProvider = `
+
+[[providers]]
+name = "other"
+kind = "%KIND%"
+model = "y"
+supported_efforts = %SUPPORTED%
+default_effort = "low"
+`
+
+func otherModel(supported string) string {
+	return strings.ReplaceAll(otherModelProvider, "%SUPPORTED%", supported)
+}
+
+func TestEffectInheritedEffortFollowsTheModelSubagentModelsTaskSelects(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		supported string
+		want      string
+	}{
+		{"model without the level runs at its own default", `["low", "high"]`, "low"},
+		{"model declaring the level receives it", `["low", "high", "max"]`, "max"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls, events, cfg := runInheritedEffortEffectWith(t, true, `subagent_models = { task = "other/y" }`, otherModel(tc.supported))
+			if len(calls) < 3 {
+				t.Fatalf("provider calls = %d, want parent, subagent, and parent follow-up", len(calls))
+			}
+			child := calls[1]
+			if child.model != "y" {
+				t.Fatalf("child ran model %q, want y: the configured task model", child.model)
+			}
+			if child.defaultEffort != tc.want || (child.request.EffortOverride != "" && child.request.EffortOverride != tc.want) {
+				t.Fatalf("child effort = default %q/override %q, want %q", child.defaultEffort, child.request.EffortOverride, tc.want)
+			}
+			if cfg.Agent.SubagentEffort != "max" {
+				t.Fatalf("persisted agent.subagent_effort = %q, want max", cfg.Agent.SubagentEffort)
+			}
+			warned := false
+			for _, e := range events {
+				warned = warned || (e.Kind == event.Notice && strings.Contains(e.Detail, "agent.subagent_effort"))
+			}
+			if warned != (tc.want != "max") {
+				t.Fatalf("dropped-effort warning delivered = %v, want %v", warned, tc.want != "max")
+			}
+		})
 	}
 }

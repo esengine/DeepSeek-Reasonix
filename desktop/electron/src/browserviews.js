@@ -1,7 +1,8 @@
 "use strict";
 const crypto = require("node:crypto");
 const { WebContentsView, session } = require("electron");
-const { guestNavigationAllowed, typedAddress } = require("./browserguard");
+const { installPaneReload } = require("./reload");
+const { guestNavigationAllowed, typed } = require("./browserguard");
 
 // The size a page lays out at while nobody is looking at it: the kernel drives
 // pages whether or not the panel is open, and a page sized to nothing reads as
@@ -96,6 +97,7 @@ class BrowserViews {
       if (allowed(to)) onPopup(to);
       return { action: "deny" };
     });
+    installPaneReload(contents);
     contents.debugger.attach("1.3");
     contents.debugger.on("message", (_event, method, params, sessionId) => {
       if (sessionId) return;
@@ -219,12 +221,15 @@ class BrowserViews {
     }
   }
 
+  // navigate starts loading what the person typed and answers "", or the code
+  // of why the window will not: "scheme" or "network_file".
   navigate(targetId, address) {
     const entry = this.entries.get(targetId);
-    const { url, fallback } = typedAddress(address);
-    if (!entry || !guestNavigationAllowed(url, this.kernelOrigin)) return false;
+    const { url, fallback, refusal } = typed(address, this.kernelOrigin);
+    if (!entry) return "scheme";
+    if (refusal) return refusal;
     void this.loadTyped(targetId, entry, url, fallback);
-    return true;
+    return "";
   }
 
   // loadTyped owns the outcome of an address the person typed. loadURL's own

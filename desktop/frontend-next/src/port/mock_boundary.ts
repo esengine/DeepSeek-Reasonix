@@ -1,5 +1,5 @@
 import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
-import type { ProgressWatchSettings } from "./boundary";
+import type { DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings } from "./boundary";
 import { MockShell } from "./mock_shell";
 
 // The boundary half of the fixture: what the agent is refused outright, and how
@@ -102,6 +102,17 @@ export class MockBoundary extends MockShell {
   async saveBrowserTools(enabled: boolean): Promise<BrowserToolsSettings> {
     this.browser = { ...this.browser, enabled, effective: enabled };
     return { ...this.browser };
+  }
+
+  private currency: DisplayCurrencySettings = { mode: "auto", path: "/Users/you/.reasonix/config.toml" };
+
+  async displayCurrency(): Promise<DisplayCurrencySettings> {
+    return { ...this.currency };
+  }
+
+  async saveDisplayCurrency(mode: DisplayCurrencyMode): Promise<DisplayCurrencySettings> {
+    this.currency = { ...this.currency, mode };
+    return { ...this.currency };
   }
 
   private watch: ProgressWatchSettings = {

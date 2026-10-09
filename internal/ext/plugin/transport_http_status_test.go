@@ -30,10 +30,8 @@ func TestATerminalHTTPFailureKeepsItsStatusAsANumber(t *testing.T) {
 	if status.Status != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", status.Status)
 	}
-	// The sentence is unchanged. Anything downstream that only displays it —
-	// diagnostics, a redaction pass, a settings row — sees what it saw before.
-	if !strings.Contains(err.Error(), "http 401: go away") {
-		t.Errorf("message = %q, want it to still read http 401 with the detail", err.Error())
+	if strings.Contains(err.Error(), "go away") || !strings.Contains(err.Error(), "http 401") {
+		t.Errorf("message = %q, want status without remote detail", err.Error())
 	}
 }
 

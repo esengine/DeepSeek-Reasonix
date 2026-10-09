@@ -49,3 +49,18 @@ func TestIdleTimeoutDefaultsWhenUnset(t *testing.T) {
 		t.Errorf("ResponseHeaderTimeout = %v, want %v", tr.ResponseHeaderTimeout, provider.StreamIdleTimeout)
 	}
 }
+
+// The retry notice tells the user how long one attempt waits, so the send
+// options must carry the same window the transport enforces.
+func TestSendOptsCarryTheHeaderWindow(t *testing.T) {
+	p, err := New(provider.Config{
+		Name: "deepseek", BaseURL: "https://api.deepseek.com/anthropic", Model: "deepseek-flash", APIKey: "k",
+		Extra: map[string]any{provider.IdleTimeoutSecondsKey: 8},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := p.(*client).sendOpts().HeaderTimeout; got != 8*time.Second {
+		t.Fatalf("HeaderTimeout = %v, want 8s", got)
+	}
+}

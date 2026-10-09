@@ -62,7 +62,7 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].map((unreviewed) => ({ lang
   retry.focus();
   await userEvent.keyboard("{Enter}");
   expect(f.read).toHaveBeenCalledTimes(2);
-  expect(f.read).toHaveBeenLastCalledWith(pkg.slug);
+  expect(f.read).toHaveBeenLastCalledWith(pkg.slug, { refresh: true });
   expect(f.preview).toHaveBeenCalledTimes(1);
   expect(f.install).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("button", { name: t("重试") })).toBeNull();

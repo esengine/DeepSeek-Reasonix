@@ -213,6 +213,9 @@ rules are written in.
   back into scope, draws its tick and nothing else. `data-just-done` carries
   that event and `data-run="done"` carries the state; keeping them apart is
   what stops history from replaying as news.
+- Unread is a fact the kernel owns, drawn beside the run tick and never merged with it: an 8px dot at the row end, so titles keep their column and it cannot be read as the project's status dot, a semibold title, and a spoken "未读" on the dot.
+- In dark an unread row also takes a 4% tint, below hover and selection. In light it would sit one step from the selected row, so light has none. A remote row keeps its dot left of the delete button, and its turn count shifts left to make room.
+- A folded project row sums the unread sessions under it into an outlined count among its action buttons, unlike the filled feedback badge, and drops it when the project opens. A pane tab carries a 6px dot; the tab strip is currently hidden by the Studio sheet. Nothing here animates.
 
 ## The queue
 
@@ -1397,3 +1400,40 @@ what exists.
 - The reduced-motion block is deliberately the last motion rule in the file, so a
   new component inherits the user's request instead of depending on a selector
   written before it.
+
+## MCP authorization state
+
+- A server awaiting project launch approval uses a static `--warn-ink` pip.
+  It is an authorization decision, so it does not use the animated connecting
+  indicator or the failed-connection color.
+
+## MCP rows in narrow settings groups
+
+- Below 560px of available row width, server identity, status metadata and
+  actions use separate lines. Status and provenance wrap instead of disappearing
+  behind an ellipsis; long unbroken source strings may break within the line.
+- The action group keeps its switches and connection buttons inside the row,
+  with room to wrap when needed. The container boundary scopes this to MCP rows,
+  including rows inside packages; wide server rows retain their inline layout.
+
+## Control tooltips
+
+- `.studio-control-tip` is a child of the button it describes, so it inherits
+  that button's `white-space` and sits inside its opacity context. It therefore
+  declares `white-space: normal` and wraps inside `max-width`; any string,
+  Chinese or English, stays inside the box.
+- A disabled host dims its glyph (`> .studio-icon`), never itself: opacity
+  multiplies down the tree, so a dimmed button would fade the tooltip that
+  explains why it is disabled.
+- `perf/tooltip.mjs` measures both in Chromium; `controltip.test.ts` pins the
+  rules statically.
+
+## The feedback veil
+
+- `.fbk-veil` is a flat scrim, not a blurred backdrop.
+- A backdrop filter over the whole window is redone every frame while anything
+  beneath it moves; a running turn's spinners are enough.
+- The scrim is opaque enough that what shows through reads as dimmed, which is
+  the job the blur did.
+- `feedback-veil.test.ts` scans every stylesheet: no rule on `.fbk-veil` may
+  carry a backdrop filter or an endless animation.

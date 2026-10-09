@@ -125,6 +125,9 @@ func (c *Controller) feedbackList() {
 	if got.Offline {
 		b.WriteString("(offline - showing what this machine remembers; statuses may be out of date)\n")
 	}
+	if standing := feedbackStanding(got.Profile, got.Offline); standing != "" {
+		b.WriteString(standing + "\n\n")
+	}
 	for _, it := range got.Items {
 		fmt.Fprintf(&b, "%s  %-8s %-11s %s%s%s\n", it.Receipt, it.Category, feedbackStatusText(it), feedbackIssueRef(it), it.TitleSnippet, feedbackMarks(it))
 	}
@@ -267,6 +270,9 @@ func feedbackStatusText(it feedback.Item) string {
 
 func feedbackFailure(err error) string {
 	var invalid *feedback.InvalidError
+	if said, ok := feedbackRefusal(err); ok {
+		return said
+	}
 	switch {
 	case errors.As(err, &invalid):
 		return "feedback not sent: " + invalid.Field + " is not acceptable (" + invalid.Reason + ")"

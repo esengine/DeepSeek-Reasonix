@@ -35,6 +35,32 @@ describe("cloud backup", () => {
     expect(req.passphrase).toBe("a long passphrase");
   });
 
+  it("says why the button is held back while the passphrase is short or unconfirmed", async () => {
+    const port = new MockPort() as unknown as AgentPort;
+    render(<Backup port={port} />);
+    const btn = await screen.findByRole<HTMLButtonElement>("button", { name: "备份到账号" });
+    const [pass, again] = document.querySelectorAll<HTMLInputElement>('input[type="password"]');
+    expect(btn.disabled).toBe(true);
+    expect(document.querySelector('[data-action="backup.wait"]')!.textContent).toBe("口令还差 10 个字符");
+    await userEvent.type(pass!, "abcd");
+    const why = document.querySelector('[data-action="backup.wait"]')!;
+    expect(why.textContent).toBe("口令还差 6 个字符");
+    expect(btn.getAttribute("aria-describedby")).toBe(why.id);
+    await userEvent.type(pass!, "efghij");
+    expect(document.querySelector('[data-action="backup.wait"]')!.textContent).toBe("请再输一次口令");
+    await userEvent.type(again!, "abcdefghij");
+    expect(document.querySelector('[data-action="backup.wait"]')).toBeNull();
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("asks for a category when every box is unticked", async () => {
+    const port = new MockPort() as unknown as AgentPort;
+    render(<Backup port={port} />);
+    await screen.findByRole("button", { name: "备份到账号" });
+    for (const box of screen.getAllByRole<HTMLInputElement>("checkbox")) if (box.checked) await userEvent.click(box);
+    expect(document.querySelector('[data-action="backup.wait"]')!.textContent).toBe("至少选择一项备份内容");
+  });
+
   it("holds a command back until its own consent box is ticked, and sends that consent", async () => {
     const port = new MockPort() as unknown as AgentPort;
     const apply = vi.spyOn(port, "applyBackup");

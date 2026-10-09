@@ -382,6 +382,10 @@ func (o *turnOrchestrator) gatePlanApproval(ctx context.Context) error {
 	// carries no subject — it's purely the gate.
 	allow, _, err := c.requestApproval(ctx, approvalRequest{tool: planApprovalTool})
 	if err != nil {
+		// A stop or timeout leaves the plan unapproved, which is the same state
+		// as a revise: awaiting approval has no card left to answer it.
+		c.plan().Transition(submitted, planmode.Revise)
+		c.sharePlanRuntime()
 		return err
 	}
 	if !allow {

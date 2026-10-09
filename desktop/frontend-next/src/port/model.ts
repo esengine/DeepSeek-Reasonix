@@ -54,6 +54,8 @@ export interface ModelEntry {
   answers?: "chat" | "decision";
   efforts?: string[];
   effort?: string;
+  // Even the lowest effort still reasons and is billed.
+  forcesThinking?: boolean;
   contextWindow?: number;
   price?: ModelPrice;
   // The credential this route spends; pairs with vendor to name the account.
@@ -87,6 +89,14 @@ export interface RoleAssignments {
   // others it never falls back to the main model: a chat model cannot answer a
   // question set, and a silent fallback would make a missing backend a wrong one.
   decision: string;
+}
+
+// A per-profile entry that outranks a role's global model. `scope` names the
+// file holding it: only a "user" entry can be cleared from the settings page.
+export interface RoleOverride {
+  key: string;
+  model: string;
+  scope: "user" | "project";
 }
 
 // The two fold bounds and which of them is in force. They are configured

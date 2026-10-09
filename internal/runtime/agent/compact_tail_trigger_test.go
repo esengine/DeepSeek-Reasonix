@@ -27,7 +27,7 @@ type oneTurnMock struct {
 func (m *oneTurnMock) handler(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	if isSummarizeRequest(body) {
-		writeSSE(w, m.t, streamChunk(deltaText("- digest")), finishChunk("stop"), usageChunk(80, 30, 0, 80))
+		writeSSE(w, m.t, streamChunk(deltaText("## Digest\n- digest")), finishChunk("stop"), usageChunk(80, 30, 0, 80))
 		return
 	}
 	promptTok := charsOf(decodeMessages(body)) / 4

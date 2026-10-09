@@ -35,7 +35,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Public callback types
@@ -448,49 +447,6 @@ func (s *server) handleInitialized(context.Context, json.RawMessage) {
 
 // Intercept and observation
 
-func (s *server) handleIntercept(ctx context.Context, raw json.RawMessage) (any, error) {
-	var p InterceptParams
-	if err := strictDecode(raw, &p); err != nil {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	if !validInterceptEvent(p.Event) || p.Seq < 1 || p.TimeoutMillis < 0 || !jsonKeyPresent(raw, "payload") {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	payload, err := s.rehydrate(ctx, p.Payload, p.Externalized, "/payload")
-	if err != nil {
-		return nil, err
-	}
-	fn := s.opts.Interceptors[string(p.Event)]
-	if fn == nil {
-		fn = s.opts.Interceptors["*"]
-	}
-	if fn == nil {
-		return Continue(), nil
-	}
-	if p.TimeoutMillis > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMillis)*time.Millisecond)
-		defer cancel()
-	}
-	result, err := fn(ctx, string(p.Event), payload)
-	if err != nil {
-		// The callback's advertised intercept budget expired. Return the
-		// frozen timeout reason rather than racing the host's identical timer
-		// with a generic internal error response.
-		if errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, MustProtocolError(ErrInterceptTimeout)
-		}
-		return nil, err
-	}
-	if result == nil {
-		return Continue(), nil
-	}
-	if !validInterceptDecision(result.Decision) {
-		return nil, fmt.Errorf("extension: interceptor for %q returned invalid decision %q", p.Event, result.Decision)
-	}
-	return result, nil
-}
-
 func (s *server) handleEvent(ctx context.Context, raw json.RawMessage) {
 	var p EventParams
 	if err := strictDecode(raw, &p); err != nil || !validInterceptEvent(p.Event) || !jsonKeyPresent(raw, "payload") {
@@ -536,134 +492,6 @@ func (s *server) handleProviderCatalog(ctx context.Context, raw json.RawMessage)
 		providers = []ProviderDescriptor{}
 	}
 	return ProviderCatalogResult{Providers: providers}, nil
-}
-
-func (s *server) handleStreamOpen(ctx context.Context, raw json.RawMessage) (any, error) {
-	if s.opts.Provider == nil {
-		return nil, MustProtocolError(ErrUnknownMethod)
-	}
-	var p StreamOpenParams
-	if err := strictDecode(raw, &p); err != nil {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	if p.SeqBase < 0 {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	if err := p.Validate(); err != nil {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	streamCtx, cancel := context.WithCancel(ctx)
-	chunks, err := s.opts.Provider.Stream(streamCtx, StreamRequest{
-		StreamID:    p.StreamID,
-		ProviderRef: p.ProviderRef,
-		Model:       p.Model,
-		Effort:      p.Effort,
-		Request:     p.Request,
-	})
-	if err != nil {
-		cancel()
-		s.log.Printf("extension: provider stream %q failed to open: %v", p.StreamID, err)
-		return nil, MustProtocolError(ErrProviderFailed)
-	}
-	if chunks == nil {
-		cancel()
-		return nil, errors.New("extension: provider returned a nil chunk channel")
-	}
-	handle := &streamHandle{cancel: cancel, done: make(chan struct{})}
-	s.streamsMu.Lock()
-	if _, exists := s.streams[p.StreamID]; exists {
-		s.streamsMu.Unlock()
-		cancel()
-		return nil, &ProtocolError{Reason: ErrProtocolError, Message: "duplicate stream id " + p.StreamID}
-	}
-	s.streams[p.StreamID] = handle
-	s.streamsMu.Unlock()
-	return deferredResult{
-		result: StreamOpenResult{Accepted: true},
-		after:  func() { go s.pumpStream(streamCtx, p.StreamID, p.SeqBase, chunks, handle) },
-	}, nil
-}
-
-func (s *server) handleStreamCancel(_ context.Context, raw json.RawMessage) (any, error) {
-	var p StreamCancelParams
-	if err := strictDecode(raw, &p); err != nil || strings.TrimSpace(p.StreamID) == "" {
-		return nil, MustProtocolError(ErrInvalidParams)
-	}
-	s.streamsMu.Lock()
-	handle := s.streams[p.StreamID]
-	s.streamsMu.Unlock()
-	if handle == nil {
-		return StreamCancelResult{Cancelled: false}, nil
-	}
-	handle.cancel()
-	return StreamCancelResult{Cancelled: true}, nil
-}
-
-// pumpStream forwards one provider channel onto the wire: chunks become
-// stream/chunk notifications with contiguous 1-based seqs (from SeqBase),
-// and exactly one stream/end closes the stream — clean on channel close,
-// with error on an error chunk, interrupted on cancel. A cancel processed by
-// the SDK is never trailed by another chunk.
-func (s *server) pumpStream(ctx context.Context, streamID string, seqBase int, chunks <-chan StreamChunk, handle *streamHandle) {
-	defer close(handle.done)
-	defer func() {
-		s.streamsMu.Lock()
-		delete(s.streams, streamID)
-		s.streamsMu.Unlock()
-	}()
-	seq := int64(seqBase)
-	if seq < 1 {
-		seq = 1
-	}
-	var lastSeq int64
-	end := StreamEndParams{StreamID: streamID}
-	for {
-		// A cancel must never be trailed by one more chunk, so check before
-		// every receive and again before every send.
-		select {
-		case <-ctx.Done():
-			end.LastSeq, end.Interrupted = lastSeq, true
-			s.sendStreamEnd(&end)
-			return
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			end.LastSeq, end.Interrupted = lastSeq, true
-			s.sendStreamEnd(&end)
-			return
-		case chunk, ok := <-chunks:
-			if !ok {
-				end.LastSeq = lastSeq
-				s.sendStreamEnd(&end)
-				return
-			}
-			if chunk.Type == ChunkError {
-				end.LastSeq = lastSeq
-				end.Error = frozenErrorSpecs[ErrProviderFailed].Message
-				if chunk.Error != nil && strings.TrimSpace(chunk.Error.Message) != "" {
-					end.Error = chunk.Error.Message
-				}
-				s.sendStreamEnd(&end)
-				return
-			}
-			if err := chunk.Validate(); err != nil {
-				s.log.Printf("extension: provider stream %q produced an invalid chunk: %v", streamID, err)
-				end.LastSeq = lastSeq
-				end.Error = "the extension provider produced an invalid chunk"
-				s.sendStreamEnd(&end)
-				return
-			}
-			if err := s.conn.notify(MethodExtensionProviderStreamChunk, StreamChunkParams{
-				StreamID: streamID, Seq: seq, Chunk: chunk,
-			}); err != nil {
-				s.log.Printf("extension: provider stream %q could not deliver chunk %d: %v", streamID, seq, err)
-				return
-			}
-			lastSeq = seq
-			seq++
-		}
-	}
 }
 
 func (s *server) sendStreamEnd(end *StreamEndParams) {

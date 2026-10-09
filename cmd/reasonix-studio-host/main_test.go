@@ -26,12 +26,67 @@ func TestMain(m *testing.M) {
 	testenv.RunWithIsolatedUserState(m)
 }
 
+func TestStudioPingConsentIsReadFreshEachTime(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	path := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts := studioTelemetryOptions(context.Background(), config.Default(), "2.20.2")
+	if opts.PingAllowed == nil {
+		t.Fatal("Studio's ping has no live consent check")
+	}
+	write("[desktop]\ntelemetry = true\n")
+	if !opts.PingAllowed() {
+		t.Fatal("enabled setting reads as off")
+	}
+	write("[desktop]\ntelemetry = false\n")
+	if opts.PingAllowed() {
+		t.Fatal("a setting turned off while running still allows the ping")
+	}
+	write("[desktop]\ntelemetry = false\n\n[broken\nx = \n")
+	if opts.PingAllowed() {
+		t.Fatal("a corrupt file after an opt-out counted as consent")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if !opts.PingAllowed() {
+		t.Fatal("a missing file should keep the documented default (on)")
+	}
+}
+
+func TestProjectConfigCannotTurnThePingOn(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	path := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[desktop]\ntelemetry = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := testenv.TempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("[desktop]\ntelemetry = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(project)
+	if desktopTelemetryOn() {
+		t.Fatal("a checkout's reasonix.toml turned the ping back on")
+	}
+}
+
 func TestStudioTelemetryUsesItsOwnSurfaceAndConsent(t *testing.T) {
 	cfg := config.Default()
 	disabled := false
 	cfg.Desktop.Telemetry = &disabled
 
-	opts := studioTelemetryOptions(cfg, "2.20.2")
+	opts := studioTelemetryOptions(context.Background(), cfg, "2.20.2")
 	if opts.Surface != surface.Studio {
 		t.Fatalf("surface = %q, want studio", opts.Surface)
 	}

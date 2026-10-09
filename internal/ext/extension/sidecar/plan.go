@@ -132,7 +132,7 @@ func StartPackagesWithPlan(ctx context.Context, home string, sessionCtx protocol
 }
 
 func adoptAll(previous *Manager) *Manager {
-	m := &Manager{clients: make(map[string]*Client)}
+	m := &Manager{clients: make(map[string]*Client), planAdopted: make(map[string]*Client)}
 	if previous == nil {
 		return m
 	}
@@ -140,6 +140,7 @@ func adoptAll(previous *Manager) *Manager {
 		id := client.PluginID()
 		if c := previous.Detach(id); c != nil {
 			m.clients[id] = c
+			m.planAdopted[id] = c
 		}
 	}
 	return m

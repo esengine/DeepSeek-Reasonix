@@ -78,6 +78,7 @@ type TaskTool struct {
 	sysPrompt                     string
 	gate                          agent.Gate
 	subagentModel, subagentEffort string
+	inheritedEffort               func(modelRef string) string
 	resolveProvider               func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
 	transcripts                   *SubagentStore
 	workspaceRoot                 string
@@ -132,6 +133,7 @@ type TaskToolOptions struct {
 	KeepPolicy                            agent.KeepPolicy
 	SubagentModel                         string
 	SubagentEffort                        string
+	InheritedEffort                       func(modelRef string) string
 	ResolveProvider                       func(string, string) (provider.Provider, *provider.Pricing, int, error)
 	// HooksForRole gives each child the session's hooks under a role of its own.
 	HooksForRole func(role string) agent.ToolHooks
@@ -163,6 +165,7 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 		hooksForRole:     opts.HooksForRole,
 		subagentModel:    opts.SubagentModel,
 		subagentEffort:   opts.SubagentEffort,
+		inheritedEffort:  opts.InheritedEffort,
 		resolveProvider:  opts.ResolveProvider,
 		maxSubagentDepth: agent.DefaultMaxSubagentDepth,
 	}
@@ -361,18 +364,6 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 	return r.task.RunProfileSpec(ctx, spec)
 }
 
-func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
-	model = strings.TrimSpace(model)
-	effort = strings.TrimSpace(effort)
-	if model == "" {
-		model = strings.TrimSpace(t.subagentModel)
-	}
-	if effort == "" {
-		effort = strings.TrimSpace(t.subagentEffort)
-	}
-	return model, effort
-}
-
 func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Prompt          string   `json:"prompt"`
@@ -453,11 +444,10 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 			configEffort = t.profileConfigEffort(profile)
 		}
 	}
-	spec.Worker.Model, spec.Worker.Effort = ResolveModelEffort(
+	spec.Worker.Model, spec.Worker.Effort = t.resolveModelEffort(
 		configModel, configEffort,
 		model, effort,
 		profileModel, profileEffort,
-		t.subagentModel, t.subagentEffort,
 	)
 
 	if !readOnly {

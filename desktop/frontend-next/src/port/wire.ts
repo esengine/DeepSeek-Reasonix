@@ -717,6 +717,10 @@ export interface WireEvent {
   retryAttempt?: number;
   retryMax?: number;
   retryScope?: "headers" | "stream";
+  retryCause?: "connection_closed" | "timeout" | "upstream_status" | "stream_idle" | "upstream_error";
+  retryStatus?: number;
+  retryDelayMs?: number;
+  retryTimeoutSecs?: number;
   itemId?: string;
   // Set by the transport on frames that must not be missed, so a client can
   // tell it missed one. Streaming deltas carry none — losing one costs nothing
