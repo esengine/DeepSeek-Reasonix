@@ -184,6 +184,8 @@ export class MockHub implements HubPort {
 
   async revealWorkspace() {}
 
+  async openWorkspace() {}
+
   removeWorkspace(path: string) {
     const at = this.roots.indexOf(path);
     if (at >= 0) this.roots.splice(at, 1);

@@ -17,7 +17,7 @@ const { uiLanguage } = require("./uilang");
 const { installFullScreenKey } = require("./fullscreen");
 const { installReload } = require("./reload");
 const { externalTarget } = require("./links");
-const { reveal, revealWorkspace } = require("./reveal");
+const { reveal, revealWorkspace, openWorkspace } = require("./reveal");
 const { appIcon } = require("./appicon");
 const layout = require("./layout");
 const { offerCleanup } = require("./legacy");
@@ -385,6 +385,9 @@ ipcMain.handle("shell:open-external", (event, raw) => {
 });
 ipcMain.handle("shell:reveal-workspace", (event, root) =>
   fromWindow(event) && client ? revealWorkspace(client, shell, String(root)) : { code: "", error: "no window" },
+);
+ipcMain.handle("shell:open-workspace", (event, root) =>
+  fromWindow(event) && client ? openWorkspace(client, shell, String(root)) : { code: "", error: "no window" },
 );
 ipcMain.handle("shell:reveal", (event, base, rel) =>
   fromWindow(event) && client ? reveal(client, shell, String(base), String(rel)) : { code: "", error: "no window" },

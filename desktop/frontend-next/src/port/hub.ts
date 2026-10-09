@@ -85,6 +85,7 @@ export interface HubPort extends SharePort {
   removeWorkspace(path: string): Promise<void>;
   /** Show a listed project's folder in the system file manager. */
   revealWorkspace(path: string): Promise<void>;
+  openWorkspace(path: string): Promise<void>;
   moveWorkspace(path: string, direction: -1 | 1): Promise<void>;
   removeSession(path: string): Promise<void>;
   archiveSession(path: string, archived: boolean): Promise<void>;
@@ -222,6 +223,11 @@ export class SseHub implements HubPort {
   async revealWorkspace(path: string) {
     const why = await host().revealWorkspace(path);
     if (why) throw new HttpError(0, why.error || "not shown", why, !!(why.code || why.error));
+  }
+
+  async openWorkspace(path: string) {
+    const why = await host().openWorkspace(path);
+    if (why) throw new HttpError(0, why.error || "not opened", why, !!(why.code || why.error));
   }
 
   async removeWorkspace(path: string) {
