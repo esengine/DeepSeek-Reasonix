@@ -82,6 +82,9 @@ grid to break.
 
 ## Surfaces
 
+- Studio's default light palette separates the frame (`#F0F0ED`), reading
+  surface (`#FAFAF8`) and composer (`--raised`). Its composer uses a short
+  `--compose-shadow`; installed packs retain their existing surface recipe.
 - `--float` / `--float-hi` exist apart from `--raised`. In dark, `--raised` and
   what it covers are nearly the same lightness, and a black shadow on a
   near-black ground paints nothing, so a menu read as transparent. A floating
@@ -234,6 +237,9 @@ raised with its ratios kept.
 
 ## Weight and contrast
 
+- Default light Studio replies use `--w-read: 400` for prose only. Headings,
+  emphasis and small UI text keep their existing weights. A chosen weight,
+  installed pack or dark scheme falls back to `--w-reg`.
 - Stroke weight is an axis beside contrast, not part of it: however bright the
   colour, 400 Han at 11px is thin. Han strokes are dense and blur at a size
   Latin still holds, so the Chinese interface starts at medium.
