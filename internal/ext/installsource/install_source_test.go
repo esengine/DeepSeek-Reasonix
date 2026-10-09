@@ -56,6 +56,19 @@ func execInstall(t *testing.T, tl tool.Tool, args map[string]any) response {
 	return resp
 }
 
+func execInstallRefused(t *testing.T, tl tool.Tool, args map[string]any) error {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tl.Execute(context.Background(), raw); err != nil {
+		return err
+	}
+	t.Fatal("install was not refused")
+	return nil
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -2412,16 +2425,13 @@ func TestCopyRefusesUnmaterializableSymlinkCommands(t *testing.T) {
 		return src, "cafe0001", func() {}, nil
 	}
 
-	resp := execInstall(t, tl, map[string]any{
+	err := execInstallRefused(t, tl, map[string]any{
 		"source": "https://github.com/acme/escapes",
 		"kind":   "plugin",
 		"apply":  true,
 	})
-	if resp.OK || resp.Status != "failed" || len(resp.Actions) != 1 || resp.Actions[0].Status != "failed" {
-		t.Fatalf("response = %+v, want a failed apply for the unmaterializable symlink", resp)
-	}
-	if !strings.Contains(resp.Actions[0].Error, "approved plan counted") {
-		t.Fatalf("action error = %q, want the capability-verification refusal", resp.Actions[0].Error)
+	if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), "approved plan counted") {
+		t.Fatalf("error = %v, want the capability-verification refusal at planning", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".reasonix", "plugins", "escapes")); !os.IsNotExist(err) {
 		t.Fatal("failed install must not leave the copied tree behind")
@@ -2468,14 +2478,14 @@ func TestFailedReplaceKeepsExistingPluginInstall(t *testing.T) {
 	}
 
 	current, commit = v2, "cafe0002"
-	update := execInstall(t, tl, map[string]any{
+	err := execInstallRefused(t, tl, map[string]any{
 		"source":  "https://github.com/acme/pwf",
 		"kind":    "plugin",
 		"apply":   true,
 		"replace": true,
 	})
-	if update.OK || update.Status != "failed" {
-		t.Fatalf("update = %+v, want a failed apply for the unmaterializable symlink", update)
+	if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), "approved plan counted") {
+		t.Fatalf("update error = %v, want the capability-verification refusal at planning", err)
 	}
 
 	installedRoot := filepath.Join(home, ".reasonix", "plugins", "pwf")
