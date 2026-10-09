@@ -27,6 +27,7 @@ func capabilityVersions(host, systemHash string, schemas []provider.ToolSchema, 
 		out = append(out, trajectory.CapabilityVersion{Kind: "tool", Name: s.Name, Digest: digestOf(string(b))})
 	}
 	for _, s := range skills {
+		s = s.Complete()
 		b, _ := json.Marshal(struct {
 			Description, Body, RunAs, Model string
 			AllowedTools                    []string

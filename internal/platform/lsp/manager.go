@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"reasonix/internal/base/fileutil"
 )
 
 // ServerSpec declares how to launch one language server. Command resolves on
@@ -169,8 +171,24 @@ func (m *Manager) spawn(_ string, spec ServerSpec) (*client, error) {
 	return startClient(m.root, bin, spec.Args, spec.Env, spec.LanguageID, m.wsRoot)
 }
 
-func (m *Manager) prepare(ctx context.Context, file string, line int, symbol string) (*client, string, Position, error) {
+// scoped is the absolute path of a model-supplied file, or the refusal for one
+// spelled as a network path outside the workspace: the server sync would stat
+// and read it, which on Windows is a connection to the named machine.
+func (m *Manager) scoped(file string) (string, error) {
 	path := m.abs(file)
+	for _, p := range []string{file, path} {
+		if err := fileutil.NetworkScope(p, []string{m.wsRoot}); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+func (m *Manager) prepare(ctx context.Context, file string, line int, symbol string) (*client, string, Position, error) {
+	path, err := m.scoped(file)
+	if err != nil {
+		return nil, "", Position{}, err
+	}
 	c, err := m.resolve(path)
 	if err != nil {
 		return nil, "", Position{}, err
@@ -240,7 +258,10 @@ func (m *Manager) Hover(ctx context.Context, file string, line int, symbol strin
 }
 
 func (m *Manager) Diagnostics(ctx context.Context, file string) (string, error) {
-	path := m.abs(file)
+	path, err := m.scoped(file)
+	if err != nil {
+		return "", err
+	}
 	c, err := m.resolve(path)
 	if err != nil {
 		return "", err

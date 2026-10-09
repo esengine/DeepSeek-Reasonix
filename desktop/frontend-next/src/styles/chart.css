@@ -1,0 +1,54 @@
+.call[data-k="chart"] > .g .sym { color: var(--cat-1) }
+.chart { margin: 6px 0 0; max-width: 720px }
+.chart-defs { position: absolute; width: 0; height: 0 }
+.chart-hold { height: 300px; max-width: 720px }
+.chart-scroll { position: relative }
+.chart-scroll::before, .chart-scroll::after { content: ""; position: absolute; top: 0; bottom: 0; width: 14px; pointer-events: none; opacity: 0; z-index: 1 }
+.chart-scroll::before { left: 0; background: linear-gradient(to right, var(--border), transparent) }
+.chart-scroll::after { right: 0; background: linear-gradient(to left, var(--border), transparent) }
+.chart-scroll[data-more-left]::before, .chart-scroll[data-more-right]::after { opacity: 1 }
+.chart-pane { overflow-x: auto }
+.chart-pane:focus-visible { outline: 2px solid var(--text); outline-offset: 2px }
+.chart-mark + .chart-mark { margin-top: 14px }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible }
+.chart-svg.pie { max-width: 320px }
+.chart .grid { stroke: var(--hair); stroke-width: 1 }
+.chart .base { stroke: var(--border); stroke-width: 1 }
+.chart .tick { fill: var(--faint); font: var(--w-reg) var(--fs-micro) var(--ui) }
+.chart .cs0 { --c: var(--cat-1) }
+.chart .cs1 { --c: var(--cat-2) }
+.chart .cs2 { --c: var(--cat-3) }
+.chart .cs3 { --c: var(--cat-4) }
+.chart .cs4 { --c: var(--cat-5) }
+.chart .bar rect:first-child { fill: var(--c) }
+.chart .hatch-line { stroke: var(--surface); stroke-width: 2; opacity: .7 }
+.chart .line path { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round }
+.chart .line.sv1 path { stroke-dasharray: 7 4 }
+.chart .line.sv2 path { stroke-dasharray: 2 4 }
+.chart .line .pt { fill: var(--surface); stroke: var(--c); stroke-width: 2 }
+.chart .slice { fill: var(--c); stroke: var(--surface); stroke-width: 2 }
+.chart .slice.sv1 { fill-opacity: .72 }
+.chart .slice.sv2 { fill-opacity: .5 }
+.chart [tabindex]:focus-visible { outline: 2px solid var(--text); outline-offset: 2px }
+.chart .bar:hover rect:first-child, .chart .slice:hover { filter: brightness(1.08) }
+.chart-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; padding: 0; list-style: none; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
+.chart-key li { display: inline-flex; align-items: center; gap: 6px; min-width: 0 }
+.chart-key .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.chart-key .v { color: var(--ghost); font-variant-numeric: tabular-nums }
+.chart-key i { flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c) }
+.chart-key i.sv1 { background: repeating-linear-gradient(45deg, var(--c) 0 3px, transparent 3px 5px) }
+.chart-key i.sv2 { background: repeating-linear-gradient(45deg, var(--c) 0 1.5px, transparent 1.5px 4px) }
+.chart-pie { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px }
+.chart-pie .chart-key { flex-direction: column; flex-wrap: nowrap; margin: 0 }
+.chart-axes { margin-top: 4px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
+.chart-read { min-height: 1.2em; margin-top: 2px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--text); font-variant-numeric: tabular-nums }
+.chart-data { margin-top: 0 }
+.chart-toggle { padding: 2px 0; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); background: none; border: 0; cursor: pointer }
+.chart-toggle:hover { color: var(--text) }
+.chart-table { max-height: 260px; max-width: 720px; overflow: auto; margin-top: 4px; border: 1px solid var(--hair); border-radius: var(--r-sm) }
+.chart-table table { width: 100%; border-collapse: collapse; font: var(--w-reg) var(--fs-meta) var(--ui) }
+.chart-table th, .chart-table td { padding: 4px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--hair) }
+.chart-table th { position: sticky; top: 0; background: var(--surface); color: var(--faint); font-weight: var(--w-med) }
+.chart-table [data-num] { text-align: right; font-variant-numeric: tabular-nums }
+.chart-more { padding: 6px 10px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
+.chart-empty { padding: 24px 0; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }

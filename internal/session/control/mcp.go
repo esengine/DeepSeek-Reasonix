@@ -33,7 +33,8 @@ type mcpManager struct {
 	defaultCallTimeout time.Duration
 	// sealed, once set, refuses every connection. It is written before the
 	// controller is handed to a caller and only read after.
-	sealed error
+	sealed         error
+	promptFailures promptFailureDebt
 }
 
 // seal makes the manager refuse to connect or register any server.
@@ -64,6 +65,7 @@ func (m *mcpManager) connectSpec(s plugin.Spec) (int, error) {
 	}
 	host, ctx, reg := m.host, m.pluginCtx, m.reg
 	m.mu.Unlock()
+	plugin.ApplyDisabledMCPPolicy(reg, s)
 
 	tools, err := host.Add(ctx, s)
 	if err != nil {
@@ -101,6 +103,7 @@ func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
 	}
 	host, ctx, reg := m.host, m.pluginCtx, m.reg
 	m.mu.Unlock()
+	plugin.ApplyDisabledMCPPolicy(reg, s)
 
 	var tools []tool.Tool
 	if host.HasClient(s.Name) {
@@ -129,6 +132,9 @@ func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
 // disconnect drops a live server and its tools from the registry. Reports whether
 // a live server was removed.
 func (m *mcpManager) disconnect(name string) bool {
+	if reg := m.registry(); reg != nil {
+		reg.ClearDisabledMCP(name)
+	}
 	host := m.hostRef()
 	if host == nil {
 		return false
@@ -149,6 +155,7 @@ func (m *mcpManager) removeToolPrefix(name string) int {
 	if reg == nil {
 		return 0
 	}
+	reg.ClearDisabledMCP(name)
 	return reg.RemovePrefix(plugin.ToolPrefix(name))
 }
 

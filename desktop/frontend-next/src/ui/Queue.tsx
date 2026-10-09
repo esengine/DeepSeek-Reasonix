@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
+import { BLOCK_WHY } from "../i18n/queue_why";
+
 import { Overflow } from "./Overflow";
 import { StudioIcon } from "./StudioIcon";
+import { touchKeyboard } from "./touchKeyboard";
 
 interface Props {
   queue: QueueSnapshot | null;
@@ -14,7 +17,7 @@ interface Props {
   onRead: (id: string) => Promise<string>;
   onEdit: (id: string, text: string) => void;
   onMove: (id: string, to: number) => void;
-  onCancel: (id: string) => void;
+  onCancel: (id: string) => void | Promise<void>;
   onSendNow: (item: QueueItem) => void;
   onRetry: (id: string) => void;
   onRefresh: (id: string) => void;
@@ -31,6 +34,18 @@ const taken = (s: QueueItem["state"]) => s === "steer_consumed" || s === "runnin
 // not theirs and belongs with the work it came from. It appears here only when
 // it needs a decision, which is the one case nobody else can make for them.
 const theirs = (it: QueueItem) => it.origin !== "host" || it.state === "blocked" || it.state === "uncertain";
+
+// Codes whose entry the kernel knows never reached the model, so sending it
+// again cannot repeat an effect. Every other uncertain code may have run.
+const RETRY_SAFE = new Set(["steer_unapplied"]);
+const retryable = (it: QueueItem) =>
+  it.state === "blocked" || (it.state === "uncertain" && !!it.blockCode && RETRY_SAFE.has(it.blockCode));
+
+/** What the panel draws: the lines nobody has acted on yet. The header's count
+ *  of guidance in flight reads this too, so it can never name a line the panel
+ *  is not showing. */
+export const waiting = (queue: QueueSnapshot | null): QueueItem[] =>
+  queue ? queue.items.filter((it) => !taken(it.state) && theirs(it)) : [];
 
 // Each arm calls t() with its own literal: the catalogue is built by reading
 // these call sites, and a table of strings looked up later is invisible to it —
@@ -83,6 +98,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
   // shut, because the row's own text is the only thing that may fill it.
   const [unread, setUnread] = useState<{ id: string; why: string } | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const readEpoch = useRef(0);
 
   // The body arrives after the click, so focus waits for the field to exist.
   useEffect(() => {
@@ -93,17 +109,20 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
     async (id: string) => {
       // Opening on the preview would put a cut-off line in the box and save it
       // back as the whole instruction.
+      const epoch = ++readEpoch.current;
       setUnread(null);
       let body: string;
       try {
         body = await onRead(id);
       } catch (e) {
+        if (epoch !== readEpoch.current) return;
         // A read that failed is not an empty instruction. Filling the box with
         // "" would have the user retype a line they never saw, and the save
         // replaces the whole entry with it.
         setUnread({ id, why: reason(e) });
         return;
       }
+      if (epoch !== readEpoch.current) return;
       setDraft(body);
       setEditing(id);
     },
@@ -121,7 +140,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
   // look like a stuck task. If a new item arrives while held, the strip returns
   // with both the item and the action needed to release it.
   if (!queue) return null;
-  const items = queue.items.filter((it) => !taken(it.state) && theirs(it));
+  const items = waiting(queue);
   if (items.length === 0) return null;
   const cap = queue.capacity;
   const fullItems = cap.maxItems > 0 && cap.items >= cap.maxItems;
@@ -174,6 +193,8 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
       <div className="qitems">
         {items.map((it, i) => {
           const live = !queue.readonly && editing !== it.id;
+          const coded = it.blockCode ? BLOCK_WHY[it.blockCode] : undefined;
+          const why = coded ? t(coded) : it.blockReason;
           return (
             <div key={it.id} className="qi" data-state={it.state}>
               {/* The chip is the answer to "did that land". Its wording says
@@ -195,10 +216,13 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                   onChange={(e) => setDraft(e.target.value)}
                   onBlur={commit}
                   onKeyDown={(e) => {
-                    if (e.key === "Escape") setEditing("");
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setEditing("");
+                    }
                     // Enter commits; the line is one instruction, and a queue
                     // row is not where a paragraph gets composed.
-                    if (e.key === "Enter" && !e.shiftKey) {
+                    if (e.key === "Enter" && !e.shiftKey && !touchKeyboard() && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       commit();
                     }
@@ -210,7 +234,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                 <Overflow className="pv" text={it.preview} />
               )}
               {!!it.refs?.length && <span className="rf">{t("冻结 {n} 文件", { n: it.refs.length })}</span>}
-              {it.blockReason && <span className="qwhy">{it.blockReason}</span>}
+              {why && <span className="qwhy">{why}</span>}
               {unread?.id === it.id && (
                 <span className="qwhy" data-err="" role="alert">
                   {t("无法读取该条的正文，未打开编辑：{why}", { why: unread.why })}
@@ -243,7 +267,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                       {t("立即发送")}
                     </button>
                   )}
-                  {it.state === "blocked" && (
+                  {retryable(it) && (
                     <button data-action="queue.retry" data-target={it.id} onClick={() => onRetry(it.id)} title={t("重试")}>
                       {t("重试")}
                     </button>

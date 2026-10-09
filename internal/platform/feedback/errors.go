@@ -62,17 +62,48 @@ func (e *InvalidError) Error() string    { return "feedback: invalid " + e.Field
 func (e *InvalidError) Is(t error) bool  { return t == ErrInvalid }
 func invalid(field, reason string) error { return &InvalidError{Field: field, Reason: reason} }
 
-// RateLimitedError is ErrRateLimited plus how long the service asked to wait.
-type RateLimitedError struct{ After time.Duration }
+// Limit names the window a refusal came from, exactly as the service says it.
+// An identifier this build does not know still passes through; a frontend with
+// no words for it says only that a limit was reached.
+type Limit string
 
-func (e *RateLimitedError) Error() string   { return ErrRateLimited.Error() }
-func (e *RateLimitedError) Is(t error) bool { return t == ErrRateLimited }
+const (
+	LimitIPHourly      Limit = "ip_hourly"
+	LimitInstallHourly Limit = "install_hourly"
+	LimitInstallDaily  Limit = "install_daily"
+	LimitReplyHourly   Limit = "reply_hourly"
+	LimitReplyItem     Limit = "reply_item"
+	LimitGlobalDaily   Limit = "global_daily"
+	LimitGlobalBurst   Limit = "global_burst"
+)
 
-// RetryAfter is the wait a rate-limited error carries, or 0.
+// LimitError is a refusal that names its window: the sentinel it satisfies
+// errors.Is for, which window, when it resets and how long to wait. ResetsAt is
+// zero and After is 0 where the service sent none (the per-report cap never
+// resets); Limit is empty from a service that sends no window at all.
+type LimitError struct {
+	Kind     error
+	Limit    Limit
+	ResetsAt time.Time
+	After    time.Duration
+}
+
+func (e *LimitError) Error() string   { return e.Kind.Error() }
+func (e *LimitError) Is(t error) bool { return t == e.Kind }
+
+// LimitOf is the window a refused call carries, or false for any other error.
+func LimitOf(err error) (*LimitError, bool) {
+	var l *LimitError
+	if errors.As(err, &l) {
+		return l, true
+	}
+	return nil, false
+}
+
+// RetryAfter is the wait a refusal carries, or 0.
 func RetryAfter(err error) time.Duration {
-	var r *RateLimitedError
-	if errors.As(err, &r) {
-		return r.After
+	if l, ok := LimitOf(err); ok {
+		return l.After
 	}
 	return 0
 }

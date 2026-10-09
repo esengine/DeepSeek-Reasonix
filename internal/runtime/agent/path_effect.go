@@ -25,6 +25,7 @@ type pathState struct {
 	exists  bool
 	size    int64
 	modTime int64
+	mode    os.FileMode
 }
 
 // pathSnapshot is what the workspace looked like before a call. root is kept so
@@ -54,6 +55,7 @@ func snapshotPaths(ledger *evidence.Ledger, root string, targets []string) pathS
 	paths := append([]string(nil), targets...)
 	paths = append(paths, ledger.TouchedPaths(observedPathLimit, false)...)
 	paths = append(paths, workspaceTopLevel(root)...)
+	paths = slices.DeleteFunc(paths, func(p string) bool { return !watchablePath(p, root) })
 	if len(paths) == 0 && root == "" {
 		return pathSnapshot{}
 	}
@@ -66,7 +68,7 @@ func snapshotPaths(ledger *evidence.Ledger, root string, targets []string) pathS
 		if _, seen := snap.state[key]; seen {
 			continue
 		}
-		snap.state[key] = watchedPath{path: p, pathState: statePathOf(p)}
+		snap.state[key] = watchedPath{path: p, pathState: statePathOf(p, root)}
 	}
 	return snap
 }
@@ -89,19 +91,25 @@ func workspaceTopLevel(root string) []string {
 	return out
 }
 
-func statePathOf(path string) pathState {
+func statePathOf(path, root string) pathState {
+	if !watchablePath(path, root) {
+		return pathState{}
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return pathState{}
 	}
-	return pathState{exists: true, size: info.Size(), modTime: info.ModTime().UnixNano()}
+	return pathState{exists: true, size: info.Size(), modTime: info.ModTime().UnixNano(), mode: info.Mode()}
 }
 
 // since compares the snapshot against the workspace as it is now, returning
 // what the call changed and, of those, what it brought into existence.
 func (before pathSnapshot) since() (affected, created []string) {
 	for _, was := range before.state {
-		now := statePathOf(was.path)
+		if !watchablePath(was.path, before.root) {
+			continue
+		}
+		now := statePathOf(was.path, before.root)
 		if now == was.pathState {
 			continue
 		}
@@ -171,12 +179,12 @@ func holdsPath(paths []string, want string) bool {
 // it: removing a file the turn made leaves the workspace as found, removing one
 // it did not is the change. An unresolvable path looks exactly like a deleted
 // one, so anything never watched appear is assumed to have survived.
-func leftSomethingBehind(ledger *evidence.Ledger, r evidence.Receipt) bool {
+func leftSomethingBehind(ledger *evidence.Ledger, r evidence.Receipt, root string) bool {
 	if len(r.Paths) == 0 {
 		return true
 	}
 	for _, path := range r.Paths {
-		if statePathOf(path).exists || !ledger.CreatedInTurn(path) {
+		if statePathOf(path, root).exists || !ledger.CreatedInTurn(path) {
 			return true
 		}
 	}
@@ -211,7 +219,7 @@ func (a *Agent) pathInWorkspace(path string) bool {
 func (a *Agent) mutationBaseline(delivery bool) (int, bool) {
 	ledger := a.task.ledger
 	survives := func(r evidence.Receipt) bool {
-		return a.touchedTheWorkspace(r) && leftSomethingBehind(ledger, r)
+		return a.touchedTheWorkspace(r) && leftSomethingBehind(ledger, r, a.writeWorkspaceRoot)
 	}
 	if delivery {
 		return ledger.LatestProvenMutationIndexFunc(survives)
@@ -317,6 +325,15 @@ func scanWorkspace(ctx context.Context, root string) workspaceScan {
 	return scanWorkspaceTo(ctx, root, workspaceScanLimit)
 }
 
+// scanLimit is the walk bound this agent runs under: its configured limit,
+// never above workspaceScanLimit, which is also the default.
+func (a *Agent) scanLimit() int {
+	if a.workspaceScanLimit > 0 {
+		return min(a.workspaceScanLimit, workspaceScanLimit)
+	}
+	return workspaceScanLimit
+}
+
 // unchanged reports whether the workspace is byte-for-byte as this scan found
 // it. Both scans must be complete; either one short of that proves nothing.
 func (before workspaceScan) unchanged(after workspaceScan) bool {
@@ -372,7 +389,7 @@ func (a *Agent) settleUnchangedWorkspace(ctx context.Context, rec *evidence.Rece
 	if !plan.scanBefore.complete || !a.mayAttributeObserved(ctx) {
 		return
 	}
-	after := scanWorkspace(ctx, a.observeRoot)
+	after := scanWorkspaceTo(ctx, a.observeRoot, a.scanLimit())
 	changed, ok := plan.scanBefore.changed(after)
 	if !ok {
 		return
@@ -431,7 +448,7 @@ func (a *Agent) scanBeforeUnprovenCall(ctx context.Context, plan *toolCallPlan) 
 	if !a.mayAttributeObserved(ctx) {
 		return workspaceScan{}
 	}
-	scan := scanWorkspace(ctx, a.observeRoot)
+	scan := scanWorkspaceTo(ctx, a.observeRoot, a.scanLimit())
 	if scan.overLimit {
 		a.task.noteWorkspaceOverScanLimit()
 	}

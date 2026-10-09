@@ -6,11 +6,12 @@ import (
 	"reasonix/internal/base/testenv"
 )
 
-// robustTempDir is the name boot's call sites already use for testenv.TempDir,
-// whose cleanup retries RemoveAll. Teardown here can leave a job goroutine or an
-// MCP writer holding a file for a few milliseconds after Close returns, which
-// plain t.TempDir turns into a red test with every assertion passed.
+// robustTempDir is testenv.TempDir, whose cleanup retries RemoveAll for
+// handles that outlive Close by milliseconds. The process-global catalogs are
+// closed first: an open SQLite file outlasts every retry on Windows.
 func robustTempDir(t *testing.T) string {
 	t.Helper()
-	return testenv.TempDir(t)
+	dir := testenv.TempDir(t)
+	t.Cleanup(func() { closeBootTestHistoryCatalog(t) })
+	return dir
 }

@@ -45,3 +45,30 @@ describe("what a failed server's row claims", () => {
     expect(html).not.toContain("HTTP");
   });
 });
+
+describe("a server awaiting launch approval", () => {
+ it.each([false, true])("does not offer reconnect when enabled=%s", (enabled) => {
+  const html = draw(entry({ state: "pending", enabled, source: "project_config" }));
+  expect(html).toContain('data-st="pending"');
+  expect(html).toContain("待授权 · 来自项目声明");
+  expect(html).not.toContain('data-action="mcp.retry"');
+  expect(html).toContain('data-action="mcp.enabled"');
+ });
+
+ it("shows what approving it would run, beside the switch that approves it", () => {
+  const html = draw(entry({ state: "pending", enabled: false, source: "project_mcp_json", launch: "node ./mcp/server.js --port 0" }));
+  expect(html).toContain("将启动");
+  expect(html).toContain("node ./mcp/server.js --port 0");
+ });
+
+ it("says, in the window's language, that what it launches changed", () => {
+  const html = draw(entry({ state: "pending", enabled: false, source: "project_mcp_json", launch: "node x.js", pendingReason: "changed_since_enabled", error: "kernel english" }));
+  expect(html).toContain("启用之后它要启动的内容变了");
+  expect(html).not.toContain("kernel english");
+ });
+
+ it("shows the launch line only while a decision is owed", () => {
+  const html = draw(entry({ state: "standby", enabled: true, source: "project_mcp_json", launch: "node ./mcp/server.js" }));
+  expect(html).not.toContain("node ./mcp/server.js");
+ });
+});

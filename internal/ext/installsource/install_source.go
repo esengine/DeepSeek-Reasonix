@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 
+	"reasonix/internal/base/fileutil"
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/pluginpkg"
@@ -166,7 +168,8 @@ func (*Tool) Schema() json.RawMessage {
 // Execute parses args, plans, and (if apply=true and Approval allows)
 // performs the writes. JSON output is always returned on success even when
 // the plan is empty, so the model can read structured `next` hints.
-func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (output string, err error) {
+	defer func() { err = secrets.DiagnosticError(err) }()
 	var req request
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return "", fmt.Errorf("install_source: invalid args: %w", err)
@@ -202,15 +205,14 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			return marshalJSON(response{
 				OK: false, Status: "blocked", Op: req.Op, Applied: false,
 				Source: req.Source, Kind: "plugin", Scope: req.Scope, Mode: req.Mode,
-				Warnings: warnings, Error: err.Error(),
+				Warnings: warnings, failure: err,
 				Next: "Choose a plugin that exports a supported skill, command, agent, hook, or MCP server.",
 			}), nil
 		}
 		return "", err
 	}
-	// Marketplace planning may keep one temporary clone alive so apply can
-	// reuse the exact approved snapshot. Clean it on every exit path, including
-	// plan-ID mismatch or host approval denial before executeApply runs.
+	// Marketplace apply reuses the approved snapshot; release its temporary clone
+	// even when approval or plan-ID validation refuses the operation.
 	defer cleanupActionResources(actions)
 	if err := checkExpectedDigest(req.ExpectDigest, actions); err != nil {
 		return "", err
@@ -298,7 +300,7 @@ func (t *Tool) executeApply(ctx context.Context, req request, actions []action, 
 		if err := t.apply(ctx, req, &actions[i]); err != nil {
 			ok = false
 			actions[i].Status = "failed"
-			actions[i].Error = err.Error()
+			actions[i].failure = err
 			if actions[i].Next == "" {
 				actions[i].Next = nextForError(err)
 			}
@@ -387,7 +389,7 @@ func (t *Tool) executeUninstall(req request) string {
 		if err := t.apply(context.Background(), req, &actions[i]); err != nil {
 			ok = false
 			actions[i].Status = "failed"
-			actions[i].Error = err.Error()
+			actions[i].failure = err
 			actions[i].Next = "Inspect the error, then retry op=uninstall."
 			continue
 		}
@@ -617,13 +619,29 @@ func (t *Tool) resolvePath(p string) string {
 	return filepath.Clean(p)
 }
 
-// computePlanID hashes the request plus the full public action set so a later
-// apply call with the same planId can be verified to be approving exactly the
-// same plan. It intentionally excludes Apply and PlanID; everything that changes
-// what will be written/connected must live either in req's planning fields or in
-// the action DTO.
+// refuseNetworkSource stops a local source spelled as a network path before
+// plan stats, walks or parses it: on Windows that lookup is a connection to the
+// named machine, and a plan-only call runs without approval. Only a path below a
+// network project root passes.
+func (t *Tool) refuseNetworkSource(source string) error {
+	if isURL(source) || strings.HasPrefix(source, "git:github.com/") {
+		return nil
+	}
+	roots := []string{t.root}
+	err := fileutil.NetworkScope(source, roots)
+	if err == nil {
+		err = fileutil.NetworkScope(t.resolvePath(source), roots)
+	}
+	if err != nil {
+		return networkSourceError{tool.Refusal{Code: fileutil.CodeNetworkPathOutsideScope, Message: fmt.Sprintf(
+			"install_source: `%s` is a network path, outside this workspace; it was refused by its spelling and never looked up", source)}}
+	}
+	return nil
+}
+
+// Approval binds operational material; display projection must never collapse distinct credentials.
 func computePlanID(req request, actions []action) string {
-	public := publicActions(actions)
+	public := append([]action(nil), actions...)
 	sort.Slice(public, func(i, j int) bool {
 		return actionPlanKey(public[i]) < actionPlanKey(public[j])
 	})
@@ -727,7 +745,7 @@ func nextForError(err error) string {
 	case errors.Is(err, ErrBinaryMissing):
 		return "Install the missing local runtime or use an absolute command path, then retry."
 	case errors.Is(err, ErrAlreadyExists):
-		return "Choose another name, remove the existing entry, or retry MCP installs with replace=true."
+		return "Choose another name, remove the existing entry, or retry MCP or plugin installs with replace=true."
 	case errors.Is(err, ErrUnsafeLinkTarget):
 		return "The link target escapes the project/home root. Pick a source path inside the workspace or home directory."
 	case errors.Is(err, ErrApprovalDenied):

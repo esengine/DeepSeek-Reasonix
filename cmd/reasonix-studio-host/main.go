@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -148,6 +149,7 @@ func main() {
 // because that pipe is the only channel pointing that way; every log goes to
 // logs, which is why no line there can be mistaken for one of these.
 func run(lease io.Reader, handshakeTo, logs io.Writer, page string, shell shellIdentity) int {
+	phases := newStartupPhases(logs, time.Now)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if lease != nil {
@@ -160,6 +162,7 @@ func run(lease io.Reader, handshakeTo, logs io.Writer, page string, shell shellI
 	}
 
 	served, err := serve.FindPage(page)
+	phases.mark(startupPage)
 	if err != nil {
 		fmt.Fprintln(logs, "reasonix-studio-host:", err)
 		return 1
@@ -168,7 +171,7 @@ func run(lease io.Reader, handshakeTo, logs io.Writer, page string, shell shellI
 		fmt.Fprintln(logs, "reasonix-studio-host: no built page found; serving the kernel only")
 	}
 
-	hub, err := assemble(ctx, logs, handshakeTo, shell, served)
+	hub, err := assemble(ctx, logs, handshakeTo, shell, served, phases)
 	if err != nil {
 		fmt.Fprintln(logs, "reasonix-studio-host:", err)
 		return 1
@@ -178,6 +181,7 @@ func run(lease io.Reader, handshakeTo, logs io.Writer, page string, shell shellI
 	defer hub.Shutdown()
 
 	bound, err := bind(hub.Handler())
+	phases.mark(startupBind)
 	if err != nil {
 		fmt.Fprintln(logs, "reasonix-studio-host:", err)
 		return 1
@@ -185,7 +189,10 @@ func run(lease io.Reader, handshakeTo, logs io.Writer, page string, shell shellI
 	// The credential-writing setup surface opens only on a loopback address,
 	// and this is the first host that has one to show it.
 	hub.EnableProviderSetupForListener(bound.listener.Addr().String())
-	if err := announce(handshakeTo, bound); err != nil {
+	phases.mark(startupSetup)
+	err = announce(handshakeTo, bound)
+	phases.mark(startupAnnounce)
+	if err != nil {
 		fmt.Fprintln(logs, "reasonix-studio-host:", err)
 		return 1
 	}
@@ -282,13 +289,15 @@ func resolveKernelLanguage(cfg *config.Config) string {
 
 // assemble builds the hub this host serves: one pane on the workspace it was
 // launched in, carrying the capabilities a local window may exercise.
-func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdentity, page fs.FS) (*serve.Hub, error) {
+func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdentity, page fs.FS, phases *startupPhases) (*serve.Hub, error) {
 	// The one-time upgrades belong to whichever entry point starts first; a
 	// person who only ever opens the window would otherwise never get them.
 	if _, err := config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath()); err != nil {
 		fmt.Fprintln(logs, "reasonix-studio-host: config upgrade:", err)
 	}
+	phases.mark(startupConfigUpgrade)
 	cfg, err := config.Load()
+	phases.mark(startupConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -307,21 +316,29 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 	bc := serve.NewBroadcaster()
 	paneSink := decorate(bc)
 	if cfg.DesktopTelemetry() || cfg.DesktopMetrics() {
-		reporter := telemetry.Start(studioTelemetryOptions(cfg, shell.version))
+		reporter := telemetry.Start(studioTelemetryOptions(ctx, cfg, shell.version))
 		if cfg.DesktopMetrics() {
 			paneSink = reporter.Wrap(paneSink)
 		}
 	}
+	phases.mark(startupSinks)
 	root := launchWorkspace(shell.exe)
+	phases.mark(startupWorkspace)
 	built, err := boot.BuildRuntime(ctx, boot.Options{
 		Version:         version,
 		WorkspaceRoot:   root,
 		SessionDir:      serve.SessionDirFor(root),
 		Sink:            paneSink,
 		Stderr:          logs,
+		OnPhase:         phases.boot,
 		StatsSource:     surface.Desktop,
 		FeedbackSurface: feedback.SurfaceStudio,
+		// A stale default_model must not keep the window from opening to fix it.
+		OpenOnFallbackModel: true,
+
+		CleanupPendingReconciler: serve.BackgroundCleanupReconciler,
 	})
+	phases.mark(startupRuntime)
 	if err != nil {
 		return nil, err
 	}
@@ -336,6 +353,7 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 	// Shut until the person at the window opens it; the context ending closes
 	// it with the rest of the kernel, unpairing every device.
 	share := serve.NewDeviceShare(page)
+	share.RestorePort(cfg.SharePort())
 	go func() {
 		<-ctx.Done()
 		share.Close()
@@ -360,12 +378,16 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 	srv := serve.New(built.Controller, bc, hubCfg)
 	srv.SetPaneSink(paneSink)
 	srv.AdoptRuntime(built)
-	if _, err := hub.Adopt(srv, bc); err != nil {
+	phases.mark(startupHub)
+	_, err = hub.Adopt(srv, bc)
+	phases.mark(startupAdopt)
+	if err != nil {
 		hub.Shutdown()
 		return nil, err
 	}
 	hub.StartRecoveryGC(ctx)
 	startCloudRemote(ctx, cfg, logs, hub)
+	phases.mark(startupBackground)
 	return hub, nil
 }
 
@@ -394,19 +416,29 @@ func startCloudRemote(ctx context.Context, cfg *config.Config, logs io.Writer, t
 		registrar.SetCloudRemoteStatus(func() serve.CloudRemoteStatus {
 			status := host.Status()
 			return serve.CloudRemoteStatus{
-				DeviceID: status.DeviceID, Name: status.Name, Online: status.Online, Error: status.Error,
+				DeviceID: status.DeviceID, Name: status.Name, Online: status.Online, Error: status.Error, Reason: string(status.Reason),
 			}
 		})
 	}
 	go host.Run(ctx)
 }
 
-func studioTelemetryOptions(cfg *config.Config, studioVersion string) telemetry.Options {
+// desktopTelemetryOn reads the user-level setting as it is now. A file that does
+// not parse is not consent, and neither the project config nor a migration
+// rewrite is involved; a missing file keeps the documented default (on).
+func desktopTelemetryOn() bool {
+	cfg, err := config.LoadForEditReadOnlyStrict(config.UserConfigPath())
+	return err == nil && cfg != nil && cfg.DesktopTelemetry()
+}
+
+func studioTelemetryOptions(ctx context.Context, cfg *config.Config, studioVersion string) telemetry.Options {
 	return telemetry.Options{
+		Context:      ctx,
 		Mode:         "on",
 		Version:      studioVersion,
 		Surface:      surface.Studio,
 		SuppressPing: !cfg.DesktopTelemetry(),
+		PingAllowed:  desktopTelemetryOn,
 		HomeDir:      config.ReasonixHomeDir(),
 		Interactive:  true,
 		Proxy:        cfg.NetworkProxySpec(),

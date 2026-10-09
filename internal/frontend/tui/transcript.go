@@ -73,12 +73,14 @@ type Item struct {
 
 // outputFold is how much of a finished shell call's output, or of an answer's
 // thinking, its row shows: fixed where the rows cannot be redrawn, else it opens.
+// Pinned is open with no key to shut it, for rows /verbose keeps expanded.
 type outputFold int8
 
 const (
 	foldFixed outputFold = iota
 	foldShut
 	foldOpen
+	foldPinned
 )
 
 // Terminal is how the last turn ended.
@@ -258,6 +260,7 @@ func (t *Transcript) Apply(ev eventwire.Event) {
 		t.Terminal, t.EndReason = terminalOf(ev)
 		t.sealSays()
 		t.sealTools(ev.Err != "")
+		t.sealPrompts()
 		if ev.Receipt != nil && ev.Receipt.SaysSomething {
 			t.Items = append(t.Items, Item{ID: t.id(), Kind: ItemReceipt, Receipt: ev.Receipt})
 		}
@@ -341,6 +344,12 @@ func mergeTool(prev, next eventwire.Tool) eventwire.Tool {
 	}
 	if next.Args != "" {
 		out.Args = next.Args
+	}
+	if next.ResolvedName != "" {
+		out.ResolvedName = next.ResolvedName
+	}
+	if next.CapabilityID != "" {
+		out.CapabilityID = next.CapabilityID
 	}
 	if next.Output != "" {
 		out.Output = next.Output
@@ -501,6 +510,7 @@ func (t *Transcript) foldNotice(ev eventwire.Event) {
 			((last.Code != "" && last.Code == ev.Code) || (last.Code == "" && ev.Code == "" && last.Text == ev.Text))
 		if same {
 			last.Count = max(last.Count, 1) + 1
+			last.Text, last.Detail = ev.Text, ev.Detail
 			return
 		}
 	}
@@ -525,6 +535,17 @@ func (t *Transcript) sealTools(failed bool) {
 			if failed && it.Tool.Err == "" && it.Tool.Output == "" {
 				it.Tool.Err = "interrupted"
 			}
+		}
+	}
+}
+
+// sealPrompts closes the prompts still open when the turn ends: the kernel drops
+// its pending decisions with the turn, so none of them can be answered any more.
+func (t *Transcript) sealPrompts() {
+	for i := range t.Items {
+		it := &t.Items[i]
+		if (it.Kind == ItemApproval || it.Kind == ItemAsk) && it.Verdict == "" {
+			it.Verdict = "expired"
 		}
 	}
 }

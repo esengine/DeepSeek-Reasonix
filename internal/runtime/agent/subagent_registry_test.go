@@ -52,3 +52,21 @@ func TestRestrictedListWithEmptyServersMapFailClosed(t *testing.T) {
 		t.Fatalf("empty servers map must not leak inventory:\n%s", rc.Result)
 	}
 }
+
+func TestSubagentRegistryCarriesDisabledMCPPolicy(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(subagentRegistryTool{name: "read_file", readOnly: true})
+	binding := tool.MCPBinding{
+		Server:       "mock",
+		RawName:      "write",
+		VisibleName:  "write",
+		CallableName: "mcp__mock__write",
+		CapabilityID: "mcp-tool:mock/write",
+	}
+	parent.ReplaceDisabledMCP("mock", []tool.MCPBinding{binding})
+
+	sub := SubagentToolRegistry(parent, nil)
+	if !sub.DisabledMCP(binding.CallableName) || !sub.DisabledMCP(binding.CapabilityID) {
+		t.Fatal("subagent registry lost the parent's disabled-tool attribution")
+	}
+}

@@ -74,13 +74,13 @@ func TestStartForSession_RejectsPathTraversalParentSession(t *testing.T) {
 
 	// Snapshot the temp root before; afterwards the directory listing must be
 	// unchanged. This proves no traversal payload created any subdirectory.
-	beforeEntries, err := os.ReadDir(m.tempRoot)
+	beforeEntries, err := os.ReadDir(m.scratch.Path())
 	if err != nil {
 		t.Fatalf("read temp root before: %v", err)
 	}
 
 	// "../../etc" with a leading traversal walks two parents up from
-	// m.tempRoot and then descends into "etc". The exact resolution does not
+	// m.scratch.Path() and then descends into "etc". The exact resolution does not
 	// matter; what matters is that the validator rejects it before any
 	// mkdir or open happens, anywhere.
 	ran := false
@@ -101,7 +101,7 @@ func TestStartForSession_RejectsPathTraversalParentSession(t *testing.T) {
 		t.Fatalf("artifactPath = %q, want empty (no file should be created)", j.artifact.path)
 	}
 
-	afterEntries, err := os.ReadDir(m.tempRoot)
+	afterEntries, err := os.ReadDir(m.scratch.Path())
 	if err != nil {
 		t.Fatalf("read temp root after: %v", err)
 	}
@@ -168,8 +168,8 @@ func TestStartForSession_AcceptsValidInput(t *testing.T) {
 	if artifactPath == "" {
 		t.Fatal("artifactPath empty; expected a path under the temp root")
 	}
-	if !strings.HasPrefix(artifactPath, m.tempRoot) {
-		t.Fatalf("artifactPath = %q does not start with temp root %q", artifactPath, m.tempRoot)
+	if !strings.HasPrefix(artifactPath, m.scratch.Path()) {
+		t.Fatalf("artifactPath = %q does not start with temp root %q", artifactPath, m.scratch.Path())
 	}
 
 	// Wait for run to finish and confirm cleanup paths still work.

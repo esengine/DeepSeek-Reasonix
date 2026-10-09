@@ -1,18 +1,17 @@
 "use strict";
-const path = require("node:path");
-const { Menu, Tray, nativeImage } = require("electron");
+const { Menu, Tray, nativeImage, screen } = require("electron");
+const { trayImage } = require("./trayimage.js");
 
 // How often the fold is re-read. It is a projection the kernel recomputes on
 // demand, so a missed read costs nothing the next one does not restore — which
 // is why it is pulled on a timer rather than carried on the stream.
 const FOLD_INTERVAL_MS = 5000;
-const ICON = path.join(__dirname, "..", "assets", "tray.png");
 
 // installTray brings the icon up and reports whether there is one. A shell with
 // no icon must never background its window: hiding it would leave a running
 // session with nothing left to bring it back.
 function installTray(host, { onOpen, onQuit }) {
-  const image = nativeImage.createFromPath(ICON);
+  const image = trayImage(nativeImage, screen.getPrimaryDisplay().scaleFactor);
   if (image.isEmpty()) return null;
   const icon = new Tray(image);
   const state = { fold: null, prefs: null };
@@ -47,6 +46,9 @@ function installTray(host, { onOpen, onQuit }) {
     );
   };
 
+  const refit = () => icon.setImage(trayImage(nativeImage, screen.getPrimaryDisplay().scaleFactor));
+  if (process.platform === "win32") screen.on("display-metrics-changed", refit);
+
   icon.on("click", onOpen);
   const timer = setInterval(() => void refresh(), FOLD_INTERVAL_MS);
 
@@ -68,6 +70,7 @@ function installTray(host, { onOpen, onQuit }) {
     refresh,
     close() {
       clearInterval(timer);
+      screen.removeListener("display-metrics-changed", refit);
       icon.destroy();
     },
   };

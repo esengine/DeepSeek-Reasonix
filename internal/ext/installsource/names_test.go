@@ -1,6 +1,10 @@
 package installsource
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
 
 func TestLooksLikePackageVersionPin(t *testing.T) {
 	accept := []string{
@@ -113,6 +117,29 @@ func TestPackageMCPActionPinnedVersion(t *testing.T) {
 		}
 		if a.Name != tc.name {
 			t.Errorf("%s: name = %q, want %q", tc.source, a.Name, tc.name)
+		}
+	}
+}
+
+// package_specs.json is shared with the registry publish validation tests in
+// workers/crash-report so the Go and TS sides cannot drift.
+func TestLooksLikePackageSharedCases(t *testing.T) {
+	raw, err := os.ReadFile("testdata/package_specs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases struct{ Accept, Reject []string }
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range cases.Reject {
+		if LooksLikePackage(s) {
+			t.Errorf("LooksLikePackage(%q) = true, want false", s)
+		}
+	}
+	for _, s := range cases.Accept {
+		if !LooksLikePackage(s) {
+			t.Errorf("LooksLikePackage(%q) = false, want true", s)
 		}
 	}
 }

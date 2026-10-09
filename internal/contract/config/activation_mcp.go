@@ -19,6 +19,13 @@ func mcpIdentity(entry PluginEntry) (forcedProject bool, source, owner string) {
 	return false, source, ""
 }
 
+// RepositoryDeclared reports an entry whose declaration arrives with the
+// workspace, so an enable on it holds only for the declaration it was given for.
+func RepositoryDeclared(entry PluginEntry) bool {
+	repoDeclared, _, _ := mcpIdentity(entry)
+	return repoDeclared
+}
+
 // ServerOverrideFor builds the override identity for entry at scope. Callers
 // name the scope they mean; a repository-declared server is pinned to the
 // project regardless of what was asked for.
@@ -38,13 +45,20 @@ func ServerOverrideFor(entry PluginEntry, root string, scope ActivationScope) Ac
 }
 
 // ServerDecision reports what the store holds for entry in root, and whether an
-// undecided one may start anyway. A repository-declared one may not: .mcp.json
-// and a project reasonix.toml both arrive with a clone, so whoever wrote the
-// repo chose the command. Every other source is a file only the user writes.
+// undecided one may start anyway. A repository-declared one may not, since a
+// clone chose its command; and an enable on it holds only for the declaration
+// it was given for, any other reading as ActivationChanged. Every other source
+// is a file only the user writes.
 func (s *ActivationStore) ServerDecision(entry PluginEntry, root string) (ActivationDecision, bool, error) {
 	repoDeclared, _, _ := mcpIdentity(entry)
-	decision, err := s.decide(ServerOverrideFor(entry, root, ActivationGlobal), root, repoDeclared)
-	return decision, DeclaredDefaultOn(entry), err
+	row, found, err := s.decidingRow(ServerOverrideFor(entry, root, ActivationGlobal), root, repoDeclared)
+	switch {
+	case err != nil || !found:
+		return ActivationUndecided, DeclaredDefaultOn(entry), err
+	case repoDeclared && row.Enabled && row.Identity != ProjectDeclarationDigest(entry, root):
+		return ActivationChanged, DeclaredDefaultOn(entry), nil
+	}
+	return decisionOf(row.Enabled), DeclaredDefaultOn(entry), nil
 }
 
 // DeclaredDefaultOn is what a server does when the store cannot be read. Every
@@ -69,6 +83,13 @@ func (s *ActivationStore) IsEnabled(entry PluginEntry, root string) (bool, error
 	return defaultOn, nil
 }
 
+// ServerChanged reports an enable the user gave for another declaration of
+// entry, so a surface can say why the server is waiting again.
+func (s *ActivationStore) ServerChanged(entry PluginEntry, root string) bool {
+	decision, _, err := s.ServerDecision(entry, root)
+	return err == nil && decision == ActivationChanged
+}
+
 // AwaitingDecision reports a repository-declared server nobody has answered for.
 // It is off, but not because the user turned it off — a surface that cannot tell
 // those apart shows a project's MCP as simply missing.
@@ -77,13 +98,18 @@ func (s *ActivationStore) AwaitingDecision(entry PluginEntry, root string) bool 
 	if err != nil {
 		return !DeclaredDefaultOn(entry) // unread store: ask again rather than go quiet
 	}
-	return decision == ActivationUndecided && !defaultOn
+	return decision == ActivationChanged || decision == ActivationUndecided && !defaultOn
 }
 
 // SetServerEnabled records a durable decision for entry at scope.
+// Enabling a repository-declared server records the declaration it was given
+// for, as it reads now.
 func (s *ActivationStore) SetServerEnabled(entry PluginEntry, root string, scope ActivationScope, enabled bool) error {
 	override := ServerOverrideFor(entry, root, scope)
 	override.Enabled = enabled
+	if repoDeclared, _, _ := mcpIdentity(entry); repoDeclared && enabled {
+		override.Identity = ProjectDeclarationDigest(entry, root)
+	}
 	return s.SetOverride(override)
 }
 

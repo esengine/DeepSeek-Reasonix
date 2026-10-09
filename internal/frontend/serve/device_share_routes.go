@@ -4,14 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"reasonix/internal/contract/config"
 )
 
 const (
-	codeShareAddress = "share.address_rejected"
-	codeShareClosed  = "share.closed"
-	codeShareCloud   = "share.cloud_unavailable"
-	codeShareListen  = "share.listen_failed"
-	codeShareUnknown = "share.device_unknown"
+	codeShareAddress   = "share.address_rejected"
+	codeShareClosed    = "share.closed"
+	codeShareCloud     = "share.cloud_unavailable"
+	codeShareListen    = "share.listen_failed"
+	codeSharePortInUse = "share.port_in_use"
+	codeSharePortRange = "share.port_out_of_range"
+	codeSharePortSave  = "share.port_save_failed"
+	codeShareUnknown   = "share.device_unknown"
 )
 
 // registerShareRoutes is registered only where a window holds a share, and
@@ -23,6 +28,7 @@ func (h *Hub) registerShareRoutes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /share", h.shareStatus)
 	mux.HandleFunc("POST /share/open", h.shareOpen)
+	mux.HandleFunc("POST /share/port", h.shareSetPort)
 	mux.HandleFunc("POST /share/close", h.shareClose)
 	mux.HandleFunc("POST /share/offer", h.shareOffer)
 	mux.HandleFunc("POST /share/cloud-offer", h.shareCloudOffer)
@@ -56,12 +62,32 @@ func (h *Hub) shareOpen(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, ErrShareAddress):
 		refuse(w, http.StatusBadRequest, codeShareAddress, err.Error(), map[string]any{"ip": body.IP})
+	case errors.Is(err, ErrSharePortInUse):
+		refuse(w, http.StatusConflict, codeSharePortInUse, err.Error(), map[string]any{"ip": body.IP, "port": h.opts.Share.Status().Port})
 	case err != nil:
 		// The socket is ours to open, so a failure is this machine's, not the
 		// request's: a port taken, a firewall, an address that went away.
 		refuse(w, http.StatusInternalServerError, codeShareListen, err.Error(), map[string]any{"ip": body.IP, "error": err.Error()})
 	default:
 		writeJSON(w, st)
+	}
+}
+
+func (h *Hub) shareSetPort(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Port *int `json:"port"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil || body.Port == nil {
+		missingField(w, "port")
+		return
+	}
+	switch err := h.opts.Share.SetPort(*body.Port); {
+	case errors.Is(err, config.ErrSharePortOutOfRange):
+		refuse(w, http.StatusBadRequest, codeSharePortRange, err.Error(), map[string]any{"min": config.MinSharePort, "max": config.MaxSharePort})
+	case err != nil:
+		saveFailed(w, http.StatusInternalServerError, codeSharePortSave, err)
+	default:
+		writeJSON(w, h.opts.Share.Status())
 	}
 }
 

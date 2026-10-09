@@ -21,6 +21,8 @@ type hostedBrowser struct {
 	// neverLoads withholds the load event, like a page whose script comes
 	// from a host the network cannot reach.
 	neverLoads bool
+	// refuses makes every navigation fail to start, like an unreachable host.
+	refuses string
 }
 
 func newHostedBrowser() *hostedBrowser {
@@ -64,6 +66,10 @@ func (h *hostedBrowser) WriteMessage(raw []byte) error {
 		result["frameTree"] = map[string]any{"frame": map[string]any{"id": "F1", "url": "about:blank"}}
 	case "Page.navigate":
 		result["loaderId"] = "L1"
+		if h.refuses != "" {
+			result["errorText"] = h.refuses
+			break
+		}
 		if h.neverLoads {
 			break
 		}
@@ -168,6 +174,85 @@ func TestVisitRefusesWhatOpenRefuses(t *testing.T) {
 		_, openErr := s.Open(context.Background(), raw, "", true)
 		if visitErr == nil || CodeOf(visitErr) != CodeOf(openErr) {
 			t.Errorf("%s: Visit = %v, Open = %v; want the same refusal", raw, visitErr, openErr)
+		}
+	}
+}
+
+// A tab the person opens must never be the active one, not even while its page
+// loads: the agent's calls without a tab land on the active tab.
+func TestVisitBesideNeverTakesTheActivePlace(t *testing.T) {
+	host := newHostedBrowser()
+	pool := &Pool{}
+	pool.SetEndpoint(func(context.Context, string) (Endpoint, error) { return host, nil })
+	s := NewSession(Config{Launch: LaunchSpec{Executable: "/nonexistent/chrome", ProfileDir: "/profiles/w1"}, Pool: pool})
+	defer s.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	first, err := s.VisitBeside(ctx, "https://example.com/")
+	if err != nil || !first.Active {
+		t.Fatalf("first = %+v, err %v; want the only tab active", first, err)
+	}
+	agent, err := s.Open(ctx, "https://agent.example/", first.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var sawBesideActive bool
+	s.OnTabsChanged(func() {
+		for _, tab := range s.Tabs() {
+			if tab.ID != agent.ID && tab.ID != first.ID && tab.Active {
+				mu.Lock()
+				sawBesideActive = true
+				mu.Unlock()
+			}
+		}
+	})
+	info, err := s.VisitBeside(ctx, "https://link.example/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Active {
+		t.Fatalf("opened = %+v, want it beside the active tab", info)
+	}
+	for _, tab := range s.Tabs() {
+		if tab.Active != (tab.ID == agent.ID) {
+			t.Fatalf("tabs = %+v, want %s active", s.Tabs(), agent.ID)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if sawBesideActive {
+		t.Fatal("the new tab was active at some point of its own opening")
+	}
+}
+
+func TestVisitBesideFailingToLoadLeavesTheActiveTab(t *testing.T) {
+	host := newHostedBrowser()
+	pool := &Pool{}
+	pool.SetEndpoint(func(context.Context, string) (Endpoint, error) { return host, nil })
+	s := NewSession(Config{Launch: LaunchSpec{Executable: "/nonexistent/chrome", ProfileDir: "/profiles/w1"}, Pool: pool})
+	defer s.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	agent, err := s.Open(ctx, "https://agent.example/", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.mu.Lock()
+	host.refuses = "net::ERR_NAME_NOT_RESOLVED"
+	host.mu.Unlock()
+	info, err := s.VisitBeside(ctx, "https://intranet.example/")
+	if CodeOf(err) != CodeNavigationFailed {
+		t.Fatalf("err = %v, want %s", err, CodeNavigationFailed)
+	}
+	if info.ID == "" || info.ID == agent.ID || info.Active {
+		t.Fatalf("left behind = %+v, want a new tab that is not active", info)
+	}
+	for _, tab := range s.Tabs() {
+		if tab.Active != (tab.ID == agent.ID) {
+			t.Fatalf("tabs = %+v, want %s active", s.Tabs(), agent.ID)
 		}
 	}
 }

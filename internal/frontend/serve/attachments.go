@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/model/visionimage"
 	"reasonix/internal/session/control"
 )
 
@@ -28,23 +29,69 @@ func attachmentBytes(path, data string) ([]byte, error) {
 	if strings.TrimSpace(path) == "" {
 		raw, err := base64.StdEncoding.DecodeString(data)
 		if err != nil {
-			return nil, errors.New("attachment data must be base64")
+			return nil, errBadAttachmentData
 		}
 		return raw, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("read attachment: %w", err)
+		return nil, &attachmentRefusal{status: http.StatusBadRequest, code: "attachment.unreadable", err: fmt.Errorf("read attachment: %w", err)}
 	}
 	// A directory or a device would read as something no image sniff would
 	// admit, but refusing here says what was wrong instead of what it was not.
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("attachment path is not a regular file")
+		return nil, &attachmentRefusal{status: http.StatusBadRequest, code: "attachment.unreadable", err: errors.New("attachment path is not a regular file")}
 	}
 	if info.Size() > maxAttachmentUpload {
-		return nil, errors.New("attachment is larger than 10 MB")
+		return nil, &attachmentRefusal{status: http.StatusRequestEntityTooLarge, code: "attachment.too_large", err: errors.New("attachment is larger than 25 MB"), params: map[string]any{"limit_mb": maxAttachmentUpload >> 20}}
 	}
-	return os.ReadFile(path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &attachmentRefusal{status: http.StatusBadRequest, code: "attachment.unreadable", err: fmt.Errorf("read attachment: %w", err)}
+	}
+	return raw, nil
+}
+
+var errBadAttachmentData = errors.New("attachment data must be base64")
+
+// attachmentRefusal is a refusal decided before the saver runs.
+type attachmentRefusal struct {
+	status int
+	code   string
+	err    error
+	params map[string]any
+}
+
+func (e *attachmentRefusal) Error() string { return e.err.Error() }
+
+// refuseAttachment answers with the class of whoever first knew why the bytes
+// were not stored. name only supplies the extension a reader would recognise;
+// without one the sniffed type stands in for it.
+func refuseAttachment(w http.ResponseWriter, name string, err error) {
+	var pre *attachmentRefusal
+	var bad *control.AttachmentError
+	switch {
+	case errors.Is(err, errBadAttachmentData):
+		badBody(w)
+	case errors.As(err, &pre):
+		refuse(w, pre.status, pre.code, pre.err.Error(), pre.params)
+	case errors.Is(err, control.ErrAttachmentEmpty):
+		refuse(w, http.StatusBadRequest, "attachment.empty", err.Error(), nil)
+	case errors.As(err, &bad) && errors.Is(err, control.ErrAttachmentTooLarge):
+		refuse(w, http.StatusRequestEntityTooLarge, "attachment.too_large", err.Error(), map[string]any{"limit_mb": bad.LimitMB})
+	case errors.As(err, &bad) && errors.Is(err, control.ErrAttachmentNotImage):
+		format := strings.ToLower(filepath.Ext(name))
+		if format == "" {
+			format = bad.Type
+		}
+		refuse(w, http.StatusUnsupportedMediaType, "attachment.unsupported_image", err.Error(), map[string]any{
+			"type":      bad.Type,
+			"format":    format,
+			"supported": strings.Join(visionimage.Labels(), ", "),
+		})
+	default:
+		refuse(w, http.StatusInternalServerError, "attachment.write_failed", err.Error(), map[string]any{"detail": err.Error()})
+	}
 }
 
 func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
@@ -58,12 +105,17 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 		Path string `json:"path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var over *http.MaxBytesError
+		if errors.As(err, &over) {
+			refuse(w, http.StatusRequestEntityTooLarge, "attachment.too_large", "attachment is larger than 25 MB", map[string]any{"limit_mb": maxAttachmentUpload >> 20})
+			return
+		}
 		badBody(w)
 		return
 	}
 	raw, err := attachmentBytes(body.Path, body.Data)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		refuseAttachment(w, body.Name, err)
 		return
 	}
 	root := s.ctl().WorkspaceRoot()
@@ -76,7 +128,7 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 	}
 	saved, err := save()
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		refuseAttachment(w, body.Name, err)
 		return
 	}
 	// The turn parser resolves "@<path>"; hand back the exact token so the

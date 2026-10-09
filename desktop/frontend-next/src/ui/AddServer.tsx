@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useEscape } from "./dismiss";
 import { t } from "../i18n";
 import type { AgentPort, McpDraftServer, McpInstallResult, McpInstallScope, McpRisk } from "../port/port";
@@ -33,6 +33,7 @@ export function AddServer(props: Props) {
 }
 
 function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
+  const sourceLabel = useId();
   // Mounted only while open, so this component is the layer Escape closes.
   useEscape(true, onClose);
   const [text, setText] = useState("");
@@ -74,7 +75,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
     }
   };
 
-  if (results.length > 0 && !error && !busy) {
+  if (results.length > 0 && remaining.length === 0 && !error && !busy) {
     return (
       <div className="addsrv" data-stage="done">
         {results.map((r) => (
@@ -95,10 +96,12 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
         <>
           <textarea
             className="paste"
+            aria-labelledby={sourceLabel}
             data-action-keydown="mcp.inspect"
             rows={4}
             autoFocus
             value={text}
+            disabled={busy}
             placeholder={PLACEHOLDER}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -109,7 +112,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
             }}
           />
           <div className="acts">
-            <span className="note">{t("一段 JSON、一行命令，或一个 https 地址")}</span>
+            <span className="note" id={sourceLabel}>{t("一段 JSON、一行命令，或一个 https 地址")}</span>
             <button className="act" onClick={onClose}>
               {t("取消")}
             </button>
@@ -134,7 +137,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
                 .map((k) => (
                   <div className="risk" key={k.field} data-kind={k.kind}>
                     <span className="lb">{t(KIND_LABEL[k.kind] ?? k.kind)}</span>
-                    <span className="dt">{k.kind === "secret" ? k.field.split(".").pop() : k.detail}</span>
+                    <span className="dt">{k.kind === "secret" ? k.field.split(".").pop() : k.kind === "unknown-host" ? (s.displayUrl ?? "<redacted>") : [s.displayCommand ?? "<redacted>", ...(s.displayArgs ?? [])].join(" ")}</span>
                     {k.kind === "secret" && <span className="why">{k.detail}</span>}
                   </div>
                 ))}
@@ -143,13 +146,30 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
           {/* Installing is a global act; how far it reaches is a separate
               question. Only the third option edits a tracked file, so it is the
               one that has to say so out loud — and it is never the default. */}
-          <div className="scope" role="radiogroup" aria-label={t("安装位置")}>
-            <button role="radio" aria-checked={scope === "user"} disabled={busy || hasSaved} onClick={() => setScope("user")}>
+          <div className="scope" role="radiogroup" aria-label={t("安装位置")} data-action-keydown="mcp.scope"
+            onKeyDown={(e) => {
+              if (busy || hasSaved || e.altKey || e.ctrlKey || e.metaKey) return;
+              const radios = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')].filter((radio) => !radio.disabled);
+              const index = radios.indexOf(document.activeElement as HTMLButtonElement);
+              if (index < 0) return;
+              const next = e.key === "ArrowRight" || e.key === "ArrowDown" ? (index + 1) % radios.length
+                : e.key === "ArrowLeft" || e.key === "ArrowUp" ? (index + radios.length - 1) % radios.length
+                : e.key === "Home" ? 0 : e.key === "End" ? radios.length - 1 : undefined;
+              if (next === undefined) return;
+              e.preventDefault();
+              e.stopPropagation();
+              radios[next].focus();
+              radios[next].click();
+            }}>
+            <button role="radio" aria-checked={scope === "user"} tabIndex={scope === "user" ? 0 : -1}
+              data-action="mcp.scope" disabled={busy || hasSaved} onClick={() => setScope("user")}>
               {t("我的")}<i>{t("所有项目均可使用")}</i>
             </button>
             <button
               role="radio"
               aria-checked={scope === "local"}
+              tabIndex={scope === "local" ? 0 : -1}
+              data-action="mcp.scope"
               disabled={busy || hasSaved || !canProject}
               onClick={() => setScope("local")}
             >
@@ -158,6 +178,8 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
             <button
               role="radio"
               aria-checked={scope === "project"}
+              tabIndex={scope === "project" ? 0 : -1}
+              data-action="mcp.scope"
               disabled={busy || hasSaved || !canProject}
               onClick={() => setScope("project")}
             >

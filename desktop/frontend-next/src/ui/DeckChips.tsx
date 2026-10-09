@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JobEntry } from "../port/port";
 import { t } from "../i18n";
 import { StudioIcon } from "./StudioIcon";
 import { agentsIn } from "./panels/derive";
 import { Agents } from "./panels/Agents";
+import { AgentTranscript } from "./panels/AgentTranscript";
 import { Jobs } from "./panels/Jobs";
 import type { Task } from "./panels/Agents";
 import { useDismiss } from "./dismiss";
@@ -18,19 +19,25 @@ export type Deck = "" | "agents" | "jobs";
 export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void> }) {
   const agentsBox = useRef<HTMLDivElement>(null);
   const jobsBox = useRef<HTMLDivElement>(null);
+  const [viewing, setViewing] = useState("");
+  const viewed = viewing ? tasks.find((x) => x.id === viewing) : undefined;
+  useEffect(() => {
+    if (viewing && !viewed) setViewing("");
+  }, [viewing, viewed]);
+  const closeView = useCallback(() => {
+    setViewing("");
+    agentsBox.current?.querySelector<HTMLElement>('[data-action="deck.agents"]')?.focus();
+  }, []);
   const shut = useCallback(() => onOpen(() => ""), [onOpen]);
   useDismiss(open === "agents", agentsBox, shut);
   useDismiss(open === "jobs", jobsBox, shut);
   const liveAgents = useMemo(() => agentsIn(tasks.filter((x) => x.running)), [tasks]);
   const liveJobs = useMemo(() => jobs.filter((j) => j.status === "running").length, [jobs]);
-  if (liveAgents === 0 && jobs.length === 0) return null;
+  if (tasks.length === 0 && jobs.length === 0) return null;
 
-  // Only while a delegate is running: a finished one is history, which the
-  // transcript and the side panel keep, and a reading left standing after the
-  // work stopped reads as work still going.
   return (
     <>
-      {liveAgents > 0 && (
+      {tasks.length > 0 && (
         <div ref={agentsBox} className="studio-deck-anchor" data-open={open === "agents" ? "" : undefined}>
           <button
             type="button"
@@ -46,10 +53,11 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob }: { tasks: T
             <span>{t("子代理")}</span>
           </button>
           <div className="studio-deck-pop" role="dialog" aria-label={t("子代理")}>
-            <Agents tasks={tasks} />
+            <Agents tasks={tasks} onOpen={(id) => { shut(); setViewing(id); }} />
           </div>
         </div>
       )}
+      {viewed && <AgentTranscript task={viewed} onClose={closeView} />}
       {jobs.length > 0 && (
         <div ref={jobsBox} className="studio-deck-anchor" data-open={open === "jobs" ? "" : undefined}>
           <button
@@ -62,7 +70,7 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob }: { tasks: T
             onClick={() => onOpen((was) => (was === "jobs" ? "" : "jobs"))}
           >
             <StudioIcon name="play" />
-            <b>{liveJobs || jobs.length}</b>
+            <b>{liveJobs}</b>
             <span>{t("后台任务")}</span>
           </button>
           <div className="studio-deck-pop" role="dialog" aria-label={t("后台任务")}>

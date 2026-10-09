@@ -18,6 +18,14 @@ const MCP_STATE: Record<string, string> = {
   disabled: "已关闭",
   standby: "待命 · 首次调用时启动",
   idle: "未连接",
+  // Project declarations require approval before the server can launch.
+  pending: "待授权 · 来自项目声明",
+};
+
+// Why a pending server waits, keyed by the kernel's code. The state label
+// already says a project declared it; a code with no entry adds nothing.
+const PENDING_WHY: Record<string, string> = {
+  changed_since_enabled: "启用之后它要启动的内容变了，或是由旧版本启用的。确认下面的命令后重新启用。",
 };
 
 // A tag only when the schema carries the server's tools or config asks it to:
@@ -70,7 +78,7 @@ export function ServerRow({
 
   const actions = (
     <span className="acts">
-      {live && m.enabled && m.state !== "ready" && (
+      {live && m.enabled && m.state !== "ready" && m.state !== "pending" && (
         <button className="act" data-action="mcp.retry" data-target={m.name} disabled={!!busy} onClick={() => void run("retry", () => port.reconnectMcp(m.name))}>
           {t(busy === "retry" ? "连接中…" : m.state === "standby" ? "立即连接" : "重连")}
         </button>
@@ -161,7 +169,7 @@ export function ServerRow({
   );
   // 服务是干什么的，只有服务自己说了算：MCP 握手里的那段自述。它没写，这里就
   // 没有 —— 拿名字或配置凑一句出来，等于替它编。
-  const about = (!!m.description || (!tools.length && m.state !== "connecting")) && (
+  const about = (!!m.description || m.remembered || (!tools.length && m.state !== "connecting")) && (
     <div className="srv-ab">
       <span className="ds">{m.description || t("该服务未提供自我说明。")}</span>
       {m.remembered && (
@@ -171,12 +179,21 @@ export function ServerRow({
       )}
     </div>
   );
-  const why = m.error || failed;
+  // Approving a repository's server approves what it runs, so the line it
+  // launches sits beside the switch that approves it.
+  const launch = m.state === "pending" && !!m.launch && (
+    <div className="srv-ab" data-launch>
+      <span className="ds">{t("将启动")} · <code>{m.launch}</code></span>
+    </div>
+  );
+  const pendingWhy = m.state === "pending" && m.pendingReason ? PENDING_WHY[m.pendingReason] : undefined;
+  const why = failed || (pendingWhy ? t(pendingWhy) : m.error);
   if (!tools.length) {
     return (
-      <div className="srv" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy}>
+      <div className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy}>
         <div className="srv-hd">{head}</div>
         {about}
+        {launch}
         {why && <div className="why">{why}</div>}
         {confirm}
       </div>
@@ -185,9 +202,10 @@ export function ServerRow({
   return (
     // Asking to remove has to open the row: the confirmation lives inside the
     // fold, and what the server contributes is worth seeing before dropping it.
-    <details className="srv" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} open={confirming || undefined}>
+    <details className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} open={confirming || undefined}>
       <summary>{head}</summary>
       {about}
+      {launch}
       {why && <div className="why">{why}</div>}
       {confirm}
       {load}

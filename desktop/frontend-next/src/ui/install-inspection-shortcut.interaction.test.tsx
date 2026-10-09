@@ -53,7 +53,7 @@ it.each(forms.flatMap((form) => modifiers.flatMap((modifier) => ["", "   "].map(
 );
 
 it.each(forms.flatMap((form) => modifiers.flatMap((modifier) => ["success", "failure"].map((outcome) => [form, modifier, outcome] as const))))(
-  "keeps %s inspection single-flight for %s+Enter (%s)", async (form, modifier, outcome) => {
+  "keeps %s inspection single-flight and its input unchanged for %s+Enter (%s)", async (form, modifier, outcome) => {
     const { read, pluginRead, mcpRead, plan, draft, pluginInstall, mcpInstall, onInstalled } = await draw(form);
     const pending = deferred();
     pluginRead.mockImplementationOnce(async () => { await pending.promise; return plan; });
@@ -64,6 +64,7 @@ it.each(forms.flatMap((form) => modifiers.flatMap((modifier) => ["success", "fai
     const reading = screen.getByRole<HTMLButtonElement>("button", { name: "读取中…" });
     expect(reading.disabled).toBe(true);
     await userEvent.click(input);
+    await userEvent.type(input, " changed");
     await userEvent.keyboard(`{${modifier}>}{Enter}{Enter}{/${modifier}}`);
     expect(read).toHaveBeenCalledTimes(1);
     expect(reading.disabled).toBe(true);

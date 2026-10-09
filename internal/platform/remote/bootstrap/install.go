@@ -22,7 +22,7 @@ var autoRouteOrder = []string{routeRemoteFetch, InstallUpload, routeDownload, In
 // drive, installing one per the strategy when what is there will not do.
 // Present-but-below-the-floor is not the same answer as absent, and the one it
 // returns says which: an upgrade over there and an install are different moves.
-func ensureBinary(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, opts Options, home, goos, goarch string, paths StatePaths) (bin, version string, err error) {
+func ensureBinary(ctx context.Context, conn Conn, env loginEnv, target remoteOS, fs *sftpfs.FS, opts Options, home, goos, goarch string, paths StatePaths) (bin, version string, err error) {
 	uploaded := uploadedBinPath(home, target.Executable())
 	// What the launch will ask of a kernel decides what counts as one here.
 	flags := LaunchFlags(opts.Broker.configured())
@@ -57,7 +57,7 @@ func ensureBinary(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS
 	}
 	var attempts []error
 	for _, route := range routes {
-		b, v, rerr := runRoute(ctx, conn, target, fs, opts, route, home, goos, goarch, uploaded, flags)
+		b, v, rerr := runRoute(ctx, conn, env, target, fs, opts, route, home, goos, goarch, uploaded, flags)
 		if rerr == nil {
 			return b, v, nil
 		}
@@ -71,12 +71,12 @@ func ensureBinary(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS
 	return fail(fmt.Errorf("%w: %w", ErrNoInstallPath, errors.Join(attempts...)))
 }
 
-func runRoute(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, opts Options, route, home, goos, goarch, uploaded string, flags []string) (bin, version string, err error) {
+func runRoute(ctx context.Context, conn Conn, env loginEnv, target remoteOS, fs *sftpfs.FS, opts Options, route, home, goos, goarch, uploaded string, flags []string) (bin, version string, err error) {
 	switch route {
 	case routeRemoteFetch:
 		return installViaRemoteFetch(ctx, conn, target, opts, home, goos, goarch, uploaded, flags)
 	case InstallNPM:
-		return installViaNPM(ctx, conn, target, opts.MinVersion, flags)
+		return installViaNPM(ctx, conn, env, target, opts.MinVersion, flags)
 	case InstallUpload:
 		return installViaUpload(ctx, conn, target, fs, opts, home, goos, goarch, uploaded, flags)
 	case routeDownload:
@@ -228,13 +228,13 @@ func outdated(found []candidate, minVersion string) string {
 	return newest
 }
 
-func installViaNPM(ctx context.Context, conn Conn, target remoteOS, minVersion string, flags []string) (bin, version string, err error) {
+func installViaNPM(ctx context.Context, conn Conn, env loginEnv, target remoteOS, minVersion string, flags []string) (bin, version string, err error) {
 	res, err := conn.Exec(ctx, "npm i -g reasonix 2>&1")
 	if err != nil {
-		return "", "", fmt.Errorf("%w: %w", ErrNPMUnavailable, err)
+		return "", "", npmUnavailable(env, err)
 	}
 	if res.ExitCode != 0 {
-		return "", "", fmt.Errorf("%w: %s", ErrNPMUnavailable, tail(res.Stdout, 400))
+		return "", "", npmUnavailable(env, errors.New(tail(res.Stdout, 400)))
 	}
 	// npm may install outside the login PATH; probe npm prefix explicitly.
 	found := probeBinaries(ctx, conn, target, "", flags)

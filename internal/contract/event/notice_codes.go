@@ -23,6 +23,7 @@ const (
 	NoticeCodeHookBlocked                                       = "hook_blocked"
 	NoticeCodeHookWarned                                        = "hook_warned"
 	NoticeCodeHookFailed                                        = "hook_failed"
+	NoticeCodeHookUnevaluable                                   = "hook_unevaluable"
 	NoticeCodeCancelledTurn                                     = "cancelled_turn_display"
 	NoticeCodeUnappliedSteer                                    = "unapplied_steer"
 	NoticeCodeSessionRecoveryForked                             = "session_recovery_forked"
@@ -45,6 +46,9 @@ const (
 	NoticeCodeProjectProgramsAwaitingApproval = "project_programs_awaiting_approval"
 	// An approved workspace program whose files changed; the host did not run it.
 	NoticeCodeProjectProgramChanged = "project_program_changed"
+	// A project-declared MCP server held off until the user approves what it runs:
+	// never approved, or changed since it was. Detail is the launch line.
+	NoticeCodeProjectMCPAwaitingApproval, NoticeCodeProjectMCPChanged = "project_mcp_awaiting_approval", "project_mcp_changed"
 	// A conversation opened from a 1.x log went on in a new session of its own.
 	NoticeCodeSessionContinuedFrom1x = "session_continued_from_1x"
 	// The user config names a default approval mode this build does not know; it loads as ask.
@@ -53,4 +57,22 @@ const (
 	NoticeCodeAwaitUser = "await_user"
 	// A slash command nothing resolves, refused rather than sent as prose.
 	NoticeCodeUnknownCommand = "unknown_command"
+	// The display currency preference changed; Detail is the stored value, "" for auto.
+	NoticeCodeDisplayCurrency = "display_currency"
+	// A saved language choice is overridden by the project config; Detail is the language in effect.
+	NoticeCodeLanguageOverridden = "language_overridden"
+	// default_model names nothing configured, so the window opened on a fallback; the file is unchanged.
+	NoticeCodeDefaultModelUnavailable = "default_model_unavailable"
+	// A legacy memory file could not be preserved, so the metadata migration left it as it was.
+	NoticeCodeMemoryMigrationBackup = "memory_migration_backup"
+	// /compact folded the context.
+	NoticeCodeCompacted = "compacted"
+	// /compact was declined as a verdict; Detail is the decline code, its text the English fallback.
+	NoticeCodeCompactDeclined = "compact_declined"
+	// /compact failed; Detail is the failure code, its text the English fallback.
+	NoticeCodeCompactFailed = "compact_failed"
+	// An optional extension was left out of an operation; Detail is the ExtensionSkipped payload.
+	NoticeCodeExtensionSkipped = "extension_skipped"
+	// A reopened session's inbox held unfinished instructions and came up paused; Detail is the InboxRecovered payload.
+	NoticeCodeInboxRecovered = "inbox_recovered"
 )

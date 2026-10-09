@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/i18n"
+	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/eventwire"
 )
 
@@ -43,5 +44,96 @@ func TestTranscriptRowsTheKernelDoesNotWordAreTranslated(t *testing.T) {
 	m.picker = &sessionPicker{query: "zzz"}
 	if got := strings.Join(m.pickerPanel(), "\n"); !strings.Contains(got, i18n.Chinese.ResumePickNoMatch) || strings.Contains(got, "Type to filter") {
 		t.Fatalf("picker:\n%s", got)
+	}
+}
+
+// A coded host notice is worded from its typed payload in the UI language, not
+// shown as the kernel's English.
+func TestCodedNoticesFollowTheUILanguage(t *testing.T) {
+	inChinese(t)
+	steer := &Item{Code: "unapplied_steer", Text: "Guidance was not applied: sync", Detail: "sync"}
+	if got := renderNotice(steer); !strings.Contains(got, "引导没有生效") || !strings.Contains(got, "sync") || strings.Contains(got, "Guidance was not applied") {
+		t.Fatalf("steer notice = %q", got)
+	}
+	unknown := &Item{Code: "no_such_code", Text: "kernel english", Detail: "not json"}
+	if got := renderNotice(unknown); !strings.Contains(got, "kernel english") {
+		t.Fatalf("a code with no wording must fall back to the kernel's text, got %q", got)
+	}
+}
+
+func TestUnappliedSteerTextIsSanitisedAndCapped(t *testing.T) {
+	inChinese(t)
+	hostile := "\x1b[2Jwipe\x07" + strings.Repeat("x", 2000)
+	got := renderNotice(&Item{Code: "unapplied_steer", Text: "english", Detail: hostile})
+	if strings.Contains(got, "\x1b[2J") || strings.Contains(got, "\x07") {
+		t.Fatalf("control sequences survived: %q", got)
+	}
+	if strings.Count(got, "x") > 450 {
+		t.Fatalf("the user text was not capped: %d runes", strings.Count(got, "x"))
+	}
+}
+
+func TestFoldedCodedNoticeShowsTheLatestPayload(t *testing.T) {
+	tr := fold(
+		eventwire.Event{Kind: "notice", Level: "warn", Code: "unapplied_steer", Text: "a", Detail: "first"},
+		eventwire.Event{Kind: "notice", Level: "warn", Code: "unapplied_steer", Text: "b", Detail: "second"},
+	)
+	if len(tr.Items) != 1 || tr.Items[0].Count != 2 || tr.Items[0].Detail != "second" {
+		t.Fatalf("items = %+v", tr.Items)
+	}
+}
+
+func TestCompactionNoticesAndCardNameTheirReasonInTheUILanguage(t *testing.T) {
+	inChinese(t)
+	failed := &Item{Code: "compact_failed", Text: "compaction failed: upstream said no", Detail: "summary_failed"}
+	if got := renderNotice(failed); !strings.Contains(got, "压缩失败") || !strings.Contains(got, "请求失败") || strings.Contains(got, "upstream") {
+		t.Fatalf("failed notice = %q", got)
+	}
+	declined := &Item{Code: "compact_declined", Text: "nothing to compact — x", Detail: "input_unchanged"}
+	if got := renderNotice(declined); !strings.Contains(got, "无需压缩") || !strings.Contains(got, "没有变化") {
+		t.Fatalf("declined notice = %q", got)
+	}
+	unknown := &Item{Code: "compact_failed", Text: "compaction failed: kernel english", Detail: "future_code"}
+	if got := renderNotice(unknown); !strings.Contains(got, "kernel english") {
+		t.Fatalf("unknown code must keep the kernel text, got %q", got)
+	}
+	card := &Item{Done: true, Compaction: &eventwire.Compaction{Trigger: "auto", Code: "cancelled"}}
+	if got := renderCompaction(card, 80); !strings.Contains(got, "压缩被取消") {
+		t.Fatalf("cancelled card = %q", got)
+	}
+}
+
+// A skipped extension is worded from its typed payload: named, located, and
+// with the way out, in the UI language; a payload this build cannot read keeps
+// the kernel's English.
+func TestSkippedExtensionNoticeFollowsTheUILanguage(t *testing.T) {
+	inChinese(t)
+	detail := event.ExtensionSkipped{Extension: "aipush-ask-bridge", Point: "tool.before", Reason: event.ExtensionSkipReasonNoLiveSidecar}.Encode()
+	got := renderNotice(&Item{Code: event.NoticeCodeExtensionSkipped, Text: "english", Detail: detail})
+	for _, want := range []string{"aipush-ask-bridge", "tool.before", "配套后台程序没有运行", "/plugins"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("notice %q lacks %q", got, want)
+		}
+	}
+	if strings.Contains(got, "{") || strings.Contains(got, "english") {
+		t.Fatalf("payload or fallback leaked into %q", got)
+	}
+	if got := renderNotice(&Item{Code: event.NoticeCodeExtensionSkipped, Text: "kernel english", Detail: "not json"}); !strings.Contains(got, "kernel english") {
+		t.Fatalf("unreadable payload must keep the kernel's text, got %q", got)
+	}
+}
+
+func TestRecoveredInboxNoticeFollowsTheUILanguage(t *testing.T) {
+	inChinese(t)
+	detail := event.InboxRecovered{Count: 2}.Encode()
+	got := renderNotice(&Item{Code: event.NoticeCodeInboxRecovered, Text: "english", Detail: detail})
+	if !strings.Contains(got, "已恢复 2 条未完成的指令") || !strings.Contains(got, "/queue") {
+		t.Fatalf("notice = %q", got)
+	}
+	if strings.Contains(got, "{") || strings.Contains(got, "english") {
+		t.Fatalf("payload or fallback leaked into %q", got)
+	}
+	if got := renderNotice(&Item{Code: event.NoticeCodeInboxRecovered, Text: "kernel english", Detail: "not json"}); !strings.Contains(got, "kernel english") {
+		t.Fatalf("unreadable payload must keep the kernel's text, got %q", got)
 	}
 }

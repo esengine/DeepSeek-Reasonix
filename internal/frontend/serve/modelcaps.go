@@ -32,6 +32,7 @@ func describeModel(e *config.ProviderEntry, into *modelEntry) {
 	if capability := config.EffortCapabilityForEntry(e); capability.Supported {
 		into.Efforts = capability.Levels
 		into.Effort = capability.Default
+		into.ForcesThinking = config.EffortForcesThinking(e)
 	}
 	into.ContextWindow = e.ContextWindow
 	if p := e.Price; p != nil && (p.Input > 0 || p.Output > 0) {

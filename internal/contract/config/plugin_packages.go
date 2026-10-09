@@ -41,15 +41,20 @@ type PackageMCPServer struct {
 // how a package is parsed.
 var installedPackages func(home string) []InstalledPackage
 
-// SetInstalledPackages names where enabled plugin packages come from.
-func SetInstalledPackages(source func(home string) []InstalledPackage) { installedPackages = source }
+// SetInstalledPackages names where enabled plugin packages come from and
+// returns the source it replaced.
+func SetInstalledPackages(source func(home string) []InstalledPackage) func(home string) []InstalledPackage {
+	prev := installedPackages
+	installedPackages = source
+	return prev
+}
 
 func (r Roots) enabledPackages() []InstalledPackage {
 	home := r.Home()
 	if strings.TrimSpace(home) == "" || installedPackages == nil {
 		return nil
 	}
-	out := installedPackages(home)
+	out := packageFlights.load(home, installedPackages)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }

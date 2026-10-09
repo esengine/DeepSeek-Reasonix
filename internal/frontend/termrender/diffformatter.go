@@ -257,11 +257,37 @@ func HasDiffFormat(key DiffKey) bool {
 	return ok
 }
 
+// diffFormatLanded reports whether a formatter's successful result for
+// (diff, width) is already in the memo, without starting a run. A caller uses
+// it to draw a prefix whose output has landed while a longer body's run is
+// still pending.
+func diffFormatLanded(diff string, width int) bool {
+	diffFormatMu.Lock()
+	defer diffFormatMu.Unlock()
+	got, hit := diffFormatCache[diffKeyOf(diff, width)]
+	return hit && got.ok
+}
+
+// diffFormatPending reports whether a configured formatter's result for
+// (diff, width) is still pending: the run is in flight. A caller draws a cheap
+// plain diff while it is, since the colourised built-in rows would only be
+// thrown away. False once the run has landed, when no formatter is set, or when
+// it was disabled by a timeout.
+func diffFormatPending(diff string, width int) bool {
+	diffFormatMu.Lock()
+	defer diffFormatMu.Unlock()
+	if len(activeDiffFormatter) == 0 || diffFormatDisabled {
+		return false
+	}
+	_, landed := diffFormatCache[diffKeyOf(diff, width)]
+	return !landed
+}
+
 // formatDiffCached returns the formatter's output for (diff, width), memoized
 // per key. With a re-render hook set (SetDiffFormatNotify) the run goes to a
 // background goroutine and this returns ok=false at once, so the caller draws
-// the built-in rows and the frontend repaints when the result lands; without a
-// hook the run is inline, so a renderer that cannot re-render still shows it.
+// its placeholder rows and the frontend repaints when the result lands; without
+// a hook the run is inline, so a renderer that cannot re-render still shows it.
 func formatDiffCached(diff string, width int) (string, bool) {
 	if len(activeDiffFormatter) == 0 {
 		return "", false

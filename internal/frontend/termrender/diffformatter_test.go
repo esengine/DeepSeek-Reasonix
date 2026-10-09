@@ -161,9 +161,9 @@ func TestRenderDiffFenceSanitisesConfiguredFormatter(t *testing.T) {
 	}
 }
 
-// An open fence (no closing ```) must not run the external formatter: every
-// streamed delta would otherwise spawn a subprocess that can never hit the
-// memo. The built-in rows are drawn until the closing fence arrives.
+// An open fence with fewer than two hunks never consults the external formatter:
+// with no settled prefix every streamed delta would spawn a subprocess that can
+// never hit the memo, so the plain rail is drawn until the closing fence.
 func TestRenderDiffFenceOpenFenceSkipsFormatter(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no portable stdin→stdout filter")
@@ -187,8 +187,9 @@ func TestRenderDiffFenceOpenFenceSkipsFormatter(t *testing.T) {
 	}
 }
 
-// A streamed answer re-renders the growing fence on every delta; the formatter
-// must run once, on the closed fence, not once per delta.
+// A single-hunk fence runs the formatter once, on the closed fence — never per
+// delta. (A multi-hunk fence runs it once per completed hunk; see
+// TestRenderDiffFenceFormatterRunsOnSettledHunk.)
 func TestRenderDiffFenceStreamingRunsFormatterOnce(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no portable shell")
@@ -309,7 +310,7 @@ func TestDiffBlockFallsBackWhenFormatterFails(t *testing.T) {
 func setDiffFormatter(argv []string) { SetDiffFormatterForTest(argv) }
 
 // With a re-render hook registered the run is asynchronous: the call returns
-// not-ok at once (so the caller draws the built-in rows), the hook fires when
+// not-ok at once (so the caller draws its placeholder rows), the hook fires when
 // the result lands, and the memo then serves it.
 func TestFormatDiffCachedAsyncWhenNotifyHookSet(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -323,7 +324,7 @@ func TestFormatDiffCachedAsyncWhenNotifyHookSet(t *testing.T) {
 	defer SetDiffFormatNotify(nil)
 
 	if _, ok := formatDiffCached("body", 80); ok {
-		t.Fatal("async call should report not-ok so the caller draws built-in rows")
+		t.Fatal("async call should report not-ok so the caller draws placeholder rows")
 	}
 	select {
 	case <-done:
@@ -354,5 +355,69 @@ func TestFormatDiffCachedMemoisesByContentAndWidth(t *testing.T) {
 	}
 	if _, ok := formatDiffCached("body", 100); ok {
 		t.Fatal("a new width should not reuse another width's entry")
+	}
+}
+
+// A multi-hunk fence runs the formatter on each completed hunk as it arrives,
+// not only at the closing fence, so the diff colours in as it streams. The
+// in-progress hunk is left on the plain rail and never reaches the formatter.
+func TestRenderDiffFenceFormatterRunsOnSettledHunk(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no portable stdin→stdout filter")
+	}
+	defer setDiffFormatter(nil)
+	setDiffFormatter([]string{"sed", "s/^/MARK:/"})
+	SetDiffFormatNotify(nil)
+	defer enableDiffFences(t)()
+
+	open := "```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n@@ -9 +9 @@\n-still\n"
+	out := NewMarkdownRenderer(80).Render(open)
+	if !strings.Contains(out, "MARK:") {
+		t.Fatalf("the completed hunk should be formatted while the fence is open:\n%q", out)
+	}
+	if strings.Contains(out, "MARK:-still") || strings.Contains(out, "MARK:@@ -9") {
+		t.Fatalf("the in-progress hunk must not reach the formatter:\n%q", out)
+	}
+}
+
+// A settled body grows by one hunk each time an "@@ " header arrives, so its
+// formatter key changes and its run goes pending again. While that run is in
+// flight the rows already formatted must keep the formatter's output: redrawing
+// the whole section on the plain rail made the delta output flash back to plain
+// at every hunk. Only the newly settled hunk and the in-progress one wait.
+func TestRenderDiffFenceKeepsFormattedPrefixWhileGrownBodyPending(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no portable stdin→stdout filter")
+	}
+	defer setDiffFormatter(nil)
+	setDiffFormatter([]string{"cat"})
+	SetDiffFormatNotify(func(DiffKey) {}) // async: a miss reads as pending
+	defer SetDiffFormatNotify(nil)
+	defer enableDiffFences(t)()
+
+	const (
+		header = "--- a/x\n+++ b/x\n"
+		h1     = "@@ -1 +1 @@\n-aaa\n+AAA\n"
+		h2     = "@@ -9 +9 @@\n-bbb\n+BBB\n"
+		h3     = "@@ -20 +20 @@\n-ccc\n+CCC\n"
+		h4     = "@@ -30 +30 @@\n-ddd\n" // in progress
+	)
+	// The prefix already settled and formatted; the body grown by h3 — the
+	// current settled value — is left pending. A settled value drops the
+	// newline before the next hunk, so the memo key is the trimmed prefix.
+	body := header + h1 + h2
+	diffFormatMu.Lock()
+	storeDiffFormat(diffKeyOf(strings.TrimRight(body, "\n"), 80), "FORMATTED-PREFIX\n", true)
+	diffFormatMu.Unlock()
+
+	out := NewMarkdownRenderer(80).Render("```diff\n" + body + h3 + h4)
+	if !strings.Contains(out, "FORMATTED-PREFIX") {
+		t.Fatalf("the settled prefix flashed back to the plain rail:\n%q", out)
+	}
+	if strings.Contains(out, "│ -aaa") {
+		t.Fatalf("the already-formatted prefix was redrawn on the plain rail:\n%q", out)
+	}
+	if !strings.Contains(out, "│ -ccc") || !strings.Contains(out, "│ -ddd") {
+		t.Fatalf("the newly settled and in-progress hunks should wait on the rail:\n%q", out)
 	}
 }

@@ -19,10 +19,22 @@ export function effortsFor(models: ModelEntry[], ref?: string): string[] {
   return EFFORT_FALLBACK;
 }
 
+/** Whether the model in hand cannot switch thinking off, so even its cheapest
+ *  level reasons and is billed. Absent is "nothing said so", never "no". */
+export function forcesThinkingFor(models: ModelEntry[], ref?: string): boolean {
+  return models.find((m) => m.ref === ref)?.forcesThinking === true;
+}
+
+/** The cheapest real level — where a model that cannot switch thinking off
+ *  still reasons, and where a saved "off" lands. The ladder opens with auto. */
+export function cheapestEffort(efforts: string[]): string {
+  return efforts.find((value) => value.toLowerCase() !== "auto") ?? "";
+}
+
 // xhigh and max are distinct rungs on the ladders that carry both, so they
 // cannot share a name.
 const EFFORT_LABELS: Record<string, string> = {
-  auto: "自动", disabled: "关闭", none: "不思考", low: "快速", medium: "平衡", high: "深入", xhigh: "超深入", max: "极致",
+  auto: "自动", disabled: "关闭", none: "不思考", minimal: "最轻量", low: "快速", medium: "平衡", high: "深入", xhigh: "超深入", max: "极致",
 };
 
 export function effortReading(value?: string, modes?: ModelMode[]): string {
@@ -69,25 +81,34 @@ export function effortApi(value: string): string {
   return id === "xhigh" ? "XHigh" : id.charAt(0).toUpperCase() + id.slice(1);
 }
 
-export function effortDescription(value: string): string {
+export function effortDescription(value: string, forcedThinking = false, cheapest = ""): string {
   const id = value.toLowerCase();
-  return t(({
+  const base = t(({
     auto: "使用模型默认或自适应策略，按任务复杂度调整",
     disabled: "不发送推理强度参数，使用服务端默认设置",
     none: "不做推理直接作答，响应最快，适合简单问答",
+    minimal: "比快速档更轻；GLM-5.2 会跳过思考",
     low: "轻量思考，适合改写、提取和明确的小任务",
     medium: "兼顾响应速度与可靠性，适合大多数任务",
     high: "投入更多时间分析复杂上下文与执行方案",
     xhigh: "比深入投入更多推理，适合困难的多步问题",
     max: "用于最复杂的问题，等待时间与消耗最高",
   } as Record<string, string>)[id] ?? value);
+  // A model that cannot switch thinking off still reasons at its cheapest
+  // level, and still bills for it. That is the rung a saved "off" lands on, so
+  // it is the one that would otherwise read as free.
+  if (forcedThinking && cheapest !== "" && id === cheapest.toLowerCase()) {
+    return `${base} · ${t("思考仍开启并计费，该模型无法关闭思考")}`;
+  }
+  return base;
 }
 
 /** The rows the effort picker offers. An endpoint that reported no levels has
  *  not said "none" — it has said nothing, so rather than invent a rung the one
  *  row here points at where the capability is declared. */
-export function effortMenu(efforts: string[], modelLabel: string, onDeclare: string, modes: ModelMode[] = []) {
+export function effortMenu(efforts: string[], modelLabel: string, onDeclare: string, modes: ModelMode[] = [], forcedThinking = false) {
   const declared = efforts.length > 0;
+  const cheapest = cheapestEffort(efforts);
   return [
     { value: "__effort-heading", label: t("推理强度"), right: modelLabel, header: true },
     ...(declared ? [] : [{ value: onDeclare, label: t("声明推理档位"), desc: t("这个端点没有报告推理档位，中转站通常不转发这项能力。将打开该来源的编辑表单，可以选择思考参数或直接填写档位。") }]),
@@ -98,7 +119,7 @@ export function effortMenu(efforts: string[], modelLabel: string, onDeclare: str
       badge: value === "auto" ? t("推荐") : undefined,
       recommended: value === "auto",
       strength: value === "disabled" || value === "none" ? 0 : ({ auto: 1, low: 1, medium: 2, high: 3, xhigh: 4, max: 4 } as Record<string, number>)[value.toLowerCase()] ?? 1,
-      desc: effortDescription(value),
+      desc: effortDescription(value, forcedThinking, cheapest),
     })),
     ...modes.map((mode, i) => ({
       value: MODE_ROW + mode.id,

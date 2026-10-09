@@ -54,10 +54,11 @@ type updateSink struct {
 	sessionID string
 	// cwd resolves relative tool-arg paths for tool_call locations. Set once
 	// via bindCwd before the sink receives events.
-	cwd     string
-	approve func(id string, allow, session, persist bool)
-	answer  func(id string, answers []event.AskAnswer)
-	status  func(event.Event)
+	cwd       string
+	approve   func(id string, allow, session, persist bool)
+	answer    func(id string, answers []event.AskAnswer)
+	status    func(event.Event)
+	mcpStatus func()
 	// extensionSurface records the client's negotiated
 	// reasonix.extensionSurface support: structured surfaces go out as vendor
 	// session/update payloads on top of the always-sent text fallback.
@@ -98,6 +99,12 @@ func (s *updateSink) bindAnswer(fn func(id string, answers []event.AskAnswer)) {
 // never raw reasoning text or terminal transcripts.
 func (s *updateSink) bindStatus(fn func(event.Event)) { s.status = fn }
 
+func (s *updateSink) bindMCPStatus(fn func()) {
+	s.mu.Lock()
+	s.mcpStatus = fn
+	s.mu.Unlock()
+}
+
 // bindExtensionSurface records whether the client negotiated structured
 // extension-surface support in the initialize handshake.
 func (s *updateSink) bindExtensionSurface(supported bool) { s.extensionSurface = supported }
@@ -131,6 +138,8 @@ func (s *updateSink) Emit(e event.Event) {
 		s.status(e)
 	}
 	switch e.Kind {
+	case event.MCPSurfaceReady:
+		s.emitMCPStatus()
 	case event.Reasoning:
 		if e.Text == "" {
 			return
@@ -207,10 +216,7 @@ func (s *updateSink) Emit(e event.Event) {
 		// Surface warnings to the host as a message chunk so they're not lost;
 		// info-level notices stay out of band.
 		if e.Level == event.LevelWarn && e.Text != "" {
-			s.send(messageChunk{
-				SessionUpdate: "agent_message_chunk",
-				Content:       textBlock("\n\n[warning] " + e.Text),
-			})
+			s.send(warningChunk(e))
 		}
 
 	case event.CompactionDone:

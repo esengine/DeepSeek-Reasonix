@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionstore"
 	"reflect"
 	"runtime"
@@ -60,6 +61,75 @@ func TestAgentKeepPolicyFromConfig(t *testing.T) {
 	}
 	if got := agentKeepPolicy([]string{"errors", "user_marked"}); got != agent.KeepErrors|agent.KeepUserMarked {
 		t.Fatalf("combined keep policy = %v, want errors|user_marked", got)
+	}
+}
+
+func TestBuildRecordsRuntimeSelectionEffort(t *testing.T) {
+	home := isolateConfigHome(t)
+	reasonixHome := filepath.Join(home, ".reasonix")
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	dir := robustTempDir(t)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model/test-model"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "test-model"
+supported_efforts = ["low", "high"]
+effort = "high"
+`)
+	approveWorkspace(t, dir)
+
+	ctrl, err := Build(context.Background(), Options{Model: "test-model/test-model", Home: reasonixHome, WorkspaceRoot: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	if got := ctrl.RuntimeSelection(); got.ModelRef != "test-model/test-model" || got.Effort != "high" {
+		t.Fatalf("runtime selection = %+v, want model test-model/test-model effort high", got)
+	} else if got.ProviderFingerprint == "" {
+		t.Fatal("runtime selection has no provider build fingerprint")
+	}
+}
+
+func TestProviderBuildIdentityTracksBuildInputsButNotStoredEffort(t *testing.T) {
+	entry := &config.ProviderEntry{
+		Name:             "relay",
+		Kind:             "openai",
+		BaseURL:          "https://one.example/v1",
+		Model:            "model-x",
+		SupportedEfforts: []string{"low", "high"},
+		Effort:           "low",
+		Vision:           false,
+	}
+	proxy := netclient.ProxySpec{}
+	first := ResolveProviderBuildIdentity(entry, proxy, nil)
+	if first.Fingerprint == "" {
+		t.Fatal("provider fingerprint is empty")
+	}
+
+	entry.Effort = "high"
+	effortChanged := ResolveProviderBuildIdentity(entry, proxy, nil)
+	if effortChanged.Fingerprint != first.Fingerprint {
+		t.Fatal("stored effort changed the provider build fingerprint")
+	}
+	if effortChanged.Effort != "high" {
+		t.Fatalf("resolved effort = %q, want high", effortChanged.Effort)
+	}
+
+	entry.Vision = true
+	visionChanged := ResolveProviderBuildIdentity(entry, proxy, nil)
+	if visionChanged.Fingerprint == first.Fingerprint {
+		t.Fatal("vision flag did not change the provider build fingerprint")
+	}
+
+	entry.BaseURL = "https://two.example/v1"
+	urlChanged := ResolveProviderBuildIdentity(entry, proxy, nil)
+	if urlChanged.Fingerprint == visionChanged.Fingerprint {
+		t.Fatal("base_url did not change the provider build fingerprint")
 	}
 }
 
@@ -432,7 +502,11 @@ func firstTokenProfileRequest(t *testing.T, tokenMode string) provider.Request {
 	prov := testutil.NewMock("token-profile", testutil.Turn{Text: "[]"}, testutil.Turn{Text: "done"})
 	setBootTokenProfileTestProvider(t, prov)
 
-	opts := Options{Sink: event.Discard}
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Sink: event.Discard, WorkspaceRoot: root}
 	if tokenMode != "" {
 		opts.TokenMode = tokenMode
 	}
@@ -2056,6 +2130,9 @@ model = "x"
 
 func TestBuildTokenBalancedAliasMatchesDefaultRequestPrefix(t *testing.T) {
 	isolateConfigHome(t)
+	if runtime.GOOS == "windows" {
+		writeUserConfig(t, "[tools.shell]\nprefer = \"powershell\"\n")
+	}
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 
@@ -3203,11 +3280,16 @@ func TestRememberPermissionRuleRejectsAnUnreadableRecordWithoutWriting(t *testin
 	}
 }
 
+// Every writer queues on one lock with a 5s wait, so N writers on a slow
+// filesystem need N critical sections to fit inside it. Eight is enough to
+// interleave on any machine without making the queue the thing under test.
+const rememberContendingWriters = 8
+
 func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
 	rememberHome(t)
 	workspace := robustTempDir(t)
 
-	const writers = 32
+	const writers = rememberContendingWriters
 	start := make(chan struct{})
 	results := make(chan control.RememberResult, writers)
 	var wg sync.WaitGroup
@@ -3274,7 +3356,7 @@ func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
 		}
 	})
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for worker := 0; worker < workers; {
 		if _, err := os.Stat(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker))); err == nil {
 			worker++
@@ -3325,7 +3407,7 @@ func TestRememberPermissionRuleProcessHelper(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker)), []byte("ready"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for {
 		if _, err := os.Stat(startPath); err == nil {
 			break
@@ -3878,10 +3960,20 @@ func TestSkillMCPBindingsUseOnlyValidOwnedCache(t *testing.T) {
 // else has to say so, or it becomes a test of that gate instead.
 func approveProjectServer(t *testing.T, root, name string) {
 	t.Helper()
-	entry := config.PluginEntry{Name: name, Source: config.MCPSourceProjectConfig}
-	if err := config.DefaultActivationStore().SetServerEnabled(entry, root, config.ActivationProject, true); err != nil {
-		t.Fatalf("approve %s: %v", name, err)
+	cfg, err := config.LoadForRootReadOnly(root)
+	if err != nil {
+		t.Fatalf("load %s: %v", root, err)
 	}
+	for _, entry := range cfg.Plugins {
+		if entry.Name != name {
+			continue
+		}
+		if err := config.DefaultActivationStore().SetServerEnabled(entry, root, config.ActivationProject, true); err != nil {
+			t.Fatalf("approve %s: %v", name, err)
+		}
+		return
+	}
+	t.Fatalf("approve %s: no such server declared in %s", name, root)
 }
 
 func TestBuildMigratesLegacyEagerTierToBackground(t *testing.T) {

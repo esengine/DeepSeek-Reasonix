@@ -30,10 +30,9 @@ func TestEnsureServeRejectsStalePortFile(t *testing.T) {
 		case strings.Contains(cmd, "command -v reasonix"):
 			return ok("bin /usr/bin/reasonix\nver reasonix v9.9.0\n" + allFlagsYes())
 		case strings.Contains(cmd, "nohup"):
-			if strings.Contains(cmd, "rm -f "+shellQuote(paths.PortFile)) {
-				_ = os.Remove(paths.PortFile) // model the generated launch command
-			}
 			return ok("12345\n") // the new serve never publishes a port
+		case strings.Contains(cmd, "ps -p 12345"):
+			return ok("1\n")
 		default:
 			return ok("")
 		}
@@ -108,7 +107,7 @@ func TestAutoInstallPreservesNPMFailureWhenNoUploadBinaryExists(t *testing.T) {
 			return ok("")
 		}
 	})
-	_, _, err := ensureBinary(context.Background(), conn, posixShell{}, conn.fs, Options{Install: InstallAuto}, root, "linux", "amd64", pathsFor(root, root))
+	_, _, err := ensureBinary(context.Background(), conn, loginEnv{}, posixShell{}, conn.fs, Options{Install: InstallAuto}, root, "linux", "amd64", pathsFor(root, root))
 	if err == nil {
 		t.Fatal("auto install unexpectedly succeeded")
 	}
@@ -145,7 +144,7 @@ func TestAutoInstallDownloadsVerifiedCrossPlatformBinaryAfterNPMFailure(t *testi
 		}
 	})
 	fetched := false
-	bin, _, err := ensureBinary(context.Background(), conn, posixShell{}, conn.fs, Options{
+	bin, _, err := ensureBinary(context.Background(), conn, loginEnv{}, posixShell{}, conn.fs, Options{
 		Install: InstallAuto, LocalBinary: "/local/reasonix", LocalGOOS: "darwin", LocalGOARCH: "arm64",
 		ProductVersion: "v1.2.3",
 		FetchBinary: func(_ context.Context, version, goos, goarch string) ([]byte, error) {

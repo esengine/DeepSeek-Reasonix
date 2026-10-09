@@ -14,6 +14,8 @@ import (
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/installsource"
 	"reasonix/internal/ext/pluginpkg"
+	"reasonix/internal/ext/skill"
+	"reasonix/internal/ext/theme"
 )
 
 func pluginCommand(args []string) int {
@@ -55,7 +57,7 @@ func pluginUsage() {
   reasonix plugin show <name>
   reasonix plugin enable <name>
   reasonix plugin disable <name>
-  reasonix plugin remove <name>
+  reasonix plugin remove <name> --yes
   reasonix plugin doctor <name>
   reasonix plugin migrate <name> --to-v2`)
 }
@@ -238,8 +240,8 @@ func pluginShowCommand(args []string) int {
 		return 1
 	}
 	summary := pkg.CapabilitySummary()
-	fmt.Printf("name: %s\nversion: %s\nenabled: %t\nkind: %s\nroot: %s\nsource: %s\nskills: %d\ncommands: %d\nprompts: %d\nhooks: %d\nmcpServers: %d\nthemes: %d\n",
-		p.Name, p.Version, p.Enabled, p.ManifestKind, root, p.Source, summary.Skills, summary.Commands, summary.Prompts, summary.Hooks, summary.MCPServers, summary.Themes)
+	fmt.Printf("name: %s\nversion: %s\nenabled: %t\nkind: %s\nroot: %s\nsource: %s\nskills: %d\nagents: %d\ncommands: %d\nprompts: %d\nhooks: %d\nmcpServers: %d\nthemes: %d\n",
+		p.Name, p.Version, p.Enabled, p.ManifestKind, root, p.Source, summary.Skills, summary.Agents, summary.Commands, summary.Prompts, summary.Hooks, summary.MCPServers, summary.Themes)
 	if summary.Runtime {
 		fmt.Print(pluginpkg.RuntimeTrustText(pkg.Manifest.Runtime))
 	}
@@ -251,6 +253,7 @@ func pluginShowCommand(args []string) int {
 }
 
 func printPluginInventory(pluginName string, inv pluginpkg.Inventory) {
+	printPluginAgents(pluginName, inv.Agents)
 	if len(inv.Skills) > 0 {
 		fmt.Println("usage:")
 		fmt.Println("  skills are available in interactive sessions; run /skills to browse them, or invoke a skill directly with /<plugin>:<name>.")
@@ -290,10 +293,11 @@ func printPluginInventory(pluginName string, inv pluginpkg.Inventory) {
 			if desc == "" {
 				desc = "(no description)"
 			}
+			invocation := "/" + pluginName + ":" + pr.Name
 			if pr.ArgHint != "" {
-				fmt.Printf("  %s %s\t%s\n", pr.Name, pr.ArgHint, desc)
+				fmt.Printf("  %s %s\t%s\n", invocation, pr.ArgHint, desc)
 			} else {
-				fmt.Printf("  %s\t%s\n", pr.Name, desc)
+				fmt.Printf("  %s\t%s\n", invocation, desc)
 			}
 		}
 	}
@@ -330,6 +334,20 @@ func printPluginInventory(pluginName string, inv pluginpkg.Inventory) {
 			}
 			fmt.Printf("  %s\t%s\t%s\n", server.Name, server.Transport, target)
 		}
+	}
+}
+
+func printPluginAgents(pluginName string, agents []pluginpkg.AgentRef) {
+	if len(agents) == 0 {
+		return
+	}
+	fmt.Println("agents:")
+	for _, agent := range agents {
+		desc := strings.Join(strings.Fields(agent.Description), " ")
+		if desc == "" {
+			desc = "(no description)"
+		}
+		fmt.Printf("  /%s:agent:%s\t%s\n", pluginName, agent.Name, desc)
 	}
 }
 
@@ -423,9 +441,23 @@ func pluginDoctorCommand(args []string) int {
 			fmt.Printf("  %s/%s/%s@%s\n", c.Namespace, c.Kind, c.ID, c.Version)
 		}
 	}
+	warnings = append(warnings, theme.PluginWarnings(pkg)...)
+	warnings = append(warnings, hook.PackageWarnings(pkg)...)
+	for _, warning := range skill.PluginWarnings(pkg) {
+		warnings = append(warnings, warning.Error())
+	}
+	for _, warning := range warnings {
+		fmt.Println("warning:", warning)
+	}
 	for _, skillRoot := range pkg.SkillRoots() {
 		if st, err := os.Stat(skillRoot); err != nil || !st.IsDir() {
 			fmt.Fprintf(os.Stderr, "missing skill root: %s\n", skillRoot)
+			return 1
+		}
+	}
+	for _, agentRoot := range pkg.AgentRoots() {
+		if st, err := os.Stat(agentRoot); err != nil || !st.IsDir() {
+			fmt.Fprintf(os.Stderr, "missing agent root: %s\n", agentRoot)
 			return 1
 		}
 	}
@@ -448,9 +480,6 @@ func pluginDoctorCommand(args []string) int {
 			return 1
 		}
 	}
-	for _, warning := range warnings {
-		fmt.Println("warning:", warning)
-	}
 	workspaceRoot, _ := os.Getwd()
 	cfg, _ := config.LoadForRootReadOnly(workspaceRoot)
 	runtimeOptions := hook.RuntimeOptions{}
@@ -469,11 +498,7 @@ func pluginDoctorCommand(args []string) int {
 	return 0
 }
 
-// checkRuntimeCommand verifies a Manifest v2 runtime command resolves to
-// something runnable. ${REASONIX_PLUGIN_ROOT} expands to the installed root;
-// other relative path forms resolve against the plugin root. Bare executable
-// names are looked up on PATH (a miss is a warning, not a failure — PATH
-// varies by environment).
+// Bare-name lookup failures remain warnings because PATH varies by environment.
 func checkRuntimeCommand(rt *pluginpkg.RuntimeSpec, root string) error {
 	expanded := pluginpkg.ExpandRuntimeCommand(rt.Command, root)
 	pathForm := filepath.IsAbs(expanded) || strings.ContainsRune(expanded, '/') || strings.ContainsRune(expanded, filepath.Separator)
@@ -489,6 +514,9 @@ func checkRuntimeCommand(rt *pluginpkg.RuntimeSpec, root string) error {
 	info, err := os.Stat(expanded)
 	if err != nil || info.IsDir() {
 		return fmt.Errorf("runtime command not found: %s", expanded)
+	}
+	if _, err := exec.LookPath(expanded); err != nil {
+		return fmt.Errorf("runtime command not executable: %s: %w", expanded, err)
 	}
 	return nil
 }

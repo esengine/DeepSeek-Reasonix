@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -30,6 +31,11 @@ func (s *Server) preset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) registerModelRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /model", s.model)
+	mux.HandleFunc("POST /default-model", s.setDefaultModel)
+}
+
 func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Ref string `json:"ref"`
@@ -38,44 +44,58 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 		missingField(w, "ref")
 		return
 	}
-	ref := strings.TrimSpace(body.Ref)
-	if err := s.switchModel(r.Context(), ref); err != nil {
+	if err := s.switchModelRequested(r.Context(), strings.TrimSpace(body.Ref)); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
-	}
-	// A pane resolving through the hub's resolver takes its default from there;
-	// this machine's default_model is one it never reads.
-	if s.resolver == nil {
-		// The switch only rebuilt the running controller. Without this the next
-		// launch boots from default_model and lands back on whatever was there
-		// before, which reads as the choice not having been saved at all — the CLI
-		// and the old desktop have both persisted it since they had a picker.
-		persistDefaultModel(ref, s.ctl().ProviderCatalog())
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// persistDefaultModel records the choice in the user config. A refusal is worth
-// a log and nothing more: the live switch already succeeded, and failing the
-// request would say the model did not change when it did.
-func persistDefaultModel(ref string, catalog []provider.Descriptor) {
-	path := config.UserConfigPath()
-	if path == "" {
+// setDefaultModel records the model new sessions start on in this machine's user
+// config and leaves the session as it is. A pane resolving through a broker
+// takes its default from the home machine, so a write here would land in a file
+// that pane never reads.
+func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Ref string `json:"ref"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Ref) == "" {
+		missingField(w, "ref")
 		return
 	}
-	// Serialize against other in-process editors so concurrent writers do not
-	// drop each other's fields.
+	if s.resolver != nil {
+		refuse(w, http.StatusConflict, "settings.default_model_brokered", "this pane's default model belongs to the machine its models come from", nil)
+		return
+	}
+	ref := strings.TrimSpace(body.Ref)
+	catalog := s.ctl().ProviderCatalog()
+	if !config.LoadForEdit(config.UserConfigPath()).ModelRefSelectable(ref, catalog) {
+		refuse(w, http.StatusBadRequest, "settings.unknown_model", "no configured model matches that reference", map[string]any{"model": ref})
+		return
+	}
+	if err := persistDefaultModel(ref, catalog); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// persistDefaultModel records the choice in the user config.
+func persistDefaultModel(ref string, catalog []provider.Descriptor) error {
+	path := config.UserConfigPath()
+	if path == "" {
+		return errNoUserConfig
+	}
 	unlock := config.LockUserConfigEdits()
 	defer unlock()
 	edit := config.LoadForEdit(path)
 	if err := edit.SetDefaultModel(ref, catalog); err != nil {
-		slog.Warn("serve: persist default model", "ref", ref, "err", err)
-		return
+		return err
 	}
-	if err := edit.SaveTo(path); err != nil {
-		slog.Warn("serve: save default model", "ref", ref, "path", path, "err", err)
-	}
+	return edit.SaveTo(path)
 }
+
+var errNoUserConfig = errors.New("no user configuration path")
 
 // autoApproveTools toggles YOLO/full-access tool auto-approval.
 func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
@@ -199,22 +219,20 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	if u := s.ctl().LastUsage(); u != nil {
 		sess["lastUsage"] = u
 	}
-	if cfg, err := config.Load(); err == nil {
-		if entry, ok := cfg.ResolveModel(currentModelRef(s.ctl())); ok {
-			sess["effort"] = entry.Effort
-			sess["modelRef"] = entry.Name + "/" + entry.Model
-			if label := strings.TrimSpace(entry.DisplayName); label != "" {
-				sess["providerDisplayName"] = label
-			}
-			// Whether this model reads images at all. A composer that cannot ask
-			// lets the user paste a screenshot into a text-only model and watch
-			// nothing happen.
-			sess["vision"] = config.EffectiveVision(entry)
-			// And whether that false is an answer or a silence: a relay forwards
-			// models nothing here has a label for, and telling its user the model
-			// cannot read images states a limitation that was never established.
-			sess["visionDeclared"] = config.VisionDeclared(entry)
+	if face, ok := s.ctl().ModelFace(); ok {
+		sess["effort"] = face.Effort
+		sess["modelRef"] = face.Ref
+		if label := providerLabel(face.Ref); label != "" {
+			sess["providerDisplayName"] = label
 		}
+		// Whether this model reads images at all. A composer that cannot ask
+		// lets the user paste a screenshot into a text-only model and watch
+		// nothing happen.
+		sess["vision"] = face.Vision
+		// And whether that false is an answer or a silence: a relay forwards
+		// models nothing here has a label for, and telling its user the model
+		// cannot read images states a limitation that was never established.
+		sess["visionDeclared"] = face.VisionDeclared
 	}
 	// Only a model that declares modes lists any, which is what keeps the
 	// switch off every other model's effort menu.
@@ -256,11 +274,19 @@ type modelEntry struct {
 	Effort        string      `json:"effort,omitempty"`
 	ContextWindow int         `json:"contextWindow,omitempty"`
 	Price         *modelPrice `json:"price,omitempty"`
+	// ForcesThinking tells frontends that even the lowest effort still reasons.
+	ForcesThinking bool `json:"forcesThinking,omitempty"`
 }
 
 type modelRoute struct {
 	key  string
 	solo bool
+}
+
+// modelRouteKey names where a model is reached: endpoint plus credential slot.
+// Two accounts at one endpoint are two routes.
+func modelRouteKey(p *config.ProviderEntry, model string) string {
+	return strings.ToLower(strings.TrimRight(p.BaseURL, "/")) + "\x00" + strings.TrimSpace(p.APIKeyEnv) + "\x00" + model
 }
 
 // collapseModelRoutes drops entries naming the same model at the same endpoint.
@@ -306,4 +332,14 @@ func betterModelRoute(a modelEntry, ar modelRoute, b modelEntry, br modelRoute) 
 type decisionViewer interface {
 	PlanPhase() planmode.Phase
 	Decisions() []control.Decision
+}
+
+// providerLabel reads the label live from the user's file: a rename rebuilds
+// nothing, so the build's snapshot of the entry cannot carry it.
+func providerLabel(ref string) string {
+	name, _, _ := strings.Cut(ref, "/")
+	if p, ok := config.LoadForEdit(config.UserConfigPath()).Provider(name); ok {
+		return strings.TrimSpace(p.DisplayName)
+	}
+	return ""
 }

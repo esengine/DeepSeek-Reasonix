@@ -12,6 +12,7 @@ import (
 	"time"
 
 	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/pluginpkg"
@@ -150,6 +151,7 @@ func (c *collector) extensions() error {
 		if !c.withSecrets {
 			entry.Env, entry.Headers = stripSecrets(entry.Name, entry.Env, entry.Headers)
 			entry.URL = stripURLSecrets(entry.URL)
+			entry.Args = secrets.RedactArgs(entry.Args)
 		}
 		raw, err := encodeTOML(entry)
 		if err != nil {

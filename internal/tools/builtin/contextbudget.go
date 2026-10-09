@@ -11,15 +11,14 @@ import (
 func init() { tool.RegisterBuiltin(contextBudget{}) }
 
 // contextBudget answers "can I afford this?" before the model commits to work
-// whose output it cannot finish reading. The host volunteers the same figure at
-// two thresholds; this tool is the pull side, for the decision that arrives
-// between them.
+// whose output it cannot finish reading. The figure is pull-only: the host never
+// appends it to a turn or raises a notice about it.
 type contextBudget struct{}
 
 func (contextBudget) Name() string { return "context_budget" }
 
 func (contextBudget) Description() string {
-	return "Report how much context room is left before this conversation is automatically compacted. Call it before committing to work whose output you may not be able to finish reading — a broad search, a large file, a long build log — so you can narrow the command instead of spending the rest of the window discovering it was too big. `tokens_remaining` counts down to the compaction trigger, not to the physical window, because the fold is what you can still act ahead of."
+	return "Report how much context room is left before this conversation is automatically compacted. Nothing reports it unprompted: check it at the start of a long task, before a large change, and before output you may not finish reading (a broad search, a large file, a long build log), so you can narrow the command. `tokens_remaining` counts down to the compaction trigger, not the physical window."
 }
 
 func (contextBudget) Schema() json.RawMessage {

@@ -79,7 +79,7 @@ describe("market list", () => {
     await userEvent.tab();
     expect(document.activeElement).toBe(screen.getByRole("searchbox"));
     expect(port.marketList).toHaveBeenCalledTimes(3);
-    expect(vi.mocked(port.marketList).mock.calls[2]).toEqual(vi.mocked(port.marketList).mock.calls[1]);
+    expect(vi.mocked(port.marketList).mock.calls[2]).toEqual([{ ...vi.mocked(port.marketList).mock.calls[1][0], refresh: true }]);
     expect(vi.mocked(port.marketList).mock.calls[2]?.[0]).toMatchObject({ q: "kit", pinned: true, offset: 0 });
     expect(screen.queryByText("无法读取社区市场")).toBeNull();
   });
@@ -88,6 +88,7 @@ describe("market list", () => {
     const port = new MockPort() as unknown as AgentPort;
     let finish!: (value: MarketDetail) => void;
     port.marketList = async () => ({ packages: [row("a/kit", true)], limit: 24, offset: 0 });
+    port.marketMyVote = async () => ({ signedIn: false, value: 0 });
     port.marketDetail = vi.fn()
       .mockRejectedValueOnce(new Error("offline"))
       .mockImplementationOnce(() => new Promise<MarketDetail>((resolve) => { finish = resolve; }));
@@ -110,7 +111,7 @@ describe("market list", () => {
     expect(document.activeElement).toBe(detail);
     await userEvent.tab();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "返回列表" }));
-    expect(port.marketDetail).toHaveBeenNthCalledWith(2, "a/kit");
+    expect(port.marketDetail).toHaveBeenNthCalledWith(2, "a/kit", { refresh: true });
     expect(screen.queryByText("无法读取 a/kit")).toBeNull();
     expect(plan).not.toHaveBeenCalled();
   });

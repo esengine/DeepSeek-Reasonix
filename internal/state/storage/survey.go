@@ -272,7 +272,7 @@ func LeftBehind() (dir string, names []string) {
 		return "", nil
 	}
 	for _, name := range config.StateRootEntriesEarlyMovesLeft {
-		if isDirAt(filepath.Join(home, name)) && !isDirAt(filepath.Join(state, name)) {
+		if _, err := os.Lstat(filepath.Join(home, name)); err == nil {
 			names = append(names, name)
 		}
 	}

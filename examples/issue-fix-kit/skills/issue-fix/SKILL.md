@@ -1,8 +1,8 @@
 ---
 name: issue-fix
 description: Reproduce a repository issue, make the smallest correct fix, and draft a pull request from observed evidence.
-owner: @esengine
-backup: @SivanCola
+owner: "@esengine"
+backup: "@SivanCola"
 status: active
 reviewed: 2026-10-01
 ---

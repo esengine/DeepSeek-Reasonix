@@ -26,13 +26,48 @@ func reconcileSessionDir(dir string, cleanup func(CleanupPendingInfo) error) err
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
+	now := time.Now()
 	for _, path := range empty {
-		info := CleanupPendingInfo{SessionPath: path, Meta: CleanupPendingMeta{Operation: "delete"}}
-		if err := cleanup(info); err != nil {
+		if err := reclaimEmptySession(path, now, cleanup); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", path, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// reclaimEmptySession deletes under the removal guard and re-proves the
+// candidate once it is held: the listing is a snapshot, and a session opened
+// since then owns the lease. A busy session is skipped, not an error.
+func reclaimEmptySession(path string, now time.Time, cleanup func(CleanupPendingInfo) error) error {
+	guard, err := TryAcquireSessionRemovalGuard(path)
+	if err != nil {
+		var held *SessionLeaseError
+		if errors.As(err, &held) {
+			return nil
+		}
+		return err
+	}
+	if !stillReclaimableEmpty(path, now, EmptySessionGracePeriod) {
+		guard.Release()
+		return nil
+	}
+	info := CleanupPendingInfo{SessionPath: path, Meta: CleanupPendingMeta{Operation: "delete"}}
+	if err := cleanup(info); err != nil {
+		guard.Release()
+		return err
+	}
+	return guard.RemoveSidecarsAndRelease()
+}
+
+func stillReclaimableEmpty(path string, now time.Time, grace time.Duration) bool {
+	if IsCleanupPending(path) {
+		return false
+	}
+	mod := SessionContentModTime(path)
+	if mod.IsZero() || now.Sub(mod) < grace {
+		return false
+	}
+	return !sessionMetaCountsTurns(path) && sessionHoldsNoUserMessage(path)
 }
 
 // EmptySessionGracePeriod is how long a transcript holding no user message must
@@ -63,14 +98,7 @@ func ReclaimableEmptySessions(dir string, now time.Time, grace time.Duration) ([
 			continue
 		}
 		path := filepath.Join(dir, name)
-		if IsCleanupPending(path) || SessionLeaseHeld(path) {
-			continue
-		}
-		mod := SessionContentModTime(path)
-		if mod.IsZero() || now.Sub(mod) < grace {
-			continue
-		}
-		if sessionMetaCountsTurns(path) || !sessionHoldsNoUserMessage(path) {
+		if SessionLeaseHeld(path) || !stillReclaimableEmpty(path, now, grace) {
 			continue
 		}
 		out = append(out, path)

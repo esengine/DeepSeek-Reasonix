@@ -170,9 +170,9 @@ export class MockHub implements HubPort {
           i === 0
             ? [
                 { path: "/sessions/mock.jsonl", name: "mock", title: "并行会话演示", turns: 3, runtimeId: open.get("/sessions/mock.jsonl") },
-                { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12 },
+                { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12, runtimeId: open.get("/sessions/older.jsonl") },
               ]
-            : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5 }],
+            : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5, runtimeId: open.get("/sessions/site.jsonl") }],
       })),
     );
   }
@@ -181,6 +181,8 @@ export class MockHub implements HubPort {
     if (!this.roots.includes(path)) this.roots.push(path);
     return Promise.resolve<TreeWorkspace>({ root: path, name: path.split("/").pop() ?? path, remembered: true, sessions: [] });
   }
+
+  async revealWorkspace() {}
 
   removeWorkspace(path: string) {
     const at = this.roots.indexOf(path);
@@ -227,7 +229,11 @@ export class MockHub implements HubPort {
   }
 
   importLegacySessions(_path: string, _workspace: string) {
-    return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0 });
+    return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0, recognised: true });
+  }
+
+  hostCapabilities() {
+    return Promise.resolve({ pickFolder: true, addWorkspace: true });
   }
 
   pickFolder() {
@@ -243,7 +249,7 @@ export class MockHub implements HubPort {
     ],
     devices: [],
     cloudDevices: [],
-    cloudRemote: { online: false },
+    cloudRemote: { online: false, reason: "signed_out" },
   };
 
   shareStatus() {
@@ -251,7 +257,12 @@ export class MockHub implements HubPort {
   }
 
   openShare(ip: string) {
-    this.share = { ...this.share, open: true, origin: `http://${ip}:41234`, devices: [] };
+    this.share = { ...this.share, open: true, origin: `http://${ip}:${this.share.port ?? 41234}`, devices: [] };
+    return Promise.resolve({ ...this.share });
+  }
+
+  setSharePort(port: number) {
+    this.share = { ...this.share, port: port || undefined };
     return Promise.resolve({ ...this.share });
   }
 

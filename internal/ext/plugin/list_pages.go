@@ -47,10 +47,10 @@ func listAllPages[T any](ctx context.Context, c *Client, method, field string) (
 			return all, nil
 		}
 		if seen[next] {
-			return nil, fmt.Errorf("plugin %q: %s returned cursor %q twice", c.name, method, next)
+			return nil, &catalogPageError{}
 		}
 		seen[next] = true
 		cursor = next
 	}
-	return nil, fmt.Errorf("plugin %q: %s did not finish within %d pages", c.name, method, maxListPages)
+	return nil, &catalogPageError{limit: maxListPages}
 }

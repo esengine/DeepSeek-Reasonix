@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/provider"
 )
 
 // hostGrants are the surfaces a host opens on behalf of its one local client.
@@ -101,10 +102,14 @@ type providerView struct {
 	Preset bool `json:"preset"`
 	// The three no probe can answer: a wrong window moves compaction to the
 	// wrong moment, and a relay without its headers refuses every request.
-	ContextWindow   int               `json:"contextWindow,omitempty"`
-	MaxOutputTokens int               `json:"maxOutputTokens,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	ExtraBody       map[string]any    `json:"extraBody,omitempty"`
+	ContextWindow   int `json:"contextWindow,omitempty"`
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	// Stored idle_timeout_seconds; zero is "not set", the built-in default.
+	IdleTimeoutSeconds int `json:"idleTimeoutSeconds,omitempty"`
+	// What a source without one waits, so a form can name the default.
+	IdleTimeoutDefault int               `json:"idleTimeoutDefault"`
+	Headers            map[string]string `json:"headers,omitempty"`
+	ExtraBody          map[string]any    `json:"extraBody,omitempty"`
 	// Which request shape controls thinking here, as declared. Empty is "not
 	// declared", which is a different answer from "none" and the reason the
 	// effort ladder can come out empty on a relay.
@@ -164,6 +169,8 @@ func (s *Server) providers(w http.ResponseWriter, _ *http.Request) {
 			InheritedLimits:    inheritedLimitsOf(p),
 			ContextWindow:      p.ContextWindow,
 			MaxOutputTokens:    p.MaxOutputTokens,
+			IdleTimeoutSeconds: p.IdleTimeoutSeconds,
+			IdleTimeoutDefault: int(provider.StreamIdleTimeout / time.Second),
 			Headers:            p.Headers,
 			ExtraBody:          p.ExtraBody,
 		})
@@ -222,11 +229,12 @@ func (s *Server) probeProvider(w http.ResponseWriter, r *http.Request) {
 		Direct:  direct,
 	})
 	if err != nil {
-		writeProbeFailure(w, err)
+		writeProbeFailure(w, err, body.APIKey)
 		return
 	}
 	writeJSON(w, struct {
 		Kind       string   `json:"kind"`
+		BaseURL    string   `json:"baseUrl"`
 		Kinds      []string `json:"kinds"`
 		AuthHeader bool     `json:"authHeader"`
 		Models     []string `json:"models"`
@@ -238,6 +246,7 @@ func (s *Server) probeProvider(w http.ResponseWriter, r *http.Request) {
 		NoProxy    bool     `json:"noProxy"`
 	}{
 		Kind:       got.Kind,
+		BaseURL:    got.BaseURL,
 		Kinds:      nonNilStrings(got.Kinds),
 		AuthHeader: got.AuthHeader,
 		Models:     nonNilStrings(got.Models),
@@ -396,13 +405,23 @@ func (s *Server) removeProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	// With nothing left there is no model to move to; the window finds the
 	// empty config and asks for a connection, as it does on a first launch.
-	if inUse && cfg.DefaultModel != "" {
-		if err := s.switchModel(r.Context(), cfg.DefaultModel); err != nil {
+	if target := removalSuccessor(cfg); inUse && target != "" {
+		if err := s.switchModel(r.Context(), target); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// removalSuccessor is where a conversation on a removed provider goes: the saved
+// default, or what a window would open on when that default names nothing.
+func removalSuccessor(cfg *config.Config) string {
+	target := cfg.DefaultModel
+	if _, found := cfg.ResolveModel(target); !found && target != "" {
+		target, _, _ = cfg.ResolveStartupChatModel()
+	}
+	return target
 }
 
 // providerEntryFrom validates what the panel sent and builds the config entry.
@@ -488,38 +507,52 @@ const (
 	codeProbePathNotFound    = "provider.probe.path_not_found"
 	codeProbeNoChatModels    = "provider.probe.no_chat_models"
 	codeProbeUpstreamError   = "provider.probe.upstream_error"
+	codeProbeTimeout         = "provider.probe.timeout"
 	codeProbeUnreachable     = "provider.probe.unreachable"
 	codeProbeNotCompatible   = "provider.probe.not_compatible"
+	codeProbeFailed          = "provider.probe.failed"
 )
 
-// writeProbeFailure sends the diagnosis out under its own code. Spelled as a
-// switch rather than by building the code from the reason: the parity guard
-// reads these call sites, and a concatenated code is one it cannot check.
-func writeProbeFailure(w http.ResponseWriter, err error) {
+// probeReasonRefusal is the one place a probe identity becomes a status and a dotted
+// code, shared by the refusal the add flow gets and the finding a check carries.
+func probeReasonRefusal(reason catalog.ProbeReason) (status int, code string) {
+	switch reason {
+	case catalog.ProbeAddressMissing:
+		return http.StatusBadRequest, codeProbeAddressMissing
+	case catalog.ProbeUnauthorized:
+		return http.StatusUnauthorized, codeProbeUnauthorized
+	case catalog.ProbePaymentRequired:
+		return http.StatusPaymentRequired, codeProbePaymentRequired
+	case catalog.ProbeRateLimited:
+		return http.StatusTooManyRequests, codeProbeRateLimited
+	case catalog.ProbePathNotFound:
+		return http.StatusNotFound, codeProbePathNotFound
+	case catalog.ProbeNoChatModels:
+		return http.StatusUnprocessableEntity, codeProbeNoChatModels
+	case catalog.ProbeUpstreamError:
+		return http.StatusBadGateway, codeProbeUpstreamError
+	case catalog.ProbeTimeout:
+		return http.StatusGatewayTimeout, codeProbeTimeout
+	case catalog.ProbeUnreachable:
+		return http.StatusBadGateway, codeProbeUnreachable
+	default:
+		return http.StatusBadGateway, codeProbeNotCompatible
+	}
+}
+
+// writeProbeFailure sends the diagnosis out under its own code. What the
+// endpoint said reaches the message only through endpointDetail: its body can
+// echo the request, and this route receives the key typed into the draft.
+func writeProbeFailure(w http.ResponseWriter, err error, apiKey string) {
 	var probe *catalog.ProbeError
 	if !errors.As(err, &probe) {
-		writeErr(w, http.StatusBadGateway, err)
+		refuse(w, http.StatusInternalServerError, codeProbeFailed, "provider probe failed", nil)
 		return
 	}
-	msg, params := probe.Error(), probe.Params
-	switch probe.Reason {
-	case catalog.ProbeAddressMissing:
-		refuse(w, http.StatusBadRequest, codeProbeAddressMissing, msg, params)
-	case catalog.ProbeUnauthorized:
-		refuse(w, http.StatusUnauthorized, codeProbeUnauthorized, msg, params)
-	case catalog.ProbePaymentRequired:
-		refuse(w, http.StatusPaymentRequired, codeProbePaymentRequired, msg, params)
-	case catalog.ProbeRateLimited:
-		refuse(w, http.StatusTooManyRequests, codeProbeRateLimited, msg, params)
-	case catalog.ProbePathNotFound:
-		refuse(w, http.StatusNotFound, codeProbePathNotFound, msg, params)
-	case catalog.ProbeNoChatModels:
-		refuse(w, http.StatusUnprocessableEntity, codeProbeNoChatModels, msg, params)
-	case catalog.ProbeUpstreamError:
-		refuse(w, http.StatusBadGateway, codeProbeUpstreamError, msg, params)
-	case catalog.ProbeUnreachable:
-		refuse(w, http.StatusBadGateway, codeProbeUnreachable, msg, params)
-	default:
-		refuse(w, http.StatusBadGateway, codeProbeNotCompatible, msg, params)
+	status, code := probeReasonRefusal(probe.Reason)
+	message := "probe: " + string(probe.Reason)
+	if detail := endpointDetail(probe.Body, func() string { return apiKey }); detail != "" {
+		message += ": " + detail
 	}
+	refuse(w, status, code, message, probe.Params)
 }

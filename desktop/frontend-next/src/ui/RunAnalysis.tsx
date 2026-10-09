@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import { decimals, seconds } from "../i18n/format";
 import type { TrajRow } from "../state/trajectory";
@@ -20,11 +20,33 @@ const labelOf = (row: TrajRow) => {
   return spanText(row.payload) || row.kind;
 };
 
+const scrollParent = (el: HTMLElement): HTMLElement | null => {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (/auto|scroll/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
+};
+
 const percentile = (values: number[], p: number) => {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)];
 };
+
+function Inspect({ row, index }: { row: TrajRow; index: number }) {
+  return (
+    <section className="run-inspect" data-c={bucketOf(row)} data-inspect>
+      <header><b>{index >= 0 ? `R${index + 1} · ` : ""}{labelOf(row)}</b><span>+{decimals(row.at, 2)}s</span></header>
+      <div className="run-inspect-facts">
+        <span><small>{t("类型")}</small><b>{row.kind}</b></span>
+        <span><small>{t("耗时")}</small><b>{seconds((row.dur ?? 0) * 1000, 2)}</b></span>
+        {row.tool && <span><small>{t("工具")}</small><b>{row.tool}</b></span>}
+      </div>
+      <p>{spanText(row.payload)}</p>
+      {row.subs.map((s, i) => <p key={i}>{spanText(s)}</p>)}
+    </section>
+  );
+}
 
 /** A readable first stop for a run. Raw trajectory remains available for
  *  diagnosis, but this page answers the questions people ask before reading a
@@ -51,9 +73,25 @@ export function RunAnalysis({ rows, availability, onSave }: {
   const recoveries = rows.filter(isRecovery);
   const signals = rows.filter((r) => !r.dur && !r.tool && r.kind !== "event").slice(0, 8);
   const first = activities.length ? Math.min(...activities.map((r) => r.at)) : 0;
-  const [selected, setSelected] = useState<number | null>(null);
+  const [pick, setPick] = useState<{ seq: number; from: "row" | "signal" } | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const picked = rows.find((r) => r.seq === selected) ?? null;
+  const picked = rows.find((r) => r.seq === pick?.seq) ?? null;
+  const selected = pick?.from === "row" ? pick.seq : null;
+  const root = useRef<HTMLDivElement>(null);
+  const clickedTop = useRef<{ el: HTMLElement; top: number } | null>(null);
+  const toggle = (seq: number, from: "row" | "signal", el: HTMLElement) => {
+    clickedTop.current = { el, top: el.getBoundingClientRect().top };
+    setPick((cur) => (cur?.seq === seq && cur.from === from ? null : { seq, from }));
+  };
+  useLayoutEffect(() => {
+    const was = clickedTop.current;
+    clickedTop.current = null;
+    const box = root.current;
+    if (!was || !box) return;
+    const scroller = scrollParent(box);
+    if (was.el.isConnected && scroller) scroller.scrollTop += was.el.getBoundingClientRect().top - was.top;
+    box.querySelector("[data-inspect]")?.scrollIntoView?.({ block: "nearest" });
+  }, [pick]);
 
   if (rows.length === 0) {
     return (
@@ -69,7 +107,7 @@ export function RunAnalysis({ rows, availability, onSave }: {
   ];
 
   return (
-    <div className="run-analysis">
+    <div className="run-analysis" ref={root}>
       <header className="run-analysis-head">
         <span>
           <b>{t("运行分析")}</b>
@@ -118,11 +156,12 @@ export function RunAnalysis({ rows, availability, onSave }: {
           <div className="run-section-head"><b>{t("信号轨")}</b><span>{t("与下方共用时间轴")}</span></div>
           <div className="run-signal-line">
             {signals.map((row) => (
-              <button data-action="analysis.signal" data-target={String(row.seq)} key={row.seq} style={{ left: `${(row.at / Math.max(span, 1)) * 100}%` }} onClick={() => setSelected(row.seq)} title={spanText(row.payload)}>
+              <button data-action="analysis.signal" data-target={String(row.seq)} key={row.seq} style={{ left: `${(row.at / Math.max(span, 1)) * 100}%` }} onClick={(e) => toggle(row.seq, "signal", e.currentTarget)} title={spanText(row.payload)}>
                 <i data-c={bucketOf(row)} />
               </button>
             ))}
           </div>
+          {picked && pick?.from === "signal" && <Inspect row={picked} index={activities.findIndex((r) => r.seq === picked.seq)} />}
         </section>
       )}
 
@@ -136,30 +175,18 @@ export function RunAnalysis({ rows, availability, onSave }: {
             const cat = row.tool ? categoryOf(row.tool) : bucket;
             return (
               <li key={row.seq} data-on={selected === row.seq ? "" : undefined}>
-                <button data-action="analysis.row" data-target={String(row.seq)} onClick={() => setSelected(row.seq)} aria-pressed={selected === row.seq}>
+                <button data-action="analysis.row" data-target={String(row.seq)} onClick={(e) => toggle(row.seq, "row", e.currentTarget)} aria-expanded={selected === row.seq}>
                   <span className="run-round-id">R{index + 1}</span>
                   <span className="run-round-track"><i data-c={cat} style={{ left: `${start}%`, width: `${width}%` }} /></span>
                   <span className="run-round-copy"><b>{labelOf(row)}</b><small>{seconds((row.dur ?? 0) * 1000, 1)}</small></span>
                   <span className="run-round-kind" data-c={bucket}>{row.kind.replaceAll("_", " ")}</span>
                 </button>
+                {selected === row.seq && <Inspect row={row} index={index} />}
               </li>
             );
           })}
         </ol>
       </section>
-
-      {picked && (
-        <section className="run-inspect" data-c={bucketOf(picked)}>
-          <header><b>R{activities.findIndex((r) => r.seq === picked.seq) + 1} · {labelOf(picked)}</b><span>+{decimals(picked.at, 2)}s</span></header>
-          <div className="run-inspect-facts">
-            <span><small>{t("类型")}</small><b>{picked.kind}</b></span>
-            <span><small>{t("耗时")}</small><b>{seconds((picked.dur ?? 0) * 1000, 2)}</b></span>
-            {picked.tool && <span><small>{t("工具")}</small><b>{picked.tool}</b></span>}
-          </div>
-          <p>{spanText(picked.payload)}</p>
-          {picked.subs.map((s, i) => <p key={i}>{spanText(s)}</p>)}
-        </section>
-      )}
     </div>
   );
 }

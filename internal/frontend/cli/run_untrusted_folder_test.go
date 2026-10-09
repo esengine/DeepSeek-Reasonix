@@ -76,15 +76,15 @@ func (r *untrustedFolderRun) modelSaw() string {
 
 // In a folder nobody trusted, a headless run that could not write says so on
 // stderr with the refusal's identity and the remedy, tells the model the same
-// cause, and exits 3 under --fail-on-unverified; trusting the folder lets the
+// cause, and exits 4 (3 under --fail-on-unverified); trusting the folder lets the
 // identical command write.
 func TestRunInUntrustedFolderSaysWhyNothingWasDone(t *testing.T) {
 	r := newUntrustedFolderRun(t)
 
 	var code int
 	_, stderr := captureCLIOutput(t, func() { code = Run([]string{"run", "write notes.md"}, "test") })
-	if code != 0 || r.wrote() {
-		t.Fatalf("exit %d, wrote %v: a plain run keeps exit 0 and the policy keeps the write out\n%s", code, r.wrote(), stderr)
+	if code != runExitUntrustedFolder || r.wrote() {
+		t.Fatalf("exit %d, wrote %v: a plain run exits %d and the policy keeps the write out\n%s", code, r.wrote(), runExitUntrustedFolder, stderr)
 	}
 	for _, want := range []string{"refused 1 tool call(s): write_file", "permission.untrusted_folder", "reasonix trust --dir '"} {
 		if !strings.Contains(stderr, want) {

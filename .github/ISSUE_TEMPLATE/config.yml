@@ -6,3 +6,9 @@ contact_links:
   - name: Questions & discussions
     url: https://github.com/esengine/DeepSeek-Reasonix/discussions
     about: For usage questions, ideas, and general discussion — please use Discussions instead of opening an issue.
+  - name: Discord
+    url: https://discord.gg/XF78rEME2D
+    about: Bilingual community chat for setup help, workflow showcases, and feature ideas.
+  - name: QQ group (DeepSeek-Reasonix官方群, 1093562660)
+    url: https://qm.qq.com/q/i59b0z2R8s
+    about: Chinese-language community chat for setup help and everyday questions.

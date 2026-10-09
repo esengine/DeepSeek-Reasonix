@@ -151,7 +151,11 @@ func (t *Tool) applyLinkSkill(req request, act *action) error {
 			return newErr(ErrAlreadyExists, "skill %q already exists at %s", act.skill.Name, conflict)
 		}
 	}
-	if !isLinkTargetSafe(act.skill.SourcePath, t.home, t.root) {
+	source, err := filepath.EvalSymlinks(act.skill.SourcePath)
+	if err != nil {
+		return newErr(ErrSourceUnreadable, "%v", err)
+	}
+	if !isLinkTargetSafe(source, t.home, t.root) {
 		act.RiskLevel = RiskHigh
 		act.RiskReasons = append(act.RiskReasons, "link target is an absolute path outside the project or home root")
 		return newErr(ErrUnsafeLinkTarget, "skill %q source %s is outside %s and %s", act.skill.Name, act.skill.SourcePath, t.root, t.home)
@@ -159,7 +163,7 @@ func (t *Tool) applyLinkSkill(req request, act *action) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	if err := os.Symlink(act.skill.SourcePath, target); err != nil {
+	if err := os.Symlink(source, target); err != nil {
 		return err
 	}
 	act.Target = target
@@ -167,14 +171,9 @@ func (t *Tool) applyLinkSkill(req request, act *action) error {
 	return t.verifySkill(act.Scope, act.skill.Name, act)
 }
 
-// isLinkTargetSafe reports whether a symlink source is allowed. The link
-// target is safe when:
-//   - it is a relative path (we never follow the parent of a relative link),
-//   - or its absolute form is contained within the user's home or the
-//     project root.
-//
-// Absolute paths outside both scopes are rejected with ErrUnsafeLinkTarget
-// so a SKILL.md that points at /etc/passwd does not silently succeed.
+// isLinkTargetSafe allows relative sources or sources within home/project roots.
+// Existing directory aliases are resolved on both sides of the comparison;
+// unresolved sources retain the lexical comparison used for planning.
 func isLinkTargetSafe(source, home, projectRoot string) bool {
 	if source == "" {
 		return false
@@ -183,11 +182,18 @@ func isLinkTargetSafe(source, home, projectRoot string) bool {
 		return true
 	}
 	clean := filepath.Clean(source)
+	resolved, resolveErr := filepath.EvalSymlinks(clean)
+	if resolveErr == nil {
+		clean = resolved
+	}
 	for _, root := range []string{home, projectRoot} {
 		if root == "" {
 			continue
 		}
 		base := filepath.Clean(root)
+		if resolved, err := filepath.EvalSymlinks(base); resolveErr == nil && err == nil {
+			base = resolved
+		}
 		if clean == base {
 			return true
 		}

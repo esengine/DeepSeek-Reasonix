@@ -15,22 +15,28 @@ const CATEGORY_NOTE: Record<BackupCategory, string> = {
 // Shown only to a signed-in account: a backup lives in the account, so there
 // is nothing to offer before one exists.
 export function Backup({ port }: { port: AgentPort }) {
+  const [connection, setConnection] = useState({ port, generation: 0 });
+  if (connection.port !== port) setConnection({ port, generation: connection.generation + 1 });
+  return <BackupInput key={connection.generation} port={port} />;
+}
+
+function BackupInput({ port }: { port: AgentPort }) {
   const [catalog, setCatalog] = useState<BackupCatalog | null>(null);
   const [error, setError] = useState("");
-  const [chosen, setChosen] = useState<Set<BackupCategory>>(new Set());
+  const [chosen, setChosen] = useState<Set<BackupCategory> | null>(null);
   const [label, setLabel] = useState("");
   const [pass, setPass] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
-  const [dropping, setDropping] = useState("");
+  const [dropping, setDropping] = useState(() => new Map<string, "confirm" | "pending">());
   const [restoring, setRestoring] = useState<BackupEntry | null>(null);
 
   const load = useCallback(async () => {
     try {
       const c = await port.backups();
       setCatalog(c);
-      setChosen((prev) => (prev.size ? prev : new Set(c.categories.filter((x) => x.defaultOn).map((x) => x.id))));
+      setChosen((prev) => prev ?? new Set(c.categories.filter((x) => x.defaultOn).map((x) => x.id)));
       setError("");
     } catch (e) {
       setError(reason(e));
@@ -51,14 +57,22 @@ export function Backup({ port }: { port: AgentPort }) {
 
   const min = catalog?.minPassphrase ?? 10;
   const mismatch = again !== "" && pass !== again;
-  const ready = chosen.size > 0 && pass.length >= min && pass === again && !busy;
+  const ready = (chosen?.size ?? 0) > 0 && pass.length >= min && pass === again && !busy;
+  const wait =
+    !chosen?.size
+      ? t("至少选择一项备份内容")
+      : pass.length < min
+        ? t("口令还差 {n} 个字符", { n: min - pass.length })
+        : again === ""
+          ? t("请再输一次口令")
+          : "";
 
   const create = async () => {
     setBusy(true);
     setNote("");
     setError("");
     try {
-      const order = (catalog?.categories ?? []).map((c) => c.id).filter((id) => chosen.has(id));
+      const order = (catalog?.categories ?? []).map((c) => c.id).filter((id) => chosen?.has(id));
       const out = await port.createBackup({ label: label.trim(), categories: order, passphrase: pass });
       setPass("");
       setAgain("");
@@ -74,16 +88,22 @@ export function Backup({ port }: { port: AgentPort }) {
   };
 
   const drop = async (id: string) => {
-    if (dropping !== id) {
-      setDropping(id);
+    if (dropping.get(id) !== "confirm") {
+      setDropping((current) => new Map([...current].filter(([, phase]) => phase === "pending")).set(id, "confirm"));
       return;
     }
-    setDropping("");
+    setDropping((current) => new Map(current).set(id, "pending"));
     try {
       await port.deleteBackup(id);
       await load();
     } catch (e) {
       setError(reason(e));
+    } finally {
+      setDropping((current) => {
+        const next = new Map(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -99,8 +119,8 @@ export function Backup({ port }: { port: AgentPort }) {
 
       <div className="bk-cats" role="group" aria-label={t("备份内容")}>
         {catalog.categories.map((c) => (
-          <label key={c.id} className="bk-cat" data-warn={c.id === "secrets" && chosen.has(c.id) ? "" : undefined}>
-            <input type="checkbox" checked={chosen.has(c.id)} onChange={() => toggle(c.id)} data-action="backup.category" data-target={c.id} />
+          <label key={c.id} className="bk-cat" data-warn={c.id === "secrets" && chosen?.has(c.id) ? "" : undefined}>
+            <input type="checkbox" checked={chosen?.has(c.id) ?? false} disabled={busy} onChange={() => toggle(c.id)} data-action="backup.category" data-target={c.id} />
             <span className="nm">{t(CATEGORY_LABEL[c.id])}</span>
             <span className="why">{t(CATEGORY_NOTE[c.id])}</span>
           </label>
@@ -110,23 +130,28 @@ export function Backup({ port }: { port: AgentPort }) {
       <div className="bk-fields">
         <label className="grow full">
           <span>{t("备注（可选）")}</span>
-          <input data-action="backup.label" value={label} maxLength={80} placeholder={t("例如：公司笔记本")} onChange={(e) => setLabel(e.target.value)} />
+          <input data-action="backup.label" value={label} disabled={busy} maxLength={80} placeholder={t("例如：公司笔记本")} onChange={(e) => setLabel(e.target.value)} />
         </label>
         <label className="grow">
           <span>{t("加密口令（至少 {n} 个字符）", { n: min })}</span>
-          <input data-action="backup.passphrase" data-target="new" type="password" autoComplete="new-password" value={pass} onChange={(e) => setPass(e.target.value)} />
+          <input data-action="backup.passphrase" data-target="new" type="password" autoComplete="new-password" value={pass} disabled={busy} onChange={(e) => setPass(e.target.value)} />
         </label>
         <label className="grow">
           <span>{t("再输一次")}</span>
-          <input data-action="backup.passphrase" data-target="again" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} />
+          <input data-action="backup.passphrase" data-target="again" type="password" autoComplete="new-password" value={again} disabled={busy} onChange={(e) => setAgain(e.target.value)} />
         </label>
       </div>
       {mismatch && <p className="acct-note" data-err="">{t("两次输入的口令不一致")}</p>}
 
       <div className="bk-acts">
-        <button className="act" data-primary data-action="backup.create" disabled={!ready} onClick={() => void create()}>
+        <button className="act" data-primary data-action="backup.create" disabled={!ready} aria-describedby={!ready && wait ? "bk-wait" : undefined} onClick={() => void create()}>
           {t(busy ? "正在加密上传…" : "备份到账号")}
         </button>
+        {!ready && !busy && wait && (
+          <span id="bk-wait" className="acct-note" aria-live="polite" data-action="backup.wait">
+            {wait}
+          </span>
+        )}
         <span className="acct-note">
           {t("已用 {n}/{max} 份", { n: catalog.backups.length, max: catalog.limits.maxCount })}
         </span>
@@ -150,15 +175,15 @@ export function Backup({ port }: { port: AgentPort }) {
               <button className="btn sm" data-action="backup.restore" data-target={b.id} onClick={() => setRestoring(b)}>
                 {t("恢复…")}
               </button>
-              <button className="btn sm" data-action="backup.delete" data-target={b.id} onClick={() => void drop(b.id)} onMouseLeave={() => setDropping("")}>
-                {t(dropping === b.id ? "确认删除" : "删除")}
+              <button className="btn sm" data-action="backup.delete" data-target={b.id} disabled={dropping.get(b.id) === "pending"} aria-busy={dropping.get(b.id) === "pending" || undefined} onClick={() => void drop(b.id)} onMouseLeave={() => setDropping((current) => current.get(b.id) === "confirm" ? new Map([...current].filter(([id]) => id !== b.id)) : current)}>
+                {t(dropping.get(b.id) === "confirm" ? "确认删除" : "删除")}
               </button>
             </li>
           ))}
         </ul>
       )}
 
-      {restoring && <BackupRestore port={port} backup={restoring} onClose={() => setRestoring(null)} />}
+      {restoring && <BackupRestore key={restoring.id} port={port} backup={restoring} onClose={() => setRestoring(null)} />}
     </div>
   );
 }

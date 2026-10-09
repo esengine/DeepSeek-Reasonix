@@ -1113,7 +1113,7 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 func newCompactionAgent(t *testing.T, d *dispatch.Dispatcher) (*mockProvider, *Agent) {
 	t.Helper()
 	mp := &mockProvider{name: "p", chunks: []provider.Chunk{
-		{Type: provider.ChunkText, Text: "SUMMARY TEXT"}, {Type: provider.ChunkDone},
+		{Type: provider.ChunkText, Text: "## Summary\nSUMMARY TEXT"}, {Type: provider.ChunkDone},
 	}}
 	sess := sessionstore.NewSession("sys")
 	big := strings.Repeat("a", 8000)
@@ -1243,7 +1243,7 @@ func TestCompactionCompleteReplace(t *testing.T) {
 			if err := json.Unmarshal(payload, &in); err != nil {
 				return protocol.InterceptResult{}, err
 			}
-			if in.Summary != "SUMMARY TEXT" {
+			if in.Summary != "## Summary\nSUMMARY TEXT" {
 				t.Errorf("complete payload summary = %q, want the produced summary", in.Summary)
 			}
 			return replaceWith(t, dispatch.CompactionCompletePayload{Summary: "EXTENSION SUMMARY"}), nil

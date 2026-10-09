@@ -572,12 +572,9 @@ type SkillFileOptions struct {
 	// ReadOnly, when true, emits frontmatter read-only: true so the profile
 	// runs against the read-only registry. Omitted/false keeps the legacy
 	// writable default for older profiles.
-	ReadOnly bool
-	Color    string // optional display tag; emitted regardless of RunAs
-	// Invocation, when "manual", keeps the written skill out of the pinned
-	// Skills index (see index.go) — invocable by name only, never
-	// model-discovered. Anything else (including empty) is the default "auto".
-	Invocation string
+	ReadOnly   bool
+	Color      string // optional display tag; emitted regardless of RunAs
+	Invocation string // "manual" hides from listings; disable-model-invocation separately gates model calls
 }
 
 // skillFileFrontmatter is the YAML shape RenderSkillFile emits. Field order is
@@ -681,8 +678,12 @@ func collapseSpaces(s string) string {
 
 // availableNames lists the discoverable skill names for an error message.
 func availableNames(store *Store) string {
-	skills := ModelInvocable(store.List())
+	invocable := ModelInvocable(store.List())
+	skills := store.PathHits().Visible(invocable)
 	if len(skills) == 0 {
+		if len(invocable) > 0 {
+			return "(none apply to the files touched so far)"
+		}
 		return "(none — no skills defined)"
 	}
 	names := make([]string, len(skills))

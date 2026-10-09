@@ -54,11 +54,16 @@ type Messages struct {
 	ReceiptChangedFmt       string // end-of-turn receipt, how many files the turn changed
 	// ReceiptGapKinds maps a completion gap kind to its short human phrase.
 	ReceiptGapKinds              map[string]string
-	NoSessionToResume            string // shown when --continue / --resume finds nothing
-	NoSessionToResumeStartingNew string // shown when --continue finds nothing and a fresh session starts
-	ResumeRequiresTTY            string // shown when --resume runs piped instead of on a terminal
-	PickSessionLabel             string // header on the --resume picker
-	AmbiguousResumeHint          string // under the sessions a --resume query matched
+	CompactionWhy                map[string]string // compaction decline/failure code -> reason; "" is the no-code decline
+	CompactionAbortedFmt         string            // card of a fold that installed nothing — %s the reason
+	NoticeCompacted              string            // /compact succeeded
+	NoticeCompactDeclinedFmt     string            // /compact declined — %s the reason
+	NoticeCompactFailedFmt       string            // /compact failed — %s the reason
+	NoSessionToResume            string            // shown when --continue / --resume finds nothing
+	NoSessionToResumeStartingNew string            // shown when --continue finds nothing and a fresh session starts
+	ResumeRequiresTTY            string            // shown when --resume runs piped instead of on a terminal
+	PickSessionLabel             string            // header on the --resume picker
+	AmbiguousResumeHint          string            // under the sessions a --resume query matched
 
 	// in-chat /resume command
 	ResumeBusy          string // shown when /resume is used mid-turn
@@ -80,12 +85,17 @@ type Messages struct {
 	ResumePickNoMatch      string // resume picker: the query matches no session
 
 	// terminal transcript rows the kernel does not word.
-	TUIDeclinedFmt      string // an approval the user refused — %s tool, %s subject
-	TUIQuestion         string // an answered question that carried no prompt
-	TUISubagentCallsFmt string // calls a sub-agent made under its task — %d count
-	TUIStallTokensFmt   string // progress watch: %d context windows (%d tokens) with nothing observable
-	TUIStallRepeating   string // progress watch: the model repeats itself
-	TUIStallIdleFmt     string // progress watch: %d tool rounds with nothing observable
+	TUIDeclinedFmt          string // an approval the user refused — %s tool, %s subject
+	NoticeUnappliedSteerFmt string // guidance that arrived too late for its turn — %s the guidance
+	NoticeExtSkippedFmt     string // an optional extension skipped, its sidecar not running — %s extension, %s point
+	NoticeInboxRecoveredFmt string // a reopened inbox came up paused with unfinished instructions — %d count
+	TUIQuestion             string // an answered question that carried no prompt
+	TUISubagentCallsFmt     string // calls a sub-agent made under its task — %d count
+	TUIChartMoreRowsFmt     string // rows of a chart table past the preview — %d count
+	TUIChartMoreColsFmt     string // columns of a chart table that did not fit — %d count
+	TUIStallTokensFmt       string // progress watch: %d context windows (%d tokens) with nothing observable
+	TUIStallRepeating       string // progress watch: the model repeats itself
+	TUIStallIdleFmt         string // progress watch: %d tool rounds with nothing observable
 
 	// chat TUI status line / approval banner.
 	ChatThinking                    string // live reasoning marker label, e.g. "thinking…"
@@ -115,7 +125,6 @@ type Messages struct {
 	ChatStatusCancellingViFmt       string // "%s stopping… (%ds)" — vi mode: Ctrl+C re-cancels instead of exiting, so the hint drops the exit key
 	ChatStatusIdle                  string // shortcuts hint when idle
 	ChatStatusYoloIdle              string // shortcuts hint when idle in YOLO/bypass mode
-	YoloConfirmHint                 string // Ctrl+Y before YOLO was ever confirmed: what it skips, press again
 	ChatStatusCycleHint             string // plan-toggle shortcut hint shown when no modal prompt owns the status row
 	ChatStatusCycleHintCompact      string // readable shortcut hint used by the persistent footer
 	ChatTurnReceiptLabel            string // compact per-turn usage receipt attached to the completed assistant response
@@ -128,6 +137,9 @@ type Messages struct {
 	ChatStatusJobsLabel             string
 	ChatStatusBalanceLabel          string
 	ChatStatusCostLabel             string
+	RateBandPeak                    string
+	RateBandOffPeak                 string
+	RateBandMixed                   string
 	ChatStatusCacheNowFmt           string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt           string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval          string // shortcuts hint while a plan is pending
@@ -265,6 +277,24 @@ type Messages struct {
 	SlashUnknownSentAsMessage    string // suffix: the unrecognised "/cmd" line was sent as a regular message
 	SlashPromptEmpty             string // an MCP prompt returned no text to send
 	SlashMCPNone                 string // /mcp when no MCP servers are connected
+	McpPanelTitle                string // /mcp panel title
+	McpPanelSummaryFmt           string // /mcp panel: server and enabled counts
+	McpPanelToolsFmt             string // /mcp panel row: tool count
+	McpPanelHint                 string // /mcp panel keyboard hint
+	McpPanelDetailHint           string // /mcp server detail keyboard hint
+	McpPanelNoTools              string // /mcp server detail: nothing to list
+	McpPanelOff                  string // /mcp panel row: server switched off
+	McpPanelPending              string // /mcp panel row: repository server awaiting the user's approval
+	McpPanelChanged              string // /mcp panel row: what an enabled repository server launches changed
+	McpPanelLaunchFmt            string // /mcp panel: what the selected pending server would start
+	McpToolDestructive           string // /mcp detail: tool tag
+	McpToolReadOnly              string // /mcp detail: tool tag
+	McpPanelConfirmFmt           string // /mcp: enabling a repository-declared server; server name and launch line
+	McpPanelErrFmt               string // /mcp: listing failed
+	McpActionErrFmt              string // /mcp: an action on one server failed; name and error
+	ListMoreAbove                string // panel scroll marker
+	ListMoreBelow                string // panel scroll marker
+	ListMoreFmt                  string // panel: count of rows not shown
 	CtrlCQuitHint                string // shown on first Ctrl+C while idle; second press exits
 	CompHintSlash                string // key hint footer under the slash-command menu
 	CompHintFile                 string // key hint footer under the @ file/resource menu
@@ -290,77 +320,108 @@ type Messages struct {
 
 	// slash command + sub-command descriptions shown in the menu (CLI and desktop
 	// share these via i18n.M, so both frontends localize identically).
-	CmdNew              string // /new
-	CmdClear            string // /clear
-	CmdCls              string // /cls
-	CmdCompact          string // /compact
-	CmdContext          string // /context
-	CmdGraph            string // /graph
-	CmdRewind           string // /rewind
-	CmdTree             string // /tree
-	CmdBranch           string // /branch
-	CmdBrowser          string // /browser
-	CmdSwitchBranch     string // /switch
-	CmdResume           string // /resume
-	CmdRename           string // /rename
-	CmdModel            string // /model
-	CmdStatus           string // /status
-	CmdVersion          string // /version
-	CmdWorkMode         string // /work-mode
-	CmdDocs             string // /docs
-	CmdMemory           string // /memory
-	CmdMigrate          string // /migrate
-	CmdGoal             string // /goal
-	CmdRemember         string // /remember
-	CmdForget           string // /forget
-	CmdMcp              string // /mcp
-	CmdRemote           string // /remote
-	CmdHooks            string // /hooks
-	CmdFeedback         string // /feedback
-	CmdPlugins          string // /plugins
-	CmdPasteImage       string // /paste-image
-	CmdOutputStyle      string // /output-style
-	CmdTheme            string // /theme
-	CmdLanguage         string // /language
-	CmdCurrency         string // /currency
-	CmdSkill            string // /skills
-	CmdVerbose          string // /verbose
-	CmdReloadCmd        string // /reload-cmd
-	CmdReload           string // /reload
-	CmdDiffFold         string // /diff-fold
-	CmdSandbox          string // /sandbox
-	CmdEffort           string // /effort
-	CmdMouse            string // /mouse
-	CmdReasonLang       string // /reasoning-language
-	CmdHelp             string // /help
-	CmdWeb              string // /web
-	CmdTodo             string // /todo
-	CmdQuit             string // /quit (also accepts /exit as hidden alias)
-	CmdCopy             string // /copy
-	CmdExport           string // /export
-	SlashCopyDone       string // "/copy" succeeded
-	SlashCopyEmpty      string // no assistant response to copy
-	SlashCopyListHeader string // header shown before the numbered list
-	SlashExportDoneFmt  string // "/export" succeeded, %s = file path
-	SlashExportEmpty    string // no messages to export
-	ArgSkillShow        string // /skills show
-	ArgSkillNew         string // /skills new
-	ArgSkillPaths       string // /skills paths
-	ArgMcpAdd           string // /mcp add
-	ArgMcpRemove        string // /mcp remove
-	ArgMcpConnected     string // /mcp remove <server> tag
-	ArgHooksList        string // /hooks list
-	ArgModelCurrent     string // /model <ref> active tag
-	ArgEffortAuto       string // /effort auto
-	ArgEffortLow        string // /effort low
-	ArgEffortMedium     string // /effort medium
-	ArgEffortHigh       string // /effort high
-	ArgEffortXHigh      string // /effort xhigh
-	ArgEffortMax        string // /effort max
-	ArgThemeCurrent     string // /theme <style> active tag
-	ArgLanguageAuto     string // /language auto
-	ArgLanguageEn       string // /language en
-	ArgLanguageZh       string // /language zh
+	CmdNew               string // /new
+	CmdClear             string // /clear
+	CmdCls               string // /cls
+	CmdCompact           string // /compact
+	CmdContext           string // /context
+	CmdGraph             string // /graph
+	CmdRewind            string // /rewind
+	CmdTree              string // /tree
+	CmdBranch            string // /branch
+	CmdBrowser           string // /browser
+	CmdSwitchBranch      string // /switch
+	CmdResume            string // /resume
+	CmdRename            string // /rename
+	CmdModel             string // /model
+	CmdStatus            string // /status
+	CmdVersion           string // /version
+	CmdSetup             string
+	SetupTitle           string
+	SetupConfigure       string
+	SetupAPIKey          string
+	SetupEnterCredential string
+	SetupSaving          string
+	SetupTesting         string
+	SetupKeyHint         string
+	SetupPickHint        string
+	SetupNoMatches       string
+	SetupModels          string
+	SetupKeyRequired     string
+	SetupActive          string
+	SetupNoConnections   string
+	SetupNeedKeyToTest   string
+	SetupNeedKey         string
+	SetupTestOK          string
+	SetupTestFailed      string
+	SetupSaved           string
+	SetupOwed            string
+	SetupTurnRefused     string
+	CmdWorkMode          string // /work-mode
+	CmdDocs              string // /docs
+	CmdMemory            string // /memory
+	CmdMigrate           string // /migrate
+	CmdGoal              string // /goal
+	CmdRemember          string // /remember
+	CmdForget            string // /forget
+	CmdMcp               string // /mcp
+	CmdRemote            string // /remote
+	CmdHooks             string // /hooks
+	CmdFeedback          string // /feedback
+	CmdPlugins           string // /plugins
+	CmdPasteImage        string // /paste-image
+	CmdOutputStyle       string // /output-style
+	CmdTheme             string // /theme
+	CmdLanguage          string // /language
+	CmdCurrency          string // /currency
+	CmdSkill             string // /skills
+	CmdVerbose           string // /verbose
+	CmdReloadCmd         string // /reload-cmd
+	CmdReload            string // /reload
+	CmdDiffFold          string // /diff-fold
+	CmdSandbox           string // /sandbox
+	CmdEffort            string // /effort
+	CmdMouse             string // /mouse
+	CmdReasonLang        string // /reasoning-language
+	CmdHelp              string // /help
+	CmdWeb               string // /web
+	CmdTodo              string // /todo
+	CmdQuit              string // /quit (also accepts /exit as hidden alias)
+	CmdCopy              string // /copy
+	CmdExport            string // /export
+	CmdQueue             string // /queue
+	CmdSteer             string // /steer
+	CmdTakeover          string // /takeover
+	TakeoverNoSteal      string // /takeover resumed a session without taking it from another process
+	SlashCopyDone        string // "/copy" succeeded
+	SlashCopyEmpty       string // no assistant response to copy
+	SlashCopyListHeader  string // header shown before the numbered list
+	SlashExportDoneFmt   string // "/export" succeeded, %s = file path
+	SlashExportEmpty     string // no messages to export
+	ArgSkillShow         string // /skills show
+	ArgSkillNew          string // /skills new
+	ArgSkillPaths        string // /skills paths
+	ArgMcpAdd            string // /mcp add
+	ArgMcpRemove         string // /mcp remove
+	ArgMcpConnected      string // /mcp remove <server> tag
+	ArgHooksList         string // /hooks list
+	ArgModelCurrent      string // /model <ref> active tag
+	ArgEffortAuto        string // /effort auto
+	ArgEffortLow         string // /effort low
+	ArgEffortMedium      string // /effort medium
+	ArgEffortHigh        string // /effort high
+	ArgEffortXHigh       string // /effort xhigh
+	ArgEffortMax         string // /effort max
+	ArgEffortForcedOn    string // Thinking cannot be disabled at the lowest effort.
+	ArgThemeCurrent      string // /theme <style> active tag
+	ArgLanguageAuto      string // /language auto
+	ArgLanguageEn        string // /language en
+	ArgLanguageZh        string // /language zh
+
+	EffortReadErrorFmt    string
+	EffortUnknownModelFmt string
+	EffortUnsupportedFmt  string
+	EffortStatusFmt       string
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
@@ -416,6 +477,9 @@ type Messages struct {
 	WorkModeBalancedDesc         string
 	WorkModeDeliveryDesc         string
 	WorkModeUsage                string
+	PresetCurrentFmt             string // /preset with no argument: current setting and usage
+	PresetSetFmt                 string // /preset <name>: the setting now in effect
+	RemoteConnectHint            string // /remote: how to open one of the listed hosts
 	WorkModeSwitchUnavailable    string
 	WorkModeSwitchBusy           string
 	WorkModeAlreadyOnFmt         string
@@ -598,10 +662,7 @@ type Messages struct {
 	WriteEnvErr               string // "write .env:" — prefix for env-write failure
 
 	// provider HTTP error explanations — actionable, reason + fix per status code
-	ProviderErrBadRequest string // 400
-	// ProviderErrDroppedReasoning explains a refused body whose
-	// assistant thinking this host left out for want of a declared protocol.
-	ProviderErrDroppedReasoning    string
+	ProviderErrBadRequest          string // 400
 	ProviderErrAuth                string // 401 — no key configured / sent
 	ProviderErrAuthRejected        string // 401 — a key was sent but the server rejected it
 	ProviderErrDNSNotFound         string // model host name does not resolve
@@ -627,6 +688,17 @@ type Messages struct {
 	ProviderAlreadyOnFmt string // already on provider
 	ProviderUnknownFmt   string // unknown provider
 	ProviderPickLabel    string // label for provider model picker
+	SkillPickTitle       string // /skills panel title
+	SkillPickSummaryFmt  string // /skills panel: available and enabled counts
+	SkillPickSource      string // /skills panel: label before the source filter
+	SkillPickHint        string // /skills panel keyboard hint
+	SkillPickSavedFmt    string // after saving toggles: enabled and disabled counts
+	PickHint             string // keyboard hint under a searchable single-choice panel
+	PickModelTitle       string // /model panel title
+	PickProviderTitle    string // /provider panel title
+	NoConfiguredModels   string // /model or /provider with nothing configured
+	ModelProviderFmt     string // description row under a model in the /model panel
+	ProviderModelsFmt    string // description row under a provider in the /provider panel
 	ProviderNoModelsFmt  string // provider has no models
 
 	// `reasonix upgrade` / `reasonix update` — self-update
@@ -674,40 +746,9 @@ type Messages struct {
 	// usage / help
 	UsageBody             string // full multi-line help text
 	StandaloneConsoleHint string
-}
 
-// ProviderStatusMessage returns an actionable explanation for a known provider
-// HTTP status, or "" when the status has no specific guidance.
-func (m Messages) ProviderStatusMessage(status int) string {
-	switch status {
-	case 400:
-		return m.ProviderErrBadRequest
-	case 401, 403:
-		return m.ProviderErrAuth
-	case 402:
-		return m.ProviderErrInsufficientBalance
-	case 422:
-		return m.ProviderErrUnprocessable
-	case 429:
-		return m.ProviderErrRateLimited
-	case 500:
-		return m.ProviderErrServer
-	case 503:
-		return m.ProviderErrServerBusy
-	}
-	return ""
-}
-
-// ProviderHintMessage returns the next step for a refusal the requesting client
-// identified, or "" when it named none this catalogue answers. The hint arrives
-// as its bare identity: this package sits below the provider layer and must not
-// import it.
-func (m Messages) ProviderHintMessage(hint string) string {
-	switch hint {
-	case "dropped_tool_call_reasoning":
-		return m.ProviderErrDroppedReasoning
-	}
-	return ""
+	// Feedback is the /feedback list standing and refusal wording.
+	Feedback FeedbackText
 }
 
 // M is the active catalogue. DetectLanguage replaces it; English is the

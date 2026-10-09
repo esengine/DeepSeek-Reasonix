@@ -1108,3 +1108,78 @@ func TestRedactionInWarnings(t *testing.T) {
 		t.Fatalf("warning leaks the credential: %v", warns.msgs)
 	}
 }
+
+// A sidecar that is not running is reported by identity, not by sentence: the
+// optional extension is skipped once through SidecarDown, never as free text.
+func TestMissingSidecarIsReportedByIdentity(t *testing.T) {
+	point := extension.PointInputReceive
+	chain := map[extension.InterceptorPoint][]extension.Contribution{point: {interceptor("gone", point, 0)}}
+	type down struct {
+		plugin string
+		point  extension.InterceptorPoint
+	}
+	newDispatcher := func(required map[string]bool, warns *warnRecorder, got *[]down) *Dispatcher {
+		return New(chain, nil, func(string) Client { return nil }, required, Options{
+			Warn:        warns.warn,
+			SidecarDown: func(id string, p extension.InterceptorPoint) { *got = append(*got, down{id, p}) },
+		})
+	}
+
+	t.Run("optional reports once and says nothing in prose", func(t *testing.T) {
+		warns, got := &warnRecorder{}, []down{}
+		d := newDispatcher(nil, warns, &got)
+		for range 3 {
+			if _, err := d.Intercept(context.Background(), point, &InputPayload{Text: "hi"}); err != nil {
+				t.Fatalf("optional missing sidecar must not fail, got %v", err)
+			}
+		}
+		if len(got) != 1 || got[0] != (down{"gone", point}) {
+			t.Fatalf("SidecarDown calls = %v, want exactly one for gone at %s", got, point)
+		}
+		if warns.count() != 0 {
+			t.Fatalf("warns = %v, want none: the typed report replaces the sentence", warns.msgs)
+		}
+	})
+
+	t.Run("required still fails the operation, with the sentinel", func(t *testing.T) {
+		warns, got := &warnRecorder{}, []down{}
+		d := newDispatcher(map[string]bool{"gone": true}, warns, &got)
+		_, err := d.Intercept(context.Background(), point, &InputPayload{Text: "hi"})
+		var failure *FailureError
+		if !errors.As(err, &failure) || !errors.Is(err, ErrNoLiveSidecar) {
+			t.Fatalf("err = %v, want *FailureError wrapping ErrNoLiveSidecar", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("a required extension's failure is an error, not a skip notice: %v", got)
+		}
+	})
+
+	t.Run("a failed call keeps its own warning", func(t *testing.T) {
+		warns, got := &warnRecorder{}, []down{}
+		fake := &fakeClient{interceptFn: func(protocol.InterceptEvent, json.RawMessage) (protocol.InterceptResult, error) {
+			return protocol.InterceptResult{}, timeoutError("live", point)
+		}}
+		liveChain := map[extension.InterceptorPoint][]extension.Contribution{point: {interceptor("live", point, 0)}}
+		d := New(liveChain, nil, func(string) Client { return fake }, nil, Options{
+			Warn:        warns.warn,
+			SidecarDown: func(id string, p extension.InterceptorPoint) { got = append(got, down{id, p}) },
+		})
+		if _, err := d.Intercept(context.Background(), point, &InputPayload{Text: "hi"}); err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 || warns.count() != 1 {
+			t.Fatalf("SidecarDown = %v, warns = %v; a timeout is not a missing sidecar", got, warns.msgs)
+		}
+	})
+
+	t.Run("without a SidecarDown hook the warning is unchanged", func(t *testing.T) {
+		warns := &warnRecorder{}
+		d := buildDispatcher(chain, nil, nil, nil, warns)
+		if _, err := d.Intercept(context.Background(), point, &InputPayload{Text: "hi"}); err != nil {
+			t.Fatal(err)
+		}
+		if warns.count() != 1 {
+			t.Fatalf("warns = %v, want the one existing warning", warns.msgs)
+		}
+	})
+}

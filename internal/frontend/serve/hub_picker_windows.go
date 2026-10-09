@@ -27,3 +27,5 @@ func pickLocalFolder(ctx context.Context, startIn string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+func pickLocalFolderAvailable() bool { return true }

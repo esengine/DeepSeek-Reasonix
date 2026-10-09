@@ -2,6 +2,7 @@ import { HttpError, type AgentPort } from "./port";
 import type { RemoteAsk, RemoteHost, RemoteHostEdit, RemoteListing, RemoteProbe } from "./remote";
 import type { CloudShareOffer, DeviceSelf, ShareOffer, SharePort, ShareStatus } from "./share";
 import { SsePort } from "./sse";
+import { host } from "./host";
 
 // How often a client waiting on a dial looks for the question it might be
 // stopped by. A person answers this one, so half a second is not the cost —
@@ -44,12 +45,23 @@ export interface TreeSession {
   pinned?: boolean;
   // Unix ms of an automatic archive, absent for a manual one.
   autoArchivedAt?: number;
+  // A turn finished since the person last looked. Absent means seen.
+  unread?: boolean;
   // Conflict-recovery copies of this same conversation. A save that keeps
   // conflicting writes one per turn, all under one title.
   copies?: TreeSession[];
   // This conversation as it stood before each edit, regenerate or rewind cut
   // it, newest first. Each opens as a whole conversation.
   versions?: TreeSession[];
+}
+
+export interface HostCapabilities {
+  // The kernel can open a picker on its own machine. A browser on a headless
+  // server gets false and must offer the path API instead.
+  pickFolder: boolean;
+  // The kernel exposes POST /tree/workspaces. This is what makes the fallback
+  // meaningful rather than sending the reader back to the desktop shell.
+  addWorkspace: boolean;
 }
 
 export interface TreeWorkspace {
@@ -75,6 +87,8 @@ export interface HubPort extends SharePort {
   tree(): Promise<TreeWorkspace[]>;
   addWorkspace(path: string): Promise<TreeWorkspace>;
   removeWorkspace(path: string): Promise<void>;
+  /** Show a listed project's folder in the system file manager. */
+  revealWorkspace(path: string): Promise<void>;
   moveWorkspace(path: string, direction: -1 | 1): Promise<void>;
   removeSession(path: string): Promise<void>;
   archiveSession(path: string, archived: boolean): Promise<void>;
@@ -84,7 +98,7 @@ export interface HubPort extends SharePort {
   syncPins(paths: string[]): Promise<void>;
   renameSession(path: string, title: string): Promise<void>;
   exportSession(path: string): Promise<{ name: string; content: string }>;
-  importLegacySessions(path: string, workspace: string): Promise<{ summary: string; imported: number; warnings: number }>;
+  importLegacySessions(path: string, workspace: string): Promise<{ summary: string; imported: number; warnings: number; recognised: boolean }>;
   // The host book with each link's state, or null where this kernel refuses
   // remote panes outright — a page served to a browser, rather than the window.
   // Null is what lets the sidebar leave the whole section out instead of
@@ -120,6 +134,10 @@ export interface HubPort extends SharePort {
   // kernel that would ask is the one this build cannot reach.
   onRemoteAsk(cb: (ask: RemoteAsk) => void): () => void;
   answerRemote(id: string, ok: boolean, text: string): void;
+  // What the kernel can do independently of the desktop window. It is a
+  // separate read so the page can choose a usable fallback before invoking a
+  // host-only action.
+  hostCapabilities(): Promise<HostCapabilities>;
   pickFolder(): Promise<string | null>;
   // Absolute paths of every file dropped anywhere on the window. It belongs
   // here rather than on a pane because the window has one of it: the shell
@@ -209,6 +227,11 @@ export class SseHub implements HubPort {
     return this.post<TreeWorkspace>("/tree/workspaces", { path });
   }
 
+  async revealWorkspace(path: string) {
+    const why = await host().revealWorkspace(path);
+    if (why) throw new HttpError(0, why.error || "not shown", why, !!(why.code || why.error));
+  }
+
   async removeWorkspace(path: string) {
     await this.post<void>("/tree/workspaces/remove", { path });
   }
@@ -242,7 +265,7 @@ export class SseHub implements HubPort {
   }
 
   importLegacySessions(path: string, workspace: string) {
-    return this.post<{ summary: string; imported: number; warnings: number }>("/tree/sessions/import-legacy", { path, workspace });
+    return this.post<{ summary: string; imported: number; warnings: number; recognised: boolean }>("/tree/sessions/import-legacy", { path, workspace });
   }
 
   async remoteHosts() {
@@ -367,6 +390,30 @@ export class SseHub implements HubPort {
     }
   }
 
+  async hostCapabilities() {
+    const shellCanPick = await host()
+      .describe()
+      .then((info) => info.shell === "electron")
+      .catch(() => false);
+
+    const res = await fetch("/host/capabilities", { credentials: "same-origin" });
+    // A kernel predating this probe has no route and keeps the old picker
+    // attempt; the caller already treats null as "no picker" safely.
+    if (res.status === 404 || res.status === 501 || res.status === 503) {
+      return { pickFolder: true, addWorkspace: true };
+    }
+    if (!res.ok) await SseHub.fail("/host/capabilities", res);
+
+    const body = (await res.json().catch(() => null)) as Partial<HostCapabilities> | null;
+    if (typeof body?.pickFolder !== "boolean" || typeof body.addWorkspace !== "boolean") {
+      return { pickFolder: true, addWorkspace: true };
+    }
+    return {
+      pickFolder: shellCanPick || body.pickFolder,
+      addWorkspace: body.addWorkspace,
+    };
+  }
+
   async pickFolder() {
     const shellPath = await this.shell.pickFolder();
     if (shellPath !== null) return shellPath;
@@ -399,6 +446,10 @@ export class SseHub implements HubPort {
 
   closeShare() {
     return this.post<ShareStatus>("/share/close", {});
+  }
+
+  setSharePort(port: number) {
+    return this.post<ShareStatus>("/share/port", { port });
   }
 
   offerShare() {

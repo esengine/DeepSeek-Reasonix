@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { t } from "../i18n";
 import { listenAction } from "./listen";
 import { useRuntimeReload } from "./RuntimeReload";
-import type { AccountState, AgentPort, Appearance as Look, CapabilityScope, McpEntry, ModelEntry, PluginPackage, RoleAssignments, SessionStatus, SkillEntry } from "../port/port";
+import { HttpError } from "../port/port";
+import type { AccountState, AgentPort, Appearance as Look, CapabilityScope, McpEntry, ModelEntry, PluginPackage, SessionStatus, SkillEntry } from "../port/port";
 import { arrowTabs } from "./tablist";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { ICON, NAV, SECTION_NAME, SETTINGS, settingMatches } from "./prefsnav";
@@ -35,17 +36,20 @@ import { Backup } from "./Backup";
 import { Providers } from "./Providers";
 import { activeKind, groupVendors } from "./Models";
 import { ModelUsage } from "./ModelUsage";
+import { useModelCatalog } from "./useModelCatalog";
+import { useRoles } from "./useRoles";
 import { KIND_LABEL } from "./vendors";
 import { planProtocolSwitch } from "./protocolswitch";
 import { Boundary } from "./Boundary";
 import { Path } from "./Path";
-import { Versions } from "./Versions";
+import { About } from "./About";
 import { Memory } from "./Memory";
-import { DEFAULT_DAYS, Usage } from "./Usage";
+import { DEFAULT_DAYS } from "./Usage";
+import { UsageSettings } from "./UsageSettings";
 import { Storage } from "./Storage";
 import { Appearance, SCHEMES } from "./Appearance";
 import { ScopeBar } from "./CapabilityScope";
-import { reason } from "../i18n/kernel";
+import { SAVED_NOT_APPLIED, reason } from "../i18n/kernel";
 import { SettingsHeading } from "./SettingsHeading";
 import { APPROVALS, approvalName, approvalNote } from "./approvals";
 
@@ -102,7 +106,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   // on its reasoning fields. The model ref's first segment is the source name.
   const declare = openedAnchor === "effort-declare" ? status?.modelRef?.split("/")[0] : undefined;
   const [models, setModels] = useState<ModelEntry[]>([]);
-  const [roles, setRoles] = useState<RoleAssignments | null>(null);
+  const { roles, overrides, loadRoles } = useRoles(port);
   const [protocol, setProtocol] = useState<Record<string, string>>({});
   const [mcp, setMcp] = useState<McpEntry[]>([]);
   const [scope, setScope] = useState<CapabilityScope | null>(null);
@@ -114,7 +118,8 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   const [implicit, setImplicit] = useState(true);
   const [live, setLive] = useState(true);
   const [busy, setBusy] = useState("");
-  const [failed, setFailed] = useState("");
+  const [note, setNote] = useState<{ text: string; unapplied: boolean } | null>(null);
+  const setFailed = useCallback((text: string) => setNote(text ? { text, unapplied: false } : null), []);
   const [adding, setAdding] = useState(false);
   const [remoteBook, setRemoteBook] = useState<RemoteHost[] | null>(null);
   const [packages, setPackages] = useState<PluginPackage[]>([]);
@@ -122,6 +127,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   const [extTab, setExtTab] = useState<"installed" | "market">(openedAnchor === "market" ? "market" : "installed");
   const [installedTarget, setInstalledTarget] = useState<{ kind: string; name: string } | null>(null);
   const [extRefreshing, setExtRefreshing] = useState(false);
+  const [extErrors, setExtErrors] = useState<Partial<Record<"mcp" | "packages" | "skills", string>>>({});
   const extRefresh = useRef(0);
   const [updatingPkg, setUpdatingPkg] = useState({ name: "", applying: false });
   const applyingChanged = useCallback((applying: boolean) => setUpdatingPkg((p) => ({ ...p, applying })), []);
@@ -135,6 +141,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
     const refresh = ++extRefresh.current;
     const current = () => extRefresh.current === refresh;
     setExtRefreshing(true);
+    setExtErrors({});
     const where = scopeAt || undefined;
     port.capabilityScopes().then((c) => { if (current()) setScopes(c); }).catch(() => { if (current()) setScopes([]); });
     const mcpRead = port.mcp(where).then((c) => {
@@ -142,8 +149,8 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
       setMcp(c.servers);
       setScope(c.scope);
       setLive(c.live !== false);
-    }).catch(() => { if (current()) setMcp([]); });
-    const packageRead = port.plugins().then((c) => { if (current()) setPackages(c); }).catch(() => { if (current()) setPackages([]); });
+    }).catch((e) => { if (current()) { setMcp([]); setExtErrors((errors) => ({ ...errors, mcp: reason(e) })); } });
+    const packageRead = port.plugins().then((c) => { if (current()) setPackages(c); }).catch((e) => { if (current()) { setPackages([]); setExtErrors((errors) => ({ ...errors, packages: reason(e) })); } });
     port.hooks().then((c) => { if (current()) setHookCount(c.hooks.length); }).catch(() => { if (current()) setHookCount(0); });
     port.network().then((n) => { if (current()) setNetMode(t(NET_MODE[n.mode] ?? n.mode)); }).catch(() => { if (current()) setNetMode(""); });
     port.memories().then((c) => { if (current()) setMemCount(c.memories.length); }).catch(() => { if (current()) setMemCount(0); });
@@ -153,27 +160,23 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
       setSkills(c.skills);
       setImplicit(c.implicit);
     })
-      .catch(() => { if (current()) setSkills([]); });
+      .catch((e) => { if (current()) { setSkills([]); setExtErrors((errors) => ({ ...errors, skills: reason(e) })); } });
     void Promise.allSettled([mcpRead, packageRead, skillRead]).then(() => { if (current()) setExtRefreshing(false); });
   }, [port, scopeAt]);
-  const currentExt = useRef({ port, reloadExt, onChanged });
-  currentExt.current = { port, reloadExt, onChanged };
+  // Adding or removing a source changes what the picker above can offer, so
+  // the list is reloadable rather than read once at mount.
+  const homePort = networkPort ?? port;
+  const loadModels = useModelCatalog(port, homePort, setModels);
+
+  const currentExt = useRef({ port, reloadExt, loadModels, onChanged });
+  currentExt.current = { port, reloadExt, loadModels, onChanged };
   const afterExtChange = useCallback(() => {
     if (currentExt.current.port !== port) return;
     currentExt.current.reloadExt();
+    currentExt.current.loadModels();
     currentExt.current.onChanged();
   }, [port]);
   const reload = useRuntimeReload(port, afterExtChange);
-
-  // Adding or removing a source changes what the picker above can offer, so
-  // the list is reloadable rather than read once at mount.
-  const loadModels = useCallback(() => {
-    port.models().then(setModels).catch(() => setModels([]));
-  }, [port]);
-
-  const loadRoles = useCallback(() => {
-    port.roles().then(setRoles).catch(() => setRoles(null));
-  }, [port]);
 
   // Three sections whose row used to report nothing. Loaded here rather than in
   // reloadExt because none of them moves with the scope the extension lists are
@@ -228,12 +231,12 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   // the row simply does not work.
   const run = async (what: string, fn: () => Promise<void>) => {
     setBusy(what);
-    setFailed("");
+    setNote(null);
     try {
       await fn();
       onChanged();
     } catch (e) {
-      setFailed(reason(e));
+      setNote({ text: reason(e), unapplied: e instanceof HttpError && SAVED_NOT_APPLIED.includes(e.reason?.code ?? "") });
     } finally {
       setBusy("");
     }
@@ -463,10 +466,10 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
               said in one place. Copied onto the pages somebody remembered, it
               was missing from the third that writes it: 创建隔离副本 was
               refused by the kernel and the screen showed nothing at all. */}
-          {failed && (
-            <div className="find" data-lvl="warn" role="alert">
-              <span className="t">{t("操作未完成")}</span>
-              <span className="why">{failed}</span>
+          {note && (
+            <div className="find" data-lvl="warn" role={note.unapplied ? "status" : "alert"}>
+              <span className="t">{t(note.unapplied ? "已保存，尚未生效" : "操作未完成")}</span>
+              <span className="why">{note.text}</span>
             </div>
           )}
           {at === "session" && (
@@ -535,11 +538,15 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
               <Group id="model" title={t("按用途选择模型")} now={nav.model}
                 hint={t("默认模型用于当前对话和大多数任务，其他用途默认跟随它；只有要为某件事换一个模型时才改。切换会保留对话并重建运行时，任务执行期间无法修改。")}>
                 <ModelUsage models={models} roles={roles} main={status?.modelRef} busy={busy} protocol={protocol}
-                  onMain={(ref) => run(ref, () => port.setModel(ref))}
-                  onRole={(role, ref) => run(`role:${role}`, async () => {
-                    await port.setRole(role, ref);
-                    loadRoles();
-                  })} />
+                  onMain={(ref) => run(ref, async () => {
+                    await port.setModel(ref);
+                    await homePort.setDefaultModel(ref);
+                    // The row reads the catalogue's default, so the list has to
+                    // be re-read or the controlled select snaps back.
+                    loadModels();
+                  })}
+                  onRole={(role, ref) => run(`role:${role}`, () => port.setRole(role, ref).finally(loadRoles))}
+                  overrides={overrides} onClearOverride={(role, key) => run(`role:${role}`, () => port.clearRoleOverride(role, key).finally(loadRoles))} />
               </Group>
               {efforts.length > 0 ? (
                 <Group id="effort" title={t("推理强度")} hint={t("以下档位由当前模型的端点支持，auto 表示使用端点自身的默认值。")}>
@@ -660,11 +667,12 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                   <Packages
                     port={port}
                     packages={packages}
-                    onChanged={afterExtChange}
+                    onChanged={afterExtChange} onReloadError={reload.report} onReloaded={reload.applied}
                     updating={updatingPkg.name}
                     onUpdate={(name) => setUpdatingPkg({ name, applying: false })}
                   />
-                  {packages.length === 0 && !addingPkg && <div className="empty">{t("尚未安装插件包。")}</div>}
+                  {extErrors.packages && <div className="rnote" data-s="bad" role="alert">{extErrors.packages} <button className="act" data-action="extensions.refresh" disabled={extRefreshing} onClick={reloadExt}>{t("重试")}</button></div>}
+                  {packages.length === 0 && !addingPkg && !extRefreshing && !extErrors.packages && <div className="empty">{t("尚未安装插件包。")}</div>}
                 </Group>
                 {/* Below the packages: what was added by hand. A server the user
                     typed in themselves is not part of anyone's package, and
@@ -692,7 +700,8 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                   {looseMcp.map((m) => (
                     <ServerRow key={m.name} m={m} port={port} onDone={afterExtChange} root={scopeAt} live={live} />
                   ))}
-                  {looseMcp.length === 0 && !adding && <div className="empty">{t("尚未接入外部服务。")}</div>}
+                  {extErrors.mcp && <div className="rnote" data-s="bad" role="alert">{extErrors.mcp} <button className="act" data-action="extensions.refresh" disabled={extRefreshing} onClick={reloadExt}>{t("重试")}</button></div>}
+                  {looseMcp.length === 0 && !adding && !extRefreshing && !extErrors.mcp && <div className="empty">{t("尚未接入外部服务。")}</div>}
                 </Group>
                 <Group id="skills"
                   title={t("技能")}
@@ -706,7 +715,8 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                   {looseSkills.map((sk) => (
                     <SkillRow key={sk.name} sk={sk} implicit={implicit} port={port} onDone={afterExtChange} root={scopeAt} onFailed={setFailed} />
                   ))}
-                  {looseSkills.length === 0 && <div className="empty">{t("当前工作目录下没有技能。")}</div>}
+                  {extErrors.skills && <div className="rnote" data-s="bad" role="alert">{extErrors.skills} <button className="act" data-action="extensions.refresh" disabled={extRefreshing} onClick={reloadExt}>{t("重试")}</button></div>}
+                  {looseSkills.length === 0 && !extRefreshing && !extErrors.skills && <div className="empty">{t("当前工作目录下没有技能。")}</div>}
                 </Group>
               </>
               )}
@@ -745,14 +755,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
             </Group>
           )}
 
-          {at === "versions" && (
-            <Group id="versions"
-              title={t("版本")}
-              hint={t("当前安装的版本、可用更新，以及出现问题时如何回退。更新下载好后由你决定何时重启；回退后会固定在所选版本，不再提示新版本。")}
-            >
-              <Versions port={port} />
-            </Group>
-          )}
+          {at === "versions" && <About port={port} />}
 
           {at === "memory" && (
             <Group id="memory"
@@ -763,14 +766,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
             </Group>
           )}
 
-          {at === "usage" && (
-            <Group id="usage"
-              title={t("用量与成本")}
-              hint={t("本机记录的 token 用量与花费，仅保存在这台机器上，不会上传。命中缓存的输入按缓存价计费，因此命中率直接影响费用。")}
-            >
-              <Usage port={port} />
-            </Group>
-          )}
+          {at === "usage" && <UsageSettings port={port} onChanged={onChanged} />}
 
           {at === "storage" && (
             <Group id="storage" title={t("存储")} hint={t("数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。")}><Storage port={port} hub={hub} workspace={workspaceRoot ?? status?.workspaceRoot ?? ""} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} /></Group>

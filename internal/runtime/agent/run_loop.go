@@ -273,14 +273,6 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 			// (unapplied path marks uncertain + pause via the notice sink).
 			a.recordUnappliedSteer("(body load failed)", entry.host, entry.itemID)
 		}
-		// Context pressure rides the turn tail, never the cached prefix: an
-		// append leaves the prefix byte-stable, and a model that knows a fold
-		// is near can restate what the summary would drop.
-		if notice := a.window().contextBudgetNotice(); notice != "" {
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: sessionstore.MidTurnSteerMessage(notice, true)})
-			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: contextBudgetNoticeSummary(a.ContextBudget())})
-		}
-
 		schemas := a.svc.tools.ProviderSchemas(ctx)
 		a.sess.lastProviderSchemas = schemas
 		prefixShape := a.capturePrefixShape(schemas)
@@ -550,18 +542,21 @@ func newStreamAttemptID(attempt int) string {
 	return fmt.Sprintf("sa-%d-%d", attempt, streamAttemptSeq.Add(1))
 }
 
-// streamRetrySleep is the body-retry backoff. Tests replace it with a no-op so
-// recovery suites stay fast while production keeps the Codex-shaped delays.
+// streamRetrySleep waits out a body-retry backoff. Tests replace it with a
+// no-op so recovery suites stay fast while production keeps the real delays.
 var streamRetrySleep = sleepStreamRetryBackoff
 
-// sleepStreamRetryBackoff waits ~0.5s, 1s, 2s, 4s, 8s with small jitter.
-// Returns false when ctx is cancelled during the wait.
-func sleepStreamRetryBackoff(ctx context.Context, attempt int) bool {
-	// attempt is 1-based for the failed attempt about to be retried.
+// streamRetryDelay is the backoff before replaying failed attempt n (1-based):
+// 0.5s, 1s, 2s, 4s, then 8s, each with up to 250ms of jitter.
+func streamRetryDelay(attempt int) time.Duration {
 	shift := min(max(attempt-1, 0), 4)
 	base := time.Duration(1<<shift) * 500 * time.Millisecond
-	jitter := time.Duration(rand.IntN(250)) * time.Millisecond
-	timer := time.NewTimer(base + jitter)
+	return base + time.Duration(rand.IntN(250))*time.Millisecond
+}
+
+// sleepStreamRetryBackoff waits d; it returns false when ctx is cancelled first.
+func sleepStreamRetryBackoff(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():

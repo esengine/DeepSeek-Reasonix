@@ -222,6 +222,12 @@ func TestSaveProviderRejectsWhatItCannotStore(t *testing.T) {
 	// the code and the 422 and wrote a bare 400.
 	for name, tc := range map[string]struct{ body, code string }{
 		"a name that would break the model ref": {`{"name":"a/b","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`, "provider.name_invalid"},
+		"an empty name":                         {`{"name":"","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`, "provider.name_invalid"},
+		"a whitespace-only name":                {`{"name":"   ","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`, "provider.name_invalid"},
+		"a Chinese name":                        {`{"name":"公司中转站","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`, "provider.name_invalid"},
+		"a Unicode-normalizable name":           {`{"name":"ｒｅｌａｙ","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`, "provider.name_invalid"},
+		"a combining-mark name":                 {`{"name":"relay\u0301","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`, "provider.name_invalid"},
+		"a name longer than 64 characters":      {`{"name":"` + strings.Repeat("a", 65) + `","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`, "provider.name_invalid"},
 		"an unsupported protocol":               {`{"name":"x","kind":"grpc","baseUrl":"https://x.invalid","models":["m"]}`, "provider.kind_unsupported"},
 		"no endpoint":                           {`{"name":"x","kind":"openai","baseUrl":"","models":["m"]}`, "provider.endpoint_required"},
 		"no models":                             {`{"name":"x","kind":"openai","baseUrl":"https://x.invalid","models":[]}`, "provider.no_models_picked"},
@@ -274,6 +280,40 @@ func TestRemoveProviderInUseMovesTheConversation(t *testing.T) {
 
 	add := postProvider(t, srv.URL, "/providers", `{"name":"spare","kind":"openai","baseUrl":"https://x.invalid","apiKey":"sk-spare","models":["m"]}`)
 	add.Body.Close()
+	resp := postProvider(t, srv.URL, "/providers/remove", `{"name":"existing"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := readAllString(resp)
+		t.Fatalf("remove = %d: %s", resp.StatusCode, b)
+	}
+	if got, _, _ := strings.Cut(currentModelRef(s.ctl()), "/"); got != "spare" {
+		t.Fatalf("conversation is on %q, want it moved to spare", currentModelRef(s.ctl()))
+	}
+}
+
+// A saved default nothing serves is not where the conversation goes: it moves
+// to what remains, as a window opening on that config would.
+func TestRemoveProviderInUseSkipsAStaleDefault(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+
+	add := postProvider(t, srv.URL, "/providers", `{"name":"spare","kind":"openai","baseUrl":"https://x.invalid","apiKey":"sk-spare","models":["m"]}`)
+	add.Body.Close()
+	path := config.UserConfigPath()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.Replace(string(body), `default_model = "existing/model-a"`, `default_model = "deepseek-v4-flash"`, 1)
+	if stale == string(body) {
+		t.Fatalf("fixture has no default_model line to make stale:\n%s", body)
+	}
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	resp := postProvider(t, srv.URL, "/providers/remove", `{"name":"existing"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
@@ -420,5 +460,46 @@ func TestSaveProviderAcceptsEveryCatalogedWire(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"responses"`) {
 		t.Fatalf("the Responses source did not reach the config:\n%s", raw)
+	}
+}
+
+func TestSaveProviderTrimsASCIIName(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+
+	resp := postProvider(t, srv.URL, "/providers", `{
+		"name":"  company-relay.1_x  ","kind":"openai","baseUrl":"https://relay.example/v1",
+		"models":["m1"]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllString(resp)
+		t.Fatalf("POST /providers with surrounding spaces = %d: %s", resp.StatusCode, b)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Provider("company-relay.1_x"); !ok {
+		t.Fatalf("trimmed provider name was not stored: %#v", cfg.Providers)
+	}
+}
+
+// The panel mirrors this pattern in vendors.ts (sourceNameUsable); the same
+// cases are asserted there so the two copies cannot drift apart silently.
+func TestProviderNameRE_Boundaries(t *testing.T) {
+	cases := map[string]bool{
+		"": false, "   ": false,
+		"a": true, strings.Repeat("a", 64): true, strings.Repeat("a", 65): false,
+		".a": false, "-a": false, "_a": false, "a.": true, "a b": false, "a/b": false,
+		"公司中转站": false, "ｒｅｌａｙ": false, "relay\u0301": false,
+		" company-relay.1_x ": false, "Relay_1.x-y": true,
+	}
+	for name, want := range cases {
+		if got := providerNameRE.MatchString(name); got != want {
+			t.Errorf("providerNameRE(%q) = %v, want %v", name, got, want)
+		}
 	}
 }

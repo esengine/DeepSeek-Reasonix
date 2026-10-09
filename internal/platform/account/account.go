@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"reasonix/internal/contract/provider"
 )
 
 // DefaultBaseURL is the identity provider every Reasonix service consumes.
@@ -238,6 +240,8 @@ func (c *Client) doLimit(ctx context.Context, method, path, token string, body, 
 	}
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
+	} else {
+		provider.ApplyClientIdentity(req)
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

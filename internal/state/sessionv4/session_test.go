@@ -131,3 +131,85 @@ func TestListSkipsWhatIsNotASession(t *testing.T) {
 		t.Fatalf("listed %+v", got)
 	}
 }
+
+func TestOpenBoundsTheManifestSize(t *testing.T) {
+	const id = "0123456789abcdef0123456789abcdef"
+	for name, tc := range map[string]struct {
+		size int
+		ok   bool
+	}{
+		"at the cap":   {maxManifestBytes, true},
+		"over the cap": {maxManifestBytes + 1, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := v4fixture.New(t)
+			dir := s.Session(id, 3)
+			raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			padded := append(raw, []byte(strings.Repeat(" ", tc.size-len(raw)))...)
+			if err := os.WriteFile(filepath.Join(dir, "manifest.json"), padded, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err = Open(dir)
+			if tc.ok && err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if !tc.ok && !errors.Is(err, ErrDamaged) {
+				t.Fatalf("Open = %v, want ErrDamaged", err)
+			}
+		})
+	}
+}
+
+func TestOpenInRefusesASessionLinkedFromOutsideTheStore(t *testing.T) {
+	s := v4fixture.New(t)
+	const id = "0123456789abcdef0123456789abcdef"
+	outside := s.Session(id, 3)
+	store := filepath.Join(t.TempDir(), "store")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(store, id)); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if got := List(store); len(got) != 0 {
+		t.Fatalf("listed %d sessions through a symlink out of the store", len(got))
+	}
+	if _, err := Open(filepath.Join(store, id)); err == nil {
+		t.Fatal("Open followed a symlink out of the store")
+	}
+}
+
+func TestPathBasedReadsKeepNoDirectoryHandle(t *testing.T) {
+	s := v4fixture.New(t)
+	const id = "0123456789abcdef0123456789abcdef"
+	dir := s.Session(id, 3)
+	s.Batch(dir, v4fixture.Ended, v4fixture.Event{Kind: "message/complete", Payload: v4fixture.Msg("m1", "user", "hi")})
+
+	var roots []*os.Root
+	rootOpened = func(r *os.Root) { roots = append(roots, r) }
+	t.Cleanup(func() { rootOpened = nil })
+
+	listed := List(s.Root)
+	opened, err := Open(dir)
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("Open: %v, listed %d", err, len(listed))
+	}
+	if _, err := opened.Transcript(); err != nil {
+		t.Fatal(err)
+	}
+	opened.CachedListing()
+	if len(roots) == 0 {
+		t.Fatal("no directory handle was opened")
+	}
+	for i, r := range roots {
+		if _, err := r.Stat("."); !errors.Is(err, os.ErrClosed) {
+			t.Fatalf("directory handle %d is still open after reads (stat: %v)", i, err)
+		}
+	}
+	if err := os.Rename(s.Root, s.Root+"-moved"); err != nil {
+		t.Fatalf("store cannot be renamed after reading it: %v", err)
+	}
+}

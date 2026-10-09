@@ -35,6 +35,23 @@ describe("decision cards", () => {
     expect(approve).toHaveBeenCalledTimes(1);
   });
 
+  it("hands the card back after a failed submit so the same answer can be retried", async () => {
+    const item = {
+      t: "approval", id: "row", a: { id: "gate", tool: "bash", subject: "run checks" },
+    } as Extract<Item, { t: "approval" }>;
+    const failed = vi.fn();
+    const approve = vi.fn()
+      .mockImplementationOnce(async () => failed(new Error("kernel busy or unreachable")))
+      .mockResolvedValueOnce(undefined);
+    render(<ApprovalCard item={item} onApprove={approve} onFullAccess={vi.fn(pending)} onPlan={vi.fn(pending)} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "允许这一次" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "允许这一次" }) as HTMLButtonElement).disabled).toBe(false));
+    await userEvent.click(screen.getByRole("button", { name: "允许这一次" }));
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(approve).toHaveBeenCalledTimes(2);
+  });
+
   // An answer the host drops must not be offered: the card used to promise "do
   // not ask again" and send a grant that died with the session, and the grant
   // that actually writes a rule was not reachable from this window at all.
@@ -54,14 +71,14 @@ describe("decision cards", () => {
     cleanup();
 
     const scoped = card({ allowsSession: true });
-    expect(names()).toEqual(["允许这一次", "本会话都允许", "拒绝"]);
-    await userEvent.click(screen.getByRole("button", { name: "本会话都允许" }));
+    expect(names()).toEqual(["允许这一次", "本会话允许此类操作，不再询问", "拒绝"]);
+    await userEvent.click(screen.getByRole("button", { name: "本会话允许此类操作，不再询问" }));
     expect(scoped.approve).toHaveBeenCalledWith("row", "gate", "session");
     cleanup();
 
     const full = card({ allowsSession: true, allowsPersist: true });
-    expect(names()).toEqual(["允许这一次", "本会话都允许", "此类操作不再询问", "拒绝"]);
-    await userEvent.click(screen.getByRole("button", { name: "此类操作不再询问" }));
+    expect(names()).toEqual(["允许这一次", "本会话允许此类操作，不再询问", "始终允许此类操作，不再询问", "拒绝"]);
+    await userEvent.click(screen.getByRole("button", { name: "始终允许此类操作，不再询问" }));
     expect(full.approve).toHaveBeenCalledWith("row", "gate", "always");
     void fresh;
   });
@@ -75,7 +92,7 @@ describe("decision cards", () => {
     } as Extract<Item, { t: "approval" }>;
     render(<ApprovalCard item={item} onApprove={vi.fn(pending)} onFullAccess={fullAccess} onPlan={vi.fn(pending)} />);
 
-    expect(screen.getByRole("button", { name: "本会话不再询问" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "本会话允许此类操作，不再询问" })).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "切换全部放行…" }));
     expect(fullAccess).not.toHaveBeenCalled();
     expect(screen.getByText("全部放行会跳过后续工具确认")).toBeTruthy();

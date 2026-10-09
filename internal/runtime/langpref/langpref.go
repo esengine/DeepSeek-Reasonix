@@ -43,12 +43,28 @@ func NormalizeResponseLanguage(lang string) string {
 func ResponseLanguageBlock(lang string) string {
 	switch NormalizeResponseLanguage(lang) {
 	case "zh":
-		return "<response-language>\nFinal answer language preference: use Simplified Chinese for user-facing replies unless the user explicitly asks for another language. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form.\n</response-language>"
+		return "<response-language>\n必须使用简体中文撰写面向用户的最终回答和所有对话文字，即使系统提示词、工具说明、工具输出或引用的代码是英文；除非用户明确要求其他语言。代码、标识符、文件路径、shell 命令和未翻译的技术术语保持原文。\n</response-language>"
 	case "en":
 		return "<response-language>\nFinal answer language preference: use English for user-facing replies unless the user explicitly asks for another language. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form.\n</response-language>"
 	default:
 		return ""
 	}
+}
+
+// ResolveResponseLanguage returns the concrete final-answer language for a
+// turn. An explicit zh/en wins; auto reads the user's script and only commits
+// to zh, because a Latin-script turn does not say which language it is in.
+func ResolveResponseLanguage(lang, source string) string {
+	mode := NormalizeResponseLanguage(lang)
+	if mode != "auto" {
+		return mode
+	}
+	if strings.ContainsFunc(source, func(r rune) bool {
+		return unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
+	}) {
+		return "auto"
+	}
+	return InferReasoningLanguageFromText(source)
 }
 
 // ReasoningLanguageBlock is transient user-turn context. It deliberately does
@@ -60,7 +76,7 @@ func ReasoningLanguageBlock(lang string) string {
 		// the soft form loses the first reasoning segment on Chinese prompts
 		// that embed English logs/code, and the first segment anchors the
 		// whole turn once providers round-trip prior reasoning.
-		return "<reasoning-language>\n必须使用简体中文书写全部可见思考/推理文本：从第一个字开始就用中文，并在整轮内保持中文，即使系统提示词、工具说明、工具输出或引用的代码是英文。代码、标识符、文件路径、shell 命令和未翻译的技术术语保持原文。此要求只约束可见思考文本，不覆盖用户对最终回答语言的明确要求。\n</reasoning-language>"
+		return "<reasoning-language>\n必须使用简体中文书写全部可见思考/推理文本：从第一个字开始就用中文，并在整轮内保持中文，即使系统提示词、工具说明、工具输出或引用的代码是英文。代码、标识符、文件路径、shell 命令和未翻译的技术术语保持原文。此要求约束可见思考文本，不覆盖用户对最终回答语言的明确要求；最终回答的语言另由 <response-language> 规定。\n</reasoning-language>"
 	case "en":
 		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
 	default:

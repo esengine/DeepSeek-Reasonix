@@ -216,6 +216,8 @@ func (s *Store) loadOrInitLocked() error {
 			switch man.Items[i].State {
 			case StateRunning, StateSteerAccepted, StateSteerConsumed:
 				man.Items[i].State = StateUncertain
+				man.Items[i].BlockReason = "in-flight owner is no longer active"
+				man.Items[i].BlockCode = BlockOwnerInactive
 				man.Items[i].UpdatedAt = time.Now().UTC()
 				recovered++
 			case StateQueued, StateBlocked, StateUncertain:
@@ -488,6 +490,7 @@ func (s *Store) UpdateItemWithIdempotency(id string, env PromptEnvelope, alias s
 	if next.Items[i].State == StateBlocked {
 		next.Items[i].State = StateQueued
 		next.Items[i].BlockReason = ""
+		next.Items[i].BlockCode = ""
 	}
 	if err := s.commitManifestLocked(next); err != nil {
 		s.removeBlobLocked(newBlob)

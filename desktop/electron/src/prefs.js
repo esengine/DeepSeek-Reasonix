@@ -44,7 +44,7 @@ function savePrefs(file, prefs) {
 // in the same process and must not reach this file.
 // fileOf is asked on each use: the profile directory is settled during boot,
 // after these handlers exist.
-function registerPrefs(ipcMain, fileOf, fromWindow) {
+function registerPrefs(ipcMain, fileOf, fromWindow, onSave = () => {}) {
   ipcMain.on("prefs:load", (event) => {
     event.returnValue = fromWindow(event) ? loadPrefs(fileOf()) : {};
   });
@@ -52,6 +52,7 @@ function registerPrefs(ipcMain, fileOf, fromWindow) {
     if (fromWindow(event)) {
       try {
         savePrefs(fileOf(), prefs);
+        onSave();
       } catch {
         // A preference that did not save is one relaunch of lost state, not a
         // reason to fail the window.

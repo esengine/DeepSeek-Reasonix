@@ -29,9 +29,9 @@
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
-    "@lezer/highlight": "^1.2.4",
+    "@lezer/highlight": "^1.2.5",
     "codemirror": "^6.0.2",
-    "katex": "^0.18.9",
+    "katex": "^0.18.10",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
@@ -53,7 +53,7 @@
     "jsdom": "^30.1.1",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   }
 }

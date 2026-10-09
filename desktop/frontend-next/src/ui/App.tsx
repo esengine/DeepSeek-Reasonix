@@ -8,6 +8,8 @@ import type { HubPort, RuntimeView, TreeWorkspace } from "../port/hub";
 import { Chrome } from "./Chrome";
 import { useLaunchHealth } from "./launchhealth";
 import { Nav } from "./Nav";
+import { useNavRail } from "./navrail";
+import { feedbackEntryTab } from "./feedbackentry";
 import { useLinkRouting } from "./links";
 import { Pane, type PaneReport } from "./Pane";
 import { clearDraftForSession } from "./drafts";
@@ -18,6 +20,7 @@ import { useFoldAway } from "./foldaway";
 import { useDrawerCloses } from "./drawer";
 import { RemoteAsk } from "./RemoteAsk";
 import { Feedback, type FeedbackTab } from "./Feedback";
+import { usePaneForSheets } from "./usePaneForSheets";
 import { BrowserLogin } from "./BrowserLogin";
 import type { RemoteAsk as RemoteAskT, RemoteHost } from "../port/remote";
 import { Boundary } from "./Boundary";
@@ -27,9 +30,14 @@ import { usePaint } from "./paint";
 import { rememberActivePane, savedActivePane } from "./activepane";
 import { Sidebar } from "./Sidebar";
 import { Sky } from "./Sky";import { useAddWorkspace } from "./addws";
+import { AddWorkspacePrompt } from "./AddWorkspacePrompt";
 import { PaneTabs } from "./PaneTabs";
+import { isUnread, useViewed } from "./unread";
 import { Onboarding } from "./Onboarding";
 import { Welcome } from "./Welcome";
+import { useSessionSwitch } from "./sessionswitch";
+import { singleFlight } from "./singleflight";
+import { useOpenPane } from "./useOpenPane";
 import { markSettled } from "../boot/gate";
 
 // Start fetching the settings chunk with the shell instead of waiting for the
@@ -57,10 +65,6 @@ const NO_REPORT: PaneReport = {
   mcp: [],
   wallet: "",
 };
-// Keep a small warm set for instant back-and-forth switching. Older settled
-// panes are cheap to restore from disk and expensive to leave mounted: every
-// hidden pane retains a transcript, observers and markdown tree.
-const WARM_PANES = 4;
 
 // App is the window around the panes, not a session itself: the workspace tree,
 // the chrome, the settings sheet and the theme are the window's, while every
@@ -113,6 +117,7 @@ export function App({ hub }: { hub: HubPort }) {
   // is still working. Read through a ref by the report handler, which must stay
   // stable or each frame would re-render every pane.
   const [runs, setRuns] = useState<Record<string, { run: string; live: boolean }>>({});
+  const sw = useSessionSwitch();
   const activeRef = useRef("");
   activeRef.current = active;
   useEffect(() => rememberActivePane(active), [active]);
@@ -152,7 +157,7 @@ export function App({ hub }: { hub: HubPort }) {
       hub
         .tree()
         .then(setTree)
-        .catch(() => setTree([]))
+        .catch(() => {})
         .finally(() => setTreeRead(true)),
     [hub],
   );
@@ -178,6 +183,7 @@ export function App({ hub }: { hub: HubPort }) {
     await reloadTree();
     void reloadRemoteTrees();
   }, [hub, reloadTree, reloadRemoteTrees]);
+  const refreshPanes = useMemo(() => singleFlight(reloadPanes), [reloadPanes]);
 
   useEffect(() => {
     void reloadPanes();
@@ -223,13 +229,14 @@ export function App({ hub }: { hub: HubPort }) {
       try {
         const view = await hub.openRemote({ host, workspace, sessionPath });
         await reloadPanes();
+        sw.cancel();
         setActive(view.id);
       } finally {
         setOpening((n) => n - 1);
         void reloadRemotes();
       }
     },
-    [hub, reloadPanes, reloadRemotes],
+    [hub, reloadPanes, reloadRemotes, sw.cancel],
   );
 
   // One port per pane, held across renders — a fresh instance would resubscribe
@@ -297,7 +304,7 @@ export function App({ hub }: { hub: HubPort }) {
   }, [setup, welcomed]);
 
   const running = report.run === "running";
-  const { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, look, onLook, pack, reloadThemes } =
+  const { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, effects, look, onLook, pack, reloadThemes } =
     usePaint(hub, runtimes, running, fail);
   // A pane with no session file has never been written to — the empty one every
   // window opens with. Opening a conversation takes it over instead of parking
@@ -305,7 +312,16 @@ export function App({ hub }: { hub: HubPort }) {
   // A transcript can be thousands of pixels tall. Capturing it into a View
   // Transition made a simple sidebar click pay for a full-page texture before
   // the active id changed. Selection feedback should be immediate.
-  const focusPane = useCallback((id: string) => setActive(id), []);
+  const reloadBooks = useCallback(() => Promise.all([reloadTree(), reloadRemoteTrees()]), [reloadTree, reloadRemoteTrees]);
+  const viewed = useViewed({ runtimes, ports: panePorts, active, tree, remote: remoteTrees, reload: reloadBooks });
+  const focusPane = useCallback(
+    (id: string) => {
+      sw.cancel();
+      setActive(id);
+      viewed.view(id);
+    },
+    [sw.cancel, viewed.view],
+  );
   // Settings is the next layer over the whole screen and had entry but no exit: it
   // simply vanished on unmount. A view transition can animate out an element that
   // is absent from the new state, so the tree need not stay mounted.
@@ -318,64 +334,7 @@ export function App({ hub }: { hub: HubPort }) {
     void reloadRemotes();
   }, [reloadRemotes]);
 
-  const openPane = useCallback(
-    async (req: { root?: string; sessionPath?: string }) => {
-      // Blank means never written to and not working: a new session mid-turn has
-      // no path in a stale pane list yet, and taking it over would hide its run.
-      const blank = runtimes.find(
-        (rt) => !rt.sessionPath && !reportsRef.current[rt.id]?.status?.sessionPath && !runsRef.current[rt.id]?.live,
-      );
-      // Asking for a new session when an unused one is already open in that
-      // folder: it is the pane being asked for. Rebuilding it would cost a full
-      // assembly to arrive back where we started.
-      if (blank && !req.sessionPath && blank.root === req.root) {
-        focusPane(blank.id);
-        return;
-      }
-      // Same folder: the pane just rebinds, so nothing is torn down and a draft
-      // in its composer survives. The kernel refuses a path from another
-      // project's session dir, which is why the root has to match.
-      if (blank && req.sessionPath && blank.root === req.root) {
-        await panePorts.get(blank.id)?.resume(req.sessionPath);
-        setTakeover((prev) => ({ ...prev, [blank.id]: (prev[blank.id] ?? 0) + 1 }));
-        focusPane(blank.id);
-        void reloadPanes();
-        return;
-      }
-      // One visible pane plus live background work is the product model. Keep a
-      // few settled panes warm for quick backtracking, then reuse the oldest
-      // idle pane in the same workspace instead of accumulating full hidden
-      // transcripts until the kernel refuses another open.
-      const idle = runtimes.filter((rt) => rt.id !== active && !runsRef.current[rt.id]?.live);
-      const atCapacity = runtimes.length >= WARM_PANES;
-      const reusable = atCapacity && req.sessionPath
-        ? idle.find((rt) => rt.root === req.root && panePorts.has(rt.id))
-        : undefined;
-      if (reusable && req.sessionPath) {
-        await panePorts.get(reusable.id)?.resume(req.sessionPath);
-        setTakeover((prev) => ({ ...prev, [reusable.id]: (prev[reusable.id] ?? 0) + 1 }));
-        focusPane(reusable.id);
-        void reloadPanes();
-        return;
-      }
-      // A different workspace cannot be resumed into the same runtime. Retire
-      // one settled background pane before opening so the row never reaches the
-      // old "nothing happens" max-pane failure.
-      let retired = "";
-      if (atCapacity && idle[0]) {
-        retired = idle[0].id;
-        await hub.close(retired);
-      }
-      const rt = await hub.open(req);
-      // Another folder needs its own runtime, so the blank one is retired
-      // rather than left behind.
-      if (blank && blank.id !== rt.id) await hub.close(blank.id);
-      setRuntimes((prev) => [...prev.filter((pane) => pane.id !== rt.id && pane.id !== blank?.id && pane.id !== retired), rt]);
-      focusPane(rt.id);
-      void reloadPanes();
-    },
-    [hub, reloadPanes, runtimes, panePorts, focusPane, active],
-  );
+  const openPane = useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runsRef, setRuntimes, setActive, setTakeover, reloadPanes: refreshPanes, sw });
 
   // Awaitable because deleting a conversation has to close its pane first and
   // then wait: the kernel refuses to erase a transcript its runtime still holds,
@@ -397,6 +356,7 @@ export function App({ hub }: { hub: HubPort }) {
   const needsProject = treeRead && !claimed && tree.every((ws) => !ws.remembered);
 
   useFoldAway("rail", setRail);
+  const navRail = useNavRail(rail);
   useDrawerCloses(setRail, active, settings);
   useEffect(() => onRoomWidth((width) => setDockLimit(dockMax(width))), []);
   const shownDockW = Math.min(dockW, dockLimit);
@@ -460,8 +420,15 @@ export function App({ hub }: { hub: HubPort }) {
   );
 
   const tabs = useMemo(
-    () => runtimes.map((rt, i) => ({ rt, title: titleFor(rt, i), run: runs[rt.id]?.run ?? "idle", live: runs[rt.id]?.live ?? false })),
-    [runtimes, titleFor, runs],
+    () =>
+      runtimes.map((rt, i) => ({
+        rt,
+        title: titleFor(rt, i),
+        run: runs[rt.id]?.run ?? "idle",
+        live: runs[rt.id]?.live ?? false,
+        unread: isUnread(rt, viewed.tree, viewed.remote),
+      })),
+    [runtimes, titleFor, runs, viewed.tree, viewed.remote],
   );
   // The folder only earns tab space when the panes actually span more than one.
   const manyRoots = useMemo(() => new Set(runtimes.map((rt) => rt.root)).size > 1, [runtimes]);
@@ -481,27 +448,25 @@ export function App({ hub }: { hub: HubPort }) {
   // the window's, not whichever project happens to sit first in the tree.
   const newSessionRoot = activeWorkspace?.root;
 
-  // Every settings route is a runtime's, so with no pane open there is nothing
-  // to read them from. Asking for settings then opens a session in the current
-  // folder, as the empty state's own button would, and the sheet follows it.
-  const prefsPane = useRef(false);
-  useEffect(() => {
-    if (!settings || !panesRead || runtimes.length > 0) {
-      prefsPane.current = false;
-      return;
-    }
-    if (prefsPane.current) return;
-    prefsPane.current = true;
-    if (!newSessionRoot) {
+  usePaneForSheets({
+    settings: !!settings,
+    feedback: feedback !== null,
+    panesRead,
+    panes: runtimes.length,
+    root: newSessionRoot,
+    openPane,
+    refuse: (message) => {
       setSettings(false);
-      setError(t("设置需要一个打开的会话。请先在左栏添加一个文件夹。"));
-      return;
-    }
-    void openPane({ root: newSessionRoot }).catch((e) => {
+      setFeedback(null);
+      setError(message);
+    },
+    fail: (e) => {
       setSettings(false);
+      setFeedback(null);
       fail(e);
-    });
-  }, [settings, panesRead, runtimes.length, newSessionRoot, openPane, fail]);
+    },
+    clear: (message) => setError((cur) => (cur === message ? "" : cur)),
+  });
 
   // The tab strip has nowhere to await: closing is the end of the gesture there,
   // so a refusal has to land in the error bar rather than in a caller.
@@ -563,6 +528,7 @@ export function App({ hub }: { hub: HubPort }) {
       className="app"
       data-run={report.run}
       data-rail={rail ? "on" : "off"}
+      data-nav={navRail.shown ? "on" : "off"}
       data-browser={browser ? "on" : "off"}
       data-plan={report.status?.plan ? "on" : "off"}
       data-apv={report.status?.toolApprovalMode ?? "ask"}
@@ -591,18 +557,23 @@ export function App({ hub }: { hub: HubPort }) {
         hub={hub} onError={fail}
       />
 
-      {pack?.sky && <Sky />}
+      {pack?.sky && effects !== "reduced" && <Sky />}
 
       <div className="cols">
-        <Nav
-          at={settings === false ? null : settings === true ? "" : settings}
-          onGo={showPrefs}
-          onHome={hidePrefs}
-        />
+        {navRail.drawn && (
+          <Nav
+            at={settings === false ? null : settings === true ? "" : settings}
+            onGo={showPrefs}
+            onHome={hidePrefs}
+            onFeedback={() => setFeedback(feedbackEntryTab(feedbackUnread))}
+            feedbackUnread={feedbackUnread}
+            shown={navRail.shown}
+          />
+        )}
         <Sidebar
           hub={hub}
           collapsed={!rail}
-          tree={tree}
+          tree={viewed.tree}
           treeRead={treeRead}
           runtimes={runtimes}
           runs={runs}
@@ -612,12 +583,13 @@ export function App({ hub }: { hub: HubPort }) {
           pinned={pinnedSessions}
           onPin={togglePinnedSession}
           remotes={remotes}
-          remoteTrees={remoteTrees}
+          remoteTrees={viewed.remote}
           reloadRemotes={reloadRemotes}
           reloadRemoteTrees={reloadRemoteTrees}
           readRemoteTree={readRemoteTree}
           reloadTree={reloadTree}
           adder={adder}
+          opening={sw.path}
           onOpen={openPane}
           onOpenRemote={openRemotePane}
           onFocusPane={focusPane}
@@ -660,7 +632,7 @@ export function App({ hub }: { hub: HubPort }) {
             />
           )}
 
-          <div className="panes">
+          <div className="panes" aria-busy={sw.pending || undefined}>
             {runtimes.map((rt) => {
               const port = panePorts.get(rt.id);
               return port ? (
@@ -675,10 +647,11 @@ export function App({ hub }: { hub: HubPort }) {
                   onFocus={() => focusPane(rt.id)}
                   visible={rt.id === active}
                   onReport={onReport}
+                  onTurnDone={viewed.turnDone}
                   // Panes, not just the tree: the first turn gives this pane a
                   // session path, and until /runtimes reports it the pane still
                   // looks blank — the next history row would take it over.
-                  onSessionChanged={reloadPanes}
+                  onSessionChanged={refreshPanes}
                   pulse={settingsPulse}
                   findPulse={findPulse}
                   alert={rt.id === active ? bar : undefined}
@@ -728,6 +701,8 @@ export function App({ hub }: { hub: HubPort }) {
         </div>
 
       </div>
+
+      {adder.pathOpen && <AddWorkspacePrompt busy={adder.busy} onSubmit={adder.addPath} onClose={adder.closePath} />}
 
       {feedback && (networkPort ?? activePort) && (
         <Feedback port={(networkPort ?? activePort)!} tab={feedback} onClose={() => setFeedback(null)} onError={setError} onUnread={setFeedbackUnread} />

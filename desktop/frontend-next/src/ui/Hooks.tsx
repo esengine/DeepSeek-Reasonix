@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useEscape } from "./dismiss";
 import { t } from "../i18n";
 import type { AgentPort, HookCatalog, HookDryRun, HookEntry } from "../port/port";
@@ -71,6 +71,12 @@ interface Props {
   onChanged: () => void;
 }
 
+interface Trial {
+  rule: HookEntry;
+  result?: HookDryRun;
+  error?: string;
+}
+
 export function Hooks({ port, onChanged }: Props) {
   const [cat, setCat] = useState<HookCatalog | null>(null);
   const [scope, setScope] = useState<"user" | "project">("user");
@@ -78,7 +84,8 @@ export function Hooks({ port, onChanged }: Props) {
   useEscape(expert, () => setExpert(false));
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [tried, setTried] = useState<Record<string, HookDryRun>>({});
+  const [tried, setTried] = useState<Record<string, Trial>>({});
+  const mine = useMemo(() => cat?.hooks.filter((h) => h.scope === (scope === "user" ? "global" : "project")) ?? [], [cat, scope]);
 
   const reload = () => {
     port
@@ -93,7 +100,6 @@ export function Hooks({ port, onChanged }: Props) {
 
   if (!cat) return <div className="empty">{t("无法读取 hooks 配置。")}</div>;
 
-  const mine = cat.hooks.filter((h) => h.scope === (scope === "user" ? "global" : "project"));
   const plugin = cat.hooks.filter((h) => h.scope === "plugin");
   const broken = cat.sources.filter((s) => s.status === "malformed" || s.status === "unreadable");
 
@@ -121,13 +127,16 @@ export function Hooks({ port, onChanged }: Props) {
   };
 
   const tryOne = async (h: HookEntry, key: string) => {
+    const trial: Trial = { rule: h };
+    setTried((t) => ({ ...t, [key]: trial }));
     setBusy(key);
     setError("");
     try {
-      const res = await port.dryRunHook(h);
-      setTried((t) => ({ ...t, [key]: res }));
+      const result = await port.dryRunHook(h);
+      setTried((t) => t[key] === trial ? { ...t, [key]: { ...trial, result } } : t);
     } catch (e) {
-      setError(reason(e));
+      const error = reason(e);
+      setTried((t) => t[key] === trial ? { ...t, [key]: { ...trial, error } } : t);
     } finally {
       setBusy("");
     }
@@ -210,7 +219,7 @@ function Expert({
   rules: HookEntry[];
   plugin: HookEntry[];
   busy: string;
-  tried: Record<string, HookDryRun>;
+  tried: Record<string, Trial>;
   onSave: (next: HookEntry[]) => void;
   onTry: (h: HookEntry, key: string) => void;
 }) {
@@ -226,7 +235,7 @@ function Expert({
       {draft.map((h, i) => {
         const meta = info(h.event);
         const key = `${scope}-${i}`;
-        const res = tried[key];
+        const trial = tried[key]?.rule === h ? tried[key] : undefined;
         return (
           <div className="rule" key={i} data-blocking={meta?.blocking ? "" : undefined}>
             <div className="line">
@@ -269,7 +278,8 @@ function Expert({
                   button that checks syntax and one that might delete a file. */}
               <span className="note">{t("将实际执行该命令")}</span>
             </div>
-            {res && <DryRun res={res} blocking={!!meta?.blocking} />}
+            {trial?.result && <DryRun res={trial.result} blocking={!!meta?.blocking} />}
+            {trial?.error && <div className="why">{trial.error}</div>}
           </div>
         );
       })}

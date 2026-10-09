@@ -34,7 +34,7 @@ function parseSemver(version) {
   };
 }
 
-function compareSemver(a, b) {
+export function compareSemver(a, b) {
   const aa = parseSemver(a);
   const bb = parseSemver(b);
   for (let i = 0; i < aa.core.length; i += 1) {

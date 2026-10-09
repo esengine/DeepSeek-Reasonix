@@ -16,7 +16,11 @@ param(
     [string]$PortableArchivePath,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("amd64", "arm64")]
+    [string]$Architecture
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,6 +75,7 @@ if ($payloadDigest -ne $ExpectedPayloadDigest) {
     throw "Signed payload digest $payloadDigest does not match the $ExpectedPayloadDigest the signing job recorded"
 }
 Assert-DeclaredPeSet -Root $payloadRoot
+Assert-PeArchitecture -Root $payloadRoot -Architecture $Architecture
 
 # Hashed before either is opened, so the hashes name the bytes that were checked.
 $installerHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $InstallerPath).Hash.ToLowerInvariant()
@@ -83,16 +88,19 @@ try {
     Assert-TreeMatchesPayload -Label "Portable archive" -Root $portableRoot -PayloadManifest $payloadManifest
 
     # electron-builder's NSIS installer carries each architecture's application
-    # as an app-<arch>.7z among its plugins; this release builds x64 alone.
+    # as an app-<arch>.7z among its plugins; electron-builder names the x64 one
+    # app-64.7z. A package for one architecture carries that architecture's alone.
     $installerRoot = Join-Path $extractRoot "installer"
     Invoke-SevenZip -Archive $InstallerPath -Destination $installerRoot
     $appArchives = @(Get-ChildItem -LiteralPath (Join-Path $installerRoot '$PLUGINSDIR') -Filter 'app-*.7z' -File -ErrorAction SilentlyContinue |
         ForEach-Object Name)
-    if ($appArchives.Count -ne 1 -or $appArchives[0] -cne 'app-64.7z') {
-        throw "Installer must carry exactly one application archive, app-64.7z; found: $($appArchives -join ', ')"
+    $appArchive = @{ amd64 = 'app-64.7z'; arm64 = 'app-arm64.7z' }[$Architecture]
+    if ($appArchives.Count -ne 1 -or $appArchives[0] -cne $appArchive) {
+        throw "Installer must carry exactly one application archive, $appArchive; found: $($appArchives -join ', ')"
     }
     $installedRoot = Join-Path $extractRoot "installed"
-    Invoke-SevenZip -Archive (Join-Path $installerRoot '$PLUGINSDIR\app-64.7z') -Destination $installedRoot
+    Invoke-SevenZip -Archive (Join-Path $installerRoot "`$PLUGINSDIR\$appArchive") -Destination $installedRoot
+    Assert-PeArchitecture -Root $installedRoot -Architecture $Architecture
     Assert-TreeMatchesPayload -Label "Installer" -Root $installedRoot -PayloadManifest $payloadManifest -Extra $script:InstallerOwnedFiles
 }
 finally {

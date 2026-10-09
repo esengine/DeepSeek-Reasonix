@@ -9,11 +9,7 @@ import (
 )
 
 var (
-	// secretKeyNamePattern matches environment-variable / key names that are
-	// likely to carry credentials. Bare "pwd" is intentionally excluded: it
-	// only counts with a leading separator (DB_PWD, MYSQL-PWD), so the POSIX
-	// PWD / OLDPWD working-directory variables never match.
-	secretKeyNamePattern = regexp.MustCompile(`(?i)((^|[_-])(api[_-]?key|access[_-]?key|private[_-]?key|secret|token|password|passwd)([_-]|$)|[_-]pwd([_-]|$))`)
+	endpointPattern = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^\s<>]+`)
 	// cookieHeaderPattern captures Cookie/Set-Cookie header values so every
 	// name=value pair gets its value masked; attribute flags without a value
 	// (HttpOnly, Secure) pass through untouched.
@@ -109,7 +105,7 @@ func EnvKeySensitive(key string) bool {
 	if key == "" {
 		return false
 	}
-	return secretKeyNamePattern.MatchString(key)
+	return CredentialKey(key)
 }
 
 // FilterEnv removes sensitive KEY=value assignments from an environment vector.
@@ -186,6 +182,10 @@ func RedactCredentials(s string) string {
 	if s == "" {
 		return s
 	}
+	s = endpointPattern.ReplaceAllStringFunc(s, func(endpoint string) string {
+		trimmed := strings.TrimRight(endpoint, ":,.)")
+		return RedactEndpoint(trimmed) + endpoint[len(trimmed):]
+	})
 	s = Redact(s)
 	s = credentialContextPattern.ReplaceAllString(s, "${1}${2}****")
 	s = maskedCredentialPattern.ReplaceAllString(s, "****")
@@ -266,7 +266,7 @@ func redactKeyValues(s string) string {
 		value := s[valueStart:valueEnd]
 		if authorizationKey(key) {
 			out.WriteString(redactedValue)
-		} else if value == "****" || value == redactedValue {
+		} else if value == redactedValue || strings.Contains(value, "**") {
 			out.WriteString(value)
 		} else {
 			out.WriteString(mask(value))
@@ -295,18 +295,11 @@ func authorizationKey(key string) bool {
 }
 
 func credentialTextKeySensitive(key string) bool {
-	upper := strings.ToUpper(key)
-	compact := strings.NewReplacer("_", "", "-", "").Replace(upper)
-	return authorizationKey(key) ||
-		strings.Contains(compact, "APIKEY") ||
-		strings.Contains(compact, "ACCESSKEY") ||
-		strings.Contains(compact, "PRIVATEKEY") ||
-		strings.Contains(upper, "SECRET") ||
-		strings.Contains(upper, "TOKEN") ||
-		strings.Contains(upper, "PASSWORD") ||
-		strings.Contains(upper, "PASSWD") ||
-		strings.Contains(upper, "_PWD") ||
-		strings.Contains(upper, "-PWD")
+	switch strings.ToLower(key) {
+	case "cookie", "set-cookie":
+		return false
+	}
+	return CredentialKey(key)
 }
 
 func authorizationScheme(s string) bool {

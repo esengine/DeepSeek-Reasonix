@@ -1,4 +1,5 @@
 "use strict";
+const { localPath, trimTyped } = require("./localpath");
 
 // What a page in the agent's browser may become. The agent's own requests pass
 // the kernel's policy first; this is the window's answer for everything else a
@@ -16,13 +17,16 @@ function guestNavigationAllowed(raw, kernelOrigin) {
 }
 
 // What the person typed, as the address to load and the one to fall back to.
-// Only "scheme://" or about: names a scheme: "intranet:8080" is a host and a
+// A path on disk is the file it names; see localPath. Only "scheme://", file:
+// or about: names a scheme: "intranet:8080" is a host and a
 // port. A host that cannot be on the public internet is read as http, the way
 // Chromium exempts it from upgrading; any other bare host tries https first
 // and falls back to http, since an intranet site may serve only http.
 function typedAddress(raw) {
-  const text = String(raw || "").trim();
+  const text = trimTyped(raw);
   if (!text) return { url: "", fallback: "" };
+  const local = localPath(text);
+  if (local) return { url: local.url, fallback: "" };
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^about:/i.test(text)) return { url: text, fallback: "" };
   let host;
   try {
@@ -32,6 +36,24 @@ function typedAddress(raw) {
   }
   if (privateHost(host)) return { url: "http://" + text, fallback: "" };
   return { url: "https://" + text, fallback: "http://" + text };
+}
+
+// typed is the whole answer for what the person typed: the address, its
+// fallback, and "" or why the window will not load it. A page's own links never
+// reach a file (guestNavigationAllowed); the person may, but only on this
+// machine: a share is refused, and Windows would sign in to its host. The
+// kernel still refuses to read or act on a page outside the workspace, whoever
+// opened it.
+function typed(raw, kernelOrigin) {
+  const local = localPath(raw);
+  if (local?.kind === "network") return { url: "", fallback: "", refusal: "network_file" };
+  if (local?.kind === "invalid") return { url: "", fallback: "", refusal: "scheme" };
+  const { url, fallback } = typedAddress(raw);
+  return { url, fallback, refusal: url.startsWith("file:") ? "" : webRefusal(url, kernelOrigin) };
+}
+
+function webRefusal(url, kernelOrigin) {
+  return guestNavigationAllowed(url, kernelOrigin) ? "" : "scheme";
 }
 
 // privateHost reads the address's structure, never its spelling: a loopback,
@@ -58,4 +80,4 @@ function privateHost(host) {
   return h === "localhost" || h.endsWith(".localhost") || !h.includes(".");
 }
 
-module.exports = { guestNavigationAllowed, typedAddress, privateHost };
+module.exports = { guestNavigationAllowed, typedAddress, typed, privateHost };

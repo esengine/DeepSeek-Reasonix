@@ -22,18 +22,22 @@ var taskCarryOver = map[string]bool{
 func TestTaskRuntimeRestartCarriesScopeAndResetsAccounting(t *testing.T) {
 	ledger := evidence.NewLedger()
 	before := &taskRuntime{
-		scopeID:    "scope-1",
-		checkpoint: evidence.DeliveryCheckpoint{ScopeID: "scope-1"},
-		ledger:     ledger,
-		outcome:    evidence.NewOutcomeTracker(),
-		budget:     runBudget{rounds: 4, requests: 9, cost: 1.5, limit: TaskBudget{}},
-		witness:    map[string][]string{"tally.go": {"total += x"}},
+		scopeID:        "scope-1",
+		checkpoint:     evidence.DeliveryCheckpoint{ScopeID: "scope-1"},
+		ledger:         ledger,
+		outcome:        evidence.NewOutcomeTracker(),
+		budget:         runBudget{rounds: 4, requests: 9, cost: 1.5, limit: TaskBudget{}},
+		witness:        map[string][]string{"tally.go": {"total += x"}},
+		workspaceProse: &workspaceProseCache{state: workspaceProseState{epoch: 1, proseOnly: true}},
 	}
 	after := *before
 	after.restartLedger()
 
 	if after.witness != nil {
 		t.Errorf("witness = %v, want the previous task's changes to prove nothing here", after.witness)
+	}
+	if after.workspaceProse == nil || after.workspaceProse == before.workspaceProse || after.workspaceProse.state.epoch != 0 {
+		t.Error("workspace prose cache retained evidence from the previous task")
 	}
 
 	if after.scopeID != "scope-1" || after.checkpoint.ScopeID != "scope-1" {
@@ -68,7 +72,8 @@ var taskRestarted = map[string]bool{
 	"overScanLimit": true,
 	// The capture answers for the workspace one task began under. A new task
 	// begins under whatever the tree says then, alongside baselineCriteria.
-	"criteriaEpoch": true,
+	"criteriaEpoch":  true,
+	"workspaceProse": true,
 	// A new task is accepted under a new contract; the cache goes with the
 	// record name restartLedger clears from the carried checkpoint.
 	"contract":       true,

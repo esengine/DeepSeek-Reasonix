@@ -45,22 +45,35 @@ function go(args, env) {
 // statically so the helper needs no redistributable on the person's machine.
 const VS_INSTALLER = path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Microsoft Visual Studio", "Installer");
 
-function msvcVars() {
+// The helper is built for the architecture the kernel is, with that
+// architecture's own tools: the x64 toolset on an x64 machine, the ARM64 one on
+// an ARM64 machine (vcvarsarm64 is the native environment there).
+const WINDOWS_TOOLCHAIN = {
+  amd64: { component: "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", vars: "vcvars64.bat", label: "x64" },
+  arm64: { component: "Microsoft.VisualStudio.Component.VC.Tools.ARM64", vars: "vcvarsarm64.bat", label: "ARM64" },
+};
+
+function msvcVars(toolchain) {
   const vswhere = path.join(VS_INSTALLER, "vswhere.exe");
   if (!fs.existsSync(vswhere)) return "";
-  const found = spawnSync(vswhere, ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], { encoding: "utf8" });
+  const found = spawnSync(vswhere, ["-latest", "-products", "*", "-requires", toolchain.component, "-property", "installationPath"], { encoding: "utf8" });
   const root = (found.stdout || "").trim().split(/\r?\n/)[0];
-  const vars = root ? path.join(root, "VC", "Auxiliary", "Build", "vcvars64.bat") : "";
+  const vars = root ? path.join(root, "VC", "Auxiliary", "Build", toolchain.vars) : "";
   return vars && fs.existsSync(vars) ? vars : "";
 }
 
-function buildWindowsHelper() {
-  const vars = msvcVars();
+function buildWindowsHelper(goarch) {
+  const toolchain = WINDOWS_TOOLCHAIN[goarch];
+  if (!toolchain) {
+    console.error(`no MSVC toolchain is declared for windows/${goarch}`);
+    process.exit(1);
+  }
+  const vars = msvcVars(toolchain);
   if (!vars) {
     // A release without the helper would ship computer use switched off with
     // nothing saying why, so CI refuses; a dev build only loses the feature.
     if (process.env.CI) {
-      console.error("MSVC with the x64 C++ tools is required to build reasonix-computer-helper.exe");
+      console.error(`MSVC with the ${toolchain.label} C++ tools is required to build reasonix-computer-helper.exe`);
       process.exit(1);
     }
     console.warn("MSVC not found: building without reasonix-computer-helper.exe, so computer use is unavailable in this build");
@@ -91,9 +104,12 @@ function buildWindowsHelper() {
 if (process.platform !== "darwin") {
   // go build names the binary after the package and adds .exe where it belongs.
   // Without cgo, because with it the Linux kernel inherits the runner's glibc.
-  go(["build", "-ldflags", LDFLAGS, "-o", OUT + path.sep, PKG], { CGO_ENABLED: "0" });
+  // REASONIX_GOARCH names the architecture to build for; unset, Go's own is
+  // used, which is the runner's.
+  const goarch = (process.env.REASONIX_GOARCH || "").trim();
+  go(["build", "-ldflags", LDFLAGS, "-o", OUT + path.sep, PKG], goarch ? { CGO_ENABLED: "0", GOARCH: goarch } : { CGO_ENABLED: "0" });
   console.log("built reasonix-studio-host");
-  if (process.platform === "win32") buildWindowsHelper();
+  if (process.platform === "win32") buildWindowsHelper(goarch || (process.arch === "arm64" ? "arm64" : "amd64"));
   process.exit(0);
 }
 

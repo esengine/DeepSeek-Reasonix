@@ -1,6 +1,7 @@
 package termrender
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -151,5 +152,52 @@ func TestHighlightCodeUpdatesOnThemeSwitch(t *testing.T) {
 		if plain := ansi.Strip(got); plain != code {
 			t.Fatalf("%s theme changed code text: got %q, want %q", name, plain, code)
 		}
+	}
+}
+
+// TestDiffBodyFoldsLargePreview proves a folded preview keeps maxLines rows
+// however large the diff, reporting the rest: the fold is counted from the
+// source, so the tail is never laid out. Four hunks add three "⋮" separators,
+// so 43 rows fold to 5 kept + a footer naming 38.
+func TestDiffBodyFoldsLargePreview(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("--- a/x\n+++ b/x\n")
+	for h := range 4 {
+		fmt.Fprintf(&b, "@@ -%d,10 +%d,10 @@\n", h*10+1, h*10+1)
+		for range 10 {
+			b.WriteString("+line\n")
+		}
+	}
+	body := diffBody(event.FileDiff{Diff: b.String()}, "x", 80, 6)
+	if len(body) != 6 {
+		t.Fatalf("want 6 rows (5 kept + footer), got %d:\n%s", len(body), strings.Join(body, "\n"))
+	}
+	if !strings.Contains(body[len(body)-1], "38") {
+		t.Fatalf("footer should report 38 folded rows, got %q", body[len(body)-1])
+	}
+}
+
+// TestDiffBodyFoldSeamSameRows proves the benchmark's seam is a fair arm: with
+// the fold off — every row laid out and the tail dropped after — diffBody draws
+// the same rows as the production path, so the benchmark prices the same work.
+func TestDiffBodyFoldSeamSameRows(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("--- a/x\n+++ b/x\n")
+	for h := range 4 {
+		fmt.Fprintf(&b, "@@ -%d,10 +%d,10 @@\n", h*10+1, h*10+1)
+		for range 10 {
+			b.WriteString("+line\n")
+		}
+	}
+	d := event.FileDiff{Diff: b.String()}
+
+	defer func(prev bool) { diffPreviewFold = prev }(diffPreviewFold)
+	diffPreviewFold = true
+	on := strings.Join(diffBody(d, "x", 80, 6), "\n")
+	diffPreviewFold = false
+	off := strings.Join(diffBody(d, "x", 80, 6), "\n")
+
+	if on != off {
+		t.Fatalf("fold seam changed the rows:\non:  %q\noff: %q", on, off)
 	}
 }

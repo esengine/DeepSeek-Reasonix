@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"gopkg.in/yaml.v3"
 )
 
 type docClass int
@@ -168,7 +170,14 @@ func docMetadata(lines []string) (map[string]string, bool) {
 			return meta, true
 		}
 		if key, value, ok := strings.Cut(line, ":"); ok {
-			meta[strings.TrimSpace(key)] = strings.TrimSpace(value)
+			value = strings.TrimSpace(value)
+			if strings.HasPrefix(value, `"`) || strings.HasPrefix(value, "'") {
+				var scalar string
+				if err := yaml.Unmarshal([]byte(value), &scalar); err == nil {
+					value = scalar
+				}
+			}
+			meta[strings.TrimSpace(key)] = value
 		}
 	}
 	return nil, false
@@ -207,7 +216,7 @@ func proseBlocks(lines []string) []proseBlock {
 			continue
 		case inFence:
 			continue
-		case t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "<"):
+		case t == "" || t == ">" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "<"):
 			flush()
 			continue
 		}

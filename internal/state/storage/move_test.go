@@ -234,3 +234,46 @@ func TestJournalIsClearedOnlyWhenTheMoveIsDone(t *testing.T) {
 		t.Fatalf("a finished move left a journal: %+v", j)
 	}
 }
+
+// The sidebar's remembered project list is a file at the top of the state
+// root. A move that carries sessions but not the list leaves every transcript
+// on disk and none of them reachable.
+func TestMoveCarriesTheRememberedProjectList(t *testing.T) {
+	home := stateHome(t)
+	seedState(t, home)
+	list := filepath.Join(home, "serve-workspaces.json")
+	if err := os.WriteFile(list, []byte(`{"paths":["D:\\work\\app"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(testenv.TempDir(t), "moved")
+
+	plan := PlanMove(t.Context(), config.RootState, target)
+	if err := Move(t.Context(), plan, nil); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "serve-workspaces.json")); err != nil {
+		t.Fatalf("project list was not carried to the new root: %v", err)
+	}
+}
+
+// Every top-level entry the state root owns travels with it: a move that left
+// standing instructions or memory behind would read as them being deleted.
+func TestMoveCarriesEveryOwnedEntry(t *testing.T) {
+	home := stateHome(t)
+	for _, name := range config.StateRootEntries {
+		if filepath.Ext(name) != "" {
+			write(t, filepath.Join(home, name), 8)
+		} else {
+			write(t, filepath.Join(home, name, "f"), 8)
+		}
+	}
+	target := filepath.Join(testenv.TempDir(t), "moved")
+	if err := Move(t.Context(), PlanMove(t.Context(), config.RootState, target), nil); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	for _, name := range config.StateRootEntries {
+		if _, err := os.Lstat(filepath.Join(target, name)); err != nil {
+			t.Errorf("%s was not carried: %v", name, err)
+		}
+	}
+}

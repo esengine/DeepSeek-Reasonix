@@ -268,13 +268,13 @@ func (p *singleflightCompressProvider) Stream(_ context.Context, _ provider.Requ
 		close(p.started)
 		go func() {
 			<-p.release
-			ch <- provider.Chunk{Type: provider.ChunkText, Text: "summary"}
+			ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nsummary"}
 			ch <- provider.Chunk{Type: provider.ChunkDone}
 			close(ch)
 		}()
 		return ch, nil
 	}
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "duplicate summary"}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nduplicate summary"}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil
@@ -287,7 +287,7 @@ func (p *staleCompressProvider) Stream(_ context.Context, _ provider.Request) (<
 	close(p.started)
 	go func() {
 		<-p.release
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "summary"}
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nsummary"}
 		ch <- provider.Chunk{Type: provider.ChunkDone}
 		close(ch)
 	}()

@@ -579,6 +579,9 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		CapabilityID: id,
 		Args:         p.Arguments,
 	}
+	if resolved, ok := t.resolveDisabled(base, id, ""); ok {
+		return resolved, nil
+	}
 	switch action {
 	case "search":
 		out, err := t.searchCapabilities(p.Query, p.Limit)
@@ -666,6 +669,19 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 	default:
 		return tool.ResolvedCall{}, fmt.Errorf("unknown action %q; use search, list, inspect, call, or decline", p.Action)
 	}
+}
+
+// TargetArgs is what a call action forwards to its target, read without
+// resolving it; every other action forwards nothing.
+func (*UseCapabilityTool) TargetArgs(args json.RawMessage) json.RawMessage {
+	var p struct {
+		Action    string          `json:"action"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if json.Unmarshal(args, &p) != nil || strings.ToLower(strings.TrimSpace(p.Action)) != "call" {
+		return nil
+	}
+	return p.Arguments
 }
 
 func (t *UseCapabilityTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -985,6 +1001,9 @@ func (t *UseCapabilityTool) resolveRegistryTool(name, id string, args json.RawMe
 	if name == "use_capability" {
 		return tool.ResolvedCall{}, fmt.Errorf("cannot proxy use_capability through itself")
 	}
+	if resolved, ok := t.resolveDisabled(base, id, name); ok {
+		return resolved, nil
+	}
 	if t.registry == nil {
 		return t.resolveUnavailable(base, id, name, "tool registry is unavailable"), nil
 	}
@@ -1039,27 +1058,6 @@ func (t *UseCapabilityTool) resolveSkillCall(skillName, id string, args json.Raw
 		}
 	}
 	return t.resolveUnavailable(base, id, skillName, fmt.Sprintf("skill tools are not available for %q", skillName)), nil
-}
-
-// resolveUnavailable fills the host-proven unavailable shape shared by the
-// side-effect-free resolution failures (missing config, unknown tool).
-func (t *UseCapabilityTool) resolveUnavailable(base tool.ResolvedCall, id, modelName, reason string) tool.ResolvedCall {
-	base.Unavailable = true
-	base.UnavailableReason = reason
-	base.SkipExecute = true
-	base.Result = "capability unavailable: " + reason
-	base.TargetName = modelName
-	base.ReadOnly = false
-	base.Commit = func() error {
-		if t.ledger != nil {
-			t.ledger.MarkUnavailable(id, reason)
-		}
-		if t.audit != nil {
-			t.audit.RecordMCPProxy(false, true, true)
-		}
-		return nil
-	}
-	return base
 }
 
 // findMCPTool matches a server's tool list by raw MCP name or by the
@@ -1493,8 +1491,9 @@ func parseMCPCapabilityID(id string) (server, raw string, err error) {
 
 // Ensure UseCapabilityTool satisfies the tool contracts used by the agent.
 var (
-	_ tool.Tool         = (*UseCapabilityTool)(nil)
-	_ tool.CallResolver = (*UseCapabilityTool)(nil)
+	_ tool.Tool             = (*UseCapabilityTool)(nil)
+	_ tool.CallResolver     = (*UseCapabilityTool)(nil)
+	_ tool.TargetArgsReader = (*UseCapabilityTool)(nil)
 )
 
 // EmitProxyAudit is a helper for frontends: returns a notice describing the

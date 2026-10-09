@@ -14,6 +14,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/base/secrets"
 )
 
 // ExportSizeLimit caps the packed bytes. A plugin root is arbitrary user
@@ -26,7 +29,7 @@ const ExportSizeLimit = 64 << 20
 // hand to a stranger.
 var exportSkipDirs = map[string]bool{".git": true, ".hg": true, ".svn": true}
 
-var envVarRef = regexp.MustCompile(`^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$`)
+var envVarRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 
 // Export packs the package rooted at root into a zip whose entries hang off a
 // single <name>/ directory, and reports the environment variables whoever
@@ -88,7 +91,13 @@ func Export(name, root string) ([]byte, []string, error) {
 		if total > ExportSizeLimit {
 			return fmt.Errorf("plugin %q exceeds the %d MB export limit", name, ExportSizeLimit>>20)
 		}
-		w, err := zw.Create(path.Join(name, rel))
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		header := &zip.FileHeader{Name: path.Join(name, rel), Method: zip.Deflate}
+		header.SetMode(info.Mode().Perm())
+		w, err := zw.CreateHeader(header)
 		if err != nil {
 			return err
 		}
@@ -124,7 +133,7 @@ func credentialBearing(rel string) bool {
 // leaks it, while a false positive costs one variable to fill in.
 func StripCredentials(raw []byte) ([]byte, []string, error) {
 	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	if err := json.Unmarshal(fileencoding.DecodeToUTF8(raw), &doc); err != nil {
 		return nil, nil, err
 	}
 	required := map[string]bool{}
@@ -152,8 +161,28 @@ func stripNode(node any, scope string, required map[string]bool) {
 		return
 	}
 	for key, value := range obj {
-		switch key {
-		case "mcpServers":
+		switch {
+		case strings.EqualFold(key, "command"):
+			if command, ok := value.(string); ok {
+				obj[key] = secrets.RedactConfigValue("", command)
+			}
+		case strings.EqualFold(key, "url"):
+			if endpoint, ok := value.(string); ok {
+				obj[key] = secrets.RedactEndpoint(endpoint)
+			}
+		case strings.EqualFold(key, "args"):
+			if args, ok := value.([]any); ok {
+				text := make([]string, len(args))
+				for i, arg := range args {
+					text[i], _ = arg.(string)
+				}
+				for i, arg := range secrets.RedactArgs(text) {
+					if _, ok := args[i].(string); ok {
+						args[i] = arg
+					}
+				}
+			}
+		case strings.EqualFold(key, "mcpServers"):
 			servers, ok := value.(map[string]any)
 			if !ok {
 				continue
@@ -161,7 +190,7 @@ func stripNode(node any, scope string, required map[string]bool) {
 			for serverName, server := range servers {
 				stripNode(server, serverName, required)
 			}
-		case "env", "headers":
+		case strings.EqualFold(key, "env"), strings.EqualFold(key, "headers"):
 			fields, ok := value.(map[string]any)
 			if !ok {
 				continue
@@ -203,6 +232,9 @@ func envVarName(key string) string {
 		}
 	}
 	if name := strings.Trim(b.String(), "_"); name != "" {
+		if name[0] >= '0' && name[0] <= '9' {
+			return "_" + name
+		}
 		return name
 	}
 	return "SECRET"

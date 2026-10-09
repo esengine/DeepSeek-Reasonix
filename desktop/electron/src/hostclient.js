@@ -26,6 +26,10 @@ class StudioHost {
     return this.json("GET", "/tray/state");
   }
 
+  trayRunning() {
+    return this.json("GET", "/tray/running");
+  }
+
   // A refusal and an unreachable kernel both answer null here: every caller of
   // this is a surface that has to keep working when the kernel is going down.
   async json(method, path, body) {

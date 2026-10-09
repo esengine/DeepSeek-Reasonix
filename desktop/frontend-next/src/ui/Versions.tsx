@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import { bytes } from "../i18n/format";
 import { t } from "../i18n";
-import type { UpdateProgress, VersionHub } from "../port/port";
+import type { UpdateProgress, VersionHub, VersionNotes } from "../port/port";
 import { reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
+import { LazyMarkdown } from "./LazyMarkdown";
 import { deltaSkippedCopy, failureCopy, releasePage } from "./versionFailure";
 
 // A shell that declared no install: a build run from source, not a failure.
 const NO_INSTALL = "studio.no_install";
 // Work is running and would end with the restart; the person decides.
 const RESTART_BUSY = "update.restart_busy";
+// The release has no notes published: nothing to retry, only the page to read.
+const NOTES_ABSENT = "studio.notes_absent";
 
 // The panel answers three questions in the order a user asks them: what am I
 // running, is something wrong with it, and how do I get off it. Every action
@@ -22,7 +25,12 @@ type Port = {
   goToVersion(v: string): Promise<void>;
   restartToVersion(v: string, force: boolean): Promise<void>;
   onUpdateProgress(cb: (p: UpdateProgress) => void): () => void;
+  versionNotes?(version: string, retry?: boolean): Promise<VersionNotes>;
 };
+
+// A document read stays read: it is kept for as long as the panel is mounted,
+// and the kernel keeps it on disk past that.
+type NotesState = { phase: "loading" } | { phase: "ok"; markdown: string } | { phase: "err"; why: string; absent: boolean };
 
 // Phases during which a move owns the install and nothing else may start.
 const MOVING = new Set<UpdateProgress["phase"]>(["downloading", "verifying", "downloaded", "applying", "authorizing", "relaunching"]);
@@ -77,6 +85,8 @@ export function Versions({ port }: { port: Port }) {
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [later, setLater] = useState("");
   const [running, setRunning] = useState(0);
+  const [openNotes, setOpenNotes] = useState("");
+  const [notes, setNotes] = useState<Record<string, NotesState>>({});
 
   // The kernel says why it cannot answer — a shell that never declared an
   // install, a server that does not carry this at all. Folding that back into
@@ -147,6 +157,37 @@ export function Versions({ port }: { port: Port }) {
       }
       setFailed(reason(e));
     }
+  };
+
+  const loadNotes = (v: string, retry: boolean) => {
+    if (!port.versionNotes) return;
+    setNotes((n) => ({ ...n, [v]: { phase: "loading" } }));
+    port
+      .versionNotes(v, retry)
+      .then((r) => setNotes((n) => ({ ...n, [v]: { phase: "ok", markdown: r.markdown } })))
+      .catch((e) =>
+        setNotes((n) => ({
+          ...n,
+          [v]: { phase: "err", why: reason(e), absent: e instanceof HttpError && e.reason?.code === NOTES_ABSENT },
+        })),
+      );
+  };
+
+  const toggleNotes = (v: string) => {
+    if (openNotes === v) {
+      setOpenNotes("");
+      return;
+    }
+    setOpenNotes(v);
+    const have = notes[v];
+    if (!have || have.phase === "err") loadNotes(v, false);
+  };
+
+  const closeNotes = (e: KeyboardEvent<HTMLElement>, v: string) => {
+    if (e.key !== "Escape" || openNotes !== v) return;
+    e.stopPropagation();
+    setOpenNotes("");
+    document.querySelector<HTMLElement>(`[aria-controls="vnotes-${v}"]`)?.focus();
   };
 
   if (uninstalled) {
@@ -270,12 +311,15 @@ export function Versions({ port }: { port: Port }) {
           marked the way every other "this one" in the app is. */}
       <div className="vlist">
         {list.map((v, i) => (
+          <Fragment key={v.version}>
           <div
-            key={v.version}
             className="vrow"
+            data-open={openNotes === v.version ? "" : undefined}
             data-on={v.current ? "" : undefined}
             data-side={v.current ? "now" : v.older ? "past" : "ahead"}
             style={{ animationDelay: `${Math.min(i, 8) * 34}ms` }}
+            data-action={v.hasNotes ? "versions.notes-close" : undefined}
+            onKeyDown={v.hasNotes ? (e) => closeNotes(e, v.version) : undefined}
           >
             <span className="nm">{v.version}</span>
             <span className="ds">{t(v.current ? "正在运行" : v.older ? "更早的版本" : "更新的版本")}</span>
@@ -316,9 +360,50 @@ export function Versions({ port }: { port: Port }) {
                 {t("固定在这里")}
               </button>
             )}
+            {v.hasNotes && port.versionNotes && (
+              <button
+                className="vn lnk"
+                data-action="versions.notes"
+                aria-expanded={openNotes === v.version}
+                aria-controls={`vnotes-${v.version}`}
+                onClick={() => toggleNotes(v.version)}
+              >
+                {t(openNotes === v.version ? "收起更新内容" : "更新内容")}
+              </button>
+            )}
           </div>
+          {v.hasNotes && port.versionNotes && openNotes === v.version && (
+            <NotesPanel id={`vnotes-${v.version}`} version={v.version} state={notes[v.version]} retry={() => loadNotes(v.version, true)} onKeyDown={(e) => closeNotes(e, v.version)} />
+          )}
+          </Fragment>
         ))}
       </div>
     </div>
+  );
+}
+
+function NotesPanel({ id, version, state, retry, onKeyDown }: { id: string; version: string; state: NotesState | undefined; retry: () => void; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void }) {
+  const loading = !state || state.phase === "loading";
+  return (
+    <section id={id} className="vnotes" data-action="versions.notes-close" onKeyDown={onKeyDown} aria-label={t("{v} 的更新内容", { v: version })} aria-busy={loading}>
+      {loading && <p className="acct-note">{t("正在读取更新内容…")}</p>}
+      {state?.phase === "ok" && <LazyMarkdown text={state.markdown} images={false} />}
+      {state?.phase === "err" && (
+        <div className="find" data-lvl="warn" role="alert">
+          <span className="t">{t("更新内容读取失败")}</span>
+          <span className="why">
+            {state.why}
+            {!state.absent && (
+              <button className="lnk" data-action="versions.notes-retry" onClick={retry}>
+                {t("重试")}
+              </button>
+            )}
+            <a className="lnk" href={releasePage(version)} target="_blank" rel="noreferrer noopener">
+              {t("在 GitHub 查看")}
+            </a>
+          </span>
+        </div>
+      )}
+    </section>
   );
 }

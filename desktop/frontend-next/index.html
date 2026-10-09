@@ -41,7 +41,9 @@
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(pair ? { code: pair } : { token: token }),
-          }).then(function () {});
+          }).then(function (response) {
+            if (response.ok) window.location.reload();
+          });
         } catch (e) {
           return Promise.resolve();
         }

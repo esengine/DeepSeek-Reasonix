@@ -8,13 +8,15 @@ interface Props {
   port: AgentPort;
   packages: PluginPackage[];
   onChanged: () => void;
+  onReloadError?: (message: string) => void;
+  onReloaded?: () => void;
   // Only one package can be mid-update: the confirmation is a full pane, and
   // two of them open at once would be two plans competing for one answer.
   updating: string;
   onUpdate: (name: string) => void;
 }
 
-export function Packages({ port, packages, onChanged, updating, onUpdate }: Props) {
+export function Packages({ port, packages, onChanged, onReloadError, onReloaded, updating, onUpdate }: Props) {
   const [connection, setConnection] = useState({ port, generation: 0 });
   const currentConnection = useRef(connection);
   currentConnection.current = connection;
@@ -28,6 +30,12 @@ export function Packages({ port, packages, onChanged, updating, onUpdate }: Prop
           port={port}
           onDone={() => {
             if (currentConnection.current === connection) onChanged();
+          }}
+          onReloadError={(message) => {
+            if (currentConnection.current === connection) onReloadError?.(message);
+          }}
+          onReloaded={() => {
+            if (currentConnection.current === connection) onReloaded?.();
           }}
           updating={updating}
           onUpdate={() => onUpdate(p.name)}
@@ -59,9 +67,11 @@ function summary(p: PluginPackage): string {
 }
 
 function Package({
-  p, port, onDone, updating, onUpdate,
+  p, port, onDone, onReloadError, onReloaded, updating, onUpdate,
 }: {
   p: PluginPackage; port: AgentPort; onDone: () => void; updating: string; onUpdate: () => void;
+  onReloadError: (message: string) => void;
+  onReloaded: () => void;
 }) {
   const [busy, setBusy] = useState("");
   const [failed, setFailed] = useState("");
@@ -100,6 +110,7 @@ function Package({
         disabled={locked}
         onClick={() =>
           void run("export", async () => {
+            setExported(null);
             setExported(await port.exportPlugin(p.name));
           })
         }
@@ -115,7 +126,11 @@ function Package({
         on={p.enabled}
         busy={locked}
         label={`${t(p.enabled ? "关闭" : "启用")} ${p.name}`}
-        onClick={() => void run("toggle", () => port.setPluginEnabled(p.name, !p.enabled))}
+        onClick={() => void run("toggle", async () => {
+          const out = await port.setPluginEnabled(p.name, !p.enabled);
+          if (out.reloadError) onReloadError(out.reloadError);
+          else onReloaded();
+        })}
       />
     </span>
   );
@@ -137,6 +152,10 @@ function Package({
           void run("remove", async () => {
             const out = await port.removePlugin(p.name);
             setConfirming(false);
+            if (out.applied) {
+              if (out.reloadError) onReloadError(out.reloadError);
+              else onReloaded();
+            }
             if (!out.ok) setFailed(out.error || out.next || t("没能删掉"));
           })
         }
@@ -169,8 +188,9 @@ function Package({
         </div>
       ))}
       {exported && (
-        <div className="why">
+        <div className="why" role="status">
           {exported.savedTo ? t("已保存至 {path}。", { path: exported.savedTo }) : t("导出完成。")}
+          {" "}
           {exported.required.length
             ? t("里面的密钥值已经去掉，装它的人要自己提供：{names}", { names: exported.required.join("、") })
             : t("该包不需要填写任何密钥。")}
@@ -180,7 +200,7 @@ function Package({
   );
 
   return (
-    <details className="srv" data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || undefined}>
+    <details className="srv" data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || !!exported || undefined}>
       <summary>{head}</summary>
       {confirm}
       {notes}
@@ -201,8 +221,8 @@ function Package({
             <span className="sc">{name}</span>
           </div>
         ))}
-        {p.hooks?.map((h) => (
-          <div className="row" data-run key={h.event + h.command}>
+        {p.hooks?.map((h, index) => (
+          <div className="row" data-run key={index}>
             <span className="d">▸</span>
             <span>{h.event}</span>
             <span className="sc">{h.description || h.command || h.contextFile}</span>
@@ -220,8 +240,8 @@ function Package({
         <Contributions items={p.agents} />
         <Contributions items={p.prompts} />
         <Contributions items={p.themes} />
-        {p.skipped?.map((s) => (
-          <div className="row" key={s.capability + s.reason}>
+        {p.skipped?.map((s, index) => (
+          <div className="row" key={index}>
             <span className="d">·</span>
             <span>{s.capability}</span>
             <span className="sc">{t("用不了：{why}", { why: s.reason })}</span>
@@ -236,8 +256,8 @@ function Contributions({ items }: { items?: PluginItem[] }) {
   if (!items?.length) return null;
   return (
     <>
-      {items.map((it) => (
-        <div className="row" key={it.invocation || it.name}>
+      {items.map((it, index) => (
+        <div className="row" key={index}>
           <span className="d">·</span>
           <span>{it.invocation || it.name}</span>
           <span className="sc">{it.description}</span>

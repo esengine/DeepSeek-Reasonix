@@ -4,7 +4,7 @@
 // cleanly falls back to the terminal block rather than being forced into a
 // list — a wrong list reads as authoritative, a raw block only reads as raw.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { t } from "../../i18n";
 import { useStartsOpen } from "../../state/foldpref";
 import { bytes } from "../../i18n/format";
@@ -208,8 +208,10 @@ function overstrike(text: string): string {
 }
 
 export function Term({ text: raw, one }: { text: string; one?: boolean }) {
-  const text = overstrike(raw);
-  const lines = text.split("\n");
+  const { text, lines } = useMemo(() => {
+    const out = overstrike(raw);
+    return { text: out, lines: out.split("\n") };
+  }, [raw]);
   if (lines.length > SPLIT_MAX) return <pre className="term">{text}</pre>;
   return (
     <pre className="term" data-one={one ? "" : undefined}>

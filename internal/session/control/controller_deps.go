@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"reasonix/internal/state/sessionstore"
+	"sync"
 
 	"reasonix/internal/contract/ablation"
 	"reasonix/internal/contract/config"
@@ -45,6 +46,9 @@ type controllerDeps struct {
 	// pauses instead of defaulting to continue.
 	evaluator goaleval.Evaluator
 	refiner   *promptrefine.Refiner
+	committer CommitDrafter
+	// commitMu serialises commits so two confirmations cannot interleave.
+	commitMu sync.Mutex
 	// goalUsageTee accounts billable usage events into the active goal turn's
 	// observational token total. It wraps the public sink when the caller didn't provide one.
 	goalUsageTee *goalUsageTee
@@ -58,10 +62,13 @@ type controllerDeps struct {
 	// observe is non-nil for a read-only unattended run; see ObserveRun.
 	observe *ObserveRun
 
-	label      string
-	modelRef   string
-	modelModes []config.ModelMode // what SetModelMode accepts; see model_modes.go
-	sessionDir string
+	label               string
+	modelRef            string
+	effort              string
+	providerFingerprint string
+	modelModes          []config.ModelMode // what SetModelMode accepts; see model_modes.go
+	modelFace           *ModelFace         // what the build resolved for the session's model; see model_face.go
+	sessionDir          string
 	// skills owns the session's discovered skills (enabled subset, full set, and
 	// the reloadable stores) — the skills slice of the Capabilities concern. See
 	// skill.go.
@@ -136,6 +143,7 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		guardianSess:           opts.Guardian,
 		evaluator:              opts.GoalEvaluator,
 		refiner:                opts.PromptRefiner,
+		committer:              opts.CommitMessenger,
 		goalUsageTee:           usageTee,
 		sink:                   sink,
 		policy:                 opts.Policy,
@@ -143,9 +151,12 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		subagentGate:           opts.SubagentGate,
 		label:                  opts.Label,
 		modelRef:               opts.ModelRef,
+		effort:                 opts.Effort,
+		providerFingerprint:    opts.ProviderFingerprint,
 		modelModes:             opts.ModelModes,
+		modelFace:              faceOfEntry(opts.ModelEntry),
 		sessionDir:             opts.SessionDir,
-		skills:                 newSkillSet(opts.Skills, opts.AllSkills, opts.SkillStore, opts.AllSkillStore, opts.DisableImplicitSkillInvocation),
+		skills:                 newSkillSet(opts.Skills, opts.AllSkills, opts.SkillStore, opts.AllSkillStore, opts.DisableImplicitSkillInvocation, opts.WorkspaceRoot),
 		skillRunner:            opts.SkillRunner,
 		readOnlySkillRunner:    opts.ReadOnlySkillRunner,
 		skillProfile:           opts.SkillProfile,

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reasonix/internal/contract/config"
+	"reasonix/internal/session/control"
 )
 
 func readRoles(t *testing.T, base string) map[string]string {
@@ -132,5 +133,29 @@ func TestSetRoleIsRefusedUntilTheHostGrantsIt(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("POST /roles without the grant = %d, want 403", resp.StatusCode)
+	}
+}
+
+// Mid-turn the assignment is written and only the rebuild waits; the answer has
+// to say so by code, and the file has to hold what the answer claims.
+func TestSetRoleMidTurnIsSavedAndSaysSo(t *testing.T) {
+	srv := newRichProviderServerAs(t, func(c control.SessionAPI) control.SessionAPI { return midTurn{c} })
+
+	resp := postProvider(t, srv.URL, "/roles", `{"role":"subagent","ref":"rich/beta"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("POST /roles mid-turn = %d, want 409", resp.StatusCode)
+	}
+	var got struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Code != "runtime.saved_while_running" {
+		t.Fatalf("code = %q, want runtime.saved_while_running", got.Code)
+	}
+	if v := readRoles(t, srv.URL)["subagent"]; v != "rich/beta" {
+		t.Fatalf("GET /roles subagent = %q, want the saved rich/beta", v)
 	}
 }

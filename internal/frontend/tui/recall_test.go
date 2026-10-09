@@ -56,3 +56,50 @@ func TestSendingARecallDropsTheOldDraft(t *testing.T) {
 		t.Fatalf("composer = %q after a sent recall, want empty", got)
 	}
 }
+
+// A recalled entry of several lines does not stop the walk: Up moves through
+// its lines, and Up on its first line goes on to the entry before it.
+func TestRecallWalksPastAMultiLineEntry(t *testing.T) {
+	m, _ := testModel(t)
+	typeText(m, "oldest")
+	run(m, press(m, "enter"))
+	m.composer.SetValue("first\nsecond")
+	run(m, press(m, "enter"))
+	for i, step := range []struct {
+		key  rune
+		want string
+		line int
+	}{
+		{tea.KeyUp, "first\nsecond", 1},
+		{tea.KeyUp, "first\nsecond", 0},
+		{tea.KeyUp, "oldest", 0},
+		{tea.KeyDown, "first\nsecond", 1},
+		{tea.KeyDown, "", 0},
+	} {
+		pressCode(m, step.key)
+		if got := m.composer.Value(); got != step.want || m.composer.Line() != step.line {
+			t.Fatalf("step %d: composer %q on line %d, want %q on line %d", i+1, got, m.composer.Line(), step.want, step.line)
+		}
+	}
+}
+
+// Up on the first line of a draft that spans lines steps into the history, and
+// the draft comes back whole at the end of the walk.
+func TestRecallStartsFromTheFirstLineOfAMultiLineDraft(t *testing.T) {
+	m, _ := testModel(t)
+	typeText(m, "old")
+	run(m, press(m, "enter"))
+	m.composer.SetValue("draft one\ndraft two")
+	pressCode(m, tea.KeyUp)
+	if got := m.composer.Value(); got != "draft one\ndraft two" {
+		t.Fatalf("Up below the first line left the draft as %q", got)
+	}
+	pressCode(m, tea.KeyUp)
+	if got := m.composer.Value(); got != "old" {
+		t.Fatalf("Up on the draft's first line recalled %q, want %q", got, "old")
+	}
+	pressCode(m, tea.KeyDown)
+	if got := m.composer.Value(); got != "draft one\ndraft two" {
+		t.Fatalf("Down past the newest entry left %q, want the draft back", got)
+	}
+}

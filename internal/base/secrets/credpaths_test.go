@@ -95,3 +95,16 @@ func TestCredentialProtectionDefaultsOn(t *testing.T) {
 		t.Fatal("credential protection is off before any setter ran")
 	}
 }
+
+func TestSensitiveFileNameIsAboutTheNameNotTheDirectory(t *testing.T) {
+	for name, want := range map[string]bool{
+		".env": true, ".ENV": true, ".netrc": true, ".git-credentials": true,
+		"server.pem": true, "id.KEY": true, "bundle.p12": true, "cert.pfx": true,
+		"id_ed25519": true, "id_rsa": true, "ID_ECDSA": true, "id_ed25519.pub": false,
+		".env.production": true, ".env.local": true, "env.go": false, ".env.example": false, ".env.sample": false, "keyboard.go": false, "monkey.txt": false,
+	} {
+		if got := SensitiveFileName(name); got != want {
+			t.Errorf("SensitiveFileName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

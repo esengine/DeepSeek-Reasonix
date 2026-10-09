@@ -1,0 +1,6 @@
+{
+  "name": "command-notes-kit",
+  "version": "0.1.0",
+  "description": "A compatible command template for notes from supplied facts",
+  "commands": "./commands/"
+}

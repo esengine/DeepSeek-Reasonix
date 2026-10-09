@@ -195,3 +195,14 @@ func TestEffectModelSwitchCarriesOnlyADeclaredMode(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildHandsTheControllerItsResolvedModel(t *testing.T) {
+	ctrl := buildModeSession(t, &modeWire{}, "https://api.openai.com/v1", "gpt-5")
+	face, ok := ctrl.ModelFace()
+	if !ok {
+		t.Fatal("boot.Build left the controller without its resolved model")
+	}
+	if face.Ref != "oai/gpt-5" {
+		t.Fatalf("ref = %q, want oai/gpt-5", face.Ref)
+	}
+}

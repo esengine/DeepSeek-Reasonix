@@ -18,9 +18,28 @@ import (
 // were all in that position. This reads the tree rather than trusting a list
 // someone has to remember to extend.
 func TestStateRootEntriesCoversEverythingWrittenThere(t *testing.T) {
-	root := filepath.Join("..", "..", "..")
+	found, err := stateRootJoins(filepath.Join("..", "..", "..", "internal"))
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(found) == 0 {
+		t.Fatal("no state-root joins found; this guard is watching nothing")
+	}
+	for name, where := range found {
+		if !slices.Contains(StateRootEntries, name) {
+			t.Errorf("%q is written under the state root (%s) but is not in StateRootEntries, so a relocation leaves it behind", name, where)
+		}
+	}
+}
+
+// stateRootJoins maps each literal name joined onto the state root to a file
+// doing it. An entry another process removes mid-walk is not a source file.
+func stateRootJoins(dir string) (map[string]string, error) {
 	found := map[string]string{}
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil && vanishedMidWalk(path, err) {
+			return nil
+		}
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
 		}
@@ -43,17 +62,7 @@ func TestStateRootEntriesCoversEverythingWrittenThere(t *testing.T) {
 		})
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if len(found) == 0 {
-		t.Fatal("no state-root joins found; this guard is watching nothing")
-	}
-	for name, where := range found {
-		if !slices.Contains(StateRootEntries, name) {
-			t.Errorf("%q is written under the state root (%s) but is not in StateRootEntries, so a relocation leaves it behind", name, where)
-		}
-	}
+	return found, err
 }
 
 func isJoin(fun ast.Expr) bool {

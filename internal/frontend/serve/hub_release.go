@@ -10,17 +10,24 @@ import (
 // is asked through its own runtime; one whose link cannot answer is running
 // nothing this window can see, so closing it loses no work.
 func (h *Hub) paneRunning(ctx context.Context, rt *Runtime) bool {
+	running, _ := h.paneRunningKnown(ctx, rt)
+	return running
+}
+
+// paneRunningKnown separates "not running" from "could not be asked": a caller
+// that must not act on a silence reads known.
+func (h *Hub) paneRunningKnown(ctx context.Context, rt *Runtime) (running, known bool) {
 	if rt.Local() {
-		return rt.Server.Controller().Running()
+		return rt.Server.Controller().Running(), true
 	}
 	ep := rt.remote.ep
 	var st struct {
 		Running bool `json:"running"`
 	}
 	if err := farRequest(ctx, ep, http.MethodGet, ep.Base+"/status", nil, &st); err != nil {
-		return false
+		return false, false
 	}
-	return st.Running
+	return st.Running, true
 }
 
 // releasePanes closes the panes standing in a delete's way. A delete the

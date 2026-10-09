@@ -103,6 +103,7 @@ type InboxItemMeta struct {
 	Origin      PromptOrigin `json:"origin,omitempty"`
 	Refs        []RefSummary `json:"refs,omitempty"`
 	BlockReason string       `json:"blockReason,omitempty"`
+	BlockCode   BlockCode    `json:"blockCode,omitempty"`
 	RunID       string       `json:"runId,omitempty"`
 }
 

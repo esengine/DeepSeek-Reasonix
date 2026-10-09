@@ -2,8 +2,8 @@ package sessionv4
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 	"strings"
 	"time"
 )
@@ -36,8 +36,7 @@ const catalogVersion = 5
 // CachedListing reads the listing 1.x cached for the session, when that cache
 // still describes the log as it is.
 func (s Session) CachedListing() (Listing, bool) {
-	path := filepath.Join(filepath.Dir(s.Dir), ".query-cache", s.Manifest.SessionID, "catalog-metadata.json")
-	raw, err := os.ReadFile(path)
+	raw, err := fs.ReadFile(s.store, path.Join(".query-cache", s.Manifest.SessionID, "catalog-metadata.json"))
 	if err != nil {
 		return Listing{}, false
 	}

@@ -38,21 +38,25 @@ var (
 // cleanly when no go toolchain is available (minimal test environments); a
 // present toolchain that cannot build the example is a real failure.
 func TestMain(m *testing.M) {
+	os.Exit(runConformanceTests(m))
+}
+
+func runConformanceTests(m *testing.M) int {
 	if _, err := exec.LookPath("go"); err != nil {
 		fmt.Fprintln(os.Stderr, "conformance: go toolchain unavailable; skipping suite")
-		os.Exit(0)
+		return 0
 	}
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		fmt.Fprintln(os.Stderr, "conformance: cannot locate source root")
-		os.Exit(1)
+		return 1
 	}
 	sdkDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..", "sdk", "go")
 	exampleRoot = filepath.Join(sdkDir, "examples", "fullsidecar")
 	dir, err := os.MkdirTemp("", "fullsidecar-conformance-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "conformance: MkdirTemp:", err)
-		os.Exit(1)
+		return 1
 	}
 	defer os.RemoveAll(dir)
 	binary := filepath.Join(dir, "fullsidecar")
@@ -62,10 +66,10 @@ func TestMain(m *testing.M) {
 	build := exec.Command("go", "build", "-C", sdkDir, "-o", binary, "./examples/fullsidecar")
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "conformance: build example: %v\n%s", err, out)
-		os.Exit(1)
+		return 1
 	}
 	examplePath = binary
-	os.Exit(m.Run())
+	return m.Run()
 }
 
 // Host client fixture

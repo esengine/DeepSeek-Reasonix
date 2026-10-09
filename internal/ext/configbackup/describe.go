@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 )
 
@@ -18,16 +19,17 @@ func describe(it Item) (string, []PathRef) {
 	case KindProvider:
 		var p config.ProviderEntry
 		if decodeTOML(it.Data, &p) == nil {
-			return strings.TrimSpace(p.Kind + " " + firstNonEmpty(p.RequestURL, p.BaseURL, p.ChatURL)), nil
+			return strings.TrimSpace(p.Kind + " " + secrets.RedactEndpoint(firstNonEmpty(p.RequestURL, p.BaseURL, p.ChatURL))), nil
 		}
 	case KindMCP:
 		var p config.PluginEntry
 		if decodeTOML(it.Data, &p) == nil {
 			if strings.TrimSpace(p.Command) == "" {
-				return p.URL, nil
+				return secrets.RedactEndpoint(p.URL), nil
 			}
-			line := strings.TrimSpace(p.Command + " " + strings.Join(p.Args, " "))
-			return line, absPaths(append([]string{p.Command}, p.Args...)...)
+			args := secrets.RedactArgs(p.Args)
+			line := strings.TrimSpace(p.Command + " " + strings.Join(args, " "))
+			return line, absPaths(append([]string{p.Command}, args...)...)
 		}
 	case KindHook:
 		var h hookData
@@ -69,15 +71,15 @@ func details(it Item) ([]string, string) {
 		if decodeTOML(it.Data, &p) != nil {
 			return nil, ""
 		}
-		out := labelled("base_url", p.BaseURL, "request_url", p.RequestURL, "chat_url", p.ChatURL,
-			"models_url", p.ModelsURL, "balance_url", p.BalanceURL, "api_key_env", p.APIKeyEnv)
+		out := labelled("base_url", stripURLSecrets(p.BaseURL), "request_url", stripURLSecrets(p.RequestURL), "chat_url", stripURLSecrets(p.ChatURL),
+			"models_url", stripURLSecrets(p.ModelsURL), "balance_url", stripURLSecrets(p.BalanceURL), "api_key_env", p.APIKeyEnv)
 		return append(out, pairs("header", p.Headers)...), ""
 	case KindMCP:
 		var p config.PluginEntry
 		if decodeTOML(it.Data, &p) != nil {
 			return nil, ""
 		}
-		out := labelled("type", p.Type, "url", p.URL)
+		out := labelled("type", p.Type, "url", secrets.RedactEndpoint(p.URL))
 		return append(append(out, pairs("env", p.Env)...), pairs("header", p.Headers)...), ""
 	case KindHook:
 		var h hookData
@@ -111,6 +113,7 @@ func labelled(kv ...string) []string {
 }
 
 func pairs(label string, m map[string]string) []string {
+	m = secrets.RedactConfigMap(m)
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

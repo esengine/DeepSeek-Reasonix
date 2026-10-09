@@ -37,7 +37,7 @@ func (s *Server) repairConfigFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.rebuildInPlace(r.Context()); err != nil {
-		refuse(w, http.StatusConflict, "runtime.rebuild_failed", err.Error(), map[string]any{"detail": err.Error()})
+		rebuildFailed(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{"backup": backup, "problem": s.ctl().ConfigProblem()})

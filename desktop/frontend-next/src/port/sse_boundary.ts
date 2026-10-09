@@ -1,6 +1,6 @@
 import { SseShell } from "./sse_shell";
 import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
-import type { AutoArchiveSettings, ProgressWatchSettings } from "./boundary";
+import type { AutoArchiveSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings } from "./boundary";
 
 // Where the agent may reach: the permission rules a call is matched against and
 // the sandbox the shell runs in.
@@ -31,6 +31,12 @@ export class SseBoundary extends SseShell {
   }
   saveBrowserTools(enabled: boolean) {
     return this.post0<BrowserToolsSettings>("/browser-tools", { enabled });
+  }
+  displayCurrency() {
+    return this.get<DisplayCurrencySettings>("/display-currency");
+  }
+  saveDisplayCurrency(mode: DisplayCurrencyMode) {
+    return this.post0<DisplayCurrencySettings>("/display-currency", { mode });
   }
   progressWatch() {
     return this.get<ProgressWatchSettings>("/progress-watch");

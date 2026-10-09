@@ -1,9 +1,12 @@
 package plugin
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 )
 
@@ -46,4 +49,65 @@ func TestAnnounceReportsWithoutPromptsOrResources(t *testing.T) {
 // must not take the connection down with it.
 func TestAnnounceToleratesNoSink(t *testing.T) {
 	NewHost().announce("x: connected")
+}
+
+func TestConnectionStateChangesAnnounceStatus(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	h := NewHost()
+	defer h.Close()
+	sink := &capturedSink{}
+	h.SetStatusSink(sink)
+
+	srv := mcpHTTPServer(t, false)
+	defer srv.Close()
+	spec := Spec{Name: "tools", Type: "http", URL: srv.URL,
+		Headers: map[string]string{"Authorization": "Bearer secret"}}
+	if _, err := h.EnsureConnected(context.Background(), spec); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.text) != 2 || sink.text[0] != "tools: connecting" || sink.text[1] != "tools: connected" {
+		t.Fatalf("status announcements = %v", sink.text)
+	}
+}
+
+// A failed attempt is announced as one: the row it refreshes says "failed", and
+// an announcement that never fired would leave a status view showing whatever
+// it showed before the attempt.
+func TestFailureAnnouncesConnectionFailed(t *testing.T) {
+	h := NewHost()
+	sink := &capturedSink{}
+	h.SetStatusSink(sink)
+
+	h.RecordFailure(Spec{Name: "tools", Type: "http"}, errors.New("connection refused"))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.text) != 1 || sink.text[0] != "tools: connection failed" {
+		t.Fatalf("announcements = %v, want the failure", sink.text)
+	}
+}
+
+// A project MCP blocked pending authorization was never attempted, so the
+// announcement must not claim a connection failed: the row it refreshes says
+// "awaiting approval" and a status view told otherwise sends the user looking
+// for a fault that does not exist.
+func TestLaunchApprovalAnnouncesAwaitingApproval(t *testing.T) {
+	h := NewHost()
+	sink := &capturedSink{}
+	h.SetStatusSink(sink)
+
+	h.RecordLaunchApprovalRequired(Spec{Name: "project-tools", Type: "stdio"})
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.text) != 1 || sink.text[0] != "project-tools: awaiting approval" {
+		t.Fatalf("announcements = %v, want the approval state", sink.text)
+	}
+	failures := h.Failures()
+	if len(failures) != 1 || !failures[0].RequiresLaunchApproval {
+		t.Fatalf("failures = %+v, want one approval-pending record", failures)
+	}
 }

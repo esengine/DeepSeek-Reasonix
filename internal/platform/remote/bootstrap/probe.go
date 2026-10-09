@@ -35,6 +35,7 @@ type Report struct {
 	// the auto strategy takes first.
 	Downloader string
 	Routes     []Route
+	env        loginEnv
 }
 
 // Route is one way a kernel could reach that machine, and what stands in the
@@ -76,7 +77,8 @@ func Probe(ctx context.Context, conn Conn, opts Options) (Report, error) {
 	}
 	// Home as that machine spells it: the file layer's /C:/Users/... is not a
 	// path anybody there would type.
-	rep := Report{OS: goos, Arch: goarch, Home: target.NativePath(home)}
+	conn, env := connWithLoginEnv(ctx, conn, target)
+	rep := Report{env: env, OS: goos, Arch: goarch, Home: target.NativePath(home)}
 	// The whole set, not the subset this call carries: a probe answers for a
 	// connect, and every connect that opens a pane publishes a broker. Calling
 	// a kernel usable that the connect then refuses is what this prevents.
@@ -139,7 +141,7 @@ func routeClosed(name string, rep Report, opts Options, goos, goarch string) err
 		return nil
 	case InstallNPM:
 		if rep.NPM == "" {
-			return ErrNPMUnavailable
+			return npmUnavailable(rep.env, nil)
 		}
 		return nil
 	case InstallUpload:

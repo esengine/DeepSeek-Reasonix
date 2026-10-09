@@ -1,0 +1,7 @@
+Review reference from review-context-kit
+
+When reviewing a change, connect each finding to a concrete source location and
+the behavior it affects. Separate observed behavior from an untested hypothesis.
+List the checks actually run and their results. State what remains unverified.
+Do not present this reference, successful installation, or a plausible explanation
+as evidence that a change works. Follow the user's requested review scope.

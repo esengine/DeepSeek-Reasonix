@@ -57,6 +57,16 @@ func ModelFetchStatus(err error) (int, bool) {
 	return statusErr.status, true
 }
 
+// ModelFetchBody is what the endpoint said alongside a refused model-list
+// request, for a reader to see and never for a caller to classify by.
+func ModelFetchBody(err error) (string, bool) {
+	var statusErr modelFetchStatusError
+	if !errors.As(err, &statusErr) {
+		return "", false
+	}
+	return strings.TrimSpace(statusErr.body), true
+}
+
 // IsModelFetchEndpointMiss reports whether a model-list request reached a
 // plausible endpoint path that the provider does not implement.
 func IsModelFetchEndpointMiss(err error) bool {

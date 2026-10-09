@@ -59,7 +59,7 @@ func TestWithStderrRedactsCredentials(t *testing.T) {
 	tr := &stdioTransport{stderr: &tailBuffer{limit: 1024}}
 	_, _ = tr.stderr.Write([]byte("Authorization: Bearer transport-secret-value"))
 	got := tr.withStderr(errors.New("child exited")).Error()
-	if strings.Contains(got, "transport-secret-value") || !strings.Contains(got, "Bearer [redacted]") {
+	if strings.Contains(got, "transport-secret-value") || !strings.Contains(got, "output omitted") {
 		t.Fatalf("stderr error was not redacted: %q", got)
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -85,13 +86,16 @@ func (m *model) refreshMenu() tea.Cmd {
 		m.menu = nil
 		return nil
 	}
+	m.onCompletion(completionMsg{line: line})
 	return m.fetchCompletion()
 }
 
 func (m *model) onCompletion(msg completionMsg) {
-	if msg.err != nil || msg.line != m.composer.Value() {
-		m.menu = nil
+	if msg.line != m.composer.Value() {
 		return
+	}
+	if msg.err != nil {
+		msg.c = Completion{}
 	}
 	c := msg.c
 	c.Items = append(m.localCommands(msg.line), c.Items...)
@@ -105,7 +109,11 @@ func (m *model) onCompletion(msg completionMsg) {
 	if len(msg.c.Items) == 0 {
 		c.From, c.To = 0, utf16At(msg.line, len(msg.line))
 	}
-	m.menu = &menu{line: msg.line, c: c}
+	sel := 0
+	if m.menu != nil && m.menu.line == msg.line {
+		sel = max(0, slices.Index(c.Items, m.menu.c.Items[m.menu.sel]))
+	}
+	m.menu = &menu{line: msg.line, c: c, sel: sel}
 }
 
 // localCommands are the slash commands this screen answers itself, offered
@@ -115,8 +123,22 @@ func (m *model) localCommands(line string) []CompletionItem {
 		return nil
 	}
 	cmds := []CompletionItem{{Label: "/resume", Insert: "/resume", Hint: i18n.M.CmdResume}}
-	cmds = append(cmds, CompletionItem{Label: "/version", Insert: "/version", Hint: i18n.M.CmdVersion},
-		CompletionItem{Label: "/help", Insert: "/help", Hint: i18n.M.CmdHelp})
+	for _, c := range []struct{ name, hint string }{
+		{"/queue", i18n.M.CmdQueue}, {"/steer", i18n.M.CmdSteer}, {"/takeover", i18n.M.CmdTakeover},
+		{"/status", i18n.M.CmdStatus}, {"/export", i18n.M.CmdExport}, {"/copy", i18n.M.CmdCopy},
+	} {
+		cmds = append(cmds, CompletionItem{Label: c.name, Insert: c.name, Hint: c.hint})
+	}
+	cmds = append(cmds, CompletionItem{Label: "/setup", Insert: "/setup", Hint: i18n.M.CmdSetup},
+		CompletionItem{Label: "/version", Insert: "/version", Hint: i18n.M.CmdVersion},
+		CompletionItem{Label: "/help", Insert: "/help", Hint: i18n.M.CmdHelp},
+		CompletionItem{Label: "/paste-image", Insert: "/paste-image", Hint: i18n.M.CmdPasteImage})
+	cmds = append(cmds,
+		CompletionItem{Label: "/cls", Insert: "/cls", Hint: i18n.M.CmdCls},
+		CompletionItem{Label: "/todo", Insert: "/todo", Hint: i18n.M.CmdTodo},
+		CompletionItem{Label: "/verbose", Insert: "/verbose", Hint: i18n.M.CmdVerbose},
+		CompletionItem{Label: "/diff-fold", Insert: "/diff-fold", Hint: i18n.M.CmdDiffFold},
+		CompletionItem{Label: "/theme", Insert: "/theme ", Hint: i18n.M.CmdTheme, Descend: true})
 	if m.scr != nil {
 		cmds = append(cmds, CompletionItem{Label: "/mouse", Insert: "/mouse", Hint: i18n.M.CmdMouse})
 	}
@@ -131,17 +153,20 @@ func (m *model) localCommands(line string) []CompletionItem {
 
 // menuKey takes the keys an open menu owns.
 func (m *model) menuKey(k string) (tea.Cmd, bool) {
-	if m.menu == nil {
+	if m.menu == nil || m.menu.line != m.composer.Value() {
+		m.menu = nil
 		return nil, false
 	}
 	n := len(m.menu.c.Items)
 	switch k {
-	case "tab", "down":
+	case "down", "ctrl+n":
 		m.menu.sel = (m.menu.sel + 1) % n
-	case "shift+tab", "up":
+	case "up", "ctrl+p":
 		m.menu.sel = (m.menu.sel + n - 1) % n
 	case "esc":
 		m.menu = nil
+	case "tab":
+		return m.acceptCompletion(), true
 	case "enter":
 		if m.menuChoiceTyped() {
 			m.menu = nil
@@ -185,7 +210,7 @@ func (m *model) acceptCompletion() tea.Cmd {
 }
 
 func (m *model) menuLines() []string {
-	if m.menu == nil {
+	if m.menu == nil || m.menu.line != m.composer.Value() {
 		return nil
 	}
 	items := m.menu.c.Items

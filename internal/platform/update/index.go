@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"reasonix/internal/contract/provider"
 )
 
 // Index is versions.json. It deliberately carries no asset URLs or signatures —
@@ -26,20 +28,22 @@ type IndexEntry struct {
 	Channel     string `json:"channel"`
 	PublishedAt string `json:"publishedAt"`
 	Manifest    string `json:"manifest"`
+	// Notes is set once the release's notes are published. Its value is never
+	// fetched: it says only that they exist (see NotesURL).
+	Notes string `json:"notes,omitempty"`
 }
 
-// FetchIndex reads the rollback catalog. A newer schemaVersion is not an error
-// and unknown fields are ignored — an old build being able to read this is the
-// whole point. Entries without a version or manifest are dropped rather than
-// failing the list: one malformed row must not cost the user every other
-// version they could go back to.
-func FetchIndex(ctx context.Context, c *http.Client, url string) (*Index, error) {
+// FetchIndex reads the rollback catalog; userAgent "" is the client identity.
+// A newer schemaVersion and unknown fields are tolerated so an old build can
+// read it. Entries without a version or manifest are dropped rather than
+// failing the list: one malformed row must not cost every other version.
+func FetchIndex(ctx context.Context, c *http.Client, url, userAgent string) (*Index, error) {
 	// No default: the catalog is per line, and falling back to another line's
 	// URL is how a caller that forgot to name one gets a silent 404.
 	if strings.TrimSpace(url) == "" {
 		return nil, fmt.Errorf("update: no catalog URL")
 	}
-	body, err := fetchJSON(ctx, c, url)
+	body, err := fetchJSON(ctx, c, url, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +62,8 @@ func FetchIndex(ctx context.Context, c *http.Client, url string) (*Index, error)
 }
 
 // FetchManifestAt reads one version's immutable manifest.
-func FetchManifestAt(ctx context.Context, c *http.Client, url string) (*Manifest, error) {
-	body, err := fetchJSON(ctx, c, url)
+func FetchManifestAt(ctx context.Context, c *http.Client, url, userAgent string) (*Manifest, error) {
+	body, err := fetchJSON(ctx, c, url, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -166,13 +170,20 @@ func normalizeVersion(v string) string {
 	return strings.TrimPrefix(strings.TrimSpace(v), "v")
 }
 
-func fetchJSON(ctx context.Context, c *http.Client, url string) ([]byte, error) {
+// fetchJSON names the caller as userAgent, or as the build's client identity
+// when none is given: edge bot protection answers Go's default with 403.
+func fetchJSON(ctx context.Context, c *http.Client, url, userAgent string) ([]byte, error) {
 	if c == nil {
 		c = http.DefaultClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	} else {
+		provider.ApplyClientIdentity(req)
 	}
 	resp, err := c.Do(req)
 	if err != nil {

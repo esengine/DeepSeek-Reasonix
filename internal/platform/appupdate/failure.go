@@ -29,6 +29,7 @@ const (
 	DeltaTimedOut     = "update.delta.timed_out"
 	DeltaMismatch     = "update.delta.mismatch"
 	DeltaDisk         = "update.delta.disk"
+	DeltaTooLarge     = "update.delta.too_large"
 	DeltaFailed       = "update.delta.failed"
 )
 

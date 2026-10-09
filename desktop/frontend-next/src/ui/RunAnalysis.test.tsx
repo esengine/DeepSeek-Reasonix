@@ -24,7 +24,7 @@ describe("RunAnalysis", () => {
 
     const tool = screen.getByRole("button", { name: /web_fetch/ });
     fireEvent.click(tool);
-    expect(tool.getAttribute("aria-pressed")).toBe("true");
+    expect(tool.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getAllByText("web_fetch").length).toBeGreaterThan(1);
   });
 
@@ -43,5 +43,32 @@ describe("RunAnalysis", () => {
     const exported = JSON.parse(content);
     expect(exported.availability).toBe("complete");
     expect(exported.rows.map((row: { seq: number }) => row.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("opens the record under the row that was clicked, without remounting the list", () => {
+    const many: TrajRow[] = Array.from({ length: 60 }, (_, i) => ({
+      seq: i + 1, at: i, dur: 1, kind: "tool", tool: "bash", payload: [{ t: `step ${i + 1}` }], subs: [],
+    }));
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const { container } = render(<RunAnalysis rows={many} onSave={onSave} />);
+    const items = [...container.querySelectorAll<HTMLLIElement>(".run-rounds li")];
+    const before = items[40];
+    fireEvent.click(before.querySelector("button")!);
+    const after = container.querySelectorAll<HTMLLIElement>(".run-rounds li")[40];
+    expect(after).toBe(before);
+    expect(after.querySelector(".run-inspect")?.textContent).toContain("step 41");
+    expect(container.querySelectorAll(".run-inspect")).toHaveLength(1);
+    expect(before.querySelector("button")!.getAttribute("aria-expanded")).toBe("true");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    fireEvent.click(after.querySelector("button")!);
+    expect(container.querySelector(".run-inspect")).toBeNull();
+  });
+
+  it("opens a signal's record beside the signal track, where it was picked", () => {
+    const withSignal: TrajRow[] = [...rows, { seq: 9, at: 2, kind: "checkpoint", payload: [{ t: "marker" }], subs: [] }];
+    const { container } = render(<RunAnalysis rows={withSignal} onSave={onSave} />);
+    fireEvent.click(container.querySelector<HTMLButtonElement>("[data-action='analysis.signal'][data-target='9']")!);
+    expect(container.querySelector(".run-signals .run-inspect")).not.toBeNull();
   });
 });

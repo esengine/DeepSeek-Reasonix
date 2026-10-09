@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionstore"
 	"sync/atomic"
 	"testing"
@@ -59,7 +60,7 @@ func receiveCheckpointTurnDone(t *testing.T, events <-chan event.Event) event.Ev
 	select {
 	case e := <-events:
 		return e
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("timed out waiting for TurnDone")
 		return event.Event{}
 	}
@@ -104,7 +105,7 @@ func TestCancelledTurnDoneCarriesRetainedUserCheckpoint(t *testing.T) {
 	controller.Send("cancel this prompt")
 	select {
 	case <-started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("runner did not start")
 	}
 	controller.Cancel()
@@ -125,7 +126,7 @@ func TestCancelBeforeRunnerAddsUserCarriesFallbackCheckpoint(t *testing.T) {
 	controller.Send("cancel before user append")
 	select {
 	case <-started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("runner did not start")
 	}
 	controller.Cancel()
@@ -238,7 +239,7 @@ func TestParkedTurnsKeepIndependentCheckpointCandidates(t *testing.T) {
 	controller.Send("first prompt")
 	select {
 	case <-firstDelivery:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("first TurnDone delivery did not start")
 	}
 	controller.Send("parked second prompt")

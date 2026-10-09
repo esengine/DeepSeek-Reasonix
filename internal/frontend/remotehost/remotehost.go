@@ -227,6 +227,10 @@ func installFailureCode(err error) string {
 		return "remote.npm_unavailable"
 	case errors.Is(err, bootstrap.ErrPlatformMismatch):
 		return "remote.platform_mismatch"
+	case errors.Is(err, bootstrap.ErrServeProviderMismatch):
+		return "remote.serve_provider_mismatch"
+	case errors.Is(err, bootstrap.ErrServeNotAttachable):
+		return "remote.serve_not_attachable"
 	}
 	return ""
 }
@@ -264,8 +268,10 @@ func identify(host string, err error) error {
 	}
 	if code := installFailureCode(err); code != "" {
 		status := http.StatusBadGateway
-		if code == "remote.install_disabled" {
-			// Nothing is broken; this machine is set not to install one.
+		switch code {
+		case "remote.install_disabled", "remote.serve_provider_mismatch", "remote.serve_not_attachable":
+			// Nothing is broken; the machine is set, or already occupied, a way
+			// this connect will not override.
 			status = http.StatusConflict
 		}
 		return serve.Refusal(status, code, err, map[string]any{"host": host})

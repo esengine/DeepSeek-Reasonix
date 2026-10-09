@@ -56,10 +56,35 @@ func FreeAPIKeyEnvFor(name string, providers []ProviderEntry) (string, error) {
 		if _, err := rand.Read(id[:]); err != nil {
 			return "", fmt.Errorf("allocate credential slot: %w", err)
 		}
-		if slot := fmt.Sprintf("REASONIX_CONNECTION_%X_KEY", id); free(slot) {
+		if slot := fmt.Sprintf("%s%X%s", privateSlotPrefix, id, privateSlotSuffix); free(slot) {
 			return slot, nil
 		}
 	}
+}
+
+const (
+	privateSlotPrefix = "REASONIX_CONNECTION_"
+	privateSlotSuffix = "_KEY"
+	privateSlotIDHex  = 32
+)
+
+// IsPrivateCredentialSlot reports whether key is exactly a slot that
+// FreeAPIKeyEnvFor allocates: the prefix, 32 upper-case hex digits, the suffix.
+func IsPrivateCredentialSlot(key string) bool {
+	id, ok := strings.CutPrefix(key, privateSlotPrefix)
+	if !ok {
+		return false
+	}
+	id, ok = strings.CutSuffix(id, privateSlotSuffix)
+	if !ok || len(id) != privateSlotIDHex {
+		return false
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' && r < 'A' || r > 'F' {
+			return false
+		}
+	}
+	return true
 }
 
 func fnv1a32Hex(s string) string {

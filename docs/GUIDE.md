@@ -20,6 +20,7 @@
 - [Reasoning language](./REASONING_LANGUAGE.md)
 - [Task contracts and pause policy](./TASK_CONTRACT.md)
 - [Custom OpenAI-compatible providers](#custom-openai-compatible-providers)
+- [Hooks](#hooks)
 - [Desktop hooks](#desktop-hooks)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
@@ -206,12 +207,17 @@ after consent are silent and never change stdout, stderr, or the process exit
 code; unsent counters stay in a bounded local queue for a later invocation.
 
 The ping contains a dedicated random 128-bit CLI install ID, CLI version, OS,
-architecture, and the `cli` surface marker. Counter batches use that same ID for
-daily active-install deduplication and contain only fixed buckets such as CLI
-mode/profile, permission/session mode, turn latency, finish reason, cache-hit
-range, generic Provider/tool error class, compaction, recovery counters, and
-normalized UI language. This ID is separate from the desktop install ID and is
-not an account, hardware, repository, or session identifier.
+architecture, and the `cli` surface marker. This ID is separate from the desktop
+install ID and is not an account, hardware, repository, or session identifier.
+
+Counter batches use that same ID for daily active-install deduplication and
+contain only fixed buckets such as CLI mode/profile, permission/session mode,
+turn latency, finish reason, cache-hit range, generic Provider/tool error class,
+compaction, recovery counters, per-turn token-volume buckets, workspace-lease
+contention buckets, and normalized UI language.
+
+Closing the prompt without answering (end of input, Ctrl+D) stores nothing and
+uploads nothing; it asks again the next time.
 
 Reasonix never uploads prompts, answers, reasoning, tool names/arguments/output,
 paths, repositories/branches, session IDs, exact token or cost values,
@@ -476,6 +482,29 @@ the desktop reconnects in the background, re-attaches its loopback forward, and
 reloads the window against the recovered Serve. An authentication or host-key
 failure is terminal and closes the unusable remote window instead.
 
+### Lifetime of the remote serve
+
+- The `reasonix serve` process on the host is persistent. Quitting the desktop
+  or losing the link does not terminate it, and the next connect attaches to it.
+- A pane's session on that serve does not outlive the desktop. Each pane drives
+  its own runtime there; closing the pane or quitting the desktop makes Studio
+  call `POST /runtimes/{id}/close` on the remote serve before it takes the
+  tunnel down.
+- That close cancels a turn in flight and releases the session lease, so another
+  window can open the session. Only the pane's runtime is closed: the serve
+  process keeps running and the next connect can attach to it. Runtimes opened
+  by other clients are left alone too, whichever way the serve was started.
+- `provider = "remote"` decides only where model credentials come from. It does
+  not detach a pane from the desktop.
+- A serve already running for the workspace is attached to, never replaced,
+  whether `reasonix remote serve start`, another window or a hand-started
+  `reasonix serve --port-file` launched it. A later connect never deletes its
+  port or pid files and never stops it.
+- `serve start` uses no broker, so a host with `provider = "local"` cannot
+  attach to it. That connect fails with an explanation and leaves the serve
+  running. Set the host to `provider = "remote"` (it then needs its own
+  credentials), or stop the serve with `reasonix remote serve stop <host>`.
+
 ## Custom OpenAI-compatible providers
 
 In the desktop app, open **Settings -> Model -> Access -> Add model service ->
@@ -617,6 +646,126 @@ extra_body  = { enable_thinking = true }
 `extra_body` is merged into the chat JSON request body. Reasonix keeps core
 fields such as `model`, `messages`, `tools`, `stream`, and `thinking` under its
 own control.
+
+## Hooks
+
+Reasonix has hooks: shell commands that run at fixed points of the agent loop
+and can observe, inject context, or (on two events) veto what is about to
+happen. They are separate from permissions: `[permissions]` rules decide
+whether a tool call is allowed or prompted, a hook runs your own code.
+
+| Event | Fires | Can block |
+| --- | --- | --- |
+| `PreToolUse` | before a tool call, after matching; `toolName` and `toolArgs` are in the payload | yes |
+| `PostToolUse` | after a tool call (success or failure) | no |
+| `PostToolUseFailure` | after a tool call returned an error | no |
+| `PermissionRequest` | before an approval prompt is shown | no |
+| `UserPromptSubmit` | before a user prompt starts a turn | yes |
+| `Stop` / `StopFailure` | when a turn ends / fails | no |
+| `SessionStart` / `SessionEnd` | when a session becomes active / is closed or rotated by `/new` | no |
+| `SubagentStart` / `SubagentStop` | around a foreground `task` call | no |
+| `Notification` | when the agent needs the user's attention | no |
+| `PreCompact` | before compaction; stdout becomes extra summary guidance | no |
+| `PostLLMCall` | after each model turn; non-empty stdout on exit 0 replaces the stored reasoning text | no |
+
+Hooks are configured in `<Reasonix home>/settings.json` (global) or
+`<root>/.reasonix/settings.json` (project). Each event maps to a list of hooks:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "match": "bash",
+        "command": "sh ~/.reasonix/hooks/no-git-push.sh",
+        "description": "block git push",
+        "timeout": 3000
+      }
+    ],
+    "SessionStart": [
+      { "command": "echo 'Team rule: run make lint before every commit.'" }
+    ]
+  }
+}
+```
+
+Fields:
+
+- `command` (required): run by the platform shell.
+- `match`: tool events only; an anchored regex over the tool name, so `file`
+  does not match `read_file`. Empty or `*` means every tool.
+- `description`: the label shown in `/hooks` and in block notices.
+- `timeout`: milliseconds; default 5000 for `PreToolUse`, `PermissionRequest`
+  and `UserPromptSubmit`, 30000 otherwise.
+- `cwd` and `env`: working directory and extra environment.
+
+A malformed file loads no hooks and does not stop Reasonix.
+
+**Contract.** The event payload arrives as one line of JSON on stdin
+(`event`, `sessionId`, `cwd`, and by event `toolName`, `toolArgs`, `prompt`,
+`toolResult`, `error`, ...). The exit code is the verdict:
+
+- `0` passes. On `SessionStart`, stdout (plain text, or JSON with
+  `hookSpecificOutput.additionalContext`) is injected once into the next real
+  user turn, as described under [Desktop hooks](#desktop-hooks).
+- `2` blocks, but only on `PreToolUse` and `UserPromptSubmit`. A blocked tool
+  call is not run and the model receives `blocked: <hook> hook (<scope>) stopped
+  this call — <stderr, or stdout if empty> · command: ... · source: ...`, so write
+  the reason for the model to read.
+- Any other code, or exit 2 on a non-blocking event, only warns the user.
+- A timeout blocks on `PreToolUse` and `UserPromptSubmit` and warns elsewhere.
+  A hook that cannot be spawned does not block, and neither does a script that
+  crashes (exit 1, or 127 for a missing file): only an explicit exit 2 vetoes.
+
+**Example: refuse `git push` in bash.** The payload's `toolArgs` for `bash` is
+the tool's argument object, so the command is `toolArgs.command`. Save as
+`~/.reasonix/hooks/no-git-push.sh` (needs `jq`):
+
+```sh
+#!/bin/sh
+cmd=$(jq -r '.toolArgs.command // empty')
+case "$cmd" in
+  *"git push"*)
+    echo "git push is disabled in this setup; ask the user to push." >&2
+    exit 2 ;;
+esac
+exit 0
+```
+
+Without a hook, the simpler tool is a permission rule, which needs no script
+and holds in every mode:
+
+```toml
+[permissions]
+deny = ["Bash(git push*)"]
+```
+
+Prefer the rule when a command pattern is enough; use a hook when the decision
+needs code (inspect arguments, consult a file, log, or react to a prompt).
+
+**Scope.**
+
+- Global hooks (`<Reasonix home>/settings.json`) and hooks from installed
+  plugin packages apply, except in the read-only observe posture, which loads
+  no hooks at all.
+- Project hooks (`<root>/.reasonix/settings.json`) run only after the user
+  approves them as they stand (`reasonix trust`); until then they are held back
+  and a notice says so. Editing the file or a workspace script it names
+  withdraws the approval.
+- `reasonix review` never runs project hooks, approved or not: the checkout is
+  untrusted input, so only global and plugin hooks apply.
+- Only tool hooks (`PreToolUse`, `PostToolUse`, `PermissionRequest`),
+  `PostLLMCall` and `PreCompact` fire in every agent a session runs, subagents
+  included (see the `session_id` table below).
+
+**Limits.**
+
+- A hook cannot force the model's wording: a block reaches the model as a
+  refused call, and the model decides what to say or try next.
+- There is no per-session scope: hooks come from the settings files and apply
+  to every session that loads them.
+- Native hooks cannot answer an approval prompt; only a `PreToolUse` block
+  refuses a call.
 
 ## Desktop hooks
 
@@ -768,8 +917,9 @@ Chat and transcript shortcuts:
 | Composer text selection | Selects, copies, or replaces draft text | Releasing an in-app drag copies the selection through the same verified clipboard path as transcript text. Typing or pasting replaces the selection; arrow keys collapse it. |
 | Right-click with no active selection | Pastes clipboard text locally | In a local session with in-app mouse capture on, Reasonix reads text only and routes it through the normal bracketed-paste handling. Over SSH, use the terminal paste shortcut because the remote process cannot read the local clipboard; `/mouse` restores the terminal's native right-click menu. Right-click with an active selection still copies that selection. |
 | `/mouse` | Toggles in-app mouse capture | Off hands the mouse back to your terminal, restoring its native click-drag selection and right-click context menu, at the cost of in-app drag-select, the transcript scrollbar, and wheel-scroll. Set `REASONIX_DISABLE_MOUSE=1` to start every session with it off. Remote (SSH) sessions start with capture off so native selection works out of the box; `REASONIX_DISABLE_MOUSE=0` forces capture on everywhere. |
-| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript or composer selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
-| `Ctrl+D` | Quits the TUI | Immediate quit. |
+| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript or composer selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. A second press while a cancelled turn is still stopping quits too. |
+| `Ctrl+D` | Quits the TUI | Immediate quit on an empty idle composer. |
+| `/quit` or `/exit` | Quits the TUI | Runs at once, also while a turn is running. Typing a bare `exit`, `quit` or `:q` sends it to the model as a normal message. |
 | Your terminal's text-paste shortcut | Pastes text | Text stays on the terminal's bracketed-paste path (`Cmd+V` on macOS, commonly `Ctrl+Shift+V` on Linux, and the terminal's configured shortcut elsewhere). Reasonix consumes the resulting paste event and never probes for an image first. |
 | `Ctrl+V` on macOS/Linux; `Alt+V` on Windows | Pastes a clipboard image | Image paste is a separate application action. The footer shows `Pasting image…` while the clipboard is read, then inserts an editable `[image #N]` token at the cursor. |
 | `/paste-image` | Pastes a clipboard image | Command form of the same image-only action. |

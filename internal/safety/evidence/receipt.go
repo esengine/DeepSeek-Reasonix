@@ -23,6 +23,9 @@ type Receipt struct {
 	CitedChecks []string       `json:"cited_checks,omitempty"`
 	TodoStep    *TodoStepMatch `json:"todo_step,omitempty"`
 	Paths       []string       `json:"paths,omitempty"`
+	// MutationPaths preserves path spelling before identity normalization can
+	// fold case or discard empty paths; scope exemptions must fail closed on both.
+	MutationPaths []string `json:"mutation_paths,omitempty"`
 	// CriteriaRewritten names existing tests this call rewrote or removed
 	// (see RewrittenTestCriteria). Editing a check is legitimate; doing it
 	// silently while reporting the suite as green is not.

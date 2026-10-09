@@ -260,8 +260,10 @@ when the sole automatic threshold is crossed.
 
 - Each provider declares `context_window` (tokens). The only automatic trigger is
   `agent.compact_ratio` (default **0.85**; presets 0.70 / 0.80 / 0.85; range
-  0.65–0.85).
+  strictly between 0 and 1).
   `triggerTokens = floor(context_window × compact_ratio)`.
+- Ratio bounds follow `CompactRatioMin` / `CompactRatioMax` in
+  `internal/contract/config`.
 - **Below the trigger** history is never rewritten: no summary, no prune/snip
   projection, no sidecar write, no projection-version bump, no maintenance event.
   Any rewrite would invalidate the prompt cache from that point on.

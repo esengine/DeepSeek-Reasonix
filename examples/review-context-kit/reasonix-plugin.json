@@ -1,0 +1,16 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "review-context-kit",
+  "version": "1.0.0",
+  "description": "A session-start review reference loaded without running a program",
+  "contributes": {
+    "hooks": {
+      "SessionStart": [
+        {
+          "contextFile": "context/review.txt",
+          "description": "Load a short review reference once at session start"
+        }
+      ]
+    }
+  }
+}

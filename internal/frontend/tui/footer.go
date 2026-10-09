@@ -40,11 +40,66 @@ func (m *model) statusBlock() []string {
 	if m.statusline != "" {
 		groups = []string{m.statusline}
 	}
-	if tel := packGroups(groups, width); len(tel) > 0 {
+	data := m.dataRows(groups, width)
+	if len(data) > 0 {
 		rows = append(rows, footerIndent+termrender.ThemeFg(termrender.ActiveTheme().Border, strings.Repeat("─", max(width-len(footerIndent), 1))))
-		rows = append(rows, tel...)
+		rows = append(rows, data...)
 	}
 	return rows
+}
+
+// dataRows puts the work tree's identity at the left of the row the telemetry
+// sits on, falling back to a row of its own when the two do not fit together.
+func (m *model) dataRows(groups []string, width int) []string {
+	git := m.gitText()
+	if git == "" {
+		return packGroups(groups, width)
+	}
+	line := termrender.Truncate(footerIndent+git, width, "…")
+	tel := strings.Join(nonEmpty(groups), "  ")
+	if tel == "" {
+		return []string{line}
+	}
+	if lw, tw := termrender.VisibleWidth(line), termrender.VisibleWidth(tel); lw+2+tw <= width {
+		return []string{line + strings.Repeat(" ", width-lw-tw) + tel}
+	}
+	return append([]string{line}, packGroups(groups, width)...)
+}
+
+func nonEmpty(groups []string) []string {
+	var out []string
+	for _, g := range groups {
+		if g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// gitText is workspace@branch followed by what differs from HEAD, as 1.x
+// draws it: counts that are zero stay out.
+func (m *model) gitText() string {
+	g := m.git
+	if !g.Repo || strings.TrimSpace(g.Name) == "" || strings.TrimSpace(g.Branch) == "" {
+		return ""
+	}
+	t := termrender.ActiveTheme()
+	branch := footerValue(g.Branch)
+	if g.Detached {
+		branch = termrender.Yellow(g.Branch)
+	}
+	out := termrender.ThemeFg(t.Warn, g.Name) + termrender.Dim("@") + branch
+	var dirt []string
+	if g.Added > 0 || g.Removed > 0 {
+		dirt = append(dirt, termrender.Green(fmt.Sprintf("+%d", g.Added)), termrender.Red(fmt.Sprintf("-%d", g.Removed)))
+	}
+	if g.Untracked > 0 {
+		dirt = append(dirt, termrender.Yellow(fmt.Sprintf("?%d", g.Untracked)))
+	}
+	if len(dirt) > 0 {
+		out += "  " + strings.Join(dirt, " ")
+	}
+	return out
 }
 
 // statuslinePayload is the context a [statusline] command reads on stdin.
@@ -225,7 +280,25 @@ func quoteText(q *CostQuote) string {
 	if err != nil || amount <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("≈%s%.4f", pricing.CurrencySymbol(money.Currency), amount)
+	text := fmt.Sprintf("≈%s%.4f", pricing.CurrencySymbol(money.Currency), amount)
+	if band := rateBandText(q.RateBand); band != "" {
+		text += " · " + band
+	}
+	return text
+}
+
+// rateBandText names the side of the vendor's peak window the spend was billed
+// on; "" for a total the kernel could not place on one.
+func rateBandText(band string) string {
+	switch band {
+	case pricing.RateBandPeak:
+		return i18n.M.RateBandPeak
+	case pricing.RateBandOffPeak:
+		return i18n.M.RateBandOffPeak
+	case pricing.RateBandMixed:
+		return i18n.M.RateBandMixed
+	}
+	return ""
 }
 
 // layoutSides puts right against the right edge of left's row, or on a row of

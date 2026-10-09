@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { ACCOUNT_SIGNIN_DISABLED, reason } from "../i18n/kernel";
 import { HttpError, type AgentPort, type MarketPackage, type MarketVote as Vote } from "../port/port";
@@ -17,9 +17,13 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
   const [off, setOff] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const buttons = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let live = true;
+    setBusy(true);
+    setError("");
     port
       .marketMyVote(pkg.slug)
       .then((v) => live && setVote(v))
@@ -27,14 +31,19 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
         if (!live) return;
         // A paired device cannot spend this machine's account token: show the
         // tally alone rather than buttons that would always refuse.
-        if (e instanceof HttpError && e.reason?.code === ACCOUNT_SIGNIN_DISABLED) setOff(true);
-        else setError(reason(e));
-        setVote({ signedIn: false, value: 0 });
-      });
+        if (e instanceof HttpError && e.reason?.code === ACCOUNT_SIGNIN_DISABLED) {
+          setOff(true);
+          setVote({ signedIn: false, value: 0 });
+        } else {
+          setError(reason(e));
+          if (e instanceof HttpError && e.reason?.code === "market.signed_out") setVote({ signedIn: false, value: 0 });
+        }
+      })
+      .finally(() => live && setBusy(false));
     return () => {
       live = false;
     };
-  }, [port, pkg.slug]);
+  }, [port, pkg.slug, attempt]);
 
   const up = vote?.upCount ?? pkg.upCount;
   const down = vote?.downCount ?? pkg.downCount;
@@ -50,6 +59,9 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
       setVote(await port.voteMarket(pkg.slug, mine === value ? 0 : value));
     } catch (e) {
       setError(reason(e));
+      if (e instanceof HttpError && e.reason?.code === "market.signed_out") {
+        setVote((current) => ({ ...current, signedIn: false, value: 0 }));
+      }
     } finally {
       setBusy(false);
     }
@@ -68,9 +80,9 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
             : "";
 
   return (
-    <div className="mkt-vote" data-mine={mine}>
+    <div className="mkt-vote" data-mine={mine} aria-busy={busy}>
       <span className="mkt-vote-rate">{approvalLabel({ approvalRate: rate ?? null, upCount: up, downCount: down })}</span>
-      <div className="mkt-vote-btns" role="group" aria-label={t("评价")}>
+      <div className="mkt-vote-btns" role="group" aria-label={t("评价")} ref={buttons} tabIndex={-1}>
         <button
           className="act"
           data-action="market.vote"
@@ -100,7 +112,12 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
         </button>
       )}
       {note && <span className="note">{note}</span>}
-      {error && <span className="why">{error}</span>}
+      {error && <span className="why" role="alert">{error}</span>}
+      {!vote && (error || attempt > 0) && (
+        <button className="act" data-action="market.vote-retry" disabled={busy} onClick={() => { buttons.current?.focus(); setAttempt((n) => n + 1); }}>
+          {t(busy ? "正在读取…" : "重试")}
+        </button>
+      )}
     </div>
   );
 }

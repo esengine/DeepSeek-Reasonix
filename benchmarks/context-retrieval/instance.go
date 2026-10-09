@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"hash/fnv"
+	"io"
 	mathrand "math/rand"
 	"strings"
 )
@@ -90,15 +91,25 @@ func seededRand(parts ...string) *mathrand.Rand {
 // liveRand is the generator a paid run uses: every run gets values that existed
 // nowhere before it started.
 func liveRand() *mathrand.Rand {
-	var seed [8]byte
-	if _, err := rand.Read(seed[:]); err != nil {
+	rng, err := liveRandFrom(rand.Reader)
+	if err != nil {
 		panic("contextbench: no entropy for a live run: " + err.Error())
+	}
+	return rng
+}
+
+// liveRandFrom seeds a generator from an entropy source, so what a run's values
+// are unpredictable from is the source and nothing else.
+func liveRandFrom(entropy io.Reader) (*mathrand.Rand, error) {
+	var seed [8]byte
+	if _, err := io.ReadFull(entropy, seed[:]); err != nil {
+		return nil, err
 	}
 	var n int64
 	for _, b := range seed {
 		n = n<<8 | int64(b)
 	}
-	return mathrand.New(mathrand.NewSource(n))
+	return mathrand.New(mathrand.NewSource(n)), nil
 }
 
 // instantiate substitutes {{name}} and refuses anything left over. The grammar

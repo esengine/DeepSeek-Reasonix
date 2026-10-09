@@ -20,11 +20,27 @@ type Failure struct {
 	Stderr                 string
 	HTTPStatus             int // what the endpoint answered; 0 when the failure was not one
 	RequiresLaunchApproval bool
+	DeclarationChanged     bool // the approval is owed because what it launches changed
 }
 
 type launchApprovalError struct {
 	server  string
 	changed bool
+	cause   error
+}
+
+func (e *launchApprovalError) Unwrap() error { return e.cause }
+
+// checkDeclaredLaunch runs s.LaunchCheck; a refusal is an approval the user
+// owes again, reported as such rather than as a failed connection.
+func checkDeclaredLaunch(s Spec) error {
+	if s.LaunchCheck == nil {
+		return nil
+	}
+	if err := s.LaunchCheck(); err != nil {
+		return &launchApprovalError{server: s.Name, changed: true, cause: err}
+	}
+	return nil
 }
 
 func (e *launchApprovalError) Error() string {
@@ -34,15 +50,36 @@ func (e *launchApprovalError) Error() string {
 	return fmt.Sprintf("project-provided MCP server %q is blocked before process or network startup until the user authorizes it", e.server)
 }
 
+func (e *launchApprovalError) DiagnosticFacts() string { return e.Error() }
+
 func requiresLaunchApproval(err error) bool {
 	var launchTarget *launchApprovalError
 	return errors.As(err, &launchTarget)
 }
 
+func launchDeclarationChanged(err error) bool {
+	var launchTarget *launchApprovalError
+	return errors.As(err, &launchTarget) && launchTarget.changed
+}
+
 // RecordFailure stores a failed MCP connection attempt for status UIs.
 func (h *Host) RecordFailure(s Spec, err error) {
+	h.recordFailure(s, err, "connection failed")
+}
+
+// RecordLaunchApprovalRequired keeps an intentionally disconnected project MCP
+// visible as awaiting authorization. This is used after an explicit launch
+// revocation, where no failed connection attempt exists to create the status.
+func (h *Host) RecordLaunchApprovalRequired(s Spec) {
+	h.recordFailure(s, &launchApprovalError{server: s.Name}, "awaiting approval")
+}
+
+// recordFailure stores the status row and then announces it, naming what
+// actually happened: a project MCP blocked pending authorization is not a
+// failed connection. The announce follows the unlock — a sink writes to a
+// frontend and must not run under h.mu.
+func (h *Host) recordFailure(s Spec, err error, what string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	tt := strings.ToLower(strings.TrimSpace(s.Type))
 	if tt == "" {
 		tt = "stdio"
@@ -52,21 +89,21 @@ func (h *Host) RecordFailure(s Spec, err error) {
 		Name: s.Name, Transport: tt, Error: summarizeFailureError(err),
 		Stage: stage, Elapsed: elapsed, Stderr: stderr, HTTPStatus: terminalHTTPStatus(err),
 		RequiresLaunchApproval: requiresLaunchApproval(err),
+		DeclarationChanged:     launchDeclarationChanged(err),
 	}
+	replaced := false
 	for i := range h.failures {
 		if h.failures[i].Name == s.Name {
 			h.failures[i] = f
-			return
+			replaced = true
+			break
 		}
 	}
-	h.failures = append(h.failures, f)
-}
-
-// RecordLaunchApprovalRequired keeps an intentionally disconnected project MCP
-// visible as awaiting authorization. This is used after an explicit launch
-// revocation, where no failed connection attempt exists to create the status.
-func (h *Host) RecordLaunchApprovalRequired(s Spec) {
-	h.RecordFailure(s, &launchApprovalError{server: s.Name})
+	if !replaced {
+		h.failures = append(h.failures, f)
+	}
+	h.mu.Unlock()
+	h.announce("%s: %s", s.Name, what)
 }
 
 // ClearFailure drops a recorded startup/connection failure for status UIs.

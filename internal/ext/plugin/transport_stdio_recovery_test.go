@@ -33,8 +33,8 @@ func TestStdioServerRecoversAfterChildDies(t *testing.T) {
 	if err == nil {
 		t.Fatal("the call that kills the child should fail")
 	}
-	if !strings.Contains(err.Error(), startupLine) {
-		t.Fatalf("error should carry the child's last words, got %v", err)
+	if strings.Contains(err.Error(), startupLine) || !strings.Contains(err.Error(), "output omitted") {
+		t.Fatalf("error should omit the child's output, got %v", err)
 	}
 	// The last words of a server that died quietly are its startup banner, so
 	// the message has to say which of the two happened — a bare "read: EOF"

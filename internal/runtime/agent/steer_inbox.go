@@ -171,6 +171,7 @@ func (a *Agent) recordUnappliedSteer(text string, host bool, itemID ...string) {
 		Level:  event.LevelWarn,
 		Code:   event.NoticeCodeUnappliedSteer,
 		Text:   UnappliedSteerNotice(text),
+		Detail: text,
 		ItemID: id,
 	})
 }

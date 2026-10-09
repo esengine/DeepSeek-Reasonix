@@ -39,6 +39,10 @@ type MigrationReport struct {
 var memoryStoreMutationMu sync.Mutex
 
 func (s Store) MigrateV2() (MigrationReport, error) {
+	return s.MigrateV2WithVersion("dev")
+}
+
+func (s Store) MigrateV2WithVersion(version string) (MigrationReport, error) {
 	memoryStoreMutationMu.Lock()
 	defer memoryStoreMutationMu.Unlock()
 	var report MigrationReport
@@ -86,6 +90,9 @@ func (s Store) MigrateV2() (MigrationReport, error) {
 			memory.Name = slug(memory.Name)
 			if memory.Scope == "" {
 				memory.Scope = s.scopeForDir(dir)
+			}
+			if err := backupLegacyMemory(dir, entry.Name(), raw, version); err != nil {
+				return report, err
 			}
 			if err := writeMemoryAtomic(path, []byte(render(memory, memory.Name)), 0o644); err != nil {
 				return report, err

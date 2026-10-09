@@ -39,6 +39,7 @@ func Code(err error) string {
 const (
 	CodeSessionBusy = "busy.session_running"
 	CodePlanStale   = "plan.decision_stale"
+	CodeKeyMissing  = "provider.key_missing"
 )
 
 // Client drives one runtime of a serve hub. Base is its route prefix, e.g.
@@ -99,10 +100,10 @@ func decodeRefusal(resp *http.Response) error {
 
 // Submit starts a turn, or runs a `!` shell command where the transport allows
 // it. A running turn refuses it with CodeSessionBusy; Queue is the way in then.
-// A slash command nothing answers is refused rather than sent as prose, which
-// is what a terminal typing one means.
+// A slash command nothing answers is sent to the model as a regular message
+// with a visible notice, as in 1.x (#5756).
 func (c *Client) Submit(ctx context.Context, input string) error {
-	return c.do(ctx, http.MethodPost, "/submit", map[string]any{"input": input, "refuseUnknownSlash": true}, nil)
+	return c.do(ctx, http.MethodPost, "/submit", map[string]string{"input": input}, nil)
 }
 
 // RunShell runs a `!` command on this machine. It stays local, as in 1.x: the
@@ -172,9 +173,11 @@ type HistoryMessage struct {
 }
 
 type HistoryToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Arguments    string `json:"arguments"`
+	ResolvedName string `json:"resolvedName,omitempty"`
+	CapabilityID string `json:"capabilityId,omitempty"`
 }
 
 func (c *Client) History(ctx context.Context) ([]HistoryMessage, error) {
@@ -198,7 +201,9 @@ type Status struct {
 	SessionPath      string `json:"sessionPath"`
 	WorkspaceRoot    string `json:"workspaceRoot"`
 	Plan             bool   `json:"plan"`
-	LastUsage        *struct {
+	// Jobs is how many background jobs the session runs; only the count shows.
+	Jobs      []json.RawMessage `json:"jobs"`
+	LastUsage *struct {
 		CacheHitTokens  int
 		CacheMissTokens int
 	} `json:"lastUsage"`
@@ -210,6 +215,7 @@ type CostQuote struct {
 	Original     Money  `json:"original"`
 	Selected     *Money `json:"selected"`
 	CostComplete bool   `json:"costComplete"`
+	RateBand     string `json:"rateBand"`
 }
 
 type Money struct {
@@ -227,6 +233,24 @@ func (c *Client) Balance(ctx context.Context) (display string, ok bool, err erro
 		return "", false, err
 	}
 	return out.Display, out.Display != "", nil
+}
+
+// GitInfo is the workspace's repository identity as the kernel reads it; Repo
+// is false when the workspace is not version-controlled.
+type GitInfo struct {
+	Repo      bool   `json:"repo"`
+	Name      string `json:"name"`
+	Branch    string `json:"branch"`
+	Detached  bool   `json:"detached"`
+	Added     int    `json:"added"`
+	Removed   int    `json:"removed"`
+	Untracked int    `json:"untracked"`
+}
+
+func (c *Client) WorkspaceGit(ctx context.Context) (GitInfo, error) {
+	var out GitInfo
+	err := c.do(ctx, http.MethodGet, "/workspace/git", nil, &out)
+	return out, err
 }
 
 // Compaction is where the session folds its history.

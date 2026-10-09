@@ -149,7 +149,7 @@ func (a *Agent) captureCriterionAt(store *evidence.BaselineStore, path string) e
 	// Before the read, not after: the name already settles whether this file
 	// could hold a criterion, and asking the bytes instead read every file in
 	// the workspace to answer it — on every broad-scope call of the task.
-	if !evidence.PathMayHoldTestCriteria(path) {
+	if !evidence.PathMayHoldTestCriteria(path) || !watchablePath(path, a.writeWorkspaceRoot) {
 		return nil
 	}
 	if _, held := a.task.baselineCriteria[path]; held {

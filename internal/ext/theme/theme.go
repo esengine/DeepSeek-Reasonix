@@ -209,13 +209,24 @@ func load(path, dirID string) (Pack, error) {
 }
 
 func decode(raw []byte, dirID string) (Pack, error) {
+	pack, m, err := decodeManifest(raw, dirID)
+	if err != nil {
+		return Pack{}, err
+	}
+	pack.Background = backgroundOf(m.Background, hasAsset(dirID, assetBackground))
+	pack.Sky = skyOf(m.Sky)
+	pack.HasPreview = hasAsset(dirID, assetPreview)
+	return pack, nil
+}
+
+func decodeManifest(raw []byte, dirID string) (Pack, manifest, error) {
 	id := dirID
 	var m manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return Pack{}, fmt.Errorf("theme %s: %w", dirID, err)
+		return Pack{}, manifest{}, fmt.Errorf("theme %s: %w", dirID, err)
 	}
 	if m.SchemaVersion != schemaVersion {
-		return Pack{}, fmt.Errorf("theme %s: unsupported schemaVersion %d", dirID, m.SchemaVersion)
+		return Pack{}, manifest{}, fmt.Errorf("theme %s: unsupported schemaVersion %d", dirID, m.SchemaVersion)
 	}
 	// The directory name is the address the user activates by, so it wins over
 	// whatever the manifest claims its id is.
@@ -227,7 +238,7 @@ func decode(raw []byte, dirID string) (Pack, error) {
 	var warnings []string
 	for _, scheme := range []string{"light", "dark"} {
 		if len(m.Tokens[scheme]) == 0 {
-			return Pack{}, fmt.Errorf("theme %s: no %s tokens", id, scheme)
+			return Pack{}, manifest{}, fmt.Errorf("theme %s: no %s tokens", id, scheme)
 		}
 		copied := make(map[string]string, len(m.Tokens[scheme]))
 		for k, v := range m.Tokens[scheme] {
@@ -241,7 +252,7 @@ func decode(raw []byte, dirID string) (Pack, error) {
 			warnings = append(warnings, dropReason(scheme, k, v))
 		}
 		if len(copied) == 0 {
-			return Pack{}, fmt.Errorf("theme %s: no usable %s tokens", id, scheme)
+			return Pack{}, manifest{}, fmt.Errorf("theme %s: no usable %s tokens", id, scheme)
 		}
 		tokens[scheme] = copied
 	}
@@ -249,10 +260,7 @@ func decode(raw []byte, dirID string) (Pack, error) {
 	// problems in a different order on every read.
 	slices.Sort(warnings)
 	pack := Pack{ID: id, Name: name, Author: strings.TrimSpace(m.Author), Description: strings.TrimSpace(m.Description), Tokens: tokens, Warnings: warnings}
-	pack.Background = backgroundOf(m.Background, hasAsset(id, assetBackground))
-	pack.Sky = skyOf(m.Sky)
-	pack.HasPreview = hasAsset(id, assetPreview)
-	return pack, nil
+	return pack, m, nil
 }
 
 // colourOr passes a value through the same check a token colour gets: every

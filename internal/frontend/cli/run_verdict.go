@@ -20,6 +20,11 @@ import (
 // apart from 1 (run error) and 2 (usage) so automation can tell them apart.
 const runExitUnverified = 3
 
+// runExitUntrustedFolder is the exit status of a run whose edits or commands
+// were refused because the folder is untrusted, so the work was not done. It
+// is apart from 1, 2 and 3; --fail-on-unverified keeps reporting 3 for it.
+const runExitUntrustedFolder = 4
+
 // runVerdict is what the host decided about the run beside its answer.
 type runVerdict struct {
 	completion *eventwire.CompletionSummary
@@ -146,6 +151,7 @@ func (c runCompletion) withFailOnUnverified(on bool) runCompletion {
 func (c runCompletion) withFolderRefusal(refused bool) runCompletion {
 	if refused && !c.isError {
 		c.unverified = true
+		c.exitCode = runExitUntrustedFolder
 	}
 	return c
 }

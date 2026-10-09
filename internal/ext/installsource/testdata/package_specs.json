@@ -1,0 +1,9 @@
+{
+  "accept": ["a.b", "@a/b.c", "@a.b/c", "@a/b..", "@a/b..c", "@_a/b", "@a/_b", "a.tgz.b", "@a/x.tgz", "a-tar"],
+  "reject": [
+    "@a/..", "@../b", "@./b", "@a/.", "@../..", "@a/..@1.2.3",
+    "@a/.b", "@a/..b", "@.a/b",
+    "a.tgz", "A.TGZ", "a.tar", "a.TAR", "a.tar.gz", "a.Tar.Gz", "a.tgz@1.2.3",
+    "_a"
+  ]
+}

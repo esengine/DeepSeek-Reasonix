@@ -27,6 +27,7 @@ import (
 
 	"reasonix/internal/base/fileutil"
 	"reasonix/internal/base/netclient"
+	"reasonix/internal/contract/provider"
 )
 
 const (
@@ -219,6 +220,7 @@ func sendWithClient(ctx context.Context, client *http.Client, endpoint string, r
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	provider.ApplyClientIdentity(req)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

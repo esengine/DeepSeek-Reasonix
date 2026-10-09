@@ -1,0 +1,11 @@
+.vrow .ds { grid-row: 1 }
+.vrow .vn { grid-column: 2; grid-row: 1; justify-self: end; text-decoration: none }
+.vnotes { grid-column: 1 / -1; margin: 0 0 8px; padding: 10px 12px; border-left: 2px solid var(--hair); font-size: var(--fs-ui); overflow-wrap: anywhere }
+.vnotes .md-noimg { color: var(--muted) }
+@container versions (max-width: 600px) {
+  .vrow .vn { grid-column: 1 / -1; grid-row: auto; justify-self: start; margin-top: 4px }
+  @media (hover: hover) {
+    .vrow[data-open] .sa:not([data-keep]) { position: static; translate: none; grid-column: 1 / -1; grid-row: auto; margin-top: 4px; max-width: 100% }
+    .vrow[data-open]:has(> .sa:not([data-keep])):is(:hover, :focus-within) :is(.ds, .sc) { visibility: visible }
+  }
+}

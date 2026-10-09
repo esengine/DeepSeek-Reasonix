@@ -1,8 +1,8 @@
 ---
 name: release-note
 description: Draft a release note from user-selected changes, citing only verified behavior.
-owner: @esengine
-backup: @SivanCola
+owner: "@esengine"
+backup: "@SivanCola"
 status: active
 reviewed: 2026-09-29
 ---

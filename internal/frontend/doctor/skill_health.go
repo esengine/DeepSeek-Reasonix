@@ -91,6 +91,9 @@ func CollectSkillHealthWarnings(opts SkillHealthOptions) []string {
 		for _, p := range sk.InvalidProfiles {
 			out = append(out, fmt.Sprintf("skill %q has illegal profiles value %q (valid: economy, balanced, delivery)", name, p))
 		}
+		for _, p := range sk.InvalidPaths {
+			out = append(out, fmt.Sprintf("skill %q has an unusable paths glob %q (negation, \"..\", malformed and over-large brace patterns are not accepted); the skill stays hidden until it is fixed", name, p))
+		}
 	}
 
 	for key, names := range requireTriggers {

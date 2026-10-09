@@ -1,4 +1,4 @@
-import type { MarketDetail, MarketList, MarketOwnRequest, MarketPackage, MarketPlan, MarketPublished, MarketQuery, MarketRequest, MarketSubmission, MarketVote } from "./market";
+import type { MarketCache, MarketDetail, MarketList, MarketOwnRequest, MarketPackage, MarketPlan, MarketPublished, MarketQuery, MarketRequest, MarketSubmission, MarketVote } from "./market";
 import { HttpError } from "./http_error";
 import { MockLook } from "./mock_look";
 
@@ -62,20 +62,22 @@ export class MockMarket extends MockLook {
   private marketVotes = new Map<string, -1 | 0 | 1>([["acme/review-kit", 1]]);
   // Voting reads its own sign-in answer so a test can draw the signed-out entry.
   marketSignedIn = true;
+  // Set to draw the listing and the entry as the last good copy.
+  marketCache: MarketCache | undefined;
 
   async marketList(q: MarketQuery): Promise<MarketList> {
     const needle = (q.q ?? "").trim().toLowerCase();
     const rows = PACKAGES.filter((p) => (!q.kind || p.kind === q.kind) && (!q.pinned || p.pinned) &&
       (!needle || `${p.name} ${p.summary} ${p.tags.join(" ")}`.toLowerCase().includes(needle)));
-    return { packages: rows.map((p) => this.view(p)), limit: 24, offset: 0 };
+    return { packages: rows.map((p) => this.view(p)), limit: 24, offset: 0, ...(this.marketCache ? { cache: this.marketCache } : {}) };
   }
 
-  async marketDetail(slug: string): Promise<MarketDetail> {
+  async marketDetail(slug: string, _opts?: { refresh?: boolean }): Promise<MarketDetail> {
     const p = PACKAGES.find((x) => x.slug === slug);
     if (!p) throw new Error("market.not_found");
     const pkg = this.view(p);
     return {
-      package: pkg, pinned: p.pinned, installed: pkg.installed,
+      package: pkg, pinned: p.pinned, installed: pkg.installed, ...(this.marketCache ? { cache: this.marketCache } : {}),
       approved: { version: p.latestVersion, source: p.source, contentHash: p.pinned ? DIGEST : "", riskLevel: "", createdAt: p.updatedAt },
     };
   }

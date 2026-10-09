@@ -53,7 +53,7 @@ func TestStatuslineCommandReplacesTheTelemetryRowAfterATurn(t *testing.T) {
 	if got := strings.Join(m.statusBlock(), "\n"); !strings.Contains(got, i18n.M.ChatStatusCacheLabel) {
 		t.Fatalf("before any turn the built-in telemetry shows:\n%s", got)
 	}
-	_, cmd := m.Update(updateMsg{u: Update{Event: eventwire.Event{Kind: "turn_done"}}, ok: true})
+	_, cmd := m.Update(updateMsg{us: []Update{{Event: eventwire.Event{Kind: "turn_done"}}}, ok: true})
 	run(m, cmd)
 
 	got := strings.Join(m.statusBlock(), "\n")
@@ -77,7 +77,7 @@ func TestStatuslineCommandReplacesTheTelemetryRowAfterATurn(t *testing.T) {
 
 func TestEmptyStatuslineOutputKeepsTheBuiltInRow(t *testing.T) {
 	m, _ := statuslineModel(t, "")
-	_, cmd := m.Update(updateMsg{u: Update{Event: eventwire.Event{Kind: "turn_done"}}, ok: true})
+	_, cmd := m.Update(updateMsg{us: []Update{{Event: eventwire.Event{Kind: "turn_done"}}}, ok: true})
 	run(m, cmd)
 	if got := strings.Join(m.statusBlock(), "\n"); !strings.Contains(got, i18n.M.ChatStatusCacheLabel) {
 		t.Fatalf("an empty line should leave the built-in telemetry:\n%s", got)

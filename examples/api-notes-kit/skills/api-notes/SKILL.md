@@ -1,8 +1,8 @@
 ---
 name: api-notes
 description: Turn a user-selected local OpenAPI JSON document into a Markdown guide with source pointers and an explicit review record.
-owner: @esengine
-backup: @SivanCola
+owner: "@esengine"
+backup: "@SivanCola"
 status: active
 reviewed: 2026-10-01
 ---

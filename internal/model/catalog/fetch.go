@@ -50,16 +50,23 @@ func FetchModelsVia(ctx context.Context, e *config.ProviderEntry, client *http.C
 // declares about itself — the probe reads the wires a relay names there rather
 // than inferring them from the shape of the listing.
 func FetchModelListingVia(ctx context.Context, e *config.ProviderEntry, client *http.Client) ([]openai.ListedModel, error) {
+	listed, _, err := fetchModelListingAt(ctx, e, client)
+	return listed, err
+}
+
+// fetchModelListingAt also names the candidate URL that answered, which is how
+// the probe learns which base a listing was served under.
+func fetchModelListingAt(ctx context.Context, e *config.ProviderEntry, client *http.Client) ([]openai.ListedModel, string, error) {
 	if e.BaseURL == "" {
-		return nil, fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
+		return nil, "", fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
 	}
 	key := e.APIKey()
 	if e.RequiresAPIKey() && key == "" {
-		return nil, fmt.Errorf("fetch models: provider %q has no API key (set %s in .env)", e.Name, e.APIKeyEnv)
+		return nil, "", fmt.Errorf("fetch models: provider %q has no API key (set %s in .env)", e.Name, e.APIKeyEnv)
 	}
 	candidates, err := BuildModelFetchURLs(e.BaseURL, e.ModelsURL)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var lastErr error
 	var firstHardErr error
@@ -71,7 +78,7 @@ func FetchModelListingVia(ctx context.Context, e *config.ProviderEntry, client *
 			Client:   client,
 		})
 		if err == nil {
-			return models, nil
+			return models, u, nil
 		}
 		lastErr = err
 		if !openai.IsModelFetchEndpointMiss(err) && firstHardErr == nil {
@@ -79,9 +86,22 @@ func FetchModelListingVia(ctx context.Context, e *config.ProviderEntry, client *
 		}
 	}
 	if firstHardErr != nil {
-		return nil, firstHardErr
+		return nil, "", firstHardErr
 	}
-	return nil, lastErr
+	return nil, "", lastErr
+}
+
+// ResolveChatBase is the base URL a chat call must be rooted at, given the base
+// the user typed and the model-list URL that answered. A listing found only
+// under {base}/v1 means the typed base is missing its version segment: chat
+// posts to {base}/chat/completions, so the completed base is the one that was
+// proven. Any other answering URL leaves the typed base as it is.
+func ResolveChatBase(typed, answeredURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(typed), "/")
+	if base != "" && answeredURL == base+"/v1/models" && !endsWithVersionSegment(base) {
+		return base + "/v1"
+	}
+	return strings.TrimSpace(typed)
 }
 
 func modelFetchAuthMode(e *config.ProviderEntry) openai.ModelFetchAuthMode {

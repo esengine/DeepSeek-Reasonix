@@ -3,7 +3,9 @@ import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
 import type { RemoteHost, RemoteHostEdit, RemoteProbe } from "../port/remote";
 import { say } from "../i18n/kernel";
+import { toggleHiddenHost, useHiddenHosts } from "../state/remotehide";
 import { RemoteDirs } from "./RemoteDirs";
+import { Switch } from "./Switch";
 
 interface Props {
   hub: HubPort;
@@ -43,6 +45,7 @@ function draftOf(host: RemoteHost | null): RemoteHostEdit {
     useSSHConfig: host?.useSSHConfig ?? false,
     passphraseEnv: host?.passphraseEnv ?? "",
     passwordEnv: host?.passwordEnv ?? "",
+    disabled: host?.disabled ?? false,
   };
 }
 
@@ -58,6 +61,7 @@ export function Remotes({ hub, onError }: Props) {
   const [editing, setEditing] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState("");
+  const hidden = useHiddenHosts();
   // What each machine answered when asked. Kept per host so a second probe
   // does not blank the first one's answer while it runs.
   const [probes, setProbes] = useState<Record<string, RemoteProbe>>({});
@@ -163,6 +167,18 @@ export function Remotes({ hub, onError }: Props) {
             >
               {t("编辑")}
             </button>
+            <button className="rmtlnk" data-action="remote.hide" data-target={host.name} onClick={() => toggleHiddenHost(host.name)}>
+              {t(hidden.includes(host.name) ? "在侧栏显示" : "在侧栏隐藏")}
+            </button>
+            {host.disabled ? <span className="st">{t("已停用")}</span> : null}
+            <Switch
+              data-action="remote.enable"
+              data-target={host.name}
+              on={!host.disabled}
+              busy={busy === host.name}
+              label={t(host.disabled ? "启用这台主机" : "停用这台主机")}
+              onClick={() => void save({ ...draftOf(host), disabled: !host.disabled })}
+            />
             <button className="rmtlnk" data-danger="" disabled={!!busy} onClick={() => setConfirm(host.name)}>
               {t("移除")}
             </button>

@@ -4,6 +4,7 @@ import {
   contributorLogins,
   CreditError,
   CreditErrorCode,
+  creditExclusions,
   creditSuffix,
   githubRefLookup,
   isBotAccount,
@@ -215,4 +216,26 @@ test("the token comes from the environment, then gh, else a coded error", () => 
       }),
     { code: CreditErrorCode.noToken },
   );
+});
+
+test("the repository owner and excluded logins are left as written, a community author is credited", async () => {
+  const { fetchImpl } = fakeGitHub({
+    1: pull("Owner"),
+    2: pull("alice"),
+    3: issue([linked(30, "owner"), linked(31, "alice")]),
+    4: pull("helper"),
+  });
+  const lookup = githubRefLookup({ repository: "owner/r", fetchImpl });
+  const credits = new Map([
+    [1, await lookup(1)],
+    [2, await lookup(2)],
+    [3, await lookup(3)],
+  ]);
+  assert.equal(creditSuffix(credits.get(1)), "");
+  assert.equal(creditSuffix(credits.get(2)), " by @alice");
+  assert.equal(creditSuffix(credits.get(3)), " fixed in #30 and #31 by @alice");
+  assert.deepEqual(contributorLogins([1, 2, 3], credits), ["alice"]);
+  const excluding = githubRefLookup({ repository: "owner/r", fetchImpl, excluded: creditExclusions("owner/r", { RELEASE_CREDIT_EXCLUDE: " Helper, ," }) });
+  assert.equal(creditSuffix(await excluding(4)), "");
+  assert.deepEqual([...creditExclusions("o/r", {})], ["o"]);
 });

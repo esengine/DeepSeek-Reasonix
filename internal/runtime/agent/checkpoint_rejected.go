@@ -7,6 +7,7 @@ import "fmt"
 // the sentinel's own wording — so rewording the sentinel silently returned the
 // whole error where a reason was expected.
 type checkpointRejection struct {
+	code   CompactionNoopReason
 	reason string
 }
 
@@ -16,7 +17,8 @@ func (c *checkpointRejection) Error() string {
 
 func (c *checkpointRejection) Unwrap() error { return errCheckpointRejected }
 
-// rejectCheckpoint builds the verdict with its reason attached.
-func rejectCheckpoint(format string, args ...any) error {
-	return &checkpointRejection{reason: fmt.Sprintf(format, args...)}
+// rejectCheckpoint builds the verdict with the rule that refused it and the
+// figures behind that rule.
+func rejectCheckpoint(code CompactionNoopReason, format string, args ...any) error {
+	return &checkpointRejection{code: code, reason: fmt.Sprintf(format, args...)}
 }

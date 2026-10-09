@@ -13,10 +13,8 @@ import (
 
 	"reasonix/internal/assembly/boot"
 	"reasonix/internal/base/i18n"
-	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/ablation"
 	"reasonix/internal/contract/config"
-	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/surface"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/extension/providerext"
@@ -372,7 +370,7 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 			Category:     "thought_level",
 			Type:         "select",
 			CurrentValue: currentEffort,
-			Options:      acpEffortOptions(cap.Levels),
+			Options:      acpEffortOptions(cap, &effortEntry),
 		})
 	} else if hadEffortOverride {
 		cleared := ""
@@ -407,16 +405,26 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		},
 	})
 
+	return acpSessionConfigState(cfg, entry, ok, currentModel, effortOverride, runtimeProfile, modelInfos, options), nil
+}
+
+func acpSessionConfigState(cfg *config.Config, entry *config.ProviderEntry, resolved bool, currentModel string, effortOverride *string, runtimeProfile string, modelInfos []acp.ModelInfo, options []acp.SessionConfigOption) acp.SessionConfigState {
+	identity := boot.ProviderBuildIdentity{}
+	if resolved {
+		identity = boot.ResolveProviderBuildIdentity(entry, cfg.NetworkProxySpec(), effortOverride)
+	}
 	return acp.SessionConfigState{
-		Model:          currentModel,
-		EffortOverride: effortOverride,
-		RuntimeProfile: runtimeProfile,
+		Model:               currentModel,
+		EffortOverride:      effortOverride,
+		RuntimeProfile:      runtimeProfile,
+		ResolvedEffort:      identity.Effort,
+		ProviderFingerprint: identity.Fingerprint,
 		Models: &acp.SessionModelState{
 			AvailableModels: modelInfos,
 			CurrentModelID:  currentModel,
 		},
 		ConfigOptions: options,
-	}, nil
+	}
 }
 
 func acpRuntimeProfile(value string) string {
@@ -480,12 +488,24 @@ func hasModelOption(options []acp.SessionConfigSelectOption, ref string) bool {
 	return false
 }
 
-func acpEffortOptions(levels []string) []acp.SessionConfigSelectOption {
-	out := make([]acp.SessionConfigSelectOption, 0, len(levels))
-	for _, level := range levels {
-		out = append(out, acp.SessionConfigSelectOption{Value: level, Name: effortOptionName(level)})
+func acpEffortOptions(cap config.EffortCapability, e *config.ProviderEntry) []acp.SessionConfigSelectOption {
+	out := make([]acp.SessionConfigSelectOption, 0, len(cap.Levels))
+	for _, level := range cap.Levels {
+		out = append(out, acp.SessionConfigSelectOption{
+			Value:       level,
+			Name:        effortOptionName(level),
+			Description: effortOptionDescription(cap, e, level),
+		})
 	}
 	return out
+}
+
+// Forced-thinking models still bill for reasoning at their cheapest real level.
+func effortOptionDescription(cap config.EffortCapability, e *config.ProviderEntry, level string) string {
+	if len(cap.Levels) > 1 && level == cap.Levels[1] && config.EffortForcesThinking(e) {
+		return i18n.M.ArgEffortForcedOn
+	}
+	return ""
 }
 
 func effortOptionName(level string) string {
@@ -513,55 +533,4 @@ func cloneStringPtr(p *string) *string {
 	}
 	cp := *p
 	return &cp
-}
-
-func acpTaskProfileDefaults(cfg *config.Config) (string, string) {
-	if cfg == nil {
-		return "", ""
-	}
-	model := strings.TrimSpace(cfg.Agent.SubagentModels["task"])
-	if model == "" {
-		model = strings.TrimSpace(cfg.Agent.SubagentModel)
-	}
-	effort := strings.TrimSpace(cfg.Agent.SubagentEfforts["task"])
-	if effort == "" {
-		effort = strings.TrimSpace(cfg.Agent.SubagentEffort)
-	}
-	return model, effort
-}
-
-func newACPSubagentProviderResolver(cfg *config.Config, parent *config.ProviderEntry, proxySpec netclient.ProxySpec) func(string, string) (provider.Provider, *provider.Pricing, int, error) {
-	return func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
-		modelRef = strings.TrimSpace(modelRef)
-		effort = strings.TrimSpace(effort)
-
-		var entry *config.ProviderEntry
-		if modelRef != "" {
-			var ok bool
-			entry, ok = cfg.ResolveModel(modelRef)
-			if !ok {
-				return nil, nil, 0, fmt.Errorf("subagent_model %q is not a configured provider", modelRef)
-			}
-		} else {
-			cp := *parent
-			entry = &cp
-		}
-
-		if effort != "" {
-			normalized, err := config.NormalizeEffort(entry, effort)
-			if err != nil {
-				return nil, nil, 0, err
-			}
-			entry.Effort = normalized
-			if entry.Kind == "anthropic" && strings.TrimSpace(entry.Effort) != "" && strings.TrimSpace(entry.Thinking) == "" {
-				entry.Thinking = "adaptive"
-			}
-		}
-
-		prov, err := boot.NewProviderWithProxy(entry, proxySpec)
-		if err != nil {
-			return nil, nil, 0, err
-		}
-		return prov, entry.Price, entry.ContextWindow, nil
-	}
 }

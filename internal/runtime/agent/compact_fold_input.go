@@ -100,7 +100,7 @@ func (a *contextWindow) foldToSummary(ctx context.Context, fold []provider.Messa
 		res.FoldTokens = a.summaryInputTokens(input)
 	}
 	if res.FoldTokens > budget {
-		return res, fmt.Errorf("summary input still exceeds single-request budget after shortening (%d > %d)", res.FoldTokens, budget)
+		return res, fmt.Errorf("%w after shortening (%d > %d)", errSummaryInputTooLarge, res.FoldTokens, budget)
 	}
 	return a.singleCallSummary(ctx, res, input, instructions)
 }
@@ -300,5 +300,5 @@ func rejectDigestThatCarriedNothing(res foldSummary, mustFree bool) error {
 	if mustFree || !res.Coverage.LostEveryChange() {
 		return nil
 	}
-	return rejectCheckpoint("the digest carried none of the fold's changes (%s)", res.Coverage.Reason())
+	return rejectCheckpoint(NoopDigestLostEveryChange, "the digest carried none of the fold's changes (%s)", res.Coverage.Reason())
 }

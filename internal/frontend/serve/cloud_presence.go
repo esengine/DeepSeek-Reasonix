@@ -18,7 +18,6 @@ type CloudControllerView struct {
 type cloudPresence struct {
 	mu          sync.Mutex
 	now         func() time.Time
-	nextOrdinal int
 	controllers map[string]CloudControllerView
 }
 
@@ -38,12 +37,28 @@ func (p *cloudPresence) connect(id, name string) int {
 		p.controllers[id] = current
 		return current.Ordinal
 	}
-	p.nextOrdinal++
+	ordinal := p.lowestFreeOrdinal()
 	now := p.now()
 	p.controllers[id] = CloudControllerView{
-		ID: id, Name: deviceLabel(name), ConnectedAt: now, LastSeen: now, Ordinal: p.nextOrdinal,
+		ID: id, Name: deviceLabel(name), ConnectedAt: now, LastSeen: now, Ordinal: ordinal,
 	}
-	return p.nextOrdinal
+	return ordinal
+}
+
+// lowestFreeOrdinal is unique among live connections and held for the
+// connection's lifetime, so a disconnect leaves a hole the next one fills.
+func (p *cloudPresence) lowestFreeOrdinal() int {
+	taken := make(map[int]struct{}, len(p.controllers))
+	for _, c := range p.controllers {
+		taken[c.Ordinal] = struct{}{}
+	}
+	n := 1
+	for {
+		if _, used := taken[n]; !used {
+			return n
+		}
+		n++
+	}
 }
 
 func (p *cloudPresence) touch(id string) {

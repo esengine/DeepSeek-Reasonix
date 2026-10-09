@@ -69,7 +69,7 @@ func newFeedbackRig(t *testing.T, surface feedback.Surface, withService bool) *f
 
 func (r *feedbackRig) last(t *testing.T, contains string) string {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for time.Now().Before(deadline) {
 		r.mu.Lock()
 		for _, s := range r.texts {
@@ -83,6 +83,14 @@ func (r *feedbackRig) last(t *testing.T, contains string) string {
 	}
 	t.Fatalf("no notice containing %q; got %q", contains, r.texts)
 	return ""
+}
+
+// edit changes what the stub server answers; the handler goroutine reads these
+// fields under mu, so the test must not write them bare.
+func (r *feedbackRig) edit(f func(r *feedbackRig)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	f(r)
 }
 
 func (r *feedbackRig) postCount() int {
@@ -113,7 +121,9 @@ func TestFeedbackCommandNeedsANicknameThenAnExplicitYes(t *testing.T) {
 
 func TestFeedbackCommandListShowsStatusAndOfflineHonesty(t *testing.T) {
 	r := newFeedbackRig(t, feedback.SurfaceTUI, true)
-	r.mine = `{"items":[{"receipt":"FB-7K3M-9QX2","category":"bug","titleSnippet":"Sidebar","status":"fixed","issueNumber":11350,"resolvedVersion":"v2.25.0","createdAt":"2026-09-30T08:00:00Z","updatedAt":"2026-10-02T08:00:00Z"},{"receipt":"FB-2H8P-4WD7","category":"idea","titleSnippet":"Export","status":"duplicate","duplicateOf":11302,"createdAt":"2026-09-29T08:00:00Z","updatedAt":"2026-09-29T08:00:00Z"}]}`
+	r.edit(func(r *feedbackRig) {
+		r.mine = `{"items":[{"receipt":"FB-7K3M-9QX2","category":"bug","titleSnippet":"Sidebar","status":"fixed","issueNumber":11350,"resolvedVersion":"v2.25.0","createdAt":"2026-09-30T08:00:00Z","updatedAt":"2026-10-02T08:00:00Z"},{"receipt":"FB-2H8P-4WD7","category":"idea","titleSnippet":"Export","status":"duplicate","duplicateOf":11302,"createdAt":"2026-09-29T08:00:00Z","updatedAt":"2026-09-29T08:00:00Z"}]}`
+	})
 	r.c.Submit("/feedback list")
 	r.last(t, "no feedback sent")
 	r.c.Submit("/feedback name kim")
@@ -129,8 +139,10 @@ func TestFeedbackCommandListShowsStatusAndOfflineHonesty(t *testing.T) {
 func TestFeedbackCommandRefusalsAreSaidFromTheirIdentity(t *testing.T) {
 	r := newFeedbackRig(t, feedback.SurfaceTUI, true)
 	r.c.Submit("/feedback name kim")
-	r.status = http.StatusTooManyRequests
-	r.respond = `{"error":{"code":"feedback.rate_limited"}}`
+	r.edit(func(r *feedbackRig) {
+		r.status = http.StatusTooManyRequests
+		r.respond = `{"error":{"code":"feedback.rate_limited"}}`
+	})
 	r.c.Submit("/feedback bug --yes x")
 	r.last(t, "too many submissions")
 	r.c.Submit("/feedback rant --yes x")
@@ -186,11 +198,13 @@ func TestFeedbackKeepsTheLinesOfAMultiLineReport(t *testing.T) {
 	r.c.Submit("/feedback name kim")
 	r.last(t, "nickname set")
 	var got string
-	r.onPost = func(body string) { got = body }
+	r.edit(func(r *feedbackRig) { r.onPost = func(body string) { got = body } })
 	r.c.Submit("/feedback bug --yes line one\n  indented line two\n\nline four")
 	r.last(t, "Receipt")
-	if !strings.Contains(got, `line one\n  indented line two\n\nline four`) {
-		t.Fatalf("body on the wire = %s", got)
+	var wire string
+	r.edit(func(*feedbackRig) { wire = got })
+	if !strings.Contains(wire, `line one\n  indented line two\n\nline four`) {
+		t.Fatalf("body on the wire = %s", wire)
 	}
 }
 
@@ -207,7 +221,7 @@ func sentRig(t *testing.T) *feedbackRig {
 	r.last(t, "nickname set")
 	r.c.Submit("/feedback bug --yes x")
 	r.last(t, "Receipt")
-	r.mine = rigThread
+	r.edit(func(r *feedbackRig) { r.mine = rigThread })
 	return r
 }
 
@@ -270,8 +284,10 @@ func TestFeedbackReplyRefusalsAreSaidFromTheirIdentity(t *testing.T) {
 		{429, "feedback.reply_limit", "reply limit"},
 		{409, "feedback.not_replyable", "takes no reply"},
 	} {
-		r.status = c.status
-		r.respond = `{"error":{"code":"` + c.code + `"}}`
+		r.edit(func(r *feedbackRig) {
+			r.status = c.status
+			r.respond = `{"error":{"code":"` + c.code + `"}}`
+		})
 		r.c.Submit("/feedback reply FB-7K3M-9QX2 --yes hello")
 		r.last(t, c.says)
 	}
@@ -291,8 +307,10 @@ func TestFeedbackReplyFailuresNeverTellYouToJustRetry(t *testing.T) {
 		{502, "", "may or may not have been sent - check /feedback show FB-7K3M-9QX2"},
 		{401, "feedback.bad_token", "send a new report instead"},
 	} {
-		r.status = c.status
-		r.respond = `{"error":{"code":"` + c.code + `"}}`
+		r.edit(func(r *feedbackRig) {
+			r.status = c.status
+			r.respond = `{"error":{"code":"` + c.code + `"}}`
+		})
 		r.c.Submit("/feedback reply FB-7K3M-9QX2 --yes hello")
 		r.last(t, c.says)
 	}

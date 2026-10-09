@@ -27,7 +27,7 @@ type oneTurnMock struct {
 func (m *oneTurnMock) handler(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	if isSummarizeRequest(body) {
-		writeSSE(w, m.t, streamChunk(deltaText("- digest")), finishChunk("stop"), usageChunk(80, 30, 0, 80))
+		writeSSE(w, m.t, streamChunk(deltaText("## Digest\n- digest")), finishChunk("stop"), usageChunk(80, 30, 0, 80))
 		return
 	}
 	promptTok := charsOf(decodeMessages(body)) / 4
@@ -59,7 +59,7 @@ func TestTailBudgetYieldsToLowTrigger(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 			defer srv.Close()
 			reg := tool.NewRegistry()
-			reg.Add(fatTool{blob: strings.Repeat("FILE CONTENTS LINE. ", 200)})
+			reg.Add(fatTool{blob: strings.Repeat("FILE CONTENTS LINE. ", 1000)})
 			prov, err := openai.New(provider.Config{
 				Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-reasoner", APIKey: "test",
 				Extra: map[string]any{"api_key_env": "DEEPSEEK_API_KEY"},

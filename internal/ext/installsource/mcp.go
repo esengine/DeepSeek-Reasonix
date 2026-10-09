@@ -3,11 +3,13 @@ package installsource
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 )
 
@@ -65,9 +67,9 @@ func mcpActionRisk(e config.PluginEntry, reasons []string) (RiskLevel, []string)
 	level := RiskMedium
 	hasAuth := false
 	for k, v := range e.Headers {
-		if strings.EqualFold(k, "Authorization") || strings.Contains(strings.ToLower(v), "bearer") || strings.Contains(strings.ToLower(v), "token") {
+		if secrets.CredentialKey(k) || secrets.CredentialValue(v) {
 			hasAuth = true
-			reasons = append(reasons, "sends auth headers to "+e.URL)
+			reasons = append(reasons, "sends auth headers to "+secrets.RedactEndpoint(e.URL))
 		}
 	}
 	if e.Tier == "eager" {
@@ -81,13 +83,19 @@ func mcpActionRisk(e config.PluginEntry, reasons []string) (RiskLevel, []string)
 }
 
 // remoteMCPAction builds a server entry from a URL alone. The default
-// transport is http unless the URL's path smells like SSE.
+// transport is http unless the endpoint path has an SSE segment.
 func (t *Tool) remoteMCPAction(req request, sourceURL string) action {
 	transport := req.Transport
 	if transport == "" || transport == "auto" {
 		transport = "http"
-		if strings.Contains(strings.ToLower(sourceURL), "sse") {
-			transport = "sse"
+		if endpoint, err := url.Parse(sourceURL); err == nil {
+			for segment := range strings.SplitSeq(endpoint.EscapedPath(), "/") {
+				decoded, err := url.PathUnescape(segment)
+				if err == nil && strings.EqualFold(decoded, "sse") {
+					transport = "sse"
+					break
+				}
+			}
 		}
 	}
 	name := strings.TrimSpace(req.Name)

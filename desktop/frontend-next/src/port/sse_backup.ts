@@ -1,9 +1,9 @@
-import { SseTheme } from "./sse_theme";
+import { SseIntake } from "./sse_intake";
 import type { BackupApplyResult, BackupCatalog, BackupCreated, BackupCreateRequest, BackupPlan } from "./backup";
 
 // Backups kept in the signed-in account. Every call is refused while signed
 // out, so a caller shows the section only when the account says signed in.
-export class SseBackup extends SseTheme {
+export class SseBackup extends SseIntake {
   backups() {
     return this.get<BackupCatalog>("/backups");
   }

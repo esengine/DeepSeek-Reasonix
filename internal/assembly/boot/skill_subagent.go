@@ -40,6 +40,7 @@ type skillSubagents struct {
 
 	resolveProvider func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
 	identity        func(modelRef, effort string) (string, string)
+	inheritedFor    func(modelRef string) string
 	runOptions      func(ctx context.Context, steps int, price *provider.Pricing, ctxWin, childDepth int) agent.Options
 }
 
@@ -93,7 +94,7 @@ func (r *skillSubagents) stepsFor(runOpts skill.SubagentRunOptions) int {
 func (r *skillSubagents) resolveModel(sk skill.Skill) (provider.Provider, *provider.Pricing, int, string, string, error) {
 	prov, price, ctxWin := r.provider, r.entry.Price, r.entry.ContextWindow
 	modelRef := subagentModelRef(r.cfg, sk)
-	effortRef := subagentEffortRef(r.cfg, sk)
+	effortRef := subagentEffortRef(r.cfg, sk, r.inheritedFor)
 	if modelRef == "" && effortRef == "" {
 		return prov, price, ctxWin, modelRef, effortRef, nil
 	}
@@ -188,7 +189,7 @@ func (r *skillSubagents) compile(sctx context.Context, sk skill.Skill, task stri
 			// resolve the profile again would silently drop them.
 			SystemPrompt: r.systemPrompt(sk), UseProfilePrompt: true,
 			Model:  subagentModelRef(r.cfg, sk),
-			Effort: subagentEffortRef(r.cfg, sk),
+			Effort: subagentEffortRef(r.cfg, sk, r.inheritedFor),
 			// A verdict the parent must act on carries an identity, never a
 			// sentence, so the typed report is required at every role setting.
 			// What that verdict may close is the separate grant beside it.

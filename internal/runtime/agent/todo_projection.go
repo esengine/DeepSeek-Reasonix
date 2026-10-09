@@ -37,10 +37,39 @@ func todoStateLine(index int, t evidence.TodoItem) string {
 // plan has none left — carried into the next task it reads as work outstanding.
 func (a *Agent) withTodoIdentityTail(visible []provider.Message) []provider.Message {
 	todos := a.CanonicalTodoState()
-	if len(evidence.TodoStepIDs(todos)) == 0 || len(evidence.IncompleteTodos(todos)) == 0 || todoStateVisible(visible, todos) {
+	if !todoIdentityOwed(visible, todos) {
 		return visible
 	}
 	return append(visible, provider.Message{Role: provider.RoleUser, Content: todoIdentityNote(todos), Derived: true})
+}
+
+func todoIdentityOwed(visible []provider.Message, todos []evidence.TodoItem) bool {
+	return len(evidence.TodoStepIDs(todos)) > 0 && len(evidence.IncompleteTodos(todos)) > 0 && !todoStateVisible(visible, todos)
+}
+
+// withFoldProgressTail appends the host's record of finished work once a fold
+// is installed, and nothing before one. The task list rides it only when no
+// todo_write is left in view and the identity note is not already carrying it;
+// the record lasts as long as the fold, so a rewind or a new session ends it.
+func (a *Agent) withFoldProgressTail(visible []provider.Message, p *foldProgress) []provider.Message {
+	if p == nil {
+		return visible
+	}
+	var todos []evidence.TodoItem
+	if listed := a.CanonicalTodoState(); !todoIdentityOwed(visible, listed) && !todoWriteVisible(visible) {
+		todos = listed
+	}
+	note := foldProgressNote(todos, *p)
+	if note == "" {
+		return visible
+	}
+	return append(visible, provider.Message{Role: provider.RoleUser, Content: note, Derived: true})
+}
+
+func todoWriteVisible(msgs []provider.Message) bool {
+	return slices.ContainsFunc(msgs, func(m provider.Message) bool {
+		return slices.ContainsFunc(m.ToolCalls, func(tc provider.ToolCall) bool { return tc.Name == "todo_write" })
+	})
 }
 
 // todoStateVisible reports whether the view already carries the host's current

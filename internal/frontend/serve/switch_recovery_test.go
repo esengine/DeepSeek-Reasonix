@@ -85,7 +85,7 @@ func TestSwitchModelKeepsAskInteractive(t *testing.T) {
 		newCtrl.AnswerQuestion(ask.ID, []event.AskAnswer{{QuestionID: "q1", Selected: []string{"A"}}})
 	case err := <-runDone:
 		t.Fatalf("ask tool returned without an ask_request after model switch: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("ask tool did not emit ask_request after model switch")
 	}
 
@@ -94,7 +94,7 @@ func TestSwitchModelKeepsAskInteractive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run after answering ask_request: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("run stayed blocked after answering ask_request")
 	}
 }

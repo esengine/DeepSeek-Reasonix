@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { SseHub } from "./hub";
 import { HttpError } from "./port";
@@ -45,5 +46,31 @@ describe("a failed hub call", () => {
     const err = (await new SseHub().openRemote({ host: "gpu-box" }).catch((e) => e)) as HttpError;
     expect(err.message).toBe("/remotes/open: 502");
     expect(err.detailed).toBe(false);
+  });
+});
+
+function jsonAnswer(status: number, body: unknown) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => JSON.stringify(body),
+    json: async () => body,
+    headers: new Map([["content-type", "application/json"]]),
+  };
+}
+
+describe("host capabilities", () => {
+  it("does not ask a kernel picker the capability probe says is absent", async () => {
+    const calls: Array<[string, string]> = [];
+    vi.stubGlobal("fetch", async (path: string, init?: RequestInit) => {
+      calls.push([init?.method ?? "GET", path]);
+      if (path === "/host/capabilities") {
+        return jsonAnswer(200, { pickFolder: false, addWorkspace: true });
+      }
+      return answer(501, JSON.stringify({ code: "picker.unsupported", error: "native folder picker is unavailable" }));
+    });
+
+    expect(await new SseHub().hostCapabilities()).toEqual({ pickFolder: false, addWorkspace: true });
+    expect(calls).toEqual([["GET", "/host/capabilities"]]);
   });
 });

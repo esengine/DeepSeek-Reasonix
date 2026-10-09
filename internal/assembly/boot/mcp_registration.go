@@ -18,10 +18,12 @@ import (
 // configured ones stay process-idle until their first call.
 func registerMCPTools(ctx context.Context, host *plugin.Host, reg *tool.Registry, plan mcpSpecPlan, sink event.Sink) ([]plugin.Spec, map[string]bool) {
 	for _, s := range plan.extra {
+		plugin.ApplyDisabledMCPPolicy(reg, s)
 		registerHostSessionServer(ctx, host, reg, s, sink)
 	}
 	known := map[string]bool{}
 	for _, s := range plan.configured {
+		plugin.ApplyDisabledMCPPolicy(reg, s)
 		if registerConfiguredServer(ctx, host, reg, s, plan.alwaysLoad[s.Name]) {
 			known[s.Name] = true
 		}
@@ -52,6 +54,7 @@ func registerHostSessionServer(ctx context.Context, host *plugin.Host, reg *tool
 			return
 		}
 	}
+	host.RecordFailure(s, err)
 	cs, _ := plugin.LoadCachedSchemaForSpec(s)
 	addTools(reg, plugin.LazyToolset(s, cs, host, reg, ctx, false))
 	report(sink, event.Event{Level: event.LevelWarn,

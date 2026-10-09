@@ -1,3 +1,4 @@
+import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { AccountState } from "../port/port";
@@ -8,6 +9,7 @@ import { AccountRow } from "./AccountRow";
 import { RailSearch } from "./railsearch";
 import { RemoteHosts } from "./RemoteHosts";
 import { StudioIcon } from "./StudioIcon";
+import { useHiddenHosts } from "../state/remotehide";
 import { chord } from "./keys";
 import { Palette, type Command } from "./Palette";
 import { Workspaces } from "./Workspaces";
@@ -38,6 +40,7 @@ interface Props {
   readRemoteTree: (host: string) => Promise<void>;
   reloadTree: () => Promise<void>;
   adder: Adder;
+  opening?: string;
   onOpen: (req: { root?: string; sessionPath?: string }) => Promise<void>;
   onOpenRemote: (host: string, workspace?: string, sessionPath?: string) => Promise<void>;
   onFocusPane: (id: string) => void;
@@ -80,6 +83,7 @@ export function Sidebar({
   readRemoteTree,
   reloadTree,
   adder,
+  opening,
   onOpen,
   onOpenRemote,
   onFocusPane,
@@ -101,6 +105,13 @@ export function Sidebar({
   const [palette, setPalette] = useState(false);
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const hideAmounts = useHidesAmounts();
+  const hiddenHosts = useHiddenHosts();
+  // The rail shows the machines this window was not asked to keep out; a hidden
+  // one is still in the book and still listed in settings.
+  const shownRemotes = useMemo(
+    () => (remotes ?? []).filter((host) => !hiddenHosts.includes(host.name)),
+    [remotes, hiddenHosts],
+  );
   const newSessionRoot = activeWorkspace?.root;
 
   // The shortcut the button prints. It was drawn and never bound, so the one
@@ -137,6 +148,8 @@ export function Sidebar({
         run: () => onFeedback("send") },
       { id: "feedback-mine", label: t("我的反馈"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
         status: feedbackUnread > 0 ? t("{n} 项待查看", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
+      { id: "community", label: t("社区与贡献者"), icon: "globe", keywords: "community discord qq group contributors 社区 交流群 加群 贡献者",
+        run: () => onSettings("versions:community") },
       { id: "settings", label: t("设置"), icon: "settings", keywords: "settings preferences 设置 偏好",
         run: () => onSettings() },
     ],
@@ -193,10 +206,10 @@ export function Sidebar({
           data-action="session.new"
           onClick={() => void onOpen({ root: newSessionRoot }).catch(onError)}
         >
-          <span aria-hidden="true"><StudioIcon name="plus" /></span>{t("新建会话")}<kbd>Alt N</kbd>
+          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("新建会话")}</b><kbd>Alt N</kbd>
         </button>
         <button className="studio-search" data-action="workspace.search" onClick={() => setPalette(true)}>
-          <span aria-hidden="true"><StudioIcon name="search" /></span>{t("搜索与快捷操作")}<kbd>Ctrl K</kbd>
+          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索与快捷操作")}</b><kbd>Ctrl K</kbd>
         </button>
         <div className="studio-quicknav">
           <button data-action="settings.section" data-value="storage" onClick={() => onSettings("storage")}><span aria-hidden="true"><StudioIcon name="file" /></span><b>{t("文件")}</b></button>
@@ -224,6 +237,7 @@ export function Sidebar({
         folded={folded}
         onFold={onFold}
         reload={reloadTree}
+        opening={opening}
         onOpen={onOpen}
         onFocus={onFocusPane}
         onClose={onClosePanes}
@@ -238,10 +252,10 @@ export function Sidebar({
         onError={onError}
         adder={adder}
       >
-        {remotes ? (
+        {shownRemotes.length ? (
           <RemoteHosts
             hub={hub}
-            hosts={remotes}
+            hosts={shownRemotes}
             runtimes={runtimes}
             active={active}
             onOpen={onOpenRemote}
@@ -260,15 +274,10 @@ export function Sidebar({
       </div>
       <div className="railfoot">
         <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("钱包与用量")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>
-        <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackUnread > 0 ? "mine" : "send")}>
+        <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
           <span aria-hidden="true"><StudioIcon name="feedback" /></span>
           <b>{t("发送反馈")}</b>
-          {feedbackUnread > 0 && (
-            <>
-              <i className="fbk-badge" aria-hidden="true" title={t("{n} 项待查看", { n: feedbackUnread })}>{feedbackUnread > 9 ? "9+" : feedbackUnread}</i>
-              <span className="sr-only">{t("{n} 项待查看", { n: feedbackUnread })}</span>
-            </>
-          )}
+          <FeedbackBadge unread={feedbackUnread} />
         </button>
         <div className="studio-user-foot">
           <AccountRow account={account} unread={accountUnread} onOpen={() => onSettings("account")} />

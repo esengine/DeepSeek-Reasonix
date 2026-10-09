@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"reasonix/internal/contract/surface"
 	"reasonix/internal/platform/feedback"
@@ -188,11 +189,7 @@ func refuseFeedback(w http.ResponseWriter, err error) {
 	case errors.Is(err, feedback.ErrTooLarge):
 		refuse(w, http.StatusRequestEntityTooLarge, codeFeedbackTooLarge, err.Error(), nil)
 	case errors.Is(err, feedback.ErrRateLimited):
-		params := map[string]any(nil)
-		if after := feedback.RetryAfter(err); after > 0 {
-			params = map[string]any{"retryAfterSeconds": int(after.Seconds())}
-		}
-		refuse(w, http.StatusTooManyRequests, codeFeedbackRateLimited, err.Error(), params)
+		refuse(w, http.StatusTooManyRequests, codeFeedbackRateLimited, err.Error(), limitParams(err))
 	case errors.Is(err, feedback.ErrDisabled):
 		refuse(w, http.StatusServiceUnavailable, codeFeedbackDisabled, err.Error(), nil)
 	case errors.Is(err, feedback.ErrDuplicate):
@@ -200,9 +197,9 @@ func refuseFeedback(w http.ResponseWriter, err error) {
 	case errors.Is(err, feedback.ErrBadToken):
 		refuse(w, http.StatusConflict, codeFeedbackBadToken, err.Error(), nil)
 	case errors.Is(err, feedback.ErrBusy):
-		refuse(w, http.StatusServiceUnavailable, codeFeedbackBusy, err.Error(), nil)
+		refuse(w, http.StatusServiceUnavailable, codeFeedbackBusy, err.Error(), limitParams(err))
 	case errors.Is(err, feedback.ErrReplyLimit):
-		refuse(w, http.StatusTooManyRequests, codeFeedbackReplyLimit, err.Error(), nil)
+		refuse(w, http.StatusTooManyRequests, codeFeedbackReplyLimit, err.Error(), limitParams(err))
 	case errors.Is(err, feedback.ErrNotReplyable):
 		refuse(w, http.StatusConflict, codeFeedbackNotReplyable, err.Error(), nil)
 	case errors.Is(err, feedback.ErrChallengeRequired):
@@ -216,4 +213,28 @@ func refuseFeedback(w http.ResponseWriter, err error) {
 	default:
 		refuse(w, http.StatusInternalServerError, codeFeedbackInternal, err.Error(), nil)
 	}
+}
+
+// limitParams is the window a refusal names, field for field as the kernel read
+// it from the service: which limit, when it resets, how long to wait. A field
+// the service did not send is absent, so a frontend never reads a zero as a time.
+func limitParams(err error) map[string]any {
+	l, ok := feedback.LimitOf(err)
+	if !ok {
+		return nil
+	}
+	params := map[string]any{}
+	if l.Limit != "" {
+		params["limit"] = string(l.Limit)
+	}
+	if !l.ResetsAt.IsZero() {
+		params["resetsAt"] = l.ResetsAt.UTC().Format(time.RFC3339)
+	}
+	if l.After > 0 {
+		params["retryAfterSeconds"] = int(l.After.Seconds())
+	}
+	if len(params) == 0 {
+		return nil
+	}
+	return params
 }

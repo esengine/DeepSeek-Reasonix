@@ -1,12 +1,13 @@
 import type { PlanAction } from "./session";
 import { HttpError } from "./port";
-import type { AccountState, AgentPort, ChangeDiff, Completion, CompletionItem, DeviceGrant, VersionHub, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, WorkspaceChanges, Attachment, DroppedRef, Queue, QueueItem, Queued, NotifyPrefs, TrayPrefs } from "./port";
+import type { AccountState, AgentPort, ChangeDiff, Completion, CompletionItem, DeviceGrant, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, WorkspaceChanges, Attachment, DroppedRef, Queue, QueueItem, Queued, ChipCall, NotifyPrefs, TrayPrefs, UsageQuery } from "./port";
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import { MockFeedback } from "./mock_feedback";
 import { SCRIPT, mockMsgIndex, mockTurnStart } from "./fixture";
 import { MockExecutionHold, mockExecutionGraph } from "./mock_graph";
 import { mockStorage, mockStoragePlan } from "./mock_storage";
 import { MEMORIES } from "./mock_memory";
+import { mockModels } from "./mock_models";
 import { mockUsage } from "./mock_usage";
 
 
@@ -81,49 +82,29 @@ export class MockPort extends MockFeedback implements AgentPort {
     this.assigned = { ...this.assigned, [role]: ref };
   }
 
-  // Two protocols onto one host, plus a second vendor carrying the only model
-  // that reads images: the two shapes the picker has to render correctly.
+  overrides: Record<string, RoleOverride[]> = {};
+
+  async roleOverrides(): Promise<Record<string, RoleOverride[]>> {
+    return this.overrides;
+  }
+
+  async clearRoleOverride(role: string, key: string) {
+    this.overrides = { ...this.overrides, [role]: (this.overrides[role] ?? []).filter((o) => o.key !== key) };
+  }
+
   async models(): Promise<ModelEntry[]> {
     const efforts = ["auto", "low", "high", "max"];
-    return [
-      {
-        ref: "deepseek/deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro",
-        kind: "openai", vendor: "api.deepseek.com", keyEnv: "DEEPSEEK_API_KEY", active: true, efforts, effort: "high",
-        contextWindow: 131072, price: { input: 2, output: 8, currency: "CNY" },
-      },
-      {
-        ref: "deepseek-anthropic/deepseek-v4-pro", provider: "deepseek-anthropic",
-        model: "deepseek-v4-pro", kind: "anthropic", vendor: "api.deepseek.com", keyEnv: "DEEPSEEK_API_KEY",
-        efforts, effort: "high", contextWindow: 131072,
-      },
-      {
-        ref: "deepseek/deepseek-flash", provider: "deepseek", model: "deepseek-flash",
-        kind: "openai", vendor: "api.deepseek.com", keyEnv: "DEEPSEEK_API_KEY", efforts, effort: "high",
-        contextWindow: 131072, price: { input: 0.5, output: 2, currency: "CNY" },
-      },
-      {
-        ref: "kimi/kimi-k2-vision", provider: "kimi", model: "kimi-k2-vision",
-        kind: "openai", vendor: "api.moonshot.cn", keyEnv: "KIMI_API_KEY", vision: true, contextWindow: 262144,
-      },
-      {
-        ref: "myrelay/gpt-4o", provider: "myrelay", model: "gpt-4o", kind: "openai",
-        vendor: "relay.example.com", keyEnv: "MYRELAY_API_KEY", vision: true, contextWindow: 131072,
-      },
-      {
-        ref: "myrelay/claude-sonnet-4", provider: "myrelay", model: "claude-sonnet-4", kind: "openai",
-        vendor: "relay.example.com", keyEnv: "MYRELAY_API_KEY", contextWindow: 200000,
-      },
-      {
-        ref: "myrelay-work/gpt-4o", provider: "myrelay-work", model: "gpt-4o", kind: "openai",
-        vendor: "relay.example.com", keyEnv: "MYRELAY_WORK_API_KEY", contextWindow: 131072,
-      },
-    ];
+    return mockModels(efforts).map((m) => ({ ...m, default: m.ref === this.defaultRef }));
   }
+
+  // The one model the catalogue marks as default, so a pick in the settings row
+  // has something to read back after the list is reloaded.
+  private defaultRef = "";
 
   private mem: MemoryEntry[] = MEMORIES.map((m) => ({ ...m }));
 
-  async usage(days: number): Promise<UsageReport> {
-    return mockUsage(days);
+  async usage(query: number | UsageQuery): Promise<UsageReport> {
+    return mockUsage(query);
   }
 
   async memories(): Promise<MemoryCatalog> {
@@ -200,6 +181,9 @@ export class MockPort extends MockFeedback implements AgentPort {
   async markWelcomed(): Promise<void> { this.welcomed = true; }
 
   async pinVersion(): Promise<void> {}
+  async versionNotes(version: string): Promise<VersionNotes> {
+    return { version, markdown: "", cached: false };
+  }
   async acknowledgeLaunchHealth(): Promise<void> {} // booted from no update
   async goToVersion(): Promise<void> {
     throw new Error("演示模式不会真的安装版本");
@@ -347,6 +331,8 @@ export class MockPort extends MockFeedback implements AgentPort {
   }
 
   async deleteSession(_name: string) {}
+
+  async markSessionViewed() {}
 
   async status() {
     return { ...this.state };
@@ -538,6 +524,7 @@ export class MockPort extends MockFeedback implements AgentPort {
   // that wait is the only window in which taking it back means anything. A
   // fixture that echoed it at once made the state undesignable.
   async steer(text: string): Promise<Queued> {
+    if (this.queuePaused) return this.queueFollowup(text);
     const itemId = `inbox-${this.queued.size + 1}-${Date.now()}`;
     const at = window.setTimeout(() => {
       // Three states, not two. The kernel marks the line consumed when the turn
@@ -613,7 +600,7 @@ export class MockPort extends MockFeedback implements AgentPort {
   async queueFollowup(text: string): Promise<Queued> {
     const itemId = `inbox-followup-${Date.now()}`;
     this.addQueued(itemId, "followup", text);
-    return { itemId, disposition: "queued_followup" };
+    return { itemId, disposition: "queued_followup", paused: this.queuePaused };
   }
 
   async browserTabs(): Promise<BrowserTab[]> {
@@ -670,7 +657,6 @@ export class MockPort extends MockFeedback implements AgentPort {
   async retryQueued(itemId: string) {
     void itemId;
   }
-
   async refreshQueued(itemId: string) {
     void itemId;
   }
@@ -691,9 +677,11 @@ export class MockPort extends MockFeedback implements AgentPort {
     if (at === undefined) throw new HttpError(409, "already applied", { code: "steer.already_applied" });
     window.clearTimeout(at);
     this.queued.delete(itemId);
+    this.dropQueued(itemId);
   }
 
-  async submit(text: string) {
+  async submit(text: string, chips?: ChipCall): Promise<Queued | void> {
+    if (chips && this.queuePaused) return this.queueFollowup(text);
     if (this.state.running) {
       this.emit({ kind: "steer", text });
       return;
@@ -778,6 +766,9 @@ export class MockPort extends MockFeedback implements AgentPort {
   async setModel(ref: string) {
     this.state.modelRef = ref;
     this.state.label = ref.split("/").pop() ?? ref;
+  }
+  async setDefaultModel(ref: string) {
+    this.defaultRef = ref;
   }
   async setEffort(effort: string) {
     this.state.effort = effort;

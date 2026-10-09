@@ -119,6 +119,9 @@ func (b *Broadcaster) Emit(e event.Event) {
 	if !drop {
 		b.replay.add(b.seq, e.Kind, data)
 	}
+	if e.Kind == event.Notice && e.Code == event.NoticeCodeDisplayCurrency {
+		b.displayCurrency = pricing.NormalizeCurrency(e.Detail)
+	}
 	if e.Kind == event.Usage && e.Usage != nil && e.CostQuote != nil {
 		if b.ledger == nil {
 			b.ledger = pricing.NewLedger()

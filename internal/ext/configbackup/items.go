@@ -5,11 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/pluginpkg"
@@ -174,19 +175,32 @@ func isPlaceholder(v string) bool {
 	return strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}")
 }
 
-// stripURLSecrets drops userinfo, which is where a token hides in a git or
-// gateway URL. A query string is left alone: it is more often a project id
-// than a key, and a URL cut short breaks the restore in a way nobody can see.
+// stripURLSecrets masks credentials in a URL (userinfo, credential-named
+// query and path parameters). A value that is not a URL (a scp-style git
+// source, a bare path) has no endpoint to project and passes through.
 func stripURLSecrets(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.User == nil || u.Host == "" {
+	if !strings.Contains(raw, "://") {
 		return raw
 	}
-	u.User = nil
-	return u.String()
+	return secrets.RedactEndpoint(raw)
+}
+
+// holdsLocal reports whether a restored, redacted MCP entry is the local one
+// with its credentials masked, so the local URL and args can be kept.
+func holdsLocal(restored, have config.PluginEntry) bool {
+	return have.Name == restored.Name && have.Command == restored.Command &&
+		(have.URL == restored.URL || secrets.RedactEndpoint(have.URL) == restored.URL) &&
+		(slices.Equal(have.Args, restored.Args) || slices.Equal(secrets.RedactArgs(have.Args), restored.Args))
 }
 
 func hookName(event string, h hook.HookConfig) string {
 	sum := sha256.Sum256([]byte(event + "\x00" + h.Match + "\x00" + h.Command))
 	return event + "#" + hex.EncodeToString(sum[:6])
+}
+
+func secretsRedacted(p config.ProviderEntry) config.ProviderEntry {
+	for _, u := range []*string{&p.BaseURL, &p.ChatURL, &p.RequestURL, &p.ModelsURL, &p.BalanceURL} {
+		*u = stripURLSecrets(*u)
+	}
+	return p
 }

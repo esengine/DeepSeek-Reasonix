@@ -125,7 +125,7 @@ func envInt(k string) int {
 // runFakeParent is a supervisor process a test can kill: it runs one child in
 // the mode SCHEDRUN_CHILD_MODE and never returns on its own.
 func runFakeParent(store *schedule.Store, id string) int {
-	sup := &Supervisor{Store: store, Policy: testPolicy(), Command: childCommand(os.Getenv("SCHEDRUN_CHILD_MODE"), env("STORE"), id, "")}
+	sup := &Supervisor{Store: store, Policy: testPolicy(), Command: childCommand(os.Getenv("SCHEDRUN_CHILD_MODE"), env("STORE"), id, env("MARK"))}
 	_, _ = sup.Run(context.Background(), id)
 	return 0
 }

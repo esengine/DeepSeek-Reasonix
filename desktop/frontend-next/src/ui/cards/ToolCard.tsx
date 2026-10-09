@@ -85,8 +85,6 @@ export function ToolCard({
   // and one that sits blank until the whole file arrives at once.
   const streaming = running && !tool.args && (tool.argChars ?? 0) > 0;
   const arg = tool.name === "todo_write" ? "" : streaming ? `${tokens(tool.argChars!)} 字符` : shortArgs(tool.args ?? "");
-  // A shell result carries its exit status separately from stdout, and stdout
-  // alone cannot say whether the command worked.
   const bad = toolFailed(tool);
   // The number is the actionable half; the state only says that something went
   // wrong, which the colour already says.
@@ -311,11 +309,15 @@ function changeCounts(tool: Tool): { added: number; removed: number } | null {
   return { added, removed };
 }
 
-function NestedCall({ tool }: { tool: Tool }) {
+const NESTED_PREVIEW = 400;
+const NESTED_WHOLE_CAP = 200_000;
+
+export function NestedCall({ tool, whole = false }: { tool: Tool; whole?: boolean }) {
+  const [all, setAll] = useState(false);
   const shown = tool.resolvedName || tool.name;
   const tag = tagFor(tool);
   const bad = toolFailed(tool);
-  const clipped = (tool.output?.length ?? 0) > 400;
+  const clipped = !whole && (tool.output?.length ?? 0) > NESTED_PREVIEW;
   return (
     <div className="call" data-call={tool.id || undefined} data-k={KINDED.has(categoryOf(shown)) ? categoryOf(shown) : undefined}>
       <div className="g">
@@ -332,8 +334,16 @@ function NestedCall({ tool }: { tool: Tool }) {
         </div>
         {tool.output && (
           <div className="out">
-            <Term text={tool.output.slice(0, 400)} />
-            {clipped && <div className="bound">{t("仅显示前 400 个字符")}</div>}
+            <Term text={clipped && !all ? tool.output.slice(0, NESTED_PREVIEW) : tool.output.slice(0, NESTED_WHOLE_CAP)} />
+            {(whole || all) && tool.output.length > NESTED_WHOLE_CAP && <div className="bound bad">{t("输出过长，仅显示前 200000 个字符")}</div>}
+            {clipped && (
+              <div className="bound">
+                {all ? null : t("仅显示前 400 个字符")}
+                <button type="button" className="out-more" data-action="tool.show-all" aria-expanded={all} onClick={() => setAll(!all)}>
+                  {all ? t("收起") : t("显示全部")}
+                </button>
+              </div>
+            )}
           </div>
         )}
         {tool.err && (

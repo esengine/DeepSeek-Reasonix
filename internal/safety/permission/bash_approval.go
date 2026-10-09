@@ -100,6 +100,9 @@ func segmentApprovalBlocker(subject string) BashApprovalBlocker {
 		if blocker := indirectExecutionBlocker(features.CommandPrefix); blocker != BashApprovalBlockerNone {
 			return blocker
 		}
+		if inv, ok := shellparse.PeelWrappers(subject); ok && inv.Opaque {
+			return BashApprovalBlockerIndirectExecution
+		}
 		// `python3 - <<EOF` carries its program in the call exactly like -c does;
 		// the parser reports the here-document, so this is the same fact, not a
 		// guess about what the interpreter will read.

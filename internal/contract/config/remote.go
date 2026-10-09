@@ -41,7 +41,14 @@ type RemoteHostEntry struct {
 	Provider     string               `toml:"provider"`       // model credentials: local (this machine, over the tunnel) | remote (that host's own)
 	UseSSHConfig bool                 `toml:"use_ssh_config"` // layer ~/.ssh/config values under unset fields
 	Forwards     []RemoteForwardEntry `toml:"forwards"`
+	// Disabled keeps the row in the book but stops this machine from being
+	// dialed. Written as "disabled" rather than "enabled" so an entry written
+	// before the field existed still means what it always did.
+	Disabled bool `toml:"disabled"`
 }
+
+// IsEnabled reports whether this machine may be dialed. The zero value is on.
+func (e RemoteHostEntry) IsEnabled() bool { return !e.Disabled }
 
 // RemoteForwardEntry is a persisted port-forward rule applied on connect.
 type RemoteForwardEntry struct {

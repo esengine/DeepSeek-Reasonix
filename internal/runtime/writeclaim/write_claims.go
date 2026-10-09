@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"reasonix/internal/base/fileutil"
 )
 
 // DefaultMaxSubagentConcurrency is the session-wide sub-agent concurrency
@@ -229,6 +231,9 @@ func resolveWriteClaimPath(workspaceRoot, raw string) (string, error) {
 	path := raw
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(workspaceRoot, path)
+	}
+	if err := fileutil.NetworkScope(path, []string{workspaceRoot}); err != nil {
+		return "", err
 	}
 	return realPathForClaim(path)
 }

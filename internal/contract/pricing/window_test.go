@@ -123,3 +123,44 @@ func TestCustomPriceIsNeverRescheduled(t *testing.T) {
 		t.Fatalf("custom price original = %q, want 2", got)
 	}
 }
+
+// The band a call was billed in reaches the quote, and an aggregate says which
+// side its calls fell on: one band, mixed, or none when any call has no schedule.
+func TestQuoteNamesTheRateBandItWasBilledIn(t *testing.T) {
+	base := QuoteInput{
+		Usage:        UsageTokens{PromptTokens: 1000, CompletionTokens: 1000},
+		Rates:        RateCard{CacheHit: 0.15, Input: 4.5, Output: 13.5, Currency: "CNY"},
+		ProviderKind: "deepseek",
+		ModelID:      "deepseek-v4-pro",
+		ModelRef:     "deepseek-v4-pro",
+	}
+	at := func(hour int) CostQuote {
+		in := base
+		in.OccurredAt = beijingAt(2026, 8, 19, hour)
+		return BuildQuote(in)
+	}
+	peak, off := at(10), at(23)
+	if peak.RateBand != RateBandPeak || off.RateBand != RateBandOffPeak {
+		t.Fatalf("bands = %q / %q", peak.RateBand, off.RateBand)
+	}
+	if got := AggregateQuotes([]CostQuote{peak, peak}, "").RateBand; got != RateBandPeak {
+		t.Fatalf("two peak calls = %q", got)
+	}
+	mixed := AggregateQuotes([]CostQuote{peak, off}, "")
+	if mixed.RateBand != RateBandMixed {
+		t.Fatalf("peak + off-peak = %q", mixed.RateBand)
+	}
+	if got := AggregateQuotes([]CostQuote{mixed, off}, "").RateBand; got != RateBandMixed {
+		t.Fatalf("a mixed total lost its band on re-aggregation: %q", got)
+	}
+	custom := base
+	custom.Rates.Input = 1
+	custom.OccurredAt = beijingAt(2026, 8, 19, 10)
+	cq := BuildQuote(custom)
+	if cq.RateBand != "" {
+		t.Fatalf("a custom price carries band %q", cq.RateBand)
+	}
+	if got := AggregateQuotes([]CostQuote{peak, cq}, "").RateBand; got != "" {
+		t.Fatalf("an aggregate with an unscheduled call claims band %q", got)
+	}
+}

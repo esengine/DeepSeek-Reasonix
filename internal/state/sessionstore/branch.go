@@ -38,7 +38,11 @@ type BranchMeta struct {
 	// AutoArchivedAt is set only by the automatic sweep and cleared on restore;
 	// it is what lets a window say "N conversations were archived for you".
 	AutoArchivedAt time.Time `json:"auto_archived_at,omitzero"`
-	Model          string    `json:"model,omitempty"`
+	// FinishedAt and ViewedAt are the two facts behind Unread. Both are optional:
+	// a sidecar written before they existed reads as seen.
+	FinishedAt time.Time `json:"finished_at,omitzero"`
+	ViewedAt   time.Time `json:"viewed_at,omitzero"`
+	Model      string    `json:"model,omitempty"`
 	// TokenMode is the legacy dual-write value (economy|full|delivery). Prefer
 	// AgentPreset (balanced|delivery) when both are present.
 	TokenMode string `json:"token_mode,omitempty"`

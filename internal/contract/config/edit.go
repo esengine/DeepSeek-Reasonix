@@ -378,7 +378,7 @@ func (c *Config) SetColdResumePrune(enabled bool) error {
 	return nil
 }
 
-// SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
+// SetDesktopTelemetry sets whether the desktop sends the anonymous daily ping.
 func (c *Config) SetDesktopTelemetry(enabled bool) error {
 	c.Desktop.Telemetry = &enabled
 	return nil
@@ -1230,7 +1230,7 @@ func validatePlugin(e PluginEntry) error {
 	default:
 		return fmt.Errorf("plugin %q: unknown type %q (want stdio|http|sse)", e.Name, e.Type)
 	}
-	return nil
+	return validateDisabledTools(e)
 }
 
 // SaveTo writes the configuration to path as annotated TOML, atomically: it

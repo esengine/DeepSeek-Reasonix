@@ -68,7 +68,7 @@ func TestLengthHasACeiling(t *testing.T) {
 // is what stops a pack from reaching a variable the frontend never meant to
 // hand over, including the ones that carry meaning.
 func TestUnknownAndReservedNamesAreRefused(t *testing.T) {
-	for _, name := range []string{"ok", "err", "radiusPill", "bgColor", ""} {
+	for _, name := range []string{"ok", "warn", "err", "net", "deleg", "add", "del", "focus", "radiusPill", "bgColor", ""} {
 		if validToken(name, "#ffffff") {
 			t.Errorf("validToken accepted %q, which is not in the vocabulary", name)
 		}
@@ -242,5 +242,47 @@ func TestThemeTokenVocabularyMatchesTheFrontend(t *testing.T) {
 	slices.Sort(frontend)
 	if kernel := TokenNames(); !slices.Equal(frontend, kernel) {
 		t.Fatalf("frontend maps %v, kernel accepts %v", frontend, kernel)
+	}
+}
+
+// link, brand, halo and labelAgent are decoration — a hyperlink, the product
+// accent, an interaction halo, an agent's name — and colours like any other.
+func TestDecorativeRolesAreColourTokens(t *testing.T) {
+	for _, name := range []string{"link", "brand", "halo", "labelAgent"} {
+		if Tokens[name] != TokenColour {
+			t.Errorf("%s is %q, want a colour token", name, Tokens[name])
+		}
+		if !validToken(name, "#0a84ff") || validToken(name, "url(x)") {
+			t.Errorf("%s does not use the colour grammar", name)
+		}
+	}
+}
+
+// A pack that tries to recolour what the status colours mean loses those
+// tokens and is told so, while the decorative ones it set are kept.
+func TestStatusNamesAreDroppedWithAWarningNextToKeptDecoration(t *testing.T) {
+	pack, err := decode([]byte(`{
+      "schemaVersion": 1,
+      "name": "Mono",
+      "tokens": {
+        "light": {"bg": "#ffffff", "fg": "#000000", "link": "#111111", "brand": "#222222", "halo": "#333333", "labelAgent": "#444444", "net": "#555555", "deleg": "#666666"},
+        "dark":  {"bg": "#000000", "fg": "#ffffff"}
+      }
+    }`), "mono")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kept := range []string{"link", "brand", "halo", "labelAgent"} {
+		if _, ok := pack.Tokens["light"][kept]; !ok {
+			t.Errorf("%s was dropped", kept)
+		}
+	}
+	for _, dropped := range []string{"net", "deleg"} {
+		if _, ok := pack.Tokens["light"][dropped]; ok {
+			t.Errorf("%s survived into the pack", dropped)
+		}
+	}
+	if len(pack.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want one each for net and deleg", pack.Warnings)
 	}
 }

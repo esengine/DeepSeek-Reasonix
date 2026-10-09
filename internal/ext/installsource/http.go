@@ -2,6 +2,7 @@ package installsource
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -21,35 +22,35 @@ const defaultFetchLimit = 2 << 20
 
 // fetchText performs a bounded GET on sourceURL using the tool's HTTP client.
 // It applies defaultFetchTimeout unless the caller's context already has a
-// tighter deadline, and never reads more than defaultFetchLimit bytes.
+// tighter deadline, and reads one byte past the size limit to detect overflow.
 func (t *Tool) fetchText(ctx context.Context, sourceURL string) (string, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, defaultFetchTimeout)
-		defer cancel()
-	}
+	ctx, cancel := context.WithTimeout(ctx, defaultFetchTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
-		return "", newErr(ErrSourceUnreadable, "%s: %v", sourceURL, err)
+		return "", newErr(ErrSourceUnreadable, "request: %v", err)
 	}
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", "reasonix-install/1.0")
 	}
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return "", newErr(ErrSourceUnreadable, "%s: %v", sourceURL, err)
+		return "", newErr(ErrSourceUnreadable, "request: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "", newErr(ErrAuthRequired, "%s: HTTP %d", sourceURL, resp.StatusCode)
+		return "", &sourceHTTPError{sentinel: ErrAuthRequired, status: resp.StatusCode}
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", newErr(ErrSourceUnreadable, "%s: HTTP %d", sourceURL, resp.StatusCode)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || resp.StatusCode == http.StatusPartialContent {
+		return "", &sourceHTTPError{sentinel: ErrSourceUnreadable, status: resp.StatusCode}
 	}
-	limited := io.LimitReader(resp.Body, defaultFetchLimit)
+	limited := io.LimitReader(resp.Body, defaultFetchLimit+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		return "", newErr(ErrSourceUnreadable, "%s: read body: %v", sourceURL, err)
+		return "", newErr(ErrSourceUnreadable, "read body: %v", err)
+	}
+	if len(body) > defaultFetchLimit {
+		return "", &hostFactError{sentinel: ErrSourceUnreadable, facts: fmt.Sprintf("response exceeds %d-byte limit", defaultFetchLimit)}
 	}
 	return string(body), nil
 }

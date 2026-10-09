@@ -430,6 +430,9 @@ func (r *Runner) handle(rep Report) (bool, string) {
 		}
 		if o.Decision == DecisionBlock {
 			blockMsg = msg
+			if o.Cause != nil {
+				blockMsg = unevaluableReason(o)
+			}
 		}
 	}
 	return rep.Blocked, blockMsg
@@ -460,6 +463,7 @@ type Notice struct {
 	Text     string
 	Detail   string
 	Refusal  error // the host's reason for not running the hook, when it had one
+	Cause    error // why the hook could not be evaluated, when that was the reason
 }
 
 // DescribeOutcome turns a non-pass outcome into what a person needs: which hook,
@@ -467,7 +471,7 @@ type Notice struct {
 // headline — the reader wrote it, and sixty clipped characters of their own
 // script identify it worse than the event and the label they gave it do.
 func DescribeOutcome(o Outcome) Notice {
-	return Notice{Decision: o.Decision, Text: outcomeHeadline(o), Detail: outcomeDetail(o), Refusal: o.Refusal}
+	return Notice{Decision: o.Decision, Text: outcomeHeadline(o), Detail: outcomeDetail(o), Refusal: o.Refusal, Cause: o.Cause}
 }
 
 // outcomeHeadline is English by contract: frontends localize by Code and fall
@@ -482,6 +486,8 @@ func outcomeHeadline(o Outcome) string {
 	switch {
 	case o.TimedOut:
 		return fmt.Sprintf("%s hook (%s) ran out of time", name, where)
+	case o.Decision == DecisionBlock && o.Cause != nil:
+		return fmt.Sprintf("%s hook (%s) could not be evaluated, so this call was stopped", name, where)
 	case o.Decision == DecisionBlock:
 		return fmt.Sprintf("%s hook (%s) stopped this call", name, where)
 	case o.Decision == DecisionError:
@@ -509,6 +515,9 @@ func outcomeDetail(o Outcome) string {
 	}
 	if src := strings.TrimSpace(o.Hook.Source); src != "" {
 		parts = append(parts, "source: "+src)
+	}
+	if o.Decision == DecisionBlock && o.Cause != nil {
+		parts = append(parts, "Fix or remove this hook in the hooks settings.")
 	}
 	return strings.Join(parts, "\n")
 }

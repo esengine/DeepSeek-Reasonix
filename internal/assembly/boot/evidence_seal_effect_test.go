@@ -53,7 +53,7 @@ func (p *writeThenReplyProvider) Stream(context.Context, provider.Request) (<-ch
 	ch := make(chan provider.Chunk, 2)
 	if i == 0 {
 		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
-			ID: "w1", Name: "write_file", Arguments: `{"path":"note.txt","content":"SEALED-BODY-MUST-NOT-PERSIST"}`,
+			ID: "w1", Name: "write_file", Arguments: `{"path":"note.log","content":"SEALED-BODY-MUST-NOT-PERSIST"}`,
 		}}
 	} else {
 		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
@@ -86,7 +86,7 @@ model = "x"
 `)
 	approveWorkspace(t, dir)
 	sink := &bundleAuditSink{}
-	ctrl, err := Build(context.Background(), Options{Sink: sink, HeadlessApprovalMode: control.ToolApprovalAuto})
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir, Sink: sink, HeadlessApprovalMode: control.ToolApprovalAuto})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -175,8 +175,8 @@ model = "x"
 			found = r.ArgsDigest != ""
 		}
 	}
-	if !slices.Contains(bundle.WithinTurn.Paths, "note.txt") {
-		t.Fatalf("the writing turn's snapshot delta = %v, want note.txt", bundle.WithinTurn.Paths)
+	if !slices.Contains(bundle.WithinTurn.Paths, "note.log") {
+		t.Fatalf("the writing turn's snapshot delta = %v, want note.log", bundle.WithinTurn.Paths)
 	}
 	if bundle.Kind != "shadow_bundle/1" || !found || !bundle.Blocked {
 		t.Fatalf("bundle = %s, want a blocked turn's write_file receipt carrying only its argument digest", payload)

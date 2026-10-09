@@ -51,18 +51,27 @@ export interface MarketVersion {
   createdAt: string;
 }
 
+// Present when the registry could not answer and this is its last good copy.
+// cause says why: the registry was unreachable, or it answered unusably.
+export interface MarketCache {
+  cachedAt: string;
+  cause: "unreachable" | "bad_response";
+}
+
 export interface MarketDetail {
   package: MarketPackage;
   approved?: MarketVersion;
   // False means an install needs the person's trust (market.unpinned without it).
   pinned: boolean;
   installed?: MarketInstalled;
+  cache?: MarketCache;
 }
 
 export interface MarketList {
   packages: MarketPackage[];
   limit: number;
   offset: number;
+  cache?: MarketCache;
 }
 
 export interface MarketQuery {
@@ -72,6 +81,8 @@ export interface MarketQuery {
   offset?: number;
   // Filtered by the registry, so paging stays whole.
   pinned?: boolean;
+  // A repeated read: skips the kernel's fresh window and asks the registry.
+  refresh?: boolean;
 }
 
 // version is the approved version the person was shown; the kernel refuses an

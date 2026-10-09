@@ -99,6 +99,17 @@
 # full of someone's work gets named in the first place. Refuse with an exit
 # code, because that is all a script driving this can read.
 !macro customInit
+  # The arm64 installer carries only an arm64 application: on any other
+  # machine electron-builder's extraction picks no archive and installs nothing
+  # while reporting success.
+  !ifdef APP_ARM64
+    ${IfNot} ${IsNativeARM64}
+      DetailPrint "This installer is for Windows on ARM64 and cannot run on this machine"
+      MessageBox MB_ICONSTOP "This Reasonix Studio installer is built for Windows on ARM64.$\r$\n$\r$\nDownload the x64 installer for this machine." /SD IDOK
+      SetErrorLevel 3
+      Abort
+    ${EndIf}
+  !endif
   Push $R9
   !insertmacro instDirTakesNothingElse $R9
   ${If} $R9 == 0

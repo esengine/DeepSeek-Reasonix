@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/state/sessionstore"
 	"reflect"
 	"slices"
@@ -63,7 +64,7 @@ func (p *scriptedProvider) Stream(ctx context.Context, req provider.Request) (<-
 		ch <- provider.Chunk{Type: provider.ChunkReasoning, Text: resp.reasoning}
 	}
 	if resp.text != "" {
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: resp.text}
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: testutil.SummaryReply(req, resp.text)}
 	}
 	if resp.usage != nil {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: resp.usage}

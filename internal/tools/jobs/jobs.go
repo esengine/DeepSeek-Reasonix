@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/nilutil"
+	"reasonix/internal/base/scratch"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/safety/evidence"
 )
@@ -157,7 +158,7 @@ type Manager struct {
 	destroying         map[string]bool
 	artifactDirs       map[string]string
 	loaded             map[string]bool
-	tempRoot           string
+	scratch            *scratch.Dir
 	reservations       map[string]int
 
 	stalledWarning time.Duration
@@ -230,7 +231,7 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 		sink = event.Discard
 	}
 	root, cancel := context.WithCancel(context.Background())
-	tempRoot, _ := os.MkdirTemp("", "reasonix-jobs-*")
+	scratchDir, _ := scratch.Create("reasonix-jobs-")
 	m := &Manager{
 		sink:          sink,
 		root:          root,
@@ -240,7 +241,7 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 		artifactDirs:  map[string]string{},
 		reservations:  map[string]int{},
 		loaded:        map[string]bool{},
-		tempRoot:      tempRoot,
+		scratch:       scratchDir,
 		teardownGrace: DefaultTeardownGrace,
 		ownerID:       newManagerOwnerID(),
 	}
@@ -549,13 +550,13 @@ func (m *Manager) artifactDirLocked(parentSession string) string {
 			return dir
 		}
 	}
-	if strings.TrimSpace(m.tempRoot) == "" {
+	if strings.TrimSpace(m.scratch.Path()) == "" {
 		return ""
 	}
 	if parentSession == "" {
-		return filepath.Join(m.tempRoot, "default")
+		return filepath.Join(m.scratch.Path(), "default")
 	}
-	return filepath.Join(m.tempRoot, parentSession)
+	return filepath.Join(m.scratch.Path(), parentSession)
 }
 
 func (m *Manager) writeJobMetaLocked(j *Job, st Status) error {
@@ -1727,9 +1728,7 @@ func (m *Manager) emitTeardownTimeout(action string, result TeardownResult) {
 }
 
 func (m *Manager) removeTempRoot() {
-	if m.tempRoot != "" {
-		_ = os.RemoveAll(m.tempRoot)
-	}
+	_ = m.scratch.Remove()
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }
