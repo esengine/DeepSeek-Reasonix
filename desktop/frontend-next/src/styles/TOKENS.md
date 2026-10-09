@@ -163,6 +163,10 @@ Radii were 1/2/3/4 — near square, and every container in the window is stroked
 so square read as table cells rather than operable surfaces. The whole tier was
 raised with its ratios kept.
 
+A pack's `recipes.corners` is a factor on that tier rather than a radius of its
+own: `square` is 0, `soft` leaves the four radii as written, `round` is 1.5. A
+pack states a shape, never a number the layout has to agree with.
+
 ## Motion
 
 - Three durations for three weights: `--t-line` a line, `--t-card` a card,
@@ -204,6 +208,11 @@ raised with its ratios kept.
 - That action is present for the whole life of the card. A control that appears
   only under a pointer is one nobody finds, and on touch it does not appear at
   all; it rests at `--muted` and comes forward on hover.
+- A pack's `recipes.density` scales `--pane-gutter`, `--call-gap`, `--call-sym`
+  and `--close-h`: `compact` is 0.85, `comfortable` leaves them as written.
+- Density moves a distance or a control's own height, never a type size and
+  never a panel's width. How large the interface reads is the reader's setting,
+  and a panel's width is layout rather than rhythm.
 
 ## Type
 

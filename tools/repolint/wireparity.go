@@ -174,12 +174,13 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/contract/chartspec/spec.go", "Column", tsChartFile, "ChartColumn"},
 	{"internal/contract/chartspec/spec.go", "Mark", tsChartFile, "ChartMark"},
 	{"internal/contract/chartspec/spec.go", "Axis", tsChartFile, "ChartAxis"},
-	// The theme a person is looking at and the picture they put behind it: the
-	// pack listing, its two shape blocks, the import receipt, and the reader's
-	// own size and wallpaper. A field one side cannot read is drawn as absent.
+	// The theme a person is looking at and the picture behind it: the pack
+	// listing with its shape blocks and recipes, the import receipt, and the
+	// reader's own size and wallpaper. A field one side cannot read is absent.
 	{"internal/frontend/serve/themes.go", "themeView", tsLookFile, "ThemePack"},
 	{"internal/ext/theme/theme.go", "Background", tsLookFile, "ThemeBackground"},
 	{"internal/ext/theme/theme.go", "Sky", tsLookFile, "ThemeSky"},
+	{"internal/ext/theme/theme.go", "Recipes", tsLookFile, "ThemeRecipes"},
 	{"internal/ext/theme/install.go", "Installed", tsLookFile, "ThemeImport"},
 	{"internal/frontend/serve/appearance.go", "appearanceView", tsLookFile, "Appearance"},
 	{"internal/frontend/serve/appearance.go", "wallpaperView", tsLookFile, "Wallpaper"},
