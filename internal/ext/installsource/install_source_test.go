@@ -836,18 +836,19 @@ func TestPlanMCPJSONRejectsInvalid(t *testing.T) {
 // declaring more servers than the limit is refused while planning, local or
 // fetched, with the invalid-manifest identity and the counts; one at the limit
 // still parses.
-func TestPlanMCPJSONRefusesMoreServersThanTheLimit(t *testing.T) {
-	body := func(n int) string {
-		servers := make([]string, n)
-		for i := range servers {
-			servers[i] = fmt.Sprintf(`"s%d":{"command":"c","tier":"eager"}`, i)
-		}
-		return `{"mcpServers":{` + strings.Join(servers, ",") + `}}`
+func eagerMCPJSON(n int) string {
+	servers := make([]string, n)
+	for i := range servers {
+		servers[i] = fmt.Sprintf(`"s%d":{"command":"c","tier":"eager"}`, i)
 	}
-	if entries, _, err := parseMCPJSON([]byte(body(maxMCPJSONServers))); err != nil || len(entries) != maxMCPJSONServers {
+	return `{"mcpServers":{` + strings.Join(servers, ",") + `}}`
+}
+
+func TestPlanMCPJSONRefusesMoreServersThanTheLimit(t *testing.T) {
+	if entries, _, err := parseMCPJSON([]byte(eagerMCPJSON(maxMCPJSONServers))); err != nil || len(entries) != maxMCPJSONServers {
 		t.Fatalf("at the limit: %d entries, err %v", len(entries), err)
 	}
-	over := body(maxMCPJSONServers + 1)
+	over := eagerMCPJSON(maxMCPJSONServers + 1)
 	mcpPath := filepath.Join(testenv.TempDir(t), ".mcp.json")
 	writeFile(t, mcpPath, over)
 	var served atomic.Value
@@ -860,6 +861,71 @@ func TestPlanMCPJSONRefusesMoreServersThanTheLimit(t *testing.T) {
 		if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), want) {
 			t.Fatalf("planning %s over the limit: err = %v; want the invalid-manifest identity saying %q", source, err, want)
 		}
+	}
+}
+
+// With kind=auto a refused .mcp.json still answers with its cause. A source that
+// is the file itself is refused rather than re-planned as a skill; a folder that
+// carries one warns with the cause, or is refused with it when nothing else plans.
+func TestPlanAutoKeepsTheCauseOfARefusedMCPJSON(t *testing.T) {
+	over := eagerMCPJSON(maxMCPJSONServers + 1)
+	want := fmt.Sprintf(".mcp.json declares %d servers; limit is %d", maxMCPJSONServers+1, maxMCPJSONServers)
+	var served atomic.Value
+	served.Store(over)
+	srv := skillServer(t, &served)
+	file := filepath.Join(testenv.TempDir(t), ".mcp.json")
+	writeFile(t, file, over)
+	bare := testenv.TempDir(t)
+	writeFile(t, filepath.Join(bare, ".mcp.json"), over)
+	tl := NewTool(Options{ProjectRoot: testenv.TempDir(t), HomeDir: testenv.TempDir(t), HTTPClient: srv.Client()})
+	for _, source := range []string{srv.URL + "/.mcp.json", file, bare} {
+		resp, err := execRaw(t, tl, map[string]any{"source": source, "kind": "auto", "strict": false})
+		if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("auto plan of %s: err = %v, plan = %+v; want the refusal saying %q", source, err, resp.Actions, want)
+		}
+	}
+	mixed := testenv.TempDir(t)
+	writeFile(t, filepath.Join(mixed, ".mcp.json"), over)
+	writeFile(t, filepath.Join(mixed, "SKILL.md"), "---\nname: helper\ndescription: A helper\n---\nBody")
+	resp, err := execRaw(t, tl, map[string]any{"source": mixed, "kind": "auto"})
+	if err != nil || len(resp.Actions) != 1 || resp.Actions[0].Kind != "skill" {
+		t.Fatalf("auto plan of a folder with a skill and a refused .mcp.json: err = %v, plan = %+v", err, resp.Actions)
+	}
+	if !slices.ContainsFunc(resp.Warnings, func(w string) bool { return strings.Contains(w, want) }) {
+		t.Fatalf("warnings = %q, want the .mcp.json refusal saying %q", resp.Warnings, want)
+	}
+}
+
+// A folder's .mcp.json that cannot be read is a refusal with an identity rather
+// than a bare filesystem error; one that declares nothing says nothing under
+// kind=auto, and a folder without one is ErrManifestMissing under kind=mcp.
+func TestPlanLocalMCPJSONReadFailuresCarryAnIdentity(t *testing.T) {
+	tl := NewTool(Options{ProjectRoot: testenv.TempDir(t), HomeDir: testenv.TempDir(t)})
+	const helper = "---\nname: helper\ndescription: A helper\n---\nBody"
+	unreadable := testenv.TempDir(t)
+	if err := os.Mkdir(filepath.Join(unreadable, ".mcp.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execRaw(t, tl, map[string]any{"source": unreadable, "kind": "auto"}); !errors.Is(err, ErrSourceUnreadable) {
+		t.Fatalf("auto plan of a folder whose .mcp.json is a directory: err = %v, want ErrSourceUnreadable", err)
+	}
+	writeFile(t, filepath.Join(unreadable, "SKILL.md"), helper)
+	prefix := hostLiteral(filepath.Join(unreadable, ".mcp.json")) + ": "
+	resp, err := execRaw(t, tl, map[string]any{"source": unreadable, "kind": "auto"})
+	if err != nil || len(resp.Actions) != 1 || !slices.ContainsFunc(resp.Warnings, func(w string) bool {
+		return strings.HasPrefix(w, prefix) && strings.Contains(w, ErrSourceUnreadable.Error())
+	}) {
+		t.Fatalf("auto plan with a skill and an unreadable .mcp.json: err = %v, warnings = %q", err, resp.Warnings)
+	}
+	declaresNothing := testenv.TempDir(t)
+	writeFile(t, filepath.Join(declaresNothing, ".mcp.json"), `{}`)
+	writeFile(t, filepath.Join(declaresNothing, "SKILL.md"), helper)
+	empty := hostLiteral(filepath.Join(declaresNothing, ".mcp.json"))
+	if resp, err := execRaw(t, tl, map[string]any{"source": declaresNothing, "kind": "auto"}); err != nil || len(resp.Actions) != 1 || slices.ContainsFunc(resp.Warnings, func(w string) bool { return strings.HasPrefix(w, empty) }) {
+		t.Fatalf("auto plan with a skill and an empty .mcp.json: err = %v, actions = %d, warnings = %q", err, len(resp.Actions), resp.Warnings)
+	}
+	if _, err := execRaw(t, tl, map[string]any{"source": testenv.TempDir(t), "kind": "mcp"}); !errors.Is(err, ErrManifestMissing) {
+		t.Fatalf("mcp plan of a folder without .mcp.json: err = %v, want ErrManifestMissing", err)
 	}
 }
 
