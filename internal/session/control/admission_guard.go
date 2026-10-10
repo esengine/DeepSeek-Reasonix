@@ -20,7 +20,22 @@ const (
 	turnDroppedDraining // generation no longer published after rebuild
 	turnDroppedWriteAuthority
 	turnDroppedWorkspace
+	// turnNoTurn is an input that needed no turn: a verb or a note.
+	turnNoTurn
 )
+
+// Admission is what a submission became: started, parked behind the turn
+// finishing, refused, or never a turn at all.
+type Admission = admissionResult
+
+// Refused reports a submission the controller dropped: nothing will run it.
+func (r admissionResult) Refused() bool {
+	switch r {
+	case turnStarted, turnParked, turnNoTurn:
+		return false
+	}
+	return true
+}
 
 // runGuarded runs body under a fresh context, guarding concurrent turns.
 // Finishing-window arrivals park instead of dropping (see admissionResult).
