@@ -6,15 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
 )
 
 func TestEffectUnknownSlashReachesProviderAsAUserMessageWithANotice(t *testing.T) {
-	isolateConfigHome(t)
-	workspace := robustTempDir(t)
-	t.Chdir(workspace)
+	t.Parallel()
+	home := statedBootHome(t)
+	workspace := testenv.TempDir(t)
 	writeFile(t, workspace, "reasonix.toml", `
 default_model = "test-model"
 [agent]
@@ -28,12 +29,12 @@ name = "test-model"
 kind = "boot-unknown-slash"
 model = "x"
 `)
-	approveWorkspace(t, workspace)
+	approveWorkspaceAt(t, home, workspace)
 	rec := &effectRecordingProvider{}
 	provider.Register("boot-unknown-slash", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	var mu sync.Mutex
 	var notices []event.Event
-	ctrl, err := Build(t.Context(), Options{Sink: event.FuncSink(func(e event.Event) {
+	ctrl, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: workspace, Sink: event.FuncSink(func(e event.Event) {
 		if e.Kind == event.Notice && e.Code == event.NoticeCodeUnknownCommand {
 			mu.Lock()
 			notices = append(notices, e)

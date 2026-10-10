@@ -87,7 +87,7 @@ func (w roleWiring) planner(opts Options, executor *agent.Agent, executorModel, 
 		ReasoningLanguage:            w.cfg.ReasoningLanguage(),
 		CapabilityLedger:             plannerLedger,
 		CapabilityAudit:              plannerAudit,
-		MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
+		MissingReasoningWarnStateDir: w.roots.MissingReasoningWarnStateDir(),
 	}
 	runner := coordinator.NewCoordinatorWithPlannerPolicy(plannerProv, plannerSess, pe.Price, plannerTools, plannerOpts, executor, w.cfg.Agent.Temperature, w.sink, control.NewPlannerPolicy())
 	return runner, executorModel + " + planner " + pe.Model, nil

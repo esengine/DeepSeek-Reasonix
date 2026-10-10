@@ -5,15 +5,16 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 )
 
 // In auto mode a Chinese turn must carry a response-language block at the tail
 // while the system prefix stays byte-stable and an English turn gets none.
 func TestEffectAutoResponseLanguageFollowsTheTurn(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &effectRecordingProvider{}
 	provider.Register("boot-response-language", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -24,8 +25,8 @@ name = "test-model"
 kind = "boot-response-language"
 model = "x"
 `)
-	approveWorkspace(t, dir)
-	ctrl, err := Build(context.Background(), Options{})
+	approveWorkspaceAt(t, home, dir)
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

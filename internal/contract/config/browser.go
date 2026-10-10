@@ -18,8 +18,11 @@ type BrowserConfig struct {
 
 // BrowserProfilesDir holds one browser profile per workspace — the logins and
 // cookies the agent's browser keeps, apart from the person's own browser.
-func BrowserProfilesDir() string {
-	home := processRoots().Home()
+func BrowserProfilesDir() string { return processRoots().BrowserProfilesDir() }
+
+// BrowserProfilesDir is the browser profile root this binding resolves to.
+func (r Roots) BrowserProfilesDir() string {
+	home := r.Home()
 	if strings.TrimSpace(home) == "" {
 		return ""
 	}

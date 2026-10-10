@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/sessionstore"
@@ -43,9 +44,9 @@ func (p *unreachableSummarizer) attempts() int {
 // A due compaction whose retry is held after a failed summary reaches the
 // frontend as a coded notice carrying the failure's code, once per turn.
 func TestEffectHeldCompactionReachesTheFrontendCoded(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	prov := &unreachableSummarizer{}
 	kind := "boot-unreachable-summarizer-" + t.Name()
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return prov, nil })
@@ -61,11 +62,11 @@ kind = "`+kind+`"
 model = "x"
 context_window = 20000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
 	var mu sync.Mutex
 	var held []event.Event
-	ctrl, err := Build(context.Background(), Options{Sink: event.FuncSink(func(e event.Event) {
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.FuncSink(func(e event.Event) {
 		if e.Kind == event.Notice && e.Code == event.NoticeCodeCompactHeld {
 			mu.Lock()
 			held = append(held, e)

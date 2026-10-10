@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/runtime/isolation"
 	"reasonix/internal/session/control"
@@ -49,7 +48,7 @@ func (b *builder) addIsolation() {
 	if !b.cfg.Agent.WorktreeIsolation || b.opts.UnattendedChild || b.tools.taskTool == nil {
 		return
 	}
-	store := isolation.NewStore(filepath.Join(config.DeliveryWorktreeDir(), "isolated"), b.root, b.repo)
+	store := isolation.NewStore(filepath.Join(b.roots.DeliveryWorktreeDir(), "isolated"), b.root, b.repo)
 	go store.SweepExpired(context.WithoutCancel(b.ctx), isolatedResultTTL)
 	posture := &isolationPosture{}
 	b.tools.isolation = &isolationWiring{store: store, posture: posture}

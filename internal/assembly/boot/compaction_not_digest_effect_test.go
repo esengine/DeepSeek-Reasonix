@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -47,9 +48,9 @@ func (p *notDigestProvider) Stream(_ context.Context, req provider.Request) (<-c
 // it is billed to the compaction, and the answer never reaches a later request
 // as the digest. The request that asks for the briefing ends on that ask.
 func TestEffectSummaryThatIsNotABriefingNeverBecomesTheDigest(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	kind := uniqueKind("boot-not-digest")
 	rec := &notDigestProvider{bulk: strings.Repeat("work output line with detail. ", 400)}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
@@ -67,7 +68,7 @@ kind = "`+kind+`"
 model = "x"
 context_window = 32000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
 	var mu sync.Mutex
 	var codes []string
@@ -82,7 +83,7 @@ context_window = 32000
 			billed++
 		}
 	})
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: sink})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

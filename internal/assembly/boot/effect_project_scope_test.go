@@ -86,7 +86,12 @@ func jailWritable(dir string) bool {
 
 func writeUserConfig(t *testing.T, body string) {
 	t.Helper()
-	path := config.UserConfigPath()
+	writeUserConfigAt(t, "", body)
+}
+
+func writeUserConfigAt(t *testing.T, home, body string) {
+	t.Helper()
+	path := config.RootsForHome(home).UserConfigPath()
 	writeFile(t, filepath.Dir(path), filepath.Base(path), body)
 }
 

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/sessionstore"
@@ -29,13 +30,13 @@ func sessionDirListing(t *testing.T, dir string) map[string]bool {
 }
 
 func TestEffect1xOpenedWithoutATurnWritesNothing(t *testing.T) {
+	t.Parallel()
 	src, err := filepath.Abs(filepath.Join("testdata", "session1x"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &effectRecordingProvider{}
 	provider.Register("effect-1x-open", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -49,12 +50,12 @@ name = "test-model"
 kind = "effect-1x-open"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	sessions := filepath.Join(dir, "sessions")
 	path, files := copySession1x(t, src, sessions, nil)
 	before := sessionDirListing(t, sessions)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -69,7 +70,7 @@ model = "x"
 		t.Fatalf("Snapshot: %v", err)
 	}
 	ctrl.SnapshotForShutdown()
-	next, err := Build(context.Background(), Options{Sink: event.Discard})
+	next, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/runtime/agent"
@@ -24,9 +25,9 @@ print("rm ok:", r.ok)
 // lands and is owed verification, the read sees it, the deny rule refuses rm, each call shows as its own
 // card, and only the script's printed result enters the conversation.
 func TestEffectRunScriptCallsPassTheOrdinaryChecks(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &browserScriptProvider{rounds: []func(string) *provider.ToolCall{
 		func(string) *provider.ToolCall {
 			return browserCall("s1", "run_script", map[string]any{"script": scriptUnderTest})
@@ -53,9 +54,9 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	sink := &noticeRecorder{}
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: sink})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
@@ -75,12 +76,12 @@ func (s askSink) Emit(e event.Event) {
 }
 
 func TestEffectLeaseIsFreeWhileTheTurnWaitsOnAnAsk(t *testing.T) {
-	isolateConfigHome(t)
-	root := robustTempDir(t)
+	t.Parallel()
+	home := statedBootHome(t)
+	root := testenv.TempDir(t)
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(root)
 	writeFile(t, root, "reasonix.toml", `
 default_model = "test-model"
 [codegraph]
@@ -90,14 +91,14 @@ name = "test-model"
 kind = "lease-ask-effect"
 model = "x"
 `)
-	approveWorkspace(t, root)
+	approveWorkspaceAt(t, home, root)
 	first := &leaseAskProvider{path: "shared.txt"}
 	second := &leaseAskProvider{path: "shared.txt", noAsk: true}
 	current := first
 	provider.Register("lease-ask-effect", func(provider.Config) (provider.Provider, error) { return current, nil })
 	asked := askSink{asked: make(chan event.Ask, 4)}
 	build := func(sink event.Sink) *control.Controller {
-		c, err := Build(context.Background(), Options{Sink: sink})
+		c, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: root, Sink: sink})
 		if err != nil {
 			t.Fatal(err)
 		}

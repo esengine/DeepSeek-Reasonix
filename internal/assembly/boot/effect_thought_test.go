@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -33,9 +34,9 @@ func (thinkingProvider) Stream(context.Context, provider.Request) (<-chan provid
 // How long a reply thought is measured by the host and kept with the turn, so
 // the live frame and a reopened transcript report the same figure.
 func TestEffectThinkingTimeIsKeptWithTheTurn(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	provider.Register("boot-thinking", func(provider.Config) (provider.Provider, error) { return thinkingProvider{}, nil })
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -51,10 +52,10 @@ name = "test-model"
 kind = "boot-thinking"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	var mu sync.Mutex
 	var framed int64
-	ctrl, err := Build(context.Background(), Options{Sink: event.FuncSink(func(e event.Event) {
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.FuncSink(func(e event.Event) {
 		if e.Kind == event.Message {
 			mu.Lock()
 			framed = e.ThoughtMs

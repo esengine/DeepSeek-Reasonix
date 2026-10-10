@@ -13,6 +13,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"reasonix/internal/base/nilutil"
 )
@@ -751,20 +752,29 @@ func (e *AuthError) Error() string {
 // Factory builds a Provider from a resolved Config.
 type Factory func(cfg Config) (Provider, error)
 
-var registry = map[string]Factory{}
+// registry is read by every Build and written by init and by tests that run in
+// parallel, so every access holds mu.
+var registry = struct {
+	mu        sync.RWMutex
+	factories map[string]Factory
+}{factories: map[string]Factory{}}
 
 // Register adds a factory under a kind (e.g. "openai"). Intended for init().
 // It panics on a duplicate kind, since that is a compile-time wiring mistake.
 func Register(kind string, f Factory) {
-	if _, dup := registry[kind]; dup {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if _, dup := registry.factories[kind]; dup {
 		panic("provider: duplicate kind " + kind)
 	}
-	registry[kind] = f
+	registry.factories[kind] = f
 }
 
 // New instantiates the provider of the given kind.
 func New(kind string, cfg Config) (Provider, error) {
-	f, ok := registry[kind]
+	registry.mu.RLock()
+	f, ok := registry.factories[kind]
+	registry.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("provider: unknown kind %q (registered: %v)", kind, Kinds())
 	}
@@ -780,6 +790,7 @@ func New(kind string, cfg Config) (Provider, error) {
 
 // Kinds returns the registered kinds, sorted.
 func Kinds() []string {
-	out := slices.Sorted(maps.Keys(registry))
-	return out
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return slices.Sorted(maps.Keys(registry.factories))
 }

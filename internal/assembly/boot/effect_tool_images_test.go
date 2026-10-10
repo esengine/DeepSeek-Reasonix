@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/plugin"
@@ -123,9 +124,9 @@ func imageWidth(t *testing.T, dataURL string) int {
 // paid: however many screenshots a session takes, a request carries the newest
 // few, and the model is told what left.
 func TestEffectScreenshotsAgeOutOfTheRequest(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	const shots = 12
 	rec := &screenshotProvider{shots: shots}
@@ -147,13 +148,15 @@ kind = "boot-screenshot"
 model = "x"
 vision = true
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	server := screenshotMCPServer(t)
 	defer server.Close()
 
 	ctrl, err := Build(context.Background(), Options{
-		Sink:         event.Discard,
-		ExtraPlugins: []plugin.Spec{{Name: "screen", Type: "http", URL: server.URL, Authorized: true}},
+		Home:          home,
+		WorkspaceRoot: dir,
+		Sink:          event.Discard,
+		ExtraPlugins:  []plugin.Spec{{Name: "screen", Type: "http", URL: server.URL, Authorized: true}},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

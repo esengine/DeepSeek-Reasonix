@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -32,6 +33,8 @@ type isolationScriptProvider struct {
 	reqs            []provider.Request
 	landedBeforeApp bool
 	childSaw        string
+	managed         string // the stated home's isolated-worktree root
+	childWorktree   string // a worktree found there while the child ran
 }
 
 func (p *isolationScriptProvider) Name() string { return "boot-isolation-script" }
@@ -63,6 +66,12 @@ func (p *isolationScriptProvider) Stream(_ context.Context, req provider.Request
 			p.mu.Unlock()
 			ch <- provider.Chunk{Type: provider.ChunkText, Text: "wrote out.txt"}
 		} else {
+			found, _ := filepath.Glob(filepath.Join(p.managed, "*", "*"))
+			p.mu.Lock()
+			if len(found) > 0 {
+				p.childWorktree = found[0]
+			}
+			p.mu.Unlock()
 			call("w1", "write_file", map[string]string{"path": "out.txt", "content": "made in isolation\n"})
 		}
 	case strings.HasPrefix(last, "applied "), hasToolResult(req) && !isoIDPattern.MatchString(last):
@@ -87,18 +96,14 @@ func (p *isolationScriptProvider) requests() []provider.Request {
 	return append([]provider.Request(nil), p.reqs...)
 }
 
-// An isolated task runs in its own kernel at its own worktree: its write stays
-// out of the workspace until the session applies it, the child cannot isolate
-// or apply again, and closing the session leaves no worktree behind.
-func TestEffectIsolatedTaskIsHeldUntilApplied(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
-	rec := &isolationScriptProvider{dir: dir}
-	provider.Register("boot-isolation", func(provider.Config) (provider.Provider, error) { return rec, nil })
+// runIsolatedTask runs one session that delegates an isolated task and applies
+// it, bound to its own stated home, and returns that home with the provider.
+func runIsolatedTask(t *testing.T, kind string) (*isolationScriptProvider, string, string) {
+	t.Helper()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
+	rec := &isolationScriptProvider{dir: dir, managed: filepath.Join(config.RootsForHome(home).DeliveryWorktreeDir(), "isolated")}
+	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -111,17 +116,17 @@ enabled = false
 
 [[providers]]
 name = "test-model"
-kind = "boot-isolation"
+kind = "`+kind+`"
 model = "x"
 `)
 	gitInDir(t, dir, "init", "-q")
 	// Attempts run in worktrees, each a folder of its own: the model is the
 	// user's, so an approval of this folder is not what makes them run.
-	mirrorToUserConfig(t, dir)
+	mirrorToUserConfigAt(t, home, dir)
 	gitInDir(t, dir, "add", "-A")
 	gitInDir(t, dir, "commit", "-q", "-m", "init")
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -131,6 +136,18 @@ model = "x"
 		t.Fatalf("Run: %v", err)
 	}
 	ctrl.Close()
+	return rec, home, dir
+}
+
+// An isolated task runs in its own kernel at its own worktree: its write stays
+// out of the workspace until the session applies it, the child cannot isolate
+// or apply again, and closing the session leaves no worktree behind.
+func TestEffectIsolatedTaskIsHeldUntilApplied(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Parallel()
+	rec, home, dir := runIsolatedTask(t, "boot-isolation")
 
 	var session, child []provider.Request
 	for _, req := range agentRequests(rec.requests()) {
@@ -149,8 +166,27 @@ model = "x"
 	if b, err := os.ReadFile(filepath.Join(dir, "out.txt")); err != nil || strings.ReplaceAll(string(b), "\r\n", "\n") != "made in isolation\n" {
 		t.Fatalf("out.txt after apply = %q, %v", b, err)
 	}
-	left, _ := filepath.Glob(filepath.Join(config.DeliveryWorktreeDir(), "isolated", "*", "*"))
+	left, _ := filepath.Glob(filepath.Join(config.RootsForHome(home).DeliveryWorktreeDir(), "isolated", "*", "*"))
 	if len(left) != 0 {
 		t.Fatalf("worktrees left after Close: %v", left)
+	}
+}
+
+// Two sessions in one process, each bound to its own home, keep their isolated
+// worktrees under that home: the worktree root is part of the binding Build
+// was handed, not of the environment the process happens to have.
+func TestEffectIsolatedWorktreesLiveUnderTheStatedHome(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Parallel()
+	for _, name := range []string{"alpha", "beta"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			rec, _, _ := runIsolatedTask(t, "boot-isolation-home-"+name)
+			if rec.childWorktree == "" {
+				t.Fatalf("the isolated child ran with no worktree under its stated home %s", rec.managed)
+			}
+		})
 	}
 }

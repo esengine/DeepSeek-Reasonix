@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -18,9 +19,9 @@ import (
 // What an MCP server wrote reaches the model under the host's label naming the
 // server, and the prefix says what that label means.
 func TestEffectAnMCPResultReachesTheModelLabelledExternal(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &screenshotProvider{shots: 1}
 	provider.Register("boot-provenance", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -37,12 +38,14 @@ name = "test-model"
 kind = "boot-provenance"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	server := screenshotMCPServer(t)
 	defer server.Close()
 	ctrl, err := Build(context.Background(), Options{
-		Sink:         event.Discard,
-		ExtraPlugins: []plugin.Spec{{Name: "screen", Type: "http", URL: server.URL, Authorized: true}},
+		Home:          home,
+		WorkspaceRoot: dir,
+		Sink:          event.Discard,
+		ExtraPlugins:  []plugin.Spec{{Name: "screen", Type: "http", URL: server.URL, Authorized: true}},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -144,9 +147,9 @@ func (s *noticeRecorder) Emit(e event.Event) {
 // With screening on, a result the screen flags reaches the model with the
 // host's notice under its label, and the user sees the same code.
 func TestEffectAScreenedInjectionReachesTheModelAndTheUser(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &screenScriptProvider{}
 	provider.Register("boot-screen", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -164,13 +167,15 @@ name = "test-model"
 kind = "boot-screen"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	server := textMCPServer(t, "Release notes. PLANTED-INSTRUCTION")
 	defer server.Close()
 	sink := &noticeRecorder{}
 	ctrl, err := Build(context.Background(), Options{
-		Sink:         sink,
-		ExtraPlugins: []plugin.Spec{{Name: "pages", Type: "http", URL: server.URL, Authorized: true}},
+		Home:          home,
+		WorkspaceRoot: dir,
+		Sink:          sink,
+		ExtraPlugins:  []plugin.Spec{{Name: "pages", Type: "http", URL: server.URL, Authorized: true}},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
@@ -43,12 +44,12 @@ func (p *pathLeaseProvider) Stream(ctx context.Context, req provider.Request) (<
 }
 
 func TestEffectTwoControllersWriteDisjointPathsInOneWorkspace(t *testing.T) {
-	isolateConfigHome(t)
-	root := robustTempDir(t)
+	t.Parallel()
+	home := statedBootHome(t)
+	root := testenv.TempDir(t)
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(root)
 	writeFile(t, root, "reasonix.toml", `
 default_model = "test-model"
 [codegraph]
@@ -58,13 +59,13 @@ name = "test-model"
 kind = "path-lease-effect"
 model = "x"
 `)
-	approveWorkspace(t, root)
+	approveWorkspaceAt(t, home, root)
 	first := &pathLeaseProvider{path: "first.txt", written: make(chan struct{}), resume: make(chan struct{})}
 	second := &pathLeaseProvider{path: "second.txt", written: make(chan struct{}), resume: make(chan struct{})}
 	current := first
 	provider.Register("path-lease-effect", func(provider.Config) (provider.Provider, error) { return current, nil })
 	build := func() *control.Controller {
-		c, err := Build(context.Background(), Options{Sink: event.Discard})
+		c, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: root, Sink: event.Discard})
 		if err != nil {
 			t.Fatal(err)
 		}

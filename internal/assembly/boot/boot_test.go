@@ -191,9 +191,9 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 }
 
 func TestBuildRunsCleanupPendingReconciler(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -208,11 +208,13 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `)
-	approveWorkspace(t, dir)
-	sessionDir := filepath.Join(robustTempDir(t), "sessions")
+	approveWorkspaceAt(t, home, dir)
+	sessionDir := filepath.Join(testenv.TempDir(t), "sessions")
 	called := false
 	ctrl, err := Build(context.Background(), Options{
-		SessionDir: sessionDir,
+		Home:          home,
+		WorkspaceRoot: dir,
+		SessionDir:    sessionDir,
 		CleanupPendingReconciler: func(got string) error {
 			called = true
 			if filepath.Clean(got) != filepath.Clean(sessionDir) {
@@ -4367,14 +4369,16 @@ func waitForMCPFailure(t *testing.T, h *plugin.Host, name string, timeout time.D
 // context is cancelled before Build returns; a successful stdio child must
 // still live on the session context and accept its first real tool call.
 func TestBuildExtraPluginProbeKeepsSessionProcessAlive(t *testing.T) {
-	isolateConfigHome(t)
-	workspace := robustTempDir(t)
-	t.Chdir(workspace)
+	t.Parallel()
+	home := statedBootHome(t)
+	workspace := testenv.TempDir(t)
 
 	sessionCtx := t.Context()
 	ctrl, err := Build(sessionCtx, Options{
-		SessionDir: filepath.Join(robustTempDir(t), "sessions"),
-		Sink:       event.Discard,
+		Home:          home,
+		WorkspaceRoot: workspace,
+		SessionDir:    filepath.Join(testenv.TempDir(t), "sessions"),
+		Sink:          event.Discard,
 		ExtraPlugins: []plugin.Spec{{
 			Name:    "acp-extra",
 			Command: os.Args[0],

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -49,9 +50,9 @@ func (p *compactionEffectProvider) requests() []provider.Request {
 // The summarizer here records nothing, so a digest cannot carry it — component
 // correctness in the partition is not the same as the model still being told.
 func TestEffectConstraintSurvivesCompactionThroughRealBuild(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	rec := &compactionEffectProvider{bulk: strings.Repeat("work output line with detail. ", 400)}
 	provider.Register("boot-compaction-effect", func(provider.Config) (provider.Provider, error) {
@@ -73,9 +74,9 @@ kind = "boot-compaction-effect"
 model = "x"
 context_window = 32000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

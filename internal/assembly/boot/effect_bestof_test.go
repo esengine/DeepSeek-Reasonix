@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/platform/gitcmd"
@@ -88,12 +89,12 @@ func gitInDir(t *testing.T, dir string, args ...string) string {
 // attempts' writes never reach the workspace, the judged winner does, the
 // attempts cannot fan out again, and no worktree is left behind.
 func TestEffectBestOfRunsAttemptsInWorktreesAndLandsTheWinner(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &bestOfScriptProvider{}
 	provider.Register("boot-bestof", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -115,11 +116,11 @@ model = "x"
 	gitInDir(t, dir, "init", "-q")
 	// Attempts run in worktrees, each a folder of its own: the model is the
 	// user's, so an approval of this folder is not what makes them run.
-	mirrorToUserConfig(t, dir)
+	mirrorToUserConfigAt(t, home, dir)
 	gitInDir(t, dir, "add", "-A")
 	gitInDir(t, dir, "commit", "-q", "-m", "init")
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

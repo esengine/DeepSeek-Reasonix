@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -88,9 +89,9 @@ func (p *inflightSwitchProvider) Stream(_ context.Context, _ provider.Request) (
 // happens at dispatch and the run holds what it resolved; a registry consulted
 // again mid-run would cancel work the user already asked for.
 func TestActivationLeavesAnAlreadyDispatchedRunAlone(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	prov := &inflightSwitchProvider{}
 	provider.Register("activation-inflight", func(provider.Config) (provider.Provider, error) { return prov, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -104,9 +105,9 @@ name = "test-model"
 kind = "activation-inflight"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

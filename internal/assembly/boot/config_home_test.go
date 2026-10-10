@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
+
 	"reasonix/internal/state/history"
 	"reasonix/internal/state/historycatalog"
 	"reasonix/internal/state/stats"
@@ -28,6 +30,14 @@ func isolateConfigHome(t *testing.T) string {
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Cleanup(func() { closeBootTestHistoryCatalog(t) })
 	return dir
+}
+
+// statedBootHome is a Reasonix home a test hands Build as Options.Home rather
+// than installing in the process, so the test leaves the environment alone and
+// may run in parallel. Cleanup closes no process-wide catalog: none lives here.
+func statedBootHome(t *testing.T) string {
+	t.Helper()
+	return testenv.TempDir(t)
 }
 
 func closeBootTestHistoryCatalog(t *testing.T) {

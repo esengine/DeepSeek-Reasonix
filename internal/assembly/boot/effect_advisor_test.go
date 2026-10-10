@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -30,7 +31,7 @@ func (p *strongAdvisorProvider) Stream(_ context.Context, req provider.Request) 
 	return ch, nil
 }
 
-func advisorEffectConfig(t *testing.T, dir, mainKind, advisorLine string) {
+func advisorEffectConfig(t *testing.T, home, dir, mainKind, advisorLine string) {
 	t.Helper()
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -53,16 +54,16 @@ name = "strong"
 kind = "boot-advisor-strong"
 model = "pro"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 }
 
 // advisor_model puts advise on the provider-visible surface; the call reaches
 // the advising model with the task and the question, and its answer comes back
 // as the tool result. Without advisor_model the tool is not offered at all.
 func TestEffectAdviseConsultsTheAdvisorModelWithTheConversation(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	strong := &strongAdvisorProvider{}
 	provider.Register("boot-advisor-strong", func(provider.Config) (provider.Provider, error) { return strong, nil })
 	rec := &browserScriptProvider{rounds: []func(string) *provider.ToolCall{
@@ -72,8 +73,8 @@ func TestEffectAdviseConsultsTheAdvisorModelWithTheConversation(t *testing.T) {
 	}}
 	kind := "boot-advisor-" + strings.ToLower(t.Name())
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
-	advisorEffectConfig(t, dir, kind, `advisor_model = "strong"`)
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	advisorEffectConfig(t, home, dir, kind, `advisor_model = "strong"`)
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -102,14 +103,14 @@ func TestEffectAdviseConsultsTheAdvisorModelWithTheConversation(t *testing.T) {
 }
 
 func TestEffectAdviseIsAbsentWithoutAnAdvisorModel(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &browserScriptProvider{}
 	kind := "boot-advisor-" + strings.ToLower(t.Name())
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
-	advisorEffectConfig(t, dir, kind, "")
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	advisorEffectConfig(t, home, dir, kind, "")
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

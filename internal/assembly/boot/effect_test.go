@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/runtime/agent/testutil"
 	"reflect"
 	"strings"
@@ -211,9 +212,9 @@ func (p *budgetRunawayProvider) roundCount() int {
 // real Build assembly. Nothing else would stop it: ordinary chat has no round
 // ceiling, and this provider never repeats itself.
 func TestEffectTaskBudgetLandsARunawayThroughRealBuild(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	rec := &budgetRunawayProvider{}
 	provider.Register("boot-budget-gate", func(provider.Config) (provider.Provider, error) {
@@ -231,9 +232,9 @@ name = "test-model"
 kind = "boot-budget-gate"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -260,9 +261,9 @@ model = "x"
 // slow loop and money reads as free on an unpriced model. It reached the
 // runtime through nothing until this wiring existed.
 func TestEffectTaskTokenBudgetLandsARunawayThroughRealBuild(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	rec := &budgetRunawayProvider{}
 	provider.Register("boot-token-budget-gate", func(provider.Config) (provider.Provider, error) {
@@ -280,9 +281,9 @@ name = "test-model"
 kind = "boot-token-budget-gate"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

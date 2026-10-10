@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -49,9 +50,9 @@ func (s *noticeSink) notice(code string) (event.Event, bool) {
 // the code is what a frontend words in its own language, the English is only a
 // fallback.
 func TestEffectManualCompactFailureNoticeCarriesACode(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	kind := "boot-failing-digest-" + t.Name()
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return failingDigestProvider{}, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -66,9 +67,9 @@ kind = "`+kind+`"
 model = "x"
 context_window = 200000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	sink := &noticeSink{}
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: sink})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
