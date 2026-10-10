@@ -41,6 +41,7 @@ func (s *Server) StartRecoveryGC(ctx context.Context) {
 		// Protect an upgrading user for a full startup grace before the first
 		// sweep, then clear the backlog without waiting out the long interval.
 		s.sweepRecoveryBranches(sessionstore.RecoveryGCStartupGracePeriod)
+		s.sweepInactiveSessions()
 		ticker := time.NewTicker(recoveryGCInterval)
 		defer ticker.Stop()
 		for {
@@ -49,6 +50,7 @@ func (s *Server) StartRecoveryGC(ctx context.Context) {
 				return
 			case <-ticker.C:
 				s.sweepRecoveryBranches(sessionstore.RecoveryGCGracePeriod)
+				s.sweepInactiveSessions()
 			}
 		}
 	}()

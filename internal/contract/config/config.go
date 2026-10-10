@@ -32,6 +32,7 @@ type Config struct {
 	Telemetry        TelemetryConfig     `toml:"telemetry"`
 	Notifications    NotificationsConfig `toml:"notifications"`
 	ProgressWatch    ProgressWatchConfig `toml:"progress_watch"`
+	AutoArchive      AutoArchiveConfig   `toml:"auto_archive"`
 	Agent            AgentConfig         `toml:"agent"`
 	Providers        []ProviderEntry     `toml:"providers"`
 	Tools            ToolsConfig         `toml:"tools"`

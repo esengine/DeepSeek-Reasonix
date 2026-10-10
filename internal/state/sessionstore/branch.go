@@ -33,6 +33,11 @@ type BranchMeta struct {
 	// without moving or deleting its transcript. Keeping this as metadata makes
 	// archive/unarchive atomic and preserves every sidecar needed to resume it.
 	Archived bool `json:"archived,omitempty"`
+	// Pinned is the user's "keep this": automatic archiving never touches it.
+	Pinned bool `json:"pinned,omitempty"`
+	// AutoArchivedAt is set only by the automatic sweep and cleared on restore;
+	// it is what lets a window say "N conversations were archived for you".
+	AutoArchivedAt time.Time `json:"auto_archived_at,omitzero"`
 	// FinishedAt and ViewedAt are the two facts behind Unread. Both are optional:
 	// a sidecar written before they existed reads as seen.
 	FinishedAt time.Time `json:"finished_at,omitzero"`
@@ -345,11 +350,24 @@ func ensureBranchMetaUnlocked(sessionPath string) (BranchMeta, error) {
 	return m, saveBranchMeta(sessionPath, m, false)
 }
 
-// SetSessionArchived changes only the catalog state of a transcript. The
-// conversation and all of its artifacts stay in place so unarchive is lossless.
+// SetSessionArchived changes only catalog state; nothing is moved or deleted.
+// Archiving drops the pin, and restoring counts as activity so an automatic
+// sweep does not archive the conversation again.
 func SetSessionArchived(sessionPath string, archived bool) error {
-	return UpdateBranchMeta(sessionPath, false, func(m *BranchMeta) error {
+	return UpdateBranchMeta(sessionPath, !archived, func(m *BranchMeta) error {
 		m.Archived = archived
+		m.AutoArchivedAt = time.Time{}
+		if archived {
+			m.Pinned = false
+		}
+		return nil
+	})
+}
+
+// SetSessionPinned marks a conversation automatic archiving must leave alone.
+func SetSessionPinned(sessionPath string, pinned bool) error {
+	return UpdateBranchMeta(sessionPath, false, func(m *BranchMeta) error {
+		m.Pinned = pinned
 		return nil
 	})
 }

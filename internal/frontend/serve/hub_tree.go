@@ -56,6 +56,9 @@ type treeSession struct {
 	Turns     int    `json:"turns,omitempty"`
 	RuntimeID string `json:"runtimeId,omitempty"`
 	Archived  bool   `json:"archived,omitempty"`
+	Pinned    bool   `json:"pinned,omitempty"`
+	// AutoArchivedAt is unix milliseconds of an automatic archive, else absent.
+	AutoArchivedAt int64 `json:"autoArchivedAt,omitempty"`
 	// Unread is a turn that finished since the person last looked. The kernel
 	// derives it from two stored timestamps; absence reads as seen.
 	Unread bool `json:"unread,omitempty"`
@@ -75,6 +78,8 @@ func (h *Hub) registerTreeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tree/workspaces/move", h.moveWorkspace)
 	mux.HandleFunc("POST /tree/sessions/remove", h.removeSession)
 	mux.HandleFunc("POST /tree/sessions/archive", h.archiveSession)
+	mux.HandleFunc("POST /tree/sessions/pin", h.pinSession)
+	mux.HandleFunc("POST /tree/sessions/pins", h.syncPins)
 	mux.HandleFunc("POST /tree/sessions/rename", h.renameSession)
 	mux.HandleFunc("POST /tree/sessions/export", h.exportSession)
 	mux.HandleFunc("POST /tree/sessions/import-legacy", h.importLegacySessions)
@@ -160,6 +165,7 @@ func (h *Hub) workspaceSessions(root string, open map[string]string) []treeSessi
 		out = append(out, treeSession{
 			Path: si.Path, Name: name, Title: title, Turns: si.Turns, RuntimeID: runtimeID, Archived: si.Archived, Unread: si.Unread,
 		})
+		decorateArchiveState(&out[len(out)-1], si.Path)
 	}
 	attachVersions(dir, out, h.openSessionsIn(root))
 	return append(h.unlistedOpenSessions(root, out), out...)
@@ -250,6 +256,81 @@ func (h *Hub) archiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// pinSession records the user's "keep this" so the kernel's automatic archiving
+// can honour it; the pin itself is only metadata and never blocks a run.
+func (h *Hub) pinSession(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path   string `json:"path"`
+		Pinned bool   `json:"pinned"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		badBody(w)
+		return
+	}
+	abs, err := filepath.Abs(strings.TrimSpace(body.Path))
+	if err != nil {
+		refuse(w, http.StatusBadRequest, codeSessionBadPath, "the session path could not be resolved", nil)
+		return
+	}
+	path, ok := h.listedSessionPaths()[sessionstore.CanonicalSessionPath(abs)]
+	if !ok {
+		refuse(w, http.StatusForbidden, "session.outside_workspace", "path outside a known workspace", nil)
+		return
+	}
+	if err := sessionstore.SetSessionPinned(path, body.Pinned); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// syncPins adds the pins a window made before the kernel kept them. Until the
+// first call the kernel will not archive anything on its own, because it
+// cannot tell what the user pinned.
+func (h *Hub) syncPins(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		badBody(w)
+		return
+	}
+	listed := h.listedSessionPaths()
+	var paths []string
+	for _, raw := range body.Paths {
+		abs, err := filepath.Abs(strings.TrimSpace(raw))
+		if err != nil {
+			continue
+		}
+		if path, ok := listed[sessionstore.CanonicalSessionPath(abs)]; ok {
+			paths = append(paths, path)
+		}
+	}
+	if err := sessionstore.PinSessions(paths); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	pinsSynced.Store(true)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// listedSessionPaths maps each conversation the kernel lists in a known
+// workspace to the listed path, so a client-supplied path is only ever used
+// through the value the kernel itself reported.
+func (h *Hub) listedSessionPaths() map[string]string {
+	out := map[string]string{}
+	for _, ref := range h.roots() {
+		infos, err := sessionstore.ListSessionOrder(SessionDirFor(ref.dir))
+		if err != nil {
+			continue
+		}
+		for _, si := range infos {
+			out[sessionstore.CanonicalSessionPath(si.Path)] = si.Path
+		}
+	}
+	return out
 }
 
 // importLegacySessions is the user-facing recovery path for old installations.
@@ -677,4 +758,17 @@ func workspaceRootForSession(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(meta.WorkspaceRoot)
+}
+
+// decorateArchiveState reads the two marks the listing does not carry; the
+// tree is bounded per workspace, so this is a handful of sidecar reads.
+func decorateArchiveState(row *treeSession, path string) {
+	m, ok, err := sessionstore.LoadBranchMeta(path)
+	if err != nil || !ok {
+		return
+	}
+	row.Pinned = m.Pinned
+	if !m.AutoArchivedAt.IsZero() {
+		row.AutoArchivedAt = m.AutoArchivedAt.UnixMilli()
+	}
 }
