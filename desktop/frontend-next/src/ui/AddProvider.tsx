@@ -6,6 +6,7 @@ import { KIND_LABEL, hostOf, nameFrom, sourceNameUsable, vendorLabel } from "./v
 import type { Port } from "./Providers";
 import { reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
+import { EffortShape } from "./EffortShape";
 import { THINKING, parseExtraBody, parseHeaders } from "./provider_compat";
 
 // Detection is assistance, not authority. Compatible relays often expose one
@@ -62,6 +63,8 @@ export function AddProvider({
   const nameBad = !composing && name.trim() !== "" && !sourceNameUsable(name);
   const extraBad = extra.trim() !== "" && parseExtraBody(extra) === null;
   const protocolCanThink = catalog.find((p) => p.kind === kind)?.reasoningParams ?? false;
+  const wire = catalog.find((p) => p.kind === kind);
+  const effortField = wire?.effortUnder?.length && !wire.effortUnder.includes(thinkingProtocol) ? undefined : wire?.effortField;
   // A wire with no listing shape has nothing to read: the model id is declared
   // rather than discovered, and offering a probe that must fail reads as a
   // broken endpoint instead of a protocol that never had one.
@@ -280,7 +283,7 @@ export function AddProvider({
           <div className="setting-line">
             <span className="setting-copy">
               <strong>{t("发送思考控制")}</strong>
-              <small>{t(protocolCanThink ? "允许当前协议发送 thinking 或 reasoning_effort；模型是否真的思考仍由模型决定。" : "当前协议没有思考控制字段，切换模型时仍可在推理强度菜单查看支持情况。")}</small>
+              <small>{t(protocolCanThink ? "允许当前协议发送思考控制字段；模型是否真的思考仍由模型决定。" : "当前协议没有思考控制字段，切换模型时仍可在推理强度菜单查看支持情况。")}</small>
             </span>
             <button
               type="button"
@@ -302,6 +305,7 @@ export function AddProvider({
                 ))}
               </select>
               <i>{t("使用「自动」时由模型和接口协议决定；只有中转站文档明确要求时才手动指定。")}</i>
+              <EffortShape field={effortField} />
             </label>
           )}
           <div className="setting-line">

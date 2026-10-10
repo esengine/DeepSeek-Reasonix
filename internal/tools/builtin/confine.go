@@ -269,6 +269,9 @@ const CodeWriteOutsideScope = "workspace.write_outside_scope"
 // templates before a run configures the workspace. The refusal carries
 // CodeWriteOutsideScope; its text names the path, the roots and the setting.
 func confine(roots []string, target string) error {
+	if err := refuseNetworkPath(target, roots); err != nil {
+		return err
+	}
 	if len(roots) == 0 {
 		return nil
 	}
@@ -302,6 +305,9 @@ func confineWrite(ctx context.Context, roots []string, guard SessionDataGuard, m
 	confineErr := confine(roots, target)
 	if confineErr == nil || underSessionTemp(temp, target) {
 		return guard.Check(target)
+	}
+	if isNetworkRefusal(confineErr) {
+		return confineErr
 	}
 	if !managed.Match(target) {
 		return withSessionTempAlternative(temp, confineErr)
@@ -349,11 +355,14 @@ func confinePreview(roots []string, guard SessionDataGuard, managed ManagedConfi
 	if confineErr == nil || underSessionTemp(temp, target) {
 		return guard.Check(target)
 	}
-	if !managed.Match(target) {
+	if isNetworkRefusal(confineErr) || !managed.Match(target) {
 		return confineErr
 	}
 	return guard.Check(target)
 }
+
+// lookupExisting is the filesystem lookup realPath makes; tests count its calls.
+var lookupExisting = resolveExisting
 
 // realPath resolves path as the system would when opening it, links and (on
 // Windows) junctions followed, re-appending a tail that does not exist yet. A
@@ -369,7 +378,7 @@ func realPath(path string) (string, error) {
 	var tail []string
 	cur := abs
 	for {
-		if real, err := resolveExisting(cur); err == nil {
+		if real, err := lookupExisting(cur); err == nil {
 			return filepath.Join(append([]string{real}, tail...)...), nil
 		}
 		parent, last := splitLastComponent(cur)

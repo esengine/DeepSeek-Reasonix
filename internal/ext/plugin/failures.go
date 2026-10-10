@@ -20,11 +20,27 @@ type Failure struct {
 	Stderr                 string
 	HTTPStatus             int // what the endpoint answered; 0 when the failure was not one
 	RequiresLaunchApproval bool
+	DeclarationChanged     bool // the approval is owed because what it launches changed
 }
 
 type launchApprovalError struct {
 	server  string
 	changed bool
+	cause   error
+}
+
+func (e *launchApprovalError) Unwrap() error { return e.cause }
+
+// checkDeclaredLaunch runs s.LaunchCheck; a refusal is an approval the user
+// owes again, reported as such rather than as a failed connection.
+func checkDeclaredLaunch(s Spec) error {
+	if s.LaunchCheck == nil {
+		return nil
+	}
+	if err := s.LaunchCheck(); err != nil {
+		return &launchApprovalError{server: s.Name, changed: true, cause: err}
+	}
+	return nil
 }
 
 func (e *launchApprovalError) Error() string {
@@ -39,6 +55,11 @@ func (e *launchApprovalError) DiagnosticFacts() string { return e.Error() }
 func requiresLaunchApproval(err error) bool {
 	var launchTarget *launchApprovalError
 	return errors.As(err, &launchTarget)
+}
+
+func launchDeclarationChanged(err error) bool {
+	var launchTarget *launchApprovalError
+	return errors.As(err, &launchTarget) && launchTarget.changed
 }
 
 // RecordFailure stores a failed MCP connection attempt for status UIs.
@@ -68,6 +89,7 @@ func (h *Host) recordFailure(s Spec, err error, what string) {
 		Name: s.Name, Transport: tt, Error: summarizeFailureError(err),
 		Stage: stage, Elapsed: elapsed, Stderr: stderr, HTTPStatus: terminalHTTPStatus(err),
 		RequiresLaunchApproval: requiresLaunchApproval(err),
+		DeclarationChanged:     launchDeclarationChanged(err),
 	}
 	replaced := false
 	for i := range h.failures {

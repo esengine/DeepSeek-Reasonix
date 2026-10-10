@@ -372,7 +372,7 @@ func (t *Tool) pluginPackageAction(req request, pkg pluginpkg.Package, source st
 	}
 	if a.Runtime != nil {
 		a.RiskLevel = RiskHigh
-		a.RiskReasons = append(a.RiskReasons, "FULL TRUST: declares a runtime process ("+pluginpkg.RuntimeCommandLine(pkg.Manifest.Runtime)+") that runs inside Reasonix — it can read the full session and environment, bypass permissions, and operate this machine directly")
+		a.RiskReasons = append(a.RiskReasons, "FULL TRUST: declares a runtime process that runs inside Reasonix — it can read the full session and environment, bypass permissions, and operate this machine directly. Command: "+hostLiteral(pluginpkg.RuntimeCommandLine(pkg.Manifest.Runtime)))
 	}
 	slices.Sort(a.Skills)
 	slices.Sort(a.Agents)

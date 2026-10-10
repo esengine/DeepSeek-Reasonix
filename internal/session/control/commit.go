@@ -69,6 +69,11 @@ func (c *Controller) ProposeCommit(ctx context.Context) (CommitProposal, error) 
 func (c *Controller) CommitStaged(ctx context.Context, req CommitRequest) (CommitResult, error) {
 	c.commitMu.Lock()
 	defer c.commitMu.Unlock()
+	releaseWorkspace, err := c.holdWorkspaceActivity(ctx)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	defer releaseWorkspace.release()
 	res, err := gitcommit.Commit(ctx, c.workspaceRepo, req.Message, req.Fingerprint, req.AcknowledgeSecrets)
 	if err != nil {
 		return CommitResult{}, err

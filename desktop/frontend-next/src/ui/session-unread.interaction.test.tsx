@@ -25,7 +25,7 @@ interface Kernel {
   viewed: string[];
   field: { present: boolean };
   gate: { hold: boolean; fail: boolean; release: () => void };
-  emit: (path: string, ev: object) => void;
+  emit: (path: string, ev: object) => Promise<void>;
   port: (path: string) => AgentPort & { markSessionViewed: ReturnType<typeof vi.fn> };
 }
 
@@ -102,7 +102,10 @@ function kernel(unread: string[], present = true): Kernel {
     viewed,
     field,
     gate,
-    emit: (path, ev) => act(() => listeners.get(path)?.(ev as WireEvent)),
+    emit: async (path, ev) => {
+      await waitFor(() => expect(listeners.has(path)).toBe(true));
+      act(() => listeners.get(path)!(ev as WireEvent));
+    },
     port: (path) => {
       const id = [...ports.keys()].find((k) => (hub as unknown as { views: RuntimeView[] }).views.find((v) => v.id === k)?.sessionPath === path);
       return ports.get(id!)!;
@@ -189,8 +192,8 @@ describe("opening a session clears its mark", () => {
     await waitFor(() => expect(current.getAttribute("aria-selected")).toBe("true"));
     focused(false);
     k.unread.add(MAIN);
-    k.emit(MAIN, { kind: "turn_started" });
-    k.emit(MAIN, { kind: "turn_done" });
+    await k.emit(MAIN, { kind: "turn_started" });
+    await k.emit(MAIN, { kind: "turn_done" });
     await waitFor(() => expect(dotIn(screen.getByRole("treeitem", { name: /Billing refactor/ }))).toBeTruthy());
     expect(k.port(MAIN).markSessionViewed).not.toHaveBeenCalled();
     focused(true);
@@ -205,8 +208,8 @@ describe("a turn ending while its pane is in front", () => {
     const k = kernel([]);
     render(<App hub={k.hub} />);
     await waitFor(() => expect(k.port(MAIN)).toBeTruthy());
-    k.emit(MAIN, { kind: "turn_started" });
-    k.emit(MAIN, { kind: "turn_done" });
+    await k.emit(MAIN, { kind: "turn_started" });
+    await k.emit(MAIN, { kind: "turn_done" });
     await waitFor(() => expect(k.port(MAIN).markSessionViewed).toHaveBeenCalledTimes(1));
   });
 
@@ -216,8 +219,8 @@ describe("a turn ending while its pane is in front", () => {
     await waitFor(() => expect(k.port(MAIN)).toBeTruthy());
     focused(false);
     k.unread.add(MAIN);
-    k.emit(MAIN, { kind: "turn_started" });
-    k.emit(MAIN, { kind: "turn_done" });
+    await k.emit(MAIN, { kind: "turn_started" });
+    await k.emit(MAIN, { kind: "turn_done" });
     await act(async () => {});
     expect(k.port(MAIN).markSessionViewed).not.toHaveBeenCalled();
   });
@@ -228,7 +231,7 @@ describe("a turn ending while its pane is in front", () => {
     await userEvent.click(await row(/Release notes/));
     await waitFor(() => expect(document.querySelectorAll(".pane").length).toBe(2));
     await waitFor(() => expect(k.port(RELEASE)).toBeTruthy());
-    k.emit(MAIN, { kind: "turn_done" });
+    await k.emit(MAIN, { kind: "turn_done" });
     await act(async () => {});
     expect(k.port(MAIN).markSessionViewed).not.toHaveBeenCalled();
   });
@@ -313,9 +316,9 @@ describe("the mark follows the kernel across reloads", () => {
     await userEvent.click(await row(/Billing refactor/));
     focused(false);
     k.unread.add(RELEASE);
-    k.emit(RELEASE, { kind: "turn_started" });
+    await k.emit(RELEASE, { kind: "turn_started" });
     await act(async () => {});
-    k.emit(RELEASE, { kind: "turn_done" });
+    await k.emit(RELEASE, { kind: "turn_done" });
     await waitFor(() => expect(dotIn(screen.getByRole("treeitem", { name: /Release notes/ }))).toBeTruthy());
   });
 });

@@ -19,7 +19,6 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"sync"
-	"time"
 
 	"reasonix/internal/assembly/boot"
 	"reasonix/internal/base/nilutil"
@@ -215,8 +214,8 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	// Snapshot the current controller under a short read of s.mu only.
 	cur := s.ctl()
-	if controllerHasActiveRuntimeWork(cur) {
-		return busyErr(codeSwitchModel, "cannot switch model while active work or background jobs are running")
+	if err := modelSwitchRefusal(cur); err != nil {
+		return err
 	}
 
 	// Off-lock: snapshot, carry history, and build the replacement. None of these
@@ -626,41 +625,6 @@ func writeJSONCached(w http.ResponseWriter, r *http.Request, v any) {
 	_, _ = w.Write(body)
 }
 
-// logMiddleware logs each request's method, path, and status.
-func logMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rw, r)
-		slog.Info("serve: request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rw.status,
-			"duration", time.Since(start).String(),
-		)
-	})
-}
-
-// responseWriter captures the status code for logging.
-type responseWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.status = code
-	rw.ResponseWriter.WriteHeader(code)
-}
-
-// Flush delegates to the underlying ResponseWriter if it supports flushing
-// (required for SSE /events). Without this the type assertion in the events
-// handler fails and the stream endpoint returns 500.
-func (rw *responseWriter) Flush() {
-	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
 // rewind rewinds the session to a checkpoint.
 func (s *Server) rewind(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -1058,4 +1022,28 @@ func removeSessionFiles(absDir, abs string) error {
 		return nil
 	}
 	return sessionstore.ClearCleanupPending(abs)
+}
+
+// modelSwitchRefusal says why a rebuild must wait. A turn in flight is waited
+// out or stopped; jobs left after the turn ended die with the controller being
+// replaced, so they are named separately with how many.
+func modelSwitchRefusal(ctrl control.SessionAPI) error {
+	if ctrl == nil {
+		return nil
+	}
+	status := ctrl.RuntimeStatus()
+	switch {
+	case status.Running || status.PendingPrompt:
+		return busyErr(codeSwitchModel, "cannot switch model while a turn is running")
+	case status.BackgroundJobs > 0:
+		return refusal(http.StatusConflict, codeSwitchModelJobs,
+			errors.New("cannot switch model while background jobs are running"),
+			map[string]any{"count": status.BackgroundJobs})
+	}
+	return nil
+}
+
+func isSwitchBusy(err error) bool {
+	code := codedRefusal(err)
+	return code == codeSwitchModel || code == codeSwitchModelJobs
 }

@@ -129,7 +129,8 @@ const (
 	// CompactionProgress streams the digest as the summarizer writes it (Text =
 	// the new chunk), between CompactionStarted and CompactionDone. A fold can
 	// take a minute, and a placeholder that says nothing for a minute is
-	// indistinguishable from one that has hung.
+	// indistinguishable from one that has hung. A frame with no Text restarts
+	// the digest: the attempt streamed so far was discarded.
 	CompactionProgress
 	// InboxChanged reports that the durable session inbox moved. Content-free:
 	// the queue is read back from the kernel, so one authority answers every

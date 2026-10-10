@@ -6,6 +6,8 @@
     "codeowners": 0,
     "commented-code": 0,
     "complexity": 759,
+    "css-important": 210,
+    "css-size": 9882,
     "doc-language": 0,
     "doc-owner": 27,
     "doc-prose": 2147,
@@ -22,6 +24,7 @@
     "orphan": 75,
     "refusal-path": 0,
     "release-note": 661,
+    "stray-file": 0,
     "struct-state": 31,
     "window-state": 0,
     "wire-parity": 0
@@ -82,6 +85,14 @@
     "desktop/frontend-next/src/styles/TOKENS.md": {
       "doc-owner": 1,
       "doc-prose": 16
+    },
+    "desktop/frontend-next/src/styles/app.css": {
+      "css-important": 28,
+      "css-size": 5631
+    },
+    "desktop/frontend-next/src/styles/studio.css": {
+      "css-important": 182,
+      "css-size": 4251
     },
     "desktop/internal/winuninstall/registry_windows.go": {
       "essay": 1

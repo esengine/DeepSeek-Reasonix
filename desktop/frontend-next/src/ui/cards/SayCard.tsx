@@ -99,7 +99,7 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
   // Thinking is the longest-running stream of the turn — 10s of it before the
   // first answer token, measured — so it gets the same paced reveal the answer
   // does rather than tracking the wire's bursts.
-  const thought = useRevealed(item.reasoning ?? "", !item.done);
+  const thought = useRevealed(item.reasoning ?? "", !item.done && open);
   return (
     <div className="call" data-k="say">
       <div className="g">

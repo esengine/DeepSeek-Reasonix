@@ -84,6 +84,26 @@ describe("the wallet follows the model's source", () => {
     expect(balance.mock.calls.length).toBe(reads);
   });
 
+  it("keeps the wallet and does not re-read when the first status names the account a read already answered", async () => {
+    const port = new MockPort();
+    const status = port.status.bind(port);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((res) => { release = res; });
+    const statusCalls = vi.spyOn(port, "status").mockImplementation(() => gate.then(status));
+    const balance = vi.spyOn(port, "balance");
+    const { container } = mount(port);
+    await waitFor(() => expect(figure(container)).toBe("¥110.00"));
+    const reads = balance.mock.calls.length;
+    const shown: Array<string | null> = [];
+    const watch = new MutationObserver(() => shown.push(figure(container)));
+    watch.observe(container, { childList: true, subtree: true, characterData: true });
+    await act(async () => { release(); await Promise.all(statusCalls.mock.results.map((r) => r.value)); });
+    watch.disconnect();
+    expect(shown).not.toContain(null);
+    expect(figure(container)).toBe("¥110.00");
+    expect(balance.mock.calls.length).toBe(reads);
+  });
+
   it("keeps only the last of two quick switches", async () => {
     const port = new MockPort();
     const pending: Record<string, (r: WalletReading) => void> = {};

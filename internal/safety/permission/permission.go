@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"reasonix/internal/base/shellparse"
+	"reasonix/internal/safety/shellsafe"
 )
 
 // Decision is the outcome of evaluating a tool call against a Policy.
@@ -224,6 +225,11 @@ func (p Policy) decideBashSubject(toolName string, readOnly bool, subject string
 	}
 	if parts != nil {
 		return p.decideBashSegments(readOnly, parts)
+	}
+	// A remembered prefix rule never covers a network path: the user approved a
+	// command, not a connection to whatever machine a later argument names.
+	if shellsafe.OperandsNameNetworkPath(subject) {
+		requiresHuman = true
 	}
 	switch {
 	case requiresHuman && p.Mode == Deny:

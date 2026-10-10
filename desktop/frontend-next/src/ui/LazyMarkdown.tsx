@@ -18,10 +18,10 @@ function loader() {
 
 let Markdown = loader();
 
-export function LazyMarkdown({ text, streaming, local }: { text: string; streaming?: boolean; local?: LocalRefs }) {
+export function LazyMarkdown({ text, streaming, local, images }: { text: string; streaming?: boolean; local?: LocalRefs; images?: boolean }) {
   return (
     <Suspense fallback={<div className="md" style={{ whiteSpace: "pre-wrap" }}>{text}</div>}>
-      <Markdown text={text} streaming={streaming} local={local} />
+      <Markdown text={text} streaming={streaming} local={local} images={images} />
     </Suspense>
   );
 }

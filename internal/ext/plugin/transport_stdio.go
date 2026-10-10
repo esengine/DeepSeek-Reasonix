@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -319,56 +320,11 @@ func hasPathSeparator(s string) bool {
 func lookPathInEnv(command string, env []string) (string, bool) {
 	path, _ := envValue(env, "PATH")
 	pathext, _ := envValue(env, "PATHEXT")
-	for _, dir := range filepath.SplitList(path) {
-		if dir == "" || !filepath.IsAbs(dir) {
-			continue
-		}
-		for _, name := range executableNames(command, pathext) {
-			candidate := filepath.Join(dir, name)
-			if isExecutableFile(candidate) {
-				return candidate, true
-			}
-		}
-	}
-	return "", false
-}
-
-func executableNames(command, pathext string) []string {
-	if runtime.GOOS != "windows" || filepath.Ext(command) != "" {
-		return []string{command}
-	}
-	if strings.TrimSpace(pathext) == "" {
-		pathext = ".COM;.EXE;.BAT;.CMD"
-	}
-	names := []string{command}
-	seen := map[string]bool{strings.ToLower(command): true}
-	for ext := range strings.SplitSeq(pathext, ";") {
-		ext = strings.TrimSpace(ext)
-		if ext == "" {
-			continue
-		}
-		if !strings.HasPrefix(ext, ".") {
-			ext = "." + ext
-		}
-		name := command + ext
-		key := strings.ToLower(name)
-		if !seen[key] {
-			seen[key] = true
-			names = append(names, name)
-		}
-	}
-	return names
+	return proc.LookPathIn(command, path, pathext, runtime.GOOS == "windows")
 }
 
 func isExecutableFile(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true
-	}
-	return info.Mode().Perm()&0o111 != 0
+	return proc.IsExecutableFile(path, runtime.GOOS == "windows")
 }
 
 func windowsStdioFallbackPATH(env []string) string {
@@ -486,10 +442,12 @@ func parseShellPATH(out []byte, marker string) string {
 	return ""
 }
 
+// mergeEnv applies overrides in key order, so two spellings of one Windows
+// variable resolve the same way every time.
 func mergeEnv(base []string, overrides map[string]string) []string {
 	out := append([]string(nil), base...)
-	for k, v := range overrides {
-		out = setEnvValue(out, k, v)
+	for _, k := range slices.Sorted(maps.Keys(overrides)) {
+		out = setEnvValue(out, k, overrides[k])
 	}
 	return out
 }

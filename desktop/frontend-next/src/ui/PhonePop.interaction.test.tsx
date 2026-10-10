@@ -88,6 +88,22 @@ it("shows the account-gated Internet QR before the optional LAN pairing code", a
   expect(offerShare).not.toHaveBeenCalled();
 });
 
+it.each([
+  [undefined, "登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。"],
+  ["signed_out", "登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。"],
+  ["relay_unreachable", "中转服务暂时无法连接，请检查网络或代理设置后重试。"],
+  ["relay_refused", "中转服务拒绝了这台设备的连接，请稍后重试。"],
+] as const)("explains why Internet access is unavailable: %s", async (reason, note) => {
+  const remote = { ...status(false), cloudRemote: { online: false, reason, error: "account: not signed in" } };
+  const hub = { shareStatus: vi.fn(async () => remote), offerShare: vi.fn() } as unknown as HubPort;
+  render(<PhonePop hub={hub} />);
+  await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
+  expect(await screen.findByText(note)).toBeTruthy();
+  if (reason === "relay_unreachable" || reason === "relay_refused") {
+    expect(screen.queryByText("登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。")).toBeNull();
+  }
+});
+
 it("labels Internet controllers by their ordinal, not their list position", async () => {
   const now = new Date().toISOString();
   const cloud = (id: string, ordinal: number) => ({ id, name: "Web Studio", connectedAt: now, lastSeen: now, ordinal });

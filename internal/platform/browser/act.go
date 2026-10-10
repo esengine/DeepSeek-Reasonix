@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -587,16 +586,9 @@ func (s *Session) upload(ctx context.Context, t *tab, step Step) (string, error)
 	if err != nil {
 		return "", err
 	}
-	paths := make([]string, 0, len(step.Files))
-	for _, file := range step.Files {
-		abs, err := filepath.Abs(file)
-		if err != nil || !fileWithin(abs, s.cfg.Roots) {
-			return "", fail(CodeURLRefused, "%q is outside the workspace; a page may only be given a file inside it", file)
-		}
-		if _, err := os.Stat(abs); err != nil {
-			return "", fail(CodeBadStep, "%q is not a file on this machine", file)
-		}
-		paths = append(paths, abs)
+	paths, err := uploadPaths(step.Files, s.cfg.Roots)
+	if err != nil {
+		return "", err
 	}
 	if err := t.call(ctx, "DOM.setFileInputFiles", map[string]any{"backendNodeId": node, "files": paths}, nil); err != nil {
 		if isProtocolError(err) {
@@ -605,6 +597,32 @@ func (s *Session) upload(ctx context.Context, t *tab, step Step) (string, error)
 		return "", engineFailure(err)
 	}
 	return fmt.Sprintf("give %s %d file(s)", step.Ref, len(paths)), nil
+}
+
+// uploadPaths vets the files an upload names: each must be a file on this
+// machine inside roots, and a network path is refused before it is looked up.
+func uploadPaths(files, roots []string) ([]string, error) {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		if spelledAsNetwork(file) && judgeFile(file, roots) != fileInside {
+			return nil, networkRefusal(file, "a page may only be given a file inside the workspace")
+		}
+		abs, err := filepath.Abs(file)
+		if err != nil {
+			return nil, fail(CodeURLRefused, "%q is outside the workspace; a page may only be given a file inside it", file)
+		}
+		switch judgeFile(abs, roots) {
+		case fileNetwork:
+			return nil, networkRefusal(file, "a page may only be given a file inside the workspace")
+		case fileOutside:
+			return nil, fail(CodeURLRefused, "%q is outside the workspace; a page may only be given a file inside it", file)
+		}
+		if _, err := statFile(abs); err != nil {
+			return nil, fail(CodeBadStep, "%q is not a file on this machine", file)
+		}
+		paths = append(paths, abs)
+	}
+	return paths, nil
 }
 
 // The viewport a page may be asked to lay out in. The floor is the smallest

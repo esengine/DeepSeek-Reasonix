@@ -1,7 +1,7 @@
 import { PLAN_ACTIONS, type PlanAction } from "./session";
-import type { AccountState, AgentPort, Appearance, ChipCall, CompactionSettings, Completion, DeviceGrant, ProviderProbe, UpdateProgress, VersionHub, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, SessionEntry, SessionStatus, WalletReading, HookDryRun, HookEntry, MemoryCatalog, MemoryEdit, MemoryEntry, UsageQuery, UsageReport, McpDraft, PluginExport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
-import { HttpError, type ChangeDiff, type CommitProposal, type CommitRequest, type CommitResult, type WorkspaceFile, type WorkspaceFiles, type WorkspaceChanges } from "./port";
-import { SseFeedback } from "./sse_feedback";
+import type { AccountState, AgentPort, Appearance, ChipCall, CompactionSettings, Completion, DeviceGrant, ProviderProbe, UpdateProgress, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, HookDryRun, HookEntry, MemoryCatalog, MemoryEdit, MemoryEntry, UsageQuery, UsageReport, McpDraft, PluginExport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
+import { HttpError, type CommitProposal, type CommitRequest, type CommitResult, type WorkspaceFile, type WorkspaceFiles } from "./port";
+import { SseWorkspace } from "./sse_workspace";
 import type { StoragePlan, StorageQuery, StorageState } from "./storage";
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import { host } from "./host";
@@ -16,7 +16,7 @@ import { openLiveStream } from "./livestream";
 // a load. The read is one small JSON body and answers from memory.
 const UPDATE_POLL_MS = 500;
 
-export class SsePort extends SseFeedback implements AgentPort {
+export class SsePort extends SseWorkspace implements AgentPort {
   status() {
     return this.get<SessionStatus>("/status");
   }
@@ -191,6 +191,14 @@ export class SsePort extends SseFeedback implements AgentPort {
     return this.post("/roles", { role, ref });
   }
 
+  roleOverrides() {
+    return this.get<Record<string, RoleOverride[]>>("/roles/overrides");
+  }
+
+  clearRoleOverride(role: string, key: string) {
+    return this.post("/roles/overrides/clear", { role, key });
+  }
+
   storage(query?: StorageQuery) {
     const q = query?.layout ? "?layout=1" : query?.root ? "?root=" + encodeURIComponent(query.root) : "";
     return this.get<StorageState>("/storage" + q);
@@ -231,6 +239,13 @@ export class SsePort extends SseFeedback implements AgentPort {
         body: JSON.stringify({ icon, closeToTray }),
       }),
     );
+  }
+
+  async versionNotes(version: string, retry = false): Promise<VersionNotes> {
+    const path = `/studio/versions/${encodeURIComponent(version)}/notes${retry ? "?retry=1" : ""}`;
+    const res = await fetch(path, { credentials: "same-origin" });
+    if (!res.ok) await SsePort.fail(path, res);
+    return (await res.json()) as VersionNotes;
   }
 
   async pinVersion(version: string): Promise<void> {
@@ -415,14 +430,6 @@ export class SsePort extends SseFeedback implements AgentPort {
 
   deleteSession(name: string) {
     return this.post("/delete-session", { name });
-  }
-
-  changes() {
-    return this.get<WorkspaceChanges>("/changes");
-  }
-
-  changeDiff(path: string) {
-    return this.get<ChangeDiff>(`/changes/diff?path=${encodeURIComponent(path)}`);
   }
 
   async proposeCommit(signal?: AbortSignal) {

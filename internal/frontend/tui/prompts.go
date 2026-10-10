@@ -90,10 +90,10 @@ func (m *model) answerApproval(it *Item, k string) (tea.Cmd, bool) {
 	choices := m.approvalChoices(it.Approval)
 	row := m.approvalRow(it)
 	switch {
-	case k == "up":
+	case k == "up" || k == "k" || k == "ctrl+p":
 		m.apSel.row = (row + len(choices) - 1) % len(choices)
 		return nil, true
-	case k == "down" || k == "tab":
+	case k == "down" || k == "j" || k == "ctrl+n" || k == "tab":
 		m.apSel.row = (row + 1) % len(choices)
 		return nil, true
 	case k == "enter":

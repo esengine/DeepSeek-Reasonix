@@ -416,7 +416,7 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
         if (!handle) return;
         setDraft({ port, handle, pkg }); setView("publish");
       }} />}
-      {at === "publish" && handle && <PublishForm port={port} handle={handle} initial={draft?.pkg} onMine={() => { setDraft(null); setView("mine"); }} />}
+      {at === "publish" && handle && <PublishForm port={port} handle={handle} initial={draft?.pkg} onApplying={applyingChanged} onMine={() => { setDraft(null); setView("mine"); }} />}
     </Group>
   );
 }

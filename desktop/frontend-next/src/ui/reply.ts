@@ -46,17 +46,13 @@ export function useReplyActions({ port, items, checkpoints, running, model, subm
   // the word "regenerate" makes.
   const regenerate = useCallback(
     async (turn: number, text: string) => {
-      try {
-        const plan = await port.prepareRewind(turn, "conversation");
-        if (!plan.canConversation) throw new Error(plan.disabledReason || t("这一轮无法重新生成"));
-        await port.commitRewind(plan.planId);
-        await reloadSession();
-        await submit(text);
-      } catch (e) {
-        onError(e);
-      }
+      const plan = await port.prepareRewind(turn, "conversation");
+      if (!plan.canConversation) throw new Error(plan.disabledReason || t("这一轮无法重新生成"));
+      await port.commitRewind(plan.planId);
+      await reloadSession();
+      await submit(text);
     },
-    [port, submit, reloadSession, onError],
+    [port, submit, reloadSession],
   );
 
   // A reply belongs to the most recent user turn, including when that turn
@@ -109,13 +105,13 @@ export function useReplyActions({ port, items, checkpoints, running, model, subm
       onRegenerate: (id: string) => {
         if (running) return;
         const ask = replyTurns.get(id);
-        if (ask) void regenerate(ask.turn, ask.text);
+        if (ask) void regenerate(ask.turn, ask.text).catch(onError);
       },
       model,
       onConfigureModel: () => onSettings("model"),
       onRunDetail,
     }),
-    [replyTurns, running, regenerate, model, onSettings, onRunDetail, turnOf],
+    [replyTurns, running, regenerate, model, onSettings, onRunDetail, turnOf, onError],
   );
 
   // Rewriting a message is the same act with different words: the turn goes

@@ -18,7 +18,8 @@ type turnImages struct {
 	candidates []string
 	skipped    []error
 	// modelReads is the model's capability, which a turn carrying no pixels of
-	// its own (a Goal continuation) still has.
+	// its own (a Goal continuation) still has. It is resolved only when there
+	// are candidates, since it decides nothing without them.
 	modelReads bool
 }
 
@@ -46,12 +47,18 @@ func (t *turnImages) reasons() string {
 	return strings.Join(parts, "; ")
 }
 
+// modelReadsAny reports whether this turn's model reads images, asking the
+// config only when the turn has candidates for it to decide about.
+func (c *Controller) modelReadsAny(candidates []string) bool {
+	return len(candidates) > 0 && c.imageInputEnabled()
+}
+
 // resolveTurnImages resolves each user attachment once. Text-only parents keep
 // the data only as candidates for a vision-capable child; vision-capable
 // parents reuse the same data URLs for their own provider request.
 func (c *Controller) resolveTurnImages(line string) *turnImages {
 	candidates, skipped := c.resolveInputImageCandidates(line)
-	images := &turnImages{candidates: candidates, skipped: skipped, modelReads: c.imageInputEnabled()}
+	images := &turnImages{candidates: candidates, skipped: skipped, modelReads: c.modelReadsAny(candidates)}
 	if images.modelReads {
 		images.userImages = candidates
 	}
@@ -70,7 +77,7 @@ func (c *Controller) prepareOrchestratedTurnImages(turn orchestratedTurn) orches
 
 // frozenTurnImages pins an already-resolved image set to a turn.
 func (c *Controller) frozenTurnImages(images []string) *turnImages {
-	frozen := &turnImages{candidates: append([]string(nil), images...), modelReads: c.imageInputEnabled()}
+	frozen := &turnImages{candidates: append([]string(nil), images...), modelReads: c.modelReadsAny(images)}
 	if frozen.modelReads {
 		frozen.userImages = append([]string(nil), images...)
 	}
@@ -85,7 +92,8 @@ func (c *Controller) imagesForOrchestratedTurn(ctx context.Context, turn orchest
 		// A Goal continuation belongs to the same visible user turn, so keep its
 		// child-only image candidates. Do not add them to the synthetic parent
 		// message: a vision parent already has the image in its earlier history.
-		return &turnImages{candidates: agent.SubagentImageCandidates(ctx), modelReads: c.imageInputEnabled()}
+		carried := agent.SubagentImageCandidates(ctx)
+		return &turnImages{candidates: carried, modelReads: c.modelReadsAny(carried)}
 	}
 	return c.resolveTurnImages(turn.imageReferenceInput())
 }
@@ -103,7 +111,10 @@ func (c *Controller) withTurnImages(ctx context.Context, line string) (context.C
 // model cannot. Without it the candidates reach whichever sub-agent runs next,
 // whose model was chosen for cost or speed and usually drops them on the wire.
 func (c *Controller) withVisionRouting(ctx context.Context) context.Context {
-	cfg, err := config.LoadForRoot(c.workspaceRoot)
+	if len(agent.SubagentImageCandidates(ctx)) == 0 {
+		return ctx
+	}
+	cfg, err := loadConfigForRoot(c.workspaceRoot)
 	if err != nil || cfg == nil || strings.TrimSpace(cfg.Agent.VisionModel) == "" {
 		return ctx
 	}

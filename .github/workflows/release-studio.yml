@@ -1242,6 +1242,22 @@ jobs:
             exit 0
           fi
 
+          # The notes object goes up before the catalog entry that names it, so
+          # no client reads a pointer to an object that is not there yet. Notes
+          # are optional: a failure here publishes the version without a pointer
+          # rather than keeping the new version out of the catalog.
+          notes_key="studio/notes/${VERSION#v}.md"
+          notes_arg=()
+          if aws s3 cp "$RUNNER_TEMP/version-notes.md" "s3://${R2_BUCKET}/${notes_key}" \
+              --endpoint-url "$endpoint" \
+              --content-type "text/markdown; charset=utf-8" \
+              --cache-control "public, max-age=31536000, immutable" &&
+            aws s3api head-object --bucket "$R2_BUCKET" --key "$notes_key" --endpoint-url "$endpoint" >/dev/null; then
+            notes_arg=(20 "https://dl.reasonix.io/${notes_key}")
+          else
+            echo "::warning::release notes for ${VERSION} were not uploaded to the mirror; the catalog entry is published without notes"
+          fi
+
           # Studio's own catalog. Writing the ROOT versions.json here would hand
           # desktop users Studio releases, so the prefix is not optional.
           current=/tmp/studio-versions-current.json
@@ -1253,7 +1269,7 @@ jobs:
             echo "no existing Studio catalog; starting a new one"
           fi
           bash scripts/update-versions-index.sh "$source" "$VERSION" "$TAG" studio \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$next"
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${notes_arg[@]}" > "$next"
           jq -e --arg v "$VERSION" '.versions | map(select(.version == $v)) | length == 1' "$next" >/dev/null
           aws s3 cp "$next" "s3://${R2_BUCKET}/studio/versions.json" \
             --endpoint-url "$endpoint" \

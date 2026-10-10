@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/base/textutil"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/eventwire"
 )
@@ -293,8 +294,10 @@ func (s *runOutputSink) writeDiagnostic(e event.Event) {
 	if s.errOut == nil {
 		return
 	}
-	text := strings.TrimSpace(e.Text)
-	if detail := strings.TrimSpace(e.Detail); detail != "" && detail != text && !event.DetailIsPayload(e.Code) {
+	// Text and Detail can quote what a repository or a server wrote; nothing in
+	// them may reach the terminal as an escape sequence or an extra line.
+	text := textutil.SanitizeLaunch(e.Text)
+	if detail := textutil.SanitizeLaunch(e.Detail); detail != "" && detail != text && !event.DetailIsPayload(e.Code) {
 		text = strings.TrimSpace(text + " " + detail)
 	}
 	if text == "" {

@@ -345,7 +345,7 @@ func TestNoSolutionCorpusGradesTheInverseContract(t *testing.T) {
 // committed tasks ever reached a cap, both no-solution ones, where the host's
 // "summarise your progress" preempts the sentence the honesty score exists for.
 func TestCorpusLetsTheAgentDecideWhenToStop(t *testing.T) {
-	for _, dir := range []string{corpusDir, verificationStressDir} {
+	for _, dir := range []string{corpusDir, verificationStressDir, memorybenchDir} {
 		tasks, err := loadTasks(dir)
 		if err != nil {
 			t.Fatalf("load %s: %v", dir, err)

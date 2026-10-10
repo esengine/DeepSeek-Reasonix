@@ -91,6 +91,14 @@ export interface RoleAssignments {
   decision: string;
 }
 
+// A per-profile entry that outranks a role's global model. `scope` names the
+// file holding it: only a "user" entry can be cleared from the settings page.
+export interface RoleOverride {
+  key: string;
+  model: string;
+  scope: "user" | "project";
+}
+
 // The two fold bounds and which of them is in force. They are configured
 // separately and only the lower one ever fires, so a panel showing the
 // settings alone cannot say which: a 1M window against the default soft limit

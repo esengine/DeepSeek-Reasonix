@@ -32,6 +32,7 @@ var Chinese = Messages{
 		"summary_timeout":                  "生成摘要的请求停滞了：连续 6 分钟没有任何输出",
 		"summary_ceiling":                  "生成摘要的请求运行满 30 分钟仍未完成，已停止",
 		"summary_truncated":                "摘要在输出上限处被截断，没有采用",
+		"summary_not_digest":               "摘要模型没有按要求的标题给出摘要，没有采用",
 		"summary_input_too_large":          "待折叠的内容缩减后仍超过单次摘要请求的容量",
 		"hook_refused":                     "扩展拒绝了这次折叠",
 		"persist_failed":                   "折叠结果没能保存",
@@ -40,6 +41,7 @@ var Chinese = Messages{
 		"candidate_not_smaller":            "折叠后的上下文不比原来小，没有采用",
 		"candidate_above_ceiling":          "折叠后仍超过检查点上限（受保护的内容太多），没有采用",
 		"candidate_above_trigger":          "折叠后仍不低于压缩阈值，没有采用",
+		"result_above_trigger":             "折叠后的上下文仍不低于压缩阈值，已暂停自动重试",
 		"candidate_above_physical_ceiling": "折叠后仍超过窗口的物理上限，没有采用",
 		"savings_below_minimum":            "固定前缀已占满检查点上限，这次折叠省下的空间太少，没有采用",
 		"fixed_prefix_above_trigger":       "无法折叠的固定部分本身已超过压缩阈值",
@@ -58,6 +60,7 @@ var Chinese = Messages{
 	NoticeCompacted:          "已压缩",
 	NoticeCompactDeclinedFmt: "无需压缩：%s",
 	NoticeCompactFailedFmt:   "压缩失败：%s",
+	NoticeCompactHeldFmt:     "自动压缩暂缓，上次尝试没有完成：%s",
 	ReceiptGapKinds: map[string]string{
 		"unbacked_claim":            "声称过但账本不支持",
 		"unproven_criterion":        "验收项没有证据",
@@ -92,6 +95,10 @@ var Chinese = Messages{
 	TUIDeclinedFmt:          "已拒绝 %s %s",
 	NoticeUnappliedSteerFmt: "引导没有生效：这一轮在处理它之前就结束了。如果仍然需要，请再发送一次：\n%s",
 	NoticeExtSkippedFmt:     "扩展 %s 的配套后台程序没有运行，本次在 %s 已被跳过。用 /plugins 查看并启动它，或停用该扩展。",
+	NoticeJobFinishedFmt:    "后台任务已结束：%s",
+	NoticeJobKilledFmt:      "后台任务已终止：%s",
+	NoticeJobFailedFmt:      "后台任务 %s 失败，需要处理",
+	NoticeInboxRecoveredFmt: "已恢复 %d 条未完成的指令。待发送已暂停，请先用 /queue 查看，再继续派发。",
 	TUIQuestion:             "提问",
 	TUISubagentCallsFmt:     "%d 次子代理调用",
 	TUIChartMoreRowsFmt:     "… 还有 %d 行",
@@ -323,6 +330,9 @@ var Chinese = Messages{
 	McpPanelDetailHint:           "Esc 返回",
 	McpPanelNoTools:              "未报告任何工具",
 	McpPanelOff:                  "关闭",
+	McpPanelPending:              "待批准",
+	McpPanelChanged:              "启用后已变更",
+	McpPanelLaunchFmt:            "将启动：%s",
 	McpToolDestructive:           "破坏性",
 	McpToolReadOnly:              "只读",
 	McpPanelConfirmFmt:           "这会运行仓库声明的服务器 %s：%s — y/n",
@@ -642,7 +652,6 @@ var Chinese = Messages{
 	WriteEnvErr:               "写入 .env 失败：",
 
 	ProviderErrBadRequest:          "请求格式错误 (HTTP 400)：请求体被拒绝，通常是程序缺陷。若持续出现请反馈。",
-	ProviderErrDroppedReasoning:    "端点拒绝了请求体：它要求把助手的思考内容随工具调用一并回传，而这个连接没有声明思考协议，于是这部分没有发出去。把连接的思考参数设成它后面那个模型所用的协议，再重试。",
 	ProviderErrAuth:                "认证失败 (HTTP 401)：未读到 API key（缺失或未设置）。请在 .env 中配置密钥，或运行 `reasonix setup`。",
 	ProviderErrAuthRejected:        "认证失败 (HTTP 401)：服务端拒绝了你的 API key。可能是 key 错误或已过期，也可能是服务端出现瞬时鉴权/额度问题——已退避重试仍失败。请稍后再试，或检查 .env 中的密钥 / 运行 `reasonix setup`。",
 	ProviderErrDNSNotFound:         "无法解析模型服务域名 %s：DNS 查询显示该主机不存在，未建立任何连接，也没有重试。请检查网络、DNS、代理设置以及服务商的接口地址。",
@@ -774,4 +783,6 @@ var Chinese = Messages{
   密钥通过 api_key_env 从环境变量注入（如 DEEPSEEK_API_KEY）。
   运行 'reasonix setup' 生成配置；详见 docs/SPEC.md。
 `,
+
+	Feedback: feedbackChinese,
 }

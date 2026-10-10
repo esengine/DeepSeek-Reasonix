@@ -457,6 +457,9 @@ func (m *model) scrollBy(n int) {
 	s.follow = s.yoff >= total-h
 }
 
+// followTail brings the view to the newest rows and keeps it there.
+func (m *model) followTail() { m.scr.yoff, m.scr.follow = 0, true }
+
 // scrollKey takes the keys that move the transcript; they are never text.
 func (m *model) scrollKey(k string) bool {
 	if m.scr == nil {
@@ -471,7 +474,7 @@ func (m *model) scrollKey(k string) bool {
 	case "ctrl+home":
 		m.scr.yoff, m.scr.follow = 0, false
 	case "ctrl+end":
-		m.scr.yoff, m.scr.follow = 0, true
+		m.followTail()
 	case "ctrl+b":
 		m.toggleLatestShell()
 	case "ctrl+o":
@@ -498,8 +501,14 @@ func (m *model) onMouse(msg tea.MouseMsg) tea.Cmd {
 			m.scrollBy(wheelRows)
 		}
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseRight && s.sel.active && !s.sel.empty() {
-			return m.copySelection()
+		if msg.Button == tea.MouseRight {
+			switch {
+			case s.sel.active && !s.sel.empty():
+				return m.copySelection()
+			case m.composerShown():
+				return m.pasteClipboardText()
+			}
+			return nil
 		}
 		if msg.Button != tea.MouseLeft || mouse.Y >= h {
 			return nil

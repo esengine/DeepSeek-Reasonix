@@ -140,3 +140,39 @@ func TestDeniedDeliveryWriterDoesNotAcquireWorkspaceLease(t *testing.T) {
 func providerToolCall(id, name string) provider.ToolCall {
 	return provider.ToolCall{ID: id, Name: name, Arguments: `{}`}
 }
+
+type yieldingWriter struct {
+	workspaceLeaseTestTool
+	owner      *workspacelease.Owner
+	heldDuring bool
+}
+
+func (w *yieldingWriter) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	resume := w.owner.Yield()
+	w.heldDuring = w.owner.State().Acquired
+	_ = resume(ctx)
+	return w.workspaceLeaseTestTool.Execute(ctx, args)
+}
+
+func TestWriterKeepsItsClaimAgainstAYieldWhileItExecutes(t *testing.T) {
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
+	owner, err := workspacelease.New(root, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &yieldingWriter{workspaceLeaseTestTool: workspaceLeaseTestTool{name: "yield_writer"}, owner: owner}
+	a := deliveryLeaseTestAgent(t, owner, w)
+	owner.BeginRun()
+	defer owner.EndRun()
+	if outcome := a.executeOne(context.Background(), &a.turn, providerToolCall("w", w.Name())); outcome.errMsg != "" {
+		t.Fatalf("writer outcome = %+v", outcome)
+	}
+	if !w.heldDuring {
+		t.Fatal("a yield gave the claim back under a tool that was still writing")
+	}
+	resume := owner.Yield()
+	if owner.State().Acquired {
+		t.Fatal("the claim stayed counted as in flight after the call returned")
+	}
+	_ = resume(context.Background())
+}

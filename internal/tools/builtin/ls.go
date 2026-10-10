@@ -18,6 +18,7 @@ func init() { tool.RegisterBuiltin(listDir{}) }
 // read aliases for external folder refs. forbidRoots lists directories the tool
 // may not list or recurse into.
 type listDir struct {
+	netRoots    []string
 	workDir     string
 	paths       *PathResolver
 	forbidRoots []string
@@ -59,6 +60,9 @@ func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, err
 	}
 	rp := resolveReadablePath(l.workDir, p.Path, l.paths)
 	p.Path = rp.Path
+	if err := rp.refuseNetwork(l.netRoots); err != nil {
+		return "", err
+	}
 	if err := confineScope(l.readRoots, p.Path); err != nil {
 		return "", err
 	}

@@ -55,10 +55,6 @@ type SendOptions struct {
 	KeySource  string // human-readable source of KeyEnv, when known
 	KeyPresent bool   // a non-empty key is being sent — separates "rejected" from "missing"
 	RetryAuth  bool   // the key has authenticated before — retry transient 401s instead of failing fast
-	// BadRequestHint names what this request left out, for the statuses that
-	// mean the body itself was refused. Only the client that built the body
-	// knows it, and it is lost by the time a reader sees the response.
-	BadRequestHint RequestHint
 	// HeaderTimeout is how long one attempt waits for response headers before
 	// the transport gives up on it; zero when the caller did not configure one.
 	HeaderTimeout time.Duration
@@ -81,16 +77,6 @@ const (
 	// RetryCauseUpstreamError: the endpoint reported an error inside an established stream.
 	RetryCauseUpstreamError RetryCause = "upstream_error"
 )
-
-// RequestHint identifies a host-side fact about a request the endpoint refused.
-// It is an identity, never a sentence: the display layer owns the wording, so a
-// reader is never left matching prose to tell one refusal from another.
-type RequestHint string
-
-// HintDroppedToolCallReasoning marks a request that left an assistant
-// tool_calls turn's reasoning behind because the endpoint's reasoning protocol
-// was never declared. Relayed thinking models refuse exactly that shape.
-const HintDroppedToolCallReasoning RequestHint = "dropped_tool_call_reasoning"
 
 // RetryInfo describes a backoff about to happen: Attempt is the 1-based retry
 // number (of Max) and Delay is how long SendWithRetry will wait before it.
@@ -228,9 +214,8 @@ type APIError struct {
 	Provider    string
 	Status      int
 	Body        string
-	TraceID     string      // provider trace identifier from the response headers, when present
-	ToolContext string      // resolved Reasonix/MCP identity for provider-indexed tool schema errors
-	Hint        RequestHint // what the built request left out; empty when nothing is known
+	TraceID     string // provider trace identifier from the response headers, when present
+	ToolContext string // resolved Reasonix/MCP identity for provider-indexed tool schema errors
 }
 
 func (e *APIError) Error() string {
@@ -251,12 +236,6 @@ func (e *APIError) Error() string {
 // 4xx (400/401/402/422, …) are caller/config problems retrying can't fix.
 func RetryableStatus(s int) bool {
 	return s == http.StatusRequestTimeout || s == http.StatusTooManyRequests || (s >= 500 && s <= 599)
-}
-
-// bodyRejected reports the statuses that mean the request body was refused, as
-// opposed to the caller's credentials, its quota, or the server's own state.
-func bodyRejected(s int) bool {
-	return s == http.StatusBadRequest || s == http.StatusUnprocessableEntity
 }
 
 // transientErr asks the caller's context whether it gave up, not the error: the
@@ -399,9 +378,6 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			Status:   resp.StatusCode,
 			Body:     strings.TrimSpace(string(msg)),
 			TraceID:  responseTraceID(resp.Header),
-		}
-		if bodyRejected(resp.StatusCode) {
-			apiErr.Hint = opts.BadRequestHint
 		}
 		if !RetryableStatus(resp.StatusCode) {
 			return nil, apiErr

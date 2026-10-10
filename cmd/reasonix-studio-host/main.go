@@ -35,6 +35,7 @@ import (
 	"reasonix/internal/frontend/traystate"
 	"reasonix/internal/platform/account"
 	"reasonix/internal/platform/appupdate"
+	"reasonix/internal/platform/crashreport"
 	"reasonix/internal/platform/feedback"
 	"reasonix/internal/platform/instanceid"
 	"reasonix/internal/platform/notify"
@@ -127,6 +128,7 @@ func main() {
 	studioApp := flag.String("studio-app", "", "the application executable this host runs inside")
 	studioAppPID := flag.Int("studio-app-pid", 0, "the process id of that application")
 	computerHelper := flag.String("computer-helper", "", "the native helper that operates this machine's applications")
+	crashDir := flag.String("crash-dir", "", "the directory a fatal runtime error is written to")
 	stripGrants := flag.Bool("strip-package-grants", false, "remove app-package grants from the directory -studio-app runs from, print what changed, and exit")
 	flag.Parse()
 	if *stripGrants {
@@ -141,7 +143,17 @@ func main() {
 	}
 	boot.SetComputerHelper(*computerHelper)
 	shell := shellIdentity{version: *studioVersion, exe: *studioApp, pid: *studioAppPID}
-	os.Exit(run(parentLease(os.Stdin), os.Stdout, os.Stderr, *page, shell))
+	releaseFatalLog := crashreport.InstallFatalLog(*crashDir, defaultVersion(shell.version))
+	code := run(parentLease(os.Stdin), os.Stdout, os.Stderr, *page, shell)
+	releaseFatalLog()
+	os.Exit(code)
+}
+
+func defaultVersion(stated string) string {
+	if strings.TrimSpace(stated) != "" {
+		return stated
+	}
+	return version
 }
 
 // run serves until the lease ends or the process is signalled. stdout carries
@@ -316,7 +328,7 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 	bc := serve.NewBroadcaster()
 	paneSink := decorate(bc)
 	if cfg.DesktopTelemetry() || cfg.DesktopMetrics() {
-		reporter := telemetry.Start(studioTelemetryOptions(cfg, shell.version))
+		reporter := telemetry.Start(studioTelemetryOptions(ctx, cfg, shell.version))
 		if cfg.DesktopMetrics() {
 			paneSink = reporter.Wrap(paneSink)
 		}
@@ -416,19 +428,29 @@ func startCloudRemote(ctx context.Context, cfg *config.Config, logs io.Writer, t
 		registrar.SetCloudRemoteStatus(func() serve.CloudRemoteStatus {
 			status := host.Status()
 			return serve.CloudRemoteStatus{
-				DeviceID: status.DeviceID, Name: status.Name, Online: status.Online, Error: status.Error,
+				DeviceID: status.DeviceID, Name: status.Name, Online: status.Online, Error: status.Error, Reason: string(status.Reason),
 			}
 		})
 	}
 	go host.Run(ctx)
 }
 
-func studioTelemetryOptions(cfg *config.Config, studioVersion string) telemetry.Options {
+// desktopTelemetryOn reads the user-level setting as it is now. A file that does
+// not parse is not consent, and neither the project config nor a migration
+// rewrite is involved; a missing file keeps the documented default (on).
+func desktopTelemetryOn() bool {
+	cfg, err := config.LoadForEditReadOnlyStrict(config.UserConfigPath())
+	return err == nil && cfg != nil && cfg.DesktopTelemetry()
+}
+
+func studioTelemetryOptions(ctx context.Context, cfg *config.Config, studioVersion string) telemetry.Options {
 	return telemetry.Options{
+		Context:      ctx,
 		Mode:         "on",
 		Version:      studioVersion,
 		Surface:      surface.Studio,
 		SuppressPing: !cfg.DesktopTelemetry(),
+		PingAllowed:  desktopTelemetryOn,
 		HomeDir:      config.ReasonixHomeDir(),
 		Interactive:  true,
 		Proxy:        cfg.NetworkProxySpec(),

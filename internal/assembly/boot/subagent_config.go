@@ -2,6 +2,7 @@ package boot
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -185,4 +186,28 @@ func firstConfigured(values map[string]string, profile string) string {
 		}
 	}
 	return ""
+}
+
+// SubagentModelOverride is a subagent_models entry. It outranks the global
+// subagent_model for the profile it names, so a surface that shows the global
+// value has to name these beside it.
+type SubagentModelOverride struct {
+	Key   string
+	Model string
+}
+
+// SubagentModelOverrides lists the non-empty subagent_models entries in key
+// order. An empty value overrides nothing and is left out.
+func SubagentModelOverrides(cfg *config.Config) []SubagentModelOverride {
+	if cfg == nil {
+		return nil
+	}
+	var out []SubagentModelOverride
+	for key, model := range cfg.Agent.SubagentModels {
+		if m := strings.TrimSpace(model); m != "" {
+			out = append(out, SubagentModelOverride{Key: key, Model: m})
+		}
+	}
+	slices.SortFunc(out, func(a, b SubagentModelOverride) int { return strings.Compare(a.Key, b.Key) })
+	return out
 }

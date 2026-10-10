@@ -22,6 +22,7 @@ const (
 	FailSummaryTimeout       CompactionNoopReason = "summary_timeout"
 	FailSummaryCeiling       CompactionNoopReason = "summary_ceiling"
 	FailSummaryTruncated     CompactionNoopReason = "summary_truncated"
+	FailSummaryNotDigest     CompactionNoopReason = "summary_not_digest"
 	FailSummaryInputTooLarge CompactionNoopReason = "summary_input_too_large"
 	FailContextChanged       CompactionNoopReason = "context_changed"
 	FailHookRefused          CompactionNoopReason = "hook_refused"
@@ -50,7 +51,7 @@ func compactionHookRefusal(err error) error {
 func classifySummaryError(parent context.Context, err error) error {
 	switch {
 	case err == nil, errors.Is(err, context.Canceled), parent.Err() != nil,
-		errors.Is(err, errSummaryOutputTruncated), errors.Is(err, errSummaryInputTooLarge),
+		errors.Is(err, errSummaryOutputTruncated), errors.Is(err, errSummaryInputTooLarge), errors.Is(err, errSummaryNotDigest),
 		errors.Is(err, errSummaryTimeout), errors.Is(err, errSummaryCeiling):
 		return err
 	case errors.Is(err, context.DeadlineExceeded):
@@ -73,6 +74,8 @@ func compactionFailureCode(err error) CompactionNoopReason {
 		return rejected.code
 	case errors.Is(err, errSummaryOutputTruncated):
 		return FailSummaryTruncated
+	case errors.Is(err, errSummaryNotDigest):
+		return FailSummaryNotDigest
 	case errors.Is(err, errCompressStaleContext):
 		return FailContextChanged
 	case errors.Is(err, errSummaryInputTooLarge):

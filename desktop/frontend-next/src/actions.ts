@@ -57,6 +57,7 @@ export const ACTIONS: UIAction[] = [
   { id: "chrome.policy", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.rail", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.theme", kind: "view", target: "none", proof: "interaction" },
+  { id: "appearance.nav-rail", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.search", kind: "view", target: "none", proof: "interaction" },
   { id: "session.filter", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.settings", kind: "navigation", target: "none", proof: "interaction" },
@@ -125,6 +126,11 @@ export const ACTIONS: UIAction[] = [
   { id: "commit.acknowledge", kind: "view", target: "none", proof: "interaction" },
   { id: "commit.confirm", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "commit.close", kind: "view", target: "none", proof: "interaction" },
+
+  // ── Which branch the workspace is on ─────────────────────────────────────
+  // The composer's branch chip opens the locals; picking one checks it out in
+  // the workspace and re-reads what the checkout moved.
+  { id: "git.branch", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
 
   // ── What is waiting to be sent ───────────────────────────────────────────
   { id: "queue.edit", kind: "kernel-mutation", target: "entity", proof: "interaction" },
@@ -355,6 +361,7 @@ export const ACTIONS: UIAction[] = [
   { id: "provider.rename", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "provider.save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "roles.model", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "roles.override.clear", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "permissions.rule-level", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "sandbox.workspace-root", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // Where compaction starts. Declaring it rebuilds the runtime, which is why
@@ -389,6 +396,9 @@ export const ACTIONS: UIAction[] = [
   { id: "versions.activate", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "versions.restart", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "versions.later", kind: "view", target: "none", proof: "interaction" },
+  { id: "versions.notes", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "versions.notes-retry", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "versions.notes-close", kind: "view", target: "none", proof: "interaction" },
   { id: "shell.executor", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "shell.custom-path", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "hooks.recipe", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
@@ -436,6 +446,7 @@ export const ACTIONS: UIAction[] = [
   { id: "appearance.scheme", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.weight", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.contrast", kind: "view", target: "none", proof: "browser" },
+  { id: "appearance.effects", kind: "view", target: "none", proof: "browser" },
   { id: "pane.close", kind: "destructive", target: "none", proof: "authority-effect" },
   { id: "settings.section", kind: "navigation", target: "none", proof: "interaction" },
   // Finding a setting changes what is on screen and nothing else: it reaches

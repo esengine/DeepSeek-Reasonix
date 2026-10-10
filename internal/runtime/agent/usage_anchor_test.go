@@ -24,7 +24,7 @@ func (p *summaryCounter) Name() string { return "summary-counter" }
 func (p *summaryCounter) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
 	p.calls.Add(1)
 	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "SUMMARY: earlier work, condensed."}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nSUMMARY: earlier work, condensed."}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil

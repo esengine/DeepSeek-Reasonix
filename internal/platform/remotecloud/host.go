@@ -29,13 +29,25 @@ const DefaultRelayURL = "wss://remote.reasonix.io"
 
 const desktopResponseChunk = 24 << 10
 
-var errAccountChanged = errors.New("remote cloud: account changed")
+var (
+	errAccountChanged = errors.New("remote cloud: account changed")
+	errRelayRefused   = errors.New("remote cloud: relay refused the connection")
+)
+
+type unavailableReason string
+
+const (
+	unavailableSignedOut        unavailableReason = "signed_out"
+	unavailableRelayUnreachable unavailableReason = "relay_unreachable"
+	unavailableRelayRefused     unavailableReason = "relay_refused"
+)
 
 type Status struct {
-	DeviceID string `json:"deviceId,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Online   bool   `json:"online"`
-	Error    string `json:"error,omitempty"`
+	DeviceID string            `json:"deviceId,omitempty"`
+	Name     string            `json:"name,omitempty"`
+	Online   bool              `json:"online"`
+	Error    string            `json:"error,omitempty"`
+	Reason   unavailableReason `json:"reason,omitempty"`
 }
 
 type hostState struct {
@@ -176,7 +188,7 @@ func (h *Host) Run(ctx context.Context) {
 		token := strings.TrimSpace(h.token())
 		if token == "" {
 			h.dropControllers()
-			h.publish(Status{})
+			h.publish(Status{Reason: unavailableSignedOut})
 			if !wait(ctx, time.Second) {
 				return
 			}
@@ -198,6 +210,7 @@ func (h *Host) Run(ctx context.Context) {
 		wasOnline := status.Online
 		status.Online = false
 		status.Error = err.Error()
+		status.Reason = unavailableReasonFor(err)
 		h.publish(status)
 		if wasOnline {
 			backoff = time.Second
@@ -209,6 +222,20 @@ func (h *Host) Run(ctx context.Context) {
 			backoff *= 2
 		}
 	}
+}
+
+func unavailableReasonFor(err error) unavailableReason {
+	if errors.Is(err, account.ErrUnauthorized) {
+		return unavailableSignedOut
+	}
+	if errors.Is(err, errRelayRefused) {
+		return unavailableRelayRefused
+	}
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) && closeErr.Code == websocket.ClosePolicyViolation {
+		return unavailableRelayRefused
+	}
+	return unavailableRelayUnreachable
 }
 
 func (h *Host) ensureIdentity(ctx context.Context, token string) (*identity, *ecdh.PrivateKey, error) {
@@ -307,10 +334,7 @@ func (h *Host) connect(ctx context.Context, token string, saved *identity, priva
 	}
 	conn, response, err := h.dialer.DialContext(ctx, url, headers)
 	if err != nil {
-		if response != nil && response.StatusCode == http.StatusUnauthorized {
-			_ = clearIdentity()
-		}
-		return err
+		return classifyRelayDialError(response, err)
 	}
 	defer conn.Close()
 	conn.SetReadLimit(64 << 10)
@@ -399,6 +423,19 @@ func (h *Host) connect(ctx context.Context, token string, saved *identity, priva
 			}
 		}
 	}
+}
+
+func classifyRelayDialError(response *http.Response, err error) error {
+	if response == nil {
+		return err
+	}
+	if response.StatusCode == http.StatusUnauthorized {
+		_ = clearIdentity()
+	}
+	if response.StatusCode >= 400 && response.StatusCode < 500 {
+		return fmt.Errorf("%w: %w", errRelayRefused, err)
+	}
+	return err
 }
 
 func (h *Host) handle(

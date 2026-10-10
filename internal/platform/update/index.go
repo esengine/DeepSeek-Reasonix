@@ -28,6 +28,9 @@ type IndexEntry struct {
 	Channel     string `json:"channel"`
 	PublishedAt string `json:"publishedAt"`
 	Manifest    string `json:"manifest"`
+	// Notes is set once the release's notes are published. Its value is never
+	// fetched: it says only that they exist (see NotesURL).
+	Notes string `json:"notes,omitempty"`
 }
 
 // FetchIndex reads the rollback catalog; userAgent "" is the client identity.

@@ -46,6 +46,8 @@ type Package struct {
 	ManifestKind  string
 	Manifest      Manifest
 	Compatibility Compatibility
+	// skills is the scan shared by the parse steps of one ParseDir call.
+	skills *skillScan
 }
 
 type Inventory struct {
@@ -262,6 +264,9 @@ type InstalledPlugin struct {
 	Commit       string `json:"commit,omitempty"`
 	Status       string `json:"status,omitempty"`
 	StatusReason string `json:"statusReason,omitempty"`
+	// Generation counts Upserts of this name, so a reinstall that lands on the
+	// same Root is still told apart from the entry a parse started from.
+	Generation int `json:"generation,omitempty"`
 }
 
 type InstalledPackage struct {
@@ -335,10 +340,12 @@ func Upsert(reasonixHome string, p InstalledPlugin) error {
 	}
 	for i := range st.Plugins {
 		if st.Plugins[i].Name == p.Name {
+			p.Generation = st.Plugins[i].Generation + 1
 			st.Plugins[i] = p
 			return SaveState(reasonixHome, st)
 		}
 	}
+	p.Generation = 1
 	st.Plugins = append(st.Plugins, p)
 	return SaveState(reasonixHome, st)
 }
@@ -396,24 +403,30 @@ func ParseDir(root string) (Package, []string, error) {
 	// error (a v1 typo names its field path); only a missing file falls
 	// through to the next manifest kind.
 	if pkg, warnings, err := parseNative(filepath.Join(root, NativeManifest), root); err == nil {
-		warnings = append(warnings, pkg.skillNameWarnings()...)
-		return pkg, append(warnings, pkg.agentNameWarnings()...), nil
+		return finishParse(pkg, warnings)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Package{}, nil, err
 	}
 	if pkg, warnings, err := parseCodex(filepath.Join(root, CodexManifest), root); err == nil {
-		warnings = append(warnings, pkg.skillNameWarnings()...)
-		return pkg, append(warnings, pkg.agentNameWarnings()...), nil
+		return finishParse(pkg, warnings)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Package{}, nil, err
 	}
 	if pkg, warnings, err := parseClaudePlugin(filepath.Join(root, ClaudeManifest), root); err == nil {
-		warnings = append(warnings, pkg.skillNameWarnings()...)
-		return pkg, append(warnings, pkg.agentNameWarnings()...), nil
+		return finishParse(pkg, warnings)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Package{}, nil, err
 	}
 	return Package{}, nil, fmt.Errorf("no %s, %s, or %s found", NativeManifest, CodexManifest, ClaudeManifest)
+}
+
+// finishParse derives the name warnings from the skill scan that
+// compatibilityFor already ran, then drops it: a Package that outlives
+// ParseDir answers from the disk as it is at the time of each later call.
+func finishParse(pkg Package, warnings []string) (Package, []string, error) {
+	warnings = append(warnings, pkg.skillNameWarnings()...)
+	pkg.skills = nil
+	return pkg, append(warnings, pkg.agentNameWarnings()...), nil
 }
 
 // parseNativeLegacy is the pre-extension native manifest path, preserved
@@ -461,6 +474,7 @@ func parseNativeLegacy(b []byte, root string) (Package, []string, error) {
 		return Package{}, warnings, err
 	}
 	pkg := Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}
+	pkg.skills = pkg.scanSkills()
 	pkg.Compatibility = compatibilityFor(pkg, issues)
 	return pkg, warnings, nil
 }
@@ -536,6 +550,7 @@ func parseCodexLike(path, root, kind string, includeCodexSessionStartHook bool) 
 		return Package{}, warnings, err
 	}
 	pkg := Package{Root: root, ManifestKind: kind, Manifest: manifest}
+	pkg.skills = pkg.scanSkills()
 	pkg.Compatibility = compatibilityFor(pkg, issues)
 	return pkg, warnings, nil
 }
@@ -1087,11 +1102,13 @@ func shouldSkipSkillScanDir(name string) bool {
 	}
 }
 
+var readSkillFile = fileencoding.ReadFileUTF8
+
 func parseSkillRef(path, stem string) (SkillRef, bool) {
 	if !config.IsValidSkillName(stem) {
 		return SkillRef{}, false
 	}
-	b, err := fileencoding.ReadFileUTF8(path)
+	b, err := readSkillFile(path)
 	if err != nil {
 		return SkillRef{}, false
 	}

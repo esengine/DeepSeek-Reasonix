@@ -15,8 +15,8 @@ const hub: VersionHub = {
   latest: "2.21.0",
   newer: true,
   versions: [
-    { version: "2.21.0", tag: "studio-v2.21.0", publishedAt: "", current: false, older: false },
-    { version: "2.20.0", tag: "studio-v2.20.0", publishedAt: "", current: true, older: false },
+    { version: "2.21.0", tag: "studio-v2.21.0", publishedAt: "", hasNotes: false, current: false, older: false },
+    { version: "2.20.0", tag: "studio-v2.20.0", publishedAt: "", hasNotes: false, current: true, older: false },
   ],
 };
 

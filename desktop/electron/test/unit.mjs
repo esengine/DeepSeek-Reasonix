@@ -12,6 +12,7 @@ const { uiLanguage } = require("../src/uilang.js");
 const { externalTarget } = require("../src/links.js");
 const { offerCleanup, ownBundle } = require("../src/legacy.js");
 const { stripPackageGrants, readReport, unpaintedWindowCause } = require("../src/packagegrants.js");
+const { groundFor, GROUND } = require("../src/ground.js");
 const { pick, loadPrefs, savePrefs, registerPrefs } = require("../src/prefs.js");
 
 const TOKEN = "a".repeat(64);
@@ -682,7 +683,8 @@ test("an unpainted window is attributed only to grants the kernel could not remo
 });
 
 const { BrowserProtocol, PAGE_SESSION } = require("../src/browserprotocol.js");
-const { guestNavigationAllowed, typedAddress } = require("../src/browserguard.js");
+const { guestNavigationAllowed, typedAddress, typed } = require("../src/browserguard.js");
+const { localPath } = require("../src/localpath.js");
 const { sseData } = require("../src/browserrelay.js");
 
 function fakeBrowser() {
@@ -803,6 +805,65 @@ test("an address that names its scheme is loaded as written", () => {
   assert.deepEqual(typedAddress("about:blank"), { url: "about:blank", fallback: "" });
   assert.equal(guestNavigationAllowed(typedAddress("javascript://x%0Aalert(1)").url, "http://127.0.0.1:1"), false);
   assert.equal(guestNavigationAllowed(typedAddress("file:///C:/x").url, "http://127.0.0.1:1"), false);
+});
+
+test("a typed path on disk is the file it names, read by the table the kernel is held to", () => {
+  const table = JSON.parse(fs.readFileSync(new URL("../../../internal/platform/browser/testdata/local_paths.json", import.meta.url), "utf8"));
+  for (const { in: raw, out, kind } of table) {
+    const got = localPath(raw);
+    assert.deepEqual(got ? { url: got.url, kind: got.kind } : { url: "", kind: "" }, { url: out, kind }, JSON.stringify(raw));
+  }
+});
+
+test("a seeded corpus of hostile addresses reaches the same digest as the kernel's parser, and never accepts a share", () => {
+  const tokens = [
+    "file:", "file:/", "/", "//", "\\", ":", "%", "5C", "2F", "09", "0A", ".", "..", "#", "?",
+    "D", "c", "$", " ", "h", "x", "\t", "\n", "\r", "﻿", "\u0085", "\u0001", "\u007f",
+    "localhost", "C:", "UNC", "%5c", "%2e", "?\\", " ",
+  ];
+  let a = 12321;
+  const next = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return (t ^ (t >>> 14)) >>> 0;
+  };
+  let h = 0x811c9dc5;
+  let accepted = 0;
+  for (let i = 0; i < 30000; i++) {
+    let input = next() % 2 === 0 ? "file:" : "";
+    for (let n = 1 + (next() % 12); n > 0; n--) input += tokens[next() % tokens.length];
+    const got = localPath(input);
+    const out = got ? got.url : "";
+    const kind = got ? got.kind : "";
+    for (const byte of Buffer.from(`${input}\0${out}\0${kind}\n`, "utf8")) h = Math.imul(h ^ byte, 0x01000193) >>> 0;
+    if (kind !== "local") continue;
+    accepted++;
+    const u = new URL(out);
+    assert.ok(u.protocol === "file:" && u.hostname === "" && !u.pathname.startsWith("//"), `${JSON.stringify(input)} accepted as ${out}`);
+    assert.ok(!/[\u0000-\u001f\u007f]/.test(out), `${JSON.stringify(input)} kept a control character`);
+  }
+  assert.ok(accepted > 1000, `only ${accepted} accepted`);
+  assert.equal(h.toString(16).padStart(8, "0"), "67b363c1");
+});
+
+test("a path typed in the address bar loads as a file, not as a host named by its drive letter", () => {
+  const kernel = "http://127.0.0.1:4455";
+  const refusal = (raw) => typed(raw, kernel).refusal;
+  const reporter = typed("D:/DevCode/MyProjects/aglo/aglo.html", kernel);
+  assert.deepEqual(reporter, { url: "file:///D:/DevCode/MyProjects/aglo/aglo.html", fallback: "", refusal: "" });
+  for (const ok of ["/Users/me/页面.html", "file:///D:/x.html", "file:/tmp/x.html", "file://localhost/tmp/x.html", "localhost:3000/x"]) {
+    assert.equal(refusal(ok), "", ok);
+  }
+  for (const share of ["\\\\nas\\share\\x.html", "file://nas/share/x.html", "file:////host/x", "file://localhost//host/x", "file://///host/share", "file:///\\\\host\\x", "file:///%5C%5Chost/x", "file:///%2F%2Fhost/x", "\\\\?\\UNC\\host\\x"]) {
+    assert.deepEqual(typed(share, kernel), { url: "", fallback: "", refusal: "network_file" }, share);
+  }
+  assert.equal(refusal("javascript://x%0Aalert(1)"), "scheme");
+  assert.equal(refusal("http://127.0.0.1:4455/_studio/"), "scheme");
+  assert.equal(refusal(""), "scheme");
+  assert.deepEqual(typedAddress("localhost:3000/x"), { url: "http://localhost:3000/x", fallback: "" });
+  assert.deepEqual(typedAddress("a.b/c"), { url: "https://a.b/c", fallback: "http://a.b/c" });
 });
 
 test("the relay reads whole SSE data frames and keeps what is unfinished", () => {
@@ -1651,4 +1712,63 @@ test("the host client asks the kernel how many panes run", async () => {
   assert.deepEqual(await client.trayRunning(), { panes: 3 });
   server.close();
   assert.equal(await client.trayRunning(), null);
+});
+
+test("the window ground follows the stored theme and, for auto, the system", () => {
+  assert.equal(groundFor({ "rx-theme": "dark" }, false), GROUND.dark);
+  assert.equal(groundFor({ "rx-theme": "light" }, true), GROUND.light);
+  assert.equal(groundFor({ "rx-theme": "auto" }, true), GROUND.dark);
+  assert.equal(groundFor({}, false), GROUND.light);
+  assert.equal(groundFor(undefined, true), GROUND.dark);
+});
+
+test("a kernel that dies after its handshake leaves its exit and last words in shell.log and a marker for the next launch", () => {
+  const { openLogs } = require("../src/shelllog.js");
+  const { crashDir, recordHostExit, pendingHostExit, clearHostExit } = require("../src/hostexit.js");
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "hostexit-"));
+  const logs = openLogs(userData);
+  const dir = crashDir(logs.dir);
+  fs.mkdirSync(dir, { recursive: true });
+  const started = Date.now() - 1000;
+  const stale = path.join(dir, "host-20200101T000000Z-2.0.0-1.log");
+  fs.writeFileSync(stale, "fatal error: an earlier run\n");
+  fs.utimesSync(stale, new Date(2020, 0, 1), new Date(2020, 0, 1));
+  const body = Array.from({ length: 80 }, (_, i) => `frame ${i}`).join("\n");
+  fs.writeFileSync(path.join(dir, "host-20261010T000000Z-2.31.0-7.log"), `fatal error: out of memory\n${body}\n`);
+
+  assert.equal(pendingHostExit(userData), null, "no marker before any exit");
+  recordHostExit({ logs, userData, code: 2, signal: null, startedAt: started });
+
+  const shell = fs.readFileSync(logs.shell.file, "utf8");
+  assert.match(shell, /host: died code=2 signal=null crash=host-20261010T000000Z-2\.31\.0-7\.log/);
+  assert.match(shell, /frame 79/, "the tail of the crash file must reach shell.log");
+  assert.doesNotMatch(shell, /frame 10\b/, "only the tail is quoted");
+  assert.doesNotMatch(shell, /an earlier run/, "a crash file from before this launch is not this death");
+
+  const pending = pendingHostExit(userData);
+  assert.equal(pending.code, 2);
+  assert.equal(pending.crashFile, "host-20261010T000000Z-2.31.0-7.log");
+  clearHostExit(userData);
+  assert.equal(pendingHostExit(userData), null, "acknowledging clears the marker");
+});
+
+test("a kernel killed by a signal with no crash file is still recorded", () => {
+  const { openLogs } = require("../src/shelllog.js");
+  const { recordHostExit, pendingHostExit } = require("../src/hostexit.js");
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "hostexit-"));
+  const logs = openLogs(userData);
+  recordHostExit({ logs, userData, code: null, signal: "SIGKILL", startedAt: Date.now() });
+  assert.match(fs.readFileSync(logs.shell.file, "utf8"), /host: died code=null signal=SIGKILL crash=\(none\)/);
+  assert.equal(pendingHostExit(userData).signal, "SIGKILL");
+});
+
+test("the notice names where the logs are in both languages and shows how it ended", () => {
+  const { hostExitNotice } = require("../src/hostexit.js");
+  const en = hostExitNotice("en-US", { code: 2, signal: null }, "/logs");
+  const zh = hostExitNotice("zh-CN", { code: 2, signal: null }, "/logs");
+  assert.notEqual(en.message, zh.message);
+  for (const text of [en, zh]) assert.match(text.detail, /\/logs/);
+  assert.match(zh.message, /内核/);
+  assert.match(en.detail, /code 2/);
+  assert.match(zh.detail, /2/);
 });

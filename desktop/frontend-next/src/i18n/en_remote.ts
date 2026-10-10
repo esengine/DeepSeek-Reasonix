@@ -213,6 +213,8 @@ export const EN_REMOTE: Record<string, string> = {
   "显示局域网二维码": "Show local network QR code",
   "互联网连接需要登录同一账号，内容端到端加密；局域网直连只在可信网络中开启。": "Internet access requires the same account and is end-to-end encrypted; only enable direct access on a trusted local network.",
   "登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。": "Sign in to Reasonix to create a QR code that also works away from this network.",
+  "中转服务暂时无法连接，请检查网络或代理设置后重试。": "The relay cannot be reached right now. Check your network or proxy settings and try again.",
+  "中转服务拒绝了这台设备的连接，请稍后重试。": "The relay refused this device's connection. Try again later.",
   "{time} 配对 · 最近 {seen}": "Paired {time} · last seen {seen}",
   "断开这台手机？它需要重新扫码才能再连上。": "Disconnect this phone? It will need to scan a new code to connect again.",
   "断开": "Disconnect",

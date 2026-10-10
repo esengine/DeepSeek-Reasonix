@@ -22,6 +22,12 @@ const MCP_STATE: Record<string, string> = {
   pending: "待授权 · 来自项目声明",
 };
 
+// Why a pending server waits, keyed by the kernel's code. The state label
+// already says a project declared it; a code with no entry adds nothing.
+const PENDING_WHY: Record<string, string> = {
+  changed_since_enabled: "启用之后它要启动的内容变了，或是由旧版本启用的。确认下面的命令后重新启用。",
+};
+
 // A tag only when the schema carries the server's tools or config asks it to:
 // deferred is the default, and a badge on every row is a badge on none.
 function loadTag(m: McpEntry): { text: string; pending: boolean } | null {
@@ -173,12 +179,21 @@ export function ServerRow({
       )}
     </div>
   );
-  const why = failed || m.error;
+  // Approving a repository's server approves what it runs, so the line it
+  // launches sits beside the switch that approves it.
+  const launch = m.state === "pending" && !!m.launch && (
+    <div className="srv-ab" data-launch>
+      <span className="ds">{t("将启动")} · <code>{m.launch}</code></span>
+    </div>
+  );
+  const pendingWhy = m.state === "pending" && m.pendingReason ? PENDING_WHY[m.pendingReason] : undefined;
+  const why = failed || (pendingWhy ? t(pendingWhy) : m.error);
   if (!tools.length) {
     return (
       <div className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy}>
         <div className="srv-hd">{head}</div>
         {about}
+        {launch}
         {why && <div className="why">{why}</div>}
         {confirm}
       </div>
@@ -190,6 +205,7 @@ export function ServerRow({
     <details className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} open={confirming || undefined}>
       <summary>{head}</summary>
       {about}
+      {launch}
       {why && <div className="why">{why}</div>}
       {confirm}
       {load}

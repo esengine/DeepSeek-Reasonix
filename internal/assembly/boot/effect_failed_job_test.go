@@ -37,16 +37,19 @@ func (p *failedJobProvider) Stream(_ context.Context, req provider.Request) (<-c
 		raw, _ := json.Marshal(args)
 		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: id, Name: name, Arguments: string(raw)}}
 	}
-	lastUser := ""
+	task, answered := "", map[string]bool{}
 	for _, m := range req.Messages {
-		if m.Role == provider.RoleUser {
-			lastUser = m.Content
+		switch {
+		case m.Role == provider.RoleTool:
+			answered[m.ToolCallID] = true
+		case m.Role == provider.RoleUser && strings.Contains(m.Content, "CHECK"):
+			task = "CHECK"
+		case m.Role == provider.RoleUser && strings.Contains(m.Content, "START"):
+			task = "START"
 		}
 	}
 	switch {
-	case toolResultAfterLastUser(req):
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "noted"}
-	case strings.Contains(lastUser, "CHECK"):
+	case task == "CHECK" && !answered["w1"]:
 		id := ""
 		for _, m := range req.Messages {
 			if found := jobIDPattern.FindString(m.Content); found != "" {
@@ -55,7 +58,7 @@ func (p *failedJobProvider) Stream(_ context.Context, req provider.Request) (<-c
 		}
 		call("w1", "wait", map[string]any{"job_ids": []string{id}})
 		call("r1", "read_file", map[string]string{"path": "note.txt"})
-	case strings.Contains(lastUser, "START"):
+	case task == "START" && !answered["b1"]:
 		call("b1", "bash", map[string]any{"command": "echo boom-output; exit 3", "run_in_background": true})
 	default:
 		ch <- provider.Chunk{Type: provider.ChunkText, Text: "noted"}

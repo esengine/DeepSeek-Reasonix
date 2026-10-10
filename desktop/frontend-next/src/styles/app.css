@@ -48,7 +48,6 @@
     position: absolute; top: -32%; left: 54%; width: 54vw; aspect-ratio: 1;
     border-radius: 50%; filter: blur(84px);
     background: radial-gradient(circle, var(--ray, rgb(255 216 142 / .55)), transparent 68%);
-    animation: sunpulse 28s ease-in-out infinite;
   }
   .sky .shafts {
     position: absolute; left: -20%; right: -20%; top: -30%; height: 150%;
@@ -60,12 +59,6 @@
     transform: rotate(var(--r)); transform-origin: 50% 0%;
     -webkit-mask-image: linear-gradient(180deg, #000 0 30%, transparent 92%);
     mask-image: linear-gradient(180deg, #000 0 30%, transparent 92%);
-    animation: breathe var(--dur) ease-in-out var(--del) infinite;
-  }
-  @keyframes sunpulse { 0%, 100% { opacity: .8 } 50% { opacity: 1 } }
-  @keyframes breathe { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
-  @media (prefers-reduced-motion: reduce) {
-    .sky .sun, .sky .shaft { animation: none }
   }
 
   :root[data-sky] .app { background: transparent }
@@ -79,14 +72,12 @@
 
   :root[data-bg] .rail, :root[data-bg] .side,
   :root[data-bg] .nav, :root[data-bg] .chrome {
-    background: color-mix(in srgb, var(--page) 20%, transparent);
-    -webkit-backdrop-filter: blur(8px) saturate(1.35); backdrop-filter: blur(8px) saturate(1.35);
+    background: color-mix(in srgb, var(--page) 62%, transparent);
     text-shadow: 0 1px 2px color-mix(in srgb, var(--page) 88%, transparent),
                  0 0 6px color-mix(in srgb, var(--page) 70%, transparent);
   }
   :root[data-bg] .tabs {
-    background: color-mix(in srgb, var(--surface) 22%, transparent);
-    -webkit-backdrop-filter: blur(8px) saturate(1.35); backdrop-filter: blur(8px) saturate(1.35);
+    background: color-mix(in srgb, var(--surface) 62%, transparent);
     text-shadow: 0 1px 2px color-mix(in srgb, var(--page) 88%, transparent);
   }
 
@@ -107,8 +98,10 @@
 
   .app::after {
     content: ""; position: fixed; inset: 0; z-index: 9; pointer-events: none;
-    background-image: var(--grain); opacity: var(--grain-a); mix-blend-mode: overlay;
+    background-image: var(--grain); opacity: var(--grain-a);
   }
+  :root:root:root[data-effects="reduced"] * { -webkit-backdrop-filter: none; backdrop-filter: none; text-shadow: none }
+  :root[data-effects="reduced"] .app::after { display: none }
   .app {
     --chrome-h: 45px;
     --lights-w: 0px;
@@ -160,7 +153,7 @@
     --chrome-h: 51px; --lights-w: 96px; --lights-h: var(--chrome-h);
   }
   [data-titlebar="app"][data-platform="darwin"] .app[data-rail="off"] .chrome {
-    padding-left: var(--lights-w);
+    padding-left: calc(var(--lights-w) - var(--nav-w));
   }
   [data-titlebar="app"][data-platform="darwin"] .app[data-rail="on"] .studio-rail-head {
     padding-top: var(--lights-h); -webkit-app-region: drag;
@@ -535,8 +528,8 @@
   .call[data-pending] > .c { opacity: .7 }
 
   .app {
-    --nav-w: 52px; --rail-w: var(--rail-open); --side-w: 0px; --dock-w: var(--dock-open);
-    transition: --rail-w var(--t-panel) cubic-bezier(.32, .72, 0, 1), --side-w var(--t-panel) cubic-bezier(.32, .72, 0, 1), --dock-w var(--t-panel) cubic-bezier(.32, .72, 0, 1);
+    --nav-w: 0px; --rail-w: var(--rail-open); --side-w: 0px; --dock-w: var(--dock-open);
+    transition: --nav-w var(--t-panel) cubic-bezier(.32, .72, 0, 1), --rail-w var(--t-panel) cubic-bezier(.32, .72, 0, 1), --side-w var(--t-panel) cubic-bezier(.32, .72, 0, 1), --dock-w var(--t-panel) cubic-bezier(.32, .72, 0, 1);
   }
   .app[data-rail="off"] { --rail-w: 0px }
   .app[data-browser="off"] { --dock-w: 0px }
@@ -1538,8 +1531,8 @@
   .opt-other .lb { color: var(--muted) }
   .opt-other[data-on] .lb { color: var(--text) }
 
-  .other-wrap { display: none; margin-top: 7px }
-  .other-wrap[data-on] { display: block; animation: card var(--t-card) var(--ease-out) both }
+  .other-wrap { margin-top: 8px }
+  .ask[data-sealed] .other-wrap:not([data-on]) { display: none }
   .other-wrap input {
     width: 100%; padding: 9px 11px; border-radius: var(--r-sm);
     border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
@@ -1914,7 +1907,7 @@
 
   .reask { display: flex; flex-direction: column; gap: 9px; margin-top: 4px }
   .reask textarea {
-    width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px;
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; max-height: min(60vh, 28rem); max-height: min(60dvh, 28rem);
     border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); color: var(--text);
     padding: 10px 12px; font: var(--w-reg) var(--fs-ui)/1.62 var(--ui); outline: 0;
   }

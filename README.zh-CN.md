@@ -43,9 +43,9 @@
 
 <br/>
 
-<p align="center"><strong>开源 · MIT · 单个 Go 二进制</strong></p>
-<h3 align="center">面向复杂软件工程任务的可靠编码 Agent。</h3>
-<p align="center">一套本地引擎,四个入口——终端、桌面端、浏览器,或通过 ACP 接入你的编辑器。计划模式、权限、工作区沙箱与逐轮 checkpoint,让长时间自治运行始终可读、可撤销。</p>
+<p align="center"><strong>开源 · MIT · 程序跑在你电脑上，模型自选</strong></p>
+<h3 align="center">终端、桌面、浏览器、编辑器里都能用的 AI 编程助手。</h3>
+<p align="center">它会读你的项目、改文件、跑命令和测试。每一步先问你，或在你划定的范围内自己做，由你选；它用编辑工具改过的文件可以退回去。第一次用，从桌面应用 Studio 开始。</p>
 <p align="center">维护者：<strong>Huahui Yu</strong>。</p>
 
 > [!IMPORTANT]
@@ -54,6 +54,42 @@
 > QQ 群 **DeepSeek-Reasonix官方群**（群号 `1093562660`）→ **<https://qm.qq.com/q/i59b0z2R8s>**（[二维码](./docs/assets/qq-group.svg)）
 
 > 抖音：**做游戏的小鱼**（抖音号 `22703872788`）· [二维码](./docs/assets/douyin.png)
+
+## ❤️赞助商
+
+<table><tr><td width="180"><a href="https://www.packyapi.ai/register?aff=rIbQ" target="_blank" rel="sponsored noopener noreferrer"><picture><source media="(prefers-color-scheme: dark)" srcset="./.github/sponsor/packycode-dark.svg"><img src="./.github/sponsor/packycode-light.svg" alt="PackyCode" width="150"></picture></a></td><td>感谢 PackyCode 赞助了本项目！PackyCode 是一家稳定、高效的 API 中转服务商，统一域名、统一密钥、智能容灾切换。</td></tr></table>
+
+## 它是什么
+
+Reasonix 是一个开源的 AI 编程助手。程序跑在你的电脑上；AI 模型是你自己配置的服务，它读到的内容会发给这个服务。你用大白话描述任务，它在你选的项目文件夹里读代码、改文件、跑命令和测试，每一步都摆给你看。
+
+模型你自己选：内置 DeepSeek 预设，其他兼容 OpenAI 接口的服务填一条配置就行，费用直接付给模型服务商。
+
+## 你能得到什么
+
+- **读、改、跑**：读你的项目、改文件、跑测试和命令，都在你选的项目文件夹里。
+- **权限分档**：每次都问你，或让日常操作自动放行；你设的禁止规则始终有效。想先看方案，就开计划模式，批准后它才动手。
+- **可回退**：改文件前先存快照，按对话轮次回退，不碰 git 历史。只覆盖编辑工具改的文件，命令行命令造成的改动不在内。
+
+## 30 秒上手
+
+下载、填模型密钥、打开项目。第一次用，从桌面应用 Studio 开始。
+
+1. 从[发布页](https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true)下载并安装桌面应用 Reasonix Studio。
+2. 打开应用，按提示填入模型服务商和密钥。
+3. 打开你的项目文件夹，写下想做的事，例如“给 http 客户端加上失败重试”。
+4. 按你选的档位，该问你的操作它会先停下来问；同意就继续，不同意就拒绝。
+
+更喜欢终端的话，下载 `reasonix` 命令行后运行 `reasonix setup` 配好模型，再运行 `reasonix` 即可。详见[安装](#安装)和[快速开始](#快速开始)。
+
+## 四种用法
+
+- **桌面应用（Studio）**：图形界面，适合第一次使用。
+- **终端**：全屏文字界面，也能用 `reasonix run "任务"` 在脚本里运行。
+- **浏览器**：`reasonix web` 在本机打开网页界面。
+- **编辑器**：VS Code 安装扩展即可；其他支持 ACP（Agent Client Protocol，编辑器接入某个 AI 助手的通用约定）的编辑器，可连接 `reasonix acp`。
+
+四种用法背后是同一套程序。下面的内容写给进阶用户和贡献者。
 
 ## 版本
 
@@ -75,6 +111,8 @@ Reasonix 分为两条版本线，调整的原因见[版本路线公告](https://
 - [2.x 路线图](./docs/ROADMAP.md)（英文）：2.x 还要交付什么、如何发布、哪些决定尚未做出。
 
 ## 特性
+
+以下是写给进阶用户的技术要点。
 
 - **配置驱动**：provider、agent、启用的工具、插件全部在 `reasonix.toml` 中声明，
   内核无硬编码模型。
@@ -220,11 +258,11 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
 <!-- reasonix-top-contributors:start -->
 | Contributor | Contributor | Contributor | Contributor |
 | --- | --- | --- | --- |
-| [**SivanCola**](https://github.com/SivanCola) | [**esengine**](https://github.com/esengine) | [**ttmouse**](https://github.com/ttmouse) | [**lifu963**](https://github.com/lifu963) |
-| **reasonix** | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**mchenziyi**](https://github.com/mchenziyi) |
-| [**Li-Charles-One**](https://github.com/Li-Charles-One) | **merge-order-check** | [**light-front-theory**](https://github.com/light-front-theory) | **Yan Li** |
-| [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan** | [**Bernardxu123**](https://github.com/Bernardxu123) | [**HaoyueQin**](https://github.com/HaoyueQin) |
-| [**CVEngineer66**](https://github.com/CVEngineer66) | [**KHG420**](https://github.com/KHG420) | [**JesonChou**](https://github.com/JesonChou) | [**SuMuxi66**](https://github.com/SuMuxi66) |
+| [**SivanCola**](https://github.com/SivanCola) | [**KHG420**](https://github.com/KHG420) | [**ttmouse**](https://github.com/ttmouse) | [**lifu963**](https://github.com/lifu963) |
+| [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**Harbor404**](https://github.com/Harbor404) | [**GTC2080**](https://github.com/GTC2080) | [**mchenziyi**](https://github.com/mchenziyi) |
+| [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**light-front-theory**](https://github.com/light-front-theory) | [**eghrhegpe**](https://github.com/eghrhegpe) | [**Bernardxu123**](https://github.com/Bernardxu123) |
+| [**HaoyueQin**](https://github.com/HaoyueQin) | [**chuiwenwei**](https://github.com/chuiwenwei) | [**BuGlessRB**](https://github.com/BuGlessRB) | [**CVEngineer66**](https://github.com/CVEngineer66) |
+| [**JesonChou**](https://github.com/JesonChou) | [**lanshi17**](https://github.com/lanshi17) | [**par73e**](https://github.com/par73e) | [**SuMuxi66**](https://github.com/SuMuxi66) |
 <!-- reasonix-top-contributors:end -->
 
 特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo和开场视频。

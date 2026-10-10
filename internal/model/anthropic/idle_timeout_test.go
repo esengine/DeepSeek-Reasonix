@@ -60,7 +60,7 @@ func TestSendOptsCarryTheHeaderWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got := p.(*client).sendOpts("").HeaderTimeout; got != 8*time.Second {
+	if got := p.(*client).sendOpts().HeaderTimeout; got != 8*time.Second {
 		t.Fatalf("HeaderTimeout = %v, want 8s", got)
 	}
 }

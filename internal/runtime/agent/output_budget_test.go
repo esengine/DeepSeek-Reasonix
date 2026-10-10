@@ -30,7 +30,7 @@ func (p *sharedWindowTestProvider) Stream(_ context.Context, req provider.Reques
 	p.last = req
 	p.calls++
 	ch := make(chan provider.Chunk, 3)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "summary"}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nsummary"}
 	if p.finish != "" {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: p.finish}}
 	}
@@ -399,8 +399,8 @@ func TestSummarizeRejectsLengthTruncation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "truncated") {
 		t.Fatalf("summarizeOnce error = %v, want truncation failure", err)
 	}
-	if prov.calls != 1 {
-		t.Fatalf("length-truncated summary calls = %d, want no identical retry", prov.calls)
+	if prov.calls != 2 || prov.last.MaxTokens <= summaryOutputMaxTokens {
+		t.Fatalf("length-truncated summary calls = %d, last cap %d, want one retry above %d", prov.calls, prov.last.MaxTokens, summaryOutputMaxTokens)
 	}
 }
 

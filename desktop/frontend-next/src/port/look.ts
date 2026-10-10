@@ -50,11 +50,20 @@ export interface ThemeImport {
 // What the user set for themselves, over whatever pack is active. Zero and ""
 // mean "unset" rather than a value, so an untouched install draws from the
 // stylesheet instead of from numbers written into a config.
+export interface ZoomRange {
+  min: number;
+  max: number;
+  step: number;
+}
+
 export interface Appearance {
   // "zh" | "en" | "" to follow the machine. The interface's language only —
   // what the model answers in follows each message you write.
   language?: string;
   zoom?: number;
+  // What the kernel holds zoom to; the slider and the keyboard steps read it
+  // rather than carrying a copy.
+  zoomRange?: ZoomRange;
   readSize?: number;
   fontUi?: string;
   fontMono?: string;

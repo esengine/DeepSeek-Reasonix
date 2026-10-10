@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"testing"
@@ -84,7 +85,7 @@ func (p *recordingProvider) Name() string { return "recording" }
 func (p *recordingProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.got = append(p.got, req)
 	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: p.reply}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: testutil.SummaryReply(req, p.reply)}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil

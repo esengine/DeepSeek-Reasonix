@@ -94,6 +94,14 @@ func (e *hostFactError) Error() string           { return fmt.Sprintf("%s: %s", 
 func (e *hostFactError) Unwrap() error           { return e.sentinel }
 func (e *hostFactError) DiagnosticFacts() string { return e.Error() }
 
+// networkSourceError carries a refusal the host composed from the source the
+// caller named, so the diagnostic wrapper keeps its cause and code for the model.
+type networkSourceError struct{ refusal tool.Refusal }
+
+func (e networkSourceError) Error() string           { return e.refusal.String() }
+func (e networkSourceError) Unwrap() error           { return e.refusal }
+func (e networkSourceError) DiagnosticFacts() string { return e.refusal.String() }
+
 type sourceHTTPError struct {
 	sentinel error
 	status   int

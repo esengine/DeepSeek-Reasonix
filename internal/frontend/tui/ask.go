@@ -91,10 +91,10 @@ func (m *model) answerAsk(it *Item, k string) (tea.Cmd, bool) {
 		tabs++
 	}
 	switch k {
-	case "left":
+	case "left", "h":
 		st.tab, st.cursor = max(st.tab-1, 0), 0
 		return nil, true
-	case "right":
+	case "right", "l":
 		// With auto-submit on the Submit tab is not drawn, so right stops at
 		// the last question instead of landing on a hidden tab that commits.
 		last := tabs - 1
@@ -115,9 +115,9 @@ func (m *model) answerAsk(it *Item, k string) (tea.Cmd, bool) {
 	switch {
 	case k == "tab" && st.cursor < len(q.Options) && !q.Multi:
 		m.openNote(q.Options[st.cursor].Label)
-	case k == "up":
+	case k == "up" || k == "k":
 		st.cursor = (st.cursor + rows - 1) % rows
-	case k == "down" || k == "tab":
+	case k == "down" || k == "j" || k == "tab":
 		st.cursor = (st.cursor + 1) % rows
 	case k == "space" && st.cursor < len(q.Options) && q.Multi:
 		st.toggle(q.Options[st.cursor].Label)

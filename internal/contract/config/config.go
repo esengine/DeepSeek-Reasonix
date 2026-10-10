@@ -632,7 +632,7 @@ func NormalizeReasoningLanguage(lang string) string {
 	}
 }
 
-// DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
+// DesktopTelemetry reports whether the desktop sends the anonymous daily ping.
 // It carries no conversation, key, or file data — see desktop/README.md.
 func (c *Config) DesktopTelemetry() bool {
 	if c == nil || c.Desktop.Telemetry == nil {

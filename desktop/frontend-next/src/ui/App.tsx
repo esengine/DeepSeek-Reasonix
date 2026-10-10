@@ -6,6 +6,8 @@ import type { HubPort, RuntimeView, TreeWorkspace } from "../port/hub";
 import { Chrome } from "./Chrome";
 import { useLaunchHealth } from "./launchhealth";
 import { Nav } from "./Nav";
+import { useNavRail } from "./navrail";
+import { feedbackEntryTab } from "./feedbackentry";
 import { useLinkRouting } from "./links";
 import { Pane, type PaneReport } from "./Pane";
 import { clearDraftForSession } from "./drafts";
@@ -23,6 +25,7 @@ import { Boundary } from "./Boundary";
 import { SettingsUnavailable } from "./SettingsUnavailable";
 import { useMachineBooks } from "./machinebooks";
 import { usePaint } from "./paint";
+import { useZoomKeys } from "./zoomkeys";
 import { rememberActivePane, savedActivePane } from "./activepane";
 import { Sidebar } from "./Sidebar";
 import { Sky } from "./Sky";import { useAddWorkspace } from "./addws";
@@ -163,7 +166,7 @@ export function App({ hub }: { hub: HubPort }) {
       hub
         .tree()
         .then(setTree)
-        .catch(() => setTree([]))
+        .catch(() => {})
         .finally(() => setTreeRead(true)),
     [hub],
   );
@@ -310,7 +313,7 @@ export function App({ hub }: { hub: HubPort }) {
   }, [setup, welcomed]);
 
   const running = report.run === "running";
-  const { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, look, onLook, pack, reloadThemes } =
+  const { theme, setTheme, scheme, contrast, setContrast, weight, setWeight, effects, look, onLook, pack, reloadThemes } =
     usePaint(hub, runtimes, running, fail);
   // A pane with no session file has never been written to — the empty one every
   // window opens with. Opening a conversation takes it over instead of parking
@@ -362,6 +365,7 @@ export function App({ hub }: { hub: HubPort }) {
   const needsProject = treeRead && !claimed && tree.every((ws) => !ws.remembered);
 
   useFoldAway("rail", setRail);
+  const navRail = useNavRail(rail);
   useDrawerCloses(setRail, active, settings);
   useEffect(() => onRoomWidth((width) => setDockLimit(dockMax(width))), []);
   const shownDockW = Math.min(dockW, dockLimit);
@@ -382,13 +386,15 @@ export function App({ hub }: { hub: HubPort }) {
   // identity the control on screen carries, because they are the same thing
   // asked for two ways. Written out rather than branched so the census can read
   // the set: a chain of ifs is a set nothing can enumerate.
+  const zoomKeys = useZoomKeys(look, onLook);
   const shortcuts: Shortcut[] = useMemo(
     () => [
       { chord: "\\", fields: true, action: "rail.toggle", run: () => setRail((v) => !v) },
       { chord: ",", fields: true, action: "chrome.settings", run: showPrefs },
       { chord: "f", action: "transcript.find", run: openFind },
+      ...zoomKeys,
     ],
-    [showPrefs, openFind],
+    [showPrefs, openFind, zoomKeys],
   );
   const closeBrowser = useCallback(() => setBrowser(false), []);
   const stopTurn = useCallback(() => activePort?.cancel(), [activePort]);
@@ -550,6 +556,7 @@ export function App({ hub }: { hub: HubPort }) {
       className="app"
       data-run={report.run}
       data-rail={rail ? "on" : "off"}
+      data-nav={navRail.shown ? "on" : "off"}
       data-browser={browser ? "on" : "off"}
       data-plan={report.status?.plan ? "on" : "off"}
       data-apv={report.status?.toolApprovalMode ?? "ask"}
@@ -578,17 +585,23 @@ export function App({ hub }: { hub: HubPort }) {
         hub={hub} onError={fail}
       />
 
-      {pack?.sky && <Sky />}
+      {pack?.sky && effects !== "reduced" && <Sky />}
 
       <div className="cols">
-        <Nav
-          at={settings === false ? null : settings === true ? "" : settings}
-          onGo={showPrefs}
-          onHome={hidePrefs}
-        />
+        {navRail.drawn && (
+          <Nav
+            at={settings === false ? null : settings === true ? "" : settings}
+            onGo={showPrefs}
+            onHome={hidePrefs}
+            onFeedback={() => setFeedback(feedbackEntryTab(feedbackUnread))}
+            feedbackUnread={feedbackUnread}
+            shown={navRail.shown}
+          />
+        )}
         <Sidebar
           hub={hub}
           collapsed={!rail}
+          navShown={navRail.shown}
           tree={viewed.tree}
           treeRead={treeRead}
           runtimes={runtimes}

@@ -65,6 +65,30 @@ func TestFullScreenScrollsAndFollowsTheTail(t *testing.T) {
 	}
 }
 
+// Enter on an empty composer brings a scrolled-back view to the newest rows and
+// follows them again, idle or while a turn runs, as 1.x did; it sends nothing.
+func TestEmptyEnterFollowsTheTailAgain(t *testing.T) {
+	m, k := testModel(t)
+	fillTranscript(m, 60)
+	m.View()
+	for _, running := range []bool{false, true} {
+		if running {
+			startTurn(m)
+		}
+		for _, draft := range []string{"", "   "} {
+			press(m, "ctrl+home")
+			m.composer.SetValue(draft)
+			run(m, press(m, "enter"))
+			if !m.scr.follow {
+				t.Fatalf("Enter on %q (running=%v) left the view at %d", draft, running, m.scr.yoff)
+			}
+		}
+	}
+	if calledWith(k, "POST /submit") || calledWith(k, "POST /inbox/items") {
+		t.Fatalf("an empty Enter sent something:\n%s", strings.Join(k.seen(), "\n"))
+	}
+}
+
 // Shift+PgUp/PgDn page the transcript as they page a terminal's scrollback.
 func TestShiftPageKeysScrollTheTranscript(t *testing.T) {
 	m, _ := testModel(t)
@@ -95,6 +119,28 @@ func TestShiftInsertPastesClipboardText(t *testing.T) {
 	}
 	if _, ok := cmd().(clipTextMsg); !ok {
 		t.Fatal("shift+insert did not read the clipboard's text")
+	}
+}
+
+// Right-click with nothing selected pastes the clipboard's text, as 1.x did and
+// docs/GUIDE.md says; over a panel that hides the composer it pastes nothing.
+func TestRightClickWithoutASelectionPastesClipboardText(t *testing.T) {
+	for _, env := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		t.Setenv(env, "")
+	}
+	m, _ := testModel(t)
+	m.View()
+	rightClick := tea.MouseClickMsg{Button: tea.MouseRight, X: 2, Y: 0}
+	_, cmd := m.Update(rightClick)
+	if cmd == nil {
+		t.Fatal("right-click with no selection did nothing")
+	}
+	if _, ok := cmd().(clipTextMsg); !ok {
+		t.Fatal("right-click with no selection did not read the clipboard's text")
+	}
+	apply(m, eventwire.Event{Kind: "approval_request", Approval: &eventwire.Approval{ID: "ap1", Tool: "bash", Subject: "rm x"}})
+	if _, cmd := m.Update(rightClick); cmd != nil {
+		t.Fatal("right-click pasted while an approval card hides the composer")
 	}
 }
 

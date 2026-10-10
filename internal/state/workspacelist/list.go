@@ -73,6 +73,11 @@ func Read(path string) (List, error) {
 	return list, nil
 }
 
+// defaultLockWait bounds a caller that set no deadline of its own. A caller
+// that did owns the bound: writers queue on one lock, so how long the last one
+// may wait is a property of how many it expects, not of this package.
+var defaultLockWait = 5 * time.Second
+
 // Update applies mutate to the list under its lock and publishes the result
 // atomically. With repair, a list that is not valid JSON is set aside as a
 // backup and replaced rather than refusing every later write.
@@ -83,8 +88,11 @@ func Update(ctx context.Context, path string, repair bool, mutate func(*List) er
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	if _, bounded := ctx.Deadline(); !bounded {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultLockWait)
+		defer cancel()
+	}
 	unlock, err := filelock.Acquire(ctx, path+".lock")
 	if err != nil {
 		return err

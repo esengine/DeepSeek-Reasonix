@@ -19,6 +19,15 @@ func (c *Controller) runSynchronousTurn(
 	if err := c.ensureWriteAuthorityReady(); err != nil {
 		return err
 	}
+	releaseWorkspace, err := c.holdWorkspaceActivity(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if releaseWorkspace != nil {
+			releaseWorkspace.release()
+		}
+	}()
 	ctx, cancel := context.WithCancel(extension.ContextWithRuntimeOwner(ctx, c.RuntimeOwner()))
 	c.mu.Lock()
 	// Finishing is part of the gate: TurnDone is still fanning out. Closed
@@ -37,6 +46,8 @@ func (c *Controller) runSynchronousTurn(
 	}
 	c.gate.begin(cancel)
 	c.mu.Unlock()
+	defer c.releaseWorkspaceTurn(releaseWorkspace)
+	releaseWorkspace = nil
 	finish := func() {
 		c.mu.Lock()
 		c.gate.end()

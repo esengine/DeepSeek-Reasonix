@@ -198,6 +198,13 @@ in the PR. Documentation-only and test-only PRs are reviewed at lower priority.
 - Every PR carries the four sections of the PR template: Cause, Blast radius,
   Neighbouring behaviours tested, Why this layer.
 - The new test must fail without the change.
+- A UI change (`desktop/frontend-next/src` or the website pages) fills the
+  template's UI section: screenshots before and after, light and dark, wide
+  and phone width.
+- The same section carries the line "Entries moved, hidden or removed".
+- Hiding or removing a visible control needs a linked issue and a release-notes
+  line naming it, and updates `docs/STUDIO_PARITY.md` for a 1.x feature.
+- Review holds these; no check reads them.
 
 **Transparency.** The PR template has an optional checkbox for disclosing AI
 assistance. It is for transparency only and does not change how a change is

@@ -1,8 +1,8 @@
 import type { PlanAction } from "./session";
 import { HttpError } from "./port";
-import type { AccountState, AgentPort, ChangeDiff, Completion, CompletionItem, DeviceGrant, VersionHub, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, WorkspaceChanges, Attachment, DroppedRef, Queue, QueueItem, Queued, ChipCall, NotifyPrefs, TrayPrefs, UsageQuery } from "./port";
+import type { AccountState, AgentPort, Completion, CompletionItem, DeviceGrant, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, Attachment, DroppedRef, Queue, QueueItem, Queued, ChipCall, NotifyPrefs, TrayPrefs, UsageQuery } from "./port";
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
-import { MockFeedback } from "./mock_feedback";
+import { MockWorkspace } from "./mock_workspace";
 import { SCRIPT, mockMsgIndex, mockTurnStart } from "./fixture";
 import { MockExecutionHold, mockExecutionGraph } from "./mock_graph";
 import { mockStorage, mockStoragePlan } from "./mock_storage";
@@ -12,7 +12,7 @@ import { mockUsage } from "./mock_usage";
 
 
 
-export class MockPort extends MockFeedback implements AgentPort {
+export class MockPort extends MockWorkspace implements AgentPort {
   private listeners = new Set<(ev: WireEvent) => void>();
   private log: WireEvent[] = [];
   // What the user has sent, so checkpoints() can mirror one per turn.
@@ -80,6 +80,16 @@ export class MockPort extends MockFeedback implements AgentPort {
 
   async setRole(role: string, ref: string) {
     this.assigned = { ...this.assigned, [role]: ref };
+  }
+
+  overrides: Record<string, RoleOverride[]> = {};
+
+  async roleOverrides(): Promise<Record<string, RoleOverride[]>> {
+    return this.overrides;
+  }
+
+  async clearRoleOverride(role: string, key: string) {
+    this.overrides = { ...this.overrides, [role]: (this.overrides[role] ?? []).filter((o) => o.key !== key) };
   }
 
   async models(): Promise<ModelEntry[]> {
@@ -171,6 +181,9 @@ export class MockPort extends MockFeedback implements AgentPort {
   async markWelcomed(): Promise<void> { this.welcomed = true; }
 
   async pinVersion(): Promise<void> {}
+  async versionNotes(version: string): Promise<VersionNotes> {
+    return { version, markdown: "", cached: false };
+  }
   async acknowledgeLaunchHealth(): Promise<void> {} // booted from no update
   async goToVersion(): Promise<void> {
     throw new Error("演示模式不会真的安装版本");
@@ -342,44 +355,6 @@ export class MockPort extends MockFeedback implements AgentPort {
 
   async dropRefs(paths: string[]): Promise<DroppedRef[]> {
     return paths.map((path) => ({ ref: "@" + path, path }));
-  }
-
-  // The tree the scripted transcript is written against. It used to answer
-  // repo:false, which made the panel fall back to the transcript — and left
-  // every row unopenable, because only git can say what a path differs by.
-  async changes(): Promise<WorkspaceChanges> {
-    return {
-      repo: true,
-      changes: [
-        { path: "internal/provider/retry.go", status: "M" },
-        { path: "internal/config/credentials.go", status: "M" },
-        { path: "internal/provider/openai/streaming/chunk_decoder.go", status: "A" },
-      ],
-    };
-  }
-
-  // Scripted, because there is no tree to read: enough of a diff for the
-  // preview to be worked on without a kernel behind the window.
-  async changeDiff(path: string): Promise<ChangeDiff> {
-    return {
-      path,
-      diff: [
-        `--- a/${path}`,
-        `+++ b/${path}`,
-        "@@ -1,6 +1,7 @@",
-        " package permission",
-        " ",
-        "-func allows(cmd string) bool {",
-        "-	return strings.Contains(cmd, \"rm -rf\")",
-        "+func allows(cmd string) bool {",
-        "+	ast, err := shellparse.Parse(cmd)",
-        "+	if err != nil {",
-        "+		return false",
-        "+	}",
-        " }",
-      ].join("\n"),
-      truncated: false,
-    };
   }
 
   async workspaceFiles(path = "", query = "", hidden = false) {

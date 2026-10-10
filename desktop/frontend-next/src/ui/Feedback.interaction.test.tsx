@@ -20,6 +20,18 @@ afterEach(() => {
 
 const png = (name = "a.png", size = 64) => new File([new Uint8Array(size)], name, { type: "image/png" });
 
+function pauseImageReads() {
+  const original = FileReader.prototype.readAsDataURL;
+  const pending: (() => Promise<void>)[] = [];
+  const spy = vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (this: FileReader, file: Blob) {
+    pending.push(() => new Promise((resolve) => {
+      this.addEventListener("loadend", () => resolve(), { once: true });
+      original.call(this, file);
+    }));
+  });
+  return { pending, restore: () => spy.mockRestore() };
+}
+
 function setup(over: Partial<FeedbackEnv> = {}, tab: "send" | "mine" = "send") {
   const port = new MockPort() as unknown as AgentPort;
   const base = port.feedbackEnv.bind(port);
@@ -91,6 +103,69 @@ describe("feedback form", () => {
 });
 
 describe("screenshots", () => {
+  it("does not attach an old pending image to a fresh report", async () => {
+    const reads = pauseImageReads();
+    try {
+      const { port } = setup();
+      const spy = vi.spyOn(port, "sendFeedback");
+      await fill();
+      await userEvent.upload(document.querySelector<HTMLInputElement>('input[type="file"]')!, png("previous.png"));
+      expect(reads.pending).toHaveLength(1);
+      await userEvent.click(send());
+      await userEvent.click(await screen.findByRole("button", { name: "再写一条" }));
+      await userEvent.type(body(), "另一件事");
+      await act(reads.pending[0]!);
+      await userEvent.click(send());
+      await screen.findByText("已收到你的反馈");
+      expect(spy.mock.calls[1]![0].images).toEqual([]);
+    } finally {
+      reads.restore();
+    }
+  });
+
+  it("keeps a pending image in the same draft after a failed send so retry can include it", async () => {
+    const reads = pauseImageReads();
+    try {
+      const { port } = setup();
+      const spy = vi.spyOn(port, "sendFeedback").mockRejectedValueOnce(new Error("offline"));
+      await fill();
+      await userEvent.upload(document.querySelector<HTMLInputElement>('input[type="file"]')!, png("retry.png"));
+      await userEvent.click(send());
+      await screen.findByRole("button", { name: "重试发送" });
+      await act(reads.pending[0]!);
+      expect(screen.getByAltText("retry.png")).toBeTruthy();
+      await userEvent.click(send());
+      await screen.findByText("已收到你的反馈");
+      expect(spy.mock.calls[1]![0].images.map((image) => image.name)).toEqual(["retry.png"]);
+    } finally {
+      reads.restore();
+    }
+  });
+
+  it("keeps the new report's completed image when an old image finishes later", async () => {
+    const reads = pauseImageReads();
+    try {
+      const { port } = setup();
+      const spy = vi.spyOn(port, "sendFeedback");
+      await fill();
+      await userEvent.upload(document.querySelector<HTMLInputElement>('input[type="file"]')!, png("previous.png"));
+      await userEvent.click(send());
+      await userEvent.click(await screen.findByRole("button", { name: "再写一条" }));
+      await userEvent.type(body(), "另一件事");
+      await userEvent.upload(document.querySelector<HTMLInputElement>('input[type="file"]')!, png("current.png"));
+      await act(reads.pending[1]!);
+      expect(screen.getByAltText("current.png")).toBeTruthy();
+      await act(reads.pending[0]!);
+      expect(screen.queryByAltText("previous.png")).toBeNull();
+      expect(screen.getByAltText("current.png")).toBeTruthy();
+      await userEvent.click(send());
+      await screen.findByText("已收到你的反馈");
+      expect(spy.mock.calls[1]![0].images.map((image) => image.name)).toEqual(["current.png"]);
+    } finally {
+      reads.restore();
+    }
+  });
+
   it("adds from the picker, previews, and removes", async () => {
     setup();
     await ready();
@@ -256,6 +331,30 @@ describe("refusals", () => {
     expect(send().disabled).toBe(false);
   });
 
+  it("says which window a typed 429 ran out of and when it resets, and keeps the form", async () => {
+    const { port } = setup();
+    const resetsAt = new Date(Date.now() + 5 * 3_600_000).toISOString();
+    port.sendFeedback = vi.fn(async () => {
+      throw new HttpError(429, "x", { code: FEEDBACK_CODE.rateLimited, error: "hourly limit reached", params: { limit: "install_daily", resetsAt, retryAfterSeconds: 18000 } });
+    });
+    await fill();
+    await userEvent.click(send());
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("今天的反馈次数已用完。将在");
+    expect(alert.textContent).not.toMatch(/小时的反馈|18000|太频繁/);
+    expect(alert.getAttribute("data-code")).toBe(FEEDBACK_CODE.rateLimited);
+    expect(body().value).toBe("侧栏在缩放窗口后丢失选中项");
+    expect(send().disabled).toBe(false);
+  });
+
+  it("shows the mock's typed refusal end to end through the port", async () => {
+    sessionStorage.setItem("rx-mock-feedback-fault", "feedback.rate_limited@install_hourly");
+    setup();
+    await fill();
+    await userEvent.click(send());
+    expect((await screen.findByRole("alert")).textContent).toContain("这一小时的反馈次数已用完。将在");
+  });
+
   it("gives every code a message no other code shares", async () => {
     const seen = new Map<string, string>();
     for (const [code, status, params] of CODES) {
@@ -357,6 +456,16 @@ describe("dialog", () => {
     cleanup();
     expect(document.activeElement).toBe(opener);
     opener.remove();
+  });
+
+  it("moves focus into the body once the environment has loaded, even if a frame fires before the commit", async () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    setup();
+    await ready();
+    await waitFor(() => expect(document.activeElement).toBe(body()));
   });
 
   it("moves between the two tabs with the arrow keys", async () => {

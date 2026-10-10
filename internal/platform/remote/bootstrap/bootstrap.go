@@ -382,7 +382,7 @@ func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, pa
 	// authority, so a tampered record cannot make us read an arbitrary file.
 	tok, err := readToken(ctx, fs, paths.TokenFile)
 	if err != nil {
-		return ServeState{}, "", false, nil
+		return ServeState{}, "", false, fmt.Errorf("%w: pid %d has no readable token file", ErrServeNotAttachable, st.PID)
 	}
 	if follows {
 		// Written on every reuse, not only when the address moved: a broker
@@ -436,11 +436,8 @@ func rebind(ctx context.Context, fs *sftpfs.FS, paths StatePaths, st ServeState,
 	return st, true
 }
 
-// retireReplaced stops the kernel named by the record this launch is about to
-// overwrite. Reuse was already refused — too old, bound to a retired broker,
-// its token gone — and which of those it was does not change that the record
-// naming the pid is the only note this side keeps. Best effort: a machine that
-// will not answer is not a reason to refuse the pane the caller asked for.
+// retireReplaced stops the recorded serve only after reuse permits replacement.
+// An attachment refusal must return before this path can signal a live serve.
 func retireReplaced(ctx context.Context, conn Conn, target remoteOS, fs *sftpfs.FS, paths StatePaths) {
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err != nil || st.PID <= 0 {

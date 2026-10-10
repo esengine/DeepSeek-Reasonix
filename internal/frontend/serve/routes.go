@@ -80,7 +80,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /branches", s.branches)
 	mux.HandleFunc("GET /models", s.models)
 	mux.HandleFunc("POST /extensions/reload", s.reloadExtensionsHTTP)
-	mux.HandleFunc("GET /status", s.status)
+	mux.HandleFunc("GET /status", routine(s.status))
 	mux.HandleFunc("GET /balance", s.balance)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /trajectory", s.trajectory)

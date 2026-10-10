@@ -225,6 +225,9 @@ func (b bash) boundedDeleteTarget(target string) bool {
 	if !filepath.IsAbs(target) {
 		target = cwd + string(filepath.Separator) + target
 	}
+	if refuseNetworkPath(target, networkRoots(cwd, b.sb.WriteRoots)) != nil {
+		return false
+	}
 	resolved, err := realPath(target)
 	if err != nil || filepath.Dir(resolved) == resolved {
 		return false

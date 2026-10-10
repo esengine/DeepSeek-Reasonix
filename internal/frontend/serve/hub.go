@@ -53,7 +53,10 @@ type Hub struct {
 	seq      int
 
 	opts HubOptions
-	auth *authGate
+	// notes answers the release-notes route; its state outlives one request. Nil reads
+	// through notesReader.
+	notes func(context.Context, update.Install, string, bool) (update.VersionNotes, error)
+	auth  *authGate
 	// What the host decided once and every later pane must inherit: where the
 	// setup surface is allowed, and the context its recovery sweep rides.
 	setupAddr string
@@ -161,6 +164,11 @@ type HubOptions struct {
 	// can answer either: inside a bundle os.Executable() names the host binary,
 	// not the application. Nil makes the version routes refuse by name.
 	Install *update.Install
+	// NotesTransport and NotesDir say how release notes travel and where they
+	// are kept, never where they are read from. Unset, the notes route reads
+	// through the user's proxy into the user's cache.
+	NotesTransport http.RoundTripper
+	NotesDir       string
 	// Update is the desktop application this kernel runs inside, where it runs
 	// inside one. Nil leaves the update routes unregistered: owning the
 	// application is what makes replacing it this process's business.
@@ -197,7 +205,12 @@ type RuntimeView struct {
 
 // NewHub returns an empty hub. Adopt or Open publishes the first runtime.
 func NewHub(opts HubOptions) *Hub {
+	var notes func(context.Context, update.Install, string, bool) (update.VersionNotes, error)
+	if opts.NotesTransport != nil {
+		notes = update.NotesReaderOver(&http.Client{Transport: opts.NotesTransport}, opts.NotesDir)
+	}
 	return &Hub{
+		notes:    notes,
 		runtimes: map[string]*Runtime{},
 		opts:     opts,
 		auth:     newAuthGate(opts.Serve),

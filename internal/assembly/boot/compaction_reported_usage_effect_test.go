@@ -31,7 +31,7 @@ func (p *promptSizeProvider) Stream(_ context.Context, req provider.Request) (<-
 	ch := make(chan provider.Chunk, 3)
 	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting the earlier part") {
 		p.digests++
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "SUMMARY of the earlier work."}
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nSUMMARY of the earlier work."}
 		ch <- provider.Chunk{Type: provider.ChunkDone}
 		close(ch)
 		return ch, nil

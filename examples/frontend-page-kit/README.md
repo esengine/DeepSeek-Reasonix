@@ -30,9 +30,19 @@ reasonix plugin doctor frontend-page-kit
 reasonix plugin show frontend-page-kit
 ```
 
-1. Copy `skills/frontend-page/fixture/` from this package to a new temporary
-   workspace. Keep the tracked inputs unchanged. The fixture intentionally
-   contains the task inputs only; the selected model creates the page there.
+Use the package root printed by `plugin show` to copy only the exercise inputs:
+
+```sh
+package_root='/absolute/path/from/plugin-show'
+workspace_root=$(mktemp -d "${TMPDIR:-/tmp}/reasonix-frontend-page.XXXXXX")
+cp "$package_root/skills/frontend-page/fixture/brief.md" \
+   "$package_root/skills/frontend-page/fixture/tickets.json" "$workspace_root/"
+cd "$workspace_root"
+```
+
+1. Keep the installed inputs unchanged and record `workspace_root` for cleanup.
+   The source checkout is not needed after copy installation. The fixture
+   contains task inputs only; the selected model creates the page there.
 2. Open a Reasonix session in that temporary workspace. Invoke
    `/frontend-page-kit:frontend-page` with the task below.
 

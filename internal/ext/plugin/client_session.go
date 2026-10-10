@@ -229,6 +229,9 @@ func (c *Client) redial(lifeCtx, callCtx context.Context) (transport, error) {
 		return nil, err
 	}
 	s, err = resolveProjectLaunchAuthorization(callCtx, s)
+	if err == nil {
+		err = checkDeclaredLaunch(s)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -21,15 +21,3 @@ func (m Messages) ProviderStatusMessage(status int) string {
 	}
 	return ""
 }
-
-// ProviderHintMessage returns the next step for a refusal the requesting client
-// identified, or "" when it named none this catalogue answers. The hint arrives
-// as its bare identity: this package sits below the provider layer and must not
-// import it.
-func (m Messages) ProviderHintMessage(hint string) string {
-	switch hint {
-	case "dropped_tool_call_reasoning":
-		return m.ProviderErrDroppedReasoning
-	}
-	return ""
-}

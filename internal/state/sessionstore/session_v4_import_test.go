@@ -152,10 +152,10 @@ func TestImportV4FromCopiesAndIsIdempotent(t *testing.T) {
 	}
 	defer root.Close()
 	dest := filepath.Join(t.TempDir(), "ws")
-	if n, err := ImportV4From(root.FS(), dest); n != 1 || err != nil {
+	if n, skipped, err := ImportV4From(root.FS(), dest, nil); n != 1 || len(skipped) != 0 || err != nil {
 		t.Fatalf("first import = %d, %v", n, err)
 	}
-	if n, err := ImportV4From(root.FS(), dest); n != 0 || err != nil {
+	if n, skipped, err := ImportV4From(root.FS(), dest, nil); n != 0 || len(skipped) != 0 || err != nil {
 		t.Fatalf("second import = %d, %v", n, err)
 	}
 	_ = sessions

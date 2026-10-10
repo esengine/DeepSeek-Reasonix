@@ -111,3 +111,40 @@ func TestMCPConfirmLineStripsEscapesFromTheLaunchText(t *testing.T) {
 		t.Fatalf("confirm line:\n%q", v)
 	}
 }
+
+// 1.x's MCP manager went into a server with l / Right, back out with h / Left,
+// and closed from anywhere with q; docs/GUIDE.md still lists those keys.
+func TestMCPPanelTakesTheOneXKeys(t *testing.T) {
+	m, k := testModel(t)
+	enterMCPLine(m, "/mcp")
+	steps := []struct {
+		name         string
+		key          tea.KeyPressMsg
+		open, detail bool
+	}{
+		{"l", tea.KeyPressMsg{Code: 'l', Text: "l"}, true, true},
+		{"h", tea.KeyPressMsg{Code: 'h', Text: "h"}, true, false},
+		{"right", tea.KeyPressMsg{Code: tea.KeyRight}, true, true},
+		{"left", tea.KeyPressMsg{Code: tea.KeyLeft}, true, false},
+		{"h on the list", tea.KeyPressMsg{Code: 'h', Text: "h"}, false, false},
+	}
+	for _, s := range steps {
+		m.Update(s.key)
+		if (m.mcp != nil) != s.open || (m.mcp != nil && m.mcp.detail != s.detail) {
+			t.Fatalf("after %s: panel %+v, want open=%v detail=%v", s.name, m.mcp, s.open, s.detail)
+		}
+	}
+	for _, path := range [][]tea.KeyPressMsg{nil, {{Code: tea.KeyEnter}}} {
+		enterMCPLine(m, "/mcp")
+		for _, key := range path {
+			m.Update(key)
+		}
+		run(m, keyRune(m, 'q'))
+		if m.mcp != nil {
+			t.Fatalf("q left the panel open (detail=%v)", m.mcp.detail)
+		}
+	}
+	if calls := strings.Join(k.seen(), "\n"); strings.Contains(calls, "POST /mcp") {
+		t.Fatalf("moving through the panel changed a server:\n%s", calls)
+	}
+}

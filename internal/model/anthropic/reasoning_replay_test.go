@@ -66,7 +66,7 @@ func TestDeclaredDeepSeekRelayReplaysUnsignedThinking(t *testing.T) {
 	}
 }
 
-func TestUndeclaredRelayDropsThinkingAndNamesIt(t *testing.T) {
+func TestUndeclaredRelayIsNotSentThinking(t *testing.T) {
 	c := relayClient(t, "https://relay.example.com", nil)
 	r := c.buildRequest(context.Background(), replayTurn())
 
@@ -74,19 +74,6 @@ func TestUndeclaredRelayDropsThinkingAndNamesIt(t *testing.T) {
 		if b.Type == "thinking" {
 			t.Fatalf("an undeclared endpoint must not be sent thinking: %+v", b)
 		}
-	}
-	if r.reasoningHint != provider.HintDroppedToolCallReasoning {
-		t.Errorf("hint = %q, want %q", r.reasoningHint, provider.HintDroppedToolCallReasoning)
-	}
-}
-
-// On Anthropic proper unsigned reasoning is unsendable rather than withheld:
-// the endpoint requires a signature it alone issues. Reporting it as a
-// declaration the user forgot would send them to a setting that cannot help.
-func TestNativeAnthropicUnsignedReasoningIsNotReported(t *testing.T) {
-	c := relayClient(t, "https://api.anthropic.com", map[string]any{"thinking": "adaptive"})
-	if hint := c.buildRequest(context.Background(), replayTurn()).reasoningHint; hint != "" {
-		t.Errorf("hint = %q, want none", hint)
 	}
 }
 

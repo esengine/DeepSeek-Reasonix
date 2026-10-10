@@ -91,6 +91,7 @@ export function Compaction({ port, onChanged }: { port: AgentPort; onChanged: ()
   const capacity = Math.round(win * box.ratio);
   const off = win === 0;
   const economicWins = !off && mode !== "capacity" && box.trigger < capacity;
+  const capped = !off && box.soft_limit_tokens > 0 && box.trigger < box.soft_limit_tokens;
   const pct = off || !used ? 0 : Math.min((used / box.trigger) * 100, 100);
 
   return (
@@ -158,7 +159,11 @@ export function Compaction({ port, onChanged }: { port: AgentPort; onChanged: ()
             <div className="lrow threshold-row">
               <span className="tx">
                 <label className="lb" htmlFor={field}>{t("阈值")}</label>
-                <span className="ds">{t("达到这个用量时开始整理")}</span>
+                <span className="ds">
+                  {capped
+                    ? t("被容量保护（{p}%）限制，实际 {n} tokens", { p: String(Math.round(box.ratio * 100)), n: tokens(box.trigger) })
+                    : t("达到这个用量时开始整理")}
+                </span>
               </span>
               <div className="threshold-control">
                 <span className="unit-field">

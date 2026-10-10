@@ -112,6 +112,27 @@ describe("a coded notice with a payload", () => {
     expect(auto.querySelector(".find .t")?.textContent).toBe(t("费用显示币种已设为 {mode}", { mode: "auto" }));
   });
 
+  it("words the recovered inbox from its count and draws no raw payload line", () => {
+    const box = draw({ level: "warn", code: "inbox_recovered", text: "Recovered 1 pending instruction(s). Inbox is paused — review with /queue before resuming.", detail: '{"count":1}' });
+    expect(box.querySelector(".find .t")?.textContent).toBe(t("已恢复 {n} 条未完成的指令。待发送已暂停，请先在输入框上方的队列里查看，再点“继续派发”", { n: 1 }));
+    expect(box.querySelector(".find .t")?.textContent).not.toContain("Recovered");
+    expect(box.querySelector(".find .why")).toBeNull();
+  });
+
+  it("keeps the kernel's English when the recovered-inbox payload is not readable", () => {
+    const box = draw({ level: "warn", code: "inbox_recovered", text: "Recovered 2 pending instruction(s).", detail: "garbled" });
+    expect(box.querySelector(".find .t")?.textContent).toContain("Recovered 2 pending");
+  });
+
+  it("words the dormant permission rules from their payload and draws no raw payload line", () => {
+    const detail = '{"rules":[{"list":"ask","rule":"rm","tool":"rm"},{"list":"deny","rule":"git reset","tool":"git reset"}]}';
+    const box = draw({ level: "warn", code: "permission_rules_dormant", text: "Permission rules that name no tool match nothing", detail });
+    expect(box.querySelector(".find .t")?.textContent).toBe(t("有 {n} 条权限规则没有对应的工具，匹配不到任何调用，因此起不到限制作用（如「{list}」里的 {rule}）；到「设置 → 权限」里删除或改写，命令要写成 Bash(命令:*)", { n: 2, list: t("询问"), rule: "rm" }));
+    expect(box.querySelector(".find .why")).toBeNull();
+    const garbled = draw({ level: "warn", code: "permission_rules_dormant", text: "Permission rules that name no tool match nothing", detail: "garbled" });
+    expect(garbled.querySelector(".find .t")?.textContent).toContain("match nothing");
+  });
+
   it("wraps the user's unapplied guidance in this build's sentence and keeps their words verbatim", () => {
     const box = draw({
       code: "unapplied_steer",
@@ -146,6 +167,19 @@ describe("a /compact notice", () => {
       .toBe("无需压缩：没有值得折叠的内容");
   });
 
+  it("words a held automatic compaction from the failure code that holds it", () => {
+    const box = draw({
+      level: "warn",
+      code: "compact_held",
+      text: "Automatic compaction is paused: the last attempt did not finish (summary_failed).",
+      detail: "summary_failed",
+    });
+    const said = box.querySelector(".find .t")?.textContent ?? "";
+    expect(said).toBe("自动压缩暂缓，上次尝试没有完成：生成摘要的请求失败了");
+    expect(said).not.toContain("summary_failed");
+    expect(box.querySelector(".find .why")).toBeNull();
+  });
+
   it("keeps the kernel's text for a code this build cannot word", () => {
     const box = draw({ code: "compact_failed", text: "compaction failed: kernel english", detail: "future_code" });
     expect(box.querySelector(".find .t")?.textContent).toBe("compaction failed: kernel english");
@@ -161,5 +195,39 @@ describe("a /compact notice", () => {
     const box = draw({ code: "extension_skipped", text: "kernel english", detail: "not json" });
     expect(box.textContent).toContain("kernel english");
     expect(box.textContent).not.toContain("{ext}");
+  });
+});
+
+describe("a background job notice", () => {
+  const text = (over: Partial<Notice>) => draw({ level: "info", ...over }).querySelector(".find .t")?.textContent ?? "";
+  const payload = JSON.stringify({ kind: "bash", id: "bash-126", label: "make build" });
+
+  it("is worded from its typed payload, not the kernel's English", () => {
+    const said = text({ code: "job_finished", text: "background bash finished: bash-126", detail: payload });
+    expect(said).toBe(t("后台任务已结束：{name}", { name: "make build" }));
+    expect(said).not.toContain("background bash");
+  });
+
+  it("names the job by id when it carries no label", () => {
+    expect(text({ code: "job_killed", text: "x", detail: JSON.stringify({ kind: "task", id: "task-3" }) }))
+      .toBe(t("后台任务已终止：{name}", { name: "task-3" }));
+  });
+
+  it("names the failed job and keeps its own error underneath", () => {
+    const box = draw({ code: "job_failed", text: "background bash failed: bash-1 — boom",
+      detail: JSON.stringify({ kind: "bash", id: "bash-1", label: "make build", error: "exit status 2" }) });
+    expect(box.querySelector(".find .t")?.textContent).toBe(t("后台任务 {name} 失败，需要处理", { name: "make build" }));
+    expect(box.querySelector(".why")?.textContent).toBe("exit status 2");
+  });
+
+  it("keeps the text of a failure stored without a payload", () => {
+    expect(text({ code: "job_failed", text: "background bash failed: needs attention", detail: "background bash failed: bash-1 — boom" }))
+      .toBe("background bash failed: needs attention");
+    expect(text({ code: undefined, text: "background bash failed: needs attention", detail: "x" })).toBe("background bash failed: needs attention");
+  });
+
+  it("keeps the text of a stored notice with no code, or an unreadable payload", () => {
+    expect(text({ code: undefined, text: "background bash finished: bash-126", detail: undefined })).toBe("background bash finished: bash-126");
+    expect(text({ code: "job_finished", text: "background bash finished: bash-1", detail: "not json" })).toBe("background bash finished: bash-1");
   });
 });

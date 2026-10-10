@@ -16,6 +16,8 @@ func (s *Server) registerGitRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /changes", s.changes)
 	mux.HandleFunc("GET /changes/diff", s.changeDiff)
 	mux.HandleFunc("GET /workspace/git", s.workspaceGit)
+	mux.HandleFunc("GET /workspace/branches", s.workspaceBranches)
+	mux.HandleFunc("POST /workspace/branch/switch", s.workspaceSwitchBranch)
 	mux.HandleFunc("POST /commit/propose", s.commitPropose)
 	mux.HandleFunc("POST /commit", s.commitStaged)
 }

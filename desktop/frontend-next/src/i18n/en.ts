@@ -123,6 +123,7 @@ export const EN: Record<string, string> = {
   "正在处理…": "Working…",
   "已完成": "Done",
   "已中断": "Interrupted",
+  "未执行": "Not run",
   "已停止": "Stopped",
   "请求未能送达内核（HTTP {status}）": "That request never reached the kernel (HTTP {status})",
   "移动 {id} 的界面": "Move {id}'s view",
@@ -376,6 +377,7 @@ export const EN: Record<string, string> = {
   "界面": "Interface",
   "微调": "Fine-tune",
   "界面大小微调": "Fine-tune interface size",
+  "键盘：{up} 放大，{down} 缩小，{reset} 恢复标准，同样调整「界面」大小。": "Keyboard: {up} larger, {down} smaller, {reset} back to standard; these change Interface size.",
   "正文": "Body text",
   "紧凑": "Compact",
   "标准": "Standard",
@@ -415,7 +417,7 @@ export const EN: Record<string, string> = {
   // ── 高级外观 ─────────────────────────────────────────────────────
   "高级外观": "Advanced appearance",
   "已修改：{list}": "Changed: {list}",
-  "字体、文字粗细、文字对比度": "Fonts, text weight, text contrast",
+  "字体、文字粗细、文字对比度、视觉效果": "Fonts, text weight, text contrast, visual effects",
 
   // ── 明暗与配色 ───────────────────────────────────────────────────
   "明暗": "Light and dark",
@@ -435,6 +437,11 @@ export const EN: Record<string, string> = {
   "已设置自定义壁纸": "Custom wallpaper set",
   "壁纸与背景位置": "Wallpaper and background position",
   "文字粗细": "Text weight",
+  "视觉效果": "Visual effects",
+  "窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空和颗粒这几层。": "If the window keeps your GPU busy, choose Reduced: the layout stays as it is, only frosted glass, the animated sky and the grain layer go.",
+  "节能": "Reduced",
+  "背景模糊、动态天空与颗粒质感全部开启": "Background blur, the animated sky and the grain layer are all on",
+  "关闭背景模糊、动态天空与颗粒质感，集成显卡或老旧电脑上更省电": "Turns off background blur, the animated sky and the grain layer; lighter on integrated graphics and older machines",
   "调整文字的笔画粗细。中文笔画密集，在小字号下加粗有助于提升清晰度。": "Adjusts stroke weight. Dense Chinese glyphs lose definition first at small sizes, and more weight recovers it.",
   "跟随语言": "Match the language",
   "中文界面使用中等字重，西文使用常规字重": "Medium for Chinese, regular for Latin",
@@ -591,6 +598,11 @@ export const EN: Record<string, string> = {
   "仓库地址，或将文件夹拖入此处": "A repository address, or drop a folder in",
   "选文件夹": "Choose a folder",
   "将添加": "Will be added",
+  "已截断": "Shortened",
+  "部分文字": "Some text",
+  "部分文字过长或含不可见字符，预览没有显示全部。": "Some text is too long or holds invisible characters, so the preview does not show all of it.",
+  "另有 {n} 项未显示；高风险项都已列出。": "{n} more steps are not shown; every high-risk step is listed.",
+  "还有 {n} 个技能未显示": "{n} more skills are not shown",
   "需填写": "Needs filling in",
   "不可用": "Unusable",
   "更新": "Update",
@@ -736,6 +748,12 @@ export const EN: Record<string, string> = {
   "无法连接版本目录": "Cannot reach the version index",
   "已固定": "Pinned",
   "固定在这里": "Pin here",
+  "更新内容": "What's new",
+  "收起更新内容": "Hide what's new",
+  "{v} 的更新内容": "What's new in {v}",
+  "正在读取更新内容…": "Loading what's new…",
+  "更新内容读取失败": "What's new could not be read",
+  "在 GitHub 查看": "View on GitHub",
 
   // ── 账号 ─────────────────────────────────────────────────────────
   "正在检查登录状态…": "Checking sign-in status…",
@@ -792,6 +810,7 @@ export const EN: Record<string, string> = {
   // ── 其余 ─────────────────────────────────────────────────────────
   "没有打开的会话": "No session open",
   "没有匹配的项": "Nothing matches",
+  "搜索模型或服务商…": "Search models or providers…",
   "筛选": "Filter",
   "补全": "Completions",
   "交还给插件": "Hand back to the extension",
@@ -817,6 +836,8 @@ export const EN: Record<string, string> = {
   "无法建立安全连接。这个网站可能只支持 http，或者要求客户端证书。": "A secure connection could not be made. The site may serve only http, or require a client certificate.",
   "连不上系统代理。内置浏览器使用系统的代理设置，而不是 Reasonix 设置里的网络代理。": "The system proxy could not be reached. The built-in browser uses the operating system's proxy settings, not the network proxy in Reasonix settings.",
   "找不到这个地址。内网域名需要连上公司网络或 VPN 才能解析。": "This address could not be found. Intranet names resolve only on the company network or VPN.",
+  "找不到这个文件。请确认路径正确，文件没有被移动或删除。": "This file could not be found. Check the path, and that the file has not been moved or deleted.",
+  "没有权限读取这个文件。": "You do not have permission to read this file.",
   "对方拒绝了连接。请确认端口正确、服务已经启动。": "The connection was refused. Check the port and that the service is running.",
   "连接超时或地址不可达。请确认已连上公司网络或 VPN。": "The connection timed out or the address is unreachable. Check that you are on the company network or VPN.",
   "登录没有通过，请重试并检查用户名和密码。": "Sign-in failed. Check the username and password and try again.",
@@ -1317,6 +1338,26 @@ export const EN: Record<string, string> = {
     "Reading the staged changes failed",
   "提交请求格式不正确":
     "The commit request was malformed",
+  "另一个会话正在写入这个工作区，请稍后重试切换分支":
+    "Another session is writing to this workspace; try switching branches again shortly",
+  "后台任务仍在运行，请先停止再切换分支":
+    "Background jobs are still running; stop them before switching branches",
+  "任务运行中，分支要等这轮结束再切":
+    "A turn is running; wait for it to finish before moving the branch",
+  "这个工作区不是 git 仓库，没有分支可切换":
+    "This workspace is not a git repository, so there is no branch to switch to",
+  "切换分支的请求格式不正确":
+    "The branch switch request was malformed",
+  "这不是有效的分支名":
+    "That is not a usable branch name",
+  "没有这个名字的本地分支":
+    "No local branch with that name",
+  "有未提交的修改会被这次切换覆盖，请先提交或暂存（git stash）":
+    "Uncommitted changes would be overwritten by the switch; commit or stash them first",
+  "该分支已在另一个 worktree 中检出，请先在那边切走":
+    "That branch is checked out in another worktree; switch away there first",
+  "git 未能完成这次分支切换":
+    "git could not complete the branch switch",
   "新增工具":
     "New tools",
   "agent 可以调用，每次调用照常经过权限确认":
@@ -1334,11 +1375,19 @@ export const EN: Record<string, string> = {
   "同一段内容被逐字重复": "The same block is being repeated verbatim",
   "任务已按设置暂停：模型卡在重复输出同一段文字": "Paused by your setting: the model is stuck repeating the same text",
   "等待你的输入": "Waiting for you",
+  "后台任务已结束：{name}": "Background job finished: {name}",
+  "后台任务已终止：{name}": "Background job killed: {name}",
+  "后台任务 {name} 失败，需要处理": "Background job {name} failed: needs attention",
+  "已恢复 {n} 条未完成的指令。待发送已暂停，请先在输入框上方的队列里查看，再点“继续派发”": "Recovered {n} unfinished instruction(s). Sending is paused: review them in the queue above the input box, then press Release",
   "待发送已暂停，这条消息已排入队列，点“继续派发”后才会发送": "Sending is paused. This message is queued and goes out once you press Release",
   "引导没有生效：这一轮在处理它之前就结束了。如果仍然需要，请再发送一次：": "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:",
   "费用显示币种已设为 {mode}": "Cost display currency set to {mode}",
   "模型卡在重复输出同一段文字，这一轮已停止；可以重试、补充引导，或换一个供应商/模型": "The model is stuck repeating the same text; this turn was stopped. Try again, add guidance, or switch provider/model.",
   "扩展 {ext} 的配套后台程序没有运行，该扩展本次（在 {point}）已被跳过；到「工具与集成」里查看并启动它，或停用该扩展": "The companion background program of extension {ext} is not running, so the extension was skipped this time (at {point}). Open Tools and integrations to check and start it, or disable the extension.",
+  "有 {n} 条权限规则没有对应的工具，匹配不到任何调用，因此起不到限制作用（如「{list}」里的 {rule}）；到「设置 → 权限」里删除或改写，命令要写成 Bash(命令:*)": "{n} permission rule(s) name no tool, so they match no call and restrict nothing (for example {rule} in {list}). Delete or rewrite them under Settings > Permissions; a shell command is written Bash(command:*).",
+  "有 {n} 条规则没有对应的工具，不会生效": "{n} rule(s) name no tool and never take effect",
+  "命令要写成 Bash(命令:*)；下方标出的规则可以删除或改写。": "A shell command is written Bash(command:*). The rules marked below can be deleted or rewritten.",
+  "没有名为 {tool} 的工具，这条规则不会生效": "No tool is named {tool}, so this rule never takes effect",
   "打开「工具与集成」": "Open Tools and integrations",
   "图表": "Chart",
   "图表：{title}（可横向滚动）": "Chart: {title} (scrolls sideways)",

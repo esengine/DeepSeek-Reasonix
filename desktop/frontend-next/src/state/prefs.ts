@@ -79,6 +79,75 @@ export function setHidesAmounts(on: boolean): void {
   amountListeners.forEach((fn) => fn());
 }
 
+// "reduced" drops the layers that cost the GPU a frame each time the page
+// moves: frosted glass, the animated sky, the grain. Anything else is "full".
+const EFFECTS_KEY = "rx-effects";
+
+export type EffectsMode = "full" | "reduced";
+
+const effectsListeners = new Set<() => void>();
+
+export function effectsMode(): EffectsMode {
+  try {
+    return localStorage.getItem(EFFECTS_KEY) === "reduced" ? "reduced" : "full";
+  } catch {
+    return "full";
+  }
+}
+
+export function onEffectsChange(fn: () => void): () => void {
+  effectsListeners.add(fn);
+  return () => {
+    effectsListeners.delete(fn);
+  };
+}
+
+export function setEffectsMode(mode: EffectsMode): void {
+  try {
+    localStorage.setItem(EFFECTS_KEY, mode);
+  } catch {
+    /* a private window keeps the default, which is the same answer it gives */
+  }
+  effectsListeners.forEach((fn) => fn());
+}
+
+// When the icon column beside the workspace rail is drawn: "on" always, "collapsed"
+// only while the workspace rail is closed, "off" never. A phone-width window
+// never draws it, whatever this says. "on" and "off" are the two values the
+// earlier on/off switch wrote, so a stored choice reads back as itself; anything
+// unreadable or unset is the default, "on".
+const NAV_RAIL_KEY = "rx-nav-rail";
+
+export type NavRailMode = "on" | "collapsed" | "off";
+export const NAV_RAIL_MODES: readonly NavRailMode[] = ["on", "collapsed", "off"];
+
+const navRailListeners = new Set<() => void>();
+
+export function navRailMode(): NavRailMode {
+  try {
+    const raw = localStorage.getItem(NAV_RAIL_KEY);
+    return raw === "collapsed" || raw === "off" ? raw : "on";
+  } catch {
+    return "on";
+  }
+}
+
+export function onNavRailChange(fn: () => void): () => void {
+  navRailListeners.add(fn);
+  return () => {
+    navRailListeners.delete(fn);
+  };
+}
+
+export function setNavRailMode(mode: NavRailMode): void {
+  try {
+    localStorage.setItem(NAV_RAIL_KEY, mode);
+  } catch {
+    /* a private window keeps the default, which is the same answer it gives */
+  }
+  navRailListeners.forEach((fn) => fn());
+}
+
 // How each foldable part of the transcript starts. "live" opens while the part
 // is still being written and folds once it is done; "failed" opens only a step
 // that failed; "changed" opens only what wrote a file. A block the reader opened

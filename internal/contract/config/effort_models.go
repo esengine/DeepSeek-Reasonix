@@ -155,14 +155,29 @@ func RequestEffortLevels(e *ProviderEntry) []string {
 	if supported := normalizedSupportedEfforts(e); len(supported) > 0 {
 		return supported
 	}
+	explicit := explicitReasoningProtocol(e)
 	cap, ok := resolvedModelEffortLadder(e)
 	if !ok {
+		if explicit == ReasoningProtocolOpenAI {
+			return declaredProtocolLevels(e, explicit)
+		}
 		return nil
 	}
-	if explicit := explicitReasoningProtocol(e); explicit != "" && explicit != cap.Protocol {
+	if explicit != "" && explicit != cap.Protocol {
 		return nil
 	}
 	return append([]string(nil), cap.Levels...)
+}
+
+// declaredProtocolLevels is the menu's own ladder for a protocol the user
+// named, without the implicit auto, so a level offered there is one the
+// request validates.
+func declaredProtocolLevels(e *ProviderEntry, protocol string) []string {
+	cap, ok := effortCapabilityForProtocol(e, protocol)
+	if !ok || len(cap.Levels) < 2 {
+		return nil
+	}
+	return slices.DeleteFunc(slices.Clone(cap.Levels), func(l string) bool { return l == "auto" })
 }
 
 // resolvedModelEffortLadder is the model table's ladder. The vendor's endpoint

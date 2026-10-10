@@ -343,15 +343,14 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 	}, "\x00")
 }
 
-func (c *client) sendOpts(hint provider.RequestHint) provider.SendOptions {
+func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
-		Provider:       c.name,
-		KeyEnv:         c.keyEnv,
-		KeySource:      c.keySource,
-		KeyPresent:     c.apiKey() != "",
-		RetryAuth:      c.learned.authed.Load(),
-		BadRequestHint: hint,
-		HeaderTimeout:  c.idleTimeout,
+		Provider:      c.name,
+		KeyEnv:        c.keyEnv,
+		KeySource:     c.keySource,
+		KeyPresent:    c.apiKey() != "",
+		RetryAuth:     c.learned.authed.Load(),
+		HeaderTimeout: c.idleTimeout,
 	}
 }
 
@@ -479,7 +478,7 @@ func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatR
 		c.setChatHeaders(httpReq)
 		return httpReq, nil
 	}
-	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(wireReq.reasoningHint), newReq)
+	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
 	if err != nil {
 		return nil, provider.AnnotateToolSchemaError(err, tools)
 	}
@@ -655,7 +654,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	// tool results, before the next non-tool message (splitting a tool-result
 	// run would break the API's tool-call pairing validation).
 	var pendingToolImages []string
-	var reasoningHint provider.RequestHint
 	openCodeGo := provider.IsOpenCodeGoEndpoint(c.chatURL)
 	flushToolImages := func() {
 		if len(pendingToolImages) == 0 {
@@ -681,11 +679,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			name := m.Name
 			cm.Name = &name
 		}
-		value, dropped := c.toolCallReasoning(m)
-		cm.ReasoningContent = value
-		if dropped {
-			reasoningHint = provider.HintDroppedToolCallReasoning
-		}
+		cm.ReasoningContent = c.toolCallReasoning(m)
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
 			wire.Function.Name = tc.Name
@@ -754,7 +748,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		MaxTokens:       maxOutputTokens,
 		ReasoningEffort: kimiK3ReasoningEffort(c.kimiK3, c.requestEffort(req)),
 		ExtraBody:       c.extraBody,
-		reasoningHint:   reasoningHint,
 	}
 	switch {
 	case c.kimiK3:
@@ -1111,18 +1104,17 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 // OpenAI-compatible wire protocol
 
 type chatRequest struct {
-	Model               string               `json:"model"`
-	Messages            []chatMessage        `json:"messages"`
-	Tools               []chatTool           `json:"tools,omitempty"`
-	Stream              bool                 `json:"stream"`
-	StreamOptions       *streamOptions       `json:"stream_options,omitempty"`
-	Temperature         *float64             `json:"temperature,omitempty"`
-	MaxTokens           int                  `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
-	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
-	Thinking            *thinkingMode        `json:"thinking,omitempty"`
-	ExtraBody           map[string]any       `json:"-"`
-	reasoningHint       provider.RequestHint // host-side, never serialized: what this body left out
+	Model               string         `json:"model"`
+	Messages            []chatMessage  `json:"messages"`
+	Tools               []chatTool     `json:"tools,omitempty"`
+	Stream              bool           `json:"stream"`
+	StreamOptions       *streamOptions `json:"stream_options,omitempty"`
+	Temperature         *float64       `json:"temperature,omitempty"`
+	MaxTokens           int            `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	Thinking            *thinkingMode  `json:"thinking,omitempty"`
+	ExtraBody           map[string]any `json:"-"`
 }
 
 func omitExtraBodyFields(in map[string]any, names ...string) map[string]any {

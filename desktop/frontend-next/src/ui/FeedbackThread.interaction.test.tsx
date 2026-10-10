@@ -132,6 +132,27 @@ describe("a question waiting for the reporter", () => {
     await waitFor(() => expect(port.myFeedback).toHaveBeenCalledTimes(code === FEEDBACK_CODE.notReplyable ? 2 : 1));
   });
 
+  it("names a reply window by its identifier, and a full thread as one that never resets", async () => {
+    for (const [code, params, words, notWords] of [
+      [FEEDBACK_CODE.rateLimited, { limit: "reply_hourly", retryAfterSeconds: 600 }, /这一小时的回复次数已用完。约 10 分钟后重置/, /反馈次数/],
+      [FEEDBACK_CODE.replyLimit, { limit: "reply_item" }, /不会自动重置/, /稍后再试/],
+    ] as const) {
+      const port = portWith(asking);
+      port.replyFeedback = vi.fn(async () => {
+        throw new HttpError(429, code, { code, error: "hourly reply limit", params });
+      });
+      render(<FeedbackMine port={port} onFile={() => {}} />);
+      await screen.findByText("FB-AAAA-0001");
+      await userEvent.type(box(), "macOS 15");
+      await userEvent.click(sendButton());
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toMatch(words);
+      expect(alert.textContent).not.toMatch(notWords);
+      expect(box().value).toBe("macOS 15");
+      cleanup();
+    }
+  });
+
   it("names the field when the kernel refuses the text itself", async () => {
     const port = portWith(asking);
     port.replyFeedback = vi.fn(async () => {

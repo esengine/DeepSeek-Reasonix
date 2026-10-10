@@ -2,7 +2,7 @@
 const crypto = require("node:crypto");
 const { WebContentsView, session } = require("electron");
 const { installPaneReload } = require("./reload");
-const { guestNavigationAllowed, typedAddress } = require("./browserguard");
+const { guestNavigationAllowed, typed } = require("./browserguard");
 
 // The size a page lays out at while nobody is looking at it: the kernel drives
 // pages whether or not the panel is open, and a page sized to nothing reads as
@@ -221,12 +221,15 @@ class BrowserViews {
     }
   }
 
+  // navigate starts loading what the person typed and answers "", or the code
+  // of why the window will not: "scheme" or "network_file".
   navigate(targetId, address) {
     const entry = this.entries.get(targetId);
-    const { url, fallback } = typedAddress(address);
-    if (!entry || !guestNavigationAllowed(url, this.kernelOrigin)) return false;
+    const { url, fallback, refusal } = typed(address, this.kernelOrigin);
+    if (!entry) return "scheme";
+    if (refusal) return refusal;
     void this.loadTyped(targetId, entry, url, fallback);
-    return true;
+    return "";
   }
 
   // loadTyped owns the outcome of an address the person typed. loadURL's own

@@ -81,20 +81,19 @@ const (
 // wireError is the tagged union of every provider error a caller matches on.
 // Wrapped carries StreamInterruptedError's cause, which is itself one of these.
 type wireError struct {
-	Kind        errKind              `json:"kind"`
-	Message     string               `json:"message,omitempty"`
-	Provider    string               `json:"provider,omitempty"`
-	Status      int                  `json:"status,omitempty"`
-	Body        string               `json:"body,omitempty"`
-	TraceID     string               `json:"traceId,omitempty"`
-	ToolContext string               `json:"toolContext,omitempty"`
-	Hint        provider.RequestHint `json:"hint,omitempty"`
-	KeyEnv      string               `json:"keyEnv,omitempty"`
-	KeySource   string               `json:"keySource,omitempty"`
-	HasKey      bool                 `json:"hasKey,omitempty"`
-	Reason      string               `json:"reason,omitempty"`
-	Ref         string               `json:"ref,omitempty"`
-	Wrapped     *wireError           `json:"wrapped,omitempty"`
+	Kind        errKind    `json:"kind"`
+	Message     string     `json:"message,omitempty"`
+	Provider    string     `json:"provider,omitempty"`
+	Status      int        `json:"status,omitempty"`
+	Body        string     `json:"body,omitempty"`
+	TraceID     string     `json:"traceId,omitempty"`
+	ToolContext string     `json:"toolContext,omitempty"`
+	KeyEnv      string     `json:"keyEnv,omitempty"`
+	KeySource   string     `json:"keySource,omitempty"`
+	HasKey      bool       `json:"hasKey,omitempty"`
+	Reason      string     `json:"reason,omitempty"`
+	Ref         string     `json:"ref,omitempty"`
+	Wrapped     *wireError `json:"wrapped,omitempty"`
 }
 
 // encodeError projects err onto the wire union. Order is specificity, not
@@ -124,7 +123,7 @@ func encodeError(err error) *wireError {
 		return &wireError{
 			Kind: errKindAPI, Message: apiErr.Error(), Provider: apiErr.Provider,
 			Status: apiErr.Status, Body: apiErr.Body, TraceID: apiErr.TraceID,
-			ToolContext: apiErr.ToolContext, Hint: apiErr.Hint,
+			ToolContext: apiErr.ToolContext,
 		}
 	}
 	var payloadErr *provider.StreamPayloadError
@@ -163,7 +162,7 @@ func (w *wireError) decode() error {
 	case errKindAPI:
 		return &provider.APIError{
 			Provider: w.Provider, Status: w.Status, Body: w.Body,
-			TraceID: w.TraceID, ToolContext: w.ToolContext, Hint: w.Hint,
+			TraceID: w.TraceID, ToolContext: w.ToolContext,
 		}
 	case errKindPayload:
 		return &provider.StreamPayloadError{Provider: w.Provider, Message: w.Message}

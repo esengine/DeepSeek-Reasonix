@@ -46,6 +46,13 @@ describe("what the runtime has to say about itself", () => {
     expect(screen.getByRole("status").textContent).toContain("recovered a forked session");
   });
 
+  it("words a recovered inbox from its count, not the payload", () => {
+    render(<RuntimeBar notices={[notice({ code: "inbox_recovered", text: "Recovered 3 pending instruction(s).", detail: '{"count":3}' })]} onSeen={() => {}} />);
+    const bar = screen.getByRole("status");
+    expect(bar.textContent).toContain("已恢复 3 条未完成的指令");
+    expect(bar.textContent).not.toContain("count");
+  });
+
   it("hands back the id of the one dismissed", async () => {
     const onSeen = vi.fn();
     render(<RuntimeBar notices={[notice(), notice({ id: "r2" })]} onSeen={onSeen} />);

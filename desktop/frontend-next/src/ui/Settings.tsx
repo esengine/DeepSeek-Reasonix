@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { listenAction } from "./listen";
 import { useRuntimeReload } from "./RuntimeReload";
 import { HttpError } from "../port/port";
-import type { AccountState, AgentPort, Appearance as Look, CapabilityScope, McpEntry, ModelEntry, PluginPackage, RoleAssignments, SessionStatus, SkillEntry } from "../port/port";
+import type { AccountState, AgentPort, Appearance as Look, CapabilityScope, McpEntry, ModelEntry, PluginPackage, SessionStatus, SkillEntry } from "../port/port";
 import { arrowTabs } from "./tablist";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { ICON, NAV, SECTION_NAME, SETTINGS, settingMatches } from "./prefsnav";
@@ -36,6 +36,7 @@ import { Providers } from "./Providers";
 import { activeKind, groupVendors } from "./Models";
 import { ModelUsage } from "./ModelUsage";
 import { useModelCatalog } from "./useModelCatalog";
+import { useRoles } from "./useRoles";
 import { KIND_LABEL } from "./vendors";
 import { planProtocolSwitch } from "./protocolswitch";
 import { Boundary } from "./Boundary";
@@ -104,7 +105,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   // on its reasoning fields. The model ref's first segment is the source name.
   const declare = openedAnchor === "effort-declare" ? status?.modelRef?.split("/")[0] : undefined;
   const [models, setModels] = useState<ModelEntry[]>([]);
-  const [roles, setRoles] = useState<RoleAssignments | null>(null);
+  const { roles, overrides, loadRoles } = useRoles(port);
   const [protocol, setProtocol] = useState<Record<string, string>>({});
   const [mcp, setMcp] = useState<McpEntry[]>([]);
   const [scope, setScope] = useState<CapabilityScope | null>(null);
@@ -127,8 +128,11 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   const [extRefreshing, setExtRefreshing] = useState(false);
   const [extErrors, setExtErrors] = useState<Partial<Record<"mcp" | "packages" | "skills", string>>>({});
   const extRefresh = useRef(0);
-  const [updatingPkg, setUpdatingPkg] = useState({ name: "", applying: false });
-  const applyingChanged = useCallback((applying: boolean) => setUpdatingPkg((p) => ({ ...p, applying })), []);
+  const [updatingPkg, setUpdatingPkg] = useState({ connection: { port }, name: "", applying: false });
+  if (updatingPkg.connection.port !== port) setUpdatingPkg({ connection: { port }, name: "", applying: false });
+  const applyingChanged = useCallback((applying: boolean) => {
+    setUpdatingPkg((p) => p.connection === updatingPkg.connection ? { ...p, applying } : p);
+  }, [updatingPkg.connection]);
   const [hookCount, setHookCount] = useState(0);
   const [netMode, setNetMode] = useState("");
   const [memCount, setMemCount] = useState(0);
@@ -161,23 +165,20 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
       .catch((e) => { if (current()) { setSkills([]); setExtErrors((errors) => ({ ...errors, skills: reason(e) })); } });
     void Promise.allSettled([mcpRead, packageRead, skillRead]).then(() => { if (current()) setExtRefreshing(false); });
   }, [port, scopeAt]);
-  const currentExt = useRef({ port, reloadExt, onChanged });
-  currentExt.current = { port, reloadExt, onChanged };
-  const afterExtChange = useCallback(() => {
-    if (currentExt.current.port !== port) return;
-    currentExt.current.reloadExt();
-    currentExt.current.onChanged();
-  }, [port]);
-  const reload = useRuntimeReload(port, afterExtChange);
-
   // Adding or removing a source changes what the picker above can offer, so
   // the list is reloadable rather than read once at mount.
   const homePort = networkPort ?? port;
   const loadModels = useModelCatalog(port, homePort, setModels);
 
-  const loadRoles = useCallback(() => {
-    port.roles().then(setRoles).catch(() => setRoles(null));
+  const currentExt = useRef({ port, reloadExt, loadModels, onChanged });
+  currentExt.current = { port, reloadExt, loadModels, onChanged };
+  const afterExtChange = useCallback(() => {
+    if (currentExt.current.port !== port) return;
+    currentExt.current.reloadExt();
+    currentExt.current.loadModels();
+    currentExt.current.onChanged();
   }, [port]);
+  const reload = useRuntimeReload(port, afterExtChange);
 
   // Three sections whose row used to report nothing. Loaded here rather than in
   // reloadExt because none of them moves with the scope the extension lists are
@@ -547,7 +548,8 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                     // be re-read or the controlled select snaps back.
                     loadModels();
                   })}
-                  onRole={(role, ref) => run(`role:${role}`, () => port.setRole(role, ref).finally(loadRoles))} />
+                  onRole={(role, ref) => run(`role:${role}`, () => port.setRole(role, ref).finally(loadRoles))}
+                  overrides={overrides} onClearOverride={(role, key) => run(`role:${role}`, () => port.clearRoleOverride(role, key).finally(loadRoles))} />
               </Group>
               {efforts.length > 0 ? (
                 <Group id="effort" title={t("推理强度")} hint={t("以下档位由当前模型的端点支持，auto 表示使用端点自身的默认值。")}>
@@ -662,7 +664,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                       port={port}
                       updating={packages.find((p) => p.name === updatingPkg.name)}
                       onApplying={applyingChanged}
-                      onClose={() => setUpdatingPkg({ name: "", applying: false })} onInstalled={afterExtChange}
+                      onClose={() => setUpdatingPkg((p) => ({ ...p, name: "", applying: false }))} onInstalled={afterExtChange}
                     />
                   )}
                   <Packages
@@ -670,7 +672,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                     packages={packages}
                     onChanged={afterExtChange} onReloadError={reload.report} onReloaded={reload.applied}
                     updating={updatingPkg.name}
-                    onUpdate={(name) => setUpdatingPkg({ name, applying: false })}
+                    onUpdate={(name) => setUpdatingPkg((p) => ({ ...p, name, applying: false }))}
                   />
                   {extErrors.packages && <div className="rnote" data-s="bad" role="alert">{extErrors.packages} <button className="act" data-action="extensions.refresh" disabled={extRefreshing} onClick={reloadExt}>{t("重试")}</button></div>}
                   {packages.length === 0 && !addingPkg && !extRefreshing && !extErrors.packages && <div className="empty">{t("尚未安装插件包。")}</div>}

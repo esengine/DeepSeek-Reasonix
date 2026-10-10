@@ -42,7 +42,8 @@ export function useHidesAmounts(): boolean {
 /** The wallet only moves when a turn spends, so the caller decides when to read.
  *  It belongs to `source` — the account (connection) that answers it — so a
  *  change of source empties it at once and reads again, and only the latest
- *  read may land. */
+ *  read may land. A source that is not named yet is no account: the read made
+ *  before the first status already answered for whichever one status then names. */
 export function useWallet(port: AgentPort, source?: string): [Wallet, () => void] {
   const [wallet, setWallet] = useState<Wallet>(ABSENT);
   const latest = useRef(0);
@@ -56,7 +57,7 @@ export function useWallet(port: AgentPort, source?: string): [Wallet, () => void
   }, [port]);
   const held = useRef(source);
   useEffect(() => {
-    if (held.current !== undefined && held.current !== source) {
+    if (held.current && source && held.current !== source) {
       setWallet(ABSENT);
       refresh();
     }

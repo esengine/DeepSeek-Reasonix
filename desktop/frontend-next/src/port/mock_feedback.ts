@@ -1,6 +1,6 @@
 import { HttpError } from "./http_error";
 import { MockCommit } from "./mock_commit";
-import { FEEDBACK_CODE, type FeedbackEnv, type FeedbackItem, type FeedbackMine, type FeedbackReceipt, type FeedbackReply, type FeedbackReplyReceipt, type FeedbackRequest } from "./feedback";
+import { FEEDBACK_CODE, type FeedbackEnv, type FeedbackItem, type FeedbackMine, type FeedbackProfile, type FeedbackReceipt, type FeedbackReply, type FeedbackReplyReceipt, type FeedbackRequest } from "./feedback";
 
 const LIMITS = { bodyBytes: 8192, nameChars: 40, contactChars: 120, images: 3, imageBytes: 2 << 20, uploadBytes: 10 << 20, replyBytes: 4096 };
 
@@ -50,14 +50,46 @@ function fault(key = FAULT): string {
   }
 }
 
+// A tab's own sessionStorage also picks the standing the list answers with, for
+// the same reason: "l0".."l6", "legacy", "lapsed", "revoked", or "none" for a
+// service that states no profile.
+const STANDING = "rx-mock-feedback-standing";
+
+const THRESHOLDS = [0, 1, 3, 6, 12, 24, 48];
+const LEVEL_LIMITS = [[3, 10, 3], [5, 15, 4], [6, 20, 5], [8, 25, 6], [10, 30, 8], [12, 40, 10], [12, 60, 10]] as const;
+const BASE_LIMITS = LEVEL_LIMITS[0];
+const TRUSTED_LIMITS = LEVEL_LIMITS[6];
+
+function standing(kind: string): FeedbackProfile | null {
+  if (kind === "none") return null;
+  const level = /^l[0-6]$/.test(kind) ? Number(kind.slice(1)) : kind === "lapsed" ? 3 : kind === "revoked" ? 2 : kind === "legacy" ? 0 : 2;
+  const adopted = kind === "legacy" ? 0 : THRESHOLDS[level]! + (level === 6 ? 2 : level === 0 ? 0 : 1);
+  const next = THRESHOLDS[level + 1];
+  const state = kind === "lapsed" ? "lapsed" : kind === "revoked" ? "revoked" : kind === "legacy" ? "legacy_active" : level === 0 ? "none" : "active";
+  const [h, d, r] = state === "lapsed" || state === "revoked" || state === "none" ? BASE_LIMITS : state === "legacy_active" ? TRUSTED_LIMITS : LEVEL_LIMITS[level]!;
+  return {
+    level, adoptedCount: adopted, currentThreshold: THRESHOLDS[level]!,
+    nextLevel: next === undefined ? null : level + 1, nextThreshold: next ?? null, remaining: next === undefined ? null : next - adopted,
+    trustState: state, trustExpiresAt: state === "active" || state === "legacy_active" ? new Date(Date.now() + 20 * DAY).toISOString() : null,
+    observedAt: new Date().toISOString(), effectiveLimits: { reportsPerHour: h, reportsPerDay: d, repliesPerHour: r },
+  };
+}
+
 const STATUS: Record<string, number> = {
   [FEEDBACK_CODE.tooLarge]: 413, [FEEDBACK_CODE.rateLimited]: 429, [FEEDBACK_CODE.disabled]: 503,
   [FEEDBACK_CODE.duplicate]: 409, [FEEDBACK_CODE.badToken]: 409, [FEEDBACK_CODE.offline]: 502, [FEEDBACK_CODE.unavailable]: 502, [FEEDBACK_CODE.internal]: 500, [FEEDBACK_CODE.busy]: 503, [FEEDBACK_CODE.imageMetadata]: 400,
   [FEEDBACK_CODE.replyLimit]: 429, [FEEDBACK_CODE.notReplyable]: 409, [FEEDBACK_CODE.challengeRequired]: 403,
 };
 
-function refusal(code: string): HttpError {
-  return new HttpError(STATUS[code] ?? 500, code, { code, error: code, params: code === FEEDBACK_CODE.rateLimited ? { retryAfterSeconds: 90 } : {} });
+// A fault is a code, optionally followed by "@" and the window it names:
+// "feedback.rate_limited@install_daily".
+function refusal(fault: string): HttpError {
+  const [code = "", limit] = fault.split("@");
+  const soon = new Date(Date.now() + (limit === "install_daily" ? 5 * 3_600_000 : 25 * 60_000)).toISOString();
+  let params: Record<string, string | number> = code === FEEDBACK_CODE.rateLimited ? { retryAfterSeconds: 90 } : {};
+  if (limit === "reply_item") params = { limit };
+  else if (limit) params = { limit, resetsAt: soon, retryAfterSeconds: Math.round((Date.parse(soon) - Date.now()) / 1000) };
+  return new HttpError(STATUS[code] ?? 500, code, { code, error: code, params });
 }
 
 export class MockFeedback extends MockCommit {
@@ -75,7 +107,7 @@ export class MockFeedback extends MockCommit {
     if (code === "feedback.invalid") {
       throw new HttpError(400, "invalid", { code, error: "invalid", params: { field: "body", reason: "too_long" } });
     }
-    if (code && STATUS[code]) throw refusal(code);
+    if (code && STATUS[code.split("@")[0]!]) throw refusal(code);
     this.name = req.displayName;
     const receipt = "FB-" + (1000 + this.filed.length * 7).toString(36).toUpperCase().padStart(4, "K") + "-9QX2";
     const now = new Date().toISOString();
@@ -91,7 +123,7 @@ export class MockFeedback extends MockCommit {
       return { ...i, needsInput: i.statusUnavailable ? false : i.needsInput, unreadReplies };
     });
     const unread = items.filter((i) => i.unreadReplies > 0 || i.needsInput).length;
-    return { items, offline: code === "mine_offline", unread, hasNew: unread > 0 };
+    return { items, offline: code === "mine_offline", unread, hasNew: unread > 0, profile: standing(fault(STANDING)) };
   }
 
   async replyFeedback(receipt: string, body: string): Promise<FeedbackReplyReceipt> {

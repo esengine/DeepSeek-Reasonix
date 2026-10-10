@@ -5,7 +5,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -92,19 +91,20 @@ func (w *scanWalk) dir(path string) {
 			return
 		}
 		full := filepath.Join(path, e.Name())
+		if fileutil.IsVCSStoreDir(e.Name()) {
+			continue
+		}
 		if e.IsDir() {
-			if !fileutil.IsVCSStoreDir(e.Name()) {
-				if w.stopped() {
-					return
-				}
-				w.wg.Add(1)
-				select {
-				case w.jobs <- full:
-				default:
-					// A saturated pool must recurse inline to keep descendants moving.
-					w.dir(full)
-					w.wg.Done()
-				}
+			if w.stopped() {
+				return
+			}
+			w.wg.Add(1)
+			select {
+			case w.jobs <- full:
+			default:
+				// A saturated pool must recurse inline to keep descendants moving.
+				w.dir(full)
+				w.wg.Done()
 			}
 			continue
 		}
@@ -123,52 +123,4 @@ func (w *scanWalk) dir(path string) {
 	w.mu.Lock()
 	maps.Copy(w.state, local)
 	w.mu.Unlock()
-}
-
-func (before workspaceScan) proseOnly(limit int) bool {
-	if !before.complete || len(before.state) >= limit {
-		return false
-	}
-	for path, state := range before.state {
-		if !state.mode.IsRegular() || (runtime.GOOS != "windows" && state.mode.Perm()&0o111 != 0) {
-			return false
-		}
-		switch filepath.Ext(path) {
-		case ".md", ".rst":
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-type workspaceProseCache struct {
-	mu    sync.Mutex
-	state workspaceProseState
-}
-
-type workspaceProseState struct {
-	epoch     uint64
-	root      string
-	proseOnly bool
-}
-
-func (a *Agent) workspaceIsProseOnly() bool {
-	if a.deliveryProfile || a.observeRoot == "" || a.mutationEpoch() == 0 || a.task.workspaceOverScanLimit() {
-		return false
-	}
-	read := func() bool {
-		return scanWorkspaceTo(context.Background(), a.observeRoot, a.scanLimit()).proseOnly(a.scanLimit())
-	}
-	cache := a.task.workspaceProse
-	if cache == nil {
-		return read()
-	}
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	epoch := a.mutationEpoch()
-	if cache.state.epoch != epoch || cache.state.root != a.observeRoot {
-		cache.state = workspaceProseState{epoch: epoch, root: a.observeRoot, proseOnly: read()}
-	}
-	return cache.state.proseOnly
 }

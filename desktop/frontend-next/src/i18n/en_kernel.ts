@@ -3,6 +3,8 @@
 // code adds one here. i18n.test.ts is what stops one from being forgotten.
 
 export const EN_KERNEL: Record<string, string> = {
+  "该路径指向网络上的另一台机器，不在当前工作区内。文件工具只按路径写法拒绝它，不会去访问；工作区本身在网络共享上时，其下的路径可用": "That path names another machine on the network and is outside this workspace. File tools refuse it by its spelling and never look it up; paths below a workspace that is itself on a network share are allowed",
+  "内置浏览器不会打开指向网络上另一台机器的路径，只按路径写法拒绝，不会去访问": "The built-in browser does not open a path that names another machine on the network; it is refused by its spelling and never looked up",
   "内核繁忙，这次操作可能没有被收到，重试前请先确认": "The kernel is busy; the action may not have been received - check before retrying",
   "无法连接内核，这次操作可能没有送达，重试前请先确认": "The kernel cannot be reached; the action may not have been delivered - check before retrying",
   "本界面无响应，这次操作可能没有送达内核，重试前请先确认": "This window is unresponsive; the action may not have reached the kernel - check before retrying",
@@ -21,6 +23,7 @@ export const EN_KERNEL: Record<string, string> = {
   "尚未取得所需的写入范围，这次等待已结束": "The wait ended before the requested write claim was granted",
   "会话 {holder}（{session}）持有写入范围：{paths}": "Session {holder} ({session}) holds write claim: {paths}",
   "所需写入范围：{paths}": "Requested write claim: {paths}",
+  "参数不符合该工具的约定，本次调用没有执行；请按工具说明补全或更正参数后重试": "The arguments break this tool's contract, so the call did not run; complete or correct them per the tool description and retry",
   "另一个会话持有所需的写入范围。本次操作未执行；请结束当前轮次，待该范围释放后再重试": "Another session holds the requested write claim. This operation did not run; end the current turn and retry after the claim is released",
   "反馈通道今日已满，请明天再试": "Feedback is at capacity for today - try again tomorrow",
   "这份反馈的回复次数已到上限，或回复太频繁了，请稍后再试": "This report has reached its reply limit, or you replied too often - try again later",
@@ -42,6 +45,8 @@ export const EN_KERNEL: Record<string, string> = {
   "该服务器未能启动，开关已恢复原状": "That server would not start; the switch has been put back",
   "该服务器未能启动，且开关未能恢复——重启后将保持刚才设置的状态":
     "That server would not start, and the switch could not be put back - after a restart it will hold what you just set",
+  "这个服务要启动的内容在你启用后变了，请先查看命令并重新启用":
+    "What this server launches changed since you enabled it; review the command and enable it again",
   "开关未能保存：其存储文件无法读取或写入": "The switch was not stored: its file could not be read or written",
   // 待送达：条目、队列、这份存档各自会拒
   "该条已不在待送达队列中": "That entry is no longer in the pending queue",
@@ -60,6 +65,7 @@ export const EN_KERNEL: Record<string, string> = {
   "这台服务器未开放配置编辑": "This server does not allow editing its config",
   "该文件需手动修改：{detail}": "This file needs an edit by hand: {detail}",
   "设置已写入，但运行时未能按新设置重建：{detail}": "The settings were written, but the runtime could not be rebuilt on them: {detail}",
+  "规则 {rule} 没有对应的工具（{tool}），匹配不到任何调用，因此未保存；命令要写成 Bash(命令:*)": "Rule {rule} names no tool ({tool}), so it would match no call and was not saved. A shell command is written Bash(command:*).",
   "该权限未能保存：{detail}": "That permission was not saved: {detail}",
   "沙箱设置未能保存：{detail}": "The sandbox settings were not saved: {detail}",
   "内置浏览器设置未能保存：{detail}": "The built-in browser setting was not saved: {detail}",
@@ -142,7 +148,9 @@ export const EN_KERNEL: Record<string, string> = {
   "连接 {host} 失败：{detail}": "Could not reach {host}: {detail}",
   "{host} 不接受该凭据。请更换密钥，或在设置中填写正确的环境变量名。":
     "{host} rejected these credentials. Try another key, or name the right environment variable in settings.",
-  "任务正在运行，请先停止再切换模型": "A task is running — stop it before switching models",
+  "当前回合正在进行，请先停止或等它结束再切换模型": "A turn is in progress — stop it or wait for it to finish before switching models",
+  "回合已结束，但还有 {count} 个后台任务在运行，切换模型会终止它们。请先在「后台任务」里停止，再切换模型":
+    "The turn has finished, but {count} background job(s) are still running and switching models would end them. Stop them under Background jobs, then switch",
   "任务正在运行，请先停止再调整推理强度": "A task is running — stop it before changing the reasoning effort",
   "{provider} 没说自己有哪些推理强度档位。要有，得在它的配置块里写 reasoning_protocol 或 supported_efforts":
     "{provider} names no reasoning-effort levels. To give it some, set reasoning_protocol or supported_efforts in its config block",
@@ -268,6 +276,7 @@ export const EN_KERNEL: Record<string, string> = {
   "HTTP 上不提供 shell 命令": "Shell commands are not served over HTTP",
   "不存在「{role}」这个角色": "There is no “{role}” role",
   "没有已配置的模型匹配「{model}」": "No configured model matches “{model}”",
+  "「{key}」不在用户配置里，可能已被清除，或来自项目配置": "“{key}” is not in the user config; it may already be cleared, or come from the project config",
   "这台服务器未开放 shell 设置": "This server does not open shell settings",
   "这台服务器未开放账号登录": "This server does not open account sign-in",
   "登录账号后才能使用云备份": "Sign in to use cloud backups",
@@ -332,6 +341,10 @@ export const EN_KERNEL: Record<string, string> = {
   "这个 Studio 不是安装版（从源码启动），没有可以查看或切换的版本":
     "This Studio is not an installed build (it runs from source), so it has no version to show or change",
   "版本固定未能保存：{detail}": "The version hold was not saved: {detail}",
+  "这不是一个已发布的版本号": "That is not a published version number",
+  "这个版本没有发布更新内容": "This version has no published notes",
+  "暂时取不到更新内容，请检查网络后重试": "What's new cannot be reached right now. Check the network and try again",
+  "这个版本的更新内容超出了允许的大小，已拒绝读取": "This version's notes are larger than allowed and were not read",
   "已有一个版本切换正在进行，请等待其完成后重试":
     "A version change is already running — wait for it to finish and try again",
   "本次版本切换未能启动：{detail}": "This version change did not start: {detail}",

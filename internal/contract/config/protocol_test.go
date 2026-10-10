@@ -102,7 +102,7 @@ func TestProtocolCapabilitiesDriveTheEntryQueries(t *testing.T) {
 	if !CanConfigureThinkingParams(&ProviderEntry{Kind: "openai"}) {
 		t.Error("reasoning_protocol governs the chat wire")
 	}
-	if CanConfigureThinkingParams(&ProviderEntry{Kind: "responses"}) {
-		t.Error("the Responses wire carries reasoning.effort, not the pinned chat shape")
+	if !CanConfigureThinkingParams(&ProviderEntry{Kind: "responses"}) {
+		t.Error("the Responses wire can pin reasoning off like the chat wire")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/runtime/agent/testutil"
 	"reflect"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ func (p *effectRecordingProvider) Stream(ctx context.Context, req provider.Reque
 	p.rawInputs = append(p.rawInputs, agent.RawUserInput(ctx, ""))
 	p.mu.Unlock()
 	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "ok"}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: testutil.SummaryReply(req, "ok")}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil

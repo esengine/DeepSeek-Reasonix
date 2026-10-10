@@ -86,3 +86,31 @@ it("shows a malformed remembered-rules file instead of silently hiding the failu
   expect(screen.getByText("/home/u/.reasonix/project-grants.json")).toBeTruthy();
   expect(screen.queryByText(/invalid JSON/)).toBeNull();
 });
+
+describe("saved rules that name no tool", () => {
+  const dormantRules = (): PermissionRules => ({
+    ...rules([]), ask: ["rm", "bash(git push:*)"], deny: ["git reset"],
+    dormant: [{ list: "deny", rule: "git reset", tool: "git reset" }, { list: "ask", rule: "rm", tool: "rm" }],
+  });
+
+  it("says they never take effect, and marks only those rows", async () => {
+    const port = { ...(new MockPort() as unknown as AgentPort), permissions: async () => dormantRules() } as unknown as AgentPort;
+    const { container } = render(<Rules port={port} onChanged={vi.fn()} />);
+    expect(await screen.findByText("有 2 条规则没有对应的工具，不会生效")).toBeTruthy();
+    const marked = [...container.querySelectorAll(".rgroup")].map((g) => [g.querySelector(".rg-hd code")?.textContent, g.querySelectorAll("[data-dormant]").length]);
+    expect(marked).toContainEqual(["rm", 1]);
+    expect(marked).toContainEqual(["git reset", 1]);
+    expect(marked).toContainEqual(["bash", 0]);
+    const how = [...container.querySelectorAll(".rgroup")].map((g) => [g.querySelector(".rg-hd code")?.textContent, !!g.querySelector(".rg-hd .how")]);
+    expect(how).toContainEqual(["rm", false]);
+    expect(how).toContainEqual(["bash", true]);
+  });
+
+  it("says nothing when every rule names a tool", async () => {
+    const port = { ...(new MockPort() as unknown as AgentPort), permissions: async () => rules([]) } as unknown as AgentPort;
+    const { container } = render(<Rules port={port} onChanged={vi.fn()} />);
+    await waitFor(() => expect(container.querySelector(".rhead")).toBeTruthy());
+    expect(container.querySelector("[data-dormant]")).toBeNull();
+    expect(screen.queryByText(/没有对应的工具/)).toBeNull();
+  });
+});

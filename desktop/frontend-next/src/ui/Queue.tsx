@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 import { t } from "../i18n";
+import { useFitHeight } from "./fitHeight";
 import { reason } from "../i18n/kernel";
 import { BLOCK_WHY } from "../i18n/queue_why";
 
 import { Overflow } from "./Overflow";
 import { StudioIcon } from "./StudioIcon";
+import { touchKeyboard } from "./touchKeyboard";
 
 interface Props {
   queue: QueueSnapshot | null;
@@ -90,6 +92,14 @@ function size(n: number): string {
 }
 const fill = (n: number, max: number) => (max > 0 ? `${Math.min(100, Math.round((n / max) * 100))}%` : "0%");
 
+// The list scrolls inside a height `.composeaux` caps, so an editor taller than
+// what the list shows is cut off with no way to reach its edge.
+function listRoom(el: HTMLTextAreaElement): number {
+  const list = el.closest(".qitems");
+  const row = el.closest(".qi");
+  return list && row ? list.clientHeight - (row.getBoundingClientRect().height - el.offsetHeight) : Infinity;
+}
+
 export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSendNow, onRetry, onRefresh, onPause }: Props) {
   const [editing, setEditing] = useState("");
   const [draft, setDraft] = useState("");
@@ -97,6 +107,16 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
   // shut, because the row's own text is the only thing that may fill it.
   const [unread, setUnread] = useState<{ id: string; why: string } | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const readEpoch = useRef(0);
+  useFitHeight(box, editing ? draft : "", undefined, listRoom);
+  useLayoutEffect(() => {
+    const row = box.current?.closest<HTMLElement>(".qi");
+    const list = row?.closest<HTMLElement>(".qitems");
+    if (!row || !list) return;
+    const over = row.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
+    const under = list.getBoundingClientRect().top - row.getBoundingClientRect().top;
+    list.scrollTop += under > 0 ? -under : Math.max(0, over);
+  }, [editing, draft]);
 
   // The body arrives after the click, so focus waits for the field to exist.
   useEffect(() => {
@@ -107,17 +127,20 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
     async (id: string) => {
       // Opening on the preview would put a cut-off line in the box and save it
       // back as the whole instruction.
+      const epoch = ++readEpoch.current;
       setUnread(null);
       let body: string;
       try {
         body = await onRead(id);
       } catch (e) {
+        if (epoch !== readEpoch.current) return;
         // A read that failed is not an empty instruction. Filling the box with
         // "" would have the user retype a line they never saw, and the save
         // replaces the whole entry with it.
         setUnread({ id, why: reason(e) });
         return;
       }
+      if (epoch !== readEpoch.current) return;
       setDraft(body);
       setEditing(id);
     },
@@ -207,14 +230,17 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                   ref={box}
                   className="qedit"
                   value={draft}
-                  rows={Math.min(6, draft.split("\n").length)}
+                  rows={1}
                   onChange={(e) => setDraft(e.target.value)}
                   onBlur={commit}
                   onKeyDown={(e) => {
-                    if (e.key === "Escape") setEditing("");
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setEditing("");
+                    }
                     // Enter commits; the line is one instruction, and a queue
                     // row is not where a paragraph gets composed.
-                    if (e.key === "Enter" && !e.shiftKey) {
+                    if (e.key === "Enter" && !e.shiftKey && !touchKeyboard() && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       commit();
                     }

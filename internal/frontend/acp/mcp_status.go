@@ -46,6 +46,8 @@ type ReasonixMCPServer struct {
 	Error      string `json:"error,omitempty"`
 	HTTPStatus int    `json:"httpStatus,omitempty"`
 	Tools      int    `json:"tools"`
+	// PendingReason is why a pending server waits for the user, as a code.
+	PendingReason string `json:"pendingReason,omitempty"`
 }
 
 func mcpStatusSnapshot(id string, rows []control.MCPHealth) ReasonixMCPStatus {
@@ -53,7 +55,7 @@ func mcpStatusSnapshot(id string, rows []control.MCPHealth) ReasonixMCPStatus {
 	for _, row := range rows {
 		servers = append(servers, ReasonixMCPServer{
 			Name: row.Name, Status: row.Status, Error: row.Error,
-			HTTPStatus: row.HTTPStatus, Tools: row.Tools,
+			HTTPStatus: row.HTTPStatus, Tools: row.Tools, PendingReason: string(row.Reason),
 		})
 	}
 	return ReasonixMCPStatus{SchemaVersion: mcpStatusSchemaVersion, SessionID: id, Servers: servers}

@@ -460,3 +460,23 @@ func TestAvailableNamesSaysWhyWhenGatingEmptiesTheList(t *testing.T) {
 		t.Fatalf("after the hit: %q", got)
 	}
 }
+
+func TestObserveRefusesNetworkPathBeforeAnyLookup(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("network paths are a Windows reading of a path")
+	}
+	prev := lookupExisting
+	lookups := 0
+	lookupExisting = func(p string) string { lookups++; return prev(p) }
+	t.Cleanup(func() { lookupExisting = prev })
+
+	hits := NewPathHits(t.TempDir())
+	for _, p := range []string{`\\evil\share\x`, `//evil/share/x`, `\\?\UNC\evil\share\x`, `\\127.0.0.1\C$\Windows\win.ini`} {
+		if err := hits.Observe(p); !errors.Is(err, ErrPathOutsideWorkspace) {
+			t.Errorf("Observe(%q) = %v, want ErrPathOutsideWorkspace", p, err)
+		}
+	}
+	if lookups != 0 {
+		t.Fatalf("%d lookups before the refusal, want 0", lookups)
+	}
+}

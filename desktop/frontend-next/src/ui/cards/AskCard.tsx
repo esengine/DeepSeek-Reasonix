@@ -104,6 +104,15 @@ export function AskCard({ item, onAnswer }: Props) {
     if (on && !qs[qi].multi) setPicks((prev) => at(prev, qi, []));
   };
 
+  const type = (qi: number, text: string) => {
+    if (noting(qi)) return setNote((prev) => at(prev, qi, text));
+    setOther((prev) => at(prev, qi, text));
+    if (text && !otherOn[qi]) {
+      setOtherOn((prev) => at(prev, qi, true));
+      if (!qs[qi].multi) setPicks((prev) => at(prev, qi, []));
+    }
+  };
+
   // A pane is display:none until it is the current one, so focus moves after
   // the render that shows it: into its open free-text or note box, else its first option.
   useEffect(() => {
@@ -222,8 +231,8 @@ export function AskCard({ item, onAnswer }: Props) {
                     aria-label={noteShown(i) ? t("补充说明（可选）") : (customOption(i)?.label ?? t("其他 —— 自行填写"))}
                     value={freeShown(i)}
                     readOnly={sealed}
-                    placeholder={noteShown(i) ? t("补充说明（可选），会随所选项一起发送") : t("在此填写你希望采用的方案")}
-                    onChange={(e) => (noting(i) ? setNote : setOther)((prev) => at(prev, i, e.target.value))}
+                    placeholder={noteShown(i) ? t("补充说明（可选），会随所选项一起发送") : t("或直接输入你的回答")}
+                    onChange={(e) => type(i, e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key !== "Enter" || sealed || ime.isIme(e.nativeEvent)) return;
                       e.preventDefault();

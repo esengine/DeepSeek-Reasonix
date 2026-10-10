@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"reasonix/internal/base/i18n"
+	"reasonix/internal/base/textutil"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/ext/mcpsetup"
 	"reasonix/internal/ext/pluginpkg"
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/state/migration"
@@ -683,14 +685,15 @@ func (c *Controller) hookListText() string {
 
 func (c *Controller) mcpListText() string {
 	names := c.mcp.serverNames()
-	if len(names) == 0 && len(c.mcp.failures()) == 0 {
+	pending := c.pendingMCPText()
+	if len(names) == 0 && len(c.mcp.failures()) == 0 && pending == "" {
 		return i18n.M.ListMcpNone
 	}
 	var b strings.Builder
 	if len(names) > 0 {
 		b.WriteString(i18n.M.ListMcpHeader + "\n")
 		for _, name := range names {
-			fmt.Fprintf(&b, "  %s\n", name)
+			fmt.Fprintf(&b, "  %s\n", mcpsetup.DisplayName(name))
 		}
 	}
 	if failures := c.mcp.failures(); len(failures) > 0 {
@@ -699,8 +702,28 @@ func (c *Controller) mcpListText() string {
 		}
 		b.WriteString("MCP startup failures:\n")
 		for _, f := range failures {
-			fmt.Fprintf(&b, "  %s (%s): %s\n", f.Name, f.Transport, f.Error)
+			fmt.Fprintf(&b, "  %s (%s): %s\n", mcpsetup.DisplayName(f.Name), f.Transport, textutil.SanitizeDisplay(f.Error))
 		}
 	}
+	if pending != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(pending)
+	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// pendingMCPText lists the project servers waiting for the user, each with why
+// and what approving it would run.
+func (c *Controller) pendingMCPText() string {
+	var b strings.Builder
+	for i, p := range c.PendingMCPApprovals() {
+		if i == 0 {
+			b.WriteString("MCP servers awaiting your approval:\n")
+		}
+		name := mcpsetup.DisplayName(p.Name)
+		fmt.Fprintf(&b, "  %s [%s]: %s\n    command: %s\n    approve: reasonix mcp enable %s\n", name, p.Reason, p.Reason.Text(), p.Launch, name)
+	}
+	return b.String()
 }

@@ -26,10 +26,18 @@ func (a *contextWindow) contextMaintenanceInputHash(visible []provider.Message) 
 // the input or the install, so retrying the same input cannot change it.
 func transientSummaryFailure(code string) bool {
 	switch CompactionNoopReason(code) {
-	case FailSummaryTruncated, FailSummaryTimeout, FailSummaryCeiling, FailSummaryFailed:
+	case FailSummaryTruncated, FailSummaryTimeout, FailSummaryCeiling, FailSummaryFailed, FailSummaryNotDigest:
 		return true
 	}
 	return false
+}
+
+// retriesOnGrowth reports a failure the input's growth releases: the summary
+// request failed, or the checkpoint was refused for the protected content it
+// would carry, which a larger input and a forced fold both answer differently.
+// Anything else holds, because retrying the same input cannot change it.
+func retriesOnGrowth(code string) bool {
+	return transientSummaryFailure(code) || CompactionNoopReason(code) == NoopCandidateAboveCeiling
 }
 
 // retryGrowthStep is how much the input must grow past a transient failure
@@ -41,21 +49,26 @@ func (a *contextWindow) retryGrowthStep(failedAt int) int {
 }
 
 // blockedReceiptHolds reports whether a blocked or failed receipt still
-// suppresses automatic maintenance at this input size. A transient failure
-// recorded without a size (older sidecars) is released once.
+// suppresses automatic maintenance at this input size. A failure that growth
+// releases, recorded without a size (older sidecars), is released once.
 func (a *contextWindow) blockedReceiptHolds(r *sessionstore.ContextMaintenanceReceipt, tokens int) bool {
 	if r == nil || (r.Status != "blocked" && r.Status != "failed") {
 		return false
 	}
-	if transientSummaryFailure(r.Code) {
+	switch {
+	case transientSummaryFailure(r.Code):
 		return r.InputTokens > 0 && tokens < r.InputTokens+a.retryGrowthStep(r.InputTokens)
+	case retriesOnGrowth(r.Code):
+		// Growth releases a protected-content refusal only below the physical
+		// ceiling: past it the request goes out and the provider rules.
+		return r.InputTokens == 0 || tokens < r.InputTokens+a.retryGrowthStep(r.InputTokens) || tokens >= a.hardInputCeiling()
 	}
 	return true
 }
 
 // contextMaintenanceBlocked reports whether automatic maintenance is
-// suppressed. Overflow is a fresh provider refusal, so it passes a transient
-// failure; one overflow recovery per request bounds the cost.
+// suppressed. Overflow is a fresh provider refusal, so it passes a failure
+// growth releases; one overflow recovery per request bounds the cost.
 func (a *contextWindow) contextMaintenanceBlocked(inputHash string, tokens int, overflow bool) (bool, string) {
 	if a == nil {
 		return false, ""
@@ -71,7 +84,7 @@ func (a *contextWindow) contextMaintenanceBlocked(inputHash string, tokens int, 
 		}
 		return false, ""
 	}
-	if overflow && transientSummaryFailure(r.Code) {
+	if overflow && (transientSummaryFailure(r.Code) || retriesOnGrowth(r.Code) && r.InputHash != inputHash) {
 		return false, ""
 	}
 	if !a.blockedReceiptHolds(r, tokens) {
@@ -123,14 +136,42 @@ func (a *contextWindow) noteMaintenanceNoop(trigger string, reason CompactionNoo
 		return
 	}
 	turn := a.activeTurnCreatedAt.Load()
-	if a.sess.win.compaction.lastNoop.reason == reason && a.sess.win.compaction.lastNoop.turn == turn {
+	if a.sess.win.compaction.lastReported.reason == reason && a.sess.win.compaction.lastReported.turn == turn {
 		return
 	}
-	a.sess.win.compaction.lastNoop = maintenanceNoop{reason: reason, turn: turn}
+	a.sess.win.compaction.lastReported = maintenanceReport{reason: reason, turn: turn}
 	a.svc.sink.Emit(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
 		Status: "noop", Action: "summary", Trigger: trigger, Code: string(reason),
 		Boundary: a.compactBoundary(), TriggerTokens: a.compactTrigger(), InputTokens: inputTokens,
 	}})
+}
+
+// noteMaintenanceHeld tells the user that compaction is due but a failed attempt
+// still holds the retry. It speaks once per turn and cause; the model is not
+// told, because the hold has no model-visible symptom of its own.
+func (a *contextWindow) noteMaintenanceHeld() {
+	if a == nil || a.svc.sink == nil {
+		return
+	}
+	a.sess.win.compactionMu.Lock()
+	var code string
+	if r := a.sess.win.compactionState.LastReceipt; r != nil {
+		code = r.Code
+	}
+	a.sess.win.compactionMu.Unlock()
+	reason := CompactionNoopReason(code)
+	if reason == "" {
+		reason = FailUnclassified
+	}
+	turn := a.activeTurnCreatedAt.Load()
+	if a.sess.win.compaction.lastReported.reason == reason && a.sess.win.compaction.lastReported.turn == turn {
+		return
+	}
+	a.sess.win.compaction.lastReported = maintenanceReport{reason: reason, turn: turn}
+	a.svc.sink.Emit(event.Event{
+		Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeCompactHeld, Detail: string(reason),
+		Text: fmt.Sprintf("Automatic compaction is paused: the last attempt did not finish (%s).", reason),
+	})
 }
 
 // recordContextMaintenanceBlocked persists a generation-scoped blocked receipt.
@@ -167,7 +208,7 @@ func (a *contextWindow) recordContextMaintenanceOutcome(inputHash, trigger, acti
 	previous := state
 	if state.LastReceipt != nil &&
 		(state.LastReceipt.Status == "blocked" || state.LastReceipt.Status == "failed") &&
-		state.LastReceipt.Action == action && !transientSummaryFailure(string(code)) {
+		state.LastReceipt.Action == action && !retriesOnGrowth(string(code)) {
 		a.sess.win.compactionMu.Unlock()
 		return
 	}

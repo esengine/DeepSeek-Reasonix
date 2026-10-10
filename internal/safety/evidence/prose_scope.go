@@ -15,7 +15,7 @@ import (
 // an accepted limit of this exemption.
 // The waiver removes an owed generic check; it never claims verification happened.
 func proseMutationPath(root, path string) bool {
-	if strings.TrimSpace(root) == "" || strings.TrimSpace(path) == "" || (filepath.Ext(path) != ".md" && filepath.Ext(path) != ".rst") {
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(path) == "" || !IsProsePath(path) {
 		return false
 	}
 	if slices.Contains(strings.Split(filepath.ToSlash(path), "/"), "..") {

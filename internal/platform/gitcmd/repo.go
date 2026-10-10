@@ -44,10 +44,14 @@ func Open(ctx context.Context, dir string) (Repo, error) {
 	if len(lines) != 3 {
 		return Repo{}, fmt.Errorf("%w: %s: unexpected rev-parse output %q", ErrNotRepository, abs, out)
 	}
+	// Git before 2.31 has no --path-format, so spelling is normalised here.
 	resolve := func(p string) string {
 		p = filepath.FromSlash(strings.TrimRight(p, "\r"))
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(abs, p)
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			p = real
 		}
 		return filepath.Clean(p)
 	}

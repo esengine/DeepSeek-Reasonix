@@ -14,6 +14,9 @@ export interface HostInfo {
 }
 
 export interface HostPort {
+  /** Whether this page runs inside the desktop shell, as opposed to a browser
+   *  tab, where the browser's own keys (zoom among them) are the reader's. */
+  inShell(): boolean;
   describe(): Promise<HostInfo>;
   minimiseWindow(): void;
   toggleMaximiseWindow(): void;
@@ -51,8 +54,8 @@ export interface HostPort {
    *  a picture of what it showed at that moment, or "" when none was taken. */
   freezeBrowserView(): Promise<string>;
   controlBrowserView(target: string, action: BrowserControl): void;
-  /** Load what the person typed. false when the shell refused the address. */
-  navigateBrowserView(target: string, address: string): Promise<boolean>;
+  /** Load what the person typed. "" when it loads, else why the shell refused it. */
+  navigateBrowserView(target: string, address: string): Promise<BrowserRefusal>;
   /** Why a page did not load, or null once another load starts. */
   onBrowserLoadState(listener: (state: BrowserLoadState) => void): () => void;
   /** A page or a proxy asking for a login; answered with answerBrowserLogin. */
@@ -62,6 +65,10 @@ export interface HostPort {
   /** Proceed past the certificate this page was refused for, for this run. */
   trustBrowserCertificate(target: string): Promise<boolean>;
 }
+
+/** Why the shell will not load a typed address: a scheme it never opens, or a
+ *  file on another machine. */
+export type BrowserRefusal = "" | "scheme" | "network_file";
 
 /** A kernel refusal as the shell hands it back: the code, and English fallback. */
 export interface Refusal {
@@ -135,7 +142,7 @@ interface ElectronBridge {
   hideBrowserView?(): Promise<void>;
   freezeBrowserView?(): Promise<string>;
   controlBrowserView?(target: string, action: string): Promise<void>;
-  navigateBrowserView?(target: string, address: string): Promise<boolean>;
+  navigateBrowserView?(target: string, address: string): Promise<BrowserRefusal>;
   onBrowserLoadState?(listener: (state: BrowserLoadState) => void): () => void;
   onBrowserLogin?(listener: (ask: BrowserLogin) => void): () => void;
   answerBrowserLogin?(id: string, username: string, password: string): Promise<void>;
@@ -152,6 +159,9 @@ function normalise(platform: string): string {
 }
 
 class ElectronHost implements HostPort {
+  inShell() {
+    return true;
+  }
   constructor(private readonly api: ElectronBridge) {}
   describe() {
     return Promise.resolve({
@@ -217,7 +227,7 @@ class ElectronHost implements HostPort {
     void this.api.controlBrowserView?.(target, action);
   }
   navigateBrowserView(target: string, address: string) {
-    return this.api.navigateBrowserView?.(target, address) ?? Promise.resolve(false);
+    return this.api.navigateBrowserView?.(target, address) ?? Promise.resolve<BrowserRefusal>("scheme");
   }
   onBrowserLoadState(listener: (state: BrowserLoadState) => void) {
     return this.api.onBrowserLoadState?.(listener) ?? (() => {});
@@ -234,6 +244,9 @@ class ElectronHost implements HostPort {
 }
 
 class BrowserHost implements HostPort {
+  inShell() {
+    return false;
+  }
   describe() {
     return Promise.resolve({ shell: "browser" as const, platform: "", titleBar: false });
   }
@@ -277,7 +290,7 @@ class BrowserHost implements HostPort {
   }
   controlBrowserView() {}
   navigateBrowserView() {
-    return Promise.resolve(false);
+    return Promise.resolve<BrowserRefusal>("scheme");
   }
   onBrowserLoadState() {
     return () => {};

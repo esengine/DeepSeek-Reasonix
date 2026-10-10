@@ -61,7 +61,7 @@ func (m *loopMock) handler(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	if isSummarizeRequest(body) {
 		writeSSE(w, m.t,
-			streamChunk(deltaText("- goal: keep going\n- pending: continue the task")),
+			streamChunk(deltaText("## Goal\n- goal: keep going\n- pending: continue the task")),
 			finishChunk("stop"),
 			usageChunk(80, 30, 0, 80))
 		return

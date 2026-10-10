@@ -17,6 +17,7 @@
 - [环境变量](#环境变量)
 - [Web 前端](#web-前端)
 - [配置路径](./CONFIG_PATHS.md)
+- [日志与崩溃文件](#日志与崩溃文件)
 - [思考语言](./REASONING_LANGUAGE.md)
 - [任务合约与暂停策略](./TASK_CONTRACT.md)
 - [自定义 OpenAI-compatible provider](#自定义-openai-compatible-provider)
@@ -200,10 +201,13 @@ telemetry 请求之前只询问一次。提示为 `[Y/n]`：直接回车、输�
 数量和时效上限的本地队列中，等待后续启动重试。
 
 ping 包含一个 CLI 专用的随机 128-bit 安装 ID、CLI 版本、OS、架构和 `cli` surface
-标记。计数批次使用同一个 ID 做每日活跃安装去重，只包含固定 bucket，例如 CLI 模式、
+标记。这个 ID 与桌面端安装 ID 分离，不是账号、硬件、仓库或 session 标识。
+
+计数批次使用同一个 ID 做每日活跃安装去重，只包含固定 bucket，例如 CLI 模式、
 运行配置档、权限/会话模式、turn 延迟、finish reason、cache hit 区间、通用
-Provider/工具错误分类、compaction、恢复计数和归一化界面语言。这个 ID 与桌面端安装
-ID 分离，不是账号、硬件、仓库或 session 标识。
+Provider/工具错误分类、compaction、恢复计数、每轮 token 量级区间、工作区写锁争用区间和归一化界面语言。
+
+不回答就关闭提示（输入结束、Ctrl+D）不会保存任何选择，也不会上传；下次启动会再问。
 
 Reasonix 绝不会上传 prompt、回答、reasoning、工具名/参数/输出、路径、仓库/分支、
 session ID、精确 token/费用、Provider/model 名称、base URL 或环境变量。
@@ -662,7 +666,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `Cmd+B` / `Ctrl+B` | 显示或隐藏左侧边栏 | 和点击侧边栏开关是同一个动作。 |
 | `Cmd+Shift+B` / `Ctrl+Shift+B` | 展开或收起最近的 shell 输出 | 和点击折叠 shell 输出提示是同一个动作。 |
 | macOS `Cmd+1`-`Cmd+9`，其它平台 `Ctrl+1`-`Ctrl+9` | 跳转到侧边栏中对应编号的可见对话 | 短暂按住 `Cmd`/`Ctrl` 会显示编号标记；已有自定义快捷键占用相同按键时，自定义动作优先生效。 |
-| macOS `Cmd++`、`Cmd+-`、`Cmd+0`；其它平台 `Ctrl++`、`Ctrl+-`、`Ctrl+0` | 放大、缩小或重置文字大小 | 对把加号上报为 `=` 的键盘也兼容。 |
+| macOS `Cmd++`、`Cmd+-`、`Cmd+0`；其它平台 `Ctrl++`、`Ctrl+-`、`Ctrl+0` | 放大、缩小或重置界面大小 | 与 **设置 → 外观 → 大小 → 界面** 使用同一组档位（80% 到 180%）并保存同一项设置。对把加号上报为 `=` 的键盘也兼容。 |
 | `?` | 打开键盘快捷键帮助表 | 帮助表显示当前实际生效的桌面端绑定。 |
 
 输入框快捷键：
@@ -710,7 +714,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 
 | 按键或命令 | 作用 | 说明 |
 | --- | --- | --- |
-| `Enter` | 发送当前消息 | turn 运行中输入非空内容时，会排队作为后续反馈。 |
+| `Enter` | 发送当前消息 | turn 运行中输入非空内容时，会排队作为后续反馈。输入框为空时，跳回最新输出并继续跟随。 |
 | `Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` | 插入换行 | 普通 `Enter` 保留给发送/确认。 |
 | 空闲时普通 `Up` / `Down` | 回放更旧或更新的已提交提示词 | turn 运行中同一组按键用于导航排队反馈。 |
 | `PageUp` / `PageDown` | 滚动 transcript | 不受当前聊天状态影响。 |
@@ -724,6 +728,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `/mouse` | 切换应用内鼠标接管 | 关闭后由终端处理原生拖选和右键菜单，但会失去应用内选区、滚动条和滚轮。可用 `REASONIX_DISABLE_MOUSE=1` 让每次会话默认关闭。远程（SSH）会话默认关闭，开箱即可原生选择；`REASONIX_DISABLE_MOUSE=0` 强制在任何环境下接管。 |
 | `Ctrl+C` | 复制、取消、清空或退出 | 有 transcript 或输入框活动选区时优先复制；否则取消运行中的 turn、清空非空输入，或在空输入下连按两次退出；已取消的 turn 仍在停止时再按一次也会退出。 |
 | `Ctrl+D` | 退出 TUI | 空输入且空闲时立即退出。 |
+| `Ctrl+Z` | 把 TUI 挂起到 shell | 仅 macOS 和 Linux，用 `fg` 恢复。Windows 没有作业控制，按下无效果。 |
 | `/quit` 或 `/exit` | 退出 TUI | 立即执行，运行中的 turn 也一样。直接输入 `exit`、`quit` 或 `:q` 只会作为普通消息发给模型。 |
 | 终端的文本粘贴快捷键 | 粘贴文本 | 文本保持终端原生 bracketed-paste 路径：macOS 通常是 `Cmd+V`，Linux 通常是 `Ctrl+Shift+V`，其它环境使用终端自身配置。Reasonix 只消费收到的文本粘贴事件，不会先探测图片。 |
 | macOS/Linux `Ctrl+V`；Windows `Alt+V` | 粘贴剪贴板图片 | 图片粘贴是独立的应用动作。读取期间底栏显示“正在粘贴图片…”，完成后在光标处插入可编辑的 `[image #N]` 标记。 |
@@ -1175,6 +1180,26 @@ Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
 
 `$ARGUMENTS` 展开为全部空格分隔参数，`$1`…`$N` 为位置参数。MCP prompts 也以
 `/mcp__<server>__<prompt>` 形式出现在这里。
+
+## 日志与崩溃文件
+
+Studio 的日志放在窗口配置目录下，不在 Reasonix home 里：
+
+| 平台 | 日志目录 |
+| --- | --- |
+| macOS | `~/Library/Application Support/Reasonix Studio/io.reasonix.studio.<实例>/logs` |
+| Windows | `%APPDATA%\Reasonix Studio\io.reasonix.studio.<实例>\logs` |
+| Linux | `~/.config/Reasonix Studio/io.reasonix.studio.<实例>/logs` |
+
+| 文件 | 内容 |
+| --- | --- |
+| `shell.log` | 窗口进程：启动、内核启动与握手，以及内核如何退出（`host: died code=… signal=…`），并附崩溃文件末尾几行。 |
+| `host.log` | 内核自己的输出。成功的轮询请求不再按 INFO 记录，错误能保留更久。 |
+| `crash/host-<时间>-<版本>-<pid>.log` | 内核被致命错误或 panic 终止时 Go 运行时打印的内容，例如 `fatal error: out of memory`。保留最新 5 个，每个只留最后 256 KiB；正常退出不留文件。 |
+
+除崩溃文件外，每个日志达 1 MiB 就轮转（保留 3 份）。内核意外退出后，下次启动会提示一次。
+
+反馈问题时请附上 `shell.log`、`host.log` 和 `crash/` 里较新的文件。`shell.log` 和 `host.log` 已抹去启动凭据；崩溃文件是运行时的原始输出，可能含堆栈、路径和 panic 文本，分享前请先自行检查。
 
 ## 内置文档检索
 

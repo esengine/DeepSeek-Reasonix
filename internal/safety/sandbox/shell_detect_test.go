@@ -103,7 +103,11 @@ func TestAvailableHeadIsWhatAutoPicks(t *testing.T) {
 		if len(list) == 0 {
 			t.Fatalf("host %+v offered nothing", h.goos)
 		}
-		if got := h.auto(nil); got != list[0] {
+		// Fallback only explains why bash was passed over; which interpreter wins is
+		// kind and path.
+		got := h.auto(nil)
+		got.Fallback = FallbackNone
+		if got != list[0] {
 			t.Fatalf("auto = %+v, want the first offered %+v", got, list[0])
 		}
 	}

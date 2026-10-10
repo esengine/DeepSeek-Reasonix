@@ -32,7 +32,13 @@ interface Props {
   onApplying?: (applying: boolean) => void;
 }
 
-export function AddPlugin({ port, onClose, onInstalled, updating, source, onApplying }: Props) {
+export function AddPlugin(props: Props) {
+  const [connection, setConnection] = useState({ port: props.port, generation: 0 });
+  if (connection.port !== props.port) setConnection({ port: props.port, generation: connection.generation + 1 });
+  return <PluginInput key={connection.generation} {...props} />;
+}
+
+function PluginInput({ port, onClose, onInstalled, updating, source, onApplying }: Props) {
   const sourceLabel = useId();
   const [text, setText] = useState(updating?.source ?? source ?? "");
   const [plan, setPlan] = useState<PluginPlan | null>(null);
@@ -171,6 +177,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
             ))}
           </section>
         ))}
+        <PreviewCut shown={plan.previewTruncated} hidden={plan.hiddenActions} />
         {plan.warnings?.map((wmsg) => (
           <div className="why" key={wmsg}>
             {wmsg}
@@ -263,6 +270,17 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
   );
 }
 
+export function PreviewCut({ shown, hidden }: { shown?: boolean; hidden?: number }) {
+  if (!shown && !hidden) return null;
+  return (
+    <div className="why" data-testid="preview-cut">
+      {hidden ? t("另有 {n} 项未显示；高风险项都已列出。", { n: hidden }) : null}
+      {hidden && shown ? " " : null}
+      {shown ? t("部分文字过长或含不可见字符，预览没有显示全部。") : null}
+    </div>
+  );
+}
+
 // The plan's own riskReasons are written for the model that reads the tool's
 // JSON. What the user needs is the same facts as rows they can scan, so the
 // structured counts are rendered here and the kernel's wording stays behind a
@@ -303,6 +321,12 @@ export function Candidate({ a }: { a: PluginAction }) {
           <span className="why">{s.reason}</span>
         </div>
       ))}
+      {a.previewTruncated && (
+        <div className="risk">
+          <span className="lb">{t("已截断")}</span>
+          <span className="dt">{t("部分文字")}</span>
+        </div>
+      )}
       {a.riskReasons?.length ? (
         <details className="reasons">
           <summary>{t("内核给出的判定（{n}）", { n: a.riskReasons.length })}</summary>

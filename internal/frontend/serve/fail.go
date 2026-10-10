@@ -137,7 +137,7 @@ func codedRefusal(err error) string {
 // A runtime still holding work refuses the rebuild by identity; that is a save
 // waiting on the work, not a malfunction.
 func rebuildFailed(w http.ResponseWriter, err error) {
-	if codedRefusal(err) == codeSwitchModel {
+	if isSwitchBusy(err) {
 		busy(w, "runtime.saved_while_running", "the settings were saved; the running conversation keeps its current ones until it is rebuilt", nil)
 		return
 	}

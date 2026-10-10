@@ -31,10 +31,12 @@ const SAID: Record<string, string> = {
   "shell.parser_unavailable": "主机命令解析器不可用；请在主机恢复后重试",
   "shell.parser_timeout": "主机命令解析超时或被取消；请重试",
   "shell.command_line_too_long": "命令超过主机长度限制；请拆分命令或从文件读取长文本",
+  "tool.arguments_invalid": "参数不符合该工具的约定，本次调用没有执行；请按工具说明补全或更正参数后重试",
   "workspace.write_conflict": "另一个会话持有所需的写入范围。本次操作未执行；请结束当前轮次，待该范围释放后再重试",
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
   "plan.decision_stale": "该决定已不符合当前状态：计划在你回答前已发生变更",
-  "busy.switch_model": "任务正在运行，请先停止再切换模型",
+  "busy.switch_model": "当前回合正在进行，请先停止或等它结束再切换模型",
+  "busy.switch_model_jobs": "回合已结束，但还有 {count} 个后台任务在运行，切换模型会终止它们。请先在「后台任务」里停止，再切换模型",
   "busy.change_effort": "任务正在运行，请先停止再调整推理强度",
   "busy.change_workspace": "任务正在运行，请先停止再切换工作区",
   "busy.reload_extensions": "任务正在运行，请先停止再重载扩展",
@@ -47,6 +49,7 @@ const SAID: Record<string, string> = {
   "workspace.file_failed": "文件操作失败，请重试",
   "workspace.path_outside_tree": "该路径不在当前工作区内",
   "workspace.write_outside_scope": "写入目标不在工作区可写范围内。这是文件工具的写入范围，不是操作系统沙箱；要允许写入，请在 设置 → 沙箱 → 额外可写目录 中添加目标文件夹",
+  "workspace.network_path_outside_scope": "该路径指向网络上的另一台机器，不在当前工作区内。文件工具只按路径写法拒绝它，不会去访问；工作区本身在网络共享上时，其下的路径可用",
   "workspace.files_failed": "无法读取工作区文件列表",
   "workspace.file_unreadable": "该文件不是可编辑文本或超过大小限制",
   "provider.model_in_use": "该来源正在使用中，请先切换模型再删除",
@@ -98,6 +101,7 @@ const SAID: Record<string, string> = {
   "shell.unavailable_over_http": "HTTP 上不提供 shell 命令",
   "roles.unknown": "不存在「{role}」这个角色",
   "roles.model_unknown": "没有已配置的模型匹配「{model}」",
+  "roles.override_not_in_user_config": "「{key}」不在用户配置里，可能已被清除，或来自项目配置",
   "shell.editing_disabled": "这台服务器未开放 shell 设置",
   "account.signin_disabled": "这台服务器未开放账号登录",
   "backup.signed_out": "登录账号后才能使用云备份",
@@ -155,6 +159,7 @@ const SAID: Record<string, string> = {
   "provider.editing_disabled": "这台服务器不允许修改模型来源",
   "browser.close_failed": "无法关闭这个网页：{error}",
   "browser.open_failed": "打不开这个网页：{error}",
+  "browser.network_path": "内置浏览器不会打开指向网络上另一台机器的路径，只按路径写法拒绝，不会去访问",
   "browser.engine_missing": "没有找到可用的浏览器。请安装 Chrome、Edge 或 Chromium，或在配置里用 [browser] executable 指定路径，新会话才会读到",
   "browser.engine_failed": "内置浏览器没能启动，稍后再试一次",
   "browser.profile_busy": "内置浏览器的资料目录正被另一个浏览器占用。关掉其他 Studio 窗口或用同一资料目录的浏览器后再试",
@@ -248,6 +253,18 @@ const SAID: Record<string, string> = {
   "commit.git_failed": "读取暂存区失败",
   "commit.bad_request": "提交请求格式不正确",
 
+  // ── 分支切换：composer 的分支菜单拒得有名字 ─────────────────────
+  "branch.workspace_busy": "另一个会话正在写入这个工作区，请稍后重试切换分支",
+  "branch.jobs_running": "后台任务仍在运行，请先停止再切换分支",
+  "branch.turn_running": "任务运行中，分支要等这轮结束再切",
+  "branch.no_repository": "这个工作区不是 git 仓库，没有分支可切换",
+  "branch.bad_request": "切换分支的请求格式不正确",
+  "branch.bad_name": "这不是有效的分支名",
+  "branch.unknown": "没有这个名字的本地分支",
+  "branch.local_changes": "有未提交的修改会被这次切换覆盖，请先提交或暂存（git stash）",
+  "branch.in_use": "该分支已在另一个 worktree 中检出，请先在那边切走",
+  "branch.switch_failed": "git 未能完成这次分支切换",
+
   // ── 会话 ─────────────────────────────────────────────────────────
   "session.disabled": "这台服务器已关闭会话切换",
   "session.pending_cleanup": "该会话正在清理，请稍后再打开",
@@ -295,6 +312,7 @@ const SAID: Record<string, string> = {
   // ── 能力开关：名字、这台机器的存档、以及服务器自己 ───────────────
   "mcp.unavailable": "该服务器未能启动，开关已恢复原状",
   "mcp.switch_not_undone": "该服务器未能启动，且开关未能恢复——重启后将保持刚才设置的状态",
+  "mcp.approval_owed": "这个服务要启动的内容在你启用后变了，请先查看命令并重新启用",
   "activation.unavailable": "开关未能保存：其存储文件无法读取或写入",
 
   // ── 待送达：条目、队列、这份存档各自会拒 ─────────────────────────
@@ -318,6 +336,7 @@ const SAID: Record<string, string> = {
   "config.editing_disabled": "这台服务器未开放配置编辑",
   "config.not_repairable": "该文件需手动修改：{detail}",
   "runtime.rebuild_failed": "设置已写入，但运行时未能按新设置重建：{detail}",
+  "permissions.rule_unknown_tool": "规则 {rule} 没有对应的工具（{tool}），匹配不到任何调用，因此未保存；命令要写成 Bash(命令:*)",
   "permissions.rejected": "该权限未能保存：{detail}",
   "sandbox.rejected": "沙箱设置未能保存：{detail}",
   "compaction.rejected": "压缩阈值未能保存：{detail}",
@@ -421,6 +440,10 @@ const SAID: Record<string, string> = {
   // ── 版本：这个内核背后有没有一个可更新的 Studio ─────────────────
   "studio.no_install": "这个 Studio 不是安装版（从源码启动），没有可以查看或切换的版本",
   "studio.pin_rejected": "版本固定未能保存：{detail}",
+  "studio.notes_bad_version": "这不是一个已发布的版本号",
+  "studio.notes_absent": "这个版本没有发布更新内容",
+  "studio.notes_unreachable": "暂时取不到更新内容，请检查网络后重试",
+  "studio.notes_too_large": "这个版本的更新内容超出了允许的大小，已拒绝读取",
   "update.install_running": "已有一个版本切换正在进行，请等待其完成后重试",
   "update.install_rejected": "本次版本切换未能启动：{detail}",
   "update.restart_busy": "有 {n} 项任务正在运行，重启会中断它们",

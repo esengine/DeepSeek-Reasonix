@@ -3,6 +3,7 @@ package feedback
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -216,7 +217,8 @@ func (s *Service) ListMine(ctx context.Context) (Mine, error) {
 		return st.mine(false), nil
 	}
 	var resp struct {
-		Items []Item `json:"items"`
+		Items   []Item          `json:"items"`
+		Profile json.RawMessage `json:"profile"`
 	}
 	err = s.get(ctx, st.InstallID, st.InstallToken, &resp)
 	switch {
@@ -232,7 +234,8 @@ func (s *Service) ListMine(ctx context.Context) (Mine, error) {
 	default:
 		return Mine{}, err
 	}
-	if err := s.store.update(func(st *state) error { st.remember(resp.Items...); return nil }); err != nil {
+	profile := readProfile(resp.Profile)
+	if err := s.store.update(func(st *state) error { st.remember(resp.Items...); st.Profile = profile; return nil }); err != nil {
 		return Mine{}, err
 	}
 	st, err = s.store.load()
@@ -240,6 +243,17 @@ func (s *Service) ListMine(ctx context.Context) (Mine, error) {
 		return Mine{}, err
 	}
 	return st.mine(false), nil
+}
+
+// readProfile is the standing the service stated, or nil when it stated none or
+// one that does not hold together. It is judged apart from the list so a
+// profile this build cannot read never costs the person their reports.
+func readProfile(raw json.RawMessage) *Profile {
+	var p Profile
+	if len(raw) == 0 || json.Unmarshal(raw, &p) != nil || !p.coherent() {
+		return nil
+	}
+	return &p
 }
 
 func isOffline(err error) bool { return errors.Is(err, ErrOffline) || errors.Is(err, ErrUnavailable) }

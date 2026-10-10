@@ -58,6 +58,7 @@ export function FeedbackForm({ port, onMine, onClose, onFile }: Props) {
   const field = useRef<HTMLTextAreaElement>(null);
   const submit = useRef<HTMLButtonElement>(null);
   const done = useRef<HTMLHeadingElement>(null);
+  const shotEpoch = useRef(0);
   const heldShots = useRef(shots);
   heldShots.current = shots;
 
@@ -68,14 +69,15 @@ export function FeedbackForm({ port, onMine, onClose, onFile }: Props) {
       .then((e) => {
         setEnv(e);
         setName((prev) => prev || e.displayName);
-        requestAnimationFrame(() => {
-          if (document.activeElement?.closest('[role="tablist"]')) field.current?.focus();
-        });
       })
       .catch((e) => setEnvFailure(feedbackFailure(e)));
   }, [port]);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    if (env && document.activeElement?.closest('[role="tablist"]')) field.current?.focus();
+  }, [env]);
 
   useEffect(() => {
     if (phase !== "sent") holdDraft({ category, body, contact, shots });
@@ -105,7 +107,9 @@ export function FeedbackForm({ port, onMine, onClose, onFile }: Props) {
       const { taken, refused: no } = admit(heldShots.current.length, files, limits);
       setRefused(no);
       if (taken.length === 0) return;
+      const epoch = shotEpoch.current;
       const read = await Promise.allSettled(taken.map(readShot));
+      if (epoch !== shotEpoch.current) return;
       const ok = read.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
       setShots((prev) => [...prev, ...ok].slice(0, limits.images));
     },
@@ -156,6 +160,7 @@ export function FeedbackForm({ port, onMine, onClose, onFile }: Props) {
         locale: document.documentElement.lang,
         images: payload(shots),
       });
+      shotEpoch.current++;
       dropDraft();
       setSent(receipt);
       setPhase("sent");

@@ -260,6 +260,8 @@ type mcpEntry struct {
 	InSchema   bool `json:"inSchema,omitempty"`
 	// Launch is what starting the server runs or contacts, redacted for display.
 	Launch string `json:"launch,omitempty"`
+	// PendingReason says why a pending server waits for the user, as a code.
+	PendingReason string `json:"pendingReason,omitempty"`
 }
 
 // mcpTool is one tool as the server describes it, plus the two hints that
@@ -339,6 +341,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			LocalOverride: st.LocalOverride, Transport: st.Entry.Type,
 			Source: string(st.Entry.Source), Error: health.Error, HTTPStatus: health.HTTPStatus,
 			Tools: health.Tools, AlwaysLoad: st.AlwaysLoad, InSchema: st.InSchema,
+			PendingReason: string(health.Reason),
 		}
 		if srv, ok := live[health.Name]; ok && health.Status == control.MCPHealthReady {
 			row.Transport, row.Source = srv.Transport, srv.ConfigSource
@@ -386,6 +389,10 @@ func (s *Server) mcpReconnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tools, err := s.ctl().ReconnectMCPServer(name)
+	if errors.Is(err, control.ErrMCPApprovalOwed) {
+		refuse(w, http.StatusConflict, "mcp.approval_owed", err.Error(), nil)
+		return
+	}
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadGateway, map[string]any{"name": name, "state": control.MCPHealthFailed, "error": err.Error()})
 		return
@@ -620,15 +627,5 @@ func decodeMCPName(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func launchText(e config.PluginEntry) string {
-	clean := textutil.SanitizeLaunch
-	line := mcpsetup.RedactURL(clean(e.URL))
-	if strings.TrimSpace(e.Command) != "" {
-		args := make([]string, len(e.Args))
-		for i, a := range e.Args {
-			args[i] = clean(a)
-		}
-		parts := append([]string{secrets.RedactConfigValue("", clean(e.Command))}, secrets.RedactArgs(args)...)
-		line = strings.Join(parts, " ")
-	}
-	return textutil.TruncateGraphemes(clean(line), mcpLaunchTextLimit, "…")
+	return textutil.TruncateGraphemes(mcpsetup.LaunchLine(e), mcpLaunchTextLimit, "…")
 }

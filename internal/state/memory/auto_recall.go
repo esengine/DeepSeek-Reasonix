@@ -437,7 +437,7 @@ func buildRecallBlock(hits []RecallHit, budget, omittedByLimit int) ([]RecallHit
 	}
 	block := prefix + strings.Join(entries, "")
 	if total := omittedByLimit + omittedByBudget; total > 0 {
-		note := fmt.Sprintf("- omitted=%d additional relevant fact(s) because of the recall limit or character budget\n", total)
+		note := omittedNote(total, "relevant fact(s)", "the recall limit or character budget") + "\n"
 		if utf8.RuneCountInString(block+note+close) <= budget {
 			block += note
 		}

@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/ext/extension"
@@ -18,6 +19,7 @@ const (
 	turnDroppedClosed
 	turnDroppedDraining // generation no longer published after rebuild
 	turnDroppedWriteAuthority
+	turnDroppedWorkspace
 )
 
 // runGuarded runs body under a fresh context, guarding concurrent turns.
@@ -46,6 +48,22 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "input was not accepted: this session is no longer writable — reopen it and try again"})
 		return turnDroppedWriteAuthority
 	}
+	releaseWorkspace, err := c.tryWorkspaceActivity()
+	if err != nil {
+		if errors.Is(err, ErrTurnRunning) {
+			if onStart == nil {
+				c.notice("input was not accepted: the workspace branch is being switched — please resend")
+			}
+			return turnDroppedWorkspace
+		}
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "input was not accepted: workspace unavailable: " + err.Error()})
+		return turnDroppedRunning
+	}
+	defer func() {
+		if releaseWorkspace != nil {
+			releaseWorkspace.release()
+		}
+	}()
 	c.mu.Lock()
 	if c.gate.closed {
 		c.mu.Unlock()
@@ -81,6 +99,7 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 	}
 	ctx, cancel := context.WithCancel(extension.ContextWithRuntimeOwner(context.Background(), c.runtimeOwner))
 	c.gate.begin(cancel)
+	c.gate.workspaceRelease, releaseWorkspace = releaseWorkspace, nil
 	c.mu.Unlock()
 	if onStart != nil {
 		onStart()

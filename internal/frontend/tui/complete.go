@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -85,13 +86,16 @@ func (m *model) refreshMenu() tea.Cmd {
 		m.menu = nil
 		return nil
 	}
+	m.onCompletion(completionMsg{line: line})
 	return m.fetchCompletion()
 }
 
 func (m *model) onCompletion(msg completionMsg) {
-	if msg.err != nil || msg.line != m.composer.Value() {
-		m.menu = nil
+	if msg.line != m.composer.Value() {
 		return
+	}
+	if msg.err != nil {
+		msg.c = Completion{}
 	}
 	c := msg.c
 	c.Items = append(m.localCommands(msg.line), c.Items...)
@@ -105,7 +109,11 @@ func (m *model) onCompletion(msg completionMsg) {
 	if len(msg.c.Items) == 0 {
 		c.From, c.To = 0, utf16At(msg.line, len(msg.line))
 	}
-	m.menu = &menu{line: msg.line, c: c}
+	sel := 0
+	if m.menu != nil && m.menu.line == msg.line {
+		sel = max(0, slices.Index(c.Items, m.menu.c.Items[m.menu.sel]))
+	}
+	m.menu = &menu{line: msg.line, c: c, sel: sel}
 }
 
 // localCommands are the slash commands this screen answers itself, offered
@@ -145,7 +153,8 @@ func (m *model) localCommands(line string) []CompletionItem {
 
 // menuKey takes the keys an open menu owns.
 func (m *model) menuKey(k string) (tea.Cmd, bool) {
-	if m.menu == nil {
+	if m.menu == nil || m.menu.line != m.composer.Value() {
+		m.menu = nil
 		return nil, false
 	}
 	n := len(m.menu.c.Items)
@@ -201,7 +210,7 @@ func (m *model) acceptCompletion() tea.Cmd {
 }
 
 func (m *model) menuLines() []string {
-	if m.menu == nil {
+	if m.menu == nil || m.menu.line != m.composer.Value() {
 		return nil
 	}
 	items := m.menu.c.Items

@@ -81,6 +81,66 @@ jobs:
             exit 1
           fi
 
+  # Real-Chromium guards that run without a kernel. Only the ones that passed
+  # three consecutive local runs are wired; the rest stay manual (see
+  # desktop/frontend-next/perf/README.md). Skipped unless the SPA changed.
+  browser-guards:
+    name: browser guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop/frontend-next
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: SPA changed?
+        id: spa
+        working-directory: .
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] &&
+             git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- desktop/frontend-next; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.spa.outputs.run == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - if: steps.spa.outputs.run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend-next/pnpm-lock.yaml
+
+      - if: steps.spa.outputs.run == 'true'
+        name: Install
+        run: pnpm install --frozen-lockfile
+
+      - if: steps.spa.outputs.run == 'true'
+        name: Build the perf harness and install Chromium
+        run: |
+          pnpm exec vite build --config vite.perf.config.ts
+          pnpm exec playwright install --with-deps chromium
+
+      - if: steps.spa.outputs.run == 'true'
+        name: Guards
+        run: |
+          python3 -m http.server 4399 --directory dist-perf >/dev/null 2>&1 &
+          for _ in $(seq 30); do curl -sf http://localhost:4399/perf.html >/dev/null && break; sleep 1; done
+          node perf/intrinsic.mjs
+          node perf/contrast.mjs
+          node perf/wheel.mjs
+          node perf/branch-tooltip.mjs
+          node perf/selfcheck.mjs branch-tooltip
+
   desktop:
     name: desktop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

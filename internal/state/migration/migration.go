@@ -13,7 +13,6 @@ import (
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/state/sessionstore"
-	"reasonix/internal/state/sessionv4"
 )
 
 // SessionImport records one legacy session source that contributed sessions.
@@ -21,6 +20,15 @@ type SessionImport struct {
 	Source      string
 	Destination string
 	Count       int
+}
+
+// SessionSkip records one 1.x session an import could not bring over. Path is
+// the entry in the source, which the import neither moved nor deleted.
+type SessionSkip struct {
+	Source string
+	Name   string
+	Path   string
+	Reason sessionstore.SkipReason
 }
 
 // MemoryImport records one legacy memory source that contributed files.
@@ -38,6 +46,7 @@ type Result struct {
 	MemoryErrs     []error
 	SessionImports []SessionImport
 	SessionErrs    []error
+	SessionSkips   []SessionSkip
 	// Unrecognised is set when an explicit import found no 1.x session
 	// store under the chosen folder, as opposed to finding nothing new.
 	Unrecognised bool
@@ -58,7 +67,7 @@ func (r Result) Summary() string {
 		warnings++
 	}
 	warnings += len(r.MemoryErrs)
-	warnings += len(r.SessionErrs)
+	warnings += len(r.SessionErrs) + len(r.SessionSkips)
 	switch {
 	case warnings > 0:
 		return fmt.Sprintf("migration rescue completed with %d warning(s): imported %d memory file(s) and %d past session(s)", warnings, importedMemory, importedSessions)
@@ -168,14 +177,20 @@ func RunLegacySessionImportInto(sourceRoot, fallbackDest string, sink event.Sink
 	for _, src := range sources {
 		var n int
 		var err error
+		var skipped []sessionstore.SkippedSession
 		if src.v4 {
-			n, err = sessionstore.ImportV4From(src.store, fallbackDest)
+			n, skipped, err = sessionstore.ImportV4From(src.store, fallbackDest, src.route)
+			for i := range skipped {
+				skipped[i].Path = filepath.Join(src.dir, filepath.FromSlash(skipped[i].Path))
+			}
 		} else {
 			var rep *sessionstore.LegacyReport
 			n, rep, err = sessionstore.ImportLegacySessionsFromExplicitDir(src.dir, fallbackDest, config.ProjectSessionDir)
-			for _, skipped := range rep.Skipped {
-				result.SessionErrs = append(result.SessionErrs, fmt.Errorf("%s: %w", src.label, skipped))
-			}
+			skipped = rep.Skipped
+		}
+		for _, sk := range skipped {
+			result.SessionSkips = append(result.SessionSkips, SessionSkip{Source: src.label, Name: sk.Name, Path: sk.Path, Reason: sk.Reason})
+			emit(event.LevelWarn, fmt.Sprintf("migration rescue: skipped %s (%s); the file is untouched", sk.Path, sk.Reason))
 		}
 		if err != nil {
 			for _, one := range splitJoined(err) {
@@ -188,7 +203,7 @@ func RunLegacySessionImportInto(sourceRoot, fallbackDest string, sink event.Sink
 			emit(event.LevelInfo, fmt.Sprintf("imported %d past session(s) from %s — resume them with --resume or the history panel", n, src.label))
 		}
 	}
-	if len(result.SessionImports) == 0 && len(result.SessionErrs) == 0 {
+	if len(result.SessionImports) == 0 && len(result.SessionErrs) == 0 && len(result.SessionSkips) == 0 {
 		emit(event.LevelInfo, "migration rescue: no legacy sessions needed migration from "+sourceRoot)
 	}
 	emit(event.LevelInfo, result.Summary())
@@ -509,6 +524,7 @@ type explicitSessionSource struct {
 	label string
 	v4    bool
 	store fs.FS
+	route func(sessionID string) string
 }
 
 func parseLegacyRescueArgs(args string) (source string, explicit bool, err error) {
@@ -564,7 +580,7 @@ func explicitLegacySessionSources(picked string) ([]explicitSessionSource, func(
 	tree := root.FS()
 	var out []explicitSessionSource
 	seen := map[string]bool{}
-	add := func(rel string, v4 bool) {
+	add := func(rel string, v4 bool, route func(string) string) {
 		if seen[rel] {
 			return
 		}
@@ -572,32 +588,47 @@ func explicitLegacySessionSources(picked string) ([]explicitSessionSource, func(
 		if err != nil {
 			return
 		}
-		if v4 && len(sessionv4.ListIn(sub)) == 0 || !v4 && !dirLooksLikeLegacySessionDir(sub) {
+		if v4 && !holdsV4Sessions(sub) || !v4 && !dirLooksLikeLegacySessionDir(sub) {
 			return
 		}
 		seen[rel] = true
 		dir := filepath.Join(picked, filepath.FromSlash(rel))
-		out = append(out, explicitSessionSource{dir: dir, label: dir, v4: v4, store: sub})
+		out = append(out, explicitSessionSource{dir: dir, label: dir, v4: v4, store: sub, route: route})
 	}
 	for _, home := range []string{".", ".reasonix", "reasonix"} {
-		add(path.Join(home, "sessions"), false)
-		add(path.Join(home, "sessions-v4"), true)
-		add(path.Join(home, "desktop-sessions-v5", "by-id"), true)
+		add(path.Join(home, "sessions"), false, nil)
+		add(path.Join(home, "sessions-v4"), true, nil)
+		add(path.Join(home, "desktop-sessions-v5", "by-id"), true, routeToOwner(desktopSessionOwners(tree, home)))
 		projects, _ := fs.ReadDir(tree, path.Join(home, "projects"))
 		for _, project := range projects {
 			if !project.IsDir() {
 				continue
 			}
 			dir := path.Join(home, "projects", project.Name())
-			add(path.Join(dir, "sessions"), false)
-			add(path.Join(dir, "sessions-v4"), true)
+			add(path.Join(dir, "sessions"), false, nil)
+			add(path.Join(dir, "sessions-v4"), true, nil)
 		}
 	}
 	if len(out) == 0 {
-		add(".", false)
-		add(".", true)
+		add(".", false, nil)
+		add(".", true, nil)
 	}
 	return out, func() { _ = root.Close() }, nil
+}
+
+// holdsV4Sessions is true for a store with any session folder, readable or not:
+// a store whose every session is damaged is still the user's 1.x history.
+func holdsV4Sessions(store fs.FS) bool {
+	entries, _ := fs.ReadDir(store, ".")
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if _, err := fs.Stat(store, path.Join(e.Name(), "manifest.json")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func dirLooksLikeLegacySessionDir(dir fs.FS) bool {

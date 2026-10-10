@@ -131,12 +131,21 @@ func TestWorkspaceMoveRefusesUnauthenticatedMutation(t *testing.T) {
 
 func TestWorkspaceListConcurrentUpdatesAndWriteFailure(t *testing.T) {
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	ctx, cancel := context.WithTimeout(context.Background(), testenv.Budget(t))
+	defer cancel()
+	errs := make(chan error, 20)
 	var wg sync.WaitGroup
 	for range 20 {
 		dir := testenv.TempDir(t)
-		wg.Go(func() { rememberWorkspace(dir) })
+		wg.Go(func() { errs <- addRememberedWorkspace(ctx, dir) })
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("remember workspace: %v", err)
+		}
+	}
 	if len(Workspaces()) != 20 {
 		t.Fatalf("concurrent additions lost: %v", Workspaces())
 	}

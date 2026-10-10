@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, screen, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerSaveBlocker, screen, session, shell } = require("electron");
 const { relaunchForOzonePlatform } = require("./ozone");
 
 // Before the instance lock: this process must hold nothing its relaunch needs.
@@ -25,9 +25,11 @@ const { stripPackageGrants, unpaintedWindowCause } = require("./packagegrants");
 const { BrowserProtocol } = require("./browserprotocol");
 const { BrowserViews } = require("./browserviews");
 const { startBrowserRelay } = require("./browserrelay");
+const { groundFor } = require("./ground");
 const { loadPrefs, prefsFile, registerPrefs } = require("./prefs");
 const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
+const { crashDir, recordHostExit, pendingHostExit, clearHostExit, hostExitNotice } = require("./hostexit");
 
 // A page in a minimized or fully covered window counts as hidden, and a hidden
 // page drops the input the agent sends it: measured, its clicks never arrive and
@@ -119,7 +121,10 @@ async function launchKernel(args) {
         // Before the handshake the launch itself fails, and boot's catch owns
         // telling the person why; quitting here would race that dialog.
         powerGuard?.close();
-        if (handshaken && code !== 0 && !quitting) app.quit();
+        if (handshaken && code !== 0 && !quitting) {
+          recordHostExit({ logs, userData: app.getPath("userData"), code, signal, startedAt: began });
+          app.quit();
+        }
       },
       onAct: handOver,
     });
@@ -146,7 +151,7 @@ async function boot() {
   // Only a packaged build has a version worth reporting -- app.getVersion()
   // falls back to Electron's own, which named a Studio that never shipped and
   // ranked it ahead of every published release.
-  const args = ["-page", pageDir];
+  const args = ["-page", pageDir, "-crash-dir", crashDir(logs.dir)];
   if (computerHelper && existsSync(computerHelper)) args.push("-computer-helper", computerHelper);
   if (app.isPackaged) {
     args.push("-studio-version", app.getVersion());
@@ -197,6 +202,7 @@ async function boot() {
   // the shell this one replaces, and a modal in front of a window that has not
   // painted reads as the application having failed to start.
   cleanUpLegacyInstalls();
+  announceHostExit();
 }
 
 // The agent's browser draws its pages as views in this window: the kernel
@@ -212,6 +218,18 @@ function hostAgentBrowser() {
     onFrame: (frame) => protocol.receive(frame),
     onDrop: () => protocol.drop(),
   });
+}
+
+// Told once: the marker stays until the person has seen the notice.
+function announceHostExit() {
+  const userData = app.getPath("userData");
+  const exit = pendingHostExit(userData);
+  if (!exit) return;
+  const text = hostExitNotice(uiLang(), exit, logs.dir);
+  dialog
+    .showMessageBox(win, { type: "warning", message: text.message, detail: text.detail, buttons: [text.ok] })
+    .then(() => clearHostExit(userData))
+    .catch((err) => logs.shell.line(`host exit notice: ${err.message}`));
 }
 
 // The Wails install a dmg download leaves beside this one. Detached from boot:
@@ -285,6 +303,8 @@ function fitted() {
   };
 }
 
+const ground = () => groundFor(loadPrefs(prefsFile(app.getPath("userData"))), nativeTheme.shouldUseDarkColors);
+
 function createWindow() {
   const mac = process.platform === "darwin";
   const windows = process.platform === "win32";
@@ -297,6 +317,7 @@ function createWindow() {
     // Shown once it has been measured against the screen it landed on; sizing a
     // visible window makes the correction a flicker.
     show: false,
+    backgroundColor: ground(),
     frame: !windows,
     titleBarStyle: mac ? "hiddenInset" : "default",
     ...(mac ? { trafficLightPosition: LIGHTS } : {}),
@@ -335,7 +356,11 @@ function fromWindow(event) {
 const uiLang = () => uiLanguage(loadPrefs(prefsFile(app.getPath("userData"))), app.getPreferredSystemLanguages()[0] ?? app.getLocale());
 registerPrefs(ipcMain, () => prefsFile(app.getPath("userData")), fromWindow, () => {
   installApplicationMenu(uiLang);
+  if (win && !win.isDestroyed()) win.setBackgroundColor(ground());
   void powerGuard?.refresh();
+});
+nativeTheme.on("updated", () => {
+  if (win && !win.isDestroyed()) win.setBackgroundColor(ground());
 });
 
 ipcMain.handle("window:minimise", (event) => {
@@ -362,7 +387,7 @@ ipcMain.handle("browser:control", (event, targetId, action) => {
   if (fromWindow(event)) browserViews?.control(String(targetId), String(action));
 });
 ipcMain.handle("browser:navigate", (event, targetId, address) =>
-  fromWindow(event) ? (browserViews?.navigate(String(targetId), String(address)) ?? false) : false,
+  fromWindow(event) ? (browserViews?.navigate(String(targetId), String(address)) ?? "scheme") : "scheme",
 );
 ipcMain.handle("browser:trust-certificate", (event, targetId) =>
   fromWindow(event) ? (browserViews?.trustCertificate(String(targetId)) ?? false) : false,

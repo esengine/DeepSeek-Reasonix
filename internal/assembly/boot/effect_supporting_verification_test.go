@@ -38,15 +38,15 @@ func TestEffectSupportingWritesWithoutChecksMayFinish(t *testing.T) {
 		{name: "move last code to prose", move: true},
 		{name: "outside AdditionalDirs write", outside: true},
 		{name: "reStructuredText only", prose: "notes.rst"},
-		{name: "text input keeps debt", file: "notes.txt"},
-		{name: "MDX component keeps debt", file: "notes.mdx"},
-		{name: "incomplete prose scan keeps debt", incomplete: true},
+		{name: "untouched text input in the workspace", file: "notes.txt"},
+		{name: "untouched MDX component in the workspace", file: "notes.mdx"},
+		{name: "oversized workspace does not matter", incomplete: true},
 		{name: "markdown and code", code: true},
 		{name: "markdown with declared check", check: true},
-		{name: "embedded policy", file: "embed"},
+		{name: "embedded policy written as prose", file: "embed"},
 		{name: "case sensitive Go test suffix", file: "main_TEST.go"},
-		{name: "untouched build input", file: "CMakeLists.txt"},
-		{name: "uppercase prose suffix", file: "UPPER.MD"},
+		{name: "untouched build input in the workspace", file: "CMakeLists.txt"},
+		{name: "uppercase prose suffix in the workspace", file: "UPPER.MD"},
 		{name: "symlink alias", symlink: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestEffectSupportingWritesWithoutChecksMayFinish(t *testing.T) {
 			}
 			defer ctrl.Close()
 			err = ctrl.Run(context.Background(), "write the requested files")
-			wantDebt := tc.code || tc.check || tc.file != "" || tc.symlink || tc.delivery || tc.incomplete || tc.move || tc.outside
+			wantDebt := tc.code || tc.check || tc.file == "main_TEST.go" || tc.symlink || tc.delivery || tc.move || tc.outside
 			var unready *agent.FinalReadinessError
 			if wantDebt {
 				if !errors.As(err, &unready) {

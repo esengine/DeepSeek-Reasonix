@@ -221,7 +221,7 @@ export class MockHub implements HubPort {
   }
 
   importLegacySessions(_path: string, _workspace: string) {
-    return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0, recognised: true });
+    return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0, recognised: true, skipped: [] });
   }
 
   hostCapabilities() {
@@ -241,7 +241,7 @@ export class MockHub implements HubPort {
     ],
     devices: [],
     cloudDevices: [],
-    cloudRemote: { online: false },
+    cloudRemote: { online: false, reason: "signed_out" },
   };
 
   shareStatus() {

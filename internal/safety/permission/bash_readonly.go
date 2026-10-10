@@ -32,6 +32,9 @@ func BashCommandIsReadOnly(args json.RawMessage) bool {
 // and whether these arguments keep this call one — come from shellsafe, so
 // permission and evidence cannot answer differently.
 func isReadOnlyBashSubject(subject string) bool {
+	if shellsafe.OperandsNameNetworkPath(subject) {
+		return false
+	}
 	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
 		subject = normalized
 	}

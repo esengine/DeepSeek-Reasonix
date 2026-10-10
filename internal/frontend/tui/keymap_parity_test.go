@@ -297,3 +297,42 @@ func TestCtrlNAndCtrlPMoveThePickerSelection(t *testing.T) {
 		t.Fatalf("picker after two Ctrl+P = sel %d, query %q; want 0 and no filter", m.picker.sel, m.picker.query)
 	}
 }
+
+// Ctrl+Enter steers a running turn, as 1.x did and docs/GUIDE.md says; idle it
+// sends nothing, so a press meant as a newline never submits the draft.
+func TestCtrlEnterSteersOnlyARunningTurn(t *testing.T) {
+	m, k := testModel(t)
+	ctrlEnter := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl}
+	typeText(m, "hello")
+	run(m, m.keyCmd(ctrlEnter))
+	if calledWith(k, "POST /submit") || m.composer.Value() != "hello" {
+		t.Fatalf("idle Ctrl+Enter sent or changed the draft (composer %q):\n%s", m.composer.Value(), strings.Join(k.seen(), "\n"))
+	}
+	m.composer.Reset()
+	startTurn(m)
+	typeText(m, "use make")
+	run(m, m.keyCmd(ctrlEnter))
+	if calls := strings.Join(k.seen(), "\n"); !strings.Contains(calls, `POST /inbox/items {"input":"use make","intent":"steer"}`) {
+		t.Fatalf("Ctrl+Enter during a turn did not steer:\n%s", calls)
+	}
+	if m.composer.Value() != "" {
+		t.Fatalf("the steered text stayed in the composer: %q", m.composer.Value())
+	}
+}
+
+// Ctrl+Z suspends the TUI to the shell, as 1.x did; Bubble Tea releases the
+// terminal first and ignores the request where there is no job control.
+func TestCtrlZSuspendsToTheShell(t *testing.T) {
+	m, k := testModel(t)
+	typeText(m, "draft")
+	cmd := m.keyCmd(tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("Ctrl+Z did nothing")
+	}
+	if _, ok := cmd().(tea.SuspendMsg); !ok {
+		t.Fatal("Ctrl+Z did not ask to suspend")
+	}
+	if m.composer.Value() != "draft" || calledWith(k, "POST /") {
+		t.Fatalf("Ctrl+Z touched the draft or the kernel: %q\n%s", m.composer.Value(), strings.Join(k.seen(), "\n"))
+	}
+}

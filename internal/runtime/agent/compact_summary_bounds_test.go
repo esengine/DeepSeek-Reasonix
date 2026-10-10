@@ -134,7 +134,7 @@ func (p *deadlineProbe) Stream(ctx context.Context, _ provider.Request) (<-chan 
 		p.remaining = time.Until(d)
 	}
 	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "digest"}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Digest\ndigest"}
 	close(ch)
 	return ch, nil
 }

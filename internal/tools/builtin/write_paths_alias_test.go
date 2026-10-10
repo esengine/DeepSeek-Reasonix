@@ -50,7 +50,7 @@ func TestAmbiguousWriterPathsRetainGrantTargets(t *testing.T) {
 func TestAmbiguousMoveDoesNotHideInvalidDestination(t *testing.T) {
 	root := testenv.TempDir(t)
 	args, _ := json.Marshal(map[string]string{"source_path": filepath.Join(root, "source.")})
-	paths, err := ResolveWritePaths(root, nil, args, true)
+	paths, err := ResolveWritePaths(root, nil, []string{root}, args, true)
 	if err == nil || errors.Is(err, fileutil.ErrAmbiguousPath) || len(paths) != 0 {
 		t.Fatalf("invalid destination: paths=%v err=%v", paths, err)
 	}

@@ -15,13 +15,18 @@ export class MockLook {
   // the switch looked broken in development and nowhere else.
   private look: Appearance = { language: localStorage.getItem(LANG) ?? undefined };
 
+  // What the kernel announces; the zoom test holds it equal to config.ZoomMin..ZoomMax.
+  private static readonly ZOOM = { min: 0.8, max: 1.8, step: 0.05 };
+
   async appearance(): Promise<Appearance> {
-    return this.look;
+    return { ...this.look, zoomRange: MockLook.ZOOM };
   }
 
   async saveAppearance(look: Appearance): Promise<Appearance> {
-    this.look = { ...look, wallpaper: this.look.wallpaper && { ...this.look.wallpaper, ...look.wallpaper } };
-    return this.look;
+    const { min, max } = MockLook.ZOOM;
+    const zoom = look.zoom ? Math.min(Math.max(look.zoom, min), max) : look.zoom;
+    this.look = { ...look, zoom, wallpaper: this.look.wallpaper && { ...this.look.wallpaper, ...look.wallpaper } };
+    return this.appearance();
   }
 
   // The kernel refuses with a code, so the fixture does too — otherwise the
@@ -38,7 +43,7 @@ export class MockLook {
       ...this.look,
       wallpaper: { url: URL.createObjectURL(blob), opacity: 0.5, dim: 0.55, focusX: 0.5, focusY: 0.5 },
     };
-    return this.look;
+    return this.appearance();
   }
 
   async clearWallpaper(): Promise<void> {

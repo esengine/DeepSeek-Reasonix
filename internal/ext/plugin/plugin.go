@@ -119,6 +119,10 @@ type Spec struct {
 	// servers set it only after an exact launch grant is resolved.
 	Authorized            bool
 	RequireLaunchApproval bool
+	// LaunchCheck, when set, runs before every process start or connection and
+	// refuses one whose project declaration no longer reads as it did when the
+	// spec was built; a lazy start can come long after the decision was read.
+	LaunchCheck func() error
 	// LaunchArgs and launcher metadata are host-local immutable resolutions for
 	// mutable package launchers. LauncherIdentityArgs is the same exact package
 	// resolution without an automatically injected offline/no-install flag: that
@@ -1169,6 +1173,9 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 		return nil, newStartupFailure("launch", started, 0, err)
 	}
 	s, err = resolveProjectLaunchAuthorization(callCtx, s)
+	if err == nil {
+		err = checkDeclaredLaunch(s)
+	}
 	if err != nil {
 		return nil, newStartupFailure("authorization", started, 0, err)
 	}

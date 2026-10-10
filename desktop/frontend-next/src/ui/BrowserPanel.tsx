@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { t } from "../i18n";
 import type { AgentPort, BrowserTab } from "../port/port";
-import { host, type BrowserControl, type BrowserLoadFailure } from "../port/host";
+import { host, type BrowserControl, type BrowserLoadFailure, type BrowserRefusal } from "../port/host";
 import { SWAP_MARK } from "./swap";
 import { occluded, visibleBox } from "./occlusion";
 import { BrowserFailure } from "./BrowserFailure";
@@ -13,6 +13,9 @@ function normalise(value: string): string | null {
   const raw = value.trim();
   if (!raw) return START;
   if (/^reasonix:\/\//i.test(raw)) return START;
+  // This panel frames a web page, and a frame cannot show a file: a path on
+  // disk is refused here, never read as a host named by its drive letter.
+  if (/^(?:[a-z]:[\\/]|\\\\|\/)/i.test(raw)) return null;
   const local = /^(?:localhost|127(?:\.\d+){3}|10(?:\.\d+){3}|192\.168(?:\.\d+){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d+){2}|\[::1\]|[^./:]+)(?::\d+)?(?:\/|$)/i.test(raw);
   const candidate = local ? `http://${raw}` : /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
   try {
@@ -177,7 +180,7 @@ function AgentBrowserView({ tabs, shown, showTabs = true }: { tabs: BrowserTab[]
   const current = tabs.find((tab) => tab.target === picked) ?? tabs.find((tab) => tab.active) ?? tabs[0];
   const [address, setAddress] = useState(current?.url ?? "");
   const [failures, setFailures] = useState<Record<string, BrowserLoadFailure>>({});
-  const [refused, setRefused] = useState(false);
+  const [refused, setRefused] = useState<BrowserRefusal>("");
   const [frame, setFrame] = useState("");
   const target = current?.target ?? "";
   const failure = failures[target];
@@ -264,7 +267,7 @@ function AgentBrowserView({ tabs, shown, showTabs = true }: { tabs: BrowserTab[]
     if (!target) return;
     void host()
       .navigateBrowserView(target, to)
-      .then((ok) => setRefused(!ok));
+      .then(setRefused);
   };
   const go = (event: FormEvent) => {
     event.preventDefault();
@@ -285,11 +288,15 @@ function AgentBrowserView({ tabs, shown, showTabs = true }: { tabs: BrowserTab[]
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="forward" aria-label={t("前进")} onClick={() => control("forward")}>→</button>
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="reload" aria-label={t("重新加载")} onClick={() => control("reload")}>↻</button>
           <form className="baddr" data-action="browser.navigate" data-target={current?.id} onSubmit={go}>
-            <input data-action="browser.navigate" data-target={current?.id} value={address} spellCheck={false} aria-label={t("网址")} onChange={(event) => { setAddress(event.target.value); setRefused(false); }} />
+            <input data-action="browser.navigate" data-target={current?.id} value={address} spellCheck={false} aria-label={t("网址")} onChange={(event) => { setAddress(event.target.value); setRefused(""); }} />
           </form>
         </div>
       </div>
-      {refused && <p className="studio-browser-error" role="alert">{t("请输入有效的 http 或 https 地址")}</p>}
+      {refused && (
+        <p className="studio-browser-error" role="alert">
+          {refused === "network_file" ? t("不能直接打开网络共享路径。请先把文件放到本机，再输入它的本机路径。") : t("请输入有效的 http 或 https 地址")}
+        </p>
+      )}
       <div className="bview" ref={slot}>
         {failure ? (
           <BrowserFailure

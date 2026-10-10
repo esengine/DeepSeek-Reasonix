@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/state/sessionstore"
+	"slices"
 	"testing"
 
 	"reasonix/internal/contract/config"
@@ -459,5 +460,31 @@ func TestSkillEffortUsesResolvedInheritedDefault(t *testing.T) {
 	}
 	if got := skillProfile(cfg, sub.inheritedFor)(skill.Skill{Name: "review", RunAs: skill.RunSubagent}); got != nil {
 		t.Fatalf("fallback skill profile = %+v, want no stale inherited effort", got)
+	}
+}
+
+// The settings page shows subagent_model; a subagent_models entry beats it for
+// its profile. The task profile is the one the generic delegate reads, so the
+// override list must name exactly the entry that decides its model.
+func TestSubagentModelOverridesNameTheEntryThatDecidesTheTaskModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentModel = "mimo-pro"
+	cfg.Agent.SubagentModels = map[string]string{"task": "deepseek-pro", "review": " ", "explore": "mimo-flash"}
+
+	got := SubagentModelOverrides(cfg)
+	want := []SubagentModelOverride{{Key: "explore", Model: "mimo-flash"}, {Key: "task", Model: "deepseek-pro"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("overrides = %+v, want %+v (blank entries override nothing)", got, want)
+	}
+	sub := newSubagentConfig(Options{}, cfg, nil, "", nil, netclient.ProxySpec{}, nil)
+	if sub.taskModel != "deepseek-pro" {
+		t.Fatalf("task model = %q, want the subagent_models.task entry the list reports", sub.taskModel)
+	}
+	if ref := subagentModelRef(cfg, skill.Skill{Name: "explore", RunAs: skill.RunSubagent}); ref != "mimo-flash" {
+		t.Fatalf("explore model = %q, want its subagent_models entry", ref)
+	}
+	cfg.Agent.SubagentModels = nil
+	if len(SubagentModelOverrides(cfg)) != 0 {
+		t.Fatal("no entries must report no overrides")
 	}
 }

@@ -46,10 +46,15 @@ const (
 	NoticeCodeProjectProgramsAwaitingApproval = "project_programs_awaiting_approval"
 	// An approved workspace program whose files changed; the host did not run it.
 	NoticeCodeProjectProgramChanged = "project_program_changed"
+	// A project-declared MCP server held off until the user approves what it runs:
+	// never approved, or changed since it was. Detail is the launch line.
+	NoticeCodeProjectMCPAwaitingApproval, NoticeCodeProjectMCPChanged = "project_mcp_awaiting_approval", "project_mcp_changed"
 	// A conversation opened from a 1.x log went on in a new session of its own.
 	NoticeCodeSessionContinuedFrom1x = "session_continued_from_1x"
 	// The user config names a default approval mode this build does not know; it loads as ask.
 	NoticeCodeApprovalModeUnrecognized = "approval_mode_unrecognized"
+	// Saved permission rules name no tool, so they match nothing; Detail is a PermissionRulesDormant.
+	NoticeCodePermissionRulesDormant = "permission_rules_dormant"
 	// A turn handed its open list back to the user; Detail is the model's `need`, as it wrote it.
 	NoticeCodeAwaitUser = "await_user"
 	// A slash command nothing resolves, refused rather than sent as prose.
@@ -68,6 +73,16 @@ const (
 	NoticeCodeCompactDeclined = "compact_declined"
 	// /compact failed; Detail is the failure code, its text the English fallback.
 	NoticeCodeCompactFailed = "compact_failed"
+	// Automatic compaction is due but an earlier attempt's failure still holds the retry; Detail is that failure's code.
+	NoticeCodeCompactHeld = "compact_held"
 	// An optional extension was left out of an operation; Detail is the ExtensionSkipped payload.
 	NoticeCodeExtensionSkipped = "extension_skipped"
+	// A reopened session's inbox held unfinished instructions and came up paused; Detail is the InboxRecovered payload.
+	NoticeCodeInboxRecovered = "inbox_recovered"
+	// A background job ended; Detail is the JobNotice payload, its text the English fallback.
+	NoticeCodeJobFinished = "job_finished"
+	// A background job was killed; Detail is the JobNotice payload, its text the English fallback.
+	NoticeCodeJobKilled = "job_killed"
+	// A background job failed; Detail is the JobNotice payload, its text the English fallback.
+	NoticeCodeJobFailed = "job_failed"
 )

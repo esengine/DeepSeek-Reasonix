@@ -55,6 +55,7 @@ func snapshotPaths(ledger *evidence.Ledger, root string, targets []string) pathS
 	paths := append([]string(nil), targets...)
 	paths = append(paths, ledger.TouchedPaths(observedPathLimit, false)...)
 	paths = append(paths, workspaceTopLevel(root)...)
+	paths = slices.DeleteFunc(paths, func(p string) bool { return !watchablePath(p, root) })
 	if len(paths) == 0 && root == "" {
 		return pathSnapshot{}
 	}
@@ -67,7 +68,7 @@ func snapshotPaths(ledger *evidence.Ledger, root string, targets []string) pathS
 		if _, seen := snap.state[key]; seen {
 			continue
 		}
-		snap.state[key] = watchedPath{path: p, pathState: statePathOf(p)}
+		snap.state[key] = watchedPath{path: p, pathState: statePathOf(p, root)}
 	}
 	return snap
 }
@@ -90,7 +91,10 @@ func workspaceTopLevel(root string) []string {
 	return out
 }
 
-func statePathOf(path string) pathState {
+func statePathOf(path, root string) pathState {
+	if !watchablePath(path, root) {
+		return pathState{}
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return pathState{}
@@ -102,7 +106,10 @@ func statePathOf(path string) pathState {
 // what the call changed and, of those, what it brought into existence.
 func (before pathSnapshot) since() (affected, created []string) {
 	for _, was := range before.state {
-		now := statePathOf(was.path)
+		if !watchablePath(was.path, before.root) {
+			continue
+		}
+		now := statePathOf(was.path, before.root)
 		if now == was.pathState {
 			continue
 		}
@@ -172,12 +179,12 @@ func holdsPath(paths []string, want string) bool {
 // it: removing a file the turn made leaves the workspace as found, removing one
 // it did not is the change. An unresolvable path looks exactly like a deleted
 // one, so anything never watched appear is assumed to have survived.
-func leftSomethingBehind(ledger *evidence.Ledger, r evidence.Receipt) bool {
+func leftSomethingBehind(ledger *evidence.Ledger, r evidence.Receipt, root string) bool {
 	if len(r.Paths) == 0 {
 		return true
 	}
 	for _, path := range r.Paths {
-		if statePathOf(path).exists || !ledger.CreatedInTurn(path) {
+		if statePathOf(path, root).exists || !ledger.CreatedInTurn(path) {
 			return true
 		}
 	}
@@ -199,10 +206,14 @@ func (a *Agent) touchedTheWorkspace(r evidence.Receipt) bool {
 // relative path is resolved against the workspace by every file tool, so it is
 // inside by construction; only an absolute one can leave.
 func (a *Agent) pathInWorkspace(path string) bool {
-	if a.writeWorkspaceRoot == "" {
+	root := a.writeWorkspaceRoot
+	if root == "" {
 		return true
 	}
-	return !filepath.IsAbs(path) || writeclaim.PathWithin(a.writeWorkspaceRoot, path)
+	if filepath.IsAbs(path) && !writeclaim.PathWithin(root, path) {
+		return false
+	}
+	return !hostOwnedPath(root, path)
 }
 
 // mutationBaseline is what the turn's remaining obligations are measured from:
@@ -212,7 +223,7 @@ func (a *Agent) pathInWorkspace(path string) bool {
 func (a *Agent) mutationBaseline(delivery bool) (int, bool) {
 	ledger := a.task.ledger
 	survives := func(r evidence.Receipt) bool {
-		return a.touchedTheWorkspace(r) && leftSomethingBehind(ledger, r)
+		return a.touchedTheWorkspace(r) && leftSomethingBehind(ledger, r, a.writeWorkspaceRoot)
 	}
 	if delivery {
 		return ledger.LatestProvenMutationIndexFunc(survives)

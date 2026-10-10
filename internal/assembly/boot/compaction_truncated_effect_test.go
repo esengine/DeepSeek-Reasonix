@@ -136,10 +136,20 @@ func TestEffectTruncatedSummaryOnPressureKeepsCodeAndRetries(t *testing.T) {
 	if code != "summary_truncated" {
 		t.Fatalf("pressure card code = %q, want summary_truncated", code)
 	}
-	if n := len(rec.summarizerRequests()); n > 6 {
-		t.Fatalf("automatic compaction made %d summarizer attempts over 10 turns; retries must be bounded by input growth", n)
+	reqs := rec.summarizerRequests()
+	if len(reqs)%2 != 0 {
+		t.Fatalf("%d summarizer requests; every cut summary is tried at its cap and once more, so they come in pairs", len(reqs))
 	}
-	if n := len(rec.summarizerRequests()); n < 2 {
-		t.Fatalf("automatic compaction made %d summarizer attempt(s) over 10 turns; one truncation blocked it for the generation", n)
+	for i := 0; i < len(reqs); i += 2 {
+		if reqs[i+1].MaxTokens <= reqs[i].MaxTokens {
+			t.Fatalf("attempt %d retried at cap %d after %d; the retry must have more room", i/2, reqs[i+1].MaxTokens, reqs[i].MaxTokens)
+		}
+	}
+	attempts := len(reqs) / 2
+	if attempts > 6 {
+		t.Fatalf("automatic compaction made %d failed summaries over 10 turns; retries must be bounded by input growth", attempts)
+	}
+	if attempts < 2 {
+		t.Fatalf("automatic compaction made %d summary attempt(s) over 10 turns; one truncation blocked it for the generation", attempts)
 	}
 }

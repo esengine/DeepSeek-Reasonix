@@ -171,46 +171,63 @@ func withV4Sessions(dir string, out []SessionInfo) []SessionInfo {
 }
 
 // ImportV4From copies the 1.x v4 conversations directly under store into dir
-// as transcripts, for a store that does not sit beside dir. A conversation already
-// imported, or one with no turns, is skipped; one that cannot be read does not
-// stop the rest.
-func ImportV4From(store fs.FS, dir string) (int, error) {
+// as transcripts, for a store that does not sit beside dir. A non-empty
+// route(sessionID) names the directory a conversation goes to instead of dir. A conversation already
+// imported, or one with no turns, is skipped silently; one that cannot be read
+// is returned as a SkippedSession (Path relative to store) and does not stop the rest.
+func ImportV4From(store fs.FS, dir string, route func(sessionID string) string) (int, []SkippedSession, error) {
 	entries, err := fs.ReadDir(store, ".")
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	imported := 0
-	var errs []error
+	var skipped []SkippedSession
+	skip := func(name string, reason SkipReason) {
+		skipped = append(skipped, SkippedSession{Name: name, Path: name, Reason: reason})
+	}
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		s, err := sessionv4.OpenIn(store, e.Name())
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
-			errs = append(errs, fmt.Errorf("session %s: %w", e.Name(), err))
+			skip(e.Name(), classifySkip(err))
 			continue
 		}
 		id := s.Manifest.SessionID
-		path := v4ImportPath(dir, id)
+		target := dir
+		if route != nil {
+			if routed := route(id); routed != "" {
+				target = routed
+			}
+		}
+		path := v4ImportPath(target, id)
 		if !isV4SessionID(id) || sessionArtifactExists(path) {
 			continue
 		}
 		t, err := s.Transcript()
 		if err != nil {
-			errs = append(errs, fmt.Errorf("session %s: %w", id, err))
+			skip(e.Name(), classifySkip(err))
 			continue
 		}
 		if _, turns := SessionPreviewFromMessages(t.Messages); turns == 0 {
 			continue
 		}
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			skip(e.Name(), classifyWriteSkip(err))
+			continue
+		}
 		if err := importV4(path, s); err != nil {
-			errs = append(errs, err)
+			skip(e.Name(), classifyWriteSkip(err))
 			continue
 		}
 		imported++
 	}
-	return imported, errors.Join(errs...)
+	return imported, skipped, nil
 }

@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 
+	"reasonix/internal/base/fileutil"
 	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/tool"
@@ -62,6 +63,9 @@ type Options struct {
 	// a preview handed out. On for the model, whose apply would otherwise be the
 	// first moment anyone could learn what the source holds; off for hosts.
 	RequireApprovedPlan bool
+	// PreparePlugin replaces plugin source resolution. Tests only: production
+	// code constructing Options must not set it.
+	PreparePlugin func(ctx context.Context, source, mode string) (root, commit string, cleanup func(), err error)
 }
 
 // Tool is install_source. Callers hold the concrete type so a call is
@@ -129,6 +133,7 @@ func NewTool(opts Options) *Tool {
 		onDisconnect:        opts.OnDisconnect,
 		approval:            opts.Approval,
 		requireApprovedPlan: opts.RequireApprovedPlan,
+		preparePlugin:       opts.PreparePlugin,
 	}
 }
 
@@ -167,7 +172,11 @@ func (*Tool) Schema() json.RawMessage {
 // Execute parses args, plans, and (if apply=true and Approval allows)
 // performs the writes. JSON output is always returned on success even when
 // the plan is empty, so the model can read structured `next` hints.
-func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (output string, err error) {
+func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	return t.execute(ctx, raw, nil)
+}
+
+func (t *Tool) execute(ctx context.Context, raw json.RawMessage, res *Result) (output string, err error) {
 	defer func() { err = secrets.DiagnosticError(err) }()
 	var req request
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -216,7 +225,7 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (output string,
 	if err := checkExpectedDigest(req.ExpectDigest, actions); err != nil {
 		return "", err
 	}
-	planID := computePlanID(req, actions)
+	planID := res.fingerprint(req, actions)
 	if len(actions) == 0 {
 		out := response{
 			OK:       false,
@@ -286,13 +295,13 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (output string,
 		}
 	}
 
-	return t.executeApply(ctx, req, actions, warnings, planID), nil
+	return t.executeApply(ctx, req, actions, warnings, planID, res), nil
 }
 
 // executeApply runs the apply phase. The first failed action short-circuits
 // the rest only when a single failure implies the plan is unusable; for
 // MCP installs in particular, partial completion is reported honestly.
-func (t *Tool) executeApply(ctx context.Context, req request, actions []action, warnings []string, planID string) string {
+func (t *Tool) executeApply(ctx context.Context, req request, actions []action, warnings []string, planID string, res *Result) string {
 	ok := true
 	anySucceeded := false
 	for i := range actions {
@@ -307,6 +316,9 @@ func (t *Tool) executeApply(ctx context.Context, req request, actions []action, 
 		}
 		actions[i].Status = "done"
 		anySucceeded = true
+		if res != nil {
+			res.Applied = append(res.Applied, AppliedItem{Kind: actions[i].Kind, Name: actions[i].Name, Target: actions[i].Target, ConfigPath: actions[i].ConfigPath})
+		}
 		warnings = append(warnings, actions[i].Warnings...)
 	}
 	status := "done"
@@ -616,6 +628,26 @@ func (t *Tool) resolvePath(p string) string {
 		p = abs
 	}
 	return filepath.Clean(p)
+}
+
+// refuseNetworkSource stops a local source spelled as a network path before
+// plan stats, walks or parses it: on Windows that lookup is a connection to the
+// named machine, and a plan-only call runs without approval. Only a path below a
+// network project root passes.
+func (t *Tool) refuseNetworkSource(source string) error {
+	if isURL(source) || strings.HasPrefix(source, "git:github.com/") {
+		return nil
+	}
+	roots := []string{t.root}
+	err := fileutil.NetworkScope(source, roots)
+	if err == nil {
+		err = fileutil.NetworkScope(t.resolvePath(source), roots)
+	}
+	if err != nil {
+		return networkSourceError{tool.Refusal{Code: fileutil.CodeNetworkPathOutsideScope, Message: fmt.Sprintf(
+			"install_source: `%s` is a network path, outside this workspace; it was refused by its spelling and never looked up", source)}}
+	}
+	return nil
 }
 
 // Approval binds operational material; display projection must never collapse distinct credentials.

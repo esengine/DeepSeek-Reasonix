@@ -1539,20 +1539,7 @@ func (a *Agent) emitResolvedToolDispatch(c provider.ToolCall, profile *event.Pro
 			CapabilityID: c.CapabilityID,
 		})
 	}
-	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
-		ID:           c.ID,
-		Name:         c.Name,
-		Args:         c.Arguments,
-		ResolvedName: c.ResolvedName,
-		CapabilityID: c.CapabilityID,
-		ReadOnly:     *c.ResolvedReadOnly,
-		Refreshed:    true,
-		Issuer:       event.IssuedByModel,
-		Profile:      profile,
-		FileDiff: event.FileDiff{
-			Diff: c.Diff, Added: c.Added, Removed: c.Removed,
-		},
-	}})
+	a.emitRefreshedDispatch(c, profile)
 }
 
 // refreshCurrentFileDiff recomputes a writer preview against the state left by

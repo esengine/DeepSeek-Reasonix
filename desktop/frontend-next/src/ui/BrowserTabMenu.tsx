@@ -7,10 +7,10 @@ import { pinToViewport } from "./place";
 
 interface Props {
   menu: { surface: Surface; x: number; y: number; anchor: HTMLElement };
-  others: boolean; onDismiss: () => void; onClose: (mode: "one" | "others" | "all") => void;
+  others: boolean; right: boolean; onDismiss: () => void; onClose: (mode: "one" | "others" | "right" | "all") => void;
 }
 
-export function BrowserTabMenu({ menu, others, onDismiss, onClose }: Props) {
+export function BrowserTabMenu({ menu, others, right, onDismiss, onClose }: Props) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const dismiss = (event: Event) => { if (!box.current?.contains(event.target as Node)) onDismiss(); };
@@ -36,6 +36,7 @@ export function BrowserTabMenu({ menu, others, onDismiss, onClose }: Props) {
     }}>
       <button role="menuitem" data-action="workbench.close" data-target={keyOf(menu.surface)} onClick={() => onClose("one")}>{t("关闭")}</button>
       <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="others" disabled={!others} onClick={() => onClose("others")}>{t("关闭其他浏览器标签")}</button>
+      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="right" disabled={!right} onClick={() => onClose("right")}>{t("关闭右侧浏览器标签")}</button>
       <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="all" onClick={() => onClose("all")}>{t("关闭全部浏览器标签")}</button>
     </div>, document.body,
   );

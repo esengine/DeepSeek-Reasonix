@@ -832,6 +832,49 @@ func TestPlanMCPJSONRejectsInvalid(t *testing.T) {
 	}
 }
 
+// Every eager entry is a high-risk row the preview never hides, so a .mcp.json
+// declaring more servers than the limit is refused while planning, local or
+// fetched, with the invalid-manifest identity and the counts; one at the limit
+// still parses.
+func TestPlanMCPJSONRefusesMoreServersThanTheLimit(t *testing.T) {
+	body := func(n int) string {
+		servers := make([]string, n)
+		for i := range servers {
+			servers[i] = fmt.Sprintf(`"s%d":{"command":"c","tier":"eager"}`, i)
+		}
+		return `{"mcpServers":{` + strings.Join(servers, ",") + `}}`
+	}
+	if entries, _, err := parseMCPJSON([]byte(body(maxMCPJSONServers))); err != nil || len(entries) != maxMCPJSONServers {
+		t.Fatalf("at the limit: %d entries, err %v", len(entries), err)
+	}
+	over := body(maxMCPJSONServers + 1)
+	mcpPath := filepath.Join(testenv.TempDir(t), ".mcp.json")
+	writeFile(t, mcpPath, over)
+	var served atomic.Value
+	served.Store(over)
+	srv := skillServer(t, &served)
+	tl := NewTool(Options{ProjectRoot: testenv.TempDir(t), HomeDir: testenv.TempDir(t), HTTPClient: srv.Client()})
+	want := fmt.Sprintf(".mcp.json declares %d servers; limit is %d", maxMCPJSONServers+1, maxMCPJSONServers)
+	for _, source := range []string{mcpPath, srv.URL + "/.mcp.json"} {
+		_, err := execRaw(t, tl, map[string]any{"source": source, "kind": "mcp"})
+		if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("planning %s over the limit: err = %v; want the invalid-manifest identity saying %q", source, err, want)
+		}
+	}
+}
+
+// A fetched document that is not a .mcp.json is the wrong kind for kind=mcp,
+// not an invalid manifest: its parse error is not the cause to report.
+func TestPlanSkillURLWithKindMCPIsTheWrongKind(t *testing.T) {
+	var served atomic.Value
+	served.Store("---\nname: demo\ndescription: A demo skill\n---\nBody")
+	srv := skillServer(t, &served)
+	tl := NewTool(Options{ProjectRoot: testenv.TempDir(t), HomeDir: testenv.TempDir(t), HTTPClient: srv.Client()})
+	if _, err := execRaw(t, tl, map[string]any{"source": srv.URL + "/SKILL.md", "kind": "mcp"}); !errors.Is(err, ErrUnsupportedKind) {
+		t.Fatalf("SKILL.md with kind=mcp: err = %v, want ErrUnsupportedKind", err)
+	}
+}
+
 func TestApplyRemoteMCPURLConnectsAndPersists(t *testing.T) {
 	project := testenv.TempDir(t)
 	home := testenv.TempDir(t)

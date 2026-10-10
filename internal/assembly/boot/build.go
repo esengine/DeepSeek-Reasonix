@@ -362,6 +362,7 @@ func (b *builder) wireMCP() {
 		OAuthHTTPClient:       b.balanceClient,
 	}
 	t.mcp = resolveMCPSpecs(opts, cfg, root, t.specOptions)
+	reportProjectMCPAwaitingApproval(b.sink, cfg, root)
 	t.configSpecs, t.mcpSchemaKnown = registerMCPTools(b.ctx, t.host, t.reg, t.mcp, b.sink)
 	b.cleanup = t.host.Close
 	if opts.SharedHost != nil {
@@ -389,6 +390,7 @@ func (b *builder) controller() (*control.Controller, error) {
 	}
 	ctrlOpts := b.controllerOptions(runner, executor, label)
 	ctrl := withWindowPosture(control.New(ctrlOpts), b.cfg, b.opts.StatsSource, b.sink)
+	reportDormantPermissionRules(b.sink, b.cfg, ctrl)
 	b.ext.publish(ctrl)
 	// Task and fleet sub-agents share the root agent's recovery checkpoint.
 	if t.taskTool != nil {
@@ -581,7 +583,6 @@ func (b *builder) freeze(ctrl *control.Controller) (*BuildResult, error) {
 		onWarning:          ext.warn,
 		onSidecarDown:      ext.sidecarDown,
 		skipPromptStrategy: shouldSkipPromptStrategy(b.opts.PreviousPlan),
-		previousDispatcher: b.opts.PreviousDispatcher,
 	}, ext.mgr)
 	// Assembly owns the sidecars on every path: closed inside, or in the runtime set.
 	b.pendingMgr = nil

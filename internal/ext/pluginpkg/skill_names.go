@@ -11,7 +11,25 @@ func (p Package) skillNameWarnings() []string {
 	return warnings
 }
 
+type skillScan struct {
+	refs     []SkillRef
+	warnings []string
+}
+
 func (p Package) skillRefsWithWarnings() ([]SkillRef, []string) {
+	if p.skills != nil {
+		return p.skills.refs, p.skills.warnings
+	}
+	s := p.scanSkills()
+	return s.refs, s.warnings
+}
+
+func (p Package) scanSkills() *skillScan {
+	refs, warnings := p.walkSkills()
+	return &skillScan{refs: refs, warnings: warnings}
+}
+
+func (p Package) walkSkills() ([]SkillRef, []string) {
 	var out []SkillRef
 	for _, root := range p.SkillRoots() {
 		p.scanSkillPath(root, 1, map[string]bool{}, &out)

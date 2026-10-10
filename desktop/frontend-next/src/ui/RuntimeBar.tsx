@@ -1,6 +1,7 @@
 import { t } from "../i18n";
 import { NOTICE_TEXT } from "../i18n/notices";
 import { EXTENSION_SKIPPED, extensionSkippedVars } from "../i18n/extension_skipped";
+import { INBOX_RECOVERED, inboxRecoveredVars } from "../i18n/inbox_recovered";
 import type { RuntimeNotice } from "../state/session";
 import type { SessionState } from "../state/session_types";
 import { stallShown } from "../state/stall";
@@ -24,11 +25,12 @@ export function RuntimeBar({ notices, onSeen, watch, onStall, onSettings }: {
       {stall && onStall && <StallBar stall={stall} onAct={onStall} />}
       {notices.map((n) => {
         const skipped = n.code === EXTENSION_SKIPPED ? extensionSkippedVars(n.detail) : undefined;
-        const said = n.code && (n.code !== EXTENSION_SKIPPED || skipped) ? NOTICE_TEXT[n.code] : undefined;
+        const recovered = n.code === INBOX_RECOVERED ? inboxRecoveredVars(n.detail) : undefined;
+        const said = n.code && (n.code !== EXTENSION_SKIPPED || skipped) && (n.code !== INBOX_RECOVERED || recovered) ? NOTICE_TEXT[n.code] : undefined;
         return (
           <div key={n.id} className="rtbar" data-lvl={n.level} role="status">
-            <span className="t">{said ? t(said, skipped) : n.text}</span>
-            {n.detail && !skipped && n.code !== EXTENSION_SKIPPED && <span className="why">{n.detail}</span>}
+            <span className="t">{said ? t(said, skipped ?? recovered) : n.text}</span>
+            {n.detail && !skipped && !recovered && n.code !== EXTENSION_SKIPPED && n.code !== INBOX_RECOVERED && <span className="why">{n.detail}</span>}
             {skipped && onSettings && (
               <button data-action="settings.section" data-value="ext" onClick={() => onSettings("ext")}>{t("打开「工具与集成」")}</button>
             )}

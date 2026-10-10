@@ -23,6 +23,7 @@
   font-display: swap;
 }
 
+@property --nav-w { syntax: "<length>"; inherits: true; initial-value: 0px }
 @property --rail-w { syntax: "<length>"; inherits: true; initial-value: 264px }
 @property --side-w { syntax: "<length>"; inherits: true; initial-value: 316px }
 @property --dock-w { syntax: "<length>"; inherits: true; initial-value: 560px }
@@ -31,6 +32,7 @@
 
 :root {
     interpolate-size: allow-keywords;
+    --nav-open: 48px;
 
     --call-sym: 28px; --call-gap: 14px;
     --rail-open: 264px; --side-open: 316px; --dock-open: 560px; --pane-gutter: 12px;

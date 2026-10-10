@@ -54,7 +54,7 @@ func (r Roots) enabledPackages() []InstalledPackage {
 	if strings.TrimSpace(home) == "" || installedPackages == nil {
 		return nil
 	}
-	out := installedPackages(home)
+	out := packageFlights.load(home, installedPackages)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }

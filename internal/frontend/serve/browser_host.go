@@ -181,7 +181,7 @@ func (h *Hub) registerBrowserHostRoutes(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /browser-host/stream", h.browserHostStream)
-	mux.HandleFunc("POST /browser-host/frames", h.browserHostFrames)
+	mux.HandleFunc("POST /browser-host/frames", routine(h.browserHostFrames))
 }
 
 // browserHostStream is the window's side: every frame the kernel sends, as SSE,

@@ -32,7 +32,7 @@ type VersionEntry struct {
 	Version     string `json:"version"`
 	Tag         string `json:"tag"`
 	PublishedAt string `json:"publishedAt"`
-	Notes       string `json:"notes"`
+	HasNotes    bool   `json:"hasNotes"`
 	Current     bool   `json:"current"`
 	Older       bool   `json:"older"`
 }
@@ -91,7 +91,7 @@ func versionRows(entries []IndexEntry, current string) []VersionEntry {
 	rows := make([]VersionEntry, 0, len(entries)+1)
 	seen := false
 	for _, e := range entries {
-		row := VersionEntry{Version: e.Version, Tag: e.Tag, PublishedAt: e.PublishedAt}
+		row := VersionEntry{Version: e.Version, Tag: e.Tag, PublishedAt: e.PublishedAt, HasNotes: strings.TrimSpace(e.Notes) != ""}
 		if SameVersion(e.Version, current) {
 			row.Current, seen = true, true
 		} else {

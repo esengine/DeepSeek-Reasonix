@@ -176,7 +176,10 @@ func (h *PathHits) Observe(p string) error {
 		abs = filepath.Join(h.root, abs)
 	}
 	abs = filepath.Clean(abs)
-	resolved := resolveExisting(abs)
+	if fileutil.NetworkScope(abs, []string{h.root, h.realRoot}) != nil {
+		return ErrPathOutsideWorkspace
+	}
+	resolved := lookupExisting(abs)
 	realRel, ok := relUnder(h.realRoot, resolved)
 	if !ok {
 		return ErrPathOutsideWorkspace
@@ -294,6 +297,9 @@ func relUnder(root, abs string) (string, bool) {
 	}
 	return rel, true
 }
+
+// lookupExisting is the filesystem lookup Observe makes; tests count its calls.
+var lookupExisting = resolveExisting
 
 // resolveExisting resolves symlinks in the longest existing prefix of p, so a
 // file about to be created is judged by where its directory really is. A link

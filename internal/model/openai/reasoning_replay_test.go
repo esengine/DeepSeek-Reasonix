@@ -41,9 +41,8 @@ func toolCallTurn(reasoning string) []provider.Message {
 
 // A relay is undeclared by construction: its host is nobody's vendor and its
 // model id is a name the operator chose. With no protocol declared the
-// thinking round-trip cannot happen, and the request must say which one it is
-// so a refusal is not read as an unexplained bug.
-func TestRelayWithoutDeclaredProtocolDropsReasoningAndNamesIt(t *testing.T) {
+// thinking round-trip does not happen.
+func TestRelayWithoutDeclaredProtocolDropsReasoning(t *testing.T) {
 	c := relayClient(t, nil)
 	req := c.buildRequest(provider.Request{Messages: toolCallTurn("CHAIN-OF-THOUGHT")})
 
@@ -53,9 +52,6 @@ func TestRelayWithoutDeclaredProtocolDropsReasoningAndNamesIt(t *testing.T) {
 	}
 	if strings.Contains(string(body), "reasoning_content") {
 		t.Errorf("an undeclared endpoint must not be sent reasoning_content: %s", body)
-	}
-	if req.reasoningHint != provider.HintDroppedToolCallReasoning {
-		t.Errorf("hint = %q, want %q", req.reasoningHint, provider.HintDroppedToolCallReasoning)
 	}
 }
 
@@ -71,30 +67,5 @@ func TestRelayWithDeclaredDeepSeekProtocolReplaysReasoning(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "CHAIN-OF-THOUGHT") {
 		t.Errorf("declared DeepSeek relay must round-trip reasoning_content: %s", body)
-	}
-	if req.reasoningHint != "" {
-		t.Errorf("a request that sent its reasoning left nothing out: %q", req.reasoningHint)
-	}
-}
-
-// The hint answers "we had it and did not send it". Anything else is a guess
-// about someone else's 400, and would send a reader after the wrong field.
-func TestNoHintWhenThereWasNoReasoningToDrop(t *testing.T) {
-	c := relayClient(t, nil)
-	for _, tc := range []struct {
-		name string
-		msgs []provider.Message
-	}{
-		{name: "tool call without reasoning", msgs: toolCallTurn("")},
-		{name: "reasoning without a tool call", msgs: []provider.Message{
-			{Role: provider.RoleUser, Content: "hi"},
-			{Role: provider.RoleAssistant, Content: "hello", ReasoningContent: "private scratchpad"},
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if hint := c.buildRequest(provider.Request{Messages: tc.msgs}).reasoningHint; hint != "" {
-				t.Errorf("hint = %q, want none", hint)
-			}
-		})
 	}
 }

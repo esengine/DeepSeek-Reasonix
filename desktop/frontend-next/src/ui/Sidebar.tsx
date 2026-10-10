@@ -1,3 +1,4 @@
+import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { AccountState } from "../port/port";
@@ -19,6 +20,7 @@ interface Props {
   // Collapsed, the column keeps its scroll position and its folds; inert is the
   // other half of that — a column nobody can see must not be reachable by Tab.
   collapsed: boolean;
+  navShown: boolean;
   tree: TreeWorkspace[];
   treeRead: boolean;
   runtimes: RuntimeView[];
@@ -66,6 +68,7 @@ interface Props {
 export function Sidebar({
   hub,
   collapsed,
+  navShown,
   tree,
   treeRead,
   runtimes,
@@ -271,24 +274,19 @@ export function Sidebar({
       </Workspaces>
       </RailSearch>
       </div>
-      <div className="railfoot">
+      {!navShown && <div className="railfoot">
         <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("钱包与用量")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>
-        <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackUnread > 0 ? "mine" : "send")}>
+        <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
           <span aria-hidden="true"><StudioIcon name="feedback" /></span>
           <b>{t("发送反馈")}</b>
-          {feedbackUnread > 0 && (
-            <>
-              <i className="fbk-badge" aria-hidden="true" title={t("{n} 项待查看", { n: feedbackUnread })}>{feedbackUnread > 9 ? "9+" : feedbackUnread}</i>
-              <span className="sr-only">{t("{n} 项待查看", { n: feedbackUnread })}</span>
-            </>
-          )}
+          <FeedbackBadge unread={feedbackUnread} />
         </button>
         <div className="studio-user-foot">
           <AccountRow account={account} unread={accountUnread} onOpen={() => onSettings("account")} />
           <span className="studio-workspace-kind">{t(account?.signedIn ? "个人工作空间" : "本地工作空间")}</span>
           <button className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("设置")}><StudioIcon name="settings" /></button>
         </div>
-      </div>
+      </div>}
     </div>
     </>
   );

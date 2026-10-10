@@ -250,6 +250,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "advanced", anchor: "elsewhere", title: "本版本尚未提供", scope: "machine", apply: "none", keywords: ["配置文件"] },
 
   { section: "appearance", anchor: "language", title: "语言", scope: "machine", apply: "restart", keywords: ["中文", "english", "界面语言"] },
+  { section: "appearance", anchor: "navrail", title: "图标栏", scope: "machine", apply: "immediate", keywords: ["侧边栏", "导航", "图标", "sidebar", "nav"] },
   { section: "appearance", anchor: "folding", title: "会话折叠", scope: "machine", apply: "immediate", keywords: ["展开", "收起", "思考", "执行过程", "步骤", "输出", "简报", "fold"] },
   { section: "appearance", anchor: "window", title: "窗口", scope: "machine", apply: "immediate", keywords: ["托盘", "关闭行为", "休眠", "睡眠"] },
   // Immediate because the endpoint hands the holder every running sink reads,
@@ -260,6 +261,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "appearance", anchor: "wallpaper", title: "壁纸", scope: "machine", apply: "immediate", keywords: ["背景", "图片"] },
   { section: "appearance", anchor: "weight", title: "文字粗细", scope: "machine", apply: "immediate", keywords: ["加粗", "字重"] },
   { section: "appearance", anchor: "contrast", title: "文字对比度", scope: "machine", apply: "immediate", keywords: ["柔和", "对比"] },
+  { section: "appearance", anchor: "effects", title: "视觉效果", scope: "machine", apply: "immediate", keywords: ["磨砂", "模糊", "动画", "显卡", "gpu", "性能", "省电", "blur"] },
   { section: "appearance", anchor: "mode", title: "明暗", scope: "machine", apply: "immediate", keywords: ["深色", "浅色", "跟随系统"] },
   { section: "appearance", anchor: "scheme", title: "配色", scope: "machine", apply: "immediate", keywords: ["主题", "theme", "色板"] },
 ];

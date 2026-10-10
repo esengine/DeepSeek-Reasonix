@@ -272,7 +272,7 @@ func parentWriteReservation(workDir, toolName string, args json.RawMessage) (wri
 }
 
 func extractWritePathsFromArgs(toolName, workDir string, args json.RawMessage) ([]string, error) {
-	return builtin.ResolveWritePaths(workDir, nil, args, toolName == "move_file")
+	return builtin.ResolveWritePaths(workDir, nil, []string{workDir}, args, toolName == "move_file")
 }
 
 func parentResolvedWriteReservation(workDir string, paths []string) (writeclaim.WritePathSet, error) {

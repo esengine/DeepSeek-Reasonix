@@ -26,6 +26,8 @@ export interface McpEntry {
   alwaysLoad?: boolean;
   inSchema?: boolean;
   launch?: string;
+  // Why a pending server waits for the user, as the kernel's code.
+  pendingReason?: string;
 }
 
 // always puts a server's tools in every request; deferred reaches them through
