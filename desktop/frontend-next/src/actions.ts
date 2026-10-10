@@ -136,6 +136,8 @@ export const ACTIONS: UIAction[] = [
   { id: "queue.edit", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   // Giving a session a name of your own. The sidebar's tree and the pane tabs
   // rename the same session through the same host call, so it is one id.
+  { id: "session.rename-start", kind: "navigation", target: "entity", proof: "interaction" },
+  { id: "session.auto-name", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "session.rename", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "queue.cancel", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "queue.send-now", kind: "kernel-mutation", target: "entity", proof: "interaction" },

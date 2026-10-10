@@ -33,6 +33,11 @@ const SAID: Record<string, string> = {
   "shell.command_line_too_long": "命令超过主机长度限制；请拆分命令或从文件读取长文本",
   "tool.arguments_invalid": "参数不符合该工具的约定，本次调用没有执行；请按工具说明补全或更正参数后重试",
   "workspace.write_conflict": "另一个会话持有所需的写入范围。本次操作未执行；请结束当前轮次，待该范围释放后再重试",
+  "session.title_empty": "请输入聊天标题",
+  "session.title_no_message": "该会话还没有可用于命名的用户消息",
+  "session.title_unavailable": "未配置可用于自动命名的模型，请先配置模型",
+  "session.title_failed": "自动命名失败，原标题未更改，请重试",
+
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
   "plan.decision_stale": "该决定已不符合当前状态：计划在你回答前已发生变更",
   "busy.switch_model": "当前回合正在进行，请先停止或等它结束再切换模型",

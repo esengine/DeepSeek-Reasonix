@@ -37,6 +37,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := sessionstore.CanonicalSessionPath(s.ctl().SessionPath())
+	titles := s.titles.snapshot()
 	out := make([]sessionEntry, 0, len(listed))
 	for _, si := range listed {
 		base := filepath.Base(si.Path)
@@ -50,16 +51,11 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		modified := sessionstore.SessionContentModTime(si.Path)
-		// A name the person typed outranks the generated one.
-		title := strings.TrimSpace(si.CustomTitle)
-		if title == "" {
-			title = s.sessionTitle(base, si.Preview, modified.UnixNano())
-		}
 		out = append(out, sessionEntry{
 			Name:     strings.TrimSuffix(base, ".jsonl"),
 			Path:     si.Path,
 			Turns:    si.Turns,
-			Title:    title,
+			Title:    s.sessionTitleFrom(titles, base, si.Preview, modified.UnixNano(), si.CustomTitle),
 			Current:  sessionstore.CanonicalSessionPath(si.Path) == current,
 			Unread:   si.Unread,
 			Modified: modified,

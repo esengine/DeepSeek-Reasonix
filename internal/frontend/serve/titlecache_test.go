@@ -78,3 +78,45 @@ func TestTitleCacheWritesRemainReadableByOlderVersions(t *testing.T) {
 		t.Fatalf("legacy entry = %+v, want title and mod preserved", got)
 	}
 }
+
+func TestTitleSnapshotReusesOneReadAndRefreshesNextList(t *testing.T) {
+	dir := testenv.TempDir(t)
+	c := newTitleCache(dir)
+	c.put("a.jsonl", "First Title", "first prompt", 1)
+	snapshot := c.snapshot()
+	if err := os.WriteFile(filepath.Join(dir, ".session-titles.json"), []byte(`{"a.jsonl":{"title":"Next Title","mod":2}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 50 {
+		if got := snapshot.display("a.jsonl", "first prompt", 2, ""); got != "First Title" {
+			t.Fatalf("list reread the title file: %q", got)
+		}
+	}
+	if got := c.snapshot().display("a.jsonl", "first prompt", 2, ""); got != "Next Title" {
+		t.Fatalf("next list did not refresh: %q", got)
+	}
+}
+
+func TestTitleCacheReadErrorIsNotTreatedAsCorruption(t *testing.T) {
+	dir := testenv.TempDir(t)
+	if err := os.Mkdir(filepath.Join(dir, ".session-titles.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c := newTitleCache(dir)
+	if _, err := c.load(); err == nil {
+		t.Fatal("a file read error must not become an empty cache")
+	}
+	if err := c.putExplicit("a.jsonl", "new title"); err == nil {
+		t.Fatal("a file read error must prevent saving the title")
+	}
+}
+
+func TestTitleSnapshotPrefersCurrentCustomTitle(t *testing.T) {
+	snapshot := titleSnapshot{"session.jsonl": {Title: "old fixed cache", Explicit: true}}
+	if got := snapshot.display("session.jsonl", "first prompt", 1, "new manual title"); got != "new manual title" {
+		t.Fatalf("current custom title lost to stale cache: %q", got)
+	}
+	if got := snapshot.display("session.jsonl", "first prompt", 1, ""); got != "old fixed cache" {
+		t.Fatalf("fixed cache without a custom title = %q", got)
+	}
+}

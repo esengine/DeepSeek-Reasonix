@@ -88,13 +88,15 @@ func (s *Server) drainTitles() {
 	}
 }
 
-// sessionTitle returns a title for a session: the cached flash-generated title
-// when its first user message is unchanged, otherwise a freshly generated one
-// (cached for next time), falling back to a truncated preview when generation
-// is off.
-func (s *Server) sessionTitle(name, first string, mod int64) string {
+// sessionTitle prefers an explicit title, then a matching automatic title.
+// A miss shows the preview while background generation fills the cache.
+func (s *Server) sessionTitle(name, first string, mod int64, custom string) string {
+	return s.sessionTitleFrom(s.titles.snapshot(), name, first, mod, custom)
+}
+
+func (s *Server) sessionTitleFrom(titles titleSnapshot, name, first string, mod int64, custom string) string {
 	source := titleSource(first)
-	if cached, ok := s.titles.get(name, source, mod); ok {
+	if cached := titles.display(name, source, mod, custom); cached != "" {
 		return cached
 	}
 	s.scheduleTitle(name, source, mod)

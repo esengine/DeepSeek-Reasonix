@@ -48,7 +48,7 @@ interface Props {
   onClosePanes: (ids: string[]) => Promise<void>;
   onPause: (runtimeId: string) => void;
   onArchive: (path: string, archived: boolean, runtimeId?: string) => Promise<void>;
-  onRename: (path: string, title: string) => void;
+  onRename: (path: string, title: string, mode?: "inline" | "dialog") => void;
   onCollapse: () => void;
   account: AccountState | null;
   accountUnread: string;

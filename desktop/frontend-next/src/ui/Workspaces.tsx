@@ -50,7 +50,7 @@ interface Props {
   onPin?: (path: string) => void;
   onPause?: (runtimeId: string) => void;
   onArchive?: (path: string, archived: boolean, runtimeId?: string) => Promise<void>;
-  onRename: (path: string, title: string) => void;
+  onRename: (path: string, title: string, mode?: "inline" | "dialog") => void;
   onError: (e: unknown) => void;
   // 打开项目这个动作归 App —— 首启那条横幅按的是同一个它。
   adder: Adder;
@@ -82,8 +82,6 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   const askedByKey = useRef("");
   const needle = useRailQuery();
   const treeKeys = useTreeKeys();
-  // Renaming is a pencil, not a double-click: a single click already opens the
-  // session, so a double one would open it twice on the way to the edit.
   const [editing, setEditing] = useState("");
   const [sessionMenu, setSessionMenu] = useState("");
   const [sessionMenuAt, setSessionMenuAt] = useState({ x: 0, y: 0 });
@@ -103,9 +101,6 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   useLayoutEffect(() => {
     if (sessionMenuPortal.current) pinToViewport(sessionMenuPortal.current, sessionMenuAt.x, sessionMenuAt.y, 12);
   }, [sessionMenu, sessionMenuAt]);
-  // What was already sent for this session, so Enter's commit and the blur it
-  // causes do not both reach the host with the same name.
-  const renamed = useRef<Record<string, string>>({});
   // Finishing is a transition this run witnessed, not a state a row can hold: a
   // persisted done replays nothing when the window opens or the scope changes.
   const priorRun = useRef<Record<string, string>>({});
@@ -127,13 +122,6 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
       });
     }, 1200);
   }, [runs]);
-  const rename = (session: { path: string; title?: string; name: string }, raw: string) => {
-    const next = raw.trim();
-    const was = session.title || session.name;
-    if (!next || next === was || renamed.current[session.path] === next) return;
-    renamed.current[session.path] = next;
-    onRename(session.path, next);
-  };
   // Folders the reader asked to see in full.
   const [whole, setWhole] = useState<Set<string>>(new Set());
   // Conversations whose conflict copies the reader asked to see.
@@ -469,7 +457,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         data-unread={session.unread ? "" : undefined}
                         data-just-done={session.runtimeId && justDone.has(session.runtimeId) ? "" : undefined}
                         data-busy={opening === session.path ? "" : undefined}
-                        onClick={() => void pick(ws, session)}
+                        onClick={(ev) => { if (ev.detail < 2) void pick(ws, session); }}
                         onContextMenu={(ev) => {
                           if ((ev.target as HTMLElement).closest("input, textarea, [role='menu']")) return;
                           ev.preventDefault();
@@ -481,7 +469,6 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         tabIndex={0}
                         onKeyDown={(ev) => {
                           if (ev.target !== ev.currentTarget) return;
-                          if (editing === session.path) return;
                           if (ev.key === "Enter" || ev.key === " ") {
                             ev.preventDefault();
                             void pick(ws, session);
@@ -493,35 +480,32 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       >
                         <i className="pip" />
                         {editing === session.path ? (
-                          <input
-                            className="sessedit"
-                            aria-label={t("重命名该会话")}
-                            autoFocus
+                          <input className="sessedit" aria-label={t("重命名该会话")} placeholder={t("留空以恢复自动标题")} autoFocus
                             defaultValue={session.title || session.name}
                             onClick={(ev) => ev.stopPropagation()}
+                            data-action-blur="session.rename" data-action-keydown="session.rename" data-target={session.path}
                             onBlur={(ev) => {
+                              const next = ev.currentTarget.value.trim();
                               setEditing("");
-                              rename(session, ev.currentTarget.value);
+                              if (next !== (session.title || session.name).trim()) onRename(session.path, next, "inline");
                             }}
-                            data-action-keydown="session.rename"
-                            data-target={session.path}
                             onKeyDown={(ev) => {
                               if (ev.key === "Enter") {
-                                // The aimed-at commit. Blur saves too, and its
-                                // own guard keeps that from sending twice.
-                                rename(session, ev.currentTarget.value);
+                                ev.preventDefault();
                                 ev.currentTarget.blur();
-                              }
-                              if (ev.key === "Escape") {
-                                // Abandoning a rename is not stopping the run behind it.
+                              } else if (ev.key === "Escape") {
+                                ev.preventDefault();
                                 ev.stopPropagation();
                                 ev.currentTarget.value = session.title || session.name;
                                 ev.currentTarget.blur();
                               }
-                            }}
-                          />
+                            }} />
                         ) : (
-                          <span className="sesstitle" title={rowLabel(session)}><span>{rowLabel(session)}</span></span>
+                          <span className="sesstitle" title={rowLabel(session)}
+                            data-action-doubleclick="session.rename-start" data-target={session.path}
+                            onDoubleClick={(ev) => { ev.stopPropagation(); setEditing(session.path); }}>
+                            <span>{rowLabel(session)}</span>
+                          </span>
                         )}
                         {session.unread && <UnreadDot kind="row" />}
                         {kept.length > 0 && (
@@ -558,7 +542,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                               <button role="menuitem" data-action="session.pin" data-target={session.path} onClick={() => { onPin(session.path); setSessionMenu(""); }}>
                                 <StudioIcon name="pin" /><span>{pinned.has(session.path) ? t("取消置顶") : t("置顶会话")}</span>
                               </button>
-                              <button role="menuitem" data-action="session.rename" data-target={session.path} onClick={() => { setEditing(session.path); setSessionMenu(""); }}>
+                              <button role="menuitem" data-action="session.rename-start" data-target={session.path} onClick={() => { setSessionMenu(""); onRename(session.path, session.title || session.name); }}>
                                 <StudioIcon name="edit" /><span>{t("重命名")}</span>
                               </button>
                               {session.runtimeId && liveIds([session.runtimeId]).length > 0 && (

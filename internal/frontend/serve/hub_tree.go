@@ -76,6 +76,7 @@ func (h *Hub) registerTreeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tree/sessions/remove", h.removeSession)
 	mux.HandleFunc("POST /tree/sessions/archive", h.archiveSession)
 	mux.HandleFunc("POST /tree/sessions/rename", h.renameSession)
+	mux.HandleFunc("POST /tree/sessions/auto-name", h.autoNameSession)
 	mux.HandleFunc("POST /tree/sessions/export", h.exportSession)
 	mux.HandleFunc("POST /tree/sessions/import-legacy", h.importLegacySessions)
 }
@@ -114,7 +115,7 @@ func (h *Hub) workspaceSessions(root string, open map[string]string) []treeSessi
 	if err != nil {
 		return nil
 	}
-	titles := h.titleCacheFor(dir)
+	titles := h.titleCacheFor(dir).snapshot()
 	byID := make(map[string]sessionstore.SessionInfo, len(listed))
 	for _, si := range listed {
 		byID[sessionstore.BranchID(si.Path)] = si
@@ -145,12 +146,7 @@ func (h *Hub) workspaceSessions(root string, open map[string]string) []treeSessi
 				continue
 			}
 		}
-		// A name the user typed outranks the generated one; without this a
-		// rename would be written to the sidecar and never show up.
-		title := strings.TrimSpace(si.CustomTitle)
-		if title == "" {
-			title, _ = titles.get(name+".jsonl", titleSource(si.Preview), sessionstore.SessionContentModTime(si.Path).UnixNano())
-		}
+		title := titles.display(name+".jsonl", titleSource(si.Preview), sessionstore.SessionContentModTime(si.Path).UnixNano(), si.CustomTitle)
 		if title == "" {
 			title = previewTitle(si.Preview)
 		}
@@ -505,34 +501,6 @@ func sessionHolder(held *sessionstore.SessionLeaseError) map[string]any {
 		return nil
 	}
 	return map[string]any{"pid": held.Info.PID, "host": held.Info.Hostname}
-}
-
-// renameSession sets the name a session shows under. Unlike removal this is
-// safe on an open one — the title lives in the sidecar, not the transcript — so
-// a tab can be renamed without closing the pane behind it.
-func (h *Hub) renameSession(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Path  string `json:"path"`
-		Title string `json:"title"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		badBody(w)
-		return
-	}
-	path, err := filepath.Abs(strings.TrimSpace(body.Path))
-	if err != nil || !store.IsSessionTranscriptName(filepath.Base(path)) {
-		refuse(w, http.StatusBadRequest, codeSessionBadPath, "the session path could not be resolved", nil)
-		return
-	}
-	if !h.ownsSessionDir(filepath.Dir(path)) {
-		refuse(w, http.StatusForbidden, "session.outside_workspace", "path outside a known workspace", nil)
-		return
-	}
-	if err := sessionstore.RenameSession(path, body.Title); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // exportSession returns the transcript only after applying the same workspace
