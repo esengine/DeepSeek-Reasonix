@@ -113,7 +113,8 @@ export interface HubPort extends SharePort {
   archiveSession(path: string, archived: boolean): Promise<void>;
   // Tells the kernel which conversations automatic archiving must leave alone.
   pinSession(path: string, pinned: boolean): Promise<void>;
-  // Sends the whole pin set once per kernel run; until it arrives the kernel archives nothing on its own.
+  // Adds pins made before the kernel kept them. The first call also opens the
+  // gate: until then the kernel archives nothing on its own.
   syncPins(paths: string[]): Promise<void>;
   renameSession(path: string, title: string): Promise<void>;
   exportSession(path: string): Promise<{ name: string; content: string }>;

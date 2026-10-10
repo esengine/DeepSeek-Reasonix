@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HubPort, TreeWorkspace } from "../port/hub";
 
 const KEY = "reasonix:pinned-sessions";
 
-function saved(): Set<string> {
+function legacy(): Set<string> {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "[]");
     return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
@@ -12,25 +12,52 @@ function saved(): Set<string> {
   }
 }
 
-// The kernel owns pins, because its automatic archiving has to honour them.
-// The window tells it every pin it remembers that the kernel does not list as
-// pinned, on each tree load until that lands, so a legacy pin in a workspace
-// added later is protected before its first sweep. A pin the kernel refused is
-// rolled back and reported rather than left looking kept.
-export function usePinnedSessions(hub: HubPort, tree: TreeWorkspace[], treeRead: boolean, onFailure: (e: unknown) => void = () => {}) {
-  const [pinned, setPinned] = useState<Set<string>>(saved);
+function keep(paths: Set<string>) {
+  try {
+    if (paths.size === 0) localStorage.removeItem(KEY);
+    else localStorage.setItem(KEY, JSON.stringify([...paths]));
+  } catch {
+    // the pins come back from the kernel on the next load
+  }
+}
 
-  const set = useCallback((path: string, on: boolean) => {
-    setPinned((current) => {
-      if (current.has(path) === on) return current;
-      const next = new Set(current);
-      if (on) next.add(path);
-      else next.delete(path);
-      try {
-        localStorage.setItem(KEY, JSON.stringify([...next]));
-      } catch {
-        // the kernel still has it
-      }
+// The kernel owns pins because its automatic archiving has to honour them, so
+// what is drawn is what the tree reports. localStorage only carries pins made
+// before the kernel kept them: each is sent once, when its conversation is
+// first listed, and forgotten. A toggle shows at once and is dropped as soon
+// as the tree agrees; a refused one is withdrawn and reported.
+export function usePinnedSessions(hub: HubPort, tree: TreeWorkspace[], treeRead: boolean, onFailure: (e: unknown) => void = () => {}) {
+  const [shown, setShown] = useState<Map<string, boolean>>(new Map());
+  const old = useRef<Set<string> | null>(null);
+  const opened = useRef(false);
+
+  const kernel = useMemo(() => {
+    const out = new Set<string>();
+    for (const ws of tree) for (const s of ws.sessions) if (s.pinned) out.add(s.path);
+    return out;
+  }, [tree]);
+
+  const pinned = useMemo(() => {
+    const out = new Set(kernel);
+    for (const [path, on] of shown) {
+      if (on) out.add(path);
+      else out.delete(path);
+    }
+    return out;
+  }, [kernel, shown]);
+
+  useEffect(() => {
+    setShown((cur) => {
+      const next = new Map([...cur].filter(([path, on]) => kernel.has(path) !== on));
+      return next.size === cur.size ? cur : next;
+    });
+  }, [kernel]);
+
+  const show = useCallback((path: string, on: boolean | null) => {
+    setShown((cur) => {
+      const next = new Map(cur);
+      if (on === null) next.delete(path);
+      else next.set(path, on);
       return next;
     });
   }, []);
@@ -38,39 +65,41 @@ export function usePinnedSessions(hub: HubPort, tree: TreeWorkspace[], treeRead:
   const toggle = useCallback(
     (path: string) => {
       const on = !pinned.has(path);
-      set(path, on);
+      show(path, on);
       hub.pinSession(path, on).catch((e) => {
-        set(path, !on);
+        show(path, null);
         onFailure(e);
       });
     },
-    [hub, onFailure, pinned, set],
+    [hub, onFailure, pinned, show],
   );
 
-  const unpin = useCallback((path: string) => set(path, false), [set]);
+  const unpin = useCallback((path: string) => show(path, false), [show]);
 
-  const synced = useRef(false);
   useEffect(() => {
     if (!treeRead) return;
-    const kernel = new Set<string>();
+    old.current ??= legacy();
     const listed = new Set<string>();
-    for (const ws of tree) {
-      for (const s of ws.sessions) {
-        listed.add(s.path);
-        if (s.pinned) kernel.add(s.path);
+    for (const ws of tree) for (const s of ws.sessions) listed.add(s.path);
+    const move = [...old.current].filter((path) => listed.has(path));
+    const send = move.filter((path) => !kernel.has(path));
+    if (opened.current && send.length === 0) {
+      if (move.length > 0) {
+        for (const path of move) old.current.delete(path);
+        keep(old.current);
       }
+      return;
     }
-    const unknown = [...pinned].filter((path) => listed.has(path) && !kernel.has(path));
-    if (synced.current && unknown.length === 0) return;
-    const union = new Set([...unknown, ...kernel]);
     hub
-      .syncPins([...union])
+      .syncPins(send)
       .then(() => {
-        synced.current = true;
-        for (const path of union) set(path, true);
+        opened.current = true;
+        for (const path of move) old.current?.delete(path);
+        if (old.current) keep(old.current);
+        for (const path of send) show(path, true);
       })
       .catch(() => {});
-  }, [hub, tree, treeRead, pinned, set]);
+  }, [hub, tree, treeRead, kernel, show]);
 
   return [pinned, toggle, unpin] as const;
 }

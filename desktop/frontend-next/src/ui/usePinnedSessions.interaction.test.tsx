@@ -5,74 +5,107 @@ import "./testkit";
 import { usePinnedSessions } from "./usePinnedSessions";
 import type { HubPort, TreeWorkspace } from "../port/hub";
 
+const KEY = "reasonix:pinned-sessions";
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
-const tree = [{ root: "/w", name: "w", sessions: [{ path: "/k.jsonl", name: "k", pinned: true }, { path: "/x.jsonl", name: "x" }] }] as unknown as TreeWorkspace[];
+const rows = (...s: { path: string; pinned?: boolean }[]) =>
+  [{ root: "/w", name: "w", sessions: s.map((x) => ({ name: x.path, ...x })) }] as unknown as TreeWorkspace[];
+const hubOf = (over: Partial<Record<"syncPins" | "pinSession", unknown>> = {}) =>
+  ({ syncPins: vi.fn(async (_p: string[]) => {}), pinSession: vi.fn(async () => {}), ...over }) as unknown as HubPort & {
+    syncPins: ReturnType<typeof vi.fn>;
+    pinSession: ReturnType<typeof vi.fn>;
+  };
 
-describe("pin sync", () => {
-  it("sends the union of the kernel's pins and the window's, and adopts it", async () => {
-    localStorage.setItem("reasonix:pinned-sessions", JSON.stringify(["/x.jsonl"]));
-    const hub = { syncPins: vi.fn(async () => {}), pinSession: vi.fn(async () => {}) } as unknown as HubPort;
-    const { result } = renderHook(() => usePinnedSessions(hub, tree, true));
-    await waitFor(() => expect(hub.syncPins).toHaveBeenCalled());
-    expect([...(hub.syncPins as ReturnType<typeof vi.fn>).mock.calls[0][0]].sort()).toEqual(["/k.jsonl", "/x.jsonl"]);
-    await waitFor(() => expect(result.current[0].has("/k.jsonl")).toBe(true));
+describe("what is drawn as pinned", () => {
+  it("is what the kernel reports, not what this window remembers", () => {
+    localStorage.setItem(KEY, JSON.stringify(["/gone.jsonl"]));
+    const { result } = renderHook(() => usePinnedSessions(hubOf(), rows({ path: "/k.jsonl", pinned: true }, { path: "/gone.jsonl" }), true));
+    expect([...result.current[0]]).toEqual(["/k.jsonl"]);
   });
 
-  it("does not send before the tree has loaded, and retries after a failure", async () => {
-    const send = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(undefined);
-    const hub = { syncPins: send, pinSession: vi.fn(async () => {}) } as unknown as HubPort;
-    const { rerender } = renderHook(({ read, t }) => usePinnedSessions(hub, t, read), { initialProps: { read: false, t: tree } });
-    expect(send).not.toHaveBeenCalled();
-    rerender({ read: true, t: tree });
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-    rerender({ read: true, t: [...tree] });
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    rerender({ read: true, t: [...tree] });
+  it("follows another window unpinning, and does not pin it back", async () => {
+    const hub = hubOf();
+    const { result, rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: rows({ path: "/k.jsonl", pinned: true }) } });
+    await waitFor(() => expect(hub.syncPins).toHaveBeenCalledTimes(1));
+    rerender({ t: rows({ path: "/k.jsonl" }) });
+    expect(result.current[0].has("/k.jsonl")).toBe(false);
     await new Promise((r) => setTimeout(r, 30));
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(hub.syncPins).toHaveBeenCalledTimes(1);
+  });
+
+  it("unpin, reload, archive does not bring the pin back", async () => {
+    const hub = hubOf();
+    const { result, rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: rows({ path: "/k.jsonl", pinned: true }) } });
+    await waitFor(() => expect(hub.syncPins).toHaveBeenCalled());
+    act(() => result.current[2]("/k.jsonl"));
+    expect(result.current[0].has("/k.jsonl")).toBe(false);
+    rerender({ t: rows({ path: "/k.jsonl", pinned: true }) });
+    expect(result.current[0].has("/k.jsonl")).toBe(false);
+    rerender({ t: rows({ path: "/k.jsonl" }) });
+    expect(result.current[0].has("/k.jsonl")).toBe(false);
+    expect(hub.syncPins).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("pin persistence", () => {
-  it("rolls a pin back and reports it when the kernel refuses", async () => {
-    const hub = { syncPins: vi.fn(async () => {}), pinSession: vi.fn().mockRejectedValue(new Error("down")) } as unknown as HubPort;
+describe("toggling", () => {
+  it("shows a pin at once and keeps it until the tree agrees", async () => {
+    const hub = hubOf();
+    const { result, rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: rows({ path: "/x.jsonl" }) } });
+    act(() => result.current[1]("/x.jsonl"));
+    expect(hub.pinSession).toHaveBeenCalledWith("/x.jsonl", true);
+    expect(result.current[0].has("/x.jsonl")).toBe(true);
+    rerender({ t: rows({ path: "/x.jsonl", pinned: true }) });
+    expect(result.current[0].has("/x.jsonl")).toBe(true);
+  });
+
+  it("withdraws a pin the kernel refused and reports it", async () => {
+    const hub = hubOf({ pinSession: vi.fn().mockRejectedValue(new Error("down")) });
     const fail = vi.fn();
-    const { result } = renderHook(() => usePinnedSessions(hub, [], false, fail));
+    const { result } = renderHook(() => usePinnedSessions(hub, rows({ path: "/x.jsonl" }), true, fail));
     act(() => result.current[1]("/x.jsonl"));
     await waitFor(() => expect(fail).toHaveBeenCalledTimes(1));
     expect(result.current[0].has("/x.jsonl")).toBe(false);
-    expect(JSON.parse(localStorage.getItem("reasonix:pinned-sessions") ?? "[]")).toEqual([]);
   });
 
-  it("restores a pin when the kernel refuses to drop it", async () => {
-    localStorage.setItem("reasonix:pinned-sessions", JSON.stringify(["/k.jsonl"]));
-    const hub = { syncPins: vi.fn(async () => {}), pinSession: vi.fn().mockRejectedValue(new Error("down")) } as unknown as HubPort;
-    const { result } = renderHook(() => usePinnedSessions(hub, [], false));
+  it("keeps a pin the kernel refused to drop", async () => {
+    const hub = hubOf({ pinSession: vi.fn().mockRejectedValue(new Error("down")) });
+    const { result } = renderHook(() => usePinnedSessions(hub, rows({ path: "/k.jsonl", pinned: true }), true));
     act(() => result.current[1]("/k.jsonl"));
+    await waitFor(() => expect(hub.pinSession).toHaveBeenCalled());
     await waitFor(() => expect(result.current[0].has("/k.jsonl")).toBe(true));
   });
+});
 
-  it("tells the kernel about a legacy pin in a workspace listed after the first sync", async () => {
-    localStorage.setItem("reasonix:pinned-sessions", JSON.stringify(["/late.jsonl"]));
-    const send = vi.fn(async (_paths: string[]) => {});
-    const hub = { syncPins: send, pinSession: vi.fn(async () => {}) } as unknown as HubPort;
-    const { rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: tree } });
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-    const later = [...tree, { root: "/w2", name: "w2", sessions: [{ path: "/late.jsonl", name: "late" }] }] as unknown as TreeWorkspace[];
-    rerender({ t: later });
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls[1][0]).toContain("/late.jsonl");
+describe("pins from before the kernel kept them", () => {
+  it("opens the gate with nothing to send once the tree has loaded", async () => {
+    const hub = hubOf();
+    const { rerender } = renderHook(({ read }) => usePinnedSessions(hub, rows({ path: "/x.jsonl" }), read), { initialProps: { read: false } });
+    expect(hub.syncPins).not.toHaveBeenCalled();
+    rerender({ read: true });
+    await waitFor(() => expect(hub.syncPins).toHaveBeenCalledWith([]));
   });
 
-  it("does not resend while every remembered pin is already pinned in the kernel", async () => {
-    const send = vi.fn(async () => {});
-    const hub = { syncPins: send, pinSession: vi.fn(async () => {}) } as unknown as HubPort;
-    const { rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: tree } });
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-    rerender({ t: [...tree] });
-    await new Promise((r) => setTimeout(r, 30));
-    expect(send).toHaveBeenCalledTimes(1);
+  it("sends each once, when its conversation is first listed, then forgets it", async () => {
+    localStorage.setItem(KEY, JSON.stringify(["/late.jsonl", "/x.jsonl"]));
+    const hub = hubOf();
+    const { result, rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: rows({ path: "/x.jsonl" }) } });
+    await waitFor(() => expect(hub.syncPins).toHaveBeenCalledWith(["/x.jsonl"]));
+    await waitFor(() => expect(result.current[0].has("/x.jsonl")).toBe(true));
+    expect(JSON.parse(localStorage.getItem(KEY) ?? "[]")).toEqual(["/late.jsonl"]);
+    rerender({ t: rows({ path: "/x.jsonl", pinned: true }, { path: "/late.jsonl" }) });
+    await waitFor(() => expect(hub.syncPins).toHaveBeenLastCalledWith(["/late.jsonl"]));
+    await waitFor(() => expect(localStorage.getItem(KEY)).toBeNull());
+  });
+
+  it("retries after a failed send and leaves the memory in place", async () => {
+    localStorage.setItem(KEY, JSON.stringify(["/x.jsonl"]));
+    const hub = hubOf({ syncPins: vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(undefined) });
+    const { rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: rows({ path: "/x.jsonl" }) } });
+    await waitFor(() => expect(hub.syncPins).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(localStorage.getItem(KEY) ?? "[]")).toEqual(["/x.jsonl"]);
+    rerender({ t: rows({ path: "/x.jsonl" }, { path: "/y.jsonl" }) });
+    await waitFor(() => expect(hub.syncPins).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(localStorage.getItem(KEY)).toBeNull());
   });
 });

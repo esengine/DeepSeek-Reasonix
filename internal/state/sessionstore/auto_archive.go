@@ -78,7 +78,7 @@ func ArchiveInactiveSessions(dir string, now time.Time, idle time.Duration, hold
 }
 
 func archivable(path string, m BranchMeta, now time.Time, idle time.Duration) bool {
-	return !m.Archived && !m.Pinned && !m.Superseded && m.InFlightTurn == nil &&
+	return !m.Archived && !m.Pinned && !m.Superseded && m.InFlightTurn == nil && !m.Unread() &&
 		now.Sub(lastActivity(path, m)) >= idle && !SessionLeaseHeld(path)
 }
 

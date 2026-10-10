@@ -286,9 +286,9 @@ func (h *Hub) pinSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// syncPins takes the window's whole pin set: the union of what it remembers and
-// what the kernel reported. Until one arrives the kernel will not archive
-// anything on its own, because it cannot tell what the user pinned.
+// syncPins adds the pins a window made before the kernel kept them. Until the
+// first call the kernel will not archive anything on its own, because it
+// cannot tell what the user pinned.
 func (h *Hub) syncPins(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Paths []string `json:"paths"`

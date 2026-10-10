@@ -23,12 +23,13 @@ const (
 // ErrAutoArchiveOutOfRange marks an idle period the setting does not accept.
 var ErrAutoArchiveOutOfRange = errors.New("auto archive setting out of range")
 
-// AutoArchiveDays is the effective idle period in days.
+// AutoArchiveDays is the effective idle period in days. A hand-edited value past
+// the limit is held there: days*24h wraps time.Duration to minutes beyond it.
 func (c *Config) AutoArchiveDays() int {
 	if c == nil || c.AutoArchive.Days <= 0 {
 		return DefaultAutoArchiveDays
 	}
-	return c.AutoArchive.Days
+	return min(c.AutoArchive.Days, maxAutoArchiveDays)
 }
 
 // AutoArchiveAfter is the idle period after which a conversation is archived,

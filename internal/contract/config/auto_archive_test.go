@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -44,5 +45,30 @@ func TestProjectFileCannotSetAutoArchive(t *testing.T) {
 	held.restore(user)
 	if user.AutoArchive != (AutoArchiveConfig{Enabled: false, Days: 9}) {
 		t.Fatalf("auto_archive = %+v, want the user's value restored", user.AutoArchive)
+	}
+}
+
+func TestAutoArchiveDaysIsHeldAtTheLimit(t *testing.T) {
+	day := 24 * time.Hour
+	for _, tc := range []struct {
+		days int
+		want int
+	}{
+		{math.MinInt, DefaultAutoArchiveDays},
+		{-1, DefaultAutoArchiveDays},
+		{0, DefaultAutoArchiveDays},
+		{1, 1},
+		{maxAutoArchiveDays, maxAutoArchiveDays},
+		{maxAutoArchiveDays + 1, maxAutoArchiveDays},
+		{213504, maxAutoArchiveDays},
+		{math.MaxInt, maxAutoArchiveDays},
+	} {
+		c := Config{AutoArchive: AutoArchiveConfig{Enabled: true, Days: tc.days}}
+		if got := c.AutoArchiveDays(); got != tc.want {
+			t.Errorf("days %d: AutoArchiveDays = %d, want %d", tc.days, got, tc.want)
+		}
+		if got := c.AutoArchiveAfter(); got != time.Duration(tc.want)*day {
+			t.Errorf("days %d: AutoArchiveAfter = %v, want %v", tc.days, got, time.Duration(tc.want)*day)
+		}
 	}
 }

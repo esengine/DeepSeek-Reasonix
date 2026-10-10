@@ -197,3 +197,24 @@ func TestAutoArchiveMarksAndRestoreClears(t *testing.T) {
 		t.Fatal("restoring kept the automatic-archive mark")
 	}
 }
+
+func TestArchiveInactiveSessionsWaitsForAnUnreadFinish(t *testing.T) {
+	dir := t.TempDir()
+	unread := writeIdleSession(t, dir, "unread")
+	ageFiles(t, unread, 20*24*time.Hour)
+	finished := time.Now().Add(-20 * 24 * time.Hour)
+	if err := RecordSessionFinished(unread, finished, true); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(10 * 24 * time.Hour)
+	week := 3 * 24 * time.Hour
+	if n, err := ArchiveInactiveSessions(dir, now, week, nil); err != nil || n != 0 || archivedOf(t, unread) {
+		t.Fatalf("archived %d (err %v) with an unread finish, want none", n, err)
+	}
+	if err := MarkSessionViewed(unread, finished.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := ArchiveInactiveSessions(dir, now, week, nil); err != nil || n != 1 || !archivedOf(t, unread) {
+		t.Fatalf("archived %d (err %v) once viewed, want it archived", n, err)
+	}
+}
