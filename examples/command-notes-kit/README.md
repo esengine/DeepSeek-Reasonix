@@ -60,3 +60,33 @@ reviewed: 2026-10-01
    preserves the original source and leaves project-authored commands alone.
    This example makes no public market submission or cross-product runtime
    compatibility claim.
+
+## Compare with a worked note
+
+1. [Worked note](example-output/note.md) uses the fixed `ISSUE-7` request
+   above. It separates the complete input from `$1` and `$2`, preserves
+   validation as not run, and avoids inventing a changed file or test result.
+2. In a fresh session, try the missing-facts case:
+
+   ```text
+   /command-notes-kit:note ISSUE-7
+   ```
+
+   Compare with the reference's request for missing change and validation
+   evidence. This is model behavior to assess, not host-side input validation.
+3. The references are implementer-written, checked against `commands/note.md`,
+   and stored outside `commands`. They add no invocation and are not captured
+   live-model output. Record the chosen model and actual answer separately.
+
+## Verify the host path
+
+```sh
+go test ./internal/assembly/boot/ -run '^TestEffectInstalledCompatibleCommandLifecycle$' -count=1
+```
+
+1. The test installs Claude and Codex manifest mappings independently. It
+   checks real approved-plan copy, qualified discovery, argument expansion,
+   project short-name ownership, provider user-message delivery, disable,
+   enable and removal without changing the stable prefix or tool schema.
+2. Its provider is scripted. This establishes Reasonix host behavior, not a
+   live model's note quality or acceptance in another product.
