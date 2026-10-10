@@ -108,6 +108,12 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// one), and its MCP servers and sidecars start on that context later.
 	b.ctx, b.opts, b.owner, b.fileWriteReceipt = bindRuntimeOwner(context.WithoutCancel(ctx), opts)
 	defer b.retireUnownedSidecars()
+	delivered := false
+	if b.owner.Notices != nil && b.opts.Sink != nil {
+		window := b.owner.Notices.Begin(b.opts.Sink)
+		b.opts.Sink = window
+		defer func() { window.Close(delivered) }()
+	}
 	if err := b.load(); err != nil {
 		return nil, err
 	}
@@ -120,7 +126,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	b.tools.candidates.bind(ctrl)
 	b.tools.isolation.bind(ctrl)
-	return b.freeze(ctrl)
+	res, err := b.freeze(ctrl)
+	delivered = err == nil
+	return res, err
 }
 
 // retireUnownedSidecars restores adopted clients and closes fresh sidecars when
