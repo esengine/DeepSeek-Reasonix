@@ -78,6 +78,7 @@ export const ACTIONS: UIAction[] = [
   { id: "metrics.details", kind: "view", target: "optional", proof: "interaction" },
   { id: "metrics.hide-amounts", kind: "view", target: "none", proof: "interaction" },
   { id: "session.menu", kind: "view", target: "entity", proof: "interaction" },
+  { id: "workspace.sessions-more", kind: "view", target: "entity", proof: "interaction" },
   { id: "workspace.menu", kind: "view", target: "entity", proof: "interaction" },
   { id: "session.pin", kind: "view", target: "entity", proof: "interaction" },
   { id: "session.pause", kind: "kernel-mutation", target: "entity", proof: "interaction" },

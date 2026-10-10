@@ -60,12 +60,7 @@ interface Props {
   children?: ReactNode;
 }
 
-// How many of a folder's sessions get a row before the rest are summarised.
-// The list is newest-first, so this is the recent end. A machine that has been
-// worked on for months holds thousands of these, and drawing them all put 98k
-// nodes in the sidebar — more than the transcript at 20000 turns.
-const SHOWN = 30;
-
+const SHOWN = 10;
 // A conversation a pane holds before its first turn is written has only a file
 // name; calling it that would show a timestamp where every other row shows words.
 const rowLabel = (session: TreeSession) =>
@@ -134,8 +129,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
     renamed.current[session.path] = next;
     onRename(session.path, next);
   };
-  // Folders the reader asked to see in full.
-  const [whole, setWhole] = useState<Set<string>>(new Set());
+  const [shownCounts, setShownCounts] = useState<Record<string, number>>({});
   // Conversations whose conflict copies the reader asked to see.
   const [spread, setSpread] = useState<Set<string>>(new Set());
   // Two folders can share a name — a worktree copy carries the project's own.
@@ -328,6 +322,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
             // A fold is a resting-state preference; while a query is on it would hide
             // the very rows the query just found.
             const shut = needle ? false : folded.has(ws.root);
+            const limit = shownCounts[ws.root] ?? SHOWN;
+            const visibleSessions = ws.sessions.filter((session, index) => index < limit || (opening ? session.path === opening : !!active && session.runtimeId === active));
+            const hiddenCount = ws.sessions.length - visibleSessions.length;
             // Only while the question is on screen: panesOf walks every runtime.
             const doomed = confirm === ws.root ? panesOf(ws.root) : [];
             const busyPanes = liveIds(doomed).length;
@@ -348,7 +345,16 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                     className="wsrow"
                     role="treeitem"
                     aria-expanded={!shut}
-                    onClick={() => onFold(ws.root, !shut)}
+                    onClick={() => {
+                      if (!shut) {
+                        setShownCounts((prev) => {
+                          const next = { ...prev };
+                          delete next[ws.root];
+                          return next;
+                        });
+                      }
+                      onFold(ws.root, !shut);
+                    }}
                   >
                     <button className="twist" tabIndex={-1} aria-hidden="true">
                       <svg viewBox="0 0 10 10">
@@ -431,7 +437,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                     两级差 18px，扫一眼只读得出“有点错位”。 */}
                 {!shut && (
                   <div className="kids">
-                {(whole.has(ws.root) ? ws.sessions : ws.sessions.slice(0, SHOWN)).map((session) => {
+                {visibleSessions.map((session) => {
                     const on = opening ? session.path === opening : session.runtimeId === active;
                     const run = session.runtimeId ? runs[session.runtimeId]?.run : undefined;
                     if (confirm === session.path) {
@@ -674,13 +680,15 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       </Fragment>
                     );
                   })}
-
-                {!whole.has(ws.root) && ws.sessions.length > SHOWN && (
+                {hiddenCount > 0 && (
                   <button
                     className="sessmore"
-                    onClick={() => setWhole((prev) => new Set(prev).add(ws.root))}
+                    aria-label={t("还有 {n} 个 · 展开显示", { n: hiddenCount })}
+                    data-action="workspace.sessions-more"
+                    data-target={ws.root}
+                    onClick={() => setShownCounts((prev) => ({ ...prev, [ws.root]: (prev[ws.root] ?? SHOWN) + SHOWN }))}
                   >
-                    {t("还有 {n} 个 · 全部显示", { n: ws.sessions.length - SHOWN })}
+                    {t("还有 {n} 个 · 展开显示", { n: hiddenCount })}
                   </button>
                 )}
                   </div>

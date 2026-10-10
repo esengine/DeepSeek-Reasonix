@@ -291,6 +291,7 @@ export const EN: Record<string, string> = {
   "新建会话": "Start a new session",
   "空会话": "Empty session",
   "{n} 轮": "{n} turns",
+  "还有 {n} 个 · 展开显示": "{n} more · Show more",
   "还有 {n} 个 · 全部显示": "{n} more · show all",
   "打开或新建项目…": "Open or start a project…",
   "文件夹的完整路径": "Full path to the folder",
