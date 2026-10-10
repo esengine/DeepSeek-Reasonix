@@ -3387,7 +3387,7 @@
     background: var(--accent-ink); transition: width var(--m-panel) ;
   }
   .cmp .note { margin-top: 8px }
-  .threshold-control { width: min(360px, 100%); display: flex; align-items: center; gap: 7px }
+  .threshold-row { flex-wrap: wrap } .threshold-row .tx { flex-basis: 14em } .threshold-control { width: min(360px, 100%); display: flex; align-items: center; gap: 7px }
   .threshold-control .unit-field { flex: 1 }
   .threshold-control input { height: 30px; padding: 4px 8px; color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono) }
   .threshold-presets { display: flex; align-items: center; gap: 3px }
