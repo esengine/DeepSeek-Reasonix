@@ -3,11 +3,16 @@ package serve
 import (
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// The platform tables may not know .webmanifest, and a manifest served as
+// text/plain is one the browser may refuse to install from.
+func init() { _ = mime.AddExtensionType(".webmanifest", "application/manifest+json") }
 
 // FindPage resolves the built page a host serves. An explicit directory holding
 // none is a launch that would open on nothing, so it fails here rather than at
