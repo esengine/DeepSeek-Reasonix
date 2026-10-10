@@ -19,6 +19,9 @@ import { docRef } from "./docrefs";
 import { useGlance } from "./glance";
 import { useMarkdownPoll } from "./useMarkdownPoll";
 import { pinToViewport } from "./place";
+import { keyOf, type Surface } from "./workbench_tabs";
+import { useTabClose } from "./useTabClose";
+import { WorkbenchTabs } from "./WorkbenchTabs";
 import { WorkbenchExplorerHead } from "./WorkbenchExplorerHead";
 import { WorkbenchFileBar, type FileMode } from "./WorkbenchFileBar";
 import { useHtmlPreview } from "./useHtmlPreview";
@@ -28,27 +31,12 @@ import { useCommitCard } from "./CommitCard";
 // The editor and its grammars load with the first file opened, not with Studio.
 const CodeEditor = lazy(() => import("./CodeEditor"));
 
-type Surface =
-  | { kind: "manual"; id: string }
-  | { kind: "browser"; tab: BrowserTab }
-  | { kind: "file"; path: string };
 type TreeRow = {
   kind: "folder" | "file";
   path: string;
   name: string;
   depth: number;
 };
-
-function keyOf(s: Surface) {
-  return `${s.kind}:${s.kind === "manual" ? s.id : s.kind === "browser" ? s.tab.target : s.path}`;
-}
-function labelOf(s: Surface, hosts: Record<string, string>) {
-  return s.kind === "manual"
-    ? hosts[s.id] || t("浏览器")
-    : s.kind === "browser"
-      ? s.tab.title || s.tab.url || t("空白页")
-      : s.path.split("/").at(-1) || s.path;
-}
 
 /** Folders first at every level, with the tree still reading as a tree. Sorting
  *  flat paths as text interleaves `bin/` with `boot.test.exe`, because text is
@@ -363,13 +351,7 @@ export function WorkbenchPanel({
     [files, directories, query, collapsed],
   );
   useEffect(() => onSurfaces(surfaces.length), [onSurfaces, surfaces.length]);
-  // A strip wider than the column scrolls, and the tab being shown is always
-  // brought into it: a selected tab nobody can see reads as a tab that closed.
-  const strip = useRef<HTMLDivElement>(null);
   const activeKey = active ? keyOf(active) : "";
-  useEffect(() => {
-    strip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [activeKey, surfaces.length]);
   const held = useRef({ file, draft });
   held.current = { file, draft };
   // Revisions are opaque, so only order says which answer is current: a read
@@ -481,21 +463,7 @@ export function WorkbenchPanel({
       setFailed(reason(e));
     }
   };
-  // The column folds only when its last tab goes, whatever kind that tab is: a
-  // page opened with + or a file still open is a reason to keep it, and so is
-  // an explorer someone has open.
-  const close = (surface: Surface) => {
-    const key = keyOf(surface);
-    if (surface.kind === "manual") setBrowsers((v) => v.filter((id) => id !== surface.id));
-    else if (surface.kind === "file")
-      setOpenFiles((v) => v.filter((p) => p !== surface.path));
-    else setDismissed((v) => new Set(v).add(key));
-    if (selected === key) {
-      setSelected("");
-      setFailed("");
-    }
-    if (!showFiles && surfaces.every((s) => keyOf(s) === key)) onCloseManual();
-  };
+  const { close, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles, setBrowsers, setOpenFiles, setDismissed, setSelected, onCloseManual, onCloseSelected: () => setFailed("") });
   const save = async () => {
     if (!file || draft === file.content) return;
     setBusy(true);
@@ -511,71 +479,8 @@ export function WorkbenchPanel({
   };
   return (
     <section className="workbench" aria-label={t("工作台")}>
-      <header className="workbench-tabs">
-        <div
-          className="workbench-tablist"
-          role="tablist"
-          ref={strip}
-          onWheel={(e) => {
-            if (e.deltaY && strip.current) strip.current.scrollLeft += e.deltaY;
-          }}
-        >
-        {surfaces.map((surface) => (
-          <div
-            className="workbench-tab"
-            key={keyOf(surface)}
-            role="tab"
-            aria-selected={surface === active}
-            data-live={surface.kind === "browser" && surface.tab.active ? "" : undefined}
-          >
-            <button
-              className="workbench-tab-pick"
-              data-action="workbench.tab"
-              data-target={keyOf(surface)}
-              title={
-                surface.kind === "browser"
-                  ? `${surface.tab.active ? `${t("模型正在操作这个页面")}
-` : ""}${surface.tab.url}`
-                  : labelOf(surface, hosts)
-              }
-              onClick={() => pick(keyOf(surface))}
-            >
-              <StudioIcon name={surface.kind === "file" ? "file" : "globe"} />
-              <span>{labelOf(surface, hosts)}</span>
-            </button>
-            <button
-              className="workbench-tab-close"
-              data-action="workbench.close"
-              data-target={keyOf(surface)}
-              aria-label={t("关闭 {name}", { name: labelOf(surface, hosts) })}
-              title={t("关闭")}
-              onClick={() => close(surface)}
-            >
-              <StudioIcon name="close" />
-            </button>
-          </div>
-        ))}
-        </div>
-        <button
-          className="workbench-files"
-          data-action="workbench.files"
-          aria-pressed={showFiles}
-          aria-label={t("文件")}
-          title={t("文件")}
-          onClick={() => setShowFiles((on) => !on)}
-        >
-          <StudioIcon name="folder" />
-        </button>
-        <button
-          className="workbench-new"
-          data-action="workbench.new-browser"
-          aria-label={t("新建浏览器标签")}
-          title={t("新建浏览器标签")}
-          onClick={() => void addBrowser()}
-        >
-          <StudioIcon name="plus" />
-        </button>
-      </header>
+      <WorkbenchTabs surfaces={surfaces} hosts={hosts} active={activeKey} showFiles={showFiles} closing={closing}
+        onPick={pick} onClose={close} onFiles={() => setShowFiles((on) => !on)} onNew={() => void addBrowser()} />
       <div className="workbench-body" data-files={showFiles ? "" : undefined}>
         <main className="workbench-canvas">
           {failed && active?.kind !== "file" && (
@@ -791,6 +696,7 @@ export function WorkbenchPanel({
           )}
         </aside>
       </div>
+      {closeFailure && <p className="workbench-no-files" role="alert">{closeFailure}</p>}
     </section>
   );
 }

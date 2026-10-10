@@ -96,3 +96,4 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Icon rail with three display modes | Have | #12377, #12428; sidebar footer entries appear only when icon navigation is hidden (#12478) |
 | Usage, feedback, account and settings footer / 用量、反馈、账号与设置底部入口 | Have differently | `ui/Nav.tsx` when navigation is visible; `ui/Sidebar.tsx` otherwise, including the narrow-window drawer. 导航可见时使用图标栏入口，隐藏时保留侧栏入口 (#12478) |
 | Completed-unread marker on sessions | Have | #12218 |
+| Workbench browser-tab menu / 工作台浏览器标签菜单 | Have differently | `ui/WorkbenchTabs.tsx` and `ui/BrowserTabMenu.tsx`: close one, others, right or all through the controller; files are excluded from bulk closing. 控制器关闭页面，批量操作保留文件 (#12067, #12348, #11645) |
