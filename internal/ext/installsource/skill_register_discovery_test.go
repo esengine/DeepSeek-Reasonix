@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -197,5 +198,43 @@ func TestApprovedSkillRegistrationReportsItsOwnDiscovery(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// The registered root and the skill that keeps the selection can each live
+// under any configured path, so the not-selected warning shows both as host
+// literals, as the install-side shadowing warning does.
+func TestNotSelectedWarningShowsBothPathsAsLiterals(t *testing.T) {
+	for name, hostile := range map[string]string{"newline": "\n", "bidi": "\u202e", "zero-width": "\u200b"} {
+		t.Run(name, func(t *testing.T) {
+			if hostile == "\n" && runtime.GOOS == "windows" {
+				t.Skip("a Windows file name cannot hold a newline, so this path cannot exist there")
+			}
+			project, home := testenv.TempDir(t), testenv.TempDir(t)
+			t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+			root := filepath.Join(project, "source"+hostile+"skills")
+			writeFile(t, filepath.Join(root, "alpha.md"), "---\nname: alpha\ndescription: Registered alpha\n---\nUse registered alpha.\n")
+			earlier := filepath.Join(project, "earlier"+hostile+"skills")
+			writeFile(t, filepath.Join(earlier, "alpha.md"), "---\nname: alpha\ndescription: Earlier alpha\n---\nUse earlier alpha.\n")
+			if err := config.EditConfigFile(filepath.Join(project, "reasonix.toml"), func(cfg *config.Config) error { return cfg.AddSkillPath(earlier) }); err != nil {
+				t.Fatal(err)
+			}
+			tl := NewTool(Options{ProjectRoot: project, HomeDir: home, RequireApprovedPlan: true})
+			args := map[string]any{"source": root, "kind": "skill", "mode": "register", "scope": "project"}
+			plan := execInstall(t, tl, args)
+			args["apply"], args["planId"] = true, plan.PlanID
+			done := execInstall(t, tl, args)
+			if !done.OK || len(done.Actions) != 1 {
+				t.Fatalf("registration = %+v", done)
+			}
+			i := slices.IndexFunc(done.Actions[0].Warnings, func(w string) bool { return strings.Contains(w, "is not selected in this workspace") })
+			if i < 0 {
+				t.Fatalf("warnings = %q, want the not-selected warning", done.Actions[0].Warnings)
+			}
+			warning := done.Actions[0].Warnings[i]
+			if strings.Contains(warning, hostile) || strings.Count(warning, hostLiteral(hostile)) != 2 {
+				t.Fatalf("not-selected warning = %q, want both paths to show %q as %q", warning, hostile, hostLiteral(hostile))
+			}
+		})
 	}
 }

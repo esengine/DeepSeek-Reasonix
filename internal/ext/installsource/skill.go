@@ -156,7 +156,7 @@ func (t *Tool) verifySkill(scope, name string, act *action) error {
 	}
 	installedPath := config.CanonicalSkillPath(act.CanonicalPath)
 	if config.CanonicalSkillPath(sk.Path) != installedPath {
-		act.Warnings = append(act.Warnings, fmt.Sprintf("skill %q installed at %s is shadowed in this workspace by %s", name, act.CanonicalPath, sk.Path))
+		act.Warnings = append(act.Warnings, fmt.Sprintf("skill %q installed at %s is shadowed in this workspace by %s", name, hostLiteral(act.CanonicalPath), hostLiteral(sk.Path)))
 	} else {
 		act.Discoverable = true
 		for _, listed := range store.List() {
