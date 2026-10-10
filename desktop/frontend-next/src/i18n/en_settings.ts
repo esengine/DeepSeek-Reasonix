@@ -365,6 +365,11 @@ export const EN_SETTINGS: Record<string, string> = {
   "一个包可以同时提供技能、命令、自动化钩子和外部服务。安装与导入是同一个操作：提供一个仓库地址，或本机的一个文件夹。":
     "One package can bring skills, commands, automation hooks and external services at once. Installing and importing are the same action: give it a repository address or a folder on this machine.",
   "尚未安装插件包。": "No plugin packages installed.",
+  "技能贡献": "Skills",
+  "命令贡献": "Commands",
+  "子代理贡献": "Subagents",
+  "提示词贡献": "Prompts",
+  "主题贡献": "Themes",
   "外部工具": "External tools",
   "已接入的 MCP 服务。其提供的能力与内置工具等同，列出的每一项均可访问文件与数据。关闭后立即从本轮工具列表中移除，重启后保持关闭。":
     "MCP services you connected yourself. What they give the agent is as real as a built-in tool: every entry here can act on your files and data. Turning one off removes it from this turn's tool list immediately, and it stays off after a restart.",

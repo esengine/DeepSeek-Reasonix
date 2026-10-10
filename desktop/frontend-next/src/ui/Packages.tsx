@@ -235,11 +235,11 @@ function Package({
             <span className="sc">{s.description || s.command || s.url || s.transport}</span>
           </div>
         ))}
-        <Contributions items={p.skills} />
-        <Contributions items={p.commands} />
-        <Contributions items={p.agents} />
-        <Contributions items={p.prompts} />
-        <Contributions items={p.themes} />
+        <Contributions label={t("技能贡献")} items={p.skills} />
+        <Contributions label={t("命令贡献")} items={p.commands} />
+        <Contributions label={t("子代理贡献")} items={p.agents} />
+        <Contributions label={t("提示词贡献")} items={p.prompts} />
+        <Contributions label={t("主题贡献")} items={p.themes} />
         {p.skipped?.map((s, index) => (
           <div className="row" key={index}>
             <span className="d">·</span>
@@ -252,10 +252,11 @@ function Package({
   );
 }
 
-function Contributions({ items }: { items?: PluginItem[] }) {
+function Contributions({ label, items }: { label: string; items?: PluginItem[] }) {
   if (!items?.length) return null;
   return (
-    <>
+    <div className="contributions" role="group" aria-label={label}>
+      <h4 className="kind">{label}</h4>
       {items.map((it, index) => (
         <div className="row" key={index}>
           <span className="d">·</span>
@@ -263,6 +264,6 @@ function Contributions({ items }: { items?: PluginItem[] }) {
           <span className="sc">{it.description}</span>
         </div>
       ))}
-    </>
+    </div>
   );
 }

@@ -1275,6 +1275,8 @@
   .fold:hover { color: var(--text) }
 
   .peek { margin-top: 7px; display: flex; flex-direction: column; gap: 3px }
+  .peek .contributions { display: flex; flex-direction: column; gap: 3px; margin-top: 7px }
+  .peek .contributions > .kind { margin: 0; font: var(--w-med) var(--fs-ui) var(--ui); color: var(--muted) }
   .peek .row { display: flex; gap: 9px; font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--faint) }
   .peek .row .d { color: var(--ghost) }
   .peek .row .n { margin-left: auto; color: var(--ghost); font-variant-numeric: tabular-nums }
