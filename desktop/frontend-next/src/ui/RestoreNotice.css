@@ -1,0 +1,14 @@
+.restore-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; padding: 8px 2px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); }
+.restore-notice button {
+  flex: 0 1 auto; max-width: 100%; border: 0; border-radius: var(--r-sm); padding: 4px 6px;
+  background: transparent; color: var(--accent-ink); cursor: pointer; font: inherit; text-decoration: none;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.restore-notice button:hover:not(:disabled) { background: var(--overlay); color: var(--text); }
+.restore-notice button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.restore-notice button:disabled { opacity: .5; cursor: default; }
+.restore-notice [role="alert"] {
+  flex-basis: 100%; min-width: 0; max-height: min(calc(18vh / var(--zoom, 1)), 6lh);
+  overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; color: var(--err-ink);
+}
+.restore-notice [role="alert"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

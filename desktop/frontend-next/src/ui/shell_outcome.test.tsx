@@ -37,7 +37,6 @@ function draw(items: Item[]) {
       checkpoints={new Map()}
       onPrepareRewind={noop}
       onCommitRewind={noop}
-      onUndoRewind={noop}
       onPrepareFileRevert={noop}
       onCommitFileRevert={noop}
       needsProject={false}

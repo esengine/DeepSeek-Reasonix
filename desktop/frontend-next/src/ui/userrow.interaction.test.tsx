@@ -21,7 +21,6 @@ const row = (text: string) => {
       onResend={vi.fn()}
       onPrepareRewind={vi.fn(never)}
       onCommitRewind={vi.fn(never)}
-      onUndoRewind={vi.fn(never)}
     />,
   );
 };

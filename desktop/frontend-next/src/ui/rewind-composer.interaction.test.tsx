@@ -241,7 +241,7 @@ describe("restoring a rewound prompt to the composer", () => {
 
   it("leaves restoration out of undo, single-file revert and commits without a prompt", async () => {
     const port = new MockPort();
-    vi.spyOn(port, "commitRewind").mockResolvedValue({ ok: true, conversationOk: true });
+    vi.spyOn(port, "commitRewind").mockResolvedValue({ ok: true, conversationOk: true, undoAvailable: true, transactionId: "tx-1" });
     const undo = vi.spyOn(port, "undoRewind").mockResolvedValue();
     const revert = vi.spyOn(port, "commitFileRevert").mockResolvedValue({ ok: true });
     const reload = vi.fn();

@@ -12,6 +12,7 @@ import { useReplyActions } from "./reply";
 import { useGateActions } from "./gates";
 import { useQueueActions } from "./queueactions";
 import { useRewindActions } from "./rewind";
+import { ReloadNotice, RestoreNotice } from "./RestoreNotice";
 import { initialTraj, reduceTraj } from "../state/trajectory";
 import { Transcript } from "./Transcript";
 import { useBackgroundDeltas } from "./deltas";
@@ -231,24 +232,26 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // Everything on screen belongs to one session; when the kernel moves this
   // pane to another one — a switch, a new session, a rewind — all of it has to
   // be re-read rather than patched.
-  const reloadSession = useCallback(() => {
+  const reloadSession = useCallback((current: () => boolean = () => true) => {
     trajDispatch({ kind: "__clear" } as never);
-    port.trajectory().then(replayTrajectory).catch(() => {});
-    port.checkpoints().then(setCheckpoints).catch(() => setCheckpoints([]));
+    port.trajectory().then((r) => { if (current()) replayTrajectory(r); }).catch(() => {});
+    port.checkpoints().then((cps) => { if (current()) setCheckpoints(cps); }).catch(() => { if (current()) setCheckpoints([]); });
     // Two reads, the same way the first mount takes them: the record does not
     // wait behind the numbers over it.
     const history = port.history().then((msgs) => {
+      if (!current()) return;
       const r = fromHistory(msgs);
       dispatch({ kind: "__restore", ...r });
     });
     port.status().then((st) => {
+      if (!current()) return;
       applyStatus(st);
       dispatch(totalsOf(st) as never);
-    });
+    }).catch((e) => { if (current()) fail(e); });
     refreshWallet();
     onSessionChanged();
     return history;
-  }, [port, applyStatus, refreshWallet, onSessionChanged, replayTrajectory]);
+  }, [port, applyStatus, refreshWallet, onSessionChanged, replayTrajectory, fail]);
 
   // Both of these read only the user and tool cards, so they key off the
   // revision rather than the items array: a streamed answer leaves every card
@@ -320,7 +323,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     sessionState: sessionRead.kind,
     sessionPath: status?.sessionPath,
   });
-  const { onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert } = useRewindActions(port, reloadSession, onRestoreText);
+  const { reloadFailure, onReloadSession, restoreNotice, dismissRestore, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert } = useRewindActions(port, reloadSession, onRestoreText, JSON.stringify([rt.id, rt.root, status?.sessionPath ?? rt.sessionPath]), running);
 
   const { onApprove, onFullAccess, onPlan, onForget, onExtInvoke, onExtSubmit, onAnswer } = useGateActions({
     port,
@@ -417,7 +420,6 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         checkpoints={paired}
         onPrepareRewind={onPrepareRewind}
         onCommitRewind={onCommitRewind}
-        onUndoRewind={onUndoRewind}
         onPrepareFileRevert={onPrepareFileRevert}
         onCommitFileRevert={onCommitFileRevert}
         needsProject={needsProject}
@@ -517,6 +519,8 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}
           onCancelJob={(id) => port.cancelJob(id).then(refreshStatus, fail)}
         />
+        {reloadFailure && <ReloadNotice failure={reloadFailure} onReload={onReloadSession} />}
+        {restoreNotice && <RestoreNotice receipt={restoreNotice} refreshing={reloadFailure?.working} onUndo={onUndoRewind} onDismiss={dismissRestore} />}
         {/* Below the box, under a ceiling of their own. Both arrive unbidden and
             both are dismissed one at a time, so nothing else bounds how many can
             be on screen at once. */}
