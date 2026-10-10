@@ -125,6 +125,12 @@ export interface ProviderProbe {
 // What re-probing a saved provider found. A failure carries `code`, the dotted
 // identity the add flow's refusals use, because "401" and "no chat models" send
 // the user to different fixes; the endpoint's own words ride along as `detail`.
+export interface ProviderRemoval {
+  movedTo: string;
+  moved: string[];
+  cleared: string[];
+}
+
 export interface ProviderCheck {
   ok: boolean;
   kind?: string;

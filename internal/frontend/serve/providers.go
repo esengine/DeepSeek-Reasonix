@@ -398,7 +398,8 @@ func (s *Server) removeProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	if err := cfg.RemoveProvider(name); err != nil {
+	removal, err := cfg.RemoveProvider(name)
+	if err != nil {
 		switch {
 		case errors.Is(err, config.ErrProviderNotFound):
 			// Already gone is the state the caller asked for: a second click, or
@@ -421,7 +422,24 @@ func (s *Server) removeProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	w.WriteHeader(http.StatusNoContent)
+	if len(removal.Moved) == 0 && len(removal.Cleared) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, providerRemovalView{
+		MovedTo: removal.MovedTo,
+		Moved:   nonNilStrings(removal.Moved),
+		Cleared: nonNilStrings(removal.Cleared),
+	})
+}
+
+// providerRemovalView is what a removal changed besides the provider: role ids
+// ("default", "planner", "vision", "subagent:<skill>", ...) handed to MovedTo or
+// emptied.
+type providerRemovalView struct {
+	MovedTo string   `json:"movedTo"`
+	Moved   []string `json:"moved"`
+	Cleared []string `json:"cleared"`
 }
 
 // removalSuccessor is where a conversation on a removed provider goes: the saved

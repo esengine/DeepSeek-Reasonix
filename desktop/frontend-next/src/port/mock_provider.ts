@@ -3,6 +3,7 @@ import type {
   ModelLimit,
   Protocol,
   ProviderCheck,
+  ProviderRemoval,
   ProviderEdit,
   ProviderEntry,
   ProviderModelCheck,
@@ -167,7 +168,14 @@ export class MockProvider extends MockBoundary {
     );
   }
 
-  async removeProvider(): Promise<void> {}
+  // The relay stands for a service other roles lean on, so removing it shows
+  // the report; the rest go without a word.
+  async removeProvider(name: string): Promise<ProviderRemoval> {
+    this.sources = this.sources.filter((e) => e.name !== name);
+    return name === "myrelay"
+      ? { movedTo: "deepseek", moved: ["default", "planner"], cleared: ["vision", "advisor"] }
+      : { movedTo: "", moved: [], cleared: [] };
+  }
 }
 
 // A gateway answering at the scale the connection panel has to survive: the

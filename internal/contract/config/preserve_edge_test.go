@@ -85,7 +85,7 @@ func TestSavingUserConfigEditsTheTextInPlace(t *testing.T) {
 		{"inline table holding unknown keys", "config_version = 12\ndesktop = { theme = \"auto\", future = 1, more = [\"x\"] }\n", darkTheme, []string{"future = 1", "more = [\"x\"]"}},
 		{"sub-table first", "config_version = 12\n[desktop.future]\nx = 1\n", darkTheme, []string{"[desktop.future]\nx = 1"}},
 		{"unnamed provider", "config_version = 12\n[desktop]\nfuture = 0\n[[providers]]\nkind = \"openai\"\nfuture = 1\n", darkTheme, []string{"future = 1"}},
-		{"delete a middle provider", threeProviders, func(c *Config) error { return c.RemoveProvider("b") }, []string{"future = 1", "future = 3"}},
+		{"delete a middle provider", threeProviders, func(c *Config) error { _, err := c.RemoveProvider("b"); return err }, []string{"future = 1", "future = 3"}},
 		{"edit a middle provider", threeProviders, func(c *Config) error {
 			for i := range c.Providers {
 				if c.Providers[i].Name == "b" {
@@ -112,7 +112,7 @@ func TestSavingUserConfigEditsTheTextInPlace(t *testing.T) {
 func TestRemovingTheLastProviderLeavesItsSubTablesWithIt(t *testing.T) {
 	seed := "config_version = 12\n[[providers]]\nname = \"a\"\nkind = \"openai\"\nbase_url = \"http://a\"\nmodel = \"m\"\n\n" +
 		"[[providers]]\nname = \"b\"\nkind = \"openai\"\nbase_url = \"http://b\"\nmodel = \"m\"\n[providers.headers]\nX-A = \"1\"\n"
-	got, _ := saveInPlace(t, seed, func(c *Config) error { return c.RemoveProvider("b") })
+	got, _ := saveInPlace(t, seed, func(c *Config) error { _, err := c.RemoveProvider("b"); return err })
 	if p, _ := got.Provider("a"); len(got.Providers) != 1 || len(p.Headers) != 0 {
 		t.Fatalf("providers = %+v, want a alone without b's headers", got.Providers)
 	}

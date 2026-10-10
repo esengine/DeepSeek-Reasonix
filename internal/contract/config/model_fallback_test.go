@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -253,7 +254,7 @@ func TestRemoveProviderMigratesDanglingRefs(t *testing.T) {
 		"explore": "prov-b/model-b1",
 	}
 
-	if err := c.RemoveProvider("prov-a"); err != nil {
+	if _, err := c.RemoveProvider("prov-a"); err != nil {
 		t.Fatalf("RemoveProvider: %v", err)
 	}
 	if _, ok := c.Provider("prov-a"); ok {
@@ -288,7 +289,7 @@ func TestRemoveProviderClearsDefaultWithoutFallback(t *testing.T) {
 	c.Providers[1].APIKeyEnv = "REASONIX_TEST_EMPTY"
 	c.Providers[1].resolvedAPIKey = ""
 
-	if err := c.RemoveProvider("prov-a"); err != nil {
+	if _, err := c.RemoveProvider("prov-a"); err != nil {
 		t.Fatalf("remove the default's provider with no fallback: %v", err)
 	}
 	if _, ok := c.Provider("prov-a"); ok {
@@ -308,7 +309,7 @@ func TestRemoveProviderClearsOptionalRefsWithoutFallback(t *testing.T) {
 	c.Providers[1].APIKeyEnv = "REASONIX_TEST_EMPTY"
 	c.Providers[1].resolvedAPIKey = ""
 
-	if err := c.RemoveProvider("prov-a"); err != nil {
+	if _, err := c.RemoveProvider("prov-a"); err != nil {
 		t.Fatalf("RemoveProvider: %v", err)
 	}
 	if c.Agent.PlannerModel != "" {
@@ -331,7 +332,7 @@ func TestRemoveProviderClearsRolesThatCannotMove(t *testing.T) {
 	a.SubagentModel = "prov-b/model-b1"
 	c.Agent = a
 
-	if err := c.RemoveProvider("prov-a"); err != nil {
+	if _, err := c.RemoveProvider("prov-a"); err != nil {
 		t.Fatalf("RemoveProvider: %v", err)
 	}
 	for name, ref := range map[string]string{
@@ -344,5 +345,71 @@ func TestRemoveProviderClearsRolesThatCannotMove(t *testing.T) {
 	}
 	if c.Agent.SubagentModel != "prov-b/model-b1" {
 		t.Fatalf("an unrelated role changed to %q", c.Agent.SubagentModel)
+	}
+}
+
+func TestRemoveProviderReportsWhatItChanged(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.DefaultModel = "prov-a/model-a1"
+	c.Agent.PlannerModel = "prov-a"
+	c.Agent.SubagentModels = map[string]string{"review": "prov-a/model-a2", "explore": "prov-b/model-b1"}
+	c.Agent.VisionModel, c.Agent.AdvisorModel = "prov-a/model-a1", "prov-a/model-a2"
+	c.Agent.GuardianModel = "prov-b/model-b1"
+
+	got, err := c.RemoveProvider("prov-a")
+	if err != nil {
+		t.Fatalf("RemoveProvider: %v", err)
+	}
+	want := ProviderRemoval{
+		MovedTo: "prov-b",
+		Moved:   []string{"default", "planner", "subagent:review"},
+		Cleared: []string{"vision", "advisor"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("removal = %+v, want %+v", got, want)
+	}
+}
+
+func TestRemoveProviderReportsClearedWhenNothingRemains(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.DefaultModel = "prov-a/model-a1"
+	c.Agent.PlannerModel = "prov-a"
+	c.Providers[1].APIKeyEnv = "REASONIX_TEST_EMPTY"
+	c.Providers[1].resolvedAPIKey = ""
+
+	got, err := c.RemoveProvider("prov-a")
+	if err != nil {
+		t.Fatalf("RemoveProvider: %v", err)
+	}
+	if got.MovedTo != "" || len(got.Moved) != 0 || !reflect.DeepEqual(got.Cleared, []string{"default", "planner"}) {
+		t.Fatalf("removal = %+v, want default and planner cleared", got)
+	}
+}
+
+func TestRemoveProviderDropsItsAccessName(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.Desktop.ProviderAccess = []string{"prov-a", " prov-b "}
+	if _, err := c.RemoveProvider("prov-a"); err != nil {
+		t.Fatalf("RemoveProvider: %v", err)
+	}
+	if !reflect.DeepEqual(c.Desktop.ProviderAccess, []string{" prov-b "}) {
+		t.Fatalf("provider_access = %q, want only prov-b", c.Desktop.ProviderAccess)
+	}
+
+	c = testModelFallbackConfig(t)
+	c.Desktop.ProviderAccess = []string{"prov-a"}
+	if _, err := c.RemoveProvider("prov-a"); err != nil {
+		t.Fatalf("RemoveProvider: %v", err)
+	}
+	if c.Desktop.ProviderAccess == nil || len(c.Desktop.ProviderAccess) != 0 {
+		t.Fatalf("provider_access = %#v, want a declared empty list", c.Desktop.ProviderAccess)
+	}
+
+	c = testModelFallbackConfig(t)
+	if _, err := c.RemoveProvider("prov-a"); err != nil {
+		t.Fatalf("RemoveProvider: %v", err)
+	}
+	if c.Desktop.ProviderAccess != nil {
+		t.Fatalf("an undeclared provider_access must stay undeclared, got %#v", c.Desktop.ProviderAccess)
 	}
 }
