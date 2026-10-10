@@ -93,7 +93,7 @@ export function App({ hub }: { hub: HubPort }) {
   // 窄到放不下工作区栏时它是收起的，而不是消失的：栏一旦从 DOM 里拿掉，把手也
   // 跟着没了，剩下的入口只有一个没人知道的快捷键。
   const [rail, setRail] = useState(() => !roomGaveUp("rail"));
-  const [pinnedSessions, togglePinnedSession, unpinSession] = usePinnedSessions(hub, tree, treeRead);
+  const [pinnedSessions, togglePinnedSession, unpinSession] = usePinnedSessions(hub, tree, treeRead, (e) => setError(reason(e)));
   const [railW, setRailW] = useState(() => widthOf(RAIL));
   const [dockW, setDockW] = useState(() => widthOf(DOCK));
   const [dockLimit, setDockLimit] = useState(() => dockMax(document.body.clientWidth));

@@ -13,13 +13,12 @@ function saved(): Set<string> {
 }
 
 // The kernel owns pins, because its automatic archiving has to honour them.
-// Once the tree has loaded the window sends the union of its own memory and
-// what the kernel reported, and adopts that union; a failed send is retried on
-// the next tree load, never assumed done. Until it lands the kernel archives
-// nothing on its own.
-export function usePinnedSessions(hub: HubPort, tree: TreeWorkspace[], treeRead: boolean) {
+// The window tells it every pin it remembers that the kernel does not list as
+// pinned, on each tree load until that lands, so a legacy pin in a workspace
+// added later is protected before its first sweep. A pin the kernel refused is
+// rolled back and reported rather than left looking kept.
+export function usePinnedSessions(hub: HubPort, tree: TreeWorkspace[], treeRead: boolean, onFailure: (e: unknown) => void = () => {}) {
   const [pinned, setPinned] = useState<Set<string>>(saved);
-  const synced = useRef(false);
 
   const set = useCallback((path: string, on: boolean) => {
     setPinned((current) => {
@@ -40,17 +39,30 @@ export function usePinnedSessions(hub: HubPort, tree: TreeWorkspace[], treeRead:
     (path: string) => {
       const on = !pinned.has(path);
       set(path, on);
-      void hub.pinSession(path, on).catch(() => {});
+      hub.pinSession(path, on).catch((e) => {
+        set(path, !on);
+        onFailure(e);
+      });
     },
-    [hub, pinned, set],
+    [hub, onFailure, pinned, set],
   );
 
   const unpin = useCallback((path: string) => set(path, false), [set]);
 
+  const synced = useRef(false);
   useEffect(() => {
-    if (!treeRead || synced.current) return;
-    const union = new Set(pinned);
-    for (const ws of tree) for (const s of ws.sessions) if (s.pinned) union.add(s.path);
+    if (!treeRead) return;
+    const kernel = new Set<string>();
+    const listed = new Set<string>();
+    for (const ws of tree) {
+      for (const s of ws.sessions) {
+        listed.add(s.path);
+        if (s.pinned) kernel.add(s.path);
+      }
+    }
+    const unknown = [...pinned].filter((path) => listed.has(path) && !kernel.has(path));
+    if (synced.current && unknown.length === 0) return;
+    const union = new Set([...unknown, ...kernel]);
     hub
       .syncPins([...union])
       .then(() => {
