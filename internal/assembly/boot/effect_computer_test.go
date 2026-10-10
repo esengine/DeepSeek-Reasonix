@@ -87,7 +87,7 @@ func TestEffectComputerUseThroughTheRealAssembly(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("tool results = %q", results)
 	}
-	if !strings.Contains(results[0], "* com.example.Notes — Notes") {
+	if !strings.Contains(results[0], `* com.example.Notes — "Notes"`) {
 		t.Fatalf("the application list did not reach the model:\n%s", results[0])
 	}
 	if !strings.Contains(results[1], "Completed 1 of 2 step(s).") || !strings.Contains(results[1], `[a2] value="hello"`) {
