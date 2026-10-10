@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import type { AgentPort, PluginExport, PluginItem, PluginPackage } from "../port/port";
 import { Switch } from "./Switch";
 import { reason } from "../i18n/kernel";
+import { CopyButton } from "./CopyButton";
 
 interface Props {
   port: AgentPort;
@@ -261,6 +262,7 @@ function Contributions({ items }: { items?: PluginItem[] }) {
           <span className="d">·</span>
           <span>{it.invocation || it.name}</span>
           <span className="sc">{it.description}</span>
+          {it.invocation && <CopyButton key={it.invocation} text={it.invocation} iconOnly label={t("复制调用命令 {command}", { command: it.invocation })} />}
         </div>
       ))}
     </>
