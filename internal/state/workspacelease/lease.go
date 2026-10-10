@@ -71,6 +71,14 @@ type Owner struct {
 	// holder names this session to a session waiting on it. Read when the
 	// lease is taken, so a rename mid-hold shows on the next hold.
 	holder func() string
+	// skipWriteSerialization drops this session's cross-session write lease
+	// entirely: no call takes the workspace lock, so opaque writers stop
+	// blocking other sessions. The zero value keeps the lease.
+	skipWriteSerialization bool
+	// relaxWholeWorkspace keeps an undeclaring writer from holding the whole
+	// workspace against other sessions; declared paths still exclude others.
+	// The zero value holds the workspace for every writer.
+	relaxWholeWorkspace bool
 
 	mu            sync.Mutex
 	activeRuns    int
@@ -113,10 +121,27 @@ var localRegistry = struct {
 	locks map[string]*localLock
 }{locks: map[string]*localLock{}}
 
+// Option configures a lease Owner at construction.
+type Option func(*Owner)
+
+// WithoutWriteSerialization lets writers that could not declare write paths run
+// without the workspace write lease. Callers get it from the user config; the
+// default (not passing this option) keeps serializing.
+func WithoutWriteSerialization() Option {
+	return func(o *Owner) { o.skipWriteSerialization = true }
+}
+
+// WithoutWholeWorkspaceHold keeps an undeclaring writer from holding the whole
+// workspace against other sessions; declared paths still exclude other
+// sessions, and queueing inside one session is unchanged.
+func WithoutWholeWorkspaceHold() Option {
+	return func(o *Owner) { o.relaxWholeWorkspace = true }
+}
+
 // New returns a Delivery-session lease owner for workspaceRoot. lockDir must be
 // shared by Reasonix processes for cross-process protection; it is kept outside
 // the workspace so acquiring a lease never dirties user files.
-func New(workspaceRoot, lockDir string, onWait WaitNotice) (*Owner, error) {
+func New(workspaceRoot, lockDir string, onWait WaitNotice, opts ...Option) (*Owner, error) {
 	canonical, err := CanonicalWorkspace(workspaceRoot)
 	if err != nil {
 		return nil, err
@@ -140,12 +165,18 @@ func New(workspaceRoot, lockDir string, onWait WaitNotice) (*Owner, error) {
 	}
 	localRegistry.Unlock()
 
-	return &Owner{
+	o := &Owner{
 		lockPath: filepath.Join(lockDir, key+".lock"),
 		onWait:   onWait,
 		local:    local,
 		scope:    pathLeaseState{root: canonical, identity: rand.Text()},
-	}, nil
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(o)
+		}
+	}
+	return o, nil
 }
 
 // CanonicalWorkspace returns the stable identity used to key a workspace. It
@@ -263,10 +294,22 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (func(),
 	if o == nil {
 		return func() {}, nil
 	}
+	if o.skipWriteSerialization {
+		// Serialization turned off: report the write as granted without taking
+		// the cross-session lease, so opaque writers stop blocking each other.
+		// Nothing was held, so the release the caller gets is a no-op.
+		return func() {}, nil
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	claim := o.normalizePaths(paths)
+	if o.relaxWholeWorkspace && claim == nil && len(paths) == 0 {
+		// Optimistic: a writer that declared no paths does not hold the whole
+		// workspace against other sessions; one that declared paths the host
+		// could not resolve still takes the whole workspace, as under strict.
+		return func() {}, nil
+	}
 	for {
 		o.mu.Lock()
 		o.askedLocked(time.Now())

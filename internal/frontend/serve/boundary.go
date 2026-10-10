@@ -21,6 +21,8 @@ func (s *Server) registerBoundaryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sandbox", s.saveSandboxSettings)
 	mux.HandleFunc("GET /browser-tools", s.browserToolsSettings)
 	mux.HandleFunc("POST /browser-tools", s.saveBrowserToolsSettings)
+	mux.HandleFunc("GET /write-lease", s.writeLeaseSettings)
+	mux.HandleFunc("POST /write-lease", s.saveWriteLeaseSettings)
 	// The file every one of these is written to, for when it is the thing that
 	// is wrong: each save above refuses with the same code, and this is where a
 	// surface reads it before trying, and repairs it after.
@@ -178,4 +180,38 @@ func (s *Server) saveBrowserToolsSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, s.ctl().BrowserToolsSettings())
+}
+
+func (s *Server) writeLeaseSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.ctl().WriteLeaseSettings())
+}
+
+// saveWriteLeaseSettings rides the provider-edit grant: the mode decides how far
+// the cross-session workspace lock reaches, so "optimistic" (or "off") is what
+// lets two sessions on one workspace run a build at the same time.
+func (s *Server) saveWriteLeaseSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.grants.at(r).providerEdit {
+		refuse(w, http.StatusForbidden, "write_lease.editing_disabled", "write-lease editing is not enabled on this server", nil)
+		return
+	}
+	var body struct {
+		Mode *string `json:"mode"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+		badBody(w)
+		return
+	}
+	if body.Mode == nil || *body.Mode == "" {
+		refuse(w, http.StatusBadRequest, "write_lease.no_mode", "mode is required", nil)
+		return
+	}
+	if err := s.ctl().SaveWriteLease(*body.Mode); err != nil {
+		saveFailed(w, http.StatusInternalServerError, "write_lease.save_failed", err)
+		return
+	}
+	if err := s.rebuildInPlace(r.Context()); err != nil {
+		rebuildFailed(w, err)
+		return
+	}
+	writeJSON(w, s.ctl().WriteLeaseSettings())
 }

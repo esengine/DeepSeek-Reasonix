@@ -273,7 +273,7 @@ func (f *FleetTool) buildItemSpecs(ctx context.Context, items []fleetTaskItem, a
 			return nil, nil, fmt.Errorf("task %d: %w", i+1, err)
 		}
 		if forceBackgroundClaim && !spec.Grant.ReadOnly && spec.Grant.WritePaths.Empty() {
-			whole, werr := writeclaim.WholeWorkspaceWriteClaim(f.taskTool.workspaceRoot)
+			whole, werr := writeclaim.UndeclaredWriterClaim(f.taskTool.workspaceRoot)
 			if werr != nil {
 				return nil, nil, fmt.Errorf("task %d: %w", i+1, werr)
 			}

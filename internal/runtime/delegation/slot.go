@@ -42,7 +42,7 @@ func (t *TaskTool) acquireRequestFor(spec *ProfileExecSpec) (writeclaim.AcquireR
 	if !req.Writer || !spec.Grant.WritePaths.Empty() || !spec.Sched.RunInBackground {
 		return req, nil
 	}
-	whole, err := writeclaim.WholeWorkspaceWriteClaim(t.workspaceRoot)
+	whole, err := writeclaim.UndeclaredWriterClaim(t.workspaceRoot)
 	if err != nil {
 		return writeclaim.AcquireRequest{}, err
 	}

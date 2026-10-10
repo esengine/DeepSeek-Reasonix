@@ -478,7 +478,7 @@ func (t *TaskTool) resolveWriterClaims(writePaths []string, requireClaim bool) (
 	if !requireClaim {
 		return writeclaim.WritePathSet{}, nil
 	}
-	return writeclaim.WholeWorkspaceWriteClaim(t.workspaceRoot)
+	return writeclaim.UndeclaredWriterClaim(t.workspaceRoot)
 }
 
 // settleSpecPrompts rejects a run with nothing to do and fills in the system

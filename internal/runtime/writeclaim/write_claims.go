@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 
 	"reasonix/internal/base/fileutil"
 )
@@ -120,6 +121,23 @@ func SubagentWriteClaim(ctx context.Context) WritePathSet {
 	return SubagentWriteGrant(ctx).Scope()
 }
 
+// undeclaredRelaxed lifts the whole-workspace hold a writer with no
+// write_paths takes; leaseOff also stops claims from excluding each other.
+// SetWriteLeaseTiers writes both once, before any runtime is assembled.
+var (
+	undeclaredRelaxed atomic.Bool
+	leaseOff          atomic.Bool
+)
+
+// SetWriteLeaseTiers records the session's write-lease tiers: relaxUndeclared
+// for the relaxed one, off for the tier that takes no claim at all. The zero
+// value is the strict upstream behaviour, so a process that never calls this
+// keeps serializing exactly as before.
+func SetWriteLeaseTiers(relaxUndeclared, off bool) {
+	undeclaredRelaxed.Store(relaxUndeclared)
+	leaseOff.Store(off)
+}
+
 // WholeWorkspaceWriteClaim claims the entire workspace for a writer that did
 // not declare write_paths. Such tasks may only run serially among writers.
 func WholeWorkspaceWriteClaim(workspaceRoot string) (WritePathSet, error) {
@@ -128,6 +146,17 @@ func WholeWorkspaceWriteClaim(workspaceRoot string) (WritePathSet, error) {
 		return WritePathSet{}, err
 	}
 	return WritePathSet{WholeWorkspace: true, WorkspaceRoot: root}, nil
+}
+
+// UndeclaredWriterClaim is the claim for a writer that declared no write_paths:
+// the whole workspace under the strict tier, nothing at all under the relaxed
+// and off tiers. A declared path that cannot be resolved still goes through
+// WholeWorkspaceWriteClaim, so those callers are untouched.
+func UndeclaredWriterClaim(workspaceRoot string) (WritePathSet, error) {
+	if undeclaredRelaxed.Load() {
+		return WritePathSet{}, nil
+	}
+	return WholeWorkspaceWriteClaim(workspaceRoot)
 }
 
 // Overlaps reports whether two write claims conflict (identical, parent/child,

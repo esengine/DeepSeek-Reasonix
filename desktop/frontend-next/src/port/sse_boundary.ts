@@ -1,5 +1,5 @@
 import { SseShell } from "./sse_shell";
-import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
+import type { Adjudications, BrowserToolsSettings, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings, WriteLeaseSettings } from "./port";
 import type { DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings } from "./boundary";
 
 // Where the agent may reach: the permission rules a call is matched against and
@@ -31,6 +31,12 @@ export class SseBoundary extends SseShell {
   }
   saveBrowserTools(enabled: boolean) {
     return this.post0<BrowserToolsSettings>("/browser-tools", { enabled });
+  }
+  writeLease() {
+    return this.get<WriteLeaseSettings>("/write-lease");
+  }
+  saveWriteLease(mode: string) {
+    return this.post0<WriteLeaseSettings>("/write-lease", { mode });
   }
   displayCurrency() {
     return this.get<DisplayCurrencySettings>("/display-currency");

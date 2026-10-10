@@ -29,6 +29,10 @@ type heldScope struct {
 	endpoints    heldEndpoints
 	layaPython   string
 	layaLocal    bool
+	// writeLease is the user's write-lease mode. A project file may not change
+	// it: widening or removing the conflict protection is not the clone's to
+	// give away.
+	writeLease string
 }
 
 func holdUserScope(c *Config) heldScope {
@@ -51,6 +55,7 @@ func holdUserScope(c *Config) heldScope {
 		endpoints:    holdUserEndpoints(c),
 		layaPython:   c.Tools.SystemOne.Laya.Python,
 		layaLocal:    c.Tools.SystemOne.Laya.Local,
+		writeLease:   c.Agent.WriteLeaseMode(),
 	}
 }
 
@@ -120,6 +125,12 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("auto_submit", fmt.Sprintf("%t", c.AutoSubmit), ProjectUserOnly)
 		c.AutoSubmit = h.autoSubmit
 	}
+	// The write-lease mode is the user's alone: a cloned repo must not be able to
+	// widen or remove the conflict protection for everyone working in it.
+	if c.Agent.WriteLeaseMode() != h.writeLease {
+		c.ignoreProject("agent.write_lease", c.Agent.WriteLeaseMode(), ProjectUserOnly)
+	}
+	c.Agent.WriteLease = h.writeLease
 	h.narrowSandbox(c, ws)
 	h.narrowPermissions(c)
 	if NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode) != NormalizeToolApprovalMode(h.approvalMode) {

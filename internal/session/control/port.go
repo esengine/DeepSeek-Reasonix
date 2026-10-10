@@ -270,6 +270,8 @@ type RuntimeSettings interface {
 	SaveSandboxSettings(in SandboxSettings) error
 	BrowserToolsSettings() BrowserToolsSettings
 	SaveBrowserToolsSettings(enabled bool) error
+	WriteLeaseSettings() WriteLeaseSetting
+	SaveWriteLease(mode string) error
 	CompactionSettings() CompactionSettings
 	SaveCompactionSettings(softLimitTokens int) error
 	DisplayCurrencySettings() DisplayCurrencySettings

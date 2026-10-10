@@ -268,7 +268,7 @@ func parentWriteReservation(workDir, toolName string, args json.RawMessage) (wri
 		return parentResolvedWriteReservation(workDir, paths)
 	}
 	// Bash and MCP/custom writers.
-	return writeclaim.WholeWorkspaceWriteClaim(workDir)
+	return writeclaim.UndeclaredWriterClaim(workDir)
 }
 
 func extractWritePathsFromArgs(toolName, workDir string, args json.RawMessage) ([]string, error) {
@@ -277,7 +277,7 @@ func extractWritePathsFromArgs(toolName, workDir string, args json.RawMessage) (
 
 func parentResolvedWriteReservation(workDir string, paths []string) (writeclaim.WritePathSet, error) {
 	if len(paths) == 0 {
-		return writeclaim.WholeWorkspaceWriteClaim(workDir)
+		return writeclaim.UndeclaredWriterClaim(workDir)
 	}
 	set, err := writeclaim.NormalizeWritePaths(workDir, paths)
 	if err != nil {

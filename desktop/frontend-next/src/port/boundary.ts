@@ -84,6 +84,17 @@ export interface BrowserToolsSettings {
   path: string;
 }
 
+// The write-lease mode as the user file holds it, beside what this workspace
+// will run with. The key is the user's alone, so a project file cannot widen or
+// remove the protection. "strict" serializes every writer whose extent could
+// overlap another's, "optimistic" excludes only declared extents, and "off"
+// takes no cross-session lease at all.
+export interface WriteLeaseSettings {
+  mode: string;
+  effective: string;
+  path: string;
+}
+
 // When a run reads as no longer moving. Only the user file holds it: a
 // project file cannot pause the user's runs.
 export type DisplayCurrencyMode = "auto" | "CNY" | "USD";

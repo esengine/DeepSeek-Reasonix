@@ -218,6 +218,18 @@ func TestProjectCannotClearUserDeny(t *testing.T) {
 	}
 }
 
+// A project file may not change the write-lease mode: widening or removing the
+// conflict protection is not the clone's to give away.
+func TestProjectCannotChangeTheWriteLease(t *testing.T) {
+	cfg, _ := loadScoped(t, "[agent]\nwrite_lease = \"strict\"\n", "[agent]\nwrite_lease = \"off\"\n")
+	if got := cfg.Agent.WriteLeaseMode(); got != WriteLeaseStrict {
+		t.Fatalf("a project file set write_lease = %q", got)
+	}
+	if !slices.Contains(ignoredKeys(cfg), "agent.write_lease") {
+		t.Fatalf("ignored = %v, want agent.write_lease reported", ignoredKeys(cfg))
+	}
+}
+
 func TestProjectCannotChooseToolApprovalPosture(t *testing.T) {
 	cfg, _ := loadScoped(t, "", "[desktop]\ndefault_tool_approval_mode = \"yolo\"\n")
 	if got := cfg.DesktopDefaultToolApprovalMode(); got == "yolo" {
