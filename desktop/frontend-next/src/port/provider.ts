@@ -223,6 +223,8 @@ export interface ModelLimit {
 export interface ModelEffort {
   supportedEfforts: string[];
   defaultEffort?: string;
+  // On an inherited ladder: the vendor's documented contract, not typed levels.
+  official?: boolean;
 }
 
 // What the panel sends back after the user has looked at the probe.

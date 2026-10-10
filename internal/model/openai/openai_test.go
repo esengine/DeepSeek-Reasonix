@@ -1557,6 +1557,36 @@ func TestZhipuDepthRequestByModel(t *testing.T) {
 	}
 }
 
+func TestDeclaredGLMProtocolOnARelayTakesTheDepthContract(t *testing.T) {
+	relay := func(model, protocol, effort string) provider.Config {
+		return provider.Config{Name: "relay", BaseURL: "https://relay.example/v1", Model: model, APIKey: "k",
+			Extra: map[string]any{"reasoning_protocol": protocol, "effort": effort}}
+	}
+	for _, tc := range []struct {
+		model, protocol, effort, wantThinking, wantDepth string
+	}{
+		{"glm-5.3", "glm", "high", "enabled", "high"},
+		{"glm-5.3", "glm", "disabled", "enabled", "low"},
+		{"glm-5.2", "glm", "none", "disabled", ""},
+		{"glm-4.5", "glm", "disabled", "disabled", ""},
+	} {
+		p, err := New(relay(tc.model, tc.protocol, tc.effort))
+		if err != nil {
+			t.Fatalf("%s/%s: %v", tc.model, tc.effort, err)
+		}
+		req := p.(*client).buildRequest(provider.Request{})
+		if req.Thinking == nil || req.Thinking.Type != tc.wantThinking || req.ReasoningEffort != tc.wantDepth {
+			t.Errorf("%s/%s: wire = thinking %+v, reasoning_effort %q; want %q/%q", tc.model, tc.effort, req.Thinking, req.ReasoningEffort, tc.wantThinking, tc.wantDepth)
+		}
+	}
+	if _, err := New(relay("glm-5.3", "glm", "medium")); err == nil {
+		t.Error("a relay declared glm accepted a level GLM-5.3 does not document")
+	}
+	if _, err := New(relay("glm-5.3", "openai", "medium")); err != nil {
+		t.Errorf("a relay declared openai must not take the GLM contract: %v", err)
+	}
+}
+
 func TestZhipuThinkingOffLevelIgnoresDepthOverride(t *testing.T) {
 	for _, off := range []string{"none", "minimal"} {
 		cfg := provider.Config{Name: "glm", BaseURL: "https://api.z.ai/api/paas/v4", Model: "glm-5.2", APIKey: "k", Extra: map[string]any{"effort": off}}
@@ -1612,7 +1642,7 @@ func TestNewExplicitGLMProtocolOnGateway(t *testing.T) {
 		p, err := New(provider.Config{
 			Name:    "glm-gateway",
 			BaseURL: "https://gateway.example.com/v1",
-			Model:   "glm-5.2",
+			Model:   "glm-4.5",
 			APIKey:  "k",
 			Extra: map[string]any{
 				"reasoning_protocol": "glm",

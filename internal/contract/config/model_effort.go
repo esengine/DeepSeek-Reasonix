@@ -87,6 +87,23 @@ func (e *ProviderEntry) InheritedEffortCapability(model string) EffortCapability
 	return EffortCapabilityForEntry(cp.forModel(model))
 }
 
+// InheritedEffortOfficial reports whether the ladder model inherits is a
+// vendor's documented contract rather than something the connection typed.
+func (e *ProviderEntry) InheritedEffortOfficial(model string) bool {
+	if e == nil {
+		return false
+	}
+	cp := *e
+	if key, ok := cp.modelOverrideKey(model); ok {
+		cp.ModelOverrides = maps.Clone(cp.ModelOverrides)
+		ov := cp.ModelOverrides[key]
+		ov.SupportedEfforts, ov.DefaultEffort = nil, ""
+		cp.ModelOverrides[key] = ov
+	}
+	_, ok := zhipuMenuContract(cp.forModel(model))
+	return ok
+}
+
 // forModel is the entry resolved onto one of its models: the model's price,
 // its overrides, then what is known about the model underneath them.
 func (e *ProviderEntry) forModel(model string) *ProviderEntry {
