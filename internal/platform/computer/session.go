@@ -102,6 +102,9 @@ type Window struct {
 	ID     int    `json:"id"`
 	Title  string `json:"title"`
 	Bounds Rect   `json:"bounds"`
+	// Owned is true for a dialog or tool window another window owns. Nil means
+	// the helper does not classify windows, which leaves a target unguarded.
+	Owned *bool `json:"owned,omitempty"`
 }
 
 // Rect is a rectangle in global points, origin top-left.
@@ -122,6 +125,7 @@ type Session struct {
 }
 
 type shotGeometry struct {
+	window int
 	bounds Rect
 	scale  float64 // screen points per pixel of the image the model was shown
 }
@@ -196,18 +200,25 @@ func (s *Session) Snapshot(ctx context.Context, bundle string) (Snapshot, error)
 
 // Screenshot captures an application's front window, sized for a vision model.
 // x and y in later steps are read in this image's pixels.
-func (s *Session) Screenshot(ctx context.Context, bundle string) (string, App, error) {
+func (s *Session) Screenshot(ctx context.Context, bundle string, window int) (string, App, error) {
 	app, err := s.App(ctx, bundle)
 	if err != nil {
+		return "", App{}, err
+	}
+	if err := app.target(window, true); err != nil {
 		return "", App{}, err
 	}
 	var r struct {
 		Data   string `json:"data"`
 		Mime   string `json:"mime"`
+		Window int    `json:"window"`
 		Bounds Rect   `json:"bounds"`
 	}
-	if err := s.call(ctx, "screenshot", map[string]any{"pid": app.PID}, &r); err != nil {
+	if err := s.call(ctx, "screenshot", withWindow(map[string]any{"pid": app.PID}, window), &r); err != nil {
 		return "", App{}, err
+	}
+	if window != 0 && r.Window != window {
+		return "", App{}, fail(CodeNoWindow, "window %d could not be captured; the capture is of window %d", window, r.Window)
 	}
 	raw, err := base64.StdEncoding.DecodeString(r.Data)
 	if err != nil {
@@ -222,7 +233,7 @@ func (s *Session) Screenshot(ctx context.Context, bundle string) (string, App, e
 		return "", App{}, fail(CodeCaptureFailed, "the capture could not be measured")
 	}
 	s.mu.Lock()
-	s.shots[app.Bundle] = shotGeometry{bounds: r.Bounds, scale: r.Bounds.Width / float64(cfg.Width)}
+	s.shots[app.Bundle] = shotGeometry{window: r.Window, bounds: r.Bounds, scale: r.Bounds.Width / float64(cfg.Width)}
 	s.mu.Unlock()
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(fitted), app, nil
 }
@@ -282,7 +293,7 @@ type StepResult struct {
 
 // Act runs steps in order on one application and stops at the first that
 // fails, or when the person presses Escape while the agent's cursor is showing.
-func (s *Session) Act(ctx context.Context, bundle string, steps []Step) (ActResult, error) {
+func (s *Session) Act(ctx context.Context, bundle string, window int, steps []Step) (ActResult, error) {
 	res := ActResult{FailedAt: -1}
 	app, err := s.App(ctx, bundle)
 	if err != nil {
@@ -290,6 +301,10 @@ func (s *Session) Act(ctx context.Context, bundle string, steps []Step) (ActResu
 		return res, err
 	}
 	res.App = app
+	if err := app.target(window, needsWindow(steps)); err != nil {
+		res.FailedAt = 0
+		return res, err
+	}
 	// The pointer goes back where the person left it when the steps are done,
 	// whether they finished or stopped.
 	if PointerSteps(steps) {
@@ -305,7 +320,7 @@ func (s *Session) Act(ctx context.Context, bundle string, steps []Step) (ActResu
 			res.FailedAt = i
 			return res, fail(CodeStopped, "the person pressed Escape; ask before continuing")
 		}
-		done, err := s.step(ctx, app, step)
+		done, err := s.step(ctx, app, window, step)
 		if err != nil {
 			res.FailedAt = i
 			return res, err
@@ -335,36 +350,39 @@ func (s *Session) deliver(ctx context.Context, method string, params map[string]
 
 func noted(note string) func(actReply) string { return func(actReply) string { return note } }
 
-func (s *Session) step(ctx context.Context, app App, step Step) (StepResult, error) {
+func (s *Session) step(ctx context.Context, app App, window int, step Step) (StepResult, error) {
 	pid := app.PID
+	deliver := func(method string, params map[string]any, note func(actReply) string) (StepResult, error) {
+		return s.deliver(ctx, method, withWindow(params, window), note)
+	}
 	switch strings.ToLower(strings.TrimSpace(step.Action)) {
 	case "click":
 		if step.Ref != "" {
-			return s.deliver(ctx, "press", map[string]any{"pid": pid, "ref": step.Ref}, noted("press "+step.Ref))
+			return deliver("press", map[string]any{"pid": pid, "ref": step.Ref}, noted("press "+step.Ref))
 		}
-		x, y, err := s.screenPoint(app, step)
+		x, y, err := s.screenPoint(app, window, step)
 		if err != nil {
 			return StepResult{}, err
 		}
-		return s.deliver(ctx, "click", map[string]any{"pid": pid, "x": x, "y": y}, func(r actReply) string {
+		return deliver("click", map[string]any{"pid": pid, "x": x, "y": y}, func(r actReply) string {
 			return fmt.Sprintf("click the %s at (%v,%v)", r.Role, *step.X, *step.Y)
 		})
 	case "focus":
-		return s.deliver(ctx, "focus", map[string]any{"pid": pid, "ref": step.Ref}, noted("focus "+step.Ref))
+		return deliver("focus", map[string]any{"pid": pid, "ref": step.Ref}, noted("focus "+step.Ref))
 	case "set_value":
-		return s.deliver(ctx, "set_value", map[string]any{"pid": pid, "ref": step.Ref, "text": step.Text},
+		return deliver("set_value", map[string]any{"pid": pid, "ref": step.Ref, "text": step.Text},
 			noted(fmt.Sprintf("set %s to %d characters", step.Ref, len([]rune(step.Text)))))
 	case "type":
-		return s.deliver(ctx, "type", map[string]any{"pid": pid, "text": step.Text}, noted(fmt.Sprintf("type %d characters", len([]rune(step.Text)))))
+		return deliver("type", map[string]any{"pid": pid, "text": step.Text}, noted(fmt.Sprintf("type %d characters", len([]rune(step.Text)))))
 	case "key":
-		return s.deliver(ctx, "key", map[string]any{"pid": pid, "key": step.Key, "times": max(step.Times, 1)}, noted("press "+step.Key))
+		return deliver("key", map[string]any{"pid": pid, "key": step.Key, "times": max(step.Times, 1)}, noted("press "+step.Key))
 	case "paste":
-		return s.deliver(ctx, "paste", map[string]any{"pid": pid, "text": step.Text}, noted(fmt.Sprintf("paste %d characters", len([]rune(step.Text)))))
+		return deliver("paste", map[string]any{"pid": pid, "text": step.Text}, noted(fmt.Sprintf("paste %d characters", len([]rune(step.Text)))))
 	case "hold_key":
-		return s.deliver(ctx, "hold_key", map[string]any{"pid": pid, "key": step.Key, "seconds": step.Seconds},
+		return deliver("hold_key", map[string]any{"pid": pid, "key": step.Key, "seconds": step.Seconds},
 			noted(fmt.Sprintf("hold %s for %vs", step.Key, step.Seconds)))
 	case "pointer_move", "pointer_click", "pointer_drag":
-		return s.pointerStep(ctx, app, step)
+		return s.pointerStep(ctx, app, window, step)
 	case "pointer_position":
 		var at struct{ X, Y float64 }
 		if err := s.call(ctx, "pointer_position", nil, &at); err != nil {
@@ -375,9 +393,9 @@ func (s *Session) step(ctx context.Context, app App, step Step) (StepResult, err
 		if step.Ref == "" {
 			return StepResult{}, fail(CodeBadStep, "a right_click needs a ref; the menu belongs to the element")
 		}
-		return s.deliver(ctx, "menu", map[string]any{"pid": pid, "ref": step.Ref}, noted("open the menu of "+step.Ref))
+		return deliver("menu", map[string]any{"pid": pid, "ref": step.Ref}, noted("open the menu of "+step.Ref))
 	case "scroll":
-		return s.deliver(ctx, "scroll", map[string]any{"pid": pid, "ref": step.Ref, "amount": step.Amount}, func(r actReply) string {
+		return deliver("scroll", map[string]any{"pid": pid, "ref": step.Ref, "amount": step.Amount}, func(r actReply) string {
 			if r.How == "revealed" {
 				return "bring " + step.Ref + " into view"
 			}
@@ -398,12 +416,12 @@ func (s *Session) step(ctx context.Context, app App, step Step) (StepResult, err
 // pointerStep takes the person's pointer to the point a screenshot named. The
 // helper refuses a point whose window belongs to another application, so an
 // approval for one application cannot reach into the next.
-func (s *Session) pointerStep(ctx context.Context, app App, step Step) (StepResult, error) {
-	x, y, err := s.screenPoint(app, step)
+func (s *Session) pointerStep(ctx context.Context, app App, window int, step Step) (StepResult, error) {
+	x, y, err := s.screenPoint(app, window, step)
 	if err != nil {
 		return StepResult{}, err
 	}
-	args := map[string]any{"pid": app.PID, "x": x, "y": y}
+	args := withWindow(map[string]any{"pid": app.PID, "x": x, "y": y}, window)
 	switch strings.ToLower(strings.TrimSpace(step.Action)) {
 	case "pointer_move":
 		return s.deliver(ctx, "pointer_move", args, noted(fmt.Sprintf("move the pointer to (%v,%v)", *step.X, *step.Y)))
@@ -412,7 +430,7 @@ func (s *Session) pointerStep(ctx context.Context, app App, step Step) (StepResu
 		if to.X == nil || to.Y == nil {
 			return StepResult{}, fail(CodeBadStep, "a pointer_drag needs where it ends: to_x and to_y")
 		}
-		toX, toY, err := s.screenPoint(app, to)
+		toX, toY, err := s.screenPoint(app, window, to)
 		if err != nil {
 			return StepResult{}, err
 		}
@@ -442,7 +460,7 @@ func (s *Session) describePoint(app App, x, y float64) string {
 
 // screenPoint converts a point in the latest screenshot's pixels to global
 // screen points.
-func (s *Session) screenPoint(app App, step Step) (float64, float64, error) {
+func (s *Session) screenPoint(app App, window int, step Step) (float64, float64, error) {
 	if step.X == nil || step.Y == nil {
 		return 0, 0, fail(CodeBadStep, "a click needs a ref, or x and y from a screenshot")
 	}
@@ -451,6 +469,9 @@ func (s *Session) screenPoint(app App, step Step) (float64, float64, error) {
 	s.mu.Unlock()
 	if !ok {
 		return 0, 0, fail(CodeNeedsScreenshot, "take a screenshot of %s first; x and y are read in its pixels", app.Bundle)
+	}
+	if window != 0 && shot.window != window {
+		return 0, 0, fail(CodeNeedsScreenshot, "the latest screenshot of %s is of another window; take one of window %d first", app.Bundle, window)
 	}
 	return shot.bounds.X + *step.X*shot.scale, shot.bounds.Y + *step.Y*shot.scale, nil
 }

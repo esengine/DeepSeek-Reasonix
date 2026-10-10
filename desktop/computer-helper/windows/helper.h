@@ -48,6 +48,9 @@ bool ownsPoint(DWORD pid, POINT at);
 bool isFront(DWORD pid);
 HWND heldOwner(HWND window, DWORD pid);
 void front(DWORD pid);
+// targetWindow aims the request being served at one of the application's
+// windows, which appWindows then lists first; null leaves the front one.
+void targetWindow(DWORD pid, HWND window);
 RECT windowBounds(HWND hwnd);
 Json rectJson(const RECT& r);
 

@@ -12,7 +12,7 @@ import (
 // it fails with an identity, and the failure names the modal from structure.
 func TestAStepAModalHoldsFailsAndNamesTheModal(t *testing.T) {
 	s := fakeSession(t)
-	res, err := s.Act(context.Background(), "com.example.Held", []Step{{Action: "type", Text: "hello"}})
+	res, err := s.Act(context.Background(), "com.example.Held", 0, []Step{{Action: "type", Text: "hello"}})
 	if CodeOf(err) != CodeBlocked || res.Done != 0 || res.FailedAt != 0 {
 		t.Fatalf("typing into a held application = %+v, %v; want %s at step 1 with nothing done", res, err, CodeBlocked)
 	}
@@ -32,7 +32,7 @@ func TestAStepAModalHoldsFailsAndNamesTheModal(t *testing.T) {
 // carries. A step that sends nothing has no effect at all.
 func TestAnEffectIsOnlyAsStrongAsItsEvidence(t *testing.T) {
 	s := fakeSession(t)
-	res, err := s.Act(context.Background(), "com.example.Notes", []Step{
+	res, err := s.Act(context.Background(), "com.example.Notes", 0, []Step{
 		{Action: "set_value", Ref: "a2", Text: "hi"},
 		{Action: "type", Text: "hi"},
 		{Action: "focus", Ref: "a2"},

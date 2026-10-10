@@ -49,7 +49,7 @@ func (computerRead) Description() string {
 }
 
 func (computerRead) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"what":{"type":"string","enum":["apps","snapshot","screenshot"]},"app":{"type":"string"}},"required":["what"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"what":{"type":"string","enum":["apps","snapshot","screenshot"]},"app":{"type":"string"},"window":{"type":"integer"}},"required":["what"]}`)
 }
 
 func (computerRead) ReadOnly() bool                                   { return false }
@@ -75,8 +75,9 @@ func (c computerRead) Execute(ctx context.Context, args json.RawMessage) (string
 
 func (c computerRead) ExecuteWithImages(ctx context.Context, args json.RawMessage) (string, []string, error) {
 	var p struct {
-		What string `json:"what"`
-		App  string `json:"app"`
+		What   string `json:"what"`
+		App    string `json:"app"`
+		Window int    `json:"window"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", nil, fmt.Errorf("invalid args: %w", err)
@@ -98,7 +99,7 @@ func (c computerRead) ExecuteWithImages(ctx context.Context, args json.RawMessag
 		}
 		return renderComputerSnapshot(snap), nil, nil
 	case "screenshot":
-		shot, app, err := c.session.Screenshot(ctx, p.App)
+		shot, app, err := c.session.Screenshot(ctx, p.App, p.Window)
 		if err != nil {
 			return "", nil, err
 		}
@@ -124,7 +125,7 @@ func (computerAct) Description() string {
 }
 
 func (computerAct) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"app":{"type":"string"},"steps":{"type":"array","items":{"type":"object","properties":{"action":{"type":"string","enum":["click","right_click","focus","set_value","type","paste","key","hold_key","scroll","wait","pointer_move","pointer_click","pointer_drag","pointer_position"]},"ref":{"type":"string"},"text":{"type":"string"},"key":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"},"amount":{"type":"number"},"ms":{"type":"integer"},"to_x":{"type":"number"},"to_y":{"type":"number"},"button":{"type":"string","enum":["left","right","middle"]},"times":{"type":"integer"},"seconds":{"type":"number"}},"required":["action"]}}},"required":["app","steps"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"app":{"type":"string"},"window":{"type":"integer"},"steps":{"type":"array","items":{"type":"object","properties":{"action":{"type":"string","enum":["click","right_click","focus","set_value","type","paste","key","hold_key","scroll","wait","pointer_move","pointer_click","pointer_drag","pointer_position"]},"ref":{"type":"string"},"text":{"type":"string"},"key":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"},"amount":{"type":"number"},"ms":{"type":"integer"},"to_x":{"type":"number"},"to_y":{"type":"number"},"button":{"type":"string","enum":["left","right","middle"]},"times":{"type":"integer"},"seconds":{"type":"number"}},"required":["action"]}}},"required":["app","steps"]}`)
 }
 
 func (computerAct) ReadOnly() bool                                   { return false }
@@ -146,8 +147,9 @@ func (c computerAct) PermissionArgs(_ context.Context, args json.RawMessage) jso
 
 func (c computerAct) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		App   string          `json:"app"`
-		Steps []computer.Step `json:"steps"`
+		App    string          `json:"app"`
+		Window int             `json:"window"`
+		Steps  []computer.Step `json:"steps"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -158,7 +160,7 @@ func (c computerAct) Execute(ctx context.Context, args json.RawMessage) (string,
 	if len(p.Steps) == 0 {
 		return "", &computer.Failure{Code: computer.CodeBadStep, Detail: "steps is empty"}
 	}
-	res, stepErr := c.session.Act(ctx, p.App, p.Steps)
+	res, stepErr := c.session.Act(ctx, p.App, p.Window, p.Steps)
 	var out strings.Builder
 	fmt.Fprintf(&out, "Completed %d of %d step(s).\n", res.Done, len(p.Steps))
 	for i, step := range res.Steps {
@@ -196,7 +198,11 @@ func renderApps(apps []computer.App) string {
 			if w.Title != "" {
 				title = computer.ShownName(w.Title)
 			}
-			fmt.Fprintf(&b, "    window %s %.0f×%.0f\n", title, w.Bounds.Width, w.Bounds.Height)
+			fmt.Fprintf(&b, "    window %d %s %.0f×%.0f", w.ID, title, w.Bounds.Width, w.Bounds.Height)
+			if w.Owned != nil && *w.Owned {
+				b.WriteString(" (dialog)")
+			}
+			b.WriteString("\n")
 		}
 	}
 	if b.Len() == 0 {
