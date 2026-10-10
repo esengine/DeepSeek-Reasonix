@@ -398,7 +398,7 @@ export function AddProvider({
       )}
       <div className="acts-bar">
         {err && errOnSave && (
-          <div className="find" data-lvl="warn">
+          <div className="find" data-lvl="err" role="alert">
             <span className="t">{t("无法保存")}</span>
             <span className="why">{err}</span>
           </div>

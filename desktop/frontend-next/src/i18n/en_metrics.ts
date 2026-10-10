@@ -26,10 +26,10 @@ export const EN_METRICS: Record<string, string> = {
     "Nobody has said how large this source's window is, so there is no share to draw — and no automatic compaction either. A relay forwards somebody else's model, so only you know what it holds.",
   "该窗口值的来源无法确定 —— 点击可改为该模型的实际上限":
     "Whoever entered this window may not have meant this model — click to set what it actually holds",
-  "只改当前这个模型，同一个来源下的其它模型不动。填模型文档写的上下文上限，不是最大输出。会重建运行时，任务跑着的时候改不了。":
-    "Applies to this model alone; the others on this source are left as they are. The context ceiling from the model's docs, not its max output. This rebuilds the runtime, so it cannot be set while a task is running.",
-  "填写模型文档中的上下文上限，而非最大输出长度。将重建运行时，任务运行期间无法修改。":
-    "The context ceiling from the model's docs, not its max output. This rebuilds the runtime, so it cannot be set while a task is running.",
+  "只改当前这个模型，同一个来源下的其它模型不动。填模型文档写的上下文上限，不是最大输出。":
+    "Applies to this model alone; the others on this source are left as they are. The context ceiling from the model's docs, not its max output.",
+  "填写模型文档中的上下文上限，而非最大输出长度。":
+    "The context ceiling from the model's docs, not its max output.",
   "{n} 会话": "{n} sessions",
   "每回合用量": "Tokens per round",
   "峰值 {peak} · 均 {avg}": "peak {peak} · avg {avg}",

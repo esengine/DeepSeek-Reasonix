@@ -6,6 +6,7 @@ import "./testkit";
 import { Compaction } from "./Compaction";
 import { MockPort } from "../port/mock";
 import type { AgentPort, CompactionSettings } from "../port/port";
+import { HttpError } from "../port/http_error";
 
 afterEach(cleanup);
 
@@ -89,5 +90,95 @@ describe("capacity-based context maintenance", () => {
     const row = screen.getByRole("textbox").closest(".threshold-row")!;
     expect(row.textContent).toContain("达到这个用量时开始整理");
     expect(row.textContent).not.toContain("容量保护");
+  });
+
+  it.each(["runtime.saved_while_running", "runtime.rebuild_failed"])("announces %s as saved but not applied", async (code) => {
+    const p = port();
+    p.saveCompaction = vi.fn().mockRejectedValue(new HttpError(409, "rebuild refused", { code, params: { detail: "boom" } }));
+    const changed = vi.fn();
+    render(<Compaction port={p} onChanged={changed} />);
+    await screen.findByText("下次整理");
+    await userEvent.click(screen.getByRole("button", { name: "自定义" }));
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "90000{Enter}");
+    const notice = await screen.findByRole("status");
+    expect(notice.getAttribute("data-lvl")).toBe("warn");
+    expect(notice.textContent).toContain("已保存，尚未生效");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getAllByText("850k").length).toBeGreaterThan(0);
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("90000");
+    expect(changed).not.toHaveBeenCalled();
+    expect(p.saveCompaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces a rejected write as an error and keeps the threshold for retry", async () => {
+    const p = port();
+    p.saveCompaction = vi.fn().mockRejectedValue(new HttpError(400, "write refused", { code: "compaction.rejected", params: { detail: "disk full" } }));
+    await open(p);
+    await userEvent.click(screen.getByRole("button", { name: "自定义" }));
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "90000{Enter}");
+    const notice = await screen.findByRole("alert");
+    expect(notice.getAttribute("data-lvl")).toBe("err");
+    expect(notice.textContent).toContain("操作未完成");
+    expect(notice.textContent).toContain("disk full");
+    expect(screen.queryByRole("status")).toBeNull();
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("90000");
+  });
+
+  it("retries the same threshold after a failed write without duplicating Enter and blur", async () => {
+    const p = port();
+    const save = vi.fn()
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockImplementation(async (n: number) => ({ ...(await p.compaction()), soft_limit_tokens: n, trigger: n }));
+    p.saveCompaction = save;
+    const changed = vi.fn();
+    render(<Compaction port={p} onChanged={changed} />);
+    await screen.findByText("下次整理");
+    await userEvent.click(screen.getByRole("button", { name: "自定义" }));
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    await userEvent.clear(input);
+    await userEvent.type(input, "90000{Enter}");
+    await screen.findByText("disk full");
+    expect(input.disabled).toBe(false);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(changed).not.toHaveBeenCalled();
+    await userEvent.click(input);
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith(90000);
+    expect(screen.queryByText("disk full")).toBeNull();
+    expect(screen.getAllByText("90k").length).toBeGreaterThan(0);
+  });
+
+  it("rejects an invalid threshold before sending a write and clears the notice after correction", async () => {
+    const p = port();
+    const save = vi.fn(async (n: number) => ({ ...(await p.compaction()), soft_limit_tokens: n, trigger: n }));
+    p.saveCompaction = save;
+    await open(p);
+    await userEvent.click(screen.getByRole("button", { name: "自定义" }));
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "999{Enter}");
+    expect((await screen.findByRole("alert")).textContent).toContain("阈值需至少为 1,000");
+    expect(save).not.toHaveBeenCalled();
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "90000{Enter}");
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("does not re-save a successfully applied threshold on a later blur", async () => {
+    const p = port();
+    const save = vi.fn(async (n: number) => ({ ...(await p.compaction()), soft_limit_tokens: n, trigger: n }));
+    p.saveCompaction = save;
+    await open(p);
+    await userEvent.click(screen.getByRole("button", { name: "自定义" }));
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "90000{Enter}");
+    await screen.findByText(/经济维护阈值会先到/);
+    await userEvent.click(screen.getByRole("textbox"));
+    await userEvent.tab();
+    expect(save).toHaveBeenCalledTimes(1);
   });
 });

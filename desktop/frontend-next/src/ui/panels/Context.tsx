@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { t } from "../../i18n";
-import { reason } from "../../i18n/kernel";
+import { reason, SAVED_NOT_APPLIED } from "../../i18n/kernel";
+import { HttpError } from "../../port/http_error";
 import type { AgentPort, ContextBreakdown } from "../../port/port";
 import { pct as percent, tokens } from "../../i18n/format";
 import { pinToViewport } from "../place";
@@ -356,18 +357,18 @@ function DeclareWindow({ port, onSet, was, onDone }: {
   // an empty box asks for the whole number again to change one digit of it.
   const [draft, setDraft] = useState(was > 0 ? String(was) : "");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [note, setNote] = useState<{ text: string; unapplied: boolean } | null>(null);
 
   const commit = async () => {
     const window = Number(draft);
     if (!window || busy) return;
     setBusy(true);
-    setError("");
+    setNote(null);
     try {
       onSet(await port.setContextWindow(window));
       onDone();
     } catch (e) {
-      setError(reason(e));
+      setNote({ text: reason(e), unapplied: e instanceof HttpError && SAVED_NOT_APPLIED.includes(e.reason?.code ?? "") });
     } finally {
       setBusy(false);
     }
@@ -394,11 +395,16 @@ function DeclareWindow({ port, onSet, was, onDone }: {
           {t("保存")}
         </button>
       </div>
-      {error && <p className="ctxnote" data-lvl="warn">{error}</p>}
+      {note && (
+        <div className="find" data-lvl={note.unapplied ? "warn" : "err"} role={note.unapplied ? "status" : "alert"}>
+          <span className="t">{t(note.unapplied ? "已保存，尚未生效" : "操作未完成")}</span>
+          <span className="why">{note.text}</span>
+        </div>
+      )}
       <p className="ctxnote">
         {t(was > 0
-          ? "只改当前这个模型，同一个来源下的其它模型不动。填模型文档写的上下文上限，不是最大输出。会重建运行时，任务跑着的时候改不了。"
-          : "填写模型文档中的上下文上限，而非最大输出长度。将重建运行时，任务运行期间无法修改。")}
+          ? "只改当前这个模型，同一个来源下的其它模型不动。填模型文档写的上下文上限，不是最大输出。"
+          : "填写模型文档中的上下文上限，而非最大输出长度。")}
       </p>
     </div>
   );

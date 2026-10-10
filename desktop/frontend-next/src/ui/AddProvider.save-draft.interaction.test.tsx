@@ -120,6 +120,11 @@ it.each([false, true].flatMap((strict) => ["success", "failure", "name"].map((ou
       expect(snapshot(container)).toEqual(before);
       expect(screen.getByLabelText<HTMLInputElement>("来源名称").getAttribute("aria-invalid")).toBe(outcome === "name" ? "true" : null);
       expect(screen.queryByText("无法保存") !== null).toBe(outcome === "failure");
+      if (outcome === "failure") {
+        const message = screen.getByRole("alert");
+        expect(message.getAttribute("data-lvl")).toBe("err");
+        expect(message.textContent).toContain("无法保存");
+      }
       const win = screen.getByLabelText<HTMLInputElement>("上下文窗口");
       expect(win.matches(":disabled")).toBe(false);
       await userEvent.clear(win);
