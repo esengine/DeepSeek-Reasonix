@@ -2065,6 +2065,26 @@ body { font-size: 14px; line-height: 1.75; }
 .studio-todo-body .block[data-b="plan"] > .lbl { display: none; }
 @media (prefers-reduced-motion: reduce) { .studio-todo, .studio-todo-body { animation: none } }
 
+.tabs:has(.plan-peek-pop) { z-index: 25; }
+.plan-peek { margin-inline-start: auto; flex: none; }
+.plan-peek-trigger { display: flex; align-items: center; gap: 6px; }
+.plan-peek-trigger .studio-icon { width: 13px; height: 13px; }
+.plan-peek-trigger small { font: 500 10px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.plan-peek-trigger[aria-expanded="true"] { background: var(--overlay); color: var(--text); }
+.plan-peek-pop {
+  position: absolute; inset-inline-end: var(--pane-gutter); top: calc(100% + 6px);
+  width: min(360px, calc(100% - 2 * var(--pane-gutter))); max-height: min(420px, calc(55vh / var(--zoom, 1)));
+  overflow-y: auto; overscroll-behavior: contain; padding: 14px; border-radius: var(--r-lg);
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow-float);
+}
+.plan-peek-pop:focus-visible { outline: 2px solid var(--focus); }
+.plan-peek-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.plan-peek-head b { font: 600 var(--fs-ui)/1.4 var(--ui); }
+.plan-peek-goal { margin: 12px 0; color: var(--muted); font: 450 var(--fs-ui)/1.6 var(--ui); overflow-wrap: anywhere; white-space: pre-wrap; }
+.plan-peek-pop .block[data-b="plan"] { margin: 12px 0 0; padding: 0; border: 0; background: none; }
+.plan-peek-pop .block[data-b="plan"] > .lbl { display: none; }
+.plan-peek-pop .s { animation: none; }
+
 .palette-veil {
   position: fixed; inset: 0; z-index: 80; display: grid; place-items: start center;
   padding-top: 14vh; background: color-mix(in srgb, var(--page) 62%, transparent);

@@ -380,7 +380,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       <PaneNav
         view={docked ? "browser" : tab}
         onPick={showView}
-        rows={traj.rows.length}
+        rows={traj.rows.length} plan={s.plan} goal={status?.goal}
         surfaces={surfaces}
       />
 
