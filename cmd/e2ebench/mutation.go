@@ -25,14 +25,13 @@ type mutationResult struct {
 // that package, and records whether they catch the mutation. A caught mutant
 // means a test actually asserts that function's output; a survivor means the new
 // tests don't check it.
-func runMutation(repo, base string, srcFiles []string, refs []testRef) mutationResult {
+func runMutation(repo, base string, srcFiles []string, refs []testRef) (res mutationResult, err error) {
 	changed := changedLineSet(repo, base, srcFiles)
 	byPkg := map[string][]string{}
 	for _, r := range refs {
 		byPkg[r.pkg] = append(byPkg[r.pkg], r.name)
 	}
 
-	var res mutationResult
 	for _, file := range srcFiles {
 		if res.total >= maxMutants {
 			break
@@ -63,22 +62,28 @@ func runMutation(repo, base string, srcFiles []string, refs []testRef) mutationR
 			lb := fset.Position(fd.Body.Lbrace).Offset
 			rb := fset.Position(fd.Body.Rbrace).Offset
 			mutated := src[:lb] + mutantBody(fset, fd.Type.Results) + src[rb+1:]
-			if os.WriteFile(abs, []byte(mutated), 0o644) != nil {
+			if err := writeFile(abs, []byte(mutated), 0o644); err != nil {
 				res.total--
 				continue
 			}
 			cmd := exec.Command("go", "test", "-run", runRe, pkg)
 			cmd.Dir = repo
 			cmd.WaitDelay = 2 * time.Minute // bound the wait for a mutant that wedges a test
-			// Restore source even on panic; a file left mutated would corrupt the next mutant.
+			// Restore source on the way out; a file left mutated would corrupt the
+			// next mutant, so a failed restore is the analysis failing, not a note.
 			restored := false
 			defer func() {
-				if !restored {
-					_ = os.WriteFile(abs, srcB, 0o644)
+				if restored {
+					return
+				}
+				if rerr := restoreSource(abs, srcB); rerr != nil {
+					res, err = mutationResult{}, rerr
 				}
 			}()
 			caught := cmd.Run() != nil
-			_ = os.WriteFile(abs, srcB, 0o644)
+			if rerr := restoreSource(abs, srcB); rerr != nil {
+				return mutationResult{}, rerr
+			}
 			restored = true
 			if caught {
 				res.caught++
@@ -87,7 +92,7 @@ func runMutation(repo, base string, srcFiles []string, refs []testRef) mutationR
 			}
 		}
 	}
-	return res
+	return res, nil
 }
 
 // changedFuncs returns the funcs in f whose line range overlaps a changed line.

@@ -108,21 +108,27 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 
 	var pins []pinResult
 	var mut mutationResult
+	var analysisErr error
 	covered, coverTotal := 0, 0
 	if len(refs) > 0 && testsPass {
 		covered, coverTotal = changedLineCoverage(o.repo, o.base, pkgs, srcFiles)
-		pins = differentialPerTest(o.repo, o.base, srcFiles, refs)
-		mut = runMutation(o.repo, o.base, srcFiles, refs)
+		pins, analysisErr = differentialPerTest(o.repo, o.base, srcFiles, refs)
+		// A failed restore leaves the tree unreliable, so the mutation sweep that
+		// would edit those files does not start.
+		if analysisErr == nil {
+			mut, analysisErr = runMutation(o.repo, o.base, srcFiles, refs)
+		}
 	}
 	buildOK, buildOut := goBuildAll(o.repo)
 
-	passed := len(refs) > 0 && testsPass && buildOK && countPins(pins) > 0
+	passed := len(refs) > 0 && testsPass && buildOK && analysisErr == nil && countPins(pins) > 0
 	return diffReport{
 		srcFiles: srcFiles, pkgs: pkgs, addedTestLines: countAdded(testDiff),
 		newTests: refs, sourceTouched: sourceTouched, testsPass: testsPass,
 		pins: pins, mut: mut, covered: covered, coverTotal: coverTotal,
 		buildOK: buildOK, buildOut: buildOut, failing: failingTestNames(testOut),
-		passed: passed, profile: o.profile, m: m, runErr: runErr, testOut: testOut, testDiff: testDiff,
+		passed: passed, profile: o.profile, m: m, runErr: runErr, analysisErr: analysisErr,
+		testOut: testOut, testDiff: testDiff,
 	}
 }
 
@@ -202,6 +208,7 @@ type diffReport struct {
 	attempt, attempts   int
 	m                   runMetrics
 	runErr              error
+	analysisErr         error
 	testOut             string
 	testDiff            string
 }
@@ -283,6 +290,9 @@ func renderDiff(r diffReport) string {
 	if r.runErr != nil {
 		fmt.Fprintf(&b, "\n<sub>agent run note: %v</sub>\n", r.runErr)
 	}
+	if r.analysisErr != nil {
+		fmt.Fprintf(&b, "\n**Analysis did not finish: %v.** Pin and mutation figures are absent, not zero.\n", r.analysisErr)
+	}
 	fmt.Fprintf(&b, "\n<sub>Pass = the agent added ≥1 test, the affected packages are green, AND ≥1 new test fails when the PR's source is reverted. \"By assertion\" pins are strong (they check changed behavior); \"by compile only\" pins just need a PR-added symbol — and since Go compiles per package, one compile-coupled test marks every test in its package that way. Mutation is the behavioral signal for additive PRs: each changed function's return is replaced with zero values and the new tests are re-run; \"caught\" means a test asserts that output, \"survived\" means it doesn't. Read the generated tests above to judge the rest.</sub>\n")
 	return b.String()
 }
@@ -326,13 +336,17 @@ func pinCell(p pinResult) string {
 // differentialPerTest reverts the PR's changed source to base (deleting files
 // new in the PR), runs each generated test on its own against the old code, and
 // restores the source. A test that fails on the old code pins the change.
-func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) []pinResult {
+func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) (out []pinResult, err error) {
 	for _, f := range srcFiles {
-		if err := exec.Command("git", "-C", repo, "checkout", base, "--", f).Run(); err != nil {
+		if cerr := exec.Command("git", "-C", repo, "checkout", base, "--", f).Run(); cerr != nil {
 			_ = os.Remove(filepath.Join(repo, filepath.FromSlash(f)))
 		}
 	}
-	// Restore source even on panic; a tree left on `base` would mask the PR for later steps.
+	if err := treeMatches(repo, base, srcFiles); err != nil {
+		return nil, err
+	}
+	// Restore source on the way out; a tree left on `base` would mask the PR for
+	// later steps, so a failed restore is this analysis failing, not a note.
 	restored := false
 	defer func() {
 		if restored {
@@ -341,9 +355,12 @@ func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) [
 		for _, f := range srcFiles {
 			_ = exec.Command("git", "-C", repo, "checkout", "HEAD", "--", f).Run()
 		}
+		if terr := treeMatches(repo, "HEAD", srcFiles); terr != nil {
+			err = terr
+		}
 	}()
 
-	out := make([]pinResult, 0, len(refs))
+	out = make([]pinResult, 0, len(refs))
 	for _, r := range refs {
 		cmd := exec.Command("go", "test", "-run", "^"+r.name+"$", r.pkg)
 		cmd.Dir = repo
@@ -356,10 +373,15 @@ func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) [
 		})
 	}
 	for _, f := range srcFiles {
-		_ = exec.Command("git", "-C", repo, "checkout", "HEAD", "--", f).Run()
+		if cerr := exec.Command("git", "-C", repo, "checkout", "HEAD", "--", f).Run(); cerr != nil {
+			return nil, fmt.Errorf("restore %s: %w", f, cerr)
+		}
+	}
+	if err := treeMatches(repo, "HEAD", srcFiles); err != nil {
+		return nil, err
 	}
 	restored = true
-	return out
+	return out, nil
 }
 
 // changedLineCoverage runs the affected packages with a coverage profile and
