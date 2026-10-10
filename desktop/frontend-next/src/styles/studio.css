@@ -481,6 +481,24 @@ body { background: var(--page) !important; }
 }
 .rail > * { width: var(--rail-open); }
 .railscroll { min-height: 0; }
+.rail > .rail-drop {
+  position: absolute;
+  z-index: 1;
+  inset: 8px;
+  width: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: 500 12px/1.5 var(--ui);
+  pointer-events: none;
+}
+.rail-drop svg { flex: none; width: 18px; height: 18px; }
 .chrome {
   width: auto;
   margin-left: calc(var(--nav-w) + var(--rail-w));

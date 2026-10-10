@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
-import type { HostCapabilities, HubPort } from "../port/hub";
+import type { HostCapabilities, HubPort, TreeWorkspace } from "../port/hub";
 
 export interface Adder {
   add: () => void;
   busy: boolean;
   /** True while the headless fallback is asking for a server-side path. */
   pathOpen: boolean;
-  addPath: (path: string) => void;
+  addPath: (path: string, onAdded?: (workspace: TreeWorkspace) => Promise<void>) => void;
   closePath: () => void;
 }
 
@@ -50,13 +50,16 @@ export function useAddWorkspace(hub: HubPort, reload: () => Promise<void>, onErr
   );
 
   const addPath = useCallback(
-    (raw: string) => {
+    (raw: string, onAdded?: (workspace: TreeWorkspace) => Promise<void>) => {
       const path = raw.trim();
       if (busy || !path) return;
       setBusy(true);
       void hub
         .addWorkspace(path)
-        .then(reload)
+        .then(async (workspace) => {
+          await reload();
+          await onAdded?.(workspace);
+        })
         .then(() => setPathOpen(false))
         .catch((e) => {
           // The error bar sits above the app; an overlay would hide the reason.
