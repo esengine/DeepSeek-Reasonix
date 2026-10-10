@@ -63,6 +63,9 @@ type turnRuntime struct {
 	policy    taskpolicy.TaskPolicy
 	policySet bool
 
+	// jobSession scopes which background jobs count as this turn's writers.
+	jobSession string
+
 	// reviewWarnings are warn-level findings to surface in the final summary.
 	reviewWarnings []string
 	// lastReadiness is the verdict the turn last asked to stop under.
