@@ -194,6 +194,7 @@ export const ACTIONS: UIAction[] = [
   { id: "feedback.send", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "feedback.another", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.thread.more", kind: "view", target: "none", proof: "interaction" },
+  { id: "feedback.thread.toggle", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "feedback.reply.open", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.reply.body", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.reply.send", kind: "kernel-mutation", target: "none", proof: "interaction" },

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { current, t } from "../i18n";
 import { FEEDBACK_CODE, FEEDBACK_REPO_ISSUES, FEEDBACK_REPLYABLE, isUnderReview, type FeedbackItem, type FeedbackReply } from "../port/feedback";
 import type { AgentPort } from "../port/port";
@@ -27,13 +27,15 @@ function when(iso: string): string {
 interface ThreadProps {
   item: FeedbackItem;
   fresh: number;
-  onShowAll?: (receipt: string) => void;
+  onView?: (receipt: string, all: boolean | null) => void;
 }
 
 // Replies are plain text by contract: they render as text nodes, never linked,
 // formatted or interpreted, whoever wrote them.
-export function FeedbackThread({ item, fresh, onShowAll }: ThreadProps) {
+export function FeedbackThread({ item, fresh, onView }: ThreadProps) {
   const [all, setAll] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
   const replies = item.replies;
   const hidden = all ? 0 : Math.max(0, replies.length - SHOWN);
   const shown = replies.slice(hidden);
@@ -42,23 +44,35 @@ export function FeedbackThread({ item, fresh, onShowAll }: ThreadProps) {
   if (replies.length === 0) return null;
   return (
     <section className="fbk-thread" aria-label={t("对话")}>
-      {hidden > 0 && (
-        <button type="button" className="btn sm" data-action="feedback.thread.more" onClick={() => { setAll(true); onShowAll?.(item.receipt); }}>
-          {t("显示更早的 {n} 条", { n: hidden })}
-        </button>
-      )}
-      <ol>
-        {shown.map((r) => (
-          <li key={r.id} data-author={r.author} data-new={isNew(r) ? "" : undefined}>
-            <div className="fbk-msg-hd">
-              <b>{t(AUTHOR_LABEL[r.author])}</b>
-              {isNew(r) && <span className="fbk-new">{t("新")}</span>}
-              <time dateTime={r.createdAt}>{when(r.createdAt)}</time>
-            </div>
-            <p className="fbk-msg" dir="auto">{r.body}</p>
-          </li>
-        ))}
-      </ol>
+      <button type="button" className="btn sm fbk-thread-toggle" data-action="feedback.thread.toggle" data-target={item.receipt} aria-expanded={expanded} aria-controls={id} onClick={() => {
+        const next = !expanded;
+        setExpanded(next);
+        onView?.(item.receipt, next ? all : null);
+      }}>
+        <StudioIcon name={expanded ? "down" : "chevron"} />
+        <span>{t(expanded ? "收起对话" : "展开对话")}</span>
+        <span className="fbk-meta">{t("{n} 条回复", { n: replies.length })}</span>
+        {fresh > 0 && <span className="fbk-thread-new">{t("{n} 条新回复", { n: fresh })}</span>}
+      </button>
+      <div id={id} className="fbk-thread-body" hidden={!expanded}>
+        {hidden > 0 && (
+          <button type="button" className="btn sm" data-action="feedback.thread.more" onClick={() => { setAll(true); onView?.(item.receipt, true); }}>
+            {t("显示更早的 {n} 条", { n: hidden })}
+          </button>
+        )}
+        <ol>
+          {shown.map((r) => (
+            <li key={r.id} data-author={r.author} data-new={isNew(r) ? "" : undefined}>
+              <div className="fbk-msg-hd">
+                <b>{t(AUTHOR_LABEL[r.author])}</b>
+                {isNew(r) && <span className="fbk-new">{t("新")}</span>}
+                <time dateTime={r.createdAt}>{when(r.createdAt)}</time>
+              </div>
+              <p className="fbk-msg" dir="auto">{r.body}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
     </section>
   );
 }

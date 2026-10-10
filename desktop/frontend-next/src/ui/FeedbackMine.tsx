@@ -108,8 +108,7 @@ interface Props {
   onUnread?: (n: number) => void;
 }
 
-// Opening the list is what reads the replies: each report with new ones is
-// marked seen, and its "new" marks stay until the page is closed.
+// A reply is read only in an expanded thread; its "new" mark stays for this visit.
 export function FeedbackMine({ port, onFile, onUnread }: Props) {
   const [mine, setMine] = useState<Mine | null>(null);
   const [failure, setFailure] = useState<FeedbackFailure | null>(null);
@@ -122,12 +121,24 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
   report.current = onUnread;
   const itemsRef = useRef<Mine["items"]>([]);
   const pending = useRef(new Set<string>());
-  const tell = () => report.current?.(itemsRef.current.filter((i) => i.needsInput || pending.current.has(i.receipt)).length);
-  const unfolded = (receipt: string) =>
-    port.feedbackSeen(receipt, newest(itemsRef.current.find((i) => i.receipt === receipt)!)).then(() => {
-      pending.current.delete(receipt);
-      tell();
-    }).catch(() => {});
+  const views = useRef(new Map<string, boolean>());
+  const tell = useCallback(() => report.current?.(itemsRef.current.filter((i) => i.needsInput || pending.current.has(i.receipt)).length), []);
+  const markSeen = useCallback(async (item: FeedbackItem) => {
+    const upTo = newest(item);
+    await port.feedbackSeen(item.receipt, upTo);
+    const current = itemsRef.current.find((i) => i.receipt === item.receipt);
+    if (current && newest(current) <= upTo) pending.current.delete(item.receipt);
+    tell();
+  }, [port, tell]);
+  const view = (receipt: string, all: boolean | null) => {
+    if (all === null) {
+      views.current.delete(receipt);
+      return;
+    }
+    views.current.set(receipt, all);
+    const item = itemsRef.current.find((i) => i.receipt === receipt)!;
+    if (pending.current.has(receipt) && (all || !foldedUnread(item))) void markSeen(item).catch(() => {});
+  };
 
   const load = useCallback(() => {
     setLoading(true);
@@ -142,17 +153,16 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
           return next;
         });
         itemsRef.current = m.items;
-        pending.current = new Set(m.items.filter((i) => i.unreadReplies > 0 && foldedUnread(i)).map((i) => i.receipt));
-        const shown = m.items.filter((i) => i.unreadReplies > 0 && !pending.current.has(i.receipt));
-        const read = await Promise.allSettled(shown.map((i) => port.feedbackSeen(i.receipt, newest(i))));
-        shown.forEach((i, k) => read[k]!.status === "rejected" && pending.current.add(i.receipt));
+        pending.current = new Set(m.items.filter((i) => i.unreadReplies > 0).map((i) => i.receipt));
+        const shown = m.items.filter((i) => i.unreadReplies > 0 && views.current.has(i.receipt) && (views.current.get(i.receipt) || !foldedUnread(i)));
+        await Promise.allSettled(shown.map(markSeen));
         tell();
         const fresher = m.items.filter((i) => i.unreadReplies > 0).length;
         if (fresher > 0) setSaid(t("有 {n} 份反馈收到了新回复。", { n: fresher }));
       })
       .catch((e) => setFailure(feedbackFailure(e)))
       .finally(() => setLoading(false));
-  }, [port]);
+  }, [port, markSeen, tell]);
 
   useEffect(load, [load]);
 
@@ -263,7 +273,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
                 ))}
               </ol>}
               <FeedbackReviewNote item={item} />
-              <FeedbackThread item={item} fresh={fresh[item.receipt] ?? 0} onShowAll={unfolded} />
+              <FeedbackThread item={item} fresh={fresh[item.receipt] ?? 0} onView={view} />
               <FeedbackReplyBox port={port} item={item} limit={replyBytes} offline={mine.offline} onSent={sent} onFile={onFile} onStale={load} />
             </li>
           ))}
