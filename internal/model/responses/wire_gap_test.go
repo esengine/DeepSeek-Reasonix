@@ -231,10 +231,10 @@ func TestIncompleteOutputCallIsNotDispatched(t *testing.T) {
 	}
 }
 
-func TestCompletedOutputSurvivesAnItemItCannotRead(t *testing.T) {
+func TestCompletedOutputSurvivesAnUnrelatedItemItCannotRead(t *testing.T) {
 	chunks := chunksOf(t,
 		`{"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"ls","arguments":""}}`,
-		`{"type":"response.completed","response":{"id":"resp_1","output":[{"id":"rs_1","type":"reasoning","status":{"phase":"done"}},{"id":"fc_2","type":"function_call","call_id":"call_2","name":"ls","arguments":{"path":"."}},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"ls","arguments":"{}"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","output":[{"id":"rs_1","type":"reasoning","status":{"phase":"done"}},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"ls","arguments":"{}"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
 	)
 	var calls []provider.ToolCall
 	done := false

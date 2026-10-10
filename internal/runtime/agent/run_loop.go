@@ -301,7 +301,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 			// Exhausted stream retries (or a non-retryable error): persist one
 			// bounded LocalOnly recovery record for the next real user message.
 			// Intermediate failed attempts never wrote session state.
-			a.recordInterruptedDisplay(text, reasoning, partialCalls, true, state.workDurationMs())
+			a.recordInterruptedDisplay(text, reasoning, partialCalls, true, state.workDurationMs(), provider.StreamFailureCauseOf(err))
 			return err
 		}
 		a.sess.lastPrefixShape = prefixShape
@@ -723,7 +723,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 	// If the context was cancelled during tool execution, return after storing
 	// the batch results so the session keeps paired tool-call history.
 	if ctx.Err() != nil {
-		a.recordInterruptedDisplay("", "", nil, true, state.workDurationMs())
+		a.recordInterruptedDisplay("", "", nil, true, state.workDurationMs(), "")
 		return false, ctx.Err()
 	}
 	if pause := a.settleProgressRound(state, mark); pause != nil {

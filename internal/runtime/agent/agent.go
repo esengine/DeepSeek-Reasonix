@@ -1406,7 +1406,7 @@ func upsertPartialToolCall(calls []provider.ToolCall, call provider.ToolCall) []
 	return append(calls, call)
 }
 
-func (a *Agent) recordInterruptedDisplay(text, reasoning string, calls []provider.ToolCall, pending bool, workDurationMs int64) {
+func (a *Agent) recordInterruptedDisplay(text, reasoning string, calls []provider.ToolCall, pending bool, workDurationMs int64, cause provider.StreamFailureCause) {
 	displayCalls := make([]provider.ToolCall, 0, len(calls))
 	interrupted := make([]string, 0, len(calls))
 	seen := make(map[string]struct{}, len(calls))
@@ -1433,6 +1433,7 @@ func (a *Agent) recordInterruptedDisplay(text, reasoning string, calls []provide
 		LocalOnly:        true,
 		InterruptedTurn: &provider.InterruptedTurnRecovery{
 			Pending:                 pending,
+			StreamFailure:           cause,
 			InterruptedTools:        interrupted,
 			DroppedPartialText:      strings.TrimSpace(text) != "",
 			DroppedPartialReasoning: strings.TrimSpace(reasoning) != "",

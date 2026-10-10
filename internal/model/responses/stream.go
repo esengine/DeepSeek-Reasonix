@@ -21,6 +21,7 @@ type streamedCall struct {
 	id, name, arguments string
 	argChars            int
 	completed           bool
+	announced           bool
 }
 
 // turn is what a response's events add up to: the visible answer, the reasoning
@@ -164,6 +165,7 @@ func (t *turn) beginItem(ctx context.Context, item *sseItem) bool {
 	case "function_call":
 		call := t.callFor(item.ID)
 		call.id, call.name = item.CallID, item.Name
+		call.announced = true
 		return t.send(ctx, provider.Chunk{
 			Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: call.id, Name: call.name},
 		})
@@ -206,6 +208,7 @@ func (t *turn) completeCall(ctx context.Context, call *streamedCall) bool {
 	if call.completed || call.name == "" {
 		return true
 	}
+	call.arguments = cmp.Or(call.arguments, "{}")
 	call.completed = true
 	return t.send(ctx, provider.Chunk{
 		Type:     provider.ChunkToolCall,
@@ -244,16 +247,29 @@ func (t *turn) applyTerminal(ctx context.Context, event sseEvent) bool {
 	}
 	t.terminal = true
 	if event.Response == nil {
+		if event.Type == "response.completed" {
+			if err := t.pendingCallError(); err != nil {
+				return t.refuseCalls(ctx, err)
+			}
+		}
 		return true
 	}
+	if !t.reportUsage(ctx, event) {
+		return false
+	}
 	if event.Type == "response.completed" {
+		if err := t.terminalOutputError(event.Response.Output); err != nil {
+			return t.refuseCalls(ctx, err)
+		}
 		t.responseID = event.Response.ID
 	}
 	if event.Type != "response.failed" && !t.closeCallsFromOutput(ctx, event.Response.Output) {
 		return false
 	}
-	if !t.reportUsage(ctx, event) {
-		return false
+	if event.Type == "response.completed" {
+		if err := t.pendingCallError(); err != nil {
+			return t.refuseCalls(ctx, err)
+		}
 	}
 	if event.Type != "response.failed" {
 		return true
@@ -262,11 +278,9 @@ func (t *turn) applyTerminal(ctx context.Context, event sseEvent) bool {
 	return t.send(ctx, provider.Chunk{Type: provider.ChunkError, Err: failureError(t.c, event.Response.Error)})
 }
 
-// closeCallsFromOutput completes the function calls the terminal response lists
-// but the stream never closed: that list is the response's own account of what
-// it issued. A call the stream already closed, matched by call id, is not sent
-// twice; one the response marks unfinished, or lists without a call id, is not
-// sent at all. Items decode one by one so an unreadable one cannot drop the rest.
+// closeCallsFromOutput recovers omitted done events, deduplicated by call ID.
+// Completed output is validated first; incomplete output may still contain
+// truncated or unreadable calls that must remain undispatched.
 func (t *turn) closeCallsFromOutput(ctx context.Context, output []json.RawMessage) bool {
 	for _, raw := range output {
 		var item sseItem
@@ -397,8 +411,16 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			continue
 		}
 		if data == "[DONE]" {
+			if err := t.pendingCallError(); err != nil {
+				t.refuseCalls(ctx, err)
+				return
+			}
 			t.terminal = true
 			break
+		}
+		if err := doneArgumentsError([]byte(data)); err != nil {
+			t.refuseCalls(ctx, err)
+			return
 		}
 		var event sseEvent
 		if json.Unmarshal([]byte(data), &event) != nil {

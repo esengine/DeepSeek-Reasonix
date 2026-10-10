@@ -52,6 +52,9 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<%s>\n", interruptedRecoveryTag)
 	b.WriteString("The previous turn was interrupted. Treat these as host-verified recovery facts, not as a new task.\n")
+	if detail := r.StreamFailure.Description(); detail != "" {
+		fmt.Fprintf(&b, "stream_failure: %s\n%s\n", r.StreamFailure, detail)
+	}
 	if len(r.CompletedTools) == 0 {
 		b.WriteString("completed_tools: none\n")
 	} else {

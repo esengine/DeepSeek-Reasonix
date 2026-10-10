@@ -134,6 +134,7 @@ type UnavailableImage struct {
 // structural facts; raw partial reasoning remains on the LocalOnly Message for
 // display and is never copied into the recovery prompt.
 type InterruptedTurnRecovery struct {
+	StreamFailure           StreamFailureCause       `json:"stream_failure,omitempty"`
 	Pending                 bool                     `json:"pending,omitempty"`
 	CompletedTools          []InterruptedToolSummary `json:"completed_tools,omitempty"`
 	InterruptedTools        []string                 `json:"interrupted_tools,omitempty"`
