@@ -10,16 +10,49 @@ import (
 	fileencoding "reasonix/internal/base/fileutil/encoding"
 )
 
-// MigrateLegacyAgentStepLimitsForRoot removes retired [agent] step-limit keys
-// from the user and project config selected for root. Boot calls it immediately
-// before LoadForRoot, so config-only/read-only commands never rewrite files and
-// the runtime can surface exactly one migration notice.
-func MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
-	return processRoots().MigrateLegacyAgentStepLimitsForRoot(root)
+// retiredKey is one config key set the runtime no longer honors and how to
+// strip it from a config's text.
+type retiredKey struct {
+	what  string
+	strip func(string) (string, bool)
 }
 
-// MigrateLegacyAgentStepLimitsForRoot removes retired [agent] step-limit keys from this binding's
-func (r Roots) MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
+var (
+	retiredStepLimits       = retiredKey{"deprecated agent step limits", stripLegacyAgentStepLimitLines}
+	retiredRedactToolOutput = retiredKey{"deprecated redact_tool_output", stripLegacyRedactToolOutputLines}
+	retiredMemoryCompiler   = retiredKey{"deprecated memory_compiler", stripLegacyMemoryCompilerLines}
+	retiredMultiThreshold   = retiredKey{"deprecated multi-threshold compaction keys", stripLegacyMultiThresholdCompactionLines}
+)
+
+// RetiredKeyResult is what one retired-key migration did: whether it removed
+// anything, and the error that stopped it.
+type RetiredKeyResult struct {
+	Changed bool
+	Err     error
+}
+
+// RetiredKeyMigrations holds one result per retired key set.
+type RetiredKeyMigrations struct {
+	StepLimits       RetiredKeyResult
+	RedactToolOutput RetiredKeyResult
+	MemoryCompiler   RetiredKeyResult
+	MultiThreshold   RetiredKeyResult
+}
+
+// MigrateRetiredKeysForRoot removes the retired agent step-limit, redact_tool_output,
+// memory_compiler and multi-threshold compaction keys from the user and project
+// config selected for root, reading and rewriting each file at most once. Boot
+// calls it immediately before LoadForRoot, so config-only/read-only commands
+// never rewrite files and the runtime can surface exactly one migration notice.
+func (r Roots) MigrateRetiredKeysForRoot(root string) RetiredKeyMigrations {
+	res := r.migrateRetiredKeys(root, fileencoding.ReadFileUTF8, []retiredKey{retiredStepLimits, retiredRedactToolOutput, retiredMemoryCompiler, retiredMultiThreshold})
+	return RetiredKeyMigrations{StepLimits: res[0], RedactToolOutput: res[1], MemoryCompiler: res[2], MultiThreshold: res[3]}
+}
+
+// migrateRetiredKeys runs migs over the user and project config. A migration
+// that fails on a file stops there and skips the remaining files, without
+// holding back the others.
+func (r Roots) migrateRetiredKeys(root string, read func(string) ([]byte, error), migs []retiredKey) []RetiredKeyResult {
 	root = resolveRoot(root)
 	paths := make([]string, 0, 2)
 	if userPath := r.userConfigLoadPath(); userPath != "" {
@@ -27,7 +60,7 @@ func (r Roots) MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
 	}
 	paths = append(paths, ProjectConfigPath(root))
 
-	changedAny := false
+	results := make([]RetiredKeyResult, len(migs))
 	seen := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
 		clean := filepath.Clean(path)
@@ -35,176 +68,83 @@ func (r Roots) MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
 			continue
 		}
 		seen[clean] = struct{}{}
-		changed, err := migrateLegacyAgentStepLimitsFile(path)
-		if err != nil {
-			return changedAny, fmt.Errorf("migrate deprecated agent step limits in %s: %w", path, err)
+		active := make([]retiredKey, 0, len(migs))
+		index := make([]int, 0, len(migs))
+		for i, m := range migs {
+			if results[i].Err == nil {
+				active = append(active, m)
+				index = append(index, i)
+			}
 		}
-		changedAny = changedAny || changed
+		if len(active) == 0 {
+			break
+		}
+		changed, err := migrateRetiredKeysFile(path, read, active)
+		for j, i := range index {
+			switch {
+			case err == nil:
+				results[i].Changed = results[i].Changed || changed[j]
+			case changed == nil || changed[j]:
+				results[i].Err = fmt.Errorf("migrate %s in %s: %w", migs[i].what, path, err)
+			}
+		}
 	}
-	return changedAny, nil
+	return results
 }
 
-// migrateLegacyAgentStepLimitsFile removes retired [agent] step-limit keys
-// before runtime decoding. A process-wide lock makes concurrent desktop tab
-// builds observe a single migration; the atomic rewrite protects other readers.
-func migrateLegacyAgentStepLimitsFile(path string) (bool, error) {
-	return migrateRetiredConfigKeysFile(path, stripLegacyAgentStepLimitLines)
+// migrateRetiredKeysFile applies migs to one file under its edit lock with a
+// single read and at most one atomic write. On an error before the write
+// changed is nil and the error concerns every migration; on a write error
+// changed names the migrations whose edit was lost.
+func migrateRetiredKeysFile(path string, read func(string) ([]byte, error), migs []retiredKey) (changed []bool, err error) {
+	unlock, err := LockConfigFileEdits(path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	resolved, exists, err := statConfigPath(path)
+	if err != nil {
+		return nil, err
+	}
+	changed = make([]bool, len(migs))
+	if !exists {
+		return changed, nil
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := read(resolved)
+	if err != nil {
+		return nil, err
+	}
+	text := string(raw)
+	dirty := false
+	for i, m := range migs {
+		var did bool
+		text, did = m.strip(text)
+		changed[i] = did
+		dirty = dirty || did
+	}
+	if !dirty {
+		return changed, nil
+	}
+	if err := fileutil.AtomicWriteFile(resolved, []byte(text), info.Mode().Perm()); err != nil {
+		return changed, err
+	}
+	return changed, nil
 }
 
 func stripLegacyAgentStepLimitLines(raw string) (string, bool) {
 	return stripTOMLKeyLines(raw, "agent", "max_steps", "planner_max_steps")
 }
 
-// MigrateLegacyRedactToolOutputForRoot removes the retired
-// [secrets].redact_tool_output setting from the user and project configs chosen
-// for root. The setting no longer controls any runtime behavior; removing it
-// avoids leaving an explicit `true` value on disk that falsely suggests live
-// output or transcript redaction is still active.
-func MigrateLegacyRedactToolOutputForRoot(root string) (bool, error) {
-	return processRoots().MigrateLegacyRedactToolOutputForRoot(root)
-}
-
-// MigrateLegacyRedactToolOutputForRoot removes the retired redact_tool_output key from this binding's
-func (r Roots) MigrateLegacyRedactToolOutputForRoot(root string) (bool, error) {
-	root = resolveRoot(root)
-	paths := make([]string, 0, 2)
-	if userPath := r.userConfigLoadPath(); userPath != "" {
-		paths = append(paths, userPath)
-	}
-	paths = append(paths, ProjectConfigPath(root))
-
-	changedAny := false
-	seen := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		clean := filepath.Clean(path)
-		if _, ok := seen[clean]; ok {
-			continue
-		}
-		seen[clean] = struct{}{}
-		changed, err := migrateLegacyRedactToolOutputFile(path)
-		if err != nil {
-			return changedAny, fmt.Errorf("migrate deprecated redact_tool_output in %s: %w", path, err)
-		}
-		changedAny = changedAny || changed
-	}
-	return changedAny, nil
-}
-
-func migrateLegacyRedactToolOutputFile(path string) (bool, error) {
-	return migrateRetiredConfigKeysFile(path, stripLegacyRedactToolOutputLines)
-}
-
 func stripLegacyRedactToolOutputLines(raw string) (string, bool) {
 	return stripTOMLKeyLines(raw, "secrets", "redact_tool_output")
 }
 
-// MigrateLegacyMemoryCompilerForRoot removes the retired
-// [agent].memory_compiler setting from the user and project configs chosen for
-// root. The Memory v5 execution compiler was removed; stripping the key avoids
-// leaving values on disk that falsely suggest compiler behavior (especially a
-// stale verbosity = "compact") is still active.
-func MigrateLegacyMemoryCompilerForRoot(root string) (bool, error) {
-	return processRoots().MigrateLegacyMemoryCompilerForRoot(root)
-}
-
-// MigrateLegacyMemoryCompilerForRoot removes the retired memory_compiler key from this binding's
-func (r Roots) MigrateLegacyMemoryCompilerForRoot(root string) (bool, error) {
-	root = resolveRoot(root)
-	paths := make([]string, 0, 2)
-	if userPath := r.userConfigLoadPath(); userPath != "" {
-		paths = append(paths, userPath)
-	}
-	paths = append(paths, ProjectConfigPath(root))
-
-	changedAny := false
-	seen := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		clean := filepath.Clean(path)
-		if _, ok := seen[clean]; ok {
-			continue
-		}
-		seen[clean] = struct{}{}
-		changed, err := migrateLegacyMemoryCompilerFile(path)
-		if err != nil {
-			return changedAny, fmt.Errorf("migrate deprecated memory_compiler in %s: %w", path, err)
-		}
-		changedAny = changedAny || changed
-	}
-	return changedAny, nil
-}
-
-func migrateLegacyMemoryCompilerFile(path string) (bool, error) {
-	return migrateRetiredConfigKeysFile(path, stripLegacyMemoryCompilerLines)
-}
-
-func migrateRetiredConfigKeysFile(path string, strip func(string) (string, bool)) (bool, error) {
-	unlock, err := LockConfigFileEdits(path)
-	if err != nil {
-		return false, err
-	}
-	defer unlock()
-	resolved, exists, err := statConfigPath(path)
-	if err != nil {
-		return false, err
-	}
-	if !exists {
-		return false, nil
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return false, err
-	}
-	raw, err := fileencoding.ReadFileUTF8(resolved)
-	if err != nil {
-		return false, err
-	}
-	next, changed := strip(string(raw))
-	if !changed {
-		return false, nil
-	}
-	if err := fileutil.AtomicWriteFile(resolved, []byte(next), info.Mode().Perm()); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func stripLegacyMemoryCompilerLines(raw string) (string, bool) {
 	return stripTOMLKeyLines(raw, "agent", "memory_compiler")
-}
-
-// MigrateLegacyMultiThresholdCompactionForRoot strips retired soft/snip/force keys.
-func MigrateLegacyMultiThresholdCompactionForRoot(root string) (bool, error) {
-	return processRoots().MigrateLegacyMultiThresholdCompactionForRoot(root)
-}
-
-// MigrateLegacyMultiThresholdCompactionForRoot strips retired compaction threshold keys from this binding's
-func (r Roots) MigrateLegacyMultiThresholdCompactionForRoot(root string) (bool, error) {
-	root = resolveRoot(root)
-	paths := make([]string, 0, 2)
-	if userPath := r.userConfigLoadPath(); userPath != "" {
-		paths = append(paths, userPath)
-	}
-	paths = append(paths, ProjectConfigPath(root))
-
-	changedAny := false
-	seen := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		clean := filepath.Clean(path)
-		if _, ok := seen[clean]; ok {
-			continue
-		}
-		seen[clean] = struct{}{}
-		changed, err := migrateLegacyMultiThresholdCompactionFile(path)
-		if err != nil {
-			return changedAny, fmt.Errorf("migrate deprecated multi-threshold compaction keys in %s: %w", path, err)
-		}
-		changedAny = changedAny || changed
-	}
-	return changedAny, nil
-}
-
-func migrateLegacyMultiThresholdCompactionFile(path string) (bool, error) {
-	return migrateRetiredConfigKeysFile(path, stripLegacyMultiThresholdCompactionLines)
 }
 
 func stripLegacyMultiThresholdCompactionLines(raw string) (string, bool) {

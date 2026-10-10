@@ -856,7 +856,7 @@ func normalizeLegacyAgentStepLimits(c *Config) bool {
 }
 
 func migrateLegacyMCPTiersFile(path string) error {
-	_, err := migrateRetiredConfigKeysFile(path, stripLegacyMCPTierLines)
+	_, err := migrateRetiredKeysFile(path, fileencoding.ReadFileUTF8, []retiredKey{{"deprecated plugin tiers", stripLegacyMCPTierLines}})
 	return err
 }
 
