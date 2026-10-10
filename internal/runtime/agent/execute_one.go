@@ -167,7 +167,7 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 				output: fmt.Sprintf("MCP server %q is connected; its real tools are now available", server),
 			}, true
 		}
-		if refusal, ok := a.svc.tools.DisabledMCPRefusal(plan.call.Name); ok {
+		if refusal, ok := a.svc.tools.MCPRefusal(plan.call.Name); ok {
 			msg := refusal.String()
 			return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), refusalCode: refusal.Code}, true
 		}

@@ -317,6 +317,8 @@ const SAID: Record<string, string> = {
   "mcp.unavailable": "该服务器未能启动，开关已恢复原状",
   "mcp.switch_not_undone": "该服务器未能启动，且开关未能恢复——重启后将保持刚才设置的状态",
   "mcp.approval_owed": "这个服务要启动的内容在你启用后变了，请先查看命令并重新启用",
+  "mcp.nothing_held": "这个服务没有被暂挡的工具定义",
+  "mcp.digest_mismatch": "你看到的被挡定义已经变了，没有接受；请重新查看",
   "activation.unavailable": "开关未能保存：其存储文件无法读取或写入",
 
   // ── 待送达：条目、队列、这份存档各自会拒 ─────────────────────────

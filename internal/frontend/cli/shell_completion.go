@@ -55,6 +55,7 @@ func mcpCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
 		completionSpec("enable", []cliCompletionFlag{help}),
 		completionSpec("disable", []cliCompletionFlag{help}),
 		completionSpecWithAliases("retry", []string{"connect"}, []cliCompletionFlag{help}),
+		completionSpec("trust", []cliCompletionFlag{help}),
 		completionSpec("update", []cliCompletionFlag{help}),
 		completionSpec("import", []cliCompletionFlag{help}),
 		completionSpecWithAliases("browse", []string{"search"}, []cliCompletionFlag{

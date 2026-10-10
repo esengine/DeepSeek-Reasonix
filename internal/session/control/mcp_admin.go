@@ -156,6 +156,9 @@ type MCPServerState struct {
 	// session's provider schema carries the server's tools, fixed at its start.
 	AlwaysLoad bool
 	InSchema   bool
+	// Held lists the tools this session's connection withheld because their
+	// definition is not the one the user approved for the server.
+	Held []plugin.HeldTool
 }
 
 // ConfiguredMCPServers lists every configured server with its resolved
@@ -188,6 +191,9 @@ func (c *Controller) ConfiguredMCPServers() []MCPServerState {
 			AlwaysLoad: cfg.MCPAlwaysLoad(p), InSchema: inSchema[p.Name],
 		}
 		state.Description, state.Tools, state.Stale = mcpCachedFacts(c.mcpSpec(p))
+		if host := c.mcp.hostRef(); host != nil {
+			state.Held, _ = host.HeldTools(p.Name)
+		}
 		out = append(out, state)
 	}
 	return out

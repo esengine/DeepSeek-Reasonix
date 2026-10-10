@@ -1070,6 +1070,8 @@ export const EN: Record<string, string> = {
   "另一个会话正在写这个工作区，等它写完会自动继续":
     "Another session is writing to this workspace; this one continues on its own when it is safe",
   "工作区空出来了，这个会话已经继续": "The workspace is free again; this session has continued",
+  "一个 MCP 服务有工具的定义是新增的或与你批准过的不同，已暂不提供给模型；详情里是这些工具，核对服务后再接受":
+    "An MCP server has tools whose definitions are new or differ from what you approved; they are held out of the model's tools until you accept them (details list them)",
   "还没轮到这个会话写，这次等待就结束了": "The wait ended before this session's turn to write came",
 
   // ── 宿主通知卡片自己的头部（NoticeCard）───────────────────────

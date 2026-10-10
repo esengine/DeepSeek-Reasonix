@@ -1,6 +1,7 @@
 package control
 
 import (
+	"errors"
 	"fmt"
 
 	"reasonix/internal/contract/config"
@@ -31,10 +32,14 @@ func reconcileRemovedMCPState(workspace, name string) removedMCPState {
 	if state.fallbackFound {
 		remainingResource = mcpdiag.HTTPMCPOAuthResource(state.fallback.Type, state.fallback.URL, mcpdiag.HasAuthConfig(state.fallback.Headers, state.fallback.Env, state.fallback.URL))
 	}
-	if _, err := plugin.ReconcileHTTPMCPOAuthAfterRemoval(plugin.Spec{
-		Name: name, StateDir: plugin.MCPStateDir(config.ReasonixHomeDir(), workspace, name),
-	}, remainingResource); err != nil {
+	spec := plugin.Spec{Name: name, StateDir: plugin.MCPStateDir(config.ReasonixHomeDir(), workspace, name)}
+	if _, err := plugin.ReconcileHTTPMCPOAuthAfterRemoval(spec, remainingResource); err != nil {
 		state.cleanupErr = fmt.Errorf("reconcile OAuth state after removing MCP server %q: %w", name, err)
+	}
+	if !state.fallbackFound {
+		if err := plugin.ForgetToolPins(spec.StateDir, name); err != nil {
+			state.cleanupErr = errors.Join(state.cleanupErr, fmt.Errorf("forget approved tool definitions of MCP server %q: %w", name, err))
+		}
 	}
 	return state
 }

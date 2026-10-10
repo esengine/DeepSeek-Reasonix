@@ -221,6 +221,9 @@ func TestMcpAdminRejectsUnknownServer(t *testing.T) {
 		{"/mcp/enabled", `{"name":"nope","enabled":true}`, http.StatusNotFound},
 		{"/mcp/enabled", `{"enabled":true}`, http.StatusBadRequest},
 		{"/mcp/reconnect", `{"name":"nope"}`, http.StatusBadGateway},
+		{"/mcp/trust", `{"name":"nope","digest":"abc"}`, http.StatusConflict},
+		{"/mcp/trust", `{"name":"nope"}`, http.StatusBadRequest},
+		{"/mcp/trust", `{}`, http.StatusBadRequest},
 	} {
 		resp, err := http.Post(srv.URL+tc.path, "application/json", strings.NewReader(tc.body))
 		if err != nil {

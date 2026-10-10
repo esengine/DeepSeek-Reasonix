@@ -18,7 +18,7 @@ func (t *UseCapabilityTool) resolveDisabled(base tool.ResolvedCall, id, name str
 		if candidate == "" {
 			continue
 		}
-		refusal, ok := t.registry.DisabledMCPRefusal(candidate)
+		refusal, ok := t.registry.MCPRefusal(candidate)
 		if !ok {
 			continue
 		}
