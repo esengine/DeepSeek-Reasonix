@@ -41,8 +41,8 @@ func (j ciJob) runsOnWindows() bool {
 	if inner, ok := strings.CutPrefix(label, "${{"); ok {
 		key, _ := strings.CutSuffix(inner, "}}")
 		key, ok = strings.CutPrefix(strings.TrimSpace(key), "matrix.")
-		if !ok {
-			return false
+		if !ok || strings.ContainsAny(key, " '") {
+			return strings.Contains(label, "'windows-")
 		}
 		values, _ := j.Strategy.Matrix[key].([]any)
 		return slices.ContainsFunc(values, func(v any) bool {
