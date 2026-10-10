@@ -63,11 +63,6 @@ func main() {
 			notesVersion = os.Args[5]
 		}
 		err = genManifest(os.Args[2], os.Args[3], os.Args[4], notesVersion)
-	case "windows-payload":
-		if len(os.Args) != 4 {
-			usage()
-		}
-		err = genWindowsPayloadManifest(os.Args[2], os.Args[3])
 	case "genkey":
 		if len(os.Args) != 3 {
 			usage()
@@ -88,32 +83,8 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag> [notes-version]\n  windows-payload <dir> <version>\n  genkey <dir>\n  verify <file>")
+	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag> [notes-version]\n  genkey <dir>\n  verify <file>")
 	os.Exit(2)
-}
-
-func genWindowsPayloadManifest(dir, version string) error {
-	hashes := make(map[string]string)
-	for _, name := range update.WindowsPayloadFileNames() {
-		path := filepath.Join(dir, name)
-		info, err := os.Lstat(path)
-		if err != nil {
-			return fmt.Errorf("Windows payload %s: %w", name, err)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("Windows payload %s is not a regular file", name)
-		}
-		_, sum, err := hashFile(path)
-		if err != nil {
-			return err
-		}
-		hashes[name] = sum
-	}
-	b, err := update.EncodeWindowsPayloadManifest(version, hashes)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, update.WindowsPayloadManifestName), b, 0o644)
 }
 
 // verifyFile checks <file> against <file>.minisig using the embedded public key —

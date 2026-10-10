@@ -206,29 +206,3 @@ func TestGenManifestIgnoresUnknownNativePackages(t *testing.T) {
 		t.Fatalf("unexpected native_packages: %+v", m.NativePackages)
 	}
 }
-
-func TestGenWindowsPayloadManifestHashesExactReleaseUnit(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range update.WindowsPayloadFileNames() {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("payload:"+name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := genWindowsPayloadManifest(dir, "v2.3.4"); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(filepath.Join(dir, update.WindowsPayloadManifestName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	hashes, err := update.DecodeWindowsPayloadManifest(b, "v2.3.4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range update.WindowsPayloadFileNames() {
-		want := update.WindowsPayloadSHA256([]byte("payload:" + name))
-		if hashes[name] != want {
-			t.Fatalf("manifest hash for %s = %q, want %q", name, hashes[name], want)
-		}
-	}
-}
