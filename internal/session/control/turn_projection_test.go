@@ -19,6 +19,7 @@ func TestTurnBlockOrderIsDeclared(t *testing.T) {
 	}
 	want := []string{
 		"hook-context",
+		"current-date",
 		"available-skills",
 		"project-instructions",
 		"mcp-prompt-failure",

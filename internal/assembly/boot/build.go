@@ -513,6 +513,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		AllSkills:                      b.prompt.allSkills,
 		SkillStore:                     b.prompt.skillStore,
 		AllSkillStore:                  b.prompt.allSkillStore,
+		Clock:                          b.clock(),
 		DisableImplicitSkillInvocation: !b.prompt.implicitSkills || b.opts.Observe != nil,
 		SkillRunner:                    t.runners.run,
 		ReadOnlySkillRunner:            t.runners.readOnly,
@@ -647,4 +648,13 @@ func (b *builder) freeze(ctrl *control.Controller) (*BuildResult, error) {
 		ProjectChecks:           b.prompt.projectChecks, ProjectSensitivePaths: b.prompt.sensitivePaths,
 	}
 	return finalizeBuildResult(b.roots, &BuildResult{Controller: ctrl, Snapshot: snap, Runtime: runtimeSet, Owner: b.owner, Extensions: extensionMgr, Dispatcher: dispatcher, ExtensionUI: hub, ProviderResolver: providerResolver, BaseProviderResolver: b.providers.base, Assembly: assembly, Phases: b.timer.done("assemble")}, !b.opts.deferPublish), nil
+}
+
+// clock is the one place the system clock enters the assembly: a host supplies
+// none, a test supplies its own.
+func (b *builder) clock() func() time.Time {
+	if b.opts.clock != nil {
+		return b.opts.clock
+	}
+	return time.Now
 }

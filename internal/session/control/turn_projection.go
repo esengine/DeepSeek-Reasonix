@@ -51,6 +51,7 @@ func (c *Controller) turnBlocksFor(source string, includeOwed bool, notes []stri
 		// the user's next message is owed.
 		blocks = append(blocks,
 			turnBlock{hookContextTag, c.drainHookContextBlock()},
+			turnBlock{currentDateTag, wrapTurnBlock(currentDateTag, c.date.owed())},
 			turnBlock{"available-skills", wrapTurnBlock("available-skills", c.skills.owedCatalog())},
 			turnBlock{"project-instructions", wrapTurnBlock("project-instructions", c.memory.owedInstructions())},
 			turnBlock{"mcp-prompt-failure", wrapTurnBlock("mcp-prompt-failure", c.mcp.promptFailures.owed())},
@@ -155,6 +156,7 @@ func (c *Controller) runWithRunner(ctx context.Context, input string) error {
 }
 
 func (c *Controller) settleTurnProjections() {
+	c.date.debt.settle()
 	c.skills.catalog.settle()
 	c.memory.instructions.settle()
 	c.mcp.promptFailures.settle()

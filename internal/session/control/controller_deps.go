@@ -73,6 +73,7 @@ type controllerDeps struct {
 	// the reloadable stores) — the skills slice of the Capabilities concern. See
 	// skill.go.
 	skills              skillSet
+	date                dateAnchor
 	skillRunner         skill.SubagentRunner
 	readOnlySkillRunner skill.SubagentRunner
 	skillProfile        skill.ProfileResolver
@@ -156,6 +157,7 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		modelModes:             opts.ModelModes,
 		modelFace:              faceOfEntry(opts.ModelEntry),
 		sessionDir:             opts.SessionDir,
+		date:                   newDateAnchor(opts.Clock),
 		skills:                 newSkillSet(opts.Skills, opts.AllSkills, opts.SkillStore, opts.AllSkillStore, opts.DisableImplicitSkillInvocation, opts.WorkspaceRoot),
 		skillRunner:            opts.SkillRunner,
 		readOnlySkillRunner:    opts.ReadOnlySkillRunner,
