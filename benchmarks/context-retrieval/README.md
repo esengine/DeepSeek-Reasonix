@@ -22,17 +22,28 @@ addresses by hand at roughly nine times the page-in cost (139 vs 1292
 tokens/task). Measured after three separate leaks were closed, so the numbers
 are from a clean environment.
 
-**Fold index marginal utility: unresolved.** Both the positive and the negative
-estimates are invalidated. The first Stage 2 ran in a contaminated environment.
-The clean paired batch found a consistent effect (six of six tasks searched less
-and paged in less with the cue visible), and the same-batch dose-response did
-not reproduce it (`boundary-aligned 0/4`, recall-token delta reversing sign).
-The most likely reason is that two of the six index tasks carry heavy-tail
-stopping behaviour that swamps the effect being measured.
+**Fold index marginal utility: direction reproduced, size still conditional.** On the v2
+substrate the direction holds in six of six tasks and in the pooled paired batch: with the
+cue visible the index addresses the target, so the same task is searched less and pages in
+less (0.67 searches and 70 recall tokens per task, against 1.50 and 120 with the cue
+absent).
 
-Existing evidence is not sufficient to tune the shipped 1% budget in either
-direction. Reopening this wants a new corpus, not more samples: that substrate
-now exists, two qualifying tasks per cue tier — see "Index corpus v2" below.
+A size is visible but is not yet quotable. On the four tasks whose absent-cue arm stayed
+out of a loop, the index cost 64,952 prompt tokens against 115,551 without, 44% less
+(`i106-budgetseal` -35,147, `i70-ingestfloor` -8,222, `i37-dispatchlag` -7,599, and
+`i112-lagquota` +369, the prefix rent a task that never searches pays). That is a
+**post-hoc subset**: `i118-fencelag` and `i47-tenantlease` are excluded because their
+absent-cue arm looped in this batch (five and three retrieval rounds, three escapes each;
+together 80% of the absent-cue total), and the qualification above does not screen for
+stopping behaviour — holding on both boundary arms across three passes shows a stable cue
+boundary, not a stopping arm. Quoting 44% as the index's effect would mean choosing the
+sample after seeing the result; a batch screened on stopping stability is what would make
+a size quotable, and one arm also reverses either way (`i70-ingestfloor` default, +11,135
+prompt tokens over three escapes).
+
+Batch facts, because the counts differ: 36 runs were executed (12 paired, 24 index), and
+the token totals here cover the 24-run index batch — the paired batch ran before the
+per-run usage line existed.
 
 **Things that turned out not to be problems**, each after being measured rather
 than argued about:
