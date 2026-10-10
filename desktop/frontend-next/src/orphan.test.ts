@@ -15,7 +15,7 @@ const SOURCES = import.meta.glob(["./**/*.{ts,tsx}", "../perf/**/*.{ts,tsx}", "!
 
 // Entry points are reached by the bundler, not by an import. Declared, never
 // inferred — nothing in a filename says whether something mounts it.
-const ENTRIES = new Set(["src/main.tsx", "perf/harness.tsx"]);
+const ENTRIES = new Set(["src/main.tsx", "perf/harness.tsx", "src/testsetup.ts"]);
 
 /** One spelling for every file, rooted at the project rather than at whichever
  *  directory the glob happened to resolve it from. */

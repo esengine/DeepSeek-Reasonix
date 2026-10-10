@@ -48,6 +48,7 @@ export default defineConfig(({ mode }) => {
     // that goes red by arrangement teaches people to re-run it, not read it.
     test: {
       css: true,
+      setupFiles: ["./src/testsetup.ts"],
       pool: "threads",
     },
     server: {
