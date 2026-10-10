@@ -73,6 +73,20 @@ Do not publish or call the API during this exercise.
 The checker supports direct local JSON Pointer references only; external or
 URI-encoded references need separately reviewed tooling or source material.
 
+## Compare the fixture draft
+
+1. Open the installed package's [worked guide](fixture/example-guide.md) after
+   drafting. It is bound to the bundled `openapi.json` byte hash and shows the
+   required operations, models, source citations, unknowns and review record.
+2. Resolve each citation in your own guide and compare the claim with that
+   source object. Check missing declarations as well as stated values; optional
+   fields, absent error responses and unspecified guarantees need distinct
+   treatment.
+3. Keep human-review status pending until a person reviews the claims. The
+   worked draft and its observed local checker results do not certify another
+   model output or a running service. For a different source, read its entire
+   document and create a new guide tied to that source.
+
 ## Disable and clean up
 
 ```sh

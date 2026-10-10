@@ -46,5 +46,10 @@ that both operations and the stated unknowns are present and that the review
 record does not claim human approval. Output is a local Markdown draft only.
 Checker results establish source-reference integrity, not model task quality.
 
+The installed `fixture/example-guide.md` provides a worked draft for this
+exact fixture. Compare coverage, citations and stated unknowns after writing
+your own guide. Its source byte hash must match the input being reviewed;
+another source needs its own claims and review record.
+
 Delete only the temporary output directory selected for this exercise. Do not
 edit the installed fixture to make the failure input pass.
