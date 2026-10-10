@@ -51,6 +51,26 @@ type CheckContract struct {
 	capturedTests int
 	delivery      bool
 	observeRoot   string
+	// unseenWriter: something outside the receipts may write the workspace.
+	unseenWriter bool
+}
+
+// WithUnseenWriter records that a writer the receipts never name — a tool hook
+// — may change the workspace around any call, so no receipt bounds what a
+// turn changed and nothing may be waived as prose.
+func (c CheckContract) WithUnseenWriter(unseen bool) CheckContract {
+	c.unseenWriter = unseen
+	return c
+}
+
+// UnseenWriter reports what WithUnseenWriter recorded.
+func (c CheckContract) UnseenWriter() bool { return c.unseenWriter }
+
+// waivesProse reports whether prose may be exempt from the generic check here:
+// no check of the project's or task's own, no delivery role, and every writer
+// one the receipts can name.
+func (c CheckContract) waivesProse() bool {
+	return !c.delivery && !c.DeclaresChecks() && !c.unseenWriter
 }
 
 func (c CheckContract) WithObserveRoot(root string) CheckContract {
@@ -147,7 +167,7 @@ func (l *Ledger) Obligations(contract CheckContract) []Obligation {
 	if !changed {
 		return out
 	}
-	if !l.ProseOnlyWithoutChecks(contract) {
+	if !l.ProseOnlyWithoutChecks(contract) && !l.VerifiedBeneathProse(contract, at, l.LatestSuccessfulMutationIndexThrough) {
 		out = append(out, staleVerificationOf(l, at)...)
 	}
 	return append(out, l.checkObligations(contract, at)...)
@@ -158,7 +178,7 @@ func (l *Ledger) Obligations(contract CheckContract) []Obligation {
 // established for every mutation; a watched subset cannot exempt effects the
 // host never observed.
 func (l *Ledger) ProseOnlyWithoutChecks(contract CheckContract) bool {
-	if contract.delivery || contract.DeclaresChecks() {
+	if !contract.waivesProse() {
 		return false
 	}
 	beyond, scoped, changed := l.mutationsBeyondProse(contract.observeRoot)
@@ -190,35 +210,76 @@ func (l *Ledger) mutationsBeyondProse(root string) (beyond []string, scoped, cha
 		if !r.Mutation {
 			continue
 		}
-		// A failure proves nothing was left unwritten: tool.after can fail a
-		// finished write and a move can stop half-done, so a failed named-path
-		// call keeps its targets; any other failed mutation is unscoped.
-		if !r.Success {
-			if !r.Write {
-				scoped = false
-				continue
-			}
-			for _, path := range r.MutationPaths {
-				if !proseMutationPath(root, path) && !slices.Contains(beyond, path) {
-					beyond = append(beyond, path)
-				}
-			}
-			continue
-		}
-		changed = true
-		// Named-path writers establish scope by contract; other tools need a
-		// complete observation rather than a watched subset.
-		if r.MutationEvidence != MutationProven || len(r.Paths) == 0 || (!r.Write && !r.PathsComplete) {
-			scoped = false
-			continue
-		}
-		for _, path := range r.MutationPaths {
-			if !proseMutationPath(root, path) && !slices.Contains(beyond, path) {
+		paths, ok := receiptBeyondProse(root, r)
+		scoped = scoped && ok
+		changed = changed || r.Success
+		for _, path := range paths {
+			if !slices.Contains(beyond, path) {
 				beyond = append(beyond, path)
 			}
 		}
 	}
 	return beyond, scoped, changed
+}
+
+// receiptBeyondProse names the paths one mutation changed that are not prose,
+// and whether its extent was established at all.
+func receiptBeyondProse(root string, r Receipt) (beyond []string, scoped bool) {
+	// A failure does not prove nothing was written: tool.after can fail a
+	// finished write and a move can stop half-done, so a failed named-path
+	// call keeps its targets; any other failed mutation is unscoped.
+	if !r.Success && !r.Write {
+		return nil, false
+	}
+	// Named-path writers establish scope by contract; other tools need a
+	// complete observation rather than a watched subset.
+	if r.Success && (r.MutationEvidence != MutationProven || len(r.Paths) == 0 || (!r.Write && !r.PathsComplete)) {
+		return nil, false
+	}
+	for _, path := range r.MutationPaths {
+		if !proseMutationPath(root, path) {
+			beyond = append(beyond, path)
+		}
+	}
+	return beyond, true
+}
+
+// VerifiedBeneathProse reports that anchor lies in a run of prose laid over
+// changes a check already stands passing for, so the prose owes no second run.
+// prior is the caller's own anchor over the receipts up to the latest change
+// beyond prose; the check has to stand for it as well as for that change.
+func (l *Ledger) VerifiedBeneathProse(contract CheckContract, anchor int, prior func(through int) (int, bool)) bool {
+	if !contract.waivesProse() {
+		return false
+	}
+	beyond, ok := l.latestMutationBeyondProse(contract.observeRoot)
+	if !ok || anchor <= beyond || !l.verifiedAfter(beyond) {
+		return false
+	}
+	at, ok := prior(beyond)
+	return !ok || l.verifiedAfter(at)
+}
+
+func (l *Ledger) latestMutationBeyondProse(root string) (int, bool) {
+	if l == nil {
+		return 0, false
+	}
+	latest := -1
+	for i, r := range l.snapshotReceipts() {
+		if !r.Mutation {
+			continue
+		}
+		if paths, scoped := receiptBeyondProse(root, r); !scoped || len(paths) > 0 {
+			latest = i
+		}
+	}
+	return latest, latest >= 0
+}
+
+// verifiedAfter is a check passing after the boundary with none standing failed:
+// one check passing cannot answer for another that did not.
+func (l *Ledger) verifiedAfter(at int) bool {
+	return l.HasSuccessfulVerificationCommandAfter(at) && !l.HasFailedVerificationAfter(at)
 }
 
 // checkObligations owes every criterion either declaration named, baseline
@@ -257,7 +318,7 @@ func (l *Ledger) checkObligations(contract CheckContract, at int) []Obligation {
 }
 
 func staleVerificationOf(l *Ledger, at int) []Obligation {
-	if l.HasSuccessfulVerificationCommandAfter(at) && !l.HasFailedVerificationAfter(at) {
+	if l.verifiedAfter(at) {
 		return nil
 	}
 	return []Obligation{{

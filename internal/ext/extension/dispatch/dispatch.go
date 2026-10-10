@@ -175,6 +175,15 @@ func New(chain map[extension.InterceptorPoint][]extension.Contribution, replacem
 	}
 }
 
+// Intercepts reports whether a sidecar sits on point: a plugin-backed
+// contribution the walk would call. Nil-safe.
+func (d *Dispatcher) Intercepts(point extension.InterceptorPoint) bool {
+	if d == nil {
+		return false
+	}
+	return slices.ContainsFunc(d.chain[point], func(c extension.Contribution) bool { return c.Source.PluginID != "" })
+}
+
 // Intercept walks the chain for point in frozen order, calling each
 // plugin-backed interceptor with the current (possibly already replaced)
 // payload. payloadPtr must be a pointer to the point's registered DTO; on
