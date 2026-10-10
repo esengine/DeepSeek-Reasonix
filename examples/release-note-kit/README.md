@@ -32,6 +32,30 @@ In a test repository:
    `skills/release-note/references/format.md`. Preview alone does not prove
    the copied files or task result.
 
+For a first exercise with fixed inputs, use [the selected change evidence](fixture/change-evidence.md).
+The audience is contributors to the prefix example; select RN-01 only. After
+reading the installed skill and its format reference, enter this request in a
+normally configured Reasonix session:
+
+```text
+/release-note-kit:release-note Draft a release note for contributors to the prefix example, using RN-01 in fixture/change-evidence.md as the selected change. Cite the source evidence and observed checks, leave the unselected idea out, and identify missing release/version approval. Do not publish the draft or run additional commands.
+```
+
+1. Resolve the evidence path relative to this installed package, or copy the
+   file into the test repository and provide its full path. It is a human-read
+   exercise asset, not an automatically discovered command or skill resource.
+2. Compare the answer with [the worked draft](fixture/example-release-note.md)
+   only after producing your own answer. The record is a local example's
+   observed patch and checks; it is not a Reasonix release or a published PR.
+3. Codex checked and revised the worked draft against the installed skill,
+   complete format reference and fixed evidence. Native Reasonix live-model
+   output quality and independent human approval remain unverified. Installation and a scripted provider's
+   reference-read test establish different facts from authoring quality.
+4. For an unverified-input exercise, copy the evidence into a test directory,
+   remove its observed-check section and explicitly say no results were
+   supplied. The answer should use the format reference's unverified wording
+   and preserve the change's scope. Do not invent replacement test results.
+
 Remove the copied test package with
 `reasonix plugin remove release-note-kit --yes`. This example is not a public
 market submission or a verified release-note authoring service.
