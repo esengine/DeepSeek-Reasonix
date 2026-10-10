@@ -49,11 +49,14 @@ export function ServerRow({
   const [busy, setBusy] = useState("");
   const [failed, setFailed] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [q, setQ] = useState("");
+  const search = useRef<HTMLInputElement>(null);
   if (owner.port !== port || owner.root !== root) {
     setOwner({ port, root });
     setBusy("");
     setFailed("");
     setConfirming(false);
+    setQ("");
   }
   // 状态码是主机答上来的事实，画出来即可；它是不是「需要你重新认证」还要看自动
   // 刷新有没有跑过，那件事目前无人知道。m.error 是外部服务器自己写的文本，只作
@@ -132,6 +135,11 @@ export function ServerRow({
   );
 
   const tools = m.toolList ?? [];
+  const searchable = tools.length > 5;
+  const words = (searchable ? q : "").normalize("NFC").toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const shown = tools.filter((tool) => words.every((word) =>
+    [tool.name, tool.description, tool.error].some((value) => value?.normalize("NFC").toLowerCase().includes(word)),
+  ));
   const tag = loadTag(m);
   // The tool list is what gets loaded, so the choice sits above it; a server
   // whose tools are not known yet has nothing to load either way.
@@ -210,7 +218,15 @@ export function ServerRow({
       {confirm}
       {load}
       <div className="peek">
-        {tools.map((tool) => (
+        {searchable && <div className="msearch">
+          <input ref={search} type="search" data-action="mcp.tool-search" data-target={m.name}
+            value={q} spellCheck={false} aria-label={t("搜索 {name} 的工具", { name: m.name })}
+            placeholder={t("搜索 {name} 的工具", { name: m.name })} onChange={(e) => setQ(e.target.value)} />
+          {q && <button className="act" data-action="mcp.tool-search-clear" data-target={m.name}
+            onClick={() => { setQ(""); search.current?.focus(); }}>{t("清除")}</button>}
+        </div>}
+        {tools.length > 0 && shown.length === 0 && <div className="empty" role="status">{t("没有匹配的工具。")}</div>}
+        {shown.map((tool) => (
           // 一行一个工具：它叫什么、它自己说它干什么、以及这一刀下去会不会动
           // 你的东西。schema 被拒的那些照列，但写明为什么调不了。
           <div className="trow" key={tool.name} data-bad={tool.error ? "" : undefined}>

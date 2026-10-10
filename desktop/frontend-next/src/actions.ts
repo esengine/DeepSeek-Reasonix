@@ -157,6 +157,8 @@ export const ACTIONS: UIAction[] = [
   { id: "mcp.retry", kind: "repeatable", target: "entity", proof: "interaction" },
   { id: "mcp.remove", kind: "destructive", target: "entity", proof: "interaction" },
   { id: "mcp.load", kind: "kernel-mutation", target: "entity", proof: "interaction" },
+  { id: "mcp.tool-search", kind: "view", target: "entity", proof: "interaction" },
+  { id: "mcp.tool-search-clear", kind: "view", target: "entity", proof: "interaction" },
 
   // ── The window itself ────────────────────────────────────────────────────
   // A mock that records the call proves the wiring and nothing about the

@@ -379,6 +379,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "技能": "Skills",
   "当前工作目录下没有技能。": "No skills in this working directory.",
   "未提供说明": "No description written",
+  "搜索 {name} 的工具": "Search tools in {name}",
+  "没有匹配的工具。": "No matching tool.",
   "只读": "Read-only",
 
   // ── 设置：其余分区 ───────────────────────────────────────────────
