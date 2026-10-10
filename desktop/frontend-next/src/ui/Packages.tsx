@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import type { AgentPort, PluginExport, PluginItem, PluginPackage } from "../port/port";
 import { Switch } from "./Switch";
 import { reason } from "../i18n/kernel";
+import { CopyButton } from "./CopyButton";
 
 interface Props {
   port: AgentPort;
@@ -194,6 +195,11 @@ function Package({
           {exported.required.length
             ? t("里面的密钥值已经去掉，装它的人要自己提供：{names}", { names: exported.required.join("、") })
             : t("该包不需要填写任何密钥。")}
+        </div>
+      )}
+      {exported?.savedTo && (
+        <div className="acts">
+          <CopyButton text={exported.savedTo} label={t("复制路径")} />
         </div>
       )}
     </>
