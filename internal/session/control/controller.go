@@ -315,6 +315,9 @@ type Options struct {
 	AllSkills           []skill.Skill
 	SkillStore          *skill.Store
 	AllSkillStore       *skill.Store
+	// Clock is the host's wall clock for the date the model is told; nil means
+	// the model is told none.
+	Clock func() time.Time
 	// DisableImplicitSkillInvocation controls model-facing discovery only;
 	// explicit /skill commands and management remain host-side capabilities.
 	DisableImplicitSkillInvocation bool

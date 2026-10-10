@@ -33,6 +33,7 @@ type projectionHarness struct {
 	rec    *effectRecordingProvider
 	events *projectionEventLog
 	ctrl   *control.Controller
+	clock  func() time.Time
 }
 
 // projectionEventLog records what the host announced, so an arm can witness the
@@ -59,6 +60,11 @@ func (l *projectionEventLog) saw(kind event.Kind) bool {
 
 func newProjectionHarness(t *testing.T, kind, agentConfig, providerConfig string) *projectionHarness {
 	t.Helper()
+	return newProjectionHarnessAt(t, kind, agentConfig, providerConfig, nil)
+}
+
+func newProjectionHarnessAt(t *testing.T, kind, agentConfig, providerConfig string, clock func() time.Time) *projectionHarness {
+	t.Helper()
 	home := isolateConfigHome(t)
 	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
 	t.Setenv("REASONIX_STATE_HOME", "")
@@ -80,7 +86,7 @@ model = "x"
 `+providerConfig+`
 `)
 	approveWorkspace(t, dir)
-	h := &projectionHarness{t: t, dir: dir, kind: kind, rec: rec, events: &projectionEventLog{}}
+	h := &projectionHarness{t: t, dir: dir, kind: kind, rec: rec, events: &projectionEventLog{}, clock: clock}
 	h.build()
 	t.Cleanup(func() {
 		if h.ctrl != nil {
@@ -94,7 +100,7 @@ func (h *projectionHarness) build() {
 	h.t.Helper()
 	ctrl, err := Build(context.Background(), Options{
 		Sink: h.events, Home: os.Getenv("REASONIX_HOME"), WorkspaceRoot: h.dir,
-		resolvedShell: pinnedEffectShell(),
+		resolvedShell: pinnedEffectShell(), clock: h.clock,
 	})
 	if err != nil {
 		h.t.Fatalf("Build: %v", err)
