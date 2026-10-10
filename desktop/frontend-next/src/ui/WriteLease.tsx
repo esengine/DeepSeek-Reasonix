@@ -17,9 +17,9 @@ const MODE_NAME: Record<string, string> = {
 };
 
 const MODE_WHY: Record<string, string> = {
-  strict: "写明了要改哪些文件的会话互不干扰；说不清会改哪里的工具会占住整个工作区，其他写入都排队。",
-  optimistic: "只有写明了要改哪些文件的会话互不干扰；说不清会改哪里的工具不再占住工作区，可与其他会话并行。",
-  off: "本会话不取跨会话写锁：不挡其他会话，也不被挡——自己的写入同样不再受保护，并发写入可能互相覆盖。会话内部的写入也不再按范围排队，只剩并发名额上限。",
+  strict: "声明写入路径的写者按路径互斥；未声明路径的写者占用整个工作区，与其他写入一律排队。",
+  optimistic: "声明写入路径的写者仍按路径互斥；未声明路径的写者不再占用整个工作区，可与其他写入并行。",
+  off: "本会话不取写锁：写入不再受保护，也不再参与路径互斥，子代理之间同样如此。",
 };
 
 export function WriteLease({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {
@@ -91,7 +91,7 @@ export function WriteLease({ port, onChanged }: { port: AgentPort; onChanged: ()
         </div>
       )}
       {state.mode === "off" && (
-        <p className="rmthint">{t("关闭写锁后，其他会话的写入与你的可能互相覆盖；确认你能接受这个风险再关闭。")}</p>
+        <p className="rmthint">{t("关闭后，其他会话的写入可能覆盖你的；确认能接受该风险再关闭。")}</p>
       )}
       {error && <div className="why">{error}</div>}
     </div>
@@ -106,7 +106,7 @@ export function WriteLeaseGroup({ port, onChanged }: { port: AgentPort; onChange
     <Group
       id="write-lease"
       title={t("写锁档位")}
-      hint={t("标准最稳；宽松允许说不清会改哪里的工具并行；关闭则本会话不参与任何路径互斥，跨会话与会话内都不再排队。修改会重建运行时，任务运行期间无法变更。")}
+      hint={t("三档决定本会话的写锁范围，对子代理与跨会话同样生效。修改会重建运行时，任务运行期间无法变更。")}
     >
       <WriteLease port={port} onChanged={onChanged} />
     </Group>
