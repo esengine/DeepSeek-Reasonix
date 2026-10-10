@@ -303,9 +303,8 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   };
   const danger = (id: Section) =>
     (id === "tools" && status?.toolApprovalMode === "yolo") || (id === "ext" && broken > 0);
-  // Null remote means this kernel does not do remote panes; advanced holds
-  // whatever has moved out of the config file and has not moved in yet.
   const shell = useShellGraphics();
+  // A null remote means no remote panes; advanced holds what has not moved in yet.
   const shown = (id: Section) =>
     (id !== "remote" || remoteBook !== null) && (id !== "advanced" || ELSEWHERE.length > 0);
 
