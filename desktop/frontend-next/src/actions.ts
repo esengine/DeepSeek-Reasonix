@@ -386,6 +386,7 @@ export const ACTIONS: UIAction[] = [
   { id: "share.ask-revoke", kind: "view", target: "entity", proof: "interaction" },
   { id: "share.keep", kind: "view", target: "entity", proof: "interaction" },
   { id: "share.revoke", kind: "destructive", target: "entity", proof: "authority-effect" },
+  { id: "share.remember", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "versions.reload", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "versions.pin", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "versions.activate", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

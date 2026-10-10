@@ -105,7 +105,7 @@ it.each([
   ["relay_refused", "中转服务拒绝了这台设备的连接，请稍后重试。"],
 ] as const)("explains why Internet access is unavailable: %s", async (reason, note) => {
   const remote = { ...status(false), cloudRemote: { online: false, reason, error: "account: not signed in" } };
-  const hub = { shareStatus: vi.fn(async () => remote), offerShare: vi.fn() } as unknown as HubPort;
+  const hub = { shareStatus: vi.fn(async () => remote), offerShare: vi.fn(), shareRemember: vi.fn(async () => ({ remember: false })) } as unknown as HubPort;
   render(<PhonePop hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
   expect(await screen.findByText(note)).toBeTruthy();
