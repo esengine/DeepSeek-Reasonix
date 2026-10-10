@@ -126,7 +126,11 @@ func (t *Tool) applyCopySkill(req request, act *action) error {
 		}
 	}
 	if act.skill.IsDir {
-		if err := copyDir(act.skill.SourcePath, targetDir, maxSkillCopyBytes); err != nil {
+		source, err := act.copySource(act.skill.SourcePath)
+		if err != nil {
+			return err
+		}
+		if err := copyDir(source, targetDir, maxSkillCopyBytes, act.resolvedSource); err != nil {
 			return err
 		}
 	} else {

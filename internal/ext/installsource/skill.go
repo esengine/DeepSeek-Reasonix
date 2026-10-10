@@ -109,14 +109,28 @@ func (t *Tool) skillRootAction(req request, path string, candidates []skillCandi
 }
 
 func (t *Tool) localSourceRisk(a action) action {
-	if resolved, err := filepath.EvalSymlinks(a.Source); err == nil && resolved != a.Source {
-		a.RiskReasons = append(a.RiskReasons, "source resolves to "+hostLiteral(resolved))
+	if resolved, err := filepath.EvalSymlinks(a.Source); err == nil {
+		a.resolvedSource = resolved
+		if resolved != a.Source {
+			a.RiskReasons = append(a.RiskReasons, "source resolves to "+hostLiteral(resolved))
+		}
 	}
 	if !isLinkTargetSafe(a.Source, t.home, t.root) {
 		a.RiskLevel = RiskHigh
-		a.RiskReasons = append(a.RiskReasons, "skill source is an absolute path outside the project or home root")
+		a.RiskReasons = append(a.RiskReasons, a.Kind+" source is an absolute path outside the project or home root")
 	}
 	return a
+}
+
+func (a action) copySource(source string) (string, error) {
+	if a.resolvedSource == "" {
+		return source, nil
+	}
+	resolved, err := filepath.EvalSymlinks(source)
+	if err != nil || resolved != a.resolvedSource {
+		return "", newErr(ErrApprovalDenied, "source resolution changed since the approved plan; re-plan and re-approve")
+	}
+	return a.resolvedSource, nil
 }
 
 func (t *Tool) skillInstallRoot(scope string) (string, error) {
@@ -350,17 +364,23 @@ func mustRel(base, path string) string {
 // escaping the tree, broken, or a directory — is skipped, never followed:
 // the plugin-package apply path verifies capability counts after the copy,
 // so a skipped link fails the install closed instead of silently shrinking it.
-func copyDir(src, dst string, byteLimit int64) error {
+func copyDir(src, dst string, byteLimit int64, approvedRoot string) error {
 	var copied int64
 	srcRoot := src
-	if resolved, err := filepath.EvalSymlinks(src); err == nil {
+	resolved, err := filepath.EvalSymlinks(src)
+	if approvedRoot != "" {
+		if err != nil || resolved != approvedRoot {
+			return newErr(ErrApprovalDenied, "source resolution changed since the approved plan; re-plan and re-approve")
+		}
+		srcRoot = approvedRoot
+	} else if err == nil {
 		srcRoot = resolved
 	}
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+	return filepath.WalkDir(srcRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(src, path)
+		rel, err := filepath.Rel(srcRoot, path)
 		if err != nil {
 			return err
 		}

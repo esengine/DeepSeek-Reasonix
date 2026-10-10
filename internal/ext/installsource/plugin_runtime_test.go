@@ -103,12 +103,12 @@ func TestPluginRuntimePlanCarriesFullTrust(t *testing.T) {
 }
 
 func TestPluginLegacyPlanOmitsRuntimeFields(t *testing.T) {
-	src := testenv.TempDir(t)
+	project := testenv.TempDir(t)
+	src := filepath.Join(project, "legacy")
 	// v2 without runtime: skills-only package has no Runtime plan fields.
 	writeFile(t, filepath.Join(src, "reasonix-plugin.json"), `{"apiVersion":"reasonix.io/plugin/v2","name":"legacy","skills":["skills"]}`)
 	writeFile(t, filepath.Join(src, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nS")
 
-	project := testenv.TempDir(t)
 	home := testenv.TempDir(t)
 	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
 

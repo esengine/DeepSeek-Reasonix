@@ -134,10 +134,11 @@ type action struct {
 
 	// Internal state used by apply. Stripped by publicActions before
 	// serializing to JSON.
-	entry      config.PluginEntry
-	skill      skillCandidate
-	skillFiles map[string][]string
-	disconnect func() // optional MCP rollback; nil when not connected
+	entry          config.PluginEntry
+	skill          skillCandidate
+	skillFiles     map[string][]string
+	disconnect     func() // optional MCP rollback; nil when not connected
+	resolvedSource string
 	// preparedRoot lets a multi-plugin marketplace apply reuse the exact clone
 	// that produced its approved plan instead of cloning the same repository
 	// once per plugin. cleanup is attached to one action and runs after all
@@ -213,6 +214,7 @@ func publicActions(in []action) []action {
 		out[i].entry = config.PluginEntry{}
 		out[i].skill = skillCandidate{}
 		out[i].skillFiles = nil
+		out[i].resolvedSource = ""
 		out[i].preparedRoot = ""
 		out[i].cleanup = nil
 	}

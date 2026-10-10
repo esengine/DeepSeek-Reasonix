@@ -378,7 +378,7 @@ func (t *Tool) planLocal(req request, path string, info os.FileInfo) ([]action, 
 	if info.IsDir() && (req.Kind == "auto" || req.Kind == "plugin") {
 		pluginAction, pluginWarnings, err := t.localPluginPackageAction(req, path)
 		if err == nil {
-			return []action{pluginAction}, pluginWarnings, nil
+			return []action{t.localSourceRisk(pluginAction)}, pluginWarnings, nil
 		}
 		if req.Kind == "plugin" {
 			return nil, pluginWarnings, err

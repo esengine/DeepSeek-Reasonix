@@ -24,13 +24,13 @@ func TestPluginCopyUsesPackageBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(testenv.TempDir(t), "presentations")
-	if err := installCopiedPlugin(pkg, root, target, false); err != nil {
+	if err := installCopiedPlugin(pkg, root, target, false, ""); err != nil {
 		t.Fatalf("plugin above individual-skill budget failed: %v", err)
 	}
 	if info, err := os.Stat(filepath.Join(target, "presentations", "assets.bin")); err != nil || info.Size() != maxSkillCopyBytes+1 {
 		t.Fatalf("copied asset = %v, error = %v", info, err)
 	}
-	if err := copyDir(root, testenv.TempDir(t), maxSkillCopyBytes); !errors.Is(err, ErrInvalidManifest) {
+	if err := copyDir(root, testenv.TempDir(t), maxSkillCopyBytes, ""); !errors.Is(err, ErrInvalidManifest) {
 		t.Fatalf("individual skill over its budget returned %v", err)
 	}
 }
@@ -51,7 +51,7 @@ func TestPluginCopyOverPackageBudgetKeepsExistingInstall(t *testing.T) {
 	parent := testenv.TempDir(t)
 	target := filepath.Join(parent, "presentations")
 	writeFile(t, filepath.Join(target, "previous.txt"), "existing install")
-	if err := installCopiedPlugin(pkg, root, target, true); !errors.Is(err, ErrInvalidManifest) {
+	if err := installCopiedPlugin(pkg, root, target, true, ""); !errors.Is(err, ErrInvalidManifest) {
 		t.Fatalf("over-budget replacement returned %v", err)
 	}
 	if body, err := os.ReadFile(filepath.Join(target, "previous.txt")); err != nil || string(body) != "existing install" {
