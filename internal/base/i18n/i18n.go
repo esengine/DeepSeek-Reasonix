@@ -705,7 +705,6 @@ type Messages struct {
 	ProviderModelsFmt    string // description row under a provider in the /provider panel
 	ProviderNoModelsFmt  string // provider has no models
 
-	// `reasonix upgrade` / `reasonix update` — self-update
 	UpgradeChecking            string // "Checking for updates…"
 	UpgradeChannelDeprecated   string // legacy channel selection is ignored
 	UpgradeDevBuild            string // dev builds cannot self-update
@@ -725,6 +724,7 @@ type Messages struct {
 	UpgradeApplying            string // "Replacing binary…"
 	UpgradeApplyFailed         string // "failed to apply update: %v"
 	UpgradeSuccessFmt          string // "Updated %s → %s"
+	UpgradeManagedFmt          string // package-manager-owned install: %s is the command to run
 
 	// `reasonix report` — local CLI crash review and explicit upload
 	ReportNoPending           string

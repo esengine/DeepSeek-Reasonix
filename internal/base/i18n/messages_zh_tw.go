@@ -778,6 +778,7 @@ var ChineseTraditional = Messages{
 	UpgradeApplying:            "正在替換二進位制檔案…",
 	UpgradeApplyFailed:         "應用更新失敗：%v",
 	UpgradeSuccessFmt:          "已更新 %s → %s",
+	UpgradeManagedFmt:          "由套件管理器安裝，需用它升級才能保持其記錄一致：%s",
 
 	Feedback: feedbackTraditional,
 }
