@@ -34,6 +34,8 @@ func remoteCommand(args []string, version string) int {
 		return remoteTestCLI(args[1:], version)
 	case "connect", "open":
 		return remoteConnectCLI(args, version)
+	case "wsl":
+		return remoteWSLCLI(args[1:])
 	case "status":
 		return remoteStatusCLI(args[1:])
 	case "forward":
@@ -400,6 +402,7 @@ Usage:
   reasonix remote remove <name>
   reasonix remote import [alias...|--all]      # from ~/.ssh/config
   reasonix remote test <name|user@host>        # dial, auth, host key, and whether a kernel can run there
+  reasonix remote wsl list | wsl test <distribution>   # WSL distributions on this Windows machine
   reasonix remote connect <name> [--workspace PATH] [--local-port N] [--no-serve] [--open] [--forward-only]
   reasonix remote open <name>                  # connect --open
   reasonix remote status [<name>]
