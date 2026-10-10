@@ -24,3 +24,15 @@ func (c *Config) roleModelRefs() []string {
 	}
 	return out
 }
+
+// clearUnmovableRoleRefs empties the roles naming provider that cannot be handed
+// to an arbitrary chat model: vision needs image input, decision a decision
+// wire, advisor a different model than the main one.
+func (c *Config) clearUnmovableRoleRefs(provider string) {
+	movable := map[*string]bool{&c.Agent.PlannerModel: true, &c.Agent.SubagentModel: true}
+	for _, ref := range c.roleModelRefTargets() {
+		if !movable[ref] && c.modelRefTargetsProvider(*ref, provider) {
+			*ref = ""
+		}
+	}
+}
