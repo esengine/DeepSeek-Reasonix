@@ -65,13 +65,15 @@ export function usePromptRefine(port: AgentPort, text: string, adopt: (next: str
       aria-label={t("优化提示词")}
       aria-describedby={tipId}
       aria-busy={working}
-      disabled={!text.trim() || working}
-      onClick={() => run(text)}
+      aria-disabled={!text.trim() || working}
+      onClick={() => { if (!working) run(text); }}
     >
       <StudioIcon name="spark" />
       <span className="studio-control-tip" id={tipId} role="tooltip">
         <b>{t("优化提示词")}</b>
-        <span>{t("用当前模型改写得更清楚，采用前不会替换原文 · Ctrl+Shift+E")}</span>
+        <span>
+          {t("用当前模型改写得更清楚，采用前不会替换原文")} <span style={{ whiteSpace: "nowrap" }}>· Ctrl+Shift+E</span>
+        </span>
       </span>
     </button>
   );

@@ -1252,8 +1252,8 @@ export const EN: Record<string, string> = {
   "没有匹配的文件": "No matching files",
   "优化提示词":
     "Refine prompt",
-  "用当前模型改写得更清楚，采用前不会替换原文 · Ctrl+Shift+E":
-    "Rewrite it more clearly with the current model; your text stays until you adopt it · Ctrl+Shift+E",
+  "用当前模型改写得更清楚，采用前不会替换原文":
+    "Rewrite it more clearly with the current model; your text stays until you adopt it",
   "优化后的提示词":
     "Refined prompt",
   "输入框已修改，采用会覆盖当前内容":

@@ -4062,7 +4062,8 @@ body { font-size: 14px; line-height: 1.75; }
 .chrome .r { align-self: center; }
 
 .turntools .studio-refine { order: 1; }
-.studio-refine[disabled] > .studio-icon { opacity: .35; }
+.studio-refine[aria-disabled="true"] { cursor: default; }
+.studio-refine[aria-disabled="true"] > .studio-icon { opacity: .35; }
 .studio-refine[aria-busy="true"] > .studio-icon { animation: refine-pulse 1s ease-in-out infinite; }
 @keyframes refine-pulse { 50% { opacity: .35; } }
 .refine-card {
