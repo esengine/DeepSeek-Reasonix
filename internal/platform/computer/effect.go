@@ -53,11 +53,18 @@ type Modal struct {
 // to; a modal's names are the application's to choose, so they get no more.
 var modalNameLimit = textutil.PreviewLimit{Graphemes: 160, Lines: 1}
 
-// shownName quotes an application-chosen name bounded, with every control and
+// ShownName quotes an application-chosen name bounded, with every control and
 // invisible character, and the quote itself, rendered as a visible escape.
-func shownName(s string) string {
+func ShownName(s string) string {
 	bounded, _ := textutil.BoundLiteral(s, modalNameLimit)
 	return `"` + strings.ReplaceAll(bounded, `"`, `\u{22}`) + `"`
+}
+
+// ShownBundle prints a bundle id as it is when nothing is hidden in it, so a
+// normal id stays a key the model can send back, and escaped otherwise.
+func ShownBundle(s string) string {
+	bounded, _ := textutil.BoundLiteral(s, modalNameLimit)
+	return bounded
 }
 
 func (m Modal) String() string {
@@ -65,12 +72,12 @@ func (m Modal) String() string {
 	if title == "" {
 		title = "(untitled)"
 	}
-	s := "the modal " + shownName(title)
+	s := "the modal " + ShownName(title)
 	if m.Ref != "" {
 		s += " [" + m.Ref + "]"
 	}
 	if m.Blocks != "" {
-		s += " over " + shownName(m.Blocks)
+		s += " over " + ShownName(m.Blocks)
 	}
 	return s
 }
