@@ -24,3 +24,8 @@ reviewed: 2026-10-01
    Do not claim the fix is verified or silently install a toolchain.
 4. Remove the temporary fixture after preserving any exercise output the user
    wants. Do not delete an unrelated repository or publish a real PR.
+
+The package's `fixture/example-delivery.md` is a worked comparison after the
+exercise. It includes observed failures, a neighbouring length-versus-capacity
+case, the temporary diff, and an unpublished PR draft. It does not replace
+`delivery.md`, the failing input, or the results from the user's own run.

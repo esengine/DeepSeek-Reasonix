@@ -53,6 +53,19 @@ input. Preserve the input, keep the tests, and provide a PR draft without
 publishing it. Record the test result before and after the change.
 ```
 
+## Worked delivery
+
+After attempting the exercise, compare your handoff with
+[`fixture/example-delivery.md`](fixture/example-delivery.md). It records an
+observed local run: the original failures, a length-versus-capacity regression,
+the minimal temporary fix, validation results, and an unpublished PR draft.
+
+Copy installation includes this document beside the fixture.
+
+The worked delivery is reference output, not a replacement for running the
+tests. Leave the bundled Go input and tests unchanged; apply the fix only in
+your temporary copy and record your own results.
+
 ## Acceptance and recovery
 
 1. Confirm the installed package contains the skill and both files under
