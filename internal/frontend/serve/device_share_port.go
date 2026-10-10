@@ -2,6 +2,7 @@ package serve
 
 import (
 	"errors"
+	"os"
 	"strconv"
 
 	"reasonix/internal/contract/config"
@@ -43,6 +44,32 @@ func persistSharePort(port int) error {
 		return err
 	}
 	return cfg.SaveTo(path)
+}
+
+// SetRemember saves [serve] remember_paired_devices to the user config. The
+// persist hooks read the key when they run, so the switch takes effect
+// without a restart; turning it off also forgets on the spot: everything
+// paired is revoked now (the trust file goes with that write) and the state
+// file is removed.
+func (s *DeviceShare) SetRemember(on bool) error {
+	unlock := config.LockUserConfigEdits()
+	path := config.UserConfigPath()
+	cfg := config.LoadForEdit(path)
+	cfg.SetRememberPairedDevices(on)
+	if err := cfg.SaveTo(path); err != nil {
+		unlock()
+		return err
+	}
+	unlock()
+	if !on {
+		s.registry.RevokeAll()
+		if p := shareStatePath(); p != "" {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *DeviceShare) listenPort() string {

@@ -53,6 +53,19 @@ type DeviceShare struct {
 	cloudStatus     func() CloudRemoteStatus
 	port            int
 	persistPort     func(int) error
+	// persistState records whether the share is open and on what address, so the
+	// next process can reopen it. Nil leaves the share in memory only, which is
+	// what every test builds.
+	persistState func(persistedShareState) error
+	// remember reports whether this install keeps paired phones across restarts.
+	// Nil is the historical behaviour: reopening the share or ending the process
+	// unpairs every device, which is what a directly built share gets.
+	remember func() bool
+}
+
+// remembers reports whether paired phones outlive the door that paired them.
+func (s *DeviceShare) remembers() bool {
+	return s.remember != nil && s.remember()
 }
 
 type shareListener struct {
@@ -123,7 +136,26 @@ type ShareOffer struct {
 
 // NewDeviceShare returns a closed share serving page to devices.
 func NewDeviceShare(page fs.FS) *DeviceShare {
-	return &DeviceShare{registry: NewDeviceRegistry(), cloud: newCloudPresence(), page: page, addresses: PrivateAddresses, persistPort: persistSharePort}
+	registry := NewDeviceRegistry()
+	// Devices paired before a restart are adopted here, and every later change
+	// writes them back: a phone that scanned once keeps its cookie across
+	// restarts, until the share is closed or that device is removed.
+	if trust := deviceTrustPath(); trust != "" {
+		// Adopted only when the switch is on at startup; the hook stays wired
+		// either way and reads the setting when it runs, so the panel switch
+		// takes effect without a restart. Off forgets: an empty set removes
+		// the file.
+		if rememberPairedDevices() {
+			registry.Restore(loadDeviceTrust(trust))
+		}
+		registry.persist = func(devices []persistedDevice) {
+			if !rememberPairedDevices() {
+				devices = nil
+			}
+			_ = saveDeviceTrust(trust, devices)
+		}
+	}
+	return &DeviceShare{registry: registry, cloud: newCloudPresence(), page: page, addresses: PrivateAddresses, persistPort: persistSharePort, remember: rememberPairedDevices}
 }
 
 // Attach names the handler devices reach. The hub is built after the share it
@@ -135,14 +167,23 @@ func (s *DeviceShare) Attach(h http.Handler) {
 }
 
 // Open listens on ip, one of the addresses Status lists, on the configured port
-// or one the system picks. A share already open is closed first, so its devices go with it.
+// or one the system picks. A share already open stops listening first; the phones
+// already paired stay paired, so reopening — after a restart, say — does not ask
+// for a new code.
 func (s *DeviceShare) Open(ip string) (ShareStatus, error) {
 	if !slices.ContainsFunc(s.addresses(), func(a ShareAddress) bool { return a.IP == ip }) {
 		return s.Status(), ErrShareAddress
 	}
 	s.turn.Lock()
 	defer s.turn.Unlock()
-	s.closeLocked()
+	// An install that does not remember paired devices gets the share it always
+	// had: opening it again is a fresh door, and the phones of the old one go
+	// with it.
+	if s.remembers() {
+		s.stopListeningLocked()
+	} else {
+		s.closeLocked()
+	}
 	s.mu.Lock()
 	handler := s.handler
 	s.mu.Unlock()
@@ -163,6 +204,9 @@ func (s *DeviceShare) Open(ip string) (ShareStatus, error) {
 	s.mu.Lock()
 	s.live = live
 	s.mu.Unlock()
+	// Recorded only after the listener is real: the next process should reopen an
+	// address that worked, never one that failed to bind.
+	s.recordState(true, ip)
 	go func() {
 		defer close(live.done)
 		if err := runGracefulListener(ctx, ln, gate); err != nil {
@@ -172,19 +216,98 @@ func (s *DeviceShare) Open(ip string) (ShareStatus, error) {
 	return s.Status(), nil
 }
 
-// Close stops listening and unpairs every device.
+// Reopen reopens the share where it last listened. When that address is gone —
+// another network, another adapter — it falls back to the first address this
+// machine now offers, because a share that cannot reopen where it was is still
+// better off open than silently shut. Phones paired on the old origin have to
+// scan again in that case; one that kept its address does not.
+func (s *DeviceShare) Reopen(address string) (ShareStatus, error) {
+	if strings.TrimSpace(address) != "" {
+		if st, err := s.Open(address); err == nil {
+			return st, nil
+		}
+	}
+	list := s.addresses()
+	if len(list) == 0 {
+		return s.Status(), ErrShareAddress
+	}
+	return s.Open(list[0].IP)
+}
+
+// RestoreState adopts what the previous process remembered — whether the share
+// was open, and where — and wires the hook that records every later change. A
+// share with no state file starts closed, which is the shipping default.
+func (s *DeviceShare) RestoreState() persistedShareState {
+	path := shareStatePath()
+	if path == "" {
+		return persistedShareState{}
+	}
+	s.mu.Lock()
+	// The hook reads the setting when it runs, so the panel switch takes
+	// effect without a restart; off forgets, and removing the file is what
+	// forgetting records.
+	s.persistState = func(st persistedShareState) error {
+		if !rememberPairedDevices() {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}
+		return saveShareState(path, st)
+	}
+	s.mu.Unlock()
+	if !rememberPairedDevices() {
+		return persistedShareState{}
+	}
+	return loadShareState(path)
+}
+
+// recordState hands the current state to the hook, outside the lock so a disk
+// write never holds up a request. The hook itself is read under the lock — it is
+// set once, but the race detector cannot know that.
+func (s *DeviceShare) recordState(open bool, address string) {
+	s.mu.Lock()
+	persist := s.persistState
+	s.mu.Unlock()
+	if persist != nil {
+		if err := persist(persistedShareState{Open: open, Address: address}); err != nil {
+			slog.Warn("serve: phone-access state was not recorded", "err", err)
+		}
+	}
+}
+
+// Close stops listening and unpairs every device — the user closing the share.
 func (s *DeviceShare) Close() {
 	s.turn.Lock()
 	defer s.turn.Unlock()
 	s.closeLocked()
 }
 
+// Shutdown stops listening when the process is going away. An install that
+// remembers paired devices keeps them, so the next process adopts the same phones
+// rather than ask for a new code; one that does not ends up as Close, which is
+// what shipped.
+func (s *DeviceShare) Shutdown() {
+	if !s.remembers() {
+		s.Close()
+		return
+	}
+	s.turn.Lock()
+	defer s.turn.Unlock()
+	s.stopListeningLocked()
+}
+
 func (s *DeviceShare) closeLocked() {
+	s.stopListeningLocked()
+	s.registry.RevokeAll()
+	s.recordState(false, "")
+}
+
+func (s *DeviceShare) stopListeningLocked() {
 	s.mu.Lock()
 	live := s.live
 	s.live = nil
 	s.mu.Unlock()
-	s.registry.RevokeAll()
 	if live != nil {
 		live.stop()
 		<-live.done

@@ -20,6 +20,7 @@ function rig(initial: ShareStatus) {
     setSharePort: vi.fn(async (port: number) => (st = { ...st, port: port || undefined })),
     openShare: vi.fn(async (ip: string) => (st = { ...st, open: true, origin: `http://${ip}:${st.port ?? 50000}` })),
     offerShare: vi.fn(async () => ({ url: "", qr: "<svg/>", expires: new Date(Date.now() + 60_000).toISOString() })),
+    shareRemember: vi.fn(async () => ({ remember: false })),
   };
   return { hub, ui: <PhoneAccess hub={hub as unknown as HubPort} onError={() => {}} /> };
 }

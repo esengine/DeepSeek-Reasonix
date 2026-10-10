@@ -185,6 +185,7 @@ const SAID: Record<string, string> = {
   "share.port_in_use": "端口 {port} 已被其他程序占用，请换一个端口，或清空后让系统自动选择。",
   "share.port_out_of_range": "端口需要在 {min}–{max} 之间，或清空后让系统自动选择。",
   "share.port_save_failed": "无法保存端口设置：{error}",
+  "share.remember_save_failed": "无法保存配对记忆设置：{error}",
   "share.device_unknown": "没有这台已配对的设备，可能已被移除。",
   "picker.unsupported": "这个系统没有可用的文件夹选择框，请直接填写路径。",
   "picker.failed": "打不开文件夹选择框：{error}",

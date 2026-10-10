@@ -194,6 +194,7 @@ export const EN_KERNEL: Record<string, string> = {
   "端口 {port} 已被其他程序占用，请换一个端口，或清空后让系统自动选择。": "Port {port} is already in use by another program. Choose a different port, or clear it to let the system pick one.",
   "端口需要在 {min}–{max} 之间，或清空后让系统自动选择。": "The port must be between {min} and {max}, or cleared to let the system pick one.",
   "无法保存端口设置：{error}": "Could not save the port setting: {error}",
+  "无法保存配对记忆设置：{error}": "Could not save the paired-phones setting: {error}",
   "没有这台已配对的设备，可能已被移除。": "No paired device has that id; it may already have been removed.",
   "这个内核没有窗口，打不开本机的编辑器。": "This kernel has no window, so it cannot open an editor on this machine.",
   "这个文件夹不在当前窗口的项目列表里。": "That folder is not a project in this window.",

@@ -40,11 +40,22 @@ func (c *Config) SetSharePort(p int) error {
 	return nil
 }
 
+// SetRememberPairedDevices stores [serve] remember_paired_devices: the user's
+// own choice whether phone access survives a restart.
+func (c *Config) SetRememberPairedDevices(on bool) {
+	c.Serve.RememberPairedDevices = on
+}
+
 // renderServeSection always writes the header: a save that clears share_port
 // then removes the key, where an absent table would take a hand-written token
 // or hash with it. Those stay in the file and are never re-rendered.
 func renderServeSection(b *strings.Builder, c *Config) {
 	b.WriteString("[serve]\n")
+	if c.Serve.RememberPairedDevices {
+		b.WriteString("remember_paired_devices = true   # keep the phones that paired; a restart reopens the share and adopts them\n")
+	} else {
+		b.WriteString("# remember_paired_devices = true   # keep the phones that paired; a restart reopens the share and adopts them\n")
+	}
 	if c.Serve.SharePort != 0 {
 		fmt.Fprintf(b, "share_port = %d   # fixed port of the phone-access LAN link; unset picks a free one each time\n\n", c.Serve.SharePort)
 		return

@@ -258,6 +258,17 @@ export class MockHub implements HubPort {
     return Promise.resolve({ ...this.share });
   }
 
+  private remember = false;
+
+  shareRemember() {
+    return Promise.resolve<{ remember: boolean } | null>({ remember: this.remember });
+  }
+
+  setShareRemember(remember: boolean) {
+    this.remember = remember;
+    return Promise.resolve({ remember: this.remember });
+  }
+
   closeShare() {
     this.share = { ...this.share, open: false, origin: undefined, devices: [], offerExpires: undefined };
     return Promise.resolve({ ...this.share });

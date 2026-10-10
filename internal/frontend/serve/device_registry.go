@@ -28,13 +28,22 @@ var ErrPairingInvalid = errors.New("pairing code is not valid")
 
 // DeviceRegistry holds which devices may reach a kernel and the one pairing
 // code that can add another. Only digests are kept: a registry dumped from
-// memory hands out no credential. It lives for the process, so a restart
-// unpairs every device.
+// memory hands out no credential. A host that gives it a persist hook survives
+// a restart with its devices paired; without one it lives for the process.
 type DeviceRegistry struct {
 	mu      sync.Mutex
 	now     func() time.Time
 	pending pairingOffer
 	devices map[string]*pairedDevice
+	// rev counts every change to the paired set. A snapshot taken before a
+	// later change carries a stale rev and is dropped before it is written,
+	// so a Revoke cannot be overwritten by an older Redeem's write.
+	rev uint64
+	// persistMu serializes the writes that survive the rev check.
+	persistMu sync.Mutex
+	// persist writes the paired set after a change. Called outside the lock, and
+	// nil for a registry that is only ever in memory.
+	persist func([]persistedDevice)
 }
 
 // pairingOffer is the code on screen. A zero digest is no offer.
@@ -113,8 +122,8 @@ func (d *DeviceRegistry) offerLiveLocked() bool {
 func (d *DeviceRegistry) Redeem(code, name string) (credential string, view DeviceView, err error) {
 	sum := sha256.Sum256([]byte(code))
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if code == "" || !d.offerLiveLocked() || subtle.ConstantTimeCompare(sum[:], d.pending.digest[:]) != 1 {
+		d.mu.Unlock()
 		return "", DeviceView{}, ErrPairingInvalid
 	}
 	d.pending = pairingOffer{}
@@ -129,6 +138,11 @@ func (d *DeviceRegistry) Redeem(code, name string) (credential string, view Devi
 		streams: map[*deviceStream]struct{}{},
 	}
 	d.devices[dev.id] = dev
+	d.rev++
+	saved := d.snapshotLocked()
+	rev := d.rev
+	d.mu.Unlock()
+	d.flush(saved, rev)
 	return credential, dev.view(), nil
 }
 
@@ -171,13 +185,18 @@ func (d *DeviceRegistry) Devices() []DeviceView {
 // holds open is cut now.
 func (d *DeviceRegistry) Revoke(id string) bool {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	dev, ok := d.devices[id]
 	if !ok {
+		d.mu.Unlock()
 		return false
 	}
 	delete(d.devices, id)
+	d.rev++
+	saved := d.snapshotLocked()
+	rev := d.rev
+	d.mu.Unlock()
 	dev.cut()
+	d.flush(saved, rev)
 	return true
 }
 
@@ -190,7 +209,10 @@ func (d *DeviceRegistry) RevokeAll() {
 	}
 	d.devices = map[string]*pairedDevice{}
 	d.pending = pairingOffer{}
+	d.rev++
+	rev := d.rev
 	d.mu.Unlock()
+	d.flush(nil, rev)
 }
 
 // holdStream registers a stream the device opened and derives the context it

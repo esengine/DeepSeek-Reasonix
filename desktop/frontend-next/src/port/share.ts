@@ -77,6 +77,10 @@ export interface SharePort {
   closeShare(): Promise<ShareStatus>;
   // Zero clears the choice. Used the next time the door opens.
   setSharePort(port: number): Promise<ShareStatus>;
+  // Whether this install keeps the phones that paired across restarts. Null
+  // where the reading failed: the share routes exist only on a window's kernel.
+  shareRemember(): Promise<{ remember: boolean } | null>;
+  setShareRemember(remember: boolean): Promise<{ remember: boolean }>;
   offerShare(): Promise<ShareOffer>;
   offerCloudShare(): Promise<CloudShareOffer>;
   revokeDevice(id: string): Promise<ShareStatus>;

@@ -451,6 +451,16 @@ export class SseHub implements HubPort {
     return this.post<ShareStatus>("/share/close", {});
   }
 
+  async shareRemember() {
+    const res = await fetch("/share/remember", { credentials: "same-origin" });
+    if (!res.ok) await SseHub.fail("/share/remember", res);
+    return (await res.json()) as { remember: boolean };
+  }
+
+  setShareRemember(remember: boolean) {
+    return this.post<{ remember: boolean }>("/share/remember", { remember });
+  }
+
   setSharePort(port: number) {
     return this.post<ShareStatus>("/share/port", { port });
   }
