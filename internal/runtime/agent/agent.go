@@ -1514,11 +1514,6 @@ func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, r
 	ok := t != nil && len(ambiguous) == 0
 	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed, Issuer: event.IssuedByModel}
 	ev.FileDiff = event.FileDiff{Diff: c.Diff, Added: c.Added, Removed: c.Removed}
-	if ok && ev.Diff == "" && ev.Added == 0 && ev.Removed == 0 {
-		if ch, ok := tool.PreviewChange(ctx, t, json.RawMessage(c.Arguments)); ok {
-			ev.FileDiff = event.FileDiff{Diff: ch.Diff, Added: ch.Added, Removed: ch.Removed}
-		}
-	}
 	if ok {
 		ev.Profile = delegationProfile(t, json.RawMessage(c.Arguments))
 	}
@@ -1540,52 +1535,6 @@ func (a *Agent) emitResolvedToolDispatch(c provider.ToolCall, profile *event.Pro
 		})
 	}
 	a.emitRefreshedDispatch(c, profile)
-}
-
-// refreshCurrentFileDiff recomputes a writer preview against the state left by
-// earlier successful writers in the same provider batch. Preview failures clear
-// any stale initial diff; a later Execute will then fail or ask for recovery
-// without presenting the user with a preview that no longer describes disk.
-func refreshCurrentFileDiff(ctx context.Context, t tool.Tool, call provider.ToolCall) (provider.ToolCall, bool) {
-	pv, ok := t.(tool.Previewer)
-	if !ok {
-		return call, false
-	}
-	refreshed := call
-	refreshed.Diff = ""
-	refreshed.Added = 0
-	refreshed.Removed = 0
-	if change, err := pv.Preview(ctx, json.RawMessage(call.Arguments)); err == nil {
-		refreshed.Diff = change.Diff
-		refreshed.Added = change.Added
-		refreshed.Removed = change.Removed
-	}
-	changed := refreshed.Diff != call.Diff || refreshed.Added != call.Added || refreshed.Removed != call.Removed
-	return refreshed, changed
-}
-
-func (a *Agent) withPreviewFileDiffs(ctx context.Context, calls []provider.ToolCall) []provider.ToolCall {
-	if len(calls) == 0 {
-		return calls
-	}
-	out := make([]provider.ToolCall, len(calls))
-	copy(out, calls)
-	for i := range out {
-		if out[i].Diff != "" || out[i].Added != 0 || out[i].Removed != 0 {
-			continue
-		}
-		t, _, ambiguous := a.svc.tools.ResolveCall(out[i].Name)
-		ok := t != nil && len(ambiguous) == 0
-		if !ok {
-			continue
-		}
-		if ch, ok := tool.PreviewChange(ctx, t, json.RawMessage(out[i].Arguments)); ok {
-			out[i].Diff = ch.Diff
-			out[i].Added = ch.Added
-			out[i].Removed = ch.Removed
-		}
-	}
-	return out
 }
 
 // completedMCPConnect recognizes a synthetic cache-miss connect call whose

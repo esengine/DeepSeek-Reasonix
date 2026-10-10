@@ -28,3 +28,19 @@ export function toolRefusalReason(tool: Tool): string {
   const reason = tool.refusalCode ? say({ code: tool.refusalCode }, "") : "";
   return tool.workspaceLease ? [reason, workspaceLeaseDetail(tool.workspaceLease)].filter(Boolean).join(" · ") : reason;
 }
+
+// These codes carry a complete user-facing refusal; the raw message is for logs.
+export function toolErrorDetail(tool: Tool): string {
+  switch (tool.refusalCode) {
+    case "workspace.read_forbidden":
+    case "workspace.read_outside_scope":
+    case "workspace.overwrite_read_forbidden":
+    case "workspace.overwrite_read_outside_scope":
+      if (toolRefusalReason(tool)) return "";
+  }
+  return tool.err ?? "";
+}
+
+export function toolOutputEchoed(tool: Tool): boolean {
+  return !!tool.err && tool.err.trim() === (tool.output ?? "").trim();
+}

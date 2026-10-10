@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"reasonix/internal/runtime/agent"
-	"reasonix/internal/runtime/langpref"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/state/sessionstore"
@@ -111,7 +110,8 @@ type TaskTool struct {
 	// sub-agent gets its own use_capability frontend so ledger state stays
 	// isolated while connections reuse the parent Host.
 	capabilityRuntime *usecap.MCPCapabilityRuntime
-	isolated          *taskIsolation               // nil unless the session offers worktree isolation
+	isolated          *taskIsolation // nil unless the session offers worktree isolation
+	checkTargetAccess tool.TargetAccessCheck
 	hooksForRole      func(string) agent.ToolHooks // nil: children fire no hooks
 }
 
@@ -130,6 +130,7 @@ type TaskToolOptions struct {
 	Temperature                           float64
 	ContextEditing, ArchiveDir, SysPrompt string
 	Gate                                  agent.Gate
+	CheckTargetAccess                     tool.TargetAccessCheck
 	KeepPolicy                            agent.KeepPolicy
 	SubagentModel                         string
 	SubagentEffort                        string
@@ -149,25 +150,26 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		prov:             opts.Provider,
-		pricing:          opts.Pricing,
-		parentReg:        opts.ParentRegistry,
-		maxSteps:         opts.MaxSteps,
-		contextWindow:    opts.ContextWindow,
-		recentKeep:       opts.RecentKeep,
-		budgets:          opts.CompactionBudgets,
-		compactRatio:     opts.CompactRatio,
-		temperature:      opts.Temperature,
-		archiveDir:       opts.ArchiveDir,
-		keepPolicy:       opts.KeepPolicy,
-		sysPrompt:        sysPrompt,
-		gate:             opts.Gate,
-		hooksForRole:     opts.HooksForRole,
-		subagentModel:    opts.SubagentModel,
-		subagentEffort:   opts.SubagentEffort,
-		inheritedEffort:  opts.InheritedEffort,
-		resolveProvider:  opts.ResolveProvider,
-		maxSubagentDepth: agent.DefaultMaxSubagentDepth,
+		prov:              opts.Provider,
+		pricing:           opts.Pricing,
+		parentReg:         opts.ParentRegistry,
+		maxSteps:          opts.MaxSteps,
+		contextWindow:     opts.ContextWindow,
+		recentKeep:        opts.RecentKeep,
+		budgets:           opts.CompactionBudgets,
+		compactRatio:      opts.CompactRatio,
+		temperature:       opts.Temperature,
+		archiveDir:        opts.ArchiveDir,
+		keepPolicy:        opts.KeepPolicy,
+		sysPrompt:         sysPrompt,
+		gate:              opts.Gate,
+		checkTargetAccess: opts.CheckTargetAccess,
+		hooksForRole:      opts.HooksForRole,
+		subagentModel:     opts.SubagentModel,
+		subagentEffort:    opts.SubagentEffort,
+		inheritedEffort:   opts.InheritedEffort,
+		resolveProvider:   opts.ResolveProvider,
+		maxSubagentDepth:  agent.DefaultMaxSubagentDepth,
 	}
 }
 
@@ -883,41 +885,6 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 	opts.RequireReviewReportKind = grant.Delivery
 	ctx, prompt, opts = t.prepareSubSession(ctx, prompt, opts, modelRef, entrance)
 	return agent.RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
-}
-
-// subagentOptions is the single construction point for the run options every
-// sub-agent spawned through this tool shares (task, read_only_task, and
-// parallel_tasks children). Compaction, language preferences, and depth limits
-// must stay uniform across those paths — add new fields here, not at call sites.
-func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string, mutationObserver *checkpoint.MutationObserver) agent.Options {
-	opts := agent.Options{
-		MaxSteps:          maxSteps,
-		Temperature:       t.temperature,
-		Pricing:           pricing,
-		UsageSource:       event.UsageSourceSubagent,
-		Gate:              t.gate,
-		ContextWindow:     ctxWin,
-		RecentKeep:        t.recentKeep,
-		CompactionBudgets: t.budgets,
-		CompactRatio:      t.compactRatio,
-		ArchiveDir:        t.archiveDir,
-		KeepPolicy:        t.keepPolicy,
-		ResponseLanguage:  langpref.ResponseLanguageFromContext(ctx),
-		ReasoningLanguage: langpref.ReasoningLanguageFromContext(ctx),
-		SubagentDepth:     childDepth,
-		MaxSubagentDepth:  t.maxDepth(),
-		DeliveryProfile:   t.deliveryProfile,
-		Ablation:          t.ablation,
-		WorkspaceLease:    t.workspaceLease,
-		RecoveryGate:      t.recoveryGate,
-		RecoveryAgentID:   "subagent",
-		RecoveryTaskID:    recoveryTaskID,
-		MutationObserver:  mutationObserver,
-	}
-	if t.hooksForRole != nil {
-		opts.Hooks = t.hooksForRole(recoveryTaskID)
-	}
-	return opts
 }
 
 func subagentRecoveryTaskID(ctx context.Context, ref string) string {

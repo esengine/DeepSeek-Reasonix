@@ -50,6 +50,7 @@ func (l barrierLevel) message() string {
 // form the model sees; rawOutput is the full original when truncation applied
 // (empty when identical so we avoid double storage). images ride outside text.
 type toolOutcome struct {
+	preview   *event.FileDiff
 	output    string
 	rawOutput string // full original when different from output
 	images    []string
@@ -138,23 +139,12 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	startedAt := make([]int64, len(calls))
 	completedStepInBatch := false
 	receiptMark := a.ledgerMark()
-	// Full dispatches used the batch's initial file state. After a writer runs
-	// (even a failed one — disk may have mutated), refresh dependent writer
-	// previews. The first writer stays on the single-preview fast path.
-	earlierWriterRan := false
 	surfaceWriters := make([]bool, len(calls))
 	run := func(i int) {
 		t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
 		known := t != nil && len(ambiguous) == 0
 		writer := known && !t.ReadOnly()
 		surfaceWriters[i] = writer
-		if earlierWriterRan && writer {
-			if refreshed, changed := refreshCurrentFileDiff(ctx, t, calls[i]); changed {
-				calls[i] = refreshed
-				a.sess.conversation.UpdateToolCallPreview(refreshed)
-				a.emitFullToolDispatch(ctx, refreshed, true)
-			}
-		}
 		start := time.Now()
 		startedAt[i] = start.UnixMilli()
 		if calls[i].Name == "complete_step" && completedStepInBatch {
@@ -168,6 +158,9 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			return
 		}
 		outcomes[i] = a.executeOne(ctx, turn, calls[i])
+		if p := outcomes[i].preview; p != nil {
+			calls[i].Diff, calls[i].Added, calls[i].Removed = p.Diff, p.Added, p.Removed
+		}
 		recordWorkspaceMutation(a.svc.sink, outcomes[i].workspaceMutation)
 		if outcomes[i].executed {
 			surfaceWriters[i] = outcomes[i].workspaceMutation != nil
@@ -189,9 +182,6 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		if calls[i].ResolvedReadOnly != nil {
 			a.sess.conversation.UpdateToolCallResolution(calls[i])
 			a.emitResolvedToolDispatch(calls[i], outcomes[i].resolvedProfile)
-		}
-		if surfaceWriters[i] || (outcomes[i].resolved && !outcomes[i].resolvedReadOnly) {
-			earlierWriterRan = true
 		}
 	}
 	cancelled := false

@@ -92,7 +92,7 @@ func reviewCommand(args []string) int {
 	}
 
 	// 5. Build a review-scoped sub-agent registry.
-	reg := buildReviewSubagentRegistry(reviewSk, userCfg, root)
+	reg, checkTargetAccess := buildReviewSubagentRegistry(reviewSk, userCfg, root)
 
 	// 6. Prepare the review prompt.
 	task := buildReviewTask(diff, *instructions)
@@ -102,17 +102,15 @@ func reviewCommand(args []string) int {
 	hooks := boot.NewUserHookRunner(cfg, root, os.Stderr)
 	hooks.SetSessionID(sessionstore.BranchID(sessionstore.NewSessionPath("", "review")))
 	ctx := context.Background()
-	// Deliberately minimal Options: this one-shot CLI path has no gate, no
-	// compaction, and no session, unlike the in-session sub-agent paths built
-	// through TaskTool.subagentOptions / boot's subagentSkillOptions. If a new
-	// Options field becomes load-bearing for sub-agents, decide explicitly
-	// whether this path needs it too.
+	// This one-shot path has no gate or compaction, but admission must use
+	// the same user-only path policy as its tools.
 	result, err := agent.RunReadOnlySubAgentWithSession(ctx, prov, reg, sessionstore.NewSession(reviewSk.Body), task, agent.Options{
-		MaxSteps:      12,
-		Hooks:         hooks,
-		Temperature:   cfg.Agent.Temperature,
-		Pricing:       entry.Price,
-		ContextWindow: entry.ContextWindow,
+		MaxSteps:          12,
+		Hooks:             hooks,
+		CheckTargetAccess: checkTargetAccess,
+		Temperature:       cfg.Agent.Temperature,
+		Pricing:           entry.Price,
+		ContextWindow:     entry.ContextWindow,
 	}, event.Discard)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: review failed:", err)
@@ -124,8 +122,9 @@ func reviewCommand(args []string) int {
 }
 
 // buildReviewSubagentRegistry takes the user-only config: the search binary and
-// the sandbox are settings a reviewed checkout must not choose.
-func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config, root string) *tool.Registry {
+// the sandbox are settings a reviewed checkout must not choose. Bind tool
+// confinement and admission together so both enforce the same policy.
+func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config, root string) (*tool.Registry, tool.TargetAccessCheck) {
 	// The shared helper strips subagent-unavailable background capabilities while
 	// preserving foreground bash. This direct CLI path does not go through boot,
 	// so it first builds the small parent set from the review skill allow-list.
@@ -144,6 +143,9 @@ func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config, root 
 	writeRoots := cfg.WriteRootsForRoot(root)
 	forbidReadRoots := boot.RuntimeForbidReadRoots(cfg, root)
 	guard := builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots())
+	checkTargetAccess := (builtin.Workspace{
+		WriteRoots: writeRoots, ForbidReadRoots: forbidReadRoots, SessionGuard: guard,
+	}).TargetAccessCheck()
 	bashSpec := sandbox.Spec{
 		Mode:            cfg.BashMode(),
 		WriteRoots:      writeRoots,
@@ -166,9 +168,9 @@ func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config, root 
 		// like the in-session runner does (writer tools stripped, bash under the
 		// permission-classified read-only policy) so `reasonix review` is not a
 		// writable backdoor.
-		return agent.ReadOnlySubagentToolRegistry(parentReg, reviewSk.AllowedTools)
+		return agent.ReadOnlySubagentToolRegistry(parentReg, reviewSk.AllowedTools), checkTargetAccess
 	}
-	return agent.SubagentToolRegistry(parentReg, reviewSk.AllowedTools)
+	return agent.SubagentToolRegistry(parentReg, reviewSk.AllowedTools), checkTargetAccess
 }
 
 // getReviewDiff runs the appropriate git diff command and returns its output.

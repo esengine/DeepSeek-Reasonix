@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"reasonix/internal/base/fileutil"
 	fileenc "reasonix/internal/base/fileutil/encoding"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/state/sessiontemp"
@@ -20,9 +21,11 @@ func init() { tool.RegisterBuiltin(writeFile{}) }
 // unconfined and is overridden per run by ConfineWriters. workDir, when
 // non-empty, is the directory a relative path resolves against (see resolveIn).
 type writeFile struct {
-	roots   []string
-	guard   SessionDataGuard
-	managed ManagedConfigPaths
+	roots       []string
+	readRoots   []string
+	forbidRoots []string
+	guard       SessionDataGuard
+	managed     ManagedConfigPaths
 	// sessionTemp, when non-nil, adds the session's own temporary directory
 	// to the writable surface — the same directory bash writes through $TMPDIR.
 	sessionTemp *sessiontemp.Manager
@@ -71,11 +74,14 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	// of always writing UTF-8, which would silently corrupt a non-UTF-8 file. A
 	// missing file yields enc=UTF8 — the right default for a new one. Reading via
 	// the overlay makes the no-op check see the same buffer Preview does.
-	src, rerr := readEditSource(ctx, w.overlay, p.Path)
-	if rerr == nil && src.content == p.Content {
+	src, hadPrior, err := w.sourceForWrite(ctx, p.Path)
+	if err != nil {
+		return "", err
+	}
+	if hadPrior && src.content == p.Content {
 		return fmt.Sprintf("%s already contains the exact content; no changes made", p.Path), nil
 	}
-	if rerr == nil {
+	if hadPrior {
 		if err := w.views.checkOverwrite(p.Path, src.content); err != nil {
 			return "", err
 		}
@@ -83,13 +89,13 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	// The host overlay applies the write to the editor buffer and the file in
 	// one step. Text-only, so it handles plain UTF-8 targets (and new files);
 	// non-UTF-8 files stay on the local encoding-preserving path below.
-	if w.overlay != nil && filepath.IsAbs(p.Path) && (rerr != nil || src.enc == fileenc.UTF8) {
+	if w.overlay != nil && filepath.IsAbs(p.Path) && src.enc == fileenc.UTF8 {
 		if ok, werr := w.overlay.WriteTextFile(ctx, p.Path, p.Content); ok {
 			if werr != nil {
 				return "", fmt.Errorf("write %s: %w", p.Path, werr)
 			}
 			if w.receipt != nil {
-				w.receipt(p.Path, rerr == nil, []byte(src.content))
+				w.receipt(p.Path, hadPrior, []byte(src.content))
 			}
 			w.views.saw(p.Path, p.Content)
 			return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil
@@ -100,12 +106,16 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	hadPrior := rerr == nil
 	var prior []byte
 	if hadPrior {
 		prior = []byte(src.content)
 	}
-	if err := writeFileEncoded(p.Path, p.Content, src.enc); err != nil {
+	if hadPrior {
+		err = writeFileEncoded(p.Path, p.Content, src.enc)
+	} else {
+		err = fileutil.AtomicCreateFile(p.Path, []byte(p.Content), 0o644)
+	}
+	if err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	if w.receipt != nil {

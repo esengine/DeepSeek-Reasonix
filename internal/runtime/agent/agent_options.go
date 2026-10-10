@@ -65,6 +65,8 @@ type Options struct {
 	RequireVisibleFinal bool
 	// Gate is the per-call permission gate. nil disables gating.
 	Gate Gate
+	// CheckTargetAccess applies workspace path policy before hooks or previews.
+	CheckTargetAccess tool.TargetAccessCheck
 	// ReadOnlyExecution enables a permanent host-side read-only boundary for
 	// planner and research agents. It is intentionally independent of Plan mode
 	// so a stale collaboration flag cannot authorize a dynamic writer target.

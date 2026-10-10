@@ -14,13 +14,18 @@ import (
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/observe"
 	"reasonix/internal/runtime/agent/testutil"
+	"reasonix/internal/tools/builtin"
 )
 
 const (
 	outsideMark = "OUTSIDE-SECRET-BODY"
 	insideMark  = "INSIDE-BODY"
-	refusedText = "outside the folders this run may read"
 )
+
+type scopeReadResult struct {
+	output string
+	code   string
+}
 
 // scopeWorld is a workspace with a neighbour it must not read through.
 type scopeWorld struct {
@@ -47,7 +52,7 @@ func (w scopeWorld) link(t *testing.T, target, name string) {
 
 // run puts each call to the read-only posture in its own round and returns
 // what the model was told for it.
-func (w scopeWorld) run(t *testing.T, calls map[string][2]string, order []string) map[string]string {
+func (w scopeWorld) run(t *testing.T, calls map[string][2]string, order []string) map[string]scopeReadResult {
 	t.Helper()
 	var turns []testutil.Turn
 	for _, id := range order {
@@ -58,17 +63,28 @@ func (w scopeWorld) run(t *testing.T, calls map[string][2]string, order []string
 	if err := ctrl.Run(context.Background(), "read"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	return toolResults(prov.Requests())
+	results := make(map[string]scopeReadResult)
+	for id, output := range toolResults(prov.Requests()) {
+		results[id] = scopeReadResult{output: output}
+	}
+	for _, message := range ctrl.History() {
+		if message.ToolFailure != nil {
+			result := results[message.ToolCallID]
+			result.code = message.ToolFailure.RefusalCode
+			results[message.ToolCallID] = result
+		}
+	}
+	return results
 }
 
-func mustRefuse(t *testing.T, results map[string]string, ids ...string) {
+func mustRefuse(t *testing.T, results map[string]scopeReadResult, ids ...string) {
 	t.Helper()
 	for _, id := range ids {
-		got := results[id]
+		got := results[id].output
 		if strings.Contains(got, outsideMark) {
 			t.Errorf("%s leaked what is outside the workspace: %q", id, got)
 		}
-		if !strings.Contains(got, refusedText) {
+		if results[id].code != builtin.CodeReadOutsideScope {
 			t.Errorf("%s was not refused for its scope: %q", id, got)
 		}
 	}
@@ -124,22 +140,22 @@ func TestEffectObserveReadsStayInsideTheWorkspace(t *testing.T) {
 		"ls-abs", "ls-home", "ls-link", "glob-abs", "glob-rec", "glob-link",
 		"grep-abs", "grep-link", "grep-file", "idx-abs", "idx-link", "idx-file")
 	for _, id := range []string{"ok-read", "ok-link"} {
-		if !strings.Contains(results[id], insideMark) {
-			t.Errorf("%s: a path that stays inside the workspace was refused: %q", id, results[id])
+		if !strings.Contains(results[id].output, insideMark) {
+			t.Errorf("%s: a path that stays inside the workspace was refused: %q", id, results[id].output)
 		}
 	}
 	for _, id := range []string{"ok-ls", "ok-grep", "ok-glob"} {
-		if !strings.Contains(results[id], "inside.go") && !strings.Contains(results[id], "Fine") {
-			t.Errorf("%s: the workspace itself was not readable: %q", id, results[id])
+		if !strings.Contains(results[id].output, "inside.go") && !strings.Contains(results[id].output, "Fine") {
+			t.Errorf("%s: the workspace itself was not readable: %q", id, results[id].output)
 		}
 	}
-	if strings.Contains(results["ok-glob"], "file-link.go") || strings.Contains(results["ok-glob"], "dir-link") {
-		t.Errorf("a glob listed a link that leads outside the workspace: %q", results["ok-glob"])
+	if strings.Contains(results["ok-glob"].output, "file-link.go") || strings.Contains(results["ok-glob"].output, "dir-link") {
+		t.Errorf("a glob listed a link that leads outside the workspace: %q", results["ok-glob"].output)
 	}
 	// Walking the workspace must not step through a link to what lies outside it.
 	for _, id := range []string{"walk-grep", "walk-glob", "walk-ls", "walk-idx"} {
-		if strings.Contains(results[id], outsideMark) || strings.Contains(results[id], "Secret") {
-			t.Errorf("%s walked through a link out of the workspace: %q", id, results[id])
+		if strings.Contains(results[id].output, outsideMark) || strings.Contains(results[id].output, "Secret") {
+			t.Errorf("%s walked through a link out of the workspace: %q", id, results[id].output)
 		}
 	}
 }
@@ -165,8 +181,9 @@ func TestEffectObserveDotDotAfterALinkStaysInside(t *testing.T) {
 		"idx":  {"code_index", fmt.Sprintf(`{"action":"outline","path":%q}`, via)},
 	}
 	results := w.run(t, calls, []string{"read", "ls", "grep", "glob", "idx"})
-	for id, got := range results {
-		if strings.Contains(got, outsideMark) || (runtime.GOOS != "windows" && !strings.Contains(got, refusedText) && (strings.Contains(got, "notes.txt") || strings.Contains(got, "data.go"))) {
+	for id, result := range results {
+		got := result.output
+		if strings.Contains(got, outsideMark) || (runtime.GOOS != "windows" && result.code != builtin.CodeReadOutsideScope && (strings.Contains(got, "notes.txt") || strings.Contains(got, "data.go"))) {
 			t.Errorf("%s reached the folder beside the workspace: %q", id, got)
 		}
 	}
@@ -180,8 +197,8 @@ func TestEffectObserveKeepsSecretProtectionOn(t *testing.T) {
 	writeUserConfig(t, userModel+"\n[secrets]\nprotect_sensitive_files = false\nprotect_credential_files = false\n")
 	writeFile(t, w.root, ".env", "TOKEN="+outsideMark+"\n")
 	results := w.run(t, map[string][2]string{"env": jsonPath("read_file", "path", ".env")}, []string{"env"})
-	if strings.Contains(results["env"], outsideMark) {
-		t.Fatalf("a sensitive file inside the workspace was readable: %q", results["env"])
+	if strings.Contains(results["env"].output, outsideMark) {
+		t.Fatalf("a sensitive file inside the workspace was readable: %q", results["env"].output)
 	}
 }
 
@@ -193,8 +210,8 @@ func TestEffectObserveCaseVariantsStayOutside(t *testing.T) {
 	w := newScopeWorld(t)
 	variant := filepath.Join(strings.ToUpper(w.other), "DATA.GO")
 	results := w.run(t, map[string][2]string{"upper": jsonPath("read_file", "path", variant)}, []string{"upper"})
-	if strings.Contains(results["upper"], outsideMark) {
-		t.Fatalf("a case variant read what is outside: %q", results["upper"])
+	if strings.Contains(results["upper"].output, outsideMark) {
+		t.Fatalf("a case variant read what is outside: %q", results["upper"].output)
 	}
 }
 
@@ -214,8 +231,8 @@ func TestEffectObserveJunctionOutOfTheWorkspaceIsRefused(t *testing.T) {
 		"walk": {"grep", `{"pattern":"Secret","path":"."}`},
 	}, []string{"read", "ls", "grep", "walk"})
 	mustRefuse(t, results, "read", "ls", "grep")
-	if strings.Contains(results["walk"], outsideMark) {
-		t.Fatalf("a walk went through a junction: %q", results["walk"])
+	if strings.Contains(results["walk"].output, outsideMark) {
+		t.Fatalf("a walk went through a junction: %q", results["walk"].output)
 	}
 }
 

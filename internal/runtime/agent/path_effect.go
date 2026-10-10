@@ -246,12 +246,13 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	// one observer's branch — a build with no mutation observer still may not
 	// move its own criteria silently.
 	var change diff.Change
-	if pv, ok := plan.execTool.(tool.Previewer); ok {
-		if c, perr := pv.Preview(ctx, plan.execArgs); perr == nil {
+	if _, ok := plan.runTool.(tool.Previewer); ok {
+		if c, described := tool.PreviewChange(ctx, plan.runTool, plan.runArgs); described {
 			change = c
 			plan.criteriaRewritten = evidence.RewrittenTestCriteria(c.Path, c.OldText, c.NewText)
 			a.captureRewrittenCriteria(c, plan.criteriaRewritten)
 		}
+		a.publishToolPreview(ctx, plan, change)
 	}
 	obs := a.svc.mutationObserver
 	if obs != nil {

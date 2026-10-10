@@ -47,7 +47,7 @@ func TestBuildReviewTask(t *testing.T) {
 }
 
 func TestBuildReviewSubagentRegistryUsesForegroundOnlyBash(t *testing.T) {
-	reg := buildReviewSubagentRegistry(skill.Skill{AllowedTools: []string{
+	reg, _ := buildReviewSubagentRegistry(skill.Skill{AllowedTools: []string{
 		"bash",
 		"wait",
 		"bash_output",
@@ -89,7 +89,7 @@ func TestBuildReviewSubagentRegistryConfinesReaders(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox.ForbidRead = []string{secret}
 
-	reg := buildReviewSubagentRegistry(skill.Skill{
+	reg, _ := buildReviewSubagentRegistry(skill.Skill{
 		ReadOnly:     true,
 		AllowedTools: []string{"read_file"},
 	}, cfg, root)
@@ -112,7 +112,7 @@ func TestBuildReviewSubagentRegistryConfinesReaders(t *testing.T) {
 // the in-session review tool, so its bash must enforce the read-only
 // policy instead of trusting the prompt's "stay read-only" promise.
 func TestBuildReviewSubagentRegistryEnforcesReadOnlySkill(t *testing.T) {
-	reg := buildReviewSubagentRegistry(skill.Skill{
+	reg, _ := buildReviewSubagentRegistry(skill.Skill{
 		ReadOnly:     true,
 		AllowedTools: []string{"bash", "read_file", "task"},
 	}, config.Default(), testenv.TempDir(t))

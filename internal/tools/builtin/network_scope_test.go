@@ -266,3 +266,43 @@ func TestUnconfinedWritersStillRefuseANetworkPath(t *testing.T) {
 		t.Errorf("unconfined local path refused: %v", err)
 	}
 }
+
+func TestTargetAccessRefusesNetworkPathBeforeLookup(t *testing.T) {
+	lookups := holdWindowsPaths(t)
+	dir := t.TempDir()
+	ws := Workspace{Dir: dir, ReadRoots: []string{dir}, ForbidReadRoots: []string{filepath.Join(dir, "private")}}
+	tools := ws.Tools("read_file", "grep", "write_file")
+	check := ws.TargetAccessCheck()
+	// A failing regression must not contact the synthetic network host.
+	lookupExisting = func(string) (string, error) { *lookups++; return "", os.ErrNotExist }
+	for _, path := range networkTargets {
+		for _, target := range tools {
+			*lookups = 0
+			err := check(context.Background(), target, mustJSON(t, map[string]any{"path": path, "pattern": "x", "content": "x"}))
+			if !isNetworkCode(err) || *lookups != 0 {
+				t.Errorf("%s(%q): refusal=%v lookups=%d, want network refusal without lookup", target.Name(), path, err, *lookups)
+			}
+		}
+	}
+}
+
+func TestTargetAccessKeepsAuthorizedNetworkReads(t *testing.T) {
+	holdWindowsPaths(t)
+	lookupExisting = func(path string) (string, error) { return filepath.Clean(path), nil }
+	resolver := NewPathResolver()
+	resolver.RegisterReadRoot("ext1", "//dropped/share/folder")
+	ws := Workspace{Dir: t.TempDir(), ReadPaths: resolver}
+	reader := ws.Tools("read_file")[0]
+	check := ws.TargetAccessCheck()
+	if err := check(context.Background(), reader, mustJSON(t, map[string]any{"path": "ext1/a.txt"})); err != nil {
+		t.Fatalf("registered network folder refused: %v", err)
+	}
+	if err := check(context.Background(), reader, mustJSON(t, map[string]any{"path": "//dropped/share/other/a.txt"})); !isNetworkCode(err) {
+		t.Fatalf("path beside registered folder accepted: %v", err)
+	}
+	ws = Workspace{Dir: "//fileserver/team/proj", ReadRoots: []string{"//fileserver/team/proj"}}
+	reader = ws.Tools("read_file")[0]
+	if err := ws.TargetAccessCheck()(context.Background(), reader, mustJSON(t, map[string]any{"path": "a.txt"})); err != nil {
+		t.Fatalf("network workspace refused its own path: %v", err)
+	}
+}

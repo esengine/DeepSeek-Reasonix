@@ -231,7 +231,7 @@ func TestDynamicBashSkipsGuardianAllow(t *testing.T) {
 		name:    "guardian",
 		streams: [][]provider.Chunk{textTurn(`{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"safe"}`)},
 	}
-	guardianSess := guardian.NewSession(guardianProv, tool.NewRegistry(), nil, guardian.PolicyPrompt(), "guardian-test", 0, nil, event.Discard)
+	guardianSess := guardian.NewSession(guardianProv, tool.NewRegistry(), nil, guardian.PolicyPrompt(), "guardian-test", 0, nil, event.Discard, nil)
 	exec := agent.New(&recordingProvider{name: "executor"}, tool.NewRegistry(), sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
 	approvals := make(chan event.Approval, 1)
 	c := New(Options{

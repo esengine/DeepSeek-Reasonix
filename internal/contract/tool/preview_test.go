@@ -43,7 +43,7 @@ func TestPreviewChange(t *testing.T) {
 		{"read-only skipped", fakeWriter{readOnly: true, change: good}, false},
 		{"writer without previewer", plainWriter{}, false},
 		{"preview error", fakeWriter{err: errors.New("boom")}, false},
-		{"binary skipped", fakeWriter{change: diff.Change{Binary: true}}, false},
+		{"binary retained for capture", fakeWriter{change: diff.Change{Binary: true}}, true},
 		{"textual change", fakeWriter{change: good}, true},
 	}
 	for _, c := range cases {
@@ -52,7 +52,7 @@ func TestPreviewChange(t *testing.T) {
 			if ok != c.want {
 				t.Fatalf("ok = %v, want %v", ok, c.want)
 			}
-			if ok && ch.Diff == "" {
+			if ok && !ch.Binary && ch.Diff == "" {
 				t.Fatal("expected a non-empty diff on success")
 			}
 		})

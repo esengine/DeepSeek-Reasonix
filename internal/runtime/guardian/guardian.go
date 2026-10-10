@@ -65,7 +65,7 @@ type Session struct {
 // registry whose calls fire hooks (nil for none), and the safety policy as its
 // system prompt. It lives as long as the parent controller session. sink
 // receives GuardianAssessment events (nil = discard); temperature 0 is deterministic.
-func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, hooks agent.ToolHooks, policyPrompt, modelRef string, temperature float64, pricing *provider.Pricing, sink event.Sink) *Session {
+func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, hooks agent.ToolHooks, policyPrompt, modelRef string, temperature float64, pricing *provider.Pricing, sink event.Sink, checkTargetAccess tool.TargetAccessCheck) *Session {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
@@ -83,6 +83,7 @@ func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, hooks agent.
 		Temperature:         temperature,
 		RequireVisibleFinal: true, // each review must produce its own parseable verdict
 		Hooks:               hooks,
+		CheckTargetAccess:   checkTargetAccess,
 		// Use the shared context window so the guardian session can compact
 		// itself when it grows too large across many reviews.
 		ContextWindow:          100_000,

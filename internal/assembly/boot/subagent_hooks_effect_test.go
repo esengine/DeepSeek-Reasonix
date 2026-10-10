@@ -44,11 +44,24 @@ func (p *subagentHookProvider) Stream(_ context.Context, req provider.Request) (
 		if strings.HasSuffix(p.delegationTool, "skill") {
 			args = `{"name":"hook-probe","arguments":"read secret.txt"}`
 		}
+		if p.delegationTool == "parallel_tasks" {
+			args = `{"tasks":[{"prompt":"read secret.txt","tools":["read_file"]},{"prompt":"read secret.txt","tools":["read_file"]}]}`
+		}
 		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "delegate-1", Name: p.delegationTool, Arguments: args}}
 	case 2:
 		emitReadFile(ch, "child-read", "secret.txt")
 	default:
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
+		// Parallel children can start in either order. Their tool list excludes
+		// delegation, so a child without a tool result still needs its read.
+		parent := false
+		for _, tl := range req.Tools {
+			parent = parent || tl.Name == "parallel_tasks"
+		}
+		if p.delegationTool == "parallel_tasks" && !parent && len(effectToolResults(req)) == 0 {
+			emitReadFile(ch, "child-read", "secret.txt")
+		} else {
+			ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
+		}
 	}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
@@ -56,16 +69,25 @@ func (p *subagentHookProvider) Stream(_ context.Context, req provider.Request) (
 }
 
 func (p *subagentHookProvider) childReadResult() (string, bool) {
+	results := p.childReadResults()
+	if len(results) == 0 {
+		return "", false
+	}
+	return results[0], true
+}
+
+func (p *subagentHookProvider) childReadResults() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	var results []string
 	for _, req := range p.reqs {
 		for _, m := range req.Messages {
 			if m.Role == provider.RoleTool && m.ToolCallID == "child-read" {
-				return m.Content, true
+				results = append(results, m.Content)
 			}
 		}
 	}
-	return "", false
+	return results
 }
 
 var (

@@ -13,7 +13,7 @@ import { currentStep, parsePlan, stepDone } from "../../state/session";
 import { DiffView } from "./DiffView";
 import { Term, ToolOutput, BoundNote } from "./ToolOutput";
 import { ExtensionView } from "./ExtensionView";
-import { toolChangedFile, toolFailed, toolFailureLabel, toolRefusalReason } from "./outcome";
+import { toolChangedFile, toolErrorDetail, toolFailed, toolFailureLabel, toolOutputEchoed, toolRefusalReason } from "./outcome";
 import { StudioIcon } from "../StudioIcon";
 import { useEscape } from "../dismiss";
 
@@ -90,6 +90,7 @@ export function ToolCard({
   // wrong, which the colour already says.
   const badLabel = toolFailureLabel(tool);
   const refusal = toolRefusalReason(tool);
+  const errorDetail = toolErrorDetail(tool);
   // Which server answered belongs on the card, not in a panel: this is the
   // moment the user can judge whether an external service should have run.
   // The interpreter that actually ran it, or the remote tool a capability call
@@ -102,7 +103,7 @@ export function ToolCard({
   // A refused call carries the same sentence twice: the kernel writes it to the
   // model as output and to the reader as an error. Rendering both prints it
   // twice, and the second copy reads like a second failure.
-  const echoed = !!tool.err && tool.err.trim() === (tool.output ?? "").trim();
+  const echoed = toolOutputEchoed(tool);
   // update_goal's payload is the model's own prose about the turn. Its shape is
   // one claim — done, still going, or stuck — so the card says the claim rather
   // than the object carrying it.
@@ -221,7 +222,7 @@ export function ToolCard({
       {/* The error stays outside the takeover: an extension may redraw what
           a call produced, never whether it failed. */}
       {refusal && <div className="txt" data-refusal={tool.refusalCode}>{refusal}</div>}
-      {tool.err && <div className="txt bad">{tool.err}</div>}
+      {errorDetail && <div className="txt bad">{errorDetail}</div>}
       {children.length > 0 && (
         <div className="nest">
           <div className="nest-hd">
@@ -318,6 +319,9 @@ export function NestedCall({ tool, whole = false }: { tool: Tool; whole?: boolea
   const tag = tagFor(tool);
   const bad = toolFailed(tool);
   const clipped = !whole && (tool.output?.length ?? 0) > NESTED_PREVIEW;
+  const echoed = toolOutputEchoed(tool);
+  const refusal = toolRefusalReason(tool);
+  const errorDetail = toolErrorDetail(tool);
   return (
     <div className="call" data-call={tool.id || undefined} data-k={KINDED.has(categoryOf(shown)) ? categoryOf(shown) : undefined}>
       <div className="g">
@@ -332,7 +336,7 @@ export function NestedCall({ tool, whole = false }: { tool: Tool; whole?: boolea
           {bad && <span className="fail">{toolFailureLabel(tool)}</span>}
           <Cost tools={[tool]} />
         </div>
-        {tool.output && (
+        {tool.output && !echoed && (
           <div className="out">
             <Term text={clipped && !all ? tool.output.slice(0, NESTED_PREVIEW) : tool.output.slice(0, NESTED_WHOLE_CAP)} />
             {(whole || all) && tool.output.length > NESTED_WHOLE_CAP && <div className="bound bad">{t("输出过长，仅显示前 200000 个字符")}</div>}
@@ -348,8 +352,8 @@ export function NestedCall({ tool, whole = false }: { tool: Tool; whole?: boolea
         )}
         {tool.err && (
           <div className="out">
-            {toolRefusalReason(tool) && <div className="txt" data-refusal={tool.refusalCode}>{toolRefusalReason(tool)}</div>}
-            <div className="txt bad">{tool.err}</div>
+            {refusal && <div className="txt" data-refusal={tool.refusalCode}>{refusal}</div>}
+            {errorDetail && <div className="txt bad">{errorDetail}</div>}
           </div>
         )}
       </div>

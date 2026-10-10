@@ -130,6 +130,13 @@ func (w pathBoundWriter) WritePaths(args json.RawMessage) ([]string, error) {
 	return extractWritePathsFromArgs(w.inner.Name(), w.workDir, args)
 }
 
+func (w pathBoundWriter) ReadPaths(ctx context.Context, args json.RawMessage) ([]string, error) {
+	if reader, ok := w.inner.(tool.ReadPathResolver); ok {
+		return reader.ReadPaths(ctx, args)
+	}
+	return w.WritePaths(args)
+}
+
 // askToWiden puts one path to the user and records the answer. With no gate
 // there is nobody to ask, and an unanswerable question is a refusal: a run that
 // could widen its own fence whenever the host happened to have no approver

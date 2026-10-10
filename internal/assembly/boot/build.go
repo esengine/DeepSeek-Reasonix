@@ -325,7 +325,7 @@ func (b *builder) wireTools() error {
 	t.hooks, t.hookRunner = loadHooks(opts, b.roots, root, b.shell, b.sink)
 
 	t.roles = roleWiring{cfg: cfg, roots: b.roots, resolver: b.providers.effective, extension: b.providers.extension,
-		proxy: b.proxy, sink: b.sink, gate: t.gate, reg: t.reg, keep: b.keep, hooks: t.hookRunner}
+		proxy: b.proxy, sink: b.sink, gate: t.gate, reg: t.reg, keep: b.keep, hooks: t.hookRunner, checkTargetAccess: t.env.targetAccessCheck()}
 	t.sub = newSubagentConfig(opts, cfg, b.model.entry, b.model.name, b.providers.effective, b.proxy, b.prompt.skillStore)
 	if t.sub.inheritedEffortDropped {
 		report(b.sink, event.Event{
@@ -447,6 +447,7 @@ func (b *builder) executor() *agent.Agent {
 		ScreenExternalContent:   cfg.Agent.ScreenExternalContent,
 		MaxPerseverationRetries: perseverationRetries(cfg, entry),
 		Gate:                    t.gate,
+		CheckTargetAccess:       t.roles.checkTargetAccess,
 		Hooks:                   t.hookRunner,
 		Jobs:                    b.session.jobs,
 		// Reserving writes at the executor entry covers every writer, late MCP

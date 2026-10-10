@@ -15,6 +15,7 @@ import (
 
 	"reasonix/internal/base/workspaceid"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/extension/sidecar"
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/runtime/agent"
@@ -43,6 +44,13 @@ type toolEnvironment struct {
 	sessionTemp     *sessiontemp.Manager
 	egress          *egress.Proxy
 	evidenceSeal    *agent.EvidenceSeal
+}
+
+func (env toolEnvironment) targetAccessCheck() tool.TargetAccessCheck {
+	return (builtin.Workspace{
+		WriteRoots: env.writeRoots, ReadRoots: env.readRoots, ForbidReadRoots: env.forbidReadRoots,
+		SessionGuard: env.sessionGuard, ManagedConfig: env.managedConfig, SessionTemp: env.sessionTemp,
+	}).TargetAccessCheck()
 }
 
 func resolveToolEnvironment(opts Options, cfg *config.Config, roots config.Roots, root string, additionalDirs []string, shell sandbox.Shell, stderr io.Writer) toolEnvironment {

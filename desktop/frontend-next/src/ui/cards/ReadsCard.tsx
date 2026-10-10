@@ -5,7 +5,7 @@ import { argOf, splitPath } from "../args";
 import { Sym, glyphFor } from "../Sym";
 import { Cost } from "../Cost";
 import { Hits, Peek, Term, hitRows, parseHits, parseListing, parseRows, PATH } from "./ToolOutput";
-import { toolFailed } from "./outcome";
+import { toolErrorDetail, toolFailed, toolOutputEchoed, toolRefusalReason } from "./outcome";
 import { t as tr } from "../../i18n";
 
 // read_file numbers every line it returns, so the count is in the output rather
@@ -66,7 +66,9 @@ function summarise(tools: Tool[]): string {
 // A picked row opens the call's own result in the shape that result has: a file
 // is a terminal block, a search is its excerpts, a listing is a manifest.
 function Body({ tool }: { tool: Tool }) {
-  const out = tool.output;
+  const out = toolOutputEchoed(tool) ? undefined : tool.output;
+  const refusal = toolRefusalReason(tool);
+  const errorDetail = toolErrorDetail(tool);
   const body = (() => {
     if (!out) return null;
     if (tool.name === "grep") {
@@ -86,7 +88,8 @@ function Body({ tool }: { tool: Tool }) {
   return (
     <>
       {body}
-      {tool.err && <div className="txt bad">{tool.err}</div>}
+      {refusal && <div className="txt" data-refusal={tool.refusalCode}>{refusal}</div>}
+      {errorDetail && <div className="txt bad">{errorDetail}</div>}
       {tool.bound?.kind === "truncated" && <div className="bound bad">{tr("输出不完整，部分内容未进入上下文")}</div>}
     </>
   );

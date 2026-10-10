@@ -26,16 +26,17 @@ import (
 // planner, the guardian and the recovery reviewer each resolve their own model
 // and run behind the same headless gate.
 type roleWiring struct {
-	cfg       *config.Config
-	roots     config.Roots
-	resolver  provider.Resolver // effective: config plus sidecar providers
-	extension provider.Resolver // non-nil only when a sidecar declared providers
-	proxy     netclient.ProxySpec
-	sink      event.Sink
-	gate      *control.SharedHeadlessGate
-	reg       *tool.Registry
-	keep      agent.KeepPolicy
-	hooks     *hook.Runner // each role fires it under a session of its own
+	cfg               *config.Config
+	roots             config.Roots
+	resolver          provider.Resolver // effective: config plus sidecar providers
+	extension         provider.Resolver // non-nil only when a sidecar declared providers
+	proxy             netclient.ProxySpec
+	sink              event.Sink
+	gate              *control.SharedHeadlessGate
+	reg               *tool.Registry
+	keep              agent.KeepPolicy
+	checkTargetAccess tool.TargetAccessCheck
+	hooks             *hook.Runner // each role fires it under a session of its own
 }
 
 // planner wraps the executor in a Coordinator when a distinct planner_model is
@@ -75,6 +76,7 @@ func (w roleWiring) planner(opts Options, executor *agent.Agent, executorModel, 
 	plannerOpts := agent.Options{
 		MaxSteps:                     0,
 		Gate:                         w.gate,
+		CheckTargetAccess:            w.checkTargetAccess,
 		Hooks:                        w.hooks.ForRole("planner"),
 		ModelRef:                     modelRefFromEntry(pe),
 		ContextWindow:                pe.ContextWindow,
@@ -114,7 +116,7 @@ func (w roleWiring) guardian() *guardian.Session {
 		return nil
 	}
 	guardianReg := agent.FilterReadOnlyRegistry(w.reg, agent.SubagentMetaTools()...)
-	g := guardian.NewSession(pProv, guardianReg, w.hooks.ForRole("guardian"), guardian.PolicyPrompt(), modelRefFromEntry(ge), w.cfg.Agent.GuardianTemperature, ge.Price, w.sink)
+	g := guardian.NewSession(pProv, guardianReg, w.hooks.ForRole("guardian"), guardian.PolicyPrompt(), modelRefFromEntry(ge), w.cfg.Agent.GuardianTemperature, ge.Price, w.sink, w.checkTargetAccess)
 	report(w.sink, event.Event{Level: event.LevelInfo, Text: fmt.Sprintf("guardian enabled · model=%s", ge.Model)})
 	return g
 }

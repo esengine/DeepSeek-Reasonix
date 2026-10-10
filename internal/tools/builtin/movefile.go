@@ -21,9 +21,11 @@ var renameFile = os.Rename
 // endpoints on either side (a move out of the store mutates it too); workDir
 // resolves relative paths.
 type moveFile struct {
-	roots   []string
-	guard   SessionDataGuard
-	managed ManagedConfigPaths
+	roots       []string
+	readRoots   []string
+	forbidRoots []string
+	guard       SessionDataGuard
+	managed     ManagedConfigPaths
 	// sessionTemp, when non-nil, adds the session's own temporary directory
 	// to the writable surface — the same directory bash writes through $TMPDIR.
 	sessionTemp *sessiontemp.Manager
@@ -43,6 +45,11 @@ func (moveFile) Schema() json.RawMessage {
 func (moveFile) ReadOnly() bool { return false }
 
 func (moveFile) WritesNamedPaths() bool { return true }
+
+// Rename does not read contents; the cross-device copy checks its source before opening it.
+func (moveFile) ReadPaths(context.Context, json.RawMessage) ([]string, error) {
+	return nil, nil
+}
 
 func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
@@ -98,6 +105,9 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 			return fmt.Sprintf("moved %s to %s", src, dst), nil
 		}
 		if isCrossDeviceMove(err) {
+			if err := checkReadTargetAccess(m.readRoots, m.forbidRoots, src); err != nil {
+				return "", err
+			}
 			if cerr := copyRegularFileAndRemoveSource(src, dst, info); cerr != nil {
 				return "", fmt.Errorf("move %s to %s: %w", src, dst, cerr)
 			}

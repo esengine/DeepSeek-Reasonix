@@ -7,12 +7,12 @@ import (
 	"reasonix/internal/runtime/usecap"
 	"strings"
 
+	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/planmode"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/safety/permission"
-	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/tools/shellrun"
 )
 
@@ -25,6 +25,7 @@ const CodeMCPToolDisabled = tool.CodeMCPToolDisabled
 // Package-private; not shared across goroutines beyond the single executeOne
 // invocation that owns it.
 type toolCallPlan struct {
+	preview       *event.FileDiff
 	call          provider.ToolCall
 	tool          tool.Tool
 	canonicalName string
@@ -122,6 +123,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		out.resolvedProfile = delegationProfile(plan.resolvedMeta.Target, plan.resolvedMeta.Args)
 	}()
 	defer finalizeWorkspaceMutationOutcome(&out, plan)
+	defer func() { out.preview = plan.preview }()
 
 	if blocked, early := a.parseToolCall(ctx, plan); early {
 		return blocked
@@ -219,6 +221,10 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *
 	if blocked, early := a.applyContextualToolGate(ctx, plan); early {
 		return blocked, true
 	}
+	if blocked, early := a.applyTargetAccess(ctx, plan); early {
+		return blocked, true
+	}
+	a.previewForApproval(ctx, plan)
 	if blocked, early := a.applyDeliveryPolicyGates(ctx, turn, plan); early {
 		return blocked, true
 	}
@@ -547,15 +553,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	// Resolve the concrete execution target before hooks. A proxy may carry a
 	// different target/name/argument set than the provider-visible call.
-	plan.runTool = plan.execTool
-	plan.runArgs = plan.execArgs
-	if plan.resolved.Target != nil {
-		plan.runTool = plan.resolved.Target
-		plan.runArgs = plan.resolved.Args
-		if len(plan.runArgs) == 0 {
-			plan.runArgs = json.RawMessage(`{}`)
-		}
-	}
+	plan.runTool, plan.runArgs = plan.executionTarget()
 	// Hooks can write beyond a tool's paths, so permission precedes lease
 	// acquisition and hooks follow it under a conservative workspace claim.
 	if plan.mutates && a.svc.workspaceLease != nil {
@@ -596,30 +594,12 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 		}
 		plan.releaseMutationWrite = barrier.ExitWrite
 	}
-	// Checkpoint the file this writer is about to change before PreToolUse.
-	// A hook may mutate and then block the call, so the deferred AfterMutation
-	// still finalizes the fingerprint on every return path. Built-in
-	// Previewers get precise paths (complete coverage). Bash / opaque MCP
-	// writers record explicit coverage gaps instead of guessing targets.
+	if blocked, early := a.preToolUse(ctx, plan); early {
+		return blocked, true
+	}
 	if !plan.readOnly {
 		a.observeBeforeMutation(ctx, plan)
 		plan.mutationObserved = plan.mutationPath != "" || len(plan.declaredPaths) > 0
-		if toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
-			a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
-		}
-	}
-	// Proxy tools fire hooks against the real MCP target name and arguments.
-	if a.svc.hooks != nil {
-		if block, msg := a.svc.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
-			if msg == "" {
-				msg = "blocked by a PreToolUse hook"
-			}
-			return toolOutcome{
-				output:  "blocked: " + msg,
-				blocked: true,
-				errMsg:  "blocked by PreToolUse hook",
-			}, true
-		}
 	}
 	plan.cctx = a.toolCallContext(ctx, plan)
 	if plan.mutates {

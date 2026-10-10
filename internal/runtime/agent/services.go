@@ -46,7 +46,8 @@ type agentServices struct {
 	warnState *missingReasoningWarnState
 	// gate is the per-call permission gate for both standard and Plan
 	// workflows. nil disables gating entirely.
-	gate Gate
+	gate              Gate
+	checkTargetAccess tool.TargetAccessCheck
 	// extensions is the frozen Extension Protocol v2 dispatcher for this
 	// controller generation; nil means every intercept point passes through
 	// byte-identically. See extensions.go.
@@ -109,26 +110,27 @@ func newAgentServices(
 	configWrite tool.ConfigWriteApprover, hooks ToolHooks, opts Options,
 ) agentServices {
 	return agentServices{
-		prov:             prov,
-		triage:           opts.TriageProvider,
-		triageRef:        opts.TriageModelRef,
-		triagePricing:    opts.TriagePricing,
-		screenExternal:   opts.ScreenExternalContent,
-		tools:            tools,
-		pricing:          opts.Pricing,
-		sink:             sink,
-		gate:             gate,
-		extensions:       opts.Extensions,
-		recoveryGate:     opts.RecoveryGate,
-		sandboxEscape:    sandboxEscape,
-		configWrite:      configWrite,
-		hooks:            hooks,
-		jobs:             opts.Jobs,
-		memQueue:         opts.MemoryQueue,
-		writeScheduler:   opts.WriteScheduler,
-		workspaceLease:   opts.WorkspaceLease,
-		warnState:        missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
-		mutationObserver: opts.MutationObserver,
-		evidenceSeal:     opts.EvidenceSeal,
+		prov:              prov,
+		triage:            opts.TriageProvider,
+		triageRef:         opts.TriageModelRef,
+		triagePricing:     opts.TriagePricing,
+		screenExternal:    opts.ScreenExternalContent,
+		tools:             tools,
+		pricing:           opts.Pricing,
+		sink:              sink,
+		gate:              gate,
+		checkTargetAccess: opts.CheckTargetAccess,
+		extensions:        opts.Extensions,
+		recoveryGate:      opts.RecoveryGate,
+		sandboxEscape:     sandboxEscape,
+		configWrite:       configWrite,
+		hooks:             hooks,
+		jobs:              opts.Jobs,
+		memQueue:          opts.MemoryQueue,
+		writeScheduler:    opts.WriteScheduler,
+		workspaceLease:    opts.WorkspaceLease,
+		warnState:         missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
+		mutationObserver:  opts.MutationObserver,
+		evidenceSeal:      opts.EvidenceSeal,
 	}
 }

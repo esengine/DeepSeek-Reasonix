@@ -68,9 +68,17 @@ type WritePathResolver interface {
 	WritePaths(json.RawMessage) ([]string, error)
 }
 
-// PreviewChange returns the change a writer tool would make for args, or ok=false
-// when there's nothing renderable: t is read-only, doesn't implement Previewer,
-// the preview errored (the edit will likely fail too), or the file is binary.
+// ReadPathResolver separates source reads from write-only targets.
+// Writers without it conservatively require read access to every write target.
+type ReadPathResolver interface {
+	ReadPaths(context.Context, json.RawMessage) ([]string, error)
+}
+
+// TargetAccessCheck checks the resolved target before hooks and source reads.
+type TargetAccessCheck func(context.Context, Tool, json.RawMessage) error
+
+// PreviewChange returns a writer change for display and preimage capture.
+// Binary changes remain available to capture even without a renderable diff.
 func PreviewChange(ctx context.Context, t Tool, args json.RawMessage) (diff.Change, bool) {
 	if t == nil || t.ReadOnly() {
 		return diff.Change{}, false
@@ -80,7 +88,7 @@ func PreviewChange(ctx context.Context, t Tool, args json.RawMessage) (diff.Chan
 		return diff.Change{}, false
 	}
 	ch, err := pv.Preview(ctx, args)
-	if err != nil || ch.Binary {
+	if err != nil {
 		return diff.Change{}, false
 	}
 	return ch, true

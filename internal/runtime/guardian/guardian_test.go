@@ -126,7 +126,7 @@ func TestGuardianReasoningOnlyStopRetriesInsteadOfReusingPriorVerdict(t *testing
 		{text: `{"risk_level":"high","user_authorization":"low","outcome":"deny","rationale":"current action is unsafe"}`},
 	}}
 	prov := &reasoningScriptedProvider{scriptedProvider: base}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{})
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{}, nil)
 	parent := sessionstore.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "review two different actions"})
 
@@ -153,7 +153,7 @@ func TestGuardianRepeatedReasoningOnlyStopsFailClosedWithoutReusingPriorAllow(t 
 		{reasoning: "dangerous review 3", usage: &provider.Usage{FinishReason: "stop"}},
 	}}
 	prov := &reasoningScriptedProvider{scriptedProvider: base}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{})
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{}, nil)
 	parent := sessionstore.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "review two different actions"})
 
@@ -191,7 +191,7 @@ func TestGuardianRepeatedReasoningOnlyStopsFailClosedWithoutReusingPriorAllow(t 
 }
 
 func TestGuardianRollbackAfterRewriteDropsReasoningOnlyRetryTail(t *testing.T) {
-	gs := NewSession(&scriptedProvider{}, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{})
+	gs := NewSession(&scriptedProvider{}, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{}, nil)
 	before := gs.sess.Snapshot()
 	rewriteBefore := gs.sess.RewriteVersion()
 
@@ -243,7 +243,7 @@ func TestGuardianSaveLoadRestoresCursorForDeltaTranscript(t *testing.T) {
 		{text: `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"second ok"}`},
 	}}
 	sink := &captureSink{}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink)
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink, nil)
 	parent := sessionstore.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "first user request"})
 
@@ -258,7 +258,7 @@ func TestGuardianSaveLoadRestoresCursorForDeltaTranscript(t *testing.T) {
 		t.Fatalf("cursor sidecar = %q err %v, want EntryCount 1", data, err)
 	}
 
-	loaded := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink)
+	loaded := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink, nil)
 	if err := loaded.Load(path); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestGuardianUsageDoesNotLeakAcrossReviews(t *testing.T) {
 		{text: `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"second ok"}`},
 	}}
 	sink := &captureSink{}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink)
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink, nil)
 	parent := sessionstore.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "do it"})
 
@@ -335,7 +335,7 @@ func TestGuardianUsageAggregatesEveryModelCall(t *testing.T) {
 		{text: `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ok"}`, usage: &provider.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7, RequestCount: 2}},
 	}}
 	sink := &captureSink{}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink)
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink, nil)
 	parent := sessionstore.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "do it"})
 
@@ -361,7 +361,7 @@ func TestGuardianReviewTurnsAlternateRoles(t *testing.T) {
 		{text: `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"first ok"}`},
 		{text: `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"second ok"}`},
 	}}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{})
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{}, nil)
 	parent := sessionstore.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "do the thing"})
 
@@ -409,7 +409,7 @@ func TestGuardianFailedReviewRollsBackSession(t *testing.T) {
 		{err: fmt.Errorf("provider unavailable")},
 		{text: `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ok"}`},
 	}}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{})
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{}, nil)
 	parent := sessionstore.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "do the thing"})
 
@@ -447,7 +447,7 @@ func TestGuardianLoadResetsLegacyConsecutiveUserSessions(t *testing.T) {
 		t.Fatalf("Save legacy session: %v", err)
 	}
 
-	gs := NewSession(&scriptedProvider{}, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{})
+	gs := NewSession(&scriptedProvider{}, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, &captureSink{}, nil)
 	if err := gs.Load(path); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestGuardianLoadResetsLegacyConsecutiveUserSessions(t *testing.T) {
 func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
 	prov := &scriptedProvider{defaultUsage: &provider.Usage{TotalTokens: 1}} // default allow verdict, also serves the summarizer
 	sink := &captureSink{}
-	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink)
+	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink, nil)
 	parent := sessionstore.NewSession("sys")
 
 	filler := strings.Repeat("parent transcript filler. ", 160)
