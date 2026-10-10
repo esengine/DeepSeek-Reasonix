@@ -202,6 +202,7 @@ func renderBody(results []result) string {
 	b.WriteString(renderAuxiliarySpend(s.bySource, s.currency))
 	b.WriteString(renderMeterAccounting(results))
 	b.WriteString(renderTapeReplay(results))
+	b.WriteString(renderTapeRecord(results))
 	b.WriteString(renderFaultRecovery(results))
 	b.WriteString(renderTimeAttribution(results))
 	b.WriteString(renderSolveProfiles(results))

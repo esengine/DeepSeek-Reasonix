@@ -47,12 +47,14 @@ func (rm runMeter) close() {
 	}
 }
 
-// record attaches what the proxy observed. It stays separate from close so the
-// snapshot is taken while the run's numbers are still being assembled.
+// record attaches what the proxy observed. It stops the meter first, because a
+// handler's deferred write can land after the last response is read and stopping
+// is what waits for those handlers; a snapshot taken before that misses them.
 func (rm runMeter) record(r *result) {
 	if rm.m == nil {
 		return
 	}
+	rm.close()
 	observed := rm.m.snapshot()
 	r.Meter = &observed
 }

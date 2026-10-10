@@ -107,6 +107,18 @@ func (c tapeConfig) forRun(taskID string, trial int) (*tape, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
+		// This run replaces the tape. Drop the old completeness markers first, or
+		// a failure here would leave the previous request beside this run's
+		// partial response and read as a complete exchange.
+		stale, err := filepath.Glob(filepath.Join(dir, "*.request.json"))
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range stale {
+			if err := os.Remove(path); err != nil {
+				return nil, err
+			}
+		}
 	} else if _, err := os.Stat(dir); err != nil {
 		return nil, fmt.Errorf("no tape for %s: %w", taskID, err)
 	}
@@ -122,11 +134,26 @@ func (t *tape) file(index int, suffix string) string {
 	return filepath.Join(t.dir, fmt.Sprintf("%04d.%s", index, suffix))
 }
 
-func (t *tape) save(index int, request []byte, status int, contentType string, body []byte) {
-	meta, _ := json.Marshal(tapeResponse{Status: status, ContentType: contentType})
-	_ = os.WriteFile(t.file(index, "request.json"), request, 0o644)
-	_ = os.WriteFile(t.file(index, "response.json"), meta, 0o644)
-	_ = os.WriteFile(t.file(index, "response.body"), body, 0o644)
+// tapeWriteFile is a variable so a test can inject a write failure.
+var tapeWriteFile = os.WriteFile
+
+// save records one exchange. request.json goes last: its presence is what tells
+// a later replay the exchange is complete rather than truncated.
+func (t *tape) save(index int, request []byte, status int, contentType string, body []byte) error {
+	meta, err := json.Marshal(tapeResponse{Status: status, ContentType: contentType})
+	if err != nil {
+		return fmt.Errorf("tape %d response meta: %w", index, err)
+	}
+	if err := tapeWriteFile(t.file(index, "response.json"), meta, 0o644); err != nil {
+		return fmt.Errorf("tape %d response.json: %w", index, err)
+	}
+	if err := tapeWriteFile(t.file(index, "response.body"), body, 0o644); err != nil {
+		return fmt.Errorf("tape %d response.body: %w", index, err)
+	}
+	if err := tapeWriteFile(t.file(index, "request.json"), request, 0o644); err != nil {
+		return fmt.Errorf("tape %d request.json: %w", index, err)
+	}
+	return nil
 }
 
 // load returns the recorded answer to request index, and where the request
@@ -142,7 +169,12 @@ func (t *tape) load(index int, request []byte) (resp tapeResponse, body []byte, 
 	if body, err = os.ReadFile(t.file(index, "response.body")); err != nil {
 		return resp, nil, "", err
 	}
-	recorded, _ := os.ReadFile(t.file(index, "request.json"))
+	recorded, err := os.ReadFile(t.file(index, "request.json"))
+	if err != nil {
+		// Not a divergence: without the recorded request there is nothing to
+		// compare against, and reporting one would blame the harness.
+		return resp, nil, "", fmt.Errorf("tape %d is incomplete: %w", index, err)
+	}
 	return resp, body, requestDiff(recorded, request), nil
 }
 
@@ -248,4 +280,20 @@ func renderTapeReplay(results []result) string {
 		line += " · diverged: " + strings.Join(diverged, " · ")
 	}
 	return line + "\n\n"
+}
+
+// renderTapeRecord reports recordings that did not finish, so a run whose tape
+// cannot be replayed says so instead of looking recorded.
+func renderTapeRecord(results []result) string {
+	var incomplete []string
+	for _, r := range results {
+		if r.Meter == nil || r.Meter.TapeIncomplete == 0 {
+			continue
+		}
+		incomplete = append(incomplete, fmt.Sprintf("`%s` (%d exchanges): %s", r.ID, r.Meter.TapeIncomplete, r.Meter.TapeError))
+	}
+	if len(incomplete) == 0 {
+		return ""
+	}
+	return "**Tape record incomplete**: " + strings.Join(incomplete, " · ") + "\n\n"
 }
