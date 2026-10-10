@@ -369,6 +369,8 @@ export const ACTIONS: UIAction[] = [
   { id: "compaction.threshold", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // Which bound is in force is the setting; how much of it is on screen is not.
   { id: "compaction.advanced", kind: "view", target: "none", proof: "interaction" },
+  { id: "compaction.confirm", kind: "view", target: "none", proof: "interaction" },
+  { id: "compaction.now", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "panel.move", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "panel.delegate-placement", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "context.window-tokens", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

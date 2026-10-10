@@ -1,0 +1,4 @@
+.compact-now .wsconfirm { display: grid; gap: 8px; padding: 8px 0; border: 0; background: transparent; }
+.compact-now .wsconfirm-t .q { overflow: visible; white-space: normal; }
+.compact-now .wsconfirm-a { justify-content: flex-end; flex-wrap: wrap; }
+.compact-now .wsconfirm-a button:disabled { opacity: .4; cursor: default; }

@@ -4,6 +4,7 @@ import type { ContextBreakdown, JobEntry, McpEntry } from "../port/port";
 import type { Metrics } from "../state/session_types";
 import { DeckChips, type Deck } from "./DeckChips";
 import { ContextSummaryCard } from "./ContextSummaryCard";
+import type { CompactAction } from "./CompactNow";
 import { useDismiss } from "./dismiss";
 import type { Task } from "./panels/Agents";
 import { Spark } from "./Spark";
@@ -13,7 +14,7 @@ import { MASK, type Wallet } from "./wallet";
 import type { SpeedSummary } from "./speed";
 
 /** The numbers about this turn, in one row under the composer. */
-export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, cost, wallet, hideAmounts, tasks, jobs, onSettings, onCancelJob }: {
+export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compact, cost, wallet, hideAmounts, tasks, jobs, onSettings, onCancelJob }: {
   tps: number;
   trail: number[];
   running: boolean;
@@ -21,6 +22,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, cost,
   metrics: Pick<Metrics, "hit" | "miss">;
   ctx: ContextBreakdown | null;
   mcp: McpEntry[];
+  compact: CompactAction;
   cost: string;
   wallet: Wallet;
   hideAmounts: boolean;
@@ -74,6 +76,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, cost,
             context={ctx}
             mcp={mcp}
             percent={contextPercent}
+            compact={compact}
             onManage={() => { closeMeter(); onSettings("ext"); }}
           />
         </div>

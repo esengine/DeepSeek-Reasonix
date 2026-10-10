@@ -6,6 +6,7 @@ import { pct as percent, tokens } from "../../i18n/format";
 import { pinToViewport } from "../place";
 import { useFoldBound } from "./useFoldBound";
 import { Row } from "./kit";
+import { CompactNow, type CompactAction } from "../CompactNow";
 
 // The order is the order they arrive in a prompt, so the bar reads the way the
 // request is built rather than by size — a class that grows is easier to spot
@@ -62,7 +63,7 @@ function place(anchor: RefObject<HTMLElement | null>) {
  *  all. Each names its own denominator, so neither becomes a percentage of
  *  something unstated, and the window stays the number a relay gets wrong and
  *  the only place it can be corrected. */
-export function Context({ ctx, legend = false, port, onCtx }: {
+export function Context({ ctx, legend = false, port, onCtx, compact }: {
   ctx: ContextBreakdown | null;
   legend?: boolean;
   // Both are needed to offer the missing window: one to declare it, one to
@@ -70,6 +71,7 @@ export function Context({ ctx, legend = false, port, onCtx }: {
   // cannot draw, which is the half that was there before.
   port?: AgentPort;
   onCtx?: (next: ContextBreakdown) => void;
+  compact?: CompactAction;
 }) {
   // Every hook runs before the first return: ctx arrives one render after the
   // rail mounts, and a guard above them made that render ask for hooks the
@@ -124,6 +126,7 @@ export function Context({ ctx, legend = false, port, onCtx }: {
           {t("该来源未声明窗口大小，因此无法显示已用比例，也不会自动压缩。中转服务转发的是第三方模型，其容量只有你知道。")}
         </p>
         {field}
+        {compact && <CompactNow action={compact} />}
       </>
     );
     return legend ? <div className="block" data-b="ctx">{missing}</div> : missing;
@@ -175,6 +178,7 @@ export function Context({ ctx, legend = false, port, onCtx }: {
           any more — so both keep a row, and each names its own denominator
           rather than collapsing into one percentage of something unstated. */}
       <Row k={t("上下文")} v={<span className="ctxq">{tokens(Math.round(used))}</span>} />
+      {compact && <CompactNow action={compact} />}
       {!folds && <Row k={t("模型容量")} v={windowFigure} />}
       {!folds && editing && field}
       <div

@@ -33,6 +33,7 @@ import { PlanFold } from "./PlanFold";
 import { RunLine } from "./RunLine";
 import type { PaneProps, PaneReport } from "./panetypes";
 import { useRate, useTrail } from "./num";
+import { useCompactNow } from "./CompactNow";
 import { DOCK, Gutter } from "./Gutter";
 import { Find } from "./Find";
 import { useFind } from "./usefind";
@@ -93,6 +94,10 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   const workbench = docked || tab === "browser";
   const flow = useRef<HTMLDivElement>(null);
   const running = s.running || !!status?.running; // A paired device can join after turn_started.
+  const fail = useCallback((e: unknown) => {
+    dispatch({ kind: "__error", text: reason(e) } as never);
+  }, []);
+  const compact = useCompactNow(port, running || s.items.some((item) => item.t === "compaction" && !item.done), fail);
   // Elapsed is a clock reading and belongs on the tick. Throughput is not: it
   // follows the deltas themselves, and expires rather than being re-derived.
   const tps = useRate(s.outWindow, running);
@@ -151,6 +156,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     () =>
       port.subscribe(
         (ev) => {
+          compact.onEvent(ev);
           pacer.push(ev); if (ev.kind === "turn_done") onTurnDone?.(rt.id);
           // A server finishing its handshake changes what /mcp answers, and this
           // is the only precise signal for it — the turn boundary below is the
@@ -169,12 +175,13 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
           if (ev.kind === "notice" && ev.code === "display_currency") revalue();
         },
         () => {
+          compact.release();
           pacer.drop();
           rebuild();
           refreshStatus();
         },
       ),
-    [port, pacer, rt.id, onTurnDone, reloadMcp, rebuild, refreshStatus, revalue],
+    [port, pacer, rt.id, onTurnDone, reloadMcp, rebuild, refreshStatus, revalue, compact.onEvent, compact.release],
   );
 
   // What the rows cover is dispatched before the rows themselves, so the table
@@ -221,12 +228,6 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   useEffect(() => {
     if (pulse) refreshStatus();
   }, [pulse, refreshStatus]);
-
-  const fail = useCallback((e: unknown) => {
-    // A refusal carries a code; say() turns it into this window's language.
-    // Anything else is an ordinary failure and prints as itself.
-    dispatch({ kind: "__error", text: reason(e) } as never);
-  }, []);
 
   // Everything on screen belongs to one session; when the kernel moves this
   // pane to another one — a switch, a new session, a rewind — all of it has to
@@ -513,7 +514,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         {alert && <div className="cmpalert">{alert}</div>}
         <Composer port={port} status={status} running={running} quote={quote} restore={restored} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} onSettings={onSettings} changeCount={tree?.repo ? tree.changes.length : 0} git={git} onTreeChanged={refreshTree} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
         <MeterRail
-          tps={tps} trail={trail} running={running} speed={speed} metrics={s.metrics} ctx={ctx} mcp={mcp} cost={cost}
+          tps={tps} trail={trail} running={running} speed={speed} metrics={s.metrics} ctx={ctx} mcp={mcp} compact={compact} cost={cost}
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}
           onCancelJob={(id) => port.cancelJob(id).then(refreshStatus, fail)}
         />
@@ -554,6 +555,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
             tree={tree}
             ctx={ctx}
             onCtx={setCtx}
+            compact={compact}
             yolo={status?.toolApprovalMode === "yolo"}
             onSettings={onSettings}
             panels={s.panels}

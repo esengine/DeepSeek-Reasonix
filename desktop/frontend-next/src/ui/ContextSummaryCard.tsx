@@ -1,13 +1,15 @@
 import { t } from "../i18n";
 import type { ContextBreakdown, McpEntry } from "../port/port";
+import { CompactNow, type CompactAction } from "./CompactNow";
 
 const compact = (n: number): string => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 100) / 10}k` : String(n);
 
-export function ContextSummaryCard({ context, mcp, percent, onManage, className = "" }: {
+export function ContextSummaryCard({ context, mcp, percent, onManage, compact: action, className = "" }: {
   context: ContextBreakdown | null;
   mcp: McpEntry[];
   percent: number | null;
   onManage: () => void;
+  compact?: CompactAction;
   className?: string;
 }) {
   const active = mcp.filter((entry) => entry.enabled);
@@ -31,6 +33,7 @@ export function ContextSummaryCard({ context, mcp, percent, onManage, className 
           <div className="chrome-context-parts">{parts.map(([label, value, key]) => <div key={key}><i data-part={key} /><span>{label}</span><b>{compact(value)}</b></div>)}</div>
         </>
       ) : <p>{t("暂时没有上下文数据")}</p>}
+      {action && <CompactNow action={action} />}
       <section>
         <div><b>MCP</b><small>{ready.length} / {active.length} {t("个已连接")} · {tools} {t("个工具")}</small></div>
         {active.slice(0, 4).map((server) => <div className="chrome-mcp-row" key={server.name}><i data-ready={server.state === "ready" ? "" : undefined} /><span>{server.name}</span><small>{server.state === "ready" ? `${server.tools} ${t("个工具")}` : t("等待连接")}</small></div>)}

@@ -17,6 +17,7 @@ import type { Wallet } from "./wallet";
 import { swapping } from "./swap";
 import { ChangePreview } from "./ChangePreview";
 import type { Posture } from "./decisions";
+import type { CompactAction } from "./CompactNow";
 
 // What the rail can show. Presence is still each panel's own contract — a
 // panel with nothing to say draws nothing — so this decides where something
@@ -56,6 +57,7 @@ interface Props extends Rail {
   // Declaring the missing window rebuilds the runtime, so the rebuilt gauge
   // comes back on that same call rather than on the next poll.
   onCtx: (next: ContextBreakdown) => void;
+  compact?: CompactAction;
   yolo: boolean;
   /** The task view has the plan at full width, so the rail's copy stands down. */
   planShownElsewhere?: boolean;
@@ -95,6 +97,7 @@ export const Metrics = memo(function Metrics({
   tree,
   ctx,
   onCtx,
+  compact,
   yolo,
   planShownElsewhere,
   onSettings,
@@ -120,7 +123,7 @@ export const Metrics = memo(function Metrics({
   const panel: Record<Section, ReactNode> = {
     cache: <Cache key="cache" metrics={metrics} />,
     cost: <Cost key="cost" metrics={metrics} wallet={wallet} account={account} onRefreshWallet={onRefreshWallet} />,
-    context: <Context key="context" ctx={ctx} legend port={port} onCtx={onCtx} />,
+    context: <Context key="context" ctx={ctx} legend port={port} onCtx={onCtx} compact={compact} />,
     agents: <Agents key="agents" tasks={tasks} />,
     runtime: <Runtime key="runtime" rate={rate} done={done} stats={stats} />,
     plan: <Plan key="plan" steps={plan} shownElsewhere={planShownElsewhere} paused={blocked} />,
