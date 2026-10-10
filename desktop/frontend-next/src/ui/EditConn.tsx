@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { ProviderCheck, ProviderEntry } from "../port/port";
 import { checkedFact, clearModelCheckFacts, ModelChoice, type ModelFact } from "./ModelChoice";
@@ -11,6 +11,7 @@ import { ModelEfforts } from "./ModelEfforts";
 import { EffortShape } from "./EffortShape";
 import type { ModelEffort, ModelLimit, ProviderEdit } from "../port/port";
 import { ModelLimits, limitTextOf, limitsToSend, type LimitText } from "./ModelLimits";
+import { useModelBatch } from "./useModelBatch";
 
 // Only what this form owns is sent: the entry keeps its prices, effort
 // vocabularies and everything else the panel cannot show.
@@ -37,9 +38,6 @@ export function EditConn({
   const [facts, setFacts] = useState<Record<string, ModelFact>>(() => modelFacts(entry.models, initialCheck));
   const [diff, setDiff] = useState(() => initialCheck?.ok ? catalogDiff(entry.models, initialCheck.models ?? [], false) : null);
   const [checkingModel, setCheckingModel] = useState("");
-  const [batch, setBatch] = useState<"idle" | "running" | "stopped">("idle");
-  const run = useRef<AbortController | null>(null);
-  const testing = checkingModel !== "" || batch === "running";
   const [def, setDef] = useState(entry.default || entry.models[0] || "");
   const [err, setErr] = useState<{ text: string; kind: "save" | "unapplied" } | null>(null);
   const [refreshFail, setRefreshFail] = useState("");
@@ -163,43 +161,6 @@ export function EditConn({
     }
   };
 
-  const stopBatch = useCallback(() => {
-    if (!run.current) return false;
-    run.current.abort();
-    run.current = null;
-    setFacts(stopChecking);
-    setBatch("stopped");
-    return true;
-  }, []);
-
-  const testAll = async () => {
-    if (run.current || picked.length === 0) return;
-    const ctl = new AbortController();
-    run.current = ctl;
-    setBatch("running");
-    const queue = [...picked];
-    const lane = async () => {
-      for (let model = queue.shift(); model !== undefined && !ctl.signal.aborted; model = queue.shift()) {
-        const m = model;
-        setFacts((cur) => ({ ...cur, [m]: { ...(cur[m] ?? { origin: "configured" }), checking: true } }));
-        let next: (fact: ModelFact | undefined) => ModelFact;
-        try {
-          const got = await port.checkProviderModel({ name: entry.name, model: m, baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), kind: entry.kind });
-          next = (fact) => ({ ...checkedFact(fact, "configured", got), checking: false });
-        } catch {
-          next = (fact) => ({ ...(fact ?? { origin: "configured" }), status: "unknown", reason: "network", checking: false });
-        }
-        if (ctl.signal.aborted) return;
-        setFacts((cur) => ({ ...cur, [m]: next(cur[m]) }));
-      }
-    };
-    await Promise.all([lane(), lane()]);
-    if (run.current === ctl) {
-      run.current = null;
-      setBatch("idle");
-    }
-  };
-
   // A connection list typed here is what every inheriting model gets; with
   // none typed, the kernel's answer holds only while the form still matches
   // what was saved.
@@ -259,10 +220,12 @@ export function EditConn({
   const dirty = draftKey !== stored;
   useEffect(() => onDirty?.(dirty), [dirty, onDirty]);
   useEffect(() => () => onDirty?.(false), [onDirty]);
-  useEffect(() => {
-    if (!stopBatch()) setBatch((b) => (b === "stopped" ? "idle" : b));
-  }, [draftKey, stopBatch]);
-  useEffect(() => () => run.current?.abort(), []);
+  const { batch, testAll } = useModelBatch({
+    port, picked, draftKey, setFacts, origin: "configured",
+    blocked: checkingModel !== "" || busy !== "",
+    request: { name: entry.name, baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), kind: entry.kind },
+  });
+  const testing = checkingModel !== "" || batch === "running";
   const [edited, setEdited] = useState(false);
   if (dirty && !edited) setEdited(true);
 
@@ -581,7 +544,3 @@ const PHASE_TEXT: Record<Phase, string> = {
   clean: "没有更改", dirty: "有未保存的更改", failed: "有未保存的更改", saving: "正在保存…",
   saved: "已保存", unapplied: "已保存，尚未生效",
 };
-
-function stopChecking(facts: Record<string, ModelFact>): Record<string, ModelFact> {
-  return Object.fromEntries(Object.entries(facts).map(([model, fact]) => [model, fact.checking ? { ...fact, checking: false } : fact]));
-}

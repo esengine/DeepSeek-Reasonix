@@ -8,6 +8,7 @@ import { reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
 import { EffortShape } from "./EffortShape";
 import { THINKING, parseExtraBody, parseHeaders } from "./provider_compat";
+import { useModelBatch } from "./useModelBatch";
 
 // Detection is assistance, not authority. Compatible relays often expose one
 // model-list shape while expecting another request protocol, so every durable
@@ -142,7 +143,7 @@ export function AddProvider({
   };
 
   const checkModel = async (model: string) => {
-    if (checkingModel || busy) return;
+    if (testing || busy) return;
     setCheckingModel(model);
     setFacts((current) => ({
       ...current,
@@ -175,6 +176,17 @@ export function AddProvider({
     }
   };
 
+  const draftKey = JSON.stringify([name, baseUrl, apiKey, kind, picked, win, maxOut, thinkingOn, thinkingProtocol, heads, extra, noProxy, probe?.authHeader, probe?.noProxy]);
+  const { batch, testAll } = useModelBatch({
+    port, picked, draftKey, setFacts, origin: "manual",
+    blocked: checkingModel !== "" || busy || baseUrl.trim() === "",
+    request: {
+      baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), kind,
+      authHeader: probe?.authHeader ?? false, noProxy: noProxy || (probe?.noProxy ?? false),
+    },
+  });
+  const testing = checkingModel !== "" || batch === "running";
+
   return (
     <fieldset className="addp" disabled={busy && errOnSave}>
       <div className="addp-head">
@@ -183,7 +195,7 @@ export function AddProvider({
           <strong>{t("添加模型来源")}</strong>
           <p>{t("按服务文档填写。连接检测只帮助读取模型，不会替你决定协议。")}</p>
         </div>
-        <button className="addp-close" onClick={onCancel} disabled={busy || checkingModel !== ""} aria-label={t("取消")}>×</button>
+        <button className="addp-close" onClick={onCancel} disabled={busy || testing} aria-label={t("取消")}>×</button>
       </div>
       <div className="fields">
         <div className="grow name-cell">
@@ -195,7 +207,7 @@ export function AddProvider({
             value={name}
             placeholder={t("例如：公司中转站")}
             onChange={(e) => { setName(e.target.value); setNameErr(""); }}
-            disabled={busy || checkingModel !== ""}
+            disabled={busy || testing}
             spellCheck={false}
             aria-invalid={nameBad || nameErr !== "" || undefined}
             aria-describedby="addp-name-rule"
@@ -212,7 +224,7 @@ export function AddProvider({
           <select aria-label={t("接口协议")} data-action="provider.draft" data-value="protocol" value={kind} onChange={(e) => {
             setKind(e.target.value);
             setFacts(clearModelCheckFacts);
-          }} disabled={busy || checkingModel !== ""}>
+          }} disabled={busy || testing}>
             {choices.map((k) => <option key={k} value={k}>{t(KIND_LABEL[k] ?? k)}</option>)}
           </select>
           <i className="tip">{t("以服务商文档为准；模型列表无法可靠判断聊天协议。")}</i>
@@ -232,7 +244,7 @@ export function AddProvider({
               setBaseUrl(e.target.value);
               setFacts(clearModelCheckFacts);
             }}
-            disabled={busy || checkingModel !== ""}
+            disabled={busy || testing}
             spellCheck={false}
           />
           {wire?.answers === "decision" && <i className="tip">{t("填写服务的基地址，不要带 /v1/systemone；Reasonix 会自己在后面追加。本地的 Ollama 之类地址不适用这个协议。")}</i>}
@@ -243,7 +255,7 @@ export function AddProvider({
             onChange={(e) => {
               setApiKey(e.target.value);
               setFacts(clearModelCheckFacts);
-            }} disabled={busy || checkingModel !== ""} spellCheck={false} />
+            }} disabled={busy || testing} spellCheck={false} />
         </label>
         <p className="addp-privacy">{t("API Key 仅保存在运行内核的这台机器上。")}</p>
         {sibling && (
@@ -293,7 +305,7 @@ export function AddProvider({
               role="switch"
               aria-label={t("发送思考控制")}
               aria-checked={protocolCanThink && thinkingOn}
-              disabled={!protocolCanThink || busy || checkingModel !== ""}
+              disabled={!protocolCanThink || busy || testing}
               onClick={() => setThinkingOn((v) => !v)}
             ><span /></button>
           </div>
@@ -315,7 +327,7 @@ export function AddProvider({
               <small>{t("仅当该地址通过系统代理无法连接、直连可用时开启。")}</small>
             </span>
             <button type="button" className="switch-control" data-action="provider.draft" data-value="no-proxy" role="switch" aria-label={t("绕过系统代理")} aria-checked={noProxy || (probe?.noProxy ?? false)}
-              disabled={busy || checkingModel !== "" || probe?.noProxy === true} onClick={() => {
+              disabled={busy || testing || probe?.noProxy === true} onClick={() => {
                 setNoProxy((v) => !v);
                 setFacts(clearModelCheckFacts);
               }}><span /></button>
@@ -344,7 +356,7 @@ export function AddProvider({
             <span>{t(protocolCanProbe ? "至少手动添加一个模型 ID，也可尝试从接口读取" : "这个协议没有模型列表接口，直接填写服务商给出的模型 ID")}</span>
           </div>
           {protocolCanProbe && (
-            <button className="act quiet" data-action="provider.probe" onClick={connect} disabled={busy || checkingModel !== "" || baseUrl.trim() === ""}>
+            <button className="act quiet" data-action="provider.probe" onClick={connect} disabled={busy || testing || baseUrl.trim() === ""}>
               {t(busy ? "检测中…" : "验证连接并读取")}
             </button>
           )}
@@ -361,15 +373,20 @@ export function AddProvider({
           <div className="mlhead">
             <span className="ttl">{t("启用的模型")}</span>
             <span className="count">{t("已启用 {on}/{all}", { on: picked.length, all: models.length })}</span>
+            <button className="mrefresh" data-action="provider.model-check-all" onClick={testAll}
+              disabled={busy || testing || picked.length === 0 || baseUrl.trim() === ""} aria-busy={batch === "running" || undefined}>
+              {t("测试已启用模型（{n}）", { n: picked.length })}
+            </button>
           </div>
-          <p className="mguide">{t("目录只用于发现，不是白名单。直接输入服务商给出的原始模型 ID 即可。")}</p>
+          <p className="mguide">{t("目录只用于发现，不是白名单。未列出的模型会按原始 ID 保存；「测试已启用模型」会给每个已勾选的模型各发送一次小请求，可能产生少量 Token 费用。")}</p>
+          {batch === "stopped" && <p className="mdiff" role="status">{t("已停止启动新的验证：草稿已改动")}</p>}
           <ModelChoice
             models={models}
             picked={picked}
             vision={probe?.vision ?? []}
             facts={facts}
             onCheck={checkModel}
-            checkDisabled={busy || checkingModel !== "" || baseUrl.trim() === ""}
+            checkDisabled={busy || testing || baseUrl.trim() === ""}
             onToggle={toggle}
             onAdd={addModel}
           />
@@ -404,10 +421,10 @@ export function AddProvider({
           </div>
         )}
         <div className="acts addp-footer">
-          <button className="act" data-action="provider.add" data-primary onClick={save} aria-describedby={nameBad ? "addp-name-rule" : undefined} disabled={busy || composing || checkingModel !== "" || picked.length === 0 || name.trim() === "" || nameBad || kind === "" || baseUrl.trim() === "" || extraBad}>
+          <button className="act" data-action="provider.add" data-primary onClick={save} aria-describedby={nameBad ? "addp-name-rule" : undefined} disabled={busy || composing || testing || picked.length === 0 || name.trim() === "" || nameBad || kind === "" || baseUrl.trim() === "" || extraBad}>
             {t(busy ? "保存中…" : "添加来源")}
           </button>
-          <button className="act" onClick={onCancel} disabled={busy || checkingModel !== ""}>{t("取消")}</button>
+          <button className="act" onClick={onCancel} disabled={busy || testing}>{t("取消")}</button>
         </div>
       </div>
     </fieldset>
