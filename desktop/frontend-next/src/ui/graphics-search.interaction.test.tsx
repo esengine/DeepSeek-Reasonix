@@ -42,6 +42,6 @@ it("does not offer the graphics setting in a browser tab", async () => {
 });
 
 it("offers the graphics setting where the shell answers", async () => {
-  answer.now = { launchedOff: false, compositing: "enabled" };
+  answer.now = { launchedOff: false, savedOff: false, compositing: "enabled" };
   expect(await search("gpu")).toBe(true);
 });

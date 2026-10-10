@@ -1,13 +1,13 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { listenAction } from "./listen";
 import { useRuntimeReload } from "./RuntimeReload";
 import { HttpError } from "../port/port";
 import type { AccountState, AgentPort, Appearance as Look, CapabilityScope, McpEntry, ModelEntry, PluginPackage, SessionStatus, SkillEntry } from "../port/port";
 import { arrowTabs } from "./tablist";
-import { useShellGraphics } from "./GraphicsSection";
+import { useSettingsSearch } from "./useSettingsSearch";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
-import { ICON, NAV, SECTION_NAME, SETTINGS, settingMatches } from "./prefsnav";
+import { ICON, NAV, SECTION_NAME } from "./prefsnav";
 import { Group, SCOPE_SAID } from "./Group";
 import type { Section } from "./prefsnav";
 import { AddServer } from "./AddServer";
@@ -303,19 +303,14 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   };
   const danger = (id: Section) =>
     (id === "tools" && status?.toolApprovalMode === "yolo") || (id === "ext" && broken > 0);
-  const shell = useShellGraphics();
-  // A null remote means no remote panes; advanced holds what has not moved in yet.
+  // Null remote means this kernel does not do remote panes; advanced holds
+  // whatever has moved out of the config file and has not moved in yet.
   const shown = (id: Section) =>
     (id !== "remote" || remoteBook !== null) && (id !== "advanced" || ELSEWHERE.length > 0);
 
   // 搜索命中的是这张表里的条目，包括当前没有挂载的那些分区；能不能显示由 shown
   // 决定，和它有没有被渲染过无关。
-  const found = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return null;
-    return SETTINGS.filter((e) => shown(e.section) && (e.anchor !== "graphics" || shell !== null) && settingMatches(e, q));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, remoteBook, shell]);
+  const found = useSettingsSearch(query, shown, remoteBook);
   // 落点：跳过去之后短暂标一下「就是这里」。这是导航反馈，不是状态变化。
   const go = (section: Section, anchor: string) => {
     setAt(section);

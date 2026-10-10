@@ -5,9 +5,8 @@ import { onSoftwareRenderingChange, setSoftwareRendering, wantsSoftwareRendering
 import { Group } from "./Group";
 
 function modeSaid(g: GraphicsInfo): string {
-  if (g.launchedOff) return t("软件渲染") + " · " + t("已按你的设置关闭硬件加速");
-  if (g.compositing && g.compositing !== "enabled") return t("软件渲染") + " · " + t("驱动不可用，已由系统退回软件渲染");
-  return t("硬件加速");
+  if (g.launchedOff) return t("软件渲染") + " · " + t(g.savedOff === false ? "本次启动已用启动参数关闭硬件加速" : "已按你的设置关闭硬件加速");
+  return g.compositing ? t("图形合成状态：{value}", { value: g.compositing }) : t("尚未报告图形状态");
 }
 
 /** Which way the window is drawn this launch, and the one switch the shell can
@@ -29,7 +28,7 @@ export function GraphicsSection() {
   const now = useShellGraphics();
   const software = useSyncExternalStore(onSoftwareRenderingChange, wantsSoftwareRendering, wantsSoftwareRendering);
   if (!now) return null;
-  const pending = software !== now.launchedOff;
+  const pending = software !== (now.savedOff ?? now.launchedOff);
   return (
     <Group
       id="graphics"
@@ -43,7 +42,7 @@ export function GraphicsSection() {
           </button>
         ))}
       </div>
-      <p className="note" data-graphics={now.launchedOff ? "software" : now.compositing === "enabled" ? "hardware" : "fallback"}>
+      <p className="note" data-graphics={now.launchedOff ? "software" : now.compositing ? "reported" : "unreported"}>
         {t("当前启动使用：{mode}", { mode: modeSaid(now) })}
       </p>
       {pending && <p className="note" role="status">{t("已保存，退出并重新打开 Studio 后生效")}</p>}

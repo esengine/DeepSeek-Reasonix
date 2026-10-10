@@ -14,20 +14,22 @@ function accelerationOff(prefs) {
   return prefs?.[PREF_KEY] === "off";
 }
 
-// launchedOff is what this launch applied; compositing is what Chromium ended
-// up with, which differs when a driver is refused without being asked.
-function graphicsReport(app, launchedOff) {
+// launchedOff is what this launch applied (the saved choice or a launch-only
+// override); savedOff is the saved choice alone. compositing is Electron's raw
+// gpu_compositing string, which it documents as usable only after
+// gpu-info-update and does not enumerate, so it is reported, never interpreted.
+function graphicsReport(app, { launchedOff, savedOff }) {
   let compositing = "";
   try {
     compositing = String(app.getGPUFeatureStatus().gpu_compositing ?? "");
   } catch {
     // Not answerable yet; the page shows only what was applied.
   }
-  return { launchedOff, compositing };
+  return { launchedOff, savedOff, compositing };
 }
 
-function graphicsHandler(app, fromWindow, launchedOff) {
-  return (event) => (fromWindow(event) ? graphicsReport(app, launchedOff) : null);
+function graphicsHandler(app, fromWindow, launch) {
+  return (event) => (fromWindow(event) ? graphicsReport(app, launch) : null);
 }
 
 module.exports = { graphicsHandler, PREF_KEY, accelerationOff, shouldDisableGpu, graphicsReport };

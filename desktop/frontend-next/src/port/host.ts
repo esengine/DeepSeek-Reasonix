@@ -13,10 +13,12 @@ export interface HostInfo {
   titleBar: boolean;
 }
 
-/** How this launch draws. `launchedOff` is what the shell applied at start;
- *  `compositing` is what Chromium ended with ("" when it could not say). */
+/** How this launch draws. `launchedOff` is what the shell applied at start,
+ *  `savedOff` the saved choice alone (absent from an older shell), and
+ *  `compositing` Electron's own status string ("" when it has none yet). */
 export interface GraphicsInfo {
   launchedOff: boolean;
+  savedOff?: boolean;
   compositing: string;
 }
 

@@ -27,16 +27,24 @@ it("is absent where the shell has no say over graphics", async () => {
   expect(screen.queryByRole("group", { name: t("图形渲染") })).toBeNull();
 });
 
-it("says hardware acceleration is in use and offers the switch", async () => {
-  answer.now = { launchedOff: false, compositing: "enabled" };
-  render(<GraphicsSection />);
-  expect(await screen.findByText(t("当前启动使用：{mode}", { mode: t("硬件加速") }))).toBeTruthy();
+it.each(["enabled", "enabled_force", "disabled_software", "unavailable_off"])("shows Electron's own compositing status %s and infers nothing from it", async (value) => {
+  answer.now = { launchedOff: false, savedOff: false, compositing: value };
+  const { container } = render(<GraphicsSection />);
+  expect(await screen.findByText(t("当前启动使用：{mode}", { mode: t("图形合成状态：{value}", { value }) }))).toBeTruthy();
+  expect(container.querySelector("[data-graphics]")?.getAttribute("data-graphics")).toBe("reported");
   expect(screen.getByRole("button", { name: t("随系统") }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByRole("status")).toBeNull();
 });
 
+it("says no status has been reported rather than guessing, when Electron has none", async () => {
+  answer.now = { launchedOff: false, savedOff: false, compositing: "" };
+  const { container } = render(<GraphicsSection />);
+  expect(await screen.findByText(t("当前启动使用：{mode}", { mode: t("尚未报告图形状态") }))).toBeTruthy();
+  expect(container.querySelector("[data-graphics]")?.getAttribute("data-graphics")).toBe("unreported");
+});
+
 it("saves the choice where the shell reads it and says it applies next launch", async () => {
-  answer.now = { launchedOff: false, compositing: "enabled" };
+  answer.now = { launchedOff: false, savedOff: false, compositing: "enabled" };
   render(<GraphicsSection />);
   await userEvent.click(await screen.findByRole("button", { name: t("仅软件渲染") }));
   expect(localStorage.getItem("rx-hw-accel")).toBe("off");
@@ -46,16 +54,24 @@ it("saves the choice where the shell reads it and says it applies next launch", 
   expect(screen.queryByRole("status")).toBeNull();
 });
 
-it("tells a launch that is already software from one the driver forced", async () => {
-  answer.now = { launchedOff: true, compositing: "disabled_software" };
+it("says a launch that is already software was the saved choice, and keeps the note quiet", async () => {
+  answer.now = { launchedOff: true, savedOff: true, compositing: "disabled_software" };
   localStorage.setItem("rx-hw-accel", "off");
   const { container } = render(<GraphicsSection />);
   await screen.findByText(/./, { selector: "[data-graphics]" });
   expect(container.querySelector("[data-graphics]")?.getAttribute("data-graphics")).toBe("software");
+  expect(container.textContent).toContain(t("已按你的设置关闭硬件加速"));
   expect(screen.queryByRole("status")).toBeNull();
-  cleanup();
-  answer.now = { launchedOff: false, compositing: "disabled_software" };
-  const again = render(<GraphicsSection />);
+});
+
+it("does not call a launch-only override a saved choice, and does not ask for a restart over it", async () => {
+  answer.now = { launchedOff: true, savedOff: false, compositing: "disabled_software" };
+  const { container } = render(<GraphicsSection />);
   await screen.findByText(/./, { selector: "[data-graphics]" });
-  expect(again.container.querySelector("[data-graphics]")?.getAttribute("data-graphics")).toBe("fallback");
+  expect(container.textContent).toContain(t("本次启动已用启动参数关闭硬件加速"));
+  expect(container.textContent).not.toContain(t("已按你的设置关闭硬件加速"));
+  expect(screen.getByRole("button", { name: t("随系统") }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("status")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: t("仅软件渲染") }));
+  expect((await screen.findByRole("status")).textContent).toBe(t("已保存，退出并重新打开 Studio 后生效"));
 });

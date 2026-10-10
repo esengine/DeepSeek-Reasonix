@@ -1733,11 +1733,16 @@ test("hardware acceleration is off only when the saved preference says exactly t
   assert.equal(accelerationOff({ "rx-hw-accel": "off" }), true);
 });
 
-test("the graphics report says what this launch is running, not what is saved", () => {
+test("the graphics report says what this launch applied and passes Electron's status through untouched", () => {
   const app = (compositing) => ({ getGPUFeatureStatus: () => ({ gpu_compositing: compositing }) });
-  assert.deepEqual(graphicsReport(app("enabled"), false), { launchedOff: false, compositing: "enabled" });
-  assert.deepEqual(graphicsReport(app("disabled_software"), true), { launchedOff: true, compositing: "disabled_software" });
-  assert.deepEqual(graphicsReport({ getGPUFeatureStatus: () => { throw new Error("not ready"); } }, false), { launchedOff: false, compositing: "" });
+  const auto = { launchedOff: false, savedOff: false };
+  for (const value of ["enabled", "enabled_force", "enabled_on", "disabled_software", "unavailable_off", ""]) {
+    assert.deepEqual(graphicsReport(app(value), auto), { ...auto, compositing: value });
+  }
+  assert.deepEqual(graphicsReport(app("disabled_software"), { launchedOff: true, savedOff: true }), { launchedOff: true, savedOff: true, compositing: "disabled_software" });
+  assert.deepEqual(graphicsReport(app("enabled"), { launchedOff: true, savedOff: false }), { launchedOff: true, savedOff: false, compositing: "enabled" });
+  assert.deepEqual(graphicsReport({ getGPUFeatureStatus: () => { throw new Error("not ready"); } }, auto), { ...auto, compositing: "" });
+  assert.deepEqual(graphicsReport({ getGPUFeatureStatus: () => ({}) }, auto), { ...auto, compositing: "" });
 });
 
 test("the GPU is disabled by the saved preference, the environment or the flag, and only then", () => {
@@ -1763,8 +1768,8 @@ test("a prefs file that is missing or corrupt keeps hardware acceleration", () =
 test("the graphics report is refused to any sender that is not the Studio window", () => {
   const app = { getGPUFeatureStatus: () => ({ gpu_compositing: "enabled" }) };
   const win = { id: "studio" };
-  const handle = graphicsHandler(app, (event) => (event.sender === "studio" ? win : null), true);
-  assert.deepEqual(handle({ sender: "studio" }), { launchedOff: true, compositing: "enabled" });
+  const handle = graphicsHandler(app, (event) => (event.sender === "studio" ? win : null), { launchedOff: true, savedOff: false });
+  assert.deepEqual(handle({ sender: "studio" }), { launchedOff: true, savedOff: false, compositing: "enabled" });
   assert.equal(handle({ sender: "agent-browser-page" }), null);
 });
 
