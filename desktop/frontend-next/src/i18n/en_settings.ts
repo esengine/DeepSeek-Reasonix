@@ -2,6 +2,10 @@
 // alone — one catalogue is still the model, and this file is read as its
 // continuation: same keying by Chinese source text, same grouping by screen.
 export const EN_SETTINGS: Record<string, string> = {
+  "搜索已安装包": "Search installed packages",
+  "搜索包名、技能、命令或服务": "Search package names, skills, commands or servers",
+  "插件包：{shown} / {total}": "Packages: {shown} / {total}",
+  "没有匹配的已安装包。": "No matching installed packages.",
   "步骤 1 · 连接服务": "Step 1 · Connect service",
   "先连接服务，再选择这个来源要启用的模型。": "Connect the service, then choose which models to enable from it.",
   "来源名称": "Source name",

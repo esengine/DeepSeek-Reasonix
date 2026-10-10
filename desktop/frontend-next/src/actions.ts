@@ -245,6 +245,8 @@ export const ACTIONS: UIAction[] = [
   { id: "extensions.enabled", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "extensions.remove", kind: "destructive", target: "entity", proof: "authority-effect" },
   { id: "extensions.tab", kind: "view", target: "none", proof: "interaction" },
+  { id: "extensions.search", kind: "view", target: "none", proof: "interaction" },
+  { id: "extensions.clear-search", kind: "view", target: "none", proof: "interaction" },
   // The community market: reads are views, and the one write is the install
   // its confirmation page answers with the plan the person just read.
   { id: "market.search", kind: "view", target: "none", proof: "interaction" },

@@ -17,16 +17,32 @@ interface Props {
 }
 
 export function Packages({ port, packages, onChanged, onReloadError, onReloaded, updating, onUpdate }: Props) {
+  const [q, setQ] = useState("");
+  const search = useRef<HTMLInputElement>(null);
   const [connection, setConnection] = useState({ port, generation: 0 });
   const currentConnection = useRef(connection);
   currentConnection.current = connection;
   if (connection.port !== port) setConnection({ port, generation: connection.generation + 1 });
+  const query = q.trim().toLowerCase();
+  const rows = packages.map((p) => ({ p, shown: matches(p, query) }));
+  const shown = rows.filter((row) => row.shown).length;
   return (
     <>
-      {packages.map((p) => (
+      {packages.length > 0 && (
+        <div className="msearch">
+          <input ref={search} type="search" value={q} spellCheck={false}
+            aria-label={t("搜索已安装包")} placeholder={t("搜索包名、技能、命令或服务")}
+            data-action="extensions.search" onChange={(e) => setQ(e.target.value)} />
+          {q && <button className="act ghost" data-action="extensions.clear-search" onClick={() => { setQ(""); search.current?.focus({ preventScroll: true }); }}>{t("清除搜索")}</button>}
+          <span className="cnt" aria-live="polite" aria-atomic="true">{t("插件包：{shown} / {total}", { shown, total: packages.length })}</span>
+        </div>
+      )}
+      {packages.length > 0 && query && shown === 0 && <div className="empty">{t("没有匹配的已安装包。")}</div>}
+      {rows.map(({ p, shown }) => (
         <Package
           key={`${connection.generation}:${p.name}`}
           p={p}
+          hidden={!shown}
           port={port}
           onDone={() => {
             if (currentConnection.current === connection) onChanged();
@@ -43,6 +59,20 @@ export function Packages({ port, packages, onChanged, onReloadError, onReloaded,
       ))}
     </>
   );
+}
+
+function matches(p: PluginPackage, query: string): boolean {
+  if (!query) return true;
+  const fields = [
+    p.name,
+    ...[p.skills, p.commands, p.agents, p.prompts, p.themes].flatMap((items) =>
+      items?.flatMap((item) => [item.name, item.invocation, item.description]) ?? []),
+    ...(p.mcpServers?.flatMap((server) => [server.name, server.displayName, server.description, server.command, server.url, server.transport]) ?? []),
+    ...(p.hooks?.flatMap((hook) => [hook.event, hook.description, hook.command, hook.contextFile]) ?? []),
+    p.runtime && [p.runtime.command, ...(p.runtime.args ?? [])].join(" "),
+    ...(p.runtime?.tools ?? []),
+  ];
+  return fields.some((field) => field?.toLowerCase().includes(query));
 }
 
 // The summary line answers "what did this bring", and the two halves of that
@@ -67,9 +97,10 @@ function summary(p: PluginPackage): string {
 }
 
 function Package({
-  p, port, onDone, onReloadError, onReloaded, updating, onUpdate,
+  p, hidden, port, onDone, onReloadError, onReloaded, updating, onUpdate,
 }: {
   p: PluginPackage; port: AgentPort; onDone: () => void; updating: string; onUpdate: () => void;
+  hidden: boolean;
   onReloadError: (message: string) => void;
   onReloaded: () => void;
 }) {
@@ -200,7 +231,7 @@ function Package({
   );
 
   return (
-    <details className="srv" data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || !!exported || undefined}>
+    <details className="srv" hidden={hidden} data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || !!exported || undefined}>
       <summary>{head}</summary>
       {confirm}
       {notes}
