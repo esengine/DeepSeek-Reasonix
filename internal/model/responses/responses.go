@@ -171,6 +171,9 @@ func New(cfg Config) provider.Provider {
 		httpClient = built
 	}
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if reject, _ := cfg.Extra["reject_redirects"].(bool); reject {
+		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	requestURL := strings.TrimSpace(cfg.RequestURL)
 	if requestURL == "" || provider.EndpointOverrideRepeatsBase(requestURL, baseURL) {
 		requestURL = baseURL + "/responses"

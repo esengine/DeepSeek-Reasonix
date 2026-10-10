@@ -539,7 +539,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
           {at === "model" && (
             <>
               <Group id="model" title={t("按用途选择模型")} now={nav.model}
-                hint={t("默认模型用于当前对话和大多数任务，其他用途默认跟随它；只有要为某件事换一个模型时才改。切换会保留对话并重建运行时，任务执行期间无法修改。")}>
+                hint={t("默认模型用于当前对话和大多数任务，其他用途默认跟随它；只有要为某件事换一个模型时才改。网页搜索默认用对话模型自带的搜索；指定独立搜索模型后，每次搜索多一次计费，且不带对话上下文。切换会保留对话并重建运行时，任务执行期间无法修改。")}>
                 <ModelUsage models={models} roles={roles} main={status?.modelRef} busy={busy} protocol={protocol}
                   onMain={(ref) => run(ref, async () => {
                     await port.setModel(ref);

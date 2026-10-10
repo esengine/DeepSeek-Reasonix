@@ -101,6 +101,10 @@ type ProviderEntry struct {
 	// send nothing — before headers or between events — before it is dropped.
 	// Zero keeps the 300s default; a silent pre-header wait is retried once.
 	IdleTimeoutSeconds int `toml:"idle_timeout_seconds"`
+
+	// searchAssigned is set on resolved copies when a dedicated search model is
+	// selected, so no conversation request also carries the built-in tool.
+	searchAssigned bool
 }
 
 type ProviderModelOverride struct {

@@ -4,8 +4,8 @@ import type { ModelEntry, RoleAssignments, RoleOverride } from "../port/port";
 import { activeKind, contextLabel, groupVendors, type Vendor } from "./Models";
 import { orderAccounts, useProviderOrder } from "../state/providerorder";
 
-type RoleKey = keyof RoleAssignments;
-type Answers = "chat" | "decision";
+type RoleKey = Exclude<keyof RoleAssignments, "web_search_effective" | "web_search_reason" | "web_search_source">;
+type Answers = "chat" | "decision" | "search";
 
 // Decision is the one job that cannot follow the main model: it asks a question
 // set, which a chat model has no answer for, so its row offers the decision
@@ -19,6 +19,7 @@ const ROLES: [RoleKey, string, string, Answers][] = [
 ];
 
 const answersOf = (m: ModelEntry): Answers => (m.answers === "decision" ? "decision" : "chat");
+const answersMatch = (m: ModelEntry, answers: Answers) => answers === "search" ? m.webSearch === true : answersOf(m) === answers;
 
 // Only what the config or the catalog declares: an inferred "reads images" sends
 // the user to a request the endpoint rejects.
@@ -113,6 +114,7 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
             </div>
           );
         })}
+        {roles && <SearchUsage models={models} vendors={vendors} protocol={protocol} main={main} roles={roles} busy={busy} onRole={onRole} />}
       </div>
       {!roles && <div className="empty">{t("无法读取角色分工。")}</div>}
       <p className="note">
@@ -121,6 +123,48 @@ export function ModelUsage({ models, roles, main, busy, protocol, onMain, onRole
           : t("主模型无法识别的图片当前无人处理 —— 会在发送前被丢弃。为「看图」指定一个带「读图」标签的模型即可接管。")}
       </p>
     </>
+  );
+}
+
+function searchReason(reason?: string) {
+  switch (reason) {
+    case "bad_ref": return t("搜索模型的格式应为 服务/模型");
+    case "not_added": return t("搜索模型所在的连接已被移出");
+    case "model_removed": return t("搜索模型已不在配置里");
+    case "unsupported": return t("搜索模型的协议不支持原生搜索，或已关闭搜索");
+    case "no_credentials": return t("搜索模型所在的连接没有凭据");
+    default: return "";
+  }
+}
+
+function SearchUsage({ models, vendors, protocol, main, roles, busy, onRole }: {
+  models: ModelEntry[]; vendors: Vendor[]; protocol: Record<string, string>; main?: string;
+  roles: RoleAssignments; busy: string; onRole: (role: string, ref: string) => void;
+}) {
+  const value = roles.web_search, effective = roles.web_search_effective ?? "";
+  const ref = !value || value.toLowerCase() === "auto" ? "" : value;
+  const none = !models.some((m) => m.webSearch);
+  const serviceOf = (r: string) => vendors.find((v) => Object.values(v.byKind).flat().some((m) => m.ref === r))?.label ?? r;
+  const reason = searchReason(roles.web_search_reason);
+  const used = ref ? (reason || serviceOf(ref)) : effective
+    ? t("自动：使用对话模型自带的搜索（{model}）", { model: serviceOf(effective) })
+    : t("对话模型没有内置搜索；需要联网搜索时请选择一个搜索模型");
+  return (
+    <div className="usage-row" role="row">
+      <span className="usage-job" role="rowheader"><b>{t("网页搜索")}</b><small>{t("独立搜索请求使用的模型")}</small></span>
+      <span role="cell">
+        <Choices vendors={vendors} protocol={protocol} main={main} value={ref} answers="search"
+          label={t("网页搜索")} role disabled={busy !== ""} empty={t("自动选择")}
+          onPick={(next) => onRole("web_search", next)} />
+      </span>
+      <span className="usage-conn" role="cell">
+        {used}
+        {none && <small>{t("尚无可用搜索模型")}</small>}
+        {roles.web_search_source === "project" && <small>{effective
+          ? t("项目配置覆盖：实际使用 {model}；此处保存的是全局设置。", { model: serviceOf(effective) })
+          : t("项目配置覆盖了这一项；此处保存的是全局设置。")}</small>}
+      </span>
+    </div>
   );
 }
 
@@ -135,8 +179,8 @@ function Choices({
   const groups = vendors
     .map((v) => {
       const kind = protocol[v.key] ?? activeKind(v, main);
-      const shown = (v.byKind[kind] ?? []).filter((m) => answersOf(m) === answers);
-      const held = Object.values(v.byKind).flat().find((m) => m.ref === value && !shown.includes(m));
+      const shown = (answers === "search" ? Object.values(v.byKind).flat() : v.byKind[kind] ?? []).filter((m) => answersMatch(m, answers));
+      const held = Object.values(v.byKind).flat().find((m) => m.ref === value && answersMatch(m, answers) && !shown.includes(m));
       return { v, rows: held ? [held, ...shown] : shown };
     })
     .filter((g) => g.rows.length > 0);
@@ -144,6 +188,7 @@ function Choices({
     <select className="usage-pick" aria-label={label} data-action={role ? "roles.model" : "model.select"} value={value} disabled={disabled}
       onChange={(e) => onPick(e.target.value)}>
       {empty !== undefined && <option value="">{empty}</option>}
+      {answers === "search" && value && !groups.some((g) => g.rows.some((m) => m.ref === value)) && <option value={value}>{t("{model}（不可用）", { model: value })}</option>}
       {groups.map(({ v, rows }) => (
         <optgroup key={v.key} label={v.label}>
           {rows.map((m) => (

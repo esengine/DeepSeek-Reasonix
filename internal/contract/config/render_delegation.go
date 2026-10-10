@@ -11,6 +11,9 @@ import (
 // because they are read together: a role with no line here is a setting the API
 // accepts, saves without error, and loses on the next read.
 func renderAgentDelegation(b *strings.Builder, c *Config) {
+	if c.Agent.WebSearchModel != "" {
+		fmt.Fprintf(b, "web_search_model = %q\n", c.Agent.WebSearchModel)
+	}
 	if c.Agent.PlannerModel != "" {
 		fmt.Fprintf(b, "planner_model = %q   # low-frequency planner (two-model collaboration)\n", c.Agent.PlannerModel)
 	} else {

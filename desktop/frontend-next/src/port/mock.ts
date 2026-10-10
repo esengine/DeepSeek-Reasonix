@@ -67,6 +67,7 @@ export class MockPort extends MockWorkspace implements AgentPort {
 
   // The subagent runs somewhere cheaper; everything else rides the main model.
   private assigned: RoleAssignments = {
+    web_search: "",
     planner: "",
     subagent: "deepseek/deepseek-flash",
     guardian: "",

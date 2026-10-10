@@ -175,6 +175,22 @@ If a gateway requires vendor-specific top-level request body fields, set
 are merged into the OpenAI-compatible chat JSON request body without allowing
 core fields such as `model`, `messages`, `tools`, or `stream` to be overridden.
 
+### Web search model
+
+Settings > Model preferences > Web search saves `agent.web_search_model`.
+
+Empty or `"auto"` changes nothing: the conversation provider's own built-in
+search keeps serving, on that provider's account only.
+An explicit `"provider/model"` replaces it with a separate search request on that
+account, which carries no conversation context and is billed on its own.
+
+An unavailable assignment emits a `web_search_model_<reason>` notice
+(`bad_ref`, `not_added`, `removed`, `unsupported`, `no_credentials`) and leaves
+search off. It never selects another account.
+
+Project `reasonix.toml` can override the global preference;
+the settings row shows that override while editing the global value.
+
 ## Global `.env`
 
 `<Reasonix home>/.env` is the single runtime source for provider API keys saved

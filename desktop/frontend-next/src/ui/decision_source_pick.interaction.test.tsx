@@ -50,7 +50,7 @@ it("the composer's model switcher never lists a decision source", async () => {
 it("the settings table reads every source, then gives each job only what it can do", async () => {
   const port = new MockPort() as unknown as AgentPort;
   const models = kernelModels(port);
-  vi.spyOn(port, "roles").mockResolvedValue({ planner: "", subagent: "", vision: "", guardian: "", decision: "" });
+  vi.spyOn(port, "roles").mockResolvedValue({ web_search: "", planner: "", subagent: "", vision: "", guardian: "", decision: "" });
   render(
     <Settings
       hub={new MockHub() as never} port={port}
