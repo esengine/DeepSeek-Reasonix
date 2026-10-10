@@ -173,7 +173,7 @@ func (s *Server) switchWorkspaceLocked(ctx context.Context, dir string) error {
 	if err := s.rebindSessionLeaseFor(newCtrl.SessionPath(), newCtrl); err != nil {
 		slog.Warn("serve: rebind session lease after workspace switch", "err", err)
 	}
-	s.bc.ResetSession()
+	s.resetSessionView()
 
 	cur.Close()
 	return nil

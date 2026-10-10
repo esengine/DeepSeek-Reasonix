@@ -569,7 +569,7 @@ func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.bc.ResetSession()
+	s.resetSessionView()
 	// Fresh path — the lease follows it; failure is theoretical but not silent.
 	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
 		sessionInUse(w, err)
@@ -1046,4 +1046,16 @@ func modelSwitchRefusal(ctrl control.SessionAPI) error {
 func isSwitchBusy(err error) bool {
 	code := codedRefusal(err)
 	return code == codeSwitchModel || code == codeSwitchModelJobs
+}
+
+// resetSessionView retires what clients were shown for the previous
+// conversation: the replay log, and the build-time notices a rebuild would
+// otherwise treat as already seen.
+func (s *Server) resetSessionView() {
+	s.bc.ResetSession()
+	if ctrl, ok := s.ctl().(*control.Controller); ok {
+		if owner := ctrl.RuntimeOwner(); owner != nil && owner.Notices != nil {
+			owner.Notices.Reset()
+		}
+	}
 }

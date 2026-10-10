@@ -116,7 +116,7 @@ func (s *Server) resumeInto(path string) (int, error) {
 		}
 	}
 	s.adoptSessionModelLocked(realPath)
-	s.bc.ResetSession()
+	s.resetSessionView()
 	return http.StatusNoContent, nil
 }
 

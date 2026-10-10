@@ -3,6 +3,7 @@ package extension
 import (
 	"context"
 	"fmt"
+	"reasonix/internal/contract/event"
 	"sync/atomic"
 )
 
@@ -15,6 +16,7 @@ type RuntimeOwner struct {
 	FilePriors  *FilePriorStore
 	Messages    *MessageSendGuard
 	HostStreams *HostStreamRegistry
+	Notices     *event.NoticeLedger
 	receiptSeq  atomic.Uint64
 }
 
@@ -36,6 +38,7 @@ func NewRuntimeOwner() *RuntimeOwner {
 		Messages:   messages,
 	}
 	owner.HostStreams = NewHostStreamRegistry(gate)
+	owner.Notices = event.NewNoticeLedger()
 	return owner
 }
 
