@@ -76,6 +76,25 @@ In an interactive session rooted at the fixture, use:
    Normal host access rules still govern readable files; naming a task directory
    is guidance, not a new per-profile filesystem access boundary.
 
+## Compare the answer with a worked reference
+
+The package includes two reference answers outside the input fixture:
+
+- [Source explanation](example-output/source-answer.md) traces the exact
+  newline, trimming, filtering and ordering operations, and cites the stale
+  note separately from the implementation.
+- [Missing input](example-output/missing-input.md) shows the limited answer to
+  a request for `missing.go`; it does not substitute `loader.go` for that file.
+
+These are source-checked examples written by the implementer, not recorded
+output from a live Reasonix subagent. Compare the selected model's answer with
+their claims and evidence, rather than requiring identical wording.
+
+Keep the reference files outside the directory passed to `--dir`, so the
+exercise reads the original two inputs. Record the chosen model and tool results for
+its separate manual acceptance; a successful install or scripted lifecycle
+test cannot establish that model's answer quality.
+
 ## Edit, disable and remove
 
 Edit the source profile, preview replacement, then apply it and start a new
