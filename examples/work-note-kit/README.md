@@ -56,6 +56,19 @@ Enter these in an interactive session:
 5. Use qualified names. A short-name compatibility alias may be absent when a
    project command or another package owns that name.
 
+## Compare with worked answers
+
+1. [Worked answers](example-output/answers.md) use the two invocations above
+   and the empty-input case. They show how to preserve supplied observations,
+   distinguish the summary label from a check result, and name missing facts.
+2. These are implementer-written references checked against the templates,
+   not recorded live-model output. Compare claims and evidence rather than
+   exact wording. Record the chosen model and actual response separately;
+   installation and scripted-provider tests do not establish answer quality.
+3. The reference is outside `prompts`, so it adds no invocable template. The
+   commands still supply ordinary user-turn guidance and use the session's
+   normal tools and approval rules.
+
 ## Edit, replace and remove
 
 1. Edit a source template. A copy installation keeps its own files; source
