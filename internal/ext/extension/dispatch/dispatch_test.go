@@ -1183,3 +1183,22 @@ func TestMissingSidecarIsReportedByIdentity(t *testing.T) {
 		}
 	})
 }
+
+func TestInterceptsCountsOnlySidecarContributions(t *testing.T) {
+	plugin := extension.Contribution{Kind: extension.KindInterceptor, ID: "after", Source: extension.ContributionSource{Scope: extension.ScopePlugin, PluginID: "p"}}
+	builtin := extension.Contribution{Kind: extension.KindInterceptor, ID: "before"}
+	d := New(map[extension.InterceptorPoint][]extension.Contribution{
+		extension.PointToolAfter:  {plugin},
+		extension.PointToolBefore: {builtin},
+	}, nil, func(string) Client { return nil }, nil, Options{})
+	if !d.Intercepts(extension.PointToolAfter) {
+		t.Error("a sidecar on tool.after is not reported")
+	}
+	if d.Intercepts(extension.PointToolBefore) || d.Intercepts(extension.PointInputReceive) {
+		t.Error("a point no sidecar sits on is reported")
+	}
+	var none *Dispatcher
+	if none.Intercepts(extension.PointToolAfter) {
+		t.Error("nil dispatcher reports a sidecar")
+	}
+}

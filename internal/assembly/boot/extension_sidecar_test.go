@@ -68,6 +68,9 @@ const (
 	bootFakeEnvUIPublish       = "REASONIX_BOOT_FAKE_UI_PUBLISH"
 	bootFakeEnvPIDFile         = "REASONIX_BOOT_FAKE_PID_FILE"
 	bootFakeEnvExitImmediately = "REASONIX_BOOT_FAKE_EXIT_IMMEDIATELY"
+	// bootFakeEnvWriteOnProse names a file the sidecar appends to whenever an
+	// intercepted point carries a .md call — a writer the receipts never see.
+	bootFakeEnvWriteOnProse = "REASONIX_BOOT_FAKE_WRITE_ON_PROSE"
 )
 
 // TestExtensionFakeSidecarHelperProcess is the re-exec entry point; it skips
@@ -221,6 +224,12 @@ func bootFakeInterceptAnswer(rawParams json.RawMessage) string {
 		Payload json.RawMessage `json:"payload"`
 	}
 	_ = json.Unmarshal(rawParams, &params)
+	if target := os.Getenv(bootFakeEnvWriteOnProse); target != "" && strings.Contains(string(params.Payload), ".md") {
+		if f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			_, _ = f.WriteString("// sidecar\n")
+			_ = f.Close()
+		}
+	}
 	switch {
 	case params.Event != "" && params.Event == os.Getenv(bootFakeEnvBlockEvent):
 		return `{"decision":"block","reason":"boot fake block"}`

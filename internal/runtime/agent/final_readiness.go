@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/contract/ablation"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/ext/extension"
 	"reasonix/internal/runtime/taskpolicy"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/instruction"
@@ -398,7 +399,17 @@ func (a *Agent) mutationEpoch() uint64 {
 // requirement it replaced.
 func (a *Agent) checkContract() evidence.CheckContract {
 	return evidence.CaptureCheckContract(a.task.checkpoint.BaselineChecks, a.declaredChecks()).
-		WithCapturedTests(len(a.task.baselineCriteria)).WithDelivery(a.deliveryProfile).WithObserveRoot(a.observeRoot)
+		WithCapturedTests(len(a.task.baselineCriteria)).WithDelivery(a.deliveryProfile).WithObserveRoot(a.observeRoot).
+		WithUnseenWriter(a.unseenToolWriter())
+}
+
+// unseenToolWriter reports a writer that runs around tool calls and names no
+// paths: a tool hook, or an extension sidecar on a point every call passes
+// (tool.before, permission.decision, tool.after), outside the bash sandbox.
+func (a *Agent) unseenToolWriter() bool {
+	d := a.svc.extensions
+	return toolHooksMayMutateWorkspace(a.svc.hooks) || d.Intercepts(extension.PointToolBefore) ||
+		d.Intercepts(extension.PointPermissionDecision) || d.Intercepts(extension.PointToolAfter)
 }
 
 // DeclaredProjectChecks is the declaration this process loaded, for a host that
@@ -486,7 +497,8 @@ func (a *Agent) appendUnseenRenderGap(out *finalReadinessCheck, missing []string
 func (a *Agent) appendVerificationGap(out *finalReadinessCheck, missing []string, writer int, blockedWithCheck, verified bool) []string {
 	if a.deliveryProfile || !a.turn.policySet || a.turn.policy.Verification < taskpolicy.VerifyTargeted ||
 		!toolPresent(a.svc.tools, "bash") || blockedWithCheck || a.checkEstablished(writer, verified) ||
-		a.task.ledger.ProseOnlyWithoutChecks(a.checkContract()) {
+		a.task.ledger.ProseOnlyWithoutChecks(a.checkContract()) ||
+		a.task.ledger.VerifiedBeneathProse(a.checkContract(), writer, a.writerBaselineThrough) {
 		return missing
 	}
 	gap, owed := a.verificationGap(writer)
@@ -550,6 +562,8 @@ func (a *Agent) verificationCause() string {
 		return " (a change ran whose extent the host could not establish)"
 	case contract.DeclaresChecks():
 		return " (checks are declared for this task or project)"
+	case contract.UnseenWriter():
+		return " (a tool hook or extension runs around tool calls and may change files no tool reports)"
 	}
 	return ""
 }

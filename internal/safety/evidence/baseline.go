@@ -4,6 +4,7 @@
 package evidence
 
 import (
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -42,12 +43,20 @@ func (l *Ledger) LatestSuccessfulWriterIndex() (int, bool) {
 // disk — knows that. nil keeps every write. keep runs outside the ledger's
 // lock, since the caller deciding may ask the ledger something itself.
 func (l *Ledger) LatestSuccessfulWriterIndexFunc(keep func(Receipt) bool) (int, bool) {
+	return l.LatestSuccessfulWriterIndexThrough(math.MaxInt, keep)
+}
+
+// LatestSuccessfulWriterIndexThrough is LatestSuccessfulWriterIndexFunc over
+// the receipts up to and including through.
+func (l *Ledger) LatestSuccessfulWriterIndexThrough(through int, keep func(Receipt) bool) (int, bool) {
 	if l == nil {
 		return 0, false
 	}
 	latest := -1
-
 	for i, r := range l.snapshotReceipts() {
+		if i > through {
+			break
+		}
 		if r.Success && r.Write && (keep == nil || keep(r)) {
 			latest = i
 		}
@@ -60,6 +69,12 @@ func (l *Ledger) LatestSuccessfulWriterIndexFunc(keep func(Receipt) bool) (int, 
 // or external tools, and bash commands that are not demonstrably observational
 // or verification-only.
 func (l *Ledger) LatestSuccessfulMutationIndex() (int, bool) {
+	return l.LatestSuccessfulMutationIndexThrough(math.MaxInt)
+}
+
+// LatestSuccessfulMutationIndexThrough is LatestSuccessfulMutationIndex over the
+// receipts up to and including through.
+func (l *Ledger) LatestSuccessfulMutationIndexThrough(through int) (int, bool) {
 	if l == nil {
 		return 0, false
 	}
@@ -67,6 +82,9 @@ func (l *Ledger) LatestSuccessfulMutationIndex() (int, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for i, r := range l.receipts {
+		if i > through {
+			break
+		}
 		if r.Success && r.Mutation {
 			latest = i
 		}

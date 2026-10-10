@@ -145,6 +145,13 @@ func decorateObservedPaths(rec *evidence.Receipt, plan *toolCallPlan) {
 			}
 		}
 	}
+	if rec.Write {
+		for _, target := range linkedWriteTargets(plan.pathsBefore.root, rec.Paths) {
+			if !holdsPath(rec.Paths, target) {
+				rec.Paths = append(rec.Paths, target)
+			}
+		}
+	}
 	if plan.pathsBefore.empty() || !rec.Success {
 		return
 	}
@@ -159,6 +166,42 @@ func decorateObservedPaths(rec *evidence.Receipt, plan *toolCallPlan) {
 			rec.Paths = append(rec.Paths, path)
 		}
 	}
+}
+
+// linkedWriteTargets names the files a named write changed through a link.
+// fileutil.AtomicOverwriteFile writes where a path resolves, and the link that
+// led there can be gone or replaced by the time anything reads the receipt.
+func linkedWriteTargets(root string, paths []string) []string {
+	if root == "" {
+		return nil
+	}
+	root = filepath.Clean(root)
+	var out []string
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !throughLink(root, filepath.Clean(path)) {
+			continue
+		}
+		if target, err := filepath.EvalSymlinks(path); err == nil {
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+// throughLink reports whether path, or a directory between it and root, is a
+// symbolic link. path must lie under root.
+func throughLink(root, path string) bool {
+	for path != root && path != filepath.Dir(path) {
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+		path = filepath.Dir(path)
+	}
+	return false
 }
 
 // holdsPath asks whether the receipt already names this file, by the ledger's
@@ -221,14 +264,20 @@ func (a *Agent) pathInWorkspace(path string) bool {
 // and build artifacts it cleaned up has no baseline, and owes no verification
 // of changes it kept none of.
 func (a *Agent) mutationBaseline(delivery bool) (int, bool) {
-	ledger := a.task.ledger
-	survives := func(r evidence.Receipt) bool {
-		return a.touchedTheWorkspace(r) && leftSomethingBehind(ledger, r, a.writeWorkspaceRoot)
-	}
 	if delivery {
-		return ledger.LatestProvenMutationIndexFunc(survives)
+		return a.task.ledger.LatestProvenMutationIndexFunc(a.survives)
 	}
-	return ledger.LatestSuccessfulWriterIndexFunc(survives)
+	return a.task.ledger.LatestSuccessfulWriterIndexFunc(a.survives)
+}
+
+// writerBaselineThrough is the non-delivery baseline as it stood at receipt
+// through.
+func (a *Agent) writerBaselineThrough(through int) (int, bool) {
+	return a.task.ledger.LatestSuccessfulWriterIndexThrough(through, a.survives)
+}
+
+func (a *Agent) survives(r evidence.Receipt) bool {
+	return a.touchedTheWorkspace(r) && leftSomethingBehind(a.task.ledger, r, a.writeWorkspaceRoot)
 }
 
 // observeBeforeMutation captures preimages for Previewable writers and records
