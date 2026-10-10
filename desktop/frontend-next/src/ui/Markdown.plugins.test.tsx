@@ -45,3 +45,38 @@ it("leaves code spans that are not one web address as code", () => {
   expect(container.querySelector("a")).toBeNull();
   expect(container.querySelectorAll("code").length).toBe(4);
 });
+
+// A Persian or Arabic reply reads right to left: every text block lets the
+// browser take its direction from its own first strong character, while code
+// keeps the document's left-to-right flow.
+it("lets each text block take its own direction and leaves code alone", async () => {
+  const text = [
+    "این یک پاسخ است که `npm install` را اجرا می‌کند.",
+    "",
+    "English paragraph.",
+    "",
+    "## عنوان",
+    "",
+    "- مورد اول",
+    "- مورد دوم",
+    "",
+    "> نقل قول",
+    "",
+    "| ستون | value |",
+    "| --- | --- |",
+    "| یک | one |",
+    "",
+    "```sh",
+    "npm install",
+    "```",
+  ].join("\n");
+  const { container } = render(<Markdown text={text} />);
+  for (const sel of ["p", "h2", "ul", "blockquote", "th", "td"]) {
+    const els = container.querySelectorAll(sel);
+    expect(els.length, sel).toBeGreaterThan(0);
+    els.forEach((el) => expect(el.getAttribute("dir"), sel).toBe("auto"));
+  }
+  expect(container.querySelector("ul > li")?.getAttribute("dir")).toBeNull();
+  await waitFor(() => expect(container.querySelector("pre")).toBeTruthy());
+  expect(container.querySelector("pre")?.closest("[dir]")).toBeNull();
+});
