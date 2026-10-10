@@ -7,6 +7,7 @@ import (
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/workspacelease"
 	"reasonix/internal/tools/jobs"
@@ -41,6 +42,10 @@ func startSessionRuntime(opts Options, cfg *config.Config, root string, sink eve
 	case cfg.Agent.RelaxedWriteLease():
 		leaseOptions = append(leaseOptions, workspacelease.WithoutWholeWorkspaceHold())
 	}
+	// The same tiers reach the in-session writer scheduler: an undeclared
+	// writer stops holding the workspace there too, and the off tier takes no
+	// claim at all. Set once per assembly, so a live runtime keeps its tier.
+	writeclaim.SetWriteLeaseTiers(cfg.Agent.RelaxedWriteLease() || cfg.Agent.SkipWriteLease(), cfg.Agent.SkipWriteLease())
 	lease, err := workspacelease.New(root, config.WorkspaceLeaseDir(), func(w workspacelease.Wait) {
 		sink.Emit(workspaceLeaseNotice(w))
 	}, leaseOptions...)

@@ -19,7 +19,7 @@ const MODE_NAME: Record<string, string> = {
 const MODE_WHY: Record<string, string> = {
   strict: "写明了要改哪些文件的会话互不干扰；说不清会改哪里的工具会占住整个工作区，其他写入都排队。",
   optimistic: "只有写明了要改哪些文件的会话互不干扰；说不清会改哪里的工具不再占住工作区，可与其他会话并行。",
-  off: "本会话不取跨会话写锁：不挡其他会话，也不被挡——自己的写入同样不再受保护，并发写入可能互相覆盖。会话内部的子代理之间仍按各自的范围排队。",
+  off: "本会话不取跨会话写锁：不挡其他会话，也不被挡——自己的写入同样不再受保护，并发写入可能互相覆盖。会话内部的写入也不再按范围排队，只剩并发名额上限。",
 };
 
 export function WriteLease({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {

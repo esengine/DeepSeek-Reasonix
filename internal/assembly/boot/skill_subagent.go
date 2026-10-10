@@ -207,7 +207,7 @@ func (r *skillSubagents) compile(sctx context.Context, sk skill.Skill, task stri
 		// Writer skills without declared paths claim the whole workspace, so
 		// they serialize against fleet and task writers that declared disjoint
 		// ones rather than racing them.
-		whole, err := writeclaim.WholeWorkspaceWriteClaim(r.root)
+		whole, err := writeclaim.UndeclaredWriterClaim(r.root)
 		if err != nil {
 			return delegation.ProfileExecSpec{}, fmt.Errorf("subagent skill %q write claim: %w", sk.Name, err)
 		}

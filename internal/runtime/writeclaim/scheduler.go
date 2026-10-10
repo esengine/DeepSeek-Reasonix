@@ -175,7 +175,7 @@ func (s *SubagentScheduler) abandonWaiter(w *schedulerWaiter, req AcquireRequest
 // taking a concurrency slot. Used for diagnostics; prefer ReserveParentWrite
 // for parent agent writes so the check is not TOCTOU with subagent Acquire.
 func (s *SubagentScheduler) TryClaimWritePaths(paths WritePathSet) error {
-	if s == nil || paths.Empty() {
+	if s == nil || paths.Empty() || leaseOff.Load() {
 		return nil
 	}
 	s.mu.Lock()
@@ -190,7 +190,7 @@ func (s *SubagentScheduler) TryClaimWritePaths(paths WritePathSet) error {
 // caller inside a tool call holding paths is the shape a deadlock needs.
 func (s *SubagentScheduler) ReserveWrite(paths WritePathSet) (release func(), err error) {
 	noop := func() {}
-	if s == nil || paths.Empty() {
+	if s == nil || paths.Empty() || leaseOff.Load() {
 		return noop, nil
 	}
 	s.mu.Lock()
@@ -267,6 +267,11 @@ func (s *SubagentScheduler) canStartLocked(req AcquireRequest) (bool, agentgraph
 	}
 	if s.activeWriters >= s.maxWriters {
 		return false, agentgraph.WaitWriters
+	}
+	// The off tier takes no claim at all: the writer still consumes a writer
+	// slot, but its paths never make it wait or make anyone wait for it.
+	if leaseOff.Load() {
+		return true, ""
 	}
 	for _, active := range s.activeClaims {
 		if active.Overlaps(req.WritePaths) {

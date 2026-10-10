@@ -306,9 +306,8 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (func(),
 	claim := o.normalizePaths(paths)
 	if o.relaxWholeWorkspace && claim == nil && len(paths) == 0 {
 		// Optimistic: a writer that declared no paths does not hold the whole
-		// workspace against other sessions. A writer that declared paths the
-		// host could not resolve falls through and takes the whole workspace,
-		// exactly as it does under strict.
+		// workspace against other sessions; one that declared paths the host
+		// could not resolve still takes the whole workspace, as under strict.
 		return func() {}, nil
 	}
 	for {

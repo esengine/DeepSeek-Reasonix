@@ -444,9 +444,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                     aria-selected={at === id} disabled={updatingPkg.applying} onClick={() => setAt(id)}>
                     <svg viewBox="0 0 16 16" aria-hidden="true">{ICON[id]}</svg>
                     <span className="nm">{t(name)}</span>
-                    <span className="nv" title={nav[id] || undefined} data-danger={danger(id) ? "" : undefined}>
-                      {nav[id]}
-                    </span>
+                    <span className="nv" title={nav[id] || undefined} data-danger={danger(id) ? "" : undefined}>{nav[id]}</span>
                   </button>
                 ))}
               </Fragment>
