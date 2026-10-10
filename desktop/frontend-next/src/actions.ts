@@ -56,6 +56,7 @@ export const ACTIONS: UIAction[] = [
   { id: "chart.data", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.policy", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.rail", kind: "view", target: "none", proof: "browser" },
+  { id: "chrome.open-project", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "appearance.theme", kind: "view", target: "none", proof: "interaction" },
   { id: "appearance.nav-rail", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.search", kind: "view", target: "none", proof: "interaction" },

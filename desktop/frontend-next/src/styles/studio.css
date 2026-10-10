@@ -503,7 +503,7 @@ body { background: var(--page) !important; }
 /* Prototype header */
 .chrome .studio-menu { width: 30px; margin-left: -6px; }
 .chrome .crumb { gap: 8px; color: var(--faint); font-size: 12px; }
-.chrome .crumb-folder { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; }
+.chrome .crumb-folder { width: 16px; height: 16px; padding: 0; border: 0; background: none; fill: none; stroke: currentColor; stroke-width: 1.25; color: inherit; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .chrome .crumb-proj { color: var(--muted); font-weight: 600; }
 .chrome .crumbsep { color: #555852; }
 .chrome .crumb b { color: var(--text); font-weight: 600; }

@@ -205,7 +205,7 @@ test("an unreachable kernel is an answer, not a crash", async () => {
   assert.equal(await dead.trayState(), null);
 });
 
-const { reveal, revealWorkspace } = require("../src/reveal.js");
+const { reveal, revealWorkspace, openWorkspace } = require("../src/reveal.js");
 
 // A kernel that answers /workspace/locate as the test says, and a shell that
 // only records what it was asked to open.
@@ -224,8 +224,37 @@ async function revealRig(answer, platform = process.platform) {
     openPath: async (p) => (opened.push(["open", p]), ""),
     showItemInFolder: (p) => opened.push(["select", p]),
   };
-  return { asked, opened, run: (base, rel) => reveal(client, shell, base, rel, platform), workspace: (root) => revealWorkspace(client, shell, root, platform), close: () => server.close() };
+  return {
+    asked, opened, close: () => server.close(),
+    run: (base, rel) => reveal(client, shell, base, rel, platform),
+    workspace: (root) => revealWorkspace(client, shell, root, platform),
+    open: (root) => openWorkspace(client, shell, root, platform),
+  };
 }
+
+// The sidebar's project entered rather than selected in its parent: the same
+// kernel answer revealWorkspace asks for, through the folder-opening verb.
+test("openWorkspace enters the folder the kernel named", async () => {
+  const rig = await revealRig(() => [200, { path: ROOT, dir: true }]);
+  try {
+    assert.equal(await rig.open("/w"), null);
+    assert.deepEqual(rig.opened, [["open", ROOT]]);
+    assert.equal(rig.asked[0], "/host/workspaces/locate?root=%2Fw");
+  } finally {
+    rig.close();
+  }
+});
+
+test("openWorkspace refuses a folder the hub does not list", async () => {
+  const rig = await revealRig(() => [404, { code: "host.unknown_workspace", error: "not listed" }]);
+  try {
+    const why = await rig.open("/nope");
+    assert.equal(why.code, "host.unknown_workspace");
+    assert.deepEqual(rig.opened, []);
+  } finally {
+    rig.close();
+  }
+});
 
 const ROOT = path.resolve(os.tmpdir(), "rx-workspace");
 

@@ -67,4 +67,16 @@ async function revealWorkspace(client, shell, root, platform = process.platform)
   return null;
 }
 
-module.exports = { reveal, revealWorkspace };
+// openWorkspace enters a folder the sidebar lists instead of selecting it in
+// its parent. The kernel answer and its refusal are the same as revealWorkspace
+// asks for; only the shell verb differs, and it is used for a folder the kernel
+// itself named rather than for a path the page carries.
+async function openWorkspace(client, shell, root, platform = process.platform) {
+  const found = await ask(client, `/host/workspaces/locate?root=${encodeURIComponent(String(root))}`, platform);
+  if (found.refusal) return found.refusal;
+  // openPath answers "" when the platform opened it, and the reason otherwise.
+  const why = await shell.openPath(found.target);
+  return why ? refused(why) : null;
+}
+
+module.exports = { reveal, revealWorkspace, openWorkspace };
