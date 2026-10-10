@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { FeedbackMine, FeedbackStatus } from "../port/feedback";
+import type { FeedbackItem, FeedbackMine, FeedbackStatus } from "../port/feedback";
 import type { AgentPort } from "../port/port";
 
 export const POLL_MS = 10 * 60_000;
@@ -7,6 +7,8 @@ export const POLL_CEILING_MS = 60 * 60_000;
 export const FOCUS_GAP_MS = 30_000;
 
 const SETTLED: readonly FeedbackStatus[] = ["fixed", "wontfix", "duplicate", "closed"];
+
+const latestReply = (i: FeedbackItem) => i.replies?.reduce((id, r) => (r.author === "maintainer" && r.id > id ? r.id : id), 0) ?? 0;
 
 const hasOpenItem = (m: FeedbackMine) => m.items.some((i) => !SETTLED.includes(i.status));
 
@@ -37,6 +39,7 @@ export function useFeedbackUnread(
     let epoch = 0;
     let open = false;
     let seeded = false;
+    const answered = new Map<string, number>();
     let failures = 0;
     let last = 0;
     let inflight = false;
@@ -68,7 +71,13 @@ export function useFeedbackUnread(
           failures = 0;
           open = hasOpenItem(m);
           if (!alive) return;
-          const rose = seeded && m.unread > unreadRef.current;
+          let replied = false;
+          for (const item of m.items) {
+            const id = latestReply(item);
+            if (id > (answered.get(item.receipt) ?? 0)) replied = true;
+            answered.set(item.receipt, id);
+          }
+          const rose = seeded && (m.unread > unreadRef.current || replied);
           seeded = true;
           setRef.current(m.unread);
           if (rose && !document.hasFocus()) void Promise.resolve().then(() => p.announceFeedbackReply()).catch(() => {});

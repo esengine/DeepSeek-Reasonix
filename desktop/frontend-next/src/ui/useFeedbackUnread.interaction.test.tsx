@@ -186,6 +186,42 @@ describe("useFeedbackUnread notice", () => {
     expect(port.announceFeedbackReply).toHaveBeenCalledTimes(1);
   });
 
+  it("announces another maintainer reply on a report that was already unread", async () => {
+    let replies = [{ id: 1, author: "maintainer", body: "", createdAt: "" }];
+    const ask = async () => {
+      const m = mine(1, ["needs_info"]);
+      (m.items[0] as unknown as { replies: unknown[] }).replies = replies;
+      return m;
+    };
+    const port = portOf(ask, ON);
+    render(<Probe port={port} />);
+    await tick(0);
+    focused = false;
+    await tick(POLL_MS);
+    expect(port.announceFeedbackReply).not.toHaveBeenCalled();
+    replies = [...replies, { id: 2, author: "maintainer", body: "", createdAt: "" }];
+    await tick(POLL_MS);
+    expect(port.announceFeedbackReply).toHaveBeenCalledTimes(1);
+    await tick(POLL_MS);
+    expect(port.announceFeedbackReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not announce the reporter's own reply", async () => {
+    let replies = [{ id: 1, author: "maintainer", body: "", createdAt: "" }];
+    const ask = async () => {
+      const m = mine(1, ["needs_info"]);
+      (m.items[0] as unknown as { replies: unknown[] }).replies = replies;
+      return m;
+    };
+    const port = portOf(ask, ON);
+    render(<Probe port={port} />);
+    await tick(0);
+    focused = false;
+    replies = [...replies, { id: 2, author: "user", body: "", createdAt: "" }];
+    await tick(POLL_MS);
+    expect(port.announceFeedbackReply).not.toHaveBeenCalled();
+  });
+
   it("does not announce what the first fetch finds", async () => {
     focused = false;
     const port = portOf(async () => mine(4, ["received"]), ON);
