@@ -63,7 +63,7 @@ interface Props {
   reply?: ReplyActions;
   // Rewriting a message: the turn it takes back, and what to send instead.
   onResend?: (turn: number, text: string) => Promise<void>;
-  onExtSubmit: (pluginId: string, surfaceId: string, values: Record<string, unknown>) => void;
+  onExtSubmit: (pluginId: string, surfaceId: string, values: Record<string, unknown>) => void | Promise<void>;
   // The checkpoint each user card can return to, keyed by item id. Absent for a
   // card whose turn could not be matched — see state/checkpoints.
   needsProject: boolean;

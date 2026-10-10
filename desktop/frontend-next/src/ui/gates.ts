@@ -95,8 +95,13 @@ export function useGateActions({ port, dispatch, refreshStatus, fail, onRevise }
   );
 
   const onExtSubmit = useCallback(
-    (pluginId: string, surfaceId: string, values: Record<string, unknown>) => {
-      port.submitExtensionForm(pluginId, surfaceId, values).catch(fail);
+    async (pluginId: string, surfaceId: string, values: Record<string, unknown>) => {
+      try {
+        await port.submitExtensionForm(pluginId, surfaceId, values);
+      } catch (e) {
+        fail(e);
+        throw e;
+      }
     },
     [port, fail],
   );
