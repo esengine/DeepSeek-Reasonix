@@ -2443,6 +2443,13 @@ body { font-size: 14px; line-height: 1.75; }
   .studio-meterrail .studio-meter-wallet { margin-left: auto; }
 }
 
+[data-fold~="scene"] .compose:not(:focus-within):not(:has(.shots, .refine-card, [aria-expanded="true"])):has(.fmain > textarea:placeholder-shown) textarea { min-height: 1lh; }
+[data-fold~="scene"] .compose:not(:focus-within):not(:has(.shots, .refine-card, [aria-expanded="true"])):has(.fmain > textarea:placeholder-shown) :is(.studio-refine, .studio-branch-pop) { display: none !important; }
+[data-fold~="scene"] .compose:not(:focus-within):not(:has(.shots, .refine-card, [aria-expanded="true"])):has(.fmain > textarea:placeholder-shown) .studio-mode-picker { width: 30px; justify-content: center; padding-inline: 0 !important; }
+[data-fold~="scene"] .compose:not(:focus-within):not(:has(.shots, .refine-card, [aria-expanded="true"])):has(.fmain > textarea:placeholder-shown) :is(.studio-mode-picker > span:not(.studio-sr-label), .studio-mode-picker > .studio-icon:last-child) { display: none; }
+[data-fold~="scene"] .compose:not(:focus-within):not(:has(.shots, .refine-card, [aria-expanded="true"])):has(.fmain > textarea:placeholder-shown) .turntools { flex-wrap: nowrap; }
+[data-fold~="scene"] .compose:not(:focus-within):not(:has(.shots, .refine-card, [aria-expanded="true"])):has(.fmain > textarea:placeholder-shown) .studio-model-group { flex-basis: 0; }
+
 .portmenu,
 .polmenu {
   min-width: 286px;

@@ -146,6 +146,47 @@ for (const state of ["idle", "running"]) {
 }
 check("扫到的对话列覆盖 360–700px", [...swept].some((w) => w <= 360) && [...swept].some((w) => w >= 700), [...swept].sort((a, b) => a - b).slice(0, 1).concat([...swept].sort((a, b) => b - a).slice(0, 1)).join("–"));
 
+// An untouched phone composer leaves room to read; focus or a draft restores
+// the editing controls without replacing the textarea or its caret.
+const phone = () => page.evaluate(() => {
+  const box = document.querySelector('textarea[role="combobox"]');
+  const shown = (selector) => document.querySelector(selector)?.getBoundingClientRect().height > 0;
+  const tools = [...document.querySelectorAll(".turntools > *")]
+    .filter((el) => el.getBoundingClientRect().height > 0);
+  const rows = new Set(tools.map((el) => {
+    const r = el.getBoundingClientRect();
+    return Math.round((r.top + r.height / 2) / 2);
+  }));
+  return { height: box.getBoundingClientRect().height, line: parseFloat(getComputedStyle(box).lineHeight),
+    refine: shown(".studio-refine"), branch: shown(".studio-branch-pop"), rows: rows.size };
+});
+await page.setViewportSize({ width: 390, height: 760 });
+await page.goto(PAGE, { waitUntil: "networkidle" });
+await page.waitForSelector(BOX);
+await page.click('[role="tab"][aria-selected="true"]');
+await frame();
+const quiet = await phone();
+check("手机：空置输入只占一行", quiet.height <= quiet.line + 1);
+check("手机：空置时收起优化与分支提示", !quiet.refine && !quiet.branch);
+check("手机：空置工具栏只占一行", quiet.rows === 1);
+await page.click(BOX);
+await frame();
+const focused = await phone();
+check("手机：聚焦恢复编辑空间与优化入口", focused.height > quiet.height && focused.refine);
+await page.fill(BOX, "保留草稿\n第二行\n第三行");
+await page.click('[role="tab"][aria-selected="true"]');
+await frame();
+const draft = await phone();
+check("手机：未聚焦草稿仍展开", draft.height >= draft.line * 3 - 1 && draft.refine);
+check("手机：展开后草稿原样保留", await page.inputValue(BOX) === "保留草稿\n第二行\n第三行");
+await page.fill(BOX, "");
+await page.getByRole("button", { name: "引用到输入框", exact: true }).last().click();
+await page.waitForSelector(".shots");
+await page.click('[role="tab"][aria-selected="true"]');
+await frame();
+const quoted = await phone();
+check("手机：仅有引用附件也保留编辑空间", quoted.height > quiet.height && quoted.refine);
+
 await browser.close();
 if (fails.length) {
   console.error(`\n${fails.length} 项不合格：\n  ` + fails.join("\n  "));
