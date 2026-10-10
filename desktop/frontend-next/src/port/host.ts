@@ -13,6 +13,15 @@ export interface HostInfo {
   titleBar: boolean;
 }
 
+/** How this launch draws. `launchedOff` is what the shell applied at start,
+ *  `savedOff` the saved choice alone (absent from an older shell), and
+ *  `compositing` Electron's own status string ("" when it has none yet). */
+export interface GraphicsInfo {
+  launchedOff: boolean;
+  savedOff?: boolean;
+  compositing: string;
+}
+
 export interface HostPort {
   /** Whether this page runs inside the desktop shell, as opposed to a browser
    *  tab, where the browser's own keys (zoom among them) are the reader's. */
@@ -22,6 +31,8 @@ export interface HostPort {
   toggleMaximiseWindow(): void;
   isWindowMaximised(): Promise<boolean>;
   closeWindow(): void;
+  /** How the shell draws this launch; null where it has no say, as in a tab. */
+  graphics(): Promise<GraphicsInfo | null>;
   openExternal(url: string): void | Promise<void>;
   /** Where dropped files live. Empty where the shell cannot say — a browser
    *  tab never learns a path. */
@@ -131,6 +142,7 @@ interface ElectronBridge {
   toggleMaximiseWindow(): Promise<void>;
   isWindowMaximised(): Promise<boolean>;
   closeWindow(): Promise<void>;
+  graphics?(): Promise<GraphicsInfo | null>;
   openExternal(url: string): Promise<void>;
   pathForFile(file: File): string;
   saveText(name: string, content: string): Promise<string>;
@@ -181,6 +193,9 @@ class ElectronHost implements HostPort {
   }
   closeWindow() {
     void this.api.closeWindow();
+  }
+  graphics() {
+    return this.api.graphics?.().catch(() => null) ?? Promise.resolve(null);
   }
   openExternal(url: string) {
     return this.api.openExternal(url);
@@ -256,6 +271,9 @@ class BrowserHost implements HostPort {
     return Promise.resolve(false);
   }
   closeWindow() {}
+  graphics() {
+    return Promise.resolve(null);
+  }
   openExternal(url: string) {
     window.open(url, "_blank", "noopener,noreferrer");
   }

@@ -27,6 +27,7 @@ const { BrowserViews } = require("./browserviews");
 const { startBrowserRelay } = require("./browserrelay");
 const { groundFor } = require("./ground");
 const { loadPrefs, prefsFile, registerPrefs } = require("./prefs");
+const { accelerationOff, shouldDisableGpu, graphicsHandler } = require("./graphics");
 const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
 const { crashDir, recordHostExit, pendingHostExit, clearHostExit, hostExitNotice } = require("./hostexit");
@@ -363,6 +364,8 @@ nativeTheme.on("updated", () => {
   if (win && !win.isDestroyed()) win.setBackgroundColor(ground());
 });
 
+ipcMain.handle("shell:graphics", (event) => graphicsHandler(app, fromWindow, gpuLaunch)(event));
+
 ipcMain.handle("window:minimise", (event) => {
   fromWindow(event)?.minimize();
 });
@@ -451,6 +454,11 @@ app.setName("Reasonix Studio");
 // already running owns those session files.
 const identity = instanceID(hostBinary);
 app.setPath("userData", profileFor(app.getPath("userData"), identity));
+// Chromium decides on the GPU before the app is ready, so this is the last
+// point a saved choice can still reach it.
+const savedPrefs = loadPrefs(prefsFile(app.getPath("userData")));
+const gpuLaunch = { launchedOff: shouldDisableGpu({ prefs: savedPrefs, env: process.env, argv: process.argv }), savedOff: accelerationOff(savedPrefs) };
+if (gpuLaunch.launchedOff) app.disableHardwareAcceleration();
 // A launch from a shortcut has no console, so this file is the only place a
 // failure before the window can be read back from.
 logs = openLogs(app.getPath("userData"));
