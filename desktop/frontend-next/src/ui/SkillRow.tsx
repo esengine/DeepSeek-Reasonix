@@ -7,7 +7,22 @@ import { reason } from "../i18n/kernel";
 
 // One skill, and the two things a reader wants from it: whether the model can
 // reach it at all, and which of the layers it was switched at.
-const SCOPE: Record<string, string> = { project: "项目", custom: "自定义", global: "我的", builtin: "内置" };
+const SCOPE: Record<string, string> = { global: "我的", project: "项目", custom: "自定义", builtin: "内置" };
+
+export function SkillGroups({ skills, ...rowProps }: { skills: SkillEntry[] } & Omit<Parameters<typeof SkillRow>[0], "sk">) {
+  const groups = new Map(Object.keys(SCOPE).map((scope) => [scope, [] as SkillEntry[]]));
+  for (const sk of skills) {
+    const scope = sk.scope ?? "";
+    if (!groups.has(scope)) groups.set(scope, []);
+    groups.get(scope)!.push(sk);
+  }
+  return <>{Array.from(groups, ([scope, rows]) => rows.length > 0 && (
+    <section className="skgroup" key={scope} aria-label={t(SCOPE[scope] ?? scope) || t("其他")}>
+      <h4>{t(SCOPE[scope] ?? scope) || t("其他")}</h4>
+      {rows.map((sk) => <SkillRow key={sk.name} sk={sk} {...rowProps} />)}
+    </section>
+  ))}</>;
+}
 
 // Which way the model can reach this skill, and whether it can reach it at all.
 // The second was being read back off the first by comparing the sentence — a

@@ -3691,6 +3691,8 @@ body { font-size: 14px; line-height: 1.75; }
 .prefs-main { padding-top: 28px; }
 .prefs-col { max-width: 820px; }
 .grp { padding: 20px 22px 18px; }
+.prefs .skgroup + .skgroup { margin-top: 20px; }
+.prefs .skgroup > h4 { margin: 0 0 8px; font: var(--w-med) var(--prefs-body)/1.5 var(--ui); color: var(--text); overflow-wrap: anywhere; }
 
 /* Progressive disclosure for source-specific compatibility. Most users only
    need address, key and models; relay-only controls remain discoverable here. */
