@@ -41,7 +41,7 @@ export interface TreeSession {
   // pane rather than opening a second writer for one file.
   runtimeId?: string;
   archived?: boolean;
-  // The kernel is the authority for pins; the window only unions its own in.
+  // The kernel is the authority for pins.
   pinned?: boolean;
   // Unix ms of an automatic archive, absent for a manual one.
   autoArchivedAt?: number;
