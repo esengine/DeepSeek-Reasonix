@@ -37,7 +37,7 @@ func registerMCPTools(ctx context.Context, host *plugin.Host, reg *tool.Registry
 func registerHostSessionServer(ctx context.Context, host *plugin.Host, reg *tool.Registry, s plugin.Spec, sink event.Sink) {
 	if host.HasClientForSpec(s) {
 		if tools, err := host.ToolsForSpec(ctx, s); err == nil {
-			addTools(reg, tools)
+			addServerTools(reg, host, s, tools)
 			return
 		}
 	}
@@ -45,12 +45,12 @@ func registerHostSessionServer(ctx context.Context, host *plugin.Host, reg *tool
 	tools, err := host.EnsureConnectedWithLifecycle(ctx, addCtx, s, 0)
 	addCancel()
 	if err == nil {
-		addTools(reg, tools)
+		addServerTools(reg, host, s, tools)
 		return
 	}
 	if plugin.IsServerAlreadyConnected(err) {
 		if tools, err2 := host.ToolsForSpec(ctx, s); err2 == nil {
-			addTools(reg, tools)
+			addServerTools(reg, host, s, tools)
 			return
 		}
 	}
@@ -69,7 +69,7 @@ func registerHostSessionServer(ctx context.Context, host *plugin.Host, reg *tool
 func registerConfiguredServer(ctx context.Context, host *plugin.Host, reg *tool.Registry, s plugin.Spec, alwaysLoad bool) bool {
 	if host.HasClientForSpec(s) {
 		if tools, err := host.ToolsForSpec(ctx, s); err == nil {
-			addTools(reg, tools)
+			addServerTools(reg, host, s, tools)
 			return true
 		}
 	}
@@ -95,6 +95,13 @@ func withoutSpecs(specs, drop []plugin.Spec) []plugin.Spec {
 		}
 	}
 	return kept
+}
+
+// addServerTools registers a connected server's tools and the held set its
+// client withheld, so a call to a withheld tool is refused with its cause.
+func addServerTools(reg *tool.Registry, host *plugin.Host, s plugin.Spec, tools []tool.Tool) {
+	addTools(reg, tools)
+	plugin.ApplyHeldMCPPolicy(reg, host, s)
 }
 
 func addTools(reg *tool.Registry, tools []tool.Tool) {

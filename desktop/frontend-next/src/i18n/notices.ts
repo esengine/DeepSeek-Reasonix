@@ -16,6 +16,7 @@ export const NOTICE_TEXT: Record<string, string> = {
   project_program_changed: "这个项目的程序在批准后被改动过，本次没有运行，需要重新批准",
   project_mcp_awaiting_approval: "这个项目声明的一个 MCP 服务要你批准后才会运行；详情里是它要启动的命令",
   project_mcp_changed: "一个已启用的项目 MCP 服务要启动的内容变了，本次没有运行，需要查看命令后重新启用",
+  mcp_tools_held: "一个 MCP 服务有工具的定义是新增的或与你批准过的不同，已暂不提供给模型；详情里是这些工具，核对服务后再接受",
   hook_unevaluable: "有一个钩子无法被评估（匹配串无效、无法启动或载荷无法序列化），为安全起见已拦截这次操作；到钩子设置里修复或移除该钩子",
   suspected_injection: "一条外部内容看起来在向智能体下指令，已提醒它只当资料看待",
   await_user: "等待你的输入",

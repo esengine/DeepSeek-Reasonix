@@ -85,6 +85,7 @@ func (m *mcpManager) connectSpec(s plugin.Spec) (int, error) {
 		for _, t := range tools {
 			reg.Add(t)
 		}
+		plugin.ApplyHeldMCPPolicy(reg, host, s)
 	}
 	return len(tools), nil
 }
@@ -125,6 +126,7 @@ func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
 		for _, t := range tools {
 			reg.Add(t)
 		}
+		plugin.ApplyHeldMCPPolicy(reg, host, s)
 	}
 	return len(tools), nil
 }
@@ -134,6 +136,7 @@ func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
 func (m *mcpManager) disconnect(name string) bool {
 	if reg := m.registry(); reg != nil {
 		reg.ClearDisabledMCP(name)
+		reg.ReplaceHeldMCP(name, nil)
 	}
 	host := m.hostRef()
 	if host == nil {

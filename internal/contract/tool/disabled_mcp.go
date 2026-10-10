@@ -94,9 +94,9 @@ func (r *Registry) ClearDisabledMCP(server string) {
 	r.rebuildDisabledMCPLocked()
 }
 
-// CopyDisabledMCPFrom copies the disabled-tool policy into a derived registry.
-// Child agents may not copy the tools themselves, but they still need the same
-// attribution when a stale call names a tool hidden by configuration.
+// CopyDisabledMCPFrom copies the disabled-tool and held-tool policy into a derived
+// registry. Child agents may not copy the tools themselves, but they still need
+// the same attribution when a stale call names a tool hidden by either.
 func (r *Registry) CopyDisabledMCPFrom(parent *Registry) {
 	if r == nil || parent == nil || r == parent {
 		return
@@ -112,9 +112,10 @@ func (r *Registry) CopyDisabledMCPFrom(parent *Registry) {
 	parent.mu.RUnlock()
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.disabledMCPByServer = byServer
 	r.rebuildDisabledMCPLocked()
+	r.mu.Unlock()
+	r.CopyHeldMCPFrom(parent)
 }
 
 // DisabledMCP reports whether name identifies a tool disabled by configuration.

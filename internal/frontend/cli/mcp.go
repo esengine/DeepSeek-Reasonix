@@ -49,6 +49,8 @@ func mcpCommand(args []string) int {
 	case "retry", "connect":
 		// connect remains a compatibility alias for enable/retry.
 		return mcpRetryCLI(args[1:])
+	case "trust":
+		return mcpTrustCLI(args[1:])
 	case "auth", "authorize":
 		return mcpAuthCLI(args[1:])
 	case "update":
@@ -509,6 +511,7 @@ Usage:
   reasonix mcp enable <name>
   reasonix mcp disable <name>
   reasonix mcp retry <name>
+  reasonix mcp trust <name> [--digest <hex>]    accept tool definitions held back as changed
   reasonix mcp auth <name>                          remote OAuth (opens browser)
   reasonix mcp update <name>
   reasonix mcp browse [query] [--limit N] [--json]

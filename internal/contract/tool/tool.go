@@ -353,6 +353,9 @@ type Registry struct {
 	disabledMCP map[string]bool
 	// disabledMCPByServer keeps per-server policy so aliases can be replaced or cleared.
 	disabledMCPByServer map[string]map[string]bool
+	// heldMCP is the per-server set of tools withheld until their changed
+	// definition is re-approved, keyed by callable alias.
+	heldMCP map[string]map[string]HeldMCP
 	// providerVisible, when non-nil, restricts Schemas/ContractEntries to the
 	// listed tool names. Get/Execute still resolve every registered tool so
 	// use_capability can dispatch tool:<name> without changing the provider

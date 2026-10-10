@@ -75,7 +75,7 @@ func FromEntry(e config.PluginEntry, workspaceRoot string, opts Options) plugin.
 		ConfigSource:                  configSource,
 		Authorized:                    e.Source.UserAuthorized(),
 		OAuthHTTPClient:               opts.OAuthHTTPClient,
-		OAuthAllowMissingPKCEMetadata: e.OAuthAllowMissingPKCEMetadata && userOwnedSource(e.Source),
+		OAuthAllowMissingPKCEMetadata: e.OAuthAllowMissingPKCEMetadata && e.Source.UserOwned(),
 	}, workspaceRoot)
 	if e.Source.ProjectScoped() && strings.TrimSpace(spec.Dir) == "" {
 		spec.Dir = workspaceRoot
@@ -229,16 +229,4 @@ func pathComparisonKey(path string) string {
 		return strings.ToLower(path)
 	}
 	return path
-}
-
-// userOwnedSource is a config the user keeps in their own home. A project's
-// config, its .mcp.json and an installed package are someone else's, and none
-// of them may relax an OAuth check for whoever opens or installs them.
-func userOwnedSource(s config.MCPConfigSource) bool {
-	switch s {
-	case config.MCPSourceUserConfig, config.MCPSourceLegacyUser, config.MCPSourceClaudeUser, config.MCPSourceClaudeLocal:
-		return true
-	default:
-		return false
-	}
 }
