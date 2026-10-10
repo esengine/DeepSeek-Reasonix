@@ -18,6 +18,12 @@ var ErrRepositoryDrivers = errors.New("gitcmd: repository-defined git drivers ca
 // includes are reported under the scope of the file that includes them.
 var repositoryScopes = []string{"local", "worktree"}
 
+// driverFree are the subcommands that never convert file content or recurse
+// into submodules, whatever their options: they handle refs, the index and
+// tree objects, not working-tree content. Anything not named here is listed,
+// so an unknown or content-reading subcommand fails closed.
+var driverFree = []string{"version", "rev-parse", "symbolic-ref", "write-tree", "ls-tree", "rev-list", "show-ref", "for-each-ref", "merge-base"}
+
 // driverOverrides returns -c entries that empty every filter and merge driver
 // defined at repository scope for the repository args will operate on, and
 // turn off a repository-set submodule.recurse. The
@@ -25,7 +31,7 @@ var repositoryScopes = []string{"local", "worktree"}
 // resolve the same repository the invocation will.
 func driverOverrides(ctx context.Context, dir string, repoEnv, args []string) ([]string, error) {
 	sub := subcommandIndex(args)
-	if sub < 0 || args[sub] == "version" {
+	if sub < 0 || slices.Contains(driverFree, args[sub]) {
 		return nil, nil
 	}
 	query := []string{"config", "--name-only", "-z", "--get-regexp", `^(filter|merge)\.|^submodule\.recurse$`}
