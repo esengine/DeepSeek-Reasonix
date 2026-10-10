@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MAX, search, stepped, type Hit } from "../state/find";
 import type { Item } from "../state/session";
+import { useShowsReceipt } from "../state/foldpref";
 
 const NO_HITS: Hit[] = [];
 
@@ -22,7 +23,8 @@ export interface Finding {
  *  has focus answers it, so one chord does not open a bar in every session. */
 export function useFind(items: Item[], pulse: number, active: boolean, onOpen: () => void): Finding {
   const [held, setHeld] = useState<{ q: string; i: number; focus: number } | null>(null);
-  const hits = useMemo(() => (held ? search(items, held.q) : NO_HITS), [items, held]);
+  const receipts = useShowsReceipt();
+  const hits = useMemo(() => (held ? search(items, held.q) : NO_HITS), [items, held, receipts]);
   const i = held ? Math.min(held.i, hits.length - 1) : -1;
   const at = i >= 0 ? hits[i] : null;
   // Hits come in reading order, so a row's occurrences sit together.

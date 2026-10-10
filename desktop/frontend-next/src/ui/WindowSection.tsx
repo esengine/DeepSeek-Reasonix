@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { AgentPort, TrayPrefs } from "../port/port";
 import { t } from "../i18n";
 import { keepsAwake, setKeepsAwake } from "../state/prefs";
-import { setShowsReceipt, showsReceipt } from "../state/session";
 import { ApplyNote } from "./Group";
 import { Switch } from "./Switch";
 
@@ -10,7 +9,6 @@ export function WindowSection({ port }: { port: AgentPort }) {
   // null in a browser tab, where there is no window to keep running and no
   // icon to bring one back. The whole section goes with it.
   const [tray, setTray] = useState<TrayPrefs | null>(null);
-  const [receipt, setReceipt] = useState(showsReceipt);
   const [awake, setAwake] = useState(keepsAwake);
 
   useEffect(() => {
@@ -46,21 +44,6 @@ export function WindowSection({ port }: { port: AgentPort }) {
         {t("关闭窗口后需通过托盘图标重新打开主界面，下方选项依赖该图标。")}
       </p>
       <div className="grp-items">
-        <div className="lrow">
-          <span className="tx">
-            <span className="lb">{t("回合结束时给出回执")}</span>
-            <span className="ds">{t("列出这一轮改了什么、验了什么、哪些没有验；无话可说时不出现。下一轮起生效")}</span>
-          </span>
-          <Switch
-            data-action="chrome.receipt"
-            on={receipt}
-            label={t("回合结束时给出回执")}
-            onClick={() => {
-              setShowsReceipt(!receipt);
-              setReceipt(!receipt);
-            }}
-          />
-        </div>
         <div className="lrow">
           <span className="tx">
             <span className="lb">{t("任务运行时阻止系统休眠")}</span>

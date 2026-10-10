@@ -54,5 +54,4 @@ it("reads a saved off back as off after a reload", async () => {
 it("leaves the tray switches where they were", async () => {
   await open();
   expect(screen.getByRole("switch", { name: t("在托盘显示图标") })).toBeTruthy();
-  expect(screen.getByRole("switch", { name: t("回合结束时给出回执") })).toBeTruthy();
 });

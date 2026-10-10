@@ -1,9 +1,13 @@
 import { createContext, useRef, useSyncExternalStore } from "react";
 import type { Item } from "./session_types";
-import { foldModes, onFoldModesChange, type Fold, type FoldMode, type FoldModes } from "./prefs";
+import { foldModes, onFoldModesChange, onReceiptChange, showsReceipt, type Fold, type FoldMode, type FoldModes } from "./prefs";
 
 export function useFoldModes(): FoldModes {
   return useSyncExternalStore(onFoldModesChange, foldModes, foldModes);
+}
+
+export function useShowsReceipt(): boolean {
+  return useSyncExternalStore(onReceiptChange, showsReceipt, showsReceipt);
 }
 
 /** Whether a part starts open under its mode, given whether it is still being
