@@ -400,7 +400,7 @@ func (a *Agent) mutationEpoch() uint64 {
 func (a *Agent) checkContract() evidence.CheckContract {
 	return evidence.CaptureCheckContract(a.task.checkpoint.BaselineChecks, a.declaredChecks()).
 		WithCapturedTests(len(a.task.baselineCriteria)).WithDelivery(a.deliveryProfile).WithObserveRoot(a.observeRoot).
-		WithUnseenWriter(a.unseenToolWriter())
+		WithUnseenWriter(a.unseenToolWriter() || a.runningJobWriter())
 }
 
 // unseenToolWriter reports a writer that runs around tool calls and names no
@@ -410,6 +410,13 @@ func (a *Agent) unseenToolWriter() bool {
 	d := a.svc.extensions
 	return toolHooksMayMutateWorkspace(a.svc.hooks) || d.Intercepts(extension.PointToolBefore) ||
 		d.Intercepts(extension.PointPermissionDecision) || d.Intercepts(extension.PointToolAfter)
+}
+
+// runningJobWriter reports a background job of this session that has not
+// exited: its writes reach the ledger only when the turn collects it, so until
+// then no receipt bounds what it changes.
+func (a *Agent) runningJobWriter() bool {
+	return a.svc.jobs != nil && len(a.svc.jobs.RunningForSession(a.turn.jobSession)) > 0
 }
 
 // DeclaredProjectChecks is the declaration this process loaded, for a host that
@@ -563,6 +570,9 @@ func (a *Agent) verificationCause() string {
 	case contract.DeclaresChecks():
 		return " (checks are declared for this task or project)"
 	case contract.UnseenWriter():
+		if a.runningJobWriter() && !a.unseenToolWriter() {
+			return " (a background job is still running and may change files no receipt reports)"
+		}
 		return " (a tool hook or extension runs around tool calls and may change files no tool reports)"
 	}
 	return ""

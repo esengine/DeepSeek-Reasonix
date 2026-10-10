@@ -172,8 +172,11 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// change without the final-readiness gate ever seeing it. Plan turns defer
 	// this lease like collectBackgroundEvidence does so execution evidence is
 	// consumed and audited only after plan approval.
+	if a.svc.jobs != nil {
+		a.turn.jobSession = jobs.SessionFromContext(ctx)
+	}
 	if a.task.ledger != nil && a.svc.jobs != nil && !a.PlanningPhase() {
-		session := jobs.SessionFromContext(ctx)
+		session := a.turn.jobSession
 		for _, jobID := range a.svc.jobs.PendingEvidenceJobIDsForSession(session) {
 			summary, ready := a.svc.jobs.TryLeaseEvidenceForSession(session, jobID)
 			if !ready {
