@@ -3,6 +3,20 @@
 // en_settings and en_kernel were — one screen's worth of wording, read together.
 
 export const EN_WINDOW: Record<string, string> = {
+  "选择本机会话": "Select local sessions",
+  "选择会话：{name}": "Select session: {name}",
+  "已选 {n} 个会话": "{n} sessions selected",
+  "完成选择": "Done selecting",
+  "全选当前显示的会话": "Select all displayed sessions",
+  "取消当前显示会话的选择": "Deselect displayed sessions",
+  "取消全选": "Deselect all",
+  "全选可见": "Select visible",
+  "归档所选会话": "Archive selected sessions",
+  "取消所选会话归档": "Unarchive selected sessions",
+  "删除所选会话": "Delete selected sessions",
+  "所选会话正在运行，停止后才能操作": "Selected sessions are running. Stop them before continuing.",
+  "正在处理所选会话…": "Processing selected sessions…",
+  "删除 {n} 个会话？": "Delete {n} sessions?",
   "运行指标": "Run metrics",
   "时间线": "Timeline",
   "定位": "Locate",

@@ -1,0 +1,18 @@
+.session-batch-entry { display: flex; justify-content: flex-end; padding: 3px 18px; }
+.session-batch-entry button, .session-batch button { font: var(--w-med) var(--fs-micro) var(--ui); }
+.session-batch-entry button { padding: 4px 6px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+.session-batch-entry button:hover:not(:disabled) { color: var(--text); background: var(--overlay); }
+.session-batch { margin: 4px 12px 8px; padding: 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--page); }
+.session-batch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: var(--fs-micro); }
+.session-batch-head button { flex: none; color: var(--muted); background: transparent; padding: 4px; border: 0; border-radius: 4px; cursor: pointer; }
+.session-batch-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.session-batch-actions button { padding: 5px 7px; background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+.session-batch-actions button:hover:not(:disabled) { background: var(--overlay); }
+.session-batch [data-action="session.batch-delete"] { color: var(--err-ink); }
+.session-batch p { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-micro); }
+.session-batch button:disabled, .session-batch-entry button:disabled { opacity: .45; cursor: default; }
+.session-batch button:focus-visible, .session-batch-entry button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.session-batch .wsconfirm { margin: 8px 0 0; flex-wrap: wrap; gap: 8px; }
+.session-batch .wsconfirm-t { flex-basis: 100%; }
+.session-batch-names { font-size: var(--fs-micro); color: var(--text); overflow-wrap: anywhere; max-height: 100px; overflow-y: auto; }
+.rail .session-select { flex: none; width: 14px; height: 14px; margin: 0 6px 0 0; accent-color: var(--accent); }

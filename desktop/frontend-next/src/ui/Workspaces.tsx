@@ -20,6 +20,7 @@ import { WorkspaceOrder, workspaceMenuKeys } from "./WorkspaceOrder";
 import { WorkspaceReveal } from "./WorkspaceReveal";
 import { Confirm, removeHint } from "./WorkspaceConfirm";
 import { UnreadCount, UnreadDot } from "./UnreadMark";
+import { SessionBatch } from "./SessionBatch";
 
 const parentOf = (root: string) => root.replace(/[/\\]+$/, "").split(/[/\\]/).slice(-2, -1)[0] ?? "";
 
@@ -77,10 +78,18 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   // holds it.
   const [hereShut, setHereShut] = useState(false);
   const [confirm, setConfirm] = useState("");
+  const [selection, setSelection] = useState<Set<string> | null>(null);
   // The row a Delete key asked about. The question replaces that row, so focus
   // goes back to it once the question is gone, or a keyboard is left nowhere.
   const askedByKey = useRef("");
   const needle = useRailQuery();
+  useEffect(() => { setSelection((current) => current === null ? null : new Set()); }, [needle, scope]);
+  const toggleSelection = (path: string) => setSelection((current) => {
+    if (!current) return current;
+    const next = new Set(current);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    return next;
+  });
   const treeKeys = useTreeKeys();
   // Renaming is a pencil, not a double-click: a single click already opens the
   // session, so a double one would open it twice on the way to the edit.
@@ -285,11 +294,26 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   // A fold is a resting-state preference: while a word is being typed it would
   // hide the very rows that word just found.
   const shutHere = needle ? false : hereShut;
+  const displayed = shutHere ? [] : shownTree.filter((ws) => needle || !folded.has(ws.root))
+    .flatMap((ws) => whole.has(ws.root) ? ws.sessions : ws.sessions.slice(0, SHOWN));
+  const selected = [...new Map(displayed.filter((row) => selection?.has(row.path)).map((row) => [row.path, row])).values()];
+  useEffect(() => {
+    const paths = new Set(displayed.map((row) => row.path));
+    setSelection((current) => {
+      if (!current) return current;
+      const next = new Set([...current].filter((path) => paths.has(path)));
+      return next.size === current.size ? current : next;
+    });
+  }, [tree, folded, hereShut, whole, needle, scope, pinned, runs]);
 
   return (
     <>
+      <SessionBatch hub={hub} selection={selection} selected={selected} displayed={displayed} onSelect={setSelection}
+        onExit={() => treeKeys.ref.current?.querySelector<HTMLElement>('[role="treeitem"]')?.focus()}
+        onBusy={(pending) => { setBusy(pending ? "batch" : ""); if (pending) { setSessionMenu(""); setEditing(""); setConfirm(""); } }}
+        onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} />
       <div className="scroll">
-        <div role="tree" aria-label={t("机器、工作区与会话")} data-action-keydown="tree.navigate" ref={treeKeys.ref} onKeyDown={treeKeys.onKeyDown}>
+        <div role="tree" aria-label={t("机器、工作区与会话")} aria-multiselectable={selection !== null} inert={busy === "batch"} data-action-keydown="tree.navigate" ref={treeKeys.ref} onKeyDown={treeKeys.onKeyDown}>
           {/* This machine is the first row of the list rather than another kind of
               thing, and its add button sits where a host's does: open a folder
               on this machine. */}
@@ -455,23 +479,24 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       <Fragment key={session.path}>
                       <div
                         ref={sessionMenu === session.path ? sessionMenuBox : undefined}
-                        data-action-click="session.open"
+                        data-action-click={selection ? "session.selection" : "session.open"}
                         data-action-contextmenu="session.menu"
                         aria-haspopup="menu"
-                        data-action-keydown={["session.open", "session.delete"]}
+                        data-action-keydown={selection ? ["session.selection"] : ["session.open", "session.delete"]}
                         data-target={session.path}
                         className="sessrow sessrow-context"
                         role="treeitem"
-                        aria-selected={on}
+                        aria-selected={selection ? selection.has(session.path) : on}
                         data-on={on ? "" : undefined}
                         data-live={session.runtimeId ? "" : undefined}
                         data-run={run === "idle" ? undefined : run}
                         data-unread={session.unread ? "" : undefined}
                         data-just-done={session.runtimeId && justDone.has(session.runtimeId) ? "" : undefined}
                         data-busy={opening === session.path ? "" : undefined}
-                        onClick={() => void pick(ws, session)}
+                        onClick={() => selection ? toggleSelection(session.path) : void pick(ws, session)}
                         onContextMenu={(ev) => {
                           if ((ev.target as HTMLElement).closest("input, textarea, [role='menu']")) return;
+                          if (selection) { ev.preventDefault(); return; }
                           ev.preventDefault();
                           ev.stopPropagation();
                           menuTrigger.current = ev.currentTarget;
@@ -482,6 +507,10 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         onKeyDown={(ev) => {
                           if (ev.target !== ev.currentTarget) return;
                           if (editing === session.path) return;
+                          if (selection) {
+                            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); toggleSelection(session.path); }
+                            return;
+                          }
                           if (ev.key === "Enter" || ev.key === " ") {
                             ev.preventDefault();
                             void pick(ws, session);
@@ -491,6 +520,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                           }
                         }}
                       >
+                        {selection && <input type="checkbox" className="session-select" tabIndex={-1} aria-label={t("选择会话：{name}", { name: rowLabel(session) })}
+                          data-action-click="session.selection" data-action-change="session.selection" data-target={session.path} checked={selection.has(session.path)}
+                          onClick={(ev) => ev.stopPropagation()} onChange={() => toggleSelection(session.path)} />}
                         <i className="pip" />
                         {editing === session.path ? (
                           <input
