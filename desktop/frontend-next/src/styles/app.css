@@ -3757,6 +3757,13 @@
   }
   .skrow .sc { flex: none; min-width: 44px; text-align: right; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
   .skrow .sw { margin-left: 4px; align-self: center }
+  .skrow:has(> .skprofile) { flex-wrap: wrap }
+  .skprofile { flex-basis: 100%; min-width: 0; font: var(--w-reg) var(--fs-meta)/1.55 var(--ui); color: var(--muted) }
+  .skprofile > p { margin: 8px 0 }
+  .skprofile > dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 8px 0 0 }
+  .skprofile dt { color: var(--faint) }
+  .skprofile dd { margin: 0; overflow-wrap: anywhere; font-family: var(--mono) }
+  .skprofile code { display: block; font: inherit }
 
   .seg {
     display: inline-flex; flex: none; align-self: start; flex-wrap: wrap;

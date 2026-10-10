@@ -111,6 +111,13 @@ export const EN_SETTINGS: Record<string, string> = {
   "切换会保留对话并重建运行时，任务运行期间无法切换。标签只显示已探测到的能力；留空表示端点未声明，不代表不支持。":
     "Switching keeps the conversation and rebuilds the runtime, and cannot be done while a task is running. Tags show only capabilities that could be detected; blank means the endpoint declared nothing, not that the feature is unsupported.",
   "推理强度": "Reasoning effort",
+  "子代理声明": "Subagent declarations",
+  "{name} 的子代理声明": "Subagent declarations for {name}",
+  "声明的模型": "Declared model",
+  "声明的推理强度": "Declared reasoning effort",
+  "声明的工具": "Declared tools",
+  "显示技能自身声明；实际运行配置还会结合当前设置解析。":
+    "Shows the skill's declarations. Runtime configuration also depends on current settings.",
   "以下档位由当前模型的端点支持，auto 表示使用端点自身的默认值。": "These levels are the ones the current model's endpoint accepts; auto leaves it at the endpoint's own default.",
   "当前模型未提供可调的推理档位，因此不显示该选项。": "The current model exposes no adjustable reasoning level, so the option is not shown.",
   "默认跟随模型容量；需要提前整理时再设置固定阈值。": "Follows model capacity by default; set a fixed threshold only when you need earlier compaction.",
