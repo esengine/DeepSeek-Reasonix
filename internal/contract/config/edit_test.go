@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	fileencoding "reasonix/internal/base/fileutil/encoding"
 	"reflect"
 	"runtime"
 	"slices"
@@ -1582,7 +1583,7 @@ temperature = 0.8
 		t.Fatal(err)
 	}
 
-	changed, err := MigrateLegacyAgentStepLimitsForRoot(root)
+	changed, err := retiredKeyMigration(root, func(m RetiredKeyMigrations) RetiredKeyResult { return m.StepLimits })
 	if err != nil {
 		t.Fatalf("MigrateLegacyAgentStepLimitsForRoot: %v", err)
 	}
@@ -1626,7 +1627,7 @@ temperature = 0.8
 		t.Fatalf("migration removed independent bot.max_steps:\n%s", userRaw)
 	}
 
-	again, err := MigrateLegacyAgentStepLimitsForRoot(root)
+	again, err := retiredKeyMigration(root, func(m RetiredKeyMigrations) RetiredKeyResult { return m.StepLimits })
 	if err != nil {
 		t.Fatalf("second migration: %v", err)
 	}
@@ -1656,7 +1657,7 @@ protect_sensitive_files = true
 		t.Fatal(err)
 	}
 
-	changed, err := MigrateLegacyRedactToolOutputForRoot(root)
+	changed, err := retiredKeyMigration(root, func(m RetiredKeyMigrations) RetiredKeyResult { return m.RedactToolOutput })
 	if err != nil {
 		t.Fatalf("MigrateLegacyRedactToolOutputForRoot: %v", err)
 	}
@@ -1687,7 +1688,7 @@ protect_sensitive_files = true
 		t.Fatalf("migration removed an unrelated project setting:\n%s", projectRaw)
 	}
 
-	again, err := MigrateLegacyRedactToolOutputForRoot(root)
+	again, err := retiredKeyMigration(root, func(m RetiredKeyMigrations) RetiredKeyResult { return m.RedactToolOutput })
 	if err != nil {
 		t.Fatalf("second migration: %v", err)
 	}
@@ -1717,7 +1718,7 @@ reasoning_language = "zh"
 		t.Fatal(err)
 	}
 
-	changed, err := MigrateLegacyMemoryCompilerForRoot(root)
+	changed, err := retiredKeyMigration(root, func(m RetiredKeyMigrations) RetiredKeyResult { return m.MemoryCompiler })
 	if err != nil {
 		t.Fatalf("MigrateLegacyMemoryCompilerForRoot: %v", err)
 	}
@@ -1748,7 +1749,7 @@ reasoning_language = "zh"
 		t.Fatalf("migration removed an unrelated project setting:\n%s", projectRaw)
 	}
 
-	again, err := MigrateLegacyMemoryCompilerForRoot(root)
+	again, err := retiredKeyMigration(root, func(m RetiredKeyMigrations) RetiredKeyResult { return m.MemoryCompiler })
 	if err != nil {
 		t.Fatalf("second migration: %v", err)
 	}
@@ -1773,7 +1774,8 @@ func TestRetiredConfigMigrationRequiresConfigFileLock(t *testing.T) {
 	configEditLockTimeout = 30 * time.Millisecond
 	t.Cleanup(func() { configEditLockTimeout = previousTimeout })
 
-	changed, err := migrateLegacyMemoryCompilerFile(path)
+	changedKeys, err := migrateRetiredKeysFile(path, fileencoding.ReadFileUTF8, []retiredKey{retiredMemoryCompiler})
+	changed := len(changedKeys) == 1 && changedKeys[0]
 	if err == nil || changed {
 		t.Fatalf("migration while file lock held = (%v, %v), want unchanged lock error", changed, err)
 	}
@@ -1837,7 +1839,7 @@ temperature = 0.2
 		t.Fatal(err)
 	}
 
-	changed, err := MigrateLegacyMemoryCompilerForRoot(root)
+	changed, err := retiredKeyMigration(root, func(m RetiredKeyMigrations) RetiredKeyResult { return m.MemoryCompiler })
 	if err != nil {
 		t.Fatalf("MigrateLegacyMemoryCompilerForRoot: %v", err)
 	}
@@ -3279,4 +3281,10 @@ func TestDesktopThemeStyleRejectsTheRetiredLayoutName(t *testing.T) {
 	if got := c.DesktopThemeStyle(); got != "" {
 		t.Fatalf("theme style = %q, want empty", got)
 	}
+}
+
+// retiredKeyMigration runs every retired-key migration and projects one result.
+func retiredKeyMigration(root string, pick func(RetiredKeyMigrations) RetiredKeyResult) (bool, error) {
+	r := pick(processRoots().MigrateRetiredKeysForRoot(root))
+	return r.Changed, r.Err
 }
