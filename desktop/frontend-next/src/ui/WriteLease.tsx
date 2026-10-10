@@ -106,7 +106,7 @@ export function WriteLeaseGroup({ port, onChanged }: { port: AgentPort; onChange
     <Group
       id="write-lease"
       title={t("写锁档位")}
-      hint={t("标准最稳；宽松允许说不清会改哪里的工具并行；关闭则本会话完全不参与跨会话互斥。修改会重建运行时，任务运行期间无法变更。")}
+      hint={t("标准最稳；宽松允许说不清会改哪里的工具并行；关闭则本会话不参与任何路径互斥，跨会话与会话内都不再排队。修改会重建运行时，任务运行期间无法变更。")}
     >
       <WriteLease port={port} onChanged={onChanged} />
     </Group>

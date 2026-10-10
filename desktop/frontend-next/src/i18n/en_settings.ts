@@ -275,7 +275,7 @@ export const EN_SETTINGS: Record<string, string> = {
     "本会话不取跨会话写锁：不挡其他会话，也不被挡——自己的写入同样不再受保护，并发写入可能互相覆盖。会话内部的写入也不再按范围排队，只剩并发名额上限。": "This session takes no cross-session write lease: it neither blocks other sessions nor is blocked by them — its own writes lose their protection too, and concurrent writes may overwrite each other. In-session writes no longer queue on their extents either; only the concurrency cap remains.",
     "无法读取写锁档位。": "Could not read the write-lease mode.",
     "关闭写锁后，其他会话的写入与你的可能互相覆盖；确认你能接受这个风险再关闭。": "With the lease off, another session's writes may overwrite yours; be sure you accept that risk before turning it off.",
-    "标准最稳；宽松允许说不清会改哪里的工具并行；关闭则本会话完全不参与跨会话互斥。修改会重建运行时，任务运行期间无法变更。": "Standard is the safest; relaxed lets tools that cannot say what they will change run in parallel; off leaves this session out of the cross-session exclusion entirely. Changing it rebuilds the runtime and cannot be done while a task is running.",
+    "标准最稳；宽松允许说不清会改哪里的工具并行；关闭则本会话不参与任何路径互斥，跨会话与会话内都不再排队。修改会重建运行时，任务运行期间无法变更。": "Standard is the safest; relaxed lets tools that cannot say what they will change run in parallel; off leaves this session out of every path exclusion, cross-session and in-session alike. Changing it rebuilds the runtime and cannot be done while a task is running.",
 
   "在侧栏隐藏": "Hide from the rail",
   "在侧栏显示": "Show in the rail",
