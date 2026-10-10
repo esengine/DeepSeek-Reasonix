@@ -1,4 +1,5 @@
 import type { Item } from "./session_types";
+import { showsReceipt } from "./prefs";
 
 /** Searching the conversation reads the rows, never the document: the transcript
  *  mounts a few dozen cards out of however many the session holds, so anything
@@ -70,7 +71,9 @@ export function search(items: Item[], query: string): Hit[] {
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return [];
   const out: Hit[] = [];
+  const receipts = showsReceipt();
   for (let row = 0; row < items.length; row++) {
+    if (items[row].t === "receipt" && !receipts) continue;
     const hay = haystack(items[row]);
     for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + needle.length)) {
       out.push({ id: items[row].id, row, at });

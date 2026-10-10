@@ -366,18 +366,15 @@ describe("the turn's verification receipt", () => {
   const card = { saysSomething: true, verdict: "unproven", gaps: [{ kind: "unverified_change" }] };
   const receipts = (s: SessionState) => s.items.filter((i) => i.t === "receipt");
 
-  // A turn that changed files and verified none of them ends on the one card
-  // that says so, so it is there unless this machine turned it off.
-  it("closes the turn by default", () => {
-    expect(receipts(run([done(card)]))).toHaveLength(1);
-  });
-
-  it("stays out when this machine turned it off", () => {
-    expect(receipts(hidingReceipts(() => run([done(card)])))).toEqual([]);
-  });
+  // The record is the transcript's; whether a card is drawn is decided at
+  // render time, so the preference never changes what the session holds.
+  it.each([["off", () => hidingReceipts(() => run([done(card)]))], ["default", () => run([done(card)])]])(
+    "closes the turn with the record when the preference is %s",
+    (_, go) => expect(receipts(go())).toHaveLength(1),
+  );
 
   // The kernel still decides whether a receipt has content at all; the
-  // preference only decides whether a reader sees one that does.
+  // preference decides nothing about that.
   it("still respects the kernel's own answer", () => {
     expect(receipts(showingReceipts(() => run([done({ ...card, saysSomething: false })])))).toEqual([]);
   });

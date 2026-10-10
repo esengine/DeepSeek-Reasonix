@@ -16,6 +16,7 @@ import { ElicitCard } from "./cards/ElicitCard";
 import { SayCard, type ReplyActions } from "./cards/SayCard";
 import { CompactionCard } from "./cards/CompactionCard";
 import { ReceiptCard } from "./cards/ReceiptCard";
+import { useShowsReceipt } from "../state/foldpref";
 import { ReadsCard } from "./cards/ReadsCard";
 import { UserCard } from "./cards/UserCard";
 import { NoticeCard } from "./cards/NoticeCard";
@@ -722,7 +723,7 @@ const Row = memo(function Row({
     case "remember":
       return <RememberCard m={it.m} forgotten={it.forgotten} onForget={(name) => onForget(it.id, name)} />;
     case "receipt":
-      return <ReceiptCard r={it.r} />;
+      return <ReceiptSlot r={it.r} />;
     case "extension":
       return <ExtensionCard ext={it.ext} onInvoke={onExtInvoke} onSubmit={onExtSubmit} />;
     case "notice":
@@ -761,4 +762,8 @@ function Hero({ needsProject, onOpen, onKeep }: HeroProps) {
       ) : null}
     </div>
   );
+}
+
+function ReceiptSlot({ r }: { r: Extract<Item, { t: "receipt" }>["r"] }) {
+  return useShowsReceipt() ? <ReceiptCard r={r} /> : null;
 }
