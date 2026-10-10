@@ -1458,6 +1458,7 @@ body { background: var(--page) !important; }
 .workbench-read > .md { max-width: 820px; margin: 0 auto; font-size: var(--read, 14px); line-height: 1.75; }
 .workbench-empty { flex: 1; display: flex; place-content: center; align-items: center; gap: 8px; color: var(--faint); font: 500 11px/1 var(--ui); }
 .workbench-empty svg { width: 18px; height: 18px; }
+.workbench-error.workbench-close-error { flex: none; font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; }
 .workbench-error { padding: 8px 12px; border-bottom: 1px solid var(--err); color: var(--err-ink); font: 500 10px/1.4 var(--ui); }
 @media (max-width: 760px) {
   .workbench-body { grid-template-columns: minmax(0, 1fr); }

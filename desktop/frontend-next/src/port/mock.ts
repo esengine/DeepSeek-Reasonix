@@ -575,6 +575,8 @@ export class MockPort extends MockWorkspace implements AgentPort {
     return { id: "mock", target: "mock", url, title: url, active: true };
   }
 
+  async browserClose(_tab: string): Promise<void> {}
+
   async queue(): Promise<Queue> {
     return {
       revision: this.queueRevision,
