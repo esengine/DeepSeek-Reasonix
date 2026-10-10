@@ -44,9 +44,32 @@ type shadowBundle struct {
 	Blocked      bool                       `json:"blocked,omitempty"`
 	Criteria     []taskcontract.Requirement `json:"criteria,omitempty"`
 	TaskContract contractState              `json:"task_contract"`
-	Verdict      verdict.Result             `json:"verdict"`
+	Verdict      bundleVerdict              `json:"verdict"`
 	Divergence   verdict.Divergence         `json:"divergence"`
 	workspaceObservation
+}
+
+// bundleVerdict keeps the outcome inline and the obligations as an object of
+// their own. The list tracks the contract's size, and an object repeats nothing
+// when a turn leaves every obligation as it was.
+type bundleVerdict struct {
+	Outcome     verdict.Outcome     `json:"outcome"`
+	Obligations trustedstate.Digest `json:"obligations,omitempty"`
+	Count       int                 `json:"obligation_count"`
+}
+
+// sealVerdict files the obligations in the store and returns the bundle's view.
+func sealVerdict(store *trustedstate.Store, res verdict.Result) (bundleVerdict, error) {
+	out := bundleVerdict{Outcome: res.Outcome, Count: len(res.Obligations)}
+	if len(res.Obligations) == 0 {
+		return out, nil
+	}
+	body, err := json.Marshal(res.Obligations)
+	if err != nil {
+		return out, err
+	}
+	out.Obligations, err = store.PutObject(body)
+	return out, err
 }
 
 type shadowContract struct {
@@ -105,6 +128,7 @@ func (a *Agent) sealShadowBundle(input string, c *taskcontract.Contract, rep com
 	if cs.Failure == "" {
 		a.turn.outcome = &res
 	}
+	sealed, putErr := sealVerdict(seal.Store, res)
 	payload, err := json.Marshal(shadowBundle{
 		Kind:         shadowBundleKind,
 		InputDigest:  sha256Hex([]byte(input)),
@@ -114,7 +138,7 @@ func (a *Agent) sealShadowBundle(input string, c *taskcontract.Contract, rep com
 		Blocked:      blocked,
 		Criteria:     c.Requirements,
 		TaskContract: cs,
-		Verdict:      res,
+		Verdict:      sealed,
 		Divergence:   div,
 
 		workspaceObservation: obs,
@@ -130,6 +154,11 @@ func (a *Agent) sealShadowBundle(input string, c *taskcontract.Contract, rep com
 		ContractRevision:   cs.Revision,
 		ContractDecision:   string(cs.Decision),
 		ContractFailure:    cs.Failure,
+	}
+	if putErr != nil {
+		audit.FailureCode = trustedstate.FailureCode(putErr)
+		event.RecordEvidenceBundle(a.svc.sink, audit)
+		return
 	}
 	if err != nil {
 		audit.FailureCode = "trusted_state.encode"

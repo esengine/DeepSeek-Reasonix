@@ -14,13 +14,14 @@ import (
 	"reasonix/internal/state/trustedstate"
 )
 
-// contractState is what the bundle records about the task's contract.
+// contractState is what the bundle records about the task's contract. Criteria
+// stay out of it: Record names the revision that holds them.
 type contractState struct {
 	Record   string               `json:"record,omitempty"`
 	Revision int                  `json:"revision,omitempty"`
 	Decision contract.Decision    `json:"decision,omitempty"`
 	Failure  string               `json:"failure,omitempty"`
-	Criteria []contract.Criterion `json:"criteria,omitempty"`
+	Criteria []contract.Criterion `json:"-"`
 }
 
 // settleContract applies host policy to the criteria the task's host-owned

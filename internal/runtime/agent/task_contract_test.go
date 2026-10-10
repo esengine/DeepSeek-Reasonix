@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/contract"
 	"reasonix/internal/runtime/plancontract"
+	"reasonix/internal/runtime/verdict"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/instruction"
 	"reasonix/internal/state/sessionstore"
@@ -103,20 +104,9 @@ func sealedVerdict(t *testing.T, store *trustedstate.Store, record, id string) s
 	if err != nil {
 		t.Fatal(err)
 	}
-	var b struct {
-		Verdict struct {
-			Obligations []struct {
-				ID      string `json:"id"`
-				Verdict string `json:"verdict"`
-			} `json:"obligations"`
-		} `json:"verdict"`
-	}
-	if err := json.Unmarshal(payload, &b); err != nil {
-		t.Fatal(err)
-	}
-	for _, o := range b.Verdict.Obligations {
+	for _, o := range sealedObligations(t, store, payload) {
 		if o.ID == id {
-			return o.Verdict
+			return string(o.Verdict)
 		}
 	}
 	t.Fatalf("bundle has no obligation %q: %s", id, payload)
@@ -253,21 +243,34 @@ func hasObligation(t *testing.T, store *trustedstate.Store, record, id string) b
 	if err != nil {
 		t.Fatal(err)
 	}
+	return slices.ContainsFunc(sealedObligations(t, store, payload), func(o verdict.Obligation) bool {
+		return o.ID == id
+	})
+}
+
+// sealedObligations resolves the obligation object a bundle's verdict names.
+func sealedObligations(t *testing.T, store *trustedstate.Store, payload []byte) []verdict.Obligation {
+	t.Helper()
 	var b struct {
 		Verdict struct {
-			Obligations []struct {
-				ID string `json:"id"`
-			} `json:"obligations"`
+			Obligations trustedstate.Digest `json:"obligations"`
 		} `json:"verdict"`
 	}
 	if err := json.Unmarshal(payload, &b); err != nil {
 		t.Fatal(err)
 	}
-	return slices.ContainsFunc(b.Verdict.Obligations, func(o struct {
-		ID string `json:"id"`
-	}) bool {
-		return o.ID == id
-	})
+	if b.Verdict.Obligations == "" {
+		return nil
+	}
+	body, err := store.Object(b.Verdict.Obligations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obs []verdict.Obligation
+	if err := json.Unmarshal(body, &obs); err != nil {
+		t.Fatal(err)
+	}
+	return obs
 }
 
 func deliverablePlan() plancontract.Plan {
