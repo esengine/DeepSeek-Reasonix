@@ -36,7 +36,7 @@ are written down in [`docs/STUDIO_SHELL_BOUNDARIES.md`](../docs/STUDIO_SHELL_BOU
 | `electron/` | the shell: main process, preload bridge, packaging |
 | `frontend-next/` | the SPA it serves |
 | `internal/platform/update/` | manifest, download, verify, apply — shared by the shell and the helper |
-| `cmd/update-helper/` | the elevated half of an update (dpkg on Linux, versioned install on Windows) |
+| `cmd/update-helper/` | the elevated half of an update (dpkg on Linux) |
 | `cmd/studio-manifest/`, `cmd/sign/` | release-side tools |
 | `internal/winuninstall/` | taking a previous Windows install over |
 

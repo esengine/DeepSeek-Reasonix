@@ -218,139 +218,6 @@ func lockPendingUpdateStrict() (func(), error) {
 
 var acquirePendingUpdateLock = lockPendingUpdateStrict
 
-// PrepareFileUpdate snapshots the current desktop executable — plus any sibling
-// binaries of the release unit the installer also replaces (Guard, launcher,
-// update helper) — and records an update transaction before an updater applies
-// the replacement. Sibling paths that do not exist are recorded explicitly so
-// rollback can remove files introduced by the replacement release.
-func PrepareFileUpdate(fromVersion, toVersion, targetPath string, siblingPaths ...string) (*UpdateTransaction, error) {
-	targetPath = filepath.Clean(strings.TrimSpace(targetPath))
-	if targetPath == "" || targetPath == "." {
-		return nil, fmt.Errorf("prepare update: empty target path")
-	}
-	root := config.MemoryUserDir()
-	if root == "" {
-		return nil, fmt.Errorf("prepare update: Reasonix state directory is unavailable")
-	}
-	unlock, err := acquirePendingUpdateLock()
-	if err != nil {
-		return nil, fmt.Errorf("prepare update: lock pending transaction: %w", err)
-	}
-	defer unlock()
-	if err := ensureNoPendingUpdate(); err != nil {
-		return nil, err
-	}
-	// Hold the same target locks as rollback so prepare/snapshot cannot race
-	// a concurrent Guard restore of the release unit.
-	lockPaths := append([]string{targetPath}, siblingPaths...)
-	unlockTargets, lockErr := lockRepairMutations(lockPaths...)
-	if lockErr != nil {
-		return nil, fmt.Errorf("prepare update: lock targets: %w", lockErr)
-	}
-	defer unlockTargets()
-	backupDir := filepath.Join(root, "repair", "updates")
-	if err := os.MkdirAll(backupDir, 0o700); err != nil {
-		return nil, err
-	}
-	if !pathInsideResolvedRoot(filepath.Join(root, "repair"), backupDir) {
-		return nil, fmt.Errorf("prepare update: backup directory resolves outside the repair directory")
-	}
-	tx := &UpdateTransaction{
-		SchemaVersion: updateTransactionVersion,
-		FromVersion:   fromVersion,
-		ToVersion:     toVersion,
-		Platform:      runtime.GOOS + "/" + runtime.GOARCH,
-		TargetKind:    "file",
-		TargetPath:    targetPath,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	seen := map[string]bool{}
-	for i, path := range append([]string{targetPath}, siblingPaths...) {
-		path = filepath.Clean(strings.TrimSpace(path))
-		key := canonicalRepairPath(path)
-		if path == "" || path == "." || key == "" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		info, statErr := os.Lstat(path)
-		if statErr != nil {
-			if i > 0 && os.IsNotExist(statErr) {
-				tx.Files = append(tx.Files, UpdateTransactionFile{TargetPath: path, MissingBefore: true})
-				continue
-			}
-			return nil, fmt.Errorf("prepare update backup: %w", statErr)
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("prepare update backup: release file %s is not a regular file", filepath.Base(path))
-		}
-		backupIdentity := repairPlanStateID(struct {
-			CreatedAt  string `json:"createdAt"`
-			TargetPath string `json:"targetPath"`
-			Index      int    `json:"index"`
-		}{
-			CreatedAt:  tx.CreatedAt,
-			TargetPath: canonicalRepairPath(path),
-			Index:      i,
-		})
-		backupPath := filepath.Join(
-			backupDir,
-			fmt.Sprintf("%s.%s.previous", filepath.Base(path), backupIdentity[:16]),
-		)
-		hash, err := copyFileWithHashCreate(path, backupPath, 0o700)
-		if err != nil {
-			return nil, fmt.Errorf("prepare update backup: %w", err)
-		}
-		tx.Files = append(tx.Files, UpdateTransactionFile{TargetPath: path, BackupPath: backupPath, SHA256: hash})
-		if i == 0 {
-			tx.BackupPath = backupPath
-			tx.BackupSHA256 = hash
-		}
-	}
-	if err := verifyPreparedFileUpdateTargets(tx); err != nil {
-		return nil, fmt.Errorf("prepare update: %w", err)
-	}
-	if err := ensureNoPendingUpdate(); err != nil {
-		return nil, err
-	}
-	if err := createPendingUpdate(tx); err != nil {
-		return nil, err
-	}
-	return tx, nil
-}
-
-// PrepareAppBundleUpdate records the sibling bundle backup that the macOS
-// handoff script creates. The script performs the directory move after exit.
-func PrepareAppBundleUpdate(fromVersion, toVersion, appPath, backupPath string) (*UpdateTransaction, error) {
-	tx, err := newAppBundleUpdateTransaction(fromVersion, toVersion, appPath, backupPath)
-	if err != nil {
-		return nil, err
-	}
-	unlock, err := acquirePendingUpdateLock()
-	if err != nil {
-		return nil, fmt.Errorf("prepare update: lock pending transaction: %w", err)
-	}
-	defer unlock()
-	if err := ensureNoPendingUpdate(); err != nil {
-		return nil, err
-	}
-	unlockTargets, lockErr := lockRepairMutations(tx.TargetPath, tx.BackupPath)
-	if lockErr != nil {
-		return nil, fmt.Errorf("prepare update: lock targets: %w", lockErr)
-	}
-	defer unlockTargets()
-	tx.BackupTreeID, err = repairPlanTreeContentStateID(tx.TargetPath)
-	if err != nil {
-		return nil, fmt.Errorf("prepare update: current bundle digest: %w", err)
-	}
-	if err := ensureNoPendingUpdate(); err != nil {
-		return nil, err
-	}
-	if err := createPendingUpdate(tx); err != nil {
-		return nil, err
-	}
-	return tx, nil
-}
-
 // PrepareAppBundleUpdateHandoff records every path the detached macOS updater
 // may mutate. The child receives only the transaction identity and must claim
 // these recorded paths under the pending-update and mutation locks.
@@ -437,27 +304,6 @@ func newAppBundleUpdateTransaction(fromVersion, toVersion, appPath, backupPath s
 		return nil, fmt.Errorf("prepare update: invalid macOS bundle paths")
 	}
 	return tx, nil
-}
-
-// ClaimPendingAppBundleUpdateHandoff authorizes a detached child to perform the
-// recorded bundle swap. It returns with both the pending transaction lock and
-// the target mutation locks held; release must be called on every path.
-func ClaimPendingAppBundleUpdateHandoff(expectedToVersion, expectedCreatedAt string, timeout time.Duration) (*UpdateTransaction, func(), error) {
-	tx, err := ReadPendingUpdate()
-	if err != nil {
-		return nil, nil, fmt.Errorf("claim update handoff: read pending transaction: %w", err)
-	}
-	if tx.TargetKind != "app-bundle" ||
-		strings.TrimSpace(tx.ToVersion) != strings.TrimSpace(expectedToVersion) ||
-		strings.TrimSpace(tx.CreatedAt) != strings.TrimSpace(expectedCreatedAt) {
-		return nil, nil, fmt.Errorf("claim update handoff: pending transaction does not match")
-	}
-	return claimPendingAppBundleUpdateHandoff(
-		expectedToVersion,
-		expectedCreatedAt,
-		UpdateTransactionID(tx),
-		timeout,
-	)
 }
 
 // ClaimPendingAppBundleUpdateHandoffExact additionally binds the detached
@@ -554,55 +400,6 @@ func claimPendingAppBundleUpdateHandoff(
 		})
 	}
 	return current, release, nil
-}
-
-// ClaimPendingFileUpdate binds an updater's actual replacement window to the
-// exact transaction and release-unit paths prepared by the desktop. The
-// launcher path is explicit because the Windows helper runs from a cache
-// directory rather than from the installation it is authorized to replace.
-func ClaimPendingFileUpdate(
-	expectedToVersion, expectedCreatedAt, launcherPath string,
-	expectedTargetPaths []string,
-	timeout time.Duration,
-) (*UpdateTransaction, func(), error) {
-	tx, err := readPendingUpdateForLauncher(launcherPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("claim file update: read pending transaction: %w", err)
-	}
-	if tx.TargetKind != "file" ||
-		strings.TrimSpace(tx.ToVersion) != strings.TrimSpace(expectedToVersion) ||
-		strings.TrimSpace(tx.CreatedAt) != strings.TrimSpace(expectedCreatedAt) {
-		return nil, nil, fmt.Errorf("claim file update: pending transaction does not match")
-	}
-	return claimPendingFileUpdate(
-		expectedToVersion,
-		expectedCreatedAt,
-		UpdateTransactionID(tx),
-		launcherPath,
-		expectedTargetPaths,
-		timeout,
-	)
-}
-
-// ClaimPendingFileUpdateExact additionally binds the updater to every field in
-// the transaction prepared by the desktop process.
-func ClaimPendingFileUpdateExact(
-	expectedToVersion, expectedCreatedAt, expectedTransactionID, launcherPath string,
-	expectedTargetPaths []string,
-	timeout time.Duration,
-) (*UpdateTransaction, func(), error) {
-	expectedTransactionID = strings.TrimSpace(expectedTransactionID)
-	if expectedTransactionID == "" {
-		return nil, nil, fmt.Errorf("claim file update: transaction identity is incomplete")
-	}
-	return claimPendingFileUpdate(
-		expectedToVersion,
-		expectedCreatedAt,
-		expectedTransactionID,
-		launcherPath,
-		expectedTargetPaths,
-		timeout,
-	)
 }
 
 func claimPendingFileUpdate(
@@ -733,16 +530,6 @@ func verifyPreparedFileUpdateBackups(tx *UpdateTransaction) error {
 		}
 	}
 	return nil
-}
-
-// PublishClaimedFileUpdateMember replaces one release-unit member without ever
-// overwriting an unverified node. The platform updater must hold the claim
-// returned by ClaimPendingFileUpdateExact for the whole release-unit operation.
-// A concurrent recreation after the prepared node moves aside wins; the new
-// bytes and the verified prior node remain staged for recovery.
-func PublishClaimedFileUpdateMember(claimed *UpdateTransaction, targetPath string, content []byte, mode os.FileMode) error {
-	_, err := PublishClaimedFileUpdateMemberExact(claimed, targetPath, content, mode)
-	return err
 }
 
 // PublishClaimedFileUpdateMemberExact returns proof of the exact node it
@@ -946,100 +733,6 @@ func stageFileUpdateContent(targetPath string, content []byte, mode os.FileMode)
 	return path, hex.EncodeToString(sum[:]), installedStateID, nil
 }
 
-// RecordClaimedFileUpdateInstalled binds the complete post-install release unit
-// while the platform updater still holds the claim's pending and target locks.
-// The binding is a transaction-unique create-only sidecar: pending-update.json
-// stays immutable, so a process crash can never strand rollback state in the
-// gap between displacing the old pending file and publishing a replacement.
-func RecordClaimedFileUpdateInstalled(
-	claimed *UpdateTransaction,
-	receipts ...FileUpdateInstallReceipt,
-) (*UpdateTransaction, error) {
-	if claimed == nil || claimed.TargetKind != "file" {
-		return nil, fmt.Errorf("record installed update: transaction identity is incomplete")
-	}
-	current, err := readPendingUpdateForLauncher(claimed.TargetPath)
-	if err != nil {
-		return nil, fmt.Errorf("record installed update: read pending transaction: %w", err)
-	}
-	if !reflect.DeepEqual(claimed, current) {
-		return nil, fmt.Errorf("record installed update: pending transaction changed")
-	}
-	if len(current.Files) == 0 {
-		return nil, fmt.Errorf("record installed update: release unit is incomplete")
-	}
-	record := &installedFileUpdateState{
-		SchemaVersion:       1,
-		UpdateTransactionID: UpdateTransactionID(current),
-		InstalledStateIDs:   make([]string, len(current.Files)),
-	}
-	receiptStates := make(map[string]string, len(receipts))
-	for _, receipt := range receipts {
-		if strings.TrimSpace(receipt.UpdateTransactionID) != record.UpdateTransactionID {
-			return nil, fmt.Errorf("record installed update: publish receipt belongs to a different transaction")
-		}
-		targetKey := canonicalRepairPath(receipt.TargetPath)
-		if targetKey == "" {
-			return nil, fmt.Errorf("record installed update: publish receipt target is invalid")
-		}
-		stateID := strings.TrimSpace(receipt.InstalledStateID)
-		if len(stateID) != sha256.Size*2 {
-			return nil, fmt.Errorf("record installed update: publish receipt state is invalid")
-		}
-		if _, err := hex.DecodeString(stateID); err != nil {
-			return nil, fmt.Errorf("record installed update: publish receipt state is invalid")
-		}
-		if _, exists := receiptStates[targetKey]; exists {
-			return nil, fmt.Errorf("record installed update: duplicate publish receipt")
-		}
-		receiptStates[targetKey] = stateID
-	}
-	for i := range current.Files {
-		f := &current.Files[i]
-		targetKey := canonicalRepairPath(f.TargetPath)
-		if stateID, ok := receiptStates[targetKey]; ok {
-			record.InstalledStateIDs[i] = stateID
-			delete(receiptStates, targetKey)
-			continue
-		}
-		info, statErr := os.Lstat(f.TargetPath)
-		if statErr != nil {
-			if os.IsNotExist(statErr) && f.MissingBefore {
-				record.InstalledStateIDs[i] = repairPlanReleaseNodeState(f.TargetPath)
-				continue
-			}
-			return nil, fmt.Errorf("record installed update: inspect %s: %w", filepath.Base(f.TargetPath), statErr)
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("record installed update: %s is not a regular file", filepath.Base(f.TargetPath))
-		}
-		return nil, fmt.Errorf("record installed update: publish receipt is missing for %s", filepath.Base(f.TargetPath))
-	}
-	if len(receiptStates) != 0 {
-		return nil, fmt.Errorf("record installed update: publish receipt target is outside the release unit")
-	}
-	for i, f := range current.Files {
-		if err := verifyRepairPlanReleaseNodeStateFor(f.TargetPath, f.TargetPath, record.InstalledStateIDs[i]); err != nil {
-			return nil, fmt.Errorf("record installed update: release unit changed while recording: %w", err)
-		}
-	}
-	if err := createInstalledFileUpdateState(current, record); err != nil {
-		return nil, fmt.Errorf("record installed update: %w", err)
-	}
-	installedUpdateAfterCreate(installedFileUpdateStatePath(current))
-	latest, err := readPendingUpdateForLauncher(claimed.TargetPath)
-	if err != nil {
-		return nil, fmt.Errorf("record installed update: re-read pending transaction: %w", err)
-	}
-	if !reflect.DeepEqual(current, latest) {
-		return nil, fmt.Errorf("record installed update: pending transaction changed")
-	}
-	if _, _, err := installedFileUpdateTargets(latest, true); err != nil {
-		return nil, fmt.Errorf("record installed update: %w", err)
-	}
-	return latest, nil
-}
-
 func installedFileUpdateStatePath(tx *UpdateTransaction) string {
 	if tx == nil {
 		return ""
@@ -1203,31 +896,6 @@ func removeInstalledFileUpdateState(tx *UpdateTransaction) error {
 		}
 		return nil
 	}, false)
-}
-
-// CancelPendingAppBundleUpdateHandoff abandons an exact handoff only when the
-// original installed bundle is still the tree captured during prepare. This is
-// the safe recovery path when source verification fails after the desktop has
-// exited but before any bundle swap occurred.
-func CancelPendingAppBundleUpdateHandoff(
-	expectedToVersion, expectedCreatedAt string,
-	timeout time.Duration,
-) (*UpdateTransaction, error) {
-	tx, err := ReadPendingUpdate()
-	if err != nil {
-		return nil, fmt.Errorf("cancel update handoff: read pending transaction: %w", err)
-	}
-	if tx.TargetKind != "app-bundle" ||
-		strings.TrimSpace(tx.ToVersion) != strings.TrimSpace(expectedToVersion) ||
-		strings.TrimSpace(tx.CreatedAt) != strings.TrimSpace(expectedCreatedAt) {
-		return nil, fmt.Errorf("cancel update handoff: pending transaction does not match")
-	}
-	return cancelPendingAppBundleUpdateHandoff(
-		expectedToVersion,
-		expectedCreatedAt,
-		timeout,
-		UpdateTransactionID(tx),
-	)
 }
 
 // CancelPendingAppBundleUpdateHandoffExact abandons only the full transaction
@@ -1956,11 +1624,6 @@ func readPendingUpdateUnchecked() (*UpdateTransaction, error) {
 	return &tx, nil
 }
 
-func HasPendingUpdate() bool {
-	_, err := ReadPendingUpdate()
-	return err == nil
-}
-
 // PendingUpdateExists reports the on-disk marker even when its contents are
 // malformed. It is intended only for progress/UI decisions; callers must use
 // ReadPendingUpdate or ReconcilePendingUpdate before authorizing mutations.
@@ -2127,40 +1790,6 @@ func CommitProbationaryPendingUpdate(runningVersion string) (bool, error) {
 	return !PendingUpdateExists(), nil
 }
 
-// AbandonPendingUpdate is the user-initiated recovery path for a stuck
-// transaction: commit if possible, else reconcile, else force-retire.
-func AbandonPendingUpdate(runningVersion string) (PendingUpdateReconcileResult, error) {
-	committed, commitErr := CommitProbationaryPendingUpdate(runningVersion)
-	if commitErr == nil && committed {
-		return PendingUpdateReconcileResult{Cleared: true, Healthy: true}, nil
-	}
-	if commitErr != nil {
-		// Keep going: a drifted backup must not block explicit discard.
-		slog.Debug("repair: probationary commit during abandon failed; continuing",
-			"err", commitErr)
-	}
-	result, reconcileErr := ReconcilePendingUpdate(runningVersion)
-	if reconcileErr == nil {
-		return result, nil
-	}
-	// Force-retire when still AwaitingHealth with the live target installed.
-	if errors.Is(reconcileErr, ErrPendingUpdateAwaitingHealth) {
-		if retired, retireErr := forceRetireProbationaryPendingUpdate(runningVersion); retireErr != nil {
-			return result, fmt.Errorf("abandon pending update: %w", retireErr)
-		} else if retired {
-			result.Pending = false
-			result.AwaitingHealth = false
-			result.Healthy = true
-			result.Cleared = true
-			return result, nil
-		}
-	}
-	if commitErr != nil && reconcileErr != nil {
-		return result, fmt.Errorf("abandon pending update: %w", errors.Join(reconcileErr, commitErr))
-	}
-	return result, reconcileErr
-}
-
 // forceRetireProbationaryPendingUpdate retires a probationary marker when the
 // live target is installed but MarkUpdateHealthy cannot finish (e.g. bad backup).
 func forceRetireProbationaryPendingUpdate(runningVersion string) (bool, error) {
@@ -2287,17 +1916,6 @@ func MarkUpdateHealthy(runningVersion string) error {
 	return markUpdateHealthyInvocation(runningVersion, "", "")
 }
 
-// MarkUpdateHealthyMatching commits only the exact pending transaction observed
-// when this desktop process started. The creation identity prevents an older
-// process from blessing a later same-version retry.
-func MarkUpdateHealthyMatching(runningVersion, expectedCreatedAt string) error {
-	expectedCreatedAt = strings.TrimSpace(expectedCreatedAt)
-	if expectedCreatedAt == "" {
-		return nil
-	}
-	return markUpdateHealthyInvocation(runningVersion, expectedCreatedAt, "")
-}
-
 // MarkUpdateHealthyExact commits only the complete transaction captured before
 // the replacement process started.
 func MarkUpdateHealthyExact(runningVersion, expectedCreatedAt, expectedTransactionID string) error {
@@ -2413,17 +2031,6 @@ func markUpdateHealthyMatching(runningVersion, expectedCreatedAt, expectedTransa
 	removeUpdateBackups(tx)
 	_ = removeInstalledFileUpdateState(tx)
 	return nil
-}
-
-// CancelPendingUpdateMatching removes only the exact transaction prepared by
-// the caller. It is used by updater failure paths where a same-version retry can
-// replace pending-update.json before cleanup runs.
-func CancelPendingUpdateMatching(toVersion, expectedCreatedAt string) error {
-	expectedCreatedAt = strings.TrimSpace(expectedCreatedAt)
-	if expectedCreatedAt == "" {
-		return nil
-	}
-	return cancelPendingUpdateInvocation(toVersion, expectedCreatedAt, "")
 }
 
 // CancelPendingUpdateExact removes only the complete transaction returned by
@@ -2628,18 +2235,6 @@ func removeUpdateNodeMatching(path string, verify func(string) error, directory 
 
 func RollbackPendingUpdate() (UpdateRollbackResult, error) {
 	return rollbackPendingUpdateInvocation("", "", "")
-}
-
-// RollbackPendingUpdateMatching rolls back only the exact transaction prepared
-// by the caller. This is used when an apply attempt fails after another process
-// may already have replaced pending-update.json with a same-version retry.
-func RollbackPendingUpdateMatching(expectedToVersion, expectedCreatedAt string) (UpdateRollbackResult, error) {
-	expectedToVersion = strings.TrimSpace(expectedToVersion)
-	expectedCreatedAt = strings.TrimSpace(expectedCreatedAt)
-	if expectedToVersion == "" || expectedCreatedAt == "" {
-		return UpdateRollbackResult{}, fmt.Errorf("rollback update: transaction identity is incomplete")
-	}
-	return rollbackPendingUpdateInvocation(expectedToVersion, expectedCreatedAt, "")
 }
 
 func rollbackPendingUpdateState(expectedStateID string, expectedStates map[string]string) (UpdateRollbackResult, error) {

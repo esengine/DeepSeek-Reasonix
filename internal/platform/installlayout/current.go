@@ -348,16 +348,3 @@ func ActiveMemberPath(installRoot, name string) (string, error) {
 	}
 	return path, nil
 }
-
-// ActiveUpdateHelperPath resolves the active update helper binary.
-func ActiveUpdateHelperPath(installRoot string) (string, error) {
-	return ActiveMemberPath(installRoot, UpdateHelperBinaryName())
-}
-
-// LauncherBinaryName is the permanent thin launcher at InstallRoot.
-func LauncherBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "reasonix-launcher.exe"
-	}
-	return "reasonix-launcher"
-}

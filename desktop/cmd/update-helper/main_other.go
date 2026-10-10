@@ -8,6 +8,6 @@ import (
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "reasonix-update-helper is only used by Windows and Linux desktop builds")
+	fmt.Fprintln(os.Stderr, "reasonix-update-helper is is only used by Linux builds")
 	os.Exit(2)
 }
