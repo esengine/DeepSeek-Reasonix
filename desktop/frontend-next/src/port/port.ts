@@ -146,6 +146,7 @@ export interface NotifyPrefs {
   turnDone: boolean;
   approval: boolean;
   ask: boolean;
+  feedbackReply: boolean;
 }
 
 export interface TrayPrefs {
@@ -381,6 +382,9 @@ export interface AgentPort {
   replyFeedback(receipt: string, body: string): Promise<FeedbackReplyReceipt>;
   // Records that the thread was shown up to reply upTo, so those replies stop counting as new.
   feedbackSeen(receipt: string, upTo: number): Promise<void>;
+  // Asks the window to raise the neutral "new reply" notification; the kernel
+  // answers for the switches. Rejects where there is no window to raise it.
+  announceFeedbackReply(): Promise<void>;
   workspaces(): Promise<WorkspaceInfo>;
   // Rebuilds the whole runtime against another folder. The conversation does
   // not come along, so the caller has to reload the transcript afterwards.

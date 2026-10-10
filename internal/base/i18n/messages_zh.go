@@ -197,6 +197,7 @@ var Chinese = Messages{
 	NotifyTurnFailed:                "这一轮失败了",
 	NotifyApproval:                  "有操作在等你批准",
 	NotifyAsk:                       "模型问了你一个问题",
+	NotifyFeedbackReply:             "你的反馈有新回复",
 	ApprovalNeededFmt:               "需要审批：%s",
 	ApprovalNeededWithSubjectFmt:    "需要审批：%s %s",
 	AnswerNeededFmt:                 "需要回答：%s",

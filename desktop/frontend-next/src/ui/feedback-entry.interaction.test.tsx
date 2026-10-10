@@ -109,7 +109,7 @@ describe("the unread badge", () => {
     expect(hit.textContent).toContain("3 项待查看");
   });
 
-  it("is read when the app opens and never on a timer", async () => {
+  it("is read when the app opens, then re-armed only every ten minutes because a report is open", async () => {
     const { hub: h, asked } = quiet();
     const long: number[] = [];
     const wrap = (name: "setInterval" | "setTimeout") => {
@@ -124,7 +124,7 @@ describe("the unread badge", () => {
     await screen.findByRole("button", { name: /3 项待查看/ });
     expect(asked).toHaveBeenCalledTimes(1);
     spies.forEach((s) => s.mockRestore());
-    expect(long).toEqual([]);
+    expect(long).toEqual([600_000]);
   });
 
   it("is not read again when another session is opened", async () => {

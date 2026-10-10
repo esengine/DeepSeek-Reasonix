@@ -170,6 +170,7 @@ type Messages struct {
 	NotifyTurnFailed                string // desktop notification: the turn failed
 	NotifyApproval                  string // desktop notification: something is waiting to be approved
 	NotifyAsk                       string // desktop notification: the model asked a question
+	NotifyFeedbackReply             string // desktop notification: a feedback report has a new reply
 	ApprovalNeededFmt               string // notification text for a pending approval, tool only
 	ApprovalNeededWithSubjectFmt    string // notification text for a pending approval with subject
 	AnswerNeededFmt                 string // notification text for a pending ask question

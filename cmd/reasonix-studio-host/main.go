@@ -378,6 +378,7 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 		DecorateSink:  decorate,
 		Tray:          &studioTray{tracker: tracker},
 		Notifications: notifySet,
+		NotifySender:  notify.NewPlatformSender(),
 		BrowserHost:   browserHost,
 		Asks:          asks,
 		Remote:        remotehost.New(ctx, version, asks),

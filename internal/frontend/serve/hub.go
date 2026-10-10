@@ -156,6 +156,9 @@ type HubOptions struct {
 	// the settings surface writes into. Nil leaves those routes unregistered:
 	// a kernel reached over the network would fire on its own machine.
 	Notifications *notify.Settings
+	// NotifySender delivers what the window asks to have announced; nil leaves
+	// that route unregistered.
+	NotifySender notify.Sender
 	// Tray is the window behind this hub, where there is one. Nil leaves the
 	// tray routes unregistered rather than answering for an icon that does not
 	// exist — a networked server has no window to put one on.

@@ -184,3 +184,25 @@ func TestNotificationSpeaksTheWindowsLanguage(t *testing.T) {
 		t.Fatal("notification answered in English for a Chinese window")
 	}
 }
+
+func TestSendFeedbackReplyNeedsBothSwitches(t *testing.T) {
+	for _, c := range []struct {
+		cfg  config.NotificationsConfig
+		want int
+	}{
+		{config.NotificationsConfig{FeedbackReply: true}, 0},
+		{config.NotificationsConfig{Enabled: true}, 0},
+		{config.NotificationsConfig{Enabled: true, FeedbackReply: true}, 1},
+	} {
+		sender := &recordSender{}
+		SendFeedbackReply(sender, i18n.English, c.cfg)
+		if len(sender.messages) != c.want {
+			t.Errorf("%+v sent %d, want %d", c.cfg, len(sender.messages), c.want)
+		}
+	}
+	sender := &recordSender{}
+	SendFeedbackReply(sender, i18n.English, config.NotificationsConfig{Enabled: true, FeedbackReply: true})
+	if sender.messages[0].Body != i18n.English.NotifyFeedbackReply {
+		t.Errorf("body = %q", sender.messages[0].Body)
+	}
+}

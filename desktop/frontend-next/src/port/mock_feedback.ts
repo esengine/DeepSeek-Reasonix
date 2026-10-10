@@ -41,6 +41,7 @@ const SEEDED: FeedbackItem[] = [
 // dev page can show every failure without a kernel that will produce it.
 const FAULT = "rx-mock-feedback-fault";
 const REPLY_FAULT = "rx-mock-feedback-reply-fault";
+const LATE_REPLY = "rx-mock-feedback-late-reply";
 
 function fault(key = FAULT): string {
   try {
@@ -118,12 +119,20 @@ export class MockFeedback extends MockCommit {
   async myFeedback(): Promise<FeedbackMine> {
     const code = fault();
     if (code === "mine_error") throw new HttpError(502, "unavailable", { code: FEEDBACK_CODE.unavailable, error: "unavailable" });
-    const items = [...this.filed, ...this.rows].map((i) => {
+    const late = fault(LATE_REPLY) !== "";
+    const items = [...this.filed, ...this.rows].map((row) => {
+      const i = late && row.receipt === "FB-9B4D-1XM6" ? { ...row, replies: [msg(41, "maintainer", "Settings > Model services.", 0)] } : row;
       const unreadReplies = i.replies.filter((r) => r.author === "maintainer" && r.id > (this.seen.get(i.receipt) ?? 0)).length;
       return { ...i, needsInput: i.statusUnavailable ? false : i.needsInput, unreadReplies };
     });
     const unread = items.filter((i) => i.unreadReplies > 0 || i.needsInput).length;
     return { items, offline: code === "mine_offline", unread, hasNew: unread > 0, profile: standing(fault(STANDING)) };
+  }
+
+  announced = 0;
+
+  async announceFeedbackReply(): Promise<void> {
+    this.announced += 1;
   }
 
   async replyFeedback(receipt: string, body: string): Promise<FeedbackReplyReceipt> {
