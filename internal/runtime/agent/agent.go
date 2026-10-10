@@ -1718,15 +1718,16 @@ func (a *Agent) readOnlyExecutionBlock(visible tool.Tool, resolved *tool.Resolve
 		return toolOutcome{}, false
 	}
 
-	switch resolved.ProxyAction {
-	case "list", "inspect":
-		if !resolved.SkipExecute || resolved.Target != nil || !resolved.ReadOnly {
+	if usecap.IsCatalogReadAction(resolved.ProxyAction) {
+		if !isHostResolvedCatalogRead(resolved) {
 			return block("execute a malformed dynamic inspection")
 		}
 		return toolOutcome{}, false
-	case "decline":
+	}
+	switch resolved.ProxyAction {
+	case usecap.ActionDecline:
 		return block("decline a capability decision")
-	case "call":
+	case usecap.ActionCall:
 		if resolved.Target == nil {
 			if a.role.plannerMCPExecution && resolved.HostCompleted && resolved.SkipExecute && resolved.ReadOnly && !resolved.Unavailable {
 				if _, ok := usecap.ParseMCPServerCapabilityID(resolved.CapabilityID); ok {
@@ -1769,8 +1770,14 @@ func (a *Agent) readOnlyExecutionBlock(visible tool.Tool, resolved *tool.Resolve
 		}
 		return toolOutcome{}, false
 	default:
-		return block("execute an unknown dynamic capability action")
+		return block(fmt.Sprintf("execute dynamic capability action %q; allowed: %s, %s", resolved.ProxyAction, strings.Join(usecap.CatalogReadActions, ", "), usecap.ActionCall+" on a read-only target"))
 	}
+}
+
+// isHostResolvedCatalogRead is the structural shape of a catalog read: answered
+// by the host, no target, no deferred state transition (decline has a Commit).
+func isHostResolvedCatalogRead(rc *tool.ResolvedCall) bool {
+	return rc.SkipExecute && rc.Target == nil && rc.ReadOnly && rc.Commit == nil
 }
 
 func readOnlyExecutionMCPDestructive(t tool.Tool) bool {
