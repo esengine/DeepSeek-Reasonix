@@ -4,6 +4,7 @@ import { current as language, plural, t } from "../i18n";
 import { useFileDrop } from "./filedrop";
 import type { AgentPort, PluginAction, PluginPackage, PluginPlan } from "../port/port";
 import { reason } from "../i18n/kernel";
+import { CopyButton } from "./CopyButton";
 
 // Installing and importing are the same act from two doors, so there is one
 // box: a link, or a folder picked off this machine.
@@ -295,6 +296,13 @@ export function Candidate({ a }: { a: PluginAction }) {
         <span className="nm">{a.name || a.kind}</span>
         {meta && <span className="meta">{meta}</span>}
       </div>
+      {a.kind === "plugin" && a.commit && (
+        <div className="risk">
+          <span className="lb">{t("已解析提交")}</span>
+          <span className="dt">{a.commit}</span>
+          <CopyButton text={a.commit} label={t("复制提交号")} iconOnly showFeedback />
+        </div>
+      )}
       {runs.map((r) => (
         <div className="risk" data-kind="shell" key={r.label}>
           <span className="lb">{t(r.label)}</span>

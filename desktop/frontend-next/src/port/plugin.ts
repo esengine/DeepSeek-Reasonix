@@ -83,6 +83,7 @@ export interface PluginAction {
   riskReasons?: string[];
   name?: string;
   source?: string;
+  commit?: string;
   target?: string;
   version?: string;
   manifestKind?: string;
