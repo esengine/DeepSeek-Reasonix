@@ -53,6 +53,21 @@ reasonix plugin show review-context-kit
 go test ./internal/assembly/boot/ -run '^TestEffectReviewContextExampleLifecycle$' -count=1
 ```
 
+## Compare the sent context
+
+1. [Provider-boundary reference](example-output/provider-boundary.md) shows
+   this package's complete reference block and the first, later and fresh-session
+   inputs exercised by the host test. Count complete blocks in the newest user
+   message for each request; earlier conversation history has a different scope.
+2. The enabled package contributes one new block on the first turn, zero on
+   the next turn of that session, and one after session rotation. The reference
+   also lists the zero-block results for absent, previewed, disabled and removed
+   packages in newly built controllers.
+3. This is implementer-written comparison material checked against the source
+   and recording-provider test. It is not a captured live-model response.
+   Evaluate a selected model's findings against actual source and check evidence;
+   sending guidance alone does not establish review quality.
+
 ## Edit and replace
 
 1. Edit `context/review.txt` in the source package. A copy installation keeps
