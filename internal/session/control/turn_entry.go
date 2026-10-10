@@ -127,9 +127,9 @@ func (c *Controller) withTurnFormat(ctx context.Context, format string) context.
 	return agent.WithResponseFormat(ctx, format)
 }
 
-func (c *Controller) runSubagentSkillSlash(sk skill.Skill, task, raw, display string) {
+func (c *Controller) runSubagentSkillSlash(sk skill.Skill, task, raw, display string) admissionResult {
 	sk = c.skills.prepare(sk)
-	c.runGuarded(func(ctx context.Context) error {
+	return c.runGuarded(func(ctx context.Context) error {
 		planMode := c.PlanMode()
 		runner := c.skillRunner
 		if runner == nil {
@@ -187,8 +187,8 @@ func isNonTurnHTTPInput(input string) bool {
 // runRefTurn resolves the turn's @references into a context block and starts a
 // turn with it prepended (or the raw line when nothing resolved), under turn
 // admission.
-func (c *Controller) runRefTurn(r refTurn) {
-	c.runGuarded(func(ctx context.Context) error { return c.runRefTurnSync(ctx, r) })
+func (c *Controller) runRefTurn(r refTurn) admissionResult {
+	return c.runGuarded(func(ctx context.Context) error { return c.runRefTurnSync(ctx, r) })
 }
 
 // runRefTurnSync is runRefTurn on the caller's goroutine, for a caller that

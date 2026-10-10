@@ -42,12 +42,12 @@ func (c *Controller) BindSessionWriteAuthority(lease *sessionstore.SessionLease)
 	return nil
 }
 
-func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool, editedOriginal string, tags turnTags) {
+func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool, editedOriginal string, tags turnTags) admissionResult {
 	if err := c.ensureWriteAuthorityReady(); err != nil {
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "input was not accepted: this session is no longer writable — reopen it and try again"})
-		return
+		return turnDroppedWriteAuthority
 	}
-	c.submitCommandOrTurnReady(trimmed, input, display, scopedRefsOnly, editedOriginal, tags)
+	return c.submitCommandOrTurnReady(trimmed, input, display, scopedRefsOnly, editedOriginal, tags)
 }
 
 // Run is the synchronous headless turn. It holds the turn gate like every other

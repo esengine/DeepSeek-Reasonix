@@ -60,7 +60,7 @@ type TurnControl interface {
 	SubmitDisplay(display, input string)
 	SubmitDeliveryRecovery(display, input string)
 	SubmitInvocationDisplay(display, input string, invocations []InvocationRequest)
-	SubmitHTTPFormat(input, format string)
+	SubmitHTTPFormat(input, format string) Admission
 	Send(input string)
 	SendWithRaw(input, raw string)
 	Run(ctx context.Context, input string) error
@@ -354,7 +354,7 @@ type SessionPersistence interface {
 // resolving @-references before submission — including what the composer can
 // still offer to complete while the line is being typed.
 type Input interface {
-	SubmitHTTPOptions(input string, opts SubmitOptions)
+	SubmitHTTPOptions(input string, opts SubmitOptions) Admission
 	Compose(text string) string
 	ComposeSynthetic(text string) string
 	ResolveRefs(ctx context.Context, line string) (block string, errs []string)
@@ -379,7 +379,7 @@ type Settings interface {
 // paired device: the same turn and the same decision, carrying who made it.
 // Only the full port names it; an editor has no paired devices to speak for.
 type Provenance interface {
-	SubmitHTTPFrom(input, format string, via *provider.Via)
+	SubmitHTTPFrom(input, format string, via *provider.Via) Admission
 	ApproveFrom(id string, allow, session, persist bool, via *provider.Via)
 	AnswerQuestionFrom(id string, answers []event.AskAnswer, via *provider.Via)
 }
