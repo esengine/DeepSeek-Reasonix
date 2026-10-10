@@ -3,6 +3,10 @@
 // en_settings and en_kernel were — one screen's worth of wording, read together.
 
 export const EN_WINDOW: Record<string, string> = {
+  "浏览器标签操作": "Browser tab actions",
+  "关闭这个标签": "Close this tab",
+  "关闭其他浏览器标签": "Close other browser tabs",
+  "关闭右侧浏览器标签": "Close browser tabs to the right",
   "运行指标": "Run metrics",
   "时间线": "Timeline",
   "定位": "Locate",

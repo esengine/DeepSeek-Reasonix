@@ -24,6 +24,7 @@ import { WorkbenchFileBar, type FileMode } from "./WorkbenchFileBar";
 import { useHtmlPreview } from "./useHtmlPreview";
 import { setShowsHiddenFiles, showsHiddenFiles } from "../state/prefs";
 import { useCommitCard } from "./CommitCard";
+import { WorkbenchTabs } from "./WorkbenchTabs";
 
 // The editor and its grammars load with the first file opened, not with Studio.
 const CodeEditor = lazy(() => import("./CodeEditor"));
@@ -363,13 +364,6 @@ export function WorkbenchPanel({
     [files, directories, query, collapsed],
   );
   useEffect(() => onSurfaces(surfaces.length), [onSurfaces, surfaces.length]);
-  // A strip wider than the column scrolls, and the tab being shown is always
-  // brought into it: a selected tab nobody can see reads as a tab that closed.
-  const strip = useRef<HTMLDivElement>(null);
-  const activeKey = active ? keyOf(active) : "";
-  useEffect(() => {
-    strip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [activeKey, surfaces.length]);
   const held = useRef({ file, draft });
   held.current = { file, draft };
   // Revisions are opaque, so only order says which answer is current: a read
@@ -484,17 +478,16 @@ export function WorkbenchPanel({
   // The column folds only when its last tab goes, whatever kind that tab is: a
   // page opened with + or a file still open is a reason to keep it, and so is
   // an explorer someone has open.
-  const close = (surface: Surface) => {
-    const key = keyOf(surface);
-    if (surface.kind === "manual") setBrowsers((v) => v.filter((id) => id !== surface.id));
-    else if (surface.kind === "file")
-      setOpenFiles((v) => v.filter((p) => p !== surface.path));
-    else setDismissed((v) => new Set(v).add(key));
-    if (selected === key) {
+  const close = (keys: string[]) => {
+    const closing = surfaces.filter((surface) => keys.includes(keyOf(surface)));
+    setBrowsers((open) => open.filter((id) => !keys.includes(`manual:${id}`)));
+    setOpenFiles((open) => open.filter((path) => !keys.includes(`file:${path}`)));
+    setDismissed((old) => new Set([...old, ...closing.filter((surface) => surface.kind === "browser").map(keyOf)]));
+    if (keys.includes(selected)) {
       setSelected("");
       setFailed("");
     }
-    if (!showFiles && surfaces.every((s) => keyOf(s) === key)) onCloseManual();
+    if (!showFiles && closing.length > 0 && closing.length === surfaces.length) onCloseManual();
   };
   const save = async () => {
     if (!file || draft === file.content) return;
@@ -511,71 +504,12 @@ export function WorkbenchPanel({
   };
   return (
     <section className="workbench" aria-label={t("工作台")}>
-      <header className="workbench-tabs">
-        <div
-          className="workbench-tablist"
-          role="tablist"
-          ref={strip}
-          onWheel={(e) => {
-            if (e.deltaY && strip.current) strip.current.scrollLeft += e.deltaY;
-          }}
-        >
-        {surfaces.map((surface) => (
-          <div
-            className="workbench-tab"
-            key={keyOf(surface)}
-            role="tab"
-            aria-selected={surface === active}
-            data-live={surface.kind === "browser" && surface.tab.active ? "" : undefined}
-          >
-            <button
-              className="workbench-tab-pick"
-              data-action="workbench.tab"
-              data-target={keyOf(surface)}
-              title={
-                surface.kind === "browser"
-                  ? `${surface.tab.active ? `${t("模型正在操作这个页面")}
-` : ""}${surface.tab.url}`
-                  : labelOf(surface, hosts)
-              }
-              onClick={() => pick(keyOf(surface))}
-            >
-              <StudioIcon name={surface.kind === "file" ? "file" : "globe"} />
-              <span>{labelOf(surface, hosts)}</span>
-            </button>
-            <button
-              className="workbench-tab-close"
-              data-action="workbench.close"
-              data-target={keyOf(surface)}
-              aria-label={t("关闭 {name}", { name: labelOf(surface, hosts) })}
-              title={t("关闭")}
-              onClick={() => close(surface)}
-            >
-              <StudioIcon name="close" />
-            </button>
-          </div>
-        ))}
-        </div>
-        <button
-          className="workbench-files"
-          data-action="workbench.files"
-          aria-pressed={showFiles}
-          aria-label={t("文件")}
-          title={t("文件")}
-          onClick={() => setShowFiles((on) => !on)}
-        >
-          <StudioIcon name="folder" />
-        </button>
-        <button
-          className="workbench-new"
-          data-action="workbench.new-browser"
-          aria-label={t("新建浏览器标签")}
-          title={t("新建浏览器标签")}
-          onClick={() => void addBrowser()}
-        >
-          <StudioIcon name="plus" />
-        </button>
-      </header>
+      <WorkbenchTabs items={surfaces.map((surface) => ({
+        key: keyOf(surface), kind: surface.kind, label: labelOf(surface, hosts),
+        live: surface.kind === "browser" && surface.tab.active,
+        title: surface.kind === "browser" ? `${surface.tab.active ? `${t("模型正在操作这个页面")}\n` : ""}${surface.tab.url}` : labelOf(surface, hosts),
+      }))} active={active ? keyOf(active) : ""} showFiles={showFiles} onPick={pick} onClose={close}
+        onFiles={() => setShowFiles((on) => !on)} onNew={() => void addBrowser()} />
       <div className="workbench-body" data-files={showFiles ? "" : undefined}>
         <main className="workbench-canvas">
           {failed && active?.kind !== "file" && (

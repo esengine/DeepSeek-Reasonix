@@ -457,6 +457,7 @@ export const ACTIONS: UIAction[] = [
   { id: "reasoning.effort", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "workbench.new-browser", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.tab", kind: "view", target: "entity", proof: "interaction" },
+  { id: "workbench.tab-menu", kind: "view", target: "entity", proof: "interaction" },
   { id: "workbench.close", kind: "view", target: "entity", proof: "interaction" },
   { id: "workbench.mode", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.save", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
