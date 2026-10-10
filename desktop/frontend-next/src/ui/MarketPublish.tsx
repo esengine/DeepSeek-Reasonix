@@ -217,6 +217,8 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
   const [sending, setSending] = useState("");
   const [sendError, setSendError] = useState<[string, string] | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [q, setQ] = useState("");
+  const search = useRef<HTMLInputElement>(null);
   useEffect(() => {
     let live = true;
     setError("");
@@ -259,8 +261,17 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
     );
   }
 
+  const words = q.normalize("NFC").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = rows?.filter((p) => words.every((word) =>
+    [p.name, p.slug, p.summary, ...p.tags].some((value) => value.normalize("NFC").toLowerCase().includes(word)),
+  ));
   return (
     <div className="mkt" aria-busy={rows === null}>
+      <div className="mkt-bar">
+        <input ref={search} className="mkt-q" type="search" data-action="market.mine-search"
+          value={q} aria-label={t("搜索我的发布")} placeholder={t("搜索我的发布")} onChange={(e) => setQ(e.target.value)} />
+        {q && <button className="act" data-action="market.mine-search-clear" onClick={() => { setQ(""); search.current?.focus(); }}>{t("清除搜索")}</button>}
+      </div>
       {error && (
         <div className="find" data-lvl="err" role="alert">
           <span className="t">{t("无法读取我的发布")}</span>
@@ -270,8 +281,9 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
       )}
       {rows === null && <div className="empty" role="status">{t("正在读取…")}</div>}
       {rows?.length === 0 && !error && <div className="empty">{t("还没有发布过。")}</div>}
+      {!!rows?.length && shown?.length === 0 && !error && <div className="empty" role="status">{t("没有找到匹配的包。")}</div>}
       <ul className="mkt-list">
-        {rows?.map((p) => {
+        {shown?.map((p) => {
           const [label, tone] = STATUS[p.status] ?? [p.status, undefined];
           const current = !!p.installed && p.installed.version === p.latestVersion;
           // A copied skill is never overwritten in place; its update starts from removal.

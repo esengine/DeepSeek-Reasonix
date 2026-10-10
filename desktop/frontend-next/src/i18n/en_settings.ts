@@ -810,6 +810,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "排序": "Sort",
   "搜索技能、插件、MCP 服务与主题": "Search skills, plugins, MCP servers and themes",
   "搜索社区市场": "Search the community market",
+  "搜索我的发布": "Search my packages",
   "无法读取社区市场": "Could not read the community market",
   "显示的是缓存数据": "Showing cached data",
   "当前显示的是缓存数据，安装需要连接市场": "Showing cached data; installing needs a connection to the market",

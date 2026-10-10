@@ -276,6 +276,8 @@ export const ACTIONS: UIAction[] = [
   { id: "market.own-inspect", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "market.own-retry", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "market.mine-retry", kind: "view", target: "none", proof: "interaction" },
+  { id: "market.mine-search", kind: "view", target: "none", proof: "interaction" },
+  { id: "market.mine-search-clear", kind: "view", target: "none", proof: "interaction" },
   { id: "market.submit", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "market.vote", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "market.vote-retry", kind: "view", target: "none", proof: "interaction" },
