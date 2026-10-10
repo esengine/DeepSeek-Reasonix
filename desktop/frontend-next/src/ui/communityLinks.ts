@@ -9,6 +9,7 @@ export const COMMUNITY = {
   author: "esengine",
   authorUrl: "https://github.com/esengine",
   discord: "https://discord.gg/XF78rEME2D",
+  paypal: "https://paypal.me/yuhuahui",
   issues: `${REPO}/issues`,
   contributors: `${REPO}/graphs/contributors`,
 } as const;

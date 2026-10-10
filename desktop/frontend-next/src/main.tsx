@@ -8,6 +8,7 @@ import "./styles/app.css";
 import "./styles/studio.css";
 import "./styles/feedback.css";
 import "./styles/community.css";
+import "./styles/sponsor.css";
 import "./styles/chart.css";
 import "./styles/versions.css";
 import { App } from "./ui/App";

@@ -1,0 +1,10 @@
+.spon { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.spon-note { margin: 0; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--muted); }
+.spon-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.spon-link { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text); text-decoration: none; }
+.spon-link:hover { text-decoration: underline; }
+.spon-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.spon-qr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+.spon-qr figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.spon-qr img { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
+.spon-qr figcaption { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); }
