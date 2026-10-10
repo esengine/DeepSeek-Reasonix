@@ -22,16 +22,30 @@ test("≤640px: marketing nav contracts to fit 390px viewports", async () => {
     source("../components/SiteHeader.astro"),
   ]);
   const block = mediaBlock(css, 640);
-  assert.match(block, /\.nav-sign-in \{ display: none/);
   assert.match(block, /\.nav \.brand span \{ display: none/);
   assert.match(block, /\.nav \.brand img \{ width: 64px; \}/);
   assert.match(header, /<source media=\"\(max-width: 400px\)\" srcset=\{`\$\{base\}\/favicon\.svg`\} \/>/);
   assert.match(block, /\.theme-switch button \{ padding: 6px 9px/);
 });
 
-test("≤1100px: marketing navigation collapses before controls overlap", async () => {
+test("≤700px: the sign-in button leaves the bar before the controls overflow", async () => {
   const css = await source("../styles/global.css");
-  const tabletBlock = mediaBlock(css, 1100);
+  assert.match(mediaBlock(css, 700), /\.nav-sign-in \{ display: none/);
+});
+
+test("≤1380px: secondary links drop out before the English labels collide with GitHub", async () => {
+  const css = await source("../styles/global.css");
+  assert.match(mediaBlock(css, 1380), /\.nav-link--secondary \{ display: none/);
+});
+
+test("≤440px: the install button leaves the bar so the menu trigger stays on screen", async () => {
+  const css = await source("../styles/global.css");
+  assert.match(mediaBlock(css, 440), /\.nav-install \{ display: none/);
+});
+
+test("≤1180px: marketing navigation collapses before controls overlap", async () => {
+  const css = await source("../styles/global.css");
+  const tabletBlock = mediaBlock(css, 1180);
   const mobileBlock = mediaBlock(css, 900);
 
   assert.match(tabletBlock, /\.nav-links \{ display: none/);
@@ -47,7 +61,6 @@ test("≤360px: marketing nav keeps the menu trigger within 320px", async () => 
   assert.match(block, /\.nav-inner \{ padding: 0 12px; gap: 6px/);
   assert.match(block, /\.lang-switch button \{ padding: 6px 8px/);
   assert.match(block, /\.theme-switch button \{ padding: 6px 7px/);
-  assert.match(block, /\.nav-install \{ display: none/);
   assert.match(block, /\.nav-menu-toggle \{ width: 36px; height: 36px/);
 });
 
