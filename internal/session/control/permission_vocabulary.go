@@ -11,14 +11,15 @@ import (
 )
 
 // PermissionVocabulary is every tool name a rule can be matched against now:
-// the built-ins, the use_capability proxy assembly adds, and whatever the live
-// registry holds. Tools an MCP server or extension supplies after startup are
-// reported open, not unknown.
+// the built-ins, the declared conditional tools, the use_capability proxy, and
+// whatever the live registry holds. Tools an MCP server or extension supplies
+// after startup are reported open, not unknown.
 func (c *Controller) PermissionVocabulary() permission.Vocabulary {
 	var names []string
 	for _, e := range tool.BuiltinContractEntries() {
 		names = append(names, e.Name)
 	}
+	names = append(names, tool.ConditionalNames()...)
 	names = append(names, new(usecap.UseCapabilityTool).Name())
 	for _, e := range c.AllToolContractEntries() {
 		names = append(names, e.Name)

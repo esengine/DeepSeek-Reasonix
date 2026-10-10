@@ -11,6 +11,12 @@ export interface PermissionLists {
   deny: string[];
 }
 
+export interface DormantPermissionRule {
+  list: string;
+  rule: string;
+  tool: string;
+}
+
 // Editable user lists and separate project rules that are in force. shadowedBy
 // names a project config that outranks the edited file; effective is the
 // merged boundary the controller actually loaded.
@@ -25,7 +31,7 @@ export interface PermissionRules extends PermissionLists {
   shadowedBy?: string;
   effective?: PermissionLists;
   // Saved rules that name no tool, so they match nothing.
-  dormant?: { list: string; rule: string; tool: string }[];
+  dormant?: DormantPermissionRule[];
 }
 
 // Where an approved write may land, and whether bash runs jailed. The

@@ -28,6 +28,8 @@ type SystemOneSpec struct {
 
 type systemOne struct{ spec SystemOneSpec }
 
+func init() { tool.RegisterConditional(systemOne{}) }
+
 func NewSystemOne(spec SystemOneSpec) tool.Tool { return systemOne{spec: spec} }
 
 func SystemOneConfigured(spec SystemOneSpec) bool {

@@ -21,6 +21,8 @@ func NewCompleteSubtaskTool() *CompleteSubtaskTool { return &CompleteSubtaskTool
 // the telemetry all mean.
 const completeSubtaskToolName = "complete_subtask"
 
+func init() { tool.RegisterConditional(&CompleteSubtaskTool{}) }
+
 func (*CompleteSubtaskTool) Name() string { return completeSubtaskToolName }
 
 func (*CompleteSubtaskTool) Description() string {
