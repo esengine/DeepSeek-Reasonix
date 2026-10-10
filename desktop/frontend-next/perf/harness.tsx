@@ -78,6 +78,11 @@ class BenchPort extends MockPort {
     return ONBOARDING ? { required: true, provider: "", model: "" } : null;
   }
 
+  async workspaceGit() {
+    const git = await super.workspaceGit();
+    return query.get("git") === "none" ? { ...git, repo: false } : git;
+  }
+
   async appearance() {
     let look = await super.appearance();
     if (query.has("zoom")) look = { ...look, zoom: Number(query.get("zoom")) };
@@ -128,6 +133,12 @@ class BenchPort extends MockPort {
       createdAt: new Date().toISOString(),
     }));
     return { ...q, items, capacity: { ...q.capacity, items: QUEUE, maxItems: 64 } };
+  }
+
+  // ?queuebody= makes a seeded line readable back, as the kernel's is.
+  async readQueued(itemId: string): Promise<string> {
+    if (!QUEUE_BODY) return super.readQueued(itemId);
+    return "请把这个模块里所有的错误处理统一改成带类型的错误，并且保证调用方可以用 errors.Is 区分每一种失败，同时补上对应的单元测试，再检查文档里提到旧行为的地方是否需要更新。".repeat(3);
   }
 
   // ?statusms= stands in for what the kernel's /status really costs when the
@@ -187,6 +198,7 @@ const TURNS = Number(query.get("turns") ?? 0);
 const STATUS_MS = Number(query.get("statusms") ?? 0);
 // ?queue= is how many lines are already waiting when the window opens.
 const QUEUE = Number(query.get("queue") ?? 0);
+const QUEUE_BODY = query.has("queuebody");
 const JOBS = Number(query.get("jobs") ?? 0);
 // ?treems= holds every tree read back until that long after load, so the
 // window can be seen before the kernel has named a single folder.

@@ -26,7 +26,9 @@ func TestProseMutationPathScope(t *testing.T) {
 		{name: "nested VCS", root: root, path: "project/.hg/hooks/run.rst"},
 		{name: "root inside VCS", root: filepath.Join(root, ".git"), path: "hooks/run.md"},
 		{name: "code suffix", root: root, path: "gone.go"},
-		{name: "uppercase suffix", root: root, path: "gone.MD"},
+		{name: "uppercase suffix", root: root, path: "gone.MD", want: true},
+		{name: "text input", root: root, path: "requirements.txt"},
+		{name: "MDX component", root: root, path: "page.mdx"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := proseMutationPath(tc.root, tc.path); got != tc.want {
@@ -48,7 +50,7 @@ func TestProseMutationPathRejectsLinkedAncestor(t *testing.T) {
 
 func TestProseWaiverPreservesSpellingAcrossReceiptReplay(t *testing.T) {
 	root := t.TempDir()
-	r := ReceiptFromToolCall("move_file", json.RawMessage(`{"source_path":"gone.MD","destination_path":"notes.md"}`), true, ToolFacts{WritesNamedPaths: true})
+	r := ReceiptFromToolCall("move_file", json.RawMessage(`{"source_path":"gone.GO","destination_path":"notes.md"}`), true, ToolFacts{WritesNamedPaths: true})
 	l := ledgerOf(r)
 	data, err := json.Marshal(l.Receipts()[0])
 	if err != nil {
@@ -59,7 +61,7 @@ func TestProseWaiverPreservesSpellingAcrossReceiptReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	l = ledgerOf(replay)
-	if l.ProseOnlyWithoutChecks(CaptureCheckContract(nil, nil).WithWorkspaceProseOnly(true, false).WithObserveRoot(root)) {
+	if l.ProseOnlyWithoutChecks(CaptureCheckContract(nil, nil).WithDelivery(false).WithObserveRoot(root)) {
 		t.Fatal("replayed receipt lost uppercase source spelling")
 	}
 }

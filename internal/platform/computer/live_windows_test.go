@@ -5,6 +5,7 @@ package computer
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,7 +26,9 @@ type probe struct {
 	button, canvas [2]float64
 }
 
-func launchWindowsTarget(t *testing.T) probe {
+// launchWindowsTarget starts the test application; mode is passed on as its
+// second argument.
+func launchWindowsTarget(t *testing.T, mode ...string) probe {
 	t.Helper()
 	dir := testenv.TempDir(t)
 	exe := filepath.Join(dir, windowsTarget)
@@ -33,7 +36,7 @@ func launchWindowsTarget(t *testing.T) probe {
 		t.Fatalf("build target: %v\n%s", err, out)
 	}
 	p := probe{log: filepath.Join(dir, "target.log")}
-	cmd := exec.Command(exe, p.log)
+	cmd := exec.Command(exe, append([]string{p.log}, mode...)...)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start target: %v", err)
 	}
@@ -102,6 +105,9 @@ func TestLiveWindowsOperatesAnApplication(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Act: %v (done %d)", err, res.Done)
+	}
+	if e := res.Steps[4].Effect; e.Class != EffectConfirmed {
+		t.Errorf("typing after the end of a value = %+v, want confirmed", e)
 	}
 	waitLog(t, p.log, "button pressed 1")
 	waitLog(t, p.log, "text from-ax 李雷3\ntext \n")
@@ -195,19 +201,120 @@ func TestLiveWindowsThePointerReachesWhatAccessibilityCannot(t *testing.T) {
 		t.Fatalf("pointer_position: %v", err)
 	}
 	if res, err := s.Act(ctx, windowsTarget, []Step{{Action: "pointer_click", X: x, Y: y}}); err != nil {
-		t.Fatalf("pointer_click: %v (%v)", err, res.Notes)
+		t.Fatalf("pointer_click: %v (%v)", err, res.Steps)
 	}
 	waitLog(t, p.log, "mouseDown")
 	back, err := s.Act(ctx, windowsTarget, []Step{{Action: "pointer_position"}})
 	if err != nil {
 		t.Fatalf("pointer_position: %v", err)
 	}
-	if back.Notes[0] != home.Notes[0] {
-		t.Fatalf("the pointer was left at %q, not where the person had it (%q)", back.Notes[0], home.Notes[0])
+	if back.Steps[0].Note != home.Steps[0].Note {
+		t.Fatalf("the pointer was left at %q, not where the person had it (%q)", back.Steps[0].Note, home.Steps[0].Note)
 	}
 	toX, toY := *x+40, *y-20
 	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "pointer_drag", X: x, Y: y, ToX: &toX, ToY: &toY}}); err != nil {
 		t.Fatalf("pointer_drag: %v", err)
 	}
 	waitLog(t, p.log, "mouseDragged")
+}
+
+// heldSnapshot reads the application until a modal is holding its input.
+func heldSnapshot(t *testing.T, ctx context.Context, s *Session) Snapshot {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		snap, err := s.Snapshot(ctx, windowsTarget)
+		if err != nil {
+			t.Fatalf("Snapshot: %v", err)
+		}
+		if len(snap.Modals) > 0 {
+			return snap
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no modal in the snapshot:\n%s", strings.Join(snap.Lines, "\n"))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// actor runs steps on the test application and answers the last one's effect.
+func actor(t *testing.T, ctx context.Context, s *Session) func(...Step) Effect {
+	return func(steps ...Step) Effect {
+		t.Helper()
+		res, err := s.Act(ctx, windowsTarget, steps)
+		if err != nil || len(res.Steps) == 0 {
+			t.Fatalf("Act = %+v, %v", res, err)
+		}
+		return res.Steps[len(res.Steps)-1].Effect
+	}
+}
+
+// A message box holds the application's input: typing would land in it, and
+// the window behind it takes nothing, so both fail and name the modal.
+func TestLiveWindowsAModalHoldsTheInput(t *testing.T) {
+	s := liveSession(t)
+	p := launchWindowsTarget(t, "modal")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	act := actor(t, ctx, s)
+
+	snap := heldSnapshot(t, ctx, s)
+	t.Logf("snapshot:\n%s", strings.Join(snap.Lines, "\n"))
+	if m := snap.Modals[0]; m.Title != "Probe modal" || m.Blocks != "Computer Target" || m.Ref == "" {
+		t.Fatalf("modal = %+v", m)
+	}
+	button := lineRef(t, snap.Lines, `button "Probe button"`)
+	res, err := s.Act(ctx, windowsTarget, []Step{{Action: "type", Text: "hello"}})
+	if CodeOf(err) != CodeBlocked || res.Done != 0 {
+		t.Fatalf("typing while a message box holds the input = %+v, %v; want %s", res, err, CodeBlocked)
+	}
+	if f, _ := errors.AsType[*Failure](err); f.BlockedBy == nil || f.BlockedBy.Title != "Probe modal" {
+		t.Fatalf("the failure does not name the modal: %v", err)
+	}
+	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "click", Ref: button}}); CodeOf(err) != CodeBlocked {
+		t.Fatalf("pressing a button behind the modal = %v, want %s", err, CodeBlocked)
+	}
+	if e := act(Step{Action: "key", Key: "escape"}); e.Class != EffectUnverifiable || e.BlockedBy == nil {
+		t.Fatalf("Escape into the modal = %+v, want unverifiable and the modal it went to", e)
+	}
+	waitLog(t, p.log, "modal closed")
+	if body, _ := os.ReadFile(p.log); strings.Contains(string(body), "hello") || strings.Contains(string(body), "button pressed") {
+		t.Fatalf("input reached the application behind the modal:\n%s", body)
+	}
+
+	snap, err = s.Snapshot(ctx, windowsTarget)
+	if err != nil || len(snap.Modals) != 0 {
+		t.Fatalf("after the modal closed: %+v, %v", snap.Modals, err)
+	}
+	field := lineRef(t, snap.Lines, `edit "Probe field"`)
+	if e := act(Step{Action: "focus", Ref: field}, Step{Action: "type", Text: "abc"}); e.Class != EffectConfirmed {
+		t.Fatalf("typing into the field = %+v, want confirmed", e)
+	}
+	if e := act(Step{Action: "set_value", Ref: field, Text: "set"}); e.Class != EffectConfirmed {
+		t.Fatalf("set_value = %+v, want confirmed", e)
+	}
+	readonly := lineRef(t, snap.Lines, `edit "Probe readonly"`)
+	if e := act(Step{Action: "focus", Ref: readonly}, Step{Action: "type", Text: "xyz"}); e.Class != EffectSuspectedNoop {
+		t.Fatalf("typing into a read-only field = %+v, want suspected_noop", e)
+	}
+}
+
+// A modal with a text field is where typing belongs: it goes in, is read
+// back, and says which modal it went to.
+func TestLiveWindowsTypingIntoAModalsFieldIsReadBack(t *testing.T) {
+	s := liveSession(t)
+	p := launchWindowsTarget(t, "form")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	act := actor(t, ctx, s)
+
+	snap := heldSnapshot(t, ctx, s)
+	if m := snap.Modals[0]; m.Title != "Probe form" || m.Blocks != "Computer Target" {
+		t.Fatalf("modal = %+v", m)
+	}
+	e := act(Step{Action: "type", Text: "xyz"})
+	if e.Class != EffectConfirmed || e.BlockedBy == nil || e.BlockedBy.Title != "Probe form" {
+		t.Fatalf("typing into the modal's field = %+v, want confirmed into the modal", e)
+	}
+	waitLog(t, p.log, "form text xyz")
 }

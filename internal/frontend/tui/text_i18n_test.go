@@ -93,6 +93,10 @@ func TestCompactionNoticesAndCardNameTheirReasonInTheUILanguage(t *testing.T) {
 	if got := renderNotice(declined); !strings.Contains(got, "无需压缩") || !strings.Contains(got, "没有变化") {
 		t.Fatalf("declined notice = %q", got)
 	}
+	held := &Item{Code: "compact_held", Text: "Automatic compaction is paused: kernel english", Detail: "summary_failed"}
+	if got := renderNotice(held); !strings.Contains(got, "自动压缩暂缓") || !strings.Contains(got, "请求失败") || strings.Contains(got, "kernel english") {
+		t.Fatalf("held notice = %q", got)
+	}
 	unknown := &Item{Code: "compact_failed", Text: "compaction failed: kernel english", Detail: "future_code"}
 	if got := renderNotice(unknown); !strings.Contains(got, "kernel english") {
 		t.Fatalf("unknown code must keep the kernel text, got %q", got)
@@ -134,6 +138,32 @@ func TestRecoveredInboxNoticeFollowsTheUILanguage(t *testing.T) {
 		t.Fatalf("payload or fallback leaked into %q", got)
 	}
 	if got := renderNotice(&Item{Code: event.NoticeCodeInboxRecovered, Text: "kernel english", Detail: "not json"}); !strings.Contains(got, "kernel english") {
+		t.Fatalf("unreadable payload must keep the kernel's text, got %q", got)
+	}
+}
+
+func TestJobNoticesFollowTheUILanguage(t *testing.T) {
+	inChinese(t)
+	detail := event.JobNotice{Kind: "bash", ID: "bash-126", Label: "make build"}.Encode()
+	got := renderNotice(&Item{Code: event.NoticeCodeJobFinished, Text: "background bash finished: bash-126", Detail: detail})
+	if !strings.Contains(got, "后台任务已结束：make build") || strings.Contains(got, "{") || strings.Contains(got, "background") {
+		t.Fatalf("finished = %q", got)
+	}
+	bare := event.JobNotice{Kind: "bash", ID: "bash-7"}.Encode()
+	if got := renderNotice(&Item{Code: event.NoticeCodeJobKilled, Text: "english", Detail: bare}); !strings.Contains(got, "后台任务已终止：bash-7") {
+		t.Fatalf("killed = %q", got)
+	}
+	failed := event.JobNotice{Kind: "bash", ID: "bash-9", Label: "make", Error: "exit status 2"}.Encode()
+	if got := renderNotice(&Item{Code: event.NoticeCodeJobFailed, Text: "english", Detail: failed}); !strings.Contains(got, "后台任务 make 失败，需要处理: exit status 2") {
+		t.Fatalf("failed = %q", got)
+	}
+	if got := renderNotice(&Item{Code: event.NoticeCodeJobFailed, Text: "kernel english", Detail: "old diagnostic"}); !strings.Contains(got, "kernel english") {
+		t.Fatalf("a failure with no payload must keep its text, got %q", got)
+	}
+	if got := renderNotice(&Item{Text: "background bash finished: bash-126"}); !strings.Contains(got, "background bash finished: bash-126") {
+		t.Fatalf("a replayed notice with no code must keep its text, got %q", got)
+	}
+	if got := renderNotice(&Item{Code: event.NoticeCodeJobFinished, Text: "kernel english", Detail: "not json"}); !strings.Contains(got, "kernel english") {
 		t.Fatalf("unreadable payload must keep the kernel's text, got %q", got)
 	}
 }

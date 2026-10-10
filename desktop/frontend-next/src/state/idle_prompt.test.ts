@@ -20,7 +20,7 @@ for (const route of ["local", "receipt"] as const) {
   describe(`${route} question answer`, () => {
     it.each(["fresh", "settled"] as const)("returns an idle %s session to idle without inventing a running turn", (prior) => {
       const waiting = reduce(prior === "fresh" ? initialState : settled(), request);
-      expect(chipLabel(waiting, false)).toBe("等待确认");
+      expect(chipLabel(waiting, false)).toBe("等待你回答");
       const done = answer(waiting, route);
       expect(done.running).toBe(false);
       expect(chipLabel(done, false)).toBe("空闲");
@@ -52,6 +52,6 @@ it("keeps a local answer when its receipt arrives afterward", () => {
 it("ignores a receipt that belongs to another question", () => {
   const waiting = reduce(settled(), request);
   const unrelated = reduce(waiting, { kind: "notice", decisionReceipt: { id: "other", kind: "ask", subject: "other", outcome: "answered" } });
-  expect(chipLabel(unrelated, false)).toBe("等待确认");
+  expect(chipLabel(unrelated, false)).toBe("等待你回答");
   expect(unrelated.items.find((i) => i.t === "ask")).not.toHaveProperty("answered");
 });

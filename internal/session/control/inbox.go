@@ -519,6 +519,7 @@ func (c *Controller) CancelWithInboxItems(ids []string, source string) error {
 		if err := st.SetPaused(false); err != nil {
 			return err
 		}
+		c.maybeDispatchInbox()
 	}
 	return nil
 }
@@ -643,6 +644,9 @@ func (c *Controller) TrySubmitInboxItem(id string) (sessioninbox.InboxReceipt, e
 		if err := st.SetState(id, sessioninbox.StateQueued, ""); err != nil {
 			_ = st.ForcePause(true, 1)
 			return sessioninbox.InboxReceipt{}, err
+		}
+		if result == turnDroppedWorkspace {
+			c.resumeInboxAfterWorkspaceCheckout()
 		}
 		return c.receiptForAdmissionResult(id, st, result), nil
 	}

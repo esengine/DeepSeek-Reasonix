@@ -24,6 +24,9 @@ type FileStore struct {
 	sink    ProjectionSink
 }
 
+// StoreDir is where the host keeps task snapshots, relative to the project root.
+const StoreDir = ".reasonix/tasks"
+
 // NewFileStore returns a FileStore rooted at baseDir.  baseDir is typically
 // ".reasonix/tasks" relative to the project root.
 func NewFileStore(baseDir string) *FileStore {

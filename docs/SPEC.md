@@ -293,10 +293,11 @@ when the sole automatic threshold is crossed.
 - Automatic maintenance is planned once in `ContextManager.Prepare` from the
   current projection plus the append-only canonical tail. The canonical
   transcript is never rewritten. Subsequent thresholds merge
-  **prior digest + new history** into a single digest (no multi-span merge, no
-  application-layer retry). Failure records a generation-scoped
+  **prior digest + new history** into a single digest (no multi-span merge). Failure records a generation-scoped
   `blocked`/`failed` receipt; the same generation does not pay for another
   automatic summary. Manual `compress` can retry.
+- A summary cut at the output limit is retried once with a larger output cap;
+  if that is cut too, the failure keeps its typed code and records the cap.
 - Old multi-threshold keys (`soft_compact_ratio`, `tool_result_snip_ratio`,
   `compact_force_ratio`, `cold_resume_prune`, `context_editing`) are removed on
   ordinary start and ignored at runtime. Native provider tool clearing is not

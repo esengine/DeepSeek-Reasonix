@@ -215,11 +215,12 @@ func (b *builder) load() error {
 	if opts.resolvedShell != nil {
 		b.shell = *opts.resolvedShell
 	} else {
-		b.shell = resolveShellWithNotice(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, b.stderr, b.sink)
+		b.shell = resolveShellWithNotice(opts, cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, b.stderr, b.sink)
 	}
 	// Record the resolved interpreter for diagnostics, staying at Debug because
 	// headless `run` must leave stderr empty unless --debug is passed. A launch
 	// failure emits an always-on Warn with the same kind/path/source fields.
+	b.timer.mark("shell")
 	slog.Debug("boot: shell tool interpreter resolved", "kind", b.shell.Kind.String(), "path", b.shell.Path, "prefer", cfg.Tools.Shell.Prefer)
 	b.prompt, err = buildPromptAssembly(b.ctx, opts, cfg, b.root, b.shell, b.sink, b.timer)
 	return err
@@ -228,9 +229,13 @@ func (b *builder) load() error {
 // resolveShellWithNotice keeps shell-discovery warnings on stderr for CLI
 // diagnostics and also reports them through the boot sink, where the settings
 // surface can show which interpreter actually runs.
-func resolveShellWithNotice(prefer, path string, stderr io.Writer, sink event.Sink) sandbox.Shell {
+func resolveShellWithNotice(opts Options, prefer, path string, stderr io.Writer, sink event.Sink) sandbox.Shell {
 	var warnings strings.Builder
-	shell := sandbox.ResolveShell(prefer, path, io.MultiWriter(stderr, &warnings))
+	d := sandbox.ShellDiscovery{Prefer: prefer, Path: path, Warn: io.MultiWriter(stderr, &warnings), ProofDir: opts.roots().CacheDir()}
+	if opts.tuneShell != nil {
+		opts.tuneShell(&d)
+	}
+	shell := d.Resolve()
 	if detail := strings.TrimSpace(warnings.String()); detail != "" {
 		report(sink, event.Event{Level: event.LevelWarn, Text: "Shell tool interpreter fallback.", Detail: detail})
 	}
@@ -253,6 +258,17 @@ func (b *builder) loadConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
+// skippedDefaultDetail says why the saved default was passed over. A decision
+// source exists but answers system_one only, which is a different fix from a name
+// nothing declares.
+func (b *builder) skippedDefaultDetail() string {
+	var mismatch *config.AnswersMismatchError
+	if errors.As(b.cfg.RequireAnswers(b.model.skipped, config.AnswersChat), &mismatch) {
+		return fmt.Sprintf("default_model = %q is a decision source: it answers system_one's questions, not conversation; using %q. Choosing a default model replaces it; until then the file keeps it as written.", b.model.skipped, b.model.ref)
+	}
+	return fmt.Sprintf("default_model = %q names no configured provider or model; using %q. Choosing a default model replaces it; until then the file keeps it as written.", b.model.skipped, b.model.ref)
+}
+
 func (b *builder) reportModelNotices() {
 	cfg, entry := b.cfg, b.model.entry
 	if ignored := cfg.IgnoredProjectDefaultModel(); ignored != "" {
@@ -261,7 +277,7 @@ func (b *builder) reportModelNotices() {
 	if b.model.skipped != "" {
 		report(b.sink, event.Event{Level: event.LevelWarn, Code: event.NoticeCodeDefaultModelUnavailable,
 			Text:   "The saved default model is not configured, so another configured model is in use.",
-			Detail: fmt.Sprintf("default_model = %q names no configured provider or model; using %q. Choosing a default model replaces it; until then the file keeps it as written.", b.model.skipped, b.model.ref)})
+			Detail: b.skippedDefaultDetail()})
 	}
 	// Without RequireKey the UI stays reachable, so a missing key would
 	// otherwise surface only as a silently failing first request.
@@ -390,6 +406,7 @@ func (b *builder) controller() (*control.Controller, error) {
 	}
 	ctrlOpts := b.controllerOptions(runner, executor, label)
 	ctrl := withWindowPosture(control.New(ctrlOpts), b.cfg, b.opts.StatsSource, b.sink)
+	reportDormantPermissionRules(b.sink, b.cfg, ctrl)
 	b.ext.publish(ctrl)
 	// Task and fleet sub-agents share the root agent's recovery checkpoint.
 	if t.taskTool != nil {

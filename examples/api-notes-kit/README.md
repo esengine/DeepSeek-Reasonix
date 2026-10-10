@@ -57,8 +57,8 @@ The unit tests check pointer escapes, array-index rules, missing/external
 targets, and recursive references; they also run without network access.
 
 Create a temporary output directory and select it as the task's write scope.
-Invoke `api-notes` with the installed `fixture/openapi.json` path and ask for
-`api-notes.md` there.
+Invoke `/api-notes-kit:api-notes` with the absolute path to the installed
+`fixture/openapi.json` and ask for `api-notes.md` in the output directory.
 
 Follow `skills/api-notes/references/scenario.md`; it defines
 both the minimum guide and the failure behavior. Check each generated claim

@@ -410,8 +410,28 @@ func TestExplicitImportSkipsACorruptManifestAndKeepsTheRest(t *testing.T) {
 	if got := totalImported(res.SessionImports); got != 1 {
 		t.Fatalf("imported %d, want 1", got)
 	}
-	if len(res.SessionErrs) != 1 {
-		t.Fatalf("a corrupt manifest must be counted as one warning, got %v", res.SessionErrs)
+	if len(res.SessionSkips) != 1 || res.SessionSkips[0].Reason != sessionstore.SkipCorrupt ||
+		res.SessionSkips[0].Name != "ffffffffffffffffffffffffffffffff" || res.SessionSkips[0].Path != bad {
+		t.Fatalf("a corrupt manifest must be one corrupt skip naming its folder, got %+v", res.SessionSkips)
+	}
+	if !strings.Contains(res.Summary(), "1 warning") {
+		t.Fatalf("summary %q does not count the skip", res.Summary())
+	}
+}
+
+func TestExplicitImportRecognisesAStoreWhoseEverySessionIsDamaged(t *testing.T) {
+	home := isolateMigrationHome(t)
+	root := filepath.Join(home, "Roaming", "reasonix", "sessions-v4")
+	bad := filepath.Join(root, "ffffffffffffffffffffffffffffffff")
+	if err := os.MkdirAll(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "manifest.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := RunLegacySessionImportInto(filepath.Dir(root), filepath.Join(config.SessionDir(), "ws"), event.Discard)
+	if res.Unrecognised || len(res.SessionSkips) != 1 || res.SessionSkips[0].Reason != sessionstore.SkipCorrupt {
+		t.Fatalf("unrecognised=%v skips=%+v, want one corrupt skip", res.Unrecognised, res.SessionSkips)
 	}
 }
 
@@ -486,8 +506,14 @@ func TestExplicitImportCountsEverySessionItCannotBringOver(t *testing.T) {
 			picked := filepath.Join(home, "D", "项目", "网络")
 			tc.seed(filepath.Join(picked, "sessions"))
 			res := RunLegacySessionImportInto(picked, filepath.Join(config.SessionDir(), "ws"), event.Discard)
-			if got := totalImported(res.SessionImports); got != tc.imported || len(res.SessionErrs) != tc.warnings {
-				t.Fatalf("imported %d, warnings %d (%v); want %d and %d", got, len(res.SessionErrs), res.SessionErrs, tc.imported, tc.warnings)
+			warnings := len(res.SessionErrs) + len(res.SessionSkips)
+			if got := totalImported(res.SessionImports); got != tc.imported || warnings != tc.warnings {
+				t.Fatalf("imported %d, warnings %d (%v %v); want %d and %d", got, warnings, res.SessionErrs, res.SessionSkips, tc.imported, tc.warnings)
+			}
+			for _, skip := range res.SessionSkips {
+				if skip.Reason != sessionstore.SkipUnreadableFormat || !strings.HasPrefix(skip.Path, picked) {
+					t.Fatalf("skip %+v, want unreadable_format under %s", skip, picked)
+				}
 			}
 		})
 	}

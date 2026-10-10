@@ -156,7 +156,9 @@ int main() {
         try {
             reply(Json::object().set("id", *id).set("result", handle(method, params)));
         } catch (const Failure& f) {
-            reply(Json::object().set("id", *id).set("error", Json::object().set("code", f.code).set("message", f.message)));
+            Json error = Json::object().set("code", f.code).set("message", f.message);
+            if (f.blockedBy.kind() != Json::Kind::Null) error.set("blocked_by", f.blockedBy);
+            reply(Json::object().set("id", *id).set("error", error));
         } catch (const std::exception& e) {
             reply(Json::object().set("id", *id).set("error", Json::object().set("code", "computer.failed").set("message", e.what())));
         }

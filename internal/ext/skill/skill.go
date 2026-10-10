@@ -440,9 +440,10 @@ func (s *Store) roots() []discoveryRoot {
 		dirs = append(dirs, de{filepath.Join(s.reasonixHomeDir, SkillsDirname), ScopeGlobal, false})
 	}
 	if config.IsolatedHomeDir() == "" {
+		reasonixHome := canonicalSkillPath(s.reasonixHomeDir)
 		for _, c := range config.ConventionDirs {
 			dir := filepath.Join(s.homeDir, c, SkillsDirname)
-			if s.reasonixHomeDir != "" && config.CanonicalSkillPath(filepath.Dir(dir)) == config.CanonicalSkillPath(s.reasonixHomeDir) {
+			if s.reasonixHomeDir != "" && canonicalSkillPath(filepath.Dir(dir)) == reasonixHome {
 				continue
 			}
 			dirs = append(dirs, de{dir, ScopeGlobal, c == ".claude"})
@@ -450,10 +451,10 @@ func (s *Store) roots() []discoveryRoot {
 	}
 	out := make([]discoveryRoot, 0, len(dirs))
 	for _, d := range dirs {
-		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
+		key := canonicalSkillPath(d.dir)
+		if s.excludedPaths[key] {
 			continue
 		}
-		key := config.CanonicalSkillPath(d.dir)
 		out = append(out, discoveryRoot{
 			Root:              Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)},
 			requireFlatMarker: d.requireFlatMarker,

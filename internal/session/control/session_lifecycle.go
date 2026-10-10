@@ -476,6 +476,18 @@ func (c *Controller) parentSessionID() string {
 // between that check and the actual SetSession, a turn could start and then be
 // yanked out from under the run loop.
 func (c *Controller) beginRotation() error {
+	releaseWorkspace, err := c.tryWorkspaceActivity()
+	if err != nil {
+		if errors.Is(err, ErrTurnRunning) {
+			return errTurnRunningRotation
+		}
+		return err
+	}
+	defer func() {
+		if releaseWorkspace != nil {
+			releaseWorkspace.release()
+		}
+	}()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.gate.active() {
@@ -485,6 +497,7 @@ func (c *Controller) beginRotation() error {
 		return errRotationInProgress
 	}
 	c.gate.rotating = true
+	c.gate.workspaceRelease, releaseWorkspace = releaseWorkspace, nil
 	return nil
 }
 

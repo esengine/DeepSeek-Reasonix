@@ -8,6 +8,7 @@ import { PROVIDER_EDIT_DISABLED, reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
 import { checkFailure } from "./provider_check";
 import { StudioIcon } from "./StudioIcon";
+import { EffortShape } from "./EffortShape";
 
 // How a turn's context reaches the next one. Auto is vendor detection, which is
 // the only honest answer for an endpoint nobody has characterised; the other two
@@ -185,8 +186,9 @@ export function ProviderDetail({
                 ))}
               </div>
               <span className="why">
-                {t(entry.sendsThinking === false ? "只发送常规聊天参数，不再指定思考深度；模型自身的推理行为不受影响。" : "部分中转站不支持 thinking 字段，会拒绝整个请求。遇到这种情况请切换为「不发送」。")}
+                {t(entry.sendsThinking === false ? "只发送常规聊天参数，不再指定思考深度；模型自身的推理行为不受影响。" : "部分中转站不支持思考控制字段，会拒绝整个请求。遇到这种情况请切换为「不发送」。")}
               </span>
+              {entry.sendsThinking !== false && <EffortShape field={entry.effortField} level={entry.supportedEfforts?.[0]} className="why" />}
             </div>
           )}
           {entry.canSetContinuation && (

@@ -8,6 +8,7 @@ import { t } from "../../i18n";
 import { StudioIcon } from "../StudioIcon";
 import { messageSource } from "../source";
 import { touchKeyboard } from "../touchKeyboard";
+import { useFitHeight } from "../fitHeight";
 import { useViewer } from "../../state/viewer";
 
 const SAVED_IMAGE = /(?:^|\s)@(\.reasonix\/attachments\/clipboard-[\d.-]+\.(?:png|jpe?g|gif|webp|bmp|svg))(?=\s|$)/gi;
@@ -55,6 +56,8 @@ export function UserCard({
     el.setSelectionRange(el.value.length, el.value.length);
   }, [draft === null]);
 
+  useFitHeight(box, draft ?? "");
+
   const resend = () => {
     const text = (draft ?? "").trim();
     if (!editable || !text || sending) return;
@@ -96,7 +99,7 @@ export function UserCard({
                 data-action-keydown="turn.resend"
                 data-target={item.id}
                 value={draft}
-                rows={Math.min(12, draft.split("\n").length + 1)}
+                rows={1}
                 readOnly={sending}
                 aria-label={t("改写这条消息")}
                 onChange={(ev) => setDraft(ev.target.value)}

@@ -298,6 +298,9 @@ func EffectiveEffort(e *ProviderEntry) string {
 	if e == nil {
 		return ""
 	}
+	if explicitReasoningProtocol(e) == ReasoningProtocolNone {
+		return ""
+	}
 	if effort := zhipuLegacyStoredEffort(e, normalizeStoredEffort(e.Effort)); effort != "" && effortInContract(e, effort) {
 		return effort
 	}

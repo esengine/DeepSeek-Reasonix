@@ -38,7 +38,7 @@ func TestAutoSkipsPowerShellThatDoesNotLaunch(t *testing.T) {
 	var asked []string
 	launches := func(p string) bool { asked = append(asked, p); return p != alias && p != `C:\fake\pwsh.exe` }
 
-	h := shellHost{"windows", fakePath("pwsh", "powershell"), yes, nil, winPS, no, no, launches}
+	h := shellHost{"windows", fakePath("pwsh", "powershell"), yes, nil, winPS, no, no, launches, nil}
 	if got := h.auto(nil); got.Kind != ShellPowerShell || got.Path != `C:\fake\System32\powershell.exe` {
 		t.Fatalf("auto = %+v, want Windows PowerShell 5.1", got)
 	}
@@ -52,7 +52,7 @@ func TestAutoSkipsPowerShellThatDoesNotLaunch(t *testing.T) {
 	}
 
 	asked = nil
-	h = shellHost{"windows", fakePath("bash", "pwsh"), yes, nil, winPS, yes, no, launches}
+	h = shellHost{"windows", fakePath("bash", "pwsh"), yes, nil, winPS, yes, no, launches, nil}
 	if got := h.auto(nil); got.Kind != ShellBash || len(asked) != 0 {
 		t.Fatalf("auto = %+v, asked %q; want bash with no PowerShell probe", got, asked)
 	}

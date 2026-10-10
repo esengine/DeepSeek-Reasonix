@@ -490,14 +490,6 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 	}
 }
 
-// autoShellPrefer reports whether [tools.shell] left the interpreter to
-// auto-detection, so the "fell back to PowerShell" hint is suppressed once the
-// user has explicitly chosen a shell.
-func autoShellPrefer(prefer string) bool {
-	p := strings.ToLower(strings.TrimSpace(prefer))
-	return p == "" || p == "auto"
-}
-
 // LSPSpecs returns the language → server map: the built-in defaults overlaid with
 // any user overrides. A user entry may set only the fields it wants to change;
 // empty fields keep the default for that language.

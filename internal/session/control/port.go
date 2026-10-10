@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/model/billing"
 	"reasonix/internal/platform/browser"
+	"reasonix/internal/platform/gitstatus"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/checkpoint"
@@ -394,10 +395,12 @@ type LocalShell interface {
 
 // Commits proposes a commit message for the staged changes and records a local
 // commit once the person has confirmed the text. It never stages, pushes or
-// rewrites history.
+// rewrites history. It also moves the workspace between local git branches —
+// a workspace write like a commit, refused typed while a turn runs.
 type Commits interface {
 	ProposeCommit(ctx context.Context) (CommitProposal, error)
 	CommitStaged(ctx context.Context, req CommitRequest) (CommitResult, error)
+	SwitchWorkspaceBranch(ctx context.Context, name string) (gitstatus.Info, bool, error)
 }
 
 // SessionAPI is the full driving port — the composition of every sub-port, for

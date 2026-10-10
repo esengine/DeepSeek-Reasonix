@@ -361,18 +361,43 @@ func (h *Hub) importLegacySessions(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusForbidden, "workspace.unknown", "select a known workspace for recovered sessions", nil)
 		return
 	}
-	result := migration.RunLegacySessionImportInto(strings.TrimSpace(body.Path), SessionDirFor(known), event.Discard)
+	result := migration.RunLegacySessionImportInto(strings.TrimSpace(body.Path), SessionDirFor(known), legacyImportLog)
 	count := 0
 	for _, imported := range result.SessionImports {
 		count += imported.Count
 	}
-	writeJSON(w, struct {
-		Summary    string `json:"summary"`
-		Imported   int    `json:"imported"`
-		Warnings   int    `json:"warnings"`
-		Recognised bool   `json:"recognised"`
-	}{Summary: result.Summary(), Imported: count, Warnings: len(result.SessionErrs), Recognised: !result.Unrecognised})
+	skipped := make([]legacySkipView, 0, len(result.SessionSkips))
+	for _, skip := range result.SessionSkips {
+		skipped = append(skipped, legacySkipView{Source: skip.Source, Name: skip.Name, Path: skip.Path, Reason: string(skip.Reason)})
+	}
+	writeJSON(w, legacyImportView{
+		Summary: result.Summary(), Imported: count, Warnings: len(result.SessionErrs) + len(skipped),
+		Recognised: !result.Unrecognised, Skipped: skipped,
+	})
 }
+
+// legacySkipView is one 1.x session the import left in place. Reason is a
+// sessionstore.SkipReason code; Path is the untouched entry in the source.
+type legacySkipView struct {
+	Source string `json:"source"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
+type legacyImportView struct {
+	Summary    string           `json:"summary"`
+	Imported   int              `json:"imported"`
+	Warnings   int              `json:"warnings"`
+	Recognised bool             `json:"recognised"`
+	Skipped    []legacySkipView `json:"skipped"`
+}
+
+var legacyImportLog = event.FuncSink(func(e event.Event) {
+	if e.Level == event.LevelWarn {
+		slog.Warn("serve: legacy import", "detail", e.Text)
+	}
+})
 
 // recoveryLineageRoot names the conversation a copy belongs to. The stamped
 // root is authoritative: walking parents instead splits one chain into a row

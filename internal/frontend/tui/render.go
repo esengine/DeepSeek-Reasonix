@@ -315,6 +315,10 @@ func codedNoticeText(it *Item) string {
 		if why, ok := i18n.M.CompactionWhy[it.Detail]; ok {
 			return fmt.Sprintf(i18n.M.NoticeCompactFailedFmt, why)
 		}
+	case event.NoticeCodeCompactHeld:
+		if why, ok := i18n.M.CompactionWhy[it.Detail]; ok {
+			return fmt.Sprintf(i18n.M.NoticeCompactHeldFmt, why)
+		}
 	case event.NoticeCodeUnappliedSteer:
 		if it.Detail != "" {
 			return fmt.Sprintf(i18n.M.NoticeUnappliedSteerFmt, textutil.TruncateGraphemes(textutil.SanitizeDisplay(it.Detail), unappliedSteerCap, "…"))
@@ -324,12 +328,38 @@ func codedNoticeText(it *Item) string {
 		if p, ok := event.DecodeInboxRecovered(it.Detail); ok {
 			return fmt.Sprintf(i18n.M.NoticeInboxRecoveredFmt, p.Count)
 		}
+	case event.NoticeCodeJobFinished, event.NoticeCodeJobKilled:
+		if p, ok := event.DecodeJobNotice(it.Detail); ok {
+			name := p.Label
+			if name == "" {
+				name = p.ID
+			}
+			if it.Code == event.NoticeCodeJobKilled {
+				return fmt.Sprintf(i18n.M.NoticeJobKilledFmt, name)
+			}
+			return fmt.Sprintf(i18n.M.NoticeJobFinishedFmt, name)
+		}
+	case event.NoticeCodeJobFailed:
+		if p, ok := event.DecodeJobNotice(it.Detail); ok {
+			name := p.Label
+			if name == "" {
+				name = p.ID
+			}
+			return fmt.Sprintf(i18n.M.NoticeJobFailedFmt, name) + jobError(p.Error)
+		}
 	case event.NoticeCodeExtensionSkipped:
 		if p, ok := event.DecodeExtensionSkipped(it.Detail); ok && p.Reason == event.ExtensionSkipReasonNoLiveSidecar {
 			return fmt.Sprintf(i18n.M.NoticeExtSkippedFmt, p.Extension, p.Point)
 		}
 	}
 	return it.Text
+}
+
+func jobError(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	return ": " + textutil.TruncateGraphemes(textutil.SanitizeDisplay(msg), unappliedSteerCap, "…")
 }
 
 func renderNotice(it *Item) string {

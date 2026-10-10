@@ -35,6 +35,7 @@ import (
 	"reasonix/internal/frontend/traystate"
 	"reasonix/internal/platform/account"
 	"reasonix/internal/platform/appupdate"
+	"reasonix/internal/platform/crashreport"
 	"reasonix/internal/platform/feedback"
 	"reasonix/internal/platform/instanceid"
 	"reasonix/internal/platform/notify"
@@ -127,6 +128,7 @@ func main() {
 	studioApp := flag.String("studio-app", "", "the application executable this host runs inside")
 	studioAppPID := flag.Int("studio-app-pid", 0, "the process id of that application")
 	computerHelper := flag.String("computer-helper", "", "the native helper that operates this machine's applications")
+	crashDir := flag.String("crash-dir", "", "the directory a fatal runtime error is written to")
 	stripGrants := flag.Bool("strip-package-grants", false, "remove app-package grants from the directory -studio-app runs from, print what changed, and exit")
 	flag.Parse()
 	if *stripGrants {
@@ -141,7 +143,17 @@ func main() {
 	}
 	boot.SetComputerHelper(*computerHelper)
 	shell := shellIdentity{version: *studioVersion, exe: *studioApp, pid: *studioAppPID}
-	os.Exit(run(parentLease(os.Stdin), os.Stdout, os.Stderr, *page, shell))
+	releaseFatalLog := crashreport.InstallFatalLog(*crashDir, defaultVersion(shell.version))
+	code := run(parentLease(os.Stdin), os.Stdout, os.Stderr, *page, shell)
+	releaseFatalLog()
+	os.Exit(code)
+}
+
+func defaultVersion(stated string) string {
+	if strings.TrimSpace(stated) != "" {
+		return stated
+	}
+	return version
 }
 
 // run serves until the lease ends or the process is signalled. stdout carries

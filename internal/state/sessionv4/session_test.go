@@ -156,8 +156,8 @@ func TestOpenBoundsTheManifestSize(t *testing.T) {
 			if tc.ok && err != nil {
 				t.Fatalf("Open: %v", err)
 			}
-			if !tc.ok && !errors.Is(err, ErrDamaged) {
-				t.Fatalf("Open = %v, want ErrDamaged", err)
+			if !tc.ok && !errors.Is(err, ErrTooLarge) {
+				t.Fatalf("Open = %v, want ErrTooLarge", err)
 			}
 		})
 	}

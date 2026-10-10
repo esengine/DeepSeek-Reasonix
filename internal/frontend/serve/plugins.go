@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reasonix/internal/base/textutil"
 	"strings"
 
 	"reasonix/internal/contract/config"
@@ -110,26 +111,29 @@ func (s *Server) plugins(w http.ResponseWriter, r *http.Request) {
 // it is what the user came here to fix, and dropping it would make the list
 // disagree with the state file.
 func pluginViewFor(home, workspaceRoot string, p pluginpkg.InstalledPlugin) pluginView {
+	root := pluginpkg.ResolveRoot(home, p.Root)
+	p = p.Display()
 	view := pluginView{
 		Name: p.Name, Version: p.Version, Description: p.Description,
-		Source: p.Source, Root: pluginpkg.ResolveRoot(home, p.Root),
+		Source: p.Source, Root: root,
 		ManifestKind: p.ManifestKind, Enabled: p.Enabled,
 		Status: p.Status, StatusReason: p.StatusReason,
 	}
-	pkg, warnings, err := pluginpkg.ParseDir(view.Root)
+	pkg, warnings, err := pluginpkg.ParseDir(root)
 	if err != nil {
-		view.Error = err.Error()
+		view.Error = textutil.ShownProse(err.Error())
 		return view
 	}
-	view.Warnings = append(warnings, theme.PluginWarnings(pkg)...)
-	view.Warnings = append(view.Warnings, hook.PackageWarnings(pkg)...)
+	all := append(warnings, theme.PluginWarnings(pkg)...)
+	all = append(all, hook.PackageWarnings(pkg)...)
 	for _, warning := range skill.PluginWarnings(pkg) {
-		view.Warnings = append(view.Warnings, warning.Error())
+		all = append(all, warning.Error())
 	}
-	view.Compatibility = pkg.Compatibility.Status
-	view.Skipped = pkg.Compatibility.Skipped
+	view.Warnings = all
+	view.Compatibility = textutil.ShownIdentity(pkg.Compatibility.Status)
+	view.Skipped = pluginpkg.DisplayIssues(pkg.Compatibility.Skipped)
 
-	inv := pkg.Inventory()
+	inv := pkg.InventoryForDisplay()
 	for _, sk := range inv.Skills {
 		view.Skills = append(view.Skills, pluginItem{
 			Name: sk.Name, Description: sk.Description, Invocation: "/" + p.Name + ":" + sk.Name,
@@ -165,13 +169,13 @@ func pluginViewFor(home, workspaceRoot string, p pluginpkg.InstalledPlugin) plug
 			Transport: srv.Transport, Command: srv.Command, URL: srv.URL, AutoStart: srv.AutoStart,
 		})
 	}
-	if rt := pkg.Manifest.Runtime; rt != nil {
+	if rt := pkg.Manifest.Runtime.Display(); rt != nil {
 		view.Runtime = &pluginRuntime{
 			Command: rt.Command, Args: rt.Args, Intercepts: rt.Intercepts,
-			Replaces: rt.Replaces, Capabilities: rt.Capabilities, Tools: rt.ToolNames(),
+			Replaces: rt.Replaces, Capabilities: rt.Capabilities, Tools: pluginpkg.DisplayIdentities(rt.ToolNames()),
 		}
 	}
-	view.Warnings = append(view.Warnings, hookRuntimeWarnings(pkg, workspaceRoot)...)
+	view.Warnings = pluginpkg.DisplayLines(append(view.Warnings, hookRuntimeWarnings(pkg, workspaceRoot)...))
 	return view
 }
 

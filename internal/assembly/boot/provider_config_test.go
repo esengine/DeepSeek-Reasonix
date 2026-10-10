@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -40,5 +41,14 @@ idle_timeout_seconds = 10000000000
 	got := provider.IdleTimeoutFromExtra(providerConfig(e, netclient.ProxySpec{}).Extra)
 	if got != provider.MaxIdleTimeoutSeconds*time.Second {
 		t.Fatalf("idle timeout = %v, want the %ds ceiling", got, provider.MaxIdleTimeoutSeconds)
+	}
+}
+
+func TestNewProviderRefusesASourceThatDoesNotAnswerConversation(t *testing.T) {
+	entry := &config.ProviderEntry{Name: "laya", Kind: "typesafe", Model: "typed-decisions", BaseURL: "http://127.0.0.1:8700"}
+	_, err := NewProviderWithProxy(entry, netclient.ProxySpec{})
+	var mismatch *config.AnswersMismatchError
+	if !errors.As(err, &mismatch) || mismatch.Has != config.AnswersDecision || mismatch.Ref != "laya/typed-decisions" {
+		t.Fatalf("err = %v, want a typed answers mismatch naming laya/typed-decisions", err)
 	}
 }

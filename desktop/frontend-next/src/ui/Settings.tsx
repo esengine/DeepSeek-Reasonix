@@ -129,8 +129,11 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
   const [extRefreshing, setExtRefreshing] = useState(false);
   const [extErrors, setExtErrors] = useState<Partial<Record<"mcp" | "packages" | "skills", string>>>({});
   const extRefresh = useRef(0);
-  const [updatingPkg, setUpdatingPkg] = useState({ name: "", applying: false });
-  const applyingChanged = useCallback((applying: boolean) => setUpdatingPkg((p) => ({ ...p, applying })), []);
+  const [updatingPkg, setUpdatingPkg] = useState({ connection: { port }, name: "", applying: false });
+  if (updatingPkg.connection.port !== port) setUpdatingPkg({ connection: { port }, name: "", applying: false });
+  const applyingChanged = useCallback((applying: boolean) => {
+    setUpdatingPkg((p) => p.connection === updatingPkg.connection ? { ...p, applying } : p);
+  }, [updatingPkg.connection]);
   const [hookCount, setHookCount] = useState(0);
   const [netMode, setNetMode] = useState("");
   const [memCount, setMemCount] = useState(0);
@@ -661,7 +664,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                       port={port}
                       updating={packages.find((p) => p.name === updatingPkg.name)}
                       onApplying={applyingChanged}
-                      onClose={() => setUpdatingPkg({ name: "", applying: false })} onInstalled={afterExtChange}
+                      onClose={() => setUpdatingPkg((p) => ({ ...p, name: "", applying: false }))} onInstalled={afterExtChange}
                     />
                   )}
                   <Packages
@@ -669,7 +672,7 @@ export function Settings({ hub, onError, port, networkPort, networkHost, status,
                     packages={packages}
                     onChanged={afterExtChange} onReloadError={reload.report} onReloaded={reload.applied}
                     updating={updatingPkg.name}
-                    onUpdate={(name) => setUpdatingPkg({ name, applying: false })}
+                    onUpdate={(name) => setUpdatingPkg((p) => ({ ...p, name, applying: false }))}
                   />
                   {extErrors.packages && <div className="rnote" data-s="bad" role="alert">{extErrors.packages} <button className="act" data-action="extensions.refresh" disabled={extRefreshing} onClick={reloadExt}>{t("重试")}</button></div>}
                   {packages.length === 0 && !addingPkg && !extRefreshing && !extErrors.packages && <div className="empty">{t("尚未安装插件包。")}</div>}

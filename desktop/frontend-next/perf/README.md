@@ -46,6 +46,7 @@ node perf/pick.mjs       # 补全菜单：/ 和 @ 的选中态，深浅两色下
 node perf/models.mjs     # 连接面板：网关报出一百多个模型时，这一屏还能不能用
 node perf/side.mjs       # 右栏：端点自己写的一句话有多长，都不该改变栏宽
 node perf/queue.mjs      # 待送达：正文读不回来时，「改」不许开出一个空编辑器
+node perf/reask.mjs      # 改写框：没有换行的长段落，框要长到让人读得到全文，宽屏和手机宽度各一遍
 node perf/onboarding.mjs # First-run setup: zoom-aware card bounds, resize, scrolling, focus and completion
 node perf/running.mjs    # 执行过程：在跑的步骤自己在动、收起后由标题接着动，步骤行没有空栏
 node perf/lang.mjs       # 双语验证：英文启动、界面译文到位、切回中文
@@ -66,6 +67,7 @@ node perf/budget.mjs     # 预算的守卫：输入框上下堆满东西时，�
 node perf/find.mjs       # 对话内查找：快捷键穿过输入框、跳到没挂载的那条、同一行里的第 n 处落在眼前
 node perf/focus.mjs      # 专注的守卫：拿走外围之后，退出时世界是否原样
 node perf/tooltip.mjs    # 控件提示的守卫：文字不溢出提示框、不在半透明祖先之下、对比度达 AA（深浅×中英×宽窄）
+node perf/navhint.mjs   # Icon-rail hover hints: drawn, inside the window, clipped by no ancestor, painted over by nothing (light/dark × on/collapsed)
 ```
 
 `lang.mjs` 从仓库外跑时用 `PERF_SRC` 指向 `src/`（它要读固件源码来决定

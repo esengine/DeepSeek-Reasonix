@@ -29,6 +29,7 @@ const { groundFor } = require("./ground");
 const { loadPrefs, prefsFile, registerPrefs } = require("./prefs");
 const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
+const { crashDir, recordHostExit, pendingHostExit, clearHostExit, hostExitNotice } = require("./hostexit");
 
 // A page in a minimized or fully covered window counts as hidden, and a hidden
 // page drops the input the agent sends it: measured, its clicks never arrive and
@@ -120,7 +121,10 @@ async function launchKernel(args) {
         // Before the handshake the launch itself fails, and boot's catch owns
         // telling the person why; quitting here would race that dialog.
         powerGuard?.close();
-        if (handshaken && code !== 0 && !quitting) app.quit();
+        if (handshaken && code !== 0 && !quitting) {
+          recordHostExit({ logs, userData: app.getPath("userData"), code, signal, startedAt: began });
+          app.quit();
+        }
       },
       onAct: handOver,
     });
@@ -147,7 +151,7 @@ async function boot() {
   // Only a packaged build has a version worth reporting -- app.getVersion()
   // falls back to Electron's own, which named a Studio that never shipped and
   // ranked it ahead of every published release.
-  const args = ["-page", pageDir];
+  const args = ["-page", pageDir, "-crash-dir", crashDir(logs.dir)];
   if (computerHelper && existsSync(computerHelper)) args.push("-computer-helper", computerHelper);
   if (app.isPackaged) {
     args.push("-studio-version", app.getVersion());
@@ -198,6 +202,7 @@ async function boot() {
   // the shell this one replaces, and a modal in front of a window that has not
   // painted reads as the application having failed to start.
   cleanUpLegacyInstalls();
+  announceHostExit();
 }
 
 // The agent's browser draws its pages as views in this window: the kernel
@@ -213,6 +218,18 @@ function hostAgentBrowser() {
     onFrame: (frame) => protocol.receive(frame),
     onDrop: () => protocol.drop(),
   });
+}
+
+// Told once: the marker stays until the person has seen the notice.
+function announceHostExit() {
+  const userData = app.getPath("userData");
+  const exit = pendingHostExit(userData);
+  if (!exit) return;
+  const text = hostExitNotice(uiLang(), exit, logs.dir);
+  dialog
+    .showMessageBox(win, { type: "warning", message: text.message, detail: text.detail, buttons: [text.ok] })
+    .then(() => clearHostExit(userData))
+    .catch((err) => logs.shell.line(`host exit notice: ${err.message}`));
 }
 
 // The Wails install a dmg download leaves beside this one. Detached from boot:

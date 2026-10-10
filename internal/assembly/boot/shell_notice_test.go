@@ -14,7 +14,7 @@ import (
 func TestResolveShellWithNoticeReportsFallback(t *testing.T) {
 	var stderr bytes.Buffer
 	var notices []event.Event
-	resolveShellWithNotice("not-a-shell", "", &stderr, event.FuncSink(func(e event.Event) {
+	resolveShellWithNotice(Options{}, "not-a-shell", "", &stderr, event.FuncSink(func(e event.Event) {
 		notices = append(notices, e)
 	}))
 

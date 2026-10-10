@@ -4,7 +4,6 @@ package control
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"reasonix/internal/runtime/taskmonitor"
@@ -25,7 +24,7 @@ func (c *Controller) observeJobs(taskStore taskmonitor.WriteStore) {
 	}
 	if c.workspaceRoot != "" {
 		if taskStore == nil {
-			taskStore = taskmonitor.NewFileStore(filepath.Join(".reasonix", "tasks"))
+			taskStore = taskmonitor.NewFileStore(taskmonitor.StoreDir)
 		}
 		c.jobs.SetTaskRecorder(taskmonitor.NewTaskRecorder(taskStore, c.workspaceRoot,
 			func() string { return c.parentSessionID() }))

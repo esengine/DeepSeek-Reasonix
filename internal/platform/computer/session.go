@@ -168,12 +168,13 @@ func (s *Session) App(ctx context.Context, bundle string) (App, error) {
 
 // Snapshot is an application's accessibility tree, one element per line. Note
 // is the host's account of what the tree is missing, such as an application
-// that exposes no window at all.
+// that exposes no window at all; Modals are the windows holding its input.
 type Snapshot struct {
 	App       App
 	Lines     []string
 	Truncated bool
 	Note      string
+	Modals    []Modal
 }
 
 func (s *Session) Snapshot(ctx context.Context, bundle string) (Snapshot, error) {
@@ -185,11 +186,12 @@ func (s *Session) Snapshot(ctx context.Context, bundle string) (Snapshot, error)
 		Lines     []string `json:"lines"`
 		Truncated bool     `json:"truncated"`
 		Note      string   `json:"note"`
+		Modals    []Modal  `json:"modals"`
 	}
 	if err := s.call(ctx, "snapshot", map[string]any{"pid": app.PID}, &r); err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{App: app, Lines: r.Lines, Truncated: r.Truncated, Note: r.Note}, nil
+	return Snapshot{App: app, Lines: r.Lines, Truncated: r.Truncated, Note: r.Note, Modals: r.Modals}, nil
 }
 
 // Screenshot captures an application's front window, sized for a vision model.
@@ -267,8 +269,15 @@ func PointerSteps(steps []Step) bool {
 type ActResult struct {
 	App      App
 	Done     int
-	Notes    []string
+	Steps    []StepResult
 	FailedAt int
+}
+
+// StepResult is one step that went through: what it was, and what is known
+// of its effect.
+type StepResult struct {
+	Note   string
+	Effect Effect
 }
 
 // Act runs steps in order on one application and stops at the first that
@@ -296,116 +305,126 @@ func (s *Session) Act(ctx context.Context, bundle string, steps []Step) (ActResu
 			res.FailedAt = i
 			return res, fail(CodeStopped, "the person pressed Escape; ask before continuing")
 		}
-		note, err := s.step(ctx, app, step)
+		done, err := s.step(ctx, app, step)
 		if err != nil {
 			res.FailedAt = i
 			return res, err
 		}
 		res.Done++
-		res.Notes = append(res.Notes, note)
+		res.Steps = append(res.Steps, done)
 	}
 	return res, nil
 }
 
-func (s *Session) step(ctx context.Context, app App, step Step) (string, error) {
+// actReply is a step's answer from the helper: what it did, and the fields
+// some steps add to say how.
+type actReply struct {
+	Effect *wireEffect `json:"effect"`
+	Role   string      `json:"role"`
+	How    string      `json:"how"`
+}
+
+// deliver sends one step to the helper and settles what it reports it did.
+func (s *Session) deliver(ctx context.Context, method string, params map[string]any, note func(actReply) string) (StepResult, error) {
+	var r actReply
+	if err := s.call(ctx, method, params, &r); err != nil {
+		return StepResult{}, err
+	}
+	return StepResult{Note: note(r), Effect: r.Effect.settle()}, nil
+}
+
+func noted(note string) func(actReply) string { return func(actReply) string { return note } }
+
+func (s *Session) step(ctx context.Context, app App, step Step) (StepResult, error) {
 	pid := app.PID
 	switch strings.ToLower(strings.TrimSpace(step.Action)) {
 	case "click":
 		if step.Ref != "" {
-			return "press " + step.Ref, s.call(ctx, "press", map[string]any{"pid": pid, "ref": step.Ref}, nil)
+			return s.deliver(ctx, "press", map[string]any{"pid": pid, "ref": step.Ref}, noted("press "+step.Ref))
 		}
 		x, y, err := s.screenPoint(app, step)
 		if err != nil {
-			return "", err
+			return StepResult{}, err
 		}
-		var r struct {
-			Role string `json:"role"`
-		}
-		if err := s.call(ctx, "click", map[string]any{"pid": pid, "x": x, "y": y}, &r); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("click the %s at (%v,%v)", r.Role, *step.X, *step.Y), nil
+		return s.deliver(ctx, "click", map[string]any{"pid": pid, "x": x, "y": y}, func(r actReply) string {
+			return fmt.Sprintf("click the %s at (%v,%v)", r.Role, *step.X, *step.Y)
+		})
 	case "focus":
-		return "focus " + step.Ref, s.call(ctx, "focus", map[string]any{"pid": pid, "ref": step.Ref}, nil)
+		return s.deliver(ctx, "focus", map[string]any{"pid": pid, "ref": step.Ref}, noted("focus "+step.Ref))
 	case "set_value":
-		return fmt.Sprintf("set %s to %d characters", step.Ref, len([]rune(step.Text))),
-			s.call(ctx, "set_value", map[string]any{"pid": pid, "ref": step.Ref, "text": step.Text}, nil)
+		return s.deliver(ctx, "set_value", map[string]any{"pid": pid, "ref": step.Ref, "text": step.Text},
+			noted(fmt.Sprintf("set %s to %d characters", step.Ref, len([]rune(step.Text)))))
 	case "type":
-		return fmt.Sprintf("type %d characters", len([]rune(step.Text))), s.call(ctx, "type", map[string]any{"pid": pid, "text": step.Text}, nil)
+		return s.deliver(ctx, "type", map[string]any{"pid": pid, "text": step.Text}, noted(fmt.Sprintf("type %d characters", len([]rune(step.Text)))))
 	case "key":
-		return "press " + step.Key, s.call(ctx, "key", map[string]any{"pid": pid, "key": step.Key, "times": max(step.Times, 1)}, nil)
+		return s.deliver(ctx, "key", map[string]any{"pid": pid, "key": step.Key, "times": max(step.Times, 1)}, noted("press "+step.Key))
 	case "paste":
-		return fmt.Sprintf("paste %d characters", len([]rune(step.Text))),
-			s.call(ctx, "paste", map[string]any{"pid": pid, "text": step.Text}, nil)
+		return s.deliver(ctx, "paste", map[string]any{"pid": pid, "text": step.Text}, noted(fmt.Sprintf("paste %d characters", len([]rune(step.Text)))))
 	case "hold_key":
-		return fmt.Sprintf("hold %s for %vs", step.Key, step.Seconds),
-			s.call(ctx, "hold_key", map[string]any{"pid": pid, "key": step.Key, "seconds": step.Seconds}, nil)
+		return s.deliver(ctx, "hold_key", map[string]any{"pid": pid, "key": step.Key, "seconds": step.Seconds},
+			noted(fmt.Sprintf("hold %s for %vs", step.Key, step.Seconds)))
 	case "pointer_move", "pointer_click", "pointer_drag":
 		return s.pointerStep(ctx, app, step)
 	case "pointer_position":
 		var at struct{ X, Y float64 }
 		if err := s.call(ctx, "pointer_position", nil, &at); err != nil {
-			return "", err
+			return StepResult{}, err
 		}
-		return s.describePoint(app, at.X, at.Y), nil
+		return StepResult{Note: s.describePoint(app, at.X, at.Y)}, nil
 	case "right_click":
 		if step.Ref == "" {
-			return "", fail(CodeBadStep, "a right_click needs a ref; the menu belongs to the element")
+			return StepResult{}, fail(CodeBadStep, "a right_click needs a ref; the menu belongs to the element")
 		}
-		return "open the menu of " + step.Ref, s.call(ctx, "menu", map[string]any{"pid": pid, "ref": step.Ref}, nil)
+		return s.deliver(ctx, "menu", map[string]any{"pid": pid, "ref": step.Ref}, noted("open the menu of "+step.Ref))
 	case "scroll":
-		var r struct {
-			How string `json:"how"`
-		}
-		if err := s.call(ctx, "scroll", map[string]any{"pid": pid, "ref": step.Ref, "amount": step.Amount}, &r); err != nil {
-			return "", err
-		}
-		if r.How == "revealed" {
-			return "bring " + step.Ref + " into view", nil
-		}
-		return fmt.Sprintf("scroll %v lines", step.Amount), nil
+		return s.deliver(ctx, "scroll", map[string]any{"pid": pid, "ref": step.Ref, "amount": step.Amount}, func(r actReply) string {
+			if r.How == "revealed" {
+				return "bring " + step.Ref + " into view"
+			}
+			return fmt.Sprintf("scroll %v lines", step.Amount)
+		})
 	case "wait":
 		d := min(time.Duration(step.Ms)*time.Millisecond, maxWait)
 		select {
 		case <-time.After(d):
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return StepResult{}, ctx.Err()
 		}
-		return "wait " + d.String(), nil
+		return StepResult{Note: "wait " + d.String()}, nil
 	}
-	return "", fail(CodeBadStep, "unknown action %q; use click, right_click, focus, set_value, type, paste, key, hold_key, scroll, wait, or the pointer steps pointer_move, pointer_click and pointer_drag", step.Action)
+	return StepResult{}, fail(CodeBadStep, "unknown action %q; use click, right_click, focus, set_value, type, paste, key, hold_key, scroll, wait, or the pointer steps pointer_move, pointer_click and pointer_drag", step.Action)
 }
 
 // pointerStep takes the person's pointer to the point a screenshot named. The
 // helper refuses a point whose window belongs to another application, so an
 // approval for one application cannot reach into the next.
-func (s *Session) pointerStep(ctx context.Context, app App, step Step) (string, error) {
+func (s *Session) pointerStep(ctx context.Context, app App, step Step) (StepResult, error) {
 	x, y, err := s.screenPoint(app, step)
 	if err != nil {
-		return "", err
+		return StepResult{}, err
 	}
 	args := map[string]any{"pid": app.PID, "x": x, "y": y}
 	switch strings.ToLower(strings.TrimSpace(step.Action)) {
 	case "pointer_move":
-		return fmt.Sprintf("move the pointer to (%v,%v)", *step.X, *step.Y), s.call(ctx, "pointer_move", args, nil)
+		return s.deliver(ctx, "pointer_move", args, noted(fmt.Sprintf("move the pointer to (%v,%v)", *step.X, *step.Y)))
 	case "pointer_drag":
 		to := Step{X: step.ToX, Y: step.ToY}
 		if to.X == nil || to.Y == nil {
-			return "", fail(CodeBadStep, "a pointer_drag needs where it ends: to_x and to_y")
+			return StepResult{}, fail(CodeBadStep, "a pointer_drag needs where it ends: to_x and to_y")
 		}
 		toX, toY, err := s.screenPoint(app, to)
 		if err != nil {
-			return "", err
+			return StepResult{}, err
 		}
 		args["to_x"], args["to_y"] = toX, toY
-		return fmt.Sprintf("drag the pointer from (%v,%v) to (%v,%v)", *step.X, *step.Y, *to.X, *to.Y), s.call(ctx, "pointer_drag", args, nil)
+		return s.deliver(ctx, "pointer_drag", args, noted(fmt.Sprintf("drag the pointer from (%v,%v) to (%v,%v)", *step.X, *step.Y, *to.X, *to.Y)))
 	}
 	button := step.Button
 	if button == "" {
 		button = "left"
 	}
 	args["button"], args["clicks"] = button, max(step.Times, 1)
-	return fmt.Sprintf("%s click at (%v,%v)", button, *step.X, *step.Y), s.call(ctx, "pointer_click", args, nil)
+	return s.deliver(ctx, "pointer_click", args, noted(fmt.Sprintf("%s click at (%v,%v)", button, *step.X, *step.Y)))
 }
 
 // describePoint says where a point on screen is in the pixels of the

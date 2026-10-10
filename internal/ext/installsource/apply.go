@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 
 	"reasonix/internal/contract/config"
@@ -76,17 +75,31 @@ func (t *Tool) applySkillRoot(req request, act *action) error {
 		if !ok {
 			return newErr(ErrSourceUnreadable, "skill %q was registered but is not discoverable", name)
 		}
+		var registeredPath string
+		for _, file := range act.skillFiles[name] {
+			if config.CanonicalSkillPath(file) == config.CanonicalSkillPath(sk.Path) {
+				registeredPath = file
+				break
+			}
+		}
+		if registeredPath == "" {
+			act.Warnings = append(act.Warnings, fmt.Sprintf("skill %q registered from %s is not selected in this workspace; current selection is %s", name, act.Source, sk.Path))
+			continue
+		}
 		act.Discoverable = true
-		if act.CanonicalPath == "" && sk.Path != "" {
-			act.CanonicalPath = sk.Path
+		if act.CanonicalPath == "" {
+			act.CanonicalPath = registeredPath
 		}
 		if strings.TrimSpace(sk.Description) == "" {
 			act.Warnings = append(act.Warnings, fmt.Sprintf("skill %q has no description frontmatter; it is installed but the skills index will use a placeholder", name))
 		}
 	}
 	for _, listed := range store.List() {
-		if slices.Contains(act.Skills, listed.Name) {
-			act.Indexed = true
+		for _, file := range act.skillFiles[listed.Name] {
+			if config.CanonicalSkillPath(file) == config.CanonicalSkillPath(listed.Path) {
+				act.Indexed = true
+				break
+			}
 		}
 	}
 	act.Target = act.Source

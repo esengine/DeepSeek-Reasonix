@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { isBotAccount, thanksExclusions } from './release-credits.mjs';
 
 const repo = 'esengine/DeepSeek-Reasonix';
-const api = `https://api.github.com/repos/${repo}/contributors?per_page=30&anon=1`;
+const api = `https://api.github.com/repos/${repo}/contributors?per_page=50&anon=1`;
 const startMarker = '<!-- reasonix-top-contributors:start -->';
 const endMarker = '<!-- reasonix-top-contributors:end -->';
 
@@ -14,29 +16,33 @@ if (process.env.GITHUB_TOKEN) {
   headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
 }
 
-const res = await fetch(api, { headers });
-if (!res.ok) {
-  throw new Error(`GitHub contributors API failed: ${res.status} ${res.statusText}`);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const res = await fetch(api, { headers });
+  if (!res.ok) {
+    throw new Error(`GitHub contributors API failed: ${res.status} ${res.statusText}`);
+  }
+
+  const contributors = await res.json();
+  if (!Array.isArray(contributors) || contributors.length === 0) {
+    throw new Error('GitHub contributors API returned no contributors');
+  }
+
+  const top = selectTop(contributors, thanksExclusions(repo));
+  await updateReadme('README.md', renderTable(top));
+  await updateReadme('README.zh-CN.md', renderTable(top));
 }
 
-const contributors = await res.json();
-if (!Array.isArray(contributors) || contributors.length === 0) {
-  throw new Error('GitHub contributors API returned no contributors');
+export function selectTop(contributors, excluded, limit = 20) {
+  return contributors
+    .filter((c) => c && typeof c.login === 'string' && c.login !== '' && typeof c.html_url === 'string' && c.html_url !== '')
+    .filter((c) => !isBotAccount(c.login, c.type) && !excluded.has(c.login.toLowerCase()))
+    .map((c) => ({ login: c.login, url: c.html_url, commits: Number(c.contributions) || 0 }))
+    .sort((a, b) => b.commits - a.commits || a.login.localeCompare(b.login))
+    .slice(0, limit)
+    .map((row, index) => ({ rank: index + 1, ...row }));
 }
 
-const top = contributors.filter((c) => c.type !== 'Bot').slice(0, 20).map((c, index) => ({
-  rank: index + 1,
-  login: typeof c.login === 'string' ? c.login : '',
-  name: typeof c.name === 'string' ? c.name : '',
-  url: typeof c.html_url === 'string' ? c.html_url : '',
-  type: typeof c.type === 'string' ? c.type : '',
-  commits: Number(c.contributions) || 0,
-}));
-
-await updateReadme('README.md', renderTable(top));
-await updateReadme('README.zh-CN.md', renderTable(top));
-
-function renderTable(rows) {
+export function renderTable(rows) {
   const header = '| Contributor | Contributor | Contributor | Contributor |\n| --- | --- | --- | --- |';
   const cells = rows.map((row) => renderContributor(row));
   const tableRows = [];
@@ -52,12 +58,7 @@ function renderTable(rows) {
 }
 
 function renderContributor(row) {
-  const label = row.login || row.name || `anonymous-${row.rank}`;
-  const escaped = escapeMarkdown(label);
-  if (row.url) {
-    return `[**${escaped}**](${row.url})`;
-  }
-  return `**${escaped}**`;
+  return `[**${escapeMarkdown(row.login)}**](${row.url})`;
 }
 
 async function updateReadme(path, replacement) {

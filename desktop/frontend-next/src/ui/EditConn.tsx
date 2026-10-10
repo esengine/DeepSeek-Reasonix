@@ -8,6 +8,7 @@ import { checkFailure } from "./provider_check";
 import { HttpError } from "../port/port";
 import { IDLE_TIMEOUT_MAX, IDLE_TIMEOUT_MIN, THINKING, headerLines, parseEffortLevels, parseExtraBody, parseHeaders, parseIdleTimeout } from "./provider_compat";
 import { ModelEfforts } from "./ModelEfforts";
+import { EffortShape } from "./EffortShape";
 import type { ModelEffort, ModelLimit, ProviderEdit } from "../port/port";
 import { ModelLimits, limitTextOf, limitsToSend, type LimitText } from "./ModelLimits";
 
@@ -418,6 +419,7 @@ export function EditConn({
               <i className="tip">
                 {t("端点控制思考深度的方式。此项无法自动探测：中转站转发的是第三方模型，只有你知道其后端。选择后才能调整推理强度，选择错误会导致请求被端点拒绝。")}
               </i>
+              <EffortShape field={think === (entry.reasoningProtocol ?? "") ? entry.effortField : undefined} level={levels[0]} />
             </label>
             <label className="grow">
               <span>{t("推理档位")}</span>
@@ -431,9 +433,11 @@ export function EditConn({
                 onChange={(e) => setLevelText(e.target.value)}
               />
               <i className="tip">
-                {t(levelsDormant
-                  ? "当前思考参数不使用自定义档位；已填写的档位会保留，切换协议后生效。"
-                  : "端点接受的推理强度取值，用逗号分隔，按原样发送。填写后会替代思考参数自带的档位；留空则使用思考参数的默认档位。")}
+                {levelsDormant
+                  ? t("当前思考参数不使用自定义档位；已填写的档位会保留，切换协议后生效。")
+                  : entry.effortField
+                    ? t("端点接受的取值，逗号分隔，按原样作为 {field} 的值发送。填写后会替代思考参数自带的档位；型号没有内置档位时需要在这里手填才能选。", { field: entry.effortField })
+                    : t("端点接受的取值，逗号分隔，按原样发送。填写后会替代思考参数自带的档位；型号没有内置档位时需要在这里手填才能选。")}
               </i>
             </label>
             <label className="grow">

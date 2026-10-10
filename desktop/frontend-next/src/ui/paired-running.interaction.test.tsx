@@ -86,7 +86,7 @@ for (const route of ["local", "receipt"] as const) {
     pane.sendEvent({ kind: "ask_request", ask: {
       id: "greeting", questions: [{ id: "name", header: "Your name", prompt: "Your name", multi: false, options: [{ label: "Native SDK" }] }],
     } });
-    await screen.findByText("等待确认");
+    await screen.findByText("等待你回答");
     if (route === "local") {
       await userEvent.click(screen.getByRole("button", { name: "Native SDK" }));
       await userEvent.click(screen.getByRole("button", { name: "确认" }));
@@ -97,7 +97,7 @@ for (const route of ["local", "receipt"] as const) {
     }
     await waitFor(() => expect(pane.container.querySelector('[data-k="ask"]')?.getAttribute("data-prompt")).toBe("settled"));
     await screen.findByText(running ? "运行中" : "空闲");
-    expect(screen.queryByText("等待确认")).toBeNull();
+    expect(screen.queryByText("等待你回答")).toBeNull();
   });
 }
 it("marks live work above the composer and removes its emphasis when done", async () => {

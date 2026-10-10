@@ -144,7 +144,7 @@ func (s *Server) applyEditedProvider(w http.ResponseWriter, r *http.Request, ent
 		return
 	}
 	if err := s.rebuildInPlace(r.Context()); err != nil {
-		if codedRefusal(err) == codeSwitchModel {
+		if isSwitchBusy(err) {
 			busy(w, "provider.saved_while_running", "the source was saved; the conversation has work in progress and keeps its current settings until it is rebuilt", nil)
 			return
 		}

@@ -130,7 +130,7 @@ func TestLiveContextMenuScrollAndWait(t *testing.T) {
 		{Action: "wait", Ms: 400},
 	})
 	if err != nil {
-		t.Fatalf("right_click: %v (%v)", err, res.Notes)
+		t.Fatalf("right_click: %v (%v)", err, res.Steps)
 	}
 	waitLog(t, log, "menu opened")
 
@@ -152,8 +152,8 @@ func TestLiveContextMenuScrollAndWait(t *testing.T) {
 	before := position()
 	deep := lineRef(t, snap.Lines, `"Deep row"`)
 	res, err = s.Act(ctx, targetBundle, []Step{{Action: "scroll", Ref: deep}})
-	if err != nil || len(res.Notes) == 0 || !strings.Contains(res.Notes[0], "into view") {
-		t.Fatalf("scroll to a ref: %v %v", err, res.Notes)
+	if err != nil || len(res.Steps) == 0 || !strings.Contains(res.Steps[0].Note, "into view") {
+		t.Fatalf("scroll to a ref: %v %v", err, res.Steps)
 	}
 	if after := position(); after == before {
 		t.Fatalf("the scroll area did not move: %q", after)
@@ -263,15 +263,15 @@ func TestLiveThePointerReachesWhatAccessibilityCannot(t *testing.T) {
 	}
 	res, err := s.Act(ctx, targetBundle, []Step{{Action: "pointer_click", X: &x, Y: &y}})
 	if err != nil {
-		t.Fatalf("pointer_click: %v (%v)", err, res.Notes)
+		t.Fatalf("pointer_click: %v (%v)", err, res.Steps)
 	}
 	waitLog(t, log, "mouseDown")
 	back, err := s.Act(ctx, targetBundle, []Step{{Action: "pointer_position"}})
 	if err != nil {
 		t.Fatalf("pointer_position: %v", err)
 	}
-	if back.Notes[0] != home.Notes[0] {
-		t.Fatalf("the pointer was left at %q, not where the person had it (%q)", back.Notes[0], home.Notes[0])
+	if back.Steps[0].Note != home.Steps[0].Note {
+		t.Fatalf("the pointer was left at %q, not where the person had it (%q)", back.Steps[0].Note, home.Steps[0].Note)
 	}
 
 	toX, toY := x+40, y-20

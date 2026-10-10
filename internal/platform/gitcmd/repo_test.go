@@ -71,6 +71,37 @@ func TestOpenResolvesLinkedWorktreeIdentity(t *testing.T) {
 	}
 }
 
+func TestOpenResolvesSymlinkedWorktreeIdentity(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		name := "main"
+		if linked {
+			name = "linked"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newRepoFixture(t, "", map[string]string{"f.txt": "one\n"})
+			dir := f.dir
+			if linked {
+				dir = filepath.Join(t.TempDir(), "linked")
+				f.plain("worktree", "add", "--quiet", dir)
+			}
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(dir, alias); err != nil {
+				t.Fatal(err)
+			}
+			repo, direct := f.open(alias), f.open(dir)
+			if repo.GitDir != direct.GitDir || repo.CommonDir != direct.CommonDir || repo.WorkTree != direct.WorkTree {
+				t.Fatalf("alias identity = %+v, want %+v", repo, direct)
+			}
+			if (repo.GitDir != repo.CommonDir) != linked {
+				t.Fatalf("linked=%v resolved as %+v", linked, repo)
+			}
+			if err := repo.Verify(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 // A workspace that is a subdirectory of a repository gains its own .git.
 func TestOpenedRepoIgnoresNestedRepositoryCreatedLater(t *testing.T) {
 	f := newRepoFixture(t, "", map[string]string{"pkg/f.txt": "one\n", "f.txt": "one\n"})

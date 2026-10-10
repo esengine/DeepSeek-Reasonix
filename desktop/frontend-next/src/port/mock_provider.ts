@@ -28,7 +28,7 @@ export class MockProvider extends MockBoundary {
   // tenants of that same relay holding different keys.
   private sources: ProviderEntry[] = [
     {
-      name: "deepseek", kind: "openai", baseUrl: "https://api.deepseek.com",
+      name: "deepseek", kind: "openai", effortField: "reasoning_effort", baseUrl: "https://api.deepseek.com",
       models: ["deepseek-v4-pro", "deepseek-flash"], default: "deepseek-v4-pro",
       hasKey: true, inUse: true, preset: false, keyEnv: "DEEPSEEK_API_KEY", canSetVision: false,
     },
@@ -37,13 +37,13 @@ export class MockProvider extends MockBoundary {
       models: ["deepseek-v4-pro"], default: "deepseek-v4-pro",
       hasKey: true, inUse: false, preset: false, keyEnv: "DEEPSEEK_API_KEY",
       canSetVision: false, canWebSearch: true, webSearch: true,
-      canSetThinking: true, sendsThinking: true,
+      canSetThinking: true, sendsThinking: true, effortField: "output_config.effort",
     },
     {
-      name: "myrelay", kind: "openai", baseUrl: "https://relay.example.com/v1",
+      name: "myrelay", kind: "openai", effortField: "reasoning_effort", baseUrl: "https://relay.example.com/v1",
       models: ["gpt-4o", "claude-sonnet-4"], default: "gpt-4o",
       hasKey: true, inUse: false, preset: false, keyEnv: "MYRELAY_API_KEY",
-      visionModels: ["gpt-4o"], canSetVision: true,
+      visionModels: ["gpt-4o"], canSetVision: true, canSetThinking: true, sendsThinking: true,
       reasoningProtocol: "openai", supportedEfforts: ["low", "medium", "high"],
       modelEfforts: { "claude-sonnet-4": { supportedEfforts: ["low", "high", "max"], defaultEffort: "high" } },
       contextWindow: 131072,
@@ -61,9 +61,10 @@ export class MockProvider extends MockBoundary {
       models: ["gpt-4o"], default: "gpt-4o",
       hasKey: true, inUse: false, preset: false, keyEnv: "MYRELAY_API_KEY",
       canSetContinuation: true, continuation: "",
+      canSetThinking: true, sendsThinking: true, effortField: "reasoning.effort",
     },
     {
-      name: "myrelay-work", kind: "openai", baseUrl: "https://relay.example.com/v1",
+      name: "myrelay-work", kind: "openai", effortField: "reasoning_effort", baseUrl: "https://relay.example.com/v1",
       models: ["gpt-4o"], default: "gpt-4o",
       hasKey: true, inUse: false, preset: false, keyEnv: "MYRELAY_WORK_API_KEY",
     },
@@ -76,9 +77,9 @@ export class MockProvider extends MockBoundary {
   // Mirrors the kernel catalog: two wires answer one OpenAI model listing.
   async protocols(): Promise<Protocol[]> {
     return [
-      { kind: "openai", discovery: "openai", serverWebSearch: false, reasoningParams: true },
-      { kind: "responses", discovery: "openai", serverWebSearch: true, reasoningParams: false },
-      { kind: "anthropic", discovery: "anthropic", serverWebSearch: true, reasoningParams: false },
+      { kind: "openai", discovery: "openai", serverWebSearch: false, reasoningParams: true, effortField: "reasoning_effort", effortUnder: ["openai"] },
+      { kind: "responses", discovery: "openai", serverWebSearch: true, reasoningParams: true, effortField: "reasoning.effort", effortUnder: [] },
+      { kind: "anthropic", discovery: "anthropic", serverWebSearch: true, reasoningParams: false, effortField: "output_config.effort", effortUnder: ["anthropic"] },
     ];
   }
 

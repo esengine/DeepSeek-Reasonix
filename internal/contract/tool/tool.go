@@ -465,6 +465,16 @@ func (r *Registry) Add(t Tool) {
 // model-visible name is "mcp__<server>__<tool>".
 const MCPNamePrefix = "mcp__"
 
+// ExtensionNamePrefix marks a tool a plugin runtime serves, the way
+// MCPNamePrefix marks one an MCP server does.
+const ExtensionNamePrefix = "ext__"
+
+// IsConnectionName reports a name in a namespace a connection supplies once it
+// is up, which a catalog read before then does not list.
+func IsConnectionName(name string) bool {
+	return strings.HasPrefix(name, MCPNamePrefix) || strings.HasPrefix(name, ExtensionNamePrefix)
+}
+
 // SplitMCPName splits a model-visible MCP tool name "mcp__<server>__<tool>" into
 // its server and tool parts. ok is false for non-MCP (built-in) names and for
 // malformed names missing either part.
