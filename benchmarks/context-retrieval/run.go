@@ -14,7 +14,6 @@ import (
 
 	"reasonix/internal/assembly/boot"
 	"reasonix/internal/contract/ablation"
-	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	_ "reasonix/internal/model/openai"
@@ -132,10 +131,11 @@ func runOne(p provider.Provider, t contextTask, arm ablation.Set, armName, root 
 	}
 	boot.ApplyUnifiedProviderToolSurface(reg, false, arm)
 
+	var usage usageSink
 	a := agent.New(p, reg, sess, agent.Options{
 		ContextWindow: fixtureWindow, CompactRatio: 0.5, RecentKeep: 2,
 		SessionPath: f.Path, KeepPolicy: agent.KeepErrors, Ablation: arm,
-	}, event.Discard)
+	}, &usage)
 	a.LoadProjectionSidecar(f.Path)
 	// From here the transcript lives only in memory. On disk it is the answer.
 	sealFixture(f.Path)
@@ -161,6 +161,10 @@ func runOne(p provider.Provider, t contextTask, arm ablation.Set, armName, root 
 	appended := sess.Snapshot()[before:]
 	m := scoreRun(appended, inst, f.Target, armName, cueVisible)
 	m.trajectory = appended
+	if u, requests := usage.snapshot(); requests > 0 {
+		m.UsageReportedRequests, m.PromptTokens, m.CompletionTokens = requests, u.PromptTokens, u.CompletionTokens
+		m.CacheHitTokens, m.CacheMissTokens, m.UsageEstimated = u.CacheHitTokens, u.CacheMissTokens, u.Estimated
+	}
 	m.scoreAnswer(finalAnswer(appended), inst)
 	if runErr != nil {
 		m.FailureStage = "RunError"
@@ -249,9 +253,9 @@ func runBoundaries(root string) int {
 			} else {
 				noCueSide = append(noCueSide, m)
 			}
-			fmt.Printf("%-24s %-14s cue=%-3v %-14s search=%d read=%d direct=%-5v recall-tok=%-5d escape=%d\n",
+			fmt.Printf("%-24s %-14s cue=%-3v %-14s search=%d read=%d direct=%-5v recall-tok=%-5d%s escape=%d\n",
 				t.ID, name, side.has, m.FailureStage, m.SearchCalls, m.ReadCalls,
-				m.CueDirectRead, m.RecallReturnedTokens, m.EscapeCalls)
+				m.CueDirectRead, m.RecallReturnedTokens, promptTokenSuffix(m), m.EscapeCalls)
 		}
 	}
 	reportDeltas(cueSide, noCueSide)
@@ -340,9 +344,9 @@ func runExperiment(experiment, root string, dry bool, tasks []contextTask) int {
 			}
 			byArm[arm.name] = append(byArm[arm.name], m)
 			all = append(all, m)
-			fmt.Printf("%-24s %-14s %-18s search=%d hit=%d read=%d recall-tok=%d %v\n",
+			fmt.Printf("%-24s %-14s %-18s search=%d hit=%d read=%d recall-tok=%d%s %v\n",
 				t.ID, arm.name, m.FailureStage, m.SearchCalls, m.TargetSearchHits, m.ReadCalls,
-				m.RecallReturnedTokens, m.UnexpectedWorkTools)
+				m.RecallReturnedTokens, promptTokenSuffix(m), m.UnexpectedWorkTools)
 		}
 	}
 	reportFunnels(byArm)

@@ -89,6 +89,15 @@ type contextMetrics struct {
 	// resident prefix; this is what is paid dynamically instead.
 	RecallReturnedTokens int `json:"recall_returned_tokens"`
 
+	// Provider usage as reported on the stream, or empty for a dry run. The count
+	// is completions that reported usage, so it is not a count of attempts.
+	UsageReportedRequests int  `json:"usage_reported_requests,omitempty"`
+	PromptTokens          int  `json:"prompt_tokens,omitempty"`
+	CompletionTokens      int  `json:"completion_tokens,omitempty"`
+	CacheHitTokens        int  `json:"cache_hit_tokens,omitempty"`
+	CacheMissTokens       int  `json:"cache_miss_tokens,omitempty"`
+	UsageEstimated        bool `json:"usage_estimated,omitempty"`
+
 	Searches []searchAttempt `json:"searches,omitempty"`
 	// PostHitSearches are queries issued after the target had already been
 	// returned: not a query problem, a result-to-read problem.
