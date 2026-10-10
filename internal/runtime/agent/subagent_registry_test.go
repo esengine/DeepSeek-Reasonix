@@ -70,3 +70,21 @@ func TestSubagentRegistryCarriesDisabledMCPPolicy(t *testing.T) {
 		t.Fatal("subagent registry lost the parent's disabled-tool attribution")
 	}
 }
+
+func TestRestrictedProxyRefusesInspectOfUnauthorizedID(t *testing.T) {
+	inner := usecap.NewUseCapabilityTool(context.Background(), nil, []plugin.Spec{
+		{Name: "secret-db", Authorized: true},
+	}, tool.NewRegistry(), nil, nil, nil)
+	proxy := &restrictedCapabilityProxy{
+		Tool:     inner,
+		resolver: inner,
+		allowed:  map[string]bool{"mcp-tool:mock/read": true},
+		servers:  map[string]bool{"mock": true},
+	}
+	for _, id := range []string{"mcp-server:secret-db", "mcp-tool:secret-db/query"} {
+		args := json.RawMessage(`{"action":"inspect","capability_id":"` + id + `"}`)
+		if _, err := proxy.ResolveCall(context.Background(), args); err == nil || !strings.Contains(err.Error(), "outside this subagent's allowed-tools") {
+			t.Errorf("inspect %s err = %v, want allowed-tools refusal", id, err)
+		}
+	}
+}

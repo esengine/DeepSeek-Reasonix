@@ -515,7 +515,7 @@ func (t *restrictedCapabilityProxy) check(args json.RawMessage) error {
 		return fmt.Errorf("invalid args: %w", err)
 	}
 	action := strings.ToLower(strings.TrimSpace(p.Action))
-	if action == "list" || action == "search" {
+	if usecap.IsIDlessCatalogAction(action) {
 		return nil
 	}
 	id := strings.TrimSpace(p.CapabilityID)
@@ -541,9 +541,9 @@ func (t *restrictedCapabilityProxy) ResolveCall(ctx context.Context, args json.R
 	}
 	_ = json.Unmarshal(args, &p)
 	action := strings.ToLower(strings.TrimSpace(p.Action))
-	if action == "list" && rc.SkipExecute {
+	if action == usecap.ActionList && rc.SkipExecute {
 		rc.Result = usecap.FilterCapabilityListResult(rc.Result, t.servers)
-	} else if action == "search" && rc.SkipExecute {
+	} else if action == usecap.ActionSearch && rc.SkipExecute {
 		rc.Result = usecap.FilterCapabilitySearchResult(rc.Result, t.allowed)
 	}
 	return rc, nil
@@ -563,9 +563,9 @@ func (t *restrictedCapabilityProxy) Execute(ctx context.Context, args json.RawMe
 	_ = json.Unmarshal(args, &p)
 	action := strings.ToLower(strings.TrimSpace(p.Action))
 	switch action {
-	case "list":
+	case usecap.ActionList:
 		return usecap.FilterCapabilityListResult(out, t.servers), nil
-	case "search":
+	case usecap.ActionSearch:
 		return usecap.FilterCapabilitySearchResult(out, t.allowed), nil
 	}
 	return out, nil

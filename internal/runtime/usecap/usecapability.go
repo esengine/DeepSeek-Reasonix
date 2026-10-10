@@ -583,7 +583,7 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		return resolved, nil
 	}
 	switch action {
-	case "search":
+	case ActionSearch:
 		out, err := t.searchCapabilities(p.Query, p.Limit)
 		if err != nil {
 			if t.audit != nil {
@@ -598,7 +598,7 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		base.Result = out
 		base.ReadOnly = true
 		return base, nil
-	case "list":
+	case ActionList:
 		out, err := t.listCapabilities()
 		if err != nil {
 			if t.audit != nil {
@@ -613,7 +613,7 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		base.Result = out
 		base.ReadOnly = true
 		return base, nil
-	case "inspect":
+	case ActionInspect:
 		if id == "" {
 			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=inspect%s", misplacedArgumentHint(p.Arguments, "capability_id"))
 		}
@@ -631,7 +631,7 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		base.Result = out
 		base.ReadOnly = true
 		return base, nil
-	case "decline":
+	case ActionDecline:
 		if id == "" {
 			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=decline%s", misplacedArgumentHint(p.Arguments, "capability_id"))
 		}
@@ -661,7 +661,7 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 			return nil
 		}
 		return base, nil
-	case "call":
+	case ActionCall:
 		if id == "" {
 			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=call%s", misplacedArgumentHint(p.Arguments, "capability_id"))
 		}
