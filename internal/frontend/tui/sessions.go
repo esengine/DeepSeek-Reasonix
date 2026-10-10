@@ -17,6 +17,50 @@ import (
 
 const pickerRows = 8
 
+// unreadMark leads a picker row whose last turn finished while nobody looked.
+const unreadMark = "●"
+
+// focusState tracks the terminal's own focus report. A terminal that never
+// reports focus leaves it at the zero value, which reads as focused.
+type focusState struct{ blurred, owed bool }
+
+// report takes a focus or blur message. Regaining focus settles a view the
+// blurred terminal could not honestly mark.
+func (f *focusState) report(msg tea.Msg, mark func() tea.Cmd) tea.Cmd {
+	_, gained := msg.(tea.FocusMsg)
+	f.blurred = !gained
+	if !gained || !f.owed {
+		return nil
+	}
+	f.owed = false
+	return mark()
+}
+
+// viewedOnTurnEnd marks the conversation seen only while the terminal has
+// focus; a turn that ends behind another window stays unread until it returns.
+func (m *model) viewedOnTurnEnd() tea.Cmd {
+	if m.focus.blurred {
+		m.focus.owed = true
+		return nil
+	}
+	return m.markViewed()
+}
+
+// viewedAtStart marks the open conversation seen, unless the picker is about
+// to choose another one: the resume that follows marks that one instead.
+func (m *model) viewedAtStart() tea.Cmd {
+	if m.opts.PickSession {
+		return nil
+	}
+	return m.markViewed()
+}
+
+// markViewed tells the kernel the conversation on screen has been seen. A
+// refusal is shown like any other failed call: the mark then stays.
+func (m *model) markViewed() tea.Cmd {
+	return m.call("viewed", m.client.MarkViewed)
+}
+
 // SessionInfo is one saved conversation of this workspace.
 type SessionInfo struct {
 	Name     string    `json:"name"`
@@ -24,6 +68,7 @@ type SessionInfo struct {
 	Title    string    `json:"title"`
 	Turns    int       `json:"turns"`
 	Current  bool      `json:"current"`
+	Unread   bool      `json:"unread"`
 	Modified time.Time `json:"modified"`
 }
 
@@ -31,6 +76,11 @@ func (c *Client) Sessions(ctx context.Context) ([]SessionInfo, error) {
 	var out []SessionInfo
 	err := c.do(ctx, http.MethodGet, "/sessions", nil, &out)
 	return out, err
+}
+
+// MarkViewed clears the unread mark on the conversation this runtime has open.
+func (c *Client) MarkViewed(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, "/sessions/viewed", nil, nil)
 }
 
 // RenameSession sets the title of the saved conversation listed under name.
@@ -169,8 +219,9 @@ func (m *model) onResumed(msg resumedMsg) tea.Cmd {
 		return m.commit()
 	}
 	m.resetScreen()
+	view := m.markViewed()
 	title := m.emit(func(int, bool) string { return termrender.Accent("◆ ") + termrender.Bold(i18n.M.ResumedTitle) })
-	return tea.Sequence(title, m.fetchHistory(true), tea.Batch(m.fetchStatus(), m.fetchTodosForRebuild(), m.fetchMeters()))
+	return tea.Sequence(title, view, m.fetchHistory(true), tea.Batch(m.fetchStatus(), m.fetchTodosForRebuild(), m.fetchMeters()))
 }
 
 // resetScreen drops the transcript this screen drew, for a conversation that
@@ -206,7 +257,11 @@ func (m *model) pickerPanel() []string {
 		if s.Current {
 			label += " " + termrender.Dim("(active)")
 		}
-		lines = append(lines, rowLine(i == p.sel, i+1, "", label, s.Current))
+		row := rowLine(i == p.sel, i+1, "", label, s.Current)
+		if s.Unread {
+			row = markedRowLine(i == p.sel, i+1, unreadMark, label, s.Current)
+		}
+		lines = append(lines, row)
 		if !s.Modified.IsZero() {
 			lines = append(lines, termrender.Dim("     "+s.Modified.Local().Format("2006-01-02 15:04")))
 		}

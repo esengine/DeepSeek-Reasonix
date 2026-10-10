@@ -4,6 +4,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"reasonix/internal/contract/eventwire"
 )
 
 // The picker opens on the first conversation that is not the open one, what
@@ -116,5 +120,99 @@ func TestVersionCommandShowsDevWhenVersionMissing(t *testing.T) {
 	run(m, press(m, "enter"))
 	if got := m.tr.Items[len(m.tr.Items)-1].Text; got != "reasonix dev" {
 		t.Fatalf("version notice = %q", got)
+	}
+}
+
+func TestPickerMarksOnlyTheSessionThatFinishedUnseen(t *testing.T) {
+	m, _ := testModel(t)
+	run(m, m.openPicker())
+	var marked []string
+	for l := range strings.SplitSeq(m.View().Content, "\n") {
+		if strings.Contains(l, unreadMark) {
+			marked = append(marked, l)
+		}
+	}
+	if len(marked) != 1 || !strings.Contains(marked[0], "write the docs") {
+		t.Fatalf("rows carrying the unread mark = %q", marked)
+	}
+}
+
+func viewedCalls(k *recordingKernel) int {
+	n := 0
+	for _, c := range k.seen() {
+		if strings.HasPrefix(c, "POST /sessions/viewed") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestResumeMarksTheOpenedSessionViewedAfterBinding(t *testing.T) {
+	m, k := testModel(t)
+	run(m, m.openPicker())
+	run(m, press(m, "down"))
+	run(m, press(m, "enter"))
+	calls := k.seen()
+	bound, viewed := -1, -1
+	for i, c := range calls {
+		switch {
+		case strings.HasPrefix(c, "POST /resume"):
+			bound = i
+		case strings.HasPrefix(c, "POST /sessions/viewed"):
+			viewed = i
+		}
+	}
+	if bound < 0 || viewed < bound {
+		t.Fatalf("viewed must follow the resume that binds the session:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+func TestTurnEndMarksTheSessionOnScreenViewed(t *testing.T) {
+	m, k := testModel(t)
+	_, cmd := m.Update(updateMsg{us: []Update{{Event: eventwire.Event{Kind: "turn_done"}}}, ok: true})
+	run(m, cmd)
+	if viewedCalls(k) != 1 {
+		t.Fatalf("calls:\n%s", strings.Join(k.seen(), "\n"))
+	}
+}
+
+func TestStartupMarksTheOpenSessionViewedUnlessThePickerChooses(t *testing.T) {
+	m, k := testModel(t)
+	run(m, m.viewedAtStart())
+	if viewedCalls(k) != 1 {
+		t.Fatalf("startup calls:\n%s", strings.Join(k.seen(), "\n"))
+	}
+	m.opts.PickSession = true
+	if m.viewedAtStart() != nil {
+		t.Fatal("a picker launch marked the unchosen session viewed")
+	}
+}
+
+func TestTurnEndBehindAnotherWindowStaysUnreadUntilFocusReturns(t *testing.T) {
+	m, k := testModel(t)
+	m.Update(tea.BlurMsg{})
+	_, cmd := m.Update(updateMsg{us: []Update{{Event: eventwire.Event{Kind: "turn_done"}}}, ok: true})
+	run(m, cmd)
+	if viewedCalls(k) != 0 {
+		t.Fatalf("a blurred terminal marked the turn seen:\n%s", strings.Join(k.seen(), "\n"))
+	}
+	_, cmd = m.Update(tea.FocusMsg{})
+	run(m, cmd)
+	if viewedCalls(k) != 1 {
+		t.Fatalf("regaining focus did not mark the finished turn seen:\n%s", strings.Join(k.seen(), "\n"))
+	}
+	_, cmd = m.Update(tea.BlurMsg{})
+	run(m, cmd)
+	_, cmd = m.Update(tea.FocusMsg{})
+	run(m, cmd)
+	if viewedCalls(k) != 1 {
+		t.Fatalf("a focus change with nothing finished marked again:\n%s", strings.Join(k.seen(), "\n"))
+	}
+}
+
+func TestTheViewAsksTheTerminalToReportFocus(t *testing.T) {
+	m, _ := testModel(t)
+	if !m.View().ReportFocus {
+		t.Fatal("without focus reports the terminal's blur can never hold a mark back")
 	}
 }
