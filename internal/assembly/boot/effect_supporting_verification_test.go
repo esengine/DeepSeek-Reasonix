@@ -199,16 +199,26 @@ func TestEffectSupportingWritesWithoutChecksMayFinish(t *testing.T) {
 			}
 			var bundle struct {
 				Verdict struct {
-					Obligations []struct {
-						Source string `json:"source"`
-					} `json:"obligations"`
+					Obligations trustedstate.Digest `json:"obligations"`
 				} `json:"verdict"`
 			}
 			if err := json.Unmarshal(payload, &bundle); err != nil {
 				t.Fatal(err)
 			}
+			var obligations []struct {
+				Source string `json:"source"`
+			}
+			if bundle.Verdict.Obligations != "" {
+				body, err := store.Object(bundle.Verdict.Obligations)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(body, &obligations); err != nil {
+					t.Fatal(err)
+				}
+			}
 			debt := false
-			for _, o := range bundle.Verdict.Obligations {
+			for _, o := range obligations {
 				debt = debt || o.Source == "host:stale_verification"
 			}
 			if debt != wantDebt {
