@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Clip } from "./Clip";
 import { useEscape } from "./dismiss";
 import { t } from "../i18n";
-import type { Protocol, ProviderCheck, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe } from "../port/port";
+import type { Protocol, ProviderCheck, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderRemoval } from "../port/port";
 import { AddProvider } from "./AddProvider";
 import { ProviderDetail } from "./ProviderDetail";
 import { accountKey, accountLabel, disambiguate, hostOf } from "./vendors";
 import { reason } from "../i18n/kernel";
 import { moveAccount, orderAccounts, useProviderOrder, writeProviderOrder } from "../state/providerorder";
 import { StudioIcon } from "./StudioIcon";
+import { RemovalNotice, removalChangedRoles, type Removal } from "./ProviderRemoval";
 
 // A connection is an account, not a config row. One endpoint answering two
 // protocols is two rows in the file and one service to the person paying for it,
@@ -22,7 +23,7 @@ export type Port = {
   protocols(): Promise<Protocol[]>;
   probeProvider(baseUrl: string, apiKey: string): Promise<ProviderProbe>;
   saveProvider(draft: ProviderDraft): Promise<void>;
-  removeProvider(name: string): Promise<void>;
+  removeProvider(name: string): Promise<ProviderRemoval>;
   checkProvider(name: string): Promise<ProviderCheck>;
   checkProviderModel(request: ProviderModelCheckRequest): Promise<ProviderModelCheck>;
   editProvider(edit: ProviderEdit): Promise<void>;
@@ -101,9 +102,9 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
   const [adding, setAdding] = useState(false);
   useEscape(adding, () => setAdding(false));
   const [busy, setBusy] = useState("");
-  const [removeFailed, setRemoveFailed] = useState("");
+  const [removal, setRemoval] = useState<Removal | null>(null);
   const [picked, setPickedRaw] = useState("");
-  const setPicked = useCallback((key: string) => { setRemoveFailed(""); setPickedRaw(key); }, []);
+  const setPicked = useCallback((key: string) => { setRemoval(null); setPickedRaw(key); }, []);
   const [q, setQ] = useState("");
   const [renaming, setRenaming] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -139,11 +140,13 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
   const remove = async (name: string) => {
     setBusy(name);
     onFailed("");
-    setRemoveFailed("");
+    setRemoval(null);
+    const key = selected;
     try {
-      await port.removeProvider(name);
+      const report = await port.removeProvider(name);
+      if (removalChangedRoles(report)) setRemoval({ key, name, why: "", report });
     } catch (e) {
-      setRemoveFailed(reason(e));
+      setRemoval({ key, name, why: reason(e), report: null });
     } finally {
       reload();
       onChanged();
@@ -300,6 +303,9 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
         </button>
       </div>
       <div className="pmain" ref={pmain}>
+        {removal && (removal.report || !accounts.some((a) => a.key === removal.key)) && (
+          <RemovalNotice removal={removal} />
+        )}
         {asked && (
           <div className="wsconfirm" role="alertdialog" aria-labelledby="provider-leave-q" aria-describedby="provider-leave-q"
             data-action-keydown="layer.dismiss"
@@ -338,7 +344,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
           <ProviderDetail key={current.key} a={current} port={port} busy={busy} setBusy={setBusy}
             kind={protocol[current.key] ?? activeKindFor(current)}
             onProtocol={(k) => leave(() => onProtocol(current, k))}
-            onRemove={remove} removeFailed={removeFailed}
+            onRemove={remove} removeFailed={removal?.key === current.key ? removal.why : ""}
             onRename={() => startRename(current.key)}
             declare={declare}
             onEdited={() => { const fresh = reload(); onChanged(); return fresh; }}

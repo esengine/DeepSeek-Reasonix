@@ -221,11 +221,10 @@ func (s *providerSetupSession) remove(name string) error {
 		return fmt.Errorf("remove provider: no provider %q", name)
 	}
 	before := providerSetupEntryPtr(*current)
-	if err := s.cfg.RemoveProvider(name); err != nil {
+	if _, err := s.cfg.RemoveProvider(name); err != nil {
 		return err
 	}
 	s.recordProviderMutation(name, before, nil)
-	s.removeProviderAccess(name)
 	if _, existed := s.originalProviders[name]; existed {
 		s.removed[name] = true
 	}
@@ -275,22 +274,6 @@ func (s *providerSetupSession) addProviderAccess(entries []config.ProviderEntry)
 		seen[name] = true
 	}
 	s.accessDeclared = true
-	s.recordAccessTransition(before)
-}
-
-func (s *providerSetupSession) removeProviderAccess(name string) {
-	name = strings.TrimSpace(name)
-	if name == "" || len(s.cfg.Desktop.ProviderAccess) == 0 {
-		return
-	}
-	before := append([]string(nil), s.cfg.Desktop.ProviderAccess...)
-	out := s.cfg.Desktop.ProviderAccess[:0]
-	for _, current := range s.cfg.Desktop.ProviderAccess {
-		if strings.TrimSpace(current) != name {
-			out = append(out, current)
-		}
-	}
-	s.cfg.Desktop.ProviderAccess = out
 	s.recordAccessTransition(before)
 }
 
@@ -704,7 +687,7 @@ func (s *providerSetupSession) replayOperations(cfg *config.Config, accessDeclar
 				return &providerSetupConflictError{field: fmt.Sprintf("provider %q", operation.providerName)}
 			}
 			if operation.afterProvider == nil {
-				if err := cfg.RemoveProvider(operation.providerName); err != nil {
+				if _, err := cfg.RemoveProvider(operation.providerName); err != nil {
 					return fmt.Errorf("replay remove provider %q: %w", operation.providerName, err)
 				}
 			} else if err := cfg.UpsertProviderPreservingRuntime(*operation.afterProvider); err != nil {

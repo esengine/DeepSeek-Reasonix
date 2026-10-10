@@ -252,7 +252,7 @@ func (g *userConfigGen) edits(c *Config) []configEdit {
 	if len(named) > 0 {
 		victim, hv := named[g.r.Intn(len(named))], g.pick("1", "2")
 		all = append(all,
-			configEdit{"remove provider " + victim, func(c *Config) error { return c.RemoveProvider(victim) }},
+			configEdit{"remove provider " + victim, func(c *Config) error { _, err := c.RemoveProvider(victim); return err }},
 			configEdit{"rename provider " + victim, renameProvider(victim, victim+"x")},
 			configEdit{"reverse providers", func(c *Config) error {
 				slices.Reverse(c.Providers)

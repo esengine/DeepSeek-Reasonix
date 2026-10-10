@@ -147,6 +147,7 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/frontend/serve/providers.go", "providerView", tsProviderFile, "ProviderEntry"},
 	{"internal/frontend/serve/providers.go", "protocolView", tsProviderFile, "Protocol"},
 	{"internal/frontend/serve/provider_check.go", "providerCheck", tsProviderFile, "ProviderCheck"},
+	{"internal/frontend/serve/providers.go", "providerRemovalView", tsProviderFile, "ProviderRemoval"},
 	{"internal/frontend/serve/provider_check.go", "providerModelCheck", tsProviderFile, "ProviderModelCheck"},
 	{"internal/frontend/serve/settings.go", "modelEntry", tsModelFile, "ModelEntry"},
 	// A per-profile entry that outranks a role's global model. A scope the page

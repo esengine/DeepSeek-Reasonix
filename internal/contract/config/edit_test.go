@@ -956,11 +956,11 @@ func TestRemoveProvider(t *testing.T) {
 	for i := range c.Providers {
 		c.Providers[i].APIKeyEnv = ""
 	}
-	if err := c.RemoveProvider(c.DefaultModel); err != nil || c.DefaultModel != "" {
+	if _, err := c.RemoveProvider(c.DefaultModel); err != nil || c.DefaultModel != "" {
 		t.Errorf("remove the default with no fallback: err=%v default=%q, want it removed and cleared", err, c.DefaultModel)
 	}
 	// Removing the planner provider clears planner_model.
-	if err := c.RemoveProvider("deepseek-pro"); err != nil {
+	if _, err := c.RemoveProvider("deepseek-pro"); err != nil {
 		t.Fatalf("remove planner provider: %v", err)
 	}
 	if c.Agent.PlannerModel != "" {
@@ -970,7 +970,7 @@ func TestRemoveProvider(t *testing.T) {
 		t.Error("provider not actually removed")
 	}
 	// Unknown name errors.
-	if err := c.RemoveProvider("ghost"); err == nil {
+	if _, err := c.RemoveProvider("ghost"); err == nil {
 		t.Error("expected error for unknown provider")
 	}
 }

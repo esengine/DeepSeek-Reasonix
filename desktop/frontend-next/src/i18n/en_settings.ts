@@ -70,6 +70,13 @@ export const EN_SETTINGS: Record<string, string> = {
   "其他分区与当前会话不受影响；关闭设置后重新打开可重试。":
     "Other sections and your session are unaffected; close Settings and reopen to try again.",
   "操作未完成": "That did not go through",
+  "{name} 的删除没有完整完成": "Removing {name} did not fully complete",
+  "已删除 {name}": "Removed {name}",
+  "已改用 {to}：{roles}": "Now using {to} for: {roles}",
+  "已清空，对应功能已关闭：{roles}": "Cleared, so these are off: {roles}",
+  "恢复审查": "Recovery review",
+  "小型分类": "Small classifications",
+  "顾问": "Advisor",
 
   // ── 设置：会话 ───────────────────────────────────────────────────
   "决定任务完成的判定标准。切换立即生效，不会重建运行时。": "Sets what counts as finished. Switching takes effect immediately and does not rebuild the runtime.",

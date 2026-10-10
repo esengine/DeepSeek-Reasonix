@@ -31,7 +31,7 @@ const stored = (name: string): ProviderEntry => ({
   canSetVision: true,
 });
 
-type Outcome = "ok" | "refused" | "after-write-failure";
+type Outcome = "ok" | "refused" | "after-write-failure" | "roles-changed";
 
 function harness(outcome: Outcome) {
   const disk = new Map<string, ProviderEntry>([["relay", stored("relay")], ["other", stored("other")]]);
@@ -44,7 +44,9 @@ function harness(outcome: Outcome) {
       removed.push(name);
       if (outcome === "refused") throw new HttpError(409, "running", { code: "provider.running" });
       disk.delete(name);
+      if (outcome === "roles-changed") return { movedTo: "other", moved: ["default", "subagent:review"], cleared: ["vision", "advisor"] };
       if (outcome === "after-write-failure") throw new HttpError(500, "switch model: boom", { error: "switch model: boom" });
+      return { movedTo: "", moved: [], cleared: [] };
     }),
   } as unknown as Port;
   render(<Providers port={port} onChanged={() => {}} onFailed={failed} protocol={{}}
@@ -53,6 +55,7 @@ function harness(outcome: Outcome) {
 }
 
 const detail = () => screen.getByRole("region");
+const rolesNote = () => screen.queryAllByRole("status").find((n) => n.classList.contains("find")) ?? null;
 const del = () => within(detail()).getByRole("button", { name: "删除" });
 
 it("drops a removed service from the list", async () => {
@@ -89,5 +92,39 @@ it("re-reads the kernel's state after a removal that failed once it was written"
   await userEvent.click(del());
   await waitFor(() => expect(screen.queryAllByText("relay.example")).toHaveLength(0));
   expect(h.disk.has("relay")).toBe(false);
-  expect(screen.getAllByRole("alert").length).toBeGreaterThan(0);
+  const alert = screen.getByRole("alert");
+  expect(alert.textContent).toContain("relay");
+  expect(alert.textContent).toContain("boom");
+});
+
+it("does not carry that failure into the detail of the service shown next", async () => {
+  harness("after-write-failure");
+  await screen.findAllByText("relay.example");
+  await userEvent.click(del());
+  await waitFor(() => expect(screen.queryAllByText("relay.example")).toHaveLength(0));
+  expect(within(detail()).queryByRole("alert")).toBeNull();
+  await userEvent.click(screen.getByText("other.example"));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
+it("says which roles moved and which were switched off by a removal", async () => {
+  harness("roles-changed");
+  await screen.findAllByText("relay.example");
+  await userEvent.click(del());
+  await waitFor(() => expect(rolesNote()).not.toBeNull());
+  const note = rolesNote()!;
+  expect(note.textContent).toContain("relay");
+  expect(note.textContent).toContain("other");
+  expect(note.textContent).toContain("默认模型、子代理 · review");
+  expect(note.textContent).toContain("看图、顾问");
+  await userEvent.click(screen.getByText("other.example"));
+  await waitFor(() => expect(rolesNote()).toBeNull());
+});
+
+it("stays silent about roles when a removal changed none", async () => {
+  harness("ok");
+  await screen.findAllByText("relay.example");
+  await userEvent.click(del());
+  await waitFor(() => expect(screen.queryAllByText("relay.example")).toHaveLength(0));
+  expect(rolesNote()).toBeNull();
 });
