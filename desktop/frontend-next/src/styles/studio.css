@@ -894,11 +894,11 @@ body { background: var(--page) !important; }
   letter-spacing: 0; -webkit-font-smoothing: antialiased;
 }
 .activity-group {
-  margin: 12px 0 0; border: 1px solid var(--hair); border-radius: 9px;
+  margin: var(--sp-6) 0 0; border: 1px solid var(--hair); border-radius: 9px;
   overflow: clip;
 }
 .activity-group > summary {
-  min-height: 38px; padding: 0 12px; display: flex; align-items: center; gap: 8px;
+  min-height: 38px; padding: 0 var(--sp-6); display: flex; align-items: center; gap: var(--sp-4);
   color: var(--muted); font-size: 11px; font-weight: 590; line-height: 1.5;
   cursor: pointer; user-select: none;
 }
