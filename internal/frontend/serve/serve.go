@@ -159,11 +159,11 @@ func (s *Server) initTitleProvider() {
 	if err != nil {
 		return
 	}
-	ref, _, ok := cfg.ResolveStartupChatModel()
+	start, ok := cfg.ResolveStartupChatModel()
 	if !ok {
 		return
 	}
-	entry, ok := cfg.ResolveModel(ref)
+	entry, ok := cfg.ResolveModel(start.Ref)
 	if !ok || !entry.Configured() {
 		return
 	}

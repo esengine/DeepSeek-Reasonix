@@ -32,9 +32,9 @@ func TestResolveStartupChatModel(t *testing.T) {
 			c := Default()
 			c.DefaultModel = tc.def
 			c.Providers = tc.providers
-			ref, skipped, ok := c.ResolveStartupChatModel()
-			if ref != tc.wantRef || skipped != tc.wantSkipped || ok != tc.wantOK {
-				t.Fatalf("ResolveStartupChatModel() = (%q, %q, %v), want (%q, %q, %v)", ref, skipped, ok, tc.wantRef, tc.wantSkipped, tc.wantOK)
+			start, ok := c.ResolveStartupChatModel()
+			if start.Ref != tc.wantRef || start.SkippedDefault != tc.wantSkipped || ok != tc.wantOK {
+				t.Fatalf("ResolveStartupChatModel() = (%+v, %v), want (%q, %q, %v)", start, ok, tc.wantRef, tc.wantSkipped, tc.wantOK)
 			}
 		})
 	}

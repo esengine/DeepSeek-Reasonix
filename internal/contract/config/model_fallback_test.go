@@ -117,7 +117,8 @@ func TestResolveNewSessionChatModelSkipsNonChatProviders(t *testing.T) {
 		},
 	}
 
-	got, fallback, ok := c.ResolveNewSessionChatModel()
+	start, ok := c.ResolveNewSessionChatModel()
+	got, fallback := start.Ref, start.Fallback
 	if !ok || !fallback || got != "visible/chat-model" {
 		t.Fatalf("ResolveNewSessionChatModel() = (%q, %v, %v), want (visible/chat-model, true, true)", got, fallback, ok)
 	}
@@ -132,7 +133,8 @@ func TestResolveNewSessionChatModelIgnoresDesktopProviderAccess(t *testing.T) {
 		},
 	}
 
-	got, fallback, ok := c.ResolveNewSessionChatModel()
+	start, ok := c.ResolveNewSessionChatModel()
+	got, fallback := start.Ref, start.Fallback
 	if !ok || fallback || got != "visible/chat" {
 		t.Fatalf("ResolveNewSessionChatModel() = (%q, %v, %v), want (visible/chat, false, true)", got, fallback, ok)
 	}
