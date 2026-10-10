@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -614,5 +615,106 @@ func TestFetchBytesSizedRequiresExactReleaseAssetLength(t *testing.T) {
 	}
 	if _, err := fetchBytesSized(client, "https://example.invalid/archive?body=x", maxCLIReleaseAssetSize+1); err == nil {
 		t.Fatal("fetchBytesSized accepted a size above the release maximum")
+	}
+}
+
+func npmLayout(t *testing.T, pkgName string) string {
+	t.Helper()
+	pkg := filepath.Join(t.TempDir(), "node_modules", "@reasonix", "cli-win32-x64")
+	if err := os.MkdirAll(filepath.Join(pkg, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"` + pkgName + `","version":"2.31.0"}`
+	if err := os.WriteFile(filepath.Join(pkg, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(pkg, "bin", "reasonix.exe")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return exe
+}
+
+func brewLayout(t *testing.T) (exe, link string) {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "Caskroom", "reasonix", "2.31.0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe = filepath.Join(dir, "reasonix")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link = filepath.Join(root, "bin", "reasonix")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(exe, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	return exe, link
+}
+
+func useExecutable(t *testing.T, exe string) {
+	t.Helper()
+	prev := upgradeExecutable
+	upgradeExecutable = func() (string, error) { return exe, nil }
+	t.Cleanup(func() { upgradeExecutable = prev })
+}
+
+func TestCheckSelfReplaceableNamesTheOwningManager(t *testing.T) {
+	brewExe, brewLink := brewLayout(t)
+	for _, c := range []struct{ name, exe, command string }{
+		{"npm", npmLayout(t, "@reasonix/cli-win32-x64"), "npm install -g reasonix@latest"},
+		{"brew via symlink", brewLink, "brew upgrade --cask reasonix"},
+		{"brew direct", brewExe, "brew upgrade --cask reasonix"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			useExecutable(t, c.exe)
+			var managed *managedInstallError
+			if !errors.As(checkSelfReplaceable(), &managed) || managed.command != c.command {
+				t.Fatalf("want managed install with %q, got %+v", c.command, managed)
+			}
+		})
+	}
+}
+
+func TestApplyCLIReleaseRefusesManagedInstallsWithoutTouchingThem(t *testing.T) {
+	brewExe, _ := brewLayout(t)
+	for _, c := range []struct{ name, exe, command string }{
+		{"npm", npmLayout(t, "@reasonix/cli-win32-x64"), "npm install -g reasonix@latest"},
+		{"brew", brewExe, "brew upgrade --cask reasonix"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			useExecutable(t, c.exe)
+			stderr := captureStderr(t, func() {
+				if code := applyCLIRelease(nil, nil, "v2.31.0", "v2.33.0"); code != 1 {
+					t.Fatalf("exit code = %d, want 1", code)
+				}
+			})
+			if !strings.Contains(stderr, c.command) {
+				t.Fatalf("stderr %q does not name %q", stderr, c.command)
+			}
+			if got, _ := os.ReadFile(c.exe); string(got) != "old" {
+				t.Fatalf("binary was modified: %q", got)
+			}
+		})
+	}
+}
+
+func TestUpgradeStillReplacesUnmanagedBinaries(t *testing.T) {
+	plain := filepath.Join(t.TempDir(), "reasonix")
+	if err := os.WriteFile(plain, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := npmLayout(t, "reasonix")
+	foreign := npmLayout(t, "some-other-package")
+	otherCask := filepath.Join(t.TempDir(), "Caskroom", "other", "1.0", "reasonix")
+	for _, exe := range []string{plain, wrapper, foreign, otherCask} {
+		useExecutable(t, exe)
+		if err := checkSelfReplaceable(); err != nil {
+			t.Fatalf("%s must stay self-upgradable, got %v", exe, err)
+		}
 	}
 }

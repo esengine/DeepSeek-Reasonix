@@ -709,6 +709,7 @@ var Chinese = Messages{
 	UpgradeApplying:            "正在替换二进制文件…",
 	UpgradeApplyFailed:         "应用更新失败：%v",
 	UpgradeSuccessFmt:          "已更新 %s → %s",
+	UpgradeManagedFmt:          "由包管理器安装，需用它升级才能保持其记录一致：%s",
 
 	ReportNoPending:           "没有待处理的 CLI 崩溃报告。",
 	ReportHeaderFmt:           "CLI 崩溃报告 %s",

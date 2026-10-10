@@ -708,6 +708,7 @@ var English = Messages{
 	UpgradeApplying:            "Replacing binary…",
 	UpgradeApplyFailed:         "failed to apply update: %v",
 	UpgradeSuccessFmt:          "Updated %s → %s",
+	UpgradeManagedFmt:          "installed through a package manager, which must do the upgrade to keep its records correct: %s",
 
 	ReportNoPending:           "No pending CLI crash reports.",
 	ReportHeaderFmt:           "CLI crash report %s",

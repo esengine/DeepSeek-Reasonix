@@ -269,6 +269,16 @@ func upgradeCommand(args []string, version string) int {
 		return 0
 	}
 
+	return applyCLIRelease(c, rel, cur, latest)
+}
+
+func applyCLIRelease(c *http.Client, rel *ghRelease, cur, latest string) int {
+	var managed *managedInstallError
+	if errors.As(checkSelfReplaceable(), &managed) {
+		fmt.Fprintf(os.Stderr, "%s "+i18n.M.UpgradeManagedFmt+"\n", i18n.M.ErrorPrefix, managed.command)
+		return 1
+	}
+
 	// 5. Find the asset for the current platform.
 	base := fmt.Sprintf("reasonix-%s-%s", runtime.GOOS, runtime.GOARCH)
 	asset := findCLIPlatformAsset(rel, runtime.GOOS, runtime.GOARCH)
