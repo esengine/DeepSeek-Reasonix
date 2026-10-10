@@ -492,11 +492,9 @@ body { background: var(--page) !important; }
 }
 .main { background: var(--surface) !important; }
 .panes { background: var(--surface) !important; }
-/* The prototype hid the pane navigation entirely, which also made trajectory,
-   task progress and the run graph unreachable. Keep the legacy pane strip
-   hidden, but expose the current purpose-based navigation. */
+/* Keep purpose-based navigation visible. App only mounts the session tab strip
+   when the reader opts in and more than one session is open. */
 .tabs { display: flex !important; }
-.panetabs { display: none !important; }
 .railhost { display: block; }
 .app { --srail-w: 36px; }
 

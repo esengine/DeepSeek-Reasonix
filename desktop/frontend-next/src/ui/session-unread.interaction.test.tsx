@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { App } from "./App";
 import { MockHub } from "../port/mock_hub";
+import { setShowsSessionTabs } from "../state/prefs";
 import type { AgentPort } from "../port/port";
 import type { RuntimeView, TreeWorkspace } from "../port/hub";
 import type { WireEvent } from "../port/wire";
@@ -118,6 +119,7 @@ const dotIn = (el: HTMLElement) => within(el).queryByRole("img", { name: "未读
 const focused = (on: boolean) => vi.spyOn(document, "hasFocus").mockReturnValue(on);
 
 beforeEach(() => {
+  setShowsSessionTabs(false);
   focused(true);
 });
 
@@ -276,6 +278,8 @@ describe("a folded project sums what is unread under it", () => {
 });
 
 describe("pane tabs carry the mark", () => {
+  beforeEach(() => setShowsSessionTabs(true));
+
   it("shows a dot on a tab whose session finished unseen and none on the one in front", async () => {
     const k = kernel([]);
     render(<App hub={k.hub} />);

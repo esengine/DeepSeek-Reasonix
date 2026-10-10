@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { App } from "./App";
 import { MockHub } from "../port/mock_hub";
+import { setShowsSessionTabs } from "../state/prefs";
 
-afterEach(cleanup);
+beforeEach(() => setShowsSessionTabs(true));
+afterEach(() => {
+  cleanup();
+  setShowsSessionTabs(false);
+});
 
 function hub() {
   const h = new MockHub();
