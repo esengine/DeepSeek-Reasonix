@@ -6,8 +6,8 @@
 //     reasoning_effort as a depth hint.
 //   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
-//   - open.bigmodel.cn / api.z.ai (Zhipu GLM) → emits thinking.type; the
-//     documented depth models also accept reasoning_effort
+//   - open.bigmodel.cn / api.z.ai or the glm protocol (Zhipu GLM) → emits
+//     thinking.type; the documented depth models also accept reasoning_effort
 //     (provider.ZhipuEffortContract). Older GLM keeps thinking.type only.
 //   - api.longcat.chat → emits thinking.type=enabled|disabled and omits
 //     reasoning_effort, matching LongCat's OpenAI-compatible API.
@@ -106,7 +106,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	zhipu := protocol == "glm" || (protocol == "" && IsZhipu(cfg.BaseURL))
 	zhipuDepth := ""
-	if zhipu && IsZhipu(cfg.BaseURL) {
+	if zhipu {
 		zhipuDepth = provider.ZhipuDepthModel(cfg.Model)
 	}
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
