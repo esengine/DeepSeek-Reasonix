@@ -29,10 +29,10 @@ const CONTINUATION_WHY: Record<string, string> = {
 // than a fact on a row, because both entries are the same key at the same host;
 // 测试连接 is what turns "which protocol did we record" back into a finding.
 export function ProviderDetail({
-  a, port, busy, setBusy, kind, onProtocol, onRemove, onRename, onEdited, onFailed, onDirty, declare,
+  a, port, busy, setBusy, kind, onProtocol, onRemove, removeFailed, onRename, onEdited, onFailed, onDirty, declare,
 }: {
   a: Account; port: Port; busy: string; setBusy: (b: string) => void;
-  kind: string; onProtocol: (kind: string) => void; onRemove: (name: string) => void; onRename: () => void;
+  kind: string; onProtocol: (kind: string) => void; onRemove: (name: string) => void; removeFailed: string; onRename: () => void;
   onEdited: () => void | Promise<void>; onFailed: (why: string) => void; onDirty: (dirty: boolean) => void; declare?: string;
 }) {
   const [found, setFound] = useState<ProviderCheck | null>(null);
@@ -104,6 +104,12 @@ export function ProviderDetail({
           {t("删除")}
         </button>
       </header>
+      {removeFailed && (
+        <div className="find" data-lvl="warn" role="alert">
+          <span className="t">{t("操作未完成")}</span>
+          <span className="why">{removeFailed}</span>
+        </div>
+      )}
       {refused && (
         <div className="find" data-lvl="warn" role="status">
           <span className="t">{refused}</span>

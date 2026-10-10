@@ -101,7 +101,9 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
   const [adding, setAdding] = useState(false);
   useEscape(adding, () => setAdding(false));
   const [busy, setBusy] = useState("");
-  const [picked, setPicked] = useState("");
+  const [removeFailed, setRemoveFailed] = useState("");
+  const [picked, setPickedRaw] = useState("");
+  const setPicked = useCallback((key: string) => { setRemoveFailed(""); setPickedRaw(key); }, []);
   const [q, setQ] = useState("");
   const [renaming, setRenaming] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -137,13 +139,14 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
   const remove = async (name: string) => {
     setBusy(name);
     onFailed("");
+    setRemoveFailed("");
     try {
       await port.removeProvider(name);
+    } catch (e) {
+      setRemoveFailed(reason(e));
+    } finally {
       reload();
       onChanged();
-    } catch (e) {
-      onFailed(reason(e));
-    } finally {
       setBusy("");
     }
   };
@@ -335,7 +338,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
           <ProviderDetail key={current.key} a={current} port={port} busy={busy} setBusy={setBusy}
             kind={protocol[current.key] ?? activeKindFor(current)}
             onProtocol={(k) => leave(() => onProtocol(current, k))}
-            onRemove={remove}
+            onRemove={remove} removeFailed={removeFailed}
             onRename={() => startRename(current.key)}
             declare={declare}
             onEdited={() => { const fresh = reload(); onChanged(); return fresh; }}

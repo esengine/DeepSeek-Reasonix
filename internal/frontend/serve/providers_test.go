@@ -503,3 +503,36 @@ func TestProviderNameRE_Boundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveProviderLeavesNoRoleNamingIt(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+
+	add := postProvider(t, srv.URL, "/providers", `{"name":"spare","kind":"openai","baseUrl":"https://x.invalid","models":["m"]}`)
+	add.Body.Close()
+	path := config.UserConfigPath()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roles := "[agent]\nguardian_model = \"spare/m\"\nvision_model = \"spare\"\nadvisor_model = \"spare/m\"\n"
+	if err := os.WriteFile(path, append(body, []byte("\n"+roles)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postProvider(t, srv.URL, "/providers/remove", `{"name":"spare"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := readAllString(resp)
+		t.Fatalf("remove = %d: %s", resp.StatusCode, b)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(saved), "spare") {
+		t.Fatalf("saved config still names the removed provider:\n%s", saved)
+	}
+}

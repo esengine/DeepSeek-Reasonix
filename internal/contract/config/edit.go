@@ -474,9 +474,8 @@ func (c *Config) modelRefTargetsProvider(ref, name string) bool {
 }
 
 // RemoveProvider deletes the named provider. References to the removed provider
-// are migrated to the first remaining configured provider when possible. The
-// default model is required, so removal is refused when no fallback exists;
-// optional planner/subagent refs are cleared instead of being left dangling.
+// move to the first remaining configured provider, or clear when none exists;
+// roles needing a specific kind of model are cleared, never moved.
 // ErrProviderNotFound is a removal of a provider the file does not hold.
 var ErrProviderNotFound = errors.New("no such provider")
 
@@ -507,6 +506,7 @@ func (c *Config) RemoveProvider(name string) error {
 	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
 		fallback = c.providerRemovalFallback(name)
 	}
+	c.clearUnmovableRoleRefs(name)
 	c.Providers = append(c.Providers[:idx], c.Providers[idx+1:]...)
 
 	if defaultRefsProvider {
