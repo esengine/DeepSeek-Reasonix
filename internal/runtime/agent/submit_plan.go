@@ -15,6 +15,8 @@ import (
 // the next round rather than a silent misparse downstream.
 type SubmitPlanTool struct{}
 
+func init() { tool.RegisterConditional(&SubmitPlanTool{}) }
+
 func NewSubmitPlanTool() *SubmitPlanTool { return &SubmitPlanTool{} }
 
 func (*SubmitPlanTool) Name() string { return "submit_plan" }

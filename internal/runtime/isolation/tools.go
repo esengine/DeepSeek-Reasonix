@@ -39,6 +39,11 @@ const (
 	DiscardName = "discard_isolated"
 )
 
+func init() {
+	tool.RegisterConditional(&ApplyTool{})
+	tool.RegisterConditional(&DiscardTool{})
+}
+
 func (*ApplyTool) Name() string { return ApplyName }
 
 func (*ApplyTool) Description() string {

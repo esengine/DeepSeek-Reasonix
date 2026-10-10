@@ -52,6 +52,8 @@ type Spec struct {
 type advise struct{ spec Spec }
 
 // New returns the advise tool bound to one advising model.
+func init() { tool.RegisterConditional(advise{}) }
+
 func New(spec Spec) tool.Tool { return advise{spec: spec} }
 
 func (advise) Name() string { return Name }

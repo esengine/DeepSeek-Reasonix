@@ -15,6 +15,8 @@ import (
 // of the planner's prose.
 type ConcludeNoChangesTool struct{}
 
+func init() { tool.RegisterConditional(&ConcludeNoChangesTool{}) }
+
 func NewConcludeNoChangesTool() *ConcludeNoChangesTool { return &ConcludeNoChangesTool{} }
 
 func (*ConcludeNoChangesTool) Name() string { return "conclude_no_changes" }

@@ -32,6 +32,8 @@ type ReviewReportGrant struct {
 // It is never registered on the parent agent tool surface.
 type ReviewReportTool struct{ grant ReviewReportGrant }
 
+func init() { tool.RegisterConditional(&ReviewReportTool{}) }
+
 func NewReviewReportTool(grant ReviewReportGrant) *ReviewReportTool {
 	return &ReviewReportTool{grant: grant}
 }

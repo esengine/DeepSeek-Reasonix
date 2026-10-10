@@ -67,6 +67,8 @@ type Spec struct {
 type bestOf struct{ spec Spec }
 
 // New returns the best_of_n tool.
+func init() { tool.RegisterConditional(bestOf{}) }
+
 func New(spec Spec) tool.Tool { return bestOf{spec: spec} }
 
 func (bestOf) Name() string { return Name }

@@ -325,6 +325,16 @@ func RegisterBuiltin(t Tool) {
 	builtins[name] = t
 }
 
+var conditionals = map[string]Tool{}
+
+// RegisterConditional declares a tool that exists only where assembly adds it
+// (a sub-registry, a configured backend), so a name that is not in the registry
+// at one moment is still a real tool. Intended for init().
+func RegisterConditional(t Tool) { conditionals[t.Name()] = t }
+
+// ConditionalNames returns the names declared by RegisterConditional, sorted.
+func ConditionalNames() []string { return slices.Sorted(maps.Keys(conditionals)) }
+
 // Builtins returns all registered built-in tools, sorted by name.
 func Builtins() []Tool {
 	names := slices.Sorted(maps.Keys(builtins))
