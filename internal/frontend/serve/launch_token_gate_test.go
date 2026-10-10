@@ -137,3 +137,34 @@ func TestAuthDisabledWildcardBindAdmitsOnlyInterfaceAddresses(t *testing.T) {
 		}
 	}
 }
+
+// An unpaired phone installs the page before it pairs, so the manifest and the
+// icons it names have to load with no credential, and the manifest has to say
+// what it is.
+func TestUnpairedDeviceLoadsTheManifestAndItsIcons(t *testing.T) {
+	page := fstest.MapFS{
+		"index.html":                  {Data: []byte("<title>studio</title>")},
+		"manifest.webmanifest":        {Data: []byte(`{"name":"Reasonix Studio"}`)},
+		"icons/icon-192.png":          {Data: []byte("png")},
+		"icons/icon-maskable-512.png": {Data: []byte("png")},
+	}
+	hub := NewHub(HubOptions{Page: page})
+	defer hub.Shutdown()
+	gate := NewDeviceGate(hub.Handler(), DeviceGateOptions{Registry: NewDeviceRegistry(), Origin: "http://192.168.1.5:9000", Page: page})
+	for path, wantType := range map[string]string{
+		"/manifest.webmanifest":        "application/manifest+json",
+		"/icons/icon-192.png":          "image/png",
+		"/icons/icon-maskable-512.png": "image/png",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "192.168.1.5:9000"
+		rec := httptest.NewRecorder()
+		gate.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("unpaired GET %s = %d, want 200", path, rec.Code)
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, wantType) {
+			t.Errorf("GET %s Content-Type = %q, want %q", path, got, wantType)
+		}
+	}
+}
