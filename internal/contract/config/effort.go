@@ -298,6 +298,9 @@ func EffectiveEffort(e *ProviderEntry) string {
 	if e == nil {
 		return ""
 	}
+	if explicitReasoningProtocol(e) == ReasoningProtocolNone {
+		return ""
+	}
 	if effort := zhipuLegacyStoredEffort(e, normalizeStoredEffort(e.Effort)); effort != "" && effortInContract(e, effort) {
 		return effort
 	}
@@ -545,13 +548,29 @@ func zhipuEffortCapability(e *ProviderEntry) EffortCapability {
 	return EffortCapability{Supported: true, Levels: levels, Default: contract.Default}
 }
 
-// zhipuDepthContract resolves the documented depth contract for the entry, or
-// false when the entry is not a Zhipu GLM depth model.
+// zhipuDepthContract resolves the documented depth contract for the entry. It
+// applies when the entry resolves to the glm reasoning protocol — declared on the
+// entry or its model — or sits on Zhipu's own endpoint, and the model has a row
+// in the contract table. No other host is consulted.
 func zhipuDepthContract(e *ProviderEntry) (provider.ZhipuEffort, bool) {
-	if !isZhipuEntry(e) {
+	if e == nil || e.Kind != "openai" {
+		return provider.ZhipuEffort{}, false
+	}
+	if ReasoningProtocolForEntry(e) != ReasoningProtocolGLM && !isZhipuEntry(e) {
 		return provider.ZhipuEffort{}, false
 	}
 	return provider.ZhipuEffortContract(e.Model)
+}
+
+// zhipuMenuContract is zhipuDepthContract for an entry whose menu is the
+// contract itself. A menu the connection typed is its own vocabulary, so the
+// contract's spellings (`none`, `low`, its default) do not translate stored
+// choices onto it.
+func zhipuMenuContract(e *ProviderEntry) (provider.ZhipuEffort, bool) {
+	if len(normalizedSupportedEfforts(e)) > 0 {
+		return provider.ZhipuEffort{}, false
+	}
+	return zhipuDepthContract(e)
 }
 
 // EffortForcesThinking reports whether the entry's model always runs thinking,
@@ -560,7 +579,7 @@ func zhipuDepthContract(e *ProviderEntry) (provider.ZhipuEffort, bool) {
 // on their cheapest level instead. The /effort menu says so where it offers the
 // level.
 func EffortForcesThinking(e *ProviderEntry) bool {
-	contract, ok := zhipuDepthContract(e)
+	contract, ok := zhipuMenuContract(e)
 	return ok && contract.ForcesThinking()
 }
 
@@ -569,7 +588,7 @@ func EffortForcesThinking(e *ProviderEntry) bool {
 // `disabled` becomes the contract's DisabledTo — which is `none` where thinking
 // can be switched off, and `low` where it cannot (GLM-5.3).
 func zhipuLegacyStoredEffort(e *ProviderEntry, effort string) string {
-	contract, ok := zhipuDepthContract(e)
+	contract, ok := zhipuMenuContract(e)
 	if !ok {
 		return effort
 	}
@@ -587,7 +606,7 @@ func normalizeZhipuEffort(e *ProviderEntry, level string) (string, error) {
 	if containsString(cap.Levels, level) {
 		return level, nil
 	}
-	if contract, ok := zhipuDepthContract(e); ok {
+	if contract, ok := zhipuMenuContract(e); ok {
 		switch level {
 		case "enabled":
 			return contract.Default, nil

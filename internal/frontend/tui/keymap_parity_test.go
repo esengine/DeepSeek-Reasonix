@@ -319,3 +319,20 @@ func TestCtrlEnterSteersOnlyARunningTurn(t *testing.T) {
 		t.Fatalf("the steered text stayed in the composer: %q", m.composer.Value())
 	}
 }
+
+// Ctrl+Z suspends the TUI to the shell, as 1.x did; Bubble Tea releases the
+// terminal first and ignores the request where there is no job control.
+func TestCtrlZSuspendsToTheShell(t *testing.T) {
+	m, k := testModel(t)
+	typeText(m, "draft")
+	cmd := m.keyCmd(tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("Ctrl+Z did nothing")
+	}
+	if _, ok := cmd().(tea.SuspendMsg); !ok {
+		t.Fatal("Ctrl+Z did not ask to suspend")
+	}
+	if m.composer.Value() != "draft" || calledWith(k, "POST /") {
+		t.Fatalf("Ctrl+Z touched the draft or the kernel: %q\n%s", m.composer.Value(), strings.Join(k.seen(), "\n"))
+	}
+}

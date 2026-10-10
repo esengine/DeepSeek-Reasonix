@@ -5,10 +5,15 @@ import "./testkit";
 import { Composer } from "./Composer";
 import { MockPort } from "../port/mock";
 import { DeliveryError, HttpError } from "../port/port";
-import type { AgentPort, ApprovalMode, Attachment, Completion, ModelEntry, Preset, SessionStatus } from "../port/port";
+import type { AgentPort, ApprovalMode, Attachment, Completion, ModelEntry, Preset, SessionStatus, WorkspaceGit } from "../port/port";
 import { draftKey } from "./drafts";
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+
+// The workspace's git answer, the way /workspace/git words it. Tests that name
+// an override get it; the rest get a plain repository on main.
+const git = (over: Partial<WorkspaceGit> = {}): WorkspaceGit =>
+  ({ repo: true, name: "reasonix", branch: "main", detached: false, added: 0, removed: 0, untracked: 0, ...over });
 
 const status = (over: Partial<SessionStatus> = {}) =>
   ({
@@ -42,7 +47,7 @@ function touchPointer() {
 }
 
 function draw(
-  over: { running?: boolean; onSubmit?: (text: string) => Promise<boolean>; port?: MockPort; st?: SessionStatus; changeCount?: number; host?: string } = {},
+  over: { running?: boolean; onSubmit?: (text: string) => Promise<boolean>; port?: MockPort; st?: SessionStatus; changeCount?: number; host?: string; git?: WorkspaceGit | null; onTreeChanged?: () => void } = {},
 ) {
   const port = over.port ?? new MockPort();
   const onSubmit = over.onSubmit ?? vi.fn(async () => true);
@@ -57,6 +62,8 @@ function draw(
       onChanged={vi.fn()}
       onError={vi.fn()}
       changeCount={over.changeCount}
+      git={"git" in over ? over.git : git()}
+      onTreeChanged={over.onTreeChanged}
       draftKey={draftKey(over.host ?? "", st.workspaceRoot ?? "/workspace", st.sessionPath ?? "")}
     />,
   );
@@ -437,6 +444,66 @@ describe("composer menus", () => {
   it("shows real workspace changes beside the current branch", async () => {
     draw({ changeCount: 3 });
     expect(await screen.findByText("3 个变更")).toBeTruthy();
+    expect(await screen.findByText("main")).toBeTruthy();
+  });
+
+  // The reading is the tree's, not the capability scope's project identity: a
+  // detached HEAD names its commit, and the menu marks nothing as current.
+  it("names a detached HEAD by its commit and marks no menu row", async () => {
+    draw({ git: git({ branch: "4f2c1ab", detached: true }) });
+    const chip = await screen.findByText("4f2c1ab");
+    fireEvent.click(chip.closest("button")!);
+    expect(await screen.findByText("本地分支")).toBeTruthy();
+    // The menu rows carry the trigger's action id, so the assertion reads the
+    // branch menu and not whichever other menu is mounted.
+    expect(document.querySelector('[data-action="git.branch"][data-on]')).toBeNull();
+  });
+
+  it("says when the workspace has no repository instead of vanishing", () => {
+    draw({ git: git({ repo: false }) });
+    expect(screen.getByRole("img", { name: "非 Git 仓库" })).toBeTruthy();
+  });
+
+  // Not answered yet is not the same fact as not a repository, and the two
+  // must not render as one word.
+  it("renders nothing before git has answered", () => {
+    draw({ git: null });
+    expect(document.querySelector(".studio-branch")).toBeNull();
+  });
+
+  it("keeps the branch trigger named and its refresh tooltip reachable by keyboard", async () => {
+    draw();
+    const chip = await screen.findByRole("button", { name: "当前 Git 分支：main" });
+    chip.focus();
+    expect(document.activeElement).toBe(chip);
+    const tooltip = document.getElementById(chip.getAttribute("aria-describedby") ?? "");
+    expect(tooltip?.textContent).toContain("非实时");
+  });
+
+  it("lists local branches, marks the current one, and refreshes the tree on a switch", async () => {
+    const onTreeChanged = vi.fn();
+    const { port } = draw({ changeCount: 2, onTreeChanged });
+    const chip = await screen.findByText("main");
+    fireEvent.click(chip.closest("button")!);
+    const menu = await screen.findByRole("menu");
+    const marked = menu.querySelector("[data-on]");
+    expect(marked?.getAttribute("data-value")).toBe("main");
+    expect(screen.getByRole("menuitem", { name: "studio" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "studio" }));
+    await waitFor(() => expect(onTreeChanged).toHaveBeenCalled());
+    expect(port.branchState.branch).toBe("studio");
+  });
+
+  it("re-reads the branch list each time the menu opens", async () => {
+    const { port } = draw({});
+    const chip = await screen.findByText("main");
+    const spy = vi.spyOn(port, "branches");
+    fireEvent.click(chip.closest("button")!);
+    await screen.findByRole("menu");
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(chip.closest("button")!);
+    await screen.findByRole("menu");
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
   it("dismisses completion when focus moves to a toolbar control", async () => {

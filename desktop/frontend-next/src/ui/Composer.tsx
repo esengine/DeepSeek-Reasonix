@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
-import type { AgentPort, ChipCall, ModelEntry, SessionStatus, Attachment } from "../port/port";
+import type { AgentPort, ChipCall, ModelEntry, SessionStatus, Attachment, WorkspaceGit } from "../port/port";
 import { Picker } from "./Menu";
+import { BranchChip } from "./BranchChip";
 import { Policy } from "./Policy";
 import { modelMenu } from "./modelmenu";
 import { effortMenu, effortReading, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
 import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
+import { useFitHeight } from "./fitHeight";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
 import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
@@ -41,6 +43,13 @@ interface Props {
   onError: (e: unknown) => void;
   onSettings?: (section?: string) => void;
   changeCount?: number;
+  // The work tree's Git state as git itself reports it, refreshed on the same
+  // path as changeCount (turn boundaries, writes). null is "not answered yet";
+  // repo:false is a workspace with no repository, and the two render apart.
+  git?: WorkspaceGit | null;
+  // Called after a branch switch landed, so the change list, the branch reading
+  // and the session's workspace view re-read what the checkout moved.
+  onTreeChanged?: () => void;
   // Bumped when settings change; a source edited there can change the ladder.
   pulse?: number;
   draftKey?: string;
@@ -91,17 +100,9 @@ function releaseChip(c: Chip) {
 let chipSeq = 0;
 const chipId = () => `c${++chipSeq}`;
 
-export function Composer({ port, status, running, quote, restore, focus, onSubmit, onChanged, onError, onSettings = () => {}, changeCount = 0, pulse = 0, draftKey = "" }: Props) {
+export function Composer({ port, status, running, quote, restore, focus, onSubmit, onChanged, onError, onSettings = () => {}, changeCount = 0, git = null, onTreeChanged, pulse = 0, draftKey = "" }: Props) {
   const touch = touchKeyboard();
   const providerOrder = useProviderOrder();
-  const [branch, setBranch] = useState("");
-  useEffect(() => {
-    let alive = true;
-    port.capabilityScope()
-      .then((scope) => alive && setBranch(scope.repo ? (scope.branch || t("分离状态")) : ""))
-      .catch(() => alive && setBranch(""));
-    return () => { alive = false; };
-  }, [port, status?.workspaceRoot]);
   const [submitting, setSubmitting] = useState(false);
   const { text, setText, beginSubmit, finishSubmit } = useDraft(draftKey, submitting);
   // The caret decides which token is being completed, so it is state here
@@ -123,7 +124,6 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
   const guide = useId();
   const completionId = useId();
   const attachTipId = useId();
-  const branchTipId = useId();
   // Set only when a completion moved the caret: the browser puts it at the end
   // of a programmatic value, which is wrong for anything accepted mid-line.
   const pending = useRef<number | null>(null);
@@ -192,42 +192,12 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
     setStopping(false);
   }, [running, kernelIdle]);
 
-  const sizeBox = useCallback(() => {
-    const el = box.current;
-    if (!el) return;
-    if (pending.current !== null) {
-      el.setSelectionRange(pending.current, pending.current);
-      pending.current = null;
-    }
-    // CSS caps the top by the available room; the element still has to be told to grow.
-    // The floor is not decoration: under an interface zoom, scrollHeight is not
-    // in the same units the height we write back is, and the two engines do not
-    // round it the same way. Writing a smaller number than one line squeezes the
-    // box shut — an empty composer with both scrollbars showing and nowhere to
-    // type. One line is the least it can ever legitimately be.
-    const line = parseFloat(getComputedStyle(el).lineHeight) || 22;
-    el.style.height = "auto";
-    // A placeholder is not content. On first paint the sidebars may still own
-    // most of a narrow viewport, and its wrapped scrollHeight must not become
-    // the empty editor's remembered height.
-    el.style.height = `${text ? Math.max(line, el.scrollHeight) : line}px`;
-  }, [text]);
-
-  useLayoutEffect(sizeBox, [sizeBox]);
-
-  useEffect(() => {
-    const el = box.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    let width = el.getBoundingClientRect().width;
-    const observer = new ResizeObserver(([entry]) => {
-      const next = entry?.contentRect.width ?? width;
-      if (Math.abs(next - width) < 0.5) return;
-      width = next;
-      sizeBox();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [sizeBox]);
+  const placeCaret = useCallback((el: HTMLTextAreaElement) => {
+    if (pending.current === null) return;
+    el.setSelectionRange(pending.current, pending.current);
+    pending.current = null;
+  }, []);
+  useFitHeight(box, text, placeCaret);
 
   // Attachments ride into the turn as path references, exactly as they do from
   // the CLI — the host saved the bytes, the turn parser resolves the token. A
@@ -676,25 +646,7 @@ export function Composer({ port, status, running, quote, restore, focus, onSubmi
             label={<><StudioIcon name="agent" /><span className="studio-sr-label">{t("计划")}</span><span>{status?.plan ? "Plan" : "Agent"}</span><StudioIcon name="down" /></>}
           />
         </div>
-        {branch && (
-          <div className="studio-branch-pop">
-            <div
-              className="mode plain studio-branch"
-              tabIndex={0}
-              aria-label={t("当前 Git 分支：{branch}", { branch })}
-              aria-describedby={branchTipId}
-            >
-              <span className="ic" aria-hidden="true"><StudioIcon name="branch" /></span>
-              <span className="lb">{branch}</span>
-              {changeCount > 0 && <small>{t("{n} 个变更", { n: changeCount })}</small>}
-            </div>
-            <div className="studio-branch-card" id={branchTipId} role="tooltip">
-              <b>{t("当前分支 · {branch}", { branch })}</b>
-              <span>{changeCount > 0 ? t("当前工作区 · {n} 个本地变更", { n: changeCount }) : t("当前工作区 · 后续任务继续使用此分支")}</span>
-              <small>{t("仅作状态提示，无需点击")}</small>
-            </div>
-          </div>
-        )}
+        <BranchChip port={port} git={git} changeCount={changeCount} onChanged={onChanged} onSwitched={onTreeChanged} onError={onError} />
         {/* The toggle keeps its legacy meaning: it follows `plan`, which the
             kernel turns off the moment a plan is approved. The lifecycle is a
             separate reading — an approved plan is still running, and saying so

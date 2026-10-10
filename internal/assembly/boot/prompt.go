@@ -58,6 +58,7 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
 	sysPrompt = appendCorePolicies(sysPrompt)
+	timer.mark("prompt")
 	// Role settings, the workspace path and its version control ride the per-turn
 	// transient blocks, so this prefix is identical for every project on the
 	// machine; per-project text added here would diverge every byte after it.
@@ -83,6 +84,7 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 			sysPrompt += "\n\n" + envSection
 		}
 	}
+	timer.mark("environment")
 	sysPrompt = appendOfflineEnvironmentNote(sysPrompt, cfg.Environment.Offline)
 
 	// Memory folds in exactly here, once, becoming part of the durable prefix,

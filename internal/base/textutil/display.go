@@ -22,12 +22,7 @@ func SanitizeDisplay(s string) string {
 		switch {
 		case r == '\t' || r == '\n' || r == '\r':
 			b.WriteByte(' ')
-		case r < 0x20 || r == 0x7f:
-			// Drop remaining C0 controls and DEL.
-		case r >= 0x80 && r <= 0x9f:
-			// Drop C1 controls (including after partial decode).
-		case unicode.Is(unicode.Cc, r):
-			// Other control categories.
+		case isControl(r), unicode.Is(unicode.Cc, r):
 		default:
 			b.WriteRune(r)
 		}
@@ -41,7 +36,7 @@ func SanitizeDisplay(s string) string {
 func SanitizeLaunch(s string) string {
 	s = SanitizeDisplay(s)
 	return strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Cf, r) {
+		if isFormat(r) {
 			return -1
 		}
 		return r

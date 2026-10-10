@@ -136,14 +136,42 @@ func (a *contextWindow) noteMaintenanceNoop(trigger string, reason CompactionNoo
 		return
 	}
 	turn := a.activeTurnCreatedAt.Load()
-	if a.sess.win.compaction.lastNoop.reason == reason && a.sess.win.compaction.lastNoop.turn == turn {
+	if a.sess.win.compaction.lastReported.reason == reason && a.sess.win.compaction.lastReported.turn == turn {
 		return
 	}
-	a.sess.win.compaction.lastNoop = maintenanceNoop{reason: reason, turn: turn}
+	a.sess.win.compaction.lastReported = maintenanceReport{reason: reason, turn: turn}
 	a.svc.sink.Emit(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
 		Status: "noop", Action: "summary", Trigger: trigger, Code: string(reason),
 		Boundary: a.compactBoundary(), TriggerTokens: a.compactTrigger(), InputTokens: inputTokens,
 	}})
+}
+
+// noteMaintenanceHeld tells the user that compaction is due but a failed attempt
+// still holds the retry. It speaks once per turn and cause; the model is not
+// told, because the hold has no model-visible symptom of its own.
+func (a *contextWindow) noteMaintenanceHeld() {
+	if a == nil || a.svc.sink == nil {
+		return
+	}
+	a.sess.win.compactionMu.Lock()
+	var code string
+	if r := a.sess.win.compactionState.LastReceipt; r != nil {
+		code = r.Code
+	}
+	a.sess.win.compactionMu.Unlock()
+	reason := CompactionNoopReason(code)
+	if reason == "" {
+		reason = FailUnclassified
+	}
+	turn := a.activeTurnCreatedAt.Load()
+	if a.sess.win.compaction.lastReported.reason == reason && a.sess.win.compaction.lastReported.turn == turn {
+		return
+	}
+	a.sess.win.compaction.lastReported = maintenanceReport{reason: reason, turn: turn}
+	a.svc.sink.Emit(event.Event{
+		Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeCompactHeld, Detail: string(reason),
+		Text: fmt.Sprintf("Automatic compaction is paused: the last attempt did not finish (%s).", reason),
+	})
 }
 
 // recordContextMaintenanceBlocked persists a generation-scoped blocked receipt.

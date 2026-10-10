@@ -20,6 +20,7 @@ const (
 	CodeStaleRef          Code = "computer.stale_ref"
 	CodeNoAction          Code = "computer.no_action"
 	CodeNeedsFront        Code = "computer.needs_front"
+	CodeBlocked           Code = "computer.blocked"
 	CodeElevated          Code = "computer.elevated"
 	CodeNoElement         Code = "computer.no_element"
 	CodeNeedsScreenshot   Code = "computer.needs_screenshot"
@@ -33,13 +34,19 @@ const (
 type Failure struct {
 	Code   Code
 	Detail string
+	// BlockedBy is the modal that would have taken the input instead.
+	BlockedBy *Modal
 }
 
 func (f *Failure) Error() string {
-	if f.Detail == "" {
-		return string(f.Code)
+	s := string(f.Code)
+	if f.Detail != "" {
+		s += ": " + f.Detail
 	}
-	return fmt.Sprintf("%s: %s", f.Code, f.Detail)
+	if f.BlockedBy != nil {
+		s += "; held by " + f.BlockedBy.String()
+	}
+	return s
 }
 
 // Is matches another Failure by code alone.

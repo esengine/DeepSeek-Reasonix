@@ -25,6 +25,7 @@ import { Boundary } from "./Boundary";
 import { SettingsUnavailable } from "./SettingsUnavailable";
 import { useMachineBooks } from "./machinebooks";
 import { usePaint } from "./paint";
+import { useZoomKeys } from "./zoomkeys";
 import { rememberActivePane, savedActivePane } from "./activepane";
 import { Sidebar } from "./Sidebar";
 import { Sky } from "./Sky";import { useAddWorkspace } from "./addws";
@@ -385,13 +386,15 @@ export function App({ hub }: { hub: HubPort }) {
   // identity the control on screen carries, because they are the same thing
   // asked for two ways. Written out rather than branched so the census can read
   // the set: a chain of ifs is a set nothing can enumerate.
+  const zoomKeys = useZoomKeys(look, onLook);
   const shortcuts: Shortcut[] = useMemo(
     () => [
       { chord: "\\", fields: true, action: "rail.toggle", run: () => setRail((v) => !v) },
       { chord: ",", fields: true, action: "chrome.settings", run: showPrefs },
       { chord: "f", action: "transcript.find", run: openFind },
+      ...zoomKeys,
     ],
-    [showPrefs, openFind],
+    [showPrefs, openFind, zoomKeys],
   );
   const closeBrowser = useCallback(() => setBrowser(false), []);
   const stopTurn = useCallback(() => activePort?.cancel(), [activePort]);
@@ -598,6 +601,7 @@ export function App({ hub }: { hub: HubPort }) {
         <Sidebar
           hub={hub}
           collapsed={!rail}
+          navShown={navRail.shown}
           tree={viewed.tree}
           treeRead={treeRead}
           runtimes={runtimes}

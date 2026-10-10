@@ -2,6 +2,9 @@ import { ApplyNote } from "./Group";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { effectsMode, onEffectsChange, setEffectsMode, type EffectsMode } from "../state/prefs";
 import type { AgentPort, Appearance as Look, ThemePack } from "../port/port";
+import { ZOOM_PRESETS } from "./zoom";
+import { chord } from "./keys";
+import { host } from "../port/host";
 import { MONO_FAMILIES, UI_FAMILIES, installed, readSizeOf, readSteps } from "./look";
 import { STORAGE as LANG_KEY, t } from "../i18n";
 import { pct } from "../i18n/format";
@@ -41,22 +44,6 @@ interface Props {
   look: Look;
   onLook: (look: Look) => void;
 }
-
-// Whole-interface scale. Named by what it does to reading rather than by its
-// number: nobody wants "115%", they want it bigger.
-const ZOOMS: [number, string][] = [
-  [0.9, "紧凑"],
-  [1, "标准"],
-  [1.15, "宽松"],
-  [1.3, "更大"],
-];
-
-// The named steps stop where a 1080p window does. Past that there is no step
-// anyone could have named in advance — a 2560 display wants something a 3840 one
-// does not — so the range takes over rather than the list growing a tail of
-// numbers. It reaches this far safely because the layout now folds on the room
-// it actually has (see viewport.ts) instead of on the unscaled window.
-const ZOOM_RANGE = { min: 0.8, max: 2.5, step: 0.05 };
 
 // Body size in the transcript alone, so the frame stays where the layout put it.
 // The steps live in look.ts next to the default they have to agree with.
@@ -162,6 +149,9 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
   // A change lands on screen through App's own effect; this only sends it on
   // so the next launch opens the same way.
   const set = useCallback((patch: Partial<Look>) => onLook({ ...look, ...patch }), [look, onLook]);
+  // Until the kernel has announced its range there is nothing to draw the
+  // slider from; it is held inert rather than given a range of its own.
+  const zoomRange = look.zoomRange ?? { min: 0, max: 1, step: 1 };
   const setPaper = useCallback(
     (patch: Partial<NonNullable<Look["wallpaper"]>>) =>
       look.wallpaper && onLook({ ...look, wallpaper: { ...look.wallpaper, ...patch } }),
@@ -319,11 +309,12 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           <h3>{t("大小")}</h3>
         </div>
         <p className="hint">{t("「界面」会同时缩放边距与控件，「正文」仅调整对话中的文字大小，两者独立设置。")}</p>
+        {host().inShell() && <p className="hint">{t("键盘：{up} 放大，{down} 缩小，{reset} 恢复标准，同样调整「界面」大小。", { up: chord("+"), down: chord("-"), reset: chord("0") })}</p>}
         <div className="grp-items">
           <div className="prow">
             <span className="tx">{t("界面")}</span>
             <div className="seg" data-text role="group" aria-label={t("界面大小")}>
-              {ZOOMS.map(([v, name]) => (
+              {ZOOM_PRESETS.map(([v, name]) => (
                 <button key={v} data-action="appearance.zoom" aria-pressed={(look.zoom || 1) === v} onClick={() => set({ zoom: v })}>
                   {t(name)}
                 </button>
@@ -334,11 +325,12 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             <span className="tx">{t("微调")}</span>
             <input
               className="slider"
-              style={at(look.zoom || 1, ZOOM_RANGE.min, ZOOM_RANGE.max)}
+              style={at(look.zoom || 1, zoomRange.min, zoomRange.max)}
               type="range"
-              min={ZOOM_RANGE.min}
-              max={ZOOM_RANGE.max}
-              step={ZOOM_RANGE.step}
+              min={zoomRange.min}
+              max={zoomRange.max}
+              step={zoomRange.step}
+              disabled={!look.zoomRange}
               value={look.zoom || 1}
               aria-label={t("界面大小微调")}
               data-action="appearance.zoom"

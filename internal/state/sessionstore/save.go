@@ -270,7 +270,7 @@ func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 	if err != nil {
 		return err
 	}
-	if err := probeRefusesSave(path, probe, digest); err != nil {
+	if err := probeRefusesSave(path, probe, msgs); err != nil {
 		return err
 	}
 	if probe.native && probe.size > 0 {

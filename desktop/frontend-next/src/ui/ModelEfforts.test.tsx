@@ -79,3 +79,26 @@ it("says inheritance waits on the save once the connection's levels are cleared"
   await userEvent.clear(screen.getByRole("textbox", { name: /^推理档位/ }));
   expect(within(row("glm-5")).getByText("继承：保存后按接入设置确定")).toBeTruthy();
 });
+
+it("shows a vendor's documented levels as what the row inherits, and typed levels still override", async () => {
+  const editProvider = vi.fn(async () => {});
+  const entry = relay({
+    supportedEfforts: undefined,
+    reasoningProtocol: "glm",
+    models: ["glm-5.3", "glm-4.5"],
+    default: "glm-5.3",
+    inheritedEfforts: {
+      "glm-5.3": { supportedEfforts: ["low", "high", "max"], defaultEffort: "max", official: true },
+      "glm-4.5": { supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" },
+    },
+  });
+  render(<EditConn entry={entry} port={{ editProvider } as unknown as Port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} declare />);
+
+  expect(within(row("glm-5.3")).getByText("官方档位：low · high · max（默认 max）")).toBeTruthy();
+  expect(within(row("glm-5.3")).getByRole("option", { name: "继承官方档位" })).toBeTruthy();
+  expect(within(row("glm-4.5")).getByText("继承：enabled · disabled")).toBeTruthy();
+  expect(within(row("glm-4.5")).queryByText(/官方档位/)).toBeNull();
+
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "glm-5.3 的推理档位" }), "own");
+  expect(within(row("glm-5.3")).getByRole("button", { name: "max" }).getAttribute("aria-pressed")).toBe("true");
+});

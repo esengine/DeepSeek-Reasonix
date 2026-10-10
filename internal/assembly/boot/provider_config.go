@@ -41,8 +41,12 @@ func ResolveProviderBuildIdentity(e *config.ProviderEntry, proxy netclient.Proxy
 }
 
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
-// network proxy settings.
+// network proxy settings. A source that does not answer conversation is refused
+// with a *config.AnswersMismatchError, not handed to the wire registry.
 func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (provider.Provider, error) {
+	if !config.Answering(e.Kind, config.AnswersChat) {
+		return nil, &config.AnswersMismatchError{Ref: e.Name + "/" + e.Model, Has: config.AnswersFor(e.Kind), Want: config.AnswersChat}
+	}
 	return provider.New(e.Kind, providerConfig(e, proxy))
 }
 

@@ -424,10 +424,14 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 			"Optional scope hint (e.g. 'focus on token handling in internal/auth/') or 'full' for everything in the diff.", 0},
 	}
 	var out []tool.Tool
+	// Skill profiles are diagnostic-only; do not hide builtin subagent
+	// entry points based on the session role setting.
+	present := map[string]bool{}
+	for _, sk := range store.enabledSkills() {
+		present[sk.Name] = true
+	}
 	for _, s := range specs {
-		// Skill profiles are diagnostic-only; do not hide builtin subagent
-		// entry points based on the session role setting.
-		if _, ok := store.Read(s.skillName); !ok {
+		if !present[s.skillName] {
 			continue
 		}
 		out = append(out, &subagentSkillTool{

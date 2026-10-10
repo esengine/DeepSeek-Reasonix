@@ -4,6 +4,7 @@
 #include <UIAutomation.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -19,6 +20,9 @@ namespace {
 
 constexpr int maxNodes = 1500;
 constexpr int maxDepth = 40;
+// A value longer than this is not read back: comparing it costs more than the
+// step it would grade.
+constexpr int maxReadback = 1 << 16;
 constexpr HRESULT elementGone = static_cast<HRESULT>(0x80040201);   // UIA_E_ELEMENTNOTAVAILABLE
 constexpr HRESULT elementDisabled = static_cast<HRESULT>(0x80040200); // UIA_E_ELEMENTNOTENABLED
 constexpr HRESULT notSupported = static_cast<HRESULT>(0x80040204);    // UIA_E_NOTSUPPORTED
@@ -137,8 +141,48 @@ bool transparent(int type) {
     return type == UIA_GroupControlTypeId || type == UIA_PaneControlTypeId || type == UIA_CustomControlTypeId;
 }
 
+std::string windowTitle(HWND hwnd) {
+    wchar_t buf[512];
+    int n = GetWindowTextW(hwnd, buf, ARRAYSIZE(buf));
+    return narrow(std::wstring(buf, n > 0 ? n : 0));
+}
+
+HWND cachedHandle(IUIAutomationElement* el) {
+    return reinterpret_cast<HWND>(static_cast<intptr_t>(Cached(el, UIA_NativeWindowHandlePropertyId).integer()));
+}
+
+// inWindowModal is a dialog drawn inside its window that declares itself
+// modal. A top-level window's own root does not count: one holds input only
+// through the owner it has disabled.
+bool inWindowModal(IUIAutomationElement* el, HWND root) {
+    return Cached(el, UIA_ControlTypePropertyId).integer() == UIA_WindowControlTypeId &&
+           Cached(el, UIA_WindowIsModalPropertyId).flag() && cachedHandle(el) != root;
+}
+
+// modalJson names a modal for the model; the titles are shown, never read.
+Json modalJson(IUIAutomationElement* el, DWORD pid, const std::string& blocks) {
+    return Json::object().set("ref", refFor(el, pid)).set("title", Cached(el, UIA_NamePropertyId).str()).set("blocks", blocks);
+}
+
+// win32Modal is the modal dialog hwnd is, when it holds another window of
+// the process; null otherwise.
+Json win32Modal(HWND hwnd, DWORD pid) {
+    HWND held = heldOwner(hwnd, pid);
+    if (!held) return Json();
+    ComPtr<IUIAutomationElement> el;
+    if (FAILED(uia->ElementFromHandleBuildCache(hwnd, cache.Get(), &el)) || !el) {
+        return Json::object().set("ref", "").set("title", windowTitle(hwnd)).set("blocks", windowTitle(held));
+    }
+    return modalJson(el.Get(), pid, windowTitle(held));
+}
+
 struct Walk {
     DWORD pid;
+    HWND root = nullptr;
+    bool rootIsModal = false;
+    std::string rootTitle, heldTitle;
+    Json modals = Json::array();
+    std::set<std::string> modalRefs;
     std::vector<std::string> lines;
     std::set<std::string> seen;
     int count = 0;
@@ -190,6 +234,12 @@ struct Walk {
         if (Cached(el, UIA_SelectionItemIsSelectedPropertyId).flag()) line += " selected";
         if (Cached(el, UIA_ToggleToggleStatePropertyId).integer() == ToggleState_On) line += " checked";
         if (pressable(el)) line += " pressable";
+        bool isRoot = cachedHandle(el) == root;
+        if ((isRoot && rootIsModal) || inWindowModal(el, root)) {
+            line += " modal";
+            Json m = modalJson(el, pid, isRoot ? heldTitle : rootTitle);
+            if (modalRefs.insert(m.get("ref")->string()).second) modals.push(m);
+        }
         lines.push_back(line);
         children(el, depth + 1);
     }
@@ -305,7 +355,147 @@ void wheel(DWORD pid, double amount) {
     PostMessageW(target, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<SHORT>(delta)), MAKELPARAM(centre.x, centre.y));
 }
 
+// nativeRoot is the top-level window an element is drawn in.
+HWND nativeRoot(IUIAutomationElement* el) {
+    ComPtr<IUIAutomationElement> at = el;
+    for (int i = 0; at && i < maxDepth; i++) {
+        UIA_HWND h = nullptr;
+        if (SUCCEEDED(at->get_CurrentNativeWindowHandle(&h)) && h) return GetAncestor(static_cast<HWND>(h), GA_ROOT);
+        ComPtr<IUIAutomationElement> parent;
+        walker->GetParentElement(at.Get(), &parent);
+        at = parent;
+    }
+    return nullptr;
+}
+
+// reachable refuses an element in a window the application has disabled,
+// which a modal dialog does to the window it holds: the application has
+// declared that window takes no input until the dialog is answered.
+void reachable(IUIAutomationElement* el, DWORD pid, const std::string& what) {
+    HWND root = nativeRoot(el);
+    if (!root || IsWindowEnabled(root)) return;
+    for (HWND w : appWindows(pid, false)) {
+        for (HWND o = heldOwner(w, pid) ? GetWindow(w, GW_OWNER) : nullptr; o; o = GetWindow(o, GW_OWNER)) {
+            if (o == root) {
+                throw Failure{"computer.blocked", what + " is in a window a modal dialog holds; answer or dismiss the dialog first",
+                              win32Modal(w, pid)};
+            }
+        }
+    }
+    throw Failure{"computer.blocked", what + " is in a window the application has disabled"};
+}
+
+// typedExactly is whether after is before with typed put in at one place,
+// replacing whatever was selected there. Where repeated characters make the
+// changed span ambiguous it is taken from either end, and any other change,
+// such as autocomplete or a single-line field dropping a newline, is not it.
+bool typedExactly(const std::wstring& before, const std::wstring& after, const std::wstring& typed) {
+    if (after == before || after.size() < typed.size()) return false;
+    auto span = [&](bool prefixFirst) {
+        size_t p = 0, s = 0, room = std::min(before.size(), after.size());
+        auto prefix = [&] { while (p < room - s && before[p] == after[p]) p++; };
+        auto suffix = [&] { while (s < room - p && before[before.size() - 1 - s] == after[after.size() - 1 - s]) s++; };
+        if (prefixFirst) {
+            prefix();
+            suffix();
+        } else {
+            suffix();
+            prefix();
+        }
+        return after.substr(p, after.size() - p - s);
+    };
+    return span(true) == typed || span(false) == typed;
+}
+
+std::wstring flat(std::wstring s) {
+    s.erase(std::remove(s.begin(), s.end(), L'\r'), s.end());
+    return s;
+}
+
+// readValue is what an element holds as text, for comparing before and after
+// a step. A password, or a value too long to compare, is not read.
+bool readValue(IUIAutomationElement* el, std::wstring& out) {
+    BOOL password = FALSE;
+    if (FAILED(el->get_CurrentIsPassword(&password)) || password) return false;
+    BSTR v = nullptr;
+    if (auto p = pattern<IUIAutomationValuePattern>(el, UIA_ValuePatternId)) {
+        if (FAILED(p->get_CurrentValue(&v))) return false;
+    } else if (auto t = pattern<IUIAutomationTextPattern>(el, UIA_TextPatternId)) {
+        ComPtr<IUIAutomationTextRange> doc;
+        if (FAILED(t->get_DocumentRange(&doc)) || !doc || FAILED(doc->GetText(maxReadback, &v))) return false;
+    } else {
+        return false;
+    }
+    out = flat(v ? std::wstring(v, SysStringLen(v)) : std::wstring());
+    SysFreeString(v);
+    return out.size() < static_cast<size_t>(maxReadback);
+}
+
 } // namespace
+
+Json effect(const char* cls, const char* evidence, const Json& modal) {
+    Json e = Json::object().set("class", cls);
+    if (evidence) {
+        Json kinds = Json::array();
+        kinds.push(evidence);
+        e.set("evidence", kinds);
+    }
+    if (modal.kind() != Json::Kind::Null) e.set("blocked_by", modal);
+    return Json::object().set("effect", e);
+}
+
+Landing landing(DWORD pid, bool withValue) {
+    need();
+    Landing at;
+    ComPtr<IUIAutomationElement> focused;
+    int owner = 0;
+    if (FAILED(uia->GetFocusedElementBuildCache(cache.Get(), &focused)) || !focused || FAILED(focused->get_CurrentProcessId(&owner)) ||
+        static_cast<DWORD>(owner) != pid) {
+        focused = nullptr;
+    }
+    HWND root = focused ? nativeRoot(focused.Get()) : nullptr;
+    if (!root && isFront(pid)) root = GetForegroundWindow();
+    ComPtr<IUIAutomationElement> el = focused;
+    for (int i = 0; el && i < maxDepth && at.modal.kind() == Json::Kind::Null; i++) {
+        if (inWindowModal(el.Get(), root)) at.modal = modalJson(el.Get(), pid, windowTitle(root));
+        ComPtr<IUIAutomationElement> parent;
+        walker->GetParentElementBuildCache(el.Get(), cache.Get(), &parent);
+        el = parent;
+    }
+    if (at.modal.kind() == Json::Kind::Null && root) at.modal = win32Modal(root, pid);
+    if (!focused || !withValue) return at;
+    if (Cached(focused.Get(), UIA_IsValuePatternAvailablePropertyId).flag()) {
+        at.takesText = !Cached(focused.Get(), UIA_ValueIsReadOnlyPropertyId).flag();
+    } else {
+        int type = Cached(focused.Get(), UIA_ControlTypePropertyId).integer();
+        at.takesText = type == UIA_EditControlTypeId || type == UIA_DocumentControlTypeId;
+    }
+    at.read = [focused](std::wstring& out) { return readValue(focused.Get(), out); };
+    at.readable = at.read(at.before);
+    return at;
+}
+
+void refuseHeldText(const Landing& at) {
+    if (at.modal.kind() == Json::Kind::Null || at.takesText) return;
+    throw Failure{"computer.blocked",
+                  "a modal dialog holds this application's input and its focused element takes no text, where a letter can answer the "
+                  "dialog; answer or dismiss it first",
+                  at.modal};
+}
+
+// The application takes typed characters one message at a time, so a value
+// read part-way through holds some of them; it is read again until all are in.
+Json typedEffect(const Landing& at, const std::wstring& typed) {
+    if (!at.readable) return effect("unverifiable", nullptr, at.modal);
+    std::wstring after, want = flat(typed);
+    for (int i = 0; i < 10; i++) {
+        if (!at.read(after)) return effect("unverifiable", nullptr, at.modal);
+        if (typedExactly(at.before, after, want)) return effect("confirmed", "value_readback", at.modal);
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }
+    if (after == at.before) return effect("suspected_noop", "value_unchanged", at.modal);
+    return effect("unverifiable", nullptr, at.modal);
+}
 
 void uiaStart() {
     if (FAILED(CoCreateInstance(__uuidof(CUIAutomation8), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&uia))) &&
@@ -324,7 +514,9 @@ void uiaStart() {
                           UIA_IsPasswordPropertyId, UIA_HelpTextPropertyId, UIA_HasKeyboardFocusPropertyId, UIA_IsEnabledPropertyId,
                           UIA_SelectionItemIsSelectedPropertyId, UIA_ToggleToggleStatePropertyId, UIA_IsInvokePatternAvailablePropertyId,
                           UIA_IsTogglePatternAvailablePropertyId, UIA_IsExpandCollapsePatternAvailablePropertyId,
-                          UIA_IsSelectionItemPatternAvailablePropertyId, UIA_LegacyIAccessibleDefaultActionPropertyId}) {
+                          UIA_IsSelectionItemPatternAvailablePropertyId, UIA_LegacyIAccessibleDefaultActionPropertyId,
+                          UIA_WindowIsModalPropertyId, UIA_NativeWindowHandlePropertyId, UIA_IsValuePatternAvailablePropertyId,
+                          UIA_ValueIsReadOnlyPropertyId}) {
         cache->AddProperty(id);
     }
 }
@@ -340,6 +532,11 @@ Json snapshot(DWORD pid) {
                    : "This application has no window on screen right now — it may be minimized. A type, key or pointer step brings it forward; take a new snapshot after.";
     }
     for (HWND hwnd : wins) {
+        walk.root = hwnd;
+        HWND held = heldOwner(hwnd, pid);
+        walk.rootIsModal = held != nullptr;
+        walk.rootTitle = windowTitle(hwnd);
+        walk.heldTitle = held ? windowTitle(held) : "";
         ComPtr<IUIAutomationElement> root;
         if (SUCCEEDED(uia->ElementFromHandleBuildCache(hwnd, cache.Get(), &root)) && root) walk.visit(root.Get(), 0);
     }
@@ -350,12 +547,14 @@ Json snapshot(DWORD pid) {
         .set("bundle", identity(pid))
         .set("lines", lines)
         .set("truncated", walk.count >= maxNodes)
-        .set("note", note);
+        .set("note", note)
+        .set("modals", walk.modals);
 }
 
 Json press(DWORD pid, const std::string& ref) {
     need();
     ComPtr<IUIAutomationElement> el = element(ref, pid);
+    reachable(el.Get(), pid, ref);
     showAt(el.Get());
     activate(el.Get(), ref);
     return Json::object();
@@ -383,6 +582,7 @@ Json clickAt(DWORD pid, double x, double y) {
     }
     int type = Cached(el.Get(), UIA_ControlTypePropertyId).integer();
     std::string what = "the " + roleName(type) + " at that point";
+    reachable(el.Get(), pid, what);
     if (pressable(el.Get())) {
         activate(el.Get(), what);
     } else if (type == UIA_EditControlTypeId || type == UIA_ComboBoxControlTypeId || type == UIA_DocumentControlTypeId) {
@@ -398,6 +598,7 @@ Json clickAt(DWORD pid, double x, double y) {
 Json menu(DWORD pid, const std::string& ref) {
     need();
     ComPtr<IUIAutomationElement> target = element(ref, pid);
+    reachable(target.Get(), pid, ref);
     showAt(target.Get());
     ComPtr<IUIAutomationElement3> el;
     if (FAILED(target.As(&el))) throw Failure{"computer.no_action", ref + " has no context menu"};
@@ -412,6 +613,7 @@ Json scroll(DWORD pid, const std::string& ref, double amount) {
     ComPtr<IUIAutomationElement> from;
     if (!ref.empty()) {
         from = element(ref, pid);
+        reachable(from.Get(), pid, ref);
         showAt(from.Get());
         if (amount == 0) {
             BOOL offscreen = TRUE;
@@ -445,6 +647,7 @@ Json scroll(DWORD pid, const std::string& ref, double amount) {
 Json focus(DWORD pid, const std::string& ref) {
     need();
     ComPtr<IUIAutomationElement> el = element(ref, pid);
+    reachable(el.Get(), pid, ref);
     showAt(el.Get());
     HRESULT hr = el->SetFocus();
     if (FAILED(hr) && hr != elementGone) throw Failure{"computer.no_action", ref + " cannot take focus (HRESULT " + hresult(hr) + ")"};
@@ -455,22 +658,22 @@ Json focus(DWORD pid, const std::string& ref) {
 Json setValue(DWORD pid, const std::string& ref, const std::string& value) {
     need();
     ComPtr<IUIAutomationElement> el = element(ref, pid);
+    reachable(el.Get(), pid, ref);
     showAt(el.Get());
     auto p = pattern<IUIAutomationValuePattern>(el.Get(), UIA_ValuePatternId);
     BOOL readOnly = FALSE;
     if (!p || (SUCCEEDED(p->get_CurrentIsReadOnly(&readOnly)) && readOnly)) {
         throw Failure{"computer.no_action", ref + " has no value that can be set"};
     }
+    std::wstring before, now;
+    bool hadBefore = readValue(el.Get(), before);
     BSTR b = SysAllocString(widen(value).c_str());
     HRESULT hr = p->SetValue(b);
     SysFreeString(b);
     if (FAILED(hr) && hr != elementGone) throw Failure{"computer.no_action", ref + " has no value that can be set (HRESULT " + hresult(hr) + ")"};
     settle(hr, ref, "set value");
-    BSTR now = nullptr;
-    p->get_CurrentValue(&now);
-    std::string result = now ? narrow(std::wstring(now, SysStringLen(now))) : "";
-    SysFreeString(now);
-    BOOL password = FALSE;
-    el->get_CurrentIsPassword(&password);
-    return Json::object().set("value", password ? "" : result);
+    if (!readValue(el.Get(), now)) return effect("unverifiable", nullptr, Json());
+    if (now == flat(widen(value))) return effect("confirmed", "value_readback", Json());
+    if (hadBefore && now == before) return effect("suspected_noop", "value_unchanged", Json());
+    return effect("unverifiable", nullptr, Json());
 }

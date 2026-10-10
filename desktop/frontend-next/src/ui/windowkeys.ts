@@ -8,6 +8,9 @@ export interface Shortcut {
   chord: string;
   shift?: boolean;
   fields?: boolean;
+  /** Reads the press itself when a chord and a shift flag cannot say which
+   *  keys count, as on layouts that type "+" or "0" from other positions. */
+  match?: (e: KeyboardEvent) => boolean;
   action: string;
   run: () => void;
 }
@@ -24,7 +27,7 @@ export function useWindowKeys(
       // A control that answered the press itself — the code editor's own find
       // on Ctrl+F, or its Escape closing that — has spent it.
       if (e.defaultPrevented) return;
-      const hit = shortcuts.find((s) => pressedChord(e, s.chord, !!s.shift));
+      const hit = shortcuts.find((s) => (s.match ? s.match(e) : pressedChord(e, s.chord, !!s.shift)));
       if (hit && (hit.fields || !typingElsewhere(e.target))) {
         e.preventDefault();
         hit.run();

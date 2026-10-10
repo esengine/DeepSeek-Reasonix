@@ -671,3 +671,31 @@ func TestEnteringThePlanWorkflowDoesNotInvalidateWorkInFlight(t *testing.T) {
 		t.Errorf("the writer was refused as stale rather than by the phase: %q", out.errMsg)
 	}
 }
+
+// A call the host failed to prove read-only is unclassified debt, not a proven
+// writer; only a declaration or a writing argument makes it one.
+func TestPlanPhaseEffectKeepsUnprovenApartFromProvenWriters(t *testing.T) {
+	a := New(nil, tool.NewRegistry(), sessionstore.NewSession(""), Options{}, event.Discard)
+	bash := fakeTool{name: "bash"}
+	for _, tc := range []struct {
+		name    string
+		tool    tool.Tool
+		command string
+		effect  planmode.Effect
+		why     planmode.Why
+	}{
+		{"bash", bash, "curl x", planmode.EffectUnclassified, planmode.WhyUnknownProgram},
+		{"bash", bash, `ls "$X"`, planmode.EffectUnclassified, planmode.WhyShellConstruct},
+		{"bash", bash, "find . -exec rm {} ;", planmode.EffectSideEffect, planmode.WhyWriteArguments},
+		{"write_file", fakeTool{name: "write_file"}, "", planmode.EffectSideEffect, planmode.WhyDeclaredWriter},
+	} {
+		args, _ := json.Marshal(map[string]string{"command": tc.command})
+		effect, proof := a.planPhaseEffect(tc.tool, tc.name, false, args)
+		if effect != tc.effect || proof.Why != tc.why {
+			t.Errorf("%s %q: effect=%v why=%q, want %v %q", tc.name, tc.command, effect, proof.Why, tc.effect, tc.why)
+		}
+	}
+	if effect, _ := a.planPhaseEffect(bash, "bash", true, nil); effect != planmode.EffectNone {
+		t.Errorf("a proven read-only call has effect %v", effect)
+	}
+}

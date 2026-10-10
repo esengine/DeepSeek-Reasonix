@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/event"
 	"reasonix/internal/safety/sandbox"
 )
 
@@ -22,6 +23,16 @@ type PermissionLists struct {
 	Allow []string `json:"allow"`
 	Ask   []string `json:"ask"`
 	Deny  []string `json:"deny"`
+}
+
+func (l PermissionLists) of(name string) []string {
+	switch name {
+	case "allow":
+		return l.Allow
+	case "ask":
+		return l.Ask
+	}
+	return l.Deny
 }
 
 // PermissionRules is what an editor needs: the lists it may write, the file
@@ -36,6 +47,8 @@ type PermissionRules struct {
 	// than in the file. Nothing wrote it down, so a reader with only the file
 	// in front of them is looking at less than the agent may currently do.
 	Granted []string `json:"granted,omitempty"`
+	// Dormant lists rules in the file that name no tool, so they match nothing.
+	Dormant []event.DormantPermissionRule `json:"dormant,omitempty"`
 	// Remembered rules are stored per workspace outside project configuration.
 	Remembered          []string `json:"remembered,omitempty"`
 	RememberedPath      string   `json:"rememberedPath,omitempty"`
@@ -82,6 +95,7 @@ func (c *Controller) PermissionRules() PermissionRules {
 		ShadowedBy:      shadowingConfig(path, c.WorkspaceRoot()),
 		Granted:         c.approval.sessionGrants(),
 	}
+	out.Dormant = DormantRules(c.PermissionVocabulary(), out.PermissionLists)
 	if root := c.WorkspaceRoot(); root != "" {
 		store := config.NewProjectGrantStore(config.Roots{}.Home())
 		out.RememberedPath = store.Path()
@@ -144,9 +158,11 @@ func (c *Controller) SavePermissionRules(in PermissionLists) error {
 	if err := cfg.SetPermissionMode(in.Mode); err != nil {
 		return err
 	}
+	saved := listsFrom(cfg)
 	cfg.Permissions.Allow = nil
 	cfg.Permissions.Ask = nil
 	cfg.Permissions.Deny = nil
+	vocab := c.PermissionVocabulary()
 	for _, list := range []struct {
 		name  string
 		rules []string
@@ -154,6 +170,11 @@ func (c *Controller) SavePermissionRules(in PermissionLists) error {
 		for _, rule := range list.rules {
 			if strings.TrimSpace(rule) == "" {
 				continue
+			}
+			if !slices.Contains(saved.of(list.name), rule) {
+				if err := vocab.Check(list.name, rule); err != nil {
+					return err
+				}
 			}
 			if err := cfg.AddPermissionRule(list.name, rule); err != nil {
 				return err

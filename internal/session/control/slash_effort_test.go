@@ -89,3 +89,52 @@ func TestEffortBareReportsForcedThinkingAndBilling(t *testing.T) {
 		}
 	}
 }
+
+const responsesRelaySeed = `config_version = 6
+default_model = "relay/gpt-5.5"
+
+[[providers]]
+name        = "relay"
+kind        = "responses"
+base_url    = "https://www.dmxapi.cn/v1"
+models      = ["gpt-5.5"]
+default     = "gpt-5.5"
+api_key_env = "RELAY_API_KEY"
+`
+
+func TestEffortOnAResponsesEntryFollowsItsDeclaration(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra, want string
+	}{
+		{"declared levels", "supported_efforts = [\"low\", \"high\", \"xhigh\"]\n", "auto|low|high|xhigh"},
+		{"declared protocol", "reasoning_protocol = \"openai\"\n", "auto|low|medium|high"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i18n.DetectLanguage("en")
+			c, take := settingsController(t)
+			seedUserConfig(t, responsesRelaySeed+tc.extra)
+			c.modelRef = "relay/gpt-5.5"
+			c.managementNotice("/effort")
+			got := lastNotice(t, take())
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("/effort = %q, want the ladder %s", got, tc.want)
+			}
+			items, _ := SlashArgItems("/effort ", ArgData{CurrentModel: "relay/gpt-5.5"})
+			if len(items) < 2 {
+				t.Errorf("/effort argument menu = %v, want the declared levels", labelsOf(items))
+			}
+		})
+	}
+}
+
+func TestEffortOnAnUndeclaredResponsesEntryIsReportedNotConfigurable(t *testing.T) {
+	i18n.DetectLanguage("en")
+	c, take := settingsController(t)
+	seedUserConfig(t, responsesRelaySeed)
+	c.modelRef = "relay/gpt-5.5"
+	c.managementNotice("/effort")
+	got := lastNotice(t, take())
+	if want := fmt.Sprintf(i18n.M.EffortUnsupportedFmt, "relay"); got != want {
+		t.Errorf("/effort = %q, want %q", got, want)
+	}
+}

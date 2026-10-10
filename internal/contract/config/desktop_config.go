@@ -124,13 +124,31 @@ type DesktopConfig struct {
 	Appearance              AppearanceConfig `toml:"appearance"`
 }
 
+// The interface scale's one declared range: the save clamp, the range the page
+// draws its slider from and the comment in the rendered config all read it.
+const (
+	ZoomMin  = 0.8
+	ZoomMax  = 1.8
+	ZoomStep = 0.05
+)
+
+// ClampZoom holds a scale to ZoomMin..ZoomMax. Zero stays zero because it means
+// "unset"; a stored value outside the range is not rewritten, only read through
+// here.
+func ClampZoom(v float64) float64 {
+	if !(v > 0) {
+		return 0
+	}
+	return min(max(v, ZoomMin), ZoomMax)
+}
+
 // AppearanceConfig is what the user set for themselves, on top of whichever
 // theme pack is active: how large it all is, what it is set in, and their own
 // picture. A pack ships a palette; these are the reader's own eyes and desk.
 // Zero means "unset" throughout, so an untouched config resolves to the
 // stylesheet's own defaults rather than to a number written here.
 type AppearanceConfig struct {
-	Zoom      float64         `toml:"zoom"`      // whole-interface scale, 0.8..1.6; 0 = 1.0
+	Zoom      float64         `toml:"zoom"`      // whole-interface scale within ZoomMin..ZoomMax; 0 = 1.0
 	ReadSize  float64         `toml:"read_size"` // transcript body size in px; 0 = the stylesheet's
 	FontUI    string          `toml:"font_ui"`   // CSS font-family list for the interface
 	FontMono  string          `toml:"font_mono"` // CSS font-family list for code and output

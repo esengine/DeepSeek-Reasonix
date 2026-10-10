@@ -3,6 +3,7 @@ package pluginpkg
 import (
 	"fmt"
 	"path/filepath"
+	"reasonix/internal/base/textutil"
 	"slices"
 	"strings"
 )
@@ -34,6 +35,7 @@ func InstalledListText(reasonixHome string) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "plugins (%d):\n", len(st.Plugins))
 	for _, p := range st.Plugins {
+		p = p.Display()
 		state := "disabled"
 		if p.Enabled {
 			state = "enabled"
@@ -67,6 +69,7 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 		return fmt.Sprintf("plugin %q is not installed", name), nil
 	}
 	root := ResolveRoot(reasonixHome, p.Root)
+	p = p.Display()
 	pkg, warnings, err := ParseDir(root)
 	if err != nil {
 		return "", err
@@ -91,8 +94,8 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 	} else {
 		b.WriteString("usage: enable this plugin before its skills, agents, commands, hooks, or MCP servers participate in sessions.\n")
 	}
-	appendInventoryText(&b, p.Name, pkg.Inventory())
-	for _, warning := range warnings {
+	appendInventoryText(&b, p.Name, pkg.InventoryForDisplay())
+	for _, warning := range DisplayLines(warnings) {
 		fmt.Fprintf(&b, "warning: %s\n", warning)
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
@@ -115,7 +118,7 @@ func pluginCapabilityText(reasonixHome string, p InstalledPlugin) string {
 	root := ResolveRoot(reasonixHome, p.Root)
 	pkg, _, err := ParseDir(root)
 	if err != nil {
-		return "invalid: " + err.Error()
+		return "invalid: " + textutil.ShownProse(err.Error())
 	}
 	summary := pkg.CapabilitySummary()
 	parts := []string{}
@@ -156,6 +159,7 @@ func RuntimeTrustText(rt *RuntimeSpec) string {
 	if rt == nil {
 		return ""
 	}
+	rt = rt.Display()
 	var b strings.Builder
 	b.WriteString("runtime: FULL TRUST\n")
 	fmt.Fprintf(&b, "  command: %s\n", RuntimeCommandLine(rt))

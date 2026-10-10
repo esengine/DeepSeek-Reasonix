@@ -29,9 +29,20 @@ reasonix plugin doctor issue-fix-kit
 reasonix plugin show issue-fix-kit
 ```
 
-1. Copy `examples/issue-fix-kit/fixture/` to a new temporary directory. Keep the
-   tracked fixture unchanged so the exercise remains reproducible.
-2. In that copy, run `go test ./...` and observe the oversized-limit panic.
+Use the package root printed by `plugin show` to make a separate task workspace:
+
+```sh
+package_root='/absolute/path/from/plugin-show'
+scenario_root=$(mktemp -d "${TMPDIR:-/tmp}/reasonix-issue-fix.XXXXXX")
+cp -R "$package_root/fixture/." "$scenario_root/"
+cd "$scenario_root"
+go test ./...
+```
+
+1. Keep the installed fixture unchanged so the exercise remains reproducible.
+   Record `scenario_root` for the task and later cleanup; the source checkout is
+   not needed after copy installation.
+2. Observe the oversized-limit panic in the workspace's initial test run.
 3. Open a Reasonix session in the temporary fixture. Invoke
    `/issue-fix-kit:issue-fix` with the task below.
 
@@ -47,7 +58,8 @@ publishing it. Record the test result before and after the change.
 1. Confirm the installed package contains the skill and both files under
    `skills/issue-fix/references/`. Copy installation must retain those files.
 2. Check the fixture's tests pass after the fix and the input is unchanged.
-   Inspect the diff and compare the handoff with `references/delivery.md`.
+   Inspect the diff and compare the handoff with the installed
+   `skills/issue-fix/references/delivery.md`.
 3. If Go is missing or a check fails, retain the evidence and report the check
    as unavailable or failed. Doctor validates the package, not the task result.
 4. Remove the test package with `reasonix plugin remove issue-fix-kit --yes`.

@@ -1767,3 +1767,54 @@ test("the graphics report is refused to any sender that is not the Studio window
   assert.deepEqual(handle({ sender: "studio" }), { launchedOff: true, compositing: "enabled" });
   assert.equal(handle({ sender: "agent-browser-page" }), null);
 });
+
+test("a kernel that dies after its handshake leaves its exit and last words in shell.log and a marker for the next launch", () => {
+  const { openLogs } = require("../src/shelllog.js");
+  const { crashDir, recordHostExit, pendingHostExit, clearHostExit } = require("../src/hostexit.js");
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "hostexit-"));
+  const logs = openLogs(userData);
+  const dir = crashDir(logs.dir);
+  fs.mkdirSync(dir, { recursive: true });
+  const started = Date.now() - 1000;
+  const stale = path.join(dir, "host-20200101T000000Z-2.0.0-1.log");
+  fs.writeFileSync(stale, "fatal error: an earlier run\n");
+  fs.utimesSync(stale, new Date(2020, 0, 1), new Date(2020, 0, 1));
+  const body = Array.from({ length: 80 }, (_, i) => `frame ${i}`).join("\n");
+  fs.writeFileSync(path.join(dir, "host-20261010T000000Z-2.31.0-7.log"), `fatal error: out of memory\n${body}\n`);
+
+  assert.equal(pendingHostExit(userData), null, "no marker before any exit");
+  recordHostExit({ logs, userData, code: 2, signal: null, startedAt: started });
+
+  const shell = fs.readFileSync(logs.shell.file, "utf8");
+  assert.match(shell, /host: died code=2 signal=null crash=host-20261010T000000Z-2\.31\.0-7\.log/);
+  assert.match(shell, /frame 79/, "the tail of the crash file must reach shell.log");
+  assert.doesNotMatch(shell, /frame 10\b/, "only the tail is quoted");
+  assert.doesNotMatch(shell, /an earlier run/, "a crash file from before this launch is not this death");
+
+  const pending = pendingHostExit(userData);
+  assert.equal(pending.code, 2);
+  assert.equal(pending.crashFile, "host-20261010T000000Z-2.31.0-7.log");
+  clearHostExit(userData);
+  assert.equal(pendingHostExit(userData), null, "acknowledging clears the marker");
+});
+
+test("a kernel killed by a signal with no crash file is still recorded", () => {
+  const { openLogs } = require("../src/shelllog.js");
+  const { recordHostExit, pendingHostExit } = require("../src/hostexit.js");
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "hostexit-"));
+  const logs = openLogs(userData);
+  recordHostExit({ logs, userData, code: null, signal: "SIGKILL", startedAt: Date.now() });
+  assert.match(fs.readFileSync(logs.shell.file, "utf8"), /host: died code=null signal=SIGKILL crash=\(none\)/);
+  assert.equal(pendingHostExit(userData).signal, "SIGKILL");
+});
+
+test("the notice names where the logs are in both languages and shows how it ended", () => {
+  const { hostExitNotice } = require("../src/hostexit.js");
+  const en = hostExitNotice("en-US", { code: 2, signal: null }, "/logs");
+  const zh = hostExitNotice("zh-CN", { code: 2, signal: null }, "/logs");
+  assert.notEqual(en.message, zh.message);
+  for (const text of [en, zh]) assert.match(text.detail, /\/logs/);
+  assert.match(zh.message, /内核/);
+  assert.match(en.detail, /code 2/);
+  assert.match(zh.detail, /2/);
+});

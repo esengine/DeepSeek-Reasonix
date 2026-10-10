@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"reasonix/internal/safety/permission"
 	"reasonix/internal/session/control"
 )
 
@@ -45,6 +46,12 @@ func (s *Server) savePermissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.ctl().SavePermissionRules(body); err != nil {
+		var unknown *permission.UnknownToolError
+		if errors.As(err, &unknown) {
+			refuse(w, http.StatusBadRequest, "permissions.rule_unknown_tool", err.Error(),
+				map[string]any{"list": unknown.List, "rule": unknown.Rule, "tool": unknown.Tool})
+			return
+		}
 		saveFailed(w, http.StatusBadRequest, "permissions.rejected", err)
 		return
 	}

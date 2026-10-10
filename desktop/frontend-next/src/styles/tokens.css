@@ -32,6 +32,7 @@
 
 :root {
     interpolate-size: allow-keywords;
+    --nav-open: 48px;
 
     --call-sym: 28px; --call-gap: 14px;
     --rail-open: 264px; --side-open: 316px; --dock-open: 560px; --pane-gutter: 12px;

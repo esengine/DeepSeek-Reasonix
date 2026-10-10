@@ -16,6 +16,11 @@ func (s *Server) switchModelRequested(ctx context.Context, ref string) error {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	cur := s.ctl()
+	if cfg, err := runtimeConfig(cur); err == nil {
+		if err := cfg.RequireAnswers(ref, config.AnswersChat); err != nil {
+			return err
+		}
+	}
 	if target, ok := runtimeTargetForModel(cur, ref); ok && runtimeSelectionMatches(cur, target) {
 		return nil
 	}

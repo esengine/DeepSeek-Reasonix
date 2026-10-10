@@ -50,7 +50,7 @@ func TestExpiryIsAHardBoundaryExcludedFromRecall(t *testing.T) {
 		t.Fatalf("expired facts must never be auto-recalled: %+v", result.Hits)
 	}
 	// Explicit search still finds it — expiry hides nothing from management.
-	hits, err := searchMemories(t.Context(), store, "release branch", "", "", 8)
+	hits, _, err := searchMemories(t.Context(), store, "release branch", "", "", 8)
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("explicit search should still see expired facts, got %v %v", hits, err)
 	}

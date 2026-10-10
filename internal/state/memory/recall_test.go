@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -322,5 +324,148 @@ func saveMemory(t *testing.T, store Store, m Memory) {
 	t.Helper()
 	if _, err := store.Save(m); err != nil {
 		t.Fatalf("Save(%s): %v", m.Name, err)
+	}
+}
+
+func TestRecallToolReportsOmittedMatches(t *testing.T) {
+	store := Store{Dir: testenv.TempDir(t)}
+	const facts = 12
+	for i := range facts {
+		saveMemory(t, store, Memory{
+			Name:        fmt.Sprintf("omitted-search-%02d", i),
+			Description: "omitted search fixture",
+			Type:        TypeProject,
+			Body:        "omittedsearchterm",
+		})
+	}
+	tl := NewRecallTool(store)
+
+	// More matches than the caller asked for: the model must be able to tell a
+	// truncated result from a complete one, the way the automatic recall block
+	// already reports what it dropped.
+	out, err := tl.Execute(context.Background(), []byte(`{"operation":"search","query":"omittedsearchterm","limit":5}`))
+	if err != nil {
+		t.Fatalf("Execute search: %v", err)
+	}
+	omitted, ok := omittedFromOutput(out)
+	if !ok {
+		t.Fatalf("search did not report what it dropped:\n%s", out)
+	}
+	if omitted != facts-5 {
+		t.Fatalf("omitted=%d, want exactly %d (the floor kept all twelve, the limit cut five):\n%s", omitted, facts-5, out)
+	}
+
+	// The negative control: a result that lost nothing must not claim otherwise.
+	full, err := tl.Execute(context.Background(), []byte(`{"operation":"search","query":"omittedsearchterm","limit":20}`))
+	if err != nil {
+		t.Fatalf("Execute search: %v", err)
+	}
+	if strings.Contains(full, "omitted=") {
+		t.Fatalf("a complete search reported an omission:\n%s", full)
+	}
+}
+
+func TestRecallToolReportsFloorDrops(t *testing.T) {
+	store := Store{Dir: testenv.TempDir(t)}
+	saveMemory(t, store, Memory{
+		Name:        "rare-floor-rule",
+		Description: "Rare floor rule",
+		Type:        TypeProject,
+		Body:        "rarefloorterm common common common",
+	})
+	for i := range 12 {
+		saveMemory(t, store, Memory{
+			Name:        fmt.Sprintf("floor-note-%02d", i),
+			Description: "Common note",
+			Type:        TypeProject,
+			Body:        "common",
+		})
+	}
+
+	out, err := NewRecallTool(store).Execute(context.Background(), []byte(`{"operation":"search","query":"rarefloorterm common","limit":20}`))
+	if err != nil {
+		t.Fatalf("Execute search: %v", err)
+	}
+	// Nothing was dropped by the limit, so this note can only come from the
+	// relevance floor: the drop the tool used to make silently.
+	if omitted, ok := omittedFromOutput(out); !ok || omitted != 12 {
+		t.Fatalf("floor drops not reported (omitted=%d ok=%v):\n%s", omitted, ok, out)
+	}
+}
+
+func TestRecallToolReportsOmittedListEntries(t *testing.T) {
+	store := Store{Dir: testenv.TempDir(t)}
+	for i := range 12 {
+		saveMemory(t, store, Memory{
+			Name:        fmt.Sprintf("omitted-list-%02d", i),
+			Description: "omitted list fixture",
+			Type:        TypeProject,
+			Body:        "listed fact",
+		})
+	}
+	tl := NewRecallTool(store)
+
+	out, err := tl.Execute(context.Background(), []byte(`{"operation":"list","limit":5}`))
+	if err != nil {
+		t.Fatalf("Execute list: %v", err)
+	}
+	if omitted, ok := omittedFromOutput(out); !ok || omitted != 7 {
+		t.Fatalf("list omitted=%d ok=%v, want 7:\n%s", omitted, ok, out)
+	}
+
+	full, err := tl.Execute(context.Background(), []byte(`{"operation":"list","limit":20}`))
+	if err != nil {
+		t.Fatalf("Execute list: %v", err)
+	}
+	if strings.Contains(full, "omitted=") {
+		t.Fatalf("a complete list reported an omission:\n%s", full)
+	}
+}
+
+// omittedFromOutput reads the tool's omission note, in the same shape the
+// automatic recall block uses: "- omitted=N ...".
+func omittedFromOutput(out string) (int, bool) {
+	_, rest, ok := strings.Cut(out, "- omitted=")
+	if !ok {
+		return 0, false
+	}
+	digits, _, _ := strings.Cut(rest, " ")
+	n, err := strconv.Atoi(digits)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func TestCountOmittedCountsBothReasons(t *testing.T) {
+	cases := []struct {
+		name                string
+		ranked, kept, limit int
+		want                int
+	}{
+		{"nothing dropped", 3, 3, 8, 0},
+		{"floor only", 13, 1, 8, 12},
+		{"limit only", 12, 12, 5, 7},
+		{"floor and limit", 20, 12, 5, 15},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := countOmitted(tc.ranked, tc.kept, tc.limit); got != tc.want {
+				t.Fatalf("countOmitted(%d, %d, %d) = %d, want %d", tc.ranked, tc.kept, tc.limit, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOmittedNoteIsTheRecallBlockWording(t *testing.T) {
+	// The recall block and the tool paths must spell the omission line the same
+	// way; this pins the one spelling both now call.
+	got := omittedNote(3, "relevant fact(s)", "the recall limit or character budget")
+	want := "- omitted=3 additional relevant fact(s) because of the recall limit or character budget"
+	if got != want {
+		t.Fatalf("omittedNote = %q, want %q", got, want)
+	}
+	if !strings.Contains(got, "- omitted=3 ") {
+		t.Fatalf("omittedNote lost the count-first shape: %q", got)
 	}
 }

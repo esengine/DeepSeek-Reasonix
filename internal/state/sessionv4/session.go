@@ -221,7 +221,7 @@ func readManifest(store fs.FS, name string) ([]byte, error) {
 		return nil, err
 	}
 	if len(raw) > maxManifestBytes {
-		return nil, fmt.Errorf("%w: manifest larger than %d bytes", ErrDamaged, maxManifestBytes)
+		return nil, fmt.Errorf("%w: manifest larger than %d bytes", ErrTooLarge, maxManifestBytes)
 	}
 	return raw, nil
 }

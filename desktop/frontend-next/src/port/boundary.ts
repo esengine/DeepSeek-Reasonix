@@ -24,6 +24,8 @@ export interface PermissionRules extends PermissionLists {
   rememberedErrorCode?: string;
   shadowedBy?: string;
   effective?: PermissionLists;
+  // Saved rules that name no tool, so they match nothing.
+  dormant?: { list: string; rule: string; tool: string }[];
 }
 
 // Where an approved write may land, and whether bash runs jailed. The

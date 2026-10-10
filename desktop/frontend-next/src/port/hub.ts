@@ -51,6 +51,25 @@ export interface TreeSession {
   versions?: TreeSession[];
 }
 
+export type LegacySkipReason = "too_large" | "unreadable_format" | "schema_unsupported" | "permission" | "corrupt" | "copy_failed";
+
+// A 1.x session the import could not read. The entry at `path` was neither
+// moved nor deleted.
+export interface LegacySkip {
+  source: string;
+  name: string;
+  path: string;
+  reason: LegacySkipReason;
+}
+
+export interface LegacyImport {
+  summary: string;
+  imported: number;
+  warnings: number;
+  recognised: boolean;
+  skipped: LegacySkip[];
+}
+
 export interface HostCapabilities {
   // The kernel can open a picker on its own machine. A browser on a headless
   // server gets false and must offer the path API instead.
@@ -90,7 +109,7 @@ export interface HubPort extends SharePort {
   archiveSession(path: string, archived: boolean): Promise<void>;
   renameSession(path: string, title: string): Promise<void>;
   exportSession(path: string): Promise<{ name: string; content: string }>;
-  importLegacySessions(path: string, workspace: string): Promise<{ summary: string; imported: number; warnings: number; recognised: boolean }>;
+  importLegacySessions(path: string, workspace: string): Promise<LegacyImport>;
   // The host book with each link's state, or null where this kernel refuses
   // remote panes outright — a page served to a browser, rather than the window.
   // Null is what lets the sidebar leave the whole section out instead of
@@ -249,7 +268,7 @@ export class SseHub implements HubPort {
   }
 
   importLegacySessions(path: string, workspace: string) {
-    return this.post<{ summary: string; imported: number; warnings: number; recognised: boolean }>("/tree/sessions/import-legacy", { path, workspace });
+    return this.post<LegacyImport>("/tree/sessions/import-legacy", { path, workspace });
   }
 
   async remoteHosts() {

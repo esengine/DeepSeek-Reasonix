@@ -1531,8 +1531,8 @@
   .opt-other .lb { color: var(--muted) }
   .opt-other[data-on] .lb { color: var(--text) }
 
-  .other-wrap { display: none; margin-top: 7px }
-  .other-wrap[data-on] { display: block; animation: card var(--t-card) var(--ease-out) both }
+  .other-wrap { margin-top: 8px }
+  .ask[data-sealed] .other-wrap:not([data-on]) { display: none }
   .other-wrap input {
     width: 100%; padding: 9px 11px; border-radius: var(--r-sm);
     border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
@@ -1907,7 +1907,7 @@
 
   .reask { display: flex; flex-direction: column; gap: 9px; margin-top: 4px }
   .reask textarea {
-    width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px;
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; max-height: min(60vh, 28rem); max-height: min(60dvh, 28rem);
     border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); color: var(--text);
     padding: 10px 12px; font: var(--w-reg) var(--fs-ui)/1.62 var(--ui); outline: 0;
   }

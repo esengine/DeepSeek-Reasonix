@@ -30,6 +30,9 @@ export interface ProviderEntry {
   // where a relay can actually reject the request over it.
   canSetThinking?: boolean;
   sendsThinking?: boolean;
+  // Where a chosen effort level lands in this entry's request body, as a dotted
+  // path; absent when its resolved reasoning protocol reshapes the request.
+  effortField?: string;
   // How this endpoint carries context between turns, and whether its protocol
   // has the choice at all. "" is vendor detection, which is what an endpoint
   // nobody has characterised keeps doing.
@@ -87,6 +90,10 @@ export interface Protocol {
   // whether thinking/effort fields ride it at all.
   serverWebSearch: boolean;
   reasoningParams: boolean;
+  effortField?: string;
+  // The reasoning protocols under which that field holds; empty when the wire
+  // fixes it whatever protocol is chosen.
+  effortUnder?: string[];
 }
 
 // What an endpoint turned out to be. Every field is a guess the user confirms
@@ -216,6 +223,8 @@ export interface ModelLimit {
 export interface ModelEffort {
   supportedEfforts: string[];
   defaultEffort?: string;
+  // On an inherited ladder: the vendor's documented contract, not typed levels.
+  official?: boolean;
 }
 
 // What the panel sends back after the user has looked at the probe.

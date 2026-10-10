@@ -65,6 +65,30 @@ func TestFullScreenScrollsAndFollowsTheTail(t *testing.T) {
 	}
 }
 
+// Enter on an empty composer brings a scrolled-back view to the newest rows and
+// follows them again, idle or while a turn runs, as 1.x did; it sends nothing.
+func TestEmptyEnterFollowsTheTailAgain(t *testing.T) {
+	m, k := testModel(t)
+	fillTranscript(m, 60)
+	m.View()
+	for _, running := range []bool{false, true} {
+		if running {
+			startTurn(m)
+		}
+		for _, draft := range []string{"", "   "} {
+			press(m, "ctrl+home")
+			m.composer.SetValue(draft)
+			run(m, press(m, "enter"))
+			if !m.scr.follow {
+				t.Fatalf("Enter on %q (running=%v) left the view at %d", draft, running, m.scr.yoff)
+			}
+		}
+	}
+	if calledWith(k, "POST /submit") || calledWith(k, "POST /inbox/items") {
+		t.Fatalf("an empty Enter sent something:\n%s", strings.Join(k.seen(), "\n"))
+	}
+}
+
 // Shift+PgUp/PgDn page the transcript as they page a terminal's scrollback.
 func TestShiftPageKeysScrollTheTranscript(t *testing.T) {
 	m, _ := testModel(t)

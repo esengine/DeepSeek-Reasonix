@@ -43,7 +43,7 @@ func TestAvailableListsInstalledInterpreters(t *testing.T) {
 	}{
 		{
 			"windows with git bash lists bash first",
-			shellHost{"windows", fakePath("pwsh", "powershell"), yes, gitBash, winPS, yes, no, yes},
+			shellHost{"windows", fakePath("pwsh", "powershell"), yes, gitBash, winPS, yes, no, yes, nil},
 			[]string{`C:\fake\Git\bin\bash.exe`, `C:\fake\PowerShell\7\pwsh.exe`, `C:\fake\System32\powershell.exe`},
 		},
 		{
@@ -51,7 +51,7 @@ func TestAvailableListsInstalledInterpreters(t *testing.T) {
 			// candidate — is one interpreter, and two rows offering it would ask
 			// the user to choose between a thing and itself.
 			"a bash found twice is listed once",
-			shellHost{"windows", fakePath("bash"), func(p string) bool { return p == `C:\fake\bash.exe` }, []string{`C:\fake\bash.exe`}, nil, yes, no, yes},
+			shellHost{"windows", fakePath("bash"), func(p string) bool { return p == `C:\fake\bash.exe` }, []string{`C:\fake\bash.exe`}, nil, yes, no, yes, nil},
 			[]string{`C:\fake\bash.exe`},
 		},
 		{
@@ -59,17 +59,17 @@ func TestAvailableListsInstalledInterpreters(t *testing.T) {
 			// workspace is a /mnt path; offering it would hand the agent a shell
 			// that cannot see the files it was pointed at.
 			"the wsl launcher is not on offer",
-			shellHost{"windows", fakePath("bash", "powershell"), no, nil, winPS, yes, func(p string) bool { return p == `C:\fake\bash.exe` }, yes},
+			shellHost{"windows", fakePath("bash", "powershell"), no, nil, winPS, yes, func(p string) bool { return p == `C:\fake\bash.exe` }, yes, nil},
 			[]string{`C:\fake\powershell.exe`},
 		},
 		{
 			"a unix host offers the one bash it has",
-			shellHost{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes},
+			shellHost{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes, nil},
 			[]string{`C:\fake\bash.exe`},
 		},
 		{
 			"a host with nothing offers nothing",
-			shellHost{"linux", fakePath(), no, nil, nil, yes, no, yes},
+			shellHost{"linux", fakePath(), no, nil, nil, yes, no, yes, nil},
 			nil,
 		},
 	}
@@ -94,16 +94,20 @@ func TestAvailableHeadIsWhatAutoPicks(t *testing.T) {
 	yes := func(string) bool { return true }
 	no := func(string) bool { return false }
 	hosts := []shellHost{
-		{"windows", fakePath("pwsh"), yes, []string{`C:\fake\Git\bin\bash.exe`}, []string{`C:\fake\PowerShell\7\pwsh.exe`}, yes, no, yes},
-		{"windows", fakePath("pwsh", "powershell"), no, nil, nil, yes, no, yes},
-		{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes},
+		{"windows", fakePath("pwsh"), yes, []string{`C:\fake\Git\bin\bash.exe`}, []string{`C:\fake\PowerShell\7\pwsh.exe`}, yes, no, yes, nil},
+		{"windows", fakePath("pwsh", "powershell"), no, nil, nil, yes, no, yes, nil},
+		{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes, nil},
 	}
 	for _, h := range hosts {
 		list := h.available()
 		if len(list) == 0 {
 			t.Fatalf("host %+v offered nothing", h.goos)
 		}
-		if got := h.auto(nil); got != list[0] {
+		// Fallback only explains why bash was passed over; which interpreter wins is
+		// kind and path.
+		got := h.auto(nil)
+		got.Fallback = FallbackNone
+		if got != list[0] {
 			t.Fatalf("auto = %+v, want the first offered %+v", got, list[0])
 		}
 	}
@@ -139,7 +143,7 @@ func TestWSLLauncherFoundAsCandidateIsNotOffered(t *testing.T) {
 	yes := func(string) bool { return true }
 	wsl := `C:\Windows\System32\bash.exe`
 	git := `D:\Git\bin\bash.exe`
-	h := shellHost{"windows", fakePath(), yes, []string{wsl, git}, nil, yes, func(p string) bool { return p == wsl }, yes}
+	h := shellHost{"windows", fakePath(), yes, []string{wsl, git}, nil, yes, func(p string) bool { return p == wsl }, yes, nil}
 	if got := paths(h.available()); len(got) != 1 || got[0] != git {
 		t.Fatalf("available = %v, want only %s", got, git)
 	}
@@ -203,7 +207,7 @@ func TestStoreAliasBashIsNeverOfferedOrChosen(t *testing.T) {
 	sep := string(filepath.Separator)
 	alias := sep + filepath.Join("u", "AppData", "Local", "Microsoft", "WindowsApps", "bash.exe")
 	isWSL := func(p string) bool { return p == alias }
-	h := shellHost{"windows", fakePath(), yes, []string{alias}, nil, yes, isWSL, yes}
+	h := shellHost{"windows", fakePath(), yes, []string{alias}, nil, yes, isWSL, yes, nil}
 	if got := paths(h.available()); len(got) != 0 {
 		t.Fatalf("available = %v, want none", got)
 	}

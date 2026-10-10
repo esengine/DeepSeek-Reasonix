@@ -1501,7 +1501,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallback bool, ok bool) {
 	ref = strings.TrimSpace(ref)
 	if ref != "" {
-		if e, found := c.ResolveModel(ref); found {
+		if e, found := c.ResolveModel(ref); found && Answering(e.Kind, AnswersChat) {
 			return e.Name + "/" + e.Model, false, true
 		}
 	}
@@ -1510,7 +1510,7 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 	// already WAS the DefaultModel (it already failed above, so retrying won't
 	// help) or when the default provider has no API key configured.
 	if ref != c.DefaultModel && c.DefaultModel != "" {
-		if e, found := c.ResolveModel(c.DefaultModel); found && e.Configured() {
+		if e, found := c.ResolveModel(c.DefaultModel); found && e.Configured() && Answering(e.Kind, AnswersChat) {
 			return e.Name + "/" + e.Model, true, true
 		}
 	}
@@ -1519,7 +1519,7 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 		// Skip providers with no models or no API key: falling back onto a keyless
 		// provider just boots the tab onto something that fails on first use. Mirrors
 		// the Configured() gate the provider-removal/selection paths already apply.
-		if len(p.ModelList()) == 0 || !p.Configured() {
+		if len(p.ModelList()) == 0 || !p.Configured() || !Answering(p.Kind, AnswersChat) {
 			continue
 		}
 		return p.Name + "/" + p.DefaultModel(), true, true
@@ -1548,7 +1548,7 @@ func (c *Config) resolveNewSessionChatModel(providerAllowed func(string) bool, p
 	keylessDefault := ""
 	if def != "" {
 		if entry, found := c.ResolveModel(def); found {
-			if providerAllowed(entry.Name) && IsLikelyChatModel(entry.Model) {
+			if providerAllowed(entry.Name) && Answering(entry.Kind, AnswersChat) && IsLikelyChatModel(entry.Model) {
 				if entry.Configured() {
 					return def, false, true
 				}
@@ -1565,7 +1565,7 @@ func (c *Config) resolveNewSessionChatModel(providerAllowed func(string) bool, p
 	keylessFallback := ""
 	for i := range c.Providers {
 		p := &c.Providers[i]
-		if !providerAllowed(p.Name) {
+		if !providerAllowed(p.Name) || !Answering(p.Kind, AnswersChat) {
 			continue
 		}
 		chatModels := p.ChatModelList()

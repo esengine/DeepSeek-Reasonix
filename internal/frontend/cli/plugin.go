@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reasonix/internal/base/textutil"
 	"strings"
 
 	"reasonix/internal/contract/config"
@@ -203,6 +204,7 @@ func pluginListCommand() int {
 		return 0
 	}
 	for _, p := range st.Plugins {
+		p = p.Display()
 		state := "disabled"
 		if p.Enabled {
 			state = "enabled"
@@ -240,13 +242,14 @@ func pluginShowCommand(args []string) int {
 		return 1
 	}
 	summary := pkg.CapabilitySummary()
+	p = p.Display()
 	fmt.Printf("name: %s\nversion: %s\nenabled: %t\nkind: %s\nroot: %s\nsource: %s\nskills: %d\nagents: %d\ncommands: %d\nprompts: %d\nhooks: %d\nmcpServers: %d\nthemes: %d\n",
 		p.Name, p.Version, p.Enabled, p.ManifestKind, root, p.Source, summary.Skills, summary.Agents, summary.Commands, summary.Prompts, summary.Hooks, summary.MCPServers, summary.Themes)
 	if summary.Runtime {
 		fmt.Print(pluginpkg.RuntimeTrustText(pkg.Manifest.Runtime))
 	}
-	printPluginInventory(p.Name, pkg.Inventory())
-	for _, warning := range warnings {
+	printPluginInventory(p.Name, pkg.InventoryForDisplay())
+	for _, warning := range pluginpkg.DisplayLines(warnings) {
 		fmt.Println("warning:", warning)
 	}
 	return 0
@@ -432,13 +435,13 @@ func pluginDoctorCommand(args []string) int {
 			if r.Optional {
 				opt = " (optional)"
 			}
-			fmt.Printf("  %s/%s/%s range=%s%s\n", r.Namespace, r.Kind, r.ID, r.VersionRange, opt)
+			fmt.Printf("  %s/%s/%s range=%s%s\n", textutil.ShownIdentity(r.Namespace), textutil.ShownIdentity(r.Kind), textutil.ShownIdentity(r.ID), textutil.ShownIdentity(r.VersionRange), opt)
 		}
 	}
 	if len(pkg.Manifest.Provides) > 0 {
 		fmt.Println("provides:")
 		for _, c := range pkg.Manifest.Provides {
-			fmt.Printf("  %s/%s/%s@%s\n", c.Namespace, c.Kind, c.ID, c.Version)
+			fmt.Printf("  %s/%s/%s@%s\n", textutil.ShownIdentity(c.Namespace), textutil.ShownIdentity(c.Kind), textutil.ShownIdentity(c.ID), textutil.ShownIdentity(c.Version))
 		}
 	}
 	warnings = append(warnings, theme.PluginWarnings(pkg)...)
@@ -446,7 +449,7 @@ func pluginDoctorCommand(args []string) int {
 	for _, warning := range skill.PluginWarnings(pkg) {
 		warnings = append(warnings, warning.Error())
 	}
-	for _, warning := range warnings {
+	for _, warning := range pluginpkg.DisplayLines(warnings) {
 		fmt.Println("warning:", warning)
 	}
 	for _, skillRoot := range pkg.SkillRoots() {

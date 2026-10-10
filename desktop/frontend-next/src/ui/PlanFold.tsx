@@ -7,7 +7,7 @@ import { StudioIcon } from "./StudioIcon";
 /** The list belongs above the line that narrates the turn, because that is
  *  what it is about. Mounted whether or not it is shown, so the fold survives a
  *  visit to another view. */
-export function PlanFold({ plan, shown }: { plan: PlanStep[]; shown: boolean }) {
+export function PlanFold({ plan, shown, paused }: { plan: PlanStep[]; shown: boolean; paused?: boolean }) {
   const [open, setOpen] = useState(false);
   if (plan.length === 0 || !shown) return null;
   return (
@@ -28,7 +28,7 @@ export function PlanFold({ plan, shown }: { plan: PlanStep[]; shown: boolean }) 
         <small>{plan.filter(stepDone).length}/{plan.length}</small>
         <StudioIcon name="down" className="studio-todo-fold" />
       </button>
-      {open && <div className="studio-todo-body"><Plan steps={plan} /></div>}
+      {open && <div className="studio-todo-body"><Plan steps={plan} paused={paused} /></div>}
     </div>
   );
 }

@@ -27,21 +27,23 @@ const (
 	recentTailBudgetRatio        = 0.10 // recent verbatim tail as a fraction of the window
 	minRecentTailTokens          = 32 * 1024
 	maxRecentTailTokens          = 96 * 1024
-	summaryOutputMaxTokens       = 16 * 1024 // max digest output; further clipped by remaining candidate space
-	summaryEffort                = "low"     // lowest depth an endpoint may approve; reasoning shares the output cap
-	exceptionalMinSavingsRatio   = 0.25      // when fixed prefix alone exceeds 50%, require at least this savings
-	minRecentKeep                = 2         // never keep fewer recent messages than this
-	minCompactMessages           = 2         // skip compaction below this many compactable messages
-	fallbackTokPerChar           = 0.25      // ~4 chars/token, used before any usage is available to calibrate
-	defaultPinnedFirstUserTokens = 1500      // default ceiling on pinning the first user turn verbatim
-	pinnedFirstUserWindowFrac    = 0.15      // and never pin a first turn worth more than this fraction of the window
-	keptUserTurnsWindowFrac      = 0.05      // default verbatim user-turn budget, as a fraction of the window
-	keptUserTurnsFloorTokens     = 1024      // ...with a floor so a small window still holds something
-	protocolReserveTokens        = 256       // provider framing and control fields not represented by message estimates
+	summaryOutputMaxTokens       = 16 * 1024                  // max digest output; further clipped by remaining candidate space
+	summaryRetryOutputMaxTokens  = 2 * summaryOutputMaxTokens // one retry after a truncation may spend up to this
+	summaryEffort                = "low"                      // lowest depth an endpoint may approve; reasoning shares the output cap
+	exceptionalMinSavingsRatio   = 0.25                       // when fixed prefix alone exceeds 50%, require at least this savings
+	minRecentKeep                = 2                          // never keep fewer recent messages than this
+	minCompactMessages           = 2                          // skip compaction below this many compactable messages
+	fallbackTokPerChar           = 0.25                       // ~4 chars/token, used before any usage is available to calibrate
+	defaultPinnedFirstUserTokens = 1500                       // default ceiling on pinning the first user turn verbatim
+	pinnedFirstUserWindowFrac    = 0.15                       // and never pin a first turn worth more than this fraction of the window
+	keptUserTurnsWindowFrac      = 0.05                       // default verbatim user-turn budget, as a fraction of the window
+	keptUserTurnsFloorTokens     = 1024                       // ...with a floor so a small window still holds something
+	protocolReserveTokens        = 256                        // provider framing and control fields not represented by message estimates
 )
 
 var (
 	errSummaryOutputTruncated = errors.New("summarizer output truncated")
+	errNoOutputHeadroom       = errors.New("no output budget above the previous attempt")
 	errCheckpointRejected     = errors.New("checkpoint candidate rejected")
 )
 
@@ -594,8 +596,14 @@ func charsOfMessages(msgs []provider.Message) int {
 
 // summarize asks the executor's own provider (no tools) to distill the region
 // into a briefing. instructions is optional /compact focus + PreCompact text.
-// Named returns so defer can attach RequestCount and still return usage.
-func (a *contextWindow) summarize(ctx context.Context, region []provider.Message, instructions string) (summary string, usage *provider.Usage, err error) {
+func (a *contextWindow) summarize(ctx context.Context, region []provider.Message, instructions string) (string, *provider.Usage, error) {
+	return a.summarizeAt(ctx, region, instructions, summaryOutputMaxTokens, 0)
+}
+
+// summarizeAt sends one summary request whose output cap is at most limit. A
+// cap that cannot exceed above is refused with errNoOutputHeadroom before any
+// request is made. Named returns so defer can attach RequestCount.
+func (a *contextWindow) summarizeAt(ctx context.Context, region []provider.Message, instructions string, limit, above int) (summary string, usage *provider.Usage, err error) {
 	parent := ctx
 	bounds := SummaryBounds
 	ctx, cancel := context.WithTimeoutCause(ctx, bounds.Ceiling, errSummaryCeiling)
@@ -621,7 +629,7 @@ func (a *contextWindow) summarize(ctx context.Context, region []provider.Message
 		}
 	}()
 	defer TrackPublishedHostStream(ctx, cancel)()
-	maxOut := summaryOutputMaxTokens
+	maxOut := limit
 	if a.maxOutputTokens > 0 && a.maxOutputTokens < maxOut {
 		maxOut = a.maxOutputTokens
 	}
@@ -640,8 +648,11 @@ func (a *contextWindow) summarize(ctx context.Context, region []provider.Message
 	} else if clipped {
 		req.MaxTokens = budget
 	}
-	if req.MaxTokens > summaryOutputMaxTokens {
-		req.MaxTokens = summaryOutputMaxTokens
+	if req.MaxTokens > limit {
+		req.MaxTokens = limit
+	}
+	if req.MaxTokens <= above {
+		return "", usage, errNoOutputHeadroom
 	}
 	if req.MaxTokens < 256 {
 		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)
@@ -667,7 +678,7 @@ func (a *contextWindow) summarize(ctx context.Context, region []provider.Message
 			idle.Reset(bounds.Idle)
 			if !ok {
 				if usage != nil && usage.FinishReason == "length" {
-					return "", usage, fmt.Errorf("%w: provider reached the output token limit", errSummaryOutputTruncated)
+					return "", usage, &summaryTruncation{Cap: req.MaxTokens}
 				}
 				s := strings.TrimSpace(b.String())
 				if s == "" {
@@ -681,7 +692,9 @@ func (a *contextWindow) summarize(ctx context.Context, region []provider.Message
 				// The digest is already streaming; forwarding it is what lets a
 				// frontend show a fold working rather than a spinner that cannot
 				// tell slow from stuck. Coalesced downstream like any delta.
-				a.svc.sink.Emit(event.Event{Kind: event.CompactionProgress, Text: chunk.Text})
+				if chunk.Text != "" {
+					a.svc.sink.Emit(event.Event{Kind: event.CompactionProgress, Text: chunk.Text})
+				}
 			case provider.ChunkUsage:
 				usage = chunk.Usage
 			case provider.ChunkError:
@@ -689,13 +702,6 @@ func (a *contextWindow) summarize(ctx context.Context, region []provider.Message
 			}
 		}
 	}
-}
-
-// summarizeOnce performs exactly one application-layer summary request.
-// Timeouts, empty results, stream errors, and output truncation all fail once
-// with no second attempt.
-func (a *contextWindow) summarizeOnce(ctx context.Context, fold []provider.Message, instructions string) (string, *provider.Usage, error) {
-	return a.summarize(ctx, fold, instructions)
 }
 
 // renderTranscript flattens messages into a readable transcript for summarization.

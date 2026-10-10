@@ -93,6 +93,8 @@ func (t *Tool) planDownloadedURL(ctx context.Context, req request, sourceURL str
 				actions = append(actions, t.mcpEntryAction(req, e, sourceURL))
 			}
 			return actions, warnings, nil
+		} else if req.Kind == "mcp" && looksLikeMCPJSONURL(sourceURL) {
+			return nil, nil, err
 		}
 	}
 	if req.Kind == "auto" || req.Kind == "skill" {
@@ -126,7 +128,7 @@ func (t *Tool) tryGitHubRepo(ctx context.Context, req request) ([]action, []stri
 				return actions, warnings
 			}
 			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s: %s", cand, err.Error()))
+				warnings = append(warnings, fmt.Sprintf("%s: %s", hostLiteral(cand), err.Error()))
 			}
 		}
 		if req.Kind == "auto" || req.Kind == "skill" {
@@ -454,7 +456,7 @@ func (t *Tool) localSkillActions(req request, path string, info os.FileInfo) ([]
 			if root == "" {
 				root = filepath.Dir(path)
 			}
-			return []action{t.skillRootAction(req, root, []string{cand.Name})}, nil
+			return []action{t.skillRootAction(req, root, []skillCandidate{cand})}, nil
 		}
 		return []action{t.skillAction(req, cand, modeForSingleSkill(req.Mode))}, nil
 	}
@@ -470,7 +472,7 @@ func (t *Tool) localSkillActions(req request, path string, info os.FileInfo) ([]
 			cand.Name = req.Name
 		}
 		if req.Mode == "register" {
-			return []action{t.skillRootAction(req, filepath.Dir(path), []string{cand.Name})}, nil
+			return []action{t.skillRootAction(req, filepath.Dir(path), []skillCandidate{cand})}, nil
 		}
 		return []action{t.skillAction(req, cand, modeForSingleSkill(req.Mode))}, nil
 	}
@@ -486,20 +488,18 @@ func (t *Tool) localSkillActions(req request, path string, info os.FileInfo) ([]
 		mode = "register"
 	}
 	if mode == "register" {
-		byRoot := map[string][]string{}
+		byRoot := map[string][]skillCandidate{}
 		for _, cand := range cands {
 			root := cand.RootPath
 			if root == "" {
 				root = path
 			}
-			byRoot[root] = append(byRoot[root], cand.Name)
+			byRoot[root] = append(byRoot[root], cand)
 		}
 		roots := slices.Sorted(maps.Keys(byRoot))
 		actions := make([]action, 0, len(roots))
 		for _, root := range roots {
-			rootNames := byRoot[root]
-			slices.Sort(rootNames)
-			actions = append(actions, t.skillRootAction(req, root, rootNames))
+			actions = append(actions, t.skillRootAction(req, root, byRoot[root]))
 		}
 		return actions, nil
 	}

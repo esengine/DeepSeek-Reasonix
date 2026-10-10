@@ -51,3 +51,35 @@ func TestThePointerStepsNameThemselvesInTheApproval(t *testing.T) {
 		t.Errorf("a run that takes the pointer named %q", got)
 	}
 }
+
+// A modal is said before the tree, from the snapshot's structure, so the model
+// knows why the rest of the window takes no input.
+func TestASnapshotLeadsWithTheModalThatHoldsTheInput(t *testing.T) {
+	out := renderComputerSnapshot(computer.Snapshot{
+		App:    computer.App{Bundle: "notepad.exe", Name: "Notepad"},
+		Lines:  []string{`- window "Untitled" [a1]`, `  - window "Error" [a34] modal`},
+		Modals: []computer.Modal{{Ref: "a34", Title: "Error", Blocks: "Untitled"}},
+	})
+	lines := strings.Split(out, "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[1], `Blocked: the modal "Error" [a34] over "Untitled" holds this application's input`) {
+		t.Fatalf("snapshot = %q", out)
+	}
+}
+
+func TestEachStepSaysWhatIsKnownOfItsEffect(t *testing.T) {
+	modal := &computer.Modal{Ref: "a34", Title: "Error"}
+	for _, c := range []struct {
+		effect computer.Effect
+		want   string
+	}{
+		{computer.Effect{Class: computer.EffectConfirmed, Evidence: []computer.Evidence{computer.EvidenceValueReadback}}, " — took effect (value read back)"},
+		{computer.Effect{Class: computer.EffectSuspectedNoop, Evidence: []computer.Evidence{computer.EvidenceValueUnchanged}}, " — no effect seen (value unchanged)"},
+		{computer.Effect{Class: computer.EffectUnverifiable}, " — effect not verified"},
+		{computer.Effect{Class: computer.EffectUnverifiable, BlockedBy: modal}, ` — effect not verified, into the modal "Error" [a34]`},
+		{computer.Effect{}, ""},
+	} {
+		if got := renderEffect(c.effect); got != c.want {
+			t.Errorf("%+v renders %q, want %q", c.effect, got, c.want)
+		}
+	}
+}

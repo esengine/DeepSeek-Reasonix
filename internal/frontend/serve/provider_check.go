@@ -84,6 +84,10 @@ func (s *Server) checkProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), providerProbeTimeout)
 	defer cancel()
+	if config.AnswersFor(entry.Kind) == config.AnswersDecision {
+		writeJSON(w, checkDecisionProvider(ctx, cfg, entry))
+		return
+	}
 	proxied, direct := probeClients()
 	got, probeErr := catalog.ProbeEndpoint(ctx, catalog.ProbeOptions{
 		BaseURL: entry.BaseURL,
@@ -221,31 +225,10 @@ func (s *Server) checkProviderModel(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(provider.WithRetryLimit(r.Context(), 0), providerProbeTimeout)
 	defer cancel()
 	if config.AnswersFor(candidate.Kind) == config.AnswersDecision {
-		client, err := netclient.NewHTTPClient(proxy, netclient.TransportOptions{})
-		if err != nil {
-			writeJSON(w, providerModelCheck{Model: model, Status: "unknown", Reason: "rejected"})
-			return
-		}
-		defer client.CloseIdleConnections()
 		if candidate.APIKey() == "" {
 			candidate.ResolveAPIKeyFromProcessEnvForProbe()
 		}
-		result, err := (typesafe.Client{HTTP: client, BaseURL: candidate.BaseURL, APIKey: candidate.APIKey}).Evaluate(ctx, typesafe.Request{
-			State: "Connectivity probe",
-			Model: model,
-			Questions: map[string]typesafe.Question{
-				"probe": {Type: "noul", Instructions: "Is this a connectivity probe?"},
-			},
-		})
-		if err == nil {
-			var answer struct {
-				Type string   `json:"type"`
-				Noul *float64 `json:"noul"`
-			}
-			if json.Unmarshal(result.Answers["probe"], &answer) != nil || answer.Type != "noul" || answer.Noul == nil || *answer.Noul < 0 || *answer.Noul > 1 {
-				err = errors.New("TypeSafe probe returned no valid Noul answer")
-			}
-		}
+		err := probeDecision(ctx, cfg, &candidate, model)
 		status, reason, httpStatus := classifyProviderModelCheck(err)
 		writeJSON(w, providerModelCheck{Model: model, Status: status, Reason: reason, HTTPStatus: httpStatus, Detail: modelCheckDetail(err, candidate.APIKey)})
 		return

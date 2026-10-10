@@ -38,9 +38,19 @@ func runFakeComputerHelper(in io.Reader, out io.Writer) {
 				"windows": []any{map[string]any{"id": 1, "title": "Draft", "bounds": map[string]any{"x": 0, "y": 0, "width": 800, "height": 600}}},
 			}}}
 		case "snapshot":
-			result = map[string]any{"lines": []string{`- window "Draft" [a1]`, `  - textField "Body" [a2] value="` + value + `"`}}
+			result = map[string]any{
+				"lines":  []string{`- window "Draft" [a1]`, `  - textField "Body" [a2] value="` + value + `"`, `  - window "Unsaved changes" [a9] modal`},
+				"modals": []any{map[string]any{"ref": "a9", "title": "Unsaved changes", "blocks": "Draft"}},
+			}
 		case "set_value":
 			value, _ = req.Params["text"].(string)
+			result = map[string]any{"effect": map[string]any{"class": "confirmed", "evidence": []string{"value_readback"}}}
+		case "type":
+			_ = enc.Encode(map[string]any{"id": req.ID, "error": map[string]any{
+				"code": "computer.blocked", "message": "the keys would land in a dialog whose focused element takes no text",
+				"blocked_by": map[string]any{"ref": "a9", "title": "Unsaved changes", "blocks": "Draft"},
+			}})
+			continue
 		}
 		_ = enc.Encode(map[string]any{"id": req.ID, "result": result})
 	}
@@ -64,6 +74,7 @@ func TestEffectComputerUseThroughTheRealAssembly(t *testing.T) {
 		func(string) *provider.ToolCall {
 			return browserCall("act-1", "computer_act", map[string]any{"app": "com.example.Notes", "steps": []any{
 				map[string]any{"action": "set_value", "ref": "a2", "text": "hello"},
+				map[string]any{"action": "type", "text": " world"},
 			}})
 		},
 	})
@@ -79,8 +90,19 @@ func TestEffectComputerUseThroughTheRealAssembly(t *testing.T) {
 	if !strings.Contains(results[0], "* com.example.Notes — Notes") {
 		t.Fatalf("the application list did not reach the model:\n%s", results[0])
 	}
-	if !strings.Contains(results[1], "Completed 1 of 1 step(s).") || !strings.Contains(results[1], `[a2] value="hello"`) {
+	if !strings.Contains(results[1], "Completed 1 of 2 step(s).") || !strings.Contains(results[1], `[a2] value="hello"`) {
 		t.Fatalf("the act result did not show the application afterwards:\n%s", results[1])
+	}
+	// What the helper read back, and the modal that swallowed the next step,
+	// reach the model as the host knows them rather than as a bare success.
+	for _, want := range []string{
+		"1. set a2 to 5 characters — took effect (value read back)",
+		`Step 2 failed: computer.blocked: the keys would land in a dialog whose focused element takes no text; held by the modal "Unsaved changes" [a9] over "Draft"`,
+		`Blocked: the modal "Unsaved changes" [a9] over "Draft" holds this application's input`,
+	} {
+		if !strings.Contains(results[1], want) {
+			t.Fatalf("the act result is missing %q:\n%s", want, results[1])
+		}
 	}
 }
 

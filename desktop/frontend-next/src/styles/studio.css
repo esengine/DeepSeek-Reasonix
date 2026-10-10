@@ -146,7 +146,7 @@
 
 body { background: var(--page); }
 .app { --rail-open: 238px; background: var(--page); }
-.app[data-nav="on"] { --nav-w: 48px; }
+.app[data-nav="on"] { --nav-w: var(--nav-open); }
 .app::after { opacity: .012; }
 
 /* Window bar */
@@ -194,7 +194,7 @@ body { background: var(--page); }
 .chrome .thbtn:hover { background: var(--overlay); }
 
 /* Primary navigation and workspace rail */
-.nav { position: fixed; z-index: 12; inset: 0 auto 0 0; width: var(--nav-w); overflow: hidden; padding: calc(var(--chrome-h) + 8px) 0 10px; gap: 4px; background: color-mix(in srgb, var(--page) 92%, var(--surface)); border-right-color: var(--hair); }
+.nav { position: fixed; z-index: 13; inset: 0 auto 0 0; width: var(--nav-open); translate: calc(var(--nav-w) - var(--nav-open)) 0; padding: calc(var(--chrome-h) + 8px) 0 10px; gap: 4px; background: color-mix(in srgb, var(--page) 92%, var(--surface)); border-right-color: var(--hair); }
 .nav > * { flex: none; }
 .app:not([data-nav="on"]) .nav { border-right-width: 0; }
 [data-titlebar="app"] .nav { -webkit-app-region: drag; }
@@ -2261,7 +2261,7 @@ body { font-size: 14px; line-height: 1.75; }
 }
 .studio-branch-pop { position: relative; flex: none; }
 .studio-branch {
-  cursor: default;
+  cursor: pointer;
   border-radius: 6px !important;
   box-shadow: none;
   transform: none;
@@ -2275,6 +2275,7 @@ body { font-size: 14px; line-height: 1.75; }
 }
 .studio-branch:hover { outline: none; }
 .studio-branch:focus-visible { outline: 2px solid #94968f; outline-offset: 1px; }
+.studio-branch[data-norepo], .studio-branch[data-norepo]:hover { color: var(--ghost); background: none; }
 .studio-branch .studio-icon { width: 13px; height: 13px; stroke-width: 1.65; }
 .studio-branch small {
   margin-left: 1px;
@@ -2289,9 +2290,6 @@ body { font-size: 14px; line-height: 1.75; }
   z-index: 65;
   left: 0;
   bottom: calc(100% + 9px);
-  width: max-content;
-  min-width: 210px;
-  max-width: 260px;
   display: grid;
   gap: 3px;
   padding: 10px 12px;
@@ -2310,7 +2308,7 @@ body { font-size: 14px; line-height: 1.75; }
 .studio-branch-card::after {
   content: "";
   position: absolute;
-  left: 15px;
+  left: var(--branch-tip-anchor, 15px);
   top: 100%;
   width: 8px;
   height: 8px;
@@ -2836,7 +2834,7 @@ body { font-size: 14px; line-height: 1.75; }
 .flow .opt .lb { color: var(--text); font-size: 11.5px; line-height: 1.35; }
 .flow .opt .ds { margin-top: 3px; color: var(--faint); font-size: 10.5px; line-height: 1.45; }
 .flow .opt-other { border-style: dashed !important; }
-.flow .other-wrap { margin-top: 8px; }
+.plan[data-paused] .s[data-now] .b { animation: none; }
 .flow .other-wrap input { min-height: 38px; border-radius: 8px; }
 .flow .ask-foot { justify-content: flex-end; margin-top: var(--y-close); padding: 9px 15px 14px; gap: 7px; border-top: 0; background: transparent; }
 .flow .ask-foot .btn { min-width: 84px; min-height: 32px; border-radius: 7px; }

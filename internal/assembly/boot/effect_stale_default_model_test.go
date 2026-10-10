@@ -190,3 +190,44 @@ api_key_env = "DEEPSEEK_API_KEY"
 		t.Fatalf("config.toml was rewritten:\n%s", after)
 	}
 }
+
+// A saved default that names a decision source is not a stale name: the source
+// exists but answers system_one only. The window opens on the first
+// conversation source and the notice says which of the two it is.
+func TestEffectDecisionSourceDefaultOpensOnAConversationModel(t *testing.T) {
+	isolateConfigHome(t)
+	t.Chdir(robustTempDir(t))
+	writeUserConfig(t, `
+default_model = "laya/typed-decisions"
+
+[[providers]]
+name = "laya"
+kind = "typesafe"
+base_url = "http://127.0.0.1:8700"
+models = ["typed-decisions"]
+
+[[providers]]
+name = "deepseek"
+kind = "boot-token-profile-test"
+model = "deepseek-flash"
+`)
+	registerBootTokenProfileTestProvider()
+	setBootTokenProfileTestProvider(t, testutil.NewMock("fallback"))
+
+	var notices []event.Event
+	res, err := BuildRuntime(context.Background(), Options{Sink: staleDefaultNotices(&notices), StatsSource: surface.Desktop, OpenOnFallbackModel: true})
+	if err != nil {
+		t.Fatalf("BuildRuntime with a decision source as default: %v", err)
+	}
+	defer res.Controller.Close()
+	if got := res.Controller.ModelRef(); got != "deepseek/deepseek-flash" {
+		t.Fatalf("model ref = %q, want the first conversation model", got)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("default-model notices = %v, want exactly one", notices)
+	}
+	d := notices[0].Detail
+	if !strings.Contains(d, "decision source") || strings.Contains(d, "names no configured") || !strings.Contains(d, `"deepseek/deepseek-flash"`) {
+		t.Fatalf("notice detail = %q, want the decision-source reason and the model in use", d)
+	}
+}

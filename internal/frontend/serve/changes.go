@@ -31,15 +31,25 @@ func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
 	}{Repo: ok, Changes: list})
 }
 
+type workspaceGitView struct {
+	Repo      bool   `json:"repo"`
+	Name      string `json:"name"`
+	Branch    string `json:"branch"`
+	Detached  bool   `json:"detached"`
+	Added     int    `json:"added"`
+	Removed   int    `json:"removed"`
+	Untracked int    `json:"untracked"`
+}
+
 // workspaceGit answers with the work tree's one-line identity. Repo is false
 // for a workspace that is not version-controlled, as for /changes.
 func (s *Server) workspaceGit(w http.ResponseWriter, r *http.Request) {
 	info, ok := gitstatus.Summary(r.Context(), workspaceRepo(s.ctl()))
 	w.Header().Set("content-type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
-		Repo bool `json:"repo"`
-		gitstatus.Info
-	}{Repo: ok, Info: info})
+	_ = json.NewEncoder(w).Encode(workspaceGitView{
+		Repo: ok, Name: info.Name, Branch: info.Branch, Detached: info.Detached,
+		Added: info.Added, Removed: info.Removed, Untracked: info.Untracked,
+	})
 }
 
 // changeDiff answers with one path's working-tree diff, so a reader can see a

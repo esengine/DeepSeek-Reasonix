@@ -848,7 +848,7 @@ Global shortcuts:
 | `Cmd+B` / `Ctrl+B` | Shows or hides the left sidebar | Same action as clicking the sidebar toggle. |
 | `Cmd+Shift+B` / `Ctrl+Shift+B` | Expands or collapses the most recent shell output | Same action as clicking the collapsed shell-output hint. |
 | `Cmd+1`-`Cmd+9` on macOS, `Ctrl+1`-`Ctrl+9` elsewhere | Jumps to the matching visible chat in the sidebar | Hold `Cmd`/`Ctrl` briefly to reveal the numbered badges. Existing custom shortcuts that already use the same key take precedence. |
-| `Cmd++`, `Cmd+-`, `Cmd+0` on macOS; `Ctrl++`, `Ctrl+-`, `Ctrl+0` elsewhere | Increases, decreases, or resets text size | `=` is accepted for the plus key on keyboards that report it that way. |
+| `Cmd++`, `Cmd+-`, `Cmd+0` on macOS; `Ctrl++`, `Ctrl+-`, `Ctrl+0` elsewhere | Increases, decreases, or resets the interface size | Steps through the same sizes as **Settings > Appearance > Size > Interface** (80% to 180%) and saves the same setting. `=` is accepted for the plus key on keyboards that report it that way. |
 | `?` | Opens the keyboard shortcuts sheet | The sheet shows the current effective desktop bindings. |
 
 Composer shortcuts:
@@ -904,7 +904,7 @@ Chat and transcript shortcuts:
 
 | Key or command | What it does | Notes |
 | --- | --- | --- |
-| `Enter` | Sends the current message | While a turn is running, non-empty input is durably queued as a follow-up before the composer clears. |
+| `Enter` | Sends the current message | While a turn is running, non-empty input is durably queued as a follow-up before the composer clears. On an empty composer it jumps back to the newest output and keeps following it. |
 | `Ctrl+Enter` or `/steer <text>` | Adds guidance to the active turn | The guidance is persisted first; if the turn cannot accept it, it remains a normal follow-up. |
 | `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` | Inserts a newline | Plain `Enter` is reserved for send/confirm. |
 | Plain `Up` / `Down` while idle | Recalls older or newer submitted prompts | In a running turn, the same keys navigate queued follow-up feedback. |
@@ -919,6 +919,7 @@ Chat and transcript shortcuts:
 | `/mouse` | Toggles in-app mouse capture | Off hands the mouse back to your terminal, restoring its native click-drag selection and right-click context menu, at the cost of in-app drag-select, the transcript scrollbar, and wheel-scroll. Set `REASONIX_DISABLE_MOUSE=1` to start every session with it off. Remote (SSH) sessions start with capture off so native selection works out of the box; `REASONIX_DISABLE_MOUSE=0` forces capture on everywhere. |
 | `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript or composer selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. A second press while a cancelled turn is still stopping quits too. |
 | `Ctrl+D` | Quits the TUI | Immediate quit on an empty idle composer. |
+| `Ctrl+Z` | Suspends the TUI to the shell | macOS and Linux; resume it with `fg`. Windows has no job control, so the key does nothing there. |
 | `/quit` or `/exit` | Quits the TUI | Runs at once, also while a turn is running. Typing a bare `exit`, `quit` or `:q` sends it to the model as a normal message. |
 | Your terminal's text-paste shortcut | Pastes text | Text stays on the terminal's bracketed-paste path (`Cmd+V` on macOS, commonly `Ctrl+Shift+V` on Linux, and the terminal's configured shortcut elsewhere). Reasonix consumes the resulting paste event and never probes for an image first. |
 | `Ctrl+V` on macOS/Linux; `Alt+V` on Windows | Pastes a clipboard image | Image paste is a separate application action. The footer shows `Pasting image…` while the clipboard is read, then inserts an editable `[image #N]` token at the cursor. |

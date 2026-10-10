@@ -109,6 +109,7 @@ func runTrace(t *testing.T, tc traceCase) traceReading {
 	barriers := make(chan eventwire.Event, 8)
 	drained := make(chan struct{})
 	turnDone := make(chan struct{})
+	progress := make(chan struct{}, 1)
 	go func() {
 		defer close(drained)
 		closed := false
@@ -120,6 +121,10 @@ func runTrace(t *testing.T, tc traceCase) traceReading {
 			mu.Lock()
 			live = append(live, e)
 			mu.Unlock()
+			select {
+			case progress <- struct{}{}:
+			default:
+			}
 			if tc.interactive && (e.Kind == "approval_request" || e.Kind == "ask_request") {
 				select {
 				case barriers <- e:
@@ -154,10 +159,29 @@ func runTrace(t *testing.T, tc traceCase) traceReading {
 	// what this compares: Run is synchronous and closes no turn, so a harness
 	// built on it would be measuring a shape no frontend produces.
 	ctrl.SubmitHTTP(tc.input)
-	select {
-	case <-turnDone:
-	case <-time.After(testenv.Budget(t) / 2):
-		t.Fatal("the turn never closed")
+	// A turn is hung when it goes silent, not when it is long; one that never
+	// stops emitting is bounded by a total ceiling.
+	quiet := testenv.Budget(t) / 2
+	ceiling := 5 * quiet
+	if deadline, ok := t.Deadline(); ok {
+		ceiling = min(ceiling, time.Until(deadline)*9/10)
+	}
+	idle := time.NewTimer(quiet)
+	defer idle.Stop()
+	overall := time.NewTimer(ceiling)
+	defer overall.Stop()
+wait:
+	for {
+		select {
+		case <-turnDone:
+			break wait
+		case <-progress:
+			idle.Reset(quiet)
+		case <-idle.C:
+			t.Fatal("the turn went silent before it closed")
+		case <-overall.C:
+			t.Fatal("the turn kept emitting but never closed")
+		}
 	}
 
 	view := settledTrajectory(t, s)

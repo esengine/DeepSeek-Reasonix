@@ -174,6 +174,7 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
 
   if (!rules || !lists) return <div className="empty">{t("无法读取权限配置。")}</div>;
 
+  const dormant = new Set((rules.dormant ?? []).map((d) => `${d.list}\u0000${d.rule}`));
   const counts = { deny: rules.deny.length, ask: rules.ask.length, allow: rules.allow.length };
   const total = counts.deny + counts.ask + counts.allow;
 
@@ -250,6 +251,13 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
           <span className="why">
             {t("{path} 中同样声明了 permissions，实际生效的是该文件。此处的修改会被保存，但需待其不再声明后才会生效。", { path: rules.shadowedBy })}
           </span>
+        </div>
+      )}
+
+      {!!rules.dormant?.length && (
+        <div className="find" data-lvl="warn" role="status">
+          <span className="t">{t("有 {n} 条规则没有对应的工具，不会生效", { n: rules.dormant.length })}</span>
+          <span className="why">{t("命令要写成 Bash(命令:*)；下方标出的规则可以删除或改写。")}</span>
         </div>
       )}
 
@@ -337,7 +345,7 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
                 <i className="caret" aria-hidden="true" />
                 <code>{g.tool}</code>
                 <span className="what">{t(TOOL_LABEL.get(g.tool) ?? "")}</span>
-                <span className="how">{t(MATCHING[g.tool] ?? pathMatching)}</span>
+                {!g.rows.every((row) => dormant.has(`${row.level}\u0000${row.rule}`)) && <span className="how">{t(MATCHING[g.tool] ?? pathMatching)}</span>}
                 <span className="cnt">{t("{n} 条", { n: g.rows.length })}</span>
               </button>
               {!closed &&
@@ -346,7 +354,9 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
                     <i className="dot" aria-hidden="true" />
                     <span className="pat">
                       <code>{row.pattern || t("整个工具")}</code>
-                      {odd(g.tool, row.pattern) && <span className="says">{odd(g.tool, row.pattern)}</span>}
+                      {dormant.has(`${row.level}\u0000${row.rule}`)
+                        ? <span className="says" data-dormant="">{t("没有名为 {tool} 的工具，这条规则不会生效", { tool: g.tool })}</span>
+                        : odd(g.tool, row.pattern) && <span className="says">{odd(g.tool, row.pattern)}</span>}
                     </span>
                     <select value={row.level} data-action="permissions.rule-level" disabled={!!busy} aria-label={t("{rule} 的处理方式", { rule: row.rule })}
                       onChange={(e) => move(row.rule, e.target.value as List)}>

@@ -261,23 +261,3 @@ func TestSubmissionVisibilityIsPublicOrPrivate(t *testing.T) {
 		}
 	}
 }
-
-// Every install, own or reviewed, passes execute's theme check; this holds
-// the check itself to "themes and nothing that runs or prompts".
-func TestThemesOnlyAdmitsPluginsThatCarryOnlyThemes(t *testing.T) {
-	for raw, want := range map[string]bool{
-		`[{"kind":"plugin","themeCount":2}]`:                   true,
-		`[{"kind":"plugin","themeCount":1,"runtime":null}]`:    true,
-		`[{"kind":"plugin","themeCount":1,"skillCount":1}]`:    false,
-		`[{"kind":"plugin","themeCount":1,"hookCount":1}]`:     false,
-		`[{"kind":"plugin","themeCount":1,"runtime":{"x":1}}]`: false,
-		`[{"kind":"plugin","themeCount":0}]`:                   false,
-		`[{"kind":"skill","themeCount":1}]`:                    false,
-		`[]`:                                                   false,
-		`[{"kind":"plugin","themeCount":1},{"kind":"mcp"}]`:    false,
-	} {
-		if got := themesOnly(json.RawMessage(raw)); got != want {
-			t.Errorf("themesOnly(%s) = %v", raw, got)
-		}
-	}
-}

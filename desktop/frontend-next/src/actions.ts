@@ -128,6 +128,11 @@ export const ACTIONS: UIAction[] = [
   { id: "commit.confirm", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "commit.close", kind: "view", target: "none", proof: "interaction" },
 
+  // ── Which branch the workspace is on ─────────────────────────────────────
+  // The composer's branch chip opens the locals; picking one checks it out in
+  // the workspace and re-reads what the checkout moved.
+  { id: "git.branch", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+
   // ── What is waiting to be sent ───────────────────────────────────────────
   { id: "queue.edit", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   // Giving a session a name of your own. The sidebar's tree and the pane tabs
