@@ -223,6 +223,7 @@ function checkReason(reason?: ProviderModelCheckReason): string {
     case "rate_limited": return "遇到限流，尚未确认";
     case "network": return "网络异常，尚未确认";
     case "timeout": return "验证超时，尚未确认";
+    case "redirect_refused": return "地址跳转到了另一个主机，已拒绝，尚未确认";
     case "rejected": return "请求被拒绝，尚未确认";
     default: return "尚未确认";
   }

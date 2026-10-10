@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"reasonix/internal/safety/redirectguard"
 )
 
 const DefaultBaseURL = "https://api.typesafe.ai"
@@ -85,7 +87,7 @@ func (c Client) Evaluate(ctx context.Context, request Request) (Response, error)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	client := c.HTTP
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{CheckRedirect: redirectguard.StayOnOrigin()}
 	}
 	httpResponse, err := client.Do(httpRequest)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"reasonix/internal/model/openai"
+	"reasonix/internal/safety/redirectguard"
 )
 
 // ProbeReason names why probing failed. Each one sends the user to a different
@@ -27,6 +28,7 @@ const (
 	ProbeTimeout         ProbeReason = "timeout"
 	ProbeUnreachable     ProbeReason = "unreachable"
 	ProbeNotCompatible   ProbeReason = "not_compatible"
+	ProbeRedirectRefused ProbeReason = "redirect_refused"
 )
 
 // ProbeError carries that identity out. Params hold the facts a sentence needs
@@ -56,6 +58,7 @@ func (e *ProbeError) Unwrap() error { return e.err }
 // listing that answered with no chat models settles the question, a 401 says
 // more than a 404, and "not compatible" is what is left when nothing spoke.
 var probeReasonRank = map[ProbeReason]int{
+	ProbeRedirectRefused: -1,
 	ProbeNoChatModels:    0,
 	ProbePaymentRequired: 1,
 	ProbeUnauthorized:    2,
@@ -73,6 +76,9 @@ func classifyProbe(err error) *ProbeError {
 	var known *ProbeError
 	if errors.As(err, &known) {
 		return known
+	}
+	if errors.Is(err, redirectguard.ErrRefused) {
+		return &ProbeError{Reason: ProbeRedirectRefused, err: err}
 	}
 	status, ok := openai.ModelFetchStatus(err)
 	if !ok {

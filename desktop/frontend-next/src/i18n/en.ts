@@ -509,6 +509,7 @@ export const EN: Record<string, string> = {
   "凭据未通过，尚未确认": "Credentials were rejected; availability is still unknown",
   "遇到限流，尚未确认": "Rate limited; availability is still unknown",
   "网络异常，尚未确认": "Network error; availability is still unknown",
+  "地址跳转到了另一个主机，已拒绝，尚未确认": "The address redirected to another host and was refused; availability is still unknown",
   "验证超时，尚未确认": "Verification timed out; availability is still unknown",
   "请求被拒绝，尚未确认": "Request rejected; availability is still unknown",
   "尚未确认": "Availability is still unknown",

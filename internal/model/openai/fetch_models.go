@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/safety/redirectguard"
 )
 
 type modelFetchStatusError struct {
@@ -107,7 +108,7 @@ type ListedModel struct {
 func FetchModelListing(ctx context.Context, baseURL, apiKey string, opts FetchModelsOptions) ([]ListedModel, error) {
 	cli := opts.Client
 	if cli == nil {
-		cli = &http.Client{Timeout: 10 * time.Second}
+		cli = &http.Client{Timeout: 10 * time.Second, CheckRedirect: redirectguard.StayOnOrigin()}
 	}
 	url := strings.TrimRight(baseURL, "/")
 	if !strings.HasSuffix(url, "/models") {

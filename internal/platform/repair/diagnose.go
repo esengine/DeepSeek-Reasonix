@@ -3,6 +3,7 @@ package repair
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -18,6 +19,8 @@ import (
 
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/safety/endpointclient"
+	"reasonix/internal/safety/redirectguard"
 )
 
 type DiagnosticFinding struct {
@@ -295,7 +298,7 @@ func checkDerivedJSON(report *DiagnosticReport) {
 }
 
 func probeProviderNetwork(ctx context.Context, report *DiagnosticReport, cfg *config.Config, timeout time.Duration) {
-	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{DialTimeout: timeout, TLSHandshakeTimeout: timeout, ResponseHeaderTimeout: timeout})
+	client, err := endpointclient.New(cfg.NetworkProxySpec(), netclient.TransportOptions{DialTimeout: timeout, TLSHandshakeTimeout: timeout, ResponseHeaderTimeout: timeout})
 	if err != nil {
 		report.add("error", "network.client_failed", "network", "Cannot build network client: "+err.Error(), "Correct proxy settings.")
 		return
@@ -324,7 +327,9 @@ func probeProviderNetwork(ctx context.Context, report *DiagnosticReport, cfg *co
 				}
 			}
 			resp, callErr := client.Do(req)
-			if callErr != nil {
+			if errors.Is(callErr, redirectguard.ErrRefused) {
+				report.add("warning", "network.redirect_refused", "provider:"+entry.Name, "Provider endpoint redirected to another host and was not followed.", "If you trust the new host, set the provider's base_url to it.")
+			} else if callErr != nil {
 				report.add("warning", "network.unreachable", "provider:"+entry.Name, "Provider endpoint could not be reached: "+redactNetworkError(callErr), "Check DNS, proxy, firewall, and provider availability.")
 			} else {
 				_ = resp.Body.Close()

@@ -140,6 +140,8 @@ export interface ProviderCheck {
   ambiguous?: boolean;
   noProxy?: boolean;
   code?: string;
+  // The host a refused redirect pointed at.
+  target?: string;
   // Only the numbers the code's sentence needs: `status`, `count`.
   params?: Record<string, number>;
   httpStatus?: number;
@@ -155,6 +157,8 @@ export type ProviderModelCheckReason =
   | "rejected"
   | "network"
   | "timeout"
+  // The address redirected to another host; the detail names it.
+  | "redirect_refused"
   // The endpoint answered chat and refused a tools array. Established by
   // sending the same request again without one, not by reading the refusal.
   | "tools";

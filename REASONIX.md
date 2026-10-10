@@ -369,6 +369,7 @@ out of how a path is spelled, which cannot tell `internal/auth` from
 - sensitive: internal/ext/pluginpkg/**
 - sensitive: internal/base/netclient/**
 - sensitive: internal/safety/redirectguard/**
+- sensitive: internal/safety/endpointclient/**
 - sensitive: internal/safety/egress/**
 - sensitive: internal/platform/browser/**
 - sensitive: internal/platform/computer/**
