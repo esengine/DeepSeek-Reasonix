@@ -94,6 +94,12 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
     if (menuTrigger.current?.dataset.target === sessionMenu) menuTrigger.current.focus();
     setSessionMenu("");
   };
+  const openWorkspaceMenu = (root: string, trigger: HTMLElement, at?: { x: number; y: number }) => {
+    menuTrigger.current = trigger;
+    const anchor = trigger.getBoundingClientRect();
+    setSessionMenuAt(at ?? { x: anchor.right + 8, y: anchor.top - 7 });
+    setSessionMenu(root);
+  };
   useDismiss(!!sessionMenu, sessionMenuBox, dismissMenu, sessionMenuPortal);
   useEffect(() => {
     if (sessionMenu && menuTrigger.current?.dataset.target === sessionMenu) {
@@ -345,10 +351,27 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                 ) : (
                   <div
                     ref={sessionMenu === ws.root ? sessionMenuBox : undefined}
+                    data-action-contextmenu="workspace.menu"
+                    data-action-keydown="workspace.menu"
+                    data-target={ws.root}
                     className="wsrow"
                     role="treeitem"
+                    aria-haspopup="menu"
                     aria-expanded={!shut}
                     onClick={() => onFold(ws.root, !shut)}
+                    onContextMenu={(ev) => {
+                      if ((ev.target as HTMLElement).closest("input, textarea, [role='menu']")) return;
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                      openWorkspaceMenu(ws.root, ev.currentTarget, ev.clientX || ev.clientY ? { x: ev.clientX, y: ev.clientY } : undefined);
+                    }}
+                    onKeyDown={(ev) => {
+                      if (ev.target !== ev.currentTarget) return;
+                      if (ev.key !== "ContextMenu" && !(ev.shiftKey && ev.key === "F10")) return;
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                      openWorkspaceMenu(ws.root, ev.currentTarget);
+                    }}
                   >
                     <button className="twist" tabIndex={-1} aria-hidden="true">
                       <svg viewBox="0 0 10 10">
@@ -395,13 +418,8 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         aria-haspopup="menu"
                         onClick={(ev) => {
                           ev.stopPropagation();
-                          const opening = sessionMenu !== ws.root;
-                          if (opening) {
-                            menuTrigger.current = ev.currentTarget;
-                            const anchor = ev.currentTarget.getBoundingClientRect();
-                            setSessionMenuAt({ x: anchor.right + 8, y: anchor.top - 7 });
-                          }
-                          setSessionMenu(opening ? ws.root : "");
+                          if (sessionMenu === ws.root) setSessionMenu("");
+                          else openWorkspaceMenu(ws.root, ev.currentTarget);
                         }}
                       >
                         <StudioIcon name="more" />
