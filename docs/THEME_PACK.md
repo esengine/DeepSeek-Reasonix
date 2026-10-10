@@ -163,8 +163,8 @@ JSON Schema: [theme-pack.schema.json](./theme-pack.schema.json)
 | `id` | Lowercase `[a-z][a-z0-9-]*`, reserved: `graphite`, `aurora`, `slate`, `carbon`, `nocturne`, `amber` |
 | `baseStyle` | One of the six built-in directions; uncovered tokens inherit it |
 | `tokens.light` / `tokens.dark` | Optional maps of semantic keys → `#RRGGBB` or `#RRGGBBAA` only |
-| `recipes.density` | `compact` \| `comfortable` |
-| `recipes.corners` | `square` \| `soft` \| `round` |
+| `recipes.density` | `compact` (gutters and control heights step to 0.85×) \| `comfortable` (as written) |
+| `recipes.corners` | `square` (0×) \| `soft` (as written) \| `round` (1.5×) |
 | `background.image` | Bare file name only (png/jpeg/webp) |
 | `background.focusX/Y` | 0–1 focal point |
 | `background.safeArea` | `left` \| `right` \| `center` (task overlay direction) |

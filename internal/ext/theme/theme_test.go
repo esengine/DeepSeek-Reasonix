@@ -162,3 +162,50 @@ func TestInstalledPackShadowsTheShippedOne(t *testing.T) {
 		t.Fatalf("Load(%q) = %+v, %v", id, pack, err)
 	}
 }
+
+// A recipe is the one part of a pack that is not a colour, so what it may say
+// is the schema's enumeration rather than free text. The value decides how far
+// the interface steps, so an unknown one is reported rather than guessed at.
+func TestLoadKeepsOnlyDeclaredRecipes(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	writePack(t, Dir(), "tiered", `{"schemaVersion":1,"name":"Tiered",
+	 "recipes":{"density":"compact","corners":"round"},
+	 "tokens":{"light":{"bg":"#FFFFFF"},"dark":{"bg":"#000000"}}}`)
+	writePack(t, Dir(), "invented", `{"schemaVersion":1,"name":"Invented",
+	 "recipes":{"density":"sparse","corners":"bevelled"},
+	 "tokens":{"light":{"bg":"#FFFFFF"},"dark":{"bg":"#000000"}}}`)
+
+	tiered, err := Load("tiered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tiered.Recipes == nil || tiered.Recipes.Density != "compact" || tiered.Recipes.Corners != "round" {
+		t.Fatalf("recipes = %+v, want the two declared tiers", tiered.Recipes)
+	}
+
+	invented, err := Load("invented")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invented.Recipes != nil {
+		t.Fatalf("recipes = %+v, want none of an unread tier", invented.Recipes)
+	}
+	if len(invented.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want one per rejected recipe", invented.Warnings)
+	}
+}
+
+// A pack written before the field existed carries no recipes, and the reader
+// must not invent a tier for it: absence is the stylesheet's own shape.
+func TestLoadWithoutRecipesLeavesThemAbsent(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	writePack(t, Dir(), "plain", minimal)
+
+	pack, err := Load("plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pack.Recipes != nil {
+		t.Fatalf("recipes = %+v, want none", pack.Recipes)
+	}
+}

@@ -54,6 +54,12 @@ const WASHES: [string, string][] = [
   ["labelAgent", "--label-agent-wash"],
 ];
 
+// A recipe is a step, not a size: the stylesheet owns what a radius or a
+// gutter measures, and the pack only says how far it moves. A factor, so no
+// pack can round a corner into a shape the rest of the layout disagrees with.
+const CORNERS: Record<string, string> = { square: "0", soft: "1", round: "1.5" };
+const DENSITY: Record<string, string> = { compact: "0.85", comfortable: "1" };
+
 // What a pack may not touch. ok/warn/err/net/deleg encode what is happening —
 // "this broke", "this is running", "this went out to a sub-agent" — and a
 // theme that could recolour them would let a failure render as success. The
@@ -149,6 +155,12 @@ function declarations(pack: ThemePack, scheme: "light" | "dark", busy: boolean, 
   for (const [token, wash] of WASHES) {
     if (tokens[token]) out.push([wash, `color-mix(in srgb, ${tokens[token]} 12%, ${tokens.bg ?? "transparent"})`]);
   }
+  // A recipe lands on the same rule as the tokens, so a pack that asks for
+  // squarer corners or a tighter rhythm is one declaration from the stylesheet.
+  const corners = pack.recipes?.corners ? CORNERS[pack.recipes.corners] : "";
+  if (corners) out.push(["--r-scale", corners]);
+  const density = pack.recipes?.density ? DENSITY[pack.recipes.density] : "";
+  if (density) out.push(["--d-scale", density]);
 
   // The sky is drawn rather than placed, so it is independent of the picture:
   // a pack can have either, both, or neither.

@@ -29,6 +29,7 @@ type themeView struct {
 	Description string                       `json:"description,omitempty"`
 	Active      bool                         `json:"active,omitempty"`
 	Tokens      map[string]map[string]string `json:"tokens"`
+	Recipes     *theme.Recipes               `json:"recipes,omitempty"`
 	Background  *theme.Background            `json:"background,omitempty"`
 	Sky         *theme.Sky                   `json:"sky,omitempty"`
 	HasPreview  bool                         `json:"hasPreview,omitempty"`

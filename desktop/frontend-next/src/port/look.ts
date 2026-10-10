@@ -25,6 +25,13 @@ export interface ThemeSky {
   cloudAlpha: number;
 }
 
+// What a pack says about shape and rhythm rather than colour. The stylesheet
+// owns what a radius or a gutter measures; a recipe only says how far it steps.
+export interface ThemeRecipes {
+  density?: "compact" | "comfortable";
+  corners?: "square" | "soft" | "round";
+}
+
 export interface ThemePack {
   id: string;
   name: string;
@@ -32,6 +39,7 @@ export interface ThemePack {
   description?: string;
   active?: boolean;
   tokens: { light?: Record<string, string>; dark?: Record<string, string> };
+  recipes?: ThemeRecipes;
   background?: ThemeBackground;
   sky?: ThemeSky;
   hasPreview?: boolean;

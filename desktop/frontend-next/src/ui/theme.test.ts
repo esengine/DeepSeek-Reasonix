@@ -190,3 +190,37 @@ describe("decorative roles are themeable and the status hues are not", () => {
     expect(read("--link")).toBe("#111111");
   });
 });
+
+describe("a pack's recipes step the shape and the rhythm", () => {
+  // A factor, not a size: the stylesheet owns what a radius or a gutter
+  // measures, so a pack that named a number would disagree with every
+  // declaration it does not reach. Held here because the pack is where the
+  // wrong number would have to be written.
+  it("writes the two factors and no measurement of its own", () => {
+    apply({ ...pack, recipes: { corners: "square", density: "compact" } }, "light");
+    expect(read("--r-scale")).toBe("0");
+    expect(read("--d-scale")).toBe("0.85");
+  });
+
+  it("leaves both unset when the pack declares no recipe", () => {
+    apply(pack, "light");
+    expect(read("--r-scale")).toBe("");
+    expect(read("--d-scale")).toBe("");
+  });
+
+  it("ignores a tier the schema does not publish", () => {
+    const invented = { ...pack, recipes: { corners: "bevelled", density: "sparse" } } as unknown as ThemePack;
+    apply(invented, "light");
+    expect(read("--r-scale")).toBe("");
+    expect(read("--d-scale")).toBe("");
+  });
+
+  it("steps each tier rather than pinning one value", () => {
+    apply({ ...pack, recipes: { corners: "round", density: "comfortable" } }, "light");
+    expect(read("--r-scale")).toBe("1.5");
+    expect(read("--d-scale")).toBe("1");
+    apply({ ...pack, recipes: { corners: "soft" } }, "light");
+    expect(read("--r-scale")).toBe("1");
+    expect(read("--d-scale")).toBe("");
+  });
+});

@@ -41,12 +41,21 @@ type Pack struct {
 	Author      string                       `json:"author,omitempty"`
 	Description string                       `json:"description,omitempty"`
 	Tokens      map[string]map[string]string `json:"tokens"`
+	Recipes     *Recipes                     `json:"recipes,omitempty"`
 	Background  *Background                  `json:"background,omitempty"`
 	Sky         *Sky                         `json:"sky,omitempty"`
 	HasPreview  bool                         `json:"hasPreview,omitempty"`
 	// Warnings names the tokens that were dropped and why. The pack still
 	// loads: one bad value must not cost the author every good one.
 	Warnings []string `json:"warnings,omitempty"`
+}
+
+// Recipes is what a pack says about shape and rhythm rather than colour: two
+// tiers the schema publishes and no token carries. A value outside them is
+// dropped and reported, the way a token that fails its grammar is.
+type Recipes struct {
+	Density string `json:"density,omitempty"`
+	Corners string `json:"corners,omitempty"`
 }
 
 // Background is how a pack's image wants to be placed, not just that it has
@@ -92,8 +101,14 @@ type manifest struct {
 	Author        string                       `json:"author"`
 	Description   string                       `json:"description"`
 	Tokens        map[string]map[string]string `json:"tokens"`
+	Recipes       *manifestRecipes             `json:"recipes"`
 	Background    *manifestBackground          `json:"background"`
 	Sky           *manifestSky                 `json:"sky"`
+}
+
+type manifestRecipes struct {
+	Density string `json:"density"`
+	Corners string `json:"corners"`
 }
 
 type manifestSky struct {
@@ -256,11 +271,48 @@ func decodeManifest(raw []byte, dirID string) (Pack, manifest, error) {
 		}
 		tokens[scheme] = copied
 	}
+	recipes := recipesOf(m.Recipes, &warnings)
 	// Map iteration order would otherwise make the same pack report its
 	// problems in a different order on every read.
 	slices.Sort(warnings)
-	pack := Pack{ID: id, Name: name, Author: strings.TrimSpace(m.Author), Description: strings.TrimSpace(m.Description), Tokens: tokens, Warnings: warnings}
+	pack := Pack{ID: id, Name: name, Author: strings.TrimSpace(m.Author), Description: strings.TrimSpace(m.Description), Tokens: tokens, Recipes: recipes, Warnings: warnings}
 	return pack, m, nil
+}
+
+// recipesOf keeps the tiers the schema publishes and reports anything else. A
+// recipe is not interpolated anywhere, but a value the frontend cannot spell
+// leaves the pack reading as one that declared nothing.
+func recipesOf(m *manifestRecipes, warnings *[]string) *Recipes {
+	if m == nil {
+		return nil
+	}
+	out := Recipes{
+		Density: recipeTier("density", m.Density, densityTiers, warnings),
+		Corners: recipeTier("corners", m.Corners, cornerTiers, warnings),
+	}
+	if out.Density == "" && out.Corners == "" {
+		return nil
+	}
+	return &out
+}
+
+// The schema's enumerations, read here rather than trusted: the schema reaches
+// only a pack somebody validated against it, and a manifest is hand-written.
+var (
+	densityTiers = []string{"compact", "comfortable"}
+	cornerTiers  = []string{"square", "soft", "round"}
+)
+
+func recipeTier(field, value string, tiers []string, warnings *[]string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if slices.Contains(tiers, value) {
+		return value
+	}
+	*warnings = append(*warnings, fmt.Sprintf("recipes.%s: %q is not one of %s", field, value, strings.Join(tiers, "|")))
+	return ""
 }
 
 // colourOr passes a value through the same check a token colour gets: every

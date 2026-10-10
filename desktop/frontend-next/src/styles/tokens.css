@@ -34,8 +34,8 @@
     interpolate-size: allow-keywords;
     --nav-open: 48px;
 
-    --call-sym: 28px; --call-gap: 14px;
-    --rail-open: 264px; --side-open: 316px; --dock-open: 560px; --pane-gutter: 12px;
+    --call-sym: calc(28px * var(--d-scale, 1)); --call-gap: calc(14px * var(--d-scale, 1));
+    --rail-open: 264px; --side-open: 316px; --dock-open: 560px; --pane-gutter: calc(12px * var(--d-scale, 1));
     --page: oklch(95.8% .0092 85); --surface: oklch(98.9% .0046 85);
     --raised: oklch(100% 0 85); --overlay: oklch(93.1% .0138 85);
     --border: oklch(87.6% .0184 85); --hair: oklch(91.7% .0126 85);
@@ -97,12 +97,13 @@
 
     --y-say: 21px;
 
-    --y-close: 4px; --close-h: 26px;
+    --y-close: 4px; --close-h: calc(26px * var(--d-scale, 1));
 
     --track-display: -.018em;
     --track-tight: -.02em; --track-lead: .06em; --track-cap: .12em;
 
-    --r-xs: 4px; --r-sm: 6px; --r-md: 9px; --r-lg: 12px; --r-pill: 999px;
+    --r-xs: calc(4px * var(--r-scale, 1)); --r-sm: calc(6px * var(--r-scale, 1));
+    --r-md: calc(9px * var(--r-scale, 1)); --r-lg: calc(12px * var(--r-scale, 1)); --r-pill: 999px;
 
     --fs-micro: 11px; --fs-meta: 12px; --fs-ui: 13px;
     --fs-lead: 15px; --fs-title: 17px; --fs-display: 22px;
