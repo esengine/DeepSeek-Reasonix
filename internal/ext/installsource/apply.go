@@ -83,7 +83,7 @@ func (t *Tool) applySkillRoot(req request, act *action) error {
 			}
 		}
 		if registeredPath == "" {
-			act.Warnings = append(act.Warnings, fmt.Sprintf("skill %q registered from %s is not selected in this workspace; current selection is %s", name, act.Source, sk.Path))
+			act.Warnings = append(act.Warnings, fmt.Sprintf("skill %q registered from %s is not selected in this workspace; current selection is %s", name, hostLiteral(act.Source), hostLiteral(sk.Path)))
 			continue
 		}
 		act.Discoverable = true

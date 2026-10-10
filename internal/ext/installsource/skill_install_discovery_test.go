@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -140,5 +141,45 @@ func TestApprovedSkillInstallReportsItsOwnDiscovery(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// The skill that shadows an install can live under any configured path, so the
+// warning shows that path as a host literal: a newline cannot forge a line and a
+// bidi or zero-width character stays visible instead of reordering or hiding text.
+func TestShadowingWarningShowsTheShadowingPathAsALiteral(t *testing.T) {
+	for name, hostile := range map[string]string{"newline": "\n", "bidi": "\u202e", "zero-width": "\u200b"} {
+		t.Run(name, func(t *testing.T) {
+			if hostile == "\n" && runtime.GOOS == "windows" {
+				t.Skip("a Windows file name cannot hold a newline, so this path cannot exist there")
+			}
+			project, home := testenv.TempDir(t), testenv.TempDir(t)
+			t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+			custom := filepath.Join(project, "custom"+hostile+"skills")
+			writeFile(t, filepath.Join(custom, "orientation.md"), "---\nname: orientation\ndescription: Earlier helper\n---\nUse the earlier helper.\n")
+			if err := config.EditConfigFile(config.UserConfigPath(), func(cfg *config.Config) error {
+				return cfg.AddSkillPath(custom)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			original := filepath.Join(project, "source", "orientation.md")
+			writeFile(t, original, "---\nname: orientation\ndescription: Installed helper\n---\nUse the installed helper.\n")
+			tl := NewTool(Options{ProjectRoot: project, HomeDir: home, RequireApprovedPlan: true})
+			args := map[string]any{"source": original, "kind": "skill", "scope": "global", "mode": "copy"}
+			plan := execInstall(t, tl, args)
+			args["apply"], args["planId"] = true, plan.PlanID
+			applied := execInstall(t, tl, args)
+			if !applied.OK || len(applied.Actions) != 1 {
+				t.Fatalf("approved install = %+v", applied)
+			}
+			i := slices.IndexFunc(applied.Actions[0].Warnings, func(w string) bool { return strings.Contains(w, "is shadowed in this workspace by") })
+			if i < 0 {
+				t.Fatalf("warnings = %q, want the shadowing warning", applied.Actions[0].Warnings)
+			}
+			warning := applied.Actions[0].Warnings[i]
+			if strings.Contains(warning, hostile) || !strings.Contains(warning, hostLiteral(hostile)) {
+				t.Fatalf("shadowing warning = %q, want %q shown as %q", warning, hostile, hostLiteral(hostile))
+			}
+		})
 	}
 }
