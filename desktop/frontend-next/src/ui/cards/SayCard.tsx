@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useStartsOpen } from "../../state/foldpref";
 import { StudioIcon } from "../StudioIcon";
 import { t } from "../../i18n";
@@ -12,6 +13,8 @@ import { CopyButton } from "../CopyButton";
 import { useRevealed } from "../reveal";
 import { useShown } from "../shown";
 import { ReplyMenu } from "./ReplyMenu";
+import { useDismiss } from "../dismiss";
+import { pinToViewport } from "../place";
 
 // Folded, the only thing left of a thought is how much of the turn it was. The
 // spec puts both halves there — how long, and how much — because either alone
@@ -67,13 +70,10 @@ export interface ReplyActions {
   onRunDetail?: () => void;
 }
 
-// Quoting a whole answer to ask about one sentence of it is not quoting. What
-// the reader has highlighted inside this card is what they mean; the selection
-// has to be checked against the card because the browser keeps the last one
-// anywhere on the page.
+// The browser keeps selections outside the answer, including across cards.
 function selectedIn(card: Element | null): string {
   const sel = card && window.getSelection();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return "";
+  if (!sel || sel.isCollapsed || sel.rangeCount !== 1) return "";
   const range = sel.getRangeAt(0);
   if (!card.contains(range.commonAncestorContainer)) return "";
   return sel.toString().trim();
@@ -96,6 +96,27 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
   const shut = useCallback(() => setMenu(""), []);
   const retry = useRef<HTMLButtonElement>(null);
   const more = useRef<HTMLButtonElement>(null);
+  const answer = useRef<HTMLDivElement>(null);
+  const selectionMenu = useRef<HTMLDivElement>(null);
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
+  const closeSelection = useCallback(() => {
+    if (selectionMenu.current?.contains(document.activeElement)) answer.current?.focus();
+    setSelection(null);
+  }, []);
+  useDismiss(!!selection, selectionMenu, closeSelection);
+  const offerSelection = (x: number, y: number) => {
+    if (!item.done || !reply) return false;
+    const text = selectedIn(answer.current);
+    if (!text) return false;
+    if (x === 0 && y === 0) {
+      const rect = window.getSelection()!.getRangeAt(0).getBoundingClientRect();
+      x = rect.left;
+      y = rect.bottom;
+    }
+    setMenu("");
+    setSelection({ text, x, y });
+    return true;
+  };
   // Thinking is the longest-running stream of the turn — 10s of it before the
   // first answer token, measured — so it gets the same paced reveal the answer
   // does rather than tracking the wire's bursts.
@@ -126,7 +147,19 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
             </details>
           )}
           {item.text && (
-            <div className="txt">
+            <div className="txt" ref={answer} tabIndex={item.done && reply ? 0 : undefined}
+              data-action-contextmenu="reply.selection.menu" data-action-keydown="reply.selection.menu" data-target={item.id}
+              onContextMenu={(e) => {
+                if (!offerSelection(e.clientX, e.clientY)) return;
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+                if (!offerSelection(0, 0)) return;
+                e.preventDefault();
+                e.stopPropagation();
+              }}>
               <Boundary retryKey={item.text} fallback={<div className="md" style={{ whiteSpace: "pre-wrap" }}>{item.text}</div>}>
                 <LazyMarkdown text={item.text} streaming={!item.done} />
               </Boundary>
@@ -139,7 +172,7 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
             <div className="acts">
               <CopyButton text={item.text} iconOnly />
               {reply && (
-                <button type="button" data-action="reply.quote" title={t("引用到输入框")} aria-label={t("引用到输入框")} onClick={(e) => reply.onQuote(selectedIn(e.currentTarget.closest(".call")) || item.text, item.id)}>
+                <button type="button" data-action="reply.quote" data-target={item.id} title={t("引用到输入框")} aria-label={t("引用到输入框")} onClick={() => reply.onQuote(selectedIn(answer.current) || item.text, item.id)}>
                   <StudioIcon name="quote" />
                 </button>
               )}
@@ -190,6 +223,27 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
           )}
         </div>
       </div>
+      {selection && reply && createPortal(
+        <div className="acts-pop" role="menu" aria-label={t("选中内容")} data-action-keydown="reply.selection.menu" data-target={item.id} ref={(el) => {
+          selectionMenu.current = el;
+          if (el) pinToViewport(el, selection.x, selection.y);
+        }}
+          onKeyDown={(e) => {
+            const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+            if (!keys.includes(e.key)) return;
+            const all = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+            const at = all.indexOf(document.activeElement as HTMLElement);
+            const next = e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + all.length) % all.length;
+            e.preventDefault();
+            all[next]?.focus();
+          }}>
+          <button type="button" role="menuitem" autoFocus data-action="reply.quote" data-target={item.id} onClick={() => {
+            setSelection(null);
+            reply.onQuote(selection.text, item.id);
+          }}><span>{t("引用选中内容")}</span></button>
+          <CopyButton text={selection.text} role="menuitem" label={t("复制选中内容")} />
+        </div>, document.body,
+      )}
     </div>
   );
 }

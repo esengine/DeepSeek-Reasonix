@@ -22,7 +22,7 @@ export async function copyText(text: string) {
   }
 }
 
-export function CopyButton({ text, iconOnly = false, showFeedback = false, className, label: what }: { text: string; iconOnly?: boolean; showFeedback?: boolean; className?: string; label?: string }) {
+export function CopyButton({ text, iconOnly = false, showFeedback = false, className, label: what, role }: { text: string; iconOnly?: boolean; showFeedback?: boolean; className?: string; label?: string; role?: "menuitem" }) {
   const [state, setState] = useState<"idle" | "done" | "failed">("idle");
   const timer = useRef<number | null>(null);
 
@@ -44,6 +44,7 @@ export function CopyButton({ text, iconOnly = false, showFeedback = false, class
     <button
       className={className ? `copy ${className}` : "copy"}
       type="button"
+      role={role}
       data-icon={iconOnly ? "" : undefined}
       data-state={state}
       data-feedback={showFeedback && state !== "idle" ? "" : undefined}

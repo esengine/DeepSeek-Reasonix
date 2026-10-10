@@ -471,6 +471,7 @@ export const ACTIONS: UIAction[] = [
   { id: "palette.pick", kind: "view", target: "entity", proof: "interaction" },
   { id: "palette.search", kind: "view", target: "none", proof: "interaction" },
   { id: "reply.quote", kind: "view", target: "entity", proof: "interaction" },
+  { id: "reply.selection.menu", kind: "view", target: "entity", proof: "interaction" },
   { id: "reply.retry", kind: "view", target: "entity", proof: "interaction" },
   { id: "reply.retry-now", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "reply.configure", kind: "view", target: "none", proof: "interaction" },
