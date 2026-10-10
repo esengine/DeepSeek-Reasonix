@@ -69,6 +69,7 @@ func (s *Server) drainTitles() {
 		if len(f.queue) == 0 {
 			f.active--
 			f.mu.Unlock()
+			s.titles.flush()
 			return
 		}
 		job := f.queue[0]
@@ -80,6 +81,9 @@ func (s *Server) drainTitles() {
 		cancel()
 		if title != "" {
 			s.titles.put(job.name, title, job.source, job.mod)
+			// Each title lands as it is minted: a crash mid-batch then loses
+			// nothing already paid for.
+			s.titles.flush()
 		}
 
 		f.mu.Lock()
