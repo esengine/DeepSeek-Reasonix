@@ -377,6 +377,7 @@ export const EN_SETTINGS: Record<string, string> = {
     "Nothing is connected right now; this is what the service itself answered the last time it was.",
   "会修改数据": "Modifies data",
   "技能": "Skills",
+  "复制调用命令 {command}": "Copy invocation {command}",
   "当前工作目录下没有技能。": "No skills in this working directory.",
   "未提供说明": "No description written",
   "只读": "Read-only",
