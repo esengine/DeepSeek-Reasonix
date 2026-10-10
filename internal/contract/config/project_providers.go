@@ -95,6 +95,7 @@ func (h heldEndpoints) restoreUnresolvedModels(c *Config, heldBack []ProviderEnt
 		{"agent.triage_model", &c.Agent.TriageModel, h.agent.TriageModel},
 		{"agent.advisor_model", &c.Agent.AdvisorModel, h.agent.AdvisorModel},
 		{"agent.decision_model", &c.Agent.DecisionModel, h.agent.DecisionModel},
+		{"agent.web_search_model", &c.Agent.WebSearchModel, h.agent.WebSearchModel},
 	}
 	for _, ref := range refs {
 		if *ref.value != ref.userChoice && orphaned(*ref.value) {

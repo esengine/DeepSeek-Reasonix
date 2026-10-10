@@ -152,6 +152,10 @@ func WithRequestAttemptCounter(ctx context.Context) context.Context {
 	return context.WithValue(ctx, requestAttemptCounterKey{}, &requestAttemptCounter{})
 }
 
+func WithIndependentRequestAttemptCounter(ctx context.Context) context.Context {
+	return context.WithValue(ctx, requestAttemptCounterKey{}, &requestAttemptCounter{})
+}
+
 // RequestAttemptCount returns the number of HTTP requests started through
 // SendWithRetry for the counter attached to ctx.
 func RequestAttemptCount(ctx context.Context) int {

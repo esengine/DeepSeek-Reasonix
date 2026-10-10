@@ -78,6 +78,10 @@ func HasServerWebSearchCapability(e *ProviderEntry) bool {
 // web_search, while compatible third-party endpoints remain opt-in. An explicit
 // false always wins so users can turn the capability off permanently.
 func EffectiveWebSearch(e *ProviderEntry) bool {
+	return !e.searchAssigned && declaredWebSearch(e)
+}
+
+func declaredWebSearch(e *ProviderEntry) bool {
 	if !SupportsServerWebSearch(e) {
 		return false
 	}

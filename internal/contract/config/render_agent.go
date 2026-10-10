@@ -56,6 +56,10 @@ func renderAgentDelta(buf *strings.Builder, c, d *Config) bool {
 // loop-guard budget, and reports whether it wrote any line.
 func renderAgentTail(buf *strings.Builder, c, d *Config) bool {
 	wrote := false
+	if c.Agent.WebSearchModel != "" && c.Agent.WebSearchModel != d.Agent.WebSearchModel {
+		fmt.Fprintf(buf, "web_search_model = %q\n", c.Agent.WebSearchModel)
+		wrote = true
+	}
 	if c.Agent.PlannerModel != "" && c.Agent.PlannerModel != d.Agent.PlannerModel {
 		fmt.Fprintf(buf, "planner_model = %q\n", c.Agent.PlannerModel)
 		wrote = true

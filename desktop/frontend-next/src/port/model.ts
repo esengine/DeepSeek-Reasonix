@@ -49,6 +49,7 @@ export interface ModelEntry {
   // nothing declares it — never "no". Rendering a guess here sends the user to
   // a rejected request they cannot explain.
   vision?: boolean;
+  webSearch?: boolean;
   // What this model produces. Absent means chat: it is what every model was
   // before decision backends, so a kernel predating the field still answers.
   answers?: "chat" | "decision";
@@ -81,6 +82,10 @@ export interface ModelMode {
 // kernel appear here; image routing joins once it can name its own model
 // instead of borrowing whatever the subagent runs.
 export interface RoleAssignments {
+  web_search: string;
+  web_search_effective?: string;
+  web_search_reason?: string;
+  web_search_source?: string;
   planner: string;
   subagent: string;
   guardian: string;

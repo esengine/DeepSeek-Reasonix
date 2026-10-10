@@ -33,7 +33,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/model/openai"
 )
@@ -150,11 +149,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		http:             httpClient, // no overall timeout; lifecycle is ctx-driven
 		idleTimeout:      provider.IdleTimeoutFromExtra(cfg.Extra),
 	}, nil
-}
-
-func newHTTPClient(cfg provider.Config) (*http.Client, error) {
-	spec, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
-	return netclient.NewHTTPClient(spec, netclient.TransportOptions{ResponseHeaderTimeout: provider.IdleTimeoutFromExtra(cfg.Extra)})
 }
 
 type client struct {

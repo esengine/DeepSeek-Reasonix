@@ -1040,11 +1040,11 @@ type AgentConfig struct {
 	RecoveryTemperature float64           `toml:"recovery_temperature"`
 	SubagentModel       string            `toml:"subagent_model"`
 	SubagentModels      map[string]string `toml:"subagent_models"`
-	// VisionModel reads the images a text-only main model cannot. Empty leaves
-	// them with whatever model the receiving sub-agent already runs, which is
-	// chosen for other reasons — a cheap worker is usually text-only, and the
-	// attachment is then dropped during serialization with nothing to show why.
-	VisionModel string `toml:"vision_model"`
+	// A text-only worker can drop images during serialization. A dedicated
+	// reader keeps those attachments available independently of the main model.
+	// Empty retains the receiving sub-agent's model.
+	VisionModel    string `toml:"vision_model"`
+	WebSearchModel string `toml:"web_search_model"`
 	// TriageModel answers the small classifications the static tables come up
 	// short on (is this unrecognized command read-only?). Empty falls back to
 	// subagent_model, then the main model — set it to point them somewhere cheap.
@@ -1475,23 +1475,11 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		ref = retargetDesktopOfficialRef(ref, access)
 	}
 	ref = c.refForFoldedDeepSeek(ref)
-	// "provider/model"
-	if prov, model, ok := strings.Cut(ref, "/"); ok {
-		if e, found := c.Provider(prov); found && e.HasModel(model) {
-			return e.forModel(model), true
-		}
+	e, ok := c.lookupModel(ref)
+	if ok {
+		e.searchAssigned = c.explicitWebSearchRef() != ""
 	}
-	// a provider name → its default model
-	if e, found := c.Provider(ref); found {
-		return e.forModel(e.DefaultModel()), true
-	}
-	// a bare model name → the provider that lists it
-	for i := range c.Providers {
-		if c.Providers[i].HasModel(ref) {
-			return c.Providers[i].forModel(ref), true
-		}
-	}
-	return nil, false
+	return e, ok
 }
 
 // ResolveModelWithFallback resolves a model reference to the canonical
