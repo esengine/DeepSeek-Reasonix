@@ -76,6 +76,10 @@ func sources(primary, fallback string) []string {
 // way, so lookups always agree.
 func PlatformKey(goos, goarch string) string { return goos + "-" + goarch }
 
+// RPMPackageKey is the native_packages key of an .rpm. It is not PlatformKey:
+// that key already names the .deb, which every installed client reads.
+func RPMPackageKey(goos, goarch string) string { return PlatformKey(goos, goarch) + "-rpm" }
+
 // CurrentPlatform is PlatformKey for the running binary.
 func CurrentPlatform() string { return PlatformKey(runtime.GOOS, runtime.GOARCH) }
 

@@ -1,6 +1,6 @@
 "use strict";
 const path = require("node:path");
-const { map } = require("../arch.json");
+const { map, fpm } = require("../arch.json");
 
 // What each artifact was built for, keyed by the path electron-builder wrote.
 // Taken from the Arch enum it hands the hook rather than read back out of the
@@ -26,4 +26,9 @@ function canonical(arch) {
   return to;
 }
 
-module.exports = { built, record, canonical, map };
+// Every spelling electron-builder or fpm may put in a file name for arch.
+function spellings(arch) {
+  return [arch, ...(fpm[arch] ?? [])];
+}
+
+module.exports = { built, record, canonical, spellings, map, fpm };

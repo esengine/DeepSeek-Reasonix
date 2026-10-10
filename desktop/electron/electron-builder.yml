@@ -96,6 +96,7 @@ mac:
 linux:
   target:
     - deb
+    - rpm
   icon: assets/icon.png
   category: Development
   maintainer: esengine <esengine@users.noreply.github.com>
@@ -126,6 +127,25 @@ deb:
     - --deb-user
     - root
     - --deb-group
+    - root
+    - linux/reasonix-studio-update-helper=/usr/lib/reasonix-studio/reasonix-studio-update-helper
+    - ../packaging/linux/io.reasonix.studio.update.policy=/usr/share/polkit-1/actions/io.reasonix.studio.update.policy
+
+rpm:
+  # The same package name as the deb, so a distribution's package database
+  # names one product under one identifier.
+  packageName: reasonix-studio
+  # electron-builder's own script removes the command link whatever $1 says, and
+  # rpm runs it for the old package after the new one installed its link.
+  afterRemove: ../packaging/linux/rpm-after-remove.sh
+  # The same two system-path files as the deb, for the same reasons, with the
+  # owner stated for the same reason: the rpm spec records whoever ran the build
+  # unless told, and polkit will not execute a helper its invoker could have
+  # written.
+  fpm:
+    - --rpm-user
+    - root
+    - --rpm-group
     - root
     - linux/reasonix-studio-update-helper=/usr/lib/reasonix-studio/reasonix-studio-update-helper
     - ../packaging/linux/io.reasonix.studio.update.policy=/usr/share/polkit-1/actions/io.reasonix.studio.update.policy

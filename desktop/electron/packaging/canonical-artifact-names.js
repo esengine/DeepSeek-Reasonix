@@ -1,12 +1,21 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
-const { built, canonical, map } = require("./arch");
+const { built, canonical, spellings, map, fpm } = require("./arch");
 
 // The archs whose electron-builder spelling differs from the release one. A
 // name still carrying one of these got past the rename, which is the failure
 // this refuses to ship rather than report.
-const foreign = Object.keys(map).filter((from) => map[from] !== from);
+const foreign = [
+  ...Object.keys(map).filter((from) => map[from] !== from),
+  ...Object.values(fpm).flat(),
+];
+
+// names reports whether a file name carries arch as a whole segment, which is
+// how both the rename and the leftover check recognise it.
+function names(name, arch) {
+  return name.includes(`-${arch}.`) || name.includes(`-${arch}-`);
+}
 
 // plan records the rename of one artifact and of everything written beside it
 // under its name — a .blockmap left behind points at a file that no longer
@@ -38,7 +47,9 @@ module.exports = async function canonicalArtifactNames(buildResult) {
     const arch = built.get(path.resolve(file));
     if (!arch) continue;
     const to = canonical(arch);
-    if (to !== arch) plan(path.resolve(file), arch, to, renames);
+    const name = path.basename(file);
+    const from = spellings(arch).find((s) => names(name, s));
+    if (from && from !== to) plan(path.resolve(file), from, to, renames);
   }
   for (const [from, to] of renames) fs.renameSync(from, to);
 
@@ -53,7 +64,7 @@ module.exports = async function canonicalArtifactNames(buildResult) {
   }
   for (const file of out) {
     const name = path.basename(file);
-    const stray = foreign.find((a) => name.includes(`-${a}.`) || name.includes(`-${a}-`));
+    const stray = foreign.find((a) => names(name, a));
     if (stray) {
       throw new Error(`${name} still names ${stray}; studio-manifest reads artifact names as GOARCH`);
     }

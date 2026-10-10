@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"reasonix/internal/platform/update"
@@ -13,7 +14,8 @@ import (
 // archMap is desktop/electron/arch.json: what the packager builds for, and what
 // each of those is called in a release.
 type archMap struct {
-	Map map[string]string `json:"map"`
+	Map map[string]string   `json:"map"`
+	FPM map[string][]string `json:"fpm"`
 }
 
 func loadArchMap(t *testing.T) archMap {
@@ -90,6 +92,36 @@ func TestThePackagerSpellingResolvesToAKeyNobodyAsksFor(t *testing.T) {
 		}
 		if canonical[got[len("windows-"):]] {
 			t.Errorf("%s resolved to a canonical platform %q; the mapping is no longer load-bearing", from, got)
+		}
+	}
+}
+
+// fpm names an .rpm for the architecture its own way, and the parser accepts
+// that name too: it keys a package nobody asks for. The packager hook renames
+// these spellings, so every one must be a non-canonical key here.
+func TestFPMSpellingOfAnRPMIsNotAReleaseKey(t *testing.T) {
+	m := loadArchMap(t)
+	if len(m.FPM) == 0 {
+		t.Fatal("arch.json lists no fpm spellings")
+	}
+	canonical := map[string]bool{}
+	for _, to := range m.Map {
+		canonical[to] = true
+	}
+	for from, spellings := range m.FPM {
+		to, ok := m.Map[from]
+		if !ok {
+			t.Errorf("fpm spells %s, which map does not release", from)
+			continue
+		}
+		if got, ok := rpmPackageKey(artifactPrefix + "linux-" + to + ".rpm"); !ok || got != update.RPMPackageKey("linux", to) {
+			t.Errorf("linux %s rpm = %q (%v)", to, got, ok)
+		}
+		for _, spelled := range spellings {
+			got, ok := rpmPackageKey(artifactPrefix + "linux-" + spelled + ".rpm")
+			if !ok || canonical[strings.TrimSuffix(strings.TrimPrefix(got, "linux-"), "-rpm")] {
+				t.Errorf("%s resolved to %q (%v); the rename is no longer load-bearing", spelled, got, ok)
+			}
 		}
 	}
 }

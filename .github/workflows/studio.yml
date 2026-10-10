@@ -256,10 +256,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: desktop/electron/pnpm-lock.yaml
 
-      # electron-builder shells out to dpkg-deb through fakeroot for the .deb.
+      # electron-builder shells out to dpkg-deb through fakeroot for the .deb and
+      # to rpmbuild for the .rpm.
       - name: Install Linux packaging deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y fakeroot
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm
 
       - name: Build the SPA
         working-directory: desktop/frontend-next
@@ -430,6 +431,31 @@ jobs:
           fi
           if ! grep -q './usr/share/polkit-1/actions/io.reasonix.studio.update.policy$' contents.txt; then
             echo "::error::the polkit action is not in the package, so pkexec has nothing to authorize against"
+            exit 1
+          fi
+
+      # The .rpm is read back for the same two properties as the .deb: it is the
+      # package update.StudioLine names, and the helper pkexec runs as root is
+      # owned by root and writable by no one else, or any local user could
+      # replace it.
+      - name: The .rpm is Studio's own package and carries what updates it
+        if: runner.os == 'Linux'
+        run: |
+          rpm=$(ls dist/ReasonixStudio-linux-*.rpm)
+          name=$(rpm -qp --qf '%{NAME}' "$rpm")
+          if [ "$name" != "reasonix-studio" ]; then
+            echo "::error::the package is $name; rpm holds that beside the installed reasonix-studio instead of upgrading it"
+            exit 1
+          fi
+          rpm -qp --qf '[%{FILEMODES:perms} %{FILEUSERNAME} %{FILEGROUPNAME} %{FILENAMES}\n]' "$rpm" > contents.txt
+          if ! grep -qxE -- '-rwxr-xr-x root root /usr/lib/reasonix-studio/reasonix-studio-update-helper' contents.txt; then
+            echo "::error::no root-owned, executable, not-writable update helper at the path the polkit action names"
+            grep reasonix-studio-update-helper contents.txt || echo "(not in the package at all)"
+            exit 1
+          fi
+          if ! grep -qE -- '^-r[w-][x-]r-[x-]r-[x-] root root /usr/share/polkit-1/actions/io.reasonix.studio.update.policy$' contents.txt; then
+            echo "::error::the polkit action is missing, or is not a root-owned file no one else can write"
+            grep polkit contents.txt || echo "(not in the package at all)"
             exit 1
           fi
 
