@@ -862,6 +862,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "发布者": "Publisher",
   "审核版本": "Reviewed version",
   "来源": "Source",
+  "复制审核来源": "Copy approved source",
   "固定内容": "Pinned content",
   "未固定——审核时没有记录内容摘要": "Not pinned - no content digest was recorded at review",
   "仓库": "Repository",

@@ -63,17 +63,32 @@ it("retries by keyboard, waits for the fresh vote, then withdraws its actual val
   const pending = screen.getByRole<HTMLButtonElement>("button", { name: "正在读取…" });
   expect(pending.disabled).toBe(true);
   expect(up().disabled).toBe(true);
-  await userEvent.click(pending);
   expect(f.read).toHaveBeenCalledTimes(2);
   expect(f.cast).not.toHaveBeenCalled();
   await act(async () => fresh.resolve(known));
   expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
   expect(up().getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByText("好评 80%（10 票）")).toBeTruthy();
+  expect(document.activeElement).toBe(group);
   await userEvent.tab();
   expect(document.activeElement).toBe(up());
   await userEvent.keyboard("{Enter}");
   expect(f.cast).toHaveBeenLastCalledWith(f.pkg.slug, 0);
+});
+
+it("ignores clicking the disabled vote retry while its fresh read is pending", async () => {
+  const f = await fixture();
+  const fresh = deferred<Vote>();
+  f.read.mockImplementationOnce(() => fresh.promise);
+  await userEvent.click(screen.getByRole("button", { name: "重试" }));
+  const pending = screen.getByRole<HTMLButtonElement>("button", { name: "正在读取…" });
+  expect(pending.disabled).toBe(true);
+  await userEvent.click(pending);
+  expect(f.read).toHaveBeenCalledTimes(2);
+  expect(f.cast).not.toHaveBeenCalled();
+  await act(async () => fresh.resolve(known));
+  expect(up().disabled).toBe(false);
+  expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
 });
 
 it("offers sign-in only when a successful retry answers signed out", async () => {

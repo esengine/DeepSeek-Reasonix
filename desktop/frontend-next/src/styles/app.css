@@ -3301,6 +3301,8 @@
   .mkt-facts dd { margin: 0; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--text); overflow-wrap: anywhere }
   .mkt-facts dd.mono { font: var(--w-reg) var(--fs-meta) var(--mono) }
   .mkt-facts dd[data-missing] { color: var(--warn-ink) }
+  .mkt-source { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px }
+  .mkt-source > span { min-width: 0 }
   .mkt .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 0 }
   .mkt .acts .note { flex: 1; min-width: 180px; margin: 0; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
   .mkt .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }

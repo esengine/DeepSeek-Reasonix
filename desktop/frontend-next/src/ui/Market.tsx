@@ -4,6 +4,7 @@ import { reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
 import type { AccountState, AgentPort, MarketCache, MarketDetail, MarketKind, MarketPackage, MarketPlan } from "../port/port";
 import { Outcome } from "./AddPlugin";
+import { CopyButton } from "./CopyButton";
 import { CacheNotice } from "./MarketCache";
 import { Group } from "./Group";
 import { PlanConfirm } from "./MarketConfirm";
@@ -326,7 +327,10 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
         <dt>{t("审核版本")}</dt>
         <dd>{v?.version || p.latestVersion}</dd>
         <dt>{t("来源")}</dt>
-        <dd className="mono">{v?.source || "—"}</dd>
+        <dd className="mono mkt-source">
+          <span>{v?.source || "—"}</span>
+          {v?.source && <CopyButton key={v.source} text={v.source} label={t("复制审核来源")} />}
+        </dd>
         <dt>{t("固定内容")}</dt>
         <dd className={d.pinned ? "mono" : undefined} data-missing={d.pinned ? undefined : ""}>{d.pinned ? v?.contentHash : t("未固定——审核时没有记录内容摘要")}</dd>
         {p.repoUrl && (
