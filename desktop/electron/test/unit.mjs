@@ -1772,3 +1772,46 @@ test("the notice names where the logs are in both languages and shows how it end
   assert.match(en.detail, /code 2/);
   assert.match(zh.detail, /2/);
 });
+
+test("packaging: an rpm fpm spelled x86_64 leaves the build as the release arch", async () => {
+  const arch = require("../packaging/arch.js");
+  const hook = require("../packaging/canonical-artifact-names.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rpm-name-"));
+  const deb = path.join(dir, "ReasonixStudio-linux-amd64.deb");
+  const rpm = path.join(dir, "ReasonixStudio-linux-x86_64.rpm");
+  fs.writeFileSync(deb, "d");
+  fs.writeFileSync(rpm, "r");
+  arch.record(deb, "x64");
+  arch.record(rpm, "x64");
+  const out = await hook({ artifactPaths: [deb, rpm] });
+  assert.deepEqual(out.map((f) => path.basename(f)), ["ReasonixStudio-linux-amd64.deb", "ReasonixStudio-linux-amd64.rpm"]);
+  assert.ok(fs.existsSync(path.join(dir, "ReasonixStudio-linux-amd64.rpm")));
+  assert.ok(!fs.existsSync(rpm));
+});
+
+test("packaging: a name still carrying an fpm spelling is refused", async () => {
+  const arch = require("../packaging/arch.js");
+  const hook = require("../packaging/canonical-artifact-names.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rpm-name-"));
+  const stray = path.join(dir, "ReasonixStudio-linux-aarch64.rpm");
+  fs.writeFileSync(stray, "r");
+  arch.record(stray, "x64");
+  await assert.rejects(hook({ artifactPaths: [stray] }), /aarch64/);
+});
+
+test("packaging: a Windows installer named for x64 is renamed to amd64", async () => {
+  const arch = require("../packaging/arch.js");
+  const hook = require("../packaging/canonical-artifact-names.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "win-name-"));
+  const installer = path.join(dir, "ReasonixStudio-windows-x64-installer.exe");
+  const zip = path.join(dir, "ReasonixStudio-windows-x64.zip");
+  for (const f of [installer, zip]) {
+    fs.writeFileSync(f, "x");
+    arch.record(f, "x64");
+  }
+  const out = await hook({ artifactPaths: [installer, zip] });
+  assert.deepEqual(
+    out.map((f) => path.basename(f)),
+    ["ReasonixStudio-windows-amd64-installer.exe", "ReasonixStudio-windows-amd64.zip"],
+  );
+});

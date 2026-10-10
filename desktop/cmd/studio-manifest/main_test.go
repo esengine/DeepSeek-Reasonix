@@ -232,3 +232,57 @@ func TestWindowsArchitecturesResolveToTheirOwnInstallers(t *testing.T) {
 		t.Errorf("no delta directory was given, yet deltas = %v", m.Deltas)
 	}
 }
+
+// Every installed Linux client reads native_packages["linux-amd64"] as the
+// .deb and hands it to dpkg. The .rpm may add a key and never change that one.
+func TestRPMRidesBesideTheDebWithoutMovingItsKey(t *testing.T) {
+	write := func(dir string, names ...string) {
+		for _, name := range names {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	generate := func(dir string) update.Manifest {
+		t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
+		if err := run(dir, "v0.1.0", "studio-v0.1.0", "", true); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		var m update.Manifest
+		raw, err := os.ReadFile(filepath.Join(dir, "latest.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	debOnly, both := t.TempDir(), t.TempDir()
+	write(debOnly, "ReasonixStudio-linux-amd64.deb")
+	write(both, "ReasonixStudio-linux-amd64.deb", "ReasonixStudio-linux-amd64.rpm")
+	before, after := generate(debOnly), generate(both)
+
+	if after.NativePackages["linux-amd64"] != before.NativePackages["linux-amd64"] {
+		t.Errorf("the deb entry moved: %+v, was %+v", after.NativePackages["linux-amd64"], before.NativePackages["linux-amd64"])
+	}
+	if !strings.HasSuffix(after.NativePackages["linux-amd64"].URL, "linux-amd64.deb") {
+		t.Errorf("native_packages[linux-amd64] = %+v, want the .deb", after.NativePackages["linux-amd64"])
+	}
+	rpm, ok := after.NativePackages["linux-amd64-rpm"]
+	if !ok || !strings.HasSuffix(rpm.URL, "ReasonixStudio-linux-amd64.rpm") || rpm.Sig != rpm.URL+".minisig" {
+		t.Errorf("native_packages[linux-amd64-rpm] = %+v, want the signed .rpm", rpm)
+	}
+	if len(after.NativePackages) != 2 {
+		t.Errorf("native packages = %v, want the deb and the rpm", after.NativePackages)
+	}
+	if _, ok := after.Platforms["linux-amd64"]; ok {
+		t.Error("the .rpm must not resolve as a platform asset")
+	}
+	if _, ok := after.Downloads["ReasonixStudio-linux-amd64.rpm"]; !ok {
+		t.Error("downloads must offer the .rpm to a person")
+	}
+	if len(after.Downloads) != len(before.Downloads)+1 {
+		t.Errorf("downloads = %v, want only the rpm added", after.Downloads)
+	}
+}

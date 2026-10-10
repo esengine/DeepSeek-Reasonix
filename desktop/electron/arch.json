@@ -4,5 +4,14 @@
     "x64": "amd64",
     "arm64": "arm64",
     "universal": "universal"
+  },
+  "_fpm": "fpm spells the architecture its own way in an .rpm name (x86_64, aarch64) wherever artifactName uses ${arch}; the deb comes out as amd64 already. Each spelling is renamed to the release arch, and one not listed here fails the build.",
+  "fpm": {
+    "x64": [
+      "x86_64"
+    ],
+    "arm64": [
+      "aarch64"
+    ]
   }
 }

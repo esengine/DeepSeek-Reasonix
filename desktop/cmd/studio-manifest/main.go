@@ -84,6 +84,12 @@ func run(dir, version, tag, deltaDir string, mirrored bool) error {
 			m.NativePackages[key] = asset
 			fmt.Printf("native package: %s -> %s\n", name, key)
 		}
+		// The .rpm rides beside the .deb under its own key: the deb's key is the
+		// one every installed client already reads.
+		if key, ok := rpmPackageKey(name); ok {
+			m.NativePackages[key] = asset
+			fmt.Printf("native package: %s -> %s\n", name, key)
+		}
 		// Windows updates by running the next installer, so that is what the
 		// platform lookup has to resolve. The portable archive is never listed:
 		// resolving it would hand the updater an artifact it cannot install.
@@ -135,7 +141,8 @@ func releaseAsset(repo, tag, name string, mirrored bool) update.Asset {
 func installable(name string) bool {
 	return strings.HasSuffix(name, ".dmg") ||
 		strings.HasSuffix(name, "-installer.exe") ||
-		strings.HasSuffix(name, ".deb")
+		strings.HasSuffix(name, ".deb") ||
+		strings.HasSuffix(name, ".rpm")
 }
 
 // macArchiveKeys maps a macOS archive to the platforms it can install. The
@@ -183,6 +190,20 @@ func nativePackageKey(name string) (string, bool) {
 		return "", false
 	}
 	return update.PlatformKey("linux", arch), true
+}
+
+// rpmPackageKey maps a ReasonixStudio-linux-<arch>.rpm artifact to its
+// native_packages key.
+func rpmPackageKey(name string) (string, bool) {
+	base, ok := strings.CutSuffix(name, ".rpm")
+	if !ok {
+		return "", false
+	}
+	arch, ok := strings.CutPrefix(base, artifactPrefix+"linux-")
+	if !ok || arch == "" {
+		return "", false
+	}
+	return update.RPMPackageKey("linux", arch), true
 }
 
 func hashFile(path string) (int64, string, error) {
