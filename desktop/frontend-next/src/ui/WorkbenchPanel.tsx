@@ -24,6 +24,7 @@ import { WorkbenchFileBar, type FileMode } from "./WorkbenchFileBar";
 import { useHtmlPreview } from "./useHtmlPreview";
 import { setShowsHiddenFiles, showsHiddenFiles } from "../state/prefs";
 import { useCommitCard } from "./CommitCard";
+import { BrowserWideToggle } from "./BrowserWideToggle";
 
 // The editor and its grammars load with the first file opened, not with Studio.
 const CodeEditor = lazy(() => import("./CodeEditor"));
@@ -120,6 +121,7 @@ export function WorkbenchPanel({
   onCloseManual,
   onSurfaces,
   onExternal,
+  wideMode,
 }: {
   port: AgentPort;
   tabs: BrowserTab[];
@@ -140,6 +142,7 @@ export function WorkbenchPanel({
   // How many surfaces the strip holds, for the pane's own tab to count.
   onSurfaces: (n: number) => void;
   onExternal: (url: string) => void;
+  wideMode?: { wide: boolean; onToggle: () => void };
 }) {
   const preview = useHtmlPreview(port, allTabs, remote);
   const tabs = preview.tabs;
@@ -556,6 +559,7 @@ export function WorkbenchPanel({
           </div>
         ))}
         </div>
+        {wideMode && <BrowserWideToggle {...wideMode} />}
         <button
           className="workbench-files"
           data-action="workbench.files"
