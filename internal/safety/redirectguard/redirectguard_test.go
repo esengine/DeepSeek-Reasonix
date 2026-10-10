@@ -3,6 +3,7 @@ package redirectguard
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,79 @@ func TestFollowWithNoHostsTrustsNothing(t *testing.T) {
 	}
 	if err := Follow()(req, nil); !errors.Is(err, ErrRefused) {
 		t.Fatal("a guard with no trusted hosts followed a redirect anyway")
+	}
+}
+
+func TestStayOnOriginFollowsOnlyTheHostItStartedOn(t *testing.T) {
+	for _, tc := range []struct {
+		name, from, to string
+		hops           int
+		want           bool
+	}{
+		{"same host and port", "http://localhost:8080/v1", "http://localhost:8080/v2", 1, true},
+		{"path-only move on https", "https://api.example.com/v1", "https://api.example.com/v2", 1, true},
+		{"http to https upgrade on default ports", "http://relay.example.com/v1", "https://relay.example.com/v1", 1, true},
+		{"host case and root label", "https://API.example.com/v1", "https://api.example.com./v1", 1, true},
+		{"another port on the same host", "http://127.0.0.1:1/v1", "http://127.0.0.1:2/v1", 1, false},
+		{"another host", "https://api.example.com/v1", "https://evil.test/v1", 1, false},
+		{"a sibling subdomain", "https://api.example.com/v1", "https://cdn.example.com/v1", 1, false},
+		{"https downgraded to http", "https://api.example.com/v1", "http://api.example.com/v1", 1, false},
+		{"credentials in the target", "https://api.example.com/v1", "https://u:p@api.example.com/v1", 1, false},
+		{"too many hops", "https://api.example.com/v1", "https://api.example.com/v2", 10, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first, err := http.NewRequest(http.MethodPost, tc.from, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, err := http.NewRequest(http.MethodPost, tc.to, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			via := make([]*http.Request, tc.hops)
+			for i := range via {
+				via[i] = first
+			}
+			err = StayOnOrigin()(next, via)
+			if (err == nil) != tc.want {
+				t.Fatalf("StayOnOrigin %s -> %s = %v, want follow=%v", tc.from, tc.to, err, tc.want)
+			}
+			if err != nil && !errors.Is(err, ErrRefused) {
+				t.Fatalf("refusal %v does not carry ErrRefused", err)
+			}
+		})
+	}
+}
+
+func TestStayOnOriginNamesTheHostItWasSentTo(t *testing.T) {
+	first, _ := http.NewRequest(http.MethodPost, "https://example.com/v1", nil)
+	next, _ := http.NewRequest(http.MethodPost, "https://www.example.com/v1?token=x", nil)
+	err := StayOnOrigin()(next, []*http.Request{first})
+	var left *OriginLeft
+	if !errors.As(err, &left) || left.From != "example.com" || left.To != "www.example.com" {
+		t.Fatalf("err = %#v, want OriginLeft example.com -> www.example.com", err)
+	}
+	if !errors.Is(err, ErrRefused) || strings.Contains(err.Error(), "token") {
+		t.Fatalf("err = %v: must be ErrRefused and carry no query", err)
+	}
+}
+
+func TestRefusalsAreRecognisedAndPermanent(t *testing.T) {
+	var p interface{ Permanent() bool }
+	if !errors.As(ErrRefused, &p) || !p.Permanent() {
+		t.Fatal("ErrRefused must report itself permanent")
+	}
+	if err := Follow(releaseHosts...)(&http.Request{}, nil); !errors.Is(err, ErrRefused) {
+		t.Fatalf("a request with no URL = %v, want ErrRefused", err)
+	}
+	empty, _ := http.NewRequest(http.MethodGet, "https:///x", nil)
+	if err := Follow(releaseHosts...)(empty, nil); !errors.Is(err, ErrRefused) {
+		t.Fatalf("a URL with no hostname = %v, want ErrRefused", err)
+	}
+	if err := StayOnOrigin()(empty, nil); !errors.Is(err, ErrRefused) {
+		t.Fatalf("no earlier request to stay on = %v, want ErrRefused", err)
+	}
+	if permitted("", releaseHosts) || permitted(" . ", releaseHosts) {
+		t.Fatal("an empty host was permitted")
 	}
 }

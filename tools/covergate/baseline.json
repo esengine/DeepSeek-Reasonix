@@ -11,6 +11,7 @@
   "internal/ext/pluginpkg/**": 82.7,
   "internal/model/providerbroker/**": 83.1,
   "internal/safety/redirectguard/**": 92.6,
+  "internal/safety/endpointclient/**": 80,
   "internal/safety/egress/**": 77.1,
   "internal/safety/sandbox/**": 78.1,
   "internal/base/shellparse/**": 64.5,

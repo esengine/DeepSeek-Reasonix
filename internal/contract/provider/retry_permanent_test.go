@@ -6,10 +6,13 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"syscall"
 	"testing"
 	"time"
+
+	"reasonix/internal/safety/redirectguard"
 )
 
 // 1.x failed a request to an endpoint that refuses connections at once;
@@ -36,6 +39,28 @@ func TestSendWithRetryFailsFastWhenTheEndpointRefuses(t *testing.T) {
 	}
 	if calls != 1 || time.Since(start) > 5*time.Second {
 		t.Fatalf("refused connection took %d attempts over %s, want one attempt", calls, time.Since(start))
+	}
+}
+
+func TestSendWithRetryDoesNotRetryARefusedRedirect(t *testing.T) {
+	elsewhere := httptest.NewServer(http.NotFoundHandler())
+	defer elsewhere.Close()
+	calls := 0
+	home := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Redirect(w, r, elsewhere.URL, http.StatusTemporaryRedirect)
+	}))
+	defer home.Close()
+	cl := &http.Client{CheckRedirect: redirectguard.StayOnOrigin()}
+	_, err := SendWithRetry(WithRetryLimit(context.Background(), 2), cl, SendOptions{Provider: "p"}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, home.URL, nil)
+	})
+	var left *redirectguard.OriginLeft
+	if !errors.As(err, &left) || left.To == "" {
+		t.Fatalf("err = %v, want it to name the host it was redirected to", err)
+	}
+	if calls != 1 {
+		t.Fatalf("a refused redirect was attempted %d times, want 1", calls)
 	}
 }
 

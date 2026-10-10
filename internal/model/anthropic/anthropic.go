@@ -36,6 +36,7 @@ import (
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/model/openai"
+	"reasonix/internal/safety/endpointclient"
 )
 
 // defaultStreamIdleTimeout caps how long a started SSE stream may go silent before
@@ -154,7 +155,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 	spec, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
-	return netclient.NewHTTPClient(spec, netclient.TransportOptions{ResponseHeaderTimeout: provider.IdleTimeoutFromExtra(cfg.Extra)})
+	return endpointclient.New(spec, netclient.TransportOptions{ResponseHeaderTimeout: provider.IdleTimeoutFromExtra(cfg.Extra)})
 }
 
 type client struct {

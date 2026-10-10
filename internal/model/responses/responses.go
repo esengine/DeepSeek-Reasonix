@@ -20,6 +20,8 @@ import (
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/provider"
 	provideropenai "reasonix/internal/model/openai"
+	"reasonix/internal/safety/endpointclient"
+	"reasonix/internal/safety/redirectguard"
 )
 
 const (
@@ -163,8 +165,8 @@ func New(cfg Config) provider.Provider {
 	if vendor == "deepseek" {
 		vision = vision && provideropenai.DeepSeekTakesImages(cfg.Model)
 	}
-	httpClient := &http.Client{Timeout: 300 * time.Second}
-	if built, err := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
+	httpClient := &http.Client{Timeout: 300 * time.Second, CheckRedirect: redirectguard.StayOnOrigin()}
+	if built, err := endpointclient.New(cfg.Proxy, netclient.TransportOptions{
 		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,
 		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: provider.IdleTimeoutFromExtra(cfg.Extra),
 	}); err == nil {

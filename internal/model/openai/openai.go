@@ -37,6 +37,7 @@ import (
 
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/safety/endpointclient"
 )
 
 // defaultStreamIdleTimeout caps how long a started SSE stream may go without any
@@ -264,7 +265,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 	spec, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
-	return netclient.NewHTTPClient(spec, netclient.TransportOptions{
+	return endpointclient.New(spec, netclient.TransportOptions{
 		DialTimeout:           30 * time.Second,
 		KeepAlive:             30 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,

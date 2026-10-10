@@ -29,6 +29,7 @@ import (
 	"reasonix/internal/platform/lsp"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/delegation"
+	"reasonix/internal/safety/endpointclient"
 	"reasonix/internal/safety/permission"
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/session/control"
@@ -57,6 +58,7 @@ type builder struct {
 	keep             agent.KeepPolicy
 	session          sessionRuntime
 	balanceClient    *http.Client
+	keyedClient      *http.Client // carries provider keys; refuses cross-origin redirects
 	execProv         provider.Provider
 	shell            sandbox.Shell
 	prompt           promptAssembly
@@ -208,6 +210,9 @@ func (b *builder) load() error {
 	if b.balanceClient, err = netclient.NewHTTPClient(b.proxy, netclient.TransportOptions{}); err != nil {
 		return err
 	}
+	if b.keyedClient, err = endpointclient.New(b.proxy, netclient.TransportOptions{}); err != nil {
+		return err
+	}
 	if b.execProv, err = resolveProvider(b.providers.effective, cfg, b.proxy, provider.Selection{Ref: b.model.ref, Effort: opts.EffortOverride}); err != nil {
 		return err
 	}
@@ -286,7 +291,7 @@ func (b *builder) wireTools() error {
 	// The full inventory registers for use_capability; the provider-visible surface narrows later.
 	addBuiltins(t.reg, cfg.Tools.Enabled, env.writeRoots, env.bash, env.bashTimeout, env.search, b.stderr, root, b.proxy, env.forbidReadRoots, env.readRoots, env.readPaths, env.sessionGuard, env.managedConfig, opts.FileOverlay, opts.TerminalRunner, env.sessionTemp, b.fileWriteReceipt)
 	bindFileViews(t.reg, cfg.Tools.ChangedFilesProtected())
-	addSystemOne(t.reg, cfg.Tools.Enabled, cfg, b.balanceClient)
+	addSystemOne(t.reg, cfg.Tools.Enabled, cfg, b.keyedClient)
 	addAdvisor(t.reg, cfg, b.proxy, b.sink)
 	b.addBestOf()
 	if cfg.Agent.CodeMode {
@@ -510,7 +515,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		Memory:                         b.prompt.memory,
 		// Read at Close time: freeze chains the extension runtime set onto it.
 		Cleanup:               func() { b.cleanup() },
-		Balance:               opts.BalanceStore.Cache(b.balanceClient, entry.BalanceURL, entry.APIKey()),
+		Balance:               opts.BalanceStore.Cache(b.keyedClient, entry.BalanceURL, entry.APIKey()),
 		Feedback:              control.FeedbackOptions{Service: feedbackService(b.roots.Home(), b.proxy), ProviderKind: feedbackProviderKind(entry), Surface: opts.FeedbackSurface},
 		Jobs:                  b.session.jobs,
 		TaskStore:             opts.TaskStore,

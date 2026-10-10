@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/safety/endpointclient"
 )
 
 // NetworkSettings is the proxy configuration as an editor needs it: the mode,
@@ -123,7 +124,7 @@ func (c *Controller) probeProviderAuth(ctx context.Context, cfg *config.Config, 
 		probe.DurationMs = time.Since(started).Milliseconds()
 		return probe
 	}
-	client, err := netclient.NewHTTPClient(spec, netclient.TransportOptions{DialTimeout: 8 * time.Second})
+	client, err := endpointclient.New(spec, netclient.TransportOptions{DialTimeout: 8 * time.Second})
 	if err != nil {
 		probe.Detail = err.Error()
 		return probe

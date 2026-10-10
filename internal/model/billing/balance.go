@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"reasonix/internal/safety/redirectguard"
 )
 
 // A wallet read fails in ways the reader must tell apart: a rejected credential
@@ -101,7 +103,7 @@ func positive(amount string) bool {
 
 // httpClient bounds the balance query so a slow endpoint can't hang the status
 // line; the per-call ctx still cancels it on shutdown.
-var httpClient = &http.Client{Timeout: 12 * time.Second}
+var httpClient = &http.Client{Timeout: 12 * time.Second, CheckRedirect: redirectguard.StayOnOrigin()}
 
 // Fetch queries url (a DeepSeek-style balance endpoint) with a Bearer apiKey and
 // returns the normalized balance. An empty url yields (nil, nil) — "not

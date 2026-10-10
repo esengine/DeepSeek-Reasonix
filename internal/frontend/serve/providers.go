@@ -15,6 +15,8 @@ import (
 	"reasonix/internal/base/netclient"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/safety/endpointclient"
+	"reasonix/internal/safety/redirectguard"
 )
 
 // hostGrants are the surfaces a host opens on behalf of its one local client.
@@ -488,8 +490,8 @@ func probeClients() (proxied, direct *http.Client) {
 	if cfg, err := config.Load(); err == nil && cfg != nil {
 		spec = cfg.NetworkProxySpec()
 	}
-	proxied, _ = netclient.NewHTTPClient(spec, netclient.TransportOptions{})
-	direct, _ = netclient.NewHTTPClient(netclient.ProxySpec{Mode: netclient.ModeOff}, netclient.TransportOptions{})
+	proxied, _ = endpointclient.New(spec, netclient.TransportOptions{})
+	direct, _ = endpointclient.New(netclient.ProxySpec{Mode: netclient.ModeOff}, netclient.TransportOptions{})
 	return proxied, direct
 }
 
@@ -518,6 +520,7 @@ const (
 	codeProbeNoChatModels    = "provider.probe.no_chat_models"
 	codeProbeUpstreamError   = "provider.probe.upstream_error"
 	codeProbeTimeout         = "provider.probe.timeout"
+	codeProbeRedirectRefused = "provider.probe.redirect_refused"
 	codeProbeUnreachable     = "provider.probe.unreachable"
 	codeProbeNotCompatible   = "provider.probe.not_compatible"
 	codeProbeFailed          = "provider.probe.failed"
@@ -545,6 +548,8 @@ func probeReasonRefusal(reason catalog.ProbeReason) (status int, code string) {
 		return http.StatusGatewayTimeout, codeProbeTimeout
 	case catalog.ProbeUnreachable:
 		return http.StatusBadGateway, codeProbeUnreachable
+	case catalog.ProbeRedirectRefused:
+		return http.StatusBadGateway, codeProbeRedirectRefused
 	default:
 		return http.StatusBadGateway, codeProbeNotCompatible
 	}
@@ -563,6 +568,11 @@ func writeProbeFailure(w http.ResponseWriter, err error, apiKey string) {
 	message := "probe: " + string(probe.Reason)
 	if detail := endpointDetail(probe.Body, func() string { return apiKey }); detail != "" {
 		message += ": " + detail
+	}
+	var left *redirectguard.OriginLeft
+	if errors.As(err, &left) {
+		message = left.Error()
+		probe.Params = map[string]any{"from": left.From, "target": left.To}
 	}
 	refuse(w, status, code, message, probe.Params)
 }

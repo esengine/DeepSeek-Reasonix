@@ -242,6 +242,8 @@ export const EN_KERNEL: Record<string, string> = {
     "The provider errored (HTTP {status}) — nothing you typed is wrong; try again shortly",
   "该地址在限定时间内没有响应。请检查网络或代理，或稍后重试":
     "That address did not answer in time. Check the network or proxy, or try again shortly",
+  "该地址跳转到了 {target}，已拒绝，以免 key 被发到别处。如果信任 {target}，请把服务地址改成 {target}":
+    "That address redirected to {target} and was refused so the key is not sent elsewhere. If you trust {target}, change the address to {target}",
   "检查失败，没有具体原因": "The check failed and gave no reason",
   "无法连接该地址。请检查网络是否通畅，以及地址是否有误":
     "Cannot reach that address. Check the network, or whether the address has a typo",

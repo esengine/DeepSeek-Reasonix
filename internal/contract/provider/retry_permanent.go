@@ -9,9 +9,10 @@ import (
 
 // permanentTransportErr reports a transport failure no backoff can fix: the
 // endpoint refused the connection, its name does not resolve, or its
-// certificate does not verify. These fail on the first attempt.
+// certificate does not verify, or the error itself says it is permanent. These fail on the first attempt.
 func permanentTransportErr(err error) bool {
-	if connectionRefused(err) {
+	var carried interface{ Permanent() bool }
+	if connectionRefused(err) || (errors.As(err, &carried) && carried.Permanent()) {
 		return true
 	}
 	var dns *net.DNSError
