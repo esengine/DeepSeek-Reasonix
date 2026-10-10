@@ -15,6 +15,8 @@ import (
 type modelEffortView struct {
 	SupportedEfforts []string `json:"supportedEfforts"`
 	DefaultEffort    string   `json:"defaultEffort,omitempty"`
+	// Official marks an inherited ladder that is the vendor's documented contract.
+	Official bool `json:"official,omitempty"`
 }
 
 // modelEffortsOf is what each chat model declares for itself, as stored.
@@ -42,7 +44,7 @@ func inheritedEffortsOf(p *config.ProviderEntry) map[string]modelEffortView {
 		if def == "auto" {
 			def = ""
 		}
-		out[model] = modelEffortView{SupportedEfforts: levels, DefaultEffort: def}
+		out[model] = modelEffortView{SupportedEfforts: levels, DefaultEffort: def, Official: p.InheritedEffortOfficial(model)}
 	}
 	return orNilMap(out)
 }
