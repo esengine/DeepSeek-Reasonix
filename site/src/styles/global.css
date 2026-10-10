@@ -187,11 +187,11 @@ body.mobile-nav-open { overflow: hidden; }
   .mobile-nav, .mobile-nav-panel { transition: none; }
 }
 
-@media (max-width: 1260px) {
+@media (max-width: 1380px) {
   .nav-link--secondary { display: none; }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1180px) {
   .nav-links { display: none; }
   .nav-github { margin-left: auto; padding-inline: 8px; }
   .nav-github-label { display: none; }
@@ -1260,7 +1260,6 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
 
 @media (max-width: 640px) {
   .nav-inner { padding: 0 16px; gap: 10px; }
-  .nav-sign-in { display: none; }
   .nav .brand img { width: 64px; }
   .nav .brand span { display: none; }
   .theme-switch button { padding: 6px 9px; }
@@ -1290,6 +1289,7 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
 
 
 @media (max-width: 700px) {
+  .nav-sign-in { display: none; }
   .hero-install {
     grid-template-columns: 1fr;
     border-radius: var(--radius-sm);
@@ -1312,6 +1312,10 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
   }
 }
 
+@media (max-width: 440px) {
+  .nav-install { display: none; }
+}
+
 @media (max-width: 400px) {
   .nav .brand img { width: 28px; height: 28px; border-radius: 8px; }
 }
@@ -1323,7 +1327,6 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
   .nav .btn { padding: 9px 14px; }
   .hero-install .install { gap: 6px; padding-inline: 6px; }
   .hero-install .install button { padding-inline: 10px; }
-  .nav-install { display: none; }
   .nav-menu-toggle { width: 36px; height: 36px; }
 }
 
