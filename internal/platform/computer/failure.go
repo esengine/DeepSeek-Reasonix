@@ -3,6 +3,7 @@ package computer
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Code is the identity of a computer-use failure, shared with the helper that
@@ -15,6 +16,7 @@ const (
 	CodePermissionMissing Code = "computer.permission_missing"
 	CodeNoApp             Code = "computer.no_app"
 	CodeNoWindow          Code = "computer.no_window"
+	CodeAmbiguousWindow   Code = "computer.ambiguous_window_target"
 	CodeAppRefused        Code = "computer.app_refused"
 	CodeUnknownRef        Code = "computer.unknown_ref"
 	CodeStaleRef          Code = "computer.stale_ref"
@@ -36,17 +38,30 @@ type Failure struct {
 	Detail string
 	// BlockedBy is the modal that would have taken the input instead.
 	BlockedBy *Modal
+	// Candidates are the windows an ambiguous target could have meant.
+	Candidates []Window
 }
 
 func (f *Failure) Error() string {
-	s := string(f.Code)
+	var b strings.Builder
+	b.WriteString(string(f.Code))
 	if f.Detail != "" {
-		s += ": " + f.Detail
+		b.WriteString(": " + f.Detail)
 	}
 	if f.BlockedBy != nil {
-		s += "; held by " + f.BlockedBy.String()
+		b.WriteString("; held by " + f.BlockedBy.String())
 	}
-	return s
+	for i, w := range f.Candidates {
+		if i == maxCandidates {
+			fmt.Fprintf(&b, "; and %d more", len(f.Candidates)-i)
+			break
+		}
+		fmt.Fprintf(&b, "; window %d %s", w.ID, ShownName(w.Title))
+		if i == 0 {
+			b.WriteString(" (front)")
+		}
+	}
+	return b.String()
 }
 
 // Is matches another Failure by code alone.

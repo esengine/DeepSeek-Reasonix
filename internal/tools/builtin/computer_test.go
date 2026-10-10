@@ -30,7 +30,7 @@ func TestApplicationListMarksTheOnesNeverOperated(t *testing.T) {
 		{Bundle: "com.apple.Notes", Name: "Notes", Active: true, Windows: []computer.Window{{Title: "", Bounds: computer.Rect{Width: 800, Height: 600}}}},
 		{Bundle: "com.apple.Terminal", Name: "Terminal"},
 	})
-	if !strings.Contains(out, `* com.apple.Notes — "Notes"`+"\n") || !strings.Contains(out, `window "(untitled)" 800×600`) {
+	if !strings.Contains(out, `* com.apple.Notes — "Notes"`+"\n") || !strings.Contains(out, `window 0 "(untitled)" 800×600`) {
 		t.Fatalf("listing = %q", out)
 	}
 	if !strings.Contains(out, `com.apple.Terminal — "Terminal" (never operated: a terminal)`) {

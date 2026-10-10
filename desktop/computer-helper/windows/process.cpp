@@ -153,6 +153,30 @@ bool appListed(HWND top) {
     return GetWindow(top, GW_OWNER) == nullptr && (ex & WS_EX_NOACTIVATE) == 0;
 }
 
+static HWND aimed = nullptr;
+
+// ownsForeground is whether the foreground is the aimed window or a dialog it
+// owns; with no window aimed any foreground of the process will do.
+static bool ownsForeground(HWND window) {
+    if (!window) return true;
+    for (HWND w = GetForegroundWindow(); w; w = GetWindow(w, GW_OWNER)) {
+        if (w == window) return true;
+    }
+    return false;
+}
+
+void targetWindow(DWORD pid, HWND window) {
+    aimed = nullptr;
+    if (!window) return;
+    for (HWND w : appWindows(pid, true)) {
+        if (w == window) {
+            aimed = window;
+            return;
+        }
+    }
+    throw Failure{"computer.no_window", "that window is not one of the application's windows on screen"};
+}
+
 // appWindows lists a process's top-level windows front to back, dialogs it
 // owns included, with the one in front of the person first.
 std::vector<HWND> appWindows(DWORD pid, bool includeMinimized) {
@@ -168,7 +192,7 @@ std::vector<HWND> appWindows(DWORD pid, bool includeMinimized) {
         if (r.right - r.left > 1 && r.bottom - r.top > 1) w->out.push_back(hwnd);
         return TRUE;
     }, reinterpret_cast<LPARAM>(&w));
-    HWND fg = GetForegroundWindow();
+    HWND fg = aimed ? aimed : GetForegroundWindow();
     for (size_t i = 1; i < w.out.size(); i++) {
         if (w.out[i] == fg) {
             w.out.erase(w.out.begin() + i);
@@ -223,7 +247,7 @@ HWND heldOwner(HWND window, DWORD pid) {
 // foreground is. Windows grants the foreground only to a process that received
 // the last input, so an input with no effect is injected first.
 void front(DWORD pid) {
-    if (isFront(pid)) return;
+    if (isFront(pid) && ownsForeground(aimed)) return;
     std::vector<HWND> wins = appWindows(pid, true);
     if (wins.empty()) throw Failure{"computer.no_window", "the application has no window to bring to the front"};
     HWND target = wins[0];
@@ -233,8 +257,8 @@ void front(DWORD pid) {
     nudge.mi.dwFlags = MOUSEEVENTF_MOVE;
     SendInput(1, &nudge, sizeof nudge);
     SetForegroundWindow(target);
-    for (int i = 0; i < 25 && !isFront(pid); i++) std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    if (!isFront(pid)) {
+    for (int i = 0; i < 25 && !(isFront(pid) && ownsForeground(aimed)); i++) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (!(isFront(pid) && ownsForeground(aimed))) {
         DWORD fgThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
         DWORD me = GetCurrentThreadId();
         if (fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE)) {
@@ -242,9 +266,9 @@ void front(DWORD pid) {
             SetForegroundWindow(target);
             AttachThreadInput(me, fgThread, FALSE);
         }
-        for (int i = 0; i < 25 && !isFront(pid); i++) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        for (int i = 0; i < 25 && !(isFront(pid) && ownsForeground(aimed)); i++) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    if (!isFront(pid)) {
+    if (!(isFront(pid) && ownsForeground(aimed))) {
         throw Failure{"computer.needs_front",
                       "Windows kept this application from coming to the front; ask the person to click it once, then try again"};
     }

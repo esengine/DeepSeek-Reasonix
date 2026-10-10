@@ -27,6 +27,7 @@ Json listApps() {
             windows.push(Json::object()
                              .set("id", static_cast<long long>(reinterpret_cast<uintptr_t>(hwnd)))
                              .set("title", narrow(std::wstring(title, n > 0 ? n : 0)))
+                             .set("owned", GetWindow(hwnd, GW_OWNER) != nullptr && !(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW))
                              .set("bounds", rectJson(windowBounds(hwnd))));
         }
         apps.push(Json::object()

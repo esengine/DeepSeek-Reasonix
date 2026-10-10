@@ -42,6 +42,8 @@ func runFakeHelper(in io.Reader, out io.Writer) {
 	var lastCall map[string]any
 	released := 0
 	asked := 0
+	delivered := 0
+	var lastSent map[string]any
 	sc := bufio.NewScanner(in)
 	for sc.Scan() {
 		var req struct {
@@ -60,13 +62,25 @@ func runFakeHelper(in io.Reader, out io.Writer) {
 			delete(reply, "result")
 			reply["error"] = map[string]any{"code": code, "message": message}
 		}
+		if m := req.Method; m != "apps" && m != "request_permission" && !strings.HasPrefix(m, "_") {
+			delivered++
+			lastSent = map[string]any{"method": m, "params": req.Params}
+		}
 		switch req.Method {
+		case "_delivered":
+			reply["result"] = map[string]any{"count": delivered}
+		case "_last_sent":
+			reply["result"] = lastSent
 		case "apps":
 			reply["result"] = map[string]any{"apps": []any{
 				map[string]any{"pid": 7, "bundle": "com.example.Notes", "name": "Notes", "windows": []any{}},
 				map[string]any{"pid": 8, "bundle": "com.example.Locked", "name": "Locked", "windows": []any{}},
 				map[string]any{"pid": 9, "bundle": "Vendor.Shell_abc123", "exe": "PWSH.exe", "name": "Shell", "windows": []any{}},
 				map[string]any{"pid": 10, "bundle": "com.example.Held", "name": "Held", "windows": []any{}},
+				map[string]any{"pid": 11, "bundle": "com.example.Two", "name": "Two", "windows": []any{fakeWindow(101, "Main", false), fakeWindow(102, "Other", false)}},
+				map[string]any{"pid": 12, "bundle": "com.example.Dialog", "name": "Dialog", "windows": []any{fakeWindow(202, "Save as", true), fakeWindow(201, "Main", false)}},
+				map[string]any{"pid": 14, "bundle": "com.example.Drift", "name": "Drift", "windows": []any{fakeWindow(401, "A", false), fakeWindow(402, "B", false)}},
+				map[string]any{"pid": 13, "bundle": "com.example.Flat", "name": "Flat", "windows": []any{map[string]any{"id": 301, "title": "A"}, map[string]any{"id": 302, "title": "A"}}},
 			}}
 		case "snapshot":
 			if req.Params["pid"] == float64(8) {
@@ -85,10 +99,17 @@ func runFakeHelper(in io.Reader, out io.Writer) {
 		case "request_permission":
 			asked++
 		case "screenshot":
-			reply["result"] = map[string]any{
+			shot := map[string]any{
 				"data": base64.StdEncoding.EncodeToString(fakeScreenshot()), "mime": "image/png",
 				"bounds": map[string]any{"x": 100, "y": 50, "width": 2000, "height": 1000},
 			}
+			if w, ok := req.Params["window"]; ok {
+				shot["window"] = w
+			}
+			if req.Params["pid"] == float64(14) {
+				shot["window"] = 401
+			}
+			reply["result"] = shot
 		case "click":
 			lastClick = req.Params
 			reply["result"] = map[string]any{"role": "button"}
@@ -154,7 +175,7 @@ func fakeSession(t *testing.T) *Session {
 func TestARefusedApplicationIsRefusedBeforeTheHelperIsAsked(t *testing.T) {
 	s := NewSession(NewHelper("/nonexistent/helper"))
 	for _, bundle := range []string{"com.apple.Terminal", " io.reasonix.studio ", "com.apple.systempreferences"} {
-		if _, err := s.Act(context.Background(), bundle, []Step{{Action: "key", Key: "Enter"}}); CodeOf(err) != CodeAppRefused {
+		if _, err := s.Act(context.Background(), bundle, 0, []Step{{Action: "key", Key: "Enter"}}); CodeOf(err) != CodeAppRefused {
 			t.Errorf("%q = %v, want %s", bundle, err, CodeAppRefused)
 		}
 	}
@@ -177,10 +198,10 @@ func TestAClickAtAPointIsReadInTheLatestScreenshotsPixels(t *testing.T) {
 	ctx := context.Background()
 	x, y := 100.0, 40.0
 	click := []Step{{Action: "click", X: &x, Y: &y}}
-	if _, err := s.Act(ctx, "com.example.Notes", click); CodeOf(err) != CodeNeedsScreenshot {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, click); CodeOf(err) != CodeNeedsScreenshot {
 		t.Fatalf("a click before any screenshot = %v, want %s", err, CodeNeedsScreenshot)
 	}
-	shot, app, err := s.Screenshot(ctx, "com.example.Notes")
+	shot, app, err := s.Screenshot(ctx, "com.example.Notes", 0)
 	if err != nil || app.PID != 7 {
 		t.Fatalf("Screenshot = %v for %+v", err, app)
 	}
@@ -192,7 +213,7 @@ func TestAClickAtAPointIsReadInTheLatestScreenshotsPixels(t *testing.T) {
 	if _, _, err := visionimage.Fit(raw, "image/png"); err != nil || fitted.Width >= 4000 {
 		t.Fatalf("the screenshot was not fitted for a vision model: %dpx, %v", fitted.Width, err)
 	}
-	res, err := s.Act(ctx, "com.example.Notes", click)
+	res, err := s.Act(ctx, "com.example.Notes", 0, click)
 	if err != nil || res.Steps[0].Note != "click the button at (100,40)" {
 		t.Fatalf("click = %+v, %v", res, err)
 	}
@@ -224,18 +245,18 @@ func TestAMissingPermissionIsRequestedOnceAndSaysWhatThePersonDoes(t *testing.T)
 func TestStepsStopAtTheFirstFailureAndWhenThePersonPressesEscape(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
-	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "key", Key: "Enter"}, {Action: "click", Ref: "a9"}, {Action: "key", Key: "Enter"}})
+	res, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "key", Key: "Enter"}, {Action: "click", Ref: "a9"}, {Action: "key", Key: "Enter"}})
 	if CodeOf(err) != CodeStaleRef || res.Done != 1 || res.FailedAt != 1 {
 		t.Fatalf("a stale ref = %+v, %v", res, err)
 	}
-	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "key", Key: "Escape"}, {Action: "key", Key: "Enter"}})
+	res, err = s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "key", Key: "Escape"}, {Action: "key", Key: "Enter"}})
 	if CodeOf(err) != CodeStopped || res.Done != 1 || res.FailedAt != 1 {
 		t.Fatalf("Escape = %+v, %v", res, err)
 	}
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "drag"}}); CodeOf(err) != CodeBadStep {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "drag"}}); CodeOf(err) != CodeBadStep {
 		t.Fatalf("an unknown action = %v, want %s", err, CodeBadStep)
 	}
-	if _, err := s.Act(ctx, "com.example.Missing", nil); CodeOf(err) != CodeNoApp {
+	if _, err := s.Act(ctx, "com.example.Missing", 0, nil); CodeOf(err) != CodeNoApp {
 		t.Fatalf("an application that is not running = %v, want %s", err, CodeNoApp)
 	}
 }
@@ -252,7 +273,7 @@ func TestAHelperThatExitsFailsWhatWasPendingAndStartsAgain(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		apps, err := s.Apps(ctx)
-		if err == nil && len(apps) == 4 {
+		if err == nil && len(apps) == 8 {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -266,7 +287,7 @@ func TestAHelperThatExitsFailsWhatWasPendingAndStartsAgain(t *testing.T) {
 // was given covers, which is what every point in a step is read in.
 func fittedScale(t *testing.T, s *Session, ctx context.Context) float64 {
 	t.Helper()
-	shot, _, err := s.Screenshot(ctx, "com.example.Notes")
+	shot, _, err := s.Screenshot(ctx, "com.example.Notes", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +318,7 @@ func TestEveryPointerStepIsAimedInTheScreenshotsPixels(t *testing.T) {
 	x, y, toX, toY := 100.0, 40.0, 300.0, 120.0
 	wantX, wantY := 100+x*scale, 50+y*scale
 
-	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_move", X: &x, Y: &y}})
+	res, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_move", X: &x, Y: &y}})
 	if err != nil || res.Steps[0].Note != "move the pointer to (100,40)" {
 		t.Fatalf("pointer_move = %+v, %v", res, err)
 	}
@@ -306,7 +327,7 @@ func TestEveryPointerStepIsAimedInTheScreenshotsPixels(t *testing.T) {
 		t.Fatalf("the helper was sent %s %v, want pointer_move at (%v,%v)", method, params, wantX, wantY)
 	}
 
-	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_click", X: &x, Y: &y, Button: "right", Times: 2}})
+	res, err = s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_click", X: &x, Y: &y, Button: "right", Times: 2}})
 	if err != nil || res.Steps[0].Note != "right click at (100,40)" {
 		t.Fatalf("pointer_click = %+v, %v", res, err)
 	}
@@ -314,14 +335,14 @@ func TestEveryPointerStepIsAimedInTheScreenshotsPixels(t *testing.T) {
 		t.Fatalf("the helper was sent %s %v, want a right double click", method, params)
 	}
 	// A click that says neither button nor count is one left click.
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_click", X: &x, Y: &y}}); err != nil {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_click", X: &x, Y: &y}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, params = lastCall(t, s); params["button"] != "left" || params["clicks"] != 1.0 {
 		t.Fatalf("a bare pointer_click sent %v, want one left click", params)
 	}
 
-	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_drag", X: &x, Y: &y, ToX: &toX, ToY: &toY}})
+	res, err = s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_drag", X: &x, Y: &y, ToX: &toX, ToY: &toY}})
 	if err != nil || res.Steps[0].Note != "drag the pointer from (100,40) to (300,120)" {
 		t.Fatalf("pointer_drag = %+v, %v", res, err)
 	}
@@ -342,12 +363,12 @@ func TestAPointerStepThatCannotSayWhereIsRefused(t *testing.T) {
 		{Action: "pointer_drag", X: &x, Y: &x},
 		{Action: "pointer_drag", X: &x, Y: &x, ToX: &x},
 	} {
-		if _, err := s.Act(ctx, "com.example.Notes", []Step{step}); CodeOf(err) != CodeNeedsScreenshot && CodeOf(err) != CodeBadStep {
+		if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{step}); CodeOf(err) != CodeNeedsScreenshot && CodeOf(err) != CodeBadStep {
 			t.Fatalf("%+v = %v", step, err)
 		}
 	}
 	_ = fittedScale(t, s, ctx)
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_drag", X: &x, Y: &x}}); CodeOf(err) != CodeBadStep {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_drag", X: &x, Y: &x}}); CodeOf(err) != CodeBadStep {
 		t.Fatalf("a drag with no destination = %v, want %s", err, CodeBadStep)
 	}
 }
@@ -365,20 +386,20 @@ func TestThePointerIsHandedBackWhicheverWayTheStepsEnd(t *testing.T) {
 		}
 		return r.Count
 	}
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "key", Key: "Enter"}}); err != nil {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "key", Key: "Enter"}}); err != nil {
 		t.Fatal(err)
 	}
 	if released() != 0 {
 		t.Fatal("steps that never took the pointer gave one back")
 	}
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_move", X: &x, Y: &y}}); err != nil {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_move", X: &x, Y: &y}}); err != nil {
 		t.Fatal(err)
 	}
 	if released() != 1 {
 		t.Fatal("the pointer was not given back after it was taken")
 	}
 	// A run that fails part way took it just the same.
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_move", X: &x, Y: &y}, {Action: "click", Ref: "a9"}}); CodeOf(err) != CodeStaleRef {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_move", X: &x, Y: &y}, {Action: "click", Ref: "a9"}}); CodeOf(err) != CodeStaleRef {
 		t.Fatalf("want %s, got %v", CodeStaleRef, err)
 	}
 	if released() != 2 {
@@ -393,12 +414,12 @@ func TestThePointerIsHandedBackWhicheverWayTheStepsEnd(t *testing.T) {
 func TestThePointerSaysWhereItIsInTheFrameTheModelHas(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
-	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_position"}})
+	res, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_position"}})
 	if err != nil || !strings.Contains(res.Steps[0].Note, "take a screenshot") {
 		t.Fatalf("pointer_position with no screenshot = %+v, %v", res, err)
 	}
 	scale := fittedScale(t, s, ctx)
-	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_position"}})
+	res, err = s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "pointer_position"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,10 +432,10 @@ func TestThePointerSaysWhereItIsInTheFrameTheModelHas(t *testing.T) {
 func TestTheMenuBelongsToAnElementAndScrollingSaysWhichItWas(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "right_click"}}); CodeOf(err) != CodeBadStep {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "right_click"}}); CodeOf(err) != CodeBadStep {
 		t.Fatalf("a right_click with no ref = %v, want %s", err, CodeBadStep)
 	}
-	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "right_click", Ref: "a4"}})
+	res, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "right_click", Ref: "a4"}})
 	if err != nil || res.Steps[0].Note != "open the menu of a4" {
 		t.Fatalf("right_click = %+v, %v", res, err)
 	}
@@ -423,7 +444,7 @@ func TestTheMenuBelongsToAnElementAndScrollingSaysWhichItWas(t *testing.T) {
 	}
 	// Bringing an element into view and turning the wheel are one step and two
 	// outcomes, and the helper says which one it did.
-	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "scroll", Ref: "a2"}, {Action: "scroll", Amount: -3}})
+	res, err = s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "scroll", Ref: "a2"}, {Action: "scroll", Amount: -3}})
 	if err != nil || res.Steps[0].Note != "bring a2 into view" || res.Steps[1].Note != "scroll -3 lines" {
 		t.Fatalf("scroll = %+v, %v", res, err)
 	}
@@ -432,27 +453,27 @@ func TestTheMenuBelongsToAnElementAndScrollingSaysWhichItWas(t *testing.T) {
 func TestHoldingAKeyAndRepeatingOneCarryTheirCount(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
-	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "hold_key", Key: "shift+a", Seconds: 1.5}})
+	res, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "hold_key", Key: "shift+a", Seconds: 1.5}})
 	if err != nil || res.Steps[0].Note != "hold shift+a for 1.5s" {
 		t.Fatalf("hold_key = %+v, %v", res, err)
 	}
 	if method, params := lastCall(t, s); method != "hold_key" || params["seconds"] != 1.5 {
 		t.Fatalf("the helper was sent %s %v, want the seconds it holds for", method, params)
 	}
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "key", Key: "Tab", Times: 4}}); err != nil {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "key", Key: "Tab", Times: 4}}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestWaitingIsBoundedAndTheContextEndsIt(t *testing.T) {
 	s := fakeSession(t)
-	res, err := s.Act(context.Background(), "com.example.Notes", []Step{{Action: "wait", Ms: 5}})
+	res, err := s.Act(context.Background(), "com.example.Notes", 0, []Step{{Action: "wait", Ms: 5}})
 	if err != nil || res.Steps[0].Note != "wait 5ms" {
 		t.Fatalf("wait = %+v, %v", res, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "wait", Ms: 60000}}); err == nil {
+	if _, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "wait", Ms: 60000}}); err == nil {
 		t.Fatal("a wait outlived the context that was cancelled under it")
 	}
 	// The same cancellation reaches a call already sent to the helper.
@@ -466,11 +487,15 @@ func TestWaitingIsBoundedAndTheContextEndsIt(t *testing.T) {
 func TestPastePutsTheWholeTextInAtOnce(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
-	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "paste", Text: "从剪贴板 pasted"}})
+	res, err := s.Act(ctx, "com.example.Notes", 0, []Step{{Action: "paste", Text: "从剪贴板 pasted"}})
 	if err != nil || res.Steps[0].Note != "paste 11 characters" {
 		t.Fatalf("paste = %+v, %v", res, err)
 	}
 	if method, params := lastCall(t, s); method != "paste" || params["text"] != "从剪贴板 pasted" {
 		t.Fatalf("the helper was sent %s %v, want the text to paste", method, params)
 	}
+}
+
+func fakeWindow(id int, title string, owned bool) map[string]any {
+	return map[string]any{"id": id, "title": title, "owned": owned, "bounds": map[string]any{"x": 0, "y": 0, "width": 800, "height": 600}}
 }

@@ -210,6 +210,10 @@ func main() {
 	switch mode {
 	case "modal":
 		postMessage.Call(top, wmApp, 0, 0)
+	case "second":
+		other := create("ReasonixProbe", "Second Window", 0x00CF0000, 620, 120, 300, 200, 0, 0)
+		showWindow.Call(other, 4)
+		logf("second open")
 	case "form":
 		form := create("ProbeForm", "Probe form", 0x10CF0000, 160, 160, 320, 140, top, 0) // owned, WS_VISIBLE
 		create("STATIC", "Form field", child|visible, 10, 12, 80, 22, form, 0)

@@ -75,7 +75,7 @@ func TestLiveOperatesAnApplicationWithoutItsPointer(t *testing.T) {
 	field := lineRef(t, snap.Lines, `textField "Probe field"`)
 	button := lineRef(t, snap.Lines, `button "Probe button"`)
 
-	res, err := s.Act(ctx, targetBundle, []Step{
+	res, err := s.Act(ctx, targetBundle, 0, []Step{
 		{Action: "set_value", Ref: field, Text: "from-ax"},
 		{Action: "click", Ref: button},
 		{Action: "focus", Ref: field},
@@ -87,7 +87,7 @@ func TestLiveOperatesAnApplicationWithoutItsPointer(t *testing.T) {
 	waitLog(t, log, "button pressed")
 	waitLog(t, log, "from-ax 李雷")
 
-	shot, app, err := s.Screenshot(ctx, targetBundle)
+	shot, app, err := s.Screenshot(ctx, targetBundle, 0)
 	if err != nil {
 		t.Fatalf("Screenshot: %v", err)
 	}
@@ -99,11 +99,11 @@ func TestLiveOperatesAnApplicationWithoutItsPointer(t *testing.T) {
 	geometry := s.shots[targetBundle]
 	s.mu.Unlock()
 	x, y := 345/geometry.scale, (geometry.bounds.Height-162)/geometry.scale
-	if _, err := s.Act(ctx, targetBundle, []Step{{Action: "click", X: &x, Y: &y}}); err != nil {
+	if _, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "click", X: &x, Y: &y}}); err != nil {
 		t.Fatalf("click at a screenshot point: %v", err)
 	}
 	cx, cy := 100/geometry.scale, (geometry.bounds.Height-70)/geometry.scale
-	if _, err := s.Act(ctx, targetBundle, []Step{{Action: "click", X: &cx, Y: &cy}}); CodeOf(err) != CodeNoAction {
+	if _, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "click", X: &cx, Y: &cy}}); CodeOf(err) != CodeNoAction {
 		t.Fatalf("clicking a view with no accessibility action = %v, want %s", err, CodeNoAction)
 	}
 	if _, err := s.Snapshot(ctx, "com.apple.Terminal"); CodeOf(err) != CodeAppRefused {
@@ -125,7 +125,7 @@ func TestLiveContextMenuScrollAndWait(t *testing.T) {
 	}
 	t.Logf("snapshot:\n%s", strings.Join(snap.Lines, "\n"))
 	menu := lineRef(t, snap.Lines, `"Probe menu area"`)
-	res, err := s.Act(ctx, targetBundle, []Step{
+	res, err := s.Act(ctx, targetBundle, 0, []Step{
 		{Action: "right_click", Ref: menu},
 		{Action: "wait", Ms: 400},
 	})
@@ -151,7 +151,7 @@ func TestLiveContextMenuScrollAndWait(t *testing.T) {
 	}
 	before := position()
 	deep := lineRef(t, snap.Lines, `"Deep row"`)
-	res, err = s.Act(ctx, targetBundle, []Step{{Action: "scroll", Ref: deep}})
+	res, err = s.Act(ctx, targetBundle, 0, []Step{{Action: "scroll", Ref: deep}})
 	if err != nil || len(res.Steps) == 0 || !strings.Contains(res.Steps[0].Note, "into view") {
 		t.Fatalf("scroll to a ref: %v %v", err, res.Steps)
 	}
@@ -159,10 +159,10 @@ func TestLiveContextMenuScrollAndWait(t *testing.T) {
 		t.Fatalf("the scroll area did not move: %q", after)
 	}
 
-	if _, err := s.Act(ctx, targetBundle, []Step{{Action: "scroll", Amount: -3}}); err != nil {
+	if _, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "scroll", Amount: -3}}); err != nil {
 		t.Fatalf("scroll by lines: %v", err)
 	}
-	if _, err := s.Act(ctx, targetBundle, []Step{{Action: "right_click"}}); CodeOf(err) != CodeBadStep {
+	if _, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "right_click"}}); CodeOf(err) != CodeBadStep {
 		t.Fatalf("a right_click with no ref = %v, want %s", err, CodeBadStep)
 	}
 }
@@ -191,22 +191,22 @@ func TestLivePasteLeavesTheClipboardAsItFoundIt(t *testing.T) {
 	paste := []Step{{Action: "focus", Ref: field}, {Action: "paste", Text: pasted}}
 	// Behind, the application never handles the keystroke, and this says so
 	// rather than reporting a paste that put nothing anywhere.
-	if _, err := s.Act(ctx, targetBundle, paste); CodeOf(err) != CodeNeedsFront {
+	if _, err := s.Act(ctx, targetBundle, 0, paste); CodeOf(err) != CodeNeedsFront {
 		t.Fatalf("pasting into an application that is behind = %v, want %s", err, CodeNeedsFront)
 	}
 
 	// Bringing it forward is a pointer step, which is answered for on its own.
-	if _, _, err := s.Screenshot(ctx, targetBundle); err != nil {
+	if _, _, err := s.Screenshot(ctx, targetBundle, 0); err != nil {
 		t.Fatalf("Screenshot: %v", err)
 	}
 	s.mu.Lock()
 	geometry := s.shots[targetBundle]
 	s.mu.Unlock()
 	x, y := 345/geometry.scale, (geometry.bounds.Height-162)/geometry.scale
-	if _, err := s.Act(ctx, targetBundle, []Step{{Action: "pointer_click", X: &x, Y: &y}}); err != nil {
+	if _, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "pointer_click", X: &x, Y: &y}}); err != nil {
 		t.Fatalf("bring it forward: %v", err)
 	}
-	if _, err := s.Act(ctx, targetBundle, paste); err != nil {
+	if _, err := s.Act(ctx, targetBundle, 0, paste); err != nil {
 		t.Fatalf("paste: %v", err)
 	}
 	waitLog(t, log, "text "+pasted)
@@ -237,7 +237,7 @@ func TestLiveThePointerReachesWhatAccessibilityCannot(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	shot, app, err := s.Screenshot(ctx, targetBundle)
+	shot, app, err := s.Screenshot(ctx, targetBundle, 0)
 	if err != nil {
 		t.Fatalf("Screenshot: %v", err)
 	}
@@ -251,22 +251,22 @@ func TestLiveThePointerReachesWhatAccessibilityCannot(t *testing.T) {
 	// the screenshot the model was shown.
 	x, y := 100/geometry.scale, (geometry.bounds.Height-70)/geometry.scale
 
-	if _, err := s.Act(ctx, targetBundle, []Step{{Action: "click", X: &x, Y: &y}}); CodeOf(err) != CodeNoAction {
+	if _, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "click", X: &x, Y: &y}}); CodeOf(err) != CodeNoAction {
 		t.Fatalf("an accessibility click on a drawn view = %v, want %s", err, CodeNoAction)
 	}
 
 	// Where the person's pointer is, in the pixels of the screenshot the model
 	// was shown, before and after the agent borrows it.
-	home, err := s.Act(ctx, targetBundle, []Step{{Action: "pointer_position"}})
+	home, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "pointer_position"}})
 	if err != nil {
 		t.Fatalf("pointer_position: %v", err)
 	}
-	res, err := s.Act(ctx, targetBundle, []Step{{Action: "pointer_click", X: &x, Y: &y}})
+	res, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "pointer_click", X: &x, Y: &y}})
 	if err != nil {
 		t.Fatalf("pointer_click: %v (%v)", err, res.Steps)
 	}
 	waitLog(t, log, "mouseDown")
-	back, err := s.Act(ctx, targetBundle, []Step{{Action: "pointer_position"}})
+	back, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "pointer_position"}})
 	if err != nil {
 		t.Fatalf("pointer_position: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestLiveThePointerReachesWhatAccessibilityCannot(t *testing.T) {
 	}
 
 	toX, toY := x+40, y-20
-	if _, err := s.Act(ctx, targetBundle, []Step{{Action: "pointer_drag", X: &x, Y: &y, ToX: &toX, ToY: &toY}}); err != nil {
+	if _, err := s.Act(ctx, targetBundle, 0, []Step{{Action: "pointer_drag", X: &x, Y: &y, ToX: &toX, ToY: &toY}}); err != nil {
 		t.Fatalf("pointer_drag: %v", err)
 	}
 	waitLog(t, log, "mouseDragged")

@@ -109,6 +109,13 @@ static Json handle(const std::string& method, const Json& params) {
     if (!perApp.count(method)) throw Failure{"computer.bad_request", "unknown method " + method};
     DWORD pid = pidParam(params);
     requireOperable(pid);
+    struct Aim {
+        explicit Aim(DWORD pid, const Json& params) {
+            const Json* w = params.get("window");
+            if (w && w->isNumber() && w->number() > 0 && w->number() <= 9007199254740992.0) targetWindow(pid, reinterpret_cast<HWND>(static_cast<uintptr_t>(w->number())));
+        }
+        ~Aim() { targetWindow(0, nullptr); }
+    } aim(pid, params);
     if (method == "snapshot") return snapshot(pid);
     if (method == "screenshot") return capture(pid);
     if (method == "press") return press(pid, stringParam(params, "ref"));

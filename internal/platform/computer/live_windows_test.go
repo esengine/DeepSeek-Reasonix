@@ -93,7 +93,7 @@ func TestLiveWindowsOperatesAnApplication(t *testing.T) {
 	field := lineRef(t, snap.Lines, `edit "Probe field"`)
 	button := lineRef(t, snap.Lines, `button "Probe button"`)
 
-	res, err := s.Act(ctx, windowsTarget, []Step{
+	res, err := s.Act(ctx, windowsTarget, 0, []Step{
 		{Action: "set_value", Ref: field, Text: "from-ax"},
 		{Action: "click", Ref: button},
 		{Action: "focus", Ref: field},
@@ -112,7 +112,7 @@ func TestLiveWindowsOperatesAnApplication(t *testing.T) {
 	waitLog(t, p.log, "button pressed 1")
 	waitLog(t, p.log, "text from-ax 李雷3\ntext \n")
 
-	shot, app, err := s.Screenshot(ctx, windowsTarget)
+	shot, app, err := s.Screenshot(ctx, windowsTarget, 0)
 	if err != nil {
 		t.Fatalf("Screenshot: %v", err)
 	}
@@ -120,18 +120,18 @@ func TestLiveWindowsOperatesAnApplication(t *testing.T) {
 		t.Fatalf("screenshot = %.40q for %+v", shot, app)
 	}
 	x, y := inShot(s, p.button)
-	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "click", X: x, Y: y}}); err != nil {
+	if _, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "click", X: x, Y: y}}); err != nil {
 		t.Fatalf("click at a screenshot point: %v", err)
 	}
 	waitLog(t, p.log, "button pressed 2")
 	cx, cy := inShot(s, p.canvas)
-	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "click", X: cx, Y: cy}}); CodeOf(err) != CodeNoAction {
+	if _, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "click", X: cx, Y: cy}}); CodeOf(err) != CodeNoAction {
 		t.Fatalf("clicking a window with no accessibility action = %v, want %s", err, CodeNoAction)
 	}
-	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "key", Key: "meta+s"}}); CodeOf(err) != CodeBadStep {
+	if _, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "key", Key: "meta+s"}}); CodeOf(err) != CodeBadStep {
 		t.Fatalf("the Windows key = %v, want %s", err, CodeBadStep)
 	}
-	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "scroll", Amount: -3}}); err != nil {
+	if _, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "scroll", Amount: -3}}); err != nil {
 		t.Fatalf("scroll by lines: %v", err)
 	}
 	for _, name := range []string{"cmd.exe", "PowerShell.exe"} {
@@ -168,7 +168,7 @@ func TestLiveWindowsPasteGivesTheClipboardBack(t *testing.T) {
 	}
 	field := lineRef(t, snap.Lines, `edit "Probe field"`)
 	pasted := "粘贴 without typing"
-	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "focus", Ref: field}, {Action: "paste", Text: pasted}}); err != nil {
+	if _, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "focus", Ref: field}, {Action: "paste", Text: pasted}}); err != nil {
 		t.Fatalf("paste: %v", err)
 	}
 	waitLog(t, p.log, "text "+pasted)
@@ -192,19 +192,19 @@ func TestLiveWindowsThePointerReachesWhatAccessibilityCannot(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	if _, _, err := s.Screenshot(ctx, windowsTarget); err != nil {
+	if _, _, err := s.Screenshot(ctx, windowsTarget, 0); err != nil {
 		t.Fatalf("Screenshot: %v", err)
 	}
 	x, y := inShot(s, p.canvas)
-	home, err := s.Act(ctx, windowsTarget, []Step{{Action: "pointer_position"}})
+	home, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "pointer_position"}})
 	if err != nil {
 		t.Fatalf("pointer_position: %v", err)
 	}
-	if res, err := s.Act(ctx, windowsTarget, []Step{{Action: "pointer_click", X: x, Y: y}}); err != nil {
+	if res, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "pointer_click", X: x, Y: y}}); err != nil {
 		t.Fatalf("pointer_click: %v (%v)", err, res.Steps)
 	}
 	waitLog(t, p.log, "mouseDown")
-	back, err := s.Act(ctx, windowsTarget, []Step{{Action: "pointer_position"}})
+	back, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "pointer_position"}})
 	if err != nil {
 		t.Fatalf("pointer_position: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestLiveWindowsThePointerReachesWhatAccessibilityCannot(t *testing.T) {
 		t.Fatalf("the pointer was left at %q, not where the person had it (%q)", back.Steps[0].Note, home.Steps[0].Note)
 	}
 	toX, toY := *x+40, *y-20
-	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "pointer_drag", X: x, Y: y, ToX: &toX, ToY: &toY}}); err != nil {
+	if _, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "pointer_drag", X: x, Y: y, ToX: &toX, ToY: &toY}}); err != nil {
 		t.Fatalf("pointer_drag: %v", err)
 	}
 	waitLog(t, p.log, "mouseDragged")
@@ -241,7 +241,7 @@ func heldSnapshot(t *testing.T, ctx context.Context, s *Session) Snapshot {
 func actor(t *testing.T, ctx context.Context, s *Session) func(...Step) Effect {
 	return func(steps ...Step) Effect {
 		t.Helper()
-		res, err := s.Act(ctx, windowsTarget, steps)
+		res, err := s.Act(ctx, windowsTarget, 0, steps)
 		if err != nil || len(res.Steps) == 0 {
 			t.Fatalf("Act = %+v, %v", res, err)
 		}
@@ -264,14 +264,14 @@ func TestLiveWindowsAModalHoldsTheInput(t *testing.T) {
 		t.Fatalf("modal = %+v", m)
 	}
 	button := lineRef(t, snap.Lines, `button "Probe button"`)
-	res, err := s.Act(ctx, windowsTarget, []Step{{Action: "type", Text: "hello"}})
+	res, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "type", Text: "hello"}})
 	if CodeOf(err) != CodeBlocked || res.Done != 0 {
 		t.Fatalf("typing while a message box holds the input = %+v, %v; want %s", res, err, CodeBlocked)
 	}
 	if f, _ := errors.AsType[*Failure](err); f.BlockedBy == nil || f.BlockedBy.Title != "Probe modal" {
 		t.Fatalf("the failure does not name the modal: %v", err)
 	}
-	if _, err := s.Act(ctx, windowsTarget, []Step{{Action: "click", Ref: button}}); CodeOf(err) != CodeBlocked {
+	if _, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "click", Ref: button}}); CodeOf(err) != CodeBlocked {
 		t.Fatalf("pressing a button behind the modal = %v, want %s", err, CodeBlocked)
 	}
 	if e := act(Step{Action: "key", Key: "escape"}); e.Class != EffectUnverifiable || e.BlockedBy == nil {
@@ -317,4 +317,77 @@ func TestLiveWindowsTypingIntoAModalsFieldIsReadBack(t *testing.T) {
 		t.Fatalf("typing into the modal's field = %+v, want confirmed into the modal", e)
 	}
 	waitLog(t, p.log, "form text xyz")
+}
+
+// Two top-level windows of one application leave the target ambiguous: input
+// is refused before it is sent, and naming a window aims it there.
+func TestLiveWindowsTwoWindowsAreRefusedUntilOneIsNamed(t *testing.T) {
+	s := liveSession(t)
+	p := launchWindowsTarget(t, "second")
+	waitLog(t, p.log, "second open")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	apps, err := s.Apps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var app App
+	for _, a := range apps {
+		if a.Bundle == windowsTarget {
+			app = a
+		}
+	}
+	main, second := 0, 0
+	for _, w := range app.Windows {
+		switch w.Title {
+		case "Computer Target":
+			main = w.ID
+		case "Second Window":
+			second = w.ID
+		}
+		if w.Owned == nil || *w.Owned {
+			t.Fatalf("window %+v is not reported as an independent window", w)
+		}
+	}
+	if main == 0 || second == 0 {
+		t.Fatalf("windows = %+v", app.Windows)
+	}
+
+	res, err := s.Act(ctx, windowsTarget, 0, []Step{{Action: "type", Text: "hello"}})
+	f, _ := errors.AsType[*Failure](err)
+	if f == nil || f.Code != CodeAmbiguousWindow || res.Done != 0 || len(f.Candidates) != 2 {
+		t.Fatalf("typing at two windows = %+v, %v; want %s with both candidates", res, err, CodeAmbiguousWindow)
+	}
+	if _, _, err := s.Screenshot(ctx, windowsTarget, 0); CodeOf(err) != CodeAmbiguousWindow {
+		t.Fatalf("a screenshot of two windows = %v, want %s", err, CodeAmbiguousWindow)
+	}
+	if body, _ := os.ReadFile(p.log); strings.Contains(string(body), "hello") {
+		t.Fatalf("input reached the application despite the refusal:\n%s", body)
+	}
+
+	if _, _, err := s.Screenshot(ctx, windowsTarget, second); err != nil {
+		t.Fatalf("screenshot of the second window: %v", err)
+	}
+	s.mu.Lock()
+	shot := s.shots[windowsTarget]
+	s.mu.Unlock()
+	if shot.window != second || shot.bounds.Width < 250 || shot.bounds.Width > 400 {
+		t.Fatalf("the capture is %+v, want the 300-wide second window %d", shot, second)
+	}
+	snap, err := s.Snapshot(ctx, windowsTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := lineRef(t, snap.Lines, `edit "Probe field"`)
+	if _, err := s.Act(ctx, windowsTarget, second, []Step{{Action: "key", Key: "home"}}); err != nil {
+		t.Fatalf("raising the second window: %v", err)
+	}
+	if res, err := s.Act(ctx, windowsTarget, main, []Step{{Action: "focus", Ref: field}, {Action: "type", Text: "hello"}}); err != nil || res.Done != 2 {
+		t.Fatalf("typing into the main window = %+v, %v", res, err)
+	}
+	waitLog(t, p.log, "hello")
+	if _, err := s.Act(ctx, windowsTarget, 1, []Step{{Action: "type", Text: "x"}}); CodeOf(err) != CodeNoWindow {
+		t.Fatalf("a window the application does not have = %v, want %s", err, CodeNoWindow)
+	}
 }

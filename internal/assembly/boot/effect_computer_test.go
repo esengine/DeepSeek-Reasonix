@@ -33,9 +33,16 @@ func runFakeComputerHelper(in io.Reader, out io.Writer) {
 		var result any = map[string]any{}
 		switch req.Method {
 		case "apps":
+			bounds := map[string]any{"x": 0, "y": 0, "width": 800, "height": 600}
 			result = map[string]any{"apps": []any{map[string]any{
 				"pid": 42, "bundle": "com.example.Notes", "name": "Notes", "active": true,
-				"windows": []any{map[string]any{"id": 1, "title": "Draft", "bounds": map[string]any{"x": 0, "y": 0, "width": 800, "height": 600}}},
+				"windows": []any{map[string]any{"id": 1, "title": "Draft", "bounds": bounds}},
+			}, map[string]any{
+				"pid": 43, "bundle": "com.example.Pair", "name": "Pair",
+				"windows": []any{
+					map[string]any{"id": 11, "title": "Left", "owned": false, "bounds": bounds},
+					map[string]any{"id": 12, "title": "Right", "owned": false, "bounds": bounds},
+				},
 			}}}
 		case "snapshot":
 			result = map[string]any{
@@ -46,6 +53,13 @@ func runFakeComputerHelper(in io.Reader, out io.Writer) {
 			value, _ = req.Params["text"].(string)
 			result = map[string]any{"effect": map[string]any{"class": "confirmed", "evidence": []string{"value_readback"}}}
 		case "type":
+			if req.Params["pid"] == float64(43) {
+				if req.Params["window"] == nil {
+					_ = enc.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": "computer.failed", "message": "type reached the helper with no window named"}})
+					continue
+				}
+				break
+			}
 			_ = enc.Encode(map[string]any{"id": req.ID, "error": map[string]any{
 				"code": "computer.blocked", "message": "the keys would land in a dialog whose focused element takes no text",
 				"blocked_by": map[string]any{"ref": "a9", "title": "Unsaved changes", "blocks": "Draft"},
@@ -133,5 +147,39 @@ func TestComputerToolIdentityAgreesAcrossTheKernel(t *testing.T) {
 	}
 	if got := evidence.ToolCallMutationClass("computer_act", json.RawMessage(`{}`), false); got != evidence.MutationUnknown {
 		t.Errorf("operating an application is classified %q, want unknown: it can write where the application may", got)
+	}
+}
+
+// Through the real assembly: an application showing two windows is refused
+// before the helper is asked anything, the candidates reach the model, and
+// naming one of them lets the same call through.
+func TestEffectComputerUseRefusesAnAmbiguousWindowThroughTheRealAssembly(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(fakeComputerHelperEnv, "1")
+	SetComputerHelper(exe)
+	t.Cleanup(func() { SetComputerHelper("") })
+
+	reqs := buildBrowserEffect(t, "", []func(string) *provider.ToolCall{
+		func(string) *provider.ToolCall {
+			return browserCall("act-1", "computer_act", map[string]any{"app": "com.example.Pair", "steps": []any{map[string]any{"action": "type", "text": "hi"}}})
+		},
+		func(string) *provider.ToolCall {
+			return browserCall("act-2", "computer_act", map[string]any{"app": "com.example.Pair", "window": 12, "steps": []any{map[string]any{"action": "type", "text": "hi"}}})
+		},
+	})
+	results := effectToolResults(reqs[len(reqs)-1])
+	if len(results) != 2 {
+		t.Fatalf("tool results = %q", results)
+	}
+	for _, want := range []string{"computer.ambiguous_window_target", `window 11 "Left" (front)`, `window 12 "Right"`, "Completed 0 of 1 step(s)."} {
+		if !strings.Contains(results[0], want) {
+			t.Fatalf("the refusal is missing %q:\n%s", want, results[0])
+		}
+	}
+	if !strings.Contains(results[1], "Completed 1 of 1 step(s).") {
+		t.Fatalf("naming the window did not let the call through:\n%s", results[1])
 	}
 }
