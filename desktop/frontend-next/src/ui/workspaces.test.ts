@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { newlyDone, removeHint } from "./Workspaces";
+import { newlyDone } from "./Workspaces";
+import { removeHint } from "./WorkspaceConfirm";
 
 describe("removeHint", () => {
   it("says only what is true when nothing is open", () => {

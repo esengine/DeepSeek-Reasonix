@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { bytes } from "../i18n/format";
 import type { AgentPort } from "../port/port";
-import type { HubPort } from "../port/hub";
+import type { HubPort, LegacyImport } from "../port/hub";
+import { LegacySkips } from "./LegacySkips";
 import type { StoragePlan, StorageRoot, StorageState } from "../port/storage";
 
 // Three questions in the order a person asks them: how much is there, where is
@@ -49,7 +50,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
   const [plan, setPlan] = useState<StoragePlan | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const [recovering, setRecovering] = useState(false);
-  const [recovery, setRecovery] = useState<{ imported: number; warnings: number } | null>(null);
+  const [recovery, setRecovery] = useState<LegacyImport | null>(null);
   const [recoveryError, setRecoveryError] = useState("");
 
   const [stalled, setStalled] = useState<ReadonlySet<string>>(new Set());
@@ -148,7 +149,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
     setRecovering(true);
     try {
       const result = await hub.importLegacySessions(source, workspace);
-      setRecovery({ imported: result.imported, warnings: result.warnings });
+      setRecovery(result);
       onRecovered();
     } catch {
       setRecoveryError(t("未能扫描这个文件夹。请确认它是旧版 Reasonix 的数据目录。"));
@@ -175,7 +176,9 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
               <span className="ready">
                 {recovery.imported > 0
                   ? t("已找回 {n} 个会话。", { n: recovery.imported })
-                  : t("没有发现尚未导入的旧会话。")}
+                  : recovery.recognised
+                    ? t("没有发现尚未导入的旧会话。")
+                    : t("这个文件夹里没有找到旧版会话。请选择 Reasonix 的数据文件夹（里面有 sessions、projects 或 desktop-sessions-v5）。")}
                 {recovery.warnings > 0 ? " " + t("有 {n} 项无法读取。", { n: recovery.warnings }) : null}
               </span>
             )}
@@ -185,6 +188,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
             {t(recovering ? "正在扫描…" : "选择旧版数据目录…")}
           </button>
         </div>
+        {recovery && <LegacySkips skipped={recovery.skipped ?? []} />}
       </section>
 
       <section className="grp">
@@ -278,7 +282,7 @@ function LeftBehind({ at }: { at: { dir: string; names: string[] } }) {
     <section className="grp">
       <h3 className="lbl">{t("原位置仍有残留数据")}</h3>
       <p className="note">
-        {t("以下内容仍位于 {dir}：{names}。迁移存储位置时未一并迁移，因此本机的壁纸、主题包或更新回滚备份可能显示为缺失。手动将这些目录复制到当前位置即可恢复。", {
+        {t("以下内容仍位于 {dir}：{names}。迁移存储位置时未一并迁移，因此项目列表、全局指令与记忆、计划任务、壁纸、主题包或更新回滚备份可能显示为缺失。下次启动会自动并入当前位置；若仍显示，请退出后把这些文件或目录复制到当前位置，已有的文件不要覆盖。", {
           dir: at.dir,
           names: at.names.join("、"),
         })}

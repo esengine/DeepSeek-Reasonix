@@ -46,8 +46,21 @@ const (
 // respelling or a wrapper is not a rewrite and the file's raw text is never the
 // identity.
 type CheckContract struct {
-	baseline []string
-	current  []string
+	baseline      []string
+	current       []string
+	capturedTests int
+	delivery      bool
+	observeRoot   string
+}
+
+func (c CheckContract) WithObserveRoot(root string) CheckContract {
+	c.observeRoot = root
+	return c
+}
+
+func (c CheckContract) WithDelivery(delivery bool) CheckContract {
+	c.delivery = delivery
+	return c
 }
 
 // CaptureCheckContract canonicalises both declarations into criterion
@@ -55,6 +68,12 @@ type CheckContract struct {
 // each time it is asked would be no provenance at all.
 func CaptureCheckContract(baseline, current []string) CheckContract {
 	return CheckContract{baseline: criterionIdentities(baseline), current: criterionIdentities(current)}
+}
+
+// WithCapturedTests preserves criteria even when their current bytes are unchanged.
+func (c CheckContract) WithCapturedTests(count int) CheckContract {
+	c.capturedTests = count
+	return c
 }
 
 // Baseline returns the captured identities, for a host that has to persist them
@@ -128,8 +147,78 @@ func (l *Ledger) Obligations(contract CheckContract) []Obligation {
 	if !changed {
 		return out
 	}
-	out = append(out, staleVerificationOf(l, at)...)
+	if !l.ProseOnlyWithoutChecks(contract) {
+		out = append(out, staleVerificationOf(l, at)...)
+	}
 	return append(out, l.checkObligations(contract, at)...)
+}
+
+// ProseOnlyWithoutChecks waives the generic check when every change this task
+// made is a prose file and the project names no check of its own. Scope must be
+// established for every mutation; a watched subset cannot exempt effects the
+// host never observed.
+func (l *Ledger) ProseOnlyWithoutChecks(contract CheckContract) bool {
+	if contract.delivery || contract.DeclaresChecks() {
+		return false
+	}
+	beyond, scoped, changed := l.mutationsBeyondProse(contract.observeRoot)
+	return changed && scoped && len(beyond) == 0
+}
+
+// DeclaresChecks reports that the project or the task's start named checks of
+// its own, which define verification there.
+func (c CheckContract) DeclaresChecks() bool {
+	return len(c.baseline) != 0 || len(c.current) != 0 || c.capturedTests != 0
+}
+
+// MutationPathsBeyondProse names the changed paths that keep the generic check
+// owed, in first-written order, and whether every mutation had its extent
+// established.
+func (l *Ledger) MutationPathsBeyondProse(contract CheckContract) (paths []string, scoped bool) {
+	beyond, scoped, _ := l.mutationsBeyondProse(contract.observeRoot)
+	return beyond, scoped
+}
+
+func (l *Ledger) mutationsBeyondProse(root string) (beyond []string, scoped, changed bool) {
+	if l == nil {
+		return nil, false, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	scoped = true
+	for _, r := range l.receipts {
+		if !r.Mutation {
+			continue
+		}
+		// A failure proves nothing was left unwritten: tool.after can fail a
+		// finished write and a move can stop half-done, so a failed named-path
+		// call keeps its targets; any other failed mutation is unscoped.
+		if !r.Success {
+			if !r.Write {
+				scoped = false
+				continue
+			}
+			for _, path := range r.MutationPaths {
+				if !proseMutationPath(root, path) && !slices.Contains(beyond, path) {
+					beyond = append(beyond, path)
+				}
+			}
+			continue
+		}
+		changed = true
+		// Named-path writers establish scope by contract; other tools need a
+		// complete observation rather than a watched subset.
+		if r.MutationEvidence != MutationProven || len(r.Paths) == 0 || (!r.Write && !r.PathsComplete) {
+			scoped = false
+			continue
+		}
+		for _, path := range r.MutationPaths {
+			if !proseMutationPath(root, path) && !slices.Contains(beyond, path) {
+				beyond = append(beyond, path)
+			}
+		}
+	}
+	return beyond, scoped, changed
 }
 
 // checkObligations owes every criterion either declaration named, baseline

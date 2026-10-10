@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/tool"
 )
 
@@ -57,7 +58,7 @@ func newSSETransport(ctx context.Context, s Spec) (*sseTransport, error) {
 	}
 	getURL, err := url.Parse(s.URL)
 	if err != nil || getURL.Scheme == "" || getURL.Host == "" {
-		return nil, fmt.Errorf("sse plugin %q: invalid url %q", s.Name, s.URL)
+		return nil, fmt.Errorf("sse plugin %q: invalid url %q", s.Name, secrets.RedactEndpoint(s.URL))
 	}
 	headers := make(map[string]string, len(s.Headers))
 	maps.Copy(headers, s.Headers)
@@ -114,11 +115,11 @@ func (t *sseTransport) readLoop() {
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		t.fail(fmt.Errorf("GET %s: %w", t.getURL, &httpStatusError{Status: resp.StatusCode, Detail: strings.TrimSpace(string(body))}))
+		t.fail(fmt.Errorf("GET %s: %w", secrets.RedactEndpoint(t.getURL.String()), &httpStatusError{Status: resp.StatusCode, BodyBytes: len(body)}))
 		return
 	}
 	if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		t.fail(fmt.Errorf("GET %s: expected text/event-stream, got %q", t.getURL, resp.Header.Get("Content-Type")))
+		t.fail(errSSEContentType)
 		return
 	}
 
@@ -172,7 +173,7 @@ func (t *sseTransport) handleEvent(eventName, payload string, baseURL *url.URL) 
 		if err == nil {
 			endpoint = baseURL.ResolveReference(endpoint)
 			if !sameHTTPOrigin(baseURL, endpoint) {
-				err = fmt.Errorf("server announced cross-origin endpoint %s", endpoint)
+				err = errSSECrossOrigin
 			}
 		}
 		t.setEndpoint(endpoint, err)
@@ -186,7 +187,7 @@ func (t *sseTransport) setEndpoint(endpoint *url.URL, err error) {
 	t.endpointOnce.Do(func() {
 		t.mu.Lock()
 		t.endpoint = endpoint
-		t.endpointErr = err
+		t.endpointErr = secrets.DiagnosticError(err)
 		t.mu.Unlock()
 		close(t.endpointReady)
 		set = true
@@ -252,7 +253,8 @@ func (t *sseTransport) replyLoop() {
 	}
 }
 
-func (t *sseTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (t *sseTransport) call(ctx context.Context, method string, params any) (result json.RawMessage, err error) {
+	defer func() { err = secrets.DiagnosticError(err) }()
 	if err := t.waitEndpoint(ctx); err != nil {
 		return nil, fmt.Errorf("plugin %q: %s: %w", t.name, method, err)
 	}
@@ -332,6 +334,8 @@ func (t *sseTransport) waitEndpoint(ctx context.Context) error {
 }
 
 var errSSEEndpointMissing = errors.New("SSE stream ended before announcing an endpoint")
+var errSSEContentType = errors.New("SSE response has an unexpected content type")
+var errSSECrossOrigin error = hostDiagnosticCause("server announced a cross-origin endpoint")
 
 func (t *sseTransport) post(ctx context.Context, body []byte) error {
 	t.mu.Lock()
@@ -342,7 +346,7 @@ func (t *sseTransport) post(ctx context.Context, body []byte) error {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
-		return err
+		return secrets.DiagnosticError(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -351,17 +355,18 @@ func (t *sseTransport) post(ctx context.Context, body []byte) error {
 	}
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return err
+		return secrets.DiagnosticError(err)
 	}
 	defer resp.Body.Close()
 	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode/100 != 2 {
-		return &httpStatusError{Status: resp.StatusCode, Detail: strings.TrimSpace(string(responseBody))}
+		return &httpStatusError{Status: resp.StatusCode, BodyBytes: len(responseBody)}
 	}
 	return nil
 }
 
 func (t *sseTransport) fail(err error) {
+	err = secrets.DiagnosticError(err)
 	t.endpointOnce.Do(func() {
 		t.mu.Lock()
 		t.endpointErr = err
@@ -372,6 +377,7 @@ func (t *sseTransport) fail(err error) {
 }
 
 func (t *sseTransport) failPending(err error) {
+	err = secrets.DiagnosticError(err)
 	t.mu.Lock()
 	if t.readErr == nil {
 		t.readErr = err

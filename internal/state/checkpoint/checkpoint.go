@@ -796,47 +796,6 @@ func (s *Store) NextTurn() int {
 	return next
 }
 
-// List returns every checkpoint's metadata, oldest turn first.
-func (s *Store) List() []Meta {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Meta, 0, len(s.done)+1)
-	for _, c := range s.all() {
-		paths := make([]string, len(c.Files))
-		for i, f := range c.Files {
-			paths[i] = f.Path
-		}
-		meta := Meta{
-			Turn:               c.Turn,
-			MsgIndex:           c.MsgIndex,
-			Time:               c.Time,
-			Prompt:             c.Prompt,
-			Paths:              paths,
-			Coverage:           c.Coverage,
-			CoverageGaps:       append([]CoverageGap(nil), c.CoverageGaps...),
-			ExpiredFilePayload: c.ExpiredFilePayload,
-			ActiveWriters:      append([]ActiveWriter(nil), c.ActiveWriters...),
-			Legacy:             c.Legacy || c.Coverage == CoverageLegacy,
-		}
-		switch {
-		case meta.Legacy:
-			meta.CanUndoFiles = false
-			meta.DisabledReason = "legacy checkpoint cannot verify later manual edits"
-		case meta.ExpiredFilePayload:
-			meta.CanUndoFiles = false
-			meta.DisabledReason = "file recovery payload expired"
-		case meta.Coverage == CoverageNone:
-			meta.CanUndoFiles = false
-		case meta.Coverage == CoveragePartial:
-			meta.CanUndoFiles = len(paths) > 0
-		default:
-			meta.CanUndoFiles = len(paths) > 0
-		}
-		out = append(out, meta)
-	}
-	return out
-}
-
 // FileState returns the earliest pre-edit state recorded for p across the
 // session. Paths are compared after resolving them against the workspace root,
 // because older checkpoints may contain absolute paths while newer writers use

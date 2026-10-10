@@ -3,6 +3,7 @@ package pluginpkg
 import (
 	"fmt"
 	"path/filepath"
+	"reasonix/internal/base/textutil"
 	"slices"
 	"strings"
 )
@@ -29,11 +30,12 @@ func InstalledListText(reasonixHome string) (string, error) {
 		return "", err
 	}
 	if len(st.Plugins) == 0 {
-		return "plugins: none installed\ninstall: reasonix plugin install <source> --yes, or use Settings -> Plugins", nil
+		return "plugins: none installed\ninstall: reasonix plugin install <source> --yes\nStudio: Settings -> Extension -> Installed -> Plugin packages -> Add", nil
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "plugins (%d):\n", len(st.Plugins))
 	for _, p := range st.Plugins {
+		p = p.Display()
 		state := "disabled"
 		if p.Enabled {
 			state = "enabled"
@@ -67,6 +69,7 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 		return fmt.Sprintf("plugin %q is not installed", name), nil
 	}
 	root := ResolveRoot(reasonixHome, p.Root)
+	p = p.Display()
 	pkg, warnings, err := ParseDir(root)
 	if err != nil {
 		return "", err
@@ -82,17 +85,17 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "plugin %s [%s]\n", p.Name, state)
-	fmt.Fprintf(&b, "version: %s\nkind: %s\nroot: %s\nsource: %s\ncapabilities: %d skills, %d commands, %d prompts, %d hooks, %d MCP servers, %d themes\n", version, p.ManifestKind, filepath.Clean(root), p.Source, summary.Skills, summary.Commands, summary.Prompts, summary.Hooks, summary.MCPServers, summary.Themes)
+	fmt.Fprintf(&b, "version: %s\nkind: %s\nroot: %s\nsource: %s\ncapabilities: %d skills, %d agents, %d commands, %d prompts, %d hooks, %d MCP servers, %d themes\n", version, p.ManifestKind, filepath.Clean(root), p.Source, summary.Skills, summary.Agents, summary.Commands, summary.Prompts, summary.Hooks, summary.MCPServers, summary.Themes)
 	if summary.Runtime {
 		b.WriteString(RuntimeTrustText(pkg.Manifest.Runtime))
 	}
 	if p.Enabled {
 		b.WriteString("usage: enabled plugins load into new sessions; use /skills, invoke /<plugin>:<skill> or /<plugin>:<command>, or ask naturally.\n")
 	} else {
-		b.WriteString("usage: enable this plugin before its skills, commands, hooks, or MCP servers participate in sessions.\n")
+		b.WriteString("usage: enable this plugin before its skills, agents, commands, hooks, or MCP servers participate in sessions.\n")
 	}
-	appendInventoryText(&b, p.Name, pkg.Inventory())
-	for _, warning := range warnings {
+	appendInventoryText(&b, p.Name, pkg.InventoryForDisplay())
+	for _, warning := range DisplayLines(warnings) {
 		fmt.Fprintf(&b, "warning: %s\n", warning)
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
@@ -115,12 +118,15 @@ func pluginCapabilityText(reasonixHome string, p InstalledPlugin) string {
 	root := ResolveRoot(reasonixHome, p.Root)
 	pkg, _, err := ParseDir(root)
 	if err != nil {
-		return "invalid: " + err.Error()
+		return "invalid: " + textutil.ShownProse(err.Error())
 	}
 	summary := pkg.CapabilitySummary()
 	parts := []string{}
 	if summary.Skills > 0 {
 		parts = append(parts, fmt.Sprintf("%d skills", summary.Skills))
+	}
+	if summary.Agents > 0 {
+		parts = append(parts, fmt.Sprintf("%d agents", summary.Agents))
 	}
 	if summary.Commands > 0 {
 		parts = append(parts, fmt.Sprintf("%d commands", summary.Commands))
@@ -153,6 +159,7 @@ func RuntimeTrustText(rt *RuntimeSpec) string {
 	if rt == nil {
 		return ""
 	}
+	rt = rt.Display()
 	var b strings.Builder
 	b.WriteString("runtime: FULL TRUST\n")
 	fmt.Fprintf(&b, "  command: %s\n", RuntimeCommandLine(rt))
@@ -179,6 +186,7 @@ func RuntimeCommandLine(rt *RuntimeSpec) string {
 }
 
 func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
+	appendAgentInventoryText(b, pluginName, inv.Agents)
 	if len(inv.Commands) > 0 {
 		b.WriteString("commands:\n")
 		for _, cmd := range inv.Commands {
@@ -216,10 +224,11 @@ func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
 			if desc == "" {
 				desc = "(no description)"
 			}
+			invocation := "/" + pluginName + ":" + pr.Name
 			if pr.ArgHint != "" {
-				fmt.Fprintf(b, "  %s %s - %s\n", pr.Name, pr.ArgHint, desc)
+				fmt.Fprintf(b, "  %s %s - %s\n", invocation, pr.ArgHint, desc)
 			} else {
-				fmt.Fprintf(b, "  %s - %s\n", pr.Name, desc)
+				fmt.Fprintf(b, "  %s - %s\n", invocation, desc)
 			}
 		}
 	}
@@ -258,8 +267,22 @@ func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
 			fmt.Fprintf(b, "  %s [%s] - %s\n", server.Name, server.Transport, target)
 		}
 	}
-	if len(inv.Skills) == 0 && len(inv.Commands) == 0 && len(inv.Prompts) == 0 && len(inv.Themes) == 0 && len(inv.Hooks) == 0 && len(inv.MCPServers) == 0 {
+	if len(inv.Skills) == 0 && len(inv.Agents) == 0 && len(inv.Commands) == 0 && len(inv.Prompts) == 0 && len(inv.Themes) == 0 && len(inv.Hooks) == 0 && len(inv.MCPServers) == 0 {
 		b.WriteString("capabilities: no detailed inventory available\n")
+	}
+}
+
+func appendAgentInventoryText(b *strings.Builder, pluginName string, agents []AgentRef) {
+	if len(agents) == 0 {
+		return
+	}
+	b.WriteString("agents:\n")
+	for _, agent := range agents {
+		desc := oneLine(agent.Description)
+		if desc == "" {
+			desc = "(no description)"
+		}
+		fmt.Fprintf(b, "  /%s:agent:%s - %s\n", pluginName, agent.Name, desc)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"reasonix/internal/base/i18n"
+	"reasonix/internal/base/textutil"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/eventwire"
 	"reasonix/internal/contract/pricing"
@@ -15,6 +16,10 @@ const (
 	toolPreviewLines = 4
 	diffPreviewLines = 24
 )
+
+// diffFoldLines is the fold limit new diffs are drawn with; /diff-fold sets it
+// to 0, which shows every line.
+var diffFoldLines = diffPreviewLines
 
 // renderItem is a settled row as it goes into the scrollback. shown is how much
 // of an answer's text an earlier print already carried.
@@ -35,7 +40,7 @@ func renderItem(it *Item, width, shown int, hideRail bool) string {
 		// Thinking with nothing said after it is a step, not an answer: it gets
 		// its marker and no speaker header.
 		if strings.TrimSpace(it.Text) == "" {
-			if it.Reasoning == "" {
+			if !hasThought(it.Reasoning) {
 				return ""
 			}
 			return "\n" + thought(it, width)
@@ -83,7 +88,7 @@ func renderSayPart(text string, first bool, width int, hideRail bool) string {
 
 // withThought puts the thinking marker above the first stretch of an answer.
 func withThought(it *Item, shown, width int, out string) string {
-	if shown > 0 || it.Reasoning == "" {
+	if shown > 0 || !hasThought(it.Reasoning) {
 		return out
 	}
 	return "\n" + thought(it, width) + "\n" + out
@@ -96,15 +101,15 @@ func thought(it *Item, width int) string {
 	switch it.Fold {
 	case foldShut:
 		mark = "▸"
-	case foldOpen:
+	case foldOpen, foldPinned:
 		mark = "▾"
 	}
 	hint := ""
-	if it.Fold != foldFixed {
+	if it.Fold == foldShut || it.Fold == foldOpen {
 		hint = " (Ctrl+O)"
 	}
 	lines := []string{termrender.Dim("  " + mark + " " + fmt.Sprintf(i18n.M.ChatThoughtForFmt, (it.ThoughtMs+500)/1000) + hint)}
-	if it.Fold == foldOpen {
+	if it.Fold == foldOpen || it.Fold == foldPinned {
 		// Styled per row: the transcript is split into rows after rendering, and
 		// one style spanning several would reach only the first of them.
 		for l := range strings.SplitSeq(termrender.Cells().Wrap(strings.TrimSpace(it.Reasoning), max(width-6, 10), ""), "\n") {
@@ -123,7 +128,7 @@ const (
 func renderTool(it *Item, width int) string {
 	t := it.Tool
 	if t.Diff != "" {
-		return "\n" + strings.Join(termrender.DiffBlock(t.Name, t.Args, event.FileDiff{Diff: t.Diff, Added: t.Added, Removed: t.Removed}, width, diffPreviewLines), "\n")
+		return "\n" + strings.Join(termrender.DiffBlock(t.Name, t.Args, event.FileDiff{Diff: t.Diff, Added: t.Added, Removed: t.Removed}, width, diffFoldLines), "\n")
 	}
 	lines := []string{termrender.ToolCard(t.Name, t.Args, width)}
 	avail := width - len([]rune(connector))
@@ -141,7 +146,9 @@ func renderTool(it *Item, width int) string {
 			lines = append(lines, outputSummary(t.Name, it.shellOutput(), avail, it.Fold)...)
 		}
 	default:
-		if t.OutputDiff {
+		if spec, ok := chartOf(it); ok {
+			lines = append(lines, chartRows(spec, width, it.Fold)...)
+		} else if t.OutputDiff {
 			lines = append(lines, diffRows(t.Output, width, it.Fold)...)
 		} else {
 			lines = append(lines, outputSummary(t.Name, t.Output, avail, it.Fold)...)
@@ -192,7 +199,7 @@ func outputSummary(name, out string, width int, f outputFold) []string {
 // fold to show more of it. The rows carry the card's "⎿" connector on the first
 // line and an aligned gutter after, matching every other tool card's body.
 func diffRows(out string, width int, f outputFold) []string {
-	maxLines := diffPreviewLines
+	maxLines := diffFoldLines
 	if f == foldOpen {
 		maxLines = shellExpandLines
 	}
@@ -239,6 +246,11 @@ func renderUsage(u *eventwire.Usage, width int) string {
 			code = u.Currency
 		}
 		groups = append(groups, fmt.Sprintf("≈%s%.4f", pricing.CurrencySymbol(code), u.Cost))
+		if u.CostQuote != nil {
+			if band := rateBandText(u.CostQuote.RateBand); band != "" {
+				groups = append(groups, band)
+			}
+		}
 	}
 	if u.Estimated {
 		groups = append(groups, "estimated")
@@ -257,6 +269,11 @@ func renderCompaction(it *Item, width int) string {
 	c := it.Compaction
 	if !it.Done {
 		return termrender.Dim("  ⋯ " + i18n.M.CompactionWorking)
+	}
+	if c != nil && strings.TrimSpace(c.Summary) == "" && c.Trigger != "manual" {
+		if why, ok := i18n.M.CompactionWhy[c.Code]; ok && c.Code != "" {
+			return termrender.Dim("  ⊘ " + fmt.Sprintf(i18n.M.CompactionAbortedFmt, why))
+		}
 	}
 	if c == nil || strings.TrimSpace(c.Summary) == "" {
 		return ""
@@ -281,6 +298,70 @@ func renderCompaction(it *Item, width int) string {
 	return "\n" + strings.Join(lines, "\n")
 }
 
+// codedNoticeText words a coded notice in the UI language from its typed payload; a
+// code with no wording here, or a payload that does not decode, keeps the
+// kernel's English.
+const unappliedSteerCap = 400
+
+func codedNoticeText(it *Item) string {
+	switch it.Code {
+	case event.NoticeCodeCompacted:
+		return i18n.M.NoticeCompacted
+	case event.NoticeCodeCompactDeclined:
+		if why, ok := i18n.M.CompactionWhy[it.Detail]; ok {
+			return fmt.Sprintf(i18n.M.NoticeCompactDeclinedFmt, why)
+		}
+	case event.NoticeCodeCompactFailed:
+		if why, ok := i18n.M.CompactionWhy[it.Detail]; ok {
+			return fmt.Sprintf(i18n.M.NoticeCompactFailedFmt, why)
+		}
+	case event.NoticeCodeCompactHeld:
+		if why, ok := i18n.M.CompactionWhy[it.Detail]; ok {
+			return fmt.Sprintf(i18n.M.NoticeCompactHeldFmt, why)
+		}
+	case event.NoticeCodeUnappliedSteer:
+		if it.Detail != "" {
+			return fmt.Sprintf(i18n.M.NoticeUnappliedSteerFmt, textutil.TruncateGraphemes(textutil.SanitizeDisplay(it.Detail), unappliedSteerCap, "…"))
+		}
+		return textutil.TruncateGraphemes(textutil.SanitizeDisplay(it.Text), unappliedSteerCap, "…")
+	case event.NoticeCodeInboxRecovered:
+		if p, ok := event.DecodeInboxRecovered(it.Detail); ok {
+			return fmt.Sprintf(i18n.M.NoticeInboxRecoveredFmt, p.Count)
+		}
+	case event.NoticeCodeJobFinished, event.NoticeCodeJobKilled:
+		if p, ok := event.DecodeJobNotice(it.Detail); ok {
+			name := p.Label
+			if name == "" {
+				name = p.ID
+			}
+			if it.Code == event.NoticeCodeJobKilled {
+				return fmt.Sprintf(i18n.M.NoticeJobKilledFmt, name)
+			}
+			return fmt.Sprintf(i18n.M.NoticeJobFinishedFmt, name)
+		}
+	case event.NoticeCodeJobFailed:
+		if p, ok := event.DecodeJobNotice(it.Detail); ok {
+			name := p.Label
+			if name == "" {
+				name = p.ID
+			}
+			return fmt.Sprintf(i18n.M.NoticeJobFailedFmt, name) + jobError(p.Error)
+		}
+	case event.NoticeCodeExtensionSkipped:
+		if p, ok := event.DecodeExtensionSkipped(it.Detail); ok && p.Reason == event.ExtensionSkipReasonNoLiveSidecar {
+			return fmt.Sprintf(i18n.M.NoticeExtSkippedFmt, p.Extension, p.Point)
+		}
+	}
+	return it.Text
+}
+
+func jobError(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	return ": " + textutil.TruncateGraphemes(textutil.SanitizeDisplay(msg), unappliedSteerCap, "…")
+}
+
 func renderNotice(it *Item) string {
 	mark := termrender.Dim("  · ")
 	switch it.Level {
@@ -289,7 +370,7 @@ func renderNotice(it *Item) string {
 	case "warn", "warning":
 		mark = termrender.Yellow("  ! ")
 	}
-	text := it.Text
+	text := codedNoticeText(it)
 	if it.Count > 1 {
 		text += termrender.Dim(fmt.Sprintf(" (×%d)", it.Count))
 	}
@@ -326,3 +407,7 @@ func indent(block, prefix string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// hasThought is false for reasoning that carries no text: a block of only
+// whitespace has nothing to fold, so it earns no "thought for 0s" marker.
+func hasThought(reasoning string) bool { return strings.TrimSpace(reasoning) != "" }

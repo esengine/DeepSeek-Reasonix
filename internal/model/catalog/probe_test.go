@@ -263,3 +263,47 @@ func TestProbeFallsBackToTheSpellingForUndeclaredAddresses(t *testing.T) {
 		t.Fatal("an address no preset covers reported as declared")
 	}
 }
+
+func TestProbeCompletesABareHostOnlyWhenTheListingAnsweredUnderV1(t *testing.T) {
+	cases := []struct {
+		name, path, want string
+		answerAt         string
+	}{
+		{"bare host, only /v1 answers", "", "/v1", "/v1/models"},
+		{"bare host with slash", "/", "/v1", "/v1/models"},
+		{"bare host answering at /models stays", "", "", "/models"},
+		{"explicit /v1 unchanged", "/v1", "/v1", "/v1/models"},
+		{"custom path unchanged", "/openai/deployments", "/openai/deployments", "/openai/deployments/models"},
+		{"version segment other than v1 unchanged", "/v4", "/v4", "/v4/models"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != c.answerAt || r.Header.Get("Authorization") != "Bearer k" {
+					http.NotFound(w, r)
+					return
+				}
+				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-x"}]}`))
+			}))
+			defer srv.Close()
+			got, err := ProbeEndpoint(context.Background(), ProbeOptions{BaseURL: srv.URL + c.path, APIKey: "k"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Kind != "openai" || got.BaseURL != srv.URL+c.want && !(c.want == "" && got.BaseURL == srv.URL) {
+				t.Fatalf("kind=%q base=%q, want openai at %q", got.Kind, got.BaseURL, srv.URL+c.want)
+			}
+		})
+	}
+}
+
+func TestProbeLeavesAnAnthropicBaseAlone(t *testing.T) {
+	srv := modelsServer(t, xAPIKey, "claude-opus-4-8")
+	got, err := ProbeEndpoint(context.Background(), ProbeOptions{BaseURL: srv.URL, APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "anthropic" || got.BaseURL != srv.URL {
+		t.Fatalf("kind=%q base=%q, want anthropic at the typed %s", got.Kind, got.BaseURL, srv.URL)
+	}
+}

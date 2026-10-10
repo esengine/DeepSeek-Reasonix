@@ -26,9 +26,6 @@ type windowState struct {
 	// checkpointState is rebound by preflight with path, so reset leaves it
 	// to its owner rather than blanking it.
 	checkpointState string // none|restored|applied; runtime-only
-	// budgetNotice latches which context-pressure rung the model has already
-	// been told about. Plain fields: the run loop is the only reader/writer.
-	budgetNotice budgetNoticeLatch
 }
 
 // reset rebinds the window to a new conversation. checkpointState is left to
@@ -42,5 +39,4 @@ func (w *windowState) reset() {
 	w.cacheState = CacheStateUnknown
 	w.compactionMu.Unlock()
 	w.compaction.restart()
-	w.budgetNotice = budgetNoticeLatch{}
 }

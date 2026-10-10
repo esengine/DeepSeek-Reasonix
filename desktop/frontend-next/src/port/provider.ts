@@ -30,6 +30,9 @@ export interface ProviderEntry {
   // where a relay can actually reject the request over it.
   canSetThinking?: boolean;
   sendsThinking?: boolean;
+  // Where a chosen effort level lands in this entry's request body, as a dotted
+  // path; absent when its resolved reasoning protocol reshapes the request.
+  effortField?: string;
   // How this endpoint carries context between turns, and whether its protocol
   // has the choice at all. "" is vendor detection, which is what an endpoint
   // nobody has characterised keeps doing.
@@ -62,6 +65,11 @@ export interface ProviderEntry {
   // on top of the protocol.
   contextWindow?: number;
   maxOutputTokens?: number;
+  // Seconds the endpoint may stay silent before the call is read as dropped;
+  // absent is the built-in default.
+  idleTimeoutSeconds?: number;
+  // What a source without one waits; the kernel owns the number.
+  idleTimeoutDefault?: number;
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
 }
@@ -82,6 +90,10 @@ export interface Protocol {
   // whether thinking/effort fields ride it at all.
   serverWebSearch: boolean;
   reasoningParams: boolean;
+  effortField?: string;
+  // The reasoning protocols under which that field holds; empty when the wire
+  // fixes it whatever protocol is chosen.
+  effortUnder?: string[];
 }
 
 // What an endpoint turned out to be. Every field is a guess the user confirms
@@ -89,6 +101,9 @@ export interface Protocol {
 // gateway speaks, only which ones it answers.
 export interface ProviderProbe {
   kind: string;
+  // The address chat must be rooted at: what was typed, completed with /v1 only
+  // when the model list answered there alone.
+  baseUrl?: string;
   // Every kind that listing may be driven with, kernel order. `kind` is the
   // pre-selection among them, not the only answer: DeepSeek serves both the
   // OpenAI chat wire and the Responses API off one model list.
@@ -107,11 +122,14 @@ export interface ProviderProbe {
   noProxy: boolean;
 }
 
-// What re-probing a saved provider found. `error` carries the endpoint's own
-// words, because "401" and "no chat models" send the user to different fixes.
+// What re-probing a saved provider found. A failure carries `code`, the dotted
+// identity the add flow's refusals use, because "401" and "no chat models" send
+// the user to different fixes; the endpoint's own words ride along as `detail`.
 export interface ProviderCheck {
   ok: boolean;
   kind?: string;
+  // Present only when the saved address is not the one chat needs.
+  baseUrl?: string;
   // Whether that answer is consistent with the kind the entry records. A
   // Responses source answers the OpenAI listing, so equality is the wrong test.
   matches?: boolean;
@@ -121,7 +139,12 @@ export interface ProviderCheck {
   vision?: string[];
   ambiguous?: boolean;
   noProxy?: boolean;
-  error?: string;
+  code?: string;
+  // Only the numbers the code's sentence needs: `status`, `count`.
+  params?: Record<string, number>;
+  httpStatus?: number;
+  // The endpoint's error text, for display; never an input to `code`.
+  detail?: string;
 }
 
 export type ProviderModelCheckStatus = "available" | "unavailable" | "unknown";
@@ -143,6 +166,8 @@ export interface ProviderModelCheck {
   status: ProviderModelCheckStatus;
   reason?: ProviderModelCheckReason;
   httpStatus?: number;
+  // The endpoint's own error text, for display; never an input to status or reason.
+  detail?: string;
 }
 
 export interface ProviderModelCheckRequest {
@@ -169,6 +194,8 @@ export interface ProviderEdit {
   // compaction off for this source.
   contextWindow?: number;
   maxOutputTokens?: number;
+  // 0 is the built-in default; omitted leaves the stored value alone.
+  idleTimeoutSeconds?: number;
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
   // Which request shape controls thinking here. "" is auto — no declaration,
@@ -196,6 +223,8 @@ export interface ModelLimit {
 export interface ModelEffort {
   supportedEfforts: string[];
   defaultEffort?: string;
+  // On an inherited ladder: the vendor's documented contract, not typed levels.
+  official?: boolean;
 }
 
 // What the panel sends back after the user has looked at the probe.

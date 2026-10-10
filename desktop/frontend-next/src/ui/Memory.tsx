@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { tx } from "../i18n/rich";
 import { reason } from "../i18n/kernel";
@@ -15,15 +15,22 @@ const GROUPS: [string, string, string][] = [
 const SCOPE: Record<string, string> = { project: "项目", global: "我的" };
 
 export function Memory({ port }: { port: AgentPort }) {
+  const [connection, setConnection] = useState({ port, generation: 0 });
+  if (connection.port !== port) setConnection({ port, generation: connection.generation + 1 });
+  return <MemoryPanel key={connection.generation} port={port} />;
+}
+
+function MemoryPanel({ port }: { port: AgentPort }) {
   const [items, setItems] = useState<MemoryEntry[] | null>(null);
   const [unread, setUnread] = useState("");
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState("");
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [edit, setEdit] = useState<MemoryEdit | null>(null);
   const [past, setPast] = useState<Record<string, MemoryEntry[]>>({});
   const [showPast, setShowPast] = useState("");
+  const historyRequests = useRef<Record<string, object>>({});
 
   const reload = () => {
     port
@@ -72,18 +79,29 @@ export function Memory({ port }: { port: AgentPort }) {
       </>
     );
 
+  const refreshMemory = (name: string) => {
+    delete historyRequests.current[name];
+    setPast((p) => {
+      const next = { ...p };
+      delete next[name];
+      return next;
+    });
+    setShowPast((shown) => shown === name ? "" : shown);
+    reload();
+  };
+
   const save = async () => {
     if (!edit) return;
-    setBusy(edit.name);
+    setBusy((names) => [...names, edit.name]);
     setError("");
     try {
       await port.saveMemory(edit);
-      setEdit(null);
-      reload();
+      setEdit((current) => current === edit ? null : current);
+      refreshMemory(edit.name);
     } catch (e) {
       setError(reason(e));
     } finally {
-      setBusy("");
+      setBusy((names) => names.filter((name) => name !== edit.name));
     }
   };
 
@@ -92,46 +110,42 @@ export function Memory({ port }: { port: AgentPort }) {
     setShowPast(name);
     setError("");
     if (past[name]) return;
+    const request = {};
+    historyRequests.current[name] = request;
     try {
       const list = await port.memoryRevisions(name);
+      if (historyRequests.current[name] !== request) return;
       setPast((p) => ({ ...p, [name]: list }));
     } catch (e) {
+      if (historyRequests.current[name] !== request) return;
       setError(reason(e));
-      setShowPast("");
+      setShowPast((shown) => shown === name ? "" : shown);
     }
   };
 
   const restore = async (name: string, revision: number) => {
-    setBusy(name);
+    setBusy((names) => [...names, name]);
     setError("");
     try {
       await port.restoreMemory(name, revision);
-      // The restore wrote a new revision, so the cached list is now one short.
-      // Drop the key rather than emptying it — an empty array reads as cached.
-      setPast((p) => {
-        const next = { ...p };
-        delete next[name];
-        return next;
-      });
-      setShowPast("");
-      reload();
+      refreshMemory(name);
     } catch (e) {
       setError(reason(e));
     } finally {
-      setBusy("");
+      setBusy((names) => names.filter((target) => target !== name));
     }
   };
 
   const forget = async (name: string) => {
-    setBusy(name);
+    setBusy((names) => [...names, name]);
     setError("");
     try {
       await port.forgetMemory(name);
-      reload();
+      refreshMemory(name);
     } catch (e) {
       setError(reason(e));
     } finally {
-      setBusy("");
+      setBusy((names) => names.filter((target) => target !== name));
     }
   };
 
@@ -166,8 +180,8 @@ export function Memory({ port }: { port: AgentPort }) {
                   {m.expired && <i className="stale">{t("已过期")}</i>}
                   <span className="sc">{t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")}</span>
                   <span className="at">{m.updatedAt || m.createdAt}</span>
-                  <button className="act ghost" data-action="memory.forget" data-target={m.name} disabled={busy === m.name} onClick={() => void forget(m.name)}>
-                    {t(busy === m.name ? "…" : "忘记")}
+                  <button className="act ghost" data-action="memory.forget" data-target={m.name} disabled={busy.includes(m.name)} onClick={() => void forget(m.name)}>
+                    {t(busy.includes(m.name) ? "…" : "忘记")}
                   </button>
                 </div>
                 {m.usedLastTurn && m.why && <div className="why-used">{t("上一轮因「{why}」被检索到", { why: m.why })}</div>}
@@ -195,8 +209,8 @@ export function Memory({ port }: { port: AgentPort }) {
                           </select>
                         </label>
                         <div className="row">
-                          <button className="act" data-action="memory.save" data-target={m.name} disabled={busy === m.name} onClick={() => void save()}>
-                            {t(busy === m.name ? "正在保存…" : "保存")}
+                          <button className="act" data-action="memory.save" data-target={m.name} disabled={busy.includes(m.name)} onClick={() => void save()}>
+                            {t(busy.includes(m.name) ? "正在保存…" : "保存")}
                           </button>
                           <button className="act ghost" onClick={() => setEdit(null)}>{t("取消")}</button>
                           {/* Saving writes a new revision rather than overwriting, which is
@@ -225,7 +239,7 @@ export function Memory({ port }: { port: AgentPort }) {
                         {showPast === m.name && <History
                           list={past[m.name]}
                           current={m.revision ?? 1}
-                          busy={busy === m.name}
+                          busy={busy.includes(m.name)}
                           onRestore={(rev) => void restore(m.name, rev)}
                         />}
                       </>

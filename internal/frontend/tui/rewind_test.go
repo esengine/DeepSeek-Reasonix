@@ -70,6 +70,25 @@ func TestClearAsksBeforeClearing(t *testing.T) {
 	}
 }
 
+// /clear restarts the screen under the banner. The viewport must re-anchor to
+// the short new transcript instead of holding the position the old one reached,
+// which would leave every transcript row past the content — a blank screen.
+func TestClearRestartsTheScreenUnderTheBanner(t *testing.T) {
+	m, _ := testModel(t)
+	fillTranscript(m, 40)
+	m.View()
+	typeText(m, "/clear")
+	run(m, press(m, "enter"))
+	run(m, press(m, "y"))
+	v := m.View()
+	if strings.Contains(v.Content, "row 39") {
+		t.Fatalf("the transcript was not cleared:\n%s", v.Content)
+	}
+	if !strings.Contains(v.Content, "reasonix") {
+		t.Fatalf("the screen did not restart under the banner:\n%s", v.Content)
+	}
+}
+
 // Idle, Esc throws away what is typed; twice on an empty composer it opens the
 // rewind picker.
 func TestEscClearsTheComposerAndTwiceOpensRewind(t *testing.T) {

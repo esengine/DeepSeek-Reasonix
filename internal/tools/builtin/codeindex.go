@@ -22,6 +22,7 @@ func init() { tool.RegisterBuiltin(codeIndex{}) }
 
 type codeIndex struct {
 	workDir     string
+	netRoots    []string
 	forbidRoots []string
 	readRoots   []string
 }
@@ -97,6 +98,9 @@ func (c codeIndex) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 
 	root := resolveIn(c.workDir, p.Path)
+	if err := refuseNetworkPath(root, c.netRoots); err != nil {
+		return "", err
+	}
 	collectionLimit := p.Limit
 	if p.Action == "outline" && hasCodeSymbolFilter(p) {
 		collectionLimit = 0

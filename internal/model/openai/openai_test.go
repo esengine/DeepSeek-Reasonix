@@ -1505,6 +1505,114 @@ func TestNewZhipuEffortValidation(t *testing.T) {
 	}
 }
 
+func TestZhipuDepthRequestByModel(t *testing.T) {
+	for _, tc := range []struct {
+		model, effort, thinking, wantThinking, wantDepth string
+		wantRoundTrip                                    bool
+	}{
+		{"glm-5.2", "high", "", "enabled", "high", true},
+		{"glm-5.2", "none", "", "disabled", "", false},
+		{"glm-5.2", "disabled", "", "disabled", "", false},
+		{"glm-5.3", "low", "", "enabled", "low", true},
+		{"glm-5.3-flash", "max", "", "enabled", "max", true},
+		{"glm-5.3", "disabled", "", "enabled", "low", true},
+		{"glm-5.3", "max", "disabled", "enabled", "low", true},
+	} {
+		t.Run(tc.model+"/"+tc.effort+"/"+tc.thinking, func(t *testing.T) {
+			cfg := provider.Config{Name: "glm", BaseURL: "https://api.z.ai/api/paas/v4", Model: tc.model, APIKey: "k", Extra: map[string]any{"effort": tc.effort}}
+			if tc.thinking != "" {
+				cfg.Extra["thinking"] = tc.thinking
+			}
+			p, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := p.(*client)
+			req := c.buildRequest(provider.Request{})
+			if req.Thinking == nil || req.Thinking.Type != tc.wantThinking || req.ReasoningEffort != tc.wantDepth {
+				t.Fatalf("wire = thinking %+v, reasoning_effort %q; want %q/%q", req.Thinking, req.ReasoningEffort, tc.wantThinking, tc.wantDepth)
+			}
+			if got := c.RequiresReasoningRoundTrip(); got != tc.wantRoundTrip {
+				t.Fatalf("reasoning round trip = %v, want %v", got, tc.wantRoundTrip)
+			}
+			wire, err := json.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(wire), `"reasoning_effort"`) != (tc.wantDepth != "") {
+				t.Fatalf("serialized effort field mismatch: %s", wire)
+			}
+		})
+	}
+	base := provider.Config{Name: "glm", BaseURL: "https://api.z.ai/api/paas/v4", Model: "glm-5.3", APIKey: "k"}
+	if _, err := New(withEffort(base, "medium")); err == nil {
+		t.Fatal("GLM-5.3 accepted unsupported medium effort")
+	}
+	p, err := New(withEffort(base, "max"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.(*client).buildRequest(provider.Request{EffortOverride: "low"}).ReasoningEffort; got != "low" {
+		t.Fatalf("per-request GLM-5.3 low = %q", got)
+	}
+}
+
+func TestDeclaredGLMProtocolOnARelayTakesTheDepthContract(t *testing.T) {
+	relay := func(model, protocol, effort string) provider.Config {
+		return provider.Config{Name: "relay", BaseURL: "https://relay.example/v1", Model: model, APIKey: "k",
+			Extra: map[string]any{"reasoning_protocol": protocol, "effort": effort}}
+	}
+	for _, tc := range []struct {
+		model, protocol, effort, wantThinking, wantDepth string
+	}{
+		{"glm-5.3", "glm", "high", "enabled", "high"},
+		{"glm-5.3", "glm", "disabled", "enabled", "low"},
+		{"glm-5.2", "glm", "none", "disabled", ""},
+		{"glm-4.5", "glm", "disabled", "disabled", ""},
+	} {
+		p, err := New(relay(tc.model, tc.protocol, tc.effort))
+		if err != nil {
+			t.Fatalf("%s/%s: %v", tc.model, tc.effort, err)
+		}
+		req := p.(*client).buildRequest(provider.Request{})
+		if req.Thinking == nil || req.Thinking.Type != tc.wantThinking || req.ReasoningEffort != tc.wantDepth {
+			t.Errorf("%s/%s: wire = thinking %+v, reasoning_effort %q; want %q/%q", tc.model, tc.effort, req.Thinking, req.ReasoningEffort, tc.wantThinking, tc.wantDepth)
+		}
+	}
+	if _, err := New(relay("glm-5.3", "glm", "medium")); err == nil {
+		t.Error("a relay declared glm accepted a level GLM-5.3 does not document")
+	}
+	if _, err := New(relay("glm-5.3", "openai", "medium")); err != nil {
+		t.Errorf("a relay declared openai must not take the GLM contract: %v", err)
+	}
+}
+
+func TestZhipuThinkingOffLevelIgnoresDepthOverride(t *testing.T) {
+	for _, off := range []string{"none", "minimal"} {
+		cfg := provider.Config{Name: "glm", BaseURL: "https://api.z.ai/api/paas/v4", Model: "glm-5.2", APIKey: "k", Extra: map[string]any{"effort": off}}
+		p, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := p.(*client)
+		if len(c.requestEfforts) != 0 {
+			t.Fatalf("effort=%q: requestEfforts = %v, want none", off, c.requestEfforts)
+		}
+		req := c.buildRequest(provider.Request{EffortOverride: "high"})
+		if req.Thinking == nil || req.Thinking.Type != "disabled" || req.ReasoningEffort != "" {
+			t.Fatalf("effort=%q let an override through: thinking %+v, reasoning_effort %q", off, req.Thinking, req.ReasoningEffort)
+		}
+	}
+	cfg := provider.Config{Name: "glm", BaseURL: "https://api.z.ai/api/paas/v4", Model: "glm-5.2", APIKey: "k", Extra: map[string]any{"effort": "high"}}
+	p, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.(*client).buildRequest(provider.Request{EffortOverride: "max"}).ReasoningEffort; got != "max" {
+		t.Fatalf("depth level refused an override: reasoning_effort = %q", got)
+	}
+}
+
 // TestNewZhipuSetsFlag is a smoke test for base-URL detection across both the
 // China (bigmodel.cn) and international (z.ai) GLM endpoints.
 func TestNewZhipuSetsFlag(t *testing.T) {
@@ -1534,7 +1642,7 @@ func TestNewExplicitGLMProtocolOnGateway(t *testing.T) {
 		p, err := New(provider.Config{
 			Name:    "glm-gateway",
 			BaseURL: "https://gateway.example.com/v1",
-			Model:   "glm-5.2",
+			Model:   "glm-4.5",
 			APIKey:  "k",
 			Extra: map[string]any{
 				"reasoning_protocol": "glm",

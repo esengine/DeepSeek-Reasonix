@@ -40,6 +40,8 @@ type ResolvedCall struct {
 	Unavailable bool
 	// UnavailableReason is the host-proven failure detail.
 	UnavailableReason string
+	// RefusalCode is the host refusal identity for a skip-execute policy denial.
+	RefusalCode string
 	// Commit applies a resolve-only state transition after the host has checked
 	// the resolved call. Proxy resolvers must not mutate host state before this
 	// callback runs: read-only agents may reject the action after resolution.
@@ -50,4 +52,11 @@ type ResolvedCall struct {
 // a real MCP (or other) target before permission, hooks, and evidence run.
 type CallResolver interface {
 	ResolveCall(ctx context.Context, args json.RawMessage) (ResolvedCall, error)
+}
+
+// TargetArgsReader is implemented by a proxy tool that can say, without
+// resolving the call, which arguments it forwards to its target. Replaying a
+// stored transcript needs it because resolution has effects of its own.
+type TargetArgsReader interface {
+	TargetArgs(args json.RawMessage) json.RawMessage
 }

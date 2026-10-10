@@ -88,9 +88,7 @@ func TestRefusalPartsAreTheTurnsVisibleAnswer(t *testing.T) {
 	}
 }
 
-// A 400 that names no field is not the server telling us an id expired, so the
-// stateful fast path is not retried away on prose that happens to read like it.
-func TestStalePreviousResponseRetryNeedsTheProtocolsOwnField(t *testing.T) {
+func TestContinuationBadRequestRecoversWithoutProtocolMetadata(t *testing.T) {
 	var attempts int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
@@ -104,15 +102,13 @@ func TestStalePreviousResponseRetryNeedsTheProtocolsOwnField(t *testing.T) {
 
 	p := New(Config{Name: "stateful", APIKey: "k", BaseURL: server.URL, Model: "m", Mode: "stateful"})
 	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "one"}}})
-	if _, err := p.Stream(t.Context(), provider.Request{Messages: []provider.Message{
+	collect(t, p, provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "one"},
 		{Role: provider.RoleAssistant, Content: ""},
 		{Role: provider.RoleUser, Content: "two"},
-	}}); err == nil {
-		t.Fatal("an unnamed 400 was treated as a stale response id and retried")
-	}
-	if attempts != 2 {
-		t.Fatalf("attempts = %d, want the request tried once and not replayed", attempts)
+	}})
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want initial, continuation and full-history recovery", attempts)
 	}
 }
 

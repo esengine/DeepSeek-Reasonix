@@ -83,7 +83,10 @@ func runTUI(args []string, version string) int {
 	}
 	bc := serve.NewBroadcaster()
 	cfg, _ := config.Load()
-	ctrl, err := setupProfileWithOverrides(ctx, *f.model, *f.maxSteps, false, withNotifications(bc, cfg), profile, cliBuildOverrides{
+	reporter := startTUITelemetry(cfg, version, profile, *f.permissionMode,
+		cliTelemetrySessionMode(resumePath != "", strings.TrimSpace(*f.resume) != "", *f.copy),
+		os.Stdin, os.Stdout, os.Stderr)
+	ctrl, err := setupProfileWithOverrides(ctx, *f.model, *f.maxSteps, false, tuiSink(withNotifications(bc, cfg), reporter), profile, cliBuildOverrides{
 		Version: version, WorkspaceRoot: workspaceRoot, OnSessionRecovered: cliSessionRecoveredHandler(leases),
 		Effort: f.effortOverride(), PermissionAllow: allowed, AdditionalDirs: f.addDirs,
 	})
@@ -113,6 +116,7 @@ func runTUI(args []string, version string) int {
 	hub := serve.NewHub(serve.HubOptions{Serve: serveCfg, Surface: surface.CLI})
 	defer hub.Shutdown()
 	adoptFirstPane(hub, ctrl, bc, bc, serveCfg, leases)
+	hub.EnableProviderSetupInProcess()
 
 	err = tui.Run(ctx, tui.Options{
 		Client:        &tui.Client{HTTP: hub.InProcessClient(), Base: tuiBase},
@@ -125,10 +129,10 @@ func runTUI(args []string, version string) int {
 		HideTurnUsage: cfg != nil && !cfg.UI.ShowTurnUsage,
 		AutoSubmit:    cfg != nil && cfg.AutoSubmit,
 		CommandMode:   cfg != nil && cfg.UICommandMode(),
+		QuitCommands:  builtinSlashNames("/quit"),
 		Statusline:    statuslineRunner(cfg),
-		YoloConfirmed: config.YoloAcknowledged(home),
-		ConfirmYolo:   func() error { return config.AcknowledgeYolo(home) },
 	})
+	reporter.RecordRecovery(ctrl.DrainRecoveryMetrics())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1

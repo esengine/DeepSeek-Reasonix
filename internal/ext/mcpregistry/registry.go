@@ -97,18 +97,32 @@ func (c *Client) Resolve(ctx context.Context, registryName string) (Entry, Resul
 	// Installation must use current Registry metadata. Search deliberately falls
 	// back to cache for offline browsing, but a cached package may have been
 	// removed or marked unavailable since it was stored.
-	entries, err := c.fetch(ctx, name, maxLimit)
-	if err != nil {
-		return Entry{}, Result{}, err
-	}
-	c.storeCache(cacheKey(name, maxLimit), entries)
-	result := Result{Entries: entries}
-	for _, entry := range result.Entries {
-		if entry.Name == name || strings.EqualFold(entry.Name, name) {
-			return entry, result, nil
+	cursor := ""
+	seen := make(map[string]bool)
+	for {
+		entries, next, err := c.fetchPage(ctx, name, maxLimit, cursor)
+		if err != nil {
+			return Entry{}, Result{}, err
 		}
+		if cursor == "" {
+			// The browse cache holds one page at the requested limit.
+			c.storeCache(cacheKey(name, maxLimit), entries)
+		}
+		result := Result{Entries: entries}
+		for _, entry := range entries {
+			if entry.Name == name || strings.EqualFold(entry.Name, name) {
+				return entry, result, nil
+			}
+		}
+		if next == "" {
+			return Entry{}, result, fmt.Errorf("MCP Registry has no server named %q", name)
+		}
+		if seen[next] {
+			return Entry{}, Result{}, fmt.Errorf("MCP Registry repeated a pagination cursor")
+		}
+		seen[next] = true
+		cursor = next
 	}
-	return Entry{}, result, fmt.Errorf("MCP Registry has no server named %q", name)
 }
 
 func (e Entry) PluginEntry(localName string) (config.PluginEntry, error) {
@@ -160,6 +174,9 @@ type apiResponse struct {
 	Servers []struct {
 		Server apiServer `json:"server"`
 	} `json:"servers"`
+	Metadata struct {
+		NextCursor string `json:"nextCursor"`
+	} `json:"metadata"`
 }
 
 type apiServer struct {
@@ -198,13 +215,18 @@ type apiTransport struct {
 }
 
 func (c *Client) fetch(ctx context.Context, query string, limit int) ([]Entry, error) {
+	entries, _, err := c.fetchPage(ctx, query, limit, "")
+	return entries, err
+}
+
+func (c *Client) fetchPage(ctx context.Context, query string, limit int, cursor string) ([]Entry, string, error) {
 	base := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	if base == "" {
 		base = DefaultBaseURL
 	}
 	endpoint, err := url.Parse(base + "/v0.1/servers")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	values := endpoint.Query()
 	values.Set("limit", fmt.Sprintf("%d", limit))
@@ -212,10 +234,13 @@ func (c *Client) fetch(ctx context.Context, query string, limit int) ([]Entry, e
 	if query != "" {
 		values.Set("search", query)
 	}
+	if cursor != "" {
+		values.Set("cursor", cursor)
+	}
 	endpoint.RawQuery = values.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "reasonix-mcp-registry/dev")
@@ -225,17 +250,17 @@ func (c *Client) fetch(ctx context.Context, query string, limit int) ([]Entry, e
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("query MCP Registry: %w", err)
+		return nil, "", fmt.Errorf("query MCP Registry: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("query MCP Registry: http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, "", fmt.Errorf("query MCP Registry: http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var response apiResponse
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, maxBody))
 	if err := decoder.Decode(&response); err != nil {
-		return nil, fmt.Errorf("decode MCP Registry response: %w", err)
+		return nil, "", fmt.Errorf("decode MCP Registry response: %w", err)
 	}
 	entries := make([]Entry, 0, len(response.Servers))
 	for _, item := range response.Servers {
@@ -243,7 +268,7 @@ func (c *Client) fetch(ctx context.Context, query string, limit int) ([]Entry, e
 			entries = append(entries, entry)
 		}
 	}
-	return entries, nil
+	return entries, response.Metadata.NextCursor, nil
 }
 
 func normalize(server apiServer) (Entry, bool) {

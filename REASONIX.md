@@ -219,9 +219,11 @@ otherwise the block the model already has goes on reading as current.
 - `#<note>` in chat quick-adds an always-on instruction. The `remember` tool
   instead saves a fallible background fact (frontmatter file + `MEMORY.md`
   index). Fact `type` classifies content; independent `scope` controls whether it
-  is project-only (the default) or explicitly global. The index loads into the
-  stable prefix on the next session; global user/feedback bodies also load as
-  lower-priority compatibility guidance. The current turn receives a tail note.
+  is project-only (the default) or explicitly global.
+- The saved-fact index stays out of the stable prefix and is reached through the
+  `memory` tool; pinned bodies and global user/feedback bodies load into it, the
+  latter as lower-priority compatibility guidance. The current turn receives a
+  tail note.
 
 ## Notes
 
@@ -319,6 +321,31 @@ Use `go test ./path/to/target/` to detect cycles **before** pushing. A `[setup f
 - **One force-push per round of review feedback.** Multiple force-pushes destroy review history and confuse reviewers.
 - **Keep the PR diff minimal.** Only the files relevant to the PR's purpose — no stray changes from other branches.
 - **Amend, don't add commits, for review feedback** — keeps the commit history clean.
+
+## Change discipline
+
+**Assess before editing.** For every change, humans and agents list callers,
+consumers of the same state, sibling features, reload/replay/restart paths,
+error and edge states, TUI/CLI and desktop equivalents, and wire mirrors.
+
+A fix that breaks a neighbouring behaviour is a failed fix.
+
+**Test the neighbourhood.** UI changes add or extend interaction tests for
+adjacent functions of the same component or flow (composer: submit, clear,
+queue, withdraw, restore, steer, failure, replay after reload) and run the whole
+affected suite.
+
+Write tests first; they must fail without the change.
+
+**Fix at the owning layer.** Use the existing unified pattern: no special-case
+flags, duplicated paths, or workarounds at the symptom site.
+
+If the design is duplicated or wrong, make the smallest unifying change:
+one path instead of two, deleting what becomes dead. Use current language and
+framework idioms; do not add a new pattern where one exists.
+
+**PR evidence.** Every PR description carries: Cause, Blast radius,
+Neighbouring behaviours tested, and Why this layer.
 
 ## Reasonix host checks
 

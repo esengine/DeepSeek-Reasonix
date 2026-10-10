@@ -75,12 +75,13 @@ func (a *contextWindow) contextMaintenanceSnapshot() ContextMaintenanceSnapshot 
 			snapshot.LastSavedTokens = receipt.SavedTokens
 		}
 		// Generation-scoped blocked/failed receipts match contextMaintenanceBlocked.
-		if receipt.Status == "blocked" || receipt.Status == "failed" {
+		if a.blockedReceiptHolds(&receipt, snapshot.ProjectedTokens) {
 			snapshot.Blocked = true
 		}
 	}
-	// Legacy sidecars may only have top-level BlockedInputHash.
-	if !snapshot.Blocked && state.BlockedInputHash != "" && state.BlockedInputHash == currentHash {
+	// Legacy sidecars may only have top-level BlockedInputHash; a receipt, when
+	// present, is the sole authority, as in contextMaintenanceBlocked.
+	if state.LastReceipt == nil && state.BlockedInputHash != "" && state.BlockedInputHash == currentHash {
 		snapshot.Blocked = true
 	}
 	return snapshot

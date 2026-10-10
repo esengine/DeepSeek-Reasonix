@@ -1,12 +1,15 @@
-import { Fragment, type ReactNode, memo, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { seconds } from "../i18n/format";
 import type { HubPort, RuntimeView, TreeSession, TreeWorkspace } from "../port/hub";
 import type { Adder } from "./addws";
+import { pinToViewport } from "./place";
 import { useRailQuery } from "./railsearch";
 import { StudioIcon } from "./StudioIcon";
 import { Cross } from "./glyphs";
+import { copyText } from "./CopyButton";
+import { sessionInfoText } from "./sessionInfo";
 import { download } from "../port/download";
 import { host } from "../port/host";
 import { useTreeKeys } from "./tree";
@@ -14,6 +17,9 @@ import { useDismiss } from "./dismiss";
 import { asksDelete } from "./keys";
 import { clearDraftForSession } from "./drafts";
 import { WorkspaceOrder, workspaceMenuKeys } from "./WorkspaceOrder";
+import { WorkspaceReveal } from "./WorkspaceReveal";
+import { Confirm, removeHint } from "./WorkspaceConfirm";
+import { UnreadCount, UnreadDot } from "./UnreadMark";
 
 const parentOf = (root: string) => root.replace(/[/\\]+$/, "").split(/[/\\]/).slice(-2, -1)[0] ?? "";
 
@@ -29,6 +35,9 @@ interface Props {
   folded: Set<string>;
   onFold: (root: string, folded: boolean) => void;
   reload: () => Promise<void>;
+  // The session path being opened, or empty. The row shows it selected and busy
+  // before the kernel answers; the owner clears it on failure.
+  opening?: string;
   onOpen: (req: { root?: string; sessionPath?: string }) => Promise<void>;
   onFocus: (id: string) => void;
   onClose: (ids: string[]) => Promise<void>;
@@ -62,7 +71,7 @@ const SHOWN = 30;
 const rowLabel = (session: TreeSession) =>
   session.title || (session.runtimeId && !session.turns ? t("新会话") : session.name);
 
-function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload, onFold, onOpen, onFocus, onClose, liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onArchive = async () => {}, onRename, onError, adder, children }: Props) {
+function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload, onFold, opening = "", onOpen, onFocus, onClose, liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onArchive = async () => {}, onRename, onError, adder, children }: Props) {
   const [busy, setBusy] = useState("");
   // Folding a machine is the reader's own preference, held the way a host row
   // holds it.
@@ -77,20 +86,23 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
   // session, so a double one would open it twice on the way to the edit.
   const [editing, setEditing] = useState("");
   const [sessionMenu, setSessionMenu] = useState("");
-  const [sessionMenuAt, setSessionMenuAt] = useState({ left: 0, top: 0 });
+  const [sessionMenuAt, setSessionMenuAt] = useState({ x: 0, y: 0 });
   const sessionMenuBox = useRef<HTMLDivElement>(null);
   const sessionMenuPortal = useRef<HTMLDivElement>(null);
-  const workspaceMenuTrigger = useRef<HTMLButtonElement | null>(null);
+  const menuTrigger = useRef<HTMLElement | null>(null);
   const dismissMenu = () => {
-    if (workspaceMenuTrigger.current?.dataset.target === sessionMenu) workspaceMenuTrigger.current.focus();
+    if (menuTrigger.current?.dataset.target === sessionMenu) menuTrigger.current.focus();
     setSessionMenu("");
   };
   useDismiss(!!sessionMenu, sessionMenuBox, dismissMenu, sessionMenuPortal);
   useEffect(() => {
-    if (sessionMenu && workspaceMenuTrigger.current?.dataset.target === sessionMenu) {
+    if (sessionMenu && menuTrigger.current?.dataset.target === sessionMenu) {
       sessionMenuPortal.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
     }
   }, [sessionMenu]);
+  useLayoutEffect(() => {
+    if (sessionMenuPortal.current) pinToViewport(sessionMenuPortal.current, sessionMenuAt.x, sessionMenuAt.y, 12);
+  }, [sessionMenu, sessionMenuAt]);
   // What was already sent for this session, so Enter's commit and the blur it
   // causes do not both reach the host with the same name.
   const renamed = useRef<Record<string, string>>({});
@@ -141,13 +153,10 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
       onFocus(session.runtimeId);
       return;
     }
-    setBusy(session.path);
     try {
       await onOpen({ root: ws.root, sessionPath: session.path });
     } catch (e) {
       onError(e);
-    } finally {
-      setBusy("");
     }
   };
 
@@ -359,6 +368,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       {t("{n} 会话", { n: ws.sessions.length })}
                     </span>
                     <span className="wsacts">
+                      {shut && <UnreadCount n={ws.sessions.filter((x) => x.unread).length} />}
                       <button
                         data-action="session.new"
                         className="wsadd"
@@ -387,12 +397,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                           ev.stopPropagation();
                           const opening = sessionMenu !== ws.root;
                           if (opening) {
-                            workspaceMenuTrigger.current = ev.currentTarget;
+                            menuTrigger.current = ev.currentTarget;
                             const anchor = ev.currentTarget.getBoundingClientRect();
-                            setSessionMenuAt({
-                              left: Math.min(window.innerWidth - 240, anchor.right + 8),
-                              top: Math.max(12, Math.min(window.innerHeight - 140, anchor.top - 7)),
-                            });
+                            setSessionMenuAt({ x: anchor.right + 8, y: anchor.top - 7 });
                           }
                           setSessionMenu(opening ? ws.root : "");
                         }}
@@ -401,11 +408,12 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       </button>
                     </span>
                     {sessionMenu === ws.root && createPortal(
-                      <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("项目操作")} style={sessionMenuAt} data-action-keydown="workspace.menu" data-target={ws.root} onKeyDown={workspaceMenuKeys} onClick={(ev) => ev.stopPropagation()}>
+                      <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("项目操作")} data-action-keydown="workspace.menu" data-target={ws.root} onKeyDown={workspaceMenuKeys} onClick={(ev) => ev.stopPropagation()}>
                         <div className="session-pop-head">
                           <b>{ws.name}</b>
                           <small className="session-pop-path" title={ws.root}>{ws.root}</small>
                         </div>
+                        <WorkspaceReveal ws={ws} hub={hub} dismiss={dismissMenu} onError={onError} />
                         {ws.remembered && <WorkspaceOrder root={ws.root} position={tree.filter((w) => w.remembered).findIndex((w) => w.root === ws.root)} total={tree.filter((w) => w.remembered).length}
                           hub={hub} reload={reload} dismiss={dismissMenu} onError={onError} />}
                         <div className="session-pop-group">
@@ -424,7 +432,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                 {!shut && (
                   <div className="kids">
                 {(whole.has(ws.root) ? ws.sessions : ws.sessions.slice(0, SHOWN)).map((session) => {
-                    const on = session.runtimeId === active;
+                    const on = opening ? session.path === opening : session.runtimeId === active;
                     const run = session.runtimeId ? runs[session.runtimeId]?.run : undefined;
                     if (confirm === session.path) {
                       return (
@@ -448,17 +456,28 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                       <div
                         ref={sessionMenu === session.path ? sessionMenuBox : undefined}
                         data-action-click="session.open"
+                        data-action-contextmenu="session.menu"
+                        aria-haspopup="menu"
                         data-action-keydown={["session.open", "session.delete"]}
                         data-target={session.path}
-                        className="sessrow"
+                        className="sessrow sessrow-context"
                         role="treeitem"
                         aria-selected={on}
                         data-on={on ? "" : undefined}
                         data-live={session.runtimeId ? "" : undefined}
                         data-run={run === "idle" ? undefined : run}
+                        data-unread={session.unread ? "" : undefined}
                         data-just-done={session.runtimeId && justDone.has(session.runtimeId) ? "" : undefined}
-                        data-busy={busy === session.path ? "" : undefined}
+                        data-busy={opening === session.path ? "" : undefined}
                         onClick={() => void pick(ws, session)}
+                        onContextMenu={(ev) => {
+                          if ((ev.target as HTMLElement).closest("input, textarea, [role='menu']")) return;
+                          ev.preventDefault();
+                          ev.stopPropagation();
+                          menuTrigger.current = ev.currentTarget;
+                          setSessionMenuAt({ x: ev.clientX, y: ev.clientY });
+                          setSessionMenu(session.path);
+                        }}
                         tabIndex={0}
                         onKeyDown={(ev) => {
                           if (ev.target !== ev.currentTarget) return;
@@ -504,6 +523,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                         ) : (
                           <span className="sesstitle" title={rowLabel(session)}><span>{rowLabel(session)}</span></span>
                         )}
+                        {session.unread && <UnreadDot kind="row" />}
                         {kept.length > 0 && (
                           <button
                             className="sesscopies"
@@ -528,30 +548,8 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                             {`+${kept.length}`}
                           </button>
                         )}
-                        <button
-                          className="session-more"
-                          data-action="session.menu"
-                          data-target={session.path}
-                          title={t("更多操作")}
-                          aria-label={t("会话操作：{title}", { title: rowLabel(session) })}
-                          aria-expanded={sessionMenu === session.path}
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            const opening = sessionMenu !== session.path;
-                            if (opening) {
-                              const anchor = ev.currentTarget.getBoundingClientRect();
-                              setSessionMenuAt({
-                                left: Math.min(window.innerWidth - 240, anchor.right + 8),
-                                top: Math.max(12, Math.min(window.innerHeight - 270, anchor.top - 7)),
-                              });
-                            }
-                            setSessionMenu(opening ? session.path : "");
-                          }}
-                        >
-                          <StudioIcon name="more" />
-                        </button>
                         {sessionMenu === session.path && createPortal(
-                          <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("会话操作")} style={sessionMenuAt} onClick={(ev) => ev.stopPropagation()}>
+                          <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("会话操作")} style={{ maxHeight: "calc(100vh / var(--zoom, 1) - 24px)", overflowY: "auto" }} onClick={(ev) => ev.stopPropagation()}>
                             <div className="session-pop-head">
                               <b>{rowLabel(session)}</b>
                               <small>{session.runtimeId && liveIds([session.runtimeId]).length ? t("执行中") : t("已完成")} · {t("本地工作区")}</small>
@@ -600,6 +598,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                             </div>
                             <div className="session-pop-divider" />
                             <div className="session-pop-group">
+                              <button role="menuitem" data-action="session.copy-info" data-target={session.path} onClick={() => { void copyText(sessionInfoText(session, ws.root)).catch(onError); setSessionMenu(""); }}>
+                                <StudioIcon name="copy" /><span>{t("复制会话信息")}</span>
+                              </button>
                               <button role="menuitem" data-action="session.export" data-target={session.path} disabled={busy === "export:" + session.path} onClick={() => void saveSession(session)}>
                                 <StudioIcon name="download" /><span>{t("导出会话")}</span><small>JSON</small>
                               </button>
@@ -634,7 +635,9 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                               key={copy.path}
                               className="sessrow sesscopy"
                               role="treeitem"
-                              data-busy={busy === copy.path ? "" : undefined}
+                              aria-selected={opening === copy.path}
+                              data-on={opening === copy.path ? "" : undefined}
+                              data-busy={opening === copy.path ? "" : undefined}
                               onClick={() => void pick(ws, copy)}
                               tabIndex={0}
                               onKeyDown={(ev) => {
@@ -737,57 +740,4 @@ export function newlyDone(
     before[id] = st.run;
   }
   return fresh;
-}
-
-// Removing a folder closes its panes, and closing one stops what it is running.
-// That price is said here rather than discovered afterwards — the kernel refuses
-// the removal either way, and a refusal names no pane the reader can go find.
-export function removeHint(panes: number, live: number): string {
-  if (panes === 0) return t("不会删除任何文件");
-  if (live === 0) return t("将先关闭 {n} 个面板；不会删除任何文件", { n: panes });
-  return t("其中 {live} 个对话正在运行，停止后才能移除", { live });
-}
-
-// 确认不跟原来那行抢位置：把「×」换成「移除」两个字，宽度一变就把文件夹名挤扁
-// 了。整行换成一条问句，取消永远在手边，误点的代价是零。
-export function Confirm({
-  what,
-  hint,
-  go,
-  danger,
-  onGo,
-  onCancel,
-}: {
-  what: string;
-  hint?: string;
-  go: string;
-  danger?: boolean;
-  onGo: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div
-      className="wsconfirm"
-      role="alertdialog"
-      aria-label={what}
-      data-action-keydown="layer.dismiss"
-      onKeyDown={(ev) => {
-        if (ev.key !== "Escape") return;
-        // Dismissing the question is not stopping the run behind it.
-        ev.stopPropagation();
-        onCancel();
-      }}
-    >
-      <div className="wsconfirm-t">
-        <span className="q">{what}</span>
-        {hint && <span className="h">{hint}</span>}
-      </div>
-      <div className="wsconfirm-a">
-        <button data-action="layer.dismiss" onClick={onCancel}>{t("取消")}</button>
-        <button autoFocus data-action="workspace.remove" data-danger={danger ? "" : undefined} onClick={onGo}>
-          {go}
-        </button>
-      </div>
-    </div>
-  );
 }

@@ -32,7 +32,7 @@ type VersionEntry struct {
 	Version     string `json:"version"`
 	Tag         string `json:"tag"`
 	PublishedAt string `json:"publishedAt"`
-	Notes       string `json:"notes"`
+	HasNotes    bool   `json:"hasNotes"`
 	Current     bool   `json:"current"`
 	Older       bool   `json:"older"`
 }
@@ -73,7 +73,7 @@ func hubOver(ctx context.Context, in Install, client *http.Client) VersionHub {
 	hub := VersionHub{Current: in.Version, Pinned: PinnedVersion()}
 	ctx, cancel := context.WithTimeout(ctx, catalogTimeout)
 	defer cancel()
-	st, err := New(Options{Current: in.Version, Pinned: hub.Pinned, HTTP: client, IndexURL: StudioCatalog}).Check(ctx)
+	st, err := New(Options{Current: in.Version, Pinned: hub.Pinned, HTTP: client, IndexURL: StudioCatalog, UserAgent: UserAgent(in.Version)}).Check(ctx)
 	hub.Latest, hub.Newer, hub.StalePin = st.Latest, st.Newer, st.StalePin
 	hub.Versions = versionRows(st.Entries, in.Version)
 	if err != nil {
@@ -91,7 +91,7 @@ func versionRows(entries []IndexEntry, current string) []VersionEntry {
 	rows := make([]VersionEntry, 0, len(entries)+1)
 	seen := false
 	for _, e := range entries {
-		row := VersionEntry{Version: e.Version, Tag: e.Tag, PublishedAt: e.PublishedAt}
+		row := VersionEntry{Version: e.Version, Tag: e.Tag, PublishedAt: e.PublishedAt, HasNotes: strings.TrimSpace(e.Notes) != ""}
 		if SameVersion(e.Version, current) {
 			row.Current, seen = true, true
 		} else {

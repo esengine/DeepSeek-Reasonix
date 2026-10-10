@@ -1,0 +1,9 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "paper-dawn-kit",
+  "version": "1.0.0",
+  "description": "A local Studio theme template with light and dark palettes.",
+  "contributes": {
+    "themes": ["paper-dawn/theme.json"]
+  }
+}

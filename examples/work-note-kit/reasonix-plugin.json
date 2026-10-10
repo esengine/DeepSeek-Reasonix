@@ -1,0 +1,9 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "work-note-kit",
+  "version": "1.0.0",
+  "description": "Prompt templates for an evidence-based handoff and check summary",
+  "contributes": {
+    "prompts": ["prompts"]
+  }
+}

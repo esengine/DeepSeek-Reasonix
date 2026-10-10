@@ -1,6 +1,6 @@
 import { HttpError } from "./http_error";
-import { MockBackup } from "./mock_backup";
-import { FEEDBACK_CODE, type FeedbackEnv, type FeedbackItem, type FeedbackMine, type FeedbackReceipt, type FeedbackReply, type FeedbackReplyReceipt, type FeedbackRequest } from "./feedback";
+import { MockCommit } from "./mock_commit";
+import { FEEDBACK_CODE, type FeedbackEnv, type FeedbackItem, type FeedbackMine, type FeedbackProfile, type FeedbackReceipt, type FeedbackReply, type FeedbackReplyReceipt, type FeedbackRequest } from "./feedback";
 
 const LIMITS = { bodyBytes: 8192, nameChars: 40, contactChars: 120, images: 3, imageBytes: 2 << 20, uploadBytes: 10 << 20, replyBytes: 4096 };
 
@@ -13,7 +13,7 @@ const DAY = 86_400_000;
 const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
 
 const item = (over: Partial<FeedbackItem> & Pick<FeedbackItem, "receipt" | "category" | "titleSnippet" | "status" | "createdAt" | "updatedAt">): FeedbackItem => ({
-  needsInput: false, replies: [], unreadReplies: 0, ...over,
+  needsInput: false, underReview: false, replies: [], unreadReplies: 0, ...over,
 });
 
 const msg = (id: number, author: FeedbackReply["author"], body: string, days: number): FeedbackReply => ({ id, author, body, createdAt: ago(days) });
@@ -28,6 +28,7 @@ const SEEDED: FeedbackItem[] = [
   item({ receipt: "FB-3F6G-2KV9", category: "idea", titleSnippet: "Fixed in the next build: quieter update banner", status: "fixed", issueNumber: 11390, issueUrl: "https://github.com/esengine/DeepSeek-Reasonix/issues/11390", resolvedVersion: "next", createdAt: ago(8), updatedAt: ago(0.5) }),
   item({ receipt: "FB-8Q2J-6PW4", category: "other", titleSnippet: "Please support a monorepo layout", status: "wontfix", issueNumber: 11288, issueUrl: "https://github.com/esengine/DeepSeek-Reasonix/issues/11288", createdAt: ago(12), updatedAt: ago(5) }),
   item({ receipt: "FB-4T7V-3ZH1", category: "bug", titleSnippet: "Crash when opening settings on a small window", status: "duplicate", issueNumber: 11301, issueUrl: "https://github.com/esengine/DeepSeek-Reasonix/issues/11301", duplicateOf: 11299, createdAt: ago(15), updatedAt: ago(9) }),
+  item({ receipt: "FB-5R2T-6VB3", category: "bug", titleSnippet: "Settings sheet flickers when the window is dragged", status: "received", underReview: true, createdAt: ago(0.3), updatedAt: ago(0.3) }),
   item({ receipt: "FB-6M9R-5CE8", category: "question", titleSnippet: "How do I move my sessions to another disk?", status: "received", statusUnavailable: true, createdAt: ago(40), updatedAt: ago(40) }),
   item({ receipt: "FB-1C5W-7NB2", category: "bug", titleSnippet: "Terminal output is cut off after a resize", status: "needs_info", needsInput: true, createdAt: ago(2), updatedAt: ago(0.2),
     replies: [msg(31, "maintainer", "Thanks for the report. Which operating system and which shell are you using?\nAnd can you say what the window size was before you resized it?", 0.2)] }),
@@ -50,17 +51,49 @@ function fault(key = FAULT): string {
   }
 }
 
+// A tab's own sessionStorage also picks the standing the list answers with, for
+// the same reason: "l0".."l6", "legacy", "lapsed", "revoked", or "none" for a
+// service that states no profile.
+const STANDING = "rx-mock-feedback-standing";
+
+const THRESHOLDS = [0, 1, 3, 6, 12, 24, 48];
+const LEVEL_LIMITS = [[3, 10, 3], [5, 15, 4], [6, 20, 5], [8, 25, 6], [10, 30, 8], [12, 40, 10], [12, 60, 10]] as const;
+const BASE_LIMITS = LEVEL_LIMITS[0];
+const TRUSTED_LIMITS = LEVEL_LIMITS[6];
+
+function standing(kind: string): FeedbackProfile | null {
+  if (kind === "none") return null;
+  const level = /^l[0-6]$/.test(kind) ? Number(kind.slice(1)) : kind === "lapsed" ? 3 : kind === "revoked" ? 2 : kind === "legacy" ? 0 : 2;
+  const adopted = kind === "legacy" ? 0 : THRESHOLDS[level]! + (level === 6 ? 2 : level === 0 ? 0 : 1);
+  const next = THRESHOLDS[level + 1];
+  const state = kind === "lapsed" ? "lapsed" : kind === "revoked" ? "revoked" : kind === "legacy" ? "legacy_active" : level === 0 ? "none" : "active";
+  const [h, d, r] = state === "lapsed" || state === "revoked" || state === "none" ? BASE_LIMITS : state === "legacy_active" ? TRUSTED_LIMITS : LEVEL_LIMITS[level]!;
+  return {
+    level, adoptedCount: adopted, currentThreshold: THRESHOLDS[level]!,
+    nextLevel: next === undefined ? null : level + 1, nextThreshold: next ?? null, remaining: next === undefined ? null : next - adopted,
+    trustState: state, trustExpiresAt: state === "active" || state === "legacy_active" ? new Date(Date.now() + 20 * DAY).toISOString() : null,
+    observedAt: new Date().toISOString(), effectiveLimits: { reportsPerHour: h, reportsPerDay: d, repliesPerHour: r },
+  };
+}
+
 const STATUS: Record<string, number> = {
   [FEEDBACK_CODE.tooLarge]: 413, [FEEDBACK_CODE.rateLimited]: 429, [FEEDBACK_CODE.disabled]: 503,
   [FEEDBACK_CODE.duplicate]: 409, [FEEDBACK_CODE.badToken]: 409, [FEEDBACK_CODE.offline]: 502, [FEEDBACK_CODE.unavailable]: 502, [FEEDBACK_CODE.internal]: 500, [FEEDBACK_CODE.busy]: 503, [FEEDBACK_CODE.imageMetadata]: 400,
   [FEEDBACK_CODE.replyLimit]: 429, [FEEDBACK_CODE.notReplyable]: 409, [FEEDBACK_CODE.challengeRequired]: 403,
 };
 
-function refusal(code: string): HttpError {
-  return new HttpError(STATUS[code] ?? 500, code, { code, error: code, params: code === FEEDBACK_CODE.rateLimited ? { retryAfterSeconds: 90 } : {} });
+// A fault is a code, optionally followed by "@" and the window it names:
+// "feedback.rate_limited@install_daily".
+function refusal(fault: string): HttpError {
+  const [code = "", limit] = fault.split("@");
+  const soon = new Date(Date.now() + (limit === "install_daily" ? 5 * 3_600_000 : 25 * 60_000)).toISOString();
+  let params: Record<string, string | number> = code === FEEDBACK_CODE.rateLimited ? { retryAfterSeconds: 90 } : {};
+  if (limit === "reply_item") params = { limit };
+  else if (limit) params = { limit, resetsAt: soon, retryAfterSeconds: Math.round((Date.parse(soon) - Date.now()) / 1000) };
+  return new HttpError(STATUS[code] ?? 500, code, { code, error: code, params });
 }
 
-export class MockFeedback extends MockBackup {
+export class MockFeedback extends MockCommit {
   private filed: FeedbackItem[] = [];
   private name = "";
   private rows: FeedbackItem[] = SEEDED.map((i) => ({ ...i, replies: [...i.replies] }));
@@ -75,12 +108,12 @@ export class MockFeedback extends MockBackup {
     if (code === "feedback.invalid") {
       throw new HttpError(400, "invalid", { code, error: "invalid", params: { field: "body", reason: "too_long" } });
     }
-    if (code && STATUS[code]) throw refusal(code);
+    if (code && STATUS[code.split("@")[0]!]) throw refusal(code);
     this.name = req.displayName;
     const receipt = "FB-" + (1000 + this.filed.length * 7).toString(36).toUpperCase().padStart(4, "K") + "-9QX2";
     const now = new Date().toISOString();
     this.filed = [item({ receipt, category: req.category, titleSnippet: req.body.trim().slice(0, 80), status: "received", createdAt: now, updatedAt: now }), ...this.filed];
-    return { receipt, status: "received", createdAt: now, redacted: /sk-[A-Za-z0-9]{8,}/.test(req.body) };
+    return { receipt, status: "received", createdAt: now, underReview: false, redacted: /sk-[A-Za-z0-9]{8,}/.test(req.body) };
   }
 
   async myFeedback(): Promise<FeedbackMine> {
@@ -93,7 +126,7 @@ export class MockFeedback extends MockBackup {
       return { ...i, needsInput: i.statusUnavailable ? false : i.needsInput, unreadReplies };
     });
     const unread = items.filter((i) => i.unreadReplies > 0 || i.needsInput).length;
-    return { items, offline: code === "mine_offline", unread, hasNew: unread > 0 };
+    return { items, offline: code === "mine_offline", unread, hasNew: unread > 0, profile: standing(fault(STANDING)) };
   }
 
   announced = 0;

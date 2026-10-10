@@ -29,6 +29,9 @@ type state struct {
 	DisplayName  string   `json:"displayName,omitempty"`
 	Items        []Item   `json:"items,omitempty"`
 	Pending      *pending `json:"pending,omitempty"`
+	// Profile is the last standing the service confirmed, shown labelled stale
+	// while it is unreachable.
+	Profile *Profile `json:"profile,omitempty"`
 	// Seen is, per receipt, the newest reply id the person has been shown.
 	Seen map[string]ReplyID `json:"seen,omitempty"`
 }
@@ -175,7 +178,7 @@ func (st *state) remember(items ...Item) {
 // sent under it stay listed, marked as unreadable, because the service lists
 // only the current identity's rows and cannot issue a token twice.
 func (st *state) retire() {
-	st.InstallID, st.InstallToken = "", ""
+	st.InstallID, st.InstallToken, st.Profile = "", "", nil
 	for i := range st.Items {
 		st.Items[i].StatusUnavailable = true
 	}

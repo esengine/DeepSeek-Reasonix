@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, dialog, ipcMain, screen, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerSaveBlocker, screen, session, shell } = require("electron");
 const { relaunchForOzonePlatform } = require("./ozone");
 
 // Before the instance lock: this process must hold nothing its relaunch needs.
@@ -13,10 +13,11 @@ const { StudioHost } = require("./hostclient");
 const { installTray } = require("./tray");
 const { instanceID, profileFor } = require("./instance");
 const { installApplicationMenu, installContextMenu } = require("./menu");
+const { uiLanguage } = require("./uilang");
 const { installFullScreenKey } = require("./fullscreen");
 const { installReload } = require("./reload");
 const { externalTarget } = require("./links");
-const { reveal } = require("./reveal");
+const { reveal, revealWorkspace } = require("./reveal");
 const { appIcon } = require("./appicon");
 const layout = require("./layout");
 const { offerCleanup } = require("./legacy");
@@ -24,8 +25,11 @@ const { stripPackageGrants, unpaintedWindowCause } = require("./packagegrants");
 const { BrowserProtocol } = require("./browserprotocol");
 const { BrowserViews } = require("./browserviews");
 const { startBrowserRelay } = require("./browserrelay");
-const { prefsFile, registerPrefs } = require("./prefs");
+const { groundFor } = require("./ground");
+const { loadPrefs, prefsFile, registerPrefs } = require("./prefs");
+const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
+const { crashDir, recordHostExit, pendingHostExit, clearHostExit, hostExitNotice } = require("./hostexit");
 
 // A page in a minimized or fully covered window counts as hidden, and a hidden
 // page drops the input the agent sends it: measured, its clicks never arrive and
@@ -69,6 +73,7 @@ let grants = null;
 let browserViews = null;
 let browserRelay = null;
 let reload = null;
+let powerGuard = null;
 let logs = null;
 let handshaken = false;
 
@@ -93,6 +98,7 @@ async function launchKernel(args) {
     const began = Date.now();
     logs.shell.line(`host: starting ${hostBinary} (attempt ${attempt})`);
     kernel = start(hostBinary, args, {
+      systemLanguage: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
       timeoutMs: handshakeTimeout(),
       onSlow: () => {
         logs.shell.line("host: no handshake yet; showing the starting window");
@@ -114,7 +120,11 @@ async function launchKernel(args) {
         logs.shell.line(`host: exited code=${code} signal=${signal}${handshaken ? "" : " before its handshake"}`);
         // Before the handshake the launch itself fails, and boot's catch owns
         // telling the person why; quitting here would race that dialog.
-        if (handshaken && code !== 0 && !quitting) app.quit();
+        powerGuard?.close();
+        if (handshaken && code !== 0 && !quitting) {
+          recordHostExit({ logs, userData: app.getPath("userData"), code, signal, startedAt: began });
+          app.quit();
+        }
       },
       onAct: handOver,
     });
@@ -141,7 +151,7 @@ async function boot() {
   // Only a packaged build has a version worth reporting -- app.getVersion()
   // falls back to Electron's own, which named a Studio that never shipped and
   // ranked it ahead of every published release.
-  const args = ["-page", pageDir];
+  const args = ["-page", pageDir, "-crash-dir", crashDir(logs.dir)];
   if (computerHelper && existsSync(computerHelper)) args.push("-computer-helper", computerHelper);
   if (app.isPackaged) {
     args.push("-studio-version", app.getVersion());
@@ -158,6 +168,17 @@ async function boot() {
   origin = ready.origin;
   client = new StudioHost(ready.origin, ready.token);
   await armCredential(ready);
+  powerGuard = createPowerGuard({
+    blocker: powerSaveBlocker,
+    running: () => client.trayRunning(),
+    enabled: () => keepsAwake(loadPrefs(prefsFile(app.getPath("userData")))),
+  });
+  powerGuard.begin();
+  // The poll alone leaves a turn unprotected for up to its period; the page's
+  // own submit is the moment one starts, and this process sees it complete.
+  session.defaultSession.webRequest.onCompleted({ urls: [`${ready.origin}/*submit`] }, (details) => {
+    if (details.method === "POST" && details.statusCode < 300) void powerGuard?.refresh();
+  });
   win = createWindow();
   closeStarting();
   guard(win.webContents);
@@ -166,7 +187,7 @@ async function boot() {
     const cause = unpaintedWindowCause(grants, app.getLocale());
     if (cause) dialog.showErrorBox(cause.title, cause.detail);
   });
-  installContextMenu(win.webContents, win);
+  installContextMenu(win.webContents, win, uiLang);
   installFullScreenKey(win.webContents, win);
   reload = installReload(win.webContents, win);
   win.once("ready-to-show", () => win.show());
@@ -181,6 +202,7 @@ async function boot() {
   // the shell this one replaces, and a modal in front of a window that has not
   // painted reads as the application having failed to start.
   cleanUpLegacyInstalls();
+  announceHostExit();
 }
 
 // The agent's browser draws its pages as views in this window: the kernel
@@ -196,6 +218,18 @@ function hostAgentBrowser() {
     onFrame: (frame) => protocol.receive(frame),
     onDrop: () => protocol.drop(),
   });
+}
+
+// Told once: the marker stays until the person has seen the notice.
+function announceHostExit() {
+  const userData = app.getPath("userData");
+  const exit = pendingHostExit(userData);
+  if (!exit) return;
+  const text = hostExitNotice(uiLang(), exit, logs.dir);
+  dialog
+    .showMessageBox(win, { type: "warning", message: text.message, detail: text.detail, buttons: [text.ok] })
+    .then(() => clearHostExit(userData))
+    .catch((err) => logs.shell.line(`host exit notice: ${err.message}`));
 }
 
 // The Wails install a dmg download leaves beside this one. Detached from boot:
@@ -269,6 +303,8 @@ function fitted() {
   };
 }
 
+const ground = () => groundFor(loadPrefs(prefsFile(app.getPath("userData"))), nativeTheme.shouldUseDarkColors);
+
 function createWindow() {
   const mac = process.platform === "darwin";
   const windows = process.platform === "win32";
@@ -281,6 +317,7 @@ function createWindow() {
     // Shown once it has been measured against the screen it landed on; sizing a
     // visible window makes the correction a flicker.
     show: false,
+    backgroundColor: ground(),
     frame: !windows,
     titleBarStyle: mac ? "hiddenInset" : "default",
     ...(mac ? { trafficLightPosition: LIGHTS } : {}),
@@ -314,7 +351,17 @@ function fromWindow(event) {
   return win && !win.isDestroyed() && event.sender === win.webContents ? win : null;
 }
 
-registerPrefs(ipcMain, () => prefsFile(app.getPath("userData")), fromWindow);
+// The page reads navigator.languages[0], which is the first preferred system
+// language; app.getLocale() is the locale Chromium resolved, which can differ.
+const uiLang = () => uiLanguage(loadPrefs(prefsFile(app.getPath("userData"))), app.getPreferredSystemLanguages()[0] ?? app.getLocale());
+registerPrefs(ipcMain, () => prefsFile(app.getPath("userData")), fromWindow, () => {
+  installApplicationMenu(uiLang);
+  if (win && !win.isDestroyed()) win.setBackgroundColor(ground());
+  void powerGuard?.refresh();
+});
+nativeTheme.on("updated", () => {
+  if (win && !win.isDestroyed()) win.setBackgroundColor(ground());
+});
 
 ipcMain.handle("window:minimise", (event) => {
   fromWindow(event)?.minimize();
@@ -340,7 +387,7 @@ ipcMain.handle("browser:control", (event, targetId, action) => {
   if (fromWindow(event)) browserViews?.control(String(targetId), String(action));
 });
 ipcMain.handle("browser:navigate", (event, targetId, address) =>
-  fromWindow(event) ? (browserViews?.navigate(String(targetId), String(address)) ?? false) : false,
+  fromWindow(event) ? (browserViews?.navigate(String(targetId), String(address)) ?? "scheme") : "scheme",
 );
 ipcMain.handle("browser:trust-certificate", (event, targetId) =>
   fromWindow(event) ? (browserViews?.trustCertificate(String(targetId)) ?? false) : false,
@@ -353,6 +400,9 @@ ipcMain.handle("shell:open-external", (event, raw) => {
   const target = externalTarget(raw);
   if (target) return shell.openExternal(target);
 });
+ipcMain.handle("shell:reveal-workspace", (event, root) =>
+  fromWindow(event) && client ? revealWorkspace(client, shell, String(root)) : { code: "", error: "no window" },
+);
 ipcMain.handle("shell:reveal", (event, base, rel) =>
   fromWindow(event) && client ? reveal(client, shell, String(base), String(rel)) : { code: "", error: "no window" },
 );
@@ -428,7 +478,7 @@ if (!primary) {
 
 app.whenReady().then(() => {
   if (!primary) return;
-  installApplicationMenu();
+  installApplicationMenu(uiLang);
   boot().catch((err) => {
     console.error("reasonix-studio:", err.message);
     if (quitting) {
@@ -490,6 +540,7 @@ app.on("before-quit", () => {
   quitting = true;
   logs.shell.line("shell: quitting");
   browserRelay?.stop();
+  powerGuard?.close();
   tray?.close();
   kernel?.child.stdin.end();
 });

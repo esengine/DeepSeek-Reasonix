@@ -288,7 +288,7 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	return c.ask(ctx, questions, nil)
 }
 
-func (c *Controller) ask(ctx context.Context, questions []event.AskQuestion, origin *event.AskOrigin) ([]event.AskAnswer, error) {
+func (c *Controller) ask(ctx context.Context, questions []event.AskQuestion, origin *event.AskOrigin) (_ []event.AskAnswer, err error) {
 	// Registering after the lock left a queued question invisible everywhere:
 	// no event, absent from the snapshot, unreachable by ReplayPendingPrompts.
 	// The record comes first: registration is what makes it answerable.
@@ -297,6 +297,7 @@ func (c *Controller) ask(ctx context.Context, questions []event.AskQuestion, ori
 		return nil, err
 	}
 	reply := c.approval.registerAsk(id, questions, origin)
+	defer c.yieldWorkspaceNow(ctx, &err)()
 
 	if !c.lockPromptFor(ctx, "question") {
 		c.approval.cancelAsk(id)
@@ -344,7 +345,7 @@ func (c *Controller) AnswerQuestionFrom(id string, answers []event.AskAnswer, vi
 			activeTurn := c.gate.cancel != nil
 			c.mu.Unlock()
 			if activeTurn {
-				c.Cancel()
+				c.cancelTurn(causeAskSkipped)
 				return
 			}
 		}
@@ -561,7 +562,7 @@ func (c *Controller) requestApproval(ctx context.Context, req approvalRequest) (
 // posture) for the same scope short-circuits; the approvalManager's promptMu
 // serialises outstanding prompts. It authorises nothing on its own — that is
 // requestApproval's half.
-func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRequest) (approvalReply, error) {
+func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRequest) (_ approvalReply, err error) {
 	// YOLO/full access and the just-approved-plan execution window auto-allow
 	// approval-gated tools without prompting. Plan approval is a user decision,
 	// not a tool permission, so it deliberately stays interactive.
@@ -569,6 +570,8 @@ func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRe
 		return approvalReply{allow: true}, nil
 	}
 
+	yield, restore := c.yieldWorkspace(ctx, &err)
+	defer restore()
 	c.approval.promptMu.Lock()
 	defer c.approval.promptMu.Unlock()
 
@@ -603,6 +606,7 @@ func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRe
 		}
 	}
 
+	yield()
 	c.approval.promptEmitMu.Lock()
 	var id string
 	var reply chan approvalReply

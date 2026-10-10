@@ -127,6 +127,7 @@ var acceptsDefaultSnip = map[string]bool{
 	"browser_read":   true, // same shape as browser_open, and paged by offset when longer
 	"code_index":     true,
 	"complete_step":  true,
+	"render_chart":   true, // a chart_id and a few summary lines; never large enough to snip
 	"computer_act":   true, // step results lead, then the application's tree read top-down
 	"computer_read":  true, // an accessibility tree reads top-down, like a page snapshot
 	"compress":       true,

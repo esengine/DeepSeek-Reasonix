@@ -4,7 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"reasonix/internal/contract/provider"
 )
 
 func indexServer(t *testing.T, status int, body string) *httptest.Server {
@@ -32,7 +35,7 @@ const sampleIndex = `{
 
 func TestFetchIndexReadsPublishedShape(t *testing.T) {
 	srv := indexServer(t, 200, sampleIndex)
-	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL)
+	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL, "")
 	if err != nil {
 		t.Fatalf("FetchIndex: %v", err)
 	}
@@ -52,7 +55,7 @@ func TestFetchIndexReadsPublishedShape(t *testing.T) {
 func TestFetchIndexToleratesUnknownFields(t *testing.T) {
 	srv := indexServer(t, 200, `{"schemaVersion":9,"future":{"x":1},"versions":[
 	  {"version":"2.0.0","tag":"studio-v2.0.0","manifest":"https://x/latest.json","extra":true}]}`)
-	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL)
+	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL, "")
 	if err != nil {
 		t.Fatalf("FetchIndex: %v", err)
 	}
@@ -67,7 +70,7 @@ func TestFetchIndexDropsUnusableEntries(t *testing.T) {
 	  {"version":"","manifest":"https://x/latest.json"},
 	  {"version":"1.9.0","manifest":""},
 	  {"version":"2.0.0","tag":"studio-v2.0.0","manifest":"https://x/2/latest.json"}]}`)
-	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL)
+	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL, "")
 	if err != nil {
 		t.Fatalf("FetchIndex: %v", err)
 	}
@@ -78,14 +81,14 @@ func TestFetchIndexDropsUnusableEntries(t *testing.T) {
 
 func TestFetchIndexReportsAnUnavailableCatalog(t *testing.T) {
 	srv := indexServer(t, 503, "nope")
-	if _, err := FetchIndex(context.Background(), srv.Client(), srv.URL); err == nil {
+	if _, err := FetchIndex(context.Background(), srv.Client(), srv.URL, ""); err == nil {
 		t.Error("a 503 must surface, not read as an empty catalog")
 	}
 }
 
 func TestRollbackableExcludesTheRunningVersion(t *testing.T) {
 	srv := indexServer(t, 200, sampleIndex)
-	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL)
+	idx, err := FetchIndex(context.Background(), srv.Client(), srv.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +121,7 @@ func TestCompareVersionsOrdersReleases(t *testing.T) {
 
 func TestFetchManifestAtRequiresAVersion(t *testing.T) {
 	ok := indexServer(t, 200, `{"version":"1.25.1","platforms":{}}`)
-	m, err := FetchManifestAt(context.Background(), ok.Client(), ok.URL)
+	m, err := FetchManifestAt(context.Background(), ok.Client(), ok.URL, "")
 	if err != nil {
 		t.Fatalf("FetchManifestAt: %v", err)
 	}
@@ -126,7 +129,7 @@ func TestFetchManifestAtRequiresAVersion(t *testing.T) {
 		t.Errorf("version = %q", m.Version)
 	}
 	empty := indexServer(t, 200, `{"platforms":{}}`)
-	if _, err := FetchManifestAt(context.Background(), empty.Client(), empty.URL); err == nil {
+	if _, err := FetchManifestAt(context.Background(), empty.Client(), empty.URL, ""); err == nil {
 		t.Error("a manifest without a version must not be installable")
 	}
 }
@@ -153,7 +156,55 @@ func TestPrereleaseRanksBelowItsRelease(t *testing.T) {
 // The catalog is per line. An empty URL used to fall back to a constant naming
 // the desktop line's, which nothing publishes, so the mistake surfaced as a 404.
 func TestFetchIndexRequiresACatalogURL(t *testing.T) {
-	if _, err := FetchIndex(context.Background(), http.DefaultClient, "  "); err == nil {
+	if _, err := FetchIndex(context.Background(), http.DefaultClient, "  ", ""); err == nil {
 		t.Fatal("an empty catalog URL was accepted")
+	}
+}
+
+func TestCatalogReadsCarryTheClientIdentity(t *testing.T) {
+	var agents []string
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		agents = append(agents, r.Header.Get("User-Agent"))
+		_, _ = w.Write([]byte(strings.ReplaceAll(sampleIndex, "https://dl.reasonix.io", srv.URL)))
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	if _, err := fetchJSON(ctx, srv.Client(), srv.URL, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FetchIndex(ctx, srv.Client(), srv.URL, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = FetchManifestAt(ctx, srv.Client(), srv.URL, "")
+	u := New(Options{HTTP: srv.Client(), IndexURL: srv.URL})
+	if _, err := u.Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = u.ManifestFor(ctx, "2.0.0")
+	for i, got := range agents {
+		want := provider.ClientUserAgent()
+		if i >= 3 {
+			want = UserAgent(provider.ClientVersion())
+		}
+		if got != want {
+			t.Errorf("request %d User-Agent = %q, want %q", i, got, want)
+		}
+	}
+	if len(agents) < 6 {
+		t.Fatalf("saw %d requests, want at least 6", len(agents))
+	}
+}
+
+func TestUpdaterUserAgentOptionWinsOverTheDefault(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("User-Agent")
+		_, _ = w.Write([]byte(sampleIndex))
+	}))
+	defer srv.Close()
+	u := New(Options{HTTP: srv.Client(), IndexURL: srv.URL, UserAgent: "custom/1"})
+	if _, err := u.Check(context.Background()); err != nil || got != "custom/1" {
+		t.Fatalf("err=%v User-Agent=%q", err, got)
 	}
 }

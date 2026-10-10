@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -77,5 +78,33 @@ func TestUseCapabilityResolveCallIsSideEffectFree(t *testing.T) {
 	}
 	if e, ok := ledger.Get("mcp-tool:lazy/do_write"); !ok || e.Outcome != capability.OutcomeUnavailable {
 		t.Fatalf("expected unavailable outcome, got %+v ok=%v", e, ok)
+	}
+}
+
+func TestUseCapabilityReturnsTypedDisabledRefusal(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.ReplaceDisabledMCP("mock", []tool.MCPBinding{{
+		Server:       "mock",
+		RawName:      "write",
+		VisibleName:  "write",
+		CallableName: "mcp__mock__write",
+		CapabilityID: "mcp-tool:mock/write",
+	}})
+	proxy := NewUseCapabilityTool(context.Background(), nil, nil, reg, nil, nil, nil)
+
+	resolved, err := proxy.ResolveCall(context.Background(), json.RawMessage(
+		`{"action":"call","capability_id":"mcp-tool:mock/write"}`,
+	))
+	if err != nil {
+		t.Fatalf("ResolveCall: %v", err)
+	}
+	if !resolved.Unavailable || !resolved.SkipExecute {
+		t.Fatalf("disabled capability should resolve as unavailable: %+v", resolved)
+	}
+	if resolved.RefusalCode != tool.CodeMCPToolDisabled {
+		t.Fatalf("refusal code = %q, want %q", resolved.RefusalCode, tool.CodeMCPToolDisabled)
+	}
+	if !strings.Contains(resolved.Result, tool.CodeMCPToolDisabled) {
+		t.Fatalf("result lacks typed refusal identity: %q", resolved.Result)
 	}
 }

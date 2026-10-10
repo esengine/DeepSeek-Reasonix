@@ -106,15 +106,17 @@ func (f *commandFactory) NewSession(_ context.Context, p SessionParams) (*contro
 }
 
 type configurableFactory struct {
-	mu         sync.Mutex
-	builds     []SessionParams
-	dir        string
-	withHooks  bool
-	hookEvents []hook.Event
-	behavior   func(ctx context.Context, sink event.Sink, input string, p SessionParams) error
-	managers   []*jobs.Manager
-	withCtrl   func(ctx context.Context, sink event.Sink, input string, p SessionParams, ctrl *control.Controller) error
-	onBuild    func(index int, p SessionParams)
+	mu            sync.Mutex
+	builds        []SessionParams
+	dir           string
+	defaultEffort string
+	withHooks     bool
+	hookEvents    []hook.Event
+	behavior      func(ctx context.Context, sink event.Sink, input string, p SessionParams) error
+	managers      []*jobs.Manager
+	withCtrl      func(ctx context.Context, sink event.Sink, input string, p SessionParams, ctrl *control.Controller) error
+	onBuild       func(index int, p SessionParams)
+	fingerprint   string
 }
 
 func (f *configurableFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
@@ -150,7 +152,15 @@ func (f *configurableFactory) NewSession(_ context.Context, p SessionParams) (*c
 			return behavior(ctx, sink, input, p)
 		},
 	}
-	opts := control.Options{Runner: runner, Sink: p.Sink, SessionDir: f.dir, OnSessionRecovered: p.OnSessionRecovered}
+	model := strings.TrimSpace(p.Model)
+	if model == "" {
+		model = "fast"
+	}
+	effort, _ := f.resolveEffort(p.EffortOverride)
+	opts := control.Options{
+		Runner: runner, Sink: p.Sink, SessionDir: f.dir, OnSessionRecovered: p.OnSessionRecovered,
+		ModelRef: model, Effort: effort, ProviderFingerprint: f.providerFingerprint(model, effort),
+	}
 	if f.withHooks {
 		opts.Hooks = f.hookRunner()
 	}
@@ -211,11 +221,7 @@ func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionCon
 	if model != "fast" && model != "pro" {
 		return SessionConfigState{}, os.ErrInvalid
 	}
-	effort := "auto"
-	effortOverride := cloneStringPtr(p.EffortOverride)
-	if effortOverride != nil && *effortOverride != "" {
-		effort = *effortOverride
-	}
+	effort, effortOverride := f.resolveEffort(p.EffortOverride)
 	modelOptions := []SessionConfigSelectOption{
 		{Value: "fast", Name: "Fast"},
 		{Value: "pro", Name: "Pro"},
@@ -242,9 +248,11 @@ func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionCon
 		agentPreset = "delivery"
 	}
 	return SessionConfigState{
-		Model:          model,
-		EffortOverride: effortOverride,
-		RuntimeProfile: runtimeProfile,
+		Model:               model,
+		EffortOverride:      effortOverride,
+		RuntimeProfile:      runtimeProfile,
+		ResolvedEffort:      effort,
+		ProviderFingerprint: f.providerFingerprint(model, effort),
 		Models: &SessionModelState{
 			AvailableModels: []ModelInfo{{ModelID: "fast", Name: "Fast"}, {ModelID: "pro", Name: "Pro"}},
 			CurrentModelID:  model,
@@ -260,6 +268,40 @@ func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionCon
 			}},
 		},
 	}, nil
+}
+
+func (f *configurableFactory) resolveEffort(override *string) (string, *string) {
+	effort := strings.TrimSpace(f.defaultEffort)
+	if effort == "" {
+		effort = "auto"
+	}
+	normalized := cloneStringPtr(override)
+	if normalized != nil && strings.TrimSpace(*normalized) != "" {
+		switch strings.ToLower(strings.TrimSpace(*normalized)) {
+		case "high":
+			effort = "high"
+		default:
+			effort = "auto"
+			cleared := ""
+			normalized = &cleared
+		}
+	}
+	return effort, normalized
+}
+
+func (f *configurableFactory) providerFingerprint(model, effort string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fingerprint != "" {
+		return f.fingerprint
+	}
+	return "test:" + model + ":" + effort
+}
+
+func (f *configurableFactory) setProviderFingerprint(fingerprint string) {
+	f.mu.Lock()
+	f.fingerprint = fingerprint
+	f.mu.Unlock()
 }
 
 func (f *configurableFactory) buildAt(t *testing.T, idx int) SessionParams {
@@ -523,6 +565,37 @@ func requireAvailableCommandsFrame(t *testing.T, f frame) {
 	}
 	if got := update["sessionUpdate"]; got != "available_commands_update" {
 		t.Fatalf("session update = %v, want available_commands_update", got)
+	}
+}
+
+// awaitResponse reads frames until the response with the given id arrives,
+// skipping the session-open notifications published by a request's after-hook.
+// session/new, session/load and session/resume write their MCP status snapshot
+// after their own response, so it can land ahead of a later request's response.
+// Any other notification is still a failure.
+func awaitResponse(t *testing.T, c *orderedRPCClient, id int) frame {
+	t.Helper()
+	for {
+		f := c.next(t)
+		if f.Method == "" {
+			return f
+		}
+		if f.Method != sessionMCPStatusUpdateMethod {
+			t.Fatalf("awaiting response %d: unexpected notification %q", id, f.Method)
+		}
+	}
+}
+
+// awaitAvailableCommands reads frames until the session-open command
+// advertisement arrives, skipping the MCP status snapshot the same after-hook
+// publishes alongside it.
+func awaitAvailableCommands(t *testing.T, c *orderedRPCClient) frame {
+	t.Helper()
+	for {
+		f := c.next(t)
+		if f.Method != sessionMCPStatusUpdateMethod {
+			return f
+		}
 	}
 }
 
@@ -842,16 +915,16 @@ func TestServeAdvertisesCommandsAfterEverySessionOpenResponse(t *testing.T) {
 	requireResponseFrame(t, client.next(t), 1)
 
 	client.send(t, 2, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
-	newResponse := client.next(t)
+	newResponse := awaitResponse(t, client, 2)
 	requireResponseFrame(t, newResponse, 2)
-	requireAvailableCommandsFrame(t, client.next(t))
+	requireAvailableCommandsFrame(t, awaitAvailableCommands(t, client))
 	var created SessionNewResult
 	if err := json.Unmarshal(newResponse.Result, &created); err != nil || created.SessionID == "" {
 		t.Fatalf("session/new result: %v (%q)", err, created.SessionID)
 	}
 
 	client.send(t, 3, "session/close", SessionCloseParams{SessionID: created.SessionID})
-	requireResponseFrame(t, client.next(t), 3)
+	requireResponseFrame(t, awaitResponse(t, client, 3), 3)
 
 	persistedID := "ordered-session-open"
 	path := transcriptPath(sessionDir, persistedID)
@@ -869,15 +942,15 @@ func TestServeAdvertisesCommandsAfterEverySessionOpenResponse(t *testing.T) {
 	}
 
 	client.send(t, 4, "session/load", SessionLoadParams{SessionID: persistedID, Cwd: sessionDir})
-	requireResponseFrame(t, client.next(t), 4)
-	requireAvailableCommandsFrame(t, client.next(t))
+	requireResponseFrame(t, awaitResponse(t, client, 4), 4)
+	requireAvailableCommandsFrame(t, awaitAvailableCommands(t, client))
 
 	client.send(t, 5, "session/close", SessionCloseParams{SessionID: persistedID})
-	requireResponseFrame(t, client.next(t), 5)
+	requireResponseFrame(t, awaitResponse(t, client, 5), 5)
 
 	client.send(t, 6, "session/resume", SessionResumeParams{SessionID: persistedID, Cwd: sessionDir})
-	requireResponseFrame(t, client.next(t), 6)
-	requireAvailableCommandsFrame(t, client.next(t))
+	requireResponseFrame(t, awaitResponse(t, client, 6), 6)
+	requireAvailableCommandsFrame(t, awaitAvailableCommands(t, client))
 }
 
 func TestServeSessionConfigSwitchesModelAndEffort(t *testing.T) {
@@ -943,6 +1016,190 @@ func TestServeSessionConfigSwitchesModelAndEffort(t *testing.T) {
 	}
 	if got := factory.buildAt(t, 3).Model; got != "fast" {
 		t.Fatalf("legacy set_model build model = %q, want fast", got)
+	}
+}
+
+func TestServeSessionConfigNoopsSameSelection(t *testing.T) {
+	factory := &configurableFactory{}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil {
+		t.Fatalf("session/new result: %v", err)
+	}
+
+	sameModel := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+		SessionID: nr.SessionID,
+		ConfigID:  "model",
+		Value:     "fast",
+	})
+	if sameModel.Error != nil {
+		t.Fatalf("same-model switch: %+v", sameModel.Error)
+	}
+	sameEffort := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+		SessionID: nr.SessionID,
+		ConfigID:  "effort",
+		Value:     "auto",
+	})
+	if sameEffort.Error != nil {
+		t.Fatalf("same-effort switch: %+v", sameEffort.Error)
+	}
+	if got := factory.buildCount(); got != 1 {
+		t.Fatalf("build count after same-selection switches = %d, want initial build only", got)
+	}
+}
+
+func TestServeSessionConfigNoopPersistsExplicitEffort(t *testing.T) {
+	dir := testenv.TempDir(t)
+	factory := &configurableFactory{dir: dir, defaultEffort: "high"}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil {
+		t.Fatalf("session/new result: %v", err)
+	}
+	path := transcriptPath(dir, nr.SessionID)
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+		SessionID: nr.SessionID,
+		ConfigID:  "effort",
+		Value:     "high",
+	})
+	if resp.Error != nil {
+		t.Fatalf("same-effective-effort switch: %+v", resp.Error)
+	}
+	if got := factory.buildCount(); got != 1 {
+		t.Fatalf("build count after same-effective-effort switch = %d, want initial build only", got)
+	}
+	meta, ok, err := loadACPMeta(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || meta.EffortOverride == nil || *meta.EffortOverride != "high" {
+		t.Fatalf("persisted effort override = %#v, want explicit high", meta.EffortOverride)
+	}
+}
+
+func TestServeSessionConfigRebuildsWhenProviderFingerprintChanges(t *testing.T) {
+	factory := &configurableFactory{}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil {
+		t.Fatalf("session/new result: %v", err)
+	}
+
+	factory.setProviderFingerprint("rotated-provider")
+	resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+		SessionID: nr.SessionID,
+		ConfigID:  "model",
+		Value:     "fast",
+	})
+	if resp.Error != nil {
+		t.Fatalf("same-model switch after provider change: %+v", resp.Error)
+	}
+	if got := factory.buildCount(); got != 2 {
+		t.Fatalf("build count after provider fingerprint change = %d, want initial build plus refresh", got)
+	}
+}
+
+func TestServeSessionConfigRejectsInvalidEffortBeforeRebuild(t *testing.T) {
+	factory := &configurableFactory{}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil {
+		t.Fatalf("session/new result: %v", err)
+	}
+
+	resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+		SessionID: nr.SessionID,
+		ConfigID:  "effort",
+		Value:     "ultra",
+	})
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "effort") {
+		t.Fatalf("invalid effort response = %+v, want an effort validation error", resp.Error)
+	}
+	if got := factory.buildCount(); got != 1 {
+		t.Fatalf("build count after invalid effort = %d, want initial build only", got)
+	}
+}
+
+func TestServeSessionConfigNoopsSameSelectionDuringActivePrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		axis  string
+		value string
+	}{
+		{name: "model", axis: "model", value: "fast"},
+		{name: "effort", axis: "effort", value: "auto"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var once sync.Once
+			factory := &configurableFactory{
+				behavior: func(ctx context.Context, sink event.Sink, input string, p SessionParams) error {
+					once.Do(func() { close(started) })
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+					sink.Emit(event.Event{Kind: event.Text, Text: p.Model + ":" + input})
+					return nil
+				},
+			}
+			client, stop := startServer(t, factory)
+			defer stop()
+
+			client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+			newResp := client.call(t, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
+			var nr SessionNewResult
+			if err := json.Unmarshal(newResp.Result, &nr); err != nil {
+				t.Fatalf("session/new result: %v", err)
+			}
+			prompt := client.callAsync("session/prompt", SessionPromptParams{
+				SessionID: nr.SessionID,
+				Prompt:    []ContentBlock{{Type: "text", Text: "keep running"}},
+			})
+			select {
+			case <-started:
+			case <-time.After(rpcCallBudget(t)):
+				t.Fatal("prompt never started")
+			}
+
+			resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+				SessionID: nr.SessionID,
+				ConfigID:  tc.axis,
+				Value:     tc.value,
+			})
+			if resp.Error != nil {
+				t.Fatalf("same-selection switch while running: %+v", resp.Error)
+			}
+			close(release)
+			if _, promptResp := drainPrompt(t, client, prompt); promptResp.Error != nil {
+				t.Fatalf("prompt: %+v", promptResp.Error)
+			}
+			if got := factory.buildCount(); got != 1 {
+				t.Fatalf("build count after same-selection switch while running = %d, want initial build only", got)
+			}
+		})
 	}
 }
 

@@ -26,7 +26,7 @@ func (t *Transcript) Restore(msgs []HistoryMessage) {
 				if c.ID != "" {
 					calls[c.ID] = len(t.Items)
 				}
-				t.Items = append(t.Items, Item{ID: t.id(), Kind: ItemTool, Tool: &eventwire.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments}})
+				t.Items = append(t.Items, Item{ID: t.id(), Kind: ItemTool, Tool: &eventwire.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ResolvedName: c.ResolvedName, CapabilityID: c.CapabilityID}})
 			}
 		case "tool":
 			at, ok := calls[m.ToolCallID]

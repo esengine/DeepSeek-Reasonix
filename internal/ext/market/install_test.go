@@ -35,7 +35,9 @@ type fixture struct {
 	skill string
 }
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T) *fixture { return newFixtureAt(t, testenv.TempDir(t)) }
+
+func newFixtureAt(t *testing.T, home string) *fixture {
 	t.Helper()
 	body := &atomic.Value{}
 	body.Store("---\nname: review-kit\ndescription: reviews diffs\n---\nreviewed body")
@@ -43,7 +45,6 @@ func newFixture(t *testing.T) *fixture {
 		_, _ = w.Write([]byte(body.Load().(string)))
 	}))
 	t.Cleanup(srv.Close)
-	home := testenv.TempDir(t)
 	newTool := func() *installsource.Tool {
 		return installsource.NewTool(installsource.Options{
 			ProjectRoot: testenv.TempDir(t), HomeDir: home, HTTPClient: srv.Client(), RequireApprovedPlan: true,
@@ -65,6 +66,25 @@ func newFixture(t *testing.T) *fixture {
 		body:  body,
 		reg:   reg,
 		skill: filepath.Join(home, ".reasonix", "skills", "review-kit", "SKILL.md"),
+	}
+}
+
+func TestLedgerRecordsRealPathsNotTheBoundedPreview(t *testing.T) {
+	home := filepath.Join(testenv.TempDir(t), "h\u200bome\u202e")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := newFixtureAt(t, home)
+	plan, err := f.svc.Plan(context.Background(), Request{Slug: "acme/review-kit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Install(context.Background(), Request{Slug: "acme/review-kit", Version: "1.0.0", PlanID: planID(t, plan)}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := InstalledRecords(f.home)["acme/review-kit"]
+	if !ok || len(rec.Items) != 1 || rec.Items[0].Target != f.skill {
+		t.Fatalf("ledger = %+v, want target %q", InstalledRecords(f.home), f.skill)
 	}
 }
 
@@ -273,7 +293,7 @@ func TestNPMPackageAcceptsOnlyPackageNames(t *testing.T) {
 		"C:x": false, "@scope/../x": false, "": false, strings.Repeat("a", 65): false,
 		"@playwright/mcp@0.0.83": true, "name@1.2.3": true, "name@1.2.3-beta.1": true,
 		"name@latest": false, "name@^1.2.3": false, "name@": false, "a@b@c": false,
-		"-y": false, "--help": false, "-y@1.2.3": false, "@a/..": false, "@a/..@1.2.3": false,
+		"-y": false, "--help": false, "-y@1.2.3": false, "@a/..": false, "@a/..@1.2.3": false, "@a/.b": false, "x.tgz": false, "_a": false, "a.b": true,
 	} {
 		if npmPackage(s) != want {
 			t.Errorf("npmPackage(%q) = %v", s, !want)

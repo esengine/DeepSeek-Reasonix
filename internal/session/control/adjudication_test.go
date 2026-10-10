@@ -39,7 +39,7 @@ func TestBarrierIsDurableBeforeTheQuestionIsAnswerable(t *testing.T) {
 	c := barrierController(t)
 	go func() { _, _ = c.Ask(t.Context(), askQuestion()) }()
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	for len(c.Decisions()) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("the ask never became observable")
@@ -62,7 +62,7 @@ func TestAnsweringClosesTheBarrier(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _, _ = c.Ask(t.Context(), askQuestion()); close(done) }()
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(t))
 	var id string
 	for id == "" {
 		if time.Now().After(deadline) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"reasonix/internal/contract/config"
 	"reasonix/internal/session/control"
 )
 
@@ -92,6 +93,12 @@ func writeErr(w http.ResponseWriter, fallback int, err error) {
 	if refuseUnparsedConfig(w, err) {
 		return
 	}
+	var mismatch *config.AnswersMismatchError
+	if errors.As(err, &mismatch) {
+		refuse(w, http.StatusConflict, answersMismatchCode(mismatch), err.Error(),
+			map[string]any{"model": mismatch.Ref, "has": string(mismatch.Has), "want": string(mismatch.Want)})
+		return
+	}
 	http.Error(w, err.Error(), fallback)
 }
 
@@ -134,6 +141,22 @@ func codedRefusal(err error) string {
 
 // rebuildFailed is the one answer to "the settings were written and the runtime
 // could not be rebuilt on them", which is not the same failure as the write.
+// A runtime still holding work refuses the rebuild by identity; that is a save
+// waiting on the work, not a malfunction.
 func rebuildFailed(w http.ResponseWriter, err error) {
+	if isSwitchBusy(err) {
+		busy(w, "runtime.saved_while_running", "the settings were saved; the running conversation keeps its current ones until it is rebuilt", nil)
+		return
+	}
 	refuse(w, http.StatusConflict, "runtime.rebuild_failed", err.Error(), map[string]any{"detail": err.Error()})
+}
+
+// answersMismatchCode names which way the model was misplaced, because the two
+// are different things to fix: a decision source put on a conversation job, or
+// a conversation model put where the decision tool asks.
+func answersMismatchCode(e *config.AnswersMismatchError) string {
+	if e.Has == config.AnswersDecision {
+		return codeModelDecisionOnly
+	}
+	return codeModelNotDecision
 }

@@ -25,8 +25,10 @@ class HostStartError extends Error {
 // the only channel pointing this way. stdin is the lease: the kernel drains
 // when this end closes, which is what stops it outliving a parent that exited
 // without being asked to.
-function start(binary, args, { onStderr, onExit, onAct, onSlow, timeoutMs = HANDSHAKE_TIMEOUT_MS } = {}) {
-  const child = spawn(binary, args, { stdio: ["pipe", "pipe", "pipe"] });
+function start(binary, args, { onStderr, onExit, onAct, onSlow, systemLanguage, timeoutMs = HANDSHAKE_TIMEOUT_MS } = {}) {
+  const env = { ...process.env };
+  if (systemLanguage) env.REASONIX_SYSTEM_LANG = systemLanguage;
+  const child = spawn(binary, args, { stdio: ["pipe", "pipe", "pipe"], env });
   child.stderr.setEncoding("utf8");
   if (onStderr) child.stderr.on("data", onStderr);
   if (onExit) child.on("exit", onExit);

@@ -38,8 +38,8 @@ func TestAutoSkipsPowerShellThatDoesNotLaunch(t *testing.T) {
 	var asked []string
 	launches := func(p string) bool { asked = append(asked, p); return p != alias && p != `C:\fake\pwsh.exe` }
 
-	h := shellHost{"windows", fakePath("pwsh", "powershell"), yes, nil, winPS, no, no, launches}
-	if got := h.auto(); got.Kind != ShellPowerShell || got.Path != `C:\fake\System32\powershell.exe` {
+	h := shellHost{"windows", fakePath("pwsh", "powershell"), yes, nil, winPS, no, no, launches, nil}
+	if got := h.auto(nil); got.Kind != ShellPowerShell || got.Path != `C:\fake\System32\powershell.exe` {
 		t.Fatalf("auto = %+v, want Windows PowerShell 5.1", got)
 	}
 	if want := []string{alias, `C:\fake\pwsh.exe`, `C:\fake\System32\powershell.exe`}; !slices.Equal(asked, want) {
@@ -47,13 +47,13 @@ func TestAutoSkipsPowerShellThatDoesNotLaunch(t *testing.T) {
 	}
 
 	h.launches = yes
-	if got := h.auto(); got.Path != alias {
+	if got := h.auto(nil); got.Path != alias {
 		t.Fatalf("auto = %+v, want the Store pwsh when it launches", got)
 	}
 
 	asked = nil
-	h = shellHost{"windows", fakePath("bash", "pwsh"), yes, nil, winPS, yes, no, launches}
-	if got := h.auto(); got.Kind != ShellBash || len(asked) != 0 {
+	h = shellHost{"windows", fakePath("bash", "pwsh"), yes, nil, winPS, yes, no, launches, nil}
+	if got := h.auto(nil); got.Kind != ShellBash || len(asked) != 0 {
 		t.Fatalf("auto = %+v, asked %q; want bash with no PowerShell probe", got, asked)
 	}
 }
@@ -94,5 +94,13 @@ func TestLaunchProbesAnswerRepeatedDiscoveryOnce(t *testing.T) {
 	}
 	if runs != 1 {
 		t.Fatalf("probe ran %d times, want 1", runs)
+	}
+}
+
+// A missing path is not a launchable Store alias; callers that gate on this
+// helper must not keep an interpreter that the host does not have.
+func TestPowerShellLaunchesRejectsMissingPath(t *testing.T) {
+	if powerShellLaunches(filepath.Join(t.TempDir(), "missing-pwsh.exe")) {
+		t.Fatal("missing PowerShell reported as launchable")
 	}
 }

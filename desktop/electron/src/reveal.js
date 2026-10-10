@@ -23,9 +23,13 @@ function local(target, platform) {
 async function locate(client, base, rel, platform) {
   if (!PANE_BASE.test(base)) return { refusal: refused("not a pane this window publishes") };
   const query = rel ? `?path=${encodeURIComponent(rel)}` : "";
+  return ask(client, `${base}/workspace/locate${query}`, platform);
+}
+
+async function ask(client, url, platform) {
   let res;
   try {
-    res = await client.request("GET", `${base}/workspace/locate${query}`);
+    res = await client.request("GET", url);
   } catch (err) {
     return { refusal: refused(err.message) };
   }
@@ -54,4 +58,13 @@ async function reveal(client, shell, base, rel, platform = process.platform) {
   return null;
 }
 
-module.exports = { reveal };
+// A project the sidebar lists needs no pane: the hub answers for the folders
+// it lists and refuses any other, so the page still names no location itself.
+async function revealWorkspace(client, shell, root, platform = process.platform) {
+  const found = await ask(client, `/host/workspaces/locate?root=${encodeURIComponent(String(root))}`, platform);
+  if (found.refusal) return found.refusal;
+  shell.showItemInFolder(found.target);
+  return null;
+}
+
+module.exports = { reveal, revealWorkspace };

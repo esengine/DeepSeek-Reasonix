@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/frontend/traystate"
+	"reasonix/internal/session/control"
 )
 
 // stubTray stands in for the window. TrayFold counts its own calls into the
@@ -171,5 +172,90 @@ func TestTrayStateIsReadFromTheWindowEveryTime(t *testing.T) {
 	}
 	if strings.TrimSpace(first.Line) == "" || first.Labels.Quit == "" {
 		t.Errorf("state = %+v, want the fold and the menu spelled out", first)
+	}
+}
+
+func awakeHub(t *testing.T) *Hub {
+	t.Helper()
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	return NewHub(HubOptions{Tray: &stubTray{live: true}})
+}
+
+func farKernelRunning(t *testing.T, running map[string]bool) string {
+	t.Helper()
+	far := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"running": running[r.URL.Path]})
+	}))
+	t.Cleanup(far.Close)
+	return far.Listener.Addr().String()
+}
+
+func openFar(t *testing.T, h *Hub, addr, base string) {
+	t.Helper()
+	if _, err := h.OpenRemote(RemoteEndpoint{Host: "gpu-box", Workspace: "/srv/w", Addr: addr, Token: "t", Base: base}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTrayRunningCountsPanesWithATurnInFlightAnywhere(t *testing.T) {
+	h := awakeHub(t)
+	srv := httptest.NewServer(operatorHandler(h))
+	defer srv.Close()
+
+	if got := trayGet[TrayRunning](t, srv, "/tray/running"); got.Panes != 0 {
+		t.Fatalf("running = %+v, want nothing with no panes open", got)
+	}
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Runner: blockingRunner{}, Sink: bc})
+	if _, err := h.Adopt(&Server{ctrl: ctrl, bc: bc}, bc); err != nil {
+		t.Fatal(err)
+	}
+	addr := farKernelRunning(t, map[string]bool{"/rt/busy/status": true})
+	openFar(t, h, addr, "/rt/busy")
+	openFar(t, h, addr, "/rt/idle")
+
+	if got := trayGet[TrayRunning](t, srv, "/tray/running"); got.Panes != 1 {
+		t.Fatalf("running = %+v, want only the busy remote pane", got)
+	}
+	ctrl.SubmitHTTP("go")
+	waitRunning(t, ctrl)
+	if got := trayGet[TrayRunning](t, srv, "/tray/running"); got.Panes != 2 {
+		t.Fatalf("running = %+v, want the local turn and the remote one", got)
+	}
+	ctrl.Cancel()
+	waitNotRunning(t, ctrl)
+	if got := trayGet[TrayRunning](t, srv, "/tray/running"); got.Panes != 1 {
+		t.Fatalf("running = %+v, want the local pane to stop counting once its turn ends", got)
+	}
+}
+
+func TestTrayRunningReportsAPaneWhoseLinkIsDownAsUnknown(t *testing.T) {
+	h := awakeHub(t)
+	srv := httptest.NewServer(operatorHandler(h))
+	defer srv.Close()
+	openFar(t, h, "127.0.0.1:1", "/rt/gone")
+
+	if got := trayGet[TrayRunning](t, srv, "/tray/running"); got.Panes != 0 || got.Unknown != 1 {
+		t.Fatalf("running = %+v, want an unreachable pane counted as unknown, not as idle", got)
+	}
+}
+
+func TestTrayRunningIsAbsentWhereThereIsNoWindow(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	srv := httptest.NewServer(operatorHandler(NewHub(HubOptions{})))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/tray/running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	state, err := http.Get(srv.URL + "/tray/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode != state.StatusCode {
+		t.Fatalf("GET /tray/running = %d, want what /tray/state answers (%d) without a window", resp.StatusCode, state.StatusCode)
 	}
 }

@@ -184,7 +184,7 @@ func runTwoTurns(t *testing.T) (*Controller, *agent.Agent, *[]event.Event) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("first answer"),
 		textTurn("second answer"),
-		textTurn("edited answer"),
+		textTurn("## Summary\nedited answer"),
 	}}
 	ag := agent.New(prov, tool.NewRegistry(), sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
 	var events []event.Event

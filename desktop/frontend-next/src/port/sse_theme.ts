@@ -1,5 +1,6 @@
 import { SseNetwork } from "./sse_network";
 import type { ThemeImport, ThemePack } from "./port";
+import { t } from "../i18n";
 
 // Theme packs, and where an extension's view is allowed to sit. Both are the
 // user overruling a default the pack or the extension asked for.
@@ -13,6 +14,7 @@ export class SseTheme extends SseNetwork {
   // JSON, not multipart: csrfGuard admits nothing else.
   async importTheme(files: File[]) {
     const zip = files.find((f) => f.name.toLowerCase().endsWith(".zip"));
+    if (zip && files.length > 1) throw new Error(t("请单独选择一个 .zip，或选择不含压缩包的 theme.json 和图片。"));
     if (zip) return this.post0<ThemeImport>("/themes/import", { name: zip.name, zip: await base64Of(zip) });
     const bodies: Record<string, string> = {};
     for (const f of files) bodies[f.name] = await base64Of(f);

@@ -60,6 +60,18 @@ func (c *Controller) readSteerCandidate(st *sessioninbox.Store, id string) (sess
 	return st.ReadItem(id)
 }
 
+// holdWhilePaused answers a steer reaching a paused queue: refuse it, or keep
+// the item as a follow-up. The caller holds the admission lock.
+func holdWhilePaused(st *sessioninbox.Store, id string, capacity sessioninbox.Capacity, hold bool) (sessioninbox.InboxReceipt, error) {
+	if !hold {
+		return sessioninbox.InboxReceipt{}, sessioninbox.ErrPaused
+	}
+	if err := st.ConvertIntent(id, sessioninbox.IntentFollowup); err != nil {
+		return sessioninbox.InboxReceipt{}, err
+	}
+	return sessioninbox.InboxReceipt{ItemID: id, Disposition: sessioninbox.DispositionQueuedFollowup, Paused: true, Capacity: capacity}, nil
+}
+
 func (c *Controller) unlockInboxSteerAdmission(dispatch *bool) {
 	c.inbox.admissionMu.Unlock()
 	if *dispatch {
@@ -73,6 +85,12 @@ func (c *Controller) unlockInboxSteerAdmission(dispatch *bool) {
 // The agent loader only captures the item ID and re-reads the blob on consume
 // so large steer bodies do not accumulate in the agent heap.
 func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, error) {
+	return c.steerInboxItem(id, false)
+}
+
+// steerInboxItem is TrySteerInboxItem; holdIfPaused makes a paused queue keep
+// the item as a follow-up instead of refusing, under the same admission lock.
+func (c *Controller) steerInboxItem(id string, holdIfPaused bool) (sessioninbox.InboxReceipt, error) {
 	c.inbox.admissionMu.Lock()
 	dispatchAfterUnlock := false
 	defer c.unlockInboxSteerAdmission(&dispatchAfterUnlock)
@@ -101,7 +119,7 @@ func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, er
 	}
 	snapshot := st.Snapshot()
 	if snapshot.Paused {
-		return sessioninbox.InboxReceipt{}, sessioninbox.ErrPaused
+		return holdWhilePaused(st, id, snapshot.Capacity, holdIfPaused)
 	}
 	if meta.State == sessioninbox.StateUncertain {
 		if err := st.SetState(id, sessioninbox.StateQueued, ""); err != nil {
@@ -290,4 +308,36 @@ func askAnswersHaveSelection(answers []event.AskAnswer) bool {
 		}
 	}
 	return false
+}
+
+// onInboxUnappliedSteer keeps accepted-but-unapplied steers for inspection.
+func (c *Controller) onInboxUnappliedSteer(itemID string) {
+	if itemID == "" {
+		return
+	}
+	st, err := c.ensureInbox()
+	if err != nil {
+		return
+	}
+	c.mu.Lock()
+	skipped := c.gate.skippedAsk()
+	c.mu.Unlock()
+	if skipped {
+		// The user declined the question, so guidance they queued into it runs
+		// next; an item whose body cannot be read back stays held.
+		if _, _, readErr := st.ReadItem(itemID); readErr == nil {
+			if _, err := st.RequeueUnappliedSteer(itemID); err == nil {
+				c.inbox.mu.Lock()
+				c.inbox.untrackActive(itemID)
+				c.inbox.mu.Unlock()
+				return
+			}
+		}
+	}
+	_ = st.SetStateCoded(itemID, sessioninbox.StateUncertain, sessioninbox.BlockSteerUnapplied, "steer accepted but unapplied before turn exit")
+	_ = st.SetPaused(true)
+	c.inbox.mu.Lock()
+	c.inbox.untrackActive(itemID)
+	c.inbox.mu.Unlock()
+	sessioninbox.NoteUncertain()
 }

@@ -137,6 +137,55 @@ func TestPromptsSettleHereOrElsewhere(t *testing.T) {
 	}
 }
 
+// A turn that ends while a prompt is open — the other screen skipped the ask,
+// or cancelled the turn — leaves nothing to answer, so this screen closes it.
+func TestTurnEndClosesOpenPrompts(t *testing.T) {
+	for _, done := range []eventwire.Event{{Kind: "turn_done", Cancelled: true}, {Kind: "turn_done"}} {
+		tr := fold(
+			eventwire.Event{Kind: "approval_request", Approval: &eventwire.Approval{ID: "a1", Tool: "bash"}},
+			eventwire.Event{Kind: "ask_request", Ask: &eventwire.Ask{ID: "q1"}},
+			done,
+		)
+		if tr.OpenPrompt() != nil {
+			t.Fatalf("prompt still open after turn_done: %+v", tr.OpenPrompt())
+		}
+		if done.Cancelled && tr.Terminal != TurnCancelled || !done.Cancelled && tr.Terminal != TurnCompleted {
+			t.Fatalf("terminal = %v for %+v", tr.Terminal, done)
+		}
+		if tr.EndReason != "" {
+			t.Fatalf("end reason = %q", tr.EndReason)
+		}
+	}
+	tr := fold(
+		eventwire.Event{Kind: "ask_request", Ask: &eventwire.Ask{ID: "q1"}},
+		eventwire.Event{Kind: "turn_done"},
+	)
+	tr.Apply(eventwire.Event{Kind: "ask_request", Ask: &eventwire.Ask{ID: "q2"}})
+	if open := tr.OpenPrompt(); open == nil || open.Ask.ID != "q2" {
+		t.Fatalf("a prompt of the next turn must open, got %+v", open)
+	}
+}
+
+// A prompt the kernel replays after the turn ended is a live wait again, and a
+// new turn starting does not bring the closed one back.
+func TestReplayedPromptReopensAndNewTurnDoesNotRevive(t *testing.T) {
+	tr := fold(
+		eventwire.Event{Kind: "ask_request", Ask: &eventwire.Ask{ID: "q1"}},
+		eventwire.Event{Kind: "turn_done", Cancelled: true, Err: "cancelled"},
+	)
+	if tr.EndReason != "cancelled" {
+		t.Fatalf("end reason = %q", tr.EndReason)
+	}
+	tr.Apply(eventwire.Event{Kind: "turn_started"})
+	if tr.OpenPrompt() != nil {
+		t.Fatalf("a new turn revived the closed prompt: %+v", tr.OpenPrompt())
+	}
+	tr.Apply(eventwire.Event{Kind: "ask_request", Ask: &eventwire.Ask{ID: "q1"}})
+	if open := tr.OpenPrompt(); open == nil || open.Ask.ID != "q1" {
+		t.Fatalf("replayed prompt did not reopen: %+v", open)
+	}
+}
+
 // Input handed to a running turn stays pending until the turn reads it, and
 // then sits where it was read, not where it was typed.
 func TestSteerMovesPendingInputToWhereItWasRead(t *testing.T) {

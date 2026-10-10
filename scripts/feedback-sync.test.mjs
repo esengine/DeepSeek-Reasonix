@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
-  ATTACHMENT_PREFIX, FatalError, MAX_REPLIES, publishable, renderReply, replyMarker, REPO, closingCommit, code, fence, hasMarker, MAX_OPEN, decideStatus, firstTag, hasOpenLinkedPull, isOurs, newestStudioRelease, liveDeps, labelsFor, marker, renderBody, renderTitle, run,
+  ATTACHMENT_PREFIX, FatalError, MAX_REPLIES, publishable, renderReply, replyMarker, REPO, closingCommit, code, fence, hasMarker, MAX_OPEN, decideStatus, firstTag, hasOpenLinkedPull, isOurs, newestStudioRelease, stableStudioTags, liveDeps, labelsFor, marker, renderBody, renderTitle, run,
 } from "./feedback-sync.mjs";
 
 const R = "FB-7K3M-9QX2";
@@ -86,8 +86,12 @@ const xref = (number, o = {}) => ({
   source: { issue: { number, pull_request: o.pr ?? {}, state: o.state ?? "closed", body: o.body ?? "Fixes #7", repository: { full_name: o.repo ?? "esengine/DeepSeek-Reasonix" } } },
 });
 
-test("closing commit: close event commit wins, else earliest merged same-repo PR that names the issue", () => {
-  assert.equal(closingCommit(7, [{ event: "closed", commit_id: "c1" }], {}), "c1");
+test("closing commit: needs a merged same-repo PR that names the issue; the close event commit wins among them", () => {
+  assert.equal(closingCommit(7, [{ event: "closed", commit_id: "c1" }], {}), null);
+  const viaPull = [xref(30), { event: "closed", commit_id: "c2" }];
+  assert.equal(closingCommit(7, viaPull, { 30: { merged_at: "2026-09-01T00:00:00Z", merge_commit_sha: "c2" } }), "c2");
+  assert.equal(closingCommit(7, [xref(30), xref(31), { event: "closed", commit_id: "late" }], { 30: { merged_at: "2026-09-01T00:00:00Z", merge_commit_sha: "early" }, 31: { merged_at: "2026-09-02T00:00:00Z", merge_commit_sha: "late" } }), "late");
+  assert.equal(closingCommit(7, [xref(30, { state: "open" })], { 30: { merged_at: null, merge_commit_sha: "unmerged" } }), null);
   const tl = [xref(20), xref(21, { body: "Closes #7" }), xref(22, { body: "see #7" }), xref(23, { repo: "someone/fork" }), { event: "closed", commit_id: null }];
   const pulls = {
     20: { merged_at: "2026-09-02T00:00:00Z", merge_commit_sha: "late" },
@@ -99,9 +103,18 @@ test("closing commit: close event commit wins, else earliest merged same-repo PR
   assert.equal(closingCommit(8, tl, pulls), null);
 });
 
-test("first studio tag is the oldest by version, ignoring other namespaces", () => {
-  assert.equal(firstTag(["studio-v2.10.0", "studio-v2.9.1", "v1.2.3", "studio-v2.9.0-rc1"]), "v2.9.1");
-  assert.equal(firstTag([]), null);
+test("first studio tag is the oldest stable one by version, ignoring other namespaces and prereleases", () => {
+  const stable = new Set(["studio-v2.10.0", "studio-v2.9.1", "studio-v2.9.0-rc1"]);
+  assert.equal(firstTag(["studio-v2.10.0", "studio-v2.9.1", "v1.2.3", "studio-v2.9.0-rc1"], stable), "v2.9.1");
+  assert.equal(firstTag(["studio-v2.9.0", "studio-v2.10.0"], new Set(["studio-v2.10.0"])), "v2.10.0");
+  assert.equal(firstTag(["studio-v2.9.0"], new Set()), null);
+  assert.equal(firstTag(["studio-v2.9.0"]), null);
+  assert.equal(firstTag([], stable), null);
+});
+
+test("stable tags come from release pages, never from a version cutoff", () => {
+  const rel = (tag_name, prerelease = false, draft = false) => ({ tag_name, prerelease, draft });
+  assert.deepEqual([...stableStudioTags([rel("studio-v2.28.0", true), rel("studio-v2.29.0"), rel("studio-v2.30.0", false, true), rel("v1.40.0"), rel("studio-v2.31.0-rc1")])], ["studio-v2.29.0"]);
 });
 
 test("status decisions", () => {
@@ -138,7 +151,7 @@ test("only issues the bot filed with the source label are ours", () => {
   assert.equal(isOurs({ ...ok, labels: [] }), false);
 });
 
-function fakes({ replies = [], ackFails = false, repliesFails = null, issueOf = (n) => ({ ...BOT, number: n, comments: 1 }), comments = [], commentFails = false, recent = [], recordedFails = false, pendingFails = null, open = [], pending = [item()], issues = {}, changed = [], timeline = [], pulls = {}, tags = [], releaseAt = null } = {}) {
+function fakes({ replies = [], ackFails = false, repliesFails = null, issueOf = (n) => ({ ...BOT, number: n, comments: 1 }), comments = [], commentFails = false, recent = [], recordedFails = false, pendingFails = null, open = [], pending = [item()], issues = {}, changed = [], timeline = [], pulls = {}, tags = [], stable = null, releaseAt = null } = {}) {
   const calls = [];
   return {
     calls,
@@ -163,6 +176,7 @@ function fakes({ replies = [], ackFails = false, repliesFails = null, issueOf = 
       getPull: async (n) => pulls[n],
     },
     tagsContaining: async () => tags,
+    stableTags: async () => new Set(stable ?? tags),
     newestReleaseAt: async () => { calls.push(["releaseAt"]); return releaseAt; },
   };
 }
@@ -250,6 +264,24 @@ test("closed as completed resolves PR -> commit -> tag; unlisted 'next' entries 
   const stillNext = fakes({ ...base, open: [{ receipt: R, issueNumber: 7, status: "fixed", resolvedVersion: "next" }], issues: { 7: closedIssue }, tags: [], releaseAt: NOW - 600000 });
   await run(stillNext, { now: NOW });
   assert.ok(!stillNext.calls.some((c) => c[0] === "status"));
+  const prereleaseOnly = fakes({ ...base, open: [{ receipt: R, issueNumber: 7, status: "fixed", resolvedVersion: "next" }], issues: { 7: closedIssue }, tags: ["studio-v2.11.0", "studio-v2.10.0"], stable: ["studio-v2.11.0"], releaseAt: NOW - 600000 });
+  await run(prereleaseOnly, { now: NOW });
+  assert.deepEqual(prereleaseOnly.calls.find((c) => c[0] === "status"), ["status", R, { status: "fixed", resolvedVersion: "v2.11.0" }]);
+});
+
+test("a closed issue without a merged closing PR is never given a version, and is reported", async () => {
+  const closedIssue = { number: 7, state: "closed", state_reason: "completed", labels: [] };
+  const handClosed = fakes({ pending: [], timeline: [{ event: "closed", commit_id: "b".repeat(40) }], open: [{ receipt: R, issueNumber: 7, status: "fixed", resolvedVersion: "next" }], issues: { 7: closedIssue }, tags: ["studio-v2.11.0"], releaseAt: Date.now() });
+  await run(handClosed, { full: true });
+  assert.ok(!handClosed.calls.some((c) => c[0] === "status"));
+  assert.ok(handClosed.calls.some((c) => c[0] === "log" && /without a merged closing PR/.test(c[1])));
+});
+
+test("an open row that omits resolvedVersion is never upgraded", async () => {
+  const closedIssue = { number: 7, state: "closed", state_reason: "completed", labels: [] };
+  const d = fakes({ pending: [], timeline: [xref(20)], pulls: { 20: { merged_at: "2026-09-01T00:00:00Z", merge_commit_sha: "a".repeat(40) } }, open: [{ receipt: R, issueNumber: 7, status: "fixed" }], issues: { 7: closedIssue }, tags: ["studio-v2.11.0"] });
+  await run(d, { full: true });
+  assert.ok(!d.calls.some((c) => c[0] === "status"));
 });
 
 test("--full re-reads every open row", async () => {
@@ -306,8 +338,8 @@ test("an unreachable worker is a warning, not a failed job", async () => {
 });
 
 test("the release signal ignores drafts and other release lines", () => {
-  const rel = (tag_name, published_at, draft = false) => ({ tag_name, published_at, draft });
-  assert.equal(newestStudioRelease([rel("v1.40.0", "2026-09-30T00:00:00Z"), rel("studio-v2.9.0", "2026-09-28T00:00:00Z"), rel("studio-v2.10.0", "2026-09-29T00:00:00Z", true)]), Date.parse("2026-09-28T00:00:00Z"));
+  const rel = (tag_name, published_at, draft = false, prerelease = false) => ({ tag_name, published_at, draft, prerelease });
+  assert.equal(newestStudioRelease([rel("v1.40.0", "2026-09-30T00:00:00Z"), rel("studio-v2.9.0", "2026-09-28T00:00:00Z"), rel("studio-v2.10.0", "2026-09-29T00:00:00Z", true), rel("studio-v2.11.0", "2026-09-30T00:00:00Z", false, true)]), Date.parse("2026-09-28T00:00:00Z"));
   assert.equal(newestStudioRelease([]), null);
 });
 

@@ -3,6 +3,7 @@ package feedback
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -31,8 +32,8 @@ type Config struct {
 	Base  string
 	Proxy netclient.ProxySpec
 	HTTP  *http.Client
-	// Backoff is the wait before each retry of an unanswered request; nil takes
-	// the default, an empty non-nil slice disables retrying.
+	// Backoff sets retry waits; a transient submit response uses the first wait.
+	// Nil takes the default, an empty non-nil slice disables retrying.
 	Backoff []time.Duration
 }
 
@@ -142,7 +143,7 @@ func (s *Service) Submit(ctx context.Context, d Draft) (Receipt, error) {
 	}
 	item := Item{
 		Receipt: got.Receipt, Category: d.Category, Status: got.Status,
-		TitleSnippet: snippet(wire.Body), CreatedAt: created, UpdatedAt: created,
+		TitleSnippet: snippet(wire.Body), CreatedAt: created, UpdatedAt: created, UnderReview: got.UnderReview,
 	}
 	if err := s.store.update(func(st *state) error {
 		if got.InstallToken != "" {
@@ -155,7 +156,7 @@ func (s *Service) Submit(ctx context.Context, d Draft) (Receipt, error) {
 	}); err != nil {
 		return Receipt{}, err
 	}
-	return Receipt{Receipt: got.Receipt, Status: got.Status, CreatedAt: created, Redacted: redacted}, nil
+	return Receipt{Receipt: got.Receipt, Status: got.Status, CreatedAt: created, Redacted: redacted, UnderReview: got.UnderReview}, nil
 }
 
 func (s *Service) prepare(d Draft) (wireSubmit, bool, error) {
@@ -216,7 +217,8 @@ func (s *Service) ListMine(ctx context.Context) (Mine, error) {
 		return st.mine(false), nil
 	}
 	var resp struct {
-		Items []Item `json:"items"`
+		Items   []Item          `json:"items"`
+		Profile json.RawMessage `json:"profile"`
 	}
 	err = s.get(ctx, st.InstallID, st.InstallToken, &resp)
 	switch {
@@ -232,7 +234,8 @@ func (s *Service) ListMine(ctx context.Context) (Mine, error) {
 	default:
 		return Mine{}, err
 	}
-	if err := s.store.update(func(st *state) error { st.remember(resp.Items...); return nil }); err != nil {
+	profile := readProfile(resp.Profile)
+	if err := s.store.update(func(st *state) error { st.remember(resp.Items...); st.Profile = profile; return nil }); err != nil {
 		return Mine{}, err
 	}
 	st, err = s.store.load()
@@ -240,6 +243,17 @@ func (s *Service) ListMine(ctx context.Context) (Mine, error) {
 		return Mine{}, err
 	}
 	return st.mine(false), nil
+}
+
+// readProfile is the standing the service stated, or nil when it stated none or
+// one that does not hold together. It is judged apart from the list so a
+// profile this build cannot read never costs the person their reports.
+func readProfile(raw json.RawMessage) *Profile {
+	var p Profile
+	if len(raw) == 0 || json.Unmarshal(raw, &p) != nil || !p.coherent() {
+		return nil
+	}
+	return &p
 }
 
 func isOffline(err error) bool { return errors.Is(err, ErrOffline) || errors.Is(err, ErrUnavailable) }

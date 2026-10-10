@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"reasonix/internal/base/testenv"
@@ -208,5 +209,30 @@ func TestPersistingAnUnknownModelLeavesTheDefaultAlone(t *testing.T) {
 	}
 	if cfg.DefaultModel != "mixed/text-only" {
 		t.Fatalf("default_model = %q, want the original left intact", cfg.DefaultModel)
+	}
+}
+
+func TestModelsReportGlmForcedThinking(t *testing.T) {
+	got := modelsByRef(t, `default_model = "glm/glm-5.3"
+
+[[providers]]
+name = "glm"
+kind = "openai"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+models = ["glm-5.3", "glm-5.3-flash", "glm-5.2"]
+api_key_env = "MIXED_API_KEY"
+`)
+	for _, model := range []string{"glm-5.3", "glm-5.3-flash", "glm-5.2"} {
+		row, ok := got["glm/"+model]
+		if !ok {
+			t.Fatalf("%s missing from /models", model)
+		}
+		forced := model != "glm-5.2"
+		if row.ForcesThinking != forced {
+			t.Errorf("%s forcesThinking = %v, want %v", model, row.ForcesThinking, forced)
+		}
+		if forced && !slices.Equal(row.Efforts, []string{"auto", "low", "high", "max"}) {
+			t.Errorf("%s efforts = %v", model, row.Efforts)
+		}
 	}
 }

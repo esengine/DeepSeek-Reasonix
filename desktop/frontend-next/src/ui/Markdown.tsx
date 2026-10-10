@@ -166,7 +166,7 @@ export interface LocalRefs {
 
 // live is the tail of a message still arriving; tail alone is only the last
 // block, which a settled message has too.
-const Block = memo(function Block({ src, math, emoji, code, tail, live, local }: { src: string; math: Plugin | null; emoji: Plugin | null; code: Plugin | null; tail?: boolean; live?: boolean; local?: LocalRefs }) {
+const Block = memo(function Block({ src, math, emoji, code, tail, live, local, images }: { src: string; math: Plugin | null; emoji: Plugin | null; code: Plugin | null; tail?: boolean; live?: boolean; local?: LocalRefs; images: boolean }) {
   // Inside the memo, so a settled block normalises once instead of per chunk.
   const body = normalizeMath(tail ? balanceFences(src) : src);
   return (
@@ -200,9 +200,12 @@ const Block = memo(function Block({ src, math, emoji, code, tail, live, local }:
             </a>
           );
         },
-        img: ({ src, alt, title }) => (
-          <img src={(local && typeof src === "string" && local.image(src)) || (src as string | undefined)} alt={alt} title={title} />
-        ),
+        img: ({ src, alt, title }) =>
+          images ? (
+            <img src={(local && typeof src === "string" && local.image(src)) || (src as string | undefined)} alt={alt} title={title} />
+          ) : (
+            <span className="md-noimg">{alt}</span>
+          ),
         pre: ({ children }) => (
           <CodeBlock lang={langOf(children)} source={textOf(children)} live={live}>{children}</CodeBlock>
         ),
@@ -218,7 +221,9 @@ const Block = memo(function Block({ src, math, emoji, code, tail, live, local }:
   );
 });
 
-export function Markdown({ text, streaming, local }: { text: string; streaming?: boolean; local?: LocalRefs }) {
+/** images=false is for text nobody in the conversation wrote: a picture
+ *  address in it is a request the reader never chose to make. */
+export function Markdown({ text, streaming, local, images = true }: { text: string; streaming?: boolean; local?: LocalRefs; images?: boolean }) {
   const shown = useRevealed(text, streaming);
   const math = usePlugin(MATH.test(text), KATEX);
   const emoji = usePlugin(EMOJI.test(text), EMOJIS);
@@ -237,9 +242,9 @@ export function Markdown({ text, streaming, local }: { text: string; streaming?:
     // handing a listing over would hand over something that was never said.
     <div className="md" data-live={streaming ? "" : undefined}>
       {parts.map((p, i) => (
-        <Block key={i} src={p} math={math} emoji={emoji} code={code} local={local} />
+        <Block key={i} src={p} math={math} emoji={emoji} code={code} local={local} images={images} />
       ))}
-      <Block src={shown.slice(at)} math={math} emoji={emoji} code={code} local={local} tail live={streaming} />
+      <Block src={shown.slice(at)} math={math} emoji={emoji} code={code} local={local} images={images} tail live={streaming} />
       {streaming && <span className="caret" />}
     </div>
   );

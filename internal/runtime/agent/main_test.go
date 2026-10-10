@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"go.uber.org/goleak"
 )
@@ -11,7 +12,7 @@ import (
 func TestMain(m *testing.M) {
 	// Stream body retries use multi-second backoff in production; collapse it
 	// in package tests so recovery suites stay deterministic and fast.
-	streamRetrySleep = func(ctx context.Context, _ int) bool {
+	streamRetrySleep = func(ctx context.Context, _ time.Duration) bool {
 		return ctx.Err() == nil
 	}
 	goleak.VerifyTestMain(m, liveRunLeakAllowances()...)

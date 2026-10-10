@@ -189,3 +189,46 @@ func TestUnmirroredManifestNamesOnlyGitHub(t *testing.T) {
 		t.Fatalf("asset = %+v, want GitHub alone when nothing is mirrored", a)
 	}
 }
+
+// Both Windows architectures ship an installer and a portable archive under
+// the same naming rule; each installer answers only its own platform key.
+func TestWindowsArchitecturesResolveToTheirOwnInstallers(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
+	for _, name := range []string{
+		"ReasonixStudio-windows-amd64-installer.exe",
+		"ReasonixStudio-windows-amd64.zip",
+		"ReasonixStudio-windows-arm64-installer.exe",
+		"ReasonixStudio-windows-arm64.zip",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := run(dir, "v0.1.0", "studio-v0.1.0", "", false); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var m update.Manifest
+	raw, err := os.ReadFile(filepath.Join(dir, "latest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Platforms) != 2 || len(m.Downloads) != 2 {
+		t.Fatalf("platforms %d, downloads %d; want one installer per architecture", len(m.Platforms), len(m.Downloads))
+	}
+	for arch, name := range map[string]string{
+		"amd64": "ReasonixStudio-windows-amd64-installer.exe",
+		"arm64": "ReasonixStudio-windows-arm64-installer.exe",
+	} {
+		a, ok := m.Platforms[update.PlatformKey("windows", arch)]
+		if !ok || !strings.HasSuffix(a.URL, "/"+name) {
+			t.Errorf("windows-%s resolves to %+v, want %s", arch, a, name)
+		}
+	}
+	if len(m.Deltas) != 0 {
+		t.Errorf("no delta directory was given, yet deltas = %v", m.Deltas)
+	}
+}

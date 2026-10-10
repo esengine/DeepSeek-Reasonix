@@ -47,7 +47,6 @@ var windowReset = map[string]bool{
 	"cacheState":      true,
 	"compaction":      true,
 	"coveredHash":     true,
-	"budgetNotice":    true,
 }
 
 var windowCarryOver = map[string]bool{
@@ -172,7 +171,7 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	a.sess.cacheMiss.Store(7)
 	a.sess.missingReasoning = missingReasoningWatch{active: true, stateRecorded: true, healthyStreak: 2}
 	a.sess.win.compaction.stuck = true
-	a.sess.win.compaction.lastNoop = maintenanceNoop{reason: NoopNoNewClosedPrefix, turn: 9}
+	a.sess.win.compaction.lastReported = maintenanceReport{reason: NoopNoNewClosedPrefix, turn: 9}
 	a.sess.win.compactionState = sessionstore.CompactionState{}
 	a.unwrittenResolve.at = time.Unix(1, 0)
 
@@ -188,9 +187,9 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	if a.sess.missingReasoning != (missingReasoningWatch{}) {
 		t.Errorf("missingReasoning = %+v, want the incident to end with its conversation", a.sess.missingReasoning)
 	}
-	if a.sess.win.compaction.stuck || a.sess.win.compaction.lastNoop.turn != 0 {
-		t.Errorf("compaction progress = stuck:%t lastNoop:%+v, want it restarted",
-			a.sess.win.compaction.stuck, a.sess.win.compaction.lastNoop)
+	if a.sess.win.compaction.stuck || a.sess.win.compaction.lastReported.turn != 0 {
+		t.Errorf("compaction progress = stuck:%t lastReported:%+v, want it restarted",
+			a.sess.win.compaction.stuck, a.sess.win.compaction.lastReported)
 	}
 	if a.sess.win.cacheState != CacheStateUnknown {
 		t.Errorf("cacheState = %q, want %q", a.sess.win.cacheState, CacheStateUnknown)

@@ -10,11 +10,14 @@
 # Merging is additive: an existing entry for the same version wins, so a rerun
 # or a recovery publication can never rewrite history. Usage:
 #
-#   update-versions-index.sh <existing-index|-> <version> <tag> <channel> <published-at> [keep]
+#   update-versions-index.sh <existing-index|-> <version> <tag> <channel> <published-at> [keep] [notes-url]
+#
+# notes-url names the version's already-uploaded release notes object. Without
+# it the entry carries no notes field, which is how a version with no notes reads.
 set -euo pipefail
 
-if [ "$#" -lt 5 ] || [ "$#" -gt 6 ]; then
-  echo "usage: $0 <existing-index|-> <version> <tag> <channel> <published-at> [keep]" >&2
+if [ "$#" -lt 5 ] || [ "$#" -gt 7 ]; then
+  echo "usage: $0 <existing-index|-> <version> <tag> <channel> <published-at> [keep] [notes-url]" >&2
   exit 2
 fi
 
@@ -24,6 +27,7 @@ tag="$3"
 channel="$4"
 published_at="$5"
 keep="${6:-20}"
+notes="${7:-}"
 
 for value in "$version" "$tag" "$channel" "$published_at"; do
   if [ -z "$value" ]; then
@@ -31,6 +35,13 @@ for value in "$version" "$tag" "$channel" "$published_at"; do
     exit 1
   fi
 done
+case "$notes" in
+  ''|https://dl.reasonix.io/studio/notes/*.md) ;;
+  *)
+    echo "::error::notes-url must be an object under https://dl.reasonix.io/studio/notes/, got $notes" >&2
+    exit 1
+    ;;
+esac
 case "$keep" in
   ''|*[!0-9]*)
     echo "::error::keep must be a positive integer, got $keep" >&2
@@ -62,6 +73,7 @@ printf '%s' "$base" | jq \
   --arg tag "$tag" \
   --arg channel "$channel" \
   --arg publishedAt "$published_at" \
+  --arg notes "$notes" \
   --argjson keep "$keep" '
   def semver: [splits("[.-]")] | map(select(test("^[0-9]+$")) | tonumber);
   {
@@ -75,7 +87,7 @@ printf '%s' "$base" | jq \
           channel: $channel,
           publishedAt: $publishedAt,
           manifest: ("https://dl.reasonix.io/" + $tag + "/latest.json"),
-        }]
+        } + (if $notes == "" then {} else {notes: $notes} end)]
       # Existing entries win: unique_by keeps the first of each group, so a
       # rerun cannot rewrite what was already published under that version.
       | unique_by(.version)

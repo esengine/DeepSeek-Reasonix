@@ -47,6 +47,7 @@ interface Props extends Rail {
    *  each panel is, whether it appears at all, and what it reads are its own. */
   posture: Posture;
   plan: PlanStep[];
+  blocked?: boolean;
   wallet: Wallet;
   account: string;
   onRefreshWallet: () => void;
@@ -87,6 +88,7 @@ export const Metrics = memo(function Metrics({
   done,
   posture,
   plan,
+  blocked,
   wallet,
   account,
   onRefreshWallet,
@@ -121,7 +123,7 @@ export const Metrics = memo(function Metrics({
     context: <Context key="context" ctx={ctx} legend port={port} onCtx={onCtx} />,
     agents: <Agents key="agents" tasks={tasks} />,
     runtime: <Runtime key="runtime" rate={rate} done={done} stats={stats} />,
-    plan: <Plan key="plan" steps={plan} shownElsewhere={planShownElsewhere} />,
+    plan: <Plan key="plan" steps={plan} shownElsewhere={planShownElsewhere} paused={blocked} />,
     files: (
       <Files key="files" changes={changes} yolo={yolo} tree={tree} open={openPath}
         onOpen={tree?.repo ? openPreview : undefined} />

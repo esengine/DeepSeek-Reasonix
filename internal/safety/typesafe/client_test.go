@@ -65,3 +65,51 @@ func TestEvaluateValidatesQuestionBoundsBeforeNetwork(t *testing.T) {
 		t.Fatal("expected invalid score criteria to fail")
 	}
 }
+
+func probeClient(t *testing.T, reply http.HandlerFunc, key string) Client {
+	t.Helper()
+	server := httptest.NewServer(reply)
+	t.Cleanup(server.Close)
+	return Client{HTTP: server.Client(), BaseURL: server.URL, APIKey: func() string { return key }}
+}
+
+func TestProbeAcceptsAValidNoulVerdict(t *testing.T) {
+	client := probeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/systemone" || r.Header.Get("Authorization") != "Bearer k" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"answers":{"probe":{"type":"noul","noul":1}}}`))
+	}, "k")
+	if err := client.Probe(context.Background(), "m"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProbeFailuresCarryIdentity(t *testing.T) {
+	ok := func(body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }
+	}
+	for name, body := range map[string]string{
+		"not json":      `<html>`,
+		"no answer":     `{"answers":{}}`,
+		"wrong type":    `{"answers":{"probe":{"type":"choice","noul":0.5}}}`,
+		"missing noul":  `{"answers":{"probe":{"type":"noul"}}}`,
+		"out of range":  `{"answers":{"probe":{"type":"noul","noul":1.5}}}`,
+		"negative noul": `{"answers":{"probe":{"type":"noul","noul":-0.1}}}`,
+	} {
+		if err := probeClient(t, ok(body), "k").Probe(context.Background(), "m"); !errors.Is(err, ErrMalformedResponse) {
+			t.Errorf("%s: err = %v, want ErrMalformedResponse", name, err)
+		}
+	}
+	if err := probeClient(t, ok(`{}`), "").Probe(context.Background(), "m"); !errors.Is(err, ErrKeyMissing) {
+		t.Errorf("no key: err = %v", err)
+	}
+	refused := probeClient(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }, "k")
+	var httpErr *HTTPError
+	if err := refused.Probe(context.Background(), "m"); !errors.As(err, &httpErr) || httpErr.Status != http.StatusTeapot {
+		t.Errorf("status: err = %v", err)
+	}
+	if err := probeClient(t, ok(`{}`), "k").Probe(context.Background(), " "); err == nil {
+		t.Error("an empty model must be refused before any request")
+	}
+}

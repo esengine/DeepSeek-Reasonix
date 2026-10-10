@@ -81,6 +81,66 @@ jobs:
             exit 1
           fi
 
+  # Real-Chromium guards that run without a kernel. Only the ones that passed
+  # three consecutive local runs are wired; the rest stay manual (see
+  # desktop/frontend-next/perf/README.md). Skipped unless the SPA changed.
+  browser-guards:
+    name: browser guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop/frontend-next
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: SPA changed?
+        id: spa
+        working-directory: .
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] &&
+             git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- desktop/frontend-next; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.spa.outputs.run == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+          run_install: false
+
+      - if: steps.spa.outputs.run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend-next/pnpm-lock.yaml
+
+      - if: steps.spa.outputs.run == 'true'
+        name: Install
+        run: pnpm install --frozen-lockfile
+
+      - if: steps.spa.outputs.run == 'true'
+        name: Build the perf harness and install Chromium
+        run: |
+          pnpm exec vite build --config vite.perf.config.ts
+          pnpm exec playwright install --with-deps chromium
+
+      - if: steps.spa.outputs.run == 'true'
+        name: Guards
+        run: |
+          python3 -m http.server 4399 --directory dist-perf >/dev/null 2>&1 &
+          for _ in $(seq 30); do curl -sf http://localhost:4399/perf.html >/dev/null && break; sleep 1; done
+          node perf/intrinsic.mjs
+          node perf/contrast.mjs
+          node perf/wheel.mjs
+          node perf/branch-tooltip.mjs
+          node perf/selfcheck.mjs branch-tooltip
+
   desktop:
     name: desktop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -121,6 +181,45 @@ jobs:
             CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -o /dev/null ./cmd/reasonix-studio-host
           done
 
+  # The ARM64 leg queues on a scarcer runner pool, so a pull request runs it
+  # only when it touches what the leg verifies; a push to studio always does.
+  scope:
+    name: package matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      arm64: ${{ steps.pick.outputs.arm64 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          arm64=true
+          if [ "$EVENT" = pull_request ]; then
+            arm64=false
+            if git diff --name-only "$BASE_SHA" HEAD |
+              grep -qE '^(desktop/electron/|desktop/cmd/studio-manifest/|desktop/go\.(mod|sum)$|cmd/reasonix-studio-host/|internal/platform/(update|appupdate)/|go\.(mod|sum)$|scripts/(windows-signing-lib|verify-windows-package|verify-windows-authenticode|install-smoke)\.ps1$|\.github/workflows/(studio|release-studio)\.yml$)'; then
+              arm64=true
+            fi
+          fi
+          legs='[
+            {"os":"macos-latest","arch":"arm64","platform":"darwin"},
+            {"os":"ubuntu-22.04","arch":"amd64","platform":"linux"},
+            {"os":"windows-latest","arch":"amd64","platform":"windows","ebarch":"x64"}
+          ]'
+          if [ "$arm64" = true ]; then
+            legs="$(jq -c '. + [{"os":"windows-11-arm","arch":"arm64","platform":"windows","ebarch":"arm64"}]' <<<"$legs")"
+          else
+            legs="$(jq -c . <<<"$legs")"
+          fi
+          echo "arm64=$arm64" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"include\":$legs}" >> "$GITHUB_OUTPUT"
+
   # The packaging contract, on real artifacts rather than on the config that
   # describes them. Unsigned on purpose: signing and notarization are a
   # distribution concern and belong to the release workflow, and treating their
@@ -128,20 +227,12 @@ jobs:
   # cross-compile while only Windows had ever produced a package.
   package:
     name: package (${{ matrix.os }})
+    needs: scope
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            arch: arm64
-            platform: darwin
-          - os: ubuntu-22.04
-            arch: amd64
-            platform: linux
-          - os: windows-latest
-            arch: amd64
-            platform: windows
+      matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     defaults:
       run:
         shell: bash
@@ -174,8 +265,13 @@ jobs:
         working-directory: desktop/frontend-next
         run: pnpm install --frozen-lockfile && pnpm build
 
+      # The Windows legs name their architecture instead of taking the
+      # toolchain's, so a runner whose Go or Node is the other architecture
+      # fails here rather than shipping a mislabelled package.
       - name: Build the kernel the shell speaks to
         working-directory: desktop/electron
+        env:
+          REASONIX_GOARCH: ${{ matrix.platform == 'windows' && matrix.arch || '' }}
         run: pnpm install --frozen-lockfile && pnpm run build:host
 
       # The .deb's absolute-path payload. A no-op off Linux, so it is not
@@ -191,7 +287,8 @@ jobs:
         working-directory: desktop/electron
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: pnpm run build:dist
+          ELECTRON_BUILDER_7Z_FILTER: ${{ matrix.platform == 'windows' && matrix.arch == 'arm64' && 'BCJ' || '' }}
+        run: pnpm run build:dist ${{ matrix.ebarch && format('--{0}', matrix.ebarch) || '' }}
 
       # The release vocabulary is GOARCH. electron-builder's own is not, and the
       # rename that reconciles them runs here rather than in the manifest.
@@ -206,6 +303,78 @@ jobs:
             echo "::error::no artifact named for ${{ matrix.platform }}-${{ matrix.arch }}"
             exit 1
           fi
+
+      # An emulated x64 program runs on ARM64 Windows, so a package that merely
+      # starts proves nothing about its architecture: every PE image in the
+      # bundle has to be built for the one the package is named for.
+      - name: Every PE image is built for the package's architecture
+        if: matrix.platform == 'windows'
+        run: |
+          dir=$(find dist -maxdepth 1 -type d -name 'win*-unpacked' | head -1)
+          test -n "$dir"
+          node desktop/electron/packaging/pe.js "$dir" "${{ matrix.arch }}"
+
+      # The release packages a signed copy of the bundle and then reads both
+      # packages back against it. The same recipe on an unsigned copy, so the
+      # packaging contract (the installer's one application archive, the pinned
+      # elevate.exe, every PE image's architecture) is exercised on pull
+      # requests and not first by a release.
+      - name: The packages read back against the bundle they were made from
+        if: matrix.platform == 'windows'
+        shell: bash
+        env:
+          ELECTRON_BUILDER_7Z_FILTER: ${{ matrix.arch == 'arm64' && 'BCJ' || '' }}
+        run: |
+          rm -rf payload nsis-src packed zip-src
+          cp -r "$(find dist -maxdepth 1 -type d -name 'win*-unpacked' | head -1)" payload
+          rm -f payload/resources/elevate.exe
+          # The NSIS run writes elevate.exe into the tree it packs, so each
+          # packager gets a copy and payload stays what was signed.
+          cp -r payload zip-src
+          cp -r payload nsis-src
+          cd desktop/electron
+          pnpm exec electron-builder --prepackaged ../../zip-src --win zip --${{ matrix.ebarch }} \
+            -c.extraMetadata.version=0.0.0-ci -c.directories.output=../../packed-zip
+          pnpm exec electron-builder --prepackaged ../../nsis-src --win nsis --${{ matrix.ebarch }} \
+            -c.extraMetadata.version=0.0.0-ci -c.directories.output=../../packed
+          mv ../../packed-zip/ReasonixStudio-windows-${{ matrix.arch }}.zip ../../packed/
+          ls -la ../../packed
+
+      - name: verify-windows-package.ps1 accepts them
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./scripts/windows-signing-lib.ps1
+          $digest = Get-ManifestDigest -Manifest @(Get-TreeManifest -Root payload)
+          ./scripts/verify-windows-package.ps1 `
+            -PayloadDirectory payload `
+            -ExpectedPayloadDigest $digest `
+            -InstallerPath "packed/ReasonixStudio-windows-${{ matrix.arch }}-installer.exe" `
+            -PortableArchivePath "packed/ReasonixStudio-windows-${{ matrix.arch }}.zip" `
+            -OutputPath "$env:RUNNER_TEMP/verify-output.txt" `
+            -Architecture ${{ matrix.arch }}
+          Get-Content "$env:RUNNER_TEMP/verify-output.txt"
+
+      # The release's own install smoke, against the unsigned installer: the
+      # package is installed where it is meant to run, its tree checked, and
+      # removed.
+      - name: The package installs, runs and uninstalls
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          ./scripts/install-smoke.ps1 `
+            -Installer "dist/ReasonixStudio-windows-${{ matrix.arch }}-installer.exe" `
+            -Architecture ${{ matrix.arch }}
+
+      - name: Keep the arm64 installer for the x64 refusal check
+        if: matrix.platform == 'windows' && matrix.arch == 'arm64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: studio-arm64-installer-ci
+          path: dist/ReasonixStudio-windows-arm64-installer.exe
+          if-no-files-found: error
+          retention-days: 1
 
       # The update channel is the signed manifest. A second answer to which
       # version is current is not a convenience. The .blockmap is the same
@@ -301,3 +470,27 @@ jobs:
             echo "::error::the manifest has no entry for ${{ matrix.platform }}-${{ matrix.arch }}"
             exit 1
           fi
+
+  # The arm64 installer carries one application and no other. Run anywhere but
+  # ARM64 Windows it has to say so and stop, instead of exiting 0 with nothing
+  # installed.
+  arm64-installer-refuses-x64:
+    name: arm64 installer refuses an x64 machine
+    needs: [scope, package]
+    if: needs.scope.outputs.arm64 == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: studio-arm64-installer-ci
+          path: installer
+
+      - name: Run it silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = Join-Path $env:RUNNER_TEMP 'rx-refused'
+          $run = Start-Process -FilePath installer/ReasonixStudio-windows-arm64-installer.exe -ArgumentList '/S', "/D=$target" -Wait -PassThru
+          Write-Host "exit code $($run.ExitCode)"
+          if ($run.ExitCode -eq 0) { throw 'the arm64 installer exited 0 on an x64 machine' }
+          if (@(Get-ChildItem -Recurse -Force $target -ErrorAction SilentlyContinue).Count -ne 0) { throw 'the arm64 installer wrote into the target on an x64 machine' }

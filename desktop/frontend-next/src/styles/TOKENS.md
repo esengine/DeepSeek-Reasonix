@@ -17,6 +17,46 @@ the gate is named.
 - `interpolate-size: allow-keywords` lets `height: auto` take part in a
   transition; engines without it jump, which is the prior behaviour.
 
+## Theme packs
+
+- A pack's values are the declarations of one generated rule,
+  `:root:root[data-pack]`, in a `<style id="pack-theme">` appended to `<head>`
+  when a pack is first applied and left where it is.
+- Nothing is written to the root's inline style: a stylesheet of equal
+  specificity added later wins without `!important`, and one already present
+  loses the tie.
+- The selector ties the contrast tiers (`:root[data-theme][data-contrast]`) and
+  beats them by order. With no pack there is no element: the tiers alone carry
+  the inks, and the reader's contrast is theirs.
+- A pack's own inks take the reader's contrast as a relative-colour lightness
+  offset inside that rule; the built-in inks need none.
+- `--ok --warn --err --net --deleg --add --del --focus` are not in the pack
+  vocabulary and are never written.
+- Decoration that is not a status has its own tokens, which a pack may set
+  (see Decorative roles). A pack that names `net` or `deleg` has them dropped
+  with a warning by the kernel; the frontend has no entry that could write them.
+
+## Decorative roles
+
+`net` and `deleg` say what the agent is doing: running, connected, delegated
+out. A hyperlink, the product accent and a hover halo are not that, so they read
+their own tokens. Each default is the status colour it replaces, in both schemes
+and at every contrast step, so nothing paints differently until a pack sets one.
+
+| Pack key | Variable | Default | Job |
+| --- | --- | --- | --- |
+| `link` | `--link` | `--net` | Hyperlinks and URLs: `.md a`, `.fbk a`, `.lk`, `.hit-row .u` |
+| `brand` | `--brand` | `--net` | The product's own tint: wallet and toolbar icons, info notes, feedback status chips, skill chips, the selected option and the open workspace's bar |
+| `halo` | `--halo` | `--net` | Hover and drag-over emphasis: card hover, screenshot hover, the reference-drop ring |
+| `labelAgent` | `--label-agent` | `--deleg` | An agent's name: `.who` labels and sub-agent chips |
+| derived | `--brand-wash` | `--net-wash` | Tint behind `brand`; a pack that sets `brand` derives it at 12% over its ground, as `--accent-wash` follows `accent` |
+| derived | `--label-agent-wash` | `--deleg-wash` | Tint behind `labelAgent`, derived the same way |
+
+- `--halo` is not `--glow`: `--glow` is the running compose ring's own local
+  variable, set to `--net` while a turn runs, and stays a status.
+- The running compose ring, call lines, pips, carets and the delegated nest keep
+  `net` and `deleg`.
+
 ## Faces
 
 The interface ships its own faces. On Windows it otherwise resolved to Segoe UI
@@ -63,6 +103,14 @@ grid to break.
   itself now, with dark ink on it. `--err` carries its own ink for the same
   reason: a danger button borrowed `--accent-fg`, which held only while the two
   hues happened to share a lightness.
+- Text takes the ink, never the base.
+  - Light `--warn` reads 4.58:1 on white and 3.86:1 on the floating layer, under
+    the 4.5 line.
+  - A label, count or note coloured `--warn`, `--ok` or `--err` uses
+    `--warn-ink`, `--ok-ink` or `--err-ink`.
+  - Borders, washes and glyph marks (status symbols, check ticks, hover icons)
+    stay on the base: a graphic needs 3:1, which the base clears.
+  - `ink-text.test.ts` fails a bare hue as `color` outside its glyph list.
 - An ink is read on every tint it lands on, not only the lightest one. The
   light `--accent-ink` cleared the popover's own surface at 6.4:1 and the
   selected row inside it — that same surface with 7% text mixed in — at 4.40,
@@ -87,6 +135,11 @@ grid to break.
     lightness band, chroma floor, adjacent-pair colour-vision separation
     (ΔE ≥ 8), normal-vision floor (≥ 15), and contrast with the ground.
   - In light, four segments fall below 3:1 and rely on the legend's text labels.
+  - Chart series take `--cat-1` … `--cat-5` by index. A sixth series onward
+    repeats the ramp with a second channel (dash for lines, hatch for bars,
+    lower opacity for slices) because five distinguishable hues is the ceiling,
+    and every chart carries a legend or a data table so colour is never the only
+    way to read a series.
 - `--lights-w` / `--lights-h` are the window corner macOS draws its controls
   over, and they are zero everywhere the shell does not hand that corner to the
   page. Whichever element occupies the corner reserves them, so a layout change
@@ -195,6 +248,10 @@ raised with its ratios kept.
   line and the other two step up; the body end does not move, because near-white
   on a dark ground haloes and narrowing the span is what "softer" means.
   Enforced by `perf/contrast.mjs`.
+- `--ghost` is `--faint`'s value in every tier: a lighter one fails the floor.
+- `perf/tiers.mjs` holds every tier: each ink is at least as legible as the
+  default palette stepped once (3.0/10.1, 3.5/7.5 and 3.5/7.0 lightness points
+  for text, muted and faint) and as the floors recorded there, on both grounds.
 - `prefers-contrast: more` is followed when the user has not chosen a tier.
   Light and dark are judged separately: a manual dark choice under a light
   system scheme would otherwise paint the light theme's dark body text onto a

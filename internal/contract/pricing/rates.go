@@ -118,6 +118,31 @@ var officialRates = []officialRateRow{
 		BillingMode: BillingModeSubscriptionEquivalent, DocURL: DocMiMoTokenPlan, Notes: "payg_equivalent_not_plan_bill", CheckedOn: checkedOn,
 		Rates: []rateGeneration{{Base: RateCard{CacheHit: 0.02, Input: 1, Output: 2, Currency: "CNY"}}},
 	},
+	{
+		Provider: "mimo", Model: "mimo-v2.6-pro", Currency: "CNY",
+		BillingMode: BillingModePAYG, DocURL: DocMiMoPAYG, CheckedOn: mimoCheckedOn,
+		Rates: []rateGeneration{{Base: RateCard{CacheHit: 0.025, Input: 3, Output: 6, Currency: "CNY"}}},
+	},
+	{
+		Provider: "mimo", Model: "mimo-v2.6-flash", Currency: "CNY",
+		BillingMode: BillingModePAYG, DocURL: DocMiMoPAYG, CheckedOn: mimoCheckedOn,
+		Rates: []rateGeneration{{Base: RateCard{CacheHit: 0.02, Input: 1, Output: 2, Currency: "CNY"}}},
+	},
+	{
+		Provider: "mimo", Model: "mimo-v2.6-pro-ultraspeed", Currency: "CNY",
+		BillingMode: BillingModePAYG, DocURL: DocMiMoPAYG, CheckedOn: mimoCheckedOn,
+		Rates: []rateGeneration{{Base: RateCard{CacheHit: 0.25, Input: 30, Output: 60, Currency: "CNY"}}},
+	},
+	{
+		Provider: "mimo", Model: "mimo-v2.6-pro", Currency: "CNY",
+		BillingMode: BillingModeSubscriptionEquivalent, DocURL: DocMiMoTokenPlan, Notes: "payg_equivalent_not_plan_bill", CheckedOn: mimoCheckedOn,
+		Rates: []rateGeneration{{Base: RateCard{CacheHit: 0.025, Input: 3, Output: 6, Currency: "CNY"}}},
+	},
+	{
+		Provider: "mimo", Model: "mimo-v2.6-flash", Currency: "CNY",
+		BillingMode: BillingModeSubscriptionEquivalent, DocURL: DocMiMoTokenPlan, Notes: "payg_equivalent_not_plan_bill", CheckedOn: mimoCheckedOn,
+		Rates: []rateGeneration{{Base: RateCard{CacheHit: 0.02, Input: 1, Output: 2, Currency: "CNY"}}},
+	},
 }
 
 // retiredDeepSeekFlashModels are names DeepSeek still answers as its current

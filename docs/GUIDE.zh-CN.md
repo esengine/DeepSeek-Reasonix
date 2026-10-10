@@ -17,9 +17,11 @@
 - [环境变量](#环境变量)
 - [Web 前端](#web-前端)
 - [配置路径](./CONFIG_PATHS.md)
+- [日志与崩溃文件](#日志与崩溃文件)
 - [思考语言](./REASONING_LANGUAGE.md)
 - [任务合约与暂停策略](./TASK_CONTRACT.md)
 - [自定义 OpenAI-compatible provider](#自定义-openai-compatible-provider)
+- [Hooks](#hooks)
 - [快捷键](#快捷键)
 - [权限与沙盒](#权限与沙盒)
 - [能力诊断](#能力诊断)
@@ -199,10 +201,13 @@ telemetry 请求之前只询问一次。提示为 `[Y/n]`：直接回车、输�
 数量和时效上限的本地队列中，等待后续启动重试。
 
 ping 包含一个 CLI 专用的随机 128-bit 安装 ID、CLI 版本、OS、架构和 `cli` surface
-标记。计数批次使用同一个 ID 做每日活跃安装去重，只包含固定 bucket，例如 CLI 模式、
+标记。这个 ID 与桌面端安装 ID 分离，不是账号、硬件、仓库或 session 标识。
+
+计数批次使用同一个 ID 做每日活跃安装去重，只包含固定 bucket，例如 CLI 模式、
 运行配置档、权限/会话模式、turn 延迟、finish reason、cache hit 区间、通用
-Provider/工具错误分类、compaction、恢复计数和归一化界面语言。这个 ID 与桌面端安装
-ID 分离，不是账号、硬件、仓库或 session 标识。
+Provider/工具错误分类、compaction、恢复计数、每轮 token 量级区间、工作区写锁争用区间和归一化界面语言。
+
+不回答就关闭提示（输入结束、Ctrl+D）不会保存任何选择，也不会上传；下次启动会再问。
 
 Reasonix 绝不会上传 prompt、回答、reasoning、工具名/参数/输出、路径、仓库/分支、
 session ID、精确 token/费用、Provider/model 名称、base URL 或环境变量。
@@ -310,7 +315,9 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板、扩展发布的 stat
 远程模块让 Reasonix 在远端主机上运行,并通过你自己的 SSH 连接访问它 —— 即 VS Code
 Remote-SSH 式的体验。它在远端主机上引导一个常驻的 headless `reasonix serve`,把本地一个
 回环端口转发过去,再经隧道打开现有的 serve Web 客户端。agent、工具与文件全部原生运行在远端
-主机上,保真度 100%,不经过有损的文件代理。V1 支持 Linux 与 macOS 远端主机。
+主机上,保真度 100%,不经过有损的文件代理。
+
+支持 Linux、macOS 与 Windows 远端主机;Windows 主机需要 PowerShell 和 OpenSSH,无论其 `DefaultShell` 指定的是 cmd、PowerShell 还是 Git Bash。
 
 主机保存在 `config.toml` 的用户级 `[remote]` 段。与 `[secrets]` 一样,项目级
 `reasonix.toml` 无法注入或覆盖远程主机 —— 克隆的仓库永远无法左右 Reasonix 向何处发起 SSH
@@ -403,6 +410,22 @@ API Key 的主机上打开工作区可以直接用。设了 `provider = "remote"
 Provider。
 短暂的 SSH 中断不会关闭远程窗口；桌面端会在后台重连、重新挂载回环转发，并让窗口重新加载已恢复的
 Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭已经不可用的远程窗口。
+
+### 远端 serve 的生命周期
+
+- 主机上的 `reasonix serve` 进程是常驻的。退出桌面或链路断开都不会终止它,下次连接会直接接入。
+- pane 在这个 serve 上的会话不会比桌面活得久。每个 pane 在远端各自驱动一个 runtime;关闭 pane
+  或退出桌面时,Studio 会先向远端 serve 发 `POST /runtimes/{id}/close`,再拆隧道。
+- 这次关闭会取消进行中的回合并释放会话租约,别的窗口随后就能打开这个会话。被关闭的只有该 pane
+  的 runtime:serve 进程继续运行,下次连接可以接入;其他客户端开的 runtime 也不受影响,无论这个
+  serve 是怎么启动的。
+- `provider = "remote"` 只决定模型凭据从哪来,不会让 pane 脱离桌面。
+- 工作区上已在运行的 serve 会被接入而不是被替换,不论它由 `reasonix remote serve start`、另一个
+  窗口还是手工执行 `reasonix serve --port-file` 启动。之后的连接不会删除它的 port 与 pid 文件,
+  也不会停掉它。
+- `serve start` 不使用 broker,所以 `provider = "local"` 的主机无法接入它:这次连接会失败并给出
+  说明,serve 保持运行。请把该主机设为 `provider = "remote"`(此时远端需自备凭据),或用
+  `reasonix remote serve stop <host>` 停掉该 serve。
 
 ## 自定义 OpenAI-compatible provider
 
@@ -508,6 +531,109 @@ Thinking 覆盖选项：
 | Disabled（关闭） | 对兼容 provider 发送 `thinking.type = "disabled"`。DeepSeek 风格 provider 下还会避免继续发送推理深度提示。 |
 | Adaptive（自适应） | 仅在服务文档明确支持 adaptive thinking 时使用，例如 MiniMax-M3 风格端点；语义是发送或保留 `thinking.type = "adaptive"`。 |
 
+## Hooks
+
+Reasonix 有 hooks：在智能体循环的固定节点运行的 shell 命令，可以观察、注入上下文，
+并在两个事件上否决即将发生的动作。它与权限是两回事：`[permissions]` 规则决定一次
+工具调用是放行还是询问，hook 则运行你自己的代码。
+
+| 事件 | 触发时机 | 能否阻断 |
+| --- | --- | --- |
+| `PreToolUse` | 工具调用前，经 `match` 匹配；payload 含 `toolName`、`toolArgs` | 能 |
+| `PostToolUse` | 工具调用后（成功或失败） | 否 |
+| `PostToolUseFailure` | 工具调用返回错误后 | 否 |
+| `PermissionRequest` | 显示审批提示前 | 否 |
+| `UserPromptSubmit` | 用户输入开启一轮之前 | 能 |
+| `Stop` / `StopFailure` | 一轮结束 / 失败时 | 否 |
+| `SessionStart` / `SessionEnd` | 会话激活 / 被关闭或被 `/new` 轮换时 | 否 |
+| `SubagentStart` / `SubagentStop` | 包住前台 `task` 调用 | 否 |
+| `Notification` | 智能体需要用户关注时 | 否 |
+| `PreCompact` | 压缩前；stdout 成为额外的摘要指引 | 否 |
+| `PostLLMCall` | 每个模型轮次后；exit 0 且 stdout 非空时替换已存储的推理文本 | 否 |
+
+Hooks 配置在 `<Reasonix home>/settings.json`（全局）或 `<root>/.reasonix/settings.json`
+（项目）。每个事件对应一个 hook 列表：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "match": "bash",
+        "command": "sh ~/.reasonix/hooks/no-git-push.sh",
+        "description": "block git push",
+        "timeout": 3000
+      }
+    ],
+    "SessionStart": [
+      { "command": "echo 'Team rule: run make lint before every commit.'" }
+    ]
+  }
+}
+```
+
+字段：
+
+- `command`（必填）：由平台 shell 执行。
+- `match`：仅工具事件；对工具名的锚定正则，所以 `file` 不会匹配 `read_file`。空或 `*` 表示所有工具。
+- `description`：`/hooks` 与阻断通知里显示的标签。
+- `timeout`：毫秒；`PreToolUse`、`PermissionRequest`、`UserPromptSubmit` 默认 5000，其余 30000。
+- `cwd`、`env`：工作目录与额外环境变量。
+
+文件格式错误时不加载任何 hook，也不会让 Reasonix 启动失败。
+
+**约定。**事件 payload 以一行 JSON 从 stdin 传入（`event`、`sessionId`、`cwd`，以及按
+事件而定的 `toolName`、`toolArgs`、`prompt`、`toolResult`、`error` 等）。退出码就是裁决：
+
+- `0` 放行。`SessionStart` 上，stdout（纯文本，或带 `hookSpecificOutput.additionalContext`
+  的 JSON）会一次性注入下一轮真实用户输入。
+- `2` 阻断，但仅限 `PreToolUse` 与 `UserPromptSubmit`。被阻断的工具调用不会执行，模型
+  收到 `blocked: <hook> hook (<scope>) stopped this call — <stderr，为空则 stdout> · command: ... · source: ...`，所以原因要写给模型看。
+- 其他退出码，或非阻断事件上的 exit 2，只向用户给出警告。
+- 超时在 `PreToolUse` 与 `UserPromptSubmit` 上算阻断，其他事件只警告。无法启动的 hook
+  不阻断，脚本崩溃（exit 1，或文件缺失的 127）同样放行：只有明确的 exit 2 才否决。
+
+**示例：禁止 bash 里的 `git push`。**`bash` 的 `toolArgs` 就是工具的参数对象，命令在
+`toolArgs.command`。保存为 `~/.reasonix/hooks/no-git-push.sh`（需要 `jq`）：
+
+```sh
+#!/bin/sh
+cmd=$(jq -r '.toolArgs.command // empty')
+case "$cmd" in
+  *"git push"*)
+    echo "git push is disabled in this setup; ask the user to push." >&2
+    exit 2 ;;
+esac
+exit 0
+```
+
+不写 hook 时，更简单的办法是权限规则：无需脚本，任何模式下都生效：
+
+```toml
+[permissions]
+deny = ["Bash(git push*)"]
+```
+
+命令模式足够时优先用规则；决定需要代码（检查参数、查文件、记日志、响应提示）时再用 hook。
+
+**作用域。**
+
+- 全局 hooks（`<Reasonix home>/settings.json`）与已安装插件包的 hooks 会生效，
+  但只读的 observe 模式完全不加载任何 hook。
+- 项目 hooks（`<root>/.reasonix/settings.json`）只有在用户按当前内容批准后才运行
+  （`reasonix trust`）；批准前被扣下并有通知说明。改动该文件或其中命令引用的工作区脚本
+  会使批准失效。
+- `reasonix review` 从不运行项目 hooks（无论是否已批准）：被审查的 checkout 属于不可信
+  输入，只有全局与插件 hooks 生效。
+- 只有工具 hooks（`PreToolUse`、`PostToolUse`、`PermissionRequest`）、`PostLLMCall` 与
+  `PreCompact` 会在会话运行的每个 Agent（含子 Agent）中触发，见配置一节的 `session_id` 表。
+
+**限制。**
+
+- hook 无法强制模型的措辞：阻断对模型表现为一次被拒绝的调用，接下来说什么、试什么由模型决定。
+- 不存在“仅本次会话”的作用域：hooks 来自设置文件，对每个加载它们的会话生效。
+- 原生 hook 不能替用户回答审批提示；只有 `PreToolUse` 的阻断会拒绝一次调用。
+
 ## 快捷键
 
 这里按使用端来写，因为用户通常是先知道“我现在在桌面端/CLI”，再找对应按键。
@@ -540,7 +666,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `Cmd+B` / `Ctrl+B` | 显示或隐藏左侧边栏 | 和点击侧边栏开关是同一个动作。 |
 | `Cmd+Shift+B` / `Ctrl+Shift+B` | 展开或收起最近的 shell 输出 | 和点击折叠 shell 输出提示是同一个动作。 |
 | macOS `Cmd+1`-`Cmd+9`，其它平台 `Ctrl+1`-`Ctrl+9` | 跳转到侧边栏中对应编号的可见对话 | 短暂按住 `Cmd`/`Ctrl` 会显示编号标记；已有自定义快捷键占用相同按键时，自定义动作优先生效。 |
-| macOS `Cmd++`、`Cmd+-`、`Cmd+0`；其它平台 `Ctrl++`、`Ctrl+-`、`Ctrl+0` | 放大、缩小或重置文字大小 | 对把加号上报为 `=` 的键盘也兼容。 |
+| macOS `Cmd++`、`Cmd+-`、`Cmd+0`；其它平台 `Ctrl++`、`Ctrl+-`、`Ctrl+0` | 放大、缩小或重置界面大小 | 与 **设置 → 外观 → 大小 → 界面** 使用同一组档位（80% 到 180%）并保存同一项设置。对把加号上报为 `=` 的键盘也兼容。 |
 | `?` | 打开键盘快捷键帮助表 | 帮助表显示当前实际生效的桌面端绑定。 |
 
 输入框快捷键：
@@ -588,7 +714,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 
 | 按键或命令 | 作用 | 说明 |
 | --- | --- | --- |
-| `Enter` | 发送当前消息 | turn 运行中输入非空内容时，会排队作为后续反馈。 |
+| `Enter` | 发送当前消息 | turn 运行中输入非空内容时，会排队作为后续反馈。输入框为空时，跳回最新输出并继续跟随。 |
 | `Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` | 插入换行 | 普通 `Enter` 保留给发送/确认。 |
 | 空闲时普通 `Up` / `Down` | 回放更旧或更新的已提交提示词 | turn 运行中同一组按键用于导航排队反馈。 |
 | `PageUp` / `PageDown` | 滚动 transcript | 不受当前聊天状态影响。 |
@@ -600,8 +726,10 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | 输入框文本选择 | 选中、复制或替换草稿文本 | 应用内拖选松开后，会通过与 transcript 相同的可验证剪贴板路径复制；输入或粘贴会替换选区，方向键会收起选区。 |
 | 没有活动选区时右键 | 在本地会话粘贴剪贴板文本 | 本地会话开启鼠标接管时，Reasonix 只读取文本并交给正常的 bracketed-paste 处理。SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键；`/mouse` 可恢复终端原生右键菜单。存在活动选区时，右键仍优先复制该选区。 |
 | `/mouse` | 切换应用内鼠标接管 | 关闭后由终端处理原生拖选和右键菜单，但会失去应用内选区、滚动条和滚轮。可用 `REASONIX_DISABLE_MOUSE=1` 让每次会话默认关闭。远程（SSH）会话默认关闭，开箱即可原生选择；`REASONIX_DISABLE_MOUSE=0` 强制在任何环境下接管。 |
-| `Ctrl+C` | 复制、取消、清空或退出 | 有 transcript 或输入框活动选区时优先复制；否则取消运行中的 turn、清空非空输入，或在空输入下连按两次退出。 |
-| `Ctrl+D` | 退出 TUI | 立即退出。 |
+| `Ctrl+C` | 复制、取消、清空或退出 | 有 transcript 或输入框活动选区时优先复制；否则取消运行中的 turn、清空非空输入，或在空输入下连按两次退出；已取消的 turn 仍在停止时再按一次也会退出。 |
+| `Ctrl+D` | 退出 TUI | 空输入且空闲时立即退出。 |
+| `Ctrl+Z` | 把 TUI 挂起到 shell | 仅 macOS 和 Linux，用 `fg` 恢复。Windows 没有作业控制，按下无效果。 |
+| `/quit` 或 `/exit` | 退出 TUI | 立即执行，运行中的 turn 也一样。直接输入 `exit`、`quit` 或 `:q` 只会作为普通消息发给模型。 |
 | 终端的文本粘贴快捷键 | 粘贴文本 | 文本保持终端原生 bracketed-paste 路径：macOS 通常是 `Cmd+V`，Linux 通常是 `Ctrl+Shift+V`，其它环境使用终端自身配置。Reasonix 只消费收到的文本粘贴事件，不会先探测图片。 |
 | macOS/Linux `Ctrl+V`；Windows `Alt+V` | 粘贴剪贴板图片 | 图片粘贴是独立的应用动作。读取期间底栏显示“正在粘贴图片…”，完成后在光标处插入可编辑的 `[image #N]` 标记。 |
 | `/paste-image` | 粘贴剪贴板图片 | 与图片快捷键相同的纯图片命令入口。 |
@@ -1052,6 +1180,26 @@ Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
 
 `$ARGUMENTS` 展开为全部空格分隔参数，`$1`…`$N` 为位置参数。MCP prompts 也以
 `/mcp__<server>__<prompt>` 形式出现在这里。
+
+## 日志与崩溃文件
+
+Studio 的日志放在窗口配置目录下，不在 Reasonix home 里：
+
+| 平台 | 日志目录 |
+| --- | --- |
+| macOS | `~/Library/Application Support/Reasonix Studio/io.reasonix.studio.<实例>/logs` |
+| Windows | `%APPDATA%\Reasonix Studio\io.reasonix.studio.<实例>\logs` |
+| Linux | `~/.config/Reasonix Studio/io.reasonix.studio.<实例>/logs` |
+
+| 文件 | 内容 |
+| --- | --- |
+| `shell.log` | 窗口进程：启动、内核启动与握手，以及内核如何退出（`host: died code=… signal=…`），并附崩溃文件末尾几行。 |
+| `host.log` | 内核自己的输出。成功的轮询请求不再按 INFO 记录，错误能保留更久。 |
+| `crash/host-<时间>-<版本>-<pid>.log` | 内核被致命错误或 panic 终止时 Go 运行时打印的内容，例如 `fatal error: out of memory`。保留最新 5 个，每个只留最后 256 KiB；正常退出不留文件。 |
+
+除崩溃文件外，每个日志达 1 MiB 就轮转（保留 3 份）。内核意外退出后，下次启动会提示一次。
+
+反馈问题时请附上 `shell.log`、`host.log` 和 `crash/` 里较新的文件。`shell.log` 和 `host.log` 已抹去启动凭据；崩溃文件是运行时的原始输出，可能含堆栈、路径和 panic 文本，分享前请先自行检查。
 
 ## 内置文档检索
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -455,33 +454,7 @@ func (s *Store) commitUndoTransaction(undo, original *TransactionManifest, appli
 		}
 	}
 
-	undo.State = TxCommitted
-	undo.UpdatedAt = time.Now()
-	if err := s.persistTransaction(undo); err != nil {
-		restoreErr := s.restoreOriginalRewind(original, applier)
-		err = s.failTransactionAfterStateCompensation(undo, undo.Targets, stages, err, restoreErr)
-		result.OK = false
-		result.Error = err.Error()
-		result.Files = stages
-		return result, err
-	}
-
-	// Mark original as undone; clear lastUndo.
-	original.State = TxUndone
-	original.UpdatedAt = time.Now()
-	if err := s.persistTransaction(original); err != nil {
-		// The committed undo manifest durably names its parent, so startup will
-		// suppress the stale parent even if this secondary write failed.
-		slog.Warn("checkpoint: persist original transaction as undone", "err", err)
-	}
-	s.mu.Lock()
-	s.lastUndo = nil
-	s.mu.Unlock()
-
-	result.OK = true
-	result.UndoAvailable = false
-	result.Files = stages
-	return result, nil
+	return s.finishOwnedUndo(undo, original, applier, result, stages)
 }
 
 func (s *Store) restoreOriginalRewind(original *TransactionManifest, applier ConversationApplier) error {
@@ -644,14 +617,6 @@ func (s *Store) writePublishTemp(path string, data []byte, mode os.FileMode) err
 	return nil
 }
 
-func (s *Store) cleanupPublishTemps(targets []TransactionTarget) {
-	for _, target := range targets {
-		if target.PublishTmp != "" {
-			_ = secureRemove(s.root, target.PublishTmp)
-		}
-	}
-}
-
 func (s *Store) commitTransaction(tx *TransactionManifest, applier ConversationApplier, inject *InjectFail) (RewindResult, error) {
 	tx.State = TxCommitting
 	tx.UpdatedAt = time.Now()
@@ -737,7 +702,6 @@ func (s *Store) commitTransaction(tx *TransactionManifest, applier ConversationA
 		return result, err
 	}
 
-	// Conversation after files.
 	if tx.Scope == RewindConversation || tx.Scope == RewindBoth {
 		if inject != nil && inject.Phase == "conversation" {
 			err := fmt.Errorf("injected failure at conversation")
@@ -789,43 +753,7 @@ func (s *Store) commitTransaction(tx *TransactionManifest, applier ConversationA
 		}
 	}
 
-	if inject != nil && inject.Phase == "finalize" {
-		err := fmt.Errorf("injected failure at finalize")
-		restoreErr := s.restoreTransactionConversation(tx, applier)
-		err = s.failTransactionAfterStateCompensation(tx, tx.Targets, stages, err, restoreErr)
-		result.OK = false
-		result.Error = err.Error()
-		result.Files = stages
-		return result, err
-	}
-	if inject != nil && inject.Phase == "after_conversation_before_finalize" {
-		// Simulate process death after both conversation mutations are durable but
-		// before the transaction can be marked committed. Startup must restore the
-		// forward transcript/checkpoints before compensating files.
-		err := fmt.Errorf("injected crash after conversation before finalize")
-		result.Error = err.Error()
-		result.Files = stages
-		return result, err
-	}
-
-	tx.State = TxCommitted
-	tx.UpdatedAt = time.Now()
-	if err := s.persistTransaction(tx); err != nil {
-		restoreErr := s.restoreTransactionConversation(tx, applier)
-		err = s.failTransactionAfterStateCompensation(tx, tx.Targets, stages, err, restoreErr)
-		result.OK = false
-		result.Error = err.Error()
-		result.Files = stages
-		return result, err
-	}
-	s.mu.Lock()
-	s.lastUndo = tx
-	s.mu.Unlock()
-
-	result.OK = true
-	result.UndoAvailable = true
-	result.Files = stages
-	return result, nil
+	return s.finishOwnedRewind(tx, applier, inject, result, stages)
 }
 
 func (s *Store) restoreTransactionConversation(tx *TransactionManifest, applier ConversationApplier) error {
@@ -1078,7 +1006,7 @@ func (s *Store) compensatePublished(targets []TransactionTarget, stages []FileSt
 			first = err
 		}
 	}
-	return first
+	return s.finishOwnedCompensation(targets, first)
 }
 
 func fingerprintMatches(fp Fingerprint, existed bool, sha string, mode uint32) bool {

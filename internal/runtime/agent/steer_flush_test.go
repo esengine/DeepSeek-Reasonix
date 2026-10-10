@@ -87,6 +87,9 @@ func TestRunFlushesUnconsumedSteersOnCancel(t *testing.T) {
 			t.Fatalf("unconsumed steer %q leaked into the next model context", text)
 		}
 	}
+	if len(notices) == 1 && notices[0].Detail != "use plan B" {
+		t.Fatalf("the notice must carry the guidance as Detail so a frontend can word the rest itself, got %q", notices[0].Detail)
+	}
 	if len(notices) != 1 || notices[0].Level != event.LevelWarn ||
 		!strings.Contains(notices[0].Text, "use plan B") ||
 		!strings.Contains(notices[0].Text, "not applied") {

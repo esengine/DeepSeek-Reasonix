@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/state/sessionstore"
 	"slices"
 	"strings"
@@ -32,7 +33,7 @@ type scriptedSummarizer struct {
 
 func (p *scriptedSummarizer) Name() string { return "scripted" }
 
-func (p *scriptedSummarizer) Stream(_ context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+func (p *scriptedSummarizer) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.mu.Lock()
 	at := p.calls
 	p.calls++
@@ -43,7 +44,7 @@ func (p *scriptedSummarizer) Stream(_ context.Context, _ provider.Request) (<-ch
 	r := p.replies[at]
 	ch := make(chan provider.Chunk, 4)
 	if r.text != "" {
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: r.text}
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: testutil.SummaryReply(req, r.text)}
 	}
 	if r.usage != nil {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: r.usage}

@@ -1,13 +1,10 @@
 package tui
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
-	"reasonix/internal/base/i18n"
 )
 
 type posture struct {
@@ -26,7 +23,6 @@ func settle(m *model, cmd tea.Cmd) posture {
 
 func TestShiftTabCyclesInTheOrder1xUsed(t *testing.T) {
 	m, k := testModel(t)
-	m.opts.YoloConfirmed = true
 	m.status.ToolApprovalMode = "readOnly"
 	want := []posture{{"ask", false}, {"auto", false}, {"yolo", false}, {"ask", true}, {"readOnly", false}, {"ask", false}}
 	for i, w := range want {
@@ -42,60 +38,46 @@ func TestShiftTabCyclesInTheOrder1xUsed(t *testing.T) {
 	}
 }
 
-func TestShiftTabSkipsYoloUntilItWasConfirmed(t *testing.T) {
+func TestShiftTabAlwaysHasYoloOnTheCycle(t *testing.T) {
 	m, _ := testModel(t)
 	m.status.ToolApprovalMode = "auto"
-	if got := settle(m, m.cycleMode()); got != (posture{"auto", true}) {
-		t.Fatalf("an unconfirmed YOLO is not a stop on the cycle: got %+v", got)
+	if got := settle(m, m.cycleMode()); got != (posture{"yolo", false}) {
+		t.Fatalf("auto steps to YOLO with no earlier confirmation: got %+v", got)
 	}
 }
 
-func TestCtrlYAsksOnceThenReturnsToThePostureItLeft(t *testing.T) {
+func TestCtrlYTakesEffectOnOnePressAndReturnsToThePostureItLeft(t *testing.T) {
 	m, k := testModel(t)
-	recorded := 0
-	m.opts.ConfirmYolo = func() error { recorded++; return nil }
-	m.status.ToolApprovalMode = "auto"
-
-	if got := settle(m, m.toggleYolo()); got.mode != "auto" {
-		t.Fatalf("the first Ctrl+Y only explains; mode moved to %q", got.mode)
-	}
-	if !strings.Contains(noticeText(m), i18n.M.YoloConfirmHint) {
-		t.Fatal("the first Ctrl+Y must say what YOLO skips")
-	}
-	for _, c := range k.seen() {
-		if strings.Contains(c, "yolo") {
-			t.Fatalf("an unconfirmed Ctrl+Y reached the kernel: %s", c)
+	for _, from := range []string{"auto", "readOnly"} {
+		m.status.ToolApprovalMode = from
+		pressedAndHeld(m, m.toggleYolo())
+		if m.status.ToolApprovalMode != "yolo" {
+			t.Fatalf("one Ctrl+Y from %s must enter YOLO, got %q", from, m.status.ToolApprovalMode)
+		}
+		pressedAndHeld(m, m.toggleYolo())
+		if m.status.ToolApprovalMode != from {
+			t.Fatalf("leaving YOLO goes back to %s, got %q", from, m.status.ToolApprovalMode)
 		}
 	}
-	if got := settle(m, m.toggleYolo()); got.mode != "yolo" || recorded != 1 || !m.opts.YoloConfirmed {
-		t.Fatalf("the second Ctrl+Y confirms: mode %q, recorded %d", got.mode, recorded)
+	if !strings.Contains(strings.Join(k.seen(), "\n"), `/tool-approval-mode {"mode":"yolo"}`) {
+		t.Fatalf("Ctrl+Y never reached the kernel as yolo:\n%s", strings.Join(k.seen(), "\n"))
 	}
-	if got := settle(m, m.toggleYolo()); got.mode != "auto" {
-		t.Fatalf("leaving YOLO goes back to auto, got %q", got.mode)
-	}
-	m.status.ToolApprovalMode = "readOnly"
-	settle(m, m.toggleYolo())
-	if recorded != 1 {
-		t.Fatalf("a confirmed YOLO is not asked about again (recorded %d)", recorded)
-	}
-	if got := settle(m, m.toggleYolo()); got.mode != "readOnly" {
-		t.Fatalf("leaving YOLO goes back to read only, got %q", got.mode)
+	if strings.TrimSpace(noticeText(m)) != "" {
+		t.Fatalf("Ctrl+Y asks nothing and says nothing: %q", noticeText(m))
 	}
 }
 
-func TestCtrlYStillEnablesWhenTheRecordFails(t *testing.T) {
-	m, _ := testModel(t)
-	m.opts.ConfirmYolo = func() error { return errors.New("disk full") }
-	m.status.ToolApprovalMode = "ask"
-	settle(m, m.toggleYolo())
-	if got := settle(m, m.toggleYolo()); got.mode != "yolo" {
-		t.Fatalf("the person confirmed; a failed record must not undo that, got %q", got.mode)
+func TestCtrlYKeyEntersYoloAtOnceAndTheFooterSaysSo(t *testing.T) {
+	m, k := testModel(t)
+	m.status.ToolApprovalMode = "auto"
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	run(m, cmd)
+	if !strings.Contains(strings.Join(k.seen(), "\n"), `/tool-approval-mode {"mode":"yolo"}`) {
+		t.Fatalf("the Ctrl+Y key never reached the kernel as yolo:\n%s", strings.Join(k.seen(), "\n"))
 	}
-	if !strings.Contains(noticeText(m), "disk full") {
-		t.Fatal("a failed record is reported")
-	}
-	if got := settle(m, m.toggleYolo()); got.mode != "ask" {
-		t.Fatalf("leaving YOLO goes back to ask, got %q", got.mode)
+	m.status.ToolApprovalMode = "yolo"
+	if !strings.Contains(m.modeTag(), "YOLO") {
+		t.Fatalf("footer tag = %q", m.modeTag())
 	}
 }
 
@@ -109,6 +91,14 @@ func TestFooterNamesReadOnlyAndDontAskApart(t *testing.T) {
 	if tag := m.modeTag(); strings.Contains(tag, "Read only") {
 		t.Fatalf("dontAsk still reads as read only: %q", tag)
 	}
+}
+
+// pressedAndHeld runs cmd against the kernel and keeps the posture the model showed
+// straight after the key, since the recording kernel's /status answers empty.
+func pressedAndHeld(m *model, cmd tea.Cmd) {
+	mode, plan := m.status.ToolApprovalMode, m.status.Plan
+	run(m, cmd)
+	m.status.ToolApprovalMode, m.status.Plan = mode, plan
 }
 
 func noticeText(m *model) string {

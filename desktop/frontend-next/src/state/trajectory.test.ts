@@ -104,3 +104,17 @@ describe("frames arriving without their other half", () => {
     expect(line(s, 0)).toContain("exit status 1");
   });
 });
+
+describe("a retry row names why", () => {
+  const retrying = (over: Partial<WireEvent>): WireEvent =>
+    ({ kind: "retrying", retryAttempt: 1, retryMax: 10, retryScope: "headers", ...over }) as WireEvent;
+
+  it("carries the failure class and the status that caused it", () => {
+    const s = run([retrying({ retryCause: "upstream_status", retryStatus: 502 })]);
+    expect(line(s, 0)).toBe("retry 1/10 · scope=headers · cause=upstream_status 502");
+  });
+
+  it("stays as it was for a kernel that sends no class", () => {
+    expect(line(run([retrying({})]), 0)).toBe("retry 1/10 · scope=headers");
+  });
+});

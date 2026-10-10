@@ -49,6 +49,7 @@ func ForRootWithOptions(entries []config.PluginEntry, workspaceRoot string, opts
 
 // FromEntry maps one configured entry, including MCP isolation.
 func FromEntry(e config.PluginEntry, workspaceRoot string, opts Options) plugin.Spec {
+	launchCheck := config.DeclaredLaunchCheck(e, workspaceRoot)
 	e = e.ExpandedPluginForRoot(workspaceRoot)
 	configSource := strings.TrimSpace(string(e.Source))
 	if configSource == "" {
@@ -79,6 +80,7 @@ func FromEntry(e config.PluginEntry, workspaceRoot string, opts Options) plugin.
 	if e.Source.ProjectScoped() && strings.TrimSpace(spec.Dir) == "" {
 		spec.Dir = workspaceRoot
 	}
+	spec.LaunchCheck = launchCheck
 	ApplyIsolation(&spec, workspaceRoot, opts)
 	return spec
 }

@@ -1,8 +1,8 @@
 ---
 name: frontend-page
 description: Build a frontend from selected requirements and hand it off with observed browser acceptance and remaining issues.
-owner: @esengine
-backup: @SivanCola
+owner: "@esengine"
+backup: "@SivanCola"
 status: active
 reviewed: 2026-10-01
 ---

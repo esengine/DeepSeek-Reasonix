@@ -24,6 +24,8 @@ export interface PermissionRules extends PermissionLists {
   rememberedErrorCode?: string;
   shadowedBy?: string;
   effective?: PermissionLists;
+  // Saved rules that name no tool, so they match nothing.
+  dormant?: { list: string; rule: string; tool: string }[];
 }
 
 // Where an approved write may land, and whether bash runs jailed. The
@@ -84,6 +86,14 @@ export interface BrowserToolsSettings {
 
 // When a run reads as no longer moving. Only the user file holds it: a
 // project file cannot pause the user's runs.
+export type DisplayCurrencyMode = "auto" | "CNY" | "USD";
+
+// Which currency costs are shown in; the user file holds it.
+export interface DisplayCurrencySettings {
+  mode: DisplayCurrencyMode;
+  path: string;
+}
+
 export interface ProgressWatchSettings {
   pause: boolean;
   rounds: number;

@@ -18,6 +18,10 @@ function explain(reason: string): string {
     case "ERR_NAME_NOT_RESOLVED":
     case "ERR_NAME_RESOLUTION_FAILED":
       return t("找不到这个地址。内网域名需要连上公司网络或 VPN 才能解析。");
+    case "ERR_FILE_NOT_FOUND":
+      return t("找不到这个文件。请确认路径正确，文件没有被移动或删除。");
+    case "ERR_ACCESS_DENIED":
+      return t("没有权限读取这个文件。");
     case "ERR_CONNECTION_REFUSED":
       return t("对方拒绝了连接。请确认端口正确、服务已经启动。");
     case "ERR_CONNECTION_TIMED_OUT":
@@ -28,6 +32,16 @@ function explain(reason: string): string {
       return t("登录没有通过，请重试并检查用户名和密码。");
     default:
       return t("网页没有加载成功。");
+  }
+}
+
+// The system opener is never handed a file: link, so the way out it offers
+// would do nothing for one.
+function isFile(raw: string): boolean {
+  try {
+    return new URL(raw).protocol === "file:";
+  } catch {
+    return false;
   }
 }
 
@@ -66,9 +80,11 @@ export function BrowserFailure({ failure, onRetry, onExternal, onTrust }: Props)
         <button className="btn sm" data-action="browser.control" data-value="retry" onClick={onRetry}>
           {t("重试")}
         </button>
-        <button className="btn sm" data-action="browser.external" onClick={onExternal}>
-          {t("在外部浏览器打开")}
-        </button>
+        {!isFile(failure.url) && (
+          <button className="btn sm" data-action="browser.external" onClick={onExternal}>
+            {t("在外部浏览器打开")}
+          </button>
+        )}
         {cert && (
           <button className="btn sm" data-action="browser.trust-certificate" onClick={onTrust}>
             {t("仍然访问（仅本次运行）")}

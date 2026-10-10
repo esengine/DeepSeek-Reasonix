@@ -42,6 +42,13 @@ type taskRuntime struct {
 	criteriaEpoch *atomic.Uint64
 }
 
+func newTaskRuntime(limit TaskBudget) taskRuntime {
+	return taskRuntime{
+		ledger: evidence.NewLedger(),
+		budget: runBudget{limit: normalizeTaskBudget(limit)},
+	}
+}
+
 // Nil-safe: a zero taskRuntime has no memo, which costs the walk it would have
 // skipped and answers exactly as before.
 func (t *taskRuntime) workspaceOverScanLimit() bool {

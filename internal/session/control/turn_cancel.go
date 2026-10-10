@@ -63,12 +63,15 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	defer func() {
 		c.mu.Lock()
 		c.gate.finishing = false
-		if c.gate.closed {
+		if c.gate.closed || len(c.parkedTurns) == 0 {
+			closed := c.gate.closed
+			releaseWorkspace := c.gate.workspaceRelease
+			c.gate.workspaceRelease = nil
 			c.mu.Unlock()
-			return
-		}
-		if len(c.parkedTurns) == 0 {
-			c.mu.Unlock()
+			c.releaseWorkspaceTurn(releaseWorkspace)
+			if closed {
+				return
+			}
 			// No parked compatibility body: admit the next durable inbox item.
 			c.maybeDispatchInbox()
 			return
@@ -92,7 +95,7 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	done := event.Event{
 		Kind:           event.TurnDone,
 		Err:            err,
-		Cancelled:      cancelRequested,
+		Cancelled:      cancelRequested && (err == nil || errors.Is(err, context.Canceled)),
 		Outcome:        turnOutcome(err),
 		CheckpointTurn: c.validatedCheckpointTurn(completion),
 		Receipt:        c.executor.CompletionReceipt(),
@@ -106,14 +109,19 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	// refresh the inbox from that event and must not observe already-consumed
 	// steers in the completed turn. Dispatch still waits for finishing to clear.
 	c.onInboxTurnDone()
+	c.recordTurnFinished(done.Cancelled)
 	c.sink.Emit(done)
 }
 
 // Cancel aborts the in-flight turn. A goroutine blocked awaiting approval
 // unblocks via the cancelled context.
 func (c *Controller) Cancel() {
+	c.cancelTurn(causeStop)
+}
+
+func (c *Controller) cancelTurn(cause cancelCause) {
 	c.mu.Lock()
-	cancel := c.gate.requestCancel()
+	cancel := c.gate.requestCancel(cause)
 	c.mu.Unlock()
 	if cancel != nil {
 		c.approval.clearAll()

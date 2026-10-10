@@ -67,6 +67,9 @@ func TestWindowsLaunchQuotesHostilePaths(t *testing.T) {
 	paths, bin, workspace := hostileWindowsPaths(t)
 	outer := decodePS(t, windowsShell{}.Launch(LaunchSpec{Bin: bin, Workspace: workspace}, paths))
 
+	if strings.Contains(outer, "Remove-Item") {
+		t.Fatalf("the launch deletes files a running serve may have published:\n%s", outer)
+	}
 	// The apostrophe in the home directory reaches the script doubled, which is
 	// how PowerShell spells a literal one.
 	if !strings.Contains(outer, "O''Hara") {

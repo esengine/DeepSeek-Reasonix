@@ -9,8 +9,20 @@ export const EN_STORAGE: Record<string, string> = {
   "选择旧版数据目录…": "Choose older data folder…",
   "正在扫描…": "Scanning…",
   "已找回 {n} 个会话。": "Recovered {n} sessions.",
-  "没有发现尚未导入的旧会话。": "No sessions remain to be imported.",
+  "没有发现尚未导入的旧会话。": "Nothing new to import.",
+  "这个文件夹里没有找到旧版会话。请选择 Reasonix 的数据文件夹（里面有 sessions、projects 或 desktop-sessions-v5）。":
+    "No older sessions were found in this folder. Pick the Reasonix data folder (the one holding sessions, projects or desktop-sessions-v5).",
   "有 {n} 项无法读取。": "{n} items could not be read.",
+  "复制路径：{name}": "Copy path: {name}",
+  "有 {n} 个会话没有导入": "{n} sessions were not imported",
+  "这些文件仍在原位置，没有被移动或删除。可复制路径自行处理，或修复后重新导入。":
+    "These files are still where they were; nothing was moved or deleted. Copy a path to deal with it yourself, or fix it and import again.",
+  体积超过读取上限: "Larger than the size limit for reading",
+  "不是本版本能读取的会话格式": "Not a session format this version can read",
+  "来自本版本尚不支持的存储版本": "Written by a storage version this version does not support yet",
+  没有读取权限: "No permission to read it",
+  文件已损坏: "The file is damaged",
+  复制到新位置时失败: "Copying it to the new location failed",
   "未能扫描这个文件夹。请确认它是旧版 Reasonix 的数据目录。": "This folder could not be scanned. Make sure it is an older Reasonix data folder.",
   存储: "Storage",
   "数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。":
@@ -21,8 +33,8 @@ export const EN_STORAGE: Record<string, string> = {
   "目录过大，已统计到时间上限，实际占用不小于此数": "This folder is too large to finish measuring in time; the real size is at least this much.",
   占用: "Space used",
   原位置仍有残留数据: "Data remains in the previous location",
-  "以下内容仍位于 {dir}：{names}。迁移存储位置时未一并迁移，因此本机的壁纸、主题包或更新回滚备份可能显示为缺失。手动将这些目录复制到当前位置即可恢复。":
-    "These are still in {dir}: {names}. A move left them behind, so a wallpaper, a theme pack or the backups an update rolls back to can look gone on this machine. Copying those folders into the current location restores them.",
+  "以下内容仍位于 {dir}：{names}。迁移存储位置时未一并迁移，因此项目列表、全局指令与记忆、计划任务、壁纸、主题包或更新回滚备份可能显示为缺失。下次启动会自动并入当前位置；若仍显示，请退出后把这些文件或目录复制到当前位置，已有的文件不要覆盖。":
+    "These are still in {dir}: {names}. A move left them behind, so the project list, global instructions and memory, scheduled runs, a wallpaper, a theme pack or the backups an update rolls back to can look gone on this machine. The next launch merges them into the current location; if they are still listed, quit and copy them there without overwriting files that already exist.",
   位置: "Locations",
   迁移: "Migrate",
   "迁移未能启动。": "The move could not be started.",

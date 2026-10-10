@@ -46,9 +46,16 @@ func ClassifyPath(path string) PathRole {
 		strings.HasSuffix(lower, "_spec.ts"), strings.Contains(lower, "/__tests__/"):
 		return PathSupporting
 	// Prose formats carry no behaviour to review, whatever directory they sit in.
-	case strings.HasSuffix(lower, ".md"), strings.HasSuffix(lower, ".mdx"),
-		strings.HasSuffix(lower, ".txt"), strings.HasSuffix(lower, ".rst"):
+	case IsProsePath(path), strings.HasSuffix(lower, ".mdx"), strings.HasSuffix(lower, ".txt"):
 		return PathSupporting
 	}
 	return PathProduction
+}
+
+// IsProsePath reports a documentation file no toolchain consumes: the formats
+// whose change a verification command cannot be about. `.txt` and `.mdx` stay
+// out because build inputs and components share those suffixes.
+func IsProsePath(path string) bool {
+	lower := strings.ToLower(path)
+	return strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".rst")
 }

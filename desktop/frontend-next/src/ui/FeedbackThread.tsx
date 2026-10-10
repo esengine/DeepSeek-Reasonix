@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { current, t } from "../i18n";
-import { FEEDBACK_CODE, FEEDBACK_REPLYABLE, type FeedbackItem, type FeedbackReply } from "../port/feedback";
+import { FEEDBACK_CODE, FEEDBACK_REPO_ISSUES, FEEDBACK_REPLYABLE, isUnderReview, type FeedbackItem, type FeedbackReply } from "../port/feedback";
 import type { AgentPort } from "../port/port";
 import { replyFailure, type FeedbackFailure } from "./feedbackfailure";
 import { StudioIcon } from "./StudioIcon";
@@ -63,16 +63,26 @@ export function FeedbackThread({ item, fresh, onShowAll }: ThreadProps) {
   );
 }
 
+export function FeedbackReviewNote({ item }: { item: FeedbackItem }) {
+  if (!isUnderReview(item)) return null;
+  return (
+    <p className="fbk-hint fbk-review" data-review="" role="status">
+      {t("维护者正在查看这份反馈，可能会回复你。现在还不能回复；维护者回复后，这里会出现回复框。")}
+    </p>
+  );
+}
+
 interface ReplyProps {
   port: AgentPort;
   item: FeedbackItem;
   limit: number | null;
   offline: boolean;
   onSent: (receipt: string) => void;
+  onFile: (url: string) => void;
   onStale: () => void;
 }
 
-export function FeedbackReplyBox({ port, item, limit, offline, onSent, onStale }: ReplyProps) {
+export function FeedbackReplyBox({ port, item, limit, offline, onSent, onFile, onStale }: ReplyProps) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -152,6 +162,11 @@ export function FeedbackReplyBox({ port, item, limit, offline, onSent, onStale }
         <div className="fbk-note" role="alert" data-tone="error" data-code={failure.code}>
           <StudioIcon name="warning" />
           <span>{failure.message}</span>
+          {failure.code === FEEDBACK_CODE.unavailable && (
+            <button type="button" className="btn sm" data-action="feedback.link" onClick={() => onFile(FEEDBACK_REPO_ISSUES + "new/choose")}>
+              {t("去 GitHub")}
+            </button>
+          )}
         </div>
       )}
       <div className="fbk-acts">

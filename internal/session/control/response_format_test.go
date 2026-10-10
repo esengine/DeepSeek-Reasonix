@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"sync"
 	"testing"
@@ -82,7 +83,7 @@ func receiveObservedTurnFormat(t *testing.T, observed <-chan observedTurnFormat)
 	select {
 	case got := <-observed:
 		return got
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("timed out waiting for submitted turn")
 		return observedTurnFormat{}
 	}
@@ -92,7 +93,7 @@ func waitForFormatTestSignal(t *testing.T, signal <-chan struct{}, message strin
 	t.Helper()
 	select {
 	case <-signal:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal(message)
 	}
 }

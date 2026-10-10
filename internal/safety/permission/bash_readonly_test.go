@@ -2,7 +2,11 @@ package permission
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"reasonix/internal/base/shellparse"
+	"reasonix/internal/contract/planmode"
 )
 
 func TestIsReadOnlyBashSubject(t *testing.T) {
@@ -248,5 +252,41 @@ func TestSemicolonChainIsReadOnlyWhenEveryLeafIs(t *testing.T) {
 		if got := BashCommandIsReadOnly(args); got != tc.want {
 			t.Errorf("%q read-only = %v, want %v", tc.cmd, got, tc.want)
 		}
+	}
+}
+
+// The proof names what stopped a command, from the parse and the tables, so a
+// caller can tell a construct from an unknown program from a writing argument.
+func TestBashReadOnlyProofNamesWhatStoppedTheCommand(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    planmode.Proof
+	}{
+		{"ls -la", planmode.Proof{}},
+		{"ls | wc -l", planmode.Proof{}},
+		{"curl -s https://example.com", planmode.Proof{Why: planmode.WhyUnknownProgram, Detail: "curl"}},
+		{"git push origin main", planmode.Proof{Why: planmode.WhyUnknownProgram, Detail: "git push"}},
+		{"ls | curl -d @- x", planmode.Proof{Why: planmode.WhyUnknownProgram, Detail: "curl"}},
+		{`ls src/$NAME`, planmode.Proof{Why: planmode.WhyShellConstruct, Detail: string(shellparse.StaticRejectExpansion)}},
+		{"A=1; ls", planmode.Proof{Why: planmode.WhyShellConstruct, Detail: string(shellparse.StaticRejectAssignment)}},
+		{"ls > out.txt", planmode.Proof{Why: planmode.WhyShellConstruct, Detail: string(shellparse.StaticRejectRedirection)}},
+		{"ls; echo $(pwd)", planmode.Proof{Why: planmode.WhyShellConstruct, Detail: string(shellparse.StaticRejectExpansion)}},
+		{"git $X; ls", planmode.Proof{Why: planmode.WhyShellConstruct, Detail: string(shellparse.StaticRejectExpansion)}},
+		{"find . -exec rm {} ;", planmode.Proof{Why: planmode.WhyWriteArguments, Detail: "find"}},
+		{"ls && sort -o f f", planmode.Proof{Why: planmode.WhyWriteArguments, Detail: "sort"}},
+	} {
+		args, _ := json.Marshal(map[string]string{"command": tc.command})
+		readOnly, got := BashReadOnlyProof(args)
+		got.Subject = ""
+		if strings.Contains(got.Detail, "__reasonix") {
+			t.Errorf("%q leaked an internal placeholder: %+v", tc.command, got)
+		}
+		if got != tc.want || readOnly != (tc.want.Why == "") || readOnly != BashCommandIsReadOnly(args) {
+			t.Errorf("%q: readOnly=%v proof=%+v, want %+v", tc.command, readOnly, got, tc.want)
+		}
+	}
+	bg, _ := json.Marshal(map[string]any{"command": "ls", "run_in_background": true})
+	if ro, p := BashReadOnlyProof(bg); ro || p.Why != planmode.WhyBackground {
+		t.Errorf("background proof = %v %+v", ro, p)
 	}
 }

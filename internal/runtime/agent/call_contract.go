@@ -10,6 +10,10 @@ import (
 	"unicode/utf8"
 )
 
+// refusalArgumentsInvalid names a call the host refused before it ran because
+// its arguments broke the target's schema.
+const refusalArgumentsInvalid = "tool.arguments_invalid"
+
 // applyCallContract refuses a call the target's own schema already rules out: a
 // required field omitted, or one filled with a kind the schema does not admit.
 // Execution was never possible, so this keeps a user approval from being spent
@@ -24,7 +28,7 @@ func (a *Agent) applyCallContract(plan *toolCallPlan) (toolOutcome, bool) {
 		return toolOutcome{}, false
 	}
 	msg := fmt.Sprintf("invalid arguments for %s%s", plan.permName, contract.Hint())
-	return toolOutcome{output: "error: " + msg, errMsg: msg}, true
+	return toolOutcome{output: "error: " + msg, errMsg: msg, refusalCode: refusalArgumentsInvalid}, true
 }
 
 // malformedArgumentsDetail says why the arguments did not parse. A call that

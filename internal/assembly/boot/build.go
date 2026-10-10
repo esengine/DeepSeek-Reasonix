@@ -103,6 +103,7 @@ type toolStage struct {
 func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	b := &builder{timer: newPhaseTimer()}
 	opts = observeOverrides(opts)
+	b.timer.observe = opts.OnPhase
 	// The runtime outlives the request that built it (Studio opens a pane with
 	// one), and its MCP servers and sidecars start on that context later.
 	b.ctx, b.opts, b.owner, b.fileWriteReceipt = bindRuntimeOwner(context.WithoutCancel(ctx), opts)
@@ -122,12 +123,12 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	return b.freeze(ctrl)
 }
 
-// retireUnownedSidecars closes the preflighted sidecars when the build fails
-// before the extension snapshot takes ownership: no process outlives a failed build.
+// retireUnownedSidecars restores adopted clients and closes fresh sidecars when
+// the build fails before the extension snapshot takes ownership.
 func (b *builder) retireUnownedSidecars() {
 	if b.pendingMgr != nil {
 		close(b.ext.failed)
-		_ = b.pendingMgr.Close()
+		b.pendingMgr.RollbackPlanStart(b.opts.Extensions)
 	}
 }
 
@@ -211,9 +212,34 @@ func (b *builder) load() error {
 		return err
 	}
 	b.timer.mark("provider")
-	b.shell = sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, b.stderr)
+	if opts.resolvedShell != nil {
+		b.shell = *opts.resolvedShell
+	} else {
+		b.shell = resolveShellWithNotice(opts, cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, b.stderr, b.sink)
+	}
+	// Record the resolved interpreter for diagnostics, staying at Debug because
+	// headless `run` must leave stderr empty unless --debug is passed. A launch
+	// failure emits an always-on Warn with the same kind/path/source fields.
+	b.timer.mark("shell")
+	slog.Debug("boot: shell tool interpreter resolved", "kind", b.shell.Kind.String(), "path", b.shell.Path, "prefer", cfg.Tools.Shell.Prefer)
 	b.prompt, err = buildPromptAssembly(b.ctx, opts, cfg, b.root, b.shell, b.sink, b.timer)
 	return err
+}
+
+// resolveShellWithNotice keeps shell-discovery warnings on stderr for CLI
+// diagnostics and also reports them through the boot sink, where the settings
+// surface can show which interpreter actually runs.
+func resolveShellWithNotice(opts Options, prefer, path string, stderr io.Writer, sink event.Sink) sandbox.Shell {
+	var warnings strings.Builder
+	d := sandbox.ShellDiscovery{Prefer: prefer, Path: path, Warn: io.MultiWriter(stderr, &warnings), ProofDir: opts.roots().CacheDir()}
+	if opts.tuneShell != nil {
+		opts.tuneShell(&d)
+	}
+	shell := d.Resolve()
+	if detail := strings.TrimSpace(warnings.String()); detail != "" {
+		report(sink, event.Event{Level: event.LevelWarn, Text: "Shell tool interpreter fallback.", Detail: detail})
+	}
+	return shell
 }
 
 // loadConfig reads the configuration this build runs under. The read-only
@@ -232,10 +258,26 @@ func (b *builder) loadConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
+// skippedDefaultDetail says why the saved default was passed over. A decision
+// source exists but answers system_one only, which is a different fix from a name
+// nothing declares.
+func (b *builder) skippedDefaultDetail() string {
+	var mismatch *config.AnswersMismatchError
+	if errors.As(b.cfg.RequireAnswers(b.model.skipped, config.AnswersChat), &mismatch) {
+		return fmt.Sprintf("default_model = %q is a decision source: it answers system_one's questions, not conversation; using %q. Choosing a default model replaces it; until then the file keeps it as written.", b.model.skipped, b.model.ref)
+	}
+	return fmt.Sprintf("default_model = %q names no configured provider or model; using %q. Choosing a default model replaces it; until then the file keeps it as written.", b.model.skipped, b.model.ref)
+}
+
 func (b *builder) reportModelNotices() {
 	cfg, entry := b.cfg, b.model.entry
 	if ignored := cfg.IgnoredProjectDefaultModel(); ignored != "" {
 		report(b.sink, event.Event{Level: event.LevelWarn, Text: "Ignored the project config's default_model.", Detail: fmt.Sprintf("./reasonix.toml sets default_model = %q but no configured provider serves it; using %q from your user config instead. Edit or remove that default_model line to silence this notice.", ignored, cfg.DefaultModel)})
+	}
+	if b.model.skipped != "" {
+		report(b.sink, event.Event{Level: event.LevelWarn, Code: event.NoticeCodeDefaultModelUnavailable,
+			Text:   "The saved default model is not configured, so another configured model is in use.",
+			Detail: b.skippedDefaultDetail()})
 	}
 	// Without RequireKey the UI stays reachable, so a missing key would
 	// otherwise surface only as a silently failing first request.
@@ -285,13 +327,20 @@ func (b *builder) wireTools() error {
 	t.roles = roleWiring{cfg: cfg, roots: b.roots, resolver: b.providers.effective, extension: b.providers.extension,
 		proxy: b.proxy, sink: b.sink, gate: t.gate, reg: t.reg, keep: b.keep, hooks: t.hookRunner}
 	t.sub = newSubagentConfig(opts, cfg, b.model.entry, b.model.name, b.providers.effective, b.proxy, b.prompt.skillStore)
+	if t.sub.inheritedEffortDropped {
+		report(b.sink, event.Event{
+			Level:  event.LevelWarn,
+			Text:   "Ignored the inherited subagent effort for the selected model.",
+			Detail: fmt.Sprintf("agent.subagent_effort = %q is not supported by the current execution model %q; subagents that follow it will use the provider/model default effort. The persisted setting was not changed.", cfg.Agent.SubagentEffort, b.model.ref),
+		})
+	}
 	t.taskTool, t.skillRun = t.roles.delegation(delegationInputs{opts: opts, sub: t.sub, exec: b.execProv, entry: b.model.entry,
 		modelName: b.model.name, root: root, maxSteps: t.maxSteps, delivery: b.model.delivery, store: subagentStore,
 		session: b.session, bashEnforced: env.bash.Enforce})
 	b.addIsolation()
 	registerSessionTools(t.reg, opts.Ablation, b.roots, b.session.dir, b.prompt.memory.Store)
 
-	t.runners = skillRunners{readOnly: t.skillRun.runReadOnly, run: t.skillRun.run, profile: skillProfile(cfg)}
+	t.runners = skillRunners{readOnly: t.skillRun.runReadOnly, run: t.skillRun.run, profile: skillProfile(cfg, t.sub.inheritedFor)}
 	t.cmds = loadCommands(opts, root)
 	addInstallSourceTool(b.ctx, t.reg, t.host, root, b.balanceClient, t.specOptions, opts.Stderr)
 	registerSkillTools(t.reg, opts.Ablation, b.prompt.skillStore, b.prompt.implicitSkills, t.runners, t.cmds)
@@ -329,6 +378,7 @@ func (b *builder) wireMCP() {
 		OAuthHTTPClient:       b.balanceClient,
 	}
 	t.mcp = resolveMCPSpecs(opts, cfg, root, t.specOptions)
+	reportProjectMCPAwaitingApproval(b.sink, cfg, root)
 	t.configSpecs, t.mcpSchemaKnown = registerMCPTools(b.ctx, t.host, t.reg, t.mcp, b.sink)
 	b.cleanup = t.host.Close
 	if opts.SharedHost != nil {
@@ -356,6 +406,7 @@ func (b *builder) controller() (*control.Controller, error) {
 	}
 	ctrlOpts := b.controllerOptions(runner, executor, label)
 	ctrl := withWindowPosture(control.New(ctrlOpts), b.cfg, b.opts.StatsSource, b.sink)
+	reportDormantPermissionRules(b.sink, b.cfg, ctrl)
 	b.ext.publish(ctrl)
 	// Task and fleet sub-agents share the root agent's recovery checkpoint.
 	if t.taskTool != nil {
@@ -401,7 +452,7 @@ func (b *builder) executor() *agent.Agent {
 		// Reserving writes at the executor entry covers every writer, late MCP
 		// adds included, without wrapping tool schemas.
 		WriteScheduler:     t.sub.scheduler,
-		WriteWorkspaceRoot: b.root, WorkspaceVCS: b.prompt.workspaceVCS, RenderRoot: renderRoot(t.browser, entry, b.root),
+		WriteWorkspaceRoot: b.root, WorkspaceScanLimit: b.opts.WorkspaceScanLimit, WorkspaceVCS: b.prompt.workspaceVCS, RenderRoot: renderRoot(t.browser, entry, b.root),
 		ProjectChecks: b.prompt.projectChecks, ProjectSensitivePaths: b.prompt.sensitivePaths,
 		EvidenceSeal:                 t.env.evidenceSeal,
 		AgentPreset:                  b.model.preset,
@@ -438,6 +489,7 @@ func perseverationRetries(cfg *config.Config, entry *config.ProviderEntry) *int 
 func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, label string) control.Options {
 	opts, cfg, root, entry, t := b.opts, b.cfg, b.root, b.model.entry, &b.tools
 	specOptions := t.specOptions
+	providerIdentity := ResolveProviderBuildIdentity(entry, b.proxy, nil)
 	return control.Options{
 		Observe:                        b.observeRun(),
 		TaskBudget:                     taskBudgetFromConfig(cfg),
@@ -449,7 +501,10 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		SubagentGate:                   t.gate,
 		Label:                          label,
 		ModelRef:                       b.model.ref,
+		Effort:                         providerIdentity.Effort,
+		ProviderFingerprint:            providerIdentity.Fingerprint,
 		ModelModes:                     config.RequestModes(entry),
+		ModelEntry:                     entry,
 		SystemPrompt:                   b.prompt.prompt,
 		SessionDir:                     b.session.dir,
 		Host:                           t.host,
@@ -520,6 +575,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		RecoveryHeadless: recoveryHeadlessMode(opts),
 		GoalEvaluator:    goalEvaluator(cfg, b.model.ref, b.proxy, b.sink),
 		PromptRefiner:    promptRefiner(entry, b.proxy, b.sink),
+		CommitMessenger:  commitMessenger(entry, b.proxy, b.sink),
 	}
 }
 
@@ -541,8 +597,8 @@ func (b *builder) freeze(ctrl *control.Controller) (*BuildResult, error) {
 		session:            ext.session(),
 		ui:                 ext.hub,
 		onWarning:          ext.warn,
+		onSidecarDown:      ext.sidecarDown,
 		skipPromptStrategy: shouldSkipPromptStrategy(b.opts.PreviousPlan),
-		previousDispatcher: b.opts.PreviousDispatcher,
 	}, ext.mgr)
 	// Assembly owns the sidecars on every path: closed inside, or in the runtime set.
 	b.pendingMgr = nil
@@ -557,6 +613,7 @@ func (b *builder) freeze(ctrl *control.Controller) (*BuildResult, error) {
 		// The failed assembly already retired the sidecars; bind neither hub nor manager.
 		extensionMgr = nil
 	}
+	installSidecarStreamRouters(extensionMgr, b.providers.extension)
 	providerResolver := b.providers.base
 	if b.providers.extension != nil {
 		providerResolver = b.providers.extension

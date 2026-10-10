@@ -3,6 +3,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "./testkit";
 import { useRevealed } from "./reveal";
+import { PaneShown } from "./shown";
 
 afterEach(() => {
   cleanup();
@@ -53,5 +54,24 @@ describe("paced streaming text", () => {
     const view = render(<Probe text="a" />);
     view.rerender(<Probe text="all at once" />);
     expect(view.container.textContent).toBe("all at once");
+  });
+
+  it("does not pace a stream nobody is looking at", () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      frames.set(++id, cb);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (n: number) => frames.delete(n));
+    const behind = (text: string) => (
+      <PaneShown.Provider value={false}>
+        <Probe text={text} />
+      </PaneShown.Provider>
+    );
+    const view = render(behind("a"));
+    view.rerender(behind("a long burst that arrived while the pane was behind another"));
+    expect(view.container.textContent).toBe("a long burst that arrived while the pane was behind another");
+    expect(frames.size).toBe(0);
   });
 });

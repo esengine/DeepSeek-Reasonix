@@ -349,3 +349,22 @@ func TestResolveSlashPromptFallsThroughToExtensionAction(t *testing.T) {
 		t.Fatalf("failed action rewrote to %q", got)
 	}
 }
+
+// A coded warning keeps its identity on the wire, so an ACP client does not
+// have to read the sentence to know which notice it is.
+func TestUpdateSinkWarningCarriesItsNoticeCode(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	detail := event.ExtensionSkipped{Extension: "aipush-ask-bridge", Point: "tool.before", Reason: event.ExtensionSkipReasonNoLiveSidecar}.Encode()
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeExtensionSkipped, Text: "skipped", Detail: detail})
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "uncoded"})
+
+	update := fn.updateMap(t, 0)
+	notice, _ := update["metadata"].(map[string]any)["notice"].(map[string]any)
+	if notice["code"] != event.NoticeCodeExtensionSkipped || notice["payload"] != detail {
+		t.Fatalf("metadata.notice = %v", notice)
+	}
+	if _, has := fn.updateMap(t, 1)["metadata"]; has {
+		t.Fatalf("an uncoded warning must carry no notice metadata")
+	}
+}

@@ -53,7 +53,7 @@ export function ModelEfforts({
                   ? { supportedEfforts: from?.supportedEfforts ?? [], defaultEffort: seededDefault(from) }
                   : undefined)}
               >
-                <option value="inherit">{t("继承接入设置")}</option>
+                <option value="inherit">{from?.official ? t("继承官方档位") : t("继承接入设置")}</option>
                 <option value="own">{t("单独设置")}</option>
               </select>
               {dormant ? (
@@ -64,9 +64,11 @@ export function ModelEfforts({
                 <i className="tip me-note">
                   {from === null
                     ? t("继承：保存后按接入设置确定")
-                    : from?.supportedEfforts.length
-                      ? t("继承：{levels}", { levels: from.supportedEfforts.join(" · ") })
-                      : t("继承：端点未声明档位")}
+                    : from?.official
+                      ? officialNote(from)
+                      : from?.supportedEfforts.length
+                        ? t("继承：{levels}", { levels: from.supportedEfforts.join(" · ") })
+                        : t("继承：端点未声明档位")}
                 </i>
               )}
             </li>
@@ -121,6 +123,13 @@ function OwnLevels({ model, own, from, onChange }: {
       {levels.length === 0 && <i className="tip me-note">{t("未选档位时按继承处理。")}</i>}
     </div>
   );
+}
+
+function officialNote(from: ModelEffort): string {
+  const levels = from.supportedEfforts.join(" · ");
+  return from.defaultEffort
+    ? t("官方档位：{levels}（默认 {def}）", { levels, def: from.defaultEffort })
+    : t("官方档位：{levels}", { levels });
 }
 
 function seededDefault(from?: ModelEffort | null): string {

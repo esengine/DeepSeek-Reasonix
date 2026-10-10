@@ -12,8 +12,11 @@ const GUARDS = readdirSync("perf")
   .filter((f) => HAS_FAILS.test(readFileSync(`perf/${f}`, "utf8")))
   .map((f) => f.slice(0, -4))
   .sort();
+const selected = [...new Set(process.argv.slice(2))];
+const unknown = selected.filter((g) => !GUARDS.includes(g));
+if (unknown.length) throw new Error(`Unknown guards: ${unknown.join(", ")}`);
 const rows = [];
-for (const g of GUARDS) {
+for (const g of selected.length ? selected : GUARDS) {
   const path = `perf/${g}.mjs`;
   const src = readFileSync(path, "utf8");
   // An exit code alone cannot tell a fired assertion from a file that does not
@@ -33,13 +36,25 @@ for (const g of GUARDS) {
   const tmp = `perf/_probe_${g}.mjs`; // 跑完就删
   writeFileSync(tmp, probe);
   let code = 0;
+  let stdout = "";
   try {
-    execFileSync("node", [tmp], { stdio: "pipe" });
+    stdout = execFileSync("node", [tmp], { stdio: "pipe", encoding: "utf8" });
   } catch (e) {
     code = e.status ?? -1;
+    stdout = e.stdout ?? "";
+  } finally {
+    unlinkSync(tmp);
   }
-  unlinkSync(tmp);
-  rows.push({ 守卫: g, "塞入必假断言后的退出码": code, 结果: code !== 0 ? "能红 ✓" : "仍然绿 ✗" });
+  // This guard emits its assertion result only after every browser case finishes.
+  // A launch error or unrelated exception cannot substitute for that verdict.
+  const fired = g !== "branch-tooltip" || code === 1 && stdout.split("\n").some((line) => {
+    try {
+      const report = JSON.parse(line);
+      return report.guard === g && Array.isArray(report.failures) &&
+        report.failures.length === 1 && report.failures[0] === "__自检__";
+    } catch { return false; }
+  });
+  rows.push({ 守卫: g, "塞入必假断言后的退出码": code, 结果: code === 0 ? "仍然绿 ✗" : fired ? "能红 ✓" : "未到达注入断言 ✗" });
 }
 console.table(rows);
 const broken = rows.filter((r) => r.结果 !== "能红 ✓");

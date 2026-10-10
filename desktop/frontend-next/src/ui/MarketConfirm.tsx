@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { t } from "../i18n";
 import type { MarketPlan } from "../port/port";
-import { Candidate, ORDER } from "./AddPlugin";
+import { Candidate, ORDER, PreviewCut } from "./AddPlugin";
 
 // Titled for what a person has to do with each group, not for what the kernel
 // fears: a high grade here is as often "many skills from one address" as it is
@@ -31,12 +31,13 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
   const [seen, setSeen] = useState(false);
   const actions = plan.actions ?? [];
   const skills = actions.filter((a) => a.kind === "skill");
-  const many = skills.length > 1;
+  const skillTotal = Math.max(plan.kinds?.skill ?? 0, skills.length);
+  const many = skillTotal > 1;
   const groups = ORDER.map((level) => ({ level, actions: actions.filter((a) => (a.riskLevel || "low") === level) })).filter(
     (g) => g.actions.length > 0,
   );
   return (
-    <div className="mkt addpkg" data-stage="confirm">
+    <div className="mkt addpkg" data-stage="confirm" aria-busy={busy}>
       {plan.unreviewed && (own ? (
         <div className="find" data-lvl="warn" data-unreviewed="">
           <span className="t">{t("未审核 · 仅你可见")}</span>
@@ -61,15 +62,16 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
       </div>
       {many && (
         <div className="find mkt-many" data-lvl="warn">
-          <span className="t">{t("这个来源包含 {n} 个技能，会全部安装", { n: skills.length })}</span>
+          <span className="t">{t("这个来源包含 {n} 个技能，会全部安装", { n: skillTotal })}</span>
           <ul className="mkt-names">
             {skills.map((a, i) => (
               <li key={`${a.name}:${i}`}>{a.name}</li>
             ))}
+            {skillTotal > skills.length && <li>{t("还有 {n} 个技能未显示", { n: skillTotal - skills.length })}</li>}
           </ul>
           <label className="mkt-seen">
-            <input type="checkbox" data-action="market.confirm-many" checked={seen} onChange={(e) => setSeen(e.target.checked)} />
-            {t("我已看过这 {n} 个技能，全部安装", { n: skills.length })}
+            <input type="checkbox" data-action="market.confirm-many" disabled={busy} checked={seen} onChange={(e) => setSeen(e.target.checked)} />
+            {t("我已看过这 {n} 个技能，全部安装", { n: skillTotal })}
           </label>
         </div>
       )}
@@ -81,6 +83,7 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
           ))}
         </section>
       ))}
+      <PreviewCut shown={plan.previewTruncated} hidden={plan.hiddenActions} />
       {plan.warnings?.map((w) => (
         <div className="why" key={w}>
           {w}
@@ -95,7 +98,7 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
           {t(busy ? "安装中…" : "安装")}
         </button>
       </div>
-      {error && <div className="why">{error}</div>}
+      {error && <div className="why" role="alert">{error}</div>}
     </div>
   );
 }

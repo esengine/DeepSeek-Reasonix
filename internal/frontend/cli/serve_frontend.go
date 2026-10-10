@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/surface"
+	"reasonix/internal/ext/mcpsetup"
 	"reasonix/internal/frontend/serve"
 	"reasonix/internal/frontend/termrender"
 	"reasonix/internal/platform/telemetry"
@@ -141,6 +142,7 @@ func (r *serveFrontendResources) release(closeListener bool) {
 }
 
 func runServeFrontend(ctrl *control.Controller, srv serveHost, cfg config.ServeConfig, opts serveFrontendOptions) int {
+	warnHeldProjectServers(os.Stderr, ctrl)
 	resources, err := prepareServeFrontend(opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -476,4 +478,17 @@ func adoptFirstPane(hub *serve.Hub, ctrl *control.Controller, bc *serve.Broadcas
 	srv.SetPaneSink(paneSink)
 	_ = srv.SetSessionLeases(leases) // same live keeper was bound above
 	_, _ = hub.Adopt(srv, bc)
+}
+
+// warnHeldProjectServers says on stderr which project servers this serve holds
+// off and how to let one run: a headless host has no settings screen to show it.
+func warnHeldProjectServers(w io.Writer, ctrl *control.Controller) {
+	if ctrl == nil {
+		return
+	}
+	for _, p := range ctrl.PendingMCPApprovals() {
+		name := mcpsetup.DisplayName(p.Name)
+		fmt.Fprintf(w, "warning: MCP server %q: %s; run `reasonix mcp enable %s` to approve the command shown. command: %s\n",
+			name, p.Reason.Text(), name, p.Launch)
+	}
 }

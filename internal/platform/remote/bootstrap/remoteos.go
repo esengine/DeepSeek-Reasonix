@@ -20,11 +20,18 @@ type remoteOS interface {
 	// it — which on Windows is not how its own shell spells it.
 	Home(ctx context.Context, conn Conn, fs *sftpfs.FS) (string, error)
 	Paths(home, workspace string) StatePaths
+	// Absolute reports whether p is rooted on that machine, and if so returns
+	// it in the file layer's spelling.
+	// HomeRelative strips a leading ~ separator, reporting whether there was one.
+	HomeRelative(p string) (string, bool)
+	Absolute(p string) (string, bool)
 	Launch(spec LaunchSpec, p StatePaths) string
 	Fetch(d releaseasset.CLIDownload, dir, bin string) string
 	Downloader() string
 	Alive(pid int, p StatePaths) string
 	Stop(pid int, p StatePaths) string
+	// ServeVersion prints the --version of the binary a running pid was started from.
+	ServeVersion(pid int) string
 	Logs(logFile string, n int) string
 	Locate(uploadedBin string, flags []string) string
 	// NPMVersion asks npm what it is. Empty output means no npm, which is the

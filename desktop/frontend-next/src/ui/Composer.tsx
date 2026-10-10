@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
-import type { AgentPort, ChipCall, ModelEntry, SessionStatus, Attachment } from "../port/port";
+import type { AgentPort, ChipCall, ModelEntry, SessionStatus, Attachment, WorkspaceGit } from "../port/port";
 import { Picker } from "./Menu";
+import { BranchChip } from "./BranchChip";
 import { Policy } from "./Policy";
 import { modelMenu } from "./modelmenu";
-import { effortMenu, effortReading, effortsFor, routeEffortPick } from "./effort";
+import { effortMenu, effortReading, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
 import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
+import { useFitHeight } from "./fitHeight";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
+import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
 import type { Dropped } from "./filedrop";
 import type { Quote } from "./cards/SayCard";
@@ -17,6 +20,7 @@ import { StudioIcon } from "./StudioIcon";
 import { usePromptRefine } from "./PromptRefine";
 import { useProviderOrder } from "../state/providerorder";
 import { useDraft } from "./useDraft";
+import { touchKeyboard } from "./touchKeyboard";
 
 interface Props {
   port: AgentPort;
@@ -26,6 +30,9 @@ interface Props {
   // twice two requests. Quoting the same reply again is an ordinary thing to
   // do, and comparing the string alone would drop the second one.
   quote?: Quote;
+  // A line taken back from the queue. The counter makes the same text twice
+  // two requests, as it does for a quote.
+  restore?: { n: number; text: string };
   // Resolves false when the line never left, so what was typed comes back
   // rather than being lost to a refusal the user could not have prevented.
   // Bumped when something outside asks for the cursor — answering a plan card
@@ -36,6 +43,13 @@ interface Props {
   onError: (e: unknown) => void;
   onSettings?: (section?: string) => void;
   changeCount?: number;
+  // The work tree's Git state as git itself reports it, refreshed on the same
+  // path as changeCount (turn boundaries, writes). null is "not answered yet";
+  // repo:false is a workspace with no repository, and the two render apart.
+  git?: WorkspaceGit | null;
+  // Called after a branch switch landed, so the change list, the branch reading
+  // and the session's workspace view re-read what the checkout moved.
+  onTreeChanged?: () => void;
   // Bumped when settings change; a source edited there can change the ladder.
   pulse?: number;
   draftKey?: string;
@@ -57,30 +71,6 @@ type Chip =
     }
   | { k: "paste"; id: string; body: string; lines: number; name?: string }
   | { k: "quote"; id: string; body: string; turn?: number; lines: number };
-
-// Two screenshots pasted in a row are one filename apart, which is the one
-// thing the chip has to tell them by. The preview comes off the blob that was
-// just attached — the kernel keeps the bytes, this keeps a handle to look at.
-function previewURL(blob: Blob): string | undefined {
-  try {
-    return URL.createObjectURL(blob);
-  } catch {
-    return undefined;
-  }
-}
-
-// A dropped file has no preview to stand behind: the host named it, it was
-// never read. Its kind fills the square, because a blank one reads as an image
-// that failed to load.
-function kindOf(path: string): string {
-  const name = nameOf(path);
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toUpperCase().slice(0, 4) : "FILE";
-}
-
-function nameOf(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
 
 function chipName(c: Chip): string {
   if (c.k === "quote") return c.turn === undefined ? t("引用回复") : t("引用第 {n} 轮回复", { n: c.turn });
@@ -110,16 +100,9 @@ function releaseChip(c: Chip) {
 let chipSeq = 0;
 const chipId = () => `c${++chipSeq}`;
 
-export function Composer({ port, status, running, quote, focus, onSubmit, onChanged, onError, onSettings = () => {}, changeCount = 0, pulse = 0, draftKey = "" }: Props) {
+export function Composer({ port, status, running, quote, restore, focus, onSubmit, onChanged, onError, onSettings = () => {}, changeCount = 0, git = null, onTreeChanged, pulse = 0, draftKey = "" }: Props) {
+  const touch = touchKeyboard();
   const providerOrder = useProviderOrder();
-  const [branch, setBranch] = useState("");
-  useEffect(() => {
-    let alive = true;
-    port.capabilityScope()
-      .then((scope) => alive && setBranch(scope.repo ? (scope.branch || t("分离状态")) : ""))
-      .catch(() => alive && setBranch(""));
-    return () => { alive = false; };
-  }, [port, status?.workspaceRoot]);
   const [submitting, setSubmitting] = useState(false);
   const { text, setText, beginSubmit, finishSubmit } = useDraft(draftKey, submitting);
   // The caret decides which token is being completed, so it is state here
@@ -141,7 +124,6 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
   const guide = useId();
   const completionId = useId();
   const attachTipId = useId();
-  const branchTipId = useId();
   // Set only when a completion moved the caret: the browser puts it at the end
   // of a programmatic value, which is wrong for anything accepted mid-line.
   const pending = useRef<number | null>(null);
@@ -172,6 +154,19 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
     queueMicrotask(() => box.current?.focus());
   }, [quote?.n]);
 
+  const restoredAt = useRef(restore?.n ?? 0);
+  useEffect(() => {
+    if (!restore?.n || restore.n === restoredAt.current) return;
+    restoredAt.current = restore.n;
+    setText((prev) => {
+      const next = !prev.trim() || prev.trim() === restore.text.trim()
+        ? restore.text : `${prev.replace(/\s+$/, "")}\n${restore.text}`;
+      pending.current = next.length;
+      return next;
+    });
+    queueMicrotask(() => box.current?.focus());
+  }, [restore?.n]);
+
   const moveTo = useCallback((next: string, at: number) => {
     pending.current = at;
     type(next, at);
@@ -188,48 +183,21 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
     if (focus) box.current?.focus();
   }, [focus]);
 
+  // The kernel's own report that no turn is live ends a stop even when the
+  // turn-done event never reached this window.
+  const kernelIdle = status?.running === false;
   useEffect(() => {
-    if (running) return;
+    if (running && !kernelIdle) return;
     stoppingRef.current = false;
     setStopping(false);
-  }, [running]);
+  }, [running, kernelIdle]);
 
-  const sizeBox = useCallback(() => {
-    const el = box.current;
-    if (!el) return;
-    if (pending.current !== null) {
-      el.setSelectionRange(pending.current, pending.current);
-      pending.current = null;
-    }
-    // CSS caps the top by the available room; the element still has to be told to grow.
-    // The floor is not decoration: under an interface zoom, scrollHeight is not
-    // in the same units the height we write back is, and the two engines do not
-    // round it the same way. Writing a smaller number than one line squeezes the
-    // box shut — an empty composer with both scrollbars showing and nowhere to
-    // type. One line is the least it can ever legitimately be.
-    const line = parseFloat(getComputedStyle(el).lineHeight) || 22;
-    el.style.height = "auto";
-    // A placeholder is not content. On first paint the sidebars may still own
-    // most of a narrow viewport, and its wrapped scrollHeight must not become
-    // the empty editor's remembered height.
-    el.style.height = `${text ? Math.max(line, el.scrollHeight) : line}px`;
-  }, [text]);
-
-  useLayoutEffect(sizeBox, [sizeBox]);
-
-  useEffect(() => {
-    const el = box.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    let width = el.getBoundingClientRect().width;
-    const observer = new ResizeObserver(([entry]) => {
-      const next = entry?.contentRect.width ?? width;
-      if (Math.abs(next - width) < 0.5) return;
-      width = next;
-      sizeBox();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [sizeBox]);
+  const placeCaret = useCallback((el: HTMLTextAreaElement) => {
+    if (pending.current === null) return;
+    el.setSelectionRange(pending.current, pending.current);
+    pending.current = null;
+  }, []);
+  useFitHeight(box, text, placeCaret);
 
   // Attachments ride into the turn as path references, exactly as they do from
   // the CLI — the host saved the bytes, the turn parser resolves the token. A
@@ -383,6 +351,7 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
   // may still carry one from a model that did, and printing that would be the
   // composer answering for an endpoint that never spoke.
   const declared = efforts.length > 0;
+  const forcedThinking = forcesThinkingFor(models, status?.modelRef);
   const modelLb = status?.modelRef?.replace(/^[^/]+\//, "") ?? status?.label ?? "—";
   // A model switch rebuilds the runtime kernel-side; other controls here may
   // land at once. Each click needs its own pending state: greying the whole
@@ -459,11 +428,11 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
                     <span className="nm" title={c.a?.path ?? c.name}>{c.name}</span>
                     {c.state === "adding" && <span className="sz live">{t("正在添加…")}</span>}
                     {c.state === "ready" && <span className="sz">{isPicture(c) ? t("图片") : t("文件")}</span>}
+                    {c.state === "failed" && c.error && <span className="why" title={c.error}>{c.error}</span>}
                     {c.state === "failed" && (
         <button
                         className="retry"
                         data-action="session.attach"
-                        title={c.error}
                         onClick={() => {
                           if (!c.blob) return;
                           setShots((prev) => prev.map((x) => (x === c ? { ...c, state: "adding", error: "" } : x)));
@@ -528,7 +497,7 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
           role="combobox"
           aria-label={t("任务输入")}
           aria-describedby={guide}
-          aria-keyshortcuts="Enter Shift+Enter"
+          aria-keyshortcuts={touch ? undefined : "Enter Shift+Enter"}
           aria-busy={submitting}
           readOnly={submitting}
           aria-expanded={menu.open}
@@ -601,7 +570,7 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
               menu.dismiss();
               return;
             }
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !touch) {
               e.preventDefault();
               send();
             }
@@ -623,7 +592,9 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
               ? t("正在添加附件…")
               : failed
                 ? t("有附件添加失败，请重试或移除")
-                : t(running ? "Enter 插话 · Shift+Enter 换行" : "Enter 发送 · Shift+Enter 换行")}
+                : t(touch
+                  ? running ? "点按插话 · 回车换行" : "点按发送 · 回车换行"
+                  : running ? "Enter 插话 · Shift+Enter 换行" : "Enter 发送 · Shift+Enter 换行")}
         </span>
         {showCount && <span className="fcount">{t("{n} 字 · {lines} 行", { n: text.length, lines })}</span>}
       </div>
@@ -675,25 +646,7 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
             label={<><StudioIcon name="agent" /><span className="studio-sr-label">{t("计划")}</span><span>{status?.plan ? "Plan" : "Agent"}</span><StudioIcon name="down" /></>}
           />
         </div>
-        {branch && (
-          <div className="studio-branch-pop">
-            <div
-              className="mode plain studio-branch"
-              tabIndex={0}
-              aria-label={t("当前 Git 分支：{branch}", { branch })}
-              aria-describedby={branchTipId}
-            >
-              <span className="ic" aria-hidden="true"><StudioIcon name="branch" /></span>
-              <span className="lb">{branch}</span>
-              {changeCount > 0 && <small>{t("{n} 个变更", { n: changeCount })}</small>}
-            </div>
-            <div className="studio-branch-card" id={branchTipId} role="tooltip">
-              <b>{t("当前分支 · {branch}", { branch })}</b>
-              <span>{changeCount > 0 ? t("当前工作区 · {n} 个本地变更", { n: changeCount }) : t("当前工作区 · 后续任务继续使用此分支")}</span>
-              <small>{t("仅作状态提示，无需点击")}</small>
-            </div>
-          </div>
-        )}
+        <BranchChip port={port} git={git} changeCount={changeCount} onChanged={onChanged} onSwitched={onTreeChanged} onError={onError} />
         {/* The toggle keeps its legacy meaning: it follows `plan`, which the
             kernel turns off the moment a plan is approved. The lifecycle is a
             separate reading — an approved plan is still running, and saying so
@@ -714,6 +667,8 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
             current={status?.modelRef}
             items={modelMenu(models, providerOrder)}
             menuClassName="studio-model-menu"
+            searchAlways
+            searchPlaceholder={t("搜索模型或服务商…")}
             menuTitle={<><b>{t("选择模型")}</b><small>{t("用于后续任务")}</small></>}
             onOpen={loadModels}
             pending={busy["model"]}
@@ -733,7 +688,7 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
                 title={t("推理强度")}
                 current={declared ? status.effort || "auto" : ""}
                 pending={busy["effort"] || busy["mode"]}
-                items={effortMenu(efforts, modelLb, "__effort-declare", status.modes)}
+                items={effortMenu(efforts, modelLb, "__effort-declare", status.modes, forcedThinking)}
                 onPick={(value) => routeEffortPick(value, status.modes, {
                   declare: () => onSettings("providers:effort-declare"),
                   effort: (level) => change("effort", () => port.setEffort(level)),
@@ -758,7 +713,7 @@ export function Composer({ port, status, running, quote, focus, onSubmit, onChan
                 if (stoppingRef.current) return;
                 stoppingRef.current = true;
                 setStopping(true);
-                void port.cancel().catch((e: unknown) => {
+                void port.cancel().then(onChanged, (e: unknown) => {
                   stoppingRef.current = false;
                   setStopping(false);
                   onError(e);

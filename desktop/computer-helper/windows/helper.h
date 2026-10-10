@@ -4,6 +4,7 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@
 struct Failure {
     std::string code;
     std::string message;
+    Json blockedBy; // the modal that would have taken the input instead
 };
 
 std::string narrow(const std::wstring& w);
@@ -44,6 +46,7 @@ bool appListed(HWND top);
 void requireOperable(DWORD pid);
 bool ownsPoint(DWORD pid, POINT at);
 bool isFront(DWORD pid);
+HWND heldOwner(HWND window, DWORD pid);
 void front(DWORD pid);
 RECT windowBounds(HWND hwnd);
 Json rectJson(const RECT& r);
@@ -64,6 +67,24 @@ Json menu(DWORD pid, const std::string& ref);
 Json scroll(DWORD pid, const std::string& ref, double amount);
 Json focus(DWORD pid, const std::string& ref);
 Json setValue(DWORD pid, const std::string& ref, const std::string& text);
+
+// Landing is where keyboard input to an application goes, read after it is
+// brought forward and before anything is sent: the modal holding it, if any,
+// and, when withValue, the focused element with what it holds now.
+struct Landing {
+    Json modal;
+    bool takesText = false;
+    bool readable = false;
+    std::wstring before;
+    std::function<bool(std::wstring&)> read;
+};
+Landing landing(DWORD pid, bool withValue);
+// refuseHeldText refuses text that would land in a modal on an element that
+// takes none, where a letter can be a dialog's mnemonic.
+void refuseHeldText(const Landing& at);
+// typedEffect grades typing on the focused element read again afterwards.
+Json typedEffect(const Landing& at, const std::wstring& typed);
+Json effect(const char* cls, const char* evidence, const Json& modal);
 
 // keyboard.cpp
 Json typeText(DWORD pid, const std::string& text);

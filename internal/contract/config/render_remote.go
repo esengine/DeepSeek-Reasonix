@@ -52,6 +52,9 @@ func renderRemoteSection(b *strings.Builder, r RemoteConfig) {
 		if h.UseSSHConfig {
 			b.WriteString("use_ssh_config = true   # layer ~/.ssh/config values under unset fields\n")
 		}
+		if h.Disabled {
+			b.WriteString("disabled = true   # kept in the book but not dialed\n")
+		}
 		for _, f := range h.Forwards {
 			b.WriteString("\n[[remote.hosts.forwards]]\n")
 			fmt.Fprintf(b, "type = %q   # local (-L) | remote (-R)\n", f.Type)

@@ -424,10 +424,14 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 			"Optional scope hint (e.g. 'focus on token handling in internal/auth/') or 'full' for everything in the diff.", 0},
 	}
 	var out []tool.Tool
+	// Skill profiles are diagnostic-only; do not hide builtin subagent
+	// entry points based on the session role setting.
+	present := map[string]bool{}
+	for _, sk := range store.enabledSkills() {
+		present[sk.Name] = true
+	}
 	for _, s := range specs {
-		// Skill profiles are diagnostic-only; do not hide builtin subagent
-		// entry points based on the session role setting.
-		if _, ok := store.Read(s.skillName); !ok {
+		if !present[s.skillName] {
 			continue
 		}
 		out = append(out, &subagentSkillTool{
@@ -572,12 +576,9 @@ type SkillFileOptions struct {
 	// ReadOnly, when true, emits frontmatter read-only: true so the profile
 	// runs against the read-only registry. Omitted/false keeps the legacy
 	// writable default for older profiles.
-	ReadOnly bool
-	Color    string // optional display tag; emitted regardless of RunAs
-	// Invocation, when "manual", keeps the written skill out of the pinned
-	// Skills index (see index.go) — invocable by name only, never
-	// model-discovered. Anything else (including empty) is the default "auto".
-	Invocation string
+	ReadOnly   bool
+	Color      string // optional display tag; emitted regardless of RunAs
+	Invocation string // "manual" hides from listings; disable-model-invocation separately gates model calls
 }
 
 // skillFileFrontmatter is the YAML shape RenderSkillFile emits. Field order is
@@ -681,8 +682,12 @@ func collapseSpaces(s string) string {
 
 // availableNames lists the discoverable skill names for an error message.
 func availableNames(store *Store) string {
-	skills := ModelInvocable(store.List())
+	invocable := ModelInvocable(store.List())
+	skills := store.PathHits().Visible(invocable)
 	if len(skills) == 0 {
+		if len(invocable) > 0 {
+			return "(none apply to the files touched so far)"
+		}
 		return "(none — no skills defined)"
 	}
 	names := make([]string, len(skills))

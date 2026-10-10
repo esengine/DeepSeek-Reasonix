@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"strings"
 
 	"reasonix/internal/platform/releaseasset"
 	"reasonix/internal/platform/remote/sftpfs"
@@ -18,6 +19,14 @@ func (posixShell) Home(ctx context.Context, _ Conn, fs *sftpfs.FS) (string, erro
 	return fs.RealPath(ctx, "~")
 }
 
+func (posixShell) HomeRelative(p string) (string, bool) {
+	return strings.CutPrefix(p, "~/")
+}
+
+func (posixShell) Absolute(p string) (string, bool) {
+	return p, strings.HasPrefix(p, "/")
+}
+
 func (posixShell) Paths(home, workspace string) StatePaths {
 	return pathsFor(home, workspace)
 }
@@ -32,6 +41,10 @@ func (posixShell) Fetch(d releaseasset.CLIDownload, dir, bin string) string {
 
 func (posixShell) Alive(pid int, p StatePaths) string {
 	return ServeAliveCommand(pid, p)
+}
+
+func (posixShell) ServeVersion(pid int) string {
+	return ServeVersionCommand(pid)
 }
 
 func (posixShell) Stop(pid int, p StatePaths) string {

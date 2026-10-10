@@ -61,6 +61,9 @@ type ActivationOverride struct {
 	Owner   string          `json:"owner,omitempty"`
 	Name    string          `json:"name"`
 	Enabled bool            `json:"enabled"`
+	// Identity is the digest of the declaration an enable was given for; set
+	// only for a repository-declared server (see ProjectDeclarationDigest).
+	Identity string `json:"identity,omitempty"`
 }
 
 // ActivationFile is the on-disk shape of $REASONIX_HOME/capability-activation.json.
@@ -213,6 +216,9 @@ const (
 	ActivationUndecided ActivationDecision = iota
 	ActivationEnabled
 	ActivationDisabled
+	// ActivationChanged is an enable recorded for a declaration the project no
+	// longer holds: off, and waiting for the user like an undecided one.
+	ActivationChanged
 )
 
 // Decide reports the stored row for want, project layer first. The absence of a
@@ -227,30 +233,37 @@ func (s *ActivationStore) Decide(want ActivationOverride, root string) (Activati
 // row anyway would let one row approve a repository-declared server everywhere,
 // which is the thing the pinning exists to prevent.
 func (s *ActivationStore) decide(want ActivationOverride, root string, projectOnly bool) (ActivationDecision, error) {
+	row, found, err := s.decidingRow(want, root, projectOnly)
+	if err != nil || !found {
+		return ActivationUndecided, err
+	}
+	return decisionOf(row.Enabled), nil
+}
+
+// decidingRow returns the row decide answers from, if any.
+func (s *ActivationStore) decidingRow(want ActivationOverride, root string, projectOnly bool) (ActivationOverride, bool, error) {
 	if s == nil {
-		return ActivationUndecided, nil
+		return ActivationOverride{}, false, nil
 	}
 	file, err := s.Load()
 	if err != nil {
-		return ActivationUndecided, err
+		return ActivationOverride{}, false, err
 	}
 	want = normalizeOverride(want)
 	for _, key := range projectKeys(root) {
 		probe := want
 		probe.Scope, probe.Key = ActivationProject, key
 		if row, ok := findOverride(file.Overrides, overrideKey(probe)); ok {
-			return decisionOf(row.Enabled), nil
+			return row, true, nil
 		}
 	}
 	if projectOnly {
-		return ActivationUndecided, nil
+		return ActivationOverride{}, false, nil
 	}
 	probe := want
 	probe.Scope, probe.Key = ActivationGlobal, ""
-	if row, ok := findOverride(file.Overrides, overrideKey(probe)); ok {
-		return decisionOf(row.Enabled), nil
-	}
-	return ActivationUndecided, nil
+	row, ok := findOverride(file.Overrides, overrideKey(probe))
+	return row, ok, nil
 }
 
 func decisionOf(enabled bool) ActivationDecision {
@@ -400,6 +413,7 @@ func normalizeOverride(o ActivationOverride) ActivationOverride {
 	o.Source = strings.TrimSpace(o.Source)
 	o.Owner = strings.TrimSpace(o.Owner)
 	o.Key = strings.TrimSpace(o.Key)
+	o.Identity = strings.TrimSpace(o.Identity)
 	if o.Kind != CapabilitySkill {
 		o.Kind = CapabilityMCP
 	}

@@ -348,7 +348,7 @@ func TestPlanClaudePluginWithNoMappedCapabilitiesIsBlocked(t *testing.T) {
 func TestApplyLocalSkillFileCopiesToProject(t *testing.T) {
 	project := testenv.TempDir(t)
 	home := testenv.TempDir(t)
-	src := filepath.Join(testenv.TempDir(t), "beta.md")
+	src := filepath.Join(project, "author", "beta.md")
 	writeFile(t, src, "---\nname: beta\ndescription: Beta helper\n---\nDo beta work.")
 
 	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
@@ -401,7 +401,7 @@ func TestApplyLocalSkillFileDoesNotShadowFlatCompatInstall(t *testing.T) {
 func TestApplyLocalSKILLFileCopiesSiblingResources(t *testing.T) {
 	project := testenv.TempDir(t)
 	home := testenv.TempDir(t)
-	srcDir := filepath.Join(testenv.TempDir(t), "frontend-design")
+	srcDir := filepath.Join(project, "author", "frontend-design")
 	writeFile(t, filepath.Join(srcDir, "SKILL.md"), "---\nname: frontend-design\ndescription: Frontend helper\n---\nSee references/style.md")
 	writeFile(t, filepath.Join(srcDir, "references", "style.md"), "# Style\n\nUse crisp layouts.")
 	writeFile(t, filepath.Join(srcDir, "scripts", "lint.sh"), "#!/bin/sh\nexit 0\n")
@@ -595,8 +595,8 @@ func TestParseSkillContentRejectsMalformedFrontmatter(t *testing.T) {
 	if err == nil {
 		t.Fatal("malformed frontmatter should fail")
 	}
-	if !strings.Contains(err.Error(), "invalid YAML") || !strings.Contains(strings.ToLower(err.Error()), "line") {
-		t.Fatalf("error = %v, want invalid YAML with location", err)
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("error = %v, want invalid manifest identity", err)
 	}
 }
 
@@ -829,6 +829,49 @@ func TestPlanMCPJSONRejectsInvalid(t *testing.T) {
 				t.Fatalf("expected error for %s", tc.name)
 			}
 		})
+	}
+}
+
+// Every eager entry is a high-risk row the preview never hides, so a .mcp.json
+// declaring more servers than the limit is refused while planning, local or
+// fetched, with the invalid-manifest identity and the counts; one at the limit
+// still parses.
+func TestPlanMCPJSONRefusesMoreServersThanTheLimit(t *testing.T) {
+	body := func(n int) string {
+		servers := make([]string, n)
+		for i := range servers {
+			servers[i] = fmt.Sprintf(`"s%d":{"command":"c","tier":"eager"}`, i)
+		}
+		return `{"mcpServers":{` + strings.Join(servers, ",") + `}}`
+	}
+	if entries, _, err := parseMCPJSON([]byte(body(maxMCPJSONServers))); err != nil || len(entries) != maxMCPJSONServers {
+		t.Fatalf("at the limit: %d entries, err %v", len(entries), err)
+	}
+	over := body(maxMCPJSONServers + 1)
+	mcpPath := filepath.Join(testenv.TempDir(t), ".mcp.json")
+	writeFile(t, mcpPath, over)
+	var served atomic.Value
+	served.Store(over)
+	srv := skillServer(t, &served)
+	tl := NewTool(Options{ProjectRoot: testenv.TempDir(t), HomeDir: testenv.TempDir(t), HTTPClient: srv.Client()})
+	want := fmt.Sprintf(".mcp.json declares %d servers; limit is %d", maxMCPJSONServers+1, maxMCPJSONServers)
+	for _, source := range []string{mcpPath, srv.URL + "/.mcp.json"} {
+		_, err := execRaw(t, tl, map[string]any{"source": source, "kind": "mcp"})
+		if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("planning %s over the limit: err = %v; want the invalid-manifest identity saying %q", source, err, want)
+		}
+	}
+}
+
+// A fetched document that is not a .mcp.json is the wrong kind for kind=mcp,
+// not an invalid manifest: its parse error is not the cause to report.
+func TestPlanSkillURLWithKindMCPIsTheWrongKind(t *testing.T) {
+	var served atomic.Value
+	served.Store("---\nname: demo\ndescription: A demo skill\n---\nBody")
+	srv := skillServer(t, &served)
+	tl := NewTool(Options{ProjectRoot: testenv.TempDir(t), HomeDir: testenv.TempDir(t), HTTPClient: srv.Client()})
+	if _, err := execRaw(t, tl, map[string]any{"source": srv.URL + "/SKILL.md", "kind": "mcp"}); !errors.Is(err, ErrUnsupportedKind) {
+		t.Fatalf("SKILL.md with kind=mcp: err = %v, want ErrUnsupportedKind", err)
 	}
 }
 
@@ -1211,6 +1254,7 @@ func TestParseGitHubRepoSourceAcceptsCanonicalRepositoryPaths(t *testing.T) {
 	}{
 		{"https://github.com/o/r", githubRepoSource{Owner: "o", Repo: "r"}},
 		{"https://github.com/o/r.git/", githubRepoSource{Owner: "o", Repo: "r"}},
+		{"https://github.com/o/.github", githubRepoSource{Owner: "o", Repo: ".github"}},
 		{"https://github.com/o/r/tree/main", githubRepoSource{Owner: "o", Repo: "r", Branch: "main"}},
 		{"https://github.com/o/r/tree/main/plugins/demo", githubRepoSource{Owner: "o", Repo: "r", Branch: "main", Path: "plugins/demo"}},
 	}
@@ -1226,6 +1270,11 @@ func TestParseGitHubRepoSourceAcceptsCanonicalRepositoryPaths(t *testing.T) {
 
 func TestParseGitHubRepoSourceRejectsPagesAndUnsafePaths(t *testing.T) {
 	for _, source := range []string{
+		"https://github.com/o/...git",
+		"https://github.com/o/..git",
+		"https://github.com/o/.git",
+		"https://github.com/./r",
+		"https://github.com/.o/r",
 		"https://github.com/o/r/issues/1",
 		"https://github.com/o/r/blob/main/reasonix-plugin.json",
 		"https://github.com/o/r/pull/1",
@@ -2062,7 +2111,7 @@ func TestGitHubClaudeMarketplaceRejectsEscapingRelativeSource(t *testing.T) {
 		"kind":   "plugin",
 	})
 	_, err := tl.Execute(context.Background(), raw)
-	if err == nil || !strings.Contains(err.Error(), "escapes") {
+	if !errors.Is(err, ErrManifestMissing) {
 		t.Fatalf("error = %v, want marketplace path escape rejection", err)
 	}
 }
@@ -2210,7 +2259,7 @@ func TestGitHubClaudeMarketplaceSelectedUnsupportedSourceFails(t *testing.T) {
 		"name":   "external",
 	})
 	_, err := tl.Execute(context.Background(), raw)
-	if err == nil || !strings.Contains(err.Error(), "external source") {
+	if !errors.Is(err, ErrManifestMissing) {
 		t.Fatalf("error = %v, want external-source rejection for the selected plugin", err)
 	}
 }
@@ -2335,7 +2384,7 @@ func TestGitHubPluginApplyRefusesUnpinnableDrift(t *testing.T) {
 	if len(resp.Actions) != 1 || resp.Actions[0].Status != "failed" {
 		t.Fatalf("actions = %+v, want the single install action failed", resp.Actions)
 	}
-	if !strings.Contains(resp.Actions[0].Error, "approved commit cafe0001") {
+	if !strings.Contains(resp.Actions[0].Error, ErrApprovalDenied.Error()) {
 		t.Fatalf("action error = %q, want the approved-commit drift refusal", resp.Actions[0].Error)
 	}
 	if _, ok, _ := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "pwf"); ok {
@@ -2577,5 +2626,23 @@ func TestPlanMCPJSONAlwaysLoadCarriesToTheEntry(t *testing.T) {
 	}
 	if loads["pinned"] != config.MCPLoadAlways || loads["plain"] != config.MCPLoadDeferred {
 		t.Fatalf("loads = %v", loads)
+	}
+}
+
+func TestPlanClaudeModsPackageIsPartial(t *testing.T) {
+	project := testenv.TempDir(t)
+	home := testenv.TempDir(t)
+	src := filepath.Join(testenv.TempDir(t), "mod-pack")
+	writeFile(t, filepath.Join(src, ".claude-plugin", "plugin.json"), `{"name":"mod-pack"}`)
+	writeFile(t, filepath.Join(src, "skills", "greet", "SKILL.md"), "---\nname: greet\ndescription: Greets\n---\nSay hi.")
+	writeFile(t, filepath.Join(src, "hooks", "hooks.json"), `{"modules":["./register.ts"]}`)
+
+	planned := execInstall(t, NewTool(Options{ProjectRoot: project, HomeDir: home}), map[string]any{"source": src, "kind": "plugin"})
+	if len(planned.Actions) != 1 {
+		t.Fatalf("actions = %+v", planned.Actions)
+	}
+	a := planned.Actions[0]
+	if a.Compatibility != "partial" || len(a.SkippedCapabilities) != 1 || a.SkippedCapabilities[0].Capability != "modules" {
+		t.Fatalf("action = %+v, want partial with a skipped modules capability", a)
 	}
 }

@@ -103,8 +103,11 @@ vision = true
 	t.Cleanup(server.Close)
 	build := func() *control.Controller {
 		ctrl, err := Build(context.Background(), Options{
-			Sink:         event.Discard,
-			ExtraPlugins: []plugin.Spec{{Name: "screen", Type: "http", URL: server.URL, Authorized: true}},
+			resolvedShell: pinnedEffectShell(),
+			Home:          os.Getenv("REASONIX_HOME"),
+			WorkspaceRoot: dir,
+			Sink:          event.Discard,
+			ExtraPlugins:  []plugin.Spec{{Name: "screen", Type: "http", URL: server.URL, Authorized: true}},
 		})
 		if err != nil {
 			t.Fatalf("Build: %v", err)
@@ -144,6 +147,13 @@ vision = true
 	if err := json.Unmarshal(bodies[before], &req); err != nil {
 		t.Fatalf("decode request body: %v", err)
 	}
+	var first chatWire
+	if err := json.Unmarshal(bodies[0], &first); err != nil {
+		t.Fatalf("decode first request body: %v", err)
+	}
+	if len(first.Messages) == 0 || len(req.Messages) == 0 || !bytes.Equal(first.Messages[0], req.Messages[0]) {
+		t.Fatal("the session's system message changed between turns")
+	}
 	return req, path
 }
 
@@ -152,7 +162,9 @@ vision = true
 // the prefix cache a restart meets is the one it left. The new turn's own user
 // message is left out: what rides the turn tail after a restart is owed anew.
 func TestEffectRestartedSessionSendsImagesByteIdentical(t *testing.T) {
-	isolateConfigHome(t)
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+	t.Setenv("REASONIX_STATE_HOME", "")
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	uninterrupted, _ := runSessionImagesArm(t, dir, "uninterrupted", false, false)
@@ -211,7 +223,9 @@ func loseStoredImages(t *testing.T, path string) {
 // that held them, and that note lives only in the request: the session keeps
 // the lost images as a host record, never as text.
 func TestEffectRestartedSessionSaysWhichImagesAreGone(t *testing.T) {
-	isolateConfigHome(t)
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+	t.Setenv("REASONIX_STATE_HOME", "")
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	restarted, path := runSessionImagesArm(t, dir, "lost", true, true)

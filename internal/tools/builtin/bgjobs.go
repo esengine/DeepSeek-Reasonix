@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -20,6 +21,10 @@ import (
 // onto every tool call — and degrade to a clear error when it isn't available
 // (a headless context with no manager). Together they poll a job's new output,
 // terminate a job, and block until jobs finish.
+
+// errJobFailed marks a read that found a job ended as failed, so the call is
+// classed as failed while the job's output still reaches the model.
+var errJobFailed = errors.New("background job failed")
 
 func init() {
 	tool.RegisterBuiltin(bashOutput{})
@@ -95,9 +100,24 @@ func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	header := fmt.Sprintf("[%s] %s%s", p.JobID, status, status.Cause())
 	if strings.TrimSpace(text) == "" {
-		return header + "\n(no new output)", nil
+		text = "(no new output)"
 	}
-	return header + "\n" + text, nil
+	return header + "\n" + text, jobsFailed([]jobs.Result{{ID: p.JobID, Status: status}})
+}
+
+// jobsFailed is the call's error when any of the jobs it reports ended as
+// failed, naming those jobs; nil otherwise.
+func jobsFailed(results []jobs.Result) error {
+	var failed []string
+	for _, r := range results {
+		if r.Status == jobs.Failed {
+			failed = append(failed, r.ID)
+		}
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", errJobFailed, strings.Join(failed, ", "))
 }
 
 // filterLines keeps only the lines of s matching the regular expression re.
@@ -229,7 +249,7 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 			b.WriteString("\n" + r.Output)
 		}
 	}
-	return b.String(), nil
+	return b.String(), jobsFailed(results)
 }
 
 // stillRunning states what happened while the caller waited. No thresholds and

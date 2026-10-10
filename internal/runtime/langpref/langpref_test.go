@@ -128,3 +128,18 @@ func TestCodeTokensCarryNoLanguage(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveResponseLanguage(t *testing.T) {
+	cases := []struct{ lang, source, want string }{
+		{"auto", "请帮我看看这个函数为什么超时", "zh"},
+		{"auto", "why does this function time out", "auto"},
+		{"auto", "この関数がなぜタイムアウトするのか見て", "auto"},
+		{"en", "请帮我看看", "en"},
+		{"zh", "hello", "zh"},
+	}
+	for _, c := range cases {
+		if got := ResolveResponseLanguage(c.lang, c.source); got != c.want {
+			t.Errorf("ResolveResponseLanguage(%q, %q) = %q, want %q", c.lang, c.source, got, c.want)
+		}
+	}
+}

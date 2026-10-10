@@ -342,6 +342,66 @@ func TestBashAppendsSessionDataHint(t *testing.T) {
 	}
 }
 
+func TestBashSessionDataHintIsNoticeNotRefusal(t *testing.T) {
+	root, _, _ := stateRootFor(t)
+	outputs := filepath.Join(root, "projects", "slug", "sessions", "s1.outputs")
+	if err := os.MkdirAll(outputs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spill := filepath.Join(outputs, "out.txt")
+	if err := os.WriteFile(spill, []byte("needle line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := ConfineBash(sandbox.Spec{Mode: "off"}, NewSessionDataGuard(root, nil))
+	for name, command := range map[string]string{
+		"matched":   "grep -F needle " + filepath.ToSlash(spill),
+		"unmatched": "grep -F absent " + filepath.ToSlash(spill) + " || true",
+	} {
+		args, _ := json.Marshal(map[string]string{"command": command})
+		out, err := b.Execute(context.Background(), args)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, want := range []string{"not a refusal", "not blocked", "read_file", "grep"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: output lacks %q:\n%s", name, want, out)
+			}
+		}
+		if name == "matched" && !strings.Contains(out, "needle line") {
+			t.Errorf("read result missing before the notice:\n%s", out)
+		}
+	}
+}
+
+func TestReadToolsReachSpillFileUnderGuardedStateRoot(t *testing.T) {
+	root, _, _ := stateRootFor(t)
+	outputs := filepath.Join(root, "projects", "slug", "sessions", "s1.outputs")
+	if err := os.MkdirAll(outputs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spill := filepath.Join(outputs, "out.txt")
+	if err := os.WriteFile(spill, []byte("alpha\nneedle line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := Workspace{Dir: testenv.TempDir(t), SessionGuard: NewSessionDataGuard(root, nil)}
+	for _, tl := range ws.Tools("read_file", "grep") {
+		var args []byte
+		want := "needle line"
+		switch tl.Name() {
+		case "read_file":
+			args, _ = json.Marshal(map[string]any{"path": spill, "offset": 1, "limit": 5})
+		case "grep":
+			args, _ = json.Marshal(map[string]any{"pattern": "needle", "path": outputs})
+		default:
+			continue
+		}
+		out, err := tl.Execute(context.Background(), args)
+		if err != nil || !strings.Contains(out, want) {
+			t.Errorf("%s on spill file: err=%v out=%q", tl.Name(), err, out)
+		}
+	}
+}
+
 func TestSessionDataGuardDeniesTrustedState(t *testing.T) {
 	root, _, _ := stateRootFor(t)
 	trusted := filepath.Join(root, TrustedStateDir)

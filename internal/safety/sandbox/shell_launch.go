@@ -18,7 +18,12 @@ import (
 // token. Only such a path pays a launch; a regular file is taken as found.
 func powerShellLaunches(p string) bool {
 	fi, err := os.Lstat(p)
-	if err != nil || fi.Mode()&os.ModeIrregular == 0 {
+	if err != nil {
+		// A path that is not there cannot start. Answering true would let a
+		// caller that gates on this alone hold an interpreter the host lacks.
+		return false
+	}
+	if fi.Mode()&os.ModeIrregular == 0 {
 		return true
 	}
 	return aliasLaunches.check(p)

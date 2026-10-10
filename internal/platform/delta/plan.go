@@ -23,6 +23,22 @@ type Plan struct {
 	ReuseBytes   int64             // plain bytes of the new tree found locally
 }
 
+// MaxMissingShare is the largest fraction of a release's tree an install may
+// lack before fetching it chunked is not worth it. Chunks and the full package
+// compress alike, so it is also the share of the full download. Past half, the
+// chunked path costs about the full package plus its overhead and retries.
+const MaxMissingShare = 0.5
+
+// Worthwhile reports whether fetching p.Missing is cheaper than the full
+// package. x is the Index p was planned from.
+func (p Plan) Worthwhile(x Index) bool {
+	var tree int64
+	for _, f := range x.Files {
+		tree += f.Size
+	}
+	return float64(p.MissingBytes) <= MaxMissingShare*float64(tree)
+}
+
 // PlanFrom reads the install at root with the same chunker the release used
 // and works out which of x's chunks it already has. A file the Index lists
 // unchanged is taken by its hash without being cut again; every other file is

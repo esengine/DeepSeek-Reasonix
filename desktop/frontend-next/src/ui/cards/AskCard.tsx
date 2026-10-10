@@ -76,6 +76,10 @@ export function AskCard({ item, onAnswer }: Props) {
     return -1;
   };
 
+  // Stepping forward is positional: only the last question looks for one still
+  // waiting, so a question already answered is still visited on the way.
+  const stepTo = (from: number, done = -1) => (from < qs.length - 1 ? from + 1 : nextOpen(from, done));
+
   const toggle = (qi: number, label: string) => {
     if (sealed) return;
     setPicks((prev) => {
@@ -87,7 +91,7 @@ export function AskCard({ item, onAnswer }: Props) {
       setOtherOn((prev) => at(prev, qi, false));
       // One pick answers a single-choice question, so the card moves on by
       // itself; the pause lets the mark land before the pane changes.
-      const next = nextOpen(qi, qi);
+      const next = stepTo(qi, qi);
       if (next >= 0) window.setTimeout(() => setTab((cur) => (cur === qi ? next : cur)), ADVANCE_MS);
     }
   };
@@ -98,6 +102,15 @@ export function AskCard({ item, onAnswer }: Props) {
     setOtherOn((prev) => at(prev, qi, on));
     if (on) setFocusTo({ q: qi });
     if (on && !qs[qi].multi) setPicks((prev) => at(prev, qi, []));
+  };
+
+  const type = (qi: number, text: string) => {
+    if (noting(qi)) return setNote((prev) => at(prev, qi, text));
+    setOther((prev) => at(prev, qi, text));
+    if (text && !otherOn[qi]) {
+      setOtherOn((prev) => at(prev, qi, true));
+      if (!qs[qi].multi) setPicks((prev) => at(prev, qi, []));
+    }
   };
 
   // A pane is display:none until it is the current one, so focus moves after
@@ -123,9 +136,9 @@ export function AskCard({ item, onAnswer }: Props) {
   // answer never needs the mouse to go on.
   const onEnter = () => {
     if (submitting) return;
-    if (nextOpen(tab, tab) >= 0) {
+    if (stepTo(tab, tab) >= 0) {
       if (!answered(tab)) return;
-      const next = nextOpen(tab);
+      const next = stepTo(tab);
       setTab(next);
       setFocusTo({ q: next });
     } else if (left === 0) {
@@ -218,8 +231,8 @@ export function AskCard({ item, onAnswer }: Props) {
                     aria-label={noteShown(i) ? t("补充说明（可选）") : (customOption(i)?.label ?? t("其他 —— 自行填写"))}
                     value={freeShown(i)}
                     readOnly={sealed}
-                    placeholder={noteShown(i) ? t("补充说明（可选），会随所选项一起发送") : t("在此填写你希望采用的方案")}
-                    onChange={(e) => (noting(i) ? setNote : setOther)((prev) => at(prev, i, e.target.value))}
+                    placeholder={noteShown(i) ? t("补充说明（可选），会随所选项一起发送") : t("或直接输入你的回答")}
+                    onChange={(e) => type(i, e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key !== "Enter" || sealed || ime.isIme(e.nativeEvent)) return;
                       e.preventDefault();
@@ -262,11 +275,11 @@ export function AskCard({ item, onAnswer }: Props) {
                     {t("上一题")}
                   </button>
                 )}
-                {nextOpen(tab, tab) >= 0 ? (
-                  // While another question is still open the primary step is to
-                  // it; it waits for this one to be answered first.
+                {stepTo(tab, tab) >= 0 ? (
+                  // Confirm belongs to the last question; earlier ones step on,
+                  // waiting for this one to be answered first.
                   <button className="btn" data-primary data-action="ask.step" data-value="next"
-                    disabled={!answered(tab) || submitting} onClick={() => setTab(nextOpen(tab))}>
+                    disabled={!answered(tab) || submitting} onClick={() => setTab(stepTo(tab))}>
                     {t("下一题（{i}/{n}）", { i: tab + 1, n: qs.length })}
                   </button>
                 ) : (

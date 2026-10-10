@@ -62,7 +62,7 @@ jobs:
               # both paths must trigger the sdk job.
               if echo "$files" | grep -qE '^(sdk/|internal/ext/extension/)'; then sdk=true; fi
               # The release-note tests render every committed Studio note; npm/ holds the publish tests.
-              if echo "$files" | grep -qE '^(scripts/|npm/|release-notes/studio/)'; then scripts=true; fi
+              if echo "$files" | grep -qE '^(scripts/|npm/|release-notes/studio/|\.github/workflows/release-studio\.yml$)'; then scripts=true; fi
             fi
           fi
           { echo "code=$code"; echo "desktop=$desktop"; echo "sdk=$sdk"; echo "scripts=$scripts"; } >> "$GITHUB_OUTPUT"
@@ -80,7 +80,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
-      - run: node --test scripts/release-credits.test.mjs scripts/markdown-refs.test.mjs scripts/studio-release-notes.test.mjs scripts/publish-cli-pointer.test.mjs scripts/feedback-sync.test.mjs npm/publish.test.mjs
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: node --test scripts/cli-archive-build.test.mjs scripts/release-credits.test.mjs scripts/update-contributors.test.mjs scripts/update-acknowledgments.test.mjs scripts/markdown-refs.test.mjs scripts/studio-release-notes.test.mjs scripts/publish-cli-pointer.test.mjs scripts/studio-release-flags.test.mjs scripts/studio-notes-publish.test.mjs scripts/brew-cask-guard.test.mjs scripts/feedback-sync.test.mjs npm/publish.test.mjs
 
   # The ruleset requires the per-OS check names (test (ubuntu-latest) etc.).
   # A matrix job skipped at job level reports no per-leg checks at all, so
@@ -175,12 +179,9 @@ jobs:
       # budget above normal 7-9 minute runner variance; each package test binary
       # remains independently bounded by Go's per-package timeout below.
       #
-      # That timeout is 8m, not 3m: across four consecutive runs of the same
-      # code, internal/assembly/boot measured 133s, 146s, 162s and then hit 180s, and
-      # internal/runtime/agent 82s, 92s, 144s and 180s — a 2.2x spread from runner
-      # variance alone, with four heavy packages sharing four vCPUs. At 3m the
-      # step failed on slow runners without a code change; a hang still trips
-      # the 15 minute job budget above.
+      # The per-package timeout is 18m: internal/assembly/boot took 478-717s
+      # (12 push runs) on the Windows runner, so 18m is 1.5x the worst. A hang
+      # still trips the step budget (25m smoke, 35m full).
       #
       # Every root-module `go test` that runs on Windows passes -count=1. With
       # the result cache on, go test records each file and environment access
@@ -191,11 +192,11 @@ jobs:
       # internal/base/testenv holds every such step to it.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 15
+        timeout-minutes: 25
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -count=1 -p 4 -timeout=8m ./internal/runtime/agent/... ./internal/platform/appidentity/... ./internal/assembly/boot/... ./internal/state/checkpoint/... ./internal/frontend/cli/... ./internal/session/control/... ./internal/base/filelock/... ./internal/base/fileutil/... ./internal/ext/hook/... ./internal/state/instruction/... ./internal/ext/mcplaunch/... ./internal/platform/notify/... ./internal/base/proc/... ./internal/platform/remote/... ./internal/platform/repair/... ./internal/safety/sandbox/... ./internal/base/sysproxy/... ./internal/state/workspacelease/... ./cmd/...
+        run: go test -count=1 -p 4 -timeout=18m ./internal/runtime/agent/... ./internal/platform/appidentity/... ./internal/assembly/boot/... ./internal/state/checkpoint/... ./internal/frontend/cli/... ./internal/session/control/... ./internal/base/filelock/... ./internal/base/fileutil/... ./internal/ext/hook/... ./internal/state/instruction/... ./internal/ext/mcplaunch/... ./internal/platform/notify/... ./internal/base/proc/... ./internal/platform/remote/... ./internal/platform/repair/... ./internal/safety/sandbox/... ./internal/base/sysproxy/... ./internal/state/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/contract/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -214,14 +215,12 @@ jobs:
         timeout-minutes: 5
         run: go test -count=1 -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tools/builtin
 
-      # Full push suite still uses the same 8m package budget as Windows smoke:
-      # agent/boot/control already hit 180s package timeouts under runner load,
-      # so 3m fails on slow machines without a code regression. It runs with
-      # -count=1 for the reason given at the smoke step. A hang still dies here
-      # rather than on a package.
+      # Full push suite uses the same 18m package timeout as Windows smoke and a
+      # 35m step budget above it. -count=1 as at the smoke step. A failure prints
+      # the failed tests' output and the 15 slowest boot tests.
       - name: test (full)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
-        timeout-minutes: 30
+        timeout-minutes: 35
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
@@ -230,7 +229,25 @@ jobs:
           # Bound sandbox helper children in Windows tests so a failed OS-level
           # launch cannot pin the Actions step after Go's package timeout fires.
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -count=1 -p 4 -timeout=8m ./...
+        shell: bash
+        run: |
+          go test -count=1 -p 4 -timeout=18m -json ./... | tee "$RUNNER_TEMP/full.jsonl" |
+            jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
+
+      - name: test (full) failure detail
+        if: failure() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/full.jsonl"
+          [ -s "$f" ] || exit 0
+          echo "::group::output of failed tests"
+          jq -rn '[inputs | select(.Test != null)] | group_by(.Package + "/" + .Test)
+            | map(select(any(.[]; .Action == "fail")))[]
+            | map(select(.Action == "output") | .Output) | join("")' "$f" || true
+          echo "::endgroup::"
+          echo "slowest internal/assembly/boot tests (seconds, name):"
+          jq -rn '[inputs | select((.Package | endswith("/internal/assembly/boot")) and .Test != null and .Action == "pass")]
+            | sort_by(-.Elapsed)[:15][] | "\(.Elapsed)\t\(.Test)"' "$f" || true
 
   race:
     needs: changes

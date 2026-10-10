@@ -5,6 +5,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,6 +20,12 @@ import (
 
 // marketRegistry is swapped by tests; production always reads the fixed host.
 var marketRegistry = func(hc *http.Client) market.Registry { return market.NewClient(hc) }
+
+// marketBrowser answers the read-only browse routes; it alone may serve the
+// last good copy when the registry is down, which an install must never do.
+var marketBrowser = func(hc *http.Client) market.Registry {
+	return market.NewClient(hc).WithCache(config.CacheDir())
+}
 
 func (s *Server) registerMarketRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /market/packages", s.marketList)
@@ -40,10 +47,11 @@ type marketInstalled struct {
 }
 
 type marketDetailView struct {
-	Package   market.Package   `json:"package"`
-	Approved  *market.Version  `json:"approved,omitempty"`
-	Pinned    bool             `json:"pinned"`
-	Installed *marketInstalled `json:"installed,omitempty"`
+	Package   market.Package    `json:"package"`
+	Approved  *market.Version   `json:"approved,omitempty"`
+	Pinned    bool              `json:"pinned"`
+	Installed *marketInstalled  `json:"installed,omitempty"`
+	Cache     *market.CacheNote `json:"cache,omitempty"`
 }
 
 // marketHTTP is the user's proxy-aware client: a machine that needs a proxy to
@@ -62,10 +70,19 @@ func marketHTTP() *http.Client {
 
 func (s *Server) marketClient() market.Registry { return marketRegistry(marketHTTP()) }
 
+func (s *Server) marketBrowse() market.Registry { return marketBrowser(marketHTTP()) }
+
+func browseContext(r *http.Request) context.Context {
+	if r.URL.Query().Get("refresh") == "1" {
+		return market.WithRefresh(r.Context())
+	}
+	return r.Context()
+}
+
 func (s *Server) marketList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	offset, _ := strconv.Atoi(q.Get("offset"))
-	page, err := s.marketClient().List(r.Context(), market.Query{
+	page, err := s.marketBrowse().List(browseContext(r), market.Query{
 		Kind: q.Get("kind"), Q: q.Get("q"), Sort: q.Get("sort"), Offset: offset, Pinned: q.Get("pinned") == "1",
 	})
 	if err != nil {
@@ -77,12 +94,16 @@ func (s *Server) marketList(w http.ResponseWriter, r *http.Request) {
 	for _, p := range page.Packages {
 		out = append(out, marketEntry{Package: p, Installed: installedView(held, p.Slug)})
 	}
-	writeJSON(w, map[string]any{"packages": out, "limit": page.Limit, "offset": page.Offset})
+	view := map[string]any{"packages": out, "limit": page.Limit, "offset": page.Offset}
+	if page.Cache != nil {
+		view["cache"] = page.Cache
+	}
+	writeJSON(w, view)
 }
 
 func (s *Server) marketDetail(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("handle") + "/" + r.PathValue("name")
-	d, err := s.marketClient().Detail(r.Context(), slug)
+	d, err := s.marketBrowse().Detail(browseContext(r), slug)
 	if err != nil {
 		refuseMarket(w, err)
 		return
@@ -92,6 +113,7 @@ func (s *Server) marketDetail(w http.ResponseWriter, r *http.Request) {
 		Approved:  d.Approved,
 		Pinned:    d.Approved != nil && installsource.IsContentDigest(d.Approved.ContentHash),
 		Installed: installedView(market.InstalledRecords(config.ReasonixHomeDir()), d.Package.Slug),
+		Cache:     d.Cache,
 	})
 }
 

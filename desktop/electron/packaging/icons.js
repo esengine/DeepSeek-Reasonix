@@ -7,11 +7,17 @@ const { chromium } = require("playwright");
 
 const ASSETS = path.join(__dirname, "..", "assets");
 const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 256];
-// The tray is drawn at 16 logical pixels; nativeImage picks the @Nx file that
-// matches the display, so a scaled screen never enlarges the 16px one.
-const TRAY_SCALES = [[1, ""], [1.25, "@1.25x"], [1.5, "@1.5x"], [2, "@2x"], [3, "@3x"]];
+// The tray is drawn at 16 logical pixels. Windows asks for exactly 16*scale
+// pixels and resizes whatever it is handed, so every Windows scale has its own
+// file (src/trayimage.js picks it).
+const TRAY_SCALES = [[1, ""], [1.25, "@1.25x"], [1.5, "@1.5x"], [1.75, "@1.75x"], [2, "@2x"], [2.5, "@2.5x"], [3, "@3x"]];
 // The app icon's margin is the platform's to keep; a tray slot has none to spare.
 const TRAY_VIEWBOX = 'viewBox="103 103 818 818"';
+// Windows draws the .ico edge to edge beside neighbours that fill their cell, so
+// its tile is cropped to a 2% margin and the glyph enlarged within it; macOS and
+// Linux keep the full-canvas artwork the platform templates expect.
+const WIN_VIEWBOX = 'viewBox="91 91 842 842"';
+const WIN_GLYPH_SCALE = "scale(2.4)";
 // PNG payloads for every type modern macOS reads; ic11–ic14 are the @2x slots.
 const ICNS_TYPES = [
   ["ic04", 16], ["ic05", 32], ["ic07", 128], ["ic08", 256], ["ic09", 512], ["ic10", 1024],
@@ -73,8 +79,9 @@ async function main() {
     for (const [scale, suffix] of TRAY_SCALES) {
       fs.writeFileSync(path.join(ASSETS, `tray${suffix}.png`), await render(page, traySvg, 16 * scale));
     }
+    const winSvg = svg.replace('viewBox="0 0 1024 1024"', WIN_VIEWBOX).replace("scale(1.9)", WIN_GLYPH_SCALE);
     const icoPngs = [];
-    for (const size of ICO_SIZES) icoPngs.push([size, await at(size)]);
+    for (const size of ICO_SIZES) icoPngs.push([size, await render(page, winSvg, size)]);
     fs.writeFileSync(path.join(ASSETS, "icon.ico"), ico(icoPngs));
     const icnsPngs = [];
     for (const [type, size] of ICNS_TYPES) icnsPngs.push([type, await at(size)]);

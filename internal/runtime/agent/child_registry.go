@@ -119,6 +119,7 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 	if parent == nil {
 		return sub
 	}
+	sub.CopyDisabledMCPFrom(parent)
 	ex := make(map[string]bool, len(exclude))
 	for _, e := range exclude {
 		ex[e] = true
@@ -379,6 +380,7 @@ func ReadOnlySubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, name
 	if parent == nil {
 		return sub
 	}
+	sub.CopyDisabledMCPFrom(parent)
 	src := names
 	if len(src) == 0 {
 		src = parent.Names()
@@ -455,6 +457,7 @@ func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Regi
 	if parent == nil {
 		return sub
 	}
+	sub.CopyDisabledMCPFrom(parent)
 	for _, name := range parent.Names() {
 		if ex[name] {
 			continue

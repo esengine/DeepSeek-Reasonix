@@ -12,6 +12,7 @@ afterEach(cleanup);
 const entry: McpEntry = {
   name: "example-mcp", state: "failed", enabled: true, transport: "http",
   source: "/workspace/.mcp.json", localOverride: true, remembered: true, tools: 1,
+  error: "previous connection diagnostic",
   toolList: [{ name: "read_example", description: "Read fixture data", readOnly: true }],
 };
 
@@ -110,4 +111,43 @@ it.each(["success", "refused", "failure"])("locks the server row without tools u
   expect(element.getAttribute("aria-busy")).toBe("false");
   expect(toggleButton.disabled).toBe(false);
   if (outcome !== "success") expect(screen.getByText(outcome === "refused" ? "service refused" : "retry offline")).toBeTruthy();
+});
+
+it.each([false, true])("returns to the connection diagnostic on a new action (tools=%s)", async (tools) => {
+  const port = new MockPort() as unknown as AgentPort;
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => { finish = resolve; });
+  const toggle = vi.spyOn(port, "setMcpEnabled")
+    .mockRejectedValueOnce(new Error("configuration write failed"))
+    .mockImplementationOnce(() => pending);
+  const onDone = vi.fn();
+  render(<ServerRow m={{ ...entry, tools: tools ? 1 : 0, toolList: tools ? entry.toolList : [] }} port={port} onDone={onDone} root="/workspace" live />);
+  const control = screen.getByRole<HTMLButtonElement>("switch", { name: "关闭 example-mcp" });
+  expect(screen.getByText(entry.error!)).toBeTruthy();
+  await userEvent.click(control);
+  expect(await screen.findByText("configuration write failed")).toBeTruthy();
+  expect(screen.queryByText(entry.error!)).toBeNull();
+  await userEvent.click(control);
+  expect(screen.queryByText("configuration write failed")).toBeNull();
+  expect(screen.getByText(entry.error!)).toBeTruthy();
+  expect(control.disabled).toBe(true);
+  await act(async () => finish());
+  expect(control.disabled).toBe(false);
+  expect(toggle).toHaveBeenCalledTimes(2);
+  expect(onDone).toHaveBeenCalledTimes(2);
+  expect(screen.getByText(entry.error!)).toBeTruthy();
+});
+
+it.each([false, true])("explains remaining declarations after removal despite an old error (tools=%s)", async (tools) => {
+  const port = new MockPort() as unknown as AgentPort;
+  const remove = vi.spyOn(port, "removeMcp").mockResolvedValue({ disconnected: true, stillConfigured: true });
+  const onDone = vi.fn();
+  render(<ServerRow m={{ ...entry, tools: tools ? 1 : 0, toolList: tools ? entry.toolList : [] }} port={port} onDone={onDone} root="/workspace" live />);
+  await userEvent.click(screen.getByRole("button", { name: "移除 example-mcp" }));
+  await userEvent.click(screen.getByRole("button", { name: "移除" }));
+  expect(await screen.findByText("同名的另一处声明已生效，该行不会消失。")).toBeTruthy();
+  expect(screen.queryByText(entry.error!)).toBeNull();
+  expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  expect(remove).toHaveBeenCalledExactlyOnceWith("example-mcp");
+  expect(onDone).toHaveBeenCalledTimes(1);
 });

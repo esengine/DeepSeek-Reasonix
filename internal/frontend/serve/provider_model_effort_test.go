@@ -119,3 +119,23 @@ func TestEditProviderRefusesAPerModelEffortItCannotApply(t *testing.T) {
 		}
 	}
 }
+
+func TestProvidersMarksAnInheritedVendorContractOfficial(t *testing.T) {
+	srv := newRichProviderServer(t)
+	resp := postProvider(t, srv.URL, "/providers/edit", `{
+		"name":"rich","models":["glm-5.3","glm-4.5"],"default":"glm-5.3","vision":[],
+		"reasoningProtocol":"glm"
+	}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST /providers/edit = %d", resp.StatusCode)
+	}
+	v := listedRich(t, srv.URL)
+	got := v.InheritedEfforts["glm-5.3"]
+	if !got.Official || !slices.Equal(got.SupportedEfforts, []string{"low", "high", "max"}) || got.DefaultEffort != "max" {
+		t.Fatalf("glm-5.3 inherits %+v, want the official low/high/max default max", got)
+	}
+	if other := v.InheritedEfforts["glm-4.5"]; other.Official {
+		t.Fatalf("glm-4.5 has no documented contract but is marked official: %+v", other)
+	}
+}

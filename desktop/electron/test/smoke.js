@@ -303,11 +303,11 @@ async function menuChecks(win, js) {
   const menu = Menu.getApplicationMenu();
   const roles = (menu?.items ?? []).map((i) => String(i.role).toLowerCase());
   check("the application menu is installed", !!menu);
-  check("it carries the three menus macOS routes through", ["appmenu", "editmenu", "windowmenu"].every((r) => roles.includes(r)), roles);
+  check("it carries the three menus macOS routes through", ["appmenu", "windowmenu"].every((r) => roles.includes(r)) && menu.items.length === 3, roles);
 
-  const edit = (menu?.items ?? []).find((i) => String(i.role).toLowerCase() === "editmenu");
+  const edit = (menu?.items ?? [])[1];
   const editRoles = (edit?.submenu?.items ?? []).map((i) => String(i.role).toLowerCase());
-  check("the edit menu carries every editing command", ["undo", "redo", "cut", "copy", "paste", "selectall"].every((r) => editRoles.includes(r)), editRoles);
+  check("the edit menu carries every editing command", ["undo", "redo", "cut", "copy", "paste", "pasteandmatchstyle", "delete", "selectall"].every((r) => editRoles.includes(r)), editRoles);
 
   app.focus({ steal: true });
   win.focus();

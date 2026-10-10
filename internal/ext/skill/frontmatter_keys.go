@@ -22,6 +22,7 @@ const (
 	skillFrontmatterDisableModel     = "disable-model-invocation"
 	skillFrontmatterUserInvocable    = "user-invocable"
 	skillFrontmatterArgumentHint     = "argument-hint"
+	skillFrontmatterPaths            = "paths"
 )
 
 var skillMarkerFrontmatterKeys = []string{
@@ -45,4 +46,5 @@ var skillMarkerFrontmatterKeys = []string{
 	skillFrontmatterDisableModel,
 	skillFrontmatterUserInvocable,
 	skillFrontmatterArgumentHint,
+	skillFrontmatterPaths,
 }

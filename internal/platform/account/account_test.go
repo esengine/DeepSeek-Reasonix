@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -168,5 +169,18 @@ func TestWaitForApprovalStopsWhenCancelled(t *testing.T) {
 	_, _, err := c.WaitForApproval(ctx, &DeviceGrant{DeviceCode: "dc-1", Interval: 1, ExpiresIn: 900})
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled wait = %v, want context.Canceled", err)
+	}
+}
+
+func TestClientWithoutAUserAgentFallsBackToTheClientIdentity(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("User-Agent")
+		writeJSON(t, w, http.StatusOK, map[string]any{})
+	}))
+	defer srv.Close()
+	_ = New(srv.URL, "", srv.Client()).do(context.Background(), http.MethodGet, "/x", "", nil, nil)
+	if got == "" || strings.HasPrefix(got, "Go-http-client") {
+		t.Fatalf("User-Agent = %q", got)
 	}
 }

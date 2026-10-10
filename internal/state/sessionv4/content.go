@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 )
 
 // contentRef names one immutable object in the content pool by the SHA-256 of
@@ -19,40 +19,46 @@ type contentRef struct {
 }
 
 // contentPool is the directory 1.x keeps large payloads and images in.
-type contentPool struct{ root string }
+type contentPool struct {
+	store fs.FS
+	dir   string
+}
 
 // poolFor resolves the pool a session names, accepting only the two spellings
 // 1.x itself resolves, so a manifest cannot point a read outside the store.
-func poolFor(sessionDir, named string) contentPool {
-	root := filepath.Join(filepath.Dir(sessionDir), ".content-v1")
+func poolFor(store fs.FS, sessionName, named string) contentPool {
+	dir := ".content-v1"
 	if named == ".content-v1" {
-		root = filepath.Join(sessionDir, ".content-v1")
+		dir = path.Join(sessionName, ".content-v1")
 	}
-	return contentPool{root: root}
+	return contentPool{store: store, dir: dir}
 }
 
 // read returns an object's bytes after checking its size and digest.
 func (p contentPool) read(ref contentRef) ([]byte, error) {
-	if len(ref.Digest) != sha256.Size*2 || ref.Bytes < 0 || ref.Bytes > maxObjectBytes {
-		return nil, fmt.Errorf("invalid content reference %q", ref.Digest)
+	if ref.Bytes > maxObjectBytes {
+		return nil, fmt.Errorf("%w: content %s holds %d bytes", ErrTooLarge, ref.Digest, ref.Bytes)
+	}
+	if len(ref.Digest) != sha256.Size*2 || ref.Bytes < 0 {
+		return nil, fmt.Errorf("%w: invalid content reference %q", ErrDamaged, ref.Digest)
 	}
 	if _, err := hex.DecodeString(ref.Digest); err != nil {
-		return nil, fmt.Errorf("invalid content reference %q", ref.Digest)
+		return nil, fmt.Errorf("%w: invalid content reference %q", ErrDamaged, ref.Digest)
 	}
-	f, err := os.Open(filepath.Join(p.root, "objects", ref.Digest[:2], ref.Digest[2:4], ref.Digest))
+	f, err := p.store.Open(path.Join(p.dir, "objects", ref.Digest[:2], ref.Digest[2:4], ref.Digest))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: content %s: %w", ErrDamaged, ref.Digest, err)
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, ref.Bytes+1))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: content %s: %w", ErrDamaged, ref.Digest, err)
 	}
 	if int64(len(data)) != ref.Bytes {
-		return nil, fmt.Errorf("content %s holds %d bytes, want %d", ref.Digest, len(data), ref.Bytes)
+		return nil, fmt.Errorf("%w: content %s holds %d bytes, want %d", ErrDamaged, ref.Digest, len(data), ref.Bytes)
 	}
 	if sum := sha256.Sum256(data); hex.EncodeToString(sum[:]) != ref.Digest {
-		return nil, fmt.Errorf("content %s does not match its digest", ref.Digest)
+		return nil, fmt.Errorf("%w: content %s does not match its digest", ErrDamaged, ref.Digest)
 	}
 	return data, nil
 }

@@ -39,7 +39,7 @@ is configured.
 | `--allowed-tools RULES` | Add session-only permission allow rules. Repeatable; `--allowedTools` is an alias. |
 | `--permission-mode MODE` | Start with a specific permission posture: `read-only`, `ask`, `auto`, `acceptEdits`, `dontAsk`, `plan` or `bypassPermissions`. 1.x's `workspace-write` and `danger-full-access` also work, as Auto and Yolo. Without it, see [Default posture](#default-posture). |
 | `--yolo` | Start in YOLO mode; alias for `--dangerously-skip-permissions`. It skips approval prompts only: the sandbox, network policy and deny rules still apply. The first interactive use asks once. |
-| `--inline` | Write the conversation into the terminal's scrollback instead of taking the full screen. |
+| `--inline` | Write the conversation into the terminal's scrollback instead of taking the full screen. Only `reasonix tui --inline` takes it; a bare `reasonix --inline` is an unknown command and exits `2`. |
 
 Flags may appear before or after the prompt where applicable.
 
@@ -121,9 +121,14 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 85% as the built-in default. Lower values
-compact earlier and may reduce prompt-prefix cache reuse; higher values retain
-more context before compaction. Project `reasonix.toml` takes precedence over
+The CLI accepts a percentage above 0 and below 100 (exclusive), with 85% as the
+built-in default. These bounds follow `CompactRatioMin` and `CompactRatioMax` in
+`internal/contract/config`; TOML stores the corresponding fraction.
+
+Lower values compact earlier and may reduce prompt-prefix cache reuse; higher
+values retain more context before compaction.
+
+Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session
 keeps the threshold it loaded at startup.
 
@@ -136,9 +141,14 @@ line numbers) instead of the plain code rail.
 It is **off by default**: a model writes headerless diff fences often, and the
 plain rail is the lossless default.
 
-A fence section with no `--- `/`+++ ` file header falls back to the plain rail so
-no line is dropped. Like `[cli].diff_formatter` it is user/global only — a
-project-local `reasonix.toml` cannot set it.
+A streaming fence colours in hunk by hunk: each `@@` header settles the rows
+before it, which are drawn coloured while the in-progress hunk stays on the plain
+rail.
+
+A fence section with no `--- `/`+++ ` file header keeps its diff content on the
+plain rail; one that is only a preamble — a `git show` commit header, say —
+carries no diff and is omitted. Like `[cli].diff_formatter` it is user/global
+only — a project-local `reasonix.toml` cannot set it.
 
 `[cli].diff_formatter` names an optional external command that formats a diff
 for the CLI/TUI to render — a fenced ` ```diff ` / ` ```patch ` block, a writer
@@ -151,9 +161,10 @@ The whole diff is written to the command's stdin; its stdout is re-emitted with
 non-SGR control sequences stripped, so the formatter's colours survive but a
 cursor or clipboard escape cannot.
 
-In the full-screen TUI it runs off the render path: the built-in rows are drawn
-first and replaced once its output is ready, so a slow formatter cannot freeze
-the UI.
+In the full-screen TUI it runs off the render path: a part of the fence whose run
+is still pending is drawn on the plain rail and replaced once the output is ready
+— a hunk an earlier run already formatted stays coloured — so a slow formatter
+cannot freeze the UI.
 
 On any failure, timeout, empty output, or a diff larger than 1 MiB, the
 built-in renderer is kept. Like `[cli].update_channel` it is user/global only —
@@ -193,7 +204,7 @@ and `--auto` / `-y` (an alias for `--permission-mode auto`).
 - Flags written before `run` move after it only when both the terminal UI
   (plus `-y` and `-p`) and `run` take every one of them the same way:
   `reasonix -y run "task"` is `reasonix run -y "task"`.
-- A terminal-UI-only leading flag (`--inline`, `-r`, `--resume` with no value)
+- A terminal-UI-only leading flag (`-r`, `--resume` with no value)
   sends the whole command line to the terminal UI instead.
 - So does a run-only leading flag (`--output-format`, `--metrics`): the
   terminal UI then reports it. Write such flags after `run`.
@@ -301,7 +312,7 @@ empty when nothing was, and a refusal never changes the exit code. The same
 | `code` | Cause |
 | --- | --- |
 | `permission.unattended` | It needed an approval and nobody could give one. |
-| `permission.untrusted_folder` | The folder is not trusted, so it needed an approval nobody could give. The denial's `remedy` names `reasonix trust --dir <folder>`, which shows what the folder would run before approving; `--fail-on-unverified` exits `3` and the result's `unverified_by` carries the code. |
+| `permission.untrusted_folder` | The folder is not trusted, so it needed an approval nobody could give. The denial's `remedy` names `reasonix trust --dir <folder>`, which shows what the folder would run before approving; the run exits `4` (`3` under `--fail-on-unverified`) and the result's `unverified_by` carries the code. |
 | `permission.read_only` | The session is in `read-only`. |
 | `permission.deny_rule` | A deny rule matched. |
 | `permission.declined` | A person answered no. |
@@ -342,10 +353,11 @@ Exit statuses of `reasonix run`:
 
 | Status | Meaning |
 | --- | --- |
-| `0` | The model finished, including with refused calls or unmet readiness. |
+| `0` | The model finished, including with other refused calls or unmet readiness. |
 | `1` | The run failed: provider, configuration, limit, or cancellation. |
 | `2` | The command line was invalid. |
-| `3` | `--fail-on-unverified` was given and final readiness stayed unmet, or the folder is not trusted and its edits were refused. |
+| `3` | `--fail-on-unverified` was given and final readiness stayed unmet or the folder's edits were refused for lack of trust. |
+| `4` | The folder is not trusted and its edits or commands were refused, so the work was not done. Trust it with `reasonix trust --dir <folder>` or pass `--permission-mode` knowingly. |
 
 ### Redacted machine interfaces
 
@@ -491,8 +503,7 @@ folder alone:
   `permission_denials`.
 
 In the terminal UI, Shift+Tab cycles read-only → ask → auto → YOLO → plan
-(YOLO joins once confirmed). Ctrl+Y toggles YOLO and returns to the posture it
-left.
+Ctrl+Y toggles YOLO at once and returns to the posture it left.
 
 For unattended execution with ordinary writer fallback enabled, use
 `reasonix run --auto ...` (or `-y`). Neither it nor `--yolo` can be combined
@@ -590,7 +601,7 @@ the displayed list matches the commands the TUI accepts.
 | --- | --- |
 | `/model` | Search configured models and switch the active model. |
 | `/provider` | Choose a provider, then choose one of its configured models. |
-| `/resume` | Search recent sessions and switch to one. |
+| `/resume [n]` | Search recent sessions and switch to one; `/resume <n>` switches to the nth session of that list directly. |
 | `/status` | Show model, effort, cache, Git, background jobs, and execution setting or balance details. |
 | `/preset [balanced\|delivery]` | View or change the agent execution setting without rebuilding the controller. `/work-mode` and `/profile` remain compatibility aliases; `economy` and `light` resolve to `balanced`. |
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |

@@ -24,7 +24,7 @@ func TestStageAllDoesNotEnterNestedRepositories(t *testing.T) {
 	f.makeStatDirty("sub/f.txt", "b\n")
 	f.plainIn(f.dir, "init", "--quiet", "nest")
 	f.write("nest/q.txt", "q\n")
-	f.write("x.txt", "two\n")
+	f.makeStatDirty("x.txt", "two\n")
 	f.write("y.txt", "new\n")
 
 	repo := f.open(f.dir)

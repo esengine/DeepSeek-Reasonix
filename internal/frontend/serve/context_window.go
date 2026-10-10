@@ -81,7 +81,7 @@ func (s *Server) setContextWindow(w http.ResponseWriter, r *http.Request) {
 		// The window is on disk by now, so a runtime that is mid-turn is not a
 		// failed save: it is a window that starts counting one turn later, and
 		// rebuild_failed would send the reader looking for a malfunction.
-		if codedRefusal(err) == codeSwitchModel {
+		if isSwitchBusy(err) {
 			busy(w, "context.window_after_this_turn", "the window was saved; it applies once the running work finishes", nil)
 			return
 		}

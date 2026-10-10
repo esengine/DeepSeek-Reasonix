@@ -52,9 +52,12 @@ export const ACTIONS: UIAction[] = [
   // Completion verification is adaptive now, rather than a user-facing preset.
   // The legacy endpoint remains in the port for older clients and sessions,
   // but it is intentionally not advertised as an interface action.
+  { id: "chart.scroll", kind: "view", target: "none", proof: "interaction" },
+  { id: "chart.data", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.policy", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.rail", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.theme", kind: "view", target: "none", proof: "interaction" },
+  { id: "appearance.nav-rail", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.search", kind: "view", target: "none", proof: "interaction" },
   { id: "session.filter", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.settings", kind: "navigation", target: "none", proof: "interaction" },
@@ -67,6 +70,7 @@ export const ACTIONS: UIAction[] = [
   // The way out of a window whose assets an update replaced underneath it.
   { id: "chrome.reload", kind: "navigation", target: "none", proof: "interaction" },
   { id: "chrome.receipt", kind: "view", target: "none", proof: "interaction" },
+  { id: "chrome.keep-awake", kind: "view", target: "none", proof: "interaction" },
   { id: "transcript.fold", kind: "view", target: "none", proof: "interaction" },
   { id: "transcript.fold-preset", kind: "view", target: "none", proof: "interaction" },
   { id: "transcript.fold-preview", kind: "view", target: "none", proof: "interaction" },
@@ -81,6 +85,7 @@ export const ACTIONS: UIAction[] = [
   // refused while a turn runs, so it never stops work.
   { id: "session.close", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "session.archive", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
+  { id: "session.copy-info", kind: "shell-native", target: "entity", proof: "interaction" },
   { id: "session.export", kind: "shell-native", target: "entity", proof: "browser" },
   { id: "session.delete", kind: "destructive", target: "entity", proof: "authority-effect" },
 
@@ -112,6 +117,20 @@ export const ACTIONS: UIAction[] = [
   { id: "prompt.refine", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "prompt.adopt", kind: "view", target: "none", proof: "interaction" },
   { id: "prompt.discard", kind: "view", target: "none", proof: "interaction" },
+
+  // ── Committing what is staged ────────────────────────────────────────────
+  // Drafting reads the index and asks the model; only confirm records a commit,
+  // and only locally.
+  { id: "commit.draft", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "commit.edit", kind: "view", target: "none", proof: "interaction" },
+  { id: "commit.acknowledge", kind: "view", target: "none", proof: "interaction" },
+  { id: "commit.confirm", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "commit.close", kind: "view", target: "none", proof: "interaction" },
+
+  // ── Which branch the workspace is on ─────────────────────────────────────
+  // The composer's branch chip opens the locals; picking one checks it out in
+  // the workspace and re-reads what the checkout moved.
+  { id: "git.branch", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
 
   // ── What is waiting to be sent ───────────────────────────────────────────
   { id: "queue.edit", kind: "kernel-mutation", target: "entity", proof: "interaction" },
@@ -155,6 +174,14 @@ export const ACTIONS: UIAction[] = [
   { id: "account.reload", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "account.sign-in", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "account.sign-out", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "community.join", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "community.discord", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "community.issues", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "community.contributors", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "community.profile", kind: "shell-native", target: "entity", proof: "interaction" },
+  { id: "community.douyin-qr", kind: "view", target: "none", proof: "interaction" },
+  { id: "community.author", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "community.more", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.open", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.tab", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.category", kind: "view", target: "none", proof: "interaction" },
@@ -177,6 +204,7 @@ export const ACTIONS: UIAction[] = [
   { id: "feedback.retry-mine", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "feedback.link", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "feedback.focus", kind: "view", target: "none", proof: "interaction" },
+  { id: "feedback.expand", kind: "view", target: "none", proof: "interaction" },
   { id: "feedback.close", kind: "view", target: "none", proof: "interaction" },
   { id: "backup.category", kind: "view", target: "entity", proof: "interaction" },
   { id: "backup.label", kind: "view", target: "none", proof: "interaction" },
@@ -204,6 +232,7 @@ export const ACTIONS: UIAction[] = [
   { id: "memory.forget", kind: "destructive", target: "entity", proof: "interaction" },
   { id: "config.repair", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.reload", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "extensions.refresh", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "extensions.inspect", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.install", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "extensions.update", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
@@ -240,6 +269,7 @@ export const ACTIONS: UIAction[] = [
   { id: "market.signin", kind: "navigation", target: "none", proof: "interaction" },
   { id: "market.draft", kind: "view", target: "none", proof: "interaction" },
   { id: "market.publish", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "market.prepare-version", kind: "view", target: "none", proof: "interaction" },
   { id: "market.publish-again", kind: "view", target: "none", proof: "interaction" },
   // The account's own packages: a preview, an install pinned to that preview's
   // digest, and sending a private one to review.
@@ -248,6 +278,7 @@ export const ACTIONS: UIAction[] = [
   { id: "market.mine-retry", kind: "view", target: "none", proof: "interaction" },
   { id: "market.submit", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "market.vote", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "market.vote-retry", kind: "view", target: "none", proof: "interaction" },
   // Taking back the innermost open thing: a popover, an inline form. One
   // intent, reached by pressing away and by Escape.
   { id: "layer.dismiss", kind: "navigation", target: "none", proof: "interaction" },
@@ -285,6 +316,7 @@ export const ACTIONS: UIAction[] = [
   // state — which is why it is one id and why it is not a mutation.
   { id: "external.open", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "remote-host.remove", kind: "destructive", target: "none", proof: "authority-effect" },
+  { id: "workspace.reveal", kind: "shell-native", target: "entity", proof: "interaction" },
   { id: "workspace.remove", kind: "destructive", target: "none", proof: "authority-effect" },
   { id: "extensions.invoke", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
 
@@ -297,8 +329,11 @@ export const ACTIONS: UIAction[] = [
   // Asking a machine whether it answers. Nothing on either side changes, and
   // asking twice is the point when the first answer was "not yet".
   { id: "remote.probe", kind: "repeatable", target: "entity", proof: "authority-effect" },
+  { id: "remote.hide", kind: "view", target: "entity", proof: "interaction" },
+  { id: "remote.enable", kind: "view", target: "entity", proof: "interaction" },
   { id: "remote.read", kind: "repeatable", target: "entity", proof: "authority-effect" },
   { id: "workspace.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "workspace.add-cancel", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.move", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
 
   // ── Taking a change back ─────────────────────────────────────────────────
@@ -314,6 +349,9 @@ export const ACTIONS: UIAction[] = [
   { id: "extensions.submit", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "provider.probe", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "provider.draft", kind: "interaction", target: "none", proof: "interaction" },
+  { id: "provider.discard-edits", kind: "destructive", target: "none", proof: "interaction" },
+  { id: "provider.revert", kind: "interaction", target: "none", proof: "interaction" },
+  { id: "provider.model-check-all", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "provider.model-check", kind: "repeatable", target: "entity", proof: "interaction" },
   { id: "provider.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "provider.add-start", kind: "view", target: "none", proof: "interaction" },
@@ -323,6 +361,7 @@ export const ACTIONS: UIAction[] = [
   { id: "provider.rename", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "provider.save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "roles.model", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "roles.override.clear", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "permissions.rule-level", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "sandbox.workspace-root", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // Where compaction starts. Declaring it rebuilds the runtime, which is why
@@ -335,6 +374,7 @@ export const ACTIONS: UIAction[] = [
   { id: "context.window-tokens", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "mcp.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "mcp.inspect", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "mcp.scope", kind: "interaction", target: "none", proof: "interaction" },
   { id: "remotes.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "remotes.save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "remotes.remove", kind: "destructive", target: "entity", proof: "authority-effect" },
@@ -346,6 +386,7 @@ export const ACTIONS: UIAction[] = [
   { id: "share.cloud-offer", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "share.toggle", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "share.address", kind: "view", target: "none", proof: "interaction" },
+  { id: "share.port", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "share.offer", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "share.ask-revoke", kind: "view", target: "entity", proof: "interaction" },
   { id: "share.keep", kind: "view", target: "entity", proof: "interaction" },
@@ -355,6 +396,9 @@ export const ACTIONS: UIAction[] = [
   { id: "versions.activate", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "versions.restart", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "versions.later", kind: "view", target: "none", proof: "interaction" },
+  { id: "versions.notes", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "versions.notes-retry", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "versions.notes-close", kind: "view", target: "none", proof: "interaction" },
   { id: "shell.executor", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "shell.custom-path", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "hooks.recipe", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
@@ -374,6 +418,11 @@ export const ACTIONS: UIAction[] = [
   { id: "theme.activate", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "theme.import", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "theme.folder", kind: "repeatable", target: "none", proof: "interaction" },
+
+  // Usage changes what report is read, not canonical session state.
+  { id: "usage.range.start", kind: "view", target: "none", proof: "interaction" },
+  { id: "usage.range.end", kind: "view", target: "none", proof: "interaction" },
+  { id: "usage.range.month", kind: "view", target: "none", proof: "interaction" },
 
   // ── How the window looks ─────────────────────────────────────────────────
   // Named for what a person is doing, not for the control they reached for.
@@ -398,6 +447,7 @@ export const ACTIONS: UIAction[] = [
   { id: "appearance.scheme", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.weight", kind: "view", target: "none", proof: "browser" },
   { id: "appearance.contrast", kind: "view", target: "none", proof: "browser" },
+  { id: "appearance.effects", kind: "view", target: "none", proof: "browser" },
   { id: "pane.close", kind: "destructive", target: "none", proof: "authority-effect" },
   { id: "settings.section", kind: "navigation", target: "none", proof: "interaction" },
   // Finding a setting changes what is on screen and nothing else: it reaches
@@ -453,6 +503,9 @@ export const ACTIONS: UIAction[] = [
   { id: "browser-tools.enabled", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // Read by the running turn at its next round, so no rebuild stands between the
   // click and the canonical change.
+  // The kernel announces the change on the stream, so no rebuild stands between
+  // the click and the canonical change.
+  { id: "currency.mode", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "progress-watch.pause", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "progress-watch.rounds", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "progress-watch.token-multiple", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

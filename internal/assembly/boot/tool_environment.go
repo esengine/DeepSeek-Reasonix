@@ -89,9 +89,6 @@ func resolveToolEnvironment(opts Options, cfg *config.Config, roots config.Roots
 		fmt.Fprintln(stderr, "warning: "+sandbox.UnavailableMessage())
 	}
 	env.routeEgress(cfg, stderr)
-	if autoShellPrefer(cfg.Tools.Shell.Prefer) && shell.Kind == sandbox.ShellPowerShell {
-		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer=\"powershell\" to silence this.")
-	}
 	env.search = builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	// A rebuild passes the previous controller's manager, so tools and
 	// controller keep one temporary generation.

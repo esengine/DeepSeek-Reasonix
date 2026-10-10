@@ -35,7 +35,7 @@ This page tracks what Reasonix 2.x still has to deliver, how it ships, and which
 
 ## General availability
 
-2.x leaves pre-release in the same stable release that moves npm and Homebrew to it. Every gate MUST hold first.
+Stable `studio-v2.*` releases are GitHub latest. The release that moves npm and Homebrew from 1.x to 2.x is the next stable one after every gate below holds, and until then it MUST NOT be tagged.
 
 | ID | Gate | Status |
 | --- | --- | --- |

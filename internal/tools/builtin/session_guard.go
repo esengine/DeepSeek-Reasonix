@@ -246,8 +246,10 @@ func (g SessionDataGuard) CommandHint(workDir, command string) string {
 		return ""
 	}
 	warn := fmt.Sprintf("WARNING: this command referenced Reasonix's own session/state data under %s. "+
+		"This is a notice, not a refusal: the command was not blocked, and an empty result above means it matched nothing. "+
+		"To read a spilled tool output (<session>.outputs/), use read_file (offset/limit) or grep rather than shell text tools. "+
 		"The app is actively saving those files; external modifications conflict with its saves and are preserved as conflict copies, so an edit can look like it \"did not take\". "+
-		"Do not modify session files from a chat — stop retrying and report the underlying problem instead.", g.stateRoot)
+		"Do not modify session files from a chat — stop retrying a write and report the underlying problem instead.", g.stateRoot)
 	haystack := strings.ToLower(filepath.ToSlash(command))
 	for _, needle := range g.hintNeedles {
 		if strings.Contains(haystack, needle) {

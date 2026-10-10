@@ -9,6 +9,8 @@ import (
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/state/sessionstore"
+	"reasonix/internal/state/sessionv4/v4fixture"
 )
 
 const legacyMessageLog = `{"role":"user","content":"hello from v0.x"}
@@ -317,5 +319,217 @@ func TestAutomaticImportSkipsProductionWhenStateRootRedirected(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(filepath.Join(isolated, "projects")); err == nil && len(entries) > 0 {
 		t.Fatalf("production projects were copied into the isolated root: %d entries", len(entries))
+	}
+}
+
+func seedV4Conversation(t *testing.T, root, id string) {
+	t.Helper()
+	store := v4fixture.New(t)
+	dir := store.Session(id, 3)
+	store.Batch(dir, v4fixture.Ended,
+		v4fixture.Event{Kind: "message/complete", Payload: v4fixture.Msg("m1", "user", "hello from 1.x")},
+		v4fixture.Event{Kind: "message/complete", Payload: v4fixture.Msg("m2", "assistant", "hi")})
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(dir, filepath.Join(root, id)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExplicitImportFindsEveryLayoutA1xInstallKeepsSessionsIn(t *testing.T) {
+	const id = "0123456789abcdef0123456789abcdef"
+	layouts := map[string]func(root string){
+		"sessions-v4": func(r string) { seedV4Conversation(t, filepath.Join(r, "sessions-v4"), id) },
+		"desktop v5":  func(r string) { seedV4Conversation(t, filepath.Join(r, "desktop-sessions-v5", "by-id"), id) },
+		"project v4":  func(r string) { seedV4Conversation(t, filepath.Join(r, "projects", "p", "sessions-v4"), id) },
+		"project jsonl": func(r string) {
+			dir := filepath.Join(r, "projects", "p", "sessions")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(legacyMessageLog), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, seed := range layouts {
+		t.Run(name, func(t *testing.T) {
+			home := isolateMigrationHome(t)
+			root := filepath.Join(home, "Roaming", "reasonix")
+			seed(root)
+			dest := filepath.Join(config.SessionDir(), "ws")
+
+			res := RunLegacySessionImportInto(root, dest, event.Discard)
+			if got := totalImported(res.SessionImports); got != 1 || len(res.SessionErrs) != 0 {
+				t.Fatalf("imported %d, errs %v; want 1", got, res.SessionErrs)
+			}
+			if infos, _ := sessionstore.ListSessions(dest); len(infos) != 1 {
+				t.Fatalf("history lists %d sessions, want 1", len(infos))
+			}
+			again := RunLegacySessionImportInto(root, dest, event.Discard)
+			if got := totalImported(again.SessionImports); got != 0 {
+				t.Fatalf("second import copied %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestExplicitImportAcceptsTheV4RootItself(t *testing.T) {
+	home := isolateMigrationHome(t)
+	root := filepath.Join(home, "Roaming", "reasonix", "sessions-v4")
+	seedV4Conversation(t, root, "0123456789abcdef0123456789abcdef")
+	res := RunLegacySessionImportInto(root, filepath.Join(config.SessionDir(), "ws"), event.Discard)
+	if got := totalImported(res.SessionImports); got != 1 {
+		t.Fatalf("imported %d, want 1", got)
+	}
+}
+
+func TestExplicitImportHandlesGlobCharactersInThePath(t *testing.T) {
+	home := isolateMigrationHome(t)
+	root := filepath.Join(home, "x[1]", "reasonix")
+	seedV4Conversation(t, filepath.Join(root, "projects", "p", "sessions-v4"), "0123456789abcdef0123456789abcdef")
+	res := RunLegacySessionImportInto(root, filepath.Join(config.SessionDir(), "ws"), event.Discard)
+	if got := totalImported(res.SessionImports); got != 1 {
+		t.Fatalf("imported %d, want 1", got)
+	}
+}
+
+func TestExplicitImportSkipsACorruptManifestAndKeepsTheRest(t *testing.T) {
+	home := isolateMigrationHome(t)
+	root := filepath.Join(home, "Roaming", "reasonix", "sessions-v4")
+	seedV4Conversation(t, root, "0123456789abcdef0123456789abcdef")
+	bad := filepath.Join(root, "ffffffffffffffffffffffffffffffff")
+	if err := os.MkdirAll(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "manifest.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := RunLegacySessionImportInto(filepath.Dir(root), filepath.Join(config.SessionDir(), "ws"), event.Discard)
+	if got := totalImported(res.SessionImports); got != 1 {
+		t.Fatalf("imported %d, want 1", got)
+	}
+	if len(res.SessionSkips) != 1 || res.SessionSkips[0].Reason != sessionstore.SkipCorrupt ||
+		res.SessionSkips[0].Name != "ffffffffffffffffffffffffffffffff" || res.SessionSkips[0].Path != bad {
+		t.Fatalf("a corrupt manifest must be one corrupt skip naming its folder, got %+v", res.SessionSkips)
+	}
+	if !strings.Contains(res.Summary(), "1 warning") {
+		t.Fatalf("summary %q does not count the skip", res.Summary())
+	}
+}
+
+func TestExplicitImportRecognisesAStoreWhoseEverySessionIsDamaged(t *testing.T) {
+	home := isolateMigrationHome(t)
+	root := filepath.Join(home, "Roaming", "reasonix", "sessions-v4")
+	bad := filepath.Join(root, "ffffffffffffffffffffffffffffffff")
+	if err := os.MkdirAll(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "manifest.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := RunLegacySessionImportInto(filepath.Dir(root), filepath.Join(config.SessionDir(), "ws"), event.Discard)
+	if res.Unrecognised || len(res.SessionSkips) != 1 || res.SessionSkips[0].Reason != sessionstore.SkipCorrupt {
+		t.Fatalf("unrecognised=%v skips=%+v, want one corrupt skip", res.Unrecognised, res.SessionSkips)
+	}
+}
+
+func TestExplicitImportSaysWhenTheFolderIsNotRecognised(t *testing.T) {
+	home := isolateMigrationHome(t)
+	empty := filepath.Join(home, "empty")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(config.SessionDir(), "ws")
+	if res := RunLegacySessionImportInto(empty, dest, event.Discard); !res.Unrecognised {
+		t.Fatal("an empty folder must be reported as unrecognised")
+	}
+	seedV4Conversation(t, filepath.Join(home, "old", "sessions-v4"), "0123456789abcdef0123456789abcdef")
+	RunLegacySessionImportInto(filepath.Join(home, "old"), dest, event.Discard)
+	if res := RunLegacySessionImportInto(filepath.Join(home, "old"), dest, event.Discard); res.Unrecognised {
+		t.Fatal("an already imported folder is recognised")
+	}
+}
+
+func TestExplicitImportDoesNotFollowASymlinkOutOfThePickedFolder(t *testing.T) {
+	home := isolateMigrationHome(t)
+	outside := filepath.Join(home, "elsewhere", "sessions-v4")
+	seedV4Conversation(t, outside, "0123456789abcdef0123456789abcdef")
+	root := filepath.Join(home, "Roaming", "reasonix")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "sessions-v4")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	res := RunLegacySessionImportInto(root, filepath.Join(config.SessionDir(), "ws"), event.Discard)
+	if got := totalImported(res.SessionImports); got != 0 || !res.Unrecognised {
+		t.Fatalf("imported %d through a symlink out of the folder (unrecognised=%v)", got, res.Unrecognised)
+	}
+}
+
+const legacyEventLog = `{"type":"user.message","text":"hello from v0"}
+{"type":"model.final","content":"hi"}
+`
+
+func writeLegacyFile(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExplicitImportCountsEverySessionItCannotBringOver(t *testing.T) {
+	cases := map[string]struct {
+		seed     func(dir string)
+		imported int
+		warnings int
+	}{
+		"v0 event log":          {func(d string) { writeLegacyFile(t, d, "a.events.jsonl", legacyEventLog) }, 1, 0},
+		"message jsonl":         {func(d string) { writeLegacyFile(t, d, "a.jsonl", legacyMessageLog) }, 1, 0},
+		"jsonl.bak only":        {func(d string) { writeLegacyFile(t, d, "a.jsonl.bak", legacyMessageLog) }, 1, 0},
+		"unknown jsonl format":  {func(d string) { writeLegacyFile(t, d, "a.jsonl", `{"schema":2,"kind":"header"}`+"\n") }, 0, 1},
+		"unreadable event log":  {func(d string) { writeLegacyFile(t, d, "a.events.jsonl", "not json at all\n") }, 0, 1},
+		"unknown format in sub": {func(d string) { writeLegacyFile(t, filepath.Join(d, "slug"), "a.jsonl", `{"kind":"x"}`+"\n") }, 0, 1},
+		"workspace is gone": {func(d string) {
+			writeLegacyFile(t, d, "a.jsonl", legacyMessageLog)
+			writeLegacyFile(t, d, "a.meta.json", `{"workspace":"/no/such/workspace","summary":"s"}`)
+		}, 1, 0},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			home := isolateMigrationHome(t)
+			picked := filepath.Join(home, "D", "项目", "网络")
+			tc.seed(filepath.Join(picked, "sessions"))
+			res := RunLegacySessionImportInto(picked, filepath.Join(config.SessionDir(), "ws"), event.Discard)
+			warnings := len(res.SessionErrs) + len(res.SessionSkips)
+			if got := totalImported(res.SessionImports); got != tc.imported || warnings != tc.warnings {
+				t.Fatalf("imported %d, warnings %d (%v %v); want %d and %d", got, warnings, res.SessionErrs, res.SessionSkips, tc.imported, tc.warnings)
+			}
+			for _, skip := range res.SessionSkips {
+				if skip.Reason != sessionstore.SkipUnreadableFormat || !strings.HasPrefix(skip.Path, picked) {
+					t.Fatalf("skip %+v, want unreadable_format under %s", skip, picked)
+				}
+			}
+		})
+	}
+}
+
+func TestExplicitImportFindsSessionsAddedAfterAnEarlierRun(t *testing.T) {
+	home := isolateMigrationHome(t)
+	picked := filepath.Join(home, "网络")
+	sessions := filepath.Join(picked, ".reasonix", "sessions")
+	dest := filepath.Join(config.SessionDir(), "ws")
+	writeLegacyFile(t, sessions, "a.jsonl", legacyMessageLog)
+	if got := totalImported(RunLegacySessionImportInto(picked, dest, event.Discard).SessionImports); got != 1 {
+		t.Fatalf("first run imported %d, want 1", got)
+	}
+	writeLegacyFile(t, sessions, "b.jsonl", legacyMessageLog)
+	if got := totalImported(RunLegacySessionImportInto(picked, dest, event.Discard).SessionImports); got != 1 {
+		t.Fatalf("second run imported %d, want the new session only", got)
 	}
 }

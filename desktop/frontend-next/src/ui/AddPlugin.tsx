@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useEscape } from "./dismiss";
 import { current as language, plural, t } from "../i18n";
 import { useFileDrop } from "./filedrop";
@@ -32,7 +32,14 @@ interface Props {
   onApplying?: (applying: boolean) => void;
 }
 
-export function AddPlugin({ port, onClose, onInstalled, updating, source, onApplying }: Props) {
+export function AddPlugin(props: Props) {
+  const [connection, setConnection] = useState({ port: props.port, generation: 0 });
+  if (connection.port !== props.port) setConnection({ port: props.port, generation: connection.generation + 1 });
+  return <PluginInput key={connection.generation} {...props} />;
+}
+
+function PluginInput({ port, onClose, onInstalled, updating, source, onApplying }: Props) {
+  const sourceLabel = useId();
   const [text, setText] = useState(updating?.source ?? source ?? "");
   const [plan, setPlan] = useState<PluginPlan | null>(null);
   const [done, setDone] = useState<PluginPlan | null>(null);
@@ -41,8 +48,9 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
   const apply = useRef<HTMLButtonElement>(null);
   useEscape(true, () => { if (!updating || !plan || !busy) onClose(); });
   useEffect(() => {
-    if (updating?.name && !busy && (done || (error && plan))) apply.current?.focus();
-  }, [updating?.name, error, plan, done, busy]);
+    const readingUpdate = !!updating?.name && !done && !plan;
+    if (readingUpdate || (!busy && (done || (updating?.name && plan)))) apply.current?.focus();
+  }, [updating?.name, plan, done, busy, error]);
 
   const request = (planId?: string) => ({
     source: text.trim(),
@@ -123,7 +131,16 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
       <div className="addpkg" data-stage="done">
         <Outcome plan={done} />
         <div className="acts">
-          <button className="act" data-action="extensions.finish" ref={apply} onClick={onClose}>
+          {!done.ok && (
+            <button className="act" data-action={updating ? "extensions.inspect" : "extensions.back"} data-primary ref={apply} disabled={busy} onClick={() => {
+              setDone(null);
+              setPlan(null);
+              if (updating) void look();
+            }}>
+              {t(updating ? "重试" : "返回")}
+            </button>
+          )}
+          <button className="act" data-action="extensions.finish" ref={done.ok ? apply : undefined} onClick={onClose}>
             {t("完成")}
           </button>
         </div>
@@ -160,6 +177,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
             ))}
           </section>
         ))}
+        <PreviewCut shown={plan.previewTruncated} hidden={plan.hiddenActions} />
         {plan.warnings?.map((wmsg) => (
           <div className="why" key={wmsg}>
             {wmsg}
@@ -201,7 +219,8 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
           <span className="why">{error || updating.source}</span>
         </div>
         <div className="acts">
-          <button className="act" data-action="extensions.cancel" onClick={onClose}>
+          {error && <button className="act" data-action="extensions.inspect" data-primary ref={apply} disabled={busy} onClick={() => void look()}>{t("重试")}</button>}
+          <button className="act" data-action="extensions.cancel" ref={error ? undefined : apply} onClick={onClose}>
             {t(error ? "关掉" : "取消")}
           </button>
         </div>
@@ -213,6 +232,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
     <div className="addpkg" data-stage="paste" ref={drop} data-over={over ? "" : undefined} aria-busy={busy}>
       <textarea
         className="paste"
+        aria-labelledby={sourceLabel}
         data-action-keydown="extensions.inspect"
         rows={3}
         autoFocus
@@ -228,7 +248,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
         }}
       />
       <div className="acts">
-        <span className="note">{t("仓库地址，或将文件夹拖入此处")}</span>
+        <span className="note" id={sourceLabel}>{t("仓库地址，或将文件夹拖入此处")}</span>
         <button className="act" data-action="extensions.pick-folder" disabled={busy} onClick={() => void pick()}>
           {t("选文件夹")}
         </button>
@@ -246,6 +266,17 @@ export function AddPlugin({ port, onClose, onInstalled, updating, source, onAppl
         </button>
       </div>
       {error && <div className="why" role="alert">{error}</div>}
+    </div>
+  );
+}
+
+export function PreviewCut({ shown, hidden }: { shown?: boolean; hidden?: number }) {
+  if (!shown && !hidden) return null;
+  return (
+    <div className="why" data-testid="preview-cut">
+      {hidden ? t("另有 {n} 项未显示；高风险项都已列出。", { n: hidden }) : null}
+      {hidden && shown ? " " : null}
+      {shown ? t("部分文字过长或含不可见字符，预览没有显示全部。") : null}
     </div>
   );
 }
@@ -290,6 +321,12 @@ export function Candidate({ a }: { a: PluginAction }) {
           <span className="why">{s.reason}</span>
         </div>
       ))}
+      {a.previewTruncated && (
+        <div className="risk">
+          <span className="lb">{t("已截断")}</span>
+          <span className="dt">{t("部分文字")}</span>
+        </div>
+      )}
       {a.riskReasons?.length ? (
         <details className="reasons">
           <summary>{t("内核给出的判定（{n}）", { n: a.riskReasons.length })}</summary>
@@ -372,16 +409,28 @@ function contributes(a: PluginAction): string[] {
 // leaves the package on disk and out of this session, and saying so is the
 // difference between waiting and re-installing.
 export function Outcome({ plan }: { plan: PluginPlan }) {
-  const state = plan.reloadError ? "action_required" : plan.ok ? "ready" : "issue";
-  return (
+  const state = !plan.ok ? "issue" : plan.reloadError ? "action_required" : "ready";
+  const failed = plan.actions?.filter((action) => action.status === "failed") ?? [];
+  return <>
     <div className="outcome" data-state={state}>
       <i className="pip" />
       <span className="nm">{plan.actions?.[0]?.name || t("安装")}</span>
       <span className="dt">
         {state === "ready" && t("装好了，下一轮就能用")}
-        {state === "action_required" && t("装好了，但这一轮还在跑：等它结束或新建会话后生效")}
-        {state === "issue" && (plan.error || plan.next || t("没装上"))}
+        {state === "action_required" && t("装好了，但运行时未重载：{reason}。请用「重载运行时」重试。", { reason: plan.reloadError! })}
+        {state === "issue" && (plan.error || (failed.length ? t("有项目未安装成功，原因见下方。") : plan.next || t("没装上")))}
       </span>
     </div>
-  );
+    {failed.map((action, i) => (
+      <div className="why" role="alert" key={`${action.kind}:${action.name}:${i}`}>
+        {action.name || action.kind}: {action.error || action.next || t("没装上")}
+        {action.error && action.next && <div>{action.next}</div>}
+      </div>
+    ))}
+    {state === "issue" && plan.reloadError && (
+      <div className="why" role="status">
+        {t("运行时未重载：{reason}。请用「重载运行时」重试。", { reason: plan.reloadError })}
+      </div>
+    )}
+  </>;
 }

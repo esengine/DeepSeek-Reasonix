@@ -1,4 +1,5 @@
-import { HttpError } from "../port/port";
+import { DeliveryError, HttpError } from "../port/port";
+import type { DeliveryFault } from "../port/port";
 import { t } from "./index";
 
 // What the kernel says when it refuses, in the language the reader uses.
@@ -18,12 +19,24 @@ export const PROVIDER_EDIT_DISABLED = "provider.editing_disabled";
 // A paired device answers this for every account route, votes included.
 export const ACCOUNT_SIGNIN_DISABLED = "account.signin_disabled";
 // The write landed and only applying it to the open conversation did not.
-export const SAVED_NOT_APPLIED: readonly string[] = ["provider.saved_while_running", "provider.saved_model_unlisted", "runtime.rebuild_failed"];
+export const SAVED_NOT_APPLIED: readonly string[] = ["provider.saved_while_running", "provider.saved_model_unlisted", "runtime.rebuild_failed", "runtime.saved_while_running"];
 
 const SAID: Record<string, string> = {
+  "shell.destructive_target": "递归删除目标受保护或超出授权范围；请使用工作区或授权目录内的字面路径",
+  "shell.analysis_unknown": "无法确定递归删除范围；请使用字面命令名、路径和解释器内容",
+  "shell.delete_sequence": "请拆分命令；递归删除前只能使用字面路径切换目录，不能依赖变量赋值",
+  "shell.delete_nonliteral": "请使用授权目录内的字面删除路径，不要使用变量、展开、通配符或未知管道输入",
+  "shell.delete_option": "删除选项无法识别；请使用已知选项并提供公共参数的值",
+  "shell.syntax_error": "命令语法有误；请修正后重试",
+  "shell.parser_unavailable": "主机命令解析器不可用；请在主机恢复后重试",
+  "shell.parser_timeout": "主机命令解析超时或被取消；请重试",
+  "shell.command_line_too_long": "命令超过主机长度限制；请拆分命令或从文件读取长文本",
+  "tool.arguments_invalid": "参数不符合该工具的约定，本次调用没有执行；请按工具说明补全或更正参数后重试",
+  "workspace.write_conflict": "另一个会话持有所需的写入范围。本次操作未执行；请结束当前轮次，待该范围释放后再重试",
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
   "plan.decision_stale": "该决定已不符合当前状态：计划在你回答前已发生变更",
-  "busy.switch_model": "任务正在运行，请先停止再切换模型",
+  "busy.switch_model": "当前回合正在进行，请先停止或等它结束再切换模型",
+  "busy.switch_model_jobs": "回合已结束，但还有 {count} 个后台任务在运行，切换模型会终止它们。请先在「后台任务」里停止，再切换模型",
   "busy.change_effort": "任务正在运行，请先停止再调整推理强度",
   "busy.change_workspace": "任务正在运行，请先停止再切换工作区",
   "busy.reload_extensions": "任务正在运行，请先停止再重载扩展",
@@ -36,13 +49,14 @@ const SAID: Record<string, string> = {
   "workspace.file_failed": "文件操作失败，请重试",
   "workspace.path_outside_tree": "该路径不在当前工作区内",
   "workspace.write_outside_scope": "写入目标不在工作区可写范围内。这是文件工具的写入范围，不是操作系统沙箱；要允许写入，请在 设置 → 沙箱 → 额外可写目录 中添加目标文件夹",
+  "workspace.network_path_outside_scope": "该路径指向网络上的另一台机器，不在当前工作区内。文件工具只按路径写法拒绝它，不会去访问；工作区本身在网络共享上时，其下的路径可用",
   "workspace.files_failed": "无法读取工作区文件列表",
   "workspace.file_unreadable": "该文件不是可编辑文本或超过大小限制",
   "provider.model_in_use": "该来源正在使用中，请先切换模型再删除",
 
   // ── 来源：填错了什么 ─────────────────────────────────────────────
   "provider.name_required": "请为该来源填写名称",
-  "provider.name_invalid": "名称只能包含字母、数字、点、连字符和下划线",
+  "provider.name_invalid": "名称只能用字母、数字、点、连字符和下划线，以字母或数字开头，最长 64 个字符",
   "provider.name_taken": "已经有名为「{name}」的连接了，换一个名称",
   "provider.config_unreadable": "读不到配置文件，没法安全地选择密钥存放位置，请检查配置后重试",
   "provider.endpoint_required": "请填写接口地址",
@@ -68,6 +82,7 @@ const SAID: Record<string, string> = {
   "session.bad_path": "无法解析该会话路径",
   "session.open_failed": "打不开这个会话",
   "session.outside_dir": "该路径位于会话目录之外",
+  "session.unknown": "没有这个会话",
   "request.method_not_allowed": "该地址不接受此种请求方式",
   "request.bad_content_type": "请求体必须是 application/json",
   "permissions.editing_disabled": "这台服务器未开放权限编辑",
@@ -86,6 +101,9 @@ const SAID: Record<string, string> = {
   "shell.unavailable_over_http": "HTTP 上不提供 shell 命令",
   "roles.unknown": "不存在「{role}」这个角色",
   "roles.model_unknown": "没有已配置的模型匹配「{model}」",
+  "model.decision_only": "「{model}」是决策来源，只服务 system_one 的询问，不能用作对话模型",
+  "model.not_decision_source": "「{model}」是对话模型，不是决策来源；决策只能选择「模型服务」里添加的决策来源",
+  "roles.override_not_in_user_config": "「{key}」不在用户配置里，可能已被清除，或来自项目配置",
   "shell.editing_disabled": "这台服务器未开放 shell 设置",
   "account.signin_disabled": "这台服务器未开放账号登录",
   "backup.signed_out": "登录账号后才能使用云备份",
@@ -107,13 +125,21 @@ const SAID: Record<string, string> = {
   "workspace.limit_reached": "项目列表已满（32 个），请先移除一个项目再添加",
   "workspace.changing_disabled": "这台服务器不支持切换工作区",
   "settings.unknown_preset": "不存在该预设",
+  "settings.unknown_model": "没有找到这个模型，默认模型没有改动",
+  "settings.default_model_brokered": "这个窗格的默认模型由模型所在的那台机器决定，请在本机的窗格里设置",
   "drop.too_many_paths": "本次拖入 {count} 个，最多允许 {limit} 个",
+  "attachment.unsupported_image": "这个文件的格式暂不支持（{format}）。支持的图片格式：{supported}。可以先转换格式再添加。",
+  "attachment.too_large": "这个文件超过 {limit_mb} MB 的上限，请压缩或拆分后再添加。",
+  "attachment.empty": "这个文件是空的（0 字节），没有可添加的内容。",
+  "attachment.unreadable": "无法读取这个文件：{detail}。它可能被其他程序占用、已被移动，或在云盘里尚未下载。",
+  "attachment.write_failed": "附件未能保存到工作区的 .reasonix/attachments：{detail}。请检查该目录的写入权限和磁盘空间。",
   "complete.line_too_long": "该行过长，无法补全",
   "stream.unsupported": "该连接不支持流式传输",
   "internal.failed": "服务端出现异常，与你的操作无关",
   "provider.bad_context_window": "上下文长度不能是负数；填 0 表示不自动压缩",
   "provider.bad_token_limit": "Token 上限不能是负数",
   "provider.bad_max_output_tokens": "最大输出 Token 不能是负数",
+  "provider.bad_idle_timeout": "无响应超时须在 {min} 到 {max} 秒之间；留空使用默认值",
   "provider.bad_reasoning_protocol": "无法识别「{protocol}」这种思考协议",
   "provider.default_effort_not_listed": "默认档位「{level}」不在填写的档位里",
   "provider.model_default_effort_not_listed": "{model} 的默认档位「{level}」不在为它选的档位里",
@@ -126,6 +152,7 @@ const SAID: Record<string, string> = {
   "provider.no_current_model": "当前没有正在使用的模型，无法记录其窗口大小",
   "context.window_after_this_turn": "窗口大小已记录，将在本轮结束后生效",
   "provider.saved_while_running": "已保存。当前对话还有未结束的工作（正在运行、等待你回答或有后台任务），仍按原设置进行；结束后再保存一次即可生效",
+  "runtime.saved_while_running": "已保存。当前对话还有未结束的工作（正在运行、等待你回答或有后台任务），仍按原设置进行；结束后再保存一次即可生效",
   "provider.saved_model_unlisted": "已保存。当前对话使用的模型已不在该来源的列表中，切换模型后才会生效",
   "provider.extra_body_null": "额外设置中的「{path}」不能为空值（null）",
   "provider.no_websearch_wire": "该协议不支持由端点自行搜索",
@@ -133,10 +160,16 @@ const SAID: Record<string, string> = {
   // ── 来源：连接与授权 ─────────────────────────────────────────────
   "provider.editing_disabled": "这台服务器不允许修改模型来源",
   "browser.open_failed": "打不开这个网页：{error}",
+  "browser.network_path": "内置浏览器不会打开指向网络上另一台机器的路径，只按路径写法拒绝，不会去访问",
+  "browser.engine_missing": "没有找到可用的浏览器。请安装 Chrome、Edge 或 Chromium，或在配置里用 [browser] executable 指定路径，新会话才会读到",
+  "browser.engine_failed": "内置浏览器没能启动，稍后再试一次",
+  "browser.profile_busy": "内置浏览器的资料目录正被另一个浏览器占用。关掉其他 Studio 窗口或用同一资料目录的浏览器后再试",
   "notifications.rejected": "通知设置没能保存：{error}",
   "editor.not_installed": "这台机器上没找到 VS Code、Cursor 这类编辑器。装一个，或在配置里用 [desktop] editor 指定路径。",
   "editor.launch_failed": "编辑器没能启动：{error}",
   "editor.no_window": "这个内核没有窗口，打不开本机的编辑器。",
+  "workspace.not_listed": "这个文件夹不在当前窗口的项目列表里。",
+  "workspace.folder_missing": "项目文件夹已不在磁盘上。",
   "workspace.locate_no_window": "这个内核不在本机，没法在系统文件管理器中显示它的文件。",
   "device.host_only": "这项操作只能在电脑上的窗口里做，已配对的手机做不了。",
   "device.host_rejected": "这个地址不是本机共享的地址，请重新扫码。",
@@ -149,15 +182,30 @@ const SAID: Record<string, string> = {
   "share.cloud_unavailable": "互联网连接暂时不可用，请确认电脑端 Studio 已登录并保持在线。",
   "share.address_rejected": "地址 {ip} 不是本机的局域网地址。",
   "share.listen_failed": "无法在 {ip} 上开启监听：{error}",
+  "share.port_in_use": "端口 {port} 已被其他程序占用，请换一个端口，或清空后让系统自动选择。",
+  "share.port_out_of_range": "端口需要在 {min}–{max} 之间，或清空后让系统自动选择。",
+  "share.port_save_failed": "无法保存端口设置：{error}",
   "share.device_unknown": "没有这台已配对的设备，可能已被移除。",
   "picker.unsupported": "这个系统没有可用的文件夹选择框，请直接填写路径。",
   "picker.failed": "打不开文件夹选择框：{error}",
   "provider.bad_key_slot": "名称「{name}」不能用来存放密钥：密钥槽位由名称推导，而它不能以数字开头。改一个以字母开头的名称即可，密钥本身没有问题。",
   "page.not_built": "这个内核没有带界面，只提供接口",
+  "provider.key_missing": "当前模型还没有 API key，请先在设置里添加",
   "provider.key_required": "请填写 API key",
   "provider.key_too_large": "该 key 长度异常，可能粘贴了错误内容",
   "provider.setup_done": "已连接，无需重复配置",
   "provider.setup_failed": "远端配置未完成，请稍后重试",
+  "provider.unknown": "没有这个模型连接",
+  "provider.no_key_slot": "该连接没有可存放密钥的变量，请先在配置中为它指定 api_key_env",
+  "provider.key_unstorable": "该 key 含有无法安全保存的字符组合，请重新复制",
+  "provider.key_invalid": "该 key 超长或含换行，请重新复制",
+  "provider.credentials_changed": "已保存的密钥在此期间被改动，请重新打开配置再试",
+  "provider.activation_failed": "密钥已保存，但连接尚未生效，请重试",
+  "provider.test_auth": "服务商拒绝了该 key，请检查是否复制完整",
+  "provider.test_timeout": "服务商没有及时应答，请稍后重试",
+  "provider.test_unreachable": "连不上服务商，请检查网络或服务地址",
+  "provider.test_upstream": "服务商返回了错误，请稍后重试",
+  "provider.test_failed": "连接测试未通过",
 
   "memory.unavailable": "该会话未启用记忆",
 
@@ -171,7 +219,12 @@ const SAID: Record<string, string> = {
   "provider.probe.path_not_found": "地址可以连通，但该路径没有模型清单。多数服务的地址需以 /v1 结尾",
   "provider.probe.no_chat_models": "该服务列出了 {count} 个模型，但均不支持对话 —— 它可能仅提供向量或重排能力",
   "provider.probe.upstream_error": "服务商返回错误（HTTP {status}），与填写内容无关，请稍后重试",
+  "provider.probe.timeout": "该地址在限定时间内没有响应。请检查网络或代理，或稍后重试",
   "provider.probe.unreachable": "无法连接该地址。请检查网络是否通畅，以及地址是否有误",
+  "provider.probe.failed": "检查失败，没有具体原因",
+  "provider.probe.decision_path_not_found": "地址可以连通，但没有 System One 决策接口。请填写服务的基地址，不要带 /v1/systemone，Reasonix 会自己在后面追加",
+  "provider.probe.decision_not_compatible": "该地址有响应，但返回的不是 System One 的决策结果。请确认这是决策协议服务的基地址",
+  "provider.probe.decision_rejected": "服务拒绝了这次决策请求。请核对模型名与服务文档，具体原因见下方服务返回的内容",
   "provider.probe.not_compatible": "该地址有响应，但不是 OpenAI 或 Anthropic 类接口。请确认是否误将网页地址复制过来",
 
   // ── 推理强度：这个端点给不了 ─────────────────────────────────────
@@ -188,6 +241,33 @@ const SAID: Record<string, string> = {
   "prompt_refine.no_answer": "模型没有给出结果，请重试",
   "prompt_refine.failed": "优化失败，请重试",
   "prompt_refine.bad_request": "优化请求格式不正确",
+
+  "commit.no_repository": "这个工作区不是 git 仓库，无法提交",
+  "commit.nothing_staged": "暂存区是空的，先用 git add 暂存要提交的文件",
+  "commit.staged_changed": "暂存区在你确认之后又变了，请重新起草",
+  "commit.secrets_staged": "暂存的内容里有疑似密钥的文件，需要你确认后才能提交",
+  "commit.empty_message": "提交说明是空的",
+  "commit.message_invalid": "提交说明含有无法记录的字符",
+  "commit.message_too_long": "提交说明超过 {max_bytes} 字节",
+  "commit.identity_missing": "git 没有配置提交者姓名和邮箱（user.name、user.email）",
+  "commit.failed": "git 没能记录这次提交",
+  "commit.no_model": "当前会话没有可用的模型，无法起草提交说明",
+  "commit.timeout": "起草提交说明超时，请重试",
+  "commit.no_answer": "模型没有给出提交说明，请重试",
+  "commit.git_failed": "读取暂存区失败",
+  "commit.bad_request": "提交请求格式不正确",
+
+  // ── 分支切换：composer 的分支菜单拒得有名字 ─────────────────────
+  "branch.workspace_busy": "另一个会话正在写入这个工作区，请稍后重试切换分支",
+  "branch.jobs_running": "后台任务仍在运行，请先停止再切换分支",
+  "branch.turn_running": "任务运行中，分支要等这轮结束再切",
+  "branch.no_repository": "这个工作区不是 git 仓库，没有分支可切换",
+  "branch.bad_request": "切换分支的请求格式不正确",
+  "branch.bad_name": "这不是有效的分支名",
+  "branch.unknown": "没有这个名字的本地分支",
+  "branch.local_changes": "有未提交的修改会被这次切换覆盖，请先提交或暂存（git stash）",
+  "branch.in_use": "该分支已在另一个 worktree 中检出，请先在那边切走",
+  "branch.switch_failed": "git 未能完成这次分支切换",
 
   // ── 会话 ─────────────────────────────────────────────────────────
   "session.disabled": "这台服务器已关闭会话切换",
@@ -211,6 +291,7 @@ const SAID: Record<string, string> = {
   "remote.name_required": "请为该机器填写名称",
   "remote.host_required": "请填写要连接的地址",
   "remote.bad_port": "这不是有效的端口号",
+  "remote.disabled": "该主机已停用，启用后才能连接",
   "remote.has_open_panes": "该机器仍有 {n} 个打开的面板，请先关闭再移除",
   // 主机密钥变了没有「仍然连接」这条路：能绕过的警告等于没有警告。
   "remote.host_key_changed": "{host} 的主机密钥已变更。可能是该机器重装，也可能存在中间人。记录位于 {file} 第 {line} 行，核实前请勿连接。",
@@ -235,6 +316,7 @@ const SAID: Record<string, string> = {
   // ── 能力开关：名字、这台机器的存档、以及服务器自己 ───────────────
   "mcp.unavailable": "该服务器未能启动，开关已恢复原状",
   "mcp.switch_not_undone": "该服务器未能启动，且开关未能恢复——重启后将保持刚才设置的状态",
+  "mcp.approval_owed": "这个服务要启动的内容在你启用后变了，请先查看命令并重新启用",
   "activation.unavailable": "开关未能保存：其存储文件无法读取或写入",
 
   // ── 待送达：条目、队列、这份存档各自会拒 ─────────────────────────
@@ -258,12 +340,15 @@ const SAID: Record<string, string> = {
   "config.editing_disabled": "这台服务器未开放配置编辑",
   "config.not_repairable": "该文件需手动修改：{detail}",
   "runtime.rebuild_failed": "设置已写入，但运行时未能按新设置重建：{detail}",
+  "permissions.rule_unknown_tool": "规则 {rule} 没有对应的工具（{tool}），匹配不到任何调用，因此未保存；命令要写成 Bash(命令:*)",
   "permissions.rejected": "该权限未能保存：{detail}",
   "sandbox.rejected": "沙箱设置未能保存：{detail}",
   "compaction.rejected": "压缩阈值未能保存：{detail}",
   "compaction.no_soft_limit": "本次请求未包含阈值，未做任何修改",
   "browser_tools.save_failed": "内置浏览器设置未能保存：{detail}",
   "browser_tools.no_enabled": "本次请求未说明开关状态，未做任何修改",
+  "display_currency.invalid": "不支持这个币种，只能选自动、CNY 或 USD：{detail}",
+  "display_currency.save_failed": "费用显示币种未能保存：{detail}",
   "progress_watch.save_failed": "无进展设置未能保存：{detail}",
   "workspace.untrustable": "主目录或磁盘根目录不能整体信任，请打开具体的项目文件夹",
   "workspace.trust_save_failed": "未能记下对此文件夹的信任决定：{detail}",
@@ -325,6 +410,8 @@ const SAID: Record<string, string> = {
   "remote.no_install_path": "无法在 {host} 上安装 reasonix —— npm、上传、下载均已尝试。请先自行在该机器上安装，再重新连接",
   "remote.binary_not_runnable": "安装到 {host} 上的 reasonix 无法运行。该目录可能挂载了 noexec，也可能传输中断",
   "remote.serve_did_not_start": "{host} 上的 reasonix 已启动，但始终未报告端口。请查看该机器上 ~/.reasonix/remote 下的日志",
+  "remote.serve_provider_mismatch": "{host} 上已有一个正在运行的 reasonix serve，它的模型来源（本机代理或该机器自带的密钥）与本次连接的设置不一致。为避免打断它正在做的事，没有替换它。请把该主机的 provider 改成与它一致，或先在该机器上运行 reasonix remote serve stop 再连接",
+  "remote.serve_not_attachable": "{host} 上已有一个正在运行的 reasonix serve 占用着该工作区，但无法接入（令牌文件或地址不可读）。请先在该机器上结束那个进程（进程号记在该机器 .reasonix/remote 目录下的 .pid 文件里），再重新连接",
   "wallet.unauthorized": "该供应商拒绝了当前密钥，无法读取余额",
   "wallet.unreachable": "该供应商的余额接口无响应",
   "wallet.unreadable": "无法解析该供应商余额接口返回的内容",
@@ -357,6 +444,10 @@ const SAID: Record<string, string> = {
   // ── 版本：这个内核背后有没有一个可更新的 Studio ─────────────────
   "studio.no_install": "这个 Studio 不是安装版（从源码启动），没有可以查看或切换的版本",
   "studio.pin_rejected": "版本固定未能保存：{detail}",
+  "studio.notes_bad_version": "这不是一个已发布的版本号",
+  "studio.notes_absent": "这个版本没有发布更新内容",
+  "studio.notes_unreachable": "暂时取不到更新内容，请检查网络后重试",
+  "studio.notes_too_large": "这个版本的更新内容超出了允许的大小，已拒绝读取",
   "update.install_running": "已有一个版本切换正在进行，请等待其完成后重试",
   "update.install_rejected": "本次版本切换未能启动：{detail}",
   "update.restart_busy": "有 {n} 项任务正在运行，重启会中断它们",
@@ -393,12 +484,19 @@ export function say(reason: Reason | null | undefined, fallback = ""): string {
  *  window's language, anything else prints as itself. One call so no display
  *  site has to know which kind it caught. */
 export function reason(e: unknown): string {
+  if (e instanceof DeliveryError) return t(UNCONFIRMED[e.fault]);
   if (e instanceof HttpError && e.reason) return say(e.reason, e.message);
   // Nothing came back but a status: printing message here would put a path and
   // a number in front of the user. The status is the only identity there is.
   if (e instanceof HttpError && !e.detailed) return t("请求未能送达内核（HTTP {status}）", { status: e.status });
   return e instanceof Error ? e.message : String(e);
 }
+
+const UNCONFIRMED: Record<DeliveryFault, string> = {
+  kernel_busy: "内核繁忙，这次操作可能没有被收到，重试前请先确认",
+  unreachable: "无法连接内核，这次操作可能没有送达，重试前请先确认",
+  ui_stalled: "本界面无响应，这次操作可能没有送达内核，重试前请先确认",
+};
 
 /** codes is what the parity check reads. */
 export const codes = SAID;

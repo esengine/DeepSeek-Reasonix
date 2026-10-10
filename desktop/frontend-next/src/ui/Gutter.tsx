@@ -16,7 +16,7 @@ export interface Span {
 
 // 拖出来的宽度是读者对自己这块屏幕的判断，不是布局的默认值 —— 所以它归本地
 // 存，不进内核配置：换台机器、换块屏幕，判断本来就不同。
-export const RAIL: Span = { min: 176, max: 440, def: 264, key: "rx-rail-w", css: "--rail-open", col: "--rail-w" };
+export const RAIL: Span = { min: 232, max: 440, def: 264, key: "rx-rail-w", css: "--rail-open", col: "--rail-w" };
 export const SIDE: Span = { min: 244, max: 540, def: 316, key: "rx-side-w", css: "--side-open", col: "--side-w" };
 // The workbench beside the conversation. Wider than the rail because what sits
 // in it is a page someone is reading, not a list of names.

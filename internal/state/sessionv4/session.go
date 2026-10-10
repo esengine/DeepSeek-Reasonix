@@ -3,7 +3,9 @@ package sessionv4
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
+	"io/fs"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,12 +32,23 @@ type Session struct {
 	// opened; a later change means 1.x has written to it since.
 	LogSize    int64
 	LogModTime time.Time
+
+	store fs.FS
+	name  string
 }
 
 // Open reads a session directory's manifest. Revisions 0 to 3 share one frame
 // format and differ only in which events may appear.
 func Open(dir string) (Session, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	s, err := OpenIn(dirFS(filepath.Dir(dir)), filepath.Base(dir))
+	s.Dir = dir
+	return s, err
+}
+
+// OpenIn reads the session named name directly under store, which confines
+// every read it and the returned Session make to that tree.
+func OpenIn(store fs.FS, name string) (Session, error) {
+	raw, err := readManifest(store, path.Join(name, "manifest.json"))
 	if err != nil {
 		return Session{}, err
 	}
@@ -46,17 +59,17 @@ func Open(dir string) (Session, error) {
 	if m.SchemaVersion != schemaVersion || m.Codec != codec || m.StorageRevision < 0 || m.StorageRevision > 3 {
 		return Session{}, fmt.Errorf("%w: schema %d, codec %q, revision %d", ErrUnsupported, m.SchemaVersion, m.Codec, m.StorageRevision)
 	}
-	if m.SessionID != filepath.Base(dir) {
+	if m.SessionID != name {
 		return Session{}, fmt.Errorf("%w: manifest names session %q", ErrDamaged, m.SessionID)
 	}
-	s := Session{Dir: dir, Manifest: m}
-	if info, err := os.Stat(s.logPath()); err == nil {
+	s := Session{Dir: name, Manifest: m, store: store, name: name}
+	if info, err := fs.Stat(store, s.logPath()); err == nil {
 		s.LogSize, s.LogModTime = info.Size(), info.ModTime()
 	}
 	return s, nil
 }
 
-func (s Session) logPath() string { return filepath.Join(s.Dir, "events.frames") }
+func (s Session) logPath() string { return path.Join(s.name, "events.frames") }
 
 // UpdatedAt is when the conversation last changed: its log, or its creation.
 func (s Session) UpdatedAt() time.Time {
@@ -85,13 +98,13 @@ type messagesPayload struct {
 // conversation it shows: complete appends, upsert replaces by id or appends,
 // retract removes, and a history replace or legacy import starts over.
 func (s Session) Transcript() (Transcript, error) {
-	pool := poolFor(s.Dir, s.Manifest.ContentRoot)
+	pool := poolFor(s.store, s.name, s.Manifest.ContentRoot)
 	var msgs []message
 	var t Transcript
 	if s.LogSize == 0 {
 		return t, nil
 	}
-	err := scanCommits(s.logPath(), pool, func(events []event) error {
+	err := scanCommits(s.store, s.logPath(), pool, func(events []event) error {
 		for _, ev := range events {
 			if !messageKinds[ev.Kind] {
 				continue
@@ -170,7 +183,16 @@ func indexOf(msgs []message, id string) int {
 // — the content pool, caches, trash, locks, temporaries — start with a dot and
 // are not sessions, and neither is a directory whose manifest does not read.
 func List(root string) []Session {
-	entries, err := os.ReadDir(root)
+	out := ListIn(dirFS(root))
+	for i := range out {
+		out[i].Dir = filepath.Join(root, out[i].name)
+	}
+	return out
+}
+
+// ListIn is List over a confined tree.
+func ListIn(store fs.FS) []Session {
+	entries, err := fs.ReadDir(store, ".")
 	if err != nil {
 		return nil
 	}
@@ -179,9 +201,27 @@ func List(root string) []Session {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		if s, err := Open(filepath.Join(root, e.Name())); err == nil {
+		if s, err := OpenIn(store, e.Name()); err == nil {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+const maxManifestBytes = 1 << 20
+
+func readManifest(store fs.FS, name string) ([]byte, error) {
+	f, err := store.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxManifestBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxManifestBytes {
+		return nil, fmt.Errorf("%w: manifest larger than %d bytes", ErrTooLarge, maxManifestBytes)
+	}
+	return raw, nil
 }

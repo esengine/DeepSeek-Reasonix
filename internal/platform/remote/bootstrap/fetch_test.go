@@ -198,7 +198,7 @@ func TestProbeReportsTheRoutesTheInstallerTakes(t *testing.T) {
 		!strings.Contains(err.Error(), "unknown install route") {
 		t.Fatalf("the probe reported on a route nobody takes: %v", err)
 	}
-	if _, _, err := runRoute(t.Context(), nil, nil, nil, Options{}, bogus, "", "", "", "", nil); err == nil ||
+	if _, _, err := runRoute(t.Context(), nil, loginEnv{}, nil, nil, Options{}, bogus, "", "", "", "", nil); err == nil ||
 		!strings.Contains(err.Error(), "unknown install route") {
 		t.Fatalf("the installer accepted a route nobody reports: %v", err)
 	}

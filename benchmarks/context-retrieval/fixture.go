@@ -36,7 +36,7 @@ func (p *digestProvider) Name() string { return "fixture-digest" }
 func (p *digestProvider) Stream(_ context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
 	p.calls++
 	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "Earlier work continued across several files; nothing outstanding was recorded."}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Earlier work\nEarlier work continued across several files; nothing outstanding was recorded."}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil

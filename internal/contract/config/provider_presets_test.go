@@ -437,7 +437,7 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !mimo.NoProxy {
 		t.Fatal("mimo-api preset should bypass configured proxy for China-only endpoint")
 	}
-	if mimo.DefaultModel() != "mimo-v2.5-pro" || !mimo.HasVisionModel("mimo-v2.5") || mimo.HasVisionModel("mimo-v2.5-pro") {
+	if mimo.DefaultModel() != "mimo-v2.6-pro" || mimo.HasVisionModel("mimo-v2.6-pro") || !mimo.HasVisionModel("mimo-v2.5") || mimo.HasVisionModel("mimo-v2.5-pro") {
 		t.Fatalf("mimo vision capability mismatch: %+v", mimo.VisionModels)
 	}
 	if price := mimo.PriceForModel("mimo-v2.5-pro"); price == nil || price.Currency != "¥" {
@@ -505,8 +505,15 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("glm-cn/glm-5.2 did not resolve")
 	}
-	if cap := EffortCapabilityForEntry(glm); !cap.Supported || cap.Default != "enabled" || !containsString(cap.Levels, "disabled") {
-		t.Fatalf("glm effort capability = %+v, want enabled/disabled", cap)
+	if cap := EffortCapabilityForEntry(glm); !cap.Supported || cap.Default != "max" || !containsString(cap.Levels, "high") || !containsString(cap.Levels, "none") {
+		t.Fatalf("glm effort capability = %+v, want GLM-5.2 depth levels", cap)
+	}
+	flash, ok := cfg.ResolveModel("glm-cn/glm-5.3-flash")
+	if !ok {
+		t.Fatal("glm-cn/glm-5.3-flash did not resolve")
+	}
+	if cap := EffortCapabilityForEntry(flash); !cap.Supported || cap.Default != "max" || !containsString(cap.Levels, "low") || containsString(cap.Levels, "disabled") {
+		t.Fatalf("GLM-5.3-Flash effort capability = %+v, want low/high/max without disabled", cap)
 	}
 	if !glm.HasVisionModel("glm-5v-turbo") {
 		t.Fatalf("glm vision capability mismatch: %+v", glm.VisionModels)
@@ -515,8 +522,8 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("zai-global/glm-5.2 did not resolve")
 	}
-	if cap := EffortCapabilityForEntry(zaiGlobal); !cap.Supported || cap.Default != "enabled" {
-		t.Fatalf("zai-global effort capability = %+v, want enabled", cap)
+	if cap := EffortCapabilityForEntry(zaiGlobal); !cap.Supported || cap.Default != "max" || !containsString(cap.Levels, "high") {
+		t.Fatalf("zai-global effort capability = %+v, want GLM-5.2 depth levels", cap)
 	}
 	glmPlanCN, ok := cfg.Provider("glm-coding-plan-cn")
 	if !ok {
@@ -734,5 +741,28 @@ func TestCuratedProviderPresetDeepSeekReasoningProtocolScope(t *testing.T) {
 				t.Fatalf("ReasoningProtocolForEntry(%q) = %q, want %q", tc.ref, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGlmPresetsDeclareTheOfficialContextWindow(t *testing.T) {
+	// Zhipu documents a 1M-token context for GLM-5.2 and GLM-5.3, declared at
+	// the entry level so the added GLM-5.3 models resolve to it.
+	// https://docs.z.ai/guides/llm/glm-5.3
+	for _, id := range []string{"glm-cn", "zai-global", "glm-coding-plan-cn", "zai-coding-plan-global"} {
+		preset, ok := CuratedProviderPreset(id)
+		if !ok || len(preset.Entries) != 1 {
+			t.Fatalf("missing preset %q", id)
+		}
+		entry := preset.Entries[0]
+		for _, model := range []string{"glm-5.2", "glm-5.3", "glm-5.3-flash"} {
+			if !entry.HasModel(model) {
+				t.Fatalf("preset %q is missing %s", id, model)
+			}
+			resolved := entry
+			resolved.Model = model
+			if window, ok := ResolvedContextWindow(&resolved); !ok || window != 1_000_000 {
+				t.Fatalf("preset %q %s window = %d/%v, want 1000000", id, model, window, ok)
+			}
+		}
 	}
 }

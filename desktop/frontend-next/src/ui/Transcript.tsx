@@ -1,11 +1,14 @@
 import { Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
-import { decimals } from "../i18n/format";
 import { t } from "../i18n";
 import type { Item, Waiting } from "../state/session";
 import type { ExtensionSurface } from "../port/wire";
-import type { ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope } from "../port/port";
+import type { AgentPort, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope } from "../port/port";
 import { RMark } from "./RMark";
+import { Await } from "./Await";
 import { ToolCard } from "./cards/ToolCard";
+import { Boundary } from "./Boundary";
+import { LazyChart } from "./chart/LazyChart";
+import { chartOfTool } from "./chart/spec";
 import { GuardianCard } from "./cards/GuardianCard";
 import { ApprovalCard, type PlanAction } from "./cards/ApprovalCard";
 import { AskCard } from "./cards/AskCard";
@@ -28,6 +31,7 @@ import { landingBox, useFindLanding, useFindPaint } from "./findland";
 
 interface Props {
   items: Item[];
+  port?: Pick<AgentPort, "workspaceImageURL">;
   // Changes only when the transcript's composition does — see state/session.
   revision: number;
   waiting: Waiting;
@@ -69,7 +73,7 @@ interface Props {
   onPrepareRewind: (turn: number, scope: RewindScope) => Promise<RewindPlan>;
   onPrepareFileRevert: (path: string) => Promise<RewindPlan>;
   onCommitFileRevert: (planId: string, resolution?: string) => Promise<RewindResult>;
-  onCommitRewind: (planId: string) => Promise<RewindResult>;
+  onCommitRewind: (planId: string, text?: string) => Promise<RewindResult>;
   onUndoRewind: (transactionId: string) => Promise<void>;
   /** Cards that have not had their one entrance yet. Owed by the projection,
    *  spent by the first render that draws them — never by the animation, which
@@ -78,7 +82,7 @@ interface Props {
   onEntered: (ids: string[]) => void;
 }
 
-export function Transcript({ items, entering, onEntered, revision, waiting, scroll, hidden, onPinned, jump, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere }: Props) {
+export function Transcript({ items, port, entering, onEntered, revision, waiting, scroll, hidden, onPinned, jump, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere }: Props) {
   // A block the selection touches must not leave the DOM. Unmounting the node a
   // selection is anchored to makes the browser remap that selection onto
   // whatever is still mounted — which reads as "I selected up there and the
@@ -431,7 +435,7 @@ export function Transcript({ items, entering, onEntered, revision, waiting, scro
   }, [entering, onEntered]);
   const owed = useMemo(() => new Set(entering), [entering]);
 
-  const rowProps = { owed, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, takeovers, onExtSubmit, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, reply, onResend };
+  const rowProps = { owed, port, onApprove, onFullAccess, onPlan, onAnswer, onForget, onExtInvoke, takeovers, onExtSubmit, onPrepareRewind, onCommitRewind, onUndoRewind, onPrepareFileRevert, onCommitFileRevert, reply, onResend };
 
   // What you said, and where it sits. Derived from the same blocks the
   // transcript renders, so a mark always knows which block holds it — that is
@@ -555,6 +559,7 @@ const Block = memo(function Block({
 
 interface RowHandlers {
   owed: Set<string>;
+  port: Props["port"];
   onApprove: Props["onApprove"];
   onFullAccess: Props["onFullAccess"];
   onPlan: Props["onPlan"];
@@ -628,6 +633,7 @@ const ActivityGroup = memo(function ActivityGroup({
 // chunk than parsing the message did.
 const Row = memo(function Row({
   it,
+  port,
   owed,
   onApprove,
   onFullAccess,
@@ -663,6 +669,7 @@ const Row = memo(function Row({
       return (
         <UserCard
           item={it}
+          port={port}
           cp={cp}
           onResend={onResend}
           onPrepareRewind={onPrepareRewind}
@@ -680,8 +687,10 @@ const Row = memo(function Row({
       // The ask tool also raises ask_request, which carries the id /answer
       // needs. Drawing the tool call too put two copies of the same question on
       // screen, each answerable.
-      return it.tool.name === "ask" ? null : (
-        <ToolCard
+      if (it.tool.name === "ask") return null;
+      return (() => {
+        const card = (
+          <ToolCard
             tool={it.tool}
             running={it.running}
             activity={activity}
@@ -691,7 +700,14 @@ const Row = memo(function Row({
             onPrepareFileRevert={onPrepareFileRevert}
             onCommitFileRevert={onCommitFileRevert}
           />
-      );
+        );
+        const chart = activity ? null : chartOfTool(it.tool);
+        return chart ? (
+          <Boundary fallback={card} retryKey={it.tool.args}>
+            <LazyChart spec={chart} callId={it.tool.id} />
+          </Boundary>
+        ) : card;
+      })();
     case "reads":
       return <ReadsCard tools={it.tools} />;
     case "guardian":
@@ -716,42 +732,6 @@ const Row = memo(function Row({
     </div>
   );
 });
-
-// Counted from the stamp the wait carries rather than from this component's
-// mount: a retry landing in a wait already on screen has to restart the clock,
-// and a tick that only ever added 0.1 drifted from the time it claimed.
-function Await({ since, retry }: { since: number; retry?: Waiting["retry"] }) {
-  const start = retry?.since ?? since;
-  const [secs, setSecs] = useState(() => (Date.now() - start) / 1000);
-  useEffect(() => {
-    const tick = () => setSecs((Date.now() - start) / 1000);
-    tick();
-    const t = setInterval(tick, 100);
-    return () => clearInterval(t);
-  }, [start]);
-  return (
-    <div className="await" data-retry={retry ? "" : undefined}>
-      <i />
-      <i />
-      <i />
-      <span className="t">
-        {/* Which half broke is the kernel's to say, not this window's to guess:
-            never getting an answer and losing one already being written out
-            read nothing alike. */}
-        {retry
-          ? t(
-              retry.scope === "headers"
-                ? "连接在响应头前断了，重试 {attempt}/{max} · {secs}s"
-                : retry.scope === "stream"
-                  ? "回包写到一半断了，重放 {attempt}/{max} · {secs}s"
-                  : "连接已断开，重试 {attempt}/{max} · {secs}s",
-              { attempt: retry.attempt, max: retry.max, secs: decimals(secs, 1) },
-            )
-          : t("等待回包 {secs}s", { secs: decimals(secs, 1) })}
-      </span>
-    </div>
-  );
-}
 
 interface HeroProps {
   needsProject: boolean;

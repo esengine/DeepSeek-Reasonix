@@ -94,6 +94,10 @@ func dropFileHeaderPair(diff string) string {
 	return diff
 }
 
+// diffPreviewFold is on in production; the preview benchmark turns it off to
+// price the whole-body highlight the fold replaced.
+var diffPreviewFold = true
+
 // diffBody renders the hunks with a line-number gutter, dropping the file and
 // "@@" headers (a dim "⋮" marks each hunk jump) and folding past maxLines to a
 // "+N more" footer. path selects the syntax lexer.
@@ -116,11 +120,22 @@ func diffBody(d event.FileDiff, path string, width, maxLines int) []string {
 	}
 	gw := gutterWidth(src)
 
+	// The fold is known before any row is laid out: colourise only the rows kept
+	// and count the rest. A colourised row costs ~1.4 ms (chroma via regexp2), so
+	// a folded preview must not pay to highlight the tail it discards.
+	keep, folded := 0, 0
+	if diffPreviewFold {
+		keep, folded = foldPreview(diffRowCount(src), maxLines)
+	}
+
 	var rows []string
 	oldNo, newNo, hunks := 0, 0, 0
 	for _, ln := range src {
 		if ln == "" {
 			continue
+		}
+		if diffPreviewFold && len(rows) >= keep {
+			break
 		}
 		switch ln[0] {
 		case '@':
@@ -150,12 +165,55 @@ func diffBody(d event.FileDiff, path string, width, maxLines int) []string {
 		}
 	}
 
-	if maxLines > 0 && len(rows) > maxLines {
-		folded := len(rows) - (maxLines - 1)
-		rows = rows[:maxLines-1]
+	if !diffPreviewFold {
+		rows, folded = foldRows(rows, maxLines)
+	}
+	if folded > 0 {
 		rows = append(rows, "  "+Dim(fmt.Sprintf(i18n.M.DiffFoldedFmt, folded)))
 	}
 	return rows
+}
+
+// foldRows drops a fully laid-out body's tail past maxLines, returning the kept
+// rows and how many it hid. The seam's slow path: production counts the fold
+// from the source and never lays the tail out.
+func foldRows(rows []string, maxLines int) ([]string, int) {
+	if maxLines <= 0 || len(rows) <= maxLines {
+		return rows, 0
+	}
+	folded := len(rows) - (maxLines - 1)
+	return rows[:maxLines-1], folded
+}
+
+// foldPreview returns how many rows to draw and how many the fold hides for a
+// body of total rows: the first maxLines-1 rows and the count of the rest, or
+// every row and no fold when the body fits.
+func foldPreview(total, maxLines int) (keep, folded int) {
+	if maxLines <= 0 || total <= maxLines {
+		return total, 0
+	}
+	keep = maxLines - 1
+	return keep, total - keep
+}
+
+// diffRowCount is how many rows diffBody draws for src: one per non-blank line
+// that is not a "@@ " header, plus the "⋮" separator each hunk header after the
+// first adds.
+func diffRowCount(src []string) int {
+	total, hunks := 0, 0
+	for _, ln := range src {
+		switch {
+		case ln == "":
+		case ln[0] == '@':
+			if hunks > 0 {
+				total++
+			}
+			hunks++
+		default:
+			total++
+		}
+	}
+	return total
 }
 
 // hasSGR reports whether s carries an ANSI CSI/SGR introducer. A diff already
@@ -169,16 +227,30 @@ func hasSGR(s string) bool {
 // width-clamped and sanitised so a hostile payload cannot drive the terminal.
 func verbatimDiffBody(diff string, width, maxLines int) []string {
 	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
-	rows := make([]string, 0, len(lines))
+	total := 0
+	for _, ln := range lines {
+		if ln != "" {
+			total++
+		}
+	}
+	keep, folded := 0, 0
+	if diffPreviewFold {
+		keep, folded = foldPreview(total, maxLines)
+	}
+	rows := make([]string, 0, keep)
 	for _, ln := range lines {
 		if ln == "" {
 			continue
 		}
+		if diffPreviewFold && len(rows) >= keep {
+			break
+		}
 		rows = append(rows, "  "+clampPlain(sgrOnly(ln), max(width-2, 1)))
 	}
-	if maxLines > 0 && len(rows) > maxLines {
-		folded := len(rows) - (maxLines - 1)
-		rows = rows[:maxLines-1]
+	if !diffPreviewFold {
+		rows, folded = foldRows(rows, maxLines)
+	}
+	if folded > 0 {
 		rows = append(rows, "  "+Dim(fmt.Sprintf(i18n.M.DiffFoldedFmt, folded)))
 	}
 	return rows

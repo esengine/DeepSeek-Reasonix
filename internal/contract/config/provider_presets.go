@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -91,15 +92,12 @@ var (
 	}
 	tokenRhythmVisionModels = []string{"kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code"}
 
-	mimoV25Models       = []string{"mimo-v2.5-pro", "mimo-v2.5"}
-	mimoV25VisionModels = []string{"mimo-v2.5"}
-
 	minimaxMSeriesModels       = []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"}
 	minimaxMSeriesVisionModels = []string{"MiniMax-M3"}
 
-	glmAPIModels       = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"}
+	glmAPIModels       = []string{"glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"}
 	glmAPIVisionModels = []string{"glm-5v-turbo"}
-	glmCodingModels    = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-4.7"}
+	glmCodingModels    = []string{"glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7"}
 	glmAnthropicModels = []string{"glm-5.2[1m]", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7", "glm-4.5-air"}
 
 	qwenAPIModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "MiniMax-M2.5", "glm-5", "glm-4.7", "kimi-k2.5"}
@@ -185,7 +183,7 @@ func kimiK3DirectOverride() ProviderModelOverride {
 	}
 }
 
-var curatedProviderPresets = append([]ProviderPreset{
+var curatedProviderPresets = slices.Concat([]ProviderPreset{
 	deepSeekAnthropicPreset(),
 	deepSeekResponsesPreset(),
 	{
@@ -307,150 +305,7 @@ var curatedProviderPresets = append([]ProviderPreset{
 			ContextWindow: 262144,
 		}},
 	},
-	{
-		ID:          "mimo-api",
-		Label:       "MiMo API",
-		Description: "Xiaomi MiMo direct API with text and vision-capable models.",
-		KeyEnv:      "MIMO_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-api",
-			Kind:          "openai",
-			BaseURL:       "https://api.xiaomimimo.com/v1",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_API_KEY",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-			NoProxy:       true,
-		}},
-	},
-	{
-		ID:          "mimo-anthropic",
-		Label:       "MiMo Anthropic",
-		Description: "Xiaomi MiMo direct Anthropic-compatible endpoint.",
-		KeyEnv:      "MIMO_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://api.xiaomimimo.com/anthropic",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_API_KEY",
-			Thinking:      "adaptive",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-			NoProxy:       true,
-		}},
-	},
-	{
-		ID:          "mimo-token-plan-cn",
-		Label:       "MiMo Token Plan CN",
-		Description: "Xiaomi MiMo token-plan China endpoint.",
-		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-token-plan-cn",
-			Kind:          "openai",
-			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_TOKEN_PLAN_API_KEY",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-			NoProxy:       true,
-		}},
-	},
-	{
-		ID:          "mimo-token-plan-cn-anthropic",
-		Label:       "MiMo Token Plan CN Anthropic",
-		Description: "Xiaomi MiMo token-plan China Anthropic-compatible endpoint.",
-		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-token-plan-cn-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://token-plan-cn.xiaomimimo.com/anthropic",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_TOKEN_PLAN_API_KEY",
-			Thinking:      "adaptive",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-			NoProxy:       true,
-		}},
-	},
-	{
-		ID:          "mimo-token-plan-sgp",
-		Label:       "MiMo Token Plan SGP",
-		Description: "Xiaomi MiMo token-plan Singapore endpoint.",
-		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-token-plan-sgp",
-			Kind:          "openai",
-			BaseURL:       "https://token-plan-sgp.xiaomimimo.com/v1",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_TOKEN_PLAN_API_KEY",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-		}},
-	},
-	{
-		ID:          "mimo-token-plan-sgp-anthropic",
-		Label:       "MiMo Token Plan SGP Anthropic",
-		Description: "Xiaomi MiMo token-plan Singapore Anthropic-compatible endpoint.",
-		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-token-plan-sgp-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://token-plan-sgp.xiaomimimo.com/anthropic",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_TOKEN_PLAN_API_KEY",
-			Thinking:      "adaptive",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-		}},
-	},
-	{
-		ID:          "mimo-token-plan-ams",
-		Label:       "MiMo Token Plan AMS",
-		Description: "Xiaomi MiMo token-plan Amsterdam endpoint.",
-		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-token-plan-ams",
-			Kind:          "openai",
-			BaseURL:       "https://token-plan-ams.xiaomimimo.com/v1",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_TOKEN_PLAN_API_KEY",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-		}},
-	},
-	{
-		ID:          "mimo-token-plan-ams-anthropic",
-		Label:       "MiMo Token Plan AMS Anthropic",
-		Description: "Xiaomi MiMo token-plan Amsterdam Anthropic-compatible endpoint.",
-		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "mimo-token-plan-ams-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://token-plan-ams.xiaomimimo.com/anthropic",
-			Models:        mimoV25Models,
-			VisionModels:  mimoV25VisionModels,
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_TOKEN_PLAN_API_KEY",
-			Thinking:      "adaptive",
-			ContextWindow: 1048576,
-			Prices:        mimoDomesticPrices(mimoV25Models),
-		}},
-	},
+}, mimoPresets, []ProviderPreset{
 	{
 		ID:          "minimax-cn-api",
 		Label:       "MiniMax CN API",
@@ -922,7 +777,7 @@ var curatedProviderPresets = append([]ProviderPreset{
 			APIKeyEnv: "OLLAMA_API_KEY",
 		}},
 	},
-}, globalProviderPresets...)
+}, globalProviderPresets)
 
 func cloneProviderPreset(p ProviderPreset) ProviderPreset {
 	p.Entries = cloneProviderEntries(p.Entries)

@@ -475,7 +475,12 @@ func (c *Controller) MCPPrompt(ctx context.Context, input string) (sent string, 
 	}
 	text, err := prompts[idx].Get(ctx, args)
 	if err != nil {
-		return "", true, err
+		if ctx.Err() != nil {
+			return "", true, err
+		}
+		failure := &MCPPromptError{Prompt: name, Server: prompts[idx].Server, Stage: mcpPromptStageGet, Err: err}
+		c.mcp.promptFailures.owe(failure.turnNote())
+		return "", true, failure
 	}
 	return text, true, nil
 }

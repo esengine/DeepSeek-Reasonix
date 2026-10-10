@@ -16,12 +16,13 @@ import (
 // skipDirs are trees whose contents this repository does not author, so debt
 // measured there names nobody who could pay it.
 var skipDirs = map[string]bool{
-	"node_modules": true,
-	"third_party":  true,
-	"vendor":       true,
-	"testdata":     true,
-	"dist":         true,
-	"bin":          true,
+	"node_modules":      true,
+	"third_party":       true,
+	"vendor":            true,
+	"testdata":          true,
+	"dist":              true,
+	"bin":               true,
+	".migration-backup": true,
 }
 
 var generatedRe = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)

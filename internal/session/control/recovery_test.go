@@ -451,7 +451,7 @@ func TestNewSessionWaitsForPendingRecoveryPersistence(t *testing.T) {
 	// The assertion is ordering (the select above proved NewSession blocked
 	// until release), not speed: NewSession does real file IO and one second
 	// flakes on loaded Windows runners.
-	case <-time.After(10 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("NewSession did not resume after recovery persistence drained")
 	}
 }

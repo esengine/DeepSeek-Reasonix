@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"os"
+	"io/fs"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -29,6 +29,10 @@ var ErrDamaged = errors.New("1.x session log is damaged")
 // ErrUnsupported means the store was written in a form this reader does not
 // know, so reading on would misread it.
 var ErrUnsupported = errors.New("1.x session store version is not supported")
+
+// ErrTooLarge means a manifest, frame or object exceeds the size this reader
+// is willing to load.
+var ErrTooLarge = errors.New("1.x session data exceeds the size limit")
 
 type record struct {
 	SchemaVersion int    `json:"schemaVersion"`
@@ -54,8 +58,8 @@ type event struct {
 // scanCommits reads every complete batch of the log in order and hands its
 // events to visit. A frame or batch cut short at the end is a write still in
 // progress and ends the scan without error.
-func scanCommits(path string, pool contentPool, visit func([]event) error) error {
-	f, err := os.Open(path)
+func scanCommits(store fs.FS, name string, pool contentPool, visit func([]event) error) error {
+	f, err := store.Open(name)
 	if err != nil {
 		return err
 	}
@@ -136,7 +140,10 @@ func readFrame(r io.Reader, dec *zstd.Decoder) ([]byte, bool, error) {
 	}
 	compressedLen := int(binary.BigEndian.Uint32(header[4:8]))
 	rawLen := int(binary.BigEndian.Uint32(header[8:12]))
-	if compressedLen <= 0 || compressedLen > maxFrameBytes || rawLen <= 0 || rawLen > maxFrameBytes {
+	if compressedLen > maxFrameBytes || rawLen > maxFrameBytes {
+		return nil, false, fmt.Errorf("%w: frame sizes %d/%d", ErrTooLarge, compressedLen, rawLen)
+	}
+	if compressedLen <= 0 || rawLen <= 0 {
 		return nil, false, fmt.Errorf("%w: frame sizes %d/%d", ErrDamaged, compressedLen, rawLen)
 	}
 	compressed := make([]byte, compressedLen)
@@ -147,6 +154,9 @@ func readFrame(r io.Reader, dec *zstd.Decoder) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	raw, err := dec.DecodeAll(compressed, make([]byte, 0, rawLen))
+	if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+		return nil, false, fmt.Errorf("%w: %w", ErrTooLarge, err)
+	}
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrDamaged, err)
 	}

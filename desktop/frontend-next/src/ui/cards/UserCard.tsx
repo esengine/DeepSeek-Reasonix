@@ -1,16 +1,28 @@
-import { useEffect, useRef, useState } from "react";
-import type { Checkpoint, RewindPlan, RewindResult, RewindScope } from "../../port/port";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgentPort, Checkpoint, RewindPlan, RewindResult, RewindScope } from "../../port/port";
 import type { Item } from "../../state/session";
 import { RewindControl } from "./RewindControl";
+import { CopyButton } from "../CopyButton";
 import { reason } from "../../i18n/kernel";
 import { t } from "../../i18n";
 import { StudioIcon } from "../StudioIcon";
 import { messageSource } from "../source";
+import { touchKeyboard } from "../touchKeyboard";
+import { useFitHeight } from "../fitHeight";
 import { useViewer } from "../../state/viewer";
-import { useLabelFit } from "../labelfit";
+
+const SAVED_IMAGE = /(?:^|\s)@(\.reasonix\/attachments\/clipboard-[\d.-]+\.(?:png|jpe?g|gif|webp|bmp|svg))(?=\s|$)/gi;
+
+function SavedImage({ path, src }: { path: string; src: string }) {
+  const [failed, setFailed] = useState(false);
+  return <div className="user-image">
+    {failed ? <span>{t("图片不可用")}</span> : <img src={src} alt={path.split("/").at(-1)} loading="lazy" width={240} height={160} onError={() => setFailed(true)} />}
+  </div>;
+}
 
 export function UserCard({
   item,
+  port,
   cp,
   onResend,
   onPrepareRewind,
@@ -18,10 +30,11 @@ export function UserCard({
   onUndoRewind,
 }: {
   item: Extract<Item, { t: "user" }>;
+  port?: Pick<AgentPort, "workspaceImageURL">;
   cp?: Checkpoint;
   onResend?: (turn: number, text: string) => Promise<void>;
   onPrepareRewind?: (turn: number, scope: RewindScope) => Promise<RewindPlan>;
-  onCommitRewind?: (planId: string) => Promise<RewindResult>;
+  onCommitRewind?: (planId: string, text?: string) => Promise<RewindResult>;
   onUndoRewind?: (transactionId: string) => Promise<void>;
 }) {
   // A rewind needs a turn the kernel claimed, and a queued line has not
@@ -32,10 +45,9 @@ export function UserCard({
   const [failed, setFailed] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
   const source = messageSource(item.via, useViewer());
-  const row = useRef<HTMLDivElement>(null);
   const reopen = editable && draft === null;
   const rewind = !!(cp && onPrepareRewind && onCommitRewind && onUndoRewind);
-  const compact = useLabelFit(row, [item.steer ? t("插话") : "", source, reopen ? t("改写") : "", rewind ? t("回到这里") : ""].join("\n"));
+  const images = useMemo(() => [...new Set(Array.from(item.text.matchAll(SAVED_IMAGE), (match) => match[1]))], [item.text]);
 
   useEffect(() => {
     const el = box.current;
@@ -43,6 +55,8 @@ export function UserCard({
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
   }, [draft === null]);
+
+  useFitHeight(box, draft ?? "");
 
   const resend = () => {
     const text = (draft ?? "").trim();
@@ -62,32 +76,21 @@ export function UserCard({
         <span className="line" />
       </div>
       <div className="c">
-        <div className="hl user-hl" ref={row}>
+        {(item.steer || source) && <div className="hl user-hl">
           {/* It reached the model inside a turn already running, which is why
               there is no checkpoint on this row to rewind to. */}
           {item.steer && <span className="steermark">{t("插话")}</span>}
           {source && <span className="viamark">{source}</span>}
-          {/* The entry point lives on the turn it returns to, so there is no
-              list to read and no turn number to match up by eye. */}
-          {reopen && (
-            <button
-              className="reask-open"
-              data-action="turn.edit"
-              data-target={item.id}
-              title={t("改写这条消息并重新发送")}
-              aria-label={compact ? t("改写") : undefined}
-              onClick={() => setDraft(item.text)}
-            >
-              <StudioIcon name="edit" />{!compact && t("改写")}
-            </button>
-          )}
-          {rewind && (
-            <RewindControl cp={cp!} compact={compact} onPrepare={onPrepareRewind!} onCommit={onCommitRewind!} onUndo={onUndoRewind!} />
-          )}
-        </div>
+        </div>}
         <div className="out">
           {draft === null ? (
-            <div className="txt">{item.text}</div>
+            <>
+              {port && images.length > 0 && <div className="user-images">{images.map((path) => {
+                const src = port.workspaceImageURL(path);
+                return <SavedImage key={src} path={path} src={src} />;
+              })}</div>}
+              <div className="txt">{item.text}</div>
+            </>
           ) : (
             <div className="reask">
               <textarea
@@ -96,7 +99,7 @@ export function UserCard({
                 data-action-keydown="turn.resend"
                 data-target={item.id}
                 value={draft}
-                rows={Math.min(12, draft.split("\n").length + 1)}
+                rows={1}
                 readOnly={sending}
                 aria-label={t("改写这条消息")}
                 onChange={(ev) => setDraft(ev.target.value)}
@@ -105,7 +108,7 @@ export function UserCard({
                     ev.preventDefault();
                     ev.stopPropagation();
                     setDraft(null);
-                  } else if (ev.key === "Enter" && !ev.shiftKey && !ev.nativeEvent.isComposing) {
+                  } else if (ev.key === "Enter" && !ev.shiftKey && !touchKeyboard() && !ev.nativeEvent.isComposing) {
                     ev.preventDefault();
                     resend();
                   }
@@ -128,6 +131,19 @@ export function UserCard({
                 <span className="hint">{t("这一轮之后的记录会被丢弃")}</span>
               </div>
             </div>
+          )}
+        </div>
+        <div className="user-acts">
+          <CopyButton text={item.text} iconOnly showFeedback label={t("复制")} />
+          {reopen && (
+            <button type="button" className="reask-open" data-action="turn.edit" data-target={item.id}
+              title={t("改写这条消息并重新发送")} aria-label={t("改写")}
+              onClick={() => setDraft(item.text)}>
+              <StudioIcon name="edit" />
+            </button>
+          )}
+          {rewind && (
+            <RewindControl cp={cp!} compact onPrepare={onPrepareRewind!} onCommit={(planId) => onCommitRewind!(planId, item.text)} onUndo={onUndoRewind!} />
           )}
         </div>
       </div>

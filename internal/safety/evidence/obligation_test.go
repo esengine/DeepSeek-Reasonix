@@ -27,7 +27,7 @@ var (
 	opaqueWrite = Receipt{ToolName: "bash", Success: true, Write: true, Mutation: true,
 		MutationEvidence: MutationUnknown, Command: `python3 -c 'open("a","w")'`}
 	observedWrite = Receipt{ToolName: "bash", Success: true, Write: true, Mutation: true,
-		MutationEvidence: MutationProven, Paths: []string{"a.txt"}, Command: `python3 -c 'open("a","w")'`}
+		MutationEvidence: MutationProven, Paths: []string{"a.go"}, Command: `python3 -c 'open("a","w")'`}
 	passingCheck = Receipt{ToolName: "bash", Success: true, Command: "go test ./..."}
 )
 

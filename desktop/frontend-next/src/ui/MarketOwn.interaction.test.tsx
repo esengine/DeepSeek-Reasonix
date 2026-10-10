@@ -208,7 +208,8 @@ describe("the account's own packages", () => {
     const row = (await screen.findByText(pkg.name)).closest("li")!;
     await userEvent.click(row.querySelector<HTMLButtonElement>('[data-action="market.own-inspect"]')!);
     await userEvent.click(await screen.findByRole("button", { name: "安装" }));
-    await screen.findByText("Some actions failed");
+    await screen.findByText("有项目未安装成功，原因见下方。");
+    expect(screen.getByRole("alert").textContent).toContain("unavailable-server: server unavailable");
 
     const installed = document.querySelector(".mkt-installed")!;
     expect(installed.textContent).toContain("working-server");

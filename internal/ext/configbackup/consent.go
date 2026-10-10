@@ -91,6 +91,9 @@ var deniedKeyNames = []string{
 var deniedKeyPrefixes = []string{"REASONIX_", "LD_", "DYLD_", "GIT_"}
 
 func deniedKey(key string) bool {
+	if config.IsPrivateCredentialSlot(strings.TrimSpace(key)) {
+		return false
+	}
 	upper := strings.ToUpper(strings.TrimSpace(key))
 	if slices.Contains(deniedKeyNames, upper) {
 		return true

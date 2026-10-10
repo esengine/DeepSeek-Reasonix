@@ -181,6 +181,35 @@ porting to `studio`; do not open the same PR against both.
 5. Ensure `gofmt -l .` shows no changes
 6. Submit a pull request to that same branch
 
+## Pull request policy
+
+**Related changes.** If you have several related changes of one pattern, a
+tracking issue plus one pull request is easiest to review.
+
+**Issue first for features.** A change that adds behaviour rather than fixing a
+defect should link an issue the maintainers have agreed to before the work
+starts. A fix for a reproducible defect may open directly, with the failing test
+in the PR. Documentation-only and test-only PRs are reviewed at lower priority.
+
+**Review tiers.**
+
+- Changes under the `sensitive:` paths declared in `REASONIX.md` get a full
+  review plus a security review, regardless of author.
+- Every PR carries the four sections of the PR template: Cause, Blast radius,
+  Neighbouring behaviours tested, Why this layer.
+- The new test must fail without the change.
+- A UI change (`desktop/frontend-next/src` or the website pages) fills the
+  template's UI section: screenshots before and after, light and dark, wide
+  and phone width.
+- The same section carries the line "Entries moved, hidden or removed".
+- Hiding or removing a visible control needs a linked issue and a release-notes
+  line naming it, and updates `docs/STUDIO_PARITY.md` for a 1.x feature.
+- Review holds these; no check reads them.
+
+**Transparency.** The PR template has an optional checkbox for disclosing AI
+assistance. It is for transparency only and does not change how a change is
+reviewed.
+
 ## Reporting issues
 
 Open an issue on GitHub with:

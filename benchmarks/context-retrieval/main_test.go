@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"maps"
+	mathrand "math/rand"
 	"os/exec"
 	"slices"
 	"strings"
@@ -82,20 +85,46 @@ func TestNoAnswerLiteralExistsInTheRepository(t *testing.T) {
 	}
 }
 
-// Two runs of the same task must not share an answer, or one leaked run leaks
-// every future one.
-func TestInstancesDifferBetweenRuns(t *testing.T) {
+// A run's values are unpredictable from a previous run only if the live
+// generator is seeded from entropy. Comparing answers across two instances
+// cannot assert that: a task whose answer is a bounded number collides by
+// chance (1/8601 to 1/286 per task), so the check is on the seed source.
+func TestLiveRandDrawsFromEntropy(t *testing.T) {
+	a, b := liveRand(), liveRand()
+	for range 4 {
+		if a.Int63() != b.Int63() {
+			return
+		}
+	}
+	t.Fatal("two live generators produced the same stream: they are seeded alike")
+}
+
+// The source alone decides an instance: the same entropy gives the same
+// answers, different entropy gives different values.
+func TestLiveRandSourceDecidesTheInstance(t *testing.T) {
+	same := func() *mathrand.Rand {
+		rng, err := liveRandFrom(bytes.NewReader(bytes.Repeat([]byte{7}, 8)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rng
+	}
+	other, err := liveRandFrom(bytes.NewReader(bytes.Repeat([]byte{9}, 8)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := liveRandFrom(bytes.NewReader(nil)); err == nil {
+		t.Fatal("an empty entropy source was accepted")
+	}
 	for _, task := range allTasks() {
-		a, err := instantiateTask(task, liveRand())
-		if err != nil {
-			t.Fatal(err)
+		a, _ := instantiateTask(task, same())
+		b, _ := instantiateTask(task, same())
+		if !slices.Equal(a.AnswerMarkers, b.AnswerMarkers) || !maps.Equal(a.Vars, b.Vars) {
+			t.Errorf("%s: the same entropy gave different instances", task.ID)
 		}
-		b, err := instantiateTask(task, liveRand())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if slices.Equal(a.AnswerMarkers, b.AnswerMarkers) {
-			t.Errorf("%s produced the same answers twice: %v", task.ID, a.AnswerMarkers)
+		c, _ := instantiateTask(task, other)
+		if maps.Equal(a.Vars, c.Vars) {
+			t.Errorf("%s: different entropy gave the same values", task.ID)
 		}
 	}
 }

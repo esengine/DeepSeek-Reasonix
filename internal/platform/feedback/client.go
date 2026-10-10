@@ -11,13 +11,17 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"reasonix/internal/safety/redirectguard"
 	"strconv"
 	"strings"
 	"time"
+
+	"reasonix/internal/contract/provider"
+	"reasonix/internal/safety/redirectguard"
 )
 
 const maxResponseBytes = 1 << 20
+
+var errTransientResponse = fmt.Errorf("%w: unrecognised response", ErrUnavailable)
 
 // wireAttachment and wireSubmit are the worker's POST /v1/feedback body.
 type wireAttachment struct {
@@ -43,11 +47,13 @@ type wireReceipt struct {
 	Status       Status    `json:"status"`
 	InstallToken string    `json:"installToken"`
 	CreatedAt    time.Time `json:"createdAt"`
+	UnderReview  bool      `json:"underReview"`
 }
 
 type wireError struct {
 	Error struct {
-		Code string `json:"code"`
+		Code   string          `json:"code"`
+		Params json.RawMessage `json:"params"`
 	} `json:"error"`
 }
 
@@ -82,7 +88,7 @@ func (s *Service) post(ctx context.Context, body wireSubmit, token string) (wire
 			req.Header.Set("X-Install-Token", token)
 		}
 		return s.do(req, &out)
-	})
+	}, true)
 	return out, err
 }
 
@@ -95,7 +101,7 @@ func (s *Service) get(ctx context.Context, id, token string, out any) error {
 		req.Header.Set("X-Install-Id", id)
 		req.Header.Set("X-Install-Token", token)
 		return s.do(req, out)
-	})
+	}, false)
 }
 
 // postReply sends one reply. It is never retried: replies carry no idempotency
@@ -121,13 +127,14 @@ func (s *Service) postReply(ctx context.Context, id, token, receipt, body string
 
 // do performs one request and turns whatever came back into a sentinel.
 func (s *Service) do(req *http.Request, out any) error {
+	provider.ApplyClientIdentity(req)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		if cerr := req.Context().Err(); cerr != nil {
 			return cerr
 		}
 		if errors.Is(err, redirectguard.ErrRefused) {
-			return ErrUnavailable
+			return fmt.Errorf("%w: %w", ErrUnavailable, redirectguard.ErrRefused)
 		}
 		return ErrOffline
 	}
@@ -135,7 +142,7 @@ func (s *Service) do(req *http.Request, out any) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		if json.Unmarshal(body, out) != nil {
-			return ErrUnavailable
+			return errTransientResponse
 		}
 		return nil
 	}
@@ -153,23 +160,52 @@ func refusalOf(resp *http.Response, body []byte) error {
 		case http.StatusRequestEntityTooLarge:
 			sentinel = ErrTooLarge
 		default:
+			if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+				return errTransientResponse
+			}
 			return ErrUnavailable
 		}
 	}
-	if errors.Is(sentinel, ErrRateLimited) {
-		secs, _ := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
-		return &RateLimitedError{After: time.Duration(secs) * time.Second}
+	if !errors.Is(sentinel, ErrRateLimited) && !errors.Is(sentinel, ErrReplyLimit) && !errors.Is(sentinel, ErrBusy) {
+		return sentinel
 	}
-	return sentinel
+	return limitOf(sentinel, resp, we)
 }
 
-// withRetry repeats only a request that got no response at all. Any answer,
-// including an uncoded 5xx, is the service's word and is returned as it is.
-func (s *Service) withRetry(ctx context.Context, call func() error) error {
+// limitOf reads the window from the body's typed params and the wait from the
+// Retry-After header, each only as well-formed as it arrived: a field that does
+// not parse is absent, never a reason to lose the refusal itself.
+func limitOf(sentinel error, resp *http.Response, we wireError) error {
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(we.Error.Params, &fields)
+	out := &LimitError{Kind: sentinel}
+	var name, at string
+	if json.Unmarshal(fields["limit"], &name) == nil {
+		out.Limit = Limit(name)
+	}
+	if json.Unmarshal(fields["resetsAt"], &at) == nil {
+		if t, err := time.Parse(time.RFC3339, at); err == nil {
+			out.ResetsAt = t
+		}
+	}
+	var secs int
+	if json.Unmarshal(fields["retryAfterSeconds"], &secs) != nil || secs <= 0 {
+		secs, _ = strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+	}
+	if secs > 0 {
+		out.After = time.Duration(secs) * time.Second
+	}
+	return out
+}
+
+// Only submits carry the idempotency key that makes replaying an ambiguous
+// response safe; a transient answer gets at most one retry.
+func (s *Service) withRetry(ctx context.Context, call func() error, submit bool) error {
 	var err error
 	for i := 0; ; i++ {
 		err = call()
-		if !errors.Is(err, ErrOffline) || i >= len(s.backoff) {
+		retry := errors.Is(err, ErrOffline) || (submit && i == 0 && errors.Is(err, errTransientResponse))
+		if !retry || i >= len(s.backoff) {
 			return err
 		}
 		select {

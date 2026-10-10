@@ -84,8 +84,11 @@ it.each(["first-exception", "issue-exception", "all-issues", "all-ready"])("noti
   const completed = outcome === "all-ready" || outcome === "all-issues";
   expect(install).toHaveBeenCalledTimes(completed ? 3 : outcome === "first-exception" ? 1 : 2);
   expect(onInstalled).toHaveBeenCalledTimes(outcome === "all-ready" ? 1 : 0);
-  if (completed) expect(screen.getByRole("button", { name: "完成" })).toBeTruthy();
-  else expect(screen.getByText(failure)).toBeTruthy();
+  if (outcome === "all-ready") expect(screen.getByRole("button", { name: "完成" })).toBeTruthy();
+  else if (outcome === "all-issues") {
+    expect(screen.queryByRole("button", { name: "完成" })).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "接入" }).disabled).toBe(false);
+  } else expect(screen.getByText(failure)).toBeTruthy();
 });
 
 it("refreshes the current managed project after an unmounted batch partially finishes", async () => {

@@ -735,6 +735,109 @@ func TestLoadForEditKeepsLegacyOpenCodeGoKimiK3CatalogMigrationInMemoryUntilSave
 	}
 }
 
+// shippedGlmEntry is a curated GLM entry still carrying the catalog it shipped
+// before GLM-5.3 was added to the preset.
+func shippedGlmEntry(id, baseURL string, models []string) ProviderEntry {
+	return ProviderEntry{
+		Name:          id,
+		Kind:          "openai",
+		BaseURL:       baseURL,
+		Models:        append([]string(nil), models...),
+		Default:       "glm-5.2",
+		APIKeyEnv:     "GLM_API_KEY",
+		ContextWindow: 1_000_000,
+		PresetID:      id,
+	}
+}
+
+func TestShippedPresetUpgradeGlm53CatalogMovesTheShippedShapesForward(t *testing.T) {
+	cn := shippedGlmEntry("glm-cn", "https://open.bigmodel.cn/api/paas/v4", legacyGlmAPIModels)
+	global := shippedGlmEntry("zai-global", "https://api.z.ai/api/paas/v4", legacyGlmAPIModels)
+	global.PresetID = "" // an install from before entries carried a preset id
+	planCN := shippedGlmEntry("glm-coding-plan-cn", "https://open.bigmodel.cn/api/coding/paas/v4", legacyGlmCodingModels)
+	planGlobal := shippedGlmEntry("zai-coding-plan-global", "https://api.z.ai/api/coding/paas/v4", legacyGlmCodingModels)
+
+	c := &Config{Providers: []ProviderEntry{cn, global, planCN, planGlobal}}
+	if !upgradeShippedPresets(c) {
+		t.Fatal("the pre-5.3 GLM catalogs were not upgraded")
+	}
+	for i, want := range [][]string{glmAPIModels, glmAPIModels, glmCodingModels, glmCodingModels} {
+		got := &c.Providers[i]
+		if !stringSlicesEqual(got.Models, want) {
+			t.Fatalf("provider %d catalog = %v, want %v", i, got.Models, want)
+		}
+		if !got.HasModel("glm-5.3") || !got.HasModel("glm-5.3-flash") {
+			t.Fatalf("provider %d did not gain GLM-5.3: %v", i, got.Models)
+		}
+		if got.Default != "glm-5.2" || got.ContextWindow != 1_000_000 || got.APIKeyEnv != "GLM_API_KEY" {
+			t.Fatalf("provider %d unrelated edits were not preserved: %+v", i, got)
+		}
+	}
+	if upgradeShippedPresets(c) {
+		t.Fatalf("a second pass changed the upgraded entries again: %+v", c.Providers)
+	}
+}
+
+func TestShippedPresetUpgradeGlm53LeavesCuratedCatalogsAlone(t *testing.T) {
+	for name, edit := range map[string]func(*ProviderEntry){
+		"catalog trimmed":   func(e *ProviderEntry) { e.Models = append([]string(nil), legacyGlmAPIModels[:3]...) },
+		"catalog extended":  func(e *ProviderEntry) { e.Models = append(e.Models, "private-glm") },
+		"single model":      func(e *ProviderEntry) { e.Model = "glm-5.2" },
+		"other endpoint":    func(e *ProviderEntry) { e.BaseURL = "https://relay.example.com/v1" },
+		"no preset id":      func(e *ProviderEntry) { e.PresetID, e.Name = "", "my-glm" },
+		"anthropic dialect": func(e *ProviderEntry) { e.Kind = "anthropic" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := shippedGlmEntry("glm-cn", "https://open.bigmodel.cn/api/paas/v4", legacyGlmAPIModels)
+			edit(&e)
+			c := &Config{Providers: []ProviderEntry{e}}
+			if upgradeShippedPresets(c) {
+				t.Fatalf("a curated GLM entry was upgraded: %+v", c.Providers[0])
+			}
+			if c.Providers[0].HasModel("glm-5.3") {
+				t.Fatalf("a curated GLM entry gained GLM-5.3: %v", c.Providers[0].Models)
+			}
+		})
+	}
+}
+
+func TestLoadForEditPersistsTheGlm53CatalogMove(t *testing.T) {
+	path := filepath.Join(testenv.TempDir(t), "config.toml")
+	cfg := Default()
+	preset, ok := CuratedProviderPreset("glm-cn")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatal("missing glm-cn preset")
+	}
+	entry := preset.Entries[0]
+	entry.Models = append([]string(nil), legacyGlmAPIModels...)
+	cfg.Providers = append(cfg.Providers, entry)
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+
+	loaded := LoadForEdit(path)
+	if got, ok := loaded.Provider("glm-cn"); !ok || !got.HasModel("glm-5.3") {
+		t.Fatalf("loaded glm-cn = %+v, want the 5.3 catalog", got)
+	}
+	var disk Config
+	if _, err := toml.DecodeFile(path, &disk); err != nil {
+		t.Fatalf("decode config after read-only load: %v", err)
+	}
+	if persisted, ok := disk.Provider("glm-cn"); !ok || persisted.HasModel("glm-5.3") {
+		t.Fatalf("read-only LoadForEdit rewrote glm-cn = %+v, want the legacy catalog on disk", persisted)
+	}
+	if err := loaded.SaveTo(path); err != nil {
+		t.Fatalf("explicit SaveTo: %v", err)
+	}
+	disk = Config{}
+	if _, err := toml.DecodeFile(path, &disk); err != nil {
+		t.Fatalf("decode explicitly saved config: %v", err)
+	}
+	if persisted, ok := disk.Provider("glm-cn"); !ok || !persisted.HasModel("glm-5.3") {
+		t.Fatalf("persisted glm-cn = %+v, want the 5.3 catalog", persisted)
+	}
+}
+
 func TestShippedPresetUpgradeOpenCodeGoCatalogPreservesVisionChoices(t *testing.T) {
 	base := ProviderEntry{
 		Name:     "opencode-go",
@@ -1724,7 +1827,7 @@ func TestNormalizeLegacyMimoProviderCatalogsBackfillsOfficialMimoAPIStub(t *test
 	if !ok {
 		t.Fatal("mimo-api provider missing")
 	}
-	wantModels := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
+	wantModels := []string{"mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-v2.6-pro-ultraspeed", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
 	if !reflect.DeepEqual(p.ModelList(), wantModels) {
 		t.Fatalf("mimo-api models = %v, want %v", p.ModelList(), wantModels)
 	}
@@ -1777,7 +1880,7 @@ func TestNormalizeLegacyMimoProviderCatalogsBackfillsOfficialMimoTokenPlanStub(t
 	if !ok {
 		t.Fatal("mimo-token-plan provider missing")
 	}
-	if !reflect.DeepEqual(p.ModelList(), []string{"mimo-v2.5-pro", "mimo-v2.5"}) {
+	if !reflect.DeepEqual(p.ModelList(), []string{"mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-v2.5-pro", "mimo-v2.5"}) {
 		t.Fatalf("mimo-token-plan models = %v, want token plan catalog", p.ModelList())
 	}
 	if p.Price == nil || p.Price.Currency != "CNY" {

@@ -21,6 +21,10 @@ func explainError(err error) error {
 	if err == nil {
 		return nil
 	}
+	var recoveryErr *provider.ContinuationRecoveryError
+	if errors.As(err, &recoveryErr) {
+		return &provider.ContinuationRecoveryError{Err: explainError(recoveryErr.Err)}
+	}
 	if provider.IsStreamInterrupted(err) {
 		return fmt.Errorf("model stream interrupted after recovery attempts: %s. The partial response was kept; retry or ask Reasonix to continue", err.Error())
 	}
@@ -44,11 +48,6 @@ func explainError(err error) error {
 			return errors.New(msg)
 		}
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
-		// The status says only that the body was refused. When the client that
-		// built it named what it left out, that answer is the actionable one.
-		if hint := i18n.M.ProviderHintMessage(string(apiErr.Hint)); hint != "" {
-			msg = hint
-		}
 		if msg == "" {
 			return err
 		}

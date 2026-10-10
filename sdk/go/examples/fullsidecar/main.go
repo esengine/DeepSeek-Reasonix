@@ -173,7 +173,7 @@ func (p *plugin) interceptTool(_ context.Context, payload json.RawMessage) (*ext
 	case rewrittenTool:
 		args := map[string]any{}
 		if strings.TrimSpace(call.Arguments) != "" {
-			if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
+			if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil || args == nil {
 				return extension.Continue(), nil
 			}
 		}
@@ -224,7 +224,7 @@ func (p *plugin) observe(ctx context.Context, event string, _ json.RawMessage) {
 	}
 	if err := p.ui.PublishCard(ctx, session.SessionID, session.Generation, "fullsidecar-card", extension.UICardPayload{
 		Title:    "fullsidecar",
-		Markdown: "Reference extension: try the **demo** action or the `/fs ` input trigger.",
+		Markdown: "Reference extension: use the **Run demo** action to open the greeting form.",
 		Fields:   []extension.UIKeyValue{{Key: "plugin", Value: p.id}, {Key: "provider", Value: fakeRef(p.id)}},
 		Actions:  []extension.UIActionRef{{ActionID: "demo", Label: "Run demo"}},
 	}); err != nil {

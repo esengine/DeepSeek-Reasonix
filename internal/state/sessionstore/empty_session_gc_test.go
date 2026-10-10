@@ -94,3 +94,47 @@ func TestReconcileCleanupPendingReclaimsEmptySessions(t *testing.T) {
 		t.Errorf("session with a user turn was removed: %v", err)
 	}
 }
+
+func TestReconcileSessionDirDeletesUnderTheRemovalGuard(t *testing.T) {
+	dir := testenv.TempDir(t)
+	path := writeAgedSession(t, dir, "empty.jsonl", toolOnlyTranscript, 7*24*time.Hour)
+	var heldDuring bool
+	err := reconcileSessionDir(dir, func(info CleanupPendingInfo) error {
+		if lease, err := TryAcquireSessionLease(info.SessionPath); err == nil {
+			lease.Release()
+		} else {
+			heldDuring = true
+		}
+		return os.Remove(info.SessionPath)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !heldDuring {
+		t.Fatal("cleanup ran without the removal guard, so a session opened meanwhile could be deleted")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("empty session survived: %v", err)
+	}
+}
+
+func TestReclaimEmptySessionSkipsOneOpenedSinceTheListing(t *testing.T) {
+	dir := testenv.TempDir(t)
+	path := writeAgedSession(t, dir, "empty.jsonl", toolOnlyTranscript, 7*24*time.Hour)
+	lease, err := TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	called := false
+	err = reclaimEmptySession(path, time.Now(), func(CleanupPendingInfo) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("a busy session is skipped, not an error: %v", err)
+	}
+	if called {
+		t.Fatal("deleted a session whose lease is held")
+	}
+}

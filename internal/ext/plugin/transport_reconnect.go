@@ -266,13 +266,13 @@ func (t *reconnectingTransport) rebindProgressLocked(next transport) {
 	}
 }
 
-func (t *reconnectingTransport) startupStderr() string {
+func (t *reconnectingTransport) startupStderr() int {
 	active, err := t.current()
 	if err != nil {
-		return ""
+		return 0
 	}
 	if diagnostic, ok := active.(startupDiagnosticTransport); ok {
 		return diagnostic.startupStderr()
 	}
-	return ""
+	return 0
 }

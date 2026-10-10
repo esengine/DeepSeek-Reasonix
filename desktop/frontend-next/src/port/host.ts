@@ -14,6 +14,9 @@ export interface HostInfo {
 }
 
 export interface HostPort {
+  /** Whether this page runs inside the desktop shell, as opposed to a browser
+   *  tab, where the browser's own keys (zoom among them) are the reader's. */
+  inShell(): boolean;
   describe(): Promise<HostInfo>;
   minimiseWindow(): void;
   toggleMaximiseWindow(): void;
@@ -38,6 +41,9 @@ export interface HostPort {
    *  root. The shell asks the kernel where that is and selects only the answer;
    *  null once shown, otherwise why it was not. */
   revealPath(base: string, path: string): Promise<Refusal | null>;
+  /** Show a project the sidebar lists, which needs no pane. The hub answers
+   *  where it is and refuses any folder it does not list. */
+  revealWorkspace(root: string): Promise<Refusal | null>;
   /** Whether this shell draws the agent's browser pages inside the window. */
   drawsBrowserViews(): boolean;
   /** Draw one of the agent's pages over rect, in on-screen coordinates, and
@@ -48,8 +54,8 @@ export interface HostPort {
    *  a picture of what it showed at that moment, or "" when none was taken. */
   freezeBrowserView(): Promise<string>;
   controlBrowserView(target: string, action: BrowserControl): void;
-  /** Load what the person typed. false when the shell refused the address. */
-  navigateBrowserView(target: string, address: string): Promise<boolean>;
+  /** Load what the person typed. "" when it loads, else why the shell refused it. */
+  navigateBrowserView(target: string, address: string): Promise<BrowserRefusal>;
   /** Why a page did not load, or null once another load starts. */
   onBrowserLoadState(listener: (state: BrowserLoadState) => void): () => void;
   /** A page or a proxy asking for a login; answered with answerBrowserLogin. */
@@ -59,6 +65,10 @@ export interface HostPort {
   /** Proceed past the certificate this page was refused for, for this run. */
   trustBrowserCertificate(target: string): Promise<boolean>;
 }
+
+/** Why the shell will not load a typed address: a scheme it never opens, or a
+ *  file on another machine. */
+export type BrowserRefusal = "" | "scheme" | "network_file";
 
 /** A kernel refusal as the shell hands it back: the code, and English fallback. */
 export interface Refusal {
@@ -127,11 +137,12 @@ interface ElectronBridge {
   saveBytes(name: string, bytes: Uint8Array): Promise<string>;
   pickFolder(startIn: string): Promise<string>;
   revealPath?(base: string, path: string): Promise<Refusal | null>;
+  revealWorkspace?(root: string): Promise<Refusal | null>;
   showBrowserView?(target: string, rect: ViewRect): Promise<void>;
   hideBrowserView?(): Promise<void>;
   freezeBrowserView?(): Promise<string>;
   controlBrowserView?(target: string, action: string): Promise<void>;
-  navigateBrowserView?(target: string, address: string): Promise<boolean>;
+  navigateBrowserView?(target: string, address: string): Promise<BrowserRefusal>;
   onBrowserLoadState?(listener: (state: BrowserLoadState) => void): () => void;
   onBrowserLogin?(listener: (ask: BrowserLogin) => void): () => void;
   answerBrowserLogin?(id: string, username: string, password: string): Promise<void>;
@@ -148,6 +159,9 @@ function normalise(platform: string): string {
 }
 
 class ElectronHost implements HostPort {
+  inShell() {
+    return true;
+  }
   constructor(private readonly api: ElectronBridge) {}
   describe() {
     return Promise.resolve({
@@ -186,10 +200,13 @@ class ElectronHost implements HostPort {
     return this.api.pickFolder(startIn);
   }
   revealsFiles() {
-    return typeof this.api.revealPath === "function";
+    return typeof this.api.revealPath === "function" && typeof this.api.revealWorkspace === "function";
   }
   revealPath(base: string, path: string) {
     return this.api.revealPath?.(base, path) ?? Promise.resolve({ error: "this shell cannot show files" });
+  }
+  revealWorkspace(root: string) {
+    return this.api.revealWorkspace?.(root) ?? Promise.resolve({ error: "this shell cannot show files" });
   }
   // A shell older than the verbs has no views to draw, and says so by lacking them.
   drawsBrowserViews() {
@@ -210,7 +227,7 @@ class ElectronHost implements HostPort {
     void this.api.controlBrowserView?.(target, action);
   }
   navigateBrowserView(target: string, address: string) {
-    return this.api.navigateBrowserView?.(target, address) ?? Promise.resolve(false);
+    return this.api.navigateBrowserView?.(target, address) ?? Promise.resolve<BrowserRefusal>("scheme");
   }
   onBrowserLoadState(listener: (state: BrowserLoadState) => void) {
     return this.api.onBrowserLoadState?.(listener) ?? (() => {});
@@ -227,6 +244,9 @@ class ElectronHost implements HostPort {
 }
 
 class BrowserHost implements HostPort {
+  inShell() {
+    return false;
+  }
   describe() {
     return Promise.resolve({ shell: "browser" as const, platform: "", titleBar: false });
   }
@@ -257,6 +277,9 @@ class BrowserHost implements HostPort {
   revealPath() {
     return Promise.resolve({ error: "a browser tab cannot show files" });
   }
+  revealWorkspace() {
+    return Promise.resolve({ error: "a browser tab cannot show files" });
+  }
   drawsBrowserViews() {
     return false;
   }
@@ -267,7 +290,7 @@ class BrowserHost implements HostPort {
   }
   controlBrowserView() {}
   navigateBrowserView() {
-    return Promise.resolve(false);
+    return Promise.resolve<BrowserRefusal>("scheme");
   }
   onBrowserLoadState() {
     return () => {};

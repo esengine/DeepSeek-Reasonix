@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"reasonix/internal/base/testenv"
+	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/session/control"
 	"reasonix/internal/state/sessionstore"
 )
 
@@ -63,5 +65,65 @@ func TestRemovingAConversationRemovesItsVersions(t *testing.T) {
 	}
 	if _, err := os.Stat(version); !os.IsNotExist(err) {
 		t.Fatalf("the version outlived its conversation: %v", err)
+	}
+}
+
+// paneOn adopts a pane working in root that holds the session at path.
+func paneOn(t *testing.T, h *Hub, root, path string) {
+	t.Helper()
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: SessionDirFor(root), WorkspaceRoot: root})
+	ctrl.SetSessionPath(path)
+	rt, err := h.Adopt(New(ctrl, bc, config.ServeConfig{}), bc)
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Close(rt.ID) })
+}
+
+func countPath(rows []treeSession, path string) int {
+	n := 0
+	for _, row := range rows {
+		if row.Path == path {
+			n++
+		}
+		for _, v := range row.Versions {
+			if v.Path == path {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// A version a pane has open is one row of its own, not also a version under its
+// conversation (the session lease keeps a second pane off it).
+func TestSidebarListsAnOpenVersionOnce(t *testing.T) {
+	root, parentPath, version := seedVersionedSession(t)
+	h := NewHub(HubOptions{})
+	paneOn(t, h, root, version)
+	rows := h.workspaceSessions(root, h.openSessions())
+	if len(rows) != 2 || countPath(rows, version) != 1 || countPath(rows, parentPath) != 1 {
+		t.Fatalf("rows = %+v, want the conversation and the open version once each", rows)
+	}
+	for _, row := range rows {
+		if len(row.Versions) != 0 {
+			t.Fatalf("versions = %+v, want none", row.Versions)
+		}
+		if row.Path == version && row.RuntimeID == "" {
+			t.Fatal("the open version lost its pane")
+		}
+	}
+}
+
+// A pane in another folder gives the version no row here, so it stays under its
+// conversation instead of vanishing from the tree.
+func TestSidebarKeepsAVersionOpenedFromAnotherRoot(t *testing.T) {
+	root, parentPath, version := seedVersionedSession(t)
+	h := NewHub(HubOptions{})
+	paneOn(t, h, testenv.TempDir(t), version)
+	rows := h.workspaceSessions(root, h.openSessions())
+	if len(rows) != 1 || rows[0].Path != parentPath || countPath(rows, version) != 1 || len(rows[0].Versions) != 1 {
+		t.Fatalf("rows = %+v, want the version under its conversation", rows)
 	}
 }

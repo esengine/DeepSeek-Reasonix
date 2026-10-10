@@ -196,7 +196,7 @@ func RemoveCandidate(ctx context.Context, snap Snapshot, c Candidate) error {
 // workingTree writes repo's working state as a tree through a private copy of
 // its index, so only changed files are hashed and the real index is untouched.
 func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
-	indexPath, _, err := runGit(ctx, repo, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	indexPath, _, err := runGit(ctx, repo, "rev-parse", "--git-path", "index")
 	if err != nil {
 		return "", fmt.Errorf("locate Git index: %w", err)
 	}
@@ -206,7 +206,11 @@ func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
 	}
 	defer os.RemoveAll(dir)
 	private := filepath.Join(dir, "index")
-	if err := copyFile(strings.TrimSpace(indexPath), private); err != nil && !os.IsNotExist(err) {
+	indexPath = strings.TrimSpace(indexPath)
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(repo.Dir, indexPath)
+	}
+	if err := copyFile(indexPath, private); err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("copy Git index: %w", err)
 	}
 	env := []string{"GIT_INDEX_FILE=" + private}

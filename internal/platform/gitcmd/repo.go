@@ -44,10 +44,14 @@ func Open(ctx context.Context, dir string) (Repo, error) {
 	if len(lines) != 3 {
 		return Repo{}, fmt.Errorf("%w: %s: unexpected rev-parse output %q", ErrNotRepository, abs, out)
 	}
+	// Git before 2.31 has no --path-format, so spelling is normalised here.
 	resolve := func(p string) string {
 		p = filepath.FromSlash(strings.TrimRight(p, "\r"))
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(abs, p)
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			p = real
 		}
 		return filepath.Clean(p)
 	}
@@ -146,8 +150,9 @@ func (r Repo) CommandWithConfig(ctx context.Context, extraConfig []string, args 
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		cmd := newCommand(ctx, Args(r.Dir, extraConfig, args...), nil)
-		cmd.Err = ErrNotRepository
+		screened, refused := screen(args)
+		cmd := newCommand(ctx, Args(r.Dir, extraConfig, screened...), nil)
+		cmd.Err = errors.Join(ErrNotRepository, refused)
 		return cmd
 	}
 	return build(ctx, r.Dir, r.env(), extraConfig, args)

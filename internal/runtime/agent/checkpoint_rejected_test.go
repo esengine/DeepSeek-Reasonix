@@ -10,7 +10,7 @@ import (
 // wording. It now travels as a field, so rewording the sentinel cannot quietly
 // turn a reason into the whole error.
 func TestDeclineReasonSurvivesRewordingTheSentinel(t *testing.T) {
-	err := rejectCheckpoint("candidate %d still at or above trigger %d", 900, 800)
+	err := rejectCheckpoint(NoopCandidateAboveTrigger, "candidate %d still at or above trigger %d", 900, 800)
 	if !IsCompactionDeclined(err) {
 		t.Fatal("a rejection did not read as one")
 	}

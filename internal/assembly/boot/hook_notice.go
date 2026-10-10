@@ -30,6 +30,9 @@ func hookNoticeCode(n hook.Notice) string {
 	}
 	switch n.Decision {
 	case hook.DecisionBlock:
+		if n.Cause != nil {
+			return event.NoticeCodeHookUnevaluable
+		}
 		return event.NoticeCodeHookBlocked
 	case hook.DecisionError:
 		return event.NoticeCodeHookFailed

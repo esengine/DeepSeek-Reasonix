@@ -24,8 +24,8 @@ const (
 // Tokens is the pack-facing vocabulary; a frontend maps it onto its own CSS
 // variables. Absent on purpose: ok/warn/err/net/deleg carry meaning rather than
 // taste, a pill radius is a shape, and a stretched transition would make the app
-// feel broken. Floating, code and sunken grounds and syntax colours are taste,
-// so a pack sets them instead of leaving them on the default palette.
+// feel broken. link, brand, halo and labelAgent are decoration — a hyperlink, the
+// product accent, an interaction halo, an agent's name — so they are taste.
 var Tokens = map[string]TokenKind{
 	"bg":          TokenColour,
 	"bgSoft":      TokenColour,
@@ -39,6 +39,10 @@ var Tokens = map[string]TokenKind{
 	"fgStrong":    TokenColour,
 	"accent":      TokenColour,
 	"accentFg":    TokenColour,
+	"link":        TokenColour,
+	"brand":       TokenColour,
+	"halo":        TokenColour,
+	"labelAgent":  TokenColour,
 	"float":       TokenColour,
 	"floatHi":     TokenColour,
 	"codeBg":      TokenColour,

@@ -39,4 +39,15 @@ var (
 
 	// It runs; it never reported a port. The launch is what to look at.
 	ErrServeDidNotStart = errors.New("bootstrap: serve never reported a port")
+
+	// A serve is already running for this workspace and resolves providers
+	// differently than this connect wants — over a broker, or on its own
+	// credentials. Replacing it would end whatever another window or a
+	// `reasonix remote serve start` is doing on it, so the connect stops here.
+	ErrServeProviderMismatch = errors.New("bootstrap: a serve already running for this workspace resolves providers differently; match its provider setting or stop it first")
+
+	// A serve holds this workspace's port and pid files but cannot be driven
+	// from here — its token file is gone or its address unreadable — and it was
+	// not started by this connect, so it is not this connect's to stop.
+	ErrServeNotAttachable = errors.New("bootstrap: a serve already running for this workspace cannot be attached to; stop that process first")
 )

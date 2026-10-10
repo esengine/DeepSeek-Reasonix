@@ -71,7 +71,8 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	if len(writeRoots) == 0 && w.Dir != "" {
 		writeRoots = []string{w.Dir}
 	}
-	roots := realRoots(writeRoots)
+	roots := append(realRoots(writeRoots), networkSpellings(append([]string{w.Dir}, writeRoots...))...)
+	netRoots := networkRoots(w.Dir, w.WriteRoots, w.ReadRoots)
 	forbidRoots := realRoots(w.ForbidReadRoots)
 	readRoots := realRoots(w.ReadRoots)
 	if len(w.ReadRoots) > 0 && len(readRoots) == 0 {
@@ -80,7 +81,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	}
 
 	overrides := map[string]tool.Tool{
-		"read_file":     readFile{workDir: w.Dir, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
+		"read_file":     readFile{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
 		"write_file":    writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay, receipt: w.FileWriteReceipt},
 		"edit_file":     editFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
 		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
@@ -88,11 +89,11 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
 		"delete_range":  deleteRange{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
 		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
-		"code_index":    codeIndex{workDir: w.Dir, readRoots: readRoots, forbidRoots: forbidRoots},
+		"code_index":    codeIndex{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, forbidRoots: forbidRoots},
 		"bash":          bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout, guard: w.SessionGuard, terminal: w.Terminal, sessionTemp: w.SessionTemp, paths: w.ReadPaths},
-		"ls":            listDir{workDir: w.Dir, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"glob":          globTool{workDir: w.Dir, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"grep":          grepTool{workDir: w.Dir, readRoots: readRoots, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp},
+		"ls":            listDir{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
+		"glob":          globTool{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
+		"grep":          grepTool{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp},
 		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
 	}
 	all := tool.Builtins()

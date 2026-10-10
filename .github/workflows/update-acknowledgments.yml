@@ -33,6 +33,6 @@ jobs:
           body: |
             Refreshes the README acknowledgments tables from the GitHub contributors API.
 
-            - Source: `repos/esengine/DeepSeek-Reasonix/contributors?per_page=20&anon=1`
-            - Anonymous contributors are shown without email addresses.
+            - Source: `repos/esengine/DeepSeek-Reasonix/contributors?per_page=50&anon=1`
+            - The repository owner, declared aliases, tool identities, bots and entries without a GitHub login are left out (`scripts/credit-identities.json`).
           labels: documentation

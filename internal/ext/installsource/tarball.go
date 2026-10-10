@@ -59,10 +59,10 @@ func (t *Tool) fetchGitHubTarball(ctx context.Context, src githubRepoSource, dir
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "", newErr(ErrAuthRequired, "%s: HTTP %d", sourceURL, resp.StatusCode)
+		return "", &sourceHTTPError{sentinel: ErrAuthRequired, status: resp.StatusCode}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", newErr(ErrSourceUnreadable, "%s: HTTP %d", sourceURL, resp.StatusCode)
+		return "", &sourceHTTPError{sentinel: ErrSourceUnreadable, status: resp.StatusCode}
 	}
 	root, err := unpackTarball(io.LimitReader(resp.Body, tarballFetchLimit), dir)
 	if err != nil {
@@ -111,11 +111,11 @@ func unpackTarball(r io.Reader, dir string) (string, error) {
 			if name == root {
 				continue
 			}
-			return "", newErr(ErrUnsupportedKind, "tarball entry %q escapes the archive root %q", head.Name, root)
+			return "", &sourceBoundaryError{code: sourceEscape}
 		}
 		rel := filepath.FromSlash(rest)
 		if !filepath.IsLocal(rel) {
-			return "", newErr(ErrUnsupportedKind, "tarball entry %q escapes the extraction directory", head.Name)
+			return "", &sourceBoundaryError{code: sourceEscape}
 		}
 		dest := filepath.Join(dir, rel)
 		if head.Typeflag == tar.TypeDir {
@@ -126,7 +126,7 @@ func unpackTarball(r io.Reader, dir string) (string, error) {
 		}
 		files++
 		if files > tarballFileLimit {
-			return "", newErr(ErrSourceUnreadable, "tarball holds more than %d files", tarballFileLimit)
+			return "", &sourceBoundaryError{code: sourceFileCount, limit: tarballFileLimit}
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return "", newErr(ErrSourceUnreadable, "create %s: %v", filepath.Dir(rel), err)
@@ -137,7 +137,7 @@ func unpackTarball(r io.Reader, dir string) (string, error) {
 		}
 		total += written
 		if total > tarballTotalLimit {
-			return "", newErr(ErrSourceUnreadable, "tarball expands past %d bytes", tarballTotalLimit)
+			return "", &sourceBoundaryError{code: sourceTotalSize, limit: tarballTotalLimit}
 		}
 	}
 	if root == "" {
@@ -165,7 +165,7 @@ func writeTarEntry(dest string, r io.Reader, mode int64) (int64, error) {
 		return written, newErr(ErrSourceUnreadable, "write %s: %v", filepath.Base(dest), err)
 	}
 	if written > tarballEntryLimit {
-		return written, newErr(ErrSourceUnreadable, "%s is larger than %d bytes", filepath.Base(dest), tarballEntryLimit)
+		return written, &sourceBoundaryError{code: sourceEntrySize, limit: tarballEntryLimit}
 	}
 	return written, nil
 }

@@ -68,7 +68,7 @@ func renderDesktopSection(b *strings.Builder, c *Config) {
 	if pinned := c.DesktopPinnedVersion(); pinned != "" {
 		fmt.Fprintf(b, "pinned_version = %q   # desktop: hold this machine on a release; empty follows the catalog\n", pinned)
 	}
-	fmt.Fprintf(b, "telemetry = %v   # desktop: anonymous launch ping + scrubbed next-launch native crash diagnostics + per-package market install counts (anonymous, no content); never content\n", c.DesktopTelemetry())
+	fmt.Fprintf(b, "telemetry = %v   # desktop: anonymous daily ping + scrubbed next-launch native crash diagnostics + per-package market install counts (anonymous, no content); never content\n", c.DesktopTelemetry())
 	fmt.Fprintf(b, "metrics = %v   # desktop: aggregate quality/lifecycle metrics (anonymous signal/bucket counts) + per-package market install counts (anonymous, no content); never content\n", c.DesktopMetrics())
 	// A non-nil empty slice is intentional: provider_access = [] means the
 	// user removed every desktop access entry. Omitting it would make the next
@@ -109,7 +109,7 @@ func renderAppearanceSection(b *strings.Builder, a AppearanceConfig) {
 		b.WriteString("\n[desktop.appearance]\n")
 	}
 	if a.Zoom != 0 {
-		fmt.Fprintf(b, "zoom = %g   # whole-interface scale, 0.8..1.6\n", a.Zoom)
+		fmt.Fprintf(b, "zoom = %g   # whole-interface scale, %g..%g\n", a.Zoom, ZoomMin, ZoomMax)
 	}
 	if a.ReadSize != 0 {
 		fmt.Fprintf(b, "read_size = %g   # transcript body size in px\n", a.ReadSize)

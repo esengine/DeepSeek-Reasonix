@@ -35,21 +35,7 @@ func probeLiveMCP(rep *MCPReport, cfg *config.Config, root, home, reasonixHome s
 		timeout = MaxLiveTimeout
 	}
 
-	// Only what would start on its own. A repo server still waiting for an
-	// answer must not: this is what a user runs to find out why it is off.
-	store := config.DefaultActivationStore()
-	var auto []config.PluginEntry
-	for _, p := range cfg.Plugins {
-		if p.ShouldAutoStart() && !store.AwaitingDecision(p, root) {
-			auto = append(auto, p)
-		} else {
-			for i := range rep.Servers {
-				if rep.Servers[i].Name == p.Name {
-					rep.Servers[i].RuntimeStatus = "skipped"
-				}
-			}
-		}
-	}
+	auto := sessionStartable(rep, cfg, root)
 	if len(auto) == 0 {
 		return issues
 	}
@@ -155,4 +141,28 @@ func LiveWarningMessage() string {
 They may access the network and receive configured environment variables and headers.
 Tools are not registered into the agent registry. Startup stats/schema cache writes are disabled.
 Host is always closed after the probe.`)
+}
+
+// sessionStartable keeps what a session here would start and marks the rest
+// skipped: a repo server still waiting for an answer, or one the user switched
+// off, must not start for a diagnosis.
+func sessionStartable(rep *MCPReport, cfg *config.Config, root string) []config.PluginEntry {
+	store := config.DefaultActivationStore()
+	var auto []config.PluginEntry
+	for _, p := range cfg.Plugins {
+		enabled, err := store.IsEnabled(p, root)
+		if err != nil {
+			enabled = config.DeclaredDefaultOn(p)
+		}
+		if enabled {
+			auto = append(auto, p)
+			continue
+		}
+		for i := range rep.Servers {
+			if rep.Servers[i].Name == p.Name {
+				rep.Servers[i].RuntimeStatus = "skipped"
+			}
+		}
+	}
+	return auto
 }

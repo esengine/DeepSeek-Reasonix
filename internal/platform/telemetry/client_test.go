@@ -78,6 +78,9 @@ func TestDailyPingSendsOnceWithCLISurface(t *testing.T) {
 		if req.URL.String() != endpoint+"/ping" {
 			t.Fatalf("request URL = %q", req.URL)
 		}
+		if ua := req.Header.Get("User-Agent"); ua != provider.ClientUserAgent() {
+			t.Fatalf("User-Agent = %q", ua)
+		}
 		var payload pingPayload
 		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 			t.Fatal(err)

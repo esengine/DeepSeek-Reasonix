@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShown } from "./shown";
 
 // The kernel pushes 2-3 characters per frame, but in bursts: measured against a
 // live turn, the median gap between frames is 0ms and the 90th is 32ms. Drawing
@@ -10,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 const DRAIN = 5;
 
 export function useRevealed(text: string, streaming?: boolean): string {
+  const watched = useShown();
   const [shown, setShown] = useState(text.length);
   const at = useRef(text.length);
   const want = useRef(text.length);
@@ -18,7 +20,7 @@ export function useRevealed(text: string, streaming?: boolean): string {
   useEffect(() => {
     // A settled message, a reload or a new turn has no backlog to pace: whatever
     // is there is already final.
-    if (!streaming || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!streaming || !watched || matchMedia("(prefers-reduced-motion: reduce)").matches) {
       at.current = want.current;
       setShown(want.current);
       return;
@@ -40,7 +42,7 @@ export function useRevealed(text: string, streaming?: boolean): string {
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [streaming, text.length]);
+  }, [streaming, watched, text.length]);
 
-  return streaming ? text.slice(0, shown) : text;
+  return streaming && watched ? text.slice(0, shown) : text;
 }

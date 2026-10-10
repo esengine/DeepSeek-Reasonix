@@ -84,7 +84,7 @@ func TestBaselineIgnoresScratchFilesTheTurnCleanedUp(t *testing.T) {
 		Created:          []string{scratch},
 	}
 	ledger.Record(cleaned)
-	if leftSomethingBehind(ledger, cleaned) {
+	if leftSomethingBehind(ledger, cleaned, "") {
 		t.Fatal("a created file that is now gone left nothing to verify")
 	}
 
@@ -95,7 +95,7 @@ func TestBaselineIgnoresScratchFilesTheTurnCleanedUp(t *testing.T) {
 	survivor.Paths = []string{kept}
 	survivor.Created = []string{kept}
 	ledger.Record(survivor)
-	if !leftSomethingBehind(ledger, survivor) {
+	if !leftSomethingBehind(ledger, survivor, "") {
 		t.Fatal("a created file still on disk must be verified")
 	}
 }
@@ -110,7 +110,7 @@ func TestBaselineKeepsWritesItDidNotWatchCreate(t *testing.T) {
 		MutationEvidence: evidence.MutationProven,
 		Paths:            []string{gone},
 	}
-	if !leftSomethingBehind(evidence.NewLedger(), edit) {
+	if !leftSomethingBehind(evidence.NewLedger(), edit, "") {
 		t.Fatal("a write with no observed creation must count as surviving")
 	}
 }
@@ -160,7 +160,7 @@ func TestBuildArtifactCreatedAndRemovedLeavesNothingBehind(t *testing.T) {
 	if !slices.Contains(cleanupRec.Paths, artifact) {
 		t.Fatalf("Paths = %v, want the artifact the cleanup removed", cleanupRec.Paths)
 	}
-	if leftSomethingBehind(ledger, cleanupRec) {
+	if leftSomethingBehind(ledger, cleanupRec, "") {
 		t.Fatal("removing what this turn built leaves nothing to verify")
 	}
 }
@@ -181,7 +181,7 @@ func TestRemovingAPreexistingFileStillCounts(t *testing.T) {
 	decorateObservedPaths(&rec, plan)
 	ledger.Record(rec)
 
-	if !leftSomethingBehind(ledger, rec) {
+	if !leftSomethingBehind(ledger, rec, "") {
 		t.Fatal("deleting a file the turn never created is a change to account for")
 	}
 }

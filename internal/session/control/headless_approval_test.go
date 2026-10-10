@@ -54,7 +54,7 @@ func runHeadlessWriteOnce(t *testing.T, mode string, askRules []string) (prompts
 		if err != nil {
 			t.Fatalf("runTurnWithRaw: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatalf("headless %s must not block on a write", mode)
 	}
 	writer.mu.Lock()
@@ -145,7 +145,7 @@ func TestApplyHeadlessApprovalModeDontAskDeniesWithoutPrompting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runTurnWithRaw: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("headless dontAsk must not block")
 	}
 	if prompts != 0 {
@@ -262,7 +262,7 @@ func TestBuildHeadlessApprovalGateMatchesParentExecutorContract(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testenv.Budget(t)):
 			t.Fatalf("sub-agent gate in %s mode must not block", mode)
 		}
 		writer.mu.Lock()
@@ -309,7 +309,7 @@ func TestSetToolApprovalModePropagatesToSubagentGate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testenv.Budget(t)):
 			t.Fatal("sub-agent gate must not block")
 		}
 		writer.mu.Lock()

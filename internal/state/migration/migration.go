@@ -1,16 +1,18 @@
 package migration
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
-	"reasonix/internal/state/sessionstore"
 	"strings"
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/state/sessionstore"
 )
 
 // SessionImport records one legacy session source that contributed sessions.
@@ -18,6 +20,15 @@ type SessionImport struct {
 	Source      string
 	Destination string
 	Count       int
+}
+
+// SessionSkip records one 1.x session an import could not bring over. Path is
+// the entry in the source, which the import neither moved nor deleted.
+type SessionSkip struct {
+	Source string
+	Name   string
+	Path   string
+	Reason sessionstore.SkipReason
 }
 
 // MemoryImport records one legacy memory source that contributed files.
@@ -35,6 +46,10 @@ type Result struct {
 	MemoryErrs     []error
 	SessionImports []SessionImport
 	SessionErrs    []error
+	SessionSkips   []SessionSkip
+	// Unrecognised is set when an explicit import found no 1.x session
+	// store under the chosen folder, as opposed to finding nothing new.
+	Unrecognised bool
 }
 
 // Summary returns the final user-visible status for a migration rescue run.
@@ -52,7 +67,7 @@ func (r Result) Summary() string {
 		warnings++
 	}
 	warnings += len(r.MemoryErrs)
-	warnings += len(r.SessionErrs)
+	warnings += len(r.SessionErrs) + len(r.SessionSkips)
 	switch {
 	case warnings > 0:
 		return fmt.Sprintf("migration rescue completed with %d warning(s): imported %d memory file(s) and %d past session(s)", warnings, importedMemory, importedSessions)
@@ -145,7 +160,8 @@ func RunLegacySessionImportInto(sourceRoot, fallbackDest string, sink event.Sink
 	result := Result{}
 	sourceRoot = strings.TrimSpace(sourceRoot)
 	emit(event.LevelInfo, "migration rescue: scanning explicit legacy sessions from "+sourceRoot)
-	sources, err := explicitLegacySessionSources(sourceRoot)
+	sources, closeRoot, err := explicitLegacySessionSources(sourceRoot)
+	defer closeRoot()
 	if err != nil {
 		result.SessionErrs = append(result.SessionErrs, err)
 		emit(event.LevelWarn, "migration rescue: "+err.Error())
@@ -153,23 +169,41 @@ func RunLegacySessionImportInto(sourceRoot, fallbackDest string, sink event.Sink
 		return result
 	}
 	if len(sources) == 0 {
+		result.Unrecognised = true
 		emit(event.LevelInfo, "migration rescue: no legacy session directories found under "+sourceRoot)
 		emit(event.LevelInfo, result.Summary())
 		return result
 	}
 	for _, src := range sources {
-		n, err := sessionstore.MigrateLegacySessionsFromExplicitDir(src.dir, fallbackDest, config.ProjectSessionDir)
+		var n int
+		var err error
+		var skipped []sessionstore.SkippedSession
+		if src.v4 {
+			n, skipped, err = sessionstore.ImportV4From(src.store, fallbackDest, src.route)
+			for i := range skipped {
+				skipped[i].Path = filepath.Join(src.dir, filepath.FromSlash(skipped[i].Path))
+			}
+		} else {
+			var rep *sessionstore.LegacyReport
+			n, rep, err = sessionstore.ImportLegacySessionsFromExplicitDir(src.dir, fallbackDest, config.ProjectSessionDir)
+			skipped = rep.Skipped
+		}
+		for _, sk := range skipped {
+			result.SessionSkips = append(result.SessionSkips, SessionSkip{Source: src.label, Name: sk.Name, Path: sk.Path, Reason: sk.Reason})
+			emit(event.LevelWarn, fmt.Sprintf("migration rescue: skipped %s (%s); the file is untouched", sk.Path, sk.Reason))
+		}
 		if err != nil {
-			result.SessionErrs = append(result.SessionErrs, fmt.Errorf("%s: %w", src.label, err))
-			emit(event.LevelWarn, "migration rescue: skipped "+src.label+": "+err.Error())
-			continue
+			for _, one := range splitJoined(err) {
+				result.SessionErrs = append(result.SessionErrs, fmt.Errorf("%s: %w", src.label, one))
+			}
+			emit(event.LevelWarn, "migration rescue: "+src.label+": "+err.Error())
 		}
 		if n > 0 {
 			result.SessionImports = append(result.SessionImports, SessionImport{Source: src.label, Destination: fallbackDest, Count: n})
 			emit(event.LevelInfo, fmt.Sprintf("imported %d past session(s) from %s — resume them with --resume or the history panel", n, src.label))
 		}
 	}
-	if len(result.SessionImports) == 0 && len(result.SessionErrs) == 0 {
+	if len(result.SessionImports) == 0 && len(result.SessionErrs) == 0 && len(result.SessionSkips) == 0 {
 		emit(event.LevelInfo, "migration rescue: no legacy sessions needed migration from "+sourceRoot)
 	}
 	emit(event.LevelInfo, result.Summary())
@@ -360,17 +394,30 @@ func copyFileIfMissing(src, dst string) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return 0, err
 	}
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	tmp, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		if os.IsExist(err) {
-			return 0, nil
-		}
 		return 0, err
 	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		_ = os.Remove(dst)
+	defer os.Remove(tmp.Name())
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
 		return 0, err
+	}
+	if err := errors.Join(tmp.Chmod(info.Mode().Perm()), tmp.Close()); err != nil {
+		return 0, err
+	}
+	// A hard link publishes the finished file under its name and refuses to
+	// replace one that is already there, so a reader never sees half a file
+	// and a concurrent writer's file is never overwritten.
+	if err := os.Link(tmp.Name(), dst); err != nil {
+		if _, statErr := os.Lstat(dst); statErr == nil {
+			return 0, nil
+		}
+		// A volume without hard links (exFAT) falls back to a rename, which
+		// is still whole-file for any reader.
+		if err := os.Rename(tmp.Name(), dst); err != nil {
+			return 0, err
+		}
 	}
 	return 1, nil
 }
@@ -475,6 +522,9 @@ func migrateLegacySessionSources(sink event.Sink, verbose bool) sessionMigration
 type explicitSessionSource struct {
 	dir   string
 	label string
+	v4    bool
+	store fs.FS
+	route func(sessionID string) string
 }
 
 func parseLegacyRescueArgs(args string) (source string, explicit bool, err error) {
@@ -515,43 +565,74 @@ func trimMatchingQuotes(s string) string {
 	return s
 }
 
-func explicitLegacySessionSources(root string) ([]explicitSessionSource, error) {
-	root = strings.TrimSpace(root)
-	if root == "" {
-		return nil, fmt.Errorf("--from requires a legacy directory path")
+// explicitLegacySessionSources finds the session stores under a user-picked
+// folder. Every probe goes through one os.Root, so a symlink inside the folder
+// cannot lead the scan outside it.
+func explicitLegacySessionSources(picked string) ([]explicitSessionSource, func(), error) {
+	picked = strings.TrimSpace(picked)
+	if picked == "" {
+		return nil, func() {}, fmt.Errorf("--from requires a legacy directory path")
 	}
-	info, err := os.Stat(root)
+	root, err := os.OpenRoot(picked)
 	if err != nil {
-		return nil, fmt.Errorf("legacy directory %s is not readable: %w", root, err)
+		return nil, func() {}, fmt.Errorf("legacy directory %s is not readable: %w", picked, err)
 	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("legacy path %s is not a directory", root)
-	}
-	candidates := []string{
-		filepath.Join(root, "sessions"),
-		filepath.Join(root, ".reasonix", "sessions"),
-		filepath.Join(root, "reasonix", "sessions"),
-	}
+	tree := root.FS()
 	var out []explicitSessionSource
 	seen := map[string]bool{}
-	for _, dir := range candidates {
-		key := cleanAbs(dir)
-		if key == "" || seen[key] {
-			continue
+	add := func(rel string, v4 bool, route func(string) string) {
+		if seen[rel] {
+			return
 		}
-		seen[key] = true
-		if dirLooksLikeLegacySessionDir(dir) {
-			out = append(out, explicitSessionSource{dir: dir, label: dir})
+		sub, err := fs.Sub(tree, rel)
+		if err != nil {
+			return
+		}
+		if v4 && !holdsV4Sessions(sub) || !v4 && !dirLooksLikeLegacySessionDir(sub) {
+			return
+		}
+		seen[rel] = true
+		dir := filepath.Join(picked, filepath.FromSlash(rel))
+		out = append(out, explicitSessionSource{dir: dir, label: dir, v4: v4, store: sub, route: route})
+	}
+	for _, home := range []string{".", ".reasonix", "reasonix"} {
+		add(path.Join(home, "sessions"), false, nil)
+		add(path.Join(home, "sessions-v4"), true, nil)
+		add(path.Join(home, "desktop-sessions-v5", "by-id"), true, routeToOwner(desktopSessionOwners(tree, home)))
+		projects, _ := fs.ReadDir(tree, path.Join(home, "projects"))
+		for _, project := range projects {
+			if !project.IsDir() {
+				continue
+			}
+			dir := path.Join(home, "projects", project.Name())
+			add(path.Join(dir, "sessions"), false, nil)
+			add(path.Join(dir, "sessions-v4"), true, nil)
 		}
 	}
-	if len(out) == 0 && dirLooksLikeLegacySessionDir(root) {
-		out = append(out, explicitSessionSource{dir: root, label: root})
+	if len(out) == 0 {
+		add(".", false, nil)
+		add(".", true, nil)
 	}
-	return out, nil
+	return out, func() { _ = root.Close() }, nil
 }
 
-func dirLooksLikeLegacySessionDir(dir string) bool {
-	entries, err := os.ReadDir(dir)
+// holdsV4Sessions is true for a store with any session folder, readable or not:
+// a store whose every session is damaged is still the user's 1.x history.
+func holdsV4Sessions(store fs.FS) bool {
+	entries, _ := fs.ReadDir(store, ".")
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if _, err := fs.Stat(store, path.Join(e.Name(), "manifest.json")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func dirLooksLikeLegacySessionDir(dir fs.FS) bool {
+	entries, err := fs.ReadDir(dir, ".")
 	if err != nil {
 		return false
 	}
@@ -564,7 +645,7 @@ func dirLooksLikeLegacySessionDir(dir string) bool {
 		if !entry.IsDir() || entry.Name() == "subagents" {
 			continue
 		}
-		subEntries, err := os.ReadDir(filepath.Join(dir, entry.Name()))
+		subEntries, err := fs.ReadDir(dir, entry.Name())
 		if err != nil {
 			continue
 		}
@@ -598,4 +679,11 @@ func cleanAbs(path string) string {
 		path = abs
 	}
 	return filepath.Clean(path)
+}
+
+func splitJoined(err error) []error {
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		return multi.Unwrap()
+	}
+	return []error{err}
 }

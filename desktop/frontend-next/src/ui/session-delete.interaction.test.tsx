@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Workspaces } from "./Workspaces";
@@ -26,6 +26,7 @@ function draw(over: { runtimes?: RuntimeView[]; workspaces?: TreeWorkspace[] } =
   const hub = new MockHub() as unknown as HubPort;
   const removeSession = vi.spyOn(hub, "removeSession").mockResolvedValue(undefined);
   const onClose = vi.fn().mockResolvedValue(undefined);
+  const onOpen = vi.fn().mockResolvedValue(undefined);
   const reload = vi.fn().mockResolvedValue(undefined);
   const onError = vi.fn();
   const view = (workspaces: TreeWorkspace[]) => (
@@ -38,7 +39,7 @@ function draw(over: { runtimes?: RuntimeView[]; workspaces?: TreeWorkspace[] } =
       folded={new Set()}
       onFold={() => {}}
       reload={reload}
-      onOpen={async () => {}}
+      onOpen={onOpen}
       onFocus={() => {}}
       onClose={onClose}
       liveIds={() => []}
@@ -51,7 +52,7 @@ function draw(over: { runtimes?: RuntimeView[]; workspaces?: TreeWorkspace[] } =
   const { rerender } = render(view(over.workspaces ?? tree()));
   // What the kernel lists after a write: the tree the next reload brings back.
   const relist = (workspaces: TreeWorkspace[]) => rerender(view(workspaces));
-  return { removeSession, onClose, reload, onError, relist };
+  return { removeSession, onClose, onOpen, reload, onError, relist };
 }
 
 it("projects each open session's run state onto its own row", () => {
@@ -84,7 +85,7 @@ it("projects each open session's run state onto its own row", () => {
 });
 
 const trash = async () => {
-  await userEvent.click(screen.getByRole("button", { name: /会话操作：/ }));
+  await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /the one to delete|open here/ }) });
   return screen.getByRole("menuitem", { name: "删除会话" });
 };
 const confirmGo = () => within(screen.getByRole("alertdialog")).getByRole("button", { name: "删除" });
@@ -134,9 +135,30 @@ describe("deleting a conversation from the rail", () => {
 });
 
 describe("the conversation action menu", () => {
+  it("opens on a title right-click without opening the conversation; left-click still opens it", async () => {
+    const { onOpen } = draw();
+    await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByText("the one to delete") });
+    expect(screen.getByRole("menu", { name: "会话操作" })).toBeTruthy();
+    expect(onOpen).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByText("the one to delete"));
+    expect(onOpen).toHaveBeenCalledWith({ root: "/w", sessionPath: SESSION });
+  });
+
+  it("keeps repeated right-clicks open and returns focus on Escape", async () => {
+    draw();
+    const row = screen.getByRole("treeitem", { name: /the one to delete/ });
+    await userEvent.pointer({ keys: "[MouseRight]", target: row });
+    await userEvent.pointer({ keys: "[MouseRight]", target: row });
+    expect(screen.getByRole("menu", { name: "会话操作" })).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu", { name: "会话操作" })).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+
   it("closes when the reader clicks outside it", async () => {
     draw();
-    await userEvent.click(screen.getByRole("button", { name: /会话操作：/ }));
+    await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /the one to delete/ }) });
     expect(screen.getByRole("menu", { name: "会话操作" })).toBeTruthy();
 
     await userEvent.click(document.body);
@@ -186,7 +208,7 @@ describe("the Delete key on a focused conversation", () => {
     });
     row().focus();
     await userEvent.keyboard("{Delete}");
-    await userEvent.click(screen.getByRole("button", { name: /会话操作：the other one/ }));
+    await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /the other one/ }) });
     await userEvent.click(screen.getByRole("menuitem", { name: "删除会话" }));
 
     const other = screen.getByRole("alertdialog", { name: "删除「the other one」？" });
@@ -213,9 +235,10 @@ describe("the Delete key on a focused conversation", () => {
 
   it("leaves a rename field's Delete to the field", async () => {
     draw();
-    await userEvent.click(screen.getByRole("button", { name: /会话操作：/ }));
+    await userEvent.pointer({ keys: "[MouseRight]", target: screen.getByRole("treeitem", { name: /the one to delete/ }) });
     await userEvent.click(screen.getByRole("menuitem", { name: /重命名/ }));
     const field = screen.getByRole("textbox", { name: "重命名该会话" });
+    expect(fireEvent.contextMenu(field)).toBe(true);
     field.focus();
     await userEvent.keyboard("{Delete}");
     expect(screen.queryByRole("alertdialog")).toBeNull();

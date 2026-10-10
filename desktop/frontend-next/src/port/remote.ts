@@ -34,6 +34,10 @@ export interface RemoteHost {
   useSSHConfig?: boolean;
   passphraseEnv?: string;
   passwordEnv?: string;
+  // Off: the machine stays in the book but is not dialed — no pane opens on it
+  // and the rail leaves it out. Absent means on, so an old config reads as it
+  // always did.
+  disabled?: boolean;
   // Set from the CLI, with no control here — counted so an edit does not look
   // like it dropped them.
   forwards?: number;
@@ -83,6 +87,7 @@ export interface RemoteHostEdit {
   useSSHConfig?: boolean;
   passphraseEnv?: string;
   passwordEnv?: string;
+  disabled?: boolean;
 }
 
 // One folder on another machine. The name is carried beside the path because

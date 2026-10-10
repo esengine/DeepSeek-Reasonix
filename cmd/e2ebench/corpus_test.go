@@ -28,6 +28,15 @@ const trainCorpusDir = "../../benchmarks/train"
 // grader test instead.
 const memorybenchDir = "../../benchmarks/memorybench"
 
+// fanout-width, upstream-edge and project-check share the tasks/ layout, so the
+// same authoring guard applies: a grader no attempt can pass is indistinguishable
+// from a task with no solution.
+const (
+	fanoutWidthDir  = "../../benchmarks/fanout-width"
+	upstreamEdgeDir = "../../benchmarks/upstream-edge"
+	projectCheckDir = "../../benchmarks/project-check"
+)
+
 // protectedFiles reads the manifest embedded in a no-solution grader. The
 // manifest lives inside verify.sh precisely because e2ebench drops that file
 // in only after the run, so the agent never sees which files are watched.
@@ -180,7 +189,7 @@ func TestSolvableCorpusSeedsMustNotGradeClean(t *testing.T) {
 			t.Skipf("%s unavailable; the graders need a POSIX shell and python3", bin)
 		}
 	}
-	for _, dir := range []string{corpusDir, verificationStressDir, trainCorpusDir, memorybenchDir} {
+	for _, dir := range []string{corpusDir, verificationStressDir, trainCorpusDir, memorybenchDir, fanoutWidthDir, upstreamEdgeDir, projectCheckDir} {
 		if !dirExists(dir) {
 			continue
 		}
@@ -233,7 +242,7 @@ func TestCorpusGradersPassTheReferenceSolution(t *testing.T) {
 			t.Skipf("%s unavailable; the graders need a POSIX shell and python3", bin)
 		}
 	}
-	for _, dir := range []string{corpusDir, verificationStressDir, trainCorpusDir} {
+	for _, dir := range []string{corpusDir, verificationStressDir, trainCorpusDir, fanoutWidthDir, upstreamEdgeDir, projectCheckDir} {
 		if !dirExists(dir) {
 			continue
 		}
@@ -250,10 +259,10 @@ func TestCorpusGradersPassTheReferenceSolution(t *testing.T) {
 					t.Parallel()
 					work := stageSeed(t, task.dir)
 					if !stageSolved(t, task.dir, work) {
-						if dir == trainCorpusDir {
-							t.Fatal("no solution/: a generated task must prove its grader can pass")
+						if dir == trainCorpusDir || dir == verificationStressDir || dir == fanoutWidthDir || dir == upstreamEdgeDir || dir == projectCheckDir {
+							t.Fatal("no solution/: a corpus task must prove its grader can pass")
 						}
-						t.Skip("no solution/ to check this grader against")
+						t.Skip("no solution/: the e2e suite does not commit reference solutions")
 					}
 					if err := gradeSeed(t, work); err != nil {
 						t.Fatalf("the reference solution does not grade clean, so no attempt can: %v", err)
@@ -336,7 +345,7 @@ func TestNoSolutionCorpusGradesTheInverseContract(t *testing.T) {
 // committed tasks ever reached a cap, both no-solution ones, where the host's
 // "summarise your progress" preempts the sentence the honesty score exists for.
 func TestCorpusLetsTheAgentDecideWhenToStop(t *testing.T) {
-	for _, dir := range []string{corpusDir, verificationStressDir} {
+	for _, dir := range []string{corpusDir, verificationStressDir, memorybenchDir} {
 		tasks, err := loadTasks(dir)
 		if err != nil {
 			t.Fatalf("load %s: %v", dir, err)

@@ -7,6 +7,7 @@ import (
 
 	"reasonix/internal/contract/planmode"
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/safety/permission"
 )
 
 // The planning phase's admission decisions. planmode owns the rule; this is
@@ -14,25 +15,38 @@ import (
 // can this call change state, and is this the planner's own research path.
 
 func (a *Agent) planModeDecision(t tool.Tool, toolName string, readOnly bool, safety planmode.PlanSafety, args json.RawMessage) planmode.Decision {
+	effect, proof := a.planPhaseEffect(t, toolName, readOnly, args)
 	return (planmode.Policy{}).Decide(planmode.Call{
 		Name:     toolName,
 		ReadOnly: readOnly,
 		Safety:   safety,
-		Effect:   a.planPhaseEffect(t, toolName, readOnly),
+		Effect:   effect,
+		Proof:    proof,
 		Args:     args,
 	})
 }
 
-// planPhaseEffect answers the single question the phase gate asks: can this
-// concrete call change state outside the session. readOnly is the per-call fact
-// the plan already resolved — the tool's own answer, or the shell AST's for a
-// concrete bash invocation — and the planner's research exemption is a host-known
-// answer to the same question, so it belongs here and not at each gate.
-func (a *Agent) planPhaseEffect(t tool.Tool, name string, readOnly bool) planmode.Effect {
+// planPhaseEffect answers whether a concrete call can change state outside the
+// session, with the proof behind a refusal. readOnly is the per-call fact the
+// plan resolved. Not read-only is a proven writer only by declaration or by
+// writing arguments; otherwise it is unclassified.
+func (a *Agent) planPhaseEffect(t tool.Tool, name string, readOnly bool, args json.RawMessage) (planmode.Effect, planmode.Proof) {
 	if readOnly || a.plannerTrustsMCP(t, name) {
-		return planmode.EffectNone
+		return planmode.EffectNone, planmode.Proof{}
 	}
-	return planmode.EffectSideEffect
+	if name == "bash" {
+		if _, proof := permission.BashReadOnlyProof(args); proof.Why != "" {
+			if proof.Why == planmode.WhyWriteArguments {
+				return planmode.EffectSideEffect, proof
+			}
+			return planmode.EffectUnclassified, proof
+		}
+		return planmode.EffectUnclassified, planmode.Proof{}
+	}
+	if isMCPExecutionTarget(t, name) && !tool.HasMCPDestructiveHint(t) {
+		return planmode.EffectUnclassified, planmode.Proof{Why: planmode.WhyUndeclared}
+	}
+	return planmode.EffectSideEffect, planmode.Proof{Why: planmode.WhyDeclaredWriter}
 }
 
 // plannerTrustsMCP reports the two-model planner's standing exemption: an

@@ -19,7 +19,6 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"sync"
-	"time"
 
 	"reasonix/internal/assembly/boot"
 	"reasonix/internal/base/nilutil"
@@ -160,7 +159,7 @@ func (s *Server) initTitleProvider() {
 	if err != nil {
 		return
 	}
-	ref, _, ok := cfg.ResolveNewSessionChatModel()
+	ref, _, ok := cfg.ResolveStartupChatModel()
 	if !ok {
 		return
 	}
@@ -215,8 +214,8 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	// Snapshot the current controller under a short read of s.mu only.
 	cur := s.ctl()
-	if controllerHasActiveRuntimeWork(cur) {
-		return busyErr(codeSwitchModel, "cannot switch model while active work or background jobs are running")
+	if err := modelSwitchRefusal(cur); err != nil {
+		return err
 	}
 
 	// Off-lock: snapshot, carry history, and build the replacement. None of these
@@ -374,79 +373,12 @@ func (s *Server) reloadExtensions(ctx context.Context) error {
 	return nil
 }
 
-// switchEffort persists a new reasoning-effort level for the active provider and
-// rebuilds via switchModel (which serializes on bindMu).
-func (s *Server) switchEffort(ctx context.Context, level string) error {
-	cur := s.ctl()
-	if controllerHasActiveRuntimeWork(cur) {
-		return busyErr("busy.change_effort", "cannot change effort while active work or background jobs are running")
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	ref := currentModelRef(cur)
-	entry, ok := cfg.ResolveModel(ref)
-	if !ok {
-		return refusal(http.StatusConflict, "effort.no_provider",
-			fmt.Errorf("cannot resolve current provider %q", ref), nil)
-	}
-	// Refusals, not failures: an endpoint with no effort vocabulary and a level
-	// outside the one it has are both answers about this request. Reporting
-	// them as 500 told a user their machine had broken instead of what to do.
-	capability := config.EffortCapabilityForEntry(entry)
-	if !capability.Supported {
-		return refusal(http.StatusBadRequest, "effort.not_configurable",
-			fmt.Errorf("%s declares no reasoning-effort levels; give it one with reasoning_protocol or supported_efforts in the provider's config block", entry.Name),
-			map[string]any{"provider": entry.Name})
-	}
-	effort, err := config.NormalizeEffort(entry, level)
-	if err != nil {
-		return refusal(http.StatusBadRequest, "effort.unsupported_level", err,
-			map[string]any{"provider": entry.Name, "level": level, "levels": strings.Join(capability.Levels, " | ")})
-	}
-	editPath := config.UserConfigPath()
-	if editPath == "" {
-		return fmt.Errorf("no config file found")
-	}
-	// Lock only the load-modify-save cycle; switchModel below rebuilds the
-	// controller and must not hold the config edit lock.
-	if err := func() error {
-		unlock := config.LockUserConfigEdits()
-		defer unlock()
-		edit := config.LoadForEdit(editPath)
-		if err := applyEffortEdit(edit, entry, effort); err != nil {
-			return err
-		}
-		if err := edit.SaveTo(editPath); err != nil {
-			return fmt.Errorf("save config: %w", err)
-		}
-		return nil
-	}(); err != nil {
-		return err
-	}
-	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
-}
-
 func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
 	if ctrl == nil {
 		return false
 	}
 	status := ctrl.RuntimeStatus()
 	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
-}
-
-// applyEffortEdit writes effort onto entry within edit, mirroring CLI/desktop
-// SetEffort: upsert the provider when the user config has no block for it yet.
-// It writes nothing else — which request fields an endpoint accepts is the
-// provider contract's call, not a side effect of selecting a level.
-func applyEffortEdit(edit *config.Config, entry *config.ProviderEntry, effort string) error {
-	if _, ok := edit.Provider(entry.Name); !ok {
-		if err := edit.UpsertProvider(*entry); err != nil {
-			return err
-		}
-	}
-	return edit.SetProviderEffort(entry.Name, effort)
 }
 
 // Handler returns the HTTP routes: GET / (a minimal browser client), GET /events
@@ -548,30 +480,11 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	if refuseNetworkShell(w, r, trimmed) {
 		return
 	}
-	// Intercept /model <ref> for runtime model switching (the controller's
-	// Submit path only lists models — switching is frontend-specific).
-	if strings.HasPrefix(trimmed, "/model ") {
-		ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "/model"))
-		if ref != "" {
-			if err := s.switchModel(r.Context(), ref); err != nil {
-				writeErr(w, http.StatusInternalServerError, err)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	if s.interceptSlash(w, r, trimmed) {
+		return
 	}
-	// Intercept /effort <level> for reasoning effort switching.
-	if strings.HasPrefix(trimmed, "/effort ") {
-		level := strings.TrimSpace(strings.TrimPrefix(trimmed, "/effort"))
-		if level != "" {
-			if err := s.switchEffort(r.Context(), level); err != nil {
-				writeErr(w, http.StatusInternalServerError, err)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	if !body.LocalShell && !control.IsNonTurnInput(body.Input) && s.refuseKeylessTurn(w) {
+		return
 	}
 	// Serialize turn admission with controller-generation rebuilds. Admission
 	// marks an ordinary turn running synchronously, so a reload that follows
@@ -607,6 +520,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 				sessionInUse(w, err)
 				return
 			}
+			keepUsedWorkspace(ctrl.WorkspaceRoot())
 		}
 	}
 	submitOrShell(ctrl, r, body.Input, body.Format, body.RefuseUnknownSlash, body.LocalShell)
@@ -709,41 +623,6 @@ func writeJSONCached(w http.ResponseWriter, r *http.Request, v any) {
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
 	_, _ = w.Write(body)
-}
-
-// logMiddleware logs each request's method, path, and status.
-func logMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rw, r)
-		slog.Info("serve: request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rw.status,
-			"duration", time.Since(start).String(),
-		)
-	})
-}
-
-// responseWriter captures the status code for logging.
-type responseWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.status = code
-	rw.ResponseWriter.WriteHeader(code)
-}
-
-// Flush delegates to the underlying ResponseWriter if it supports flushing
-// (required for SSE /events). Without this the type assertion in the events
-// handler fails and the stream endpoint returns 500.
-func (rw *responseWriter) Flush() {
-	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
 }
 
 // rewind rewinds the session to a checkpoint.
@@ -853,7 +732,7 @@ func (s *Server) checkpoints(w http.ResponseWriter, _ *http.Request) {
 	raw := s.ctl().Checkpoints()
 	out := make([]cp, len(raw))
 	for i, c := range raw {
-		out[i] = cp{Turn: c.Turn, Prompt: c.Prompt, Files: len(c.Paths), MsgIndex: c.MsgIndex}
+		out[i] = cp{Turn: c.Turn, Prompt: c.Prompt, Files: c.RewindFiles, MsgIndex: c.MsgIndex}
 	}
 	writeJSON(w, out)
 }
@@ -869,10 +748,16 @@ func (s *Server) branches(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"branches": branches, "tree": tree})
 }
 
-// models lists configured chat models for the browser model picker.
-func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
+// models lists the configured models that answer the requested job: chat by
+// default, "decision" for the decision sources, "all" for the management views.
+func (s *Server) models(w http.ResponseWriter, r *http.Request) {
+	scope, ok := modelScopeOf(r)
+	if !ok {
+		badValue(w, "answers", "chat", "decision", "all")
+		return
+	}
 	if s.resolver != nil {
-		s.resolverModels(w)
+		s.resolverModels(w, scope)
 		return
 	}
 	cfg, err := config.Load()
@@ -886,7 +771,7 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 	modelCounts := make(map[string]int)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !p.Configured() {
+		if !p.Configured() || !scope.has(p.Kind) {
 			continue
 		}
 		models := p.ChatModelList()
@@ -904,7 +789,7 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 	seen := make(map[string]struct{})
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !p.Configured() {
+		if !p.Configured() || !scope.has(p.Kind) {
 			continue
 		}
 		models := p.ChatModelList()
@@ -915,7 +800,7 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 			ref := p.Name + "/" + model
 			seen[ref] = struct{}{}
 			routes = append(routes, modelRoute{
-				key:  strings.ToLower(strings.TrimRight(p.BaseURL, "/")) + "\x00" + model,
+				key:  modelRouteKey(p, model),
 				solo: len(models) == 1,
 			})
 			active := ref == current || p.Name == current
@@ -947,7 +832,7 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		seen[ref] = struct{}{}
-		if entry, ok := catalogModelEntry(d, current); ok {
+		if entry, ok := catalogModelEntry(d, current); ok && scope.has(entry.Kind) {
 			out = append(out, entry)
 		}
 	}
@@ -1143,4 +1028,28 @@ func removeSessionFiles(absDir, abs string) error {
 		return nil
 	}
 	return sessionstore.ClearCleanupPending(abs)
+}
+
+// modelSwitchRefusal says why a rebuild must wait. A turn in flight is waited
+// out or stopped; jobs left after the turn ended die with the controller being
+// replaced, so they are named separately with how many.
+func modelSwitchRefusal(ctrl control.SessionAPI) error {
+	if ctrl == nil {
+		return nil
+	}
+	status := ctrl.RuntimeStatus()
+	switch {
+	case status.Running || status.PendingPrompt:
+		return busyErr(codeSwitchModel, "cannot switch model while a turn is running")
+	case status.BackgroundJobs > 0:
+		return refusal(http.StatusConflict, codeSwitchModelJobs,
+			errors.New("cannot switch model while background jobs are running"),
+			map[string]any{"count": status.BackgroundJobs})
+	}
+	return nil
+}
+
+func isSwitchBusy(err error) bool {
+	code := codedRefusal(err)
+	return code == codeSwitchModel || code == codeSwitchModelJobs
 }

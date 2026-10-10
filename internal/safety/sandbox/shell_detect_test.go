@@ -43,7 +43,7 @@ func TestAvailableListsInstalledInterpreters(t *testing.T) {
 	}{
 		{
 			"windows with git bash lists bash first",
-			shellHost{"windows", fakePath("pwsh", "powershell"), yes, gitBash, winPS, yes, no, yes},
+			shellHost{"windows", fakePath("pwsh", "powershell"), yes, gitBash, winPS, yes, no, yes, nil},
 			[]string{`C:\fake\Git\bin\bash.exe`, `C:\fake\PowerShell\7\pwsh.exe`, `C:\fake\System32\powershell.exe`},
 		},
 		{
@@ -51,7 +51,7 @@ func TestAvailableListsInstalledInterpreters(t *testing.T) {
 			// candidate — is one interpreter, and two rows offering it would ask
 			// the user to choose between a thing and itself.
 			"a bash found twice is listed once",
-			shellHost{"windows", fakePath("bash"), func(p string) bool { return p == `C:\fake\bash.exe` }, []string{`C:\fake\bash.exe`}, nil, yes, no, yes},
+			shellHost{"windows", fakePath("bash"), func(p string) bool { return p == `C:\fake\bash.exe` }, []string{`C:\fake\bash.exe`}, nil, yes, no, yes, nil},
 			[]string{`C:\fake\bash.exe`},
 		},
 		{
@@ -59,17 +59,17 @@ func TestAvailableListsInstalledInterpreters(t *testing.T) {
 			// workspace is a /mnt path; offering it would hand the agent a shell
 			// that cannot see the files it was pointed at.
 			"the wsl launcher is not on offer",
-			shellHost{"windows", fakePath("bash", "powershell"), no, nil, winPS, yes, func(p string) bool { return p == `C:\fake\bash.exe` }, yes},
+			shellHost{"windows", fakePath("bash", "powershell"), no, nil, winPS, yes, func(p string) bool { return p == `C:\fake\bash.exe` }, yes, nil},
 			[]string{`C:\fake\powershell.exe`},
 		},
 		{
 			"a unix host offers the one bash it has",
-			shellHost{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes},
+			shellHost{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes, nil},
 			[]string{`C:\fake\bash.exe`},
 		},
 		{
 			"a host with nothing offers nothing",
-			shellHost{"linux", fakePath(), no, nil, nil, yes, no, yes},
+			shellHost{"linux", fakePath(), no, nil, nil, yes, no, yes, nil},
 			nil,
 		},
 	}
@@ -94,16 +94,20 @@ func TestAvailableHeadIsWhatAutoPicks(t *testing.T) {
 	yes := func(string) bool { return true }
 	no := func(string) bool { return false }
 	hosts := []shellHost{
-		{"windows", fakePath("pwsh"), yes, []string{`C:\fake\Git\bin\bash.exe`}, []string{`C:\fake\PowerShell\7\pwsh.exe`}, yes, no, yes},
-		{"windows", fakePath("pwsh", "powershell"), no, nil, nil, yes, no, yes},
-		{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes},
+		{"windows", fakePath("pwsh"), yes, []string{`C:\fake\Git\bin\bash.exe`}, []string{`C:\fake\PowerShell\7\pwsh.exe`}, yes, no, yes, nil},
+		{"windows", fakePath("pwsh", "powershell"), no, nil, nil, yes, no, yes, nil},
+		{"darwin", fakePath("bash"), no, nil, nil, yes, no, yes, nil},
 	}
 	for _, h := range hosts {
 		list := h.available()
 		if len(list) == 0 {
 			t.Fatalf("host %+v offered nothing", h.goos)
 		}
-		if got := h.auto(); got != list[0] {
+		// Fallback only explains why bash was passed over; which interpreter wins is
+		// kind and path.
+		got := h.auto(nil)
+		got.Fallback = FallbackNone
+		if got != list[0] {
 			t.Fatalf("auto = %+v, want the first offered %+v", got, list[0])
 		}
 	}
@@ -139,7 +143,7 @@ func TestWSLLauncherFoundAsCandidateIsNotOffered(t *testing.T) {
 	yes := func(string) bool { return true }
 	wsl := `C:\Windows\System32\bash.exe`
 	git := `D:\Git\bin\bash.exe`
-	h := shellHost{"windows", fakePath(), yes, []string{wsl, git}, nil, yes, func(p string) bool { return p == wsl }, yes}
+	h := shellHost{"windows", fakePath(), yes, []string{wsl, git}, nil, yes, func(p string) bool { return p == wsl }, yes, nil}
 	if got := paths(h.available()); len(got) != 1 || got[0] != git {
 		t.Fatalf("available = %v, want only %s", got, git)
 	}
@@ -203,14 +207,14 @@ func TestStoreAliasBashIsNeverOfferedOrChosen(t *testing.T) {
 	sep := string(filepath.Separator)
 	alias := sep + filepath.Join("u", "AppData", "Local", "Microsoft", "WindowsApps", "bash.exe")
 	isWSL := func(p string) bool { return p == alias }
-	h := shellHost{"windows", fakePath(), yes, []string{alias}, nil, yes, isWSL, yes}
+	h := shellHost{"windows", fakePath(), yes, []string{alias}, nil, yes, isWSL, yes, nil}
 	if got := paths(h.available()); len(got) != 0 {
 		t.Fatalf("available = %v, want none", got)
 	}
 	if sh, ok := h.bash(); ok {
 		t.Fatalf("bash() chose %v", sh)
 	}
-	if got := h.auto(); got.Path != "bash" {
+	if got := h.auto(nil); got.Path != "bash" {
 		t.Fatalf("auto = %v", got)
 	}
 }
@@ -239,5 +243,80 @@ func TestBashCandidatesDropRelativePathAndDuplicates(t *testing.T) {
 	}
 	if seen[`d:\x\bash.exe`] != 1 {
 		t.Errorf("absolute PATH entry lost: %v", seen)
+	}
+}
+
+// A found PowerShell that will not start must not win; Windows PowerShell 5.1
+// is the fallback when it starts. The launch probe is injected so the decision
+// table is testable on hosts without pwsh.
+func TestResolveShellFallsBackFromUnusablePowerShell(t *testing.T) {
+	no := func(string) bool { return false }
+	pwsh := `C:\fake\PowerShell\7\pwsh.exe`
+	ps51 := `C:\fake\System32\WindowsPowerShell\v1.0\powershell.exe`
+	winPS := []string{pwsh, ps51}
+	// pwsh is not on PATH either way; Windows keeps 5.1 where the probe finds it.
+	onPath := fakePath("powershell")
+	starts := func(p string) bool { return strings.EqualFold(pathBase(p), "powershell.exe") }
+
+	t.Run("pwsh installed but will not start", func(t *testing.T) {
+		got := resolveShell("", "", nil, "windows", onPath, func(string) bool { return true }, nil, winPS, no, no, starts)
+		if got.Kind != ShellPowerShell || got.Path != ps51 {
+			t.Fatalf("auto = %+v, want Windows PowerShell 5.1 at %s", got, ps51)
+		}
+	})
+
+	t.Run("pwsh not installed at all", func(t *testing.T) {
+		exists := func(p string) bool { return p != pwsh }
+		got := resolveShell("", "", nil, "windows", onPath, exists, nil, winPS, no, no, starts)
+		if got.Kind != ShellPowerShell || got.Path != ps51 {
+			t.Fatalf("auto = %+v, want Windows PowerShell 5.1 at %s", got, ps51)
+		}
+	})
+}
+
+// With nothing left to pick, the resolver returns bare bash and warns: no
+// candidate was proven usable, so callers must not silently treat the fallback
+// as a confirmed host shell.
+func TestResolveShellSaysWhenNothingIsUsable(t *testing.T) {
+	no := func(string) bool { return false }
+	winPS := []string{`C:\fake\PowerShell\7\pwsh.exe`}
+	var warn strings.Builder
+	got := resolveShell("", "", &warn, "windows", fakePath("pwsh", "powershell"), func(string) bool { return true }, nil, winPS, no, no, no)
+	if got.Kind != ShellBash || got.Path != "bash" {
+		t.Fatalf("auto = %+v, want the bare bash fallback", got)
+	}
+	if !strings.Contains(warn.String(), "no usable shell") {
+		t.Fatalf("an unusable host went unreported: %q", warn.String())
+	}
+}
+
+// A pinned path is proven before it is trusted, the same bar the bash arm has
+// always set for its own: existing is not the same as starting.
+func TestResolveShellRefusesPinnedPowerShellThatWillNotStart(t *testing.T) {
+	no := func(string) bool { return false }
+	pwsh := `C:\fake\PowerShell\7\pwsh.exe`
+	ps51 := `C:\fake\System32\WindowsPowerShell\v1.0\powershell.exe`
+	starts := func(p string) bool { return strings.EqualFold(pathBase(p), "powershell.exe") }
+	var warn strings.Builder
+	got := resolveShell("pwsh", pwsh, &warn, "windows", fakePath("powershell"), func(string) bool { return true }, nil, []string{pwsh, ps51}, no, no, starts)
+	if got.Kind != ShellPowerShell || got.Path != ps51 {
+		t.Fatalf("pinned pwsh = %+v, want the fallback to 5.1 at %s", got, ps51)
+	}
+	if !strings.Contains(warn.String(), "not a usable PowerShell") {
+		t.Fatalf("the ignored pin went unreported: %q", warn.String())
+	}
+}
+
+// VerifyShell proves the PowerShell path launches: an existing Store alias can
+// fail to start and must not be accepted at the settings boundary.
+func TestVerifyShellRejectsPowerShellThatWillNotStart(t *testing.T) {
+	const path = `C:\fake\WindowsApps\pwsh.exe`
+	exists := func(string) bool { return true }
+	probe := func(string) bool { return true }
+	if err := verifyShell("pwsh", path, exists, probe, func(string) bool { return false }); err == nil || !strings.Contains(err.Error(), "did not start") {
+		t.Fatalf("unstartable PowerShell error = %v, want did not start", err)
+	}
+	if err := verifyShell("pwsh", path, exists, probe, func(string) bool { return true }); err != nil {
+		t.Fatalf("working PowerShell refused: %v", err)
 	}
 }

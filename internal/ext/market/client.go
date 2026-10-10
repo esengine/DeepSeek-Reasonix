@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,7 +43,7 @@ var (
 
 var slugSegment = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
-func slugPart(s string) bool { return slugSegment.MatchString(s) && s != "." && s != ".." }
+func slugPart(s string) bool { return slugSegment.MatchString(s) && !strings.HasPrefix(s, ".") }
 
 // Package is one listed capability as the registry describes it. Every field is
 // the publisher's claim; none of it decides what gets installed.
@@ -82,8 +85,9 @@ type Version struct {
 // Detail is a package with its approved version, nil when the registry holds
 // no version row for the one a reviewer let through.
 type Detail struct {
-	Package  Package  `json:"package"`
-	Approved *Version `json:"approved"`
+	Package  Package    `json:"package"`
+	Approved *Version   `json:"approved"`
+	Cache    *CacheNote `json:"cache,omitempty"`
 }
 
 // Query narrows a listing. Unknown kinds and sorts are the registry's to
@@ -103,6 +107,8 @@ type Page struct {
 	Packages []Package `json:"packages"`
 	Limit    int       `json:"limit"`
 	Offset   int       `json:"offset"`
+	// Cache is set when the registry could not answer and this is its last good copy.
+	Cache *CacheNote `json:"cache,omitempty"`
 }
 
 // Registry is what a caller needs from the community registry.
@@ -115,13 +121,26 @@ type Registry interface {
 // configuration: a listing that can be pointed elsewhere is a listing anyone
 // with write access to a settings file can rewrite.
 type Client struct {
-	http *http.Client
-	base url.URL
+	http  *http.Client
+	base  url.URL
+	cache *diskCache
 }
 
 // NewClient wraps hc (the caller's proxy-aware client) for the registry.
 func NewClient(hc *http.Client) *Client {
 	return newClient(url.URL{Scheme: "https", Host: registryHost}, hc)
+}
+
+// WithCache returns a client that keeps the last good anonymous browse answer
+// under root and serves it, marked, when the registry cannot answer. Empty root
+// leaves caching off. Requests carrying a token never touch it.
+func (c *Client) WithCache(root string) *Client {
+	out := *c
+	out.cache = nil
+	if root != "" {
+		out.cache = newDiskCache(filepath.Join(root, "market"))
+	}
+	return &out
 }
 
 func newClient(base url.URL, hc *http.Client) *Client {
@@ -160,9 +179,11 @@ func (c *Client) List(ctx context.Context, q Query) (Page, error) {
 	v.Set("limit", strconv.Itoa(defaultPageSize))
 	v.Set("offset", strconv.Itoa(max(0, min(q.Offset, 10000))))
 	var page Page
-	if err := c.get(ctx, "/v1/packages", v, maxListBody, &page); err != nil {
+	note, err := c.get(ctx, "/v1/packages", v, maxListBody, &page)
+	if err != nil {
 		return Page{}, err
 	}
+	page.Cache = note
 	kept := page.Packages[:0]
 	for _, p := range page.Packages {
 		if q.Pinned && (p.Pinned == nil || !*p.Pinned) {
@@ -192,13 +213,14 @@ func (c *Client) Detail(ctx context.Context, slug string) (Detail, error) {
 		} `json:"versions"`
 	}
 	path := "/v1/packages/" + url.PathEscape(handle) + "/" + url.PathEscape(name)
-	if err := c.get(ctx, path, nil, maxDetailBody, &raw); err != nil {
+	note, err := c.get(ctx, path, nil, maxDetailBody, &raw)
+	if err != nil {
 		return Detail{}, err
 	}
 	if raw.Package.Status != "active" || raw.Package.Slug != handle+"/"+name {
 		return Detail{}, ErrNotFound
 	}
-	out := Detail{Package: raw.Package}
+	out := Detail{Package: raw.Package, Cache: note}
 	// The registry serves a package only while it is active, and approval fixes
 	// latestVersion to the reviewed row, so that row is the approved one.
 	for _, v := range raw.Versions {
@@ -210,23 +232,102 @@ func (c *Client) Detail(ctx context.Context, slug string) (Detail, error) {
 	return out, nil
 }
 
-func (c *Client) get(ctx context.Context, path string, query url.Values, limit int64, into any) error {
-	resp, body, err := c.send(ctx, http.MethodGet, path, query, "", nil, limit)
+func (c *Client) get(ctx context.Context, path string, query url.Values, limit int64, into any) (*CacheNote, error) {
+	if c.cache == nil {
+		_, err := c.fetch(ctx, path, query, limit, nil, into)
+		return nil, err
+	}
+	key := c.cache.key(c.base.Host, path, query)
+	held, have := c.cache.load(key)
+	if have && !refreshAsked(ctx) && c.cache.fresh(held) && decode(held.Body, into) == nil {
+		return nil, nil
+	}
+	var cond http.Header
+	if have && (held.ETag != "" || held.LastModified != "") {
+		cond = http.Header{}
+		if held.ETag != "" {
+			cond.Set("If-None-Match", held.ETag)
+		}
+		if held.LastModified != "" {
+			cond.Set("If-Modified-Since", held.LastModified)
+		}
+	}
+	resp, err := c.fetch(ctx, path, query, limit, cond, into)
+	switch {
+	case err == nil && resp.status == http.StatusNotModified && have:
+		if decode(held.Body, into) != nil {
+			c.cache.remove(key)
+			return nil, ErrBadResponse
+		}
+		held.FetchedAt = cacheNow().UTC()
+		c.cache.write(held)
+		return nil, nil
+	case err == nil && noStore(resp.header):
+		c.cache.remove(key)
+		return nil, nil
+	case err == nil:
+		c.cache.store(key, resp.header, resp.body)
+		return nil, nil
+	case errors.Is(err, ErrNotFound):
+		c.cache.remove(key)
+		return nil, err
+	case !have || ctx.Err() != nil:
+		return nil, err
+	}
+	var cause string
+	switch {
+	case errors.Is(err, ErrUnreachable):
+		cause = CacheCauseUnreachable
+	case resp.status >= 500 || resp.garbled:
+		cause = CacheCauseBadResponse
+	default:
+		return nil, err
+	}
+	reflect.ValueOf(into).Elem().SetZero()
+	if decode(held.Body, into) != nil {
+		return nil, err
+	}
+	return &CacheNote{CachedAt: held.FetchedAt.UTC().Format(time.RFC3339), Cause: cause}, nil
+}
+
+type fetched struct {
+	status  int
+	header  http.Header
+	body    []byte
+	garbled bool
+}
+
+// fetch makes one GET and decodes a 2xx answer into into. A 304 is returned
+// for the caller to resolve; the fetched value describes the answer even when
+// the error is not nil.
+func (c *Client) fetch(ctx context.Context, path string, query url.Values, limit int64, extra http.Header, into any) (fetched, error) {
+	resp, body, err := c.sendWith(ctx, http.MethodGet, path, query, "", nil, limit, extra)
 	if err != nil {
-		return err
+		return fetched{}, err
 	}
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrNotFound
+	out := fetched{status: resp.StatusCode, header: resp.Header, body: body}
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return out, ErrNotFound
+	case resp.StatusCode == http.StatusNotModified && extra != nil:
+		return out, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return out, fmt.Errorf("%w: HTTP %d", ErrBadResponse, resp.StatusCode)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%w: HTTP %d", ErrBadResponse, resp.StatusCode)
+	if err := decode(body, into); err != nil {
+		out.garbled = true
+		return out, err
 	}
-	return decode(body, into)
+	return out, nil
 }
 
 // send makes one request to the fixed registry host and reads at most limit
 // bytes of the answer. A token, when given, travels only on this request.
 func (c *Client) send(ctx context.Context, method, path string, query url.Values, token string, payload []byte, limit int64) (*http.Response, []byte, error) {
+	return c.sendWith(ctx, method, path, query, token, payload, limit, nil)
+}
+
+func (c *Client) sendWith(ctx context.Context, method, path string, query url.Values, token string, payload []byte, limit int64, extra http.Header) (*http.Response, []byte, error) {
 	u := c.base
 	u.Path = path
 	u.RawQuery = query.Encode()
@@ -245,6 +346,7 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	maps.Copy(req.Header, extra)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

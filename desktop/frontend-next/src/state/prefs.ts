@@ -23,6 +23,26 @@ export function setShowsReceipt(on: boolean): void {
   }
 }
 
+// On unless this machine turned it off. The desktop shell reads the same key
+// from its saved preferences, so a flip here reaches it without a request.
+const KEEP_AWAKE_KEY = "rx-keep-awake";
+
+export function keepsAwake(): boolean {
+  try {
+    return localStorage.getItem(KEEP_AWAKE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setKeepsAwake(on: boolean): void {
+  try {
+    localStorage.setItem(KEEP_AWAKE_KEY, on ? "on" : "off");
+  } catch {
+    /* a private window keeps the default, which is the same answer it gives */
+  }
+}
+
 // Off unless this machine turned it on. The balance and the session's cost are
 // what a shared screen or a recording leaks; masking changes only what is drawn,
 // so the reads behind them keep running and revealing shows the current value.
@@ -57,6 +77,75 @@ export function setHidesAmounts(on: boolean): void {
     /* the choice holds for this window and is forgotten on the next */
   }
   amountListeners.forEach((fn) => fn());
+}
+
+// "reduced" drops the layers that cost the GPU a frame each time the page
+// moves: frosted glass, the animated sky, the grain. Anything else is "full".
+const EFFECTS_KEY = "rx-effects";
+
+export type EffectsMode = "full" | "reduced";
+
+const effectsListeners = new Set<() => void>();
+
+export function effectsMode(): EffectsMode {
+  try {
+    return localStorage.getItem(EFFECTS_KEY) === "reduced" ? "reduced" : "full";
+  } catch {
+    return "full";
+  }
+}
+
+export function onEffectsChange(fn: () => void): () => void {
+  effectsListeners.add(fn);
+  return () => {
+    effectsListeners.delete(fn);
+  };
+}
+
+export function setEffectsMode(mode: EffectsMode): void {
+  try {
+    localStorage.setItem(EFFECTS_KEY, mode);
+  } catch {
+    /* a private window keeps the default, which is the same answer it gives */
+  }
+  effectsListeners.forEach((fn) => fn());
+}
+
+// When the icon column beside the workspace rail is drawn: "on" always, "collapsed"
+// only while the workspace rail is closed, "off" never. A phone-width window
+// never draws it, whatever this says. "on" and "off" are the two values the
+// earlier on/off switch wrote, so a stored choice reads back as itself; anything
+// unreadable or unset is the default, "on".
+const NAV_RAIL_KEY = "rx-nav-rail";
+
+export type NavRailMode = "on" | "collapsed" | "off";
+export const NAV_RAIL_MODES: readonly NavRailMode[] = ["on", "collapsed", "off"];
+
+const navRailListeners = new Set<() => void>();
+
+export function navRailMode(): NavRailMode {
+  try {
+    const raw = localStorage.getItem(NAV_RAIL_KEY);
+    return raw === "collapsed" || raw === "off" ? raw : "on";
+  } catch {
+    return "on";
+  }
+}
+
+export function onNavRailChange(fn: () => void): () => void {
+  navRailListeners.add(fn);
+  return () => {
+    navRailListeners.delete(fn);
+  };
+}
+
+export function setNavRailMode(mode: NavRailMode): void {
+  try {
+    localStorage.setItem(NAV_RAIL_KEY, mode);
+  } catch {
+    /* a private window keeps the default, which is the same answer it gives */
+  }
+  navRailListeners.forEach((fn) => fn());
 }
 
 // How each foldable part of the transcript starts. "live" opens while the part

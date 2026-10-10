@@ -118,3 +118,17 @@ func IsStreamInterrupted(err error) bool {
 	var interrupted *StreamInterruptedError
 	return errors.As(err, &interrupted)
 }
+
+// RetryCauseOfStreamInterrupt maps a stream-interrupt reason onto the retry
+// cause a frontend words; a reason it does not know yields no cause.
+func RetryCauseOfStreamInterrupt(reason string) RetryCause {
+	switch reason {
+	case StreamInterruptConnectionReset, StreamInterruptPrematureEOF:
+		return RetryCauseConnectionClosed
+	case StreamInterruptIdleTimeout:
+		return RetryCauseStreamIdle
+	case StreamInterruptUpstreamError:
+		return RetryCauseUpstreamError
+	}
+	return ""
+}

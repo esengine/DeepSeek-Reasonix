@@ -84,15 +84,6 @@ func MigrateLegacySessionsFromConfigDir(srcDir, globalDest string, projectDir fu
 	return migrateLegacySessions(srcDir, globalDest, legacyRoutedConfigImportMarker, projectDir)
 }
 
-// MigrateLegacySessionsFromExplicitDir imports sessions from a user-selected
-// legacy directory. It uses a source-specific marker so a previous default
-// /migrate pass cannot hide later imports from a custom Windows install/data
-// directory.
-func MigrateLegacySessionsFromExplicitDir(srcDir, globalDest string, projectDir func(workspaceRoot string) string) (int, error) {
-	marker := explicitLegacyImportMarker(srcDir)
-	return migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, marker+".jsonl", projectDir)
-}
-
 func explicitLegacyImportMarker(srcDir string) string {
 	key := strings.TrimSpace(srcDir)
 	if abs, err := filepath.Abs(key); err == nil {
@@ -103,10 +94,10 @@ func explicitLegacyImportMarker(srcDir string) string {
 }
 
 func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(string) string) (int, error) {
-	return migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, legacyJsonlPassMarker, projectDir)
+	return migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, legacyJsonlPassMarker, projectDir, nil)
 }
 
-func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker string, projectDir func(string) string) (int, error) {
+func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker string, projectDir func(string) string, rep *LegacyReport) (int, error) {
 	if strings.TrimSpace(marker) == "" {
 		marker = legacyImportMarker
 	}
@@ -116,7 +107,7 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 	// Gate on both the routed marker AND the jsonl marker: an existing upgrader
 	// whose events pass already stamped the routed marker must still reach the
 	// .jsonl-only / subdir passes below (Pass 1 is idempotent via dest checks).
-	if importMarkerExists(globalDest, marker) && importMarkerExists(globalDest, jsonlMarker) {
+	if rep == nil && importMarkerExists(globalDest, marker) && importMarkerExists(globalDest, jsonlMarker) {
 		// The one-time full passes already ran for this source. Still run the
 		// bounded re-home pass: a user who downgrades to a pre-routing build
 		// (which writes every session to the flat dir) and then upgrades again
@@ -127,6 +118,7 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 	}
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
+		rep.skipRead(srcDir, err)
 		return 0, nil
 	}
 
@@ -192,6 +184,11 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 
 		msgs, err := reconstructSession(filepath.Join(srcDir, name))
 		if err != nil || len(msgs) == 0 {
+			if err != nil {
+				rep.skipRead(filepath.Join(srcDir, name), err)
+			} else if eventsInfo != nil && eventsInfo.Size() > 0 {
+				rep.skip(filepath.Join(srcDir, name), SkipUnreadableFormat)
+			}
 			continue
 		}
 		s := &Session{Messages: msgs}
@@ -213,84 +210,18 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 	// desktop, subagent, and later-version chat sessions). The pass is gated by
 	// its own marker so existing upgraders whose events passes completed still
 	// get their .jsonl-only sessions imported.
-	if !importMarkerExists(globalDest, jsonlMarker) {
-		n, failed := importJsonlSessions(entries, srcDir, globalDest, hasEvents, projectDir)
+	if rep != nil || !importMarkerExists(globalDest, jsonlMarker) {
+		n, failed := importJsonlSessions(entries, srcDir, globalDest, hasEvents, projectDir, rep)
 		imported += n
 		hadArtifactFailure = hadArtifactFailure || failed
 
-		// .jsonl.bak recovery: when the .jsonl was lost but a backup remains.
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, ".jsonl.bak") {
-				continue
-			}
-			base := strings.TrimSuffix(name, ".jsonl.bak")
-			if hasEvents[base] {
-				continue
-			}
-			jsonlName := base + ".jsonl"
-			if _, err := os.Stat(filepath.Join(srcDir, jsonlName)); err == nil {
-				continue // .jsonl exists, prefer it
-			}
-			meta := readLegacyMeta(srcDir, base)
-			destDir := globalDest
-			if projectDir != nil && meta.Workspace != "" && dirExists(meta.Workspace) {
-				if d := projectDir(meta.Workspace); d != "" {
-					destDir = d
-				}
-			}
-			dest := filepath.Join(destDir, base+".jsonl")
-			if _, err := os.Stat(dest); err == nil {
-				continue
-			}
-			bakPath := filepath.Join(srcDir, name)
-			if !isMessageFormat(bakPath) {
-				continue
-			}
-			srcInfo, _ := e.Info()
-			if err := transformAndCopyJsonl(bakPath, dest); err != nil {
-				continue
-			}
-			if srcInfo != nil {
-				_ = os.Chtimes(dest, srcInfo.ModTime(), srcInfo.ModTime())
-			}
-			recordImportedTitle(destDir, base, meta.Summary)
-			imported++
-		}
+		imported += importBakSessions(entries, srcDir, globalDest, hasEvents, projectDir, rep)
 	}
 
 	// Pass 3 — recurse into subdirectories that look like project session dirs
 	// (e.g. Users_Yuki_git_polytone-audio-engine/ under ~/.reasonix/sessions/).
 	// The TS version nested project-scoped sessions under a workspace slug.
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if e.Name() == "subagents" {
-			continue
-		}
-		subDir := filepath.Join(srcDir, e.Name())
-		subEntries, err := os.ReadDir(subDir)
-		if err != nil {
-			continue
-		}
-		hasSessions := false
-		for _, se := range subEntries {
-			sn := se.Name()
-			if !se.IsDir() && (strings.HasSuffix(sn, ".jsonl") || strings.HasSuffix(sn, ".events.jsonl")) {
-				hasSessions = true
-				break
-			}
-		}
-		if !hasSessions {
-			continue
-		}
-		n, err := migrateSubDirectory(subDir, globalDest, projectDir)
-		if err != nil {
-			continue
-		}
-		imported += n
-	}
+	imported += migrateProjectSubdirs(entries, srcDir, globalDest, projectDir, rep)
 
 	// Also stamp the flat markers so a downgrade to an older build doesn't
 	// re-run the flat import over routed sessions.
@@ -304,7 +235,7 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 // importJsonlSessions copies .jsonl files that are already in message format
 // (no .events.jsonl counterpart) from srcDir into their appropriate destination
 // dirs. Returns the count imported and whether a session or artifact copy failed.
-func importJsonlSessions(entries []os.DirEntry, srcDir, globalDest string, hasEvents map[string]bool, projectDir func(string) string) (int, bool) {
+func importJsonlSessions(entries []os.DirEntry, srcDir, globalDest string, hasEvents map[string]bool, projectDir func(string) string, rep *LegacyReport) (int, bool) {
 	imported := 0
 	hadArtifactFailure := false
 	for _, e := range entries {
@@ -321,6 +252,9 @@ func importJsonlSessions(entries []os.DirEntry, srcDir, globalDest string, hasEv
 		}
 		jsonlPath := filepath.Join(srcDir, name)
 		if !isMessageFormat(jsonlPath) {
+			if info, err := e.Info(); err == nil && info.Size() > 0 {
+				rep.skip(jsonlPath, SkipUnreadableFormat)
+			}
 			continue
 		}
 		destDir, summary, copyBranchMeta := jsonlSessionDestDir(srcDir, jsonlPath, base, globalDest, projectDir)
@@ -336,6 +270,7 @@ func importJsonlSessions(entries []os.DirEntry, srcDir, globalDest string, hasEv
 		srcInfo, _ := e.Info()
 		if !copySessionFile(jsonlPath, dest) {
 			hadArtifactFailure = true
+			rep.skip(jsonlPath, SkipCopyFailed)
 			continue
 		}
 		if srcInfo != nil {
@@ -382,7 +317,7 @@ func jsonlSessionDestDir(srcDir, srcPath, base, globalDest string, projectDir fu
 // migrateSubDirectory imports sessions from a project-scoped subdirectory
 // within the legacy session dir. It walks the subdirectory for .events.jsonl and
 // .jsonl files and imports them using the projectDir callback for routing.
-func migrateSubDirectory(subDir, globalDest string, projectDir func(string) string) (int, error) {
+func migrateSubDirectory(subDir, globalDest string, projectDir func(string) string, rep *LegacyReport) (int, error) {
 	entries, err := os.ReadDir(subDir)
 	if err != nil {
 		return 0, nil
@@ -433,6 +368,9 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 			}
 			srcPath = filepath.Join(subDir, name)
 			if !isMessageFormat(srcPath) {
+				if info, err := e.Info(); err == nil && info.Size() > 0 {
+					rep.skip(srcPath, SkipUnreadableFormat)
+				}
 				continue
 			}
 			// reconstruct stays false
@@ -454,6 +392,9 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 		if reconstruct {
 			msgs, err := reconstructSession(srcPath)
 			if err != nil || len(msgs) == 0 {
+				if err != nil {
+					rep.skipRead(srcPath, err)
+				}
 				continue
 			}
 			s := &Session{Messages: msgs}
@@ -465,10 +406,12 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 			}
 		} else if isNativeSessionEventLog(SessionEventLogPath(srcPath)) {
 			if err := saveNativeSessionCopy(srcPath, dest); err != nil {
+				rep.skipRead(srcPath, err)
 				continue
 			}
 		} else {
 			if err := transformAndCopyJsonl(srcPath, dest); err != nil {
+				rep.skipWrite(srcPath, err)
 				continue
 			}
 		}

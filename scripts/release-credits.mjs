@@ -4,6 +4,7 @@
 // plain with a warning; a lookup GitHub could not answer fails by code.
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 export const defaultRepository = "esengine/DeepSeek-Reasonix";
 
@@ -32,6 +33,28 @@ export function isBotAccount(login, type) {
   if (type === "Bot") return true;
   const name = String(login).toLowerCase();
   return name.endsWith("[bot]") || botLogins.has(name);
+}
+
+// Accounts left uncredited like bots: the repository owner, plus the logins in
+// RELEASE_CREDIT_EXCLUDE (comma separated). Compared case-insensitively.
+export function creditExclusions(repository = defaultRepository, env = process.env) {
+  const extra = String(env.RELEASE_CREDIT_EXCLUDE || "").split(",");
+  const names = [repository.split("/")[0], ...extra].map((name) => name.trim().toLowerCase());
+  return new Set(names.filter(Boolean));
+}
+
+// The owner's anonymous-commit aliases and the tool or CI identities that author
+// commits without being people; declared once in credit-identities.json.
+export function declaredNonCredits() {
+  const declared = JSON.parse(readFileSync(new URL("./credit-identities.json", import.meta.url), "utf8"));
+  const names = [...declared.ownerAliases, ...declared.nonPersonIdentities];
+  return new Set(names.map((name) => String(name).trim().toLowerCase()).filter(Boolean));
+}
+
+// creditExclusions plus the declared aliases and tool identities, for lists that
+// thank people by name.
+export function thanksExclusions(repository = defaultRepository, env = process.env) {
+  return new Set([...creditExclusions(repository, env), ...declaredNonCredits()]);
 }
 
 export function tokenFromEnvironment(env = process.env, runGh = defaultRunGh) {
@@ -71,21 +94,23 @@ const refQuery = `query($owner: String!, $name: String!, $number: Int!) {
   }
 }`;
 
-function person(author) {
+// `bot` is true for every account that is never credited, excluded humans included.
+function person(author, excluded) {
   if (!author) return { login: null, bot: true };
-  return { login: author.login, bot: isBotAccount(author.login, author.__typename) };
+  const bot = isBotAccount(author.login, author.__typename) || excluded.has(author.login.toLowerCase());
+  return { login: author.login, bot };
 }
 
 // An issue's fixers are the merged pull requests GitHub links to it as closing
 // it: the one that closed it, and any linked by a closing keyword or by hand.
 // A mere mention is not a fix, so cross-references are not read.
-function issueFixes(issue) {
+function issueFixes(issue, excluded) {
   const closer = issue.timelineItems?.nodes?.[0]?.closer;
   const candidates = [...(issue.closedByPullRequestsReferences?.nodes || [])];
   if (closer?.__typename === "PullRequest") candidates.push(closer);
   const fixes = new Map();
   for (const pull of candidates) {
-    if (pull?.merged && !fixes.has(pull.number)) fixes.set(pull.number, { number: pull.number, ...person(pull.author) });
+    if (pull?.merged && !fixes.has(pull.number)) fixes.set(pull.number, { number: pull.number, ...person(pull.author, excluded) });
   }
   return [...fixes.values()].sort((a, b) => a.number - b.number);
 }
@@ -116,6 +141,7 @@ export function githubRefLookup({
   fetchImpl = fetch,
   sleep = defaultSleep,
   attempts = 4,
+  excluded = creditExclusions(repository),
 } = {}) {
   const [owner, name] = repository.split("/");
   const headers = { "Content-Type": "application/json", "User-Agent": "reasonix-release-credits" };
@@ -148,8 +174,8 @@ export function githubRefLookup({
     const payload = await query(ref);
     const repositoryNode = payload.data?.repository;
     const node = repositoryNode?.issueOrPullRequest;
-    if (node?.__typename === "PullRequest") return { kind: "pull", ...person(node.author) };
-    if (node?.__typename === "Issue") return { kind: "issue", fixes: issueFixes(node) };
+    if (node?.__typename === "PullRequest") return { kind: "pull", ...person(node.author, excluded) };
+    if (node?.__typename === "Issue") return { kind: "issue", fixes: issueFixes(node, excluded) };
     const errors = payload.errors || [];
     if (repositoryNode && errors.every((error) => error.type === "NOT_FOUND")) {
       return { kind: repositoryNode.discussion ? "discussion" : "missing" };

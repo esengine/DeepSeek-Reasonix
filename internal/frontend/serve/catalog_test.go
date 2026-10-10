@@ -428,27 +428,6 @@ func mustJSON(t *testing.T, value string) string {
 	return string(body)
 }
 
-// A configured server with no process running is three different things, and
-// the panel used to have two words for them. The reported symptom was every
-// working server reading as "not connected" beside a Reconnect button: a
-// cache-hit server is process-idle by design, with its whole toolset callable.
-func TestAConfiguredServerSaysWhetherItIsCallableRatherThanRunning(t *testing.T) {
-	enabled := control.MCPServerState{Enabled: true}
-	off := control.MCPServerState{Enabled: false}
-
-	if got := configuredState(enabled, 12); got != "standby" {
-		t.Fatalf("enabled with 12 tools in the catalog = %q, want standby", got)
-	}
-	if got := configuredState(enabled, 0); got != "idle" {
-		t.Fatalf("enabled with nothing registered = %q, want idle", got)
-	}
-	// Switched off outranks the catalog: tools can linger a moment after the
-	// switch, and the row has to report the decision, not the leftovers.
-	if got := configuredState(off, 12); got != "disabled" {
-		t.Fatalf("switched off = %q, want disabled", got)
-	}
-}
-
 // The settings pane lists a server so the user can decide whether to keep it.
 // Name, transport and source cannot answer that; what the server says it is
 // and what its tools do can, so both have to survive the wire shape.

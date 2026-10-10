@@ -62,7 +62,7 @@ func TestJobCompletionQueuesHostOriginItem(t *testing.T) {
 	}
 	select {
 	case <-held:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("the continuation never reached dispatch")
 	}
 	st, err := c.ensureInbox()
@@ -236,7 +236,7 @@ func TestJobCompletionSteersLiveTurnAsHost(t *testing.T) {
 	c.Submit("start something long")
 	select {
 	case <-prov.started:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("the first provider round never started")
 	}
 
@@ -253,7 +253,7 @@ func TestJobCompletionSteersLiveTurnAsHost(t *testing.T) {
 
 	// Release the turn so the steer is consumed at the next round boundary.
 	release()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testenv.Budget(t))
 	for {
 		if hostSteerInHistory(c.History(), "task-6") {
 			return
@@ -339,7 +339,7 @@ func TestJobBurstFoldsIntoOneContinuation(t *testing.T) {
 	}
 	select {
 	case <-held:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testenv.Budget(t)):
 		t.Fatal("the first continuation never reached dispatch")
 	}
 	// An error is the contract with the manager: it keeps its own note, so the

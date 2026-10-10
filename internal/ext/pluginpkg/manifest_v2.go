@@ -213,6 +213,7 @@ func parseNativeV2(b []byte, root, apiVersion string) (Package, []string, error)
 		return Package{}, warnings, err
 	}
 	pkg := Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}
+	pkg.skills = pkg.scanSkills()
 	pkg.Compatibility = compatibilityFor(pkg, nil)
 	return pkg, warnings, nil
 }
@@ -402,7 +403,9 @@ func ParseNativeForMigrate(root string) (Package, []string, error) {
 		return Package{}, nil, err
 	}
 	if apiVersion == "" {
-		return parseNativeLegacy(b, root)
+		pkg, warnings, err := parseNativeLegacy(b, root)
+		pkg.skills = nil
+		return pkg, warnings, err
 	}
 	if apiVersion == ManifestAPIVersionV2 {
 		return Package{}, nil, fmt.Errorf("%s: already uses %s; migration only supports pre-extension manifests without apiVersion", NativeManifest, ManifestAPIVersionV2)

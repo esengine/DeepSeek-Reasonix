@@ -167,17 +167,25 @@ func RootIDs() []RootID {
 	return out
 }
 
-// StateRootEntries is everything written under the state root. A move and a
-// size report read it, so a directory missing from here is left behind by a
-// relocation while the config still names what was in it — which is how a
-// wallpaper and a theme pack came back gone from a moved install.
-var StateRootEntries = []string{"sessions", "archive", "stats", "projects", "appearance", "themes", "repair"}
+// StateRootEntries is everything written at the top of the state root. An entry
+// missing here is stranded by a relocation while the code reads only the new
+// root, so the project list, instructions and memory looked deleted. The
+// state-root guard test fails on a joined path this list does not name.
+var StateRootEntries = []string{
+	"sessions", "archive", "stats", "projects", "appearance", "themes", "repair",
+	"serve-workspaces.json", "memory", "schedules", "trusted", "machine-id.key", "mcp-global-migration-v1", "commands",
+	"REASONIX.md", "AGENTS.md", "CLAUDE.md", "REASONIX.local.md", "AGENTS.local.md", "CLAUDE.local.md",
+}
 
-// StateRootEntriesEarlyMovesLeft is what StateRootEntries did not hold when
-// relocation shipped, so a move performed by those versions left them in the
-// previous root. It is a fixed historical fact and does not grow with the list
-// above; the recovery and the panel notice both read it.
-var StateRootEntriesEarlyMovesLeft = []string{"appearance", "themes", "repair"}
+// stateRootEntriesFirstMove is what relocation owned when it shipped.
+var stateRootEntriesFirstMove = []string{"sessions", "archive", "stats", "projects"}
+
+// StateRootEntriesEarlyMovesLeft is what a move made by an earlier version left
+// in the previous root: every entry the first relocation did not own. The
+// recovery and the panel notice both read it.
+var StateRootEntriesEarlyMovesLeft = slices.DeleteFunc(slices.Clone(StateRootEntries), func(name string) bool {
+	return slices.Contains(stateRootEntriesFirstMove, name)
+})
 
 // RootOwns names the entries a root may claim inside its directory, empty when
 // it has the directory to itself. A move and a size report read this rather

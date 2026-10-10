@@ -221,3 +221,28 @@ func TestGatedSlashCommandToolSnapshotsOncePerCall(t *testing.T) {
 		t.Fatal("an empty expansion must be an error, not an empty Expanded result")
 	}
 }
+
+func TestUnlistedEntryStaysCallableButOffTheListing(t *testing.T) {
+	hidden := true
+	tl := NewSlashCommandTool([]SlashEntry{
+		{Name: "shown", Render: func([]string) string { return "SHOWN" }},
+		{Name: "gated", Skill: true, Unlisted: func() bool { return hidden }, Render: func([]string) string { return "GATED BODY" }},
+	}, func() func(string) error { return func(string) error { return nil } })
+	run := func(command string) (string, error) {
+		return tl.Execute(context.Background(), json.RawMessage(`{"command":"`+command+`"}`))
+	}
+	list, _ := run("list")
+	if !strings.Contains(list, "/shown") || strings.Contains(list, "/gated") {
+		t.Fatalf("listing while unlisted:\n%s", list)
+	}
+	if out, err := run("gated"); err != nil || !strings.Contains(out, "GATED BODY") {
+		t.Fatalf("an unlisted entry must stay callable by name: %q %v", out, err)
+	}
+	if _, err := run("nope"); err == nil || strings.Contains(err.Error(), "gated") {
+		t.Fatalf("the unknown-name hint must not list it either: %v", err)
+	}
+	hidden = false
+	if list, _ := run("list"); !strings.Contains(list, "/gated") {
+		t.Fatalf("listing once eligible:\n%s", list)
+	}
+}

@@ -65,3 +65,13 @@ func TestSkillHealthReportsInvalidInvocationDeclarations(t *testing.T) {
 		t.Fatalf("doctor did not report the invalid declaration: %v", warns)
 	}
 }
+
+func TestCollectSkillHealthWarningsReportsUnusablePathsGlobs(t *testing.T) {
+	warns := CollectSkillHealthWarnings(SkillHealthOptions{Skills: []skill.Skill{
+		{Name: "gated", Description: "ok", Paths: []string{"**/*.go"}, InvalidPaths: []string{"!vendor/**"}},
+	}})
+	joined := strings.Join(warns, "\n")
+	if !strings.Contains(joined, `"!vendor/**"`) || !strings.Contains(joined, "stays hidden") || strings.Contains(joined, `"**/*.go"`) {
+		t.Fatalf("warnings = %q", warns)
+	}
+}

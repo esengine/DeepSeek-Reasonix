@@ -78,15 +78,15 @@ type SessionConfigStateParams struct {
 
 // SessionConfigState is the complete ACP-visible config state for a session.
 type SessionConfigState struct {
-	Model          string
-	EffortOverride *string
-	RuntimeProfile string
-	Models         *SessionModelState
-	ConfigOptions  []SessionConfigOption
+	Model                               string
+	EffortOverride                      *string
+	RuntimeProfile                      string
+	ResolvedEffort, ProviderFingerprint string
+	Models                              *SessionModelState
+	ConfigOptions                       []SessionConfigOption
 }
 
-// SessionConfigStateProvider lets a Factory expose model, effort, and work-mode
-// selectors without making the ACP transport depend on a concrete config backend.
+// SessionConfigStateProvider exposes model, effort, and work-mode selectors.
 type SessionConfigStateProvider interface {
 	SessionConfigState(ctx context.Context, p SessionConfigStateParams) (SessionConfigState, error)
 }
@@ -146,7 +146,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle(sessionInboxRefreshMethod, svc.sessionInboxRefresh)
 	conn.Handle(sessionReloadExtensionsMethod, svc.sessionReloadExtensions)
 	registerGoalMethods(conn, svc)
-	conn.Handle(sessionStatusMethod, svc.sessionStatus)
+	registerSessionHealthMethods(conn, svc)
 	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
 	conn.Handle("session/set_model", svc.sessionSetModel)
 	conn.Handle("session/set_mode", svc.sessionSetMode)
@@ -691,7 +691,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		updatedAt:        meta.UpdatedAt,
 		lease:            lease,
 	}
-	s.bindStatusEvents(sess)
+	s.bindSessionHealthEvents(sess)
 	if err := saveACPMeta(path, sess.meta()); err != nil {
 		sess.releaseSessionLease()
 		ctrl.Close()

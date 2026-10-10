@@ -3,6 +3,12 @@
 //
 //   - The registry is reached over https at one fixed host, with a timeout, a
 //     body cap and no redirects. Its rows are untrusted data.
+//   - Browsing keeps the last good anonymous answer on disk and serves it,
+//     marked with when it was saved, only when the registry cannot answer.
+//     Install, publish, vote and a signed-in view never read or write it. The
+//     cache is not a trust source: whoever can write the user's cache can only
+//     forge what is displayed (the pinned badge included); the install digest
+//     chain never reads it, and an answer marked private or no-store is not kept.
 //   - Two things are written back. A vote carries the account token, which
 //     therefore only ever goes to that host. An install report carries the
 //     slug and a random id kept only for the market (InstallID) — no token,

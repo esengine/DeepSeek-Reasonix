@@ -195,7 +195,7 @@ func TestReadStreamContextCancelClosesBody(t *testing.T) {
 	out := make(chan provider.Chunk, 4)
 	done := make(chan struct{})
 	go func() {
-		(&client{idleTimeout: time.Minute}).readStream(ctx, resp, out, nil)
+		(&client{idleTimeout: time.Minute}).readStream(ctx, resp, out, nil, false)
 		close(done)
 	}()
 

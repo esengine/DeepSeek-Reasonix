@@ -173,6 +173,42 @@ func TestFormattedShellDiffRowsFitTheTranscriptWidth(t *testing.T) {
 	}
 }
 
+// A diff collapses to fewer rows when its formatter lands: the raw preamble it
+// drew while the run was in flight becomes one formatted line. A collapse
+// larger than the viewport must re-anchor the transcript to its tail — holding
+// the old position would put every transcript row past the content, so the
+// whole transcript would read as empty while the composer stayed.
+func TestCollapsedDiffReanchorsTheTranscript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no portable stdin→stdout filter")
+	}
+	restore := termrender.SetDiffFormatterForTest([]string{"head", "-n", "1"})
+	landed := make(chan termrender.DiffKey, 8)
+	termrender.SetDiffFormatNotify(func(k termrender.DiffKey) { landed <- k })
+	t.Cleanup(func() {
+		termrender.SetDiffFormatNotify(nil)
+		restore()
+	})
+
+	m, _ := testModel(t)
+	fillTranscript(m, 40) // taller than the viewport
+	m.View()
+
+	diff := "diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1,40 +1,40 @@\n" + strings.Repeat("-old\n+new\n", 20)
+	apply(m,
+		eventwire.Event{Kind: "tool_dispatch", Tool: &eventwire.Tool{ID: "t1", Name: "bash", Args: `{"command":"git diff"}`}},
+		eventwire.Event{Kind: "tool_result", Tool: &eventwire.Tool{ID: "t1", Name: "bash", Output: diff, OutputDiff: true}},
+	)
+	m.View()
+	key := waitLanded(t, landed)
+	m.Update(diffFormattedMsg{key: key})
+	m.View()
+
+	if total := len(m.content(m.liveLines())); m.scr.yoff >= total {
+		t.Fatalf("the transcript blanked after the diff collapsed: yoff=%d total=%d", m.scr.yoff, total)
+	}
+}
+
 // A transcript holding more diff keys than the memo must still settle: each
 // landed run is fed back the way the program feeds it, and a run may only be
 // answered by repainting the block that asked for its key, so a repaint cannot

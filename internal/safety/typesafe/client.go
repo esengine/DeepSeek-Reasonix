@@ -15,6 +15,11 @@ import (
 
 const DefaultBaseURL = "https://api.typesafe.ai"
 
+var (
+	ErrKeyMissing        = errors.New("TypeSafe API key is not configured")
+	ErrMalformedResponse = errors.New("TypeSafe response is not a System One answer")
+)
+
 type Question struct {
 	Type         string `json:"type"`
 	Instructions any    `json:"instructions"`
@@ -63,7 +68,7 @@ func (c Client) Evaluate(ctx context.Context, request Request) (Response, error)
 		key = strings.TrimSpace(c.APIKey())
 	}
 	if key == "" {
-		return Response{}, errors.New("TypeSafe API key is not configured")
+		return Response{}, ErrKeyMissing
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -101,7 +106,7 @@ func (c Client) Evaluate(ctx context.Context, request Request) (Response, error)
 	}
 	var response Response
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return Response{}, fmt.Errorf("decode TypeSafe response: %w", err)
+		return Response{}, fmt.Errorf("%w: %w", ErrMalformedResponse, err)
 	}
 	return response, nil
 }

@@ -3,13 +3,20 @@ package installsource
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 )
+
+// maxMCPJSONServers caps the servers one .mcp.json may declare, as
+// maxMarketplacePlugins caps a marketplace: every eager entry is a high-risk
+// action the preview never hides, so an unbounded file would all be shown.
+const maxMCPJSONServers = 64
 
 // mcpEntryAction assembles the DTO for a single MCP server install. The
 // caller decides whether apply=true actually runs cfg.UpsertPlugin +
@@ -65,9 +72,9 @@ func mcpActionRisk(e config.PluginEntry, reasons []string) (RiskLevel, []string)
 	level := RiskMedium
 	hasAuth := false
 	for k, v := range e.Headers {
-		if strings.EqualFold(k, "Authorization") || strings.Contains(strings.ToLower(v), "bearer") || strings.Contains(strings.ToLower(v), "token") {
+		if secrets.CredentialKey(k) || secrets.CredentialValue(v) {
 			hasAuth = true
-			reasons = append(reasons, "sends auth headers to "+e.URL)
+			reasons = append(reasons, "sends auth headers to "+hostLiteral(secrets.RedactEndpoint(e.URL)))
 		}
 	}
 	if e.Tier == "eager" {
@@ -81,13 +88,19 @@ func mcpActionRisk(e config.PluginEntry, reasons []string) (RiskLevel, []string)
 }
 
 // remoteMCPAction builds a server entry from a URL alone. The default
-// transport is http unless the URL's path smells like SSE.
+// transport is http unless the endpoint path has an SSE segment.
 func (t *Tool) remoteMCPAction(req request, sourceURL string) action {
 	transport := req.Transport
 	if transport == "" || transport == "auto" {
 		transport = "http"
-		if strings.Contains(strings.ToLower(sourceURL), "sse") {
-			transport = "sse"
+		if endpoint, err := url.Parse(sourceURL); err == nil {
+			for segment := range strings.SplitSeq(endpoint.EscapedPath(), "/") {
+				decoded, err := url.PathUnescape(segment)
+				if err == nil && strings.EqualFold(decoded, "sse") {
+					transport = "sse"
+					break
+				}
+			}
 		}
 	}
 	name := strings.TrimSpace(req.Name)
@@ -198,6 +211,9 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 	if len(raw.MCPServers) == 0 {
 		return nil, nil, newErr(ErrManifestMissing, ".mcp.json has no mcpServers")
 	}
+	if len(raw.MCPServers) > maxMCPJSONServers {
+		return nil, nil, &hostFactError{sentinel: ErrInvalidManifest, facts: fmt.Sprintf(".mcp.json declares %d servers; limit is %d", len(raw.MCPServers), maxMCPJSONServers)}
+	}
 	names := make([]string, 0, len(raw.MCPServers))
 	for name := range raw.MCPServers {
 		names = append(names, name)
@@ -223,7 +239,7 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 		}
 		tier, ok := normalizeTier(s.Tier)
 		if !ok && strings.TrimSpace(s.Tier) != "" {
-			warnings = append(warnings, fmt.Sprintf("%s: tier %q is unknown; treating as background", name, s.Tier))
+			warnings = append(warnings, fmt.Sprintf("%s: tier %q is unknown; treating as background", hostLiteral(name), s.Tier))
 		}
 		e := config.PluginEntry{
 			Name:                  name,
@@ -251,7 +267,7 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 		normalized, changed := config.NormalizePluginCommandLine(e)
 		e = normalized
 		if changed {
-			warnings = append(warnings, fmt.Sprintf("%s: split a pasted MCP command line into command and args", name))
+			warnings = append(warnings, fmt.Sprintf("%s: split a pasted MCP command line into command and args", hostLiteral(name)))
 		}
 		if err := validateMCPEntry(e); err != nil {
 			return nil, warnings, err

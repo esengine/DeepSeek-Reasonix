@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,21 +14,20 @@ import (
 	"reasonix/internal/base/i18n"
 )
 
-// A paste this large stands in the composer as one token, the way the reader
-// would describe it, and goes to the model whole.
+// A paste this large stands in the composer as one token and goes to the
+// model whole, with the thresholds 1.x folds at.
 const (
-	pasteFoldChars = 800
-	pasteFoldLines = 3
+	pasteFoldChars = 1000
+	pasteFoldLines = 5
 )
 
-var (
-	pasteToken = regexp.MustCompile(`\[Pasted text #(\d+) \+\d+ lines\]`)
-	imageToken = regexp.MustCompile(`\[image #(\d+)\]`)
-)
+var imageToken = regexp.MustCompile(`\[image #(\d+)\]`)
+
+type pasteBlock struct{ label, text string }
 
 type pasteStore struct {
 	next   int
-	texts  map[int]string
+	blocks []pasteBlock
 	images []string
 }
 
@@ -38,23 +38,48 @@ func (p *pasteStore) image(ref string) string {
 	return fmt.Sprintf("[image #%d]", len(p.images))
 }
 
-// fold returns what the composer shows for a paste: the text itself, or a
-// token for it when it would bury the line being written.
-func (p *pasteStore) fold(text string) string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	lines := strings.Count(text, "\n") + 1
-	if len(text) < pasteFoldChars && lines <= pasteFoldLines {
-		return text
+// pastedLines counts rows the way a terminal ends them: LF, CRLF or a bare CR.
+func pastedLines(text string) int {
+	if text == "" {
+		return 0
 	}
-	if p.texts == nil {
-		p.texts = map[int]string{}
-	}
-	p.next++
-	p.texts[p.next] = text
-	return fmt.Sprintf("[Pasted text #%d +%d lines]", p.next, lines)
+	return strings.Count(text, "\n") + 1
 }
 
-// expand replaces each paste token with the text it stands for.
+func foldedPasteLabel(id, lines int) string {
+	return fmt.Sprintf("[Pasted text #%d · %d lines]", id, lines)
+}
+
+// fold returns what the composer shows for a paste: the text itself, or a
+// labelled token for it when it would bury the line being written.
+func (p *pasteStore) fold(text string) string {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	lines := pastedLines(text)
+	if len([]rune(text)) < pasteFoldChars && lines < pasteFoldLines {
+		return text
+	}
+	p.next++
+	label := foldedPasteLabel(p.next, lines)
+	p.blocks = append(p.blocks, pasteBlock{label: label, text: text})
+	return label + " "
+}
+
+// seed moves the numbering past every label the session already carries, so a
+// resumed conversation never gets a second paste with the same label.
+func (p *pasteStore) seed(history []HistoryMessage) {
+	for _, h := range history {
+		for _, m := range foldedLabel.FindAllStringSubmatch(h.Content, -1) {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > p.next {
+				p.next = n
+			}
+		}
+	}
+}
+
+var foldedLabel = regexp.MustCompile(`\[Pasted text #(\d+) · \d+ lines\]`)
+
+// expand replaces each label with the block 1.x sends: the label, then the
+// text between Begin and End markers that name it.
 func (p *pasteStore) expand(s string) string {
 	s = imageToken.ReplaceAllStringFunc(s, func(tok string) string {
 		n, _ := strconv.Atoi(imageToken.FindStringSubmatch(tok)[1])
@@ -63,13 +88,26 @@ func (p *pasteStore) expand(s string) string {
 		}
 		return tok
 	})
-	return pasteToken.ReplaceAllStringFunc(s, func(tok string) string {
-		n, _ := strconv.Atoi(pasteToken.FindStringSubmatch(tok)[1])
-		if text, ok := p.texts[n]; ok {
-			return text
+	for _, b := range p.blocks {
+		if strings.Contains(s, b.label) {
+			s = strings.ReplaceAll(s, b.label, fmt.Sprintf("%s\n\n--- Begin %s ---\n%s\n--- End %s ---", b.label, b.label, b.text, b.label))
 		}
-		return tok
-	})
+	}
+	return s
+}
+
+// insertPaste puts pasted text in the composer, folded unless a panel is
+// taking the keys: what is typed into one is an answer, not a message.
+func (m *model) insertPaste(text string) {
+	if m.setup != nil {
+		m.pasteIntoSetup(text)
+		return
+	}
+	if m.tr.OpenPrompt() != nil || m.picker != nil || m.skills != nil || m.quick != nil || m.mcp != nil || m.rewind != nil || m.copying != nil || m.clearing != nil {
+		m.composer.InsertString(text)
+		return
+	}
+	m.composer.InsertString(m.pastes.fold(text))
 }
 
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -90,16 +128,21 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		return m, m.fetchCompletion()
 	case "enter":
+		if m.scr != nil && strings.TrimSpace(m.composer.Value()) == "" {
+			m.followTail()
+			return m, nil
+		}
 		return m, m.send(false)
 	case "ctrl+s":
 		return m, m.send(true)
+	case "ctrl+enter":
+		return m, m.steerRunning()
 	case "esc":
 		return m, m.escape(empty)
 	case "ctrl+c":
 		switch {
 		case m.tr.Running:
-			m.cancelling = true
-			return m, m.call("cancel", m.client.Cancel)
+			return m, m.interrupt()
 		case !empty:
 			m.composer.Reset()
 			m.shell = false
@@ -125,7 +168,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "up", "down":
-		if m.composer.LineCount() <= 1 && m.recall(msg.String() == "up") {
+		if m.recallAtEdge(msg.String() == "up") {
 			return m, nil
 		}
 	}
@@ -138,14 +181,36 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// steerRunning sends the draft as a steer, but only while a turn runs: idle, a
+// press meant as a newline must not submit it.
+func (m *model) steerRunning() tea.Cmd {
+	if !m.tr.Running {
+		return nil
+	}
+	return m.send(true)
+}
+
+// recallAtEdge recalls history only when the cursor sits on the composer's
+// first line (older) or last line (newer), so multi-line editing keeps the arrows.
+func (m *model) recallAtEdge(older bool) bool {
+	if older {
+		return m.composer.Line() == 0 && m.recall(true)
+	}
+	return m.composer.Line() == m.composer.LineCount()-1 && m.recall(false)
+}
+
 // shortcutKey takes the keys that act without touching the composer: the
-// approval modes and the clipboard.
+// approval modes, clearing the screen, suspending, and the clipboard.
 func (m *model) shortcutKey(k string) (tea.Cmd, bool) {
 	switch {
 	case k == "shift+tab":
 		return m.cycleMode(), true
 	case k == "ctrl+y":
 		return m.toggleYolo(), true
+	case k == "ctrl+l":
+		return m.clearDisplay(), true
+	case k == "ctrl+z":
+		return tea.Suspend, true
 	case imagePasteKey(k):
 		return m.pasteClipboard(), true
 	case k == "shift+insert":
@@ -163,10 +228,25 @@ func (m *model) screenKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.scrollKey(msg.String()) {
 		return nil, true
 	}
+	if cmd, handled := m.setupKey(msg); handled {
+		return cmd, true
+	}
+	if cmd, handled := m.skillsKey(msg); handled {
+		return cmd, true
+	}
+	if cmd, handled := m.quickKey(msg); handled {
+		return cmd, true
+	}
+	if cmd, handled := m.mcpKey(msg); handled {
+		return cmd, true
+	}
 	if cmd, handled := m.pickerKey(msg); handled {
 		return cmd, true
 	}
 	if cmd, handled := m.rewindKey(msg.String()); handled {
+		return cmd, true
+	}
+	if cmd, handled := m.copyKey(msg.String()); handled {
 		return cmd, true
 	}
 	if cmd, handled := m.clearKey(msg.String()); handled {
@@ -221,26 +301,36 @@ func (m *model) send(steer bool) tea.Cmd {
 	if display == "" {
 		return nil
 	}
+	if cmd, ok := m.queueSlash(display); ok {
+		return cmd
+	}
+	name, _, _ := strings.Cut(display, " ")
 	switch {
-	case isHelp(display):
+	case isHelp(name):
 		m.composer.Reset()
 		m.tr.AddEcho(display)
 		return tea.Batch(m.commit(), m.showHelp())
-	case display == "/mouse" && m.scr != nil:
+	case slices.Contains(m.opts.QuitCommands, name):
+		return tea.Quit
+	case name == "/mouse" && m.scr != nil:
 		m.composer.Reset()
 		return m.toggleMouse()
-	case display == "/resume":
+	case name == "/resume":
 		m.composer.Reset()
 		return m.openPicker()
 	case display == "/rewind" && !m.tr.Running:
 		m.composer.Reset()
 		m.tr.AddEcho(display)
 		return tea.Batch(m.commit(), m.openRewind())
-	case display == "/clear" && !m.tr.Running:
+	case name == "/clear" && !m.tr.Running:
 		m.composer.Reset()
 		m.tr.AddEcho(display)
 		return tea.Batch(m.commit(), m.askClear())
-	case display == "/version":
+	case isSetup(name) && !m.tr.Running:
+		m.composer.Reset()
+		m.tr.AddEcho(display)
+		return tea.Batch(m.commit(), m.openSetup())
+	case name == "/version":
 		m.composer.Reset()
 		version := m.opts.Version
 		if version == "" {
@@ -248,6 +338,26 @@ func (m *model) send(steer bool) tea.Cmd {
 		}
 		m.tr.AddNotice("info", "reasonix "+version)
 		return m.commit()
+	}
+	if name == "/paste-image" {
+		m.composer.Reset()
+		return m.pasteClipboard()
+	}
+	if display == "/skills" || display == "/skill" {
+		m.composer.Reset()
+		m.tr.AddEcho(display)
+		return tea.Batch(m.commit(), m.openSkills())
+	}
+	if cmd, ok := m.modelSlash(display); ok {
+		return cmd
+	}
+	if display == "/mcp" {
+		m.composer.Reset()
+		m.tr.AddEcho(display)
+		return tea.Batch(m.commit(), m.openMCP())
+	}
+	if cmd, ok := m.miscSlash(display); ok {
+		return cmd
 	}
 	text := m.pastes.expand(display)
 	m.history = append(m.history, display)
@@ -271,7 +381,24 @@ func (m *model) send(steer bool) tea.Cmd {
 		}
 	}
 	m.tr.AddUser(display)
-	return tea.Batch(m.commit(), m.call("send", func(ctx context.Context) error { return m.client.Submit(ctx, text) }))
+	return tea.Batch(m.commit(), func() tea.Msg {
+		return sentMsg{display: display, err: m.client.Submit(m.ctx, text)}
+	})
+}
+
+// cancelTurn asks the kernel to stop the running turn.
+func (m *model) cancelTurn() tea.Cmd {
+	m.cancelling = true
+	return m.call("cancel", m.client.Cancel)
+}
+
+// interrupt is Ctrl+C on a running turn: the first press stops it, and a
+// second while it is still stopping leaves the program.
+func (m *model) interrupt() tea.Cmd {
+	if m.cancelling {
+		return tea.Quit
+	}
+	return m.cancelTurn()
 }
 
 // escape backs out of the most specific thing in progress: the running turn,
@@ -280,11 +407,9 @@ func (m *model) send(steer bool) tea.Cmd {
 func (m *model) escape(empty bool) tea.Cmd {
 	switch {
 	case m.tr.Running:
-		m.cancelling = true
-		return m.call("cancel", m.client.Cancel)
+		return m.cancelTurn()
 	case !empty:
 		m.composer.Reset()
-		m.pastes = pasteStore{}
 		return nil
 	case m.shell:
 		m.shell = false

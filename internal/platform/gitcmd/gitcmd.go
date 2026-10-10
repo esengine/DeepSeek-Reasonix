@@ -64,9 +64,18 @@ func argsFor(goos, dir string, extraConfig []string, args ...string) []string {
 		out = append(out, "-c", "submodule.recurse=false")
 	}
 	if dir != "" {
-		out = append(out, "-C", dir)
+		out = append(out, "-C", dirOperand(dir))
 	}
 	return append(out, hardenSubcommand(args)...)
+}
+
+// dirOperand spells a relative directory that starts with "-" as "./dir",
+// the same directory, so no -C value can be read as an option.
+func dirOperand(dir string) string {
+	if dashed.MatchString(dir) {
+		return "./" + dir
+	}
+	return dir
 }
 
 // noRecurse are the subcommands a user's own submodule.recurse=true would carry
@@ -148,8 +157,12 @@ func build(ctx context.Context, dir string, repoEnv, extraConfig, args []string)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	overrides, err := driverOverrides(ctx, dir, repoEnv, args)
-	cmd := newCommand(ctx, Args(dir, append(slices.Clone(extraConfig), overrides...), args...), repoEnv)
+	screened, refused := screen(args)
+	overrides, err := driverOverrides(ctx, dir, repoEnv, screened)
+	cmd := newCommand(ctx, Args(dir, append(slices.Clone(extraConfig), overrides...), screened...), repoEnv)
+	if err == nil {
+		err = refused
+	}
 	if err != nil {
 		cmd.Err = err
 	}

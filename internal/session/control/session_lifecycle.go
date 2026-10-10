@@ -476,6 +476,18 @@ func (c *Controller) parentSessionID() string {
 // between that check and the actual SetSession, a turn could start and then be
 // yanked out from under the run loop.
 func (c *Controller) beginRotation() error {
+	releaseWorkspace, err := c.tryWorkspaceActivity()
+	if err != nil {
+		if errors.Is(err, ErrTurnRunning) {
+			return errTurnRunningRotation
+		}
+		return err
+	}
+	defer func() {
+		if releaseWorkspace != nil {
+			releaseWorkspace.release()
+		}
+	}()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.gate.active() {
@@ -485,6 +497,7 @@ func (c *Controller) beginRotation() error {
 		return errRotationInProgress
 	}
 	c.gate.rotating = true
+	c.gate.workspaceRelease, releaseWorkspace = releaseWorkspace, nil
 	return nil
 }
 
@@ -578,6 +591,7 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 // generation — the private temporary directory and the browser — reusing what a
 // hot rebuild hands over, so ReleaseResources/Close never race a replacement.
 func (c *Controller) adoptSessionResources(opts Options) {
+	c.workspaceLease.SetSessionID(func() string { return sessionstore.BranchID(c.SessionPath()) })
 	c.sessionTemp = opts.SessionTemp
 	if c.sessionTemp == nil {
 		c.sessionTemp = sessiontemp.New()
@@ -610,34 +624,7 @@ func (c *Controller) BrowserOpen(ctx context.Context, rawURL, tabID string, newT
 	if !newTab {
 		return c.browser.Visit(ctx, rawURL, tabID, newTab)
 	}
-	return openBeside(ctx, c.browser, rawURL)
-}
-
-// A person's open answers once the page is drawn; only the agent's waits for
-// every subresource, since it reads what loaded.
-type tabOpener interface {
-	Tabs() []browser.TabInfo
-	Visit(ctx context.Context, rawURL, tabID string, newTab bool) (browser.TabInfo, error)
-	Switch(tabID string) (browser.TabInfo, error)
-}
-
-// openBeside opens rawURL in a new tab and hands the active one back to the
-// tab that held it, when one did.
-func openBeside(ctx context.Context, b tabOpener, rawURL string) (browser.TabInfo, error) {
-	held := ""
-	for _, t := range b.Tabs() {
-		if t.Active {
-			held = t.ID
-		}
-	}
-	info, err := b.Visit(ctx, rawURL, "", true)
-	if held == "" || info.ID == "" || info.ID == held {
-		return info, err
-	}
-	if _, serr := b.Switch(held); serr == nil {
-		info.Active = false
-	}
-	return info, err
+	return c.browser.VisitBeside(ctx, rawURL)
 }
 
 // BrowserSession is the agent's browser, which a rebuild hands to the

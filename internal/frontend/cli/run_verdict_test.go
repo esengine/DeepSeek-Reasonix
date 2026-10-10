@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,13 +68,28 @@ func TestRunUnverifiedFinishExitsZeroUnlessAsked(t *testing.T) {
 	}
 }
 
+func TestRunProseOnlyFinishHasNoReadinessDebt(t *testing.T) {
+	dir := runToolCallFixture(t, "write_file", `{"path":"notes.md","content":"A neutral note."}`)
+	if err := os.Remove(filepath.Join(dir, "note.txt")); err != nil {
+		t.Fatal(err)
+	}
+	code, result, stderr := runCLIJSONResult(t, "run", "-y", "--fail-on-unverified", "--output-format", "json", "write a note")
+	if code != 0 || result["is_error"] != false || result["readiness"] != nil {
+		t.Fatalf("prose finish exited %d with %v; stderr: %s", code, result, stderr)
+	}
+}
+
 // A write the headless policy refuses is not a failed run, but it is not
 // silent either: the result lists it the way permission_denials readers expect.
 func TestRunReportsPermissionDenials(t *testing.T) {
 	runWriteFileFixture(t)
 	code, result, stderr := runCLIJSONResult(t, "run", "--output-format", "json", "write it")
-	if code != 0 {
-		t.Fatalf("exit %d, want 0\nstderr:\n%s", code, stderr)
+	wantExit := 0
+	if sandbox.Available() {
+		wantExit = runExitUntrustedFolder
+	}
+	if code != wantExit {
+		t.Fatalf("exit %d, want %d\nstderr:\n%s", code, wantExit, stderr)
 	}
 	denials, _ := result["permission_denials"].([]any)
 	if len(denials) != 1 {
@@ -91,7 +107,7 @@ func TestRunReportsPermissionDenials(t *testing.T) {
 	runWriteFileFixture(t)
 	var printCode int
 	_, printErr := captureCLIOutput(t, func() { printCode = Run([]string{"-p", "write it"}, "test") })
-	if printCode != 0 || !strings.Contains(printErr, "permission policy refused 1 tool call(s): write_file") {
+	if printCode != wantExit || !strings.Contains(printErr, "permission policy refused 1 tool call(s): write_file") {
 		t.Fatalf("-p exited %d; stderr must name the refused call:\n%s", printCode, printErr)
 	}
 

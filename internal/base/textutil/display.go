@@ -22,15 +22,23 @@ func SanitizeDisplay(s string) string {
 		switch {
 		case r == '\t' || r == '\n' || r == '\r':
 			b.WriteByte(' ')
-		case r < 0x20 || r == 0x7f:
-			// Drop remaining C0 controls and DEL.
-		case r >= 0x80 && r <= 0x9f:
-			// Drop C1 controls (including after partial decode).
-		case unicode.Is(unicode.Cc, r):
-			// Other control categories.
+		case isControl(r), unicode.Is(unicode.Cc, r):
 		default:
 			b.WriteRune(r)
 		}
 	}
 	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// SanitizeLaunch is SanitizeDisplay for a line the user is asked to approve:
+// it also drops format characters (bidi overrides, zero-width), which would
+// let the text on screen read differently from what is run.
+func SanitizeLaunch(s string) string {
+	s = SanitizeDisplay(s)
+	return strings.Map(func(r rune) rune {
+		if isFormat(r) {
+			return -1
+		}
+		return r
+	}, s)
 }

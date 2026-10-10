@@ -124,7 +124,7 @@ func TestNormalizeNameAvoidsSanitizedCollisions(t *testing.T) {
 
 func TestSummarizeFailureErrorSingleLine(t *testing.T) {
 	got := summarizeFailureError(errors.New("npm error code ENOTEMPTY\nnpm error path /tmp/x"))
-	if strings.Contains(got, "\n") || !strings.Contains(got, "ENOTEMPTY") {
+	if strings.Contains(got, "\n") || strings.Contains(got, "ENOTEMPTY") || !strings.Contains(got, "dependency failure") {
 		t.Fatalf("summary = %q", got)
 	}
 }

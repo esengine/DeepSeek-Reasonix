@@ -34,6 +34,51 @@ func (windowsShell) Home(ctx context.Context, _ Conn, fs *sftpfs.FS) (string, er
 	return toSFTPPath(home), nil
 }
 
+// Absolute accepts rooted, drive-qualified and UNC paths. One folder gets one
+// spelling (upper-case drive, no trailing slash) because the state slug is
+// derived from it.
+func (windowsShell) Absolute(p string) (string, bool) {
+	p = strings.ReplaceAll(p, `\`, "/")
+	if rest, ok := strings.CutPrefix(p, "//?/"); ok {
+		if !hasDriveRoot(rest) {
+			return "", false
+		}
+		p = rest
+	}
+	switch {
+	case hasDriveRoot(p):
+		p = "/" + strings.ToUpper(p[:1]) + p[1:]
+	case strings.HasPrefix(p, "/"):
+	default:
+		return "", false
+	}
+	if t := strings.TrimRight(p, "/"); t != "" {
+		p = t
+	}
+	return p, true
+}
+
+// HomeRelative also takes the backslash spelling of ~.
+func (windowsShell) HomeRelative(p string) (string, bool) {
+	if p[:min(len(p), 2)] == `~\` {
+		return p[2:], true
+	}
+	return posixShell{}.HomeRelative(p)
+}
+
+// hasDriveRoot is a drive letter followed by a separator or nothing: C: and
+// C:foo are relative to that drive's current directory, not rooted.
+func hasDriveRoot(p string) bool {
+	if len(p) < 2 || p[1] != ':' {
+		return false
+	}
+	c := p[0] | 0x20
+	if c < 'a' || c > 'z' {
+		return false
+	}
+	return len(p) == 2 || p[2] == '/'
+}
+
 // Paths keeps the SFTP spelling, which is what the file layer addresses and
 // what every state path is stored as. The shell form is derived where a
 // command needs it, never the other way round.
@@ -58,8 +103,6 @@ func (windowsShell) Launch(spec LaunchSpec, p StatePaths) string {
 	outer := strings.Join([]string{
 		"$ErrorActionPreference='Stop'",
 		"New-Item -ItemType Directory -Force -Path " + psQuote(toShellPath(p.Dir)) + " | Out-Null",
-		"Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath " +
-			psQuote(toShellPath(p.PortFile)) + "," + psQuote(toShellPath(p.PidFile)),
 		"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=" +
 			psQuote(launch) + "; CurrentDirectory=" + psQuote(toShellPath(spec.Workspace)) + "}",
 		"if ($r.ReturnValue -ne 0) { throw \"Win32_Process.Create returned $($r.ReturnValue)\" }",
@@ -93,6 +136,11 @@ func (windowsShell) Alive(pid int, p StatePaths) string {
 		commandLineOf(pid),
 		"if (" + ownsServe(p) + ") { '1' } else { '0' }",
 	}, "; "))
+}
+
+func (windowsShell) ServeVersion(pid int) string {
+	return psCommand(fmt.Sprintf(
+		"$e = (Get-Process -Id %d -ErrorAction SilentlyContinue).Path; if ($e) { & $e --version 2>$null | Select-Object -First 1 }", pid))
 }
 
 func (windowsShell) Stop(pid int, p StatePaths) string {
@@ -198,5 +246,8 @@ func (windowsShell) NativePath(p string) string { return toShellPath(p) }
 
 // toShellPath is the reverse, for a path going into a script.
 func toShellPath(p string) string {
+	if after, ok := strings.CutPrefix(p, "//"); ok {
+		return `\\` + strings.ReplaceAll(after, "/", `\`)
+	}
 	return strings.ReplaceAll(strings.TrimPrefix(p, "/"), "/", `\`)
 }

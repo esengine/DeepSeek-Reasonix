@@ -30,7 +30,7 @@ func (p *sharedWindowTestProvider) Stream(_ context.Context, req provider.Reques
 	p.last = req
 	p.calls++
 	ch := make(chan provider.Chunk, 3)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "summary"}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nsummary"}
 	if p.finish != "" {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: p.finish}}
 	}
@@ -148,7 +148,7 @@ func TestSharedWindowFoldRejectsUnshortenableOverBudgetInput(t *testing.T) {
 	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 200_000)}}
 	_, err := a.window().foldToSummary(context.Background(), fold, "")
-	if err == nil || !strings.Contains(err.Error(), "exceeds single-request budget") {
+	if !errors.Is(err, errSummaryInputTooLarge) {
 		t.Fatalf("foldToSummary err = %v, want single-request budget failure", err)
 	}
 	if prov.calls != 0 {
@@ -399,8 +399,8 @@ func TestSummarizeRejectsLengthTruncation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "truncated") {
 		t.Fatalf("summarizeOnce error = %v, want truncation failure", err)
 	}
-	if prov.calls != 1 {
-		t.Fatalf("length-truncated summary calls = %d, want no identical retry", prov.calls)
+	if prov.calls != 2 || prov.last.MaxTokens <= summaryOutputMaxTokens {
+		t.Fatalf("length-truncated summary calls = %d, last cap %d, want one retry above %d", prov.calls, prov.last.MaxTokens, summaryOutputMaxTokens)
 	}
 }
 

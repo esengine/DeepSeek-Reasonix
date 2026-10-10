@@ -41,6 +41,14 @@ const (
 	AggregateModeCurrencyBuckets = "currency_buckets"
 )
 
+// Rate bands name which side of a vendor's peak window a call was billed on.
+// An aggregate is mixed when its calls fell on both sides.
+const (
+	RateBandPeak    = "peak"
+	RateBandOffPeak = "off_peak"
+	RateBandMixed   = "mixed"
+)
+
 // DisplayRequest identifies how a caller selected the requested presentation
 // currency. The source is runtime context only; it is never persisted as a
 // provider price or wallet fact.
@@ -92,6 +100,9 @@ type CostQuote struct {
 	IncompleteReason   string `json:"incompleteReason,omitempty"`
 	LegacyEstimate     bool   `json:"legacyEstimate,omitempty"`
 	CatalogSource      string `json:"catalogSource,omitempty"`
+	// RateBand is set only for a rate confirmed as a vendor's own schedule; an
+	// aggregate that includes any call without one carries none.
+	RateBand string `json:"rateBand,omitempty"`
 }
 
 // Valuation is one currency view of a cost fact.
@@ -269,6 +280,10 @@ func newQuoteBuildState(in QuoteInput) *quoteBuildState {
 func (s *quoteBuildState) applyOfficialSchedule() {
 	if !s.isOfficial || s.official.Peak == nil {
 		return
+	}
+	s.quote.RateBand = RateBandOffPeak
+	if s.official.Window.IsPeak(s.occurred) {
+		s.quote.RateBand = RateBandPeak
 	}
 	rates := s.official.RatesAt(s.occurred)
 	if rates.CacheHit == s.input.Rates.CacheHit && rates.Input == s.input.Rates.Input && rates.Output == s.input.Rates.Output {
@@ -470,6 +485,8 @@ type quoteAccumulator struct {
 	coverage         string
 	displayComplete  bool
 	modes            map[string]struct{}
+	rateBands        map[string]struct{}
+	unbanded         bool
 }
 
 func emptyAggregate(display string) CostQuote {
@@ -488,7 +505,7 @@ func newQuoteAccumulator(display string) *quoteAccumulator {
 		out:     CostQuote{Valuations: map[string]Valuation{}, Estimated: true},
 		display: NormalizeCurrency(display), totals: map[string]Amount{}, originalTotals: map[string]Amount{},
 		originalComplete: true, coverage: CoverageNone, displayComplete: true,
-		modes: map[string]struct{}{},
+		modes: map[string]struct{}{}, rateBands: map[string]struct{}{},
 	}
 }
 
@@ -502,6 +519,7 @@ func (a *quoteAccumulator) add(quote CostQuote) {
 	if quote.BillingMode != "" {
 		a.modes[quote.BillingMode] = struct{}{}
 	}
+	a.addRateBand(quote.RateBand)
 	if quote.RateDate > a.out.RateDate {
 		a.out.RateDate = quote.RateDate
 	}
@@ -531,6 +549,32 @@ func (a *quoteAccumulator) add(quote CostQuote) {
 			AsOf: time.Now().UTC().Format("2006-01-02"),
 		})
 	}
+}
+
+func (a *quoteAccumulator) addRateBand(band string) {
+	switch band {
+	case RateBandPeak, RateBandOffPeak:
+		a.rateBands[band] = struct{}{}
+	case RateBandMixed:
+		a.rateBands[RateBandPeak], a.rateBands[RateBandOffPeak] = struct{}{}, struct{}{}
+	default:
+		a.unbanded = true
+	}
+}
+
+func (a *quoteAccumulator) rateBand() string {
+	if a.unbanded {
+		return ""
+	}
+	switch len(a.rateBands) {
+	case 1:
+		for band := range a.rateBands {
+			return band
+		}
+	case 2:
+		return RateBandMixed
+	}
+	return ""
 }
 
 func (a *quoteAccumulator) addOriginal(original Money, currency string) {
@@ -588,6 +632,7 @@ func (a *quoteAccumulator) finish() CostQuote {
 			a.out.OriginalTotals = append(a.out.OriginalTotals, MoneyOf(a.originalTotals[code], code))
 		}
 	}
+	a.out.RateBand = a.rateBand()
 	if len(a.modes) == 1 {
 		for mode := range a.modes {
 			a.out.BillingMode = mode
@@ -645,6 +690,9 @@ func NormalizeQuote(q CostQuote) CostQuote {
 	}
 	if q.DisplayStatus != "" && q.DisplayStatus != DisplayStatusMatched && q.DisplayStatus != DisplayStatusFallbackOriginal && q.DisplayStatus != DisplayStatusBucketed && q.DisplayStatus != DisplayStatusUnavailable {
 		q.DisplayStatus = ""
+	}
+	if q.RateBand != RateBandPeak && q.RateBand != RateBandOffPeak && q.RateBand != RateBandMixed {
+		q.RateBand = ""
 	}
 	if q.AggregateMode != "" && q.AggregateMode != AggregateModeSingleCurrency && q.AggregateMode != AggregateModeCommonValuation && q.AggregateMode != AggregateModeCurrencyBuckets {
 		q.AggregateMode = ""

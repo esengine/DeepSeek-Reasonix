@@ -177,7 +177,9 @@ func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
 	return strings.TrimSpace(cfg.Agent.SubagentModel)
 }
 
-func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
+// subagentEffortRef is the effort a skill's sub-agent asks for: its explicit
+// settings first, then agent.subagent_effort resolved for the model that runs it.
+func subagentEffortRef(cfg *config.Config, sk skill.Skill, inheritedFor func(modelRef string) string) string {
 	if cfg != nil {
 		for _, key := range SubagentModelKeys(sk.Name) {
 			if e := strings.TrimSpace(cfg.Agent.SubagentEfforts[key]); e != "" {
@@ -188,10 +190,13 @@ func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
 	if e := strings.TrimSpace(sk.Effort); e != "" {
 		return e
 	}
-	if cfg == nil {
-		return ""
+	if inheritedFor == nil {
+		if cfg == nil {
+			return ""
+		}
+		return strings.TrimSpace(cfg.Agent.SubagentEffort)
 	}
-	return strings.TrimSpace(cfg.Agent.SubagentEffort)
+	return inheritedFor(subagentModelRef(cfg, sk))
 }
 
 // SubagentModelKeys returns the cfg.Agent.SubagentModels/SubagentEfforts map
@@ -391,27 +396,11 @@ func subagentEffectiveIdentity(cfg *config.Config, resolver provider.Resolver, b
 	} else {
 		ref = strings.TrimSpace(baseModelRef)
 	}
-	if explicit && cfg != nil && ref != "" {
-		if resolved, ok := cfg.ResolveModel(ref); ok {
-			entry = *resolved
-		} else if resolved := syntheticEntryFromResolver(resolver, ref); strings.TrimSpace(resolved.Name) != "" {
-			entry = *resolved
+	if explicit || base == nil {
+		if resolved, _, err := subagentModelEntry(cfg, resolver, base, ref); err == nil {
+			entry = resolved
 		} else {
 			entry.Model = ref
-		}
-	} else if explicit {
-		if resolved := syntheticEntryFromResolver(resolver, ref); strings.TrimSpace(resolved.Name) != "" {
-			entry = *resolved
-		} else {
-			entry.Model = ref
-		}
-	} else if base == nil && ref != "" {
-		if resolved := syntheticEntryFromResolver(resolver, ref); strings.TrimSpace(resolved.Name) != "" {
-			entry = *resolved
-		} else if cfg != nil {
-			if resolved, ok := cfg.ResolveModel(ref); ok {
-				entry = *resolved
-			}
 		}
 	}
 	if rawEffort := strings.TrimSpace(effort); rawEffort != "" {
@@ -499,14 +488,6 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			reg.Add(t)
 		}
 	}
-}
-
-// autoShellPrefer reports whether [tools.shell] left the interpreter to
-// auto-detection, so the "fell back to PowerShell" hint is suppressed once the
-// user has explicitly chosen a shell.
-func autoShellPrefer(prefer string) bool {
-	p := strings.ToLower(strings.TrimSpace(prefer))
-	return p == "" || p == "auto"
 }
 
 // LSPSpecs returns the language → server map: the built-in defaults overlaid with

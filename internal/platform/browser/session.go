@@ -229,7 +229,7 @@ func (s *Session) tab(id string) (*tab, error) {
 // Open navigates a tab to rawURL and waits for it to load. newTab opens a fresh
 // tab; otherwise the named tab, or the active one, navigates.
 func (s *Session) Open(ctx context.Context, rawURL, tabID string, newTab bool) (TabInfo, error) {
-	return s.open(ctx, rawURL, tabID, newTab, true)
+	return s.open(ctx, rawURL, tabID, newTab, true, false)
 }
 
 // Visit is Open for a person watching the page: it returns once the page has
@@ -237,10 +237,18 @@ func (s *Session) Open(ctx context.Context, rawURL, tabID string, newTab bool) (
 // referencing a host it cannot reach never fires load, and the person already
 // sees it; the agent's Open still waits, because it reads what loaded.
 func (s *Session) Visit(ctx context.Context, rawURL, tabID string, newTab bool) (TabInfo, error) {
-	return s.open(ctx, rawURL, tabID, newTab, false)
+	return s.open(ctx, rawURL, tabID, newTab, false, false)
 }
 
-func (s *Session) open(ctx context.Context, rawURL, tabID string, newTab, untilLoaded bool) (TabInfo, error) {
+// VisitBeside is Visit into a fresh tab that does not take the active place:
+// the active tab is where the agent's calls without a tab land, and a page the
+// person opened must not become one, even for the moment a load takes. Only a
+// session with no active tab gives it to the new one.
+func (s *Session) VisitBeside(ctx context.Context, rawURL string) (TabInfo, error) {
+	return s.open(ctx, rawURL, "", true, false, true)
+}
+
+func (s *Session) open(ctx context.Context, rawURL, tabID string, newTab, untilLoaded, beside bool) (TabInfo, error) {
 	target, err := checkURL(rawURL, s.cfg.Roots)
 	if err != nil {
 		return TabInfo{}, err
@@ -258,7 +266,9 @@ func (s *Session) open(ctx context.Context, rawURL, tabID string, newTab, untilL
 	if err != nil {
 		return TabInfo{}, err
 	}
-	s.activate(t)
+	if !beside || s.activeTab() == nil {
+		s.activate(t)
+	}
 	if untilLoaded {
 		err = t.navigate(ctx, target)
 	} else {

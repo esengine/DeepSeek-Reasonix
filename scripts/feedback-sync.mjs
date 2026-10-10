@@ -110,11 +110,12 @@ export function closingPulls(number, timeline) {
   return [...out.values()];
 }
 
-// The close event's own commit wins; otherwise the earliest merged closing PR.
+// Only a merged closing PR proves a fix shipped. The close event's own commit
+// wins among them; a close by a bare commit, or by hand, yields no commit at all.
 export function closingCommit(number, timeline, pulls) {
-  const event = [...timeline].reverse().find((e) => e.event === "closed");
-  if (event?.commit_id) return event.commit_id;
   const merged = closingPulls(number, timeline).map((s) => pulls[s.number]).filter((pr) => pr?.merged_at && pr.merge_commit_sha);
+  const event = [...timeline].reverse().find((e) => e.event === "closed");
+  if (event?.commit_id && merged.some((pr) => pr.merge_commit_sha === event.commit_id)) return event.commit_id;
   merged.sort((a, b) => Date.parse(a.merged_at) - Date.parse(b.merged_at));
   return merged[0]?.merge_commit_sha ?? null;
 }
@@ -123,13 +124,19 @@ export function hasOpenLinkedPull(number, timeline) {
   return closingPulls(number, timeline).some((s) => s.state === "open" && !s.pull_request.merged_at);
 }
 
+const STUDIO_TAG = /^studio-v\d+\.\d+\.\d+$/;
+const isStable = (r) => r && !r.draft && !r.prerelease && STUDIO_TAG.test(r.tag_name);
+
+// A tag counts as released only when its GitHub release is neither a draft nor a prerelease.
+export const stableStudioTags = (releases) => new Set(releases.filter(isStable).map((r) => r.tag_name));
+
 export function newestStudioRelease(releases) {
-  const times = releases.filter((r) => !r.draft && /^studio-v/.test(r.tag_name) && r.published_at).map((r) => Date.parse(r.published_at));
+  const times = releases.filter((r) => isStable(r) && r.published_at).map((r) => Date.parse(r.published_at));
   return times.length ? Math.max(...times) : null;
 }
 
-export function firstTag(tags) {
-  const list = tags.filter((t) => /^studio-v\d+\.\d+\.\d+$/.test(t));
+export function firstTag(tags, stable) {
+  const list = stable instanceof Set ? tags.filter((t) => STUDIO_TAG.test(t) && stable.has(t)) : [];
   const key = (t) => t.slice(8).split(".").map(Number);
   list.sort((a, b) => {
     const x = key(a), y = key(b);
@@ -188,7 +195,8 @@ async function syncOne(row, issue, deps, dry) {
     const pulls = {};
     for (const src of closingPulls(number, timeline)) pulls[src.number] = await deps.gh.getPull(src.number);
     const sha = closingCommit(number, timeline, pulls);
-    version = sha ? firstTag(await deps.tagsContaining(sha)) : null;
+    if (!sha) deps.log(`::notice::#${number} (${row.receipt}) is closed without a merged closing PR; it stays unresolved`);
+    version = sha ? firstTag(await deps.tagsContaining(sha), await deps.stableTags()) : null;
   }
   const update = decideStatus({ current: row.status, resolvedVersion: row.resolvedVersion, issue, version, inProgress: hasOpenLinkedPull(number, timeline) });
   if (!update) return;
@@ -293,6 +301,7 @@ const paginate = (path) => {
 
 export function liveDeps(env) {
   const base = (env.FEEDBACK_BASE_URL || DEFAULT_BASE).replace(/\/$/, "");
+  const cache = {};
   const call = async (method, path, body) => {
     let res;
     try {
@@ -347,6 +356,10 @@ export function liveDeps(env) {
     async newestReleaseAt() {
       const releases = gh(["api", `repos/${REPO}/releases?per_page=10`]) ?? [];
       return newestStudioRelease(releases);
+    },
+    async stableTags() {
+      cache.stable ??= stableStudioTags(paginate(`repos/${REPO}/releases?per_page=100`));
+      return cache.stable;
     },
     async tagsContaining(sha) {
       if (!/^[0-9a-f]{40}$/.test(sha)) return [];

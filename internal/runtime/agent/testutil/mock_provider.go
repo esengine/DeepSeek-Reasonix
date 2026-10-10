@@ -95,7 +95,7 @@ func (p *MockProvider) Stream(ctx context.Context, req provider.Request) (<-chan
 			chunks = append(chunks, provider.Chunk{Type: provider.ChunkReasoning, Text: t.Reasoning})
 		}
 		if t.Text != "" {
-			chunks = append(chunks, provider.Chunk{Type: provider.ChunkText, Text: t.Text})
+			chunks = append(chunks, provider.Chunk{Type: provider.ChunkText, Text: SummaryReply(req, t.Text)})
 		}
 		for i := range t.ToolCalls {
 			tc := t.ToolCalls[i]

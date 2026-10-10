@@ -341,9 +341,8 @@ func gapsOf(rep Report, c *taskcontract.Contract) []Gap {
 	// Only report the blanket gap when no declared check already said it: a
 	// contract with checks states the same absence in more specific words.
 	if rep.Mutations > 0 && !proven && !missingCheck {
-		// The kind's own phrase already says the absence in the reader's
-		// language; the detail says what was there instead, which is the part
-		// a turn that just ran a command of its own cannot get from the phrase.
+		// The kind's own phrase says the absence in the reader's language; the
+		// detail is only the command the host declined, never a sentence.
 		gaps = append(gaps, Gap{Kind: GapUnverifiedChange, Detail: unreadCheckDetail(rep.UnreadCheck)})
 	}
 	for _, ch := range rep.Changes {
@@ -445,5 +444,5 @@ func unreadCheckDetail(command string) string {
 	if len(command) > unreadCheckLimit {
 		command = command[:unreadCheckLimit] + "…"
 	}
-	return "`" + command + "` ran, but the host does not read it as a check"
+	return command
 }

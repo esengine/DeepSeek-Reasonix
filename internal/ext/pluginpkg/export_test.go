@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -118,5 +119,35 @@ func TestStripCredentialsKeepsExistingReferences(t *testing.T) {
 func TestExportRefusesInvalidName(t *testing.T) {
 	if _, _, err := Export("../etc", testenv.TempDir(t)); err == nil {
 		t.Fatal("Export accepted a path-shaped name")
+	}
+}
+
+func TestExportPreservesRegularFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not store POSIX execute bits")
+	}
+	for _, mode := range []os.FileMode{0o755, 0o744, 0o644, 0o600, 0o674} {
+		t.Run(mode.String(), func(t *testing.T) {
+			root := testenv.TempDir(t)
+			file := filepath.Join(root, "content")
+			writeExportFile(t, file, "package content")
+			if err := os.Chmod(file, mode); err != nil {
+				t.Fatal(err)
+			}
+			archive, _, err := Export("demo", root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(zr.File) != 1 || zr.File[0].Name != "demo/content" {
+				t.Fatalf("exported files = %+v", zr.File)
+			}
+			if got := zr.File[0].Mode(); got != mode {
+				t.Fatalf("exported mode = %v, want %v", got, mode)
+			}
+		})
 	}
 }

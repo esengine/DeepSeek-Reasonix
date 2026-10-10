@@ -70,7 +70,7 @@ func (a *contextWindow) contextReport() ContextReport {
 
 	if a.effectiveContextWindow() > 0 {
 		rep.FoldThreshold = a.compactTrigger()
-		if _, reason := a.contextMaintenanceBlocked(a.contextMaintenanceInputHash(visible)); reason != "" {
+		if _, reason := a.contextMaintenanceBlocked(a.contextMaintenanceInputHash(visible), a.estimatedVisibleRequestTokens(visible), false); reason != "" {
 			rep.BlockedReason = reason
 		}
 	}

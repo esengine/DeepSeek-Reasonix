@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStartsOpen } from "../../state/foldpref";
 import { StudioIcon } from "../StudioIcon";
 import { t } from "../../i18n";
@@ -10,18 +10,18 @@ import { LazyMarkdown } from "../LazyMarkdown";
 import { Boundary } from "../Boundary";
 import { CopyButton } from "../CopyButton";
 import { useRevealed } from "../reveal";
+import { useShown } from "../shown";
 import { ReplyMenu } from "./ReplyMenu";
 
 // Folded, the only thing left of a thought is how much of the turn it was. The
 // spec puts both halves there — how long, and how much — because either alone
 // hides whether a slow turn was spent thinking or waiting.
-function thoughtLabel(item: Extract<Item, { t: "say" }>) {
+function ThoughtLabel({ item }: { item: Extract<Item, { t: "say" }> }) {
   // Graphemes, not code units: an emoji in the reasoning is one character to
   // the reader and two to the string.
-  const chars = t("{n} 字", { n: count([...(item.reasoning ?? "")].length) });
-  return item.thoughtMs
-    ? t("思考 {secs} 秒 · {chars}", { secs: decimals(item.thoughtMs / 1000, 1), chars })
-    : t("思考 {chars}", { chars });
+  const graphemes = useMemo(() => [...(item.reasoning ?? "")].length, [item.reasoning]);
+  const chars = t("{n} 字", { n: count(graphemes) });
+  return <>{item.thoughtMs ? t("思考 {secs} 秒 · {chars}", { secs: decimals(item.thoughtMs / 1000, 1), chars }) : t("思考 {chars}", { chars })}</>;
 }
 
 const LIVE_TICK_MS = 100;
@@ -30,12 +30,14 @@ const LIVE_TICK_MS = 100;
 // ellipsis; a card this window did not watch begin has no start to count from.
 function LiveThought({ id }: { id: string }) {
   const since = thoughtStartedAt(id);
+  const watched = useShown();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (since === undefined) return;
+    if (since === undefined || !watched) return;
+    setNow(Date.now());
     const h = window.setInterval(() => setNow(Date.now()), LIVE_TICK_MS);
     return () => window.clearInterval(h);
-  }, [since]);
+  }, [since, watched]);
   if (since === undefined) return <>{t("思考中…")}</>;
   return <>{t("思考中 {secs} 秒", { secs: decimals(Math.max(0, now - since) / 1000, 1) })}</>;
 }
@@ -97,7 +99,7 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
   // Thinking is the longest-running stream of the turn — 10s of it before the
   // first answer token, measured — so it gets the same paced reveal the answer
   // does rather than tracking the wire's bursts.
-  const thought = useRevealed(item.reasoning ?? "", !item.done);
+  const thought = useRevealed(item.reasoning ?? "", !item.done && open);
   return (
     <div className="call" data-k="say">
       <div className="g">
@@ -115,7 +117,7 @@ export function SayCard({ item, afterAnswer, reply }: { item: Extract<Item, { t:
           {item.reasoning?.trim() && (
             <details className="think" open={open} onToggle={(e) => e.currentTarget.open !== open && setOpen(e.currentTarget.open)}>
               <summary>
-                <span className="fold">{item.done || item.thoughtMs !== undefined ? thoughtLabel(item) : <LiveThought id={item.id} />}</span>
+                <span className="fold">{item.done || item.thoughtMs !== undefined ? <ThoughtLabel item={item} /> : <LiveThought id={item.id} />}</span>
               </summary>
               <div className="tk">
                 {thought}

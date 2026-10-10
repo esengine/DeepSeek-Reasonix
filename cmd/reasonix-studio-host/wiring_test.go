@@ -71,3 +71,40 @@ func TestTheHostPointsTheKernelsCatalogueAtTheConfiguredLanguage(t *testing.T) {
 		}
 	}
 }
+
+// Sweeping a session directory costs a handful of file operations per
+// transcript, and the window cannot open until the handshake. A build that
+// sweeps inline makes the first launch after the cache went cold wait on
+// history it never displays.
+func TestTheHostsFirstBuildSweepsSessionsInTheBackground(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse main.go: %v", err)
+	}
+	found := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		sel, ok := lit.Type.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Options" {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "CleanupPendingReconciler" {
+				if v, ok := kv.Value.(*ast.SelectorExpr); ok && v.Sel.Name == "BackgroundCleanupReconciler" {
+					found = true
+				}
+			}
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("the host's boot.Options does not set CleanupPendingReconciler to serve.BackgroundCleanupReconciler")
+	}
+}

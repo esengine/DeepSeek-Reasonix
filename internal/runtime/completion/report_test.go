@@ -429,8 +429,8 @@ func TestUnverifiedChangeNamesTheDeclinedCheck(t *testing.T) {
 	if !strings.Contains(detail, "python3 -c") {
 		t.Fatalf("detail = %q, want the declined command named", detail)
 	}
-	if !strings.Contains(detail, "does not read it as a check") {
-		t.Fatalf("detail = %q, want the reason the command did not count", detail)
+	if detail != `python3 -c "import calc; assert calc.add(2,3)==5; print('ok')"` {
+		t.Fatalf("detail = %q, want the bare command: the sentence about it belongs to the frontend's language", detail)
 	}
 }
 

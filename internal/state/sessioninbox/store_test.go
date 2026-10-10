@@ -521,6 +521,9 @@ func TestCrossProcessRecoveryPauses(t *testing.T) {
 	if len(snap.Items) != 1 || snap.Items[0].State != StateUncertain {
 		t.Fatalf("want uncertain item, got %+v", snap.Items)
 	}
+	if snap.Items[0].BlockCode != BlockOwnerInactive {
+		t.Fatalf("BlockCode = %q, want %q", snap.Items[0].BlockCode, BlockOwnerInactive)
+	}
 }
 
 func TestPreviewDoesNotMaterializeHugeBody(t *testing.T) {
@@ -601,6 +604,11 @@ func TestCorruptManifestSalvagesBlobs(t *testing.T) {
 	}
 	if len(snap.Items) == 0 || snap.RecoveredN == 0 {
 		t.Fatalf("salvage must surface blobs, got items=%d recoveredN=%d", len(snap.Items), snap.RecoveredN)
+	}
+	for _, it := range snap.Items {
+		if it.BlockCode != BlockManifestSalvaged {
+			t.Fatalf("salvaged item %s has BlockCode %q, want %q", it.ID, it.BlockCode, BlockManifestSalvaged)
+		}
 	}
 }
 

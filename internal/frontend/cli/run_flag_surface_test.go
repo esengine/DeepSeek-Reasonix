@@ -115,7 +115,7 @@ func TestRunApprovalFlagsReachTheHeadlessGate(t *testing.T) {
 		captureStderr(t, func() {
 			captureStdout(t, func() { rc = Run(tc.argv, "test-version") })
 		})
-		_, err := os.Stat(filepath.Join(dir, "marker.txt"))
+		_, err := os.Stat(filepath.Join(dir, "marker.go"))
 		if wrote := err == nil; wrote != tc.wrote {
 			t.Errorf("Run(%q) rc=%d wrote marker=%v, want %v", tc.argv, rc, wrote, tc.wrote)
 		}
@@ -123,7 +123,7 @@ func TestRunApprovalFlagsReachTheHeadlessGate(t *testing.T) {
 }
 
 // runWriteFileFixture points an isolated home at a fake provider whose first
-// reply asks for write_file marker.txt, and returns the workspace it runs in.
+// reply asks for write_file marker.go, and returns the workspace it runs in.
 func runWriteFileFixture(t *testing.T) string {
 	t.Helper()
 	var mu sync.Mutex
@@ -136,7 +136,7 @@ func runWriteFileFixture(t *testing.T) string {
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		if n == 1 {
-			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"marker.txt\",\"content\":\"x\"}"}}]}}]}`+"\n\n")
+			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"marker.go\",\"content\":\"x\"}"}}]}}]}`+"\n\n")
 			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`+"\n\ndata: [DONE]\n\n")
 			return
 		}

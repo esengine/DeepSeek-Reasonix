@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"reasonix/internal/model/catalog"
 )
 
 // codeArg is where each helper carries the dotted code, so a new one is added
@@ -18,7 +20,7 @@ var codeArg = map[string]int{"refuse": 2, "busy": 1, "coded": 0, "busyErr": 0, "
 // Where a coded refusal can be built. The exported constructor put the second
 // one outside this package, and a guard that only watches its own directory
 // would have let the next one through untranslated.
-var refusalDirs = []string{".", filepath.Join("..", "..", "..", "desktop", "next")}
+var refusalDirs = []string{".", filepath.Join("..", "remotehost")}
 
 // serveRefusalCodes reads the codes this package can send, from the syntax
 // rather than from the text: a scan that matched on wording would be the very
@@ -168,4 +170,48 @@ func packageStringConsts(t *testing.T, fset *token.FileSet, names []string) map[
 		}
 	}
 	return out
+}
+
+// probeReasons reads every catalog.ProbeReason constant from the declaring
+// file's syntax, so a reason added there is checked here without a second list.
+func probeReasons(t *testing.T) []catalog.ProbeReason {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", "model", "catalog", "probe_failure.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []catalog.ProbeReason
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok || spec.Type == nil {
+			return true
+		}
+		if id, ok := spec.Type.(*ast.Ident); !ok || id.Name != "ProbeReason" {
+			return true
+		}
+		for _, v := range spec.Values {
+			if lit, ok := v.(*ast.BasicLit); ok {
+				if value, err := strconv.Unquote(lit.Value); err == nil {
+					out = append(out, catalog.ProbeReason(value))
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// A probe identity reaches the page through probeReasonRefusal rather than a
+// literal at a refuse call, which the scan above cannot see.
+func TestEveryProbeReasonIsTranslated(t *testing.T) {
+	said := translatedCodes(t)
+	reasons := probeReasons(t)
+	if len(reasons) < 9 {
+		t.Fatalf("read %d probe reasons; this guard is watching nothing", len(reasons))
+	}
+	for _, reason := range reasons {
+		if _, code := probeReasonRefusal(reason); !said[code] {
+			t.Errorf("probe reason %q maps to %q, which kernel.ts cannot say", reason, code)
+		}
+	}
 }

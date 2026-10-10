@@ -76,6 +76,7 @@ func init() { tool.RegisterBuiltin(grepTool{}) }
 // sb is the OS sandbox spec for the ripgrep subprocess, making forbid-read
 // directories invisible to ripgrep instead of checking them in-process.
 type grepTool struct {
+	netRoots    []string
 	workDir     string
 	paths       *PathResolver
 	rg          string
@@ -144,6 +145,9 @@ func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	rp := resolveReadablePath(g.workDir, p.Path, g.paths)
 	p.Path = rp.Path
+	if err := rp.refuseNetwork(g.netRoots); err != nil {
+		return "", err
+	}
 
 	to := toolTimeout(p.TimeoutSeconds, grepDefaultTimeout, grepMaxTimeout)
 	ctx, cancel := context.WithTimeout(ctx, to)

@@ -15,6 +15,10 @@ import (
 // one serving GPT, and only the person holding the key knows which they bought.
 type Probe struct {
 	Kind string // the protocol catalog kind whose listing answered
+	// BaseURL is the address a saved provider must carry for chat to reach what
+	// the listing reached: the typed address, completed with /v1 only when the
+	// listing answered there alone and the protocol roots its chat at the base.
+	BaseURL string
 	// Kinds are every kind that listing shape may be driven with, in catalog
 	// order, so a chooser offers the alternatives instead of hiding them.
 	Kinds      []string
@@ -89,15 +93,17 @@ func ProbeEndpoint(ctx context.Context, opts ProbeOptions) (Probe, error) {
 
 func probeThrough(ctx context.Context, base, apiKey string, client *http.Client) (Probe, error) {
 	answered := make(map[shape][]string)
+	answeredAt := make(map[shape]string)
 	var declared []string
 	var worst *ProbeError
 	for _, s := range probeShapes {
-		chat, named, err := listChatModels(ctx, s, base, apiKey, client)
+		chat, named, at, err := listChatModels(ctx, s, base, apiKey, client)
 		if err != nil {
 			worst = keepWorseDiagnosis(worst, classifyProbe(err))
 			continue
 		}
 		answered[s] = chat
+		answeredAt[s] = at
 		declared = mergeProtocolChoices(declared, named)
 	}
 	if len(answered) == 0 {
@@ -107,6 +113,9 @@ func probeThrough(ctx context.Context, base, apiKey string, client *http.Client)
 		return Probe{}, worst
 	}
 	best := pick(base, answered)
+	if best.kind == "openai" {
+		base = ResolveChatBase(base, answeredAt[best])
+	}
 	p := describe(base, best, answered[best])
 	p.Kinds = mergeProtocolChoices(p.Kinds, declared)
 	p.Ambiguous = len(answered) > 1
@@ -145,7 +154,7 @@ func allClaude(models []string) bool {
 	return len(models) > 0
 }
 
-func listChatModels(ctx context.Context, s shape, baseURL, apiKey string, client *http.Client) ([]string, []string, error) {
+func listChatModels(ctx context.Context, s shape, baseURL, apiKey string, client *http.Client) ([]string, []string, string, error) {
 	// The key is held for this call only — a probe runs before there is a
 	// provider to store it against, and nothing here writes to disk.
 	entry := (&config.ProviderEntry{
@@ -154,9 +163,9 @@ func listChatModels(ctx context.Context, s shape, baseURL, apiKey string, client
 		BaseURL:    baseURL,
 		AuthHeader: s.authHeader,
 	}).WithAPIKeyForProbe(apiKey)
-	listed, err := FetchModelListingVia(ctx, &entry, client)
+	listed, at, err := fetchModelListingAt(ctx, &entry, client)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	models := make([]string, 0, len(listed))
 	for _, m := range listed {
@@ -166,13 +175,13 @@ func listChatModels(ctx context.Context, s shape, baseURL, apiKey string, client
 	if len(chat) == 0 {
 		// The endpoint answered but offers nothing we can hold a conversation
 		// with — a rerank or embedding gateway.
-		return nil, nil, &ProbeError{
+		return nil, nil, "", &ProbeError{
 			Reason: ProbeNoChatModels,
 			Params: map[string]any{"count": len(models)},
 			detail: fmt.Sprintf("%s lists %d models, none of them chat models", baseURL, len(models)),
 		}
 	}
-	return chat, ProtocolsDeclaredBy(listed), nil
+	return chat, ProtocolsDeclaredBy(listed), at, nil
 }
 
 // describe fills in what can be told from the endpoint and its model ids.
@@ -183,6 +192,7 @@ func listChatModels(ctx context.Context, s shape, baseURL, apiKey string, client
 func describe(baseURL string, s shape, chat []string) Probe {
 	p := Probe{
 		Kind:       s.kind,
+		BaseURL:    baseURL,
 		Kinds:      config.ProtocolsDiscoveredAs(s.kind),
 		AuthHeader: s.authHeader,
 		Models:     chat,
