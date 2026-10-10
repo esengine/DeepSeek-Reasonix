@@ -115,3 +115,78 @@ func TestReadParityFailsAPairThatIsNotAStruct(t *testing.T) {
 		t.Fatalf("findings = %v, want one against the missing reader", got)
 	}
 }
+
+const embedGoSource = `package p
+
+type Base struct {
+	Mode string ` + "`json:\"mode\"`" + `
+}
+
+type Outer struct {
+	Base
+	Path   string ` + "`json:\"path\"`" + `
+	Extra  string ` + "`json:\"extra,omitempty\"`" + `
+}
+`
+
+const extendsTS = `export interface Base {
+  mode: string;
+}
+
+export interface Outer extends Base {
+  path: string;
+  extra?: string;
+}
+`
+
+var embedPair = []wireMirror{{"t.go", "Outer", tsWireFile, "Outer"}}
+
+func embedFindingsFor(t *testing.T, goSrc, ts string) []Finding {
+	t.Helper()
+	names, ok := wireFieldNames(parseBytes("t.go", []byte(goSrc)).file, "Outer")
+	if !ok {
+		t.Fatal("the fixture's Outer does not resolve")
+	}
+	return wireParityFindings(embedPair, map[string][]string{"t.go.Outer": names}, map[string]string{tsWireFile: ts})
+}
+
+// An embedded struct's fields are the outer type's own on the wire, and so are
+// an extended interface's.
+func TestWireParityFlattensEmbeddingAndExtends(t *testing.T) {
+	if got := embedFindingsFor(t, embedGoSource, extendsTS); len(got) != 0 {
+		t.Fatalf("a faithful mirror must produce no findings, got %+v", got)
+	}
+}
+
+func TestWireParityCatchesAFieldAddedToTheEmbeddedStruct(t *testing.T) {
+	goSrc := strings.Replace(embedGoSource, "type Outer", "type Wider struct {\n\tMore string `json:\"more\"`\n}\n\ntype Outer", 1)
+	goSrc = strings.Replace(goSrc, "\tBase\n", "\tBase\n\tWider\n", 1)
+	got := embedFindingsFor(t, goSrc, extendsTS)
+	if len(got) != 1 || !strings.Contains(got[0].Msg, `sends "more"`) {
+		t.Fatalf("a field added under the embedded struct was not reported: %+v", got)
+	}
+}
+
+func TestWireParityCatchesAFieldAddedToTheExtendedInterface(t *testing.T) {
+	ts := strings.Replace(extendsTS, "  mode: string;\n}\n\nexport interface Outer", "  mode: string;\n  invented: string;\n}\n\nexport interface Outer", 1)
+	got := embedFindingsFor(t, embedGoSource, ts)
+	if len(got) != 1 || !strings.Contains(got[0].Msg, `reads "invented"`) {
+		t.Fatalf("a field added under the extended interface was not reported: %+v", got)
+	}
+}
+
+func TestWireParityKeepsAnEmbeddedStructWithATagAsOneField(t *testing.T) {
+	src := "package p\n\ntype Base struct {\n\tMode string `json:\"mode\"`\n}\n\ntype Outer struct {\n\tBase `json:\"base\"`\n}\n"
+	names, ok := wireFieldNames(parseBytes("t.go", []byte(src)).file, "Outer")
+	if !ok || len(names) != 1 || names[0] != "base" {
+		t.Fatalf("names = %v ok=%v, want the tag's name as one field", names, ok)
+	}
+}
+
+func TestWireParitySkipsAnEmbeddedTypeFromAnotherPackage(t *testing.T) {
+	src := "package p\n\ntype Outer struct {\n\tID string `json:\"id\"`\n\tother.Snapshot\n}\n"
+	names, ok := wireFieldNames(parseBytes("t.go", []byte(src)).file, "Outer")
+	if !ok || len(names) != 1 || names[0] != "id" {
+		t.Fatalf("names = %v ok=%v, want only the struct's own field", names, ok)
+	}
+}
