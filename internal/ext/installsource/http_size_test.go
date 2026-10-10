@@ -118,6 +118,35 @@ func TestManifestReadErrorKeepsGitHubTreeFolderFallback(t *testing.T) {
 	}
 }
 
+// A GitHub repository whose root .mcp.json is fetched and refused, with nothing
+// else to plan, answers with that refusal: neither the remote-endpoint fallback
+// (a repo named like "mcp") nor ErrUnsupportedKind (any other name) stands in.
+func TestPlanGitHubRepoKeepsTheCauseOfARefusedMCPJSON(t *testing.T) {
+	oldAPI := githubAPIBaseURL
+	githubAPIBaseURL = "https://api.example.test"
+	t.Cleanup(func() { githubAPIBaseURL = oldAPI })
+	over := eagerMCPJSON(maxMCPJSONServers + 1)
+	want := fmt.Sprintf(".mcp.json declares %d servers; limit is %d", maxMCPJSONServers+1, maxMCPJSONServers)
+	for _, repo := range []string{"acme/mcp", "acme/tools"} {
+		client := &http.Client{Transport: manifestSizeRoundTrip(func(r *http.Request) (*http.Response, error) {
+			status, body := http.StatusNotFound, "not found"
+			if r.URL.String() == "https://raw.githubusercontent.com/"+repo+"/main/.mcp.json" {
+				status, body = http.StatusOK, over
+			}
+			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		})}
+		tl := &Tool{root: testenv.TempDir(t), httpClient: client, preparePlugin: func(context.Context, string, string) (string, string, func(), error) {
+			return "", "", nil, ErrManifestMissing
+		}}
+		actions, _, err := tl.planURL(context.Background(), request{
+			Source: "https://github.com/" + repo, Kind: "auto", Mode: "copy", Scope: "project", scopeExplicit: true,
+		})
+		if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("auto plan of github.com/%s: %d actions, err = %v; want the refusal saying %q", repo, len(actions), err, want)
+		}
+	}
+}
+
 type manifestSizeRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f manifestSizeRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
