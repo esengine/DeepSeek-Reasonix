@@ -5,6 +5,9 @@ import { useFitHeight } from "./fitHeight";
 import { reason } from "../i18n/kernel";
 import { BLOCK_WHY } from "../i18n/queue_why";
 
+import { useSendShortcut } from "../state/prefs";
+import { sendAria, sendsOnKey } from "./sendkey";
+import { useIme } from "./ime";
 import { Overflow } from "./Overflow";
 import { StudioIcon } from "./StudioIcon";
 import { touchKeyboard } from "./touchKeyboard";
@@ -117,6 +120,8 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
     const under = list.getBoundingClientRect().top - row.getBoundingClientRect().top;
     list.scrollTop += under > 0 ? -under : Math.max(0, over);
   }, [editing, draft]);
+  const shortcut = useSendShortcut();
+  const ime = useIme();
 
   // The body arrives after the click, so focus waits for the field to exist.
   useEffect(() => {
@@ -233,14 +238,15 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                   rows={1}
                   onChange={(e) => setDraft(e.target.value)}
                   onBlur={commit}
+                  {...ime.handlers}
+                  aria-keyshortcuts={sendAria(shortcut, touchKeyboard())}
                   onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      setEditing("");
+                    if (e.key === "Escape") { e.preventDefault(); setEditing(""); return; }
+                    if (ime.isIme(e.nativeEvent)) {
+                      if (e.key === "Enter") e.preventDefault();
+                      return;
                     }
-                    // Enter commits; the line is one instruction, and a queue
-                    // row is not where a paragraph gets composed.
-                    if (e.key === "Enter" && !e.shiftKey && !touchKeyboard() && !e.nativeEvent.isComposing) {
+                    if (sendsOnKey(e, shortcut, touchKeyboard())) {
                       e.preventDefault();
                       commit();
                     }

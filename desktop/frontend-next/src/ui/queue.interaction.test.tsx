@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Queue } from "./Queue";
 import { HttpError } from "../port/port";
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 
 // The preview is cut at 120 runes, so the box has to be filled from the read
 // and never from the row: saving the row back files a truncated line as the
@@ -121,4 +121,56 @@ describe("retrying a held entry", () => {
     await userEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(onRetry).toHaveBeenCalledWith("u1");
   });
+});
+
+describe("queue send shortcut", () => {
+  it.each([false, true])("preserves Escape propagation when abandoning an edit (composing=%s)", async (composing) => {
+    const key = vi.fn();
+    window.addEventListener("keydown", key);
+    try {
+      const { edit, onEdit } = draw(async () => BODY);
+      await edit();
+      if (composing) fireEvent.compositionStart(box()!);
+      expect(fireEvent.keyDown(box()!, { key: "Escape" })).toBe(false);
+      expect(key).toHaveBeenCalledTimes(1);
+      expect(box()).toBeNull();
+      expect(onEdit).not.toHaveBeenCalled();
+    } finally { window.removeEventListener("keydown", key); }
+  });
+  it("keeps Enter for a newline and commits with Control+Enter", async () => {
+    localStorage.setItem("rx-send-shortcut", "modifier_enter");
+    const { edit, onEdit } = draw(async () => BODY);
+    await edit();
+    fireEvent.keyDown(box()!, { key: "Enter" });
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(box()).not.toBeNull();
+    fireEvent.keyDown(box()!, { key: "Enter", ctrlKey: true });
+    expect(onEdit).toHaveBeenCalledWith("i1", BODY);
+    expect(box()).toBeNull();
+  });
+  it("does not commit during or just after IME composition", async () => {
+    const { edit, onEdit } = draw(async () => BODY);
+    await edit();
+    fireEvent.compositionStart(box()!);
+    fireEvent.keyDown(box()!, { key: "Enter", isComposing: true });
+    fireEvent.compositionEnd(box()!);
+    fireEvent.keyDown(box()!, { key: "Enter" });
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(box()).not.toBeNull();
+  });
+});
+
+it.each(["enter", "modifier_enter"])("keeps touch Enter in the queue editor (%s)", async (mode) => {
+  const media = window.matchMedia("(pointer: coarse)");
+  vi.spyOn(window, "matchMedia").mockReturnValue({ ...media, matches: true });
+  localStorage.setItem("rx-send-shortcut", mode);
+  const { edit, onEdit } = draw(async () => BODY);
+  await edit();
+  fireEvent.keyDown(box()!, { key: "Enter", code: "Enter" });
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(box()).not.toBeNull();
+  if (mode === "enter") expect(box()?.hasAttribute("aria-keyshortcuts")).toBe(false);
+  if (mode === "modifier_enter") fireEvent.keyDown(box()!, { key: "Enter", code: "Enter", ctrlKey: true });
+  else fireEvent.blur(box()!);
+  expect(onEdit).toHaveBeenCalledWith("i1", BODY);
 });

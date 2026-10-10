@@ -2,6 +2,14 @@
 // alone — one catalogue is still the model, and this file is read as its
 // continuation: same keying by Chinese source text, same grouping by screen.
 export const EN_SETTINGS: Record<string, string> = {
+  "发送快捷键": "Send shortcut",
+  "用于任务输入、待发送消息编辑与历史消息重发。输入法确认候选词时不会发送。": "Applies to task input, editing queued messages, and resending past messages. Confirming an input-method candidate never sends.",
+  "Enter 发送": "Enter to send",
+  "{key} 发送": "{key} to send",
+  "{key} 发送 · Enter 换行": "{key} to send · Enter for a new line",
+  "{key} 插话 · Enter 换行": "{key} to steer · Enter for a new line",
+  "Shift+Enter 换行；触屏设备使用发送按钮。": "Shift+Enter for a new line; use the send button on touch devices.",
+  "Enter 换行，也可点击发送按钮。": "Enter for a new line, or click the send button.",
   "步骤 1 · 连接服务": "Step 1 · Connect service",
   "先连接服务，再选择这个来源要启用的模型。": "Connect the service, then choose which models to enable from it.",
   "来源名称": "Source name",

@@ -1,6 +1,8 @@
-// Per-machine display choices. They live in localStorage rather than in the
-// kernel's settings because they answer "what does this screen show me",
-// which is not a fact about the session and does not travel with it.
+import { useSyncExternalStore } from "react";
+
+// Per-machine interface choices. They live in localStorage rather than in the
+// kernel's settings because they govern this screen's presentation and input,
+// not session facts, and do not travel with the session.
 
 // On unless this machine turned it off. A turn that changed files and verified
 // none of them ends on the one card that says so, and the kernel already
@@ -299,4 +301,40 @@ export function setShowsHiddenFiles(on: boolean): void {
   } catch {
     /* the choice holds for this window and is forgotten on the next */
   }
+}
+
+// The send key is local to this machine, never read from project settings.
+export type SendShortcut = "enter" | "modifier_enter";
+const SEND_SHORTCUT_KEY = "rx-send-shortcut";
+const sendShortcutListeners = new Set<() => void>();
+let transientSendShortcut: SendShortcut = "enter";
+// A refused write can still leave reads returning the old choice.
+let sendShortcutStorageFailed = false;
+
+export function sendShortcut(): SendShortcut {
+  if (sendShortcutStorageFailed) return transientSendShortcut;
+  try {
+    return localStorage.getItem(SEND_SHORTCUT_KEY) === "modifier_enter" ? "modifier_enter" : "enter";
+  } catch {
+    return transientSendShortcut;
+  }
+}
+
+export function setSendShortcut(next: SendShortcut): void {
+  transientSendShortcut = next;
+  try { localStorage.setItem(SEND_SHORTCUT_KEY, next); sendShortcutStorageFailed = false; } catch { sendShortcutStorageFailed = true; }
+  sendShortcutListeners.forEach((fn) => fn());
+}
+
+function subscribeSendShortcut(fn: () => void): () => void {
+  sendShortcutListeners.add(fn);
+  const storage = (event: StorageEvent) => {
+    if (event.key === SEND_SHORTCUT_KEY || event.key === null) fn();
+  };
+  window.addEventListener("storage", storage);
+  return () => { sendShortcutListeners.delete(fn); window.removeEventListener("storage", storage); };
+}
+
+export function useSendShortcut(): SendShortcut {
+  return useSyncExternalStore(subscribeSendShortcut, sendShortcut, sendShortcut);
 }
