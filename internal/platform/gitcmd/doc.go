@@ -19,7 +19,8 @@
 //   - Filter and merge drivers defined at local or worktree scope are listed by
 //     git itself before each invocation (includes followed) and overridden
 //     empty; user and system drivers stay live. A name -c cannot address stops
-//     the invocation (ErrRepositoryDrivers).
+//     the invocation (ErrRepositoryDrivers). Ref, index and tree plumbing that
+//     never converts content (driverFree) is not listed.
 //
 // Which repository is read is settled once. A session resolves its workspace
 // with Open before any command runs, and every later call through the Repo

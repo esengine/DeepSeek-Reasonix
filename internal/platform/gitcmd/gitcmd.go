@@ -29,6 +29,11 @@ var baseConfig = []string{
 	// Otherwise log and show run gpg.program on every signed commit.
 	"log.showSignature=false",
 	"merge.verifySignatures=false",
+	// Signature formats (%G?, %(signature)) run these programs for any signed
+	// object, whatever the repository names.
+	"gpg.program=",
+	"gpg.ssh.program=",
+	"gpg.x509.program=",
 	// No inline submodule diff starts a git process that reads the
 	// submodule's own config. submodule.recurse is pinned per repository.
 	"diff.submodule=short",
@@ -85,7 +90,7 @@ var noRecurse = []string{"checkout", "switch", "restore", "reset", "merge", "rea
 
 // globalsWithValue are git's global options that take their value as the next
 // argument when not written with '='.
-var globalsWithValue = []string{"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix", "--exec-path"}
+var globalsWithValue = []string{"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix", "--attr-source"}
 
 // subcommandIndex returns the position of the subcommand in args, past any
 // global options, or -1 when args names none.
