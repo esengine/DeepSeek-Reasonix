@@ -80,6 +80,16 @@ func Protocols() []Protocol {
 	return slices.Clone(protocols)
 }
 
+// CanListModels reports whether an endpoint of this entry's wire has a model
+// listing to read. An unknown kind keeps the control it always had.
+func CanListModels(e *ProviderEntry) bool {
+	if e == nil {
+		return false
+	}
+	p, ok := ProtocolFor(e.Kind)
+	return !ok || p.Discovery != ""
+}
+
 // ProtocolFor resolves a config kind, following aliases.
 func ProtocolFor(kind string) (Protocol, bool) {
 	k := strings.ToLower(strings.TrimSpace(kind))

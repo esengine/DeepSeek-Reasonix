@@ -106,3 +106,17 @@ func TestProtocolCapabilitiesDriveTheEntryQueries(t *testing.T) {
 		t.Error("the Responses wire can pin reasoning off like the chat wire")
 	}
 }
+
+func TestCanListModelsFollowsTheDeclaredDiscovery(t *testing.T) {
+	for kind, want := range map[string]bool{
+		"openai": true, "responses": true, "anthropic": true, "dashscope-responses": true,
+		"typesafe": false, "made-up": true,
+	} {
+		if got := CanListModels(&ProviderEntry{Kind: kind}); got != want {
+			t.Errorf("CanListModels(%q) = %v, want %v", kind, got, want)
+		}
+	}
+	if CanListModels(nil) {
+		t.Error("a missing entry has no listing")
+	}
+}

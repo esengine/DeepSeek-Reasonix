@@ -296,3 +296,46 @@ it("words the kernel's refusal of the timeout with its bounds", async () => {
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
   expect(await screen.findByText("无响应超时须在 1 到 32767 秒之间；留空使用默认值")).toBeTruthy();
 });
+
+const decisionEntry: ProviderEntry = {
+  name: "verdicts",
+  kind: "typesafe",
+  baseUrl: "https://api.typesafe.ai",
+  models: ["system-one"],
+  default: "system-one",
+  hasKey: true,
+  inUse: false,
+  preset: false,
+  canListModels: false,
+};
+
+it("offers no model listing read for a protocol that declares none, header or inline", async () => {
+  const port = { checkProvider: vi.fn(), probeProvider: vi.fn() } as unknown as Port;
+  render(<EditConn entry={decisionEntry} port={port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} />);
+
+  expect(screen.queryByRole("button", { name: "从服务商读取可用模型" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "没找到？从服务商读取可用模型" })).toBeNull();
+  expect(screen.getByText("system-one")).toBeTruthy();
+});
+
+it("still checks, adds and saves a model on a source with no listing", async () => {
+  const editProvider = vi.fn(async () => {});
+  const checkProviderModel = vi.fn(async () => ({ model: "system-two", status: "available" as const }));
+  const port = { editProvider, checkProviderModel } as unknown as Port;
+  render(<EditConn entry={decisionEntry} port={port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} />);
+
+  await userEvent.type(screen.getByRole("searchbox", { name: "搜索或添加模型" }), "system-two{enter}");
+  const row = screen.getAllByText("system-two").map((el) => el.closest(".mline")).find(Boolean) as HTMLElement;
+  await userEvent.click(within(row).getByRole("button", { name: "验证模型 system-two" }));
+  await waitFor(() => expect(within(row).getByText("已验证可用")).toBeTruthy());
+  await userEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(editProvider).toHaveBeenCalled());
+  expect(editProvider).toHaveBeenCalledWith(expect.objectContaining({ name: "verdicts", models: expect.arrayContaining(["system-two"]) }));
+});
+
+it("keeps the listing read when the kernel says nothing about it", async () => {
+  const port = { checkProvider: vi.fn(async () => ({ ok: true, models: ["a"] })) } as unknown as Port;
+  const entry: ProviderEntry = { ...decisionEntry, kind: "openai", canListModels: undefined };
+  render(<EditConn entry={entry} port={port} busy="" setBusy={() => {}} onDone={() => {}} onRevert={() => {}} />);
+  expect(screen.getByRole("button", { name: "从服务商读取可用模型" })).toBeTruthy();
+});
