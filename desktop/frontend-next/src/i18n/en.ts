@@ -1391,6 +1391,7 @@ export const EN: Record<string, string> = {
   "打开「工具与集成」": "Open Tools and integrations",
   "图表": "Chart",
   "图表：{title}（可横向滚动）": "Chart: {title} (scrolls sideways)",
+  "悬停或聚焦图表以查看数值": "Hover or focus the chart to see values",
   "没有可画的数据": "Nothing to draw",
   "柱状图": "Bar chart",
   "折线图": "Line chart",

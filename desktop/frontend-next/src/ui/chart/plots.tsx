@@ -92,6 +92,7 @@ export function BarPlot({ spec, mark, hot, hatch }: Frame) {
         const label = `${s.label} · ${p.categories[i]} · ${formatValue(v, spec.y_axis)}`;
         return (
           <g key={`${k}:${i}`} className={`bar ${seriesClass(k)}`} {...pointProps(label, hot, focusable)}>
+            <title>{label}</title>
             <rect x={x} y={Math.min(a, b)} width={Math.max(1, slot - 1)} height={Math.max(1, Math.abs(b - a))} />
             {k >= 5 && <rect className="hatch" x={x} y={Math.min(a, b)} width={Math.max(1, slot - 1)} height={Math.max(1, Math.abs(b - a))} fill={`url(#${hatch})`} />}
           </g>
@@ -123,22 +124,39 @@ export function LinePlot({ spec, mark, hot }: Frame) {
     <svg viewBox={`0 0 ${W} ${H}`} className="chart-svg" style={{ minWidth: W }}>
       <Axes y={y} left={left} spec={spec} />
       {p.series.map((s, k) => {
-        const runs: string[] = [];
-        let run = "";
+        const runs: number[][] = [];
+        let run: number[] = [];
         for (const i of order) {
           const v = s.values[i];
-          if (v === null) { if (run) runs.push(run); run = ""; continue; }
-          run += `${run ? "L" : "M"}${xs[i].toFixed(1)} ${at(v).toFixed(1)}`;
+          if (v === null) { if (run.length) runs.push(run); run = []; continue; }
+          run.push(i);
         }
-        if (run) runs.push(run);
+        if (run.length) runs.push(run);
         return (
           <g key={k} className={`line ${seriesClass(k)}`}>
-            {runs.map((d, r) => <path key={r} d={d} />)}
+            {runs.map((indices, r) => {
+              const d = indices.map((i, j) => `${j ? "L" : "M"}${xs[i].toFixed(1)} ${at(s.values[i]!).toFixed(1)}`).join("");
+              const hit = indices.length === 1 ? `${d}L${xs[indices[0]].toFixed(1)} ${at(s.values[indices[0]]!).toFixed(1)}` : d;
+              return (
+                <g key={r}>
+                  <path d={d} />
+                  <path className="line-hit" d={hit} aria-hidden="true" onMouseMove={(e) => {
+                    const rect = e.currentTarget.ownerSVGElement!.getBoundingClientRect();
+                    if (!rect.width) return;
+                    const x = ((e.clientX - rect.left) / rect.width) * W;
+                    const i = indices.reduce((best, next) => Math.abs(xs[next] - x) < Math.abs(xs[best] - x) ? next : best);
+                    hot(`${s.label} · ${p.categories[i]} · ${formatValue(s.values[i]!, spec.y_axis)}`);
+                  }} onMouseLeave={() => hot(null)}>
+                    <title>{s.label}</title>
+                  </path>
+                </g>
+              );
+            })}
             {s.values.map((v, i) => {
               if (v === null) return null;
               const label = `${s.label} · ${p.categories[i]} · ${formatValue(v, spec.y_axis)}`;
               return dots
-                ? <circle key={i} className="pt" cx={xs[i]} cy={at(v)} r={3.4} {...pointProps(label, hot, true)} />
+                ? <circle key={i} className="pt" cx={xs[i]} cy={at(v)} r={3.4} {...pointProps(label, hot, true)}><title>{label}</title></circle>
                 : null;
             })}
           </g>
@@ -176,7 +194,7 @@ export function PiePlot({ spec, mark, hot }: Frame) {
           angle += (s.value / total) * TAU;
           const label = `${s.label} · ${formatValue(s.value, spec.y_axis)} · ${pct(s.value / total, 1)}`;
           return (
-            <path key={i} className={`slice ${seriesClass(i)}`} d={arc(W / 4, H / 2, r, mark.donut ? r * 0.58 : 0, a0, angle)} fillRule="evenodd" {...pointProps(label, hot, slices.length <= FOCUSABLE_MAX)} />
+            <path key={i} className={`slice ${seriesClass(i)}`} d={arc(W / 4, H / 2, r, mark.donut ? r * 0.58 : 0, a0, angle)} fillRule="evenodd" {...pointProps(label, hot, slices.length <= FOCUSABLE_MAX)}><title>{label}</title></path>
           );
         })}
       </svg>

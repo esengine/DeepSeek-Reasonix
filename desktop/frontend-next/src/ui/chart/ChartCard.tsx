@@ -104,7 +104,7 @@ export function ChartCard({ spec, callId }: { spec: ChartSpec; callId?: string }
             </div>
           ))}
           {axes(spec) && <figcaption className="chart-axes">{axes(spec)}</figcaption>}
-          <div className="chart-read" aria-live="polite">{read ?? " "}</div>
+          <div className="chart-read" aria-live="polite">{read ?? t("悬停或聚焦图表以查看数值")}</div>
         </figure>
         <ChartTable spec={spec} id={`${uid}-data`} />
       </div>

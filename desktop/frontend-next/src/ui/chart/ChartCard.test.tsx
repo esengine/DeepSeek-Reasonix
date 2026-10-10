@@ -84,7 +84,7 @@ describe("a chart card", () => {
 
   it("breaks a line at a null instead of bridging it", () => {
     const box = draw(series());
-    expect(box.querySelectorAll(".line path")).toHaveLength(2);
+    expect(box.querySelectorAll(".line path:not(.line-hit)")).toHaveLength(2);
   });
 
   it("shows the data as a real table on request and hides it again", async () => {

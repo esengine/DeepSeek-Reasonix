@@ -20,17 +20,18 @@
 .chart .cs2 { --c: var(--cat-3) }
 .chart .cs3 { --c: var(--cat-4) }
 .chart .cs4 { --c: var(--cat-5) }
-.chart .bar rect:first-child { fill: var(--c) }
+.chart .bar rect:first-of-type { fill: var(--c) }
 .chart .hatch-line { stroke: var(--surface); stroke-width: 2; opacity: .7 }
 .chart .line path { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round }
 .chart .line.sv1 path { stroke-dasharray: 7 4 }
 .chart .line.sv2 path { stroke-dasharray: 2 4 }
+.chart .line .line-hit { stroke: transparent; stroke-width: 12; stroke-dasharray: none; pointer-events: stroke }
 .chart .line .pt { fill: var(--surface); stroke: var(--c); stroke-width: 2 }
 .chart .slice { fill: var(--c); stroke: var(--surface); stroke-width: 2 }
 .chart .slice.sv1 { fill-opacity: .72 }
 .chart .slice.sv2 { fill-opacity: .5 }
 .chart [tabindex]:focus-visible { outline: 2px solid var(--text); outline-offset: 2px }
-.chart .bar:hover rect:first-child, .chart .slice:hover { filter: brightness(1.08) }
+.chart .bar:hover rect:first-of-type, .chart .slice:hover { filter: brightness(1.08) }
 .chart-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; padding: 0; list-style: none; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
 .chart-key li { display: inline-flex; align-items: center; gap: 6px; min-width: 0 }
 .chart-key .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
