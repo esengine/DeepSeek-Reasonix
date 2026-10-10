@@ -205,6 +205,10 @@ export interface SessionState {
   // second model wrote it; the rest are this one, recorded when the turn began
   // rather than read off the composer, which moves on.
   turnModel?: string;
+  // The session-log index of the message the live turn is about, taken from
+  // its turn_started. A second start naming the same one is the same open
+  // delivered twice — a duplicate, not a turn that ended without saying so.
+  turnMsgIndex?: number;
   entranceOwed: string[];
   enteredThrough: number;
   // Bumped when the transcript's composition changes — a card added, settled,

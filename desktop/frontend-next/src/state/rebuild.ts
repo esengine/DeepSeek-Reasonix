@@ -24,7 +24,10 @@ export function rebuild(s: SessionState, ev: { items: Item[]; plan?: PlanStep[];
     (i) => i.t === "tool" && i.running && i.tool.id && !ev.items.some((r) => r.t === "tool" && r.tool.id === i.tool.id),
   );
   // A record ending on the committed answer, with no call of ours still out,
-  // is a turn_done the wire lost: the answer wins and the turn is over.
+  // holds the same words the live card is still writing: the record's copy
+  // wins the card. Whether the TURN is over is not shape's to say — the
+  // kernel commits a text-only round before handleFinalResponse decides to
+  // continue it — and rides /status as __running instead.
   const ended = !openCalls && tail.some((i) => i.t === "say") && ev.items[ev.items.length - 1]?.t === "say";
   const items = [
     ...ev.items.map((row) => {
@@ -43,5 +46,5 @@ export function rebuild(s: SessionState, ev: { items: Item[]; plan?: PlanStep[];
   // How the restored turns ended is not in the record; a live turn that
   // vanished mid-flight leaves null, which is a different answer.
   const terminal: TurnTerminal = ev.items.length ? { kind: "unread" } : s.terminal;
-  return { ...s, executions: ev.executions, terminal, running: s.running && !ended, items };
+  return { ...s, executions: ev.executions, terminal, running: s.running, items };
 }

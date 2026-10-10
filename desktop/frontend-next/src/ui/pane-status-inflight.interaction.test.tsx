@@ -28,6 +28,10 @@ function open(visible: boolean) {
     return subscribe(onEvent, onGap, bootstrap);
   });
   const status = vi.spyOn(port, "status");
+  // The pane carries /status's running into the reducer alongside the record;
+  // a port answering idle over an emitted turn_started is a kernel that
+  // contradicts its own wire. Tests below replace this with their own reads.
+  status.mockImplementation(async () => ({ running: true }) as never);
   const todos = vi.spyOn(port, "todos");
   const props = {
     port: port as AgentPort,

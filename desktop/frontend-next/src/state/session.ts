@@ -201,6 +201,7 @@ export type SessionEvent =
   | { kind: "__restore"; items: Item[]; plan?: PlanStep[]; executions: Executions }
   | { kind: "__todos"; plan: PlanStep[] }
   | { kind: "__totals"; hit: number; miss: number; cost?: number; currency?: string; coverage?: CostCoverage; incompleteReason?: string }
+  | { kind: "__running"; running: boolean }
   | { kind: "__error"; text: string }
   | { kind: "__user"; text: string; pending: boolean; id?: string }
   | { kind: "__unsent"; id: string }
@@ -320,6 +321,10 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       },
     };
   }
+  // /status's own answer, because the record cannot end a turn: the kernel
+  // commits a text-only round before it decides whether the turn continues,
+  // so only the kernel saying idle can close one. Equal answers fold to s.
+  if (ev.kind === "__running") return s.running === ev.running ? s : { ...s, running: ev.running };
   // A wait only text or reasoning could end outlived every turn whose first
   // packet was a tool call: the retry line and its clock stayed up for the rest
   // of the turn, over calls that were running fine.
@@ -341,7 +346,11 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       // be on screen over work that is running now.
       // A turn still open here is one whose end never arrived; nothing of it
       // can arrive any more, and sealTurn is the seal its end would have spent.
-      return nameTurnStart({ ...s, running: true, doing: "运行中", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() }, items: sealTurn(sealSay(s.items, true)) }, ev);
+      // A second start naming this turn's own message is that open delivered
+      // twice: no seal — calls still run, a prompt is still owed — but naming
+      // still runs, because the row may have been sent between the two.
+      if (s.running && ev.msgIndex !== undefined && ev.msgIndex === s.turnMsgIndex) return nameTurnStart(s, ev);
+      return nameTurnStart({ ...s, running: true, doing: "运行中", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() }, turnMsgIndex: ev.msgIndex ?? s.turnMsgIndex, items: sealTurn(sealSay(s.items, true)) }, ev);
 
     case "reasoning":
       return {
