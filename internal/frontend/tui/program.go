@@ -80,6 +80,7 @@ type model struct {
 	client  *Client
 	opts    Options
 	updates <-chan Update
+	focus   focusState
 
 	tr        Transcript
 	committed map[int]bool
@@ -200,6 +201,7 @@ func (m *model) Init() tea.Cmd {
 	if m.opts.PickSession {
 		cmds = append(cmds, m.openPicker())
 	}
+	cmds = append(cmds, m.viewedAtStart())
 	if p := strings.TrimSpace(m.opts.Prompt); p != "" {
 		m.tr.AddUser(p)
 		cmds = append(cmds, m.commit(), m.call("submit", func(ctx context.Context) error { return m.client.Submit(ctx, p) }))
@@ -299,6 +301,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.resize(msg)
 		return m, nil
+	case tea.FocusMsg, tea.BlurMsg:
+		return m, m.focus.report(msg, m.markViewed)
 	case tea.ModeReportMsg:
 		noteCells(msg)
 		return m, nil
@@ -324,7 +328,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{m.commit(), rearm, m.noteRunning(was)}
 		if turnDone {
 			m.noteTurnEnd()
-			cmds = append(cmds, m.commit(), m.fetchMeters())
+			cmds = append(cmds, m.commit(), m.fetchMeters(), m.viewedOnTurnEnd())
 		}
 		if m.tr.TodosMoved {
 			m.tr.TodosMoved = false

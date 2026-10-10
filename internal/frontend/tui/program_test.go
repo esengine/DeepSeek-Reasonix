@@ -61,7 +61,7 @@ func (k *recordingKernel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/sessions":
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"name": "a", "path": "/s/a.jsonl", "title": "fix the parser", "turns": 3, "current": true},
-			{"name": "b", "path": "/s/b.jsonl", "title": "write the docs", "turns": 2},
+			{"name": "b", "path": "/s/b.jsonl", "title": "write the docs", "turns": 2, "unread": true},
 			{"name": "c", "path": "/s/c.jsonl", "title": "fix the lexer", "turns": 1},
 		})
 	case "/history":

@@ -74,6 +74,7 @@ func (m *model) View() tea.View {
 		v.Content = splitClusters(v.Content)
 	}
 	v.Content = m.glyphs.apply(v.Content)
+	v.ReportFocus = true
 	return v
 }
 
