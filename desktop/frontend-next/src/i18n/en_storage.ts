@@ -13,6 +13,16 @@ export const EN_STORAGE: Record<string, string> = {
   "这个文件夹里没有找到旧版会话。请选择 Reasonix 的数据文件夹（里面有 sessions、projects 或 desktop-sessions-v5）。":
     "No older sessions were found in this folder. Pick the Reasonix data folder (the one holding sessions, projects or desktop-sessions-v5).",
   "有 {n} 项无法读取。": "{n} items could not be read.",
+  "复制路径：{name}": "Copy path: {name}",
+  "有 {n} 个会话没有导入": "{n} sessions were not imported",
+  "这些文件仍在原位置，没有被移动或删除。可复制路径自行处理，或修复后重新导入。":
+    "These files are still where they were; nothing was moved or deleted. Copy a path to deal with it yourself, or fix it and import again.",
+  体积超过读取上限: "Larger than the size limit for reading",
+  "不是本版本能读取的会话格式": "Not a session format this version can read",
+  "来自本版本尚不支持的存储版本": "Written by a storage version this version does not support yet",
+  没有读取权限: "No permission to read it",
+  文件已损坏: "The file is damaged",
+  复制到新位置时失败: "Copying it to the new location failed",
   "未能扫描这个文件夹。请确认它是旧版 Reasonix 的数据目录。": "This folder could not be scanned. Make sure it is an older Reasonix data folder.",
   存储: "Storage",
   "数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。":

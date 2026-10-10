@@ -128,6 +128,10 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		return m, m.fetchCompletion()
 	case "enter":
+		if m.scr != nil && strings.TrimSpace(m.composer.Value()) == "" {
+			m.followTail()
+			return m, nil
+		}
 		return m, m.send(false)
 	case "ctrl+s":
 		return m, m.send(true)
@@ -196,7 +200,7 @@ func (m *model) recallAtEdge(older bool) bool {
 }
 
 // shortcutKey takes the keys that act without touching the composer: the
-// approval modes, clearing the screen, and the clipboard.
+// approval modes, clearing the screen, suspending, and the clipboard.
 func (m *model) shortcutKey(k string) (tea.Cmd, bool) {
 	switch {
 	case k == "shift+tab":
@@ -205,6 +209,8 @@ func (m *model) shortcutKey(k string) (tea.Cmd, bool) {
 		return m.toggleYolo(), true
 	case k == "ctrl+l":
 		return m.clearDisplay(), true
+	case k == "ctrl+z":
+		return tea.Suspend, true
 	case imagePasteKey(k):
 		return m.pasteClipboard(), true
 	case k == "shift+insert":

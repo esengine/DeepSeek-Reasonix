@@ -66,11 +66,22 @@ func runFakeHelper(in io.Reader, out io.Writer) {
 				map[string]any{"pid": 7, "bundle": "com.example.Notes", "name": "Notes", "windows": []any{}},
 				map[string]any{"pid": 8, "bundle": "com.example.Locked", "name": "Locked", "windows": []any{}},
 				map[string]any{"pid": 9, "bundle": "Vendor.Shell_abc123", "exe": "PWSH.exe", "name": "Shell", "windows": []any{}},
+				map[string]any{"pid": 10, "bundle": "com.example.Held", "name": "Held", "windows": []any{}},
 			}}
 		case "snapshot":
 			if req.Params["pid"] == float64(8) {
 				refuse("computer.permission_missing", "accessibility")
 			}
+			if req.Params["pid"] == float64(heldPID) {
+				reply["result"] = map[string]any{"lines": []string{`- window "Untitled" [a1] disabled`, `- window "Error" [a34] modal`}, "modals": []any{heldModal}}
+			}
+		case "type", "set_value", "focus":
+			if req.Params["pid"] == float64(heldPID) {
+				refuse("computer.blocked", "the keys would land in a dialog whose focused element takes no text")
+				reply["error"].(map[string]any)["blocked_by"] = heldModal
+				break
+			}
+			reply["result"] = map[string]any{"effect": fakeEffects[req.Method]}
 		case "request_permission":
 			asked++
 		case "screenshot":
@@ -84,6 +95,7 @@ func runFakeHelper(in io.Reader, out io.Writer) {
 		case "press":
 			refuse("computer.stale_ref", "a9 is gone")
 		case "key":
+			reply["result"] = map[string]any{"effect": map[string]any{"class": "a_class_nobody_declared", "blocked_by": heldModal}}
 			if req.Params["key"] == "Escape" {
 				_ = enc.Encode(map[string]any{"event": "stop"})
 				time.Sleep(20 * time.Millisecond)
@@ -115,6 +127,18 @@ func runFakeHelper(in io.Reader, out io.Writer) {
 		}
 		_ = enc.Encode(reply)
 	}
+}
+
+// heldPID is the fake application a modal dialog holds.
+const heldPID = 10
+
+var heldModal = map[string]any{"ref": "a34", "title": "Error", "blocks": "Untitled"}
+
+// fakeEffects are what the fake helper claims each step did, evidence or not.
+var fakeEffects = map[string]any{
+	"set_value": map[string]any{"class": "confirmed", "evidence": []string{"value_readback"}},
+	"type":      map[string]any{"class": "confirmed"},
+	"focus":     map[string]any{"class": "suspected_noop", "evidence": []string{"value_unchanged"}},
 }
 
 func fakeSession(t *testing.T) *Session {
@@ -169,7 +193,7 @@ func TestAClickAtAPointIsReadInTheLatestScreenshotsPixels(t *testing.T) {
 		t.Fatalf("the screenshot was not fitted for a vision model: %dpx, %v", fitted.Width, err)
 	}
 	res, err := s.Act(ctx, "com.example.Notes", click)
-	if err != nil || res.Notes[0] != "click the button at (100,40)" {
+	if err != nil || res.Steps[0].Note != "click the button at (100,40)" {
 		t.Fatalf("click = %+v, %v", res, err)
 	}
 	var got struct{ X, Y float64 }
@@ -228,7 +252,7 @@ func TestAHelperThatExitsFailsWhatWasPendingAndStartsAgain(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		apps, err := s.Apps(ctx)
-		if err == nil && len(apps) == 3 {
+		if err == nil && len(apps) == 4 {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -274,7 +298,7 @@ func TestEveryPointerStepIsAimedInTheScreenshotsPixels(t *testing.T) {
 	wantX, wantY := 100+x*scale, 50+y*scale
 
 	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_move", X: &x, Y: &y}})
-	if err != nil || res.Notes[0] != "move the pointer to (100,40)" {
+	if err != nil || res.Steps[0].Note != "move the pointer to (100,40)" {
 		t.Fatalf("pointer_move = %+v, %v", res, err)
 	}
 	method, params := lastCall(t, s)
@@ -283,7 +307,7 @@ func TestEveryPointerStepIsAimedInTheScreenshotsPixels(t *testing.T) {
 	}
 
 	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_click", X: &x, Y: &y, Button: "right", Times: 2}})
-	if err != nil || res.Notes[0] != "right click at (100,40)" {
+	if err != nil || res.Steps[0].Note != "right click at (100,40)" {
 		t.Fatalf("pointer_click = %+v, %v", res, err)
 	}
 	if method, params = lastCall(t, s); method != "pointer_click" || params["button"] != "right" || params["clicks"] != 2.0 {
@@ -298,7 +322,7 @@ func TestEveryPointerStepIsAimedInTheScreenshotsPixels(t *testing.T) {
 	}
 
 	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_drag", X: &x, Y: &y, ToX: &toX, ToY: &toY}})
-	if err != nil || res.Notes[0] != "drag the pointer from (100,40) to (300,120)" {
+	if err != nil || res.Steps[0].Note != "drag the pointer from (100,40) to (300,120)" {
 		t.Fatalf("pointer_drag = %+v, %v", res, err)
 	}
 	method, params = lastCall(t, s)
@@ -370,7 +394,7 @@ func TestThePointerSaysWhereItIsInTheFrameTheModelHas(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
 	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "pointer_position"}})
-	if err != nil || !strings.Contains(res.Notes[0], "take a screenshot") {
+	if err != nil || !strings.Contains(res.Steps[0].Note, "take a screenshot") {
 		t.Fatalf("pointer_position with no screenshot = %+v, %v", res, err)
 	}
 	scale := fittedScale(t, s, ctx)
@@ -379,8 +403,8 @@ func TestThePointerSaysWhereItIsInTheFrameTheModelHas(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := fmt.Sprintf("the pointer is at (%.0f,%.0f) in the screenshot", (600-100)/scale, (300-50)/scale)
-	if res.Notes[0] != want {
-		t.Fatalf("pointer_position = %q, want %q", res.Notes[0], want)
+	if res.Steps[0].Note != want {
+		t.Fatalf("pointer_position = %q, want %q", res.Steps[0].Note, want)
 	}
 }
 
@@ -391,7 +415,7 @@ func TestTheMenuBelongsToAnElementAndScrollingSaysWhichItWas(t *testing.T) {
 		t.Fatalf("a right_click with no ref = %v, want %s", err, CodeBadStep)
 	}
 	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "right_click", Ref: "a4"}})
-	if err != nil || res.Notes[0] != "open the menu of a4" {
+	if err != nil || res.Steps[0].Note != "open the menu of a4" {
 		t.Fatalf("right_click = %+v, %v", res, err)
 	}
 	if method, params := lastCall(t, s); method != "menu" || params["ref"] != "a4" {
@@ -400,7 +424,7 @@ func TestTheMenuBelongsToAnElementAndScrollingSaysWhichItWas(t *testing.T) {
 	// Bringing an element into view and turning the wheel are one step and two
 	// outcomes, and the helper says which one it did.
 	res, err = s.Act(ctx, "com.example.Notes", []Step{{Action: "scroll", Ref: "a2"}, {Action: "scroll", Amount: -3}})
-	if err != nil || res.Notes[0] != "bring a2 into view" || res.Notes[1] != "scroll -3 lines" {
+	if err != nil || res.Steps[0].Note != "bring a2 into view" || res.Steps[1].Note != "scroll -3 lines" {
 		t.Fatalf("scroll = %+v, %v", res, err)
 	}
 }
@@ -409,7 +433,7 @@ func TestHoldingAKeyAndRepeatingOneCarryTheirCount(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
 	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "hold_key", Key: "shift+a", Seconds: 1.5}})
-	if err != nil || res.Notes[0] != "hold shift+a for 1.5s" {
+	if err != nil || res.Steps[0].Note != "hold shift+a for 1.5s" {
 		t.Fatalf("hold_key = %+v, %v", res, err)
 	}
 	if method, params := lastCall(t, s); method != "hold_key" || params["seconds"] != 1.5 {
@@ -423,7 +447,7 @@ func TestHoldingAKeyAndRepeatingOneCarryTheirCount(t *testing.T) {
 func TestWaitingIsBoundedAndTheContextEndsIt(t *testing.T) {
 	s := fakeSession(t)
 	res, err := s.Act(context.Background(), "com.example.Notes", []Step{{Action: "wait", Ms: 5}})
-	if err != nil || res.Notes[0] != "wait 5ms" {
+	if err != nil || res.Steps[0].Note != "wait 5ms" {
 		t.Fatalf("wait = %+v, %v", res, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -443,7 +467,7 @@ func TestPastePutsTheWholeTextInAtOnce(t *testing.T) {
 	s := fakeSession(t)
 	ctx := context.Background()
 	res, err := s.Act(ctx, "com.example.Notes", []Step{{Action: "paste", Text: "从剪贴板 pasted"}})
-	if err != nil || res.Notes[0] != "paste 11 characters" {
+	if err != nil || res.Steps[0].Note != "paste 11 characters" {
 		t.Fatalf("paste = %+v, %v", res, err)
 	}
 	if method, params := lastCall(t, s); method != "paste" || params["text"] != "从剪贴板 pasted" {

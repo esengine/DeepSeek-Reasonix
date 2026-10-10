@@ -320,3 +320,26 @@ func TestHasHereDoc(t *testing.T) {
 		t.Fatal("HasHereDoc = false, want true")
 	}
 }
+
+func TestCompoundLeavesNamesWhatMadeAStatementUnreadable(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		why     StaticRejectReason
+		ok      bool
+	}{
+		{"ls | wc -l", "", true},
+		{"ls; echo $(pwd)", StaticRejectExpansion, false},
+		{"ls && $X y", StaticRejectExpansion, false},
+		{"A=1; ls", StaticRejectAssignment, false},
+		{"ls; ls > f", StaticRejectRedirection, false},
+		{"ls; cat <<EOF\nx\nEOF", StaticRejectHereDoc, false},
+		{"ls; sleep 1 &", StaticRejectControl, false},
+		{"ls; (", StaticRejectParse, false},
+		{"ls", "", false},
+	} {
+		_, why, ok := CompoundLeaves(tc.command)
+		if why != tc.why || ok != tc.ok {
+			t.Errorf("%q: why=%q ok=%v, want %q %v", tc.command, why, ok, tc.why, tc.ok)
+		}
+	}
+}

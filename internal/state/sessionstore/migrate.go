@@ -118,7 +118,7 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 	}
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
-		rep.skip(srcDir, err.Error())
+		rep.skipRead(srcDir, err)
 		return 0, nil
 	}
 
@@ -185,9 +185,9 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 		msgs, err := reconstructSession(filepath.Join(srcDir, name))
 		if err != nil || len(msgs) == 0 {
 			if err != nil {
-				rep.skip(name, err.Error())
+				rep.skipRead(filepath.Join(srcDir, name), err)
 			} else if eventsInfo != nil && eventsInfo.Size() > 0 {
-				rep.skip(name, "no messages in a format this version reads")
+				rep.skip(filepath.Join(srcDir, name), SkipUnreadableFormat)
 			}
 			continue
 		}
@@ -253,7 +253,7 @@ func importJsonlSessions(entries []os.DirEntry, srcDir, globalDest string, hasEv
 		jsonlPath := filepath.Join(srcDir, name)
 		if !isMessageFormat(jsonlPath) {
 			if info, err := e.Info(); err == nil && info.Size() > 0 {
-				rep.skip(name, "not a session format this version reads")
+				rep.skip(jsonlPath, SkipUnreadableFormat)
 			}
 			continue
 		}
@@ -270,7 +270,7 @@ func importJsonlSessions(entries []os.DirEntry, srcDir, globalDest string, hasEv
 		srcInfo, _ := e.Info()
 		if !copySessionFile(jsonlPath, dest) {
 			hadArtifactFailure = true
-			rep.skip(name, "could not be copied")
+			rep.skip(jsonlPath, SkipCopyFailed)
 			continue
 		}
 		if srcInfo != nil {
@@ -369,7 +369,7 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 			srcPath = filepath.Join(subDir, name)
 			if !isMessageFormat(srcPath) {
 				if info, err := e.Info(); err == nil && info.Size() > 0 {
-					rep.skip(name, "not a session format this version reads")
+					rep.skip(srcPath, SkipUnreadableFormat)
 				}
 				continue
 			}
@@ -393,7 +393,7 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 			msgs, err := reconstructSession(srcPath)
 			if err != nil || len(msgs) == 0 {
 				if err != nil {
-					rep.skip(name, err.Error())
+					rep.skipRead(srcPath, err)
 				}
 				continue
 			}
@@ -406,12 +406,12 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 			}
 		} else if isNativeSessionEventLog(SessionEventLogPath(srcPath)) {
 			if err := saveNativeSessionCopy(srcPath, dest); err != nil {
-				rep.skip(name, err.Error())
+				rep.skipRead(srcPath, err)
 				continue
 			}
 		} else {
 			if err := transformAndCopyJsonl(srcPath, dest); err != nil {
-				rep.skip(name, err.Error())
+				rep.skipWrite(srcPath, err)
 				continue
 			}
 		}

@@ -15,7 +15,7 @@ const waiting = (kind: Decision["kind"]): Decision => ({ id: `d-${kind}`, kind }
 // Labels this window has written, or could write, in the place the verdict used
 // to be read from. The first two are the literals that owned it; the rest are
 // what the same field says in another language or after a rewrite.
-const LABELS = ["等待批准", "等待确认", "Waiting for approval", "正在继续工作", "foo", ""];
+const LABELS = ["等待批准", "等待确认", "等待你回答", "Waiting for approval", "正在继续工作", "foo", ""];
 
 describe("pending decisions, not localized doing text, own blocked state", () => {
   // The counterfactual that matters most: the old wording is still on screen and

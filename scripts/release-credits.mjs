@@ -4,6 +4,7 @@
 // plain with a warning; a lookup GitHub could not answer fails by code.
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 export const defaultRepository = "esengine/DeepSeek-Reasonix";
 
@@ -40,6 +41,20 @@ export function creditExclusions(repository = defaultRepository, env = process.e
   const extra = String(env.RELEASE_CREDIT_EXCLUDE || "").split(",");
   const names = [repository.split("/")[0], ...extra].map((name) => name.trim().toLowerCase());
   return new Set(names.filter(Boolean));
+}
+
+// The owner's anonymous-commit aliases and the tool or CI identities that author
+// commits without being people; declared once in credit-identities.json.
+export function declaredNonCredits() {
+  const declared = JSON.parse(readFileSync(new URL("./credit-identities.json", import.meta.url), "utf8"));
+  const names = [...declared.ownerAliases, ...declared.nonPersonIdentities];
+  return new Set(names.map((name) => String(name).trim().toLowerCase()).filter(Boolean));
+}
+
+// creditExclusions plus the declared aliases and tool identities, for lists that
+// thank people by name.
+export function thanksExclusions(repository = defaultRepository, env = process.env) {
+  return new Set([...creditExclusions(repository, env), ...declaredNonCredits()]);
 }
 
 export function tokenFromEnvironment(env = process.env, runGh = defaultRunGh) {

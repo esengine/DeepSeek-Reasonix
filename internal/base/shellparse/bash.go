@@ -610,14 +610,32 @@ func WordBase(word string) string {
 // statically. A true result is the complete list of what runs; classifying
 // those argv is the caller's job.
 func CompoundLeafCommands(command string) (leaves [][]string, ok bool) {
+	leaves, _, ok = CompoundLeaves(command)
+	return leaves, ok
+}
+
+// CompoundLeaves is CompoundLeafCommands with the reason a statement could not
+// be read. The reason is empty when nothing in it was unreadable but it is not a
+// compound at all, so the single-command classifier owns the answer.
+func CompoundLeaves(command string) (leaves [][]string, why StaticRejectReason, ok bool) {
 	file, err := ParseBash(command)
-	if err != nil || len(file.Stmts) == 0 {
-		return nil, false
+	if err != nil {
+		return nil, StaticRejectParse, false
+	}
+	if len(file.Stmts) == 0 {
+		return nil, "", false
 	}
 	// `;`-separated statements are several commands too. Only the chaining
 	// operators used to set this, so a plain `a; b` fell between the
 	// single-command classifier and this one and counted as a write.
 	readable, compound := true, len(file.Stmts) > 1
+	unreadable := func(reason StaticRejectReason) bool {
+		if readable {
+			why = reason
+		}
+		readable = false
+		return false
+	}
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if !readable || node == nil {
 			return false
@@ -636,22 +654,21 @@ func CompoundLeafCommands(command string) (leaves [][]string, ok bool) {
 			compound = true
 		case *syntax.CmdSubst, *syntax.ProcSubst:
 			// Whatever these run never appears in the argv below.
-			readable = false
-			return false
+			return unreadable(StaticRejectExpansion)
 		case *syntax.Redirect:
 			// A redirect can create or truncate a file, and a here-document
 			// feeds a program source the argv does not show.
-			readable = false
-			return false
+			if n.Hdoc != nil {
+				return unreadable(StaticRejectHereDoc)
+			}
+			return unreadable(StaticRejectRedirection)
 		case *syntax.Stmt:
 			if n.Negated || n.Background || n.Coprocess || n.Disown {
-				readable = false
-				return false
+				return unreadable(StaticRejectControl)
 			}
 		case *syntax.CallExpr:
 			if len(n.Assigns) > 0 {
-				readable = false
-				return false
+				return unreadable(StaticRejectAssignment)
 			}
 			if len(n.Args) == 0 {
 				return true // a bare assignment-less call has nothing to run
@@ -663,8 +680,7 @@ func CompoundLeafCommands(command string) (leaves [][]string, ok bool) {
 					// A non-static argument is fine as data — the program still
 					// decides what it does — but never as the program itself.
 					if i == 0 {
-						readable = false
-						return false
+						return unreadable(StaticRejectExpansion)
 					}
 					field = dynamicArgPlaceholder
 				}
@@ -674,16 +690,23 @@ func CompoundLeafCommands(command string) (leaves [][]string, ok bool) {
 		}
 		return true
 	})
-	if !readable || !compound || len(leaves) == 0 {
-		return nil, false
+	if !readable {
+		return nil, why, false
 	}
-	return leaves, true
+	if !compound || len(leaves) == 0 {
+		return nil, "", false
+	}
+	return leaves, "", true
 }
 
 // dynamicArgPlaceholder stands in for an argument whose value is only known at
 // run time. It never occupies argv[0], so a classifier still sees the real
 // program name.
 const dynamicArgPlaceholder = "__reasonix_dynamic_arg__"
+
+// IsDynamicArg reports whether a leaf argument returned by CompoundLeaves stands
+// for a word only known at run time.
+func IsDynamicArg(field string) bool { return field == dynamicArgPlaceholder }
 
 // StdinHereDocPrograms returns the program name of every command in the
 // statement whose standard input comes from a here-document, at any nesting.

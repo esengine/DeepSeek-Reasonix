@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/platform/gitcmd"
+	"reasonix/internal/platform/gitstatus"
 	"reasonix/internal/session/control"
 )
 
@@ -128,5 +130,48 @@ func TestWorkspaceGitReportsBranchAndDirtOfTheSessionRepo(t *testing.T) {
 	got := read(changesServer(t, dir, repo))
 	if !got.Repo || got.Name != filepath.Base(dir) || got.Branch != "trunk" || got.Untracked != 1 {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestWorkspaceGitWirePreservesSummaryFields(t *testing.T) {
+	dir := testenv.TempDir(t)
+	for _, args := range [][]string{{"init", "-q", "-b", "trunk"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base", "--allow-empty"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git unavailable: %v\n%s", err, out)
+		}
+	}
+	repo, err := gitcmd.Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scratch.go"), []byte("package a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, ok := gitstatus.Summary(context.Background(), repo)
+	if !ok {
+		t.Fatal("test repository has no summary")
+	}
+	encoded, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	if err := json.Unmarshal(encoded, &want); err != nil {
+		t.Fatal(err)
+	}
+	want["repo"] = true
+	resp, err := http.Get(changesServer(t, dir, repo) + "/workspace/git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("workspace Git wire = %#v; want %#v", got, want)
 	}
 }

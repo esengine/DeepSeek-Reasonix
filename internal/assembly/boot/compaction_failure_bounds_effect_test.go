@@ -34,7 +34,7 @@ func (r *refusingRelay) Name() string { return "boot-refusing-relay" }
 func (r *refusingRelay) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting the earlier part") {
+	if len(req.Tools) == 0 {
 		r.summaries++
 		return nil, &provider.APIError{Provider: "relay", Status: 400, Body: `{"error":{"message":"summarizer unavailable"}}`}
 	}

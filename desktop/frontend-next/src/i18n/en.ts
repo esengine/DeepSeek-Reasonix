@@ -379,6 +379,7 @@ export const EN: Record<string, string> = {
   "界面": "Interface",
   "微调": "Fine-tune",
   "界面大小微调": "Fine-tune interface size",
+  "键盘：{up} 放大，{down} 缩小，{reset} 恢复标准，同样调整「界面」大小。": "Keyboard: {up} larger, {down} smaller, {reset} back to standard; these change Interface size.",
   "正文": "Body text",
   "紧凑": "Compact",
   "标准": "Standard",
@@ -599,6 +600,11 @@ export const EN: Record<string, string> = {
   "仓库地址，或将文件夹拖入此处": "A repository address, or drop a folder in",
   "选文件夹": "Choose a folder",
   "将添加": "Will be added",
+  "已截断": "Shortened",
+  "部分文字": "Some text",
+  "部分文字过长或含不可见字符，预览没有显示全部。": "Some text is too long or holds invisible characters, so the preview does not show all of it.",
+  "另有 {n} 项未显示；高风险项都已列出。": "{n} more steps are not shown; every high-risk step is listed.",
+  "还有 {n} 个技能未显示": "{n} more skills are not shown",
   "需填写": "Needs filling in",
   "不可用": "Unusable",
   "更新": "Update",
@@ -719,7 +725,7 @@ export const EN: Record<string, string> = {
   "撤销这次还原": "Undo this restore",
   "仍还原其余部分": "Restore the rest anyway",
   "还原失败": "Could not restore",
-  "本轮未修改任何文件": "This turn changed no files",
+  "回退范围内未修改任何文件": "No files changed in this rewind range",
   "本轮有改动无法还原": "Some of this turn's changes cannot be restored",
   "部分改动不在快照内": "Some of the changes are outside the snapshot",
   "已还原 {n} 个文件": "{n} files restored",
@@ -1334,6 +1340,26 @@ export const EN: Record<string, string> = {
     "Reading the staged changes failed",
   "提交请求格式不正确":
     "The commit request was malformed",
+  "另一个会话正在写入这个工作区，请稍后重试切换分支":
+    "Another session is writing to this workspace; try switching branches again shortly",
+  "后台任务仍在运行，请先停止再切换分支":
+    "Background jobs are still running; stop them before switching branches",
+  "任务运行中，分支要等这轮结束再切":
+    "A turn is running; wait for it to finish before moving the branch",
+  "这个工作区不是 git 仓库，没有分支可切换":
+    "This workspace is not a git repository, so there is no branch to switch to",
+  "切换分支的请求格式不正确":
+    "The branch switch request was malformed",
+  "这不是有效的分支名":
+    "That is not a usable branch name",
+  "没有这个名字的本地分支":
+    "No local branch with that name",
+  "有未提交的修改会被这次切换覆盖，请先提交或暂存（git stash）":
+    "Uncommitted changes would be overwritten by the switch; commit or stash them first",
+  "该分支已在另一个 worktree 中检出，请先在那边切走":
+    "That branch is checked out in another worktree; switch away there first",
+  "git 未能完成这次分支切换":
+    "git could not complete the branch switch",
   "新增工具":
     "New tools",
   "agent 可以调用，每次调用照常经过权限确认":
@@ -1351,12 +1377,19 @@ export const EN: Record<string, string> = {
   "同一段内容被逐字重复": "The same block is being repeated verbatim",
   "任务已按设置暂停：模型卡在重复输出同一段文字": "Paused by your setting: the model is stuck repeating the same text",
   "等待你的输入": "Waiting for you",
+  "后台任务已结束：{name}": "Background job finished: {name}",
+  "后台任务已终止：{name}": "Background job killed: {name}",
+  "后台任务 {name} 失败，需要处理": "Background job {name} failed: needs attention",
   "已恢复 {n} 条未完成的指令。待发送已暂停，请先在输入框上方的队列里查看，再点“继续派发”": "Recovered {n} unfinished instruction(s). Sending is paused: review them in the queue above the input box, then press Release",
   "待发送已暂停，这条消息已排入队列，点“继续派发”后才会发送": "Sending is paused. This message is queued and goes out once you press Release",
   "引导没有生效：这一轮在处理它之前就结束了。如果仍然需要，请再发送一次：": "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:",
   "费用显示币种已设为 {mode}": "Cost display currency set to {mode}",
   "模型卡在重复输出同一段文字，这一轮已停止；可以重试、补充引导，或换一个供应商/模型": "The model is stuck repeating the same text; this turn was stopped. Try again, add guidance, or switch provider/model.",
   "扩展 {ext} 的配套后台程序没有运行，该扩展本次（在 {point}）已被跳过；到「工具与集成」里查看并启动它，或停用该扩展": "The companion background program of extension {ext} is not running, so the extension was skipped this time (at {point}). Open Tools and integrations to check and start it, or disable the extension.",
+  "有 {n} 条权限规则没有对应的工具，匹配不到任何调用，因此起不到限制作用（如「{list}」里的 {rule}）；到「设置 → 权限」里删除或改写，命令要写成 Bash(命令:*)": "{n} permission rule(s) name no tool, so they match no call and restrict nothing (for example {rule} in {list}). Delete or rewrite them under Settings > Permissions; a shell command is written Bash(command:*).",
+  "有 {n} 条规则没有对应的工具，不会生效": "{n} rule(s) name no tool and never take effect",
+  "命令要写成 Bash(命令:*)；下方标出的规则可以删除或改写。": "A shell command is written Bash(command:*). The rules marked below can be deleted or rewritten.",
+  "没有名为 {tool} 的工具，这条规则不会生效": "No tool is named {tool}, so this rule never takes effect",
   "打开「工具与集成」": "Open Tools and integrations",
   "图表": "Chart",
   "图表：{title}（可横向滚动）": "Chart: {title} (scrolls sideways)",

@@ -59,6 +59,7 @@ type Messages struct {
 	NoticeCompacted              string            // /compact succeeded
 	NoticeCompactDeclinedFmt     string            // /compact declined — %s the reason
 	NoticeCompactFailedFmt       string            // /compact failed — %s the reason
+	NoticeCompactHeldFmt         string            // automatic compaction held after a failed attempt — %s the reason
 	NoSessionToResume            string            // shown when --continue / --resume finds nothing
 	NoSessionToResumeStartingNew string            // shown when --continue finds nothing and a fresh session starts
 	ResumeRequiresTTY            string            // shown when --resume runs piped instead of on a terminal
@@ -88,6 +89,9 @@ type Messages struct {
 	TUIDeclinedFmt          string // an approval the user refused — %s tool, %s subject
 	NoticeUnappliedSteerFmt string // guidance that arrived too late for its turn — %s the guidance
 	NoticeExtSkippedFmt     string // an optional extension skipped, its sidecar not running — %s extension, %s point
+	NoticeJobFinishedFmt    string // a background job ended — %s its label, else its id
+	NoticeJobKilledFmt      string // a background job was killed — %s its label, else its id
+	NoticeJobFailedFmt      string // a background job failed — %s its label, else its id
 	NoticeInboxRecoveredFmt string // a reopened inbox came up paused with unfinished instructions — %d count
 	TUIQuestion             string // an answered question that carried no prompt
 	TUISubagentCallsFmt     string // calls a sub-agent made under its task — %d count

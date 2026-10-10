@@ -4,7 +4,7 @@ import { reason } from "../i18n/kernel";
 import { t } from "../i18n";
 import { hasPendingDecision, posture, runState } from "./decisions";
 import { createPortal } from "react-dom";
-import type { Checkpoint, ContextBreakdown, JobEntry, McpEntry, SessionStatus, WorkspaceChanges } from "../port/port";
+import type { Checkpoint, ContextBreakdown, JobEntry, McpEntry, SessionStatus, WorkspaceChanges, WorkspaceGit } from "../port/port";
 import type { TrajectoryRead } from "../port/wire";
 import { chipLabel, fromHistory, initialState, quoteAmount, reduce } from "../state/session";
 import { pairCheckpoints } from "../state/checkpoints";
@@ -78,6 +78,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   const [mcp, setMcp] = useState<McpEntry[]>([]);
   const [askFocus, setAskFocus] = useState(0);
   const [tree, setTree] = useState<WorkspaceChanges | null>(null);
+  const [git, setGit] = useState<WorkspaceGit | null>(null);
   const [ctx, setCtx] = useState<ContextBreakdown | null>(null);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const pages = useBrowserTabs(port, s.browserTabsMoved);
@@ -276,7 +277,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   }, [ready, reloadMcp, status?.sessionPath, running]);
   useCheckpointRefresh(port, status?.sessionPath, running, setCheckpoints);
   // A call that may write can have moved the tree before the turn ends.
-  const refreshTree = useCallback(() => void port.changes().then(setTree).catch(() => setTree(null)), [port]);
+  const refreshTree = useCallback(() => { void port.changes().then(setTree).catch(() => setTree(null)); void port.workspaceGit().then(setGit).catch(() => setGit(null)); }, [port]);
   useEffect(() => { if (ready || counts.wrote) refreshTree(); }, [ready, refreshTree, status?.sessionPath, running, counts.wrote]);
 
   // One turn can be dozens of model round trips — the session this was measured
@@ -476,7 +477,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         </span>
         {/* Everything stacked above the input box shares one ceiling, so no
             child of this region may grow without bound. */}
-        <PlanFold plan={s.plan} shown={tab === "flow"} />
+        <PlanFold plan={s.plan} shown={tab === "flow"} paused={blocked} />
         {tab === "flow" && <RunLine label={chipLabel(s, running)} running={running} blocked={blocked} sent={sent} received={received} estimated={s.outLive > 0} />}
         <div className="composeaux">
           <Queue
@@ -510,7 +511,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
           )}
         </div>
         {alert && <div className="cmpalert">{alert}</div>}
-        <Composer port={port} status={status} running={running} quote={quote} restore={restored} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} onSettings={onSettings} changeCount={tree?.repo ? tree.changes.length : 0} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
+        <Composer port={port} status={status} running={running} quote={quote} restore={restored} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} onSettings={onSettings} changeCount={tree?.repo ? tree.changes.length : 0} git={git} onTreeChanged={refreshTree} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
         <MeterRail
           tps={tps} trail={trail} running={running} speed={speed} metrics={s.metrics} ctx={ctx} mcp={mcp} cost={cost}
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}
@@ -546,6 +547,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
             done={!running}
             posture={posture(run, blocked)}
             plan={s.plan}
+            blocked={blocked}
             wallet={wallet}
             account={status?.providerDisplayName || accountOf(status?.modelRef)}
             onRefreshWallet={refreshWallet}

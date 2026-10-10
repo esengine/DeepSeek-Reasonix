@@ -209,6 +209,16 @@ bool isFront(DWORD pid) {
     return fg && contentPid(fg) == pid;
 }
 
+// heldOwner is the window of the same process that window, as a modal dialog,
+// has disabled somewhere up its owner chain; null when it holds none.
+HWND heldOwner(HWND window, DWORD pid) {
+    if (!IsWindowEnabled(window)) return nullptr;
+    for (HWND o = GetWindow(window, GW_OWNER); o; o = GetWindow(o, GW_OWNER)) {
+        if (contentPid(o) == pid && !IsWindowEnabled(o)) return o;
+    }
+    return nullptr;
+}
+
 // front brings the application forward before input that goes wherever the
 // foreground is. Windows grants the foreground only to a process that received
 // the last input, so an input with no effect is injected first.

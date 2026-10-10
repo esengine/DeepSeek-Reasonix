@@ -2,12 +2,14 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -52,18 +54,30 @@ func (k ShellKind) String() string {
 	return "bash"
 }
 
+// FallbackReason says why auto-detection settled on PowerShell instead of bash.
+type FallbackReason string
+
+const (
+	FallbackNone         FallbackReason = ""
+	FallbackNotFound     FallbackReason = "not_found"
+	FallbackProbeTimeout FallbackReason = "probe_timeout"
+	FallbackProbeFailed  FallbackReason = "probe_failed"
+)
+
 // Shell is the resolved interpreter the bash tool executes commands with: a kind
-// (so callers can adapt prompts) and the executable to invoke.
+// (so callers can adapt prompts) and the executable to invoke. Fallback is set
+// only when bash was wanted and could not be used.
 type Shell struct {
-	Kind ShellKind
-	Path string
+	Kind     ShellKind
+	Path     string
+	Fallback FallbackReason
 }
 
 // ResolveShell picks the interpreter the shell tool runs commands under: auto
 // favours bash; a forced kind overrides the PATH lookup with path and falls back
 // to auto if unusable, so a typo cannot leave the tool broken.
 func ResolveShell(prefer, path string, warn io.Writer) Shell {
-	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash, powerShellLaunches)
+	return ShellDiscovery{Prefer: prefer, Path: path, Warn: warn}.Resolve()
 }
 
 // shellHost holds the lookups shell discovery needs. Resolution and enumeration
@@ -78,22 +92,11 @@ type shellHost struct {
 	probe    func(string) bool
 	isWSL    func(string) bool
 	launches func(string) bool // whether a found PowerShell starts; asked only of the one about to win
+	search   *bashSearch       // nil means the defaults
 }
 
 func currentHost() shellHost {
-	return shellHost{runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash, powerShellLaunches}
-}
-
-func (h shellHost) bash() (Shell, bool) {
-	if p, err := h.lookPath("bash"); err == nil && !h.isWSL(p) && h.probe(p) {
-		return Shell{Kind: ShellBash, Path: p}, true
-	}
-	for _, p := range h.winBash {
-		if h.exists(p) && !h.isWSL(p) && h.probe(p) {
-			return Shell{Kind: ShellBash, Path: p}, true
-		}
-	}
-	return Shell{}, false
+	return shellHost{runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash, powerShellLaunches, nil}
 }
 
 func (h shellHost) powerShell(order []string) (Shell, bool) {
@@ -120,6 +123,8 @@ func (h shellHost) auto(warn io.Writer) Shell {
 	}
 	if h.goos == "windows" {
 		if sh, ok := h.powerShell([]string{"pwsh", "powershell"}); ok {
+			sh.Fallback = h.bashFallback()
+			warnBashFallback(warn, sh)
 			return sh
 		}
 	}
@@ -130,6 +135,48 @@ func (h shellHost) auto(warn io.Writer) Shell {
 		fmt.Fprintf(warn, "warning: [tools.shell] no usable shell was found; falling back to %q, which may fail to start\n", "bash")
 	}
 	return Shell{Kind: ShellBash, Path: "bash"}
+}
+
+// bashFallback explains why bash was not usable: no candidate exists, or the
+// ones that exist did not run a command (and whether that was a timeout).
+func (h shellHost) bashFallback() FallbackReason {
+	var tried []string
+	if p, err := h.lookPath("bash"); err == nil && !h.isWSL(p) {
+		tried = append(tried, p)
+	}
+	for _, p := range h.winBash {
+		if h.exists(p) && !h.isWSL(p) {
+			tried = append(tried, p)
+		}
+	}
+	if len(tried) == 0 {
+		return FallbackNotFound
+	}
+	if slices.ContainsFunc(tried, bashProbeTimedOut) {
+		return FallbackProbeTimeout
+	}
+	return FallbackProbeFailed
+}
+
+// warnBashFallback tells the user the session runs PowerShell because bash was
+// unusable: the model writes bash syntax unless it is told otherwise, and that
+// fails here without any other sign of why.
+func warnBashFallback(warn io.Writer, sh Shell) {
+	if warn == nil {
+		return
+	}
+	why := map[FallbackReason]string{
+		FallbackNotFound:     "no Git Bash was found",
+		FallbackProbeTimeout: "Git Bash did not answer in time",
+		FallbackProbeFailed:  "Git Bash did not run a command",
+	}[sh.Fallback]
+	// prefer="powershell" tries Windows PowerShell 5.1 before pwsh, so the advice
+	// names the interpreter actually in use rather than trading pwsh 7 away.
+	keep := "powershell"
+	if sh.SupportsChaining() {
+		keep = "pwsh"
+	}
+	fmt.Fprintf(warn, "warning: [tools.shell] %s; using PowerShell at %q. Commands written for bash that need POSIX tools such as head or grep will fail there. Install Git for Windows or set [tools.shell] path to its bash.exe; set prefer=%q to keep this interpreter and silence this.\n", why, sh.Path, keep)
 }
 
 // available lists the interpreters this host really has, in the order auto
@@ -204,7 +251,11 @@ func verifyShell(prefer, path string, exists, probe, launches func(string) bool)
 // Git-for-Windows candidates whose %ProgramFiles% values are empty off Windows.
 // launches is injected too, so any host can test "pwsh will not start, 5.1 will".
 func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, winPowerShellCandidates []string, probe func(string) bool, isWSL func(string) bool, launches func(string) bool) Shell {
-	h := shellHost{goos, lookPath, exists, winBashCandidates, winPowerShellCandidates, probe, isWSL, launches}
+	return resolveOn(shellHost{goos, lookPath, exists, winBashCandidates, winPowerShellCandidates, probe, isWSL, launches, nil}, prefer, path, warn)
+}
+
+func resolveOn(h shellHost, prefer, path string, warn io.Writer) Shell {
+	exists, probe, launches := h.exists, h.probe, h.launches
 	switch strings.ToLower(strings.TrimSpace(prefer)) {
 	case "", "auto":
 		return h.auto(warn)
@@ -307,41 +358,40 @@ func probeBash(path string) bool {
 	return probeBashMemo(path, runBashProbe)
 }
 
+// bashProbeTimeout bounds one probe. A cold start behind antivirus scanning can
+// outlast a few seconds, and a probe that gives up too early costs the session its
+// bash for good.
+const bashProbeTimeout = 10 * time.Second
+
+// bashProbeFailures remembers, per path, why the last probe of it failed.
+var bashProbeFailures sync.Map
+
+func bashProbeTimedOut(path string) bool {
+	v, ok := bashProbeFailures.Load(path)
+	return ok && v == FallbackProbeTimeout
+}
+
 func runBashProbe(path string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), bashProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "-c", "true")
 	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
-	return cmd.Run() == nil
-}
-
-// bashProbeIdentity is the file a successful probe vouched for. The same path
-// with the same size and mtime is the same executable, so it is not launched
-// again; a failure is never kept, because a timeout may be transient.
-type bashProbeIdentity struct {
-	path    string
-	size    int64
-	modTime int64
-}
-
-// provenBash lives for the process and holds successes only.
-var provenBash sync.Map
-
-func probeBashMemo(path string, run func(string) bool) bool {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return run(path)
-	}
-	id := bashProbeIdentity{path: path, size: fi.Size(), modTime: fi.ModTime().UnixNano()}
-	if _, ok := provenBash.Load(id); ok {
+	if cmd.Run() == nil {
+		bashProbeFailures.Delete(path)
 		return true
 	}
-	if !run(path) {
-		return false
+	bashProbeFailures.Store(path, probeFailureReason(ctx.Err()))
+	return false
+}
+
+// probeFailureReason is a timeout only when the probe's own deadline expired; a
+// command that ran and exited non-zero, or would not start, is a plain failure.
+func probeFailureReason(ctxErr error) FallbackReason {
+	if errors.Is(ctxErr, context.DeadlineExceeded) {
+		return FallbackProbeTimeout
 	}
-	provenBash.Store(id, struct{}{})
-	return true
+	return FallbackProbeFailed
 }
 
 func fileExists(p string) bool {
@@ -359,7 +409,44 @@ func pathBase(p string) string {
 // windowsBashCandidates lists the bash.exe paths a Git-for-Windows install
 // ships, across the usual program-files roots and a per-user install.
 func windowsBashCandidates() []string {
-	return bashCandidates(os.Getenv, exec.LookPath)
+	return appendGitInstallRoots(bashCandidates(os.Getenv, exec.LookPath), gitInstallRoots())
+}
+
+// appendGitInstallRoots adds the install locations Git for Windows records for
+// itself, after every candidate already found so none of their order changes. An
+// install outside the standard roots whose git is not on PATH is otherwise
+// invisible.
+func appendGitInstallRoots(existing, roots []string) []string {
+	seen := map[string]bool{}
+	for _, p := range existing {
+		seen[strings.ToLower(filepath.Clean(p))] = true
+	}
+	out := existing
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		if !gitInstallRootOK(r) {
+			continue
+		}
+		for _, p := range []string{filepath.Join(r, "bin", "bash.exe"), filepath.Join(r, "usr", "bin", "bash.exe")} {
+			key := strings.ToLower(filepath.Clean(p))
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// gitInstallRootOK accepts only a drive-absolute directory exactly as given: a
+// network share, a \\?\ path, a relative or drive-relative value is not taken
+// as an install root. Callers trim first, so the string checked is the string used.
+func gitInstallRootOK(p string) bool {
+	if len(p) < 3 || p[1] != ':' || (p[2] != '\\' && p[2] != '/') {
+		return false
+	}
+	c := p[0]
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 // bashCandidates adds to the standard roots every absolute PATH directory and the

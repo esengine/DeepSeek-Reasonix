@@ -308,16 +308,8 @@ func compoundIsReadOnly(subject string) bool {
 	if !ok {
 		return false
 	}
-	for _, argv := range leaves {
-		base, sub, fields, classified := shellsafe.ClassifyReadOnlyFields(argv)
-		if !classified {
-			return false
-		}
-		if shellsafe.ArgsMakeReadOnlyCommandWrite(base, sub, fields) {
-			return false
-		}
-	}
-	return true
+	readOnly, _ := leavesProof(leaves)
+	return readOnly
 }
 
 // hasHereDocFedInterpreter reports whether any command in the statement reads

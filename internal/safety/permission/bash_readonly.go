@@ -2,8 +2,11 @@ package permission
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
+	"reasonix/internal/base/shellparse"
+	"reasonix/internal/contract/planmode"
 	"reasonix/internal/safety/shellsafe"
 )
 
@@ -12,18 +15,28 @@ import (
 // depending on Plan mode: Plan is a collaboration workflow, while this check is
 // an execution permission boundary.
 func BashCommandIsReadOnly(args json.RawMessage) bool {
+	readOnly, _ := BashReadOnlyProof(args)
+	return readOnly
+}
+
+// BashReadOnlyProof is BashCommandIsReadOnly with the structural reason a call
+// was not proven read-only. The proof is zero when the call is read-only or the
+// arguments are not a bash invocation at all.
+func BashReadOnlyProof(args json.RawMessage) (bool, planmode.Proof) {
 	var p struct {
 		Command                     string `json:"command"`
 		RunInBackground             bool   `json:"run_in_background"`
 		PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil || strings.TrimSpace(p.Command) == "" {
-		return false
+		return false, planmode.Proof{}
 	}
 	if p.RunInBackground || p.PreserveBackgroundProcesses {
-		return false
+		return false, planmode.Proof{Why: planmode.WhyBackground, Subject: p.Command}
 	}
-	return isReadOnlyBashSubject(p.Command)
+	readOnly, proof := bashSubjectProof(p.Command)
+	proof.Subject = p.Command
+	return readOnly, proof
 }
 
 // isReadOnlyBashSubject returns true when a bash command is a known read-only
@@ -32,19 +45,82 @@ func BashCommandIsReadOnly(args json.RawMessage) bool {
 // and whether these arguments keep this call one — come from shellsafe, so
 // permission and evidence cannot answer differently.
 func isReadOnlyBashSubject(subject string) bool {
+	readOnly, _ := bashSubjectProof(subject)
+	return readOnly
+}
+
+func bashSubjectProof(subject string) (bool, planmode.Proof) {
 	if shellsafe.OperandsNameNetworkPath(subject) {
-		return false
+		return false, planmode.Proof{Why: planmode.WhyNetworkPath}
 	}
 	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
 		subject = normalized
 	}
 	base, sub, fields, ok := shellsafe.ClassifyReadOnlyCommand(subject)
-	if !ok {
-		// A compound statement is not one classifiable command, but every
-		// command it runs is; read-only leaves make the whole thing read-only.
-		return compoundIsReadOnly(subject)
+	if ok {
+		return argsProof(base, sub, fields)
 	}
-	return !shellsafe.ArgsMakeReadOnlyCommandWrite(base, sub, fields)
+	// A compound statement is not one classifiable command, but every
+	// command it runs is; read-only leaves make the whole thing read-only.
+	leaves, why, readable := shellparse.CompoundLeaves(subject)
+	if readable {
+		return leavesProof(leaves)
+	}
+	if why == "" {
+		why = singleCommandRejection(subject)
+	}
+	if why != "" {
+		return false, planmode.Proof{Why: planmode.WhyShellConstruct, Detail: string(why)}
+	}
+	if argv, malformed := shellparse.StaticFields(subject); malformed == "" && len(argv) > 0 {
+		return false, planmode.Proof{Why: planmode.WhyUnknownProgram, Detail: programLabel(argv)}
+	}
+	return false, planmode.Proof{}
+}
+
+func argsProof(base, sub string, fields []string) (bool, planmode.Proof) {
+	if shellsafe.ArgsMakeReadOnlyCommandWrite(base, sub, fields) {
+		return false, planmode.Proof{Why: planmode.WhyWriteArguments, Detail: programLabel(fields)}
+	}
+	return true, planmode.Proof{}
+}
+
+func leavesProof(leaves [][]string) (bool, planmode.Proof) {
+	for _, argv := range leaves {
+		base, sub, fields, classified := shellsafe.ClassifyReadOnlyFields(argv)
+		if !classified {
+			if len(argv) > 1 && shellparse.IsDynamicArg(argv[1]) {
+				return false, planmode.Proof{Why: planmode.WhyShellConstruct, Detail: string(shellparse.StaticRejectExpansion)}
+			}
+			return false, planmode.Proof{Why: planmode.WhyUnknownProgram, Detail: programLabel(argv)}
+		}
+		if readOnly, proof := argsProof(base, sub, fields); !readOnly {
+			return false, proof
+		}
+	}
+	return true, planmode.Proof{}
+}
+
+func singleCommandRejection(subject string) shellparse.StaticRejectReason {
+	_, err := shellparse.ParseStaticCommand(subject, shellparse.StaticCommandPolicy{})
+	var reject *shellparse.StaticRejectError
+	if errors.As(err, &reject) {
+		return reject.Reason
+	}
+	return ""
+}
+
+// programLabel names the program a classifier judged: the command word, plus the
+// subcommand for the programs read-only only by subcommand.
+func programLabel(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	base := strings.ToLower(shellparse.WordBase(argv[0]))
+	if _, tabled := shellsafe.ReadOnlyPrefixes[base]; tabled && len(argv) > 1 {
+		return base + " " + argv[1]
+	}
+	return base
 }
 
 // containsShellSyntax delegates to the shared classifier; retained for the other

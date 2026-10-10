@@ -18,7 +18,7 @@ function keys(steps: PlanStep[]): string[] {
   });
 }
 
-export function Plan({ steps, shownElsewhere }: { steps: PlanStep[]; shownElsewhere?: boolean }) {
+export function Plan({ steps, shownElsewhere, paused }: { steps: PlanStep[]; shownElsewhere?: boolean; paused?: boolean }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [cursor, setCursor] = useState<{ y: number; h: number } | null>(null);
   const now = currentStep(steps);
@@ -57,7 +57,7 @@ export function Plan({ steps, shownElsewhere }: { steps: PlanStep[]; shownElsewh
       </div>
       <div className="planwrap" ref={wrap}>
         {cursor && <i className="cursor" style={{ height: cursor.h, transform: `translateY(${cursor.y}px)` }} />}
-        <div className="plan">
+        <div className="plan" data-paused={paused ? "" : undefined}>
           {steps.map((st, i) => (
             <div
               className="s"

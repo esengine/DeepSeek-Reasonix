@@ -51,6 +51,8 @@ interface Props {
   pending?: boolean;
   triggerAction?: string;
   ariaPressed?: boolean;
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
   wrapClassName?: string;
   menuClassName?: string;
   menuTitle?: ReactNode;
@@ -67,7 +69,7 @@ interface Props {
 // carry theirs: the action's identity is written at the call site, and the
 // answer this menu gives is the item's own value.
 export function Picker({
-  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, ...id
+  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, ariaLabel, ariaDescribedBy, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, ...id
 }: Props & { [K in `data-${string}`]?: string }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -195,6 +197,8 @@ export function Picker({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-pressed={ariaPressed}
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         data-pending={pending ? "" : undefined}
         title={title}
         onClick={() => {

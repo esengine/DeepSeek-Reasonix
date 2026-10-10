@@ -157,8 +157,8 @@ func (c computerAct) Execute(ctx context.Context, args json.RawMessage) (string,
 	res, stepErr := c.session.Act(ctx, p.App, p.Steps)
 	var out strings.Builder
 	fmt.Fprintf(&out, "Completed %d of %d step(s).\n", res.Done, len(p.Steps))
-	for i, note := range res.Notes {
-		fmt.Fprintf(&out, "  %d. %s\n", i+1, note)
+	for i, step := range res.Steps {
+		fmt.Fprintf(&out, "  %d. %s%s\n", i+1, step.Note, renderEffect(step.Effect))
 	}
 	if stepErr != nil {
 		fmt.Fprintf(&out, "Step %d failed: %v\n", res.FailedAt+1, stepErr)
@@ -201,9 +201,39 @@ func renderApps(apps []computer.App) string {
 	return b.String()
 }
 
+// effectSaid and evidenceSaid are how a step's effect reads to the model.
+var effectSaid = map[computer.EffectClass]string{
+	computer.EffectConfirmed:     "took effect",
+	computer.EffectSuspectedNoop: "no effect seen",
+	computer.EffectUnverifiable:  "effect not verified",
+}
+
+var evidenceSaid = map[computer.Evidence]string{
+	computer.EvidenceValueReadback:  "value read back",
+	computer.EvidenceValueUnchanged: "value unchanged",
+}
+
+func renderEffect(e computer.Effect) string {
+	if e.Class == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(" — " + effectSaid[e.Class])
+	for _, ev := range e.Evidence {
+		b.WriteString(" (" + evidenceSaid[ev] + ")")
+	}
+	if e.BlockedBy != nil {
+		b.WriteString(", into " + e.BlockedBy.String())
+	}
+	return b.String()
+}
+
 func renderComputerSnapshot(snap computer.Snapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s)\n", snap.App.Name, snap.App.Bundle)
+	for _, m := range snap.Modals {
+		fmt.Fprintf(&b, "Blocked: %s holds this application's input; the window behind it takes none until it is answered.\n", m)
+	}
 	if snap.Note != "" {
 		b.WriteString(snap.Note + "\n")
 	}

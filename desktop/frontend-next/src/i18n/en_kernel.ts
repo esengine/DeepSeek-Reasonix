@@ -64,6 +64,7 @@ export const EN_KERNEL: Record<string, string> = {
   "这台服务器未开放配置编辑": "This server does not allow editing its config",
   "该文件需手动修改：{detail}": "This file needs an edit by hand: {detail}",
   "设置已写入，但运行时未能按新设置重建：{detail}": "The settings were written, but the runtime could not be rebuilt on them: {detail}",
+  "规则 {rule} 没有对应的工具（{tool}），匹配不到任何调用，因此未保存；命令要写成 Bash(命令:*)": "Rule {rule} names no tool ({tool}), so it would match no call and was not saved. A shell command is written Bash(command:*).",
   "该权限未能保存：{detail}": "That permission was not saved: {detail}",
   "沙箱设置未能保存：{detail}": "The sandbox settings were not saved: {detail}",
   "内置浏览器设置未能保存：{detail}": "The built-in browser setting was not saved: {detail}",
@@ -146,7 +147,9 @@ export const EN_KERNEL: Record<string, string> = {
   "连接 {host} 失败：{detail}": "Could not reach {host}: {detail}",
   "{host} 不接受该凭据。请更换密钥，或在设置中填写正确的环境变量名。":
     "{host} rejected these credentials. Try another key, or name the right environment variable in settings.",
-  "任务正在运行，请先停止再切换模型": "A task is running — stop it before switching models",
+  "当前回合正在进行，请先停止或等它结束再切换模型": "A turn is in progress — stop it or wait for it to finish before switching models",
+  "回合已结束，但还有 {count} 个后台任务在运行，切换模型会终止它们。请先在「后台任务」里停止，再切换模型":
+    "The turn has finished, but {count} background job(s) are still running and switching models would end them. Stop them under Background jobs, then switch",
   "任务正在运行，请先停止再调整推理强度": "A task is running — stop it before changing the reasoning effort",
   "{provider} 没说自己有哪些推理强度档位。要有，得在它的配置块里写 reasoning_protocol 或 supported_efforts":
     "{provider} names no reasoning-effort levels. To give it some, set reasoning_protocol or supported_efforts in its config block",
@@ -242,6 +245,12 @@ export const EN_KERNEL: Record<string, string> = {
   "检查失败，没有具体原因": "The check failed and gave no reason",
   "无法连接该地址。请检查网络是否通畅，以及地址是否有误":
     "Cannot reach that address. Check the network, or whether the address has a typo",
+  "地址可以连通，但没有 System One 决策接口。请填写服务的基地址，不要带 /v1/systemone，Reasonix 会自己在后面追加":
+    "The address answers, but has no System One decision endpoint. Enter the service's base address without /v1/systemone — Reasonix appends it",
+  "该地址有响应，但返回的不是 System One 的决策结果。请确认这是决策协议服务的基地址":
+    "The address answers, but not with a System One decision. Check that it is the decision service's base address",
+  "服务拒绝了这次决策请求。请核对模型名与服务文档，具体原因见下方服务返回的内容":
+    "The service refused the decision request. Check the model name against its documentation; what it said is shown with this result",
   "该地址有响应，但不是 OpenAI 或 Anthropic 类接口。请确认是否误将网页地址复制过来":
     "Something answered, but not as an OpenAI- or Anthropic-compatible API. Check a web page address was not pasted in",
   "无法解析本次请求的内容，请刷新页面后重试": "That request could not be read — reload the page and try again",
@@ -272,6 +281,8 @@ export const EN_KERNEL: Record<string, string> = {
   "HTTP 上不提供 shell 命令": "Shell commands are not served over HTTP",
   "不存在「{role}」这个角色": "There is no “{role}” role",
   "没有已配置的模型匹配「{model}」": "No configured model matches “{model}”",
+  "「{model}」是决策来源，只服务 system_one 的询问，不能用作对话模型": "“{model}” is a decision source: it only answers system_one's questions and cannot be used as a conversation model",
+  "「{model}」是对话模型，不是决策来源；决策只能选择「模型服务」里添加的决策来源": "“{model}” is a conversation model, not a decision source; decisions can only use a decision source added under Model services",
   "「{key}」不在用户配置里，可能已被清除，或来自项目配置": "“{key}” is not in the user config; it may already be cleared, or come from the project config",
   "这台服务器未开放 shell 设置": "This server does not open shell settings",
   "这台服务器未开放账号登录": "This server does not open account sign-in",

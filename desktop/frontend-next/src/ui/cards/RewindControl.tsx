@@ -76,7 +76,7 @@ export function RewindControl({
     onPrepare(cp.turn, scope)
       .then((plan) => {
         // Nothing to consent to: apply it straight away.
-        if (!plan.requiresConfirmation) return onCommit(plan.planId).then((r) => settle(r, plan.fileCount));
+        if (!plan.requiresConfirmation) return onCommit(plan.planId).then(settle);
         setStage({ at: "confirm", plan });
       })
       .catch(fail);
@@ -85,15 +85,15 @@ export function RewindControl({
   const commit = (plan: RewindPlan) => {
     setStage({ at: "working" });
     onCommit(plan.planId)
-      .then((r) => settle(r, plan.fileCount))
+      .then(settle)
       .catch(fail);
   };
 
   // A rewind the kernel can still reverse leaves the offer on screen; one it
   // cannot just closes, because an undo row that fails is worse than none.
-  const settle = (result: RewindResult, files: number) => {
+  const settle = (result: RewindResult) => {
     const tx = result.undoAvailable ? (result.transactionId ?? "") : "";
-    setStage(tx ? { at: "done", tx, files: result.deleted?.length ?? files } : { at: "closed" });
+    setStage(tx ? { at: "done", tx, files: (result.written?.length ?? 0) + (result.deleted?.length ?? 0) } : { at: "closed" });
   };
 
   const undo = (tx: string) => {
@@ -139,7 +139,7 @@ export function RewindControl({
                 <div className="mi plain">
                   <span className="dot" />
                   <span className="tx">
-                    <span className="lb">{t("本轮未修改任何文件")}</span>
+                    <span className="lb">{t("回退范围内未修改任何文件")}</span>
                   </span>
                 </div>
               )}

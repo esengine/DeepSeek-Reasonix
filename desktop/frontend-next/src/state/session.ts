@@ -452,21 +452,19 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       return ev.approval ? prompted(s, "等待批准", { t: "approval", id: nextId(), a: ev.approval }) : s;
 
     case "ask_request":
-      return ev.ask ? prompted(s, "等待确认", { t: "ask", id: nextId(), ask: ev.ask }) : s;
+      return ev.ask ? prompted(s, "等待你回答", { t: "ask", id: nextId(), ask: ev.ask }) : s;
 
     case "compaction_started":
       return { ...s, items: [...s.items, { t: "compaction", id: nextId(), c: ev.compaction ?? {}, done: false }] };
 
-    // The digest streams in while the fold runs. It accumulates on the card's
-    // own summary so the finished event simply replaces it — a fold that dies
-    // mid-write leaves what it had written rather than an empty placeholder.
+    // The digest streams in while the fold runs, accumulating on the card's own
+    // summary. A frame with no text restarts it: the attempt so far was discarded.
     case "compaction_progress": {
-      if (!ev.text) return s;
       const items = s.items.slice();
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i];
         if (it.t === "compaction" && !it.done) {
-          items[i] = { ...it, c: { ...it.c, summary: (it.c.summary ?? "") + ev.text } };
+          items[i] = { ...it, c: { ...it.c, summary: ev.text ? (it.c.summary ?? "") + ev.text : "" } };
           break;
         }
       }

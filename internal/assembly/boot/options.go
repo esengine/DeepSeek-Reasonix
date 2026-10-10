@@ -70,6 +70,8 @@ type Options struct {
 	Home string
 	// Tests that compare prompt bytes must not depend on host discovery probes.
 	resolvedShell *sandbox.Shell
+	// tuneShell adjusts shell discovery before it runs; tests drive a slow interpreter through it.
+	tuneShell func(*sandbox.ShellDiscovery)
 	// StatsSource labels this frontend's usage records. Unset — or a value this
 	// build does not know — disables usage recording rather than filing turns
 	// under a label nothing can read back.

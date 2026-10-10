@@ -41,8 +41,9 @@ type helperReply struct {
 	ID     int64           `json:"id"`
 	Result json.RawMessage `json:"result"`
 	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
+		Code      string `json:"code"`
+		Message   string `json:"message"`
+		BlockedBy *Modal `json:"blocked_by"`
 	} `json:"error"`
 	Event string `json:"event"`
 }
@@ -175,7 +176,7 @@ func (h *Helper) Call(ctx context.Context, method string, params, out any) error
 			return fail(CodeFailed, "%v", errHelperGone)
 		}
 		if r.Error != nil {
-			return &Failure{Code: Code(r.Error.Code), Detail: r.Error.Message}
+			return &Failure{Code: Code(r.Error.Code), Detail: r.Error.Message, BlockedBy: r.Error.BlockedBy}
 		}
 		if out != nil && len(r.Result) > 0 {
 			return json.Unmarshal(r.Result, out)

@@ -322,16 +322,29 @@ func loadSessionDAGMessages(sessionPath string, limits sessionReplayLimits) ([]p
 	return st.materialize(st.selectedHead()), st.damaged, nil
 }
 
-// dagTranscriptMatches reports whether a snapshot holds exactly what the 1.x
-// log already does, read the way LoadSession reads it. Opening and leaving a
-// 1.x conversation saves nothing, so it must not move to a new session.
-func dagTranscriptMatches(sessionPath string, digest [32]byte) bool {
+// dagTranscriptMatches reports whether a snapshot holds what the 1.x log
+// already does, read the way LoadSession reads it. The leading system prompt is
+// the host's contract rather than conversation, and a rebuild swaps it for the
+// current build's, so it takes no part: opening and leaving a 1.x conversation
+// saves nothing, so it must not move to a new session.
+func dagTranscriptMatches(sessionPath string, snapshot []provider.Message) bool {
 	msgs, _, err := loadSessionDAGMessages(sessionPath, defaultSessionReplayLimits)
 	if err != nil {
 		return false
 	}
-	onDisk, err := DigestSessionMessages(migrateLegacyProviderContent(NormalizeSession(msgs)))
-	return err == nil && onDisk == digest
+	onDisk, err := DigestSessionMessages(withoutLeadingSystem(migrateLegacyProviderContent(NormalizeSession(msgs))))
+	if err != nil {
+		return false
+	}
+	held, err := DigestSessionMessages(withoutLeadingSystem(snapshot))
+	return err == nil && onDisk == held
+}
+
+func withoutLeadingSystem(msgs []provider.Message) []provider.Message {
+	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
+		return msgs[1:]
+	}
+	return msgs
 }
 
 // IsForeignSessionLog reports whether the session at sessionPath is kept in a
@@ -344,11 +357,11 @@ func IsForeignSessionLog(sessionPath string) bool {
 // probeRefusesSave is why a save cannot write the log the probe found: a
 // schema newer than this build, or 1.x's log, which either already holds the
 // transcript or cannot take the rest of it.
-func probeRefusesSave(path string, probe sessionEventLogProbe, digest [32]byte) error {
+func probeRefusesSave(path string, probe sessionEventLogProbe, msgs []provider.Message) error {
 	switch {
 	case probe.futureSchema:
 		return fmt.Errorf("session event log for %s uses schema %d; this build supports up to %d", path, probe.schemaVersion, sessionEventImageBlobsSchemaVersion)
-	case probe.dag && dagTranscriptMatches(path, digest):
+	case probe.dag && dagTranscriptMatches(path, msgs):
 		return fmt.Errorf("%w: %s", ErrSessionLogUnchanged, path)
 	case probe.dag:
 		return fmt.Errorf("%w: %s", ErrSessionLogForeign, path)

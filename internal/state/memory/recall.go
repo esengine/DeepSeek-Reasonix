@@ -72,11 +72,11 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	limit := clampRecallLimit(in.Limit)
 	switch strings.TrimSpace(in.Operation) {
 	case "search":
-		hits, err := searchMemories(ctx, t.store, in.Query, memType, memScope, limit)
+		hits, omitted, err := searchMemories(ctx, t.store, in.Query, memType, memScope, limit)
 		if err != nil {
 			return "", err
 		}
-		return formatMemoryHits(in.Query, hits), nil
+		return formatMemoryHits(in.Query, hits, omitted), nil
 	case "read":
 		m, ok := readMemoryByName(t.store, in.Name)
 		if !ok {
@@ -107,20 +107,20 @@ type memoryDoc struct {
 	length int
 }
 
-func searchMemories(ctx context.Context, store Store, query string, typ Type, scope FactScope, limit int) ([]memoryHit, error) {
+func searchMemories(ctx context.Context, store Store, query string, typ Type, scope FactScope, limit int) ([]memoryHit, int, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, fmt.Errorf("query is required")
+		return nil, 0, fmt.Errorf("query is required")
 	}
 	queryTerms, err := retrieval.QueryTerms(query)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	memories := filterMemories(store.ListAll(), typ, scope)
 	docs := make([]memoryDoc, 0, len(memories))
 	for _, m := range memories {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		text := memorySearchText(m)
 		terms := retrieval.Tokens(text)
@@ -135,7 +135,7 @@ func searchMemories(ctx context.Context, store Store, query string, typ Type, sc
 		})
 	}
 	if len(docs) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	counts := make([]map[string]int, 0, len(docs))
 	totalLen := 0
@@ -164,13 +164,15 @@ func searchMemories(ctx context.Context, store Store, query string, typ Type, sc
 		}
 		return hits[i].Score > hits[j].Score
 	})
+	ranked := len(hits)
 	hits = retrieval.KeepTopRelativeScore(hits, recallScoreFloor, func(hit memoryHit) float64 {
 		return hit.Score
 	})
+	omitted := countOmitted(ranked, len(hits), limit)
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
-	return hits, nil
+	return hits, omitted, nil
 }
 
 func recallTypeFilter(s string) (Type, error) {
@@ -225,8 +227,10 @@ func memorySearchText(m Memory) string {
 	}, "\n")
 }
 
-func formatMemoryHits(query string, hits []memoryHit) string {
+func formatMemoryHits(query string, hits []memoryHit, omitted int) string {
 	if len(hits) == 0 {
+		// KeepTopRelativeScore always keeps the top hit, so an empty result means
+		// nothing matched; the omission note below only belongs to a real result.
 		return strings.Join([]string{
 			"No saved memories matched " + strconvQuote(query) + ".",
 			"",
@@ -242,6 +246,9 @@ func formatMemoryHits(query string, hits []memoryHit) string {
 		m := hit.Memory
 		fmt.Fprintf(&b, "\n%d. score=%.3f id=%s revision=%d name=%s scope=%s type=%s title=%s\n   reference: %s\n   description: %s\n   snippet: %s\n",
 			i+1, hit.Score, m.ID, m.Revision, m.Name, NormalizeFactScope(string(m.Scope)), NormalizeType(string(m.Type)), displayTitle(m.Title, m.Name), providerMemoryReference(m), oneLine(m.Description), hit.Snippet)
+	}
+	if omitted > 0 {
+		fmt.Fprintf(&b, "\n%s\n", omittedNote(omitted, "fact(s)", "the result limit or the relevance floor"))
 	}
 	b.WriteString("\nUse operation=\"read\" with a stable memory id to inspect the full saved fact.")
 	return strings.TrimSpace(b.String())
@@ -266,7 +273,9 @@ func formatMemoryList(_ Store, memories []Memory, limit int) string {
 	if len(memories) == 0 {
 		return "No saved memories found."
 	}
+	omitted := 0
 	if len(memories) > limit {
+		omitted = len(memories) - limit
 		memories = memories[:limit]
 	}
 	var b strings.Builder
@@ -275,7 +284,26 @@ func formatMemoryList(_ Store, memories []Memory, limit int) string {
 		fmt.Fprintf(&b, "- [%s](%s.md) reference=%s id=%s revision=%d scope=%s type=%s - %s\n",
 			displayTitle(m.Title, m.Name), m.Name, providerMemoryReference(m), m.ID, m.Revision, NormalizeFactScope(string(m.Scope)), NormalizeType(string(m.Type)), oneLine(m.Description))
 	}
+	if omitted > 0 {
+		fmt.Fprintf(&b, "%s\n", omittedNote(omitted, "fact(s)", "the list limit"))
+	}
 	return strings.TrimSpace(b.String())
+}
+
+// countOmitted reports what a ranked result dropped: the matches the relative
+// score floor compacted away, plus the tail the caller's limit cut off.
+func countOmitted(ranked, kept, limit int) int {
+	omitted := ranked - kept
+	if kept > limit {
+		omitted += kept - limit
+	}
+	return omitted
+}
+
+// omittedNote is the one place the omission line is spelled, so a tool result and
+// the automatic recall block cannot drift apart (#11853).
+func omittedNote(omitted int, noun, because string) string {
+	return fmt.Sprintf("- omitted=%d additional %s because of %s", omitted, noun, because)
 }
 
 func providerMemoryReference(m Memory) string {

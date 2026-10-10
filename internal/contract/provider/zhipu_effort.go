@@ -23,8 +23,7 @@ type ZhipuEffort struct {
 
 // zhipuEffortContracts is keyed by exact model id. Zhipu's Core Parameters page
 // states the ladder per model, not per host, so a gateway serving the same id
-// gets the same contract only when the caller has opted in (see ZhipuDepthModel
-// and the openai client, which require the vendor host as well).
+// gets the same contract once its entry declares the glm reasoning protocol.
 var zhipuEffortContracts = map[string]ZhipuEffort{
 	// "GLM-5.2 supports max, xhigh, high, medium, low, minimal, none; passing
 	// none or minimal will cause the model to skip thinking; low and medium
@@ -49,8 +48,8 @@ func ZhipuEffortContract(model string) (ZhipuEffort, bool) {
 	return contract, ok
 }
 
-// ZhipuDepthModel recognizes only model IDs whose direct API effort contract is
-// documented. A gateway or an unrelated GLM variant must not inherit it by name.
+// ZhipuDepthModel recognizes only model IDs whose effort contract is documented.
+// An unrelated GLM variant must not inherit one by resemblance.
 func ZhipuDepthModel(model string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if _, ok := ZhipuEffortContract(model); ok {

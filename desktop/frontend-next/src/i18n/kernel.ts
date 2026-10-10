@@ -35,7 +35,8 @@ const SAID: Record<string, string> = {
   "workspace.write_conflict": "另一个会话持有所需的写入范围。本次操作未执行；请结束当前轮次，待该范围释放后再重试",
   // ── 忙：不是出错，是「现在不行」 ─────────────────────────────────
   "plan.decision_stale": "该决定已不符合当前状态：计划在你回答前已发生变更",
-  "busy.switch_model": "任务正在运行，请先停止再切换模型",
+  "busy.switch_model": "当前回合正在进行，请先停止或等它结束再切换模型",
+  "busy.switch_model_jobs": "回合已结束，但还有 {count} 个后台任务在运行，切换模型会终止它们。请先在「后台任务」里停止，再切换模型",
   "busy.change_effort": "任务正在运行，请先停止再调整推理强度",
   "busy.change_workspace": "任务正在运行，请先停止再切换工作区",
   "busy.reload_extensions": "任务正在运行，请先停止再重载扩展",
@@ -100,6 +101,8 @@ const SAID: Record<string, string> = {
   "shell.unavailable_over_http": "HTTP 上不提供 shell 命令",
   "roles.unknown": "不存在「{role}」这个角色",
   "roles.model_unknown": "没有已配置的模型匹配「{model}」",
+  "model.decision_only": "「{model}」是决策来源，只服务 system_one 的询问，不能用作对话模型",
+  "model.not_decision_source": "「{model}」是对话模型，不是决策来源；决策只能选择「模型服务」里添加的决策来源",
   "roles.override_not_in_user_config": "「{key}」不在用户配置里，可能已被清除，或来自项目配置",
   "shell.editing_disabled": "这台服务器未开放 shell 设置",
   "account.signin_disabled": "这台服务器未开放账号登录",
@@ -219,6 +222,9 @@ const SAID: Record<string, string> = {
   "provider.probe.timeout": "该地址在限定时间内没有响应。请检查网络或代理，或稍后重试",
   "provider.probe.unreachable": "无法连接该地址。请检查网络是否通畅，以及地址是否有误",
   "provider.probe.failed": "检查失败，没有具体原因",
+  "provider.probe.decision_path_not_found": "地址可以连通，但没有 System One 决策接口。请填写服务的基地址，不要带 /v1/systemone，Reasonix 会自己在后面追加",
+  "provider.probe.decision_not_compatible": "该地址有响应，但返回的不是 System One 的决策结果。请确认这是决策协议服务的基地址",
+  "provider.probe.decision_rejected": "服务拒绝了这次决策请求。请核对模型名与服务文档，具体原因见下方服务返回的内容",
   "provider.probe.not_compatible": "该地址有响应，但不是 OpenAI 或 Anthropic 类接口。请确认是否误将网页地址复制过来",
 
   // ── 推理强度：这个端点给不了 ─────────────────────────────────────
@@ -250,6 +256,18 @@ const SAID: Record<string, string> = {
   "commit.no_answer": "模型没有给出提交说明，请重试",
   "commit.git_failed": "读取暂存区失败",
   "commit.bad_request": "提交请求格式不正确",
+
+  // ── 分支切换：composer 的分支菜单拒得有名字 ─────────────────────
+  "branch.workspace_busy": "另一个会话正在写入这个工作区，请稍后重试切换分支",
+  "branch.jobs_running": "后台任务仍在运行，请先停止再切换分支",
+  "branch.turn_running": "任务运行中，分支要等这轮结束再切",
+  "branch.no_repository": "这个工作区不是 git 仓库，没有分支可切换",
+  "branch.bad_request": "切换分支的请求格式不正确",
+  "branch.bad_name": "这不是有效的分支名",
+  "branch.unknown": "没有这个名字的本地分支",
+  "branch.local_changes": "有未提交的修改会被这次切换覆盖，请先提交或暂存（git stash）",
+  "branch.in_use": "该分支已在另一个 worktree 中检出，请先在那边切走",
+  "branch.switch_failed": "git 未能完成这次分支切换",
 
   // ── 会话 ─────────────────────────────────────────────────────────
   "session.disabled": "这台服务器已关闭会话切换",
@@ -322,6 +340,7 @@ const SAID: Record<string, string> = {
   "config.editing_disabled": "这台服务器未开放配置编辑",
   "config.not_repairable": "该文件需手动修改：{detail}",
   "runtime.rebuild_failed": "设置已写入，但运行时未能按新设置重建：{detail}",
+  "permissions.rule_unknown_tool": "规则 {rule} 没有对应的工具（{tool}），匹配不到任何调用，因此未保存；命令要写成 Bash(命令:*)",
   "permissions.rejected": "该权限未能保存：{detail}",
   "sandbox.rejected": "沙箱设置未能保存：{detail}",
   "compaction.rejected": "压缩阈值未能保存：{detail}",

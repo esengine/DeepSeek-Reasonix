@@ -25,7 +25,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
   const [unread, setUnread] = useState("");
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState("");
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [edit, setEdit] = useState<MemoryEdit | null>(null);
   const [past, setPast] = useState<Record<string, MemoryEntry[]>>({});
@@ -92,16 +92,16 @@ function MemoryPanel({ port }: { port: AgentPort }) {
 
   const save = async () => {
     if (!edit) return;
-    setBusy(edit.name);
+    setBusy((names) => [...names, edit.name]);
     setError("");
     try {
       await port.saveMemory(edit);
-      setEdit(null);
+      setEdit((current) => current === edit ? null : current);
       refreshMemory(edit.name);
     } catch (e) {
       setError(reason(e));
     } finally {
-      setBusy("");
+      setBusy((names) => names.filter((name) => name !== edit.name));
     }
   };
 
@@ -124,7 +124,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
   };
 
   const restore = async (name: string, revision: number) => {
-    setBusy(name);
+    setBusy((names) => [...names, name]);
     setError("");
     try {
       await port.restoreMemory(name, revision);
@@ -132,12 +132,12 @@ function MemoryPanel({ port }: { port: AgentPort }) {
     } catch (e) {
       setError(reason(e));
     } finally {
-      setBusy("");
+      setBusy((names) => names.filter((target) => target !== name));
     }
   };
 
   const forget = async (name: string) => {
-    setBusy(name);
+    setBusy((names) => [...names, name]);
     setError("");
     try {
       await port.forgetMemory(name);
@@ -145,7 +145,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
     } catch (e) {
       setError(reason(e));
     } finally {
-      setBusy("");
+      setBusy((names) => names.filter((target) => target !== name));
     }
   };
 
@@ -180,8 +180,8 @@ function MemoryPanel({ port }: { port: AgentPort }) {
                   {m.expired && <i className="stale">{t("已过期")}</i>}
                   <span className="sc">{t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")}</span>
                   <span className="at">{m.updatedAt || m.createdAt}</span>
-                  <button className="act ghost" data-action="memory.forget" data-target={m.name} disabled={busy === m.name} onClick={() => void forget(m.name)}>
-                    {t(busy === m.name ? "…" : "忘记")}
+                  <button className="act ghost" data-action="memory.forget" data-target={m.name} disabled={busy.includes(m.name)} onClick={() => void forget(m.name)}>
+                    {t(busy.includes(m.name) ? "…" : "忘记")}
                   </button>
                 </div>
                 {m.usedLastTurn && m.why && <div className="why-used">{t("上一轮因「{why}」被检索到", { why: m.why })}</div>}
@@ -209,8 +209,8 @@ function MemoryPanel({ port }: { port: AgentPort }) {
                           </select>
                         </label>
                         <div className="row">
-                          <button className="act" data-action="memory.save" data-target={m.name} disabled={busy === m.name} onClick={() => void save()}>
-                            {t(busy === m.name ? "正在保存…" : "保存")}
+                          <button className="act" data-action="memory.save" data-target={m.name} disabled={busy.includes(m.name)} onClick={() => void save()}>
+                            {t(busy.includes(m.name) ? "正在保存…" : "保存")}
                           </button>
                           <button className="act ghost" onClick={() => setEdit(null)}>{t("取消")}</button>
                           {/* Saving writes a new revision rather than overwriting, which is
@@ -239,7 +239,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
                         {showPast === m.name && <History
                           list={past[m.name]}
                           current={m.revision ?? 1}
-                          busy={busy === m.name}
+                          busy={busy.includes(m.name)}
                           onRestore={(rev) => void restore(m.name, rev)}
                         />}
                       </>

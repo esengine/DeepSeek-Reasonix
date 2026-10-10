@@ -15,7 +15,7 @@ func (c *Config) ResolveStartupChatModel() (resolvedRef, skippedDefault string, 
 	if def == "" {
 		return ref, "", ok
 	}
-	if _, found := c.ResolveModel(def); found {
+	if entry, found := c.ResolveModel(def); found && Answering(entry.Kind, AnswersChat) {
 		return ref, "", ok
 	}
 	if ok {

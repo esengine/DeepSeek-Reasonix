@@ -21,7 +21,12 @@ const (
 func (c *Controller) endRotation() {
 	c.mu.Lock()
 	c.gate.rotating = false
+	releaseWorkspace := c.gate.workspaceRelease
+	c.gate.workspaceRelease = nil
 	c.mu.Unlock()
+	if releaseWorkspace != nil {
+		releaseWorkspace.release()
+	}
 	c.maybeDispatchInbox()
 }
 

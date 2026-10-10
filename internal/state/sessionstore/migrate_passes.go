@@ -1,7 +1,6 @@
 package sessionstore
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,13 +8,7 @@ import (
 
 // LegacyReport lists what an import found in the source but could not bring
 // over, one entry per file, so a caller can count it instead of losing it.
-type LegacyReport struct{ Skipped []error }
-
-func (r *LegacyReport) skip(name, why string) {
-	if r != nil {
-		r.Skipped = append(r.Skipped, fmt.Errorf("%s: %s", name, why))
-	}
-}
+type LegacyReport struct{ Skipped []SkippedSession }
 
 // ImportLegacySessionsFromExplicitDir imports sessions from a user-selected
 // legacy directory and reports what it skipped. The user asked for this folder, so earlier
@@ -59,12 +52,12 @@ func importBakSessions(entries []os.DirEntry, srcDir, globalDest string, hasEven
 		}
 		bakPath := filepath.Join(srcDir, name)
 		if !isMessageFormat(bakPath) {
-			rep.skip(name, "not a session format this version reads")
+			rep.skip(bakPath, SkipUnreadableFormat)
 			continue
 		}
 		srcInfo, _ := e.Info()
 		if err := transformAndCopyJsonl(bakPath, dest); err != nil {
-			rep.skip(name, err.Error())
+			rep.skipWrite(bakPath, err)
 			continue
 		}
 		if srcInfo != nil {
@@ -92,7 +85,7 @@ func migrateProjectSubdirs(entries []os.DirEntry, srcDir, globalDest string, pro
 		subDir := filepath.Join(srcDir, e.Name())
 		subEntries, err := readDirUnder(srcDir, e.Name())
 		if err != nil {
-			rep.skip(e.Name(), err.Error())
+			rep.skipRead(subDir, err)
 			continue
 		}
 		hasSessions := false
@@ -108,7 +101,7 @@ func migrateProjectSubdirs(entries []os.DirEntry, srcDir, globalDest string, pro
 		}
 		n, err := migrateSubDirectory(subDir, globalDest, projectDir, rep)
 		if err != nil {
-			rep.skip(e.Name(), err.Error())
+			rep.skipRead(subDir, err)
 			continue
 		}
 		imported += n

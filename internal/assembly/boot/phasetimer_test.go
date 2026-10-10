@@ -37,7 +37,7 @@ func TestBuildReportsPhasesToHostBeforeReturning(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ctrl.Close()
-	want := []string{"extensions", "config", "migrations", "sessions", "provider", "memory", "skills", "mcp", "assemble"}
+	want := []string{"extensions", "config", "migrations", "sessions", "provider", "shell", "prompt", "environment", "memory", "skills", "mcp", "assemble"}
 	if len(phases) != len(want) {
 		t.Fatalf("phases = %#v", phases)
 	}

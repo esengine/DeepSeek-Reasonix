@@ -66,7 +66,7 @@ func taskCommand(args []string) int {
 	}
 	store := taskStore
 	if store == nil {
-		store = taskmonitor.NewFileStore(".reasonix/tasks")
+		store = taskmonitor.NewFileStore(taskmonitor.StoreDir)
 	}
 	switch args[0] {
 	case "list":
@@ -133,7 +133,7 @@ func taskTmuxCmd(store taskmonitor.Store, args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: reasonix task tmux <attach|status|open|detach>")
 		return 2
 	}
-	a := taskmonitor.NewTmuxAdapter(store, ".reasonix/tasks")
+	a := taskmonitor.NewTmuxAdapter(store, taskmonitor.StoreDir)
 	switch args[0] {
 	case "attach":
 		return taskTmuxAttachCmd(a, args[1:])

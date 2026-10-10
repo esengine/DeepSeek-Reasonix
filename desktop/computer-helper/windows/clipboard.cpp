@@ -90,6 +90,8 @@ void clipboardSettle() {
 
 Json paste(DWORD pid, const std::string& text) {
     front(pid);
+    Landing at = landing(pid, true);
+    refuseHeldText(at);
     clipboardSettle();
     if (!open()) throw Failure{"computer.failed", "another application is holding the clipboard"};
     std::vector<Saved> saved = save();
@@ -112,5 +114,5 @@ Json paste(DWORD pid, const std::string& text) {
     // The application reads the clipboard when it gets round to the keystroke,
     // and giving it back before then hands it the person's clipboard instead.
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    return Json::object().set("pasted", static_cast<unsigned long long>(w.size()));
+    return typedEffect(at, w);
 }

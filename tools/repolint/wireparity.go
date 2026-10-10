@@ -25,6 +25,7 @@ const (
 	tsProviderFile  = "desktop/frontend-next/src/port/provider.ts"
 	tsFeedbackFile  = "desktop/frontend-next/src/port/feedback.ts"
 	tsWorkspaceFile = "desktop/frontend-next/src/port/workspace.ts"
+	tsLookFile      = "desktop/frontend-next/src/port/look.ts"
 	tsHubFile       = "desktop/frontend-next/src/port/hub.ts"
 	tsChartFile     = "desktop/frontend-next/src/ui/chart/spec.ts"
 )
@@ -35,6 +36,9 @@ const (
 // wrong. Declared and not inferred, for the reason the sensitive paths are: no
 // spelling tells a mirrored contract from a struct with json tags.
 var mirroredWireTypes = []wireMirror{
+	{"internal/frontend/serve/branch.go", "workspaceBranchesView", tsWorkspaceFile, "WorkspaceBranches"},
+	{"internal/platform/gitstatus/branches.go", "Branch", tsWorkspaceFile, "WorkspaceBranch"},
+	{"internal/frontend/serve/changes.go", "workspaceGitView", tsWorkspaceFile, "WorkspaceGit"},
 	{"internal/contract/eventwire/wire.go", "AskOrigin", tsWireFile, "AskOrigin"},
 	{"internal/contract/agentgraph/graph.go", "Node", tsWireFile, "GraphNode"},
 	{"internal/contract/agentgraph/graph.go", "Edge", tsWireFile, "GraphEdge"},
@@ -112,6 +116,11 @@ var mirroredWireTypes = []wireMirror{
 	// The sidebar row. The unread mark is derived by the kernel from two stored
 	// timestamps; a row the page cannot read it from shows a finished turn as seen.
 	{"internal/frontend/serve/hub_tree.go", "treeSession", tsHubFile, "TreeSession"},
+	// A session the import left in place. The reason code is what the window
+	// words the explanation from; a code it cannot read is a skipped session
+	// reported as nothing more than a count.
+	{"internal/frontend/serve/hub_tree.go", "legacySkipView", tsHubFile, "LegacySkip"},
+	{"internal/frontend/serve/hub_tree.go", "legacyImportView", tsHubFile, "LegacyImport"},
 	// What waits on the user, and which call answers it. The desktop reads this
 	// list as the whole set of open prompts — one it cannot read is a card it
 	// seals as decided while the run stays blocked on it.
@@ -136,6 +145,7 @@ var mirroredWireTypes = []wireMirror{
 	// A source and a model as the pickers name them. A label the page cannot
 	// read puts the config name back on screen after the user renamed it.
 	{"internal/frontend/serve/providers.go", "providerView", tsProviderFile, "ProviderEntry"},
+	{"internal/frontend/serve/providers.go", "protocolView", tsProviderFile, "Protocol"},
 	{"internal/frontend/serve/provider_check.go", "providerCheck", tsProviderFile, "ProviderCheck"},
 	{"internal/frontend/serve/provider_check.go", "providerModelCheck", tsProviderFile, "ProviderModelCheck"},
 	{"internal/frontend/serve/settings.go", "modelEntry", tsModelFile, "ModelEntry"},
@@ -163,6 +173,9 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/session/control/commit.go", "CommitRequest", tsWorkspaceFile, "CommitRequest"},
 	{"internal/session/control/commit.go", "CommitResult", tsWorkspaceFile, "CommitResult"},
 	{"internal/platform/gitcommit/gitcommit.go", "File", tsWorkspaceFile, "CommitFile"},
+	// The scale range the slider is drawn from: a bound the page cannot read
+	// would leave it a range of its own.
+	{"internal/frontend/serve/appearance.go", "zoomRangeView", tsLookFile, "ZoomRange"},
 	// The chart spec a stored render_chart call carries. The page re-validates it
 	// on load, so a field it cannot read is one the card silently drops.
 	{"internal/contract/chartspec/spec.go", "Spec", tsChartFile, "ChartSpec"},
@@ -170,6 +183,15 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/contract/chartspec/spec.go", "Column", tsChartFile, "ChartColumn"},
 	{"internal/contract/chartspec/spec.go", "Mark", tsChartFile, "ChartMark"},
 	{"internal/contract/chartspec/spec.go", "Axis", tsChartFile, "ChartAxis"},
+	// The theme a person is looking at and the picture they put behind it: the
+	// pack listing, its two shape blocks, the import receipt, and the reader's
+	// own size and wallpaper. A field one side cannot read is drawn as absent.
+	{"internal/frontend/serve/themes.go", "themeView", tsLookFile, "ThemePack"},
+	{"internal/ext/theme/theme.go", "Background", tsLookFile, "ThemeBackground"},
+	{"internal/ext/theme/theme.go", "Sky", tsLookFile, "ThemeSky"},
+	{"internal/ext/theme/install.go", "Installed", tsLookFile, "ThemeImport"},
+	{"internal/frontend/serve/appearance.go", "appearanceView", tsLookFile, "Appearance"},
+	{"internal/frontend/serve/appearance.go", "wallpaperView", tsLookFile, "Wallpaper"},
 }
 
 type wireMirror struct {

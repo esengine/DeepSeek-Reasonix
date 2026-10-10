@@ -416,7 +416,7 @@ func collectPlugins(reasonixHome string, disp func(string) string) (PluginPackag
 		if p.ManifestKind == "" {
 			info.ManifestKind = pkg.ManifestKind
 		}
-		for _, w := range warnings {
+		for _, w := range pluginpkg.DisplayLines(warnings) {
 			info.Warnings = append(info.Warnings, w)
 			issues = append(issues, Issue{
 				Severity: "warning", Code: "plugin.compatibility", Subsystem: "plugins",

@@ -17,6 +17,39 @@ export interface WorkspaceChanges {
   changes: WorkspaceChange[];
 }
 
+// GET /workspace/git — the work tree's one-line identity, from git itself.
+// This is the workspace's real Git state: the branch reading a chip that wants
+// to stay current asks, not the capability scope's file-derived project name.
+export interface WorkspaceGit {
+  // False when the workspace is not a git repository — distinguishable from
+  // "not answered yet" by whoever renders it.
+  repo: boolean;
+  name: string;
+  // The checked-out branch; the short SHA when HEAD is detached.
+  branch: string;
+  detached: boolean;
+  added: number;
+  removed: number;
+  untracked: number;
+}
+
+// One local branch, as the composer's branch menu lists it.
+export interface WorkspaceBranch {
+  name: string;
+  // The branch HEAD is on. A detached HEAD marks none — there is no branch.
+  current?: boolean;
+  // Set when another linked worktree of the same repository holds this branch
+  // checked out; git refuses to check it out here too, so the menu closes the
+  // row and says where it lives instead of letting the switch fail first.
+  worktree?: string;
+}
+
+export interface WorkspaceBranches {
+  // False when the workspace is not a git repository, as for /changes.
+  repo: boolean;
+  branches: WorkspaceBranch[];
+}
+
 // One path's working-tree diff, as unified text for DiffView to render.
 // truncated says the kernel stopped at its cap rather than that the file is
 // unchanged — the two look the same at the end of a string otherwise.

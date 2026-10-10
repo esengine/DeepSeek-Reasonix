@@ -23,6 +23,15 @@ var roleFields = map[string]func(*config.Config) *string{
 	"decision": func(c *config.Config) *string { return &c.Agent.DecisionModel },
 }
 
+// roleAnswers is what a role's model must produce. Decision asks a question
+// set a conversation model cannot answer; every other role holds a conversation.
+func roleAnswers(role string) config.Answers {
+	if strings.TrimSpace(role) == "decision" {
+		return config.AnswersDecision
+	}
+	return config.AnswersChat
+}
+
 func (s *Server) registerRoleRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /roles", s.roles)
 	mux.HandleFunc("POST /roles", s.setRole)
@@ -155,6 +164,10 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request) {
 		// build, and the failure would surface as a broken turn rather than here.
 		if !cfg.ModelRefSelectable(ref, s.ctl().ProviderCatalog()) {
 			refuse(w, http.StatusBadRequest, "roles.model_unknown", "no configured model matches that reference", map[string]any{"model": ref})
+			return
+		}
+		if err := cfg.RequireAnswers(ref, roleAnswers(body.Role)); err != nil {
+			writeErr(w, http.StatusConflict, err)
 			return
 		}
 	}

@@ -332,3 +332,49 @@ func TestSaveBrowserToolsPersists(t *testing.T) {
 		t.Fatalf("read back = %+v, want off", got)
 	}
 }
+
+func TestSavePermissionsRefusesARuleNamingNoToolByCode(t *testing.T) {
+	s := newProviderEditServer(t, t.TempDir())
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	resp := postProvider(t, srv.URL, "/permissions", `{"mode":"ask","allow":[],"ask":["rm"],"deny":["Bash(git push:*)"]}`)
+	defer resp.Body.Close()
+	var got Reason
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusBadRequest || got.Code != "permissions.rule_unknown_tool" ||
+		got.Params["list"] != "ask" || got.Params["rule"] != "rm" || got.Params["tool"] != "rm" {
+		t.Fatalf("save = %d %+v", resp.StatusCode, got)
+	}
+	if rules := readJSON[control.PermissionRules](t, srv.URL, "/permissions"); len(rules.Ask) != 0 || len(rules.Deny) != 0 {
+		t.Fatalf("a refused save wrote %+v", rules.PermissionLists)
+	}
+	ok := postProvider(t, srv.URL, "/permissions", `{"mode":"ask","allow":[],"ask":["Bash(rm:*)"],"deny":["mcp__later__tool"]}`)
+	defer ok.Body.Close()
+	if ok.StatusCode != http.StatusOK {
+		t.Fatalf("valid save = %d", ok.StatusCode)
+	}
+}
+
+func TestPermissionsListsRulesAlreadyInTheFileThatNameNoTool(t *testing.T) {
+	s := newProviderEditServer(t, t.TempDir())
+	s.AllowProviderEdit()
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Permissions.Ask = []string{"rm", "bash"}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	rules := readJSON[control.PermissionRules](t, srv.URL, "/permissions")
+	if len(rules.Dormant) != 1 || rules.Dormant[0].List != "ask" || rules.Dormant[0].Rule != "rm" {
+		t.Fatalf("dormant = %+v", rules.Dormant)
+	}
+	same := postProvider(t, srv.URL, "/permissions", `{"mode":"deny","allow":[],"ask":["rm","bash"],"deny":[]}`)
+	defer same.Body.Close()
+	if same.StatusCode != http.StatusOK {
+		t.Fatalf("changing the mode with the old rule kept = %d", same.StatusCode)
+	}
+}

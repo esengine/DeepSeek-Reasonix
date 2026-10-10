@@ -126,7 +126,7 @@ describe("decision cards", () => {
 
     expect(screen.getAllByText("其他（请填写城市名）")).toHaveLength(1);
     await userEvent.click(screen.getByRole("button", { name: /其他（请填写城市名）/ }));
-    await userEvent.type(screen.getByPlaceholderText("在此填写你希望采用的方案"), "深圳");
+    await userEvent.type(screen.getByPlaceholderText("或直接输入你的回答"), "深圳");
     await userEvent.click(screen.getByRole("button", { name: "确认" }));
 
     expect(answer).toHaveBeenCalledWith("row", "ask", [{ questionId: "city", selected: ["深圳"] }]);
@@ -144,7 +144,7 @@ describe("decision cards", () => {
     render(<AskCard item={item} onAnswer={answer} />);
 
     await userEvent.click(screen.getByRole("button", { name: /其他 —— 自行填写/ }));
-    const box = screen.getByPlaceholderText("在此填写你希望采用的方案");
+    const box = screen.getByPlaceholderText("或直接输入你的回答");
     expect(document.activeElement).toBe(box);
 
     await userEvent.keyboard("shenzhen");

@@ -15,19 +15,19 @@ import (
 // one value rather than two fields.
 type compactionProgress struct {
 	stuck bool // a fold landed above the trigger, so pressure retries are pointless
-	// lastNoop is the verdict already reported for the running turn. A crossed
+	// lastReported is the verdict already reported for the running turn. A crossed
 	// threshold stays crossed, so without it every later round of the same turn
 	// would report the same "folded nothing" again.
-	lastNoop maintenanceNoop
+	lastReported maintenanceReport
 	// lastUserTurns is what the most recent fold could and could not hold of
 	// the user's own words. The notice fires once, at the moment of the fold;
 	// this is what /context can still answer with afterwards.
 	lastUserTurns userTurnRetention
 }
 
-// maintenanceNoop is one reported no-fold verdict, scoped to the turn it was
+// maintenanceReport is one reported no-fold verdict, scoped to the turn it was
 // reached under: the same reason in a later turn is news again.
-type maintenanceNoop struct {
+type maintenanceReport struct {
 	reason CompactionNoopReason
 	turn   int64
 }
@@ -36,7 +36,7 @@ type maintenanceNoop struct {
 // lastUserTurns stays: /context still answers with what the last fold held.
 func (p *compactionProgress) restart() {
 	p.stuck = false
-	p.lastNoop = maintenanceNoop{}
+	p.lastReported = maintenanceReport{}
 }
 
 // ContextManager is the sole owner of provider-visible context maintenance.
@@ -129,6 +129,9 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 		// request goes out and the provider rules.
 		if policy.Trigger == CompactionTriggerOverflow {
 			return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
+		}
+		if policy.Trigger == CompactionTriggerPressure && ownEst >= fold {
+			a.noteMaintenanceHeld()
 		}
 		return prepared, nil
 	}

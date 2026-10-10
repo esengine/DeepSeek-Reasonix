@@ -53,9 +53,9 @@ func Summary(ctx context.Context, repo gitcmd.Repo) (Info, bool) {
 }
 
 func branchOf(ctx context.Context, top gitcmd.Repo) (name string, detached bool) {
-	if out, err := top.Command(ctx, "symbolic-ref", "--quiet", "--short", "HEAD").Output(); err == nil {
+	if out, err := top.Command(ctx, "symbolic-ref", "--quiet", "HEAD").Output(); err == nil {
 		if name = strings.TrimSpace(string(out)); name != "" {
-			return name, false
+			return strings.TrimPrefix(name, "refs/heads/"), false
 		}
 	}
 	if out, err := top.Command(ctx, "rev-parse", "--short", "HEAD").Output(); err == nil {

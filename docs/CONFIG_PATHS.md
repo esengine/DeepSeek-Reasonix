@@ -319,3 +319,27 @@ Version limits:
 - Plain `/migrate` rescans the legacy locations listed above. Use
   `/migrate --from <path>` only for a known v0.x session source; it is not a
   backup restore tool or a downgrade importer.
+
+## Logs and crash files
+
+Studio keeps its logs next to its window profile, not in the Reasonix home:
+
+| Platform | Logs directory |
+| --- | --- |
+| macOS | `~/Library/Application Support/Reasonix Studio/io.reasonix.studio.<instance>/logs` |
+| Windows | `%APPDATA%\Reasonix Studio\io.reasonix.studio.<instance>\logs` |
+| Linux | `~/.config/Reasonix Studio/io.reasonix.studio.<instance>/logs` |
+
+| File | What it holds |
+| --- | --- |
+| `shell.log` | The window process: launch, kernel start and handshake, and how the kernel exited (`host: died code=… signal=…`) with the tail of its crash file. |
+| `host.log` | The kernel's own output. Successful polling requests are not logged at INFO, so errors stay in it longer. |
+| `crash/host-<time>-<version>-<pid>.log` | What the Go runtime printed when the kernel was killed by a fatal error or panic, for example `fatal error: out of memory`. Newest 5 are kept, each cut to its last 256 KiB. A clean exit leaves none. |
+
+Each file rotates at 1 MiB (3 files kept) except the crash files above. After an
+unexpected kernel exit the next launch says so once.
+
+When reporting a problem, attach `shell.log`, `host.log` and any newer file in
+`crash/`. `shell.log` and `host.log` are redacted of the launch credential; the
+crash files are the runtime's raw output and may contain stack frames, paths and
+panic text. Read them before sharing.

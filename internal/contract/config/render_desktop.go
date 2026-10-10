@@ -109,7 +109,7 @@ func renderAppearanceSection(b *strings.Builder, a AppearanceConfig) {
 		b.WriteString("\n[desktop.appearance]\n")
 	}
 	if a.Zoom != 0 {
-		fmt.Fprintf(b, "zoom = %g   # whole-interface scale, 0.8..1.6\n", a.Zoom)
+		fmt.Fprintf(b, "zoom = %g   # whole-interface scale, %g..%g\n", a.Zoom, ZoomMin, ZoomMax)
 	}
 	if a.ReadSize != 0 {
 		fmt.Fprintf(b, "read_size = %g   # transcript body size in px\n", a.ReadSize)

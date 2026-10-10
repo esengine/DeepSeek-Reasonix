@@ -27,9 +27,9 @@ const TO: [keyof typeof ICON, string, string | null][] = [
   ["remote", "远程", "remote"],
 ];
 
-const FOOT: [keyof typeof ICON, string, string][] = [
-  ["account", "账号", "account"],
-  ["settings", "设置", ""],
+const FOOT: [keyof typeof ICON, string, string, string][] = [
+  ["account", "账号", "account", "chrome.account"],
+  ["settings", "设置", "", "chrome.settings"],
 ];
 
 interface Props {
@@ -43,10 +43,11 @@ interface Props {
 }
 
 export function Nav({ at, onGo, onHome, onFeedback, feedbackUnread, shown }: Props) {
-  const btn = ([key, label, sec]: [keyof typeof ICON, string, string | null]) => (
+  const btn = ([key, label, sec, action]: [keyof typeof ICON, string, string | null, string?]) => (
     <button
       key={key}
       className="navbtn"
+      data-action={action}
       aria-label={t(label)}
       aria-current={(sec ?? null) === at ? "page" : undefined}
       onClick={() => (sec === null ? onHome() : onGo(sec || undefined))}

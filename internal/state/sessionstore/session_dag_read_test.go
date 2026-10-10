@@ -180,3 +180,24 @@ func TestDAGSessionSaveNeverWritesTheLog(t *testing.T) {
 		}
 	}
 }
+
+// A rebuild swaps the system prompt for the current build's; that alone is not
+// something 1.x's log lacks, so the save still writes nothing.
+func TestDAGSessionSaveIgnoresASwappedSystemPrompt(t *testing.T) {
+	path := writeDAGSession(t, baseDAG(t)...)
+	s, err := LoadSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := s.Snapshot()
+	msgs[0] = provider.Message{Role: provider.RoleSystem, Content: "this build's prompt"}
+	s.Replace(msgs)
+	if err := s.SaveSnapshot(path); !errors.Is(err, ErrSessionLogUnchanged) {
+		t.Fatalf("save with only the system prompt changed = %v, want ErrSessionLogUnchanged", err)
+	}
+	msgs[2].Content = "edited"
+	s.Replace(msgs)
+	if err := s.SaveSnapshot(path); !errors.Is(err, ErrSessionLogForeign) {
+		t.Fatalf("save with a changed turn = %v, want ErrSessionLogForeign", err)
+	}
+}

@@ -20,4 +20,11 @@
 // foreground, so there typing, keys and paste bring the application forward
 // first. Escape pressed while the helper's cursor is on screen stops the run
 // between steps.
+//
+// A step that went through says what is known of its effect, graded on what
+// the helper read back afterwards and never on a call being accepted:
+// confirmed only on a value read back, suspected_noop only on one that stayed
+// the same, unverifiable otherwise. Input a modal dialog would swallow is not
+// sent; it fails as computer.blocked naming the modal, and a snapshot lists the
+// modals holding an application's input.
 package computer

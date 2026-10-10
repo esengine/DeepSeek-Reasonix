@@ -13,10 +13,6 @@ import (
 	"reasonix/internal/ext/pluginpkg"
 )
 
-// ExtensionToolPrefix marks a tool a plugin runtime serves, the way mcp__
-// marks one an MCP server does.
-const ExtensionToolPrefix = "ext__"
-
 // extensionToolTimeout bounds one call; a tool doing longer work should
 // report progress through its own surfaces and return.
 const extensionToolTimeout = 5 * time.Minute
@@ -54,7 +50,7 @@ func (t extensionTool) Execute(ctx context.Context, args json.RawMessage) (strin
 // extensionToolName qualifies a runtime's tool with its plugin, so two plugins
 // can each serve a "search" and neither can take a built-in's name.
 func extensionToolName(pluginID, toolName string) string {
-	return ExtensionToolPrefix + strings.NewReplacer(".", "_").Replace(pluginID) + "__" + toolName
+	return tool.ExtensionNamePrefix + strings.NewReplacer(".", "_").Replace(pluginID) + "__" + toolName
 }
 
 // addExtensionTools registers the tools each running runtime declared in its

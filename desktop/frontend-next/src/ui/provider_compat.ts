@@ -3,7 +3,7 @@
 // translate the labels independently.
 export const THINKING: [string, string][] = [
   ["", "自动 · 按模型和地址推断"],
-  ["openai", "OpenAI reasoning_effort"],
+  ["openai", "OpenAI 风格"],
   ["anthropic", "Anthropic thinking"],
   ["deepseek", "DeepSeek"],
   ["glm", "GLM enable_thinking"],
@@ -66,4 +66,11 @@ export function parseIdleTimeout(text: string): { ok: true; secs: number } | { o
   if (!/^[1-9]\d*$/.test(v)) return { ok: false };
   const secs = Number(v);
   return secs >= IDLE_TIMEOUT_MIN && secs <= IDLE_TIMEOUT_MAX ? { ok: true, secs } : { ok: false };
+}
+
+/** The body a request would carry for a level, built from the protocol's dotted
+ *  field path, so the example is the declaration itself rather than a table. */
+export function effortExample(field: string, level: string): string {
+  const body = field.split(".").reduceRight<unknown>((inner, key) => ({ [key]: inner }), level);
+  return JSON.stringify(body);
 }
