@@ -22,6 +22,7 @@ import { chipLabel, IDLE, RUNNING } from "./chip";
 import { foldStall } from "./stall";
 import { nameQueued } from "./queued";
 import { dropTool, foldLastRead, foldTool, isSubagentProgress, mergeReads, notePhase } from "./fold";
+import { rebuild } from "./rebuild";
 export { chipLabel };
 export { quoteAmount };
 export { setShowsReceipt, showsReceipt };
@@ -200,6 +201,7 @@ export type SessionEvent =
   | { kind: "__restore"; items: Item[]; plan?: PlanStep[]; executions: Executions }
   | { kind: "__todos"; plan: PlanStep[] }
   | { kind: "__totals"; hit: number; miss: number; cost?: number; currency?: string; coverage?: CostCoverage; incompleteReason?: string }
+  | { kind: "__running"; running: boolean }
   | { kind: "__error"; text: string }
   | { kind: "__user"; text: string; pending: boolean; id?: string }
   | { kind: "__unsent"; id: string }
@@ -283,13 +285,12 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       ),
     };
   }
-  // The transcript does not contain live extension publications or pending
-  // prompts. Both belong to this pane until it is rebound to another session.
+  // A rebuild re-reads the record while the turn may still be writing it; the
+  // merge goes by identity, and an open prompt or extension is not in the
+  // record at all — both belong to this pane until it is rebound.
   if (ev.kind === "__restore") {
-    // How the restored turns ended is not in the record; a live turn that
-    // vanished mid-flight leaves null, which is a different answer.
-    const terminal: TurnTerminal = ev.items.length ? { kind: "unread" } : s.terminal;
-    return { ...s, executions: ev.executions, terminal, items: [...ev.items, ...s.items.filter((i) => i.t === "extension" || promptOpen(i))], plan: ev.plan ? livePlan(ev.plan) : s.plan };
+    const merged = rebuild(s, ev);
+    return ev.plan ? { ...merged, plan: livePlan(ev.plan) } : merged;
   }
   // The kernel's canonical task list, asked for rather than re-derived: the
   // advances are not todo_write calls, and the refused writes are.
@@ -320,6 +321,10 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       },
     };
   }
+  // /status's own answer, because the record cannot end a turn: the kernel
+  // commits a text-only round before it decides whether the turn continues,
+  // so only the kernel saying idle can close one. Equal answers fold to s.
+  if (ev.kind === "__running") return s.running === ev.running ? s : { ...s, running: ev.running };
   // A wait only text or reasoning could end outlived every turn whose first
   // packet was a tool call: the retry line and its clock stayed up for the rest
   // of the turn, over calls that were running fine.
@@ -339,7 +344,13 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       // turn in front of you, not a record that one ever finished — without
       // this it would be the latter, and the tick from an hour ago would still
       // be on screen over work that is running now.
-      return nameTurnStart({ ...s, running: true, doing: "运行中", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() } }, ev);
+      // A turn still open here is one whose end never arrived; nothing of it
+      // can arrive any more, and sealTurn is the seal its end would have spent.
+      // A second start naming this turn's own message is that open delivered
+      // twice: no seal — calls still run, a prompt is still owed — but naming
+      // still runs, because the row may have been sent between the two.
+      if (s.running && ev.msgIndex !== undefined && ev.msgIndex === s.turnMsgIndex) return nameTurnStart(s, ev);
+      return nameTurnStart({ ...s, running: true, doing: "运行中", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() }, turnMsgIndex: ev.msgIndex ?? s.turnMsgIndex, items: sealTurn(sealSay(s.items, true)) }, ev);
 
     case "reasoning":
       return {

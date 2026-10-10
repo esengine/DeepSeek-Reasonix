@@ -91,6 +91,131 @@ describe("sealing a turn", () => {
     const s = run([partial("c1"), full("c1"), progress, done("context canceled")]);
     expect(tools(s)).toHaveLength(1);
   });
+
+  // A turn whose end never arrived is closed when the next one starts, the way
+  // its own end would have closed it: the dispatched call reports, the
+  // never-sent batch is counted, nothing keeps spinning.
+  it("seals a lost turn's open calls when the next turn starts", () => {
+    const start = { kind: "turn_started" } as SessionEvent;
+    const s = run([start, partial("c1"), full("c2"), start]);
+    expect(s.running).toBe(true);
+    expect(tools(s).filter((i) => i.running)).toHaveLength(0);
+    expect(tools(s).find((i) => i.tool.id === "c2")?.tool.err).toContain("没有回报结果");
+    expect(notices(s)[0]).toContain("1 个调用");
+  });
+
+  // A rebuild mid-turn meets the record already holding the round it committed
+  // — before its calls run — so the merge goes by identity, not concatenation.
+  it("folds the record's copy of a call into the live card", () => {
+    const start = { kind: "turn_started" } as SessionEvent;
+    const live = run([start, partial("c1"), full("c1")]);
+    const record = fromHistory([
+      { role: "user", content: "跑一下" },
+      { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "bash", arguments: "{}" }] },
+    ] as HistoryMessage[]);
+    const s = reduce(live, { kind: "__restore", items: record.items, executions: record.executions } as SessionEvent);
+    const cards = tools(s).filter((i) => i.tool.id === "c1");
+    expect(cards).toHaveLength(1);
+    expect(cards[0].running).toBe(true);
+    expect(cards[0].tool.args).toBe('{"path":"a.js"}');
+    const settled = reduce(s, result("c1"));
+    expect(tools(settled)).toHaveLength(1);
+    expect(tools(settled)[0].tool.output).toBe("wrote a.js");
+  });
+
+  // A result the record already holds is the truth; the live copy adds nothing.
+  it("adopts the record's settled call over the live one", () => {
+    const start = { kind: "turn_started" } as SessionEvent;
+    const live = run([start, partial("c1"), full("c1")]);
+    const record = fromHistory([
+      { role: "user", content: "跑一下" },
+      { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "bash", arguments: "{}" }] },
+      { role: "tool", content: "wrote a.js", toolCallId: "c1", toolName: "bash" },
+    ] as HistoryMessage[]);
+    const s = reduce(live, { kind: "__restore", items: record.items, executions: record.executions } as SessionEvent);
+    expect(tools(s)).toHaveLength(1);
+    expect(tools(s)[0].running).toBe(false);
+    expect(tools(s)[0].tool.output).toBe("wrote a.js");
+  });
+
+  // The record holds the committed answer, but the kernel commits each
+  // text-only round BEFORE handleFinalResponse decides whether the turn
+  // continues — the baseline-criteria run, the executor-handoff nudge, the
+  // empty-final retry and the steer drain all do — so a record ending on a
+  // say proves the answer, not the end.
+  it("keeps a live turn running when the record already holds its answer", () => {
+    const start = { kind: "turn_started", msgIndex: 1 } as SessionEvent;
+    const live = run([start, { kind: "text", text: "你好，正在" } as SessionEvent]);
+    const record = fromHistory([
+      { role: "user", content: "问" },
+      { role: "assistant", content: "你好，这是完整回答" },
+    ] as HistoryMessage[]);
+    const s = reduce(live, { kind: "__restore", items: record.items, executions: record.executions } as SessionEvent);
+    expect(s.items.filter((i) => i.t === "say")).toHaveLength(1);
+    expect(s.running).toBe(true);
+  });
+
+  // /history carries no turn-end marker, so the typed fact that a turn is
+  // over rides the status read every restore already pairs with the record.
+  // The record cannot even name the case it misses: a turn_done lost outside
+  // the replay window leaves the live cards spinning over a record whose last
+  // word is a tool result.
+  it("clears a stale running flag when the kernel says the turn is over", () => {
+    const start = { kind: "turn_started", msgIndex: 1 } as SessionEvent;
+    const live = run([start, partial("c1"), full("c1")]);
+    const record = fromHistory([
+      { role: "user", content: "跑一下" },
+      { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "bash", arguments: "{}" }] },
+      { role: "tool", content: "wrote a.js", toolCallId: "c1", toolName: "bash" },
+    ] as HistoryMessage[]);
+    const restored = reduce(live, { kind: "__restore", items: record.items, executions: record.executions } as SessionEvent);
+    expect(restored.running).toBe(true);
+    const s = reduce(restored, { kind: "__running", running: false } as SessionEvent);
+    expect(s.running).toBe(false);
+  });
+
+  // What the record does not speak for is happening, not history: it stays
+  // after the record, where the next delta lands on the card it was landing on.
+  it("keeps the running tail the record does not speak for", () => {
+    const live = run([{ kind: "turn_started" } as SessionEvent, partial("c1"), full("c2")]);
+    const s = reduce(live, { kind: "__restore", items: [{ t: "user", id: "h1", text: "a" }], executions: {} } as SessionEvent);
+    expect(s.items[0]).toMatchObject({ t: "user", text: "a" });
+    expect(tools(s).map((i) => i.tool.id)).toEqual(["c1", "c2"]);
+    expect(tools(s).every((i) => i.running)).toBe(true);
+    expect(s.running).toBe(true);
+  });
+
+  // A resumed reader's watermark can land before this turn's open, and the
+  // replay delivers the same turn_started twice. The second names the turn
+  // already in front of us: not a lost end, so nothing it opened has ended —
+  // the call is still running and the prompt is still owed an answer.
+  it("does not seal a turn whose start frame arrives twice", () => {
+    const start = { kind: "turn_started", msgIndex: 1 } as SessionEvent;
+    const approval = {
+      kind: "approval_request",
+      approval: { id: "apv-1", tool: "write_file", subject: "src/main.rs" },
+    } as SessionEvent;
+    const s = run([start, partial("c1"), full("c1"), approval, start]);
+    expect(s.running).toBe(true);
+    expect(tools(s)).toHaveLength(1);
+    expect(tools(s)[0].running).toBe(true);
+    expect(tools(s)[0].tool.err).toBeFalsy();
+    expect(s.items.filter((i) => i.t === "approval")).toHaveLength(1);
+    expect(notices(s)).toHaveLength(0);
+  });
+
+  // The seal exists for the turn whose end never arrived, and identity is
+  // what tells that apart: the next start names the next message.
+  it("seals the lost turn when the next start names another message", () => {
+    const s = run([
+      { kind: "turn_started", msgIndex: 1 } as SessionEvent,
+      partial("c1"),
+      full("c1"),
+      { kind: "turn_started", msgIndex: 2 } as SessionEvent,
+    ]);
+    expect(tools(s).filter((i) => i.running)).toHaveLength(0);
+    expect(tools(s)[0].tool.err).toContain("没有回报结果");
+  });
 });
 
 // The kernel flags a turn the user's own action ended. Its err is the sentinel's

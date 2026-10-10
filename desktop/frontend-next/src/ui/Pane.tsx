@@ -130,6 +130,11 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // answers are word-for-word the previous one. Swapping in an equal object
   // would repaint the rail and the composer for no news at all.
   const applyStatus = useCallback((next: SessionStatus) => {
+    // The typed half /history cannot carry rides every status read: the
+    // kernel commits a text-only round before it decides to continue the
+    // turn, so only this read closes one or vouches one still runs. A
+    // payload that cannot say leaves the wire's own running standing.
+    if (next.running !== undefined) dispatch({ kind: "__running", running: next.running });
     setSessionRead((prev) => (prev.kind === "settled" && prev.status && JSON.stringify(prev.status) === JSON.stringify(next)
       ? prev : { kind: "settled", status: next }));
   }, []);
