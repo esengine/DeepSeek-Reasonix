@@ -489,7 +489,8 @@ func editBuiltinSubagentProfile(sk skill.Skill, values subagentProfileFlags) err
 			}
 			model := explicit
 			if model == "" {
-				model, _, _ = cfg.ResolveNewSessionChatModel()
+				start, _ := cfg.ResolveNewSessionChatModel()
+				model = start.Ref
 			}
 			// Profile editing is an offline configuration operation. The model
 			// must resolve so effort capabilities can be validated, but it does

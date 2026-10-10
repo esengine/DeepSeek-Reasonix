@@ -42,8 +42,8 @@ func resolveModelForCLI(explicitRef string, cfg *config.Config) (ref string, fal
 		}
 		return entry.Name + "/" + entry.Model, false, nil
 	}
-	ref, fallback, _ = cfg.ResolveNewSessionChatModel()
-	return ref, fallback, nil
+	start, _ := cfg.ResolveNewSessionChatModel()
+	return start.Ref, start.Fallback, nil
 }
 
 // serveStartModel is the model a serve's first pane starts on. Explicit flags
@@ -65,8 +65,8 @@ func resolveServeModel(modelName string) string {
 		return modelName
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
-		return resolved
+	if start, ok := cfg.ResolveNewSessionChatModel(); ok {
+		return start.Ref
 	}
 	return modelName
 }

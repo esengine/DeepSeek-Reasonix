@@ -32,13 +32,14 @@ func TestRequireAnswersNamesTheMismatch(t *testing.T) {
 
 func TestANewSessionNeverOpensOnADecisionSource(t *testing.T) {
 	for _, def := range []string{"laya/typed-decisions", "laya", ""} {
-		ref, _, ok := decisionPickConfig(def).ResolveNewSessionChatModel()
-		if !ok || ref != "chat/m1" {
-			t.Fatalf("default %q opened on %q (ok=%v), want chat/m1", def, ref, ok)
+		for name, resolve := range map[string]func() (NewSessionModel, bool){
+			"new session": decisionPickConfig(def).ResolveNewSessionChatModel,
+			"startup":     decisionPickConfig(def).ResolveStartupChatModel,
+		} {
+			start, ok := resolve()
+			if !ok || start.Ref != "chat/m1" || start.SkippedDefault != def {
+				t.Fatalf("%s with default %q = %+v (ok=%v), want chat/m1 with %q reported as skipped", name, def, start, ok, def)
+			}
 		}
-	}
-	_, skipped, _ := decisionPickConfig("laya/typed-decisions").ResolveStartupChatModel()
-	if skipped != "laya/typed-decisions" {
-		t.Fatalf("a decision default must be reported as skipped, got %q", skipped)
 	}
 }

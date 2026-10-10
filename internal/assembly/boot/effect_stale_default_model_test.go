@@ -231,3 +231,40 @@ model = "deepseek-flash"
 		t.Fatalf("notice detail = %q, want the decision-source reason and the model in use", d)
 	}
 }
+
+// A build that did not ask to open on a fallback (run, the TUI) still passes over
+// a default that is a decision source, since it cannot hold a conversation; it
+// says so with the same notice the window gives instead of switching silently.
+func TestEffectDecisionSourceDefaultIsReportedWithoutAFallbackRequest(t *testing.T) {
+	isolateConfigHome(t)
+	t.Chdir(robustTempDir(t))
+	writeUserConfig(t, `
+default_model = "laya/typed-decisions"
+
+[[providers]]
+name = "laya"
+kind = "typesafe"
+base_url = "http://127.0.0.1:8700"
+models = ["typed-decisions"]
+
+[[providers]]
+name = "deepseek"
+kind = "boot-token-profile-test"
+model = "deepseek-flash"
+`)
+	registerBootTokenProfileTestProvider()
+	setBootTokenProfileTestProvider(t, testutil.NewMock("fallback"))
+
+	var notices []event.Event
+	res, err := BuildRuntime(context.Background(), Options{Sink: staleDefaultNotices(&notices)})
+	if err != nil {
+		t.Fatalf("BuildRuntime with a decision source as default: %v", err)
+	}
+	defer res.Controller.Close()
+	if got := res.Controller.ModelRef(); got != "deepseek/deepseek-flash" {
+		t.Fatalf("model ref = %q, want the first conversation model", got)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0].Detail, "decision source") || !strings.Contains(notices[0].Detail, `"deepseek/deepseek-flash"`) {
+		t.Fatalf("default-model notices = %v, want exactly one naming the decision source and the model in use", notices)
+	}
+}

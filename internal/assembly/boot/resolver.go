@@ -31,8 +31,8 @@ func (r *LocalProviderResolver) Catalog() []provider.Descriptor {
 		return nil
 	}
 	defaultRef := ""
-	if def, _, ok := startupChatModel(r.cfg); ok {
-		if e, found := r.cfg.ResolveModel(def); found {
+	if def, ok := startupChatModel(r.cfg); ok {
+		if e, found := r.cfg.ResolveModel(def.Ref); found {
 			defaultRef = modelRefFromEntry(e)
 		}
 	}
@@ -105,27 +105,26 @@ func newSessionModel(resolver provider.Resolver, cfg *config.Config, fallback bo
 			return ref, ""
 		}
 	}
-	if !fallback {
-		if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
-			return resolved, ""
-		}
-		return "", ""
+	resolve := cfg.ResolveNewSessionChatModel
+	if fallback {
+		resolve = func() (config.NewSessionModel, bool) { return startupChatModel(cfg) }
 	}
-	if resolved, skipped, ok := startupChatModel(cfg); ok {
-		return resolved, skipped
+	if m, ok := resolve(); ok {
+		return m.Ref, m.SkippedDefault
 	}
 	return "", ""
 }
 
 // startupChatModel is what a build nobody named a model for opens on. A
 // plugin-owned default is the extension resolver's to answer, so it is kept.
-func startupChatModel(cfg *config.Config) (ref, skippedDefault string, ok bool) {
+func startupChatModel(cfg *config.Config) (config.NewSessionModel, bool) {
 	if cfg == nil {
-		return "", "", false
+		return config.NewSessionModel{}, false
 	}
 	if providerext.PluginRefOwner(strings.TrimSpace(cfg.DefaultModel)) != "" {
-		ref, _, ok = cfg.ResolveNewSessionChatModel()
-		return ref, "", ok
+		m, ok := cfg.ResolveNewSessionChatModel()
+		m.SkippedDefault = ""
+		return m, ok
 	}
 	return cfg.ResolveStartupChatModel()
 }

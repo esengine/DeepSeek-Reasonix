@@ -429,7 +429,8 @@ func (s *Server) removeProvider(w http.ResponseWriter, r *http.Request) {
 func removalSuccessor(cfg *config.Config) string {
 	target := cfg.DefaultModel
 	if _, found := cfg.ResolveModel(target); !found && target != "" {
-		target, _, _ = cfg.ResolveStartupChatModel()
+		start, _ := cfg.ResolveStartupChatModel()
+		target = start.Ref
 	}
 	return target
 }

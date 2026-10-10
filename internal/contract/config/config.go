@@ -1529,11 +1529,15 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 
 // ResolveNewSessionChatModel selects the model for a newly-created chat
 // session. Configured candidates win; if every chat candidate is keyless, the
-// valid default (or first chat model) is preserved so callers can surface their
-// existing missing-key recovery UI. An unknown default is also preserved for
-// the CLI's actionable configuration error. Provider order is otherwise stable.
-func (c *Config) ResolveNewSessionChatModel() (resolvedRef string, fallback bool, ok bool) {
-	return c.resolveNewSessionChatModel(nil, true)
+// valid default (or first chat model) is kept for the missing-key recovery UI,
+// and an unknown default is kept for the CLI's configuration error. A default
+// passed over as no conversation source comes back as SkippedDefault.
+func (c *Config) ResolveNewSessionChatModel() (NewSessionModel, bool) {
+	ref, fallback, ok := c.resolveNewSessionChatModel(nil, true)
+	if !ok {
+		return NewSessionModel{}, false
+	}
+	return c.newSessionModel(ref, fallback), true
 }
 
 func (c *Config) resolveNewSessionChatModel(providerAllowed func(string) bool, preserveUnknownDefault bool) (resolvedRef string, fallback bool, ok bool) {
