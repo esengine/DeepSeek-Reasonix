@@ -34,3 +34,7 @@ reviewed: 2026-10-01
 
 If a browser or another prerequisite is missing, the corresponding acceptance
 remains not run. Installing this package does not settle the page's quality.
+
+A [worked reference](../../../example-output/delivery.md) records one local
+execution of this scenario. Its output lives outside `fixture/` and does not
+replace the supplied inputs or the selected model's own acceptance checks.

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fictional work queue</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- THESIS: scan and triage fictional requests. OWN-WORLD: calm neutral field and restrained green native controls.
+  STORY: queue before addition. FIRST VIEWPORT: identity, filters, counts, then original ticket text. FORM: brief-pinned Operate page; session-only state. -->
+  <main>
+    <header>
+      <h1>Fictional work queue</h1>
+      <p>A local exercise for reviewing sample requests. Changes stay in this page;
+        refresh to restore the supplied tickets.</p>
+    </header>
+    <section aria-labelledby="queue-heading">
+      <div class="queue-toolbar">
+        <h2 id="queue-heading">Tickets</h2>
+        <div class="filters" role="group" aria-label="Filter tickets">
+          <button type="button" data-filter="all" aria-pressed="true">All <span id="all-count">0</span></button>
+          <button type="button" data-filter="open" aria-pressed="false">Open <span id="open-count">0</span></button>
+          <button type="button" data-filter="complete" aria-pressed="false">Complete <span id="complete-count">0</span></button>
+        </div>
+      </div>
+      <p id="queue-status" role="status" aria-live="polite" aria-atomic="true">Reading sample tickets…</p>
+      <div id="read-error" hidden>
+        <p role="alert">Could not read tickets.json. Restore the input file, then retry.</p>
+        <button id="retry" type="button">Retry reading tickets</button>
+      </div>
+      <ul id="tickets" aria-label="Tickets" aria-busy="true"></ul>
+      <p id="empty-state" hidden></p>
+    </section>
+    <section class="add-ticket" aria-labelledby="add-heading">
+      <h2 id="add-heading">Add a ticket</h2>
+      <p id="title-hint">New tickets start open with normal priority.</p>
+      <form id="add-form" novalidate>
+        <label for="title">Ticket title</label>
+        <div class="add-controls">
+          <input id="title" name="title" type="text" aria-describedby="title-hint title-error" disabled>
+          <button id="add-button" type="submit" disabled>Add ticket</button>
+        </div>
+        <p id="title-error" role="alert" hidden>Enter a title that is not blank.</p>
+      </form>
+    </section>
+    <footer>Fictional sample · No accounts, storage, or network service beyond the local input.</footer>
+  </main>
+</body>
+</html>

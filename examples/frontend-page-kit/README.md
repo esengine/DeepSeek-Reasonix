@@ -84,3 +84,14 @@ needed for this exercise. Never stop another task's server to free the port.
 This exercise is not a community market submission. Installation and
 resource-access tests do not prove that a live model completes the page or
 that its design and browser behavior satisfy the brief.
+
+## Worked reference
+
+[`example-output/`](example-output/) contains a Codex-built reference page
+and its [observed delivery record](example-output/delivery.md). It is
+separate from the fixture so the exercise still starts with task inputs
+only.
+
+Copy the reference files and the original JSON into a temporary directory to
+run it. The record distinguishes native keyboard checks, frame layout
+observations, and acceptance that remains unrun.
