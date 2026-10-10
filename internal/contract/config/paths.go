@@ -338,8 +338,12 @@ func RemoteKnownHostsPath() string {
 // missing tool-call thinking recovery gate (#7059): <Reasonix home>/state. The
 // legacy name preserves callers and the existing state-file contract. Routed
 // through the home resolver so REASONIX_HOME isolation holds.
-func MissingReasoningWarnStateDir() string {
-	home := processRoots().Home()
+func MissingReasoningWarnStateDir() string { return processRoots().MissingReasoningWarnStateDir() }
+
+// MissingReasoningWarnStateDir is the recovery gate's state directory under
+// this binding's home.
+func (r Roots) MissingReasoningWarnStateDir() string {
+	home := r.Home()
 	if strings.TrimSpace(home) == "" {
 		return ""
 	}
@@ -364,7 +368,10 @@ func RepairMutationLockDir() string {
 // workspaces. Explicit state/home overrides remain authoritative. Windows uses
 // LocalAppData by default so large Git worktrees do not roam with the user's
 // profile; other platforms keep using Reasonix state storage.
-func DeliveryWorktreeDir() string { return processRoots().Dir(RootWorktrees) }
+func DeliveryWorktreeDir() string { return processRoots().DeliveryWorktreeDir() }
+
+// DeliveryWorktreeDir is the worktree root this binding resolves to.
+func (r Roots) DeliveryWorktreeDir() string { return r.Dir(RootWorktrees) }
 
 // UserCredentialsPath is the reasonix-owned global .env file under Reasonix
 // home. It is the single source for provider credentials saved by Reasonix, so

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
@@ -73,13 +74,13 @@ func (p *failedJobProvider) Stream(_ context.Context, req provider.Request) (<-c
 // model still reads the job's output under the error line, and the call
 // batched beside it still runs.
 func TestEffectReadingAFailedBackgroundJobIsAFailedCall(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	kind := uniqueKind("boot-failed-job")
 	rec := &failedJobProvider{answers: map[string]string{}}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
-	writeUserConfig(t, "[sandbox]\nbash = \"off\"\n")
+	writeUserConfigAt(t, home, "[sandbox]\nbash = \"off\"\n")
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -95,7 +96,7 @@ kind = "`+kind+`"
 model = "x"
 `)
 	writeFile(t, dir, "note.txt", "note-body")
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
 	var mu sync.Mutex
 	liveErr := map[string]string{}
@@ -106,7 +107,7 @@ model = "x"
 			mu.Unlock()
 		}
 	})
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: sink})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

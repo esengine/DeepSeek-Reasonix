@@ -22,6 +22,7 @@
     "marker": 0,
     "narrative": 0,
     "orphan": 75,
+    "process-input": 98,
     "refusal-path": 0,
     "release-note": 661,
     "stray-file": 0,
@@ -168,7 +169,8 @@
       "doc-prose": 2
     },
     "internal/assembly/boot/boot.go": {
-      "essay": 15
+      "essay": 15,
+      "process-input": 1
     },
     "internal/assembly/boot/boot_test.go": {
       "essay": 10
@@ -191,6 +193,9 @@
     "internal/assembly/boot/model_error_test.go": {
       "essay": 2
     },
+    "internal/assembly/boot/observe.go": {
+      "process-input": 1
+    },
     "internal/assembly/boot/prompt_stability_test.go": {
       "essay": 4
     },
@@ -207,6 +212,9 @@
     "internal/assembly/boot/token_profile.go": {
       "essay": 1
     },
+    "internal/assembly/boot/tool_environment.go": {
+      "process-input": 2
+    },
     "internal/base/fileutil/atomicwrite.go": {
       "essay": 18,
       "orphan": 1
@@ -220,8 +228,17 @@
     "internal/base/fileutil/replacefallback_windows_test.go": {
       "essay": 1
     },
+    "internal/base/gitignore/excludes.go": {
+      "process-input": 6
+    },
+    "internal/base/hostwrite/hostwrite.go": {
+      "process-input": 1
+    },
     "internal/base/i18n/catalog_parity_test.go": {
       "essay": 13
+    },
+    "internal/base/i18n/detect.go": {
+      "process-input": 1
     },
     "internal/base/i18n/i18n.go": {
       "essay": 6
@@ -232,11 +249,21 @@
     "internal/base/proc/kill_windows.go": {
       "essay": 5
     },
+    "internal/base/secrets/credpaths.go": {
+      "process-input": 2
+    },
     "internal/base/secrets/redact.go": {
-      "complexity": 9
+      "complexity": 9,
+      "process-input": 2
     },
     "internal/base/shellparse/bash.go": {
       "essay": 8
+    },
+    "internal/base/testenv/home.go": {
+      "process-input": 2
+    },
+    "internal/contract/config/activation_mcp_identity.go": {
+      "process-input": 1
     },
     "internal/contract/config/billing.go": {
       "orphan": 1
@@ -245,15 +272,21 @@
       "essay": 9
     },
     "internal/contract/config/ccswitch.go": {
-      "essay": 2
+      "essay": 2,
+      "process-input": 1
+    },
+    "internal/contract/config/claudejson.go": {
+      "process-input": 2
     },
     "internal/contract/config/config.go": {
       "essay": 30,
-      "file-size": 938
+      "file-size": 938,
+      "process-input": 3
     },
     "internal/contract/config/credentials.go": {
       "essay": 1,
-      "file-size": 47
+      "file-size": 47,
+      "process-input": 4
     },
     "internal/contract/config/credentials_keyring_unix.go": {
       "essay": 7
@@ -265,11 +298,13 @@
       "orphan": 2
     },
     "internal/contract/config/dotenv.go": {
-      "essay": 1
+      "essay": 1,
+      "process-input": 1
     },
     "internal/contract/config/edit.go": {
       "essay": 9,
-      "file-size": 1305
+      "file-size": 1305,
+      "process-input": 2
     },
     "internal/contract/config/effort.go": {
       "complexity": 1,
@@ -277,6 +312,9 @@
     },
     "internal/contract/config/effort_test.go": {
       "essay": 2
+    },
+    "internal/contract/config/expand.go": {
+      "process-input": 2
     },
     "internal/contract/config/load.go": {
       "essay": 24,
@@ -288,10 +326,12 @@
       "essay": 1
     },
     "internal/contract/config/mcpjson.go": {
-      "essay": 3
+      "essay": 3,
+      "process-input": 1
     },
     "internal/contract/config/migrate.go": {
-      "orphan": 1
+      "orphan": 1,
+      "process-input": 2
     },
     "internal/contract/config/mutate.go": {
       "essay": 2
@@ -300,7 +340,8 @@
       "essay": 3
     },
     "internal/contract/config/paths.go": {
-      "essay": 10
+      "essay": 10,
+      "process-input": 4
     },
     "internal/contract/config/plugin_entry.go": {
       "essay": 2
@@ -469,6 +510,9 @@
     "internal/ext/extension/sidecar/probe_client.go": {
       "orphan": 1
     },
+    "internal/ext/extension/sidecar/process.go": {
+      "process-input": 1
+    },
     "internal/ext/extension/snapshot.go": {
       "essay": 1
     },
@@ -478,10 +522,14 @@
     "internal/ext/extension/uihub/hub.go": {
       "essay": 6
     },
+    "internal/ext/hook/env_contract.go": {
+      "process-input": 1
+    },
     "internal/ext/hook/hook.go": {
       "complexity": 15,
       "essay": 41,
-      "file-size": 788
+      "file-size": 788,
+      "process-input": 2
     },
     "internal/ext/hook/hook_test.go": {
       "essay": 8
@@ -496,7 +544,8 @@
       "essay": 3
     },
     "internal/ext/installsource/install_source.go": {
-      "essay": 2
+      "essay": 2,
+      "process-input": 2
     },
     "internal/ext/installsource/install_source_test.go": {
       "essay": 2
@@ -560,7 +609,8 @@
       "essay": 1
     },
     "internal/ext/plugin/transport_stdio.go": {
-      "essay": 10
+      "essay": 10,
+      "process-input": 1
     },
     "internal/ext/pluginpkg/claude_compat.go": {
       "essay": 19,
@@ -577,6 +627,9 @@
     "internal/ext/pluginpkg/state_lock_test.go": {
       "essay": 1
     },
+    "internal/ext/pluginspec/pluginspec.go": {
+      "process-input": 1
+    },
     "internal/ext/skill/builtincontent/embed.go": {
       "orphan": 1
     },
@@ -588,7 +641,8 @@
     },
     "internal/ext/skill/skill.go": {
       "essay": 7,
-      "file-size": 551
+      "file-size": 551,
+      "process-input": 2
     },
     "internal/ext/skill/tools.go": {
       "essay": 2
@@ -799,14 +853,33 @@
     "internal/model/responses/vendor.go": {
       "essay": 19
     },
+    "internal/platform/browser/discover.go": {
+      "process-input": 1
+    },
+    "internal/platform/editor/editor.go": {
+      "process-input": 1
+    },
     "internal/platform/environment/probe.go": {
-      "essay": 5
+      "essay": 5,
+      "process-input": 3
     },
     "internal/platform/environment/snapshot.go": {
       "essay": 5
     },
     "internal/platform/environment/snapshot_test.go": {
       "essay": 2
+    },
+    "internal/platform/environment/workspace_vcs.go": {
+      "process-input": 1
+    },
+    "internal/platform/feedback/env.go": {
+      "process-input": 1
+    },
+    "internal/platform/feedback/service.go": {
+      "process-input": 1
+    },
+    "internal/platform/gitcmd/gitcmd.go": {
+      "process-input": 1
     },
     "internal/platform/installlayout/activate.go": {
       "complexity": 7,
@@ -815,8 +888,15 @@
     "internal/platform/installlayout/current.go": {
       "orphan": 1
     },
+    "internal/platform/remote/agent_unix.go": {
+      "process-input": 1
+    },
+    "internal/platform/remote/agent_windows.go": {
+      "process-input": 1
+    },
     "internal/platform/remote/auth.go": {
-      "essay": 7
+      "essay": 7,
+      "process-input": 1
     },
     "internal/platform/remote/bootstrap/ensure_test.go": {
       "essay": 2
@@ -833,8 +913,12 @@
     "internal/platform/remote/forward/forward.go": {
       "essay": 2
     },
+    "internal/platform/remote/host.go": {
+      "process-input": 1
+    },
     "internal/platform/remote/knownhosts.go": {
-      "essay": 1
+      "essay": 1,
+      "process-input": 1
     },
     "internal/platform/remote/remote.go": {
       "error-text": 5,
@@ -844,7 +928,8 @@
       "essay": 2
     },
     "internal/platform/remote/sshconfig.go": {
-      "essay": 2
+      "essay": 2,
+      "process-input": 3
     },
     "internal/platform/repair/apply_failure.go": {
       "orphan": 2
@@ -903,10 +988,16 @@
     "internal/platform/repair/update_test.go": {
       "essay": 2
     },
+    "internal/platform/telemetry/policy.go": {
+      "process-input": 3
+    },
     "internal/platform/update/apply_darwin.go": {
       "complexity": 42,
       "essay": 1,
       "function-size": 180
+    },
+    "internal/platform/update/cache.go": {
+      "process-input": 1
     },
     "internal/platform/update/install_windows.go": {
       "essay": 1
@@ -1062,6 +1153,9 @@
     "internal/runtime/langpref/langpref.go": {
       "essay": 2
     },
+    "internal/runtime/outputstyle/outputstyle.go": {
+      "process-input": 2
+    },
     "internal/runtime/plancontract/project.go": {
       "orphan": 1
     },
@@ -1144,8 +1238,15 @@
     "internal/safety/permission/permission_extra_test.go": {
       "essay": 1
     },
+    "internal/safety/sandbox/authority_endpoint.go": {
+      "process-input": 2
+    },
+    "internal/safety/sandbox/egress_bridge_entry.go": {
+      "process-input": 1
+    },
     "internal/safety/sandbox/sandbox.go": {
-      "essay": 11
+      "essay": 11,
+      "process-input": 2
     },
     "internal/safety/sandbox/seatbelt_darwin.go": {
       "essay": 3
@@ -1157,7 +1258,8 @@
       "essay": 1
     },
     "internal/safety/sandbox/shell.go": {
-      "essay": 1
+      "essay": 1,
+      "process-input": 5
     },
     "internal/safety/shellsafe/bash_redirect.go": {
       "essay": 5
@@ -1173,7 +1275,8 @@
     },
     "internal/session/control/approval_orchestration.go": {
       "essay": 38,
-      "frontend-parity": 3
+      "frontend-parity": 3,
+      "process-input": 1
     },
     "internal/session/control/attachments.go": {
       "orphan": 1
@@ -1261,7 +1364,8 @@
     },
     "internal/session/control/refs.go": {
       "essay": 5,
-      "file-size": 403
+      "file-size": 403,
+      "process-input": 1
     },
     "internal/session/control/session_lease_keeper.go": {
       "essay": 5
@@ -1326,13 +1430,15 @@
       "orphan": 1
     },
     "internal/state/instruction/resolver.go": {
-      "essay": 1
+      "essay": 1,
+      "process-input": 2
     },
     "internal/state/memory/doc.go": {
       "essay": 1
     },
     "internal/state/memory/memory.go": {
-      "essay": 2
+      "essay": 2,
+      "process-input": 1
     },
     "internal/state/memory/store.go": {
       "essay": 6,
@@ -1341,6 +1447,9 @@
     "internal/state/memory/store_v2.go": {
       "complexity": 14,
       "function-size": 10
+    },
+    "internal/state/migration/migration.go": {
+      "process-input": 2
     },
     "internal/state/sessionstore/branch.go": {
       "essay": 10,
@@ -1432,7 +1541,11 @@
     },
     "internal/tools/builtin/bash.go": {
       "essay": 11,
-      "orphan": 1
+      "orphan": 1,
+      "process-input": 1
+    },
+    "internal/tools/builtin/bash_delete.go": {
+      "process-input": 3
     },
     "internal/tools/builtin/bash_env_test.go": {
       "essay": 4
@@ -1473,11 +1586,15 @@
     "internal/tools/builtin/preview.go": {
       "essay": 7
     },
+    "internal/tools/builtin/protected_dirs_darwin.go": {
+      "process-input": 1
+    },
     "internal/tools/builtin/readfile.go": {
       "function-size": 8
     },
     "internal/tools/builtin/session_guard.go": {
-      "essay": 25
+      "essay": 25,
+      "process-input": 2
     },
     "internal/tools/builtin/updategoal.go": {
       "essay": 2

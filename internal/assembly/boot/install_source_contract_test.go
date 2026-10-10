@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 )
 
@@ -15,14 +16,16 @@ import (
 // is that the sentence describing it survives into the assembled runtime,
 // because a tool description is edited far more often than a refusal path.
 func TestInstallSourceContractStatesTheTicketRule(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	ctrl, err := Build(context.Background(), Options{
-		SessionDir: filepath.Join(robustTempDir(t), "sessions"),
-		TokenMode:  TokenModeFull,
-		Sink:       event.Discard,
+		Home:          home,
+		WorkspaceRoot: dir,
+		SessionDir:    filepath.Join(testenv.TempDir(t), "sessions"),
+		TokenMode:     TokenModeFull,
+		Sink:          event.Discard,
 	})
 	if err != nil {
 		t.Fatal(err)

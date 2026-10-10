@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -29,9 +30,9 @@ func digestRequests(reqs []provider.Request) (summarizer, carrying int) {
 // the old model earned is content, not model state: the next request must still
 // carry it, and no summarization call may be spent re-deriving it.
 func TestEffectModelSwitchKeepsTheCompactionProjection(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	rec := &compactionEffectProvider{bulk: strings.Repeat("work output line with detail. ", 400)}
 	provider.Register("boot-compaction-switch", func(provider.Config) (provider.Provider, error) {
@@ -57,9 +58,9 @@ kind = "boot-compaction-switch"
 model = "b"
 context_window = 32000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	from, err := Build(context.Background(), Options{Sink: event.Discard})
+	from, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build a: %v", err)
 	}
@@ -77,7 +78,7 @@ context_window = 32000
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	to, err := Build(context.Background(), Options{Model: "model-b", Sink: event.Discard})
+	to, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Model: "model-b", Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build b: %v", err)
 	}

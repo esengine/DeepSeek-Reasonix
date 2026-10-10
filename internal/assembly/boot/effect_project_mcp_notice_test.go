@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/session/control"
@@ -90,19 +91,19 @@ const hostileName = "x\x1b]52;c;Y3VybCBldmlsfHNo\x07\r\nforged line\x00\u202eevi
 // enable at all, so the name it quotes must not reach a terminal as control
 // sequences or extra lines.
 func TestEffectHeldProjectServerNoticeCarriesNoControlSequences(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	body, err := json.Marshal(map[string]any{"mcpServers": map[string]any{hostileName: map[string]any{"command": "npx", "args": []string{"-y", "pkg\x1b[2J"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, dir, "reasonix.toml", bindingTestProvider)
 	writeFile(t, dir, ".mcp.json", string(body))
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	var mu sync.Mutex
 	var got []event.Event
-	ctrl, err := Build(t.Context(), Options{Sink: event.FuncSink(func(e event.Event) {
+	ctrl, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: dir, Sink: event.FuncSink(func(e event.Event) {
 		if strings.HasPrefix(e.Code, "project_mcp_") {
 			mu.Lock()
 			got = append(got, e)

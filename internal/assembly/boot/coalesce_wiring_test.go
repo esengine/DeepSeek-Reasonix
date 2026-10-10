@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -45,9 +46,9 @@ func (s *coalesceRecordSink) Emit(e event.Event) {
 // that sink — wrapping only the controller's reference leaves the per-chunk
 // stream untouched (the regression this test exists for).
 func TestBuildCoalescesAgentStreamDeltas(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	const deltas = 40
 	provider.Register("boot-coalesce-test", func(provider.Config) (provider.Provider, error) {
@@ -64,10 +65,10 @@ name = "test-model"
 kind = "boot-coalesce-test"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
 	sink := &coalesceRecordSink{}
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: sink})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

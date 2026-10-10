@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/safety/sandbox"
@@ -46,15 +47,15 @@ func (p *egressScriptProvider) Stream(_ context.Context, req provider.Request) (
 // egress proxy, and a host the list does not name reaches the model as the
 // host's refusal rather than as a bare connection error.
 func TestEffectEgressRefusalReachesTheModel(t *testing.T) {
+	t.Parallel()
 	if !sandbox.Available() || !sandbox.EgressSupported() {
 		t.Skip("egress confinement not available on this host")
 	}
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("curl not installed")
 	}
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &egressScriptProvider{command: `curl -sS -o /dev/null https://not-listed.example.invalid/; echo "proxy=$HTTPS_PROXY"`}
 	provider.Register("boot-egress", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -76,8 +77,8 @@ name = "test-model"
 kind = "boot-egress"
 model = "x"
 `)
-	approveWorkspace(t, dir)
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	approveWorkspaceAt(t, home, dir)
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -107,15 +108,15 @@ model = "x"
 // Where the frontend can ask, a host outside the list reaches the user as a
 // network_egress approval, and a refusal reaches the model as theirs.
 func TestEffectUnlistedHostIsPutToTheUser(t *testing.T) {
+	t.Parallel()
 	if !sandbox.Available() || !sandbox.EgressSupported() {
 		t.Skip("egress confinement not available on this host")
 	}
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("curl not installed")
 	}
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &egressScriptProvider{command: `curl -sS -o /dev/null https://ask-me.example.invalid/`}
 	provider.Register("boot-egress-ask", func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
@@ -137,7 +138,7 @@ name = "test-model"
 kind = "boot-egress-ask"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	var ctrlRef atomic.Pointer[control.Controller]
 	asked := make(chan event.Approval, 4)
 	sink := event.FuncSink(func(e event.Event) {
@@ -148,7 +149,7 @@ model = "x"
 		allow := e.Approval.Tool != control.NetworkEgressApprovalTool
 		go ctrlRef.Load().Approve(e.Approval.ID, allow, false, false)
 	})
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: sink})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

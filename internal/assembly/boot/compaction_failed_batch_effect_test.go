@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
@@ -68,13 +69,13 @@ func (p *failedBatchProvider) requests() []provider.Request {
 // the failure still reaches the model, and no request carries a call without its
 // result.
 func TestEffectFailingCallDoesNotPinItsParallelBatch(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	kind := uniqueKind("boot-failed-batch")
 	rec := &failedBatchProvider{}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
-	writeUserConfig(t, "[sandbox]\nbash = \"off\"\n")
+	writeUserConfigAt(t, home, "[sandbox]\nbash = \"off\"\n")
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -95,7 +96,7 @@ context_window = 32000
 	for i := range failedBatchReads {
 		writeFile(t, dir, fmt.Sprintf("src%d.txt", i), fmt.Sprintf("SIBLING-%d\n", i)+strings.Repeat("source line with detail.\n", 160))
 	}
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
 	var mu sync.Mutex
 	var blocked []string
@@ -106,7 +107,7 @@ context_window = 32000
 			mu.Unlock()
 		}
 	})
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: sink})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

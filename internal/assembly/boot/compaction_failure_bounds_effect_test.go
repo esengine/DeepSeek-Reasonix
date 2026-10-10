@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/sessionstore"
@@ -59,9 +60,9 @@ func (r *refusingRelay) Stream(_ context.Context, req provider.Request) (<-chan 
 // the retry hold gives way before the ceiling, and a refusal the relay words
 // without a code is still answered by folding.
 func TestEffectFailedSummaryNeverLetsARequestPastTheWindow(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	relay := &refusingRelay{}
 	kind := "boot-refusing-relay-" + t.Name()
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return relay, nil })
@@ -77,9 +78,9 @@ kind = "`+kind+`"
 model = "x"
 context_window = 20000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

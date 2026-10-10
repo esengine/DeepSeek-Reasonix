@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/runtime/agent"
@@ -63,7 +62,7 @@ func (b *builder) addBestOf() {
 	cfg := b.cfg
 	b.tools.reg.Add(bestof.New(bestof.Spec{
 		Repo:        b.repo,
-		ManagedRoot: filepath.Join(config.DeliveryWorktreeDir(), "candidates"),
+		ManagedRoot: filepath.Join(b.roots.DeliveryWorktreeDir(), "candidates"),
 		Runner:      candidateRunner(b.opts, b.sink, approval),
 		KnownModel:  func(ref string) bool { _, ok := cfg.ResolveModel(ref); return ok },
 		Judge:       judge,

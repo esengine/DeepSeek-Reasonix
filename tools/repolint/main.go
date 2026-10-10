@@ -189,6 +189,7 @@ func run(root string) ([]Finding, error) {
 		findings = append(findings, checkErrorText(src)...)
 		findings = append(findings, checkFlatView(src)...)
 		findings = append(findings, checkWindowState(src)...)
+		findings = append(findings, checkProcessInput(src)...)
 		orphans.observe(src)
 		wires.observe(src)
 		entries, vars := dialectRefs(src)

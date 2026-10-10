@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/runtime/agent"
@@ -16,9 +17,9 @@ import (
 // rewritten. Reported as one, the window warns that the prefix moved on every
 // turn of every ordinary task.
 func TestEffectATaskListTailIsNotReportedAsARewrittenBody(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 	rec := &browserScriptProvider{rounds: []func(string) *provider.ToolCall{
 		func(string) *provider.ToolCall {
 			return browserCall("todo-1", "todo_write", map[string]any{"todos": []any{
@@ -50,10 +51,10 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 	var mu sync.Mutex
 	var diags []*event.CacheDiagnostics
-	ctrl, err := Build(context.Background(), Options{Sink: event.FuncSink(func(e event.Event) {
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.FuncSink(func(e event.Event) {
 		if e.Kind == event.Usage && e.CacheDiagnostics != nil {
 			mu.Lock()
 			diags = append(diags, e.CacheDiagnostics)

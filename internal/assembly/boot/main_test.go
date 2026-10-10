@@ -12,5 +12,8 @@ func TestMain(m *testing.M) {
 		runFakeComputerHelper(os.Stdin, os.Stdout)
 		return
 	}
+	// A stated home has no process variable to carry this, and the OS keychain
+	// is not isolated by the disposable home.
+	_ = os.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	testenv.RunWithIsolatedUserState(m)
 }

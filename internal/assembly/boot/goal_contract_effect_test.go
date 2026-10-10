@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -26,9 +27,9 @@ func userTextOf(req provider.Request) string {
 // points at the contract, so a request carrying the pointer and not the target
 // leaves the model following a reference into nothing.
 func TestEffectGoalContractIsStatedOnceAndNeverLost(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	rec := &compactionEffectProvider{bulk: strings.Repeat("work output line with detail. ", 400)}
 	provider.Register("boot-goal-contract-effect", func(provider.Config) (provider.Provider, error) {
@@ -48,9 +49,9 @@ kind = "boot-goal-contract-effect"
 model = "x"
 context_window = 32000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -112,9 +113,9 @@ context_window = 32000
 // The contract is stated once and superseded thereafter: at most the retained
 // copy plus one fresh restatement, never one per turn the goal ever ran.
 func TestEffectGoalContractDoesNotAccumulate(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	rec := &compactionEffectProvider{bulk: strings.Repeat("work output line with detail. ", 400)}
 	provider.Register("boot-goal-accum-effect", func(provider.Config) (provider.Provider, error) {
@@ -134,9 +135,9 @@ kind = "boot-goal-accum-effect"
 model = "x"
 context_window = 32000
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 )
 
@@ -60,9 +61,9 @@ func writeProjectSkill(t *testing.T, dir, name, frontmatter, body string) {
 // every description reachable through the capability search: the model finds
 // a skill by its description, by a trigger its author declared, and runs it.
 func TestEffectOversizedSkillCatalogStaysReachable(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
+	t.Parallel()
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
 
 	const fillers = 80
 	var names []string
@@ -98,8 +99,8 @@ name = "test-model"
 kind = "skill-scale"
 model = "x"
 `)
-	approveWorkspace(t, dir)
-	ctrl, err := Build(context.Background(), Options{})
+	approveWorkspaceAt(t, home, dir)
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

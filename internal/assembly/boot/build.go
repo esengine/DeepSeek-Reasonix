@@ -455,7 +455,7 @@ func (b *builder) executor() *agent.Agent {
 		ReasoningLanguage:            cfg.ReasoningLanguage(),
 		SubagentDepth:                0,
 		MaxSubagentDepth:             t.sub.maxDepth,
-		MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
+		MissingReasoningWarnStateDir: b.roots.MissingReasoningWarnStateDir(),
 	}, b.sink)
 }
 

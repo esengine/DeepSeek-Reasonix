@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -207,13 +208,13 @@ func TestEffectEnabledProjectMCPDoesNotLaunchARewrittenDeclaration(t *testing.T)
 // the call is refused before any process starts, and the server reads as
 // waiting for the user.
 func TestEffectEnabledProjectMCPRefusesAWorkspaceFileChangedMidSession(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the launcher script is POSIX shell")
 	}
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
-	logPath := filepath.Join(robustTempDir(t), "argv.log")
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
+	logPath := filepath.Join(testenv.TempDir(t), "argv.log")
 	launcher := func(phase string) {
 		writeFile(t, dir, "run.sh", "#!/bin/sh\nexec \""+os.Args[0]+"\" -test.run='^TestArgvRecordingMCPHelper$' -- "+phase+"\n")
 	}
@@ -237,9 +238,9 @@ name = "test-model"
 kind = "boot-mcp-binding-midsession"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	first, err := Build(t.Context(), Options{Sink: event.Discard})
+	first, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +256,7 @@ model = "x"
 	first.Close()
 	// The next session discovers and caches the schema, so the one after it
 	// registers the server from cache and starts nothing until a call.
-	discovery, err := Build(t.Context(), Options{Sink: event.Discard})
+	discovery, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +264,7 @@ model = "x"
 	discovery.Close()
 	launches := len(launchedPhases(logPath))
 
-	ctrl, err := Build(t.Context(), Options{Sink: event.Discard})
+	ctrl, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,13 +297,13 @@ model = "x"
 // that PATH points into the workspace, the file it finds is repository code
 // the user approved, and swapping it must not start on that approval.
 func TestEffectEnabledProjectMCPDoesNotLaunchASwappedDeclaredPathExecutable(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the launcher script is POSIX shell")
 	}
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
-	logPath := filepath.Join(robustTempDir(t), "argv.log")
+	home := statedBootHome(t)
+	dir := testenv.TempDir(t)
+	logPath := filepath.Join(testenv.TempDir(t), "argv.log")
 	launcher := func(phase string) {
 		writeFile(t, dir, "tools/rxhelper", "#!/bin/sh\nexec \""+os.Args[0]+"\" -test.run='^TestArgvRecordingMCPHelper$' -- "+phase+"\n")
 		if err := os.Chmod(filepath.Join(dir, "tools", "rxhelper"), 0o755); err != nil {
@@ -330,9 +331,9 @@ name = "test-model"
 kind = "boot-mcp-binding-declared-path"
 model = "x"
 `)
-	approveWorkspace(t, dir)
+	approveWorkspaceAt(t, home, dir)
 
-	first, err := Build(t.Context(), Options{Sink: event.Discard})
+	first, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +349,7 @@ model = "x"
 	first.Close()
 
 	launcher("swapped")
-	ctrl, err := Build(t.Context(), Options{Sink: event.Discard})
+	ctrl, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}

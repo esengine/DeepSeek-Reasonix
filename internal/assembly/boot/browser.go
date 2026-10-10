@@ -20,7 +20,7 @@ var browserPool = &browser.Pool{}
 // runs is found at first use, so the schema answers to the config alone and a
 // machine without one hears browser.engine_missing then.
 func bindBrowser(reg *tool.Registry, conf *config.Config, root string, reused *browser.Session) *browser.Session {
-	profiles := config.BrowserProfilesDir()
+	profiles := conf.Roots().BrowserProfilesDir()
 	if !conf.Tools.BrowserToolsEnabled() || root == "" || profiles == "" {
 		return nil
 	}
