@@ -62,7 +62,9 @@ func (t *stdioTransport) handleInboundLine(line []byte, replies chan<- any) {
 		if isNotificationID(probe.ID) {
 			if probe.Method == "notifications/progress" {
 				t.progress.dispatchProgress(probe.Params)
+				return
 			}
+			t.notices.dispatchNotification(probe.Method, probe.Params)
 			return
 		}
 		response := serverRequestReply(probe.ID, probe.Method, t.roots)
@@ -108,4 +110,8 @@ func (t *stdioTransport) registerProgress(token string, sink tool.ProgressFunc) 
 
 func (t *stdioTransport) registerElicitCall(ctx context.Context) func() {
 	return t.elicits.register(ctx)
+}
+
+func (t *stdioTransport) registerNotification(method string, handler notificationFunc) func() {
+	return t.notices.registerNotification(method, handler)
 }

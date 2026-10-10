@@ -185,6 +185,7 @@ func (h *Host) ReplaceServerBackend(ctx context.Context, name string, next *Clie
 		}
 	}
 	h.mu.Unlock()
+	h.bindToolListChanges(next)
 	if replaced != nil && replaced != next && replaced.t != nil {
 		replaced.close()
 	}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/plugin"
+	"reasonix/internal/runtime/agent"
 )
 
 // mcpManager owns the session's live tool/plugin surface: the MCP plugin Host
@@ -35,13 +37,93 @@ type mcpManager struct {
 	// controller is handed to a caller and only read after.
 	sealed         error
 	promptFailures promptFailureDebt
+	// notice tells the model what a catalog refresh took away. It is the
+	// executor's turn tail, bound once at construction.
+	notice func(string)
 }
 
 // seal makes the manager refuse to connect or register any server.
 func (m *mcpManager) seal(reason error) { m.sealed = reason }
 
-func newMcpManager(host *plugin.Host, reg *tool.Registry, pluginCtx context.Context, defaultCallTimeout time.Duration) mcpManager {
-	return mcpManager{host: host, reg: reg, pluginCtx: pluginCtx, defaultCallTimeout: defaultCallTimeout}
+func newMcpManager(host *plugin.Host, reg *tool.Registry, pluginCtx context.Context, defaultCallTimeout time.Duration, notice func(string)) mcpManager {
+	watchToolListChanges(host, reg, pluginCtx, notice)
+	return mcpManager{host: host, reg: reg, pluginCtx: pluginCtx, defaultCallTimeout: defaultCallTimeout, notice: notice}
+}
+
+// watchToolListChanges keeps this session's registry in step with a server that
+// announces a changed tool list. The host may be shared between sessions, so
+// each one registers the refreshed catalog into its own registry. notice, when
+// set, is how the session tells the model what the refresh took away from it.
+func watchToolListChanges(host *plugin.Host, reg *tool.Registry, pluginCtx context.Context, notice func(string)) {
+	if host == nil || reg == nil {
+		return
+	}
+	host.SubscribeToolListChanges(pluginCtx, func(spec plugin.Spec, tools []tool.Tool) {
+		withdrawn := registerRefreshedMCPTools(reg, spec, tools)
+		if len(withdrawn) > 0 && notice != nil {
+			notice(withdrawnMCPToolsNotice(spec.Name, withdrawn))
+		}
+	})
+}
+
+// registerRefreshedMCPTools swaps one server's tools for the set it now offers,
+// in one registry call, and reports the pinned names the catalog no longer
+// backs — those stay as withdrawn slots (see withdrawnProviderTools). The
+// prefix is not resumed: a session that suspended this server turned it off,
+// and a server announcing new tools is not the user asking for it back.
+func registerRefreshedMCPTools(reg *tool.Registry, spec plugin.Spec, tools []tool.Tool) []string {
+	prefix := plugin.ToolPrefix(spec.Name)
+	held, withdrawn := withdrawnProviderTools(reg, spec.Name, prefix, tools)
+	reg.ReplacePrefix(prefix, append(slices.Clone(tools), held...))
+	return withdrawn
+}
+
+// withdrawnProviderTools are the slots the refresh must not vacate: what this
+// session pinned into the provider-visible array at boot and the catalog no
+// longer offers. Vacating one rewrites the cache-stable prefix, so the entry
+// stays and its call fails with the live catalog's not-found. A slot an earlier
+// refresh withdrew is kept but not announced twice.
+func withdrawnProviderTools(reg *tool.Registry, server, prefix string, offered []tool.Tool) ([]tool.Tool, []string) {
+	live := make(map[string]bool, len(offered))
+	for _, t := range offered {
+		if t != nil {
+			live[t.Name()] = true
+		}
+	}
+	raw := map[string]string{}
+	for _, b := range reg.MCPBindings() {
+		raw[b.CallableName] = b.RawName
+	}
+	var held []tool.Tool
+	var withdrawn []string
+	for _, name := range reg.AllNames() {
+		if !strings.HasPrefix(name, prefix) || live[name] || !reg.ProviderSurfacePinned(name) {
+			continue
+		}
+		current, ok := reg.Get(name)
+		if !ok || current == nil {
+			continue
+		}
+		if tool.IsWithdrawn(current) {
+			held = append(held, current)
+			continue
+		}
+		rawName := raw[name]
+		if rawName == "" {
+			rawName = strings.TrimPrefix(name, prefix)
+		}
+		held = append(held, tool.Withdraw(current, fmt.Sprintf("MCP tool %q not found on server %q", rawName, server)))
+		withdrawn = append(withdrawn, name)
+	}
+	return held, withdrawn
+}
+
+// withdrawnMCPToolsNotice is what the model is told on the turn tail: the tools
+// array still shows these calls and will until the session ends, so a model
+// reading the array and nothing else would keep spending turns on them.
+func withdrawnMCPToolsNotice(server string, names []string) string {
+	return fmt.Sprintf("MCP server %q withdrew %s during this session. The definition stays in your tool list so the cached prefix does not move, but calling it now fails with a not-found; use what the server offers instead (use_capability inspect mcp-server:%s lists it).",
+		server, strings.Join(names, ", "), server)
 }
 
 // hostRef returns the live plugin host (nil until one is injected or lazily
@@ -59,12 +141,7 @@ func (m *mcpManager) connectSpec(s plugin.Spec) (int, error) {
 	if m.sealed != nil {
 		return 0, m.sealed
 	}
-	m.mu.Lock()
-	if m.host == nil {
-		m.host = plugin.NewHost()
-	}
-	host, ctx, reg := m.host, m.pluginCtx, m.reg
-	m.mu.Unlock()
+	host, ctx, reg := m.ensureHost()
 	plugin.ApplyDisabledMCPPolicy(reg, s)
 
 	tools, err := host.Add(ctx, s)
@@ -97,12 +174,7 @@ func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
 	if m.sealed != nil {
 		return 0, m.sealed
 	}
-	m.mu.Lock()
-	if m.host == nil {
-		m.host = plugin.NewHost()
-	}
-	host, ctx, reg := m.host, m.pluginCtx, m.reg
-	m.mu.Unlock()
+	host, ctx, reg := m.ensureHost()
 	plugin.ApplyDisabledMCPPolicy(reg, s)
 
 	var tools []tool.Tool
@@ -127,6 +199,22 @@ func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
 		}
 	}
 	return len(tools), nil
+}
+
+// ensureHost returns the live host, creating it on first use. A host created
+// here starts watching for catalog changes before any server connects to it.
+func (m *mcpManager) ensureHost() (*plugin.Host, context.Context, *tool.Registry) {
+	m.mu.Lock()
+	created := m.host == nil
+	if created {
+		m.host = plugin.NewHost()
+	}
+	host, ctx, reg := m.host, m.pluginCtx, m.reg
+	m.mu.Unlock()
+	if created {
+		watchToolListChanges(host, reg, ctx, m.notice)
+	}
+	return host, ctx, reg
 }
 
 // disconnect drops a live server and its tools from the registry. Reports whether
@@ -239,4 +327,14 @@ func (m *mcpManager) readResource(ctx context.Context, server, uri string) (stri
 		return "", fmt.Errorf("no MCP servers connected")
 	}
 	return h.ReadResource(ctx, server, uri)
+}
+
+// hostFactNotice is how a background change reaches the model: the executor's
+// turn tail, which an append leaves the cached prefix alone. A session with no
+// executor has nowhere to say it, and says nothing.
+func hostFactNotice(executor *agent.Agent) func(string) {
+	if executor == nil {
+		return nil
+	}
+	return executor.NoteHostFact
 }

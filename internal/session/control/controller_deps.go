@@ -172,7 +172,7 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		feedback:               opts.Feedback,
 		jobs:                   opts.Jobs,
 		workspaceLease:         opts.WorkspaceLease,
-		mcp:                    newMcpManager(opts.Host, opts.Registry, pluginCtx, opts.MCPDefaultCallTimeout),
+		mcp:                    newMcpManager(opts.Host, opts.Registry, pluginCtx, opts.MCPDefaultCallTimeout, hostFactNotice(opts.Executor)),
 		mcpConfigureSpec:       opts.MCPConfigureSpec,
 		capabilityRuntime:      opts.CapabilityRuntime,
 		ablation:               opts.Ablation,

@@ -30,6 +30,7 @@ type sseTransport struct {
 	client       *http.Client
 	roots        []mcpRoot
 	progress     progressRouter
+	notices      notificationRouter
 	replies      chan inboundMessage
 	replyTimeout time.Duration
 
@@ -90,6 +91,10 @@ func newSSETransport(ctx context.Context, s Spec) (*sseTransport, error) {
 	go t.replyLoop()
 	go t.readLoop()
 	return t, nil
+}
+
+func (t *sseTransport) registerNotification(method string, handler notificationFunc) func() {
+	return t.notices.registerNotification(method, handler)
 }
 
 func (t *sseTransport) registerProgress(token string, sink tool.ProgressFunc) func() {
@@ -206,7 +211,9 @@ func (t *sseTransport) handleMessage(payload []byte) {
 		if isNotificationID(message.ID) {
 			if message.Method == "notifications/progress" {
 				t.progress.dispatchProgress(message.Params)
+				return
 			}
+			t.notices.dispatchNotification(message.Method, message.Params)
 			return
 		}
 		select {

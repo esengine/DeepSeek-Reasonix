@@ -50,8 +50,23 @@ type reconnectingTransport struct {
 	mu       sync.Mutex
 	active   transport
 	progress map[string]*progressRegistration
+	notices  notificationRegistrations
 	dialing  chan struct{} // non-nil while a dial runs; closed when it settles
 	closed   bool
+}
+
+// notificationRegistrations are the connection-scoped notification handlers a
+// consumer registered. A replacement connection knows none of them, so they are
+// kept here and rebound onto it.
+type notificationRegistrations struct {
+	nextID uint64
+	byID   map[uint64]*notificationRegistration
+}
+
+type notificationRegistration struct {
+	method     string
+	handler    notificationFunc
+	unregister func()
 }
 
 // progressRegistration is one live progress token: the sink to re-attach to a
@@ -176,6 +191,7 @@ func (t *reconnectingTransport) renew(ctx context.Context, stale transport) (tra
 		}
 		t.active = next
 		t.rebindProgressLocked(next)
+		t.rebindNotificationsLocked(next)
 		t.mu.Unlock()
 		close(done)
 		if stale != nil {
@@ -251,6 +267,48 @@ func (t *reconnectingTransport) registerProgress(token string, sink tool.Progres
 		if ok && registration.unregister != nil {
 			registration.unregister()
 		}
+	}
+}
+
+// registerNotification outlives one connection: the handler is recorded here and
+// bound to whichever connection is active, so a server that reconnects and then
+// announces a change is still heard.
+func (t *reconnectingTransport) registerNotification(method string, handler notificationFunc) func() {
+	if method == "" || handler == nil {
+		return func() {}
+	}
+	registration := &notificationRegistration{method: method, handler: handler}
+	t.mu.Lock()
+	if t.notices.byID == nil {
+		t.notices.byID = map[uint64]*notificationRegistration{}
+	}
+	t.notices.nextID++
+	id := t.notices.nextID
+	t.notices.byID[id] = registration
+	if router, ok := t.active.(notificationTransport); ok {
+		registration.unregister = router.registerNotification(method, handler)
+	}
+	t.mu.Unlock()
+	return func() {
+		t.mu.Lock()
+		registration, ok := t.notices.byID[id]
+		delete(t.notices.byID, id)
+		t.mu.Unlock()
+		if ok && registration.unregister != nil {
+			registration.unregister()
+		}
+	}
+}
+
+// rebindNotificationsLocked moves live handlers onto a replacement connection.
+// Caller holds t.mu.
+func (t *reconnectingTransport) rebindNotificationsLocked(next transport) {
+	router, ok := next.(notificationTransport)
+	if !ok {
+		return
+	}
+	for _, registration := range t.notices.byID {
+		registration.unregister = router.registerNotification(registration.method, registration.handler)
 	}
 }
 

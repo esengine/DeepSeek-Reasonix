@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"reasonix/internal/contract/tool"
 )
 
 // TestHostConcurrentAccess hammers the Host's mutable state from many goroutines:
@@ -14,9 +16,10 @@ import (
 func TestHostConcurrentAccess(t *testing.T) {
 	h := &Host{}
 	// Seed a few "connected" servers so the read paths have data to walk. These
-	// methods only read name/transport/toolCount, never the (nil) transport.
+	// methods only read name/transport and the published catalog, never the
+	// (nil) transport.
 	for i := range 4 {
-		h.clients = append(h.clients, &Client{name: fmt.Sprintf("srv-%d", i), transport: "stdio", toolCount: i})
+		h.clients = append(h.clients, &Client{name: fmt.Sprintf("srv-%d", i), transport: "stdio", toolAdapters: make([]tool.Tool, i)})
 		h.prompts = append(h.prompts, Prompt{Server: fmt.Sprintf("srv-%d", i), Name: "p"})
 	}
 

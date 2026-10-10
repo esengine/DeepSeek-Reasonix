@@ -97,10 +97,12 @@ func (h *Host) Servers() []ServerStatus {
 			Transport:    c.transport,
 			ConfigSource: strings.TrimSpace(c.spec.ConfigSource),
 			Description:  c.instructions,
-			Tools:        c.toolCount,
 			HasTools:     c.hasTools,
 		}
+		// Count and list come from the same snapshot: a refresh publishes both
+		// at once, and a count written beside it would disagree after one.
 		c.toolsMu.Lock()
+		s.Tools = len(c.toolAdapters)
 		s.ToolList = append([]ToolInfo(nil), c.tools...)
 		c.toolsMu.Unlock()
 		for _, p := range h.prompts {

@@ -427,6 +427,20 @@ func (r *Registry) ProviderVisible(name string) bool {
 	return r.providerVisible[strings.TrimSpace(name)]
 }
 
+// ProviderSurfacePinned reports whether name belongs to an explicit
+// provider-visible allowlist. Unlike ProviderVisible it is false when no
+// allowlist is set: a registry that shows whatever it holds promises nothing
+// about which names a provider sees, so nothing has to be held back to keep
+// that promise.
+func (r *Registry) ProviderSurfacePinned(name string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.providerVisible != nil && r.providerVisible[strings.TrimSpace(name)]
+}
+
 func (r *Registry) isProviderVisibleLocked(name string) bool {
 	if r.providerVisible == nil {
 		return true
@@ -448,10 +462,8 @@ func (r *Registry) Add(t Tool) {
 	defer r.mu.Unlock()
 
 	name := t.Name()
-	for prefix := range r.suspended {
-		if strings.HasPrefix(name, prefix) {
-			return
-		}
+	if r.suspendedLocked(name) {
+		return
 	}
 	if _, ok := r.tools[name]; !ok {
 		r.order = append(r.order, name)

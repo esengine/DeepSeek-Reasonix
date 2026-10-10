@@ -909,7 +909,7 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 	// let them silently miss.
 	modelName := plugin.ModelToolName(server, raw)
 	if t.registry != nil {
-		if tl, ok := t.registry.Get(modelName); ok {
+		if tl, ok := routableRegistryTool(t.registry, modelName); ok {
 			if t.runtime != nil && !plugin.MCPToolMatchesSpec(tl, runtimeSpec) {
 				return t.resolveUnavailable(base, id, modelName, fmt.Sprintf("connected MCP server %q identity does not match the current runtime configuration", server)), nil
 			}

@@ -212,11 +212,28 @@ func (c *Client) initializeSessionOn(ctx context.Context, t transport, recordCap
 		slog.Warn("plugin: parse initialize capabilities", "server", c.name, "err", err)
 	}
 	_, c.hasTools = ir.Capabilities["tools"]
+	c.declareToolListChanged(declaresToolListChanged(ir.Capabilities["tools"]))
 	_, c.hasPrompts = ir.Capabilities["prompts"]
 	_, c.hasResources = ir.Capabilities["resources"]
 	c.instructions = strings.TrimSpace(ir.Instructions)
 
 	return c.notifyOn(ctx, t, "notifications/initialized", map[string]any{})
+}
+
+// declaresToolListChanged reads tools.listChanged from the initialize result.
+// Absent or false means the server never announces catalog changes, so nothing
+// subscribes and its catalog stays as listed.
+func declaresToolListChanged(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var capability struct {
+		ListChanged bool `json:"listChanged"`
+	}
+	if err := json.Unmarshal(raw, &capability); err != nil {
+		return false
+	}
+	return capability.ListChanged
 }
 
 // redial opens a replacement connection for this client's server. It re-clears

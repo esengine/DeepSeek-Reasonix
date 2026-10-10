@@ -39,6 +39,7 @@ type httpTransport struct {
 	client   *http.Client
 	roots    []mcpRoot
 	progress progressRouter
+	notices  notificationRouter
 	oauth    *mcpOAuthClient
 
 	mu      sync.Mutex
@@ -200,6 +201,10 @@ func (t *httpTransport) registerProgress(token string, sink tool.ProgressFunc) f
 	return t.progress.registerProgress(token, sink)
 }
 
+func (t *httpTransport) registerNotification(method string, handler notificationFunc) func() {
+	return t.notices.registerNotification(method, handler)
+}
+
 // mu covers the shared fields below and never a round trip: a request in flight
 // must not stop the next call — or this one's own cancellation — from being
 // written. Each request already carries its own context for that.
@@ -348,7 +353,9 @@ func (t *httpTransport) readSSEResponse(ctx context.Context, body io.Reader, id 
 			if isNotificationID(message.ID) {
 				if message.Method == "notifications/progress" {
 					t.progress.dispatchProgress(message.Params)
+					return nil, false, nil
 				}
+				t.notices.dispatchNotification(message.Method, message.Params)
 				return nil, false, nil
 			}
 			if err := t.replyServerRequest(ctx, message); err != nil {

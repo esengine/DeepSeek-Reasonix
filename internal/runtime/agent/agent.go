@@ -284,6 +284,10 @@ type Agent struct {
 	// is unavoidable but limited to one call — the prefix stays stable otherwise.
 	steer steerInbox
 
+	// hostNotices is runtime-authored fact the next round appends to the turn
+	// tail. See host_notice.go.
+	hostNotices hostNoticeQueue
+
 	// task is the state shared by every Run continuing one delivery scope: the
 	// receipt ledger complete_step validates citations against, the spend that
 	// outlives a single Run, and the guards keyed to the task rather than the

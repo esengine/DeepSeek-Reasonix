@@ -54,6 +54,7 @@ type stdioTransport struct {
 	releaseSlot func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
 	progress    progressRouter
 	elicits     elicitRouter
+	notices     notificationRouter
 }
 
 func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {

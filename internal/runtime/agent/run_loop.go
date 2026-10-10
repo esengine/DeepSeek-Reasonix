@@ -273,6 +273,8 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 			// (unapplied path marks uncertain + pause via the notice sink).
 			a.recordUnappliedSteer("(body load failed)", entry.host, entry.itemID)
 		}
+		a.appendTurnTailNotices()
+
 		schemas := a.svc.tools.ProviderSchemas(ctx)
 		a.sess.lastProviderSchemas = schemas
 		prefixShape := a.capturePrefixShape(schemas)
