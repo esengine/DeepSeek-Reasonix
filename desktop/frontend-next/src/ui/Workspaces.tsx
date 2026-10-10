@@ -207,6 +207,11 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
     setConfirm(path);
   };
 
+  const archive = (session: TreeSession) => {
+    setSessionMenu("");
+    void onArchive(session.path, !session.archived, session.runtimeId).catch(onError);
+  };
+
   const dropSession = async (session: TreeSession) => {
     if (confirm !== session.path) {
       setConfirm(session.path);
@@ -548,6 +553,22 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                             {`+${kept.length}`}
                           </button>
                         )}
+                        <span className="sessquick">
+                          <button
+                            data-action="session.archive" data-target={session.path}
+                            data-value={session.archived ? "restore" : "archive"}
+                            title={t(session.archived ? "取消归档" : "归档会话")}
+                            aria-label={t(session.archived ? "取消归档：{title}" : "归档会话：{title}", { title: rowLabel(session) })}
+                            disabled={!!session.runtimeId && liveIds([session.runtimeId]).length > 0}
+                            onClick={(ev) => { ev.stopPropagation(); archive(session); }}
+                          ><StudioIcon name="archive" /></button>
+                          <button
+                            className="danger" data-action="session.delete" data-target={session.path}
+                            title={t("删除会话")}
+                            aria-label={t("删除会话：{title}", { title: rowLabel(session) })}
+                            onClick={(ev) => { ev.stopPropagation(); askDelete(session.path); }}
+                          ><StudioIcon name="trash" /></button>
+                        </span>
                         {sessionMenu === session.path && createPortal(
                           <div ref={sessionMenuPortal} className="session-pop" role="menu" aria-label={t("会话操作")} style={{ maxHeight: "calc(100vh / var(--zoom, 1) - 24px)", overflowY: "auto" }} onClick={(ev) => ev.stopPropagation()}>
                             <div className="session-pop-head">
@@ -588,10 +609,7 @@ function WorkspacesView({ hub, tree, treeRead, runtimes, active, folded, reload,
                                 data-target={session.path}
                                 data-value={session.archived ? "restore" : "archive"}
                                 disabled={!!session.runtimeId && liveIds([session.runtimeId]).length > 0}
-                                onClick={() => {
-                                  setSessionMenu("");
-                                  void onArchive(session.path, !session.archived, session.runtimeId).catch(onError);
-                                }}
+                                onClick={() => archive(session)}
                               >
                                 <StudioIcon name="archive" /><span>{t(session.archived ? "取消归档" : "归档会话")}</span>
                               </button>

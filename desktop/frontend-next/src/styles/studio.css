@@ -1904,6 +1904,23 @@ body { font-size: 14px; line-height: 1.75; }
 }
 .rail .sessrow-context > .sesstitle { padding-inline-end: 9px; }
 .rail .sessrow-context > .sesscopies { margin-inline-end: 8px; }
+.rail .sessquick {
+  flex: none; display: flex; align-items: center; gap: 2px; width: 0; overflow: hidden;
+  opacity: 0; pointer-events: none; transition: opacity 100ms ease;
+}
+.rail .sessrow:hover > .sessquick,
+.rail .sessrow:focus-within > .sessquick { width: 50px; margin-inline-end: 6px; opacity: 1; pointer-events: auto; }
+.rail .sessquick > button {
+  flex: none; width: 24px; height: 28px; padding: 0; display: grid; place-items: center;
+  border: 0; border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer;
+}
+.rail .sessquick .studio-icon { width: 14px; height: 14px; }
+.rail .sessquick > button:hover { background: var(--raised); color: var(--text); }
+.rail .sessquick > .danger:hover { color: var(--err-ink); }
+.rail .sessquick > button:disabled { opacity: .35; cursor: default; background: transparent; color: var(--faint); }
+.rail .sessquick > button:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.rail .sessrow-context[data-unread]:hover > .sessquick,
+.rail .sessrow-context[data-unread]:focus-within > .sessquick { margin-inline-end: 26px; }
 .rail .sesstitle > span {
   min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; white-space: normal; overflow-wrap: anywhere; word-break: break-word;
@@ -1945,6 +1962,10 @@ body { font-size: 14px; line-height: 1.75; }
 .rail .sessrow > .unread-dot { position: absolute; inset-inline-end: 11px; top: 50%; translate: 0 -50%; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-ink); pointer-events: none; }
 .rail .sessrow[data-unread] > .sesscopies { margin-inline-end: 26px; }
 .rail .sessrow-context[data-unread] > .sesstitle { padding-inline-end: 26px; }
+.rail .sessrow-context[data-unread]:hover > .sesscopies,
+.rail .sessrow-context[data-unread]:focus-within > .sesscopies { margin-inline-end: 8px; }
+.rail .sessrow-context[data-unread]:hover > .sesstitle,
+.rail .sessrow-context[data-unread]:focus-within > .sesstitle { padding-inline-end: 9px; }
 .rail .sessrow-remote > .unread-dot { inset-inline-end: 36px; }
 .rail .sessrow-remote[data-unread] > .sessmeta { margin-inline-end: 58px; }
 .rail .sessrow[data-unread] .sesstitle { color: var(--text); font-weight: var(--w-semi); }
@@ -4136,10 +4157,15 @@ body { font-size: 14px; line-height: 1.75; }
   .wsdel,
   .rail .sessrow > .wsdel,
   .rail .session-more,
+  .rail .sessquick,
   .stepctl,
   .call > .c .reask-open,
   .rrow .act.ghost,
   .ptab-x { opacity: 1; }
+  .rail .sessquick { width: 50px; margin-inline-end: 6px; pointer-events: auto; }
+  .rail .sessrow-context[data-unread] > .sessquick { margin-inline-end: 26px; }
+  .rail .sessrow-context[data-unread] > .sesscopies { margin-inline-end: 8px; }
+  .rail .sessrow-context[data-unread] > .sesstitle { padding-inline-end: 9px; }
 }
 
 .remote-closed {
