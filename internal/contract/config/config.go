@@ -654,34 +654,6 @@ type StatuslineConfig struct {
 	Command string `toml:"command"`
 }
 
-// ServeConfig controls the HTTP serve frontend security settings.
-type ServeConfig struct {
-	// AuthMode selects the authentication mode for the HTTP serve frontend.
-	// "none" (default): no authentication.
-	// "token": a pre-shared token in the URL query string.
-	// "password": a login page with bcrypt password verification.
-	AuthMode string `toml:"auth_mode"`
-	// Token is a pre-shared token for auth_mode = "token". When empty, a
-	// cryptographically random token is generated at startup and printed.
-	Token string `toml:"token"`
-	// PasswordHash is a bcrypt hash of the password for auth_mode = "password".
-	// Generate one with: reasonix serve --hash-password --password '...'
-	PasswordHash string `toml:"password_hash"`
-	// BehindProxy indicates the server sits behind a trusted reverse proxy
-	// (nginx, Caddy, Cloudflare, etc.) that sets X-Forwarded-For and
-	// X-Forwarded-Proto headers. When true, those headers are used for
-	// rate-limiting and Secure-cookie decisions. When false (default), they
-	// are ignored — an attacker can otherwise forge them.
-	BehindProxy bool `toml:"behind_proxy"`
-	// SharePort fixes the port of the phone-access LAN link; zero picks a free
-	// one each time the door opens. User-global like the rest of [serve].
-	SharePort int `toml:"share_port"`
-	// RememberPairedDevices keeps paired phones across restarts: the next process
-	// reopens the share where it was and adopts the devices that paired against it.
-	// Off by default, like every other promise about a device you are not holding.
-	RememberPairedDevices bool `toml:"remember_paired_devices"`
-}
-
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,
 // wallet-balance lookups, updater checks, CodeGraph downloads, and web_fetch.
 // web_fetch reuses these proxy settings while keeping its own SSRF-guarded

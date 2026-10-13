@@ -388,14 +388,7 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 	browserHost := serve.NewBrowserHost()
 	boot.SetBrowserHost(browserHost.Dial)
 	hubCfg := hostServeConfig(cfg.Serve)
-	// Shut until the person at the window opens it; the context ending stops it
-	// with the rest of the kernel, keeping the phones this machine already adopted.
-	share := serve.NewDeviceShare(page)
-	share.RestorePort(cfg.SharePort())
-	go func() {
-		<-ctx.Done()
-		share.Shutdown()
-	}()
+	share := newShare(ctx, page, cfg)
 	owner := &shellOwner{to: handshakeTo}
 	// A toast the user clicks is answered here, in the process that sent it, and
 	// the shell is the one that can bring its window forward.
@@ -423,15 +416,7 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 		LogsDir:        shell.logsDir,
 	})
 	share.Attach(hub.Handler())
-	// A share the person had open reopens where it was: the phone that paired
-	// against that address keeps its cookie. An address that is gone falls back
-	// to one this machine now offers, at the cost of one fresh scan.
-	state := share.RestoreState()
-	if state.Open {
-		if _, err := share.Reopen(state.Address); err != nil {
-			fmt.Fprintln(logs, "reasonix-studio-host: could not reopen phone access:", err)
-		}
-	}
+	reopenShare(share, logs)
 	srv := serve.New(built.Controller, bc, hubCfg)
 	srv.SetPaneSink(paneSink)
 	srv.AdoptRuntime(built)
@@ -446,6 +431,32 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 	startCloudRemote(ctx, cfg, logs, hub)
 	phases.mark(startupBackground)
 	return hub, nil
+}
+
+// newShare builds the phone-access door. It stays shut until the person opens it,
+// and the context ending stops it with the rest of the kernel, keeping the phones
+// this machine already adopted.
+func newShare(ctx context.Context, page fs.FS, cfg *config.Config) *serve.DeviceShare {
+	share := serve.NewDeviceShare(page)
+	share.RestorePort(cfg.SharePort())
+	go func() {
+		<-ctx.Done()
+		share.Shutdown()
+	}()
+	return share
+}
+
+// reopenShare reopens a share the person had open where it was: the phone that
+// paired against that address keeps its cookie. An address that is gone falls
+// back to one this machine now offers, at the cost of one fresh scan.
+func reopenShare(share *serve.DeviceShare, logs io.Writer) {
+	state := share.RestoreState()
+	if !state.Open {
+		return
+	}
+	if _, err := share.Reopen(state.Address); err != nil {
+		fmt.Fprintln(logs, "reasonix-studio-host: could not reopen phone access:", err)
+	}
 }
 
 func startCloudRemote(ctx context.Context, cfg *config.Config, logs io.Writer, tasks remotecloud.TaskService) {
