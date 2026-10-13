@@ -131,6 +131,10 @@ make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 scripts/desktop-build.sh darwin/arm64 v0.0.0-dev   # 每次构建一个平台
 ```
 
+在 Windows 上也可双击仓库根目录的 `build-main-v2-windows.bat`，从 `main-v2`
+构建未签名的 x64 安装包和便携 ZIP，产物位于 `dist/`。需要 Git Bash、Go、Node 24+、
+pnpm 10 和 NSIS，并确保这些工具都在 `PATH` 中。
+
 无需安装系统 WebView 依赖：Electron 壳自带 Chromium。详见
 [桌面端构建指南](desktop/README.md#prerequisites)。
 

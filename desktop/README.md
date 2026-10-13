@@ -140,6 +140,10 @@ component code and the CSS positioning contract:
 scripts/desktop-build.sh darwin/arm64 v0.0.0-dev   # one platform per run
 ```
 
+On Windows, `build-main-v2-windows.bat` builds the unsigned x64 installer and
+portable ZIP from the `main-v2` branch into the repository's `dist/` directory.
+It requires Git Bash, Go, Node 24+, pnpm 10, and NSIS on `PATH`.
+
 The script regenerates the host contract (failing on drift), builds the Go
 service, and packages the Electron shell through `desktop/packaging/package.mjs`.
 Chromium cannot cross-compile the native targets from one host, so releases run
