@@ -15048,6 +15048,18 @@ body > .mermaid-diagram--fullscreen {
 .cap-skill-card__meta a {
   color: var(--accent);
 }
+.cap-skill-update-action {
+  min-height: 24px;
+  padding: 2px 7px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-faint);
+}
+.cap-skill-update-action:hover:not(:disabled) {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+  color: var(--fg);
+}
 .cap-skill-card__more {
   display: inline-flex;
   align-items: center;

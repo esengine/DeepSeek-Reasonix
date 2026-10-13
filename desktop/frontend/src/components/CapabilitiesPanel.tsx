@@ -1522,10 +1522,25 @@ function SkillRow({
         <div className="cap-skill-card__meta">
           {skill.category && <span>{t("caps.skillCategory")}: {skill.category}</span>}
           {skill.sourceUrl && <a href={skill.sourceUrl} target="_blank" rel="noreferrer">{t("caps.skillSource")}</a>}
-          {updateInfo?.supported && <span>{updateInfo.installedVersion ? t("caps.skillUpdateInstalled", { version: updateInfo.installedVersion }) : t("caps.skillUpdateEmbedded")}{updateInfo.latestVersion ? ` · ${t("caps.skillUpdateLatest", { version: updateInfo.latestVersion })}` : ""}</span>}
+          {updateInfo?.supported && (
+            <span
+              title={[
+                updateInfo.installedVersion ? t("caps.skillUpdateInstalled", { version: updateInfo.installedVersion }) : t("caps.skillUpdateEmbedded"),
+                updateInfo.latestVersion ? t("caps.skillUpdateLatest", { version: updateInfo.latestVersion }) : "",
+                updateInfo.lastCheckedAt ? t("caps.skillUpdateChecked", { time: new Date(updateInfo.lastCheckedAt).toLocaleString() }) : "",
+              ].filter(Boolean).join(" · ")}
+            >
+              {updateInfo.updateAvailable
+                ? t("caps.skillUpdateAvailable")
+                : updateInfo.latestVersion && updateInfo.installedVersion === updateInfo.latestVersion
+                  ? t("caps.skillUpdateCurrent")
+                  : updateInfo.installedVersion
+                    ? t("caps.skillUpdateInstalledShort")
+                    : t("caps.skillUpdateEmbedded")}
+            </span>
+          )}
           {updateInfo?.error && <span role="status">{updateInfo.error}</span>}
-          {updateInfo?.lastCheckedAt && <span>{t("caps.skillUpdateChecked", { time: new Date(updateInfo.lastCheckedAt).toLocaleString() })}</span>}
-          {updateInfo?.updateAvailable && <button className="btn btn--small" type="button" disabled={busy} onClick={onUpdate}>{t("caps.skillUpdateAction")}</button>}
+          {updateInfo?.updateAvailable && <button className="btn btn--small cap-skill-update-action" type="button" disabled={busy} onClick={onUpdate}>{t("caps.skillUpdateAction")}</button>}
         </div>
       )}
       {canExpand && (
