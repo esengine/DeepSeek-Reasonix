@@ -3,8 +3,10 @@ setlocal
 cd /d "%~dp0"
 
 where git >nul 2>nul || goto :missing_git
+set "GIT_EXE="
+for /f "delims=" %%I in ('where git 2^>nul') do if not defined GIT_EXE set "GIT_EXE=%%I"
 set "BASH_EXE="
-for /f "delims=" %%I in ('where bash 2^>nul') do if not defined BASH_EXE set "BASH_EXE=%%I"
+for %%I in ("%GIT_EXE%") do if exist "%%~dpI..\bin\bash.exe" set "BASH_EXE=%%~dpI..\bin\bash.exe"
 if not defined BASH_EXE if exist "%ProgramFiles%\Git\bin\bash.exe" set "BASH_EXE=%ProgramFiles%\Git\bin\bash.exe"
 if not defined BASH_EXE if exist "%ProgramFiles(x86)%\Git\bin\bash.exe" set "BASH_EXE=%ProgramFiles(x86)%\Git\bin\bash.exe"
 if not defined BASH_EXE goto :missing_bash
@@ -21,7 +23,7 @@ if not "%CURRENT_BRANCH%"=="main-v2" (
 )
 
 echo Building the unsigned Windows x64 desktop client from main-v2...
-for /f "delims=" %%D in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set "BUILD_VERSION=v0.0.0-dev-%%D"
+for /f "delims=" %%D in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set "BUILD_VERSION=v1.39.8-%%D"
 echo Version: %BUILD_VERSION%
 "%BASH_EXE%" scripts/desktop-build.sh windows/amd64 %BUILD_VERSION% stable
 if errorlevel 1 goto :failed

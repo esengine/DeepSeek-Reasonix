@@ -2,6 +2,7 @@
 .gitignore text eol=lf
 .npmrc text eol=lf
 *.astro text eol=lf
+*.bat text eol=crlf
 *.css text eol=lf
 *.go text eol=lf
 *.html text eol=lf

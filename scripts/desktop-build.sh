@@ -141,7 +141,11 @@ rm -rf "$contract_snapshot"
 # are installed first. A warm store makes this a no-op.
 if [ ! -d "$ROOT/desktop/node_modules/@electron/packager" ] || [ ! -d "$ROOT/desktop/electron/node_modules/electron" ]; then
 	echo "==> pnpm install desktop workspace"
-	pnpm --dir "$ROOT/desktop" install --frozen-lockfile
+	pnpm_command=pnpm
+	if ! command -v "$pnpm_command" >/dev/null 2>&1 && command -v pnpm.cmd >/dev/null 2>&1; then
+		pnpm_command=pnpm.cmd
+	fi
+	"$pnpm_command" --dir "$ROOT/desktop" install --frozen-lockfile
 fi
 
 # Service ldflags carry version + channel; the shell reads the same identity
