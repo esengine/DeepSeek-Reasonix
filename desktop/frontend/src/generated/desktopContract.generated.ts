@@ -3,7 +3,7 @@
 
 export const DESKTOP_PROTOCOL_VERSION = 11;
 
-export const DESKTOP_CONTRACT_DIGEST = "sha256:3fbf2a3c84a51991a0f7e3cc193f25c6533752b9bea595a543f064648009a055";
+export const DESKTOP_CONTRACT_DIGEST = "sha256:93a2a52482051450ba41c6609e83c9378ee01f17d1dddbf5a16657f71d603286";
 
 export const DESKTOP_COMMANDS = [
   "AIRenameSession",
@@ -113,6 +113,7 @@ export const DESKTOP_COMMANDS = [
   "CloseTab",
   "CloseTabWithPolicy",
   "CloseTerminalForTab",
+  "CogneeMemorySettings",
   "Commands",
   "CommitRewindForTab",
   "CommitWorkspaceFileRevertForTab",
@@ -120,6 +121,7 @@ export const DESKTOP_COMMANDS = [
   "CompactForTab",
   "CompactRemoteTab",
   "CompleteSessionComposerSubmission",
+  "ConfigureCogneeMemory",
   "ConfirmAction",
   "ConfirmRemoteHostKey",
   "ConfirmRemoteSecret",
@@ -1127,6 +1129,14 @@ export interface CancelReceipt {
   accepted: boolean;
   alreadyIdle: boolean;
   recoveryRequired: boolean;
+}
+
+export interface CogneeMemoryStatus {
+  state: string;
+  detail: string;
+  skillEnabled: boolean;
+  configured: boolean;
+  tokenConfigured: boolean;
 }
 
 export interface InboxQueueEdit {
@@ -6065,6 +6075,7 @@ export interface GeneratedDesktopCommands {
   CloseTab(arg0: string): Promise<void>;
   CloseTabWithPolicy(arg0: string, arg1: string): Promise<void>;
   CloseTerminalForTab(arg0: string, arg1: string): Promise<void>;
+  CogneeMemorySettings(): Promise<CogneeMemoryStatus>;
   Commands(): Promise<CommandInfo[]>;
   CommitRewindForTab(arg0: string, arg1: string, arg2: number, arg3: string): Promise<RewindResultView>;
   CommitWorkspaceFileRevertForTab(arg0: string, arg1: string, arg2: string): Promise<RewindResultView>;
@@ -6072,6 +6083,7 @@ export interface GeneratedDesktopCommands {
   CompactForTab(arg0: string): Promise<void>;
   CompactRemoteTab(arg0: string, arg1: string): Promise<void>;
   CompleteSessionComposerSubmission(arg0: SessionRef, arg1: string, arg2: string): Promise<SessionComposerState>;
+  ConfigureCogneeMemory(arg0: string, arg1: string): Promise<CogneeMemoryStatus>;
   ConfirmAction(arg0: NativeConfirmRequest): Promise<boolean>;
   ConfirmRemoteHostKey(arg0: string, arg1: boolean): Promise<void>;
   ConfirmRemoteSecret(arg0: string, arg1: string, arg2: string, arg3: boolean): Promise<void>;

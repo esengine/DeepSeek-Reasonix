@@ -12,6 +12,7 @@ import { mcpServerLifecycleActions, mcpServerRetryableFromAvailableList } from "
 import { mcpSessionStateLabel, mcpSettingsSearchText } from "../lib/mcpSessionStatus";
 import { canUseNativeMCPOAuth } from "../lib/mcpOAuthEligibility";
 import type { BuiltinSkillUpdateInfo, CapabilitiesView, MCPMarketplaceEntry, MCPMarketplaceView, MCPServerInput, PluginAgentView, PluginCommandView, PluginCompatibilityIssue, PluginHookView, PluginInstallOptions, PluginMCPServerView, PluginSkillView, PluginView, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
+import type { CogneeMemoryStatus } from "../generated/desktopContract.generated";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
@@ -60,9 +61,23 @@ export function CapabilitiesPanel({
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
   const [expandedServers, setExpandedServers] = useState<Set<string>>(() => new Set());
   const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
+  const [cogneeStatus, setCogneeStatus] = useState<CogneeMemoryStatus | null>(null);
+  const [cogneeURL, setCogneeURL] = useState("");
+  const [cogneeToken, setCogneeToken] = useState("");
 
   const reload = useCallback(async () => {
-    setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [], plugins: [] }))));
+    const [capabilities, cognee] = await Promise.all([
+      app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [], plugins: [] })),
+      app.CogneeMemorySettings().catch(() => null),
+    ]);
+    const normalized = normalizeCapabilitiesView(capabilities);
+    setView(normalized);
+    setCogneeStatus(cognee);
+    const server = normalized.servers.find((candidate) => candidate.name === "cognee");
+    if (server?.url) {
+      const serverURL = server.url;
+      setCogneeURL((current) => current || serverURL);
+    }
   }, []);
   useEffect(() => {
     void reload();
@@ -273,6 +288,28 @@ export function CapabilitiesPanel({
               </section>
             ) : (
               <section className="mem-section">
+                <CogneeSettingsCard
+                  status={cogneeStatus}
+                  server={view.servers.find((server) => server.name === "cognee")}
+                  url={cogneeURL}
+                  token={cogneeToken}
+                  busy={busy}
+                  onURLChange={setCogneeURL}
+                  onTokenChange={setCogneeToken}
+                  onConfigure={() => {
+                    const result: { status: CogneeMemoryStatus | null } = { status: null };
+                    void mutate(async () => {
+                      result.status = await app.ConfigureCogneeMemory(cogneeURL, cogneeToken);
+                      setCogneeToken("");
+                    }).then((ok) => {
+                      if (ok && result.status) setCogneeStatus(result.status);
+                    });
+                  }}
+                  onToggleSkill={(enabled) => void mutate(() => app.SetSkillEnabled("cognee-memory", enabled))}
+                  onAuthorize={() => void mutate(() => app.AuthenticateMCPServer("cognee"))}
+                  onReconnect={() => void mutate(() => app.AuthorizeAndConnectMCPServer("cognee"))}
+                  onOpenMCP={() => { setTab("servers"); setEditing("cognee"); }}
+                />
                 <div className="cap-search settings-toolbar">
                   <input
                     className="mem-input"
@@ -322,6 +359,85 @@ export function CapabilitiesPanel({
         )}
     </ResizableDrawer>
   );
+}
+
+function CogneeSettingsCard({
+  status, server, url, token, busy, onURLChange, onTokenChange, onConfigure,
+  onToggleSkill, onAuthorize, onReconnect, onOpenMCP,
+}: {
+  status: CogneeMemoryStatus | null;
+  server?: ServerView;
+  url: string;
+  token: string;
+  busy: boolean;
+  onURLChange: (value: string) => void;
+  onTokenChange: (value: string) => void;
+  onConfigure: () => void;
+  onToggleSkill: (enabled: boolean) => void;
+  onAuthorize: () => void;
+  onReconnect: () => void;
+  onOpenMCP: () => void;
+}) {
+  const t = useT();
+  const managed = Boolean(server?.managedByPlugin);
+  const useMCPSettings = managed || server?.transport === "stdio";
+  const urlIsSafe = (() => {
+    try {
+      const parsed = new URL(url.trim());
+      return (parsed.protocol === "https:" && !parsed.username && !parsed.password)
+        || (parsed.protocol === "http:" && ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname));
+    } catch { return false; }
+  })();
+  const state = status?.state ?? "connection_failed";
+  return (
+    <section className="cap-cognee" aria-labelledby="cap-cognee-title">
+      <div className="cap-cognee__heading">
+        <div>
+          <h3 id="cap-cognee-title">{t("caps.cogneeTitle")}</h3>
+          <p>{t("caps.cogneeHint")}</p>
+        </div>
+        <span className={`cap-cognee__state cap-cognee__state--${state}`}>{t(cogneeStateLabelKey(state))}</span>
+      </div>
+      <p className="cap-cognee__detail">{status?.detail ?? t("caps.cogneeLoading")}</p>
+      <label className="cap-cognee__skill">
+        <input type="checkbox" checked={status?.skillEnabled ?? false} disabled={busy || !status} onChange={(event) => onToggleSkill(event.target.checked)} />
+        <span>{t("caps.cogneeSkillToggle")}</span>
+      </label>
+      {useMCPSettings ? (
+        <div className="cap-cognee__actions">
+          <span>{managed ? t("caps.cogneeManaged", { plugin: server?.managedByPlugin ?? "" }) : t("caps.cogneeUseMCPSettings")}</span>
+          <button className="btn btn--small" type="button" onClick={onOpenMCP}>{t("caps.cogneeOpenMCP")}</button>
+        </div>
+      ) : (
+        <div className="cap-cognee__form">
+          <label>{t("caps.cogneeURL")}
+            <input className="mem-input" type="url" value={url} placeholder="https://…/mcp" onChange={(event) => onURLChange(event.target.value)} />
+          </label>
+          {!urlIsSafe && url.trim() !== "" && <div className="cap-cognee__validation">{t("caps.cogneeURLRule")}</div>}
+          <label>{t("caps.cogneeToken")}
+            <input className="mem-input" type="password" autoComplete="new-password" value={token} placeholder={status?.tokenConfigured ? t("caps.cogneeTokenSaved") : t("caps.cogneeTokenOptional")} onChange={(event) => onTokenChange(event.target.value)} />
+          </label>
+          <div className="cap-cognee__actions">
+            <button className="btn btn--small" type="button" disabled={busy || !urlIsSafe} onClick={onConfigure}>{status?.configured ? t("caps.cogneeSaveConnect") : t("caps.cogneeConfigure")}</button>
+            {state === "authorization_required" && <button className="btn btn--small" type="button" disabled={busy} onClick={onAuthorize}>{t("caps.cogneeAuthorize")}</button>}
+            {status?.configured && state !== "ready" && state !== "authorization_required" && <button className="btn btn--small" type="button" disabled={busy} onClick={onReconnect}>{t("caps.cogneeRetry")}</button>}
+            {server && <button className="btn btn--small" type="button" onClick={onOpenMCP}>{t("caps.cogneeOpenMCP")}</button>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function cogneeStateLabelKey(state: string): "caps.cogneeState.not_configured" | "caps.cogneeState.disabled" | "caps.cogneeState.authorization_required" | "caps.cogneeState.connection_failed" | "caps.cogneeState.tools_incompatible" | "caps.cogneeState.ready" {
+  switch (state) {
+    case "disabled": return "caps.cogneeState.disabled";
+    case "authorization_required": return "caps.cogneeState.authorization_required";
+    case "connection_failed": return "caps.cogneeState.connection_failed";
+    case "tools_incompatible": return "caps.cogneeState.tools_incompatible";
+    case "ready": return "caps.cogneeState.ready";
+    default: return "caps.cogneeState.not_configured";
+  }
 }
 
 function normalizeCapabilitiesView(view: CapabilitiesView | null | undefined): CapabilitiesView {

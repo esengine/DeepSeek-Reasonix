@@ -4,6 +4,12 @@ Reasonix 可选用已配置的 Cognee MCP 服务，为当前工作区检索项�
 
 ## 配置
 
+推荐在「设置 → Agent Skills → Cognee 项目记忆」中配置。向导接受 HTTPS 地址或 loopback 的 HTTP 地址，可选填写 Bearer 令牌；令牌保存在 Reasonix 凭据存储中，MCP 配置只引用凭据变量。留空令牌会保留已保存的令牌。向导会显示未配置、技能关闭、需要授权、连接异常、工具不兼容和已就绪等状态；就绪检查只读取连接状态与工具 schema，不会调用 `recall` 或 `remember`。由插件管理的服务请从 MCP 设置编辑。
+
+配置好服务后，在卡片中启用 `cognee-memory`。远端地址必须使用 HTTPS；只有 loopback 地址允许 HTTP。
+
+高级用户也可直接编辑 Reasonix MCP 配置：
+
 在 Reasonix 现有的 MCP 配置中添加 Cognee 服务。下面展示 HTTPS Streamable HTTP 配置；把 URL 和认证值放在环境变量中，配置只保存变量引用：
 
 ```toml
@@ -14,7 +20,7 @@ url = "${COGNEE_MCP_URL}"
 headers = { Authorization = "Bearer ${COGNEE_MCP_TOKEN}" }
 ```
 
-配置好环境变量后，用 Reasonix 现有的 MCP 授权和连接流程连接服务，再到「设置 → 技能」启用 `cognee-memory`。远端地址必须使用 HTTPS；只有 loopback 地址允许 HTTP。Reasonix 不会在 recall 或 remember 时自动启动、连接或重新授权 Cognee。
+手动配置时，请自行通过 Reasonix 的凭据存储提供变量值，然后用现有的 MCP 授权和连接流程连接服务。Reasonix 不会在 recall 或 remember 时自动启动、连接或重新授权 Cognee。
 
 Cognee 服务需提供符合当前 JSON Schema 的 `recall` 与 `remember` 工具。`recall` 需要字符串 `query` 和数据集选择器（字符串 `dataset_name`，或字符串数组 `datasets`）；`remember` 需要字符串 `data` 和 `dataset_name`。Schema 缺失或不匹配时，该轮跳过记忆操作。
 

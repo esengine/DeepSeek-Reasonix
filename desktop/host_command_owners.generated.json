@@ -1551,6 +1551,18 @@
       ]
     }
   },
+  "CogneeMemorySettings": {
+    "domain": "desktop/cognee_settings.go",
+    "owner": "App.CogneeMemorySettings",
+    "sources": [
+      "desktop/cognee_settings.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.CogneeMemorySettings",
+      "inputs": []
+    }
+  },
   "Commands": {
     "domain": "desktop/app.go",
     "owner": "App.Commands",
@@ -1650,6 +1662,21 @@
         "ref",
         "submissionID",
         "outcome"
+      ]
+    }
+  },
+  "ConfigureCogneeMemory": {
+    "domain": "desktop/cognee_settings.go",
+    "owner": "App.ConfigureCogneeMemory",
+    "sources": [
+      "desktop/cognee_settings.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.ConfigureCogneeMemory",
+      "inputs": [
+        "rawURL",
+        "token"
       ]
     }
   },

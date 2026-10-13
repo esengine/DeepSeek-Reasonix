@@ -334,31 +334,84 @@ func SetCredential(key, value string) (string, error) {
 // the same process and advisory file lock, preventing a stale setup page in one
 // Reasonix process from overwriting a credential saved by another process.
 func SetCredentialIfRevision(key, value, expectedRevision string) (string, bool, error) {
+	path, _, applied, err := SetCredentialIfRevisionWithRevision(key, value, expectedRevision)
+	return path, applied, err
+}
+
+// CredentialSnapshot reads one stored credential and its store revision under
+// the same edit lock so conditional writes cannot pair a stale value with a new
+// revision.
+func CredentialSnapshot(key string) (value string, present bool, revision string, err error) {
 	key = strings.TrimSpace(key)
 	if !isCredentialKey(key) {
-		return "", false, fmt.Errorf("invalid credential key %q", key)
+		return "", false, "", fmt.Errorf("invalid credential key %q", key)
+	}
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return "", false, "", err
+	}
+	defer unlock()
+	value, _, present = storedCredentialValue(key)
+	return value, present, CredentialStoreRevision(), nil
+}
+
+// SetCredentialIfRevisionWithRevision atomically returns the revision produced
+// by a successful write. The returned revision can be used for a conditional
+// compensating update if a larger operation later fails.
+func SetCredentialIfRevisionWithRevision(key, value, expectedRevision string) (string, string, bool, error) {
+	key = strings.TrimSpace(key)
+	if !isCredentialKey(key) {
+		return "", "", false, fmt.Errorf("invalid credential key %q", key)
 	}
 	if strings.ContainsAny(value, "\r\n") {
-		return "", false, fmt.Errorf("credential value for %s contains a newline", key)
+		return "", "", false, fmt.Errorf("credential value for %s contains a newline", key)
 	}
 	assignments := parseCredentialLines([]string{key + "=" + value})
 	if len(assignments) != 1 {
-		return "", false, fmt.Errorf("invalid credential assignment for %s", key)
+		return "", "", false, fmt.Errorf("invalid credential assignment for %s", key)
 	}
 
 	unlock, err := LockUserCredentialEdits()
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	defer unlock()
 	if expectedRevision == "" || CredentialStoreRevision() != expectedRevision {
-		return CredentialsTargetDescription(), false, nil
+		return CredentialsTargetDescription(), "", false, nil
 	}
 	path, err := storeCredentialAssignmentsLocked(assignments)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
-	return path, true, nil
+	return path, CredentialStoreRevision(), true, nil
+}
+
+// RestoreCredentialIfRevision applies a compensating credential change only
+// when the store still has the revision produced by the caller's write.
+func RestoreCredentialIfRevision(key, value string, present bool, expectedRevision string) (bool, error) {
+	key = strings.TrimSpace(key)
+	if !isCredentialKey(key) || strings.ContainsAny(value, "\r\n") {
+		return false, fmt.Errorf("invalid credential restore request")
+	}
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	if expectedRevision == "" || CredentialStoreRevision() != expectedRevision {
+		return false, nil
+	}
+	if present {
+		_, err = storeCredentialAssignmentsLocked(map[string]string{key: value})
+		return err == nil, err
+	}
+	if path := UserCredentialsPath(); path != "" {
+		if err := removeCredentialFromFile(path, key); err != nil {
+			return false, err
+		}
+	}
+	_ = os.Unsetenv(key)
+	return true, nil
 }
 
 // IsValidCredentialKey reports whether key can be stored in Reasonix's dotenv

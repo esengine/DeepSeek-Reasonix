@@ -2900,6 +2900,25 @@
     },
     {
       "cancellation": "before-dispatch",
+      "domain": "desktop/cognee_settings.go",
+      "name": "CogneeMemorySettings",
+      "owner": "App.CogneeMemorySettings",
+      "params": [],
+      "result": {
+        "kind": "object",
+        "ref": "control.CogneeMemoryStatus"
+      },
+      "scope": {
+        "inputs": [],
+        "kind": "owner-state",
+        "resolver": "App.CogneeMemorySettings"
+      },
+      "sources": [
+        "desktop/cognee_settings.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
       "domain": "desktop/app.go",
       "name": "Commands",
       "owner": "App.Commands",
@@ -3087,6 +3106,36 @@
       },
       "sources": [
         "desktop/session_composer_state.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/cognee_settings.go",
+      "name": "ConfigureCogneeMemory",
+      "owner": "App.ConfigureCogneeMemory",
+      "params": [
+        {
+          "kind": "string"
+        },
+        {
+          "kind": "string"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "control.CogneeMemoryStatus"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "rawURL",
+          "token"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.ConfigureCogneeMemory"
+      },
+      "sources": [
+        "desktop/cognee_settings.go"
       ]
     },
     {
@@ -23182,6 +23231,40 @@
         },
         {
           "name": "recoveryRequired",
+          "type": {
+            "kind": "boolean"
+          }
+        }
+      ]
+    },
+    "control.CogneeMemoryStatus": {
+      "fields": [
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "detail",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "skillEnabled",
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "configured",
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "tokenConfigured",
           "type": {
             "kind": "boolean"
           }

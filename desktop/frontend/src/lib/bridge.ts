@@ -39,6 +39,7 @@ import type {
   WorkspaceSnapshot,
 } from "../generated/desktopContract.generated";
 export type { FileBrowserPreviewRequest, FileBrowserPreviewResult } from "../generated/desktopContract.generated";
+import type { CogneeMemoryStatus } from "../generated/desktopContract.generated";
 import type { ExactInteractionBindings } from "./exactInteractionBindings";
 import type { InvocationRequest } from "./invocationDisplay";
 import type { FollowupBindings } from "./pendingFollowup";
@@ -539,6 +540,8 @@ export interface AppBindings extends AttachmentBindings, SessionExportBindings, 
   Commands(): Promise<CommandInfo[]>;
   Capabilities(): Promise<CapabilitiesView>;
   MCPServers(): Promise<ServerView[]>;
+  CogneeMemorySettings(): Promise<CogneeMemoryStatus>;
+  ConfigureCogneeMemory(url: string, token: string): Promise<CogneeMemoryStatus>;
   MCPCapabilityMatrix(): Promise<{
     views: Array<{ id: string; layer: string; state: string; negotiated: boolean; detail: string }>;
     hostProfile: string;
@@ -3742,6 +3745,25 @@ function makeMockApp(): MockAppBindings {
     },
     async MCPServers() {
       return capServers.map((s) => ({ ...s }));
+    },
+    async CogneeMemorySettings() {
+      const skillEnabled = capSkills.find((skill) => skill.name === "cognee-memory")?.enabled !== false;
+      const configured = capServers.some((server) => server.name === "cognee");
+      const server = capServers.find((candidate) => candidate.name === "cognee");
+      return {
+        state: !configured ? "not_configured" : !skillEnabled ? "disabled" : server?.status === "connected" ? "ready" : "connection_failed",
+        detail: !configured ? "Configure a Cognee MCP endpoint to get started." : "Cognee mock status.",
+        skillEnabled,
+        configured,
+        tokenConfigured: false,
+      };
+    },
+    async ConfigureCogneeMemory(url: string, _token: string) {
+      const existing = capServers.some((server) => server.name === "cognee");
+      const input: MCPServerInput = { name: "cognee", transport: "http", command: "", args: [], url, env: {}, headers: {} };
+      if (existing) await this.UpdateMCPServer("cognee", input);
+      else await this.AddMCPServer(input);
+      return this.CogneeMemorySettings();
     },
     async MCPCapabilityMatrix() {
       return { views: [], hostProfile: "desktop-apps-2026-01-26-v1" };

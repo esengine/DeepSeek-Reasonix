@@ -24,6 +24,7 @@ import (
 
 const (
 	cogneeServerName       = "cognee"
+	cogneeTokenCredential  = "REASONIX_COGNEE_MCP_TOKEN"
 	maxCogneeQueryBytes    = 1024
 	maxCogneeRecallBytes   = 8 << 10
 	maxCogneeRememberBytes = 3 << 10
@@ -39,6 +40,74 @@ var (
 )
 
 type cogneeSchema struct{ datasetField string }
+
+// CogneeMemoryStatus is a safe, read-only summary for the desktop settings UI.
+// It deliberately excludes the endpoint and all credential material.
+type CogneeMemoryStatus struct {
+	State           string `json:"state"`
+	Detail          string `json:"detail"`
+	SkillEnabled    bool   `json:"skillEnabled"`
+	Configured      bool   `json:"configured"`
+	TokenConfigured bool   `json:"tokenConfigured"`
+}
+
+func (c *Controller) CogneeMemoryStatus(ctx context.Context) CogneeMemoryStatus {
+	status := CogneeMemoryStatus{State: "not_configured"}
+	if c == nil {
+		status.Detail = "No active session is available."
+		return status
+	}
+	cfg, err := config.LoadForRootWithoutCredentialsReadOnly(c.workspaceRoot)
+	if err != nil {
+		status.State, status.Detail = "connection_failed", "Cognee settings could not be read."
+		return status
+	}
+	status.SkillEnabled = !cfg.IsSkillDisabled("cognee-memory")
+	status.TokenConfigured = config.CredentialStored(cogneeTokenCredential)
+	var entry config.PluginEntry
+	for _, candidate := range cfg.Plugins {
+		if strings.EqualFold(strings.TrimSpace(candidate.Name), cogneeServerName) {
+			entry, status.Configured = candidate, true
+			break
+		}
+	}
+	if !status.Configured {
+		status.Detail = "Configure a Cognee MCP endpoint to get started."
+		return status
+	}
+	if !status.SkillEnabled {
+		status.State, status.Detail = "disabled", "Cognee project memory is turned off in the Skills list."
+		return status
+	}
+	spec := plugin.ResolveStoredAuthorization(ctx, c.mcpSpec(entry))
+	if !spec.ServerAuthorized() {
+		status.State, status.Detail = "authorization_required", "Authorize the Cognee MCP server to continue."
+		return status
+	}
+	if err := validateCogneeEndpoint(spec); err != nil {
+		status.State, status.Detail = "connection_failed", redactCogneeText(err.Error(), 240)
+		return status
+	}
+	host := c.mcp.hostRef()
+	if host == nil || !host.HasClientForSpec(spec) {
+		status.State, status.Detail = "connection_failed", "Cognee is configured but not connected to this session."
+		return status
+	}
+	if _, err := host.ToolsForSpec(ctx, spec); err != nil {
+		status.State, status.Detail = "connection_failed", "Cognee tools could not be loaded."
+		return status
+	}
+	if _, err := c.cogneeTool(ctx, spec, "recall"); err != nil {
+		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide a compatible recall tool."
+		return status
+	}
+	if _, err := c.cogneeTool(ctx, spec, "remember"); err != nil {
+		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide a compatible remember tool."
+		return status
+	}
+	status.State, status.Detail = "ready", "Cognee is connected and its required tools are ready."
+	return status
+}
 
 func (c *Controller) cogneeMemoryEnabled() bool {
 	if c == nil {
@@ -107,6 +176,12 @@ func validateCogneeEndpoint(spec plugin.Spec) error {
 		return nil
 	}
 	return fmt.Errorf("remote Cognee MCP endpoints require HTTPS; HTTP is allowed only for loopback")
+}
+
+// ValidateCogneeEndpointForSettings applies the same URL policy to the desktop
+// setup form as the runtime readiness check.
+func ValidateCogneeEndpointForSettings(spec plugin.Spec) error {
+	return validateCogneeEndpoint(spec)
 }
 
 func isLoopbackHost(host string) bool {
