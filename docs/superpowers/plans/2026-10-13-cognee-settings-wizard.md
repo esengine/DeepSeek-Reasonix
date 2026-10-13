@@ -89,7 +89,7 @@
 - [x] Update Cognee setup documentation with the in-app flow, HTTPS/loopback rule, credential storage behavior, and readiness statuses.
 - [x] Run frontend typecheck, ESLint, CSS syntax validation, and the production Vite build. The package `pnpm build` wrapper was not run because it launches test files, which the active developer instruction prohibits.
 - [x] Run `git diff --check` and inspect the final diff; verify the three pre-existing unrelated local edits remain unstaged.
-- [ ] Commit only the planned implementation files and push the approved feature commit to `origin main-v2`.
+- [x] Commit only the planned implementation files and push the approved feature commit to `origin main-v2`.
 
 ## Verification boundaries
 
