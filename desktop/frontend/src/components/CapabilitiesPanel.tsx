@@ -1525,7 +1525,7 @@ function SkillRow({
           {updateInfo?.supported && <span>{updateInfo.installedVersion ? t("caps.skillUpdateInstalled", { version: updateInfo.installedVersion }) : t("caps.skillUpdateEmbedded")}{updateInfo.latestVersion ? ` · ${t("caps.skillUpdateLatest", { version: updateInfo.latestVersion })}` : ""}</span>}
           {updateInfo?.error && <span role="status">{updateInfo.error}</span>}
           {updateInfo?.lastCheckedAt && <span>{t("caps.skillUpdateChecked", { time: new Date(updateInfo.lastCheckedAt).toLocaleString() })}</span>}
-          {updateInfo?.updateAvailable && <button className="button button--secondary" type="button" disabled={busy} onClick={onUpdate}>{t("caps.skillUpdateAction")}</button>}
+          {updateInfo?.updateAvailable && <button className="btn btn--small" type="button" disabled={busy} onClick={onUpdate}>{t("caps.skillUpdateAction")}</button>}
         </div>
       )}
       {canExpand && (
@@ -3441,7 +3441,7 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 					<div className="cap-skills-head__title">{t("caps.skills")}</div>
 					<div className="cap-skills-head__summary">{skillSummary}</div>
 				</div>
-				<button className="button button--secondary" type="button" disabled={actionBusy} onClick={() => void checkSkillUpdates()}>
+				<button className="btn btn--small" type="button" disabled={actionBusy} onClick={() => void checkSkillUpdates()}>
 					{t("caps.checkSkillUpdates")}
 				</button>
 			</div>
