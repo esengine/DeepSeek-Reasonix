@@ -1314,6 +1314,8 @@ export interface MCPToolView {
 export interface SkillView {
   name: string;
   description: string;
+  category?: string;
+  sourceUrl?: string;
   scope: string;
   sourceDir?: string;
   runAs: string;
@@ -1329,6 +1331,15 @@ export interface SkillView {
   body?: string;
   configuredModel?: string;
   configuredEffort?: string;
+}
+export interface BuiltinSkillUpdateInfo {
+  id: string;
+  supported: boolean;
+  installedVersion?: string;
+  latestVersion?: string;
+  updateAvailable: boolean;
+  lastCheckedAt?: string;
+  error?: string;
 }
 export interface SkillRootSkillView {
   name: string;

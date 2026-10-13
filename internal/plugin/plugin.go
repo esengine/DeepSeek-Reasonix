@@ -1058,6 +1058,42 @@ func (h *Host) ToolsForSpec(ctx context.Context, spec Spec) ([]tool.Tool, error)
 	return c.listTools(ctx)
 }
 
+// CallToolForSpec lets a trusted host integration call one exact tool on an
+// already connected, authorized MCP runtime. It never connects as a side effect.
+func (h *Host) CallToolForSpec(ctx context.Context, spec Spec, rawToolName string, args json.RawMessage) (string, error) {
+	if !spec.ServerAuthorized() {
+		return "", fmt.Errorf("MCP server %q is not authorized", spec.Name)
+	}
+	if strings.EqualFold(spec.Name, "cognee") {
+		if rawToolName != "recall" && rawToolName != "remember" {
+			return "", fmt.Errorf("managed Cognee calls allow only recall and remember")
+		}
+		ctx = context.WithValue(ctx, managedCogneeCallKey{}, true)
+	}
+	tools, err := h.ToolsForSpec(ctx, spec)
+	if err != nil {
+		return "", err
+	}
+	for _, candidate := range tools {
+		metadata, ok := candidate.(tool.MCPMetadata)
+		if !ok || metadata.MCPRawToolName() != rawToolName {
+			continue
+		}
+		authority, ok := candidate.(tool.MCPServerAuthorization)
+		if !ok || !authority.MCPServerAuthorized() || !MCPToolMatchesSpec(candidate, spec) {
+			return "", fmt.Errorf("MCP server %q authorization or identity changed", spec.Name)
+		}
+		validation := tool.ValidateArguments(candidate, args)
+		if validation.CompileErr != nil || validation.Skipped || len(validation.Violations) > 0 {
+			return "", fmt.Errorf("MCP tool %q arguments do not match the current schema", rawToolName)
+		}
+		return candidate.Execute(ctx, args)
+	}
+	return "", fmt.Errorf("MCP tool %q not found on authorized server %q", rawToolName, spec.Name)
+}
+
+type managedCogneeCallKey struct{}
+
 // MCPRuntimeSpecMatches compares the complete host-local runtime behavior of
 // two specs while deliberately excluding non-behavioral handles such as the
 // stderr writer and LaunchManager pointer. Secret values are compared only in
@@ -1807,6 +1843,9 @@ func (t *remoteTool) ExecuteForApp(ctx context.Context, args json.RawMessage) (j
 func (t *remoteTool) callRaw(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 	if t.client == nil {
 		return nil, errors.New("MCP tool client is unavailable")
+	}
+	if strings.EqualFold(t.client.name, "cognee") && ctx.Value(managedCogneeCallKey{}) != true {
+		return nil, fmt.Errorf("Cognee tools are available only through Reasonix's managed memory lifecycle")
 	}
 	t.client.toolDispatchMu.RLock()
 	defer t.client.toolDispatchMu.RUnlock()

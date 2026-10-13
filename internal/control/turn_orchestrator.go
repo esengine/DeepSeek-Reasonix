@@ -275,6 +275,15 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	modelInput := input
 	if !turn.synthetic {
 		modelInput = c.withCapabilityRoute(ctx, input, turn.raw)
+		if turn.goalRound == nil {
+			recallCtx, cancelRecall := context.WithTimeout(ctx, 5*time.Second)
+			memory, notice := c.cogneeRecallContext(recallCtx, turn.raw, c.WorkspaceRoot())
+			cancelRecall()
+			if memory != "" {
+				ctx = agent.WithTransientTurnContext(ctx, "Cognee project memory", memory)
+			}
+			c.cogneeNotice(notice)
+		}
 	}
 	modelInput, ctx, err = c.prepareVisionTurn(ctx, modelInput, imageCandidates)
 	if err != nil {
@@ -300,9 +309,24 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 			// pairs survive; unsafe stream fragments stay local-only.
 			c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages, fallback)
 		}
+		if !turn.synthetic && turn.goalRound == nil && c.cogneeMemoryEnabled() {
+			c.cogneeNotice("任务未成功完成，本轮没有尝试保存 Cognee 项目记忆")
+		}
 		return err
 	}
-	return o.executeApprovedPlan(ctx)
+	err = o.executeApprovedPlan(ctx)
+	if err == nil && !turn.synthetic && turn.goalRound == nil && c.executor != nil && c.cogneeMemoryEnabled() {
+		snapshot := c.executor.CompletionSnapshot()
+		if snapshot.TodosComplete && snapshot.HasVerifiedEvidence {
+			rememberCtx, cancelRemember := context.WithTimeout(ctx, 15*time.Second)
+			text := c.cogneeRemember(rememberCtx, userMessageID, c.WorkspaceRoot(), lastAssistantText(c.History()), snapshot.EvidenceCategories)
+			cancelRemember()
+			c.cogneeNotice(text)
+		} else {
+			c.cogneeNotice("Cognee 项目记忆未保存：需要所有当前任务 todo 完成，并有成功验证或 review 依据")
+		}
+	}
+	return err
 }
 
 func (o *turnOrchestrator) executeApprovedPlan(ctx context.Context) error {

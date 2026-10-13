@@ -80,6 +80,9 @@ func (t *UseCapabilityTool) resolveDiscovery(ctx context.Context, p useCapabilit
 }
 
 func (t *UseCapabilityTool) inspect(ctx context.Context, id string) (string, error) {
+	if server, _, ok := parseMCPToolCapabilityID(id); ok && strings.EqualFold(server, "cognee") {
+		return "", fmt.Errorf("Cognee tools are controlled by Reasonix's managed memory lifecycle")
+	}
 	cat := t.currentCatalog()
 	e, ok := cat.Lookup(id)
 	if !ok {
@@ -192,6 +195,9 @@ type inspectToolInfo struct {
 
 func compactInspectToolList(server string, tools []plugin.CachedTool) []inspectToolInfo {
 	list := make([]inspectToolInfo, 0, len(tools))
+	if strings.EqualFold(server, "cognee") {
+		return list
+	}
 	for _, candidate := range tools {
 		list = append(list, inspectToolInfo{
 			ID:          "mcp-tool:" + server + "/" + candidate.Name,
@@ -259,6 +265,9 @@ func truncateInspectString(value string, limit int) string {
 // connection. Exact schemas stay behind inspect(mcp-tool:server/tool).
 func inspectToolListJSON(server string, tools []tool.Tool) string {
 	var list []inspectToolInfo
+	if strings.EqualFold(server, "cognee") {
+		return "[]"
+	}
 	for _, tl := range tools {
 		raw := ""
 		if m, ok := tl.(tool.MCPMetadata); ok {

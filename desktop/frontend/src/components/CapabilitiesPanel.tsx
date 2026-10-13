@@ -11,7 +11,7 @@ import { presentError } from "../lib/errorPresentation";
 import { mcpServerLifecycleActions, mcpServerRetryableFromAvailableList } from "../lib/mcpServerLifecycle";
 import { mcpSessionStateLabel, mcpSettingsSearchText } from "../lib/mcpSessionStatus";
 import { canUseNativeMCPOAuth } from "../lib/mcpOAuthEligibility";
-import type { CapabilitiesView, MCPMarketplaceEntry, MCPMarketplaceView, MCPServerInput, PluginAgentView, PluginCommandView, PluginCompatibilityIssue, PluginHookView, PluginInstallOptions, PluginMCPServerView, PluginSkillView, PluginView, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
+import type { BuiltinSkillUpdateInfo, CapabilitiesView, MCPMarketplaceEntry, MCPMarketplaceView, MCPServerInput, PluginAgentView, PluginCommandView, PluginCompatibilityIssue, PluginHookView, PluginInstallOptions, PluginMCPServerView, PluginSkillView, PluginView, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
@@ -1464,12 +1464,16 @@ function SkillRow({
   expanded,
   onToggle,
   onToggleEnabled,
+  updateInfo,
+  onUpdate,
 }: {
   skill: SkillView;
   busy: boolean;
   expanded: boolean;
   onToggle: () => void;
   onToggleEnabled: (enabled: boolean) => void;
+  updateInfo?: BuiltinSkillUpdateInfo;
+  onUpdate?: () => void;
 }) {
   const t = useT();
   const summary = summarizeSkillDescription(skill.description);
@@ -1514,6 +1518,16 @@ function SkillRow({
         </Tooltip>
       </div>
       <div className="cap-skill-card__desc">{expanded ? skill.description : summary}</div>
+      {(skill.category || skill.sourceUrl || updateInfo?.supported) && (
+        <div className="cap-skill-card__meta">
+          {skill.category && <span>{t("caps.skillCategory")}: {skill.category}</span>}
+          {skill.sourceUrl && <a href={skill.sourceUrl} target="_blank" rel="noreferrer">{t("caps.skillSource")}</a>}
+          {updateInfo?.supported && <span>{updateInfo.installedVersion ? t("caps.skillUpdateInstalled", { version: updateInfo.installedVersion }) : t("caps.skillUpdateEmbedded")}{updateInfo.latestVersion ? ` · ${t("caps.skillUpdateLatest", { version: updateInfo.latestVersion })}` : ""}</span>}
+          {updateInfo?.error && <span role="status">{updateInfo.error}</span>}
+          {updateInfo?.lastCheckedAt && <span>{t("caps.skillUpdateChecked", { time: new Date(updateInfo.lastCheckedAt).toLocaleString() })}</span>}
+          {updateInfo?.updateAvailable && <button className="button button--secondary" type="button" disabled={busy} onClick={onUpdate}>{t("caps.skillUpdateAction")}</button>}
+        </div>
+      )}
       {canExpand && (
         <button className="cap-skill-card__more" type="button" onClick={onToggle} aria-expanded={expanded}>
           {expanded ? t("common.collapse") : t("common.expand")}
@@ -3311,6 +3325,7 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 	const [view, setView] = useState<SkillsSettingsView | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
+	const [skillUpdates, setSkillUpdates] = useState<BuiltinSkillUpdateInfo[]>([]);
 	const [skillQuery, setSkillQuery] = useState("");
 	const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set());
 	const reloadSequence = useRef(0);
@@ -3334,6 +3349,7 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 		if (sequence !== reloadSequence.current) return;
 		skillsSettingsSnapshot = { key, value: next };
 		setView(next);
+		setSkillUpdates(await app.BuiltinSkillUpdates().catch(() => []));
 	}, [activeWorkspaceKey]);
 	useEffect(() => {
 		setView(null);
@@ -3361,7 +3377,7 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 		const q = skillQuery.trim().toLowerCase();
 		if (!q) return view.skills;
 		return view.skills.filter((sk) => {
-			const text = [sk.name, "/" + sk.name, sk.invocation, sk.plugin, sk.description, sk.scope, sk.sourceDir, sk.runAs].join(" ").toLowerCase();
+			const text = [sk.name, "/" + sk.name, sk.invocation, sk.plugin, sk.description, sk.category, sk.sourceUrl, sk.scope, sk.sourceDir, sk.runAs].join(" ").toLowerCase();
 			return text.includes(q);
 		});
 	}, [view, skillQuery]);
@@ -3374,6 +3390,12 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 	const toggleSkill = useCallback((name: string) => {
 		setExpandedSkills((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
 	}, []);
+	const checkSkillUpdates = async () => {
+		setBusy(true); setErr(null);
+		try { setSkillUpdates(await app.CheckBuiltinSkillUpdates()); }
+		catch (e) { setErr(String((e as Error)?.message ?? e)); }
+		finally { setBusy(false); }
+	};
 
 	if (!view) return <div className="empty">{t("caps.loading")}</div>;
 	const actionBusy = busy || !snapshotKey;
@@ -3419,6 +3441,9 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 					<div className="cap-skills-head__title">{t("caps.skills")}</div>
 					<div className="cap-skills-head__summary">{skillSummary}</div>
 				</div>
+				<button className="button button--secondary" type="button" disabled={actionBusy} onClick={() => void checkSkillUpdates()}>
+					{t("caps.checkSkillUpdates")}
+				</button>
 			</div>
 			{view.skills.length === 0 ? (
 				<div className="mem-empty">{t("caps.noSkills")}</div>
@@ -3434,6 +3459,8 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 							expanded={expandedSkills.has(sk.name)}
 							onToggle={() => toggleSkill(sk.name)}
 							onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+							updateInfo={skillUpdates.find((item) => item.id === sk.name)}
+							onUpdate={() => void mutate(async () => { const info = await app.UpdateBuiltinSkill(sk.name); setSkillUpdates((items) => items.map((item) => item.id === info.id ? info : item)); })}
 						/>
 					))}
 				</div>

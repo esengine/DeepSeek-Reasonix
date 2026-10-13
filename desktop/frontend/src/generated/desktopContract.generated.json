@@ -1756,6 +1756,28 @@
     {
       "cancellation": "before-dispatch",
       "domain": "desktop/app.go",
+      "name": "BuiltinSkillUpdates",
+      "owner": "App.BuiltinSkillUpdates",
+      "params": [],
+      "result": {
+        "elem": {
+          "kind": "object",
+          "ref": "skill.BuiltinSkillUpdateInfo"
+        },
+        "kind": "array"
+      },
+      "scope": {
+        "inputs": [],
+        "kind": "owner-state",
+        "resolver": "App.BuiltinSkillUpdates"
+      },
+      "sources": [
+        "desktop/app.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/app.go",
       "name": "Cancel",
       "owner": "App.Cancel",
       "params": [],
@@ -2359,6 +2381,28 @@
       },
       "sources": [
         "desktop/inbox_target.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/app.go",
+      "name": "CheckBuiltinSkillUpdates",
+      "owner": "App.CheckBuiltinSkillUpdates",
+      "params": [],
+      "result": {
+        "elem": {
+          "kind": "object",
+          "ref": "skill.BuiltinSkillUpdateInfo"
+        },
+        "kind": "array"
+      },
+      "scope": {
+        "inputs": [],
+        "kind": "owner-state",
+        "resolver": "App.CheckBuiltinSkillUpdates"
+      },
+      "sources": [
+        "desktop/app.go"
       ]
     },
     {
@@ -20918,6 +20962,32 @@
       },
       "sources": [
         "desktop/pinned_files.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/app.go",
+      "name": "UpdateBuiltinSkill",
+      "owner": "App.UpdateBuiltinSkill",
+      "params": [
+        {
+          "kind": "string"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "skill.BuiltinSkillUpdateInfo"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "name"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.UpdateBuiltinSkill"
+      },
+      "sources": [
+        "desktop/app.go"
       ]
     },
     {
@@ -41809,6 +41879,20 @@
           }
         },
         {
+          "name": "category",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "sourceUrl",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
           "name": "scope",
           "type": {
             "kind": "string"
@@ -46627,6 +46711,56 @@
           "optional": true,
           "type": {
             "kind": "boolean"
+          }
+        }
+      ]
+    },
+    "skill.BuiltinSkillUpdateInfo": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "supported",
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "installedVersion",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "latestVersion",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "updateAvailable",
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "lastCheckedAt",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "error",
+          "optional": true,
+          "type": {
+            "kind": "string"
           }
         }
       ]

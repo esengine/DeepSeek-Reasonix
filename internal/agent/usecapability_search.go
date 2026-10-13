@@ -37,6 +37,11 @@ func (t *UseCapabilityTool) searchCapabilities(ctx context.Context, query string
 	mcpSchemas := t.mcpSearchSchemaIndex()
 	results := make([]capabilitySearchResult, 0, len(cat.Entries))
 	for _, entry := range cat.Entries {
+		if entry.Kind == capability.KindMCPTool {
+			if server, _, ok := parseMCPToolCapabilityID(entry.ID); ok && strings.EqualFold(server, "cognee") {
+				continue
+			}
+		}
 		entry = t.contextualEntry(ctx, entry)
 		unavailableReason := ""
 		if entry.Kind == capability.KindTool {

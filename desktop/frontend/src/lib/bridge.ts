@@ -546,6 +546,9 @@ export interface AppBindings extends AttachmentBindings, SessionExportBindings, 
   MCPMarketplace(query: string): Promise<MCPMarketplaceView>;
   MCPMarketplaceResolve(registryName: string): Promise<MCPMarketplaceEntry>;
   SkillsSettings(): Promise<SkillsSettingsView>;
+  BuiltinSkillUpdates(): Promise<import("./types").BuiltinSkillUpdateInfo[]>;
+  CheckBuiltinSkillUpdates(): Promise<import("./types").BuiltinSkillUpdateInfo[]>;
+  UpdateBuiltinSkill(name: string): Promise<import("./types").BuiltinSkillUpdateInfo>;
   CapabilityDiagnostics(includeSessionRuntime: boolean): Promise<CapabilityDiagnosticsReport>;
   CredentialDiagnostics(probe: boolean): Promise<CredentialDiagnosticReport>;
   RepairCredentials(dryRun: boolean): Promise<CredentialDiagnosticReport>;
@@ -3786,6 +3789,9 @@ function makeMockApp(): MockAppBindings {
         allowImplicitInvocation: true,
       };
     },
+    async BuiltinSkillUpdates() { return []; },
+    async CheckBuiltinSkillUpdates() { return []; },
+    async UpdateBuiltinSkill(name: string) { return { id: name, supported: false, updateAvailable: false }; },
     async RuntimeDoctor() {
       return {
         text: "runtime status: mock\nrecoverability: clean=true irreversible=false\nresume: allow=true cleanRollback=true\n",

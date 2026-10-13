@@ -908,6 +908,18 @@
       "inputs": []
     }
   },
+  "BuiltinSkillUpdates": {
+    "domain": "desktop/app.go",
+    "owner": "App.BuiltinSkillUpdates",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.BuiltinSkillUpdates",
+      "inputs": []
+    }
+  },
   "Cancel": {
     "domain": "desktop/app.go",
     "owner": "App.Cancel",
@@ -1235,6 +1247,18 @@
         "tabID",
         "expectedPath"
       ]
+    }
+  },
+  "CheckBuiltinSkillUpdates": {
+    "domain": "desktop/app.go",
+    "owner": "App.CheckBuiltinSkillUpdates",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-state",
+      "resolver": "App.CheckBuiltinSkillUpdates",
+      "inputs": []
     }
   },
   "CheckHistoricalSourceUpdate": {
@@ -11136,6 +11160,20 @@
       "inputs": [
         "tabID",
         "relPath"
+      ]
+    }
+  },
+  "UpdateBuiltinSkill": {
+    "domain": "desktop/app.go",
+    "owner": "App.UpdateBuiltinSkill",
+    "sources": [
+      "desktop/app.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.UpdateBuiltinSkill",
+      "inputs": [
+        "name"
       ]
     }
   },

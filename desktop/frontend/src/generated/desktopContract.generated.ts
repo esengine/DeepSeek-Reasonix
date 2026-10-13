@@ -3,7 +3,7 @@
 
 export const DESKTOP_PROTOCOL_VERSION = 11;
 
-export const DESKTOP_CONTRACT_DIGEST = "sha256:b15b003ee368eaa577f89919ef5938e9fdac210a90cf218dae5bb10a0518efad";
+export const DESKTOP_CONTRACT_DIGEST = "sha256:3fbf2a3c84a51991a0f7e3cc193f25c6533752b9bea595a543f064648009a055";
 
 export const DESKTOP_COMMANDS = [
   "AIRenameSession",
@@ -67,6 +67,7 @@ export const DESKTOP_COMMANDS = [
   "BeginSessionExportForTarget",
   "BeginSessionHistoryReadForTab",
   "BotRuntimeStatus",
+  "BuiltinSkillUpdates",
   "Cancel",
   "CancelDraftSubmission",
   "CancelJob",
@@ -90,6 +91,7 @@ export const DESKTOP_COMMANDS = [
   "CapabilityDiagnostics",
   "CaptureAttachmentTarget",
   "CaptureInboxTarget",
+  "CheckBuiltinSkillUpdates",
   "CheckHistoricalSourceUpdate",
   "CheckRemotePlatform",
   "CheckUpdate",
@@ -771,6 +773,7 @@ export const DESKTOP_COMMANDS = [
   "TurnEventsForTab",
   "UndoRewindForTab",
   "UnpinFileForTab",
+  "UpdateBuiltinSkill",
   "UpdateInboxItem",
   "UpdateMCPServer",
   "UpdatePlugin",
@@ -4584,6 +4587,8 @@ export interface SkillSuggestion {
 export interface SkillView {
   name: string;
   description: string;
+  category?: string;
+  sourceUrl?: string;
   scope: string;
   sourceDir?: string;
   runAs: string;
@@ -5510,6 +5515,16 @@ export interface InboxReceipt {
   idempotent?: boolean;
 }
 
+export interface BuiltinSkillUpdateInfo {
+  id: string;
+  supported: boolean;
+  installedVersion?: string;
+  latestVersion?: string;
+  updateAvailable: boolean;
+  lastCheckedAt?: string;
+  error?: string;
+}
+
 export interface skillwatch_Diagnostics {
   physicalWatches: number;
   logicalSubscriptions: number;
@@ -6004,6 +6019,7 @@ export interface GeneratedDesktopCommands {
   BeginSessionExportForTarget(arg0: SessionSelector, arg1: string, arg2: string, arg3: string, arg4: string): Promise<SessionExportHandle>;
   BeginSessionHistoryReadForTab(arg0: string): Promise<SessionHistoryReadHandle>;
   BotRuntimeStatus(): Promise<BotRuntimeStatusView>;
+  BuiltinSkillUpdates(): Promise<BuiltinSkillUpdateInfo[]>;
   Cancel(): Promise<void>;
   CancelDraftSubmission(arg0: string): Promise<SessionDraftSubmissionView>;
   CancelJob(arg0: string): Promise<boolean>;
@@ -6027,6 +6043,7 @@ export interface GeneratedDesktopCommands {
   CapabilityDiagnostics(arg0: boolean): Promise<Report>;
   CaptureAttachmentTarget(arg0: ComposerTarget): Promise<AttachmentTargetView>;
   CaptureInboxTarget(arg0: string, arg1: string): Promise<InboxTargetView>;
+  CheckBuiltinSkillUpdates(): Promise<BuiltinSkillUpdateInfo[]>;
   CheckHistoricalSourceUpdate(arg0: SessionSelector): Promise<HistoricalSourceUpdateView>;
   CheckRemotePlatform(arg0: string): Promise<void>;
   CheckUpdate(arg0: string): Promise<UpdateInfo | null>;
@@ -6708,6 +6725,7 @@ export interface GeneratedDesktopCommands {
   TurnEventsForTab(arg0: string, arg1: number): Promise<TurnEventReplayView>;
   UndoRewindForTab(arg0: string, arg1: string): Promise<RewindResultView>;
   UnpinFileForTab(arg0: string, arg1: string): Promise<void>;
+  UpdateBuiltinSkill(arg0: string): Promise<BuiltinSkillUpdateInfo>;
   UpdateInboxItem(arg0: string, arg1: string, arg2: string, arg3: string): Promise<void>;
   UpdateMCPServer(arg0: string, arg1: MCPServerInput): Promise<void>;
   UpdatePlugin(arg0: string): Promise<string>;

@@ -764,6 +764,9 @@ func (t *UseCapabilityTool) Execute(ctx context.Context, args json.RawMessage) (
 }
 
 func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args json.RawMessage, base tool.ResolvedCall) (tool.ResolvedCall, error) {
+	if server, _, ok := parseMCPToolCapabilityID(id); ok && strings.EqualFold(server, "cognee") {
+		return t.resolveUnavailable(base, id, "", "Cognee tools are controlled by Reasonix's managed memory lifecycle"), nil
+	}
 	// Registry-backed tools and skills share the unified proxy. Real writers
 	// still pass permission/plan/sandbox/lease checks via ResolvedCall.Target.
 	if name, ok := strings.CutPrefix(id, "tool:"); ok {
@@ -874,6 +877,15 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 	releaseRuntime()
 	releaseRuntime = func() {}
 	return t.resolveUnconnectedMCPCall(id, args, base, spec, server, raw, modelName), nil
+}
+
+func parseMCPToolCapabilityID(id string) (server, raw string, ok bool) {
+	rest, found := strings.CutPrefix(strings.TrimSpace(id), "mcp-tool:")
+	if !found {
+		return "", "", false
+	}
+	server, raw, found = strings.Cut(rest, "/")
+	return strings.TrimSpace(server), strings.TrimSpace(raw), found && server != "" && raw != ""
 }
 
 // resolveSkillCall routes skill:<name> through run_skill / read_only_skill /

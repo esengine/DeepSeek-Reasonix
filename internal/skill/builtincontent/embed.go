@@ -13,13 +13,15 @@ import (
 	"reasonix/internal/frontmatter"
 )
 
-//go:embed reasonix-guide
+//go:embed all:reasonix-guide all:wj-forge
 var files embed.FS
 
 // SkillMarkdown is one embedded skill file after frontmatter split.
 type SkillMarkdown struct {
 	Name        string
 	Description string
+	Category    string
+	SourceURL   string
 	RunAs       string // "inline" | "subagent" (and cross-tool aliases handled by caller)
 	Context     string
 	Agent       string
@@ -33,7 +35,7 @@ func LoadReasonixGuide() (SkillMarkdown, error) {
 	return loadSkill("reasonix-guide/SKILL.md")
 }
 
-// All loads every embedded SKILL.md under this package (currently one).
+// All loads every embedded SKILL.md under this package in deterministic path order.
 func All() ([]SkillMarkdown, error) {
 	var out []SkillMarkdown
 	err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
@@ -83,6 +85,8 @@ func ParseSkillMarkdown(sourcePath, content string) (SkillMarkdown, error) {
 	return SkillMarkdown{
 		Name:        name,
 		Description: strings.TrimSpace(fm["description"]),
+		Category:    strings.TrimSpace(fm["category"]),
+		SourceURL:   strings.TrimSpace(fm["source-url"]),
 		RunAs:       strings.TrimSpace(fm["runas"]),
 		Context:     strings.TrimSpace(fm["context"]),
 		Agent:       strings.TrimSpace(fm["agent"]),

@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -204,6 +205,14 @@ func (m *mcpManager) serverNames() []string {
 // hasServer reports whether a server is live.
 func (m *mcpManager) hasServer(name string) bool {
 	return slices.Contains(m.serverNames(), name)
+}
+
+func (m *mcpManager) callToolForSpec(ctx context.Context, spec plugin.Spec, rawToolName string, args json.RawMessage) (string, error) {
+	host := m.hostRef()
+	if host == nil {
+		return "", fmt.Errorf("MCP server %q is not connected", spec.Name)
+	}
+	return host.CallToolForSpec(ctx, spec, rawToolName, args)
 }
 
 // prompts lists the live MCP prompts (nil when no host is connected).

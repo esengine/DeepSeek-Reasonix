@@ -51,6 +51,26 @@ reasonix plugin doctor <name>                                      # 校验
 - **Prompts 与主题**——`/<plugin>:<name>` 提示词模板，以及 Desktop
   设置中的只读插件主题（`plugin:<plugin>:<theme>`）。
 
+## 内置技能
+
+Desktop「设置 → 技能」列出 Reasonix 随应用打包的内置技能。当前目录包含：
+
+`superpowers`、`bug-hunt`、`code-review`、`release-notes`、`ponytail`、
+`ui-ux-pro-max`、`taste-skill`、`zerotoken-skill`、`weiliaozi-skill`、
+`moon-lovers`、`cognee-memory`、`officecli`、`github` 和
+`chrome-mcp-bridge-2026-skill`。每项可单独启用或停用；设置保存在已有的
+`skills.disabled_skills` 配置中。
+
+技能是工作流程说明，不会添加工具或扩大权限。设置页的来源链接仅供查阅。
+只有 `cognee-memory`、`ponytail`、`taste-skill`、`zerotoken-skill`、
+`weiliaozi-skill`、`moon-lovers` 和 `officecli` 提供固定来源更新。点击
+「检查技能更新」后，Reasonix 会访问这些已编译的 HTTPS 地址；点击单项
+「更新」才会安装内容。Reasonix 校验上游 frontmatter 名称，只接受有限大小的
+Markdown 正文，并原子替换本地更新文件。更新不会修改启用/停用偏好。
+
+技能说明不代表相应工具已安装。例如 `officecli` 是文档工作流指南；当前
+Reasonix 没有随该技能提供 OfficeCLI 适配器。
+
 ## 运行时重载
 
 已安装扩展发生变化（安装、更新、启用/禁用、`--link` 内容变化）绝不会

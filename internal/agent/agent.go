@@ -1275,6 +1275,39 @@ func (a *Agent) setTodoState(todos []evidence.TodoItem) {
 	a.sess.todoMu.Unlock()
 }
 
+// CompletionSnapshot exposes only compact todo and verification state to
+// controller lifecycle integrations. It never returns transcript or receipts.
+type CompletionSnapshot struct {
+	TodosComplete       bool
+	HasVerifiedEvidence bool
+	EvidenceCategories  []string
+}
+
+func (a *Agent) CompletionSnapshot() CompletionSnapshot {
+	if a == nil {
+		return CompletionSnapshot{}
+	}
+	todos, written := a.TodoStateSnapshot()
+	complete := written && len(todos) > 0
+	for _, todo := range todos {
+		if todo.Status != "completed" {
+			complete = false
+			break
+		}
+	}
+	out := CompletionSnapshot{TodosComplete: complete}
+	if a.task.ledger != nil {
+		if a.task.ledger.HasSuccessfulVerificationCommand() {
+			out.EvidenceCategories = append(out.EvidenceCategories, "verification")
+		}
+		if a.task.ledger.HasCompletedReview() {
+			out.EvidenceCategories = append(out.EvidenceCategories, "review")
+		}
+	}
+	out.HasVerifiedEvidence = len(out.EvidenceCategories) > 0
+	return out
+}
+
 func executorHandoffRetryMessage() string {
 	return `You are already in the executor phase. The planner's read-only limitations do not apply to you.
 

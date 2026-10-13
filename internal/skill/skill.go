@@ -69,6 +69,8 @@ const (
 type Skill struct {
 	Name        string // canonical identifier; matches the directory / filename stem
 	Description string // one-liner shown in the session-context catalog
+	Category    string // optional display category for shipped Skill catalogs
+	SourceURL   string // upstream project or documentation URL; never grants update authority
 	Body        string // full markdown body (post-frontmatter), loaded eagerly
 	Scope       Scope  // where it came from
 	Path        string // absolute path to the SKILL.md / <name>.md, or "(builtin)"

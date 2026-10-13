@@ -15036,6 +15036,18 @@ body > .mermaid-diagram--fullscreen {
   display: block;
   overflow: visible;
 }
+.cap-skill-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0 0 33px;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+.cap-skill-card__meta a {
+  color: var(--accent);
+}
 .cap-skill-card__more {
   display: inline-flex;
   align-items: center;

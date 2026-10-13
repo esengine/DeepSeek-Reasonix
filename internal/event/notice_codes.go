@@ -25,6 +25,7 @@ const (
 	NoticeCodeStreamInterruptedConnectionReset                  = "stream_interrupted_connection_reset"
 	NoticeCodeUnappliedSteer                                    = "unapplied_steer"
 	NoticeCodeMCPToolsList                                      = "mcp_tools_list"
+	NoticeCodeCogneeMemory                                      = "cognee_memory"
 	NoticeCodeSessionRecoveryForked                             = "session_recovery_forked"
 	NoticeCodeSessionRecoveryAdopted                            = "session_recovery_adopted"
 	NoticeCodeSessionRecoveryAdoptedCovered                     = "session_recovery_adopted_covered"

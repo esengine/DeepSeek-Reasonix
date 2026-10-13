@@ -6768,6 +6768,8 @@ type ToolView struct {
 type SkillView struct {
 	Name         string   `json:"name"`
 	Description  string   `json:"description"`
+	Category     string   `json:"category,omitempty"`
+	SourceURL    string   `json:"sourceUrl,omitempty"`
 	Scope        string   `json:"scope"`
 	SourceDir    string   `json:"sourceDir,omitempty"`
 	RunAs        string   `json:"runAs"`
@@ -7246,7 +7248,7 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 	out.SkillRoots = a.cachedSkillRootsView(workspaceRoot)
 	for _, s := range ctrl.AllSkills() {
 		view := SkillView{
-			Name: s.Name, Description: s.Description,
+			Name: s.Name, Description: s.Description, Category: s.Category, SourceURL: s.SourceURL,
 			Scope: string(s.Scope), SourceDir: skillSourceDir(s, out.SkillRoots), RunAs: string(s.RunAs),
 			Enabled:          !disabled[config.SkillNameKey(s.Name)],
 			Plugin:           s.Plugin,
@@ -7272,6 +7274,30 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 		out.Skills = append(out.Skills, view)
 	}
 	return out
+}
+
+// CheckBuiltinSkillUpdates checks only the fixed, compiled update sources.
+func (a *App) BuiltinSkillUpdates() []skill.BuiltinSkillUpdateInfo {
+	return skill.BuiltinSkillUpdates()
+}
+
+func (a *App) CheckBuiltinSkillUpdates() []skill.BuiltinSkillUpdateInfo {
+	ctx, cancel := context.WithTimeout(context.Background(), 16*time.Second)
+	defer cancel()
+	return skill.CheckBuiltinSkillUpdates(ctx)
+}
+
+// UpdateBuiltinSkill installs a freshly fetched, identity-validated built-in Skill version.
+func (a *App) UpdateBuiltinSkill(name string) (skill.BuiltinSkillUpdateInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 16*time.Second)
+	defer cancel()
+	info, err := skill.UpdateBuiltinSkill(ctx, name)
+	if err == nil {
+		if refreshErr := a.RefreshSkills(); refreshErr != nil {
+			return info, fmt.Errorf("skill update installed, but the active runtime could not reload skills: %w", refreshErr)
+		}
+	}
+	return info, err
 }
 
 // SetSkillImplicitInvocation persists whether the model may discover and

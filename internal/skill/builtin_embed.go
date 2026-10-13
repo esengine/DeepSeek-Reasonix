@@ -39,6 +39,8 @@ func skillFromEmbedded(item builtincontent.SkillMarkdown) Skill {
 	return Skill{
 		Name:        item.Name,
 		Description: item.Description,
+		Category:    item.Category,
+		SourceURL:   item.SourceURL,
 		Body:        item.Body,
 		Scope:       ScopeBuiltin,
 		Path:        "(builtin:" + item.Path + ")",

@@ -13,6 +13,10 @@ func (s *Store) discoverSkillsUncached(ctx context.Context) ([]Skill, map[string
 		return nil, nil
 	}
 	var out []Skill
+	var builtinEntries []Skill
+	if !s.disableBuiltins {
+		builtinEntries = applyBuiltinSkillUpdates(builtinSkills(), s.reasonixHomeDir)
+	}
 	for _, r := range s.roots() {
 		if ctx.Err() != nil {
 			return nil, nil
@@ -39,7 +43,7 @@ func (s *Store) discoverSkillsUncached(ctx context.Context) ([]Skill, map[string
 		}
 	}
 	if !s.disableBuiltins {
-		for _, sk := range builtinSkills() {
+		for _, sk := range builtinEntries {
 			if !s.disabledName(sk.Name) {
 				out = append(out, skillCandidate(sk))
 			}
@@ -47,7 +51,7 @@ func (s *Store) discoverSkillsUncached(ctx context.Context) ([]Skill, map[string
 	}
 	builtins := map[string]Skill{}
 	if !s.disableBuiltins {
-		for _, sk := range builtinSkills() {
+		for _, sk := range builtinEntries {
 			if !s.disabledName(sk.Name) {
 				builtins[sk.Name] = sk
 			}

@@ -160,6 +160,7 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 		return samplingRequest{}, err
 	}
 	requestMessages = a.normalizeModelRequestMessages(requestMessages)
+	requestMessages = applyTransientTurnContext(ctx, requestMessages)
 	// context.prepare: extensions may rewrite the message copy feeding THIS
 	// request. The session log is never touched — the replacement is
 	// ephemeral, so the next request starts from the unmodified history.
