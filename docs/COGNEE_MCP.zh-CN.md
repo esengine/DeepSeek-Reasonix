@@ -1,12 +1,12 @@
 # Cognee 项目记忆
 
-Reasonix 可选用已配置的 Cognee MCP 服务，为当前工作区检索项目背景，并在任务完成后保存经过核验的简短摘要。MCP 服务必须叫 `cognee`，并且已经连接、获得授权；缺少服务或连接失败时，普通任务继续运行。
+Reasonix 可用 Cognee MCP 服务为当前工作区检索项目背景，并在任务完成后保存经过核验的简短摘要。此仓库已在根目录 `.mcp.json` 中配置名为 `cognee` 的本地服务，地址为 `http://127.0.0.1:12316/mcp-new`。首次使用时，Reasonix 会要求你启用项目声明的 MCP 服务；Cognee 服务未运行或连接失败时，普通任务继续运行。
 
 ## 配置
 
-推荐在「设置 → Agent Skills → Cognee 项目记忆」中配置。向导接受 HTTPS 地址或 loopback 的 HTTP 地址，可选填写 Bearer 令牌；令牌保存在 Reasonix 凭据存储中，MCP 配置只引用凭据变量。留空令牌会保留已保存的令牌。向导会显示未配置、技能关闭、需要授权、连接异常、工具不兼容和已就绪等状态；就绪检查只读取连接状态与工具 schema，不会调用 `recall` 或 `remember`。由插件管理的服务请从 MCP 设置编辑。
+本仓库的 `.mcp.json` 已提供默认连接。先启动本地 Cognee MCP 服务，再在 Reasonix 的 MCP 管理器中检查并启用 `cognee`。若需要更改地址或令牌，可在「设置 → Agent Skills → Cognee 项目记忆」中配置。向导接受 HTTPS 地址或 loopback 的 HTTP 地址，可选填写 Bearer 令牌；令牌保存在 Reasonix 凭据存储中，MCP 配置只引用凭据变量。留空令牌会保留已保存的令牌。向导会显示未配置、技能关闭、需要授权、连接异常、工具不兼容和已就绪等状态；就绪检查只读取连接状态与工具 schema，不会调用 `recall` 或 `remember`。由插件管理的服务请从 MCP 设置编辑。
 
-配置好服务后，在卡片中启用 `cognee-memory`。远端地址必须使用 HTTPS；只有 loopback 地址允许 HTTP。
+连接就绪后，在卡片中启用 `cognee-memory`。远端地址必须使用 HTTPS；只有 loopback 地址允许 HTTP。
 
 高级用户也可直接编辑 Reasonix MCP 配置：
 

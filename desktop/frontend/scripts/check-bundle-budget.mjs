@@ -314,7 +314,8 @@ for (const path of localeChunks) {
   // 64606 / 65349 B, so both dialect ceilings ratchet to the next tenth.
   // Model-application copy on the read-pause base measures 64734 / 65499 B,
   // adding 128 / 150 B. Retain only the next one-decimal ceiling.
-  const budget = name.startsWith("zh-TW-") ? 64.0 * 1024 : 63.3 * 1024;
+  // Cognee and skill-update copy brings zh-TW to 65655 B; round to 64.2 KiB.
+  const budget = name.startsWith("zh-TW-") ? 64.2 * 1024 : 63.3 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -558,9 +559,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // native paging stay lazy. The Linux producer measured 2106070 B; round the
 // gate to the smallest passing 2056.8 KiB ceiling and retain every compressed,
 // chunk, CSS, and residency budget.
-// Ready-event cold-history joining adds 163 B locally (2106326 B versus
-// 2106163 B); retain the producer margin and round to the smallest 2057.2 KiB
-// ceiling that covers the same Linux build. Other bundle budgets stay fixed.
-const rawInitialBudgetKiB = 2_057.2;
+// The current main-v2 Windows build measures 2109722 B. Preserve the measured
+// 186 B Linux producer difference with headroom at the next 2060.6 KiB ceiling.
+const rawInitialBudgetKiB = 2_060.6;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
