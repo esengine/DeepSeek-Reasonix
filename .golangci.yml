@@ -64,6 +64,12 @@ linters:
         linters:
           - staticcheck
         text: SA5011
+      # x/net's Transport still returns GoAwayError although the type is marked
+      # deprecated, so the classifier has to keep recognising it.
+      - path: internal/provider/transport_diagnostic
+        linters:
+          - staticcheck
+        text: SA1019
       # SA4023 is trivially true on GOOS=windows: dialAgent's Windows stub
       # (agent_windows.go) always returns a non-nil error until named-pipe
       # transport lands. Suppress only this call site; the comparison stays
