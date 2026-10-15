@@ -13,7 +13,7 @@ import (
 	"reasonix/internal/frontmatter"
 )
 
-//go:embed all:reasonix-guide all:wj-forge
+//go:embed all:reasonix-guide all:wj-forge all:phoenixlucky/figma-design-skill
 var files embed.FS
 
 // SkillMarkdown is one embedded skill file after frontmatter split.

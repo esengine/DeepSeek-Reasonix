@@ -1147,6 +1147,57 @@ func InstallUserPluginForRoot(root string, entry PluginEntry, forceEnable bool) 
 	return path, errors.Join(activationErr, restoreErr)
 }
 
+// EnsureDefaultUserMCPServer adds a built-in MCP server to the user-global
+// config only when no current or legacy user config already defines that name.
+// Project declarations are deliberately left alone and continue to shadow the
+// global fallback. A newly seeded server is durably enabled; callers can set
+// AutoStart=false to keep it disconnected until first use.
+func EnsureDefaultUserMCPServer(entry PluginEntry) (string, bool, error) {
+	entry.Source = MCPSourceUserConfig
+	path := UserConfigPath()
+	if strings.TrimSpace(path) == "" {
+		return "", false, fmt.Errorf("cannot resolve user config path")
+	}
+	paths := append(userConfigCandidatePaths(), path)
+	unlock, err := LockConfigFilesEdits(paths...)
+	if err != nil {
+		return path, false, fmt.Errorf("seed default MCP server: %w", err)
+	}
+	defer unlock()
+
+	for _, candidate := range userConfigCandidatePaths() {
+		cfg, loadErr := LoadForEditReadOnlyStrict(candidate)
+		if loadErr != nil {
+			return candidate, false, loadErr
+		}
+		if _, ok := pluginEntryByName(cfg.Plugins, entry.Name); ok {
+			return candidate, false, nil
+		}
+	}
+
+	cfg, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		return path, false, err
+	}
+	if err := cfg.UpsertPlugin(entry); err != nil {
+		return path, false, err
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return path, false, err
+	}
+	if err := DefaultMCPActivationStore().SetServerEnabled(entry, "", true); err != nil {
+		var rollbackErr error
+		if cfg.RemovePlugin(entry.Name) {
+			rollbackErr = cfg.SaveTo(path)
+		}
+		if rollbackErr != nil {
+			rollbackErr = fmt.Errorf("restore user config after activation failure: %w", rollbackErr)
+		}
+		return path, false, errors.Join(err, rollbackErr)
+	}
+	return path, true, nil
+}
+
 // RemovePluginFromSourceForRoot removes exactly the declaration represented by
 // entry. Lower-priority same-name declarations are intentionally preserved so
 // they can become effective after a project override is removed.

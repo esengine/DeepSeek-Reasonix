@@ -1204,6 +1204,82 @@ func TestInstallUserPluginForRootRestoresConfigWhenActivationFails(t *testing.T)
 	}
 }
 
+func TestEnsureDefaultUserMCPServerSeedsOnDemandAndPreservesProjectOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	workspace := t.TempDir()
+	project := filepath.Join(workspace, mcpJSONFile)
+	if err := os.WriteFile(project, []byte(`{"mcpServers":{"cognee":{"type":"http","url":"http://project/mcp"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	autoStart := false
+	entry := PluginEntry{Name: "cognee", Type: "http", URL: "http://127.0.0.1:12316/mcp-new", AutoStart: &autoStart}
+	path, seeded, err := EnsureDefaultUserMCPServer(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !seeded || path != UserConfigPath() {
+		t.Fatalf("EnsureDefaultUserMCPServer = (%q, %v), want global seed", path, seeded)
+	}
+	global, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := pluginEntryByName(global.Plugins, "cognee")
+	if !ok || got.URL != entry.URL || got.AutoStart == nil || *got.AutoStart {
+		t.Fatalf("global cognee = %+v, found=%v", got, ok)
+	}
+	got.Source = MCPSourceUserConfig
+	enabled := MCPServerEnabled(got, workspace)
+	if !enabled {
+		t.Fatalf("global Cognee enabled = %v; want enabled for on-demand use", enabled)
+	}
+	effective, err := LoadForRootReadOnly(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectEntry, ok := pluginEntryByName(effective.Plugins, "cognee")
+	if !ok || projectEntry.URL != "http://project/mcp" || projectEntry.Source != MCPSourceProjectMCPJSON {
+		t.Fatalf("effective project cognee = %+v, found=%v", projectEntry, ok)
+	}
+	otherWorkspace := t.TempDir()
+	otherEffective, err := LoadForRootReadOnly(otherWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalFallback, ok := pluginEntryByName(otherEffective.Plugins, "cognee")
+	if !ok || globalFallback.URL != entry.URL || globalFallback.Source != MCPSourceUserConfig {
+		t.Fatalf("effective Cognee in another project = %+v, found=%v", globalFallback, ok)
+	}
+}
+
+func TestEnsureDefaultUserMCPServerPreservesExistingGlobalEntry(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	cfg := Default()
+	custom := PluginEntry{Name: "cognee", Type: "http", URL: "http://custom/mcp"}
+	if err := cfg.UpsertPlugin(custom); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	path, seeded, err := EnsureDefaultUserMCPServer(PluginEntry{Name: "cognee", Type: "http", URL: "http://127.0.0.1:12316/mcp-new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seeded || path != UserConfigPath() {
+		t.Fatalf("EnsureDefaultUserMCPServer = (%q, %v), want existing config unchanged", path, seeded)
+	}
+	after, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := pluginEntryByName(after.Plugins, "cognee")
+	if !ok || got.URL != custom.URL {
+		t.Fatalf("global cognee = %+v, found=%v; custom URL was overwritten", got, ok)
+	}
+}
+
 func TestRemoveEffectivePluginLocksAllCompetingSources(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("REASONIX_HOME", filepath.Join(root, "home"))

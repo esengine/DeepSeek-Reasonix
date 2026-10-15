@@ -136,6 +136,9 @@ func (c *Controller) cogneeSpecIfReady(ctx context.Context) (plugin.Spec, error)
 	if !strings.EqualFold(strings.TrimSpace(entry.Name), cogneeServerName) {
 		return plugin.Spec{}, fmt.Errorf("configured server name must be cognee")
 	}
+	if !config.MCPServerEnabled(entry, c.workspaceRoot) {
+		return plugin.Spec{}, fmt.Errorf("Cognee MCP server is not enabled for this workspace")
+	}
 	spec := c.mcpSpec(entry)
 	spec = plugin.ResolveStoredAuthorization(ctx, spec)
 	if !spec.ServerAuthorized() {
@@ -145,8 +148,18 @@ func (c *Controller) cogneeSpecIfReady(ctx context.Context) (plugin.Spec, error)
 		return plugin.Spec{}, err
 	}
 	host := c.mcp.hostRef()
+	if host == nil {
+		return plugin.Spec{}, fmt.Errorf("Cognee MCP runtime is unavailable")
+	}
+	if !host.HasClientForSpec(spec) {
+		if _, err := c.ConnectMCPServer(entry); err != nil {
+			return plugin.Spec{}, fmt.Errorf("could not connect Cognee MCP server: %w", err)
+		}
+		spec = plugin.ResolveStoredAuthorization(ctx, c.mcpSpec(entry))
+		host = c.mcp.hostRef()
+	}
 	if host == nil || !host.HasClientForSpec(spec) {
-		return plugin.Spec{}, fmt.Errorf("Cognee MCP server is not already connected to this runtime")
+		return plugin.Spec{}, fmt.Errorf("Cognee MCP server did not connect to this runtime")
 	}
 	if _, err := host.ToolsForSpec(ctx, spec); err != nil {
 		return plugin.Spec{}, fmt.Errorf("Cognee MCP server is unavailable")

@@ -741,6 +741,15 @@ func (a *App) restoreOrBuildTabs() {
 	_, _ = recoverLegacyProjectSidebarRoots(f)
 	_, _ = config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath())
 	_, _ = config.MigrateMCPToUserConfigOnUpgrade(desktopMCPMigrationRoots(f))
+	cogneeAutoStart := false
+	if _, _, err := config.EnsureDefaultUserMCPServer(config.PluginEntry{
+		Name:      "cognee",
+		Type:      "http",
+		URL:       "http://127.0.0.1:12316/mcp-new",
+		AutoStart: &cogneeAutoStart,
+	}); err != nil {
+		slog.Warn("desktop: could not ensure default global Cognee MCP server", "error", err)
+	}
 
 	// Load i18n from the first available config.
 	// Prefer DesktopLanguage (desktop UI setting) over Language (CLI setting),
