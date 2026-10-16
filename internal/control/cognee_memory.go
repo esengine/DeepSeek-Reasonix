@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/fileutil"
@@ -39,7 +40,15 @@ var (
 	unixHomePath         = regexp.MustCompile(`/(?:Users|home|root)/[^\s"'<>]+`)
 )
 
-type cogneeSchema struct{ datasetField string }
+type cogneeSchema struct {
+	queryField    string
+	contentField  string
+	categoryField string
+	scopeField    string
+	sourceField   string
+	actionField   string
+	actionValue   string
+}
 
 // CogneeMemoryStatus is a safe, read-only summary for the desktop settings UI.
 // It deliberately excludes the endpoint and all credential material.
@@ -97,15 +106,15 @@ func (c *Controller) CogneeMemoryStatus(ctx context.Context) CogneeMemoryStatus 
 		status.State, status.Detail = "connection_failed", "Cognee tools could not be loaded."
 		return status
 	}
-	if _, err := c.cogneeTool(ctx, spec, "recall"); err != nil {
-		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide a compatible recall tool."
+	if _, _, err := c.cogneeReadTool(ctx, spec); err != nil {
+		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide compatible get_guidance or search_memory tools."
 		return status
 	}
-	if _, err := c.cogneeTool(ctx, spec, "remember"); err != nil {
-		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide a compatible remember tool."
+	if _, err := c.cogneeTool(ctx, spec, "propose_memory"); err != nil {
+		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide a compatible propose_memory tool."
 		return status
 	}
-	status.State, status.Detail = "ready", "Cognee is connected and its required tools are ready."
+	status.State, status.Detail = "ready", "VISION-LIAO memory guidance and proposal tools are ready."
 	return status
 }
 
@@ -205,7 +214,7 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (c *Controller) cogneeRecallContext(ctx context.Context, raw, workspace string) (string, string) {
+func (c *Controller) cogneeGuidanceContext(ctx context.Context, raw string) (string, string) {
 	if !c.cogneeMemoryEnabled() {
 		return "", ""
 	}
@@ -217,19 +226,13 @@ func (c *Controller) cogneeRecallContext(ctx context.Context, raw, workspace str
 	if query == "" {
 		return "", "Cognee 项目记忆已跳过：请求中没有可安全检索的文本"
 	}
-	dataset := cogneeDatasetName(workspace)
-	schema, err := c.cogneeTool(ctx, spec, "recall")
+	toolName, schema, err := c.cogneeReadTool(ctx, spec)
 	if err != nil {
-		return "", "Cognee 项目记忆已跳过：recall 工具不可用"
+		return "", "Cognee 项目记忆已跳过：get_guidance/search_memory 工具不可用"
 	}
-	args := map[string]any{"query": query}
-	if schema.datasetField == "dataset_name" {
-		args["dataset_name"] = dataset
-	} else {
-		args["datasets"] = []string{dataset}
-	}
+	args := map[string]any{schema.queryField: query}
 	encoded, _ := json.Marshal(args)
-	result, err := c.mcp.callToolForSpec(ctx, spec, "recall", encoded)
+	result, err := c.mcp.callToolForSpec(ctx, spec, toolName, encoded)
 	if err != nil {
 		return "", "Cognee 项目记忆检索失败；任务会继续"
 	}
@@ -237,7 +240,7 @@ func (c *Controller) cogneeRecallContext(ctx context.Context, raw, workspace str
 	if strings.TrimSpace(result) == "" {
 		return "", "Cognee 未返回可安全使用的项目记忆"
 	}
-	return result, "已检索 Cognee 项目记忆，并作为不可信上下文提供给本轮任务"
+	return result, "已检索 VISION-LIAO 记忆，并作为不可信上下文提供给本轮任务"
 }
 
 func (c *Controller) cogneeTool(ctx context.Context, spec plugin.Spec, raw string) (cogneeSchema, error) {
@@ -260,6 +263,16 @@ func (c *Controller) cogneeTool(ctx context.Context, spec plugin.Spec, raw strin
 	return cogneeSchema{}, fmt.Errorf("Cognee %s tool unavailable", raw)
 }
 
+func (c *Controller) cogneeReadTool(ctx context.Context, spec plugin.Spec) (string, cogneeSchema, error) {
+	for _, name := range []string{"get_guidance", "search_memory"} {
+		schema, err := c.cogneeTool(ctx, spec, name)
+		if err == nil {
+			return name, schema, nil
+		}
+	}
+	return "", cogneeSchema{}, fmt.Errorf("Cognee guidance/search tools unavailable")
+}
+
 func validateCogneeSchema(rawSchema json.RawMessage, toolName string) (cogneeSchema, error) {
 	var root struct {
 		Properties map[string]json.RawMessage `json:"properties"`
@@ -267,50 +280,117 @@ func validateCogneeSchema(rawSchema json.RawMessage, toolName string) (cogneeSch
 	if json.Unmarshal(rawSchema, &root) != nil {
 		return cogneeSchema{}, fmt.Errorf("Cognee schema is invalid")
 	}
-	stringField := func(name string) bool {
-		var p struct {
-			Type string `json:"type"`
+	stringField := func(name string) bool { return schemaAllowsType(root.Properties[name], "string") }
+	if toolName == "get_guidance" || toolName == "search_memory" {
+		for _, field := range []string{"task", "query"} {
+			if stringField(field) {
+				return cogneeSchema{queryField: field}, nil
+			}
 		}
-		return json.Unmarshal(root.Properties[name], &p) == nil && p.Type == "string"
+		return cogneeSchema{}, fmt.Errorf("Cognee %s schema lacks task/query", toolName)
 	}
-	if toolName == "recall" {
-		if !stringField("query") {
-			return cogneeSchema{}, fmt.Errorf("Cognee recall schema lacks query")
+	if toolName == "propose_memory" {
+		contentField := firstStringField(root.Properties, "content", "text")
+		categoryField := firstStringField(root.Properties, "category")
+		scopeField := firstStringField(root.Properties, "scope", "target_scope")
+		sourceField := firstStringField(root.Properties, "source", "source_description")
+		if contentField == "" || categoryField == "" || scopeField == "" || sourceField == "" {
+			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema lacks content/category/scope/source")
 		}
-		if stringField("dataset_name") {
-			return cogneeSchema{datasetField: "dataset_name"}, nil
+		if !schemaAllowsEnumValue(root.Properties[scopeField], "private") || !schemaAllowsEnumValue(root.Properties[scopeField], "global") {
+			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema does not support private and global scopes")
 		}
-		var datasets struct {
-			Type  string `json:"type"`
-			Items struct {
-				Type string `json:"type"`
-			} `json:"items"`
+		if !schemaAllowsEnumValue(root.Properties[categoryField], "experience") {
+			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema does not support experience category")
 		}
-		if json.Unmarshal(root.Properties["datasets"], &datasets) == nil && datasets.Type == "array" && datasets.Items.Type == "string" {
-			return cogneeSchema{datasetField: "datasets"}, nil
+		result := cogneeSchema{contentField: contentField, categoryField: categoryField, scopeField: scopeField, sourceField: sourceField}
+		if actionField := firstStringField(root.Properties, "action"); actionField != "" {
+			result.actionField = actionField
+			for _, value := range []string{"new", "create", "add"} {
+				if schemaAllowsEnumValue(root.Properties[actionField], value) {
+					result.actionValue = value
+					break
+				}
+			}
+			if result.actionValue == "" {
+				return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema has no supported create action")
+			}
 		}
-		return cogneeSchema{}, fmt.Errorf("Cognee recall schema lacks a dataset selector")
+		return result, nil
 	}
-	if toolName == "remember" && stringField("data") && stringField("dataset_name") {
-		return cogneeSchema{datasetField: "dataset_name"}, nil
-	}
-	return cogneeSchema{}, fmt.Errorf("Cognee remember schema is incompatible")
+	return cogneeSchema{}, fmt.Errorf("Cognee tool schema is incompatible")
 }
 
-func cogneeDatasetName(workspace string) string {
-	canonical, err := filepath.Abs(workspace)
-	if err != nil {
-		canonical = filepath.Clean(workspace)
+func firstStringField(properties map[string]json.RawMessage, fields ...string) string {
+	for _, field := range fields {
+		if schemaAllowsType(properties[field], "string") {
+			return field
+		}
 	}
-	if resolved, err := filepath.EvalSymlinks(canonical); err == nil {
-		canonical = resolved
+	return ""
+}
+
+func schemaAllowsEnumValue(raw json.RawMessage, value string) bool {
+	var schema struct {
+		Enum  []string          `json:"enum"`
+		AnyOf []json.RawMessage `json:"anyOf"`
+		OneOf []json.RawMessage `json:"oneOf"`
 	}
-	identity := filepath.Clean(canonical)
-	if runtime.GOOS == "windows" {
-		identity = strings.ToLower(identity)
+	if json.Unmarshal(raw, &schema) != nil {
+		return false
 	}
-	sum := sha256.Sum256([]byte(identity))
-	return "reasonix-" + hex.EncodeToString(sum[:16])
+	if !schemaAllowsType(raw, "string") {
+		return false
+	}
+	if len(schema.Enum) > 0 {
+		for _, allowed := range schema.Enum {
+			if allowed == value {
+				return true
+			}
+		}
+		return false
+	}
+	if len(schema.AnyOf)+len(schema.OneOf) > 0 {
+		for _, option := range append(schema.AnyOf, schema.OneOf...) {
+			if schemaAllowsEnumValue(option, value) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(raw) == 0 {
+		return true
+	}
+	return true
+}
+
+func schemaAllowsType(raw json.RawMessage, want string) bool {
+	var schema struct {
+		Type  json.RawMessage   `json:"type"`
+		AnyOf []json.RawMessage `json:"anyOf"`
+		OneOf []json.RawMessage `json:"oneOf"`
+	}
+	if json.Unmarshal(raw, &schema) != nil {
+		return false
+	}
+	var single string
+	if json.Unmarshal(schema.Type, &single) == nil && single == want {
+		return true
+	}
+	var multiple []string
+	if json.Unmarshal(schema.Type, &multiple) == nil {
+		for _, value := range multiple {
+			if value == want {
+				return true
+			}
+		}
+	}
+	for _, option := range append(schema.AnyOf, schema.OneOf...) {
+		if schemaAllowsType(option, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func redactCogneeText(raw string, limit int) string {
@@ -331,43 +411,134 @@ func redactCogneeText(raw string, limit int) string {
 	return text
 }
 
-func (c *Controller) cogneeRemember(ctx context.Context, taskKey, workspace, summary string, categories []string) string {
+func buildCogneeTaskRecord(task, outcome, workspace string, categories []string) string {
+	task = redactCogneeText(redactCogneeWorkspacePath(task, workspace), 1024)
+	outcome = redactCogneeText(redactCogneeWorkspacePath(outcome, workspace), maxCogneeRememberBytes)
+	compactOutcome := strings.Trim(strings.ToLower(strings.Join(strings.Fields(outcome), "")), ".,!。！?？")
+	if task == "" || outcome == "" || utf8.RuneCountInString(strings.Join(strings.Fields(task+outcome), "")) < 24 {
+		return ""
+	}
+	switch compactOutcome {
+	case "ok", "done", "完成", "好的", "收到":
+		return ""
+	}
+	record := "Task: " + task + "\nOutcome: " + outcome
+	if len(categories) > 0 {
+		record += "\nEvidence: " + strings.Join(categories, ", ")
+	}
+	return redactCogneeText(record, maxCogneeRememberBytes)
+}
+
+func redactCogneeWorkspacePath(raw, workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return raw
+	}
+	absolute, err := filepath.Abs(workspace)
+	if err != nil {
+		return raw
+	}
+	absolute = filepath.Clean(absolute)
+	if absolute == string(filepath.Separator) || absolute == filepath.VolumeName(absolute)+string(filepath.Separator) {
+		return raw
+	}
+	candidates := []string{absolute}
+	if strings.HasPrefix(workspace, "/") && workspace != "/" {
+		candidates = append(candidates, workspace)
+	}
+	if resolved, err := filepath.EvalSymlinks(absolute); err == nil && resolved != absolute {
+		candidates = append(candidates, filepath.Clean(resolved))
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		raw = strings.ReplaceAll(raw, candidate, "[WORKSPACE_PATH]")
+		if runtime.GOOS == "windows" {
+			matcher := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(candidate))
+			raw = matcher.ReplaceAllString(raw, "[WORKSPACE_PATH]")
+		}
+	}
+	return raw
+}
+
+func cogneeMemoryEligibility(snapshot agent.CompletionSnapshot, record string) (session, graph bool) {
+	todosReady := !snapshot.TodosWritten || snapshot.TodosComplete
+	session = strings.TrimSpace(record) != "" && todosReady
+	graph = session && (snapshot.HasVerifiedEvidence || snapshot.HasObservedMutation)
+	return session, graph
+}
+
+func (c *Controller) cogneeProposePrivate(ctx context.Context, taskKey, record string) string {
+	return c.cogneeProposeDestination(ctx, taskKey, "private", record)
+}
+
+func (c *Controller) cogneeProposeGlobal(ctx context.Context, taskKey, record string) string {
+	return c.cogneeProposeDestination(ctx, taskKey, "global", record)
+}
+
+func (c *Controller) cogneeProposeDestination(ctx context.Context, taskKey, scope, record string) string {
 	if !c.cogneeMemoryEnabled() {
 		return ""
 	}
-	if len(categories) == 0 || strings.TrimSpace(summary) == "" {
-		return "Cognee 项目记忆未保存：缺少已核实的摘要"
+	if strings.TrimSpace(record) == "" {
+		return "VISION-LIAO 记忆提案未提交：没有可复用的任务摘要"
 	}
 	spec, err := c.cogneeSpecIfReady(ctx)
 	if err != nil {
-		return "Cognee 项目记忆未保存：服务未连接或未授权"
+		return "VISION-LIAO 记忆提案未提交：服务未连接或未授权"
 	}
-	dataset := cogneeDatasetName(workspace)
-	_, err = c.cogneeTool(ctx, spec, "remember")
+	schema, err := c.cogneeTool(ctx, spec, "propose_memory")
 	if err != nil {
-		return "Cognee 项目记忆未保存：remember 工具不可用"
+		return "VISION-LIAO 记忆提案未提交：propose_memory 工具不可用"
 	}
-	data := "Verified project completion. Evidence: " + strings.Join(categories, ", ") + ". Summary: " + redactCogneeText(summary, maxCogneeRememberBytes)
-	args, _ := json.Marshal(map[string]any{"data": data, "dataset_name": dataset})
-	if err := createCogneeAttempt(c.sessionDir, taskKey); err != nil {
+	if scope != "private" && scope != "global" {
+		return "VISION-LIAO 记忆提案未提交：目标范围无效"
+	}
+	argsMap := map[string]any{
+		schema.contentField:  redactCogneeText(record, maxCogneeRememberBytes),
+		schema.categoryField: "experience",
+		schema.scopeField:    scope,
+		schema.sourceField:   "Reasonix completed task outcome",
+	}
+	if schema.actionField != "" {
+		argsMap[schema.actionField] = schema.actionValue
+	}
+	args, _ := json.Marshal(argsMap)
+	if err := createCogneeAttempt(c.sessionDir, taskKey, scope); err != nil {
 		if os.IsExist(err) {
-			return "Cognee 项目记忆未重复保存：此任务已有持久化尝试记录"
+			return "VISION-LIAO " + cogneeDestinationName(scope) + "未重复提交：此任务已有尝试记录"
 		}
-		return "Cognee 项目记忆未保存：无法持久化一次性尝试标记"
+		return "VISION-LIAO " + cogneeDestinationName(scope) + "未提交：无法持久化一次性尝试标记"
 	}
-	if _, err := c.mcp.callToolForSpec(ctx, spec, "remember", args); err != nil {
-		finishCogneeAttempt(c.sessionDir, taskKey, "uncertain")
-		return "Cognee 项目记忆保存结果不确定；Reasonix 不会自动重试"
+	result, err := c.mcp.callToolForSpec(ctx, spec, "propose_memory", args)
+	if err != nil {
+		finishCogneeAttempt(c.sessionDir, taskKey, scope, "uncertain")
+		return "VISION-LIAO " + cogneeDestinationName(scope) + "提交结果不确定；Reasonix 不会自动重试"
 	}
-	finishCogneeAttempt(c.sessionDir, taskKey, "saved")
-	return "已将经过核验的项目摘要保存到 Cognee"
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(result)), "error:") {
+		finishCogneeAttempt(c.sessionDir, taskKey, scope, "uncertain")
+		return "VISION-LIAO " + cogneeDestinationName(scope) + "返回错误，提交结果不确定；Reasonix 不会自动重试"
+	}
+	finishCogneeAttempt(c.sessionDir, taskKey, scope, "submitted")
+	if strings.Contains(strings.ToLower(result), "pending") {
+		return "VISION-LIAO " + cogneeDestinationName(scope) + "已提交，待桌面端审核"
+	}
+	return "VISION-LIAO " + cogneeDestinationName(scope) + "调用已完成；请在桌面端审核队列确认状态"
 }
 
-func createCogneeAttempt(sessionDir, taskKey string) error {
+func cogneeDestinationName(scope string) string {
+	if scope == "private" {
+		return "私有记忆提案"
+	}
+	return "全局记忆提案"
+}
+
+func createCogneeAttempt(sessionDir, taskKey, destination string) error {
 	if strings.TrimSpace(sessionDir) == "" || strings.TrimSpace(taskKey) == "" {
 		return fmt.Errorf("missing task identity")
 	}
-	sum := sha256.Sum256([]byte(filepath.Clean(sessionDir) + "\x00" + taskKey))
+	sum := sha256.Sum256([]byte(filepath.Clean(sessionDir) + "\x00" + taskKey + "\x00" + destination))
 	path := filepath.Join(config.ReasonixHomeDir(), "cognee-memory", hex.EncodeToString(sum[:])+".json")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
@@ -384,11 +555,11 @@ func createCogneeAttempt(sessionDir, taskKey string) error {
 	return err
 }
 
-func finishCogneeAttempt(sessionDir, taskKey, status string) {
-	if status != "saved" && status != "uncertain" {
+func finishCogneeAttempt(sessionDir, taskKey, destination, status string) {
+	if status != "submitted" && status != "uncertain" {
 		return
 	}
-	sum := sha256.Sum256([]byte(filepath.Clean(sessionDir) + "\x00" + taskKey))
+	sum := sha256.Sum256([]byte(filepath.Clean(sessionDir) + "\x00" + taskKey + "\x00" + destination))
 	path := filepath.Join(config.ReasonixHomeDir(), "cognee-memory", hex.EncodeToString(sum[:])+".json")
 	_ = fileutil.AtomicWriteFile(path, []byte("{\"status\":\""+status+"\"}"), 0600)
 }

@@ -1278,8 +1278,10 @@ func (a *Agent) setTodoState(todos []evidence.TodoItem) {
 // CompletionSnapshot exposes only compact todo and verification state to
 // controller lifecycle integrations. It never returns transcript or receipts.
 type CompletionSnapshot struct {
+	TodosWritten        bool
 	TodosComplete       bool
 	HasVerifiedEvidence bool
+	HasObservedMutation bool
 	EvidenceCategories  []string
 }
 
@@ -1295,16 +1297,20 @@ func (a *Agent) CompletionSnapshot() CompletionSnapshot {
 			break
 		}
 	}
-	out := CompletionSnapshot{TodosComplete: complete}
+	out := CompletionSnapshot{TodosWritten: written, TodosComplete: complete}
 	if a.task.ledger != nil {
+		_, out.HasObservedMutation = a.task.ledger.LatestSuccessfulMutationIndex()
 		if a.task.ledger.HasSuccessfulVerificationCommand() {
 			out.EvidenceCategories = append(out.EvidenceCategories, "verification")
 		}
 		if a.task.ledger.HasCompletedReview() {
 			out.EvidenceCategories = append(out.EvidenceCategories, "review")
 		}
+		out.HasVerifiedEvidence = len(out.EvidenceCategories) > 0
+		if out.HasObservedMutation {
+			out.EvidenceCategories = append(out.EvidenceCategories, "workspace_mutation")
+		}
 	}
-	out.HasVerifiedEvidence = len(out.EvidenceCategories) > 0
 	return out
 }
 

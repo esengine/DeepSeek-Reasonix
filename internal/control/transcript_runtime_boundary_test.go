@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/session"
@@ -19,6 +21,21 @@ import (
 )
 
 func TestTranscriptFollowAssignsUniqueIdentityToOutsideTurnNotices(t *testing.T) {
+	isolateControlConfigHome(t)
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetSkillEnabled("cognee-memory", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveForRoot(root); err != nil {
+		t.Fatal(err)
+	}
 	for _, afterTurn := range []bool{false, true} {
 		name := "before-turn"
 		if afterTurn {

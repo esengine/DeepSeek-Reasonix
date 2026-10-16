@@ -276,9 +276,9 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	if !turn.synthetic {
 		modelInput = c.withCapabilityRoute(ctx, input, turn.raw)
 		if turn.goalRound == nil {
-			recallCtx, cancelRecall := context.WithTimeout(ctx, 5*time.Second)
-			memory, notice := c.cogneeRecallContext(recallCtx, turn.raw, c.WorkspaceRoot())
-			cancelRecall()
+			guidanceCtx, cancelGuidance := context.WithTimeout(ctx, 5*time.Second)
+			memory, notice := c.cogneeGuidanceContext(guidanceCtx, turn.raw)
+			cancelGuidance()
 			if memory != "" {
 				ctx = agent.WithTransientTurnContext(ctx, "Cognee project memory", memory)
 			}
@@ -310,20 +310,30 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 			c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages, fallback)
 		}
 		if !turn.synthetic && turn.goalRound == nil && c.cogneeMemoryEnabled() {
-			c.cogneeNotice("任务未成功完成，本轮没有尝试保存 Cognee 项目记忆")
+			c.cogneeNotice("任务未成功完成，本轮没有提交 VISION-LIAO 记忆提案")
 		}
 		return err
 	}
 	err = o.executeApprovedPlan(ctx)
 	if err == nil && !turn.synthetic && turn.goalRound == nil && c.executor != nil && c.cogneeMemoryEnabled() {
 		snapshot := c.executor.CompletionSnapshot()
-		if snapshot.TodosComplete && snapshot.HasVerifiedEvidence {
-			rememberCtx, cancelRemember := context.WithTimeout(ctx, 15*time.Second)
-			text := c.cogneeRemember(rememberCtx, userMessageID, c.WorkspaceRoot(), lastAssistantText(c.History()), snapshot.EvidenceCategories)
-			cancelRemember()
-			c.cogneeNotice(text)
+		record := buildCogneeTaskRecord(turn.raw, lastAssistantText(c.History()), c.WorkspaceRoot(), snapshot.EvidenceCategories)
+		sessionEligible, graphEligible := cogneeMemoryEligibility(snapshot, record)
+		if !sessionEligible {
+			if snapshot.TodosWritten && !snapshot.TodosComplete {
+				c.cogneeNotice("VISION-LIAO 记忆提案已跳过：当前任务 TODO 尚未全部完成")
+			}
 		} else {
-			c.cogneeNotice("Cognee 项目记忆未保存：需要所有当前任务 todo 完成，并有成功验证或 review 依据")
+			privateCtx, cancelPrivate := context.WithTimeout(ctx, 15*time.Second)
+			c.cogneeNotice(c.cogneeProposePrivate(privateCtx, userMessageID, record))
+			cancelPrivate()
+			if graphEligible {
+				graphCtx, cancelGraph := context.WithTimeout(ctx, 15*time.Second)
+				c.cogneeNotice(c.cogneeProposeGlobal(graphCtx, userMessageID, record))
+				cancelGraph()
+			} else {
+				c.cogneeNotice("VISION-LIAO 全局记忆提案已跳过：本轮没有足够的项目级证据")
+			}
 		}
 	}
 	return err

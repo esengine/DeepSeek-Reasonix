@@ -1065,8 +1065,8 @@ func (h *Host) CallToolForSpec(ctx context.Context, spec Spec, rawToolName strin
 		return "", fmt.Errorf("MCP server %q is not authorized", spec.Name)
 	}
 	if strings.EqualFold(spec.Name, "cognee") {
-		if rawToolName != "recall" && rawToolName != "remember" {
-			return "", fmt.Errorf("managed Cognee calls allow only recall and remember")
+		if !managedCogneeToolAllowed(rawToolName) {
+			return "", fmt.Errorf("managed Cognee calls allow only guidance, search, and memory proposals")
 		}
 		ctx = context.WithValue(ctx, managedCogneeCallKey{}, true)
 	}
@@ -1093,6 +1093,15 @@ func (h *Host) CallToolForSpec(ctx context.Context, spec Spec, rawToolName strin
 }
 
 type managedCogneeCallKey struct{}
+
+func managedCogneeToolAllowed(name string) bool {
+	switch name {
+	case "get_guidance", "search_memory", "propose_memory":
+		return true
+	default:
+		return false
+	}
+}
 
 // MCPRuntimeSpecMatches compares the complete host-local runtime behavior of
 // two specs while deliberately excluding non-behavioral handles such as the

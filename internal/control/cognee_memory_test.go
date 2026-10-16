@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
@@ -21,7 +22,8 @@ func TestCogneeRecallConnectsEnabledServerOnDemand(t *testing.T) {
 	isolateControlConfigHome(t)
 	workspace := t.TempDir()
 	var requests atomic.Int32
-	var recalls atomic.Int32
+	var guidanceCalls atomic.Int32
+	var proposals []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ID     json.RawMessage `json:"id"`
@@ -49,22 +51,30 @@ func TestCogneeRecallConnectsEnabledServerOnDemand(t *testing.T) {
 			}
 		case "tools/list":
 			result = map[string]any{"tools": []map[string]any{
-				{"name": "recall", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{
-					"query": map[string]any{"type": "string"}, "dataset_name": map[string]any{"type": "string"},
+				{"name": "get_guidance", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+					"task": map[string]any{"type": "string"},
 				}}},
-				{"name": "remember", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{
-					"data": map[string]any{"type": "string"}, "dataset_name": map[string]any{"type": "string"},
+				{"name": "propose_memory", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+					"content": map[string]any{"type": "string"}, "category": map[string]any{"type": "string"},
+					"scope": map[string]any{"type": "string", "enum": []string{"private", "global"}}, "source": map[string]any{"type": "string"},
 				}}},
 			}}
 		case "tools/call":
-			if req.Params.Name != "recall" {
-				t.Errorf("tools/call name = %q, want recall", req.Params.Name)
+			if req.Params.Name == "get_guidance" {
+				if req.Params.Arguments["task"] == "" || req.Params.Arguments["dataset_name"] != nil || req.Params.Arguments["datasets"] != nil || req.Params.Arguments["scope"] != nil || req.Params.Arguments["session_id"] != nil {
+					t.Errorf("get_guidance arguments = %#v, want task only and no caller-controlled scope", req.Params.Arguments)
+				}
+				guidanceCalls.Add(1)
+				result = map[string]any{"content": []map[string]any{{"type": "text", "text": "remembered project fact"}}}
+			} else if req.Params.Name == "propose_memory" {
+				proposals = append(proposals, req.Params.Arguments)
+				if req.Params.Arguments["content"] == "" || req.Params.Arguments["category"] == "" || req.Params.Arguments["source"] == "" || req.Params.Arguments["scope"] == "" {
+					t.Errorf("proposal arguments = %#v, want content, category, scope, and source", req.Params.Arguments)
+				}
+				result = map[string]any{"content": []map[string]any{{"type": "text", "text": "Proposal created with status=pending"}}}
+			} else {
+				t.Errorf("tools/call name = %q, want get_guidance or propose_memory", req.Params.Name)
 			}
-			if req.Params.Arguments["query"] == "" || req.Params.Arguments["dataset_name"] == "" {
-				t.Errorf("recall arguments = %#v, want query and dataset_name", req.Params.Arguments)
-			}
-			recalls.Add(1)
-			result = map[string]any{"content": []map[string]any{{"type": "text", "text": "remembered project fact"}}}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
@@ -95,15 +105,37 @@ url = %q
 	})
 	defer ctrl.Close()
 	if host.HasClientForSpec(ctrl.mcpSpec(cfg.Plugins[0])) {
-		t.Fatal("Cognee unexpectedly connected before memory recall")
+		t.Fatal("Cognee unexpectedly connected before guidance retrieval")
 	}
 
-	memory, notice := ctrl.cogneeRecallContext(context.Background(), "What project decisions were made?", workspace)
+	memory, notice := ctrl.cogneeGuidanceContext(context.Background(), "What project decisions were made?")
 	if !strings.Contains(memory, "remembered project fact") || !strings.Contains(notice, "已检索") {
 		t.Fatalf("recall = (%q, %q), want remembered context and success notice", memory, notice)
 	}
-	if got := recalls.Load(); got != 1 {
-		t.Fatalf("recall calls = %d, want 1 (MCP requests=%d)", got, requests.Load())
+	if got := guidanceCalls.Load(); got != 1 {
+		t.Fatalf("guidance calls = %d, want 1 (MCP requests=%d)", got, requests.Load())
+	}
+	ctrl.sessionDir = filepath.Join(t.TempDir(), "session")
+	sessionNotice := ctrl.cogneeProposePrivate(context.Background(), "test-message-id", "Task: remember this safely\nOutcome: durable session result")
+	if got := sessionNotice; !strings.Contains(got, "私有记忆提案") || !strings.Contains(got, "待桌面端审核") {
+		t.Fatalf("private proposal result = %q", got)
+	}
+	graphNotice := ctrl.cogneeProposeGlobal(context.Background(), "test-message-id", "Task: remember this safely\nOutcome: durable graph result")
+	if got := graphNotice; !strings.Contains(got, "全局记忆提案") || !strings.Contains(got, "待桌面端审核") {
+		t.Fatalf("global proposal result = %q", got)
+	}
+	if len(proposals) != 2 {
+		t.Fatalf("proposal calls = %d, want private and global; notices=(%q,%q)", len(proposals), sessionNotice, graphNotice)
+	}
+	privateArgs, globalArgs := proposals[0], proposals[1]
+	if privateArgs["scope"] != "private" || privateArgs["dataset_name"] != nil || privateArgs["session_id"] != nil {
+		t.Fatalf("private proposal args = %#v", privateArgs)
+	}
+	if globalArgs["scope"] != "global" || globalArgs["dataset_name"] != nil || globalArgs["session_id"] != nil {
+		t.Fatalf("global proposal args = %#v", globalArgs)
+	}
+	if strings.Contains(sessionNotice, "已保存") || strings.Contains(graphNotice, "已保存") {
+		t.Fatalf("proposal notice claimed data was applied: (%q, %q)", sessionNotice, graphNotice)
 	}
 }
 
@@ -126,10 +158,81 @@ url = %q
 	}
 	ctrl := newOwnedTestController(t, Options{WorkspaceRoot: workspace})
 	defer ctrl.Close()
-	if _, notice := ctrl.cogneeRecallContext(context.Background(), "query", workspace); !strings.Contains(notice, "服务未连接或未授权") {
+	if _, notice := ctrl.cogneeGuidanceContext(context.Background(), "query"); !strings.Contains(notice, "服务未连接或未授权") {
 		t.Fatalf("disabled Cognee notice = %q, want a skipped-memory notice", notice)
 	}
 	if got := requests.Load(); got != 0 {
 		t.Fatalf("disabled Cognee server received %d requests, want no network access", got)
+	}
+}
+
+func TestValidateCogneeDesignSchemas(t *testing.T) {
+	guidance := json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"}}}`)
+	got, err := validateCogneeSchema(guidance, "get_guidance")
+	if err != nil || got.queryField != "task" {
+		t.Fatalf("guidance schema = (%+v, %v), want task input", got, err)
+	}
+	search, err := validateCogneeSchema(json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"scope":{"type":"string"},"datasets":{"type":"string"}}}`), "search_memory")
+	if err != nil || search.queryField != "query" {
+		t.Fatalf("search schema = (%+v, %v), want query input", search, err)
+	}
+	proposal := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string","enum":["fact","experience"]},"scope":{"type":"string","enum":["private","global"]},"source":{"type":"string"},"action":{"type":"string","enum":["new","update","promote"]}}}`)
+	got, err = validateCogneeSchema(proposal, "propose_memory")
+	if err != nil || got.contentField != "content" || got.actionValue != "new" {
+		t.Fatalf("proposal schema = (%+v, %v), want content and new action", got, err)
+	}
+	unsafe := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string"},"scope":{"type":"string","enum":["workspace"]},"source":{"type":"string"}}}`)
+	if _, err := validateCogneeSchema(unsafe, "propose_memory"); err == nil {
+		t.Fatal("proposal schema without authorized private/global scope was accepted")
+	}
+	nullableScope := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string"},"scope":{"anyOf":[{"type":"string","enum":["workspace"]},{"type":"null"}]},"source":{"type":"string"}}}`)
+	if _, err := validateCogneeSchema(nullableScope, "propose_memory"); err == nil {
+		t.Fatal("nullable scope schema without private/global values was accepted")
+	}
+	for _, legacy := range []string{"recall", "remember"} {
+		if _, err := validateCogneeSchema(json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"data":{"type":"string"},"dataset_name":{"type":"string"}}}`), legacy); err == nil {
+			t.Errorf("legacy tool %q was accepted by the new design adapter", legacy)
+		}
+	}
+}
+
+func TestCogneeTaskRecordRedactsBoundsAndRejectsTrivialOutcome(t *testing.T) {
+	record := buildCogneeTaskRecord("Implement memory with api_key=secret-value", "Updated E:\\private\\repo\\internal\\memory.go and verified session recall behavior", `E:\private\repo`, []string{"verification"})
+	if record == "" || strings.Contains(record, "secret-value") || strings.Contains(record, `E:\private\repo`) {
+		t.Fatalf("Cognee record was empty or unsafe: %q", record)
+	}
+	if got := buildCogneeTaskRecord("ok", "done", "", nil); got != "" {
+		t.Fatalf("trivial record = %q, want empty", got)
+	}
+	if got := buildCogneeTaskRecord(strings.Repeat("任务", 3000), strings.Repeat("完成", 3000), "", nil); len(got) > maxCogneeRememberBytes {
+		t.Fatalf("record bytes = %d, want <= %d", len(got), maxCogneeRememberBytes)
+	}
+	if got := buildCogneeTaskRecord("Fix workspace issue", "Updated /srv/reasonix/internal/a.go", "/srv/reasonix", []string{"workspace_mutation"}); strings.Contains(got, "/srv/reasonix") {
+		t.Fatalf("record contains absolute workspace path: %q", got)
+	}
+}
+
+func TestCogneeMemoryEligibilitySeparatesSessionAndGraph(t *testing.T) {
+	cases := []struct {
+		name     string
+		snapshot agent.CompletionSnapshot
+		record   string
+		session  bool
+		graph    bool
+	}{
+		{name: "no todos useful session", record: "useful result", session: true},
+		{name: "completed todos and verified graph", snapshot: agent.CompletionSnapshot{TodosWritten: true, TodosComplete: true, HasVerifiedEvidence: true}, record: "useful result", session: true, graph: true},
+		{name: "mutation graph without verifier", snapshot: agent.CompletionSnapshot{HasObservedMutation: true}, record: "useful result", session: true, graph: true},
+		{name: "incomplete todos block both", snapshot: agent.CompletionSnapshot{TodosWritten: true, TodosComplete: false, HasVerifiedEvidence: true}, record: "useful result"},
+		{name: "session only without durable evidence", record: "useful result", session: true},
+		{name: "empty record", snapshot: agent.CompletionSnapshot{HasVerifiedEvidence: true}, session: false, graph: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			session, graph := cogneeMemoryEligibility(tc.snapshot, tc.record)
+			if session != tc.session || graph != tc.graph {
+				t.Fatalf("eligibility = (%v, %v), want (%v, %v)", session, graph, tc.session, tc.graph)
+			}
+		})
 	}
 }

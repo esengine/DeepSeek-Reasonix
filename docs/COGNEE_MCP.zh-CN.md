@@ -1,36 +1,44 @@
-# Cognee 项目记忆
+# VISION-LIAO 记忆
 
-Reasonix 可用 Cognee MCP 服务为当前工作区检索项目背景，并在任务完成后保存经过核验的简短摘要。桌面应用首次启动时，会在用户级 MCP 配置中补入默认服务 `http://127.0.0.1:12316/mcp-new`，供所有项目使用；已有的用户级 `cognee` 配置不会被覆盖，项目内同名配置仍优先。默认服务已启用但采用按需连接，不会在应用启动时连接。Cognee 服务未运行或连接失败时，普通任务继续运行。
+Reasonix 通过 VISION-LIAO 的 Cognee MCP 为当前任务检索获准的长期记忆，并在任务成功后提交私有或全局记忆提案。桌面应用首次启动时，会在用户级 MCP 配置中补入默认服务 `http://127.0.0.1:12316/mcp-new`，供所有项目使用；已有的用户级 `cognee` 配置不会被覆盖，项目内同名配置仍优先。默认服务按需连接，服务未运行或连接失败时，普通任务继续运行。
 
 ## 配置
 
-先启动本地 Cognee MCP 服务，再在 Reasonix 的 MCP 管理器中检查 `cognee`。首次使用内置记忆时，Reasonix 会按需连接已启用且已授权的服务。若需要更改地址或令牌，可在「设置 → Agent Skills → Cognee 项目记忆」中配置。向导接受 HTTPS 地址或 loopback 的 HTTP 地址，可选填写 Bearer 令牌；令牌保存在 Reasonix 凭据存储中，MCP 配置只引用凭据变量。留空令牌会保留已保存的令牌。向导会显示未配置、技能关闭、需要授权、连接异常、工具不兼容和已就绪等状态；就绪检查只读取连接状态与工具 schema，不会调用 `recall` 或 `remember`。由插件管理的服务请从 MCP 设置编辑。
+在「设置 → Agent Skills → Cognee 项目记忆」检查服务地址和 connector token；也可以从 MCP 管理器编辑名为 `cognee` 的服务。Loopback HTTP 可用；远程端点必须使用 HTTPS。连接凭据应是 VISION-LIAO 为此连接者签发的独立 connector token，保存在 Reasonix 凭据存储中。不要把桌面内部 `local.mcp_api_key` 当作连接者凭据共享给其他客户端。
 
-连接就绪后，在卡片中启用 `cognee-memory`。远端地址必须使用 HTTPS；只有 loopback 地址允许 HTTP。
-
-高级用户也可直接编辑 Reasonix MCP 配置：
-
-在 Reasonix 现有的 MCP 配置中添加 Cognee 服务。下面展示 HTTPS Streamable HTTP 配置；把 URL 和认证值放在环境变量中，配置只保存变量引用：
+高级用户可在 Reasonix 的 MCP 配置中添加服务，并将 token 值放在凭据存储提供的环境变量中：
 
 ```toml
 [[plugins]]
 name = "cognee"
 type = "http"
-url = "${COGNEE_MCP_URL}"
-headers = { Authorization = "Bearer ${COGNEE_MCP_TOKEN}" }
+url = "${VISION_LIAO_COGNEE_MCP_URL}"
+headers = { Authorization = "Bearer ${VISION_LIAO_CONNECTOR_TOKEN}" }
 ```
 
-手动配置时，请自行通过 Reasonix 的凭据存储提供变量值，并先在 MCP 管理器中启用项目声明的服务。启用且授权后，内置记忆会在首次 recall 或 remember 前按需建立当前会话的 MCP 连接；它不会替你启用或重新授权服务。未启用、连接失败或授权失效时，记忆操作会跳过且普通任务继续运行。
+首次使用时，Reasonix 按需连接已启用且已授权的服务。服务就绪检查只读取工具目录和 schema，不会创建提案或检索记忆。
 
-Cognee 服务需提供符合当前 JSON Schema 的 `recall` 与 `remember` 工具。`recall` 需要字符串 `query` 和数据集选择器（字符串 `dataset_name`，或字符串数组 `datasets`）；`remember` 需要字符串 `data` 和 `dataset_name`。Schema 缺失或不匹配时，该轮跳过记忆操作。
+服务连接后，还需在 Agent Skills 中启用 `cognee-memory`。Reasonix 不会替用户启用或重新授权 MCP 服务。
 
-## 数据与任务边界
+## 工具与范围
 
-- 每个可见的用户任务最多执行一次 recall。查询会先删除已识别的凭据样式文本、常见令牌和绝对用户路径，再限制长度。
-- 数据集名称由工作区规范路径的 SHA-256 摘要生成。Reasonix 不会把工作区绝对路径发送给 Cognee。
-- recall 结果会删除已识别的凭据和绝对路径并限制在 8 KiB；结果只作为当前 provider 请求副本中的外部不可信上下文，不写进会话 transcript，不作为工具或权限指令。
-- 只有整轮成功、当前任务写过非空 todos 且所有项目都已完成，并且 Reasonix 记录到成功的验证命令或完成的 review，才会尝试 remember。
-- remember 只发送经过清理并限制长度的最终摘要与证据类别，不发送原始对话、凭据或绝对工作区路径。一次性尝试标记在网络调用前持久化；超时或断连时结果按不确定处理，Reasonix 不会自动重试。
-- 模型不能通过 MCP 工具直接调用 Cognee；宿主只为生命周期管理调用 `recall` 和 `remember`。`forget` 及其他写入工具不可用。
+新 MCP 至少需要提供：
 
-Cognee 的可用状态会通过 Reasonix 事件提示呈现。记忆服务失败、未连接或 schema 不兼容不会阻塞正常任务。
+- `get_guidance` 或 `search_memory`，其输入 schema 声明字符串 `task` 或 `query`。
+- `propose_memory`，其输入 schema 声明内容、类别、目标范围和来源字段，并允许 `private`、`global` 两个范围及 `experience` 类别。
+
+Reasonix 优先调用 `get_guidance`，不可用时才回退到 `search_memory`。范围和身份由 VISION-LIAO 从 connector 凭据判定；Reasonix 不传 dataset、connector ID、scope 过滤器或 session ID 给读取工具。
+
+Reasonix 自动提交的私有目标对应当前 connector 的私有区；有项目级证据时，还会单独提交全局目标。两者均调用 `propose_memory`，只会进入待审核队列，不会直接修改有效记忆。Reasonix 会分别报告提案结果，不会把提案说成已保存或已获批准。
+
+此设计没有会话记录写入 API。原先的会话摘要目标会以 `experience` 类别提交到 connector 私有区，并仍需审核；Reasonix transcript 不会上传。全局提案只在任务 TODO（若有）全部完成，且存在验证、完成的 review 或宿主观察到的项目修改时提交。未完成、失败、取消、空摘要或过短摘要不提交。
+
+## 数据边界
+
+- 每个可见用户任务最多检索一次；检索文本会先清除已识别的凭据、常见令牌和绝对路径，再限制长度。返回内容也会清理并限制为 8 KiB，只作为不可信上下文交给模型，不写入 Reasonix transcript。
+- 提案仅包含清理并限长的任务意图、可见结果和证据类别，不上传原始 transcript、凭据或绝对工作区路径。
+- 私有和全局提案有各自的一次性尝试标记。超时或断连按结果不确定处理，不自动重试，避免重复建案。
+- Reasonix 仅在内部生命周期调用 `get_guidance`、`search_memory` 和 `propose_memory`。模型不能直接调用 Cognee MCP；删除提案、提案状态和其他工具仍由 VISION-LIAO 桌面审核流程管理。
+- 旧 `remember`、`recall`、`forget` 工具不作为兼容回退。服务若只提供旧工具，会显示工具不兼容并跳过记忆操作。
+
+记忆服务故障、未授权或工具 schema 不兼容不会阻塞普通任务。
