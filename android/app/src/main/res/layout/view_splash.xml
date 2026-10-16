@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The screen between the tap and the page.
+
+  It exists for a reason that is not cosmetic: the kernel has to be unpacked and
+  started before there is a page to show, and on a cold start that is about a
+  second. A blank window for a second reads as a broken app; a line of text that
+  says what is happening does not.
+
+  The progress bar is indeterminate and driven by nothing: the WebView's own
+  progress is mirrored onto it while the page loads, and before that it simply
+  turns, which is the honest description of "we do not know how long".
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/page"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:paddingStart="32dp"
+    android:paddingEnd="32dp">
+
+    <TextView
+        android:id="@+id/splash_wordmark"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/app_name"
+        android:textColor="#8A857B"
+        android:textSize="22sp"
+        android:letterSpacing="0.08"
+        android:fontFamily="sans-serif-medium" />
+
+    <ProgressBar
+        android:id="@+id/splash_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="132dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="26dp"
+        android:indeterminate="true" />
+
+    <TextView
+        android:id="@+id/splash_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:gravity="center"
+        android:text="@string/splash_connecting"
+        android:textColor="#8A857B"
+        android:textSize="13sp"
+        android:lineSpacingMultiplier="1.5" />
+
+    <Button
+        android:id="@+id/splash_retry"
+        style="?android:attr/borderlessButtonStyle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:minHeight="44dp"
+        android:text="@string/splash_retry"
+        android:textColor="#A6680C"
+        android:visibility="gone" />
+</LinearLayout>

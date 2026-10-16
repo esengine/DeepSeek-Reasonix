@@ -68,6 +68,33 @@ func TestAvailableListsInstalledInterpreters(t *testing.T) {
 			[]string{`C:\fake\bash.exe`},
 		},
 		{
+			// Android has no bash. `/system/bin/sh` is the only interpreter a
+			// phone carries, and without it the search found nothing and handed
+			// the session the literal name "bash" — which is the "Shell tool
+			// interpreter fallback" a phone reported on launch, and not a
+			// warning about a preference: the shell tool did not work at all.
+			"an android host offers the device's own sh",
+			shellHost{"android", fakePath(), func(p string) bool { return p == "/system/bin/sh" }, nil, nil, yes, no, yes, nil},
+			[]string{"/system/bin/sh"},
+		},
+		{
+			// A phone with a real bash installed keeps it: the vendor shell is
+			// what is there when nothing else is, not a replacement. `available`
+			// lists one interpreter per kind, so bash winning is the assertion.
+			"an android host with a real bash prefers it",
+			shellHost{"android", fakePath("bash"), yes, nil, nil, yes, no, yes, nil},
+			[]string{`C:\fake\bash.exe`},
+		},
+		{
+			// The vendor mount is a second path to the same shell, and the search
+			// takes the first that answers rather than reporting both.
+			"an android host takes the first sh it finds",
+			shellHost{"android", fakePath(), func(p string) bool {
+				return p == "/system/bin/sh" || p == "/vendor/bin/sh"
+			}, nil, nil, yes, no, yes, nil},
+			[]string{"/system/bin/sh"},
+		},
+		{
 			"a host with nothing offers nothing",
 			shellHost{"linux", fakePath(), no, nil, nil, yes, no, yes, nil},
 			nil,

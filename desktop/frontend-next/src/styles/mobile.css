@@ -1,0 +1,775 @@
+/*
+ * Mobile — what an installed phone shell adds to the layout.
+ *
+ * `app.css`'s "Phones" section already says how the interface is *reached* on a
+ * narrow window: the rail becomes a drawer, the workbench takes one column, the
+ * settings sheet fills the screen, heights are `dvh`, and a coarse pointer gets
+ * a composer at 16px so iOS does not zoom on focus. All of that is upstream's
+ * and stays untouched here.
+ *
+ * What is left is everything a browser tab does not have to think about and a
+ * WebView does: the notch and the home indicator are drawn *over* the page, the
+ * system bars tint themselves from the page's own colours, a long press starts
+ * a text selection or a context menu nobody asked for, and the rubber-band
+ * scroll of a WebView tries to reload the page. This file carries only those,
+ * under `[data-shell="android"]`, so a desktop build and the upstream test suite
+ * — which reads `app.css` for its rules — are unaffected either way.
+ *
+ * The shell sets `data-shell="android"` on `<html>` before the bundle runs, so
+ * the first paint is already right.
+ */
+
+/* The insets arrive as custom properties so one place owns the arithmetic: a
+   shell that later draws under the bars only has to change these. `env()` with
+   no fallback is 0 on every surface that has no inset, which is what a desktop
+   browser and a WebView without `viewport-fit=cover` both report. */
+[data-shell="android"] {
+  /* The insets, as `env(safe-area-inset-*)` OR the numbers the shell pushes in.
+   *
+   * `env()` is what an iPhone's Safari answers and what a desktop answers with
+   * 0; an Android WebView also answers 0 — the property is an iOS feature — so
+   * on the platform this file exists for, the fallback is what applies and it
+   * leaves the interface under the status bar. `--inset-*` is set by the shell
+   * from the window's real insets, and it wins wherever it is present.
+   *
+   * Kept as two layers rather than replacing `env()` outright: a browser tab
+   * (which is how this page is also used) has no shell to push anything, and
+   * there the `env()` values are the real ones on iOS and 0 everywhere else.
+   */
+  --safe-t: var(--inset-t, env(safe-area-inset-top, 0px));
+  --safe-r: var(--inset-r, env(safe-area-inset-right, 0px));
+  --safe-b: var(--inset-b, env(safe-area-inset-bottom, 0px));
+  --safe-l: var(--inset-l, env(safe-area-inset-left, 0px));
+  /* A finger is not a cursor. 44px is the smallest target both platform
+     guidelines agree on, and it is also what stops the composer's send button
+     and the chrome's icons from being a coin toss. */
+  --tap: 44px;
+}
+
+/* The window. `body` is `100dvh` already; `dvh` on a phone excludes the
+   browser's own bar, and in a WebView it excludes nothing, which is correct
+   here because the bars are the shell's to draw, not the page's. */
+[data-shell="android"] body {
+  /* A WebView's rubber-band overscroll offers a pull-to-refresh the page never
+     asked for, and on a page this one scrolls nothing at the body level it is
+     pure accident. Contained, the gesture stays inside the element it started
+     in — which is what every transcript and sheet here actually wants. */
+  overscroll-behavior: none;
+  /* Long-pressing a control that is not a text field is how a phone offers to
+     select, look up, or share a word of interface chrome. None of those apply
+     to a button; text fields and readable text opt back in below. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  /* The grey flash a WebView paints over whatever it thinks was tapped. The
+     stylesheet already draws its own press state (`--press`), so this one is
+     only a double exposure. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Reading and writing are selecting: the surfaces whose text a person actually
+   copies, and every field they type into. `.md` is the message body, `.code-wrap`
+   a fenced block, `.scroll` the transcript, `.hits`/`.find` a result list. */
+[data-shell="android"] :is(.md, .code-wrap, .scroll, .hits, .find, .prefs-main,
+  input, textarea, select, [contenteditable]) {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* The chrome starts under the status bar. Padding rather than a taller row, so
+   `--chrome-h` stays the truth the rail and the panes are positioned from. */
+[data-shell="android"] .chrome {
+  padding-top: var(--safe-t);
+  height: calc(var(--chrome-h) + var(--safe-t));
+  padding-left: calc(12px + var(--safe-l));
+  padding-right: calc(12px + var(--safe-r));
+}
+
+/* The paired-device bar is `position: fixed`-adjacent: the rail starts under it
+   at a hard 30px. Above the notch it has to start lower, or the bar's own text
+   runs under the status bar. */
+[data-shell="android"] .devicebar {
+  padding-top: var(--safe-t);
+  height: calc(30px + var(--safe-t));
+}
+[data-shell="android"] .app:has(> .devicebar) .rail {
+  top: calc(30px + var(--safe-t));
+}
+
+/* The drawer is the whole screen's height, so its own head needs the inset and
+   its list needs room above the home indicator to scroll into.
+ *
+ * The top inset is the one that was missing, and it is the visible one: `.rail`
+ * is `position: fixed; inset: 0 …`, so it starts at the very top of the window —
+ * under the status bar — and `studio.css` gives its head a flat `16px` that was
+ * written for a desktop with nothing drawn above it. On a phone that put the
+ * wordmark and the brand mark behind the clock. Padding on the rail rather than
+ * a taller head, so every child of the drawer moves down together. */
+[data-shell="android"] .rail {
+  padding-top: var(--safe-t);
+  padding-left: var(--safe-l);
+  padding-bottom: var(--safe-b);
+}
+
+/* The readings line sits in the composer's own bottom margin, so the home
+   indicator is cleared by making that margin taller — not by padding the line.
+ *
+ * Padding it was what broke this the first time. `.studio-meterrail` is
+ * `position: absolute; bottom: -32px`, i.e. anchored by its *bottom* edge 32px
+ * below the composer; a `padding-bottom` of 34px therefore grew it upward and
+ * 27px of it landed on top of the composer's own toolbar (measured at 390×844:
+ * composer bottom 809, meterrail top 782). Moving the composer up by the same
+ * amount keeps the two in the relation `studio.css` chose — the line's own
+ * height stays 25px and the space comes from outside. */
+[data-shell="android"] .compose {
+  margin-bottom: calc(35px + max(var(--safe-b), var(--ime-b, 0px)));
+}
+
+/* The composer's toolbar keeps to one line on a phone.
+ *
+ * The row is 301px wide (measured at a 390px viewport) and the five controls
+ * before the model group take 197px of it, leaving 99px for a group whose
+ * contents want 146px: the model name (82px `scrollWidth`) and the effort chip
+ * (64px). There is no arrangement that keeps both readable — measured, flexing
+ * them against each other left the name at 31px and the chip's text at 4px, each
+ * still taking space and neither still saying anything.
+ *
+ * The row itself must not grow either: it sits directly above the readings line,
+ * and a second line pushes the composer down onto it — the reason this rule
+ * exists at all (the group asked for `flex: 1 0 172px`, a basis that may not
+ * shrink, and wrapped).
+ *
+ * So the chip goes. It reads "自动" by default and is a preference, where the
+ * model name answers "what am I talking to" — the thing a person checks before
+ * typing, and the one that is worth the room. The chip remains on the desktop
+ * and in settings; only this row, on this shell, drops it.
+ *
+ * What this replaced is worth recording, because it looked like a fix: squeezing
+ * only the model collapsed its name to zero width (`scrollWidth` 82, rendered 0)
+ * so the control said nothing at all, while the chip's inner button held its
+ * 92px and hung 11px past the 390px viewport. Half-measures here produce a
+ * toolbar that is both truncated and overflowing. */
+[data-shell="android"] .turntools {
+  flex-wrap: nowrap;
+}
+[data-shell="android"] .studio-effort-control {
+  display: none;
+}
+/* Refine, as words rather than a spark.
+ *
+ * The glyph said nothing on a surface with no hover tooltip to explain it, and
+ * the row had room for five characters where it had none for a control whose
+ * meaning had to be guessed. `优化提示词` is the shortest thing that says what it
+ * does, and the tooltip behind it says the rest — including that the task goes
+ * in first, which is the step the icon never conveyed.
+ *
+ * Sized as a pill rather than the 29px circle `.studio-attach` gives it: a
+ * circle cannot hold words, and this is no longer an icon. */
+[data-shell="android"] .studio-refine {
+  width: auto !important;
+  min-width: 0 !important;
+  height: 29px !important;
+  padding: 0 9px !important;
+  border-radius: 999px !important;
+  color: var(--muted) !important;
+  font: 500 11px/1 var(--ui) !important;
+}
+[data-shell="android"] .studio-refine .lb {
+  white-space: nowrap;
+}
+/* The mode picker keeps its word and loses its marks.
+ *
+ * "Agent"/"Plan" is what the control says; the spark glyph in front and the
+ * chevron behind are decoration that costs ~28px of a row where the model name
+ * is already ellipsised. The word alone still says which mode is on, and the
+ * menu still opens on a tap — the chevron was an affordance, not the control. */
+[data-shell="android"] .studio-mode-picker .studio-icon {
+  display: none;
+}
+/* The row's own buttons come down from the 44px touch floor.
+ *
+ * That floor is right for a control standing alone, and wrong for this one:
+ * measured at 390px, a 44px stop button plus its label is wide enough to cover
+ * the model picker beside it, so the control that says which model is answering
+ * is the thing it hides. 36px is still comfortably above the ~24px a mouse
+ * build ships and still a full thumb target.
+ *
+ * Written here rather than beside the other composer rules above, because this
+ * is the one that has to win: `@media (pointer: coarse)` below sets the same
+ * three properties to `--tap`, and a rule earlier in the file would lose to it
+ * on source order alone. */
+[data-shell="android"] .studio-model-group {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+[data-shell="android"] .studio-model-control {
+  /* `studio.css` caps this at 180px; on a row this tight every pixel of the cap
+     is room the name does not get. */
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+[data-shell="android"] .studio-model-control .model-picker .nm {
+  min-width: 0;
+  max-width: none;
+}
+
+/* The composer sits above the readings row, not on the bottom edge of the
+   window, so its own 35px margin is left exactly as `studio.css` sets it. What
+   owns the last line is `.studio-meterrail` above, and the home indicator is
+   drawn over that line — so the inset goes there, once, rather than being added
+   to the composer's margin and moving the box up off its own spacing. */
+/* An error outranks the composer.
+ *
+ * `.cmpalert > .errbar` and `.composenotes > .errbar` are `position: fixed;
+ * bottom: 16px; z-index: 20` — inside the composer's own footprint, under the
+ * send and stop buttons, which sit in `.compose .row` and are painted later.
+ * On a desktop the bar is wide enough to read around them; on a phone it is the
+ * width of the window and its own dismiss button is exactly what the send
+ * button covers, so a message that says "close the other window first" cannot
+ * be dismissed. Raised above the composer and given the window's own margins.
+ *
+ * `.main > .errbar` — the bar shown when no pane is on screen — gets the same
+ * treatment, because there the thing below it is the same composer.
+ *
+ * 40 is above every control in the composer (`.studio-meterrail` is 12, a
+ * picker's menu 31) and below the full-screen sheets (`.prefs` is 60), which is
+ * the right order: a sheet covers the composer deliberately, and an error must
+ * not cover the sheet that is asking the question. */
+[data-shell="android"] :is(.cmpalert > .errbar, .composenotes > .errbar, .main > .errbar) {
+  z-index: 40;
+  left: 12px;
+  right: 12px;
+  /* Above the keyboard as well as the home indicator. The bar is what says why
+     a message was refused, and a refusal arrives exactly when someone is
+     typing — the state where the keyboard is up. Left at the home indicator it
+     sat under the keyboard and could not be read or dismissed. */
+  bottom: calc(12px + max(var(--safe-b), var(--ime-b, 0px)));
+  max-width: none;
+}
+
+/* Picture themes: on a phone the shadow goes, it is not made smaller.
+ *
+ * `app.css` gives every text surface a two-layer `text-shadow` while a theme
+ * has a picture behind it — a 1–2px drop and a 6–7px glow in the page colour.
+ * The glow is what keeps a transcript readable over a photograph on a desktop
+ * monitor; at a phone's text sizes the same shadow reads as a smudge under
+ * every glyph instead, and a reader notices the blur before the words.
+ * Reported as "every character has a shadow under it, and only the plain
+ * theme's characters do not" — that comparison is why this is `none` rather
+ * than a smaller shadow. A tight 1.5px edge was tried first and still read as
+ * soft, so the second layer was never the only problem.
+ *
+ * Readability does not rest on the shadow. Every surface named below carries
+ * its own translucent ground (`color-mix(in srgb, var(--page) 62%,
+ * transparent)`, kept on the pane by `studio.css`), and `--bg-overlay` dims the
+ * picture itself, so the glyphs keep their contrast without a halo. The layers
+ * `app.css` writes are all overridden here: `.rail/.side/.nav/.chrome/.tabs`
+ * carry `0 1px 2px` plus `0 0 6px`, `.flow:not([data-empty])` carries `0 0 7px`,
+ * and `.hero` carries `0 1px 3px` — nothing is left behind on a surface a phone
+ * shows.
+ *
+ * Scoped to this shell: the desktop keeps the halo it was designed around. */
+html[data-shell="android"]:root[data-bg] :is(.rail, .side, .nav, .chrome, .tabs, .flow, .hero) {
+  text-shadow: none;
+}
+/* The grain layer is `position: fixed` at `z-index: 9`, i.e. painted over the
+   whole interface including the text. Over a flat page that is a texture; over
+   a photograph the two speckles multiply, and the text under them is the thing
+   that loses contrast. The shell already gets the picture's own texture from
+   the picture, so the grain is dropped here and the theme stays as legible as
+   it was before a background was chosen. */
+html[data-shell="android"]:root[data-bg] .app::after {
+  display: none;
+}
+
+/* A settings sheet fills the phone's screen. Its own header and its scrolling
+   body both have to clear the bars they are now drawn under; `--main-pad-b` is
+   the sheet's own bottom padding, which the inset extends. */
+[data-shell="android"] .prefs-hd {
+  padding-top: calc(12px + var(--safe-t));
+}
+[data-shell="android"] .prefs {
+  padding-left: var(--safe-l);
+  padding-right: var(--safe-r);
+  /* The keyboard as well as the home indicator, and this panel is the one a
+     person meets again long after the wizard is gone.
+   *
+   * `.prefs` is `position: fixed; inset: var(--chrome-h) 0 0` — pinned to the
+   * window's own box, so when the window does not shrink for the keyboard
+   * (Android 15's forced edge-to-edge) the sheet keeps the full height and the
+   * field being typed into sits under the keys. It was taught to clear the
+   * safe-area inset but never the keyboard, and this is where the address and
+   * the API key get edited.
+   *
+   * Only the bottom is changed, and only by the larger of the two: with the
+   * keyboard down `--ime-b` is 0, so the value is the inset it always was. The
+   * grid centres the sheet in what is left, which is also what makes the
+   * browser's own focus-scroll land above the keys. */
+  padding-bottom: max(var(--safe-b), var(--ime-b, 0px));
+}
+
+/* The field that is being typed into lives in the sheet's own scrolling body,
+   and clearing the keyboard on the sheet only shortens it.
+ *
+ * `.prefs` stops the *sheet* running under the keys; the fields are inside
+ * `.prefs-main`, which is what scrolls, and its bottom padding is a flat
+ * `--main-pad-b` (64px). With the keyboard up — around 300px on a phone — the
+ * last field of a long section scrolls to the bottom of that 64px and stops
+ * under the keys, which is exactly the model-service page: an address, a key,
+ * a window, an output cap, then a probe button, all stacked. The padding has to
+ * grow by the keyboard's height so the scroll has somewhere to carry the field.
+ *
+ * Added to `--main-pad-b` rather than replacing it: with the keyboard down
+ * `--ime-b` is 0 and the value is the 64px it always was. `scroll-padding`
+ * matches, so a jump to a field (settings search, a failed probe) lands it clear
+ * of the keys rather than flush against them. */
+[data-shell="android"] .prefs-main {
+  padding-bottom: calc(var(--main-pad-b) + max(var(--safe-b), var(--ime-b, 0px)));
+  scroll-padding-bottom: calc(16px + max(var(--safe-b), var(--ime-b, 0px)));
+}
+
+/* The feedback sheet is the same fixed box, and it holds a multi-line field.
+ *
+ * `.fbk-veil` is `inset: var(--chrome-h) 0 0` with `place-items: center`, so it
+ * has the identical problem to `.prefs`: the card is centred in a box as tall as
+ * the window, and after Android 15 the window no longer shrinks for the
+ * keyboard. What it holds is a `<textarea>` a person types a bug report into,
+ * which makes it the worst place to lose sight of the cursor.
+ *
+ * `max(20px, …)` rather than the safe-area variable: this card has always sat
+ * 20px off the bottom and never cleared the home indicator, so keeping 20px as
+ * the floor changes nothing while the keyboard is down. */
+[data-shell="android"] .fbk-veil {
+  padding-bottom: max(20px, var(--ime-b, 0px));
+}
+
+/* The onboarding wizard's own top bar.
+ *
+ * The same omission as `.rail` above, and the one a new install meets first: it
+ * is flush with the top of the window, so on a phone its brand mark and the word
+ * `reasonix` sit under the status bar. Measured on a 390px viewport with a 47px
+ * top inset: the bar's first 47px were behind the clock and the battery.
+ *
+ * Grown rather than padded, because the bar's height is the anchor the wizard's
+ * `scroll-padding` below is written against. */
+[data-shell="android"] .onb-brandbar {
+  height: calc(64px + var(--safe-t));
+  padding-top: var(--safe-t);
+}
+[data-shell="android"] .onb-stage {
+  /* A jump to an error field — which is what a failed probe does — scrolls the
+     card to the top of the stage, and the bar is what it must clear. */
+  scroll-padding-top: calc(64px + var(--safe-t) + 12px);
+  /* The keyboard as well, and this page was the one still missing it.
+   *
+   * `studio.css` fixes this stage at `calc(100dvh / var(--zoom, 1))`, and after
+   * Android 15 an edge-to-edge window no longer shrinks for the keyboard: that
+   * `100dvh` is the height the window had with the keys *down*, the card stays
+   * centred in a box taller than the room left, and the URL and key fields sit
+   * under the keys while being typed into. `.compose` and `.errbar` were taught
+   * to read `--ime-b`; the wizard never was — the variable was consumed in
+   * exactly two places, neither of them here.
+   *
+   * Subtracted from the height rather than padded onto the bottom, because the
+   * card is centred by `margin: auto` in a flex column: a shorter stage
+   * re-centres it in the room that actually remains, and the scrollport the
+   * browser aims within then ends above the keys — so focusing a field brings
+   * it into view with no script of ours involved. */
+  height: calc(100dvh / var(--zoom, 1) - max(var(--safe-b), var(--ime-b, 0px)));
+  scroll-padding-bottom: calc(16px + max(var(--safe-b), var(--ime-b, 0px)));
+}
+
+/* Overlays hang from the chrome's bottom edge, and on a phone that edge moved.
+ *
+ * Every one of these is `inset: var(--chrome-h) 0 0` — anchored to the chrome's
+ * height, which is 54px on a desktop and *101px here*, because `.chrome` grows
+ * by the top inset so its own content clears the status bar. The variable is
+ * deliberately still 54: it is the height of a chrome's content row, and
+ * `.studio-brand` uses it to sit level with the row beside it. So the overlays
+ * are the things that have to be told, and they were not — measured at a 390px
+ * viewport, `.prefs` began at 54px while the chrome ended at 101px, so the
+ * settings sheet's backdrop covered the lower half of the chrome.
+ *
+ * (`--chrome-h` is not redefined for the shell instead, because that would move
+ * the brand mark and the rail's own padding by the inset a second time.)
+ *
+ * `.agent-tx-scrim` and `.fbk-veil` are the same shape in other files, and are
+ * named here rather than left to their own: this is the third time a fixed
+ * element has been found flush with a window edge on this shell, and the fix
+ * belongs in one place. */
+[data-shell="android"] :is(.prefs, .cpv, .tshot-full, .fbk-veil, .agent-tx-scrim) {
+  inset-block-start: calc(var(--chrome-h, 39px) + var(--safe-t));
+}
+[data-shell="android"] [data-fold~="scene"] .phonecard {
+  top: calc(var(--chrome-h, 45px) + 6px + var(--safe-t));
+}
+/* Its height cap is measured from the window's own edges, so it needs the same
+   correction or the card runs under the home indicator. */
+[data-shell="android"] .phonecard {
+  max-height: calc(100dvh - var(--chrome-h, 45px) - var(--safe-t) - 24px);
+}
+/* The scanner's menu is capped against the window the same way the card is, so
+   it takes the same correction. Its rows are 44px by design — the whole point
+   of the menu is that a thumb can hit a computer without aiming at the camera —
+   so a cap measured from the wrong chrome height drops the last row under the
+   home indicator exactly when a phone has several to come back to.
+ *
+ * Only the cap is corrected. The menu hangs under its own button, which is
+   already below the status bar by way of the chrome's padding, so a `top` that
+   added the inset here would push it down by the inset a second time. */
+[data-shell="android"] .scan-menu {
+  max-height: calc(100dvh - var(--chrome-h, 45px) - var(--safe-t) - 24px);
+}
+
+/* A settings row whose control is sized for a wide window has no room left for
+   its own label on a phone.
+ *
+ * `.lrow` is a flex row and its text is `flex: 1; min-width: 0`; the control
+ * beside it — `.threshold-control` — asks for `min(360px, 100%)`. On a phone the
+ * sheet's inner width is under 360px, so the control takes all of it and the text
+ * is squeezed to zero, which renders Chinese one character per line: the label
+ * reads top-to-bottom down the left edge and the description becomes a column of
+ * single glyphs. Measured on a 390px viewport before this rule.
+ *
+ * Stacked instead: the text gets the full width it needs and the control keeps
+ * its own row underneath, which is also the shape a thumb wants — a 30px field
+ * under a two-line explanation is easier to hit than one pushed to the margin. */
+[data-shell="android"] .lrow.threshold-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+[data-shell="android"] .lrow.threshold-row .threshold-control {
+  width: 100%;
+}
+
+/* The same collapse, without a named class to catch it: any row whose text is
+   beside a fixed-width control. Written as a guard rather than as a list of the
+   screens that have one today, because the next screen to add a row would not
+   be on that list. */
+[data-shell="android"] .lrow:has(> .tx) > :not(.tx) {
+  flex: none;
+  max-width: 45%;
+}
+[data-shell="android"] .lrow:has(> .tx) > .tx {
+  flex: 1 1 auto;
+}
+
+/* Touch targets. Upstream sizes these for a mouse, where a 24px affordance is
+   comfortable; a thumb needs the 44px above. Only the controls that are alone
+   in their row take the full square — a row of chips would wrap into a column
+   if each grew, so those keep their width and only take the height. */
+@media (pointer: coarse) {
+  [data-shell="android"] :is(.chrome button, .chrome [role="button"],
+    .rail button, .devicebar button, .act) {
+    min-height: var(--tap);
+  }
+  /* The composer's own row and the decision cards are where a thumb lands, so
+     the send button and an approval's answer take the floor in both axes. The
+     two answers must stay the same height as each other — upstream keeps that
+     at every width, and taking both to the floor keeps it here.
+     
+     36px for this row rather than the 44px `--tap`: measured at 390px, a 44px
+     stop button plus its label is wide enough to cover the model picker beside
+     it, so the control that says which model is answering is the thing it
+     hides. 36px is still comfortably above the ~24px a mouse build ships. */
+  [data-shell="android"] :is(.compose .row button, .compose .row .go, .send) {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  /* The stop button loses its label and keeps its mark, exactly as the send
+     button already does (`app.css`: `.btn.send > :not(.ic) { display: none }`).
+     With the word, it is the widest thing in the row and the one that covers
+     the model picker while a turn runs — which is when knowing the model
+     matters most. The square glyph is the same mark the desktop draws, and it
+     is what the send button beside it already is. */
+  [data-shell="android"] .btn.stop > :not(.ic) {
+    display: none;
+  }
+  [data-shell="android"] .btn.stop {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+  [data-shell="android"] :is(.dif-ask .row button, .ask .row button) {
+    min-height: var(--tap);
+  }
+}
+
+[data-shell="android"] .machrow {
+  grid-template-columns: 10px 6px minmax(0, 1fr) auto auto;
+  column-gap: 6px;
+}
+/* The words beside the plus, and they are the point: the mark alone was read as
+   "expand this row". Kept to the machine row on a phone — a desktop has the
+   hover tooltip and the room, and widening every row would re-wrap the tree.
+   
+   On the same row as the plus, immediately to its left: the label was put on
+   the row below and the two then read as two unrelated things, so the one row
+   that explains the mark was the one nobody connected to it. */
+[data-shell="android"] .machadd {
+  grid-area: 1 / 4;
+  justify-self: end;
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--w-reg) var(--fs-micro) var(--ui);
+  color: var(--ghost);
+}
+[data-shell="android"] .machpick {
+  grid-area: 1 / 5;
+}
+[data-shell="android"] .machrow:has(+ .wsnode) {
+  padding-bottom: 8px;
+}
+
+/* The workspace chip in the composer's status row.
+ *
+ * It takes the room the row already had: the mark and one word on the left, the
+ * token counts on the right, and a long gap between them. Pushed to that end
+ * with `margin-left: auto` so it reads as belonging to the same group as the
+ * counts rather than crowding the status word beside it — and so the row's
+ * height, which `.studio-runstate` fixes at 26px, does not change.
+ *
+ * `.mode` gives it a border and a press animation meant for the toolbar; in
+ * this row it is a reading you can change, so the border goes and the chevron
+ * carries the affordance. */
+/* A bordered pill rather than a bare reading.
+ *
+ * It began as one more fact in a row of facts — no border, no ground, so the
+ * only thing saying it could be tapped was the chevron. On a phone that is not
+ * enough: 修改工作区 is a thing people look for and the row gave them nothing to
+ * aim at. The border and the capsule ground are the affordance; the row's 26px
+ * height is what has to survive, so the pill stays at 22px and grows inwards. */
+[data-shell="android"] .studio-runstate .studio-workspace-picker {
+  margin-left: auto;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  gap: 4px;
+  background: var(--raised);
+  color: var(--muted);
+  font-weight: 500;
+}
+[data-shell="android"] .studio-runstate .studio-workspace-picker:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  transform: none;
+}
+[data-shell="android"] .studio-runstate .studio-workspace-picker .nm {
+  max-width: 30vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-shell="android"] .studio-runstate .studio-workspace-picker .studio-icon {
+  width: 11px;
+  height: 11px;
+  color: var(--ghost);
+}
+/* While a turn runs the label becomes a filled chip; the folder beside it stays
+   a plain reading, because it is not part of the run. */
+[data-shell="android"] .studio-runstate[data-running] .studio-workspace-picker {
+  color: var(--muted);
+}
+
+/* A phone has no hover, so a control that only appears on hover is one a thumb
+   cannot find: upstream already keeps those visible under `(hover: none)`. What
+   is added here is the half that upstream leaves to the shell — the row actions
+   the desktop reveals on hover, in the lists a phone actually shows. */
+@media (hover: none) {
+  [data-shell="android"] :is(.vrow, .memrow, .srvrow, .acctrow) .act {
+    opacity: 1;
+  }
+}
+
+/* A page that scrolls the body sideways is the exception upstream forbids, and
+   a phone is the surface where a wide table or a long token is most likely to
+   try. The rule is upstream's; this is the guard rail, and the report script
+   checks the same thing from the outside. */
+[data-shell="android"] :is(table, .code-wrap, .code-body) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* The mode control in the readings row.
+ *
+ * It reads like the row's other items — 10px, no ground, 25px tall — so the row
+ * keeps the one-line height it was measured at. The chevron stays, unlike the
+ * toolbar's copy: there, the row's own words were the label and the mark was
+ * decoration; here the control is a bare word sitting among readings, and
+ * without the chevron nothing says it opens anything. */
+[data-shell="android"] .studio-meterrail > .picker {
+  display: inline-flex;
+  align-items: center;
+}
+[data-shell="android"] .studio-meterrail .studio-meter-mode {
+  min-height: 25px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 5px;
+  gap: 3px;
+  background: transparent;
+  color: var(--faint);
+  font: 500 10px/1 var(--ui);
+}
+[data-shell="android"] .studio-meterrail .studio-meter-mode:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+  transform: none;
+}
+[data-shell="android"] .studio-meterrail .studio-meter-mode .studio-icon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  color: var(--ghost);
+}
+
+/* Keyboard hints come out on a phone.
+ *
+ * `Ctrl K` beside the session search, and the chords in a control's own tooltip,
+ * are labels for keys a phone does not have. Most were already gone — the
+ * sidebar's shortcut rows are not drawn on this shell at all — and what is left
+ * is the search field's, which is the one a thumb actually lands on. The
+ * shortcuts still work for anyone who pairs a keyboard; only the printed hint
+ * goes, because a hint nobody can act on is one more thing to read past. */
+[data-shell="android"] .wsfind kbd {
+  display: none;
+}
+
+/* A long press in the file tree means the row's menu, not the text.
+ *
+ * The explorer is inside `.scroll`, which this file opts into text selection
+ * because a transcript is something people copy out of. A file row is not: when
+ * the WebView finds selectable text under a long press it raises its own
+ * selection menu (复制 / 分享 / 全选 / 网页搜索) and the row's `contextmenu`
+ * never fires — which is why the same long press sometimes opened 另存为/分享/
+ * 导出到下载 and sometimes offered to copy a file's name. `offerReveal` refused
+ * to help either: it steps aside whenever a selection is non-empty, so the two
+ * faults compounded into "it works, except when it doesn't".
+ *
+ * Only the rows opt out. The search field keeps its selection, and so does the
+ * file's own text once it is open in the reading pane. */
+[data-shell="android"] :is(.workbench-filelist, .workbench-changes) :is(button, span, em, svg, i) {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The open file's bar on a phone: the export button joins Save, and both have to
+   be reachable with a thumb.
+ *
+ * The bar is a grid of five columns at a 390px viewport, and the path in the
+ * first one is a long absolute path that will not shrink — so the two buttons
+ * are held at the tap size the rest of this shell uses and the path keeps the
+ * ellipsis it already had. `导出到下载` is five characters, so it wraps to two
+ * lines before the label is dropped: the words are the button.
+ *
+ * Every area is named rather than left to auto-flow. The switcher spans the
+ * whole row, and with automatic placement the path and the two buttons were
+ * laid out into row 1 beside it while the switcher's own cells ran underneath
+ * them — the interactive buttons were painted over by the labels they share the
+ * grid with, which is how 导出到下载 stopped taking taps in the open view while
+ * the identical menu entry worked. Written out, the path owns row 1 column 1,
+ * the buttons own 1/2 and 1/3, and the switcher takes row 2 alone. */
+[data-shell="android"] .workbench-filebar {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  row-gap: 6px;
+  padding: 6px 10px;
+}
+[data-shell="android"] .workbench-filebar > strong { grid-area: 1 / 1 / 2 / 2; }
+[data-shell="android"] .workbench-filebar > [role="group"] {
+  grid-area: 2 / 1 / 3 / -1;
+  justify-content: flex-start;
+}
+[data-shell="android"] .workbench-filebar > .workbench-export { grid-area: 1 / 2 / 2 / 3; }
+[data-shell="android"] .workbench-filebar > .workbench-save { grid-area: 1 / 3 / 2 / 4; }
+[data-shell="android"] :is(.workbench-filebar .workbench-export, .workbench-filebar .workbench-save) {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   1.2.0
+   --------------------------------------------------------------------------- */
+
+/* An error at the bottom of a conversation outranks everything the composer
+   draws below it — the readings line and its amount mask included.
+ *
+ * `z-index: 40` was chosen against the sheets and is still the right ceiling,
+ * but on a phone the bar and the readings line land in the same 26px and the
+ * bar's own dismiss button ("知道了") is what the line sat on top of, so the
+ * tap went to the line underneath. Measured on the packaged page at 390x844:
+ * bar bottom 46, `.studio-meterrail` top 40 — a 6px overlap that took the whole
+ * button. 55 is above every control the composer owns and still below every
+ * sheet (`.prefs` is 60), which is the order that was always intended.
+ *
+ * Raising the bar alone did not work, and that is the part worth keeping: the
+ * `.cmpalert` wrapper is `position: absolute` with a `z-index` of its own, so
+ * it is a stacking context. A `z-index: 55` written on the bar is compared only
+ * against the bar's siblings *inside* that wrapper — the wrapper as a whole
+ * still sits at 6, under `.studio-meterrail` at 12. Measured again after that
+ * attempt: the button was still covered. So the wrapper is raised here too, and
+ * the two numbers are kept in step so neither can be changed alone. */
+[data-shell="android"] :is(.cmpalert, .composenotes) {
+  z-index: 55;
+}
+[data-shell="android"] :is(.cmpalert > .errbar, .composenotes > .errbar, .main > .errbar) {
+  z-index: 55;
+  pointer-events: auto;
+  /* Above the readings row, not on top of it. The rail is anchored 32px below
+     the composer and is 27px tall, so the band the bar was using (12px off the
+     window) is the same band the rail's lower half occupies — and this shell
+     adds the mode control to that rail, which makes the overlap worse rather
+     than better. 44px clears the rail's own top edge with the same 12px of
+     breathing room the bar had before. */
+  bottom: calc(44px + max(var(--safe-b), var(--ime-b, 0px)));
+}
+[data-shell="android"] :is(.cmpalert > .errbar, .composenotes > .errbar) > button {
+  position: relative;
+  z-index: 1;
+}
+
+/* A sheet is modal: nothing behind it takes a tap.
+ *
+ * `.prefs` is pinned below the chrome (`inset: var(--chrome-h) 0 0`), so the bar
+ * above it stayed live — and the first thing a thumb finds there is the rail
+ * toggle, which opened the sidebar over a sheet that is asking the one question
+ * on screen. `App` already marks the window with `data-prefs` while the sheet is
+ * up; this is the half that makes the mark mean something. `inert` on the two
+ * containers is the keyboard half, and it is set in `App.tsx` beside this. */
+[data-prefs] :is(.chrome, .rail, .devicebar, .panes, .compose, .studio-meterrail) {
+  pointer-events: none;
+}
+
+/* The remote form on a phone.
+ *
+ * `.rmtf` keeps its label in a fixed `13ch` column (`app.css`). At 390px that
+ * leaves the field about 200px, and the address, port and jump-host inputs hold
+ * longer strings than they can show — so the row ran past the sheet's right edge
+ * and out of the window. Above the field the label costs one line and the field
+ * takes the whole width, which is the same trade the rest of this shell makes. */
+[data-shell="android"] .rmtf {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+[data-shell="android"] .rmtf > span { width: auto }
+[data-shell="android"] .rmtck {
+  flex-direction: row;
+  align-items: center;
+}
+[data-shell="android"] .rmtck > span { width: auto }
+[data-shell="android"] .rmthint { margin-left: 0 }
+[data-shell="android"] .rmtform { grid-template-columns: minmax(0, 1fr) }
+
+/* The directory row is a field and a button on one line, and the pair is wider
+   than the sheet. The field already shrinks; the button does not, so the row
+   wraps instead of running off the edge. */
+[data-shell="android"] .prule { flex-wrap: wrap }
+[data-shell="android"] .prule > :is(input, code) { flex: 1 1 100% }
+[data-shell="android"] .prule .act { flex: 1 1 auto }

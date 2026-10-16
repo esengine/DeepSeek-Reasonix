@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shell's own furniture: a window background matching the page's light
+     palette before the WebView paints, and a transparent system bar so the
+     page's own safe-area padding is what the notch meets. The page themes
+     itself; this exists only so the first frame is not a white flash. -->
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.Reasonix" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- The page draws its own edge-to-edge layout and pads itself with the
+             safe-area insets from mobile.css. Laying the window out edge to edge
+             while leaving the bars transparent is what makes those insets real
+             numbers instead of zero. -->
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="p">shortEdges</item>
+        <item name="android:enforceStatusBarContrast" tools:targetApi="q">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
+    </style>
+
+    <!-- The camera. A black ground because the preview has not drawn yet and a
+         light window behind a dark viewfinder is a flash in the dark; the bars
+         stay transparent so the preview reaches the edges, which is what makes
+         a code near the top of the screen scannable. -->
+    <style name="Theme.Reasonix.Scan" parent="Theme.Reasonix">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

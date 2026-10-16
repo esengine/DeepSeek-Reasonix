@@ -3,6 +3,8 @@ package boot
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"strings"
 	"time"
 
 	"reasonix/internal/contract/config"
@@ -110,10 +112,52 @@ func addTools(reg *tool.Registry, tools []tool.Tool) {
 	}
 }
 
+// lspWithoutServer reports whether this host could only ever answer
+// `language server "gopls" not found on PATH`, so the tools should stay out of
+// the schema rather than be offered and then refuse on the first call.
+//
+// Android is that host, and for the same reason it has no browser tools: every
+// built-in spec launches a language server off PATH (`gopls`, `rust-analyzer`,
+// `typescript-language-server`, …), and a phone has none of them, no package
+// manager to install one with, and no place a project's sources would be. A
+// remote workspace is the case a phone actually has — and there the server runs
+// on the machine the workspace is on, so this host's own PATH is not what
+// answers.
+//
+// A host that names a command in `[lsp.servers]` is taken at its word, the way
+// a named `[browser] executable` is: someone who says where their language
+// server is has one, and the manager decides the rest at first query.
+func lspWithoutServer(goos string, cfg config.LSPConfig) bool {
+	if goos != "android" {
+		return false
+	}
+	for _, spec := range LSPSpecs(cfg) {
+		if strings.TrimSpace(spec.Command) != "" && !isBuiltinLSPCommand(spec.Command) {
+			return false
+		}
+	}
+	return true
+}
+
+// isBuiltinLSPCommand reports a command that is one of the shipped defaults
+// rather than a host's own. The defaults are what a phone cannot have; a
+// command someone wrote into their config is the one case this check yields to.
+func isBuiltinLSPCommand(command string) bool {
+	for _, spec := range lsp.DefaultSpecs() {
+		if spec.Command == command {
+			return true
+		}
+	}
+	return false
+}
+
 // registerLSP adds the LSP tools. Servers resolve on PATH and spawn on first
 // query, so registering is cheap even with none installed.
 func registerLSP(reg *tool.Registry, cfg *config.Config, root string) *lsp.Manager {
 	if !cfg.LSP.Enabled {
+		return nil
+	}
+	if lspWithoutServer(runtime.GOOS, cfg.LSP) {
 		return nil
 	}
 	specs := LSPSpecs(cfg.LSP)

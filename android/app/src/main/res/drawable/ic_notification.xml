@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The status-bar glyph, not the launcher icon: Android renders a notification
+     icon as a mask, so anything that is not a solid silhouette on transparency
+     comes out as a grey blob. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M3,4h18v2H3zM3,9h18v2H3zM3,14h12v2H3zM3,19h12v2H3zM17.5,13.2l1.6,2.6 1.6,-2.6h2.3l-2.8,4.3V21h-2.2v-3.5L15.2,13.2z" />
+</vector>

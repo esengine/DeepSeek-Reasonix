@@ -339,3 +339,59 @@ func filelockAcquire(path string) (func(), error) {
 	// Local import shim for tests in this package.
 	return tryLockForTest(path)
 }
+
+// The bug this holds: a phone restarts its kernel on every cold start, and each
+// restart leaves the previous process's temporary directory behind with its
+// owner lock already released. Those used to wait 24h, so five of them piled up
+// inside one day and read as the app leaking storage. A released lock is the
+// whole answer; the age is only there for the microseconds between a directory
+// being made and its lock being taken.
+func TestReleasedOwnerIsSweptBeforeTheDayIsOut(t *testing.T) {
+	root := testenv.TempDir(t)
+	now := time.Now()
+
+	fresh, err := os.MkdirTemp(root, dirPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	released, err := os.MkdirTemp(root, dirPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := filelockAcquire(filepath.Join(released, ownerLockName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r()
+	// Two hours old: past graceAge, well inside what staleAge used to allow.
+	if err := os.Chtimes(released, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Held, and just as old: the lock is what protects it, not its age.
+	held, err := os.MkdirTemp(root, dirPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, err := filelockAcquire(filepath.Join(held, ownerLockName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keep()
+	if err := os.Chtimes(held, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupStale(root, func() time.Time { return now })
+
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("fresh dir removed: %v", err)
+	}
+	if _, err := os.Stat(released); !os.IsNotExist(err) {
+		t.Fatalf("a released owner two hours old should be swept: %v", err)
+	}
+	if _, err := os.Stat(held); err != nil {
+		t.Fatalf("a held dir removed while its owner lives: %v", err)
+	}
+}

@@ -40,6 +40,10 @@ type Session struct {
 	lost     map[string]bool   // tabs closed outside the agent since it last opened one
 	changed  func()
 	checks   browserCallChecks
+
+	// shell is non-nil when this session is backed by the phone's WebView
+	// rather than a Chromium process. Every public method delegates to it.
+	shell *ShellSession
 }
 
 type browserCallChecks struct {
@@ -52,6 +56,24 @@ func NewSession(cfg Config) *Session {
 		cfg.Pool = &Pool{}
 	}
 	return &Session{cfg: cfg, openedBy: map[string]string{}, lost: map[string]bool{}}
+}
+
+// NewSessionFromShell creates a Session backed by the phone's WebView,
+// reached over loopback HTTP. The returned *Session carries the same surface
+// BrowserTools expects, so the tools work unchanged; each method delegates
+// to the ShellSession when the shell field is set.
+//
+// token is the shared secret the shell minted for this launch. The server
+// listens on loopback, which every other process on the phone can reach, and
+// the routes it exposes run script in and read text out of whatever page is
+// loaded — so the shell refuses any call that does not carry it.
+func NewSessionFromShell(baseURL string, roots []string, token string) *Session {
+	return &Session{
+		cfg:      Config{Roots: roots},
+		shell:    NewShellSession(baseURL, roots, token),
+		openedBy: map[string]string{},
+		lost:     map[string]bool{},
+	}
 }
 
 // TabInfo is what a tab is showing. Target is the browser's own id for the
@@ -105,6 +127,10 @@ func (s *Session) dropEngineLocked() {
 // OnTabsChanged names who hears that a tab opened, closed, became active or
 // navigated. It replaces whoever heard before.
 func (s *Session) OnTabsChanged(fn func()) {
+	if s.shell != nil {
+		s.shell.OnTabsChanged(fn)
+		return
+	}
 	s.mu.Lock()
 	s.changed = fn
 	s.mu.Unlock()
@@ -122,6 +148,10 @@ func (s *Session) tabsChanged() {
 // Retain adds an owner. A session outlives a rebuild by being retained by the
 // runtime that replaces its owner before that owner releases it.
 func (s *Session) Retain() {
+	if s.shell != nil {
+		s.shell.Retain()
+		return
+	}
 	s.mu.Lock()
 	s.owners++
 	s.mu.Unlock()
@@ -129,6 +159,10 @@ func (s *Session) Retain() {
 
 // Release drops an owner, and closes the session when it was the last one.
 func (s *Session) Release() {
+	if s.shell != nil {
+		s.shell.Release()
+		return
+	}
 	s.mu.Lock()
 	if s.owners > 0 {
 		s.owners--
@@ -142,6 +176,10 @@ func (s *Session) Release() {
 
 // Close closes this session's tabs and releases its browser.
 func (s *Session) Close() {
+	if s.shell != nil {
+		s.shell.Close()
+		return
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -171,6 +209,9 @@ func (s *Session) Close() {
 // Origin is the scheme, host and port of the page a tab shows ("" is the
 // active tab), or "" when it shows no page. A local file's origin is file://.
 func (s *Session) Origin(tabID string) string {
+	if s.shell != nil {
+		return s.shell.Origin(tabID)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return ""
@@ -183,6 +224,9 @@ func (s *Session) Origin(tabID string) string {
 // host's answer, not the model's: a step may have navigated away from what it
 // asked for.
 func (s *Session) PageURL(tabID string) string {
+	if s.shell != nil {
+		return s.shell.PageURL(tabID)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return ""
@@ -191,8 +235,24 @@ func (s *Session) PageURL(tabID string) string {
 	return raw
 }
 
+// SingleContext reports whether this session drives one browsing context
+// rather than many. The phone's WebView is one: a request for a new tab loads
+// the address in the view already open, and a caller has to say so rather than
+// let the model believe a second tab now exists.
+func (s *Session) SingleContext() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shell != nil
+}
+
 // Tabs lists this session's tabs in the order they opened.
 func (s *Session) Tabs() []TabInfo {
+	if s.shell != nil {
+		return s.shell.Tabs()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]TabInfo, 0, len(s.tabs))
@@ -230,6 +290,9 @@ func (s *Session) tab(id string) (*tab, error) {
 // Open navigates a tab to rawURL and waits for it to load. newTab opens a fresh
 // tab; otherwise the named tab, or the active one, navigates.
 func (s *Session) Open(ctx context.Context, rawURL, tabID string, newTab bool) (TabInfo, error) {
+	if s.shell != nil {
+		return s.shell.Open(ctx, rawURL, tabID, newTab)
+	}
 	return s.open(ctx, rawURL, tabID, newTab, true, false)
 }
 
@@ -238,6 +301,9 @@ func (s *Session) Open(ctx context.Context, rawURL, tabID string, newTab bool) (
 // referencing a host it cannot reach never fires load, and the person already
 // sees it; the agent's Open still waits, because it reads what loaded.
 func (s *Session) Visit(ctx context.Context, rawURL, tabID string, newTab bool) (TabInfo, error) {
+	if s.shell != nil {
+		return s.shell.Visit(ctx, rawURL, tabID, newTab)
+	}
 	return s.open(ctx, rawURL, tabID, newTab, false, false)
 }
 
@@ -246,6 +312,9 @@ func (s *Session) Visit(ctx context.Context, rawURL, tabID string, newTab bool) 
 // person opened must not become one, even for the moment a load takes. Only a
 // session with no active tab gives it to the new one.
 func (s *Session) VisitBeside(ctx context.Context, rawURL string) (TabInfo, error) {
+	if s.shell != nil {
+		return s.shell.VisitBeside(ctx, rawURL)
+	}
 	return s.open(ctx, rawURL, "", true, false, true)
 }
 
@@ -310,6 +379,9 @@ func (s *Session) activate(t *tab) {
 
 // Switch makes a tab the active one.
 func (s *Session) Switch(tabID string) (TabInfo, error) {
+	if s.shell != nil {
+		return s.shell.Switch(tabID)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return TabInfo{}, err

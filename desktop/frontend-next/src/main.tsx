@@ -15,7 +15,6 @@ import "./styles/phonecomposer.css";
 import "./styles/tips.css";
 import "./styles/skillpin.css";
 import "./styles/waitnote.css";
-import "./styles/contentmatches.css";
 import "./styles/jsontext.css";
 import "./styles/narrow.css";
 import "./styles/workfold.css";
@@ -44,11 +43,19 @@ import "./styles/modelmenu.css";
 import "./styles/runsignals.css";
 import "./styles/toasts.css";
 import "./styles/overview.css";
+// Last: it keys off `data-shell="android"`, which the line below sets, and it
+// only exists to describe what an installed phone shell adds to the screens
+// above. Loading it on a desktop is inert by construction.
+import "./styles/mobile.css";
 import { App } from "./ui/App";
 import { SseHub } from "./port/hub";
 import { HttpError } from "./port/http_error";
 import type { HubPort } from "./port/hub";
 import { install as installFileDrop } from "./ui/filedrop";
+// Imported for its side effect: it publishes `window.__reasonixBack`, which the
+// phone shell's back gesture calls. Imported here rather than from a component
+// so the entry point exists before the first layer can open.
+import "./ui/backstack";
 import { host } from "./port/host";
 import { play } from "./boot/intro";
 import { settled } from "./boot/gate";
@@ -144,7 +151,10 @@ void host()
   .describe()
   .then(({ shell, platform, titleBar }) => {
     const root = document.documentElement.dataset;
-    root.shell = shell;
+    // index.html has already answered this one when a phone shell announced
+    // itself: the page's own bridge knows a WebView, not the shell around it,
+    // and overwriting "android" with "browser" would drop every safe-area rule.
+    if (root.shell !== "android") root.shell = shell;
     if (platform) root.platform = platform;
     if (titleBar) root.titlebar = "app";
   });

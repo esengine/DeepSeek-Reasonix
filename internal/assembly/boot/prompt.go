@@ -63,9 +63,15 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 	// transient blocks, so this prefix is identical for every project on the
 	// machine; per-project text added here would diverge every byte after it.
 	if cfg.EnvironmentEnabled() {
-		shellLabel := shell.Kind.String()
-		if strings.TrimSpace(cfg.Tools.Shell.Path) != "" {
-			shellLabel = shell.Path
+		// The interpreter the shell tool actually resolved, not the name of the
+		// kind it wanted. On Android that is `/system/bin/sh`, and calling it
+		// "bash" there names a program the device does not have — a phone's own
+		// report had to check twice whether the block was describing this
+		// machine. An explicit `[tools.shell] path` is what runs, so it is
+		// reported as itself.
+		shellLabel := strings.TrimSpace(shell.Path)
+		if shellLabel == "" {
+			shellLabel = shell.Kind.String()
 		}
 		if label := shell.Description(); label != "" {
 			shellLabel = label
@@ -89,6 +95,11 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 	}
 	timer.mark("environment")
 	sysPrompt = appendOfflineEnvironmentNote(sysPrompt, cfg.Environment.Offline)
+	// Which surface this is. A phone is a different machine to plan for, and the
+	// environment section above describes the host without saying so.
+	if note := platformNote(); note != "" {
+		sysPrompt += "\n\n" + note
+	}
 
 	// Memory folds in exactly here, once, becoming part of the durable prefix,
 	// so it costs nothing per turn. Mid-session changes ride the controller's

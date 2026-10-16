@@ -377,6 +377,21 @@ func (s *DeviceShare) CloudOffer() (CloudShareOffer, error) {
 	return CloudShareOffer{URL: link, QR: svg}, nil
 }
 
+// emptyIfNil keeps a JSON array an array.
+//
+// `addresses` is `null` when no interface could be enumerated, which is the
+// ordinary answer on Android: the platform forbids reading `/proc/net/dev`, so
+// the enumeration finds nothing. A window that reads `.length` off `null`
+// throws, and the error boundary that catches it takes the whole settings
+// section down with it — so the field is a list on the wire, always, whatever
+// the machine could enumerate.
+func emptyIfNil[T any](in []T) []T {
+	if in == nil {
+		return []T{}
+	}
+	return in
+}
+
 // Status reports what is open, what could be, and who is paired.
 func (s *DeviceShare) Status() ShareStatus {
 	s.mu.Lock()
@@ -384,7 +399,8 @@ func (s *DeviceShare) Status() ShareStatus {
 	cloudStatus := s.cloudStatus
 	port := s.port
 	s.mu.Unlock()
-	st := ShareStatus{Port: port, Addresses: s.addresses(), Devices: s.registry.Devices(), CloudDevices: s.cloud.views()}
+	st := ShareStatus{Port: port, Addresses: emptyIfNil(s.addresses()),
+		Devices: emptyIfNil(s.registry.Devices()), CloudDevices: emptyIfNil(s.cloud.views())}
 	if cloudStatus != nil {
 		st.CloudRemote = cloudStatus()
 	}

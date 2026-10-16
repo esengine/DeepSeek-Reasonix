@@ -28,13 +28,30 @@ const probeSnapshotTTL = 24 * time.Hour
 // 2: results carry the executable they resolved to, and the fingerprint keys
 // on PATH rather than on the workspace's deny roots. A v1 file describes one
 // workspace and cannot be checked against another's, so it is not read.
-const probeSnapshotVersion = 2
+// 3: the stored fingerprint is a digest rather than the key, so the PATH the
+// key is built from is no longer written to disk.
+const probeSnapshotVersion = 3
 
 type probeSnapshot struct {
-	Version     int           `json:"version"`
+	Version int `json:"version"`
+	// Fingerprint is the digest of the key this snapshot answers, never the key
+	// itself. The key contains the machine's whole PATH — that is what decides
+	// what a probe resolves to, so it has to be part of the identity — and
+	// writing it out verbatim put a list of the system's directories in a file
+	// under the shared cache root for no benefit: the digest is all the read
+	// path compares against, and it is what the filename is already made of.
 	Fingerprint string        `json:"fingerprint"`
 	StoredAt    time.Time     `json:"stored_at"`
 	Results     []ProbeResult `json:"results"`
+}
+
+// fingerprintDigest is what a snapshot stores and compares: the sha256 of the
+// probe key, in the same spelling the filename uses. A file written by an
+// earlier version holds the key itself, and is rejected rather than trusted —
+// the version below is what tells the two apart.
+func fingerprintDigest(fingerprint string) string {
+	sum := sha256.Sum256([]byte(fingerprint))
+	return fmt.Sprintf("%x", sum)
 }
 
 func probeSnapshotPath(dir, fingerprint string) string {
@@ -62,7 +79,7 @@ func loadProbeSnapshot(dir, fingerprint string) (probeSnapshot, bool) {
 	if err := json.Unmarshal(b, &snap); err != nil {
 		return probeSnapshot{}, false
 	}
-	if snap.Version != probeSnapshotVersion || snap.Fingerprint != fingerprint {
+	if snap.Version != probeSnapshotVersion || snap.Fingerprint != fingerprintDigest(fingerprint) {
 		return probeSnapshot{}, false
 	}
 	return snap, true
@@ -75,7 +92,7 @@ func saveProbeSnapshot(dir, fingerprint string, results []ProbeResult, now time.
 	}
 	b, err := json.Marshal(probeSnapshot{
 		Version:     probeSnapshotVersion,
-		Fingerprint: fingerprint,
+		Fingerprint: fingerprintDigest(fingerprint),
 		StoredAt:    now,
 		Results:     results,
 	})

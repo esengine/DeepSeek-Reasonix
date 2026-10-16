@@ -225,7 +225,7 @@ func (p fleetPlan) validateConcurrentWriteClaims(claims []writeclaim.WritePathSe
 				continue
 			}
 			if claims[i].Overlaps(claims[j]) {
-				return fmt.Errorf("%s and %s can run at the same time and their write claims conflict; add a depends_on between them or give them disjoint write_paths",
+				return fmt.Errorf("%s and %s can run at the same time and their write claims conflict; add a depends_on between them, give them disjoint write_paths, or mark the ones that only read with read_only: true (a task with no write_paths claims the whole workspace, so two such tasks cannot run at once)",
 					p.describe(i), p.describe(j))
 			}
 		}

@@ -173,7 +173,11 @@ var English = Messages{
 	AskURLOpenFailed:                "Could not open the browser. Retry, or open the displayed address manually.",
 	AskURLSending:                   "Sending your decision…",
 	AskURLAnswerFailed:              "Could not send your decision. Please retry.",
-	AskTypeSomething:                "Type something else",
+
+	BrowserNavigationFailed:  "This page could not be opened (%s). A name that does not resolve is usually an intranet address or one that needs the company network or a VPN; a refused connection usually means the service is not running or the port is wrong.",
+	BrowserNavigationTimeout: "This page never answered, so waiting stopped (%s). A site unreachable from here hangs this long; try an address that responds.",
+
+	AskTypeSomething: "Type something else",
 	AskTypingHint:                   "type below, Enter to confirm",
 	AskNoteHint:                     "note for this choice below, Enter to confirm",
 	AskChatInstead:                  "None — just chat",
@@ -661,6 +665,7 @@ var English = Messages{
 	ProviderErrAuthRejected:        "Authentication failed (HTTP 401): the server rejected your API key. It may be wrong or expired, or the provider hit a transient auth/quota issue — retried with backoff and still failed. Try again shortly, or check the key in .env / run `reasonix setup`.",
 	ProviderErrDNSNotFound:         "Cannot resolve the model service domain name %s: the DNS lookup found no such host, so no connection was made and nothing was retried. Check the network, DNS and proxy settings, and the provider base URL.",
 	ProviderErrDNSTemporary:        "Cannot resolve the model service domain name %s: the DNS lookup failed temporarily (resolver unreachable or timed out), so no connection was made. Check the network, DNS and proxy settings, then retry.",
+	ProviderErrCertificateFmt:      "TLS certificate verification failed: %s. The certificate is not issued for this domain, so the handshake was refused and nothing was retried. The usual cause is a poisoned DNS answer that points the name at someone else's server, or a decrypting proxy on the path. Check any VPN, proxy or accelerator app, or switch networks and retry.",
 	ProviderErrInsufficientBalance: "Insufficient balance (HTTP 402): your account is out of credit. Top up your account, then retry.",
 	ProviderErrUnprocessable:       "Invalid parameters (HTTP 422): a request parameter was rejected. This is likely a bug — please report it if it persists.",
 	ProviderErrInputSensitive:      "MiniMax rejected the input during content review (error 1026). The review may include conversation history and tool results; adjust the relevant content or start a new session with only the necessary context. Repeating the same request is unlikely to help.",

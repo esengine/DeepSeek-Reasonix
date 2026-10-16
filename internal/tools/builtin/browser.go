@@ -3,9 +3,11 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"reasonix/internal/base/i18n"
 	"reasonix/internal/base/textutil"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/platform/browser"
@@ -71,6 +73,33 @@ func tabArg(args json.RawMessage) string {
 
 var errNoBrowser = &browser.Failure{Code: browser.CodeEngineMissing, Detail: "no browser is available in this runtime"}
 
+// sayBrowserFailure adds the reader's-language sentence to a browser failure
+// whose English detail is a Chromium error name.
+//
+// The kernel reports a failed navigation as `<url>: ERR_NAME_NOT_RESOLVED`,
+// which names the fault and says nothing about what to do with it. A sentence
+// costs nothing here and is the difference between a person acting and a person
+// staring; the browser's own name stays beside it, because that is what a
+// search or a colleague will recognise. Wording comes from the kernel's
+// catalog, so this reads in whatever language the session is running in.
+func sayBrowserFailure(err error) error {
+	var f *browser.Failure
+	if err == nil || !errors.As(err, &f) {
+		return err
+	}
+	switch f.Code {
+	case browser.CodeNavigationFailed:
+		if s := strings.TrimSpace(i18n.M.BrowserNavigationFailed); s != "" {
+			return &browser.Failure{Code: f.Code, Ref: f.Ref, Detail: fmt.Sprintf(s, f.Detail)}
+		}
+	case browser.CodeNavigationTimeout:
+		if s := strings.TrimSpace(i18n.M.BrowserNavigationTimeout); s != "" {
+			return &browser.Failure{Code: f.Code, Ref: f.Ref, Detail: fmt.Sprintf(s, f.Detail)}
+		}
+	}
+	return err
+}
+
 type browserOpen struct{ session *browser.Session }
 
 func (browserOpen) Name() string { return "browser_open" }
@@ -124,7 +153,7 @@ func (b browserOpen) Execute(ctx context.Context, args json.RawMessage) (string,
 	switch {
 	case p.Close:
 		if err := b.session.CloseTab(ctx, p.Tab); err != nil {
-			return "", err
+			return "", sayBrowserFailure(err)
 		}
 		return renderTabs(b.session.Tabs()), nil
 	case p.URL == "":
@@ -132,18 +161,36 @@ func (b browserOpen) Execute(ctx context.Context, args json.RawMessage) (string,
 			return "", &browser.Failure{Code: browser.CodeBadStep, Detail: "give a url to load, or a tab to switch to"}
 		}
 		if _, err := b.session.Switch(p.Tab); err != nil {
-			return "", err
+			return "", sayBrowserFailure(err)
 		}
 	default:
 		if _, err := b.session.Open(ctx, p.URL, p.Tab, p.NewTab); err != nil {
 			if browser.CodeOf(err) != browser.CodeNavigationTimeout {
-				return "", err
+				return "", sayBrowserFailure(err)
 			}
 			out, _ := b.snapshot(ctx)
-			return out, err
+			return newTabNote(out, b.session, p.NewTab), sayBrowserFailure(err)
 		}
 	}
-	return b.snapshot(ctx)
+	out, err := b.snapshot(ctx)
+	if err != nil {
+		return "", sayBrowserFailure(err)
+	}
+	return newTabNote(out, b.session, p.NewTab), nil
+}
+
+// newTabNote says what this backend did with a request for a new tab.
+//
+// The phone's WebView is one browsing context: a second tab cannot exist, so
+// the address asked for was loaded in the view already there and the snapshot
+// below describes that same view. Left unsaid, the model reads it as a second
+// tab it can return to. Said once, on the call that asked, it costs a line and
+// removes a wrong belief.
+func newTabNote(out string, s *browser.Session, newTab bool) string {
+	if !newTab || s == nil || !s.SingleContext() {
+		return out
+	}
+	return "Note: this browser has a single view, so new_tab loaded the address in it instead of opening a second tab.\n" + out
 }
 
 func (b browserOpen) snapshot(ctx context.Context) (string, error) {
@@ -222,7 +269,7 @@ func (b browserRead) ExecuteWithImages(ctx context.Context, args json.RawMessage
 	case "", "snapshot":
 		snap, err := b.session.Snapshot(ctx, p.Tab, p.Ref)
 		if err != nil {
-			return "", nil, err
+			return "", nil, sayBrowserFailure(err)
 		}
 		limit := browserSnapshotLines
 		if p.Limit > 0 {
@@ -232,13 +279,13 @@ func (b browserRead) ExecuteWithImages(ctx context.Context, args json.RawMessage
 	case "screenshot":
 		url, info, err := b.session.Screenshot(ctx, p.Tab)
 		if err != nil {
-			return "", nil, err
+			return "", nil, sayBrowserFailure(err)
 		}
 		return tabLine(info) + "\n[image: screenshot]", []string{url}, nil
 	case "logs":
 		entries, info, err := b.session.Logs(p.Tab)
 		if err != nil {
-			return "", nil, err
+			return "", nil, sayBrowserFailure(err)
 		}
 		if len(entries) == 0 {
 			return tabLine(info) + "\nNothing new reported.", nil, nil
@@ -250,13 +297,13 @@ func (b browserRead) ExecuteWithImages(ctx context.Context, args json.RawMessage
 		}
 		snap, err := b.session.Snapshot(ctx, p.Tab, p.Ref)
 		if err != nil {
-			return "", nil, err
+			return "", nil, sayBrowserFailure(err)
 		}
 		return renderFound(snap, p.Text, max(p.Limit, 0)), nil, nil
 	case "network":
 		requests, info, err := b.session.Requests(p.Tab)
 		if err != nil {
-			return "", nil, err
+			return "", nil, sayBrowserFailure(err)
 		}
 		return tabLine(info) + "\n" + renderRequests(requests, p.Text, max(p.Limit, 0)), nil, nil
 	case "tabs":
@@ -361,6 +408,7 @@ func (b browserAct) Execute(ctx context.Context, args json.RawMessage) (string, 
 		return "", &browser.Failure{Code: browser.CodeBadStep, Detail: "steps is empty"}
 	}
 	res, stepErr := b.session.Act(ctx, p.Tab, p.Steps, b.session.SecretsConfirmed(args), b.session.ScriptOrigin(args))
+	stepErr = sayBrowserFailure(stepErr)
 	var out strings.Builder
 	fmt.Fprintf(&out, "Completed %d of %d step(s).\n", res.Done, len(p.Steps))
 	for i, note := range res.Notes {
@@ -551,6 +599,8 @@ func requestLine(r browser.Request) string {
 	switch {
 	case r.Failed != "":
 		fmt.Fprintf(&b, " → failed: %s", r.Failed)
+	case r.ResponseUnknown:
+		b.WriteString(" → sent, response not visible on this backend")
 	case r.Status == 0:
 		b.WriteString(" → in flight")
 	default:

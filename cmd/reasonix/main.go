@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime/debug"
 
+	"reasonix/internal/base/netdns"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/frontend/cli"
@@ -16,6 +17,15 @@ import (
 	_ "reasonix/internal/model/responses"
 	_ "reasonix/internal/tools/builtin"
 )
+
+// Name resolution before anything opens a socket. On Android a CGO-free build
+// cannot read the system's DNS servers — there is no `/etc/resolv.conf`, and the
+// cgo resolver the platform expects is not in a static binary — so the app hands
+// them in through `REASONIX_DNS` and this installs them. Everywhere else the
+// variable is absent and this does nothing.
+func init() {
+	netdns.Install()
+}
 
 // Build identity injected via -ldflags (see Makefile). version remains the
 // single-line contract for `reasonix --version`; gitCommit/buildTimeUTC feed

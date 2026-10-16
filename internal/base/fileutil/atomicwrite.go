@@ -124,6 +124,22 @@ var createLink = os.Link
 // AtomicCreateFile publishes a complete file only when path is still absent.
 // It is the non-overwriting counterpart to AtomicWriteFile: a concurrent writer
 // that creates path wins, and its file is never replaced.
+//
+// Two ways of publishing, because one platform refuses the first. `os.Link` is
+// the better one — the file appears whole or not at all, and the kernel decides
+// the race — but Android's SELinux policy denies an app the hard-link operation
+// even inside its own directory:
+//
+//	ln: cannot create hard link from 'src' to 'dst': Permission denied
+//
+// and every caller of this function then fails: the launch token a serve writes,
+// the registration a web instance writes, the snapshot a config repair writes.
+// So a refusal falls back to `O_EXCL`, which keeps the half of the contract that
+// matters to the callers — an existing file is never replaced, and the winner of
+// a race is still decided by the kernel — and gives up only the property that a
+// reader never sees a partial file. For a token, a registration record and a
+// snapshot of a config that is already on disk, a torn write on a crash is
+// recoverable; a write that cannot happen at all is not.
 func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 	tmpPath, err := writeAtomicTemp(path, data, perm)
 	if err != nil {
@@ -132,8 +148,46 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 	defer os.Remove(tmpPath)
 	if renameErr := createRenameNoReplace(tmpPath, path); renameErr != nil {
 		if linkErr := createLink(tmpPath, path); linkErr != nil {
+			if linkDenied(linkErr) {
+				return publishExclusively(path, data, perm)
+			}
 			return fmt.Errorf("publish new file %s: %w", path, errors.Join(renameErr, linkErr))
 		}
+	}
+	return nil
+}
+
+// linkDenied reports a hard link the platform refused rather than one that could
+// not work for a reason of the caller's making: a cross-device link, a missing
+// directory and a full disk all stay errors, because the fallback would fail
+// them too and the caller should hear why.
+func linkDenied(err error) bool {
+	return errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EPERM)
+}
+
+// publishExclusively is AtomicCreateFile without the hard link: create only if
+// absent, write, and take the file away again if the write did not finish.
+func publishExclusively(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return fmt.Errorf("publish new file %s: %w", path, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(path)
+		return fmt.Errorf("write new file %s: %w", path, err)
+	}
+	// Synced before the close, so a crash after the name exists still leaves the
+	// bytes behind it. Without this the fallback would be weaker than the link
+	// path in the one way that matters most on the platform that needs it.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(path)
+		return fmt.Errorf("fsync new file %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return fmt.Errorf("close new file %s: %w", path, err)
 	}
 	return nil
 }

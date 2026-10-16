@@ -58,7 +58,29 @@ func (webFetch) SnipHint() tool.SnipHint {
 	return tool.SnipHint{Head: 120, Tail: 12, HeadChars: 12000, TailChars: 2000}
 }
 
-var lookupFetchHost = net.DefaultResolver.LookupIPAddr
+// lookupFetchHost resolves a host through the process's current resolver, read
+// at call time rather than bound here.
+//
+// The binding is the whole point of the indirection. `net.DefaultResolver` is
+// a package variable that `netdns.Install` *replaces* — on Android it is the
+// only thing standing between this tool and `127.0.0.1:53`, where nothing
+// listens, because a CGO-free Go binary reads no `/etc/resolv.conf` and the
+// platform keeps its servers in `netd`. Taking the method value once, in a
+// package-level initialiser, captures the resolver as it was *before* that
+// install ran: Go initialises an imported package before the importing one, so
+// this file's init precedes `main`'s, and every fetch resolved through the
+// default that had already been discarded.
+//
+// Measured as `lookup example.com on [::1]:53: read udp ...: connection refused`
+// while `ping example.com` from the same shell answered, and `web_fetch` to a
+// loopback address worked — the tool was fine, its resolver was the stale one.
+// Calling through on each use costs a field read and cannot go stale.
+//
+// Kept a variable rather than a plain function because the SSRF guard's tests
+// replace it to describe a DNS answer without a network.
+var lookupFetchHost = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
+}
 
 // ssrfGuardedTransport refuses to connect to private, link-local, or unspecified
 // addresses — the SSRF surface a prompt-injected fetch would aim at (cloud

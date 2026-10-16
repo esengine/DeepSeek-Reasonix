@@ -107,6 +107,23 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# no_proxy   = \"localhost,127.0.0.1,.local\"   # honored for proxy_mode = \"custom\"\n")
 		}
+		// Named rather than left to the system, for the case where the system's
+		// answer is the one being interfered with. Both are shown with an example
+		// so the shape is discoverable without the docs.
+		if len(c.Network.DNSServers) > 0 {
+			quoted := make([]string, 0, len(c.Network.DNSServers))
+			for _, s := range c.Network.DNSServers {
+				quoted = append(quoted, strconv.Quote(s))
+			}
+			fmt.Fprintf(&b, "dns        = [%s]   # resolvers to use instead of the system's\n", strings.Join(quoted, ", "))
+		} else {
+			b.WriteString("# dns        = [\"223.5.5.5\", \"1.1.1.1\"]   # resolvers to use instead of the system's\n")
+		}
+		if c.Network.DoH != "" {
+			fmt.Fprintf(&b, "doh        = %q   # DNS over HTTPS; takes precedence over dns above\n", c.Network.DoH)
+		} else {
+			b.WriteString("# doh        = \"https://1.1.1.1/dns-query\"   # encrypted DNS; wins over `dns`\n")
+		}
 		b.WriteString("\n[network.proxy]\n")
 		proxyType := c.Network.Proxy.Type
 		if proxyType == "" {

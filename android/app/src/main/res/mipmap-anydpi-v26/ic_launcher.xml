@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The adaptive launcher icon.
+
+     minSdk is 26, which is the release that introduced adaptive icons, so this
+     is the only launcher asset the app needs: there is no device running it
+     that would ask for a bitmap fallback. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <!-- The safe zone is the middle 66dp of 108dp; the glyph is drawn inside it
+         so no launcher's mask can clip it. -->
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

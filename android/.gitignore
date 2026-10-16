@@ -1,0 +1,22 @@
+# Build output and local tooling state.
+build/
+.gradle/
+.kotlin/
+local.properties
+*.iml
+.idea/
+
+# The signing key and the file that names it.
+#
+# A key is not part of the project: it is the identity one person ships under,
+# and publishing it would let anyone else sign an APK that installs over
+# everyone's. Neither the keystore nor its password belongs in version control.
+# `app/build.gradle` reads both from here when present and falls back to the
+# debug key when they are not, so a fresh clone builds without them.
+keystore/
+
+# Build inputs, produced by scripts/ before Gradle runs.
+# jniLibs/ holds the cross-compiled kernel, assets/page/ the built
+# frontend. assets/LICENSE is hand-placed and stays tracked.
+app/src/main/jniLibs/
+app/src/main/assets/page/

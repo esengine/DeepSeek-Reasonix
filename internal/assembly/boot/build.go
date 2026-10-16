@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/netclient"
+	"reasonix/internal/base/netdns"
 	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
@@ -181,6 +182,20 @@ func (b *builder) load() error {
 		return err
 	}
 	cfg := b.cfg
+	// Name resolution is settled from the config before anything opens a socket,
+	// and it is settled here rather than in an `init` because the setting lives
+	// in the config and the config is only readable now. `netdns.Install` has
+	// already run for the environment's own answer; this is what a person's
+	// `[network] dns` / `doh` overrides it with. An empty setting leaves the
+	// resolver exactly as it was.
+	//
+	// The proxy comes along because a DoH query is an HTTPS request: on a
+	// machine whose only egress is a configured proxy, a resolver that went
+	// direct would fail for a reason nothing on screen names. A spec that
+	// composes to nothing yields nil, which is "no proxy" — the same answer the
+	// rest of the kernel's traffic gets.
+	proxyForDNS, _ := netclient.ProxyFunc(cfg.NetworkProxySpec())
+	netdns.InstallConfigured(cfg.NetworkDNS(), cfg.NetworkDoH(), proxyForDNS)
 	migrations.deepSeekErr = deepSeekProtocolMigrationNoticeError(handleConfigLoadWarnings(opts, cfg, b.stderr), migrations.deepSeekErr)
 	// [secrets] is user-global, so arming these package globals before any
 	// subprocess can spawn is correct for every concurrent workspace.

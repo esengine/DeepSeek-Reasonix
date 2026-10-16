@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The light palette's page colour, and only what the window needs before the
+     WebView paints. The interface's own colours are `tokens.css`'s and are the
+     page's business; these two exist so the first frame is the app's ground
+     rather than the platform default white. -->
+<resources>
+    <color name="page">#F4F1EA</color>
+    <color name="boot">#07080C</color>
+</resources>

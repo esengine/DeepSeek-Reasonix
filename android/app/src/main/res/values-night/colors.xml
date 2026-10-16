@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dark palette's page colour. `DayNight` on the theme picks this up when
+     the system is dark, which is what keeps the frame before the WebView from
+     flashing light at someone using a dark phone at night. -->
+<resources>
+    <color name="page">#0E1014</color>
+</resources>

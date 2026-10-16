@@ -59,6 +59,9 @@ type ActResult struct {
 // secrets says the call was confirmed as entering one (see CredentialEntry);
 // without it a step that types into a secret field is refused.
 func (s *Session) Act(ctx context.Context, tabID string, steps []Step, secrets bool, scriptOrigin string) (ActResult, error) {
+	if s.shell != nil {
+		return s.shell.Act(ctx, tabID, steps, secrets, scriptOrigin)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return ActResult{FailedAt: 0}, err

@@ -41,6 +41,16 @@ func (c *Config) userConfigBody(logicalPath, resolved string) (string, bool, err
 		patched, _ = strip(patched)
 	}
 	if ok {
+		// Only when this save actually rewrote [network]: a save that touched
+		// some other section must leave the file byte for byte as it found it,
+		// which is a contract the 1.x-preservation tests pin. Injecting on every
+		// save would rewrite the head of a file whose network settings nobody
+		// edited — the opposite of what this patcher exists to guarantee.
+		if !reflect.DeepEqual(base.Network, c.Network) {
+			if hinted, added := addNetworkResolverHints(patched); added {
+				patched = hinted
+			}
+		}
 		if loaded, err := loadUserConfigBytes(logicalPath, patched); err == nil && (sameUserRender(loaded, fullLoaded) ||
 			fullErr != nil && RenderTOMLForScope(loaded, RenderScopeUser) == full) {
 			if lossy {
@@ -54,6 +64,102 @@ func (c *Config) userConfigBody(logicalPath, resolved string) (string, bool, err
 	}
 	keepPriorUserConfig(logicalPath, resolved, raw, "config: saved by full rewrite")
 	return full, false, nil
+}
+
+// networkResolverHints are the commented examples that make the resolver
+// settings discoverable, byte for byte as the full render writes them. A fresh
+// config gets them; a save that edits an existing file rewrites only the keys
+// whose values changed and never adds a comment, so a file written before these
+// settings existed keeps none — the person reads the whole [network] section,
+// sees neither `dns` nor `doh`, and concludes the feature is not there. That is
+// what was reported, with the file rewritten between releases and both keys
+// still absent.
+var networkResolverHints = []string{
+	`# dns        = ["223.5.5.5", "1.1.1.1"]   # resolvers to use instead of the system's`,
+	"# doh        = \"https://1.1.1.1/dns-query\"   # encrypted DNS; wins over `dns`",
+}
+
+// addNetworkResolverHints appends the commented resolver examples to [network]
+// when the section names neither setting and carries neither example.
+//
+// A section that already mentions either key is left byte for byte as it is: a
+// value someone set, the commented example, and a line they wrote themselves all
+// count, so a save never duplicates or reflows what is already there. That also
+// makes the writer idempotent, which a no-op save depends on.
+//
+// Only [network] is touched, and only when it exists. The renderer writes that
+// section whenever it has something to say about the network; inventing one in a
+// file that had none would be a larger change than the one this makes.
+func addNetworkResolverHints(raw string) (string, bool) {
+	lines := strings.Split(raw, "\n")
+	state := tomlOutside
+	header, end := -1, -1
+	have := map[string]bool{}
+	for i, line := range lines {
+		if state != tomlOutside {
+			state = advanceTOMLStringState(state, line)
+			continue
+		}
+		if name := tomlSectionHeader(line); name != "" {
+			if header >= 0 {
+				end = i
+				break
+			}
+			if name == "network" {
+				header = i
+			}
+			continue
+		}
+		if header >= 0 {
+			for _, key := range []string{"dns", "doh"} {
+				if tomlLineNamesKey(line, key) {
+					have[key] = true
+				}
+			}
+		}
+		state = advanceTOMLStringState(tomlOutside, line)
+	}
+	if header < 0 {
+		return raw, false
+	}
+	if end < 0 {
+		end = len(lines)
+	}
+	var add []string
+	if !have["dns"] {
+		add = append(add, networkResolverHints[0])
+	}
+	if !have["doh"] {
+		add = append(add, networkResolverHints[1])
+	}
+	if len(add) == 0 {
+		return raw, false
+	}
+	// Before the blank line that separates this section from the next, so the
+	// examples read as part of [network] and the file keeps its shape.
+	at := end
+	for at > header+1 && strings.TrimSpace(lines[at-1]) == "" {
+		at--
+	}
+	out := make([]string, 0, len(lines)+len(add))
+	out = append(out, lines[:at]...)
+	out = append(out, add...)
+	out = append(out, lines[at:]...)
+	return strings.Join(out, "\n"), true
+}
+
+// tomlLineNamesKey reports whether line assigns key, or is the commented example
+// of one — the two shapes this writer and a person both use.
+func tomlLineNamesKey(line, key string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(trimmed, "#"); ok {
+		trimmed = strings.TrimSpace(rest)
+	}
+	got, ok := tomlAssignmentKey(trimmed)
+	return ok && got == key
 }
 
 func keepPriorUserConfig(logicalPath, resolved string, raw []byte, msg string) {

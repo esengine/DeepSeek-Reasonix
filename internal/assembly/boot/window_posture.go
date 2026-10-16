@@ -14,8 +14,20 @@ import (
 // or, when the person never named one, in the default the sandbox claim and
 // folder trust decide. That posture is configuration, not something each shell
 // repeats for itself. A terminal frontend states its own and is left alone.
+//
+// `serve` counts as a window too. It is how a phone runs its own kernel, and
+// the posture chosen there is written to the same `[desktop]
+// default_tool_approval_mode` — so a build that read it back only for the
+// desktop shell wrote a setting it never applied, and the choice looked like it
+// had not been made on the very next launch. The two halves have to agree about
+// which surfaces this field belongs to, or the field is write-only.
 func withWindowPosture(ctrl *control.Controller, cfg *config.Config, src surface.Surface, sink event.Sink) *control.Controller {
-	if ctrl == nil || cfg == nil || src != surface.Desktop {
+	if ctrl == nil || cfg == nil {
+		return ctrl
+	}
+	switch src {
+	case surface.Desktop, surface.Serve, surface.Studio:
+	default:
 		return ctrl
 	}
 	if raw := cfg.UnrecognizedDesktopToolApprovalMode(); raw != "" {

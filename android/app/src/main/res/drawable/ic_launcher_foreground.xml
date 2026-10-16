@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The mark, drawn rather than shipped as a bitmap: one R in the app's own ink
+     on the palette's ground, which scales to every launcher's mask without a
+     density bucket per size. The hole in the R is the glyph's own counter, cut
+     with evenOdd rather than painted over. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F4F1EA"
+        android:fillType="evenOdd"
+        android:pathData="M39,30 L39,78 L47,78 L47,60 L54.5,60 L65,78 L74.5,78 L62.5,58 C68.6,55.8 72.6,50.6 72.6,43.6 C72.6,35.4 66.8,30 57.6,30 Z M47,37 L56.4,37 C61.2,37 64.4,39.4 64.4,43.8 C64.4,48.2 61.2,50.9 56.4,50.9 L47,50.9 Z" />
+    <path
+        android:fillColor="#A6680C"
+        android:pathData="M62,66 L74,66 L74,78 L62,78 Z" />
+</vector>

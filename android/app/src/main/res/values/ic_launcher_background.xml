@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher ground: the interface's dark page colour. It is the same in
+     both themes because a launcher icon is not themed by the app. -->
+<resources>
+    <color name="ic_launcher_background">#14161C</color>
+</resources>
