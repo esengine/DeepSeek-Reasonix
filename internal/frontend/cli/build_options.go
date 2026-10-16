@@ -38,6 +38,17 @@ type cliBuildOverrides struct {
 	// ProviderResolver routes model roles through a caller-owned catalog. A
 	// bootstrapped serve sets the broker's; nil keeps the local config path.
 	ProviderResolver provider.Resolver
+	// StatsSource labels this build's surface, and it is also what decides
+	// whether the window posture in the config is read at all: `boot` applies
+	// `[desktop] default_tool_approval_mode` to the surfaces that have a window,
+	// and leaves a terminal to state its own posture on its command line.
+	//
+	// It matters here because `serve` builds its first controller through this
+	// path, so leaving the default would file a phone's first window as a
+	// terminal — the approval mode the person chose would be written by every
+	// save and read by none, and reopening the app would ask again. Empty means
+	// a terminal, which is what every caller but `serve` is.
+	StatsSource surface.Surface
 }
 
 func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
@@ -47,6 +58,10 @@ func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOv
 
 func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) boot.Options {
 	// profile is dual-write TokenMode; also set AgentPreset for the new path.
+	src := overrides.StatsSource
+	if !src.Valid() {
+		src = surface.CLI
+	}
 	return boot.Options{
 		Version:              overrides.Version,
 		Model:                modelName,
@@ -64,7 +79,7 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		AdditionalDirs:       overrides.AdditionalDirs,
 		HeadlessApprovalMode: overrides.HeadlessApprovalMode,
 		GoalTurnsUnreachable: overrides.GoalTurnsUnreachable,
-		StatsSource:          surface.CLI,
+		StatsSource:          src,
 		Stderr:               overrides.Stderr,
 		OnSessionRecovered:   overrides.OnSessionRecovered,
 		Ablation:             overrides.Ablation,

@@ -139,9 +139,6 @@ type providerView struct {
 	InheritedLimits map[string]modelLimitsView `json:"inheritedLimits,omitempty"`
 	// Per chat model: the price per million tokens it declares for itself.
 	ModelPrices map[string]modelPriceView `json:"modelPrices,omitempty"`
-	// LastCheck is how the latest plain check of this saved entry ended; absent
-	// when none ran in this process or the entry changed since.
-	LastCheck *providerLastCheck `json:"lastCheck,omitempty"`
 }
 
 func (s *Server) providers(w http.ResponseWriter, _ *http.Request) {
@@ -156,7 +153,6 @@ func (s *Server) providers(w http.ResponseWriter, _ *http.Request) {
 		p := &cfg.Providers[i]
 		settable := visionSettableOf(cfg, p)
 		out = append(out, providerView{
-			LastCheck:          lastCheckOf(p),
 			Name:               p.Name,
 			DisplayName:        strings.TrimSpace(p.DisplayName),
 			Kind:               strings.ToLower(strings.TrimSpace(p.Kind)),
@@ -296,6 +292,11 @@ func (s *Server) saveProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Name              string            `json:"name"`
+		// The label the person typed, when it differs from the name. It is what
+		// the account list shows; the name above is what the config file and
+		// every model ref use, which is why a source can be called 万象 in the
+		// interface and still be filed under an ASCII config table name.
+		DisplayName       string            `json:"displayName"`
 		Kind              string            `json:"kind"`
 		BaseURL           string            `json:"baseUrl"`
 		APIKey            string            `json:"apiKey"`
@@ -354,6 +355,25 @@ func (s *Server) saveProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if taken {
 		entry.DisplayName = prev.DisplayName
+	}
+	// A label the panel sent wins over the one carried over, and it is normalised
+	// here rather than trusted: a control character or an over-long label is
+	// refused with the same two codes the rename route uses, so the name field
+	// has wording for it already — rather than being written into the config and
+	// shown broken everywhere the source is listed. An empty label is the signal
+	// to keep following the name, which is why it does not clear the carried-over
+	// one.
+	if label, err := config.NormalizeProviderDisplayName(body.DisplayName); err != nil {
+		switch {
+		case errors.Is(err, config.ErrProviderDisplayNameTooLong):
+			refuse(w, http.StatusUnprocessableEntity, "provider.display_name_too_long", err.Error(),
+				map[string]any{"max": config.MaxProviderDisplayNameRunes})
+		default:
+			refuse(w, http.StatusUnprocessableEntity, "provider.display_name_invalid", err.Error(), nil)
+		}
+		return
+	} else if label != "" {
+		entry.DisplayName = label
 	}
 	if !storeProviderEntries(w, known, []config.ProviderEntry{entry}, body.APIKey, body.Replace) {
 		return

@@ -48,6 +48,9 @@ type Service struct {
 	backoff []time.Duration
 	limits  Limits
 	assert  func(context.Context) (string, error)
+	// mail, when the shell named a relay and a recipient, is where a report is
+	// delivered instead of the service. Nil is the upstream path unchanged.
+	mail *MailConfig
 	// replying holds the receipts whose reply is on its way.
 	replying sync.Map
 }
@@ -81,7 +84,7 @@ func New(cfg Config) (*Service, error) {
 	if backoff == nil {
 		backoff = []time.Duration{400 * time.Millisecond, 1500 * time.Millisecond}
 	}
-	return &Service{base: base, http: hc, store: newStore(cfg.Home), backoff: backoff, limits: DefaultLimits, assert: cfg.Assert}, nil
+	return &Service{base: base, http: hc, store: newStore(cfg.Home), backoff: backoff, limits: DefaultLimits, assert: cfg.Assert, mail: mailFromEnv()}, nil
 }
 
 func (s *Service) Limits() Limits { return s.limits }
@@ -126,6 +129,12 @@ func (s *Service) Submit(ctx context.Context, d Draft) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
+	// A build that named a mailbox delivers there instead of posting. Every
+	// check above is the same either way — the limits are this client's, not
+	// the service's — so only the last leg differs.
+	if s.mail != nil {
+		return s.submitByMail(d, wire, redacted)
+	}
 	id, token, key, err := s.store.begin(strings.TrimSpace(d.IdempotencyKey), wire.fingerprint())
 	if err != nil {
 		return Receipt{}, err
@@ -161,6 +170,41 @@ func (s *Service) Submit(ctx context.Context, d Draft) (Receipt, error) {
 		return Receipt{}, err
 	}
 	return Receipt{Receipt: got.Receipt, Status: got.Status, CreatedAt: created, Redacted: redacted, UnderReview: got.UnderReview}, nil
+}
+
+// submitByMail delivers one report to the configured mailbox.
+//
+// The receipt is minted here rather than issued: a relay answers with a queue
+// id at best, and the form is built around there being something the person can
+// write down and quote back. What this machine remembers is the same either
+// way, so 「我的反馈」 lists a mailed report beside a posted one — with no
+// install identity behind it, which is exactly why its status never moves.
+func (s *Service) submitByMail(d Draft, wire wireSubmit, redacted bool) (Receipt, error) {
+	receipt, err := localReceipt()
+	if err != nil {
+		return Receipt{}, err
+	}
+	subject := mailSubject(wire, receipt)
+	message := mailWithAttachments(*s.mail, subject, mailBody(wire, receipt), wire.Attachments)
+	if err := sendMail(*s.mail, message); err != nil {
+		// The report has nowhere to go, which is what ErrOffline means
+		// everywhere else: retrying is the right next step, and the text is
+		// still on screen for the person to try again with.
+		return Receipt{}, fmt.Errorf("%w: %v", ErrOffline, err)
+	}
+	created := now().UTC()
+	item := Item{
+		Receipt: receipt, Category: d.Category, Status: StatusReceived,
+		TitleSnippet: snippet(wire.Body), CreatedAt: created, UpdatedAt: created,
+	}
+	if err := s.store.update(func(st *state) error {
+		st.DisplayName = wire.DisplayName
+		st.remember(item)
+		return nil
+	}); err != nil {
+		return Receipt{}, err
+	}
+	return Receipt{Receipt: receipt, Status: StatusReceived, CreatedAt: created, Redacted: redacted}, nil
 }
 
 func (s *Service) prepare(d Draft) (wireSubmit, bool, error) {

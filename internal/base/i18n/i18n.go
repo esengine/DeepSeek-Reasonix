@@ -218,6 +218,14 @@ type Messages struct {
 	AskURLOpenFailed     string
 	AskURLSending        string
 	AskURLAnswerFailed   string
+
+	// The session browser's failures, said in the reader's language. The kernel
+	// reports a failed navigation as the browser's own error name, which is
+	// English machine text; these carry the sentence that says what that name
+	// usually means, so a person can act on it without knowing Chromium's codes.
+	BrowserNavigationFailed  string // %s is the address and the browser's error name
+	BrowserNavigationTimeout string // %s is the address
+
 	AskTypeSomething     string // the "type your own answer" option label
 	AskTypingHint        string // shown on that row while entering free text
 	AskNoteHint          string // shown under a single-choice pick while typing its note
@@ -675,6 +683,7 @@ type Messages struct {
 	ProviderErrAuthRejected        string // 401 — a key was sent but the server rejected it
 	ProviderErrDNSNotFound         string // model host name does not resolve
 	ProviderErrDNSTemporary        string // resolver unreachable or timed out
+	ProviderErrCertificateFmt      string // TLS certificate not valid for the host (one %s: the error)
 	ProviderErrInsufficientBalance string // 402
 	ProviderErrUnprocessable       string // 422
 	ProviderErrInputSensitive      string // MiniMax 1026

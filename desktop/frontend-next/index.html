@@ -2,7 +2,21 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover hands the notch and the home indicator to the page,
+         which is what lets the safe-area insets below mean anything on a phone;
+         without it a WebView letterboxes the content and the insets read 0. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- The status bar of an installed shell (Android WebView / a phone's
+         "add to home screen") is tinted from here. It matches --page in each
+         theme, and the boot screen's own ground while the app is still coming
+         up, so the bar never flashes a colour the page does not have. -->
+    <meta name="theme-color" content="#07080c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
     <link rel="preconnect" href="https://id.reasonix.io" crossorigin />
     <link rel="preconnect" href="https://remote.reasonix.io" crossorigin />
     <link rel="dns-prefetch" href="//id.reasonix.io" />
@@ -16,6 +30,152 @@
     <meta name="apple-mobile-web-app-title" content="Reasonix" />
     <title>Reasonix Studio</title>
     <script>
+      // An installed phone shell announces itself before the first paint, so
+      // mobile.css's safe-area and touch rules apply to the boot screen too and
+      // nothing shifts once the bundle runs. The interface itself stays the one
+      // in this repository: the shell is a window, not a second application.
+      //
+      // Both spellings are accepted because the two bridges an Android WebView
+      // can install are `addJavascriptInterface` (a Java object, which is the
+      // first) and an evaluate-injected global (the second).
+      (function () {
+        try {
+          var native = window.ReasonixNative || window.__reasonixNative;
+          if (!native) return;
+          document.documentElement.dataset.shell = "android";
+          if (native.version) document.documentElement.dataset.native = String(native.version);
+        } catch (e) {}
+      })();
+
+      // The window's safe-area insets, as the shell reports them.
+      //
+      // `env(safe-area-inset-*)` is an iOS Safari feature: an Android WebView
+      // resolves all four to 0, so the padding `mobile.css` writes against them
+      // does nothing on the platform that matters here and the first row of the
+      // interface sits under the status bar. The shell reads the real insets off
+      // the window and calls this with them, and it calls it again whenever they
+      // change — rotation, a foldable unfolding, the keyboard opening.
+      //
+      // Defined before the bundle so an inset that arrives during boot is not
+      // lost, and left on `window` so the shell can call it at any time.
+      window.__reasonixInsets = function (left, top, right, bottom) {
+        var root = document.documentElement;
+        root.style.setProperty("--inset-l", left + "px");
+        root.style.setProperty("--inset-t", top + "px");
+        root.style.setProperty("--inset-r", right + "px");
+        root.style.setProperty("--inset-b", bottom + "px");
+      };
+
+      // The on-screen keyboard, from whichever of two sources can see it.
+      //
+      // Neither source alone is enough. `visualViewport` shrinks with the
+      // keyboard only while the window stays edge to edge — Android 15 forces
+      // that from targetSdk 35, but a WebView told to `adjustResize` shrinks the
+      // window instead, and then the visual and layout viewports stay equal and
+      // the difference computed from them is zero with the keyboard up. That is
+      // the arrangement this page actually met: the composer sat under the
+      // keyboard and nothing moved. `offsetTop` is subtracted because a page
+      // that scrolled to reach a field moves the visual viewport down without
+      // the keyboard being any shorter.
+      //
+      // The shell answers the other half: it can ask the window for
+      // `WindowInsetsCompat.Type.ime()`, which is the keyboard's height whether
+      // or not the window resized, and pushes it through `__reasonixIme`.
+      //
+      // Taking the larger of the two would be wrong in the resized case: the
+      // window has already made room for the keyboard, and adding the shell's
+      // height again would lift the composer by two keyboards. So the room the
+      // window has already given up is measured against the height it had with
+      // no keyboard — `baseline` — and only the remainder is applied. That
+      // baseline is retaken whenever the shell reports no keyboard, which is
+      // also what a rotation or a fold looks like from here.
+      //
+      // Kept apart from `__reasonixInsets`: a system bar is furniture the whole
+      // interface clears, while the keyboard is an overlay only the composer
+      // rises above. Folding them into one number would lift the settings sheet
+      // and the transcript by a keyboard they do not sit under.
+      (function () {
+        var vv = window.visualViewport;
+        var shell = 0;
+        var baseline = window.innerHeight;
+        var apply = function () {
+          // A test harness runs this script against a bare document; the page
+          // is not what is under test there, and a missing style object is not
+          // a reason to throw before the credential bootstrap has run.
+          var root = document.documentElement;
+          if (!root || !root.style) return;
+          var layout = window.innerHeight;
+          if (shell === 0) baseline = layout;
+          // What the window has already given up for the keyboard.
+          var given = Math.max(0, baseline - layout);
+          var fromShell = Math.max(0, shell - given);
+          var fromView = vv ? Math.max(0, layout - vv.height - vv.offsetTop) : 0;
+          var hidden = Math.max(fromShell, fromView);
+          root.style.setProperty("--ime-b", hidden + "px");
+        };
+        // Bring whatever holds focus back into view, once the keys are up.
+        //
+        // The field took focus while the keyboard was still down, and the
+        // browser decided then where to scroll — against a layout where nothing
+        // was in the way. When the keys arrive, the box the field sits in gets
+        // shorter and the field can end up under them with nothing re-running
+        // that decision: moving `--ime-b` is a style change, and a style change
+        // is not a focus change. Measured on the packaged page at 390x844 with
+        // a 300px keyboard: the setup wizard's key field came to rest 31px
+        // below the top of the keys, with 201px of scroll still available.
+        //
+        // `nearest` rather than `center`: a field already in view is not moved
+        // at all, which matters for the composer, where the transcript below
+        // has a scroll position of its own to keep.
+        var reveal = function () {
+          var el = document.activeElement;
+          // `body`/`documentElement` is what "nothing is focused" reports, and
+          // scrolling those would move the page for no reason at all.
+          if (!el || el === document.body || el === document.documentElement) return;
+          if (typeof el.scrollIntoView !== "function") return;
+          try {
+            el.scrollIntoView({ block: "nearest" });
+          } catch (e) {}
+        };
+        // Defined before the bundle, like `__reasonixInsets`, so a height that
+        // arrives during boot is not lost and the shell can call it at any time.
+        window.__reasonixIme = function (bottom) {
+          var n = Math.floor(bottom);
+          var moved = n !== shell;
+          shell = n > 0 ? n : 0;
+          apply();
+          // Only while the keyboard is up, and only when its height actually
+          // changed: a shell re-pushing the same number is not a reason to move
+          // someone's scroll.
+          if (moved && shell > 0) reveal();
+        };
+        if (vv) {
+          vv.addEventListener("resize", apply);
+          vv.addEventListener("scroll", apply);
+        }
+        apply();
+      })();
+
+      // Ask once as soon as the page exists: a shell that installed its bridge
+      // after the last change (or a reload where nothing moved) would otherwise
+      // never be asked, and the page would keep the `env()` answer of 0.
+      (function () {
+        var ask = function () {
+          try {
+            var native = window.ReasonixNative || window.__reasonixNative;
+            if (!native || !native.safeArea) return;
+            var parts = String(native.safeArea()).split(",");
+            if (parts.length !== 4) return;
+            window.__reasonixInsets(+parts[0] || 0, +parts[1] || 0, +parts[2] || 0, +parts[3] || 0);
+          } catch (e) {}
+        };
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", ask, { once: true });
+        } else {
+          ask();
+        }
+      })();
+
       // The boot screen below is painted by this file, before the bundle that
       // would otherwise decide these two exists. Mirrors App.tsx's "rx-theme"
       // and i18n.resolve — a wrong guess here only mis-tints one frame.

@@ -698,6 +698,21 @@ type NetworkConfig struct {
 	// process environment instead.
 	NoProxy string             `toml:"no_proxy"`
 	Proxy   NetworkProxyConfig `toml:"proxy"`
+	// DNS names the resolvers to use instead of the system's, most useful first.
+	// Each entry is a `host` or `host:port`; a bare address means port 53.
+	//
+	// This exists because a system's resolver is not always the one that
+	// answers: on a phone behind a tampered path, and on a network that
+	// intercepts port 53, the reply comes from whoever is in the middle. Naming
+	// a server here is the plain fix; `DoH` below is the one that works even
+	// when the path itself is the problem.
+	DNSServers []string `toml:"dns"`
+	// DoH is a DNS-over-HTTPS endpoint, e.g. "https://1.1.1.1/dns-query". When
+	// set it takes precedence over `dns` above, because it is the stronger
+	// answer to the same question: the query travels inside TLS, so the reply
+	// comes from whoever holds that endpoint's certificate rather than from
+	// whoever can see port 53.
+	DoH string `toml:"doh"`
 }
 
 // NetworkProxyConfig is the structured custom-proxy editor shape. Password is
@@ -761,6 +776,30 @@ func (c *Config) directProxyHosts() []string {
 // NetworkProxyMode normalizes network.proxy_mode to a known value.
 func (c *Config) NetworkProxyMode() string {
 	return netclient.NormalizeMode(c.Network.ProxyMode)
+}
+
+// NetworkDoH is the DNS-over-HTTPS endpoint the person configured, or "".
+//
+// `${VAR}` expands from the process environment for the same reason the proxy
+// fields do — an endpoint is not a secret, but where it comes from is the
+// person's to decide — and the value is trimmed because a TOML string spelled
+// across lines arrives with whitespace around it.
+func (c *Config) NetworkDoH() string {
+	return strings.TrimSpace(ExpandVars(c.Network.DoH))
+}
+
+// NetworkDNS is the resolver list the person configured, or nil.
+//
+// Entries are trimmed and empties dropped, so a trailing comma in the setting
+// is not a resolver that fails to answer.
+func (c *Config) NetworkDNS() []string {
+	out := make([]string, 0, len(c.Network.DNSServers))
+	for _, raw := range c.Network.DNSServers {
+		if host := strings.TrimSpace(ExpandVars(raw)); host != "" {
+			out = append(out, host)
+		}
+	}
+	return out
 }
 
 // SkillsConfig configures skill discovery. Paths adds extra "custom"-scope skill
@@ -993,11 +1032,17 @@ func (c *Config) BashMode() string {
 }
 
 // BashModeForGOOS normalises the bash-sandbox mode for tests and cross-platform
-// rendering. Windows has no OS-level Bash sandbox and forces the effective mode
-// off, even when older configs explicitly requested "enforce". macOS/Linux keep
-// the existing explicit-mode behavior.
+// rendering. Windows and Android have no OS-level Bash sandbox and force the
+// effective mode off, even when older configs explicitly requested "enforce".
+// macOS/Linux keep the existing explicit-mode behavior.
+//
+// Android joins Windows rather than Linux because it has no bubblewrap: the
+// platform ships no `bwrap`, and its SELinux policy denies the namespace and
+// mount operations one would need. Resolving "enforce" to "off" there is what
+// keeps the shell usable — the alternative is the fail-closed path, which
+// refuses every command on a device that has a perfectly good /system/bin/sh.
 func (c *Config) BashModeForGOOS(goos string) string {
-	if goos == "windows" {
+	if goos == "windows" || goos == "android" {
 		return "off"
 	}
 	switch strings.TrimSpace(c.Sandbox.Bash) {

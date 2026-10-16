@@ -170,6 +170,9 @@ func OriginOf(raw string) string {
 // server for the code being edited runs. A page anywhere else exercises code
 // nobody here wrote.
 func (s *Session) ServesWorkspace(raw string) bool {
+	if s.shell != nil {
+		return s.shell.ServesWorkspace(raw)
+	}
 	raw, kind := asAddress(raw)
 	if kind == NetworkPath || kind == InvalidPath {
 		return false

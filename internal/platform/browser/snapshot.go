@@ -55,6 +55,9 @@ type axNode struct {
 // Snapshot renders a tab's page. scope, when set, is a ref whose subtree alone
 // is rendered.
 func (s *Session) Snapshot(ctx context.Context, tabID, scope string) (Snapshot, error) {
+	if s.shell != nil {
+		return s.shell.Snapshot(ctx, tabID, scope)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return Snapshot{}, err
@@ -113,6 +116,9 @@ type Changes struct {
 
 // Refresh snapshots a tab and reports what changed since the agent's last look.
 func (s *Session) Refresh(ctx context.Context, tabID string) (Snapshot, Changes, error) {
+	if s.shell != nil {
+		return s.shell.Refresh(ctx, tabID)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return Snapshot{}, Changes{}, err

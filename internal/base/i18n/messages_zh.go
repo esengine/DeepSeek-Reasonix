@@ -173,7 +173,11 @@ var Chinese = Messages{
 	AskURLOpenFailed:                "无法打开浏览器。请重试，或手动打开显示的地址。",
 	AskURLSending:                   "正在发送你的决定…",
 	AskURLAnswerFailed:              "无法发送你的决定，请重试。",
-	AskTypeSomething:                "自己输入",
+
+	BrowserNavigationFailed:  "这个网页打不开（%s）。域名解析失败常见于内网域名或需要连公司网络、VPN；连接被拒通常是对端服务没启动或端口不对。",
+	BrowserNavigationTimeout: "这个网页一直没回应，已放弃等待（%s）。国内无法访问的站点会这样长时间挂起，换个能访问的地址再试。",
+
+	AskTypeSomething: "自己输入",
 	AskTypingHint:                   "输入后按 Enter 确认",
 	AskNoteHint:                     "在下方为此项补充说明，Enter 确认",
 	AskChatInstead:                  "先不选择，直接回复",
@@ -661,6 +665,7 @@ var Chinese = Messages{
 	ProviderErrAuthRejected:        "认证失败 (HTTP 401)：服务端拒绝了你的 API key。可能是 key 错误或已过期，也可能是服务端出现瞬时鉴权/额度问题——已退避重试仍失败。请稍后再试，或检查 .env 中的密钥 / 运行 `reasonix setup`。",
 	ProviderErrDNSNotFound:         "无法解析模型服务域名 %s：DNS 查询显示该主机不存在，未建立任何连接，也没有重试。请检查网络、DNS、代理设置以及服务商的接口地址。",
 	ProviderErrDNSTemporary:        "无法解析模型服务域名 %s：DNS 查询暂时失败（解析服务器不可达或超时），未建立任何连接。请检查网络、DNS、代理设置后重试。",
+	ProviderErrCertificateFmt:      "TLS 证书验证失败：%s。这张证书不是发给这个域名的，握手已被拒绝，也没有重试。常见原因是 DNS 被污染（域名被解析到了别人的服务器），或者链路上有解密代理。请检查 VPN、代理、加速类应用，或换个网络后重试。",
 	ProviderErrInsufficientBalance: "余额不足 (HTTP 402)：账户余额不足，请前往充值后重试。",
 	ProviderErrUnprocessable:       "参数错误 (HTTP 422)：某个请求参数被拒绝，通常是程序缺陷。若持续出现请反馈。",
 	ProviderErrInputSensitive:      "输入被 MiniMax 内容审查拒绝（错误码 1026）。审查对象可能包含会话历史和工具结果；请调整相关内容，或新建会话仅保留必要上下文。原样重试通常无效。",

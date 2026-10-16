@@ -652,6 +652,13 @@ func TestEffectDesktopOpensInTheConfiguredApprovalMode(t *testing.T) {
 	}{
 		{"a window takes the configured posture", surface.Desktop, control.ToolApprovalYolo},
 		{"a terminal frontend is left at the default", surface.CLI, control.ToolApprovalAsk},
+		// `serve` is how a phone runs its own kernel, and its first pane is a
+		// window like any other. It used to arrive labelled `cli` — the frontend
+		// builds that controller through the terminal's own path — so the
+		// posture the person chose was written by every save and read by none,
+		// and reopening the app asked again while panes opened later obeyed.
+		{"a served window takes the configured posture", surface.Serve, control.ToolApprovalYolo},
+		{"a studio window takes the configured posture", surface.Studio, control.ToolApprovalYolo},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := robustTempDir(t)

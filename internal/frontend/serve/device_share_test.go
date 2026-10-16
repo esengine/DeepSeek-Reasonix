@@ -357,6 +357,39 @@ func TestTheWindowCanRequestACloudQR(t *testing.T) {
 	}
 }
 
+// A machine that cannot enumerate an interface still answers with a list.
+//
+// Android is that machine: `/proc/net/dev` is unreadable to an app, so the
+// enumeration returns nothing and `addresses` used to serialise as `null`. A
+// window reading `.length` off that throws, and the error boundary around the
+// settings section turns the whole remote panel into "this section failed" —
+// the SSH hosts included, which have nothing to do with interfaces. The field
+// is an array on the wire whatever this machine found.
+func TestAnUnenumerableMachineStillAnswersWithLists(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	share := NewDeviceShare(fstest.MapFS{"index.html": {Data: []byte("<title>x</title>")}})
+	share.addresses = func() []ShareAddress { return nil }
+	st := share.Status()
+	if st.Addresses == nil {
+		t.Error("Addresses is nil; JSON would carry null and a reader would throw on .length")
+	}
+	if st.Devices == nil {
+		t.Error("Devices is nil")
+	}
+	if st.CloudDevices == nil {
+		t.Error("CloudDevices is nil")
+	}
+	raw, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"addresses":[]`, `"devices":[]`, `"cloudDevices":[]`} {
+		if !strings.Contains(string(raw), field) {
+			t.Errorf("marshalled status lacks %s: %s", field, raw)
+		}
+	}
+}
+
 func TestADeviceKnowsWhichMachineItDrives(t *testing.T) {
 	rig := newShareRig(t)
 	cookie := rig.pair(t)

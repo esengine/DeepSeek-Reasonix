@@ -18,6 +18,9 @@ var secretAutocomplete = map[string]bool{
 // after a step moved it where the host cannot follow, counts as well, since
 // nothing there can be inspected.
 func (s *Session) CredentialEntry(ctx context.Context, tabID string, steps []Step) bool {
+	if s.shell != nil {
+		return s.shell.CredentialEntry(ctx, tabID, steps)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return false
@@ -109,6 +112,10 @@ func secretMarkup(localName string, attributes []string) bool {
 // arguments. The call runs only after that check allowed it, so the verdict it
 // was allowed under is what execution may act on.
 func (s *Session) NoteSecretCheck(args []byte, secret bool) {
+	if s.shell != nil {
+		s.shell.NoteSecretCheck(args, secret)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.checks.secrets == nil || len(s.checks.secrets) > 32 {
@@ -120,6 +127,9 @@ func (s *Session) NoteSecretCheck(args []byte, secret bool) {
 // SecretsConfirmed reports whether a call's arguments were allowed as entering
 // a secret. A call no check has seen was not.
 func (s *Session) SecretsConfirmed(args []byte) bool {
+	if s.shell != nil {
+		return s.shell.SecretsConfirmed(args)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.checks.secrets[string(args)]
@@ -127,6 +137,10 @@ func (s *Session) SecretsConfirmed(args []byte) bool {
 
 // NoteScriptOrigin binds an evaluated script to the origin its permission covered.
 func (s *Session) NoteScriptOrigin(args []byte, origin string) {
+	if s.shell != nil {
+		s.shell.NoteScriptOrigin(args, origin)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.checks.scriptOrigin == nil || len(s.checks.scriptOrigin) > 32 {
@@ -137,6 +151,9 @@ func (s *Session) NoteScriptOrigin(args []byte, origin string) {
 
 // ScriptOrigin returns the origin approved for a call's arbitrary JavaScript.
 func (s *Session) ScriptOrigin(args []byte) string {
+	if s.shell != nil {
+		return s.shell.ScriptOrigin(args)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.checks.scriptOrigin[string(args)]

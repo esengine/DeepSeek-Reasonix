@@ -1,0 +1,225 @@
+// The app module.
+//
+// Two things ship inside the APK and neither is fetched at runtime: the kernel
+// binary, and the built page it serves. Bundling the page is what makes the app
+// work offline and start instantly; bundling the kernel is what lets it run
+// `reasonix serve` on the phone itself, which is the whole point — the agent
+// starts locally and reaches the server over SSH, so the interface, the model
+// catalogue and the credentials all live on the phone.
+//
+// The kernel is placed as `jniLibs/arm64-v8a/libreasonix.so`, not under
+// `assets/`. That is not a trick for its own sake: Android permits executing a
+// file under `nativeLibraryDir` and nothing under `filesDir` has that
+// guarantee, so a binary shipped the ordinary way would have to be copied out
+// and made executable at runtime — which fails outright on a device mounted
+// noexec, and fails confusingly on the ones that are merely unusual. `scripts/
+// build-kernel.sh` writes it there; the name is fixed by the packaging rules.
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+// One version, read by the About screen and the update check.
+def versionMajor = 2
+def versionMinor = 0
+def versionPatch = 0
+def versionBuild = 1
+
+// Where the two build inputs are expected. Both are produced from the checkout
+// beside this module, by the scripts named in each message.
+def upstream = rootProject.file("../upstream")
+def pageDir = new File(projectDir, "src/main/assets/page")
+def kernelSo = new File(projectDir, "src/main/jniLibs/arm64-v8a/libreasonix.so")
+
+android {
+    namespace "io.reasonix.mobile.app"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "io.reasonix.mobile.app"
+        minSdk 26
+        // 35: the API level this app is actually built and tested against.
+        //
+        // It was briefly lowered to 26 while chasing an install failure that
+        // turned out to be a package-name collision with an unrelated app on the
+        // user's phone — the signature error named the wrong cause. Nothing about
+        // the target level ever caused it, so it goes back to the level the code
+        // is really written for.
+        //
+        // One consequence to keep in mind: from 35, Android 15 forces the window
+        // edge-to-edge and ignores a request to lay out inside the safe area. The
+        // window therefore *is* drawn under the status bar and the home indicator,
+        // and the only correct answer is for the page to pad itself — which is
+        // what `MainActivity` feeds real inset values for, since a WebView does
+        // not implement `env(safe-area-inset-*)`.
+        targetSdk 35
+        versionCode versionMajor * 10000 + versionMinor * 100 + versionPatch * 10 + versionBuild
+        versionName "${versionMajor}.${versionMinor}.${versionPatch}"
+
+        // The kernel is built for arm64 only, so every other ABI would ship an
+        // APK that installs and then cannot start. Naming the one real ABI keeps
+        // the store listing and the installer honest.
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+
+        resourceConfigurations += ["zh", "en"]
+    }
+
+    // Android identifies an app by package name *and* signing key: an APK signed
+    // with a different key is not an update, it is an impostor, and the
+    // installer refuses it with "the signature does not match the installed
+    // app". Gradle's default release key is the debug key in the user's home
+    // directory, which is per-machine, so a build made on a second computer
+    // could never be installed over one made on the first.
+    //
+    // Whoever ships a build therefore pins a key — and that key is theirs, not
+    // the project's. It lives beside the checkout, in `keystore/`, which is
+    // ignored; so does the file naming it. A checkout without either signs with
+    // the debug key instead, which is what a contributor building locally wants
+    // and is what the README tells them to expect. Point the build at a real key
+    // by writing `keystore/keystore.properties` (storeFile, storePassword,
+    // keyAlias) or by setting REASONIX_KEYSTORE / REASONIX_KEYSTORE_PASSWORD /
+    // REASONIX_KEY_ALIAS.
+    def keyProperties = new Properties()
+    def keyPropertiesFile = rootProject.file("keystore/keystore.properties")
+    if (keyPropertiesFile.exists()) {
+        keyPropertiesFile.withInputStream { keyProperties.load(it) }
+    }
+    def keyStorePath = keyProperties.getProperty("storeFile") ?: System.getenv("REASONIX_KEYSTORE")
+    def keyStorePassword = keyProperties.getProperty("storePassword") ?: System.getenv("REASONIX_KEYSTORE_PASSWORD")
+    def keyAliasName = keyProperties.getProperty("keyAlias") ?: System.getenv("REASONIX_KEY_ALIAS")
+    def haveReleaseKey = keyStorePath && keyStorePassword && keyAliasName &&
+            rootProject.file(keyStorePath).exists()
+
+    signingConfigs {
+        if (haveReleaseKey) {
+            releaseKey {
+                storeFile rootProject.file(keyStorePath)
+                storePassword keyStorePassword
+                keyAlias keyAliasName
+                keyPassword keyStorePassword
+                // v1 is not optional here. Android 7+ reads v2 and ignores v1, so
+                // a v2-only APK installs on a modern phone — and then fails on the
+                // compatibility layers older devices and HarmonyOS' 卓易通 run,
+                // which know only the JAR signature and report its absence as a
+                // signature *mismatch*. Signing both is what makes one APK install
+                // everywhere.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
+    // Nothing native is compiled here — the one .so is a prebuilt the kernel
+    // script writes — so the external native build is left alone entirely.
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+            // The debug build wears the release key when there is one, so the two
+            // can be installed side by side (they are different packages) and so
+            // a debug build can always be replaced by a release build.
+            if (haveReleaseKey) signingConfig signingConfigs.releaseKey
+        }
+        release {
+            // The kernel is a stripped Go binary and the page is minified, but
+            // the Kotlin shell still benefits and shipping the shrunk build is
+            // how a size regression gets noticed.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            // Without a key of one's own, the debug key is what makes the release
+            // variant installable at all — an unsigned APK cannot be handed to
+            // anyone. A shipped build brings its own key and this line stops
+            // mattering.
+            signingConfig haveReleaseKey ? signingConfigs.releaseKey : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    buildFeatures {
+        // AGP 8 stops generating BuildConfig unless asked. `Kernel` reads the
+        // version name and code out of it to decide whether the bundled page
+        // needs unpacking, so it is asked for.
+        buildConfig = true
+    }
+
+    packaging {
+        jniLibs {
+            // `extractNativeLibs=true`: the kernel must exist as a real file on
+            // disk to be executed, and an uncompressed-and-mmap'd .so is not
+            // one. This is the only reason the flag is on.
+            useLegacyPackaging true
+        }
+        resources {
+            excludes += ["META-INF/*.version", "META-INF/*.kotlin_module", "kotlin/**", "DebugProbesKt.bin"]
+        }
+    }
+
+    // The page is read out of assets by `Kernel.publish`, not by the resource
+    // system, so it is not compressed — a page is already-compressed text and
+    // shrinking it again only costs startup time.
+    androidResources {
+        noCompress += ["json", "woff2", "ttf", "woff", "txt", "svg"]
+    }
+
+    lint {
+        abortOnError true
+        warningsAsErrors false
+        checkReleaseBuilds true
+    }
+}
+
+dependencies {
+    implementation "androidx.core:core-ktx:1.15.0"
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "androidx.activity:activity-ktx:1.9.3"
+    implementation "androidx.webkit:webkit:1.12.1"
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.8.7"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0"
+
+    // Scanning the pairing code a computer shows.
+    //
+    // CameraX for the preview and the frame stream, ZXing for the decode, and
+    // deliberately not ML Kit: this app installs on phones whose HarmonyOS
+    // compatibility layer has no Google Play Services, so a decoder that needs
+    // GMS would work on the developer's phone and fail on the user's. ZXing
+    // core is pure Java with no runtime dependency at all, which is what makes
+    // the scanner work on both.
+    implementation "androidx.camera:camera-core:1.4.1"
+    implementation "androidx.camera:camera-camera2:1.4.1"
+    implementation "androidx.camera:camera-lifecycle:1.4.1"
+    implementation "androidx.camera:camera-view:1.4.1"
+    implementation "com.google.zxing:core:3.5.3"
+}
+
+// Fail before the packaging step with something a person can act on, rather
+// than shipping an APK whose kernel is missing or whose page is a directory the
+// build never filled. The two messages name the script that produces each.
+tasks.register("requireBuildInputs") {
+    doFirst {
+        if (!kernelSo.exists()) {
+            throw new GradleException(
+                "内核二进制缺失：${kernelSo}\n先运行 ./scripts/build-kernel.sh（在 android/ 目录下）交叉编译内核。")
+        }
+        if (!pageDir.exists() || !new File(pageDir, "index.html").exists()) {
+            throw new GradleException(
+                "前端页面缺失：${pageDir}/index.html\n先运行 ./scripts/sync-page.sh（在 android/ 目录下）构建并同步页面。")
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith("merge") && (task.name.contains("Assets") || task.name.contains("JniLibFolders"))) {
+        task.dependsOn("requireBuildInputs")
+    }
+}

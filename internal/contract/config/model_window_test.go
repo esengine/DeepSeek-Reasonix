@@ -48,7 +48,7 @@ func TestDeclaredWindowsOutrankTheRegistry(t *testing.T) {
 }
 
 // A custom relay cannot always expose context metadata. In that case it gets a
-// usable 160k baseline until the user supplies the model's actual limit.
+// usable 1M baseline until the user supplies the model's actual limit.
 func TestAnUnestablishedWindowUsesTheRelayFallback(t *testing.T) {
 	cfg := &Config{Providers: []ProviderEntry{{
 		Name: "relay", Kind: "openai", BaseURL: "https://relay.example.com/v1",

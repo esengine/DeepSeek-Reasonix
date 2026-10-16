@@ -1,0 +1,40 @@
+// Reasonix Mobile — the Android shell around the Reasonix kernel.
+//
+// The shell is deliberately thin: it unpacks the kernel and the built page that
+// ship inside the APK, starts `reasonix serve` on a loopback port, and points a
+// WebView at it. Everything the person sees and does is the same page the
+// desktop Studio and `reasonix web` serve, because it is literally the same
+// build of `desktop/frontend-next` — which is what keeps one interface honest
+// across the three surfaces, and why the page is packaged rather than fetched.
+
+pluginManagement {
+    repositories {
+        // Mirrors first, then the originals. On a machine behind a slow or
+        // filtered route to `dl.google.com` the mirror is the difference
+        // between a build and a timeout, and listing the originals after it
+        // costs nothing when the mirror already answered.
+        maven { url = "https://maven.aliyun.com/repository/google" }
+        maven { url = "https://maven.aliyun.com/repository/gradle-plugin" }
+        maven { url = "https://maven.aliyun.com/repository/public" }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    // Deliberately not FAIL_ON_PROJECT_REPOS. This machine also carries a
+    // global `~/.gradle/init.gradle` that adds mirror repositories to every
+    // build; failing on a project repository would make that script an error
+    // rather than an accelerator, and the accelerator is worth keeping.
+    repositories {
+        maven { url = "https://maven.aliyun.com/repository/google" }
+        maven { url = "https://maven.aliyun.com/repository/central" }
+        maven { url = "https://maven.aliyun.com/repository/public" }
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "ReasonixMobile"
+include(":app")

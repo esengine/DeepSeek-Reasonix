@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is allowed, and this is a deliberate trade rather than an
+  oversight.
+
+  Reasonix's own surfaces speak plain HTTP: a kernel serves its page on
+  `127.0.0.1:<port>`, and the Studio on a computer serves the same page on its
+  LAN address so a phone can pair with it. Both are `http://`. Android denies
+  cleartext by default from API 28, so without this the WebView could load
+  neither — including the paired computer this app exists to reach.
+
+  The alternative, naming hosts, cannot express the thing that needs it: the
+  address of the computer to pair with is whatever its router handed out
+  (`192.168.x.x`), chosen at scan time, and `network-security-config` matches
+  literals and domains, not subnets. So the exception is global.
+
+  What that costs is bounded by what this app can reach. Its own kernel listens
+  on loopback; a paired computer is on the same network; a remote server is
+  reached over SSH, which is encrypted whatever the tunnelled protocol is. The
+  page it loads is the same build this repository ships, and the credential it
+  trades a pairing code for is an HttpOnly cookie scoped to that origin.
+
+  Still HTTPS everywhere it is offered: nothing here downgrades a request, and
+  `trust-anchors` keeps the system roots for every TLS connection that is made.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

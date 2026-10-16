@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -30,6 +31,11 @@ type NetworkSettings struct {
 	Effective string   `json:"effective"`
 	Direct    []string `json:"direct,omitempty"`
 	Endpoint  string   `json:"endpoint,omitempty"`
+	// DNS and DoH are the resolvers to use instead of the system's. Both are
+	// ordinary settings rather than secrets — an endpoint may name a provider
+	// the person pays for, but the name of it is not the credential.
+	DNS []string `json:"dns,omitempty"`
+	DoH string   `json:"doh,omitempty"`
 }
 
 // NetworkSettings reads the current proxy configuration.
@@ -51,6 +57,8 @@ func (c *Controller) NetworkSettings() NetworkSettings {
 		Effective:   netclient.RedactProxyURL(netclient.Summary(spec)),
 		Direct:      spec.DirectHosts,
 		Endpoint:    c.providerEndpoint(cfg),
+		DNS:         cfg.NetworkDNS(),
+		DoH:         cfg.NetworkDoH(),
 	}
 }
 
@@ -78,7 +86,45 @@ func (c *Controller) SaveNetworkSettings(in NetworkSettings, password string, cl
 	if err := netclient.Validate(cfg.NetworkProxySpec()); err != nil {
 		return fmt.Errorf("这个代理设置用不了：%w", err)
 	}
+	// Kept as written, and validated only for shape: a resolver that does not
+	// answer is a network fact, not a typo, and refusing to save one would leave
+	// the person unable to fix a broken resolver by pointing at a working one.
+	cfg.Network.DNSServers = trimAll(in.DNS)
+	cfg.Network.DoH = strings.TrimSpace(in.DoH)
+	if err := validateDoH(cfg.Network.DoH); err != nil {
+		return err
+	}
 	return cfg.SaveTo(config.UserConfigPath())
+}
+
+// validateDoH rejects an endpoint that is not an HTTPS URL, because a DoH
+// client that accepted `http://` would send the query it exists to protect in
+// clear text — the exact failure this setting is here to fix.
+func validateDoH(endpoint string) error {
+	if endpoint == "" {
+		return nil
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("DNS over HTTPS 地址读不懂：%w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("DNS over HTTPS 必须是 https 地址，当前是 %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("DNS over HTTPS 地址缺少主机名")
+	}
+	return nil
+}
+
+func trimAll(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if v := strings.TrimSpace(s); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // NetworkProbe is one diagnosed step. The auth step is here rather than in

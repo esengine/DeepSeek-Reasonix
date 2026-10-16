@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backups are off, and this file says why rather than leaving it implicit.
+
+  A Reasonix home holds provider keys, an account token and every session
+  transcript. Android's auto-backup would copy all of it to the person's cloud
+  drive and, on a device-to-device transfer, to a new phone — which is a
+  credential leaving the device by a route nobody chose. `allowBackup="false"`
+  in the manifest turns that off; these two stanzas are the belt to its braces,
+  excluding everything explicitly so that a later change to `allowBackup` cannot
+  quietly start copying credentials.
+
+  What a person wants to move between phones, the kernel already moves: its own
+  export writes a file the person hands to the system's picker.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

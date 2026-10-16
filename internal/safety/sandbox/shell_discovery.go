@@ -165,6 +165,22 @@ func (h shellHost) bashCandidates() []string {
 			add(p)
 		}
 	}
+	// Android has no bash. `/system/bin/sh` is mksh — a POSIX shell that takes
+	// `-c` like the rest — and it is the only one on the device, so without it
+	// the search finds nothing, hands the session the literal name "bash", and
+	// every command fails to start. That is the "Shell tool interpreter
+	// fallback" a phone showed on launch, and it was not a warning about a
+	// preference: the shell tool did not work at all.
+	//
+	// Listed after bash rather than instead of it, so a device with a real bash
+	// installed (Termux, a rooted system) keeps using it.
+	if h.goos == "android" {
+		for _, p := range []string{"/system/bin/sh", "/vendor/bin/sh"} {
+			if h.exists(p) {
+				add(p)
+			}
+		}
+	}
 	return out
 }
 

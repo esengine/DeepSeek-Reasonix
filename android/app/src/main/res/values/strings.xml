@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Every string the shell itself shows. The interface's own text belongs to
+     the page and lives in its i18n bundle; these are only the few lines that
+     exist before it, or when it cannot load. -->
+<resources>
+    <string name="app_name">Reasonix</string>
+
+    <string name="channel_kernel">内核运行中</string>
+    <string name="channel_kernel_desc">Reasonix 内核在后台运行时显示，可在系统设置中单独关闭。</string>
+
+    <string name="notify_running_title">Reasonix 正在运行</string>
+    <string name="notify_running_body">任务继续进行，切回应用即可查看。</string>
+    <string name="notify_failed_title">Reasonix 无法启动</string>
+
+    <string name="err_kernel_unreachable">连接内核失败。请返回桌面重新打开应用。</string>
+
+    <string name="download_default_name">reasonix-download</string>
+    <string name="download_saved">已保存：%1$s</string>
+    <string name="download_failed">保存失败：%1$s</string>
+    <string name="download_failed_status">保存失败：服务器返回 %1$d</string>
+
+    <string name="splash_connecting">正在启动内核…</string>
+    <string name="splash_retry">重试</string>
+
+    <string name="wsperm_title">需要「所有文件访问」权限</string>
+    <string name="wsperm_body">要打开手机上的文件夹作为工作区，需要先允许本应用访问所有文件。点「去设置」，在列表里打开 Reasonix 的开关，然后返回这里。</string>
+    <string name="wsperm_go">去设置</string>
+    <string name="wsperm_later">以后再说</string>
+
+    <string name="scan_title">扫描电脑上的二维码</string>
+    <string name="scan_hint">对准电脑上「设备访问」里的二维码，识别后即可连接这台电脑。</string>
+    <string name="scan_button">扫码连接电脑</string>
+    <string name="scan_denied">没有相机权限，无法扫码。请在系统设置里允许。</string>
+    <string name="share_title">分享文件</string>
+</resources>

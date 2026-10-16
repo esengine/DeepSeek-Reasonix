@@ -18,6 +18,11 @@ type Request struct {
 	Failed string // what the browser said when nothing arrived
 	Millis int64
 
+	// ResponseUnknown marks a request whose response this backend cannot see.
+	// The phone's WebView reports what a page asked for but not what came
+	// back, so an entry would otherwise read as one still in flight.
+	ResponseUnknown bool
+
 	// Page is which document of this tab asked: the list outlives a navigation,
 	// and a 404 the page before this one collected is not this page's.
 	Page int64
@@ -28,6 +33,9 @@ type Request struct {
 
 // Requests answers what a tab asked the network for, oldest first.
 func (s *Session) Requests(tabID string) ([]Request, TabInfo, error) {
+	if s.shell != nil {
+		return s.shell.Requests(tabID)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return nil, TabInfo{}, err

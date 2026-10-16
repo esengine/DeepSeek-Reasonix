@@ -36,6 +36,23 @@ func explainError(err error) error {
 		}
 		return fmt.Errorf(msg, dnsErr.Name)
 	}
+	// Before the reset branch, which would otherwise claim it: a `*url.Error`
+	// satisfies net.Error, so a refused certificate used to be reported as a
+	// dropped connection and sent the reader to check a network that works.
+	//
+	// The text fallback is the second half, and it exists because the identity
+	// check does not survive every wrapper in the streaming path: an attempt that
+	// failed its handshake is retried, and the retry's error can be rebuilt from
+	// its sentence rather than kept as a chain — after which there is no
+	// `*tls.CertificateVerificationError` left to match on. See
+	// `neterr.LooksLikeTLSCertificateFailure` for why matching text is sound
+	// there and nowhere else. Measured on a phone behind a poisoned resolver:
+	// the bar read "model stream disconnected … Check the provider/proxy
+	// connection" over an `x509: certificate is valid for localhost` — advice
+	// pointing at a network that was working.
+	if neterr.IsCertificateError(err) || neterr.LooksLikeTLSCertificateFailure(err) {
+		return fmt.Errorf(i18n.M.ProviderErrCertificateFmt, err.Error())
+	}
 	if neterr.IsConnReset(err) {
 		return fmt.Errorf("model stream disconnected before completion after retry attempts: %s. Check the provider/proxy connection, then retry or ask Reasonix to continue", err.Error())
 	}

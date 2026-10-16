@@ -60,11 +60,41 @@ func CaptureFatalDumps(home, version string) {
 	}
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(strings.TrimSuffix(entry.Name(), fatalSuffix))
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), fatalSuffix) || err != nil ||
-			pid <= 0 || pid == os.Getpid() || processAlive(pid) {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), fatalSuffix) || err != nil || pid <= 0 {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
+		// Whether the writer is still there — and, when it is, whether it is
+		// still *this* program.
+		//
+		// Liveness alone is not enough here, and believing it was is what made
+		// these files permanent on a phone: pids are recycled, so the number in
+		// the name eventually belongs to some unrelated process that is alive
+		// right now, and every start read that as "its writer is still running"
+		// and skipped it. Reported as two empty files still sitting in
+		// `cli-crash-fatal` long after the build that was supposed to clear
+		// them.
+		live := pid == os.Getpid() || (processAlive(pid) && sameBinary(pid))
+		// A dump with nothing in it is not a dump.
+		//
+		// `InstallFatalOutput` creates this file when a process *starts*, and
+		// the runtime writes to it only if that process dies fatally. So an
+		// empty file whose writer is gone means "started, then killed without
+		// ever crashing" — on a phone the ordinary case, not an exception: the
+		// system reaps a backgrounded app, and the process never reaches the
+		// `release` that would have removed the file.
+		if info, statErr := entry.Info(); statErr == nil && info.Size() == 0 {
+			if !live {
+				_ = os.Remove(path)
+			}
+			continue
+		}
+		// A file with bytes in it may still be being written: a process killed
+		// mid-dump leaves a truncated one, and only the check tells that apart
+		// from a finished report.
+		if live {
+			continue
+		}
 		if captureFatalDump(home, version, path) == nil {
 			_ = os.Remove(path)
 		}

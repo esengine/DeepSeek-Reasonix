@@ -3,10 +3,18 @@
 // source added by hand resolved to nothing, and nothing turns compaction off.
 package config
 
-// DefaultUnknownContextWindow is the safe working window for a custom relay
-// whose endpoint and model registry provide no capacity metadata. Users can
-// replace it with the relay model's actual limit through a model override.
-const DefaultUnknownContextWindow = 160_000
+// DefaultUnknownContextWindow is the working window for a custom relay whose
+// endpoint and model registry provide no capacity metadata. Users can replace
+// it with the relay model's actual limit through a model override.
+//
+// One million tokens, not a smaller "safe" number. The window is what
+// compaction is measured against, so a low fallback folds a conversation long
+// before the model would have run out of room — and the gateways this applies
+// to are the ones serving the large-window models, which is exactly why nobody
+// recorded a capacity for them. A relay that really is smaller is the case the
+// override exists for, and stating the wrong number in the meantime costs a
+// fold nobody needed.
+const DefaultUnknownContextWindow = 1_000_000
 
 // ResolvedContextWindow reports the window to run this entry against and
 // whether anything established it. Most-specific first: what the config says

@@ -519,6 +519,73 @@ func TestSaveProviderTrimsASCIIName(t *testing.T) {
 	}
 }
 
+// The label a person types may be Chinese while the name the file is written
+// under may not: the name is a config table and the head of every
+// "<provider>/<model>" ref, so the panel derives an ASCII name from the vendor
+// and sends the typed label beside it. This is the half that has to keep the two
+// attached — filed under the name, shown as the label.
+func TestSaveProviderStoresTheLabelBesideAnASCIIName(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+
+	resp := postProvider(t, srv.URL, "/providers", `{
+		"name":"relay","displayName":"公司中转站","kind":"openai","baseUrl":"https://relay.example/v1",
+		"models":["m1"]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllString(resp)
+		t.Fatalf("POST /providers = %d: %s", resp.StatusCode, b)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.Provider("relay")
+	if !ok {
+		t.Fatalf("the source was not stored under its ASCII name: %#v", cfg.Providers)
+	}
+	if entry.DisplayName != "公司中转站" {
+		t.Fatalf("display name = %q, want the label the panel sent", entry.DisplayName)
+	}
+	// Name and every ref built from it are untouched by the label.
+	if entry.Name != "relay" {
+		t.Fatalf("name = %q, want the ASCII name the refs use", entry.Name)
+	}
+	if got := entry.Label(); got != "公司中转站" {
+		t.Fatalf("Label() = %q, want the label", got)
+	}
+}
+
+// A label that cannot be stored is refused where it was typed, with a code the
+// field can point at — rather than written to the config and shown broken
+// everywhere the source is listed.
+func TestSaveProviderRefusesAnUnstorableDisplayName(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+
+	resp := postProvider(t, srv.URL, "/providers", `{
+		"name":"relay","displayName":"a\tb","kind":"openai","baseUrl":"https://relay.example/v1",
+		"models":["m1"]
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		b, _ := readAllString(resp)
+		t.Fatalf("POST /providers with a control character in the label = %d: %s", resp.StatusCode, b)
+	}
+	var got Reason
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("refusal was not a Reason: %v", err)
+	}
+	if got.Code != "provider.display_name_invalid" {
+		t.Fatalf("code = %q, want provider.display_name_invalid", got.Code)
+	}
+}
+
 // The panel mirrors this pattern in vendors.ts (sourceNameUsable); the same
 // cases are asserted there so the two copies cannot drift apart silently.
 func TestProviderNameRE_Boundaries(t *testing.T) {

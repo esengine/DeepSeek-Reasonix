@@ -54,8 +54,8 @@ func TestUnavailableMessageIsActionable(t *testing.T) {
 		`[sandbox] bash = "off"`,
 		"Settings -> Sandbox",
 	}
-	if runtime.GOOS == "windows" {
-		// Windows ships no OS-level Bash backend and the effective mode is
+	if runtime.GOOS == "windows" || runtime.GOOS == "android" {
+		// Neither ships an OS-level Bash backend and the effective mode is
 		// fixed to off, so the remediation states that fact instead of
 		// pointing at a config edit the platform would ignore.
 		want = []string{

@@ -16,6 +16,9 @@ import (
 // Screenshot captures what a tab's viewport shows, sized for a vision model.
 // Steps that give x and y afterwards are read in this image's pixels.
 func (s *Session) Screenshot(ctx context.Context, tabID string) (string, TabInfo, error) {
+	if s.shell != nil {
+		return s.shell.Screenshot(ctx, tabID)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return "", TabInfo{}, err
@@ -112,6 +115,9 @@ func (t *tab) screenshotScale() float64 {
 
 // Logs returns what a tab reported since the last call that read them.
 func (s *Session) Logs(tabID string) ([]LogEntry, TabInfo, error) {
+	if s.shell != nil {
+		return s.shell.Logs(tabID)
+	}
 	t, err := s.tab(tabID)
 	if err != nil {
 		return nil, TabInfo{}, err

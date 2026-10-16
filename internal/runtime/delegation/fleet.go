@@ -40,7 +40,7 @@ func NewFleetTool(taskTool *TaskTool) *FleetTool {
 func (*FleetTool) Name() string { return "fleet" }
 
 func (*FleetTool) Description() string {
-	return "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items and start from their final answers (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths, as file paths when the targets are known: a directory overlaps every path beneath it and serializes writers. Ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts; under [agent] write_lease = optimistic they reserve nothing up front and hold only the path being written. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. An item may pass adopt_ref instead of a prompt to stand in for running it with an already-completed child's answer, which is how a fleet a restart interrupted is re-issued without paying twice for the items that finished. Background mode returns a fleet job id collectable with wait."
+	return "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items and start from their final answers (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths, as file paths when the targets are known: a directory overlaps every path beneath it and serializes writers. Ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. An item may pass adopt_ref instead of a prompt to stand in for running it with an already-completed child's answer, which is how a fleet a restart interrupted is re-issued without paying twice for the items that finished. Background mode returns a fleet job id collectable with wait."
 }
 
 func (*FleetTool) Schema() json.RawMessage {
@@ -61,7 +61,7 @@ func (*FleetTool) Schema() json.RawMessage {
         "depends_on":{"type":"array","items":{"type":"string"},"description":"Ids of tasks that must complete before this one starts. This task begins with each dependency's final answer in its context, bounded and split evenly across them, so it need not re-derive their work. Unknown ids, self-edges, and cycles fail preflight. A task whose dependency fails or is skipped is skipped too. Ordered tasks may share write_paths; only tasks that can run at the same time need disjoint claims."},
         "description":{"type":"string","description":"Optional short label shown in the job list."},
         "profile":{"type":"string","description":"Optional runAs=subagent profile name."},
-        "write_paths":{"type":"array","items":{"type":"string"},"description":"Write targets for this item, as file paths when the targets are known: a directory overlaps every path beneath it and serializes writers. Writers that can run at the same time must declare non-overlapping paths; writers ordered by depends_on may share them. Omitting write_paths claims the whole workspace (not under write_lease = optimistic); two concurrent whole-workspace claims (or any overlap between concurrent writers) fail preflight and start nothing."},
+        "write_paths":{"type":"array","items":{"type":"string"},"description":"Write targets for this item, as file paths when the targets are known: a directory overlaps every path beneath it and serializes writers. Writers that can run at the same time must declare non-overlapping paths; writers ordered by depends_on may share them. Omitting write_paths claims the whole workspace; two concurrent whole-workspace claims (or any overlap between concurrent writers) fail preflight and start nothing."},
         "read_only":{"type":"boolean","description":"Force the read-only registry even if the profile is writable."},
         "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist (intersected with profile allowed-tools)."},
         "max_steps":{"type":"integer","description":"Optional max tool-call rounds.","minimum":1},
@@ -78,6 +78,22 @@ func (*FleetTool) Schema() json.RawMessage {
 }
 
 func (*FleetTool) ReadOnly() bool { return false }
+
+// fleetArgsHint is appended to a call this tool refused, showing one minimal
+// shape that would have been accepted.
+//
+// The three things a caller guesses wrong here are the ones no single schema
+// field can teach: depends_on names another task's **id string** (not its
+// 1-based position, and not the task's description), write_paths is what keeps
+// two concurrent writers from colliding (a task with none claims the whole
+// workspace, so two of them cannot run side by side), and read_only is how a
+// task that writes nothing says so — a pair of those runs in parallel happily.
+// Each wrong guess used to cost a round trip and taught only the one mistake it
+// tripped; showing a whole valid call teaches all three at once.
+const fleetArgsHint = `
+
+A minimal valid call (ids are strings; read_only lets readers run together):
+{"tasks":[{"id":"read","prompt":"...","read_only":true},{"id":"write","prompt":"...","depends_on":["read"],"write_paths":["out.txt"]}]}`
 
 type fleetTaskItem struct {
 	Prompt      string   `json:"prompt"`
@@ -146,15 +162,15 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 	dec := json.NewDecoder(bytes.NewReader(args))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&params); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+		return "", fmt.Errorf("invalid args: %w%s", err, fleetArgsHint)
 	}
 	if n := len(params.Tasks); n < fleetMinTasks || n > fleetMaxTasks {
-		return "", fmt.Errorf("fleet requires between %d and %d tasks (got %d)", fleetMinTasks, fleetMaxTasks, n)
+		return "", fmt.Errorf("fleet requires between %d and %d tasks (got %d)%s", fleetMinTasks, fleetMaxTasks, n, fleetArgsHint)
 	}
 
 	call, err := f.preflight(ctx, params.Tasks, params.FailFast)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w%s", err, fleetArgsHint)
 	}
 	plan, specs, adopted := call.plan, call.specs, call.adopted
 

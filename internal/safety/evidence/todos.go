@@ -78,7 +78,7 @@ func ValidateSerialTodos(todos []TodoItem) error {
 		}
 	}
 	if len(todos) > 0 && seenPending && !seenCurrent {
-		return fmt.Errorf("serial task list has pending work but no in_progress item")
+		return fmt.Errorf("serial task list has pending work but no in_progress item: exactly one item must be in_progress — the first unfinished one. If you finished an item, sign it off with complete_step instead of writing status completed here")
 	}
 	return nil
 }

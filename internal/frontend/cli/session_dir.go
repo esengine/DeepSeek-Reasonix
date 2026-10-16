@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reasonix/internal/assembly/boot"
 	"reasonix/internal/contract/config"
 )
@@ -23,6 +24,33 @@ func resolveCLISessionDirFor(workspaceRoot string) string {
 		return projDir
 	}
 	return config.SessionDir()
+}
+
+// enterWorkspace switches into dir and answers it as an absolute path, which is
+// what a caller hands on as boot's WorkspaceRoot. Empty dir is no override and
+// answers empty.
+//
+// The path is made absolute *before* the switch, and that order is the point: a
+// relative value resolved a second time against the directory just changed into
+// lands somewhere nobody named. Answering the absolute form is what keeps the
+// working directory and the root the same string, so `write_roots` — derived
+// from the root — covers the folder the caller asked for.
+//
+// A directory that cannot be entered is an error rather than a silent fallback,
+// because the two answers are different places to work and only the caller
+// knows whether to drop the override or refuse the command.
+func enterWorkspace(dir string) (string, error) {
+	if dir == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("--dir %s: %w", dir, err)
+	}
+	if err := os.Chdir(abs); err != nil {
+		return "", fmt.Errorf("--dir %s: %w", dir, err)
+	}
+	return abs, nil
 }
 
 // workspaceRootForDir is the root --dir pins; it runs after chdirTo, so the

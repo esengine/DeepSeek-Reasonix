@@ -172,7 +172,11 @@ var ChineseTraditional = Messages{
 	AskURLOpenFailed:                "無法開啟瀏覽器。請重試，或手動開啟顯示的地址。",
 	AskURLSending:                   "正在傳送你的決定…",
 	AskURLAnswerFailed:              "無法傳送你的決定，請重試。",
-	AskTypeSomething:                "自己輸入",
+
+	BrowserNavigationFailed:  "這個網頁打不開（%s）。網域名稱解析失敗常見於內網網域或需要連公司網路、VPN；連線被拒通常是對端服務沒啟動或連接埠不對。",
+	BrowserNavigationTimeout: "這個網頁一直沒回應，已放棄等待（%s）。國內無法存取的站點會這樣長時間掛起，換個能存取的位址再試。",
+
+	AskTypeSomething: "自己輸入",
 	AskTypingHint:                   "輸入後按 Enter 確認",
 	AskNoteHint:                     "在下方為此項補充說明，Enter 確認",
 	AskChatInstead:                  "先不選擇，直接回覆",
@@ -747,6 +751,7 @@ var ChineseTraditional = Messages{
 	ProviderErrAuthRejected:    "認證失敗 (HTTP 401)：服務端拒絕了你的 API key。可能是 key 錯誤或已過期，也可能是服務端出現瞬時鑑權/額度問題——已退避重試仍失敗。請稍後再試，或檢查 .env 中的金鑰 / 執行 `reasonix setup`。",
 	ProviderErrDNSNotFound:     "無法解析模型服務網域 %s：DNS 查詢顯示該主機不存在，未建立任何連線，也沒有重試。請檢查網路、DNS、代理設定以及服務商的介面位址。",
 	ProviderErrDNSTemporary:    "無法解析模型服務網域 %s：DNS 查詢暫時失敗（解析伺服器不可達或逾時），未建立任何連線。請檢查網路、DNS、代理設定後重試。",
+	ProviderErrCertificateFmt:  "TLS 憑證驗證失敗：%s。這張憑證不是發給這個網域的，握手已被拒絕，也沒有重試。常見原因是 DNS 被污染（網域被解析到了別人的伺服器），或者鏈路上有解密代理。請檢查 VPN、代理、加速類應用程式，或換個網路後重試。",
 	SelectMoreAboveFmt:         "  ↑ 上方還有 %d 個",
 	SelectMoreBelowFmt:         "  ↓ 下方還有 %d 個",
 	SelectSearchHint:           "/ 搜尋 · 輸入關鍵詞過濾 · Esc 取消搜尋",

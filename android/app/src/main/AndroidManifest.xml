@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The shell's manifest.
+
+  There is no INTERNET-adjacent permission beyond INTERNET itself: the page and
+  the kernel talk over loopback, and reaching a server is the kernel's job over
+  a socket it owns. Reading and writing files goes through the system's document
+  picker (SAF), which hands back a grant for one file at a time — so no
+  storage permission is declared and none is needed.
+
+  `usesCleartextTraffic` is off, and the loopback origin is exempted by the
+  network security config instead: the kernel serves plain HTTP on 127.0.0.1 and
+  nothing else, so a blanket "allow cleartext" would open far more than the one
+  connection this app makes. A server reached over SSH is not HTTP at all.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Only to tell the person the kernel is still running while the screen is
+         off; it is a foreground service with a dismissible notification, not a
+         background wake-up. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- From API 34 every foreground-service *type* needs its own permission as
+         well as the general one: naming dataSync in the manifest without asking
+         for it is a SecurityException at startForeground, on the one code path
+         that keeps a long task alive. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Only to read the pairing code a computer shows. Requested at the
+         moment the person asks to scan, never at launch. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- The kernel is a child process, and a task left running is one the person
+         expects to finish with the screen off. Android's own doze can freeze the
+         whole app group instead, which is what the shell asks to be exempt from
+         — once, when a turn is actually running, never at launch. It is a
+         request the person can refuse, and refusing it only costs battery life
+         during a long turn. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Every-file access, for opening a folder on this phone as a workspace.
+         The kernel is a plain Go binary: it opens paths with `open(2)`, and a
+         document URI is not a path it can open. SAF would hand back exactly
+         that unusable URI, so the one honest permission is the broad one —
+         granted by the person in system settings, which is the only place
+         Android offers it. Nothing here reads storage for any other purpose. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <!-- Below API 33 the same folder walk needs the older pair; from 33 they are
+         superseded by the permission above and asking for them would be a lie. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+
+    <!-- A phone without a touchscreen cannot drive this interface; saying so
+         keeps the listing honest rather than letting it install on a TV. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
+    <!-- The camera is optional: a phone without one is still a fine client for
+         a kernel it already knows, and it can still pair by opening the link the
+         computer shows. Requiring it would take the app off those devices. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <application
+        android:name=".App"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Reasonix"
+        android:usesCleartextTraffic="false"
+        tools:targetApi="35">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|fontScale|smallestScreenSize"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Reasonix">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- A pairing link the kernel prints can be opened from a phone's
+                 scanner, which is the shortest path from "server says here is a
+                 code" to "this phone is driving it". The scheme is the app's
+                 own so a browser is never asked to handle it. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="reasonix" />
+            </intent-filter>
+        </activity>
+
+        <!-- The kernel outlives the screen: a turn that takes minutes would
+             otherwise be killed when the phone is pocketed. The service is
+             `stopWithTask="false"` so swiping the app away ends it deliberately
+             rather than silently, and `foregroundServiceType="dataSync"` is the
+             closest honest description of "an agent is working". -->
+        <service
+            android:name=".KernelService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+
+        <!-- Reading the pairing code a computer shows. Its own activity rather
+             than a dialog, because the camera preview needs the whole screen to
+             be worth pointing at anything. Not exported: only this app starts
+             it, and a scanner another app could open is one that could be made
+             to read a code on someone else's behalf. -->
+        <activity
+            android:name=".ScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Reasonix.Scan" />
+    </application>
+</manifest>

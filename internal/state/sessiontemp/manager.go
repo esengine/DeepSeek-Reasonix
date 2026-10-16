@@ -27,7 +27,19 @@ import (
 const (
 	dirPrefix     = "reasonix-session-tmp-"
 	ownerLockName = ".owner.lock"
-	staleAge      = 24 * time.Hour
+	// graceAge is how long an unowned directory is left alone before it is
+	// swept.
+	//
+	// The owner lock is the real signal — a live process holds it — and the gap
+	// between creating the directory and taking that lock is microseconds, so
+	// the margin only has to cover a window that small. A phone is where the
+	// difference showed: its kernel is restarted on every cold start, each
+	// restart leaves the previous process's directory behind with the lock
+	// released, and a day-long wait meant five generations piled up inside one
+	// day (`reasonix-session-tmp-*` under the app cache, oldest a day old). The
+	// person reads that as the app leaking storage, and there is nothing left
+	// running that could still be using any of them.
+	graceAge = time.Hour
 )
 
 // ErrUnavailable reports that a session-private temporary directory could not
@@ -374,8 +386,14 @@ func resetProcessCleanupForTest() {
 	processCleanup.Unlock()
 }
 
-// cleanupStale removes reasonix-session-tmp-* direct children of root that are
-// older than 24h and whose owner lock is free. Failures are logged only.
+// cleanupStale removes reasonix-session-tmp-* direct children of root that no
+// live process owns and that are past graceAge. Failures are logged only.
+//
+// The owner lock is the signal that decides this; the age is only a guard
+// against the microseconds between a directory being made and its lock being
+// taken. Waiting on age instead is what let five generations pile up in one day
+// on a phone, where every cold start restarts the kernel and leaves the
+// previous process's directory behind with its lock already released.
 func cleanupStale(root string, now func() time.Time) {
 	if root == "" {
 		return
@@ -385,7 +403,7 @@ func cleanupStale(root string, now func() time.Time) {
 		slog.Warn("sessiontemp: list temp root for stale cleanup", "root", root, "err", err)
 		return
 	}
-	cutoff := now().Add(-staleAge)
+	cutoff := now().Add(-graceAge)
 	for _, ent := range entries {
 		name := ent.Name()
 		if !strings.HasPrefix(name, dirPrefix) {
