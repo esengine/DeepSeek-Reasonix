@@ -1105,16 +1105,25 @@ func (c *Config) DisabledSkillNames() []string {
 
 // IsSkillDisabled reports whether name is configured as disabled.
 func (c *Config) IsSkillDisabled(name string) bool {
-	key := SkillNameKey(name)
+	key := SkillNameKey(canonicalSkillName(name))
 	if key == "" {
 		return false
 	}
 	for _, disabled := range c.DisabledSkillNames() {
-		if SkillNameKey(disabled) == key {
+		if SkillNameKey(canonicalSkillName(disabled)) == key {
 			return true
 		}
 	}
 	return false
+}
+
+func canonicalSkillName(name string) string {
+	switch SkillNameKey(name) {
+	case "cognee-memory", "vision-liao-memory":
+		return "vision-liao-memory"
+	default:
+		return name
+	}
 }
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer

@@ -280,7 +280,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 			memory, notice := c.cogneeGuidanceContext(guidanceCtx, turn.raw)
 			cancelGuidance()
 			if memory != "" {
-				ctx = agent.WithTransientTurnContext(ctx, "Cognee project memory", memory)
+				ctx = agent.WithTransientTurnContext(ctx, "Vision-Liao project memory", memory)
 			}
 			c.cogneeNotice(notice)
 		}

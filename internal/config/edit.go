@@ -803,6 +803,20 @@ func (c *Config) SetSkillEnabled(name string, enabled bool) error {
 		return fmt.Errorf("skill name %q: use letters, digits, '_', '-', '.', 1-64 chars, starting alphanumeric", name)
 	}
 	next := c.DisabledSkillNames()
+	if key == "cognee-memory" || key == "vision-liao-memory" {
+		filtered := next[:0]
+		for _, existing := range next {
+			oldKey := SkillNameKey(existing)
+			if oldKey != "cognee-memory" && oldKey != "vision-liao-memory" {
+				filtered = append(filtered, existing)
+			}
+		}
+		if !enabled {
+			filtered = append(filtered, "vision-liao-memory")
+		}
+		c.Skills.DisabledSkills = filtered
+		return nil
+	}
 	idx := -1
 	for i, existing := range next {
 		if SkillNameKey(existing) == key {

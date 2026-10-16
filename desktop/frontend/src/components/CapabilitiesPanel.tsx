@@ -1,3 +1,4 @@
+import "./ChromeMCPStatusCard.css";
 import { ErrorMessage } from "./ErrorMessage";
 import { SettingsOptions } from "./SettingsOptions";
 import { SettingsSelect } from "./SettingsSelect";
@@ -61,23 +62,11 @@ export function CapabilitiesPanel({
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
   const [expandedServers, setExpandedServers] = useState<Set<string>>(() => new Set());
   const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
-  const [cogneeStatus, setCogneeStatus] = useState<CogneeMemoryStatus | null>(null);
-  const [cogneeURL, setCogneeURL] = useState("");
-  const [cogneeToken, setCogneeToken] = useState("");
 
   const reload = useCallback(async () => {
-    const [capabilities, cognee] = await Promise.all([
-      app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [], plugins: [] })),
-      app.CogneeMemorySettings().catch(() => null),
-    ]);
+		const capabilities = await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [], plugins: [] }));
     const normalized = normalizeCapabilitiesView(capabilities);
     setView(normalized);
-    setCogneeStatus(cognee);
-    const server = normalized.servers.find((candidate) => candidate.name === "cognee");
-    if (server?.url) {
-      const serverURL = server.url;
-      setCogneeURL((current) => current || serverURL);
-    }
   }, []);
   useEffect(() => {
     void reload();
@@ -288,28 +277,6 @@ export function CapabilitiesPanel({
               </section>
             ) : (
               <section className="mem-section">
-                <CogneeSettingsCard
-                  status={cogneeStatus}
-                  server={view.servers.find((server) => server.name === "cognee")}
-                  url={cogneeURL}
-                  token={cogneeToken}
-                  busy={busy}
-                  onURLChange={setCogneeURL}
-                  onTokenChange={setCogneeToken}
-                  onConfigure={() => {
-                    const result: { status: CogneeMemoryStatus | null } = { status: null };
-                    void mutate(async () => {
-                      result.status = await app.ConfigureCogneeMemory(cogneeURL, cogneeToken);
-                      setCogneeToken("");
-                    }).then((ok) => {
-                      if (ok && result.status) setCogneeStatus(result.status);
-                    });
-                  }}
-                  onToggleSkill={(enabled) => void mutate(() => app.SetSkillEnabled("cognee-memory", enabled))}
-                  onAuthorize={() => void mutate(() => app.AuthenticateMCPServer("cognee"))}
-                  onReconnect={() => void mutate(() => app.AuthorizeAndConnectMCPServer("cognee"))}
-                  onOpenMCP={() => { setTab("servers"); setEditing("cognee"); }}
-                />
                 <div className="cap-search settings-toolbar">
                   <input
                     className="mem-input"
@@ -362,25 +329,17 @@ export function CapabilitiesPanel({
 }
 
 function CogneeSettingsCard({
-  status, server, url, token, busy, onURLChange, onTokenChange, onConfigure,
-  onToggleSkill, onAuthorize, onReconnect, onOpenMCP,
+	status, url, token, busy, onURLChange, onTokenChange, onConfigure,
 }: {
   status: CogneeMemoryStatus | null;
-  server?: ServerView;
   url: string;
   token: string;
   busy: boolean;
   onURLChange: (value: string) => void;
   onTokenChange: (value: string) => void;
   onConfigure: () => void;
-  onToggleSkill: (enabled: boolean) => void;
-  onAuthorize: () => void;
-  onReconnect: () => void;
-  onOpenMCP: () => void;
 }) {
   const t = useT();
-  const managed = Boolean(server?.managedByPlugin);
-  const useMCPSettings = managed || server?.transport === "stdio";
   const urlIsSafe = (() => {
     try {
       const parsed = new URL(url.trim());
@@ -388,7 +347,6 @@ function CogneeSettingsCard({
         || (parsed.protocol === "http:" && ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname));
     } catch { return false; }
   })();
-  const state = status?.state ?? "connection_failed";
   return (
     <section className="cap-cognee" aria-labelledby="cap-cognee-title">
       <div className="cap-cognee__heading">
@@ -396,48 +354,21 @@ function CogneeSettingsCard({
           <h3 id="cap-cognee-title">{t("caps.cogneeTitle")}</h3>
           <p>{t("caps.cogneeHint")}</p>
         </div>
-        <span className={`cap-cognee__state cap-cognee__state--${state}`}>{t(cogneeStateLabelKey(state))}</span>
       </div>
-      <p className="cap-cognee__detail">{status?.detail ?? t("caps.cogneeLoading")}</p>
-      <label className="cap-cognee__skill">
-        <input type="checkbox" checked={status?.skillEnabled ?? false} disabled={busy || !status} onChange={(event) => onToggleSkill(event.target.checked)} />
-        <span>{t("caps.cogneeSkillToggle")}</span>
-      </label>
-      {useMCPSettings ? (
-        <div className="cap-cognee__actions">
-          <span>{managed ? t("caps.cogneeManaged", { plugin: server?.managedByPlugin ?? "" }) : t("caps.cogneeUseMCPSettings")}</span>
-          <button className="btn btn--small" type="button" onClick={onOpenMCP}>{t("caps.cogneeOpenMCP")}</button>
-        </div>
-      ) : (
-        <div className="cap-cognee__form">
+      <div className="cap-cognee__form">
           <label>{t("caps.cogneeURL")}
             <input className="mem-input" type="url" value={url} placeholder="https://…/mcp" onChange={(event) => onURLChange(event.target.value)} />
           </label>
           {!urlIsSafe && url.trim() !== "" && <div className="cap-cognee__validation">{t("caps.cogneeURLRule")}</div>}
           <label>{t("caps.cogneeToken")}
-            <input className="mem-input" type="password" autoComplete="new-password" value={token} placeholder={status?.tokenConfigured ? t("caps.cogneeTokenSaved") : t("caps.cogneeTokenOptional")} onChange={(event) => onTokenChange(event.target.value)} />
+            <input className="mem-input" type="password" autoComplete="new-password" value={token} placeholder={status?.tokenConfigured ? t("caps.cogneeTokenSaved") : t("caps.cogneeTokenOptional")} onInput={(event) => onTokenChange(event.currentTarget.value)} />
           </label>
           <div className="cap-cognee__actions">
-            <button className="btn btn--small" type="button" disabled={busy || !urlIsSafe} onClick={onConfigure}>{status?.configured ? t("caps.cogneeSaveConnect") : t("caps.cogneeConfigure")}</button>
-            {state === "authorization_required" && <button className="btn btn--small" type="button" disabled={busy} onClick={onAuthorize}>{t("caps.cogneeAuthorize")}</button>}
-            {status?.configured && state !== "ready" && state !== "authorization_required" && <button className="btn btn--small" type="button" disabled={busy} onClick={onReconnect}>{t("caps.cogneeRetry")}</button>}
-            {server && <button className="btn btn--small" type="button" onClick={onOpenMCP}>{t("caps.cogneeOpenMCP")}</button>}
+            <button className="btn btn--small" type="button" disabled={busy || !urlIsSafe} onClick={onConfigure}>{t("caps.cogneeSaveConnect")}</button>
           </div>
-        </div>
-      )}
+      </div>
     </section>
   );
-}
-
-function cogneeStateLabelKey(state: string): "caps.cogneeState.not_configured" | "caps.cogneeState.disabled" | "caps.cogneeState.authorization_required" | "caps.cogneeState.connection_failed" | "caps.cogneeState.tools_incompatible" | "caps.cogneeState.ready" {
-  switch (state) {
-    case "disabled": return "caps.cogneeState.disabled";
-    case "authorization_required": return "caps.cogneeState.authorization_required";
-    case "connection_failed": return "caps.cogneeState.connection_failed";
-    case "tools_incompatible": return "caps.cogneeState.tools_incompatible";
-    case "ready": return "caps.cogneeState.ready";
-    default: return "caps.cogneeState.not_configured";
-  }
 }
 
 function normalizeCapabilitiesView(view: CapabilitiesView | null | undefined): CapabilitiesView {
@@ -2608,6 +2539,63 @@ function mcpServerSourceLabel(server: ServerView, t: ReturnType<typeof useT>): s
 	}
 }
 
+function isChromeBridgeServer(server: ServerView): boolean {
+	const identity = `${server.name} ${server.command ?? ""} ${(server.args ?? []).join(" ")}`.toLowerCase().replaceAll("\\", "/");
+	return server.name.toLowerCase() === "chrome" || identity.includes("chrome-mcp-bridge");
+}
+
+function ChromeMCPStatusCard({
+	server,
+	busy,
+	onRemove,
+	onConnectNow,
+	onReconnect,
+	onClearAuth,
+	onEdit,
+}: {
+	server: ServerView;
+	busy: boolean;
+	onRemove: () => void;
+	onConnectNow: () => void;
+	onReconnect: () => void;
+	onClearAuth: () => void;
+	onEdit: () => void;
+}) {
+	const t = useT();
+	const [toolsExpanded, setToolsExpanded] = useState(false);
+	return (
+		<section className="cap-chrome-mcp-card">
+			<header className="cap-mcp-subpage__header">
+				<h3 className="cap-mcp-subpage__title">{t("caps.chromeMcpTitle")}</h3>
+				<p className="cap-mcp-subpage__desc">{t("caps.chromeMcpHint")}</p>
+			</header>
+			{server.error && (
+				<div className="cap-mcp-detail-error">
+					<div className="banner banner--error"><ErrorMessage error={server.error} /></div>
+					<details><summary>{t("caps.rawLog")}</summary><pre>{server.error}</pre></details>
+				</div>
+			)}
+			<ServerDetails
+				s={server}
+				tools={server.toolList ?? []}
+				busy={busy}
+				onConfirm={onRemove}
+				onConnectNow={onConnectNow}
+				onReconnect={onReconnect}
+				onConfirmClearAuth={onClearAuth}
+				toolsExpanded={toolsExpanded}
+				editing={false}
+				onEdit={onEdit}
+				onCancelEdit={() => undefined}
+				onUpdate={() => undefined}
+				onToggleTools={() => setToolsExpanded((expanded) => !expanded)}
+				standalone
+				showToolsToggle
+			/>
+		</section>
+	);
+}
+
 function MCPSettingsSubpageHeader({
 	title,
 	description,
@@ -3190,6 +3178,9 @@ export function MCPServersSettingsPage() {
 	const t = useT();
 	const [snapshotKey, setSnapshotKey] = useState("");
 	const [servers, setServers] = useState<ServerView[] | null>(null);
+	const [cogneeStatus, setCogneeStatus] = useState<CogneeMemoryStatus | null>(null);
+	const [cogneeURL, setCogneeURL] = useState("");
+	const [cogneeToken, setCogneeToken] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
@@ -3198,10 +3189,12 @@ export function MCPServersSettingsPage() {
 	const [marketplaceQuery, setMarketplaceQuery] = useState("");
 
 	const reload = useCallback(async () => {
-		const [meta, tabs] = await Promise.all([
+		const [meta, tabs, cognee] = await Promise.all([
 			app.Meta().catch(() => null),
 			app.ListTabs().catch(() => []),
+			typeof app.CogneeMemorySettings === "function" ? app.CogneeMemorySettings().catch(() => null) : Promise.resolve(null),
 		]);
+		setCogneeStatus(cognee);
 		const key = settingsSnapshotKey(meta, tabs);
 		setSnapshotKey(key);
 		const cached = key ? mcpSettingsSnapshot : null;
@@ -3213,6 +3206,8 @@ export function MCPServersSettingsPage() {
 		const next = normalizeServerViews(await app.MCPServers().catch(() => []));
 		mcpSettingsSnapshot = { key, value: next };
 		setServers(next);
+		const cogneeServer = next.find((server) => server.name === "cognee");
+		if (cogneeServer?.url) setCogneeURL((current) => current || cogneeServer.url || "");
 	}, []);
 	useEffect(() => { void reload(); }, [reload]);
 	useEffect(() => {
@@ -3275,6 +3270,7 @@ export function MCPServersSettingsPage() {
 	const selectedServer = screen.kind === "detail" || screen.kind === "edit"
 		? servers?.find((server) => server.name === screen.name)
 		: undefined;
+	const chromeServer = useMemo(() => servers?.find(isChromeBridgeServer), [servers]);
 	useEffect(() => {
 		if (servers && (screen.kind === "detail" || screen.kind === "edit") && !servers.some((server) => server.name === screen.name)) {
 			setScreen({ kind: "list" });
@@ -3294,6 +3290,17 @@ export function MCPServersSettingsPage() {
 			{err && <div className="banner banner--error" role="alert"><ErrorMessage error={err} /></div>}
 			{screen.kind === "list" && (
 				<>
+					{chromeServer && (
+						<ChromeMCPStatusCard
+							server={chromeServer}
+							busy={actionBusy}
+							onRemove={() => void mutate(() => app.RemoveMCPServer(chromeServer.name))}
+							onConnectNow={() => void mutate(() => connectMCPServer(chromeServer.name, servers ?? []))}
+							onReconnect={() => void mutate(() => app.ReconnectMCPServer(chromeServer.name))}
+							onClearAuth={() => void mutate(() => app.ClearMCPServerAuthentication(chromeServer.name))}
+							onEdit={() => setScreen({ kind: "edit", name: chromeServer.name })}
+						/>
+					)}
 					<div className="cap-mcp-list-toolbar settings-toolbar">
 						{servers && servers.length > 0 ? <div className="drawer__summary">{summary}</div> : <span />}
 						<div className="cap-mcp-list-toolbar__actions">
@@ -3442,6 +3449,20 @@ export function MCPServersSettingsPage() {
 						standalone
 						showToolsToggle={false}
 					/>
+					{selectedServer.name === "cognee" && (
+						<CogneeSettingsCard
+							status={cogneeStatus}
+							url={cogneeURL || selectedServer.url || ""}
+							token={cogneeToken}
+							busy={actionBusy}
+							onURLChange={setCogneeURL}
+							onTokenChange={setCogneeToken}
+							onConfigure={() => void mutate(async () => {
+								setCogneeStatus(await app.ConfigureCogneeMemory(cogneeURL || selectedServer.url || "", cogneeToken));
+								setCogneeToken("");
+							})}
+						/>
+					)}
 				</div>
 			)}
 		</section>
@@ -3476,8 +3497,9 @@ export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspac
 		} else {
 			setView(null);
 		}
-		const next = normalizeSkillsSettingsView(await app.SkillsSettings().catch(() => ({ skills: [], skillRoots: [] })));
+		const nextRaw = await app.SkillsSettings().catch(() => ({ skills: [], skillRoots: [] }));
 		if (sequence !== reloadSequence.current) return;
+		const next = normalizeSkillsSettingsView(nextRaw);
 		skillsSettingsSnapshot = { key, value: next };
 		setView(next);
 		setSkillUpdates(await app.BuiltinSkillUpdates().catch(() => []));

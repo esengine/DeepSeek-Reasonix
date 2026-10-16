@@ -131,6 +131,183 @@ function ok(value: unknown, message: string) {
   dom.window.close();
 }
 
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const meta: Meta = { label: "test", ready: true, eventChannel: "cognee-detail-channel", cwd: "/tmp/reasonix-test", workspaceRoot: "/tmp/reasonix-test" };
+  const tabs: TabMeta[] = [{
+    id: "tab-cognee-detail",
+    scope: "project",
+    workspaceRoot: "/tmp/reasonix-test",
+    workspaceName: "reasonix-test",
+    topicId: "topic-cognee-detail",
+    topicTitle: "Cognee detail",
+    label: "Cognee detail",
+    ready: true,
+    running: false,
+    mode: "normal",
+    toolApprovalMode: "auto",
+    active: true,
+    cwd: "/tmp/reasonix-test",
+  }];
+  const saved: { url?: string; token?: string } = {};
+  const server: ServerView = {
+    name: "cognee",
+    transport: "http",
+    status: "failed",
+    configured: true,
+    source: "user",
+    autoStart: true,
+    url: "http://127.0.0.1:12316/mcp-new",
+    error: "401 unauthorized",
+    tools: 0,
+    prompts: 0,
+    resources: 0,
+  };
+  const appStubTable: AppBindings = ({
+    main: {
+      App: {
+        Meta: async () => meta,
+        ListTabs: async () => tabs,
+        MCPServers: async () => [server],
+        CogneeMemorySettings: async () => ({
+          state: "authorization_required",
+          detail: "401 unauthorized",
+          skillEnabled: true,
+          configured: true,
+          tokenConfigured: false,
+        }),
+        ConfigureCogneeMemory: async (url, token) => {
+          saved.url = url;
+          saved.token = token;
+          return {
+            state: "ready",
+            detail: "Connected",
+            skillEnabled: true,
+            configured: true,
+            tokenConfigured: true,
+          };
+        },
+      } as Partial<AppBindings> as AppBindings,
+    },
+  }).main.App;
+  installDesktopHostStub(appStubTable);
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));
+    await flush();
+  });
+  const openServer = document.querySelector<HTMLButtonElement>(".cap-mcp-list-row__main");
+  if (!openServer) throw new Error("missing Cognee server details button");
+  await act(async () => {
+    openServer.click();
+    await flush();
+  });
+  await waitFor("Cognee token form", () => Boolean(document.querySelector('.cap-cognee input[type="password"]')));
+  const urlInput = document.querySelector<HTMLInputElement>('.cap-cognee input[type="url"]');
+  const tokenInput = document.querySelector<HTMLInputElement>('.cap-cognee input[type="password"]');
+  if (!urlInput || !tokenInput) throw new Error("missing Cognee endpoint or token field");
+  await act(async () => {
+    urlInput.value = "http://127.0.0.1:12316/mcp-new";
+    urlInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    tokenInput.value = "vision-liao-one-time-token";
+    tokenInput.dispatchEvent(new dom.window.InputEvent("input", { bubbles: true, inputType: "insertText", data: "vision-liao-one-time-token" }));
+    await flush();
+  });
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".cap-cognee button")?.click();
+    await flush();
+  });
+  await waitFor("Cognee connector token save", () => saved.token === "vision-liao-one-time-token");
+  ok(saved.url === "http://127.0.0.1:12316/mcp-new", "Cognee details saves the endpoint together with the connector token");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const meta: Meta = { label: "test", ready: true, eventChannel: "chrome-mcp-channel", cwd: "/tmp/reasonix-test", workspaceRoot: "/tmp/reasonix-test" };
+  const tabs: TabMeta[] = [{
+    id: "tab-chrome-mcp",
+    scope: "project",
+    workspaceRoot: "/tmp/reasonix-test",
+    workspaceName: "reasonix-test",
+    topicId: "topic-chrome-mcp",
+    topicTitle: "Chrome MCP",
+    label: "Chrome MCP",
+    ready: true,
+    running: false,
+    mode: "normal",
+    toolApprovalMode: "auto",
+    active: true,
+    cwd: "/tmp/reasonix-test",
+  }];
+  let reconnected = "";
+  const server: ServerView = {
+    name: "chrome",
+    transport: "stdio",
+    status: "connected",
+    configured: true,
+    source: "project",
+    configSource: ".mcp.json",
+    autoStart: true,
+    command: "node C:\\Users\\Administrator\\AppData\\Roaming\\reasonix\\skills\\chrome-mcp-bridge-2026-skill\\mcp-bridge.js --server",
+    envKeys: ["CHROME_MCP_API_KEY", "MCP_PROTOCOL_MODE"],
+    tools: 1,
+    prompts: 0,
+    resources: 0,
+    toolList: [{ name: "chrome_navigate", description: "Navigate Chrome." }],
+  };
+  const appStubTable: AppBindings = ({
+    main: {
+      App: {
+        Meta: async () => meta,
+        ListTabs: async () => tabs,
+        MCPServers: async () => [server],
+        ReconnectMCPServer: async (name) => { reconnected = name; },
+      } as Partial<AppBindings> as AppBindings,
+    },
+  }).main.App;
+  installDesktopHostStub(appStubTable);
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(MCPServersSettingsPage)));
+    await flush();
+  });
+  const chromeCard = document.querySelector(".cap-chrome-mcp-card");
+  ok(Boolean(chromeCard), "Chrome bridge gets a dedicated MCP status card");
+  ok(chromeCard?.textContent?.includes(".mcp.json") && chromeCard.textContent.toLowerCase().includes("connected"), "Chrome card shows its source and connection status");
+  ok(chromeCard?.textContent?.includes("CHROME_MCP_API_KEY"), "Chrome card shows environment variable names");
+  ok(chromeCard?.textContent?.includes("mcp-bridge.js --server"), "Chrome card shows the stdio bridge command");
+  const showTools = Array.from(chromeCard?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((button) => button.textContent?.includes("View tools"));
+  if (!showTools) throw new Error("missing Chrome tools action");
+  await act(async () => {
+    showTools.click();
+    await flush();
+  });
+  ok(chromeCard?.textContent?.includes("chrome_navigate"), "Chrome card can expand its tool list");
+  const reconnect = Array.from(chromeCard?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((button) => button.textContent?.includes("Reconnect"));
+  if (!reconnect) throw new Error("missing Chrome reconnect action");
+  await act(async () => {
+    reconnect.click();
+    await flush();
+  });
+  ok(reconnected === "chrome", "Chrome card reconnect action targets the bridge server");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
 const quickCommand = parseMCPQuickDefinition("npx -y chrome-devtools-mcp@latest");
 ok(quickCommand.name === "chrome-devtools-mcp" && quickCommand.transport === "stdio", "quick install should derive a stable name and stdio transport from one command");
 

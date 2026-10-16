@@ -1,0 +1,12 @@
+.cap-chrome-mcp-card {
+  min-width: 0;
+  margin: 0 0 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-elev-2) 68%, var(--bg-elev));
+}
+
+.cap-chrome-mcp-card .cap-mcp-subpage__header {
+  margin-bottom: 12px;
+}

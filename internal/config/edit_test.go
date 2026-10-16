@@ -1094,6 +1094,27 @@ func TestSkillEnabledMutator(t *testing.T) {
 	}
 }
 
+func TestVisionLiaoSkillMigratesLegacyDisabledPreference(t *testing.T) {
+	c := Default()
+	c.Skills.DisabledSkills = []string{"cognee-memory"}
+	if !c.IsSkillDisabled("vision-liao-memory") {
+		t.Fatal("legacy disabled Cognee skill should keep Vision-Liao memory disabled")
+	}
+	if err := c.SetSkillEnabled("vision-liao-memory", true); err != nil {
+		t.Fatalf("enable renamed skill: %v", err)
+	}
+	if c.IsSkillDisabled("vision-liao-memory") || len(c.Skills.DisabledSkills) != 0 {
+		t.Fatalf("disabled skills after enabling renamed skill = %v", c.Skills.DisabledSkills)
+	}
+	c.Skills.DisabledSkills = []string{"cognee-memory"}
+	if err := c.SetSkillEnabled("vision-liao-memory", false); err != nil {
+		t.Fatalf("disable renamed skill: %v", err)
+	}
+	if len(c.Skills.DisabledSkills) != 1 || c.Skills.DisabledSkills[0] != "vision-liao-memory" {
+		t.Fatalf("disabled skills after migration = %v, want [vision-liao-memory]", c.Skills.DisabledSkills)
+	}
+}
+
 func TestSkillImplicitInvocationMutator(t *testing.T) {
 	c := Default()
 	if !c.ImplicitSkillInvocationEnabled() {

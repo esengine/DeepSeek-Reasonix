@@ -4,7 +4,7 @@ Reasonix 通过 VISION-LIAO 的 Cognee MCP 为当前任务检索获准的长期�
 
 ## 配置
 
-在「设置 → Agent Skills → Cognee 项目记忆」检查服务地址和 connector token；也可以从 MCP 管理器编辑名为 `cognee` 的服务。Loopback HTTP 可用；远程端点必须使用 HTTPS。连接凭据应是 VISION-LIAO 为此连接者签发的独立 connector token，保存在 Reasonix 凭据存储中。不要把桌面内部 `local.mcp_api_key` 当作连接者凭据共享给其他客户端。
+在「设置 → Agent Skills → Vision-Liao 记忆」检查服务地址和 connector token；也可以从 MCP 管理器编辑名为 `cognee` 的服务。Loopback HTTP 可用；远程端点必须使用 HTTPS。连接凭据应是 VISION-LIAO 为此连接者签发的独立 connector token，保存在 Reasonix 凭据存储中。不要把桌面内部 `local.mcp_api_key` 当作连接者凭据共享给其他客户端。
 
 高级用户可在 Reasonix 的 MCP 配置中添加服务，并将 token 值放在凭据存储提供的环境变量中：
 
@@ -18,20 +18,20 @@ headers = { Authorization = "Bearer ${VISION_LIAO_CONNECTOR_TOKEN}" }
 
 首次使用时，Reasonix 按需连接已启用且已授权的服务。服务就绪检查只读取工具目录和 schema，不会创建提案或检索记忆。
 
-服务连接后，还需在 Agent Skills 中启用 `cognee-memory`。Reasonix 不会替用户启用或重新授权 MCP 服务。
+服务连接后，还需在 Agent Skills 中启用 `vision-liao-memory`。Reasonix 不会替用户启用或重新授权 MCP 服务。该技能使用 Cognee MCP 作为记忆服务后端。
 
 ## 工具与范围
 
 新 MCP 至少需要提供：
 
-- `get_guidance` 或 `search_memory`，其输入 schema 声明字符串 `task` 或 `query`。
-- `propose_memory`，其输入 schema 声明内容、类别、目标范围和来源字段，并允许 `private`、`global` 两个范围及 `experience` 类别。
+- `get_guidance`，其输入 schema 声明必填字符串 `task`；或者 `search_memory` 声明必填字符串 `query`。类别、来源、更新时间和数量筛选均为可选。
+- `propose_memory`，其输入 schema 声明 `content`、`category`、`target_scope` 和 `source` 字段，并允许 `private`、`global` 两个范围。`memory_id` 和 `reason` 可选；新提案不传 `memory_id`。
 
 Reasonix 优先调用 `get_guidance`，不可用时才回退到 `search_memory`。范围和身份由 VISION-LIAO 从 connector 凭据判定；Reasonix 不传 dataset、connector ID、scope 过滤器或 session ID 给读取工具。
 
-Reasonix 自动提交的私有目标对应当前 connector 的私有区；有项目级证据时，还会单独提交全局目标。两者均调用 `propose_memory`，只会进入待审核队列，不会直接修改有效记忆。Reasonix 会分别报告提案结果，不会把提案说成已保存或已获批准。
+Reasonix 优先以 `adaptive_strategy` 类别创建提案；若服务通过 schema 限制类别，则会选用其支持的 `decision_principle`、`collaboration_practice` 或 `experience` 类别。私有目标对应当前 connector 的私有区；有项目级证据时，还会单独创建全局目标提案。两者均调用 `propose_memory`，只会进入待审核队列，不会直接修改有效记忆。Reasonix 会分别报告提案结果，不会把提案说成已保存或已获批准。
 
-此设计没有会话记录写入 API。原先的会话摘要目标会以 `experience` 类别提交到 connector 私有区，并仍需审核；Reasonix transcript 不会上传。全局提案只在任务 TODO（若有）全部完成，且存在验证、完成的 review 或宿主观察到的项目修改时提交。未完成、失败、取消、空摘要或过短摘要不提交。
+此设计没有会话记录写入 API。可复用的任务摘要会作为提案提交到 connector 私有区，并仍需审核；Reasonix transcript 不会上传。全局提案只在任务 TODO（若有）全部完成，且存在验证、完成的 review 或宿主观察到的项目修改时提交。未完成、失败、取消、空摘要或过短摘要不提交。
 
 ## 数据边界
 

@@ -46,6 +46,18 @@ func TestBuiltinReviewSkillsDeclareReadOnly(t *testing.T) {
 	}
 }
 
+func TestVisionLiaoMemorySkillKeepsCogneeUpdateSource(t *testing.T) {
+	for _, update := range BuiltinSkillUpdates() {
+		if update.ID == "vision-liao-memory" {
+			if !update.Supported {
+				t.Fatal("Vision-Liao memory should retain the validated Cognee upstream update source")
+			}
+			return
+		}
+	}
+	t.Fatal("Vision-Liao memory update entry not found")
+}
+
 func TestCodeGraphReadToolsRequireKnownNameAndReadOnly(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(builtinTestTool{name: "mcp__codegraph__symbols", readOnly: true})

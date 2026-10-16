@@ -27,7 +27,7 @@ type builtinSkillSource struct {
 }
 
 var builtinSkillSources = []builtinSkillSource{
-	{"cognee-memory", "https://raw.githubusercontent.com/topoteretes/cognee/main/cognee/skill.md", "cognee"},
+	{"vision-liao-memory", "https://raw.githubusercontent.com/topoteretes/cognee/main/cognee/skill.md", "cognee"},
 	{"ponytail", "https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md", "ponytail"},
 	{"taste-skill", "https://raw.githubusercontent.com/Leonxlnx/taste-skill/main/skills/taste-skill/SKILL.md", "design-taste-frontend"},
 	{"zerotoken-skill", "https://raw.githubusercontent.com/phoenixlucky/zerotoken-skill/main/SKILL.md", "zerotoken-skill"},

@@ -3747,7 +3747,7 @@ function makeMockApp(): MockAppBindings {
       return capServers.map((s) => ({ ...s }));
     },
     async CogneeMemorySettings() {
-      const skillEnabled = capSkills.find((skill) => skill.name === "cognee-memory")?.enabled !== false;
+      const skillEnabled = capSkills.find((skill) => skill.name === "vision-liao-memory")?.enabled !== false;
       const configured = capServers.some((server) => server.name === "cognee");
       const server = capServers.find((candidate) => candidate.name === "cognee");
       return {

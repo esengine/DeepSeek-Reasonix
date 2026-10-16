@@ -56,7 +56,8 @@ func TestCogneeRecallConnectsEnabledServerOnDemand(t *testing.T) {
 				}}},
 				{"name": "propose_memory", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 					"content": map[string]any{"type": "string"}, "category": map[string]any{"type": "string"},
-					"scope": map[string]any{"type": "string", "enum": []string{"private", "global"}}, "source": map[string]any{"type": "string"},
+					"target_scope": map[string]any{"type": "string", "enum": []string{"private", "global"}}, "source": map[string]any{"type": "string"},
+					"memory_id": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"},
 				}}},
 			}}
 		case "tools/call":
@@ -68,8 +69,8 @@ func TestCogneeRecallConnectsEnabledServerOnDemand(t *testing.T) {
 				result = map[string]any{"content": []map[string]any{{"type": "text", "text": "remembered project fact"}}}
 			} else if req.Params.Name == "propose_memory" {
 				proposals = append(proposals, req.Params.Arguments)
-				if req.Params.Arguments["content"] == "" || req.Params.Arguments["category"] == "" || req.Params.Arguments["source"] == "" || req.Params.Arguments["scope"] == "" {
-					t.Errorf("proposal arguments = %#v, want content, category, scope, and source", req.Params.Arguments)
+				if req.Params.Arguments["content"] == "" || req.Params.Arguments["category"] != "adaptive_strategy" || req.Params.Arguments["source"] == "" || req.Params.Arguments["target_scope"] == "" || req.Params.Arguments["reason"] == "" {
+					t.Errorf("proposal arguments = %#v, want content, supported category, target_scope, source, and reason", req.Params.Arguments)
 				}
 				result = map[string]any{"content": []map[string]any{{"type": "text", "text": "Proposal created with status=pending"}}}
 			} else {
@@ -128,10 +129,10 @@ url = %q
 		t.Fatalf("proposal calls = %d, want private and global; notices=(%q,%q)", len(proposals), sessionNotice, graphNotice)
 	}
 	privateArgs, globalArgs := proposals[0], proposals[1]
-	if privateArgs["scope"] != "private" || privateArgs["dataset_name"] != nil || privateArgs["session_id"] != nil {
+	if privateArgs["target_scope"] != "private" || privateArgs["memory_id"] != nil || privateArgs["dataset_name"] != nil || privateArgs["session_id"] != nil {
 		t.Fatalf("private proposal args = %#v", privateArgs)
 	}
-	if globalArgs["scope"] != "global" || globalArgs["dataset_name"] != nil || globalArgs["session_id"] != nil {
+	if globalArgs["target_scope"] != "global" || globalArgs["memory_id"] != nil || globalArgs["dataset_name"] != nil || globalArgs["session_id"] != nil {
 		t.Fatalf("global proposal args = %#v", globalArgs)
 	}
 	if strings.Contains(sessionNotice, "已保存") || strings.Contains(graphNotice, "已保存") {
@@ -158,7 +159,7 @@ url = %q
 	}
 	ctrl := newOwnedTestController(t, Options{WorkspaceRoot: workspace})
 	defer ctrl.Close()
-	if _, notice := ctrl.cogneeGuidanceContext(context.Background(), "query"); !strings.Contains(notice, "服务未连接或未授权") {
+	if _, notice := ctrl.cogneeGuidanceContext(context.Background(), "query"); !strings.Contains(notice, "Cognee MCP 服务未连接或未授权") {
 		t.Fatalf("disabled Cognee notice = %q, want a skipped-memory notice", notice)
 	}
 	if got := requests.Load(); got != 0 {
@@ -166,26 +167,64 @@ url = %q
 	}
 }
 
+func TestCogneeRecallReportsAuthenticationFailure(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "missing connector token", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(fmt.Sprintf(`
+[[plugins]]
+name = "cognee"
+type = "http"
+url = %q
+`, server.URL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadForRoot(workspace)
+	if err != nil || len(cfg.Plugins) != 1 {
+		t.Fatalf("load Cognee config = (%+v, %v)", cfg.Plugins, err)
+	}
+	if err := config.DefaultMCPActivationStore().SetServerEnabled(cfg.Plugins[0], workspace, true); err != nil {
+		t.Fatalf("enable Cognee MCP: %v", err)
+	}
+	host := plugin.NewHost()
+	defer host.Close()
+	ctrl := newOwnedTestController(t, Options{Host: host, WorkspaceRoot: workspace})
+	defer ctrl.Close()
+	_, notice := ctrl.cogneeGuidanceContext(context.Background(), "query")
+	if !strings.Contains(notice, "401") || !strings.Contains(notice, "connector token") {
+		t.Fatalf("notice = %q, want authentication status and connector token guidance", notice)
+	}
+}
+
 func TestValidateCogneeDesignSchemas(t *testing.T) {
-	guidance := json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"}}}`)
+	guidance := json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["task"]}`)
 	got, err := validateCogneeSchema(guidance, "get_guidance")
 	if err != nil || got.queryField != "task" {
 		t.Fatalf("guidance schema = (%+v, %v), want task input", got, err)
 	}
-	search, err := validateCogneeSchema(json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"scope":{"type":"string"},"datasets":{"type":"string"}}}`), "search_memory")
+	search, err := validateCogneeSchema(json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"source":{"type":"string"},"since":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["query"]}`), "search_memory")
 	if err != nil || search.queryField != "query" {
 		t.Fatalf("search schema = (%+v, %v), want query input", search, err)
 	}
-	proposal := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string","enum":["fact","experience"]},"scope":{"type":"string","enum":["private","global"]},"source":{"type":"string"},"action":{"type":"string","enum":["new","update","promote"]}}}`)
-	got, err = validateCogneeSchema(proposal, "propose_memory")
-	if err != nil || got.contentField != "content" || got.actionValue != "new" {
-		t.Fatalf("proposal schema = (%+v, %v), want content and new action", got, err)
+	if _, err := validateCogneeSchema(json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`), "get_guidance"); err == nil {
+		t.Fatal("get_guidance schema without task was accepted")
 	}
-	unsafe := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string"},"scope":{"type":"string","enum":["workspace"]},"source":{"type":"string"}}}`)
+	if _, err := validateCogneeSchema(json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"}}}`), "search_memory"); err == nil {
+		t.Fatal("search_memory schema without query was accepted")
+	}
+	proposal := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string"},"target_scope":{"type":"string","enum":["private","global"]},"source":{"type":"string"},"memory_id":{"type":"string"},"reason":{"type":"string"}}}`)
+	got, err = validateCogneeSchema(proposal, "propose_memory")
+	if err != nil || got.contentField != "content" || got.scopeField != "target_scope" {
+		t.Fatalf("proposal schema = (%+v, %v), want content and target_scope", got, err)
+	}
+	unsafe := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string"},"target_scope":{"type":"string","enum":["workspace"]},"source":{"type":"string"}}}`)
 	if _, err := validateCogneeSchema(unsafe, "propose_memory"); err == nil {
 		t.Fatal("proposal schema without authorized private/global scope was accepted")
 	}
-	nullableScope := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string"},"scope":{"anyOf":[{"type":"string","enum":["workspace"]},{"type":"null"}]},"source":{"type":"string"}}}`)
+	nullableScope := json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"category":{"type":"string"},"target_scope":{"anyOf":[{"type":"string","enum":["workspace"]},{"type":"null"}]},"source":{"type":"string"}}}`)
 	if _, err := validateCogneeSchema(nullableScope, "propose_memory"); err == nil {
 		t.Fatal("nullable scope schema without private/global values was accepted")
 	}

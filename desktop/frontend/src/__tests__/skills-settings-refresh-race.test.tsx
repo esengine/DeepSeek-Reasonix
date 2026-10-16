@@ -60,6 +60,19 @@ const appBindings = {
   SkillsSettings: async () => new Promise<SkillsView>((resolve) => {
     pending[activeWorkspace].push(resolve);
   }),
+  Capabilities: async () => ({
+    servers: [{ name: "cognee", transport: "http", configured: true, url: "http://127.0.0.1:12316/mcp-new", tools: 0, prompts: 0, resources: 0 }],
+    skills: [],
+    skillRoots: [],
+  }),
+  CogneeMemorySettings: async () => ({
+    state: "connection_failed",
+    detail: "401",
+    skillEnabled: true,
+    configured: true,
+    tokenConfigured: false,
+  }),
+  BuiltinSkillUpdates: async () => [],
 } as unknown as AppBindings;
 
 installDesktopHostStub(({ main: { App: appBindings } }).main.App);
@@ -94,6 +107,12 @@ await act(async () => {
   await flushPromises();
 });
 await waitFor("workspace B render", () => rootEl.textContent?.includes("skill-b") === true);
+if (rootEl.textContent?.includes("Vision-Liao project memory")) {
+  throw new Error("Vision-Liao connector settings must have one canonical location in MCP settings");
+}
+if (rootEl.querySelector('input[type="password"]')) {
+  throw new Error("Agent Skills must not duplicate the MCP connector token input");
+}
 
 await act(async () => {
   pending.a.shift()?.(view("skill-a"));

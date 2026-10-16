@@ -44,10 +44,10 @@ type cogneeSchema struct {
 	queryField    string
 	contentField  string
 	categoryField string
+	categoryValue string
 	scopeField    string
 	sourceField   string
-	actionField   string
-	actionValue   string
+	reasonField   string
 }
 
 // CogneeMemoryStatus is a safe, read-only summary for the desktop settings UI.
@@ -68,10 +68,10 @@ func (c *Controller) CogneeMemoryStatus(ctx context.Context) CogneeMemoryStatus 
 	}
 	cfg, err := config.LoadForRootWithoutCredentialsReadOnly(c.workspaceRoot)
 	if err != nil {
-		status.State, status.Detail = "connection_failed", "Cognee settings could not be read."
+		status.State, status.Detail = "connection_failed", "Vision-Liao memory settings could not be read."
 		return status
 	}
-	status.SkillEnabled = !cfg.IsSkillDisabled("cognee-memory")
+	status.SkillEnabled = !cfg.IsSkillDisabled("vision-liao-memory")
 	status.TokenConfigured = config.CredentialStored(cogneeTokenCredential)
 	var entry config.PluginEntry
 	for _, candidate := range cfg.Plugins {
@@ -81,16 +81,16 @@ func (c *Controller) CogneeMemoryStatus(ctx context.Context) CogneeMemoryStatus 
 		}
 	}
 	if !status.Configured {
-		status.Detail = "Configure a Cognee MCP endpoint to get started."
+		status.Detail = "Configure a Cognee MCP endpoint for Vision-Liao memory to get started."
 		return status
 	}
 	if !status.SkillEnabled {
-		status.State, status.Detail = "disabled", "Cognee project memory is turned off in the Skills list."
+		status.State, status.Detail = "disabled", "Vision-Liao memory is turned off in the Skills list."
 		return status
 	}
 	spec := plugin.ResolveStoredAuthorization(ctx, c.mcpSpec(entry))
 	if !spec.ServerAuthorized() {
-		status.State, status.Detail = "authorization_required", "Authorize the Cognee MCP server to continue."
+		status.State, status.Detail = "authorization_required", "Authorize the Cognee MCP server for Vision-Liao memory to continue."
 		return status
 	}
 	if err := validateCogneeEndpoint(spec); err != nil {
@@ -99,19 +99,19 @@ func (c *Controller) CogneeMemoryStatus(ctx context.Context) CogneeMemoryStatus 
 	}
 	host := c.mcp.hostRef()
 	if host == nil || !host.HasClientForSpec(spec) {
-		status.State, status.Detail = "connection_failed", "Cognee is configured but not connected to this session."
+		status.State, status.Detail = "connection_failed", "Cognee MCP is configured but not connected to this session."
 		return status
 	}
 	if _, err := host.ToolsForSpec(ctx, spec); err != nil {
-		status.State, status.Detail = "connection_failed", "Cognee tools could not be loaded."
+		status.State, status.Detail = "connection_failed", "Cognee MCP tools could not be loaded for Vision-Liao memory."
 		return status
 	}
 	if _, _, err := c.cogneeReadTool(ctx, spec); err != nil {
-		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide compatible get_guidance or search_memory tools."
+		status.State, status.Detail = "tools_incompatible", "The Cognee MCP server does not provide compatible get_guidance or search_memory tools for Vision-Liao memory."
 		return status
 	}
 	if _, err := c.cogneeTool(ctx, spec, "propose_memory"); err != nil {
-		status.State, status.Detail = "tools_incompatible", "The Cognee server does not provide a compatible propose_memory tool."
+		status.State, status.Detail = "tools_incompatible", "The Cognee MCP server does not provide a compatible propose_memory tool for Vision-Liao memory."
 		return status
 	}
 	status.State, status.Detail = "ready", "VISION-LIAO memory guidance and proposal tools are ready."
@@ -123,7 +123,7 @@ func (c *Controller) cogneeMemoryEnabled() bool {
 		return false
 	}
 	cfg, err := config.LoadForRootWithoutCredentialsReadOnly(c.workspaceRoot)
-	return err == nil && !cfg.IsSkillDisabled("cognee-memory")
+	return err == nil && !cfg.IsSkillDisabled("vision-liao-memory")
 }
 
 func (c *Controller) cogneeSpecIfReady(ctx context.Context) (plugin.Spec, error) {
@@ -171,9 +171,20 @@ func (c *Controller) cogneeSpecIfReady(ctx context.Context) (plugin.Spec, error)
 		return plugin.Spec{}, fmt.Errorf("Cognee MCP server did not connect to this runtime")
 	}
 	if _, err := host.ToolsForSpec(ctx, spec); err != nil {
-		return plugin.Spec{}, fmt.Errorf("Cognee MCP server is unavailable")
+		return plugin.Spec{}, fmt.Errorf("Cognee MCP server is unavailable: %w", err)
 	}
 	return spec, nil
+}
+
+func cogneeReadinessNotice(err error) string {
+	message := strings.ToLower(fmt.Sprint(err))
+	if strings.Contains(message, "401") || strings.Contains(message, "unauthorized") || strings.Contains(message, "oauth authorization is required") {
+		return "VISION-LIAO 记忆服务（Cognee MCP）已响应 HTTP 401：connector token 缺失或无效，请在「设置 → Agent Skills → Vision-Liao 项目记忆」配置"
+	}
+	if strings.Contains(message, "403") || strings.Contains(message, "forbidden") {
+		return "VISION-LIAO 记忆服务（Cognee MCP）已响应 HTTP 403：当前 connector token 无权访问，请检查 VISION-LIAO 授权"
+	}
+	return "VISION-LIAO 项目记忆已跳过：Cognee MCP 服务未连接或未授权"
 }
 
 func validateCogneeEndpoint(spec plugin.Spec) error {
@@ -220,21 +231,21 @@ func (c *Controller) cogneeGuidanceContext(ctx context.Context, raw string) (str
 	}
 	spec, err := c.cogneeSpecIfReady(ctx)
 	if err != nil {
-		return "", "Cognee 项目记忆已跳过：服务未连接或未授权"
+		return "", cogneeReadinessNotice(err)
 	}
 	query := redactCogneeText(raw, maxCogneeQueryBytes)
 	if query == "" {
-		return "", "Cognee 项目记忆已跳过：请求中没有可安全检索的文本"
+		return "", "VISION-LIAO 项目记忆已跳过：请求中没有可安全检索的文本"
 	}
 	toolName, schema, err := c.cogneeReadTool(ctx, spec)
 	if err != nil {
-		return "", "Cognee 项目记忆已跳过：get_guidance/search_memory 工具不可用"
+		return "", "VISION-LIAO 项目记忆已跳过：Cognee MCP 的 get_guidance/search_memory 工具不可用"
 	}
 	args := map[string]any{schema.queryField: query}
 	encoded, _ := json.Marshal(args)
 	result, err := c.mcp.callToolForSpec(ctx, spec, toolName, encoded)
 	if err != nil {
-		return "", "Cognee 项目记忆检索失败；任务会继续"
+		return "", "VISION-LIAO 项目记忆检索失败；任务会继续"
 	}
 	result = redactCogneeText(result, maxCogneeRecallBytes)
 	if strings.TrimSpace(result) == "" {
@@ -281,41 +292,41 @@ func validateCogneeSchema(rawSchema json.RawMessage, toolName string) (cogneeSch
 		return cogneeSchema{}, fmt.Errorf("Cognee schema is invalid")
 	}
 	stringField := func(name string) bool { return schemaAllowsType(root.Properties[name], "string") }
-	if toolName == "get_guidance" || toolName == "search_memory" {
-		for _, field := range []string{"task", "query"} {
-			if stringField(field) {
-				return cogneeSchema{queryField: field}, nil
-			}
+	if toolName == "get_guidance" {
+		if stringField("task") {
+			return cogneeSchema{queryField: "task"}, nil
 		}
-		return cogneeSchema{}, fmt.Errorf("Cognee %s schema lacks task/query", toolName)
+		return cogneeSchema{}, fmt.Errorf("Cognee get_guidance schema lacks task")
+	}
+	if toolName == "search_memory" {
+		if stringField("query") {
+			return cogneeSchema{queryField: "query"}, nil
+		}
+		return cogneeSchema{}, fmt.Errorf("Cognee search_memory schema lacks query")
 	}
 	if toolName == "propose_memory" {
 		contentField := firstStringField(root.Properties, "content", "text")
 		categoryField := firstStringField(root.Properties, "category")
-		scopeField := firstStringField(root.Properties, "scope", "target_scope")
+		scopeField := firstStringField(root.Properties, "target_scope")
 		sourceField := firstStringField(root.Properties, "source", "source_description")
 		if contentField == "" || categoryField == "" || scopeField == "" || sourceField == "" {
-			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema lacks content/category/scope/source")
+			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema lacks content/category/target_scope/source")
 		}
 		if !schemaAllowsEnumValue(root.Properties[scopeField], "private") || !schemaAllowsEnumValue(root.Properties[scopeField], "global") {
 			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema does not support private and global scopes")
 		}
-		if !schemaAllowsEnumValue(root.Properties[categoryField], "experience") {
-			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema does not support experience category")
-		}
-		result := cogneeSchema{contentField: contentField, categoryField: categoryField, scopeField: scopeField, sourceField: sourceField}
-		if actionField := firstStringField(root.Properties, "action"); actionField != "" {
-			result.actionField = actionField
-			for _, value := range []string{"new", "create", "add"} {
-				if schemaAllowsEnumValue(root.Properties[actionField], value) {
-					result.actionValue = value
-					break
-				}
-			}
-			if result.actionValue == "" {
-				return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema has no supported create action")
+		categoryValue := ""
+		for _, candidate := range []string{"adaptive_strategy", "decision_principle", "collaboration_practice", "experience"} {
+			if schemaAllowsEnumValue(root.Properties[categoryField], candidate) {
+				categoryValue = candidate
+				break
 			}
 		}
+		if categoryValue == "" {
+			return cogneeSchema{}, fmt.Errorf("Cognee propose_memory schema has no supported category")
+		}
+		result := cogneeSchema{contentField: contentField, categoryField: categoryField, categoryValue: categoryValue, scopeField: scopeField, sourceField: sourceField}
+		result.reasonField = firstStringField(root.Properties, "reason")
 		return result, nil
 	}
 	return cogneeSchema{}, fmt.Errorf("Cognee tool schema is incompatible")
@@ -486,7 +497,7 @@ func (c *Controller) cogneeProposeDestination(ctx context.Context, taskKey, scop
 	}
 	spec, err := c.cogneeSpecIfReady(ctx)
 	if err != nil {
-		return "VISION-LIAO 记忆提案未提交：服务未连接或未授权"
+		return "VISION-LIAO 记忆提案未提交；" + cogneeReadinessNotice(err)
 	}
 	schema, err := c.cogneeTool(ctx, spec, "propose_memory")
 	if err != nil {
@@ -497,12 +508,12 @@ func (c *Controller) cogneeProposeDestination(ctx context.Context, taskKey, scop
 	}
 	argsMap := map[string]any{
 		schema.contentField:  redactCogneeText(record, maxCogneeRememberBytes),
-		schema.categoryField: "experience",
+		schema.categoryField: schema.categoryValue,
 		schema.scopeField:    scope,
 		schema.sourceField:   "Reasonix completed task outcome",
 	}
-	if schema.actionField != "" {
-		argsMap[schema.actionField] = schema.actionValue
+	if schema.reasonField != "" {
+		argsMap[schema.reasonField] = "Reusable outcome from a completed Reasonix task."
 	}
 	args, _ := json.Marshal(argsMap)
 	if err := createCogneeAttempt(c.sessionDir, taskKey, scope); err != nil {

@@ -57,12 +57,12 @@ Desktop「设置 → 技能」列出 Reasonix 随应用打包的内置技能。�
 
 `superpowers`、`bug-hunt`、`code-review`、`release-notes`、`ponytail`、
 `ui-ux-pro-max`、`taste-skill`、`zerotoken-skill`、`weiliaozi-skill`、
-`moon-lovers`、`cognee-memory`、`officecli`、`github` 和
+`moon-lovers`、`vision-liao-memory`、`officecli`、`github` 和
 `chrome-mcp-bridge-2026-skill`。每项可单独启用或停用；设置保存在已有的
 `skills.disabled_skills` 配置中。
 
 技能是工作流程说明，不会添加工具或扩大权限。设置页的来源链接仅供查阅。
-只有 `cognee-memory`、`ponytail`、`taste-skill`、`zerotoken-skill`、
+只有 `vision-liao-memory`、`ponytail`、`taste-skill`、`zerotoken-skill`、
 `weiliaozi-skill`、`moon-lovers` 和 `officecli` 提供固定来源更新。点击
 「检查技能更新」后，Reasonix 会访问这些已编译的 HTTPS 地址；点击单项
 「更新」才会安装内容。Reasonix 校验上游 frontmatter 名称，只接受有限大小的
