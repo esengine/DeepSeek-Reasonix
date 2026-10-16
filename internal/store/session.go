@@ -16,13 +16,23 @@ package store
 
 import "strings"
 
+// studioImportPrefix starts the name of a transcript that Reasonix Studio wrote
+// into this directory when it imported a session. Studio owns the file and its
+// sidecars; this runtime neither lists nor maintains them.
+const studioImportPrefix = "v4-"
+
+// IsStudioImportName reports whether name belongs to Studio's import of a session.
+func IsStudioImportName(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), studioImportPrefix)
+}
+
 // IsSessionTranscriptName reports whether name is a primary session transcript
 // file. Append-only event logs and guardian sidecars also end in .jsonl, so
 // callers that discover sessions by directory scan must use this helper instead
 // of filepath.Ext.
 func IsSessionTranscriptName(name string) bool {
 	name = strings.TrimSpace(name)
-	if !strings.HasSuffix(name, ".jsonl") {
+	if !strings.HasSuffix(name, ".jsonl") || IsStudioImportName(name) {
 		return false
 	}
 	for _, suffix := range sessionJSONLSidecars {

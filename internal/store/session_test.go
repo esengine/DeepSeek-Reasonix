@@ -123,3 +123,16 @@ func TestSessionSidecarFiles(t *testing.T) {
 		t.Error("SessionSidecarFiles(\"\") should be nil")
 	}
 }
+
+func TestAStudioImportIsNotASessionTranscript(t *testing.T) {
+	for name, want := range map[string]bool{
+		"v4-abc.jsonl": false, "v4-abc.events.jsonl": false, "20260101-abc.jsonl": true, "dev4-x.jsonl": true,
+	} {
+		if got := IsSessionTranscriptName(name); got != want {
+			t.Errorf("IsSessionTranscriptName(%q) = %v, want %v", name, got, want)
+		}
+	}
+	if !IsStudioImportName("v4-abc.jsonl.meta") || IsStudioImportName("abc.jsonl") {
+		t.Fatal("IsStudioImportName must key on the v4- prefix alone")
+	}
+}

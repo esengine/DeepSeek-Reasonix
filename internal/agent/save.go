@@ -1622,6 +1622,9 @@ func ReconcileSessionSidecars(dir string) error {
 			continue
 		}
 		name := e.Name()
+		if store.IsStudioImportName(name) {
+			continue
+		}
 		sidecarPath := filepath.Join(dir, name)
 		switch {
 		case strings.HasSuffix(name, sessionLeaseInfoSidecarSuffix):
