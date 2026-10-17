@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The parse is the part that runs on a machine that is not a phone: everything
@@ -373,4 +375,63 @@ func answerQuestion(query []byte) []byte {
 		127, 0, 0, 1, // rdata
 	)
 	return out
+}
+
+// resetInstall gives one test the process's first install, and puts the resolver
+// back afterwards, so tests cannot stand in for each other.
+func resetInstall(t *testing.T) {
+	t.Helper()
+	beforeResolver, beforeOnce := net.DefaultResolver, installOnce
+	installOnce = sync.Once{}
+	t.Cleanup(func() {
+		net.DefaultResolver, installOnce = beforeResolver, beforeOnce
+	})
+}
+
+// A second build with the same setting must not replace the resolver: other
+// panes are resolving through it, and the write is the race.
+func TestInstallKeepsTheResolverForAnUnchangedSetting(t *testing.T) {
+	resetInstall(t)
+	InstallConfigured([]string{"10.0.0.1"}, "", nil)
+	first := net.DefaultResolver
+	InstallConfigured([]string{"10.0.0.1"}, "", nil)
+	if net.DefaultResolver != first {
+		t.Fatal("the same servers replaced the resolver a second time")
+	}
+}
+
+// With DoH the same mistake is worse than a racy write: each build would wrap
+// the previous resolver as its bootstrap, one layer per pane.
+func TestInstallDoesNotWrapTheSameEndpointTwice(t *testing.T) {
+	resetInstall(t)
+	InstallConfigured(nil, "https://dns.example/dns-query", nil)
+	first := net.DefaultResolver
+	InstallConfigured(nil, "https://dns.example/dns-query", nil)
+	if net.DefaultResolver != first {
+		t.Fatal("the same endpoint wrapped the previous resolver")
+	}
+}
+
+// Lookups run while another pane builds with the same setting. The second build
+// must not write: the resolver the first one installed is in use, and the
+// standard library reads net.DefaultResolver without synchronisation, so a write
+// here is a race no mutex on this side can close. Run under -race.
+func TestRepeatedInstallDoesNotWriteWhileLookupsRun(t *testing.T) {
+	resetInstall(t)
+	server := localDNS(t)
+	InstallConfigured([]string{server}, "", nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 20; i++ {
+			InstallConfigured([]string{server}, "", nil)
+		}
+	}()
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = net.DefaultResolver.LookupHost(ctx, "example.test")
+		cancel()
+	}
+	<-done
 }

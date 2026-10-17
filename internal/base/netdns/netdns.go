@@ -38,15 +38,39 @@ const (
 	aliveTTL = 30 * time.Second
 )
 
+// installOnce guards the one write this package makes to net.DefaultResolver.
+//
+// It is a once rather than a guard keyed by setting because the standard library
+// reads that variable without synchronisation: any write after lookups have begun
+// is a race on this side, whatever lock orders it. Studio builds one runtime per
+// pane in one process, so a per-build install would be exactly that write — with
+// DoH it would also wrap the previous resolver as its bootstrap, one layer per
+// pane. The setting is therefore applied once, and a changed setting takes effect
+// on the next start.
+var installOnce sync.Once
+
+// install points the process default at the resolver build makes, if nothing has
+// installed one yet.
+func install(build func() *net.Resolver) {
+	installOnce.Do(func() {
+		net.DefaultResolver = build()
+	})
+}
+
 // Install points the default resolver at the servers named, and does nothing
 // when none are. The caller reads the environment and parses it, because a
 // build bound to a home other than the process's must be told what to ask
 // rather than infer it.
+//
+// It runs from an `init` in the command, so it is the first install when
+// REASONIX_DNS names servers, and later installs leave its resolver in place.
 func Install(servers []string) {
 	if len(servers) == 0 {
 		return
 	}
-	net.DefaultResolver = resolver(servers)
+	install(func() *net.Resolver {
+		return resolver(servers)
+	})
 }
 
 // InstallConfigured points name resolution at what the person asked for, which
@@ -54,17 +78,27 @@ func Install(servers []string) {
 // set: a bare server is faster but still fails where the path is tampered with.
 // An empty call changes nothing, which keeps every other install on the
 // system's own resolver.
+//
+// The install happens once per process: with neither setting present nothing is
+// written, and a setting changed while running takes effect on the next start.
 func InstallConfigured(servers []string, doh string, proxy func(*http.Request) (*url.URL, error)) {
 	if endpoint := strings.TrimSpace(doh); endpoint != "" {
-		// The resolver about to be replaced is the one that can still resolve
-		// the endpoint's own hostname: after the swap, anything asking the
-		// process default would be asking this resolver to resolve itself.
-		net.DefaultResolver = dohResolver(endpoint, net.DefaultResolver, proxy)
+		install(func() *net.Resolver {
+			// The resolver about to be replaced is the one that can still
+			// resolve the endpoint's own hostname: after the swap, anything
+			// asking the process default would be asking this resolver to
+			// resolve itself.
+			return dohResolver(endpoint, net.DefaultResolver, proxy)
+		})
 		return
 	}
-	if all := Parse(strings.Join(servers, ",")); len(all) > 0 {
-		net.DefaultResolver = resolver(all)
+	all := Parse(strings.Join(servers, ","))
+	if len(all) == 0 {
+		return
 	}
+	install(func() *net.Resolver {
+		return resolver(all)
+	})
 }
 
 // ValidateEndpoint checks a DoH setting and returns it trimmed. Encrypted

@@ -482,7 +482,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 
 	// [network] section
-	if !reflect.DeepEqual(c.Network, d.Network) {
+	if networkDeltaDiffers(c, d) {
 		b.WriteString("[network]\n")
 		if c.Network.ProxyMode != d.Network.ProxyMode {
 			fmt.Fprintf(&b, "proxy_mode = %q\n", c.NetworkProxyMode())
@@ -493,7 +493,6 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if c.Network.NoProxy != "" {
 			fmt.Fprintf(&b, "no_proxy = %q\n", c.Network.NoProxy)
 		}
-		renderNetworkResolvers(&b, c)
 		if c.Network.Proxy.Type != "" || c.Network.Proxy.Server != "" || c.Network.Proxy.Port > 0 || c.Network.Proxy.Username != "" || c.Network.Proxy.Password != "" {
 			b.WriteString("[network.proxy]\n")
 			pt := c.Network.Proxy.Type
@@ -740,6 +739,16 @@ func shouldRenderNetwork(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.Network, defaults.Network)
+}
+
+// networkDeltaDiffers reports whether the project delta has anything to write in
+// [network]. The resolver setting is user-only, so it is compared out here: left
+// in, a config whose only difference is `dns` would emit a bare header with
+// nothing under it.
+func networkDeltaDiffers(c, defaults *Config) bool {
+	a, b := c.Network, defaults.Network
+	a.NetworkResolverConfig, b.NetworkResolverConfig = NetworkResolverConfig{}, NetworkResolverConfig{}
+	return !reflect.DeepEqual(a, b)
 }
 
 func shouldRenderEnvironment(c, defaults *Config, scope RenderScope) bool {

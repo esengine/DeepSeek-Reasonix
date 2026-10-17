@@ -1679,17 +1679,16 @@ func TestProjectRenderDropsDNSResolvers(t *testing.T) {
 }
 
 // The delta writer puts the keys in [network] too, not under the proxy table.
-func TestProjectDeltaPutsResolversInNetwork(t *testing.T) {
+// A project file must never carry the person's resolvers, in either writer: a
+// cloned repository could otherwise redirect every lookup the process makes.
+func TestProjectDeltaDropsResolvers(t *testing.T) {
 	c := Default()
 	c.Network.DNSServers = []string{"1.1.1.1"}
+	c.Network.DoH = "https://dns.example/dns-query"
 
 	delta := RenderTOMLProjectDelta(c)
-	if !strings.Contains(delta, "dns        =") {
-		t.Fatalf("project delta lost dns:\n%s", delta)
-	}
-	proxy := strings.Index(delta, "[network.proxy]")
-	if at := networkLineIndex(delta, "dns"); proxy >= 0 && at > proxy {
-		t.Fatalf("dns landed after [network.proxy], where it reads as network.proxy.dns:\n%s", delta)
+	if strings.Contains(delta, "dns        =") || strings.Contains(delta, "doh        =") {
+		t.Fatalf("project delta carried the user's resolvers:\n%s", delta)
 	}
 }
 
