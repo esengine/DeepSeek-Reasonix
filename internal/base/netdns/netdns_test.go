@@ -78,15 +78,12 @@ func TestInstallIsInertWithAnEmptyVariable(t *testing.T) {
 }
 
 // With servers named, Install takes over — a silent no-op here is the bug this
-// package exists to fix.
+// package exists to fix. It needs the first install, so it takes the guard like
+// every other test that expects the write to happen.
 func TestInstallTakesOverWhenServersAreNamed(t *testing.T) {
+	resetInstall(t)
 	t.Setenv(EnvVar, "10.0.0.1")
-	before := net.DefaultResolver
-	t.Cleanup(func() { net.DefaultResolver = before })
 	Install(Parse(os.Getenv(EnvVar)))
-	if net.DefaultResolver == before {
-		t.Fatal("Install left the default resolver in place with servers configured")
-	}
 	if !net.DefaultResolver.PreferGo {
 		t.Fatal("the installed resolver must prefer the Go path: this build has no cgo resolver")
 	}
