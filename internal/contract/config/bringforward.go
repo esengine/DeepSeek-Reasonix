@@ -18,4 +18,5 @@ func bringConfigForward(cfg *Config) {
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
+	normalizeNetworkResolver(cfg)
 }

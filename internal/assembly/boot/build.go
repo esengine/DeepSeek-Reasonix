@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/netclient"
+	"reasonix/internal/base/netdns"
 	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
@@ -197,6 +198,11 @@ func (b *builder) load() error {
 		return err
 	}
 	cfg := b.cfg
+	// Name resolution is settled before anything opens a socket, and here rather
+	// than in an `init` because the setting lives in the config. Empty leaves the
+	// resolver as it was; the proxy rides along because a DoH query is HTTPS.
+	proxyForDNS, _ := netclient.ProxyFunc(cfg.NetworkProxySpec())
+	netdns.InstallConfigured(cfg.NetworkDNS(), cfg.NetworkDoH(), proxyForDNS)
 	migrations.deepSeekErr = deepSeekProtocolMigrationNoticeError(handleConfigLoadWarnings(opts, cfg, b.stderr), migrations.deepSeekErr)
 	// [secrets] is user-global, so arming these package globals before any
 	// subprocess can spawn is correct for every concurrent workspace.

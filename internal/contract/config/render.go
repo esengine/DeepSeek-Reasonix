@@ -107,7 +107,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# no_proxy   = \"localhost,127.0.0.1,.local\"   # honored for proxy_mode = \"custom\"\n")
 		}
-		b.WriteString("\n[network.proxy]\n")
+		renderNetworkResolvers(&b, c, scope)
 		proxyType := c.Network.Proxy.Type
 		if proxyType == "" {
 			proxyType = "socks5"
@@ -479,7 +479,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 
 	// [network] section
-	if !reflect.DeepEqual(c.Network, d.Network) {
+	if networkDeltaDiffers(c, d) {
 		b.WriteString("[network]\n")
 		if c.Network.ProxyMode != d.Network.ProxyMode {
 			fmt.Fprintf(&b, "proxy_mode = %q\n", c.NetworkProxyMode())
