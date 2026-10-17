@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime/debug"
 
+	"reasonix/internal/base/netdns"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/frontend/cli"
@@ -16,6 +17,15 @@ import (
 	_ "reasonix/internal/model/responses"
 	_ "reasonix/internal/tools/builtin"
 )
+
+// Name resolution before anything opens a socket. A CGO-free build cannot read a
+// system whose DNS servers live outside a file — there is no `/etc/resolv.conf`
+// to read and no cgo resolver in a static binary. A host is what reads a
+// process's surroundings, so it parses them and hands them in; absent, this does
+// nothing.
+func init() {
+	netdns.Install(netdns.Parse(os.Getenv(netdns.EnvVar)))
+}
 
 // Build identity injected via -ldflags (see Makefile). version remains the
 // single-line contract for `reasonix --version`; gitCommit/buildTimeUTC feed

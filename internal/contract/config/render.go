@@ -510,6 +510,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 				fmt.Fprintf(&b, "password = %q\n", c.Network.Proxy.Password)
 			}
 		}
+		renderNetworkResolvers(&b, c)
 		b.WriteString("\n")
 	}
 

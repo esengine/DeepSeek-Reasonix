@@ -700,6 +700,7 @@ type NetworkConfig struct {
 	// process environment instead.
 	NoProxy string             `toml:"no_proxy"`
 	Proxy   NetworkProxyConfig `toml:"proxy"`
+	NetworkResolverConfig
 }
 
 // NetworkProxyConfig is the structured custom-proxy editor shape. Password is
