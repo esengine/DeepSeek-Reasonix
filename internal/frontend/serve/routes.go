@@ -52,6 +52,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /model-mode", s.modelMode)
 	mux.HandleFunc("POST /compact", s.compact)
 	s.registerCompactionRoutes(mux)
+	s.registerPersonaRoutes(mux)
 	s.registerProgressWatchRoutes(mux)
 	s.registerChangedFilesRoutes(mux)
 	mux.HandleFunc("POST /new", s.newSession)

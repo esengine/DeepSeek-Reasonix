@@ -453,6 +453,8 @@ const SAID: Record<string, string> = {
   "progress_watch.save_failed": "无进展设置未能保存：{detail}",
   "auto_archive.save_failed": "自动归档设置未能保存：{detail}",
   "auto_archive.out_of_range": "天数超出允许范围，未做任何修改：{detail}",
+  "persona.complete_requires_prefix": "complete 模式必须填写前缀，未做任何修改：{detail}",
+  "persona.too_large": "人设内容超出长度上限，未做任何修改：{detail}",
   "workspace.untrustable": "主目录或磁盘根目录不能整体信任，请打开具体的项目文件夹",
   "workspace.trust_save_failed": "未能记下对此文件夹的信任决定：{detail}",
   "progress_watch.out_of_range": "该数值超出允许范围，未做任何修改：{detail}",

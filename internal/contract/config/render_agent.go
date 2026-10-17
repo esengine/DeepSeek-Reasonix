@@ -8,7 +8,8 @@ import (
 
 // renderAgentDelta writes the first half of the [agent] scalar delta onto buf
 // and reports whether it wrote any line. Split from renderAgentTail so neither
-// half carries more branches than the complexity limit allows.
+// half carries more branches than the complexity limit allows. Persona is absent
+// on purpose: it is user-level, so it never enters a project delta.
 func renderAgentDelta(buf *strings.Builder, c, d *Config) bool {
 	wrote := false
 	if sp := strings.TrimSpace(c.Agent.SystemPrompt); sp != "" && sp != d.Agent.SystemPrompt {

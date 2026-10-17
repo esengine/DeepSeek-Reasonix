@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/platform/environment"
 	"reasonix/internal/runtime/outputstyle"
+	"reasonix/internal/runtime/persona"
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/instruction"
 	"reasonix/internal/state/memory"
@@ -36,9 +37,10 @@ type promptAssembly struct {
 }
 
 // buildPromptAssembly resolves the base system prompt and folds in, in order,
-// the output style, core policies, workspace line, environment section, offline
-// note, memory, and the skill index. Order is the contract: it decides the
-// prefix bytes every turn reuses.
+// the persona prefix, output style, core policies, persona suffix, environment
+// section, offline note, memory, and the skill index — then persona.Final.
+// Order is the contract: it decides the cache-stable prefix bytes every turn
+// reuses, so a saved persona rides a new session and never rebuilds this one.
 func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, root string, shell sandbox.Shell, sink event.Sink, timer *phaseTimer) (promptAssembly, error) {
 	sysPrompt, err := cfg.ResolveSystemPromptForRoot(root)
 	if err != nil {
@@ -51,6 +53,11 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 		report(sink, event.Event{Level: event.LevelWarn, Text: err.Error() + "; falling back to inline/default system prompt"})
 		sysPrompt = cfg.InlineSystemPrompt()
 	}
+	// The persona is part of the provider-cached prefix, composed here once. A
+	// saved edit is picked up by the next boot (new sessions), never by rewriting
+	// a live prompt — see control.Compose for what may change mid-session.
+	p := persona.FromConfig(cfg.Agent.Persona)
+	sysPrompt = persona.ApplyPrefix(sysPrompt, p)
 	// Output style: fold the selected persona/tone block into the base prompt
 	// before language/memory/skills append, so a "replace" style (keep-coding
 	// false) still keeps those. Applied once, into the cache-stable prefix.
@@ -58,10 +65,14 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
 	sysPrompt = appendCorePolicies(sysPrompt)
+	sysPrompt = persona.ApplySuffix(sysPrompt, p)
 	timer.mark("prompt")
 	// Role settings, the workspace path and its version control ride the per-turn
 	// transient blocks, so this prefix is identical for every project on the
 	// machine; per-project text added here would diverge every byte after it.
+
+	// The probe still runs when the persona withholds runtime context: its
+	// persisted snapshot keeps later boots stable. Only the section is dropped.
 	if cfg.EnvironmentEnabled() {
 		shellLabel := shell.Kind.String()
 		if strings.TrimSpace(cfg.Tools.Shell.Path) != "" {
@@ -83,12 +94,14 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 			shellLabel,
 			cfg.Environment.Tools,
 		)
-		if envSection != "" {
+		if envSection != "" && p.IncludeRuntimeContext {
 			sysPrompt += "\n\n" + envSection
 		}
 	}
 	timer.mark("environment")
-	sysPrompt = appendOfflineEnvironmentNote(sysPrompt, cfg.Environment.Offline)
+	if p.IncludeRuntimeContext {
+		sysPrompt = appendOfflineEnvironmentNote(sysPrompt, cfg.Environment.Offline)
+	}
 
 	// Memory folds in exactly here, once, becoming part of the durable prefix,
 	// so it costs nothing per turn. Mid-session changes ride the controller's
@@ -111,7 +124,7 @@ func buildPromptAssembly(ctx context.Context, opts Options, cfg *config.Config, 
 	timer.mark("skills")
 
 	return promptAssembly{
-		prompt:         skillSet.sysPrompt,
+		prompt:         persona.Final(p, skillSet.sysPrompt),
 		workspaceVCS:   environment.WorkspaceVCS(root),
 		memory:         memSet.set,
 		projectChecks:  memSet.checks,

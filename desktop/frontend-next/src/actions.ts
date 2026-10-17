@@ -649,6 +649,14 @@ export const ACTIONS: UIAction[] = [
   { id: "auto-archive.notice-dismiss", kind: "view", target: "none", proof: "interaction" },
   { id: "auto-archive.enabled", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "auto-archive.days", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  // The persona editor edits a draft; only the save reaches the kernel, and the
+  // persona is composed once at boot so the write is read by later sessions.
+  { id: "persona.prefix", kind: "view", target: "none", proof: "interaction" },
+  { id: "persona.suffix", kind: "view", target: "none", proof: "interaction" },
+  { id: "persona.preset", kind: "view", target: "optional", proof: "interaction" },
+  { id: "persona.complete", kind: "view", target: "none", proof: "interaction" },
+  { id: "persona.runtime-context", kind: "view", target: "none", proof: "interaction" },
+  { id: "persona.save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // The kernel announces the change on the stream, so no rebuild stands between
   // the click and the canonical change.
   { id: "currency.mode", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

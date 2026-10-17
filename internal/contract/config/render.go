@@ -221,6 +221,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# output_style = \"explanatory\"   # explanatory | learning | concise | custom; empty = default\n")
 	}
+	// Persona is the user's own identity, so it never goes into a project file.
+	if p := c.Agent.Persona.Normalize(); scope != RenderScopeProject && !p.IsZero() {
+		renderPersonaTable(&b, p)
+	}
 	b.WriteString("\n")
 
 	if shouldRenderProviders(c, defaults, scope) {

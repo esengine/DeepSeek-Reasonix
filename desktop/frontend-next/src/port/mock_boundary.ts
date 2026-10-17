@@ -1,5 +1,5 @@
 import type { Adjudications, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, PeerReceipt, PeersState, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings, UpdateMode } from "./port";
-import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
+import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings, PersonaDraft, PersonaSettings } from "./boundary";
 import { HttpError } from "./http_error";
 import { MockShell } from "./mock_shell";
 
@@ -196,6 +196,38 @@ export class MockBoundary extends MockShell {
     if (s.days < 1 || s.days > 3650) throw new Error("auto archive setting out of range");
     this.archive = { ...this.archive, ...s };
     return { ...this.archive };
+  }
+
+  // Two starting points are enough for the page's layout: one that is a whole
+  // prefix (complete) and one that only trails the built-in guidance.
+  private personaState: PersonaSettings = {
+    prefix: "", suffix: "", complete: false, include_runtime_context: true,
+    path: "/Users/you/.reasonix/config.toml",
+    presets: [
+      {
+        id: "engineer",
+        prefix: "You are a rigorous staff engineer. Verify before claiming, make the smallest correct change, and state the residual risk.",
+        suffix: "", complete: true, include_runtime_context: true,
+      },
+      {
+        id: "concise",
+        prefix: "",
+        suffix: "Be terse. Skip the preamble; prefer code and bullets.",
+        complete: false, include_runtime_context: false,
+      },
+    ],
+  };
+
+  async persona(): Promise<PersonaSettings> {
+    return { ...this.personaState, presets: this.personaState.presets.map((p) => ({ ...p })) };
+  }
+
+  async savePersonaSettings(s: PersonaDraft): Promise<PersonaSettings> {
+    // The same rule the kernel enforces, so the fixture cannot show a screen
+    // accepting something the real save refuses.
+    if (s.complete && !s.prefix.trim()) throw new Error("complete requires a prefix");
+    this.personaState = { ...this.personaState, ...s };
+    return this.persona();
   }
 
   private currency: DisplayCurrencySettings = { mode: "auto", path: "/Users/you/.reasonix/config.toml" };

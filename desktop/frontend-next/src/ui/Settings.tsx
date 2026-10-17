@@ -36,6 +36,7 @@ import { AskTimeout } from "./AskTimeout";
 import { ProgressWatch } from "./ProgressWatch";
 import { DisplaySettings } from "./DisplaySettings";
 import { AutoArchive } from "./AutoArchive";
+import { Persona } from "./Persona";
 import { Account } from "./Account";
 import { Backup } from "./Backup";
 import { BackupFile } from "./BackupFile";
@@ -292,6 +293,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // each section rides on its own row, so the risky one is legible from here.
   const nav: Record<Section, string> = {
     session: status?.plan ? t("计划模式") : preset,
+    persona: "",
     model: status?.modelRef?.split("/").pop() ?? "—",
     providers: models.length ? t("{n} 个服务", { n: groupVendors(models).length }) : "",
     tools: ruleCount ? `${approval} · ${ruleCount}` : approval,
@@ -528,6 +530,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               </Group>
             </>
           )}
+
+          {at === "persona" && <Persona port={port} />}
 
           {at === "providers" && (
             <Group id="providers" title={t("模型服务")}

@@ -3676,6 +3676,21 @@
   .lrow .sa + .sc { margin-left: 8px }
   .lrow .sc { margin-left: auto; flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
 
+  /* The persona prompt boxes are prompt-sized rather than row inputs: full
+     width, monospace because the content is prompt text, and draggable because
+     a persona can be long. */
+  .pers-field { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 0 }
+  .pers-field .lb { font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--text) }
+  .pers-field .ds { font: var(--w-reg) var(--fs-meta)/1.55 var(--ui); color: var(--faint) }
+  .pers-field textarea {
+    min-height: 84px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--raised); color: var(--text); outline: none; resize: vertical;
+    font: var(--w-reg) var(--fs-ui)/1.6 var(--mono);
+  }
+  .pers-field textarea:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 2px color-mix(in oklab, var(--focus) 26%, transparent) }
+  .pers-field textarea:disabled { opacity: .6 }
+  .box .persona-name { margin: 10px 0 0; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--muted) }
+
   .skrow { display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--hair) }
   .skrow:last-of-type { border-bottom: 1px solid var(--hair) }
   .skrow[data-off] .nm, .skrow[data-off] .ds { color: var(--ghost) }

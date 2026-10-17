@@ -1,6 +1,6 @@
 import { SseShell } from "./sse_shell";
 import type { Adjudications, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, PeerReceipt, PeersState, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
-import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
+import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings, PersonaDraft, PersonaSettings } from "./boundary";
 
 // Where the agent may reach: the permission rules a call is matched against and
 // the sandbox the shell runs in.
@@ -103,6 +103,12 @@ export class SseBoundary extends SseShell {
   }
   saveAutoArchive(s: Pick<AutoArchiveSettings, "enabled" | "days">) {
     return this.post0<AutoArchiveSettings>("/auto-archive", s);
+  }
+  persona() {
+    return this.get<PersonaSettings>("/persona");
+  }
+  savePersonaSettings(s: PersonaDraft) {
+    return this.post0<PersonaSettings>("/persona", s);
   }
   askTimeout() {
     return this.get<AskTimeoutSettings>("/ask-timeout");

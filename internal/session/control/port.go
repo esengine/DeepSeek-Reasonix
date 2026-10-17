@@ -299,6 +299,8 @@ type RuntimeSettings interface {
 	SaveFoldWorkSettings(fold bool) error
 	TurnNarrationSettings() TurnNarrationSettings
 	SaveTurnNarrationSettings(level string) error
+	PersonaSettings() PersonaSettings
+	SavePersonaSettings(in config.PersonaConfig) error
 	ProgressWatchSettings() ProgressWatchSettings
 	SaveProgressWatchSettings(in ProgressWatchSettings) error
 	AskTimeoutSettings() AskTimeoutSettings
