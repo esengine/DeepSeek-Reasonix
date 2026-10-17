@@ -36,3 +36,14 @@ it("opens the row's menu by right click after an inline rename, before and after
   fireEvent.contextMenu(screen.getByRole("treeitem", { name: /renamed/ }));
   expect(await screen.findByRole("menu")).toBeTruthy();
 });
+
+it.each(["{Shift>}{F10}{/Shift}", "{ContextMenu}"])("opens the local session menu with %s and restores row focus", async (keys) => {
+  render(view("keyboard title"));
+  const row = screen.getByRole("treeitem", { name: "keyboard title" });
+  row.focus();
+  await userEvent.keyboard(keys);
+  expect(screen.getByRole("menu", { name: "会话操作" })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "置顶会话" }));
+  await userEvent.keyboard("{Escape}");
+  expect(document.activeElement).toBe(row);
+});

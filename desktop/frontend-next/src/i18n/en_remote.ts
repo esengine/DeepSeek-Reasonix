@@ -45,6 +45,8 @@ export const EN_REMOTE: Record<string, string> = {
     "No remote machines yet. Add one and its workspaces appear in the sidebar beside your local ones.",
   "添加机器": "Add a machine",
   "未设置默认工作区": "No default workspace",
+  "默认连接目录：{path}": "Default connection directory: {path}",
+  "连接目录：{path}": "Connected directory: {path}",
   "跟随 ssh_config": "Follows ssh_config",
   "{n} 条转发": "{n} forwards",
   "{n} 个面板": "{n} panes",

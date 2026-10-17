@@ -385,6 +385,24 @@ follow the provider idiom: the host names an env var (`passphrase_env`,
 `password_env`) whose value lives in Reasonix's global `.env`; key material
 itself is never stored — `identity_file` is a path.
 
+Studio uses that host's explicit `workspace` as the default for host-level reads
+and opens that omit a workspace.
+
+Only when it is unset does the first nonempty
+`workspaces` entry supply the default; with neither set, the attach receives an
+empty workspace. An explicit open path takes precedence.
+
+Reordering other
+entries cannot override a declared `workspace`. These values come only from the
+user's host configuration, and disabled hosts are refused before any link reuse.
+
+The active SSH project's secondary line shows its actual connection directory,
+including isolated worktrees. Its project menu shows the default connection
+directory used by Refresh; these can differ. Settings' default action explicitly
+chooses a new default.
+
+A host-level read never borrows an unrelated pane's path.
+
 ```toml
 [remote]
 [[remote.hosts]]

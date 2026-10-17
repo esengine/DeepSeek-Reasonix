@@ -1,29 +1,39 @@
 .rail .sessquick {
-  flex: none; display: flex; align-items: center; gap: 2px; width: 0; overflow: hidden;
+  flex: none; display: flex; align-items: center; width: 24px; margin-inline-end: 6px;
   opacity: 0; pointer-events: none; transition: opacity 100ms ease;
 }
-.rail .sessrow:hover > .sessquick,
-.rail .sessrow:focus-within > .sessquick { width: 50px; margin-inline-end: 6px; opacity: 1; pointer-events: auto; }
-.rail .sessquick > button {
+.rail .sessrow:is(:hover, :focus-within) > .sessquick,
+.rail .sessrow:is(:hover, :focus-within) > .sesspin-action { opacity: 1; pointer-events: auto; }
+.rail .sessquick > button,
+.rail .sesspin-action {
   flex: none; width: 24px; height: 28px; padding: 0; display: grid; place-items: center;
   border: 0; border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer;
 }
-.rail .sessquick .studio-icon { width: 14px; height: 14px; }
-.rail .sessquick > button:hover { background: var(--raised); color: var(--text); }
-.rail .sessquick > .danger:hover { color: var(--err-ink); }
-.rail .sessquick > button:disabled { opacity: .35; cursor: default; background: transparent; color: var(--faint); }
-.rail .sessquick > button:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
-.rail .sessrow-context[data-unread]:hover > .sessquick,
-.rail .sessrow-context[data-unread]:focus-within > .sessquick { margin-inline-end: 26px; }
-.rail .sessrow-context[data-unread]:hover > .sesscopies,
-.rail .sessrow-context[data-unread]:focus-within > .sesscopies { margin-inline-end: 8px; }
-.rail .sessrow-context[data-unread]:hover > .sesstitle,
-.rail .sessrow-context[data-unread]:focus-within > .sesstitle { padding-inline-end: 9px; }
+.rail .sessquick .studio-icon,
+.rail .sesspin-action .studio-icon { width: 14px; height: 14px; }
+.rail .sessquick > button:hover,
+.rail .sesspin-action:hover { background: var(--raised); color: var(--text); }
+.rail .sessquick > button:disabled,
+.rail .sesspin-action:disabled { opacity: .35; cursor: default; background: transparent; color: var(--faint); }
+.rail .sessquick > button:focus-visible,
+.rail .sesspin-action:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.rail .sesspin-action { position: absolute; inset-inline-start: 2px; inset-block-start: 3px; opacity: 0; pointer-events: none; }
+.rail .sesspin-action[aria-pressed="true"] { opacity: 1; pointer-events: auto; color: var(--muted); }
+.rail .sessrow[data-run]:not(:hover):not(:focus-within) > .sesspin-action { opacity: 0; pointer-events: none; }
+.rail .sesspin-marker { position: absolute; width: 14px; height: 14px; inset-inline-start: 7px; inset-block-start: 10px; color: var(--muted); }
+.rail .sessrow[data-run] > .sesspin-marker { display: none; }
+.rail .sessrow:is(.sessrow-context, .sessrow-remote) { margin-inline-start: -17px; }
+.rail :is(.sessrow-context, .sessrow-remote) > .sesstitle { padding-inline-start: 29px; }
+.rail .sessrow-remote > .sesstitle { padding-inline-end: 9px; }
+.rail .sessrow-context > .session-select { position: absolute; inset-inline-start: 7px; inset-block-start: 10px; margin: 0; }
+.rail .sessrow-context > .sessedit { margin-inline-start: 24px; }
+.rail .sessrow:has(> .sessedit) > :is(.sesspin-action, .sesspin-marker, .sessquick) { visibility: hidden; pointer-events: none; }
+.rail .sessrow:has(.sesspin-action):is(:hover, :focus-within)::before,
+.rail .sessrow:has(.sesspin-action):is(:hover, :focus-within) > .pip { visibility: hidden; }
+.rail .sessrow:has(.sessquick) > .unread-dot { inset-inline-end: 36px; }
 @media (hover: none) {
-  .rail .sessquick { opacity: 1; width: 50px; margin-inline-end: 6px; pointer-events: auto; }
-  .rail .sessrow-context[data-unread] > .sessquick { margin-inline-end: 26px; }
-  .rail .sessrow-context[data-unread] > .sesscopies { margin-inline-end: 8px; }
-  .rail .sessrow-context[data-unread] > .sesstitle { padding-inline-end: 9px; }
+  .rail .sessquick,
+  .rail .sesspin-action { opacity: 1; pointer-events: auto; }
 }
 .rail .sesslegacy {
   flex: none; display: inline-flex; align-items: center; padding: 0 5px; height: 15px;
@@ -31,5 +41,4 @@
   color: var(--ghost); cursor: default;
   font: var(--w-reg) var(--fs-micro) var(--ui);
 }
-.rail .sessrow:hover > .sesslegacy,
-.rail .sessrow:focus-within > .sesslegacy { display: none; }
+.rail .sessrow:has(.sessquick):is(:hover, :focus-within) > .sesslegacy { visibility: hidden; }

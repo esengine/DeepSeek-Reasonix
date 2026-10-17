@@ -42,11 +42,11 @@ const menuItem = (name: string) => {
 const archive = () => menuItem("归档会话");
 const trash = () => menuItem("删除会话");
 
-it("keeps the full local title available on hover and leaves no action icons on the row", () => {
+it("keeps the full local title available and deletion off the hover row", () => {
   const title = "这是什么？ @.reasonix/attachments/" + "clipboard-long-title".repeat(10);
   draw({ title });
   expect(screen.getByTitle(title).textContent).toBe(title);
-  expect(within(screen.getByRole("treeitem", { name: new RegExp(title.slice(0, 10)) })).queryAllByRole("button", { name: /归档|删除/ })).toEqual([]);
+  expect(within(screen.getByRole("treeitem", { name: new RegExp(title.slice(0, 10)) })).queryByRole("button", { name: /删除/ })).toBeNull();
 });
 
 it.each([undefined, "r1"])("archives directly without opening or focusing the session held by %j", async (runtimeId) => {

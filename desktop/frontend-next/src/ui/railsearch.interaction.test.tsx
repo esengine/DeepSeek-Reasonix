@@ -81,9 +81,10 @@ describe("the rail's search reaches every machine", () => {
   // rows just found. The local half has always done this; both halves must.
   it("opens a folded machine rather than hiding what it just found", async () => {
     draw([host("gpu", { workspaces: ["/home/ada/training"] })]);
-    await userEvent.click(screen.getByText("gpu"));
-    expect(screen.queryByText("training")).toBeNull();
+    await userEvent.click(screen.getByText("training"));
+    expect(screen.getByText("training").closest('[role="treeitem"]')?.getAttribute("aria-expanded")).toBe("false");
     await userEvent.type(find(), "train");
     expect(screen.queryByText("training")).toBeTruthy();
+    expect(screen.getByText("training").closest('[role="treeitem"]')?.getAttribute("aria-expanded")).toBe("true");
   });
 });

@@ -1,13 +1,12 @@
-// Whether session rows carry hover Archive and Delete buttons. Off unless this
-// machine turned it on; both actions are always in the row's context menu.
+// An explicit off choice survives the default-on hover action recipe.
 const KEY = "rx-session-quick-actions";
 const listeners = new Set<() => void>();
 
 export function showsSessionQuickActions(): boolean {
   try {
-    return localStorage.getItem(KEY) === "on";
+    return localStorage.getItem(KEY) !== "off";
   } catch {
-    return false;
+    return true;
   }
 }
 

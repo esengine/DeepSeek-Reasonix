@@ -12,6 +12,8 @@ const PATHS = {
   arrow: "M12 20V4m-6 6 6-6 6 6",
   close: "m6 6 12 12M6 18 18 6",
   expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
+  collapseAll: "M18 10h-4v-4M20 4l-6 6M6 14h4v4M10 14l-6 6",
+  expandAll: "M16 20h4v-4M14 14l6 6M8 4H4v4M4 4l6 6",
   check: "m5 12 4 4L19 6",
   globe: "M3 12h18M12 3c-5 5-5 13 0 18 5-5 5-13 0-18M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
   code: "m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18",

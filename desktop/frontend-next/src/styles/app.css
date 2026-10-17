@@ -4488,7 +4488,7 @@
 
   .sessrow[data-on] { background: var(--raised); color: var(--text); font-weight: var(--w-med); box-shadow: inset 0 0 0 1px var(--hair), 0 3px 10px -8px rgb(0 0 0 / .5) }
   .sessrow[data-on] .sesstitle { font-weight: var(--w-med) }
-  .sessrow[data-busy] { opacity: .55; pointer-events: none }
+  .sessrow[data-busy] { opacity: .55 }
   .sessrow[data-on][data-busy] { opacity: .8 }
   .sessrow .pip { flex: none; opacity: .35 }
   .sessrow[data-live] .pip { opacity: 1; background: var(--net) }

@@ -19,12 +19,14 @@ export interface Command {
   run: () => void;
 }
 
+export interface PaletteWorkspace extends TreeWorkspace { host?: string; }
+
 interface Props {
   open: boolean;
   onClose: () => void;
   commands: Command[];
-  tree: TreeWorkspace[];
-  onOpenSession: (path: string) => void;
+  tree: PaletteWorkspace[];
+  onOpenSession: (path: string, workspace: PaletteWorkspace) => void;
 }
 
 interface Hit {
@@ -63,13 +65,13 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
       for (const session of workspace.sessions) {
         if (sessions.length >= SESSION_LIMIT) break;
         const title = session.title || session.name;
-        if (q && !title.toLowerCase().includes(q)) continue;
+        if (q && !`${title} ${workspace.name} ${workspace.host ?? ""}`.toLowerCase().includes(q)) continue;
         sessions.push({
-          key: `s:${session.path}`,
+          key: `s:${workspace.host ?? ""}:${session.path}`,
           label: title,
           icon: "clock",
-          note: workspace.name,
-          run: () => onOpenSession(session.path),
+          note: [workspace.name, workspace.host].filter(Boolean).join(" · "),
+          run: () => onOpenSession(session.path, { ...workspace, root: session.workspaceRoot || workspace.root }),
         });
       }
     }

@@ -82,7 +82,8 @@ it("switches the context menu to another project and preserves normal row and ad
   await userEvent.click(screen.getByRole("menuitem", { name: /在文件管理器中显示/ }));
   expect(revealWorkspace).toHaveBeenCalledExactlyOnceWith("/b");
   await userEvent.click(row("a"));
-  expect(onFold).toHaveBeenCalledExactlyOnceWith("/a", true);
+  expect(onFold).not.toHaveBeenCalled();
+  expect(row("a").hasAttribute("aria-expanded")).toBe(false);
   await userEvent.click(screen.getByRole("button", { name: "在 b 下新建会话" }));
   expect(onOpen).toHaveBeenCalledExactlyOnceWith({ root: "/b" });
   expect(screen.queryByRole("menu")).toBeNull();

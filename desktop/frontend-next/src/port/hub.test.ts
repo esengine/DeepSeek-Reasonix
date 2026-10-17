@@ -13,11 +13,34 @@ function answer(status: number, body: string) {
   }));
 }
 
+it("routes pin and archive to the named host while keeping existing local calls local", async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const hub = new SseHub();
+    await hub.pinSession("/same/session.jsonl", true);
+    await hub.pinSession("/same/session.jsonl", false, "gpu box");
+    await hub.archiveSession("/same/session.jsonl", true);
+    await hub.archiveSession("/same/session.jsonl", false, "gpu box");
+    expect(fetch.mock.calls.map(([path, init]) => [path, JSON.parse(init.body)])).toEqual([
+      ["/tree/sessions/pin", { path: "/same/session.jsonl", pinned: true }],
+      ["/remotes/gpu%20box/sessions/pin", { path: "/same/session.jsonl", pinned: false }],
+      ["/tree/sessions/archive", { path: "/same/session.jsonl", archived: true }],
+      ["/remotes/gpu%20box/sessions/archive", { path: "/same/session.jsonl", archived: false }],
+    ]);
+  } finally { vi.unstubAllGlobals(); }
+});
+
 // The same defect SseHttp was fixed for, still standing in the hub port: asking
 // for JSON first threw away every answer that was not an envelope, and what
 // reached the window was "this request did not reach the kernel (HTTP 502)" —
 // wrong twice over, because it had, and the kernel had explained itself.
 describe("a failed hub call", () => {
+  it("surfaces a remote book conflict instead of treating it as an unread book", async () => {
+    answer(409, JSON.stringify({ code: "remote.serve_provider_mismatch", error: "provider setting conflict", params: { host: "gpu-box" } }));
+    await expect(new SseHub().remoteTree("gpu-box")).rejects.toMatchObject({ status: 409,
+      reason: { code: "remote.serve_provider_mismatch", params: { host: "gpu-box" } } });
+  });
   it("carries a plain-text reason through", async () => {
     answer(502, "remote /runtimes: 400 Bad Request: workspace /srv/data is not a directory");
     const err = (await new SseHub().openRemote({ host: "gpu-box" }).catch((e) => e)) as HttpError;

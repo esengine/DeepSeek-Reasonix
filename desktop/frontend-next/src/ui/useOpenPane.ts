@@ -35,7 +35,7 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
       // Blank means never written to and not working: a new session mid-turn has
       // no path in a stale pane list yet, and taking it over would hide its run.
       const blank = runtimes.find(
-        (rt) => !rt.sessionPath && !reportsRef.current[rt.id]?.status?.sessionPath && !runsRef.current[rt.id]?.live,
+        (rt) => !rt.host && !rt.sessionPath && !reportsRef.current[rt.id]?.status?.sessionPath && !runsRef.current[rt.id]?.live,
       );
       // Asking for a new session when an unused one is already open in that
       // folder: it is the pane being asked for. Rebuilding it would cost a full
@@ -58,7 +58,7 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
       const limit = openSessionLimit();
       const atCapacity = limit > 0 && runtimes.length >= limit;
       const reusable = atCapacity && req.sessionPath
-        ? idle.find((rt) => rt.root === req.root && panePorts.has(rt.id))
+        ? idle.find((rt) => !rt.host && rt.root === req.root && panePorts.has(rt.id))
         : undefined;
       // The window folds on its own here, so it says which conversation left the
       // tab bar. A pane with no conversation in it has nothing to say about.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 const CSS = import.meta.glob("./studio.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const ROWS = import.meta.glob("./treerows.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const MARKER = "Theme token closure";
 
 describe("the Studio shell closes over the active theme", () => {
@@ -41,17 +42,12 @@ describe("the Studio shell closes over the active theme", () => {
     }
   });
 
-  // Selection was a 4% darkening of the surface, invisible under a theme pack:
-  // the open conversation read as unselected. It is the same short bar a
-  // running row gets, in the theme's accent. The row itself stays a plain
-  // surface — a filled one is the loudest thing in the list at any saturation.
-  it("marks the open conversation with a bar, not a filled row", () => {
-    const selected = closure.match(/\.rail \.sessrow\[aria-selected="true"\]\s*\{([^}]*)\}/s)?.[1] ?? "";
-    expect(selected).toContain("var(--overlay)");
-    expect(selected).not.toContain("var(--accent)");
-    expect(selected).toContain("box-shadow: none");
-    const css = Object.values(CSS)[0];
-    expect(css).toMatch(/\.rail \.sessrow\[aria-selected="true"\]::before/);
+  it("gives selection a stronger neutral fill than hover and no extra bar", () => {
+    const rows = Object.values(ROWS)[0];
+    expect(rows).toMatch(/\.sessrow\[aria-selected="true"\][^{]*\{[^}]*var\(--text\) 8%/);
+    expect(rows).toMatch(/\.sessrow:hover[^{]*\{[^}]*var\(--text\) 4%/);
+    expect(rows).not.toContain("inset 2px");
+    expect(Object.values(CSS)[0]).not.toMatch(/\.sessrow\[aria-selected="true"\]::before/);
   });
 
   // The scale is the reader's size and weight, not a literal: a pack states

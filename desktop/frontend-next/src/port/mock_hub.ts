@@ -1,5 +1,5 @@
 import type { AgentPort } from "./port";
-import type { HistoryHit, HubPort, RuntimeView, TreeWindow, TreeWorkspace } from "./hub";
+import type { HistoryHit, HubPort, RuntimeView, TreeSession, TreeWindow, TreeWorkspace } from "./hub";
 import type { RemoteHost, RemoteListing, RemoteProbe } from "./remote";
 import type { ShareStatus } from "./share";
 import { MockPort } from "./mock";
@@ -16,6 +16,12 @@ export class MockHub implements HubPort {
   ];
   private readonly roots = ["~/projects/DeepSeek-Reasonix", "~/projects/my-website"];
   private seq = 1;
+  private readonly flags = new Map<string, Pick<TreeSession, "pinned" | "archived">>();
+
+  private decorate(tree: TreeWorkspace[], host = ""): TreeWorkspace[] {
+    return tree.map((ws) => ({ ...ws, sessions: ws.sessions.map((session) => ({ ...session,
+      ...this.flags.get(JSON.stringify([host, session.path])) })) }));
+  }
 
   runtimes() {
     return Promise.resolve([...this.views]);
@@ -60,7 +66,7 @@ export class MockHub implements HubPort {
   // the tree under a connected host can be designed without one.
   remoteTree(host: string) {
     if (host !== "gpu-box") return Promise.resolve(null);
-    return Promise.resolve<TreeWorkspace[]>([
+    return Promise.resolve<TreeWorkspace[]>(this.decorate([
       {
         root: "/srv/training",
         name: "training",
@@ -70,7 +76,7 @@ export class MockHub implements HubPort {
         ],
       },
       { root: "/srv/scratch", name: "scratch", sessions: [] },
-    ]);
+    ], host));
   }
 
   openRemote(req: { host: string; workspace?: string; sessionPath?: string }) {
@@ -164,7 +170,7 @@ export class MockHub implements HubPort {
   tree(_window?: TreeWindow) {
     const open = new Map(this.views.filter((v) => v.sessionPath).map((v) => [v.sessionPath!, v.id]));
     return Promise.resolve(
-      this.roots.map<TreeWorkspace>((root, i) => ({
+      this.decorate(this.roots.map<TreeWorkspace>((root, i) => ({
         root,
         name: root.split("/").pop() ?? root,
         open: this.views.some((v) => v.root === root),
@@ -176,7 +182,7 @@ export class MockHub implements HubPort {
                 { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12, runtimeId: open.get("/sessions/older.jsonl"), legacy: true },
               ]
             : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5, runtimeId: open.get("/sessions/site.jsonl") }],
-      })),
+      }))),
     );
   }
 
@@ -231,11 +237,15 @@ export class MockHub implements HubPort {
     return Promise.resolve();
   }
 
-  archiveSession(_path: string, _archived: boolean) {
+  archiveSession(path: string, archived: boolean, host = "") {
+    const key = JSON.stringify([host, path]);
+    this.flags.set(key, { ...this.flags.get(key), archived, ...(archived ? { pinned: false } : {}) });
     return Promise.resolve();
   }
 
-  pinSession(_path: string, _pinned: boolean) {
+  pinSession(path: string, pinned: boolean, host = "") {
+    const key = JSON.stringify([host, path]);
+    this.flags.set(key, { ...this.flags.get(key), pinned });
     return Promise.resolve();
   }
 

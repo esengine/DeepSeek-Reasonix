@@ -89,16 +89,14 @@ it("filters by the word on the kernel and never asks for every row", async () =>
   await waitFor(() => expect(asked.at(-1)).toMatchObject({ scope: "active", q: "" }));
 });
 
-it("counts the whole workspace in the chips, and the counts do not move with the window", async () => {
+it("keeps the full project total while its loaded window grows, without local-only filter badges", async () => {
   const { hub } = pagedHub();
   render(<App hub={hub} />);
   await screen.findByRole("button", { name: /显示更多/ });
-  expect(filter(/^全部/).textContent).toContain("130");
-  expect(filter(/^归档/).textContent).toContain("2");
-  expect(filter(/^置顶/).textContent).toContain("1");
+  expect(await screen.findByLabelText(/\/ 130 会话/)).toBeTruthy();
+  for (const scope of [/^全部/, /^归档/, /^置顶/]) expect(filter(scope).querySelector("b")).toBeNull();
   await userEvent.click(await screen.findByRole("button", { name: /显示更多/ }));
-  await waitFor(() => expect(filter(/^置顶/).textContent).toContain("1"));
-  expect(filter(/^归档/).textContent).toContain("2");
+  await waitFor(() => expect(screen.getByLabelText(/101 \/ 130 会话/)).toBeTruthy());
 });
 
 it("reaches an archived conversation far outside the window instead of a dead end", async () => {

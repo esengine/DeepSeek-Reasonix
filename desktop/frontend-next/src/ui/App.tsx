@@ -59,6 +59,8 @@ import { useSessionSwitch } from "./sessionswitch";
 import { singleFlight } from "./singleflight";
 import { useTreeRead } from "./useTreeRead";
 import { useOpenPane } from "./useOpenPane";
+import { useOpenRemotePane } from "./useOpenRemotePane";
+import { useNewConversation } from "./useNewConversation";
 import { markSettled } from "../boot/gate";
 import type { PaneView } from "../state/paneview";
 
@@ -263,21 +265,7 @@ export function App({ hub }: { hub: HubPort }) {
     [hub],
   );
 
-  const openRemotePane = useCallback(
-    async (host: string, workspace?: string, sessionPath?: string) => {
-      setOpening((n) => n + 1);
-      try {
-        const view = await hub.openRemote({ host, workspace, sessionPath });
-        await reloadPanes();
-        sw.cancel();
-        setActive(view.id);
-      } finally {
-        setOpening((n) => n - 1);
-        void reloadRemotes();
-      }
-    },
-    [hub, reloadPanes, reloadRemotes, sw.cancel],
-  );
+  const openRemotePane = useOpenRemotePane({ hub, reloadPanes, reloadRemotes, sw, setActive, setOpening });
 
   // One port per pane, held across renders — a fresh instance would resubscribe
   // the event stream and drop the frames in between.
@@ -455,15 +443,16 @@ export function App({ hub }: { hub: HubPort }) {
   // "新会话" — with several open, identical labels are the same as no labels.
   const titleFor = useCallback(
     (rt: RuntimeView, at: number) => {
-      for (const ws of tree) {
+      for (const ws of rt.host ? viewed.remote[rt.host] ?? [] : tree) {
         for (const session of ws.sessions) {
           // An unwritten one has only a file name; the numbered fallback reads better.
-          if (session.runtimeId === rt.id && (session.title || session.turns)) return session.title || session.name;
+          const held = rt.host ? workspaceContains(ws, rt.root) && session.path === rt.sessionPath : session.runtimeId === rt.id;
+          if (held && (session.title || session.turns)) return session.title || session.name;
         }
       }
       return at === 0 ? t("新会话") : t("新会话 {n}", { n: at + 1 });
     },
-    [tree],
+    [tree, viewed.remote],
   );
 
   const tabs = useMemo(
@@ -486,9 +475,8 @@ export function App({ hub }: { hub: HubPort }) {
   const errorBar = useMemo(() => (error ? <ErrorBar text={error} onDismiss={() => setError("")} onReport={() => setFeedback("send")} /> : null), [error]);
   const bar = useMemo(() => errorBar ?? <AutoArchiveNotice tree={tree} />, [errorBar, tree]);
   const activeWorkspace = tree.find((ws) => !activeRuntime?.host && workspaceContains(ws, activeRuntime?.root)) ?? tree[0];
-  // The folder a new session opens in is the one the switcher above names —
-  // the window's, not whichever project happens to sit first in the tree.
   const newSessionRoot = activeWorkspace?.root;
+  const startConversation = useNewConversation(active, runtimes, newSessionRoot, openPane, openRemotePane);
 
   usePaneForSheets({
     settings: !!settings,
@@ -598,7 +586,7 @@ export function App({ hub }: { hub: HubPort }) {
             onFeedback={() => setFeedback(feedbackEntryTab(feedbackUnread))}
             onNew={() => {
               hidePrefs();
-              void openPane({ root: newSessionRoot }).catch(fail);
+              void startConversation().catch(fail);
             }}
             feedbackUnread={feedbackUnread}
             shown={navRail.shown}
@@ -629,6 +617,7 @@ export function App({ hub }: { hub: HubPort }) {
           adder={adder}
           opening={sw.path}
           onOpen={openPane}
+          onNew={startConversation}
           onOpenRemote={openRemotePane}
           onFocusPane={focusPane}
           onClosePanes={closePanes}
@@ -731,7 +720,7 @@ export function App({ hub }: { hub: HubPort }) {
                 ) : (
                   <>
                     <p className="h">{t("从左栏选择，或在当前文件夹新建")}</p>
-                    <button data-action="session.new" onClick={() => void openPane({ root: newSessionRoot }).catch(fail)}>{t("新建会话")}</button>
+                    <button data-action="session.new" onClick={() => void startConversation().catch(fail)}>{t("新建会话")}</button>
                   </>
                 )}
               </div>

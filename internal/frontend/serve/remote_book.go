@@ -309,46 +309,40 @@ func (h *Hub) removeRemoteSession(w http.ResponseWriter, r *http.Request) {
 // remoteLink is an endpoint on host: a pane's link when one is open, or one
 // taken for this request and handed back by release.
 func (h *Hub) remoteLink(r *http.Request, host string) (RemoteEndpoint, func(), error) {
-	if ep, ok := h.anyRemotePane(host); ok {
-		return ep, func() {}, nil
-	}
-	// The far kernel outlives the link, and its book is on its own disk. A
-	// machine the book has turned off is not reached for at all, so a question
-	// about it fails the same way opening it would.
-	if err := h.remoteHostDialable(host); err != nil {
+	// Disabling a host must also refuse reads that could reuse an existing pane.
+	workspace, err := h.remoteHostWorkspace(host)
+	if err != nil {
 		return RemoteEndpoint{}, nil, err
 	}
-	return h.opts.Remote.Attach(operationContext(r), host, "")
+	if ep, ok := h.remotePane(host, workspace); ok {
+		return ep, func() {}, nil
+	}
+	return h.opts.Remote.Attach(operationContext(r), host, workspace)
 }
 
 // errRemoteDisabled is the typed refusal a machine the book has turned off gets,
 // so a read answers the same code an open does.
 var errRemoteDisabled = errors.New("this machine is turned off in the host book")
 
-// remoteHostDialable reports why the book will not dial name: nil when it will,
-// errRemoteDisabled when the machine is off, and the read error when the book
-// cannot be read at all — a switch that stops a machine has to keep stopping it
-// then too.
-func (h *Hub) remoteHostDialable(name string) error {
+// remoteHostWorkspace resolves the configured default and refuses disabled hosts.
+func (h *Hub) remoteHostWorkspace(name string) (string, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return "", err
 	}
 	entry, ok := cfg.RemoteHost(name)
 	if !ok {
-		return nil
+		return "", nil
 	}
 	if !entry.IsEnabled() {
-		return errRemoteDisabled
+		return "", errRemoteDisabled
 	}
-	return nil
+	return entry.DefaultWorkspace(), nil
 }
 
-// anyRemotePane returns an endpoint on host, for a question about the machine
-// rather than about one pane.
-func (h *Hub) anyRemotePane(host string) (RemoteEndpoint, bool) {
+func (h *Hub) remotePane(host, workspace string) (RemoteEndpoint, bool) {
 	for _, rt := range h.Runtimes() {
-		if ep, ok := rt.Remote(); ok && ep.Host == host {
+		if ep, ok := rt.Remote(); ok && ep.Host == host && ep.Workspace == workspace {
 			return ep, true
 		}
 	}

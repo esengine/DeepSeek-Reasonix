@@ -95,7 +95,7 @@
 }
 
 body { background: var(--page); }
-.app { --rail-open: 238px; background: var(--page); }
+.app { --rail-open: 316px; background: var(--page); }
 .app[data-nav="on"] { --nav-w: var(--nav-open); }
 .app::after { opacity: .012; }
 
@@ -654,7 +654,6 @@ body { background: var(--page) !important; }
 .rail .kids { margin-left: 18px; border-left-color: var(--hair); }
 .rail .sessrow { min-height: 42px; margin: 1px 12px 1px 3px; padding-inline: 9px 6px; border-radius: 7px; color: var(--muted); }
 .rail .sessrow:hover { background: var(--overlay); color: var(--text); }
-.rail .sessrow[aria-selected="true"] { background: var(--raised); color: var(--text); box-shadow: inset 2px 0 var(--text); }
 .rail .sessrow .pip { opacity: .45; }
 .rail .sesstitle { font-size: calc(11px * var(--fs-scale, 1)); line-height: 1.35; }
 .rail .sessmeta { flex: none; color: var(--faint); font-size: calc(9px * var(--fs-scale, 1)); white-space: nowrap; }
@@ -1874,11 +1873,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 }
 .rail .sessrow:hover { background: var(--overlay); color: var(--text); }
 .rail .sessrow .pip { display: none; }
-.rail .sessrow[aria-selected="true"] {
-  background: var(--overlay);
-  color: var(--text);
-  box-shadow: none;
-}
 .rail .sesstitle {
   flex: 1; min-width: 0; align-self: stretch; box-sizing: border-box;
   min-height: 34px; height: 34px; padding: 0 34px 0 9px;
@@ -1891,12 +1885,10 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   flex: 1; min-width: 0; display: block;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.rail .sessrow[aria-selected="true"] .sesstitle { font-weight: 590; }
 .rail .sessrow:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
 .rail .sessmeta { color: var(--faint); font-family: var(--ui); font-size: calc(9px * var(--fs-scale, 1)); }
 .rail .sessrow { position: relative; }
-.rail .sessrow[data-run]::before,
-.rail .sessrow[aria-selected="true"]::before {
+.rail .sessrow[data-run]::before {
   content: "";
   position: absolute; inset-block: 50% auto; inset-inline-start: 3px;
   width: 2px; height: 14px; translate: 0 -50%;
@@ -3033,15 +3025,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .rail .wsname,
 .rail .sessrow { color: var(--muted); }
 .rail .kids { border-color: var(--hair); }
-.rail .sessrow[aria-selected="true"] {
-  /* The open conversation is marked by the same short bar a running one gets,
-     in the theme's accent. A filled row would say "act on me", which
-     navigation does not, and at any saturation it is the loudest thing in the
-     list. */
-  background: var(--overlay);
-  color: var(--text);
-  box-shadow: none;
-}
 
 .hero .mk { color: var(--faint); }
 .hero .t { color: var(--text); }

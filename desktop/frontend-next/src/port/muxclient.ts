@@ -62,7 +62,8 @@ export class MuxClient {
             void this.subscribe(id, pane);
           }
         },
-        holdsConnection: () => !!pane.own && !pane.paused,
+        // A paused dedicated stream needs a slot again when resumed.
+        holdsConnection: () => !!pane.own,
       },
     );
   }

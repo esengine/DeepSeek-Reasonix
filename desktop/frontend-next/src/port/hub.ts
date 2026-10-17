@@ -180,9 +180,9 @@ export interface HubPort extends SharePort {
   /** Drop a project before another remembered one, or at the end when `before` is empty. */
   placeWorkspace(path: string, before: string): Promise<void>;
   removeSession(path: string): Promise<void>;
-  archiveSession(path: string, archived: boolean): Promise<void>;
+  archiveSession(path: string, archived: boolean, host?: string): Promise<void>;
   // Tells the kernel which conversations automatic archiving must leave alone.
-  pinSession(path: string, pinned: boolean): Promise<void>;
+  pinSession(path: string, pinned: boolean, host?: string): Promise<void>;
   // Adds pins made before the kernel kept them. The first call also opens the
   // gate: until then the kernel archives nothing on its own.
   syncPins(paths: string[]): Promise<void>;
@@ -375,12 +375,12 @@ export class SseHub implements HubPort {
     await this.post<void>("/tree/sessions/remove", { path });
   }
 
-  async archiveSession(path: string, archived: boolean) {
-    await this.post<void>("/tree/sessions/archive", { path, archived });
+  async archiveSession(path: string, archived: boolean, host?: string) {
+    await this.post<void>(host ? `/remotes/${encodeURIComponent(host)}/sessions/archive` : "/tree/sessions/archive", { path, archived });
   }
 
-  async pinSession(path: string, pinned: boolean) {
-    await this.post<void>("/tree/sessions/pin", { path, pinned });
+  async pinSession(path: string, pinned: boolean, host?: string) {
+    await this.post<void>(host ? `/remotes/${encodeURIComponent(host)}/sessions/pin` : "/tree/sessions/pin", { path, pinned });
   }
 
   async syncPins(paths: string[]) {
@@ -429,9 +429,6 @@ export class SseHub implements HubPort {
   async remoteTree(host: string) {
     const path = `/remotes/${encodeURIComponent(host)}/tree`;
     const res = await fetch(path, { credentials: "same-origin" });
-    // Nothing open on that machine yet, which is a step to take rather than a
-    // failure to report.
-    if (res.status === 409) return null;
     if (!res.ok) await SseHub.fail(path, res);
     return (await res.json()) as TreeWorkspace[];
   }

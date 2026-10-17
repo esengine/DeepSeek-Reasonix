@@ -10,6 +10,7 @@ afterEach(cleanup);
 
 function hubWithHeldTree() {
   const hub = new MockHub();
+  hub.remoteHosts = async () => [];
   const build = hub.portFor.bind(hub);
   hub.portFor = (rt) => {
     const port = build(rt);

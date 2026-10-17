@@ -87,7 +87,7 @@ describe("a session row selects on the click, not on the kernel's answer", () =>
     const { hub, gates } = window();
     render(<App hub={hub} />);
     const first = await row(/上一次的会话/);
-    await userEvent.click(await row(/my-website/));
+    expect((await row(/my-website/)).getAttribute("aria-expanded")).toBe("true");
     const second = await row(/站点改版/);
 
     await userEvent.click(first);
@@ -110,7 +110,7 @@ describe("a session row selects on the click, not on the kernel's answer", () =>
     const { hub, gates } = window();
     render(<App hub={hub} />);
     const first = await row(/上一次的会话/);
-    await userEvent.click(await row(/my-website/));
+    expect((await row(/my-website/)).getAttribute("aria-expanded")).toBe("true");
     const second = await row(/站点改版/);
 
     await userEvent.click(first);

@@ -172,7 +172,8 @@ it("starts and rebinds feedback polling when the first local owner becomes avail
   await screen.findByRole("button", { name: /发送反馈.*3 项待查看/ });
   const first = (await h.runtimes()).find((rt) => !rt.host)!;
   const firstReads = read.mock.calls.length;
-  await userEvent.click(await screen.findByRole("treeitem", { name: /my-website/ }));
+  const project = await screen.findByRole("treeitem", { name: /my-website/ });
+  if (project.getAttribute("aria-expanded") === "false") await userEvent.click(project);
   await userEvent.click(await screen.findByRole("treeitem", { name: /站点改版/ }));
   await waitFor(async () => expect((await h.runtimes()).filter((rt) => !rt.host)).toHaveLength(2));
   expect(read).toHaveBeenCalledTimes(firstReads);

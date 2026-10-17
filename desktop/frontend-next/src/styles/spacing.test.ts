@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 const TOKENS = import.meta.glob("./tokens.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const SHELL = import.meta.glob("./studio.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const APP = import.meta.glob("./app.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
 const tokens = Object.values(TOKENS)[0];
 const shell = Object.values(SHELL)[0];
@@ -44,6 +45,10 @@ describe("the spacing scale", () => {
 });
 
 describe("a migrated surface", () => {
+  it("keeps a pending session row clickable so returning to it can become the latest selection", () => {
+    const pending = block(Object.values(APP)[0], ".sessrow[data-busy]");
+    expect(pending).not.toMatch(/pointer-events:\s*none/);
+  });
   it("takes every distance from the scale", () => {
     for (const selector of [".activity-group", ".activity-group > summary"]) {
       expect(literalDistances(shell, selector), selector).toEqual([]);

@@ -37,7 +37,7 @@ const MARKS: Record<string, string> = {
 const MIXED = new Set([
   "c", "cnt", "cost", "cur", "d", "delta", "dt", "fail", "isolab", "k",
   "lb", "meta", "mk", "n", "nm", "ntimes", "path", "pill", "pt", "r", "rmtcand", "rt",
-  "sc", "sessmeta", "st", "sym", "sz", "tag", "u", "uspan", "v",
+  "sc", "st", "sym", "sz", "tag", "u", "uspan", "v",
 ]);
 
 const TRANSLATORS = ["t", "tx", "plural"];

@@ -66,7 +66,7 @@ export function usePinnedSessions(hub: HubPort, tree: TreeWorkspace[], treeRead:
     (path: string) => {
       const on = !pinned.has(path);
       show(path, on);
-      hub.pinSession(path, on).catch((e) => {
+      return hub.pinSession(path, on).catch((e) => {
         show(path, null);
         onFailure(e);
       });

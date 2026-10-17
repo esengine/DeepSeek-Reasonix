@@ -39,7 +39,7 @@ function draw(rows = sessions, scope: "all" | "archived" = "all", folded = new S
 }
 
 async function startSelection() {
-  await userEvent.click(screen.getByRole("button", { name: "这台机器的更多操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "项目列表的更多操作" }));
   await userEvent.click(screen.getByRole("menuitem", { name: "选择本机会话" }));
 }
 
@@ -48,14 +48,12 @@ async function selectAll() {
   await userEvent.click(screen.getByRole("button", { name: "全选当前显示的会话" }));
 }
 
-it("keeps the batch entry in the local machine menu without occupying an idle toolbar", async () => {
+it("keeps the batch entry in the project list menu without occupying an idle toolbar", async () => {
   draw();
   expect(document.querySelector(".session-batch-entry, .session-batch")).toBeNull();
   expect(screen.queryByRole("menuitem", { name: "选择本机会话" })).toBeNull();
-  const machine = screen.getByRole("treeitem", { name: /这台机器/ });
-  const more = screen.getByRole("button", { name: "这台机器的更多操作" });
+  const more = screen.getByRole("button", { name: "项目列表的更多操作" });
   await userEvent.click(more);
-  expect(machine.getAttribute("aria-expanded")).toBe("true");
   expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "选择本机会话" }));
   await userEvent.keyboard("{Escape}");
   expect(screen.queryByRole("menuitem", { name: "选择本机会话" })).toBeNull();
@@ -68,23 +66,17 @@ it("keeps the batch entry in the local machine menu without occupying an idle to
 
 it.each([{ rows: [] }, { rows: sessions }])("disables selection when no local sessions are displayed: $rows", async ({ rows }) => {
   draw(rows, "all", new Set(["/w"]));
-  await userEvent.click(screen.getByRole("button", { name: "这台机器的更多操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "项目列表的更多操作" }));
   expect((screen.getByRole("menuitem", { name: "选择本机会话" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-it("keeps add and more separate from folding the local machine with its chevron", async () => {
+it("keeps opening projects and the list menu outside the project tree", async () => {
   const pane = draw();
-  const machine = screen.getByRole("treeitem", { name: /这台机器/ });
-  await userEvent.click(screen.getByRole("button", { name: "打开或新建项目…" }));
+  await userEvent.click(screen.getByRole("button", { name: "打开项目" }));
   expect(pane.add).toHaveBeenCalledOnce();
-  expect(machine.getAttribute("aria-expanded")).toBe("true");
-  await userEvent.click(machine.querySelector(".twist")!);
-  expect(machine.getAttribute("aria-expanded")).toBe("false");
-  await userEvent.click(screen.getByRole("button", { name: "这台机器的更多操作" }));
-  expect(machine.getAttribute("aria-expanded")).toBe("false");
-  await userEvent.keyboard("{Escape}");
-  await userEvent.click(machine.querySelector(".twist")!);
-  expect(machine.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.queryByRole("treeitem", { name: /这台机器/ })).toBeNull();
+  await startSelection();
+  expect(screen.getByText("Alpha")).toBeTruthy();
 });
 
 it("selects rows with clicks and the keyboard without opening or focusing a pane", async () => {
@@ -103,7 +95,7 @@ it("selects rows with clicks and the keyboard without opening or focusing a pane
   expect(pane.onOpen).not.toHaveBeenCalled();
   expect(pane.onFocus).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "完成选择" }));
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "这台机器的更多操作" }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "项目列表的更多操作" }));
   await userEvent.click(beta);
   expect(pane.onOpen).toHaveBeenCalledWith({ root: "/w", sessionPath: "/sessions/b.jsonl" });
 });
@@ -235,7 +227,7 @@ it("drops deleted selections when a tree refresh removes their canonical rows", 
   expect(pane.onArchive).toHaveBeenCalledTimes(1);
 });
 
-it("removes hidden selections when a project or the local machine is folded", async () => {
+it("removes hidden selections when projects are folded", async () => {
   const pane = draw();
   await selectAll();
   pane.update([
@@ -252,12 +244,12 @@ it("removes hidden selections when a project or the local machine is folded", as
   await userEvent.click(screen.getByRole("button", { name: "取消当前显示会话的选择" }));
   expect(screen.getByText("已选 0 个会话")).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "全选当前显示的会话" }));
-  await userEvent.click(screen.getByRole("treeitem", { name: /这台机器/ }));
+  pane.fold(new Set(["/w", "/other"]));
   expect(screen.getByText("已选 0 个会话")).toBeTruthy();
   expect((screen.getByRole("button", { name: "删除所选会话" }) as HTMLButtonElement).disabled).toBe(true);
   expect(pane.onArchive).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "完成选择" }));
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "这台机器的更多操作" }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "项目列表的更多操作" }));
 });
 
 it("selects every loaded row of a search matching the project name, and only those", async () => {

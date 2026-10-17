@@ -23,7 +23,8 @@ describe("adding a project from the sidebar", () => {
     const open = vi.spyOn(hub, "open");
     render(<App hub={hub} />);
 
-    await user.click((await screen.findAllByRole("button", { name: "打开或新建项目…" }))[0]);
+    await user.click((await screen.findAllByRole("button", { name: "打开项目" }))[0]);
+    await user.click(await screen.findByRole("button", { name: "选择本机文件夹" }));
 
     await waitFor(() => expect(open).toHaveBeenCalledWith({ root: "/work/fresh-project" }));
   });

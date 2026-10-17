@@ -52,7 +52,7 @@ describe("toggling", () => {
   it("shows a pin at once and keeps it until the tree agrees", async () => {
     const hub = hubOf();
     const { result, rerender } = renderHook(({ t }) => usePinnedSessions(hub, t, true), { initialProps: { t: rows({ path: "/x.jsonl" }) } });
-    act(() => result.current[1]("/x.jsonl"));
+    act(() => { void result.current[1]("/x.jsonl"); });
     expect(hub.pinSession).toHaveBeenCalledWith("/x.jsonl", true);
     expect(result.current[0].has("/x.jsonl")).toBe(true);
     rerender({ t: rows({ path: "/x.jsonl", pinned: true }) });
@@ -63,7 +63,7 @@ describe("toggling", () => {
     const hub = hubOf({ pinSession: vi.fn().mockRejectedValue(new Error("down")) });
     const fail = vi.fn();
     const { result } = renderHook(() => usePinnedSessions(hub, rows({ path: "/x.jsonl" }), true, fail));
-    act(() => result.current[1]("/x.jsonl"));
+    act(() => { void result.current[1]("/x.jsonl"); });
     await waitFor(() => expect(fail).toHaveBeenCalledTimes(1));
     expect(result.current[0].has("/x.jsonl")).toBe(false);
   });
@@ -71,7 +71,7 @@ describe("toggling", () => {
   it("keeps a pin the kernel refused to drop", async () => {
     const hub = hubOf({ pinSession: vi.fn().mockRejectedValue(new Error("down")) });
     const { result } = renderHook(() => usePinnedSessions(hub, rows({ path: "/k.jsonl", pinned: true }), true));
-    act(() => result.current[1]("/k.jsonl"));
+    act(() => { void result.current[1]("/k.jsonl"); });
     await waitFor(() => expect(hub.pinSession).toHaveBeenCalled());
     await waitFor(() => expect(result.current[0].has("/k.jsonl")).toBe(true));
   });

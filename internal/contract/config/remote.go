@@ -128,6 +128,17 @@ func (e RemoteHostEntry) WorkspaceList() []string {
 	return out
 }
 
+// DefaultWorkspace prefers the declared default over the order of other folders.
+func (e RemoteHostEntry) DefaultWorkspace() string {
+	if dir := strings.TrimSpace(e.Workspace); dir != "" {
+		return dir
+	}
+	if dirs := e.WorkspaceList(); len(dirs) > 0 {
+		return dirs[0]
+	}
+	return ""
+}
+
 // withWorkspaceList rewrites both fields from one list, so the pair can never
 // disagree about which folder a bare connect lands in: the head is the default,
 // and the rest is what is left.

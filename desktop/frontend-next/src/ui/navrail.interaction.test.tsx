@@ -265,16 +265,16 @@ it("remembers divider width through collapse, reopen, and reload with the icon r
   const divider = screen.getByRole("separator", { name: "调整工作区栏宽度" });
   divider.focus();
   await userEvent.keyboard("{ArrowRight}");
-  expect(divider.getAttribute("aria-valuenow")).toBe("276");
-  expect(localStorage.getItem("rx-rail-w")).toBe("276");
+  expect(divider.getAttribute("aria-valuenow")).toBe("328");
+  expect(localStorage.getItem("rx-rail-w")).toBe("328");
   await userEvent.keyboard("{Enter}");
   expect(app().dataset.rail).toBe("off");
   await userEvent.keyboard(" ");
   expect(app().dataset.rail).toBe("on");
-  expect(divider.getAttribute("aria-valuenow")).toBe("276");
+  expect(divider.getAttribute("aria-valuenow")).toBe("328");
   first.view.unmount();
   await open();
-  expect(screen.getByRole("separator", { name: "调整工作区栏宽度" }).getAttribute("aria-valuenow")).toBe("276");
+  expect(screen.getByRole("separator", { name: "调整工作区栏宽度" }).getAttribute("aria-valuenow")).toBe("328");
 });
 
 it.each(["on", "off"])("keeps one drawer entry at the scene boundary with the icon rail %s", async (mode) => {

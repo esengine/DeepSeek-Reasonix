@@ -36,10 +36,7 @@ describe("a new session opens in the workspace on screen", () => {
 
     render(<App hub={hub} />);
 
-    // The tree is the only place a workspace is named now. Folders other than
-    // the focused one open shut, so this is the whole way in: unfold, then work
-    // in it.
-    await userEvent.click(await screen.findByRole("treeitem", { name: /my-website/ }));
+    expect((await screen.findByRole("treeitem", { name: /my-website/ })).getAttribute("aria-expanded")).toBe("true");
     await userEvent.click(await screen.findByRole("treeitem", { name: /站点改版/ }));
     await waitFor(() => expect(asked).toEqual([SECOND]));
 

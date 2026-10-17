@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MuxClient } from "./muxclient";
 import { subscribeStream } from "./sse_subscribe";
+import { StreamBudget } from "./streambudget";
 import type { WireEvent } from "./wire";
 
 interface Source { url: string; closed: boolean; open: (conn: string) => void; say: (pane: string, frame: object) => void }
@@ -56,6 +57,25 @@ function pane(client: MuxClient, id: string, seen: { at: number | null } = { at:
 }
 
 describe("panes sharing one stream", () => {
+  it("keeps paused SSH fallback streams charged when the connection budget settles again", async () => {
+    const hub = stubHub(() => ({ status: 409, code: "mux.pane_not_local" }));
+    const client = new MuxClient();
+    const a = pane(client, "ssh-a");
+    const b = pane(client, "ssh-b");
+    hub.sources[0].open("c1");
+    await flush();
+    const budget = new StreamBudget(() => 1);
+    const dropA = budget.attach("ssh-a", a.stop, () => {}, { visible: true, busy: false });
+    const dropB = budget.attach("ssh-b", b.stop, () => {}, { visible: false, busy: false });
+    expect(budget.liveIds()).toEqual(["ssh-a"]);
+    budget.resettle();
+    expect(budget.liveIds()).toEqual(["ssh-a"]);
+    budget.update("ssh-a", { visible: false, busy: false });
+    budget.update("ssh-b", { visible: true, busy: false });
+    budget.resettle();
+    expect(budget.liveIds()).toEqual(["ssh-b"]);
+    dropA(); dropB(); a.stop(); b.stop();
+  });
   it("carries nine panes on one connection", async () => {
     const hub = stubHub();
     const client = new MuxClient();

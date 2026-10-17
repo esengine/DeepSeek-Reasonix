@@ -120,7 +120,7 @@ it("keeps the add action busy until selection finishes and does not admit anothe
   open.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
   drop([folder.root]);
   await waitFor(() => expect(open).toHaveBeenCalledOnce());
-  const picker = screen.getByRole("button", { name: "打开或新建项目…" });
+  const picker = screen.getByRole("button", { name: "打开项目" });
   expect(picker.hasAttribute("data-busy")).toBe(true);
   drop(["/work/other"]);
   expect(add).toHaveBeenCalledOnce();
@@ -162,7 +162,7 @@ it("shows a folder-drop hint only while hovering a visible, idle sidebar", async
 it("opens a session in the folder the picker added, the same as a drop does", async () => {
   const { add, pick, open } = draw();
   pick.mockResolvedValueOnce("/work/picked");
-  await userEvent.click(screen.getByRole("button", { name: "打开或新建项目…" }));
+  await userEvent.click(screen.getByRole("button", { name: "打开项目" }));
   await waitFor(() => expect(add).toHaveBeenCalledWith("/work/picked"));
   await waitFor(() => expect(open).toHaveBeenCalledExactlyOnceWith({ root: folder.root }));
 });

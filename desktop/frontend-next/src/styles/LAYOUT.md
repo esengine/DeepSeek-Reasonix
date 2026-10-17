@@ -1285,13 +1285,12 @@ what exists.
 - Children form their own block so they can carry the hierarchy guide line.
   Indentation alone does not say level: 18px between two tiers scans as "slightly
   out of line".
-- A selected session row cannot share hover's colour: both at `--overlay` makes
-  any row the mouse passes look selected. Its hue changed too — `--net` already
-  means "this session has a live runtime" (the dot is that), and reusing it for
-  "you are looking at this one" merges two meanings. The blue dot means a live
-  runtime, not that it is reasoning now: the heartbeat goes only to the one
-  actually running, with the global run state on `.app` and the current session
-  as `data-on`.
+- A selected session uses an 8% text-ink wash and hover uses 4%, with regular
+  title weight in both states. The neutral fill carries selection without a
+  coloured edge or a second short bar. Runtime marks describe execution state,
+  pin icons describe pinned sessions, and the keyboard focus outline remains
+  independent of selection. `treerows.css` owns the selected-row recipe for
+  both local and SSH sessions.
 - The rename and delete controls leave the layout but stay on the row: the width
   they held belonged to the title, and a control nobody can see is the other
   failure. They reserve their width whatever they look like, so hiding them until
@@ -1578,6 +1577,35 @@ what exists.
 
 - A prompt that can answer "this and every later one of its kind" draws those choices through one component (`RememberChoice`), only for the kinds the kernel says it will honour, as the quieter buttons beside the primary one.
 - A note under the footer (`RememberWhere`) says where each is kept: for the session only and never on disk, or as a permission rule in the user config that Settings can undo.
+
+## Unified project list
+
+- The sidebar is one project list: local roots and SSH roots share alignment and keyboard levels. Machine names are secondary project metadata, never parent groups. Remote folds use the host and root together as identity.
+- Project headings have no separate chevron. Clicking a heading or using the tree arrow keys toggles its conversations; known empty projects do not advertise expansion. The heading toolbar switches all projects together, while search reveals matching conversations independently of saved folds.
+- The project toolbar keeps collapse/expand beside the label and open-project plus and overflow at the right. The plus opens the common local/SSH location picker; project-row chat icons create conversations. Empty lists retain a text entry.
+- Each project previews five recent sessions and keeps an older active/opening session visible. Search and explicit scopes show their matches. Show more reveals loaded rows and uses the existing bounded kernel paging path.
+- Time metadata comes only from canonical last-active timestamps. Loaded/total session counts remain available to assistive technology without visible badges.
+- The sidebar defaults to 316px, respects saved widths and retains its existing 232px floor. Folder glyphs, titles, action slots and conversation indents align across environments. Hover actions reserve their space.
+- The diagonal toolbar glyphs reuse Tabler's MIT-licensed [collapse][tabler-collapse] and [expand][tabler-expand] paths through the existing Studio icon component.
+
+## Session hover actions
+
+- Local and SSH transcript rows reveal Pin on the left and Archive on the
+  right on hover or focus. Pinned idle rows retain the pin. Execution marks
+  take the leading slot at rest; hover or focus reveals the pin action there.
+- The leading slot and trailing archive width are reserved. Titles do not
+  move when buttons appear, when a session is pinned, or when legacy metadata
+  is visually hidden. Batch checkboxes replace the leading pin slot.
+- Delete stays in each conversation's context menu. Running sessions refuse
+  archive; restoring uses the same action with the opposite flag. Row buttons
+  stop the open gesture, and SSH writes carry the host separately from the
+  transcript path so an identical local path cannot receive them.
+- Hover actions default to shown; an explicit saved off preference survives.
+  Hidden actions remain available in the session menus. Touch surfaces show
+  idle-row actions without requiring hover.
+
+[tabler-collapse]: https://github.com/tabler/tabler-icons/blob/main/icons/outline/arrows-diagonal-minimize-2.svg
+[tabler-expand]: https://github.com/tabler/tabler-icons/blob/main/icons/outline/arrows-diagonal-2.svg
 
 ## Brand lockup
 
