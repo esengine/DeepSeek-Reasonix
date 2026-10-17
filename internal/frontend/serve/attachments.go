@@ -17,8 +17,8 @@ import (
 // Bytes ride into a turn as path references, exactly as the CLI's do. This is
 // the door for a client that has bytes and no path: a browser tab, and the
 // clipboard everywhere. A window that knows the path uses POST /drop and copies
-// nothing. JSON rather than raw bytes because csrfGuard admits nothing else.
-// control enforces the real per-kind limit once these are decoded.
+// nothing. This legacy JSON endpoint remains bounded; /attachments/upload
+// streams files without aggregating their bytes in memory.
 const maxAttachmentUpload = 25 << 20
 
 // attachmentBytes takes the bytes from whichever half the client had. A desktop
@@ -70,7 +70,13 @@ func (e *attachmentRefusal) Error() string { return e.err.Error() }
 func refuseAttachment(w http.ResponseWriter, name string, err error) {
 	var pre *attachmentRefusal
 	var bad *control.AttachmentError
+	var streamLimit *control.AttachmentStreamLimitError
 	switch {
+	case errors.As(err, &streamLimit):
+		refuse(w, http.StatusRequestEntityTooLarge, "attachment.too_large", err.Error(), map[string]any{
+			"limit_bytes": streamLimit.LimitBytes, "limit_source": streamLimit.LimitSource,
+			"limit_mb": float64(streamLimit.LimitBytes) / (1 << 20),
+		})
 	case errors.Is(err, errBadAttachmentData):
 		badBody(w)
 	case errors.As(err, &pre):

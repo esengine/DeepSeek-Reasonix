@@ -96,6 +96,37 @@ const UPLOAD_PART = 24 * 1024;
 const MAX_UPLOAD = 16 * 1024 * 1024;
 const BUFFER_HIGH = 1024 * 1024;
 
+async function requestBytes(request: Request): Promise<Uint8Array> {
+  const uploadSignal: AbortSignal = request.signal;
+  uploadSignal.throwIfAborted();
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const abort = () => { void reader.cancel(uploadSignal.reason); };
+  uploadSignal.addEventListener("abort", abort, { once: true });
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      uploadSignal.throwIfAborted();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_UPLOAD) {
+        await reader.cancel();
+        throw new Error(t("这次发送的内容太大：远程控制最多只能传 {mb} MB。请换一个更小的文件。", { mb: MAX_UPLOAD / (1024 * 1024) }));
+      }
+      chunks.push(value);
+    }
+  } finally {
+    uploadSignal.removeEventListener("abort", abort);
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.length; }
+  return body;
+}
+
 const DEFAULTS: RemoteLinkOptions = {
   requestTimeoutMs: 30_000,
   retryDelaysMs: [500, 1_000, 2_000, 4_000, 8_000, 15_000],
@@ -153,7 +184,7 @@ export class RemoteLink {
   async fetch(request: Request): Promise<Response> {
     if (this.ended) throw new Error(t("远程连接已断开，请重新连接。"));
     const id = crypto.randomUUID();
-    const body = new Uint8Array(await request.arrayBuffer());
+    const body = await requestBytes(request);
     const path = request.url.slice(location.origin.length);
     const room = maxRequestBody(path);
     const method = request.method;

@@ -365,13 +365,8 @@ func (s *Server) reloadExtensionsHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// csrfGuard rejects state-changing requests that don't carry a JSON content type.
-// The command endpoints have no auth and bind to localhost, so a page the user
-// visits could otherwise drive them with a simple cross-origin POST (text/plain,
-// no preflight) — submitting prompts or auto-approving tool calls. Requiring
-// application/json forces a CORS preflight the unauthenticated server never
-// answers, blocking cross-site requests; the same-origin frontend (which always
-// sends JSON) is unaffected.
+// Both admitted content types require a CORS preflight, which the server does
+// not answer. Binary bodies are admitted only at the attachment upload route.
 func csrfGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -379,7 +374,8 @@ func csrfGuard(next http.Handler) http.Handler {
 			if i := strings.IndexByte(ct, ';'); i >= 0 {
 				ct = ct[:i]
 			}
-			if !strings.EqualFold(strings.TrimSpace(ct), "application/json") {
+			binaryUpload := strings.HasSuffix(r.URL.Path, "/attachments/upload") && strings.EqualFold(strings.TrimSpace(ct), "application/octet-stream")
+			if !strings.EqualFold(strings.TrimSpace(ct), "application/json") && !binaryUpload {
 				refuse(w, http.StatusUnsupportedMediaType, "request.bad_content_type", "the body must be application/json", nil)
 				return
 			}

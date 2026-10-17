@@ -79,7 +79,7 @@ func TestCloudDesktopBodylessPostReachesTheBackendAsJSON(t *testing.T) {
 func TestCSRFGuardStillRefusesPostWithoutJSONType(t *testing.T) {
 	reached := false
 	guarded := csrfGuard(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
-	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
+	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded", "application/octet-stream"} {
 		req := httptest.NewRequest(http.MethodPost, "/runtimes/x/close", nil)
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
@@ -89,5 +89,27 @@ func TestCSRFGuardStillRefusesPostWithoutJSONType(t *testing.T) {
 		if rec.Code != http.StatusUnsupportedMediaType || reached {
 			t.Fatalf("content type %q: status = %d, reached = %v", contentType, rec.Code, reached)
 		}
+	}
+}
+
+func TestCloudDesktopForwardsBinaryAttachment(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	hub := NewHub(HubOptions{})
+	runtime := hubRuntime(t, hub, testenv.TempDir(t))
+	response, err := hub.CloudDesktop(t.Context(), remotecloud.DesktopRequest{
+		Method: http.MethodPost, Path: "/rt/" + runtime.ID + "/attachments/upload?name=app.apk", Body: []byte("APK binary fixture"),
+	}, "phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != http.StatusOK {
+		t.Fatalf("status %d: %s", response.Status, response.Body)
+	}
+	var result struct{ Path, Ref string }
+	if err := json.Unmarshal(response.Body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Path == "" || result.Ref != "@"+result.Path {
+		t.Fatalf("bad reference: %+v", result)
 	}
 }

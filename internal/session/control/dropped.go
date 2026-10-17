@@ -36,10 +36,8 @@ func (c *Controller) DroppedRef(path string) (token, displayPath string, err err
 }
 
 // registerExternalRef authorizes one dropped path outside the workspace as a
-// structured @reference for this session. The registered root is always a
-// directory because that is what a read root can be; a dropped file registers
-// the directory holding it. The token carries no drive punctuation, which the
-// real spelling would, and the @ parser reads that as a server name.
+// structured @reference for this session. A file grants access only to itself;
+// selecting a directory grants access to that directory's descendants.
 func (c *Controller) registerExternalRef(abs string) (token, displayPath string, err error) {
 	info, err := os.Stat(abs)
 	if err != nil {
@@ -50,11 +48,25 @@ func (c *Controller) registerExternalRef(abs string) (token, displayPath string,
 		root, name = filepath.Dir(abs), filepath.Base(abs)
 	}
 	rootToken := externalFolderRefToken(root)
-	c.externalFolders.register(rootToken, root)
 	if name == "" {
+		c.externalFolders.register(rootToken, root)
 		return rootToken, filepath.ToSlash(abs), nil
 	}
-	return EscapeRefPath(rootToken + "/" + name), filepath.ToSlash(abs), nil
+	token = rootToken + "/" + name
+	c.externalFolders.register(token, abs)
+	return EscapeRefPath(token), filepath.ToSlash(abs), nil
+}
+
+func (c *Controller) externalFolderRef(token string) (ref, bool) {
+	_, rel, abs, ok := c.externalFolderRefTarget(token)
+	if !ok {
+		return ref{}, false
+	}
+	displayPath := externalFolderDisplayPath(abs, rel)
+	if info, err := os.Stat(abs); err == nil && !info.IsDir() && rel == "." {
+		rel, abs = filepath.Base(abs), filepath.Dir(abs)
+	}
+	return ref{kind: refFile, path: rel, baseDir: abs, displayPath: displayPath, raw: token}, true
 }
 
 func normalizeDroppedPath(path string) (string, error) {

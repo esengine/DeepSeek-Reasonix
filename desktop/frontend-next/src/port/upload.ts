@@ -9,11 +9,6 @@ export const UPLOAD_LIMIT_MB = { attachment: 25, image: 10, wallpaper: 12, theme
 
 const MB = 1024 * 1024;
 
-/** An attachment's cap: pictures go through the kernel's image door, which is stricter than the general one. */
-export function attachmentLimitMb(mime: string, name?: string): number {
-  return !name || mime.toLowerCase().startsWith("image/") ? UPLOAD_LIMIT_MB.image : UPLOAD_LIMIT_MB.attachment;
-}
-
 /** Throws the refusal `refuse` builds when `bytes` is past `limitMb`, before any read. */
 export function guardUpload(bytes: number, limitMb: number, refuse: (limitMb: number) => Error): void {
   if (bytes > limitMb * MB) throw refuse(limitMb);

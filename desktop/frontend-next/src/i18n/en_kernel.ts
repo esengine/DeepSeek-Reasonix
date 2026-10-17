@@ -455,6 +455,7 @@ export const EN_KERNEL: Record<string, string> = {
   "这段内容不是纯文本，不能存为文本文件。": "This is not plain text, so it cannot be kept as a text file.",
   "无法读取这个文件：{detail}。它可能被其他程序占用、已被移动，或在云盘里尚未下载。": "Could not read this file: {detail}. It may be open in another program, moved, or not yet downloaded from cloud storage.",
   "附件未能保存到工作区的 .reasonix/attachments：{detail}。请检查该目录的写入权限和磁盘空间。": "The attachment could not be saved to .reasonix/attachments in the workspace: {detail}. Check that folder's write permission and the free disk space.",
+  "无法读取附件上传上限，请修复用户 config.toml 后重试。": "The attachment upload limit could not be read. Repair your user config.toml and try again.",
   "该行过长，无法补全": "That line is too long to complete",
   "该连接不支持流式传输": "This connection does not support streaming",
   "服务端出现异常，与你的操作无关": "Something went wrong on this side — nothing you did is at fault",

@@ -240,6 +240,25 @@ func TestWorkspaceReadToolsResolveExternalReadRoots(t *testing.T) {
 	assertExternalToolError(t, tools["glob"], map[string]any{"pattern": token + "/missing/**/*.go"}, token+"/missing/**/*.go", external)
 }
 
+func TestWorkspaceReadToolsResolveSelectedFileOnly(t *testing.T) {
+	workspace, outside := testenv.TempDir(t), testenv.TempDir(t)
+	file := filepath.Join(outside, "selected.txt")
+	if err := os.WriteFile(file, []byte("selected file body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewPathResolver()
+	token := "__reasonix_external_folder/abc123/External/selected.txt"
+	resolver.RegisterReadRoot(token, file)
+	tools := byName(Workspace{Dir: workspace, ReadPaths: resolver}.Tools("read_file"))
+	out := runTool(t, tools["read_file"], map[string]any{"path": token})
+	if !strings.Contains(out, "selected file body") {
+		t.Fatalf("selected file unreadable: %s", out)
+	}
+	if _, ok := resolver.Resolve("__reasonix_external_folder/abc123/External/sibling.txt"); ok {
+		t.Fatal("selected file grants sibling read access")
+	}
+}
+
 // helpers
 
 func byName(tools []tool.Tool) map[string]tool.Tool {

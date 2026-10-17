@@ -325,6 +325,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	renderPassthroughTable(&b, "bot", c.Bot)
 
 	renderStorage(&b, c, scope)
+	renderAttachments(&b, c, scope)
 
 	// [secrets] is user/global only: LoadForRoot discards project values, so the
 	// project scope never renders it. Rendering it here keeps saved toggles across rewrites.

@@ -242,15 +242,6 @@ func normalizeExternalFolderRefToken(token string) string {
 	return token
 }
 
-func (c *Controller) externalFolderRef(token string) (ref, bool) {
-	_, rel, abs, ok := c.externalFolderRefTarget(token)
-	if !ok {
-		return ref{}, false
-	}
-	displayPath := externalFolderDisplayPath(abs, rel)
-	return ref{kind: refFile, path: rel, baseDir: abs, displayPath: displayPath, raw: token}, true
-}
-
 func (c *Controller) externalFolderRefTarget(token string) (rootToken, rel, abs string, ok bool) {
 	key := normalizeExternalFolderRefToken(token)
 	if !strings.HasPrefix(key, externalFolderRefPrefix+"/") {

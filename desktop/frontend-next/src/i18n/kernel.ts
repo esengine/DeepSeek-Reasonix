@@ -187,6 +187,7 @@ const SAID: Record<string, string> = {
   "attachment.not_text": "这段内容不是纯文本，不能存为文本文件。",
   "attachment.unreadable": "无法读取这个文件：{detail}。它可能被其他程序占用、已被移动，或在云盘里尚未下载。",
   "attachment.write_failed": "附件未能保存到工作区的 .reasonix/attachments：{detail}。请检查该目录的写入权限和磁盘空间。",
+  "attachment.config_unavailable": "无法读取附件上传上限，请修复用户 config.toml 后重试。",
   "complete.line_too_long": "该行过长，无法补全",
   "stream.unsupported": "该连接不支持流式传输",
   "internal.failed": "服务端出现异常，与你的操作无关",

@@ -1,10 +1,10 @@
 package fileutil
 
 import (
+	"crypto/rand"
 	"errors"
 	"io/fs"
 	"os"
-	"path/filepath"
 )
 
 var writeMarker = func(f *os.File) error {
@@ -18,25 +18,35 @@ var writeMarker = func(f *os.File) error {
 // of the write it accompanies, so callers ignore its error: a filesystem with
 // no hard links (FAT, some network mounts) must still store the state.
 func MarkUntracked(dir string) error {
-	tmp, err := os.CreateTemp(dir, ".gitignore-*")
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer root.Close()
+	return MarkUntrackedInRoot(root)
+}
+
+// MarkUntrackedInRoot keeps marker creation and publication on an already-open
+// directory, even if its pathname is replaced during an attachment write.
+func MarkUntrackedInRoot(root *os.Root) error {
+	name := ".gitignore-" + rand.Text()
+	tmp, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Remove(name) }()
 	if err := writeMarker(tmp); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
-		return err
-	}
-	// Link publishes only a complete marker and, like O_EXCL, refuses to
-	// replace or follow whatever already sits at the target: an empty marker
-	// left by a failed write would read as present and never be repaired.
-	err = os.Link(tmp.Name(), filepath.Join(dir, ".gitignore"))
+	err = root.Link(name, ".gitignore")
 	if errors.Is(err, fs.ErrExist) {
 		return nil
 	}

@@ -653,6 +653,23 @@ describe("composer menus", () => {
 });
 
 describe("composer attachments", () => {
+  it("cancels an upload when its attachment is removed", async () => {
+    const port = new MockPort();
+    let signal: AbortSignal | undefined;
+    vi.spyOn(port, "attach").mockImplementation((_blob?: Blob, _name?: string, abort?: AbortSignal) => {
+      signal = abort;
+      return new Promise<Attachment>(() => {});
+    });
+    const { container, unmount } = draw({ port });
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["apk"], "large.apk")] } });
+    expect(signal?.aborted).toBe(false);
+    fireEvent.click(await screen.findByRole("button", { name: "移除 large.apk" }));
+    expect(signal?.aborted).toBe(true);
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["apk"], "another.apk")] } });
+    expect(signal?.aborted).toBe(false);
+    unmount();
+    expect(signal?.aborted).toBe(true);
+  });
   it("settles files independently and keeps a failed item actionable", async () => {
     const port = new MockPort();
     const attach = vi.fn(async (_blob: Blob, name: string): Promise<Attachment> => {

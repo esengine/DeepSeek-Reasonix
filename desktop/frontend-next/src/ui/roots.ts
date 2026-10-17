@@ -220,6 +220,31 @@ function declaresLocally(tree: Node, name: string): boolean {
   return found;
 }
 
+/** An explicit signal type proves a runtime target, only in its binding's scope. */
+function isAbortSignalBinding(name: string, stack: Node[]): boolean {
+  const typed = (binding: Node) => {
+    const annotation = (binding.typeAnnotation as Node)?.typeAnnotation as Node | undefined;
+    return annotation?.type === "TSTypeReference" && flat(annotation.typeName as Node) === "AbortSignal";
+  };
+  for (const scope of stack.slice().reverse()) {
+    const body = /^(BlockStatement|Program)$/.test(scope.type) ? scope.body as Node[] : [];
+    for (const statement of body) {
+      if (/^(FunctionDeclaration|ClassDeclaration)$/.test(statement.type) && (statement.id as Node)?.name === name) return false;
+      if (statement.type === "VariableDeclaration") {
+        for (const declaration of statement.declarations as Node[]) {
+          const binding = declaration.id as Node;
+          if (bindsName(binding, name)) return binding.type === "Identifier" && typed(binding);
+        }
+      }
+    }
+    const parameter = (scope.params as Node[] | undefined)?.find(binding => bindsName(binding, name));
+    if (parameter) return parameter.type === "Identifier" && typed(parameter);
+    if (scope.type === "CatchClause" && bindsName(scope.param as Node, name)) return false;
+    if (/FunctionDeclaration|ClassDeclaration/.test(scope.type) && (scope.id as Node)?.name === name) return false;
+  }
+  return false;
+}
+
 /** What both readers of a tree need: the module graph, the bindings a file
  *  declares, and what a receiver expression is proven to be. Built once and
  *  handed to whoever asks, so a second reader cannot answer differently. */
@@ -287,13 +312,14 @@ function analysisContext(sources: Map<string, string | Node>, opts: Options) {
       }
     });
   }
-  const targetTypeOf = (node: Node | null, path: string, depth = 0): string | null => {
+  const targetTypeOf = (node: Node | null, path: string, depth = 0, stack: Node[] = []): string | null => {
     if (!node || depth > 6) return null;
-    if (node.type === "TSAsExpression" || node.type === "TSNonNullExpression") return targetTypeOf(node.expression as Node, path, depth + 1);
+    if (node.type === "TSAsExpression" || node.type === "TSNonNullExpression") return targetTypeOf(node.expression as Node, path, depth + 1, stack);
     if (node.type === "Identifier") {
       if (/^(window|document|globalThis)$/.test(node.name as string)) return "Window";
+      if (isAbortSignalBinding(node.name as string, stack)) return "AbortSignal";
       const init = localsOf(path).get(node.name as string);
-      return init ? targetTypeOf(init, path, depth + 1) : null;
+      return init ? targetTypeOf(init, path, depth + 1, stack) : null;
     }
     if (node.type === "MemberExpression" || node.type === "OptionalMemberExpression") {
       const prop = (node.property as Node)?.name as string | undefined;
@@ -469,10 +495,10 @@ function registrationsIn(ctx: ReturnType<typeof analysisContext>, opts: Options)
         return;
       }
       if (declared) {
-        fact.target = recvNode ? targetTypeOf(recvNode, path) : null;
+        fact.target = recvNode ? targetTypeOf(recvNode, path, 0, stack) : null;
         fact.targetProvenance = fact.target ? "declared-wrapper" : null;
       } else if (member) {
-        fact.target = targetTypeOf(recvNode, path);
+        fact.target = targetTypeOf(recvNode, path, 0, stack);
         fact.targetProvenance = fact.target ? "typed-receiver" : null;
       } else {
         fact.target = "Window";

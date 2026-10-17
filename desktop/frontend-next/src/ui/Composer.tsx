@@ -92,6 +92,11 @@ export function Composer({ port, status, running, quote, restore, inject, focus,
   // rather than something read off the element when a menu happens to open.
   const [caret, setCaret] = useState(0);
   const [shots, setShots] = useState<Chip[]>([]);
+  const uploads = useRef(new Map<string, AbortController>());
+  useEffect(() => () => {
+    uploads.current.forEach((upload) => upload.abort());
+    uploads.current.clear();
+  }, []);
   const [stopping, setStopping] = useState(false);
   const submittingRef = useRef(false);
   const stoppingRef = useRef(false);
@@ -277,20 +282,28 @@ export function Composer({ port, status, running, quote, restore, inject, focus,
   }, []);
 
   const discard = useCallback((c: Chip) => {
+    uploads.current.get(c.id)?.abort();
+    uploads.current.delete(c.id);
     releaseChip(c);
     setShots((prev) => prev.filter((x) => x !== c));
   }, []);
 
   const upload = useCallback(
     (id: string, blob: File) => {
+      const controller = new AbortController();
+      uploads.current.get(id)?.abort();
+      uploads.current.set(id, controller);
       void port
-        .attach(blob, blob.name)
+        .attach(blob, blob.name, controller.signal)
         .then((a) =>
           setShots((prev) => prev.map((c) => (c.k === "attachment" && c.id === id ? { ...c, a, state: "ready", error: "" } : c))),
         )
         .catch((e: unknown) =>
           setShots((prev) => prev.map((c) => (c.k === "attachment" && c.id === id ? { ...c, state: "failed", error: reason(e) } : c))),
-        );
+        )
+        .finally(() => {
+          if (uploads.current.get(id) === controller) uploads.current.delete(id);
+        });
     },
     [port],
   );

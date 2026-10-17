@@ -27,3 +27,29 @@ read it, which costs more than the seconds it saves.
 `css: true` is load-bearing: the guards under `src/styles` read `app.css`
 through `?raw`, and a stubbed stylesheet hands them an empty string, which
 passes on nothing.
+
+## Large-file shell regression
+
+From the repository root, install the frontend and Electron dependencies, then
+build the host and production page before running the real-shell regression:
+
+```sh
+pnpm --dir desktop/frontend-next install --frozen-lockfile
+pnpm --dir desktop/electron install --frozen-lockfile
+go build -o desktop/electron/bin/ ./cmd/reasonix-studio-host
+pnpm --dir desktop/frontend-next build
+node desktop/electron/test/attachments_live.mjs
+```
+
+The test uses a disposable workspace, Reasonix home and Electron profile. It
+checks 111 MiB native-file selection, paste and drop without byte uploads,
+then streams a 65 MiB virtual file and verifies its saved size and ready chip.
+No provider request is sent.
+
+Set `REASONIX_TEST_ELECTRON` to use an existing Electron executable, or
+`REASONIX_ATTACHMENT_ARTIFACTS` to retain a screenshot and JSON result in a
+chosen directory. Failed runs retain their fixture directory for diagnosis.
+
+Attachment transport limits are documented in the
+[English guide](../../docs/GUIDE.md#studio-file-attachments) and
+[Chinese guide](../../docs/GUIDE.zh-CN.md#studio-文件附件).

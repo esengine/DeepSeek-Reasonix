@@ -5,11 +5,8 @@ import (
 	"sync"
 )
 
-// externalFolders owns the directories a user dropped from outside the
-// workspace: the token each was given and the tool-side read roots they
-// authorize. Like memoryManager it is a strict leaf behind its own lock, and
-// per-controller by design — dragging a folder authorizes it for this chat
-// session alone rather than widening @ resolution to absolute paths.
+// externalFolders owns session-scoped external path grants. Directory grants
+// include descendants; selecting a file registers only that file's token.
 type externalFolders struct {
 	mu       sync.RWMutex
 	byToken  map[string]string

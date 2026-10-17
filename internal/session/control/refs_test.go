@@ -982,9 +982,8 @@ func TestDroppedRefInsideTheWorkspaceStaysAWorkspacePath(t *testing.T) {
 	}
 }
 
-// A dropped file outside the workspace cannot be referenced by its own
-// spelling — a drive letter reads as an MCP server and a space ends the token —
-// so it is registered under the directory holding it and referenced from there.
+// External files keep an escaped token in their parent's stable namespace,
+// while the read grant belongs only to the selected file.
 func TestDroppedRefOutsideTheWorkspaceResolvesTheFileItself(t *testing.T) {
 	workspace := testenv.TempDir(t)
 	parent := testenv.TempDir(t)
@@ -1007,8 +1006,11 @@ func TestDroppedRefOutsideTheWorkspaceResolvesTheFileItself(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DroppedRef: %v", err)
 	}
-	if registrar.root != expectedRoot {
-		t.Fatalf("registered read root = %q, want the directory holding the file (%q)", registrar.root, expectedRoot)
+	if registrar.root != filepath.Join(expectedRoot, "term list.txt") {
+		t.Fatalf("registered read root = %q, want only the selected file", registrar.root)
+	}
+	if _, _, _, ok := c.externalFolderRefTarget(externalFolderRefToken(expectedRoot) + "/sibling.txt"); ok {
+		t.Fatal("selecting a file authorized its sibling")
 	}
 	if displayPath != filepath.ToSlash(filepath.Join(expectedRoot, "term list.txt")) {
 		t.Fatalf("display path = %q, want the real path of the dropped file", displayPath)

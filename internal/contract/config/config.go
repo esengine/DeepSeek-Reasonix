@@ -48,6 +48,7 @@ type Config struct {
 	Browser          BrowserConfig       `toml:"browser"`
 	Bot              map[string]any      `toml:"bot"` // opaque; see passthrough.go
 	Serve            ServeConfig         `toml:"serve"`
+	Attachments      AttachmentsConfig   `toml:"attachments,omitempty"`
 	Secrets          SecretsConfig       `toml:"secrets"`
 	Remote           RemoteConfig        `toml:"remote"`
 	// AutoSubmit commits a multi-question ask once its last question is answered,

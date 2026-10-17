@@ -370,6 +370,22 @@ describe("a request too large for one message", () => {
     expect(socket.sent).toHaveLength(0);
   });
 
+  it("stops reading an oversized upload stream at the relay budget", async () => {
+    const { conn, socket } = connection(["upload"]);
+    const link = new RemoteLink(conn, async () => conn, (end) => ends.push(end));
+    let chunks = 0;
+    const canceled = vi.fn();
+    const body = new ReadableStream({
+      pull(controller) { chunks++; controller.enqueue(new Uint8Array(1024 * 1024)); },
+      cancel: canceled,
+    });
+    const request = new Request(`${location.origin}/rt/one/attachments/upload?name=large.apk`, { method: "POST", body, duplex: "half" } as RequestInit);
+    await expect(link.fetch(request)).rejects.toThrow(/16 MB/);
+    expect(chunks).toBeLessThanOrEqual(18);
+    expect(canceled).toHaveBeenCalledOnce();
+    expect(socket.sent).toHaveLength(0);
+  });
+
   it("starts again from the first part, under the same id, when the link is lost midway", async () => {
     const first = connection(["replay", "upload"], "desktop-1");
     const second = connection(["replay", "upload"], "desktop-1");

@@ -566,7 +566,7 @@ export interface AgentPort {
   // that knows where the file came from uses dropRefs and copies nothing.
   // Naming the bytes is what stores them as that kind of file; unnamed bytes
   // must prove they are an image.
-  attach(blob: Blob, name?: string): Promise<Attachment>;
+  attach(blob: Blob, name?: string, signal?: AbortSignal): Promise<Attachment>;
   // Keeps a pasted text as a file in the attachment directory and answers with
   // the pointer that replaces it in the message. Only on a person's say-so.
   keepText(text: string): Promise<KeptText>;

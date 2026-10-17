@@ -18,6 +18,7 @@ import (
 // may narrow these grants and never widen them. The slices are copies because
 // decoding the project file writes into the arrays the user's decode left.
 type heldScope struct {
+	attachments    AttachmentsConfig
 	sandbox        SandboxConfig
 	permissions    PermissionsConfig
 	approvalMode   string
@@ -69,6 +70,7 @@ func holdUserScope(c *Config) heldScope {
 	shell.Env = maps.Clone(shell.Env)
 	shell.Args = slices.Clone(shell.Args)
 	return heldScope{
+		attachments:     cloneAttachments(c.Attachments),
 		sandbox:         s,
 		permissions:     p,
 		approvalMode:    c.Desktop.DefaultToolApprovalMode,
@@ -174,6 +176,10 @@ func (c *Config) ignoreProject(key, value string, reason IgnoredProjectReason) {
 // may have written, and gates the programs the project names. Shell env is
 // the user's alone: it reaches every command the agent runs.
 func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.MetaData) {
+	if !reflect.DeepEqual(c.Attachments, h.attachments) {
+		c.ignoreProject("attachments.max_stream_bytes", fmt.Sprint(c.AttachmentStreamLimit().Bytes), ProjectUserOnly)
+	}
+	c.Attachments = cloneAttachments(h.attachments)
 	ws := workspaceDir(root)
 	c.Tools.Shell.Env = h.shell.Env
 	c.Tools.Shell.Args = h.shell.Args

@@ -15,12 +15,12 @@ function noNetwork() {
 }
 
 describe("an upload past the kernel's cap is refused before it is read", () => {
-  it("attachments, with the kernel's own code", async () => {
+  it("image attachments, with the kernel's own code", async () => {
     const fetched = noNetwork();
     const read = vi.fn(async () => new ArrayBuffer(0));
-    const err = await new SsePort("", "r1").attach(Object.assign(sized(600, read), { type: "application/zip" }), "modpack.mrpack").catch((e) => e);
+    const err = await new SsePort("", "r1").attach(sized(600, read), "shot.png").catch((e) => e);
     expect(err).toBeInstanceOf(HttpError);
-    expect(err.reason).toMatchObject({ code: "attachment.too_large", params: { limit_mb: 25 } });
+    expect(err.reason).toMatchObject({ code: "attachment.too_large", params: { limit_mb: 10 } });
     expect(read).not.toHaveBeenCalled();
     expect(fetched).not.toHaveBeenCalled();
   });
@@ -35,7 +35,7 @@ describe("an upload past the kernel's cap is refused before it is read", () => {
     const zip = Object.assign(sized(15, read), { type: "application/zip" });
     vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, json: async () => ({ path: "p", ref: "@p", image: false }) }));
     await new SsePort("", "r1").attach(zip, "pack.zip");
-    expect(read).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
     expect(fetched).not.toHaveBeenCalled();
   });
 
