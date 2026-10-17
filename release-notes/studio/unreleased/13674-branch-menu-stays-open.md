@@ -1,0 +1,2 @@
+- 修复：刚进入窗格就打开分支菜单时，菜单会被自己的挂载收尾关掉，或一直停在加载中。关联 #13674。
+- Fixed: Opening the branch menu just as a pane settles no longer shuts it or leaves it loading forever. Refs #13674.

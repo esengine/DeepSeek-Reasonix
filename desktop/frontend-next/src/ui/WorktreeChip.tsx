@@ -43,9 +43,14 @@ export function WorktreeChip({ sources, canCreate, selection, branch, busy, chan
   const isolated = workspace?.current === sources.sourceRoot && !!workspace.isolated;
   const chosen = sources.sources.find((source) => source.ref === selection?.ref);
   const label = chosen?.name ?? selection?.ref ?? branch;
+  const scope = useRef({ port, root: sources.sourceRoot });
   useEffect(() => {
     let live = true;
-    returnFocus.current = false; setWorkspace(null); setOpen(false); setQuery("");
+    if (scope.current.port !== port || scope.current.root !== sources.sourceRoot) {
+      scope.current = { port, root: sources.sourceRoot };
+      returnFocus.current = false; setOpen(false); setQuery("");
+    }
+    setWorkspace(null);
     void port.workspaces().then((value) => { if (live) setWorkspace(value); }).catch(() => {});
     return () => { live = false; };
   }, [port, sources.sourceRoot]);

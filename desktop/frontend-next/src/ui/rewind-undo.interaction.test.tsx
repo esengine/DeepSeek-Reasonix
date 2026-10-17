@@ -134,7 +134,9 @@ it("keeps undo after unrelated rerender, supports a refused undo retry and repea
 it("allows explicit dismissal without invoking undo", async () => {
   const h = await open(); await restore();
   await screen.findByRole("button", { name: "撤销这次回退" });
-  fireEvent.click(screen.getByRole("button", { name: "关闭回退提示" }));
+  const close = screen.getByRole<HTMLButtonElement>("button", { name: "关闭回退提示" });
+  await waitFor(() => expect(close.disabled).toBe(false));
+  fireEvent.click(close);
   expect(screen.queryByText("已还原 1 个文件")).toBeNull(); expect(h.undo).not.toHaveBeenCalled();
 });
 
