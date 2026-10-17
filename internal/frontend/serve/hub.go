@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/platform/computer"
 
 	"reasonix/internal/base/fileutil"
+	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -195,31 +196,6 @@ type HubOptions struct {
 	Share *DeviceShare
 }
 
-// OpenRequest asks for a runtime. An empty SessionPath opens a fresh session in
-// Root; a path that is already open focuses that runtime rather than binding a
-// second writer to one transcript.
-type OpenRequest struct {
-	Root        string `json:"root"`
-	SessionPath string `json:"sessionPath"`
-	Model       string `json:"model"`
-}
-
-// RuntimeView is what the frontend needs to address and label a pane.
-type RuntimeView struct {
-	ID          string `json:"id"`
-	Base        string `json:"base"`
-	Root        string `json:"root"`
-	Name        string `json:"name"`
-	SessionPath string `json:"sessionPath,omitempty"`
-	// Set only on a pane driven over SSH. Its absence is what tells the
-	// frontend the pane is this machine's own — the common case stays unmarked.
-	Host string `json:"host,omitempty"`
-	// Set on a pane whose conversation another window holds the write lease
-	// for. It reads like any other; what it cannot do is add to it — said here
-	// so the composer can say so before a line is typed, not after.
-	ReadOnly bool `json:"readOnly,omitempty"`
-}
-
 // NewHub returns an empty hub. Adopt or Open publishes the first runtime.
 func NewHub(opts HubOptions) *Hub {
 	var notes func(context.Context, update.Install, string, bool) (update.VersionNotes, error)
@@ -336,6 +312,15 @@ func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	var binding *agentcomposition.Binding
+	if req.SessionPath != "" {
+		binding, err = loadOpenComposition(root, req.SessionPath)
+		if err != nil {
+			return nil, err
+		}
+	} else if req.AgentComposition == "" {
+		req.AgentComposition = "default"
+	}
 	preset := ""
 	savedModel := ""
 	if settings != nil {
@@ -345,7 +330,9 @@ func (h *Hub) Open(ctx context.Context, req OpenRequest) (*Runtime, error) {
 	bc := NewBroadcaster()
 	paneSink := h.decorateSink(bc)
 	build := func(model string, fallback bool) (*boot.BuildResult, error) {
-		return boot.BuildRuntime(ctx, boot.Options{
+		return buildCompositionOrHistory(ctx, boot.Options{
+			AgentComposition:         req.AgentComposition,
+			Composition:              binding,
 			ComputerDriver:           h.opts.ComputerDriver,
 			Model:                    strings.TrimSpace(model),
 			AgentPreset:              preset,
@@ -494,12 +481,13 @@ func (rt *Runtime) view() RuntimeView {
 	}
 	ctrl := rt.Server.Controller()
 	return RuntimeView{
-		ID:          rt.ID,
-		Base:        runtimePrefix + rt.ID,
-		Root:        ctrl.WorkspaceRoot(),
-		Name:        fileutil.RootName(ctrl.WorkspaceRoot()),
-		SessionPath: ctrl.SessionPath(),
-		ReadOnly:    !rt.writable(),
+		AgentComposition: compositionControllerView(ctrl),
+		ID:               rt.ID,
+		Base:             runtimePrefix + rt.ID,
+		Root:             ctrl.WorkspaceRoot(),
+		Name:             fileutil.RootName(ctrl.WorkspaceRoot()),
+		SessionPath:      ctrl.SessionPath(),
+		ReadOnly:         !rt.writable(),
 	}
 }
 
@@ -509,6 +497,9 @@ func (rt *Runtime) view() RuntimeView {
 func (rt *Runtime) writable() bool {
 	if rt.Server == nil {
 		return true
+	}
+	if c, ok := rt.Server.Controller().(*control.Controller); ok && c.CompositionExecutionError() != nil {
+		return false
 	}
 	path := strings.TrimSpace(rt.Server.Controller().SessionPath())
 	if path == "" || rt.leases == nil {

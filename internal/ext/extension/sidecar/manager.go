@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -69,9 +70,10 @@ func LoadRuntimePackages(home string) ([]pluginpkg.InstalledPackage, []string) {
 // alone. It implements io.Closer so the kernel's RuntimeSet can retire it
 // with its controller generation.
 type Manager struct {
-	mu      sync.Mutex
-	clients map[string]*Client
-	closed  bool
+	mu           sync.Mutex
+	clients      map[string]*Client
+	closed       bool
+	privateRoots []string
 	// planAdopted records clients moved from a previous manager during
 	// StartPackagesWithPlan (Unchanged). RollbackPlanStart reattaches only
 	// these; newly started Added/Reloaded clients are closed by m.Close().
@@ -194,6 +196,8 @@ func (m *Manager) Close() error {
 	}
 	m.clients = nil
 	m.planAdopted = nil
+	privateRoots := m.privateRoots
+	m.privateRoots = nil
 	m.mu.Unlock()
 
 	var wg sync.WaitGroup
@@ -205,6 +209,9 @@ func (m *Manager) Close() error {
 		}(client)
 	}
 	wg.Wait()
+	for _, root := range privateRoots {
+		_ = os.RemoveAll(root)
+	}
 	return nil
 }
 

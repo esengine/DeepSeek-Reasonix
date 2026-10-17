@@ -13,6 +13,7 @@ const ROUTES = [
   // so without it a second session's traffic answers with the SPA shell.
   "/runtimes", "/tree", "/rt", "/remotes", "/side",
   "/appearance",
+  "/agent-presets", "/agent-composition",
   "/events", "/history", "/status", "/balance", "/submit", "/cancel", "/approve", "/answer",
   "/adjudications", "/execution-graph", "/jobs", "/tool-calls",
   "/plan", "/plan-decision", "/goal", "/resume", "/models", "/tool-approval-mode", "/workspace-trust", "/preset",
@@ -22,7 +23,7 @@ const ROUTES = [
   "/changes", "/commit", "/attachments", "/drop", "/checkpoints", "/branches", "/compact", "/compaction", "/rewind", "/branch",
   "/extensions", "/themes", "/plugins", "/market", "/surfaces", "/feedback",
   "/fork", "/summarize", "/forget", "/bypass", "/auto-approve-tools",
-  "/permissions", "/sandbox", "/progress-watch", "/ask-timeout", "/changed-files-settings", "/fold-work-settings", "/turn-narration-settings", "/display-currency", "/auto-archive", "/context", "/storage", "/tray", "/browser", "/browser-host", "/asks", "/update", "/receipt-settings", "/subagent-claims", "/write-lease", "/peers",
+  "/permissions", "/sandbox", "/progress-watch", "/ask-timeout", "/changed-files-settings", "/fold-work-settings", "/turn-narration-settings", "/display-currency", "/auto-archive", "/persona", "/context", "/storage", "/tray", "/browser", "/browser-host", "/asks", "/update", "/receipt-settings", "/subagent-claims", "/write-lease", "/peers",
   "/host", "/notifications", "/share", "/pair", "/device",
   "/web-access-settings", "/slash", "/workspaces", "/welcome", "/usage", "/config", "/studio",
 ];

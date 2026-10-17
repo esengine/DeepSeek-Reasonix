@@ -95,6 +95,9 @@ func (c *Controller) ensureWriteAuthorityReady() error {
 	if c == nil || c.executor == nil {
 		return nil
 	}
+	if err := c.CompositionExecutionError(); err != nil {
+		return err
+	}
 	path := c.SessionPath()
 	if path == "" {
 		return nil

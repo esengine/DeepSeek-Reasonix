@@ -27,10 +27,11 @@ type extensionTool struct {
 	clients  *sidecar.Manager
 }
 
-func (t extensionTool) Name() string            { return t.name }
-func (t extensionTool) Description() string     { return t.decl.Description }
-func (t extensionTool) Schema() json.RawMessage { return t.decl.InputSchema }
-func (t extensionTool) ReadOnly() bool          { return t.decl.ReadOnly }
+func (t extensionTool) Name() string                 { return t.name }
+func (t extensionTool) Description() string          { return t.decl.Description }
+func (t extensionTool) Schema() json.RawMessage      { return t.decl.InputSchema }
+func (t extensionTool) ReadOnly() bool               { return t.decl.ReadOnly }
+func (t extensionTool) ExtensionPackageName() string { return t.pluginID }
 
 func (t extensionTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	client := t.clients.Client(t.pluginID)

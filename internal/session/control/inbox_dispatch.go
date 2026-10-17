@@ -28,6 +28,7 @@ func (c *Controller) endRotation() {
 		releaseWorkspace.release()
 	}
 	c.maybeDispatchInbox()
+	c.notifyIdle()
 }
 
 // maybeDispatchInbox is a level-triggered kick, not a one-shot edge. Every

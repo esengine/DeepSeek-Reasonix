@@ -1,4 +1,5 @@
 import type { ModelMode } from "./model";
+import type { CompositionSummary } from "./composition";
 import type { StoredAttachment, Via } from "./wire";
 // A conversation and the states it passes through: what is running, what it
 // cost, and the points it can be wound back to.
@@ -223,6 +224,8 @@ export interface Decision {
 }
 
 export interface SessionStatus {
+  agentComposition?:CompositionSummary|null;
+  agentCompositionLocked?:boolean;
   // Whether the current model reads images at all, and whether that answer was
   // ever given: a relay forwards models nothing here has a label for, and an
   // undeclared one is not the same claim as a text-only one.

@@ -97,7 +97,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 	// run/serve --resume require a value; only interactive root --resume [QUERY] is optional.
 	runResume := completionFlag("--resume", cliCompletionSessionValue)
 	runFlags := []cliCompletionFlag{
-		model, preset, profile,
+		model, preset, profile, compositionCompletionFlag(),
 		completionFlag("--max-steps", cliCompletionStaticValue),
 		completionFlag("--show-thinking", cliCompletionNoValue), completionFlag("--debug", cliCompletionNoValue),
 		completionFlag("--metrics", cliCompletionPathValue),
@@ -117,7 +117,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		help,
 	}
 	root := cliCompletionSpec{name: "reasonix", flags: append([]cliCompletionFlag{
-		model,
+		model, compositionCompletionFlag(),
 		completionFlag("--max-steps", cliCompletionStaticValue),
 		completionFlag("--print -p", cliCompletionNoValue),
 		completionFlag("--continue -c", cliCompletionNoValue),
@@ -294,6 +294,7 @@ func doctorCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
 
 func cliServeCompletionFlags(model, profile, help cliCompletionFlag) []cliCompletionFlag {
 	return []cliCompletionFlag{
+		compositionCompletionFlag(),
 		model, profile,
 		completionFlag("--max-steps --addr", cliCompletionStaticValue),
 		// Serve/Web resume accepts file paths, not branch IDs.
@@ -675,7 +676,7 @@ complete -c reasonix -a '(__reasonix_completion)'
 
 func cliTUICompletionFlags(model, preset, permissionMode, effort, help cliCompletionFlag) []cliCompletionFlag {
 	return []cliCompletionFlag{
-		model, preset, permissionMode, effort,
+		model, preset, permissionMode, effort, compositionCompletionFlag(),
 		completionFlag("--dir", cliCompletionPathValue),
 		completionFlag("--continue -c", cliCompletionNoValue),
 		completionFlag("--resume -r", cliCompletionSessionValue),

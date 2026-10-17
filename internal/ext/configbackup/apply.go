@@ -253,6 +253,8 @@ func applyHooks(items []Item) error {
 
 func writeOne(it Item) error {
 	switch it.Kind {
+	case KindAgentPreset:
+		return restoreCompositionItem(it)
 	case KindSkill:
 		var d skillData
 		if err := json.Unmarshal(it.Data, &d); err != nil {

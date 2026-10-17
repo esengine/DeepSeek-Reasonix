@@ -1,0 +1,16 @@
+[
+  {
+    "schemaVersion": 1, "id": "builtin:general", "name": "标准模式", "description": "处理代码、文件和资料，适合大多数任务。创建会话时继承当前配置，按需检索、编辑和运行工具。",
+    "persona": {"prefix": "", "suffix": "", "complete": false, "include_runtime_context": true},
+    "tools": {"mode":"inherit","members":[]}, "skills": {"mode":"inherit","members":[]},
+    "mcp": {"mode":"inherit","members":[]}, "extensions": {"mode":"inherit","members":[]},
+    "hooks": {"mode":"inherit","members":[]}, "commands": {"mode":"inherit","members":[]}
+  },
+  {
+    "schemaVersion": 1, "id": "builtin:minimal", "name": "精简模式", "description": "只使用终端和图片读取工具，保留上下文压缩，适合基础任务与效果对比。需要支持读图的模型；终端操作仍受现有权限约束。",
+    "persona": {"prefix": "You are a helpful software engineer assistant.", "suffix": "", "complete": true, "include_runtime_context": false},
+    "tools": {"mode":"select","members":[{"id":"bash"},{"id":"view_image"}]},
+    "skills": {"mode":"select","members":[]}, "mcp": {"mode":"select","members":[]},
+    "extensions": {"mode":"select","members":[]}, "hooks": {"mode":"select","members":[]}, "commands": {"mode":"select","members":[]}
+  }
+]

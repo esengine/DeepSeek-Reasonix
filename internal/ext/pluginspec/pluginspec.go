@@ -5,6 +5,8 @@
 package pluginspec
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,6 +27,8 @@ type Options struct {
 	LaunchManager         *mcplaunch.Manager
 	ConfigSource          string
 	StateHome             string
+	ProcessScope          string
+	SessionPackageRoots   map[string]SessionPackageRoot
 	WriterRoots           []string
 	// WritableRoots are what the session lets tools write; a local server is told them.
 	WritableRoots   []string
@@ -94,6 +98,7 @@ func ApplyIsolation(spec *plugin.Spec, workspaceRoot string, opts Options) {
 	if spec == nil {
 		return
 	}
+	ApplySessionPackageRoot(spec, opts.SessionPackageRoots)
 	// Authorized user MCP defaults to trusted host process mode. Confined mode
 	// is opt-in for internal managed deployments/tests and is never selected by
 	// ordinary install paths.
@@ -105,12 +110,18 @@ func ApplyIsolation(spec *plugin.Spec, workspaceRoot string, opts Options) {
 	}
 	stateDir := plugin.MCPStateDir(opts.StateHome, workspaceRoot, spec.Name)
 	spec.StateDir = stateDir
+	processDir := stateDir
+	if opts.ProcessScope != "" {
+		digest := sha256.Sum256([]byte(opts.ProcessScope))
+		processDir = filepath.Join(stateDir, "sessions", hex.EncodeToString(digest[:12]))
+		spec.ProcessStateDir = processDir
+	}
 	if spec.ResolvedProcessMode() != plugin.MCPProcessConfined {
 		// Host mode still gets a private state/cache/temp tree; only the OS
 		// command sandbox is omitted so local app integrations keep working.
 		return
 	}
-	writerRoots := appendUniquePaths([]string{stateDir}, opts.WriterRoots...)
+	writerRoots := appendUniquePaths([]string{processDir}, opts.WriterRoots...)
 	readerRoots := []string{workspaceRoot}
 	if home, err := os.UserHomeDir(); err == nil {
 		readerRoots = appendUniquePaths(readerRoots, home)

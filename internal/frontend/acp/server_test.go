@@ -1499,7 +1499,26 @@ func TestServeSessionConfigQueuesDuringActivePrompt(t *testing.T) {
 
 func TestServeSessionConfigRejectsBackgroundJobsWhileIdle(t *testing.T) {
 	dir := testenv.TempDir(t)
-	factory := &configurableFactory{dir: dir, managers: []*jobs.Manager{}}
+	continuing, continueRelease, rebuilt := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var continuingOnce, continueReleaseOnce sync.Once
+	defer continueReleaseOnce.Do(func() { close(continueRelease) })
+	factory := &configurableFactory{dir: dir, managers: []*jobs.Manager{},
+		onBuild: func(index int, _ SessionParams) {
+			if index == 1 {
+				close(rebuilt)
+			}
+		},
+		behavior: func(ctx context.Context, sink event.Sink, input string, p SessionParams) error {
+			continuingOnce.Do(func() { close(continuing) })
+			select {
+			case <-continueRelease:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			sink.Emit(event.Event{Kind: event.Text, Text: p.Model + ":" + input})
+			return nil
+		},
+	}
 	client, stop := startServer(t, factory)
 	defer stop()
 
@@ -1558,6 +1577,11 @@ func TestServeSessionConfigRejectsBackgroundJobsWhileIdle(t *testing.T) {
 	if running := jm.RunningForSession(sessionstore.BranchID(sessionPath)); len(running) != 0 {
 		t.Fatalf("running jobs after release = %+v, want none before retry", running)
 	}
+	select {
+	case <-continuing:
+	case <-time.After(rpcCallBudget(t)):
+		t.Fatal("background completion never entered its foreground continuation")
+	}
 
 	retryResp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 		SessionID: nr.SessionID,
@@ -1575,8 +1599,22 @@ func TestServeSessionConfigRejectsBackgroundJobsWhileIdle(t *testing.T) {
 	if modelOpt.CurrentValue != "pro" {
 		t.Fatalf("retry model currentValue = %q, want pro", modelOpt.CurrentValue)
 	}
+	// Job completion can still own a foreground continuation. The successful
+	// config response queues behind it; wait for that accepted rebuild.
+	continueReleaseOnce.Do(func() { close(continueRelease) })
+	select {
+	case <-rebuilt:
+	case <-time.After(rpcCallBudget(t)):
+		t.Fatal("accepted retry never rebuilt after the completion turn")
+	}
 	if got := factory.buildCount(); got != 2 {
 		t.Fatalf("build count after retry switch = %d, want rebuild", got)
+	}
+	// A mode request joins the same serialization domain and observes completed
+	// publication, whereas onBuild only signals candidate construction.
+	settled := client.call(t, "session/set_mode", SessionSetModeParams{SessionID: nr.SessionID, ModeID: sessionModeNormal})
+	if settled.Error != nil {
+		t.Fatalf("mode barrier after queued config: %+v", settled.Error)
 	}
 
 	promptCh := client.callAsync("session/prompt", SessionPromptParams{

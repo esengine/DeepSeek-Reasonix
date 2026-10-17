@@ -15,45 +15,14 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/extension/uihub"
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/store"
-	"reasonix/internal/tools/builtin"
 	"reasonix/internal/tools/jobs"
 )
-
-// SessionParams is everything a Factory needs to assemble one ACP session's
-// controller. Sink is owned by this package (an updateSink bound to the session
-// id) and must be wired into the controller's event sink; the controller's
-// interactive approval (see control.Controller.EnableInteractiveApproval) then
-// routes "ask" decisions back through that sink as ApprovalRequest events, which
-// the sink forwards to the client over session/request_permission.
-//
-// Cwd roots the session's file tools and bash (built via builtin.Workspace).
-// Model, EffortOverride, and RuntimeProfile are optional session-local selectors
-// from ACP config options. MCPServers are the MCP servers the client asked the
-// agent to connect for this session. OnSessionRecovered is the service's
-// bookkeeping hook for automatic transcript recovery branches (see
-// sessionRecoveredHandler); factories must wire it into the controller they build.
-type SessionParams struct {
-	Cwd                string
-	MCPServers         []plugin.Spec
-	Sink               event.Sink
-	Model              string
-	EffortOverride     *string
-	RuntimeProfile     string
-	OnSessionRecovered func(control.SessionRecoveryInfo) error
-	// FileOverlay and Terminal are non-nil when the client advertised the
-	// matching capability at initialize: file tools then see unsaved editor
-	// buffers, and foreground bash can run in a client-owned terminal.
-	// Factories thread them into the controller's tool assembly.
-	FileOverlay builtin.FileOverlay
-	Terminal    builtin.TerminalRunner
-}
 
 // Factory builds the per-session controller. The composition root (the cli's
 // `reasonix acp` command) implements it by reusing setup()'s assembly: a
@@ -244,6 +213,7 @@ func (s *service) bindClientIO(p *SessionParams, sessionID string) {
 // persistence, turns, approval, and the editor-facing capability surface. It
 // names no checkpoint, memory, skill-authoring or settings port.
 type acpController interface {
+	control.AgentCompositions
 	control.Lifecycle
 	control.TurnControl
 	RunTurnWithRaw(ctx context.Context, input, raw, invokedSkill string) error
@@ -610,7 +580,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		OnSessionRecovered: s.sessionRecoveredHandler(id),
 	}
 	s.bindClientIO(&sessionParams, id)
-	ctrl, err := s.factory.NewSession(ctx, sessionParams)
+	ctrl, err := s.newPersistedSession(ctx, sessionParams, persistedPath)
 	if err != nil {
 		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
@@ -832,6 +802,7 @@ func (s *service) reloadSessionExtensionsLocked(ctx context.Context, sess *acpSe
 		return nil, &RPCError{Code: ErrInternal, Message: sessionReloadExtensionsMethod + ": session controller does not support rebuild"}
 	}
 	rebuildParams := SessionParams{
+		Composition:        old.CompositionBinding(),
 		Cwd:                cwd,
 		MCPServers:         mcpServers,
 		Sink:               sink,
@@ -882,8 +853,7 @@ func (s *service) reloadSessionExtensionsLocked(ctx context.Context, sess *acpSe
 		_ = saveACPMeta(sess.transcript, sess.metaLocked())
 	}
 	sess.mu.Unlock()
-	sink.bindApprove(newCtrl.Approve)
-	sink.bindAnswer(newCtrl.AnswerQuestion)
+	s.bindCompositionIO(sess, newCtrl)
 
 	// Release the outgoing controller only after the swap published the
 	// replacement. ReleaseResources (not Close): the session logically
@@ -1052,6 +1022,7 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 	}
 
 	rebuildParams := SessionParams{
+		Composition:        cur.CompositionBinding(),
 		Cwd:                cwd,
 		MCPServers:         mcpServers,
 		Sink:               sink,
@@ -1145,8 +1116,7 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 		_ = saveACPMeta(sess.transcript, sess.metaLocked())
 	}
 	sess.mu.Unlock()
-	sink.bindApprove(newCtrl.Approve)
-	sink.bindAnswer(newCtrl.AnswerQuestion)
+	s.bindCompositionIO(sess, newCtrl)
 
 	cur.ReleaseResources()
 	s.sendAvailableCommands(sess)

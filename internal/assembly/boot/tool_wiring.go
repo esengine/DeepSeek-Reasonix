@@ -26,9 +26,15 @@ import (
 
 // loadHooks resolves the hooks, reusing the previous build's discovery when
 // its plan allows, and binds the runner to the resolved shell.
-func loadHooks(opts Options, roots config.Roots, root string, shell sandbox.Shell, sink event.Sink) ([]hook.ResolvedHook, *hook.Runner) {
+func loadHooks(opts Options, roots config.Roots, root string, shell sandbox.Shell, sink event.Sink) ([]hook.ResolvedHook, *hook.Runner, error) {
 	var resolved []hook.ResolvedHook
-	if opts.Observe != nil {
+	if opts.Composition != nil && opts.Observe == nil {
+		var err error
+		resolved, err = compositionHookSet(opts, roots.Home(), root)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else if opts.Observe != nil {
 		// An empty, non-nil scope list loads no hook at all: nil would load every one.
 		resolved = hook.Load(hook.LoadOptions{ProjectRoot: root, ReasonixHomeDir: roots.Home(), Scopes: []hook.Scope{}})
 	} else if opts.ReuseAssembly != nil && shouldReuseDiscovery(opts.PreviousPlan) {
@@ -39,7 +45,7 @@ func loadHooks(opts Options, roots config.Roots, root string, shell sandbox.Shel
 			sink.Emit(projectHooksHeldEvent(held))
 		}
 	}
-	return resolved, hook.NewRunner(resolved, root, hook.NewDefaultSpawner(hookRuntime(shell)), func(n hook.Notice) { sink.Emit(hookNoticeEvent(n)) })
+	return resolved, hook.NewRunner(resolved, root, hook.NewDefaultSpawner(hookRuntime(shell)), func(n hook.Notice) { sink.Emit(hookNoticeEvent(n)) }), nil
 }
 
 // NewUserHookRunner resolves only the hooks the user configured under the
@@ -89,6 +95,10 @@ func registerSessionTools(reg *tool.Registry, set ablation.Set, roots config.Roo
 }
 
 func loadCommands(opts Options, root string) []command.Command {
+	if opts.Composition != nil {
+		cmds, _ := resource[command.Command](opts.Composition, "command")
+		return cmds
+	}
 	if opts.ReuseAssembly != nil && shouldReuseDiscovery(opts.PreviousPlan) {
 		return opts.ReuseAssembly.Commands
 	}
@@ -163,8 +173,14 @@ type capabilitySurface struct {
 	catalog func() capability.Catalog
 }
 
-func newCapabilitySurface(ctx context.Context, cfg *config.Config, root string, specOptions pluginspec.Options, host *plugin.Host, reg *tool.Registry, skills *skill.Store, profile capability.Profile, enabled map[string]bool) *capabilitySurface {
+func newCapabilitySurface(ctx context.Context, cfg *config.Config, root string, specOptions pluginspec.Options, host *plugin.Host, reg *tool.Registry, skills *skill.Store, profile capability.Profile, enabled map[string]bool, extra ...plugin.Spec) *capabilitySurface {
 	c := &capabilitySurface{specs: pluginspec.ForRootWithOptions(cfg.Plugins, root, specOptions)}
+	entries := append([]config.PluginEntry(nil), cfg.Plugins...)
+	for _, spec := range extra {
+		c.specs = append(c.specs, spec)
+		entries = append(entries, compositionMCPEntry(spec))
+		enabled[spec.Name] = true
+	}
 	cachedTools, cacheKeyOK := capability.LoadCachedToolsForSpecs(c.specs)
 	skills.ConfigureToolBindings(func(sk skill.Skill) []tool.MCPBinding {
 		return skillMCPBindings(sk, reg, c.specs, cachedTools, cacheKeyOK)
@@ -184,7 +200,7 @@ func newCapabilitySurface(ctx context.Context, cfg *config.Config, root string, 
 		catOpts := capability.CatalogOptions{
 			Tools:       reg.AllContractEntries(),
 			Skills:      skills.PathHits().Visible(skill.ModelInvocable(skills.List())),
-			Plugins:     cfg.Plugins,
+			Plugins:     entries,
 			Profile:     profile,
 			Connected:   conn,
 			Failed:      failedNow,
@@ -198,7 +214,7 @@ func newCapabilitySurface(ctx context.Context, cfg *config.Config, root string, 
 	}
 	// WithoutCancel: ctx is often one request, and MCP children outlive it.
 	c.runtime = usecap.NewMCPCapabilityRuntime(context.WithoutCancel(ctx), host, c.specs, reg, c.catalog)
-	c.runtime.ConfigureServers(cfg.Plugins, c.specs, enabled)
+	c.runtime.ConfigureServers(entries, c.specs, enabled)
 	c.ledger = capability.NewLedger()
 	c.audit = &capability.Audit{}
 	c.proxy = c.runtime.NewFrontend(c.ledger, c.audit)

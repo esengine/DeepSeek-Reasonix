@@ -17,7 +17,7 @@ var reservedSubagentSlashNames = map[string]bool{
 	"theme": true, "skill": true, "skills": true, "reload-cmd": true, "tree": true,
 	"branch": true, "switch": true, "rewind": true, "plan-exec": true, "prometheus": true,
 	"resume": true, "rename": true, "todo": true, "verbose": true, "mouse": true,
-	"sandbox": true, "work-mode": true, "profile": true,
+	"sandbox": true, "work-mode": true, "profile": true, "agent": true,
 	"reasoning-language": true, "paste-image": true, "output-style": true,
 	"output-styles": true, "diff-fold": true, "language": true, "help": true,
 	"quit": true, "exit": true, "copy": true, "export": true, "forget": true,

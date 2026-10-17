@@ -73,7 +73,7 @@ interface Props {
 // answer this menu gives is the item's own value.
 export function Picker({
   label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, ariaLabel, ariaDescribedBy, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, head, ...id
-}: Props & { [K in `data-${string}`]?: string }) {
+}: Props & { [K in `data-${string}`]?: string | ((value: string) => string) }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrap = useRef<HTMLDivElement>(null);
@@ -95,7 +95,7 @@ export function Picker({
       return;
     }
     if (filtering) find.current?.focus();
-    else menu.current?.querySelector<HTMLElement>("button.mi")?.focus();
+    else menu.current?.querySelector<HTMLElement>("button.mi:not(:disabled)")?.focus();
     menu.current?.querySelector<HTMLElement>("button.mi[data-on]")?.scrollIntoView({ block: "nearest" });
     // The menu is not inside the wrapper any more, so without asking it too a
     // press on one of its own rows would read as a press outside.
@@ -159,7 +159,7 @@ export function Picker({
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const all = [...(menu.current?.querySelectorAll<HTMLElement>("button.mi") ?? [])];
+    const all = [...(menu.current?.querySelectorAll<HTMLElement>("button.mi:not(:disabled)") ?? [])];
     if (!all.length) return;
     const i = all.indexOf(document.activeElement as HTMLElement);
     // From the field, Down enters the list at the row Enter would have taken.
@@ -250,10 +250,12 @@ export function Picker({
               ) : (
                 <button
                   {...id}
+                  data-action={typeof id["data-action"] === "function" ? id["data-action"](it.value) : id["data-action"]}
                   data-value={it.value}
                   className={it.plain ? "mi plain" : "mi"}
                   role={it.toggle === undefined ? "menuitem" : "menuitemcheckbox"}
                   aria-checked={it.toggle}
+                  aria-current={it.value === current ? true : undefined}
                   disabled={it.disabled}
                   data-on={it.value === current ? "" : undefined}
                   data-lead={it.value === lead ? "" : undefined}

@@ -244,9 +244,12 @@ func (s *Server) rebuildOptions(cur control.SessionAPI, ref string) boot.Options
 		return opts
 	}
 	opts.NativeSurfaces = cur.NativeSurfaces()
+	opts.AgentPreset = cur.AgentPreset()
 	opts.WorkspaceRoot, opts.SessionDir = cur.WorkspaceRoot(), cur.SessionDir()
 	// Keep the logical session's private temporary directory across the rebuild.
 	if ctrl, ok := cur.(*control.Controller); ok && ctrl != nil {
+		opts.Composition = ctrl.CompositionBinding()
+		opts.Home = ctrl.PresetStore().Home
 		opts.SessionTemp = ctrl.SessionTemp()
 		opts.WorkspaceRepo = ctrl.WorkspaceRepo()
 		opts.BrowserSession = ctrl.BrowserSession()

@@ -23,6 +23,7 @@ func (s *Server) publishController(previous control.SessionAPI, next *control.Co
 	if s.ctrl == previous {
 		s.ctrl = next
 		s.mu.Unlock()
+		s.bindCompositionSelector(next)
 		return nil
 	}
 	current = s.ctrl

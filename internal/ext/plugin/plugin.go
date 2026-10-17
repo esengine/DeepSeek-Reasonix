@@ -144,6 +144,7 @@ type Spec struct {
 	// agent command sandbox.
 	Sandbox         sandbox.Spec
 	StateDir        string
+	ProcessStateDir string
 	OAuthHTTPClient *http.Client
 	// OAuthAllowMissingPKCEMetadata accepts an authorization server that does
 	// not list code_challenge_methods_supported; see ErrOAuthPKCEUnadvertised.
@@ -177,11 +178,12 @@ type Host struct {
 	// mu guards the slices below: StartAll builds the Host single-threaded, but
 	// after that a /mcp hot-add or -remove (one goroutine) can run concurrently
 	// with reads from a running turn's @ref resolution or the status UI.
-	mu        sync.RWMutex
-	clients   []*Client
-	prompts   []Prompt
-	resources []Resource
-	failures  []Failure
+	mu                sync.RWMutex
+	clients           []*Client
+	prompts           []Prompt
+	resources         []Resource
+	failures          []Failure
+	compositionGuards map[string]*compositionToolGuard
 
 	// statusMu guards statusSink alone: it is written once at assembly and read
 	// from whichever goroutine a background connection finished on.
@@ -572,10 +574,11 @@ func (h *Host) fetchResources(ctx context.Context, c *Client, sink event.Sink) {
 // JSON-RPC. The MCP-level methods (initialize, listTools, …) are transport-
 // agnostic — they go through t.
 type Client struct {
-	name       string
-	instanceID uint64 // Host-local identity for RemoveIfInstance rollback
-	t          transport
-	spec       Spec
+	compositionGuard atomic.Pointer[compositionToolGuard]
+	name             string
+	instanceID       uint64 // Host-local identity for RemoveIfInstance rollback
+	t                transport
+	spec             Spec
 
 	// registrationClaims and registrationCommitted are guarded by Host.mu.
 	// Claims keep a tentative shared instance alive across overlapping builds;
@@ -878,6 +881,7 @@ type mcpRuntimeSpecIdentity struct {
 	ProcessMode             MCPProcessMode
 	Sandbox                 sandbox.Spec
 	StateDir                string
+	ProcessStateDir         string
 	StripRawPrefix          string
 	LowPriority             bool
 }
@@ -915,6 +919,7 @@ func mcpRuntimeSpecIdentityOf(s Spec) mcpRuntimeSpecIdentity {
 		ProcessMode:             s.ResolvedProcessMode(),
 		Sandbox:                 canonicalMCPRuntimeSandbox(s.Sandbox),
 		StateDir:                s.StateDir,
+		ProcessStateDir:         s.ProcessStateDir,
 		StripRawPrefix:          s.StripRawPrefix,
 		LowPriority:             s.LowPriority,
 	}
@@ -1063,6 +1068,7 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 	if err != nil {
 		return nil, err
 	}
+	h.attachCompositionGuard(c)
 	ts, err := c.listTools(callCtx)
 	if err != nil {
 		c.close()
@@ -1601,6 +1607,9 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 // content items, which callers with a structural image channel (the agent)
 // forward to vision models instead of relying on the text placeholders alone.
 func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage) (string, []string, error) {
+	if err := t.client.compositionContractError(); err != nil {
+		return "", nil, err
+	}
 	var argMap map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &argMap); err != nil {

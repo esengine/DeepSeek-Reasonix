@@ -57,6 +57,7 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	if old == nil {
 		return nil, fmt.Errorf("boot: Rebuild requires the controller being replaced")
 	}
+	opts = inheritComposition(old, opts)
 	if _, observed := old.ObservePosture(); observed && opts.Observe == nil {
 		return nil, ErrObserveRebuild
 	}
@@ -82,7 +83,7 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	var fromGraph *extension.DependencyGraph
 	if previous != nil && previous.Plan != nil && previous.Plan.Graph != nil {
 		fromGraph = previous.Plan.Graph
-	} else if g, err := buildRuntimeGraph(home, nil); err == nil {
+	} else if g, err := buildRuntimeGraph(home, nil, opts.Composition); err == nil {
 		fromGraph = g
 	}
 	opts.Graph = fromGraph
@@ -103,7 +104,7 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	}
 
 	var toGraph *extension.DependencyGraph
-	if g, err := buildRuntimeGraph(home, nil); err == nil {
+	if g, err := buildRuntimeGraph(home, nil, opts.Composition); err == nil {
 		toGraph = g
 	}
 	var previousSnapshot *extension.RuntimeSnapshot

@@ -19,6 +19,7 @@ function operationHeaders(operationId?: string): Record<string, string> {
 // RuntimeView is one open pane. Base is the prefix every request of that pane
 // carries, which is also what tells the shell's bus which channel to listen on.
 export interface RuntimeView {
+  agentComposition?: import("./composition").CompositionSummary;
   id: string;
   base: string;
   root: string;
@@ -161,7 +162,7 @@ export interface HistoryHit {
 
 export interface HubPort extends SharePort {
   runtimes(): Promise<RuntimeView[]>;
-  open(req: { root?: string; sessionPath?: string }): Promise<RuntimeView>;
+  open(req: { root?: string; sessionPath?: string; agentComposition?: string }): Promise<RuntimeView>;
   close(id: string): Promise<void>;
   tree(window?: TreeWindow): Promise<TreeWorkspace[]>;
   /** Conversations, in every workspace, that say these words. */
@@ -190,6 +191,7 @@ export interface HubPort extends SharePort {
   autoNameSession(path: string): Promise<{ title: string }>;
   exportSession(path: string): Promise<{ name: string; content: string }>;
   importLegacySessions(path: string, workspace: string): Promise<LegacyImport>;
+  importNativeSession(content: unknown, workspace: string): Promise<{ path: string }>;
   // The host book with each link's state, or null where this kernel refuses
   // remote panes outright — a page served to a browser, rather than the window.
   // Null is what lets the sidebar leave the whole section out instead of
@@ -197,7 +199,7 @@ export interface HubPort extends SharePort {
   remoteHosts(): Promise<RemoteHost[] | null>;
   // Opens a pane on another machine. Slow the first time — the kernel may be
   // installing itself over there — so the caller polls remoteHosts for the step.
-  openRemote(req: { host: string; workspace?: string; sessionPath?: string }): Promise<RuntimeView>;
+  openRemote(req: { host: string; workspace?: string; sessionPath?: string; agentComposition?:string }): Promise<RuntimeView>;
   // The far machine's own workspaces, or null while nothing is open on it:
   // there is no kernel over there to ask until a pane puts one there.
   remoteTree(host: string): Promise<TreeWorkspace[] | null>;
@@ -310,8 +312,8 @@ export class SseHub implements HubPort {
     return (await res.json()) as RuntimeView[];
   }
 
-  open(req: { root?: string; sessionPath?: string }) {
-    return this.post<RuntimeView>("/runtimes", { root: req.root ?? "", sessionPath: req.sessionPath ?? "" });
+  open(req: { root?: string; sessionPath?: string; agentComposition?: string }) {
+    return this.post<RuntimeView>("/runtimes", { root: req.root ?? "", sessionPath: req.sessionPath ?? "", agentComposition: req.agentComposition });
   }
 
   async close(id: string) {
@@ -403,6 +405,10 @@ export class SseHub implements HubPort {
     return this.post<LegacyImport>("/tree/sessions/import-legacy", { path, workspace });
   }
 
+  importNativeSession(content: unknown, workspace: string) {
+    return this.post<{ path: string }>("/tree/sessions/import-native", { content, workspace });
+  }
+
   async remoteHosts() {
     const res = await fetch("/remotes", { credentials: "same-origin" });
     // Not an error to report: this kernel does not do remote panes, or answers
@@ -412,7 +418,7 @@ export class SseHub implements HubPort {
     return (await res.json()) as RemoteHost[];
   }
 
-  openRemote(req: { host: string; workspace?: string; sessionPath?: string }) {
+  openRemote(req: { host: string; workspace?: string; sessionPath?: string; agentComposition?:string }) {
     return this.dial((operationId) =>
       this.post<RuntimeView>(
         "/remotes/open",

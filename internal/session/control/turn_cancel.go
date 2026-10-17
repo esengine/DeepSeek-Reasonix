@@ -75,6 +75,7 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 			}
 			// No parked compatibility body: admit the next durable inbox item.
 			c.maybeDispatchInbox()
+			c.notifyIdle()
 			return
 		}
 		next := c.parkedTurns[0]

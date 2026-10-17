@@ -14,16 +14,17 @@ import (
 // tuiFlags are the options the terminal UI takes, which are also the ones a
 // bare `reasonix` took in 1.x, so a 1.x command line starts the same session.
 type tuiFlags struct {
-	fs             *pflag.FlagSet
-	model, preset  *string
-	profile, dir   *string
-	resume, effort *string
-	permissionMode *string
-	inline, cont   *bool
-	yolo, copy     *bool
-	maxSteps       *int
-	addDirs        []string
-	allowedValues  []string
+	agentComposition *string
+	fs               *pflag.FlagSet
+	model, preset    *string
+	profile, dir     *string
+	resume, effort   *string
+	permissionMode   *string
+	inline, cont     *bool
+	yolo, copy       *bool
+	maxSteps         *int
+	addDirs          []string
+	allowedValues    []string
 }
 
 func newTUIFlags() *tuiFlags {
@@ -31,6 +32,7 @@ func newTUIFlags() *tuiFlags {
 	f := &tuiFlags{fs: fs}
 	f.model = fs.String("model", "", "provider name (default: config default_model)")
 	f.preset = fs.String("preset", "balanced", presetFlagUsage())
+	f.agentComposition = fs.String("agent-composition", "default", "Agent composition ID (builtin:, user: or project:)")
 	f.profile = fs.String("profile", "", "deprecated: use --preset")
 	f.dir = fs.String("dir", "", "change to this directory first (project root)")
 	f.inline = fs.Bool("inline", false, "write the conversation into the terminal's scrollback instead of taking the full screen")

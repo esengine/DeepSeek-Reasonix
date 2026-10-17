@@ -55,6 +55,10 @@ func (c *Controller) ConnectMCPServer(e config.PluginEntry) (int, error) {
 // surface without forcing a handshake. It is the durable-enable counterpart to
 // ConnectMCPServer, which remains the explicit install/retry operation.
 func (c *Controller) RegisterMCPServerOnDemand(e config.PluginEntry) (int, error) {
+	var err error
+	if e, err = c.pinnedMCPEntry(e); err != nil {
+		return 0, err
+	}
 	spec := c.mcpSpec(e)
 	n, err := c.mcp.registerSpecOnDemand(spec)
 	if err == nil && c.capabilityRuntime != nil {
@@ -66,6 +70,10 @@ func (c *Controller) RegisterMCPServerOnDemand(e config.PluginEntry) (int, error
 // connectMCPServer expands an entry's ${VARS}, applies the known-server
 // overrides scoped to the workspace, and connects it live via the mcp manager.
 func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
+	var err error
+	if e, err = c.pinnedMCPEntry(e); err != nil {
+		return 0, err
+	}
 	spec := c.mcpSpec(e)
 	n, err := c.mcp.connectSpec(spec)
 	if err == nil && c.capabilityRuntime != nil {

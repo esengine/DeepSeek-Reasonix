@@ -66,4 +66,3 @@ describe("a price the pinned currency cannot be shown for", () => {
     expect(screen.queryByText(/恢复官方价/)).toBeNull();
   });
 });
-

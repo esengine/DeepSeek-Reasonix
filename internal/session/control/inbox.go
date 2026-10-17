@@ -288,6 +288,11 @@ func (c *Controller) pauseInboxOnRotate() {
 // EnqueueInbox durably queues an instruction. Only returns a receipt after
 // blob+manifest commit. Does not auto-start a turn (call TrySubmit / dispatcher).
 func (c *Controller) EnqueueInbox(req InboxRequest) (sessioninbox.InboxReceipt, error) {
+	c.compositionMutationMu.Lock()
+	defer c.compositionMutationMu.Unlock()
+	if err := c.compositionEnqueueReady(); err != nil {
+		return sessioninbox.InboxReceipt{}, err
+	}
 	st, err := c.ensureInbox()
 	if err != nil {
 		return sessioninbox.InboxReceipt{}, err
@@ -320,6 +325,10 @@ func (c *Controller) EnqueueInbox(req InboxRequest) (sessioninbox.InboxReceipt, 
 	if intent != sessioninbox.IntentSteer {
 		intent = sessioninbox.IntentFollowup
 	}
+	rollback, err := c.beginCompositionEnqueue()
+	if err != nil {
+		return sessioninbox.InboxReceipt{}, err
+	}
 	rec, err := st.Enqueue(sessioninbox.EnqueueRequest{
 		Intent:      intent,
 		Origin:      req.Origin,
@@ -334,7 +343,7 @@ func (c *Controller) EnqueueInbox(req InboxRequest) (sessioninbox.InboxReceipt, 
 		} else {
 			sessioninbox.NoteTxFail()
 		}
-		return sessioninbox.InboxReceipt{}, err
+		return sessioninbox.InboxReceipt{}, errors.Join(err, rollback())
 	}
 	if !rec.Idempotent && len(env.ReferenceErrors) > 0 {
 		reason := strings.Join(env.ReferenceErrors, "; ")

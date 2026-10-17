@@ -246,6 +246,7 @@ For advanced CLI usage and configuration, see the **[CLI reference](./docs/CLI.m
   [Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md) ·
   [Recovery and updates](./docs/RECOVERY.md) ·
   [Checkpoints & rewind](./docs/CHECKPOINTS.md)
+- **Agent presets:** [Session Agent compositions](./docs/AGENT_COMPOSITIONS.md)
 - **Engineering & migration:** [Spec](./docs/SPEC.md) ·
   [Task contracts & pause policy](./docs/TASK_CONTRACT.md) ·
   [Tool contract](./docs/TOOL_CONTRACT.md) · [Moving from 1.x to 2.x](./docs/MIGRATING.md) ·

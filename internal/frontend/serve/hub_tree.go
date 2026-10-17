@@ -99,6 +99,7 @@ func (h *Hub) registerTreeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tree/sessions/auto-name", h.autoNameSession)
 	mux.HandleFunc("POST /tree/sessions/export", h.exportSession)
 	mux.HandleFunc("POST /tree/sessions/import-legacy", h.importLegacySessions)
+	mux.HandleFunc("POST /tree/sessions/import-native", h.importNativeSession)
 }
 
 // tree answers the whole sidebar in one request: every remembered workspace
@@ -603,7 +604,24 @@ func (h *Hub) exportSession(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusForbidden, "session.outside_workspace", "path outside a known workspace", nil)
 		return
 	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		refuse(w, http.StatusForbidden, "session.outside_workspace", "session export requires a regular transcript", nil)
+		return
+	}
+	loaded, err := sessionstore.LoadSession(path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	content, err := os.ReadFile(path)
+	if loaded.Composition() != nil {
+		content, err = sessionstore.ExportNativeArchive(path)
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

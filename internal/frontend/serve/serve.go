@@ -65,8 +65,9 @@ type Server struct {
 	// buildController's counterpart for the switch that changes the root.
 	buildWorkspaceController func(ctx context.Context, dir, ref string) (*control.Controller, error)
 	lastBuild                *boot.BuildResult // serving generation, guarded by bindMu; see reuseFromLastBuild
-	grants                   hostGrants        // what the embedding host has opened up
-	moves                    moveTracker       // the one storage relocation this server may be running
+	compositionAssembly      *compositionAssembly
+	grants                   hostGrants  // what the embedding host has opened up
+	moves                    moveTracker // the one storage relocation this server may be running
 	preparations             workspacePreparations
 	titleModel               titleProviderState
 	titles                   *titleCache
@@ -117,6 +118,9 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 	}
 	s.nameWorkspaceHolder(ctrl)
 	s.attachWireLog()
+	if concrete, ok := ctrl.(*control.Controller); ok {
+		s.bindCompositionSelector(concrete)
+	}
 	return s
 }
 
@@ -523,7 +527,7 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) newLegacySession(w http.ResponseWriter, _ *http.Request) {
 	// Session-path-changing entry point: serialize with /resume, /fork, and
 	// switchModel so the controller and the lease keeper move together.
 	s.bindMu.Lock()

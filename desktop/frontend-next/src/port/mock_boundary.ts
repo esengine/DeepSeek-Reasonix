@@ -1,7 +1,9 @@
-import type { Adjudications, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, PeerReceipt, PeersState, PeersSettings, PeersSettingsEdit, PeerRemember, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings, UpdateMode } from "./port";
-import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, WebAccessPatch, WebAccessSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
+import type { Adjudications, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, PeerReceipt, PeersState, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings, UpdateMode, PeersSettings, PeersSettingsEdit, PeerRemember } from "./port";
+import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings, PersonaDraft, PersonaSettings, WebAccessPatch, WebAccessSettings } from "./boundary";
 import { HttpError } from "./http_error";
 import { MockShell } from "./mock_shell";
+import { MockCompositions } from "./mock_composition";
+import type { AgentComposition } from "./composition";
 
 // The boundary half of the fixture: what the agent is refused outright, and how
 // far an approved write reaches. It carries one rule of each kind already, so
@@ -16,6 +18,16 @@ function effectiveBash(s: SandboxSettings): string {
 }
 
 export class MockBoundary extends MockShell {
+  protected compositions = new MockCompositions();
+  shareAgentPresetsFrom(other: MockBoundary, workspace:string) { this.compositions=other.compositions.fork(workspace); }
+  agentPresets() { return this.compositions.agentPresets(); }
+  saveAgentPreset(d: AgentComposition, expected: string) { return this.compositions.saveAgentPreset(d, expected); }
+  deleteAgentPreset(id: string, revision: string) { return this.compositions.deleteAgentPreset(id, revision); }
+  setDefaultAgentPreset(id: string, workspace: boolean) { return this.compositions.setDefaultAgentPreset(id, workspace); }
+  exportAgentPreset(id: string) { return this.compositions.exportAgentPreset(id); }
+  importAgentPreset(d: AgentComposition) { return this.compositions.importAgentPreset(d); }
+  agentComposition() { return this.compositions.agentComposition(); }
+  selectAgentComposition(id: string) { return this.compositions.selectAgentComposition(id); }
   async decideWorkspaceTrust(_trust: "trusted" | "declined") {}
   // One interrupted barrier and one that a later turn took over, so the card
   // and the reason it disappears are both reachable without a crash.
@@ -216,6 +228,45 @@ export class MockBoundary extends MockShell {
     return { ...this.archive };
   }
 
+  // Two starting points are enough for the page's layout: one that is a whole
+  // prefix (complete) and one that only trails the built-in guidance.
+  private personaState: PersonaSettings = {
+    prefix: "", suffix: "", complete: false, include_runtime_context: true,
+    path: "/Users/you/.reasonix/config.toml",
+    presets: [
+      {
+        id: "engineer",
+        prefix: "You are a rigorous staff engineer. Verify before claiming, make the smallest correct change, and state the residual risk.",
+        suffix: "", complete: true, include_runtime_context: true,
+      },
+      {
+        id: "concise",
+        prefix: "",
+        suffix: "Be terse. Skip the preamble; prefer code and bullets.",
+        complete: false, include_runtime_context: false,
+      },
+    ],
+  };
+
+  async persona(): Promise<PersonaSettings> {
+    const catalog=await this.agentPresets();
+    const definition=catalog.presets.find((v)=>v.definition.id===catalog.default)!.definition;
+    return { ...this.personaState,...definition.persona, presets: this.personaState.presets.map((p) => ({ ...p })) };
+  }
+
+  async savePersonaSettings(s: PersonaDraft): Promise<PersonaSettings> {
+    // The same rule the kernel enforces, so the fixture cannot show a screen
+    // accepting something the real save refuses.
+    if (s.complete && !s.prefix.trim()) throw new Error("complete requires a prefix");
+    const catalog=await this.agentPresets();
+    const old=catalog.presets.find((v)=>v.definition.id===catalog.default)!;
+    const copied=old.definition.id.startsWith("builtin:");
+    const definition={...old.definition,id:copied ? "user:persona" : old.definition.id,persona:{...s}};
+    await this.saveAgentPreset(definition,copied ? "" : old.revision);
+    await this.setDefaultAgentPreset(definition.id,false);
+    return this.persona();
+  }
+
   private currency: DisplayCurrencySettings = { mode: "auto", path: "/Users/you/.reasonix/config.toml", unconverted: [] };
 
   async displayCurrency(): Promise<DisplayCurrencySettings> {
@@ -312,17 +363,7 @@ export class MockBoundary extends MockShell {
     return { ...this.watch };
   }
 
-  // The fixture carries the broken file, because a banner nobody can reach is
-  // a banner nobody designs. Repairing it here clears it, so the whole
-  // interaction is reachable without a Go build.
-  private broken: ConfigProblem | null = {
-    path: "C:\\Users\\you\\AppData\\Roaming\\reasonix\\config.toml",
-    line: 263,
-    key: "plugins.command",
-    excerpt: 'command = "C:\\Scripts\\mcp.exe"',
-    repair: 'command = "C:\\\\Scripts\\\\mcp.exe"',
-    recovered: "last-known-good",
-  };
+  private broken: ConfigProblem | null = null;
 
   async configProblem(): Promise<ConfigProblem | null> {
     return this.broken && { ...this.broken };

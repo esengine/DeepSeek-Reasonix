@@ -768,52 +768,6 @@ func (t *TaskTool) bashCanEnforceWriteRoots() bool {
 	return false
 }
 
-func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *tool.Registry, modelRef, effortRef, parentSession, execution, parentID, continueFrom, legacyForkFrom, systemPrompt, kind, name string) (*SubagentRun, error) {
-	continueFrom = strings.TrimSpace(continueFrom)
-	legacyForkFrom = strings.TrimSpace(legacyForkFrom)
-	parentSession = strings.TrimSpace(parentSession)
-	if continueFrom != "" && legacyForkFrom != "" {
-		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive; pass only continue_from")
-	}
-	if t.transcripts == nil {
-		return nil, fmt.Errorf("subagent transcript store is required")
-	}
-	if systemPrompt == "" {
-		systemPrompt = t.sysPrompt
-	}
-	kind = firstNonEmpty(kind, "task")
-	name = firstNonEmpty(name, "task")
-	if parentSession == "" {
-		if continueFrom != "" || legacyForkFrom != "" {
-			return nil, fmt.Errorf("subagent continuation requires a persisted session; none is active in this run")
-		}
-		return EphemeralSubagentRun(systemPrompt), nil
-	}
-	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
-	spec := SubagentSpec{
-		Kind:             kind,
-		Name:             name,
-		WorkspaceRoot:    t.workspaceRoot,
-		ParentSession:    parentSession,
-		ExecutionID:      execution,
-		ParentToolCallID: parentID,
-		SystemPrompt:     systemPrompt,
-		Registry:         subReg,
-		ToolContext:      childToolIdentityContext(ctx),
-		Model:            identityModel,
-		Effort:           identityEffort,
-		ResumedFrom:      firstNonEmpty(continueFrom, legacyForkFrom),
-		UpstreamFrom:     upstreamSources(upstreamFromContext(ctx)),
-	}
-	if continueFrom != "" {
-		return t.transcripts.PrepareContinue(continueFrom, spec)
-	}
-	if legacyForkFrom != "" {
-		return t.transcripts.PrepareLegacyForkFrom(legacyForkFrom, spec)
-	}
-	return t.transcripts.PrepareFresh(spec)
-}
-
 func childToolIdentityContext(ctx context.Context) context.Context {
 	ctx = tool.WithoutGoalTurnRecorder(ctx)
 	ctx = memory.WithoutQueue(ctx)

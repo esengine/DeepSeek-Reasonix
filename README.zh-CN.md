@@ -227,6 +227,7 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
   [能力诊断](./docs/CAPABILITY_DIAGNOSTICS.md) ·
   [恢复与安全模式](./docs/RECOVERY.md) ·
   [Checkpoints 与 rewind](./docs/CHECKPOINTS.md)
+- **Agent 预设：** [会话级组合](./docs/AGENT_COMPOSITIONS.zh.md)
 - **工程与迁移：** [规格](./docs/SPEC.md) ·
   [任务合约与暂停策略](./docs/TASK_CONTRACT.md) ·
   [工具合约](./docs/TOOL_CONTRACT.md) ·

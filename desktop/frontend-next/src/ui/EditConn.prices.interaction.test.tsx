@@ -82,4 +82,3 @@ describe("a price on a vendor's own endpoint that is not one of the vendor's", (
     expect(screen.queryByRole("button", { name: /恢复官方价/ })).toBeNull();
   });
 });
-

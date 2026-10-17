@@ -1,4 +1,5 @@
 import { useLayoutEffect } from "react";
+import { onFolds } from "./viewport";
 
 // Placing a fixed element while the interface is zoomed puts two coordinate
 // systems into one calculation. Measured in Chromium with html{zoom:1.5}: a
@@ -68,11 +69,15 @@ export function useFollow(open: boolean, place: () => void, key?: unknown): void
   useLayoutEffect(() => {
     if (!open) return;
     place();
+    const stopFolds = onFolds(place);
     addEventListener("scroll", place, true);
     addEventListener("resize", place);
+    addEventListener("transitionend", place, true);
     return () => {
+      stopFolds();
       removeEventListener("scroll", place, true);
       removeEventListener("resize", place);
+      removeEventListener("transitionend", place, true);
     };
   }, [open, place, key]);
 }

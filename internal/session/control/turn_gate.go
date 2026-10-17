@@ -3,7 +3,7 @@ package control
 
 import "context"
 
-// turnGate is the controller's admission state, held under c.mu. The five
+// turnGate is the controller's admission state, held under c.mu. These
 // conditions constrain each other — running and rotating are mutually
 // exclusive, and closed outranks all of them — so they answer as one type
 // rather than as five loose bools whose combinations include states no
@@ -11,6 +11,8 @@ import "context"
 type turnGate struct {
 	// running is a turn executing right now.
 	running bool
+	// bindingPending reserves admission until its composition latch is durable.
+	bindingPending bool
 	// finishing is TurnDone still being delivered; a replacement turn parks.
 	finishing bool
 	// canceling is a cancel requested for the turn in flight.
@@ -32,12 +34,14 @@ type turnGate struct {
 // establish; this is the state change it has earned.
 func (g *turnGate) begin(cancel context.CancelFunc) {
 	g.running, g.canceling, g.cause, g.cancel = true, false, causeStop, cancel
+	g.bindingPending = false
 }
 
 // end releases the turn. finishing is left to the caller: whether TurnDone is
 // still fanning out is a different question from whether the turn is over.
 func (g *turnGate) end() {
 	g.running, g.canceling, g.cause, g.cancel = false, false, causeStop, nil
+	g.bindingPending = false
 }
 
 // requestCancel marks a cancel requested and returns what to call, or nil when

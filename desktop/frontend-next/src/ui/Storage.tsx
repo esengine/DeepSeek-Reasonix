@@ -4,6 +4,7 @@ import { bytes } from "../i18n/format";
 import type { AgentPort } from "../port/port";
 import type { HubPort, LegacyImport } from "../port/hub";
 import { LegacySkips } from "./LegacySkips";
+import { NativeSessionImport } from "./NativeSessionImport";
 import type { StoragePlan, StorageRoot, StorageState } from "../port/storage";
 
 // Three questions in the order a person asks them: how much is there, where is
@@ -181,6 +182,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
 
   return (
     <div className="storage">
+      <NativeSessionImport hub={hub} workspace={workspace} onImported={onRecovered} />
       <section className="grp">
         <h3 className="lbl">{t("找回旧版会话")}</h3>
         <div className="item">

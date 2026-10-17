@@ -221,6 +221,10 @@ func (c *Client) refreshToolCatalog(ctx context.Context) ([]tool.Tool, bool, err
 		return nil, false, err
 	}
 	c.toolsMu.Lock()
+	if err := c.checkCompositionContract(cat.fingerprint); err != nil {
+		c.toolsMu.Unlock()
+		return nil, false, err
+	}
 	changed := !c.toolsListed || cat.fingerprint != c.toolsFingerprint
 	if changed {
 		c.publishToolCatalogLocked(cat)

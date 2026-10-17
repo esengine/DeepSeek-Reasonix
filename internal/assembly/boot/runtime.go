@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/command"
@@ -164,11 +165,20 @@ var startExtensionPackages = sidecar.StartPackagesWithPlan
 // preflightExtensionRuntimes starts enabled runtime packages before model
 // resolution. Required failures are fatal; optional failures warn. With
 // prev+plan, only Added/Reloaded start and Unchanged are adopted.
-func preflightExtensionRuntimes(ctx context.Context, home string, ext extensionBoot, prev *sidecar.Manager, plan *extension.RuntimePlan) (*sidecar.Manager, error) {
+func preflightExtensionRuntimes(ctx context.Context, home string, ext extensionBoot, prev *sidecar.Manager, plan *extension.RuntimePlan, bindings ...*agentcomposition.Binding) (*sidecar.Manager, error) {
 	if strings.TrimSpace(home) == "" {
 		return nil, nil
 	}
 	packages, loadWarnings := sidecar.LoadRuntimePackages(home)
+	var binding *agentcomposition.Binding
+	if len(bindings) > 0 {
+		binding = bindings[0]
+	}
+	var selectErr error
+	packages, selectErr = compositionPackages(home, packages, binding)
+	if selectErr != nil {
+		return nil, selectErr
+	}
 	if len(packages) == 0 {
 		// No v2 runtime packages: surface the installed-state warnings exactly
 		// as the in-assembly StartPackages call did, and take the untouched
@@ -185,7 +195,14 @@ func preflightExtensionRuntimes(ctx context.Context, home string, ext extensionB
 	if ext.ui != nil {
 		ui = ext.ui
 	}
-	mgr, warnings, err := startExtensionPackages(ctx, home, ext.session, ui, prev, plan)
+	var mgr *sidecar.Manager
+	var warnings []string
+	var err error
+	if binding != nil {
+		mgr, warnings, err = sidecar.StartResolvedPackages(ctx, packages, ext.session, ui)
+	} else {
+		mgr, warnings, err = startExtensionPackages(ctx, home, ext.session, ui, prev, plan)
+	}
 	for _, warning := range warnings {
 		ext.warn(warning)
 	}

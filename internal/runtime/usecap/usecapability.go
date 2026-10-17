@@ -32,10 +32,11 @@ type MCPCapabilityRuntime struct {
 	// startup and tools/call. Calls may run concurrently under RLock; a disable,
 	// uninstall, or hot update waits for in-flight dispatch and invalidates every
 	// target that has not begun its final runtime-bound execution check.
-	dispatchMu sync.RWMutex
-	mu         sync.RWMutex
-	servers    map[string]mcpRuntimeServer
-	gates      mcpServerGates
+	dispatchMu        sync.RWMutex
+	compositionFrozen bool
+	mu                sync.RWMutex
+	servers           map[string]mcpRuntimeServer
+	gates             mcpServerGates
 	// shared connection observation across all frontends on this session.
 	state *mcpProxySharedState
 }
@@ -118,39 +119,6 @@ func (r *MCPCapabilityRuntime) ConfigureServers(entries []config.PluginEntry, sp
 			r.state.clearServer(name)
 		}
 	}
-}
-
-// UpsertServer makes a hot-added or updated MCP spec authoritative for every
-// frontend on this controller. Dynamic state stays host-local and never changes
-// the provider-visible use_capability schema.
-func (r *MCPCapabilityRuntime) UpsertServer(entry config.PluginEntry, raw plugin.Spec, enabled bool) {
-	if r == nil {
-		return
-	}
-	r.dispatchMu.Lock()
-	defer r.dispatchMu.Unlock()
-	spec := cloneMCPSpec(raw)
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		return
-	}
-	entry = runtimePluginEntry(entry)
-	if strings.TrimSpace(entry.Name) == "" {
-		entry.Name = name
-	}
-	cached, keyOK := cachedToolsForSpec(spec)
-	r.mu.Lock()
-	r.servers[name] = mcpRuntimeServer{
-		entry:      entry,
-		spec:       spec,
-		enabled:    enabled,
-		cached:     cached,
-		cacheKeyOK: keyOK,
-	}
-	r.mu.Unlock()
-	// Endpoint/tool metadata may have changed. Never route a stale live snapshot
-	// across an update; a connected client or the next call will repopulate it.
-	r.state.clearServer(name)
 }
 
 // SetServerEnabled revokes or restores this controller's right to use a server.

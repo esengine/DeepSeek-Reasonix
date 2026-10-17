@@ -79,6 +79,7 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 			releaseWorkspace.release()
 		}
 	}()
+	binding := c.CompositionBinding()
 	c.mu.Lock()
 	if c.gate.closed {
 		c.mu.Unlock()
@@ -93,6 +94,10 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 		c.mu.Unlock()
 		c.noticeInputRefused("input was not accepted: the session is being switched — please resend")
 		return turnDroppedRotating
+	}
+	if c.gate.bindingPending {
+		c.mu.Unlock()
+		return turnDroppedRunning
 	}
 	if c.gate.running {
 		if parkWhileRunning {
@@ -114,7 +119,23 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 	}
 	ctx, cancel := context.WithCancel(extension.ContextWithRuntimeOwner(context.Background(), c.runtimeOwner))
 	c.gate.begin(cancel)
+	c.gate.bindingPending = binding != nil && !binding.Started
 	c.gate.workspaceRelease, releaseWorkspace = releaseWorkspace, nil
+	c.mu.Unlock()
+	if err := c.persistCompositionAdmission(); err != nil {
+		c.mu.Lock()
+		release := c.gate.workspaceRelease
+		c.gate.workspaceRelease = nil
+		c.gate.end()
+		c.mu.Unlock()
+		cancel()
+		c.releaseWorkspaceTurn(release)
+		c.notifyIdle()
+		c.noticeInputRefused("input was not accepted: composition admission could not be saved: " + err.Error())
+		return turnDroppedWriteAuthority
+	}
+	c.mu.Lock()
+	c.gate.bindingPending = false
 	c.mu.Unlock()
 	if onStart != nil {
 		onStart()

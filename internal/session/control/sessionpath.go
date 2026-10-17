@@ -1,6 +1,8 @@
 package control
 
 import (
+	"fmt"
+	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/sessionstore"
 )
@@ -48,6 +50,12 @@ func (c *Controller) Resume(s *sessionstore.Session, path string) error {
 		return err
 	}
 	defer c.endRotation()
+	current, target := c.CompositionBinding(), s.Composition()
+	if current != nil || target != nil {
+		if current == nil || target == nil || current.Digest != target.Digest {
+			return fmt.Errorf("%w: resume requires the bound runtime", agentcomposition.ErrUnavailable)
+		}
+	}
 	c.resume(s, path, true)
 	return nil
 }

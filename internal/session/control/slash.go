@@ -46,6 +46,7 @@ type SlashArg struct {
 // chat TUI (controller-free, from its cached lists) and the desktop (from the
 // controller). This keeps the CLI and desktop sub-command hints identical.
 type ArgData struct {
+	Compositions    []SlashItem
 	Skills          []skill.Skill
 	DisabledSkills  []skill.Skill
 	ServerNames     []string
@@ -77,6 +78,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	prior := strings.Fields(line[:from]) // committed tokens, including the command word
 	var raw []SlashItem
 	switch line[:cmdEnd] {
+	case "/agent":
+		raw = d.Compositions
 	case "/mcp":
 		raw = mcpArgItems(prior, cur, d)
 	case "/model":
@@ -461,8 +464,8 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		return false
 	}
 	switch fields[0] {
-	case "/model":
-		c.notice(c.modelListText())
+	case "/agent", "/model":
+		c.compositionOrModelNotice(fields)
 	case "/preset", "/work-mode", "/profile":
 		c.presetNotice(fields)
 	case "/remote":

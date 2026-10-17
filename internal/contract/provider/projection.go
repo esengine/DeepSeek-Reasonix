@@ -49,6 +49,7 @@ func projectMessages(msgs []Message, keepExecution bool) []Message {
 		candidate.DecisionReceipt = nil
 		candidate.DecisionReceipts = nil
 		if !keepExecution {
+			candidate.AgentComposition = nil
 			// Local shell metadata must never enter provider request bytes.
 			candidate.ToolExecution = nil
 			candidate.ToolFailure = nil
@@ -64,7 +65,7 @@ func projectMessages(msgs []Message, keepExecution bool) []Message {
 
 // needsProjection reports a host-only field this message carries.
 func needsProjection(m Message, keepExecution bool) bool {
-	if (len(m.UnavailableImages) > 0 || m.ToolExecution != nil || m.ToolFailure != nil) && !keepExecution {
+	if (m.AgentComposition != nil || len(m.UnavailableImages) > 0 || m.ToolExecution != nil || m.ToolFailure != nil) && !keepExecution {
 		return true
 	}
 	return m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.HostAuthored || m.ModelRef != "" || m.Via != nil || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0

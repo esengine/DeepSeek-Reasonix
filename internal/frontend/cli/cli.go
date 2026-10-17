@@ -170,7 +170,7 @@ func isDoctorRepairCommand(args []string) bool {
 
 func isDefaultInteractiveFlag(arg string) bool {
 	switch arg {
-	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile", "--preset":
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile", "--preset", "--agent-composition":
 		return true
 	}
 	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
@@ -501,9 +501,9 @@ func runAgent(args []string, version string) int {
 	// executor, not just the top-level one. Ask fails closed because no UI can
 	// answer; with no mode named, the build's sandbox claim and the folder's
 	// trust decide between that and auto once the controller exists.
-	overrides := runBuildOverrides(effortOverride, allowedTools, f.additionalDirs, workspaceRoot,
-		permissions.approval, cliSessionRecoveredHandler(leases), ablated)
+	overrides := runBuildOverrides(effortOverride, allowedTools, f.additionalDirs, workspaceRoot, permissions.approval, cliSessionRecoveredHandler(leases), ablated)
 	overrides.Version = version
+	overrides = withComposition(overrides, *f.agentComposition, resumeSession)
 	ctrl, err := setupProfileWithOverrides(ctx, *f.model, *f.maxSteps, true, sink, profile, overrides)
 	if err != nil {
 		if resultOutput != nil && format != runOutputText {

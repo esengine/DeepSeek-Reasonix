@@ -112,7 +112,7 @@ func (s *Server) resumeInto(path string) (int, error) {
 	if hook := resumeBindHookForTest; hook != nil {
 		hook()
 	}
-	if err := s.ctl().Resume(loaded, realPath); err != nil {
+	if err := s.resumeCompositionInto(loaded, realPath); err != nil {
 		// The turn in flight owns the session it is writing to. Binding another
 		// one under it is how the running conversation's output lands in the
 		// transcript the user just switched to.

@@ -133,6 +133,14 @@ func projectProgramApproved(opts LoadOptions, program config.ProjectProgram) boo
 // blocks: the script that guards an action is the one thing the agent could
 // otherwise edit to switch the guard off.
 func refuseChangedHook(report *Report, h ResolvedHook) bool {
+	if h.retainedCheck != nil {
+		if err := h.retainedCheck(); err != nil {
+			recordUnevaluable(report, h, fmt.Errorf("%w: %w", ErrApprovalChanged, err))
+			report.Outcomes[len(report.Outcomes)-1].Refusal = err
+			return true
+		}
+		return false
+	}
 	if h.approval == nil {
 		return false
 	}

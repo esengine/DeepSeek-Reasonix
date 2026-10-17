@@ -41,6 +41,7 @@ import { MeterRail } from "./MeterRail";
 import { PlanFold } from "./PlanFold";
 import { useBroughtResults } from "./useBroughtResults";
 import { RunLine } from "./RunLine";
+import { AgentCompositionPicker } from "./AgentCompositionPicker";
 import type { PaneProps, PaneReport } from "./panetypes";
 import { useRate, useTrail } from "./num";
 import { useCompactNow } from "./CompactNow";
@@ -569,7 +570,9 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         {/* Everything stacked above the input box shares one ceiling, so no
             child of this region may grow without bound. */}
         <PlanFold plan={s.plan} goal={status?.goal} shown={tab === "flow"} paused={blocked} />
-        {tab === "flow" && <RunLine label={worktreePhase ? t(["failed", "cleanup_failed"].includes(worktreePhase) ? "创建失败" : worktreePhase === "cancelled" ? "创建已取消" : "准备工作目录") : chipLabel(s, running)} running={running} blocked={blocked} since={s.running ? s.runSince : undefined} sent={sent} received={received} estimated={s.outLive > 0} />}
+        {tab === "flow" && <RunLine label={worktreePhase ? t(["failed", "cleanup_failed"].includes(worktreePhase) ? "创建失败" : worktreePhase === "cancelled" ? "创建已取消" : "准备工作目录") : chipLabel(s, running)} running={running} blocked={blocked} since={s.running ? s.runSince : undefined} sent={sent} received={received} estimated={s.outLive > 0}>
+          <AgentCompositionPicker port={port} binding={status?.agentComposition} locked={status?.agentCompositionLocked} running={running} onChanged={refreshStatus} onSettings={() => onSettings("persona")} onError={notify} />
+        </RunLine>}
         <div className="composeaux">
           <Queue
             queue={queue}

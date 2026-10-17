@@ -58,6 +58,9 @@ func Collect(opts CollectOptions) (*Snapshot, error) {
 	}
 	s.Items, s.Omitted = c.items, c.omitted
 	if slices.ContainsFunc(s.Items, func(it Item) bool { return it.Kind == KindHook }) {
+		s.Format = 2
+	}
+	if slices.ContainsFunc(s.Items, func(it Item) bool { return it.Kind == KindAgentPreset }) {
 		s.Format = FormatVersion
 	}
 	return s, nil
@@ -133,7 +136,10 @@ func (c *collector) settings() error {
 	if err != nil {
 		return err
 	}
-	return c.add(KindInterface, "interface", raw)
+	if err := c.add(KindInterface, "interface", raw); err != nil {
+		return err
+	}
+	return c.compositions()
 }
 
 func (c *collector) extensions() error {

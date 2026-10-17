@@ -3,6 +3,7 @@ package boot
 import (
 	"strings"
 
+	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/extension"
 	"reasonix/internal/ext/extension/dispatch"
@@ -35,8 +36,15 @@ type RuntimeReload struct {
 // buildRuntimeGraph constructs the dependency graph for installed native
 // runtime packages. Host-provided capabilities (if any) are included as a
 // synthetic "host" component so plugin requirements can resolve.
-func buildRuntimeGraph(home string, hostProvides []extensioncontract.Capability) (*extension.DependencyGraph, error) {
+func buildRuntimeGraph(home string, hostProvides []extensioncontract.Capability, bindings ...*agentcomposition.Binding) (*extension.DependencyGraph, error) {
 	packages, _ := sidecar.LoadRuntimePackages(home)
+	if len(bindings) > 0 {
+		var err error
+		packages, err = compositionPackages(home, packages, bindings[0])
+		if err != nil {
+			return nil, err
+		}
+	}
 	comps := make([]extension.ComponentDescriptor, 0, len(packages)+1)
 	if len(hostProvides) > 0 {
 		comps = append(comps, extension.ComponentDescriptor{
@@ -166,7 +174,7 @@ func planForPreflight(opts Options, toGen uint64) *extension.RuntimePlan {
 	if opts.Extensions == nil && opts.Graph == nil {
 		return nil
 	}
-	toGraph, err := buildRuntimeGraph(opts.roots().Home(), nil)
+	toGraph, err := buildRuntimeGraph(opts.roots().Home(), nil, opts.Composition)
 	if err != nil {
 		return nil
 	}
@@ -179,7 +187,7 @@ func finalizeBuildResult(roots config.Roots, res *BuildResult, publish bool) *Bu
 	if res == nil {
 		return nil
 	}
-	if graph, err := buildRuntimeGraph(roots.Home(), nil); err == nil {
+	if graph, err := buildRuntimeGraph(roots.Home(), nil, res.Controller.CompositionBinding()); err == nil {
 		attachPlanAndStatus(res, nil, graph, 0, nil)
 	}
 	if publish {

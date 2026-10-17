@@ -3126,9 +3126,10 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   align-items: center;
   gap: 7px;
   min-height: 26px;
-  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 0;
-  margin: -3px 0 4px;
+  margin: 0;
   color: var(--muted);
   font: 550 calc(10px * var(--fs-scale, 1))/1.2 var(--ui);
 }

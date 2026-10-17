@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"reasonix/internal/base/nilutil"
+	"reasonix/internal/contract/agentcomposition"
 )
 
 // Role is the role of a message.
@@ -39,7 +40,8 @@ const (
 
 // Message is a single conversation message.
 type Message struct {
-	Role Role `json:"role"`
+	AgentComposition *agentcomposition.Binding `json:"agent_composition,omitempty"`
+	Role             Role                      `json:"role"`
 	// Content is the provider-visible conversation content. Keeping this legacy
 	// field provider-visible preserves replay for older CLI/Desktop releases.
 	Content string `json:"content,omitempty"`

@@ -2,14 +2,9 @@
 // is a named, described prompt body the model can invoke via the run_skill tool
 // (or the user via a slash name): an "inline" skill folds its body into the turn as
 // a tool result, a "subagent" skill runs in an isolated child loop and returns
-// only its final answer. Project scope wins over global; only names+descriptions
-// enter the cache-stable system-prompt index (see index.go) — bodies load on
-// demand. Discovery scans several conventions (.reasonix / .agents / .agent /
-// .claude under the project root and the home dir — see config.ConventionDirs) so
-// skills authored for other agent tools migrate in unchanged. Directory skills
-// use <name>/SKILL.md; flat <name>.md files from Claude roots are loaded only
-// when they carry skill frontmatter. Discovery follows symlinks, so linked
-// skills are picked up like real ones.
+// only its final answer. Project scope wins over global. Catalogs ride the turn,
+// not the cache-stable prefix. Ordinary stores rediscover current sources;
+// composition snapshots retain the resolved playbooks belonging to one session.
 package skill
 
 import (
@@ -171,6 +166,7 @@ type Options struct {
 
 // Store resolves skills across the configured roots.
 type Store struct {
+	snapshot         *[]Skill
 	homeDir          string
 	reasonixHomeDir  string
 	projectRoot      string
@@ -548,6 +544,9 @@ func pathStatus(dir string) PathStatus {
 }
 
 func (s *Store) discoveredSkills() []Skill {
+	if s != nil && s.snapshot != nil {
+		return s.snapshotSkills()
+	}
 	if s == nil || s.disableDiscovery {
 		return nil
 	}

@@ -27,6 +27,12 @@ export const SAVED_NOT_APPLIED: readonly string[] = ["provider.saved_while_runni
 export const savedNotApplied = (e: unknown): boolean => e instanceof HttpError && SAVED_NOT_APPLIED.includes(e.reason?.code ?? "");
 
 const SAID: Record<string, string> = {
+  "agent_composition.invalid": "预设内容无效，请检查标识、模块和参数",
+  "agent_composition.unavailable": "组合所需资源不可用，无法继续执行",
+  "agent_composition.locked": "会话已开始或正在工作，不能切换组合",
+  "agent_composition.conflict": "预设已被其他操作修改，草稿已保留，请重新加载后再保存",
+  "agent_composition.not_found": "找不到该 Agent 预设",
+  "agent_composition.read_only": "内置预设只读，请复制后编辑",
   "surface.value_invalid": "填写内容不符合字段要求，请检查后重试",
   "surface.expired": "界面已失效，请等待新的请求",
   "surface.schema_invalid": "界面描述不符合约定",
@@ -478,6 +484,8 @@ const SAID: Record<string, string> = {
   "progress_watch.save_failed": "无进展设置未能保存：{detail}",
   "auto_archive.save_failed": "自动归档设置未能保存：{detail}",
   "auto_archive.out_of_range": "天数超出允许范围，未做任何修改：{detail}",
+  "persona.complete_requires_prefix": "complete 模式必须填写前缀，未做任何修改：{detail}",
+  "persona.too_large": "人设内容超出长度上限，未做任何修改：{detail}",
   "workspace.untrustable": "主目录或磁盘根目录不能整体信任，请打开具体的项目文件夹",
   "workspace.trust_save_failed": "未能记下对此文件夹的信任决定：{detail}",
   "progress_watch.out_of_range": "该数值超出允许范围，未做任何修改：{detail}",

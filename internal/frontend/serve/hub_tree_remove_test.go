@@ -81,6 +81,15 @@ func TestExportSessionReadsOnlyAKnownWorkspaceTranscript(t *testing.T) {
 	if refused.StatusCode != http.StatusForbidden {
 		t.Errorf("outside export = %d, want 403", refused.StatusCode)
 	}
+	link := filepath.Join(SessionDirFor(root), "linked.jsonl")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	linked := postExportSession(t, srv, link)
+	defer linked.Body.Close()
+	if linked.StatusCode != http.StatusForbidden {
+		t.Errorf("symlink export = %d, want 403", linked.StatusCode)
+	}
 }
 
 func postRemoveSession(t *testing.T, srv *httptest.Server, path string) *http.Response {

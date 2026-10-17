@@ -83,7 +83,10 @@ var errNoSessionPath = errors.New("session has content but no session path; conv
 // Controller drives one chat session. Construct with New; drive with the command
 // methods; observe through the Sink passed in Options.
 type Controller struct {
-	surfacePublications liveSurfacePublications
+	composition           *compositionControl
+	compositionMutationMu sync.Mutex
+	idleObserver          func()
+	surfacePublications   liveSurfacePublications
 	controllerDeps
 
 	guardianPath string // persisted guardian session file ("" when disabled)
@@ -1064,6 +1067,9 @@ func (c *Controller) Commands() []command.Command {
 // ReloadCommands rescans all command directories and hot-swaps the slash_command
 // tool and the internal command slice — no MCP restart, no hook rerun.
 func (c *Controller) ReloadCommands(ctx context.Context) error {
+	if c.CompositionBinding() != nil {
+		return ctx.Err()
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

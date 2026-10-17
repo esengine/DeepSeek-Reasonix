@@ -256,6 +256,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	profileFlag := fs.String("profile", "", "deprecated: use --preset (economy|balanced|delivery)")
 	presetFlag := fs.String("preset", "balanced", presetFlagUsage())
+	agentComposition := fs.String("agent-composition", "default", "Agent composition ID (builtin:, user: or project:)")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
@@ -381,6 +382,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	// rebuilds this controller in place before the normal web UI is exposed.
 	paneSink := reporter.Wrap(bc)
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, paneSink, profile, cliBuildOverrides{
+		AgentComposition: freshCompositionName(*agentComposition, resumeSession), Composition: resumedComposition(resumeSession),
 		NativeSurfaces: true,
 		// The project named on the command line, empty when there was none: boot
 		// then falls back to the working directory exactly as before.

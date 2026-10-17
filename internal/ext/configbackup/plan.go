@@ -227,5 +227,5 @@ func canonical(raw json.RawMessage) []byte {
 }
 
 func executes(kind string) bool {
-	return kind == KindHook || kind == KindStatusline || kind == KindMCP
+	return kind == KindHook || kind == KindStatusline || kind == KindMCP || kind == KindAgentPreset
 }

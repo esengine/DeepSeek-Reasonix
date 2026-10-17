@@ -90,6 +90,9 @@ func (s *Session) Add(m provider.Message) {
 func (s *Session) AddIndexed(m provider.Message) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if m.Role == provider.RoleUser && !m.LocalOnly {
+		s.markCompositionStartedLocked()
+	}
 	s.Messages = append(s.Messages, m)
 	s.version++
 	return len(s.Messages) - 1
@@ -218,7 +221,7 @@ func (s *Session) UpdateToolCallResolution(call provider.ToolCall) bool {
 func (s *Session) Replace(msgs []provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Messages = msgs
+	s.Messages = s.preserveCompositionLocked(msgs)
 	s.version++
 }
 
@@ -236,7 +239,7 @@ func (s *Session) Replace(msgs []provider.Message) {
 func (s *Session) Rewrite(msgs []provider.Message, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Messages = msgs
+	s.Messages = s.preserveCompositionLocked(msgs)
 	s.rewriteVersion++
 	s.version++
 	if reason != "" {
@@ -253,7 +256,7 @@ func (s *Session) Rewrite(msgs []provider.Message, reason string) {
 func (s *Session) ReplaceLocalMetadata(msgs []provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Messages = msgs
+	s.Messages = s.preserveCompositionLocked(msgs)
 	s.rewriteVersion++
 	s.version++
 }

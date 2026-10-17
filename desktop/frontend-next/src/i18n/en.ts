@@ -1,4 +1,5 @@
 import { EN_SURFACES } from "./en_surfaces";
+import { EN_COMPOSITION } from "./en_composition";
 // English catalogue, keyed by the Chinese source text. A key that is missing
 // here renders as Chinese rather than as a blank, so an incomplete translation
 // degrades instead of breaking — and i18n.test.ts is what stops it from
@@ -22,6 +23,7 @@ import { EN_COMMUNITY } from "./en_community";
 import { EN_SPONSOR } from "./en_sponsor";
 
 export const EN: Record<string, string> = {
+	...EN_COMPOSITION,
   "此检查点不包含文件快照": "This checkpoint contains no file snapshots",
   ...EN_SURFACES,
   "重命名聊天": "Rename chat",
@@ -1633,4 +1635,35 @@ export const EN: Record<string, string> = {
   "收起数据": "Hide data",
   "图表数据：{title}": "Chart data: {title}",
   "另有 {n} 行": "and {n} more rows",
+
+  // ── 系统人设 ───────────────────────────────────────────────────
+  "人设": "Persona",
+  "系统人设": "System persona",
+  "系统人设决定 agent 的身份：前缀写在系统提示词最前面，后缀写在内置指令之后。保存只影响之后新建的会话，当前会话保持它打开时的提示词。":
+    "The system persona shapes the agent's identity: the prefix leads the system prompt and the suffix follows the built-in guidance. Saving affects only sessions started afterwards; the running session keeps the prompt it opened with.",
+  "无法读取人设设置。": "Couldn't read the persona settings.",
+  "预设": "Presets",
+  "严谨工程师": "Rigorous engineer",
+  "简洁": "Concise",
+  "教学导师": "Mentor",
+  "严苛评审": "Critic",
+  "先验证再下结论，只做最少的正确改动，并说明剩余风险。": "Verify before concluding, make the smallest correct change, and state the residual risk.",
+  "回答简短直接，不铺垫，优先代码与要点。": "Answer briefly and directly, skip the preamble, prefer code and bullets.",
+  "像老师一样说明取舍与原理，把决定权留给你。": "Explain trade-offs and reasoning like a teacher, and leave the decision to you.",
+  "以审查者的立场找问题：先指出失效方式和证据，再谈通过。": "Review adversarially: name the failure mode and the evidence before approving.",
+  "未应用预设；直接填写下面的两段即可。": "No preset applied; fill in the two boxes below.",
+  "已修改预设内容，按下面的字段保存。": "The preset text has been edited; save the fields below.",
+  "系统提示词开头": "Start of the system prompt",
+  "作为系统提示词的第一段，写在内置指令之前；留空表示不添加。": "Leads the system prompt, ahead of the built-in guidance; leave it empty to add nothing.",
+  "第一方指令之后": "After the first-party guidance",
+  "紧跟在内置指令之后、运行时上下文之前；留空表示不添加。": "Follows the built-in guidance and precedes the runtime context; leave it empty to add nothing.",
+  "用前缀替换整个系统提示词（complete）": "Replace the whole system prompt with the prefix (complete)",
+  "先填写前缀才能开启。": "Fill in a prefix to turn this on.",
+  "开启后只用前缀作为整个系统提示词，其余内置指令、运行时上下文、记忆与技能不再写入（工具仍可用）。":
+    "When on, the prefix alone is the system prompt: the other built-in guidance, runtime context, memory and skills are not written (tools stay available).",
+  "不注入可选运行时上下文": "Do not inject optional runtime context",
+  "关闭后不注入探测到的运行环境与离线提示；指令、记忆与技能照常写入。": "When on, the probed environment and the offline note are not injected; instructions, memory and skills are written as usual.",
+  "启用「用前缀替换整个系统提示词」时，前缀不能为空。": "A prefix cannot be empty while it replaces the whole system prompt.",
+  "写入用户配置，从新会话开始生效；当前会话保持它打开时的系统提示词。": "Writes the user config; applies from new sessions, while the running session keeps the prompt it opened with.",
+  "已保存，新会话生效": "Saved; applies to new sessions",
 };

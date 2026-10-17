@@ -31,7 +31,7 @@ interface Deps {
 // only the latest one moves focus and a failure of an older one changes nothing.
 export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runsRef, setRuntimes, setActive, setTakeover, reloadPanes, sw }: Deps) {
   const placePane = useCallback(
-    async (req: { root?: string; sessionPath?: string }): Promise<Placed> => {
+    async (req: { root?: string; sessionPath?: string; agentComposition?: string }): Promise<Placed> => {
       // Blank means never written to and not working: a new session mid-turn has
       // no path in a stale pane list yet, and taking it over would hide its run.
       const blank = runtimes.find(
@@ -41,6 +41,8 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
       // folder: it is the pane being asked for. Rebuilding it would cost a full
       // assembly to arrive back where we started.
       if (blank && !req.sessionPath && blank.root === req.root) {
+        const port=panePorts.get(blank.id);
+        if(port) {const chosen=req.agentComposition??(await port.agentPresets()).default;await port.selectAgentComposition(chosen);}
         return { id: blank.id, changed: false };
       }
       // Same folder: the pane just rebinds, so nothing is torn down and a draft
@@ -93,7 +95,7 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
 
   const flights = useRef(new Map<string, Promise<Placed>>());
   const openPane = useCallback(
-    async (req: { root?: string; sessionPath?: string }) => {
+    async (req: { root?: string; sessionPath?: string; agentComposition?: string }) => {
       const wanted = req.sessionPath ?? "";
       if (wanted && sw.opening(wanted)) return;
       const ticket = sw.begin(wanted);

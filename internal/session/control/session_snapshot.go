@@ -114,7 +114,7 @@ func (c *Controller) snapshotWithDurability(markActivity, forceRewrite, shutdown
 		return false, nil
 	}
 	s := c.executor.Session()
-	if !s.HasContent() {
+	if !s.HasContent() && !c.compositionNeedsSnapshot(forceRewrite) {
 		// Nothing to persist yet (e.g. a fresh session with only a system
 		// prompt) — staying quiet here is correct, not a data-loss path.
 		return false, nil

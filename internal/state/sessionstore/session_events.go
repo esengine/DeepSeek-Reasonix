@@ -207,7 +207,7 @@ func replaySessionEventLog(path string) (sessionEventReplay, error) {
 // nativeSessionEventSchema reports whether this build writes and replays records
 // of schema v; 2 is 1.x's DAG log, read by its own replay.
 func nativeSessionEventSchema(v int) bool {
-	return v == sessionEventSchemaVersion || v == sessionEventImageBlobsSchemaVersion
+	return v == sessionEventSchemaVersion || v == sessionEventImageBlobsSchemaVersion || v == sessionEventCompositionSchemaVersion
 }
 
 // replaySessionEventLogWithLimits replays the log, then restores any image
@@ -630,7 +630,7 @@ func appendSessionEvent(sessionPath string, rec sessionEventRecord, sync bool) e
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	rec.SchemaVersion = sessionEventRecordSchema(rec.ImageBlobs)
+	rec.SchemaVersion = compositionEventSchema(sessionPath, rec.Messages, rec.ImageBlobs)
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
@@ -718,7 +718,7 @@ func compactSessionEventLog(sessionPath string, msgs []provider.Message, digest 
 	if rec.Messages, rec.ImageBlobs, err = externalizeSessionImages(sessionPath, rec.Messages); err != nil {
 		return err
 	}
-	rec.SchemaVersion = sessionEventRecordSchema(rec.ImageBlobs)
+	rec.SchemaVersion = compositionEventSchema(sessionPath, rec.Messages, rec.ImageBlobs)
 	buf, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("encode session event: %w", err)

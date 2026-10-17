@@ -11,6 +11,7 @@ export class MockHub implements HubPort {
   private readonly ports = new Map<string, AgentPort>();
   private readonly machine = { configured: false };
   private readonly settings = new MockPort();
+  private readonly remoteSettings = new Map<string, MockPort>();
   private readonly views: RuntimeView[] = [
     { id: "r1", base: "", root: "~/projects/DeepSeek-Reasonix", name: "DeepSeek-Reasonix", sessionPath: "/sessions/mock.jsonl" },
   ];
@@ -21,7 +22,7 @@ export class MockHub implements HubPort {
     return Promise.resolve([...this.views]);
   }
 
-  open(req: { root?: string; sessionPath?: string }) {
+  async open(req: { root?: string; sessionPath?: string; agentComposition?:string }) {
     const held = req.sessionPath ? this.views.find((v) => v.sessionPath === req.sessionPath) : undefined;
     if (held) return Promise.resolve(held);
     this.seq++;
@@ -33,6 +34,9 @@ export class MockHub implements HubPort {
       name: root.split("/").pop() ?? root,
       sessionPath: req.sessionPath,
     };
+    const port=this.portFor(view);
+    if (req.agentComposition) await port.selectAgentComposition(req.agentComposition);
+    view.agentComposition=await port.agentComposition() ?? undefined;
     this.views.push(view);
     return Promise.resolve(view);
   }
@@ -73,7 +77,7 @@ export class MockHub implements HubPort {
     ]);
   }
 
-  openRemote(req: { host: string; workspace?: string; sessionPath?: string }) {
+  async openRemote(req: { host: string; workspace?: string; sessionPath?: string; agentComposition?: string }) {
     this.seq++;
     const workspace = req.workspace || "/srv/training";
     const view: RuntimeView = {
@@ -84,6 +88,9 @@ export class MockHub implements HubPort {
       host: req.host,
       sessionPath: req.sessionPath,
     };
+    const port = this.portFor(view);
+    if (req.agentComposition) await port.selectAgentComposition(req.agentComposition);
+    view.agentComposition = await port.agentComposition() ?? undefined;
     this.views.push(view);
     return Promise.resolve(view);
   }
@@ -260,6 +267,10 @@ export class MockHub implements HubPort {
     return Promise.resolve({ summary: "mock migration complete", imported: 0, warnings: 0, recognised: true, skipped: [] });
   }
 
+  importNativeSession(_content: unknown, _workspace: string) {
+    return Promise.resolve({ path: `/sessions/imported-${++this.seq}.jsonl` });
+  }
+
   hostCapabilities() {
     return Promise.resolve({ pickFolder: true, addWorkspace: true });
   }
@@ -350,6 +361,12 @@ export class MockHub implements HubPort {
     const held = this.ports.get(rt.id);
     if (held) return held;
     const port = new MockPort();
+    let settings = this.settings;
+    if (rt.host) {
+      settings = this.remoteSettings.get(rt.host) ?? new MockPort();
+      this.remoteSettings.set(rt.host, settings);
+    }
+    port.shareAgentPresetsFrom(settings,rt.root);
     port.machine = this.machine;
     this.ports.set(rt.id, port);
     return port;

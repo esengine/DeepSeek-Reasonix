@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/state/trustedstate"
 )
 
 // SessionDataGuard rejects agent writes into Reasonix's own session stores:
@@ -121,7 +122,7 @@ func (g SessionDataGuard) deniesSecurity(abs string) bool {
 }
 
 // TrustedStateDir is the state-root subdirectory holding Trusted Host State.
-const TrustedStateDir = "trusted"
+const TrustedStateDir = trustedstate.DirectoryName
 
 // CodeTrustedStateWrite identifies a file-tool write refused for landing in
 // Trusted Host State.

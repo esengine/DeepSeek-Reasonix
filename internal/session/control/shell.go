@@ -224,6 +224,10 @@ func (c *Controller) RunShell(command string) {
 
 // RunShellWith is RunShell with how the command is followed up spelled out.
 func (c *Controller) RunShellWith(command string, opts ShellRun) {
+	if binding := c.CompositionBinding(); binding != nil && !compositionAllowsTool(binding, "bash") {
+		c.notice("shell is unavailable in this Agent composition")
+		return
+	}
 	command = strings.TrimSpace(command)
 	if command == "" {
 		c.notice(i18n.M.ShellExecEmpty)

@@ -19,6 +19,7 @@ import (
 // those here would offer a window a command nothing answers.
 func SubmitSlashCommands(m i18n.Messages) []SlashItem {
 	return []SlashItem{
+		{Label: "/agent", Insert: "/agent ", Hint: "Agent compositions", Descend: true},
 		{Label: "/compact", Insert: "/compact ", Hint: m.CmdCompact},
 		{Label: "/context", Insert: "/context", Hint: m.CmdContext},
 		{Label: "/new", Insert: "/new", Hint: m.CmdNew},
@@ -94,6 +95,7 @@ func (c *Controller) completionData(lang string, withArgs bool) CompletionData {
 		rootCfg = nil
 	}
 	d.ArgData = ArgData{
+		Compositions:    c.compositionArgItems(),
 		Skills:          skills,
 		DisabledSkills:  c.DisabledSkills(),
 		ConfiguredMCP:   configuredMCPNamesOf(rootCfg),

@@ -1,0 +1,26 @@
+.composition-catalog { padding: 16px 12px; }
+.composition-catalog h4 { margin: 0 0 12px; color: var(--muted); font: var(--w-med) var(--fs-ui)/1.4 var(--ui); }
+.composition-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.composition-card { min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
+.composition-card[data-selected] { border-color: var(--faint); background: var(--overlay); }
+.composition-card-select { position: relative; width: 100%; min-height: 176px; flex: 1; padding: 18px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.composition-card-select:hover { background: var(--overlay); }
+.composition-card-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.composition-card-title strong { font: 650 var(--fs-ui)/1.4 var(--ui); }
+.composition-card-badge { padding: 2px 7px; border: 1px solid var(--border); border-radius: var(--r-pill); color: var(--muted); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); }
+.composition-card-select[aria-pressed="true"] .composition-card-badge { color: var(--text); }
+.composition-card-id { display: block; margin-top: 6px; color: var(--ghost); font: var(--w-reg) var(--fs-meta)/1.5 var(--mono); }
+.composition-card-description { display: block; margin-top: 14px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.7 var(--ui); overflow-wrap: anywhere; }
+.composition-card-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--hair); }
+.composition-card-footer .act { font-size: var(--fs-meta); }
+.composition-how { margin: 14px 0 24px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.7 var(--ui); }
+.composition-how summary { cursor: pointer; }
+.composition-how p { margin: 8px 0 0; }
+.composition-create { width: 100%; min-height: 48px; border: 1px dashed var(--border); border-radius: var(--r-md); background: transparent; color: var(--text); font: var(--w-med) var(--fs-ui)/1.5 var(--ui); cursor: pointer; }
+.composition-create:hover { border-color: var(--faint); background: var(--overlay); }
+.composition-custom-list { display: grid; gap: 6px; margin-bottom: 12px; }
+.composition-custom-list .act { display: flex; justify-content: space-between; gap: 12px; text-align: left; }
+.composition-custom-list small { color: var(--muted); font: inherit; }
+.composition-custom-list [aria-pressed="true"] { background: var(--overlay); border-color: var(--faint); }
+.composition-catalog button:focus-visible, .composition-how summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; }
+.composition-catalog button:disabled { cursor: default; opacity: .6; }

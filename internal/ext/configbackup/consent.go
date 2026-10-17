@@ -108,6 +108,10 @@ func (s *Snapshot) validateRestorable() error {
 	readers := map[string]bool{}
 	for _, it := range s.Items {
 		switch it.Kind {
+		case KindAgentPreset:
+			if _, err := decodeCompositionItem(it); err != nil || s.Format < 3 {
+				return fmt.Errorf("%w: Agent preset", ErrMalformed)
+			}
 		case KindProvider:
 			var p config.ProviderEntry
 			if err := decodeTOML(it.Data, &p); err != nil || p.Name != it.Name {

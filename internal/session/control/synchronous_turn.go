@@ -29,6 +29,7 @@ func (c *Controller) runSynchronousTurn(
 		}
 	}()
 	ctx, cancel := context.WithCancel(extension.ContextWithRuntimeOwner(ctx, c.RuntimeOwner()))
+	binding := c.CompositionBinding()
 	c.mu.Lock()
 	// Finishing is part of the gate: TurnDone is still fanning out. Closed
 	// seals a torn-down controller. Blocking callers get an error rather than
@@ -45,6 +46,7 @@ func (c *Controller) runSynchronousTurn(
 		return ErrRuntimeDraining
 	}
 	c.gate.begin(cancel)
+	c.gate.bindingPending = binding != nil && !binding.Started
 	c.mu.Unlock()
 	defer c.releaseWorkspaceTurn(releaseWorkspace)
 	releaseWorkspace = nil
@@ -53,7 +55,15 @@ func (c *Controller) runSynchronousTurn(
 		c.gate.end()
 		c.mu.Unlock()
 		cancel()
+		c.notifyIdle()
 	}
+	if err := c.persistCompositionAdmission(); err != nil {
+		finish()
+		return err
+	}
+	c.mu.Lock()
+	c.gate.bindingPending = false
+	c.mu.Unlock()
 	if onAdmitted != nil {
 		if err := onAdmitted(); err != nil {
 			finish()

@@ -60,9 +60,12 @@ func observeOverrides(opts Options) Options {
 // however late, can put a tool the ceiling refuses in reach of the model.
 func newToolRegistry(opts Options) *tool.Registry {
 	reg := tool.NewRegistry()
-	if opts.Observe != nil {
-		reg.Restrict(observeAdmits(opts.Observe.Tools))
-	}
+	reg.Restrict(func(t tool.Tool) bool {
+		if opts.Composition != nil && !compositionAdmits(opts.Composition.Resolved)(t) {
+			return false
+		}
+		return opts.Observe == nil || observeAdmits(opts.Observe.Tools)(t)
+	})
 	return reg
 }
 

@@ -87,6 +87,7 @@ func runTUI(args []string, version string) int {
 		cliTelemetrySessionMode(resumePath != "", strings.TrimSpace(*f.resume) != "", *f.copy),
 		os.Stdin, os.Stdout, os.Stderr)
 	ctrl, err := setupProfileWithOverrides(ctx, *f.model, *f.maxSteps, false, tuiSink(withNotifications(bc, cfg), reporter), profile, cliBuildOverrides{
+		AgentComposition: freshCompositionName(*f.agentComposition, resumed), Composition: resumedComposition(resumed),
 		Version: version, WorkspaceRoot: workspaceRoot, OnSessionRecovered: cliSessionRecoveredHandler(leases),
 		Effort: f.effortOverride(), PermissionAllow: allowed, AdditionalDirs: f.addDirs,
 	})

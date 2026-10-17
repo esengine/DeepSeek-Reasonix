@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/contract/config"
 )
 
 // TestBuildComposesByteStableSystemPrompt is the boot-level byte-stability
@@ -61,6 +63,61 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if firstPrompt != secondPrompt {
 		t.Fatalf("system prompt is not byte-stable across identical Builds:\nfirst  (%d bytes)\nsecond (%d bytes)\nfirst diff site: %q",
 			len(firstPrompt), len(secondPrompt), firstDivergence(firstPrompt, secondPrompt))
+	}
+}
+
+// A persona joins the same cached prefix, so it must compose deterministically
+// and land where the assembly contract says: prefix ahead of the base prompt,
+// suffix after the first-party policies.
+func TestBuildComposesByteStablePersonaPrompt(t *testing.T) {
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+	t.Setenv("REASONIX_STATE_HOME", "")
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE SYSTEM PROMPT"
+
+[agent.persona]
+prefix = "PERSONA IDENTITY"
+suffix = "PERSONA SUFFIX"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+	approveWorkspace(t, dir)
+
+	opts := Options{Home: os.Getenv("REASONIX_HOME"), WorkspaceRoot: dir, resolvedShell: pinnedEffectShell()}
+	build := func() string {
+		b, err := Build(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		prompt := systemMessage(b.History())
+		b.Close()
+		return prompt
+	}
+	firstPrompt := build()
+	secondPrompt := build()
+
+	if firstPrompt != secondPrompt {
+		t.Fatalf("persona prompt is not byte-stable across identical Builds: %q vs %q",
+			firstDivergence(firstPrompt, secondPrompt), firstDivergence(secondPrompt, firstPrompt))
+	}
+	if !strings.HasPrefix(firstPrompt, "PERSONA IDENTITY") {
+		t.Fatalf("persona prefix does not lead the prompt: %q", firstPrompt[:min(len(firstPrompt), 120)])
+	}
+	suffix := strings.Index(firstPrompt, "PERSONA SUFFIX")
+	if suffix < strings.Index(firstPrompt, config.ExternalContentPolicy) {
+		t.Fatalf("persona suffix at %d does not follow the first-party policies", suffix)
 	}
 }
 

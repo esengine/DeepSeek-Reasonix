@@ -4,13 +4,21 @@ import { t } from "../i18n";
 /** The settings table of contents: which sections exist, what each is called,
  *  what mark it carries and which question it answers. Kept out of Settings
  *  itself because it is a table, not a screen — the screen reads it. */
-export type Section = "session" | "model" | "providers" | "tools" | "hooks" | "ext" | "network" | "remote" | "memory" | "usage" | "storage" | "account" | "versions" | "appearance" | "advanced";
+export type Section = "session" | "persona" | "model" | "providers" | "tools" | "hooks" | "ext" | "network" | "remote" | "memory" | "usage" | "storage" | "account" | "versions" | "appearance" | "advanced";
 
 // Drawn on the same 16-unit grid at 1.45 stroke as the rest of this screen's
 // marks. The rail in Nav.tsx draws a section's entry from this table, so one
 // destination carries one mark wherever it is shown.
 export const ICON: Record<Section, ReactNode> = {
   session: <path d="M2.6 8h10.8M8 2.6v10.8" />,
+  // An identity card: the section is about who the agent is, not what it does.
+  persona: (
+    <>
+      <rect x="2.2" y="3.4" width="11.6" height="9.2" rx="1.4" />
+      <circle cx="5.8" cy="7.2" r="1.3" />
+      <path d="M8.6 6.2h3.2M8.6 8.4h3.2M3.9 11.4c.5-1.1 1.5-1.7 2.7-1.7s2.2.6 2.7 1.7" />
+    </>
+  ),
   model: (
     <>
       <circle cx="8" cy="8" r="2.4" />
@@ -90,6 +98,7 @@ export const NAV: [string, [Section, string][]][] = [
     "本轮执行",
     [
       ["session", "会话"],
+      ["persona", "Agent 预设"],
       ["model", "模型偏好"],
       ["providers", "模型服务"],
       ["tools", "工具与权限"],
@@ -206,6 +215,9 @@ export const SETTINGS: SettingEntry[] = [
   { section: "session", anchor: "fold-work", title: "折叠中间过程", scope: "machine", apply: "immediate", keywords: ["折叠", "中间过程", "工具调用", "思考", "最后一句", "收起", "摘要"] },
   // Written to the user file only; the kernel's background sweep reads it on each pass.
   { section: "session", anchor: "auto-archive", title: "自动归档不活跃的对话", scope: "machine", apply: "immediate", keywords: ["归档", "过期", "清理", "闲置", "天数"] },
+  // Composed into the system prompt once at boot as part of the cache-stable
+  // prefix: the save lands now, and only sessions opened afterwards read it.
+  { section: "persona", anchor: "agent-presets", title: "Agent 预设", scope: "machine", apply: "on-open", keywords: ["人设", "persona", "身份", "提示词", "系统提示词", "前缀", "后缀", "complete", "预设", "组合", "Agent"] },
   { section: "session", anchor: "session-dir", title: "会话写入位置", scope: "workspace", apply: "none", keywords: ["工作目录", "路径"] },
 
   { section: "model", anchor: "model", title: "按用途选择模型", scope: "machine", apply: "runtime-rebuild", keywords: ["主模型", "默认模型", "模型", "切换", "端点", "按任务指定模型", "角色分工", "子代理", "规划", "看图", "复核", "决策", "网页搜索", "web search", "system one", "typesafe", "laya", "自动命名", "思考强度", "推理", "reasoning", "档位"] },

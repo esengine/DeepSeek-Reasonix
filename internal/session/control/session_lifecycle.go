@@ -57,6 +57,9 @@ func (c *Controller) maybeSessionStart(ctx context.Context) {
 // resets the executor to a clean session carrying the same system prompt. It
 // ends the old session and starts the new one for lifecycle hooks.
 func (c *Controller) NewSession() error {
+	if c.CompositionBinding() != nil {
+		return c.newCompositionSession()
+	}
 	if c.executor == nil {
 		return nil
 	}
@@ -96,7 +99,12 @@ func (c *Controller) NewSession() error {
 		c.mu.Unlock()
 	}
 	c.setActiveJobSession(c.SessionPath())
-	c.executor.SetSession(sessionstore.NewSession(c.systemPrompt))
+	fresh := sessionstore.NewSession(c.systemPrompt)
+	if binding := c.CompositionBinding(); binding != nil {
+		binding.Started = false
+		fresh.BindComposition(binding)
+	}
+	c.executor.SetSession(fresh)
 	c.bindExecutorProjection(c.SessionPath(), false)
 	if c.guardianSess != nil {
 		c.guardianSess.Reset()
@@ -184,7 +192,11 @@ func (c *Controller) ClearSession() error {
 		c.mu.Unlock()
 	}
 	c.setActiveJobSession(c.SessionPath())
-	c.executor.SetSession(sessionstore.NewSession(c.systemPrompt))
+	fresh := sessionstore.NewSession(c.systemPrompt)
+	if binding := c.CompositionBinding(); binding != nil {
+		fresh.BindComposition(binding)
+	}
+	c.executor.SetSession(fresh)
 	c.bindExecutorProjection(c.SessionPath(), false)
 	if c.guardianSess != nil {
 		c.guardianSess.Reset()
@@ -460,6 +472,9 @@ func (c *Controller) beginRotation() error {
 	}()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.gate.closed {
+		return errControllerClosed
+	}
 	if c.gate.active() {
 		return errTurnRunningRotation
 	}

@@ -35,7 +35,9 @@ func (c *Controller) SaveHooks(scope hook.Scope, settings hook.Settings) error {
 			return err
 		}
 	}
-	c.hooks.Replace(hook.Load(hook.LoadOptions{ProjectRoot: c.workspaceRoot}))
+	if c.CompositionBinding() == nil {
+		c.hooks.Replace(hook.Load(hook.LoadOptions{ProjectRoot: c.workspaceRoot}))
+	}
 	return nil
 }
 

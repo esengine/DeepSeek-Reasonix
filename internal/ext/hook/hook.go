@@ -163,10 +163,11 @@ type Settings struct {
 // ResolvedHook is a loaded hook with its origin baked in.
 type ResolvedHook struct {
 	HookConfig
-	Event    Event
-	Scope    Scope
-	Source   string                 // absolute path to the settings.json it came from
-	approval *config.ProjectProgram // the approval a project hook runs under
+	Event         Event
+	Scope         Scope
+	Source        string                 // absolute path to the settings.json it came from
+	approval      *config.ProjectProgram // the approval a project hook runs under
+	retainedCheck func() error
 }
 
 func (h ResolvedHook) timeout() time.Duration {

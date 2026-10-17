@@ -1102,6 +1102,9 @@ type AgentConfig struct {
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
 	OutputStyle string `toml:"output_style"`
+	// Persona is the user's system persona, composed into the cache-stable
+	// prefix once at boot. User-config only; see PersonaConfig.
+	Persona PersonaConfig `toml:"persona"`
 	// Deprecated compatibility field. Automatic plan mode was retired in config
 	// version 5; old TOML remains readable, but loading normalizes it to "off"
 	// and rendering omits it. Plan mode remains available as an explicit user

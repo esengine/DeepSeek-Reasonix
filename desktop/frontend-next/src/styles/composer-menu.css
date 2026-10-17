@@ -18,6 +18,10 @@
 }
 :root :is(.polmenu, .studio-model-menu).composer-menu { --choice-width: 340px; }
 :root :is(.worktree-panel, .studio-effort-menu).composer-menu { --choice-width: 320px; }
+:root .composer-menu.composition-menu { --choice-width: 320px; }
+:root .composition-menu .studio-item-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+:root .composition-menu .mi :is(.lb, .ds) { white-space: normal; overflow-wrap: anywhere; }
+:root .composition-menu .composition-menu-note { margin: 0 8px 6px; color: var(--muted); font: 400 calc(11px * var(--fs-scale, 1))/1.45 var(--ui); }
 :root .composer-menu :is(.studio-picker-title, .studio-policy-head, .worktree-heading), :root .composer-menu > .mi.head:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: auto; min-height: 30px; margin: 0 0 4px; padding: 2px 8px 8px; border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; color: var(--muted); font: 500 calc(12px * var(--fs-scale, 1))/1.4 var(--ui); }
 :root .composer-menu :is(.studio-picker-title b, .studio-policy-head b), :root .composer-menu > .mi.head:first-child .lb { color: var(--muted); font: inherit; letter-spacing: 0; }
 :root .composer-menu :is(.studio-picker-title small, .studio-policy-head small), :root .composer-menu > .mi.head:first-child .rt { margin-left: auto; color: var(--muted); font: 400 calc(11px * var(--fs-scale, 1))/1.4 var(--ui); text-align: right; }

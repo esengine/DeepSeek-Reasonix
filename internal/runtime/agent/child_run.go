@@ -37,6 +37,10 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	if sess == nil {
 		return "", fmt.Errorf("sub-agent session is nil")
 	}
+	if err := BindChildComposition(ctx, sess, true); err != nil {
+		return "", err
+	}
+	restrictChildComposition(ctx, reg)
 	// Isolate temporary files for this run before any tool execution.
 	ctx = tool.WithoutGoalTurnRecorder(ctx)
 	if opts.MemoryQueue != nil {

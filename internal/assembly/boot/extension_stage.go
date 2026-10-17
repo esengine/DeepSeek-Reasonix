@@ -83,7 +83,7 @@ func startExtensions(ctx context.Context, opts Options, roots config.Roots, root
 		// Extension sidecars are programs the run would start; the posture holds none.
 		home = ""
 	}
-	mgr, err := preflightExtensionRuntimes(ctx, home, ext.boot(), opts.Extensions, planForPreflight(opts, ext.generation))
+	mgr, err := preflightExtensionRuntimes(ctx, home, ext.boot(), opts.Extensions, planForPreflight(opts, ext.generation), opts.Composition)
 	if err != nil {
 		return nil, fmt.Errorf("boot: %w", err)
 	}

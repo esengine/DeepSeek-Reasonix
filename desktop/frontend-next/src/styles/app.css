@@ -3679,6 +3679,21 @@
   .lrow .sa + .sc { margin-left: 8px }
   .lrow .sc { margin-left: auto; flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
 
+  /* The persona prompt boxes are prompt-sized rather than row inputs: full
+     width, monospace because the content is prompt text, and draggable because
+     a persona can be long. */
+  .pers-field { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 0 }
+  .pers-field .lb { font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--text) }
+  .pers-field .ds { font: var(--w-reg) var(--fs-meta)/1.55 var(--ui); color: var(--faint) }
+  .pers-field textarea {
+    min-height: 84px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--raised); color: var(--text); outline: none; resize: vertical;
+    font: var(--w-reg) var(--fs-ui)/1.6 var(--mono);
+  }
+  .pers-field textarea:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 2px color-mix(in oklab, var(--focus) 26%, transparent) }
+  .pers-field textarea:disabled { opacity: .6 }
+  .box .persona-name { margin: 10px 0 0; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--muted) }
+
   .skrow { display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--hair) }
   .skrow:last-of-type { border-bottom: 1px solid var(--hair) }
   .skrow[data-off] .nm, .skrow[data-off] .ds { color: var(--ghost) }
@@ -5576,3 +5591,32 @@
     transition-duration: .01ms !important;
   }
 }
+.composition-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
+.composition-editor { display: grid; gap: 12px; margin-block: 16px; }
+.composition-editor input, .composition-editor select { min-width: 0; max-width: 100%; }
+.composition-modules { border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0; }
+.composition-modules legend { font-weight: 600; padding-inline: 4px; }
+.composition-module { margin-block: 8px; }
+.composition-module .in { flex: 1; min-width: 100px; }
+.compose-context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  min-height: 28px;
+  margin: -3px 0 4px;
+}
+.compose-context > .studio-runstate { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.composition-picker { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: 100%; }
+.composition-picker > .picker { min-width: 0; max-width: 100%; }
+.composition-trigger { max-width: 100%; }
+.composition-trigger .nm { max-width: 180px; }
+.composition-trigger > .studio-icon { width: 12px; height: 12px; flex: none; }
+.composition-picker [role="alert"] { overflow-wrap: anywhere; }
+.composition-editor :is(input, select) {
+  width: 100%; min-height: 34px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--raised); color: var(--text); padding: 6px 9px; font: var(--w-reg) var(--fs-ui)/1.5 var(--ui);
+}
+.composition-editor :is(input, select):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.composition-editor :is(input, select):disabled { opacity: .65; }
+.composition-editor h4 { margin: 10px 12px 0; font-size: var(--fs-ui); }

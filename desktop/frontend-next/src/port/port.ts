@@ -1,4 +1,6 @@
 import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
+import type { AgentComposition, AgentPresetVersion, AgentPresetCatalog, CompositionSummary } from "./composition";
+export type * from "./composition";
 import { DeliveryError, HttpError } from "./http_error";
 import type { DeliveryFault } from "./http_error";
 
@@ -46,7 +48,7 @@ import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import type { PluginExport, PluginInstallRequest, PluginPackage, PluginPlan } from "./plugin";
 import type { MarketDetail, MarketList, MarketOwnRequest, MarketPackage, MarketPlan, MarketPublished, MarketQuery, MarketRequest, MarketSubmission, MarketVote } from "./market";
 import type { Appearance, ThemeImport, ThemePack } from "./look";
-import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, WebAccessPatch, WebAccessSettings, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, PeerReceipt, PeersState, PeersSettings, PeersSettingsEdit, PeerRemember, ConfigProblem, ConfigRepair, DisplayCurrencyMode, DisplayCurrencySettings, PermissionLists, PermissionRules, ProgressWatchSettings, SandboxSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
+import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, PeerReceipt, PeersState, ConfigProblem, ConfigRepair, DisplayCurrencyMode, DisplayCurrencySettings, PermissionLists, PermissionRules, ProgressWatchSettings, SandboxSettings, WorkspaceRoots, ReceiptSettings, PersonaDraft, PersonaSettings, WebAccessPatch, WebAccessSettings, PeersSettings, PeersSettingsEdit, PeerRemember } from "./boundary";
 import type { Protocol, ProviderCheck, ProviderCheckDraft, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderSetup, ProviderRemoval, ProviderPreset, ProviderPresetInstall } from "./provider";
 export type { ModelEffort, ModelLimit, ModelRate, Protocol, ProviderCheck, ProviderCheckDraft, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderSetup, ProviderRemoval, ProviderPreset, ProviderPresetInstall } from "./provider";
 import type { StoragePlan, StorageQuery, StorageState } from "./storage";
@@ -310,6 +312,18 @@ export interface AgentPort {
   autoArchive(): Promise<AutoArchiveSettings>;
   // Read by the kernel's background sweep on each pass; no rebuild.
   saveAutoArchive(s: Pick<AutoArchiveSettings, "enabled" | "days">): Promise<AutoArchiveSettings>;
+  persona(): Promise<PersonaSettings>;
+  agentPresets(): Promise<AgentPresetCatalog>;
+  saveAgentPreset(definition: AgentComposition, expectedRevision: string): Promise<AgentPresetVersion>;
+  deleteAgentPreset(id: string, revision: string): Promise<void>;
+  setDefaultAgentPreset(id: string, workspace: boolean): Promise<void>;
+  exportAgentPreset(id: string): Promise<AgentComposition>;
+  importAgentPreset(content: AgentComposition): Promise<{definition:AgentComposition;diagnostics:AgentPresetCatalog["diagnostics"]}>;
+  agentComposition(): Promise<CompositionSummary | null>;
+  selectAgentComposition(id: string): Promise<CompositionSummary>;
+  // The persona is part of the cache-stable prefix, composed once at boot:
+  // saving is written now and read by the next session, not this one's runtime.
+  savePersonaSettings(s: PersonaDraft): Promise<PersonaSettings>;
   receiptSettings(): Promise<ReceiptSettings>;
   saveReceiptSettings(show: boolean): Promise<ReceiptSettings>;
   // null in a browser tab: there is no window to keep running.

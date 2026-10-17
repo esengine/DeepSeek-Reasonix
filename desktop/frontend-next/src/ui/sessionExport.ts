@@ -4,12 +4,14 @@ import type { HubPort, TreeSession } from "../port/hub";
 
 export async function saveSessionFile(hub: Pick<HubPort, "exportSession">, session: TreeSession) {
   const exported = await hub.exportSession(session.path);
-  const records = exported.content
+  let nativeArchive: unknown;
+  try {const parsed=JSON.parse(exported.content) as {format?:string};if(parsed.format==="reasonix-native-session") nativeArchive=parsed;} catch {}
+  const records = nativeArchive?[]:exported.content
     .split(/\r?\n/)
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line) as unknown);
   const content = JSON.stringify(
-    { version: 1, title: session.title || session.name, exportedAt: new Date().toISOString(), records },
+    nativeArchive??{ version: 1, title: session.title || session.name, exportedAt: new Date().toISOString(), records },
     null,
     2,
   );

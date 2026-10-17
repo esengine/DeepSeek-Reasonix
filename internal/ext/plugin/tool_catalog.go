@@ -50,9 +50,13 @@ func (c *Client) readToolCatalog(ctx context.Context, settle bool) (toolCatalog,
 	held = slices.DeleteFunc(held, func(h HeldTool) bool { return !c.spec.ToolEnabled(h.RawName) })
 
 	toolInfos, sortedTools := c.buildToolCatalog(out)
+	fingerprint := toolCatalogFingerprint(toolInfos, sortedTools, held)
+	if err := c.checkCompositionContract(fingerprint); err != nil {
+		return toolCatalog{}, err
+	}
 	return toolCatalog{
 		infos: toolInfos, tools: sortedTools, held: held, followed: followed,
-		fingerprint: toolCatalogFingerprint(toolInfos, sortedTools, held),
+		fingerprint: fingerprint,
 	}, nil
 }
 

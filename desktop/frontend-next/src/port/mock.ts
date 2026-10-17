@@ -690,6 +690,7 @@ export class MockPort extends MockWorkspace implements AgentPort {
   }
 
   async submit(text: string, chips?: ChipCall): Promise<Queued | void> {
+    this.compositions.markCompositionStarted();
     if (chips && this.queuePaused) return this.queueFollowup(text);
     if (this.state.running) {
       this.emit({ kind: "steer", text });
