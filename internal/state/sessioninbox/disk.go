@@ -2,6 +2,7 @@ package sessioninbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -146,6 +147,11 @@ func (s *Store) commitManifestLocked(next *manifest) error {
 	if next == nil {
 		return fmt.Errorf("sessioninbox: nil manifest")
 	}
+	if s.unrecovered {
+		// The queue's bodies could not be read, so no manifest may stand in for
+		// them: overwriting the corrupt bytes would turn "unknown" into "empty".
+		return fmt.Errorf("sessioninbox: refusing to overwrite the manifest while the queue bodies are unreadable: %w", ErrUnrecovered)
+	}
 	if err := validateManifest(next, false); err != nil {
 		return fmt.Errorf("sessioninbox: invalid manifest: %w", err)
 	}
@@ -219,15 +225,21 @@ func (s *Store) gcOrphansLocked() {
 }
 
 // salvageOrphanBlobsLocked rebuilds uncertain meta rows from blob files after a
-// corrupt-manifest quarantine. Bodies stay on disk; the user reviews before resume.
-func (s *Store) salvageOrphanBlobsLocked() []InboxItemMeta {
+// corrupt-manifest quarantine. Bodies stay on disk; the user reviews before
+// resume. A non-nil error means the bodies could not be read, so the caller must
+// not publish the result as the queue's contents.
+func (s *Store) salvageOrphanBlobsLocked() ([]InboxItemMeta, error) {
 	bdir := filepath.Join(s.dir, blobsDirName)
 	if err := validatePrivateDir(bdir); err != nil {
-		return nil
+		if errors.Is(err, os.ErrNotExist) {
+			// No bodies were ever written: an empty queue, not a failure.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sessioninbox: blobs dir: %w", err)
 	}
 	entries, err := os.ReadDir(bdir)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("sessioninbox: read blobs dir: %w", err)
 	}
 	now := time.Now().UTC()
 	var out []InboxItemMeta
@@ -241,7 +253,7 @@ func (s *Store) salvageOrphanBlobsLocked() []InboxItemMeta {
 		}
 		data, err := readRegularFile(filepath.Join(bdir, e.Name()), s.limits.MaxItemBytes)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessioninbox: salvage blob %s: %w", e.Name(), err)
 		}
 		var env PromptEnvelope
 		if err := json.Unmarshal(data, &env); err != nil {
@@ -269,7 +281,7 @@ func (s *Store) salvageOrphanBlobsLocked() []InboxItemMeta {
 			BlockCode:   BlockManifestSalvaged,
 		})
 	}
-	return out
+	return out, nil
 }
 
 func (s *Store) quarantineUnknownLocked(path string) error {

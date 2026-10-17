@@ -94,6 +94,8 @@ type Messages struct {
 	NoticeJobExitFmt        string // how its process ended — %d the exit code
 	NoticeJobSignalFmt      string // how its process ended — %d the signal number
 	NoticeInboxRecoveredFmt string // a reopened inbox came up paused with unfinished instructions — %d count
+	NoticeInboxUnrecovered  string // the inbox bodies could not be read, so the queue is paused with unknown contents
+	TUIQueueUnrecovered     string // the /queue line for an inbox whose contents could not be read
 	TUIQuestion             string // an answered question that carried no prompt
 	TUISubagentCallsFmt     string // calls a sub-agent made under its task — %d count
 	TUIChartMoreRowsFmt     string // rows of a chart table past the preview — %d count

@@ -142,6 +142,24 @@ func TestRecoveredInboxNoticeFollowsTheUILanguage(t *testing.T) {
 	}
 }
 
+// A queue whose contents could not be read is worded for the reader like the
+// recovered one is, and its payload (the queue's own directory) never leaks
+// into the sentence.
+func TestUnreadableInboxNoticeFollowsTheUILanguage(t *testing.T) {
+	inChinese(t)
+	detail := event.InboxUnrecovered{Dir: "/Users/someone/.reasonix/sessions/s.inbox"}.Encode()
+	got := renderNotice(&Item{Code: event.NoticeCodeInboxUnrecovered, Text: "kernel english", Detail: detail})
+	if !strings.Contains(got, "未知") || !strings.Contains(got, "已暂停") {
+		t.Fatalf("notice = %q", got)
+	}
+	if strings.Contains(got, "kernel english") || strings.Contains(got, ".inbox") {
+		t.Fatalf("fallback or payload leaked into %q", got)
+	}
+	if got := renderNotice(&Item{Code: event.NoticeCodeInboxUnrecovered, Text: "kernel english", Detail: "not json"}); !strings.Contains(got, "kernel english") {
+		t.Fatalf("unreadable payload must keep the kernel's text, got %q", got)
+	}
+}
+
 func TestJobNoticesFollowTheUILanguage(t *testing.T) {
 	inChinese(t)
 	detail := event.JobNotice{Kind: "bash", ID: "bash-126", Label: "make build"}.Encode()

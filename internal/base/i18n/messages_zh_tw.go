@@ -99,6 +99,8 @@ var ChineseTraditional = Messages{
 	NoticeJobExitFmt:              "結束碼 %d",
 	NoticeJobSignalFmt:            "被訊號 %d 終止",
 	NoticeInboxRecoveredFmt:       "已恢復 %d 條未完成的指令。待發送已暫停，請先用 /queue 查看，再繼續派發。",
+	NoticeInboxUnrecovered:        "佇列內容讀不出來，因此待發送裡有什麼是未知的，已暫停等待檢查。內容沒有被丟棄：請用 /queue 查看，並在任何寫入覆蓋之前檢查檔案。",
+	TUIQueueUnrecovered:           "待發送內容未知 —— 佇列讀不出來，已暫停等待檢查",
 	TUIQuestion:                   "提問",
 	TUISubagentCallsFmt:           "%d 次子代理呼叫",
 	TUIChartMoreRowsFmt:           "… 還有 %d 行",

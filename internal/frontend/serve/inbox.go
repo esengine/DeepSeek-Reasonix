@@ -48,6 +48,10 @@ func writeInboxError(w http.ResponseWriter, err error) {
 		refuse(w, http.StatusConflict, "inbox.invalid_state", err.Error(), nil)
 	case errors.Is(err, sessioninbox.ErrPaused):
 		refuse(w, http.StatusConflict, "inbox.paused", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrUnrecovered):
+		// The bodies could not be read, so the queue's contents are unknown:
+		// a conflict, not an internal fault, and the panel can say which.
+		refuse(w, http.StatusConflict, "inbox.unrecovered", err.Error(), nil)
 	case errors.Is(err, sessioninbox.ErrNotFound):
 		refuse(w, http.StatusConflict, "inbox.not_found", err.Error(), nil)
 	case errors.Is(err, sessioninbox.ErrIdempotencyConflict):

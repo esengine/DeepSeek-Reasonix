@@ -222,11 +222,28 @@ func (c *Controller) ensureInbox() (*sessioninbox.Store, error) {
 		return nil, err
 	}
 	snap := st.Snapshot()
+	if snap.Unrecovered {
+		// The contents are unknown, so this says so and never the count.
+		c.sink.Emit(inboxUnrecoveredNotice(st.Dir()))
+		return st, nil
+	}
 	if snap.Recovered && snap.RecoveredN > 0 {
 		c.sink.Emit(inboxRecoveredNotice(snap.RecoveredN))
 		sessioninbox.NoteRecovered(snap.RecoveredN)
 	}
 	return st, nil
+}
+
+// inboxUnrecoveredNotice carries the queue directory as a typed payload; the
+// English text is the fallback for a frontend that does not word the code.
+func inboxUnrecoveredNotice(dir string) event.Event {
+	return event.Event{
+		Kind:   event.Notice,
+		Level:  event.LevelWarn,
+		Code:   event.NoticeCodeInboxUnrecovered,
+		Text:   "The queue could not be read, so the inbox contents are unknown and it is paused. Inspect the queue before resuming.",
+		Detail: event.InboxUnrecovered{Dir: dir}.Encode(),
+	}
 }
 
 // inboxRecoveredNotice carries the count as a typed payload; the English text is
@@ -267,10 +284,19 @@ func (c *Controller) rebindInbox() {
 		return
 	}
 	snap := st.Snapshot()
+	if snap.Unrecovered {
+		// As in ensureInbox: say the contents are unknown, never a count.
+		dir := st.Dir()
+		// Capture the sink: New writes c.sink right after this call returns.
+		sink := c.sink
+		go func() { sink.Emit(inboxUnrecoveredNotice(dir)) }()
+		return
+	}
 	if snap.Recovered && snap.RecoveredN > 0 {
 		// Emit after unlock via deferred sink call would race; emit here.
+		sink := c.sink
 		go func(n int) {
-			c.sink.Emit(inboxRecoveredNotice(n))
+			sink.Emit(inboxRecoveredNotice(n))
 		}(snap.RecoveredN)
 		sessioninbox.NoteRecovered(snap.RecoveredN)
 	}

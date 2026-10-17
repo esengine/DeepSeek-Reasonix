@@ -403,6 +403,7 @@ const SAID: Record<string, string> = {
   "inbox.closed": "该会话的待送达已关闭",
   "inbox.schema_readonly": "该待送达由更高版本写入，当前版本只能读取",
   "inbox.idempotency_conflict": "该提交标识已被使用，且当时的内容不同",
+  "inbox.unrecovered": "待送达的正文读不出来，队列内容未知，已暂停等待检查",
 
   // ── 配置文件本身坏了，以及每一个写设置的面板被它挡住时 ─────────
   "config.unparsed": "配置文件 {path} 无法读取，因此本次未保存。到「设置」里可以看到出错的位置并修复",

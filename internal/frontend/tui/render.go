@@ -331,6 +331,13 @@ func codedNoticeText(it *Item) string {
 		if p, ok := event.DecodeInboxRecovered(it.Detail); ok {
 			return fmt.Sprintf(i18n.M.NoticeInboxRecoveredFmt, p.Count)
 		}
+	case event.NoticeCodeInboxUnrecovered:
+		// The payload names the queue directory for a diagnostic, not for the
+		// reader: the sentence is the same whatever it holds, and a Detail that
+		// is not the payload keeps the kernel's own text.
+		if _, ok := event.DecodeInboxUnrecovered(it.Detail); ok {
+			return i18n.M.NoticeInboxUnrecovered
+		}
 	case event.NoticeCodeJobFinished, event.NoticeCodeJobKilled:
 		if p, ok := event.DecodeJobNotice(it.Detail); ok {
 			name := p.Label

@@ -101,6 +101,8 @@ var Chinese = Messages{
 	NoticeJobExitFmt:                "退出码 %d",
 	NoticeJobSignalFmt:              "被信号 %d 终止",
 	NoticeInboxRecoveredFmt:         "已恢复 %d 条未完成的指令。待发送已暂停，请先用 /queue 查看，再继续派发。",
+	NoticeInboxUnrecovered:          "队列内容读不出来，因此待发送里有什么是未知的，已暂停等待检查。内容没有被丢弃：请用 /queue 查看，并在任何写入覆盖之前检查文件。",
+	TUIQueueUnrecovered:             "待发送内容未知 —— 队列读不出来，已暂停等待检查",
 	TUIQuestion:                     "提问",
 	TUISubagentCallsFmt:             "%d 次子代理调用",
 	TUIChartMoreRowsFmt:             "… 还有 %d 行",

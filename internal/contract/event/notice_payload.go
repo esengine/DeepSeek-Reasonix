@@ -6,6 +6,7 @@ import "encoding/json"
 // sentence is worded from, so a sink that prints Text must not append it again.
 func DetailIsPayload(code string) bool {
 	return code == NoticeCodeUnappliedSteer || code == NoticeCodeExtensionSkipped || code == NoticeCodeInboxRecovered ||
+		code == NoticeCodeInboxUnrecovered ||
 		code == NoticeCodePermissionRulesDormant || code == NoticeCodeSubagentWaiting || code == NoticeCodeContextComposition || code == NoticeCodeJobFinished || code == NoticeCodeJobKilled || code == NoticeCodeJobFailed || code == NoticeCodeJobStalled
 }
 
@@ -64,7 +65,33 @@ func DecodeInboxRecovered(detail string) (InboxRecovered, bool) {
 	return p, true
 }
 
-// JobNotice is the Detail payload of the NoticeCodeJob* notices:
+// InboxUnrecovered is the Detail payload of NoticeCodeInboxUnrecovered: the
+// queue directory whose bodies could not be read, so the queue is paused with
+// contents that are unknown rather than empty.
+type InboxUnrecovered struct {
+	Dir string `json:"dir"`
+}
+
+// Encode renders the payload as the notice's Detail.
+func (p InboxUnrecovered) Encode() string {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// DecodeInboxUnrecovered reads the payload back; ok is false for a Detail that
+// is not one, so a caller keeps the kernel's English.
+func DecodeInboxUnrecovered(detail string) (InboxUnrecovered, bool) {
+	var p InboxUnrecovered
+	if err := json.Unmarshal([]byte(detail), &p); err != nil || p.Dir == "" {
+		return InboxUnrecovered{}, false
+	}
+	return p, true
+}
+
+// JobNotice is the Detail payload of the three NoticeCodeJob* notices:
 // which background job ended, by kind, id and the label it was started with.
 type JobNotice struct {
 	Kind  string `json:"kind"`

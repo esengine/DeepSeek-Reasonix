@@ -100,6 +100,8 @@ var English = Messages{
 	NoticeJobExitFmt:              "exit code %d",
 	NoticeJobSignalFmt:            "ended by signal %d",
 	NoticeInboxRecoveredFmt:       "Recovered %d unfinished instruction(s). The inbox is paused: review them with /queue, then resume.",
+	NoticeInboxUnrecovered:        "The queued instructions could not be read, so the inbox contents are unknown and it came up paused. Nothing was discarded: check with /queue and inspect the files before anything overwrites them.",
+	TUIQueueUnrecovered:           "inbox contents UNKNOWN — the queue is unreadable; paused for inspection",
 	TUIQuestion:                   "question",
 	TUISubagentCallsFmt:           "%d sub-agent call(s)",
 	TUIChartMoreRowsFmt:           "… %d more rows",

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"reasonix/internal/base/i18n"
 )
 
 const queueUsage = "usage: /queue list|show|edit|delete|move|pause|resume|retry|refresh"
@@ -155,6 +157,9 @@ func resolveQueueRef(snap InboxSnapshot, args []string) (string, error) {
 
 func renderQueueList(snap InboxSnapshot) string {
 	if len(snap.Items) == 0 {
+		if snap.Unrecovered {
+			return i18n.M.TUIQueueUnrecovered
+		}
 		if snap.Paused {
 			return "inbox empty (paused)"
 		}
@@ -167,6 +172,11 @@ func renderQueueList(snap InboxSnapshot) string {
 	}
 	if snap.Recovered {
 		fmt.Fprintf(&b, " recovered=%d", snap.RecoveredN)
+	}
+	if snap.Unrecovered {
+		// The items a corrupt manifest still names say nothing about what the
+		// unreadable bodies hold, so the unknown marker outranks the count.
+		fmt.Fprintf(&b, "\n%s", i18n.M.TUIQueueUnrecovered)
 	}
 	b.WriteByte('\n')
 	for i, it := range snap.Items[:min(len(snap.Items), queueListLimit)] {

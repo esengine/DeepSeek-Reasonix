@@ -17,11 +17,14 @@ type InboxItem struct {
 
 // InboxSnapshot is the durable queue as GET /inbox answers it.
 type InboxSnapshot struct {
-	Revision   int64       `json:"revision"`
-	Paused     bool        `json:"paused"`
-	Recovered  bool        `json:"recovered"`
-	RecoveredN int         `json:"recoveredCount"`
-	Items      []InboxItem `json:"items"`
+	Revision   int64 `json:"revision"`
+	Paused     bool  `json:"paused"`
+	Recovered  bool  `json:"recovered"`
+	RecoveredN int   `json:"recoveredCount"`
+	// Unrecovered means the kernel could not read the queue at all, so Items is
+	// empty because the contents are unknown, not because nothing is queued.
+	Unrecovered bool        `json:"unrecovered"`
+	Items       []InboxItem `json:"items"`
 }
 
 // InboxReceipt says how the kernel settled an enqueue.

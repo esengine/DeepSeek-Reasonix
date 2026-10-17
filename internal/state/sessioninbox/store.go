@@ -34,7 +34,10 @@ type Store struct {
 	limits   Limits
 	man      *manifest
 	readonly bool
-	closed   bool
+	// unrecovered records that the queue bodies could not be read, so the
+	// manifest on disk is not a statement about the queue's contents.
+	unrecovered bool
+	closed      bool
 	// listeners receive revision bumps after durable commits (non-blocking).
 	listeners []func(InboxSnapshot)
 }
@@ -163,6 +166,7 @@ func (s *Store) loadOrInitLocked() error {
 	if errors.Is(err, os.ErrNotExist) {
 		s.man = emptyManifest(s.runID)
 		s.readonly = false
+		s.unrecovered = false
 		return nil
 	}
 	if err != nil {
@@ -172,15 +176,27 @@ func (s *Store) loadOrInitLocked() error {
 	if err != nil {
 		// Corrupt manifest → quarantine, salvage orphan blobs as uncertain
 		// items, pause for user inspection. Never present "0 recovered".
+		salvaged, salvageErr := s.salvageOrphanBlobsLocked()
+		if salvageErr != nil {
+			// The bodies could not be read, so no manifest here can state the
+			// queue's contents. Leave the corrupt bytes in place as evidence
+			// and pause instead of committing a fabricated empty queue.
+			s.man = emptyManifest(s.runID)
+			s.man.Paused = true
+			s.readonly = false
+			s.unrecovered = true
+			return nil
+		}
 		_ = s.quarantineFileLocked(path, "manifest-corrupt")
-		salvaged := s.salvageOrphanBlobsLocked()
 		s.man = emptyManifest(s.runID)
 		s.man.Paused = true
 		s.man.Recovered = true
 		s.man.RecoveredN = len(salvaged)
 		s.man.Items = salvaged
+		s.unrecovered = false
 		return s.commitManifestLocked(s.man)
 	}
+	s.unrecovered = false
 	if man.SchemaVersion > SchemaVersion {
 		s.man = man
 		s.readonly = true
@@ -263,9 +279,10 @@ func (s *Store) snapshotLocked() InboxSnapshot {
 	return InboxSnapshot{
 		SchemaVersion: m.SchemaVersion,
 		Revision:      m.Revision,
-		Paused:        m.Paused,
+		Paused:        m.Paused || s.unrecovered,
 		Recovered:     m.Recovered,
 		RecoveredN:    m.RecoveredN,
+		Unrecovered:   s.unrecovered,
 		Readonly:      s.readonly,
 		RunID:         m.RunID,
 		Items:         items,
