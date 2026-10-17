@@ -107,7 +107,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# no_proxy   = \"localhost,127.0.0.1,.local\"   # honored for proxy_mode = \"custom\"\n")
 		}
-		renderNetworkResolvers(&b, c)
+		renderNetworkResolvers(&b, c, scope)
 		proxyType := c.Network.Proxy.Type
 		if proxyType == "" {
 			proxyType = "socks5"
