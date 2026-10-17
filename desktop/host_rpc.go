@@ -323,6 +323,7 @@ func startResourceOrigin(app *App, token string) (origin string, stop func(), er
 	}
 	handler := http.NotFoundHandler()
 	chain := []func(http.Handler) http.Handler{
+		app.attachmentUploadMiddleware(),
 		app.jsProfilingMiddleware(),
 		app.remoteMarkdownImageMiddleware(),
 		app.workspaceMediaMiddleware(),

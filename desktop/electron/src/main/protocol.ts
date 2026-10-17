@@ -15,6 +15,8 @@ export const FORWARDED_PATHS = [
   "/__reasonix_remote_markdown_image",
 ] as const;
 
+const ATTACHMENT_UPLOAD_PATH = "/__reasonix_attachment_upload";
+
 export type AppRoute =
   | { kind: "file"; path: string; mime: string }
   | { kind: "forward"; target: string }
@@ -52,7 +54,7 @@ export function mimeFor(path: string): string {
 }
 
 export function isForwardedPath(pathname: string): boolean {
-  return FORWARDED_PATHS.some((prefix) =>
+  return pathname === ATTACHMENT_UPLOAD_PATH || FORWARDED_PATHS.some((prefix) =>
     prefix.endsWith("/") ? pathname.startsWith(prefix) : pathname === prefix || pathname.startsWith(prefix + "/"));
 }
 
@@ -125,6 +127,11 @@ export function registerAppProtocol(deps: AppProtocolDeps): void {
       deps.log.warn(`404 ${request.url}: ${route.reason}`);
       return text(404, "Not found");
     }
+    const upload = new URL(request.url).pathname === ATTACHMENT_UPLOAD_PATH;
+    if (upload ? request.method !== "POST" : request.method !== "GET" && request.method !== "HEAD") {
+      return text(405, "Method not allowed");
+    }
+    if (upload && request.headers.get("content-type") !== "application/octet-stream") return text(415, "Unsupported upload type");
     if (route.kind === "forward") {
       const resources = deps.resources();
       if (!resources) return text(503, "Desktop service unavailable");
@@ -133,10 +140,15 @@ export function registerAppProtocol(deps: AppProtocolDeps): void {
         const value = request.headers.get(name);
         if (value) headers.set(name, value);
       }
+      if (upload) headers.set("content-type", "application/octet-stream");
       try {
-        return await deps.fetch(resources.origin + route.target, { method: request.method, headers, bypassCustomProtocolHandlers: true });
+        const init: RequestInit & { bypassCustomProtocolHandlers?: boolean; duplex?: "half" } = {
+          method: request.method, headers, signal: request.signal, bypassCustomProtocolHandlers: true,
+          ...(upload ? { body: request.body, duplex: "half" as const } : {}),
+        };
+        return await deps.fetch(resources.origin + route.target, init);
       } catch (error) {
-        deps.log.warn(`resource forward failed for ${route.target}: ${errorText(error)}`);
+        deps.log.warn(`resource forward failed for ${new URL(request.url).pathname}: ${errorText(error)}`);
         return text(502, "Resource origin unreachable");
       }
     }

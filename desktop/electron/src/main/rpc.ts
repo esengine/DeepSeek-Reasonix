@@ -82,7 +82,7 @@ export class RpcClient {
   private closedWith: Error | null = null;
   readonly stats = { ignoredLines: 0, orphanResponses: 0 };
 
-  constructor(private readonly transport: RpcTransport, private readonly handlers: RpcHandlers, limit = MAX_FRAME_BYTES) {
+  constructor(private readonly transport: RpcTransport, private readonly handlers: RpcHandlers, private readonly limit = MAX_FRAME_BYTES) {
     this.decoder = new LineDecoder(limit);
   }
 
@@ -119,7 +119,7 @@ export class RpcClient {
         : null;
       this.pending.set(id, { resolve, reject, timer });
       try {
-        this.transport.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        this.writeFrame({ jsonrpc: "2.0", id, method, params });
       } catch (error) {
         this.pending.delete(id);
         if (timer) clearTimeout(timer);
@@ -130,7 +130,14 @@ export class RpcClient {
 
   notify(method: string, params: unknown): void {
     if (this.closedWith) return;
-    this.transport.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
+    this.writeFrame({ jsonrpc: "2.0", method, params });
+  }
+
+  private writeFrame(frame: Record<string, unknown>): void {
+    const line = JSON.stringify(frame) + "\n";
+    const bytes = Buffer.byteLength(line);
+    if (bytes > this.limit) throw new OversizeFrameError(bytes, this.limit);
+    this.transport.write(line);
   }
 
   close(error: Error): void {

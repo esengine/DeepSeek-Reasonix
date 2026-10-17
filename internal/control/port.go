@@ -293,6 +293,7 @@ type Input interface {
 	HasRefs(line string) bool
 	ImageInputEnabled() bool
 	RegisterExternalFolderRef(path string) (token, displayPath string, err error)
+	RegisterExternalFileRef(path string) (token, displayPath string, err error)
 }
 
 // Settings covers runtime session settings that don't fit a richer domain.

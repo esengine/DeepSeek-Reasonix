@@ -8,7 +8,7 @@ import { Composer } from "../components/Composer";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
-import { installDesktopHostStub } from "./desktopHostStub";
+import { installDesktopHostStub, type DesktopHostStubOptions } from "./desktopHostStub";
 
 let passed = 0;
 let failed = 0;
@@ -90,7 +90,7 @@ function installDom() {
   return dom;
 }
 
-function installBridgeApp(methods: Record<string, unknown>) {
+function installBridgeApp(methods: Record<string, unknown>, options?: DesktopHostStubOptions) {
 	const legacySave = methods.SavePastedImageForTarget as ((token: string, dataURL: string) => Promise<string>) | undefined;
 	const legacyPreview = methods.AttachmentDataURLForTarget as ((token: string, path: string) => Promise<string>) | undefined;
 	const unscopedPreview = methods.AttachmentDataURL as ((path: string) => Promise<string>) | undefined;
@@ -113,7 +113,7 @@ function installBridgeApp(methods: Record<string, unknown>) {
 		AttachmentDataURLForTarget: legacyPreview ?? (async () => "data:image/png;base64,iVBORw0KGgo="),
 		AttachmentDataURLForTab: async (_tabID: string, path: string) => unscopedPreview ? unscopedPreview(path) : "data:image/png;base64,iVBORw0KGgo=",
     ...methods,
-  });
+  }, options);
 }
 
 async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}) {
@@ -218,8 +218,6 @@ function oversized(name: string, type: string, bytes: number): File {
 console.log("\ncomposer oversize attachment");
 
 for (const [name, type, bytes] of [
-  ["pack.mrpack", "application/octet-stream", 25 * 1024 * 1024 + 1],
-  ["huge.zip", "application/zip", 900 * 1024 * 1024],
   ["huge.png", "image/png", 64 * 1024 * 1024 + 1],
 ] as const) {
   const dom = installDom();
@@ -261,21 +259,87 @@ for (const [name, type, bytes] of [
   dom.window.close();
 }
 
-{
+for (const entry of ["pick", "paste"] as const) {
+  for (const nativePath of ["", "/repo/releases/large app.apk"]) {
+  for (const [name, type, bytes] of [
+    ["large app.apk", "application/vnd.android.package-archive", 900 * 1024 * 1024],
+    ["pack.zip", "application/zip", 25 * 1024 * 1024 + 1],
+    ["small.zip", "application/zip", 2],
+  ] as const) {
   const dom = installDom();
-  let saves = 0;
-  installBridgeApp({ SavePastedFileForTarget: async () => { saves += 1; return ".reasonix/attachments/x.bin"; } });
+  const label = `${entry} ${nativePath ? "native" : "pathless"} ${name}`;
+  let reads = 0;
+  let digests = 0;
+  let buffered = 0;
+  let legacySaves = 0;
+  const nativeCalls: Array<{ token: string; path: string }> = [];
+  const uploads: Array<{ input: string; init: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    uploads.push({ input: String(input), init });
+    return new Response(JSON.stringify({ path: ".reasonix/attachments/uploaded.apk" }), {
+      status: 201, headers: { "content-type": "application/json" },
+    });
+  };
+  const originalReader = dom.window.FileReader.prototype.readAsDataURL;
+  dom.window.FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) {
+    reads++;
+    return originalReader.call(this, blob);
+  };
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { randomUUID: () => "id", subtle: { digest: async () => { digests++; return new ArrayBuffer(32); } } },
+  });
+  installBridgeApp({
+    SavePastedFileForTarget: async () => { legacySaves++; return ".reasonix/attachments/legacy.bin"; },
+    AttachDroppedForTarget: async (token: string, path: string) => {
+      nativeCalls.push({ token, path });
+      return { kind: "workspace", path: "releases/large app.apk", isDir: false };
+    },
+  }, { getPathForFile: () => nativePath });
   const { root } = await renderComposer({ imageInputEnabled: true });
+  const file = oversized(name, type, bytes);
+  file.arrayBuffer = async () => { buffered++; return new ArrayBuffer(1); };
   await act(async () => {
-    textarea().dispatchEvent(pasteEvent(new File(["pk"], "small.zip", { type: "application/zip", lastModified: 2 })));
+    if (entry === "paste") textarea().dispatchEvent(pasteEvent(file));
+    else {
+      const input = document.querySelector<HTMLInputElement>("input[type=file]");
+      if (!input) throw new Error("file picker did not render");
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
     await flushTimers();
     await flushTimers();
   });
   await waitFor(() => contextItemCount() > 0);
-  eq(saves, 1, "a small archive still reaches the kernel");
-  eq(contextItemCount(), 1, "a small archive is attached");
+  eq(contextItemCount(), 1, `${label}: appears in chat context`);
+  eq(toastText(), "", `${label}: no size or upload error`);
+  eq(reads, 0, `${label}: FileReader never starts`);
+  eq(buffered, 0, `${label}: file bytes never buffered`);
+  eq(digests, 0, `${label}: no full-file digest`);
+  eq(legacySaves, 0, `${label}: no Base64 RPC`);
+  eq(nativeCalls.length, nativePath ? 1 : 0, `${label}: native reference used when available`);
+  eq(uploads.length, nativePath ? 0 : 1, `${label}: HTTP upload only for a pathless file`);
+  if (nativeCalls[0]) {
+    eq(nativeCalls[0].token, "test-attachment-target", `${label}: native reference bound to source target`);
+    eq(nativeCalls[0].path, nativePath, `${label}: original native path preserved`);
+    ok(document.body.textContent?.includes("large app.apk") === true, `${label}: workspace reference is visible`);
+  }
+  if (uploads[0]) {
+    const uploaded = uploads[0];
+    const url = new URL(uploaded.input, "http://localhost/");
+    eq(url.pathname, "/__reasonix_attachment_upload", `${label}: raw upload endpoint`);
+    eq(url.searchParams.get("target"), "test-attachment-target", `${label}: target token preserved`);
+    eq(url.searchParams.get("name"), name, `${label}: filename preserved`);
+    eq(uploaded.init.method, "POST", `${label}: POST upload`);
+    eq(uploaded.init.body, file, `${label}: original File is the request body`);
+    eq(new Headers(uploaded.init.headers).get("content-type"), "application/octet-stream", `${label}: raw binary content type`);
+  }
   await act(async () => root.unmount());
   dom.window.close();
+  globalThis.fetch = originalFetch;
+  }
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

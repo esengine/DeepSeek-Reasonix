@@ -283,9 +283,45 @@ authorises through the existing workspace and media checks.
 
 ## Resource origin
 
+Ordinary files picked, pasted or dropped in Desktop use their native path when
+available. Workspace files keep relative references; external files keep exact
+file references, without copying bytes or granting access to their parent.
+References are restored against the captured composer owner before submission.
+
+Files without native paths use `POST /__reasonix_attachment_upload?target=…&name=…`
+with an `application/octet-stream` body. The shell forwards the body stream and
+cancellation signal to the authenticated resource origin. The service validates
+the captured attachment-target token, writes in 64 KiB chunks, and removes partial
+files on failure or cancellation. It returns `{"path":".reasonix/attachments/…"}`.
+Streaming bounds memory use. To protect disk space, each streamed file defaults
+to a 1 GiB ceiling, counted from actual bytes read even without Content-Length.
+
+Only the user config may set `[attachments] max_stream_bytes = N` in bytes;
+`0` explicitly disables this ceiling, while unset or negative values use the
+default. Project `reasonix.toml` cannot override it. Configuration read failures
+reject uploads.
+
+An exceeded limit removes the partial file and returns HTTP 413:
+`{"code":"attachment.too_large","message":"…","limit_bytes":1073741824,"limit_source":"default"}`.
+The source is `default` or `user`. Native path references do not copy bytes and
+are unaffected by this upload ceiling. Available storage still applies.
+
+Image
+intake retains its 64 MiB limit, and legacy Base64 file APIs retain 25 MiB. The
+shell rejects oversized outgoing RPC frames locally without closing the service.
+
+The saved composer/session JSON fields and attachment paths remain unchanged.
+Native file references use existing absolute-path syntax, so older readers still
+see the source path; exact-file context registration is refreshed by the new
+runtime. No provider system prefix or tool schema changes.
+
+Run `cd desktop/electron && node scripts/attachment-smoke.mjs` after building the
+frontend, shell and Go service to exercise a 120 MiB native file and an 80 MiB
+pathless file through the real Electron application in a disposable home.
+
 The service listens on a loopback port for the existing authorised asset
 handlers (`/__reasonix_workspace_media/…`, `/__reasonix_theme_asset/…`, the
-remote markdown image proxy). The shell serves the packaged UI from the
+remote markdown image proxy) and the exact attachment-upload route. The shell serves the packaged UI from the
 privileged `reasonix://app/` scheme and forwards only those prefixes to the
 resource origin, adding `Authorization: Bearer <token>` in the main process.
 The token never reaches the renderer, a website view, a remote window or an

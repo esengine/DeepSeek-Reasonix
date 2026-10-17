@@ -274,6 +274,9 @@ func normalizeExternalFolderRefToken(token string) string {
 }
 
 func (c *Controller) externalFolderRef(token string) (ref, bool) {
+	if r, ok := c.externalFileRef(token); ok {
+		return r, true
+	}
 	_, rel, abs, ok := c.externalFolderRefTarget(token)
 	if !ok {
 		return ref{}, false

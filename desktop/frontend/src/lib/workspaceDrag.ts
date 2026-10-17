@@ -1,3 +1,5 @@
+import { escapeRefPath, unescapeRefPath } from "./refToken";
+
 export const WORKSPACE_REF_DRAG_TYPE = "application/x-reasonix-workspace-ref";
 
 export interface WorkspaceRefDragPayload {
@@ -7,14 +9,14 @@ export interface WorkspaceRefDragPayload {
 
 export function formatWorkspaceReference(path: string, isDir?: boolean): string {
   const clean = isDir && !path.endsWith("/") ? path + "/" : path;
-  return `@${clean}`;
+  return `@${escapeRefPath(clean)}`;
 }
 
 export function parseWorkspaceReference(text: string): WorkspaceRefDragPayload | null {
   const trimmed = text.trim();
-  const match = /^@(\S+)$/.exec(trimmed);
+  const match = /^@((?:\\[ \t]|[^\s])+)$/.exec(trimmed);
   if (!match) return null;
-  const path = match[1];
+  const path = unescapeRefPath(match[1]);
   if (!path) return null;
   return { path, isDir: path.endsWith("/") };
 }

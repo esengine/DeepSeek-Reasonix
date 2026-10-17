@@ -10,6 +10,7 @@ import { resetCustomShortcuts, saveCustomShortcut } from "../lib/keyboardShortcu
 import { ToastProvider } from "../lib/toast";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
 import { installDesktopHostStub } from "./desktopHostStub";
+import { createFileUploadMock, dispatchPasteFile } from "./fileUploadStub";
 
 let passed = 0;
 let failed = 0;
@@ -941,11 +942,11 @@ console.log("\ncomposer session draft");
   const saveStarted = deferred<void>();
   const savePastedFile = deferred<string>();
   const sent: string[] = [];
-  installBridgeApp({
-    SavePastedFileForTarget: async () => {
-      saveStarted.resolve();
-      return savePastedFile.promise;
-    },
+  installBridgeApp({});
+  const restoreUpload = createFileUploadMock("test-attachment-target", { ok, eq })(async (file) => {
+    eq(file.name, "draft.txt", "pending upload preserves the source file");
+    saveStarted.resolve();
+    return savePastedFile.promise;
   });
   const { root, rerender } = await renderComposer({
     onSend: (text) => {
@@ -953,19 +954,9 @@ console.log("\ncomposer session draft");
     },
   });
   const file = new File(["draft attachment"], "draft.txt", { type: "text/plain", lastModified: 1 });
-  const event = new Event("paste", { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "clipboardData", {
-    configurable: true,
-    value: {
-      files: [file],
-      items: [],
-      types: [],
-      getData: () => "",
-    },
-  });
 
   await act(async () => {
-    textarea().dispatchEvent(event);
+    dispatchPasteFile(textarea(), file);
     await saveStarted.promise;
   });
   await rerender({ insertRequest: { id: 10, text: "session A waits for its attachment", mode: "replace" } });
@@ -993,6 +984,7 @@ console.log("\ncomposer session draft");
     root.unmount();
   });
   dom.window.close();
+  restoreUpload();
 }
 
 {

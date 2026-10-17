@@ -29,6 +29,7 @@ type heldScope struct {
 	network      NetworkConfig
 	endpoints    heldEndpoints
 	bot          BotConfig
+	attachments  AttachmentsConfig
 	// Regional display preferences: a repository must not alter how spend reads.
 	language, currency, displayCurrency string
 }
@@ -38,6 +39,11 @@ func holdUserScope(c *Config) heldScope {
 	s.AllowWrite, s.ForbidRead = slices.Clone(s.AllowWrite), slices.Clone(s.ForbidRead)
 	b.ChromeArgs = slices.Clone(b.ChromeArgs)
 	p.Allow, p.Ask, p.Deny = slices.Clone(p.Allow), slices.Clone(p.Ask), slices.Clone(p.Deny)
+	attachments := c.Attachments
+	if attachments.MaxStreamBytes != nil {
+		value := *attachments.MaxStreamBytes
+		attachments.MaxStreamBytes = &value
+	}
 	return heldScope{
 		sandbox:         s,
 		permissions:     p,
@@ -49,6 +55,7 @@ func holdUserScope(c *Config) heldScope {
 		network:         c.Network,
 		endpoints:       holdUserEndpoints(c),
 		bot:             cloneBotConfig(c.Bot),
+		attachments:     attachments,
 		language:        c.Desktop.Language,
 		currency:        c.Desktop.Currency,
 		displayCurrency: c.Billing.DisplayCurrency,
@@ -144,6 +151,10 @@ func (h heldScope) narrow(c *Config, root string) {
 		c.ignoreProject("bot", "", ProjectUserOnly)
 	}
 	c.Bot = h.bot
+	if !reflect.DeepEqual(c.Attachments, h.attachments) {
+		c.ignoreProject("attachments.max_stream_bytes", "", ProjectUserOnly)
+	}
+	c.Attachments = h.attachments
 	home := reasonixHomeDir()
 	store := NewProjectProgramStore(home)
 	h.gatePrograms(c, store, ws)

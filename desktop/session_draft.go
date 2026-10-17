@@ -800,20 +800,29 @@ func (a *App) resolveDraftExternalRefs(tabID string, request *SessionDraftSubmis
 		return errors.New("session runtime is not ready")
 	}
 	for _, ref := range request.WorkspaceRefs {
-		if !ref.IsDir || !filepath.IsAbs(ref.Path) {
+		if !filepath.IsAbs(ref.Path) {
 			continue
 		}
-		token, _, err := ctrl.RegisterExternalFolderRef(ref.Path)
+		register := ctrl.RegisterExternalFileRef
+		if ref.IsDir {
+			register = ctrl.RegisterExternalFolderRef
+		}
+		token, _, err := register(ref.Path)
 		if err != nil {
 			return err
 		}
-		request.Input = rewriteDraftExternalFolderRef(request.Input, ref.Path, token)
+		if ref.IsDir {
+			request.Input = rewriteDraftExternalFolderRef(request.Input, ref.Path, token)
+		} else {
+			request.Input = rewriteDraftExternalFileRef(request.Input, ref.Path, token)
+		}
 	}
 	return nil
 }
 
 func rewriteDraftExternalFolderRef(input, path, token string) string {
-	old := "@" + strings.TrimSuffix(filepath.Clean(path), string(filepath.Separator)) + "/"
+	old := "@" + control.EscapeRefPath(strings.TrimSuffix(filepath.Clean(path), string(filepath.Separator))) + "/"
+	input = strings.ReplaceAll(input, "@"+strings.TrimSuffix(filepath.Clean(path), string(filepath.Separator))+"/", "@"+strings.Trim(token, "/")+"/")
 	return strings.ReplaceAll(input, old, "@"+strings.Trim(token, "/")+"/")
 }
 
@@ -1284,36 +1293,9 @@ func (a *App) AttachmentDataURLForComposerTarget(target ComposerTarget, rel stri
 }
 
 func (a *App) AttachDroppedForComposerTarget(target ComposerTarget, path string) (DroppedItem, error) {
-	root, _, err := a.composerTargetWorkspace(target)
+	owner, err := a.attachmentTargetForComposerTarget(target)
 	if err != nil {
 		return DroppedItem{}, err
 	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return DroppedItem{}, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return DroppedItem{}, errors.New("dropped path must not be a symlink")
-	}
-	if isImageExt(path) {
-		rel, saveErr := control.SaveImageFileInRoot(root, path)
-		if saveErr == nil {
-			preview, _ := control.ImageDataURLInRoot(root, rel)
-			return DroppedItem{Kind: "attachment", Path: rel, PreviewURL: preview}, nil
-		}
-	}
-	if rel, ok := workspaceRelativeIn(path, root); ok {
-		return DroppedItem{Kind: "workspace", Path: rel, IsDir: info.IsDir()}, nil
-	}
-	if info.IsDir() {
-		// External folders stay as durable draft references. The controller
-		// registers them immediately before first execution; no runtime is built
-		// merely to create the reference chip.
-		return DroppedItem{Kind: "workspace", Path: filepath.Clean(path), IsDir: true, DisplayPath: filepath.Base(path)}, nil
-	}
-	rel, err := control.SaveAttachmentFileInRoot(root, path)
-	if err != nil {
-		return DroppedItem{}, err
-	}
-	return DroppedItem{Kind: "attachment", Path: rel}, nil
+	return a.attachDroppedForTarget(owner, path)
 }

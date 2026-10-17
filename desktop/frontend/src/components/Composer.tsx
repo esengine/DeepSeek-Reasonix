@@ -11,7 +11,7 @@ import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEven
 import { ArrowRight, ArrowUp, Brain, Check, CornerDownRight, Eye, FileText, Folder, Lightbulb, List, MessageSquare, Plus, Search, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
-import { DedupIndex, sha256 } from "../lib/attachDedup";
+import { DedupIndex, sha256, ordinaryFileSource } from "../lib/attachDedup";
 import { splitOversizeAttachments } from "../lib/attachmentLimits";
 import { app, onFilesDropped } from "../lib/bridge";
 import { attachmentExt, attachmentName, baseName, formatAttachmentDisplayReference, hasImageAttachments, sortComposerAttachments, type Attachment } from "../lib/composerAttachments";
@@ -2127,7 +2127,7 @@ export function Composer({
       submissionCapture = onCaptureSubmit?.(persistentSnapshot(snapshotComposerDraft()));
       if (onCaptureSubmit && !submissionCapture) return;
       await onPrepareSubmit?.(submissionCapture);
-      if (bridgeTarget.kind === "session" && currentWorkspaceRefs.some(ref => ref.isDir && ref.path.startsWith("__reasonix_external_folder/"))) {
+      if (bridgeTarget.kind === "session" && currentWorkspaceRefs.length > 0) {
         const { restoreExternalFolderReferences } = await loadAttachmentSubmit();
         await restoreExternalFolderReferences(app, bridgeTarget, currentWorkspaceRefs);
       }
@@ -2449,8 +2449,6 @@ export function Composer({
 		}
 	};
 
-  // Non-image pastes (PDFs, docs): the clipboard hands us bytes, not a path, so
-  // the kernel stores them and we reference the saved path — attached, not ignored.
   const attachOtherFiles = async (files: File[], sourceDraftKey: string) => {
     const owner = persistentTargetsByDraftRef.current[sourceDraftKey];
     if (!attachmentInputEnabled) return;
@@ -2458,21 +2456,26 @@ export function Composer({
 		const others = files.filter((f) => !f.type.startsWith("image/"));
 		if (others.length === 0) return;
 		const attachmentSubmit = await loadAttachmentSubmit();
-			const target = await attachmentSubmit.captureAttachmentTarget(app, sourceBridgeTarget, ["SavePastedFileForTarget"]);
+			const target = await attachmentSubmit.captureAttachmentTarget(app, sourceBridgeTarget, []);
 		try {
 		for (const file of others) {
       updatePendingPasteForDraft(sourceDraftKey, 1);
       try {
-        const key = await fileDedupKey(file);
+        const nativePath = desktopHost().native.getPathForFile?.(file) || "";
+        const key = { hash: "", source: ordinaryFileSource(file, nativePath) };
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
-        const dataUrl = await attachmentSubmit.readFileAsDataURL(file);
-				const path = await app.SavePastedFileForTarget!(target, file.name, dataUrl);
-        addAttachmentToDraft(sourceDraftKey, { path, displayName: file.name }, key, owner);
-      } catch {
+        const item = await attachmentSubmit.attachOrdinaryFile(app, target, file, () => nativePath);
+        if (item.kind === "workspace") {
+          addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir, displayPath: item.displayPath }, owner);
+        } else {
+          addAttachmentToDraft(sourceDraftKey, { path: item.path, displayName: file.name }, key, owner);
+        }
+      } catch (error) {
         console.warn("[composer] failed to attach pasted file");
-        if (owner?.onTaskError) owner.onTaskError(owner.draftId, owner.generation, t("composer.attachFileFailed"));
-        else if (sourceDraftKey === activeDraftKeyRef.current) showToast(t("composer.attachFileFailed"), "warn");
-        // non-fatal: a failed attach must not block normal text input
+        const message = attachmentSubmit.attachmentUploadFailure(error, t("composer.attachFileFailed"), bytes => t("composer.attachTooLarge", { name: file.name, limit: String(bytes / (1024 * 1024)) }));
+        if (sourceDraftKey === activeDraftKeyRef.current && attachmentSubmit.isAttachmentUploadLimitError(error)) showToast(message, "warn", { summary: message });
+        else if (owner?.onTaskError) owner.onTaskError(owner.draftId, owner.generation, message);
+        else if (sourceDraftKey === activeDraftKeyRef.current) showToast(message, "warn");
       } finally {
         updatePendingPasteForDraft(sourceDraftKey, -1);
 			}

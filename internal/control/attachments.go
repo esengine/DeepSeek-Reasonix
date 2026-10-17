@@ -165,34 +165,20 @@ func SaveImageBytesInRoot(root, declaredMime string, raw []byte) (string, error)
 }
 
 func saveAttachmentBytesInRoot(root, ext string, raw []byte) (string, error) {
-	if strings.TrimSpace(root) == "" {
-		root = "."
-	}
-	absRoot, err := filepath.Abs(root)
+	owned, err := createOwnedAttachmentFile(root, ext)
 	if err != nil {
 		return "", err
 	}
-	if err := ensureAttachmentRootIn(absRoot); err != nil {
-		return "", err
-	}
-	rel, f, err := createAttachmentFileIn(absRoot, ext)
-	if err != nil {
-		return "", err
-	}
-	if n, err := f.Write(raw); err != nil {
-		_ = f.Close()
-		_ = os.Remove(filepath.Join(absRoot, rel))
+	defer owned.cleanup()
+	if n, err := owned.Write(raw); err != nil {
 		return "", err
 	} else if n != len(raw) {
-		_ = f.Close()
-		_ = os.Remove(filepath.Join(absRoot, rel))
 		return "", io.ErrShortWrite
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(filepath.Join(absRoot, rel))
+	if err := owned.finish(); err != nil {
 		return "", err
 	}
-	return filepath.ToSlash(rel), nil
+	return filepath.ToSlash(owned.rel), nil
 }
 
 func SaveImageFile(path string) (string, error) {
@@ -588,39 +574,11 @@ func ensureAttachmentRoot() error {
 }
 
 func ensureAttachmentRootIn(base string) error {
-	if info, err := os.Lstat(filepath.Join(base, ".reasonix")); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("attachment path must not contain symlinks")
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("attachment path exists but is not a directory")
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	root := filepath.Join(base, ".reasonix", "attachments")
-	if info, err := os.Lstat(root); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("attachment directory must not be a symlink")
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("attachment path exists but is not a directory")
-		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return err
-	}
-	info, err := os.Lstat(root)
+	directory, err := openAttachmentRootIn(base)
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("attachment directory is invalid")
-	}
-	return nil
+	return directory.Close()
 }
 
 func validateAttachmentDirectories(base string) error {
@@ -739,18 +697,12 @@ func createAttachmentFile(ext string) (string, *os.File, error) {
 }
 
 func createAttachmentFileIn(base, ext string) (string, *os.File, error) {
-	for range maxAttachmentCreateAttempts {
-		rel := attachmentPath(ext)
-		f, err := os.OpenFile(filepath.Join(base, rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if os.IsExist(err) {
-			continue
-		}
-		if err != nil {
-			return "", nil, err
-		}
-		return rel, f, nil
+	owned, err := createOwnedAttachmentFile(base, ext)
+	if err != nil {
+		return "", nil, err
 	}
-	return "", nil, fmt.Errorf("create unique attachment path")
+	_ = owned.directory.Close()
+	return owned.rel, owned.File, nil
 }
 
 func attachmentPath(ext string) string {

@@ -111,6 +111,9 @@ func (a *App) attachmentTargetCurrent(target attachmentTarget) bool {
 }
 
 func (a *App) attachmentTargetInvalidReason(target attachmentTarget) string {
+	if target.ctx != nil && target.ctx.Err() != nil {
+		return "attachment operation cancelled"
+	}
 	if target.tab == nil {
 		if target.draftID == "" {
 			return "missing owner"
@@ -165,7 +168,7 @@ func (a *App) finishAttachmentWrite(target attachmentTarget, rel string, err err
 		return rel, nil
 	}
 	if isAttachmentRefPath(rel) {
-		_ = os.Remove(filepath.Join(target.root, filepath.FromSlash(rel)))
+		_ = control.RemoveStoredAttachment(target.root, rel)
 	}
 	return "", fmt.Errorf("attachment workspace changed while saving; please retry")
 }
@@ -428,6 +431,9 @@ func (a *App) attachDroppedForTarget(target attachmentTarget, path string) (Drop
 	if err != nil {
 		return DroppedItem{}, err
 	}
+	if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+		return DroppedItem{}, fmt.Errorf("dropped path must be a regular file or directory")
+	}
 	if isImageExt(path) {
 		if rel, saveErr := control.SaveImageFileInRoot(target.root, path); saveErr == nil {
 			rel, saveErr = a.finishAttachmentWrite(target, rel, nil)
@@ -436,7 +442,7 @@ func (a *App) attachDroppedForTarget(target attachmentTarget, path string) (Drop
 			}
 			preview, previewErr := a.attachmentDataURLForTarget(target, rel)
 			if previewErr != nil {
-				_ = os.Remove(filepath.Join(target.root, filepath.FromSlash(rel)))
+				_ = control.RemoveStoredAttachment(target.root, rel)
 				return DroppedItem{}, previewErr
 			}
 			return DroppedItem{Kind: "attachment", Path: rel, PreviewURL: preview}, nil
@@ -449,6 +455,20 @@ func (a *App) attachDroppedForTarget(target attachmentTarget, path string) (Drop
 			return DroppedItem{}, fmt.Errorf("attachment workspace changed while reading; please retry")
 		}
 		return DroppedItem{Kind: "workspace", Path: rel, IsDir: info.IsDir()}, nil
+	}
+	if target.draftID != "" {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return DroppedItem{}, err
+		}
+		if !info.IsDir() {
+			abs, err = filepath.EvalSymlinks(abs)
+			if err != nil {
+				return DroppedItem{}, err
+			}
+			abs = filepath.ToSlash(abs)
+		}
+		return DroppedItem{Kind: "workspace", Path: abs, IsDir: info.IsDir(), DisplayPath: filepath.ToSlash(abs)}, nil
 	}
 	if info.IsDir() {
 		if target.tab == nil || target.ctrl == nil {
@@ -473,15 +493,17 @@ func (a *App) attachDroppedForTarget(target attachmentTarget, path string) (Drop
 		}
 		return DroppedItem{Kind: "workspace", Path: token, IsDir: true, DisplayPath: displayPath}, nil
 	}
-	rel, err := control.SaveAttachmentFileInRoot(target.root, path)
+	if target.ctrl == nil || !a.attachmentTargetCurrent(target) {
+		return DroppedItem{}, fmt.Errorf("workspace is not ready")
+	}
+	token, displayPath, err := target.ctrl.RegisterExternalFileRef(path)
 	if err != nil {
 		return DroppedItem{}, err
 	}
-	rel, err = a.finishAttachmentWrite(target, rel, nil)
-	if err != nil {
-		return DroppedItem{}, err
+	if !a.attachmentTargetCurrent(target) {
+		return DroppedItem{}, fmt.Errorf("attachment workspace changed while reading; please retry")
 	}
-	return DroppedItem{Kind: "attachment", Path: rel}, nil
+	return DroppedItem{Kind: "workspace", Path: token, DisplayPath: displayPath}, nil
 }
 
 func isImageExt(path string) bool {

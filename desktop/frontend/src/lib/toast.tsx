@@ -6,11 +6,13 @@ export interface Toast {
   id: number;
   text: string;
   level: "info" | "warn" | "error";
+  summary?: string;
   actionLabel?: string;
   onAction?: () => void;
 }
 
 export interface ToastOptions {
+  summary?: string;
   actionLabel?: string;
   onAction?: () => void;
   durationMs?: number;
@@ -40,7 +42,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const showToast = useCallback((text: string, level: Toast["level"] = "info", options: ToastOptions = {}) => {
     const id = nextId++;
-    setToasts((prev) => [...prev, { id, text, level, actionLabel: options.actionLabel, onAction: options.onAction }]);
+    setToasts((prev) => [...prev, { id, text, level, summary: options.summary, actionLabel: options.actionLabel, onAction: options.onAction }]);
     const timer = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
       timers.current.delete(id);
@@ -63,7 +65,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div key={t.id} className={`toast toast--${t.level}`} onClick={() => dismissToast(t.id)}>
             {t.level === "warn" && <span className="toast__icon">⚠️</span>}
             {t.level === "error" && <span className="toast__icon">❌</span>}
-            <span className="toast__text">{t.level === "info" ? t.text : <ErrorMessage error={t.text} onInspect={() => {
+            <span className="toast__text">{t.level === "info" ? t.text : <ErrorMessage error={t.text} summary={t.summary} onInspect={() => {
               clearTimeout(timers.current.get(t.id));
               timers.current.delete(t.id);
             }} />}</span>

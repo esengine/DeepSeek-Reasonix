@@ -25,6 +25,18 @@ function harness(limit?: number) {
   return { client, written, requests, notifications, errors, feed, lastFrame };
 }
 
+test("oversized outgoing requests never reach or disconnect the service", async () => {
+  const h = harness(256);
+  await assert.rejects(h.client.request("desktop/invoke", { data: "a".repeat(257) }), OversizeFrameError);
+  assert.equal(h.written.length, 0);
+  assert.equal(h.client.pendingCount, 0);
+  assert.equal(h.client.closed, false);
+  const pending = h.client.request("ping", {});
+  const sent = h.lastFrame();
+  h.feed(JSON.stringify({ jsonrpc: "2.0", id: sent.id, result: "pong" }) + "\n");
+  assert.equal(await pending, "pong");
+});
+
 test("LineDecoder reassembles partial lines and strips CR", () => {
   const decoder = new LineDecoder();
   assert.deepEqual(decoder.push(Buffer.from('{"a":')), []);

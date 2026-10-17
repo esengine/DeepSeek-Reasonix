@@ -84,7 +84,7 @@ async function load(entry: Entry) {
       const content=parse(state.contentJson);
       entry.state = state; entry.content = content; entry.error = undefined; entry.unreadable = false;
       const tabId = [...tabs].find(([, key]) => key === keyFor(entry.ref))?.[0];
-      if (tabId && content.workspaceRefs.some(ref => ref.isDir && ref.path.startsWith("__reasonix_external_folder/"))) {
+      if (tabId && content.workspaceRefs.length > 0) {
         const { restoreExternalFolderReferences } = await import("./attachmentSubmit");
         await restoreExternalFolderReferences(app, {kind:"session",session:entry.ref,tabId}, content.workspaceRefs);
       }

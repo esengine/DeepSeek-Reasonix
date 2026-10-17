@@ -1,4 +1,3 @@
-export const MAX_FILE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_IMAGE_ATTACHMENT_BYTES = 64 * 1024 * 1024;
 
 const MIB = 1024 * 1024;
@@ -14,7 +13,7 @@ export function splitOversizeAttachments(files: File[]): { accepted: File[]; ove
   const accepted: File[] = [];
   const oversize: OversizeAttachment[] = [];
   for (const file of files) {
-    const limit = file.type.startsWith("image/") ? MAX_IMAGE_ATTACHMENT_BYTES : MAX_FILE_ATTACHMENT_BYTES;
+    const limit = file.type.startsWith("image/") ? MAX_IMAGE_ATTACHMENT_BYTES : Infinity;
     if (file.size > limit) oversize.push({ file, limitMiB: limit / MIB });
     else accepted.push(file);
   }

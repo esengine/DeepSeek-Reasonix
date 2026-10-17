@@ -426,7 +426,7 @@ func TestAttachDroppedInWorkspaceReferencesInPlace(t *testing.T) {
 	}
 }
 
-func TestAttachDroppedOutsideWorkspaceCopiesToAttachments(t *testing.T) {
+func TestAttachDroppedOutsideWorkspaceReferencesFile(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
@@ -439,8 +439,10 @@ func TestAttachDroppedOutsideWorkspaceCopiesToAttachments(t *testing.T) {
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
+	c := control.New(control.Options{WorkspaceRoot: root})
+	t.Cleanup(c.Close)
 	app := &App{
-		tabs:        map[string]*WorkspaceTab{"project": {ID: "project", WorkspaceRoot: root}},
+		tabs:        map[string]*WorkspaceTab{"project": {ID: "project", WorkspaceRoot: root, Ctrl: c}},
 		activeTabID: "project",
 	}
 
@@ -448,8 +450,8 @@ func TestAttachDroppedOutsideWorkspaceCopiesToAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachDropped: %v", err)
 	}
-	if got.Kind != "attachment" || !strings.HasPrefix(got.Path, ".reasonix/attachments/") || !strings.HasSuffix(got.Path, ".pdf") {
-		t.Fatalf("got %+v, want copied pdf attachment", got)
+	if got.Kind != "workspace" || !filepath.IsAbs(got.Path) || got.DisplayPath == "" {
+		t.Fatalf("got %+v, want exact file reference", got)
 	}
 }
 

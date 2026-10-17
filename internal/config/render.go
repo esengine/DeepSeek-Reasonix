@@ -159,6 +159,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("[telemetry]\n")
 			fmt.Fprintf(&b, "cli_metrics = %q   # CLI content-free usage metrics: auto|on|off; auto requires a local interactive terminal\n\n", c.CLITelemetryMode())
 		}
+		if c.Attachments.MaxStreamBytes != nil {
+			b.WriteString("[attachments]\n")
+			fmt.Fprintf(&b, "max_stream_bytes = %d   # user/global only; ordinary streamed file bytes; 0 = unlimited; unset = 1 GiB\n\n", *c.Attachments.MaxStreamBytes)
+		}
 
 		b.WriteString("[notifications]\n")
 		fmt.Fprintf(&b, "enabled = %v   # system notifications for CLI and desktop turns; default off\n", c.Notifications.Enabled)

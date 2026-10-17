@@ -8,6 +8,20 @@
 
 const HEX = "0123456789abcdef";
 
+const ordinaryFileSources = new WeakMap<File, string>();
+
+// File metadata cannot distinguish two different pathless files with the same
+// name, size and timestamp. Keep object identity without reading their bytes.
+export function ordinaryFileSource(file: File, nativePath: string): string {
+  if (nativePath) return `path:${nativePath}`;
+  let source = ordinaryFileSources.get(file);
+  if (!source) {
+    source = `file:${crypto.randomUUID()}`;
+    ordinaryFileSources.set(file, source);
+  }
+  return source;
+}
+
 function bytesToHex(bytes: Uint8Array): string {
   let out = "";
   for (let i = 0; i < bytes.length; i++) {
