@@ -1628,3 +1628,92 @@ func TestShowReceiptDefaultsOffAndRendersAnOnOverride(t *testing.T) {
 		t.Fatal("ui.show_receipt did not round-trip")
 	}
 }
+
+// The user-scope writer is the path every normal save goes through, so a
+// resolver set by hand has to be in its [network] block. Written after
+// no_proxy and before [network.proxy], because a key placed after that
+// header reads as network.proxy.dns.
+func TestUserRenderKeepsDNSResolvers(t *testing.T) {
+	c := Default()
+	c.Network.DNSServers = []string{"1.1.1.1", "[fd00::1]:5353"}
+	c.Network.DoH = "https://dns.example/dns-query"
+
+	out := RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(out, `dns        = ["1.1.1.1", "[fd00::1]:5353"]`) {
+		t.Fatalf("user render lost dns:\n%s", out)
+	}
+	if !strings.Contains(out, `doh        = "https://dns.example/dns-query"`) {
+		t.Fatalf("user render lost doh:\n%s", out)
+	}
+	proxy := strings.Index(out, "[network.proxy]")
+	if at := networkLineIndex(out, "dns"); at < 0 || at > proxy {
+		t.Fatalf("dns must sit in [network], before [network.proxy]:\n%s", out)
+	}
+	if at := networkLineIndex(out, "doh"); at < 0 || at > proxy {
+		t.Fatalf("doh must sit in [network], before [network.proxy]:\n%s", out)
+	}
+
+	got := Default()
+	if _, err := toml.Decode(out, got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if !reflect.DeepEqual(got.Network.DNSServers, c.Network.DNSServers) {
+		t.Fatalf("dns round-trip = %v, want %v", got.Network.DNSServers, c.Network.DNSServers)
+	}
+	if got.Network.DoH != c.Network.DoH {
+		t.Fatalf("doh round-trip = %q, want %q", got.Network.DoH, c.Network.DoH)
+	}
+}
+
+// A project file must never carry the person's resolvers: a cloned repository
+// could otherwise redirect every lookup the process makes.
+func TestProjectRenderDropsDNSResolvers(t *testing.T) {
+	c := Default()
+	c.Network.DNSServers = []string{"1.1.1.1"}
+	c.Network.DoH = "https://dns.example/dns-query"
+
+	out := RenderTOMLForScope(c, RenderScopeProject)
+	if strings.Contains(out, "dns        =") || strings.Contains(out, "doh        =") {
+		t.Fatalf("project render carried the user's resolvers:\n%s", out)
+	}
+}
+
+// The delta writer puts the keys in [network] too, not under the proxy table.
+func TestProjectDeltaPutsResolversInNetwork(t *testing.T) {
+	c := Default()
+	c.Network.DNSServers = []string{"1.1.1.1"}
+
+	delta := RenderTOMLProjectDelta(c)
+	if !strings.Contains(delta, "dns        =") {
+		t.Fatalf("project delta lost dns:\n%s", delta)
+	}
+	proxy := strings.Index(delta, "[network.proxy]")
+	if at := networkLineIndex(delta, "dns"); proxy >= 0 && at > proxy {
+		t.Fatalf("dns landed after [network.proxy], where it reads as network.proxy.dns:\n%s", delta)
+	}
+}
+
+// The shared renderer has one [peers] table, and a change near it must not drop
+// it: the next save would silently switch messages between sessions off.
+func TestPeersSurviveRender(t *testing.T) {
+	c := Default()
+	c.Peers.Enabled = true
+	if !strings.Contains(RenderTOMLForScope(c, RenderScopeUser), "[peers]") {
+		t.Fatal("[peers] missing from the rendered config")
+	}
+}
+
+// networkLineIndex is where an uncommented `key` line starts, so a commented
+// example cannot stand in for a real setting.
+func networkLineIndex(out, key string) int {
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, key+" ") || strings.HasPrefix(trimmed, key+"=") {
+			return strings.Index(out, line)
+		}
+	}
+	return -1
+}

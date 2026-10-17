@@ -107,6 +107,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# no_proxy   = \"localhost,127.0.0.1,.local\"   # honored for proxy_mode = \"custom\"\n")
 		}
+		if scope != RenderScopeProject {
+			renderNetworkResolvers(&b, c)
+		}
 		b.WriteString("\n[network.proxy]\n")
 		proxyType := c.Network.Proxy.Type
 		if proxyType == "" {
@@ -490,6 +493,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if c.Network.NoProxy != "" {
 			fmt.Fprintf(&b, "no_proxy = %q\n", c.Network.NoProxy)
 		}
+		renderNetworkResolvers(&b, c)
 		if c.Network.Proxy.Type != "" || c.Network.Proxy.Server != "" || c.Network.Proxy.Port > 0 || c.Network.Proxy.Username != "" || c.Network.Proxy.Password != "" {
 			b.WriteString("[network.proxy]\n")
 			pt := c.Network.Proxy.Type
@@ -510,7 +514,6 @@ func RenderTOMLProjectDelta(c *Config) string {
 				fmt.Fprintf(&b, "password = %q\n", c.Network.Proxy.Password)
 			}
 		}
-		renderNetworkResolvers(&b, c)
 		b.WriteString("\n")
 	}
 
