@@ -471,6 +471,7 @@ const SAID: Record<string, string> = {
   "web_access.editing_disabled": "这台服务器没有开启联网搜索与抓取设置的编辑：只有这台电脑上的窗口能改。",
   "web_access.save_failed": "联网搜索与抓取的设置未能保存：{detail}",
   "web_access.unknown_backend": "“{backend}”不是可选的联网后端，未做任何修改。",
+  "web_access.probe_failed": "没能测试这个地址：{detail}",
   "web_access.bad_searxng_url": "SearXNG 地址必须是带主机名的 http(s) 地址，不能含账号、查询串或片段，未做任何修改。",
   "ask_timeout.save_failed": "提问等待时长未能保存：{detail}",
   "ask_timeout.out_of_range": "等待时长超出允许范围，未做任何修改：{detail}",

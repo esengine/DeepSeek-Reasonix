@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/session/control"
@@ -12,6 +13,7 @@ import (
 func (s *Server) registerWebAccessRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /web-access-settings", s.webAccessSettings)
 	mux.HandleFunc("POST /web-access-settings", s.saveWebAccessSettings)
+	mux.HandleFunc("POST /web-access-settings/probe", s.probeSearxng)
 }
 
 func (s *Server) webAccessSettings(w http.ResponseWriter, _ *http.Request) {
@@ -42,4 +44,31 @@ func (s *Server) saveWebAccessSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, saved)
 	}
+}
+
+// probeSearxng sends one test search to the address in the request, so a window
+// can say why an instance fails before the address is saved. It reaches out from
+// this machine to a place the caller names, which is the window's to ask for.
+func (s *Server) probeSearxng(w http.ResponseWriter, r *http.Request) {
+	if !s.grants.at(r).providerEdit {
+		refuse(w, http.StatusForbidden, "web_access.editing_disabled", "web search and fetch settings editing is not enabled on this server", nil)
+		return
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+		badBody(w)
+		return
+	}
+	probe, err := s.ctl().ProbeSearxng(r.Context(), strings.TrimSpace(body.URL))
+	if errors.Is(err, config.ErrBadSearxngURL) {
+		refuse(w, http.StatusBadRequest, "web_access.bad_searxng_url", err.Error(), nil)
+		return
+	}
+	if err != nil {
+		saveFailed(w, http.StatusInternalServerError, "web_access.probe_failed", err)
+		return
+	}
+	writeJSON(w, probe)
 }

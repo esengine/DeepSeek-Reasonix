@@ -118,12 +118,24 @@ func TestEffectSearxngFailureReachesTheNoticeAndTheModelWithACode(t *testing.T) 
 	}), "[tools]\nweb_search_backends = [\"searxng\"]\nsearxng_url = \"SEARX_URL\"\n", sink)
 	mu.Lock()
 	defer mu.Unlock()
-	if len(notices) != 1 || notices[0].Detail != "searxng|status|429||none" {
+	if len(notices) != 1 || notices[0].Detail != "searxng|status|429|search.searxng_status|none" {
 		t.Fatalf("notices = %+v", notices)
 	}
 	results := probe.toolResults()
 	if len(results) != 1 || !strings.Contains(results[0], "search.all_backends_failed") {
 		t.Fatalf("tool results = %v, want the typed refusal", results)
+	}
+}
+
+// An instance whose settings do not list the JSON format refuses with 403; the
+// model is told that cause by its code, not just that every backend failed.
+func TestEffectSearxngWithoutJSONFormatTellsTheModelWhy(t *testing.T) {
+	probe, _ := searchChainSession(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}), "[tools]\nweb_search_backends = [\"searxng\"]\nsearxng_url = \"SEARX_URL\"\n", nil)
+	results := probe.toolResults()
+	if len(results) != 1 || !strings.Contains(results[0], "search.searxng_json_disabled") {
+		t.Fatalf("tool results = %v, want the cause by its code", results)
 	}
 }
 

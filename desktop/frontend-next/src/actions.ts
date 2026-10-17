@@ -554,6 +554,7 @@ export const ACTIONS: UIAction[] = [
   { id: "web-access.backend", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "web-access.move", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "web-access.consent", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "web-access.probe", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "web-access.searxng-url", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "appearance.reading-size", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "appearance.text-size", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

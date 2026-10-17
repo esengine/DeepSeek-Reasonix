@@ -1571,6 +1571,16 @@ searxng_url = "http://localhost:8888"
 每次发生时 Reasonix 会弹出通知，写明后端和原因，再尝试下一个；全部没有回答时，模型收到 `search.all_backends_failed`。
 
 - SearXNG 内部某些引擎被限流，只要还有一个引擎能回答，搜索就不算失败。
+
+设置里的「联网：搜索与抓取」在地址旁有「测试连接」按钮：它向框里的地址发一次搜索，不跟随重定向，并说明这个实例为什么没有应答。真实搜索失败时，模型收到的是同一个码。
+
+| 码 | 含义 | 怎么办 |
+|---|---|---|
+| `search.searxng_json_disabled` | 实例回了 403。SearXNG 在 `settings.yml` 的 `search.formats` 没有 `json` 时就这样回；它前面的反向代理也可能回 403。 | 在 `search.formats` 里加上 `json` 并重启；已有的话检查代理。 |
+| `search.searxng_unreachable` | 这个地址没有任何应答。 | 确认它在运行，主机和端口写对。 |
+| `search.searxng_not_searxng` | 回了 200，但不是 SearXNG 的 JSON 结果。 | 地址要指向 SearXNG 本身，不是登录页或别的服务。 |
+| `search.searxng_redirected` | 这个地址会重定向。 | 直接填最终地址，例如 `https` 的那个。 |
+| `search.searxng_status` | 其他 HTTP 状态，比如 429、500。 | 稍后重试，或查看实例的日志。 |
 - 搜索结果是第三方内容，会向模型标注为外部内容。
 
 ### 付费回退：DeepSeek 搜索接口

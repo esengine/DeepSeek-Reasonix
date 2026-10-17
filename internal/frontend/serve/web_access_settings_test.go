@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/session/control"
+	"reasonix/internal/tools/websearch"
 )
 
 func webAccessFile(t *testing.T) config.WebAccessSettings {
@@ -150,5 +151,84 @@ func TestWebAccessSettingsAreWrittenOnlyWithTheEditGrant(t *testing.T) {
 				t.Fatalf("%s: reading must stay open and show the file unchanged, got %+v", name, got)
 			}
 		})
+	}
+}
+
+func searxngAt(t *testing.T, h http.HandlerFunc) string {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func probeBody(t *testing.T, resp *http.Response) websearch.SearxngProbe {
+	t.Helper()
+	defer resp.Body.Close()
+	var out websearch.SearxngProbe
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestProbeNamesWhyAnInstanceFailsWithoutSavingAnything(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	before, _ := os.ReadFile(config.UserConfigPath())
+
+	refusing := searxngAt(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) })
+	resp := postProvider(t, srv.URL, "/web-access-settings/probe", `{"url":"`+refusing+`"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("probe = %d", resp.StatusCode)
+	}
+	if got := probeBody(t, resp); got.OK || got.Code != websearch.CodeSearxngJSONDisabled || got.Status != http.StatusForbidden {
+		t.Fatalf("probe = %+v, want the JSON format reported as not enabled", got)
+	}
+
+	working := searxngAt(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"results":[]}`)) })
+	if got := probeBody(t, postProvider(t, srv.URL, "/web-access-settings/probe", `{"url":"`+working+`"}`)); !got.OK {
+		t.Fatalf("an instance that answers must read as ok: %+v", got)
+	}
+	if after, _ := os.ReadFile(config.UserConfigPath()); string(after) != string(before) {
+		t.Fatal("a probe must not write the user file")
+	}
+}
+
+func TestProbeUsesTheSavedAddressWhenTheRequestNamesNone(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	saved := searxngAt(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) })
+	postProvider(t, srv.URL, "/web-access-settings", `{"searxng_url":"`+saved+`"}`).Body.Close()
+	if got := probeBody(t, postProvider(t, srv.URL, "/web-access-settings/probe", `{}`)); got.Code != websearch.CodeSearxngStatus || got.Status != http.StatusTooManyRequests {
+		t.Fatalf("probe = %+v, want the saved instance's refusal", got)
+	}
+}
+
+func TestProbeRefusesWithoutTheWindowsGrantAndForABadAddress(t *testing.T) {
+	denied := httptest.NewServer(operatorHandler(newProviderEditServer(t)))
+	defer denied.Close()
+	reached := make(chan struct{}, 1)
+	target := searxngAt(t, func(http.ResponseWriter, *http.Request) { reached <- struct{}{} })
+	resp := postProvider(t, denied.URL, "/web-access-settings/probe", `{"url":"`+target+`"}`)
+	if resp.StatusCode != http.StatusForbidden || webAccessRefusal(t, resp) != "web_access.editing_disabled" {
+		t.Fatalf("a server that did not open provider editing must refuse the probe: %d", resp.StatusCode)
+	}
+	select {
+	case <-reached:
+		t.Fatal("a refused probe must not send a request")
+	default:
+	}
+
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	allowed := httptest.NewServer(operatorHandler(s))
+	defer allowed.Close()
+	resp = postProvider(t, allowed.URL, "/web-access-settings/probe", `{"url":"file:///etc/passwd"}`)
+	if resp.StatusCode != http.StatusBadRequest || webAccessRefusal(t, resp) != "web_access.bad_searxng_url" {
+		t.Fatalf("a non-http address: %d", resp.StatusCode)
 	}
 }

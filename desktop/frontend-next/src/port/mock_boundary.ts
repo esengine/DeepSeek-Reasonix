@@ -1,5 +1,5 @@
 import type { Adjudications, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, PeerReceipt, PeersState, PeersSettings, PeersSettingsEdit, PeerRemember, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings, UpdateMode } from "./port";
-import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, WebAccessPatch, WebAccessSettings, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
+import type { AskTimeoutSettings, AutoArchiveSettings, ChangedFilesSettings, FoldWorkSettings, TurnNarrationSettings, WebAccessPatch, WebAccessSettings, SearxngProbe, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
 import { HttpError } from "./http_error";
 import { MockShell } from "./mock_shell";
 
@@ -268,6 +268,10 @@ export class MockBoundary extends MockShell {
   async saveWebAccessSettings(patch: WebAccessPatch): Promise<WebAccessSettings> {
     this.webAccess = { ...this.webAccess, ...patch };
     return { ...this.webAccess };
+  }
+
+  async probeSearxng(url: string): Promise<SearxngProbe> {
+    return url.trim() ? { ok: true } : { ok: false, code: "search.searxng_unreachable" };
   }
 
   async saveFoldWorkSettings(fold: boolean): Promise<FoldWorkSettings> {

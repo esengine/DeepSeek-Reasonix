@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import { HttpError } from "../port/http_error";
-import type { AgentPort, WebAccessPatch, WebAccessSettings } from "../port/port";
+import type { AgentPort, SearxngProbe, WebAccessPatch, WebAccessSettings } from "../port/port";
 import { Group } from "./Group";
 import { Switch } from "./Switch";
 
@@ -16,6 +16,16 @@ const NOTE: Record<Kind, Record<string, string>> = {
   search: { searxng: "你自己部署的搜索服务，免费，需要填它的地址。", deepseek_api: "DeepSeek 官方的搜索接口，按次计费。" },
   fetch: { local: "由本机直接下载网页，免费。", deepseek_api: "DeepSeek 官方的网页抓取接口，按次计费。" },
 };
+const PROBE: Record<string, string> = {
+  "search.searxng_json_disabled": "这个 SearXNG 没有开启 JSON 格式：在它的 settings.yml 的 search.formats 里加上 json，然后重启它。",
+  "search.searxng_unreachable": "连不上这个地址：检查它是否在运行，地址和端口是否写对。",
+  "search.searxng_not_searxng": "这个地址有应答，但不是 SearXNG 的 JSON 搜索结果：确认地址指向 SearXNG 本身，而不是登录页或别的服务。",
+  "search.searxng_redirected": "这个地址把请求转到了别处：请直接填 SearXNG 的最终地址。",
+};
+const probeSaid = (r: SearxngProbe) =>
+  r.ok ? t("连通：这个 SearXNG 能返回 JSON 搜索结果。")
+    : PROBE[r.code ?? ""] ? t(PROBE[r.code ?? ""])
+      : t("这个 SearXNG 拒绝了测试搜索（HTTP {status}）：稍后重试，或查看它的日志。", { status: String(r.status ?? "") });
 const said = (kind: Kind, id: string) => (NAME[kind][id] ? t(NAME[kind][id]) : id);
 
 /** Where the agent looks things up and reads pages from: an ordered list per
@@ -26,6 +36,8 @@ export function WebAccess({ port }: { port: AgentPort }) {
   const [state, setState] = useState<WebAccessSettings | null>(null);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [probe, setProbe] = useState<SearxngProbe | null>(null);
+  const [probing, setProbing] = useState(false);
   const [error, setError] = useState("");
   // A window the server has not granted editing to is read-only; the first refused
   // save is how that is learned, and nothing here asks again.
@@ -57,6 +69,20 @@ export function WebAccess({ port }: { port: AgentPort }) {
       setBusy(false);
     }
   }, [port]);
+
+  const test = async () => {
+    setProbing(true);
+    setProbe(null);
+    setError("");
+    try {
+      setProbe(await port.probeSearxng(url.trim()));
+    } catch (e) {
+      if (e instanceof HttpError && e.reason?.code === "web_access.editing_disabled") setReadOnly(true);
+      setError(reason(e));
+    } finally {
+      setProbing(false);
+    }
+  };
 
   if (!state) return null;
   const locked = busy || readOnly;
@@ -113,6 +139,10 @@ export function WebAccess({ port }: { port: AgentPort }) {
             <input id="searxng-url" className="peerfield" data-action-change="web-access.searxng-url" aria-label={t("SearXNG 地址")} placeholder="http://127.0.0.1:8080"
               value={url} disabled={locked} onChange={(e) => setUrl(e.target.value)}
               onBlur={() => { if (url.trim() !== state.searxng_url) void apply({ searxng_url: url.trim() }); }} />
+            <div className="wa-test">
+              <button className="act" data-action="web-access.probe" disabled={readOnly || probing || !url.trim()} onClick={() => void test()}>{probing ? t("正在测试…") : t("测试连接")}</button>
+              {probe && <div className={probe.ok ? "peernote" : "peernote bad"} role="status">{probeSaid(probe)}</div>}
+            </div>
           </div>
         )}
       </div>

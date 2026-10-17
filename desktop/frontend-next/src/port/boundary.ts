@@ -243,6 +243,13 @@ export interface WebAccessSettings {
   path: string;
 }
 
+// What one test search to a SearXNG address showed. code is empty when it answered.
+export interface SearxngProbe {
+  ok: boolean;
+  code?: string;
+  status?: number;
+}
+
 export type WebAccessPatch = Partial<Pick<WebAccessSettings, "search_backends" | "searxng_url" | "search_paid_allowed" | "fetch_backends" | "fetch_paid_allowed">>;
 
 export interface ChangedFilesSettings {

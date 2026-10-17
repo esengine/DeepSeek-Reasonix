@@ -2004,6 +2004,16 @@ A backend counts as not answering when:
 Each time that happens Reasonix shows a notice naming the backend and the cause, then tries the next one. If none answers, the model receives `search.all_backends_failed`.
 
 - Engines inside SearXNG that rate-limit you do not fail a search while one engine still answers.
+
+In Settings, **Web access** has a **Test connection** button beside the address. It sends one search to the address in the field, follows no redirect, and says why the instance does not answer. The model is told the same code when a real search fails.
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `search.searxng_json_disabled` | The instance answered 403. SearXNG does that when `json` is not in `search.formats` of its `settings.yml`; a reverse proxy in front of it can also answer 403. | Add `json` to `search.formats` and restart it; if that is set, look at the proxy. |
+| `search.searxng_unreachable` | Nothing answered at the address. | Check that it runs and that host and port are right. |
+| `search.searxng_not_searxng` | It answered 200 but not with SearXNG's JSON results. | Point at SearXNG itself, not a login page or another service. |
+| `search.searxng_redirected` | The address redirects. | Enter the final address, for example the `https` one. |
+| `search.searxng_status` | Any other HTTP status, for example 429 or 500. | Retry later or read the instance's log. |
 - Results are third-party content and are labelled as such to the model.
 
 ### Paid fallback: the DeepSeek Search API

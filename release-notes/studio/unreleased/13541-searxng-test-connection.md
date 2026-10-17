@@ -1,0 +1,2 @@
+- 设置里的 SearXNG 地址旁新增「测试连接」，说明连不上的原因（未开 JSON 格式、无应答、不是 SearXNG、被重定向）；搜索失败时模型也收到同一原因码。关联 #13541。
+- A Test connection button beside the SearXNG address says why an instance does not answer (JSON off, no answer, not SearXNG, redirected); the model gets the same code. Refs #13541.
