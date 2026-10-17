@@ -107,10 +107,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# no_proxy   = \"localhost,127.0.0.1,.local\"   # honored for proxy_mode = \"custom\"\n")
 		}
-		if scope != RenderScopeProject {
-			renderNetworkResolvers(&b, c)
-		}
-		b.WriteString("\n[network.proxy]\n")
+		renderNetworkResolvers(&b, c)
 		proxyType := c.Network.Proxy.Type
 		if proxyType == "" {
 			proxyType = "socks5"
@@ -739,16 +736,6 @@ func shouldRenderNetwork(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.Network, defaults.Network)
-}
-
-// networkDeltaDiffers reports whether the project delta has anything to write in
-// [network]. The resolver setting is user-only, so it is compared out here: left
-// in, a config whose only difference is `dns` would emit a bare header with
-// nothing under it.
-func networkDeltaDiffers(c, defaults *Config) bool {
-	a, b := c.Network, defaults.Network
-	a.NetworkResolverConfig, b.NetworkResolverConfig = NetworkResolverConfig{}, NetworkResolverConfig{}
-	return !reflect.DeepEqual(a, b)
 }
 
 func shouldRenderEnvironment(c, defaults *Config, scope RenderScope) bool {

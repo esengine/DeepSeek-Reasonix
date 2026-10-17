@@ -38,17 +38,11 @@ const (
 	aliveTTL = 30 * time.Second
 )
 
-// installOnce guards the one write this package makes to net.DefaultResolver.
-//
-// It is a once rather than a guard keyed by setting because the standard library
-// reads that variable without synchronisation: any write after lookups have begun
-// is a race on this side, whatever lock orders it. Studio builds one runtime per
-// pane in one process, so a per-build install would be exactly that write — with
-// DoH it would also wrap the previous resolver as its bootstrap, one layer per
-// pane. The setting is therefore applied once, and a changed setting takes effect
-// on the next start.
-//
-// A pointer, so a test can start from a fresh guard without copying the lock.
+// installOnce guards the one write to net.DefaultResolver. A once rather than a
+// per-setting guard: the standard library reads that variable without
+// synchronisation, so a write after lookups begin races whatever lock orders it,
+// and with DoH a per-build install would stack resolvers as each other's
+// bootstrap. A changed setting applies on next start.
 var installOnce = new(sync.Once)
 
 // install points the process default at the resolver build makes, if nothing has
@@ -60,12 +54,10 @@ func install(build func() *net.Resolver) {
 }
 
 // Install points the default resolver at the servers named, and does nothing
-// when none are. The caller reads the environment and parses it, because a
-// build bound to a home other than the process's must be told what to ask
-// rather than infer it.
-//
-// It runs from an `init` in the command, so it is the first install when
-// REASONIX_DNS names servers, and later installs leave its resolver in place.
+// when none are. The caller reads the environment and parses it, because a build
+// bound to a home other than the process's must be told what to ask rather than
+// infer it. It runs from an `init` in the command, so it is the first install
+// when REASONIX_DNS names servers.
 func Install(servers []string) {
 	if len(servers) == 0 {
 		return
@@ -78,18 +70,14 @@ func Install(servers []string) {
 // InstallConfigured points name resolution at what the person asked for, which
 // is what makes the `[network]` setting mean anything. DoH wins when both are
 // set: a bare server is faster but still fails where the path is tampered with.
-// An empty call changes nothing, which keeps every other install on the
-// system's own resolver.
-//
-// The install happens once per process: with neither setting present nothing is
-// written, and a setting changed while running takes effect on the next start.
+// An empty call changes nothing; the install happens once per process, so a
+// setting changed while running takes effect on the next start.
 func InstallConfigured(servers []string, doh string, proxy func(*http.Request) (*url.URL, error)) {
 	if endpoint := strings.TrimSpace(doh); endpoint != "" {
 		install(func() *net.Resolver {
-			// The resolver about to be replaced is the one that can still
-			// resolve the endpoint's own hostname: after the swap, anything
-			// asking the process default would be asking this resolver to
-			// resolve itself.
+			// The resolver being replaced is the one that can still resolve the
+			// endpoint's own hostname: after the swap, asking the process default
+			// would be asking this resolver to resolve itself.
 			return dohResolver(endpoint, net.DefaultResolver, proxy)
 		})
 		return
