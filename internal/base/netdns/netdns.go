@@ -47,7 +47,9 @@ const (
 // DoH it would also wrap the previous resolver as its bootstrap, one layer per
 // pane. The setting is therefore applied once, and a changed setting takes effect
 // on the next start.
-var installOnce sync.Once
+//
+// A pointer, so a test can start from a fresh guard without copying the lock.
+var installOnce = new(sync.Once)
 
 // install points the process default at the resolver build makes, if nothing has
 // installed one yet.

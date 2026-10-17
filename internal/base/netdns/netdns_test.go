@@ -378,11 +378,12 @@ func answerQuestion(query []byte) []byte {
 }
 
 // resetInstall gives one test the process's first install, and puts the resolver
-// back afterwards, so tests cannot stand in for each other.
+// back afterwards, so tests cannot stand in for each other. The guard is a
+// pointer, so a fresh one is swapped in rather than copied.
 func resetInstall(t *testing.T) {
 	t.Helper()
 	beforeResolver, beforeOnce := net.DefaultResolver, installOnce
-	installOnce = sync.Once{}
+	installOnce = new(sync.Once)
 	t.Cleanup(func() {
 		net.DefaultResolver, installOnce = beforeResolver, beforeOnce
 	})
