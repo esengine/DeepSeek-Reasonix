@@ -416,7 +416,12 @@ function bootstrap(dataHome: string): void {
     {
       binary: serviceBinary,
       args: ["--host-rpc"],
-      env: process.env,
+      env: {
+        ...process.env,
+        REASONIX_MCP_BRIDGE: process.env.REASONIX_MCP_BRIDGE?.trim() || (app.isPackaged
+          ? join(process.resourcesPath, "mcp-bridge.js")
+          : join(app.getAppPath(), "..", "..", "mcp-bridge.js")),
+      },
       onStderr: (chunk) => {
         serviceLog.write(chunk);
         if (!app.isPackaged) process.stderr.write(chunk);

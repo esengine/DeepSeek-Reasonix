@@ -251,6 +251,13 @@ func TestCogneeTaskRecordRedactsBoundsAndRejectsTrivialOutcome(t *testing.T) {
 	}
 }
 
+func TestCogneeSummaryFailureNoticeIncludesRedactedCause(t *testing.T) {
+	notice := cogneeSummaryFailureNotice(fmt.Errorf("provider timeout api_key=secret-value at C:\\Users\\Alice\\repo"))
+	if !strings.Contains(notice, "provider timeout") || strings.Contains(notice, "secret-value") || strings.Contains(notice, `C:\Users\Alice\repo`) {
+		t.Fatalf("summary failure notice = %q, want a useful redacted cause", notice)
+	}
+}
+
 func TestCogneeMemoryEligibilitySeparatesSessionAndGraph(t *testing.T) {
 	cases := []struct {
 		name     string

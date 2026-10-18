@@ -194,7 +194,7 @@ export const WINDOWS_FLAT_PAYLOAD = Object.freeze([
   "reasonix-uninstall.exe",
 ]);
 
-const APP_RESOURCES = ["resources/app.asar", "resources/app/index.html", "resources/build.json", "resources/icons/appicon.png", "resources/icons/trayTemplate.png", "resources/icons/trayTemplate@2x.png"];
+const APP_RESOURCES = ["resources/app.asar", "resources/app/index.html", "resources/build.json", "resources/mcp-bridge.js", "resources/icons/appicon.png", "resources/icons/trayTemplate.png", "resources/icons/trayTemplate@2x.png"];
 
 function darwinBundleMembers() {
   const helper = (kind) => `Contents/Frameworks/${PRODUCT.name} Helper (${kind}).app/Contents/MacOS/${PRODUCT.name} Helper (${kind})`;
@@ -210,6 +210,7 @@ function darwinBundleMembers() {
     "Contents/Resources/app.asar",
     "Contents/Resources/app/index.html",
     "Contents/Resources/build.json",
+    "Contents/Resources/mcp-bridge.js",
     "Contents/Resources/icons/appicon.png",
     "Contents/Resources/icons/trayTemplate.png",
     "Contents/Resources/icons/trayTemplate@2x.png",
@@ -245,6 +246,7 @@ const MEMBERS = {
       new RegExp(`^${VERSION_DIR}/app/resources/app\\.asar$`),
       new RegExp(`^${VERSION_DIR}/app/resources/app/index\\.html$`),
       new RegExp(`^${VERSION_DIR}/app/resources/build\\.json$`),
+      new RegExp(`^${VERSION_DIR}/app/resources/mcp-bridge\\.js$`),
     ],
     forbidden: ["reasonix-guard.exe", "reasonix-desktop.exe"],
   },

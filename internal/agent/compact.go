@@ -440,6 +440,12 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 // runSummaryRequest admits, sends, and drains one summary request.
 // Named returns so defer can attach RequestCount and still return usage.
 func (a *Agent) runSummaryRequest(ctx context.Context, req provider.Request) (summary string, usage *provider.Usage, err error) {
+	return a.runSummaryRequestWithOptions(ctx, req, a.summaryOutputBudget(), true)
+}
+
+// runSummaryRequestWithOptions runs an auxiliary summary request with an explicit
+// output cap and controls whether reasoning-only provider output is acceptable.
+func (a *Agent) runSummaryRequestWithOptions(ctx context.Context, req provider.Request, maxTokens int, allowReasoning bool) (summary string, usage *provider.Usage, err error) {
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
@@ -463,6 +469,9 @@ func (a *Agent) runSummaryRequest(ctx context.Context, req provider.Request) (su
 	}
 	if budget := a.summaryOutputBudget(); req.MaxTokens > budget {
 		req.MaxTokens = budget
+	}
+	if maxTokens > 0 && req.MaxTokens > maxTokens {
+		req.MaxTokens = maxTokens
 	}
 	if req.MaxTokens < 256 {
 		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)
@@ -498,13 +507,12 @@ func (a *Agent) runSummaryRequest(ctx context.Context, req provider.Request) (su
 				}
 				s := strings.TrimSpace(b.String())
 				if s == "" {
-					// Thinking providers may answer with reasoning_content only. Surface
-					// it as the briefing unless the turn also reached for tools: that
-					// reasoning is private chain-of-thought, not digest material.
 					r := strings.TrimSpace(reasoning.String())
-					if r == "" || toolCalls > 0 {
+					if !allowReasoning || r == "" || toolCalls > 0 {
 						return "", usage, errSummaryEmpty
 					}
+					// Existing compaction accepts reasoning-only output as a briefing
+					// when no tools were called. Memory summaries explicitly reject it.
 					return truncateUTF8Bytes(r, summaryReasoningMaxBytes), usage, nil
 				}
 				return s, usage, nil

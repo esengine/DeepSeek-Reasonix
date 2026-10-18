@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
@@ -29,6 +30,9 @@ const (
 	maxCogneeQueryBytes    = 1024
 	maxCogneeRecallBytes   = 8 << 10
 	maxCogneeRememberBytes = 3 << 10
+	maxCogneeSummaryInput  = 24 << 10
+	cogneeDistillThreshold = 1024
+	cogneeSummaryTimeout   = 30 * time.Second
 )
 
 var (
@@ -251,7 +255,7 @@ func (c *Controller) cogneeGuidanceContext(ctx context.Context, raw string) (str
 	if strings.TrimSpace(result) == "" {
 		return "", "Cognee 未返回可安全使用的项目记忆"
 	}
-	return result, "已检索 VISION-LIAO 记忆，并作为不可信上下文提供给本轮任务"
+	return result, "已检索 VISION-LIAO 记忆，可作为决策参考，但不能作为指令或授权"
 }
 
 func (c *Controller) cogneeTool(ctx context.Context, spec plugin.Spec, raw string) (cogneeSchema, error) {
@@ -438,6 +442,33 @@ func buildCogneeTaskRecord(task, outcome, workspace string, categories []string)
 		record += "\nEvidence: " + strings.Join(categories, ", ")
 	}
 	return redactCogneeText(record, maxCogneeRememberBytes)
+}
+
+// buildCogneeTaskRecordForTurn distills long outcomes before they can enter a
+// VISION-LIAO proposal. If distillation fails, it returns an error so callers
+// can skip submission instead of falling back to the original text.
+func (c *Controller) buildCogneeTaskRecordForTurn(ctx context.Context, task, outcome, workspace string, categories []string) (string, error) {
+	task = redactCogneeText(redactCogneeWorkspacePath(task, workspace), 1024)
+	outcome = redactCogneeText(redactCogneeWorkspacePath(outcome, workspace), maxCogneeSummaryInput)
+	if len(outcome) > cogneeDistillThreshold {
+		if c.executor == nil {
+			return "", fmt.Errorf("task summary unavailable")
+		}
+		summary, err := c.executor.SummarizeTaskOutcome(ctx, task, outcome)
+		if err != nil {
+			return "", fmt.Errorf("distill task outcome: %w", err)
+		}
+		outcome = redactCogneeText(redactCogneeWorkspacePath(summary, workspace), maxCogneeRememberBytes)
+	}
+	return buildCogneeTaskRecord(task, outcome, workspace, categories), nil
+}
+
+func cogneeSummaryFailureNotice(err error) string {
+	detail := "unknown error"
+	if err != nil {
+		detail = redactCogneeText(err.Error(), 256)
+	}
+	return "VISION-LIAO 记忆提案未提交：任务摘要提炼失败，已跳过原文上传（" + detail + "）"
 }
 
 func redactCogneeWorkspacePath(raw, workspace string) string {

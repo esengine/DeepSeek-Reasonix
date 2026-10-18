@@ -317,7 +317,13 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	err = o.executeApprovedPlan(ctx)
 	if err == nil && !turn.synthetic && turn.goalRound == nil && c.executor != nil && c.cogneeMemoryEnabled() {
 		snapshot := c.executor.CompletionSnapshot()
-		record := buildCogneeTaskRecord(turn.raw, lastAssistantText(c.History()), c.WorkspaceRoot(), snapshot.EvidenceCategories)
+		summaryCtx, cancelSummary := context.WithTimeout(ctx, cogneeSummaryTimeout)
+		record, summaryErr := c.buildCogneeTaskRecordForTurn(summaryCtx, turn.raw, lastAssistantText(c.History()), c.WorkspaceRoot(), snapshot.EvidenceCategories)
+		cancelSummary()
+		if summaryErr != nil {
+			c.cogneeNotice(cogneeSummaryFailureNotice(summaryErr))
+			return err
+		}
 		sessionEligible, graphEligible := cogneeMemoryEligibility(snapshot, record)
 		if !sessionEligible {
 			if snapshot.TodosWritten && !snapshot.TodosComplete {

@@ -29,6 +29,7 @@ import { frontendProducerAttempt, verifyFrontendArtifact } from "../frontend/scr
 
 const desktop = dirname(dirname(fileURLToPath(import.meta.url)));
 const repo = dirname(desktop);
+const mcpBridge = join(repo, "mcp-bridge.js");
 const [spec, version, channel = "stable"] = process.argv.slice(2);
 if (!spec || !version) {
   console.error("usage: package.mjs <os/arch> <version> [channel]");
@@ -58,6 +59,7 @@ function require(path, what) {
 }
 
 const frontendDist = join(desktop, "frontend", "dist");
+require(mcpBridge, "Chrome MCP bridge");
 if (process.env.REASONIX_PACKAGE_REUSE_FRONTEND === "1") {
   const pnpmVersion = (process.env.REASONIX_FRONTEND_PNPM_VERSION ?? "").trim();
   if (!pnpmVersion) throw new Error("REASONIX_FRONTEND_PNPM_VERSION is required when reusing a frontend artifact");
@@ -182,7 +184,7 @@ try {
     identity,
     root: desktop,
     electronVersion,
-    extraResources: [join(staging, "app"), join(staging, "icons"), join(staging, "build.json")],
+    extraResources: [join(staging, "app"), join(staging, "icons"), join(staging, "build.json"), mcpBridge],
     icon,
   });
   options.sanitizePackageJson = [defaultSanitizePackageJson, (pkg) => sanitizeShellPackageJson(pkg, { version, productName: PRODUCT.name })];
