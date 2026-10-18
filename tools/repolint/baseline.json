@@ -1696,7 +1696,7 @@
       "file-size": 686
     },
     "tools/repolint/frontendparity.go": {
-      "frontend-parity": 8
+      "frontend-parity": 13
     }
   }
 }

@@ -47,6 +47,11 @@ var frontendScopes = []frontendScope{
 	{method: "SetMCPServerEnabled", pkg: "internal/frontend/acp", issue: "#13660", reason: "enabling a project server approves its command and persists; approval belongs where the command is shown"},
 	{method: "ClearMCPServerOverride", pkg: "internal/frontend/acp", issue: "#13660", reason: "rewrites the persistent activation record that ACP leaves alone"},
 	{method: "SubmitHTTPFormat", pkg: "internal/frontend/acp", issue: "#13644", reason: "applies an HTTP request's response_format; ACP prompts carry no structured-output field"},
+	{method: "CustomCommand", pkg: "internal/frontend/serve", issue: "#13662", reason: "the controller's submit path resolves a custom command, so serve inherits it by submitting the line; ACP resolves it itself because its slash handling runs before submit"},
+	{method: "MCPPrompt", pkg: "internal/frontend/serve", issue: "#13662", reason: "resolved inside submit, as a custom command is"},
+	{method: "EnqueueInbox", pkg: "internal/frontend/serve", issue: "#13662", reason: "serve admits queue items with TryEnqueueFollowup and TryEnqueueAndSteer, which enqueue and dispatch when idle"},
+	{method: "TryEnqueueFollowup", pkg: "internal/frontend/acp", issue: "#13662", reason: "ACP enqueues without dispatch and drains the queue itself"},
+	{method: "ReplayPendingPromptsWith", pkg: "internal/frontend/acp", issue: "#13662", reason: "an SSE hand-off that closes an attach race; ACP has one stdio connection and no re-attach"},
 }
 
 const frontendScopeFile = "tools/repolint/frontendparity.go"
