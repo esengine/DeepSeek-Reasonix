@@ -2461,10 +2461,7 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 	if m.nativeScrollback {
 		return
 	}
-	lines := make([]string, len(vis))
-	for i, ln := range vis {
-		lines[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
-	}
+	lines := m.wrapOutputLines(vis)
 	m.rewriteConnectorBlock(m.toolStreamIdx, lines)
 }
 
@@ -2734,6 +2731,27 @@ func (m *chatTUI) printSubagentProgressScrollback(id string, sp *cliSubagentProg
 	}
 }
 
+// wrapOutputLines expands each raw output line into width-bounded lines. Without
+// this the terminal soft-wraps long lines itself, which drops them out of the
+// connector gutter and shreds the surrounding card layout.
+func (m *chatTUI) wrapOutputLines(lines []string) []string {
+	w := max(m.width-len([]rune(connector)), 8)
+	out := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		for wl := range strings.SplitSeq(ansi.Wrap(expandTabs(ln), w, ""), "\n") {
+			out = append(out, dim(wl))
+		}
+	}
+	return out
+}
+
+// wrapShellPreview renders the collapsed shell preview: the first shellPreviewLines
+// raw lines, each wrapped to the viewport, plus the "… N more lines (Ctrl+B)" hint.
+func (m *chatTUI) wrapShellPreview(lines []string) []string {
+	out := m.wrapOutputLines(lines[:min(shellPreviewLines, len(lines))])
+	return append(out, dim(fmt.Sprintf("… %d more lines (Ctrl+B)", len(lines)-shellPreviewLines)))
+}
+
 // collapseToolOutput replaces a finished tool's live block with a dim
 // "⎿ N lines" summary, so the scrollback keeps a marker of the run without the
 // full output (which the model already received). For shell commands ("shell-"
@@ -2754,18 +2772,9 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 				lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 				total := len(lines)
 				if total > shellPreviewLines {
-					preview := make([]string, shellPreviewLines+1)
-					for i := range shellPreviewLines {
-						preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
-					}
-					preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-					m.commitConnectorBlock(preview)
+					m.commitConnectorBlock(m.wrapShellPreview(lines))
 				} else {
-					rendered := make([]string, total)
-					for i, ln := range lines {
-						rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
-					}
-					m.commitConnectorBlock(rendered)
+					m.commitConnectorBlock(m.wrapOutputLines(lines))
 				}
 				m.shellTranscriptIdx[id] = len(m.transcript) - 1
 			} else {
@@ -2843,18 +2852,9 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 		total := len(lines)
 		if total > shellPreviewLines {
-			preview := make([]string, shellPreviewLines+1)
-			for i := range shellPreviewLines {
-				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
-			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-			m.rewriteConnectorBlock(idx, preview)
+			m.rewriteConnectorBlock(idx, m.wrapShellPreview(lines))
 		} else {
-			rendered := make([]string, total)
-			for i, ln := range lines {
-				rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
-			}
-			m.rewriteConnectorBlock(idx, rendered)
+			m.rewriteConnectorBlock(idx, m.wrapOutputLines(lines))
 		}
 	} else {
 		m.rewriteConnectorBlock(idx, []string{dim(fmt.Sprintf("%d lines", n))})
@@ -2884,30 +2884,18 @@ func (m *chatTUI) toggleShellOutput() {
 	}
 	lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 	total := len(lines)
-	innerW := m.width - len([]rune(connector))
-	if innerW < 10 {
-		innerW = 80
-	}
 
 	if m.shellExpanded[lastID] {
 		// Collapse back to preview.
 		m.shellExpanded[lastID] = false
 		if total > shellPreviewLines {
-			preview := make([]string, shellPreviewLines+1)
-			for i := range shellPreviewLines {
-				preview[i] = dim(clampPlain(lines[i], innerW))
-			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-			m.rewriteConnectorBlock(lastIdx, preview)
+			m.rewriteConnectorBlock(lastIdx, m.wrapShellPreview(lines))
 		}
 	} else {
 		// Expand: show up to shellExpandMaxLines lines.
 		m.shellExpanded[lastID] = true
 		show := min(total, shellExpandMaxLines)
-		rendered := make([]string, show)
-		for i := range show {
-			rendered[i] = dim(clampPlain(lines[i], innerW))
-		}
+		rendered := m.wrapOutputLines(lines[:show])
 		if total > shellExpandMaxLines {
 			rendered = append(rendered, dim(fmt.Sprintf("… %d more lines", total-shellExpandMaxLines)))
 		}
