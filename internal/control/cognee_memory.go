@@ -437,9 +437,16 @@ func buildCogneeTaskRecord(task, outcome, workspace string, categories []string)
 	case "ok", "done", "完成", "好的", "收到":
 		return ""
 	}
-	record := "Task: " + task + "\nOutcome: " + outcome
+	record := outcome
+	if !strings.HasPrefix(strings.TrimSpace(outcome), "任务目的：") {
+		record = "任务目的：" + task + "\n" +
+			"可复用结论：" + outcome + "\n" +
+			"验证依据：\n" +
+			"适用条件与时效：\n" +
+			"不确定项："
+	}
 	if len(categories) > 0 {
-		record += "\nEvidence: " + strings.Join(categories, ", ")
+		record += "\n宿主证据类别：" + strings.Join(categories, ", ")
 	}
 	return redactCogneeText(record, maxCogneeRememberBytes)
 }
@@ -544,7 +551,7 @@ func (c *Controller) cogneeProposeDestination(ctx context.Context, taskKey, scop
 		schema.sourceField:   "Reasonix completed task outcome",
 	}
 	if schema.reasonField != "" {
-		argsMap[schema.reasonField] = "Reusable outcome from a completed Reasonix task."
+		argsMap[schema.reasonField] = "Propose this concise completed-task outcome as reusable memory for human review; it is not approved or active memory yet."
 	}
 	args, _ := json.Marshal(argsMap)
 	if err := createCogneeAttempt(c.sessionDir, taskKey, scope); err != nil {
