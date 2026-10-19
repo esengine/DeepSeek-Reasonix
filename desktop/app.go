@@ -750,6 +750,21 @@ func (a *App) restoreOrBuildTabs() {
 	}); err != nil {
 		slog.Warn("desktop: could not ensure default global Cognee MCP server", "error", err)
 	}
+	if bridgePath := strings.TrimSpace(os.Getenv("REASONIX_MCP_BRIDGE")); bridgePath != "" {
+		if _, _, err := config.EnsureDefaultUserMCPServer(config.PluginEntry{
+			Name:    "chrome",
+			Command: "node",
+			Args:    []string{bridgePath, "--server"},
+			Env: map[string]string{
+				"MCP_SERVER_URL":       "http://127.0.0.1:12306/mcp-new",
+				"MCP_PROTOCOL_MODE":    "stateless",
+				"MCP_PROTOCOL_VERSION": "2026-07-28",
+				"MCP_SERVER_ORIGIN":    "http://127.0.0.1",
+			},
+		}); err != nil {
+			slog.Warn("desktop: could not ensure default global Chrome MCP server", "error", err)
+		}
+	}
 
 	// Load i18n from the first available config.
 	// Prefer DesktopLanguage (desktop UI setting) over Language (CLI setting),

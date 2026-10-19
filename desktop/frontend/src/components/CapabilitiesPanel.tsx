@@ -3271,6 +3271,7 @@ export function MCPServersSettingsPage() {
 		? servers?.find((server) => server.name === screen.name)
 		: undefined;
 	const chromeServer = useMemo(() => servers?.find(isChromeBridgeServer), [servers]);
+	const cogneeServer = useMemo(() => servers?.find((server) => server.name.toLowerCase() === "cognee"), [servers]);
 	useEffect(() => {
 		if (servers && (screen.kind === "detail" || screen.kind === "edit") && !servers.some((server) => server.name === screen.name)) {
 			setScreen({ kind: "list" });
@@ -3299,6 +3300,20 @@ export function MCPServersSettingsPage() {
 							onReconnect={() => void mutate(() => app.ReconnectMCPServer(chromeServer.name))}
 							onClearAuth={() => void mutate(() => app.ClearMCPServerAuthentication(chromeServer.name))}
 							onEdit={() => setScreen({ kind: "edit", name: chromeServer.name })}
+						/>
+					)}
+					{cogneeServer && (
+						<CogneeSettingsCard
+							status={cogneeStatus}
+							url={cogneeURL || cogneeServer.url || ""}
+							token={cogneeToken}
+							busy={actionBusy}
+							onURLChange={setCogneeURL}
+							onTokenChange={setCogneeToken}
+							onConfigure={() => void mutate(async () => {
+								setCogneeStatus(await app.ConfigureCogneeMemory(cogneeURL || cogneeServer.url || "", cogneeToken));
+								setCogneeToken("");
+							})}
 						/>
 					)}
 					<div className="cap-mcp-list-toolbar settings-toolbar">
