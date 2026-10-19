@@ -1843,6 +1843,7 @@ func (c *Controller) runShell(command string, admission turnAdmission) {
 		res := shellrun.RunForeground(ctx, shellrun.Request{
 			Argv:           argv,
 			Dir:            c.workspaceRoot,
+			Env:            shellrun.LoginEnvironment(ctx, os.Environ(), sh.Path),
 			Timeout:        shellTimeout,
 			WaitDelay:      shellWaitDelay,
 			CommandPreview: diagnosticPreview,
