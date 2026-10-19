@@ -15,23 +15,30 @@ import (
 
 func canonicalTopicHistoryReady(t *testing.T, app *App, tabID string) session.HistoryWindowPage {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		page, err := app.SessionHistoryWindowForTab(tabID, session.HistoryWindowRequest{Anchor: "newest", Limit: 32})
+	req := session.HistoryWindowRequest{Anchor: "newest", Limit: 32}
+	page, err := app.SessionHistoryWindowForTab(tabID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Status == "preparing" {
+		query, ref, err := app.canonicalSessionQuery(tabID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if page.Status != "preparing" {
-			if page.Status != "ready" || len(page.Messages) == 0 {
-				t.Fatalf("history is not readable: status=%s messages=%d", page.Status, len(page.Messages))
-			}
-			return page
+		// TitleMessages joins this query's locator preparation, so completion
+		// supplies the readiness boundary without polling filesystem speed.
+		if _, err := query.TitleMessages(t.Context(), ref, 1); err != nil {
+			t.Fatal(err)
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("independent history preparation did not finish")
+		page, err = app.SessionHistoryWindowForTab(tabID, req)
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
 	}
+	if page.Status != "ready" || len(page.Messages) == 0 {
+		t.Fatalf("history is not readable: status=%s messages=%d", page.Status, len(page.Messages))
+	}
+	return page
 }
 
 func TestCanonicalSidebarActivationReplacesRemoteSurface(t *testing.T) {

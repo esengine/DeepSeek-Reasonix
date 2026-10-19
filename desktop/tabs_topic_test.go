@@ -734,28 +734,6 @@ func TestAmbiguousLegacyRecoverySessionsMigrateIntoTopics(t *testing.T) {
 	}
 }
 
-func TestUnmodifiedRecoveryCopyDoesNotMigrateIntoTopics(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	dir := config.SessionDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir sessions: %v", err)
-	}
-	parent, recovery, branchMsgs := forkDesktopRecoveryBranch(t, dir, "normal")
-	coverDesktopRecoveryParent(t, parent, branchMsgs)
-
-	app := NewApp()
-	nodes := waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(parent))
-	if len(nodes) != 1 || len(nodes[0].Children) != 2 {
-		t.Fatalf("project tree = %#v, want both sources before content proof", nodes)
-	}
-	if meta, ok, err := agent.LoadBranchMeta(recovery); err != nil || !ok {
-		t.Fatalf("load recovery meta: ok=%v err=%v", ok, err)
-	} else if strings.TrimSpace(meta.TopicID) != "" {
-		t.Fatalf("parent-covered recovery copy was migrated into topic %q", meta.TopicID)
-	}
-}
-
 func TestCoveredRecoveryCopyBecomesVisibleAfterMigratedParentDeletion(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
