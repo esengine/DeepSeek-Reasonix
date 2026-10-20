@@ -8,6 +8,19 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
+func resolveMiniMaxEffort(cfg provider.Config, effort string) (string, error) {
+	if provider.IsMiniMaxFlash(cfg.Model) {
+		return MiniMaxFlashEffort(effort, cfg.Extra)
+	}
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	switch effort {
+	case "", "adaptive", "disabled":
+		return effort, nil
+	default:
+		return "", fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be adaptive or disabled", cfg.Name)
+	}
+}
+
 // MiniMaxFlashEffort validates the shared MiniMax depth contract for both API wires.
 func MiniMaxFlashEffort(effort string, extra map[string]any) (string, error) {
 	effort = strings.ToLower(strings.TrimSpace(effort))

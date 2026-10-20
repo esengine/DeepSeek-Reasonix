@@ -153,21 +153,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 				return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be low, high, max, or disabled", name)
 			}
 		}
-	case minimax && provider.IsMiniMaxFlash(cfg.Model):
+	case minimax:
 		var err error
-		effort, err = MiniMaxFlashEffort(effort, cfg.Extra)
+		effort, err = resolveMiniMaxEffort(cfg, effort)
 		if err != nil {
 			return nil, err
-		}
-	case minimax:
-		// M3 and saved legacy models keep their binary thinking contract.
-		// Config normalizes depth aliases before they reach this constructor.
-		effort = strings.ToLower(strings.TrimSpace(effort))
-		switch effort {
-		case "": // auto — leave empty so the wire emits thinking.type=adaptive
-		case "adaptive", "disabled":
-		default:
-			return nil, fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be adaptive or disabled", name)
 		}
 	case zhipu:
 		resolved, err := resolveZhipuEffort(name, zhipuDepth, effort)

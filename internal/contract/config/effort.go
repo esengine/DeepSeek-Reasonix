@@ -66,7 +66,7 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	if explicitProtocol == ReasoningProtocolKimiK3 {
 		return kimiK3EffortCapability()
 	}
-	if explicitProtocol == "" && isMiniMaxEntry(e) && provider.IsMiniMaxFlash(e.Model) {
+	if isMiniMaxFlashEntry(e) {
 		return EffortCapability{Supported: true, Levels: append([]string{"auto"}, provider.MiniMaxFlashEfforts()...), Default: "max"}
 	}
 	supported := normalizedSupportedEfforts(e)
@@ -201,11 +201,8 @@ func normalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	if explicitProtocol == ReasoningProtocolKimiK3 {
 		return normalizeKimiK3ReasoningEffort(level)
 	}
-	if explicitProtocol == "" && isMiniMaxEntry(e) && provider.IsMiniMaxFlash(e.Model) {
-		if containsString(provider.MiniMaxFlashEfforts(), level) {
-			return level, nil
-		}
-		return "", fmt.Errorf("usage: /effort auto|low|medium|high|xhigh|max")
+	if isMiniMaxFlashEntry(e) {
+		return normalizeMiniMaxFlashEffort(level)
 	}
 	supported := normalizedSupportedEfforts(e)
 	if len(supported) > 0 {
@@ -242,23 +239,7 @@ func normalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	}
 	switch {
 	case isMiniMaxEntry(e):
-		// The M3 knob is binary; map Anthropic / OpenAI-style levels onto the
-		// nearest valid value so a stale /effort high|low still works. "off"
-		// is a retired DeepSeek level meaning "no thinking" — on M3 that maps
-		// to "disabled" rather than the model default, since M3 actually
-		// supports a "thinking off" mode and "off" is the natural request.
-		switch level {
-		case "adaptive", "disabled":
-			return level, nil
-		case "off":
-			return "disabled", nil
-		case "low", "medium", "high":
-			return "adaptive", nil
-		case "xhigh", "max":
-			return "disabled", nil
-		default:
-			return "", fmt.Errorf("usage: /effort auto|adaptive|disabled")
-		}
+		return normalizeMiniMaxBinaryEffort(level)
 	case isZhipuEntry(e):
 		return normalizeZhipuEffort(e, level)
 	case isLongCatEntry(e):
