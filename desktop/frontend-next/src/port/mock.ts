@@ -388,6 +388,7 @@ export class MockPort extends MockWorkspace implements AgentPort {
   }
   async workspaceFile(path: string, _root?: string): Promise<import("./port").WorkspaceFile> { return { path, content: `// ${path}\n`, revision: "fixture" }; }
   workspaceImageURL(path: string) { return `/fixture/${path}`; }
+  workspaceVideoURL(path: string) { return `/fixture/${path}`; }
   async saveWorkspaceFile(file: import("./port").WorkspaceFile) { return { ...file, revision: file.revision + "-saved" }; }
 
   async trajectory(): Promise<TrajectoryRead> {

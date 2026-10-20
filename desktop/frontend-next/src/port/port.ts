@@ -646,6 +646,8 @@ export interface AgentPort {
   // Where an image in the workspace is served, for a rendered document to show.
   /** root names a folder the user granted this workspace; absent means the workspace itself. */
   workspaceImageURL(path: string, root?: string): string;
+  // Where a workspace video is served with range requests, for a player to seek.
+  workspaceVideoURL(path: string, root?: string): string;
   // Saves bytes into the workspace's attachment directory and returns the
   // "@path" token a turn references it by. This is the door for what has no
   // path to offer — the clipboard, and a browser tab's dropped File. A window

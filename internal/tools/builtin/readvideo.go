@@ -400,3 +400,7 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// VideoContainer names a file's container from its first bytes, or "" for
+// anything read_video would not decode.
+func VideoContainer(head []byte) string { return videoDemuxer(head) }

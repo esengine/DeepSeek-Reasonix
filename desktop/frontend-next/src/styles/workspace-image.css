@@ -12,3 +12,8 @@
   max-height: 100%;
   object-fit: contain;
 }
+
+.workbench-image video {
+  max-width: 100%;
+  max-height: 100%;
+}

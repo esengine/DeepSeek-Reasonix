@@ -36,7 +36,7 @@ import { useHtmlPreview } from "./useHtmlPreview";
 import { setShowsHiddenFiles, showsHiddenFiles } from "../state/prefs";
 import { BrowserWideToggle } from "./BrowserWideToggle";
 import { BrowserFullToggle } from "./BrowserFullToggle";
-import { WorkspaceImage, isWorkspaceImage } from "./WorkspaceImage";
+import { ProductionManifest, WorkspaceMedia, isProductionManifest, isWorkspaceMedia } from "./WorkspaceMedia";
 
 // The editor and its grammars load with the first file opened, not with Studio.
 const CodeEditor = lazy(() => import("./CodeEditor"));
@@ -351,7 +351,7 @@ export function WorkbenchPanel({
     setSelectionMenu({ text, x: e.clientX, y: e.clientY, anchor: e.currentTarget });
   };
   const grantedFile = parseGrantedFile(filePath);
-  const readable = /\.(md|markdown|mdx)$/i.test(grantedFile?.rel ?? filePath);
+  const readable = /\.(md|markdown|mdx)$/i.test(grantedFile?.rel ?? filePath) || (!grantedFile && isProductionManifest(filePath));
   const previewable = !!filePath && !grantedFile && preview.can(filePath);
   useEffect(() => {
     setMode((m) => {
@@ -362,7 +362,7 @@ export function WorkbenchPanel({
   const previewTab = previewable ? preview.tabFor(filePath) : undefined;
   const { open: openPreview, sync: syncPreview } = preview;
   const { file, draft, diff, busy, error: fileFailed, missing, setDraft, save } = useWorkbenchFiles({
-    port, workspaceRoot, repos: gitRepos.repos, path: isWorkspaceImage(filePath) ? "" : filePath, openPaths: openFiles, shown, refresh: JSON.stringify([changeKey, glance, running, wrote]),
+    port, workspaceRoot, repos: gitRepos.repos, path: isWorkspaceMedia(filePath) ? "" : filePath, openPaths: openFiles, shown, refresh: JSON.stringify([changeKey, glance, running, wrote]),
     poll: (readable && mode === "read") || (previewable && mode === "preview"),
   });
   const revision = file?.revision;
@@ -624,7 +624,7 @@ export function WorkbenchPanel({
               onOpenDocument={(path) => port.openDocument(path)}
             />
           )}
-          {active?.kind === "file" && (isWorkspaceImage(active.path) ? <WorkspaceImage key={active.path} port={port} path={active.path} /> : (
+          {active?.kind === "file" && (isWorkspaceMedia(active.path) ? <WorkspaceMedia key={active.path} port={port} path={active.path} /> : (
             <>
               <WorkbenchFileBar
                 path={grantedFile ? `${grantedFile.root.replace(/[\\/]+$/, "")}/${grantedFile.rel}` : active.path}
@@ -657,7 +657,7 @@ export function WorkbenchPanel({
                 </div>
               ) : mode === "read" && file && file.path === (grantedFile?.rel ?? active.path) ? (
                 <div className="workbench-read">
-                  <LazyMarkdown text={draft} local={docRefs} />
+                  {isProductionManifest(active.path) && !grantedFile ? <ProductionManifest text={draft} onOpen={openFile} /> : <LazyMarkdown text={draft} local={docRefs} />}
                 </div>
               ) : file && file.path === (grantedFile?.rel ?? active.path) ? (
                 <Suspense fallback={<div className="workbench-empty">{t("正在读取…")}</div>}>
