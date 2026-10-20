@@ -90,7 +90,7 @@ func miniMaxHTTPBody(t *testing.T, entry *config.ProviderEntry) map[string]any {
 		if entry.Kind == "anthropic" {
 			_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 		} else {
-			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 		}
 	}))
 	defer srv.Close()
