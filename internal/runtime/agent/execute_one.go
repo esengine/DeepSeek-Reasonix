@@ -28,6 +28,7 @@ const CodeMCPToolDisabled = tool.CodeMCPToolDisabled
 // invocation that owns it.
 type toolCallPlan struct {
 	preview       *event.FileDiff
+	resultRef     string // tool-result reference the host retained for this call
 	call          provider.ToolCall
 	tool          tool.Tool
 	canonicalName string
@@ -132,7 +133,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		out.resolvedProfile = delegationProfile(plan.resolvedMeta.Target, plan.resolvedMeta.Args)
 	}()
 	defer finalizeWorkspaceMutationOutcome(&out, plan)
-	defer func() { out.preview = plan.preview }()
+	defer func() { out.preview, out.resultRef = plan.preview, plan.resultRef }()
 
 	if blocked, early := a.parseToolCall(ctx, plan); early {
 		return blocked

@@ -56,6 +56,7 @@ type toolOutcome struct {
 	unbounded string // what the tool returned, whenever bound moved or cut it
 	images    []string
 	videos    []provider.VideoRef
+	resultRef string
 	blocked   bool
 	// endsRound marks a call whose result is a user decision. The pre-scheduling
 	// scan cannot see one an extension substituted in, so the call reports it.

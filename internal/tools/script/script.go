@@ -56,7 +56,8 @@ func (runScript) Description() string {
 	return "Run a short Starlark (Python-like) script that calls tools, so several dependent steps take one round trip and only what the script prints comes back. " +
 		"Use it to read or search many files and keep only what matters, run a command and act on its output, or repeat one tool over a list. " +
 		"In the script: call(name, **args) runs a tool and returns its output as a string, stopping the script if the call fails (read_file returns the file's exact text, ready to edit and pass to write_file); " +
-		"try_call(name, **args) returns a struct with ok, output and error instead of stopping; json.decode/json.encode convert JSON; print(...) writes the result. " +
+		"try_call(name, **args) returns a struct with ok, output, error and result_ref (a tool-result: reference when the full result was kept) instead of stopping; " +
+		"call_many([{name, args}, ...]) runs several calls as one batch, concurrently where they are read-only, and returns those structs in order; json.decode/json.encode convert JSON; print(...) writes the result. " +
 		"Every call is checked and approved exactly as if you made it directly. The script has no file, network or clock access of its own, " +
 		"at most 64 tool calls, and cannot call run_script. Prefer ordinary calls for one or two independent steps."
 }
@@ -114,10 +115,11 @@ func (r *run) exec(src string) (string, error) {
 		}
 	}()
 	predeclared := starlark.StringDict{
-		"call":     starlark.NewBuiltin("call", r.call),
-		"try_call": starlark.NewBuiltin("try_call", r.tryCall),
-		"json":     starjson.Module,
-		"struct":   starlark.NewBuiltin("struct", starlarkstruct.Make),
+		"call":      starlark.NewBuiltin("call", r.call),
+		"try_call":  starlark.NewBuiltin("try_call", r.tryCall),
+		"call_many": starlark.NewBuiltin("call_many", r.callMany),
+		"json":      starjson.Module,
+		"struct":    starlark.NewBuiltin("struct", starlarkstruct.Make),
 	}
 	_, err := starlark.ExecFileOptions(fileOptions, thread, "script.star", src, predeclared)
 	result := r.result()
@@ -176,56 +178,96 @@ func (r *run) call(thread *starlark.Thread, fn *starlark.Builtin, args starlark.
 }
 
 func (r *run) tryCall(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	out, err := r.invoke(thread, fn, args, kwargs)
-	errText := ""
+	c, err := r.prepare(thread, fn, args, kwargs)
 	if err != nil {
-		if !errors.Is(err, tool.ErrNestedCallFailed) {
-			return nil, err
+		return nil, err
+	}
+	var res tool.NestedResult
+	if b, ok := r.inv.(tool.BatchInvoker); ok {
+		res = b.InvokeResult(r.ctx, c)
+	} else {
+		res.Output, res.Err = r.inv.Invoke(r.ctx, c.Name, c.Args)
+	}
+	return resultStruct(res)
+}
+
+// resultStruct is try_call's answer; a failure other than a failed call stops the script.
+func resultStruct(res tool.NestedResult) (starlark.Value, error) {
+	errText := ""
+	if res.Err != nil {
+		if !errors.Is(res.Err, tool.ErrNestedCallFailed) {
+			return nil, res.Err
 		}
-		errText = err.Error()
+		errText = res.Err.Error()
 	}
 	return starlarkstruct.FromStringDict(starlarkstruct.Default, starlark.StringDict{
-		"ok": starlark.Bool(err == nil), "output": starlark.String(out), "error": starlark.String(errText),
+		"ok": starlark.Bool(res.Err == nil), "output": starlark.String(res.Output), "error": starlark.String(errText),
+		"result_ref": starlark.String(res.ResultRef),
 	}), nil
 }
 
 // invoke reads call(name, **args) or call(name, {args}) and runs it. A failed
 // call returns its output with an error wrapping tool.ErrNestedCallFailed.
 func (r *run) invoke(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (string, error) {
+	c, err := r.prepare(thread, fn, args, kwargs)
+	if err != nil {
+		return "", err
+	}
+	return r.inv.Invoke(r.ctx, c.Name, c.Args)
+}
+
+// prepare reads one call's name and arguments and counts it against the limit.
+func (r *run) prepare(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (tool.NestedCall, error) {
 	if len(args) < 1 || len(args) > 2 {
-		return "", fmt.Errorf("%s: want a tool name, then keyword arguments or one dict", fn.Name())
-	}
-	name, ok := starlark.AsString(args[0])
-	if !ok || strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("%s: the tool name must be a string", fn.Name())
-	}
-	if name == Name {
-		return "", ErrNested
+		return tool.NestedCall{}, fmt.Errorf("%s: want a tool name, then keyword arguments or one dict", fn.Name())
 	}
 	var payload starlark.Value
 	switch {
 	case len(args) == 2 && len(kwargs) > 0:
-		return "", fmt.Errorf("%s: pass arguments as keywords or as one dict, not both", fn.Name())
+		return tool.NestedCall{}, fmt.Errorf("%s: pass arguments as keywords or as one dict, not both", fn.Name())
 	case len(args) == 2:
 		payload = args[1]
 	default:
 		d := starlark.NewDict(len(kwargs))
 		for _, kv := range kwargs {
 			if err := d.SetKey(kv[0], kv[1]); err != nil {
-				return "", err
+				return tool.NestedCall{}, err
 			}
 		}
 		payload = d
 	}
+	c, err := r.encode(thread, fn, args[0], payload)
+	if err != nil {
+		return tool.NestedCall{}, err
+	}
+	return c, r.count(fn, []tool.NestedCall{c})
+}
+
+func (r *run) encode(thread *starlark.Thread, fn *starlark.Builtin, nameValue, payload starlark.Value) (tool.NestedCall, error) {
+	name, ok := starlark.AsString(nameValue)
+	if !ok || strings.TrimSpace(name) == "" {
+		return tool.NestedCall{}, fmt.Errorf("%s: the tool name must be a string", fn.Name())
+	}
+	if name == Name {
+		return tool.NestedCall{}, ErrNested
+	}
 	encoded, err := starlark.Call(thread, starjson.Module.Members["encode"], starlark.Tuple{payload}, nil)
 	if err != nil {
-		return "", fmt.Errorf("%s(%q): arguments are not JSON: %w", fn.Name(), name, err)
+		return tool.NestedCall{}, fmt.Errorf("%s(%q): arguments are not JSON: %w", fn.Name(), name, err)
 	}
-	if r.calls >= maxCalls {
-		return "", fmt.Errorf("%s: the script reached its limit of %d tool calls", fn.Name(), maxCalls)
-	}
-	r.calls++
-	r.counts[name]++
 	raw, _ := starlark.AsString(encoded)
-	return r.inv.Invoke(r.ctx, name, json.RawMessage(raw))
+	return tool.NestedCall{Name: name, Args: json.RawMessage(raw)}, nil
+}
+
+// count charges calls to the script's limit all at once, so a batch over the
+// limit runs none of its calls.
+func (r *run) count(fn *starlark.Builtin, calls []tool.NestedCall) error {
+	if r.calls+len(calls) > maxCalls {
+		return fmt.Errorf("%s: the script reached its limit of %d tool calls", fn.Name(), maxCalls)
+	}
+	r.calls += len(calls)
+	for _, c := range calls {
+		r.counts[c.Name]++
+	}
+	return nil
 }

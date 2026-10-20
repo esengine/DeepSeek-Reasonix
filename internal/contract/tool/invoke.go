@@ -66,3 +66,25 @@ func IsNestedCallOf(id, parentID string) bool {
 	n, err := strconv.Atoi(seq)
 	return err == nil && n > 0 && strconv.Itoa(n) == seq
 }
+
+// NestedCall is one call a running tool asks its invoker to make.
+type NestedCall struct {
+	Name string
+	Args json.RawMessage
+}
+
+// NestedResult is what a nested call returned: its output and, when the host
+// retained the full result, the tool-result reference that reads it back.
+type NestedResult struct {
+	Output    string
+	ResultRef string
+	Err       error
+}
+
+// BatchInvoker runs several nested calls; the host decides which may share a
+// moment, by the same rule it applies to a model's parallel calls.
+type BatchInvoker interface {
+	Invoker
+	InvokeResult(ctx context.Context, call NestedCall) NestedResult
+	InvokeMany(ctx context.Context, calls []NestedCall) []NestedResult
+}

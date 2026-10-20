@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/contract/ablation"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/langpref"
 	"reasonix/internal/state/memory"
 )
@@ -166,6 +167,11 @@ func (c *Controller) runWithRunner(ctx context.Context, input string) error {
 	if c.runner == nil {
 		return ErrNoRunner
 	}
+	ctx = tool.WithRemoteTaskDetach(ctx, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.gate.closed
+	})
 	return c.runner.Run(ctx, input)
 }
 
