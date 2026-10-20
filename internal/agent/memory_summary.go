@@ -18,6 +18,8 @@ Return exactly these five fields, in Chinese, with one concise value per field:
 不确定项：only unresolved questions or caveats explicitly stated
 Leave a field's value empty when the supplied information does not support it. Do not invent facts, imply checks were run, expose chain-of-thought, or address the user. Keep each field concise. Summarize only the supplied task and final outcome.`
 
+const taskOutcomeSummaryMaxTokens = 2048
+
 // SummarizeTaskOutcome distills a completed task into a short memory candidate.
 // It sends only the supplied task and outcome, with no transcript or tool access.
 func (a *Agent) SummarizeTaskOutcome(ctx context.Context, task, outcome string) (string, error) {
@@ -29,10 +31,10 @@ func (a *Agent) SummarizeTaskOutcome(ctx context.Context, task, outcome string) 
 			{Role: provider.RoleSystem, Content: taskOutcomeSummaryPrompt},
 			HostGeneratedUserMessage("Task:\n" + task + "\n\nFinal outcome:\n" + outcome),
 		},
-		MaxTokens:   512,
+		MaxTokens:   taskOutcomeSummaryMaxTokens,
 		Temperature: provider.TemperaturePtr(0),
 	}
-	summary, _, err := a.runSummaryRequestWithOptions(ctx, req, 512, false)
+	summary, _, err := a.runSummaryRequestWithOptions(ctx, req, taskOutcomeSummaryMaxTokens, false)
 	if err != nil {
 		return "", err
 	}
