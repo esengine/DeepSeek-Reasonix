@@ -1,6 +1,10 @@
 package config
 
-import "slices"
+import (
+	"slices"
+
+	"reasonix/internal/contract/provider"
+)
 
 // EffortFieldForEntry is where a chosen effort level lands in this entry's
 // request body, or "" when the entry's resolved reasoning protocol reshapes the
@@ -16,6 +20,9 @@ func EffortFieldForEntry(e *ProviderEntry) string {
 	resolved := ReasoningProtocolForEntry(e)
 	if resolved == ReasoningProtocolNone {
 		return ""
+	}
+	if explicitReasoningProtocol(e) == "" && isMiniMaxEntry(e) && provider.IsMiniMaxFlash(e.Model) {
+		return p.EffortField
 	}
 	if len(p.EffortUnder) == 0 {
 		return p.EffortField

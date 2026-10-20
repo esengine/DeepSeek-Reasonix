@@ -4,8 +4,8 @@
 // code. Each instance picks the wire shape from its base URL:
 //   - api.deepseek.com → emits thinking.type=enabled (DeepSeek-flavor CoT) plus
 //     reasoning_effort as a depth hint.
-//   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
-//     knob) instead of reasoning_effort, since M3 has no level scale.
+//   - api.minimaxi.com / api.minimax.io → M3 exposes binary thinking;
+//     M3.1 Flash always thinks and accepts reasoning_effort depth.
 //   - open.bigmodel.cn / api.z.ai or the glm protocol (Zhipu GLM) → emits
 //     thinking.type; the documented depth models also accept reasoning_effort
 //     (provider.ZhipuEffortContract). Older GLM keeps thinking.type only.
@@ -153,12 +153,15 @@ func New(cfg provider.Config) (provider.Provider, error) {
 				return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be low, high, max, or disabled", name)
 			}
 		}
+	case minimax && provider.IsMiniMaxFlash(cfg.Model):
+		var err error
+		effort, err = MiniMaxFlashEffort(effort, cfg.Extra)
+		if err != nil {
+			return nil, err
+		}
 	case minimax:
-		// M3's knob is binary. The config effort layer normalises user input
-		// to "adaptive", "disabled", or "" (== auto). We keep "high"/"max"
-		// (legacy DeepSeek) and "low"/"medium" (Anthropic) out — config-level
-		// NormalizeEffort remaps them to "adaptive" already, so anything
-		// reaching here is expected to be one of: "", "adaptive", "disabled".
+		// M3 and saved legacy models keep their binary thinking contract.
+		// Config normalizes depth aliases before they reach this constructor.
 		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
 		case "": // auto — leave empty so the wire emits thinking.type=adaptive
@@ -220,6 +223,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		minimax: minimax, zhipu: zhipu, longcat: longcat, ollamaCloud: ollamaCloud,
 		zhipuDepth: zhipuDepth,
 		explicit:   hasExplicitEfforts, supported: supportedEfforts})
+	if minimax && provider.IsMiniMaxFlash(cfg.Model) {
+		requestEfforts = provider.MiniMaxFlashEfforts()
+	}
 	// max_output_tokens=0 means automatic (not unlimited). DeepSeek reasoning
 	// uses 32K / high-max 64K; thinking-disabled stays ordinary 16K. 128K is
 	// never automatic — users must set it explicitly after length truncations.
@@ -314,7 +320,7 @@ func (c *client) RequiresToolCallReasoning() bool {
 }
 
 func (c *client) RequiresReasoningRoundTrip() bool {
-	return c != nil && (c.kimiK3 || c.glmThinkingEnabled())
+	return c != nil && (c.minimax || c.kimiK3 || c.glmThinkingEnabled())
 }
 
 func (c *client) WarnOnMissingToolCallReasoning() bool {
@@ -769,15 +775,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			out.Thinking = &thinkingMode{Type: "enabled"}
 		}
 	case c.minimax:
-		// M3 uses a single `thinking.type` field with two valid values:
-		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
-		// depth is not a knob on M3, so reasoning_effort is omitted entirely.
-		t := c.effort
-		if t == "" {
-			t = "adaptive" // /effort auto == the M3 model default
-		}
-		out.Thinking = &thinkingMode{Type: t}
-		out.ReasoningEffort = ""
+		c.applyMiniMaxThinking(&out, req)
 	case c.zhipu:
 		c.applyZhipuEffort(&out, req)
 	case c.longcat:

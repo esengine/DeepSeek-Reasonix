@@ -31,6 +31,8 @@ func speaksDeepSeekContract(root string, extra map[string]any) bool {
 // or nil when this endpoint's contract has no place for it.
 func (c *client) replayThinking(m provider.Message) *contentBlock {
 	switch {
+	case provider.IsMiniMaxEndpoint(c.baseURL) && m.ReasoningContent != "":
+		return &contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature}
 	case c.deepseek && len(m.ToolCalls) > 0 && (m.ReasoningContent != "" || c.deepSeekThinkingEnabled()):
 		// DeepSeek wants a tool-call turn's reasoning in every later request,
 		// even once this one declares no tools or thinking has been turned off.

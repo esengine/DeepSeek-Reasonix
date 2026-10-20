@@ -9,7 +9,7 @@ var opencodeGoAnthropicPreset = ProviderPreset{
 		Name:          "opencode-go-anthropic",
 		Kind:          "anthropic",
 		BaseURL:       "https://opencode.ai/zen/go",
-		Models:        []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"},
+		Models:        []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3"},
 		VisionModels:  []string{"qwen3.7-plus", "qwen3.6-plus"},
 		Default:       "qwen3.7-plus",
 		APIKeyEnv:     "OPENCODE_GO_API_KEY",
