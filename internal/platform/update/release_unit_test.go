@@ -39,12 +39,12 @@ func regularMember(name string, body []byte) tar.Header {
 
 func completeRelease() ([]tar.Header, [][]byte) {
 	return []tar.Header{
-			regularMember("reasonix-desktop", []byte("desktop")),
-			regularMember("reasonix-guard", []byte("guard")),
-			regularMember("reasonix", []byte("cli")),
-		}, [][]byte{
-			[]byte("desktop"), []byte("guard"), []byte("cli"),
-		}
+		regularMember("reasonix-desktop", []byte("desktop")),
+		regularMember("reasonix-guard", []byte("guard")),
+		regularMember("reasonix", []byte("cli")),
+	}, [][]byte{
+		[]byte("desktop"), []byte("guard"), []byte("cli"),
+	}
 }
 
 // testLine mirrors the desktop's shape — two installed members and one the
