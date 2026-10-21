@@ -3109,6 +3109,12 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   color: var(--ghost);
   opacity: 1;
 }
+.compose .loopline { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--net); font: 500 calc(10px * var(--fs-scale, 1))/1.35 var(--ui); }
+.compose .loopline span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose .loopline svg { flex: none; width: 12px; height: 12px; }
+.compose .loopline button { flex: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ghost); cursor: pointer; }
+.compose .loopline button:hover { background: var(--hair); color: var(--text); }
+.compose .loopline button svg { width: 11px; height: 11px; }
 .compose .queue {
   font: 500 calc(10px * var(--fs-scale, 1))/1.35 var(--ui);
   letter-spacing: 0;

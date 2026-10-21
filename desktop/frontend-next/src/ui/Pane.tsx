@@ -35,6 +35,8 @@ import { accountOf, useHidesAmounts, useWallet } from "./wallet";
 import { useOnBump } from "./useOnBump";
 import { useShowView } from "./showview";
 import { useSubmit } from "./usesubmit";
+import { loopLabel, useLoopMode } from "./loop_mode";
+import { StudioIcon } from "./StudioIcon";
 import { useSurfaceSlots } from "./usesurfaceslots";
 import { useSurfaceReplay } from "./surface-replay";
 import { MeterRail } from "./MeterRail";
@@ -404,6 +406,18 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   const { slots, moveSurface, atComposer, inRail } = useSurfaceSlots(port, s.views, notify);
 
   const submit = useSubmit({ port, running, dispatch, trajDispatch, refreshStatus, fail });
+  // A loop turn is an ordinary turn: it goes through the same submit, so it
+  // lands in the transcript, can be stopped, and costs what typing it would.
+  const { loop, command: loopCommand, stop: loopStop } = useLoopMode({ fire: submit, busy: running });
+  const onComposerSubmit = useCallback(
+    async (text: string, chips?: Parameters<typeof submit>[1]) => {
+      const answered = loopCommand(text);
+      if (!answered.handled) return submit(text, chips);
+      if (answered.reply) pushToast(answered.reply);
+      return true;
+    },
+    [loopCommand, submit],
+  );
 
   const [inserted, setInserted] = useState<{ n: number; text: string; session?: { id: string; title: string } }>({ n: 0, text: "" });
   const { queue, restored, onRestoreText, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel } = useQueueActions({
@@ -603,6 +617,15 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           <AgentCompositionPicker port={port} binding={status?.agentComposition} locked={status?.agentCompositionLocked} running={running} onChanged={refreshStatus} onSettings={() => onSettings("persona")} onError={notify} />
         </RunLine>}
         <div className="composeaux">
+          {loop && (
+            <div className="loopline" data-action="loop.stop" role="status">
+              <StudioIcon name="refresh" />
+              <span>{loopLabel(loop)}</span>
+              <button type="button" data-action="loop.stop" aria-label={t("停止循环")} title={t("停止循环")} onClick={() => loopStop()}>
+                <StudioIcon name="close" />
+              </button>
+            </div>
+          )}
           <Queue
             queue={queue}
             running={running}
@@ -638,7 +661,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         {alert && <div className="cmpalert">{alert}</div>}
         <RootMissingBanner items={s.items} onPick={onOpenProject} />
         {pill && <ChangedFilesPill changes={tree?.changes ?? []} onOpen={openChanges} />}
-        <Composer worktreeTarget={worktreeTarget} onWorktreePhase={setWorktreePhase} port={port} fresh={ready && !rt.host && s.items.length === 0} status={status} running={running} quote={quote} restore={restored} inject={inserted} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={notify} onSettings={onSettings} side={sideAsk} onSide={() => setSideAsk((on) => !on)} sidePanel={sideAsk ? <SidePanel port={port} onClose={() => setSideAsk(false)} /> : null} changeCount={changeCount} countElsewhere={pill} git={git} onTreeChanged={refreshTree} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
+        <Composer worktreeTarget={worktreeTarget} onWorktreePhase={setWorktreePhase} port={port} fresh={ready && !rt.host && s.items.length === 0} status={status} running={running} quote={quote} restore={restored} inject={inserted} focus={askFocus} onSubmit={onComposerSubmit} onChanged={refreshStatus} onError={notify} onSettings={onSettings} side={sideAsk} onSide={() => setSideAsk((on) => !on)} sidePanel={sideAsk ? <SidePanel port={port} onClose={() => setSideAsk(false)} /> : null} changeCount={changeCount} countElsewhere={pill} git={git} onTreeChanged={refreshTree} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
         <MeterRail
           tps={tps} trail={trail} running={running} speed={speed} metrics={s.metrics} ctx={ctx} mcp={mcp} compact={compact} cost={cost}
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}
