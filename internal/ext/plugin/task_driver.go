@@ -8,6 +8,8 @@ import (
 	"maps"
 	"sync"
 	"time"
+
+	"reasonix/internal/contract/tool"
 )
 
 const tasksExtension = "io.modelcontextprotocol/tasks"
@@ -126,6 +128,9 @@ func (c *Client) awaitTask(ctx context.Context, t transport, params any, created
 	}
 	if task.TaskID == "" {
 		return nil, fmt.Errorf("plugin %q: task result without a taskId", c.name)
+	}
+	if start, ok := tool.RemoteTaskStarterFrom(ctx); ok {
+		return c.awaitDurableTask(ctx, t, params, task, start)
 	}
 	waitCtx, stop, timeout := c.contextWithCallTimeout(ctx, "tools/call", params)
 	if stop != nil {
