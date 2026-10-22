@@ -2,9 +2,14 @@ package plugin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
+
+	"reasonix/internal/contract/tool"
 )
 
 // toolContent is one item of a tools/call result, across every content type
@@ -76,6 +81,57 @@ func parseToolResult(res json.RawMessage) (string, []string, error) {
 		return text, images, fmt.Errorf("plugin tool reported error: %s", text)
 	}
 	return text, images, nil
+}
+
+// captureToolResult retains a rich result whole and tells the model where it
+// is; a text-only result is read exactly as it always was and never stored.
+func captureToolResult(ctx context.Context, raw json.RawMessage) (string, []string, error) {
+	text, images, parseErr := parseToolResult(raw)
+	var result struct {
+		Structured json.RawMessage `json:"structuredContent"`
+		Content    []toolContent   `json:"content"`
+	}
+	_ = json.Unmarshal(raw, &result)
+	rich := hasStructured(result.Structured)
+	for _, item := range result.Content {
+		rich = rich || item.Type != "text"
+	}
+	if !rich || !tool.CanRecordResult(ctx) {
+		return text, images, parseErr
+	}
+	if len(raw) > tool.ResultRetainLimit {
+		text += fmt.Sprintf("\n[MCP result not retained: %d bytes is over the %d-byte limit]", len(raw), tool.ResultRetainLimit)
+		return text, images, parseErr
+	}
+	ref, err := tool.RecordResult(ctx, raw)
+	if err != nil {
+		return text, images, fmt.Errorf("retain MCP result: %w", err)
+	}
+	text += "\n[MCP result artifact: " + ref + "]"
+	if fields := structuredFields(result.Structured); fields != "" {
+		text += "\n[structuredContent fields: " + fields + "]"
+	}
+	text += "\nUse read_file with this reference to inspect the full result."
+	return text, images, parseErr
+}
+
+// structuredFields names an object's top-level keys, so a JSON pointer can be
+// chosen without the values entering the conversation.
+func structuredFields(raw json.RawMessage) string {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil || len(object) == 0 {
+		return ""
+	}
+	keys := slices.Sorted(maps.Keys(object))
+	if len(keys) > 24 {
+		keys = append(keys[:24], "…")
+	}
+	for i, k := range keys {
+		if len(k) > 64 {
+			keys[i] = k[:64] + "…"
+		}
+	}
+	return strings.Join(keys, ", ")
 }
 
 func hasStructured(raw json.RawMessage) bool {

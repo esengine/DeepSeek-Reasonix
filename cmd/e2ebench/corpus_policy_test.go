@@ -130,6 +130,15 @@ func corpusPolicies() []corpusPolicy {
 				ruleStopPolicy:   {Mode: ruleEnforce},
 			},
 		},
+		{
+			Dir: videoDir,
+			Rules: map[authoringRule]ruleDecision{
+				rulePristineSeed: {Mode: ruleEnforce},
+				ruleReference: {Mode: ruleEnforceWhenPresent,
+					Reason: "a solved video task includes the fake service's submission log, which a committed solution/ cannot hold honestly"},
+				ruleStopPolicy: {Mode: ruleEnforce},
+			},
+		},
 	}
 }
 
@@ -306,9 +315,9 @@ func TestCorpusPolicyEnforcementSets(t *testing.T) {
 		want   int
 		exempt []string
 	}{
-		{rulePristineSeed, 8, nil},
-		{ruleReference, 7, []string{memorybenchDir}},
-		{ruleStopPolicy, 8, nil},
+		{rulePristineSeed, 9, nil},
+		{ruleReference, 8, []string{memorybenchDir}},
+		{ruleStopPolicy, 9, nil},
 	} {
 		running := policiesRunning(policies, c.rule)
 		if len(running) != c.want {

@@ -1,0 +1,3 @@
+prompt = "In the harbour production (video/harbour/manifest.json), make shot s02 a night scene. Keep everything else as it is."
+class = "video"
+timeout_sec = 600

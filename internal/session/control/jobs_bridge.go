@@ -35,6 +35,7 @@ func (c *Controller) observeJobs(taskStore taskmonitor.WriteStore) {
 	if c.jobs == nil {
 		return
 	}
+	c.jobs.SetRemoteTaskResumer(c.remoteTaskResumer)
 	if rec, ok := c.jobs.Recorder().(*taskmonitor.TaskRecorder); ok && rec != nil {
 		rec.Rebind(func() string { return c.parentSessionID() })
 	} else if c.workspaceRoot != "" {

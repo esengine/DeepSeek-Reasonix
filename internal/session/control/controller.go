@@ -354,6 +354,8 @@ type Options struct {
 	Feedback FeedbackOptions // nil service refuses every feedback call
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
+	// RemoteTaskResumer reconciles checkpointed MCP tasks; nil leaves them unrecovered.
+	RemoteTaskResumer tool.RemoteTaskResumer
 	// Subagents reads the runs the delegation tools persist; nil lists none.
 	Subagents SubagentReader
 	// TaskStore remains a FileStore-compatible authority. Desktop injects one

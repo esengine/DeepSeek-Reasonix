@@ -1,0 +1,3 @@
+prompt = "Make a 6 second teaser about a lighthouse at dawn as three 2-second shots, 320x240, no audio. Production id: lighthouse. Use the video-production workflow and the generate_video tool."
+class = "video"
+timeout_sec = 900

@@ -9,6 +9,8 @@
 /reasonix.exe
 /e2ebench
 /e2ebench.exe
+/fakevideomcp
+/fakevideomcp.exe
 /context-retrieval
 /compaction
 /context-maintenance-e2e

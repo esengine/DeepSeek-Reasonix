@@ -75,6 +75,10 @@ func (c codeIndex) RootsFor(args json.RawMessage) []tool.Root {
 	return workspaceRoots(c.workDir, pathArg(args, "path"))
 }
 
+func (w artifactDownload) RootsFor(args json.RawMessage) []tool.Root {
+	return workspaceRoots(w.workDir, pathArg(args, "path"))
+}
+
 func (w writeFile) RootsFor(args json.RawMessage) []tool.Root {
 	return workspaceRoots(w.workDir, pathArg(args, "path"))
 }

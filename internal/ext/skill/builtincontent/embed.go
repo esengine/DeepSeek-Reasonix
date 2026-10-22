@@ -13,7 +13,7 @@ import (
 	"reasonix/internal/base/frontmatter"
 )
 
-//go:embed reasonix-guide/SKILL.md
+//go:embed reasonix-guide/SKILL.md video-production/SKILL.md
 var files embed.FS
 
 // SkillMarkdown is one embedded skill file after frontmatter split.
@@ -33,7 +33,7 @@ func LoadReasonixGuide() (SkillMarkdown, error) {
 	return loadSkill("reasonix-guide/SKILL.md")
 }
 
-// All loads every embedded SKILL.md under this package (currently one).
+// All loads every embedded SKILL.md under this package.
 func All() ([]SkillMarkdown, error) {
 	var out []SkillMarkdown
 	err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {

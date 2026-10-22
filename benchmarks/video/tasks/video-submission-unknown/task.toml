@@ -1,0 +1,3 @@
+prompt = "Continue the harbour production in video/harbour/manifest.json."
+class = "video"
+timeout_sec = 600

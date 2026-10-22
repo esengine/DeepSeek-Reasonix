@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "production_id": "harbour",
+  "revision": 3,
+  "brief": {
+    "revision": 1,
+    "duration": 4,
+    "aspect_ratio": 1.3333,
+    "width": 320,
+    "height": 240,
+    "audio": "forbidden",
+    "subtitles": false,
+    "budget": {
+      "retries_per_shot": 2
+    },
+    "required_reviews": [
+      "technical"
+    ]
+  },
+  "script_revision": 1,
+  "shots": [
+    {
+      "shot_id": "s01",
+      "start": 0,
+      "end": 2,
+      "prompt_revision": 1,
+      "prompt": "harbour at noon, shot s01",
+      "references": [],
+      "depends_on": []
+    },
+    {
+      "shot_id": "s02",
+      "start": 2,
+      "end": 4,
+      "prompt_revision": 1,
+      "prompt": "harbour at noon, shot s02",
+      "references": [],
+      "depends_on": []
+    }
+  ],
+  "jobs": [
+    {
+      "shot_id": "s01",
+      "tool": "mcp-tool:video/generate_video",
+      "job_id": "seed-s01",
+      "task_id": "seed-s01",
+      "state": "downloaded"
+    },
+    {
+      "shot_id": "s02",
+      "tool": "mcp-tool:video/generate_video",
+      "state": "planned"
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact_id": "s01",
+      "version": 1,
+      "shot_id": "s01",
+      "path": "video/harbour/s01-v1.mp4",
+      "receipt": "video/harbour/s01-v1.mp4.source.json",
+      "sha256": "5ff207395e93b5ef1a5ab5fda3112617689c772ee82f830e51c790900b321260",
+      "bytes": 76
+    }
+  ],
+  "reviews": [],
+  "delivery": null,
+  "x_seed_note": "must survive every edit"
+}

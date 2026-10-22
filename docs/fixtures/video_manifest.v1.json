@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "production_id": "teaser",
+  "revision": 7,
+  "brief": {
+    "revision": 1,
+    "duration": 10,
+    "aspect_ratio": 1.7778,
+    "width": 1920,
+    "height": 1080,
+    "audio": "required",
+    "subtitles": false,
+    "budget": {"usd": 5, "retries_per_shot": 2},
+    "required_reviews": ["technical", "content", "audio_and_sync"]
+  },
+  "script_revision": 1,
+  "shots": [
+    {"shot_id": "s01", "start": 0, "end": 5, "prompt_revision": 1, "prompt": "city street at dusk, slow dolly in", "references": [], "depends_on": []},
+    {"shot_id": "s02", "start": 5, "end": 10, "prompt_revision": 2, "prompt": "the same street at night, neon reflections", "references": ["s01"], "depends_on": []}
+  ],
+  "jobs": [
+    {"shot_id": "s01", "tool": "mcp-tool:video/generate", "job_id": "job-3", "task_id": "remote-81", "state": "generated", "result_ref": "tool-result:0f3a..."},
+    {"shot_id": "s02", "tool": "mcp-tool:video/generate", "job_id": "job-9", "task_id": "remote-95", "state": "generating"}
+  ],
+  "artifacts": [
+    {"artifact_id": "s01", "version": 1, "shot_id": "s01", "path": "video/teaser/s01-v1.mp4", "receipt": "video/teaser/s01-v1.mp4.source.json", "sha256": "9c1e...", "bytes": 4183920},
+    {"artifact_id": "s02", "version": 1, "shot_id": "s02", "path": "video/teaser/s02-v1.mp4", "receipt": "video/teaser/s02-v1.mp4.source.json", "sha256": "77ab...", "bytes": 4022011, "superseded_by": 2}
+  ],
+  "reviews": [
+    {"artifact_id": "s01", "version": 1, "sha256": "9c1e...", "brief_revision": 1, "scope": "technical", "ranges": [[0, 5]], "reviewer": "tool:check_video", "verdict": "pass", "evidence": "check_video report v1"},
+    {"artifact_id": "s01", "version": 1, "sha256": "9c1e...", "brief_revision": 1, "scope": "audio_and_sync", "ranges": [[0, 5]], "reviewer": "none", "verdict": "unverified", "evidence": "no reviewer declared for audio"}
+  ],
+  "delivery": null,
+  "x_studio_notes": "unknown fields like this one survive every edit"
+}

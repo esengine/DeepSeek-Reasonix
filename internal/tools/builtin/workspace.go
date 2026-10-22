@@ -61,24 +61,40 @@ type Workspace struct {
 	FileWriteReceipt func(path string, hadPrior bool, prior []byte)
 }
 
+// writerRoots are the resolved roots every file-writing tool is confined to.
+func (w Workspace) writerRoots() []string {
+	writeRoots := w.WriteRoots
+	if len(writeRoots) == 0 && w.Dir != "" {
+		writeRoots = []string{w.Dir}
+	}
+	return append(realRoots(writeRoots), networkSpellings(append([]string{w.Dir}, writeRoots...))...)
+}
+
+// readVideo binds the media reader to the workspace's read boundary and sandbox.
+func (w Workspace) readVideo() readVideo {
+	return readVideo{workDir: w.Dir, netRoots: networkRoots(w.Dir, w.WriteRoots, w.ReadRoots), readRoots: w.resolvedReadRoots(),
+		paths: w.ReadPaths, forbidRoots: realRoots(w.ForbidReadRoots), sb: w.Bash}
+}
+
+// resolvedReadRoots resolves ReadRoots; a scope that resolves to nothing refuses everything.
+func (w Workspace) resolvedReadRoots() []string {
+	readRoots := realRoots(w.ReadRoots)
+	if len(w.ReadRoots) > 0 && len(readRoots) == 0 {
+		readRoots = []string{filepath.Join(string(filepath.Separator), "\x00unresolved")}
+	}
+	return readRoots
+}
+
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
 // per-run tool.Registry. An empty enabled list yields every built-in; otherwise
 // only the named ones are returned (unknown names are ignored). This is the
 // per-workspace analogue of the cli's process-cwd assembly — a desktop driver
 // calls it once per agent instead of relying on the global working directory.
 func (w Workspace) Tools(enabled ...string) []tool.Tool {
-	writeRoots := w.WriteRoots
-	if len(writeRoots) == 0 && w.Dir != "" {
-		writeRoots = []string{w.Dir}
-	}
-	roots := append(realRoots(writeRoots), networkSpellings(append([]string{w.Dir}, writeRoots...))...)
+	roots := w.writerRoots()
 	netRoots := networkRoots(w.Dir, w.WriteRoots, w.ReadRoots)
 	forbidRoots := realRoots(w.ForbidReadRoots)
-	readRoots := realRoots(w.ReadRoots)
-	if len(w.ReadRoots) > 0 && len(readRoots) == 0 {
-		// A scope that resolves to nothing must refuse everything, not confine nothing.
-		readRoots = []string{filepath.Join(string(filepath.Separator), "\x00unresolved")}
-	}
+	readRoots := w.resolvedReadRoots()
 
 	overrides := map[string]tool.Tool{
 		"read_file":        readFile{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
@@ -94,7 +110,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"ls":               listDir{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"glob":             globTool{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"grep":             grepTool{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp},
-		"read_video":       readVideo{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots, sb: w.Bash},
+		"read_video":       w.readVideo(),
 		"web_fetch":        webFetch{proxySpec: w.ProxySpec},
 		"import_web_image": webImage{workDir: w.Dir, roots: roots, guard: w.SessionGuard, proxySpec: w.ProxySpec, receipt: w.FileWriteReceipt},
 	}

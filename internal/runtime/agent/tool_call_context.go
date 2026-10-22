@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"reasonix/internal/runtime/langpref"
 
@@ -48,6 +49,13 @@ func (a *Agent) toolCallContext(ctx context.Context, plan *toolCallPlan) context
 	if a.svc.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.svc.jobs)
 		session, manager := jobs.SessionFromContext(cctx), a.svc.jobs
+		cctx = tool.WithResultReader(cctx, func(ref string) (io.ReadCloser, error) { return manager.OpenToolResultForSession(session, ref) })
+		cctx = tool.WithResultRecorder(cctx, func(raw json.RawMessage) (string, error) {
+			return manager.SaveToolResultForSession(session, plan.call.ID, raw)
+		})
+		cctx = tool.WithRemoteTaskStarter(cctx, func(task tool.RemoteTask, run tool.RemoteTaskRun) (tool.RemoteTaskHandle, error) {
+			return manager.StartRemoteForSession(session, task, run)
+		})
 		cctx = tool.WithBackgroundStarter(cctx, func(kind, label string, run func(context.Context, io.Writer) (string, error)) string {
 			return manager.StartForSession(session, kind, label, run).ID
 		})

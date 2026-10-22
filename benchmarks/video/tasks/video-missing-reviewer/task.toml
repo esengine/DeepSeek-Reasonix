@@ -1,0 +1,3 @@
+prompt = "Make a single 2 second shot of rain on a window, 320x240, with audio and lip-sync reviewed. Production id: rain. Use the video-production workflow."
+class = "video"
+timeout_sec = 600
