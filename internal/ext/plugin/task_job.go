@@ -41,7 +41,7 @@ func (c *Client) promoteTask(ctx context.Context, t transport, params any, task 
 			}
 			return "", err
 		}
-		text, _, err := parseToolResult(res)
+		text, _, err := captureToolResult(runCtx, res)
 		return origin + text, err
 	})
 	msg := fmt.Sprintf("MCP task %s is still running on the server and continues as background job %s: use wait or bash_output to collect its result, kill_shell to cancel it.", label, id)

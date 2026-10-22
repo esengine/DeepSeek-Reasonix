@@ -111,3 +111,25 @@ func schemaWidenHint(rows []schemaRow) string {
 	}
 	return b.String()
 }
+
+// mediaSchemaCap bounds each conditional media tool: they sit outside the
+// built-in total, so nothing else would notice one of them growing.
+const mediaSchemaCap = 400
+
+func TestConditionalMediaSchemasStayCompact(t *testing.T) {
+	r := tool.NewRegistry()
+	r.Add(artifactDownload{})
+	r.Add(videoCheck{})
+	for _, s := range r.Schemas() {
+		b, err := json.Marshal(s)
+		if err != nil {
+			t.Fatalf("%s: %v", s.Name, err)
+		}
+		if n := tokencount.Text(string(b)); n > mediaSchemaCap {
+			t.Errorf("%s schema is %d tokens, over the %d cap for a conditional media tool", s.Name, n, mediaSchemaCap)
+		}
+	}
+	if len(r.Schemas()) == 0 {
+		t.Fatal("no media schemas were read")
+	}
+}

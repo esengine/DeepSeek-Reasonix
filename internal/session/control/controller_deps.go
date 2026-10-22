@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/contract/ablation"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/extension"
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/ext/plugin"
@@ -110,9 +111,10 @@ type controllerDeps struct {
 	// jobs is the session-scoped background-job manager. The agent's background
 	// tools spawn into it; Compose drains its completion notes into the next turn;
 	// Close cancels its still-running jobs.
-	jobs      *jobs.Manager
-	subagents SubagentReader
-	taskStore taskmonitor.WriteStore
+	jobs              *jobs.Manager
+	subagents         SubagentReader
+	taskStore         taskmonitor.WriteStore
+	remoteTaskResumer tool.RemoteTaskResumer
 	// workspaceLease is the Delivery writer owner shared with the executor.
 	// It is exposed only through a sanitized state snapshot for Desktop recovery.
 	workspaceLease *workspacelease.Owner
@@ -200,6 +202,7 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		jobs:                   opts.Jobs,
 		subagents:              opts.Subagents,
 		taskStore:              opts.TaskStore,
+		remoteTaskResumer:      opts.RemoteTaskResumer,
 		workspaceLease:         opts.WorkspaceLease,
 		mcp:                    newMcpManager(opts.Host, opts.Registry, pluginCtx, opts.MCPDefaultCallTimeout, hostFactNotice(opts.Executor)),
 		mcpConfigureSpec:       opts.MCPConfigureSpec,

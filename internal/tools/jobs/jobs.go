@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"reasonix/internal/base/nilutil"
 	"reasonix/internal/base/scratch"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/evidence"
 )
 
@@ -125,6 +127,7 @@ type Job struct {
 
 	evidence          evidence.ChildEvidenceSummary
 	evidenceCommitted bool
+	remote            *remoteJob
 }
 
 // Manager is the session's background-job table. It is safe for concurrent use.
@@ -156,7 +159,8 @@ type Manager struct {
 	stalledWarning time.Duration
 	teardownGrace  time.Duration
 
-	taskRecorder TaskRecorder // optional task-monitoring lifecycle hook
+	taskRecorder  TaskRecorder // optional task-monitoring lifecycle hook
+	remoteResumer tool.RemoteTaskResumer
 }
 
 type completion struct {
@@ -402,6 +406,9 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	applyOptions(j, opts)
 	ctx = WithSession(ctx, parentSession)
 	ctx = context.WithValue(ctx, jobCtxKey{}, j)
+	ctx = tool.WithResultRecorder(ctx, func(raw json.RawMessage) (string, error) {
+		return m.SaveToolResultForSession(parentSession, id, raw)
+	})
 	key := jobKey(parentSession, id)
 	m.jobs[key] = j
 	m.order = append(m.order, key)
@@ -412,6 +419,11 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		j.artifact.err = err.Error()
 	}
 	j.mu.Unlock()
+	if j.remote != nil {
+		if err := m.prepareRemote(j); err != nil {
+			run = func(context.Context, io.Writer) (string, error) { return "", err }
+		}
+	}
 	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
 
 	if !nilutil.IsNil(m.taskRecorder) {
@@ -820,6 +832,10 @@ func (m *Manager) KillForSession(parentSession, id string) bool {
 	if !running {
 		return false
 	}
+	if err := m.markRemoteCancellation(j); err != nil {
+		m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelWarn,
+			Text: "Remote task cancellation intent could not be retained.", Detail: err.Error()})
+	}
 	j.cancel()
 	return true
 }
@@ -1020,7 +1036,7 @@ func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 	m.active = parentSession
 	oldDir := m.artifactDirLocked(parentSession)
 	adoptDefault := false
-	if _, hasDir := m.artifactDirs[parentSession]; !hasDir && m.hasUnscopedJobsLocked() {
+	if _, hasDir := m.artifactDirs[parentSession]; !hasDir && (m.hasUnscopedJobsLocked() || m.hasUnscopedResultsLocked()) {
 		oldDir = m.artifactDirLocked("")
 		adoptDefault = true
 	}
@@ -1045,12 +1061,14 @@ func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 			m.mu.Lock()
 			if adoptDefault {
 				m.adoptUnscopedJobsLocked(parentSession)
+				m.artifactDirs[""] = newDir
 			}
 			m.mu.Unlock()
 		}
 	}
 	if !loaded {
-		m.loadSessionArtifacts(parentSession, sessionPath, newDir)
+		// Resuming reaches the network, so it runs once no lock is held.
+		m.resumeRemoteJobs(parentSession, sessionPath, m.loadSessionArtifacts(parentSession, sessionPath, newDir))
 	}
 }
 
@@ -1282,13 +1300,13 @@ func copyArtifactFile(src, dst string) error {
 	return nil
 }
 
-func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
+func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) []*Job {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		m.mu.Lock()
 		m.loaded[parentSession] = true
 		m.mu.Unlock()
-		return
+		return nil
 	}
 	var loaded []*Job
 	deferredLiveOwner := false
@@ -1365,9 +1383,10 @@ func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, j := range loaded {
+	for i, j := range loaded {
 		key := jobKey(parentSession, j.ID)
-		if _, exists := m.jobs[key]; exists {
+		if existing, exists := m.jobs[key]; exists {
+			loaded[i] = existing
 			continue
 		}
 		m.jobs[key] = j
@@ -1377,6 +1396,7 @@ func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
 		m.seq = maxSeq
 	}
 	m.loaded[parentSession] = !deferredLiveOwner
+	return loaded
 }
 
 // BeginDestroySession marks a parent session as being removed from active use

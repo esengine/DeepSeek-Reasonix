@@ -1649,5 +1649,5 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 	if err != nil {
 		return "", nil, t.client.scopeRefusal(err)
 	}
-	return parseToolResult(res)
+	return captureToolResult(ctx, res)
 }

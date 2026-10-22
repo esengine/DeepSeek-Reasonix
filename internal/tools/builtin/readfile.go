@@ -89,6 +89,9 @@ func (r readFile) ReadTarget(args json.RawMessage) string {
 	if json.Unmarshal(args, &p) != nil || p.Path == "" {
 		return ""
 	}
+	if tool.IsResultReference(p.Path) {
+		return ""
+	}
 	return resolveReadablePath(r.workDir, p.Path, r.paths).Path
 }
 
@@ -99,7 +102,9 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 			Path string `json:"path"`
 		}
 		if json.Unmarshal(args, &p) == nil {
-			r.views.sawFile(ctx, r.overlay, resolveReadablePath(r.workDir, p.Path, r.paths).Path)
+			if !tool.IsResultReference(p.Path) {
+				r.views.sawFile(ctx, r.overlay, resolveReadablePath(r.workDir, p.Path, r.paths).Path)
+			}
 		}
 	}
 	return out, err
@@ -125,16 +130,15 @@ func (r readFile) refuse(rp ResolvedPath) error {
 }
 
 func (r readFile) read(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		Path   string `json:"path"`
-		Offset int    `json:"offset,omitempty"`
-		Limit  int    `json:"limit,omitempty"`
-	}
+	var p readFileArgs
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {
 		return "", fmt.Errorf("path is required")
+	}
+	if tool.IsResultReference(p.Path) {
+		return r.readResult(ctx, p)
 	}
 	rp := resolveReadablePath(r.workDir, p.Path, r.paths)
 	p.Path = rp.Path

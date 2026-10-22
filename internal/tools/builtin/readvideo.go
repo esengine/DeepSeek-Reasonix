@@ -359,10 +359,16 @@ func sampleTimes(from, to float64, n int) []float64 {
 // one, with the secrets-scrubbed environment, and reads at most limit bytes of
 // its output.
 func (r readVideo) exec(ctx context.Context, argv []string, limit int64) ([]byte, string, error) {
+	return r.execIn(ctx, argv, limit, "")
+}
+
+// execIn is exec with tempDir mapped into the sandbox, for a program that must
+// read a snapshot the host wrote there.
+func (r readVideo) execIn(ctx context.Context, argv []string, limit int64, tempDir string) ([]byte, string, error) {
 	if r.run != nil {
 		return r.run(ctx, argv)
 	}
-	prepared := sandbox.PrepareArgs(r.sb, argv, "")
+	prepared := sandbox.PrepareArgs(r.sb, argv, tempDir)
 	cmd := exec.CommandContext(ctx, prepared.Argv[0], prepared.Argv[1:]...)
 	cmd.Env = applyEnvOverrides(secrets.ProcessEnv(), prepared.EnvOverrides)
 	proc.HideWindow(cmd)

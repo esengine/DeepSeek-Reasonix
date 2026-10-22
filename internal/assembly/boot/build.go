@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -387,6 +389,7 @@ func (b *builder) wireTools() error {
 	if err := b.wireMCP(); err != nil {
 		return err
 	}
+	addMediaTools(t.reg, cfg.Tools.Enabled, mediaWorkspace(root, env, b.proxy, b.fileWriteReceipt), t.mcp, exec.LookPath)
 	t.browser = bindMachineTools(t.reg, cfg, root, opts.BrowserSession, opts.ComputerDriver)
 	b.timer.mark("mcp")
 
@@ -617,6 +620,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		Tariff:                func(at time.Time) (pricing.Tariff, bool) { return b.cfg.LiveTariff(b.model.ref, at) },
 		Feedback:              control.FeedbackOptions{Service: feedbackService(b.roots.Home(), b.proxy, opts.AccountsURL), ProviderKind: feedbackProviderKind(entry), Surface: opts.FeedbackSurface},
 		Jobs:                  b.session.jobs,
+		RemoteTaskResumer:     remoteTaskResumer(t.host, append(slices.Clone(t.mcp.configured), t.mcp.extra...), t.policy),
 		TaskStore:             opts.TaskStore,
 		WorkspaceLease:        b.session.lease,
 		Registry:              t.reg,
