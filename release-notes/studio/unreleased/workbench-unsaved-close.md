@@ -1,0 +1,2 @@
+- 优化：工作台文件栏不再常驻一条「保存」按钮，改为 Ctrl+S 保存当前文件；有未保存改动时，标签页的关闭图标变成蓝点，悬停恢复成关闭，点击先问「确认未保存就关闭它吗？」，可选「不保存」「保存」或「取消」。
+- Changed: the workbench file bar no longer keeps a Save button; Ctrl+S saves the open file. A tab with unsaved edits shows a blue dot in place of its close mark, hover brings the mark back, and closing asks first with Don't save, Save and Cancel.

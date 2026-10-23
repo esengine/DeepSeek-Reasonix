@@ -4,18 +4,17 @@ import { StudioIcon } from "./StudioIcon";
 
 export type FileMode = "file" | "diff" | "read" | "preview" | "document";
 
-/** The open file's path, the views it can be seen in, and save. A document that
+/** The open file's path and the views it can be seen in. A document that
  *  renders (Markdown, a page) leads with that view and calls the editor
- *  "编辑"; any other file has only its text. */
+ *  "编辑"; any other file has only its text. Saving is Ctrl+S and the tab's
+ *  unsaved mark, so the bar carries no button of its own. */
 export function WorkbenchFileBar({
   path,
   mode,
   onMode,
   readable,
   previewable,
-  canSave,
   readOnlyIn,
-  onSave,
   openWith,
   onReveal,
   document = false,
@@ -26,10 +25,8 @@ export function WorkbenchFileBar({
   onMode: (mode: FileMode) => void;
   readable: boolean;
   previewable: boolean;
-  canSave: boolean;
   // Set for a file read from a granted folder: the folder, shown as why it cannot be saved.
   readOnlyIn?: string;
-  onSave: () => void;
   openWith?: ReactNode;
   // Present only where the kernel's own machine can show the file.
   onReveal?: () => void;
@@ -59,11 +56,6 @@ export function WorkbenchFileBar({
       {openWith}
       {readOnlyIn ? (
         <span className="workbench-readonly" title={readOnlyIn}>{t("只读 · 来自你授权的文件夹")}</span>
-      ) : source ? (
-        <button className="workbench-save" data-action="workbench.save" data-target={path} disabled={!canSave} onClick={onSave}>
-          <StudioIcon name="check" />
-          {t("保存")}
-        </button>
       ) : null}
     </div>
   );

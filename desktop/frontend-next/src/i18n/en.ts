@@ -1363,6 +1363,9 @@ export const EN: Record<string, string> = {
   // ── 通用动作 ─────────────────────────────────────────────────────
   "取消": "Cancel",
   "保存": "Save",
+  "不保存": "Don't save",
+  "确认未保存就关闭它吗？": "Close it without saving?",
+  "这可能引起你的项目出错。": "This could break your project.",
   "已保存": "Saved",
   "没有更改": "No changes",
   "有未保存的更改": "Unsaved changes",

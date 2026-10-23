@@ -1364,6 +1364,16 @@ body { background: var(--page) !important; }
 .workbench-tab-close { display: grid; place-items: center; opacity: .4; }
 .workbench-tab:hover .workbench-tab-close, .workbench-tab[aria-selected="true"] .workbench-tab-close { opacity: 1; }
 .workbench-tab-close:hover { color: var(--text); }
+/* A file whose draft the disk does not have: the close mark becomes a dot that
+   says so without a hover, and the cross comes back when the pointer is on it. */
+.workbench-tab-close .workbench-tab-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--net); }
+.workbench-tab-close[data-dirty] { opacity: 1; }
+.workbench-tab-close[data-dirty] .workbench-tab-dot { display: block; }
+.workbench-tab-close[data-dirty] svg { display: none; }
+.workbench-tab-close[data-dirty]:hover .workbench-tab-dot,
+.workbench-tab-close[data-dirty]:focus-visible .workbench-tab-dot { display: none; }
+.workbench-tab-close[data-dirty]:hover svg,
+.workbench-tab-close[data-dirty]:focus-visible svg { display: block; }
 .workbench-tabs svg { width: 13px; height: 13px; flex: none; }
 .workbench-body { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(190px, 25%, 300px); grid-template-rows: minmax(0, 1fr); }
 .workbench-canvas { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -1424,9 +1434,6 @@ body { background: var(--page) !important; }
 .workbench-filebar [role="group"] { display: flex; padding: 2px; background: var(--page); border: 1px solid var(--hair); border-radius: 5px; }
 .workbench-filebar button { min-height: 25px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: 600 calc(10px * var(--fs-scale, 1))/1 var(--ui); }
 .workbench-filebar button[aria-pressed="true"] { background: var(--raised); color: var(--text); }
-.workbench-filebar .workbench-save { display: flex; align-items: center; gap: 5px; }
-.workbench-filebar .workbench-save { background: var(--accent); color: white; }
-.workbench-filebar .workbench-save:disabled { opacity: .35; }
 .workbench-filebar .workbench-readonly { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); white-space: nowrap; }
 .workbench-filebar svg { width: 13px; height: 13px; }
 .workbench-editor { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--face-code); }

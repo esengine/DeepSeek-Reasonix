@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -43,11 +43,13 @@ function fixture() {
   const save = vi.spyOn(port, "saveWorkspaceFile").mockImplementation(async (file) => ({ ...file, revision: "r2" }));
   const props = { port, tabs: [], manual: false, shown: true, scheme: "light" as const, changes: [], workspaceRoot: "/one", onCloseManual: vi.fn(), onSurfaces: vi.fn(), onExternal: vi.fn() };
   const view = render(<WorkbenchPanel {...props} />);
+  // Saving is the shortcut now; the file bar carries no button to click.
+  const ctrlS = () => fireEvent.keyDown(window, { key: "s", ctrlKey: true });
   const open = async (path: string) => {
     await user.click(button("files"));
     await user.click(await screen.findByRole("button", { name: path }));
   };
-  return { ...view, user, port, read, save, props, open };
+  return { ...view, user, port, read, save, ctrlS, props, open };
 }
 
 it("preserves both dirty file tabs without saving or reloading either draft", async () => {
@@ -66,7 +68,7 @@ it("preserves both dirty file tabs without saving or reloading either draft", as
   expect(f.read).toHaveBeenCalledTimes(2);
 });
 
-it("keeps a draft through launcher cancellation, hiding and closing then reopening its tab", async () => {
+it("keeps a draft through launcher cancellation and hiding, and a close asks before dropping it", async () => {
   const f = fixture();
   await f.open("a.txt");
   await append(" draft");
@@ -76,10 +78,9 @@ it("keeps a draft through launcher cancellation, hiding and closing then reopeni
   f.rerender(<WorkbenchPanel {...f.props} shown={false} />);
   f.rerender(<WorkbenchPanel {...f.props} />);
   await editor("saved a.txt draft");
+  // The close is a question now; staying is one of its answers.
   await f.user.click(button("close", "file:a.txt"));
-  await f.open("b.txt");
-  await editor("saved b.txt");
-  await f.open("a.txt");
+  await f.user.click(await screen.findByRole("button", { name: "取消" }));
   await editor("saved a.txt draft");
   expect(f.save).not.toHaveBeenCalled();
 });
@@ -90,7 +91,7 @@ it.each([false, true])("keeps a late save result on its own file (failure: %s)",
   f.save.mockReturnValueOnce(pending.promise);
   await f.open("a.txt");
   await append(" draft");
-  await f.user.click(button("save"));
+  f.ctrlS();
   await f.open("b.txt");
   await editor("saved b.txt");
   await append(" other");
@@ -105,7 +106,7 @@ it.each([false, true])("keeps a late save result on its own file (failure: %s)",
   expect(screen.queryByText("save refused")).toBeNull();
   await f.user.click(button("tab", "file:a.txt"));
   await editor("saved a.txt draft");
-  expect(button("save").disabled).toBe(!fails);
+  if (!fails) expect(screen.queryByRole("alert")).toBeNull();
   if (fails) expect(screen.getByRole("alert").textContent).toBe("save refused");
   expect(f.save.mock.calls[0][0]).toEqual(file("a.txt", "saved a.txt draft"));
 });
@@ -116,15 +117,14 @@ it("retains edits typed during saving and suppresses repeated save shortcuts", a
   f.save.mockReturnValueOnce(pending.promise);
   await f.open("a.txt");
   await append(" draft");
-  await f.user.click(button("save"));
+  f.ctrlS();
   await append(" newer");
   (await editor()).focus();
   await f.user.keyboard("{Control>}s{/Control}");
   expect(f.save).toHaveBeenCalledTimes(1);
   await act(async () => pending.resolve(file("a.txt", "saved a.txt draft", "r2")));
   await editor("saved a.txt draft newer");
-  expect(button("save").disabled).toBe(false);
-  await f.user.click(button("save"));
+  f.ctrlS();
   expect(f.save.mock.calls[1][0]).toEqual(file("a.txt", "saved a.txt draft newer", "r2"));
 });
 
@@ -134,7 +134,7 @@ it.each(["workspace", "connection"])("isolates same-path drafts and pending save
   f.save.mockReturnValueOnce(pending.promise);
   await f.open("a.txt");
   await append(" old draft");
-  await f.user.click(button("save"));
+  f.ctrlS();
   const nextPort = change === "connection" ? new MockPort() : f.port;
   const nextRead = deferred<WorkspaceFile>();
   vi.spyOn(nextPort, "workspaceFile").mockReturnValue(nextRead.promise);
@@ -142,13 +142,12 @@ it.each(["workspace", "connection"])("isolates same-path drafts and pending save
   nextSave.mockClear();
   f.rerender(<WorkbenchPanel {...f.props} port={nextPort} workspaceRoot={change === "workspace" ? "/two" : "/one"} />);
   expect(document.querySelector(".cm-content")).toBeNull();
-  expect(button("save").disabled).toBe(true);
   await act(async () => nextRead.resolve(file("a.txt", "new workspace", "next")));
   await editor("new workspace");
   await append(" draft");
   await act(async () => pending.resolve(file("a.txt", "saved a.txt old draft", "r2")));
   await editor("new workspace draft");
-  await f.user.click(button("save"));
+  f.ctrlS();
   expect(nextSave).toHaveBeenCalledExactlyOnceWith(file("a.txt", "new workspace draft", "next"));
 });
 
@@ -174,8 +173,7 @@ it("does not save the previous draft while another file is loading and ignores o
   const second = deferred<WorkspaceFile>();
   f.read.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
   await f.open("b.txt");
-  expect(button("save").disabled).toBe(true);
-  await f.user.click(button("save"));
+  f.ctrlS();
   expect(f.save).not.toHaveBeenCalled();
   await f.user.click(button("tab", "file:a.txt"));
   await editor("saved a.txt draft");
@@ -225,26 +223,29 @@ it("resumes Markdown polling after changing modes during a pending poll", async 
   } finally { vi.useRealTimers(); }
 });
 
-it("evicts clean closed files but retains a closed draft until its pending save settles", async () => {
+it("evicts a clean closed file and asks before a dirty one is dropped", async () => {
   const f = fixture();
   await f.open("a.txt");
   await editor("saved a.txt");
+  // Clean: no question, and the closed entry is evicted, so reopening reads.
   await f.user.click(button("close", "file:a.txt"));
+  expect(screen.queryByRole("dialog")).toBeNull();
   const cleanRead = deferred<WorkspaceFile>();
   f.read.mockReturnValueOnce(cleanRead.promise);
   await f.open("a.txt");
   expect(document.querySelector(".cm-content")).toBeNull();
   await act(async () => cleanRead.resolve(file("a.txt")));
+  await editor("saved a.txt");
+  // Dirty: the question stands between the draft and the disk.
   await append(" draft");
-  const pending = deferred<WorkspaceFile>();
-  f.save.mockReturnValueOnce(pending.promise);
-  await f.user.click(button("save"));
   await f.user.click(button("close", "file:a.txt"));
-  await f.open("a.txt");
+  await f.user.click(await screen.findByRole("button", { name: "取消" }));
   await editor("saved a.txt draft");
-  expect(button("save").disabled).toBe(true);
+  // Saving clears the mark, so the next close needs no answer.
+  f.ctrlS();
+  await waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
   await f.user.click(button("close", "file:a.txt"));
-  await act(async () => pending.resolve(file("a.txt", "saved a.txt draft", "r2")));
+  expect(screen.queryByRole("dialog")).toBeNull();
   const savedRead = deferred<WorkspaceFile>();
   f.read.mockReturnValueOnce(savedRead.promise);
   await f.open("a.txt");
@@ -261,7 +262,7 @@ it.each(["read", "save"])("ignores a late %s after unmounting and remounting the
   await f.open("a.txt");
   if (operation === "save") {
     await append(" old draft");
-    await f.user.click(button("save"));
+    f.ctrlS();
   }
   f.unmount();
   f.read.mockResolvedValue(file("a.txt", "remounted", "r3"));
