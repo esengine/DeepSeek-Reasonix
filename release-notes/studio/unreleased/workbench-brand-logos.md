@@ -1,0 +1,2 @@
+- 优化：工作台「资源管理器」标题栏里的「在代码编辑器中打开」与「在系统文件管理器中显示」改用真实品牌标记——VS Code 的蓝色图标与 Windows 资源管理器的文件夹图标，不必再靠悬停说明辨认。仅适用于 Windows 桌面端。
+- Changed: the workbench explorer header's "open in a code editor" and "show in the system file manager" actions now carry their real marks — the VS Code blue icon and the Windows File Explorer folder — so the tooltip is no longer what explains them. Windows desktop only.

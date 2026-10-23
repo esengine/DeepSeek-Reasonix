@@ -1382,6 +1382,10 @@ body { background: var(--page) !important; }
 .workbench-open-editor:hover { color: var(--text); background: var(--overlay); }
 .workbench-open-editor[aria-pressed="true"] { color: var(--text); background: var(--overlay); }
 .workbench-open-editor svg { width: 16px; height: 16px; }
+/* The two host actions keep their own marks: the editor's blue and the
+   Windows folder are read faster than a monochrome glyph whose meaning only
+   arrives in the tooltip. */
+.workbench-open-editor .workbench-app-logo { width: 16px; height: 16px; display: block; object-fit: contain; }
 .workbench-open-editor + .workbench-open-editor { margin-left: 2px; }
 .workbench-search { height: 34px; margin: 7px 8px; padding: 0 8px; flex: none; display: flex; align-items: center; gap: 6px; border: 1px solid var(--hair); border-radius: 5px; background: var(--surface); }
 .workbench-search:focus-within { border-color: var(--accent); }

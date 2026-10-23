@@ -3,6 +3,8 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort } from "../port/port";
 import { StudioIcon } from "./StudioIcon";
+import vscodeLogo from "../assets/vscode.svg";
+import explorerLogo from "../assets/windows-explorer.webp";
 
 /** The explorer's title row and the actions that act on the whole workspace.
  *  They sit beside the files rather than in settings: this is the one place
@@ -54,7 +56,7 @@ export function WorkbenchExplorerHead({
         aria-label={t("在代码编辑器中打开工作区")}
         onClick={openEditor}
       >
-        <StudioIcon name="code" />
+        <img className="workbench-app-logo" src={vscodeLogo} alt="" aria-hidden="true" />
       </button>
       {revealable && (
         <button
@@ -64,7 +66,7 @@ export function WorkbenchExplorerHead({
           aria-label={t("在系统文件管理器中显示工作区")}
           onClick={onReveal}
         >
-          <StudioIcon name="reveal" />
+          <img className="workbench-app-logo" src={explorerLogo} alt="" aria-hidden="true" />
         </button>
       )}
       {openWith}
