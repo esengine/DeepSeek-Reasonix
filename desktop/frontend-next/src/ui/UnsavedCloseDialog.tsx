@@ -35,9 +35,9 @@ export function UnsavedCloseDialog({ busy, onDiscard, onSave, onCancel }: {
         <h2 id="unsaved-t">{t("确认未保存就关闭它吗？")}</h2>
         <p className="picknote">{t("这可能引起你的项目出错。")}</p>
         <div className="pickact">
-          <button data-action="workbench.close-discard" disabled={busy} onClick={onDiscard}>{t("不保存")}</button>
-          <button className="pickgo" data-action="workbench.close-save" disabled={busy} onClick={onSave}>{t("保存")}</button>
-          <button ref={cancel} data-action="workbench.close-cancel" disabled={busy} onClick={onCancel}>{t("取消")}</button>
+          <button data-action="workbench.close" data-value="discard" disabled={busy} onClick={onDiscard}>{t("不保存")}</button>
+          <button className="pickgo" data-action="workbench.save" data-value="save" disabled={busy} onClick={onSave}>{t("保存")}</button>
+          <button ref={cancel} data-action="layer.dismiss" disabled={busy} onClick={onCancel}>{t("取消")}</button>
         </div>
       </div>
     </div>,

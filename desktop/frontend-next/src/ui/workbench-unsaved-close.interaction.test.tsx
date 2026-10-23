@@ -42,7 +42,7 @@ describe("saving a file without the bar's button", () => {
 
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
 
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(document.querySelector(".workbench")!, { key: "s", ctrlKey: true });
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0][0].content.endsWith("## Unsaved")).toBe(true);
   });
@@ -56,7 +56,7 @@ describe("saving a file without the bar's button", () => {
     await openEditedREADME(user);
 
     view.rerender(<WorkbenchPanel {...props} shown={false} />);
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(document.querySelector(".workbench")!, { key: "s", ctrlKey: true });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(save).not.toHaveBeenCalled();
   });

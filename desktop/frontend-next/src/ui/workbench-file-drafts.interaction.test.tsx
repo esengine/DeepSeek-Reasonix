@@ -44,7 +44,7 @@ function fixture() {
   const props = { port, tabs: [], manual: false, shown: true, scheme: "light" as const, changes: [], workspaceRoot: "/one", onCloseManual: vi.fn(), onSurfaces: vi.fn(), onExternal: vi.fn() };
   const view = render(<WorkbenchPanel {...props} />);
   // Saving is the shortcut now; the file bar carries no button to click.
-  const ctrlS = () => fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  const ctrlS = () => fireEvent.keyDown(document.querySelector(".workbench")!, { key: "s", ctrlKey: true });
   const open = async (path: string) => {
     await user.click(button("files"));
     await user.click(await screen.findByRole("button", { name: path }));

@@ -321,22 +321,6 @@ export function WorkbenchPanel({
     poll: (readable && mode === "read") || (previewable && mode === "preview"),
   });
   const unpreviewableText = !hasDocument && errorCode === "workspace.file_unreadable";
-  // Ctrl+S belongs to the file the panel is showing, wherever focus sits: the
-  // editor's own keymap only sees the chord while the editor has focus, and a
-  // person who just clicked a tab expects it to still work.
-  const saveActive = useRef(savePath);
-  saveActive.current = savePath;
-  useEffect(() => {
-    if (!shown) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() !== "s" || !filePath || launcher) return;
-      e.preventDefault();
-      void saveActive.current(filePath);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [shown, filePath, launcher]);
   const unsaved = useMemo(() => new Set(dirtyPaths), [dirtyPaths]);
   const [closePrompt, setClosePrompt] = useState<string>("");
   const [promptBusy, setPromptBusy] = useState(false);
@@ -479,7 +463,14 @@ export function WorkbenchPanel({
   };
   return (
     <section className="workbench" aria-label={t("工作台")} data-action-keydown="layer.dismiss" onKeyDown={(e) => {
-      if (launcher && e.key === "Escape") { e.stopPropagation(); toggleLauncher(); newTab.current?.focus(); }
+      if (launcher && e.key === "Escape") { e.stopPropagation(); toggleLauncher(); newTab.current?.focus(); return; }
+      // Ctrl+S belongs to the file on screen: the editor's own keymap sees the
+      // chord while it has focus, and a person who just clicked a tab expects
+      // it to work there too.
+      if (!shown || launcher || !filePath) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      void savePath(filePath);
     }}>
       <header className="workbench-tabs">
         <div

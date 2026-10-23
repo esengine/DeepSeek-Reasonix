@@ -32,7 +32,7 @@ describe("WorkbenchPanel", () => {
     });
     const view = EditorView.findFromDOM(content)!;
     act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "updated" } }));
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(document.querySelector(".workbench")!, { key: "s", ctrlKey: true });
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][0].content.endsWith("updated")).toBe(true);
     // What reading shows is the draft, so an edit is visible before it is saved.
@@ -775,7 +775,7 @@ describe("WorkbenchPanel", () => {
     vi.spyOn(port, "saveWorkspaceFile").mockImplementation(async (file) => ({ ...file, revision: "r3" }));
 
     act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "\n\n## Saved" } }));
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(document.querySelector(".workbench")!, { key: "s", ctrlKey: true });
     await waitFor(() => expect(port.saveWorkspaceFile).toHaveBeenCalled());
     await land({ content: "# Second", revision: "r2" });
 
