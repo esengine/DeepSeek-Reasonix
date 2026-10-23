@@ -57,3 +57,50 @@ it.each(["ref", "slash"] as const)("keeps %s navigation made as soon as the rows
   await act(async () => { render(<Probe />); });
   expect(screen.getByRole("status").textContent).toBe("second");
 });
+
+it.each(["Enter", "Tab"])("keeps the exact command ahead of longer matches when accepting with %s", async (key) => {
+  const typed = { label: "/reload", insert: "/reload", hint: "Reload runtime", kind: "builtin" };
+  const alternative = { label: "/reload-cmd", insert: "/reload-cmd", hint: "Reload commands", kind: "builtin" };
+  const port = { complete: async (): Promise<Completion> => ({
+    kind: "slash", from: 0, to: 7, query: "/reload", typed, items: [alternative],
+  }) } as unknown as AgentPort;
+  const apply = vi.fn();
+  function Probe() {
+    const menu = useCompletion(port, "/reload", 7, apply);
+    return <>
+      <input aria-label="draft" defaultValue="/reload" onKeyDown={(e) => {
+        if (e.key === "ArrowDown") menu.move(1);
+        if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); menu.accept(); }
+        if (e.key === "Escape") menu.dismiss();
+      }} />
+      {menu.open && <CompletionMenu id="m" items={menu.completion.items} active={menu.active}
+        kind="slash" query="/reload" kb={menu.kb} onPick={menu.accept} onHover={menu.hover} />}
+    </>;
+  }
+  render(<Probe />);
+  await screen.findByRole("option", { name: /Reload commands/ });
+  const rows = screen.getAllByRole("option");
+  expect(rows.map((row) => row.textContent)).toEqual([
+    expect.stringContaining("Reload runtime"), expect.stringContaining("Reload commands"),
+  ]);
+  expect(rows[0].getAttribute("aria-selected")).toBe("true");
+  const box = screen.getByRole("textbox", { name: "draft" });
+  fireEvent.keyDown(box, { key: "ArrowDown" });
+  fireEvent.keyDown(box, { key });
+  expect(apply).toHaveBeenLastCalledWith("/reload-cmd", 11);
+  fireEvent.keyDown(box, { key: "Escape" });
+  expect(screen.queryByRole("listbox")).toBeNull();
+});
+
+it("offers an exact command even when no alternatives remain", async () => {
+  const port = { complete: async (): Promise<Completion> => ({
+    kind: "slash", from: 0, to: 7, typed: { label: "/reload", insert: "/reload" }, items: [],
+  }) } as unknown as AgentPort;
+  function Probe() {
+    const menu = useCompletion(port, "/reload", 7, () => {});
+    return menu.open && <CompletionMenu id="m" items={menu.completion.items} active={menu.active}
+      kind="slash" query="/reload" kb={menu.kb} onPick={menu.accept} onHover={menu.hover} />;
+  }
+  render(<Probe />);
+  expect(await screen.findByRole("option")).toHaveProperty("textContent", expect.stringContaining("/reload"));
+});

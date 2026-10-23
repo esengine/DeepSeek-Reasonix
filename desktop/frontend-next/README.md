@@ -28,6 +28,16 @@ read it, which costs more than the seconds it saves.
 through `?raw`, and a stubbed stylesheet hands them an empty string, which
 passes on nothing.
 
+## Command completion
+
+The menu includes the command already typed in full as its first, selected row,
+followed by matching alternatives. For example, `/reload` offers `/reload`
+(reload the runtime) before `/reload-cmd` (reload custom commands).
+
+The kernel sends the exact match separately as `typed`; Studio restores it to
+the menu, as the terminal frontend does. Confirming that row closes the menu
+without changing the draft; the next Enter sends it.
+
 ## Large-file shell regression
 
 From the repository root, install the frontend and Electron dependencies, then

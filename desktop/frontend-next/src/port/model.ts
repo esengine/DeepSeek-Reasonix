@@ -34,6 +34,7 @@ export interface Completion {
   // here instead of leaving a fuzzy hit unexplained.
   query?: string;
   items: CompletionItem[];
+  typed?: CompletionItem;
 }
 
 export interface ModelPrice {

@@ -945,3 +945,21 @@ describe("send shortcut preference", () => {
     expect(screen.getByText("Ctrl Enter 插话 · Enter 换行")).toBeTruthy();
   });
 });
+
+it.each(["Enter", "Tab"])("can submit an exact command after confirming its completion with %s", async (key) => {
+  const port = new MockPort();
+  vi.spyOn(port, "complete").mockResolvedValue({
+    kind: "slash", from: 0, to: 7, query: "/reload",
+    typed: { label: "/reload", insert: "/reload", hint: "Reload runtime", kind: "builtin" },
+    items: [{ label: "/reload-cmd", insert: "/reload-cmd", hint: "Reload commands", kind: "builtin" }],
+  });
+  const { box, onSubmit } = draw({ port });
+  fireEvent.change(box, { target: { value: "/reload", selectionStart: 7 } });
+  await screen.findByRole("option", { name: /Reload runtime/ });
+  fireEvent.keyDown(box, { key });
+  expect(box.value).toBe("/reload");
+  expect(screen.queryByRole("listbox")).toBeNull();
+  expect(onSubmit).not.toHaveBeenCalled();
+  fireEvent.keyDown(box, { key: "Enter" });
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("/reload"));
+});

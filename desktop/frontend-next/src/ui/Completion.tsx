@@ -137,6 +137,7 @@ export function useCompletion(
       .then((r) => {
         if (id === asked.current) {
           window.clearTimeout(timer);
+          if (r.typed) r = { ...r, items: [r.typed, ...r.items] };
           setCompletion(r.items?.length ? r : EMPTY);
           setLoading(false);
         }
@@ -175,6 +176,7 @@ export function useCompletion(
       const suffix = text.slice(completion.to);
       const separator = finishRef && !/^\s/.test(suffix) ? " " : "";
       const next = text.slice(0, completion.from) + pick.insert + separator + suffix;
+      if (next === text) setDismissed(completion);
       if (completion.kind === "ref") {
         asked.current++;
         setCompletion(EMPTY);
