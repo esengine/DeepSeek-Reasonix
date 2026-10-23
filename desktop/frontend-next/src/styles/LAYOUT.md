@@ -292,6 +292,9 @@ and selected states, while long titles truncate within the remaining width.
   the global icon navigation is not visible. It follows the window's existing
   navigation visibility state, including collapsed-only mode and narrow-window
   folds, so both columns never offer the same footer actions together.
+- The footer avatar initial and workspace label share font metrics and a
+  horizontal text centerline. The compact account button has no row divider;
+  the footer owns the divider above all three controls.
 - Browser wide mode changes the existing pane's grid tracks, keeping the
   workbench, pages, transcript and composer in place. The conversation takes
   34% of the pane up to 380px; the browser takes the remaining width.
