@@ -51,7 +51,7 @@ func At(dir string, opts Options) *Rules {
 	if global := globalExcludesFile(read); global != "" {
 		lines = append(lines, reanchorLines(read(global), "")...)
 	}
-	lines = append(lines, reanchorLines(read(filepath.Join(root, ".git", "info", "exclude")), "")...)
+	lines = append(lines, reanchorLines(read(infoExcludeFile(root)), "")...)
 	lines = append(lines, reanchorLines(read(filepath.Join(root, ".gitignore")), "")...)
 	r.compile(lines)
 

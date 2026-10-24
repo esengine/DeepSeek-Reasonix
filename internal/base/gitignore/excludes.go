@@ -52,6 +52,46 @@ func reanchorPattern(line, relDir string) string {
 	return neg + "/" + relDir + "/**/" + line
 }
 
+// infoExcludeFile is the repository's own exclude file. In a plain repository
+// that is .git/info/exclude. In a linked worktree or a submodule .git is a file
+// reading "gitdir: <path>"; a linked worktree's gitdir names the common
+// directory in a "commondir" file, and info/exclude lives there, shared by every
+// worktree of the repository.
+func infoExcludeFile(root string) string {
+	gitPath := filepath.Join(root, ".git")
+	dir := gitPath
+	if info, err := os.Stat(gitPath); err == nil && !info.IsDir() {
+		pointer, ok := readOneLine(gitPath)
+		target, cut := strings.CutPrefix(pointer, "gitdir:")
+		if !ok || !cut {
+			return filepath.Join(gitPath, "info", "exclude")
+		}
+		dir = resolveFrom(root, strings.TrimSpace(target))
+		if common, ok := readOneLine(filepath.Join(dir, "commondir")); ok && common != "" {
+			dir = resolveFrom(dir, common)
+		}
+	}
+	return filepath.Join(dir, "info", "exclude")
+}
+
+// resolveFrom reads p relative to base unless it is absolute.
+func resolveFrom(base, p string) string {
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	return filepath.Join(base, p)
+}
+
+// readOneLine returns the first line of a small file, trimmed.
+func readOneLine(path string) (string, bool) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	line, _, _ := strings.Cut(string(body), "\n")
+	return strings.TrimSpace(line), true
+}
+
 // globalExcludesFile returns git's effective global ignore file: core.excludesFile
 // from the user/global git config when set and present, else git's default
 // ($XDG_CONFIG_HOME/git/ignore, then ~/.config/git/ignore). "" when none exists.

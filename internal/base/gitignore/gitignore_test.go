@@ -157,3 +157,58 @@ func TestRootPatternWithEscapedBangOrHashIgnoresLiteralName(t *testing.T) {
 		}
 	}
 }
+
+func writeTestFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A linked worktree's .git is a file, and its info/exclude lives in the common
+// directory; a submodule's lives in the gitdir the file names. Git reads the
+// repository's own exclude file from there in both.
+func TestInfoExcludeIsReadWhenDotGitIsAFile(t *testing.T) {
+	home := testenv.TempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	base := testenv.TempDir(t)
+	common := filepath.Join(base, "main", ".git")
+	writeTestFile(t, filepath.Join(common, "info", "exclude"), "secret.txt\n")
+	writeTestFile(t, filepath.Join(common, "worktrees", "wt", "commondir"), "../..\n")
+	modules := filepath.Join(base, "main", ".git", "modules", "sub")
+	writeTestFile(t, filepath.Join(modules, "info", "exclude"), "private.txt\n")
+
+	cases := map[string]struct {
+		pointer string
+		ignored string
+	}{
+		"plain repository":     {pointer: "", ignored: "plain.txt"},
+		"linked worktree":      {pointer: "gitdir: " + filepath.Join(common, "worktrees", "wt") + "\n", ignored: "secret.txt"},
+		"relative gitdir":      {pointer: "gitdir: ../main/.git/worktrees/wt\n", ignored: "secret.txt"},
+		"submodule":            {pointer: "gitdir: ../main/.git/modules/sub\n", ignored: "private.txt"},
+		"unreadable gitdir":    {pointer: "gitdir: ../nowhere\n", ignored: ""},
+		"not a gitdir pointer": {pointer: "garbage\n", ignored: ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			wt := filepath.Join(base, "wt-"+strings.ReplaceAll(name, " ", "-"))
+			if c.pointer == "" {
+				writeTestFile(t, filepath.Join(wt, ".git", "info", "exclude"), "plain.txt\n")
+			} else {
+				writeTestFile(t, filepath.Join(wt, ".git"), c.pointer)
+			}
+			rules := At(wt, Options{})
+			for _, f := range []string{"plain.txt", "secret.txt", "private.txt", "other.txt"} {
+				got := rules.Ignored(filepath.Join(wt, f), false)
+				if want := f == c.ignored; got != want {
+					t.Errorf("Ignored(%s) = %v, want %v", f, got, want)
+				}
+			}
+		})
+	}
+}
