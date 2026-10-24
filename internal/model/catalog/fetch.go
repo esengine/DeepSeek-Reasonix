@@ -78,7 +78,7 @@ func fetchModelListingAt(ctx context.Context, e *config.ProviderEntry, client *h
 			Client:   client,
 		})
 		if err == nil {
-			return models, u, nil
+			return currentMiniMaxChoices(models, e), u, nil
 		}
 		lastErr = err
 		if !openai.IsModelFetchEndpointMiss(err) && firstHardErr == nil {

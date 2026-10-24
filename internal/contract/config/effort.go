@@ -66,6 +66,9 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	if explicitProtocol == ReasoningProtocolKimiK3 {
 		return kimiK3EffortCapability()
 	}
+	if isMiniMaxFlashEntry(e) {
+		return EffortCapability{Supported: true, Levels: append([]string{"auto"}, provider.MiniMaxFlashEfforts()...), Default: "max"}
+	}
 	supported := normalizedSupportedEfforts(e)
 	if len(supported) > 0 {
 		levels := make([]string, 0, len(supported)+1)
@@ -88,12 +91,11 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	}
 	switch {
 	case isMiniMaxEntry(e):
-		// MiniMax-M3 only exposes a binary thinking knob (adaptive|disabled)
-		// on its OpenAI-compatible endpoint, so /effort mirrors the API
-		// vocabulary verbatim. Default is "adaptive" because the M3 model
-		// runs with thinking on out of the box; "auto" means "don't override
-		// the model default" (== adaptive for M3).
-		return EffortCapability{Supported: true, Levels: []string{"auto", "adaptive", "disabled"}, Default: "adaptive"}
+		def := "adaptive"
+		if e.Kind == "anthropic" {
+			def = "disabled"
+		}
+		return EffortCapability{Supported: true, Levels: []string{"auto", "adaptive", "disabled"}, Default: def}
 	case isZhipuEntry(e):
 		return zhipuEffortCapability(e)
 	case isLongCatEntry(e):
@@ -199,6 +201,9 @@ func normalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	if explicitProtocol == ReasoningProtocolKimiK3 {
 		return normalizeKimiK3ReasoningEffort(level)
 	}
+	if isMiniMaxFlashEntry(e) {
+		return normalizeMiniMaxFlashEffort(level)
+	}
 	supported := normalizedSupportedEfforts(e)
 	if len(supported) > 0 {
 		if containsString(supported, level) {
@@ -234,23 +239,7 @@ func normalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	}
 	switch {
 	case isMiniMaxEntry(e):
-		// The M3 knob is binary; map Anthropic / OpenAI-style levels onto the
-		// nearest valid value so a stale /effort high|low still works. "off"
-		// is a retired DeepSeek level meaning "no thinking" — on M3 that maps
-		// to "disabled" rather than the model default, since M3 actually
-		// supports a "thinking off" mode and "off" is the natural request.
-		switch level {
-		case "adaptive", "disabled":
-			return level, nil
-		case "off":
-			return "disabled", nil
-		case "low", "medium", "high":
-			return "adaptive", nil
-		case "xhigh", "max":
-			return "disabled", nil
-		default:
-			return "", fmt.Errorf("usage: /effort auto|adaptive|disabled")
-		}
+		return normalizeMiniMaxBinaryEffort(level)
 	case isZhipuEntry(e):
 		return normalizeZhipuEffort(e, level)
 	case isLongCatEntry(e):
@@ -443,11 +432,10 @@ func isDeepSeekEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && provider.IsDeepSeekEndpoint(e.BaseURL)
 }
 
-// isMiniMaxEntry reports whether the entry points at MiniMax's OpenAI-compatible
-// endpoint. See provider.IsMiniMaxEndpoint for the host-matching rule; the entry-wrapper
-// just gates on the openai kind.
+// isMiniMaxEntry recognizes the direct Chat Completions and Messages routes.
+// Gateway effort vocabularies come from their own declarations.
 func isMiniMaxEntry(e *ProviderEntry) bool {
-	return e != nil && e.Kind == "openai" && provider.IsMiniMaxEndpoint(e.BaseURL)
+	return e != nil && (e.Kind == "openai" || e.Kind == "anthropic") && provider.IsMiniMaxEndpoint(e.BaseURL)
 }
 
 // isZhipuEntry reports whether the entry points at Zhipu's OpenAI-compatible

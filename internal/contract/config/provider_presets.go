@@ -86,23 +86,23 @@ var (
 	longCat20Models   = []string{"LongCat-2.0"}
 	tokenRhythmModels = []string{
 		"deepseek-v4-flash", "deepseek-v4-pro", "glm-5", "glm-5.1",
-		"minimax-m2.7", "kimi-k2.5", "kimi-k2.6", "minimax-m2.5",
+		"kimi-k2.5", "kimi-k2.6",
 		"mimo-v2.5-pro", "qwen3.7-max", "kimi-k2.7-code", "glm-5.2",
 		"qwen3.8-max", "deepseek-v4-flash-0731",
 	}
 	tokenRhythmVisionModels = []string{"kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code"}
 
-	minimaxMSeriesModels       = []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"}
-	minimaxMSeriesVisionModels = []string{"MiniMax-M3"}
+	minimaxMSeriesModels       = []string{"MiniMax-M3.1-Flash", "MiniMax-M3"}
+	minimaxMSeriesVisionModels = []string{"MiniMax-M3.1-Flash", "MiniMax-M3"}
 
 	glmAPIModels       = []string{"glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"}
 	glmAPIVisionModels = []string{"glm-5v-turbo"}
 	glmCodingModels    = []string{"glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7"}
 	glmAnthropicModels = []string{"glm-5.2[1m]", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7", "glm-4.5-air"}
 
-	qwenAPIModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "MiniMax-M2.5", "glm-5", "glm-4.7", "kimi-k2.5"}
+	qwenAPIModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-5", "glm-4.7", "kimi-k2.5"}
 	qwenAPIVisionModels  = []string{"qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
-	qwenPlanModels       = []string{"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
+	qwenPlanModels       = []string{"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
 	qwenPlanVisionModels = []string{"qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
 
 	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
@@ -317,9 +317,9 @@ var curatedProviderPresets = slices.Concat([]ProviderPreset{
 			BaseURL:       "https://api.minimaxi.com/v1",
 			Models:        minimaxMSeriesModels,
 			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
+			Default:       "MiniMax-M3.1-Flash",
 			APIKeyEnv:     "MINIMAX_API_KEY",
-			ContextWindow: 1048576,
+			ContextWindow: 1000000,
 			ExtraBody:     map[string]any{"reasoning_split": true},
 		}},
 	},
@@ -334,9 +334,9 @@ var curatedProviderPresets = slices.Concat([]ProviderPreset{
 			BaseURL:       "https://api.minimax.io/v1",
 			Models:        minimaxMSeriesModels,
 			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
+			Default:       "MiniMax-M3.1-Flash",
 			APIKeyEnv:     "MINIMAX_API_KEY",
-			ContextWindow: 1048576,
+			ContextWindow: 1000000,
 			ExtraBody:     map[string]any{"reasoning_split": true},
 		}},
 	},
@@ -351,10 +351,10 @@ var curatedProviderPresets = slices.Concat([]ProviderPreset{
 			BaseURL:       "https://api.minimaxi.com/anthropic",
 			Models:        minimaxMSeriesModels,
 			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
+			Default:       "MiniMax-M3.1-Flash",
 			APIKeyEnv:     "MINIMAX_PLAN_API_KEY",
 			AuthHeader:    true,
-			ContextWindow: 1048576,
+			ContextWindow: 1000000,
 		}},
 	},
 	{
@@ -368,10 +368,10 @@ var curatedProviderPresets = slices.Concat([]ProviderPreset{
 			BaseURL:       "https://api.minimax.io/anthropic",
 			Models:        minimaxMSeriesModels,
 			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
+			Default:       "MiniMax-M3.1-Flash",
 			APIKeyEnv:     "MINIMAX_API_KEY",
 			AuthHeader:    true,
-			ContextWindow: 1048576,
+			ContextWindow: 1000000,
 		}},
 	},
 	{
