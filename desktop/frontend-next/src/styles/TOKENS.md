@@ -276,6 +276,10 @@ pack states a shape, never a number the layout has to agree with.
 - `--read` is the conversation body's own size, separate from interface zoom, so
   "I cannot read this" adjusts one thing. The value here is the first-frame
   fallback; the real default is `look.ts`'s `readDefault()`.
+- Execution disclosures, their tool rows, helper text and input details derive
+  size from `--read`, not `--fs-scale`, including work folded at turn completion.
+  Labels use `--ui`; tool names, paths and input use `--mono`. Text weights use
+  the reading/weight tokens, preserving emphasis without bypassing preferences.
 - `--column` is the reading column's width. The composer is laid at it in
   every measure; the transcript takes it through `--doc`.
 - `--doc` is the column the transcript is laid in: `--column`, or the whole
