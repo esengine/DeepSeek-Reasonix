@@ -36,10 +36,11 @@ func NextSessionWriteGeneration() uint64 {
 // controller is replaced or rebound. Tokens never leave process memory and
 // cannot be reconstructed from disk metadata.
 type SessionWriteAuthority struct {
-	path       string
-	ownerID    uint64
-	generation uint64
-	lease      *SessionLease
+	path                   string
+	ownerID                uint64
+	generation             uint64
+	lease                  *SessionLease
+	environmentReservation atomic.Bool
 }
 
 // IssueWriteAuthority mints a path-bound authority for generation. The lease

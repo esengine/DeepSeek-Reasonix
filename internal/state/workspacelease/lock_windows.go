@@ -5,6 +5,7 @@ package workspacelease
 import (
 	"errors"
 	"os"
+	"reasonix/internal/base/locktrace"
 
 	"golang.org/x/sys/windows"
 )
@@ -27,6 +28,7 @@ func tryFileLock(path string, flags uint32) (func(), error) {
 	}
 	handle := windows.Handle(f.Fd())
 	var overlapped windows.Overlapped
+	attempt := locktrace.BeginAttempt()
 	if err := windows.LockFileEx(handle, flags, 0, 1, 0, &overlapped); err != nil {
 		_ = f.Close()
 		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
@@ -34,8 +36,11 @@ func tryFileLock(path string, flags uint32) (func(), error) {
 		}
 		return nil, err
 	}
+	hold := attempt.Acquired(path, flags&windows.LOCKFILE_EXCLUSIVE_LOCK == 0)
 	return func() {
+		hold.Releasing()
 		_ = windows.UnlockFileEx(handle, 0, 1, 0, &overlapped)
 		_ = f.Close()
+		hold.Released()
 	}, nil
 }

@@ -26,6 +26,8 @@
 /write_heartbeat
 /catalog-detector
 /tool-surface-cache
+/mutation-coordination
+/product-concurrency
 
 # Go test/build scratch
 *.test

@@ -44,10 +44,11 @@ func TestKernelReplyKeepsTheHighlightedLocalCommand(t *testing.T) {
 	m, _ := testModel(t)
 	_, pending := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	press(m, "down")
+	want := m.menu.c.Items[m.menu.sel].Insert
 	run(m, pending)
 	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if got := m.composer.Value(); got != "/queue" {
-		t.Fatalf("composer after Down, reply, Tab = %q, want /queue", got)
+	if got := m.composer.Value(); got != want {
+		t.Fatalf("composer after Down, reply, Tab = %q, want %q", got, want)
 	}
 }
 

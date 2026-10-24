@@ -73,7 +73,7 @@ func isolatedUnsupported(profile string, writePaths, tools []string, continueFro
 // withIsolation adds the isolation argument to task's schema when the session
 // offers it. The session decides once, at boot, so the schema stays byte-stable.
 func (t *TaskTool) withIsolation(schema json.RawMessage) json.RawMessage {
-	if t.isolated == nil {
+	if t.isolated == nil && t.environment == nil {
 		return schema
 	}
 	var s struct {
@@ -85,6 +85,9 @@ func (t *TaskTool) withIsolation(schema json.RawMessage) json.RawMessage {
 		return schema
 	}
 	s.Properties["isolation"] = json.RawMessage(`{"type":"string","enum":["worktree"],"description":"Run this writer in its own git worktree of the workspace instead of the workspace itself. Its changes are held, not written: the result lists them under an iso_ id for apply_isolated or discard_isolated. The sub-agent runs as a separate agent and cannot take profile, tools, write_paths, continue_from or run_in_background."}`)
+	if t.environment != nil {
+		s.Properties["isolation"] = json.RawMessage(`{"type":"string","enum":["auto","shared","worktree"],"description":"Choose automatic environment selection, shared short transactions, or a required isolated Git worktree. Isolation retains the task profile, tool/path limits, model, effort, step budget and background lifecycle. Changes are retained as an iso_ result until integrated."}`)
+	}
 	out, err := json.Marshal(s)
 	if err != nil {
 		return schema

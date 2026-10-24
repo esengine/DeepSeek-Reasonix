@@ -16,6 +16,7 @@ import (
 	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/runtime/writeclaim"
+	"reasonix/internal/safety/evidence"
 )
 
 // skillSubagents runs a skill inside its own sub-agent loop: an isolated turn
@@ -111,6 +112,20 @@ func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task 
 	if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
 		return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
 	}
+	mode, err := r.cfg.CollaborationMode()
+	if err != nil {
+		return "", err
+	}
+	if mode != "legacy" {
+		sk.ReadOnly = true
+		spec, err := r.compile(sctx, sk, task, runOpts)
+		if err != nil {
+			return "", err
+		}
+		spec.Context.Ephemeral = true
+		spec.Worker.ReviewAuthority = evidence.ReviewAuthority{}
+		return r.executeSkillSpec(sctx, spec, runOpts)
+	}
 	releaseSlot, err := r.scheduler.Acquire(sctx, writeclaim.AcquireRequest{
 		Writer: false,
 		Nested: agent.SubagentDepth(sctx) > 0,
@@ -166,16 +181,18 @@ func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task 
 // verdict a reviewer owes — and nothing about how an execution is admitted,
 // carried out or ended, which belong to the runner every other delegation uses.
 func (r *skillSubagents) run(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
-	if runOpts.MaxSteps > 0 {
-		// A cap the entry point chose is the host's, not the user's: the round
-		// it grants to finalize ends with the answer instead of a pause.
-		sctx = agent.WithRunStepLimit(sctx, r.stepsFor(runOpts), sk.Name+" rounds")
-	}
 	spec, err := r.compile(sctx, sk, task, runOpts)
 	if err != nil {
 		return "", err
 	}
-	return r.tasks.RunProfileSpec(sctx, spec)
+	return r.executeSkillSpec(sctx, spec, runOpts)
+}
+
+func (r *skillSubagents) executeSkillSpec(ctx context.Context, spec delegation.ProfileExecSpec, opts skill.SubagentRunOptions) (string, error) {
+	if opts.MaxSteps > 0 {
+		ctx = agent.WithRunStepLimit(ctx, spec.Sched.MaxSteps, spec.Worker.Name+" rounds")
+	}
+	return r.tasks.RunProfileSpec(ctx, spec)
 }
 
 // compile turns a skill and one invocation into the shared execution spec. Every

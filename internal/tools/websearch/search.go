@@ -76,7 +76,7 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (string, error
 			t.ReportUsage(u)
 		}
 	}()
-	stream, err := p.Stream(ctx, provider.Request{
+	stream, err := provider.Stream(ctx, p, provider.Request{
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "Search the web, summarize relevant findings, and cite sources.\n\n" + input.Query}},
 		MaxTokens: 8192,
 	})

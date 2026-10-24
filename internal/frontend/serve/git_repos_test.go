@@ -21,7 +21,7 @@ import (
 func projectsFolder(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	isolateGitGlobalConfig(t)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
 		t.Setenv(k+"_NAME", "t")

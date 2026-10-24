@@ -166,7 +166,7 @@ func TestEffectRebuildKeepsWorkspaceLeaseNotices(t *testing.T) {
 		w := ledger.Begin(sink)
 		cfg := config.Default()
 		cfg.SetWriteLease(false)
-		session, err := startSessionRuntime(Options{SessionDir: robustTempDir(t)}, cfg, root, w)
+		session, err := startSessionRuntime(t.Context(), Options{SessionDir: robustTempDir(t)}, cfg, root, w)
 		if err != nil {
 			t.Fatal(err)
 		}

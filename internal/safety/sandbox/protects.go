@@ -19,7 +19,7 @@ func WriteProtects(spec Spec, path string) bool {
 // backend that demonstrably confines its writes on this host. It is the
 // Integrity claim alone: it says nothing about reads or host authorities.
 func IntegrityEnforced(spec Spec) bool {
-	return spec.Enforce() && Available()
+	return runtime.GOOS != "windows" && spec.Enforce() && AvailableFor(spec)
 }
 
 // outsideAll reports whether path neither lies under nor contains any of dirs.

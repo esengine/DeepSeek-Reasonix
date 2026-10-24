@@ -386,32 +386,40 @@ func TestPartitionToolCallsBackgroundCollectorsSerial(t *testing.T) {
 	}
 }
 
-// TestExecuteBatchParallelReadOnly checks that three 80ms read-only calls
-// complete in well under 3×80ms — the wall-clock proof of true parallelism.
 func TestExecuteBatchParallelReadOnly(t *testing.T) {
-	const delay = 80 * time.Millisecond
-	calls := int32(0)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
 	reg := tool.NewRegistry()
-	reg.Add(fakeTool{name: "a", readOnly: true, delay: delay, calls: &calls})
-	reg.Add(fakeTool{name: "b", readOnly: true, delay: delay, calls: &calls})
-	reg.Add(fakeTool{name: "c", readOnly: true, delay: delay, calls: &calls})
+	started := []chan struct{}{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+	for i, name := range []string{"a", "b", "c"} {
+		reg.Add(blockingTool{name: name, started: started[i], release: release})
+	}
 
 	a := New(nil, reg, sessionstore.NewSession(""), Options{}, event.Discard)
 
-	start := time.Now()
-	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "a"}, {Name: "b"}, {Name: "c"}})
-	results := batch.results
-	elapsed := time.Since(start)
-
-	if calls != 3 {
-		t.Errorf("dispatched %d calls, want 3", calls)
+	done := make(chan []string, 1)
+	go func() {
+		done <- a.executeBatch(ctx, &a.turn, []provider.ToolCall{{Name: "a"}, {Name: "b"}, {Name: "c"}}).results
+	}()
+	for i, signal := range started {
+		select {
+		case <-signal:
+		case <-ctx.Done():
+			t.Fatalf("call %d did not start while its peers were blocked: %v", i, ctx.Err())
+		}
+	}
+	once.Do(func() { close(release) })
+	var results []string
+	select {
+	case results = <-done:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	if len(results) != 3 || results[0] != "a done" || results[1] != "b done" || results[2] != "c done" {
 		t.Errorf("results out of order or wrong: %v", results)
-	}
-	// Allow generous slack for CI; even 2x serial would prove we got parallelism.
-	if elapsed >= 2*delay {
-		t.Errorf("read-only batch took %v (>= %v) — not parallel", elapsed, 2*delay)
 	}
 }
 

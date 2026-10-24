@@ -1251,11 +1251,19 @@ func NewDefaultSpawner(options RuntimeOptions) Spawner {
 }
 
 func defaultSpawner(ctx context.Context, in SpawnInput, options RuntimeOptions) SpawnResult {
+	options, release, err := prepareHookRuntime(options, in.Env)
+	if err != nil {
+		return SpawnResult{ExitCode: -1, SpawnErr: err}
+	}
+	defer release()
 	in = normalizeWindowsHookSpawnInputForPlatform(in, runtime.GOOS)
 	cctx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
 
 	cmd, spawnErr := spawnCommand(cctx, in.Command, in.Mode, in.Shell, in.Args, options)
+	if spawnErr == nil {
+		cmd, spawnErr = confineHookCommand(cctx, cmd, options)
+	}
 	if spawnErr != nil {
 		return SpawnResult{ExitCode: -1, SpawnErr: spawnErr}
 	}
@@ -1273,6 +1281,9 @@ func defaultSpawner(ctx context.Context, in SpawnInput, options RuntimeOptions) 
 		}
 	}
 	cmd.Env = env
+	if options.Sandbox != nil {
+		cmd.Env = append(cmd.Env, sandbox.PrivateProcessEnv(*options.Sandbox, options.Sandbox.SessionTemp, runtime.GOOS == "linux")...)
+	}
 	cmd.Stdin = strings.NewReader(in.Stdin)
 	var outBuf, errBuf cappedBuffer
 	cmd.Stdout = &outBuf
@@ -1281,7 +1292,7 @@ func defaultSpawner(ctx context.Context, in SpawnInput, options RuntimeOptions) 
 	// shell is killed on timeout/cancel.
 	cmd.WaitDelay = 500 * time.Millisecond
 
-	err := cmd.Run()
+	err = runHookProcess(cctx, cmd, options)
 	res := SpawnResult{
 		ExitCode:  -1,
 		Stdout:    decodeHookOutput(outBuf.Bytes(), outBuf.truncated),

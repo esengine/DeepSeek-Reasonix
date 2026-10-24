@@ -232,6 +232,18 @@ describe("a push is previewed, then confirmed, and says why when it is refused",
     expect((screen.getByRole("button", { name: "推送到 github.com" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("keeps remote success visible when local tracking settlement was refused", async () => {
+    const port = mock();
+    const push = vi.spyOn(port, "push").mockImplementation(async ({ plan }) => ({ plan, new: false, trackingStatus: "not_updated" }));
+    draw(port);
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "推送到 github.com" }));
+    expect((await screen.findByText(/远端推送成功，但本地跟踪引用未更新/)).textContent).toContain("无需重复推送");
+    expect(screen.getByText(/已把 2 个提交推送到 github\.com/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["untrusted", "还没有被你信任"],
     ["protocol", "只支持 https、ssh 和 git://"],

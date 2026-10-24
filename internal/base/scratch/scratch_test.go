@@ -37,6 +37,10 @@ func isolatedTemp(t *testing.T) string {
 	t.Setenv("TMPDIR", root)
 	t.Setenv("TMP", root)
 	t.Setenv("TEMP", root)
+	t.Setenv("SystemTemp", root)
+	if os.TempDir() != root {
+		t.Fatalf("OS temp root is not isolated: %s", os.TempDir())
+	}
 	return root
 }
 

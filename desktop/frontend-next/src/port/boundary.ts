@@ -125,14 +125,25 @@ export interface SubagentSteerSettings {
   path: string;
 }
 
-// How this machine's sessions hold the workspace write lease against one
-// another, as the user file records it. A project file cannot set it. A running
-// session keeps the lease it was built with, so a change reaches sessions
-// opened after it.
+// Saved choices and the immutable policy of the current runtime.
 export interface WriteLeaseSettings {
   optimistic: boolean;
   maxWaitMinutes: number;
   path: string;
+  collaboration?: string;
+  autoIntegrate?: boolean;
+  effective?: WriteCoordinationRuntime;
+}
+
+export interface WriteCoordinationRuntime {
+  autoIntegrate?: boolean;
+  collaboration: string;
+  optimistic: boolean;
+  maxWaitMinutes: number;
+  maxSubagentConcurrency: number;
+  maxParallelWriters: number;
+  transactionWaitSeconds: number;
+  automaticIsolationFallback?: boolean;
 }
 
 // Whether a submitted plan starts executing without the approval click, as the

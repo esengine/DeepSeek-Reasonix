@@ -1179,7 +1179,7 @@ func (c *Config) SaveTo(path string) error {
 	if c.editLoadErr != nil {
 		return fmt.Errorf("save config loaded from %q: %w", path, c.editLoadErr)
 	}
-	scope := renderScopeForPath(path)
+	scope := c.renderScopeForPath(path)
 	if scope == RenderScopeUser {
 		if err := currentUserConfigEditLockError(); err != nil {
 			return fmt.Errorf("save user config: %w", err)
@@ -1193,7 +1193,7 @@ func (c *Config) SaveTo(path string) error {
 		return c.saveProjectIncrementalResolved(path, resolved)
 	}
 	if scope == RenderScopeUser {
-		return c.writeUserConfig(path, resolved, func(body string) error { return writeConfigFileResolved(resolved, body, configFilePerm(path)) })
+		return c.writeUserConfig(path, resolved, func(body string) error { return writeConfigFileResolved(resolved, body, 0600) })
 	}
 	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
 }
@@ -1208,7 +1208,7 @@ func (c *Config) SaveToScope(path string, scope RenderScope) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
-	userConfig := scope == RenderScopeUser || (scope == RenderScopeFull && isUserConfigPath(path))
+	userConfig := scope == RenderScopeUser || (scope == RenderScopeFull && c.renderScopeForPath(path) == RenderScopeUser)
 	if userConfig {
 		if err := currentUserConfigEditLockError(); err != nil {
 			return fmt.Errorf("save user config: %w", err)
@@ -1219,7 +1219,7 @@ func (c *Config) SaveToScope(path string, scope RenderScope) error {
 		return err
 	}
 	if scope == RenderScopeUser {
-		return c.writeUserConfig(path, resolved, func(body string) error { return writeConfigFileResolved(resolved, body, configFilePerm(path)) })
+		return c.writeUserConfig(path, resolved, func(body string) error { return writeConfigFileResolved(resolved, body, 0600) })
 	}
 	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
 }

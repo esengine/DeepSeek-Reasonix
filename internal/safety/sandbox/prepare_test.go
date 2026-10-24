@@ -121,6 +121,20 @@ func TestAnEscapeApproverThatIsThereIsFound(t *testing.T) {
 	}
 }
 
+func TestNewExecutionCanShadowParentEscapeApproval(t *testing.T) {
+	parent := WithEscapeApprover(t.Context(), stubApprover{})
+	child := WithoutEscapeApprover(parent)
+	if _, ok := EscapeApproverFrom(child); ok {
+		t.Fatal("child retained parent sandbox escape authority")
+	}
+	if _, ok := EscapeApproverFrom(parent); !ok {
+		t.Fatal("shadowing changed the parent's authority")
+	}
+	if _, ok := EscapeApproverFrom(WithEscapeApprover(child, stubApprover{})); !ok {
+		t.Fatal("child could not bind its own approver")
+	}
+}
+
 // The code is the identity and the sentence is one rendering of it. They are
 // separate so a frontend can say it in the reader's language; what has to hold
 // is that this platform has both, and that the code is a code rather than the

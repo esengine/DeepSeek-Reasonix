@@ -6,6 +6,7 @@ import (
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/platform/gitpush"
+	"reasonix/internal/state/mutation"
 )
 
 // ErrWorkspaceNotTrusted refuses a push from a workspace the person has not
@@ -33,8 +34,8 @@ func (c *Controller) GitPushPreview(ctx context.Context, repoDir string) (gitpus
 	return gitpush.Preview(ctx, repo)
 }
 
-// GitPush sends the confirmed branch to its upstream. It shares the commit lock,
-// so a commit is never half-made while it goes.
+// GitPush sends the confirmed branch to its upstream. Source state is protected
+// during preparation and tracking-ref settlement, not during the transfer.
 func (c *Controller) GitPush(ctx context.Context, req PushRequest) (gitpush.Result, error) {
 	if c.WorkspaceTrust() != config.WorkspaceTrusted {
 		return gitpush.Result{}, ErrWorkspaceNotTrusted
@@ -43,7 +44,21 @@ func (c *Controller) GitPush(ctx context.Context, req PushRequest) (gitpush.Resu
 	if err != nil {
 		return gitpush.Result{}, err
 	}
-	c.commitMu.Lock()
-	defer c.commitMu.Unlock()
-	return gitpush.Push(ctx, repo, req.Plan)
+	if c.mutations == nil {
+		c.commitMu.Lock()
+		defer c.commitMu.Unlock()
+		return gitpush.Push(ctx, repo, req.Plan)
+	}
+	return gitpush.PushWithScope(ctx, repo, req.Plan, func(ctx context.Context) (func(), error) {
+		c.commitMu.Lock()
+		lease, err := c.holdGitMutation(ctx, repo, "git.push", false)
+		if err != nil {
+			c.commitMu.Unlock()
+			return nil, err
+		}
+		return func() {
+			lease.End(mutation.Unknown)
+			c.commitMu.Unlock()
+		}, nil
+	})
 }

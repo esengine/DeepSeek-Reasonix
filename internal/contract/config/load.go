@@ -37,14 +37,6 @@ func Load() (*Config, error) {
 // LoadForRootReadOnly instead.
 func LoadForRoot(root string) (*Config, error) { return processRoots().LoadForRoot(root) }
 
-// defaultConfig is Default() bound to this binding, so a path derived from the
-// result later lands in the home the load read.
-func (r Roots) defaultConfig() *Config {
-	cfg := Default()
-	cfg.roots = r
-	return cfg
-}
-
 // LoadForRoot reads root's configuration out of this binding's home, so one
 // process can serve two homes without either seeing the other's config.
 func (r Roots) LoadForRoot(root string) (*Config, error) {
@@ -72,15 +64,7 @@ func (r Roots) LoadForRootReadOnly(root string) (*Config, error) {
 
 func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Config, error) {
 	root = resolveRoot(root)
-	var expansionEnv map[string]string
-	if withProject {
-		expansionEnv = r.loadDotEnvForRoot(root)
-	} else {
-		r.loadCredentialStoreForScope(root, false)
-	}
-	cfg := r.defaultConfig()
-	cfg.setExpansionEnv(expansionEnv)
-	cfg.CredentialsStore = r.credentialsStoreMode()
+	cfg, expansionEnv := r.runtimeConfigBase(root, migrateOnDisk, withProject)
 
 	projectTOML := ProjectConfigPath(root)
 	if primary := r.userConfigPath(); primary != "" {
@@ -661,6 +645,9 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 		loadDotEnvForEditPath(path)
 	}
 	cfg := Default()
+	if isUserConfigPath(path) {
+		cfg = processRoots().defaultConfig()
+	}
 	meta, err := mergeFileSnapshot(cfg, path)
 	if err != nil {
 		return nil, err
@@ -799,6 +786,12 @@ func mergeFileSnapshotWithRead(cfg *Config, path string, readFile func(string) (
 	var validated Config
 	if _, err := decodeTOMLBytes(data, &validated); err != nil {
 		return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
+	}
+	// The user snapshot may have appeared after installation-default selection.
+	// Omission in an actual user file always means compatibility, independent of
+	// an earlier existence probe or a new-install marker.
+	if _, user := cfg.userConfigRoots(path); user {
+		cfg.Agent.Collaboration = ""
 	}
 	meta, err := decodeTOMLBytes(data, cfg)
 	if err != nil {

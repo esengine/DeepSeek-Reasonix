@@ -23,6 +23,9 @@ func CommandArgs(spec Spec, args []string) ([]string, bool) {
 
 // winWrap routes argv through this binary's launcher entry.
 func winWrap(spec Spec, argv []string) ([]string, bool) {
+	if refusesCommand(spec) {
+		return nil, false
+	}
 	if spec.Mode != "enforce" || spec.GrantSID == "" || len(argv) == 0 {
 		return argv, false
 	}

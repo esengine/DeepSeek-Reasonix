@@ -89,7 +89,17 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	// The host overlay applies the write to the editor buffer and the file in
 	// one step. Text-only, so it handles plain UTF-8 targets (and new files);
 	// non-UTF-8 files stay on the local encoding-preserving path below.
-	if w.overlay != nil && filepath.IsAbs(p.Path) && src.enc == fileenc.UTF8 {
+	if w.overlay != nil && filepath.IsAbs(p.Path) && src.enc == fileenc.UTF8 && (!requiresVersionedWrite(ctx) || src.overlay) {
+		if requiresVersionedWrite(ctx) {
+			if err := compareOverlayWrite(ctx, w.overlay, p.Path, src.bufferVersion, p.Content); err != nil {
+				return "", err
+			}
+			if w.receipt != nil {
+				w.receipt(p.Path, hadPrior, []byte(src.content))
+			}
+			w.views.saw(p.Path, p.Content)
+			return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil
+		}
 		if ok, werr := w.overlay.WriteTextFile(ctx, p.Path, p.Content); ok {
 			if werr != nil {
 				return "", fmt.Errorf("write %s: %w", p.Path, werr)

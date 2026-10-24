@@ -26,7 +26,7 @@ import (
 
 // loadHooks resolves the hooks, reusing the previous build's discovery when
 // its plan allows, and binds the runner to the resolved shell.
-func loadHooks(opts Options, roots config.Roots, root string, shell sandbox.Shell, sink event.Sink) ([]hook.ResolvedHook, *hook.Runner, error) {
+func loadHooks(opts Options, roots config.Roots, root string, shell sandbox.Shell, sink event.Sink, environment toolEnvironment) ([]hook.ResolvedHook, *hook.Runner, error) {
 	var resolved []hook.ResolvedHook
 	if opts.Composition != nil && opts.Observe == nil {
 		var err error
@@ -45,7 +45,11 @@ func loadHooks(opts Options, roots config.Roots, root string, shell sandbox.Shel
 			sink.Emit(projectHooksHeldEvent(held))
 		}
 	}
-	runner := hook.NewRunner(resolved, root, hook.NewDefaultSpawner(hookRuntime(shell)), func(n hook.Notice) { sink.Emit(hookNoticeEvent(n)) })
+	runtime := hookRuntime(shell)
+	if opts.WorkspaceOnly {
+		runtime.Sandbox, runtime.SessionTemp = &environment.bash, environment.sessionTemp
+	}
+	runner := hook.NewRunner(resolved, root, hook.NewDefaultSpawner(runtime), func(n hook.Notice) { sink.Emit(hookNoticeEvent(n)) })
 	if opts.Composition.Live() && opts.Observe == nil {
 		runner.ConfigureSource(func() []hook.ResolvedHook {
 			return hook.CompositionHooks(hook.Load(hook.LoadOptions{ProjectRoot: root, ReasonixHomeDir: roots.Home()}), opts.Composition.Resolved)

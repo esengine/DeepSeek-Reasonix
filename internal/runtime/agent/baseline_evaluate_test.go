@@ -113,7 +113,7 @@ func TestAnUnchangedCriterionCostsNoBuild(t *testing.T) {
 	a.evaluateBaselineCriteriaOnce(context.Background())
 	elapsed := time.Since(start)
 
-	if len(a.turn.baselineEval) != 0 {
+	if len(a.turn.baselineEval.results) != 0 {
 		t.Fatalf("evaluations = %v, want none for a criterion the workspace still holds", a.turn.baselineEval)
 	}
 	if len(a.baselineFacts()) != 0 {
@@ -122,5 +122,22 @@ func TestAnUnchangedCriterionCostsNoBuild(t *testing.T) {
 	// A toolchain build cannot finish this fast, so this fails if one ran.
 	if elapsed > 300*time.Millisecond {
 		t.Fatalf("took %s — an unchanged criterion reached for the toolchain", elapsed)
+	}
+}
+
+func TestBaselineReevaluatesAfterCorrectiveMutation(t *testing.T) {
+	a := baselineWorkspace(t, "package spike\nfunc Evict(n int) int { return n }\n", assertsNothing)
+	a.task.ledger = evidence.NewLedger()
+	a.evaluateBaselineCriteriaOnce(t.Context())
+	if facts := a.baselineFacts(); len(facts) != 1 || facts[0].Evaluation == nil || facts[0].Evaluation.Result != evidence.CriterionFail {
+		t.Fatalf("initial failure missing: %+v", facts)
+	}
+	if err := os.WriteFile(filepath.Join(a.writeWorkspaceRoot, "cache.go"), []byte("package spike\nfunc Evict(n int) int { return n-1 }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a.task.ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Mutation: true})
+	a.evaluateBaselineCriteriaOnce(t.Context())
+	if facts := a.baselineFacts(); len(facts) != 1 || facts[0].Evaluation == nil || facts[0].Evaluation.Result != evidence.CriterionPass || facts[0].Evaluation.StateEpoch != a.mutationEpoch() {
+		t.Fatalf("corrected code kept the old verdict: %+v", facts)
 	}
 }

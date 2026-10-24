@@ -4,8 +4,6 @@ import (
 	"reasonix/internal/runtime/completion"
 	"reasonix/internal/runtime/taskpolicy"
 	"reasonix/internal/runtime/verdict"
-
-	"reasonix/internal/safety/evidence"
 )
 
 // turnRuntime is the host state for exactly one Agent.Run. beginRunTurn builds
@@ -48,7 +46,7 @@ type turnRuntime struct {
 	deliveryCriteriaEstablished bool
 	// baselineEval holds this turn's verdicts for captured criteria, keyed by
 	// criterion identity. Running one costs a build, so it happens once.
-	baselineEval        map[string]evidence.BaselineEvidence
+	baselineEval        *baselineEvaluationCache
 	deliveryScopeActive bool
 	// readinessRecovered marks a run that started with evidence preserved from
 	// (or a pending recovery of) a prior readiness failure, so the final

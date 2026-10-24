@@ -56,7 +56,7 @@ func (s *Session) notifyPersisted(path string, rewrite bool, appendFrom int) {
 // destination another runtime created after the caller's scan.
 func (s *Session) SaveIfAbsent(path string) error {
 	err := s.withSessionSaveLocks(path, func() error {
-		if sessionArtifactExists(path) {
+		if sessionArtifactExists(path) && !s.ownsEnvironmentReservation(path) {
 			return os.ErrExist
 		}
 		return s.saveLocked(path, sessionSaveSnapshot)

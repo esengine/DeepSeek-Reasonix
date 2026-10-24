@@ -56,6 +56,8 @@ func (*ApplyTool) Schema() json.RawMessage { return json.RawMessage(idSchema) }
 
 func (*ApplyTool) ReadOnly() bool { return false }
 
+func (*ApplyTool) RecoversIntegration() bool { return true }
+
 func (t *ApplyTool) DeclaredWritePaths(_ context.Context, raw json.RawMessage) ([]string, error) {
 	id, err := parseID(raw)
 	if err != nil {
@@ -76,8 +78,8 @@ func (t *ApplyTool) Execute(ctx context.Context, raw json.RawMessage) (string, e
 	return fmt.Sprintf("applied %s to the workspace:\n%s", e.ID, statTable(e)), nil
 }
 
-// DiscardTool drops an isolated run's changes and its worktree. The workspace
-// is untouched, which is why it needs no approval.
+// DiscardTool retains the legacy model-driven cleanup surface. New strategies
+// require a previewed human action through the host results interface.
 type DiscardTool struct{ store *Store }
 
 // NewDiscardTool discards results held by store.
@@ -85,7 +87,10 @@ func NewDiscardTool(store *Store) *DiscardTool { return &DiscardTool{store: stor
 
 func (*DiscardTool) Name() string { return DiscardName }
 
-func (*DiscardTool) Description() string {
+func (t *DiscardTool) Description() string {
+	if t.store != nil && t.store.mutations != nil {
+		return "Retained isolated results require the user's explicit previewed decision in the host result manager or /isolated terminal command. This tool cannot delete coordinated results; report their IDs and retained locations to the user."
+	}
 	return "Throw away the changes of a finished isolated task without writing them to the workspace, and remove its worktree."
 }
 
@@ -97,6 +102,9 @@ func (*DiscardTool) ReadOnly() bool { return true }
 func (*DiscardTool) Sequential(context.Context, json.RawMessage) bool { return true }
 
 func (t *DiscardTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	if t.store != nil && t.store.mutations != nil {
+		return "", tool.Refusal{Code: "isolation.user_action_required", Message: "discarding isolated work requires an explicit action in the host's results interface"}
+	}
 	id, err := parseID(raw)
 	if err != nil {
 		return "", err

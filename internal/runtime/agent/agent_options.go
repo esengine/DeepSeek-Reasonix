@@ -7,12 +7,14 @@ import (
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/extension/dispatch"
 	"reasonix/internal/runtime/capability"
+	"reasonix/internal/runtime/checkenv"
 	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/instruction"
 	"reasonix/internal/state/memory"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/workspacelease"
 	"reasonix/internal/tools/jobs"
 	"strings"
@@ -29,7 +31,9 @@ type Steerer interface {
 
 // Options configures an Agent.
 type Options struct {
-	MaxSteps int
+	ProcessSandbox   sandbox.Spec
+	CheckEnvironment *checkenv.Spec
+	MaxSteps         int
 	// MaxStepsKey names the explicit runtime control shown when the MaxSteps guard
 	// is hit. Empty defaults to the generic max_steps tool/runtime parameter.
 	MaxStepsKey string
@@ -139,6 +143,8 @@ type Options struct {
 	// runs, so the host can reach it while it works. Nothing else about the run
 	// changes: the guidance it admits is read at the next tool boundary.
 	OnStart func(Steerer)
+	// AdmissionSaver may refuse execution if its admitted prompt is not durable.
+	AdmissionSaver AdmissionSaver
 	// ObserveRoot is where an unclassified call's effect is observed by walking
 	// the workspace before and after it. Set it only for an agent no other
 	// foreground writer runs beside; empty falls back to WriteWorkspaceRoot.
@@ -164,7 +170,9 @@ type Options struct {
 	// WorkspaceLease serializes Delivery mutations across sessions that target
 	// the same workspace. nil preserves source compatibility for direct Agent
 	// construction; boot always supplies it for Delivery sessions.
-	WorkspaceLease *workspacelease.Owner
+	WorkspaceLease      *workspacelease.Owner
+	MutationCoordinator *mutation.Coordinator
+	ExecutionCapacity   writeclaim.PhaseCapacity
 
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks         []instruction.VerifyCheck

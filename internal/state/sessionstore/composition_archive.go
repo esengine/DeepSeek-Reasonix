@@ -27,6 +27,9 @@ var ErrNativeArchiveInvalid = errors.New("invalid native session archive")
 var ErrNativeArchiveUnsupported = errors.New("unsupported native session archive version")
 
 func ExportNativeArchive(path string) ([]byte, error) {
+	if err := refuseBoundConversationTransfer(path); err != nil {
+		return nil, err
+	}
 	s, err := LoadSession(path)
 	if err != nil {
 		return nil, err

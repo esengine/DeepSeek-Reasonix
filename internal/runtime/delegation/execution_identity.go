@@ -68,17 +68,25 @@ func ResolveExecutionIdentity(meta sessionstore.SubagentMeta, opened func(execut
 }
 
 func validateMeta(meta sessionstore.SubagentMeta, spec SubagentSpec) error {
-	if meta.Status == sessionstore.SubagentRunning {
+	var err error
+	spec, err = continuationSourceSpec(meta, spec)
+	if err != nil {
+		return err
+	}
+	recovered := resumedEnvironmentOwns(meta, spec)
+	if meta.Status == sessionstore.SubagentRunning && !recovered {
 		return fmt.Errorf("subagent reference %q is still in progress", meta.Ref)
 	}
-	if meta.Status == sessionstore.SubagentFailed {
+	if meta.Status == sessionstore.SubagentFailed && !recovered {
 		return fmt.Errorf("subagent reference %q failed and cannot be continued", meta.Ref)
 	}
-	if meta.Status == sessionstore.SubagentInterrupted {
+	if meta.Status == sessionstore.SubagentInterrupted && !recovered {
 		return fmt.Errorf("subagent reference %q was interrupted by a previous shutdown or crash and cannot be continued or forked; run a fresh subagent instead", meta.Ref)
 	}
 	want := metaFromSpec(meta.Ref, meta.Status, meta.CreatedAt, meta.UpdatedAt, spec)
 	switch {
+	case meta.EnvironmentID != want.EnvironmentID || meta.OriginWorkspace != want.OriginWorkspace:
+		return fmt.Errorf("subagent reference %q belongs to a different execution environment", meta.Ref)
 	case meta.Kind != want.Kind:
 		return fmt.Errorf("subagent reference %q has kind %q, want %q", meta.Ref, meta.Kind, want.Kind)
 	case meta.Name != want.Name:
@@ -95,4 +103,10 @@ func validateMeta(meta sessionstore.SubagentMeta, spec SubagentSpec) error {
 		return fmt.Errorf("subagent reference %q uses model/effort %q/%q, current run would use %q/%q", meta.Ref, meta.Model, meta.Effort, want.Model, want.Effort)
 	}
 	return nil
+}
+
+func resumedEnvironmentOwns(meta sessionstore.SubagentMeta, spec SubagentSpec) bool {
+	return spec.EnvironmentID != "" && spec.EnvironmentID == meta.EnvironmentID &&
+		spec.OriginWorkspace == meta.OriginWorkspace && spec.EnvironmentGeneration != "" &&
+		meta.EnvironmentGeneration != "" && spec.EnvironmentGeneration != meta.EnvironmentGeneration
 }

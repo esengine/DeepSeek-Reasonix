@@ -493,6 +493,44 @@ describe("waiting for another session to finish writing", () => {
     ({ kind: "notice", code, level, text }) as SessionEvent;
   const cards = (st: SessionState) => st.items.filter((i): i is Extract<Item, { t: "notice" }> => i.t === "notice");
 
+  const transaction = (id: string, code = "workspace_lease"): SessionEvent => ({
+    ...lease(code, "info", id),
+    workspaceLease: { contended: 0, heldMs: 0, idleMs: 0, transactionId: id },
+  }) as SessionEvent;
+
+  it("closes the matching transaction while another agent remains queued", () => {
+    const waiting = run([transaction("a"), transaction("b")]);
+    const resumed = reduce(waiting, transaction("a", "workspace_lease_resumed"));
+    expect(cards(resumed).map((it) => [it.text, it.code])).toEqual([
+      ["a", "workspace_lease_resumed"], ["b", "workspace_lease"],
+    ]);
+    expect(resumed.doing).toBe("等待工作区");
+    const done = reduce(resumed, transaction("b", "workspace_lease_abandoned"));
+    expect(done.doing).toBe("运行中");
+    expect(cards(done)).toHaveLength(2);
+  });
+
+  it("keeps unrelated and legacy waits open when a close has no matching identity", () => {
+    const waiting = run([lease("workspace_lease", "warn", "legacy"), transaction("a")]);
+    const unknown = reduce(waiting, transaction("b", "workspace_lease_abandoned"));
+    expect(cards(unknown).map((it) => it.code)).toEqual([
+      "workspace_lease", "workspace_lease", "workspace_lease_abandoned",
+    ]);
+    const legacyClosed = reduce(unknown, lease("workspace_lease_resumed", "info", "legacy done"));
+    expect(cards(legacyClosed)[0].code).toBe("workspace_lease_resumed");
+    expect(cards(legacyClosed)[1].code).toBe("workspace_lease");
+    expect(legacyClosed.doing).toBe("等待工作区");
+  });
+
+  it("replays duplicate transaction notices without reopening a completed wait", () => {
+    const opened = transaction("a");
+    const closed = transaction("a", "workspace_lease_resumed");
+    const st = run([opened, opened, closed, closed, opened]);
+    expect(cards(st)).toHaveLength(1);
+    expect(cards(st)[0].code).toBe("workspace_lease_resumed");
+    expect(st.doing).toBe("运行中");
+  });
+
   it("preserves holder and claim scope through close and event replay", () => {
     const scope = { contended: 0, heldMs: 0, idleMs: 0, holder: "Fixture A", holderSessionId: "session-a", paths: ["src/a.go"], requestedPaths: ["src/a.go"] };
     const opened = { ...lease("workspace_lease", "warn", "Waiting"), workspaceLease: scope } as SessionEvent;

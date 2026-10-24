@@ -60,16 +60,13 @@ func resolveToolEnvironment(opts Options, cfg *config.Config, roots config.Roots
 		_ = os.MkdirAll(dir, 0o700)
 	}
 	env := toolEnvironment{
-		forbidReadRoots: RuntimeForbidReadRoots(cfg, root),
+		forbidReadRoots: appendUniquePaths(RuntimeForbidReadRoots(cfg, root), opts.inheritedReadDenies...),
 		network:         cfg.Sandbox.Network,
 		bashTimeout:     time.Duration(cfg.BashTimeoutSeconds()) * time.Second,
 		readPaths:       builtin.NewPathResolver(),
 		sessionTemp:     opts.SessionTemp,
 	}
-	env.writeRoots = appendUniquePaths(cfg.WriteRootsForRoot(root), additionalDirs...)
-	if opts.WorkspaceOnly {
-		env.writeRoots = []string{root}
-	}
+	env.writeRoots = runtimeWriteRoots(opts, cfg, root, additionalDirs)
 	if opts.Observe != nil {
 		env.readRoots = []string{root}
 	}
@@ -82,6 +79,16 @@ func resolveToolEnvironment(opts Options, cfg *config.Config, roots config.Roots
 	env.managedConfig = builtin.NewManagedConfigPaths(config.ReasonixManagedConfigPaths())
 	env.bash = sandbox.Spec{Mode: bashMode, WriteRoots: env.writeRoots, Pins: sandbox.PinWriteRoots(env.writeRoots), ForbidReadRoots: env.forbidReadRoots, Network: env.network,
 		HostAuthorities: sandbox.ParseAuthorities(cfg.Sandbox.HostAuthorities), AllowDevices: cfg.Sandbox.AllowDevices, Shell: shell, ShellEnv: cfg.Tools.Shell.Env}
+	if opts.WorkspaceOnly {
+		env.bash.RequiredIntegrity = sandbox.CompleteFileIntegrity
+		env.bash.MinimalWrites = true
+		env.bash.ProtectedWriteRoots = slices.Clone(opts.protectedMutationRoots)
+		for _, metadata := range []string{opts.WorkspaceRepo.CommonDir, opts.WorkspaceRepo.GitDir} {
+			if metadata != "" {
+				env.bash.ReadRoots = appendUniquePaths(env.bash.ReadRoots, metadata)
+			}
+		}
+	}
 	// On Windows an enforcing spec is prepared here: its roots granted to the
 	// restricted token, or the reason it cannot be. Elsewhere this changes nothing.
 	env.bash = sandbox.GrantSpec(env.bash, roots.SandboxDir())
@@ -104,6 +111,13 @@ func resolveToolEnvironment(opts Options, cfg *config.Config, roots config.Roots
 		env.sessionTemp = sessiontemp.New()
 	}
 	return env
+}
+
+func runtimeWriteRoots(opts Options, cfg *config.Config, root string, additionalDirs []string) []string {
+	if opts.WorkspaceOnly {
+		return []string{root}
+	}
+	return appendUniquePaths(cfg.WriteRootsForRoot(root), additionalDirs...)
 }
 
 var _ sandbox.EgressRoute = (*egress.Proxy)(nil)

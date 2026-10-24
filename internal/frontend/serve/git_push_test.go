@@ -26,7 +26,7 @@ func pushFixture(t *testing.T, trusted bool) (srv *httptest.Server, work, remote
 		t.Skip("the stand-in ssh is a shell script")
 	}
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	isolateGitGlobalConfig(t)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
 		t.Setenv(k+"_NAME", "t")

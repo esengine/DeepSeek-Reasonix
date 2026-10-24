@@ -669,7 +669,7 @@ func (a *contextWindow) summarizeAtMode(ctx context.Context, region []provider.M
 	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
 	}
-	ch, err := a.svc.prov.Stream(ctx, req)
+	ch, err := provider.Stream(ctx, a.svc.prov, req)
 	if err != nil {
 		return "", usage, err
 	}

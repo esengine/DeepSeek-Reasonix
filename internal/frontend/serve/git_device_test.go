@@ -83,6 +83,11 @@ func TestAPairedDeviceCannotReachThePushOrDiscardOfARemotePaneAndTheHostIsForwar
 		{http.MethodGet, "/git/push"},
 		{http.MethodPost, "/git/push"},
 		{http.MethodPost, "/changes/discard"},
+		{http.MethodPost, "/isolated-results/discard-preview"},
+		{http.MethodPost, "/isolated-results/discard"},
+		{http.MethodPost, "/isolated-results/recover"},
+		{http.MethodPost, "/isolated-results/command"},
+		{http.MethodPost, "/isolated-results/root"},
 		{http.MethodGet, "//git/./push"},
 		{http.MethodHead, "/git/push"},
 		{http.MethodPost, "/changes/../changes/discard"},
@@ -115,17 +120,17 @@ func TestAPairedDeviceCannotReachThePushOrDiscardOfARemotePaneAndTheHostIsForwar
 		if rec.Code != http.StatusNotFound || reason.Code != codeDeviceHostOnly {
 			t.Errorf("%s %s from a device = %d %q, want 404 %s", rt.method, rt.path, rec.Code, reason.Code, codeDeviceHostOnly)
 		}
-	}
-	if n := drain(); n != 0 {
-		t.Fatalf("the remote kernel saw %d requests from a device, want none", n)
+		if n := drain(); n != 0 {
+			t.Fatalf("the remote kernel saw %d requests from a device for %s, want none", n, rt.path)
+		}
 	}
 	for _, rt := range routes {
 		rec := serve(rt.method, rt.path, false)
 		if rec.Code == http.StatusNotFound && strings.Contains(rec.Body.String(), codeDeviceHostOnly) {
 			t.Errorf("%s %s from the host was refused as a device", rt.method, rt.path)
 		}
-	}
-	if n := drain(); n != len(routes) {
-		t.Fatalf("the remote kernel saw %d of the host's %d requests, want all forwarded", n, len(routes))
+		if n := drain(); n != 1 {
+			t.Fatalf("the remote kernel saw %d requests from the host for %s, want one", n, rt.path)
+		}
 	}
 }

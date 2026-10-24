@@ -211,6 +211,20 @@ func (p fleetPlan) ordered(a, b int) bool {
 	return p.reachable[a][b] || p.reachable[b][a]
 }
 
+func (p fleetPlan) markParallelWriters(specs []ProfileExecSpec, adopted map[int]adoptedItem) {
+	for i := range specs {
+		if _, ok := adopted[i]; ok || specs[i].Grant.ReadOnly {
+			continue
+		}
+		for j := range specs {
+			if _, ok := adopted[j]; !ok && i != j && !specs[j].Grant.ReadOnly && !p.ordered(i, j) {
+				specs[i].Sched.ParallelWriter = true
+				break
+			}
+		}
+	}
+}
+
 // validateConcurrentWriteClaims rejects overlapping write claims only for items
 // that can actually run at the same time. Two writers joined by a dependency are
 // serialised by the graph, so an implement → review chain may legitimately share

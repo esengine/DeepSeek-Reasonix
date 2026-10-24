@@ -1,13 +1,16 @@
 package boot
 
 import (
+	"context"
 	"fmt"
 	"reasonix/internal/state/sessionstore"
 	"time"
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/session/control"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/workspacelease"
 	"reasonix/internal/tools/jobs"
 )
@@ -16,15 +19,25 @@ import (
 // controller: the workspace write lease, the background job manager that
 // retains it while a job runs, and the directory sessions are read from.
 type sessionRuntime struct {
-	lease *workspacelease.Owner
-	jobs  *jobs.Manager
-	dir   string
+	lease     *workspacelease.Owner
+	jobs      *jobs.Manager
+	dir       string
+	mutations *mutation.Coordinator
+	presence  control.ExecutionPresence
 }
 
 // startSessionRuntime acquires the workspace lease and opens the job manager.
 // Every role setting lazily acquires the lease on the first real writer, so
 // read-only turns never take it.
-func startSessionRuntime(opts Options, cfg *config.Config, root string, sink event.Sink) (sessionRuntime, error) {
+func startSessionRuntime(ctx context.Context, opts Options, cfg *config.Config, root string, sink event.Sink) (sessionRuntime, error) {
+	repos, resources, err := mutationRepositories(ctx, workspaceRepo(ctx, opts.WorkspaceRepo, root), runtimeWriteRoots(opts, cfg, root, opts.AdditionalDirs))
+	if err != nil {
+		return sessionRuntime{}, err
+	}
+	mutations, err := newMutationCoordinator(cfg, root, sink, repos, resources)
+	if err != nil {
+		return sessionRuntime{}, err
+	}
 	jobOptions := []jobs.Option{
 		jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds()) * time.Second),
 		jobs.WithSessionOwnershipProbe(sessionstore.SessionLeaseHeldByCurrentRuntime),
@@ -47,6 +60,10 @@ func startSessionRuntime(opts Options, cfg *config.Config, root string, sink eve
 		}
 		lease.OnRelease(func(st workspacelease.Stats) { sink.Emit(workspaceLeaseAccount(st)) })
 	}
+	for _, repo := range repos {
+		lease.AddWriteAdmission(repo.WorkTree+"\x00"+repo.GitDir+"\x00"+repo.CommonDir,
+			func(paths []string) error { return recoveryBarrier([]gitcmd.Repo{repo}, paths) })
+	}
 	manager := opts.Jobs
 	if manager == nil {
 		manager = jobs.NewManager(sink, jobOptions...)
@@ -63,7 +80,7 @@ func startSessionRuntime(opts Options, cfg *config.Config, root string, sink eve
 	if err := reconcileCleanupPending(dir); err != nil {
 		report(sink, event.Event{Level: event.LevelWarn, Text: "cleanup-pending reconciliation failed: " + err.Error()})
 	}
-	return sessionRuntime{lease: lease, jobs: manager, dir: dir}, nil
+	return sessionRuntime{lease: lease, jobs: manager, dir: dir, mutations: mutations}, nil
 }
 
 // workspaceLeaseAccount carries what serialising writers cost this session.

@@ -21,6 +21,7 @@ import { nameTurnStart, othersSteer } from "./turn_start";
 import { appendText, foldMessage, sealSay } from "./say";
 import { nextId } from "./ids";
 import { worked } from "./worked";
+import { reduceWorkspaceWait } from "./workspace_wait";
 import { chipLabel, IDLE, RUNNING } from "./chip";
 import { foldStall } from "./stall";
 import { nameQueued, withoutPendingRow } from "./queued";
@@ -30,10 +31,6 @@ import { rebuild } from "./rebuild";
 export { chipLabel };
 export { quoteAmount };
 
-// doing is what the status chip prints. These two values are also read back by
-// the reducer, so they get a name: a comparison against a sentence is one copy
-// pass away from never matching again, and nothing fails when it stops.
-const WAITING_WORKSPACE = "等待工作区";
 // What the turn is doing between a tool finishing and the model's next packet.
 // The chip used to keep printing the tool that had already returned, so the
 // one stretch nothing is on screen for looked like the one stretch it hung.
@@ -552,31 +549,8 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         if (s.runtime.some((n) => said(n) === said(fresh))) return s;
         return { ...s, runtime: [...s.runtime, fresh] };
       }
-      // A wait is not a fact about the turn, it is a state the turn is in.
-      // The strip carries it while it lasts, and the notice that closes it
-      // rewrites the card rather than stacking a second one under it — the
-      // pair used to be one line that stayed on screen saying "waiting" long
-      // after the wait was over.
-      if (ev.code === "workspace_lease") {
-        const waiting: Item = { t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code, workspaceLease: ev.workspaceLease };
-        return { ...s, doing: WAITING_WORKSPACE, items: [...s.items, waiting] };
-      }
-      if (ev.code === "workspace_lease_resumed" || ev.code === "workspace_lease_abandoned") {
-        const items = s.items.slice();
-        let closed = false;
-        for (let i = items.length - 1; i >= 0; i--) {
-          const it = items[i];
-          if (it.t === "notice" && it.code === "workspace_lease") {
-            items[i] = { t: "notice", id: it.id, level, text: ev.text ?? "", detail: ev.detail, code: ev.code, workspaceLease: ev.workspaceLease };
-            closed = true;
-            break;
-          }
-        }
-        if (!closed) {
-          items.push({ t: "notice", id: nextId(), level, text: ev.text ?? "", detail: ev.detail, code: ev.code, workspaceLease: ev.workspaceLease });
-        }
-        return { ...s, doing: s.doing === WAITING_WORKSPACE ? RUNNING : s.doing, items };
-      }
+      const workspaceWait = reduceWorkspaceWait(s, ev, nextId);
+      if (workspaceWait) return workspaceWait;
       // A retry that repeats says the same thing each time. Three identical
       // lines push whatever came before them off the screen and read as three
       // problems, so a repeat folds into the one already there.

@@ -21,7 +21,7 @@ import (
 func commitServer(t *testing.T, repoDir string, gen *commitmsg.Generator) *httptest.Server {
 	t.Helper()
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	isolateGitGlobalConfig(t)
 	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
 		t.Setenv(k+"_NAME", "t")
 		t.Setenv(k+"_EMAIL", "t@t")
@@ -55,7 +55,7 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 
 func repoWith(t *testing.T, files map[string]string) string {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	isolateGitGlobalConfig(t)
 	t.Setenv("GIT_AUTHOR_NAME", "t")
 	t.Setenv("GIT_AUTHOR_EMAIL", "t@t")
 	t.Setenv("GIT_COMMITTER_NAME", "t")

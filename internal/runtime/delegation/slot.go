@@ -39,6 +39,10 @@ func (t *TaskTool) acquireRequestFor(spec *ProfileExecSpec) (writeclaim.AcquireR
 		OnQueued:   queuedHook(spec.Sched),
 		Label:      firstNonEmpty(spec.Task.Description, spec.Worker.Name, "task"),
 	}
+	if t.mutations != nil {
+		req.WritePaths = writeclaim.WritePathSet{}
+		return req, nil
+	}
 	if !req.Writer || !spec.Grant.WritePaths.Empty() || !spec.Sched.RunInBackground {
 		return req, nil
 	}

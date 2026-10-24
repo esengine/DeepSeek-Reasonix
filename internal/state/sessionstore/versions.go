@@ -28,6 +28,24 @@ func SaveSupersededVersion(parentPath string, msgs []provider.Message) (string, 
 	sess := NewSession("")
 	sess.Messages = slices.Clone(msgs)
 	path := NewSessionPath(filepath.Dir(parentPath), "version")
+	if binding, bound, err := LoadExecutionEnvironment(parentPath); err != nil {
+		return "", err
+	} else if bound {
+		lease, err := TryAcquireSessionLease(path)
+		if err != nil {
+			return "", err
+		}
+		defer lease.Release()
+		auth, err := lease.IssueWriteAuthority(NextSessionWriteGeneration())
+		if err != nil {
+			return "", err
+		}
+		binding.ArchiveOnly = true
+		if err := BindExecutionEnvironment(path, binding, auth); err != nil {
+			return "", err
+		}
+		sess.BindWriteAuthority(auth)
+	}
 	if err := sess.SaveIfAbsent(path); err != nil {
 		return "", err
 	}

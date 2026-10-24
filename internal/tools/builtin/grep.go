@@ -407,6 +407,9 @@ func (g grepTool) ripgrepPass(ctx context.Context, pattern, path, glob string, d
 		defer lease.Release()
 	}
 	prepared := sandbox.PrepareArgs(g.sb, args, sessionDir)
+	if prepared.Err != nil {
+		return nil, false, false, nil
+	}
 	argv, wrapped := prepared.Argv, prepared.Wrapped
 	if len(g.forbidRoots) > 0 && !wrapped {
 		return nil, false, wrapped, nil

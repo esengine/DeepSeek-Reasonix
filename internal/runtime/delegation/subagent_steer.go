@@ -166,6 +166,7 @@ func (s *SubagentStore) Steer(ref, parentSession, workspaceRoot, text string, fr
 // the run can be spoken to while it works.
 func (t *TaskTool) steerable(opts agent.Options, sess *sessionstore.Session) agent.Options {
 	opts.OnStart = func(st agent.Steerer) { t.transcripts.attachSteerer(sess, st) }
+	opts.AdmissionSaver = t.transcripts.admissionSaver(sess)
 	return opts
 }
 

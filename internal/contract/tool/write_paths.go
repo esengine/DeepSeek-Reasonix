@@ -13,3 +13,15 @@ import (
 type WritePathDeclarer interface {
 	DeclaredWritePaths(ctx context.Context, args json.RawMessage) ([]string, error)
 }
+
+// WriteAuthorizer resolves any grant expansion before a mutation lease is held.
+// Implementations must not mutate files or reserve execution resources.
+type WriteAuthorizer interface {
+	AuthorizeWrite(context.Context, json.RawMessage) error
+}
+
+// IntegrationRecovery marks host tools that settle a durable integration journal.
+// Their declared resources must include every path recovery may restore.
+type IntegrationRecovery interface {
+	RecoversIntegration() bool
+}

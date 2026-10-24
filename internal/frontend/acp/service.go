@@ -1014,7 +1014,7 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 	// The rebuilt controller must keep the client-capability wiring (fs
 	// overlay, host terminal) a model/effort switch would otherwise drop.
 	s.bindClientIO(&rebuildParams, sess.id)
-	newCtrl, err := s.factory.NewSession(ctx, rebuildParams)
+	newCtrl, err := s.factory.NewSession(ctx, withSessionEnvironment(rebuildParams, cur, prevPath))
 	if err != nil {
 		return &RPCError{Code: ErrInternal, Message: "session config: " + err.Error()}
 	}

@@ -79,7 +79,7 @@ func (c *Config) ForbiddenRootsForRoot(root string) []string {
 
 func appendUniqueResolved(base []string, extra ...string) []string {
 	out := append([]string(nil), base...)
-	seen := make(map[string]struct{}, len(out)+len(extra))
+	seen := make(map[string]struct{}, len(out))
 	for _, p := range out {
 		seen[rootKey(p)] = struct{}{}
 	}

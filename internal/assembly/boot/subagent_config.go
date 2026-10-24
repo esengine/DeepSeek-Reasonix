@@ -97,6 +97,10 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 		cfg.Agent.MaxSubagentConcurrency, cfg.Agent.MaxParallelWriters,
 	)
 	inherited := resolveInheritedSubagentEffort(cfg, entry)
+	scheduler := opts.DelegationScheduler
+	if scheduler == nil {
+		scheduler = writeclaim.NewSubagentScheduler(maxConcurrency, maxWriters)
+	}
 	return subagentConfig{
 		resolveProvider: func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
 			me, selectedRef, err := subagentModelEntry(cfg, resolver, entry, modelRef)
@@ -139,7 +143,7 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 		},
 		profileModel:           func(profile string) string { return firstConfigured(cfg.Agent.SubagentModels, profile) },
 		profileEffort:          func(profile string) string { return firstConfigured(cfg.Agent.SubagentEfforts, profile) },
-		scheduler:              writeclaim.NewSubagentScheduler(maxConcurrency, maxWriters),
+		scheduler:              scheduler,
 		inheritedFor:           inheritedEffortFor(opts, cfg, resolver, entry, &sync.Map{}),
 		inheritedEffortDropped: inherited.dropped,
 		taskModel:              firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel),

@@ -83,7 +83,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	chunks, err := prov.Stream(ctx, req.Request)
+	chunks, err := provider.Stream(ctx, prov, req.Request)
 	if err != nil {
 		writeWireError(w, http.StatusBadGateway, err)
 		return

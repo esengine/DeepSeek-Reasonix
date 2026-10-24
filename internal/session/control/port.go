@@ -22,6 +22,7 @@ import (
 	"reasonix/internal/platform/gitstatus"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/delegation"
+	"reasonix/internal/runtime/isolation"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/agentpreset"
 	"reasonix/internal/state/checkpoint"
@@ -309,6 +310,11 @@ type RuntimeSettings interface {
 	SaveSubagentSteerSettings(maxBytes, perMinute int) error
 	WriteLeaseSettings() WriteLeaseSettings
 	SaveWriteLeaseSettings(optimistic *bool, maxWaitMinutes *int) error
+	SaveWriteCoordinationSettings(edit WriteCoordinationEdit) error
+	IsolationResults(context.Context) (isolation.Catalog, error)
+	PreviewIsolatedDiscard(context.Context, string) (isolation.DiscardPreview, error)
+	DiscardIsolated(context.Context, IsolatedDiscardRequest) error
+	RecoverIsolatedIntegration(context.Context, isolation.RecoveryRequest) error
 	PlanApprovalSettings() PlanApprovalSettings
 	SavePlanApprovalSettings(auto bool) error
 	DefaultModeSettings() DefaultModeSettings

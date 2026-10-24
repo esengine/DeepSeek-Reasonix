@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/bestof"
 	"reasonix/internal/session/control"
@@ -83,26 +84,19 @@ func candidateRunner(parent Options, sink event.Sink, approval *candidateApprova
 // forwards reaches the parent session. A run that stopped without proving its
 // work is not an error: its readiness reason comes back as unverified.
 func runUnattended(ctx context.Context, parent Options, sink event.Sink, mode, root, prompt, model string) (answer, unverified string, err error) {
+	opts, err := unattendedOptions(parent, sink, mode, root, model)
+	if err != nil {
+		return "", "", err
+	}
 	sessDir, err := os.MkdirTemp("", "reasonix-candidate-")
 	if err != nil {
 		return "", "", err
 	}
 	defer os.RemoveAll(sessDir)
-	ctrl, err := Build(ctx, Options{
-		ComputerDriver:       parent.ComputerDriver,
-		WorkspaceRoot:        root,
-		Home:                 parent.Home,
-		Model:                model,
-		AgentPreset:          parent.AgentPreset,
-		ProviderResolver:     parent.ProviderResolver,
-		Sink:                 sink,
-		Stderr:               io.Discard,
-		SessionDir:           sessDir,
-		HeadlessApprovalMode: mode,
-		ApprovalTimeout:      time.Second,
-		GoalTurnsUnreachable: true,
-		UnattendedChild:      true,
-	})
+	opts.SessionDir = sessDir
+	opts.WorkspaceOnly, opts.SandboxBashOverride = true, "enforce"
+	opts.protectedMutationRoots = appendUniquePaths(parent.protectedMutationRoots, parent.WorkspaceRoot, parent.WorkspaceRepo.WorkTree)
+	ctrl, err := Build(ctx, opts)
 	if err != nil {
 		return "", "", err
 	}
@@ -115,6 +109,44 @@ func runUnattended(ctx context.Context, parent Options, sink event.Sink, mode, r
 		unverified = unready.Reason
 	}
 	return finalAnswer(ctrl), unverified, nil
+}
+
+func unattendedOptions(parent Options, sink event.Sink, mode, root, model string) (Options, error) {
+	if parent.Composition != nil || parent.AgentComposition != "" {
+		return Options{}, tool.Refusal{Code: "isolation.unsupported_arg", Message: "this agent composition cannot yet be rebound to an isolated workspace; run a shared task under its existing authorization"}
+	}
+	source := parent.readPolicyRoot
+	if source == "" {
+		source = resolveWorkspaceRoot(parent.WorkspaceRoot)
+	}
+	denies, err := rebindReadPolicy(parent.inheritedReadDenies, source, root)
+	if err != nil {
+		return Options{}, err
+	}
+	return Options{
+		VerificationClient:     parent.VerificationClient.Clone(),
+		inheritedReadDenies:    denies,
+		readPolicyRoot:         root,
+		ComputerDriver:         parent.ComputerDriver,
+		WorkspaceRoot:          root,
+		Home:                   parent.Home,
+		Model:                  model,
+		AgentPreset:            parent.AgentPreset,
+		PermissionAllow:        slices.Clone(parent.PermissionAllow),
+		AdditionalDirs:         slices.Clone(parent.AdditionalDirs),
+		SandboxNetworkOverride: parent.SandboxNetworkOverride,
+		SandboxBashOverride:    parent.SandboxBashOverride,
+		WorkspaceOnly:          parent.WorkspaceOnly,
+		Ablation:               parent.Ablation,
+		Observe:                parent.Observe,
+		ProviderResolver:       parent.ProviderResolver,
+		Sink:                   sink,
+		Stderr:                 io.Discard,
+		HeadlessApprovalMode:   mode,
+		ApprovalTimeout:        time.Second,
+		GoalTurnsUnreachable:   true,
+		UnattendedChild:        true,
+	}, nil
 }
 
 // finalAnswer is the attempt's last visible message; empty when it ended

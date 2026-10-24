@@ -21,8 +21,10 @@ import (
 	"reasonix/internal/runtime/recovery"
 	"reasonix/internal/runtime/taskmonitor"
 	"reasonix/internal/runtime/usecap"
+	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/safety/permission"
 	"reasonix/internal/safety/sandbox"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/workspacelease"
 	"reasonix/internal/tools/jobs"
 )
@@ -31,9 +33,10 @@ import (
 // split is for the reader and the lock discipline: c.turn and c.policy read
 // alike, and only one can change under you. Embedded, so existing reads resolve.
 type controllerDeps struct {
-	runner       agent.Runner
-	executor     *agent.Agent
-	guardianSess *guardian.Session // nil when guardian is disabled
+	runner            agent.Runner
+	executionPresence ExecutionPresence
+	executor          *agent.Agent
+	guardianSess      *guardian.Session // nil when guardian is disabled
 	// recoveryGate is the shared Auto Guard state for this controller.
 	// nil when the feature is not wired for this controller.
 	recoveryGate *recovery.Gate
@@ -115,7 +118,11 @@ type controllerDeps struct {
 	taskStore taskmonitor.WriteStore
 	// workspaceLease is the Delivery writer owner shared with the executor.
 	// It is exposed only through a sanitized state snapshot for Desktop recovery.
-	workspaceLease *workspacelease.Owner
+	workspaceLease      *workspacelease.Owner
+	delegationScheduler *writeclaim.SubagentScheduler
+	mutations           *mutation.Coordinator
+	coordination        *WriteCoordinationRuntime
+	isolatedResults     isolatedResultsState
 
 	// mcp owns the live tool/plugin surface — Host, registry, and the session
 	// context a hot-added stdio server binds to — behind its own lock, off c.mu.
@@ -192,6 +199,7 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		hooks:                  opts.Hooks,
 		memory:                 newMemoryManager(opts.Memory),
 		cleanup:                opts.Cleanup,
+		executionPresence:      opts.ExecutionPresence,
 		display:                displayPrefsFrom(opts),
 		disableColdResumePrune: opts.DisableColdResumePrune,
 		shell:                  opts.Shell,
@@ -204,6 +212,10 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 		subagents:              opts.Subagents,
 		taskStore:              opts.TaskStore,
 		workspaceLease:         opts.WorkspaceLease,
+		delegationScheduler:    opts.DelegationScheduler,
+		mutations:              opts.MutationCoordinator,
+		coordination:           cloneWriteCoordination(opts.WriteCoordination),
+		isolatedResults:        newIsolatedResultsState(opts),
 		mcp:                    newMcpManager(opts.Host, opts.Registry, pluginCtx, opts.MCPDefaultCallTimeout, hostFactNotice(opts.Executor)),
 		mcpConfigureSpec:       opts.MCPConfigureSpec,
 		capabilityRuntime:      opts.CapabilityRuntime,

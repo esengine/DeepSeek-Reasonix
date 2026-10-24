@@ -18,28 +18,32 @@ import (
 // may narrow these grants and never widen them. The slices are copies because
 // decoding the project file writes into the arrays the user's decode left.
 type heldScope struct {
-	attachments    AttachmentsConfig
-	sandbox        SandboxConfig
-	permissions    PermissionsConfig
-	approvalMode   string
-	updateMode     string
-	autoSubmit     bool
-	writeLease     string
-	planApproval   string
-	defaultMode    string
-	toolsDisabled  []string
-	limits         agentLimits
-	goalAutoRetry  int
-	subagentClaims string
-	hostVerif      string
-	shell          ShellConfig
-	rgPath         string
-	lsp            map[string]LSPServer
-	browser        BrowserConfig
-	network        NetworkConfig
-	endpoints      heldEndpoints
-	layaPython     string
-	layaLocal      bool
+	attachments         AttachmentsConfig
+	sandbox             SandboxConfig
+	permissions         PermissionsConfig
+	approvalMode        string
+	updateMode          string
+	autoSubmit          bool
+	writeLease          string
+	collaboration       string
+	isolationCopyPaths  []string
+	verificationRuntime string
+	autoIntegrate       bool
+	planApproval        string
+	defaultMode         string
+	toolsDisabled       []string
+	limits              agentLimits
+	goalAutoRetry       int
+	subagentClaims      string
+	hostVerif           string
+	shell               ShellConfig
+	rgPath              string
+	lsp                 map[string]LSPServer
+	browser             BrowserConfig
+	network             NetworkConfig
+	endpoints           heldEndpoints
+	layaPython          string
+	layaLocal           bool
 	// rememberDevices is the user's [serve] remember_paired_devices. A project
 	// may not set it: a cloned repo must not be able to make a phone the person
 	// paired with stay trusted longer than they chose.
@@ -79,36 +83,40 @@ func holdUserScope(c *Config) heldScope {
 	shell.Env = maps.Clone(shell.Env)
 	shell.Args = slices.Clone(shell.Args)
 	return heldScope{
-		attachments:     cloneAttachments(c.Attachments),
-		sandbox:         s,
-		permissions:     p,
-		approvalMode:    c.Desktop.DefaultToolApprovalMode,
-		updateMode:      c.DesktopUpdateMode(),
-		autoSubmit:      c.AutoSubmit,
-		writeLease:      c.Agent.WriteLease,
-		planApproval:    c.Agent.PlanApproval,
-		defaultMode:     c.Agent.DefaultMode,
-		toolsDisabled:   c.DisabledTools(),
-		limits:          holdAgentLimits(c),
-		goalAutoRetry:   c.Agent.GoalAutoRetry,
-		subagentClaims:  c.Agent.SubagentClaims,
-		hostVerif:       c.Agent.HostVerification,
-		shell:           shell,
-		rgPath:          c.Tools.Search.RgPath,
-		lsp:             maps.Clone(c.LSP.Servers),
-		browser:         c.Browser,
-		network:         c.Network,
-		endpoints:       holdUserEndpoints(c),
-		layaPython:      c.Tools.SystemOne.Laya.Python,
-		layaLocal:       c.Tools.SystemOne.Laya.Local,
-		rememberDevices: c.Serve.RememberPairedDevices,
-		turnNarration:   c.TurnNarration(),
-		persona:         clonePersona(c.Agent.Persona),
-		peers:           clonePeers(c.Peers),
-		observability:   c.Observability,
-		mods:            c.Mods,
-		mcpResources:    c.Tools.MCPResources,
-		presentFiles:    c.Tools.PresentFiles,
+		attachments:         cloneAttachments(c.Attachments),
+		sandbox:             s,
+		permissions:         p,
+		approvalMode:        c.Desktop.DefaultToolApprovalMode,
+		updateMode:          c.DesktopUpdateMode(),
+		autoSubmit:          c.AutoSubmit,
+		writeLease:          c.Agent.WriteLease,
+		collaboration:       c.Agent.Collaboration,
+		isolationCopyPaths:  slices.Clone(c.Agent.IsolationCopyPaths),
+		verificationRuntime: c.Agent.VerificationRuntime,
+		autoIntegrate:       c.AutoIntegrationEnabled(),
+		planApproval:        c.Agent.PlanApproval,
+		defaultMode:         c.Agent.DefaultMode,
+		toolsDisabled:       c.DisabledTools(),
+		limits:              holdAgentLimits(c),
+		goalAutoRetry:       c.Agent.GoalAutoRetry,
+		subagentClaims:      c.Agent.SubagentClaims,
+		hostVerif:           c.Agent.HostVerification,
+		shell:               shell,
+		rgPath:              c.Tools.Search.RgPath,
+		lsp:                 maps.Clone(c.LSP.Servers),
+		browser:             c.Browser,
+		network:             c.Network,
+		endpoints:           holdUserEndpoints(c),
+		layaPython:          c.Tools.SystemOne.Laya.Python,
+		layaLocal:           c.Tools.SystemOne.Laya.Local,
+		rememberDevices:     c.Serve.RememberPairedDevices,
+		turnNarration:       c.TurnNarration(),
+		persona:             clonePersona(c.Agent.Persona),
+		peers:               clonePeers(c.Peers),
+		observability:       c.Observability,
+		mods:                c.Mods,
+		mcpResources:        c.Tools.MCPResources,
+		presentFiles:        c.Tools.PresentFiles,
 
 		webSearchBackends: slices.Clone(c.Tools.WebSearchBackends),
 		searxngURL:        c.Tools.SearxngURL,
@@ -252,6 +260,7 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("agent.write_lease", c.Agent.WriteLease, ProjectUserOnly)
 		c.Agent.WriteLease = h.writeLease
 	}
+	h.narrowCollaboration(c)
 	// How a sub-agent's write claim is held decides whether another writer can
 	// work beside it, so a cloned repo cannot loosen it either.
 	if c.Agent.SubagentClaims != h.subagentClaims {

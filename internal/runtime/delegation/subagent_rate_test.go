@@ -50,20 +50,15 @@ func TestSubagentRateIsNotReportedInAToolCall(t *testing.T) {
 	trk.wrap().Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "t1", Name: "bash"}})
 	clock.Advance(subagentProgressMergeWindow)
 
-	var last event.Event
 	for {
-		select {
-		case e := <-ch:
-			if e.Tool.Name == event.SubagentProgressStatusName {
-				last = e
-			}
+		e := waitEvent(t, ch, "tool phase status")
+		if e.Tool.Name != event.SubagentProgressStatusName || e.Tool.Output != string(subagentPhaseTool) {
 			continue
-		case <-time.After(100 * time.Millisecond):
+		}
+		if e.Tool.RateTokensPerSec != 0 {
+			t.Fatalf("tool status rate = %d, want zero", e.Tool.RateTokensPerSec)
 		}
 		break
-	}
-	if last.Tool.Output != string(subagentPhaseTool) || last.Tool.RateTokensPerSec != 0 {
-		t.Fatalf("last status = %q at %d tokens/s, want tool at none", last.Tool.Output, last.Tool.RateTokensPerSec)
 	}
 }
 

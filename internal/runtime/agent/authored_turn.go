@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"reasonix/internal/state/sessionstore"
+	"strings"
+	"time"
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/runtime/taskpolicy"
 )
 
 // PriorAuthoredTurn is the authored-turn count over msgs: the number the next
@@ -56,17 +59,17 @@ func HostTurnBoundaryFrom(ctx context.Context) (HostTurnBoundary, bool) {
 // writes the message owns its Content. Exported because a host that persists a
 // turn's message itself has to land it through this seam too — a second place
 // that appends is a second answer to which message the turn was about.
-func (a *Agent) LandAuthoredUserMessage(ctx context.Context, msg provider.Message) {
+func (a *Agent) LandAuthoredUserMessage(ctx context.Context, msg provider.Message) (err error) {
 	if a == nil || a.sess.conversation == nil {
-		return
+		return nil
 	}
 	if a.svc.admissionSaver != nil {
-		defer a.svc.admissionSaver.SaveAdmittedMessage(ctx)
+		defer func() { err = a.svc.admissionSaver.SaveAdmittedMessage(ctx) }()
 	}
 	boundary, hosted := HostTurnBoundaryFrom(ctx)
 	if !hosted {
 		a.sess.conversation.Add(msg)
-		return
+		return nil
 	}
 	if boundary.Authored != nil && boundary.Authored.Raw != "" {
 		msg.RawContent = boundary.Authored.Raw
@@ -77,6 +80,27 @@ func (a *Agent) LandAuthoredUserMessage(ctx context.Context, msg provider.Messag
 	if boundary.Authored != nil {
 		a.verifyAuthoredLanding(*boundary.Authored, msg, index)
 	}
+	return nil
+}
+
+func (a *Agent) openUserTurn(ctx context.Context, providerInput, rawInput string) (string, error) {
+	input := a.withTurnPreferences(providerInput)
+	if !strings.Contains(input, "<execution-policy") {
+		input = strings.TrimSpace(input) + "\n\n" + taskpolicy.ExecutionPolicyBlock(a.turn.policy)
+	}
+	rawContent := rawInput
+	if rawContent == "" {
+		rawContent = a.turn.turnInput
+	}
+	pending := provider.Message{
+		Role: provider.RoleUser, Content: input, RawContent: rawContent,
+		Images: UserImages(ctx),
+	}
+	a.announceOwnTurn(ctx, pending)
+	a.emitTurnPhase(event.TurnPhaseWorking)
+	pending.CreatedAt = time.Now().UnixMilli()
+	a.activeTurnCreatedAt.Store(pending.CreatedAt)
+	return input, a.LandAuthoredUserMessage(ctx, pending)
 }
 
 // announceOwnTurn opens a turn boundary for a run no host announced one for.

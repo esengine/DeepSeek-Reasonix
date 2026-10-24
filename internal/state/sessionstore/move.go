@@ -49,6 +49,11 @@ type AdoptInput struct {
 // AdoptConversation writes the messages as a new native session in dir. Nothing
 // is left behind when any step fails.
 func AdoptConversation(dir string, in AdoptInput) (string, error) {
+	if in.Record.From != "" {
+		if err := refuseBoundConversationTransfer(in.Record.From); err != nil {
+			return "", err
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -86,6 +91,9 @@ func AdoptConversation(dir string, in AdoptInput) (string, error) {
 // target's own trust and write roots decide everything from then on. The
 // original goes only after the copy reads back identical.
 func MoveSession(src, dstDir, dstRoot string) (string, error) {
+	if err := refuseBoundConversationTransfer(src); err != nil {
+		return "", err
+	}
 	if sameDir(filepath.Dir(src), dstDir) {
 		return "", ErrSameFolder
 	}

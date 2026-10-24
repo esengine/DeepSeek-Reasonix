@@ -120,9 +120,10 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 	ctx, cancel := context.WithCancel(extension.ContextWithRuntimeOwner(context.Background(), c.runtimeOwner))
 	c.gate.begin(cancel)
 	c.gate.bindingPending = binding != nil && !binding.Started
+	admittedWorkspace := releaseWorkspace
 	c.gate.workspaceRelease, releaseWorkspace = releaseWorkspace, nil
 	c.mu.Unlock()
-	if err := c.persistCompositionAdmission(); err != nil {
+	if err := c.persistTurnAdmission(ctx, admittedWorkspace); err != nil {
 		c.mu.Lock()
 		release := c.gate.workspaceRelease
 		c.gate.workspaceRelease = nil

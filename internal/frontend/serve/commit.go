@@ -68,6 +68,7 @@ func (s *Server) stageChanges(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Context().Err() != nil:
 			// The person cancelled; nobody is left to read an answer.
+		case refuseMutation(w, err):
 		case errors.Is(err, gitrepos.ErrNotListed):
 			refuse(w, http.StatusNotFound, "git.repo_unknown", "that repository is not part of this workspace", nil)
 		case errors.Is(err, gitcommit.ErrNoRepository):
@@ -87,6 +88,7 @@ func refuseCommit(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case r.Context().Err() != nil:
 		// The person cancelled; nobody is left to read an answer.
+	case refuseMutation(w, err):
 	case errors.Is(err, gitrepos.ErrNotListed):
 		refuse(w, http.StatusNotFound, "git.repo_unknown", "that repository is not part of this workspace", nil)
 	case errors.Is(err, gitcommit.ErrNoRepository):
@@ -129,6 +131,7 @@ func (s *Server) discardChange(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Context().Err() != nil:
 			// The person cancelled; nobody is left to read an answer.
+		case refuseMutation(w, err):
 		case errors.Is(err, gitrepos.ErrNotListed):
 			refuse(w, http.StatusNotFound, "git.repo_unknown", "that repository is not part of this workspace", nil)
 		case errors.Is(err, control.ErrTurnRunning):

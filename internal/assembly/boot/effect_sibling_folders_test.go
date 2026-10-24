@@ -20,9 +20,7 @@ func siblingProjects(t *testing.T, bashMode string) (alpha, beta, root *workspac
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	repo := robustTempDir(t)
-	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	initEffectRepository(t, repo)
 	for _, dir := range []string{"alpha", "beta"} {
 		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
 			t.Fatal(err)
@@ -32,7 +30,7 @@ func siblingProjects(t *testing.T, bashMode string) (alpha, beta, root *workspac
 		cfg := config.Default()
 		cfg.Agent.WriteLease = "strict"
 		cfg.Sandbox.Bash = bashMode
-		session, err := startSessionRuntime(Options{SessionDir: robustTempDir(t)}, cfg, folder, event.Discard)
+		session, err := startSessionRuntime(t.Context(), Options{SessionDir: robustTempDir(t)}, cfg, folder, event.Discard)
 		if err != nil {
 			t.Fatal(err)
 		}

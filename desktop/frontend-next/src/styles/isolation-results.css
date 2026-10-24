@@ -1,0 +1,4 @@
+.isolation-results code, .isolation-discard-path { overflow-wrap: anywhere; white-space: normal }
+.isolation-results .result-actions { display: flex; flex-wrap: wrap; gap: var(--y-line) }
+.isolation-results .result-entry { border-top: 1px solid var(--border); padding-block: var(--y-card) }
+.isolation-results .result-entry summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--y-line) }

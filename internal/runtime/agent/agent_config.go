@@ -1,11 +1,18 @@
 package agent
 
+import (
+	"reasonix/internal/runtime/checkenv"
+	"reasonix/internal/safety/sandbox"
+)
+
 // agentConfig is everything New fixes for an Agent's lifetime; nothing writes
 // it afterwards, which agent_config_test.go enforces. Embedded rather than
 // nested so access stays flat, as perTurnState already does. Separating it lets
 // the struct-state ratchet count reachable states instead of size: an immutable
 // field combines with nothing. Anything that changes after New goes on Agent.
 type agentConfig struct {
+	processSandbox     sandbox.Spec
+	checkEnvironment   *checkenv.Spec
 	maxSteps           int
 	maxStepsKey        string
 	reasoningByteLimit int

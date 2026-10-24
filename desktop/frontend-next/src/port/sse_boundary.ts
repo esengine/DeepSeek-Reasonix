@@ -3,6 +3,7 @@ import type { PresentFilesSettings } from "./boundary";
 import type { AgentComposition, AgentPresetVersion, AgentPresetCatalog, CompositionSummary } from "./composition";
 import type { ScheduleBoard, ScheduleDraft, SchedulePreview, ScheduleResultView, ScheduleView } from "./schedule";
 import type { PersonaDraft, PersonaSettings } from "./boundary";
+import type { IsolationCatalog, IsolatedDiscardPreview, IsolatedDiscardRequest, IsolationRecoveryRequest, RootSceneRequest } from "./isolation";
 import type { Adjudications, BrowserToolsSettings, SubagentClaimsSettings, SubagentSteerSettings, WriteLeaseSettings, PlanApprovalSettings, DefaultModeSettings, ToolSettings, PeerReceipt, PeersState, PeersSettings, PeersSettingsEdit, PeerRemember, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
 import type { AskTimeoutSettings, ModStatus, ModsSettings, ModsSettingsEdit, SessionRefSettings, AutoArchiveSettings, ChangedFilesSettings, FeedbackLevelNotices, FoldWorkSettings, TurnNarrationSettings, ObservabilityPatch, ObservabilitySettings, WebAccessPatch, WebAccessSettings, SearxngProbe, DisplayCurrencyMode, DisplayCurrencySettings, ProgressWatchSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
 
@@ -83,9 +84,14 @@ export class SseBoundary extends SseShell {
   writeLease() {
     return this.get<WriteLeaseSettings>("/write-lease");
   }
-  saveWriteLease(edit: { optimistic?: boolean; maxWaitMinutes?: number }) {
+  saveWriteLease(edit: { optimistic?: boolean; maxWaitMinutes?: number; collaboration?: string; autoIntegrate?: boolean }) {
     return this.post0<WriteLeaseSettings>("/write-lease", edit);
   }
+  isolatedResults() { return this.get<IsolationCatalog>("/isolated-results"); }
+  manageRootScene(request: RootSceneRequest) { return this.post0<void>("/isolated-results/root", request); }
+  previewIsolatedDiscard(id: string) { return this.post0<IsolatedDiscardPreview>("/isolated-results/discard-preview", { id }); }
+  discardIsolated(request: IsolatedDiscardRequest) { return this.post0<void>("/isolated-results/discard", request); }
+  recoverIsolatedIntegration(target: IsolationRecoveryRequest) { return this.post0<void>("/isolated-results/recover", target); }
   schedules() {
     return this.get<ScheduleBoard>("/schedules");
   }

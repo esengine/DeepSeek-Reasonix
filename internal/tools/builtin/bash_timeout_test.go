@@ -37,8 +37,7 @@ func TestBashForegroundTimeoutConfig(t *testing.T) {
 
 func TestBashExplicitZeroTimeoutDoesNotCapForeground(t *testing.T) {
 	sh := sandbox.ResolveShell("", "", nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 
 	start := time.Now()
 	out, err := (bash{shell: sh, timeout: 0}).Execute(ctx, argsJSON(t, map[string]any{"command": oneSecondCommand(sh)}))

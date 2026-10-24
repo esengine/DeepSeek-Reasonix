@@ -24,6 +24,7 @@ import (
 func newProviderEditServer(t *testing.T, workspaceRoot ...string) *Server {
 	t.Helper()
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	closeSharedCatalogsOnCleanup(t)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	configPath := config.UserConfigPath()
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -51,7 +52,6 @@ api_key_env = "EXISTING_API_KEY"
 		Sink: bc, Label: "model-a", ModelRef: "existing/model-a", SessionDir: testenv.TempDir(t), WorkspaceRoot: root,
 	})
 	t.Cleanup(ctrl.Close)
-	closeSharedCatalogsOnCleanup(t)
 	return New(ctrl, bc, config.ServeConfig{})
 }
 
@@ -63,10 +63,14 @@ api_key_env = "EXISTING_API_KEY"
 func closeSharedCatalogsOnCleanup(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = stats.CloseUsageCatalogs(ctx)
-		_ = history.CloseSharedCatalog(ctx)
+		for _, closeCatalog := range []func(context.Context) error{stats.CloseUsageCatalogs, history.CloseSharedCatalog} {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := closeCatalog(ctx)
+			cancel()
+			if err != nil {
+				t.Errorf("close shared test catalog: %v", err)
+			}
+		}
 	})
 }
 

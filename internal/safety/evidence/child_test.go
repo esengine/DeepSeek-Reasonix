@@ -9,7 +9,7 @@ import (
 func TestMetaToolsDoNotMutate(t *testing.T) {
 	for _, name := range []string{
 		"run_skill", "read_skill", "read_only_skill", "task", "read_only_task",
-		"parallel_tasks", "explore", "research", "review", "security_review", "use_capability",
+		"parallel_tasks", "fleet", "explore", "research", "review", "security_review", "use_capability",
 	} {
 		if ToolCallMutates(name, json.RawMessage(`{}`), false) {
 			t.Fatalf("%s must not count as mutation", name)
@@ -18,28 +18,32 @@ func TestMetaToolsDoNotMutate(t *testing.T) {
 }
 
 func TestMergeChildPropagatesRealWrites(t *testing.T) {
-	parent := NewLedger()
-	parent.Record(ReceiptFromToolCall("task", json.RawMessage(`{"prompt":"edit"}`), true, ToolFacts{}))
-	if _, ok := parent.LatestSuccessfulMutationIndex(); ok {
-		t.Fatal("task alone must not create a mutation index")
-	}
+	for _, name := range []string{"task", "fleet", "parallel_tasks"} {
+		t.Run(name, func(t *testing.T) {
+			parent := NewLedger()
+			parent.Record(ReceiptFromToolCall(name, json.RawMessage(`{"prompt":"edit"}`), true, ToolFacts{}))
+			if _, ok := parent.LatestSuccessfulMutationIndex(); ok {
+				t.Fatal("task alone must not create a mutation index")
+			}
 
-	child := NewLedger()
-	child.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, ToolFacts{WritesNamedPaths: true}))
-	child.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/a.go"}`), true, ToolFacts{ReadOnly: true}))
-	parent.MergeChild(child.Summary())
+			child := NewLedger()
+			child.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, ToolFacts{WritesNamedPaths: true}))
+			child.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/a.go"}`), true, ToolFacts{ReadOnly: true}))
+			parent.MergeChild(child.Summary())
 
-	idx, ok := parent.LatestSuccessfulMutationIndex()
-	if !ok {
-		t.Fatal("expected merged child write to count as mutation")
-	}
-	paths := parent.PathsSince(idx)
-	wantPath := filepath.ToSlash("internal/a.go")
-	if len(paths) != 1 || filepath.ToSlash(paths[0]) != wantPath {
-		t.Fatalf("paths = %v, want %s", paths, wantPath)
-	}
-	if !parent.HasSuccessfulReviewAfter(idx) {
-		t.Fatal("child read of mutated path should satisfy review")
+			idx, ok := parent.LatestSuccessfulMutationIndex()
+			if !ok {
+				t.Fatal("expected merged child write to count as mutation")
+			}
+			paths := parent.PathsSince(idx)
+			wantPath := filepath.ToSlash("internal/a.go")
+			if len(paths) != 1 || filepath.ToSlash(paths[0]) != wantPath {
+				t.Fatalf("paths = %v, want %s", paths, wantPath)
+			}
+			if !parent.HasSuccessfulReviewAfter(idx) {
+				t.Fatal("child read of mutated path should satisfy review")
+			}
+		})
 	}
 }
 

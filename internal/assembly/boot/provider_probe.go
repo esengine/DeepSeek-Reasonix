@@ -29,7 +29,7 @@ func ProbeProviderConnection(ctx context.Context, entry config.ProviderEntry, ke
 	if err != nil {
 		return err
 	}
-	chunks, err := client.Stream(ctx, provider.Request{
+	chunks, err := provider.Stream(ctx, client, provider.Request{
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "Reply with OK."}},
 		MaxTokens: 16,
 	})

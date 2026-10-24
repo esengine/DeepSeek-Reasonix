@@ -62,6 +62,7 @@ export function usePushCard(port: AgentPort, repo: string | undefined, onPushed:
         <p className="commit-done" role="status">
           {t(state.result.new ? "已把 {branch} 推送到 {host}，远端新建了这个分支" : "已把 {n} 个提交推送到 {host}", { branch: plan.upstreamBranch, host: plan.host, n: String(plan.ahead) })}
         </p>
+        {state.result.trackingStatus === "not_updated" && <p role="status">{t("远端推送成功，但本地跟踪引用未更新。请刷新仓库状态，无需重复推送。")}</p>}
         <footer><button type="button" className="btn sm" data-weak="" data-action="push.close" onClick={close}>{t("收起")}</button></footer>
       </section>
     ) };

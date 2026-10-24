@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reasonix/internal/base/diff"
 	"reasonix/internal/base/fileutil"
 	"reasonix/internal/runtime/writeclaim"
+	"reasonix/internal/state/mutation"
 	"strings"
 
 	"reasonix/internal/contract/tool"
@@ -108,6 +110,9 @@ func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (str
 			continue
 		}
 		if !w.grant.Allows(p) {
+			if mutation.HoldingLease(ctx) {
+				return "", fmt.Errorf("%w: path authorization changed before execution: %s", writeclaim.ErrWriteFenceClosed, p)
+			}
 			if err := w.askToWiden(ctx, p); err != nil {
 				return "", err
 			}
@@ -121,6 +126,28 @@ func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (str
 		held = append(held, release)
 	}
 	return w.inner.Execute(ctx, args)
+}
+
+func (w pathBoundWriter) AuthorizeWrite(ctx context.Context, args json.RawMessage) error {
+	paths, err := w.WritePaths(args)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		if !w.grant.Allows(path) {
+			if err := w.askToWiden(ctx, path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (w pathBoundWriter) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
+	if p, ok := w.inner.(tool.Previewer); ok {
+		return p.Preview(ctx, args)
+	}
+	return diff.Change{}, errors.New("tool does not provide a change preview")
 }
 
 func (w pathBoundWriter) WritePaths(args json.RawMessage) ([]string, error) {
@@ -234,7 +261,7 @@ func BindWritePaths(reg *tool.Registry, grant *writeclaim.WriteGrant, gate Gate,
 			bound.Add(tl)
 			continue
 		}
-		if pathBoundWriterNames[name] {
+		if tool.WritesNamedPaths(tl) {
 			bound.Add(pathBoundWriter{inner: tl, grant: grant, gate: gate, sched: sched, workDir: workDir})
 			continue
 		}

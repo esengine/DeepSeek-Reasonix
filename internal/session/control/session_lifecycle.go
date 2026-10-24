@@ -80,6 +80,15 @@ func (c *Controller) NewSession() error {
 	if err := c.Snapshot(); err != nil {
 		return err
 	}
+	nextPath := c.SessionPath()
+	if c.sessionDir != "" {
+		nextPath = sessionstore.NewSessionPath(c.sessionDir, c.label)
+	}
+	transition, err := c.prepareRootSessionTransition(nextPath)
+	if err != nil {
+		return err
+	}
+	defer transition.close()
 	// session.rotate: the session_policy owner rules on the rotation before
 	// anything is torn down, so its failure (required-class) aborts the
 	// rotation cleanly. SessionPath is the file being rotated away from; the
@@ -92,14 +101,18 @@ func (c *Controller) NewSession() error {
 	// Hold snapshotMu across the swap so an in-flight save cannot pair the old
 	// path with the fresh session (or the fresh path with the old session).
 	c.snapshotMu.Lock()
+	fresh := sessionstore.NewSession(c.systemPrompt)
+	if err := transition.commit(fresh); err != nil {
+		c.snapshotMu.Unlock()
+		return err
+	}
 	if c.sessionDir != "" {
 		c.mu.Lock()
-		c.sessionPath = sessionstore.NewSessionPath(c.sessionDir, c.label)
+		c.sessionPath = nextPath
 		c.guardianPath = guardian.PathFor(c.sessionPath)
 		c.mu.Unlock()
 	}
 	c.setActiveJobSession(c.SessionPath())
-	fresh := sessionstore.NewSession(c.systemPrompt)
 	if binding := c.CompositionBinding(); binding != nil {
 		binding.Started = false
 		fresh.BindComposition(binding)
@@ -152,12 +165,28 @@ func (c *Controller) ClearSession() error {
 	c.mu.Lock()
 	oldPath := c.sessionPath
 	c.mu.Unlock()
+	nextPath := oldPath
+	if c.sessionDir != "" {
+		nextPath = sessionstore.NewSessionPath(c.sessionDir, c.label)
+	}
+	transition, err := c.prepareRootSessionTransition(nextPath)
+	if err != nil {
+		return err
+	}
+	defer transition.close()
 	preMarkedCleanup := c.hasUnfinishedSessionJobs(oldPath)
-	if preMarkedCleanup {
+	postCleanup := transition != nil
+	if preMarkedCleanup || postCleanup {
 		if err := sessionstore.MarkCleanupPending(oldPath, "clear"); err != nil {
 			return err
 		}
 	}
+	published := false
+	defer func() {
+		if postCleanup && !published && !preMarkedCleanup {
+			_ = sessionstore.ClearCleanupPending(oldPath)
+		}
+	}()
 	// Retire the old recovery state before deleting its artifacts. Async gate
 	// snapshots are path-bound, so wait for every already-scheduled old-path
 	// write; otherwise one can recreate the sidecar after removeSessionArtifacts.
@@ -174,8 +203,13 @@ func (c *Controller) ClearSession() error {
 	// in between would resurrect the just-removed transcript, and one that
 	// overlapped the swap could pair the old path with the fresh session.
 	c.snapshotMu.Lock()
+	fresh := sessionstore.NewSession(c.systemPrompt)
+	if err := transition.commit(fresh); err != nil {
+		c.snapshotMu.Unlock()
+		return err
+	}
 	destroy := c.BeginDestroySession(oldPath)
-	if !destroy.Async {
+	if !destroy.Async && !postCleanup {
 		if err := removeSessionArtifacts(oldPath); err != nil {
 			destroy.Finish()
 			c.snapshotMu.Unlock()
@@ -187,12 +221,11 @@ func (c *Controller) ClearSession() error {
 	c.extensionSessionEvent(extension.PointSessionEnd, dispatch.PhaseEnd, oldPath)
 	if c.sessionDir != "" {
 		c.mu.Lock()
-		c.sessionPath = sessionstore.NewSessionPath(c.sessionDir, c.label)
+		c.sessionPath = nextPath
 		c.guardianPath = guardian.PathFor(c.sessionPath)
 		c.mu.Unlock()
 	}
 	c.setActiveJobSession(c.SessionPath())
-	fresh := sessionstore.NewSession(c.systemPrompt)
 	if binding := c.CompositionBinding(); binding != nil {
 		fresh.BindComposition(binding)
 	}
@@ -206,6 +239,7 @@ func (c *Controller) ClearSession() error {
 	c.rebindCheckpoints(freshPath)
 	c.resetRecoveryForNewSession(freshPath)
 	c.rotateSessionTemp()
+	published = true
 	c.snapshotMu.Unlock()
 	c.rebindInbox()
 	// Same contract as NewSession: the fresh session starts with no active goal.
@@ -216,21 +250,7 @@ func (c *Controller) ClearSession() error {
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.enqueueHookContexts(c.hooks.SessionStart(context.Background(), "clear"))
 	c.extensionSessionEvent(extension.PointSessionStart, dispatch.PhaseStart, c.SessionPath())
-	if destroy.Async {
-		go func() {
-			result := destroy.Wait()
-			if result.HasTimedOut() && destroy.WaitAll != nil {
-				if err := sessionstore.MarkCleanupPending(oldPath, "clear"); err != nil {
-					c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "mark cleanup pending failed: " + err.Error()})
-				}
-				destroy.WaitAll()
-			}
-			if err := removeSessionArtifacts(oldPath); err != nil {
-				c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "clear session cleanup failed: " + err.Error()})
-			}
-			destroy.Finish()
-		}()
-	}
+	c.finishSessionClear(oldPath, destroy, postCleanup)
 	return nil
 }
 
@@ -308,6 +328,9 @@ func (c *Controller) SwitchBranch(ref string) (sessionstore.BranchInfo, error) {
 	}
 	match, err := resolveBranch(branches, ref)
 	if err != nil {
+		return sessionstore.BranchInfo{}, c.rewindFail(err)
+	}
+	if err := c.CheckSessionEnvironment(match.Path); err != nil {
 		return sessionstore.BranchInfo{}, c.rewindFail(err)
 	}
 	if !sessionstore.IsVisibleSession(match.Path) {
@@ -614,6 +637,11 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 // generation — the private temporary directory and the browser — reusing what a
 // hot rebuild hands over, so ReleaseResources/Close never race a replacement.
 func (c *Controller) adoptSessionResources(opts Options) {
+	if opts.RootEnvironmentPolicy != nil {
+		policy := *opts.RootEnvironmentPolicy
+		c.rootEnvironmentPolicy = &policy
+	}
+	c.adoptRootEnvironment(opts.RootEnvironment)
 	c.sessionTemp = opts.SessionTemp
 	if c.sessionTemp == nil {
 		c.sessionTemp = sessiontemp.New()

@@ -1101,7 +1101,11 @@ type AgentConfig struct {
 	BestOfN bool `toml:"best_of_n"`
 	// WorktreeIsolation lets task run a writer in a git worktree of the
 	// workspace, its changes held until applied. Off by default.
-	WorktreeIsolation bool `toml:"worktree_isolation"`
+	WorktreeIsolation   bool     `toml:"worktree_isolation"`
+	Collaboration       string   `toml:"collaboration"`
+	IsolationCopyPaths  []string `toml:"isolation_copy_paths"`
+	VerificationRuntime string   `toml:"verification_runtime"`
+	AutoIntegrate       *bool    `toml:"auto_integrate"`
 	// CodeMode offers run_script: a Starlark script whose tool calls each pass
 	// the ordinary checks, so dependent steps cost one round trip.
 	CodeMode bool `toml:"code_mode"`

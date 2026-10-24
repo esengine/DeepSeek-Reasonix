@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"reasonix/internal/platform/otlp"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/delegation"
+	"reasonix/internal/runtime/rootenv"
 	"reasonix/internal/safety/endpointclient"
 	"reasonix/internal/safety/permission"
 	"reasonix/internal/safety/sandbox"
@@ -72,8 +74,9 @@ type builder struct {
 	prompt             promptAssembly
 	additionalDirs     []string
 
-	tools   toolStage
-	cleanup func()
+	tools           toolStage
+	cleanup         func()
+	rootEnvironment *rootenv.Environment
 }
 
 // toolStage is everything the registry was built from, which the controller
@@ -115,8 +118,12 @@ type toolStage struct {
 // objects it just assembled. The controller owns plugin subprocesses until
 // Controller.Close releases them.
 func build(ctx context.Context, opts Options) (*BuildResult, error) {
-	b := &builder{timer: newPhaseTimer(), compositionBinding: newLiveCompositionBinding}
+	b := newBuilder()
 	return b.build(ctx, opts)
+}
+
+func newBuilder() *builder {
+	return &builder{timer: newPhaseTimer(), compositionBinding: newLiveCompositionBinding}
 }
 
 func (b *builder) build(ctx context.Context, opts Options) (*BuildResult, error) {
@@ -128,6 +135,11 @@ func (b *builder) build(ctx context.Context, opts Options) (*BuildResult, error)
 	b.closeLifetime = closeLifetime
 	b.ctx, b.opts, b.owner, b.fileWriteReceipt = bindRuntimeOwner(life, opts)
 	defer b.retireUnownedSidecars()
+	defer func() {
+		if b.rootEnvironment != nil {
+			b.rootEnvironment.Close()
+		}
+	}()
 	delivered := false
 	var constructed *control.Controller
 	defer func() {
@@ -159,6 +171,7 @@ func (b *builder) build(ctx context.Context, opts Options) (*BuildResult, error)
 		return nil, err
 	}
 	constructed = ctrl
+	b.rootEnvironment = nil
 	b.tools.candidates.bind(ctrl)
 	b.tools.isolation.bind(ctrl)
 	res, err := b.freeze(ctrl)
@@ -173,11 +186,12 @@ func (b *builder) build(ctx context.Context, opts Options) (*BuildResult, error)
 }
 
 // workspaceExtraRoots is the one list of folders that count as the workspace
-// beside the root: the granted extra roots and this session's --add-dir folders.
+// beside the root, derived from the same final write roots as the tools.
 // The executor and every sub-agent it spawns read it, so a write in one is
 // observed the same way whoever made it.
 func (b *builder) workspaceExtraRoots() []string {
-	return appendUniquePaths(b.cfg.ExtraRoots(), b.additionalDirs...)
+	roots := runtimeWriteRoots(b.opts, b.cfg, b.root, b.additionalDirs)
+	return slices.DeleteFunc(roots, func(path string) bool { return pathComparisonKey(path) == pathComparisonKey(b.root) })
 }
 
 // retireUnownedSidecars restores adopted clients and closes fresh sidecars when
@@ -192,6 +206,9 @@ func (b *builder) retireUnownedSidecars() {
 // load settles configuration, the extension generation, the executor model,
 // the session resources and the system prompt.
 func (b *builder) load() error {
+	if err := b.restoreRootEnvironment(); err != nil {
+		return err
+	}
 	opts := b.opts
 	if opts.Observe != nil && opts.Observe.Pending == nil {
 		return errors.New("boot: the read-only posture needs somewhere to park what needs a person")
@@ -207,15 +224,19 @@ func (b *builder) load() error {
 		}
 	}
 	b.repo = workspaceRepo(b.ctx, opts.WorkspaceRepo, b.root)
+	b.opts.WorkspaceRoot, b.opts.WorkspaceRepo = b.root, b.repo
 	var err error
 	if b.additionalDirs, err = normalizeAdditionalDirs(b.root, opts.AdditionalDirs); err != nil {
 		return err
 	}
 	var migrations configMigrations
-	if opts.Observe == nil {
+	if opts.Observe == nil && opts.frozenConfig == nil {
 		migrations = runConfigMigrations(b.roots, b.root)
 	}
 	if b.cfg, err = b.loadConfig(); err != nil {
+		return err
+	}
+	if err := b.bindRootEnvironmentPolicy(b.cfg); err != nil {
 		return err
 	}
 	if err := b.prepareComposition(); err != nil {
@@ -265,7 +286,11 @@ func (b *builder) load() error {
 	migrateLegacySources(opts, b.sink)
 	b.timer.mark("migrations")
 	b.reportModelNotices()
-	if b.session, err = startSessionRuntime(opts, cfg, b.root, b.sink); err != nil {
+	opts.AdditionalDirs = b.additionalDirs
+	if b.session, err = startSessionRuntime(b.ctx, opts, cfg, b.root, b.sink); err != nil {
+		return err
+	}
+	if b.session.presence, err = b.buildExecutionPresence(); err != nil {
 		return err
 	}
 	b.timer.mark("sessions")
@@ -295,6 +320,7 @@ func (b *builder) load() error {
 	b.timer.mark("shell")
 	slog.Debug("boot: shell tool interpreter resolved", "kind", b.shell.Kind.String(), "path", b.shell.Path, "prefer", cfg.Tools.Shell.Prefer)
 	b.prompt, err = buildPromptAssembly(b.ctx, opts, cfg, b.root, b.shell, b.sink, b.timer)
+	b.bindRootVerificationChecks()
 	if err == nil {
 		err = b.bindCompositionSkills()
 	}
@@ -321,15 +347,23 @@ func resolveShellWithNotice(opts Options, prefer, path string, args []string, st
 // posture takes the user's own and nothing the workspace declares, and holds no
 // MCP server at all.
 func (b *builder) loadConfig() (*config.Config, error) {
-	if b.opts.Observe == nil {
-		return b.roots.LoadForRoot(b.root)
+	var cfg *config.Config
+	var err error
+	switch {
+	case b.opts.frozenConfig != nil:
+		cfg, err = b.opts.frozenConfig.CloneResolved()
+	case b.opts.Observe == nil:
+		cfg, err = b.roots.LoadForRoot(b.root)
+	default:
+		cfg, err = b.roots.LoadUserScopeForRoot(b.root)
 	}
-	cfg, err := b.roots.LoadUserScopeForRoot(b.root)
 	if err != nil {
 		return nil, err
 	}
-	cfg.Plugins = nil
-	cfg.Secrets.ProtectSensitiveFiles, cfg.Secrets.ProtectCredentialFiles = true, true
+	if b.opts.Observe != nil {
+		cfg.Plugins = nil
+		cfg.Secrets.ProtectSensitiveFiles, cfg.Secrets.ProtectCredentialFiles = true, true
+	}
 	return cfg, nil
 }
 
@@ -369,11 +403,12 @@ func (b *builder) wireTools() error {
 	t.reg = newToolRegistry(opts)
 	t.env = resolveToolEnvironment(opts, cfg, b.roots, root, b.additionalDirs, b.shell, b.stderr)
 	env := t.env
+	b.opts.inheritedReadDenies, b.opts.readPolicyRoot = append([]string(nil), env.forbidReadRoots...), root
 	// The full inventory registers for use_capability; the provider-visible surface narrows later.
 	addBuiltins(t.reg, cfg.Tools.Enabled, env.writeRoots, env.bash, env.bashTimeout, env.search, b.stderr, root, b.proxy, env.forbidReadRoots, env.readRoots, env.readPaths, env.sessionGuard, env.managedConfig, opts.FileOverlay, opts.TerminalRunner, env.sessionTemp, b.fileWriteReceipt)
 	addViewImage(t.reg, cfg, b.model.entry, env, root)
 	addPresentFiles(t.reg, cfg, env, root)
-	bindFileViews(t.reg, cfg.Tools.ChangedFilesProtected())
+	bindFileViews(t.reg, cfg.Tools.ChangedFilesProtected() || cfg.UsesMutationTransactions(), cfg.UsesMutationTransactions())
 	t.peerLink, t.peerTools = peerTools(t.reg, cfg)
 	t.settingLink = addSettingTool(t.reg, cfg)
 	addSystemOne(t.reg, cfg.Tools.Enabled, cfg, b.keyedClient)
@@ -408,7 +443,7 @@ func (b *builder) wireTools() error {
 		WithAskOnOrigin(cfg.Permissions.AskOnExternalOrigin).
 		WithSessionAllow(opts.PermissionAllow)
 	t.gate = control.NewSharedHeadlessGate(t.policy, opts.HeadlessApprovalMode)
-	t.hooks, t.hookRunner, err = loadHooks(opts, b.roots, root, b.shell, b.sink)
+	t.hooks, t.hookRunner, err = loadHooks(opts, b.roots, root, b.shell, b.sink, env)
 	if err != nil {
 		return err
 	}
@@ -426,8 +461,10 @@ func (b *builder) wireTools() error {
 	}
 	t.taskTool, t.skillRun = t.roles.delegation(delegationInputs{opts: opts, sub: t.sub, exec: b.execProv, entry: b.model.entry,
 		modelName: b.model.name, root: root, maxSteps: t.maxSteps, delivery: b.model.delivery, store: subagentStore,
-		session: b.session, bashEnforced: env.bash.Enforce, extraRoots: b.workspaceExtraRoots(), childTools: childViewImage(cfg, env, root)})
-	b.addIsolation()
+		session: b.session, bashEnforced: env.bash.Enforce, processSandbox: env.bash, extraRoots: b.workspaceExtraRoots(), childTools: childViewImage(cfg, env, root)})
+	if err := b.addIsolation(); err != nil {
+		return err
+	}
 	registerSessionTools(t.reg, opts.Ablation, b.roots, b.session.dir, b.prompt.memory.Store)
 	if opts.NativeSurfaces {
 		t.reg.Add(agent.NewRenderSurfaceTool())
@@ -517,14 +554,16 @@ func (b *builder) executor() *agent.Agent {
 	cfg, entry, t := b.cfg, b.model.entry, &b.tools
 	triageProv, triageRef, triagePrice := resolveTriage(cfg, b.model.ref, b.proxy)
 	ag := agent.New(b.execProv, t.reg, newObservedSession(b.prompt.prompt), agent.Options{
-		MaxSteps:       t.maxSteps,
-		MaxStepsKey:    b.opts.MaxStepsKey,
-		Temperature:    cfg.Agent.Temperature,
-		TaskBudget:     taskBudgetFromConfig(cfg),
-		ProgressWatch:  control.ProgressWatchFromConfig(cfg),
-		Pricing:        entry.Price,
-		ModelRef:       b.model.ref,
-		TriageProvider: triageProv, TriageModelRef: triageRef, TriagePricing: triagePrice,
+		ProcessSandbox:   t.env.bash,
+		CheckEnvironment: t.roles.verificationEnvironment(delegationInputs{root: b.root, opts: b.opts}),
+		MaxSteps:         t.maxSteps,
+		MaxStepsKey:      b.opts.MaxStepsKey,
+		Temperature:      cfg.Agent.Temperature,
+		TaskBudget:       taskBudgetFromConfig(cfg),
+		ProgressWatch:    control.ProgressWatchFromConfig(cfg),
+		Pricing:          entry.Price,
+		ModelRef:         b.model.ref,
+		TriageProvider:   triageProv, TriageModelRef: triageRef, TriagePricing: triagePrice,
 		ScreenExternalContent:   cfg.Agent.ScreenExternalContent,
 		MaxPerseverationRetries: perseverationRetries(cfg, entry),
 		Gate:                    t.gate,
@@ -542,6 +581,7 @@ func (b *builder) executor() *agent.Agent {
 		WaiveOwedChecks:              cfg.WaivesOwedChecks(b.model.delivery) && !b.opts.HoldOwedChecks,
 		Ablation:                     b.opts.Ablation,
 		WorkspaceLease:               b.session.lease,
+		MutationCoordinator:          b.session.mutations,
 		CapabilityLedger:             t.caps.ledger,
 		CapabilityAudit:              t.caps.audit,
 		ContextWindow:                entry.ContextWindow,
@@ -612,16 +652,24 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		Hooks:                          t.hookRunner,
 		Memory:                         b.prompt.memory,
 		// Read at Close time: freeze chains the extension runtime set onto it.
-		Cleanup:               func() { defer b.closeLifetime(); b.cleanup() },
-		Balance:               opts.BalanceStore.Cache(b.keyedClient, entry.BalanceURL, billing.Format(entry.BalanceFormat), entry.APIKey()),
-		Tariff:                func(at time.Time) (pricing.Tariff, bool) { return b.cfg.LiveTariff(b.model.ref, at) },
-		Feedback:              control.FeedbackOptions{Service: feedbackService(b.roots.Home(), b.proxy, opts.AccountsURL), ProviderKind: feedbackProviderKind(entry), Surface: opts.FeedbackSurface},
-		Jobs:                  b.session.jobs,
-		TaskStore:             opts.TaskStore,
-		WorkspaceLease:        b.session.lease,
-		Registry:              t.reg,
-		PluginCtx:             b.ctx,
-		MCPDefaultCallTimeout: specOptions.DefaultCallTimeout,
+		Cleanup:                 func() { defer b.closeLifetime(); b.cleanup() },
+		Balance:                 opts.BalanceStore.Cache(b.keyedClient, entry.BalanceURL, billing.Format(entry.BalanceFormat), entry.APIKey()),
+		Tariff:                  func(at time.Time) (pricing.Tariff, bool) { return b.cfg.LiveTariff(b.model.ref, at) },
+		Feedback:                control.FeedbackOptions{Service: feedbackService(b.roots.Home(), b.proxy, opts.AccountsURL), ProviderKind: feedbackProviderKind(entry), Surface: opts.FeedbackSurface},
+		Jobs:                    b.session.jobs,
+		TaskStore:               opts.TaskStore,
+		WorkspaceLease:          b.session.lease,
+		RootEnvironment:         b.rootEnvironment,
+		RootEnvironmentPolicy:   b.rootEnvironmentPolicy(),
+		ExecutionPresence:       b.session.presence,
+		DelegationScheduler:     b.retainedDelegationScheduler(),
+		MutationCoordinator:     b.session.mutations,
+		WriteCoordination:       b.writeCoordination(opts, cfg),
+		IsolatedResults:         b.isolatedResultsOwner(),
+		IsolationRecoveryAccess: b.integrationRecoveryAccess,
+		Registry:                t.reg,
+		PluginCtx:               b.ctx,
+		MCPDefaultCallTimeout:   specOptions.DefaultCallTimeout,
 		MCPConfigureSpec: func(spec *plugin.Spec) {
 			if spec == nil {
 				return

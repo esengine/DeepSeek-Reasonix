@@ -37,6 +37,10 @@ func windowsBook(stateDir string) (*GrantBook, error) {
 // unprepared with an ErrWin* identity, so enforce mode refuses instead of running
 // unconfined. A spec that does not enforce is returned as it was.
 func GrantSpec(spec Spec, stateDir string) Spec {
+	if err := RequiredIntegrityFault(spec); err != nil {
+		spec.GrantSID, spec.GrantFault = "", err
+		return spec
+	}
 	if spec.Mode != "enforce" {
 		return spec
 	}

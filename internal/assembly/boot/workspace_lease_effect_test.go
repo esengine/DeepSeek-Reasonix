@@ -26,7 +26,7 @@ func TestBackgroundJobDoesNotPinTheWorkspaceForTheNextSession(t *testing.T) {
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	root := robustTempDir(t)
 
-	session, err := startSessionRuntime(Options{SessionDir: robustTempDir(t)}, config.Default(), root, event.Discard)
+	session, err := startSessionRuntime(t.Context(), Options{SessionDir: robustTempDir(t)}, config.Default(), root, event.Discard)
 	if err != nil {
 		t.Fatalf("startSessionRuntime: %v", err)
 	}

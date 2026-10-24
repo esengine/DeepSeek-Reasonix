@@ -35,11 +35,8 @@ func (p pipeStatusProbe) active() bool { return p.nonce != "" }
 // exited with, so nothing downstream sees a different result. A command that
 // exits or execs never reaches the report, which simply leaves it unreported.
 func (p pipeStatusProbe) wrap(command string) string {
-	if !p.active() {
-		return command
-	}
-	return command + "\n__rx_ps=(\"${PIPESTATUS[@]}\"); printf '%s %s\\n' '" + p.marker() +
-		"' \"${__rx_ps[*]}\" >&2; exit \"${__rx_ps[${#__rx_ps[@]}-1]:-0}\"\n"
+	payload, _ := tool.BashVerificationPayload(command, p.marker())
+	return payload
 }
 
 func (p pipeStatusProbe) marker() string {

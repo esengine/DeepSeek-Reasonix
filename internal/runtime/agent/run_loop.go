@@ -125,7 +125,7 @@ func (s *deferredStreamSink) Discard() {
 // evidence re-lease, and the initial user-turn persistence. Callers still own
 // all Run-level defers (workspace lease, evidence commit, delivery checkpoint,
 // steer queue, active-turn timestamp).
-func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string, state *turnRuntime) {
+func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string, state *turnRuntime, err error) {
 	rawInput = RawUserInput(ctx, input)
 	providerInput := input
 	// A fresh user turn starts from zeroed per-turn host state; the new turn's
@@ -186,7 +186,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 			if !a.task.ledger.NoteBackgroundLease(session, jobID) {
 				continue
 			}
-			a.task.ledger.MergeChild(summary)
+			a.task.ledger.MergeConcurrentChildren(summary)
 		}
 	}
 	a.turn.deliveryCriteriaEstablished = a.hasIncompleteCanonicalCriteria() ||
@@ -221,7 +221,10 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// transcript tail. Fold its bounded facts into this new user turn exactly
 	// once; the user's raw text remains the classifier source above.
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
-	input = a.openUserTurn(ctx, providerInput, rawInput)
+	input, err = a.openUserTurn(ctx, providerInput, rawInput)
+	if err != nil {
+		return rawInput, &a.turn, err
+	}
 
 	// The loop fields join the classification computed above rather than
 	// opening a second object: one turn, one turnRuntime. The zero values the
@@ -230,34 +233,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	state.executorHandoff = a.role.executorHandoff && strings.Contains(input, sessionstore.ExecutorHandoffMarker)
 	state.input = input
 	state.budget = runBudget{started: time.Now()}
-	return rawInput, state
-}
-
-// openUserTurn composes this turn's user message, announces the turn it starts
-// and appends it, returning the provider-visible text. Composing before
-// announcing is what lets the announcement name the message: what goes out is
-// classified, not a stand-in for it.
-func (a *Agent) openUserTurn(ctx context.Context, providerInput, rawInput string) string {
-	input := a.withTurnPreferences(providerInput)
-	// Persist the short execution-policy block in provider Content; keep the
-	// original user text in RawContent for history/title/rewind stripping.
-	if !strings.Contains(input, "<execution-policy") {
-		input = strings.TrimSpace(input) + "\n\n" + taskpolicy.ExecutionPolicyBlock(a.turn.policy)
-	}
-	rawContent := rawInput
-	if rawContent == "" {
-		rawContent = a.turn.turnInput
-	}
-	pending := provider.Message{
-		Role: provider.RoleUser, Content: input, RawContent: rawContent,
-		Images: UserImages(ctx),
-	}
-	a.announceOwnTurn(ctx, pending)
-	a.emitTurnPhase(event.TurnPhaseWorking)
-	pending.CreatedAt = time.Now().UnixMilli()
-	a.activeTurnCreatedAt.Store(pending.CreatedAt)
-	a.LandAuthoredUserMessage(ctx, pending)
-	return input
+	return rawInput, state, nil
 }
 
 // runToolLoop owns the main tool-round budget and dispatches each streamed

@@ -30,7 +30,11 @@ func (s *Server) prepareResumeComposition(loaded *sessionstore.Session, path str
 		return nil
 	}
 	old, target := cur.CompositionBinding(), loaded.Composition()
-	if old == nil && target == nil || old != nil && target != nil && old.Digest == target.Digest {
+	if _, _, err := sessionstore.LoadExecutionEnvironment(path); err != nil {
+		return err
+	}
+	environmentErr := cur.CheckSessionEnvironment(path)
+	if environmentErr == nil && (old == nil && target == nil || old != nil && target != nil && old.Digest == target.Digest) {
 		return nil
 	}
 	release, err := cur.BeginRuntimeReplacement()
@@ -39,6 +43,17 @@ func (s *Server) prepareResumeComposition(loaded *sessionstore.Session, path str
 	}
 	defer release()
 	opts := s.rebuildOptions(cur, currentModelRef(cur))
+	if environmentErr != nil {
+		if environment := cur.RootEnvironment(); environment != nil {
+			binding, bound, _ := sessionstore.LoadExecutionEnvironment(path)
+			if bound && binding.EnvironmentID == environment.Record().ID {
+				return environmentErr
+			}
+			opts.WorkspaceRoot, opts.WorkspaceRepo = environment.Record().SourceWorkspace, environment.Record().Source
+		}
+		opts.RootEnvironment = nil
+		opts.SessionEnvironmentPath = path
+	}
 	opts.Composition, opts.AgentComposition = target, ""
 	opts.RuntimeReload = boot.RuntimeReload{}
 	result, err := buildCompositionOrHistory(context.Background(), opts)

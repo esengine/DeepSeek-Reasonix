@@ -7,6 +7,7 @@ import (
 
 	"reasonix/internal/platform/gitcommit"
 	"reasonix/internal/runtime/commitmsg"
+	"reasonix/internal/state/mutation"
 )
 
 // CommitDrafter proposes a commit message for a staged change set.
@@ -82,6 +83,16 @@ func (c *Controller) StageChanges(ctx context.Context, req StageRequest) error {
 	}
 	c.commitMu.Lock()
 	defer c.commitMu.Unlock()
+	activity, err := c.holdWorkspaceActivity(ctx)
+	if err != nil {
+		return err
+	}
+	defer activity.release()
+	lease, err := c.holdGitMutation(ctx, repo, "git.stage", req.All, req.Paths...)
+	if err != nil {
+		return err
+	}
+	defer lease.End(mutation.Unknown)
 	if req.Unstage {
 		return gitcommit.Unstage(ctx, repo, req.Paths, req.All)
 	}
@@ -95,7 +106,7 @@ func (c *Controller) ProposeCommit(ctx context.Context, repoDir string) (CommitP
 	if err != nil {
 		return CommitProposal{}, err
 	}
-	snap, err := gitcommit.Staged(ctx, repo)
+	snap, err := c.stagedSnapshot(ctx, repo)
 	if err != nil {
 		return CommitProposal{}, err
 	}
@@ -140,6 +151,11 @@ func (c *Controller) CommitStaged(ctx context.Context, req CommitRequest) (Commi
 		return CommitResult{}, err
 	}
 	defer releaseWorkspace.release()
+	lease, err := c.holdGitMutation(ctx, repo, "git.commit", false)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	defer lease.End(mutation.Unknown)
 	res, err := gitcommit.Commit(ctx, repo, req.Message, req.Fingerprint, req.AcknowledgeSecrets)
 	if err != nil {
 		return CommitResult{}, err

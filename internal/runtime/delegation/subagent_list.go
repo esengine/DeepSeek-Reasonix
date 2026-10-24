@@ -166,7 +166,7 @@ func (s *SubagentStore) ListForParent(parentSession, workspaceRoot string) ([]se
 		if meta == nil {
 			continue
 		}
-		if wantWorkspace != "" && strings.TrimSpace(meta.WorkspaceRoot) != wantWorkspace {
+		if !transcriptInWorkspace(*meta, wantWorkspace) {
 			continue
 		}
 		if !s.ownedForListing(owned, strings.TrimSpace(meta.ParentSession), parentSession) {

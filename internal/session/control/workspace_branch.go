@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"reasonix/internal/contract/config"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/workspacelease"
 
 	"reasonix/internal/platform/gitstatus"
@@ -57,6 +58,16 @@ func (c *Controller) SwitchWorkspaceBranch(ctx context.Context, name string) (gi
 func (c *Controller) acquireBranchWriteLease(ctx context.Context) (func(), error) {
 	if !c.WorkspaceRepo().Valid() {
 		return func() {}, nil
+	}
+	if c.mutations != nil {
+		lease, err := c.tryHoldGitMutation(ctx, c.WorkspaceRepo(), "git.checkout", true)
+		if err != nil {
+			if errors.Is(err, mutation.ErrBusy) {
+				return nil, fmt.Errorf("%w: %w", ErrWorkspaceBusy, err)
+			}
+			return nil, err
+		}
+		return func() { lease.End(mutation.Unknown) }, nil
 	}
 	lease, err := workspacelease.New(c.WorkspaceRepo().WorkTree, config.WorkspaceLeaseDir(), nil)
 	if err != nil {

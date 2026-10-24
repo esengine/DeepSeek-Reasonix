@@ -33,7 +33,7 @@ func gitRepo(t *testing.T) string {
 	}
 	repo := testenv.TempDir(t)
 	write(t, repo, "a.txt", "one\n")
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-q", "-m", "init"}} {
+	for _, args := range [][]string{{"init", "-q"}, {"config", "core.autocrlf", "false"}, {"add", "-A"}, {"commit", "-q", "-m", "init"}} {
 		cmd := gitcmd.Command(context.Background(), repo, args...)
 		cmd.Env = append(cmd.Env, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -149,8 +149,8 @@ func TestApplyConflictKeepsTheResult(t *testing.T) {
 	if _, err := NewDiscardTool(store).Execute(ctx, args(id)); err != nil {
 		t.Fatalf("discard after conflict: %v", err)
 	}
-	if _, err := NewDiscardTool(store).Execute(ctx, args(id)); !errors.As(err, &refusal) || refusal.Code != CodeUnknownID {
-		t.Fatalf("second discard err = %v, want %s", err, CodeUnknownID)
+	if _, err := NewDiscardTool(store).Execute(ctx, args(id)); err != nil {
+		t.Fatalf("idempotent discard: %v", err)
 	}
 }
 
@@ -187,8 +187,11 @@ func TestPendingResultOutlivesItsStore(t *testing.T) {
 	if read(t, repo, "a.txt") != "isolated\n" {
 		t.Fatal("the rebuilt store did not apply the result")
 	}
-	if left, _ := filepath.Glob(filepath.Join(managed, "*", "*")); len(left) != 0 {
-		t.Fatalf("an applied result left %v behind", left)
+	if left, _ := filepath.Glob(filepath.Join(managed, "*", "*")); len(left) != 1 || filepath.Base(left[0]) != entryFile {
+		t.Fatalf("expected only the settled receipt, found %v", left)
+	}
+	if receipt, err := resumed.operationSnapshot(t.Context(), id); err != nil || !receipt.CleanupComplete {
+		t.Fatalf("missing cleanup receipt: %+v %v", receipt, err)
 	}
 }
 

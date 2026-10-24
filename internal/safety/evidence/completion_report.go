@@ -201,10 +201,14 @@ func (l *Ledger) criterionIsBacked(c AcceptanceCriterion) (bool, string) {
 	for _, e := range c.Evidence {
 		switch e.Kind {
 		case CompletionEvidenceVerification:
-			if l.HasSuccessfulCommand(e.Command) {
+			mutation := -1
+			if at, ok := l.LatestSuccessfulMutationIndex(); ok {
+				mutation = at
+			}
+			if l.HasSuccessfulCommandAfter(e.Command, mutation) {
 				return true, ""
 			}
-			missing = append(missing, "no successful run of "+quoteShort(e.Command))
+			missing = append(missing, "no successful run of "+quoteShort(e.Command)+" after the latest mutation")
 		case CompletionEvidenceDiff:
 			if l.HasSuccessfulWrite(e.Paths) {
 				return true, ""

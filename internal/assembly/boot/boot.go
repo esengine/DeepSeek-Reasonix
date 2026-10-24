@@ -288,7 +288,7 @@ func normalizeAdditionalDirs(root string, dirs []string) ([]string, error) {
 
 func appendUniquePaths(base []string, extra ...string) []string {
 	out := append([]string(nil), base...)
-	seen := make(map[string]struct{}, len(out)+len(extra))
+	seen := make(map[string]struct{}, len(out))
 	for _, path := range out {
 		seen[pathComparisonKey(path)] = struct{}{}
 	}

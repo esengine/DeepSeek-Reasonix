@@ -42,6 +42,7 @@ var leaves = []string{
 	"internal/state/execjournal",
 	"internal/ext/extensioncontract",
 	"internal/base/filelock",
+	"internal/base/locktrace",
 	"internal/base/fileref",
 	"internal/base/fileutil",
 	"internal/base/fileutil/encoding",

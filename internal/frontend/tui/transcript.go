@@ -69,10 +69,11 @@ type Item struct {
 	AskSkipAt time.Time
 
 	// ItemNotice. Count folds a repeated notice into the row already there.
-	Level  string
-	Code   string
-	Count  int
-	Detail string
+	Level          string
+	Code           string
+	Count          int
+	Detail         string
+	WorkspaceLease *eventwire.WorkspaceLease
 
 	Compaction *eventwire.Compaction
 	Receipt    *eventwire.CompletionReceipt
@@ -551,6 +552,9 @@ func (t *Transcript) foldNotice(ev eventwire.Event) {
 		level = "info"
 	}
 	if ev.Audience == "operator" && level == "info" {
+		return
+	}
+	if t.foldWorkspaceWait(ev, level) {
 		return
 	}
 	if n := len(t.Items); n > 0 {

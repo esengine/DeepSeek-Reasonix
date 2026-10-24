@@ -97,3 +97,20 @@ func (l *Ledger) MergeChildren(summaries ...ChildEvidenceSummary) {
 		l.MergeChild(s)
 	}
 }
+
+// MergeConcurrentChildren imports mutation observations, never unbound proofs.
+// Concurrent checks, reads and reviews remain in the job artifact; they cannot
+// prove the collector's current content without a shared snapshot identity.
+func (l *Ledger) MergeConcurrentChildren(summaries ...ChildEvidenceSummary) {
+	for _, summary := range summaries {
+		for _, receipt := range summary.Receipts {
+			if receipt.Mutation || receipt.Write {
+				l.Record(Receipt{ToolName: receipt.ToolName, Success: receipt.Success,
+					Write: receipt.Write, Mutation: true, Paths: receipt.Paths, HostOwned: receipt.HostOwned,
+					MutationPaths: receipt.MutationPaths, CriteriaRewritten: receipt.CriteriaRewritten,
+					MutationEvidence: receipt.MutationEvidence, Created: receipt.Created,
+					PathsComplete: receipt.PathsComplete, SourceExecutionID: receipt.SourceExecutionID})
+			}
+		}
+	}
+}

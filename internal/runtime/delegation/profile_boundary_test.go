@@ -65,7 +65,7 @@ func TestDelegationSpecMembersStaySeparate(t *testing.T) {
 	// not a capability — it says there is no parent call to inherit.
 	assertFieldSet(t, "ContextRequest", ContextRequest{}, []string{"ContinueFrom", "ForkFrom", "Ephemeral", "Upstream", "TopLevel"})
 	assertFieldSet(t, "SchedulerPolicy", SchedulerPolicy{}, []string{
-		"MaxSteps", "RunInBackground", "BackgroundWriter", "Nested", "Priority", "OnStart", "OnQueued", "OnHeld",
+		"MaxSteps", "RunInBackground", "BackgroundWriter", "ParallelWriter", "Nested", "Priority", "OnStart", "OnQueued", "OnHeld", "Environment",
 	})
 }
 

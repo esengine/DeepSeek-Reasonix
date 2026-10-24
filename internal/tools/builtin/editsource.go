@@ -12,9 +12,10 @@ import (
 // from the host's unsaved buffer has to return there, and content read from disk
 // has to return to disk. Mixing the two silently drops one side's changes.
 type editSource struct {
-	content string
-	enc     fileenc.Kind
-	overlay bool
+	content       string
+	enc           fileenc.Kind
+	overlay       bool
+	bufferVersion string
 }
 
 // readEditSource resolves path the way Execute and Preview must both see it:
@@ -28,6 +29,15 @@ func readEditSource(ctx context.Context, overlay FileOverlay, path string) (edit
 		return editSource{}, err
 	}
 	if overlay != nil && enc == fileenc.UTF8 && filepath.IsAbs(path) {
+		if v, ok := overlay.(VersionedFileOverlay); ok && requiresVersionedWrite(ctx) {
+			buffered, version, available, err := v.ReadTextFileVersion(ctx, path)
+			if err != nil {
+				return editSource{}, err
+			}
+			if available {
+				return editSource{content: buffered, enc: enc, overlay: true, bufferVersion: version}, nil
+			}
+		}
 		if buffered, ok := overlay.ReadTextFile(ctx, path); ok {
 			return editSource{content: buffered, enc: enc, overlay: true}, nil
 		}
@@ -40,6 +50,9 @@ func readEditSource(ctx context.Context, overlay FileOverlay, path string) (edit
 // the content already carries whatever the buffer held.
 func (s editSource) write(ctx context.Context, overlay FileOverlay, path, content string) error {
 	if s.overlay && overlay != nil {
+		if requiresVersionedWrite(ctx) {
+			return compareOverlayWrite(ctx, overlay, path, s.bufferVersion, content)
+		}
 		if ok, err := overlay.WriteTextFile(ctx, path, content); ok {
 			return err
 		}

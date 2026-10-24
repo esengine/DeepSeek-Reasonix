@@ -89,6 +89,9 @@ model = "x"
 	if len(options) > 0 {
 		opts.ComputerDriver = options[0].ComputerDriver
 	}
+	if opts.ComputerDriver != nil {
+		defer opts.ComputerDriver.Close()
+	}
 	ctrl, err := Build(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("Build: %v", err)

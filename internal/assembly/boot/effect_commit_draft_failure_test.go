@@ -3,7 +3,6 @@ package boot
 import (
 	"context"
 	"errors"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -34,7 +33,7 @@ func (commitDraftFailsProvider) Stream(_ context.Context, req provider.Request) 
 func TestEffectCommitDraftFailureStillOffersTheStagedSetForAManualMessage(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	isolateGitGlobalConfig(t)
 	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
 		t.Setenv(k+"_NAME", "t")
 		t.Setenv(k+"_EMAIL", "t@t")

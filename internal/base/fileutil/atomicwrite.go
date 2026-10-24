@@ -138,6 +138,16 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+// AtomicCreateFileStrict also flushes the parent directory after publication.
+// Directory-sync failure does not turn a published file into a failed create.
+func AtomicCreateFileStrict(path string, data []byte, perm os.FileMode) error {
+	if err := AtomicCreateFile(path, data, perm); err != nil {
+		return err
+	}
+	_ = syncParentDirFn(path)
+	return nil
+}
+
 // AtomicOverwriteFile replaces an existing file's contents atomically while
 // keeping the two properties a bare rename drops: the file's current permission
 // bits (an executable script must not come back 0644) and the symlink target

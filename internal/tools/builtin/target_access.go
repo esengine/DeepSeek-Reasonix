@@ -34,6 +34,10 @@ func (w Workspace) TargetAccessCheck() tool.TargetAccessCheck {
 	roots = append(realRoots(roots), networkSpellings(append([]string{w.Dir}, roots...))...)
 	readRoots, forbidden := realRoots(w.ReadRoots), realRoots(w.ForbidReadRoots)
 	return func(ctx context.Context, target tool.Tool, args json.RawMessage) error {
+		managed := w.ManagedConfig
+		if scoped, ok := target.(tool.WriteScopeRequired); ok && scoped.RequiresWriteScope() {
+			managed = ManagedConfigPaths{}
+		}
 		var paths []string
 		if tool.WritesNamedPaths(target) {
 			writer, ok := target.(tool.WritePathResolver)
@@ -52,7 +56,7 @@ func (w Workspace) TargetAccessCheck() tool.TargetAccessCheck {
 				return fmt.Errorf("no file targets resolved for %s", target.Name())
 			}
 			for _, path := range paths {
-				if err := confinePreview(roots, w.SessionGuard, w.ManagedConfig, w.SessionTemp, path); err != nil {
+				if err := confinePreview(roots, w.SessionGuard, managed, w.SessionTemp, path); err != nil {
 					return err
 				}
 			}

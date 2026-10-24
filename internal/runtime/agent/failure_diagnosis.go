@@ -102,7 +102,7 @@ func (a *Agent) selectDiagnosticLines(ctx context.Context, content string) ([]in
 	}()
 	defer TrackPublishedHostStream(ctx, cancel)()
 
-	ch, err := a.svc.prov.Stream(ctx, provider.Request{
+	ch, err := provider.Stream(ctx, a.svc.prov, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: diagnosisSystemPrompt},
 			{Role: provider.RoleUser, Content: numbered.String()},

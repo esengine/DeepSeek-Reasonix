@@ -45,3 +45,32 @@ func TestChildCompositionKeepsExactBindingAndIntersectsProfileCeiling(t *testing
 		t.Fatal("continued child accepted another binding")
 	}
 }
+
+func TestCarryChildCompositionCopiesOnlyFrozenBinding(t *testing.T) {
+	d := agentcomposition.Builtins()[0]
+	d.Persona.Prefix = "FROZEN PERSONA"
+	b := &agentcomposition.Binding{Resolved: d, Version: agentcomposition.Version{Definition: d, Revision: agentcomposition.Revision(d)}}
+	b.Seal()
+	type unrelatedKey struct{}
+	source := context.WithValue(context.WithValue(t.Context(), compositionContextKey{}, b), unrelatedKey{}, "host capability")
+	ctx, cancel := context.WithCancel(t.Context())
+	child := CarryChildComposition(ctx, source)
+	s := sessionstore.NewSession("child instructions")
+	if err := BindChildComposition(child, s, true); err != nil {
+		t.Fatal(err)
+	}
+	if s.Composition().Digest != b.Digest || !strings.Contains(s.Snapshot()[0].Content, "FROZEN PERSONA") {
+		t.Fatal("child lost binding or persona")
+	}
+	b.Resolved.Persona.Prefix = "MUTATED"
+	if !strings.Contains(ChildCompositionPrompt(child, "base"), "FROZEN PERSONA") {
+		t.Fatal("child retained mutable source binding")
+	}
+	if child.Value(unrelatedKey{}) != nil {
+		t.Fatal("copied unrelated host capability")
+	}
+	cancel()
+	if child.Err() != context.Canceled {
+		t.Fatal("lost job cancellation")
+	}
+}

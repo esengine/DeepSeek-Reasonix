@@ -30,9 +30,10 @@ const (
 // listed, so a test can tell a refusal at the host from a refusal by the server.
 type resourceMCPServer struct {
 	*httptest.Server
-	mu             sync.Mutex
-	reads          []string
-	initializeGate <-chan struct{}
+	mu                sync.Mutex
+	reads             []string
+	initializeGate    <-chan struct{}
+	initializeStarted chan<- struct{}
 }
 
 func newResourceMCPServer(t *testing.T, declares bool) *resourceMCPServer {
@@ -56,11 +57,17 @@ func newResourceMCPServer(t *testing.T, declares bool) *resourceMCPServer {
 		switch req.Method {
 		case "initialize":
 			s.mu.Lock()
-			gate := s.initializeGate
+			wait, started := s.initializeGate, s.initializeStarted
 			s.mu.Unlock()
-			if gate != nil {
+			if started != nil {
 				select {
-				case <-gate:
+				case started <- struct{}{}:
+				default:
+				}
+			}
+			if wait != nil {
+				select {
+				case <-wait:
 				case <-r.Context().Done():
 					return
 				}
@@ -179,6 +186,14 @@ type resourceSession struct {
 }
 
 func buildResourceSession(t *testing.T, userOn, declares bool, projectOn bool, uri string, beforeBuild ...func(*resourceMCPServer)) *resourceSession {
+	return buildResourceSessionConfigured(t, userOn, declares, projectOn, uri, nil, nil, beforeBuild...)
+}
+
+func buildResourceSessionWithReadiness(t *testing.T, userOn, declares bool, projectOn bool, uri string, wait <-chan struct{}, started chan<- struct{}) *resourceSession {
+	return buildResourceSessionConfigured(t, userOn, declares, projectOn, uri, wait, started)
+}
+
+func buildResourceSessionConfigured(t *testing.T, userOn, declares bool, projectOn bool, uri string, wait <-chan struct{}, started chan<- struct{}, beforeBuild ...func(*resourceMCPServer)) *resourceSession {
 	t.Helper()
 	home := isolateConfigHome(t)
 	reasonixHome := filepath.Join(home, ".reasonix")
@@ -189,6 +204,10 @@ func buildResourceSession(t *testing.T, userOn, declares bool, projectOn bool, u
 	kind := uniqueKind("boot-mcp-resource-" + strings.NewReplacer("/", "-", " ", "-").Replace(t.Name()))
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return s.rec, nil })
 	extra := ""
+	load := "always"
+	if wait != nil {
+		load = "deferred"
+	}
 	if projectOn {
 		extra = "[tools]\nmcp_resources = true\n"
 	}
@@ -207,8 +226,8 @@ model = "x"
 name = "res"
 type = "http"
 url = %q
-load = "always"
-`, extra, kind, s.server.URL))
+load = %q
+`, extra, kind, s.server.URL, load))
 	if userOn {
 		writeFile(t, reasonixHome, "config.toml", "[tools]\nmcp_resources = true\n")
 	}
@@ -231,6 +250,9 @@ load = "always"
 		t.Fatal(err)
 	}
 	warm.Close()
+	s.server.mu.Lock()
+	s.server.initializeGate, s.server.initializeStarted = wait, started
+	s.server.mu.Unlock()
 	for _, prepare := range beforeBuild {
 		prepare(s.server)
 	}
@@ -245,6 +267,45 @@ load = "always"
 	ctrl.SetToolApprovalMode(control.ToolApprovalAsk)
 	ctrl.EnableInteractiveApproval()
 	return s
+}
+
+func TestEffectMCPResourceReadWaitsForTheAuthorizedConnection(t *testing.T) {
+	resume, started := make(chan struct{}), make(chan struct{}, 1)
+	var release sync.Once
+	defer release.Do(func() { close(resume) })
+	s := buildResourceSessionWithReadiness(t, true, true, false, resourceDeclaredURI, resume, started)
+	done := make(chan error, 1)
+	go func() { done <- s.ctrl.Run(t.Context(), "read the handbook") }()
+	var request event.Approval
+	waitFor(t, "the resource approval", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(s.approvals) == 0 {
+			return false
+		}
+		request = s.approvals[0]
+		return true
+	})
+	s.ctrl.Approve(request.ID, true, false, false)
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("resource call returned before connection readiness: %v / %s", err, s.rec.lastToolResult())
+	case <-t.Context().Done():
+		t.Fatal(t.Context().Err())
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("resource call did not wait for the in-flight handshake: %v / %s", err, s.rec.lastToolResult())
+	default:
+	}
+	release.Do(func() { close(resume) })
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.rec.lastToolResult(), resourceBody) {
+		t.Fatalf("authorized resource was not read after readiness: %s", s.rec.lastToolResult())
+	}
 }
 
 // The tool exists only where the user's own file turned it on and a connected

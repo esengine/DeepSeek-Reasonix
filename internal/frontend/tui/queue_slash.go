@@ -33,6 +33,8 @@ func (m *model) queueSlash(display string) (tea.Cmd, bool) {
 	rest := strings.TrimSpace(strings.TrimPrefix(display, fields[0]))
 	var run func() tea.Msg
 	switch strings.ToLower(fields[0]) {
+	case "/isolated":
+		run = func() tea.Msg { return isolatedCommand(m.ctx, m.client, rest) }
 	case "/queue":
 		run = func() tea.Msg { return queueCommand(m.ctx, m.client, fields[1:]) }
 	case "/steer":

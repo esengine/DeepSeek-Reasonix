@@ -1,63 +1,85 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, WriteLeaseSettings } from "../port/port";
 import { Switch } from "./Switch";
 
-// One switch over how sessions in one project wait on each other. On is the
-// default and trades the whole-workspace hold for concurrency; off is strict.
-// It says what that costs beside the switch, and says that only sessions
-// opened afterwards pick it up: a running one keeps the lease it started with.
+const coordinationName = (mode: string) => ({ legacy: t("兼容模式"), auto: t("自动隔离"), shared: t("共享工作区"), isolated: t("隔离工作区") }[mode] ?? mode);
+
 export function WriteLease({ port }: { port: AgentPort }) {
-  const [state, setState] = useState<WriteLeaseSettings | null>(null);
+  const [loaded, setLoaded] = useState<{ port: AgentPort; value: WriteLeaseSettings } | null>(null);
+  const state = loaded?.port === port ? loaded.value : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [wait, setWait] = useState("");
+  const epoch = useRef(0);
 
   useEffect(() => {
+    const current = ++epoch.current;
+    setLoaded(null);
+    setBusy(false);
+    setError("");
     port
       .writeLease()
       .then((s) => {
-        setState(s);
+        if (epoch.current !== current) return;
+        setLoaded({ port, value: s });
         setWait(String(s.maxWaitMinutes));
       })
-      .catch(() => setState(null));
+      .catch(() => { if (epoch.current === current) setLoaded(null); });
+    return () => { epoch.current++; };
   }, [port]);
 
   if (!state) return <div className="empty">{t("无法读取多会话写入设置。")}</div>;
 
-  const flip = async () => {
+  const save = async (edit: Parameters<AgentPort["saveWriteLease"]>[0]) => {
+    const current = epoch.current;
     setBusy(true);
     setError("");
     try {
-      setState(await port.saveWriteLease({ optimistic: !state.optimistic }));
+      const next = await port.saveWriteLease(edit);
+      if (epoch.current === current) { setLoaded({ port, value: next }); setWait(String(next.maxWaitMinutes)); }
     } catch (e) {
-      setError(reason(e));
+      if (epoch.current === current) setError(reason(e));
     } finally {
-      setBusy(false);
+      if (epoch.current === current) setBusy(false);
     }
   };
+
+  const flip = () => save({ optimistic: !state.optimistic });
+  const choose = (collaboration: string) => save({ collaboration });
+  const flipIntegration = () => save({ autoIntegrate: !state.autoIntegrate });
 
   const commitWait = async () => {
     const minutes = Number(wait);
     if (minutes === state.maxWaitMinutes) return;
-    setBusy(true);
-    setError("");
-    try {
-      const next = await port.saveWriteLease({ maxWaitMinutes: minutes });
-      setState(next);
-      setWait(String(next.maxWaitMinutes));
-    } catch (e) {
-      setError(reason(e));
-    } finally {
-      setBusy(false);
-    }
+    await save({ maxWaitMinutes: minutes });
   };
   const enter = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.currentTarget.blur(); };
   const waitLabel = t("等待其他会话释放写入权的最长时间");
 
   return (
     <div className="box">
+      <div className="lrow">
+        <span className="tx">
+          <span className="lb">{t("协作工作方式")}</span>
+          <span className="ds">{t("自动隔离并行的可写子任务；共享方式只在实际变更时协调写入；隔离方式要求可用的 worktree。保存后新开的会话采用新值，当前聊天保持原策略。")}</span>
+        </span>
+        <select aria-label={t("协作工作方式")} data-action-change="write-lease.collaboration" value={state.collaboration ?? "legacy"} disabled={busy || state.collaboration === undefined} onChange={(e) => void choose(e.target.value)}>
+          {["legacy", "auto", "shared", "isolated"].map((mode) => <option key={mode} value={mode}>{coordinationName(mode)}</option>)}
+        </select>
+      </div>
+      <p className="ds" role="status">{state.effective ? t("当前聊天：{mode}；子代理并发 {total}，写入并发 {writers}。", { mode: coordinationName(state.effective.collaboration), total: state.effective.maxSubagentConcurrency, writers: state.effective.maxParallelWriters }) : t("无法确认当前聊天的生效策略。")}</p>
+      {state.effective?.collaboration === "auto" && state.effective.automaticIsolationFallback && <p className="ds">{t("本机无法为自动隔离限定完整的写入边界，当前聊天的可写子任务改用共享事务。")}</p>}
+      {state.effective && state.effective.collaboration !== (state.collaboration ?? "legacy") && <p className="ds">{t("已保存：{mode}。当前聊天尚未切换。", { mode: coordinationName(state.collaboration ?? "legacy") })}</p>}
+      {state.effective && state.effective.transactionWaitSeconds > 0 && <p className="ds">{t("当前共享事务最多等待 {seconds} 秒，超时后可重新调度；不会强制释放正在写入的资源。", { seconds: state.effective.transactionWaitSeconds })}</p>}
+      {state.autoIntegrate !== undefined && <div className="lrow">
+        <span className="tx"><span className="lb">{t("自动整合已验证成果")}</span><span className="ds">{t("新开的会话会自动验证并整合无冲突的隔离成果。关闭后保留成果供手动处理。")}</span></span>
+        <Switch data-action="write-lease.auto-integrate" on={state.autoIntegrate} busy={busy} label={t("自动整合已验证成果")} onClick={() => void flipIntegration()} />
+      </div>}
+      {state.effective?.autoIntegrate !== undefined && <p className="ds">{t("当前聊天自动整合：{value}。", { value: state.effective.autoIntegrate ? t("开") : t("关") })}</p>}
+      <details open={(state.collaboration ?? "legacy") === "legacy"}>
+        <summary><span className="fold">{t("兼容设置（仅兼容模式使用）")}</span></summary>
       <div className="lrow">
         <span className="tx">
           <span className="lb">{t("乐观模式（多会话并行）")}</span>
@@ -71,6 +93,7 @@ export function WriteLease({ port }: { port: AgentPort }) {
           onClick={() => void flip()}
         />
       </div>
+      {state.effective?.collaboration === "legacy" && <p className="ds">{t("当前聊天的兼容设置：乐观写入 {optimistic}；最长等待 {minutes} 分钟（0 表示等待到本轮结束）。", { optimistic: state.effective.optimistic ? t("开") : t("关"), minutes: state.effective.maxWaitMinutes })}</p>}
       <div className="lrow threshold-row">
         <span className="tx">
           <span className="lb">{waitLabel}</span>
@@ -83,6 +106,7 @@ export function WriteLease({ port }: { port: AgentPort }) {
           </span>
         </div>
       </div>
+      </details>
       {error && <div className="why" role="alert">{error}</div>}
     </div>
   );

@@ -16,6 +16,14 @@ func (c *Controller) runSynchronousTurn(
 	onAdmitted func() error,
 	run func(context.Context) error,
 ) error {
+	return c.runSynchronousActivity(ctx, onAdmitted, func(ctx context.Context) error { return c.runWithRootPublication(ctx, run) })
+}
+
+func (c *Controller) runSynchronousActivity(
+	ctx context.Context,
+	onAdmitted func() error,
+	run func(context.Context) error,
+) error {
 	if err := c.ensureWriteAuthorityReady(); err != nil {
 		return err
 	}
@@ -48,6 +56,7 @@ func (c *Controller) runSynchronousTurn(
 	c.gate.begin(cancel)
 	c.gate.bindingPending = binding != nil && !binding.Started
 	c.mu.Unlock()
+	admittedWorkspace := releaseWorkspace
 	defer c.releaseWorkspaceTurn(releaseWorkspace)
 	releaseWorkspace = nil
 	finish := func() {
@@ -57,7 +66,7 @@ func (c *Controller) runSynchronousTurn(
 		cancel()
 		c.notifyIdle()
 	}
-	if err := c.persistCompositionAdmission(); err != nil {
+	if err := c.persistTurnAdmission(ctx, admittedWorkspace); err != nil {
 		finish()
 		return err
 	}

@@ -7,10 +7,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
+	"reasonix/internal/base/proc"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/safety/evidence"
 )
@@ -48,10 +51,28 @@ func (a *Agent) runBaselineCriterion(ctx context.Context, store *evidence.Baseli
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "go", "test", "-overlay="+overlay, "-json", "-count=1", packagePathOf(a.writeWorkspaceRoot, path))
+	argv := []string{"go", "test", "-overlay=" + overlay, "-json", "-count=1", packagePathOf(a.writeWorkspaceRoot, path)}
+	ctx, release, err := a.holdHookExecution(ctx, true)
+	if err != nil {
+		return evidence.CriterionUnavailable, true
+	}
+	defer release()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = a.writeWorkspaceRoot
-	out, _ := cmd.Output()
-	return evidence.BaselineOutcomeFromTestJSON(out, names), true
+	out := evidence.NewTestJSONObserver(names)
+	cmd.Stdout = out
+	tracked, runErr := proc.RunCommand(ctx, cmd, proc.RunOptions{Track: true, Source: "baseline_verification"})
+	if tracked != nil {
+		if done := tracked.WaitCompleted(); done != nil {
+			<-done
+		}
+		tracked.Kill()
+	}
+	var exitErr *exec.ExitError
+	if ctx.Err() != nil || cmd.ProcessState == nil || !cmd.ProcessState.Exited() || errors.Is(runErr, proc.ErrScopeCompletionUnknown) || errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || (runErr != nil && !errors.As(runErr, &exitErr)) {
+		return evidence.CriterionUnavailable, true
+	}
+	return out.Outcome(), true
 }
 
 // packagePathOf names the criterion's package as the toolchain expects it,
@@ -100,11 +121,18 @@ func (a *Agent) writeBaselineOverlay(store *evidence.BaselineStore, criterion ev
 // it and whatever verdict this turn reached. A criterion with no verdict is
 // owed — capture alone is the debt, and only a run against the captured bytes
 // settles it.
-func (a *Agent) baselineFacts() []evidence.BaselineTestFact {
+func (a *Agent) baselineFacts(contexts ...context.Context) []evidence.BaselineTestFact {
 	if a == nil || len(a.task.baselineCriteria) == 0 {
 		return nil
 	}
 	facts := make([]evidence.BaselineTestFact, 0, len(a.task.baselineCriteria))
+	observed := map[string]evidence.ContentSnapshot{}
+	ctx := context.Background()
+	if len(contexts) != 0 {
+		ctx = contexts[0]
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	for path, criterion := range a.task.baselineCriteria {
 		provenance := a.criterionProvenance(criterion, path)
 		if provenance == evidence.CriterionUnchanged {
@@ -114,8 +142,18 @@ func (a *Agent) baselineFacts() []evidence.BaselineTestFact {
 			continue
 		}
 		fact := evidence.BaselineTestFact{Criterion: criterion, Provenance: provenance}
-		if got, ok := a.turn.baselineEval[criterion.Identity()]; ok {
-			fact.Evaluation = &got
+		if got, ok := a.cachedBaselineEvaluation(criterion.Identity()); ok {
+			fact.Evaluation = &got.evidence
+			if got.inputs.Complete {
+				current, exists := observed[got.root]
+				if !exists {
+					current = a.captureBaselineInput(ctx, got.root)
+					observed[got.root] = current
+				}
+				if !sameBaselineInput(got.inputs, current) {
+					fact.Evaluation = nil
+				}
+			}
 		}
 		facts = append(facts, fact)
 	}
@@ -126,11 +164,14 @@ func (a *Agent) baselineFacts() []evidence.BaselineTestFact {
 // called where the turn asks whether it may stop, because a run costs a build
 // and its answer cannot change between two tool calls that changed nothing.
 func (a *Agent) evaluateBaselineCriteriaOnce(ctx context.Context) {
-	if a == nil || len(a.task.baselineCriteria) == 0 || a.turn.baselineEval != nil {
+	if a == nil || len(a.task.baselineCriteria) == 0 {
 		return
 	}
-	a.turn.baselineEval = map[string]evidence.BaselineEvidence{}
 	epoch := a.mutationEpoch()
+	if cached := a.turn.baselineEval; cached != nil && cached.epoch == epoch && a.cachedBaselineInputsCurrent(ctx) {
+		return
+	}
+	a.turn.baselineEval = &baselineEvaluationCache{epoch: epoch, results: map[string]baselineEvaluation{}}
 	store := a.baselineCriteriaStore()
 	// A build takes seconds the reader would otherwise watch as an unexplained
 	// spinner: the model has answered, and the host is still checking.
@@ -146,12 +187,19 @@ func (a *Agent) evaluateBaselineCriteriaOnce(ctx context.Context) {
 			a.emitTurnPhase(event.TurnPhaseChecking)
 			announced = true
 		}
-		result, ok := a.runBaselineCriterion(ctx, store, criterion, path)
+		var result evidence.CriterionResult
+		var inputs evidence.ContentSnapshot
+		ok := true
+		if a.processSandbox.RequiredIntegrity != "" {
+			result, inputs = a.runControlledBaseline(ctx, store, criterion, path)
+		} else {
+			result, ok = a.runBaselineCriterion(ctx, store, criterion, path)
+		}
 		if !ok {
 			continue
 		}
-		a.turn.baselineEval[criterion.Identity()] = evidence.BaselineEvidence{
-			Criterion: criterion, StateEpoch: epoch, Result: result, Backend: baselineBackend,
+		a.turn.baselineEval.results[criterion.Identity()] = baselineEvaluation{
+			evidence: evidence.BaselineEvidence{Criterion: criterion, StateEpoch: epoch, Result: result, Backend: a.baselineBackend()}, inputs: inputs, root: a.baselineInputRoot(),
 		}
 	}
 }

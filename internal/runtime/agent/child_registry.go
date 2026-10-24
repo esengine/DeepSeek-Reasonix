@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/tools/builtin"
 )
 
 // read_skill is deliberately not listed: it renders playbook text inline and
@@ -89,16 +90,29 @@ func SubagentToolRegistryForDepth(parent *tool.Registry, names []string, childDe
 // use_capability (for example Economy or legacy callers) but sub-agents still
 // need the proxy.
 func SubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, names []string, childDepth, maxDepth int, runtime *usecap.MCPCapabilityRuntime) *tool.Registry {
+	return subagentExecutionRegistry(parent, names, childDepth, maxDepth, runtime, false)
+}
+
+// SubagentToolRegistryWithOwnedJobs requires a fresh run-owned job manager.
+// Its caller must seal admission and join jobs before releasing the environment.
+func SubagentToolRegistryWithOwnedJobs(parent *tool.Registry, names []string, childDepth, maxDepth int, runtime *usecap.MCPCapabilityRuntime) *tool.Registry {
+	return subagentExecutionRegistry(parent, names, childDepth, maxDepth, runtime, true)
+}
+
+func subagentExecutionRegistry(parent *tool.Registry, names []string, childDepth, maxDepth int, runtime *usecap.MCPCapabilityRuntime, ownedJobs bool) *tool.Registry {
 	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
 	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
 		exclude = append(exclude, subagentRecursiveTools...)
 	}
-	exclude = append(exclude, subagentJobTools...)
+	if !ownedJobs {
+		exclude = append(exclude, subagentJobTools...)
+	}
 	sub := FilterRegistry(parent, names, exclude...)
+	bindLocal := builtin.ForkFileViews(sub)
 	stripDirectMCPTools(sub)
 	AttachCompleteSubtaskTool(sub)
-	attachSubagentCapabilityProxy(parent, sub, names, runtime)
-	if bash, ok := sub.Get("bash"); ok {
+	attachSubagentCapabilityProxy(parent, sub, names, runtime, bindLocal)
+	if bash, ok := sub.Get("bash"); ok && !ownedJobs {
 		sub.Add(foregroundOnlyBash{inner: bash})
 	}
 	return sub
@@ -221,7 +235,7 @@ func serversFromCapabilityAllowlist(allowed map[string]bool) map[string]bool {
 // state. No allowlist → full proxy. Explicit allowlist with MCP names →
 // restricted proxy. Explicit "use_capability" → full proxy. Explicit allowlist
 // without MCP entries → no proxy.
-func attachSubagentCapabilityProxy(parent, sub *tool.Registry, names []string, runtime *usecap.MCPCapabilityRuntime) {
+func attachSubagentCapabilityProxy(parent, sub *tool.Registry, names []string, runtime *usecap.MCPCapabilityRuntime, bindLocal func(tool.Tool) tool.Tool) {
 	if sub == nil {
 		return
 	}
@@ -233,6 +247,9 @@ func attachSubagentCapabilityProxy(parent, sub *tool.Registry, names []string, r
 	frontend := newSubagentCapabilityFrontend(parent, runtime)
 	if frontend == nil {
 		return
+	}
+	if local, ok := frontend.(*usecap.UseCapabilityTool); ok {
+		local.BindLocalTools(bindLocal)
 	}
 	if len(names) == 0 || allowlistRequestsUnrestrictedProxy(names) {
 		sub.Add(frontend)
@@ -403,7 +420,8 @@ func ReadOnlySubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, name
 		}
 		sub.Add(tl)
 	}
-	attachSubagentCapabilityProxy(parent, sub, names, runtime)
+	bindLocal := builtin.ForkFileViews(sub)
+	attachSubagentCapabilityProxy(parent, sub, names, runtime, bindLocal)
 	return sub
 }
 
@@ -478,16 +496,8 @@ func (b foregroundOnlyBash) Description() string {
 }
 
 func (b foregroundOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		RunInBackground bool `json:"run_in_background"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if p.RunInBackground {
-		return "", tool.Blocked("blocked: background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
-	}
-	return b.inner.Execute(ctx, args)
+	result, err := b.ExecuteDetailed(ctx, args)
+	return result.Output, err
 }
 
 func (b foregroundOnlyBash) ReadOnly() bool { return b.inner.ReadOnly() }

@@ -45,6 +45,12 @@ func WithEscapeApprover(ctx context.Context, approver EscapeApprover) context.Co
 	return context.WithValue(ctx, escapeApproverContextKey{}, approver)
 }
 
+// WithoutEscapeApprover prevents a new execution from inheriting a caller's
+// session-wide sandbox escape approval. Local services may bind a new approver.
+func WithoutEscapeApprover(ctx context.Context) context.Context {
+	return context.WithValue(ctx, escapeApproverContextKey{}, struct{}{})
+}
+
 // EscapeApproverFrom returns the sandbox-escape approver carried by ctx. Held
 // here as well as at the stamp because this is the side that fails closed: the
 // two callers that set one today normalize first, and this is what keeps that

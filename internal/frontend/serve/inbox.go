@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -123,7 +124,7 @@ func (s *Server) inboxEnqueue(w http.ResponseWriter, r *http.Request) {
 	req.Idempotency = body.IdempotencyKey
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
-	s.enqueueLocked(w, req)
+	s.enqueueLocked(r.Context(), w, req)
 }
 
 // submitChips starts a chip line the way /submit starts a typed one, through
@@ -140,30 +141,26 @@ func (s *Server) submitChips(w http.ResponseWriter, r *http.Request, line chipLi
 	}
 	req := line.request(r)
 	req.Intent, req.Format = sessioninbox.IntentFollowup, format
-	s.enqueueLocked(w, req)
+	s.enqueueLocked(r.Context(), w, req)
 }
 
-func (s *Server) enqueueLocked(w http.ResponseWriter, req control.InboxRequest) {
-	api := s.inboxAPI()
-	if ensurer, ok := any(api).(interface{ EnsureSessionPath() }); ok {
-		before := api.SessionPath()
-		ensurer.EnsureSessionPath()
-		// Same reason as submit: the keeper has never seen a path minted here,
-		// and a controller with no authority over its session drops the work.
-		if after := api.SessionPath(); after != before {
-			if err := s.rebindSessionLease(after); err != nil {
-				sessionInUse(w, err)
-				return
-			}
-			keepUsedWorkspace(s.ctl().WorkspaceRoot())
-		}
+func (s *Server) enqueueLocked(ctx context.Context, w http.ResponseWriter, req control.InboxRequest) {
+	if err := s.pinSubmissionSession(); err != nil {
+		sessionInUse(w, err)
+		return
 	}
 	if err := s.promoteSessionLease(); err != nil {
 		sessionInUse(w, err)
 		return
 	}
+	cleanup, err := s.prepareRootExecutionLocked(ctx)
+	if err != nil {
+		writeIsolationError(w, err)
+		return
+	}
+	defer cleanup()
+	api := s.inboxAPI()
 	var rec sessioninbox.InboxReceipt
-	var err error
 	if req.Intent == sessioninbox.IntentSteer {
 		rec, err = api.TryEnqueueAndSteer(req)
 	} else {

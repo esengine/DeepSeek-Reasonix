@@ -21,7 +21,7 @@ func TestEffectSharedProjectSkillAcrossWorktreesAndHomes(t *testing.T) {
 	}
 	isolateConfigHome(t)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	isolateGitGlobalConfig(t)
 	owned := robustTempDir(t)
 	main := filepath.Join(owned, "main")
 	linked := filepath.Join(owned, "linked")

@@ -33,9 +33,7 @@ model = "x"
 `)
 	writeFile(t, dir, "REASONIX.md", instructions)
 	if isRepo {
-		if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
-			t.Fatalf("make repository marker: %v", err)
-		}
+		initEffectRepository(t, dir)
 	}
 	approveWorkspace(t, dir)
 	skillDir := filepath.Join(dir, ".reasonix", "skills", skillName)

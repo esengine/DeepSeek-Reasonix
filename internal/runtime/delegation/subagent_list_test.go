@@ -62,6 +62,31 @@ func TestListForParentKeepsOwnedChildrenAndDropsOthers(t *testing.T) {
 	}
 }
 
+func TestListForParentFindsIsolatedFailuresByTheirVerifiedTranscriptWorkspaceScope(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "task")
+	source := spec.WorkspaceRoot
+	spec.WorkspaceRoot = t.TempDir()
+	spec.EnvironmentID, spec.EnvironmentGeneration, spec.OriginWorkspace = "iso_12345678", "generation", source
+	want := saveListedChild(t, store, spec, (*SubagentStore).SaveFailed)
+	for _, mode := range []string{"foreign_origin", "foreign_owner", "unbound_origin"} {
+		other := spec
+		switch mode {
+		case "foreign_origin":
+			other.OriginWorkspace = t.TempDir()
+		case "foreign_owner":
+			other.ParentSession = "other-session"
+		case "unbound_origin":
+			other.EnvironmentID, other.EnvironmentGeneration = "", ""
+		}
+		saveListedChild(t, store, other, (*SubagentStore).SaveFailed)
+	}
+	got, err := store.ListForParent(spec.ParentSession, source)
+	if err != nil || len(got) != 1 || got[0].Ref != want || got[0].Meta.Status != sessionstore.SubagentFailed {
+		t.Fatalf("isolated failure discovery lost origin scope or ownership: %+v %v", got, err)
+	}
+}
+
 func TestListForParentReturnsNewestFirst(t *testing.T) {
 	store := NewSubagentStore(testenv.TempDir(t))
 	spec := testSubagentSpec(t, "explore")

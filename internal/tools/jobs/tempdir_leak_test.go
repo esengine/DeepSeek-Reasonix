@@ -16,6 +16,10 @@ func TestKilledKernelsJobTempDirIsCollectedByNextManager(t *testing.T) {
 	t.Setenv("TMPDIR", root)
 	t.Setenv("TMP", root)
 	t.Setenv("TEMP", root)
+	t.Setenv("SystemTemp", root)
+	if os.TempDir() != root {
+		t.Fatalf("OS temp root is not isolated: %s", os.TempDir())
+	}
 
 	cmd := exec.Command(os.Args[0])
 	cmd.Env = append(os.Environ(), jobsHolderEnv+"=1")

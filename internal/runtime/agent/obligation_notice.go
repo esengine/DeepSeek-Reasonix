@@ -5,6 +5,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 
 	"reasonix/internal/contract/tool"
@@ -13,8 +14,8 @@ import (
 
 // withObligationNotice is every notice a call owes the model about the host's
 // debts: what it changed, and why a command that ran code settled none of them.
-func (a *Agent) withObligationNotice(result string, before []evidence.Obligation, execution *tool.ShellExecution, readOnly bool) string {
-	after := a.obligations()
+func (a *Agent) withObligationNotice(ctx context.Context, result string, before []evidence.Obligation, execution *tool.ShellExecution, readOnly bool) string {
+	after := a.obligations(ctx)
 	result = withObligationDelta(result, evidence.DiffObligations(before, after))
 	if a.turn.uncountedCheckNoted || !uncountedCheck(after, execution, readOnly) {
 		return result

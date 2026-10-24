@@ -141,7 +141,7 @@ model = "x"
 
 // An isolated task runs in its own kernel at its own worktree: its write stays
 // out of the workspace until the session applies it, the child cannot isolate
-// or apply again, and closing the session leaves no worktree behind.
+// or apply again, and settlement leaves only an idempotent terminal receipt.
 func TestEffectIsolatedTaskIsHeldUntilApplied(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -167,8 +167,22 @@ func TestEffectIsolatedTaskIsHeldUntilApplied(t *testing.T) {
 		t.Fatalf("out.txt after apply = %q, %v", b, err)
 	}
 	left, _ := filepath.Glob(filepath.Join(config.RootsForHome(home).DeliveryWorktreeDir(), "isolated", "*", "*"))
-	if len(left) != 0 {
-		t.Fatalf("worktrees left after Close: %v", left)
+	if len(left) != 1 || filepath.Base(left[0]) != "entry-v2.json" {
+		t.Fatalf("expected only a terminal receipt after Close: %v", left)
+	}
+	raw, err := os.ReadFile(left[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt struct {
+		State           string `json:"state"`
+		CleanupComplete bool   `json:"cleanup_complete"`
+	}
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.State != "integrated" || !receipt.CleanupComplete {
+		t.Fatalf("incomplete settlement: %s", raw)
 	}
 }
 

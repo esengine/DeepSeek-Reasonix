@@ -1,7 +1,7 @@
 import type { Item } from "../../state/session";
 import { t } from "../../i18n";
 import { leftoverDetail, noticeWording } from "../../i18n/notice_wording";
-import { workspaceLeaseDetail } from "../../i18n/workspace_lease";
+import { workspaceLeaseDetail, workspaceLeaseTitle } from "../../i18n/workspace_lease";
 import { StudioIcon } from "../StudioIcon";
 import { LazyMarkdown } from "../LazyMarkdown";
 import { settingScreen } from "../settingScreens";
@@ -30,7 +30,7 @@ export function NoticeCard({ item, onSettings }: { item: Extract<Item, { t: "not
       {lvl ? <StudioIcon name="warning" className="nb-ic" aria-hidden="true" /> : <i className="nb-dot" aria-hidden="true" />}
       <div className="nb-body">
         <span className="t">
-          {wording ? t(wording.text, vars) : item.text}
+          {workspaceLeaseTitle(claim) ?? (wording ? t(wording.text, vars) : item.text)}
           {/* Repeats are folded rather than stacked: three identical lines
               say the same thing as one and a count, and bury whatever came
               before them. */}

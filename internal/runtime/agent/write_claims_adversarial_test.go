@@ -142,6 +142,21 @@ func TestClaimViolationsSurfaceOutOfClaimMutations(t *testing.T) {
 	}
 }
 
+func TestClaimViolationAuditResolvesRelativeReceiptsInTheirDeclaredWorkspace(t *testing.T) {
+	root := testenv.TempDir(t)
+	claim, err := writeclaim.NormalizeWritePaths(root, []string{"auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"auth/token.go", "elsewhere.go", "../escape.go"} {
+		summary := evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{Success: true, Mutation: true, Paths: []string{path}}}}
+		got := claimViolations(summary, claim)
+		if (len(got) == 0) != (path == "auth/token.go") {
+			t.Fatalf("relative receipt audited against process cwd: path=%s violations=%v", path, got)
+		}
+	}
+}
+
 // A writer that declared nothing is scheduled as whole-workspace, and the host
 // deliberately enforces nothing inside the workspace for it. This test pins the
 // real semantics so the SPEC claim stays honest.

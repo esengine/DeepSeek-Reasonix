@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"io"
+	"reasonix/internal/frontend/hostenv"
 
 	"reasonix/internal/assembly/boot"
 	"reasonix/internal/contract/ablation"
@@ -23,17 +24,18 @@ type cliBuildOverrides struct {
 	// Version marks a top-level session of a real installation, which is what
 	// lets the assembly record a last-known-good config snapshot. Nested and
 	// rebuild paths leave it empty; the snapshot is recorded once per process.
-	Version              string
-	Effort               *string
-	PermissionAllow      []string
-	AdditionalDirs       []string
-	WorkspaceRoot        string
-	HeadlessApprovalMode string
-	GoalTurnsUnreachable bool
-	HoldOwedChecks       bool
-	Stderr               io.Writer
-	OnSessionRecovered   func(control.SessionRecoveryInfo) error
-	Ablation             ablation.Set
+	Version                string
+	Effort                 *string
+	PermissionAllow        []string
+	AdditionalDirs         []string
+	WorkspaceRoot          string
+	SessionEnvironmentPath string
+	HeadlessApprovalMode   string
+	GoalTurnsUnreachable   bool
+	HoldOwedChecks         bool
+	Stderr                 io.Writer
+	OnSessionRecovered     func(control.SessionRecoveryInfo) error
+	Ablation               ablation.Set
 	// NewConversation marks an interactive start that is not resuming anything, so the user's default mode applies.
 	NewConversation bool
 	// SessionTemp carries the previous Controller's private temporary directory
@@ -45,6 +47,11 @@ type cliBuildOverrides struct {
 	// ProviderResolver routes model roles through a caller-owned catalog. A
 	// bootstrapped serve sets the broker's; nil keeps the local config path.
 	ProviderResolver provider.Resolver
+}
+
+func withRunSessionEnvironment(overrides cliBuildOverrides, version, resumePath string) cliBuildOverrides {
+	overrides.Version, overrides.SessionEnvironmentPath = version, resumePath
+	return overrides
 }
 
 func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
@@ -60,34 +67,36 @@ func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOv
 func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) boot.Options {
 	// profile is dual-write TokenMode; also set AgentPreset for the new path.
 	return boot.Options{
-		AgentComposition:     overrides.AgentComposition,
-		Composition:          overrides.Composition,
-		Version:              overrides.Version,
-		Model:                modelName,
-		MaxSteps:             maxStepsOverride,
-		MaxStepsKey:          "--max-steps",
-		RequireKey:           requireKey,
-		Sink:                 sink,
-		NativeSurfaces:       overrides.NativeSurfaces,
-		AgentPreset:          boot.NormalizeAgentPreset(profile),
-		TokenMode:            boot.NormalizeTokenMode(profile),
-		SessionDir:           resolveCLISessionDirFor(overrides.WorkspaceRoot),
-		WorkspaceRoot:        overrides.WorkspaceRoot,
-		EffortOverride:       overrides.Effort,
-		PermissionAllow:      overrides.PermissionAllow,
-		AdditionalDirs:       overrides.AdditionalDirs,
-		HeadlessApprovalMode: overrides.HeadlessApprovalMode,
-		GoalTurnsUnreachable: overrides.GoalTurnsUnreachable,
-		HoldOwedChecks:       overrides.HoldOwedChecks,
-		StatsSource:          surface.CLI,
-		FeedbackSurface:      feedback.SurfaceTUI,
-		Stderr:               overrides.Stderr,
-		OnSessionRecovered:   overrides.OnSessionRecovered,
-		Ablation:             overrides.Ablation,
-		NewConversation:      overrides.NewConversation,
-		SessionTemp:          overrides.SessionTemp,
-		BrowserSession:       overrides.BrowserSession,
-		ProviderResolver:     overrides.ProviderResolver,
+		VerificationClient:     hostenv.VerificationClient(),
+		AgentComposition:       overrides.AgentComposition,
+		Composition:            overrides.Composition,
+		Version:                overrides.Version,
+		Model:                  modelName,
+		MaxSteps:               maxStepsOverride,
+		MaxStepsKey:            "--max-steps",
+		RequireKey:             requireKey,
+		Sink:                   sink,
+		NativeSurfaces:         overrides.NativeSurfaces,
+		AgentPreset:            boot.NormalizeAgentPreset(profile),
+		TokenMode:              boot.NormalizeTokenMode(profile),
+		SessionDir:             resolveCLISessionDirFor(overrides.WorkspaceRoot),
+		WorkspaceRoot:          overrides.WorkspaceRoot,
+		SessionEnvironmentPath: overrides.SessionEnvironmentPath,
+		EffortOverride:         overrides.Effort,
+		PermissionAllow:        overrides.PermissionAllow,
+		AdditionalDirs:         overrides.AdditionalDirs,
+		HeadlessApprovalMode:   overrides.HeadlessApprovalMode,
+		GoalTurnsUnreachable:   overrides.GoalTurnsUnreachable,
+		HoldOwedChecks:         overrides.HoldOwedChecks,
+		StatsSource:            surface.CLI,
+		FeedbackSurface:        feedback.SurfaceTUI,
+		Stderr:                 overrides.Stderr,
+		OnSessionRecovered:     overrides.OnSessionRecovered,
+		Ablation:               overrides.Ablation,
+		NewConversation:        overrides.NewConversation,
+		SessionTemp:            overrides.SessionTemp,
+		BrowserSession:         overrides.BrowserSession,
+		ProviderResolver:       overrides.ProviderResolver,
 	}
 }
 

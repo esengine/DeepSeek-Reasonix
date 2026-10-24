@@ -102,7 +102,11 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	confined := false
 	if s.ResolvedProcessMode() == MCPProcessConfined {
 		processSandbox.MinimalWrites = true
-		argv, confined = sandbox.CommandArgs(processSandbox, launchArgs)
+		prepared := sandbox.PrepareArgs(processSandbox, launchArgs, "")
+		if prepared.Err != nil {
+			return nil, prepared.Err
+		}
+		argv, confined = prepared.Argv, prepared.Wrapped
 	} else {
 		argv = launchArgs
 	}

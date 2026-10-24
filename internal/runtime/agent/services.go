@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/memory"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/workspacelease"
 	"reasonix/internal/tools/jobs"
 )
@@ -94,6 +95,8 @@ type agentServices struct {
 	// session, acquired lazily on the first mutation and held through the final
 	// participating run so verification stays isolated.
 	workspaceLease *workspacelease.Owner
+	mutations      *mutation.Coordinator
+	capacity       writeclaim.PhaseCapacity
 	// memQueue lets the remember/forget tools fold a turn-tail note about a
 	// just-made memory change into the next turn, so it applies this session
 	// without touching the cache-stable prefix.
@@ -115,6 +118,7 @@ func newAgentServices(
 ) agentServices {
 	return agentServices{
 		prov:              prov,
+		admissionSaver:    opts.AdmissionSaver,
 		triage:            opts.TriageProvider,
 		triageRef:         opts.TriageModelRef,
 		triagePricing:     opts.TriagePricing,
@@ -133,6 +137,8 @@ func newAgentServices(
 		memQueue:          opts.MemoryQueue,
 		writeScheduler:    opts.WriteScheduler,
 		workspaceLease:    opts.WorkspaceLease,
+		mutations:         opts.MutationCoordinator,
+		capacity:          opts.ExecutionCapacity.Clone(),
 		warnState:         missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
 		mutationObserver:  opts.MutationObserver,
 		evidenceSeal:      opts.EvidenceSeal,

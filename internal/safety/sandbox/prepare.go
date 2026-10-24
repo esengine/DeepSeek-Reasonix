@@ -4,6 +4,7 @@ package sandbox
 // that may hold a session-private temporary directory lease. Callers must
 // Release the lease after the process exits — including when Start fails.
 type Prepared struct {
+	Err error
 	// Argv is the final process argv (possibly wrapped by bwrap/sandbox-exec).
 	Argv []string
 	// Wrapped reports whether an OS sandbox wrapper was applied.
@@ -24,14 +25,20 @@ type Prepared struct {
 
 // PrepareArgs builds argv for a raw argument vector (e.g. ripgrep).
 func PrepareArgs(spec Spec, args []string, sessionTemp string) Prepared {
+	if err := RequiredIntegrityFault(spec); err != nil {
+		return Prepared{Err: err}
+	}
 	spec = withSessionTemp(spec, sessionTemp)
 	argv, wrapped := CommandArgs(spec, args)
+	if spec.RequiredIntegrity != "" && !wrapped {
+		return Prepared{Err: ErrIncompleteIntegrity}
+	}
 	linuxSB := wrapped && sessionTemp != "" && isLinux()
 	return Prepared{
 		Argv:           argv,
 		Wrapped:        wrapped,
 		SessionTemp:    sessionTemp,
-		EnvOverrides:   SessionTempEnv(sessionTemp, linuxSB),
+		EnvOverrides:   PrivateProcessEnv(spec, sessionTemp, linuxSB),
 		LinuxSandboxed: linuxSB,
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reasonix/internal/frontend/hostenv"
 	"strings"
 
 	"reasonix/internal/assembly/boot"
@@ -237,6 +238,7 @@ func (s *Server) statsSurface() surface.Surface { return s.surface.Or(surface.Se
 // switch would quietly serve another project's conversations.
 func (s *Server) rebuildOptions(cur control.SessionAPI, ref string) boot.Options {
 	opts := boot.Options{Model: ref, Sink: s.rebuildSink(), NativeSurfaces: true, Stderr: os.Stderr, StatsSource: s.statsSurface(), FeedbackSurface: feedbackSurface(s.statsSurface()), AccountsURL: accountsBaseURL(), ProviderResolver: s.resolver, CleanupPendingReconciler: BackgroundCleanupReconciler}
+	opts.VerificationClient = hostenv.VerificationClient()
 	if s.lastBuild != nil {
 		opts.ComputerDriver = s.lastBuild.ComputerDriver
 	}
@@ -253,6 +255,9 @@ func (s *Server) rebuildOptions(cur control.SessionAPI, ref string) boot.Options
 		opts.SessionTemp = ctrl.SessionTemp()
 		opts.WorkspaceRepo = ctrl.WorkspaceRepo()
 		opts.BrowserSession = ctrl.BrowserSession()
+		opts.RootEnvironment = ctrl.RootEnvironment()
+		opts.SessionEnvironmentPath = ctrl.SessionPath()
+		opts.DelegationScheduler = ctrl.DelegationScheduler()
 	}
 	opts.RuntimeReload = s.reuseFromLastBuild()
 	return opts

@@ -16,7 +16,7 @@ func leaseSession(t *testing.T, root string, mode string) *workspacelease.Owner 
 	t.Helper()
 	cfg := config.Default()
 	cfg.Agent.WriteLease = mode
-	session, err := startSessionRuntime(Options{SessionDir: robustTempDir(t)}, cfg, root, event.Discard)
+	session, err := startSessionRuntime(t.Context(), Options{SessionDir: robustTempDir(t)}, cfg, root, event.Discard)
 	if err != nil {
 		t.Fatalf("startSessionRuntime(%q): %v", mode, err)
 	}

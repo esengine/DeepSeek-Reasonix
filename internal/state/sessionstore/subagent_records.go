@@ -50,16 +50,19 @@ type SubagentMeta struct {
 	// ExecutionID is which execution this transcript belongs to — a different
 	// question from ParentToolCallID, which names the provider-visible call it
 	// descends from. Empty is a record written before the two were told apart.
-	ExecutionID      string   `json:"executionId,omitempty"`
-	WorkspaceRoot    string   `json:"workspaceRoot"`
-	ParentSession    string   `json:"parentSession,omitempty"`
-	ParentToolCallID string   `json:"parentToolCallId,omitempty"`
-	ForkedFrom       string   `json:"forkedFrom,omitempty"`
-	SystemPromptHash string   `json:"systemPromptHash"`
-	ToolScope        []string `json:"toolScope"`
-	ToolSchemaHash   string   `json:"toolSchemaHash"`
-	Model            string   `json:"model"`
-	Effort           string   `json:"effort"`
+	ExecutionID           string   `json:"executionId,omitempty"`
+	EnvironmentID         string   `json:"environmentId,omitempty"`
+	EnvironmentGeneration string   `json:"environmentGeneration,omitempty"`
+	OriginWorkspace       string   `json:"originWorkspace,omitempty"`
+	WorkspaceRoot         string   `json:"workspaceRoot"`
+	ParentSession         string   `json:"parentSession,omitempty"`
+	ParentToolCallID      string   `json:"parentToolCallId,omitempty"`
+	ForkedFrom            string   `json:"forkedFrom,omitempty"`
+	SystemPromptHash      string   `json:"systemPromptHash"`
+	ToolScope             []string `json:"toolScope"`
+	ToolSchemaHash        string   `json:"toolSchemaHash"`
+	Model                 string   `json:"model"`
+	Effort                string   `json:"effort"`
 	// Capsule records what context this run was given; CapsuleHash is its
 	// stable identity for comparing two runs.
 	Capsule     ContextCapsule `json:"capsule"`

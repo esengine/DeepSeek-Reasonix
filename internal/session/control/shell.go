@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/sandbox"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/tools/shellrun"
 )
 
@@ -245,6 +247,11 @@ func (c *Controller) RunShellWith(command string, opts ShellRun) {
 			preview = preview[:32]
 		}
 		id := "shell-" + string(preview)
+		lease, err := c.acquireUserShellMutation(ctx, id)
+		if err != nil {
+			return err
+		}
+		defer lease.End(mutation.Unknown)
 		diagnosticPreview := shellCommandPreview(command)
 		desc := shellrun.DescriptorFromShell(sh)
 
@@ -282,6 +289,8 @@ func (c *Controller) RunShellWith(command string, opts ShellRun) {
 				})
 			},
 		})
+		res.Err = errors.Join(res.Err, lease.HoldUntil(res.Tracked.WaitCompleted()))
+		lease.End(mutation.Unknown)
 		durationMs := time.Since(start).Milliseconds()
 		ex := &event.ShellExecution{
 			Kind: desc.Kind, Shell: desc.Shell, ShellVersion: desc.ShellVersion,

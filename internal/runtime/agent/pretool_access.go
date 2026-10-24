@@ -31,7 +31,12 @@ func (a *Agent) preToolUse(ctx context.Context, plan *toolCallPlan) (toolOutcome
 	if a.svc.hooks == nil {
 		return toolOutcome{}, false
 	}
-	if !plan.readOnly && toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
+	ctx, end, err := a.holdHookMutation(ctx)
+	if err != nil {
+		return toolOutcome{output: err.Error(), errMsg: err.Error(), blocked: true, refusalCode: refusalCodeOf(err)}, true
+	}
+	defer end()
+	if (!plan.readOnly || a.svc.mutations != nil) && toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
 		a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{
 			Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName,
 			Detail: "user tool hook writes are outside the tool preimage capture",

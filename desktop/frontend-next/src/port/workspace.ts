@@ -273,4 +273,5 @@ export interface PushRequest {
 export interface PushResult {
   plan: PushPlan;
   new: boolean;
+  trackingStatus?: string;
 }

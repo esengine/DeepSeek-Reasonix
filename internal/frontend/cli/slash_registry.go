@@ -21,6 +21,7 @@ type builtinSlashSpec struct {
 
 func builtinSlashSpecs() []builtinSlashSpec {
 	return []builtinSlashSpec{
+		{name: "/isolated", insert: "/isolated ", hint: "Manage retained isolated results", showInHelp: true},
 		{name: "/agent", insert: "/agent ", hint: "Agent compositions", descend: true, showInHelp: true},
 		{name: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact, showInHelp: true},
 		{name: "/context", insert: "/context", hint: i18n.M.CmdContext, showInHelp: true},

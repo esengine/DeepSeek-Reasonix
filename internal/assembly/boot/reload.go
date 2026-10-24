@@ -58,6 +58,9 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 		return nil, fmt.Errorf("boot: Rebuild requires the controller being replaced")
 	}
 	opts = inheritComposition(old, opts)
+	if opts.DelegationScheduler == nil {
+		opts.DelegationScheduler = old.DelegationScheduler()
+	}
 	if _, observed := old.ObservePosture(); observed && opts.Observe == nil {
 		return nil, ErrObserveRebuild
 	}
@@ -65,6 +68,7 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 		opts.Owner = old.RuntimeOwner()
 	}
 	m := CaptureRuntimeMigration(old)
+	opts = inheritRootEnvironment(old, opts)
 	// Reuse the previous Controller's session-private temporary directory so
 	// model/settings hot rebuilds do not wipe temporary files mid-session.
 	if opts.SessionTemp == nil {
@@ -186,6 +190,9 @@ func CaptureRuntimeMigration(old control.SessionAPI) RuntimeMigration {
 func ApplyRuntimeMigration(ctrl, old *control.Controller, m RuntimeMigration) error {
 	carried := spliceFreshSystemPrompt(m.carried, ctrl.History())
 	path := sessionstore.ContinueSessionPath(m.prevPath, ctrl.SessionDir(), ctrl.Label())
+	if err := ctrl.CheckSessionEnvironment(path); err != nil {
+		return err
+	}
 	ctrl.AdoptHistory(carried, path)
 	// Same conversation, different model: the carried blocks were composed
 	// for the model being replaced, so this one is owed them once.

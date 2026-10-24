@@ -1,11 +1,17 @@
 package hook
 
-import "strings"
+import (
+	"reasonix/internal/safety/sandbox"
+	"reasonix/internal/state/sessiontemp"
+	"strings"
+)
 
 // RuntimeOptions carries resolved host dependencies into Hook execution.
 // It is runtime-only and never changes persisted Hook configuration.
 type RuntimeOptions struct {
-	BashPath string
+	BashPath    string
+	Sandbox     *sandbox.Spec
+	SessionTemp *sessiontemp.Manager
 }
 
 // RuntimeOptionsForShell carries an explicitly configured Bash path into Hook

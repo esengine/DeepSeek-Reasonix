@@ -3,6 +3,7 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -12,8 +13,10 @@ func TestWriteProtectsNeedsEnforcement(t *testing.T) {
 	if WriteProtects(Spec{Mode: "off"}, outside) {
 		t.Fatal("an unenforced spec protects nothing")
 	}
-	if got := WriteProtects(Spec{Mode: "enforce", WriteRoots: []string{t.TempDir()}}, outside); got != Available() {
-		t.Fatalf("WriteProtects = %v with a backend available = %v", got, Available())
+	spec := Spec{Mode: "enforce", WriteRoots: []string{t.TempDir()}}
+	completeBackend := runtime.GOOS != "windows" && AvailableFor(spec)
+	if got := WriteProtects(spec, outside); got != completeBackend {
+		t.Fatalf("WriteProtects = %v with complete mutation bounds = %v", got, completeBackend)
 	}
 }
 
@@ -72,7 +75,9 @@ func TestIntegrityEnforcedNeedsBothTheSpecAndABackend(t *testing.T) {
 	if IntegrityEnforced(Spec{Mode: "off"}) || IntegrityEnforced(Spec{}) {
 		t.Fatal("a spec that does not enforce claims no integrity")
 	}
-	if got := IntegrityEnforced(Spec{Mode: "enforce"}); got != Available() {
-		t.Fatalf("IntegrityEnforced(enforce) = %v with a backend available = %v", got, Available())
+	spec := Spec{Mode: "enforce"}
+	completeBackend := runtime.GOOS != "windows" && AvailableFor(spec)
+	if got := IntegrityEnforced(spec); got != completeBackend {
+		t.Fatalf("IntegrityEnforced(enforce) = %v with complete mutation bounds = %v", got, completeBackend)
 	}
 }

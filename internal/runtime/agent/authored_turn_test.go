@@ -135,7 +135,9 @@ func TestLandingHoldsTheMessageToTheAnnouncedIdentity(t *testing.T) {
 		session := sessionstore.NewSession("system")
 		a := New(&turnStartProvider{}, tool.NewRegistry(), session, Options{}, sink)
 		ctx := WithHostTurnBoundary(context.Background(), HostTurnBoundary{Authored: &id})
-		a.LandAuthoredUserMessage(ctx, provider.Message{Role: provider.RoleUser, Content: text})
+		if err := a.LandAuthoredUserMessage(ctx, provider.Message{Role: provider.RoleUser, Content: text}); err != nil {
+			t.Fatal(err)
+		}
 		if got := session.Snapshot()[1].RawContent; got != id.Raw {
 			t.Fatalf("landed RawContent = %q, want the announced identity's %q", got, id.Raw)
 		}

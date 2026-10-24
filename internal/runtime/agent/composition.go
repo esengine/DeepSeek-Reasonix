@@ -14,6 +14,15 @@ import (
 
 type compositionContextKey struct{}
 
+// CarryChildComposition transfers only the frozen binding, without host capabilities.
+func CarryChildComposition(ctx, source context.Context) context.Context {
+	b, _ := source.Value(compositionContextKey{}).(*agentcomposition.Binding)
+	if b == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, compositionContextKey{}, agentcomposition.Clone(b))
+}
+
 func (a *Agent) compositionContext(ctx context.Context) context.Context {
 	if b := a.Session().Composition(); b != nil {
 		return context.WithValue(ctx, compositionContextKey{}, b)

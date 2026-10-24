@@ -537,9 +537,7 @@ func TestEffectVersionControlRidesTheTurnNotThePrefix(t *testing.T) {
 	t.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+robustTempDir(t))
 	plain := effectRunPrepared(t, "boot-effect-vcs-plain", "", ablation.Set{}, nil)
 	repo := effectRunPrepared(t, "boot-effect-vcs-repo", "", ablation.Set{}, func(dir string) {
-		if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
-			t.Fatalf("make repository marker: %v", err)
-		}
+		initEffectRepository(t, dir)
 	})
 
 	plainSystem, repoSystem := systemOf(plain[0]), systemOf(repo[0])

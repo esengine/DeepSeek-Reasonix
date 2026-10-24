@@ -151,7 +151,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	}
 	ctx, marker = c.beginTurn(ctx, startMessages, true)
 	ctx = c.announceAuthoredTurn(ctx, firstNonEmpty(raw, task), startMessages)
-	c.executor.LandAuthoredUserMessage(ctx, provider.Message{Role: provider.RoleUser, Content: input, Images: images.userImages, CreatedAt: time.Now().UnixMilli()})
+	if err := c.executor.LandAuthoredUserMessage(ctx, provider.Message{Role: provider.RoleUser, Content: input, Images: images.userImages, CreatedAt: time.Now().UnixMilli()}); err != nil {
+		return err
+	}
 
 	for _, sk := range skills {
 		sk = c.skills.prepare(sk)

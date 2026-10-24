@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reasonix/internal/frontend/hostenv"
 	"runtime"
 	"slices"
 	"strings"
@@ -189,7 +190,8 @@ func (f *acpFactory) sessionBootOptions(p acp.SessionParams) (boot.Options, erro
 		bashOverride = "enforce"
 	}
 	return boot.Options{
-		AgentComposition: p.AgentComposition, Composition: p.Composition,
+		VerificationClient: hostenv.VerificationClient(),
+		AgentComposition:   p.AgentComposition, Composition: p.Composition,
 		Model:                    firstNonEmpty(p.Model, f.model),
 		TokenMode:                firstNonEmpty(p.RuntimeProfile, f.profile),
 		AgentPreset:              boot.NormalizeAgentPreset(firstNonEmpty(p.RuntimeProfile, f.profile)),
@@ -199,6 +201,8 @@ func (f *acpFactory) sessionBootOptions(p acp.SessionParams) (boot.Options, erro
 		EffortOverride:           p.EffortOverride,
 		Stderr:                   os.Stderr,
 		WorkspaceRoot:            root,
+		SessionEnvironmentPath:   p.SessionEnvironmentPath,
+		RootEnvironment:          p.RootEnvironment,
 		ExtraPlugins:             p.MCPServers,
 		AdditionalDirs:           p.AdditionalDirs,
 		CleanupPendingReconciler: acp.ReconcileCleanupPending,

@@ -25,9 +25,7 @@ const (
 	fleetMaxTasks = 64
 )
 
-// FleetTool dispatches multiple profile-aware sub-agent tasks in parallel
-// under the session scheduler. Write tasks must predeclare non-overlapping
-// write_paths; preflight failure starts nothing.
+// FleetTool runs a dependency graph under the session's execution policy.
 type FleetTool struct {
 	taskTool *TaskTool
 }
@@ -40,7 +38,7 @@ func NewFleetTool(taskTool *TaskTool) *FleetTool {
 func (*FleetTool) Name() string { return "fleet" }
 
 func (*FleetTool) Description() string {
-	return "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items and start from their final answers (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths, as file paths when the targets are known: a directory overlaps every path beneath it and serializes writers. Ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts; under [agent] write_lease = optimistic they reserve nothing up front and hold only the path being written. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. An item may pass adopt_ref instead of a prompt to stand in for running it with an already-completed child's answer, which is how a fleet a restart interrupted is re-issued without paying twice for the items that finished. Background mode returns a fleet job id collectable with wait."
+	return "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items and start from their final answers (research → implement → review). Tasks without dependencies run in parallel. write_paths authorize each item's allowed changes. Use file paths when the targets are known: a directory overlaps every path beneath it. Legacy mode reserves those paths and rejects concurrent overlaps; omitted paths reserve the workspace unless write_lease is optimistic. Shared collaboration coordinates actual writes in short transactions, so overlapping grants are allowed and stale versions return conflicts. Automatic collaboration isolates eligible parallel writers; isolated results may still conflict when integrated. Ordered tasks may share paths. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. An item may pass adopt_ref instead of a prompt to stand in for running it with an already-completed child's answer, which is how a fleet a restart interrupted is re-issued without paying twice for the items that finished. Background mode returns a fleet job id collectable with wait."
 }
 
 func (*FleetTool) Schema() json.RawMessage {
@@ -58,10 +56,10 @@ func (*FleetTool) Schema() json.RawMessage {
         "prompt":{"type":"string","description":"Task prompt for the sub-agent. Required unless adopt_ref stands in for running this item."},
         "adopt_ref":{"type":"string","description":"A Subagent reference whose already-completed answer stands in for running this item, from list_subagents or an earlier aggregate. The item runs nothing: its answer becomes the dependency payload its dependents open with, exactly as if it had just produced it. Use it to re-issue a fleet a restart interrupted without paying again for the items that finished. Rejected unless the reference is completed and inside this conversation's lineage and workspace. Mutually exclusive with prompt and with every execution field (profile, model, effort, tools, max_steps, write_paths, read_only), since nothing executes. Whether that answer is still valid after what changed since is yours to judge — the host only proves the reference is yours and complete."},
         "id":{"type":"string","description":"Optional stable id for this task, referenced by other tasks' depends_on. Defaults to the 1-based position."},
-        "depends_on":{"type":"array","items":{"type":"string"},"description":"Ids of tasks that must complete before this one starts. This task begins with each dependency's final answer in its context, bounded and split evenly across them, so it need not re-derive their work. Unknown ids, self-edges, and cycles fail preflight. A task whose dependency fails or is skipped is skipped too. Ordered tasks may share write_paths; only tasks that can run at the same time need disjoint claims."},
+        "depends_on":{"type":"array","items":{"type":"string"},"description":"Ids of tasks that must complete before this one starts. This task begins with each dependency's final answer in its context, bounded and split evenly across them, so it need not re-derive their work. Unknown ids, self-edges, and cycles fail preflight. A task whose dependency fails or is skipped is skipped too. Legacy reservations require disjoint paths for concurrent writers. Shared transactions and isolated candidates coordinate actual writes; depends_on still orders the tasks."},
         "description":{"type":"string","description":"Optional short label shown in the job list."},
         "profile":{"type":"string","description":"Optional runAs=subagent profile name."},
-        "write_paths":{"type":"array","items":{"type":"string"},"description":"Write targets for this item, as file paths when the targets are known: a directory overlaps every path beneath it and serializes writers. Writers that can run at the same time must declare non-overlapping paths; writers ordered by depends_on may share them. Omitting write_paths claims the whole workspace (not under write_lease = optimistic); two concurrent whole-workspace claims (or any overlap between concurrent writers) fail preflight and start nothing."},
+        "write_paths":{"type":"array","items":{"type":"string"},"description":"Allowed write targets for this item, as file paths when the targets are known: a directory overlaps every path beneath it. In legacy mode paths are also task reservations, so concurrent overlaps fail preflight; omission reserves the workspace unless write_lease is optimistic. Shared collaboration uses short write transactions and permits overlapping grants with version checks. Automatic collaboration isolates eligible parallel writers. Omission never removes ordinary permission checks."},
         "read_only":{"type":"boolean","description":"Force the read-only registry even if the profile is writable."},
         "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist (intersected with profile allowed-tools)."},
         "max_steps":{"type":"integer","description":"Optional max tool-call rounds.","minimum":1},
@@ -189,7 +187,7 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 				writerRegistered = true
 			}
 		}
-		job := jm.StartForSession(jobs.SessionFromContext(ctx), "fleet", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
+		job, startErr := jm.StartOwnedForSession(jobs.SessionFromContext(ctx), "fleet", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
 			// Execute returns as soon as the job is registered, so the job owns
 			// the handed-off merger until every child preview and terminal has
 			// flushed. Closing it in Execute would strand child cards at running.
@@ -205,6 +203,10 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 			jobCtx = withSubagentProgressMerger(jobCtx, merger)
 			return f.runFleet(jobCtx, groupSink, specs, plan, adopted, parentID)
 		})
+		if startErr != nil {
+			releaseUnstartedRun(nil, observer, writerRegistered, writerID)
+			return "", startErr
+		}
 		// runFleet (inside the job) owns the terminal and merger close from
 		// here on. Foreground runFleet hands off only the terminal; Execute
 		// still closes the merger after the synchronous call returns.
@@ -247,9 +249,12 @@ func (f *FleetTool) preflight(ctx context.Context, tasks []fleetTaskItem, failFa
 	if err != nil {
 		return fleetCall{}, err
 	}
-	if err := plan.validateConcurrentWriteClaims(claims); err != nil {
-		return fail(err)
+	if f.taskTool.mutations == nil {
+		if err := plan.validateConcurrentWriteClaims(claims); err != nil {
+			return fail(err)
+		}
 	}
+	plan.markParallelWriters(specs, adopted)
 	return fleetCall{plan: plan, specs: specs, adopted: adopted}, nil
 }
 

@@ -685,8 +685,10 @@ func TestRunProfileSpecProgressCancelledTerminal(t *testing.T) {
 	if len(terminals) != 1 {
 		t.Fatalf("cancelled terminal count = %d, want exactly one", len(terminals))
 	}
-	if len(rec.kinds(event.ToolProgress)) < 2 {
-		t.Fatalf("progress events = %d, want running + cancelled at minimum", len(rec.kinds(event.ToolProgress)))
+	for _, e := range rec.kinds(event.ToolProgress) {
+		if progressName(e) == event.SubagentProgressStatusName && progressOutput(e) == string(subagentPhaseRunning) {
+			t.Fatal("task cancelled before admission reported running")
+		}
 	}
 }
 

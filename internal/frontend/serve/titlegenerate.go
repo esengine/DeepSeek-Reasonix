@@ -77,7 +77,7 @@ func (s *Server) tryRequestTitle(ctx context.Context, firstMsg string, model tit
 			model.sink.Emit(e)
 		}
 	}()
-	ch, err := model.prov.Stream(ctx, provider.Request{
+	ch, err := provider.Stream(ctx, model.prov, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: titlePrompt},
 			{Role: provider.RoleUser, Content: firstMsg},

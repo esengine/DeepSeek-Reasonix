@@ -100,6 +100,8 @@ type Owner struct {
 	undeclaredFree bool
 	folderClaim    bool
 	maxWait        time.Duration
+	admissionMu    sync.RWMutex
+	admissions     map[string]func([]string) error
 
 	mu            sync.Mutex
 	activeRuns    int
@@ -315,6 +317,9 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHo
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := o.checkAdmission(o.normalizePaths(paths)); err != nil {
+		return nil, err
+	}
 	if o.undeclaredFree && len(paths) == 0 {
 		return nil, nil
 	}
@@ -323,6 +328,9 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHo
 		claim = []string{o.scope.folder}
 	}
 	for {
+		if err := o.checkAdmission(claim); err != nil {
+			return nil, err
+		}
 		o.mu.Lock()
 		o.askedLocked(time.Now())
 		if o.acquired && coversPaths(o.scope.paths, claim) {

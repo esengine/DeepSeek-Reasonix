@@ -5,6 +5,7 @@ package filelock
 import (
 	"errors"
 	"os"
+	"reasonix/internal/base/locktrace"
 
 	"golang.org/x/sys/windows"
 )
@@ -20,6 +21,7 @@ func tryLockFile(path string) (func(), error) {
 	handle := windows.Handle(f.Fd())
 	var overlapped windows.Overlapped
 	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)
+	attempt := locktrace.BeginAttempt()
 	if err := windows.LockFileEx(handle, flags, 0, 1, 0, &overlapped); err != nil {
 		_ = f.Close()
 		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
@@ -27,8 +29,11 @@ func tryLockFile(path string) (func(), error) {
 		}
 		return nil, err
 	}
+	hold := attempt.Acquired(path, false)
 	return func() {
+		hold.Releasing()
 		_ = windows.UnlockFileEx(handle, 0, 1, 0, &overlapped)
 		_ = f.Close()
+		hold.Released()
 	}, nil
 }

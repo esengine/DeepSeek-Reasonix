@@ -118,6 +118,7 @@ type Job struct {
 	runReturned bool
 	cancel      context.CancelFunc
 	done        chan struct{}
+	waits       []<-chan struct{}
 	stalled     bool
 
 	watches  []*outputWatch
@@ -152,6 +153,8 @@ type Manager struct {
 	loaded             map[string]bool
 	scratch            *scratch.Dir
 	reservations       map[string]int
+	admission          *admissionSeal
+	waits              []<-chan struct{}
 
 	stalledWarning time.Duration
 	teardownGrace  time.Duration
@@ -371,18 +374,22 @@ func (m *Manager) startInvalid(parentSession, kind, label string, validationErr 
 	return j
 }
 
-// StartForSession launches a job owned by parentSession. Session-scoped readers
-// only see jobs whose owner matches the active session.
-func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error), opts ...StartOption) *Job {
+// StartOwnedForSession transfers execution ownership only on a nil error.
+// Otherwise run will never be called and the caller must release its resources.
+func (m *Manager) StartOwnedForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error), opts ...StartOption) (*Job, error) {
 	parentSession = strings.TrimSpace(parentSession)
 	kind = strings.TrimSpace(kind)
 	if err := validatePathSegment(parentSession, "parentSession"); err != nil {
-		return m.startInvalid(parentSession, kind, label, err)
+		return m.startInvalid(parentSession, kind, label, err), err
 	}
 	if err := validatePathSegment(kind, "kind"); err != nil {
-		return m.startInvalid(parentSession, kind, label, err)
+		return m.startInvalid(parentSession, kind, label, err), err
 	}
 	m.mu.Lock()
+	if m.admissionClosedLocked(parentSession) {
+		m.mu.Unlock()
+		return m.startInvalid(parentSession, kind, label, ErrAdmissionClosed), ErrAdmissionClosed
+	}
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
 	ctx, cancel := context.WithCancel(m.root)
@@ -419,8 +426,7 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		m.taskRecorder.RecordStart(id, kind, label)
 	}
 
-	m.launchJob(ctx, j, run)
-	return j
+	return j, m.launchJob(ctx, j, run)
 }
 
 func runRecovered(ctx context.Context, out io.Writer, run func(context.Context, io.Writer) (string, error)) (result string, err error) {
@@ -873,12 +879,17 @@ func (m *Manager) resolve(parentSession string, ids []string) []*Job {
 // job (or when setup fails). Running jobs and in-flight start reservations both
 // count toward limit, so concurrent callers cannot overshoot it.
 func (m *Manager) ReserveStartForSession(parentSession, kind string, limit int) (release func(), running int, ok bool) {
-	if limit <= 0 {
-		return func() {}, 0, true
-	}
 	parentSession = strings.TrimSpace(parentSession)
 	key := jobKey(parentSession, kind)
 	m.mu.Lock()
+	if m.admissionClosedLocked(parentSession) || m.root.Err() != nil {
+		m.mu.Unlock()
+		return func() {}, 0, false
+	}
+	if limit <= 0 {
+		m.mu.Unlock()
+		return func() {}, 0, true
+	}
 	for _, jobKey := range m.order {
 		j := m.jobs[jobKey]
 		if j == nil || !sessionMatches(parentSession, j.SessionID) || j.Kind != kind {

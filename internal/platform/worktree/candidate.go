@@ -26,6 +26,7 @@ type Snapshot struct {
 	Commit   string
 	Tree     string
 	Repo     gitcmd.Repo // the source workspace's identity, at its root
+	Metadata string      `json:",omitempty"`
 }
 
 // Change is one path a candidate added, modified or deleted, relative to the
@@ -53,12 +54,20 @@ func TakeSnapshot(ctx context.Context, repo gitcmd.Repo) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	commit, stderr, err := runGitEnv(ctx, info.repo, snapshotIdentity, "commit-tree", tree, "-p", info.head, "-m", "reasonix candidate base")
+	metadata, err := captureSnapshotMetadata(ctx, info.repo, tree)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	metadataParent, err := snapshotMetadataAnchor(ctx, info.repo, metadata)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	commit, stderr, err := runGitEnv(ctx, info.repo, snapshotIdentity, "commit-tree", tree, "-p", info.head, "-p", metadataParent, "-m", "reasonix candidate base")
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("record workspace snapshot: %w%s", err, stderrSuffix(stderr))
 	}
 	return Snapshot{RepoRoot: info.RepoRoot, Prefix: strings.Trim(strings.TrimSpace(info.prefix), "/"),
-		Commit: strings.TrimSpace(commit), Tree: tree, Repo: info.repo}, nil
+		Commit: strings.TrimSpace(commit), Tree: tree, Repo: info.repo, Metadata: metadata}, nil
 }
 
 // repo is the snapshot's pinned identity. An entry persisted without one is
@@ -79,38 +88,16 @@ func (c Candidate) repo(ctx context.Context) (gitcmd.Repo, error) {
 
 // CreateCandidate checks snap out into a new detached worktree under managedRoot.
 func CreateCandidate(ctx context.Context, snap Snapshot, managedRoot string) (Candidate, error) {
-	id, err := randomID()
+	c, err := PlanCandidate(snap, managedRoot)
 	if err != nil {
 		return Candidate{}, err
 	}
-	source, err := snap.repo(ctx)
+	prepared, err := MaterializeCandidate(ctx, snap, c)
 	if err != nil {
+		_ = RemoveCandidate(context.WithoutCancel(ctx), snap, c)
 		return Candidate{}, err
 	}
-	root := filepath.Join(managedRoot, id, safePathComponent(filepath.Base(snap.RepoRoot)))
-	if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
-		return Candidate{}, fmt.Errorf("create candidate parent: %w", err)
-	}
-	// --no-checkout, then populate through gitcmd inside the new worktree: a
-	// checkout during add runs in a child whose gitdir is the new worktree,
-	// where the reset's driver listing sees an includeIf keyed on that gitdir.
-	if _, stderr, err := runGit(ctx, source, "worktree", "add", "--no-checkout", "--detach", root, snap.Commit); err != nil {
-		return Candidate{}, fmt.Errorf("create candidate worktree: %w%s", err, stderrSuffix(stderr))
-	}
-	repo, err := gitcmd.Open(ctx, root)
-	if err != nil {
-		_, _, _ = runGit(ctx, source, "worktree", "remove", "--force", root)
-		return Candidate{}, fmt.Errorf("resolve candidate worktree: %w", err)
-	}
-	if _, stderr, err := runGit(ctx, repo, "reset", "--hard", snap.Commit); err != nil {
-		_, _, _ = runGit(ctx, source, "worktree", "remove", "--force", root)
-		return Candidate{}, fmt.Errorf("populate candidate worktree: %w%s", err, stderrSuffix(stderr))
-	}
-	c := Candidate{WorkspaceRoot: root, WorktreeRoot: root, Repo: repo}
-	if snap.Prefix != "" {
-		c.WorkspaceRoot = filepath.Join(root, filepath.FromSlash(snap.Prefix))
-	}
-	return c, nil
+	return prepared, nil
 }
 
 // CandidateTree is the candidate's current state as a tree, and the paths that
@@ -153,6 +140,11 @@ func Apply(ctx context.Context, snap Snapshot, tree string, changes []Change) er
 	if err != nil {
 		return err
 	}
+	release, err := lockApply(ctx, source)
+	if err != nil {
+		return err
+	}
+	defer release()
 	current, err := workingTree(ctx, source)
 	if err != nil {
 		return err
@@ -160,24 +152,7 @@ func Apply(ctx context.Context, snap Snapshot, tree string, changes []Change) er
 	if current != snap.Tree {
 		return ErrWorkspaceMoved
 	}
-	var restore []string
-	for _, ch := range changes {
-		if ch.Status == "D" {
-			if err := os.Remove(filepath.Join(snap.RepoRoot, filepath.FromSlash(ch.Path))); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("apply deletion of %s: %w", ch.Path, err)
-			}
-			continue
-		}
-		restore = append(restore, ch.Path)
-	}
-	if len(restore) == 0 {
-		return nil
-	}
-	args := append([]string{"restore", "--source=" + tree, "--worktree", "--"}, restore...)
-	if _, stderr, err := runGit(ctx, source, args...); err != nil {
-		return fmt.Errorf("apply candidate files: %w%s", err, stderrSuffix(stderr))
-	}
-	return nil
+	return applyPaths(ctx, snap, tree, changes)
 }
 
 // RemoveCandidate deletes a candidate worktree and its administrative entry.
@@ -186,6 +161,16 @@ func RemoveCandidate(ctx context.Context, snap Snapshot, c Candidate) error {
 	if err != nil {
 		return err
 	}
+	registered, err := candidateRegistered(ctx, source, c.WorktreeRoot)
+	if err != nil {
+		return err
+	}
+	if !registered {
+		if _, err := os.Lstat(c.WorktreeRoot); os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("unregistered candidate retained: %s", c.WorktreeRoot)
+	}
 	if _, stderr, err := runGit(ctx, source, "worktree", "remove", "--force", c.WorktreeRoot); err != nil {
 		return fmt.Errorf("remove candidate worktree: %w%s", err, stderrSuffix(stderr))
 	}
@@ -193,8 +178,9 @@ func RemoveCandidate(ctx context.Context, snap Snapshot, c Candidate) error {
 	return nil
 }
 
-// workingTree writes repo's working state as a tree through a private copy of
-// its index, so only changed files are hashed and the real index is untouched.
+// workingTree writes actual workspace bytes through a private index. Rebuild
+// cached entries before add: Git's stat cache is not a content version (a writer
+// can preserve size and timestamps). The user's index remains untouched.
 func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
 	indexPath, _, err := runGit(ctx, repo, "rev-parse", "--git-path", "index")
 	if err != nil {
@@ -216,6 +202,29 @@ func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
 	env := []string{"GIT_INDEX_FILE=" + private}
 	stageCtx, cancel := context.WithTimeout(ctx, gitWorktreeAddTimeout)
 	defer cancel()
+	if _, err := os.Stat(private); err == nil {
+		unmerged, stderr, err := runGitEnv(stageCtx, repo, env, "ls-files", "--unmerged", "-z")
+		if err != nil {
+			return "", fmt.Errorf("read private index: %w%s", err, stderrSuffix(stderr))
+		}
+		if unmerged != "" {
+			if err := repo.StageAll(stageCtx, env...); err != nil {
+				return "", fmt.Errorf("stage conflicted workspace snapshot: %w", err)
+			}
+		}
+		indexTree, stderr, err := runGitEnv(stageCtx, repo, env, "write-tree")
+		if err != nil {
+			return "", fmt.Errorf("record private index: %w%s", err, stderrSuffix(stderr))
+		}
+		if err := os.Remove(private); err != nil {
+			return "", err
+		}
+		if _, stderr, err := runGitEnv(stageCtx, repo, env, "read-tree", strings.TrimSpace(indexTree)); err != nil {
+			return "", fmt.Errorf("rebuild private index: %w%s", err, stderrSuffix(stderr))
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
 	if err := repo.StageAll(stageCtx, env...); err != nil {
 		return "", fmt.Errorf("stage workspace snapshot: %w", err)
 	}

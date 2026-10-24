@@ -42,6 +42,11 @@ func (s *Server) newCompositionSession(ctx context.Context, cur *control.Control
 		next.Close()
 		return err
 	}
+	if environment := cur.RootEnvironment(); environment != nil {
+		if err := environment.AttachSession(ctx, cur.SessionPath(), next.SessionPath(), next.Executor().Session().WriteAuthority()); err != nil {
+			return errors.Join(err, s.rollbackComposition(cur, next, false))
+		}
+	}
 	if err := s.persistComposition(next); err != nil {
 		return errors.Join(err, s.rollbackComposition(cur, next, false))
 	}

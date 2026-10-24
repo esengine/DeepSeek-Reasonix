@@ -6,6 +6,7 @@ package evidence
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -38,9 +39,9 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, r := range l.receipts {
-		if r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
-			return true
+	for _, r := range slices.Backward(l.receipts) {
+		if r.ToolName == "bash" && CommandMatches(command, r.Command) {
+			return commandReceiptSucceeded(r)
 		}
 	}
 	return false
@@ -143,13 +144,24 @@ func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for i := start; i < len(l.receipts); i++ {
-		r := l.receipts[i]
-		if r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
-			return true
+	for _, r := range slices.Backward(l.receipts[min(start, len(l.receipts)):]) {
+		if r.ToolName == "bash" && CommandMatches(command, r.Command) {
+			return commandReceiptSucceeded(r)
 		}
 	}
 	return false
+}
+
+func commandReceiptSucceeded(r Receipt) bool {
+	if !r.Success || (r.ExitCode != nil && *r.ExitCode != 0) {
+		return false
+	}
+	switch r.Verification {
+	case "", VerificationPassed, VerificationNotVerification:
+		return true
+	default:
+		return false
+	}
 }
 
 // HasCorroboratedCitedCheckAfter reports whether a completion after `after`

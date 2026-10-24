@@ -28,17 +28,6 @@ func (t *TaskTool) subRegistryFor(spec *ProfileExecSpec, childDepth int, grant *
 		}
 	} else {
 		subReg = t.buildSubReg(toolNames, childDepth)
-		// Explicit paths are an execution boundary and rebind or drop tools that
-		// cannot honour it. A synthesized whole-workspace claim is a scheduling
-		// boundary, and preserves the session's existing tool boundaries.
-		if !spec.Grant.WritePaths.Empty() && !spec.Grant.WritePaths.WholeWorkspace {
-			keepBash := t.bashCanEnforceWriteRoots()
-			bound, removed := agent.BindWritePaths(subReg, grant, t.gate, t.scheduler, t.workspaceRoot, keepBash)
-			subReg = bound
-			if len(removed) > 0 && subReg.Len() == 0 {
-				return nil, fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))
-			}
-		}
 	}
 	return subReg, nil
 }
@@ -52,7 +41,7 @@ func (t *TaskTool) childRegistry(spec *ProfileExecSpec, childDepth int, grant *w
 		return nil, err
 	}
 	if t.childTools == nil || strings.TrimSpace(modelRef) == "" {
-		return reg, nil
+		return t.bindExecutionWriters(reg, spec, grant)
 	}
 	ceiling, err := IntersectToolLists(t.parentReg, spec.Grant.ProfileTools, spec.Grant.CallTools)
 	if err != nil {
@@ -71,5 +60,27 @@ func (t *TaskTool) childRegistry(spec *ProfileExecSpec, childDepth int, grant *w
 		}
 		reg.Add(extra)
 	}
-	return reg, nil
+	return t.bindExecutionWriters(reg, spec, grant)
+}
+
+func (t *TaskTool) bindExecutionWriters(reg *tool.Registry, spec *ProfileExecSpec, grant *writeclaim.WriteGrant) (*tool.Registry, error) {
+	if !spec.Grant.ReadOnly && !spec.Grant.WritePaths.Empty() && !spec.Grant.WritePaths.WholeWorkspace && !spec.Grant.WritePaths.Optimistic {
+		scheduler := t.scheduler
+		if t.mutations != nil {
+			scheduler = nil
+		}
+		bound, removed := agent.BindWritePaths(reg, grant, t.gate, scheduler, t.workspaceRoot, t.bashCanEnforceWriteRoots())
+		if len(removed) > 0 && bound.Len() == 0 {
+			return nil, fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))
+		}
+		return bound, nil
+	}
+	return t.bindOptimisticWriters(reg, grant), nil
+}
+
+func (t *TaskTool) bindOptimisticWriters(reg *tool.Registry, grant *writeclaim.WriteGrant) *tool.Registry {
+	if t.mutations != nil || !grant.Declared().Optimistic {
+		return reg
+	}
+	return agent.BindOptimisticWriters(reg, grant, t.gate, t.scheduler, t.workspaceRoot)
 }

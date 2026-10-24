@@ -1,9 +1,15 @@
 package delegation
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/runtime/writeclaim"
+	"reasonix/internal/tools/builtin"
 )
 
 func childToolFixture(extra ...tool.Tool) *TaskTool {
@@ -15,6 +21,33 @@ func childToolFixture(extra ...tool.Tool) *TaskTool {
 		}
 		return nil
 	})
+}
+
+func TestChildModelWriterCannotEscapeExplicitPaths(t *testing.T) {
+	root := t.TempDir()
+	ws := builtin.Workspace{Dir: root}
+	task := childToolFixture(ws.Tools("write_file")[0])
+	task.workspaceRoot = root
+	paths, err := writeclaim.NormalizeWritePaths(root, []string{filepath.Join(root, "allowed.txt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := ProfileExecSpec{Grant: CapabilityGrant{WritePaths: paths}}
+	reg, err := task.childRegistry(&spec, 1, writeclaim.NewWriteGrant(paths), "vision/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, ok := reg.Get("write_file")
+	if !ok {
+		t.Fatal("path-capable child tool was removed")
+	}
+	_, err = writer.Execute(t.Context(), json.RawMessage(`{"path":"outside.txt","content":"escape"}`))
+	if !errors.Is(err, writeclaim.ErrWriteFenceClosed) {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "outside.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("tool added after grants bypassed the boundary: %v", err)
+	}
 }
 
 func childHas(t *testing.T, task *TaskTool, spec ProfileExecSpec, modelRef, name string) bool {

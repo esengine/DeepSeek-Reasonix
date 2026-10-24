@@ -2,6 +2,7 @@ package proc
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os/exec"
 	"sync"
@@ -13,8 +14,13 @@ const (
 	defaultCancelRetryFor      = 5 * time.Second
 )
 
+var ErrScopeCompletionUnknown = errors.New("execution scope termination is unconfirmed; resources retained")
+
 // RunOptions controls process-tree tracking for a foreground command.
 type RunOptions struct {
+	OnStarted           func(*exec.Cmd)
+	CancelScope         func() error
+	WaitScope           func() error
 	Track               bool
 	CancelWaitGrace     time.Duration
 	CancelRetryInterval time.Duration
@@ -46,11 +52,13 @@ type RunDiagnostics struct {
 type TrackedCommand struct {
 	cmd *exec.Cmd
 
-	mu     sync.Mutex
-	job    *TrackedJob
-	tree   *TreeTracker
-	killed bool
-	diag   RunDiagnostics
+	mu          sync.Mutex
+	job         *TrackedJob
+	tree        *TreeTracker
+	killed      bool
+	diag        RunDiagnostics
+	waitDone    <-chan struct{}
+	cancelScope func() error
 }
 
 // RunCommand starts cmd and waits for it. When tracking is enabled, cancellation
@@ -60,10 +68,23 @@ func RunCommand(ctx context.Context, cmd *exec.Cmd, opts RunOptions) (*TrackedCo
 	opts = normalizeRunOptions(opts)
 	if !opts.Track {
 		SetCancelKillsTree(cmd)
-		return nil, cmd.Run()
+		if opts.CancelScope != nil {
+			cmd.Cancel = opts.CancelScope
+		}
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		if opts.OnStarted != nil {
+			opts.OnStarted(cmd)
+		}
+		err := cmd.Wait()
+		if opts.WaitScope != nil {
+			err = errors.Join(err, opts.WaitScope())
+		}
+		return nil, err
 	}
 
-	tracked := &TrackedCommand{cmd: cmd}
+	tracked := &TrackedCommand{cmd: cmd, cancelScope: opts.CancelScope}
 	tracked.setMetadata(opts)
 	HideWindow(cmd)
 	cmd.Cancel = func() error {
@@ -76,7 +97,16 @@ func RunCommand(ctx context.Context, cmd *exec.Cmd, opts RunOptions) (*TrackedCo
 	}
 	tracked.setStarted(job)
 	tracked.setTree(TrackTree(cmd))
-	return tracked, waitForTrackedCommand(ctx, tracked, cmd.Wait, opts.CancelWaitGrace, opts.CancelRetryInterval, opts.CancelRetryFor)
+	if opts.OnStarted != nil {
+		opts.OnStarted(cmd)
+	}
+	return tracked, waitForTrackedCommand(ctx, tracked, func() error {
+		err := cmd.Wait()
+		if opts.WaitScope != nil {
+			err = errors.Join(err, opts.WaitScope())
+		}
+		return err
+	}, opts.CancelWaitGrace, opts.CancelRetryInterval, opts.CancelRetryFor)
 }
 
 // SetCancelKillsTree configures cmd so context cancellation kills the entire
@@ -138,7 +168,15 @@ func normalizeRunOptions(opts RunOptions) RunOptions {
 
 func waitForTrackedCommand(ctx context.Context, tracked *TrackedCommand, wait func() error, grace, retryEvery, retryFor time.Duration) error {
 	waitCh := make(chan error, 1)
-	go func() { waitCh <- wait() }()
+	done := make(chan struct{})
+	tracked.mu.Lock()
+	tracked.waitDone = done
+	tracked.mu.Unlock()
+	observeCompletion(ctx, done)
+	go func() {
+		err := wait()
+		publishCompletedWait(done, waitCh, err)
+	}()
 
 	select {
 	case err := <-waitCh:
@@ -170,9 +208,23 @@ func waitForTrackedCommand(ctx context.Context, tracked *TrackedCommand, wait fu
 	}
 }
 
+func publishCompletedWait(done chan struct{}, results chan<- error, err error) {
+	// A published wait result is also the physical-completion boundary.
+	// Closing after the buffered send lets a receiver return too early.
+	if !errors.Is(err, ErrScopeCompletionUnknown) {
+		close(done)
+	}
+	results <- err
+}
+
 // Kill terminates the tracked command tree.
 func (p *TrackedCommand) Kill() {
 	if p == nil {
+		return
+	}
+	if p.cancelScope != nil {
+		_ = p.cancelScope()
+		p.StopTracking()
 		return
 	}
 	p.mu.Lock()

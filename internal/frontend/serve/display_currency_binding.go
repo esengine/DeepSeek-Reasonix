@@ -23,6 +23,8 @@ func (s *Server) publishController(previous control.SessionAPI, next *control.Co
 	if s.ctrl == previous {
 		s.ctrl = next
 		s.mu.Unlock()
+		next.SetOnSessionPathChanged(s.followSessionLease)
+		next.SetOnSessionRecovered(sessionLeaseRecoveryHandler(s.leases))
 		s.bindCompositionSelector(next)
 		return nil
 	}

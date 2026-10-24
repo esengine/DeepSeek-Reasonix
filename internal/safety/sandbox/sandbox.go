@@ -1,17 +1,8 @@
-// Package sandbox wraps a shell command in an OS-level jail so the model's
-// `bash` calls are confined: it may read almost freely but write only inside
-// the writable roots (workspace, configured extras, plus temp and toolchain
-// caches), with optional forbid-read roots, and reach the network only when
-// allowed. This is the *enforcement* layer beneath the permission rules
-// (*policy*): a permitted command still cannot escape the box.
-//
-// macOS uses Seatbelt via sandbox-exec and Linux uses bubblewrap when available.
-// Windows does not currently provide an OS-level bash sandbox and resolves the
-// product setting to off. When enforce is requested but no OS sandbox backend
-// is available, the bash tool fails closed instead of running the command
-// unwrapped.
-// Confining the in-process file-writer built-ins is handled separately, in
-// package tool/builtin.
+// Package sandbox confines processes using macOS Seatbelt, Linux bubblewrap,
+// or optional Windows creation grants. Windows grants do not bound deletion
+// and rename. Execution requirements distinguish these protection levels;
+// unsupported complete mutation boundaries refuse before process launch.
+// In-process file tools enforce their access separately.
 package sandbox
 
 import (
@@ -23,6 +14,8 @@ import (
 // Spec describes how to confine one command. The zero value (Mode == "") does
 // not enforce, so an unconfigured caller runs commands unchanged.
 type Spec struct {
+	RequiredIntegrity   IntegrityRequirement
+	ProtectedWriteRoots []string
 	// Mode is "enforce" to wrap the command, anything else (incl. "off" and "")
 	// to run it unwrapped.
 	Mode string
@@ -33,8 +26,8 @@ type Spec struct {
 	// Pins are the identities WriteRoots had when the session established
 	// them; a root that no longer has its identity is not made writable.
 	Pins *WriteRootPins
-	// ReadRoots are explicit host paths a Windows AppContainer may read. The
-	// macOS/Linux profiles already mount the host read-only by default.
+	// ReadRoots are explicit host read grants. Linux restores declared temporary
+	// directories hidden by private /tmp; Windows uses them for AppContainer reads.
 	ReadRoots []string
 	// AppContainerWriteRoots are the small subset of WriteRoots that a
 	// read-only Windows AppContainer may write (for MCP this is only its
@@ -130,7 +123,12 @@ func EffectiveGetenv(shellEnv map[string]string) func(string) string {
 func UnavailableMessage() string { return unavailableMessage(bwrapFault()) }
 
 // UnavailableMessageFor is UnavailableMessage for the launch spec will make.
-func UnavailableMessageFor(spec Spec) string { return unavailableMessage(bwrapFaultFor(spec)) }
+func UnavailableMessageFor(spec Spec) string {
+	if err := RequiredIntegrityFault(spec); err != nil {
+		return err.Error()
+	}
+	return unavailableMessage(bwrapFaultFor(spec))
+}
 
 func unavailableMessage(fault error) string {
 	return "bash sandbox requested but unavailable on this host; refusing to run unconfined. " + remediation(fault)
@@ -189,7 +187,9 @@ func UnavailableReason() error { return bwrapFault() }
 // AvailableFor reports whether a command launched for spec can be confined: a
 // spec that denies network needs a network namespace that Available alone does
 // not prove.
-func AvailableFor(spec Spec) bool { return Available() && bwrapFaultFor(spec) == nil }
+func AvailableFor(spec Spec) bool {
+	return RequiredIntegrityFault(spec) == nil && Available() && bwrapFaultFor(spec) == nil
+}
 
 // bwrapFault is the base fault, with the network left open.
 func bwrapFault() error { return bwrapFaultFor(Spec{Network: true}) }
@@ -197,7 +197,12 @@ func bwrapFault() error { return bwrapFaultFor(Spec{Network: true}) }
 // UnavailableCodeFor is that explanation's identity. A frontend says it in the
 // reader's language from this; matching the English sentence above would be a
 // second copy of this switch, in a place that cannot see when it changes.
-func UnavailableCodeFor(spec Spec) string { return unavailableCode(bwrapFaultFor(spec)) }
+func UnavailableCodeFor(spec Spec) string {
+	if RequiredIntegrityFault(spec) != nil {
+		return "sandbox.incomplete_integrity"
+	}
+	return unavailableCode(bwrapFaultFor(spec))
+}
 
 func unavailableCode(fault error) string {
 	switch runtime.GOOS {

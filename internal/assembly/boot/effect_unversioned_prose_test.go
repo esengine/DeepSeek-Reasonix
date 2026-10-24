@@ -3,7 +3,6 @@ package boot
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -38,9 +37,7 @@ func TestEffectDeliveryOwesNoVerificationForProseOutsideAnyRepository(t *testing
 			writeUserConfig(t, userModel+"\n[codegraph]\nenabled = false\n")
 			registerBootTokenProfileTestProvider()
 			if tc.repo {
-				if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				initEffectRepository(t, dir)
 			}
 			approveWorkspace(t, dir)
 			prov := testutil.NewMock("unversioned-prose",

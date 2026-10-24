@@ -16,6 +16,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/sessionstore"
 	"slices"
 	"strings"
@@ -46,8 +47,10 @@ import (
 	"reasonix/internal/runtime/guardian"
 	"reasonix/internal/runtime/promptrefine"
 	"reasonix/internal/runtime/recovery"
+	"reasonix/internal/runtime/rootenv"
 	"reasonix/internal/runtime/taskmonitor"
 	"reasonix/internal/runtime/usecap"
+	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/safety/permission"
 	"reasonix/internal/safety/sandbox"
@@ -136,8 +139,10 @@ type Controller struct {
 	capabilityProxy bool
 	// proxyToolsFn returns live tools observed through use_capability without
 	// entering the provider-visible registry (Balanced dual-model Planner).
-	proxyToolsFn   func() map[string][]plugin.CachedTool
-	runtimeProfile capability.Profile
+	proxyToolsFn          func() map[string][]plugin.CachedTool
+	runtimeProfile        capability.Profile
+	rootEnvironment       *rootenv.Environment
+	rootEnvironmentPolicy *RootEnvironmentPolicy
 
 	// externalFolders owns the @ tokens for user-dropped directories outside
 	// workspaceRoot, behind its own lock. See external_folders.go.
@@ -367,7 +372,12 @@ type Options struct {
 	// projection hints; nil preserves the ordinary FileStore.
 	TaskStore taskmonitor.WriteStore
 	// WorkspaceLease is the Delivery writer owner shared with the executor.
-	WorkspaceLease *workspacelease.Owner
+	WorkspaceLease          *workspacelease.Owner
+	DelegationScheduler     *writeclaim.SubagentScheduler
+	MutationCoordinator     *mutation.Coordinator
+	WriteCoordination       *WriteCoordinationRuntime
+	IsolatedResults         IsolatedResultsOwner
+	IsolationRecoveryAccess func(context.Context, []string) error
 	// Registry is the executor's live tool set, and PluginCtx the session-scoped
 	// context; both are needed for hot-adding MCP servers via AddMCPServer.
 	Registry  *tool.Registry
@@ -388,7 +398,10 @@ type Options struct {
 	RuntimeOwner *extension.RuntimeOwner
 	// WorkspaceRoot confines checkpoint restores ("" = none); frontends pass the launch cwd.
 	WorkspaceRoot          string
-	WorkspaceRepo          gitcmd.Repo     // WorkspaceRoot's identity, resolved when the session opened
+	WorkspaceRepo          gitcmd.Repo          // WorkspaceRoot's identity, resolved when the session opened
+	RootEnvironment        *rootenv.Environment // ownership transfers to this controller
+	ExecutionPresence      ExecutionPresence
+	RootEnvironmentPolicy  *RootEnvironmentPolicy
 	Posture                PostureEvidence // what DefaultApprovalMode decides from
 	ExternalFolderToolRefs externalFolderToolRefs
 	ShowTurnReceipt        bool // attach the end-of-turn verification report; see display_prefs.go

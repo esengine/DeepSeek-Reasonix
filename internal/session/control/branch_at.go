@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -63,7 +64,7 @@ func (c *Controller) branchAt(turn *int, name string, switchTo func(*sessionstor
 			return "", fmt.Errorf("%w: the conversation was compacted past turn %d", ErrBranchUnavailable, *turn)
 		}
 	}
-	_, path, err := c.createBranchPrefix(src[:end], name)
+	_, path, err := c.createBranchPrefixInEnvironment(src[:end], name, switchTo == nil)
 	if err != nil {
 		return "", err
 	}
@@ -95,12 +96,12 @@ func (c *Controller) branchClosedTurn(turn int, name string) (string, error) {
 	if !c.checkpoints.namesUserMessage(end, src[end]) {
 		return "", ErrBranchStale
 	}
-	_, path, err := c.createBranchPrefix(src[:end], name)
+	_, path, err := c.createBranchPrefixInEnvironment(src[:end], name, true)
 	return path, err
 }
 
 // createBranchPrefix is the one writer for idle, closed-turn and tip branches.
-func (c *Controller) createBranchPrefix(src []provider.Message, name string) (*sessionstore.Session, string, error) {
+func (c *Controller) createBranchPrefixInEnvironment(src []provider.Message, name string, independent bool) (*sessionstore.Session, string, error) {
 	child := sessionstore.NewSession("")
 	child.Messages = append([]provider.Message(nil), src...)
 	path := sessionstore.NewSessionPath(c.sessionDir, c.label)
@@ -115,6 +116,19 @@ func (c *Controller) createBranchPrefix(src []provider.Message, name string) (*s
 		meta.Mode = "plan"
 	}
 	if err := saveConversationBranch(path, child, meta, func() error {
+		if c.rootEnvironment != nil {
+			if independent {
+				fork, err := c.rootEnvironment.Fork(context.Background(), c.SessionPath(), path, child.WriteAuthority())
+				if err != nil {
+					return err
+				}
+				fork.Close()
+			} else {
+				if err := c.rootEnvironment.AttachSession(context.Background(), c.SessionPath(), path, child.WriteAuthority()); err != nil {
+					return err
+				}
+			}
+		}
 		if err := c.checkpoints.storeRef().CopyConversationPrefixTo(ckptDir(path), sessionstore.BranchID(path), len(src)); err != nil {
 			return err
 		}

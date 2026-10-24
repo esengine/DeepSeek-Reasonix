@@ -380,5 +380,5 @@ func collectBackgroundEvidence(ctx context.Context, jm *jobs.Manager, jobID stri
 	if !ledger.NoteBackgroundLease(session, jobID) {
 		return
 	}
-	ledger.MergeChild(summary)
+	ledger.MergeConcurrentChildren(summary)
 }

@@ -409,6 +409,9 @@ func renderNotice(it *Item) string {
 	if it.Code == event.NoticeCodeContextReport && it.Detail != "" {
 		text += "\n" + indent(strings.TrimRight(it.Detail, "\n"), "    ")
 	}
+	if it.WorkspaceLease != nil && it.Detail != "" {
+		text += "\n" + indent(textutil.SanitizeDisplay(it.Detail), "    ")
+	}
 	return mark + text
 }
 

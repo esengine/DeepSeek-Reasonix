@@ -105,8 +105,10 @@ func TestBaselineOutcomeIsAttributedToTheCriterionAndNothingElse(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := BaselineOutcomeFromTestJSON([]byte(tc.stream), criteria); got != tc.want {
-				t.Fatalf("BaselineOutcomeFromTestJSON = %q, want %q", got, tc.want)
+			observer := NewTestJSONObserver(criteria)
+			_, _ = observer.Write([]byte(tc.stream))
+			if got := observer.Outcome(); got != tc.want {
+				t.Fatalf("criterion outcome = %q, want %q", got, tc.want)
 			}
 		})
 	}

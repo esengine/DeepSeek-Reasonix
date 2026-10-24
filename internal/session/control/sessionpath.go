@@ -50,6 +50,9 @@ func (c *Controller) Resume(s *sessionstore.Session, path string) error {
 		return err
 	}
 	defer c.endRotation()
+	if err := c.CheckSessionEnvironment(path); err != nil {
+		return err
+	}
 	current, target := c.CompositionBinding(), s.Composition()
 	if current != nil || target != nil {
 		if current == nil || target == nil || current.Digest != target.Digest {
@@ -70,6 +73,10 @@ func (c *Controller) Resume(s *sessionstore.Session, path string) error {
 // Resume/SetSessionPath choice in one place avoids the orphaned-duplicate class
 // of bug (#2807) recurring as each surface copied it.
 func (c *Controller) AdoptHistory(msgs []provider.Message, path string) {
+	if err := c.CheckSessionEnvironment(path); err != nil {
+		c.noticeInputRefused("session history requires its bound execution environment: " + err.Error())
+		return
+	}
 	if len(msgs) > 0 {
 		if path != "" {
 			if loaded, err := sessionstore.LoadSession(path); err == nil && loaded != nil {

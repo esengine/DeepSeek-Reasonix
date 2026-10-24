@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"reasonix/internal/runtime/agent"
+	"reasonix/internal/runtime/checkenv"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/state/sessionstore"
-	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -19,9 +18,10 @@ import (
 	"reasonix/internal/contract/planmode"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/safety/evidence"
+	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/memory"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/workspacelease"
 	"reasonix/internal/tools/jobs"
 )
@@ -47,7 +47,7 @@ processes, or delegate to writer-capable agents. If a read-only delegation tool 
 available and genuinely useful, you may use it within the configured depth limit.
 Return a concise, self-contained final answer with the evidence the parent needs.`
 
-const subagentToolBoundarySummary = "Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
+const subagentToolBoundarySummary = "Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; parallel_tasks is excluded. Isolated writer runs own their background jobs and may expose wait, bash_output, kill_shell and background bash when allowed by the tool whitelist. Other subagents expose foreground-only bash and exclude job tools."
 
 // maxConcurrentBackgroundTasks is the legacy writer-background fallback used
 // only when a TaskTool has no session scheduler (tests). Production boots
@@ -67,6 +67,7 @@ type TaskTool struct {
 	pricing                       *provider.Pricing
 	parentReg                     *tool.Registry
 	maxSteps                      int
+	providerRetries               int
 	contextWindow                 int
 	compactRatio                  float64
 	recentKeep                    int
@@ -89,6 +90,10 @@ type TaskTool struct {
 	deliveryProfile               bool
 	ablation                      ablation.Set
 	workspaceLease                *workspacelease.Owner
+	mutations                     *mutation.Coordinator
+	executionPresence             func(context.Context, string, bool) (func(), error)
+	checkEnvironment              *checkenv.Spec
+	processSandbox                sandbox.Spec
 	// scheduler is the session-scoped concurrency + write-claim controller.
 	// nil falls back to the legacy jobs.ReserveStart cap for background tasks.
 	scheduler *writeclaim.SubagentScheduler
@@ -114,10 +119,14 @@ type TaskTool struct {
 	// capabilityRuntime is the session-shared MCP Host/specs substrate. Each
 	// sub-agent gets its own use_capability frontend so ledger state stays
 	// isolated while connections reuse the parent Host.
-	capabilityRuntime *usecap.MCPCapabilityRuntime
-	isolated          *taskIsolation // nil unless the session offers worktree isolation
-	checkTargetAccess tool.TargetAccessCheck
-	hooksForRole      func(string) agent.ToolHooks // nil: children fire no hooks
+	capabilityRuntime     *usecap.MCPCapabilityRuntime
+	isolated              *taskIsolation // nil unless the session offers worktree isolation
+	environment           *environmentPolicy
+	environmentID         string
+	environmentGeneration string
+	environmentSource     string
+	checkTargetAccess     tool.TargetAccessCheck
+	hooksForRole          func(string) agent.ToolHooks // nil: children fire no hooks
 }
 
 // TaskToolOptions holds the construction parameters for a TaskTool.
@@ -128,6 +137,7 @@ type TaskToolOptions struct {
 	Pricing                               *provider.Pricing
 	ParentRegistry                        *tool.Registry
 	MaxSteps                              int
+	ProviderRetries                       int
 	ContextWindow                         int
 	RecentKeep                            int
 	CompactionBudgets                     agent.CompactionBudgets
@@ -159,6 +169,7 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 		pricing:           opts.Pricing,
 		parentReg:         opts.ParentRegistry,
 		maxSteps:          opts.MaxSteps,
+		providerRetries:   opts.ProviderRetries,
 		contextWindow:     opts.ContextWindow,
 		recentKeep:        opts.RecentKeep,
 		budgets:           opts.CompactionBudgets,
@@ -307,6 +318,11 @@ func (t *TaskTool) WithBashSandboxEnforced(fn func() bool) *TaskTool {
 	return t
 }
 
+func (t *TaskTool) WithProcessSandbox(spec sandbox.Spec) *TaskTool {
+	t.processSandbox = spec
+	return t
+}
+
 // WithChildTools supplies the tools a child gets because of its own model (an
 // image reader for a model that reads images). The parent's tool block is not
 // touched; only the child's registry is.
@@ -417,7 +433,7 @@ func (t *TaskTool) executeTask(ctx context.Context, args json.RawMessage) (strin
 	if strings.TrimSpace(p.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
-	if p.Isolation != "" {
+	if p.Isolation != "" && t.environment == nil {
 		return t.executeIsolated(ctx, isolatedCall{mode: p.Isolation, prompt: p.Prompt, model: p.Model,
 			unsupported: isolatedUnsupported(p.Profile, p.WritePaths, p.Tools, p.ContinueFrom, p.ForkFrom, p.RunInBackground)})
 	}
@@ -426,6 +442,7 @@ func (t *TaskTool) executeTask(ctx context.Context, args json.RawMessage) (strin
 	if err != nil {
 		return "", err
 	}
+	spec.Sched.Environment = p.Isolation
 	return t.RunProfileSpec(ctx, spec)
 }
 
@@ -532,220 +549,51 @@ func (t *TaskTool) settleSpecPrompts(spec *ProfileExecSpec) error {
 // RunProfileSpec executes a unified profile/task specification. Shared by task,
 // fleet items, and boot-wired skill runners so prompt, tools, claims, and
 // scheduling cannot drift across entry points.
-func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (result string, err error) {
-	if t == nil {
-		return "", fmt.Errorf("task tool is not configured")
-	}
-	// Per-child progress tracker: converts the child's reasoning/text/notice/
-	// retrying into reserved ToolProgress previews and guarantees exactly one
-	// terminal status (completed/cancelled/failed). The background job owns
-	// finish after handoff; every other exit finishes here, including
-	// validation errors and panics.
+func (t *TaskTool) runProfileSpec(ctx context.Context, spec ProfileExecSpec, environment *environmentRequest) (result string, err error) {
 	trk := newSubagentProgressTracker(ctx, subSink(ctx))
-	backgroundHandoff := false
+	handoff := false
 	defer func() {
-		if backgroundHandoff {
-			return
+		if !handoff {
+			environment.release()
 		}
-		if p := recover(); p != nil {
-			trk.finish(nil, fmt.Errorf("panic: %v", p))
-			panic(p)
-		}
-		trk.finish(ctx.Err(), err)
 	}()
+	defer trk.finishReturning(ctx, &handoff, &err)
 	if err := t.settleSpecPrompts(&spec); err != nil {
 		return "", err
 	}
+	releaseResident, err := t.reserveResident()
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if !handoff {
+			releaseResident()
+		}
+	}()
 	ctx = agent.BindTaskImages(ctx, spec.Task.Objective)
-	maxSteps := t.childMaxStepsForContext(ctx, spec.Sched.MaxSteps)
-	childDepth, err := t.nextSubagentDepth(ctx)
+	plan, err := t.prepareAdmissionProfile(ctx, spec, trk, environment)
 	if err != nil {
 		return "", err
 	}
-
-	// What this run may write, over its whole life. The tools bound below hold
-	// it and widen it with the user's answer; the audit at the end reads the
-	// same object, so a path the user granted is not reported as an escape.
-	writeGrant := writeclaim.NewWriteGrant(spec.Grant.WritePaths)
-	modelRef, effortRef := t.childRuntimeRef(ctx, spec.Worker.Model, spec.Worker.Effort)
-	subReg, err := t.childRegistry(&spec, childDepth, writeGrant, modelRef)
+	plan.environment = environment
+	req, err := t.acquireRequestFor(&spec)
 	if err != nil {
 		return "", err
 	}
-	usageModelRef := t.identifyChild(trk, modelRef, effortRef)
+	life, err := t.openDelegation(ctx, &spec, &req, trk)
+	if err != nil {
+		return "", err
+	}
+	plan.spec = spec
+	defer (*environmentTerminal)(nil).settleLifecycle(ctx, life, &handoff, &result, &err)
 	parentID, _, _, _ := agent.CallContext(ctx)
-	prov, pricing, ctxWin, err := t.resolveSubSessionRuntime(modelRef, effortRef)
-	if err != nil {
-		return "", fmt.Errorf("sub-agent profile: %w", err)
-	}
-	acquireReq, err := t.acquireRequestFor(&spec)
-	if err != nil {
-		return "", err
-	}
-	// Every deterministic refusal has answered by here, so this is where work
-	// enters orchestration: recorded, drawn pending, and handed the scheduler's
-	// two moments. A fan-out item's group opened it already.
-	life, err := t.openDelegation(ctx, &spec, &acquireReq, trk)
-	if err != nil {
-		return "", err
-	}
-	// A handoff moves the ending to the job, which is where the child stops.
-	defer life.settleOnReturn(ctx, &backgroundHandoff, &result, &err)
-	// Prove, admit, allocate: a foreground run holds its slot from here because
-	// the transcript below is the first thing it reserves, and a fan-out with
-	// sixty queued items must not hold sixty of them open.
-	if !spec.Sched.RunInBackground {
-		releaseSlot, slotErr := t.acquireSlot(ctx, acquireReq, spec.Sched)
-		if slotErr != nil {
-			return "", slotErr
-		}
-		defer releaseSlot()
-	}
-	// Two identities, taken apart from here on: which execution this is, and
-	// which provider-visible call it descends from. They are the same string
-	// for everything a model delegated and cannot be for anything else.
 	execution := life.executionID(parentID)
-	// Never on the parent surface: the gate reads a child's report, and exposing
-	// it upward would let a turn file a verdict on its own behalf. Mounted here
-	// rather than with the rest of the registry because it is bound to a grant,
-	// and the execution that grant names does not exist until now.
-	grant := reviewGrantFor(spec.Worker, execution)
-	agent.AttachReviewReport(subReg, grant)
-	run, err := t.prepareTranscriptRunWithPrompt(withUpstream(ctx, spec.Context.Upstream), subReg, modelRef, effortRef, spec.Context.parentSession(ctx), execution, spec.Context.executionParent(execution), spec.Context.ContinueFrom, spec.Context.ForkFrom, spec.Worker.SystemPrompt, spec.Worker.Kind, spec.Worker.Name)
-	if err != nil {
-		return "", err
-	}
-
-	recoveryTaskID := subagentRecoveryTaskID(ctx, run.Ref)
-	backgroundWriter := (spec.Sched.RunInBackground || spec.Sched.BackgroundWriter) && !spec.Grant.ReadOnly
-	var mutationObserver *checkpoint.MutationObserver
-	if t.mutationObserver != nil {
-		turn := t.mutationObserver.OwnershipTurn()
-		mutationObserver = t.mutationObserver.CloneForSubagent(recoveryTaskID, turn, backgroundWriter)
-	}
-	runSession := func(runCtx context.Context, sink event.Sink, writerAlreadyRegistered bool) (string, error) {
-		if mutationObserver != nil && backgroundWriter && !writerAlreadyRegistered {
-			turn := mutationObserver.OwnershipTurn()
-			if err := mutationObserver.RegisterWriter(recoveryTaskID, "background_subagent", turn); err != nil {
-				return "", err
-			}
-			defer mutationObserver.UnregisterWriter(recoveryTaskID)
-		}
-		if spec.Grant.ReadOnly {
-			return t.runReadOnlySubSession(withUpstream(runCtx, spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, "read_only_"+spec.Worker.Kind, grant)
-		}
-		return t.runSubSession(t.withChildEffort(withUpstream(writeclaim.WithSubagentWriteGrant(runCtx, writeGrant), spec.Context.Upstream), ctx, modelRef, effortRef), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, spec.Worker.Kind, grant, t.observeRootFor(backgroundWriter, writeGrant))
-	}
-
 	if spec.Sched.RunInBackground {
-		jm, ok := jobs.FromContext(ctx)
-		if !ok {
-			run.Release()
-			return "", fmt.Errorf("background execution is not available in this context")
-		}
-		// Legacy hard-cap remains only when no scheduler is attached. With a
-		// scheduler, return the job immediately and queue for a slot inside the
-		// job so the parent turn is not blocked at concurrency limits.
-		var releaseStart func()
-		if t.scheduler == nil {
-			var running int
-			var okReserve bool
-			releaseStart, running, okReserve = jm.ReserveStartForSession(jobs.SessionFromContext(ctx), "task", maxConcurrentBackgroundTasks)
-			if !okReserve {
-				run.Release()
-				return "", fmt.Errorf("%d background tasks are already running for this session (limit %d); collect their results with wait — or run this sub-task in the foreground — before starting more", running, maxConcurrentBackgroundTasks)
-			}
-			defer releaseStart()
-		} else {
-			releaseStart = func() {}
-		}
-		label := firstNonEmpty(spec.Task.Description, spec.Worker.Name, "task")
-		writerRegistered := false
-		if mutationObserver != nil && backgroundWriter {
-			turn := mutationObserver.OwnershipTurn()
-			if err := mutationObserver.RegisterWriter(recoveryTaskID, "background_subagent", turn); err != nil {
-				releaseStart()
-				run.Release()
-				return "", err
-			}
-			writerRegistered = true
-		}
-		parentSession := agent.ParentSession(ctx)
-		backgroundEvidence := evidence.NewLedger()
-		// Capture acquire request by value for the job goroutine.
-		slotReq := acquireReq
-		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
-			if writerRegistered {
-				defer mutationObserver.UnregisterWriter(recoveryTaskID)
-			}
-			jobCtx = agent.WithParentSession(jobCtx, parentSession)
-			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
-			defer run.Release()
-			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
-			defer func() {
-				if r := recover(); r != nil {
-					panicErr := fmt.Errorf("internal error: panic: %v\n%s", r, debug.Stack())
-					result = FormatSubagentRunResult("", run, true)
-					err = errors.Join(panicErr, t.transcripts.SaveFailed(run))
-				}
-				// The job owns the ending after the handoff, and settles the
-				// delegation where it can see the child stop.
-				life.settle(jobCtx, result, err)
-				// The job owns the terminal status: the parent tool call has
-				// already returned its job id by now.
-				trk.finish(jobCtx.Err(), err)
-			}()
-			// Queue for a concurrency/write slot here — not before Start —
-			// so the parent tool call returns a job id immediately.
-			releaseSlot, slotErr := t.acquireSlot(jobCtx, slotReq, spec.Sched)
-			if slotErr != nil {
-				// A refusal is orchestration, not execution: nothing ran under
-				// this run, so the store is owed no terminal for it.
-				return FormatSubagentRunResult("", run, true), slotErr
-			}
-			defer releaseSlot()
-			if err := t.beginExecution(jobCtx, life, spec.Context.Ephemeral, trk, run); err != nil {
-				return FormatSubagentRunResult("", run, true), err
-			}
-			answer, err := runSession(jobCtx, trk.wrap(), writerRegistered)
-			if err != nil {
-				return FormatSubagentRunResult("", run, true), errors.Join(err, t.saveRunTerminal(run, err))
-			}
-			if err := t.transcripts.SaveCompleted(run); err != nil {
-				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
-			}
-			return FormatSubagentRunResult(answer, run, false), nil
-		})
-		releaseStart()
-		// Hand the tracker to the job goroutine: the outer defer must not
-		// finish (and close) it while the job still runs.
-		backgroundHandoff = true
-		queuedNote := ""
-		if t.scheduler != nil {
-			queuedNote = " It may wait in the session queue until a concurrency/write slot is free."
-		}
-		if run != nil && run.Ref != "" {
-			return fmt.Sprintf("Started background task %q (%s).%s\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, queuedNote, FormatSubagentReference(run)), nil
-		}
-		return fmt.Sprintf("Started background task %q (%s).%s It runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, queuedNote), nil
+		result, err = t.startProfileBackground(ctx, plan, environment, req, execution, life, trk, releaseResident)
+		handoff = err == nil
+		return result, err
 	}
-
-	// Foreground: the slot has been held since before the transcript existed.
-	defer run.Release()
-	if err := t.beginExecution(ctx, life, spec.Context.Ephemeral, trk, run); err != nil {
-		return "", err
-	}
-	answer, err := runSession(ctx, trk.wrap(), false)
-	if err != nil {
-		return "", t.endedRunError(run, err)
-	}
-	if t.transcripts != nil && run.Ref != "" {
-		if err := t.transcripts.SaveCompleted(run); err != nil {
-			return "", errors.Join(err, t.transcripts.SaveFailed(run))
-		}
-		return FormatSubagentRunResult(answer, run, false), nil
-	}
-	return GuardSubagentHostDecisionText(answer), nil
+	return t.runScheduledProfile(ctx, plan, environment, req, execution, life, trk)
 }
 
 // endedRunError records how a run that executed ended and returns its error. A
@@ -781,6 +629,7 @@ func (t *TaskTool) bashCanEnforceWriteRoots() bool {
 }
 
 func childToolIdentityContext(ctx context.Context) context.Context {
+	ctx = mutation.WithoutLease(ctx)
 	ctx = tool.WithoutGoalTurnRecorder(ctx)
 	ctx = memory.WithoutQueue(ctx)
 	ctx = jobs.WithoutManager(ctx)
@@ -823,6 +672,9 @@ func (t *TaskTool) effectiveEffortIdentity(effort string) string {
 // buildSubReg returns the sub-agent's tool set: the named whitelist (minus
 // unavailable sub-agent tools), or every parent tool except those tools.
 func (t *TaskTool) buildSubReg(names []string, childDepth int) *tool.Registry {
+	if t.environmentID != "" {
+		return agent.SubagentToolRegistryWithOwnedJobs(t.parentReg, names, childDepth, t.maxDepth(), t.capabilityRuntime)
+	}
 	return agent.SubagentToolRegistryForDepthWithRuntime(t.parentReg, names, childDepth, t.maxDepth(), t.capabilityRuntime)
 }
 

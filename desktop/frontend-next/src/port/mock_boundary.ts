@@ -7,6 +7,7 @@ import { MockShell } from "./mock_shell";
 import { MockCompositions } from "./mock_composition";
 import type { AgentComposition } from "./composition";
 import type { PersonaDraft, PersonaSettings } from "./boundary";
+import type { IsolationCatalog, IsolatedDiscardPreview, IsolatedDiscardRequest, RootSceneRequest } from "./isolation";
 
 // The boundary half of the fixture: what the agent is refused outright, and how
 // far an approved write reaches. It carries one rule of each kind already, so
@@ -235,16 +236,36 @@ export class MockBoundary extends MockShell {
     return structuredClone(this.toolList);
   }
 
-  private lease: WriteLeaseSettings = { optimistic: true, maxWaitMinutes: 0, path: "/Users/you/.reasonix/config.toml" };
+  private lease: WriteLeaseSettings = { optimistic: true, maxWaitMinutes: 0, path: "/Users/you/.reasonix/config.toml", collaboration: "legacy", autoIntegrate: true,
+    effective: { collaboration: "legacy", optimistic: true, maxWaitMinutes: 0, maxSubagentConcurrency: 8, maxParallelWriters: 4, transactionWaitSeconds: 0, autoIntegrate: true } };
 
   async writeLease(): Promise<WriteLeaseSettings> {
-    return { ...this.lease };
+    return structuredClone(this.lease);
   }
 
-  async saveWriteLease(edit: { optimistic?: boolean; maxWaitMinutes?: number }): Promise<WriteLeaseSettings> {
+  async saveWriteLease(edit: { optimistic?: boolean; maxWaitMinutes?: number; collaboration?: string; autoIntegrate?: boolean }): Promise<WriteLeaseSettings> {
     this.lease = { ...this.lease, ...edit };
-    return { ...this.lease };
+    return structuredClone(this.lease);
   }
+
+  private isolationCatalog: IsolationCatalog = { enabled: true, recoveryRequired: false, diagnostics: [], results: [{
+    id: "iso_55bb1122", kind: "result", state: "pending", activity: "inactive", owner: "example-session",
+    candidateRoot: "/Users/you/.reasonix/worktrees/isolated/candidate-example/project", baselineTree: "fixture-base", tree: "fixture-result",
+    changes: [{ Status: "M", Path: "src/settings.ts" }], verification: "unknown", cleanupComplete: false, actions: ["discard_preview"],
+  }] };
+
+  async isolatedResults(): Promise<IsolationCatalog> { return structuredClone(this.isolationCatalog); }
+  async manageRootScene(_request: RootSceneRequest): Promise<void> { throw new Error("mock has no persistent root scene"); }
+  async previewIsolatedDiscard(id: string): Promise<IsolatedDiscardPreview> {
+    const row = this.isolationCatalog.results.find((result) => result.id === id && !result.cleanupComplete);
+    if (!row?.candidateRoot) throw new Error("unknown isolated result");
+    return { id, revision: "1".repeat(64), candidateRoot: row.candidateRoot, entries: 8, state: row.state };
+  }
+  async discardIsolated(request: IsolatedDiscardRequest): Promise<void> {
+    if (request.revision !== "1".repeat(64)) throw new Error("candidate changed after preview");
+    this.isolationCatalog.results = this.isolationCatalog.results.map((row) => row.id === request.id ? { ...row, state: "discarded", cleanupComplete: true } : row);
+  }
+  async recoverIsolatedIntegration(): Promise<void> { return; }
 
   protected peerState: PeersState = { enabled: false, peers: [], held: [] };
 

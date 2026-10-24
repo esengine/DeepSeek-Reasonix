@@ -92,6 +92,33 @@ func TestWaitMergesBackgroundEvidenceExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestBackgroundCollectorsNeverPromoteUnboundCheckAfterParentWrite(t *testing.T) {
+	for _, collector := range []tool.Tool{waitJob{}, bashOutput{}} {
+		t.Run(collector.Name(), func(t *testing.T) {
+			m := jobs.NewManager(event.Discard)
+			t.Cleanup(m.Close)
+			ledger := evidence.NewLedger()
+			ctx := evidence.WithLedger(jobs.WithSession(jobs.WithManager(t.Context(), m), "owner"), ledger)
+			job := m.StartForSession("owner", "task", "old check", func(jobCtx context.Context, _ io.Writer) (string, error) {
+				jobs.PublishEvidence(jobCtx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{ToolName: "bash", Command: "go test ./...", Success: true, Verification: evidence.VerificationPassed}}})
+				return "done", nil
+			})
+			if _, outcome := m.WaitForSession(ctx, "owner", []string{job.ID}, jobs.WaitOptions{}); outcome != jobs.WaitFinished {
+				t.Fatalf("fixture job did not finish: %v", outcome)
+			}
+			ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"changed.go"}})
+			args := []byte(`{"job_id":"` + job.ID + `","job_ids":["` + job.ID + `"]}`)
+			if _, err := collector.Execute(ctx, args); err != nil {
+				t.Fatal(err)
+			}
+			mutation, _ := ledger.LatestSuccessfulMutationIndex()
+			if ledger.HasSuccessfulVerificationCommandAfter(mutation) || ledger.HasSuccessfulCommandAfter("go test ./...", mutation) {
+				t.Fatal("collection manufactured fresh verification from an old child check")
+			}
+		})
+	}
+}
+
 func TestWaitWithoutLedgerDoesNotConsumeBackgroundEvidence(t *testing.T) {
 	m := jobs.NewManager(event.Discard)
 	defer m.Close()

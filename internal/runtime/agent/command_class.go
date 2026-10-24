@@ -175,7 +175,7 @@ func (a *Agent) askTriage(ctx context.Context, systemPrompt, input, source strin
 		}
 	}()
 
-	ch, err := a.triageProvider().Stream(ctx, provider.Request{
+	ch, err := provider.Stream(ctx, a.triageProvider(), provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: systemPrompt},
 			{Role: provider.RoleUser, Content: input},

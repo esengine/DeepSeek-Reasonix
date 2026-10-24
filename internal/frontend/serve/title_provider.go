@@ -29,7 +29,7 @@ func (s *Server) currentTitleProvider() titleProviderState {
 }
 
 func (s *Server) initTitleProvider() error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadForRootReadOnly(".")
 	if err != nil {
 		return err
 	}

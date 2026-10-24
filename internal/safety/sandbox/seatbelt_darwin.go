@@ -18,6 +18,9 @@ import (
 // wrapping happened; false means the argv is unwrapped (sandbox off, or
 // sandbox-exec missing). Callers decide whether an unwrapped command is allowed.
 func Command(spec Spec, sh Shell, command string) ([]string, bool) {
+	if refusesCommand(spec) {
+		return nil, false
+	}
 	if !spec.Enforce() || !Available() {
 		return sh.argv(command), false
 	}
@@ -29,6 +32,9 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 // without shell interpretation — suitable for direct binary invocations like
 // ripgrep that don't need a shell wrapper.
 func CommandArgs(spec Spec, args []string) ([]string, bool) {
+	if refusesCommand(spec) {
+		return nil, false
+	}
 	if !spec.Enforce() || !Available() {
 		return args, false
 	}

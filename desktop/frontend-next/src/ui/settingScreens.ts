@@ -41,6 +41,8 @@ export const SETTING_SCREEN: Record<string, string> = {
   "agent.max_subagent_steer_bytes": "tools:subagent-steer",
   "agent.max_subagent_steers_per_minute": "tools:subagent-steer",
   "agent.write_lease": "tools:write-lease",
+  "agent.collaboration": "tools:write-lease",
+  "agent.auto_integrate": "tools:write-lease",
   "ui.show_receipt": "session:receipt",
   "ui.show_changed_files": "session:changed-files",
   "ui.feedback_level_notices": "session:feedback-level-notices",

@@ -2,8 +2,6 @@ package boot
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -53,9 +51,7 @@ func TestEffectContendedYieldTellsTheModelAndTheReceipt(t *testing.T) {
 	t.Parallel()
 	home := statedBootHome(t)
 	root := testenv.TempDir(t)
-	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	initEffectRepository(t, root)
 	writeFile(t, root, "reasonix.toml", `
 default_model = "test-model"
 [codegraph]

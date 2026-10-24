@@ -151,6 +151,10 @@ func (o *Owner) acquirePaths(ctx context.Context, paths []string, held bool) (fu
 }
 
 func (o *Owner) tryPaths(paths []string, held bool) (func(), *ConflictError, error) {
+	return o.tryPathSet(paths, held, true)
+}
+
+func (o *Owner) tryPathSet(paths []string, held, publish bool) (func(), *ConflictError, error) {
 	select {
 	case <-o.local.token:
 	default:
@@ -224,6 +228,12 @@ func (o *Owner) tryPaths(paths []string, held bool) (func(), *ConflictError, err
 			return nil, o.conflict(record.Holder, record.SessionID, record.Paths, paths), errHeld
 		}
 	}
+	if !publish {
+		return nil, nil, nil
+	}
+	if err := o.checkAdmission(paths); err != nil {
+		return nil, nil, err
+	}
 	if !held {
 		var id [16]byte
 		if _, err := rand.Read(id[:]); err != nil {
@@ -239,18 +249,24 @@ func (o *Owner) tryPaths(paths []string, held bool) (func(), *ConflictError, err
 			return nil, nil, err
 		}
 	}
-	if err := o.writeClaim(path, paths); err != nil {
+	defer func() {
 		if release != nil {
+			_ = os.Remove(path)
 			release()
+			_ = os.Remove(path + ".lock")
 		}
+	}()
+	if err := o.writeClaim(path, paths); err != nil {
 		return nil, nil, err
 	}
 	if held {
 		return nil, nil, nil
 	}
 	sharedRelease := shared
+	claimRelease := release
+	release = nil
 	shared = nil
-	return func() { o.releaseClaim(path, release); sharedRelease() }, nil, nil
+	return func() { o.releaseClaim(path, claimRelease); sharedRelease() }, nil, nil
 }
 
 func (o *Owner) releaseClaim(path string, release func()) {

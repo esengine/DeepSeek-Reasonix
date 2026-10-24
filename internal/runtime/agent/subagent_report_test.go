@@ -78,3 +78,21 @@ func TestHostReceiptsStaySilentForReadOnlyChildren(t *testing.T) {
 		t.Fatalf("answer = %q, want it unchanged", got)
 	}
 }
+
+func TestHostReceiptsInvalidateOldChecksAndShowLatestOutcome(t *testing.T) {
+	summary := evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{
+		{ToolName: "bash", Success: true, Command: "go test ./...", Verification: evidence.VerificationPassed},
+		{ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"changed.go"}},
+	}}
+	if got := formatHostReceipts(summary, writeclaim.WritePathSet{}); !strings.Contains(got, "invalidated by later changes") {
+		t.Fatalf("stale check still presented as fresh: %s", got)
+	}
+	summary.Receipts = append(summary.Receipts, evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./...", Verification: evidence.VerificationFailed})
+	if got := formatHostReceipts(summary, writeclaim.WritePathSet{}); strings.Contains(got, "verification passed") || !strings.Contains(got, "verification failed") {
+		t.Fatalf("superseded check outcome: %s", got)
+	}
+	summary.Receipts = append(summary.Receipts, evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
+	if got := formatHostReceipts(summary, writeclaim.WritePathSet{}); strings.Contains(got, "verification failed") || strings.Contains(got, "verification passed") {
+		t.Fatalf("unknown latest check inherited an older verdict: %s", got)
+	}
+}

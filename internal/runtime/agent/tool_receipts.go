@@ -62,15 +62,21 @@ func (a *Agent) recordToolReceipts(ctx context.Context, plan *toolCallPlan, resu
 // notifyToolHooks lets success and failure hooks observe a finished call. The
 // name is the real target's, so a proxied tool reaches hooks under the tool
 // they were written against rather than under the proxy.
-func (a *Agent) notifyToolHooks(ctx context.Context, name string, args json.RawMessage, result string, err error) {
+func (a *Agent) notifyToolHooks(ctx context.Context, name string, args json.RawMessage, result string, err error) error {
 	if a.svc.hooks == nil {
-		return
+		return nil
 	}
+	ctx, end, holdErr := a.holdHookMutation(ctx)
+	if holdErr != nil {
+		return holdErr
+	}
+	defer end()
 	if err != nil {
 		a.svc.hooks.PostToolUseFailure(ctx, name, args, result, err)
-		return
+		return nil
 	}
 	a.svc.hooks.PostToolUse(ctx, name, args, result)
+	return nil
 }
 
 // stampReviewGrant records what the host granted the execution behind a review

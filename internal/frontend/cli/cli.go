@@ -502,27 +502,25 @@ func runAgent(args []string, version string) int {
 	// answer; with no mode named, the build's sandbox claim and the folder's
 	// trust decide between that and auto once the controller exists.
 	overrides := runBuildOverrides(effortOverride, allowedTools, f.additionalDirs, workspaceRoot, permissions.approval, cliSessionRecoveredHandler(leases), ablated, *f.failOnUnverified)
-	overrides.Version = version
+	overrides = withRunSessionEnvironment(overrides, version, resumePath)
 	overrides = withComposition(overrides, *f.agentComposition, resumeSession)
 	ctrl, err := setupProfileWithOverrides(ctx, *f.model, *f.maxSteps, true, sink, profile, overrides)
 	if err != nil {
-		if resultOutput != nil && format != runOutputText {
-			if encodeErr := resultOutput.Finalize("", started, err); encodeErr != nil {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, encodeErr)
-			}
-			return 1
-		}
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 1
+		return reportRunBuildFailure(resultOutput, format, started, err)
 	}
-	defer ctrl.Close()
-	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
+	defer func() { ctrl.Close() }()
 	permissions.approval = chain.settlePosture(ctrl, strings.TrimSpace(*f.permissionMode) == "", permissions.approval)
 
 	if err := bindRunSession(ctrl, leases, resumeSession, resumePath); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}
+	ctrl, finishPreparation, err := prepareRunRoot(ctx, ctrl, leases, cliProfileBuildOptions(*f.model, *f.maxSteps, true, sink, profile, overrides))
+	if err != nil {
+		return reportRunBuildFailure(resultOutput, format, started, err)
+	}
+	defer finishPreparation()
+	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 
 	chain.begin(ctrl, version, prompt)
 	runErr := ctrl.Run(ctx, prompt)

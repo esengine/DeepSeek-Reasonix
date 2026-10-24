@@ -33,7 +33,7 @@ func (c *Controller) spawnGuardedTurn(ctx context.Context, cancel context.Cancel
 				c.finishGuardedTurn(fmt.Errorf("internal error: %v", r), completion)
 			}
 		}()
-		err := body(ctx)
+		err := c.runWithRootPublication(ctx, body)
 		c.finishGuardedTurn(explainError(err), completion)
 	}()
 }

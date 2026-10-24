@@ -20,8 +20,9 @@ import (
 // leaves its result pending; in the APPLY turn it applies the id the transcript
 // carries and reports what the host answered.
 type restartIsolationProvider struct {
-	mu          sync.Mutex
-	applyResult string
+	mu             sync.Mutex
+	applyResult    string
+	delegateResult string
 }
 
 func (p *restartIsolationProvider) Name() string { return "boot-restart-isolation" }
@@ -60,6 +61,9 @@ func (p *restartIsolationProvider) Stream(_ context.Context, req provider.Reques
 		p.mu.Unlock()
 		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
 	case hasToolResult(req):
+		p.mu.Lock()
+		p.delegateResult = last
+		p.mu.Unlock()
 		ch <- provider.Chunk{Type: provider.ChunkText, Text: "left pending"}
 	default:
 		call("t1", "task", map[string]string{"prompt": isolatedTask, "isolation": "worktree"})
@@ -133,6 +137,13 @@ model = "x"
 	ctrl.SetSessionPath(filepath.Join(dir, ".reasonix", "sessions", "isolation.jsonl"))
 	if err := ctrl.Run(context.Background(), "DELEGATE make out.txt in isolation"); err != nil {
 		t.Fatalf("delegate: %v", err)
+	}
+	rec.mu.Lock()
+	delegated := rec.delegateResult
+	rec.mu.Unlock()
+	if isoIDPattern.FindString(delegated) == "" {
+		ctrl.Close()
+		t.Fatalf("delegation produced no retained result: %s", delegated)
 	}
 	if restart {
 		path := ctrl.SessionPath()

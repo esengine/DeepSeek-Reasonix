@@ -372,6 +372,7 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionConflictLog(sessionPath),
 		SessionRecoveryState(sessionPath),
 		SessionContext(sessionPath),
+		SessionEnvironment(sessionPath),
 	}
 }
 

@@ -35,6 +35,9 @@ func (b bash) prepareGuardedLaunch(ctx context.Context, sh sandbox.Shell, p bash
 	if err := b.refuseCommand(ctx, sh, p.Command); err != nil {
 		return sandbox.Prepared{}, pipeStatusProbe{}, nil, err
 	}
+	if launcher := tool.ControlledShellFrom(ctx); launcher != nil {
+		return b.prepareControlledLaunch(ctx, launcher, sh, p)
+	}
 	return b.prepareLaunch(ctx, sh, p, args)
 }
 

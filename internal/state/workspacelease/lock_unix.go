@@ -5,6 +5,7 @@ package workspacelease
 import (
 	"errors"
 	"os"
+	"reasonix/internal/base/locktrace"
 
 	"golang.org/x/sys/unix"
 )
@@ -22,6 +23,7 @@ func tryFileLock(path string, flags int) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	attempt := locktrace.BeginAttempt()
 	if err := unix.Flock(int(f.Fd()), flags); err != nil {
 		_ = f.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
@@ -29,8 +31,11 @@ func tryFileLock(path string, flags int) (func(), error) {
 		}
 		return nil, err
 	}
+	hold := attempt.Acquired(path, flags&unix.LOCK_SH != 0)
 	return func() {
+		hold.Releasing()
 		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
 		_ = f.Close()
+		hold.Released()
 	}, nil
 }

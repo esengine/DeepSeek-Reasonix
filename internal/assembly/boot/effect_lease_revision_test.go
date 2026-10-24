@@ -80,9 +80,7 @@ func revisionLeaseWorkspace(t *testing.T) (string, func(provider.Provider, event
 	isolateConfigHome(t)
 	useStrictClaims(t)
 	root := robustTempDir(t)
-	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	initEffectRepository(t, root)
 	t.Chdir(root)
 	kind := "lease-revision-" + filepath.Base(root)
 	writeFile(t, root, "reasonix.toml", `

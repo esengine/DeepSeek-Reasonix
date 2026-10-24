@@ -51,6 +51,7 @@ type Request struct {
 	Timeout           time.Duration
 	WaitDelay         time.Duration
 	CommandPreview    string
+	Command           string
 	ShellKind         string
 	ShellPath         string
 	Source            string
@@ -102,14 +103,20 @@ func RunForeground(ctx context.Context, req Request) Result {
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, req.Argv[0], req.Argv[1:]...)
-	cmd.Dir = req.Dir
-	cmd.Env = req.Env
-	cmd.WaitDelay = waitDelay
+	cmd, finishObservation, err := prepareForegroundCommand(runCtx, req, waitDelay)
+	if err != nil {
+		return Result{State: tool.ShellStateNotRun, FailurePhase: tool.ShellPhasePreflight, Err: err, Cmd: cmd}
+	}
+	physicallyCompleted := false
+	var completedWait <-chan struct{}
+	defer func() { finishObservation.end(physicallyCompleted, completedWait) }()
 
 	collector := newOutputCollector(combinedOutputMaxBytes, tool.OutputTailMaxBytes)
 	var writers []io.Writer
 	writers = append(writers, collector.combined, collector.tail)
+	if observer, ok := tool.ControlledShellFrom(ctx).(io.Writer); ok {
+		writers = append(writers, observer)
+	}
 	if req.Progress != nil {
 		pw := newProgressWriter(req.Progress, progressOutputMaxBytes, progressOutputTruncated)
 		pw.suppress = req.SuppressLine
@@ -123,22 +130,9 @@ func RunForeground(ctx context.Context, req Request) Result {
 	cmd.Stdout = w
 	cmd.Stderr = w
 
-	run := req.Run
-	if run == nil {
-		run = proc.RunCommand
-	}
-	source := req.Source
-	if source == "" {
-		source = "shellrun"
-	}
-	tracked, err := run(runCtx, cmd, proc.RunOptions{
-		Track:           req.Track,
-		CancelWaitGrace: waitDelay + time.Second,
-		Source:          source,
-		ShellKind:       req.ShellKind,
-		ShellPath:       req.ShellPath,
-		CommandPreview:  req.CommandPreview,
-	})
+	tracked, err := runForegroundProcess(runCtx, req, cmd, waitDelay)
+	physicallyCompleted = completedForegroundWait(runCtx, tracked, err)
+	completedWait = tracked.WaitCompleted()
 	out := Result{
 		Combined:   collector.combinedString(),
 		OutputTail: collector.tailString(),
@@ -195,10 +189,24 @@ func RunForeground(ctx context.Context, req Request) Result {
 		out.FailurePhase = tool.ShellPhaseExecution
 	} else {
 		out.FailurePhase = tool.ShellPhaseLaunch
-		warnInterpreterStartFailure(source, req, err)
+		warnInterpreterStartFailure(foregroundSource(req), req, err)
 	}
 	out.Err = err
 	return out
+}
+
+func completedForegroundWait(ctx context.Context, tracked *proc.TrackedCommand, err error) bool {
+	if done := tracked.WaitCompleted(); done != nil {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}
+	// An untracked synchronous wait has completed when it returns. Cancellation
+	// without a completion signal cannot establish physical completion.
+	return ctx.Err() == nil && !isCanceledWait(err)
 }
 
 func warnInterpreterStartFailure(source string, req Request, err error) {

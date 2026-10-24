@@ -11,7 +11,7 @@ import (
 
 // runForegroundDetailed uses the shared shellrun collector so model bash and
 // user !command share exit-code / phase / output-tail classification.
-func (b bash) runForegroundDetailed(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, probe pipeStatusProbe) (string, *tool.ShellExecution, error) {
+func (b bash) runForegroundDetailed(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, probe pipeStatusProbe) (string, *tool.ShellExecution, <-chan struct{}, error) {
 	ex := shellrun.DescriptorFromShell(sh)
 	var progress func(string)
 	if emit, ok := tool.ProgressFrom(ctx); ok {
@@ -25,6 +25,7 @@ func (b bash) runForegroundDetailed(ctx context.Context, p bashParams, sh sandbo
 		Timeout:           b.foregroundTimeout(p.TimeoutSeconds),
 		WaitDelay:         bashWaitDelay,
 		CommandPreview:    commandPreview(p.Command),
+		Command:           p.Command,
 		ShellKind:         sh.Kind.String(),
 		ShellPath:         sh.Path,
 		Source:            "bash_tool",
@@ -68,5 +69,5 @@ func (b bash) runForegroundDetailed(ctx context.Context, p bashParams, sh sandbo
 	if res.State == tool.ShellStateTimedOut {
 		runErr = fmt.Errorf("%w; %s", runErr, b.timeoutExit(p.TimeoutSeconds))
 	}
-	return probe.harvest(res.Combined, ex), ex, runErr
+	return probe.harvest(res.Combined, ex), ex, res.Tracked.WaitCompleted(), runErr
 }

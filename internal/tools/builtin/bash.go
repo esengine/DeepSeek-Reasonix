@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"runtime"
 	"slices"
@@ -21,6 +20,7 @@ import (
 	"reasonix/internal/base/shellparse"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/sandbox"
+	"reasonix/internal/state/mutation"
 	"reasonix/internal/state/sessiontemp"
 	"reasonix/internal/tools/jobs"
 	"reasonix/internal/tools/shellrun"
@@ -171,6 +171,9 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	if p.Command == "" {
 		return notRun(ex, start, fmt.Errorf("command is required"))
 	}
+	if mutation.HoldingLease(ctx) && (p.PreserveBackgroundProcesses || hasExplicitBackgroundKeepalive(p.Command)) {
+		return refusedBeforeLaunch(ex, start, tool.ShellPhasePreflight, tool.Refusal{Code: "workspace.detached_mutation", Message: "a coordinated shell operation must own its process lifetime; run the service directly with run_in_background instead of detaching it"})
+	}
 	sh := b.resolved()
 	if !sh.SupportsChaining() && (hasUnquotedSeq(p.Command, "&&") || hasUnquotedSeq(p.Command, "||")) {
 		return notRun(ex, start, fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. "+
@@ -193,9 +196,10 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	// Background jobs take ownership of the lease until the job goroutine ends.
 	// Foreground/terminal paths release after the process exits.
 	releaseLease := true
+	var tempWait <-chan struct{}
 	defer func() {
 		if releaseLease && lease != nil {
-			lease.Release()
+			proc.AfterWait(tempWait, lease.Release)
 		}
 	}()
 
@@ -205,7 +209,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	// (the host terminal spawns with its own unfiltered environment, which
 	// would leak the credentials the user asked to strip), and never for
 	// background jobs. ok=false falls back to local execution unchanged.
-	if b.terminal != nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
+	if b.terminal != nil && tool.ControlledShellFrom(ctx) == nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
 		envMap := shellEnvMap(b.sb.ShellEnv, sandbox.SessionTempEnvMap(prepared.SessionTemp, prepared.LinuxSandboxed))
 		if out, ok, termErr := b.terminal.RunCommand(ctx, p.Command, b.workDir, b.foregroundTimeout(p.TimeoutSeconds), envMap); ok {
 			out = appendSessionDataHint(appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), nul.note())
@@ -222,6 +226,10 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	}
 
 	if p.RunInBackground {
+		continuation, err := mutation.PrepareContinuation(ctx)
+		if err != nil {
+			return refusedBeforeLaunch(ex, start, tool.ShellPhasePreflight, err)
+		}
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
 			ex.State = tool.ShellStateNotRun
@@ -230,30 +238,12 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 			ex.DurationMs = time.Since(start).Milliseconds()
 			return tool.DetailedResult{Execution: ex}, fmt.Errorf("background execution is not available in this context")
 		}
-		workDir := b.workDir
-		// Transfer lease ownership to the job closure; it releases when the
-		// background process ends (including start failures inside the job).
-		jobLease := lease
+		run := backgroundShell{params: p, shell: sh, prepared: prepared, env: cmdEnv, temp: lease, mutation: continuation}
+		job, startErr := b.startBackground(ctx, jm, run)
+		if startErr != nil {
+			return refusedBeforeLaunch(ex, start, tool.ShellPhaseDependency, startErr)
+		}
 		releaseLease = false
-		// The job runs under the manager's session context (no foreground timeout), so it
-		// survives this turn; its combined output streams to the job buffer.
-		job := jm.StartForSession(jobs.SessionFromContext(ctx), "bash", commandPreview(p.Command), func(jobCtx context.Context, out io.Writer) (string, error) {
-			if jobLease != nil {
-				defer jobLease.Release()
-			}
-			cmd := exec.CommandContext(jobCtx, argv[0], argv[1:]...)
-			cmd.Dir = workDir
-			cmd.Env = cmdEnv
-			cmd.WaitDelay = bashWaitDelay
-			cmd.Stdout = out
-			cmd.Stderr = out
-			tracked, runErr := runShellProcess(jobCtx, cmd, sh, p.Command, shouldTrackShellProcess(wrapped, sh, p.Command, p.PreserveBackgroundProcesses))
-			if shouldReapAfterRun(jobCtx, sh, p.Command, p.PreserveBackgroundProcesses) {
-				reapShellProcess(cmd, tracked) // reap process-group stragglers the job left running (#3702)
-			}
-			b.writeEgressNote(out, prepared.EgressToken)
-			return "", jobExit(normalizeBashRunError(jobCtx, runErr, p.PreserveBackgroundProcesses))
-		}, jobs.WithPresentation(p.Description, p.Command))
 		msg := fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID)
 		// Background start is not a completed execution: completion is reported
 		// later by bash_output/wait. Do not masquerade as success with exit 0.
@@ -266,7 +256,9 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 		}, nil
 	}
 
-	out, runEx, err := b.runForegroundDetailed(ctx, p, sh, argv, wrapped, cmdEnv, probe)
+	out, runEx, waitDone, err := b.runForegroundDetailed(ctx, p, sh, argv, wrapped, cmdEnv, probe)
+	tempWait = waitDone
+	err = errors.Join(err, mutation.HoldUntil(ctx, waitDone))
 	mergeRunInto(ex, runEx)
 	ex.DurationMs = time.Since(start).Milliseconds()
 	return tool.DetailedResult{
@@ -331,6 +323,9 @@ func mergeRunInto(dst *tool.ShellExecution, src *tool.ShellExecution) {
 // builds the sandboxed argv, and applies sandbox-escape approval. The caller
 // owns the returned lease and must Release it after the process exits.
 func (b bash) prepareLaunch(ctx context.Context, sh sandbox.Shell, p bashParams, rawArgs json.RawMessage) (sandbox.Prepared, pipeStatusProbe, *sessiontemp.Lease, error) {
+	if err := sandbox.RequiredIntegrityFault(b.sb); err != nil {
+		return sandbox.Prepared{}, pipeStatusProbe{}, nil, tool.Refusal{Code: "sandbox.incomplete_integrity", Message: err.Error()}
+	}
 	// command is what the user and every approval prompt see; launch is what the
 	// shell actually runs, which the host may have appended a report to.
 	command := p.Command
@@ -357,11 +352,17 @@ func (b bash) prepareLaunch(ctx context.Context, sh sandbox.Shell, p bashParams,
 		Argv:           argv,
 		Wrapped:        wrapped,
 		SessionTemp:    sessionDir,
-		EnvOverrides:   sandbox.SessionTempEnv(sessionDir, linuxSB),
+		EnvOverrides:   sandbox.PrivateProcessEnv(spec, sessionDir, linuxSB),
 		LinuxSandboxed: linuxSB,
 	}
+	if b.sb.RequiredIntegrity != "" && !wrapped {
+		if lease != nil {
+			lease.Release()
+		}
+		return sandbox.Prepared{}, probe, nil, tool.Refusal{Code: "sandbox.incomplete_integrity", Message: sandbox.ErrIncompleteIntegrity.Error()}
+	}
 
-	if b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, command, rawArgs) {
+	if b.sb.RequiredIntegrity == "" && b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, command, rawArgs) {
 		prepared.Argv = unconfinedShellArgv(sh, launch)
 		prepared.Wrapped = false
 		// Escaped commands still inherit private temp env vars pointing at the
@@ -547,8 +548,9 @@ func shouldTrackShellProcess(wrapped bool, sh sandbox.Shell, command string, pre
 	return sh.Kind != sandbox.ShellBash || !hasExplicitBackgroundKeepalive(command)
 }
 
-func runShellProcess(ctx context.Context, cmd *exec.Cmd, sh sandbox.Shell, command string, track bool) (*proc.TrackedCommand, error) {
+func runShellProcess(ctx context.Context, cmd *exec.Cmd, sh sandbox.Shell, command string, track bool, started func(*exec.Cmd)) (*proc.TrackedCommand, error) {
 	return proc.RunCommand(ctx, cmd, proc.RunOptions{
+		OnStarted:       started,
 		Track:           track,
 		CancelWaitGrace: bashWaitDelay + time.Second,
 		Source:          "bash_tool",

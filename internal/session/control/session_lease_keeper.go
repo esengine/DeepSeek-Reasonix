@@ -242,6 +242,7 @@ func (k *SessionLeaseKeeper) BindControllerAuthority(c *Controller) error {
 		return err
 	}
 	k.controller = c
+	c.ConfigureSessionLeaseAdoption(func(lease *sessionstore.SessionLease) error { return k.adoptSessionLease(c, lease) })
 	return nil
 }
 

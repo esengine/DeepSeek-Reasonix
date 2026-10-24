@@ -133,6 +133,10 @@ type RecoveryBranchOptions struct {
 	Name         string
 	Reason       string
 	BranchMeta   BranchMeta
+	// BeforePublish persists host-owned execution attachment before exposing
+	// a derived transcript. It is required when the source has an environment.
+	BeforePublish       func(string) error
+	BeforePublishLocked func(string, *SessionPublication) error
 }
 
 type RecoveryBranchInfo struct {
@@ -230,7 +234,7 @@ func sessionArtifactExists(path string) bool {
 
 func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 	baseRevision := int64(0)
-	releaseAuth, err := s.requireWriteAuthorityForSave(path)
+	releaseAuth, err := s.beginEnvironmentSave(path)
 	if err != nil {
 		return err
 	}
@@ -635,6 +639,11 @@ func (s *Session) saveRecoveryBranch(opts RecoveryBranchOptions, shutdown bool) 
 		return RecoveryBranchInfo{}, fmt.Errorf("empty original session path")
 	}
 	opts.OriginalPath = originalPath
+	if _, bound, err := LoadExecutionEnvironment(originalPath); err != nil {
+		return RecoveryBranchInfo{}, err
+	} else if bound && opts.BeforePublishLocked == nil {
+		return RecoveryBranchInfo{}, ErrExecutionEnvironmentMismatch
+	}
 	msgs, version, rewriteVersion := s.SnapshotWithVersion()
 	preview, turns := SessionPreviewFromMessages(msgs)
 	if turns == 0 {
@@ -1798,6 +1807,9 @@ func reconcileOverlongSessionFilenames(dir string) error {
 // migrates the sidecars that carry user state. It returns the new branch ID,
 // or "" when the session was skipped because a runtime may still own it.
 func renameOverlongSession(oldPath string) (string, error) {
+	if err := refuseBoundConversationTransfer(oldPath); err != nil {
+		return "", err
+	}
 	oldID := BranchID(oldPath)
 	newID := recoveryParentStem(oldID)
 	if newID == oldID {

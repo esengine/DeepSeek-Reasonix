@@ -160,6 +160,10 @@ func (r *Runner) ToolMutationHooksEnabled() bool {
 	return r.Has(PreToolUse) || r.Has(PostToolUse) || r.Has(PostToolUseFailure)
 }
 
+func (r *Runner) SubagentMutationHooksEnabled() bool {
+	return r.Has(SubagentStart) || r.Has(SubagentStop)
+}
+
 // PreToolUse fires before a tool call. block=true means the call must be
 // refused; message is the reason (fed back to the model and shown to the user).
 func (r *Runner) PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string) {

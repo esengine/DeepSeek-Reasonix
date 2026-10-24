@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/evidence"
+	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/memory"
 	"reasonix/internal/tools/jobs"
 )
@@ -41,6 +42,8 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		return "", err
 	}
 	restrictChildComposition(ctx, reg)
+	ctx = tool.WithoutHostExecutionCapabilities(ctx)
+	ctx = sandbox.WithoutEscapeApprover(ctx)
 	// Isolate temporary files for this run before any tool execution.
 	ctx = tool.WithoutGoalTurnRecorder(ctx)
 	if opts.MemoryQueue != nil {
@@ -53,6 +56,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	}
 	ctx, releaseTemp := withSubagentSessionTemp(ctx)
 	defer releaseTemp()
+	defer jobs.JoinExecution(ctx, opts.Jobs, &err)
 	if opts.SubagentDepth > 0 {
 		ctx = WithSubagentDepth(ctx, opts.SubagentDepth)
 	}
@@ -79,13 +83,25 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	sub := newDelegatedAgent(ctx, prov, reg, sess, opts, sink)
 	// One defer: this returns from a salvage, a review failure, a provider
 	// error and a clean answer, and per-path calls would miss one.
-	defer func() { observeSubagentHandoff(sink, sub, sess, opts, answer, err) }()
+	defer func() {
+		p := recover()
+		if p != nil {
+			err = fmt.Errorf("sub-agent panic: %v", p)
+		}
+		settleChildJobs(ctx, sub, opts.Jobs, &err)
+		if err == nil && answer != "" {
+			answer = composeSubagentAnswer(ctx, answer, sub, writeclaim.SubagentWriteClaim(ctx), opts.ClassifierTaskText)
+		}
+		mergeChildEvidence(ctx, sub)
+		observeSubagentHandoff(sink, sub, sess, opts, answer, err)
+		if p != nil {
+			panic(p)
+		}
+	}()
 	sub.SetPlanMode(planWorkflow)
 	if err := sub.Run(ctx, prompt); err != nil {
-		// Still merge any partial child evidence so parent gates see real writes.
-		mergeChildEvidence(ctx, sub)
 		if answer, ok := salvageReadinessExhaustedAnswer(sub, sess, opts, err); ok {
-			return composeSubagentAnswer(ctx, answer, sub, writeclaim.SubagentWriteClaim(ctx), opts.ClassifierTaskText), nil
+			return answer, nil
 		}
 		return "", fmt.Errorf("sub-agent: %w", err)
 	}
@@ -98,20 +114,18 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 			nudges++
 			sub.pending.preserveEvidence = true
 			if err := sub.Run(ctx, reviewReportNudgePrompt(kind)); err != nil {
-				mergeChildEvidence(ctx, sub)
 				// A retry that fails still keeps local parent mutations; the
 				// parent turns this into Partial/Unverified rather than rolling back.
 				return "", fmt.Errorf("sub-agent: %w", err)
 			}
 		}
 		if !sub.HasSuccessfulReviewReport(kind) {
-			mergeChildEvidence(ctx, sub)
 			// Nudging pays at every role setting: a verdict the host can read is
 			// how a block reaches the gate. Failing over its absence does not —
 			// no report is no block, the state a killed run leaves anyway.
 			if !opts.DeliveryProfile {
 				if answer := latestAssistantAnswer(sess); answer != "" {
-					return composeSubagentAnswer(ctx, reviewWithoutVerdictNote+answer, sub, writeclaim.SubagentWriteClaim(ctx), opts.ClassifierTaskText), nil
+					return reviewWithoutVerdictNote + answer, nil
 				}
 			}
 			dumpRef := dumpFailedSubagentSession(opts.ArchiveDir, string(kind), sess)
@@ -124,9 +138,8 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 			}
 		}
 	}
-	mergeChildEvidence(ctx, sub)
 	if answer := latestAssistantAnswer(sess); answer != "" {
-		return composeSubagentAnswer(ctx, answer, sub, writeclaim.SubagentWriteClaim(ctx), opts.ClassifierTaskText), nil
+		return answer, nil
 	}
 	return "", fmt.Errorf("sub-agent finished without producing a final answer")
 }
@@ -546,7 +559,11 @@ func claimViolations(summary evidence.ChildEvidenceSummary, claims writeclaim.Wr
 	}
 	var out []string
 	for _, p := range summary.MutationPaths() {
-		if !claims.AllowsPath(p) {
+		target := p
+		if !filepath.IsAbs(target) && claims.WorkspaceRoot != "" {
+			target = filepath.Join(claims.WorkspaceRoot, target)
+		}
+		if !claims.AllowsPath(target) {
 			out = append(out, p)
 		}
 	}
@@ -604,15 +621,28 @@ func formatHostReceipts(summary evidence.ChildEvidenceSummary, claims writeclaim
 func hostReceiptCommands(summary evidence.ChildEvidenceSummary) []string {
 	var out []string
 	seen := map[string]bool{}
-	for _, r := range summary.Receipts {
+	latestMutation := -1
+	for i, r := range summary.Receipts {
+		if r.Success && r.Mutation {
+			latestMutation = i
+		}
+	}
+	for i, r := range slices.Backward(summary.Receipts) {
 		cmd := strings.TrimSpace(r.Command)
 		outcome := hostReceiptOutcome(r)
-		if cmd == "" || outcome == "" || seen[cmd] {
+		if cmd == "" || seen[cmd] {
 			continue
 		}
 		seen[cmd] = true
+		if outcome == "" {
+			continue
+		}
+		if r.Verification == evidence.VerificationPassed && i <= latestMutation {
+			outcome += " [invalidated by later changes]"
+		}
 		out = append(out, cmd+outcome)
 	}
+	slices.Reverse(out)
 	return out
 }
 

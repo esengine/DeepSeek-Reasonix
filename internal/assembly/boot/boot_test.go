@@ -4081,9 +4081,8 @@ tier = "lazy"
 func TestBuildDefaultsToNearestGitRoot(t *testing.T) {
 	isolateConfigHome(t)
 	root := robustTempDir(t)
-	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	isolateGitGlobalConfig(t)
+	gitInDir(t, root, "init", "--template=")
 	subdir := filepath.Join(root, "cmd", "tool")
 	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatal(err)

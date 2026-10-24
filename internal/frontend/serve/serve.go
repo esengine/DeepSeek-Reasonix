@@ -110,7 +110,7 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 		fill:   newTitleFiller(),
 		auth:   newAuthGate(serveCfg),
 	}
-	if cfg, err := config.Load(); err == nil {
+	if cfg, err := config.LoadForRootReadOnly("."); err == nil {
 		bc.SetDisplayCurrency(cfg.ExplicitDisplayCurrency())
 	}
 	if err := s.initTitleProvider(); err != nil {
@@ -476,24 +476,19 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		sessionBusy(w)
 		return
 	}
-	// A shell that pins no auto-save path at launch — so an opened window leaves
-	// no empty transcript — left the whole conversation unsaved. Pinning on the
-	// first submit keeps both halves. POST /inbox/items already did this.
-	if ensurer, ok := any(ctrl).(interface{ EnsureSessionPath() }); ok {
-		before := ctrl.SessionPath()
-		ensurer.EnsureSessionPath()
-		// The keeper has never seen a path minted here, and a controller with
-		// no write authority over its own session drops the input — how a
-		// freshly opened pane answered 409 to its own first turn.
-		if after := ctrl.SessionPath(); after != before {
-			if err := s.rebindSessionLease(after); err != nil {
-				s.bindMu.Unlock()
-				sessionInUse(w, err)
-				return
-			}
-			keepUsedWorkspace(ctrl.WorkspaceRoot())
-		}
+	if err := s.pinSubmissionSession(); err != nil {
+		s.bindMu.Unlock()
+		sessionInUse(w, err)
+		return
 	}
+	cleanup, err := s.prepareRootExecutionLocked(r.Context())
+	if err != nil {
+		s.bindMu.Unlock()
+		writeIsolationError(w, err)
+		return
+	}
+	defer cleanup()
+	ctrl = s.ctl()
 	refused := submitOrShell(ctrl, r, body.Input, body.Format, body.RefuseUnknownSlash, body.LocalShell)
 	s.bindMu.Unlock()
 	if refused {

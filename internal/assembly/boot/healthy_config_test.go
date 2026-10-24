@@ -102,7 +102,8 @@ func TestTopLevelFrontendsDeclareVersion(t *testing.T) {
 		match *regexp.Regexp
 	}{
 		{"../../frontend/cli/cli.go", regexp.MustCompile(`Version:\s+version,`)},
-		{"../../frontend/cli/cli.go", regexp.MustCompile(`overrides\.Version = version`)},
+		{"../../frontend/cli/cli.go", regexp.MustCompile(`withRunSessionEnvironment\(overrides, version, resumePath\)`)},
+		{"../../frontend/cli/build_options.go", regexp.MustCompile(`overrides\.Version, overrides\.SessionEnvironmentPath = version, resumePath`)},
 		{"../../frontend/cli/serve_frontend.go", regexp.MustCompile(`Version:\s+opts\.version,`)},
 		{"../../frontend/cli/build_options.go", regexp.MustCompile(`Version:\s+overrides\.Version,`)},
 	} {

@@ -1,7 +1,6 @@
 package delegation
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,30 +18,8 @@ import (
 
 	"reasonix/internal/base/fileutil"
 	fileencoding "reasonix/internal/base/fileutil/encoding"
-	"reasonix/internal/contract/tool"
 	"reasonix/internal/state/store"
 )
-
-// SubagentSpec describes the current invocation identity.
-type SubagentSpec struct {
-	Kind             string
-	Name             string
-	WorkspaceRoot    string
-	ParentSession    string
-	ParentToolCallID string
-	SystemPrompt     string
-	// ExecutionID is the execution this run belongs to, allocated before the
-	// work was opened. A store ref cannot stand in for it: work the scheduler
-	// is holding back has an execution and no transcript yet.
-	ExecutionID string
-	Registry    *tool.Registry
-	ToolContext context.Context
-	Model       string
-	Effort      string
-	// ResumedFrom and UpstreamFrom feed the context capsule only.
-	ResumedFrom  string
-	UpstreamFrom []string
-}
 
 // SubagentRun is a prepared transcript run. Call Release exactly once.
 type SubagentRun struct {
@@ -51,11 +28,15 @@ type SubagentRun struct {
 	Meta       sessionstore.SubagentMeta
 	ForkedFrom string
 
-	store   *SubagentStore
-	release func()
+	store       *SubagentStore
+	release     func()
+	preparation *continuationReservation
 }
 
 func (r *SubagentRun) Release() {
+	if r != nil {
+		r.preparation.close()
+	}
 	if r != nil && r.store != nil && r.Ref != "" {
 		r.store.setLive(r.Ref, nil)
 	}
@@ -87,8 +68,7 @@ type SubagentStore struct {
 
 	mu     sync.Mutex
 	locked map[string]bool
-	// live holds the conversation of every run this process is executing, so a
-	// reader sees a child while it works: its file is written only at the end.
+	// live exposes changes since the last durable admission or terminal save.
 	live  map[string]*liveRun
 	steer steerState
 }
@@ -333,6 +313,7 @@ func (s *SubagentStore) PrepareContinue(ref string, spec SubagentSpec) (*Subagen
 	}
 	meta.ParentSession = spec.ParentSession
 	meta.ParentToolCallID = spec.ParentToolCallID
+	meta.EnvironmentGeneration = spec.EnvironmentGeneration
 	return &SubagentRun{Ref: ref, Session: sess, Meta: meta, store: s, release: release}, nil
 }
 
@@ -376,7 +357,24 @@ func (s *SubagentStore) PrepareLegacyForkFrom(ref string, spec SubagentSpec) (*S
 	return s.PrepareContinue(ref, spec)
 }
 
-func (s *SubagentStore) prepareContinueFromAncestor(sourceRef string, spec SubagentSpec) (*SubagentRun, error) {
+func (s *SubagentStore) prepareContinueFromAncestor(sourceRef string, spec SubagentSpec) (run *SubagentRun, resultErr error) {
+	if spec.continuationSource == nil {
+		nearest, err := s.ancestorReference(sourceRef, spec.ParentSession)
+		if err != nil {
+			return nil, err
+		}
+		reservation, err := s.reserveContinuation(spec.ParentSession, nearest)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if resultErr != nil || run == nil {
+				reservation.close()
+			} else {
+				run.preparation = reservation
+			}
+		}()
+	}
 	sourceRef, err := s.nearestLineageSource(sourceRef, spec)
 	if err != nil {
 		return nil, err
@@ -401,32 +399,15 @@ func (s *SubagentStore) prepareContinueFromAncestor(sourceRef string, spec Subag
 }
 
 func (s *SubagentStore) nearestLineageSource(requestedRef string, spec SubagentSpec) (string, error) {
-	ancestors, err := s.sessionAncestors(spec.ParentSession)
+	ref, err := s.ancestorReference(requestedRef, spec.ParentSession)
 	if err != nil {
 		return "", err
 	}
-	for _, ancestor := range ancestors {
-		artifacts, err := sessionstore.ListSubagentsByParent(filepath.Dir(s.dir), ancestor)
-		if err != nil {
-			return "", err
-		}
-		var candidates []sessionstore.SubagentArtifact
-		for _, artifact := range artifacts {
-			if artifact.Ref == requestedRef || s.derivesFrom(artifact.Meta, requestedRef) {
-				candidates = append(candidates, artifact)
-			}
-		}
-		if len(candidates) > 1 {
-			return "", fmt.Errorf("subagent reference %q has multiple candidate transcripts in ancestor parent session %q", requestedRef, ancestor)
-		}
-		if len(candidates) == 1 {
-			if err := validateMeta(candidates[0].Meta, spec); err != nil {
-				return "", err
-			}
-			return candidates[0].Ref, nil
-		}
+	meta, err := s.LoadMeta(ref)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("subagent reference %q is not in current parent session %q lineage", requestedRef, spec.ParentSession)
+	return ref, validateMeta(meta, spec)
 }
 
 func (s *SubagentStore) sessionAncestors(current string) ([]string, error) {
@@ -569,11 +550,22 @@ func (s *SubagentStore) MarkRunning(run *SubagentRun) error {
 	if s.parentDestroyed(run) {
 		return nil
 	}
-	s.setLive(run.Ref, run.Session)
+	if err := s.ensureBranchCreatedAt(run); err != nil {
+		return err
+	}
+	if err := run.Session.Save(s.sessionPath(run.Ref)); err != nil {
+		return err
+	}
 	meta := run.Meta
 	meta.Status = sessionstore.SubagentRunning
 	meta.UpdatedAt = time.Now().UTC()
-	return s.saveMeta(meta)
+	if err := s.saveMeta(meta); err != nil {
+		return err
+	}
+	run.Meta = meta
+	s.setLive(run.Ref, run.Session)
+	run.preparation.close()
+	return nil
 }
 
 func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
@@ -600,10 +592,8 @@ func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
 	return s.saveTerminal(run, sessionstore.SubagentFailed, "")
 }
 
-// ensureBranchCreatedAt seeds the session list sidecar before the first
-// transcript save. Subagent transcripts are written only on completion, so
-// Session.Save would otherwise backfill BranchMeta.CreatedAt with the save
-// moment (completion time). The real start time already lives on run.Meta.
+// ensureBranchCreatedAt preserves the execution's actual start time when its
+// first durable save occurs after preparation.
 func (s *SubagentStore) ensureBranchCreatedAt(run *SubagentRun) error {
 	if s == nil || run == nil || run.Ref == "" {
 		return nil

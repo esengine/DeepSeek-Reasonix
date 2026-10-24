@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *tool.Registry, modelRef, effortRef, parentSession, execution, parentID, continueFrom, legacyForkFrom, systemPrompt, kind, name string) (run *SubagentRun, err error) {
+func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *tool.Registry, modelRef, effortRef, parentSession, execution, parentID, continueFrom, legacyForkFrom, systemPrompt, kind, name string, source *EnvironmentSource) (run *SubagentRun, err error) {
 	defer func() {
 		if err == nil {
 			if bindErr := agent.BindChildComposition(ctx, run.Session, false); bindErr != nil {
@@ -41,19 +41,23 @@ func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *t
 	}
 	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
 	spec := SubagentSpec{
-		Kind:             kind,
-		Name:             name,
-		WorkspaceRoot:    t.workspaceRoot,
-		ParentSession:    parentSession,
-		ExecutionID:      execution,
-		ParentToolCallID: parentID,
-		SystemPrompt:     systemPrompt,
-		Registry:         subReg,
-		ToolContext:      childToolIdentityContext(ctx),
-		Model:            identityModel,
-		Effort:           identityEffort,
-		ResumedFrom:      firstNonEmpty(continueFrom, legacyForkFrom),
-		UpstreamFrom:     upstreamSources(upstreamFromContext(ctx)),
+		Kind:                  kind,
+		Name:                  name,
+		WorkspaceRoot:         t.workspaceRoot,
+		ParentSession:         parentSession,
+		ExecutionID:           execution,
+		EnvironmentID:         t.environmentID,
+		EnvironmentGeneration: t.environmentGeneration,
+		OriginWorkspace:       t.environmentSource,
+		ParentToolCallID:      parentID,
+		SystemPrompt:          systemPrompt,
+		Registry:              subReg,
+		ToolContext:           childToolIdentityContext(ctx),
+		Model:                 identityModel,
+		Effort:                identityEffort,
+		ResumedFrom:           firstNonEmpty(continueFrom, legacyForkFrom),
+		UpstreamFrom:          upstreamSources(upstreamFromContext(ctx)),
+		continuationSource:    source,
 	}
 	if continueFrom != "" {
 		return t.transcripts.PrepareContinue(continueFrom, spec)

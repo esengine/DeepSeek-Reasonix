@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reasonix/internal/frontend/hostenv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -242,18 +243,19 @@ func (r *scheduleRun) execute(ctx context.Context, roots config.Roots, token str
 		return failed(tool.CodeRootMissing)
 	}
 	ctrl, err := boot.Build(ctx, boot.Options{
-		Version:        "",
-		Model:          ref,
-		MaxSteps:       int(steps),
-		MaxStepsKey:    "schedule per-run steps",
-		RequireKey:     true,
-		Sink:           r.sink,
-		AgentPreset:    boot.NormalizeAgentPreset(""),
-		SessionDir:     clisession.DirFor(ws),
-		WorkspaceRoot:  ws,
-		EffortOverride: effort,
-		StatsSource:    surface.CLI,
-		Stderr:         os.Stderr,
+		VerificationClient: hostenv.VerificationClient(),
+		Version:            "",
+		Model:              ref,
+		MaxSteps:           int(steps),
+		MaxStepsKey:        "schedule per-run steps",
+		RequireKey:         true,
+		Sink:               r.sink,
+		AgentPreset:        boot.NormalizeAgentPreset(""),
+		SessionDir:         clisession.DirFor(ws),
+		WorkspaceRoot:      ws,
+		EffortOverride:     effort,
+		StatsSource:        surface.CLI,
+		Stderr:             os.Stderr,
 		Observe: &boot.ObserveOptions{
 			Pending: r.gov.Sink(ledger, r.policy.MaxRepeatParks),
 			Run:     observe.RunContext{ScheduleID: r.sc.ID, TriggerID: r.id, Slot: r.claim.SlotAt, RemainingTokens: ceiling},

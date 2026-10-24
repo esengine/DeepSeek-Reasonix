@@ -12,7 +12,7 @@ type SubagentClaimsSettings struct {
 
 // SubagentClaimsSettings reads [agent] subagent_claims from the user file.
 func (c *Controller) SubagentClaimsSettings() SubagentClaimsSettings {
-	path := config.UserConfigPath()
+	path := c.writeCoordinationConfigPath()
 	return SubagentClaimsSettings{Optimistic: config.LoadForEdit(path).SubagentClaimsOptimistic(), Path: path}
 }
 
@@ -20,10 +20,8 @@ func (c *Controller) SubagentClaimsSettings() SubagentClaimsSettings {
 // rebuilds: boot hands the claim policy to the delegation tools while
 // assembling, so a live runtime keeps the policy it was built with.
 func (c *Controller) SaveSubagentClaimsSettings(optimistic bool) error {
-	unlock := config.LockUserConfigEdits()
-	defer unlock()
-	path := config.UserConfigPath()
-	cfg := config.LoadForEdit(path)
-	cfg.SetSubagentClaims(optimistic)
-	return cfg.SaveTo(path)
+	return c.editWriteCoordination(func(cfg *config.Config) error {
+		cfg.SetSubagentClaims(optimistic)
+		return nil
+	})
 }

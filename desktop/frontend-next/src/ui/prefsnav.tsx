@@ -266,7 +266,8 @@ export const SETTINGS: SettingEntry[] = [
   // the save reaches only sessions opened afterwards; the handler rebuilds nothing.
   { section: "peers", anchor: "peers", title: "会话间消息（实验）", scope: "machine", apply: "next-turn", keywords: ["peer", "会话间", "消息", "发送", "批准", "挂起", "另一个会话"] },
   { section: "peers", anchor: "peer-projects", title: "放行的项目", scope: "machine", apply: "next-turn", keywords: ["放行", "项目", "不再询问", "长期", "撤销", "peer", "release", "会话间"] },
-  { section: "tools", anchor: "write-lease", title: "多个会话同时写一个项目", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "等待"] },
+  { section: "tools", anchor: "write-lease", title: "多个会话同时写一个项目", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "等待", "自动隔离", "共享", "worktree", "collaboration"] },
+  { section: "tools", anchor: "isolation-results", title: "保留的隔离成果", scope: "workspace", apply: "none", keywords: ["worktree", "隔离", "恢复", "整合", "iso_", "int_", "成果", "丢弃"] },
   { section: "tools", anchor: "subagent-claims", title: "子代理的写入范围", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "子代理", "并发", "write_paths", "乐观", "optimistic", "写锁"] },
   { section: "network", anchor: "trace-export", title: "追踪导出", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
   { section: "tools", anchor: "subagent-steer", title: "给运行中子代理的指示", scope: "machine", apply: "immediate", keywords: ["subagent", "子代理", "指示", "补充", "steer", "上限", "频率", "字节"] },

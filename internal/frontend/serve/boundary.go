@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"strings"
 
+	"reasonix/internal/contract/config"
 	"reasonix/internal/safety/permission"
 	"reasonix/internal/session/control"
 )
 
 func (s *Server) registerBoundaryRoutes(mux *http.ServeMux) {
+	s.registerIsolationResultRoutes(mux)
 	mux.HandleFunc("GET /permissions", s.permissions)
 	mux.HandleFunc("POST /permissions", s.savePermissions)
 	mux.HandleFunc("POST /permissions/revoke", s.revokeSessionGrant)
@@ -240,33 +242,36 @@ func (s *Server) writeLeaseSettings(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.ctl().WriteLeaseSettings())
 }
 
-// saveWriteLeaseSettings rides the provider-edit grant: choosing optimistic
-// lets two sessions write one file with the last write winning, so a networked
-// client must not make that choice for the machine's owner. It does not rebuild
-// the runtime: a rebuild adopts the lease it already holds, so the choice is for
-// the sessions opened afterwards and the answer says so by not pretending.
+// Coordination changes require the same machine-owner grant as provider edits.
+// Saving does not change an existing runtime's protocol or resource pools.
 func (s *Server) saveWriteLeaseSettings(w http.ResponseWriter, r *http.Request) {
 	if !s.grants.at(r).providerEdit {
 		refuse(w, http.StatusForbidden, "write_lease.editing_disabled", "write-lease editing is not enabled on this server", nil)
 		return
 	}
-	var body struct {
-		Optimistic     *bool `json:"optimistic"`
-		MaxWaitMinutes *int  `json:"maxWaitMinutes"`
-	}
+	var body control.WriteCoordinationEdit
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 		badBody(w)
 		return
 	}
-	if body.Optimistic == nil && body.MaxWaitMinutes == nil {
-		refuse(w, http.StatusBadRequest, "write_lease.no_choice", "optimistic or maxWaitMinutes is required", nil)
+	if body.Optimistic == nil && body.MaxWaitMinutes == nil && body.Collaboration == nil && body.AutoIntegrate == nil {
+		refuse(w, http.StatusBadRequest, "write_lease.no_choice", "collaboration, optimistic or maxWaitMinutes is required", nil)
 		return
 	}
 	if body.MaxWaitMinutes != nil && *body.MaxWaitMinutes < 0 {
 		refuse(w, http.StatusBadRequest, "write_lease.bad_wait", "maxWaitMinutes cannot be negative", nil)
 		return
 	}
-	if err := s.ctl().SaveWriteLeaseSettings(body.Optimistic, body.MaxWaitMinutes); err != nil {
+	if body.Collaboration != nil {
+		cfg := config.Default()
+		if *body.Collaboration != "legacy" {
+			if err := cfg.SetCollaborationMode(*body.Collaboration); err != nil {
+				refuse(w, http.StatusBadRequest, "write_lease.bad_strategy", err.Error(), nil)
+				return
+			}
+		}
+	}
+	if err := s.ctl().SaveWriteCoordinationSettings(body); err != nil {
 		saveFailed(w, http.StatusInternalServerError, "write_lease.save_failed", err)
 		return
 	}

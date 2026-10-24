@@ -131,6 +131,7 @@ type sessionEventWireRecord struct {
 	Reason        string               `json:"reason,omitempty"`
 	CreatedAt     time.Time            `json:"created_at"`
 	ImageBlobs    []sessionEventImages `json:"image_blobs,omitempty"`
+	Binding       json.RawMessage      `json:"binding,omitempty"`
 }
 
 type sessionEventIndex struct {
@@ -238,6 +239,7 @@ func replaySessionEventRecords(path string, limits sessionReplayLimits) (session
 		return replay, sessionReplayLimitError(path, "encoded_bytes", info.Size(), limits.maxBytes)
 	}
 	reader := newSessionRecordReader(limits.reader(f), path, limits.maxBytes)
+	headerSeen := false
 	for {
 		if err := limits.err(); err != nil {
 			return replay, err
@@ -260,6 +262,12 @@ func replaySessionEventRecords(path string, limits sessionReplayLimits) (session
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			replay.damaged = true
 			return replay, nil
+		}
+		if handled, err := replayEnvironmentHeader(path, rec, &headerSeen, replay.records); err != nil {
+			return replay, err
+		} else if handled {
+			replay.lastGoodEnd = reader.offset
+			continue
 		}
 		if !nativeSessionEventSchema(rec.SchemaVersion) {
 			return replay, fmt.Errorf("decode session event log %s: unsupported schema version %d", path, rec.SchemaVersion)
@@ -602,43 +610,6 @@ func appendSessionAppendEvent(sessionPath string, messageIndex int, msgs []provi
 		Messages:      append([]provider.Message(nil), msgs...),
 		ContentDigest: digestString(digest),
 	}, true)
-}
-
-// compactSessionEventLog rewrites the log as a single replace event via an
-// atomic tmp+fsync+rename, so readers observe either the old log or the
-// compacted one and never a partial state. It also heals a damaged log by
-// construction.
-func compactSessionEventLog(sessionPath string, msgs []provider.Message, digest [sha256.Size]byte, baseRevision int64, reason string) error {
-	path := store.SessionEventLog(sessionPath)
-	if path == "" {
-		return fmt.Errorf("empty session event log path")
-	}
-	rec := sessionEventRecord{
-		Type:          sessionEventTypeReplace,
-		Revision:      baseRevision + 1,
-		BaseRevision:  baseRevision,
-		Messages:      append([]provider.Message(nil), msgs...),
-		ContentDigest: digestString(digest),
-		WriterID:      SessionWriterID(),
-		Reason:        reason,
-		CreatedAt:     time.Now().UTC(),
-	}
-	var err error
-	if rec.Messages, rec.ImageBlobs, err = externalizeSessionImages(sessionPath, rec.Messages); err != nil {
-		return err
-	}
-	rec.SchemaVersion = compositionEventSchema(sessionPath, rec.Messages, rec.ImageBlobs)
-	buf, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("encode session event: %w", err)
-	}
-	buf = append(buf, '\n')
-	if err := fileutil.AtomicWriteFile(path, buf, 0o600); err != nil {
-		return err
-	}
-	// The published log names every blob still needed; nothing else is.
-	sweepSessionImageBlobs(sessionPath, rec.ImageBlobs)
-	return nil
 }
 
 func sessionEventRecordSchema(images []sessionEventImages) int {

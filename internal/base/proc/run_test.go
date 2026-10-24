@@ -35,6 +35,64 @@ func TestWaitForTrackedCommandReturnsWhenWaitStallsAfterCancel(t *testing.T) {
 	}
 }
 
+func TestCancellationGraceDoesNotSignalCompletedWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	tracked := &TrackedCommand{}
+	releaseWait := make(chan struct{})
+	err := waitForTrackedCommand(ctx, tracked, func() error { <-releaseWait; return nil }, time.Millisecond, time.Millisecond, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		close(releaseWait)
+		t.Fatal(err)
+	}
+	done := tracked.WaitCompleted()
+	if done == nil {
+		close(releaseWait)
+		t.Fatal("missing completion ownership")
+	}
+	select {
+	case <-done:
+		close(releaseWait)
+		t.Fatal("grace expiry impersonated process completion")
+	default:
+	}
+	released := make(chan struct{})
+	AfterWait(done, func() { close(released) })
+	select {
+	case <-released:
+		close(releaseWait)
+		t.Fatal("cleanup ran before wait completion")
+	default:
+	}
+	close(releaseWait)
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("completed wait did not release cleanup")
+	}
+}
+
+func TestCompletionSignalPrecedesPublishingWaitResult(t *testing.T) {
+	done := make(chan struct{})
+	results := make(chan error) // Hold publication until the assertion completes.
+	finished := make(chan struct{})
+	go func() {
+		publishCompletedWait(done, results, nil)
+		close(finished)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		// Let the producer exit even if ordering regresses.
+		<-results
+		t.Fatal("completion was held behind result publication")
+	}
+	if err := <-results; err != nil {
+		t.Fatal(err)
+	}
+	<-finished
+}
+
 func TestWaitForTrackedCommandKeepsWaitErrorAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tracked := &TrackedCommand{}

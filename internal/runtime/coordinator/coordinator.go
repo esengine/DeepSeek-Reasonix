@@ -397,7 +397,9 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome plannerOutcome, decision agent.PlannerDecision) error {
 	plan := outcome.text
 	if outcome.exit == plannerExitNoChanges {
-		c.persistExecutorNoOp(ctx, input, plan)
+		if err := c.persistExecutorNoOp(ctx, input, plan); err != nil {
+			return err
+		}
 		// The relayed conclusion is planner text; keep its source so sinks
 		// attribute it like every other planner emission.
 		c.sink.Emit(event.Event{Kind: event.Text, Text: agent.DisplayAssistantText(plan), Source: event.UsageSourcePlanner, ModelRef: c.plannerModelRef})
@@ -412,7 +414,9 @@ func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome pla
 	}
 	runWithPlanApproval := func() error {
 		if c.plannerPlanApprover == nil {
-			c.persistExecutorNoOp(ctx, input, plan+"\n\n"+plannerPlanAwaitingApprovalNote)
+			if err := c.persistExecutorNoOp(ctx, input, plan+"\n\n"+plannerPlanAwaitingApprovalNote); err != nil {
+				return err
+			}
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: plannerPlanAwaitingApprovalNotice, Source: event.UsageSourcePlanner, ModelRef: c.plannerModelRef})
 			return nil
 		}
@@ -426,13 +430,17 @@ func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome pla
 			// The user declined the plan. Persist the exchange like the no-op
 			// path does — a denied turn must survive session save/reload, and
 			// the note tells the next executor turn that nothing ran.
-			c.persistExecutorNoOp(ctx, input, plan+"\n\n"+plannerPlanNotApprovedNote)
+			if err := c.persistExecutorNoOp(ctx, input, plan+"\n\n"+plannerPlanNotApprovedNote); err != nil {
+				return err
+			}
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: plannerPlanNotApprovedNotice, Source: event.UsageSourcePlanner, ModelRef: c.plannerModelRef})
 		}
 		return err
 	}
 	if decision.Route == agent.PlannerRoutePlanOnly {
-		c.persistExecutorNoOp(ctx, input, plan+"\n\n"+plannerPlanOnlyNote)
+		if err := c.persistExecutorNoOp(ctx, input, plan+"\n\n"+plannerPlanOnlyNote); err != nil {
+			return err
+		}
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: plannerPlanOnlyNotice, Source: event.UsageSourcePlanner, ModelRef: c.plannerModelRef})
 		return nil
 	}
@@ -465,19 +473,22 @@ const (
 	plannerDecisionUnansweredNotice   = "Waiting for your decision; nothing was executed. Reply to continue."
 )
 
-func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan string) {
+func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan string) error {
 	if c == nil || c.executor == nil || c.executor.Session() == nil {
-		return
+		return nil
 	}
 	// A turn nobody executed is still the turn the host named. It lands through
 	// the same seam an executed one does, so the identity published for it holds
 	// whichever way the turn ended.
-	c.executor.LandAuthoredUserMessage(ctx, provider.Message{
+	if err := c.executor.LandAuthoredUserMessage(ctx, provider.Message{
 		Role: provider.RoleUser, Content: c.executor.WithTurnPreferences(input),
 		RawContent: agent.RawUserInput(ctx, input),
 		Images:     agent.UserImages(ctx), CreatedAt: time.Now().UnixMilli(),
-	})
+	}); err != nil {
+		return err
+	}
 	c.executor.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
+	return nil
 }
 
 // plannerOutcome is one planning turn's result. A submitted plan is the
@@ -548,7 +559,7 @@ func (c *Coordinator) planFromStream(ctx context.Context, input string) (string,
 	planCtx, planCancel := context.WithCancel(ctx)
 	defer planCancel()
 	defer agent.TrackPublishedHostStream(planCtx, planCancel)()
-	ch, err := c.planner.Stream(planCtx, provider.Request{
+	ch, err := provider.Stream(planCtx, c.planner, provider.Request{
 		Messages:    provider.ModelMessages(c.plannerSess.Messages),
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})

@@ -461,6 +461,34 @@ func TestSaveWriteLeasePersistsAndSaysWhenItTakesEffect(t *testing.T) {
 	}
 }
 
+func TestWriteCoordinationStrategyUsesExistingMachineEditGrant(t *testing.T) {
+	s := newProviderEditServer(t)
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	refused := postProvider(t, srv.URL, "/write-lease", `{"collaboration":"shared"}`)
+	refused.Body.Close()
+	if refused.StatusCode != http.StatusForbidden {
+		t.Fatalf("strategy edit without machine grant = %d", refused.StatusCode)
+	}
+	s.AllowProviderEdit()
+	for _, mode := range []string{"auto", "shared", "isolated", "legacy"} {
+		r := postProvider(t, srv.URL, "/write-lease", `{"collaboration":"`+mode+`"}`)
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("strategy %s edit = %d", mode, r.StatusCode)
+		}
+		got := readJSON[control.WriteLeaseSettings](t, srv.URL, "/write-lease")
+		if got.Collaboration != mode {
+			t.Fatalf("saved strategy = %q, want %q", got.Collaboration, mode)
+		}
+	}
+	r := postProvider(t, srv.URL, "/write-lease", `{"collaboration":"future-protocol","optimistic":false}`)
+	r.Body.Close()
+	if r.StatusCode != http.StatusBadRequest || !config.LoadForEdit(config.UserConfigPath()).WriteLeaseOptimistic() {
+		t.Fatal("unknown strategy was accepted or partially persisted")
+	}
+}
+
 // The origin switch is saved through the rules endpoint and survives the rebuild
 // that endpoint triggers; a save that omits it leaves it alone.
 func TestPermissionsEndpointCarriesTheOriginSwitchThroughARebuild(t *testing.T) {

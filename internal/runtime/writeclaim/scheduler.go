@@ -68,6 +68,8 @@ type SubagentScheduler struct {
 
 	maxTotal   int
 	maxWriters int
+	phases     PhaseCapacity
+	phaseLive  phaseExecutions
 
 	activeTotal   int
 	activeWriters int
@@ -91,7 +93,7 @@ type schedulerWaiter struct {
 // NewSubagentScheduler builds a scheduler with the given limits (normalized).
 func NewSubagentScheduler(maxTotal, maxWriters int) *SubagentScheduler {
 	maxTotal, maxWriters = NormalizeConcurrencyLimits(maxTotal, maxWriters)
-	return &SubagentScheduler{maxTotal: maxTotal, maxWriters: maxWriters}
+	return &SubagentScheduler{maxTotal: maxTotal, maxWriters: maxWriters, phases: newPhaseCapacity(maxTotal, maxWriters)}
 }
 
 // Limits returns the effective total/writer caps; zero is no limit.
@@ -107,6 +109,15 @@ func (s *SubagentScheduler) Limits() (total, writers int) {
 		return 0, 0
 	}
 	return s.maxTotal, s.maxWriters
+}
+
+func (s *SubagentScheduler) ActiveWriters() int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeWriters + s.phaseLive.writers
 }
 
 // Acquire reserves a concurrency slot (and optional write claim). Nested

@@ -92,6 +92,17 @@ func probeSessionEventLogWithLimits(sessionPath string, limits sessionReplayLimi
 	if err := limits.err(); err != nil {
 		return probe, err
 	}
+	if schemaVersion == sessionEnvironmentSchemaVersion || eventType == sessionEnvironmentEventType {
+		if _, _, exists, err := readEnvironmentFence(sessionPath); err != nil || !exists {
+			return probe, ErrExecutionEnvironmentProtocol
+		}
+		contentSchema, err := environmentContentSchema(sessionPath)
+		if err != nil {
+			return probe, err
+		}
+		probe.native, probe.schemaVersion = true, contentSchema
+		return probe, nil
+	}
 	if !ok {
 		// Nothing decodable at the head: not a native log this build can own.
 		return probe, nil
@@ -126,32 +137,32 @@ func probeSessionEventHeader(r io.Reader) (schemaVersion int, eventType string, 
 	for dec.More() {
 		key, err := dec.Token()
 		if err != nil {
-			return 0, "", false
+			return schemaVersion, eventType, false
 		}
 		name, isString := key.(string)
 		if !isString {
-			return 0, "", false
+			return schemaVersion, eventType, false
 		}
 		switch name {
 		case "schema_version":
 			if err := dec.Decode(&schemaVersion); err != nil {
-				return 0, "", false
+				return schemaVersion, eventType, false
 			}
 			haveSchema = true
 		case "type":
 			if err := dec.Decode(&eventType); err != nil {
-				return 0, "", false
+				return schemaVersion, eventType, false
 			}
 			haveType = true
 		default:
 			var discard json.RawMessage
 			if err := dec.Decode(&discard); err != nil {
-				return 0, "", false
+				return schemaVersion, eventType, false
 			}
 		}
 		if haveSchema && haveType {
 			return schemaVersion, eventType, true
 		}
 	}
-	return 0, "", false
+	return schemaVersion, eventType, false
 }

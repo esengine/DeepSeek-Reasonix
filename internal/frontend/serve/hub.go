@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"reasonix/internal/frontend/hostenv"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"sync"
@@ -334,8 +335,7 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 			return nil, err
 		}
 	}
-	preset := ""
-	savedModel := ""
+	preset, savedModel := "", ""
 	if settings != nil {
 		savedModel = strings.TrimSpace(settings.Model)
 		req.Model, preset = savedModel, settings.AgentPreset
@@ -344,12 +344,14 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 	paneSink := h.decorateSink(bc)
 	build := func(model string, fallback bool) (*boot.BuildResult, error) {
 		opts := boot.Options{
+			VerificationClient:       hostenv.VerificationClient(),
 			AgentComposition:         req.AgentComposition,
 			Composition:              binding,
 			ComputerDriver:           h.opts.ComputerDriver,
 			Model:                    strings.TrimSpace(model),
 			AgentPreset:              preset,
 			WorkspaceRoot:            root,
+			SessionEnvironmentPath:   req.SessionPath,
 			SessionDir:               SessionDirFor(root),
 			Sink:                     paneSink,
 			NativeSurfaces:           h.opts.NativeSurfaces,

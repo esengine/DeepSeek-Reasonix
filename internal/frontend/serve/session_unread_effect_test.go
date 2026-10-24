@@ -65,6 +65,7 @@ func newUnreadHarness(t *testing.T, mode string) *unreadHarness {
 	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_STATE_HOME", home)
+	closeSharedCatalogsOnCleanup(t)
 	root := testenv.TempDir(t)
 	model := &unreadModel{mode: mode, started: make(chan struct{})}
 	kind := fmt.Sprintf("unread-%s-%d", t.Name(), unreadKinds.Add(1))
@@ -94,6 +95,7 @@ func (h *unreadHarness) pane(path string) (*Hub, *Runtime, *Broadcaster) {
 	}
 	ctrl.SetFreshSessionPath(path)
 	hub := NewHub(HubOptions{})
+	h.t.Cleanup(hub.Shutdown)
 	rt, err := hub.Adopt(New(ctrl, bc, config.ServeConfig{}), bc)
 	if err != nil {
 		h.t.Fatalf("adopt: %v", err)

@@ -59,7 +59,7 @@ func (p *commitEffectProvider) split() (agent, commit []provider.Request) {
 func TestEffectCommitMessageRidesItsOwnRequestAndCommitsOnConfirm(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	isolateGitGlobalConfig(t)
 	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
 		t.Setenv(k+"_NAME", "t")
 		t.Setenv(k+"_EMAIL", "t@t")

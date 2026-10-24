@@ -41,6 +41,9 @@ func (s *Session) writeRecoveryBranchAtPath(
 			return RecoveryBranchInfo{}, false, digestErr
 		}
 		if bytes.Equal(existingDigest[:], digest[:]) {
+			if err := publishRecoveryAttachment(path, opts); err != nil {
+				return RecoveryBranchInfo{}, false, err
+			}
 			InheritCompactionState(opts.OriginalPath, path, msgs)
 			meta, err := s.saveRecoveryBranchMeta(path, opts, preview, turns, digestText, recoveryDepth)
 			if err != nil {
@@ -57,6 +60,9 @@ func (s *Session) writeRecoveryBranchAtPath(
 		}
 	} else if loadErr != nil && !os.IsNotExist(loadErr) {
 		return RecoveryBranchInfo{}, false, loadErr
+	}
+	if err := publishRecoveryAttachment(path, opts); err != nil {
+		return RecoveryBranchInfo{}, false, err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -84,6 +90,16 @@ func (s *Session) writeRecoveryBranchAtPath(
 	}
 	s.markPersisted(path, digest, version, meta.Revision, rewriteVersion)
 	return RecoveryBranchInfo{Path: path, Digest: digestText, Meta: meta, Preview: preview, Turns: turns}, false, nil
+}
+
+func publishRecoveryAttachment(path string, opts RecoveryBranchOptions) error {
+	if opts.BeforePublishLocked != nil {
+		return withLockedPublication(path, func(p *SessionPublication) error { return opts.BeforePublishLocked(path, p) })
+	}
+	if opts.BeforePublish != nil {
+		return opts.BeforePublish(path)
+	}
+	return nil
 }
 
 // InheritCompactionState gives targetPath the context projection saved beside

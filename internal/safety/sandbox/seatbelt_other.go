@@ -100,6 +100,9 @@ func bwrapFaultFor(spec Spec) error {
 // spec.Network is true. When bwrap is unavailable, the argv is returned
 // unwrapped with wrapped=false so callers can decide whether to fail closed.
 func Command(spec Spec, sh Shell, command string) ([]string, bool) {
+	if refusesCommand(spec) {
+		return nil, false
+	}
 	if !spec.Enforce() {
 		return sh.argv(command), false
 	}
@@ -117,6 +120,9 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 // prefix without shell interpretation — suitable for direct binary invocations
 // like ripgrep that don't need a shell wrapper.
 func CommandArgs(spec Spec, args []string) ([]string, bool) {
+	if refusesCommand(spec) {
+		return nil, false
+	}
 	if !spec.Enforce() {
 		return args, false
 	}
@@ -180,6 +186,7 @@ func bwrapBaseArgs(spec Spec) []string {
 	}
 	args = append(args, bwrapDeviceArgs(spec.AllowDevices)...)
 	args = append(args, bwrapTmpMountArgs(spec)...)
+	args = append(args, bwrapReadRootArgs(spec)...)
 	if spec.Network && !egressBridged(spec) {
 		// Re-allow network by removing the network namespace.
 		args = args[1:] // drop --unshare-net

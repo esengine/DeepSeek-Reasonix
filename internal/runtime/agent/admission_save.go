@@ -5,7 +5,7 @@ import "context"
 // AdmissionSaver makes a turn's user message durable once it has landed, so a
 // process killed before the turn's next save still has the prompt on reopen.
 type AdmissionSaver interface {
-	SaveAdmittedMessage(ctx context.Context)
+	SaveAdmittedMessage(ctx context.Context) error
 }
 
 // SetAdmissionSaver installs the host's save for admitted user messages; nil

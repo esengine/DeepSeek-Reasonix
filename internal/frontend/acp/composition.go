@@ -10,25 +10,28 @@ import (
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/ext/plugin"
+	"reasonix/internal/runtime/rootenv"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/sessionstore"
 	"reasonix/internal/tools/builtin"
 )
 
 type SessionParams struct {
-	AgentComposition   string
-	Composition        *agentcomposition.Binding
-	Cwd                string
-	MCPServers         []plugin.Spec
-	AdditionalDirs     []string
-	Sink               event.Sink
-	Model              string
-	EffortOverride     *string
-	RuntimeProfile     string
-	OnSessionRecovered func(control.SessionRecoveryInfo) error
-	NewConversation    bool
-	FileOverlay        builtin.FileOverlay
-	Terminal           builtin.TerminalRunner
+	AgentComposition       string
+	Composition            *agentcomposition.Binding
+	Cwd                    string
+	MCPServers             []plugin.Spec
+	AdditionalDirs         []string
+	Sink                   event.Sink
+	Model                  string
+	EffortOverride         *string
+	RuntimeProfile         string
+	OnSessionRecovered     func(control.SessionRecoveryInfo) error
+	NewConversation        bool
+	FileOverlay            builtin.FileOverlay
+	Terminal               builtin.TerminalRunner
+	SessionEnvironmentPath string
+	RootEnvironment        *rootenv.Environment
 }
 
 func (s *service) bindCompositionIO(sess *acpSession, ctrl *control.Controller) {
@@ -44,6 +47,7 @@ func (s *service) newPersistedSession(ctx context.Context, p SessionParams, path
 		return nil, err
 	}
 	p.Composition = binding
+	p.SessionEnvironmentPath = path
 	ctrl, err := s.factory.NewSession(ctx, p)
 	if err != nil && binding != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		return boot.BuildCompositionHistory(boot.Options{Composition: binding, WorkspaceRoot: p.Cwd, SessionDir: s.sessionDir(), Sink: p.Sink, Model: p.Model}, err).Controller, nil
@@ -115,6 +119,7 @@ func (s *service) switchComposition(ctx context.Context, sess *acpSession, cur *
 		return agentcomposition.ErrLocked
 	}
 	params := SessionParams{AgentComposition: id, Cwd: sess.cwd, MCPServers: clonePluginSpecs(sess.mcpServers), AdditionalDirs: slices.Clone(sess.additionalDirs), Sink: sess.sink, Model: sess.model, EffortOverride: cloneStringPtr(sess.effortOverride), RuntimeProfile: sess.runtimeProfile, OnSessionRecovered: s.sessionRecoveredHandler(sess.id)}
+	params.RootEnvironment, params.SessionEnvironmentPath = cur.RootEnvironment(), cur.SessionPath()
 	done := make(chan struct{})
 	sess.maintenanceDone = done
 	sess.mu.Unlock()

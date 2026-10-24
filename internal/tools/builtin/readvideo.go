@@ -363,6 +363,9 @@ func (r readVideo) exec(ctx context.Context, argv []string, limit int64) ([]byte
 		return r.run(ctx, argv)
 	}
 	prepared := sandbox.PrepareArgs(r.sb, argv, "")
+	if prepared.Err != nil {
+		return nil, "", prepared.Err
+	}
 	cmd := exec.CommandContext(ctx, prepared.Argv[0], prepared.Argv[1:]...)
 	cmd.Env = applyEnvOverrides(secrets.ProcessEnv(), prepared.EnvOverrides)
 	proc.HideWindow(cmd)

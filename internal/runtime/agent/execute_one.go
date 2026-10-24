@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reasonix/internal/base/diff"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/runtime/writeclaim"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/safety/permission"
+	"reasonix/internal/tools/builtin"
 )
 
 // CodeMCPToolDisabled identifies a call refused by an explicit disabled_tools
@@ -26,10 +28,11 @@ const CodeMCPToolDisabled = tool.CodeMCPToolDisabled
 // Package-private; not shared across goroutines beyond the single executeOne
 // invocation that owns it.
 type toolCallPlan struct {
-	preview       *event.FileDiff
-	call          provider.ToolCall
-	tool          tool.Tool
-	canonicalName string
+	preview        *event.FileDiff
+	approvedChange *diff.Change
+	call           provider.ToolCall
+	tool           tool.Tool
+	canonicalName  string
 
 	permName     string
 	permArgs     json.RawMessage
@@ -104,6 +107,9 @@ func (p *toolCallPlan) provenanceOf(t tool.Tool, args json.RawMessage) tool.Prov
 // parallel goroutines. Stages: parse → policy → prepare → finish.
 func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider.ToolCall) (out toolOutcome) {
 	ctx = a.withAgentContext(ctx)
+	if a.svc.mutations != nil {
+		ctx = builtin.WithVersionedWrites(ctx)
+	}
 	plan := &toolCallPlan{call: call}
 	ctx = tool.WithInvoker(ctx, &nestedInvoker{a: a, turn: turn, parent: plan})
 	todosBefore := a.todoStateBefore(call)
@@ -224,6 +230,9 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 // Guard, and permission checks. Permission must complete before any write lease.
 func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *toolCallPlan) (toolOutcome, bool) {
 	if blocked, early := a.applyPlanModeAndProxy(ctx, plan); early {
+		return blocked, true
+	}
+	if blocked, early := enforceHostCall(ctx, plan); early {
 		return blocked, true
 	}
 	if blocked, early := a.applyCallContract(plan); early {
@@ -566,11 +575,8 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	if outcome, missing := rootMissingOutcome(plan.runTool, plan.runArgs); missing {
 		return outcome, true
 	}
-	// Hooks can write beyond a tool's paths, so permission precedes lease
-	// acquisition and hooks follow it under a conservative workspace claim.
-	ctx, blocked, refused := a.holdWorkspaceLease(ctx, plan)
-	if refused {
-		return blocked, true
+	if outcome, blocked := a.authorizeMutationPaths(ctx, plan); blocked {
+		return outcome, true
 	}
 	// Hold the parent claim before PreToolUse: hooks are user shell code and may
 	// mutate the same workspace. The reservation remains live through hooks,
@@ -591,10 +597,18 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	} else if releaseParentWrite != nil {
 		plan.releaseParentWrite = releaseParentWrite
 	}
+	// Refused local reservations must not accumulate cross-session claims.
+	ctx, blocked, refused := a.holdWorkspaceLease(ctx, plan)
+	if refused {
+		return blocked, true
+	}
+	if outcome, blocked := a.revalidateMutationPreview(ctx, plan); blocked {
+		return outcome, true
+	}
 	// Acquire the checkpoint barrier before preimage capture and any hook. It is
 	// held through post hooks and AfterMutation so rewind cannot interleave with
 	// writer-side user code.
-	if !plan.readOnly && a.svc.mutationObserver != nil {
+	if (plan.mutates || (!plan.readOnly && a.svc.mutations == nil)) && a.svc.mutationObserver != nil {
 		release, err := a.svc.mutationObserver.BeginWrite()
 		if err != nil {
 			return toolOutcome{output: "blocked: " + err.Error(), blocked: true, errMsg: "blocked: checkpoint write preparation failed"}, true
@@ -644,7 +658,11 @@ func toolHooksMayMutateWorkspace(hooks ToolHooks) bool {
 // finishToolExecution performs the concrete Execute, records evidence, runs
 // post hooks and recovery observation, and truncates the model-facing result.
 func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) toolOutcome {
+	if outcome, blocked := a.revalidateMutationPreview(plan.cctx, plan); blocked {
+		return outcome
+	}
 	plan.executed = true
+	markHostExecution(ctx, plan.call.ID)
 	a.announceDelegation(plan)
 	cctx := plan.cctx
 	runTool := plan.runTool
@@ -678,13 +696,19 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.role.plannerMCPExecution && isMCPExecutionTarget(runTool, permName) && tool.IsMCPServerAuthorized(runTool) && !tool.HasMCPDestructiveHint(runTool) {
 		cctx = tool.WithNonDestructiveMCPExecutionIntent(cctx)
 	}
-	if a.svc.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.ExecutionArguments()) {
-		a.svc.hooks.SubagentStart(ctx, call.ID, json.RawMessage(call.ExecutionArguments()))
-		// Stop answers every exit after Start, including a cancelled turn, whose
-		// ctx would otherwise kill the hook before it runs.
-		defer func() { a.svc.hooks.SubagentStop(context.WithoutCancel(ctx), call.ID, result, err) }()
+	stopHooks, startErr := a.startSubagentHooks(cctx, plan)
+	if startErr != nil {
+		return toolOutcome{output: startErr.Error(), blocked: true, errMsg: startErr.Error(), refusalCode: refusalCodeOf(startErr)}
 	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = stopHooks(result, fmt.Errorf("subagent execution panic: %v", p))
+			panic(p)
+		}
+		_ = stopHooks(result, err)
+	}()
 	result, media, execution, err = a.executeStoppable(ctx, cctx, plan)
+	err = errors.Join(err, stopHooks(result, err))
 	// tool.after: extensions rule on the executed result (success or error)
 	// before evidence, hooks, and recovery observation, so every downstream
 	// consumer sees the final (possibly replaced) outcome.
@@ -698,12 +722,15 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	err = usecap.WithContractHint(err, runTool, runArgs)
 	origin := plan.provenanceOf(runTool, runArgs)
 	tool.NoteProvenance(ctx, origin)
-	owedBefore := a.obligations()
+	owedBefore := a.obligations(plan.cctx)
+	if hookErr := a.notifyToolHooks(plan.cctx, permName, permArgs, result, err); hookErr != nil {
+		err = errors.Join(err, hookErr)
+		plan.ranClean = false
+	}
 	a.recordToolReceipts(ctx, plan, result, execution, err)
-	result = a.withObligationNotice(result, owedBefore, execution, readOnly)
+	result = a.withObligationNotice(plan.cctx, result, owedBefore, execution, readOnly)
 	// Track skill/capability outcomes for Delivery gates.
 	a.noteCapabilityInvocation(plan.canonicalName, json.RawMessage(call.ExecutionArguments()), runTool, err)
-	a.notifyToolHooks(ctx, permName, permArgs, result, err)
 	// Always re-read after post hooks — partial writes and hook side effects can
 	// change the previewed path even when the concrete tool returned an error.
 	checkpointErr := a.observeAfterMutation(plan)
@@ -739,38 +766,4 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	}
 	out.keepFull(result)
 	return out
-}
-
-// executeStoppable runs the call under a context CancelToolCall can end alone.
-func (a *Agent) executeStoppable(turn, cctx context.Context, plan *toolCallPlan) (result string, media toolMedia, execution *tool.ShellExecution, err error) {
-	runTool, runArgs := plan.runTool, plan.runArgs
-	cctx, endCall := a.stops.begin(cctx, plan.call.ID)
-	defer endCall()
-	if de, ok := runTool.(tool.DetailedExecutor); ok {
-		var detailed tool.DetailedResult
-		detailed, err = de.ExecuteDetailed(cctx, runArgs)
-		result, media.images, execution = detailed.Output, detailed.Images, detailed.Execution
-		// Annotate verification outcome when the host classified this call as a
-		// verifier. The exit status answers for the whole command, so it is a
-		// verdict about the verifier only when no later stage can decide it.
-		if execution != nil && plan.verification {
-			execution.Verification = shellVerificationVerdict(bashCommandFromArgs(plan.evidenceArgs),
-				bashDeclaredCheck(plan.evidenceArgs) != "", execution.PipeStatus, err)
-			result = shellVerificationNotice(result, execution)
-		} else if execution != nil && execution.Verification == "" {
-			execution.Verification = tool.ShellVerificationNotVerification
-		}
-		annotateShellSubject(execution, runArgs)
-		// Sole opaque inline interpreters are allowed outside Delivery but cannot
-		// prove mutation completeness.
-		if execution != nil && evidence.BashCommandMayBeOpaqueMutation(runArgs) &&
-			execution.MutationRisk == tool.ShellMutationMayHaveCompleted {
-			execution.MutationRisk = tool.ShellMutationUnknown
-		}
-	} else if run, ok := mediaTool(runTool); ok {
-		result, media, err = run(cctx, runArgs)
-	} else {
-		result, err = runTool.Execute(cctx, runArgs)
-	}
-	return result, media, execution, stoppedByUser(turn, cctx, err)
 }

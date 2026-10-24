@@ -1,16 +1,13 @@
 import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
 import type { AgentComposition, AgentPresetVersion, AgentPresetCatalog, CompositionSummary } from "./composition";
 export type * from "./composition";
-import { DeliveryError, HttpError } from "./http_error";
-import type { DeliveryFault } from "./http_error";
+export { DeliveryError, HttpError, type DeliveryFault } from "./http_error";
 import type { SideProgress } from "./side";
 
 /** What `subscribe` hands back: the disposer, and where the transport has one, a
  *  way to give its connection up and take it again without losing the cursor. */
 export type Subscription = (() => void) & { pause?: () => void; resume?: () => void; holdsConnection?: () => boolean };
 import type { Attachment, DroppedRef, KeptText } from "./attachment";
-export { DeliveryError, HttpError };
-export type { DeliveryFault };
 export type { Attachment, DroppedRef, KeptText };
 
 import type { AccountState, AccountUser, DeviceGrant } from "./account";
@@ -75,6 +72,8 @@ export type * from "./look";
 // accepted item replaces. Offsets are UTF-16 code units — the units a string
 // index uses here, converted from the kernel's bytes at the boundary.
 export type * from "./boundary";
+export type * from "./isolation";
+import type { IsolationPort } from "./isolation";
 export type * from "./provider";
 
 /** A skill chip as the kernel takes it; offset only orders chips in a line. */
@@ -184,7 +183,7 @@ export interface TrayPrefs {
   closeToTray: boolean;
 }
 
-export interface AgentPort extends WorkspacePreviewPort {
+export interface AgentPort extends WorkspacePreviewPort, IsolationPort {
   providerSetup(): Promise<ProviderSetup | null>;
   saveProviderKey(apiKey: string): Promise<void>;
   // The models that answer the job asked about; "chat" when none is named.
@@ -313,7 +312,7 @@ export interface AgentPort extends WorkspacePreviewPort {
   toolSettings(): Promise<ToolSettings>;
   saveToolDisabled(name: string, disabled: boolean): Promise<ToolSettings>;
   writeLease(): Promise<WriteLeaseSettings>;
-  saveWriteLease(edit: { optimistic?: boolean; maxWaitMinutes?: number }): Promise<WriteLeaseSettings>;
+  saveWriteLease(edit: { optimistic?: boolean; maxWaitMinutes?: number; collaboration?: string; autoIntegrate?: boolean }): Promise<WriteLeaseSettings>;
   schedules(): Promise<ScheduleBoard>;
   previewSchedule(draft: ScheduleDraft): Promise<SchedulePreview>;
   createSchedule(draft: ScheduleDraft, confirm: string): Promise<ScheduleView>;

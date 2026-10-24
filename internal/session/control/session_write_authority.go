@@ -99,6 +99,9 @@ func (c *Controller) ensureWriteAuthorityReady() error {
 		return err
 	}
 	path := c.SessionPath()
+	if err := c.CheckSessionEnvironment(path); err != nil {
+		return err
+	}
 	if path == "" {
 		return nil
 	}
@@ -108,13 +111,13 @@ func (c *Controller) ensureWriteAuthorityReady() error {
 	}
 	auth := sess.WriteAuthority()
 	if auth == nil {
-		if sess.WriteAuthorityRequired() {
+		if sess.WriteAuthorityRequired() || c.rootEnvironment != nil {
 			return sessionstore.ErrSessionWriteAuthorityMissing
 		}
 		return nil
 	}
 	if auth.Covers(path) {
-		return nil
+		return sessionstore.EnsureExecutionEnvironmentFence(path, auth)
 	}
 	return sessionstore.ErrSessionWriteAuthorityStale
 }

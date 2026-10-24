@@ -128,6 +128,7 @@ func (m *model) localCommands(line string) []CompletionItem {
 	}
 	cmds := []CompletionItem{{Label: "/resume", Insert: "/resume", Hint: i18n.M.CmdResume}}
 	for _, c := range []struct{ name, hint string }{
+		{"/isolated", "Manage retained isolated results"},
 		{"/queue", i18n.M.CmdQueue}, {"/steer", i18n.M.CmdSteer}, {"/takeover", i18n.M.CmdTakeover},
 		{"/status", i18n.M.CmdStatus}, {"/export", i18n.M.CmdExport}, {"/copy", i18n.M.CmdCopy}, {"/btw", i18n.M.CmdBtw},
 	} {

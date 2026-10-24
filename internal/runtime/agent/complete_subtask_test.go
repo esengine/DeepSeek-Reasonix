@@ -59,8 +59,8 @@ func TestCompleteSubtaskHostLowersUnbackedClaim(t *testing.T) {
 
 func TestCompleteSubtaskKeepsFullyBackedClaim(t *testing.T) {
 	led := evidence.NewLedger()
-	led.Record(evidence.Receipt{ToolName: "bash", Command: "go test ./parser", Success: true, OutputBytes: 12})
 	led.Record(evidence.Receipt{ToolName: "write_file", Success: true, Mutation: true, Write: true, Paths: []string{"parser.go"}})
+	led.Record(evidence.Receipt{ToolName: "bash", Command: "go test ./parser", Success: true, OutputBytes: 12})
 
 	out := submitCompleteSubtask(t, led, `{
 		"status":"complete",

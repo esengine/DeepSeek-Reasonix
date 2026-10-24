@@ -208,6 +208,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	renderConcurrencyLimits(&b, c, defaults)
 	agentSetting(&b, "subagent_claims", c.Agent.SubagentClaims, defaults.Agent.SubagentClaims, "optimistic (default): a sub-agent that declared no write_paths holds only the path it is writing; strict: it holds the whole workspace; user file only")
 	agentSetting(&b, "write_lease", c.Agent.WriteLease, defaults.Agent.WriteLease, "optimistic (default): a writer that declared no path does not hold the whole workspace against other sessions; strict: it does; user file only")
+	agentSetting(&b, "collaboration", c.Agent.Collaboration, defaults.Agent.Collaboration, "auto, shared, isolated or legacy; omitted in existing user files preserves compatibility; user file only")
+	if scope != RenderScopeProject && len(c.Agent.IsolationCopyPaths) > 0 {
+		fmt.Fprintf(&b, "isolation_copy_paths = %s   # independent copies of declared repository-local dependencies; user file only\n", renderStringArray(c.Agent.IsolationCopyPaths))
+	}
+	renderVerificationRuntime(&b, c, scope)
 	agentSetting(&b, "write_lease_max_wait_minutes", c.Agent.WriteLeaseMaxWaitMinutes, defaults.Agent.WriteLeaseMaxWaitMinutes, "minutes a write waits behind another session's claim before it fails with workspace.claim_timeout; 0 = wait as long as the turn lasts (default), 120 is a sensible limit; user file only")
 	agentSetting(&b, "plan_approval", c.Agent.PlanApproval, defaults.Agent.PlanApproval, "auto: the plan card answers itself and execution starts; user file only")
 	agentSetting(&b, "default_mode", c.Agent.DefaultMode, defaults.Agent.DefaultMode, "plan: a new conversation starts in plan mode (the mode picker still switches it); a resumed one keeps its own; user file only")

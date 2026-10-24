@@ -59,7 +59,9 @@ func ReclaimRecoveryBranches(dir string) {
 // that a no-op.
 func BindRun(ctrl *control.Controller, leases *control.SessionLeaseKeeper, resumed *sessionstore.Session, resumePath string) error {
 	if resumePath != "" {
-		_ = ctrl.Resume(resumed, resumePath) // startup: nothing can be running
+		if err := ctrl.Resume(resumed, resumePath); err != nil {
+			return err
+		}
 	}
 	if ctrl.SessionPath() == "" && ctrl.SessionDir() != "" {
 		ctrl.SetFreshSessionPath(sessionstore.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))

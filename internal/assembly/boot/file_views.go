@@ -11,11 +11,14 @@ var fileViewTools = []string{"read_file", "write_file", "edit_file", "multi_edit
 
 // bindFileViews gives this run's file tools one shared record of what the agent
 // last saw of each file, so write_file can refuse to discard a change made since.
-func bindFileViews(reg *tool.Registry, protect bool) {
+func bindFileViews(reg *tool.Registry, protect bool, strict ...bool) {
 	if !protect {
 		return
 	}
 	views := builtin.NewFileViews()
+	if len(strict) > 0 && strict[0] {
+		views = builtin.NewStrictFileViews()
+	}
 	for _, name := range fileViewTools {
 		if t, ok := reg.Get(name); ok {
 			reg.Add(builtin.BindFileViews(t, views))

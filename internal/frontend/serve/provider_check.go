@@ -445,7 +445,7 @@ func worthAskingWithoutTools(err error) bool {
 }
 
 func probeProviderModel(ctx context.Context, modelProvider provider.Provider, tools []provider.ToolSchema) error {
-	stream, err := modelProvider.Stream(ctx, provider.Request{
+	stream, err := provider.Stream(ctx, modelProvider, provider.Request{
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "OK"}},
 		Tools:     tools,
 		MaxTokens: 1,

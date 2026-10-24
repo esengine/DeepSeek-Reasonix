@@ -1,6 +1,7 @@
 import { MARKET_ACTIONS } from "./actions_market";
 import { SCHEDULE_ACTIONS } from "./actions_schedule";
 import { DOCUMENT_ACTIONS } from "./actions_document";
+import { ISOLATION_ACTIONS } from "./actions_isolation";
 
 // The census oracle is independent of production literals so disagreements fail.
 // An id names the intent; data-target and data-value name its entity and choice.
@@ -718,6 +719,9 @@ export const ACTIONS: UIAction[] = [
   { id: "subagent-steer.max-bytes", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "subagent-steer.per-minute", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "write-lease.optimistic", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "write-lease.collaboration", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "write-lease.auto-integrate", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  ...ISOLATION_ACTIONS,
   { id: "write-lease.max-wait", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "workbench.stage-folder", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "workbench.change-folder", kind: "view", target: "entity", proof: "interaction" },

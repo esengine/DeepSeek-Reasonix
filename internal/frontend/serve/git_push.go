@@ -50,6 +50,7 @@ func refusePush(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case r.Context().Err() != nil:
 		// The person cancelled; nobody is left to read an answer.
+	case refuseMutation(w, err):
 	case errors.Is(err, control.ErrWorkspaceNotTrusted):
 		refuse(w, http.StatusForbidden, "push.workspace_untrusted", "this workspace is not trusted, so nothing is pushed from it", nil)
 	case errors.Is(err, gitrepos.ErrNotListed):

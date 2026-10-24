@@ -23,6 +23,7 @@ type compositionControl struct {
 	newSession   func(context.Context) error
 	unavailable  error
 	validate     func() error
+	adoptLease   func(*sessionstore.SessionLease) error
 }
 
 func (c *Controller) ConfigureCompositions(home string, selectPreset func(context.Context, string) error) {

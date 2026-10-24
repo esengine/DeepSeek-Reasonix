@@ -15,8 +15,8 @@ func satisfied(id string, evidence ...CompletionEvidence) AcceptanceCriterion {
 
 func TestAdjudicateCompletionKeepsWhatTheHostsOwnReceiptsBack(t *testing.T) {
 	l := recorded(
-		Receipt{ToolName: "bash", Success: true, Command: "go test ./..."},
 		Receipt{ToolName: "edit_file", Success: true, Write: true, Mutation: true, Paths: []string{"a.go"}},
+		Receipt{ToolName: "bash", Success: true, Command: "go test ./..."},
 		Receipt{ToolName: "read_file", Success: true, Read: true, Paths: []string{"b.go"}},
 	)
 	in := report(CompletionComplete,

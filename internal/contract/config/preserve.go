@@ -67,6 +67,9 @@ func keepPriorUserConfig(logicalPath, resolved string, raw []byte, msg string) {
 // writeUserConfig hands write the body a save puts in the user config, and
 // writes nothing when there is no body that loads.
 func (c *Config) writeUserConfig(logicalPath, resolved string, write func(body string) error) error {
+	if err := c.prepareFirstUserCollaboration(logicalPath, resolved); err != nil {
+		return err
+	}
 	body, newFile, err := c.userConfigBody(logicalPath, resolved)
 	if err != nil {
 		return err

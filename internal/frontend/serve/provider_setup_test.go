@@ -347,6 +347,7 @@ func newProviderSetupTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
+	closeSharedCatalogsOnCleanup(t)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv(providerSetupTestKeyEnv, "")
 	configPath := config.UserConfigPath()
@@ -374,7 +375,9 @@ api_key_env = "` + providerSetupTestKeyEnv + `"
 		ModelRef:   "remote-demo/model-a",
 		SessionDir: testenv.TempDir(t),
 	})
-	return New(ctrl, bc, config.ServeConfig{}), "remote-secret-for-test"
+	s := New(ctrl, bc, config.ServeConfig{})
+	t.Cleanup(func() { s.Controller().Close() })
+	return s, "remote-secret-for-test"
 }
 
 func postProviderSetup(t *testing.T, baseURL, body string) *http.Response {

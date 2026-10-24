@@ -397,16 +397,20 @@ type UseCapabilityTool struct {
 	// specs are the boot-converted plugin specs (env expansion, workspace
 	// overrides and timeouts). The proxy never rebuilds
 	// specs from raw config entries — that would fork the conversion logic.
-	specs    []plugin.Spec
-	runtime  *MCPCapabilityRuntime
-	registry *tool.Registry // live registry for already-exposed MCP tools
-	ledger   *capability.Ledger
-	audit    *capability.Audit
-	catalog  func() capability.Catalog
+	specs     []plugin.Spec
+	runtime   *MCPCapabilityRuntime
+	registry  *tool.Registry // live registry for already-exposed MCP tools
+	bindLocal func(tool.Tool) tool.Tool
+	ledger    *capability.Ledger
+	audit     *capability.Audit
+	catalog   func() capability.Catalog
 	// state is session-shared connection observation when built via
 	// MCPCapabilityRuntime; nil falls back to a private map for tests.
 	state *mcpProxySharedState
 }
+
+// BindLocalTools installs execution-local file state before the frontend is published.
+func (t *UseCapabilityTool) BindLocalTools(bind func(tool.Tool) tool.Tool) { t.bindLocal = bind }
 
 // NewUseCapabilityTool builds a standalone capability proxy (tests and simple
 // boots). Prefer MCPCapabilityRuntime.NewFrontend when multiple agents share
@@ -938,6 +942,9 @@ func (t *UseCapabilityTool) resolveRegistryTool(name, id string, args json.RawMe
 	tl, ok := t.registry.Get(name)
 	if !ok {
 		return t.resolveUnavailable(base, id, name, fmt.Sprintf("tool %q is not registered in this session", name)), nil
+	}
+	if t.bindLocal != nil {
+		tl = t.bindLocal(tl)
 	}
 	base.Target = tl
 	base.TargetName = name

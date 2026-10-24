@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"reasonix/internal/contract/hostaudit"
@@ -390,9 +391,9 @@ func (a *Agent) postWriteVerification(writer int) (verified, blockedWithCheck bo
 // obligations asks the ledger what it owes. Readiness and the delta the model
 // is handed after each call both read this one derivation, so what blocks a
 // turn is what the model was already told it was carrying.
-func (a *Agent) obligations() []evidence.Obligation {
+func (a *Agent) obligations(contexts ...context.Context) []evidence.Obligation {
 	owed := a.task.ledger.Obligations(a.checkContract())
-	owed = append(owed, evidence.BaselineTestObligations(a.baselineFacts(), a.mutationEpoch())...)
+	owed = append(owed, evidence.BaselineTestObligations(a.baselineFacts(contexts...), a.mutationEpoch())...)
 	if a.renderRoot != "" {
 		owed = append(owed, a.task.ledger.UnseenRenders(a.renderRoot)...)
 	}
