@@ -31,6 +31,9 @@ func (a *Agent) preToolUse(ctx context.Context, plan *toolCallPlan) (toolOutcome
 	if a.svc.hooks == nil {
 		return toolOutcome{}, false
 	}
+	if toolHooksMayMutateWorkspace(a.svc.hooks) {
+		plan.leasePreparation.Retain()
+	}
 	if !plan.readOnly && toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
 		a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{
 			Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName,

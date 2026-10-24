@@ -126,6 +126,7 @@ func (o *Owner) acquirePaths(ctx context.Context, paths []string, held bool) (fu
 		if conflict != nil {
 			w.conflict = conflict
 			if held {
+				w.close(WaitAbandoned)
 				return nil, conflict
 			}
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/runtime/writeclaim"
+	"reasonix/internal/state/workspacelease"
 	"strings"
 
 	"reasonix/internal/contract/event"
@@ -58,7 +59,7 @@ type toolCallPlan struct {
 	cctx                 context.Context
 	releaseParentWrite   func()
 	releaseMutationWrite func()
-	releaseLeaseHold     func()
+	leasePreparation     *workspacelease.PreparedCall
 
 	// pathsBefore is the state of the turn's known paths taken before an
 	// unclassifiable call ran, so its receipt can say what it actually touched.
@@ -115,8 +116,13 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		if plan.releaseMutationWrite != nil {
 			plan.releaseMutationWrite()
 		}
-		if plan.releaseLeaseHold != nil {
-			plan.releaseLeaseHold()
+		if err := plan.leasePreparation.Close(context.WithoutCancel(ctx)); err != nil {
+			out.output += "\nwarning: " + err.Error()
+			if out.errMsg == "" {
+				out.errMsg = err.Error()
+			} else {
+				out.errMsg += "; " + err.Error()
+			}
 		}
 		if plan.releaseParentWrite != nil {
 			plan.releaseParentWrite()
@@ -644,6 +650,7 @@ func toolHooksMayMutateWorkspace(hooks ToolHooks) bool {
 // finishToolExecution performs the concrete Execute, records evidence, runs
 // post hooks and recovery observation, and truncates the model-facing result.
 func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) toolOutcome {
+	plan.leasePreparation.Retain()
 	plan.executed = true
 	a.announceDelegation(plan)
 	cctx := plan.cctx

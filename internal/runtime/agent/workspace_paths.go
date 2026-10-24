@@ -59,13 +59,13 @@ func (a *Agent) parentToolWriteReservation(writer tool.Tool, args json.RawMessag
 	return parentWriteReservation(a.writeWorkspaceRoot, writer.Name(), args)
 }
 
-// holdWorkspaceLease claims the paths a mutating call may write; the claim is
-// released through plan.releaseLeaseHold.
+// holdWorkspaceLease provisionally claims paths before local preparation.
+// Only entry into writing hooks or execution retains them for the run.
 func (a *Agent) holdWorkspaceLease(ctx context.Context, plan *toolCallPlan) (context.Context, toolOutcome, bool) {
 	if !plan.mutates || a.svc.workspaceLease == nil {
 		return ctx, toolOutcome{}, false
 	}
-	heldCtx, end, err := a.svc.workspaceLease.HoldPaths(ctx, a.workspaceWritePaths(plan))
+	heldCtx, preparation, err := a.svc.workspaceLease.PreparePaths(ctx, a.workspaceWritePaths(plan))
 	if err != nil {
 		return ctx, toolOutcome{
 			output:         fmt.Sprintf("blocked: %v", err),
@@ -75,6 +75,6 @@ func (a *Agent) holdWorkspaceLease(ctx context.Context, plan *toolCallPlan) (con
 			workspaceLease: workspaceLeaseConflictScope(err),
 		}, true
 	}
-	plan.releaseLeaseHold = end
+	plan.leasePreparation = preparation
 	return heldCtx, toolOutcome{}, false
 }

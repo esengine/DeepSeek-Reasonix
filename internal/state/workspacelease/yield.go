@@ -2,6 +2,7 @@ package workspacelease
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 )
@@ -9,10 +10,13 @@ import (
 // holdState is what the claim's lifetime depends on besides runs: calls that
 // are executing under it, and sessions waiting on a person who took it off.
 type holdState struct {
-	inFlight  int
-	yielders  int
-	parked    []string
-	parkedSet bool
+	generation uint64
+	retained   leaseExtent
+	calls      map[*callHold]struct{}
+	inFlight   int
+	yielders   int
+	parked     []string
+	parkedSet  bool
 	// parkedMark is the claim record when the parked extent was given up.
 	parkedMark claimMark
 }
@@ -20,10 +24,11 @@ type holdState struct {
 // callHold is one writing call's share of inFlight. It stays reachable from the
 // call's context so a question that call asks can suspend it.
 type callHold struct {
-	owner *Owner
-	paths []string
-	live  bool
-	done  bool
+	owner    *Owner
+	paths    []string
+	live     bool
+	done     bool
+	retained bool
 }
 
 type callKey struct{}
@@ -32,19 +37,15 @@ type callKey struct{}
 // runs, the claim is not given back by Yield, except by a Yield made with the
 // returned context, which is the call itself asking before it writes.
 func (o *Owner) HoldPaths(ctx context.Context, paths []string) (context.Context, func(), error) {
-	h, err := o.acquire(ctx, paths, true)
-	if err != nil || h == nil {
+	if o == nil {
+		return ctx, func() {}, nil
+	}
+	h := &callHold{owner: o, retained: true}
+	err := o.acquire(ctx, paths, h)
+	if err != nil {
 		return ctx, func() {}, err
 	}
 	return context.WithValue(ctx, callKey{}, h), h.end, nil
-}
-
-func (o *Owner) holdLocked(hold bool, paths []string) *callHold {
-	if !hold {
-		return nil
-	}
-	o.holds.inFlight++
-	return &callHold{owner: o, paths: paths, live: true}
 }
 
 func (h *callHold) end() {
@@ -55,12 +56,20 @@ func (h *callHold) end() {
 		h.live = false
 		o.holds.inFlight--
 	}
+	delete(o.holds.calls, h)
+	release := o.releaseIfIdleLocked()
 	o.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // Resume ends a yield. It takes the claim again, queueing behind any session
 // that claimed it meanwhile, and names the sessions that did.
 type Resume func(context.Context) (Contention, error)
+
+// ErrHoldEnded refuses restoration after the call or run's lifetime ended.
+var ErrHoldEnded = errors.New("workspace write hold has ended")
 
 // Yield gives the claim back while the session waits on a person and returns
 // the func that ends that wait. Waits nest: the claim is taken again only when
@@ -76,6 +85,7 @@ func (o *Owner) Yield(ctx context.Context) Resume {
 	}
 	mark := o.claimMark()
 	o.mu.Lock()
+	generation := o.holds.generation
 	o.holds.yielders++
 	var suspended *callHold
 	if h, _ := ctx.Value(callKey{}).(*callHold); h != nil && h.owner == o && h.live {
@@ -99,14 +109,20 @@ func (o *Owner) Yield(ctx context.Context) Resume {
 		release()
 	}
 	var once sync.Once
-	return func(ctx context.Context) (c Contention, err error) {
-		once.Do(func() { c, err = o.resume(ctx, suspended) })
-		return c, err
+	var contention Contention
+	var resumeErr error
+	return func(ctx context.Context) (Contention, error) {
+		once.Do(func() { contention, resumeErr = o.resume(ctx, suspended, generation) })
+		return contention, resumeErr
 	}
 }
 
-func (o *Owner) resume(ctx context.Context, suspended *callHold) (Contention, error) {
+func (o *Owner) resume(ctx context.Context, suspended *callHold, generation uint64) (Contention, error) {
 	o.mu.Lock()
+	if generation != o.holds.generation {
+		o.mu.Unlock()
+		return Contention{}, ErrHoldEnded
+	}
 	o.holds.yielders--
 	last := o.holds.yielders == 0 && o.holds.parkedSet
 	parked, mark := o.holds.parked, o.holds.parkedMark
@@ -116,8 +132,17 @@ func (o *Owner) resume(ctx context.Context, suspended *callHold) (Contention, er
 	o.mu.Unlock()
 	var contention Contention
 	if last {
-		if err := o.AcquirePaths(ctx, parked); err != nil {
-			return Contention{}, err
+		o.mu.Lock()
+		extent := o.callExtentLocked()
+		o.mu.Unlock()
+		if extent.set {
+			restore := &callHold{owner: o}
+			if err := o.acquire(ctx, extent.paths, restore); err != nil {
+				return Contention{}, err
+			}
+			if err := (&PreparedCall{hold: restore}).Close(ctx); err != nil {
+				return Contention{}, err
+			}
 		}
 		contention = o.contendersSince(mark, parked)
 	}
@@ -132,20 +157,7 @@ func (o *Owner) resume(ctx context.Context, suspended *callHold) (Contention, er
 // rehold puts a suspended call back under the claim it gave up, waiting for it
 // if another session has it.
 func (o *Owner) rehold(ctx context.Context, h *callHold) error {
-	again, err := o.acquire(ctx, h.paths, true)
-	if err != nil || again == nil {
-		return err
-	}
-	o.mu.Lock()
-	if h.done {
-		o.mu.Unlock()
-		again.end()
-		return nil
-	}
-	again.live = false
-	h.live = true
-	o.mu.Unlock()
-	return nil
+	return o.acquire(ctx, h.paths, h)
 }
 
 func noResume(context.Context) (Contention, error) { return Contention{}, nil }

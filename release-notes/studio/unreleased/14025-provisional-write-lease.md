@@ -1,0 +1,2 @@
+- Fixed: a write refused before hooks or execution releases its newly requested paths without dropping earlier writes or concurrent calls. Refs #14025, #14133.
+- 修复：hooks 和执行前被拒绝的写入会释放本次新增路径，同时保留此前写入和并行调用的有效占用。关联 #14025、#14133。

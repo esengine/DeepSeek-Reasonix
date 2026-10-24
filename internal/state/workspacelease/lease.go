@@ -288,6 +288,9 @@ func (o *Owner) EndRun() {
 		o.activeRuns--
 	}
 	release := o.releaseIfIdleLocked()
+	if o.activeRuns == 0 && o.holds.inFlight == 0 && !o.acquired && !o.acquiring {
+		o.resetCallsLocked()
+	}
 	o.mu.Unlock()
 	if release != nil {
 		release()
@@ -303,20 +306,18 @@ func (o *Owner) AcquireWrite(ctx context.Context) error {
 // AcquirePaths retains the complete write extent until the last run ends.
 // Missing or unresolvable extents conservatively claim the whole workspace.
 func (o *Owner) AcquirePaths(ctx context.Context, paths []string) error {
-	_, err := o.acquire(ctx, paths, false)
-	return err
+	return o.acquire(ctx, paths, nil)
 }
 
-// acquire returns the call's hold when hold is set and the claim is not waived.
-func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHold, error) {
+func (o *Owner) acquire(ctx context.Context, paths []string, h *callHold) error {
 	if o == nil {
-		return nil, nil
+		return nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if o.undeclaredFree && len(paths) == 0 {
-		return nil, nil
+		return nil
 	}
 	claim := o.normalizePaths(paths)
 	if len(paths) == 0 && o.folderClaim && o.scope.folder != "" {
@@ -325,10 +326,9 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHo
 	for {
 		o.mu.Lock()
 		o.askedLocked(time.Now())
-		if o.acquired && coversPaths(o.scope.paths, claim) {
-			h := o.holdLocked(hold, paths)
+		if h != nil && h.done {
 			o.mu.Unlock()
-			return h, nil
+			return ErrHoldEnded
 		}
 		if o.acquiring {
 			done := o.acquireDone
@@ -337,13 +337,19 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHo
 			case <-done:
 				continue
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return ctx.Err()
 			}
+		}
+		if o.acquired && coversPaths(o.scope.paths, claim) {
+			o.registerCallLocked(h, claim)
+			o.mu.Unlock()
+			return nil
 		}
 		o.acquiring = true
 		o.acquireDone = make(chan struct{})
 		done := o.acquireDone
 
+		requested := claim
 		wasAcquired := o.acquired
 		if wasAcquired {
 			claim = mergePaths(o.scope.paths, claim)
@@ -353,7 +359,6 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHo
 		o.mu.Lock()
 		o.acquiring = false
 		o.waiting = false
-		var h *callHold
 		if err == nil {
 			o.acquired = true
 			o.scope.paths = claim
@@ -361,7 +366,11 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHo
 				o.acquiredAt = time.Now()
 				o.releaseSystem = release
 			}
-			h = o.holdLocked(hold, paths)
+			if h != nil && h.done {
+				err = ErrHoldEnded
+			} else {
+				o.registerCallLocked(h, requested)
+			}
 		}
 		close(done)
 		releaseIfIdle := o.releaseIfIdleLocked()
@@ -369,12 +378,12 @@ func (o *Owner) acquire(ctx context.Context, paths []string, hold bool) (*callHo
 		if releaseIfIdle != nil {
 			releaseIfIdle()
 		}
-		return h, err
+		return err
 	}
 }
 
 func (o *Owner) releaseIfIdleLocked() func() {
-	if !o.acquired || o.acquiring || o.activeRuns != 0 {
+	if !o.acquired || o.acquiring || o.activeRuns != 0 || o.holds.inFlight != 0 {
 		return nil
 	}
 	return o.releaseLocked(true)
@@ -391,6 +400,7 @@ func (o *Owner) releaseLocked(final bool) func() {
 		o.stats.Held += time.Since(o.acquiredAt)
 		return release
 	}
+	o.resetCallsLocked()
 	closed, report := o.closeStatsLocked(time.Now())
 	notice := o.onRelease
 	return func() {
