@@ -51,6 +51,10 @@ export function useTabClose({ port, surfaces, selected, showFiles, setBrowsers, 
           fromExplorer.current = "";
           setLauncher?.(false);
           setShowFiles?.(true);
+        } else if (targets.some((s) => s.kind !== "file")) {
+          // Closing the last page leaves the column with something to offer
+          // rather than folding it away: the same place a new tab starts from.
+          setLauncher?.(true);
         } else {
           onCloseManual();
         }
