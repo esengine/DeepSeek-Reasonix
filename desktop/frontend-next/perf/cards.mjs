@@ -27,7 +27,7 @@ await page.evaluate(() => {
   window.__feed({ kind: "tool_result", tool: { id: "read-bad", name: "read_file", args: '{"path":"b.ts"}', err: "no such file", readOnly: true } });
   window.__feed({ kind: "tool_dispatch", tool: { id: "long-output", name: "bash", args: "run", readOnly: false } });
   window.__feed({ kind: "tool_result", tool: { id: "long-output", name: "bash", args: "run", output: "x".repeat(1800) + "\n" + "row\n".repeat(80), readOnly: false } });
-  window.__feed({ kind: "approval_request", approval: { id: "approval-layout", tool: "bash", subject: long } });
+  window.__feed({ kind: "approval_request", approval: { id: "approval-layout", tool: "bash", subject: long, allowsSession: true, allowsPersist: true } });
   window.__feed({ kind: "ask_request", ask: { id: "ask-layout", questions: [
     { id: "q1", header: "一个很长的问题标题", prompt: "选择一种方案", options: [{ label: "方案 A" }, { label: "方案 B" }] },
     { id: "q2", header: "另一个同样很长的问题标题", prompt: "补充选择", options: [{ label: "继续" }, { label: "停止" }] },
@@ -66,7 +66,7 @@ for (const { width, height } of [{ width: 1440, height: 900 }, { width: 640, hei
       view: { w: innerWidth, h: innerHeight },
       runLabel: document.querySelector(".studio-runlabel")?.textContent ?? "",
       approvalRows: [...new Set(actions.map((r) => Math.round(r.y)))].length,
-      approvalMainWidth: actions[0]?.width ?? 0,
+      approvalActions: actions,
       approvalWidth: apv?.getBoundingClientRect().width ?? 0,
     };
   });
@@ -80,8 +80,8 @@ for (const { width, height } of [{ width: 1440, height: 900 }, { width: 640, hei
   if (width === 420) {
     check("420px：提问主次动作分行", layout.primary.bottom <= layout.secondary.top + 1);
     check("420px：提问动作都留在卡内", layout.secondary.right <= layout.foot.right + 1);
-    check("420px：审批主操作独占首行", layout.approvalRows === 2 && layout.approvalMainWidth >= layout.approvalWidth * 0.8,
-      `${layout.approvalRows} 行 / ${Math.round(layout.approvalMainWidth)}px`);
+    check("420px：四种审批动作排成两列且保持可点击尺寸", layout.approvalRows === 2 && layout.approvalActions.length === 4 && layout.approvalActions.every((r) => r.height >= 44 && r.width >= 44),
+      `${layout.approvalRows} 行`);
   }
 }
 

@@ -3,8 +3,8 @@ import { t } from "../../i18n";
 export type Remembered = "session" | "always";
 
 const LABEL: Record<Remembered, string> = {
-  session: "本会话允许此类操作，不再询问",
-  always: "始终允许此类操作，不再询问",
+  session: "本会话允许",
+  always: "始终允许",
 };
 
 /** The quieter half of a prompt's footer: the choices that answer this question

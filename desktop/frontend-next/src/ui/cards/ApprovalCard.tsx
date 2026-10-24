@@ -149,30 +149,27 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
                 <span>{t("这项设置会放宽模型的权限，所以没有「本会话内不再问」，每次都要你亲自确认。")}</span>
               </div>
             )}
+            {!sealed && <RememberWhere options={remembering} target={item.a.id} tool={item.a.tool} />}
             {!sealed && (
               <div className="apv-ft">
-                <button className="btn" data-primary data-action="decision.tool" data-target={item.a.id} data-value="once"
-                  disabled={!!submitting} onClick={() => void decide("once")}>
-                  {submitting === "once" ? t("正在提交…") : t("允许这一次")}
-                </button>
-                {/* 后两颗比「这一次」安静一档：三颗同样大小挨在一起时，读者分不出
-                    哪颗只管这一次、哪颗管到会话结束、哪颗写进配置。内核会说这次
-                    认哪几种授权，不认的就不画 —— 画出来就是承诺它做不到的事。 */}
                 <RememberChoice options={remembering} target={item.a.id} busy={submitting}
                   disabled={!!submitting} onChoose={(choice) => void decide(choice)} />
-                <button className="btn" data-deny="" data-action="decision.tool" data-target={item.a.id} data-value="deny"
-                  disabled={!!submitting} onClick={() => void decide("deny")}>
-                  {t("拒绝")}
-                </button>
                 {explicit && (
                   <button className="btn" data-weak="" data-yolo="" data-action="decision.full-access"
                     disabled={!!submitting} onClick={() => setConfirmFullAccess(true)}>
                     {t("切换全部放行…")}
                   </button>
                 )}
+                <button className="btn" data-deny="" data-action="decision.tool" data-target={item.a.id} data-value="deny"
+                  disabled={!!submitting} onClick={() => void decide("deny")}>
+                  {t("拒绝")}
+                </button>
+                <button className="btn" data-primary data-action="decision.tool" data-target={item.a.id} data-value="once"
+                  disabled={!!submitting} onClick={() => void decide("once")}>
+                  {submitting === "once" ? t("正在提交…") : t("允许一次")}
+                </button>
               </div>
             )}
-            {!sealed && <RememberWhere options={remembering} target={item.a.id} tool={item.a.tool} />}
             {!sealed && confirmFullAccess && (
               <div className="apv-yolo-confirm" role="alertdialog" aria-label={t("确认切换全部放行")}>
                 <div><b>{t("全部放行会跳过后续工具确认")}</b><span>{t("拒绝规则与沙盒边界仍然生效。仅在完全信任当前工作区时使用。")}</span></div>

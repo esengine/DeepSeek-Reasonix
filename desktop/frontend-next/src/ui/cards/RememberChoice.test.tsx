@@ -75,6 +75,7 @@ describe("the approval card's footer", () => {
     const note = both.querySelector(".apv-note")?.textContent ?? "";
     expect(note).toContain(t("“本会话允许”只对这个对话有效，随对话保存，恢复这个对话后仍然有效。"));
     expect(note).toContain(t("“始终允许”写入用户配置的权限规则，可在设置 → 工具与权限里撤销。"));
+    expect(both.querySelector(".apv-note")!.compareDocumentPosition(both.querySelector(".apv-ft")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("answers with the remembered verdict", () => {
@@ -82,5 +83,27 @@ describe("the approval card's footer", () => {
     const box = draw({ id: "a3", tool: "bash", subject: "ls", allowsSession: true, allowsPersist: true }, approve);
     fireEvent.click(box.querySelector('[data-value="session"]')!);
     expect(approve).toHaveBeenCalledWith("i1", "a3", "session");
+  });
+
+  it.each([
+    ["paid_search", "[tools]"],
+    ["network_egress", "allowed_domains"],
+    ["mcp_signin", "登录状态"],
+  ])("keeps %s grant storage guidance in the compact card", (tool, place) => {
+    const box = draw({ id: "scoped", tool, subject: "target", allowsSession: true, allowsPersist: true });
+    const note = box.querySelector(".apv-note")?.textContent ?? "";
+    expect(note).toContain("随对话保存");
+    expect(note).toContain("恢复这个对话后仍然有效");
+    expect(note).toContain(place);
+    expect(note).not.toContain("权限规则");
+    expect(box.querySelectorAll(".apv-ft button")).toHaveLength(4);
+  });
+
+  it.each(["session", "always", "deny", "once"] as const)("keeps the %s decision's original callback", (verdict) => {
+    const approve = vi.fn(async () => {});
+    const box = draw({ id: "a4", tool: "bash", subject: "ls", allowsSession: true, allowsPersist: true }, approve);
+    expect([...box.querySelectorAll(".apv-ft button")].map((b) => b.getAttribute("data-value"))).toEqual(["session", "always", "deny", "once"]);
+    fireEvent.click(box.querySelector(`[data-value="${verdict}"]`)!);
+    expect(approve).toHaveBeenCalledExactlyOnceWith("i1", "a4", verdict);
   });
 });
