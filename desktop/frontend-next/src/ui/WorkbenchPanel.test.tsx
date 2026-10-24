@@ -32,7 +32,7 @@ describe("WorkbenchPanel", () => {
     });
     const view = EditorView.findFromDOM(content)!;
     act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "updated" } }));
-    await user.click(screen.getByRole("button", { name: "保存" }));
+    fireEvent.keyDown(document.querySelector(".workbench")!, { key: "s", ctrlKey: true });
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][0].content.endsWith("updated")).toBe(true);
     // What reading shows is the draft, so an edit is visible before it is saved.
@@ -641,7 +641,7 @@ describe("WorkbenchPanel", () => {
     const port = new MockPort();
     render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} remote onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
     await user.click(await screen.findByRole("button", { name: "README.md" }));
-    await screen.findByRole("button", { name: "保存" });
+    await screen.findByRole("button", { name: "编辑" });
     expect(screen.queryByRole("button", { name: "在系统文件管理器中显示此文件" })).toBeNull();
   });
 
@@ -771,11 +771,11 @@ describe("WorkbenchPanel", () => {
   });
 
   it("drops a reload that was issued before a save and lands after it", async () => {
-    const { user, port, view, land } = await openWithHeldRead();
+    const { port, view, land } = await openWithHeldRead();
     vi.spyOn(port, "saveWorkspaceFile").mockImplementation(async (file) => ({ ...file, revision: "r3" }));
 
     act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "\n\n## Saved" } }));
-    await user.click(screen.getByRole("button", { name: "保存" }));
+    fireEvent.keyDown(document.querySelector(".workbench")!, { key: "s", ctrlKey: true });
     await waitFor(() => expect(port.saveWorkspaceFile).toHaveBeenCalled());
     await land({ content: "# Second", revision: "r2" });
 

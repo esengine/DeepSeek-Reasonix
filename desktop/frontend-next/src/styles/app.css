@@ -4679,6 +4679,17 @@
   .pickact button[data-go]:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent) }
   .pickact button:disabled { opacity: .38; cursor: default }
 
+  /* Closing a file with unsaved edits: pills, and saving is the answer that
+     carries the accent — the other two are ways out, not the recommended one. */
+  .unsaved-close .picknote { padding-top: 2px; font-size: var(--fs-meta); }
+  .unsaved-close .pickact button { border-radius: 999px; padding: 6px 16px; }
+  .unsaved-close .pickact .pickgo {
+    border-color: var(--net); background: var(--net); color: var(--page);
+  }
+  .unsaved-close .pickact .pickgo:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--net) 86%, black); color: var(--page);
+  }
+
   .rmtbook { display: grid; gap: 0 }
   .rmtrow { border-top: 1px solid var(--hair); padding: 10px 2px }
   .rmtrow:last-of-type { border-bottom: 1px solid var(--hair) }

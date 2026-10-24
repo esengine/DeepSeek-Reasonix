@@ -123,25 +123,43 @@ export function useWorkbenchFiles({ port, workspaceRoot, repos = [], path, openP
     entry.draft = draft;
     notify();
   };
-  const save = async () => {
-    if (current.current !== entries || !entry.file || entry.file.readOnly || !dirty(entry) || entry.pending === "save") return;
-    const sent = { ...entry.file, content: entry.draft };
-    const ticket = ++entry.issued;
-    entry.pending = "save";
-    entry.error = "";
+  // Saving by path, because a tab can be closed while another file is the one
+  // on screen: the confirmation that closes it must write that file's draft,
+  // not whatever the panel happens to be showing.
+  const saveEntry = async (target: string): Promise<boolean> => {
+    const held = entries.get(target);
+    if (current.current !== entries || !held || !held.file || held.file.readOnly || !dirty(held) || held.pending === "save") return false;
+    const sent = { ...held.file, content: held.draft };
+    const ticket = ++held.issued;
+    held.pending = "save";
+    held.error = "";
     notify();
     try {
       const file = await port.saveWorkspaceFile(sent);
-      if (current.current !== entries || ticket !== entry.issued) return;
-      entry.file = file;
-      if (entry.draft === sent.content) entry.draft = file.content;
+      if (current.current !== entries || ticket !== held.issued) return false;
+      held.file = file;
+      if (held.draft === sent.content) held.draft = file.content;
+      return true;
     } catch (e) {
-      if (current.current === entries && ticket === entry.issued) entry.error = reason(e);
+      if (current.current === entries && ticket === held.issued) held.error = reason(e);
+      return false;
     } finally {
-      if (current.current === entries && ticket === entry.issued) { entry.pending = ""; notify(); }
+      if (current.current === entries && ticket === held.issued) { held.pending = ""; notify(); }
     }
   };
-  return { ...entry, busy: entry.pending === "save" || (!entry.file && entry.pending === "read"), setDraft, save };
+  const save = () => saveEntry(path);
+  // Closing without saving drops the draft, so reopening the file reads the
+  // disk again instead of resurrecting edits the person just refused.
+  const discard = (target: string) => {
+    const held = entries.get(target);
+    if (current.current !== entries || !held || !held.file) return;
+    held.draft = held.file.content;
+    held.error = "";
+    notify();
+  };
+  // Every open file with edits, so a tab can show it without being the active one.
+  const dirtyPaths = [...entries].filter(([, held]) => dirty(held)).map(([path]) => path);
+  return { ...entry, dirtyPaths, busy: entry.pending === "save" || (!entry.file && entry.pending === "read"), setDraft, save, savePath: saveEntry, discard };
 }
 
 // The diff of a workspace-relative path, read from the repository that holds it.
