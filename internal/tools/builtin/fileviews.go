@@ -1,11 +1,11 @@
 package builtin
 
 import (
-	"context"
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"sync"
 
@@ -16,18 +16,26 @@ import (
 // holds what the agent last read or wrote there.
 var ErrFileChangedSinceSeen = errors.New("file changed since the agent last saw it")
 
+// ErrFileNotFullySeen marks a whole-file overwrite after an incomplete read.
+var ErrFileNotFullySeen = fmt.Errorf("%w: not read in full", ErrFileChangedSinceSeen)
+
 // FileViews is what one run's agent last saw of each file: the content a read
 // returned it from, or what one of its own writes left there. write_file checks
 // it so a whole-file overwrite cannot discard a change made since. A nil
 // *FileViews records and checks nothing.
 type FileViews struct {
 	mu   sync.Mutex
-	seen map[string][sha256.Size]byte
+	seen map[string]fileView
+}
+
+type fileView struct {
+	content  [sha256.Size]byte
+	complete bool
 }
 
 // NewFileViews returns an empty record.
 func NewFileViews() *FileViews {
-	return &FileViews{seen: map[string][sha256.Size]byte{}}
+	return &FileViews{seen: map[string]fileView{}}
 }
 
 func (v *FileViews) saw(path, content string) {
@@ -36,27 +44,70 @@ func (v *FileViews) saw(path, content string) {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.seen[filepath.Clean(path)] = sha256.Sum256([]byte(content))
+	v.seen[filepath.Clean(path)] = fileView{content: sha256.Sum256([]byte(content)), complete: true}
 }
 
-// maxViewBytes bounds the files a read records: past it the view is dropped
-// rather than paid for with a second whole-file read.
+func (v *FileViews) sawPartial(path string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	path = filepath.Clean(path)
+	if _, ok := v.seen[path]; !ok {
+		v.seen[path] = fileView{}
+	}
+}
+
+// maxViewBytes bounds decoded content retained while rendering a read.
 const maxViewBytes = 8 << 20
 
-// sawFile records the file's current content, as the edit tools would read it.
-func (v *FileViews) sawFile(ctx context.Context, overlay FileOverlay, path string) {
+// Only a complete returned read can replace an earlier observation. A page,
+// failed read or oversize input must not certify content the caller did not see.
+func (v *FileViews) captureRead(path string, emit func(io.Reader, int, int) (string, error)) func(io.Reader, int, int) (string, error) {
 	if v == nil {
-		return
+		return emit
 	}
-	if info, err := os.Stat(path); err == nil && info.Size() <= maxViewBytes {
-		if src, err := readEditSource(ctx, overlay, path); err == nil {
-			v.saw(path, src.content)
-			return
+	return func(src io.Reader, offset, limit int) (string, error) {
+		if offset != 0 {
+			out, err := emit(src, offset, limit)
+			if err == nil {
+				v.sawPartial(path)
+			}
+			return out, err
 		}
+		read := &fileViewRead{src: src}
+		out, err := emit(read, offset, limit)
+		if err != nil {
+			return out, err
+		}
+		v.sawPartial(path)
+		data := read.data
+		if read.eof && len(data) <= maxViewBytes {
+			lines := bytes.Count(data, []byte{'\n'})
+			if len(data) > 0 && data[len(data)-1] != '\n' {
+				lines++
+			}
+			if limit <= 0 || lines <= limit {
+				v.saw(path, string(data))
+			}
+		}
+		return out, nil
 	}
-	v.mu.Lock()
-	delete(v.seen, filepath.Clean(path))
-	v.mu.Unlock()
+}
+
+type fileViewRead struct {
+	src  io.Reader
+	data []byte
+	eof  bool
+}
+
+func (r *fileViewRead) Read(p []byte) (int, error) {
+	n, err := r.src.Read(p)
+	if remaining := maxViewBytes + 1 - len(r.data); remaining > 0 {
+		r.data = append(r.data, p[:min(n, remaining)]...)
+	}
+	if err == io.EOF {
+		r.eof = true
+	}
+	return n, err
 }
 
 // checkOverwrite refuses replacing current when the agent saw different
@@ -69,7 +120,10 @@ func (v *FileViews) checkOverwrite(path, current string) error {
 	v.mu.Lock()
 	want, ok := v.seen[filepath.Clean(path)]
 	v.mu.Unlock()
-	if !ok || want == sha256.Sum256([]byte(current)) {
+	if ok && !want.complete {
+		return fmt.Errorf("%w: read %s in full before replacing it, or use edit_file for a targeted change", ErrFileNotFullySeen, path)
+	}
+	if !ok || want.content == sha256.Sum256([]byte(current)) {
 		return nil
 	}
 	return fmt.Errorf("%w: %s was modified after you last read or wrote it, by the user or another process; read it again and apply your change to what it holds now", ErrFileChangedSinceSeen, path)
