@@ -193,8 +193,8 @@ func RemoveCandidate(ctx context.Context, snap Snapshot, c Candidate) error {
 	return nil
 }
 
-// workingTree writes repo's working state as a tree through a private copy of
-// its index, so only changed files are hashed and the real index is untouched.
+// workingTree hashes actual workspace bytes through a rebuilt private index.
+// Git's cached stat identity is not a content version; the real index is untouched.
 func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
 	indexPath, _, err := runGit(ctx, repo, "rev-parse", "--git-path", "index")
 	if err != nil {
@@ -216,6 +216,29 @@ func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
 	env := []string{"GIT_INDEX_FILE=" + private}
 	stageCtx, cancel := context.WithTimeout(ctx, gitWorktreeAddTimeout)
 	defer cancel()
+	if _, err := os.Stat(private); err == nil {
+		unmerged, stderr, err := runGitEnv(stageCtx, repo, env, "ls-files", "--unmerged", "-z")
+		if err != nil {
+			return "", fmt.Errorf("read private index: %w%s", err, stderrSuffix(stderr))
+		}
+		if unmerged != "" {
+			if err := repo.StageAll(stageCtx, env...); err != nil {
+				return "", fmt.Errorf("stage conflicted workspace snapshot: %w", err)
+			}
+		}
+		indexTree, stderr, err := runGitEnv(stageCtx, repo, env, "write-tree")
+		if err != nil {
+			return "", fmt.Errorf("record private index: %w%s", err, stderrSuffix(stderr))
+		}
+		if err := os.Remove(private); err != nil {
+			return "", err
+		}
+		if _, stderr, err := runGitEnv(stageCtx, repo, env, "read-tree", strings.TrimSpace(indexTree)); err != nil {
+			return "", fmt.Errorf("rebuild private index: %w%s", err, stderrSuffix(stderr))
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
 	if err := repo.StageAll(stageCtx, env...); err != nil {
 		return "", fmt.Errorf("stage workspace snapshot: %w", err)
 	}
@@ -257,9 +280,8 @@ func runGitEnv(parent context.Context, repo gitcmd.Repo, env []string, args ...s
 	return outBuf.String(), strings.TrimSpace(errBuf.String()), err
 }
 
-// copyFile copies an index keeping its modification time: git re-hashes an
-// entry written in the index's own second only while the index file's mtime
-// says so, and a fresh mtime would hide a same-size edit made in that second.
+// copyFile preserves the index bytes and timestamp. workingTree rebuilds its
+// cached entries before staging the current workspace content.
 func copyFile(from, to string) error {
 	in, err := os.Open(from)
 	if err != nil {
