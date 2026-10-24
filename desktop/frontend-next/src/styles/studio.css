@@ -2185,9 +2185,11 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   padding-top: 4px;
   border-top: 1px solid var(--hair);
 }
-.studio-user-foot .acctrow { width: 30px; min-width: 30px; height: 30px; margin: 0; padding: 0; overflow: hidden; }
+.studio-user-foot .acctrow { width: 30px; min-width: 30px; height: 30px; margin: 0; padding: 0; border: 0; overflow: hidden; }
 .studio-user-foot .ini { width: 30px; height: 30px; border-radius: 9px; }
-.studio-workspace-kind { color: var(--faint); font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-user-foot .ini,
+.studio-workspace-kind { font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--ui); }
+.studio-workspace-kind { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .turntools > .attach { order: 1 !important; }
 .turntools > .studio-mode-control { order: 2 !important; }
