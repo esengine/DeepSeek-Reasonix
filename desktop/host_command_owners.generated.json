@@ -6231,6 +6231,20 @@
       ]
     }
   },
+  "RemoteTabHydrationState": {
+    "domain": "desktop/remote_events.go",
+    "owner": "App.RemoteTabHydrationState",
+    "sources": [
+      "desktop/remote_events.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.RemoteTabHydrationState",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
   "RemoteTabMetadata": {
     "domain": "desktop/remote_tab_snapshot.go",
     "owner": "App.RemoteTabMetadata",

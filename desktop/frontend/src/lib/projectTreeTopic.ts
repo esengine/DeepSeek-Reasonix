@@ -1,7 +1,7 @@
 import { asArray } from "./array";
 import { getLocale, type DictKey, type Translator } from "./i18n";
 import type { ProjectNode, ProjectTopicStatus } from "./types";
-import { projectSessionIdentity, projectSessionExcluded, projectSessionKeys, sameProjectSession } from "./projectSessionIdentity";
+import { projectSessionIdentity, projectSessionExcluded, projectSessionKeys, canonicalProjectSession, projectSessionResolver } from "./projectSessionIdentity";
 
 export type ProjectTreeVariant = "workbench" | "creation";
 export type WorkbenchSortMode = "created" | "updated";
@@ -63,32 +63,21 @@ export function projectTreeShouldApplyShellSnapshot(options: {
 export function mergeProjectTopicPage(current: ProjectNode[], incoming: ProjectNode[], append: boolean): ProjectNode[] {
   // Owner aliases retire the source projection even when its old page arrives
   // after adoption. Canonical identity always wins; its durable row metadata is retained.
-  incoming = incoming.map(row => !row.session ? current.find(old => old.session && sameProjectSession(old,row)) ?? row : row);
+  const identity = projectSessionResolver([...current, ...incoming]);
+  const canonical = new Map([...current, ...incoming].filter(canonicalProjectSession).map(node => [identity(node), node]));
+  incoming = incoming.map(row => canonical.get(identity(row)) ?? row);
+  let base = current;
   if (!append) {
     // Project snapshots carry every pinned topic shell, while a lazy first
     // page is bounded. Keep off-page pins so expanding a busy project cannot
     // make its pinned section incomplete again.
-    const incomingKeys = new Set(incoming.flatMap(projectSessionKeys));
-    const offPagePins = current.filter((node) => Boolean(node.pinned) && !projectSessionKeys(node).some(key => incomingKeys.has(key)));
-    return [...incoming, ...offPagePins];
+    const incomingKeys = new Set(incoming.map(identity));
+    base = incoming;
+    incoming = current.filter(node => Boolean(node.pinned) && !incomingKeys.has(identity(node)));
   }
-  const next = [...current];
-  const positions = new Map(next.flatMap((node, index) => projectSessionKeys(node).map(key => [key,index] as const)));
-  for (const node of incoming) {
-    const index = projectSessionKeys(node).map(key => positions.get(key)).find(index => index !== undefined);
-    if (index === undefined) {
-      positions.set(projectSessionIdentity(node), next.length);
-      next.push(node);
-    } else {
-      next[index] = node;
-    }
-  }
-  const seen = new Set<string>();
-  return next.filter(node => {
-    const keys = projectSessionKeys(node);
-    if (keys.some(key => seen.has(key))) return false;
-    keys.forEach(key => seen.add(key)); return true;
-  });
+  const rows = new Map<string, ProjectNode>();
+  for (const node of [...base, ...incoming]) rows.set(identity(node), canonical.get(identity(node)) ?? node);
+  return [...rows.values()];
 }
 
 // A directory scan commits catalog rows in batches, but an incomplete page is
@@ -96,10 +85,11 @@ export function mergeProjectTopicPage(current: ProjectNode[], incoming: ProjectN
 // last complete resident rows byte-for-byte and append only newly discovered
 // keys until a complete page can replace the canonical first page.
 export function mergeIncompleteProjectTopicPage(current: ProjectNode[], incoming: ProjectNode[]): ProjectNode[] {
-  const residents = new Map(current.flatMap(node => projectSessionKeys(node).map(key => [key, node] as const)));
+  const identity = projectSessionResolver([...current, ...incoming]);
+  const residents = new Map(current.map(node => [identity(node), node]));
   const discovered = incoming.filter(node => {
-    const resident = projectSessionKeys(node).map(key => residents.get(key)).find(Boolean);
-    return !resident || Boolean(node.session && !resident.session);
+    const resident = residents.get(identity(node));
+    return !resident || Boolean(canonicalProjectSession(node) && !canonicalProjectSession(resident));
   });
   return discovered.length === 0 ? current : mergeProjectTopicPage(current, discovered, true);
 }

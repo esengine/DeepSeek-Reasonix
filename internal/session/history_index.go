@@ -132,7 +132,7 @@ func incrementHistoryIndex(ctx context.Context, dir, path, sessionID string, rev
 	if _, err := os.Stat(path); err != nil {
 		return false, nil
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return false, nil
 	}
@@ -276,7 +276,7 @@ func historyIndexCurrent(ctx context.Context, dir, path, sessionID string, revis
 	if _, err := os.Stat(path); err != nil {
 		return false
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return false
 	}

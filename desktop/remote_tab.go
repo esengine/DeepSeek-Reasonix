@@ -211,7 +211,7 @@ func (a *App) markRemoteTabAttached(tabID string, gen uint64) bool {
 	if tab == nil || tab.gen != gen || tab.state != "connecting" {
 		return false
 	}
-	tab.attachedGen = gen
+	tab.publication.attachedGen = gen
 	return true
 }
 
@@ -221,12 +221,12 @@ func (a *App) publishRemoteTabAttachedReady(tabID string, gen uint64) bool {
 		return false
 	}
 	a.remoteTabMu.Lock()
-	if a.remoteTabs[tabID] != tab || tab.gen != gen || tab.attachedGen != gen || tab.state != "connecting" {
+	if a.remoteTabs[tabID] != tab || tab.gen != gen || tab.publication.attachedGen != gen || tab.state != "connecting" {
 		a.remoteTabMu.Unlock()
 		tab.routeEventMu.Unlock()
 		return false
 	}
-	tab.attachedGen = 0
+	tab.publication.attachedGen = 0
 	tab.state = "ready"
 	tab.err = ""
 	a.remoteTabMu.Unlock()

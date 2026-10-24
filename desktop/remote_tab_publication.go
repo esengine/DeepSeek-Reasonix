@@ -33,7 +33,7 @@ func (a *App) retireRemoteTabGeneration(tabID string, gen uint64) {
 	}
 	cancel := tab.cancel
 	tab.gen++
-	tab.attachedGen = 0
+	tab.publication.attachedGen = 0
 	tab.cancel = nil
 	tab.client = nil
 	tab.base = ""
@@ -63,7 +63,7 @@ func (a *App) reconnectRemoteTabGeneration(tabID string, gen uint64) bool {
 	startRetry := tab.state != "reconnecting"
 	cancel := tab.cancel
 	tab.gen++
-	tab.attachedGen = 0
+	tab.publication.attachedGen = 0
 	tab.cancel = nil
 	tab.client = nil
 	tab.base = ""

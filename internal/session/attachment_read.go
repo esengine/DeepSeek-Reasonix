@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"reasonix/internal/attachment"
-	"reasonix/internal/projectiondb"
 	"reasonix/internal/sessioncontent"
 )
 
@@ -78,7 +77,7 @@ func (q *Query) lookupHistoryAttachment(ctx context.Context, filesystem *Filesys
 	if err := ensureHistoryIndex(ctx, filesystem, ref.SessionID, path); err != nil {
 		return sessioncontent.Ref{}, false, err
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return sessioncontent.Ref{}, false, err
 	}

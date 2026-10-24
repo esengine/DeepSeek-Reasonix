@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useRuntimeSession } from "./useRuntimeState";
 import { createLegacyRemotePolicyNoticeTracker } from "./legacyRemotePolicyNotice";
 import { app, onRemoteTabEvent, onRemoteTabState } from "./bridge";
+import { createRemoteHydrationOwner } from "./remoteHydrationOwner";
 import { queuedFollowupOutcome } from "./pendingFollowup";
 import { onRemoteTabUpdated } from "./remoteTabEvents";
 import { hydrateRemoteTelemetry, loadRemoteStatusSnapshot } from "./remoteTelemetry";
@@ -324,7 +325,7 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
       applyRemoteStatus(status);
       setTranscript(current => hydrateRemoteTelemetry(current, status));
     };
-    const hydrate = async () => {
+    const hydration = createRemoteHydrationOwner(async () => {
       const ticket = ++generation;
       follower?.stop();
       follower = new TranscriptSessionFollower(tabId, sessionPath ?? "", true, action => {
@@ -340,7 +341,7 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
         await follower.start();
         const loaded = await loadRemoteStatusSnapshot(tabId, mountedState === "ready" ? 3 : 60,
           () => cancelled || ticket !== generation, isAuthoritativeRemoteStatus, true);
-        if (!loaded || cancelled || ticket !== generation) return;
+        if (!loaded || cancelled || ticket !== generation) return false;
         const [snapshot, status] = loaded;
         applyRemoteStatus(status);
         setCommands(Array.isArray(snapshot.commands) ? snapshot.commands as CommandInfo[] : []);
@@ -354,8 +355,9 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
         setRevalidating(false);
         setSurfaceGeneration(value => value + 1);
         void forkTargetsRefreshRef.current?.();
+        return true;
       } catch (error) {
-        if (cancelled || ticket !== generation) return;
+        if (cancelled || ticket !== generation) return false;
         // The transcript protocol requires the live runtime that owns the
         // session. Only a session taken over by a local runtime on the serve
         // host (the Follow request answers 409, or status reports the
@@ -363,12 +365,12 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
         // other failure keeps its error and waits for the next ready
         // publication or an explicit retry.
         const takenOver = isRemoteTakeoverError(error) || await app.RemoteTabStatus(tabId).then(remoteStatusTakenOver, () => false);
-        if (cancelled || ticket !== generation) return;
-        if (!takenOver) { setError(String(error)); return; }
+        if (cancelled || ticket !== generation) return false;
+        if (!takenOver) { setError(String(error)); return false; }
         try {
           const legacyLoaded = await loadRemoteStatusSnapshot(tabId, mountedState === "ready" ? 3 : 60,
             () => cancelled || ticket !== generation, isAuthoritativeRemoteStatus, false);
-          if (!legacyLoaded || cancelled || ticket !== generation) return;
+          if (!legacyLoaded || cancelled || ticket !== generation) return false;
           const [snapshot, status] = legacyLoaded;
           const messages = Array.isArray(snapshot.history) ? snapshot.history as HistoryMessage[] : [];
           const checkpoints = remoteCheckpoints(snapshot.checkpoints);
@@ -389,11 +391,14 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
           setRevalidating(false);
           setSurfaceGeneration(value => value + 1);
           void forkTargetsRefreshRef.current?.();
+          return true;
         } catch (fallbackError) {
           if (!cancelled && ticket === generation) setError(String(fallbackError));
         }
       }
-    };
+      return false;
+    });
+    const hydrate = () => hydration.load();
     const offContent = getTranscriptStore().subscribe(tabId, change => change.projection
       ? dispatch({ type: "transcript_records", projection: change.projection, confirmedUsers: [] })
       : dispatch({ type: "history_items_patch", patches: change.patches, expected: change.expected }));
@@ -441,17 +446,20 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
     };
     refreshStatusRef.current = { tabId, run: refreshStatus };
     reconcileHistoryRef.current = hydrate;
-    const offState = onRemoteTabState(tabId, next => {
-      if (cancelled) return;
+    const acceptState: Parameters<typeof onRemoteTabState>[1] = next => {
+      if (cancelled || !hydration.observe(next.hydrationRevision)) return;
       setState(next.state);
       setError(next.error ?? "");
-      if (next.state === "ready") void hydrate();
-      else if (next.state === "disconnected") {
+      if (next.state === "ready") void hydration.load(next.hydrationRevision);
+      else {
+        generation++;
+        follower?.stop();
         setHydrated(false);
         setRevalidating(false);
         dispatch({ type: "transcript_connection", status: "disconnected" });
       }
-    });
+    };
+    const offState = onRemoteTabState(tabId, acceptState);
     // Ownership flips arrive as tab meta updates (an explicit reclaim clears
     // the pin there before any status poll runs); mirror them into the
     // spectator flag that drives the reconcile loop below.
@@ -473,7 +481,12 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
     if (revivedFromShell) void app.SetActiveTab(tabId).catch(() => undefined);
     paintResidentCache();
     void primeEarlyHistory();
-    void hydrate();
+    const initialGeneration = generation;
+    void Promise.resolve().then(() => app.RemoteTabHydrationState?.(tabId)).catch(() => undefined).then(next => {
+      if (cancelled || generation !== initialGeneration) return;
+      if (next) acceptState(next);
+      else void hydrate(); // Older hosts do not publish hydration revisions.
+    });
     return () => {
       submitBindingRef.current = {};
       cancelled = true;

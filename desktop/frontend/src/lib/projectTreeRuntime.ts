@@ -1,7 +1,7 @@
 import { desktopHost } from "./desktopHost";
 import { asArray } from "./array";
 import { runtimeStateStore } from "./runtimeStateStore";
-import { projectSessionIdentity, projectSessionExcluded, projectSessionKeys } from "./projectSessionIdentity";
+import { projectSessionIdentity, projectSessionExcluded, projectSessionResolver } from "./projectSessionIdentity";
 import type { ProjectNode, ProjectRuntimeTopic, ProjectTreeRuntimeSnapshot } from "./types";
 
 const noExcludedTopicIds: ReadonlySet<string> = new Set();
@@ -106,12 +106,7 @@ export function projectTreeApplyRuntimeTopics(
       .filter((topic) => !projectSessionExcluded(topic.node, excludedTopicIds)
         && topic.scope === scope
         && (scope !== "project" || topic.workspaceRoot === root));
-    const aliases = new Map<string, string>();
-    for (const node of [...asArray(project.children), ...available.map(topic => topic.node)]) {
-      if (!node.session && !node.tabId) continue;
-      for (const alias of projectSessionKeys(node)) aliases.set(alias, projectSessionIdentity(node));
-    }
-    const identityOf = (node: ProjectNode) => aliases.get(projectSessionIdentity(node)) ?? projectSessionIdentity(node);
+    const identityOf = projectSessionResolver([...asArray(project.children), ...available.map(topic => topic.node)]);
     const runtimeByTopic = new Map(available.map(topic => [identityOf(topic.node), topic]));
     const currentChildren = asArray(project.children);
     const base: ProjectNode[] = [];

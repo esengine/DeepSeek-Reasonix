@@ -11,7 +11,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"reasonix/internal/projectiondb"
 	"reasonix/internal/sessioncontent"
 )
 
@@ -89,7 +88,7 @@ func (q *Query) ReadMessageField(ctx context.Context, ref SessionRef, messageID 
 	if err != nil {
 		return MessageFieldPage{}, err
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return MessageFieldPage{}, err
 	}

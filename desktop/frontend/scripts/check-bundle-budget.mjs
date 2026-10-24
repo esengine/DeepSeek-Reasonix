@@ -567,6 +567,11 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // The Studio introduction and the provider-failure causes measure 2107767 B in
 // the initial raw boundary; the ceiling keeps 341 B of producer headroom, and
 // compressed initial JS, per-chunk and CSS ceilings remain unchanged.
-const rawInitialBudgetKiB = 2_058.7;
+// Session navigation, alias ownership and remote ready barriers add 1499 B
+// (0.071%) over isolated main-v2 8cc804e687 with the same toolchain:
+// 2109361 B versus 2107862 B. This includes the earlier canonical-open fix.
+// Keep the 186 B producer margin at the smallest one-decimal ceiling; gzip,
+// chunk, CSS, locale, and resident-history limits remain unchanged.
+const rawInitialBudgetKiB = 2_060.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

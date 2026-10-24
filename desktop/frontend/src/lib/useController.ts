@@ -3078,6 +3078,8 @@ export function useController() {
     return active.id;
   }, [activeTabFromBackend, beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, isNavigationIntentCurrent, loadSessionDataForTab, primeReadableHistoryForTab, startTranscriptFollow]);
 
+  const { openCanonicalSession, opening: canonicalOpening, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession } = useSessionCatalogActions(requireRegisteredNavigationIntent, isNavigationIntentCurrent, syncActiveTabFromBackend, invalidateCache);
+
   const reconcileTabRuntime = useCallback(async (
     tabId: string,
     options: { hydrateSessionData?: boolean; refreshAncillary?: boolean } = {},
@@ -3374,6 +3376,7 @@ export function useController() {
     const off = onEvent(receiveWireEvent);
 
     const offReady = onReady((readyTabId) => {
+      if (canonicalOpening.current?.intent === activeNavigationSeqRef.current) return;
       const activeId = activeTabIdRef.current;
       if (readyTabId && activeId && readyTabId !== activeId) {
         addBreadcrumb("tab.hydrate", `ready ignored ${readyTabId}`);
@@ -3391,13 +3394,19 @@ export function useController() {
     const offRebuilt = onRuntimeRebuilt((rebuiltTabId, runtimeEpoch) => {
       const ids = rebuiltTabId ? [rebuiltTabId] : Array.from(statesRef.current.keys());
       for (const id of ids) {
-        followers.current.get(id)?.stop();
-        followers.current.delete(id);
+        // Keep the subscription when publication replays the same runtime epoch.
+        if (!runtimeEpoch || runtimeEpochByTabRef.current.get(id) !== runtimeEpoch) {
+          followers.current.get(id)?.stop();
+          followers.current.delete(id);
+        }
         invalidateSharedQuery("MetaForTab", [id]);
         if (runtimeEpoch) runtimeEpochByTabRef.current.set(id, runtimeEpoch);
         dispatchTo(id, { type: "controller_rebuilt" });
         const state = statesRef.current.get(id);
-        if (!needsColdHistory(state?.meta) && !state?.hydrating && !state?.backendActivationPending) {
+        const opening = canonicalOpening.current;
+        const owned = opening?.intent === activeNavigationSeqRef.current &&
+          (id === activeTabIdRef.current || !state?.meta || state.meta.session?.sessionId === opening.sessionId);
+        if (!followers.current.has(id) && !owned && !needsColdHistory(state?.meta) && !state?.hydrating && !state?.backendActivationPending) {
           void startTranscriptFollow(id, state?.meta?.sessionPath ?? "").catch(error =>
             dispatchTo(id, { type: "transcript_connection", status: "disconnected", error: String(error) }));
         }
@@ -3474,7 +3483,7 @@ export function useController() {
       offTabMeta();
       offRecovery();
     };
-  }, [dispatchRuntimeStatusForTab, dispatchTo, handleTopicActivationEvent, loadSessionDataForTab, primeReadableHistoryForTab, refreshBalanceForTab, refreshCheckpoints, refreshMetaForTab, syncActiveTabFromBackend, startTranscriptFollow]);
+  }, [canonicalOpening, dispatchRuntimeStatusForTab, dispatchTo, handleTopicActivationEvent, loadSessionDataForTab, primeReadableHistoryForTab, refreshBalanceForTab, refreshCheckpoints, refreshMetaForTab, syncActiveTabFromBackend, startTranscriptFollow]);
 
   // Track the visible tab in the transcript store: the active tab is pinned
   // out of LRU eviction. (In-flight loads of background tabs still complete
@@ -4182,8 +4191,6 @@ export function useController() {
     return { value: undefined, surfaceReady };
   }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, ensureTranscriptSubscription, failSessionNavigation, invalidateCheckpoints, isNavigationIntentCurrent, navigationCompletionCurrent, reconcileSessionNavigationForTab, refreshTurnBoundaries, requireRegisteredNavigationIntent, sessionLoadCurrent, startTranscriptFollow, snapshotNavigationSourceTab, waitForTabReady]);
 
-  const { openCanonicalSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession } =
-    useSessionCatalogActions(requireRegisteredNavigationIntent, isNavigationIntentCurrent, syncActiveTabFromBackend, invalidateCache);
   const refreshMeta = useCallback(async () => {
     if (!activeTabId) return;
     invalidateSharedQuery("MetaForTab", [activeTabId]);

@@ -11747,6 +11747,32 @@
     },
     {
       "cancellation": "before-dispatch",
+      "domain": "desktop/remote_events.go",
+      "name": "RemoteTabHydrationState",
+      "owner": "App.RemoteTabHydrationState",
+      "params": [
+        {
+          "kind": "string"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "main.RemoteTabStateView"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "tabID"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.RemoteTabHydrationState"
+      },
+      "sources": [
+        "desktop/remote_events.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
       "domain": "desktop/remote_tab_snapshot.go",
       "name": "RemoteTabMetadata",
       "owner": "App.RemoteTabMetadata",
@@ -38108,6 +38134,30 @@
               "kind": "any"
             },
             "kind": "array"
+          }
+        }
+      ]
+    },
+    "main.RemoteTabStateView": {
+      "fields": [
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "error",
+          "optional": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "hydrationRevision",
+          "optional": true,
+          "type": {
+            "kind": "integer"
           }
         }
       ]

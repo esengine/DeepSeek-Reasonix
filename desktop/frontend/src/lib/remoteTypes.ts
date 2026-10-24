@@ -75,6 +75,7 @@ export type RemoteTabStateValue = "connecting" | "ready" | "reconnecting" | "ser
 export interface RemoteTabState {
   state: RemoteTabStateValue;
   error?: string;
+  hydrationRevision?: number;
 }
 
 export interface RemoteTabOpenOptions {

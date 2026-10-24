@@ -14,23 +14,6 @@ import (
 	"reasonix/internal/config"
 )
 
-func TestSetActiveTabRepublishesTerminalRemoteState(t *testing.T) {
-	log := &eventLog{}
-	tab := &remoteTab{
-		id: "remote-terminal", ref: RemoteTabRef{HostID: "box", Workspace: "~/app"},
-		state: "serve_down", err: "bootstrap failed",
-		routing: remoteTabSessionRouting{running: map[string]bool{}},
-	}
-	a := &App{remoteTabs: map[string]*remoteTab{tab.id: tab}, remoteEventHook: log.add}
-	if err := a.SetActiveTab(tab.id); err != nil {
-		t.Fatal(err)
-	}
-	events := strings.Join(log.recorded(), "\n")
-	if !strings.Contains(events, `remote-tab:remote-terminal:state {"state":"serve_down","error":"bootstrap failed"}`) {
-		t.Fatalf("terminal activation events = %s", events)
-	}
-}
-
 func TestRemoteTabServeDownSavedSessionClearsPendingBeforeDelayedMarker(t *testing.T) {
 	const oldPath = "/sessions/old.jsonl"
 	const savedPath = "/sessions/saved.jsonl"

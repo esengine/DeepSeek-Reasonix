@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"reasonix/internal/projectiondb"
 	"reasonix/internal/sessioncontent"
 )
 
@@ -144,7 +143,7 @@ func (q *Query) ReadHistoryWindow(ctx context.Context, ref SessionRef, req Histo
 	if !ready {
 		return HistoryWindowPage{Messages: []PersistentMessage{}, Status: "preparing"}, nil
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return HistoryWindowPage{}, err
 	}

@@ -89,7 +89,7 @@ func (q *Query) SearchHistory(ctx context.Context, ref SessionRef, textQuery, cu
 	if err != nil {
 		return SearchHistoryPage{}, err
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: searchMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openSearchProjection(ctx, path)
 	if err != nil {
 		return SearchHistoryPage{}, err
 	}
@@ -242,7 +242,7 @@ func ensureSearchIndex(ctx context.Context, persistence *FilesystemPersistence, 
 	if err != nil {
 		return err
 	}
-	if handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: searchMigrations, RequireDisk: true, MaxOpenConns: 1}); err == nil {
+	if handle, err := openSearchProjection(ctx, path); err == nil {
 		metadata, metaErr := readSearchMetadata(ctx, handle.DB)
 		_ = handle.DB.Close()
 		if metaErr == nil && metadata.sessionID == sessionID && metadata.storageRevision == StorageRevision && metadata.projection == searchIndexVersion {
@@ -270,7 +270,7 @@ func rebuildSearchIndex(ctx context.Context, dir, path, sessionID string, revisi
 }
 
 func incrementSearchIndex(ctx context.Context, dir, path string, revision logRevision, metadata searchMetadata) error {
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: searchMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openSearchProjection(ctx, path)
 	if err != nil {
 		return err
 	}

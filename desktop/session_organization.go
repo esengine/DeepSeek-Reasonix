@@ -234,7 +234,20 @@ func workspaceSourceAliases(state workspacestate.State, workspaceID string) map[
 				"source\x00local\x00"+desktopSourceKey(m.Path, ""))
 		}
 	}
+	aliasOwners := map[string]string{}
 	for id, aliases := range result {
+		for _, alias := range aliases {
+			if owner, exists := aliasOwners[alias]; exists && owner != id {
+				aliasOwners[alias] = ""
+			} else if !exists {
+				aliasOwners[alias] = id
+			}
+		}
+	}
+	for id, aliases := range result {
+		// Old path spellings can normalize to the same source while retaining
+		// independent durable receipts. Ambiguity is not an ownership alias.
+		aliases = slices.DeleteFunc(aliases, func(alias string) bool { return aliasOwners[alias] != id })
 		slices.Sort(aliases)
 		result[id] = slices.Compact(aliases)
 	}

@@ -31,6 +31,7 @@ export interface RemoteProjectBindings {
   EditRemoteTabGoal(tabId: string, objective: string, maxGoalRounds: number | null): Promise<void>;
   RemoteTabSnapshot(tabId: string): Promise<RemoteTabSnapshot>;
   RemoteTabMetadata?(tabId: string): Promise<RemoteTabSnapshot>;
+  RemoteTabHydrationState?(tabId: string): Promise<import("./remoteTypes").RemoteTabState>;
   RemoteTabStatus(tabId: string): Promise<unknown>;
   SetRemoteTabEffort(tabId: string, level: string): Promise<void>;
   SetRemoteTabQualityFloor(tabId: string, floor: string): Promise<void>;

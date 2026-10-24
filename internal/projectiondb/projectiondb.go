@@ -76,6 +76,10 @@ type OpenOptions struct {
 	// QuickCheck uses SQLite's quick_check for a disposable projection.
 	// Authoritative stores keep the full integrity_check default.
 	QuickCheck bool
+	// ReuseIntegrityCheck permits cached audits of unchanged disposable files.
+	// File identity, size, mtime, SQLite header and empty WAL are required.
+	// Default stays full validation; authoritative stores must not opt in.
+	ReuseIntegrityCheck bool
 	// ResumeKey opts Rebuild into a single persistent staging database. The
 	// callback atomically commits data and position. Cancellation retains staging;
 	// a changed key starts fresh. Progress is disposable, never business authority.
@@ -228,6 +232,11 @@ func open(ctx context.Context, opts OpenOptions, mode Mode, checkIntegrity bool)
 			return nil, err
 		}
 	}
+	var auditFile integrityCertificate
+	var auditKnown bool
+	if opts.ReuseIntegrityCheck && mode == ModeDisk {
+		auditFile, auditKnown = integrityFileState(opts.Path)
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -271,7 +280,14 @@ func open(ctx context.Context, opts OpenOptions, mode Mode, checkIntegrity bool)
 		_, _ = db.ExecContext(ctx, `PRAGMA auto_vacuum=INCREMENTAL`)
 	}
 	if checkIntegrity {
-		if err := checkDatabaseIntegrity(ctx, db, opts.QuickCheck); err != nil {
+		validate := func() error { return checkDatabaseIntegrity(ctx, db, opts.QuickCheck) }
+		var err error
+		if opts.ReuseIntegrityCheck && mode == ModeDisk {
+			err = reusableIntegrityChecks.checkOpened(opts.Path, opts.QuickCheck, auditFile, auditKnown, validate)
+		} else {
+			err = validate()
+		}
+		if err != nil {
 			return fail(err)
 		}
 	}

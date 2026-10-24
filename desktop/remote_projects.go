@@ -50,8 +50,9 @@ type RemoteTabOpenOptions struct {
 // RemoteTabStateView is the payload on the remote-tab:{id}:state channel.
 // State: connecting | ready | reconnecting | serve_down | error.
 type RemoteTabStateView struct {
-	State string `json:"state"`
-	Error string `json:"error,omitempty"`
+	State             string `json:"state"`
+	Error             string `json:"error,omitempty"`
+	HydrationRevision uint64 `json:"hydrationRevision,omitempty"`
 }
 
 // remoteTab is one open remote project tab.
@@ -87,9 +88,7 @@ type remoteTab struct {
 	capabilities map[string]bool
 	gen          uint64
 	cancel       context.CancelFunc
-	// attachedGen marks a pump that survived the open/session-entry barrier.
-	// It stays internal so ListTabs never exposes a transient non-wire state.
-	attachedGen uint64
+	publication  remoteTabPublicationState
 	// Pending approval/ask frames are retained while the frontend surface is
 	// inactive. RemoteTabSnapshot replays them when that surface mounts again.
 	pendingEvents    map[string]json.RawMessage
@@ -124,6 +123,13 @@ type remoteTabRuntimeState struct {
 	backgroundJobs  int
 	cancelRequested bool
 	cancellable     bool
+}
+
+// Publication counters belong to the tab, not a rollbackable Serve snapshot.
+// Both are guarded by remoteTabMu and ordered by routeEventMu.
+type remoteTabPublicationState struct {
+	attachedGen       uint64 // pump that survived the open/session-entry barrier
+	hydrationRevision uint64
 }
 
 type remoteTabTitleRefreshState struct {
@@ -708,7 +714,7 @@ func (a *App) bootstrapRemoteTab(tabID, hostID, workspace string) {
 		return
 	}
 	gen := openTab.gen
-	if openTab.attachedGen != gen || openTab.state != "connecting" {
+	if openTab.publication.attachedGen != gen || openTab.state != "connecting" {
 		a.remoteTabMu.Unlock()
 		return
 	}

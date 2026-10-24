@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"reasonix/internal/projectiondb"
 	"reasonix/internal/textutil"
 )
 
@@ -74,7 +73,7 @@ func (q *Query) ReadHistoryOutline(ctx context.Context, ref SessionRef, req Hist
 		page.Status = "preparing"
 		return page, nil
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return page, err
 	}

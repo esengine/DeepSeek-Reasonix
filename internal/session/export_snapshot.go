@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reasonix/internal/projectiondb"
 	"strings"
 	"time"
 )
@@ -48,7 +47,7 @@ func (q *Query) CaptureExportSnapshot(ctx context.Context, ref SessionRef) (Expo
 	if err != nil {
 		return out, err
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return out, err
 	}
@@ -97,7 +96,7 @@ func (q *Query) VisitExportMessagesForRef(ctx context.Context, ref SessionRef, s
 	if err != nil {
 		return err
 	}
-	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{Path: path, Migrations: historyMigrations, RequireDisk: true, MaxOpenConns: 1})
+	handle, err := openHistoryProjection(ctx, path)
 	if err != nil {
 		return err
 	}
