@@ -4,6 +4,7 @@ import { decimals, seconds } from "../i18n/format";
 import type { TrajRow } from "../state/trajectory";
 import type { TrajectoryAvailability } from "../port/wire";
 import { categoryOf } from "./icons";
+import { StudioIcon } from "./StudioIcon";
 import { serialiseTrajectory, spanText, trajectoryFileName } from "./trajectory-export";
 
 const SIGNAL_GAP = 22;
@@ -53,10 +54,11 @@ function Inspect({ row, index }: { row: TrajRow; index: number }) {
 /** A readable first stop for a run. Raw trajectory remains available for
  *  diagnosis, but this page answers the questions people ask before reading a
  *  protocol log: where time went, what overlapped, and which round is unusual. */
-export function RunAnalysis({ rows, availability, onSave }: {
+export function RunAnalysis({ rows, availability, onSave, onBack }: {
   rows: TrajRow[];
   availability?: TrajectoryAvailability;
   onSave: (name: string, content: string) => Promise<string | null>;
+  onBack: () => void;
 }) {
   const activities = useMemo(
     () => rows.filter((r) => (r.dur ?? 0) > 0 || isRecovery(r)),
@@ -141,6 +143,9 @@ export function RunAnalysis({ rows, availability, onSave }: {
     <div className="run-analysis" ref={root}>
       <header className="run-analysis-head">
         <span>
+          <button className="run-export run-back" type="button" data-action="pane.view" data-value="flow" aria-label={t("返回正文")} title={t("返回正文")} onClick={onBack}>
+            <StudioIcon name="chevron" />
+          </button>
           <b>{t("运行分析")}</b>
           <small>{t("本轮 · 基于真实记录")}</small>
         </span>

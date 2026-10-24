@@ -77,6 +77,10 @@ func (e *startupFailure) Unwrap() error {
 	return e.Err
 }
 
+// ErrRuntimeNotExecutable marks a runtime command the operating system refused
+// as a program, such as a shell script on Windows.
+var ErrRuntimeNotExecutable = errors.New("runtime command is not an executable program")
+
 func newStartupFailure(stage string, started time.Time, stderr string, err error) error {
 	if err == nil {
 		return nil
@@ -211,6 +215,9 @@ func startProcess(pkg pluginpkg.Package, installed pluginpkg.InstalledPlugin) (*
 	unconfinedLaunch.Store(true)
 	job, err := proc.StartTracked(cmd)
 	if err != nil {
+		if notExecutableFormat(err) {
+			err = fmt.Errorf("%w: %q cannot be started directly here, so the plugin has to ship a native executable for this system (%w)", ErrRuntimeNotExecutable, command, err)
+		}
 		return nil, newStartupFailure("spawn", started, stderr.String(), err)
 	}
 	p := &process{

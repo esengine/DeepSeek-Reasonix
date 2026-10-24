@@ -86,8 +86,10 @@ func (s Store) settleRestoreStaging(base, staging, id string, when time.Time) er
 		}
 		return nil
 	}
-	archived, ok := loadMemory(filepath.Join(base, ".archive", staging))
-	if !ok {
+	archived, ok, readErr := loadMemory(filepath.Join(base, ".archive", staging))
+	// A staging copy that cannot be read is the same state as one that cannot
+	// be parsed: the restore cannot move forward, and nothing is published.
+	if readErr != nil || !ok {
 		return fmt.Errorf("interrupted restore left an unreadable archive copy at %q", staging)
 	}
 	dest, err := archivePath(root, slug(archived.Name), when)

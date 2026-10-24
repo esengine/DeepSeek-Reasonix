@@ -12,6 +12,7 @@ import type { ModelEffort, ModelLimit, ProviderEdit } from "../port/port";
 import { KIND_LABEL } from "./vendors";
 import { ModelLimits, limitTextOf, limitsToSend, type LimitText } from "./ModelLimits";
 import { ModelPrices, incomplete, priceTextOf, pricesToSend, sourceBad, type PriceText } from "./ModelPrices";
+import { BillingModeField, PAYG } from "./BillingModeField";
 import { useModelBatch } from "./useModelBatch";
 import { EndpointSwitches, hasEndpointSwitches } from "./EndpointSwitches";
 import { BalanceFields } from "./BalanceFields";
@@ -66,6 +67,7 @@ export function EditConn({
   const [priceText, setPriceText] = useState<Record<string, PriceText>>(
     () => Object.fromEntries(Object.entries(entry.modelPrices ?? {}).map(([m, r]) => [m, priceTextOf(r)])),
   );
+  const [billing, setBilling] = useState(entry.billingMode || PAYG);
   const [balUrl, setBalUrl] = useState(entry.balanceUrl ?? "");
   const [balFormat, setBalFormat] = useState(entry.balanceFormat ?? "");
   const [think, setThink] = useState(entry.reasoningProtocol ?? "");
@@ -232,6 +234,7 @@ export function EditConn({
     contextWindow: Number(win.replace(/\D/g, "")) || 0,
     maxOutputTokens: Number(maxOut.replace(/\D/g, "")) || 0,
     idleTimeoutSeconds: idle.ok ? idle.secs : 0,
+    ...(billing !== (entry.billingMode || PAYG) && { billingMode: billing }),
     ...(balUrl.trim() !== (entry.balanceUrl ?? "") && { balanceUrl: balUrl.trim() }),
     ...(balFormat !== (entry.balanceFormat ?? "") && { balanceFormat: balFormat }),
     reasoningProtocol: think,
@@ -357,6 +360,7 @@ export function EditConn({
         )}
         {picked.length > 0 && <ModelPrices models={picked} value={priceText} onChange={setPriceText} official={entry.officialPricing === true} stored={entry.modelPrices ?? {}}
           onOpenSource={(url) => void Promise.resolve(port.openExternal(url)).catch(() => {})} />}
+        {picked.length > 0 && <div className="fields"><BillingModeField value={billing} onChange={setBilling} /></div>}
       </div>
 
       <div className="mlist">

@@ -7,7 +7,7 @@ import "encoding/json"
 func DetailIsPayload(code string) bool {
 	return code == NoticeCodeUnappliedSteer || code == NoticeCodeExtensionSkipped || code == NoticeCodeInboxRecovered ||
 		code == NoticeCodeInboxUnrecovered ||
-		code == NoticeCodePermissionRulesDormant || code == NoticeCodeSubagentWaiting || code == NoticeCodeContextComposition || code == NoticeCodeJobFinished || code == NoticeCodeJobKilled || code == NoticeCodeJobFailed || code == NoticeCodeJobStalled
+		code == NoticeCodePermissionRulesDormant || code == NoticeCodeSubagentWaiting || code == NoticeCodeContextComposition || code == NoticeCodeCompactionTelemetry || code == NoticeCodeJobStarted || code == NoticeCodeJobFinished || code == NoticeCodeJobKilled || code == NoticeCodeJobFailed || code == NoticeCodeJobStalled
 }
 
 // ExtensionSkipReasonNoLiveSidecar: the extension's companion process is not running.
@@ -103,8 +103,12 @@ type JobNotice struct {
 	// knew: Signal is the signal number that ended it, zero when none did.
 	ExitCode *int `json:"exitCode,omitempty"`
 	Signal   int  `json:"signal,omitempty"`
-	// QuietSeconds is how long the job's own output has been silent, on a stalled notice only.
+	// QuietSeconds is how long the job has been inactive, on a stalled notice only.
 	QuietSeconds int `json:"quietSeconds,omitempty"`
+	// Steps is what the job had reported before it went quiet, on a stalled
+	// notice only. Zero means it never reported any, which is a different
+	// situation from a job that worked and then stopped.
+	Steps int `json:"steps,omitempty"`
 }
 
 // Encode renders the payload as the notice's Detail.
@@ -201,4 +205,49 @@ func (p SubagentWaiting) Encode() string {
 		return ""
 	}
 	return string(raw)
+}
+
+// CompactionNotice is the Detail payload of NoticeCodeCompactionTelemetry: how a
+// finished fold went, as the numbers a reader can word in their own language.
+// Mode and Trigger are the fold's own identifiers (summarized, degraded, native,
+// snip; pressure, manual, overflow, snip, tool), never sentences.
+type CompactionNotice struct {
+	Trigger          string `json:"trigger"`
+	Mode             string `json:"mode"`
+	CacheState       string `json:"cache_state,omitempty"`
+	SourceTokens     int    `json:"source_tokens"`
+	FoldTokens       int    `json:"fold_tokens"`
+	Spans            int    `json:"spans"`
+	ProjectionTokens int    `json:"projection_tokens"`
+	InputTokens      int    `json:"input_tokens"`
+	OutputTokens     int    `json:"output_tokens"`
+	CacheHitTokens   int    `json:"cache_hit_tokens"`
+	CacheMissTokens  int    `json:"cache_miss_tokens"`
+	CacheWriteTokens int    `json:"cache_write_tokens"`
+	RequestCount     int    `json:"request_count"`
+	UserTurnsKept    int    `json:"user_turns_kept"`
+	UserTurnsDropped int    `json:"user_turns_dropped"`
+	// ProviderRequestID names the summary request, for support to look up.
+	ProviderRequestID string `json:"provider_request_id,omitempty"`
+	// Error is the summarizer's failure class on a degraded fold, empty otherwise.
+	Error string `json:"error,omitempty"`
+}
+
+// Encode renders the payload as the notice's Detail.
+func (p CompactionNotice) Encode() string {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// DecodeCompactionNotice reads the payload back; ok is false for a Detail that
+// is not one, so a caller keeps the kernel's English.
+func DecodeCompactionNotice(detail string) (CompactionNotice, bool) {
+	var p CompactionNotice
+	if err := json.Unmarshal([]byte(detail), &p); err != nil || p.Mode == "" {
+		return CompactionNotice{}, false
+	}
+	return p, true
 }

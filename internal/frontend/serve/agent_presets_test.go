@@ -40,3 +40,38 @@ func TestAgentPresetRoutesKeepRevisionsAndRejectStaleWrites(t *testing.T) {
 		t.Fatal("version missing")
 	}
 }
+
+func TestAgentPresetImportOnlyReportsMissingRequiredTools(t *testing.T) {
+	s := newProviderEditServer(t)
+	s.AllowProviderEdit()
+	srv := httptest.NewServer(operatorHandler(s))
+	defer srv.Close()
+	for _, optional := range []bool{false, true} {
+		d := agentcomposition.Builtins()[0]
+		d.ID = "user:imported"
+		d.Tools = agentcomposition.Selection{Mode: agentcomposition.Select, Members: []agentcomposition.Module{{ID: "unavailable-image-reader", Optional: optional}}}
+		body, err := json.Marshal(map[string]any{"content": d})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp := postProvider(t, srv.URL, "/agent-presets/import", string(body))
+		var preview struct {
+			Diagnostics []agentcomposition.Diagnostic `json:"diagnostics"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&preview)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("optional=%v: import status %d", optional, resp.StatusCode)
+		}
+		if optional {
+			if len(preview.Diagnostics) != 0 {
+				t.Fatalf("optional tool refused: %+v", preview.Diagnostics)
+			}
+		} else if len(preview.Diagnostics) != 1 || preview.Diagnostics[0].Code != "agent_composition.unavailable" || preview.Diagnostics[0].Module != "tools:unavailable-image-reader" {
+			t.Fatalf("required tool diagnostic = %+v", preview.Diagnostics)
+		}
+	}
+}

@@ -1,2 +1,0 @@
-- 修复：输入框下方计量条把整个会话的累计花费标成了“本轮”；现在“本会话”显示累计总额，“本轮”只显示最近一轮的花费。关联 #14200。
-- Fixed: the meter under the composer labelled the whole session's spend as "This turn"; it now shows "This session" and the last turn's own amount. Refs #14200.

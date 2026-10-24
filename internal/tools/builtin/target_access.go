@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"syscall"
 
 	"reasonix/internal/base/fileutil"
@@ -20,7 +21,6 @@ const (
 	CodeOverwriteReadOutsideScope = "workspace.overwrite_read_outside_scope"
 )
 
-const readAccessDeniedMessage = "Cannot read target file: permission denied."
 const overwriteReadAccessDeniedMessage = "Cannot overwrite target file: permission to read existing contents is required."
 
 // TargetAccessCheck binds one path policy for Agent admission. Existing tool
@@ -85,12 +85,29 @@ func (w Workspace) TargetAccessCheck() tool.TargetAccessCheck {
 
 func checkReadTargetAccess(readRoots, forbidden []string, path string) error {
 	if readOutsideScope(readRoots, path) {
-		return tool.Refusal{Code: CodeReadOutsideScope, Message: readAccessDeniedMessage}
+		return tool.Refusal{Code: CodeReadOutsideScope, Message: readOutsideScopeMessage(path, readRoots)}
 	}
 	if confineRead(forbidden, path) {
-		return tool.Refusal{Code: CodeReadForbidden, Message: readAccessDeniedMessage}
+		return tool.Refusal{Code: CodeReadForbidden, Message: readForbiddenMessage(path)}
 	}
 	return nil
+}
+
+// readOutsideScopeMessage names the target and the folders this session may
+// read. It depends only on the policy and the path, never on whether the file
+// exists, so it tells the model what to do without saying anything about the
+// disk.
+func readOutsideScopeMessage(path string, readRoots []string) string {
+	if len(readRoots) == 0 {
+		return fmt.Sprintf("Cannot read `%s`: it is outside the folders this session may read. Read a path inside the workspace, or ask the user to add the folder.", path)
+	}
+	return fmt.Sprintf("Cannot read `%s`: it is outside the folders this session may read (%s). Read a path inside one of them, or ask the user to add the folder.", path, strings.Join(readRoots, ", "))
+}
+
+// readForbiddenMessage says the path is on the read-forbidden list without
+// naming which entry matched: that list is a protection the user configured.
+func readForbiddenMessage(path string) string {
+	return fmt.Sprintf("Cannot read `%s`: it is on this session's forbidden-read list, a protection the user configured, so it cannot be read here.", path)
 }
 
 func checkOverwriteReadAccess(readRoots, forbidden []string, path string) error {

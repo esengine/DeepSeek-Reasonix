@@ -12,6 +12,14 @@ function prefsFile(userData) {
   return path.join(userData, "window-prefs.json");
 }
 
+// How long a page the agent's browser holds may sit undriven before the shell
+// puts it to sleep. Off until the person turns it on; "on" waits 15 minutes.
+const PAGE_SLEEP_MS = 15 * 60_000;
+
+function pageSleepAfterMs(prefs) {
+  return prefs && prefs["rx-page-sleep"] === "on" ? PAGE_SLEEP_MS : Infinity;
+}
+
 // Anything that is not one of the page's own string preferences is dropped, in
 // both directions: a hand-edited file or a page bug cannot widen what is kept.
 function pick(value) {
@@ -62,4 +70,4 @@ function registerPrefs(ipcMain, fileOf, fromWindow, onSave = () => {}) {
   });
 }
 
-module.exports = { PREFIX, prefsFile, pick, loadPrefs, savePrefs, registerPrefs };
+module.exports = { PREFIX, PAGE_SLEEP_MS, pageSleepAfterMs, prefsFile, pick, loadPrefs, savePrefs, registerPrefs };

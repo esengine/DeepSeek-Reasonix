@@ -33,6 +33,7 @@ import { ReceiptSlot } from "./ReceiptSlot";
 import { WorkFold } from "./WorkFold";
 import { opensTurn, useBlocks } from "./blocks";
 import { Rail, type RailMark } from "./Rail";
+import { railMarks } from "./railmarks";
 import { StudioIcon } from "./StudioIcon";
 import { LiveWork, useStartsOpen } from "../state/foldpref";
 import { landingBox, useFindLanding, useFindPaint } from "./findland";
@@ -43,7 +44,6 @@ import { chunkText, heldBlocks, type Held } from "./chunk_text";
 interface Props {
   items: Item[];
   port?: Pick<AgentPort, "workspaceImageURL"> & Partial<Pick<AgentPort, "surfaceAction" | "surfaceActionState" | "cancelQueued" | "engageQuestion" | "stopToolCall" | "refinePrompt" | "toolOutput">>;
-  // Changes only when the transcript's composition does — see state/session.
   revision: number;
   waiting: Waiting;
   scroll: RefObject<HTMLDivElement | null>;
@@ -52,7 +52,7 @@ interface Props {
   // node you clicked. The nonce, not the id, is what makes asking twice land
   // twice; null while nothing has been asked for.
   focus: { call: string; n: number } | null;
-  find?: { id: string; nth: number; n: number } | null;
+  find?: { id: string; nth: number; n: number; mode?: { regex?: boolean; caseSensitive?: boolean } } | null;
   query?: string;
   onApprove: (itemId: string, id: string, v: ApprovalVerdict) => Promise<void>;
   onFullAccess: (itemId: string) => Promise<void>;
@@ -80,6 +80,7 @@ interface Props {
   onKeepHere: () => void;
   foldWork?: boolean;
   turnRunning?: boolean;
+  scope?: string;
   checkpoints: Map<string, Checkpoint>;
   onPrepareRewind: (turn: number, scope: RewindScope) => Promise<RewindPlan>;
   onPrepareFileRevert: (path: string) => Promise<RewindPlan>;
@@ -95,7 +96,7 @@ interface Props {
   brought?: { ids: string[]; bring: (id: string) => void; dismiss: (id: string) => void };
 }
 
-export function Transcript({ items, port, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, foldWork = false, turnRunning = false }: Props) {
+export function Transcript({ items, port, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, foldWork = false, turnRunning = false, scope = "" }: Props) {
   // A block the selection touches must not leave the DOM. Unmounting the node a
   // selection is anchored to makes the browser remap that selection onto
   // whatever is still mounted — which reads as "I selected up there and the
@@ -145,7 +146,7 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
     });
   }, [scroll]);
 
-  useFindPaint(flow, hidden, query ?? "", find?.id ?? null, find?.nth ?? 0);
+  useFindPaint(flow, hidden, query ?? "", find?.id ?? null, find?.nth ?? 0, find?.mode);
 
   useEffect(() => {
     const onSelect = () => {
@@ -461,27 +462,7 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
   const onBring = useMemo(() => (bring ? (id: string) => { bring(id); resume(); } : undefined), [bring, resume]);
   const rowProps = { onBring, owed, echoes, port, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, takeovers, onExtSubmit, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, reply, onResend };
 
-  // What you said, and where it sits. Derived from the same blocks the
-  // transcript renders, so a mark always knows which block holds it — that is
-  // what makes it locatable while the message itself is unmounted.
-  const marks: RailMark[] = [];
-  let offset = 0;
-  blocks.forEach((block, b) => {
-    const base = offset;
-    offset += block.length;
-    block.forEach((it, i) => {
-      if (it.t !== "user") return;
-      marks.push({
-        id: it.id,
-        text: it.text,
-        at: base + i,
-        block: b,
-        within: i,
-        of: block.length,
-        files: checkpoints.get(it.id)?.files ?? 0,
-      });
-    });
-  });
+  const marks = railMarks(blocks, (id) => checkpoints.get(id)?.files ?? 0);
 
   return (
     <div
@@ -491,7 +472,7 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
       ref={scroll}
       hidden={hidden}
     >
-      <Rail marks={marks} total={items.length} scroll={scroll} flow={flow} onJump={jumpTo} bound={!hidden} />
+      <Rail marks={marks} total={items.length} scroll={scroll} flow={flow} onJump={jumpTo} bound={!hidden} scope={scope} />
       <div className="flow-edge" aria-hidden="true" />
       {/* 空转录是「窗口的空白」，壁纸该在那儿；一有内容它就是内容了。 */}
       <div className="flow" ref={flow} data-empty={items.length === 0 ? "" : undefined}>

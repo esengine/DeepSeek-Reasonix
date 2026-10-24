@@ -102,6 +102,11 @@ export interface BrowserToolsSettings {
   path: string;
 }
 
+export interface PresentFilesSettings {
+  enabled: boolean;
+  path: string;
+}
+
 // How a sub-agent that declared no write_paths holds its claim, as the user
 // file records it. A project file cannot set it, so there is one value.
 export interface SubagentClaimsSettings {

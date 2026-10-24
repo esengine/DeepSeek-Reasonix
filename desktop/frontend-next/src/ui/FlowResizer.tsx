@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { t } from "../i18n";
 import { onRoomWidth } from "./viewport";
@@ -62,6 +62,13 @@ export interface Column {
    *  stylesheet, not by this number. */
   dragged: number;
   commit: (w: number) => void;
+  /** How wide the sidebars are drawn while the column asks for `w`.
+   *
+   *  The same rule as `rail`/`dock`, but for a width a hand is still moving:
+   *  a drag has to ask this on every frame, because the committed numbers only
+   *  catch up when the pointer is released — and until they do, the column
+   *  would grow into room the sidebars are still occupying. */
+  fit: (w: number) => { rail: number; dock: number };
 }
 
 /** Everything the reading column's width is made of: the number a hand set, the
@@ -84,20 +91,29 @@ export function useColumn(railW: number, dockW: number, railMin: number, dockMin
   // the range it is now allowed; the drawn column, and the sidebars beside it,
   // both follow what is allowed rather than what was once asked for.
   const width = dragged > 0 ? clamp(dragged, floor, ceiling) : floor;
-  const fit = dragged > 0 ? barsFit(room, width, railW, dockW, railMin, dockMin) : { rail: railW, dock: dockW };
+  const bars = dragged > 0 ? barsFit(room, width, railW, dockW, railMin, dockMin) : { rail: railW, dock: dockW };
 
   const commit = useCallback((w: number) => {
     setDragged(w);
     localStorage.setItem(FLOW_KEY, String(Math.round(w)));
   }, []);
 
+  // The same rule the committed numbers above obey, asked for a width the
+  // pointer is still holding. A drag reads this on every frame: committing on
+  // release only is what let the column run under sidebars that had not moved
+  // yet, so the room was taken from nothing.
+  const fit = useCallback(
+    (w: number) => barsFit(room, w, railW, dockW, railMin, dockMin),
+    [room, railW, dockW, railMin, dockMin],
+  );
+
   // The same object for as long as the numbers are the same. Every pane is
   // memoised on its props, so a fresh object each render would look like news to
   // all of them and re-draw every transcript in the window on an unrelated
   // state change — the one thing the pane memo exists to prevent.
   return useMemo(
-    () => ({ width, floor, ceiling, rail: fit.rail, dock: fit.dock, dragged, commit }),
-    [width, floor, ceiling, fit.rail, fit.dock, dragged, commit],
+    () => ({ width, floor, ceiling, rail: bars.rail, dock: bars.dock, dragged, commit, fit }),
+    [width, floor, ceiling, bars.rail, bars.dock, dragged, commit, fit],
   );
 }
 
@@ -142,10 +158,26 @@ export function FlowGrips({ column }: { column: Column }) {
   );
 }
 
+/** Put a width on the window while a hand still holds the edge: the column
+ *  itself, and the two sidebars giving way in proportion to what they were set
+ *  to.
+ *
+ *  Everything is written to the `.app` element, never to `:root`. Once a width
+ *  has been committed, `App` keeps `--flow-w` on `.app` inline, and an inherited
+ *  `:root` value can never outrank its own descendant — which is why every drag
+ *  after the first one moved nothing at all. */
+function paint(app: HTMLElement | null, w: number, column: Column) {
+  const bars = column.fit(w);
+  const target = app ?? document.documentElement;
+  target.style.setProperty("--flow-w", `${w}px`);
+  target.style.setProperty("--rail-open", `${bars.rail}px`);
+  target.style.setProperty("--dock-open", `${bars.dock}px`);
+}
+
 function FlowGrip({ edge, column }: { edge: "l" | "r"; column: Column }) {
   // The drag's own state, kept out of React so a pointer that moves sixty times
   // a second does not re-render the transcript behind it.
-  const drag = useRef<{ x0: number; start: number; pending: number } | null>(null);
+  const drag = useRef<{ x0: number; start: number; pending: number; app: HTMLElement | null } | null>(null);
   const raf = useRef(0);
 
   const down = useCallback(
@@ -153,7 +185,12 @@ function FlowGrip({ edge, column }: { edge: "l" | "r"; column: Column }) {
       if (e.button !== 0) return;
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
-      drag.current = { x0: e.clientX, start: column.width, pending: column.width };
+      drag.current = {
+        x0: e.clientX,
+        start: column.width,
+        pending: column.width,
+        app: e.currentTarget.closest(".app") as HTMLElement | null,
+      };
       document.body.dataset.flowdrag = edge;
     },
     [edge, column.width],
@@ -170,23 +207,22 @@ function FlowGrip({ edge, column }: { edge: "l" | "r"; column: Column }) {
       if (!raf.current) {
         raf.current = requestAnimationFrame(() => {
           raf.current = 0;
-          document.documentElement.style.setProperty("--flow-w", `${drag.current?.pending ?? column.width}px`);
+          const cur = drag.current;
+          if (cur) paint(cur.app, cur.pending, column);
         });
       }
     },
-    [edge, column.width, column.floor, column.ceiling],
+    [edge, column],
   );
 
   // Everything a drag leaves behind in the document, undone in one place: the
-  // pending frame, the inline width, and the flag the stylesheet reads to turn
-  // every cursor into a resize one. A drag that ends any way at all — released,
-  // cancelled, or torn down with the pane — has to pass through this, or the
+  // pending frame and the flag the stylesheet reads to turn every cursor into a
+  // resize one. A drag that ends any way at all has to pass through this, or the
   // window keeps a col-resize cursor over everything with no way to clear it.
-  const forget = useCallback(() => {
+  const stop = useCallback(() => {
     cancelAnimationFrame(raf.current);
     raf.current = 0;
     drag.current = null;
-    document.documentElement.style.removeProperty("--flow-w");
     delete document.body.dataset.flowdrag;
   }, []);
 
@@ -194,15 +230,60 @@ function FlowGrip({ edge, column }: { edge: "l" | "r"; column: Column }) {
     const d = drag.current;
     if (!d) return;
     const wanted = d.pending;
-    forget();
+    // Leave the numbers where the hand left them: the commit below re-renders
+    // with the same values, and the frame in between must not fall back to the
+    // width the column started at.
+    paint(d.app, wanted, column);
+    stop();
     column.commit(wanted);
-  }, [column, forget]);
+  }, [column, stop]);
+
+  // The drag never committed, so the width the reader let go of is dropped: the
+  // column and both sidebars go back to the numbers React is holding.
+  const cancel = useCallback(() => {
+    const d = drag.current;
+    if (!d) return;
+    if (d.app) {
+      // A width that was never committed has no owner on `.app`: `App` writes
+      // `--flow-w` itself only once something has been dragged. Putting a pixel
+      // value back here would leave it owned by nobody, so React would never
+      // remove it and the column would stay pinned to that width while the
+      // window was free to change around it.
+      if (column.dragged > 0) d.app.style.setProperty("--flow-w", `${column.width}px`);
+      else d.app.style.removeProperty("--flow-w");
+      d.app.style.setProperty("--rail-open", `${column.rail}px`);
+      d.app.style.setProperty("--dock-open", `${column.dock}px`);
+    }
+    stop();
+  }, [column, stop]);
 
   // Switching conversation, closing the tab or collapsing the pane mid-drag
   // unmounts this element with the pointer still down. Nothing would arrive to
   // release it, so the cleanup does what the release would have: the width it
   // had reached is dropped rather than committed — the reader never let go.
-  useEffect(() => forget, [forget]);
+  useEffect(() => cancel, [cancel]);
+
+  // The keys walk the same path the hand does: an arrow towards this edge's own
+  // side of the window widens the column, so the left handle's ArrowLeft and the
+  // right handle's ArrowRight both mean "wider". Reversing it per handle would
+  // make one of the two teach the opposite of what dragging it does.
+  const key = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      const dir = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+      if (dir) {
+        e.preventDefault();
+        const grow = edge === "l" ? -dir : dir;
+        const next = clamp(column.width + grow * (e.shiftKey ? 48 : 12), column.floor, column.ceiling);
+        if (next !== column.width) column.commit(next);
+        return;
+      }
+      if (e.key === "Home") {
+        e.preventDefault();
+        column.commit(column.floor);
+      }
+    },
+    [edge, column],
+  );
 
   return (
     <div
@@ -213,14 +294,17 @@ function FlowGrip({ edge, column }: { edge: "l" | "r"; column: Column }) {
       aria-valuenow={Math.round(column.width)}
       aria-valuemin={column.floor}
       aria-valuemax={column.ceiling}
+      tabIndex={0}
       data-action-pointerdown="appearance.reading-width"
       data-action-pointermove="appearance.reading-width"
       data-action-pointerup="appearance.reading-width"
       data-action-pointercancel="appearance.reading-width"
+      data-action-keydown="appearance.reading-width"
+      onKeyDown={key}
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
-      onPointerCancel={up}
+      onPointerCancel={cancel}
     />
   );
 }

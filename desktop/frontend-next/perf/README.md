@@ -48,6 +48,7 @@ node perf/side.mjs       # 右栏：端点自己写的一句话有多长，都�
 node perf/queue.mjs      # 待送达：正文读不回来时，「改」不许开出一个空编辑器
 node perf/reask.mjs      # 改写框：没有换行的长段落，框要长到让人读得到全文，宽屏和手机宽度各一遍
 node perf/composer-reflow.mjs # Draft and skill-chip wrapping during column transitions, interface zoom and native scrollbar gutters
+node perf/composer-toolbar-row.mjs # The buttons under the composer stay on one row from 900 to 400 px of conversation width, with the widest realistic labels
 node perf/onboarding.mjs # First-run setup: zoom-aware card bounds, resize, scrolling, focus and completion
 node perf/running.mjs    # 执行过程：在跑的步骤自己在动、收起后由标题接着动，步骤行没有空栏
 node perf/lang.mjs       # 双语验证：英文启动、界面译文到位、切回中文

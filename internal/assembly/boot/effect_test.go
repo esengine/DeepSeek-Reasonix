@@ -133,9 +133,7 @@ func TestEffectRoleSettingsShareProviderToolSurface(t *testing.T) {
 	if !reflect.DeepEqual(toolSchemaNames(delivery[0].Tools), balNames) {
 		t.Fatalf("delivery surface diverged from balanced\ndelivery=%v\nbalanced=%v", toolSchemaNames(delivery[0].Tools), balNames)
 	}
-	if len(balNames) > 16+len(BrowserToolNames()) {
-		t.Fatalf("unified surface sent %d tools; expected a small fixed core set", len(balNames))
-	}
+	assertSegmentedSurface(t, "unified default surface", balNames)
 	names := toolNames(balanced[0])
 	if !names["use_capability"] {
 		t.Fatal("unified surface must expose use_capability")

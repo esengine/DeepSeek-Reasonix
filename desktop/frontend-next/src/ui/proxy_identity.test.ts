@@ -18,6 +18,11 @@ describe("a proxied call reads as the capability it reached", () => {
     expect(shortArgs(JSON.stringify({ command: "go test ./..." }))).toBe("go test ./...");
   });
 
+  it("names the skill a run_skill call invoked, and still prefers a more specific key", () => {
+    expect(shortArgs(JSON.stringify({ name: "planning", arguments: "同步优化 collection" }))).toBe("planning");
+    expect(shortArgs(JSON.stringify({ name: "x", description: "写一条事实" }))).toBe("写一条事实");
+  });
+
   it("says nothing when neither level names anything readable", () => {
     expect(shortArgs(JSON.stringify({ action: "list" }))).toBe("");
     expect(shortArgs(JSON.stringify({ action: "call", arguments: { limit: 5 } }))).toBe("");

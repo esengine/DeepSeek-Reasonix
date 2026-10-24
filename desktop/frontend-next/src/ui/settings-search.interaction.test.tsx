@@ -44,6 +44,18 @@ function draw() {
 }
 
 describe("finding a setting", () => {
+  it("finds file delivery by its config key and opens its switch under tools", async () => {
+    const { find, block } = draw();
+    await userEvent.type(find(), "tools.present_files");
+    const hit = await screen.findByRole("option", { name: /AI 文件交付卡片/ });
+    expect(hit.getAttribute("data-value")).toBe("tools");
+    await userEvent.click(hit);
+    await waitFor(() => expect(block("present-files")).toBeTruthy());
+    expect(block("present-files")?.previousElementSibling?.getAttribute("data-setting")).toBe("approval");
+    expect((await screen.findByRole("switch", { name: "启用 AI 文件交付卡片" })).getAttribute("aria-checked")).toBe("false");
+    expect(block("present-files")?.querySelector("[data-apply]")?.getAttribute("data-apply")).toBe("on-open");
+    expect(screen.getByRole("switch", { name: "启用内置浏览器" })).toBeTruthy();
+  });
   it("finds the mode picker visibility switch on the persona management page", async () => {
     const { find, block } = draw();
     await userEvent.type(find(), "显示模式选择器");

@@ -51,13 +51,13 @@ func get(mux *http.ServeMux, target string) *httptest.ResponseRecorder {
 
 func TestSubagentRunsAreListedWithTheirState(t *testing.T) {
 	started := time.UnixMilli(1_760_000_000_000)
-	src := &subagentSource{runs: []delegation.RunInfo{{Ref: "sa_1", Name: "audit", Kind: "task", Model: "deepseek/pro", State: delegation.RunRunning, StartedAt: started, UpdatedAt: started}}}
+	src := &subagentSource{runs: []delegation.RunInfo{{Ref: "sa_1", Name: "audit", Kind: "task", Model: "deepseek/pro", State: delegation.RunRunning, StartedAt: started, UpdatedAt: started, ParentToolCallID: "call_9"}}}
 	rec := get(subagentMux(src), "/subagents")
 	var got []subagentRunView
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
 		t.Fatalf("status %d body %s err %v", rec.Code, rec.Body.String(), err)
 	}
-	if len(got) != 1 || got[0].Ref != "sa_1" || got[0].State != "running" || got[0].Model != "deepseek/pro" || got[0].StartedAt != 1_760_000_000_000 {
+	if len(got) != 1 || got[0].Ref != "sa_1" || got[0].State != "running" || got[0].Model != "deepseek/pro" || got[0].StartedAt != 1_760_000_000_000 || got[0].ParentCall != "call_9" {
 		t.Fatalf("runs = %+v", got)
 	}
 	if rec := get(subagentMux(&subagentSource{}), "/subagents"); rec.Body.String() != "[]\n" {

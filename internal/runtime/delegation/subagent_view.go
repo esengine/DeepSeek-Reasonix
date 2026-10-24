@@ -47,8 +47,11 @@ type RunInfo struct {
 	Effort        string
 	State         RunState
 	ParentSession string
-	StartedAt     time.Time
-	UpdatedAt     time.Time
+	// ParentToolCallID is the call in the parent's transcript that spawned the
+	// run; it is how a reader pairs a task card with its run.
+	ParentToolCallID string
+	StartedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // RunTranscript is one page of a run's conversation: Messages are those from
@@ -112,7 +115,8 @@ func (s *SubagentStore) infoOf(meta sessionstore.SubagentMeta) RunInfo {
 	}
 	return RunInfo{
 		Ref: meta.Ref, Name: meta.Name, Kind: meta.Kind, Model: meta.Model, Effort: meta.Effort,
-		State: state, ParentSession: meta.ParentSession, StartedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt,
+		State: state, ParentSession: meta.ParentSession, ParentToolCallID: meta.ParentToolCallID,
+		StartedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt,
 	}
 }
 

@@ -6,8 +6,10 @@ import type { Tool } from "../../port/wire";
 import { ReadsCard } from "./ReadsCard";
 import { NestedCall, ToolCard } from "./ToolCard";
 
-const ZH = "无法读取目标文件：没有权限访问。";
-const EN = "Cannot read target file: permission denied.";
+const WORDS: Record<string, { zh: string; en: string }> = {
+  "workspace.read_forbidden": { zh: "无法读取目标文件：它在你配置的禁读列表里。", en: "Cannot read the target file: it is on the forbidden-read list you configured." },
+  "workspace.read_outside_scope": { zh: "无法读取目标文件：它不在这个会话允许读取的文件夹里。", en: "Cannot read the target file: it is outside the folders this session may read." },
+};
 
 afterEach(() => {
   cleanup();
@@ -31,8 +33,8 @@ describe.each(["zh", "en"])("file access refusals in %s", (lang) => {
   ))("localizes %s in the %s card without the raw echo", (code, shape) => {
     localStorage.setItem(STORAGE, lang); boot();
     // The English window also covers a restored, previously Chinese result.
-    const raw = lang === "zh" ? EN : ZH;
-    const expected = lang === "zh" ? ZH : EN;
+    const raw = lang === "zh" ? WORDS[code].en : WORDS[code].zh;
+    const expected = lang === "zh" ? WORDS[code].zh : WORDS[code].en;
     const view = show(shape, { id: "denied", name: "read_file", args: '{"path":"private.txt"}',
       err: raw, output: raw, refusalCode: code, readOnly: true });
     expect(view.container.querySelector("[data-refusal]")?.textContent).toBe(expected);

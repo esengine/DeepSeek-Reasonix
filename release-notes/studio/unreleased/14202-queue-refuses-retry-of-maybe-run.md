@@ -1,2 +1,0 @@
-- 修复：队列现在由内核拒绝重发“可能已经跑过”的恢复条目，通过接口或 ACP 调用重试时也一样，不会再重复执行同一条指令。关联 #14202。
-- Fixed: the queue itself now refuses to retry a recovered entry that may already have run, including retries made through the API or ACP, so an instruction is not run twice. Refs #14202.

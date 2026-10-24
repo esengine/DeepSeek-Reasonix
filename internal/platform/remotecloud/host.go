@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"slices"
@@ -32,6 +34,7 @@ const desktopResponseChunk = 24 << 10
 var (
 	errAccountChanged = errors.New("remote cloud: account changed")
 	errRelayRefused   = errors.New("remote cloud: relay refused the connection")
+	errRelayInsecure  = errors.New("remote cloud: the relay address must start with wss://")
 )
 
 type unavailableReason string
@@ -58,6 +61,7 @@ type Host struct {
 	client     *account.Client
 	dialer     *websocket.Dialer
 	relayURL   string
+	gatewayID  string
 	version    string
 	name       string
 	token      func() string
@@ -149,6 +153,29 @@ func New(client *account.Client, dialer *websocket.Dialer, relayURL, version str
 // DisconnectController asks the relay to close one authenticated controller.
 // The live connection owns WebSocket writes, so callers hand the request to it
 // instead of writing concurrently from the local HTTP handler.
+// relaySecure admits wss://, and ws:// only to this machine, where nothing
+// crosses a network. A device credential must never be sent in the clear.
+func relaySecure(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "wss":
+		return u.Host != ""
+	case "ws":
+		ip := net.ParseIP(u.Hostname())
+		return u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())
+	}
+	return false
+}
+
+// SetGateway binds this machine to a gateway the person registered with the
+// account service. The relay address is the gateway's own; the id is what the
+// account service uses to scope the gateway's token to this device. Call it
+// before Run.
+func (h *Host) SetGateway(id string) { h.gatewayID = strings.TrimSpace(id) }
+
 func (h *Host) DisconnectController(id string) error {
 	id = strings.TrimSpace(id)
 	if len(id) != 32 {
@@ -233,7 +260,7 @@ func unavailableReasonFor(err error) unavailableReason {
 	if errors.Is(err, account.ErrUnauthorized) {
 		return unavailableSignedOut
 	}
-	if errors.Is(err, errRelayRefused) {
+	if errors.Is(err, errRelayRefused) || errors.Is(err, errRelayInsecure) {
 		return unavailableRelayRefused
 	}
 	var closeErr *websocket.CloseError
@@ -272,7 +299,7 @@ func (h *Host) identityCurrent(ctx context.Context, token string, saved *identit
 	}
 	for _, device := range devices {
 		if device.ID == saved.DeviceID {
-			return slices.Contains(device.Capabilities, account.RemoteDesktop)
+			return device.GatewayID == h.gatewayID && slices.Contains(device.Capabilities, account.RemoteDesktop)
 		}
 	}
 	return false
@@ -289,6 +316,7 @@ func (h *Host) registerIdentityWithPublic(ctx context.Context, token string, own
 		Capabilities: []account.RemoteCapability{
 			account.RemoteTasks, account.RemoteLogs, account.RemoteFiles, account.RemoteDesktop,
 		},
+		GatewayID: h.gatewayID,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -335,6 +363,9 @@ type controllerCommand struct {
 }
 
 func (h *Host) connect(ctx context.Context, token string, saved *identity, private *ecdh.PrivateKey) error {
+	if !relaySecure(h.relayURL) {
+		return errRelayInsecure
+	}
 	url := h.relayURL + "/v1/devices/" + saved.DeviceID + "/connect"
 	headers := http.Header{
 		"Authorization": []string{"Bearer " + saved.DeviceCredential},

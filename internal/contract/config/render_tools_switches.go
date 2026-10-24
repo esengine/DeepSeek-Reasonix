@@ -42,8 +42,8 @@ func renderToolsSwitches(b *strings.Builder, t ToolsConfig) {
 	if t.MCPResources {
 		b.WriteString("mcp_resources = true\n")
 	}
-	if t.PresentFiles {
-		b.WriteString("present_files = true\n")
+	if !t.PresentFiles {
+		b.WriteString("present_files = false\n")
 	}
 	if len(t.WebSearchBackends) > 0 {
 		fmt.Fprintf(b, "web_search_backends = %s\n", renderStringArray(t.WebSearchBackends))

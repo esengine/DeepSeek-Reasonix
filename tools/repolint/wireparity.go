@@ -38,6 +38,10 @@ const (
 	tsSurfaceFile   = "desktop/frontend-next/src/ui/surface/spec.ts"
 )
 
+// tuiInboxFile is where the terminal re-declares the kernel's inbox wire types
+// by hand. One file holds both the listing and its entries.
+const tuiInboxFile = "internal/frontend/tui/client_inbox.go"
+
 // mirroredWireTypes are the Go types the desktop keeps a second, hand-written
 // copy of: the graph, whose consumers all fold the same deltas, and the sandbox
 // editor, which draws a security posture a field it cannot read would get
@@ -138,6 +142,7 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/session/control/write_lease_settings.go", "WriteLeaseSettings", tsBoundaryFile, "WriteLeaseSettings"},
 	{"internal/session/control/plan_approval_settings.go", "PlanApprovalSettings", tsBoundaryFile, "PlanApprovalSettings"},
 	{"internal/session/control/default_mode_settings.go", "DefaultModeSettings", tsBoundaryFile, "DefaultModeSettings"},
+	{"internal/session/control/present_files_settings.go", "PresentFilesSettings", tsBoundaryFile, "PresentFilesSettings"},
 	{"internal/session/control/tool_settings.go", "ToolSettings", tsBoundaryFile, "ToolSettings"},
 	{"internal/session/control/tool_settings.go", "ToolSetting", tsBoundaryFile, "ToolSetting"},
 	{"internal/session/control/peer_settings.go", "PeersSettings", tsBoundaryFile, "PeersSettings"},
@@ -324,6 +329,40 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/frontend/serve/appearance.go", "wallpaperView", tsLookFile, "Wallpaper"},
 }
 
+// partialWireMirrors are hand-written copies honestly smaller than the kernel's
+// struct: a terminal draws one row per entry and the page's outbox shows the
+// person's lines. Each pair names the fields it must carry and is compared both
+// ways over those only; a subset's failure mode is a field quietly dropped, and
+// the full-mirror list above is not relaxed for it.
+var partialWireMirrors = []partialWireMirror{
+	// What a surface reads to decide whose a queued line is, whether it may act
+	// on it, and whether the queue can be changed at all.
+	{"internal/state/sessioninbox/types.go", "InboxItemMeta", tuiInboxFile, "InboxItem",
+		[]string{"id", "intent", "state", "preview", "origin", "images", "blockCode", "blockReason"}},
+	{"internal/state/sessioninbox/types.go", "InboxSnapshot", tuiInboxFile, "InboxSnapshot",
+		[]string{"revision", "paused", "readonly", "recovered", "recoveredCount", "unrecovered", "items", "capacity"}},
+	{"internal/state/sessioninbox/types.go", "Capacity", tuiInboxFile, "InboxCapacity",
+		[]string{"items", "maxItems", "bytes", "maxBytes", "maxItemBytes"}},
+	// The page reads the same two types through its own hand-written copy. It
+	// omits the manifest fields neither surface draws, and must keep the ones
+	// its outbox decides from.
+	{"internal/state/sessioninbox/types.go", "InboxItemMeta", tsPortFile, "QueueItem",
+		[]string{"id", "intent", "origin", "state", "preview", "createdAt", "blockReason", "blockCode", "refs", "images"}},
+	{"internal/state/sessioninbox/types.go", "InboxSnapshot", tsPortFile, "Queue",
+		[]string{"revision", "paused", "readonly", "recoveredCount", "items", "capacity"}},
+	{"internal/state/sessioninbox/types.go", "Capacity", tsPortFile, "QueueCapacity",
+		[]string{"items", "maxItems", "bytes", "maxBytes"}},
+}
+
+// partialWireMirror is one declared subset: readerFile's readerType must carry
+// every name in fields, the writer must still send each, and the reader must
+// choose no name the writer never sends. What is left out is the point.
+type partialWireMirror struct {
+	writerFile, writerType string
+	readerFile, readerType string
+	fields                 []string
+}
+
 type wireMirror struct {
 	goFile, goType, tsFile, tsType string
 }
@@ -369,6 +408,16 @@ func (w *wireScan) observe(src *sourceFile) {
 			}
 		}
 	}
+	for _, m := range partialWireMirrors {
+		for _, side := range [][2]string{{m.writerFile, m.writerType}, {m.readerFile, m.readerType}} {
+			if side[0] != src.rel {
+				continue
+			}
+			if names, ok := wireFieldNames(src.file, side[1]); ok {
+				w.fields[side[0]+"."+side[1]] = names
+			}
+		}
+	}
 }
 
 // findings compares each declared pair both ways. Either direction is a defect:
@@ -386,7 +435,21 @@ func (w *wireScan) findings(root string) []Finding {
 		}
 		bodies[m.tsFile] = string(raw)
 	}
+	for _, m := range partialWireMirrors {
+		if !strings.HasSuffix(m.readerFile, ".ts") {
+			continue
+		}
+		if _, read := bodies[m.readerFile]; read {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, m.readerFile))
+		if err != nil {
+			return nil
+		}
+		bodies[m.readerFile] = string(raw)
+	}
 	out := append(wireParityFindings(mirroredWireTypes, w.fields, bodies), readParityFindings(readMirrors, w.fields)...)
+	out = append(out, partialWireFindings(partialWireMirrors, w.fields, bodies)...)
 	return append(out, wireConstantFindings(root, mirroredWireConstants)...)
 }
 
@@ -414,6 +477,57 @@ func readParityFindings(mirrors []readMirror, goFields map[string][]string) []Fi
 		}
 	}
 	return out
+}
+
+// partialWireFindings checks a declared subset in the three directions that
+// matter: the writer must still send each named field, the reader must still
+// carry it, and the reader may not read a name nothing sends. What the writer
+// sends and a subset ignores is the reason a subset exists.
+func partialWireFindings(mirrors []partialWireMirror, goFields map[string][]string, bodies map[string]string) []Finding {
+	var out []Finding
+	for _, m := range mirrors {
+		writer, sends := goFields[m.writerFile+"."+m.writerType]
+		if !sends {
+			out = append(out, Finding{m.writerFile, 1, ruleWireParity,
+				fmt.Sprintf("%s is declared a mirrored wire type and is not a struct here", m.writerType), 1})
+			continue
+		}
+		reader, line, declares := partialReaderFields(m, goFields, bodies)
+		if !declares {
+			out = append(out, Finding{m.readerFile, 1, ruleWireParity,
+				fmt.Sprintf("%s is declared a partial mirror of %s.%s and is not declared here", m.readerType, m.writerFile, m.writerType), 1})
+			continue
+		}
+		for _, name := range m.fields {
+			if !slices.Contains(writer, name) {
+				out = append(out, Finding{m.writerFile, 1, ruleWireParity,
+					fmt.Sprintf("%s no longer sends %q, a field %s decides from", m.writerType, name, m.readerType), 1})
+			}
+			if !slices.Contains(reader, name) {
+				out = append(out, Finding{m.readerFile, line, ruleWireParity,
+					fmt.Sprintf("%s no longer declares %q, which %s.%s sends and this copy decides from", m.readerType, name, m.writerFile, m.writerType), 1})
+			}
+		}
+		for _, name := range missingFrom(reader, writer) {
+			if slices.Contains(m.fields, name) {
+				// Already named as the writer dropping a declared field.
+				continue
+			}
+			out = append(out, Finding{m.readerFile, line, ruleWireParity,
+				fmt.Sprintf("%s reads %q and %s.%s never sends it", m.readerType, name, m.writerFile, m.writerType), 1})
+		}
+	}
+	return out
+}
+
+// partialReaderFields reads one side of a pair from whichever grammar declares
+// it: the terminal's copy is Go, the page's is TypeScript.
+func partialReaderFields(m partialWireMirror, goFields map[string][]string, bodies map[string]string) ([]string, int, bool) {
+	if strings.HasSuffix(m.readerFile, ".ts") {
+		return tsInterfaceFields(bodies[m.readerFile], m.readerType)
+	}
+	names, ok := goFields[m.readerFile+"."+m.readerType]
+	return names, 1, ok
 }
 
 // wireParityFindings is the comparison itself, so a fixture can carry the one

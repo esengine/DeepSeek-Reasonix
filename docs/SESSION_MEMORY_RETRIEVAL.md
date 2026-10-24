@@ -260,6 +260,11 @@ A missing memory directory is treated as empty. Permission denial and other
 directory I/O errors are reported instead of returning partial lists or
 calculating a revision from incomplete history.
 
+The same rule holds for one fact file: a file that exists but cannot be read is
+reported as unreadable rather than absent. Listings name it beside the facts that
+loaded, recall still serves the readable facts and its audit names it, and a save
+by that name is refused instead of rewriting bytes nobody read.
+
 Recovery stops before creating
 a snapshot or an active fact when history cannot be read. Session loading keeps
 the read failure, omits incomplete pinned guidance, and reports recall as
@@ -270,6 +275,10 @@ sandbox denial, or storage fault; they do not establish data deletion.
 
 缺失的记忆目录按空目录处理；权限拒绝和其他目录 I/O 错误会明确报错，
 不会返回不完整的列表，也不会根据不完整的历史计算版本号。
+
+单条记忆文件同样如此：文件存在但读不出来时会报为「无法读取」，而不是
+当作不存在。列表会把它和读出的记忆并列显示，召回仍使用可读的记忆并在
+审计中列出它，按名字保存会被拒绝，不会覆盖没人读过的字节。
 
 历史读取失败时，
 归档恢复会在创建快照或活动记忆前停止。会话加载保留读取错误，省略不完整的

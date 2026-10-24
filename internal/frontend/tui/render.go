@@ -341,13 +341,20 @@ func codedNoticeText(it *Item) string {
 		if _, ok := event.DecodeInboxUnrecovered(it.Detail); ok {
 			return i18n.M.NoticeInboxUnrecovered
 		}
-	case event.NoticeCodeJobFinished, event.NoticeCodeJobKilled:
+	case event.NoticeCodeCompactionTelemetry:
+		if text, ok := compactionNoticeText(it.Detail); ok {
+			return text
+		}
+	case event.NoticeCodeJobStarted, event.NoticeCodeJobFinished, event.NoticeCodeJobKilled:
 		if p, ok := event.DecodeJobNotice(it.Detail); ok {
 			name := p.Label
 			if name == "" {
 				name = p.ID
 			}
-			if it.Code == event.NoticeCodeJobKilled {
+			switch it.Code {
+			case event.NoticeCodeJobStarted:
+				return fmt.Sprintf(i18n.M.NoticeJobStartedFmt, name)
+			case event.NoticeCodeJobKilled:
 				return fmt.Sprintf(i18n.M.NoticeJobKilledFmt, name)
 			}
 			return fmt.Sprintf(i18n.M.NoticeJobFinishedFmt, name)
@@ -444,4 +451,25 @@ func videoDetail(v eventwire.VideoShown) string {
 		detail += fmt.Sprintf(" · %.1fs", float64(v.DurationMs)/1000)
 	}
 	return detail
+}
+
+// compactionNoticeText words a finished fold from its typed payload, or reports
+// false for a Detail that is not one so the kernel's own text stays.
+func compactionNoticeText(detail string) (string, bool) {
+	p, ok := event.DecodeCompactionNotice(detail)
+	if !ok {
+		return "", false
+	}
+	how := p.Mode
+	switch p.Mode {
+	case "summarized":
+		how = i18n.M.CompactionHowSummarized
+	case "degraded":
+		how = i18n.M.CompactionHowDegraded
+	case "native":
+		how = i18n.M.CompactionHowNative
+	case "snip":
+		how = i18n.M.CompactionHowSnip
+	}
+	return fmt.Sprintf(i18n.M.NoticeCompactionFmt, how, p.SourceTokens, p.ProjectionTokens), true
 }

@@ -13,6 +13,9 @@ type InboxItem struct {
 	Intent  string `json:"intent"`
 	State   string `json:"state"`
 	Preview string `json:"preview"`
+	// Origin says who wrote the entry: empty is the person, "host" is the
+	// runtime's own continuation (a finished background job, an extension).
+	Origin string `json:"origin"`
 	// Images marks a line that froze a picture: it cannot join a running turn.
 	Images bool `json:"images"`
 	// BlockCode is the kernel's stable name for why a held entry stopped, and
@@ -23,15 +26,44 @@ type InboxItem struct {
 
 // InboxSnapshot is the durable queue as GET /inbox answers it.
 type InboxSnapshot struct {
-	Revision   int64 `json:"revision"`
-	Paused     bool  `json:"paused"`
-	Recovered  bool  `json:"recovered"`
-	RecoveredN int   `json:"recoveredCount"`
+	Revision int64 `json:"revision"`
+	Paused   bool  `json:"paused"`
+	// Readonly means a newer schema owns the queue: the kernel refuses every
+	// mutation with 409 inbox.schema_readonly, so this surface offers none.
+	Readonly   bool `json:"readonly"`
+	Recovered  bool `json:"recovered"`
+	RecoveredN int  `json:"recoveredCount"`
 	// Unrecovered means the kernel could not read the queue at all, so Items is
 	// empty because the contents are unknown, not because nothing is queued.
-	Unrecovered bool        `json:"unrecovered"`
-	Items       []InboxItem `json:"items"`
+	Unrecovered bool          `json:"unrecovered"`
+	Items       []InboxItem   `json:"items"`
+	Capacity    InboxCapacity `json:"capacity"`
 }
+
+// InboxCapacity is the queue's declared limits. It is decoded for parity with
+// the kernel's wire type, not acted on: the terminal draws no meter, and the
+// kernel refuses on its own limits.
+type InboxCapacity struct {
+	Items        int   `json:"items"`
+	MaxItems     int   `json:"maxItems"`
+	Bytes        int64 `json:"bytes"`
+	MaxBytes     int64 `json:"maxBytes"`
+	MaxItemBytes int64 `json:"maxItemBytes"`
+}
+
+// taken and theirs are the desktop's rule from ui/Queue.tsx: an entry the
+// kernel has taken is in the transcript, and a host continuation is not the
+// person's line unless it stopped and needs a decision only they can make.
+func (it InboxItem) taken() bool {
+	return it.State == "steer_consumed" || it.State == "running"
+}
+
+func (it InboxItem) theirs() bool {
+	return it.Origin != "host" || it.State == "blocked" || it.State == "uncertain"
+}
+
+// pending reports whether this entry is still the person's to act on.
+func (it InboxItem) pending() bool { return !it.taken() && it.theirs() }
 
 // InboxReceipt says how the kernel settled an enqueue.
 type InboxReceipt struct {

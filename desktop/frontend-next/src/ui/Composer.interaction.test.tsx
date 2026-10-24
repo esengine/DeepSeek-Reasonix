@@ -945,3 +945,44 @@ describe("send shortcut preference", () => {
     expect(screen.getByText("Ctrl Enter 插话 · Enter 换行")).toBeTruthy();
   });
 });
+
+describe("a command typed in full beside longer commands that share its name", () => {
+  const reload = { label: "/reload", insert: "/reload", kind: "command" } as const;
+  const reloadCmd = { label: "/reload-cmd", insert: "/reload-cmd", kind: "command" } as const;
+  const answer = (items: Completion["items"], typed?: Completion["items"][number]): Completion =>
+    ({ kind: "slash", from: 0, to: 7, query: "/reload", items, ...(typed && { typed }) }) as Completion;
+
+  it("lists the typed command first, so Enter sends it instead of completing the longer one", async () => {
+    const port = new MockPort();
+    vi.spyOn(port, "complete").mockResolvedValue(answer([reloadCmd], reload));
+    const { box, onSubmit } = draw({ port });
+    fireEvent.change(box, { target: { value: "/reload", selectionStart: 7 } });
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringContaining("/reload"), expect.stringContaining("/reload-cmd")]);
+    expect(options[0].textContent).not.toContain("-cmd");
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("/reload"));
+    expect(box.value).not.toBe("/reload-cmd");
+  });
+
+  it("still completes the longer command once the person moves down to it", async () => {
+    const port = new MockPort();
+    vi.spyOn(port, "complete").mockResolvedValue(answer([reloadCmd], reload));
+    const { box, onSubmit } = draw({ port });
+    fireEvent.change(box, { target: { value: "/reload", selectionStart: 7 } });
+    await screen.findAllByRole("option");
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box.value).toBe("/reload-cmd");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("opens no menu when the typed command has nothing longer beside it", async () => {
+    const port = new MockPort();
+    vi.spyOn(port, "complete").mockResolvedValue(answer([], reload));
+    const { box } = draw({ port });
+    fireEvent.change(box, { target: { value: "/reload", selectionStart: 7 } });
+    await act(async () => {});
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+});

@@ -44,6 +44,7 @@ import "./styles/sessionquick.css";
 import "./styles/sessionpin.css";
 import "./styles/treerows.css";
 import "./styles/workbench-changes.css";
+import "./styles/agentrun.css";
 import "./styles/gitgraph.css";
 import "./styles/modelmenu.css";
 import "./styles/composer-menu.css";

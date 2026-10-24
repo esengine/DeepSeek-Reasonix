@@ -156,3 +156,26 @@ func TestAuditUnreadableMetaDropsTheBranchInsteadOfDefaulting(t *testing.T) {
 			len(branches), filepath.Base(corrupt))
 	}
 }
+
+// A sidecar whose bytes are all NUL is what NTFS leaves when power is lost
+// between extending a file and flushing its data: it records nothing, so it is
+// an absent sidecar rather than one that blocks every lineage walk.
+func TestNULFilledSiblingMetaReadsAsAbsent(t *testing.T) {
+	paths := seedRecoveryArchiveLineage(t)
+	if err := os.WriteFile(BranchMetaPath(paths[1]), make([]byte, 512), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok, err := LoadBranchMeta(paths[1]); err != nil || ok {
+		t.Fatalf("LoadBranchMeta(NUL-filled) ok=%v err=%v, want absent", ok, err)
+	}
+	if err := SetSessionLineageArchived(paths[0], true); err != nil {
+		t.Fatalf("archive beside a NUL-filled sidecar = %v, want success", err)
+	}
+	if err := SetSessionArchived(paths[1], true); err != nil {
+		t.Fatalf("archive the NUL-filled copy itself = %v, want its sidecar rewritten", err)
+	}
+	if meta, ok, err := LoadBranchMeta(paths[1]); err != nil || !ok || !meta.Archived {
+		t.Fatalf("rewritten sidecar: meta=%+v ok=%v err=%v", meta, ok, err)
+	}
+}

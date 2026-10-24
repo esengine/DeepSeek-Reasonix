@@ -83,6 +83,12 @@ type Messages struct {
 	TUIDeclinedFmt          string // an approval the user refused — %s tool, %s subject
 	NoticeUnappliedSteerFmt string // guidance that arrived too late for its turn — %s the guidance
 	NoticeExtSkippedFmt     string // an optional extension skipped, its sidecar not running — %s extension, %s point
+	NoticeCompactionFmt     string // a fold finished — %s how (one of the four below), %d tokens before, %d after
+	CompactionHowSummarized string
+	CompactionHowDegraded   string
+	CompactionHowNative     string
+	CompactionHowSnip       string
+	NoticeJobStartedFmt     string // a background job started — %s its label, else its id
 	NoticeJobFinishedFmt    string // a background job ended — %s its label, else its id
 	NoticeJobKilledFmt      string // a background job was killed — %s its label, else its id
 	NoticeJobFailedFmt      string // a background job failed — %s its label, else its id

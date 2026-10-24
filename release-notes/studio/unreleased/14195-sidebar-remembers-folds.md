@@ -1,2 +1,0 @@
-- 优化：侧栏会记住你折叠过的项目，重新打开界面后仍保持折叠；新项目默认展开，不替你做决定。关联 #14195。
-- Changed: the sidebar remembers which projects you folded and keeps them folded when the interface reopens; new projects still start expanded. Refs #14195.

@@ -184,6 +184,9 @@ func verifySelected[T any](kind string, s agentcomposition.Selection, items []T,
 		return nil
 	}
 	for _, m := range s.Members {
+		if kind == "tools" && m.Optional {
+			continue
+		}
 		if !slices.ContainsFunc(items, func(v T) bool { return id(v) == m.ID }) {
 			return agentcomposition.Unavailable(kind+":"+m.ID, "Required module is unavailable or was revoked.")
 		}

@@ -7,7 +7,7 @@ export function Find({ find }: { find: Finding }) {
 }
 
 function Bar({ find }: { find: Finding }) {
-  const { query, total, index, capped, focus, ask: onQuery, step: onStep, close: onClose } = find;
+  const { query, total, index, capped, focus, regex, caseSensitive, setMode, ask: onQuery, step: onStep, close: onClose } = find;
   const box = useRef<HTMLInputElement>(null);
   useEffect(() => {
     box.current?.focus();
@@ -46,6 +46,28 @@ function Bar({ find }: { find: Finding }) {
           }
         }}
       />
+      <button
+        className="st"
+        data-action="transcript.find"
+        data-value="case"
+        aria-pressed={caseSensitive}
+        aria-label={t("区分大小写")}
+        title={t("区分大小写")}
+        onClick={() => setMode({ caseSensitive: !caseSensitive })}
+      >
+        Aa
+      </button>
+      <button
+        className="st"
+        data-action="transcript.find"
+        data-value="regex"
+        aria-pressed={regex}
+        aria-label={t("把查询当作正则表达式")}
+        title={t("把查询当作正则表达式")}
+        onClick={() => setMode({ regex: !regex })}
+      >
+        .*
+      </button>
       <span className="n" data-empty={asked && total === 0 ? "" : undefined} aria-live="polite">
         {count}
       </span>

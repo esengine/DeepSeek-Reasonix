@@ -1,2 +1,0 @@
-- 修复：隐藏图标栏时，侧栏各行的图标和文字对齐在同一条竖线上，字号统一为 12px，“新建会话”和“发送反馈”不再加粗。关联 #14207。
-- Fixed: with the icon rail hidden, sidebar rows line up icons and labels on one vertical line and share one 12px regular label style; New session and Send feedback are no longer bold. Refs #14207.

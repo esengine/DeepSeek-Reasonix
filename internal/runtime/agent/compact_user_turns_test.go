@@ -63,12 +63,46 @@ func TestCompactionReportsDroppedUserTurns(t *testing.T) {
 	if notice.Level != event.LevelWarn {
 		t.Errorf("dropped-turn notice level = %v, want warn", notice.Level)
 	}
-	tele, ok := noticeMentioning(events, "user_dropped=")
+	tele, ok := telemetryNotice(events)
 	if !ok {
 		t.Fatal("compaction telemetry carries no user-turn retention counts")
 	}
-	if !strings.Contains(tele.Detail, "user_dropped=1") {
-		t.Errorf("telemetry detail = %q, want user_dropped=1", tele.Detail)
+	if tele.UserTurnsDropped != 1 {
+		t.Errorf("telemetry = %+v, want user_turns_dropped=1", tele)
+	}
+}
+
+// telemetryNotice is the finished-fold notice's typed payload: a coded notice
+// whose Detail a frontend words in its own language, not a line of key=value text.
+func telemetryNotice(events []event.Event) (event.CompactionNotice, bool) {
+	for _, e := range events {
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeCompactionTelemetry {
+			return event.DecodeCompactionNotice(e.Detail)
+		}
+	}
+	return event.CompactionNotice{}, false
+}
+
+func TestCompactionTelemetryIsACodedNoticeWithATypedPayload(t *testing.T) {
+	events := compactWithSink(t, retentionSession("always use pnpm not npm"))
+	var notice event.Event
+	for _, e := range events {
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeCompactionTelemetry {
+			notice = e
+		}
+	}
+	if notice.Code == "" {
+		t.Fatalf("no %s notice in %+v", event.NoticeCodeCompactionTelemetry, noticeTexts(events))
+	}
+	p, ok := event.DecodeCompactionNotice(notice.Detail)
+	if !ok || p.Mode == "" || p.Trigger == "" || p.SourceTokens <= 0 || p.ProjectionTokens <= 0 {
+		t.Fatalf("payload = %+v ok=%v from %q", p, ok, notice.Detail)
+	}
+	if !strings.Contains(notice.Text, "Context compacted") || strings.Contains(notice.Text, "=") {
+		t.Fatalf("English fallback = %q, want a sentence and not key=value text", notice.Text)
+	}
+	if !event.DetailIsPayload(event.NoticeCodeCompactionTelemetry) {
+		t.Fatal("the notice's Detail is its payload, so a sink that prints Text must not append it")
 	}
 }
 
@@ -80,12 +114,12 @@ func TestCompactionSilentWhenEveryUserTurnKept(t *testing.T) {
 	if _, ok := noticeMentioning(events, "[[keep]]"); ok {
 		t.Errorf("warned about dropped turns when none were dropped; events=%+v", noticeTexts(events))
 	}
-	tele, ok := noticeMentioning(events, "user_kept=")
+	tele, ok := telemetryNotice(events)
 	if !ok {
 		t.Fatal("compaction telemetry carries no user-turn retention counts")
 	}
-	if !strings.Contains(tele.Detail, "user_dropped=0") {
-		t.Errorf("telemetry detail = %q, want user_dropped=0", tele.Detail)
+	if tele.UserTurnsDropped != 0 || tele.UserTurnsKept == 0 {
+		t.Errorf("telemetry = %+v, want user_turns_dropped=0 and some kept", tele)
 	}
 }
 

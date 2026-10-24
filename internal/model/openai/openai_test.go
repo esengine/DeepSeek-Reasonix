@@ -1001,6 +1001,69 @@ func TestNormaliseUsageMiMoShape(t *testing.T) {
 	}
 }
 
+// TestNormaliseUsageCacheSplitEdgeCases pins the cache-split edge cases: a
+// details object with cached=0 is an explicit full miss, no cache fields at
+// all stay unknown, and a hit above prompt is a broken report clamped to it.
+func TestNormaliseUsageCacheSplitEdgeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		u    wireUsage
+		hit  int
+		miss int
+	}{
+		{
+			name: "explicit full miss",
+			u: wireUsage{
+				PromptTokens:     1000,
+				CompletionTokens: 200,
+				PromptTokensDetails: &struct {
+					CachedTokens int `json:"cached_tokens"`
+				}{CachedTokens: 0},
+			},
+			hit:  0,
+			miss: 1000,
+		},
+		{
+			name: "no cache fields stays unknown",
+			u: wireUsage{
+				PromptTokens:     1000,
+				CompletionTokens: 200,
+			},
+			hit:  0,
+			miss: 0,
+		},
+		{
+			name: "over-reported hit clamps to prompt",
+			u: wireUsage{
+				PromptTokens: 1000,
+				PromptTokensDetails: &struct {
+					CachedTokens int `json:"cached_tokens"`
+				}{CachedTokens: 4000},
+			},
+			hit:  1000,
+			miss: 0,
+		},
+		{
+			name: "deepseek explicit full miss kept",
+			u: wireUsage{
+				PromptTokens:          1000,
+				PromptCacheHitTokens:  0,
+				PromptCacheMissTokens: 1000,
+			},
+			hit:  0,
+			miss: 1000,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u := normaliseUsage(&tt.u)
+			if u.CacheHitTokens != tt.hit || u.CacheMissTokens != tt.miss {
+				t.Errorf("cache split wrong: hit=%d miss=%d (want %d / %d)", u.CacheHitTokens, u.CacheMissTokens, tt.hit, tt.miss)
+			}
+		})
+	}
+}
+
 // TestBuildRequestDropsReasoningContent guards the cache/cost fix: an assistant
 // turn's reasoning_content is a response-only signal and must never be echoed
 // back in the outgoing request. DeepSeek otherwise counts it as paid prompt

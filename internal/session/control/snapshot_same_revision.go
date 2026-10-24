@@ -53,6 +53,10 @@ func retrySameRevisionDivergedRewrite(s *sessionstore.Session, path string, err 
 
 func (c *Controller) snapshot(markActivity, forceRewrite, shutdownRecovery bool) error {
 	_, err := c.guardedSnapshotWithDurability(markActivity, forceRewrite, shutdownRecovery)
+	if err == nil {
+		// A grant given before the first save had no sidecar to go into.
+		c.persistSessionGrants()
+	}
 	return err
 }
 

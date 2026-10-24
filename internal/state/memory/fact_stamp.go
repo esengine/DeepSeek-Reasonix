@@ -58,7 +58,8 @@ func FactAt(path string) (Memory, bool) {
 	if strings.TrimSpace(path) == "" {
 		return Memory{}, false
 	}
-	return loadMemory(path)
+	memory, ok, _ := loadMemory(path)
+	return memory, ok
 }
 
 // SameContent reports whether the file still holds the exact bytes this stamp

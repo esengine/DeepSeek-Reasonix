@@ -1,4 +1,5 @@
 import { SseShell } from "./sse_shell";
+import type { PresentFilesSettings } from "./boundary";
 import type { AgentComposition, AgentPresetVersion, AgentPresetCatalog, CompositionSummary } from "./composition";
 import type { ScheduleBoard, ScheduleDraft, SchedulePreview, ScheduleResultView, ScheduleView } from "./schedule";
 import type { PersonaDraft, PersonaSettings } from "./boundary";
@@ -48,6 +49,12 @@ export class SseBoundary extends SseShell {
   }
   browserTools() {
     return this.get<BrowserToolsSettings>("/browser-tools");
+  }
+  presentFiles() {
+    return this.get<PresentFilesSettings>("/present-files");
+  }
+  savePresentFiles(enabled: boolean) {
+    return this.post0<PresentFilesSettings>("/present-files", { enabled });
   }
   saveBrowserTools(enabled: boolean) {
     return this.post0<BrowserToolsSettings>("/browser-tools", { enabled });

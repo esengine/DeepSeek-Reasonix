@@ -27,7 +27,7 @@ func parseMCPAdd(args []string) (config.PluginEntry, error) { return mcpsetup.Pa
 
 // mcpCommand implements persisted server management plus explicit browse/install
 // access to the official MCP Registry. Config edits take effect on the next
-// session start; for a live manual connection inside an open chat, use `/mcp add`.
+// session start; inside an open chat, the /mcp panel adds a server live.
 func mcpCommand(args []string) int {
 	if len(args) == 0 {
 		mcpUsage()
@@ -531,11 +531,11 @@ Examples:
   reasonix mcp add fs npx -y @modelcontextprotocol/server-filesystem .
   reasonix mcp add stripe --http https://mcp.stripe.com --header "Authorization=Bearer $STRIPE_KEY"
 
-CLI config changes take effect on the next session. Inside a running chat, use
-/mcp add to save and connect a server immediately. Installing a server is also
-its launch authorization; there is no separate trust step. Remote OAuth, when
-requested by the server, is completed with reasonix mcp auth <name> and stored
-in Reasonix-private MCP state.
+CLI config changes take effect on the next session. Inside a running chat,
+press n in the /mcp panel to save and connect a server immediately. Installing
+a server is also its launch authorization; there is no separate trust step.
+Remote OAuth, when requested by the server, is completed with reasonix mcp auth
+<name> and stored in Reasonix-private MCP state.
 
 Servers declared by project reasonix.toml or .mcp.json are trusted configuration
 and need no separate launch confirmation. Project entries override same-name

@@ -1,2 +1,0 @@
-- 修复：设置里“模型可用的工具”列表中，其余内置工具（搜索、读写文件、子代理、记忆、同伴协作等）也按界面语言显示一句话说明，不再露出英文原文。关联 #14208。
-- Fixed: the settings tool list now describes the remaining built-in tools (search, file edits, sub-agents, memory, peers) in the interface language, not model-facing English. Refs #14208.

@@ -74,11 +74,11 @@ func TestPreToolAccessRejectsForbiddenFileTools(t *testing.T) {
 			a := New(nil, reg, sessionstore.NewSession(""), Options{Hooks: h, CheckTargetAccess: ws.TargetAccessCheck()}, event.Discard)
 			args, _ := json.Marshal(map[string]any{"path": path, "old_string": "not present", "new_string": "changed", "content": "changed", "edits": []map[string]string{{"old_string": "not present", "new_string": "changed"}}, "cell_number": 0, "new_source": "changed", "start_anchor": "package main", "end_anchor": "func RemoveMe() {}", "name": "RemoveMe", "source_path": path, "destination_path": filepath.Join(root, "moved.go")})
 			out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{ID: "blocked", Name: name, Arguments: string(args)})
-			message, code := "Cannot read target file: permission denied.", builtin.CodeReadForbidden
+			message, code := "forbidden-read list", builtin.CodeReadForbidden
 			if name == "write_file" {
 				message, code = "Cannot overwrite target file: permission to read existing contents is required.", builtin.CodeOverwriteReadForbidden
 			}
-			if !out.blocked || out.output != message || out.refusalCode != code {
+			if !out.blocked || !strings.Contains(out.output, message) || out.refusalCode != code {
 				t.Fatalf("wrong refusal: %+v", out)
 			}
 			if probe.previews != 0 || probe.executions != 0 || len(h.preSeen) != 0 {
@@ -170,7 +170,7 @@ func TestPreToolAccessReadScopeAndAllowedEdit(t *testing.T) {
 	a := New(nil, reg, sessionstore.NewSession(""), Options{CheckTargetAccess: ws.TargetAccessCheck()}, event.Discard)
 	args, _ := json.Marshal(map[string]string{"path": path, "old_string": "outside", "new_string": "changed"})
 	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: string(args)})
-	if !out.blocked || out.output != "Cannot read target file: permission denied." || out.refusalCode != builtin.CodeReadOutsideScope {
+	if !out.blocked || !strings.Contains(out.output, "outside the folders this session may read") || !strings.Contains(out.output, filepath.Base(path)+"`") || out.refusalCode != builtin.CodeReadOutsideScope {
 		t.Fatalf("read scope not enforced: %+v", out)
 	}
 	local := filepath.Join(root, "note.txt")
@@ -217,7 +217,7 @@ func TestPreToolAccessNestedAndBatch(t *testing.T) {
 	reg.Add(accessNestedCaller{args: args})
 	a := New(nil, reg, sessionstore.NewSession(""), Options{CheckTargetAccess: ws.TargetAccessCheck()}, event.Discard)
 	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "access_nested", Arguments: `{}`})
-	if !strings.Contains(out.output, "Cannot read target file: permission denied.") || probe.previews != 0 || probe.executions != 0 {
+	if !strings.Contains(out.output, "Cannot read `") || probe.previews != 0 || probe.executions != 0 {
 		t.Fatalf("nested call bypassed access check: %+v previews=%d exec=%d", out, probe.previews, probe.executions)
 	}
 	public := filepath.Join(root, "public.txt")
@@ -262,7 +262,7 @@ func TestPreToolAccessThroughPathBoundSubagentWriter(t *testing.T) {
 	h := &stubHooks{}
 	a := New(nil, bound, sessionstore.NewSession(""), Options{Hooks: h, CheckTargetAccess: ws.TargetAccessCheck()}, event.Discard)
 	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"private.txt","old_string":"missing","new_string":"x"}`})
-	if !out.blocked || out.output != "Cannot read target file: permission denied." || probe.previews != 0 || probe.executions != 0 || len(h.preSeen) != 0 {
+	if !out.blocked || !strings.Contains(out.output, "forbidden-read list") || probe.previews != 0 || probe.executions != 0 || len(h.preSeen) != 0 {
 		t.Fatalf("wrapped writer bypassed admission: %+v previews=%d execute=%d hooks=%v", out, probe.previews, probe.executions, h.preSeen)
 	}
 	data, err := os.ReadFile(path)

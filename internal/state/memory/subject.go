@@ -48,7 +48,13 @@ func (s Store) findActiveSubject(scope FactScope, key string) (Memory, bool, err
 		if e.IsDir() || e.Name() == indexFile || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		m, ok := loadMemory(filepath.Join(dir, e.Name()))
+		// The subject key lives in the part of the file that could not be read,
+		// so an unreadable fact leaves the claim unverifiable: report it rather
+		// than let a save mint a second holder of the same subject.
+		m, ok, readErr := loadMemory(filepath.Join(dir, e.Name()))
+		if readErr != nil {
+			return Memory{}, false, readErr
+		}
 		if !ok || NormalizeSubjectKey(m.SubjectKey) != key {
 			continue
 		}

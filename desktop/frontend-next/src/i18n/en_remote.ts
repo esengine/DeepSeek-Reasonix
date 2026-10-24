@@ -159,6 +159,7 @@ export const EN_REMOTE: Record<string, string> = {
   "远程连接已断开，请重新连接。": "The remote connection ended. Reconnect to continue.",
   "远程 Studio 拒绝了这次请求。": "Remote Studio refused this request.",
   "请先登录 Reasonix，再打开 Web Studio。": "Sign in to Reasonix before opening Web Studio.",
+  "这台电脑使用的中继地址无法识别，请更新 Web Studio 后再试。": "The relay address this computer uses is not recognised. Update Web Studio and try again.",
   "请先更新这台电脑上的 Studio，再连接。": "Update Studio on this computer before connecting.",
   "无法授权 Web Studio，请重新登录后再试。": "Web Studio could not be authorized. Sign in again and retry.",
   "连接远程 Studio 超时，请检查电脑是否在线。": "Connecting to Remote Studio timed out. Check that the computer is online.",

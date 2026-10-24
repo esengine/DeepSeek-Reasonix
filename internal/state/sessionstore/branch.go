@@ -1,6 +1,7 @@
 package sessionstore
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -55,10 +56,14 @@ type BranchMeta struct {
 	AgentPreset      string `json:"agent_preset,omitempty"`
 	Mode             string `json:"mode,omitempty"`
 	ToolApprovalMode string `json:"tool_approval_mode,omitempty"`
-	Goal             string `json:"goal,omitempty"`
-	Recovered        bool   `json:"recovered,omitempty"`
-	RecoveryReason   string `json:"recovery_reason,omitempty"`
-	RecoveryDigest   string `json:"recovery_digest,omitempty"`
+	// SessionGrants are the tool answers the person gave for the rest of this
+	// conversation. They live with the conversation and nowhere else: a resumed
+	// conversation keeps them, a branch or a new one starts without them.
+	SessionGrants  []string `json:"session_grants,omitempty"`
+	Goal           string   `json:"goal,omitempty"`
+	Recovered      bool     `json:"recovered,omitempty"`
+	RecoveryReason string   `json:"recovery_reason,omitempty"`
+	RecoveryDigest string   `json:"recovery_digest,omitempty"`
 	// RecoveryDepth counts how many recovery forks separate this branch from a
 	// normal session (1 = forked from a normal session). SaveRecoveryBranch
 	// refuses to fork past SessionRecoveryMaxDepth so a conflict loop cannot
@@ -179,6 +184,11 @@ func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
 			return BranchMeta{}, false, nil
 		}
 		return BranchMeta{}, false, err
+	}
+	// NTFS leaves a NUL-filled file when power fails between extending it and
+	// flushing its data; it records nothing, so it is an absent sidecar.
+	if len(b) > 0 && len(bytes.Trim(b, "\x00")) == 0 {
+		return BranchMeta{}, false, nil
 	}
 	var m BranchMeta
 	if err := json.Unmarshal(b, &m); err != nil {

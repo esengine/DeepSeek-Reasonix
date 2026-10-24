@@ -22,7 +22,7 @@ export interface SessionMenuProps {
   onArchive: () => void;
   onBranch?: () => void;
   onCopyInfo: () => void;
-  onExport: () => void;
+  onExport: (format: "json" | "md") => void;
   onDelete: () => void;
   /** One place up or down in the project list; absent where the row has no order to move in. */
   onMove?: (direction: -1 | 1) => void;
@@ -109,8 +109,11 @@ export const SessionMenu = forwardRef<HTMLDivElement, SessionMenuProps>(function
             <StudioIcon name="folder" /><span>{t("移动到项目…")}</span>
           </button>
         )}
-        <button role="menuitem" data-action="session.export" data-target={target} disabled={exporting} onClick={onExport}>
+        <button role="menuitem" data-action="session.export" data-target={target} disabled={exporting} onClick={() => onExport("json")}>
           <StudioIcon name="download" /><span>{t("导出会话")}</span><small>JSON</small>
+        </button>
+        <button role="menuitem" data-action="session.export" data-value="md" data-target={target} disabled={exporting} onClick={() => onExport("md")}>
+          <StudioIcon name="file" /><span>{t("导出会话")}</span><small>MD</small>
         </button>
       </div>
       <div className="session-pop-divider" />

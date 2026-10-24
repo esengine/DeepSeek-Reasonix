@@ -23,9 +23,9 @@ import (
 func lockFreeProcessSave(t *testing.T, dir, name, body string) {
 	t.Helper()
 	path := filepath.Join(dir, name+".md")
-	existing, ok := loadMemory(path)
-	if !ok {
-		t.Fatalf("other process: %s is not readable", path)
+	existing, ok, readErr := loadMemory(path)
+	if readErr != nil || !ok {
+		t.Fatalf("other process: %s: %v", path, readErr)
 	}
 	next := existing
 	next.Revision = existing.Revision + 1
@@ -47,8 +47,8 @@ func lockFreeProcessSave(t *testing.T, dir, name, body string) {
 func otherProcessArchiveAndRecreate(t *testing.T, dir, name, body string) {
 	t.Helper()
 	path := filepath.Join(dir, name+".md")
-	if _, ok := loadMemory(path); !ok {
-		t.Fatalf("other process: %s is not readable", path)
+	if _, ok, readErr := loadMemory(path); readErr != nil || !ok {
+		t.Fatalf("other process: %s is not readable: %v", path, readErr)
 	}
 	archive := filepath.Join(dir, ".archive")
 	if err := os.MkdirAll(archive, 0o755); err != nil {
@@ -98,9 +98,9 @@ func TestAuditCrossProcessSnapshotIsTheRevisionItNames(t *testing.T) {
 	if _, statErr := os.Stat(revisionSlot(dir, id, 3)); !os.IsNotExist(statErr) {
 		t.Fatalf("refused save filed revision 3: stat error %v\n%s", statErr, revisionSlots(t, dir, id))
 	}
-	snapshot, ok := loadMemory(revisionSlot(dir, id, 2))
-	if !ok {
-		t.Fatalf("revision 2 snapshot is missing at %s", revisionSlot(dir, id, 2))
+	snapshot, ok, readErr := loadMemory(revisionSlot(dir, id, 2))
+	if readErr != nil || !ok {
+		t.Fatalf("revision 2 snapshot is missing at %s: %v", revisionSlot(dir, id, 2), readErr)
 	}
 	if snapshot.Revision != 2 || snapshot.Body != "two" {
 		raw, _ := os.ReadFile(revisionSlot(dir, id, 2))
@@ -180,8 +180,8 @@ func TestSnapshotRefusesARecreatedName(t *testing.T) {
 	if _, statErr := os.Stat(revisionSlot(dir, id, 2)); !os.IsNotExist(statErr) {
 		t.Fatalf("refused save filed revision 2: stat error %v\n%s", statErr, revisionSlots(t, dir, id))
 	}
-	active, ok := loadMemory(alpha)
-	if !ok || active.ID == id || active.Body != "reborn" {
+	active, ok, readErr := loadMemory(alpha)
+	if readErr != nil || !ok || active.ID == id || active.Body != "reborn" {
 		t.Fatalf("recreated fact = %+v (ok %v), want body %q under a new id", active, ok, "reborn")
 	}
 }
@@ -204,9 +204,9 @@ func TestSnapshotsHoldTheRevisionTheyName(t *testing.T) {
 		}
 	}
 	for i, body := range bodies[:len(bodies)-1] {
-		m, ok := loadMemory(revisionSlot(dir, id, i+1))
-		if !ok {
-			t.Fatalf("revision %d snapshot is missing", i+1)
+		m, ok, readErr := loadMemory(revisionSlot(dir, id, i+1))
+		if readErr != nil || !ok {
+			t.Fatalf("revision %d snapshot is missing: %v", i+1, readErr)
 		}
 		if m.ID != id || m.Revision != i+1 || m.Body != body {
 			t.Errorf("revision %d snapshot = id %q revision %d body %q, want id %q revision %d body %q",
@@ -240,9 +240,9 @@ func assertSlotsHoldTheirRevision(t *testing.T, dir, id string) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		m, ok := loadMemory(filepath.Join(revisionDir, e.Name()))
-		if !ok {
-			t.Errorf("%s is not readable", e.Name())
+		m, ok, readErr := loadMemory(filepath.Join(revisionDir, e.Name()))
+		if readErr != nil || !ok {
+			t.Errorf("%s is not readable: %v", e.Name(), readErr)
 			continue
 		}
 		var revision int
@@ -266,8 +266,8 @@ func revisionSlots(t *testing.T, dir, id string) string {
 	}
 	var b strings.Builder
 	for _, e := range entries {
-		m, ok := loadMemory(filepath.Join(dir, e.Name()))
-		if !ok {
+		m, ok, readErr := loadMemory(filepath.Join(dir, e.Name()))
+		if readErr != nil || !ok {
 			continue
 		}
 		b.WriteString("  " + e.Name() + ": revision " + strconv.Itoa(m.Revision) + " body " + strconv.Quote(m.Body) + "\n")

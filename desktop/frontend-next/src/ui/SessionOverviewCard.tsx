@@ -7,7 +7,7 @@ import { cacheRate, costSay, sessionTokens, sourceTokens, type CostSay } from ".
 import { MASK } from "./wallet";
 
 const tokens = (n: number): string => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 100) / 10}k` : String(n));
-const percent = (r: number | null): string => (r === null ? "—" : `${Math.round(r * 100)}%`);
+const percent = (r: number | null): string => (r === null ? "—" : `${Math.floor(r * 100)}%`);
 
 function clock(ms: number): string {
   if (ms <= 0) return "—";

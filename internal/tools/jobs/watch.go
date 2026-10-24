@@ -112,6 +112,14 @@ func (j *Job) producedBytes() int64 {
 	return j.written
 }
 
+// reportedSteps is how many steps the runner had reported when it was asked.
+// A caller compares two readings to see whether a job advanced without writing.
+func (j *Job) reportedSteps() int64 {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.times.steps
+}
+
 // WaitForSession blocks until the jobs finish, one of them writes something
 // opts.Match matches, the timeout expires, or ctx ends. Each result carries
 // what the job produced while this call was waiting, which is the only reading
@@ -122,14 +130,17 @@ func (m *Manager) WaitForSession(ctx context.Context, parentSession string, ids 
 		return nil, WaitFinished
 	}
 	before := make(map[string]int64, len(targets))
+	beforeSteps := make(map[string]int64, len(targets))
 	for _, j := range targets {
 		before[j.ID] = j.producedBytes()
+		beforeSteps[j.ID] = j.reportedSteps()
 	}
 	finish := func(outcome WaitOutcome) ([]Result, WaitOutcome) {
 		out := m.results(targets)
 		for i := range out {
 			if out[i].Progress != nil {
 				out[i].Progress.Delta = maxInt64(0, out[i].Progress.Produced-before[out[i].ID])
+				out[i].Progress.StepDelta = maxInt64(0, out[i].Progress.Steps-beforeSteps[out[i].ID])
 			}
 		}
 		return out, outcome

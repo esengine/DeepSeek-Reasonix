@@ -24,6 +24,9 @@ type RemoteDevice struct {
 	Capabilities []RemoteCapability `json:"capabilities"`
 	LastSeenAt   *string            `json:"lastSeenAt"`
 	RevokedAt    *string            `json:"revokedAt"`
+	// GatewayID is the self-hosted gateway the device is bound to; empty is the
+	// hosted one.
+	GatewayID string `json:"gatewayId,omitempty"`
 }
 
 type RemoteDeviceRegistration struct {
@@ -31,6 +34,7 @@ type RemoteDeviceRegistration struct {
 	Platform     string             `json:"platform"`
 	PublicKey    string             `json:"publicKey"`
 	Capabilities []RemoteCapability `json:"capabilities"`
+	GatewayID    string             `json:"gatewayId,omitempty"`
 }
 
 type RegisteredRemoteDevice struct {

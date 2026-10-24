@@ -77,9 +77,9 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # max_queued_inputs = 0              # prompts waiting in a session's queue; 0 = no limit, the queue's byte limits still apply (user config only)
 # max_subagent_steer_bytes = 16384    # bytes in one message of guidance to a running sub-agent, which keeps one message from filling its context; 0 = no limit (user config only)
 # max_subagent_steers_per_minute = 30  # messages of guidance per minute to one running sub-agent, a stop for a loop; 0 = no limit (user config only)
-# write_lease = "optimistic"          # user file only; a writer that declares no path (bash, MCP) stops holding the whole workspace
+# write_lease = "strict"              # user file only; default optimistic: a writer that declares no path (bash, MCP) does not hold the whole workspace; strict makes it hold it
 # write_lease_max_wait_minutes = 0    # minutes a write waits behind another session's claim before it fails with workspace.claim_timeout; 0 (default) = wait as long as the turn lasts, 120 is a sensible limit (user config only)
-# subagent_claims = "optimistic"      # user file only; a sub-agent that declares no write_paths holds only the path it is writing, not the whole workspace against other sessions; default strict
+# subagent_claims = "strict"          # user file only; default optimistic: a sub-agent that declares no write_paths holds only the path it is writing; strict makes it hold the whole workspace
 # plan_approval = "auto"             # user file only; a submitted plan starts executing without the approval click, and the transcript says so; default ask
 # default_mode = "plan"              # user file only; a new conversation starts in plan mode (a resumed one keeps its own; Settings has a switch); default normal
 # host_verification = "on"           # user file only; "on" holds a turn that changed files open until a check, a review and a sign-off exist; unset or "off" does not (unset still holds them under the delivery preset); the receipt always says what was checked
@@ -1539,8 +1539,9 @@ as manual setup instead of being installed with an incomplete configuration;
 query-specific cached results remain available during a registry outage.
 
 The normal setup path is intentionally one step. Use Desktop's **Add and
-connect**, `/mcp add`, or ask Reasonix to install a package or URL. These
-explicit installs are saved to the user-global `config.toml` and are also
+connect**, `n` in the terminal `/mcp` panel, or ask Reasonix to install a
+package or URL. These explicit installs are saved to the user-global
+`config.toml` (`p` in the panel: `reasonix.toml`) and are also
 authorization: the server connects in the current session, and no second trust
 step appears now or on the next startup. Servers declared by the current
 project's `reasonix.toml` or `.mcp.json` remain in that project and are trusted

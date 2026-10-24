@@ -516,6 +516,7 @@ func startCloudRemote(ctx context.Context, cfg *config.Config, logs io.Writer, t
 	dialer.NetDialContext = stream.DialContext
 	client := account.New(os.Getenv("REASONIX_ACCOUNTS_URL"), "reasonix-studio/"+version, httpClient)
 	host := remotecloud.New(client, &dialer, os.Getenv("REASONIX_REMOTE_URL"), version, tasks)
+	host.SetGateway(os.Getenv("REASONIX_REMOTE_GATEWAY_ID"))
 	if registrar, ok := tasks.(interface{ SetCloudControllerDisconnect(func(string) error) }); ok {
 		registrar.SetCloudControllerDisconnect(host.DisconnectController)
 	}

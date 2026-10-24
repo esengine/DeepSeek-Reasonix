@@ -31,6 +31,7 @@ function gapPhrase(kind: string): string {
     case "declared_unverified": return t("自己申报未验证");
     case "mod_effects_unobserved": return t("有 Claude Code mod 在运行；它写了什么不在主机观测范围内");
     case "workspace_claim_yielded": return t("你在等待期间，另一个会话改动了本会话占用的路径；之前读到的内容可能已过时");
+    case "outside_observed_root": return t("写在了主机观测范围之外；这里没有任何证据能说明它留下了什么");
     default: return kind;
   }
 }

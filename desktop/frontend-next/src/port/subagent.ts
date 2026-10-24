@@ -12,6 +12,8 @@ export interface SubagentRun {
   model: string;
   effort?: string;
   state: SubagentState;
+  /** The transcript tool call that spawned the run. */
+  parentCall?: string;
   startedAt: number;
   updatedAt: number;
 }

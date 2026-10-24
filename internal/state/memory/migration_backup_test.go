@@ -48,7 +48,10 @@ func TestMigrationBackupExactBytesAndIsolation(t *testing.T) {
 		if manifest.MigratedAt.IsZero() || manifest.AppVersion == "" {
 			t.Fatalf("manifest = %+v", manifest)
 		}
-		active, ok := loadMemory(filepath.Join(dir, "original-name.md"))
+		active, ok, err := loadMemory(filepath.Join(dir, "original-name.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok || active.Revision != 1 || active.Scope != store.scopeForDir(dir) {
 			t.Fatalf("active = %+v, %v", active, ok)
 		}

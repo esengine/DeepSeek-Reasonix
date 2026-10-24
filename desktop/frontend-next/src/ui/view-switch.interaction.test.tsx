@@ -69,6 +69,9 @@ describe("ViewSwitch on its own", () => {
     expect(screen.queryByRole("button", { name: "运行分析" })).toBeNull();
     rerender(<ViewSwitch view="flow" rows={3} surfaces={2} onView={onView} />);
     expect(screen.getByRole("button", { name: "工作台" }).textContent).toBe("2");
+    // The analysis entry reads as words, not only an icon: a control that exists
+    // solely as a picture is one people scroll past.
+    expect(screen.getByRole("button", { name: "运行分析" }).textContent).toBe("运行分析");
     await user.click(screen.getByRole("button", { name: "运行分析" }));
     expect(onView).toHaveBeenLastCalledWith("analysis");
     rerender(<ViewSwitch view="analysis" rows={3} surfaces={2} onView={onView} />);

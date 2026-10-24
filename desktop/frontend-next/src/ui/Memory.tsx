@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { tx } from "../i18n/rich";
 import { reason } from "../i18n/kernel";
-import type { AgentPort, MemoryEdit, MemoryEntry } from "../port/port";
+import type { AgentPort, MemoryEdit, MemoryEntry, UnreadableMemory } from "../port/port";
 
 // Memory is the only thing here that changes how the agent behaves without the
 // user ever configuring it — the agent writes it. So the grouping answers the
@@ -22,6 +22,7 @@ export function Memory({ port }: { port: AgentPort }) {
 
 function MemoryPanel({ port }: { port: AgentPort }) {
   const [items, setItems] = useState<MemoryEntry[] | null>(null);
+  const [unreadable, setUnreadable] = useState<UnreadableMemory[]>([]);
   const [unread, setUnread] = useState("");
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState("");
@@ -37,11 +38,13 @@ function MemoryPanel({ port }: { port: AgentPort }) {
       .memories()
       .then((c) => {
         setItems(c.memories);
+        setUnreadable(c.unreadable ?? []);
         setQuery(c.recallQuery);
         setUnread("");
       })
       .catch((e) => {
         setItems(null);
+        setUnreadable([]);
         setUnread(reason(e));
       });
   };
@@ -54,6 +57,16 @@ function MemoryPanel({ port }: { port: AgentPort }) {
   const authoring = (
     <p className="note">{tx("如需手动记录，请在输入框中使用 {cmd} 命令。", { cmd: <code>/remember</code> })}</p>
   );
+
+  // A fact file that is present but unreadable is not a fact that does not
+  // exist. It gets its own warning instead of vanishing from the list, and the
+  // store refuses to overwrite it.
+  const unreadableNotice = unreadable.length > 0 ? (
+    <div className="find" data-lvl="warn" role="alert">
+      <span className="t">{t("这些记忆无法读取")}</span>
+      <span className="why">{unreadable.map((u) => `${u.name}: ${u.error}`).join("；")}</span>
+    </div>
+  ) : null;
 
   // Three answers, not two: a request still out is not a store that refused,
   // and reading the first as the second told every reader their memory was
@@ -74,7 +87,8 @@ function MemoryPanel({ port }: { port: AgentPort }) {
   if (items.length === 0)
     return (
       <>
-        <div className="empty">{t("暂无记录。")}</div>
+        {unreadableNotice}
+        {unreadable.length === 0 && <div className="empty">{t("暂无记录。")}</div>}
         {authoring}
       </>
     );
@@ -153,6 +167,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
 
   return (
     <div className="mem">
+      {unreadableNotice}
       {query && (
         <p className="recall">
           {t("上一轮以「{q}」为线索检索了一次记忆", { q: clip(query) })}

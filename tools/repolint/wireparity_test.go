@@ -190,3 +190,107 @@ func TestWireParitySkipsAnEmbeddedTypeFromAnotherPackage(t *testing.T) {
 		t.Fatalf("names = %v ok=%v, want only the struct's own field", names, ok)
 	}
 }
+
+const partialWriter = `package p
+
+type Item struct {
+	ID      string ` + "`json:\"id\"`" + `
+	Origin  string ` + "`json:\"origin,omitempty\"`" + `
+	Preview string ` + "`json:\"preview\"`" + `
+}
+`
+
+const partialReader = `package p
+
+type ItemView struct {
+	ID      string ` + "`json:\"id\"`" + `
+	Origin  string ` + "`json:\"origin\"`" + `
+	Preview string ` + "`json:\"preview\"`" + `
+}
+`
+
+var partialPair = []partialWireMirror{
+	{"w.go", "Item", "r.go", "ItemView", []string{"id", "origin", "preview"}},
+}
+
+func partialFindingsFor(t *testing.T, writer, reader string) []Finding {
+	t.Helper()
+	w, r := parseBytes("w.go", []byte(writer)), parseBytes("r.go", []byte(reader))
+	wn, ok := wireFieldNames(w.file, "Item")
+	if !ok {
+		t.Fatal("the fixture's writer does not resolve")
+	}
+	rn, ok := wireFieldNames(r.file, "ItemView")
+	if !ok {
+		t.Fatal("the fixture's reader does not resolve")
+	}
+	return partialWireFindings(partialPair, map[string][]string{
+		"w.go.Item":     wn,
+		"r.go.ItemView": rn,
+	}, nil)
+}
+
+// A subset is allowed to ignore what the writer sends; the names it declares
+// are the whole contract.
+func TestPartialWireParityAcceptsACopyThatCarriesItsDeclaredFields(t *testing.T) {
+	if got := partialFindingsFor(t, partialWriter, partialReader); len(got) != 0 {
+		t.Fatalf("a faithful subset must produce no findings, got %+v", got)
+	}
+}
+
+// The defect the sessioninbox guard exists for: the copy drops a field a
+// decision reads, and the empty value looks like a real answer.
+func TestPartialWireParityCatchesAFieldTheCopyDropped(t *testing.T) {
+	reader := strings.Replace(partialReader, "\tOrigin  string `json:\"origin\"`\n", "", 1)
+	got := partialFindingsFor(t, partialWriter, reader)
+	if len(got) != 1 || !strings.Contains(got[0].Msg, `no longer declares "origin"`) {
+		t.Fatalf("a dropped decision field was not reported: %+v", got)
+	}
+}
+
+// A rename on the reading side reads as zero as surely as a dropped field.
+func TestPartialWireParityCatchesANameTheCopyInvented(t *testing.T) {
+	reader := strings.Replace(partialReader, `json:"origin"`, `json:"orgin"`, 1)
+	got := partialFindingsFor(t, partialWriter, reader)
+	if len(got) != 2 {
+		t.Fatalf("findings = %+v, want the dropped name and the invented one", got)
+	}
+	var sawDropped, sawInvented bool
+	for _, f := range got {
+		sawDropped = sawDropped || strings.Contains(f.Msg, `no longer declares "origin"`)
+		sawInvented = sawInvented || strings.Contains(f.Msg, `reads "orgin"`)
+	}
+	if !sawDropped || !sawInvented {
+		t.Fatalf("findings = %+v, want both directions named", got)
+	}
+}
+
+// The writer's side is checked too: a field the kernel stops sending is a
+// decision the copy can no longer make.
+func TestPartialWireParityCatchesAFieldTheWriterStoppedSending(t *testing.T) {
+	writer := strings.Replace(partialWriter, "\tOrigin  string `json:\"origin,omitempty\"`\n", "", 1)
+	got := partialFindingsFor(t, writer, partialReader)
+	if len(got) != 1 || !strings.Contains(got[0].Msg, `no longer sends "origin"`) {
+		t.Fatalf("a field the writer stopped sending was not reported: %+v", got)
+	}
+}
+
+// The page's copy is TypeScript and read from its interface, not its wording.
+func TestPartialWireParityReadsThePagesInterface(t *testing.T) {
+	const ts = "export interface ItemView {\n  id: string;\n  origin?: \"host\";\n  preview: string;\n}\n"
+	mirrors := []partialWireMirror{{"w.go", "Item", tsWireFile, "ItemView", []string{"id", "origin", "preview"}}}
+	names, ok := wireFieldNames(parseBytes("w.go", []byte(partialWriter)).file, "Item")
+	if !ok {
+		t.Fatal("the fixture's writer does not resolve")
+	}
+	if got := partialWireFindings(mirrors, map[string][]string{"w.go.Item": names},
+		map[string]string{tsWireFile: ts}); len(got) != 0 {
+		t.Fatalf("a faithful TS subset must produce no findings, got %+v", got)
+	}
+	dropped := strings.Replace(ts, "  origin?: \"host\";\n", "", 1)
+	got := partialWireFindings(mirrors, map[string][]string{"w.go.Item": names},
+		map[string]string{tsWireFile: dropped})
+	if len(got) != 1 || !strings.Contains(got[0].Msg, `no longer declares "origin"`) {
+		t.Fatalf("a dropped field in the page's copy was not reported: %+v", got)
+	}
+}

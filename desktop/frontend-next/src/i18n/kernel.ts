@@ -27,6 +27,9 @@ export const SAVED_NOT_APPLIED: readonly string[] = ["provider.saved_while_runni
 export const savedNotApplied = (e: unknown): boolean => e instanceof HttpError && SAVED_NOT_APPLIED.includes(e.reason?.code ?? "");
 
 const SAID: Record<string, string> = {
+  "present_files.editing_disabled": "这台服务器未开放文件交付设置",
+  "present_files.save_failed": "文件交付设置未能保存：{detail}",
+  "present_files.no_enabled": "本次请求未说明开关状态，未做任何修改",
   "agent_composition.invalid": "预设内容无效，请检查标识、模块和参数",
   "agent_composition.unavailable": "组合所需模块 {module} 当前不可用：{detail}",
   "agent_composition.mcp_unavailable": "MCP 服务 {module} 不可用：{detail}。请在 MCP 设置中检查连接或认证，或在预设中取消选择该服务后重试。",
@@ -112,8 +115,8 @@ const SAID: Record<string, string> = {
   "workspace.path_outside_tree": "该路径不在当前工作区内",
   "workspace.root_not_granted": "这个文件夹没有授权给当前工作区",
   "workspace.target_access_unconfigured": "未配置文件访问策略，无法执行此文件操作。",
-  "workspace.read_forbidden": "无法读取目标文件：没有权限访问。",
-  "workspace.read_outside_scope": "无法读取目标文件：没有权限访问。",
+  "workspace.read_forbidden": "无法读取目标文件：它在你配置的禁读列表里。",
+  "workspace.read_outside_scope": "无法读取目标文件：它不在这个会话允许读取的文件夹里。",
   "video.ffmpeg_missing": "读视频需要本机装有 ffmpeg（含 ffprobe）并能在系统路径里找到。装好后再试一次。",
   "video.unsupported_container": "不认识这种视频格式。支持 MP4/MOV、MKV/WebM、AVI、FLV、ASF、MPEG 和 Ogg 这些常见封装。",
   "video.too_large": "视频文件太大，超过了能读取的上限。",
@@ -317,6 +320,7 @@ const SAID: Record<string, string> = {
 
   "memory.unavailable": "该会话未启用记忆",
   "memory.directory_unreadable": "无法读取记忆目录，请检查权限或存储状态后重试",
+  "memory.fact_unreadable": "这条记忆存在于磁盘上，但读取失败，已拒绝覆盖；请检查权限或存储状态后重试",
   "side.unavailable": "这个会话不支持辅助提问",
   "side.unknown": "这个辅助提问已经关闭，请重新打开",
   "side.busy": "上一个问题还在回答，请稍候再问",

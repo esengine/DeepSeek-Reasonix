@@ -90,7 +90,7 @@ describe("feedback and settings with no pane open", () => {
   it("drops the settings refusal once a folder is added", async () => {
     const { hub } = folderless();
     render(<App hub={hub} />);
-    await userEvent.click(await screen.findByRole("button", { name: /工具与集成/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
     await waitFor(() => expect(document.querySelector(".errbar")!.textContent).toContain("设置需要一个打开的会话"));
     await userEvent.click(await screen.findByRole("button", { name: "添加文件夹" }));
     await waitFor(() => expect(document.querySelector(".errbar")).toBeNull());

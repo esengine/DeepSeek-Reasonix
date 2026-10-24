@@ -12,19 +12,19 @@ afterEach(cleanup);
 const toggle = () => screen.findByRole("switch", { name: "乐观模式（多会话并行）" });
 
 describe("the write-lease switch", () => {
-  it("starts off, says what it costs and when it takes effect, and saves the opposite of what it shows", async () => {
+  it("starts on, says what it costs and when it takes effect, and saves the opposite of what it shows", async () => {
     const p = new MockPort() as unknown as AgentPort;
     const save = vi.spyOn(p, "saveWriteLease");
     render(<WriteLease port={p} />);
     const sw = await toggle();
-    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText(/没有事前的路径围栏，只在事后观察/)).toBeTruthy();
     expect(screen.getByText(/只对之后新开的会话生效/)).toBeTruthy();
     await userEvent.click(sw);
-    expect(save).toHaveBeenCalledWith({ optimistic: true });
-    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("true"));
+    expect(save).toHaveBeenCalledWith({ optimistic: false });
+    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("false"));
     await userEvent.click(sw);
-    expect(save).toHaveBeenLastCalledWith({ optimistic: false });
+    expect(save).toHaveBeenLastCalledWith({ optimistic: true });
   });
 
   it("shows the longest wait, saves a changed one on blur and shows what the kernel stored", async () => {
@@ -50,7 +50,7 @@ describe("the write-lease switch", () => {
     const sw = await toggle();
     await userEvent.click(sw);
     await screen.findByText(/disk full/);
-    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
   });
 
   it("says so when the setting cannot be read", async () => {

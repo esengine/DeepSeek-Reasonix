@@ -379,42 +379,42 @@ func TestPermissionsListsRulesAlreadyInTheFileThatNameNoTool(t *testing.T) {
 	}
 }
 
-// The default is strict and changing it is a deliberate write to the user file;
-// a body that does not say which changes nothing.
+// The default is optimistic and choosing strict is a deliberate write to the
+// user file; a body that does not say which changes nothing.
 func TestSaveSubagentClaimsPersists(t *testing.T) {
 	s := newProviderEditServer(t)
 	s.AllowProviderEdit()
 	srv := httptest.NewServer(operatorHandler(s))
 	defer srv.Close()
 
-	if got := readJSON[control.SubagentClaimsSettings](t, srv.URL, "/subagent-claims"); got.Optimistic {
-		t.Fatalf("unset choice reads %+v, want the strict default", got)
+	if got := readJSON[control.SubagentClaimsSettings](t, srv.URL, "/subagent-claims"); !got.Optimistic {
+		t.Fatalf("unset choice reads %+v, want the optimistic default", got)
 	}
 	empty := postProvider(t, srv.URL, "/subagent-claims", `{}`)
 	empty.Body.Close()
 	if empty.StatusCode != http.StatusBadRequest {
 		t.Fatalf("POST /subagent-claims without a choice = %d, want 400", empty.StatusCode)
 	}
-	resp := postProvider(t, srv.URL, "/subagent-claims", `{"optimistic":true}`)
+	resp := postProvider(t, srv.URL, "/subagent-claims", `{"optimistic":false}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		got, _ := readAllString(resp)
 		t.Fatalf("POST /subagent-claims = %d: %s", resp.StatusCode, got)
 	}
-	if !config.LoadForEdit(config.UserConfigPath()).SubagentClaimsOptimistic() {
-		t.Fatal("choosing optimistic did not reach the config file")
-	}
-	if got := readJSON[control.SubagentClaimsSettings](t, srv.URL, "/subagent-claims"); !got.Optimistic {
-		t.Fatalf("read back = %+v, want optimistic", got)
-	}
-	back := postProvider(t, srv.URL, "/subagent-claims", `{"optimistic":false}`)
-	back.Body.Close()
 	if config.LoadForEdit(config.UserConfigPath()).SubagentClaimsOptimistic() {
-		t.Fatal("returning to strict did not reach the config file")
+		t.Fatal("choosing strict did not reach the config file")
+	}
+	if got := readJSON[control.SubagentClaimsSettings](t, srv.URL, "/subagent-claims"); got.Optimistic {
+		t.Fatalf("read back = %+v, want strict", got)
+	}
+	back := postProvider(t, srv.URL, "/subagent-claims", `{"optimistic":true}`)
+	back.Body.Close()
+	if !config.LoadForEdit(config.UserConfigPath()).SubagentClaimsOptimistic() {
+		t.Fatal("returning to optimistic did not reach the config file")
 	}
 }
 
-// The same choice for the main session's own lease. Strict is the default, the
+// The same choice for the main session's own lease. Optimistic is the default, the
 // write goes to the user file only, and a body that does not say which changes
 // nothing. The running session keeps the lease it was built with, so the answer
 // says that instead of rebuilding a runtime that would adopt the same lease.
@@ -424,40 +424,40 @@ func TestSaveWriteLeasePersistsAndSaysWhenItTakesEffect(t *testing.T) {
 	srv := httptest.NewServer(operatorHandler(s))
 	defer srv.Close()
 
-	if got := readJSON[control.WriteLeaseSettings](t, srv.URL, "/write-lease"); got.Optimistic {
-		t.Fatalf("unset choice reads %+v, want the strict default", got)
+	if got := readJSON[control.WriteLeaseSettings](t, srv.URL, "/write-lease"); !got.Optimistic {
+		t.Fatalf("unset choice reads %+v, want the optimistic default", got)
 	}
 	empty := postProvider(t, srv.URL, "/write-lease", `{}`)
 	empty.Body.Close()
 	if empty.StatusCode != http.StatusBadRequest {
 		t.Fatalf("POST /write-lease without a choice = %d, want 400", empty.StatusCode)
 	}
-	resp := postProvider(t, srv.URL, "/write-lease", `{"optimistic":true}`)
+	resp := postProvider(t, srv.URL, "/write-lease", `{"optimistic":false}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		got, _ := readAllString(resp)
 		t.Fatalf("POST /write-lease = %d: %s", resp.StatusCode, got)
 	}
-	if !config.LoadForEdit(config.UserConfigPath()).WriteLeaseOptimistic() {
-		t.Fatal("choosing optimistic did not reach the config file")
+	if config.LoadForEdit(config.UserConfigPath()).WriteLeaseOptimistic() {
+		t.Fatal("choosing strict did not reach the config file")
 	}
-	if got := readJSON[control.WriteLeaseSettings](t, srv.URL, "/write-lease"); !got.Optimistic {
-		t.Fatalf("read back = %+v, want optimistic", got)
+	if got := readJSON[control.WriteLeaseSettings](t, srv.URL, "/write-lease"); got.Optimistic {
+		t.Fatalf("read back = %+v, want strict", got)
 	}
 	wait := postProvider(t, srv.URL, "/write-lease", `{"maxWaitMinutes":45}`)
 	wait.Body.Close()
-	if got := readJSON[control.WriteLeaseSettings](t, srv.URL, "/write-lease"); got.MaxWaitMinutes != 45 || !got.Optimistic {
-		t.Fatalf("after saving only the wait, read back = %+v, want 45 and optimistic untouched", got)
+	if got := readJSON[control.WriteLeaseSettings](t, srv.URL, "/write-lease"); got.MaxWaitMinutes != 45 || got.Optimistic {
+		t.Fatalf("after saving only the wait, read back = %+v, want 45 and strict untouched", got)
 	}
 	negative := postProvider(t, srv.URL, "/write-lease", `{"maxWaitMinutes":-1}`)
 	negative.Body.Close()
 	if negative.StatusCode != http.StatusBadRequest {
 		t.Fatalf("a negative wait = %d, want 400", negative.StatusCode)
 	}
-	back := postProvider(t, srv.URL, "/write-lease", `{"optimistic":false}`)
+	back := postProvider(t, srv.URL, "/write-lease", `{"optimistic":true}`)
 	back.Body.Close()
-	if config.LoadForEdit(config.UserConfigPath()).WriteLeaseOptimistic() {
-		t.Fatal("returning to strict did not reach the config file")
+	if !config.LoadForEdit(config.UserConfigPath()).WriteLeaseOptimistic() {
+		t.Fatal("returning to optimistic did not reach the config file")
 	}
 }
 

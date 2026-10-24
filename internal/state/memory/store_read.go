@@ -72,7 +72,15 @@ func (s Store) findActiveInDir(dir, ref string) (Memory, string, bool, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		memory, ok := loadMemory(path)
+		memory, ok, readErr := loadMemory(path)
+		if readErr != nil {
+			// The stem is an unreadable file's only remaining identity: report
+			// it for the name asked for, and never let it block another name.
+			if slug(strings.TrimSuffix(entry.Name(), ".md")) == wantName {
+				return Memory{}, path, false, readErr
+			}
+			continue
+		}
 		if !ok {
 			continue
 		}
@@ -140,7 +148,13 @@ func (s Store) Revisions(ref string) ([]Memory, error) {
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 				continue
 			}
-			memory, ok := loadMemory(filepath.Join(revisionDir, entry.Name()))
+			// A revision that cannot be read makes this history incomplete, and
+			// an incomplete history is reported rather than shown as if the
+			// missing revision never existed.
+			memory, ok, readErr := loadMemory(filepath.Join(revisionDir, entry.Name()))
+			if readErr != nil {
+				return nil, readErr
+			}
 			if !ok || memory.ID != active.ID || seen[memory.Revision] {
 				continue
 			}
@@ -188,7 +202,12 @@ func (s Store) findArchivedByPath(want string) (Memory, string, bool, error) {
 			if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 				return Memory{}, "", false, nil
 			}
-			archived, ok := loadMemory(path)
+			archived, ok, readErr := loadMemory(path)
+			if readErr != nil {
+				// This is the very file the caller named, so recovery stops
+				// instead of reporting the archive entry as missing.
+				return Memory{}, "", false, readErr
+			}
 			if !ok {
 				return Memory{}, "", false, nil
 			}
@@ -222,7 +241,13 @@ func (s Store) maxKnownRevision(id string) (int, error) {
 				if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 					continue
 				}
-				candidate, ok := loadMemory(path)
+				// History that cannot be read makes the maximum unknown, and a
+				// revision computed from incomplete history is exactly what the
+				// recovery contract forbids; stop before snapshotting anything.
+				candidate, ok, readErr := loadMemory(path)
+				if readErr != nil {
+					return 0, readErr
+				}
 				if ok && candidate.ID == id && candidate.Revision > maxRevision {
 					maxRevision = candidate.Revision
 				}

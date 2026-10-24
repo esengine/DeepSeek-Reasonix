@@ -9,7 +9,7 @@
   {
     "schemaVersion": 1, "id": "builtin:minimal", "name": "轻装搭档", "description": "带上终端和看图工具，轻装开工。和你一起处理小任务、快速试验，也方便对比模型表现。",
     "persona": {"prefix": "You are a helpful software engineer assistant.", "suffix": "", "include_runtime_context": false},
-    "tools": {"mode":"select","members":[{"id":"bash"},{"id":"view_image"}]},
+    "tools": {"mode":"select","members":[{"id":"bash"},{"id":"view_image","optional":true}]},
     "skills": {"mode":"select","members":[]}, "mcp": {"mode":"select","members":[]},
     "extensions": {"mode":"select","members":[]}, "hooks": {"mode":"select","members":[]}, "commands": {"mode":"select","members":[]}
   }

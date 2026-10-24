@@ -31,6 +31,15 @@ type memoryEntry struct {
 	Why          string `json:"why,omitempty"`
 }
 
+// unreadableMemory is one fact file that is present but could not be read. It
+// rides beside the readable entries so the panel can say the fact exists
+// instead of showing a store that looks like it never held it.
+type unreadableMemory struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
 // memories lists saved facts with the last turn's recall folded in. Which facts
 // exist is the less useful half; which ones were just acted on is the question a
 // user actually has when the agent does something surprising.
@@ -38,7 +47,7 @@ func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
 	ctl := s.ctl()
 	set := ctl.Memory()
 	if set == nil {
-		writeJSON(w, map[string]any{"memories": []memoryEntry{}, "recallQuery": ""})
+		writeJSON(w, map[string]any{"memories": []memoryEntry{}, "unreadable": []unreadableMemory{}, "recallQuery": ""})
 		return
 	}
 	recall := ctl.LastMemoryRecall()
@@ -46,14 +55,14 @@ func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
 	for _, hit := range recall.Hits {
 		used[hit.Memory.Name] = strings.TrimSpace(hit.Reason)
 	}
-	raw, err := set.Store.ListAll()
+	report, err := set.Store.ListActive()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	now := time.Now()
-	out := make([]memoryEntry, 0, len(raw))
-	for _, m := range raw {
+	out := make([]memoryEntry, 0, len(report.Facts))
+	for _, m := range report.Facts {
 		reason, hit := used[m.Name]
 		path, err := set.Store.Path(string(memory.NormalizeFactScope(string(m.Scope))) + "/" + m.Name + ".md")
 		if err != nil {
@@ -70,6 +79,10 @@ func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
 			UsedLastTurn: hit, Why: reason,
 		})
 	}
+	unreadable := make([]unreadableMemory, 0, len(report.Unreadable))
+	for _, e := range report.Unreadable {
+		unreadable = append(unreadable, unreadableMemory{Name: e.Name(), Path: e.Path, Error: e.Error()})
+	}
 	indexPath, err := set.Store.Path("MEMORY")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -77,6 +90,7 @@ func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"memories":    out,
+		"unreadable":  unreadable,
 		"recallQuery": recall.Query,
 		"indexPath":   indexPath,
 	})
@@ -140,18 +154,27 @@ func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current, found := memory.Memory{}, false
-	facts, err := set.Store.ListAll()
+	report, err := set.Store.ListActive()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	for _, m := range facts {
+	for _, m := range report.Facts {
 		if m.Name == name {
 			current, found = m, true
 			break
 		}
 	}
 	if !found {
+		// The name may belong to a fact that is present but unreadable. Saving
+		// would write over bytes nobody read, so the store must be able to say
+		// which of the two it is.
+		for _, unreadable := range report.Unreadable {
+			if strings.EqualFold(unreadable.Name(), strings.TrimSuffix(name, ".md")) {
+				writeErr(w, http.StatusInternalServerError, unreadable)
+				return
+			}
+		}
 		notFound(w, "memory", name)
 		return
 	}

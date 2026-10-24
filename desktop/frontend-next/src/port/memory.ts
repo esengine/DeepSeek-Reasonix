@@ -21,10 +21,20 @@ export interface MemoryEntry {
   why?: string;
 }
 
+// A memory file that is present but could not be read. It is reported beside
+// the catalog so the panel can say the fact exists instead of showing a store
+// that looks like it never held it.
+export interface UnreadableMemory {
+  name: string;
+  path: string;
+  error: string;
+}
+
 export interface MemoryCatalog {
   memories: MemoryEntry[];
   recallQuery: string;
   indexPath?: string;
+  unreadable?: UnreadableMemory[];
 }
 
 // What a person may change about a saved fact. Identity, revision and

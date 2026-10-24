@@ -39,6 +39,7 @@ import { useSubmit } from "./usesubmit";
 import { useSurfaceSlots } from "./usesurfaceslots";
 import { useSurfaceReplay } from "./surface-replay";
 import { MeterRail } from "./MeterRail";
+import { useAgentRequest } from "./useAgentRequest";
 import { PlanFold } from "./PlanFold";
 import { useBroughtResults } from "./useBroughtResults";
 import { RunLine } from "./RunLine";
@@ -139,6 +140,8 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     pushToast(shown);
   }, []);
   const statusRead = useCallback(() => dispatch({ kind: "__error_clear", from: "status" } as never), []);
+  const agentRuns = useAgentRequest(port, revealBrowser);
+  const openRun = agentRuns.open;
   const conversationFiles = useConversationFiles(port, status?.workspaceRoot ?? rt.root, !!rt.host, visible && tab === "flow", revealBrowser, notify);
   const compact = useCompactNow(port, running || s.items.some((item) => item.t === "compaction" && !item.done), notify);
   // Elapsed is a clock reading and belongs on the tick. Throughput is not: it
@@ -513,6 +516,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
       <Transcript port={port}
+        scope={rt.sessionPath || rt.id}
         onSettings={onSettings}
         brought={brought}
         foldWork={foldWork}
@@ -558,6 +562,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             rows={traj.rows}
             availability={traj.availability}
             onSave={(name, content) => port.saveText(name, content)}
+            onBack={() => showView("flow")}
           />
         )}
       </div>
@@ -574,6 +579,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             port={port}
             hub={hub}
             fileRequest={conversationFiles.request}
+            agentRequest={agentRuns.request}
             tabs={pages}
             wideMode={docked ? { wide: browserSize.size === "wide", onToggle: browserSize.toggle } : undefined}
             fullMode={docked ? { full: browserSize.size === "full", onToggle: browserSize.toggleFull } : undefined}
@@ -649,6 +655,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}
           onCancelJob={(id) => cancelJob(port, id, notify, refreshStatus).then(() => {})}
           onReadJob={readJob}
+          onOpenRun={openRun}
           usage={status?.sessionUsage} quote={status?.sessionCostQuote} tariff={status?.tariff} onTariffFlip={refreshStatus}
         />
         {reloadFailure && <ReloadNotice failure={reloadFailure} onReload={onReloadSession} />}

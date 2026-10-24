@@ -29,7 +29,7 @@ it("keeps machine reads separate from active-pane account operations", async () 
   const remoteLogout = vi.spyOn(remote, "accountLogout").mockResolvedValue();
   const localLogout = vi.spyOn(local, "accountLogout");
   render(<App hub={hub} />);
-  await userEvent.click(await screen.findByRole("button", { name: /工具与集成/ }));
+  await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
   await userEvent.click(await screen.findByRole("tab", { name: /记忆/ }, { timeout: 10000 }));
   await screen.findByText("This machine fact");
   expect(remoteMemories).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
   const storage = vi.spyOn(first, "storage");
   rememberActivePane(active);
   render(<App hub={hub} />);
-  await userEvent.click(await screen.findByRole("button", { name: /工具与集成/ }));
+  await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
   await userEvent.click(await screen.findByRole("tab", { name: /记忆/ }));
   await screen.findByText(`${expected} fact`);
   await userEvent.click(screen.getByRole("button", { name: "忘记" }));
@@ -85,7 +85,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
     await userEvent.keyboard("{Escape}");
     const tabs = within(screen.getByRole("tablist", { name: "会话面板" })).getAllByRole("tab");
     await userEvent.click(tabs[0]);
-    await userEvent.click(screen.getByRole("button", { name: /工具与集成/ }));
+    await userEvent.click(screen.getByRole("button", { name: /扩展/ }));
     await userEvent.click(await screen.findByRole("tab", { name: /记忆/ }));
     await screen.findByText("first fact");
     expect(screen.queryByText("second fact")).toBeNull();
@@ -118,7 +118,7 @@ it("saves a second-local-only default through the owner that offered it", async 
   const switched = vi.spyOn(second, "setModel");
   rememberActivePane("second");
   render(<App hub={hub} />);
-  await userEvent.click(await screen.findByRole("button", { name: /工具与集成/ }));
+  await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
   await userEvent.click(await screen.findByRole("tab", { name: /模型偏好/ }));
   const select = await screen.findByRole("combobox", { name: "默认模型" }) as HTMLSelectElement;
   await userEvent.selectOptions(select, extension);

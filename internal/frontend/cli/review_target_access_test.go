@@ -95,7 +95,7 @@ base_url = "http://127.0.0.1:1"
 				t.Fatalf("expected one completed read, got %q", results)
 			}
 			if forbidden {
-				if results[0] != "Cannot read target file: permission denied." {
+				if !strings.Contains(results[0], "forbidden-read list") {
 					t.Fatalf("review skipped unified target admission: %q", results[0])
 				}
 			} else if !strings.Contains(results[0], reviewHookSecret) {

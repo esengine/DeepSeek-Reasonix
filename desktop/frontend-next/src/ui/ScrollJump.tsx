@@ -2,6 +2,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { t } from "../i18n";
 import { reach, type Direction } from "./jumpreach";
 import { StudioIcon } from "./StudioIcon";
+import { TooltipButton } from "./TooltipButton";
 
 const NONE = { up: false, down: false };
 
@@ -47,14 +48,14 @@ export function ScrollJump({ scroll, flow, active, onJump }: {
     <div className="scrolljump">
       <div>
         {shown.up && (
-          <button type="button" data-action="transcript.scroll" data-value="up" aria-label={t("回到会话顶部")} title={t("回到会话顶部（Shift+点击：上一个展开的块）")} onClick={(e) => onJump("up", e.shiftKey)}>
+          <TooltipButton data-action="transcript.scroll" data-value="up" aria-label={t("回到会话顶部")} title={t("回到会话顶部（Shift+点击：上一个展开的块）")} onClick={(e) => onJump("up", e.shiftKey)}>
             <StudioIcon name="down" />
-          </button>
+          </TooltipButton>
         )}
         {shown.down && (
-          <button type="button" data-action="transcript.scroll" data-value="down" aria-label={t("跳到最新")} title={t("跳到最新（Shift+点击：下一个展开的块）")} onClick={(e) => onJump("down", e.shiftKey)}>
+          <TooltipButton data-action="transcript.scroll" data-value="down" aria-label={t("跳到最新")} title={t("跳到最新（Shift+点击：下一个展开的块）")} onClick={(e) => onJump("down", e.shiftKey)}>
             <StudioIcon name="down" />
-          </button>
+          </TooltipButton>
         )}
       </div>
     </div>

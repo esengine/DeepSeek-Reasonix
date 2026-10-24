@@ -1,6 +1,7 @@
 import { t } from ".";
 import { elapsed } from "./format";
 
+export const JOB_STARTED = "job_started";
 export const JOB_FINISHED = "job_finished";
 export const JOB_KILLED = "job_killed";
 export const JOB_FAILED = "job_failed";
@@ -20,16 +21,22 @@ export function jobNoticeVars(detail: string | undefined): { name: string } | un
   }
 }
 
-// A stalled job's sentence also says how long its own output has been silent:
-// without that span the sentence would be half-filled, so it reads as no payload.
-export function jobStalledVars(detail: string | undefined): { name: string; quiet: string } | undefined {
+// A stalled job's sentence also says how long it has been inactive, and whether
+// it had reported any steps by then: a job that worked and stopped is waiting on
+// something, while one that never reported may be writing elsewhere. Without the
+// span the sentence would be half-filled, so it reads as no payload.
+export function jobStalledVars(detail: string | undefined): { name: string; quiet: string; work: string } | undefined {
   const named = jobNoticeVars(detail);
   if (!named || !detail) return undefined;
   try {
-    const p = JSON.parse(detail) as { quietSeconds?: unknown };
-    return typeof p.quietSeconds === "number" && Number.isInteger(p.quietSeconds) && p.quietSeconds > 0
-      ? { ...named, quiet: elapsed(p.quietSeconds * 1000) }
-      : undefined;
+    const p = JSON.parse(detail) as { quietSeconds?: unknown; steps?: unknown };
+    if (typeof p.quietSeconds !== "number" || !Number.isInteger(p.quietSeconds) || p.quietSeconds <= 0) return undefined;
+    const steps = typeof p.steps === "number" && Number.isInteger(p.steps) && p.steps > 0 ? p.steps : 0;
+    return {
+      ...named,
+      quiet: elapsed(p.quietSeconds * 1000),
+      work: steps > 0 ? t("{n} 步在静默前完成", { n: steps }) : t("静默前没有任何进展"),
+    };
   } catch {
     return undefined;
   }

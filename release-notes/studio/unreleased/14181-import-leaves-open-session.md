@@ -1,2 +1,0 @@
-- 修复：导入旧会话时，不再把另一个窗口正打开着的会话搬走或删除；这类会话会留在原处，之后再导入。关联 #14181。
-- Fixed: importing legacy sessions no longer moves or deletes a session that another window has open; it is left in place and settled on a later import. Refs #14181.

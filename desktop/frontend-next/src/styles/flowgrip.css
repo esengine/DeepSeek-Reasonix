@@ -5,13 +5,21 @@
   position: absolute; top: 0; bottom: 0; width: 7px;
   cursor: col-resize; touch-action: none; pointer-events: auto;
 }
-.flowgrip-l { left: calc(var(--grip-left, 0px) - 7px) }
-.flowgrip-r { right: calc(var(--grip-right, 0px) - 7px) }
+.flowgrip-l { left: max(0px, calc(var(--grip-left, 0px) - 18px)) }
+.flowgrip-r { right: max(0px, calc(var(--grip-right, 0px) - 18px)) }
 .flowgrip::before {
-  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
-  background: transparent; transition: background var(--m-card) var(--ease);
+  content: ""; position: absolute; top: 50%; left: 3px; width: 1px; height: 38px;
+  translate: 0 -50%;
+  border-radius: 1px;
+  background: var(--hair);
+  transition: background var(--m-card) var(--ease), height var(--m-card) var(--ease), transform var(--m-card) var(--ease);
 }
-.flowgrip:hover::before { background: var(--border) }
-body[data-flowdrag] .flowgrip::before { background: var(--accent) }
+.flowgrip:hover::before { background: var(--border); height: 64px; transform: scaleX(2) }
+.flowgrip:focus-visible { outline: none }
+.flowgrip:focus-visible::before { background: var(--focus); height: 64px; transform: scaleX(2) }
+body[data-flowdrag] .flowgrip::before { background: var(--accent); height: 64px; transform: scaleX(2) }
 body[data-flowdrag], body[data-flowdrag] * { cursor: col-resize }
 body[data-flowdrag] { user-select: none }
+@media (prefers-reduced-motion: reduce) {
+  .flowgrip::before { transition: none }
+}

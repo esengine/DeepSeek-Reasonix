@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type RefObject } from "react";
+import { finderFor, type Finder, type FindMode } from "../state/find";
 import type { Item } from "../state/session";
 import { clearFind, currentRange, paintFind } from "./findpaint";
 
@@ -18,7 +19,7 @@ const FIND_BAR = 56;
  *  in a block that is not mounted, so it is found by block first, the same way
  *  the rail lands on a message. */
 export function useFindLanding(
-  find: { id: string; nth: number; n: number } | null | undefined,
+  find: { id: string; nth: number; n: number; mode?: FindMode } | null | undefined,
   query: string,
   hidden: boolean,
   blocks: Item[][],
@@ -39,25 +40,25 @@ export function useFindLanding(
     if (hidden || !find || found.current === find.n) return;
     found.current = find.n;
     const where = rowBlock.get(find.id);
-    const needle = query.trim().toLocaleLowerCase();
+    const finder = finderFor(query, find.mode);
     const nth = find.nth;
     const n = find.n;
     const mine = () => found.current === n;
-    if (where) land(where.block, where.into, `[data-item="${CSS.escape(find.id)}"]`, FIND_BAR, (row, root) => reveal(row, root, needle, nth, mine));
+    if (where && finder) land(where.block, where.into, `[data-item="${CSS.escape(find.id)}"]`, FIND_BAR, (row, root) => reveal(row, root, finder, nth, mine));
   }, [hidden, find, query, rowBlock, land]);
 }
 
 /** Puts the occurrence being looked at where it is read, and says whether it
  *  could: a row can be taller than the view, so its top is not enough. Rows
  *  above it may still mount and move it, so it holds for a few frames. */
-function reveal(row: HTMLElement, root: HTMLElement, needle: string, nth: number, mine: () => boolean, tries = 8): boolean {
-  if (!needle || !mine() || !row.isConnected) return false;
+function reveal(row: HTMLElement, root: HTMLElement, finder: Finder, nth: number, mine: () => boolean, tries = 8): boolean {
+  if (!mine() || !row.isConnected) return false;
   landingBox(row);
-  const range = currentRange(row, needle, nth);
+  const range = currentRange(row, finder, nth);
   if (!range) {
     const lazy = [...row.querySelectorAll<HTMLDetailsElement>("details[data-lazy]:not([open])")];
     for (const fold of lazy) fold.open = true;
-    if (lazy.length > 0 && tries > 0) requestAnimationFrame(() => reveal(row, root, needle, nth, mine, tries - 1));
+    if (lazy.length > 0 && tries > 0) requestAnimationFrame(() => reveal(row, root, finder, nth, mine, tries - 1));
     return false;
   }
   for (let fold = range.startContainer.parentElement?.closest("details:not([open])"); fold && row.contains(fold);
@@ -78,7 +79,7 @@ function reveal(row: HTMLElement, root: HTMLElement, needle: string, nth: number
   const top = view.top + FIND_BAR;
   const bottom = view.bottom - view.height / 4;
   if (box.top < top || box.bottom > bottom) root.scrollTop += box.top - (top + (bottom - top) / 3);
-  if (tries > 0) requestAnimationFrame(() => reveal(row, root, needle, nth, mine, tries - 1));
+  if (tries > 0) requestAnimationFrame(() => reveal(row, root, finder, nth, mine, tries - 1));
   return true;
 }
 
@@ -101,6 +102,7 @@ export function useFindPaint(
   query: string,
   current: string | null,
   nth: number,
+  mode?: FindMode,
 ) {
   useEffect(() => {
     if (hidden || !query.trim()) return clearFind();
@@ -110,7 +112,7 @@ export function useFindPaint(
       frame = requestAnimationFrame(() => {
         frame = 0;
         if (!flow.current?.isConnected) return;
-        paintFind(flow.current, query, current === null ? null : { id: current, nth });
+        paintFind(flow.current, query, current === null ? null : { id: current, nth }, mode);
       });
     };
     paint();
@@ -123,5 +125,5 @@ export function useFindPaint(
       watch.disconnect();
       clearFind();
     };
-  }, [flow, hidden, query, current, nth]);
+  }, [flow, hidden, query, current, nth, mode]);
 }

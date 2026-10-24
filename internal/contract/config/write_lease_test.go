@@ -23,13 +23,20 @@ func TestUserFileChoosesTheWriteLease(t *testing.T) {
 	}
 }
 
-func TestProjectCannotLoosenTheWriteLease(t *testing.T) {
-	cfg, _ := loadScoped(t, "", "[agent]\nwrite_lease = \"optimistic\"\n")
-	if cfg.WriteLeaseOptimistic() {
-		t.Fatal("a cloned repo's reasonix.toml turned the cross-session write lease optimistic")
+func TestProjectCannotChangeTheWriteLease(t *testing.T) {
+	cfg, _ := loadScoped(t, "", "[agent]\nwrite_lease = \"strict\"\n")
+	if !cfg.WriteLeaseOptimistic() {
+		t.Fatal("a cloned repo's reasonix.toml tightened the cross-session write lease for the user")
 	}
 	if !slices.Contains(ignoredKeys(cfg), "agent.write_lease") {
 		t.Fatalf("ignored = %v, want agent.write_lease reported", ignoredKeys(cfg))
+	}
+}
+
+func TestProjectCannotLoosenAStrictUserChoiceWriteLease(t *testing.T) {
+	cfg, _ := loadScoped(t, "[agent]\nwrite_lease = \"strict\"\n", "[agent]\nwrite_lease = \"optimistic\"\n")
+	if cfg.WriteLeaseOptimistic() {
+		t.Fatal("a cloned repo's reasonix.toml loosened the user's own strict write_lease")
 	}
 }
 
@@ -47,7 +54,12 @@ func TestAnOptimisticWriteLeaseSurvivesASave(t *testing.T) {
 		t.Fatalf("rendered config lost the choice:\n%s", out)
 	}
 	if out := RenderTOMLForScope(Default(), RenderScopeUser); strings.Contains(out, "\nwrite_lease = ") {
-		t.Fatalf("the strict default was written as an active key:\n%s", out)
+		t.Fatalf("the optimistic default was written as an active key:\n%s", out)
+	}
+	strict := Default()
+	strict.Agent.WriteLease = "strict"
+	if out := RenderTOMLForScope(strict, RenderScopeUser); !strings.Contains(out, "write_lease = \"strict\"") {
+		t.Fatalf("a strict choice was dropped on save, so the optimistic default would return:\n%s", out)
 	}
 }
 

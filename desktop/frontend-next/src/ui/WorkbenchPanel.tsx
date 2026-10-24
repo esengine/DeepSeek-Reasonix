@@ -46,6 +46,8 @@ const DocumentPreview = lazy(() => import("./document/DocumentPreview"));
 const CodeEditor = lazy(() => import("./CodeEditor"));
 
 import { treeRows } from "./workbench_tree";
+import { AgentRunView } from "./AgentRunView";
+import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
 
 export function WorkbenchPanel({
   port,
@@ -71,6 +73,7 @@ export function WorkbenchPanel({
   wideMode,
   fullMode,
   fileRequest,
+  agentRequest,
 }: {
   port: AgentPort;
   tabs: BrowserTab[];
@@ -104,6 +107,7 @@ export function WorkbenchPanel({
   wideMode?: { wide: boolean; onToggle: () => void };
   fullMode?: { full: boolean; onToggle: () => void };
   fileRequest?: { path: string; consumed?: () => void };
+  agentRequest?: AgentRequest;
 }) {
   const preview = useHtmlPreview(port, allTabs, remote);
   const tabs = preview.tabs;
@@ -134,6 +138,7 @@ export function WorkbenchPanel({
   const { pick, follow, supersede, current } = useBrowserSelection(port, select, allTabs);
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set()),
     [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const { agents, setAgents } = useAgentTabs(agentRequest, pick, setDismissed);
   // The explorer's own failure, drawn in the explorer: the file view's error
   // sits in a canvas the docked file list hides.
   const [listFailed, setListFailed] = useState("");
@@ -278,8 +283,9 @@ export function WorkbenchPanel({
         ...browsers.map((id) => ({ kind: "manual", id }) as const),
         ...tabs.map((tab) => ({ kind: "browser", tab }) as const),
         ...openFiles.map((path) => ({ kind: "file", path }) as const),
+        ...agents.map((run) => ({ kind: "agent", ...run }) as const),
       ].filter((s) => !dismissed.has(keyOf(s))),
-    [browsers, tabs, openFiles, dismissed],
+    [browsers, tabs, openFiles, agents, dismissed],
   );
   const active =
     surfaces.find((s) => keyOf(s) === selected) ??
@@ -413,7 +419,7 @@ export function WorkbenchPanel({
       if (openingBrowser.current === page) openingBrowser.current = null;
     }
   };
-  const { close: closeTabs, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles: showFiles || launcher, fromExplorer, setBrowsers, setOpenFiles, setDismissed, setSelected, setShowFiles, setLauncher, onCloseManual, onCloseSelected: () => setFailed("") });
+  const { close: closeTabs, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles: showFiles || launcher, fromExplorer, setBrowsers, setOpenFiles, setAgents, setDismissed, setSelected, setShowFiles, setLauncher, onCloseManual, onCloseSelected: () => setFailed("") });
   const close = (targets: Surface[]) => { supersede(); return closeTabs(targets); };
   const dismissTabMenu = useCallback(() => setTabMenu(null), []);
   const [tabMenu, setTabMenu] = useState<{ surface: Surface; x: number; y: number; anchor: HTMLElement } | null>(null);
@@ -502,7 +508,7 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              <StudioIcon name={surface.kind === "file" ? "file" : "globe"} />
+              <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "agent" ? "branch" : "globe"} />
               <span>{labelFor(surface)}</span>
             </button>
             )}
@@ -579,6 +585,7 @@ export function WorkbenchPanel({
               onOpenDocument={(path) => port.openDocument(path)}
             />
           )}
+          {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} />}
           {active?.kind === "file" && (
             <>
               <WorkbenchFileBar

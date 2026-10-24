@@ -42,10 +42,9 @@ it("without the icon rail has one way into the remote settings, and it opens tha
   expect(onSettings).toHaveBeenCalledWith("remote");
 });
 
-it("writes the hints beside its shortcut rows with one separator", () => {
+it("draws the shortcut rows with their label only, the shortcuts staying on the tooltip", () => {
   draw(false);
-  const hints = [...document.querySelectorAll(".studio-quicknav small")].map((el) => el.textContent ?? "");
-  expect(hints.length).toBeGreaterThan(1);
-  const separators = new Set(hints.map((h) => h.replace(/[A-Za-z0-9\s]/g, "")));
-  expect([...separators]).toHaveLength(1);
+  expect(document.querySelectorAll(".studio-quicknav small, .studio-new-task kbd, .studio-search kbd")).toHaveLength(0);
+  expect(document.querySelector(".studio-new-task")?.getAttribute("title")).toBe("Alt N");
+  expect(document.querySelector(".studio-search")?.getAttribute("title")).toBe("Ctrl K");
 });

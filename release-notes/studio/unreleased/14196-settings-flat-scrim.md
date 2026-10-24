@@ -1,2 +1,0 @@
-- 优化：设置打开时，背后的内容被更深的平面遮罩压下去，设置面板更突出；没有使用实时模糊。关联 #14196。
-- Changed: while Settings is open, the content behind it is pushed back by a stronger flat scrim, so Settings stands out; no live blur is used. Refs #14196.

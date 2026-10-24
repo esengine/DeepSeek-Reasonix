@@ -157,7 +157,7 @@ export class MockBoundary extends MockShell {
     return { ...this.browser };
   }
 
-  private claims: SubagentClaimsSettings = { optimistic: false, path: "/Users/you/.reasonix/config.toml" };
+  private claims: SubagentClaimsSettings = { optimistic: true, path: "/Users/you/.reasonix/config.toml" };
 
   async subagentClaims(): Promise<SubagentClaimsSettings> {
     return { ...this.claims };
@@ -188,6 +188,17 @@ export class MockBoundary extends MockShell {
   async savePlanApproval(auto: boolean): Promise<PlanApprovalSettings> {
     this.plans = { ...this.plans, auto };
     return { ...this.plans };
+  }
+
+  private deliveries = { enabled: false, path: "/Users/you/.reasonix/config.toml" };
+
+  async presentFiles() {
+    return { ...this.deliveries };
+  }
+
+  async savePresentFiles(enabled: boolean) {
+    this.deliveries = { ...this.deliveries, enabled };
+    return { ...this.deliveries };
   }
 
   private modes: DefaultModeSettings = { plan: false, path: "/Users/you/.reasonix/config.toml" };
@@ -224,7 +235,7 @@ export class MockBoundary extends MockShell {
     return structuredClone(this.toolList);
   }
 
-  private lease: WriteLeaseSettings = { optimistic: false, maxWaitMinutes: 0, path: "/Users/you/.reasonix/config.toml" };
+  private lease: WriteLeaseSettings = { optimistic: true, maxWaitMinutes: 0, path: "/Users/you/.reasonix/config.toml" };
 
   async writeLease(): Promise<WriteLeaseSettings> {
     return { ...this.lease };

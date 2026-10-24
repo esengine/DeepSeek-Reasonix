@@ -420,6 +420,7 @@ func (c *Controller) setSessionPath(p string, fresh bool) {
 		c.rotateSessionTemp()
 	} else {
 		c.loadRecoveryState(p)
+		c.restoreSessionGrants(p)
 	}
 	c.snapshotMu.Unlock()
 	// After the unlock: taking the lease touches the filesystem, and doing that

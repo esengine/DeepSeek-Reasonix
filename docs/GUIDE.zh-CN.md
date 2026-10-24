@@ -86,11 +86,11 @@ reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # max_queued_inputs = 0              # 会话队列里等待发送的消息条数；0 = 不限制，队列的字节上限仍然生效（只认用户级配置）
 # max_subagent_steer_bytes = 16384    # 发给运行中子代理的单条指示的字节数，防止一条消息占满它的上下文；0 = 不限制（只认用户级配置）
 # max_subagent_steers_per_minute = 30  # 每分钟发给同一个运行中子代理的指示条数，用来刹住循环；0 = 不限制（只认用户级配置）
-# write_lease = "optimistic"          # 仅用户配置文件；没有声明路径的写入（bash、MCP）不再占住整个工作区，默认 strict
+# write_lease = "strict"              # 仅用户配置文件；默认 optimistic：没有声明路径的写入（bash、MCP）不占住整个工作区；strict 则让它占住整个工作区
 # write_lease_max_wait_minutes = 0    # 写入在另一个会话占着路径时最多等多少分钟，超时以 workspace.claim_timeout 失败；0（默认）= 一直等到本轮结束，建议值 120（只认用户级配置）
 # plan_approval = "auto"             # 仅用户配置文件；提交的计划不再等待批准点击，直接开始执行，对话里会留下说明，默认 ask
 # default_mode = "plan"              # 仅用户配置文件；新对话从计划模式开始（恢复的对话保持自己的模式；设置里有对应开关），默认 normal
-# subagent_claims = "optimistic"      # 仅用户配置文件；没有声明 write_paths 的子代理只占用正在写的路径，不占整个工作区，默认 strict
+# subagent_claims = "strict"          # 仅用户配置文件；默认 optimistic：没有声明 write_paths 的子代理只占用正在写的路径；strict 则让它占整个工作区
 # host_verification = "on"           # 仅用户配置文件；设为 on 时，改过文件的回合要先有检查、复核和签收才能结束；不设或设为 off 则不要求（不设时交付预设仍会要求）；交付回执始终如实写明检查了什么
 # compact_ratio 是唯一自动维护阈值（默认 0.85；预设 0.70/0.80/0.85）
 # max_output_tokens = 0            # 推荐：自动（DeepSeek 默认 high → 约 64K；不是无限）
@@ -1167,8 +1167,9 @@ OAuth client 与 token 状态保存在工作区之外、该 server 私有的 Rea
 只在用户显式浏览或安装时联网，不进入启动路径。需要 secret 或必填参数的条目只显示为手动配置，
 不会写入不完整配置；Registry 故障时可回退到同一查询的缓存结果。
 
-普通配置流程现在只有一步：使用桌面端的“添加并连接”、`/mcp add`，或直接让 Reasonix
-安装一个 package 或 URL。此类主动安装统一写入用户全局 `config.toml`，安装本身就是授权：
+普通配置流程现在只有一步：使用桌面端的“添加并连接”、终端 `/mcp` 面板的 `n`，或直接让
+Reasonix 安装一个 package 或 URL。此类主动安装写入用户全局 `config.toml`（按 `p` 写入
+`reasonix.toml`），安装本身就是授权：
 server 会在当前会话连接，现在和下次启动都不会再弹出第二套信任步骤。当前项目
 `reasonix.toml` 或 `.mcp.json` 中声明的 server 保留在项目配置中，同样默认可信，不需要额外
 启动确认。显式 deny 仍然优先；包括声明

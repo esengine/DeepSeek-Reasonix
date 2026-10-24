@@ -1072,12 +1072,20 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 	if hit == 0 {
 		hit = u.CacheReadInputTokens
 	}
+	if prompt > 0 && hit > prompt {
+		// prompt_tokens includes cached tokens, so a bigger hit is a broken report, not a perfect cache.
+		hit = prompt
+	}
 	if miss == 0 {
 		switch {
 		case anthropicPrompt:
 			// Cache writes are still uncached input for Reasonix pricing and
 			// cache-ratio accounting.
 			miss = u.InputTokens + u.CacheCreationInputTokens
+		case u.PromptTokensDetails != nil:
+			// A details object is the endpoint reporting the split: cached=0
+			// is an explicit full miss, not missing cache accounting.
+			miss = max(prompt-hit, 0)
 		case hit > 0 && prompt > hit:
 			miss = prompt - hit
 		}

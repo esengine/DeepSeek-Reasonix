@@ -182,7 +182,10 @@ func TestLoadMemoryNoFrontmatter(t *testing.T) {
 	dir := testenv.TempDir(t)
 	f := filepath.Join(dir, "no-fm.md")
 	os.WriteFile(f, []byte("just a body\nno frontmatter"), 0o644)
-	m, ok := loadMemory(f)
+	m, ok, err := loadMemory(f)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("loadMemory should succeed for files without frontmatter")
 	}
@@ -196,9 +199,9 @@ func TestLoadMemoryNoFrontmatter(t *testing.T) {
 }
 
 func TestLoadMemoryMissingFile(t *testing.T) {
-	_, ok := loadMemory("/nonexistent/path.md")
-	if ok {
-		t.Error("loadMemory should return false for missing file")
+	_, ok, err := loadMemory("/nonexistent/path.md")
+	if ok || err != nil {
+		t.Errorf("loadMemory = ok %v, error %v; want absent, not unreadable", ok, err)
 	}
 }
 
@@ -206,7 +209,10 @@ func TestLoadMemoryEmptyFile(t *testing.T) {
 	dir := testenv.TempDir(t)
 	f := filepath.Join(dir, "empty.md")
 	os.WriteFile(f, nil, 0o644)
-	m, ok := loadMemory(f)
+	m, ok, err := loadMemory(f)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("loadMemory should succeed for empty files")
 	}

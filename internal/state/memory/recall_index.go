@@ -14,20 +14,26 @@ import (
 type RecallIndex struct {
 	docs    []autoRecallDoc
 	fielded []retrieval.FieldedDoc // V2 shadow pool, prebuilt field split
+	// unreadable names the fact files that exist but could not be read while
+	// this index was built. They are carried, not treated as absent: a turn
+	// still recalls from the facts that did load and the audit names the rest.
+	unreadable []*FactReadError
 }
 
 // BuildRecallIndex reads and tokenizes the recall pool once. A zero store
-// yields nil, which recall reports as an empty memory store.
+// yields nil, which recall reports as an empty memory store. A store whose only
+// present facts are unreadable yields a non-nil index with no documents, so
+// recall reports the read failure instead of claiming the store is empty.
 func BuildRecallIndex(store Store) (*RecallIndex, error) {
-	all, err := store.ListAll()
+	report, err := store.ListActive()
 	if err != nil {
 		return nil, err
 	}
-	memories := recallMemories(all)
-	if len(memories) == 0 {
+	memories := recallMemories(report.Facts)
+	if len(memories) == 0 && len(report.Unreadable) == 0 {
 		return nil, nil
 	}
-	index := &RecallIndex{}
+	index := &RecallIndex{unreadable: report.Unreadable}
 	for _, memory := range memories {
 		index.fielded = append(index.fielded, retrieval.FieldedDoc{ID: memory.ID, Fields: map[string]string{
 			"name": memory.Name, "title": memory.Title, "keywords": memory.Keywords,

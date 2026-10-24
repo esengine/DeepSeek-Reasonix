@@ -6,6 +6,9 @@ type QueueMessages struct {
 	TUIQueueUnrecovered  string // the /queue line for an inbox whose contents could not be read
 	QueueRowsMoreFmt     string // rows below the queue list when more items wait than are drawn
 	QueueRowsPaused      string // the queue is paused
+	QueueRowsReadonly    string // the queue is read-only: a newer schema owns it
+	QueueReadonlyNote    string // a queue key refused because a newer schema is read-only
+	QueueHostTag         string // the marker on a runtime-authored line that needs a decision
 	QueueTagFmt          string // appended to the working line while messages are queued
 	QueueDeleteAgainFmt  string // first d on a selected queued message
 	QueueDeletedFmt      string // a queued message was deleted

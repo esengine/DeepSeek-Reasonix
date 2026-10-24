@@ -133,7 +133,7 @@ func sideReason(err error) (int, Reason) {
 	case errors.Is(err, control.ErrSideEmpty):
 		return http.StatusBadRequest, Reason{Code: codeSideEmpty, Message: "a side question needs some words"}
 	}
-	if reason, ok := memoryDirectoryReason(err); ok {
+	if reason, ok := memoryReadReason(err); ok {
 		return http.StatusInternalServerError, reason
 	}
 	if reason, ok := unparsedConfigReason(err); ok {

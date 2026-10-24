@@ -95,6 +95,38 @@ describe("my feedback", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("shows the list it already has at once when the page is opened again, and refreshes behind it", async () => {
+    const first = { items: [item({})], offline: false, unread: 0, hasNew: false } as Mine;
+    const port = portWith(first);
+    const view = render(<FeedbackMine port={port} onFile={() => {}} />);
+    await screen.findByText("FB-AAAA-0001");
+    view.unmount();
+
+    let answer: (m: Mine) => void = () => {};
+    port.myFeedback = vi.fn(() => new Promise<Mine>((resolve) => { answer = resolve; }));
+    render(<FeedbackMine port={port} onFile={() => {}} />);
+    expect(screen.getByText("FB-AAAA-0001")).toBeTruthy();
+    expect(screen.queryByText("正在读取你的反馈…")).toBeNull();
+    answer({ ...first, items: [item({}), item({ receipt: "FB-AAAA-0002" })] });
+    expect(await screen.findByText("FB-AAAA-0002")).toBeTruthy();
+  });
+
+  it("keeps the level, account and board behind one collapsed row and asks for them only when it is opened", async () => {
+    const port = portWith({ items: [item({})], offline: false, unread: 0, hasNew: false });
+    port.account = vi.fn(async () => ({ signedIn: false, expired: false }) as never);
+    port.feedbackBoard = vi.fn(async () => ({ entries: [] }) as never);
+    port.feedbackLinks = vi.fn(async () => []);
+    render(<FeedbackMine port={port} onFile={() => {}} />);
+    await screen.findByText("FB-AAAA-0001");
+    const section = screen.getByRole("button", { name: /等级、账号与贡献榜/ });
+    expect(section.getAttribute("aria-expanded")).toBe("false");
+    expect(port.account).not.toHaveBeenCalled();
+    expect(port.feedbackBoard).not.toHaveBeenCalled();
+    await userEvent.click(section);
+    await waitFor(() => expect(port.account).toHaveBeenCalled());
+    expect(port.feedbackBoard).toHaveBeenCalled();
+  });
+
   it("keeps the remembered list under a gentle banner when the service is offline", async () => {
     render(<FeedbackMine port={portWith({ items: [item({})], offline: true, unread: 0, hasNew: false })} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");

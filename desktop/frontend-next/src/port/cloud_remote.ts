@@ -10,6 +10,23 @@ export const accountOrigin = ACCOUNT;
 // The computer this page is controlling; null on the desktop's own window.
 export const remoteDeviceId = () => new URLSearchParams(location.search).get("device")?.trim() || null;
 const RELAY = (import.meta.env.VITE_REMOTE_GATEWAY || "wss://remote.reasonix.io").replace(/\/$/, "");
+
+/** The relay a grant names. The account service sends the origin of the gateway
+ *  the device is bound to (`null` for the hosted one); it is only ever an https
+ *  origin, which is spoken to as wss. Anything else is refused: a ticket for a
+ *  self-hosted gateway must not be offered to another relay. */
+export function relayFor(named: unknown, hosted: string = RELAY): string | null {
+  if (named === null || named === undefined) return hosted;
+  if (typeof named !== "string") return null;
+  let url: URL;
+  try {
+    url = new URL(named);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) return null;
+  return `wss://${url.host}`;
+}
 const REMOTE_HOME = import.meta.env.VITE_REMOTE_HOME || "https://reasonix.io/remote/";
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 
@@ -274,12 +291,14 @@ async function connect(deviceId: string, nativeFetch: typeof fetch, useBootstrap
     throw new RemoteLinkError("transient", failureView(detail).body, detail);
   }
   if (!issued.ok) throw await grantFailure(issued);
-  const { grant, device: target } = await issued.json() as { grant: { ticket: string }; device?: RemoteDevice };
+  const { grant, device: target, relay: named } = await issued.json() as { grant: { ticket: string }; device?: RemoteDevice; relay?: unknown };
+  const relay = relayFor(named);
+  if (!relay) throw new RemoteLinkError("ended", t("这台电脑使用的中继地址无法识别，请更新 Web Studio 后再试。"));
   if (!target || target.id !== deviceId || target.revokedAt || !target.capabilities.includes("desktop")) {
     throw new RemoteLinkError("ended", t("请先更新这台电脑上的 Studio，再连接。"));
   }
   performance.mark("reasonix:remote:authorized");
-  const socket = new WebSocket(`${RELAY}/v1/sessions/connect`, ["reasonix.remote.v1", `reasonix.auth.${grant.ticket}`]);
+  const socket = new WebSocket(`${relay}/v1/sessions/connect`, ["reasonix.remote.v1", `reasonix.auth.${grant.ticket}`]);
   try {
     await waitForSocketOpen(socket);
     const readyWire = nextMessage(socket);
@@ -307,7 +326,7 @@ async function connect(deviceId: string, nativeFetch: typeof fetch, useBootstrap
     if (error instanceof RemoteLinkError) throw error;
     if (error instanceof SocketRefused) {
       const detail = await classifyHandshakeFailure({
-        relay: RELAY, online: () => navigator.onLine !== false, fetch: nativeFetch,
+        relay, online: () => navigator.onLine !== false, fetch: nativeFetch,
       }).catch(() => ({ code: "unknown" as const }));
       throw new RemoteLinkError("transient", failureView(detail).body, detail);
     }

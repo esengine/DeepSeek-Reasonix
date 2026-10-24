@@ -18,11 +18,14 @@ import { OpenSessionLimitSection } from "./OpenSessionLimitSection";
 import { LiveStreamBudgetSection } from "./LiveStreamBudgetSection";
 import { NewAnswerSection } from "./NewAnswerSection";
 import { SessionQuickSection } from "./SessionQuickSection";
+import { NavEntriesSection } from "./NavEntriesSection";
 import { NavRailSection } from "./NavRailSection";
 import { GraphicsSection } from "./GraphicsSection";
 import { SendShortcut } from "./SendShortcut";
+import { KeysSheet } from "./KeysSheet";
 import { SessionTabsSetting } from "./SessionTabsSetting";
 import { EscStopSetting } from "./EscStopSetting";
+import { PageSleepSetting } from "./PageSleepSetting";
 import { ThemeImport } from "./ThemeImport";
 import { ThemeRemove } from "./ThemeRemove";
 import { useThemeInventory } from "./useThemeInventory";
@@ -563,6 +566,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
       <WindowSection port={port} />
       <NavRailSection />
+      <NavEntriesSection />
       <LiveGraceSection />
       <LegacySessionsSection />
       <OpenSessionLimitSection />
@@ -571,7 +575,9 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
       <NewAnswerSection />
       <GraphicsSection />
       <SendShortcut />
+      <KeysSheet />
       <EscStopSetting />
+      <PageSleepSetting />
       <SessionTabsSetting />
       <Folding />
       <Notifications port={port} />

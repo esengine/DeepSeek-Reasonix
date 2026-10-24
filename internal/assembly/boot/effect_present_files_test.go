@@ -23,7 +23,7 @@ func TestEffectPresentFilesSurvivesTheRealToolPipeline(t *testing.T) {
 		if proxy {
 			name = "capability"
 		}
-		for _, mode := range []string{"off", "on", "forbidden", "disabled", "excluded"} {
+		for _, mode := range []string{"default", "off", "on", "forbidden", "disabled", "excluded"} {
 			t.Run(name+"/"+mode, func(t *testing.T) { presentFilesEffect(t, proxy, mode) })
 		}
 	}
@@ -35,8 +35,10 @@ func presentFilesEffect(t *testing.T, proxy bool, mode string) {
 	t.Setenv("REASONIX_HOME", home)
 	settings := "[tools]\npresent_files = true\n"
 	switch mode {
-	case "off":
+	case "default":
 		settings = ""
+	case "off":
+		settings = "[tools]\npresent_files = false\n"
 	case "forbidden":
 		settings += "[sandbox]\nforbid_read = [\"report.md\"]\n"
 	case "disabled":
@@ -45,7 +47,8 @@ func presentFilesEffect(t *testing.T, proxy bool, mode string) {
 		settings += "enabled = [\"read_file\"]\n"
 	}
 	writeFile(t, home, "config.toml", settings)
-	enabled := mode == "on" || mode == "forbidden"
+	delivers := mode == "on" || mode == "default"
+	enabled := delivers || mode == "forbidden"
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	registerBootTokenProfileTestProvider()
@@ -95,7 +98,7 @@ func presentFilesEffect(t *testing.T, proxy bool, mode string) {
 			if wire.Tool == nil {
 				t.Fatal("tool result missing wire payload")
 			}
-			if mode != "on" {
+			if !delivers {
 				if e.Tool.Err == "" || len(wire.Tool.Deliveries) != 0 {
 					t.Fatalf("unavailable/forbidden call produced delivery: %+v", e.Tool)
 				}
@@ -116,7 +119,7 @@ func presentFilesEffect(t *testing.T, proxy bool, mode string) {
 			}
 		}
 	}
-	if mode == "on" && !found {
+	if delivers && !found {
 		t.Fatal("host-confirmed identity was not persisted")
 	}
 	requests := prov.Requests()

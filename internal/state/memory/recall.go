@@ -72,14 +72,16 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	limit := clampRecallLimit(in.Limit)
 	switch strings.TrimSpace(in.Operation) {
 	case "search":
-		hits, omitted, err := searchMemories(ctx, t.store, in.Query, memType, memScope, limit)
+		hits, omitted, unreadable, err := searchMemories(ctx, t.store, in.Query, memType, memScope, limit)
 		if err != nil {
 			return "", err
 		}
-		return formatMemoryHits(in.Query, hits, omitted), nil
+		return withUnreadable(formatMemoryHits(in.Query, hits, omitted), unreadable), nil
 	case "read":
 		m, ok, err := readMemoryByName(t.store, in.Name)
 		if err != nil {
+			// A named file that is present but unreadable reaches the caller as
+			// its store error; "not found" is reserved for a genuinely absent one.
 			return "", err
 		}
 		if !ok {
@@ -87,16 +89,39 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		}
 		return formatMemory(t.store, m), nil
 	case "list":
-		memories, err := t.store.ListAll()
+		report, err := t.store.ListActive()
 		if err != nil {
 			return "", err
 		}
-		return formatMemoryList(t.store, filterMemories(memories, memType, memScope), limit), nil
+		return withUnreadable(formatMemoryList(t.store, filterMemories(report.Facts, memType, memScope), limit), report.Unreadable), nil
 	case "":
 		return "", fmt.Errorf("operation is required")
 	default:
 		return "", fmt.Errorf("unknown operation %q", in.Operation)
 	}
+}
+
+// withUnreadable appends what the pool could not read to an otherwise complete
+// answer, so no tool result implies that an unreadable fact does not exist.
+func withUnreadable(text string, unreadable []*FactReadError) string {
+	if note := unreadableNote(unreadable); note != "" {
+		return text + "\n\n" + note
+	}
+	return text
+}
+
+// unreadableNote is the one spelling of "these files are present but could not
+// be read", shared by the list and search answers.
+func unreadableNote(unreadable []*FactReadError) string {
+	if len(unreadable) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Unreadable saved memories (%d present on disk, contents unknown):", len(unreadable))
+	for _, e := range unreadable {
+		fmt.Fprintf(&b, "\n- %s", e.Error())
+	}
+	return b.String()
 }
 
 func (recallTool) ReadOnly() bool { return true }
@@ -114,24 +139,24 @@ type memoryDoc struct {
 	length int
 }
 
-func searchMemories(ctx context.Context, store Store, query string, typ Type, scope FactScope, limit int) ([]memoryHit, int, error) {
+func searchMemories(ctx context.Context, store Store, query string, typ Type, scope FactScope, limit int) ([]memoryHit, int, []*FactReadError, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, 0, fmt.Errorf("query is required")
+		return nil, 0, nil, fmt.Errorf("query is required")
 	}
 	queryTerms, err := retrieval.QueryTerms(query)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	all, err := store.ListAll()
+	report, err := store.ListActive()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	memories := filterMemories(all, typ, scope)
+	memories := filterMemories(report.Facts, typ, scope)
 	docs := make([]memoryDoc, 0, len(memories))
 	for _, m := range memories {
 		if err := ctx.Err(); err != nil {
-			return nil, 0, err
+			return nil, 0, nil, err
 		}
 		text := memorySearchText(m)
 		terms := retrieval.Tokens(text)
@@ -146,7 +171,7 @@ func searchMemories(ctx context.Context, store Store, query string, typ Type, sc
 		})
 	}
 	if len(docs) == 0 {
-		return nil, 0, nil
+		return nil, 0, report.Unreadable, nil
 	}
 	counts := make([]map[string]int, 0, len(docs))
 	totalLen := 0
@@ -183,7 +208,7 @@ func searchMemories(ctx context.Context, store Store, query string, typ Type, sc
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
-	return hits, omitted, nil
+	return hits, omitted, report.Unreadable, nil
 }
 
 func recallTypeFilter(s string) (Type, error) {

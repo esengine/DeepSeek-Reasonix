@@ -24,6 +24,7 @@ func stableBootToolNames() []string {
 		"compress",
 		"context_budget",
 		"edit_file",
+		"present_files",
 		"read_file",
 		"recall",
 		"setting",

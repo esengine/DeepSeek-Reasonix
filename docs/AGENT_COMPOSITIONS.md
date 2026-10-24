@@ -74,10 +74,10 @@ editable rows. Usage, details and copy do not change the new-task default.
 | Mode | Behavior |
 | --- | --- |
 | Everyday partner (`builtin:general`) | Inherit current configuration for everyday code, file and research work. The stable ID preserves existing defaults. |
-| Lightweight partner (`builtin:minimal`) | A concise system persona, terminal (`bash`) and image reading (`view_image`), with native context compaction. Requires a vision-capable model. |
+| Lightweight partner (`builtin:minimal`) | A concise system persona and terminal (`bash`), with native context compaction. Adds image reading (`view_image`) when the selected model reads images and the tool is enabled. |
 
-These display names replace Standard and Minimal; their IDs and capabilities
-stay unchanged. Retained conversations keep their saved names and revisions.
+The stable IDs preserve existing defaults. Retained conversations keep their
+saved names, revisions and module requirements.
 
 The persona reference is DeepSeek Harness commit
 `687f282e8625c6b8d11ff58211a90524be2e4317`:
@@ -99,8 +99,9 @@ It retains the host controls needed to answer and ask questions. Its terminal
 can still modify files and access the network under existing permissions and
 sandbox rules; Lightweight partner is not a read-only mode.
 
-Missing image capability or
-disabled tools produce an explicit dependency error rather than another tool set.
+Missing required tools produce an explicit dependency error. Lightweight partner
+requires `bash`; its `view_image` member is optional, so a text-only model or a
+configuration that disables image reading can still use the terminal.
 
 Code review and Research are no longer built-in catalog entries. Their existing
 conversations retain the original binding. An old default pointing to a retired
@@ -109,6 +110,13 @@ entry reports a diagnostic until an available default is explicitly chosen.
 Copy a built-in to customize it. Each module group either follows current authorized
 configuration, including resources enabled later, or uses only the selected IDs. An empty explicit
 selection disables the group.
+
+A selected tool member may declare `"optional": true`, for example
+`{"id":"view_image","optional":true}`. It is admitted only if already available;
+the declaration does not enable a disabled tool or grant image capability.
+
+Omitting `optional` keeps the member required. Other module groups do not accept
+optional members.
 
 The editor lists locally available modules;
 imports preview missing dependencies without installing or launching them.

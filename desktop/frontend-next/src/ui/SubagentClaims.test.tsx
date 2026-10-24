@@ -12,17 +12,17 @@ afterEach(cleanup);
 const toggle = () => screen.findByRole("switch", { name: "乐观模式（效率优先）" });
 
 describe("the sub-agent claims switch", () => {
-  it("starts off, says what turning it on costs, and saves the opposite of what it shows", async () => {
+  it("starts on, says what the optimistic mode costs, and saves the opposite of what it shows", async () => {
     const p = new MockPort() as unknown as AgentPort;
     const save = vi.spyOn(p, "saveSubagentClaims");
     const changed = vi.fn();
     render(<SubagentClaims port={p} onChanged={changed} />);
     const sw = await toggle();
-    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText(/不受路径围栏约束，只在事后观察/)).toBeTruthy();
     await userEvent.click(sw);
-    expect(save).toHaveBeenCalledWith(true);
-    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("true"));
+    expect(save).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("false"));
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
@@ -36,7 +36,7 @@ describe("the sub-agent claims switch", () => {
     const sw = await toggle();
     await userEvent.click(sw);
     await screen.findByText(/disk full/);
-    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
     expect(changed).not.toHaveBeenCalled();
   });
 

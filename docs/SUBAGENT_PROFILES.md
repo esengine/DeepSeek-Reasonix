@@ -72,10 +72,10 @@ fleet(tasks=[
   concise default is stacked on top.
 - `write_paths` declares non-overlapping write targets so parallel writers can
   share one workspace.
-- A writer that omits `write_paths` claims the whole workspace, serializing
-  against every other writer claim. With `[agent] write_lease = optimistic` in
-  the user config it reserves nothing up front and holds only the path it is
-  writing.
+- A writer that omits `write_paths` reserves nothing up front and holds only
+  the path it is writing (the default, `optimistic`). With `[agent] write_lease =
+  "strict"` in the user config it claims the whole workspace instead,
+  serializing against every other writer claim.
 - In `fleet`, multiple whole-workspace claims or any path overlap fail
   preflight and start nothing.
 - Session defaults: `agent.max_subagent_concurrency = 6`,

@@ -43,6 +43,7 @@ function portWith(answer: () => Mine | Error) {
 async function shown(p: FeedbackProfile | null, over: Partial<Mine> = {}) {
   render(<FeedbackMine port={portWith(() => mine(p, over))} onFile={() => {}} />);
   await screen.findByText("FB-AAAA-0001");
+  await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜|Level, account and leaderboard/ }));
 }
 
 const level = () => document.querySelector(".fbk-level");
@@ -171,6 +172,7 @@ describe("when the standing cannot be confirmed", () => {
     const port = portWith(() => (fail ? new HttpError(502, "x", { code: FEEDBACK_CODE.unavailable, error: "x" }) : mine(MID)));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
+    await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜/ }));
     fail = true;
     await userEvent.click(screen.getByRole("button", { name: "刷新列表" }));
     await screen.findByRole("alert");
@@ -185,6 +187,7 @@ describe("the row beside the rest of the panel", () => {
     port.replyFeedback = vi.fn(async () => ({ replyId: 6, createdAt: "2026-10-07T08:00:00Z" }));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
+    await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜/ }));
     expect(text(".fbk-level-name")).toBe("L2 · 幼苗");
 
     now = profile({ level: 3, adoptedCount: 6, currentThreshold: 6, nextLevel: 4, nextThreshold: 12, remaining: 6 });
@@ -211,6 +214,7 @@ describe("the row beside the rest of the panel", () => {
     const port = new MockPort() as unknown as AgentPort;
     render(<Feedback port={port} tab="mine" onClose={() => {}} onError={() => {}} />);
     await screen.findByText("FB-7K3M-9QX2");
+    await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜/ }));
     expect(document.querySelectorAll(".fbk-level")).toHaveLength(1);
     cleanup();
     render(<Feedback port={port} tab="send" onClose={() => {}} onError={() => {}} />);

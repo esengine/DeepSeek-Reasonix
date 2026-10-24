@@ -13,7 +13,7 @@ import (
 
 func init() { tool.RegisterConditional(presentFiles{}) }
 
-// PresentFiles binds the opt-in declaration tool to the same file policy as reads.
+// PresentFiles binds the declaration tool to the same file policy as reads.
 func (w Workspace) PresentFiles() tool.Tool {
 	readRoots := realRoots(w.ReadRoots)
 	if len(w.ReadRoots) > 0 && len(readRoots) == 0 {

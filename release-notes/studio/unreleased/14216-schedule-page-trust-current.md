@@ -1,2 +1,0 @@
-- 修复：定时运行页现在可以直接信任当前项目，不再要求先去别处点信任；之前点过“暂不信任”或手动选过批准模式、从未看到信任提示的项目也能处理。关联 #14216。
-- Fixed: the scheduled runs page can trust the open project itself, so a project that never showed the trust prompt, or was declined earlier, no longer leaves you stuck. Refs #14216.

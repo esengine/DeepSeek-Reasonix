@@ -384,8 +384,8 @@ newest first, and the oldest fold into the digest past it. A kept turn rides
 into every later fold, so an unbounded mark would grow what each fold carries
 until its candidate could not land under the trigger.
 
-That drop is never silent: compaction telemetry carries `user_kept` and
-`user_dropped` counts, and a committed checkpoint that had to fold one of your
+That drop is never silent: the finished-fold notice (`compaction_telemetry`, typed
+payload) carries `user_turns_kept` and `user_turns_dropped` counts, and a committed checkpoint that had to fold one of your
 turns, marked or not, emits a warning. The projection reads as complete either
 way, so the count is the only thing that distinguishes them.
 

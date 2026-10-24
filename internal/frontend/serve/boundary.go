@@ -24,6 +24,8 @@ func (s *Server) registerBoundaryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sandbox", s.saveSandboxSettings)
 	mux.HandleFunc("GET /browser-tools", s.browserToolsSettings)
 	mux.HandleFunc("POST /browser-tools", s.saveBrowserToolsSettings)
+	mux.HandleFunc("GET /present-files", s.presentFilesSettings)
+	mux.HandleFunc("POST /present-files", s.savePresentFilesSettings)
 	mux.HandleFunc("GET /subagent-claims", s.subagentClaimsSettings)
 	mux.HandleFunc("POST /subagent-claims", s.saveSubagentClaimsSettings)
 	mux.HandleFunc("GET /subagent-steer-limits", s.subagentSteerSettings)

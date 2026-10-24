@@ -48,6 +48,10 @@ type StepState = "done" | "current" | "todo";
 
 const STEP_STATE: Record<StepState, string> = { done: "已完成：", current: "当前：", todo: "尚未开始：" };
 
+// What this window last read, per port, so opening the page again draws the list
+// it already has and refreshes behind it instead of showing one waiting line.
+const remembered = new WeakMap<object, Mine>();
+
 const SNIPPET_CUT = 80;
 
 function snippet(text: string): string {
@@ -118,7 +122,8 @@ interface Props {
 
 // A reply is read only in an expanded thread; its "new" mark stays for this visit.
 export function FeedbackMine({ port, onFile, onUnread }: Props) {
-  const [mine, setMine] = useState<Mine | null>(null);
+  const [mine, setMine] = useState<Mine | null>(() => remembered.get(port) ?? null);
+  const [account, setAccount] = useState(false);
   const [boardTick, setBoardTick] = useState(0);
   const [failure, setFailure] = useState<FeedbackFailure | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,6 +160,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
     port
       .myFeedback()
       .then(async (m) => {
+        remembered.set(port, m);
         setMine(m);
         setFailure(null);
         setFresh((prev) => {
@@ -218,14 +224,24 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
 
       {mine && mine.items.length > 1 && <FeedbackFilter items={mine.items} fresh={fresh} group={group} onPick={pick} />}
 
-      {mine?.profile ? (
-        <FeedbackLevel profile={mine.profile} offline={mine.offline} />
-      ) : (
-        mine !== null && mine.items.length > 0 && <p className="fbk-hint fbk-level-gone">{t("等级暂时无法显示。")}</p>
+      {mine && (
+        <section className="fbk-account">
+          <button type="button" className="btn sm" data-action="feedback.account-section" aria-expanded={account} onClick={() => setAccount((open) => !open)}>
+            {t("等级、账号与贡献榜")}
+          </button>
+          {account && (
+            <>
+              {mine.profile ? (
+                <FeedbackLevel profile={mine.profile} offline={mine.offline} />
+              ) : (
+                mine.items.length > 0 && <p className="fbk-hint fbk-level-gone">{t("等级暂时无法显示。")}</p>
+              )}
+              <FeedbackLink port={port} hasReport={mine.items.length > 0} onBoardChanged={() => setBoardTick((n) => n + 1)} />
+              <FeedbackBoard port={port} reload={boardTick} />
+            </>
+          )}
+        </section>
       )}
-
-      {mine && <FeedbackLink port={port} hasReport={mine.items.length > 0} onBoardChanged={() => setBoardTick((n) => n + 1)} />}
-      {mine && <FeedbackBoard port={port} reload={boardTick} />}
 
       {mine?.offline && (
         <div className="fbk-note" role="status" data-tone="info">

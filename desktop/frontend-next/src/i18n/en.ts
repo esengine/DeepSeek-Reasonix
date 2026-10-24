@@ -17,6 +17,7 @@ import { EN_SETTINGS } from "./en_settings";
 import { EN_TOOL_BLURBS } from "./en_tool_blurbs";
 import { EN_PERSONA } from "./en_persona";
 import { EN_METRICS } from "./en_metrics";
+import { EN_FIND } from "./en_find";
 import { EN_STORAGE } from "./en_storage";
 import { EN_USAGE } from "./en_usage";
 import { EN_COMPOSER } from "./en_composer";
@@ -57,6 +58,7 @@ export const EN: Record<string, string> = {
   ...EN_COMMUNITY,
   ...EN_SPONSOR,
   ...EN_METRICS,
+  ...EN_FIND,
   ...EN_STORAGE,
   ...EN_USAGE,
   ...EN_COMPOSER,
@@ -71,6 +73,10 @@ export const EN: Record<string, string> = {
   "选择本地文件夹": "Choose local folder",
   "选择模型": "Choose model",
   "定位到你说的：{text}": "Jump to what you said: {text}",
+  "定位到第 {a} 至 {b} 条": "Jump to questions {a} to {b}",
+  "第 {a} 至 {b} 条": "Questions {a} to {b}",
+  "右键给这处加星标": "Right-click to star this question",
+  "右键取消这处星标": "Right-click to remove the star",
   "你的第 {n} 条消息": "Your message {n}",
   // ── 转录：卡片与流 ───────────────────────────────────────────────
   "本次会话另外允许了 {n} 项": "{n} more allowed for this session",
@@ -892,6 +898,7 @@ export const EN: Record<string, string> = {
   "有改动；没有主机能读作证据的检查": "changed; no check the host could read as proof",
   "改动后未再检查": "changed, never looked at again",
   "有 Claude Code mod 在运行；它写了什么不在主机观测范围内": "a Claude Code mod was active; what it wrote is outside what the host observes",
+  "写在了主机观测范围之外；这里没有任何证据能说明它留下了什么": "written outside the folder this host watches; nothing here can say what it left",
   "你在等待期间，另一个会话改动了本会话占用的路径；之前读到的内容可能已过时": "another session wrote under this session's paths while it waited on you; earlier reads there may be stale",
   "自己申报未验证": "declared unverified by the turn itself",
   "同一账号的两种接入方式。当前这一种不支持联网搜索；这是协议差异，不是可配置项。": "Two ways in to the same account. This one has no web search — that is a difference between the protocols, not a setting.",
@@ -934,7 +941,21 @@ export const EN: Record<string, string> = {
   "所有项目均可使用": "Available in every project",
   "写入仓库，clone 仓库的人也会获得": "Written into the repository, so whoever clones it gets it too",
   "返回": "Back",
+  "返回正文": "Back to the conversation",
   "完成": "Done",
+  "快捷键": "Keyboard shortcuts",
+  "下列按键在窗口中生效；标着 ⌘ 的地方，Windows 与 Linux 上是 Ctrl。": "These work anywhere in the window. Where a chord shows ⌘, Windows and Linux use Ctrl.",
+  "在对话里查找": "Find in the conversation",
+  "搜索会话": "Search conversations",
+  "在提问之间移动": "Move between your questions",
+  "工作台全屏": "Workbench full screen",
+  "工作台加宽": "Widen the workbench",
+  "缩小 / 放大 / 复原界面": "Make the interface smaller / larger / its default size",
+  "发送（发送键设为修饰键 + Enter 时）": "Send when the send key is set to the modifier plus Enter",
+  "发送，或用 Shift 换行": "Send, or a new line with Shift",
+  "关闭当前弹层": "Close the open panel",
+  "聚焦分隔条后调宽或用 Home 复位": "Widen a divider once focused, or reset it with Home",
+  "窗口高亮时逐条跳到你问过的问题": "Step through your own questions while the rail has focus",
   "仓库地址，或将文件夹拖入此处": "A repository address, or drop a folder in",
   "选文件夹": "Choose a folder",
   "将添加": "Will be added",
@@ -1160,6 +1181,7 @@ export const EN: Record<string, string> = {
   "已过期": "Expired",
   "无法读取记忆。": "Could not read the memory.",
   "无法读取记忆": "Memory could not be read",
+  "这些记忆无法读取": "These memories could not be read",
   "如需手动记录，请在输入框中使用 {cmd} 命令。": "To write one yourself, use {cmd} in the composer.",
   "正在读取记忆…": "Loading memory…",
 
@@ -1453,6 +1475,10 @@ export const EN: Record<string, string> = {
   "该供应商的余额接口无响应": "The provider's balance endpoint did not answer",
   "余额地址": "Balance address",
   "余额格式": "Balance format",
+  "计费方式": "Billing",
+  "按量计费（默认）": "Pay as you go (default)",
+  "订阅套餐（按价格折算的估算）": "Subscription plan (estimated at the prices above)",
+  "订阅套餐的用量按上面的价格折算成估算值，单独显示，不会计入实际花费。": "A plan's usage is converted to an estimate at the prices above and shown separately; it is never counted as money spent.",
   "留空则不显示余额。密钥只会发给这个地址，不会跟随跳转。": "Leave empty to show no balance. The key is sent only to this address and never follows a redirect.",
   "供应商自己的域名会按它的格式读取；其他地址（例如中转站）必须选择它返回的格式，否则不读取余额。": "A vendor's own domain is read in that vendor's format; any other address (a relay, for example) must name the format it answers in, or no balance is read.",
   "按地址推断（{format}）": "From the address ({format})",
@@ -1535,6 +1561,7 @@ export const EN: Record<string, string> = {
   "执行任务并使用已启用工具": "Run tasks with enabled tools",
   "先整理步骤，不写入文件": "Plan steps before changing files",
   "直接回答，不调用工具": "Answer directly without tools",
+  "Ask（未实现）": "Ask (Not implemented)",
   "当前 Git 分支": "Current Git branch",
   "后续任务会继续使用这个分支": "Later tasks will continue on this branch",
   "由模型自动选择": "Let the model choose",
@@ -1820,11 +1847,14 @@ export const EN: Record<string, string> = {
   "同一段内容被逐字重复": "The same block is being repeated verbatim",
   "任务已按设置暂停：模型卡在重复输出同一段文字": "Paused by your setting: the model is stuck repeating the same text",
   "等待你的输入": "Waiting for you",
+  "后台任务已开始：{name}": "Background job started: {name}",
   "后台任务已结束：{name}": "Background job finished: {name}",
   "后台任务已终止：{name}": "Background job killed: {name}",
   "后台任务 {name} 失败，需要处理": "Background job {name} failed: needs attention",
-  "后台任务 {name} 已有 {quiet} 没往自己的输出里写任何内容：可能是在写文件，也可能卡住了；可以用 wait 或 bash_output 查看，或用 kill_shell 结束它":
-    "Background job {name} has written nothing to its own output for {quiet}: it may be writing to a file, or stuck; check it with wait or bash_output, or stop it with kill_shell",
+  "后台任务 {name} 已有 {quiet} 没有活动（{work}）：可能在等某个东西，也可能卡住了；可以用 wait 或 bash_output 查看，或用 kill_shell 结束它":
+    "Background job {name} has been inactive for {quiet} ({work}): it may be waiting on something, or stuck; check it with wait or bash_output, or stop it with kill_shell",
+  "{n} 步在静默前完成": "{n} step(s) completed before going quiet",
+  "静默前没有任何进展": "no progress reported",
   "被信号 {signal} 终止": "Ended by signal {signal}",
   "退出码 {code}": "Exit code {code}",
   "已恢复 {n} 条未完成的指令。待发送已暂停，请先在输入框上方的队列里查看，再点“继续派发”": "Recovered {n} unfinished instruction(s). Sending is paused: review them in the queue above the input box, then press Release",

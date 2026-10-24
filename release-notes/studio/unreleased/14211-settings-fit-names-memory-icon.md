@@ -1,2 +1,0 @@
-- 修复：设置窗口加高，菜单在 1080p 屏幕上完整显示、不再出现滚动条；“记忆”图标与文字垂直对齐；空白会话提示和运行分析面板统一称“运行分析”和“运行记录”，不再混称“轨迹”。关联 #14211。
-- Fixed: the settings sheet is taller so its whole menu shows on a 1080p screen, the Memory icon lines up with its label, and the run analysis view keeps one name instead of "trajectory". Refs #14211.

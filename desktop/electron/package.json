@@ -18,6 +18,7 @@
     "browser-resize-live": "electron test/browser_resize_live.js",
     "browser-fit-live": "electron test/browser_fit_live.js",
     "browser-fit-pages": "electron test/browser_fit_pages.js",
+    "sleep-live": "electron test/sleep_live.js",
     "image-live": "electron test/image_live.js",
     "image-pane-live": "electron test/image_pane_live.js",
     "sidepanel-live": "electron test/sidepanel_live.js",

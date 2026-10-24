@@ -270,15 +270,16 @@ func RenderMemorySummary(set *memory.Set, now time.Time) string {
 	if set == nil {
 		return i18n.M.ListMemoryNone
 	}
-	facts, err := set.Store.ListAll()
+	report, err := set.Store.ListActive()
 	if err != nil {
 		return "memory: " + err.Error()
 	}
+	facts, unreadable := report.Facts, report.Unreadable
 	archives, err := set.Store.ListArchived()
 	if err != nil {
 		return "memory: " + err.Error()
 	}
-	if len(set.Docs) == 0 && len(facts) == 0 && len(archives) == 0 {
+	if len(set.Docs) == 0 && len(facts) == 0 && len(archives) == 0 && len(unreadable) == 0 {
 		return i18n.M.ListMemoryNone
 	}
 	if now.IsZero() {
@@ -316,11 +317,17 @@ func RenderMemorySummary(set *memory.Set, now time.Time) string {
 			}
 		}
 	}
+	if len(unreadable) > 0 {
+		b.WriteString("\nunreadable facts (present on disk, contents unknown)\n")
+		for _, unreadable := range unreadable {
+			fmt.Fprintf(&b, "  %s\n", unreadable.Error())
+		}
+	}
 	if len(archives) > 0 {
 		b.WriteByte('\n')
 		b.WriteString(renderMemoryArchives(set) + "\n")
 	}
-	if len(facts) > 0 || len(archives) > 0 {
+	if len(facts) > 0 || len(archives) > 0 || len(unreadable) > 0 {
 		for _, dir := range memoryStoreDirs(set.Store) {
 			fmt.Fprintf(&b, "  stored under %s\n", dir)
 		}
@@ -336,7 +343,7 @@ func RenderMemorySummary(set *memory.Set, now time.Time) string {
 }
 
 func renderMemoryRecall(recall memory.RecallResult) string {
-	if strings.TrimSpace(recall.Query) == "" && len(recall.Hits) == 0 && recall.SuppressionCode == "" {
+	if strings.TrimSpace(recall.Query) == "" && len(recall.Hits) == 0 && recall.SuppressionCode == "" && len(recall.Unreadable) == 0 {
 		return "last memory recall: none"
 	}
 	var b strings.Builder
@@ -348,6 +355,14 @@ func renderMemoryRecall(recall memory.RecallResult) string {
 		fmt.Fprintf(&b, " suppressed=%s", memoryOneLine(recall.Suppressed))
 	}
 	b.WriteByte('\n')
+	if len(recall.Unreadable) > 0 {
+		// An unreadable fact is reported here, never folded into "not found":
+		// this audit is where a reader checks what recall did with the pool.
+		fmt.Fprintf(&b, "  unreadable=%d\n", len(recall.Unreadable))
+		for _, unreadable := range recall.Unreadable {
+			fmt.Fprintf(&b, "    %s\n", unreadable.Error())
+		}
+	}
 	for _, hit := range recall.Hits {
 		fact := hit.Memory
 		fmt.Fprintf(&b, "  id=%s revision=%d scope=%s type=%s freshness=%s score=%.3f\n",

@@ -1,2 +1,0 @@
-- 修复：在反馈窗口里点过空白处之后，Ctrl+V 粘贴截图不再没反应；剪贴板里以条目形式给出的图片也能贴进去。关联 #14210。
-- Fixed: pasting a screenshot into the feedback form no longer does nothing after clicking a blank part of it, and an image the clipboard offers as an item is taken too. Refs #14210.

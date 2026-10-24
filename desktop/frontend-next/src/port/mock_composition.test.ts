@@ -50,3 +50,32 @@ describe("project composition authority", () => {
     await expect(presets.selectAgentComposition("user:gone")).rejects.toMatchObject({reason:{code:"agent_composition.unavailable",params:{module:"tools:no_such_tool"}}});
   });
 });
+
+describe("optional tool dependencies", () => {
+  it("admits missing optional tools without relaxing required tool selection", async () => {
+    const presets = new MockCompositions();
+    const definition = {...builtinCompositions()[0],id:"user:optional",tools:{mode:"select" as const,members:[{id:"bash"},{id:"missing_image",optional:true}]}};
+    const saved = await presets.saveAgentPreset(definition,"");
+    await expect(presets.selectAgentComposition(definition.id)).resolves.toMatchObject({id:definition.id});
+    await presets.saveAgentPreset({...definition,tools:{...definition.tools,members:[...definition.tools.members,{id:"missing_required"}]}},saved.revision);
+    await expect(presets.selectAgentComposition(definition.id)).rejects.toMatchObject({reason:{code:"agent_composition.unavailable",params:{module:"tools:missing_required"}}});
+  });
+
+  it.each([undefined, false, true])("reports missing imported tools unless optional is true (%s)", async (optional) => {
+    const presets = new MockCompositions();
+    const definition = {...builtinCompositions()[0],id:"user:import",tools:{mode:"select" as const,members:[{id:"missing_image",optional}]}};
+    const preview = await presets.importAgentPreset(definition);
+    if (optional) expect(preview.diagnostics).toEqual([]);
+    else {
+      expect(preview.diagnostics).toHaveLength(1);
+      expect(preview.diagnostics[0]).toMatchObject({code:"agent_composition.unavailable",module:"tools:missing_image"});
+    }
+  });
+
+  it.each(["skills","mcp","extensions","hooks","commands"] as const)("rejects optional %s members on save and import", async (kind) => {
+    const presets = new MockCompositions();
+    const definition = {...builtinCompositions()[0],id:"user:import",[kind]:{mode:"select" as const,members:[{id:"missing_dependency",optional:true}]}};
+    await expect(presets.saveAgentPreset(definition,"")).rejects.toMatchObject({reason:{code:"agent_composition.invalid"}});
+    await expect(presets.importAgentPreset(definition)).rejects.toMatchObject({reason:{code:"agent_composition.invalid"}});
+  });
+});

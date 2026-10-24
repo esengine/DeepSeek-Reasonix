@@ -27,6 +27,7 @@ export const SETTING_SCREEN: Record<string, string> = {
   "tools.shell.prefer": "tools:shell",
   "tools.shell.path": "tools:shell",
   "tools.browser_tools": "tools:browser-tools",
+  "tools.present_files": "tools:present-files",
   "tools.web_search_backends": "tools:web-access",
   "tools.web_fetch_backends": "tools:web-access",
   "tools.searxng_url": "tools:web-access",

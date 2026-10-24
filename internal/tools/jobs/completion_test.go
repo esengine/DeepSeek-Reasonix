@@ -283,3 +283,35 @@ func TestFailedJobNoticeCarriesTheTypedExit(t *testing.T) {
 		}
 	}
 }
+
+func TestStartedJobEmitsCodedNoticeWithTypedIdentity(t *testing.T) {
+	sink := &recordingSink{}
+	m := NewManager(sink)
+	defer m.Close()
+	j := m.Start("bash", "make build", func(context.Context, io.Writer) (string, error) { return "", nil })
+	<-j.done
+	waitFor(t, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		return len(sink.events) >= 2
+	})
+	var started event.Event
+	for _, ev := range sink.events {
+		if ev.Kind == event.Notice && ev.Code == event.NoticeCodeJobStarted {
+			started = ev
+		}
+	}
+	if started.Code == "" {
+		t.Fatalf("no %s notice in %+v", event.NoticeCodeJobStarted, sink.events)
+	}
+	p, ok := event.DecodeJobNotice(started.Detail)
+	if !ok || p.Kind != "bash" || p.Label != "make build" || p.ID == "" {
+		t.Fatalf("payload = %+v ok=%v from %q", p, ok, started.Detail)
+	}
+	if !strings.Contains(started.Text, "background bash started") {
+		t.Fatalf("English fallback = %q", started.Text)
+	}
+	if !event.DetailIsPayload(event.NoticeCodeJobStarted) {
+		t.Fatal("a started notice's Detail is its payload, so a sink that prints Text must not append it")
+	}
+}

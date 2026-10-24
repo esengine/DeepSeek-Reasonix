@@ -77,6 +77,9 @@ func (s *Server) switchEffort(ctx context.Context, level string) error {
 		return err
 	}
 	if alreadyRunning {
+		if placer != nil {
+			placer.NoteEffortChoice(effort)
+		}
 		return nil
 	}
 	if inPlace && placer.SetEffortInPlace(effort, target) {

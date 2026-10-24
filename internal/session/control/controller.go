@@ -192,6 +192,9 @@ type Controller struct {
 	// Not reentrant — never call snapshot (or anything that snapshots, such as
 	// recoverInterruptedTurn or maybeColdResumePrune) while holding it.
 	snapshotMu sync.Mutex
+	// grantsMu orders sidecar writes of session grants; the grants are read after
+	// it is held, so the write that runs last carries the latest answers.
+	grantsMu sync.Mutex
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 
@@ -487,6 +490,8 @@ func New(opts Options) *Controller {
 	if c.executor != nil {
 		c.bindProjectionSeer(c.deliveredNewest, c.deliveredSees)
 	}
+	c.approval.onGrantChange = func() { go c.persistSessionGrants() }
+	c.restoreSessionGrants(opts.SessionPath)
 	c.adoptSessionResources(opts)
 	c.publishPerProjectContext(opts)
 	if opts.Extensions != nil {

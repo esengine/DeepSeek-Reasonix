@@ -30,7 +30,7 @@ const { BrowserProtocol } = require("./browserprotocol");
 const { BrowserViews } = require("./browserviews");
 const { startBrowserRelay } = require("./browserrelay");
 const { groundFor, themeSourceFor } = require("./ground");
-const { loadPrefs, prefsFile, registerPrefs } = require("./prefs");
+const { loadPrefs, pageSleepAfterMs, prefsFile, registerPrefs } = require("./prefs");
 const { stateFile, openWindow } = require("./windowstate");
 const { accelerationOff, shouldDisableGpu, graphicsHandler } = require("./graphics");
 const { processMemoryHandler } = require("./procmem");
@@ -38,7 +38,7 @@ const { captureHandler } = require("./capture");
 const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
 const { raise } = require("./raise");
-const { keepCredential } = require("./credential");
+const { keepCredential, restoreIfStale } = require("./credential");
 const { actHandler } = require("./acts");
 const { crashDir, recordHostExit, pendingHostExit, clearHostExit, hostExitNotice } = require("./hostexit");
 
@@ -198,8 +198,9 @@ cua = await startEmbedded(computerDriver, contract, text => logs.host.raw(text))
   powerGuard.begin();
   // The poll alone leaves a turn unprotected for up to its period; the page's
   // own submit is the moment one starts, and this process sees it complete.
-  session.defaultSession.webRequest.onCompleted({ urls: [`${ready.origin}/*submit`] }, (details) => {
-    if (details.method === "POST" && details.statusCode < 300) void powerGuard?.refresh();
+  session.defaultSession.webRequest.onCompleted({ urls: [`${ready.origin}/*`] }, (details) => {
+    if (details.statusCode === 403) void restoreIfStale(session.defaultSession, credentialCookie, (line) => logs.shell.line(line));
+    if (details.method === "POST" && details.statusCode < 300 && details.url.endsWith("submit")) void powerGuard?.refresh();
   });
   followTheme();
   win = createWindow();
@@ -230,8 +231,10 @@ cua = await startEmbedded(computerDriver, contract, text => logs.host.raw(text))
 
 // The agent's browser draws its pages as views in this window: the kernel
 // drives them through the relay, and the page decides where one is shown.
+// Idle pages sleep only once the person turns rx-page-sleep on; prefs.js owns
+// the threshold, and a save reaches the running window through onSave below.
 function hostAgentBrowser() {
-  browserViews = new BrowserViews({ win, kernelOrigin: origin });
+  browserViews = new BrowserViews({ win, kernelOrigin: origin, sleepAfterMs: pageSleepAfterMs(storedPrefs()) });
   const protocol = new BrowserProtocol({
     createView: (spec) => browserViews.create(spec),
     post: (frame) => browserRelay?.post(frame),
@@ -280,6 +283,8 @@ function cleanUpLegacyInstalls() {
   });
 }
 
+let credentialCookie;
+
 // Set before anything is loaded, or the first request answers 403 and the
 // window opens on a refusal. HttpOnly because nothing in the page ever reads
 // it, Strict because no cross-site navigation ever needs to carry it, and no
@@ -294,6 +299,7 @@ async function armCredential(ready) {
     secure: false,
     sameSite: "strict",
   };
+  credentialCookie = cookie;
   await session.defaultSession.cookies.set(cookie);
   keepCredential(session.defaultSession, cookie, (line) => logs.shell.line(line));
 }
@@ -393,6 +399,7 @@ registerPrefs(ipcMain, () => prefsFile(app.getPath("userData")), fromWindow, () 
   followTheme();
   if (win && !win.isDestroyed()) win.setBackgroundColor(ground());
   void powerGuard?.refresh();
+  browserViews?.setSleepAfterMs(pageSleepAfterMs(storedPrefs()));
 });
 nativeTheme.on("updated", () => {
   if (win && !win.isDestroyed()) win.setBackgroundColor(ground());

@@ -15,6 +15,7 @@ import (
 
 type leaseRig struct {
 	c     *Controller
+	sink  *askProbeSink
 	owner *workspacelease.Owner
 	other *workspacelease.Owner
 	file  string
@@ -31,9 +32,10 @@ func newLeaseRig(t *testing.T, timeout time.Duration) leaseRig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sink := &askProbeSink{}
 	c := New(Options{
 		Policy:          permission.New("ask", nil, nil, nil),
-		Sink:            event.Discard,
+		Sink:            sink,
 		WorkspaceLease:  owner,
 		ApprovalTimeout: timeout,
 	})
@@ -44,7 +46,7 @@ func newLeaseRig(t *testing.T, timeout time.Duration) leaseRig {
 	if err := owner.AcquirePaths(context.Background(), []string{file}); err != nil {
 		t.Fatal(err)
 	}
-	return leaseRig{c: c, owner: owner, other: other, file: file}
+	return leaseRig{c: c, sink: sink, owner: owner, other: other, file: file}
 }
 
 // pendingAsk returns the ask on screen: a registered ask still queued behind
@@ -207,6 +209,7 @@ func awaitAsk(t *testing.T, done <-chan error) {
 }
 
 func TestTwoAsksRetakeTheClaimOnlyAfterTheLastIsAnswered(t *testing.T) {
+	shortenPromptQueueNotice(t)
 	r := newLeaseRig(t, 0)
 	done := make(chan error, 2)
 	ask := func(id string) {
@@ -216,15 +219,16 @@ func TestTwoAsksRetakeTheClaimOnlyAfterTheLastIsAnswered(t *testing.T) {
 	go ask("q1")
 	first := r.pendingAsk(t)
 	go ask("q2")
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		r.c.approval.mu.Lock()
-		n := len(r.c.approval.asks)
-		r.c.approval.mu.Unlock()
-		if n == 2 {
-			break
+	// An ask is registered before it yields, so registration does not say the
+	// second one is waiting yet; its queue notice comes after the yield.
+	deadline := time.After(testenv.Budget(t))
+	for _, notices := r.sink.counts(); notices == 0; _, notices = r.sink.counts() {
+		select {
+		case <-deadline:
+			t.Fatal("the second ask never queued behind the first")
+		default:
+			time.Sleep(5 * time.Millisecond)
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 	r.c.AnswerQuestion(first, []event.AskAnswer{{QuestionID: "q1", Selected: []string{"x"}}})
 	awaitAsk(t, done)

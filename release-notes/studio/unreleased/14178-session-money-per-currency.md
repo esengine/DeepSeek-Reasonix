@@ -1,2 +1,0 @@
-- 修复：一个会话用到多种货币时，计量条和费用面板不再把不同币种的金额直接相加，而是分币种各显示一个金额。关联 #14178。
-- Fixed: a session billed in more than one currency no longer shows one summed figure under a single symbol; the meter and cost panel show one amount per currency. Refs #14178.

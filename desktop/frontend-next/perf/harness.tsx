@@ -27,6 +27,7 @@ import "../src/styles/stophint.css";
 import "../src/styles/dialogcenter.css";
 import "../src/styles/treerows.css";
 import "../src/styles/workbench-changes.css";
+import "../src/styles/agentrun.css";
 import "../src/styles/gitgraph.css";
 import "../src/styles/tips.css";
 import "../src/styles/waitnote.css";
@@ -58,6 +59,7 @@ import type { ThemePack } from "../src/port/look";
 import type { RuntimeView, TreeWindow, TreeWorkspace } from "../src/port/hub";
 import type { WireEvent } from "../src/port/wire";
 import type { PreviewInfo } from "../src/port/workspace";
+import type { SubagentRun } from "../src/port/subagent";
 import { deliveryContents, deliveryHistory } from "./delivery-data";
 
 // Saves are coalesced (src/ui/trailing.ts), and a fixture answers too fast for
@@ -396,7 +398,7 @@ class BenchPort extends MockPort {
     const goalRuntime = usage
       ? { turnsUsed: 4, tokensUsed: 128_400, requestsUsed: 9, workDurationMs: 12 * 60_000, noProgressTurns: usage === "blocked" ? 2 : 0, ...(usage === "blocked" ? { stopCause: "goal_stuck", lastReason: "测试一直没有通过，改动没有让失败的数量减少" } : {}) }
       : undefined;
-    const st = { ...(await super.status()), ...(query.has("running") ? { running: true } : {}), ...(query.has("goal") ? { goal: query.get("goal") ?? "" } : {}), ...(usage ? { goalStatus: usage, goalRuntime } : {}), ...(query.has("trustpending") ? { toolApprovalMode: "ask" as const, approvalDefault: { defaulted: true, writesConfined: true, trust: "" as const, trustable: true } } : {}) };
+    const st = { ...(await super.status()), ...(query.has("running") ? { running: true } : {}), ...(query.has("goal") ? { goal: query.get("goal") ?? "" } : {}), ...(usage ? { goalStatus: usage, goalRuntime } : {}), ...(query.has("fullaccess") ? { toolApprovalMode: "yolo" as const } : {}), ...(query.has("effort") ? { effort: query.get("effort") ?? "" } : {}), ...(query.has("modelref") ? { modelRef: query.get("modelref") ?? "" } : {}), ...(query.has("trustpending") ? { toolApprovalMode: "ask" as const, approvalDefault: { defaulted: true, writesConfined: true, trust: "" as const, trustable: true } } : {}) };
     if (STATUS_MS > 0) await new Promise((r) => setTimeout(r, STATUS_MS));
     if (!JOBS) return st;
     const jobs = Array.from({ length: JOBS }, (_, i) => ({
@@ -589,7 +591,11 @@ declare global {
     // conversations really cost.
     __feed: (ev: WireEvent) => void;
     __panes: () => number;
+    // Answer every completion request with this one, as the kernel would for a command typed in full.
+    __complete: (answer: import("../src/port/port").Completion) => void;
     __previewFiles: (files: Record<string, { kind: PreviewInfo["kind"]; text: string }>) => void;
+    // Sub-agent runs the kernel would list, each with the conversation it would return.
+    __subagents: (runs: { run: SubagentRun; messages: HistoryMessage[] }[]) => void;
     // What folding a stored transcript into cards costs on its own, with no
     // frame in it: the step between the read answering and the first paint.
     __foldCost: () => number;
@@ -615,6 +621,14 @@ window.__previewFiles = (files) => hub.feeds.forEach((port) => {
     data: new TextEncoder().encode(files[ref.path].text).buffer, version: "fixture",
   });
 });
+window.__subagents = (runs) => hub.feeds.forEach((port) => {
+  port.subagents = async () => runs.map((r) => r.run);
+  port.subagentTranscript = async (ref) => {
+    const found = runs.find((r) => r.run.ref === ref)!;
+    return { run: found.run, messages: found.messages, after: 0, next: found.messages.length, total: found.messages.length, live: false };
+  };
+});
+window.__complete = (answer) => hub.feeds.forEach((port) => { port.complete = async () => answer; });
 window.__refuse = (method, message) => {
   (hub as unknown as Record<string, unknown>)[method] = () => Promise.reject(new Error(message));
 };

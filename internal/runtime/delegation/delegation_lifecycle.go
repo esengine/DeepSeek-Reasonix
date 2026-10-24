@@ -134,6 +134,10 @@ func (t *TaskTool) beginExecution(ctx context.Context, life *delegationLifecycle
 	if node, drawn := executionNode(ctx, life); drawn {
 		publishGraph(node.sink, fanOutItemRunningDelta(node.id))
 	}
+	// The child's work reaches its transcript, never the job's own streams, so
+	// a background run that does not report here reads as silent for its whole
+	// life. A foreground context carries no job, so this is one path for both.
+	bindJobLiveness(ctx, trk)
 	trk.running()
 	return nil
 }

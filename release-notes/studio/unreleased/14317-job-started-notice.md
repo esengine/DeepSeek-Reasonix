@@ -1,0 +1,2 @@
+- 修复：后台任务启动时的提示（“background bash started: …”）现在也按界面语言显示为“后台任务已开始：…”，不再是同类提示里唯一的英文。关联 #14308。
+- Fixed: the notice shown when a background job starts is now worded in the interface language like its end notices, instead of staying the one English line. Refs #14308.

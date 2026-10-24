@@ -62,6 +62,7 @@ import { Welcome } from "./Welcome";
 import { useSessionSwitch } from "./sessionswitch";
 import { singleFlight } from "./singleflight";
 import { useTreeRead } from "./useTreeRead";
+import { useSidebarOpen } from "./sidebaropen";
 import { useOpenPane } from "./useOpenPane";
 import { useOpenRemotePane } from "./useOpenRemotePane";
 import { useNewConversation } from "./useNewConversation";
@@ -380,6 +381,8 @@ export function App({ hub }: { hub: HubPort }) {
   );
 
   const openPeerSession = useCallback((path: string) => void openPane({ sessionPath: path }).catch(fail), [openPane, fail]);
+
+  const openFromSidebar = useSidebarOpen<PaneView>(runtimes, openPane, setActive, setViewRequests, "flow");
   const adder = useAddWorkspace(hub, reloadTree, fail, (workspace) => openPane({ root: workspace.root }));
   // 每个窗口都有一个根 —— 没选过项目时那是它碰巧启动的地方。两者读起来一样，
   // 于是「从哪加项目」这句问题永远问不出口；只有内核说的 remembered 分得开。
@@ -624,7 +627,7 @@ export function App({ hub }: { hub: HubPort }) {
           paging={paging}
           adder={adder}
           opening={sw.path}
-          onOpen={openPane}
+          onOpen={openFromSidebar}
           onNew={startConversation}
           onOpenRemote={openRemotePane}
           onFocusPane={focusPane}

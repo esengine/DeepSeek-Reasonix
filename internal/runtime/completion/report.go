@@ -82,6 +82,10 @@ const (
 	// GapWorkspaceClaimYielded: the session gave up its write claim to wait on a
 	// person, and another session was granted an overlapping one meanwhile.
 	GapWorkspaceClaimYielded
+	// GapOutsideObservedRoot: the turn had files written where nothing this
+	// host watches can speak for them. The receipt exists — it says the work
+	// landed out of sight, not that it is done.
+	GapOutsideObservedRoot
 )
 
 func (k GapKind) String() string {
@@ -106,6 +110,8 @@ func (k GapKind) String() string {
 		return "mod_effects_unobserved"
 	case GapWorkspaceClaimYielded:
 		return "workspace_claim_yielded"
+	case GapOutsideObservedRoot:
+		return "outside_observed_root"
 	default:
 		return "unknown"
 	}
@@ -138,6 +144,34 @@ type Report struct {
 	Claimed    Claim
 	Risks      []string
 	Unverified []string
+}
+
+// OutsideWriteDetail bounds the list of files written where the host observes
+// nothing, the way every other receipt detail is bounded: the first few names
+// and a count. A card that scrolls is a card nobody reads.
+func OutsideWriteDetail(paths []string) string {
+	const shown = 3
+	list := strings.Join(paths[:min(len(paths), shown)], ", ")
+	if rest := len(paths) - shown; rest > 0 {
+		list += fmt.Sprintf(" and %d more", rest)
+	}
+	return list
+}
+
+// WithOutsideObservedWrites records files the turn wrote where nothing the
+// caller observes can speak for them, and refuses to call that a clean finish.
+// The gap is reported, never enforced: a person who asked for a file to land
+// outside the workspace got what they asked for, and what they are owed is the
+// line saying this part is out of sight — not a turn that will not end.
+func (r Report) WithOutsideObservedWrites(paths []string) Report {
+	if len(paths) == 0 {
+		return r
+	}
+	r.Gaps = append(r.Gaps, Gap{Kind: GapOutsideObservedRoot, Detail: OutsideWriteDetail(paths)})
+	if r.Verdict == VerdictDone {
+		r.Verdict = VerdictPartial
+	}
+	return r
 }
 
 // Build derives the report from a contract and the turn's receipts. Both may
@@ -423,7 +457,7 @@ func (r Report) Summary() string {
 func (r Report) GapKinds() []string {
 	seen := map[GapKind]bool{}
 	var out []string
-	for _, kind := range []GapKind{GapUnbackedClaim, GapUnprovenCriterion, GapMissingCheck, GapFailedVerification, GapStaleVerification, GapInconclusiveVerification, GapUnverifiedChange, GapUnreviewedChange} {
+	for _, kind := range []GapKind{GapUnbackedClaim, GapUnprovenCriterion, GapMissingCheck, GapFailedVerification, GapStaleVerification, GapInconclusiveVerification, GapUnverifiedChange, GapUnreviewedChange, GapOutsideObservedRoot} {
 		for _, gap := range r.Gaps {
 			if gap.Kind == kind && !seen[kind] {
 				seen[kind] = true

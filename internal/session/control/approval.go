@@ -49,6 +49,11 @@ type approvalManager struct {
 	// remain authoritative, matching Auto rather than YOLO semantics.
 	planAutoApprove bool
 
+	// onGrantChange runs after a session grant is added or revoked, so the owner
+	// of the conversation can write the answers down. Write-once after
+	// construction.
+	onGrantChange func()
+
 	// persists reports whether an answer can be written down as a rule at all:
 	// without a place to write it, offering it would promise a file nobody has.
 	persists bool
@@ -226,8 +231,12 @@ func (a *approvalManager) registerDecisionKindWithInput(tool, subject, reason st
 // short-circuit.
 func (a *approvalManager) grantSession(tool, subject string) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.granted[permission.SessionGrantRuleForScope(tool, subject)] = true
+	changed := a.onGrantChange
+	a.mu.Unlock()
+	if changed != nil {
+		changed()
+	}
 }
 
 // SessionAuthorizations is the same-session tool-grant state a controller
@@ -727,15 +736,18 @@ func (a *approvalManager) sessionGrants() []string {
 // not an error and is not a revocation either.
 func (a *approvalManager) revokeSessionGrant(rule string) int {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	n := 0
 	if rule == "" {
-		n := len(a.granted)
+		n = len(a.granted)
 		clear(a.granted)
-		return n
+	} else if a.granted[rule] {
+		delete(a.granted, rule)
+		n = 1
 	}
-	if !a.granted[rule] {
-		return 0
+	changed := a.onGrantChange
+	a.mu.Unlock()
+	if n > 0 && changed != nil {
+		changed()
 	}
-	delete(a.granted, rule)
-	return 1
+	return n
 }

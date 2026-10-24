@@ -38,12 +38,15 @@ export class MockCompositions {
   private fail(status:number,code:string):never { throw new HttpError(status,"",{code:`agent_composition.${code}`}); }
   private requireModules(definition:AgentComposition) {
     for (const kind of ["tools"] as const) for (const member of definition[kind]?.members ?? []) {
-      if (definition[kind]?.mode==="select" && !(MOCK_MODULES?.[kind] ?? []).some((m)=>m.id===member.id)) {
+      if (definition[kind]?.mode==="select" && !member.optional && !(MOCK_MODULES?.[kind] ?? []).some((m)=>m.id===member.id)) {
         throw new HttpError(409,"",{code:"agent_composition.unavailable",params:{module:`${kind}:${member.id}`,detail:"Required module is unavailable or was revoked."}});
       }
     }
   }
-  private validateAuthority(definition:AgentComposition) {
+  private validateDefinition(definition:AgentComposition) {
+    for (const kind of ["skills","mcp","extensions","hooks","commands"] as const) {
+      if (definition[kind]?.members.some((member)=>member.optional)) this.fail(400,"invalid");
+    }
     if (!definition.id.startsWith("project:")) return;
     for (const kind of ["mcp","extensions"] as const) for (const member of definition[kind]?.members ?? []) {
       if (Object.entries(member.parameters ?? {}).some(([key,value])=>["args","url","env","headers"].includes(key.toLowerCase()) && value!=null)) this.fail(400,"invalid");
@@ -55,7 +58,7 @@ export class MockCompositions {
     const prior=this.catalog.presets.find((v)=>v.definition.id===definition.id);
     if ((prior?.revision ?? "")!==expectedRevision) this.fail(409,"conflict");
     if (!/^(user|project):[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(definition.id) || !definition.name.trim()) this.fail(400,"invalid");
-    this.validateAuthority(definition);
+    this.validateDefinition(definition);
     const version={definition:structuredClone(definition),revision:`mock-${++this.library.revision}`};
     const items=definition.id.startsWith("project:") ? this.library.projects.get(this.workspace) ?? [] : this.library.user;
     const next=[...items.filter((v)=>v.definition.id!==definition.id),version];
@@ -81,10 +84,10 @@ export class MockCompositions {
   }
   async importAgentPreset(content:AgentComposition) {
     if (content.schemaVersion!==1 || !content.name || !content.persona) this.fail(400,"invalid");
-    this.validateAuthority(content);
+    this.validateDefinition(content);
     const diagnostics:AgentPresetCatalog["diagnostics"]=[];
     for (const kind of ["tools","skills","mcp","extensions","hooks","commands"] as const) for (const member of content[kind]?.members ?? []) {
-      if (!(MOCK_MODULES?.[kind] ?? []).some((m)=>m.id===member.id)) diagnostics.push({code:"agent_composition.unavailable",module:`${kind}:${member.id}`,detail:"Dependency is not available on this host."});
+      if (!(kind==="tools" && member.optional) && !(MOCK_MODULES?.[kind] ?? []).some((m)=>m.id===member.id)) diagnostics.push({code:"agent_composition.unavailable",module:`${kind}:${member.id}`,detail:"Dependency is not available on this host."});
     }
     return {definition:structuredClone(content),diagnostics};
   }

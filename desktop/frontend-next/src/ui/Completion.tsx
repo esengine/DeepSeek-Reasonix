@@ -61,7 +61,7 @@ interface ChipHost {
 }
 
 function ask(port: AgentPort, text: string, caret: number, mid: ReturnType<typeof midSlash>, signal: AbortSignal): Promise<Completion> {
-  if (!mid) return port.complete(text, caret, signal);
+  if (!mid) return port.complete(text, caret, signal).then(withTyped);
   return port.complete(mid.token, mid.token.length, signal).then((r) => ({
     kind: "slash",
     from: mid.from,
@@ -71,10 +71,16 @@ function ask(port: AgentPort, text: string, caret: number, mid: ReturnType<typeo
   }));
 }
 
+function withTyped(r: Completion): Completion {
+  return r.typed && r.items?.length ? { ...r, items: [r.typed, ...r.items] } : r;
+}
+
 interface State {
   completion: Completion;
   active: number;
   open: boolean;
+  // The line already spells the highlighted command in full.
+  typedChosen: boolean;
   loading: boolean;
   move: (delta: number) => void;
   hover: (i: number) => void;
@@ -185,10 +191,15 @@ export function useCompletion(
     [items, active, text, completion, apply, chips, onSession],
   );
 
+  // A line that already says what the highlighted row would make it: Enter
+  // sends it rather than completing it again.
+  const typedChosen = completion.kind === "slash" && completion.typed !== undefined && items[at]?.insert === text;
+
   return {
     completion,
     active: at,
     open,
+    typedChosen,
     loading,
     kb,
     move: (delta) => {

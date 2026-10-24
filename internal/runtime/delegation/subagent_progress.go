@@ -605,8 +605,8 @@ func utf8SafeTail(s string, maxBytes int) string {
 
 // subagentProgressTracker is the per-child state machine installed between a
 // sub-agent run and its parent sink. It converts the child's reasoning/text/
-// notice/retrying into preview slots on the group merger, forwards tool
-// activity unchanged, and guarantees exactly one terminal status event.
+// notice/retrying into preview slots, forwards tool activity, and guarantees
+// exactly one terminal status event.
 type subagentProgressTracker struct {
 	mu         sync.Mutex
 	merger     *subagentProgressMerger
@@ -618,6 +618,11 @@ type subagentProgressTracker struct {
 	started    time.Time
 	ownsMerger bool
 	done       bool
+
+	// noteProgress reports this run to the job it runs under; nil when it runs
+	// in the foreground. notedAt paces those reports. See subagent_liveness.go.
+	noteProgress func(steps int)
+	notedAt      time.Time
 }
 
 // newSubagentProgressTracker creates (or joins) the group merger and returns a
@@ -738,6 +743,7 @@ func (s trackedChildSink) Emit(e event.Event) {
 		t.setPhaseLocked(subagentPhaseTool)
 	}
 	t.mu.Unlock()
+	t.noteJobProgress(e.Kind)
 	switch e.Kind {
 	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
 		e.Source = event.UsageSourceSubagent

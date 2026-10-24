@@ -1,0 +1,2 @@
+- 修复：正文字宽的两个手柄在第一次拖过之后就不再生效；拖动时两侧栏现在就按各自设定的比例让位，输入框也跟随正文一起变宽。关联 #14320。
+- Fixed: the reading column's grips stopped responding after the first drag; the sidebars now give way while the grip is still being dragged, and the composer follows the same width. Refs #14320.

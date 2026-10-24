@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MAX, search, stepped, type Hit } from "../state/find";
+import { MAX, search, stepped, type FindMode, type Hit } from "../state/find";
 import type { Item } from "../state/session";
 import { useShowsReceipt } from "../state/foldpref";
 import type { ReceiptPref } from "../state/receiptpref";
@@ -14,18 +14,25 @@ export interface Finding {
   total: number;
   capped: boolean;
   // n moves on every step, so landing on the same occurrence twice is asked for.
-  at: { id: string; nth: number; n: number } | null;
+  at: { id: string; nth: number; n: number; mode: FindMode } | null;
   ask: (query: string) => void;
   step: (by: 1 | -1) => void;
   close: () => void;
+  /** How the query is read. Off is the plain substring search. */
+  regex: boolean;
+  caseSensitive: boolean;
+  setMode: (mode: Partial<FindMode>) => void;
 }
 
 /** The find bar's whole state. pulse is the window asking; only the pane that
  *  has focus answers it, so one chord does not open a bar in every session. */
 export function useFind(items: Item[], pulse: number, active: boolean, onOpen: () => void, pref?: ReceiptPref, togglePulse = 0): Finding {
-  const [held, setHeld] = useState<{ q: string; i: number; focus: number } | null>(null);
+  const [held, setHeld] = useState<{ q: string; i: number; focus: number; re?: boolean; cs?: boolean } | null>(null);
   const receipts = useShowsReceipt(pref);
-  const hits = useMemo(() => (held ? search(items, held.q, receipts) : NO_HITS), [items, held, receipts]);
+  const hits = useMemo(
+    () => (held ? search(items, held.q, receipts, { regex: held.re, caseSensitive: held.cs }) : NO_HITS),
+    [items, held, receipts],
+  );
   const i = held ? Math.min(held.i, hits.length - 1) : -1;
   const at = i >= 0 ? hits[i] : null;
   // Hits come in reading order, so a row's occurrences sit together.
@@ -64,6 +71,12 @@ export function useFind(items: Item[], pulse: number, active: boolean, onOpen: (
   const ask = useCallback((q: string) => setHeld((was) => ({ q, i: 0, focus: was?.focus ?? 0 })), []);
   const step = useCallback((by: 1 | -1) => setHeld((was) => (was ? { ...was, i: stepped(was.i, total, by) } : was)), [total]);
   const close = useCallback(() => setHeld(null), []);
+  // Changing how the query is read restarts from the first hit: the old index
+  // counted hits the new reading may no longer have.
+  const setMode = useCallback(
+    (mode: Partial<FindMode>) => setHeld((was) => (was ? { ...was, ...(mode.regex !== undefined ? { re: mode.regex } : {}), ...(mode.caseSensitive !== undefined ? { cs: mode.caseSensitive } : {}), i: 0 } : was)),
+    [],
+  );
 
   return {
     open: held !== null,
@@ -72,9 +85,12 @@ export function useFind(items: Item[], pulse: number, active: boolean, onOpen: (
     focus: held?.focus ?? 0,
     total,
     capped: total >= MAX,
-    at: at ? { id: at.id, nth, n: nonce } : null,
+    at: at ? { id: at.id, nth, n: nonce, mode: { regex: held?.re ?? false, caseSensitive: held?.cs ?? false } } : null,
     ask,
     step,
     close,
+    regex: held?.re ?? false,
+    caseSensitive: held?.cs ?? false,
+    setMode,
   };
 }

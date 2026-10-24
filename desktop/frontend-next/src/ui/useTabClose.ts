@@ -3,16 +3,17 @@ import type { AgentPort } from "../port/port";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import { keyOf, labelOf, type Surface } from "./workbench_tabs";
+import type { AgentTab } from "./useAgentTabs";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 interface Props {
   port: AgentPort; surfaces: Surface[]; selected: string; showFiles: boolean;
-  setBrowsers: Setter<string[]>; setOpenFiles: Setter<string[]>; setDismissed: Setter<Set<string>>;
+  setBrowsers: Setter<string[]>; setOpenFiles: Setter<string[]>; setAgents: Setter<AgentTab[]>; setDismissed: Setter<Set<string>>;
   setSelected: Setter<string>; onCloseManual: () => void; onCloseSelected: () => void;
   fromExplorer?: { current: string }; setShowFiles?: Setter<boolean>; setLauncher?: Setter<boolean>;
 }
 
-export function useTabClose({ port, surfaces, selected, showFiles, setBrowsers, setOpenFiles, setDismissed, setSelected, onCloseManual, onCloseSelected, fromExplorer, setShowFiles, setLauncher }: Props) {
+export function useTabClose({ port, surfaces, selected, showFiles, setBrowsers, setOpenFiles, setAgents, setDismissed, setSelected, onCloseManual, onCloseSelected, fromExplorer, setShowFiles, setLauncher }: Props) {
   const current = useRef({ surfaces, selected, showFiles });
   current.current = { surfaces, selected, showFiles };
   const pending = useRef(false);
@@ -35,6 +36,7 @@ export function useTabClose({ port, surfaces, selected, showFiles, setBrowsers, 
       }
       setBrowsers((v) => v.filter((id) => !closed.has(`manual:${id}`)));
       setOpenFiles((v) => v.filter((path) => !closed.has(`file:${path}`)));
+      setAgents((v) => v.filter((run) => !closed.has(`agent:${run.ref}`)));
       setDismissed((v) => new Set([...v, ...closed]));
       if (closed.has(current.current.selected)) onCloseSelected();
       setSelected((v) => closed.has(v) ? "" : v);

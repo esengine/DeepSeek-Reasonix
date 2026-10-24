@@ -18,6 +18,11 @@ type Progress struct {
 	// differ here, and which one matters is the caller's to know.
 	Produced int64
 	Delta    int64
+	// Steps is how many steps the runner reported; StepDelta is how many
+	// arrived while the caller waited. A sub-agent works in its own transcript,
+	// so steps without output text are progress, not silence.
+	Steps     int64
+	StepDelta int64
 }
 
 func (m *Manager) results(targets []*Job) []Result {
@@ -44,6 +49,7 @@ func (m *Manager) results(targets []*Job) []Result {
 				Silent:   sinceMs(j.times.activity),
 				Spoke:    j.written > 0,
 				Produced: j.written,
+				Steps:    j.times.steps,
 			}
 		}
 		out = append(out, r)

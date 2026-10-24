@@ -32,6 +32,7 @@ type Persona struct {
 type Module struct {
 	ID         string          `json:"id"`
 	Parameters json.RawMessage `json:"parameters,omitempty"`
+	Optional   bool            `json:"optional,omitempty"`
 }
 
 type Selection struct {
@@ -140,7 +141,7 @@ func (d Definition) Validate() error {
 	if len(d.Persona.Prefix) > 32768 || len(d.Persona.Suffix) > 32768 {
 		return fmt.Errorf("%w: persona", ErrInvalid)
 	}
-	for _, s := range []Selection{d.Tools, d.Skills, d.MCP, d.Extensions, d.Hooks, d.Commands} {
+	for group, s := range []Selection{d.Tools, d.Skills, d.MCP, d.Extensions, d.Hooks, d.Commands} {
 		if len(s.Members) > 10000 {
 			return ErrInvalid
 		}
@@ -149,6 +150,9 @@ func (d Definition) Validate() error {
 		}
 		seen := map[string]bool{}
 		for _, m := range s.Members {
+			if m.Optional && group != 0 {
+				return fmt.Errorf("%w: optional is only supported for tools", ErrInvalid)
+			}
 			if m.ID == "" || len(m.ID) > 1024 || seen[m.ID] {
 				return fmt.Errorf("%w: duplicate or empty module %q", ErrInvalid, m.ID)
 			}

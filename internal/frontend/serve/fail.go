@@ -86,7 +86,7 @@ func keepRefusalStatus(status int, err error) error {
 // wherever it surfaces, and anything else keeps the old shape, so adoption is
 // incremental rather than a flag day.
 func writeErr(w http.ResponseWriter, fallback int, err error) {
-	if refuseMemoryDirectory(w, err) {
+	if refuseMemoryRead(w, err) {
 		return
 	}
 	var c *coded
@@ -133,7 +133,7 @@ func unparsedConfigReason(err error) (Reason, bool) {
 // keeps one code across every panel; anything else is that panel's own
 // rejection, carrying the kernel's words as the detail a reader acts on.
 func saveFailed(w http.ResponseWriter, status int, code string, err error) {
-	if refuseMemoryDirectory(w, err) {
+	if refuseMemoryRead(w, err) {
 		return
 	}
 	if refuseUnparsedConfig(w, err) {
@@ -142,20 +142,27 @@ func saveFailed(w http.ResponseWriter, status int, code string, err error) {
 	refuse(w, status, code, err.Error(), map[string]any{"detail": err.Error()})
 }
 
-func refuseMemoryDirectory(w http.ResponseWriter, err error) bool {
-	reason, ok := memoryDirectoryReason(err)
+func refuseMemoryRead(w http.ResponseWriter, err error) bool {
+	reason, ok := memoryReadReason(err)
 	if ok {
 		refuse(w, http.StatusInternalServerError, reason.Code, reason.Message, reason.Params)
 	}
 	return ok
 }
 
-func memoryDirectoryReason(err error) (Reason, bool) {
+// memoryReadReason gives a memory read failure the code its granularity earns:
+// a directory that could not be listed is not the same condition as one fact
+// file that could not be read, and neither may reach a frontend as "not found".
+func memoryReadReason(err error) (Reason, bool) {
 	var directory *memory.DirectoryReadError
-	if !errors.As(err, &directory) {
-		return Reason{}, false
+	if errors.As(err, &directory) {
+		return Reason{Code: "memory.directory_unreadable", Message: err.Error()}, true
 	}
-	return Reason{Code: "memory.directory_unreadable", Message: err.Error()}, true
+	var fact *memory.FactReadError
+	if errors.As(err, &fact) {
+		return Reason{Code: "memory.fact_unreadable", Message: err.Error()}, true
+	}
+	return Reason{}, false
 }
 
 // codedRefusal is the identity a coded error carries, for the caller that has to

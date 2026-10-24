@@ -65,7 +65,10 @@ func otherProcessSave(t *testing.T, dir, name, body string) bool {
 		return false
 	}
 	path := filepath.Join(dir, name+".md")
-	existing, ok := loadMemory(path)
+	existing, ok, err := loadMemory(path)
+	if err != nil {
+		t.Fatalf("other process: %s: %v", path, err)
+	}
 	if !ok {
 		t.Fatalf("other process: %s is not readable", path)
 	}

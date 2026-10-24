@@ -81,7 +81,7 @@ func (r *CompletionReceipt) Severity() string {
 
 func gapSeverity(kind string) string {
 	switch kind {
-	case "stale_verification", "inconclusive_verification", "unreviewed_change", "declared_unverified", "mod_effects_unobserved":
+	case "stale_verification", "inconclusive_verification", "unreviewed_change", "declared_unverified", "mod_effects_unobserved", "outside_observed_root":
 		return ReceiptSeverityNotice
 	}
 	return ReceiptSeverityWarn

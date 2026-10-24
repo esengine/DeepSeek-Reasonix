@@ -841,6 +841,8 @@
     opacity: calc(.3 + .55 * var(--lit));
     transition: width var(--m-line), opacity var(--m-line), background-color var(--m-line);
   }
+  .srail-m[data-folded] > i { height: 3px }
+  .srail-m[data-starred]::after { content: ""; position: absolute; right: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-ink) }
   .srail-m:focus-visible > i { outline: 2px solid var(--focus); outline-offset: 3px }
   .srail-m[data-on] > i { background: var(--accent-ink) }
 
@@ -2353,6 +2355,8 @@
     background: var(--float); box-shadow: var(--shadow-float);
     animation: sheetin var(--t-panel) var(--ease-spring) both;
   }
+  .prefs-sheet[data-wide] { width: 100%; height: 100% }
+  .prefs-sheet[data-wide] .prefs-main .prefs-col { max-width: min(1200px, 100%) }
 
   @keyframes prefsin { from { opacity: 0 } to { opacity: 1 } }
   @keyframes sheetin { from { transform: translateY(14px) scale(.985) } to { transform: none } }

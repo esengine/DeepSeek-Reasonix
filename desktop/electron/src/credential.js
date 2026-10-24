@@ -19,4 +19,15 @@ function keepCredential(ses, cookie, log) {
   return () => ses.cookies.removeListener("changed", onChanged);
 }
 
-module.exports = { keepCredential };
+// The change event is not the only way the jar loses the cookie: a network
+// service restart drops session cookies without announcing a removal. A request
+// the kernel refused is the moment that shows, so the shell reads the jar then.
+async function restoreIfStale(ses, cookie, log) {
+  const held = await ses.cookies.get({ url: cookie.url, name: cookie.name });
+  const found = held.find((c) => c.name === cookie.name);
+  if (found && found.value === cookie.value) return;
+  log(`credential cookie ${found ? "differs from this launch's" : "missing"} after a refused request; restoring`);
+  await ses.cookies.set(cookie).catch((err) => log(`credential cookie restore failed: ${err.message}`));
+}
+
+module.exports = { keepCredential, restoreIfStale };

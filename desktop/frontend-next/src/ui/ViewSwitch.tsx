@@ -19,11 +19,12 @@ export function ViewSwitch({ view, rows, surfaces, onView }: {
     <>
       {rows > 0 && (
         <TooltipButton
-          type="button" className="thbtn view-action" data-action="pane.view" data-value="analysis"
+          type="button" className="thbtn view-action top-action" data-action="pane.view" data-value="analysis"
           aria-pressed={view === "analysis"} aria-label={t("运行分析")} aria-keyshortcuts={ariaChord("2")}
           title={view === "analysis" ? t("关闭运行分析") : t("打开运行分析")} shortcut={chord("2")} onClick={() => press("analysis")}
         >
-          <StudioIcon name="gauge" />
+          <StudioIcon name="activity" />
+          <span className="view-label">{t("运行分析")}</span>
         </TooltipButton>
       )}
       <TooltipButton

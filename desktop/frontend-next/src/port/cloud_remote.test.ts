@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { onRemoteConnectionEnded, RemoteEventSource, remoteCodec, remoteConnectionEnded } from "./cloud_remote";
+import { onRemoteConnectionEnded, relayFor, RemoteEventSource, remoteCodec, remoteConnectionEnded } from "./cloud_remote";
 import { openLiveStream, STREAM_SILENCE_MS } from "./livestream";
 
 describe("remote Studio binary framing", () => {
@@ -215,4 +215,25 @@ describe("remote Studio binary framing", () => {
       vi.restoreAllMocks();
     });
   }
+});
+
+describe("the relay a connection grant names", () => {
+  const hosted = "wss://remote.reasonix.io";
+
+  it("is the hosted relay when the grant names none", () => {
+    expect(relayFor(null, hosted)).toBe(hosted);
+    expect(relayFor(undefined, hosted)).toBe(hosted);
+  });
+
+  it("speaks wss to the https origin of a self-hosted gateway", () => {
+    expect(relayFor("https://relay.example.com", hosted)).toBe("wss://relay.example.com");
+    expect(relayFor("https://relay.example.com:8443/", hosted)).toBe("wss://relay.example.com:8443");
+  });
+
+  it.each([
+    "http://relay.example.com", "wss://relay.example.com", "https://user:pw@relay.example.com", "https://relay.example.com/path",
+    "https://relay.example.com/?x=1", "not a url", "", 7, {},
+  ])("refuses %j, so a ticket is never offered to a relay it was not issued for", (named) => {
+    expect(relayFor(named, hosted)).toBeNull();
+  });
 });

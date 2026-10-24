@@ -4,7 +4,7 @@
 import { chromium } from "playwright";
 
 const BASE = process.env.PERF_URL ?? "http://localhost:4399/perf.html?pref=zh&ws=3&sess=3&turns=2";
-const FAMILY = ["搜索与快捷操作", "文件", "工具与集成", "运行环境", "钱包与用量"];
+const FAMILY = ["搜索与快捷操作", "文件", "工具与权限", "扩展", "记忆", "远程", "钱包与用量"];
 const fails = [];
 const check = (name, ok, detail = "") => {
   console.log(`${ok ? "  ok" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);

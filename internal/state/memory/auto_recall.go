@@ -64,6 +64,10 @@ type RecallResult struct {
 	// field, never a prefix cut from the sentence. Empty when hits were injected.
 	SuppressionCode SuppressionCode
 	StoreError      error `json:"-"`
+	// Unreadable names the saved fact files that exist but could not be read
+	// while this turn's pool was built. They are reported as unreadable, never
+	// counted as absent, and they do not stop the block when other facts load.
+	Unreadable []*FactReadError `json:"-"`
 	// ShadowHits is the Retrieval V2 ranking over the same pool, telemetry
 	// only: it never reaches the model and never affects Hits.
 	ShadowHits []ShadowHit
@@ -195,6 +199,7 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 		result.Suppress(SuppressEmptyStore, "memory store is empty")
 		return result
 	}
+	result.Unreadable = index.unreadable
 	// The shadow ranks the full pool before any production gate: what V1
 	// misses entirely is exactly what the comparison must be able to see.
 	result.ShadowHits = shadowRankV2(result.Query, index.fielded)
@@ -205,6 +210,12 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 	}
 	docs := index.docs
 	if len(docs) == 0 {
+		if len(result.Unreadable) > 0 {
+			// Nothing readable is left to recall: say the read failed rather
+			// than claim the store is empty, which is the absence this fix
+			// exists to rule out.
+			return recallReadFailure(result, result.Unreadable[0])
+		}
 		result.Suppress(SuppressEmptyStore, "memory store is empty")
 		return result
 	}

@@ -25,14 +25,16 @@ func (s *Server) registerSubagentRoutes(mux *http.ServeMux) {
 }
 
 type subagentRunView struct {
-	Ref       string `json:"ref"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Model     string `json:"model"`
-	Effort    string `json:"effort,omitempty"`
-	State     string `json:"state"`
-	StartedAt int64  `json:"startedAt"` // unix milliseconds
-	UpdatedAt int64  `json:"updatedAt"`
+	Ref    string `json:"ref"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Model  string `json:"model"`
+	Effort string `json:"effort,omitempty"`
+	State  string `json:"state"`
+	// ParentCall is the transcript tool call that spawned the run.
+	ParentCall string `json:"parentCall,omitempty"`
+	StartedAt  int64  `json:"startedAt"` // unix milliseconds
+	UpdatedAt  int64  `json:"updatedAt"`
 }
 
 type subagentTranscriptView struct {
@@ -46,7 +48,7 @@ type subagentTranscriptView struct {
 
 func subagentRunOf(r delegation.RunInfo) subagentRunView {
 	return subagentRunView{
-		Ref: r.Ref, Name: r.Name, Kind: r.Kind, Model: r.Model, Effort: r.Effort, State: string(r.State),
+		Ref: r.Ref, Name: r.Name, Kind: r.Kind, Model: r.Model, Effort: r.Effort, State: string(r.State), ParentCall: r.ParentToolCallID,
 		StartedAt: r.StartedAt.UnixMilli(), UpdatedAt: r.UpdatedAt.UnixMilli(),
 	}
 }

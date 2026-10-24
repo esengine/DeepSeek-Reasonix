@@ -66,6 +66,11 @@
 
 .fbk-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .fbk-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.fbk-labelrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fbk-previewtoggle { font: var(--w-med) var(--fs-meta) var(--ui); color: var(--muted); background: none; border: 0; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+.fbk-previewtoggle:hover:not(:disabled) { color: var(--text); background: var(--hover); }
+.fbk-previewtoggle:disabled { opacity: .5; cursor: default; }
+.fbk-preview { min-height: 110px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
 .fbk-label { font: var(--w-med) var(--fs-meta) var(--ui); color: var(--text); }
 .fbk-hint { font: var(--w-reg) var(--fs-meta)/1.55 var(--ui); color: var(--muted); }
 .fbk-hint[data-tone="warn"] { color: var(--warn-ink); }

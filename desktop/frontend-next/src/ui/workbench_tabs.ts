@@ -4,14 +4,17 @@ import { t } from "../i18n";
 export type Surface =
   | { kind: "manual"; id: string }
   | { kind: "browser"; tab: BrowserTab }
-  | { kind: "file"; path: string };
+  | { kind: "file"; path: string }
+  | { kind: "agent"; ref: string; name: string };
 export function keyOf(s: Surface) {
-  return `${s.kind}:${s.kind === "manual" ? s.id : s.kind === "browser" ? s.tab.target : s.path}`;
+  return `${s.kind}:${s.kind === "manual" ? s.id : s.kind === "browser" ? s.tab.target : s.kind === "agent" ? s.ref : s.path}`;
 }
 export function labelOf(s: Surface, hosts: Record<string, string>) {
   return s.kind === "manual"
     ? hosts[s.id] || t("浏览器")
     : s.kind === "browser"
       ? s.tab.title || s.tab.url || t("空白页")
-      : s.path.split("/").at(-1) || s.path;
+      : s.kind === "agent"
+        ? s.name
+        : s.path.split("/").at(-1) || s.path;
 }

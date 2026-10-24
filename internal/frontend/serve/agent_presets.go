@@ -204,6 +204,9 @@ func (s *Server) importAgentPreset(w http.ResponseWriter, r *http.Request) {
 	selections := map[string]agentcomposition.Selection{"tools": d.Tools, "skills": d.Skills, "mcp": d.MCP, "extensions": d.Extensions, "hooks": d.Hooks, "commands": d.Commands}
 	for kind, selection := range selections {
 		for _, m := range selection.Members {
+			if m.Optional {
+				continue
+			}
 			if !slices.ContainsFunc(catalog.Modules[kind], func(available agentpreset.Choice) bool { return available.ID == m.ID }) {
 				diagnostics = append(diagnostics, agentcomposition.Diagnostic{Code: "agent_composition.unavailable", Module: kind + ":" + m.ID, Detail: "Dependency is not available on this host."})
 			}

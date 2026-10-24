@@ -43,11 +43,11 @@ func TestEffectPreToolAccessRejectsBeforePreview(t *testing.T) {
 				t.Fatal(err)
 			}
 			result := run.results["blocked"]
-			message, code := "Cannot read target file: permission denied.", builtin.CodeReadForbidden
+			message, code := "forbidden-read list", builtin.CodeReadForbidden
 			if name == "write_file" {
 				message, code = "Cannot overwrite target file: permission to read existing contents is required.", builtin.CodeOverwriteReadForbidden
 			}
-			if result.Output != message || result.RefusalCode != code || result.Executed {
+			if !strings.Contains(result.Output, message) || result.RefusalCode != code || result.Executed {
 				t.Fatalf("wrong final-boundary refusal: %+v", result)
 			}
 			if seen := run.modelSaw(t, "blocked"); strings.Contains(seen, "review-canary") || seen != result.Output {
@@ -110,7 +110,7 @@ model = "x"
 				t.Fatalf("%s completed %d child reads, want %d", entry, len(results), wantReads)
 			}
 			for _, result := range results {
-				if result != "Cannot read target file: permission denied." {
+				if !strings.Contains(result, "forbidden-read list") {
 					t.Fatalf("%s child lost the system target policy: %q", entry, result)
 				}
 			}
@@ -164,7 +164,7 @@ func TestEffectPreToolAccessInheritedByReviewRoles(t *testing.T) {
 			if len(reqs) < 2 {
 				t.Fatalf("%s did not attempt its read", role)
 			}
-			if results := effectToolResults(reqs[1]); len(results) != 1 || results[0] != "Cannot read target file: permission denied." {
+			if results := effectToolResults(reqs[1]); len(results) != 1 || !strings.Contains(results[0], "forbidden-read list") {
 				t.Fatalf("%s lost the system target policy: %q", role, results)
 			}
 		})

@@ -1,5 +1,6 @@
 import type { Tool } from "../port/wire";
 import { t } from "../i18n";
+import type { SubagentState } from "../port/subagent";
 import { toolFailed } from "./cards/outcome";
 
 // One reading of "what left this context". The kernel marks a dispatch with a
@@ -42,3 +43,8 @@ export const delegateStatus = (running: boolean, tool: Tool): DelegateStatus =>
 
 export const delegateStatusLabel = (status: DelegateStatus): string =>
   status === "running" ? t("运行中") : status === "refused" ? t("未执行") : status === "failed" ? t("已中断") : t("已交付");
+
+// What the kernel's own record says about one run, as opposed to the card's
+// reading above, which has only the progress stream to go on.
+export const delegateStateLabel = (state: SubagentState): string =>
+  state === "running" ? t("运行中") : state === "completed" ? t("已完成") : state === "cancelled" ? t("已取消") : state === "failed" ? t("失败") : t("已中断");

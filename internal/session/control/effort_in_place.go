@@ -18,6 +18,7 @@ type effortSelection struct {
 type EffortInPlacer interface {
 	EffortInPlaceEligible(level string) bool
 	SetEffortInPlace(level string, target RuntimeSelection) bool
+	NoteEffortChoice(level string)
 }
 
 var _ EffortInPlacer = (*Controller)(nil)
@@ -55,6 +56,17 @@ func (c *Controller) SetEffortInPlace(level string, target RuntimeSelection) boo
 	c.effortSel.sel.Store(&target)
 	c.effortSel.level.Store(&level)
 	return true
+}
+
+// NoteEffortChoice records the depth the person named when it sends the same
+// request the session already sends, so a status read says what they chose and
+// not what the session was built with. "auto" reads back as the unset depth.
+func (c *Controller) NoteEffortChoice(level string) {
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level == "auto" {
+		level = ""
+	}
+	c.effortSel.level.Store(&level)
 }
 
 // runtimeSelectionNow is the selection the session runs under now.

@@ -19,8 +19,11 @@ func (s Store) rebuildIndexIn(dir string, entries []os.DirEntry, cause error) er
 		if entry.IsDir() || entry.Name() == indexFile || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
-		m, ok := loadMemory(filepath.Join(dir, entry.Name()))
-		if !ok {
+		// The index is derived and best-effort: a fact that cannot be read
+		// contributes no line, and /memory still names the file through
+		// ListActive. A directory error already returned above.
+		m, ok, readErr := loadMemory(filepath.Join(dir, entry.Name()))
+		if readErr != nil || !ok {
 			continue
 		}
 		m.Name = slug(m.Name)

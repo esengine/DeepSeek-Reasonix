@@ -21,6 +21,10 @@ type jobTimes struct {
 	started  int64
 	activity int64
 	finished int64
+	// steps counts what the runner reported as done, which a job whose work
+	// never reaches its own streams has and a hung one does not. It is the
+	// other half of activity: a sub-agent writes a transcript, not job output.
+	steps int64
 }
 
 // touch records that the job's output just moved.

@@ -30,6 +30,7 @@ func siblingProjects(t *testing.T, bashMode string) (alpha, beta, root *workspac
 	}
 	open := func(folder string) *workspacelease.Owner {
 		cfg := config.Default()
+		cfg.Agent.WriteLease = "strict"
 		cfg.Sandbox.Bash = bashMode
 		session, err := startSessionRuntime(Options{SessionDir: robustTempDir(t)}, cfg, folder, event.Discard)
 		if err != nil {

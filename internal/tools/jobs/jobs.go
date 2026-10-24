@@ -412,7 +412,8 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		j.artifact.err = err.Error()
 	}
 	j.mu.Unlock()
-	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
+	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeJobStarted,
+		Text: startedText(kind, id, label), Detail: event.JobNotice{Kind: kind, ID: id, Label: label}.Encode()})
 
 	if !nilutil.IsNil(m.taskRecorder) {
 		m.taskRecorder.RecordStart(id, kind, label)
@@ -629,8 +630,9 @@ func (m *Manager) monitorStalled(parentSession string, j *Job) {
 			idle := time.Since(time.UnixMilli(j.times.activity))
 			if idle >= m.stalledWarning && !j.stalled {
 				j.stalled = true
+				steps := j.times.steps
 				j.mu.Unlock()
-				m.recordStalled(parentSession, j.ID, j.Kind, j.Label)
+				m.recordStalled(parentSession, j.ID, j.Kind, j.Label, steps)
 				return
 			}
 			wait := m.stalledWarning - idle
@@ -643,21 +645,30 @@ func (m *Manager) monitorStalled(parentSession string, j *Job) {
 	}
 }
 
-func (m *Manager) recordStalled(parentSession, id, kind, label string) {
+// recordStalled reports a job that has gone quiet. steps says how much work it
+// had reported by then: a job with steps and no recent activity is waiting on
+// something, while one with none never got going, and the two need different
+// answers from the reader.
+func (m *Manager) recordStalled(parentSession, id, kind, label string, steps int64) {
 	tag := id
 	if label != "" {
 		tag = fmt.Sprintf("%s (%s)", id, label)
 	}
 	parentSession = strings.TrimSpace(parentSession)
+	quiet := m.stalledWarning.Round(time.Second)
+	// What went quiet is two different things: a job that reported work and
+	// stopped is waiting on something, while one that never reported may simply
+	// be writing to a file rather than its own streams.
+	work := "no progress has been reported, so it may be writing elsewhere rather than stuck"
+	if steps > 0 {
+		work = fmt.Sprintf("%d step(s) were reported before it went quiet, so it may be waiting on something", steps)
+	}
 	m.mu.Lock()
 	if parentSession != "" && m.destroying[parentSession] {
 		m.mu.Unlock()
 		return
 	}
-	// What is true, not what it looks like: silence on a job's own streams is
-	// also what a task redirecting into a file looks like, and calling that
-	// stalled sends the reader after the wrong thing.
-	text := fmt.Sprintf("%s has written nothing to its own output for %s — it may be writing to a file instead, or it may be stuck. Check with wait or bash_output, or stop it with kill_shell.", tag, m.stalledWarning.Round(time.Second))
+	text := fmt.Sprintf("%s has been inactive for %s — %s. It may be waiting on something, or it may be stuck. Check with wait or bash_output, or stop it with kill_shell.", tag, quiet, work)
 	m.completed = append(m.completed, completion{sessionID: parentSession, text: text})
 	active := m.active
 	shouldEmit := active == "" || parentSession == "" || active == parentSession
@@ -667,8 +678,8 @@ func (m *Manager) recordStalled(parentSession, id, kind, label string) {
 			Kind:   event.Notice,
 			Level:  event.LevelWarn,
 			Code:   event.NoticeCodeJobStalled,
-			Text:   fmt.Sprintf("background %s %s has written nothing to its own output for %s — it may be writing to a file, or stuck; check with wait/bash_output or stop with kill_shell", kind, id, m.stalledWarning.Round(time.Second)),
-			Detail: event.JobNotice{Kind: kind, ID: id, Label: label, QuietSeconds: int(m.stalledWarning / time.Second)}.Encode(),
+			Text:   fmt.Sprintf("background %s %s has been inactive for %s — %s; check with wait/bash_output or stop with kill_shell", kind, id, quiet, work),
+			Detail: event.JobNotice{Kind: kind, ID: id, Label: label, QuietSeconds: int(m.stalledWarning / time.Second), Steps: int(steps)}.Encode(),
 		})
 	}
 }
@@ -1701,6 +1712,31 @@ func PublishEvidence(ctx context.Context, summary evidence.ChildEvidenceSummary)
 	}
 	j.mu.Lock()
 	j.evidence.Receipts = append(j.evidence.Receipts, summary.Receipts...)
+	j.mu.Unlock()
+}
+
+// HasJob reports whether ctx belongs to a running background job. A runner whose
+// work never reaches the job's own streams asks this before promising to report.
+func HasJob(ctx context.Context) bool {
+	j, _ := ctx.Value(jobCtxKey{}).(*Job)
+	return j != nil
+}
+
+// NoteProgress records that the job's runner is alive: it refreshes the job's
+// activity stamp, and counts the work unit when steps is non-zero. A sub-agent
+// writes a transcript and calls tools; none of that is job output, so counting
+// bytes alone reports a busy job as silent for its whole life. This claims
+// liveness and step count, never that any output text was produced.
+func NoteProgress(ctx context.Context, steps int) {
+	j, _ := ctx.Value(jobCtxKey{}).(*Job)
+	if j == nil {
+		return
+	}
+	j.mu.Lock()
+	if steps > 0 {
+		j.times.steps += int64(steps)
+	}
+	j.times.touch()
 	j.mu.Unlock()
 }
 

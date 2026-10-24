@@ -1,2 +1,0 @@
-- 修复：终端里对“可能已经跑过”的恢复条目按 r 或 /queue retry 不再重新发送，会说明原因并建议先看对话记录或删除它。关联 #14180。
-- Fixed: in the terminal, r and /queue retry no longer re-send a recovered queue entry that may already have run; they say why and suggest checking the transcript or deleting it. Refs #14180.

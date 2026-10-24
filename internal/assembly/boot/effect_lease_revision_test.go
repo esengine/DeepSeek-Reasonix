@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/contract/config"
 	"strings"
 	"sync"
 	"testing"
@@ -77,6 +78,7 @@ func revisionLeaseScript(first, second provider.ToolCall) *revisionLeaseProvider
 func revisionLeaseWorkspace(t *testing.T) (string, func(provider.Provider, event.Sink, ...builtin.TerminalRunner) *control.Controller) {
 	t.Helper()
 	isolateConfigHome(t)
+	useStrictClaims(t)
 	root := robustTempDir(t)
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -297,4 +299,18 @@ func (revisionFixtureTerminal) RunCommand(_ context.Context, command, _ string, 
 		return "", false, nil
 	}
 	return "ok  \tleasefixture\t0.001s\n", true, nil
+}
+
+// useStrictClaims chooses the strict claim modes in the user file, which is the
+// only place they can be chosen: these tests exercise a writer that declares no
+// extent holding the whole workspace, and the default is optimistic.
+func useStrictClaims(t *testing.T) {
+	t.Helper()
+	path := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[agent]\nwrite_lease = \"strict\"\nsubagent_claims = \"strict\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

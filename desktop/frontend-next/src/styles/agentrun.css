@@ -1,0 +1,7 @@
+.agentrun { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.agentrun-hd { flex: none; display: flex; align-items: center; gap: 9px; padding: 8px 14px; border-bottom: 1px solid var(--hair); }
+.agentrun-hd .who { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--label-agent); }
+.agentrun-hd .model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint); }
+.agentrun-hd .rt { margin-left: auto; flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint); }
+.agentrun[data-state="running"] .agentrun-hd .rt { color: var(--net); }
+.agentrun > .scroll { flex: 1; min-height: 0; overflow-y: auto; }

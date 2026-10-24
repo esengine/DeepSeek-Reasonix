@@ -32,15 +32,23 @@ export function FeedbackBoard({ port, reload = 0 }: { port: AgentPort; reload?: 
 
   const load = useCallback(async () => {
     try {
-      const first = await port.feedbackBoard();
+      const [first, account] = await Promise.all([port.feedbackBoard(), port.account().catch(() => null)]);
       setAll(first);
       setBoard(first);
-      const account = await port.account().catch(() => null);
       const on = !!account && account.signedIn && !account.expired;
       setSignedIn(on);
-      if (on) setMe(await port.feedbackBoardMe().catch(() => null));
-      setLinked(on && ((await port.feedbackLinks().catch(() => [])).some((l) => l.current)));
-      if (on) await port.feedbackEnv(document.documentElement.lang).then((e) => setOfferName((prev) => prev || boardPrefill(e.displayName)), () => {});
+      if (!on) {
+        setLinked(false);
+        return;
+      }
+      const [mine, links, env] = await Promise.all([
+        port.feedbackBoardMe().catch(() => null),
+        port.feedbackLinks().catch(() => []),
+        port.feedbackEnv(document.documentElement.lang).catch(() => null),
+      ]);
+      setMe(mine);
+      setLinked(links.some((l) => l.current));
+      if (env) setOfferName((prev) => prev || boardPrefill(env.displayName));
     } catch {
       setAll(null);
     }

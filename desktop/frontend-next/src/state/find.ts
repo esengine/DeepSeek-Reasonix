@@ -7,6 +7,8 @@ export interface Hit {
   id: string;
   row: number;
   at: number;
+  /** How much the hit covers: the needle's length, or the regex match's. */
+  length: number;
 }
 
 /** Everything a row says, in reading order. Exhaustive over Item on purpose: a
@@ -60,6 +62,18 @@ export function saidBy(it: Item): string[] {
 // cached against the object and a growing session pays only for what it grew.
 const folded = new WeakMap<Item, string>();
 
+// The same text before it was flattened to lower case: a case-sensitive search
+// and a regular expression both have to see the row as it was written.
+const exact = new WeakMap<Item, string>();
+
+function exactHaystack(it: Item): string {
+  const held = exact.get(it);
+  if (held !== undefined) return held;
+  const made = saidBy(it).filter(Boolean).join("\n");
+  exact.set(it, made);
+  return made;
+}
+
 function haystack(it: Item): string {
   const held = folded.get(it);
   if (held !== undefined) return held;
@@ -68,15 +82,100 @@ function haystack(it: Item): string {
   return made;
 }
 
-export function search(items: Item[], query: string, receipts = false): Hit[] {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return [];
+/** How the query is read. Both default to off, which is the plain
+ *  case-insensitive substring search the box has always done. */
+export interface FindMode {
+  regex?: boolean;
+  caseSensitive?: boolean;
+}
+
+/** One match: where it starts and how much it covers. */
+export interface Match {
+  at: number;
+  length: number;
+}
+
+export type Matcher = (text: string, from: number) => Match | null;
+
+/** How one query is read. The count and the painter share this, so a hit the
+ *  counter sees is one the painter can draw. */
+export interface Finder {
+  match: Matcher;
+  /** Whether the text must be read as written (a regex, or a case-sensitive
+   *  search). A substring search reads the folded copy instead. */
+  verbatim: boolean;
+}
+
+/** null when the query is empty or the pattern does not compile yet: a
+ *  half-typed `(` is not an error worth a message, the box just has nothing to
+ *  point at. */
+export function finderFor(query: string, mode: FindMode = {}): Finder | null {
+  const text = query.trim();
+  if (!text) return null;
+  if (mode.regex) {
+    let re: RegExp;
+    try {
+      re = new RegExp(text, mode.caseSensitive ? "g" : "gi");
+    } catch {
+      return null;
+    }
+    return {
+      verbatim: true,
+      match: (hay, from) => {
+        re.lastIndex = from;
+        const hit = re.exec(hay);
+        return hit ? { at: hit.index, length: hit[0].length } : null;
+      },
+    };
+  }
+  if (mode.caseSensitive) {
+    return {
+      verbatim: true,
+      match: (hay, from) => {
+        const at = hay.indexOf(text, from);
+        return at < 0 ? null : { at, length: text.length };
+      },
+    };
+  }
+  const needle = text.toLocaleLowerCase();
+  return {
+    verbatim: false,
+    match: (hay, from) => {
+      const at = hay.indexOf(needle, from);
+      return at < 0 ? null : { at, length: needle.length };
+    },
+  };
+}
+
+/** The match after `m`. A plain substring advances by its own length, so
+ *  overlapping text is counted the way it always was ("aa" in "aaaa" is two,
+ *  not three). A regex may match nothing at all (`^`, a lookahead), so an empty
+ *  match steps one position instead of standing still. */
+export function afterMatch(finder: Finder, hay: string, m: Match): Match | null {
+  const from = m.at + (m.length || 1);
+  return from > hay.length ? null : finder.match(hay, from);
+}
+
+/** One search may not spend longer than this on a pathological pattern: a typed
+ *  `(a+)+$` would otherwise run against the whole transcript on every keystroke
+ *  and freeze the window. Cutting it short keeps the window usable; the count
+ *  then speaks for what was scanned. */
+const BUDGET_MS = 50;
+
+export function search(items: Item[], query: string, receipts = false, mode: FindMode = {}): Hit[] {
+  const finder = finderFor(query, mode);
+  if (!finder) return [];
   const out: Hit[] = [];
+  const deadline = Date.now() + BUDGET_MS;
   for (let row = 0; row < items.length; row++) {
     if (items[row].t === "receipt" && !receipts) continue;
-    const hay = haystack(items[row]);
-    for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + needle.length)) {
-      out.push({ id: items[row].id, row, at });
+    if (Date.now() > deadline) break;
+    const hay = finder.verbatim ? exactHaystack(items[row]) : haystack(items[row]);
+    for (let m = finder.match(hay, 0); m; m = afterMatch(finder, hay, m)) {
+      // An empty match (`^`, `a*`) covers nothing to paint; the painter skips
+      // it, so the count has to as well or the box shows hits with no range.
+      if (m.length === 0) continue;
+      out.push({ id: items[row].id, row, at: m.at, length: m.length });
       if (out.length >= MAX) return out;
     }
   }

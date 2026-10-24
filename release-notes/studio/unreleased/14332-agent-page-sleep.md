@@ -1,0 +1,2 @@
+- 新增：agent 浏览器的网页可在「设置 → 外观」开启空闲休眠：15 分钟无人使用后整页收起以省内存，再次使用时自动恢复为同一标签页。默认关闭。关联 #14332。
+- Added: agent browser pages can sleep when idle (Settings → Appearance): a page nobody drives for 15 minutes is folded away to save memory and wakes as the same tab. Off by default. Refs #14332.

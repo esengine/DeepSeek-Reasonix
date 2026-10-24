@@ -235,7 +235,7 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
                       <>
                         <div className="acts-pop-head">{t("本轮执行")}</div>
                         <button type="button" role="menuitem" data-action="reply.run-detail" onClick={() => { setMenu(""); reply.onRunDetail?.(); }}>
-                          <StudioIcon name="gauge" /><span>{t("运行分析")}</span>
+                          <StudioIcon name="activity" /><span>{t("运行分析")}</span>
                         </button>
                       </>
                     )}

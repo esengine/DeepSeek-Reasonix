@@ -284,6 +284,8 @@ export interface ProviderEdit {
   // The whole per-model answer for the listed models: a model sent null has no
   // price of its own again. Omitted leaves every model alone.
   modelPrices?: Record<string, ModelRate | null>;
+  // payg or subscription_equivalent; omitted leaves the stored mode alone.
+  billingMode?: string;
 }
 
 // One model's price per million tokens, zeros included: free is a price.

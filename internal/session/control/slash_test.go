@@ -3,6 +3,7 @@ package control
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -456,6 +457,34 @@ func TestManagementUnknownMCPAndSkillsSubcommandsSaySo(t *testing.T) {
 		}
 		if len(notices) != 1 || !strings.Contains(notices[0], "unknown /") || !strings.Contains(notices[0], "try:") {
 			t.Errorf("%s answered %v, want an unknown-subcommand notice", line, notices)
+		}
+	}
+}
+
+// Completion offers exactly the /mcp and /skills subcommands the controller
+// runs, so it is also the list a document may teach.
+func TestTheDocsNameOnlyMCPAndSkillsSubcommandsThatRun(t *testing.T) {
+	var docs []string
+	for _, pattern := range []string{"../../../docs/*.md", "../../../README*.md"} {
+		found, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		docs = append(docs, found...)
+	}
+	if len(docs) == 0 {
+		t.Fatal("no documents found")
+	}
+	named := regexp.MustCompile("`(/mcp|/skills?) ([a-z][a-z-]*)")
+	for _, path := range docs {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range named.FindAllStringSubmatch(string(body), -1) {
+			if items, _ := SlashArgItems(m[1]+" ", ArgData{}); !has(items, m[2]) {
+				t.Errorf("%s names `%s %s`, which the controller does not run", filepath.Base(path), m[1], m[2])
+			}
 		}
 	}
 }

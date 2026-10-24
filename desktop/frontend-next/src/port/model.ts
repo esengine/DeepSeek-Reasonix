@@ -34,6 +34,10 @@ export interface Completion {
   // here instead of leaving a fuzzy hit unexplained.
   query?: string;
   items: CompletionItem[];
+  // The command the line already spells in full. The kernel keeps it out of
+  // items, where accepting it would change nothing; a menu that has longer
+  // commands to offer lists it first so Enter still sends it.
+  typed?: CompletionItem;
 }
 
 export interface ModelPrice {

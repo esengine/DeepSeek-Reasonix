@@ -1,2 +1,0 @@
-- 修复：工作台顶栏里“加宽工作台”按钮移到最左边，“全屏工作台”按钮移到最右边，不再夹在标签中间。关联 #14229。
-- Fixed: the workbench bar puts the wide toggle at its left edge and the full-size toggle at its right edge instead of between the tabs. Refs #14229.

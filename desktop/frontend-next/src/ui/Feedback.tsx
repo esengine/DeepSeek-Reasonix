@@ -116,7 +116,7 @@ export function Feedback({ port, tab: first = "send", onClose, onError, onUnread
         </div>
         <div className="fbk-body">
           <div id="fbk-panel-send" role="tabpanel" aria-labelledby="fbk-tab-send" hidden={tab !== "send"}>
-            <FeedbackForm port={port} onMine={() => setTab("mine")} onClose={onClose} onFile={openLink} onConceal={setConcealed} />
+            <FeedbackForm port={port} pasteRoot={card} active={tab === "send" && !concealed} onMine={() => setTab("mine")} onClose={onClose} onFile={openLink} onConceal={setConcealed} />
           </div>
           {tab === "mine" && (
             <div id="fbk-panel-mine" role="tabpanel" aria-labelledby="fbk-tab-mine">

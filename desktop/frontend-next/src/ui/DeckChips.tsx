@@ -17,7 +17,7 @@ export type Deck = "" | "agents" | "jobs";
  *  readings sit at the right end of the run rail, beside the other numbers
  *  about this turn, and each opens on hover the way the context reading does —
  *  one gesture for every summary on this row. */
-export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput> }) {
+export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, onOpenRun }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput>; onOpenRun?: (call: string) => Promise<boolean> }) {
   const agentsBox = useRef<HTMLDivElement>(null);
   const jobsBox = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState("");
@@ -31,6 +31,11 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob }:
     agentsBox.current?.querySelector<HTMLElement>('[data-action="deck.agents"]')?.focus();
   }, []);
   const shut = useCallback(() => onOpen(() => ""), [onOpen]);
+  const openTask = async (id: string) => {
+    const call = tasks.find((x) => x.id === id)?.tool.id;
+    if (call && onOpenRun && (await onOpenRun(call))) return;
+    setViewing(id);
+  };
   useDismiss(open === "agents", agentsBox, shut);
   useDismiss(open === "jobs", jobsBox, shut);
   const liveAgents = useMemo(() => agentsIn(tasks.filter((x) => x.running)), [tasks]);
@@ -57,7 +62,7 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob }:
             <span>{t("子代理")}</span>
           </button>
           <div className="studio-deck-pop" role="dialog" aria-label={t("子代理")}>
-            <Agents tasks={tasks} onOpen={(id) => { shut(); setViewing(id); }} />
+            <Agents tasks={tasks} onOpen={(id) => { shut(); void openTask(id); }} />
           </div>
         </div>
       )}

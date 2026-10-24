@@ -163,3 +163,29 @@ func TestARecordedFinishedRunIsNotLiveWhileItsOwnerHasNotLetGo(t *testing.T) {
 		t.Fatalf("read between SaveCompleted and Release = %+v err=%v, want completed, not live, all messages", got, err)
 	}
 }
+
+func TestARunNamesTheToolCallThatSpawnedIt(t *testing.T) {
+	store, spec := viewFixture(t)
+	spec.ParentToolCallID = "call_task_7"
+	live := startedRun(t, store, spec, said(provider.RoleUser, "a"))
+	defer live.Release()
+	done := startedRun(t, store, spec, said(provider.RoleUser, "b"))
+	if err := store.SaveCompleted(done); err != nil {
+		t.Fatal(err)
+	}
+	done.Release()
+
+	runs, err := store.Runs(spec.ParentSession, spec.WorkspaceRoot)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("runs = %+v err=%v", runs, err)
+	}
+	for _, r := range runs {
+		if r.ParentToolCallID != "call_task_7" {
+			t.Fatalf("run %s parent call = %q, want the call that spawned it, live or finished", r.Ref, r.ParentToolCallID)
+		}
+	}
+	page, err := store.Transcript(live.Ref, spec.ParentSession, spec.WorkspaceRoot, 0, 0)
+	if err != nil || page.Info.ParentToolCallID != "call_task_7" {
+		t.Fatalf("transcript info = %+v err=%v", page.Info, err)
+	}
+}

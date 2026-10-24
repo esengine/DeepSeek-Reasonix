@@ -1,6 +1,7 @@
 package agentcomposition
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -46,8 +47,116 @@ func TestMinimalTemplateHasNoAutomationOrDelegation(t *testing.T) {
 				t.Fatalf("%s inherits modules", d.ID)
 			}
 		}
-		if d.Tools.Mode != Select || len(d.Tools.Members) != 2 || d.Tools.Members[0].ID != "bash" || d.Tools.Members[1].ID != "view_image" {
+		if d.Tools.Mode != Select || len(d.Tools.Members) != 2 || d.Tools.Members[0].ID != "bash" || d.Tools.Members[0].Optional || d.Tools.Members[1].ID != "view_image" || !d.Tools.Members[1].Optional {
 			t.Fatalf("minimal tools = %+v", d.Tools)
 		}
+	}
+}
+
+func TestOptionalModulesDecodeAndValidate(t *testing.T) {
+	for _, group := range []string{"tools", "skills", "mcp", "extensions", "hooks", "commands"} {
+		t.Run(group, func(t *testing.T) {
+			d := Builtins()[0]
+			data, err := json.Marshal(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(data, &document); err != nil {
+				t.Fatal(err)
+			}
+			document[group] = json.RawMessage(`{"mode":"select","members":[{"id":"example","optional":true}]}`)
+			data, err = json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := Decode(data)
+			if group != "tools" {
+				if !errors.Is(err, ErrInvalid) {
+					t.Fatalf("optional %s decode error = %v", group, err)
+				}
+				if !errors.Is(decoded.Validate(), ErrInvalid) {
+					t.Fatalf("optional %s passed structural validation", group)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !decoded.Tools.Members[0].Optional {
+				t.Fatal("optional tool lost during decode")
+			}
+		})
+	}
+}
+
+func TestOptionalToolsBindingRoundTrip(t *testing.T) {
+	d := Builtins()[1]
+	binding := Binding{
+		Resolved: d,
+		Version:  Version{Definition: d, Revision: Revision(d)},
+	}
+	binding.Seal()
+	restored := Clone(binding)
+	if err := restored.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range []Definition{restored.Resolved, restored.Version.Definition} {
+		if definition.Tools.Members[0].Optional || !definition.Tools.Members[1].Optional {
+			t.Fatalf("tool requirements changed during binding roundtrip: %+v", definition.Tools)
+		}
+	}
+	restored.Resolved.Tools.Members[1].Optional = false
+	if !errors.Is(restored.Validate(), ErrInvalid) {
+		t.Fatal("changing optional requirement did not invalidate binding digest")
+	}
+}
+
+func TestAbsentOptionalPreservesRevisionAndBindingDigest(t *testing.T) {
+	// A legacy declaration has no optional field; false must keep that encoding.
+	d := Builtins()[0]
+	d.Tools = Selection{Mode: Select, Members: []Module{{ID: "bash"}}}
+	data, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]json.RawMessage
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy["tools"] = json.RawMessage(`{"mode":"select","members":[{"id":"bash"}]}`)
+	if Revision(d) != Digest(legacy) {
+		t.Fatal("absent optional changed legacy revision")
+	}
+	decoded, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Tools.Members[0].Optional {
+		t.Fatal("explicit tool became optional by default")
+	}
+	binding := Binding{Resolved: decoded, Version: Version{Definition: decoded, Revision: Revision(decoded)}}
+	binding.Seal()
+	var legacyBinding map[string]json.RawMessage
+	data, err = json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &legacyBinding); err != nil {
+		t.Fatal(err)
+	}
+	legacyData, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyBinding["resolved"] = legacyData
+	versionData, err := json.Marshal(map[string]any{"definition": legacy, "revision": Revision(decoded)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyBinding["version"] = versionData
+	legacyBinding["digest"] = json.RawMessage(`""`)
+	if binding.Digest != Digest(legacyBinding) {
+		t.Fatal("absent optional changed legacy binding digest")
 	}
 }

@@ -19,19 +19,19 @@ const onSave = async () => null;
 describe("RunAnalysis", () => {
   it("says what the signal rail is for and why its marks do not move", () => {
     const moments: TrajRow[] = [...rows, { seq: 4, at: 2, kind: "note", payload: [{ t: "checkpoint" }], subs: [] }];
-    render(<RunAnalysis rows={moments} onSave={onSave} />);
+    render(<RunAnalysis rows={moments} onSave={onSave}  onBack={() => {}} />);
     expect(screen.getByText("信号轨")).toBeTruthy();
     expect(screen.getByText(/位置就是时间，无法拖动/)).toBeTruthy();
   });
 
   it("draws no rail, and no explanation of one, when nothing is a moment", () => {
-    render(<RunAnalysis rows={rows.slice(0, 2)} onSave={onSave} />);
+    render(<RunAnalysis rows={rows.slice(0, 2)} onSave={onSave}  onBack={() => {}} />);
     expect(screen.queryByText("信号轨")).toBeNull();
     expect(screen.queryByText(/位置就是时间/)).toBeNull();
   });
 
   it("summarises recorded activity and exposes an inspectable timeline", () => {
-    render(<RunAnalysis rows={rows} onSave={onSave} />);
+    render(<RunAnalysis rows={rows} onSave={onSave}  onBack={() => {}} />);
     expect(screen.getByText("运行分析")).toBeTruthy();
     expect(screen.getByText("工具耗时")).toBeTruthy();
     expect(screen.getByText("活动回合")).toBeTruthy();
@@ -43,13 +43,13 @@ describe("RunAnalysis", () => {
   });
 
   it("does not invent metrics before a run exists", () => {
-    render(<RunAnalysis rows={[]} onSave={onSave} />);
+    render(<RunAnalysis rows={[]} onSave={onSave}  onBack={() => {}} />);
     expect(screen.getByText("还没有可分析的运行")).toBeTruthy();
   });
 
   it("exports the same recorded rows directly from analysis", async () => {
     const save = vi.fn(async (_name: string, _content: string) => "D:/exports/trajectory.json");
-    render(<RunAnalysis rows={rows} availability="complete" onSave={save} />);
+    render(<RunAnalysis rows={rows} availability="complete" onSave={save}  onBack={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "导出运行记录" }));
     await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
     const [name, content] = save.mock.calls[0];
@@ -65,7 +65,7 @@ describe("RunAnalysis", () => {
     }));
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;
-    const { container } = render(<RunAnalysis rows={many} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={many} onSave={onSave}  onBack={() => {}} />);
     const items = [...container.querySelectorAll<HTMLLIElement>(".run-rounds li")];
     const before = items[40];
     fireEvent.click(before.querySelector("button")!);
@@ -81,13 +81,13 @@ describe("RunAnalysis", () => {
 
   it("opens a signal's record beside the signal track, where it was picked", () => {
     const withSignal: TrajRow[] = [...rows, { seq: 9, at: 2, kind: "checkpoint", payload: [{ t: "marker" }], subs: [] }];
-    const { container } = render(<RunAnalysis rows={withSignal} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={withSignal} onSave={onSave}  onBack={() => {}} />);
     fireEvent.click(container.querySelector<HTMLButtonElement>("[data-action='analysis.signal'][data-target='9']")!);
     expect(container.querySelector(".run-signals .run-inspect")).not.toBeNull();
   });
 
   it("zooms one shared timeline, preserves selection and resets the scroll position", () => {
-    const { container } = render(<RunAnalysis rows={rows} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={rows} onSave={onSave}  onBack={() => {}} />);
     const slider = screen.getByRole("slider", { name: "时间轴缩放" });
     const scroller = screen.getByRole("region", { name: "时间轴" });
     const canvas = container.querySelector<HTMLElement>(".run-timeline-canvas")!;
@@ -109,7 +109,7 @@ describe("RunAnalysis", () => {
     const moments: TrajRow[] = Array.from({ length: 12 }, (_, seq) => ({
       seq, at: 0, kind: "checkpoint", payload: [{ t: `signal ${seq}` }], subs: [],
     }));
-    const { container } = render(<RunAnalysis rows={moments} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={moments} onSave={onSave}  onBack={() => {}} />);
     const rail = container.querySelector<HTMLElement>(".run-signal-line")!;
     const marker = rail.querySelector<HTMLButtonElement>("[data-action='analysis.signal']")!;
     expect(rail.querySelectorAll("[data-action='analysis.signal']")).toHaveLength(1);
@@ -132,9 +132,9 @@ describe("RunAnalysis", () => {
 
   it("handles a single zero-time signal and newly arriving records without resetting zoom", () => {
     const moment: TrajRow = { seq: 1, at: 0, kind: "note", payload: [{ t: "start" }], subs: [] };
-    const { container, rerender } = render(<RunAnalysis rows={[moment]} onSave={onSave} />);
+    const { container, rerender } = render(<RunAnalysis rows={[moment]} onSave={onSave}  onBack={() => {}} />);
     fireEvent.change(screen.getByRole("slider"), { target: { value: "16" } });
-    rerender(<RunAnalysis rows={[moment, { ...moment, seq: 2, at: 1 }]} onSave={onSave} />);
+    rerender(<RunAnalysis rows={[moment, { ...moment, seq: 2, at: 1 }]} onSave={onSave}  onBack={() => {}} />);
     expect((screen.getByRole("slider") as HTMLInputElement).value).toBe("16");
     expect(container.querySelector("[data-target='1']")?.getAttribute("style")).not.toMatch(/NaN|Infinity/);
     expect(container.querySelectorAll("[data-action='analysis.signal']")).toHaveLength(2);
@@ -154,7 +154,7 @@ describe("RunAnalysis", () => {
     const moments: TrajRow[] = [1, 1.1, 10].map((at, seq) => ({
       seq, at, kind: "checkpoint", payload: [{ t: `signal ${seq}` }], subs: [],
     }));
-    const { container } = render(<RunAnalysis rows={moments} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={moments} onSave={onSave}  onBack={() => {}} />);
     const markers = () => [...container.querySelectorAll<HTMLButtonElement>("[data-action='analysis.signal']")];
     expect(markers().map((m) => m.textContent)).toEqual(["2", ""]);
     const first = markers()[0].style.left;
@@ -168,7 +168,7 @@ describe("RunAnalysis", () => {
     const moments: TrajRow[] = [0, 13, 100].map((at, seq) => ({
       seq, at, kind: "checkpoint", payload: [{ t: `signal ${seq}` }], subs: [],
     }));
-    const { container } = render(<RunAnalysis rows={moments} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={moments} onSave={onSave}  onBack={() => {}} />);
     const markers = [...container.querySelectorAll<HTMLButtonElement>("[data-action='analysis.signal']")];
     expect(markers.map((m) => m.textContent)).toEqual(["2", ""]);
     const [a, b] = markers.map((m) => parseFloat(m.style.left));
@@ -183,7 +183,7 @@ describe("RunAnalysis", () => {
       { seq: 4, at: 40, dur: 10, kind: "model_round", payload: [{ t: "long" }], subs: [] },
       { seq: 5, at: 100, kind: "event", payload: [], subs: [] },
     ];
-    const { container } = render(<RunAnalysis rows={timed} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={timed} onSave={onSave}  onBack={() => {}} />);
     const bars = [...container.querySelectorAll<HTMLElement>(".run-round-track > i")];
     fireEvent.click(container.querySelector("[data-action='analysis.row'][data-target='1']")!);
     fireEvent.change(screen.getByRole("slider"), { target: { value: String(zoom) } });
@@ -198,7 +198,7 @@ describe("RunAnalysis", () => {
 
   it("keeps zero-span recovery markers finite and duration-free at maximum zoom", () => {
     const recovery: TrajRow = { seq: 1, at: 0, dur: 0, kind: "protocol_recovery", payload: [{ t: "retry" }], subs: [] };
-    const { container } = render(<RunAnalysis rows={[recovery]} onSave={onSave} />);
+    const { container } = render(<RunAnalysis rows={[recovery]} onSave={onSave}  onBack={() => {}} />);
     fireEvent.change(screen.getByRole("slider"), { target: { value: "16" } });
     const bar = container.querySelector<HTMLElement>(".run-round-track > i")!;
     expect(bar.style.left).toBe("0%");
@@ -207,4 +207,13 @@ describe("RunAnalysis", () => {
     expect(container.querySelector(".run-inspect p")?.textContent).toBe("retry");
   });
 
+});
+
+describe("leaving the analysis view", () => {
+  it("puts a back control beside the title and hands the press to the caller", () => {
+    const onBack = vi.fn();
+    render(<RunAnalysis rows={rows} onSave={async () => null} onBack={onBack} />);
+    fireEvent.click(screen.getByRole("button", { name: "返回正文" }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
 });

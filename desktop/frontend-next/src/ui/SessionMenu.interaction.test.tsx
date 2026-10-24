@@ -45,7 +45,9 @@ it("names the toggles by the state they will leave behind", () => {
 
 it("disables export while one is in flight", () => {
   draw(session(), { exporting: true });
-  expect((screen.getByRole("menuitem", { name: /导出会话/ }) as HTMLButtonElement).disabled).toBe(true);
+  const items = screen.getAllByRole("menuitem", { name: /导出会话/ });
+  expect(items).toHaveLength(2);
+  for (const item of items) expect((item as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("branches an open conversation from its latest reply, even while it runs", async () => {

@@ -9,10 +9,12 @@ const PAYLOAD: Record<string, string | undefined> = {
   extension_skipped: JSON.stringify({ extension: "e", point: "tool.before" }),
   inbox_recovered: JSON.stringify({ count: 2 }),
   permission_rules_dormant: JSON.stringify({ rules: [{ list: "ask", rule: "Foo(bar)" }] }),
+  job_started: JSON.stringify({ id: "j", label: "build" }),
   job_finished: JSON.stringify({ id: "j", label: "build" }),
   job_killed: JSON.stringify({ id: "j", label: "build" }),
   job_failed: JSON.stringify({ id: "j", label: "build" }),
   job_stalled: JSON.stringify({ id: "j", label: "build", quietSeconds: 900 }),
+  compaction_telemetry: JSON.stringify({ mode: "summarized", source_tokens: 122525, projection_tokens: 61192, input_tokens: 40710, output_tokens: 8186, cache_hit_tokens: 256, request_count: 1 }),
   context_composition: JSON.stringify({ total: 561061, at: 419430, active: 400000, parts: [{ name: "tool_output", tokens: 500000 }] }),
   subagent_waiting: JSON.stringify({ task: "fix the typo", by: "rewrite the docs", whole: true }),
   display_currency: "USD",
@@ -67,6 +69,9 @@ describe("notice wording", () => {
     ["job_stalled", '{"id":"j"}'],
     ["job_stalled", '{"id":"j","quietSeconds":"900"}'],
     ["job_stalled", '{"id":"j","quietSeconds":0}'],
+    ["compaction_telemetry", '{"mode":"summarized"}'],
+    ["compaction_telemetry", '{"mode":"","source_tokens":1,"projection_tokens":1}'],
+    ["compaction_telemetry", '{"mode":"summarized","source_tokens":"122525","projection_tokens":1}'],
     ["compact_failed", "no_such_reason"],
   ])("%s reads valid JSON of the wrong shape (%s) as no payload", (code, detail) => {
     expect(noticeWording(code, detail)).toBeUndefined();

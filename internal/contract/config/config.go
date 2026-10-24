@@ -1137,8 +1137,8 @@ type AgentConfig struct {
 	// declare non-overlapping write_paths. 0, the default, sets no limit: the
 	// path claims keep writers apart, not a count. The user file only.
 	MaxParallelWriters int    `toml:"max_parallel_writers"`
-	SubagentClaims     string `toml:"subagent_claims"`   // "strict" (default) or "optimistic"; the user file only
-	WriteLease         string `toml:"write_lease"`       // "strict" (default) or "optimistic"; the user file only
+	SubagentClaims     string `toml:"subagent_claims"`   // "optimistic" (default) or "strict"; the user file only
+	WriteLease         string `toml:"write_lease"`       // "optimistic" (default) or "strict"; the user file only
 	PlanApproval       string `toml:"plan_approval"`     // "ask" (default) or "auto": the plan card answers itself; the user file only
 	DefaultMode        string `toml:"default_mode"`      // "normal" (default) or "plan": how a new conversation starts; the user file only
 	GoalAutoRetry      int    `toml:"goal_auto_retry"`   // 0 (default) stops at an unavailable completion check; N retries it up to N times in a row; the user file only
@@ -1216,7 +1216,7 @@ type ToolsConfig struct {
 	SettingTool              *bool                `toml:"setting_tool"`
 	// MCPResources offers a tool that reads a connected server's resource; user file only, off by default.
 	MCPResources bool `toml:"mcp_resources"`
-	// PresentFiles offers file-delivery cards to the model; user file only, off by default.
+	// PresentFiles offers file-delivery cards to the model; user file only, on by default.
 	PresentFiles bool `toml:"present_files"`
 	WebAccessSettings
 	// VideoNativeMaxBytes lowers the size read_video sends natively below the endpoint's limit; 0 keeps it. User file only.
@@ -1372,6 +1372,7 @@ func Default() *Config {
 		UI:      UIConfig{Theme: "auto", ShowTurnUsage: true, ShowChangedFiles: true},
 		Desktop: DesktopConfig{ConversationWidth: "standard"},
 		Billing: BillingConfig{},
+		Tools:   ToolsConfig{PresentFiles: true},
 		// Set here, not left to the zero value: an absent [secrets] still protects.
 		Secrets: SecretsConfig{ProtectCredentialFiles: true},
 		Notifications: NotificationsConfig{
@@ -1401,8 +1402,8 @@ func Default() *Config {
 			SubagentSteerPerMinute: 30,
 			MaxSubagentConcurrency: 0,
 			MaxParallelWriters:     0,
-			SubagentClaims:         "strict",
-			WriteLease:             "strict",
+			SubagentClaims:         "optimistic",
+			WriteLease:             "optimistic",
 			PlanApproval:           "ask",
 			DefaultMode:            "normal",
 		},

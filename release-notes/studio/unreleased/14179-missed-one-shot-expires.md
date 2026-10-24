@@ -1,2 +1,0 @@
-- 修复：只运行一次的定时任务错过时间后，不再一直显示“运行中”；它会变成“已到期”，不再出现点“续期”提示成功却什么都没运行。关联 #14179。
-- Fixed: a one-shot scheduled run that missed its time no longer stays Active; it shows as expired, so Renew no longer reports success when nothing will run. Refs #14179.

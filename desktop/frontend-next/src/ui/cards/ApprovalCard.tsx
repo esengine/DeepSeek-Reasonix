@@ -172,7 +172,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
                 )}
               </div>
             )}
-            {!sealed && <RememberWhere options={remembering} target={item.a.id} />}
+            {!sealed && <RememberWhere options={remembering} target={item.a.id} tool={item.a.tool} />}
             {!sealed && confirmFullAccess && (
               <div className="apv-yolo-confirm" role="alertdialog" aria-label={t("确认切换全部放行")}>
                 <div><b>{t("全部放行会跳过后续工具确认")}</b><span>{t("拒绝规则与沙盒边界仍然生效。仅在完全信任当前工作区时使用。")}</span></div>
@@ -187,7 +187,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
             {sealed && (
               <div className="apv-done">
                 {item.verdict === "session" ? (
-                  <><b>{t("已允许：本会话内此类操作不再询问。")}</b>{t("内核已记入会话授权，不写入磁盘。")}</>
+                  <><b>{t("已允许：本会话内此类操作不再询问。")}</b>{t("内核已记入这个对话的授权，随对话保存；恢复对话后仍然有效。")}</>
                 ) : item.verdict === "always" ? (
                   <><b>{t("已允许：已保存为规则。")}</b>{t("已写入配置，后续会话中此类操作也始终允许，不再询问。")}</>
                 ) : item.verdict === "yolo" ? (

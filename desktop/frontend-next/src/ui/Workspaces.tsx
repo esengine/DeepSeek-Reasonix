@@ -304,10 +304,10 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     }
   };
 
-  const saveSession = async (session: TreeSession) => {
+  const saveSession = async (session: TreeSession, format: "json" | "md" = "json") => {
     setBusy("export:" + session.path);
     try {
-      await saveSessionFile(hub, session);
+      await saveSessionFile(hub, session, format);
     } catch (e) {
       onError(e);
     } finally {
@@ -669,7 +669,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                             onArchive={() => archive(session)}
                             onBranch={onBranch && session.runtimeId ? () => { setSessionMenu(""); void onBranch(session.runtimeId!, `${rowLabel(session)} · ${t("分支")}`).catch(onError); } : undefined}
                             onCopyInfo={() => { void copyText(sessionInfoText(session, session.workspaceRoot || ws.root)).catch(onError); setSessionMenu(""); }}
-                            onExport={() => void saveSession(session)}
+                            onExport={(format) => void saveSession(session, format)}
                             onDelete={() => { askDelete(session.path); setSessionMenu(""); }}
                             onMove={(direction) => { setSessionMenu(""); void order.move(session, direction); }}
                             canMove={order.canMove(ws, session)}

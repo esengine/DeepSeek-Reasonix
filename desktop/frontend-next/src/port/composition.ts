@@ -1,7 +1,7 @@
 import definitions from "../../../../internal/contract/agentcomposition/builtins.json";
 
 export type CompositionKind = "tools" | "skills" | "mcp" | "extensions" | "hooks" | "commands";
-export interface CompositionModule { id: string; parameters?: Record<string, unknown> }
+export interface CompositionModule { id: string; parameters?: Record<string, unknown>; optional?: boolean }
 // A module the editor offers: the id is what a preset stores; the description is what the module
 // says about itself, for the person choosing, and is never saved.
 export interface CompositionChoice { id: string; description?: string; source?: "builtin" | "custom" }

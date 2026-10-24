@@ -87,7 +87,10 @@ func (s Store) publishArtifacts() ([]publishArtifact, map[int64]publishArtifact,
 				continue
 			}
 			path := filepath.Join(dir, hidden)
-			memory, loaded := loadMemory(path)
+			// An artifact that cannot be read cannot be matched by id or name
+			// either, so it stays unloaded here; the artifact name still lets a
+			// later pass retry it.
+			memory, loaded, _ := loadMemory(path)
 			artifact := publishArtifact{
 				dir: dir, file: hidden, name: factName, memory: memory,
 				loaded: loaded, stamp: stamp, staged: isStaged,

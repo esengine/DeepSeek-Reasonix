@@ -91,7 +91,7 @@ func (s Store) MigrateV2WithVersion(version string) (report MigrationReport, err
 				// A previous run can have rewritten the fact and then failed to
 				// publish the index, which leaves a migrated fact with a stale
 				// line. Repairing it is what makes the retry converge.
-				if migrated, ok := loadMemory(path); ok {
+				if migrated, ok, readErr := loadMemory(path); readErr == nil && ok {
 					migrated.Name = slug(migrated.Name)
 					if err := reindexIn(dir, migrated.Name, migrated); err != nil {
 						return report, err
@@ -99,8 +99,10 @@ func (s Store) MigrateV2WithVersion(version string) (report MigrationReport, err
 				}
 				continue
 			}
-			memory, ok := loadMemory(path)
-			if !ok {
+			// Unreadable after a successful raw read is a race; skip the rewrite
+			// and let the next migration pass see the file again.
+			memory, ok, readErr := loadMemory(path)
+			if readErr != nil || !ok {
 				continue
 			}
 			memory.Name = slug(memory.Name)

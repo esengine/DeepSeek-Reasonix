@@ -1,4 +1,4 @@
-const ARG_KEYS = ["command", "path", "file_path", "pattern", "query", "url", "description", "prompt", "step_id"];
+const ARG_KEYS = ["command", "path", "file_path", "pattern", "query", "url", "description", "prompt", "step_id", "name"];
 
 export function shortArgs(raw: string) {
   if (!raw) return "";

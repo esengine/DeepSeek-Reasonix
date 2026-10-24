@@ -1,2 +1,0 @@
-- 修复：侧栏各行（新建会话、搜索、文件、工具与集成、运行环境、钱包与用量、发送反馈）的文字统一为同一种颜色，“新建会话”不再有底色。关联 #14221。
-- Fixed: the sidebar rows now share one label colour, and New session no longer has a filled background at rest. Refs #14221.

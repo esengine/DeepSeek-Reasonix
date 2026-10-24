@@ -133,7 +133,9 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 		return "", err
 	}
 	path := result.Path
-	if saved, ok := loadMemory(path); ok && saved.Scope != "" {
+	// The save just wrote this file, so the read is only a scope refinement; if
+	// it fails the path's scope is the same answer.
+	if saved, ok, readErr := loadMemory(path); readErr == nil && ok && saved.Scope != "" {
 		factScope = NormalizeFactScope(string(saved.Scope))
 	} else {
 		factScope = t.store.scopeForPath(path)

@@ -1,2 +1,0 @@
-- 修复：“交付验收”卡片里的长命令不再铺满一大片，只显示开头一行并以省略号结尾，完整命令在鼠标悬停时可见。关联 #14204。
-- Fixed: a long command in the delivery receipt card no longer fills the card; it shows its first line with an ellipsis, and the whole command is in the hover text. Refs #14204.

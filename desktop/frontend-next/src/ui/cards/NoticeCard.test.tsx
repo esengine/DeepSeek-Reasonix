@@ -211,6 +211,26 @@ describe("a /compact notice", () => {
   });
 });
 
+describe("a finished-fold notice", () => {
+  const text = (over: Partial<Notice>) => draw({ level: "info", ...over }).querySelector(".notice-bar .t")?.textContent ?? "";
+  const payload = JSON.stringify({ mode: "summarized", source_tokens: 122525, projection_tokens: 61192, input_tokens: 40710, output_tokens: 8186, cache_hit_tokens: 256, request_count: 1, user_turns_kept: 157, user_turns_dropped: 6 });
+
+  it("is worded from its typed payload, not as a line of key=value text", () => {
+    const said = text({ code: "compaction_telemetry", text: "Context compacted (summarized): about 122525 -> 61192 tokens.", detail: payload });
+    expect(said).toContain(t("摘要压缩"));
+    expect(said).not.toContain("=");
+    expect(said).not.toContain("user_dropped");
+    expect(said).not.toContain("Context compacted");
+  });
+
+  it("leaves out the usage sentence for a fold that asked for no summary", () => {
+    const quiet = JSON.stringify({ mode: "snip", source_tokens: 9000, projection_tokens: 6000, request_count: 0 });
+    const said = text({ code: "compaction_telemetry", text: "x", detail: quiet });
+    expect(said).toContain(t("裁剪旧工具输出"));
+    expect(said).not.toContain(t("摘要请求用了 {in} 输入、{out} 输出 token，缓存命中 {hit}。", { in: "0", out: "0", hit: "0" }));
+  });
+});
+
 describe("a background job notice", () => {
   const text = (over: Partial<Notice>) => draw({ level: "info", ...over }).querySelector(".notice-bar .t")?.textContent ?? "";
   const payload = JSON.stringify({ kind: "bash", id: "bash-126", label: "make build" });
@@ -221,10 +241,21 @@ describe("a background job notice", () => {
     expect(said).not.toContain("background bash");
   });
 
-  it("words a stalled job from its payload: the name and how long it has been quiet", () => {
-    const said = text({ level: "warn", code: "job_stalled", text: "background bash bash-16 has written nothing to its own output for 15m0s", detail: JSON.stringify({ kind: "bash", id: "bash-16", label: "make build", quietSeconds: 900 }) });
-    expect(said).toBe(t("后台任务 {name} 已有 {quiet} 没往自己的输出里写任何内容：可能是在写文件，也可能卡住了；可以用 wait 或 bash_output 查看，或用 kill_shell 结束它", { name: "make build", quiet: "15m" }));
-    expect(said).not.toContain("has written nothing");
+  it("words a started job from its payload too, so the start is not the one English line among its siblings", () => {
+    const said = text({ code: "job_started", text: "background bash started: bash-126 (make build)", detail: payload });
+    expect(said).toBe(t("后台任务已开始：{name}", { name: "make build" }));
+    expect(said).not.toContain("background bash");
+  });
+
+  it("words a stalled job from its payload: the name, the span, and what it had reported", () => {
+    const said = text({ level: "warn", code: "job_stalled", text: "background bash bash-16 has been inactive for 15m0s", detail: JSON.stringify({ kind: "bash", id: "bash-16", label: "make build", quietSeconds: 900, steps: 12 }) });
+    expect(said).toBe(t("后台任务 {name} 已有 {quiet} 没有活动（{work}）：可能在等某个东西，也可能卡住了；可以用 wait 或 bash_output 查看，或用 kill_shell 结束它", { name: "make build", quiet: "15m", work: t("{n} 步在静默前完成", { n: 12 }) }));
+    expect(said).not.toContain("has been inactive");
+  });
+
+  it("says a stalled job reported no progress when it reported no steps", () => {
+    const said = text({ level: "warn", code: "job_stalled", text: "x", detail: JSON.stringify({ kind: "bash", id: "bash-16", quietSeconds: 900 }) });
+    expect(said).toContain(t("静默前没有任何进展"));
   });
 
   it("keeps the kernel's text for a stalled job whose payload does not say how long", () => {

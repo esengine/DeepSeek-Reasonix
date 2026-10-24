@@ -112,6 +112,10 @@ const (
 	NoticeCodeInboxRecovered = "inbox_recovered"
 	// A session's inbox bodies could not be read, so the queue's contents are unknown and it came up paused; Detail is the InboxUnrecovered payload.
 	NoticeCodeInboxUnrecovered = "inbox_unrecovered"
+	// A context fold finished; Detail is the CompactionNotice payload, its text the English fallback.
+	NoticeCodeCompactionTelemetry = "compaction_telemetry"
+	// A background job started; Detail is the JobNotice payload, its text the English fallback.
+	NoticeCodeJobStarted = "job_started"
 	// A background job ended; Detail is the JobNotice payload, its text the English fallback.
 	NoticeCodeJobFinished = "job_finished"
 	// A background job was killed; Detail is the JobNotice payload, its text the English fallback.

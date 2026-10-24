@@ -248,23 +248,24 @@ func (a *contextWindow) recordContextMaintenanceOutcome(inputHash, trigger, acti
 }
 
 func (a *contextWindow) emitCompactionTelemetry(t CompactionTelemetry) {
-	detail := fmt.Sprintf("trigger=%s mode=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d user_kept=%d user_dropped=%d",
-		t.Trigger, t.Mode, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
-		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount,
-		t.UserTurnsKept, t.UserTurnsDropped)
-	if t.ProviderRequestID != "" {
-		detail += " provider_request_id=" + t.ProviderRequestID
+	// A degraded fold carries the summarizer's error but still freed the
+	// context, so it is a notice with a cause rather than a failure.
+	if t.Error != "" && t.Mode != CompactionModeDegraded {
+		slog.Warn("agent: compaction failed", "trigger", t.Trigger, "mode", t.Mode, "source_tokens", t.SourceTokens,
+			"fold_tokens", t.FoldTokens, "input_tokens", t.InputTokens, "output_tokens", t.OutputTokens,
+			"provider_request_id", t.ProviderRequestID, "err_type", t.Error)
+		return
 	}
-	if t.Error != "" {
-		// A degraded fold carries the summarizer's error but still freed the
-		// context, so it is a notice with a cause rather than a failure.
-		if t.Mode != CompactionModeDegraded {
-			slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
-			return
-		}
-		detail += " err_type=" + t.Error
+	payload := event.CompactionNotice{
+		Trigger: t.Trigger, Mode: t.Mode, CacheState: t.CacheState, SourceTokens: t.SourceTokens, FoldTokens: t.FoldTokens,
+		Spans: t.Spans, ProjectionTokens: t.ProjectionTokens, InputTokens: t.InputTokens, OutputTokens: t.OutputTokens,
+		CacheHitTokens: t.CacheHitTokens, CacheMissTokens: t.CacheMissTokens, CacheWriteTokens: t.CacheWriteTokens,
+		RequestCount: t.RequestCount, UserTurnsKept: t.UserTurnsKept, UserTurnsDropped: t.UserTurnsDropped,
+		ProviderRequestID: t.ProviderRequestID, Error: t.Error,
 	}
-	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeCompactionTelemetry,
+		Text:   fmt.Sprintf("Context compacted (%s): about %d -> %d tokens.", t.Mode, t.SourceTokens, t.ProjectionTokens),
+		Detail: payload.Encode()})
 }
 
 // emitCompactionAborted closes the card of a fold that installed nothing. code
