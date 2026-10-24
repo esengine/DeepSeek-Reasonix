@@ -7,9 +7,9 @@ import (
 	"reasonix/internal/transcript"
 )
 
-func mcpDisplayNoticeEvents(e event.Event) ([]session.Event, error) {
+func displayNoticeEvents(e event.Event) ([]session.Event, error) {
 	var out []session.Event
-	if e.Code != event.NoticeCodeMCPToolsList || e.MessageID == "" {
+	if (e.Code != event.NoticeCodeMCPToolsList && e.Code != event.NoticeCodeImageReplayUnavailable && e.Code != event.NoticeCodeProviderRequestFailed) || e.MessageID == "" {
 		return nil, nil
 	}
 	var buffer transcript.Buffer

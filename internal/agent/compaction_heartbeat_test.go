@@ -49,9 +49,12 @@ func TestCompactionDeadlineSurvivesSSEHeartbeats(t *testing.T) {
 		a := New(p, nil, sess, Options{ContextWindow: 5000, CompactRatio: .5}, event.Discard)
 		started := time.Now()
 		err = a.CompactNow(t.Context(), "")
+		elapsed := time.Since(started)
+		// The synthetic transport can take another tick to finish its pipe
+		// write. Assert the compaction deadline, not transport cleanup latency.
 		<-closed
-		if !errors.Is(err, errSummaryBudget) || time.Since(started) != compactionBudget {
-			t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
+		if !errors.Is(err, errSummaryBudget) || elapsed != compactionBudget {
+			t.Fatalf("elapsed=%s err=%v", elapsed, err)
 		}
 		if requests != 1 || heartbeats < 20 {
 			t.Fatalf("requests=%d heartbeats=%d", requests, heartbeats)

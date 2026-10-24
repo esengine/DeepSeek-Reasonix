@@ -31,6 +31,7 @@ func TestInterruptedRecoveryDisplayMetadataDoesNotChangeProviderBlock(t *testing
 	base := &provider.InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"bash"}, DroppedPartialText: true}
 	enriched := *base
 	enriched.TerminalStatus = "failed"
+	enriched.Cause = "image processing failed: configured image understanding model does not accept images"
 	enriched.FailureDiagnostic = &provider.FailureDiagnostic{Kind: "request", Status: 404, ProviderID: "deepseek-anthropic", ProviderDisplayName: "Deepseek2", Protocol: "openai"}
 	if before, after := interruptedRecoveryBlock(base), interruptedRecoveryBlock(&enriched); before != after {
 		t.Fatalf("display metadata changed provider-visible recovery\nbefore=%q\nafter=%q", before, after)

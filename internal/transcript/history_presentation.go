@@ -54,7 +54,7 @@ func CollapseExpandedPaste(content string) string {
 func interruptedNotice(recovery *provider.InterruptedTurnRecovery) Message {
 	if recovery != nil && recovery.TerminalStatus == "failed" {
 		diagnostic := recovery.FailureDiagnostic
-		text := "The provider request failed. Check the connection settings and try again."
+		text := "This turn failed. The original error details were not saved."
 		if diagnostic != nil {
 			if diagnostic.Kind == "no_deliverable_output" {
 				text = i18n.M.NoDeliverableOutput
@@ -67,7 +67,12 @@ func interruptedNotice(recovery *provider.InterruptedTurnRecovery) Message {
 				text = label + ": " + text
 			}
 		}
-		return Message{Role: "notice", Level: "warn", Code: event.NoticeCodeProviderRequestFailed, Content: text, Detail: provider.FailureDiagnosticDetail(diagnostic), Diagnostic: diagnostic}
+		detail := provider.FailureDiagnosticDetail(diagnostic)
+		if recovery.Cause != "" && recovery.Cause != "runtime_restart" {
+			text = recovery.Cause
+			detail = strings.TrimSpace(text + "\n" + detail)
+		}
+		return Message{Role: "notice", Level: "warn", Code: event.NoticeCodeProviderRequestFailed, Content: text, Detail: detail, Diagnostic: diagnostic}
 	}
 	return Message{Role: "notice", Level: "info", Code: event.NoticeCodeCancelledTurn,
 		Content: "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes."}

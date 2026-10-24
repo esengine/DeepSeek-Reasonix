@@ -345,6 +345,7 @@ func (buffer *Buffer) applyNotice(e event.Event) {
 		Level:           level,
 		Content:         e.Text,
 		Detail:          e.Detail,
+		Diagnostic:      e.Diagnostic,
 		Code:            e.Code,
 		DecisionReceipt: cloneDecisionReceipt(e.DecisionReceipt),
 	}})

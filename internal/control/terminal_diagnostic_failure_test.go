@@ -46,6 +46,9 @@ func TestTerminalEventsSurviveProviderDiagnosticFailure(t *testing.T) {
 				kinds = append(kinds, ev.Kind)
 			}
 			want := []string{"tool/result", "interaction/resolved", "step/end"}
+			if !e.Cancelled {
+				want = append([]string{"diagnostic"}, want...)
+			}
 			if e.Recovery != nil {
 				want = append(want, "runtime/recovery")
 			}

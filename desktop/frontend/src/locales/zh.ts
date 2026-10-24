@@ -26,6 +26,7 @@ export const zh: Record<DictKey, string> = {
   "studio.cardBody": "了解 Studio、安装方式和数据兼容说明。",
   "studio.learnMore": "了解详情",
   "error.unknown": "操作出现问题，请展开详情查看原始报错。",
+  "error.imageInput": "图片处理失败，请检查图片理解模型设置，展开详情查看具体原因。",
   "error.requestSendTimeout": "请求发送超时（300 秒），重发一次后仍未完成，本轮已停止。请查看错误详情，导出会话诊断可获取失败阶段和原因。",
   "error.transportEOF": "连接意外结束（EOF）。请查看错误详情，导出会话诊断可获取失败阶段。",
   "error.transportReset": "连接被重置或关闭。请查看错误详情，导出会话诊断可获取失败阶段。",

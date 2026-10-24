@@ -114,17 +114,24 @@ func planCancelledMessages(msgs []provider.Message, idx int, fallback provider.M
 		localIndexes = append(localIndexes, len(next)-1)
 	}
 	if evidence != nil {
-		recovery.Cause = "runtime_restart"
-		recovery.TurnID = evidence.turnID
-		recovery.SilentInterruption = len(recovery.ToolCalls) == 0 && len(recovery.CompletedTools) == 0 && !recovery.DroppedPartialText && !recovery.DroppedPartialReasoning
+		applyInterruptedTailEvidence(recovery, evidence)
 	}
 	next[localIndexes[len(localIndexes)-1]].InterruptedTurn = recovery
 	return next
 }
 
+func applyInterruptedTailEvidence(recovery *provider.InterruptedTurnRecovery, evidence *interruptedTailEvidence) {
+	if recovery.TerminalStatus != "failed" {
+		recovery.Cause = "runtime_restart"
+	}
+	recovery.TurnID = evidence.turnID
+	recovery.SilentInterruption = len(recovery.ToolCalls) == 0 && len(recovery.CompletedTools) == 0 && !recovery.DroppedPartialText && !recovery.DroppedPartialReasoning
+}
+
 func mergeInterruptedRecovery(dst, src *provider.InterruptedTurnRecovery) {
 	if src.TerminalStatus != "" {
 		dst.TerminalStatus = src.TerminalStatus
+		dst.Cause = src.Cause
 		dst.FailureDiagnostic = nil
 	}
 	if src.FailureDiagnostic != nil {

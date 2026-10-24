@@ -17,6 +17,7 @@ var English = Messages{
 	CompletionUncertain:              "Completion could not be confirmed. The current result and completed work are kept. Send \"continue\" to resume, or restate what should change.",
 	ReasoningReplayRepair:            "The model provider rejected this conversation's stored thinking blocks. Reasonix removed them from the provider-visible history and retried once.",
 	ImageRequestRecovery:             "This image could not be included. Attach it again and resend; if it still fails, check the image model settings. Your conversation is kept",
+	ImageReplayUnavailable:           "Some earlier or tool images could not be processed. Continuing with available text; see details for the cause.",
 	ExtensionRequestRecovery:         "An extension could not prepare a usable model request. Review the recently enabled extensions in settings and retry; your conversation is kept",
 	ExtensionBlockRecovery:           "Review the extension's reason and settings before retrying. Repeatedly resending the same message will not resolve this block.",
 	ContextLimitRecovery:             "Automatic context recovery could not fit this request. Shorten the latest message or choose a model with a larger context window. The original history is kept",

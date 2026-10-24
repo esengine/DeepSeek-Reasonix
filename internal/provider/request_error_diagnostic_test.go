@@ -130,7 +130,7 @@ func TestFailureDiagnosticStrictPreviousReader(t *testing.T) {
 		RequestPath         string `json:"requestPath,omitempty"`
 		TransportCode       string `json:"transportCode,omitempty"`
 	}
-	for _, kind := range []string{"request_send_timeout", "transport_eof", "transport_reset", "transport_timeout", "transport_dns"} {
+	for _, kind := range []string{"request_send_timeout", "transport_eof", "transport_reset", "transport_timeout", "transport_dns", FailureKindImageInput} {
 		raw, _ := json.Marshal(FailureDiagnostic{Kind: kind, ProviderID: "deepseek", Protocol: "openai"})
 		var old previous
 		decoder := json.NewDecoder(strings.NewReader(string(raw)))

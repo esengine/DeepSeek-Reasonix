@@ -44,6 +44,9 @@ for (const locale of ["en", "zh", "zh-TW"] as const) {
   assert.deepEqual(presentError("saved failure", translate, locale, { kind: "no_deliverable_output" }), {
     summary: dict["error.noDeliverable"], detail: "saved failure",
   });
+  assert.deepEqual(presentError("Image processing failed: configured image understanding model does not accept images", translate, locale, { kind: "image_input" }), {
+    summary: dict["error.imageInput"], detail: "Image processing failed: configured image understanding model does not accept images",
+  });
   for (const [kind, key] of [
     ["request_send_timeout", "error.requestSendTimeout"],
     ["transport_eof", "error.transportEOF"],
@@ -79,10 +82,11 @@ let changeLocale: (locale: Locale) => void;
 let toast: ReturnType<typeof useToast>["showToast"];
 const raw = "unknown library failure <img src=x onerror=alert(1)>";
 const protocolError = "connection error: PROTOCOL_ERROR <img src=x onerror=alert(1)>";
+const imageError = "Image processing failed: unknown vision model fixture/vision";
 function Probe() {
   changeLocale = useI18n().setPref;
   toast = useToast().showToast;
-  return <><p id="inline-error"><ErrorMessage error={raw} /></p><p id="transport-error"><ErrorMessage error={protocolError} diagnostic={{ kind: "transport_protocol", transportCode: "PROTOCOL_ERROR" }} /></p><p id="summary-only"><ErrorMessage error={undefined} summary="仅有说明" /></p></>;
+  return <><p id="inline-error"><ErrorMessage error={raw} /></p><p id="transport-error"><ErrorMessage error={protocolError} diagnostic={{ kind: "transport_protocol", transportCode: "PROTOCOL_ERROR" }} /></p><p id="image-error"><ErrorMessage error={imageError} diagnostic={{ kind: "image_input" }} /></p><p id="summary-only"><ErrorMessage error={undefined} summary="仅有说明" /></p></>;
 }
 const root = createRoot(document.getElementById("root")!);
 await act(async () => root.render(<LocaleProvider><ToastProvider><Probe /></ToastProvider></LocaleProvider>));
@@ -104,6 +108,9 @@ assert.equal(document.querySelector("#transport-error .user-error__summary")?.te
 await act(async () => document.querySelector<HTMLButtonElement>("#transport-error .user-error__toggle")!.click());
 assert.equal(document.querySelector("#transport-error .user-error__detail")?.textContent, `${protocolError}\nHTTP/2: PROTOCOL_ERROR`);
 assert.equal(document.querySelector("#transport-error img"), null);
+assert.equal(document.querySelector("#image-error .user-error__summary")?.textContent, en["error.imageInput"]);
+await act(async () => document.querySelector<HTMLButtonElement>("#image-error .user-error__toggle")!.click());
+assert.equal(document.querySelector("#image-error .user-error__detail")?.textContent, imageError);
 assert.equal(document.querySelector("#inline-error .user-error__summary")?.textContent, raw, "English errors follow the active English UI locale");
 await act(async () => changeLocale("zh-TW"));
 

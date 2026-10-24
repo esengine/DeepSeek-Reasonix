@@ -14,8 +14,10 @@ for version in v1.39.8 v1.39.9; do
   mkdir -p "$snapshot"
   git -C "$root" archive "$version" | tar -x -C "$snapshot"
   cp "$root/$fixture" "$snapshot/$fixture"
-  run_fixture "$root" "$scratch/new-to-$version" write request_send_timeout
-  run_fixture "$snapshot" "$scratch/new-to-$version" read request_send_timeout
+  for kind in request_send_timeout image_input; do
+    run_fixture "$root" "$scratch/new-to-$version-$kind" write "$kind"
+    run_fixture "$snapshot" "$scratch/new-to-$version-$kind" read "$kind"
+  done
   run_fixture "$snapshot" "$scratch/$version-to-new" write temporary
   run_fixture "$root" "$scratch/$version-to-new" read temporary
   printf 'PASS %s: bidirectional replay, continued write and reopen\n' "$version"

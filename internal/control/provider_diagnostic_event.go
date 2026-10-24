@@ -22,7 +22,13 @@ func withTerminalFailureDiagnostic(e event.Event) event.Event {
 			e.Diagnostic = provider.DiagnoseFailure(cause)
 		}
 		if e.Detail == "" {
-			e.Detail = provider.FailureDiagnosticDetail(e.Diagnostic)
+			e.Detail = secrets.FailureDetail(e.Err)
+			if metadata := provider.FailureDiagnosticDetail(e.Diagnostic); metadata != "" {
+				if e.Detail != "" {
+					e.Detail += "\n"
+				}
+				e.Detail += metadata
+			}
 		}
 	}
 	return e

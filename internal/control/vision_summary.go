@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"fmt"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/imageinput"
@@ -31,21 +30,21 @@ func (c *Controller) prepareVisionTurn(ctx context.Context, input string, images
 	}
 	target, err := svc.SelectModel(c.selection.ref, images)
 	if err != nil {
-		return input, ctx, fmt.Errorf("图片理解失败，当前回答尚未发送：%w", err)
+		return input, ctx, imageRequestFailure(ctx, err)
 	}
 	if len(prepared.inputs) > 0 {
 		route, routeErr := c.imageRequestRoute(target)
 		if routeErr != nil {
-			return input, ctx, routeErr
+			return input, ctx, imageRequestFailure(ctx, routeErr)
 		}
 		images, err = c.resolveImageInputsForRoute(ctx, prepared.inputs, route)
 		if err != nil {
-			return input, ctx, err
+			return input, ctx, imageRequestFailure(ctx, err)
 		}
 	}
 	summary, err := svc.UnderstandSelected(ctx, target, images, history, c.sink)
 	if err != nil {
-		return input, ctx, fmt.Errorf("图片理解失败，当前回答尚未发送：%w", err)
+		return input, ctx, imageRequestFailure(ctx, err)
 	}
 	return imageinput.AppendSummary(input, summary), agent.WithVisionSummary(ctx, summary), nil
 }

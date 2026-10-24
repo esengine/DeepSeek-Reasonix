@@ -20,6 +20,28 @@ All structured tool images, including direct and on-demand MCP images, share the
 
 ## Compatibility
 
+If an older attachment or a tool image cannot be read or understood, later text
+turns continue with the available text. A warning preserves the failure reason;
+the request explicitly identifies unavailable images and forbids guessing their
+contents. Original attachments and conversation history are retained. Current
+user attachments still fail visibly instead of being silently omitted, and
+cancelling the turn still stops processing. A failed image service's own timeout
+does not cancel an otherwise active text turn.
+
+Failure details are credential-redacted and bounded before persistence. Reopened
+conversations and diagnostic exports retain the cause, including failures before
+the main model request starts. Older records that never saved a cause explicitly
+say it is unavailable. The existing local-only recovery `cause` field and optional
+display notices are used; no required storage fields are added, and diagnostic
+text is excluded from model requests. The fixed unavailable-image note changes
+only degraded requests and may cause a prompt-cache miss on that path.
+
+| Diagnostic data | Existing records | New records | v1.39.8 / v1.39.9 readers |
+| --- | --- | --- | --- |
+| Recovery `cause` | Missing cause remains unavailable | Bounded, redacted cause | Read, append and reopen without schema changes |
+| Failure kind `image_input` | Existing classifications unchanged | Identifies image preparation | Unknown classification falls back safely |
+| Optional display notice | Existing format unchanged | Prepass failures and degraded-image warnings | Existing display format remains readable |
+
 | Data | Old writer | This build | Previous build |
 | --- | --- | --- | --- |
 | Old `images []string` (data URL / HTTP / Files ID) | Written | Read as-is; not rewritten | Read as-is |

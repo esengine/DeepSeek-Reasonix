@@ -32,6 +32,7 @@ const codeKeys: Record<string, DictKey> = {
   transport_timeout: "error.timeout",
   transport_dns: "error.dns",
   no_deliverable_output: "error.noDeliverable",
+  image_input: "error.imageInput",
 };
 
 // Narrow legacy matches bridge errors from older services and OS libraries.

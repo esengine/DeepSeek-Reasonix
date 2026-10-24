@@ -13,7 +13,6 @@ import (
 )
 
 // imageReadError distinguishes local attachment loss from upload/auth failures.
-// Only the former can be omitted when replaying an earlier user turn.
 type imageReadError struct{ error }
 
 func (e imageReadError) Unwrap() error { return e.error }
@@ -41,12 +40,12 @@ func (c *Controller) resolveReplayImages(ctx context.Context, inputs []attachmen
 			images = append(images, resolved...)
 			continue
 		}
-		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 			return nil, nil, err
 		}
-		var readErr imageReadError
-		if historical && (errors.As(err, &readErr) || input.Validate() != nil) {
+		if historical {
 			missing = append(missing, i+1)
+			c.emitImageReplayWarning(err)
 			continue
 		}
 		var item attachment.Error
@@ -75,8 +74,11 @@ func noteUnreadableImages(m *provider.Message, count int) {
 }
 
 func imageRequestFailure(ctx context.Context, err error) error {
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, context.Canceled) {
 		return err
 	}
-	return fmt.Errorf("%s: %w", i18n.M.ImageRequestRecovery, err)
+	return fmt.Errorf("%s: %w", i18n.M.ImageRequestRecovery, &provider.ImageInputError{Err: err})
 }

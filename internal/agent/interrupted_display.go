@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/secrets"
 	"strings"
 )
 
@@ -50,9 +51,11 @@ func interruptedDisplayRecord(messageID, text, reasoning string, calls []provide
 	}
 	terminalStatus := "interrupted"
 	var failureDiagnostic *provider.FailureDiagnostic
+	var cause string
 	if terminalErr != nil && !errors.Is(terminalErr, context.Canceled) {
 		terminalStatus = "failed"
 		failureDiagnostic = provider.DiagnoseFailure(terminalErr)
+		cause = secrets.FailureDetail(terminalErr)
 	}
 	return provider.Message{
 		ID:               messageID,
@@ -64,6 +67,7 @@ func interruptedDisplayRecord(messageID, text, reasoning string, calls []provide
 		Name:             provider.LocalOnlyToolName,
 		LocalOnly:        true,
 		InterruptedTurn: &provider.InterruptedTurnRecovery{
+			Cause:                   cause,
 			TerminalStatus:          terminalStatus,
 			FailureDiagnostic:       failureDiagnostic,
 			Pending:                 pending,

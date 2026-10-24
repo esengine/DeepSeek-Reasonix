@@ -227,6 +227,7 @@ func TestTerminationPreservesFailureWithoutChangingModelContext(t *testing.T) {
 			recovery := &provider.InterruptedTurnRecovery{Pending: true, TerminalStatus: status}
 			if status == "failed" {
 				recovery.FailureDiagnostic = &provider.FailureDiagnostic{Kind: "transport_protocol", TransportCode: "PROTOCOL_ERROR"}
+				recovery.Cause = "connection error: PROTOCOL_ERROR"
 			}
 			user := provider.Message{ID: "user", Role: provider.RoleUser, Content: "hello"}
 			local := provider.Message{ID: "local", Role: provider.RoleTool, LocalOnly: true, InterruptedTurn: recovery}
@@ -238,7 +239,7 @@ func TestTerminationPreservesFailureWithoutChangingModelContext(t *testing.T) {
 				t.Fatal("diagnostics changed model-visible bytes")
 			}
 			after := got[len(got)-1].InterruptedTurn
-			if after.TerminalStatus != status || (after.FailureDiagnostic == nil) != (recovery.FailureDiagnostic == nil) {
+			if after.TerminalStatus != status || after.Cause != recovery.Cause || (after.FailureDiagnostic == nil) != (recovery.FailureDiagnostic == nil) {
 				t.Fatalf("lost terminal metadata: %+v", after)
 			}
 			if after.FailureDiagnostic != nil {

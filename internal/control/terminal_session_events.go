@@ -16,6 +16,11 @@ func (c *Controller) terminalSessionEvents(e event.Event, projection session.Pro
 	} else if diagnostic != nil {
 		out = append(out, *diagnostic)
 	}
+	if notices, err := c.terminalFailureDisplayEvents(e, projection); err != nil {
+		slog.Warn("controller: discarded optional failure display", "turnId", e.TurnID)
+	} else {
+		out = append(out, notices...)
+	}
 	interactionState := "unavailable"
 	if e.Cancelled || e.Status == event.TurnInterrupted {
 		interactionState = "cancelled"

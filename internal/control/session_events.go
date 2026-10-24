@@ -440,7 +440,7 @@ func (c *Controller) appendSessionEventLocked(ctx context.Context, e event.Event
 
 func (c *Controller) sessionEventsFor(e event.Event, projection session.Projection) ([]session.Event, error) {
 	if e.Kind == event.Notice {
-		return mcpDisplayNoticeEvents(e)
+		return displayNoticeEvents(e)
 	}
 	if e.Kind == event.SessionOperation {
 		return sessionMaintenanceEvents(e)

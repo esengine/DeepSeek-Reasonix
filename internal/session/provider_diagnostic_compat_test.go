@@ -24,9 +24,13 @@ func TestProviderDiagnosticCrossVersionFixture(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close(t.Context()) })
 	if mode == "write" {
+		cause := ""
+		if kind == "image_input" {
+			cause = "Image processing failed: configured image understanding model does not accept images"
+		}
 		payload, err := json.Marshal(map[string]any{"message": provider.Message{
 			ID: "failure", Role: provider.RoleTool, LocalOnly: true,
-			InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true, TerminalStatus: "failed", FailureDiagnostic: &provider.FailureDiagnostic{Kind: kind, ProviderID: "deepseek"}},
+			InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true, TerminalStatus: "failed", Cause: cause, FailureDiagnostic: &provider.FailureDiagnostic{Kind: kind, ProviderID: "deepseek"}},
 		}})
 		if err != nil {
 			t.Fatal(err)
@@ -54,6 +58,9 @@ func TestProviderDiagnosticCrossVersionFixture(t *testing.T) {
 		messages := projection.Messages
 		if len(messages) != 1 || messages[0].InterruptedTurn == nil || messages[0].InterruptedTurn.FailureDiagnostic.Kind != kind {
 			t.Fatalf("old/new reader lost failure: %+v", messages)
+		}
+		if kind == "image_input" && messages[0].InterruptedTurn.Cause != "Image processing failed: configured image understanding model does not accept images" {
+			t.Fatal("reader lost original image cause")
 		}
 		payload, _ := json.Marshal(map[string]any{"message": provider.Message{ID: "continued", Role: provider.RoleUser, Content: "continue"}})
 		if _, err = s.Append(t.Context(), Batch{OperationID: "continue", Events: []Event{{Kind: "message/complete", Payload: payload}}}); err != nil {

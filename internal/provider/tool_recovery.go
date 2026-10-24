@@ -108,7 +108,7 @@ func RecordToolRecovery(r *InterruptedTurnRecovery, call InterruptedToolSummary,
 type InterruptedTurnRecovery struct {
 	TurnID                  string                   `json:"turn_id,omitempty"`
 	AttemptID               string                   `json:"attempt_id,omitempty"`
-	Cause                   string                   `json:"cause,omitempty"`
+	Cause                   string                   `json:"cause,omitempty"`          // bounded redacted error for failed turns; runtime_restart for interrupted turns
 	TerminalStatus          string                   `json:"terminalStatus,omitempty"` // failed | interrupted; absent preserves legacy display
 	FailureDiagnostic       *FailureDiagnostic       `json:"failureDiagnostic,omitempty"`
 	WriteChecks             []WriteRecoveryCheck     `json:"write_checks,omitempty"`

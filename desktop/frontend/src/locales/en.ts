@@ -25,6 +25,7 @@ export const en = {
   "studio.cardBody": "Explore Studio, installation and data compatibility.",
   "studio.learnMore": "Learn more",
   "error.unknown": "An error occurred. Open details to view the reported cause.",
+  "error.imageInput": "Image processing failed. Check the image model settings; expand details for the cause.",
   "error.requestSendTimeout": "Send timed out (300s) after one resend; turn stopped. See error details and session diagnostics.",
   "error.transportEOF": "Connection ended unexpectedly (EOF). See session diagnostics.",
   "error.transportReset": "Connection reset or closed. See session diagnostics.",

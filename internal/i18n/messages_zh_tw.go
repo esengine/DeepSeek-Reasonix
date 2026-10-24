@@ -18,6 +18,7 @@ var ChineseTraditional = Messages{
 	CompletionUncertain:              "完成狀態未確認。目前結果與已完成工作均已保留。傳送「繼續」可接著完成，也可以補充說明需要調整的內容。",
 	ReasoningReplayRepair:            "模型服務拒絕了本會話歷史中的 thinking 區塊。Reasonix 已從傳送給模型的歷史中移除這些內容，並重試了一次。",
 	ImageRequestRecovery:             "這張圖片未能傳送給模型。請重新加入圖片後傳送；如果仍然失敗，請檢查圖片模型設定。聊天記錄已保留",
+	ImageReplayUnavailable:           "部分歷史圖片或工具圖片無法處理，將使用可用文字繼續。具體原因請查看詳情。",
 	ExtensionRequestRecovery:         "擴充功能未能提供可用的模型請求。請在設定中檢查最近啟用的擴充功能後重試，聊天記錄已保留",
 	ExtensionBlockRecovery:           "請根據擴充功能給出的原因檢查其設定後重試。重複傳送同一則訊息不能解除此攔截。",
 	ContextLimitRecovery:             "自動整理上下文後，請求仍然過長。請縮短最新訊息，或切換到支援更長上下文的模型。原始聊天記錄已保留",

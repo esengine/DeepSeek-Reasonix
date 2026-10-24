@@ -41,6 +41,7 @@ type Messages struct {
 	CompletionUncertain      string // completion validator could not confirm the result; work is kept
 	ReasoningReplayRepair    string // provider rejected replayed thinking blocks; history repaired and retried once
 	ImageRequestRecovery     string // current image cannot be included; request a fresh attachment
+	ImageReplayUnavailable   string // earlier/tool image processing failed; text remains usable
 	ExtensionRequestRecovery string // extension produced an invalid model request
 	ExtensionBlockRecovery   string // actionable hint following an explicit extension block
 	ContextLimitRecovery     string // automatic context recovery exhausted

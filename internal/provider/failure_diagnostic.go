@@ -122,6 +122,8 @@ func DiagnoseFailure(err error) *FailureDiagnostic {
 	switch {
 	case errors.Is(err, context.Canceled):
 		d.Kind = FailureKindCancelled
+	case errors.As(err, new(*ImageInputError)):
+		d.Kind = FailureKindImageInput
 	case errors.Is(err, ErrNoDeliverableOutput):
 		d.Kind = "no_deliverable_output"
 	case AsRecoveryWaitExhausted(err) != nil:

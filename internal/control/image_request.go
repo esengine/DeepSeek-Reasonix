@@ -9,8 +9,6 @@ import (
 
 	"reasonix/internal/attachment"
 	"reasonix/internal/config"
-	"reasonix/internal/i18n"
-	"reasonix/internal/imageinput"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 )
@@ -157,19 +155,21 @@ func (c *Controller) ResolveRequestImagesForModel(ctx context.Context, msgs []pr
 	if c == nil {
 		return msgs, nil
 	}
-	route, err := c.imageRequestRoute(model)
-	if err != nil {
-		return nil, err
-	}
 	out := append([]provider.Message(nil), msgs...)
 	currentTurn := lastImageRequestTurn(msgs)
 	for i := range out {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if out[i].LocalOnly {
 			continue
 		}
 		if err := out[i].ValidateImageFields(); err != nil {
+			if out[i].Role == provider.RoleTool && c.omitReplayImageFailure(ctx, &out[i], err, i < currentTurn) {
+				continue
+			}
 			if i >= currentTurn {
-				return nil, fmt.Errorf("%s: %w", i18n.M.ImageRequestRecovery, err)
+				return nil, imageRequestFailure(ctx, err)
 			}
 			if len(out[i].Images) > 0 && len(out[i].ImageInputs) > 0 {
 				positions := make([]int, len(out[i].Images)+len(out[i].ImageInputs))
@@ -186,43 +186,22 @@ func (c *Controller) ResolveRequestImagesForModel(ctx context.Context, msgs []pr
 			continue
 		}
 		if !native {
-			if out[i].VisionSummary == nil {
-				svc := imageinput.New(imageinput.Config{Model: c.visionModel, Resolve: c.visionProviderResolver, Select: c.visionModelSelector})
-				if c.executor != nil && c.executor.ImageInput() != nil {
-					svc = c.executor.ImageInput()
-				}
-				target, err := svc.SelectModel(model, nil)
-				if errors.Is(err, imageinput.ErrNoModel) && (out[i].Role != provider.RoleUser || i < currentTurn) {
-					noteUnreadableImages(&out[i], len(out[i].ImageInputs))
-					out[i].ImageInputs = nil
-					continue
-				}
-				if err != nil {
+			if err := c.understandReplayImages(ctx, &out[i], model, i < currentTurn); err != nil {
+				if !c.omitReplayImageFailure(ctx, &out[i], err, i < currentTurn) {
 					return nil, imageRequestFailure(ctx, err)
 				}
-				visionRoute, err := c.imageRequestRoute(target)
-				if err != nil {
-					return nil, imageRequestFailure(ctx, err)
-				}
-				images, missing, err := c.resolveReplayImages(ctx, out[i].ImageInputs, visionRoute, i < currentTurn)
-				if err != nil {
-					return nil, imageRequestFailure(ctx, err)
-				}
-				noteUnavailableImages(&out[i], missing)
-				if len(images) == 0 {
-					out[i].ImageInputs = nil
-					continue
-				}
-				summary, err := svc.UnderstandSelected(ctx, target, images, nil, c.sink)
-				if err != nil {
-					return nil, imageRequestFailure(ctx, err)
-				}
-				out[i].Content = imageinput.AppendSummary(out[i].Content, summary)
 			}
 			out[i].ImageInputs = nil
 			continue
 		}
-		resolved, missing, err := c.resolveReplayImages(ctx, out[i].ImageInputs, route, i < currentTurn)
+		route, err := c.imageRequestRoute(model)
+		if err != nil {
+			if c.omitReplayImageFailure(ctx, &out[i], err, i < currentTurn) {
+				continue
+			}
+			return nil, imageRequestFailure(ctx, err)
+		}
+		resolved, missing, err := c.resolveReplayImages(ctx, out[i].ImageInputs, route, i < currentTurn || out[i].Role == provider.RoleTool)
 		if err != nil {
 			return nil, imageRequestFailure(ctx, err)
 		}
