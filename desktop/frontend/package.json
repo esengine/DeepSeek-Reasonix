@@ -73,19 +73,19 @@
     "@dnd-kit/sortable": "10.0.0",
     "@dnd-kit/utilities": "3.2.2",
     "@modelcontextprotocol/ext-apps": "1.7.5",
-    "@tanstack/react-virtual": "^3.14.13",
+    "@tanstack/react-virtual": "^3.14.21",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "anser": "^2.3.5",
     "hast-util-to-jsx-runtime": "2.3.6",
     "highlight.js": "^11.12.0",
     "html-url-attributes": "3.0.1",
-    "katex": "^0.18.9",
+    "katex": "^0.18.10",
     "lucide-react": "^1.41.0",
     "mermaid": "^11.17.2",
     "qrcode.react": "^4.2.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.2.9",
+    "react-dom": "^19.2.9",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.0",
@@ -95,7 +95,7 @@
     "unified": "11.0.5",
     "unist-util-visit": "^5.1.0",
     "vfile": "6.0.3",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@types/hast": "3.0.5",
@@ -105,7 +105,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@typescript-eslint/parser": "^8.70.1",
-    "@vitejs/plugin-react": "^6.1.1",
+    "@vitejs/plugin-react": "^6.1.2",
     "decode-named-character-reference": "^1.3.0",
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -116,7 +116,7 @@
     "terser": "^5.51.2",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vite": "^8.2.2"
+    "vite": "^8.2.4"
   },
   "overrides": {
     "dompurify": "3.4.13",
