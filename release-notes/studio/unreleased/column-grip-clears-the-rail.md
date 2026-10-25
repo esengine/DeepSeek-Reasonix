@@ -1,0 +1,2 @@
+- 修复：右侧栏打开、正文到达最宽时，右边缘的拖动把手会落进历史对话鱼眼所占的那条竖带里，导致拖不动；正文现在在最宽时给把手留出位置。关联 #14343。
+- Fixed: with the workbench open and the column at its width ceiling, the right drag handle fell inside the conversation rail's lane and could not be grabbed; the column now leaves room for the handle at that width. Refs #14343.

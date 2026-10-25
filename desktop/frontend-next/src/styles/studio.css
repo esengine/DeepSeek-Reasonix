@@ -219,7 +219,7 @@ body { background: var(--page); }
 
 /* Composer */
 .compose {
-  width: min(var(--flow-w, var(--column)), calc(100% - var(--srail-w) - 42px));
+  width: min(var(--flow-w, var(--column)), calc(100% - var(--srail-w) - 84px));
   max-width: none;
   margin: 0 auto 14px;
   padding: 14px 15px 11px;
@@ -725,7 +725,7 @@ body { background: var(--page) !important; }
 .flow[data-empty] { display: flex; align-items: center; justify-content: center; }
 .flow:not([data-empty]) {
   flex: 0 0 auto;
-  width: min(var(--flow-w, var(--doc)), calc(100% - var(--srail-w) - 34px));
+  width: min(var(--flow-w, var(--doc)), calc(100% - var(--srail-w) - 76px));
   margin: 0 auto;
   padding: 28px 0 36px;
   box-sizing: border-box;
@@ -1074,7 +1074,7 @@ body { background: var(--page) !important; }
 .flow .copy:hover { color: var(--muted); background: transparent; }
 
 .compose {
-  width: min(var(--flow-w, var(--column)), calc(100% - var(--srail-w) - 42px));
+  width: min(var(--flow-w, var(--column)), calc(100% - var(--srail-w) - 84px));
   margin-bottom: 35px;
   padding: 15px 16px 10px;
   border-radius: 15px;
@@ -1174,7 +1174,7 @@ body { background: var(--page) !important; }
 .btn.send:hover { background: var(--accent); transform: translateY(-1px); }
 .btn.send:disabled { background: var(--hair); color: var(--ghost); }
 .composeaux,
-.composenotes { width: min(var(--flow-w, var(--column)), calc(100% - var(--srail-w) - 42px)); margin-inline: auto; }
+.composenotes { width: min(var(--flow-w, var(--column)), calc(100% - var(--srail-w) - 84px)); margin-inline: auto; }
 .composenotes { color: var(--ghost); }
 .studio-meterrail {
   position: absolute; z-index: 12; left: 16px; right: 16px; bottom: -32px; min-height: 27px;
