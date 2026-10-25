@@ -725,7 +725,7 @@ body { background: var(--page) !important; }
 .flow[data-empty] { display: flex; align-items: center; justify-content: center; }
 .flow:not([data-empty]) {
   flex: 0 0 auto;
-  width: min(var(--flow-w, var(--doc)), calc(100% - var(--srail-w) - 76px));
+  width: min(var(--flow-w, var(--doc)), calc(100% - var(--srail-w) - var(--flow-reserve, 76px)));
   margin: 0 auto;
   padding: 28px 0 36px;
   box-sizing: border-box;
@@ -1683,7 +1683,7 @@ body { background: var(--page) !important; }
 
 @media (max-width: 760px) {
   .studio-brand-sub { display: none; }
-  .flow { width: calc(100% - 20px); margin-inline: auto; padding-inline: 0; }
+  .flow { --flow-reserve: 34px; width: calc(100% - 20px); margin-inline: auto; padding-inline: 0; }
   .compose { width: calc(100% - 20px); margin-inline: auto; }
 }
 
