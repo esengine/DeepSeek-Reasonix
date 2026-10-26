@@ -4,6 +4,8 @@
 /bin/
 /dist/
 /stage/
+# Static HTML design prototypes; the implementation lives in desktop/frontend-next.
+/output/
 /npm/.stage/
 /reasonix
 /reasonix.exe
