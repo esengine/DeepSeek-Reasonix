@@ -5,7 +5,7 @@ import { beside, pinToViewport, useFollow } from "../place";
 import { StudioIcon, type StudioIconName } from "../StudioIcon";
 
 export interface DeliveryAction {
-  kind: "add" | "open" | "reveal" | "copy";
+  kind: "add" | "open" | "reveal" | "locate" | "copy";
   label: string;
   icon: StudioIconName;
   disabled?: boolean;
@@ -41,9 +41,9 @@ export function DeliveryMenu({ anchor, label, target, actions, onClose }: {
       items[next]?.focus();
     }}>
     {actions.map((action, index) => {
-      const add = action.kind === "add", open = action.kind === "open", reveal = action.kind === "reveal";
+      const add = action.kind === "add", open = action.kind === "open", reveal = action.kind === "reveal", locate = action.kind === "locate";
       return <button key={action.label} type="button" role="menuitem" data-target={target}
-      data-action={add ? "delivery.add-to-chat" : open ? "workbench.open-file" : reveal ? "workbench.reveal" : "workbench.copy-path"}
+      data-action={add ? "delivery.add-to-chat" : open ? "workbench.open-file" : reveal ? "workbench.reveal" : locate ? "workbench.locate" : "workbench.copy-path"}
       disabled={action.disabled} title={action.title} autoFocus={index === actions.findIndex((item) => !item.disabled)}
       onClick={() => { close(); action.run(); }}>
       <StudioIcon name={action.icon} /><span>{action.label}</span>

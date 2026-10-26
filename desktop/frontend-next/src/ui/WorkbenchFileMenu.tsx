@@ -14,10 +14,11 @@ export function absoluteWorkspacePath(root: string, path: string): string {
   return base + separator + (separator === "\\" ? path.replaceAll("/", "\\") : path);
 }
 
-export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, onOpen, onAddToChat, onClose }: {
+export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, onLocate, onOpen, onAddToChat, onClose }: {
   menu: FileMenu; root: string; revealable: boolean; platform: string;
   onReveal: (path: string) => void; onAddToChat?: (reference: string) => void; onClose: () => void;
   onOpen?: (path: string) => void;
+  onLocate?: (path: string) => void;
 }) {
   const [state, setState] = useState<"idle" | "copying" | "failed">("idle");
   const live = useRef(false);
@@ -75,9 +76,13 @@ export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, 
           {platform === "darwin" ? t("在访达中显示") : platform === "windows" ? t("在文件资源管理器中显示") : t("在系统文件管理器中显示")}
         </button>
       )}
+      {onLocate && (
+        <button role="menuitem" autoFocus={!revealable} data-action="workbench.locate" data-target={menu.path}
+          onClick={() => { close(); onLocate(menu.path); }}>{t("在文件树中显示")}</button>
+      )}
       <button
         role="menuitem"
-        autoFocus={!revealable && !!absolute}
+        autoFocus={!revealable && !onLocate && !!absolute}
         disabled={!absolute || state === "copying"}
         data-action="workbench.copy-path"
         data-target={menu.path}
@@ -85,7 +90,7 @@ export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, 
       >{t("复制路径")}</button>
       <button
         role="menuitem"
-        autoFocus={!revealable && !absolute}
+        autoFocus={!revealable && !onLocate && !absolute}
         disabled={!reference || state === "copying"}
         title={reference ? undefined : ambiguous ? t("此名称可能被识别为 MCP 资源") : t("此名称不能表示为 @ 引用")}
         data-action="workbench.copy-ref"

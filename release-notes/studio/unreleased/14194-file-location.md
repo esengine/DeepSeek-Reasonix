@@ -1,0 +1,2 @@
+- Studio：交付文件卡片支持右键和键盘菜单；卡片和对话文件链接新增“在文件树中显示”，展开父目录并定位文件。文件树使用独立标题，与提交历史区分；折叠目录后可再次定位。关联 #14194。
+- Studio: right-click file cards to reveal files in the expanded workbench tree. A Files heading separates it from commit history; revealing again reopens collapsed parents. Refs #14194.
