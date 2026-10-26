@@ -1,0 +1,2 @@
+- 新增：Wallpaper Engine 场景支持多图层合成与逐音轨音量/循环，并保留 effects 元数据供后续 shader 接入。Refs #14561。
+- Added: scene wallpapers composite their image layers, honor per-track volume and loop mode, and keep effect metadata for a future shader pass. Refs #14561.

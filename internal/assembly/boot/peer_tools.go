@@ -10,7 +10,7 @@ import (
 
 // peerToolNames are the tools the peer switches own, so a switch turned off
 // withdraws exactly these.
-var peerToolNames = []string{"list_peers", "send_peer_message", "dispatch_to_project"}
+var peerToolNames = []string{"list_peers", "send_peer_message", "dispatch_to_project", "open_projects"}
 
 // peerTools registers the tools that let the model see and message other
 // sessions, and only while the user has the switch on, so the tool block of
@@ -31,7 +31,7 @@ func peerTools(reg *tool.Registry, cfg *config.Config) (*tool.PeerLink, func(ena
 		}
 		add := builtin.PeerTools(link)
 		if dispatch {
-			add = append(add, builtin.DispatchTool(link))
+			add = append(add, builtin.DispatchTool(link), builtin.OpenProjectsTool(link))
 		}
 		for _, t := range add {
 			if allowed(t.Name()) {

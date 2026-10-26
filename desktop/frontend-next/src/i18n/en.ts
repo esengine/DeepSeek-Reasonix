@@ -484,6 +484,7 @@ export const EN: Record<string, string> = {
   "批准后还会发生": "Approving also",
   "并行启动 {n} 个候选": "starts {n} attempts in parallel",
   "并行启动多个候选": "starts several attempts in parallel",
+  "把下面 {n} 个文件夹加入你的项目列表并标记为可信；加入后，会话才能把任务派发到这些项目。没有出现在这里的文件夹不会被加入。": "Adds these {n} folders to your project list and marks them trusted, so sessions can then dispatch tasks to them. A folder that is not listed here is not added.",
   "，各自在独立的 git 工作副本里无人值守地运行：它们的工具调用按「自动审核」处理，不再逐个询问（拒绝规则仍然生效；会话为「不询问」时候选也不询问）。最后由评审选出一个写回工作区。": ", each running unattended in its own git worktree: their tool calls are handled as Auto review, without asking one by one (deny rules still apply; if this session never asks, neither do they). A judge then writes one of them back to the workspace.",
   "候选要做的任务": "The attempts' task",
   "这次批准的效力超出这一次调用本身。": "This approval covers more than this one call.",

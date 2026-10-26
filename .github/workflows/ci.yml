@@ -420,6 +420,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+
+      - name: test (Windows root auxiliary budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(RootAuxiliary|EffectRootAuxiliary)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-auxiliary-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestRootAuxiliaryAutomaticCompaction", "TestRootAuxiliaryTokenBudget",
+              "TestRootAuxiliaryTokenBudget/summary", "TestRootAuxiliaryTokenBudget/summary_failed",
+              "TestRootAuxiliaryTokenBudget/summary_missing", "TestRootAuxiliaryTokenBudget/summary_disabled",
+              "TestRootAuxiliaryTokenBudget/diagnosis", "TestRootAuxiliaryTokenBudget/diagnosis_failed",
+              "TestRootAuxiliaryTokenBudget/diagnosis_missing", "TestRootAuxiliaryTokenBudget/diagnosis_disabled",
+              "TestRootAuxiliaryManualCompactionOutsideRun", "TestRootAuxiliaryBudgetProjectionKeepsOldTask",
+              "TestEffectRootAuxiliarySummaryBudget", "TestEffectRootAuxiliarySummaryBudget/configured",
+              "TestEffectRootAuxiliarySummaryBudget/disabled", "TestEffectRootAuxiliarySummaryBudget/missing_usage"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/root-auxiliary-budget.jsonl"
+
+      - name: upload Windows root auxiliary budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: root-auxiliary-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-auxiliary-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: test (Windows estimated usage quotes)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 5
@@ -449,6 +481,41 @@ jobs:
         with:
           name: estimated-quote-windows-${{ github.run_attempt }}
           path: ${{ runner.temp }}/estimated-quote.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows bounded root budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(AuxiliaryUsageObserver|BoundedUsageObserver|RootBounded|EffectRootBounded)' ./internal/contract/provider ./internal/model/boundedllm ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/bounded-root-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/contract/provider", "reasonix/internal/model/boundedllm",
+              "reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestAuxiliaryUsageObserverReplacesAndCopies",
+              "TestBoundedUsageObserverOwnsOneTerminal", "TestBoundedUsageObserverOwnsOneTerminal/reported",
+              "TestBoundedUsageObserverOwnsOneTerminal/billed_failure", "TestBoundedUsageObserverOwnsOneTerminal/without_sink",
+              "TestBoundedUsageObserverOwnsOneTerminal/missing", "TestBoundedUsageObserverOwnsOneTerminal/input_refused",
+              "TestRootBoundedReviewerBudget", "TestRootBoundedReviewerBudget/reported",
+              "TestRootBoundedReviewerBudget/billed_failure", "TestRootBoundedReviewerBudget/missing_usage",
+              "TestRootBoundedReviewerBudget/disabled", "TestRootBoundedReviewerBudget/no_emission",
+              "TestRootBoundedReviewerBudget/projected_job_context", "TestRootBoundedNestedBudgetChargesOnce",
+              "TestRootBoundedLateProjectionStaysWithOldTask", "TestEffectRootBoundedAdvisorBudget",
+              "TestEffectRootBoundedAdvisorBudget/reported", "TestEffectRootBoundedAdvisorBudget/disabled",
+              "TestEffectRootBoundedAdvisorBudget/missing_usage"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/bounded-root-budget.jsonl"
+
+      - name: upload Windows bounded root budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bounded-root-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bounded-root-budget.jsonl
           if-no-files-found: ignore
           retention-days: 7
 

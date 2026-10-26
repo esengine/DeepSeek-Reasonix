@@ -1,0 +1,2 @@
+- 新增（默认关闭）：打开派发开关后，模型可请你把一批文件夹开成项目；一张卡逐条列出路径，你批准后才加入并标记为可信，之后才能向它们派发任务。关联 #13341。
+- Added (off by default): with dispatch on, the model can ask to open folders as projects; one card lists every path and nothing is added or trusted until you approve. Refs #13341.

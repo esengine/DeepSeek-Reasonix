@@ -205,7 +205,7 @@ func TestEffectDispatchToolExistsOnlyWhereTheUserTurnedDispatchOn(t *testing.T) 
 			for _, name := range rec.toolNames() {
 				has[name] = true
 			}
-			if has["dispatch_to_project"] != dispatch || !has["send_peer_message"] {
+			if has["dispatch_to_project"] != dispatch || has["open_projects"] != dispatch || !has["send_peer_message"] {
 				t.Fatalf("tools in the first request = %v", rec.toolNames())
 			}
 		})

@@ -59,11 +59,11 @@ func TestEffectPeerSwitchMovesTheToolBlockOnlyAtTurnBoundaries(t *testing.T) {
 	}
 	runTurn(t, ctrl)
 	got := rec.toolsOfRequest(2)
-	want := map[string]bool{"list_peers": true, "send_peer_message": true, "dispatch_to_project": true}
+	want := map[string]bool{"list_peers": true, "send_peer_message": true, "dispatch_to_project": true, "open_projects": true}
 	for _, n := range got {
 		delete(want, n)
 	}
-	if len(want) != 0 || len(got) != len(base)+3 {
+	if len(want) != 0 || len(got) != len(base)+4 {
 		t.Fatalf("after turning on: %d tools (was %d), still missing %v", len(got), len(base), want)
 	}
 

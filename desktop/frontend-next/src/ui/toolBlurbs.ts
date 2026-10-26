@@ -43,6 +43,8 @@ export function toolBlurb(name: string): string | undefined {
       return t("按名字从 Go 源文件里删除一个函数、方法或类型等符号。");
     case "dispatch_to_project":
       return t("把任务交给你另一个项目里的会话：指定项目并写明要做什么；对方没有等待中的会话时会在那里新开一个。");
+    case "open_projects":
+      return t("请你把一批文件夹加入项目列表：卡片逐条列出路径，你批准后才会加入并标记为可信，之后才能向它们派发任务。");
     case "docs":
       return t("搜索并阅读内置在本版本里的官方文档。");
     case "edit_file":

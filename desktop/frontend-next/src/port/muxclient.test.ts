@@ -7,7 +7,7 @@ import type { WireEvent } from "./wire";
 
 interface Source { url: string; closed: boolean; open: (conn: string) => void; say: (pane: string, frame: object) => void }
 
-function stubHub(answer: (method: string, url: string, body: string) => { status: number; code?: string } = () => ({ status: 204 })) {
+function stubHub(answer: (method: string, url: string, body: string) => { status: number; code?: string; json?: object } = () => ({ status: 204 })) {
   const sources: Source[] = [];
   const calls: { method: string; url: string; body: string }[] = [];
   vi.stubGlobal(
@@ -35,7 +35,7 @@ function stubHub(answer: (method: string, url: string, body: string) => { status
     const call = { method: init.method ?? "GET", url, body: String(init.body ?? "") };
     calls.push(call);
     const a = answer(call.method, url, call.body);
-    return { ok: a.status < 300, status: a.status, json: async () => ({ code: a.code }) } as Response;
+    return { ok: a.status < 300, status: a.status, json: async () => a.json ?? { code: a.code } } as Response;
   });
   return { sources, calls };
 }
@@ -236,6 +236,36 @@ describe("a pane's subscription over the shared stream", () => {
     for (const seq of [3, 4, 5]) hub.sources[0].say("r1", { kind: "tick", seq });
     expect(got).toEqual([1, 2, 3, 4, 5]);
     sub();
+  });
+
+  // The kernel stands at 7 when the pane subscribes; the shared stream opens later.
+  const attachAt = async (watermark: number) => {
+    const hub = stubHub((method, url) => method === "GET" && url === "/rt/r1/events/replay"
+      ? { status: 200, json: { frames: [], complete: true, watermark: 7 } }
+      : { status: 204 });
+    const got: number[] = [];
+    const gap = vi.fn();
+    const sub = subscribeStream("/rt/r1", (ev: WireEvent) => got.push(ev.seq ?? 0), gap, undefined, "r1");
+    await flush();
+    const s = open(hub.sources)[0];
+    s.open("c1");
+    await flush();
+    s.say("r1", { kind: "stream_watermark", seq: watermark });
+    s.say("r1", { kind: "tick", seq: watermark + 1 });
+    sub();
+    return { got, gap };
+  };
+
+  it("says what went by between subscribing and the shared stream attaching the pane is a hole", async () => {
+    const { got, gap } = await attachAt(9);
+    expect(gap).toHaveBeenCalledOnce();
+    expect(got).toEqual([10]);
+  });
+
+  it("attaches without a hole when the stream did not move in between", async () => {
+    const { got, gap } = await attachAt(7);
+    expect(gap).not.toHaveBeenCalled();
+    expect(got).toEqual([8]);
   });
 
   it("keeps the budget out of panes that cost no connection", async () => {

@@ -1,0 +1,2 @@
+- 修复：活跃 Agent 根 context 内的有界 reviewer/advisor 用量现在计入既有 token 软预算，保留缺失用量、零阈值、局部遥测和独立请求边界。关联 #14025。
+- Fixed: bounded reviewer/advisor usage in an active Agent root now counts toward its token soft budget. Missing usage, zero limits and isolated requests retain their behavior. Refs #14025.

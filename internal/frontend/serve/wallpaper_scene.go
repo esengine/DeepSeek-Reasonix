@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"math"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -17,16 +19,30 @@ import (
 // without its shader runtime: the backdrop, its soundtrack, and how far the
 // camera moves with the pointer.
 type sceneAudio struct {
-	Data []byte
-	MIME string
+	Data   []byte
+	MIME   string
+	Volume float64
+	Loop   bool
+}
+
+type sceneLayer struct {
+	Image   []byte
+	MIME    string
+	X, Y    float64
+	W, H    float64
+	Alpha   float64
+	Effects []string
 }
 
 type sceneWallpaper struct {
-	Image     []byte
-	ImageMIME string
-	Title     string
-	Audios    []sceneAudio
-	Parallax  float64
+	Image       []byte
+	ImageMIME   string
+	Layers      []sceneLayer
+	SceneWidth  float64
+	SceneHeight float64
+	Title       string
+	Audios      []sceneAudio
+	Parallax    float64
 }
 
 var (
@@ -46,10 +62,25 @@ type sceneDocument struct {
 		CameraParallax               bool    `json:"cameraparallax"`
 		CameraParallaxAmount         float64 `json:"cameraparallaxamount"`
 		CameraParallaxMouseInfluence float64 `json:"cameraparallaxmouseinfluence"`
+		OrthogonalProjection         struct {
+			Width  float64 `json:"width"`
+			Height float64 `json:"height"`
+		} `json:"orthogonalprojection"`
 	} `json:"general"`
 	Objects []struct {
-		Image string   `json:"image"`
-		Sound []string `json:"sound"`
+		Image   string   `json:"image"`
+		Sound   []string `json:"sound"`
+		Origin  string   `json:"origin"`
+		Size    string   `json:"size"`
+		Scale   string   `json:"scale"`
+		Alpha   *float64 `json:"alpha"`
+		Visible *bool    `json:"visible"`
+		Effects []struct {
+			File string `json:"file"`
+		} `json:"effects"`
+		Volume       float64 `json:"volume"`
+		PlaybackMode string  `json:"playbackmode"`
+		StartSilent  bool    `json:"startsilent"`
 	} `json:"objects"`
 }
 
@@ -90,19 +121,20 @@ func importSceneWallpaper(project, pkg, preview []byte) (sceneWallpaper, error) 
 	}
 
 	out := sceneWallpaper{Title: title}
-	if imageBytes, ok := sceneBackdrop(files, scene); ok {
-		out.Image = imageBytes
-		out.ImageMIME = imageMIME(imageBytes)
-	}
-	if out.Image == nil && len(preview) > 0 {
+	layers, sceneWidth, sceneHeight := sceneLayers(files, scene)
+	if len(layers) == 0 && len(preview) > 0 {
 		if mime := imageMIME(preview); mime != "" {
-			out.Image = preview
-			out.ImageMIME = mime
+			layers = []sceneLayer{{Image: preview, MIME: mime, W: 1, H: 1, Alpha: 1}}
+			sceneWidth, sceneHeight = 1, 1
 		}
 	}
-	if out.Image == nil {
+	if len(layers) == 0 {
 		return sceneWallpaper{}, errSceneNoImage
 	}
+	out.Layers = layers
+	out.SceneWidth, out.SceneHeight = sceneWidth, sceneHeight
+	out.Image = layers[0].Image
+	out.ImageMIME = layers[0].MIME
 	out.Audios = sceneSounds(files, scene)
 	out.Parallax = 0.02
 	if scene.General.CameraParallax {
@@ -117,43 +149,163 @@ func importSceneWallpaper(project, pkg, preview []byte) (sceneWallpaper, error) 
 	return out, nil
 }
 
-func sceneBackdrop(files map[string][]byte, scene sceneDocument) ([]byte, bool) {
-	for _, object := range scene.Objects {
-		imagePath := cleanAssetPath(object.Image)
-		if imagePath == "" {
-			continue
-		}
-		rawModel, ok := files[imagePath]
-		if !ok {
-			continue
-		}
-		var model struct {
-			Material string `json:"material"`
-		}
-		if json.Unmarshal(rawModel, &model) != nil {
-			continue
-		}
-		materialPath := cleanAssetPath(model.Material)
-		if materialPath != "" {
-			if raw, ok := files[materialPath]; ok {
-				var material struct {
-					Passes []struct {
-						Textures []string `json:"textures"`
-					} `json:"passes"`
-				}
-				if json.Unmarshal(raw, &material) == nil {
-					for _, pass := range material.Passes {
-						for _, texture := range pass.Textures {
-							if imageBytes, ok := sceneTexture(files, materialPath, texture); ok {
-								return imageBytes, true
-							}
-						}
-					}
-				}
+func sceneObjectImage(files map[string][]byte, image string) ([]byte, bool) {
+	imagePath := cleanAssetPath(image)
+	if imagePath == "" {
+		return nil, false
+	}
+	rawModel, ok := files[imagePath]
+	if !ok {
+		return nil, false
+	}
+	var model struct {
+		Material string `json:"material"`
+	}
+	if json.Unmarshal(rawModel, &model) != nil {
+		return nil, false
+	}
+	materialPath := cleanAssetPath(model.Material)
+	if materialPath == "" {
+		return nil, false
+	}
+	raw, ok := files[materialPath]
+	if !ok {
+		return nil, false
+	}
+	var material struct {
+		Passes []struct {
+			Textures []string `json:"textures"`
+		} `json:"passes"`
+	}
+	if json.Unmarshal(raw, &material) != nil {
+		return nil, false
+	}
+	for _, pass := range material.Passes {
+		for _, texture := range pass.Textures {
+			if imageBytes, ok := sceneTexture(files, materialPath, texture); ok {
+				return imageBytes, true
 			}
 		}
 	}
 	return nil, false
+}
+
+const (
+	maxSceneDimension = 1 << 20
+	maxLayerExtent    = 4.0
+)
+
+func sceneLayers(files map[string][]byte, scene sceneDocument) ([]sceneLayer, float64, float64) {
+	sceneWidth := saneSceneDimension(scene.General.OrthogonalProjection.Width)
+	sceneHeight := saneSceneDimension(scene.General.OrthogonalProjection.Height)
+	layers := make([]sceneLayer, 0, len(scene.Objects))
+	for _, object := range scene.Objects {
+		if object.Visible != nil && !*object.Visible {
+			continue
+		}
+		imageBytes, ok := sceneObjectImage(files, object.Image)
+		if !ok {
+			continue
+		}
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(imageBytes))
+		if err != nil {
+			continue
+		}
+		imageW, imageH := float64(cfg.Width), float64(cfg.Height)
+		sizeX, sizeY := parsePair(object.Size, imageW, imageH)
+		scaleX, scaleY := parsePair(object.Scale, 1, 1)
+		if scaleX < 0 {
+			scaleX = -scaleX
+		}
+		if scaleY < 0 {
+			scaleY = -scaleY
+		}
+		if sceneWidth <= 0 {
+			sceneWidth = saneSceneDimension(imageW)
+		}
+		if sceneHeight <= 0 {
+			sceneHeight = saneSceneDimension(imageH)
+		}
+		originX, originY := parsePair(object.Origin, sceneWidth/2, sceneHeight/2)
+		alpha := 1.0
+		if object.Alpha != nil {
+			alpha = *object.Alpha
+		}
+		effects := make([]string, 0, len(object.Effects))
+		for _, effect := range object.Effects {
+			if file := cleanAssetPath(effect.File); file != "" {
+				effects = append(effects, file)
+			}
+		}
+		x := (originX - sizeX*scaleX/2) / sceneWidth
+		y := (originY - sizeY*scaleY/2) / sceneHeight
+		w := sizeX * scaleX / sceneWidth
+		h := sizeY * scaleY / sceneHeight
+		layers = append(layers, sceneLayer{
+			Image:   imageBytes,
+			MIME:    imageMIME(imageBytes),
+			X:       boundLayer(x, -maxLayerExtent, maxLayerExtent),
+			Y:       boundLayer(y, -maxLayerExtent, maxLayerExtent),
+			W:       boundLayer(w, 0, maxLayerExtent),
+			H:       boundLayer(h, 0, maxLayerExtent),
+			Alpha:   clampAlpha(alpha),
+			Effects: effects,
+		})
+		if len(layers) >= 16 {
+			break
+		}
+	}
+	if sceneWidth <= 0 || sceneHeight <= 0 {
+		sceneWidth, sceneHeight = 1, 1
+	}
+	return layers, sceneWidth, sceneHeight
+}
+
+func parsePair(value string, dx, dy float64) (float64, float64) {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return dx, dy
+	}
+	parse := func(s string, fallback float64) float64 {
+		n, err := strconv.ParseFloat(s, 64)
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+			return fallback
+		}
+		return n
+	}
+	x := parse(fields[0], dx)
+	y := x
+	if len(fields) > 1 {
+		y = parse(fields[1], dy)
+	}
+	return x, y
+}
+
+func saneSceneDimension(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > maxSceneDimension {
+		return 0
+	}
+	return value
+}
+
+func boundLayer(value, lo, hi float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return lo
+	}
+	if value < lo {
+		return lo
+	}
+	if value > hi {
+		return hi
+	}
+	return value
+}
+
+func clampAlpha(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 1
+	}
+	return clamp01(value)
 }
 
 func sceneTexture(files map[string][]byte, materialPath, texture string) ([]byte, bool) {
@@ -181,7 +333,7 @@ const maxSceneAudioTracks = 8
 func sceneSounds(files map[string][]byte, scene sceneDocument) []sceneAudio {
 	seen := map[string]bool{}
 	out := make([]sceneAudio, 0, 2)
-	add := func(name string) {
+	add := func(name string, volume float64, loop bool) {
 		name = cleanAssetPath(name)
 		if name == "" || seen[name] || len(out) >= maxSceneAudioTracks {
 			return
@@ -191,12 +343,17 @@ func sceneSounds(files map[string][]byte, scene sceneDocument) []sceneAudio {
 		if !ok || mime == "" || len(raw) == 0 {
 			return
 		}
+		if math.IsNaN(volume) || math.IsInf(volume, 0) || volume <= 0 {
+			volume = 1
+		} else {
+			volume = clamp01(volume)
+		}
 		seen[name] = true
-		out = append(out, sceneAudio{Data: raw, MIME: mime})
+		out = append(out, sceneAudio{Data: raw, MIME: mime, Volume: volume, Loop: loop})
 	}
 	for _, object := range scene.Objects {
 		for _, sound := range object.Sound {
-			add(sound)
+			add(sound, object.Volume, !strings.EqualFold(object.PlaybackMode, "once"))
 		}
 	}
 	if len(out) == 0 {
@@ -208,7 +365,7 @@ func sceneSounds(files map[string][]byte, scene sceneDocument) []sceneAudio {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			add(name)
+			add(name, 1, true)
 		}
 	}
 	return out

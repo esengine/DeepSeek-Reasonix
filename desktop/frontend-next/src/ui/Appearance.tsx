@@ -510,7 +510,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 />
                 <span className="now">{pct(look.wallpaper.focusY)}</span>
               </label>
-              {(look.wallpaper.audios?.length || look.wallpaper.audio) && (
+              {(look.wallpaper.audioTracks?.length || look.wallpaper.audios?.length || look.wallpaper.audio) && (
                 <WallpaperVolumeSlider volume={look.wallpaper.volume} onChange={setPaper} />
               )}
               {crop.known && !(crop.x && crop.y) && (

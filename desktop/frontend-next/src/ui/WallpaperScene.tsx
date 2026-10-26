@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { useEffect, useRef } from "react";
-import type { Wallpaper } from "../port/look";
+import type { Wallpaper, WallpaperAudioTrack } from "../port/look";
 import { listenAction } from "./listen";
 
 /** The part of a Wallpaper Engine scene this window can replay: the extracted
@@ -8,7 +8,8 @@ import { listenAction } from "./listen";
  *  the interface. Shaders and particles stay in Wallpaper Engine. */
 export function WallpaperScene({ wallpaper }: { wallpaper?: Wallpaper }) {
   const audio = useRef<(HTMLAudioElement | null)[]>([]);
-  const sources = audioSources(wallpaper);
+  const tracks = audioTracks(wallpaper);
+  const trackKey = tracks.map((track) => `${track.url}:${track.volume}:${track.loop}`).join("|");
 
   useEffect(() => {
     const paper = wallpaper;
@@ -36,13 +37,14 @@ export function WallpaperScene({ wallpaper }: { wallpaper?: Wallpaper }) {
   }, [wallpaper?.kind, wallpaper?.parallax, wallpaper?.focusX, wallpaper?.focusY]);
 
   useEffect(() => {
-    for (const element of audio.current) {
-      if (element) element.volume = clampLevel(wallpaper?.volume ?? 1);
-    }
-  }, [wallpaper?.volume, sources.length]);
+    tracks.forEach((track, i) => {
+      const element = audio.current[i];
+      if (element) element.volume = clampLevel((wallpaper?.volume ?? 1) * track.volume);
+    });
+  }, [wallpaper?.volume, trackKey]);
 
   useEffect(() => {
-    if (!sources.length || wallpaper?.kind !== "scene" || wallpaper.muted || (wallpaper.volume ?? 1) <= 0) return;
+    if (!tracks.length || wallpaper?.kind !== "scene" || wallpaper.muted || (wallpaper.volume ?? 1) <= 0) return;
     const start = () => {
       for (const element of audio.current) {
         if (!element) continue;
@@ -61,19 +63,19 @@ export function WallpaperScene({ wallpaper }: { wallpaper?: Wallpaper }) {
       offKey();
       for (const element of audio.current) element?.pause();
     };
-  }, [sources.join("\u0000"), wallpaper?.muted, wallpaper?.kind, wallpaper?.volume]);
+  }, [trackKey, wallpaper?.muted, wallpaper?.kind, wallpaper?.volume]);
 
-  if (!sources.length) return null;
+  if (!tracks.length) return null;
   return createPortal(
     <>
-      {sources.map((src, i) => (
+      {tracks.map((track, i) => (
         <audio
-          key={`${i}:${src}`}
+          key={`${i}:${track.url}`}
           ref={(element) => {
             audio.current[i] = element;
           }}
-          src={src}
-          loop
+          src={track.url}
+          loop={track.loop}
           muted={wallpaper?.muted}
           preload="auto"
           hidden
@@ -84,10 +86,13 @@ export function WallpaperScene({ wallpaper }: { wallpaper?: Wallpaper }) {
   );
 }
 
-function audioSources(wallpaper?: Wallpaper): string[] {
+function audioTracks(wallpaper?: Wallpaper): WallpaperAudioTrack[] {
   if (wallpaper?.kind !== "scene") return [];
-  if (wallpaper.audios?.length) return wallpaper.audios;
-  return wallpaper.audio ? [wallpaper.audio] : [];
+  if (wallpaper.audioTracks?.length) return wallpaper.audioTracks;
+  if (wallpaper.audios?.length) {
+    return wallpaper.audios.map((url) => ({ url, volume: 1, loop: true }));
+  }
+  return wallpaper.audio ? [{ url: wallpaper.audio, volume: 1, loop: true }] : [];
 }
 
 function clampPct(value: number): number {

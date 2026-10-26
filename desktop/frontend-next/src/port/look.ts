@@ -87,6 +87,22 @@ export interface Appearance {
   wallpaper?: Wallpaper;
 }
 
+export interface WallpaperLayer {
+  url: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  alpha: number;
+  effects?: string[];
+}
+
+export interface WallpaperAudioTrack {
+  url: string;
+  volume: number;
+  loop: boolean;
+}
+
 export interface Wallpaper {
   // Content-addressed, so the bytes at this address never change.
   url: string;
@@ -98,6 +114,10 @@ export interface Wallpaper {
   title?: string;
   audio?: string;
   audios?: string[];
+  audioTracks?: WallpaperAudioTrack[];
+  layers?: WallpaperLayer[];
+  sceneWidth?: number;
+  sceneHeight?: number;
   parallax?: number;
   muted?: boolean;
   volume?: number;

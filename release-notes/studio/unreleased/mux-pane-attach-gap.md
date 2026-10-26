@@ -1,0 +1,2 @@
+- 修复：Studio 里一个对话在后台跑完一轮后再打开，不再缺这一轮的回复；面板接入共享事件流之前错过的内容会从对话记录重新读出。关联 477ce369b。
+- Fixed: a conversation that ran a turn in the background no longer opens without that turn's reply; what its pane missed before the shared stream attached it is read back. Refs 477ce369b.

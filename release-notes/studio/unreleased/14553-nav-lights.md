@@ -1,0 +1,2 @@
+- 修复：macOS 上图标栏的竖线和底色不再从窗口顶端画起，不再穿过左上角的红绿灯。关联 #14553。
+- Fixed: on macOS the icon rail's edge and background no longer start at the top of the window, so they no longer cut through the window controls. Fixes #14553.

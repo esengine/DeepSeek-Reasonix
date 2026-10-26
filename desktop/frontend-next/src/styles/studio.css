@@ -146,7 +146,7 @@ body { background: var(--page); }
 /* Primary navigation and workspace rail */
 .nav { position: fixed; z-index: 13; inset: 0 auto 0 0; width: var(--nav-open); translate: calc(var(--nav-w) - var(--nav-open)) 0; padding: calc(var(--chrome-h) + 8px) 0 10px; gap: 4px; background: color-mix(in srgb, var(--page) 92%, var(--surface)); border-right-color: var(--hair); }
 .nav > * { flex: none; }
-.app:not([data-nav="on"]) .nav { border-right-width: 0; }
+.app:not([data-nav="on"]) .nav { border-right-width: 0; } [data-titlebar="app"][data-platform="darwin"] .app[data-nav="on"] .nav { border-right-width: 0; background-image: linear-gradient(var(--hair), var(--hair)); background-size: 1px calc(100% - var(--chrome-h)); background-position: right bottom; background-repeat: no-repeat; } [data-titlebar="app"][data-platform="darwin"] .app[data-nav="on"][data-rail="off"] .nav { background-color: transparent; background-image: linear-gradient(var(--hair), var(--hair)), linear-gradient(color-mix(in srgb, var(--page) 92%, var(--surface)), color-mix(in srgb, var(--page) 92%, var(--surface))); background-size: 1px calc(100% - var(--chrome-h)), 100% calc(100% - var(--chrome-h)); background-position: right bottom, right bottom; }
 [data-titlebar="app"] .nav { -webkit-app-region: drag; }
 [data-titlebar="app"] .nav button { -webkit-app-region: no-drag; }
 .studio-settings, .navbtn { position: relative; }
@@ -2875,7 +2875,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 :root[data-theme="light"] .flow .call[data-approval] .apv-dt {
   border-top-color: var(--hair); color: var(--faint);
 }
-:root[data-theme="light"] .flow .call[data-approval] .apv-dt-label { color: var(--ghost); }
+:root[data-theme="light"] .flow .call[data-approval] .apv-dt-label { color: var(--ghost); } .apv-paths { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 3px } .apv-paths code { font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--text); overflow-wrap: anywhere }
 :root[data-theme="light"] .flow .call[data-approval] .apv-ft .btn[data-yolo] { color: var(--warn-ink); border-color: #dec4b4; }
 :root[data-theme="light"] .flow .call[data-approval] .apv-yolo-confirm { border-top-color: var(--border); background: var(--page); }
 :root[data-theme="light"] .flow .call[data-approval] .apv-yolo-confirm b { color: var(--warn-ink); }

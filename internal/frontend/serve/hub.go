@@ -678,6 +678,7 @@ func (h *Hub) publish(rt *Runtime) error {
 		}
 		if concrete {
 			ctrl.SetProjectDispatcher(h.dispatcherFor(rt))
+			ctrl.SetProjectOpener(openProjects)
 		}
 		rt.Server.bindMu.Unlock()
 		rt.Server.bc.observeTree(h.treeChanged)

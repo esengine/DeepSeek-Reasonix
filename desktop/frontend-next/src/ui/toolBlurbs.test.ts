@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { toolBlurb } from "./toolBlurbs";
 
 const catalogue = new URL("../../../../internal/runtime/usecap/testdata/capability_list.json", import.meta.url);
-const peerTools = ["dispatch_to_project", "list_peers", "send_peer_message"];
+const peerTools = ["dispatch_to_project", "list_peers", "open_projects", "send_peer_message"];
 const configTools = ["advise", "best_of_n", "run_script", "read_mcp_resource", "present_files"];
 const mediaTools = ["web_search", "read_video", "import_web_image", "computer_act", "computer_read"];
 

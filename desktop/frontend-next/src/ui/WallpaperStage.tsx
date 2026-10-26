@@ -1,5 +1,6 @@
 import type { Appearance } from "../port/port";
 import { Backdrop } from "./Backdrop";
+import { WallpaperLayers } from "./WallpaperLayers";
 import { WallpaperScene } from "./WallpaperScene";
 import { WallpaperVolume } from "./WallpaperVolume";
 
@@ -9,6 +10,7 @@ export function WallpaperStage({ sky, look, onLook }: { sky: boolean; look: Appe
   return (
     <>
       <Backdrop sky={sky} wallpaper={look.wallpaper} />
+      <WallpaperLayers wallpaper={look.wallpaper} />
       <WallpaperScene wallpaper={look.wallpaper} />
       <WallpaperVolume look={look} onLook={onLook} />
     </>

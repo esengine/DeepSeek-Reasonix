@@ -100,7 +100,7 @@ export function apply(look: Appearance | null, busy = false) {
   for (const v of IMAGE_VARS) style.removeProperty(v);
   // A video is drawn by WallpaperVideo from the same variables; only a picture
   // is a background image.
-  if (paper.kind !== "video") style.setProperty("--bg-image", `url("${paper.url}")`);
+  if (paper.kind !== "video" && !paper.layers?.length) style.setProperty("--bg-image", `url("${paper.url}")`);
   style.setProperty("--bg-x", `${pct(paper.focusX)}%`);
   style.setProperty("--bg-y", `${pct(paper.focusY)}%`);
   // At work it recedes to a third of what it is at rest, so the picture never

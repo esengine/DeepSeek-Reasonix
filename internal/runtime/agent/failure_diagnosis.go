@@ -95,6 +95,7 @@ func (a *Agent) selectDiagnosticLines(ctx context.Context, content string) ([]in
 	var usage *provider.Usage
 	defer func() {
 		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
+		observeRootTokenUsage(ctx, usage)
 		if usage != nil && (usage.TotalTokens > 0 || usage.RequestCount > 0) {
 			a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage,
 				Pricing: a.svc.pricing, UsageSource: event.UsageSourceCompaction})

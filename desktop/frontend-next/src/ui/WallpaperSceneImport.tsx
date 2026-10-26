@@ -75,7 +75,7 @@ export function WallpaperSceneImport({ port, look, onLook, setPaper, onError }: 
           <div className="prow">
             <span className="tx">{t("Wallpaper Engine 场景")}</span>
             <span className="now">{paper.title || t("未命名场景")}</span>
-            {(paper.audios?.length || paper.audio) && (
+            {(paper.audioTracks?.length || paper.audios?.length || paper.audio) && (
               <button className="now nowbtn" data-action="wallpaper.sound" onClick={() => setPaper({ muted: !paper.muted })}>
                 {paper.muted ? t("打开声音") : t("关闭声音")}
               </button>

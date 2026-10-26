@@ -59,12 +59,18 @@ func TestSceneUploadStoresBackdropAudioAndParallax(t *testing.T) {
 	if !view.Wallpaper.Muted {
 		t.Error("a newly imported scene must start muted")
 	}
+	if len(view.Wallpaper.Layers) != 1 || view.Wallpaper.Layers[0].URL == "" {
+		t.Errorf("layers = %+v, want one stored layer", view.Wallpaper.Layers)
+	}
+	if len(view.Wallpaper.AudioTracks) != 1 || view.Wallpaper.AudioTracks[0].Volume != 1 || !view.Wallpaper.AudioTracks[0].Loop {
+		t.Errorf("audio tracks = %+v, want one looping track at volume 1", view.Wallpaper.AudioTracks)
+	}
 
 	raw, err := os.ReadFile(config.UserConfigPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`kind = "scene"`, `title = "Test Scene"`, `parallax = 0.03`, `volume = 1`} {
+	for _, want := range []string{`kind = "scene"`, `title = "Test Scene"`, `parallax = 0.03`, `volume = 1`, `audio_volumes = [1]`, `audio_loops = [true]`, `[[desktop.appearance.wallpaper.layers]]`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("stored config lacks %q:\n%s", want, raw)
 		}

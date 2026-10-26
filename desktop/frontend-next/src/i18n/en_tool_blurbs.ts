@@ -7,6 +7,7 @@ export const EN_TOOL_BLURBS: Record<string, string> = {
   "用起止文本锚点删除文件里的一整段内容，适合大块删除。": "Delete a contiguous range of a file between two text anchors, for large removals.",
   "按名字从 Go 源文件里删除一个函数、方法或类型等符号。": "Delete a named function, method, type or other symbol from a Go source file.",
   "把任务交给你另一个项目里的会话：指定项目并写明要做什么；对方没有等待中的会话时会在那里新开一个。": "Hand a task to a session in another of your projects: name the project and say what to do; a session is opened there if none is waiting.",
+  "请你把一批文件夹加入项目列表：卡片逐条列出路径，你批准后才会加入并标记为可信，之后才能向它们派发任务。": "Ask you to add a batch of folders to your project list: the card lists every path, and they are added and marked trusted only once you approve, so tasks can then be dispatched to them.",
   "搜索并阅读内置在本版本里的官方文档。": "Search and read the official documentation built into this version.",
   "在隔离的子代理里做只读的代码库调查，只返回提炼后的结论。": "Investigate the codebase read-only in an isolated sub-agent and return only a distilled answer.",
   "把 2–64 个子代理任务按依赖关系一起派出，返回摘要和取回完整结果的引用。": "Dispatch 2–64 sub-agent tasks as a dependency graph and return previews plus references for the full results.",

@@ -69,23 +69,43 @@ type zoomRangeView struct {
 	Step float64 `json:"step"`
 }
 
+type wallpaperLayerView struct {
+	URL     string   `json:"url"`
+	X       float64  `json:"x"`
+	Y       float64  `json:"y"`
+	W       float64  `json:"w"`
+	H       float64  `json:"h"`
+	Alpha   float64  `json:"alpha"`
+	Effects []string `json:"effects,omitempty"`
+}
+
+type wallpaperAudioView struct {
+	URL    string  `json:"url"`
+	Volume float64 `json:"volume"`
+	Loop   bool    `json:"loop"`
+}
+
 type wallpaperView struct {
 	// URL carries the content hash in its name, so the bytes at an address
 	// never change and the page needs no cache buster.
 	URL string `json:"url"`
 	// Kind is "image", "video" or "scene"; the kernel decides it from the
 	// stored type so the page never infers a renderer from a name.
-	Kind     string   `json:"kind"`
-	Title    string   `json:"title,omitempty"`
-	Audio    string   `json:"audio,omitempty"`
-	Audios   []string `json:"audios,omitempty"`
-	Parallax float64  `json:"parallax,omitempty"`
-	Muted    bool     `json:"muted,omitempty"`
-	Volume   float64  `json:"volume"`
-	Opacity  float64  `json:"opacity"`
-	Dim      float64  `json:"dim"`
-	FocusX   float64  `json:"focusX"`
-	FocusY   float64  `json:"focusY"`
+	Kind        string               `json:"kind"`
+	Title       string               `json:"title,omitempty"`
+	Audio       string               `json:"audio,omitempty"`
+	Audios      []string             `json:"audios,omitempty"`
+	AudioTracks []wallpaperAudioView `json:"audioTracks,omitempty"`
+	Layers      []wallpaperLayerView `json:"layers,omitempty"`
+	SceneWidth  float64              `json:"sceneWidth,omitempty"`
+	SceneHeight float64              `json:"sceneHeight,omitempty"`
+	Parallax    float64              `json:"parallax,omitempty"`
+	Muted       bool                 `json:"muted,omitempty"`
+	Volume      float64              `json:"volume"`
+	Opacity     float64              `json:"opacity"`
+	Dim         float64              `json:"dim"`
+	FocusX      float64              `json:"focusX"`
+	FocusY      float64              `json:"focusY"`
 }
 
 func appearanceDir() string {
@@ -105,6 +125,23 @@ func wallpaperAudioNames(w config.WallpaperConfig) []string {
 	add(w.Audio)
 	for _, name := range w.Audios {
 		add(name)
+	}
+	return names
+}
+
+func wallpaperLayerNames(w config.WallpaperConfig) []string {
+	names := make([]string, 0, len(w.Layers)+1)
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	add(w.File)
+	for _, layer := range w.Layers {
+		add(layer.File)
 	}
 	return names
 }
@@ -133,22 +170,49 @@ func viewOf(a config.AppearanceConfig, language, width string) appearanceView {
 			kind = "scene"
 		}
 		out.Wallpaper = &wallpaperView{
-			URL:      "/appearance/wallpaper/" + a.Wallpaper.File,
-			Kind:     kind,
-			Title:    a.Wallpaper.Title,
-			Parallax: a.Wallpaper.Parallax,
-			Muted:    a.Wallpaper.Muted,
-			Volume:   wallpaperVolume(a.Wallpaper),
-			Opacity:  a.Wallpaper.Opacity,
-			Dim:      a.Wallpaper.Dim,
-			FocusX:   a.Wallpaper.FocusX,
-			FocusY:   a.Wallpaper.FocusY,
+			URL:         "/appearance/wallpaper/" + a.Wallpaper.File,
+			Kind:        kind,
+			Title:       a.Wallpaper.Title,
+			SceneWidth:  a.Wallpaper.SceneWidth,
+			SceneHeight: a.Wallpaper.SceneHeight,
+			Parallax:    a.Wallpaper.Parallax,
+			Muted:       a.Wallpaper.Muted,
+			Volume:      wallpaperVolume(a.Wallpaper),
+			Opacity:     a.Wallpaper.Opacity,
+			Dim:         a.Wallpaper.Dim,
+			FocusX:      a.Wallpaper.FocusX,
+			FocusY:      a.Wallpaper.FocusY,
 		}
-		for _, name := range wallpaperAudioNames(a.Wallpaper) {
-			out.Wallpaper.Audios = append(out.Wallpaper.Audios, "/appearance/wallpaper/"+name)
+		names := wallpaperAudioNames(a.Wallpaper)
+		for i, name := range names {
+			url := "/appearance/wallpaper/" + name
+			out.Wallpaper.Audios = append(out.Wallpaper.Audios, url)
+			volume := 1.0
+			if i < len(a.Wallpaper.AudioVolumes) {
+				volume = clamp01(a.Wallpaper.AudioVolumes[i])
+			}
+			loop := true
+			if i < len(a.Wallpaper.AudioLoops) {
+				loop = a.Wallpaper.AudioLoops[i]
+			}
+			out.Wallpaper.AudioTracks = append(out.Wallpaper.AudioTracks, wallpaperAudioView{URL: url, Volume: volume, Loop: loop})
 		}
 		if len(out.Wallpaper.Audios) > 0 {
 			out.Wallpaper.Audio = out.Wallpaper.Audios[0]
+		}
+		for _, layer := range a.Wallpaper.Layers {
+			if layer.File == "" {
+				continue
+			}
+			out.Wallpaper.Layers = append(out.Wallpaper.Layers, wallpaperLayerView{
+				URL:     "/appearance/wallpaper/" + layer.File,
+				X:       layer.X,
+				Y:       layer.Y,
+				W:       layer.W,
+				H:       layer.H,
+				Alpha:   clamp01(layer.Alpha),
+				Effects: layer.Effects,
+			})
 		}
 	}
 	return out
@@ -237,18 +301,22 @@ func (s *Server) uploadWallpaper(w http.ResponseWriter, r *http.Request) {
 	}
 	edit := config.LoadForEdit(config.UserConfigPath())
 	paper := &edit.Desktop.Appearance.Wallpaper
-	prev, prevAudios := paper.File, wallpaperAudioNames(*paper)
+	prevLayers := wallpaperLayerNames(*paper)
+	prevAudios := wallpaperAudioNames(*paper)
 	paper.File = name
+	paper.Layers = nil
 	paper.Kind = ""
 	paper.Title = ""
 	paper.Audio = ""
 	paper.Audios = nil
+	paper.AudioVolumes = nil
+	paper.AudioLoops = nil
 	paper.Parallax = 0
 	paper.Muted = false
 	paper.Volume = nil
 	// First picture: give it settings it can be seen at. Replacing one keeps
 	// whatever the user had already dialled in.
-	if prev == "" {
+	if len(prevLayers) == 0 {
 		paper.Opacity = 0.5
 		paper.Dim = 0.55
 		paper.FocusX = 0.5
@@ -258,8 +326,10 @@ func (s *Server) uploadWallpaper(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if prev != "" && prev != name {
-		_ = os.Remove(filepath.Join(appearanceDir(), prev))
+	for _, old := range prevLayers {
+		if old != name {
+			_ = os.Remove(filepath.Join(appearanceDir(), old))
+		}
 	}
 	for _, old := range prevAudios {
 		_ = os.Remove(filepath.Join(appearanceDir(), old))
@@ -270,14 +340,15 @@ func (s *Server) uploadWallpaper(w http.ResponseWriter, r *http.Request) {
 func (s *Server) clearWallpaper(w http.ResponseWriter, r *http.Request) {
 	edit := config.LoadForEdit(config.UserConfigPath())
 	paper := edit.Desktop.Appearance.Wallpaper
-	prev, prevAudios := paper.File, wallpaperAudioNames(paper)
+	prevLayers := wallpaperLayerNames(paper)
+	prevAudios := wallpaperAudioNames(paper)
 	edit.Desktop.Appearance.Wallpaper = config.WallpaperConfig{}
 	if err := edit.SaveTo(config.UserConfigPath()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if prev != "" {
-		_ = os.Remove(filepath.Join(appearanceDir(), prev))
+	for _, old := range prevLayers {
+		_ = os.Remove(filepath.Join(appearanceDir(), old))
 	}
 	for _, old := range prevAudios {
 		_ = os.Remove(filepath.Join(appearanceDir(), old))
@@ -297,6 +368,11 @@ func (s *Server) wallpaperAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	paper := cfg.Desktop.Appearance.Wallpaper
 	allowed := paper.File == name
+	for _, layer := range wallpaperLayerNames(paper) {
+		if layer == name {
+			allowed = true
+		}
+	}
 	for _, audio := range wallpaperAudioNames(paper) {
 		if audio == name {
 			allowed = true

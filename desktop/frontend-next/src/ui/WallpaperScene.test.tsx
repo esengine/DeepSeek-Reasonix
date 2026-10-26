@@ -52,6 +52,30 @@ describe("a Wallpaper Engine backdrop", () => {
     expect(document.documentElement.style.getPropertyValue("--bg-y")).not.toBe("50%");
   });
 
+  it("applies each track's volume and loop mode", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    render(
+      <WallpaperScene
+        wallpaper={{
+          ...scene,
+          audio: undefined,
+          audios: undefined,
+          audioTracks: [
+            { url: "/a.mp3", volume: 0.4, loop: true },
+            { url: "/b.mp3", volume: 0.8, loop: false },
+          ],
+        }}
+      />,
+    );
+    const audio = Array.from(document.querySelectorAll<HTMLAudioElement>("audio"));
+    expect(audio).toHaveLength(2);
+    expect(audio[0].loop).toBe(true);
+    expect(audio[1].loop).toBe(false);
+    await waitFor(() => expect(audio[0].volume).toBeCloseTo(0.2));
+    expect(audio[1].volume).toBeCloseTo(0.4);
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
   it("does not install the soundtrack when muted", () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
     render(<WallpaperScene wallpaper={{ ...scene, muted: true }} />);

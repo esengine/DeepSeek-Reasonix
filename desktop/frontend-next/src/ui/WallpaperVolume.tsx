@@ -70,7 +70,7 @@ export function WallpaperVolume({ look, onLook }: Props) {
 }
 
 function hasAudio(paper: Wallpaper): boolean {
-  return Boolean(paper.audios?.length || paper.audio);
+  return Boolean(paper.audioTracks?.length || paper.audios?.length || paper.audio);
 }
 
 function clamp(value: number): number {

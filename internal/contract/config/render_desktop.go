@@ -143,18 +143,12 @@ func renderAppearanceSection(b *strings.Builder, a AppearanceConfig) {
 	if a.Wallpaper.Title != "" {
 		fmt.Fprintf(b, "title = %q\n", a.Wallpaper.Title)
 	}
-	if a.Wallpaper.Audio != "" {
-		fmt.Fprintf(b, "audio = %q   # legacy first soundtrack inside the appearance directory\n", a.Wallpaper.Audio)
+	renderWallpaperAudio(b, a.Wallpaper)
+	if a.Wallpaper.SceneWidth > 0 {
+		fmt.Fprintf(b, "scene_width = %g\n", a.Wallpaper.SceneWidth)
 	}
-	if len(a.Wallpaper.Audios) > 0 {
-		b.WriteString("audios = [")
-		for i, name := range a.Wallpaper.Audios {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(b, "%q", name)
-		}
-		b.WriteString("]   # soundtracks inside the appearance directory\n")
+	if a.Wallpaper.SceneHeight > 0 {
+		fmt.Fprintf(b, "scene_height = %g\n", a.Wallpaper.SceneHeight)
 	}
 	if a.Wallpaper.Parallax != 0 {
 		fmt.Fprintf(b, "parallax = %g   # pointer parallax for a scene, 0..0.2\n", a.Wallpaper.Parallax)
@@ -169,4 +163,67 @@ func renderAppearanceSection(b *strings.Builder, a AppearanceConfig) {
 	fmt.Fprintf(b, "dim = %g   # scrim of page colour over it, 0..1\n", a.Wallpaper.Dim)
 	fmt.Fprintf(b, "focus_x = %g   # 0..1, the point that survives cropping\n", a.Wallpaper.FocusX)
 	fmt.Fprintf(b, "focus_y = %g\n", a.Wallpaper.FocusY)
+	renderWallpaperLayers(b, a.Wallpaper)
+}
+
+func renderWallpaperAudio(b *strings.Builder, w WallpaperConfig) {
+	if w.Audio != "" {
+		fmt.Fprintf(b, "audio = %q   # legacy first soundtrack inside the appearance directory\n", w.Audio)
+	}
+	if len(w.Audios) > 0 {
+		b.WriteString("audios = [")
+		for i, name := range w.Audios {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(b, "%q", name)
+		}
+		b.WriteString("]   # soundtracks inside the appearance directory\n")
+	}
+	if len(w.AudioVolumes) > 0 {
+		b.WriteString("audio_volumes = [")
+		for i, volume := range w.AudioVolumes {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(b, "%g", volume)
+		}
+		b.WriteString("]\n")
+	}
+	if len(w.AudioLoops) > 0 {
+		b.WriteString("audio_loops = [")
+		for i, loop := range w.AudioLoops {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			if loop {
+				b.WriteString("true")
+			} else {
+				b.WriteString("false")
+			}
+		}
+		b.WriteString("]\n")
+	}
+}
+
+func renderWallpaperLayers(b *strings.Builder, w WallpaperConfig) {
+	for _, layer := range w.Layers {
+		b.WriteString("\n[[desktop.appearance.wallpaper.layers]]\n")
+		fmt.Fprintf(b, "file = %q\n", layer.File)
+		fmt.Fprintf(b, "x = %g\n", layer.X)
+		fmt.Fprintf(b, "y = %g\n", layer.Y)
+		fmt.Fprintf(b, "w = %g\n", layer.W)
+		fmt.Fprintf(b, "h = %g\n", layer.H)
+		fmt.Fprintf(b, "alpha = %g\n", layer.Alpha)
+		if len(layer.Effects) > 0 {
+			b.WriteString("effects = [")
+			for i, effect := range layer.Effects {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				fmt.Fprintf(b, "%q", effect)
+			}
+			b.WriteString("]\n")
+		}
+	}
 }

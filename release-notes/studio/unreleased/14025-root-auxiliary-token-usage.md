@@ -1,0 +1,2 @@
+- 修复：活跃 Agent 根任务中的摘要与失败诊断用量现在计入既有 token 软预算，保留缺失用量、零阈值、局部遥测和无根 context 手动维护的行为。关联 #14025。
+- Fixed: active-root summary and failure-diagnosis usage now counts toward its token soft budget. Missing usage, zero limits and local telemetry retain their behavior. Refs #14025.

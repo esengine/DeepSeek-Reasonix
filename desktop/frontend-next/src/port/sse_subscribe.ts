@@ -35,6 +35,14 @@ export function subscribeStream(base: string, onEvent: (ev: WireEvent) => void, 
   let recovering = booting;
   let held: WireEvent[] = [];
   let live = true;
+  // The shared stream attaches a pane only once it is open, which can be long
+  // after this call. Where the stream stood at subscribing is read at once, and
+  // an attach that finds it has moved on since reports what went by as a hole.
+  let subscribedAt: number | null = null;
+  let attachedAt: number | null = null;
+  const blindAttach = () => {
+    if (subscribedAt !== null && attachedAt !== null && attachedAt > subscribedAt) onGap?.();
+  };
 
   const deliver = (ev: WireEvent) => {
     // The cursor is the record of what has been folded, and the replay and
@@ -103,7 +111,11 @@ export function subscribeStream(base: string, onEvent: (ev: WireEvent) => void, 
       // A bootstrap states that position from its snapshot instead, and taking
       // it from here would baseline the cursor over frames already held.
       if (seen === null) {
-        if (!booting) seen = ev.seq ?? 0;
+        if (!booting) {
+          seen = ev.seq ?? 0;
+          attachedAt = seen;
+          blindAttach();
+        }
         return;
       }
       if (!recovering && ev.seq && ev.seq > seen) void recover(seen);
@@ -157,6 +169,13 @@ export function subscribeStream(base: string, onEvent: (ev: WireEvent) => void, 
   // stream instead of costing the window a connection each.
   const detach = lane ? mux.attach(lane, { cursor: () => seen, onData: feed, own }) : own();
   if (bootstrap) void bootstrapFrom(bootstrap);
+  else if (lane) {
+    // A position that cannot be read cannot vouch for the attach either.
+    void positionNow(base).catch(() => -1).then((at) => {
+      subscribedAt = at;
+      if (live) blindAttach();
+    });
+  }
   // A subscription that gave its connection up before the stream ever stated a
   // position has nothing to resume from, so what went by is a hole it cannot
   // name: it says so, and the caller re-reads.
@@ -181,4 +200,14 @@ export function subscribeStream(base: string, onEvent: (ev: WireEvent) => void, 
       holdsConnection: () => detach.holdsConnection?.() ?? true,
     },
   );
+}
+
+// Where the stream stands now, as the attach read of a client with no stream
+// open answers it.
+async function positionNow(base: string): Promise<number> {
+  const res = await fetch(`${base}/events/replay`, { credentials: "same-origin" });
+  if (!res.ok) throw new Error(String(res.status));
+  const { watermark } = (await res.json()) as { watermark?: unknown };
+  if (typeof watermark !== "number") throw new Error("the attach read carried no watermark");
+  return watermark;
 }
