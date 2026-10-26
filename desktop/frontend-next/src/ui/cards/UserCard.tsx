@@ -28,6 +28,16 @@ function SavedImage({ path, src }: { path: string; src: string }) {
   </div>;
 }
 
+// The thumbnail stands for a stored image, so the token that carried it into
+// the turn is not drawn again as prose. This only removes what attachments
+// covers; item.text itself is untouched, so copy and resend still see it.
+function stripAttachmentTokens(text: string, paths: string[]): string {
+  const covered = paths.filter(Boolean).map((p) => p.replace(/[.*+()?^${}|[\]\\]/g, "\\$&"));
+  if (covered.length === 0) return text;
+  const token = new RegExp("(?:^|\\s)@(?:" + covered.join("|") + ")(?=$|\\s)", "g");
+  return text.replace(token, "").replace(/\s{2,}/g, " ").trim();
+}
+
 export function UserCard({
   item,
   port,
@@ -57,6 +67,9 @@ export function UserCard({
   const rewind = !!(cp && onPrepareRewind && onCommitRewind);
   const pin = useMemo(() => parseSkillPin(item.text), [item.text]);
   const images = useMemo(() => [...new Set((item.attachments ?? []).map((a) => a.path))], [item.attachments]);
+  // What the row says is the words without the paths the thumbnails already
+  // stand for; empty means the message was only its attachments, so no bubble.
+  const shown = useMemo(() => stripAttachmentTokens(item.text, images), [item.text, images]);
 
   useEffect(() => {
     const el = box.current;
@@ -97,7 +110,7 @@ export function UserCard({
                 const src = port.workspaceImageURL(path);
                 return <SavedImage key={src} path={path} src={src} />;
               })}</div>}
-              {pin ? <SkillPinView pin={pin} /> : <div className="txt" dir="auto">{item.text}</div>}
+              {pin ? <SkillPinView pin={pin} /> : shown ? <div className="txt" dir="auto">{shown}</div> : null}
             </>
           ) : (
             <div className="reask">
