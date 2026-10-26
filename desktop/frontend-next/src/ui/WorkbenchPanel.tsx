@@ -31,6 +31,7 @@ import { workspaceDrag } from "./filedrag";
 import { useGitRepos } from "./useGitRepos";
 import { WorkbenchExplorerHead } from "./WorkbenchExplorerHead";
 import { WorkbenchFileBar, type FileMode } from "./WorkbenchFileBar";
+import { UnsavedCloseDialog } from "./UnsavedCloseDialog";
 import { OpenWithMenu } from "./OpenWithMenu";
 import type { HubPort } from "../port/hub";
 import { useHtmlPreview } from "./useHtmlPreview";
@@ -311,11 +312,14 @@ export function WorkbenchPanel({
   }, [filePath, readable, hasDocument, source]);
   const previewTab = previewable ? preview.tabFor(filePath) : undefined;
   const { open: openPreview, sync: syncPreview } = preview;
-  const { file, draft, diff, busy, error: fileFailed, errorCode, missing, setDraft, save } = useWorkbenchFiles({
+  const { file, draft, diff, busy, error: fileFailed, errorCode, missing, setDraft, save, savePath, discard, dirtyPaths } = useWorkbenchFiles({
     port, workspaceRoot, repos: gitRepos.repos, path: !source || (hasDocument && mode === "document") ? "" : filePath, openPaths: openFiles, shown, refresh: JSON.stringify([changeKey, glance, running, wrote]),
     poll: (readable && mode === "read") || (previewable && mode === "preview"),
   });
   const unpreviewableText = !hasDocument && errorCode === "workspace.file_unreadable";
+  const unsaved = useMemo(() => new Set(dirtyPaths), [dirtyPaths]);
+  const [closePrompt, setClosePrompt] = useState<string>("");
+  const [promptBusy, setPromptBusy] = useState(false);
   const revision = file?.revision;
   useEffect(() => {
     if (mode !== "preview" || !previewable || !shown || showFiles || launcher || previewTab || (!revision && !fileFailed && !failed)) return;
@@ -411,6 +415,24 @@ export function WorkbenchPanel({
   };
   const { close: closeTabs, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles: showFiles || launcher, fromExplorer, setBrowsers, setOpenFiles, setAgents, setDismissed, setSelected, setShowFiles, setLauncher, onCloseManual, onCloseSelected: () => setFailed("") });
   const close = (targets: Surface[]) => { supersede(); return closeTabs(targets); };
+  // Closing a file with edits asks first: the answer decides whether the draft
+  // is written, dropped, or kept with the tab still open.
+  const resolveClose = async (how: "save" | "discard") => {
+    const target = closePrompt;
+    if (!target || promptBusy) return;
+    const surface = surfaces.find((s) => s.kind === "file" && s.path === target);
+    if (!surface) { setClosePrompt(""); return; }
+    if (how === "save") {
+      setPromptBusy(true);
+      const written = await savePath(target);
+      setPromptBusy(false);
+      if (!written) { setClosePrompt(""); return; }
+    } else {
+      discard(target);
+    }
+    setClosePrompt("");
+    await close([surface]);
+  };
   const dismissTabMenu = useCallback(() => setTabMenu(null), []);
   const [tabMenu, setTabMenu] = useState<{ surface: Surface; x: number; y: number; anchor: HTMLElement } | null>(null);
   const pages = surfaces.filter((s) => s.kind !== "file");
@@ -437,7 +459,14 @@ export function WorkbenchPanel({
   };
   return (
     <section className="workbench" aria-label={t("工作台")} data-action-keydown="layer.dismiss" onKeyDown={(e) => {
-      if (launcher && e.key === "Escape") { e.stopPropagation(); toggleLauncher(); newTab.current?.focus(); }
+      if (launcher && e.key === "Escape") { e.stopPropagation(); toggleLauncher(); newTab.current?.focus(); return; }
+      // Ctrl+S belongs to the file on screen: the editor's own keymap sees the
+      // chord while it has focus, and a person who just clicked a tab expects
+      // it to work there too.
+      if (!shown || launcher || !filePath) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      void savePath(filePath);
     }}>
       <header className="workbench-tabs">
         <div
@@ -448,7 +477,10 @@ export function WorkbenchPanel({
             if (e.deltaY && strip.current) strip.current.scrollLeft += e.deltaY;
           }}
         >
-        {surfaces.map((surface) => (
+        {surfaces.map((surface) => {
+          const tabPath = surface.kind === "file" ? surface.path : "";
+          const unsavedFile = tabPath !== "" && unsaved.has(tabPath);
+          return (
           <div
             className="workbench-tab"
             key={keyOf(surface)}
@@ -505,15 +537,21 @@ export function WorkbenchPanel({
               className="workbench-tab-close"
               data-action="workbench.close"
               data-target={keyOf(surface)}
+              data-dirty={unsavedFile ? "" : undefined}
               aria-label={t("关闭 {name}", { name: labelFor(surface) })}
               title={t("关闭")}
               disabled={closing}
-              onClick={() => void close([surface])}
+              onClick={() => {
+                if (unsavedFile) setClosePrompt(tabPath);
+                else void close([surface]);
+              }}
             >
+              <span className="workbench-tab-dot" aria-hidden="true" />
               <StudioIcon name="close" />
             </button>
           </div>
-        ))}
+          );
+        })}
         </div>
         <TooltipButton
           className="workbench-files"
@@ -585,9 +623,7 @@ export function WorkbenchPanel({
                 previewable={previewable}
                 document={hasDocument}
                 source={source}
-                canSave={!busy && !file?.readOnly && file?.path === (grantedFile?.rel ?? active.path) && draft !== file.content}
                 readOnlyIn={grantedFile?.root ?? file?.root}
-                onSave={() => void save()}
                 openWith={hub && !remote ? <OpenWithMenu hub={hub} root={workspaceRoot} onError={(e) => setFailed(reason(e))} /> : undefined}
                 onReveal={revealable && !grantedFile ? () => { setFailed(""); port.revealInFileManager(active.path).catch((e) => setFailed(reason(e))); } : undefined}
               />
@@ -761,6 +797,14 @@ export function WorkbenchPanel({
         setTabMenu(null);
         void close(mode === "one" ? [target] : mode === "others" ? tabOthers : mode === "right" ? tabRight : pages);
       }} />}
+      {closePrompt && shown && (
+        <UnsavedCloseDialog
+          busy={promptBusy}
+          onDiscard={() => void resolveClose("discard")}
+          onSave={() => void resolveClose("save")}
+          onCancel={() => setClosePrompt("")}
+        />
+      )}
     </section>
   );
 }
