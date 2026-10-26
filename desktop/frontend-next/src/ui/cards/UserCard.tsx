@@ -29,13 +29,19 @@ function SavedImage({ path, src }: { path: string; src: string }) {
 }
 
 // The thumbnail stands for a stored image, so the token that carried it into
-// the turn is not drawn again as prose. This only removes what attachments
-// covers; item.text itself is untouched, so copy and resend still see it.
-function stripAttachmentTokens(text: string, paths: string[]): string {
+// the turn is not drawn again as prose. A removed token leaves a placeholder,
+// and only the whitespace beside one is collapsed; any other message text is
+// returned byte for byte, so paragraph breaks and indentation survive.
+export function stripAttachmentTokens(text: string, paths: string[]): string {
   const covered = paths.filter(Boolean).map((p) => p.replace(/[.*+()?^${}|[\]\\]/g, "\\$&"));
   if (covered.length === 0) return text;
   const token = new RegExp("(?:^|\\s)@(?:" + covered.join("|") + ")(?=$|\\s)", "g");
-  return text.replace(token, "").replace(/\s{2,}/g, " ").trim();
+  const HOLD = "\u0000";
+  return text
+    .replace(token, HOLD)
+    .replace(/^\u0000[ \t\r\n]*/, "")
+    .replace(/\u0000[ \t]/g, " ")
+    .replace(/\u0000/g, "");
 }
 
 export function UserCard({
