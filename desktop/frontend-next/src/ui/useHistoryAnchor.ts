@@ -32,9 +32,13 @@ export function useOlderPageIntent({ scroll, hidden, load, generation }: OlderPa
   }, [scroll, hidden, load, generation]);
 }
 
+/** Pages read on the hook's own initiative, past the one the open already read. */
+const READ_AHEAD = 3;
+
 export function useHistoryAnchor(paging: HistoryPaging | undefined, scroll: RefObject<HTMLDivElement | null>, blocks: Item[][], hidden: boolean,
-  generation: { current: number }, release: () => void, land: Landing) {
+  generation: { current: number }, release: () => void, land: Landing, settled = false) {
   const pending = useRef<{ generation: number; revision: number; snapshot: string; id: string; offset: number } | null>(null);
+  const read = useRef(0);
   const more = paging?.more;
   const load = useCallback(() => {
     const root = scroll.current;
@@ -49,6 +53,19 @@ export function useHistoryAnchor(paging: HistoryPaging | undefined, scroll: RefO
     pending.current = anchor ? { generation: mine, revision: paging.revision, snapshot: paging.snapshot, id: anchor.dataset.item!, offset: renderedBox(anchor).getBoundingClientRect().top - top } : null;
     void more().catch(() => {});
   }, [scroll, paging?.hasMore, paging?.busy, paging?.revision, paging?.snapshot, more, generation, release]);
+
+  // Reading ahead goes through `load`, never through `more`: only `load` records
+  // the anchor a prepended page is placed against, so the reader's place holds.
+  // It also releases the follow, which costs nothing while no turn is running.
+  useEffect(() => {
+    if (!settled || hidden || !paging?.hasMore || paging.busy || paging.failed) return;
+    if (read.current >= READ_AHEAD) return;
+    const timer = setTimeout(() => { read.current += 1; load(); }, 0);
+    return () => clearTimeout(timer);
+  }, [settled, hidden, paging?.hasMore, paging?.busy, paging?.failed, paging?.revision, load]);
+
+  // A new conversation gets its own budget; the last one's must not spend it.
+  useEffect(() => { read.current = 0; }, [paging?.snapshot]);
 
   useLayoutEffect(() => {
     const anchor = pending.current;

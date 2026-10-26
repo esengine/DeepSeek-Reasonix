@@ -1,0 +1,2 @@
+- 优化：打开长会话时，前几屏更早的消息会自己读好，不必先点一次「加载更早的消息」；更远的仍由该按钮和滚到顶部加载。关联 #14500。
+- Changed: the first screens of older history arrive without a press when a long conversation opens; the rest stays on the button and the near-top read. Refs #14500.

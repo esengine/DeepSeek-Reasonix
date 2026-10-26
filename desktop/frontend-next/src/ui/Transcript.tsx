@@ -411,7 +411,7 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
   const live = last?.t === "say" && !last.done ? last : undefined;
   const blocks = useBlocks(items, live ? items.length - 1 : items.length, revision);
   const blockKeys = useBlockKeys(blocks);
-  const loadOlder = useHistoryAnchor(historyPaging, scroll, blocks, hidden, landing, release, land);
+  const loadOlder = useHistoryAnchor(historyPaging, scroll, blocks, hidden, landing, release, land, !turnRunning);
   useOlderPageIntent({ scroll, hidden, load: loadOlder, generation: landing });
 
   useFindLanding(find, query ?? "", hidden, blocks, live, land);
