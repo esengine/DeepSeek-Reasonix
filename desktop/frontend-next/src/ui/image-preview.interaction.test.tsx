@@ -39,7 +39,7 @@ describe("shared image preview entrances", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(trigger);
-    expect(screen.getByText(item.text)).toBeTruthy();
+    expect(screen.getByText("Read this")).toBeTruthy();
   });
 
   it("opens from the keyboard and keeps clicks on the image inside the viewer", async () => {
@@ -82,7 +82,7 @@ describe("shared image preview entrances", () => {
     fireEvent.error(screen.getByRole("img"));
     expect(screen.queryByRole("button", { name: "查看图片 preview.png" })).toBeNull();
     expect(screen.getByText("图片不可用")).toBeTruthy();
-    expect(screen.getByText(item.text)).toBeTruthy();
+    expect(screen.getByText("Read this")).toBeTruthy();
   });
 
   it("uses the same viewer for tool screenshots and preserves the expanded tool disclosure", async () => {
