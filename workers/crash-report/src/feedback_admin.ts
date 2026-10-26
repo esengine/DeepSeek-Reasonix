@@ -15,7 +15,7 @@ import { CONCRETE_VERSION, statusRank, type FeedbackRow } from "./feedback_types
 
 // Attachment URLs are public links, so they never follow the origin the admin request arrived on.
 export const PUBLIC_ORIGIN = "https://crash.reasonix.io";
-const OPEN_LIMIT = 200;
+const OPEN_LIMIT = 600;
 const ISSUE_BASE = "https://github.com/esengine/DeepSeek-Reasonix/issues/";
 const LINKABLE = ["held", "needs_info", "answered", "received"];
 const ACTIVE = ["recorded", "in_progress"];

@@ -441,6 +441,18 @@ describe("admin flow", () => {
     expect(await errCode(await status(r, { status: "fixed", resolvedVersion: "next" }))).toBe("feedback.bad_transition");
   });
 
+  it("lists every open row, not only the oldest 200", async () => {
+    for (let i = 0; i < 205; i++) {
+      const at = new Date(1700000000000 + i * 1000).toISOString();
+      await env.DB.prepare(
+        "INSERT INTO feedback (receipt, install_hash, idempotency_key, category, body, display_name, status, issue_number, issue_url, created_at, updated_at) VALUES (?, ?, ?, 'bug', 'x', 'n', 'recorded', ?, ?, ?, ?)",
+      ).bind(`FB-${String(i).padStart(4, "0")}-ZZZZ`, `h${i}`, `k${i}`, 1000 + i, `https://github.com/o/r/issues/${1000 + i}`, at, at).run();
+    }
+    const open = (await (await call("/v1/admin/feedback/open", { headers: admin })).json()) as { items: { receipt: string }[] };
+    expect(open.items).toHaveLength(205);
+    expect(open.items.at(-1)?.receipt).toBe("FB-0204-ZZZZ");
+  });
+
   it("refuses backward and terminal-to-terminal transitions", async () => {
     const r = await receiptOf();
     expect(await errCode(await status(r, { status: "in_progress" }))).toBe("feedback.bad_transition");
