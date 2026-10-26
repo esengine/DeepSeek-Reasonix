@@ -1,0 +1,2 @@
+- 修复：带图片的消息里，缩略图旁边不再重复显示存储路径；多段消息的段落断开和缩进也按原文保留，只有被缩略图替掉的引用周围空白被收掉。关联 #14554。
+- Fixed: a message with images no longer repeats the stored path beside its thumbnails, and multi-paragraph text keeps its paragraph breaks and indentation — only the whitespace around a reference the thumbnails already cover is collapsed. Refs #14554.

@@ -75,6 +75,19 @@ describe("saved images in user messages", () => {
     expect(screen.queryByText(text)).toBeNull();
   });
 
+  it("renders a multi-paragraph message with attachments byte for byte when no token is removed", () => {
+    const multi = { ...item, text: "第一段\n\n第二段" } as typeof item;
+    const view = render(<UserCard item={multi} port={port} />);
+    expect(view.container.querySelector(".txt")?.textContent).toBe("第一段\n\n第二段");
+    expect(screen.getByRole("img")).toBeTruthy();
+  });
+
+  it("collapses only the whitespace a removed token occupied, not the paragraphs after it", () => {
+    const multi = { ...item, text: `@${path} 第一段\n\n第二段` } as typeof item;
+    const view = render(<UserCard item={multi} port={port} />);
+    expect(view.container.querySelector(".txt")?.textContent).toBe("第一段\n\n第二段");
+  });
+
   it("previews what a steer or another client's turn was told it carries", () => {
     const steer = othersSteer([], { kind: "steer", text, itemId: "s1", attachments: [stored(path)] } as WireEvent)[0] as typeof item;
     render(<UserCard item={steer} port={port} />);
