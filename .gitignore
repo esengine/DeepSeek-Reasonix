@@ -98,3 +98,6 @@ scripts/official-theme-art/__pycache__/
 *.exe
 *.exe~
 /relayfake
+
+# WorkBuddy agent / memory data; local only, never commit.
+.workbuddy/
