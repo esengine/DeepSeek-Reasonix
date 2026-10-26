@@ -101,7 +101,7 @@ body { background: var(--page); }
 
 /* Window bar */
 .chrome {
-  height: 54px;
+  height: var(--chrome-h);
   padding: 0 14px;
   gap: 11px;
   background: color-mix(in srgb, var(--surface) 94%, var(--page));
@@ -144,9 +144,9 @@ body { background: var(--page); }
 .chrome .thbtn:hover { background: var(--overlay); }
 
 /* Primary navigation and workspace rail */
-.nav { position: fixed; z-index: 13; inset: 0 auto 0 0; width: var(--nav-open); translate: calc(var(--nav-w) - var(--nav-open)) 0; padding: calc(var(--chrome-h) + 8px) 0 10px; gap: 4px; background: color-mix(in srgb, var(--page) 92%, var(--surface)); border-right-color: var(--hair); }
+.nav { position: fixed; z-index: 13; inset: var(--chrome-h) auto 0 0; width: var(--nav-open); translate: calc(var(--nav-w) - var(--nav-open)) 0; padding: 8px 0 10px; gap: 4px; background: color-mix(in srgb, var(--page) 92%, var(--surface)); border-right-color: var(--hair); }
 .nav > * { flex: none; }
-.app:not([data-nav="on"]) .nav { border-right-width: 0; } [data-titlebar="app"][data-platform="darwin"] .app[data-nav="on"] .nav { border-right-width: 0; background-image: linear-gradient(var(--hair), var(--hair)); background-size: 1px calc(100% - var(--chrome-h)); background-position: right bottom; background-repeat: no-repeat; } [data-titlebar="app"][data-platform="darwin"] .app[data-nav="on"][data-rail="off"] .nav { background-color: transparent; background-image: linear-gradient(var(--hair), var(--hair)), linear-gradient(color-mix(in srgb, var(--page) 92%, var(--surface)), color-mix(in srgb, var(--page) 92%, var(--surface))); background-size: 1px calc(100% - var(--chrome-h)), 100% calc(100% - var(--chrome-h)); background-position: right bottom, right bottom; }
+.app:not([data-nav="on"]) .nav { border-right-width: 0; }
 [data-titlebar="app"] .nav { -webkit-app-region: drag; }
 [data-titlebar="app"] .nav button { -webkit-app-region: no-drag; }
 .studio-settings, .navbtn { position: relative; }
@@ -453,11 +453,10 @@ body { background: var(--page) !important; }
 .main { grid-column: 3; }
 .side { grid-column: 4; }
 
-/* The navigation owns the whole left edge, as in the prototype. */
 .rail {
   position: fixed;
   z-index: 12;
-  inset: 0 auto 0 var(--nav-w);
+  inset: var(--chrome-h) auto 0 var(--nav-w);
   width: var(--rail-w);
   display: flex;
   flex-direction: column;
@@ -470,12 +469,11 @@ body { background: var(--page) !important; }
 .railscroll { min-height: 0; }
 .chrome {
   width: auto;
-  margin-left: calc(var(--nav-w) + var(--rail-w));
-  padding: 0 18px 0 max(20px, calc(var(--lights-w) + var(--rail-toggle-gap) - var(--nav-w) - var(--rail-w)));
+  margin-left: 0;
+  padding: 0 18px 0 max(20px, calc(var(--lights-w) + var(--rail-toggle-gap)));
   gap: 11px;
   background: var(--surface) !important;
   border-bottom: 1px solid var(--hair);
-  transition: margin-left var(--t-panel) var(--ease-out);
 }
 .main { background: var(--surface) !important; }
 .panes { background: var(--surface) !important; }
@@ -1480,7 +1478,6 @@ body { background: var(--page) !important; }
 
 @media (max-width: 680px) {
   .app { --rail-open: min(84vw, 300px) !important; }
-  .chrome { margin-left: var(--nav-w); }
   .rail { box-shadow: 18px 0 50px -28px #000; }
   .app[data-rail="off"] .rail { pointer-events: none; }
   .flow,

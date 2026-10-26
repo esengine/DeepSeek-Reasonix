@@ -154,10 +154,9 @@ grid to break.
     lower opacity for slices) because five distinguishable hues is the ceiling,
     and every chart carries a legend or a data table so colour is never the only
     way to read a series.
-- `--lights-w` / `--lights-h` are the window corner macOS draws its controls
-  over, and they are zero everywhere the shell does not hand that corner to the
-  page. Whichever element occupies the corner reserves them, so a layout change
-  that moves what sits there does not have to rediscover the measurement.
+- `--lights-w` reserves the macOS window controls inside the full-width titlebar.
+  It is zero wherever the shell does not hand that corner to the page.
+  `--chrome-h` sets both the titlebar height and the top edge of the sidebars.
 - `--call-sym` / `--call-gap` are the transcript gutter: the symbol cell and the
   space after it. Anything that has to line up with a card reads them instead of
   restating the sum, and `.nest-bd` redefines them rather than re-specifying the

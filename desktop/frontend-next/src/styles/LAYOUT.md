@@ -97,10 +97,13 @@ and selected states, while long titles truncate within the remaining width.
   *is* the title bar, so it has to be the drag handle, and every control on it
   opts back out. Membership is what the markup says is interactive, not a list of the
   controls that happen to be on the bar today.
-- macOS floats its window controls over the window's corner, not over this row.
-  Whichever element owns that corner reserves them — `.chrome` collapsed, the
-  rail head open — and both read `--lights-w` / `--lights-h`. The swap inside
-  that width is opacity alone, so nothing after it moves.
+- The titlebar spans the whole window. Navigation and workspace sidebar dividers
+  start at its bottom edge, including when the sidebar is collapsed or a drawer.
+  The icon rail uses its real border: its box already excludes the titlebar.
+- Sidebar logo spacing is measured from the sidebar's top edge, not the window's;
+  the titlebar is outside that padding.
+- macOS window controls occupy the titlebar's left corner; `.chrome` reserves
+  `--lights-w` before the project and session identity, independently of sidebar width.
 - The shell pins the lights with `trafficLightPosition`: AppKit's own placement
   sits them above the line this row centres its controls on. The inset is
   measured from their top edge, so it is that line minus half a control.

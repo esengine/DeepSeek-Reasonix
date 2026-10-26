@@ -194,6 +194,7 @@ jobs:
           node perf/rail-rows-typography.mjs
           node perf/settings-nav-fit.mjs
           node perf/rail-rows-align.mjs
+          node perf/titlebar-span.mjs
           node perf/progress-tail.mjs
           node perf/trust-wait.mjs
           node perf/nest-nodes.mjs
