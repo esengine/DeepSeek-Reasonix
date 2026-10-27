@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { listenAction } from "./listen";
 
@@ -39,21 +39,33 @@ export function useDismiss(
   }, [open, box, close, also]);
 }
 
+const escapeLayers: object[] = [];
+
 /** Escape closes this layer, and stops there.
  *
- *  The settings sheet listens for Escape on the window, so an inline form that
- *  does not claim the key first goes down with the whole sheet — and takes
- *  whatever was typed into it. Claiming it in the capture phase is what makes
- *  the innermost open thing the one that answers.
+ *  Layers answer innermost first: each one opened registers on a stack in the
+ *  order it mounted, and only the top answers, so a screenshot viewer over a
+ *  dialog closes on its own and leaves the dialog for the next press. Same-target
+ *  listeners run in registration order and stopPropagation does not end that,
+ *  which is why a stack, not the event, decides.
  */
 export function useEscape(open: boolean, close: () => void) {
+  const closeRef = useRef(close);
+  closeRef.current = close;
   useEffect(() => {
     if (!open) return;
+    const layer = {};
+    escapeLayers.push(layer);
     const esc = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || escapeLayers[escapeLayers.length - 1] !== layer) return;
       e.stopPropagation();
-      close();
+      closeRef.current();
     };
-    return listenAction(window, "keydown", { action: "layer.dismiss", listener: esc as EventListener }, true);
-  }, [open, close]);
+    const off = listenAction(window, "keydown", { action: "layer.dismiss", listener: esc as EventListener }, true);
+    return () => {
+      off();
+      const at = escapeLayers.indexOf(layer);
+      if (at >= 0) escapeLayers.splice(at, 1);
+    };
+  }, [open]);
 }

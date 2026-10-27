@@ -8,8 +8,6 @@ export const EN_DOCUMENT: Record<string, string> = {
   "已请求系统应用打开": "Requested opening in the system application",
   "已请求显示文件位置": "Requested showing the file location",
   "已复制路径": "Path copied",
-  "加宽工作台": "Widen workbench",
-  "恢复分栏": "Restore split view",
   "全屏工作台": "Expand workbench",
   "退出工作台全屏": "Exit expanded workbench",
   "展开文件树": "Show file tree",

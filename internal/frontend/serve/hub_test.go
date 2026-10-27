@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
 	"testing"
@@ -214,10 +215,37 @@ func TestHubOpensInARememberedWorkspaceWithNoPanesLeft(t *testing.T) {
 	}
 }
 
-// With nothing remembered either, the refusal says what is missing by code,
-// so a window in any language can say it and offer to add a folder.
-func TestHubRefusalNamesTheMissingFolder(t *testing.T) {
+// With nothing open and nothing remembered, a new session opens in the folder
+// the app owns, so a first run is never refused for lack of a project.
+func TestHubOpensTheAutoWorkspaceWhenNothingIsChosenOrRemembered(t *testing.T) {
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	h := NewHub(HubOptions{})
+	got, err := h.resolveRoot(OpenRequest{})
+	if err != nil {
+		t.Fatalf("resolveRoot with no panes and nothing remembered: %v", err)
+	}
+	if want := config.AutoWorkspaceDir(); got != want {
+		t.Fatalf("resolveRoot = %q, want the auto workspace %q", got, want)
+	}
+	if info, err := os.Stat(got); err != nil || !info.IsDir() {
+		t.Fatalf("auto workspace was not created: %v", err)
+	}
+	for _, dir := range LaunchWorkspaces() {
+		if isAutoWorkspace(dir) {
+			t.Fatalf("auto workspace entered the remembered list: %v", LaunchWorkspaces())
+		}
+	}
+}
+
+// When even the app's own folder cannot be made, the refusal says what is
+// missing by code, so a window in any language can say it and offer to add a
+// folder.
+func TestHubRefusalNamesTheMissingFolder(t *testing.T) {
+	blocker := filepath.Join(testenv.TempDir(t), "state")
+	if err := os.WriteFile(blocker, []byte("a file where the state root should be"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REASONIX_HOME", blocker)
 	h := NewHub(HubOptions{})
 	_, err := h.resolveRoot(OpenRequest{})
 	var c *coded

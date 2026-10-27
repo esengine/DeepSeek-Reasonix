@@ -40,3 +40,24 @@ it.each(["zh", "en"])("localizes a malformed upload by host code in %s", async (
     : "Invalid session file. Choose a complete native session export.");
   expect(refresh).not.toHaveBeenCalled();
 });
+
+it("offers the file through the app's own button, with the native input out of sight", async () => {
+  const hub = new MockHub();
+  render(<NativeSessionImport hub={hub} workspace="/workspace" onImported={vi.fn()}/>);
+  const input = screen.getByLabelText("选择会话 JSON 文件") as HTMLInputElement;
+  expect(input.hidden).toBe(true);
+  const open = vi.spyOn(input, "click");
+  await userEvent.click(screen.getByRole("button", { name: "选择会话文件…" }));
+  expect(open).toHaveBeenCalledOnce();
+});
+
+it("holds the button while an import is running", async () => {
+  const hub = new MockHub();
+  let finish: () => void = () => {};
+  vi.spyOn(hub, "importNativeSession").mockImplementation(() => new Promise<never>((_, reject) => { finish = () => reject(new Error("stop")); }));
+  render(<NativeSessionImport hub={hub} workspace="/workspace" onImported={vi.fn()}/>);
+  await userEvent.upload(screen.getByLabelText("选择会话 JSON 文件"), new File(["{}"], "s.json", { type: "application/json" }));
+  const busy = await screen.findByRole("button", { name: "正在导入…" });
+  expect((busy as HTMLButtonElement).disabled).toBe(true);
+  finish();
+});

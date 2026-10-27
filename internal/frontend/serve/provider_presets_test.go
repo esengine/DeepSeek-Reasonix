@@ -22,7 +22,7 @@ func TestProviderPresetsAreTheKernelsCuratedList(t *testing.T) {
 	}
 	for i, p := range got {
 		entry := want[i].Entries[0]
-		if p.ID != want[i].ID || p.Kind != entry.Kind || p.BaseURL != entry.BaseURL || p.Label == "" {
+		if p.ID != want[i].ID || p.Kind != entry.Kind || p.BaseURL != entry.BaseURL || p.Label == "" || p.Vendor != want[i].Vendor || p.Vendor == "" {
 			t.Errorf("preset %d = %+v, want id %q kind %q url %q", i, p, want[i].ID, entry.Kind, entry.BaseURL)
 		}
 	}

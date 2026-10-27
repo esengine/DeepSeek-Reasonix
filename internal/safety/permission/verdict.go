@@ -83,6 +83,12 @@ func (g *Gate) Verdict(ctx context.Context, toolName string, args json.RawMessag
 	if toolName == "bash" && !readOnly && BashCommandIsReadOnly(args) {
 		readOnly = true
 	}
+	programKeys := ""
+	if toolName == "bash" && readOnly {
+		if keys := g.Policy.gitReadPrograms(ctx, args); keys != "" {
+			readOnly, programKeys = false, keys
+		}
+	}
 	// Producing an install plan reads the source and writes nothing. Treating
 	// the preview as the write it precedes would train the user to approve the
 	// question that carries no information, ahead of the one that does.
@@ -96,6 +102,12 @@ func (g *Gate) Verdict(ctx context.Context, toolName string, args json.RawMessag
 	ruleReason := ""
 	if rule, ok := g.Policy.MatchedRule(toolName, decision, args); ok {
 		ruleReason = fmt.Sprintf("Matched permission rule: %s %s", decision, rule)
+	}
+	if ruleReason == "" && programKeys != "" {
+		ruleReason = "This git command reads a repository whose own configuration runs programs (" + programKeys + "), so it is not treated as a plain read."
+		if decision == Allow && g.Policy.Mode != Allow {
+			decision = Ask
+		}
 	}
 	switch decision {
 	case Deny:

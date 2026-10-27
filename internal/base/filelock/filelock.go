@@ -59,35 +59,15 @@ func acquire(ctx context.Context, path string, externalTimeout time.Duration) (f
 	}
 	defer cancel()
 
-	for {
-		releaseFile, err := tryLockFile(key)
-		if err == nil {
-			var once sync.Once
-			return func() {
-				once.Do(func() {
-					releaseFile()
-					releaseLocal()
-				})
-			}, nil
-		}
-		if !errors.Is(err, ErrHeld) {
-			releaseLocal()
-			return nil, fmt.Errorf("acquire file lock: %w", err)
-		}
-		timer := time.NewTimer(retryInterval)
-		select {
-		case <-timer.C:
-		case <-fileCtx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			releaseLocal()
-			return nil, fmt.Errorf("acquire file lock: %w", fileCtx.Err())
-		}
+	releaseFile, err := waitForFileLock(fileCtx, func() (func(), error) { return tryLockFile(key) })
+	if err != nil {
+		releaseLocal()
+		return nil, err
 	}
+	return sync.OnceFunc(func() {
+		releaseFile()
+		releaseLocal()
+	}), nil
 }
 
 // TryAcquire attempts a non-blocking exclusive lock. It returns ErrHeld when

@@ -1,0 +1,2 @@
+- 改进：设置页里的文字统一成同一套样式，字号从 10 种减到 5 种，字重和灰色也各收成固定几档，页面看起来更整齐。关联 #14625。
+- Changed: text on the settings pages now follows one set of styles: 5 font sizes instead of 10, and fixed weights and grey tones. Refs #14625.

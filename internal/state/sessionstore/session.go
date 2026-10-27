@@ -14,6 +14,7 @@ import (
 // the run-loop goroutine stay lock-free (serial with its own writes); cross-
 // goroutine access goes through Snapshot.
 type Session struct {
+	historyRead    *historyReadIndex
 	mu             sync.RWMutex
 	Messages       []provider.Message
 	version        uint64
@@ -222,6 +223,7 @@ func (s *Session) Replace(msgs []provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Messages = s.preserveCompositionLocked(msgs)
+	s.historyRead = nil
 	s.version++
 }
 

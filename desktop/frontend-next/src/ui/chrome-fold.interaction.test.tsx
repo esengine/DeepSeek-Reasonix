@@ -67,7 +67,7 @@ it("gathers the controls under one button below the bar fold, keeps them in the 
   expect(document.documentElement.dataset.fold).toContain("bar");
   const button = more()!;
   expect(button.getAttribute("aria-expanded")).toBe("false");
-  for (const sel of [".find-action", ".theme-toggle", ".top-action"]) {
+  for (const sel of [".find-action", ".theme-toggle", ".view-action"]) {
     expect(document.querySelector(`.chrome .r-fold ${sel}`), sel).not.toBeNull();
   }
   await userEvent.click(button);

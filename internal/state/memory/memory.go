@@ -204,12 +204,17 @@ const memoryProtocol = "## Background memory\n\n" +
 // InstructionsBlockFor renders the standing instructions as they are on disk
 // now. It rediscovers rather than reading a snapshot: the block rides the turn,
 // and an edit made by an editor, a script or a branch switch is still an edit.
-func InstructionsBlockFor(opts Options) string {
+// unverified marks the project folder's own entries as not vouched for by the user.
+func InstructionsBlockFor(opts Options, unverified bool) string {
 	cwd := opts.CWD
 	if cwd == "" {
 		cwd = "."
 	}
-	return instruction.Block(instruction.Resolve(instruction.ResolveOptions{TargetDir: cwd, UserDir: opts.UserDir}).Documents)
+	docs := instruction.Resolve(instruction.ResolveOptions{TargetDir: cwd, UserDir: opts.UserDir}).Documents
+	if unverified {
+		docs = instruction.MarkUnverified(docs)
+	}
+	return instruction.Block(docs)
 }
 
 // InstructionsBlock renders the standing instructions resolved for this

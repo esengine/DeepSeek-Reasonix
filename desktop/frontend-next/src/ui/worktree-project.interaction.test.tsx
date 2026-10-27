@@ -53,7 +53,7 @@ it.each([[false, "原目录"], [true, "隔离目录"]])("identifies the conversa
   const current = isolated ? copy : root;
   vi.spyOn(port, "workspaces").mockResolvedValue({ current, isolated, canSwitch: true, canIsolate: true, recents: [] });
   render(<Chrome port={port} status={{ workspaceRoot: current, sessionPath: path } as never}
-    title="工作" steer={0} onSettings={vi.fn()} account={null} theme="dark" onTheme={vi.fn()}
+    title="工作" steer={0} account={null} theme="dark" onTheme={vi.fn()}
     onFind={vi.fn()} view="flow" rows={0} surfaces={0} onView={vi.fn()} />);
   expect(await screen.findByText(label)).toBeTruthy();
   expect(screen.getByText(label).getAttribute("title")).toBe(current);
@@ -65,7 +65,7 @@ it("ignores old checkout metadata when switching conversations before it arrives
   let finish!: (value: Awaited<ReturnType<MockPort["workspaces"]>>) => void;
   vi.spyOn(old, "workspaces").mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   vi.spyOn(next, "workspaces").mockResolvedValue({ current: root, isolated: false, canSwitch: true, canIsolate: true, recents: [] });
-  const props = { title: "工作", steer: 0, onSettings: vi.fn(), account: null, theme: "dark" as const,
+  const props = { title: "工作", steer: 0, account: null, theme: "dark" as const,
     onTheme: vi.fn(), onFind: vi.fn(), view: "flow" as const, rows: 0, surfaces: 0, onView: vi.fn() };
   const { rerender } = render(<Chrome {...props} port={old} status={{ workspaceRoot: copy } as never} />);
   rerender(<Chrome {...props} port={next} status={{ workspaceRoot: root } as never} />);

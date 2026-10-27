@@ -1,6 +1,6 @@
 import { SseHttp } from "./sse_http";
 import { base64Of, guardUpload, tooLarge, UPLOAD_LIMIT_MB } from "./upload";
-import type { Appearance } from "./port";
+import type { Appearance, SceneFolder } from "./port";
 
 // The appearance half of the port. Chained the way the fixture's faces are, so
 // SsePort satisfies AgentPort in one declaration and each subject keeps its own
@@ -22,16 +22,36 @@ export class SseLook extends SseHttp {
       dim: look.wallpaper?.dim ?? 0,
       focusX: look.wallpaper?.focusX ?? 0.5,
       focusY: look.wallpaper?.focusY ?? 0.5,
+      muted: look.wallpaper?.muted ?? false,
+      volume: look.wallpaper?.volume ?? 1,
     });
   }
 
-  // JSON, not raw bytes: csrfGuard admits nothing else, which is what stops a
-  // cross-site form from posting here at all.
-  // JSON, not raw bytes: csrfGuard admits nothing else, which is what stops a
-  // cross-site form from posting here at all.
+  async uploadScene(folder: SceneFolder) {
+    guardUpload(folder.scene.size, UPLOAD_LIMIT_MB.scene, tooLarge("wallpaper.scene_too_large", "limit"));
+    if (folder.preview) {
+      guardUpload(folder.preview.size, UPLOAD_LIMIT_MB.scene, tooLarge("wallpaper.scene_too_large", "limit"));
+    }
+    return this.post0<Appearance>("/appearance/wallpaper/scene", {
+      project: await base64Of(folder.project),
+      scene: await base64Of(folder.scene),
+      preview: folder.preview ? await base64Of(folder.preview) : "",
+    });
+  }
+
+  // The picture goes up as the request body, so neither side holds a copy of it
+  // beyond what the browser already has: the kernel writes it to disk as it
+  // arrives. octet-stream is the one binary type csrfGuard admits (it needs a
+  // preflight a cross-site page cannot get), so the real type rides in the query.
   async uploadWallpaper(blob: Blob) {
-    guardUpload(blob.size, UPLOAD_LIMIT_MB.wallpaper, tooLarge("wallpaper.too_large", "limit"));
-    return this.post0<Appearance>("/appearance/wallpaper", { mime: blob.type, data: await base64Of(blob) });
+    const res = await fetch(this.base + "/appearance/wallpaper?mime=" + encodeURIComponent(blob.type), {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      credentials: "same-origin",
+      body: blob,
+    });
+    if (!res.ok) await SseHttp.fail("/appearance/wallpaper", res);
+    return (await res.json()) as Appearance;
   }
   clearWallpaper() {
     return this.del("/appearance/wallpaper");

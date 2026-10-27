@@ -39,7 +39,8 @@ type ProjectDispatcher func(ctx context.Context, project, text string) (Dispatch
 
 // dispatchState is the controller's side of cross-project dispatch.
 type dispatchState struct {
-	hook atomic.Pointer[ProjectDispatcher]
+	hook   atomic.Pointer[ProjectDispatcher]
+	opener atomic.Pointer[ProjectOpener]
 	// mu guards the relation: a partner is a session this one opened or the one
 	// that opened it, paired by a secret the host keeps in memory. The spool only
 	// carries messages; who sent one is proved with the secret, never believed.
@@ -59,6 +60,10 @@ const dispatchWindow = 4096
 // however many others have been read since.
 type dispatchPair struct {
 	secret []byte
+	// opener is true for the session that opened this one: the partner this
+	// session answers on its own, and the only one, so a reply never starts a
+	// reply of its own.
+	opener bool
 	sent   uint64
 	seen   map[uint64]bool
 	floor  uint64
@@ -104,7 +109,7 @@ func (c *Controller) MarkOpenedByDispatch(parent string, secret []byte, depth in
 	c.dispatch.mu.Lock()
 	defer c.dispatch.mu.Unlock()
 	c.dispatch.opened, c.dispatch.depth = true, depth
-	c.rememberPairLocked(parent, secret)
+	c.rememberPairLocked(parent, secret, true)
 }
 
 // OpenedByDispatch reports whether MarkOpenedByDispatch was called.
@@ -127,17 +132,17 @@ func (c *Controller) DispatchDepth() int {
 func (c *Controller) NoteDispatchedSession(child string, secret []byte) {
 	c.dispatch.mu.Lock()
 	defer c.dispatch.mu.Unlock()
-	c.rememberPairLocked(child, secret)
+	c.rememberPairLocked(child, secret, false)
 }
 
-func (c *Controller) rememberPairLocked(key string, secret []byte) {
+func (c *Controller) rememberPairLocked(key string, secret []byte, opener bool) {
 	if key == "" || len(secret) == 0 {
 		return
 	}
 	if c.dispatch.pairs == nil {
 		c.dispatch.pairs = map[string]*dispatchPair{}
 	}
-	c.dispatch.pairs[key] = &dispatchPair{secret: append([]byte(nil), secret...)}
+	c.dispatch.pairs[key] = &dispatchPair{secret: append([]byte(nil), secret...), opener: opener}
 }
 
 // signDispatch numbers and signs a message to a dispatch partner, and leaves it

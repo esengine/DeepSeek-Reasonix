@@ -12,7 +12,6 @@ import type { Attachment, DroppedRef, KeptText } from "./attachment";
 export { DeliveryError, HttpError };
 export type { DeliveryFault };
 export type { Attachment, DroppedRef, KeptText };
-
 import type { AccountState, AccountUser, DeviceGrant } from "./account";
 import type { Adjudications } from "./adjudication";
 import type { BackupApplyResult, BackupCatalog, BackupCategory, BackupCreated, BackupCreateRequest, BackupFileCatalog, BackupFileExport, BackupPlan } from "./backup";
@@ -49,7 +48,7 @@ export type { AccountState, AccountUser, ApprovalDefault, ApprovalMode, Approval
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import type { PluginExport, PluginInstallRequest, PluginPackage, PluginPlan } from "./plugin";
 import type { MarketDetail, MarketList, MarketOwnRequest, MarketPackage, MarketPlan, MarketPublished, MarketQuery, MarketRequest, MarketSubmission, MarketVote } from "./market";
-import type { Appearance, ThemeImport, ThemePack } from "./look";
+import type { Appearance, SceneFolder, ThemeImport, ThemePack } from "./look";
 import type { AskTimeoutSettings, ModStatus, ModsSettings, ModsSettingsEdit, SessionRefSettings, AutoArchiveSettings, ChangedFilesSettings, FeedbackLevelNotices, FoldWorkSettings, TurnNarrationSettings, ObservabilityPatch, ObservabilitySettings, WebAccessPatch, WebAccessSettings, SearxngProbe, BrowserToolsSettings, SubagentClaimsSettings, SubagentSteerSettings, WriteLeaseSettings, PlanApprovalSettings, DefaultModeSettings, ToolSettings, PeerReceipt, PeersState, PeersSettings, PeersSettingsEdit, PeerRemember, ConfigProblem, ConfigRepair, DisplayCurrencyMode, DisplayCurrencySettings, PermissionLists, PermissionRules, ProgressWatchSettings, SandboxSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
 import type { ScheduleBoard, ScheduleDraft, SchedulePreview, ScheduleResultView, ScheduleView } from "./schedule";
 import type { Protocol, ProviderCheck, ProviderCheckDraft, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderSetup, ProviderRemoval, ProviderPreset, ProviderPresetInstall } from "./provider";
@@ -570,8 +569,8 @@ export interface AgentPort extends WorkspacePreviewPort {
    *  could not be read. That one refuses, with a code saying which failure. */
   balance(): Promise<WalletReading | null>;
   history(): Promise<HistoryMessage[]>;
-  // The kernel's canonical task list. The plan panel answers to it and does not
-  // restate it.
+  historyPage?(cursor?: string): Promise<import("./session").HistoryPage>;
+  // The plan panel renders this canonical task list without reconstructing it.
   todos(): Promise<HostTodo[]>;
   // One entry per user turn, oldest first. files is how many the writer tools
   // touched that turn — zero is normal and means there is nothing to restore.
@@ -759,6 +758,7 @@ export interface AgentPort extends WorkspacePreviewPort {
   appearance(): Promise<Appearance>;
   saveAppearance(look: Appearance): Promise<Appearance>;
   uploadWallpaper(blob: Blob): Promise<Appearance>;
+  uploadScene(folder: SceneFolder): Promise<Appearance>;
   clearWallpaper(): Promise<void>;
   // Where the user put each extension surface, keyed "<pluginId>:<surfaceId>".
   // It outranks what the extension asked for; an empty slot hands the decision

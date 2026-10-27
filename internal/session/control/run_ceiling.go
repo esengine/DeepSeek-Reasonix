@@ -7,6 +7,15 @@ import (
 	"reasonix/internal/runtime/agent"
 )
 
+// prepareTurnRootBudget runs after turn admission and blocking hooks, but before
+// semantic routing. The executor owns the scope later inherited by its planner.
+func (c *Controller) prepareTurnRootBudget(ctx context.Context) context.Context {
+	if c.executor == nil {
+		return ctx
+	}
+	return c.executor.PrepareRootTaskBudget(ctx)
+}
+
 // bindTurnScope binds a Goal turn's spend budget and its usage recorder, the
 // latter active until the FSM commits. Neither chat nor Goal gets a round
 // ceiling: rounds carry no information the spend axes lack. An explicit

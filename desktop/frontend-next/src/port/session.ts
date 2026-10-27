@@ -54,6 +54,24 @@ export interface HistoryToolCall {
   capabilityId?: string;
 }
 
+export interface HistoryToolContext {
+  messageIndex: number;
+  ordinal: number;
+  call: HistoryToolCall;
+}
+
+export interface HistoryPage {
+  messages: HistoryMessage[];
+  toolContext: HistoryToolContext[];
+  snapshot: string;
+  start: number;
+  end: number;
+  total: number;
+  hasMoreBefore: boolean;
+  nextCursor?: string;
+  turnStartedAt?: number;
+}
+
 // GET /todos as internal/frontend/serve writes it: the canonical task list, the latest
 // todo_write merged with every complete_step advance. Deriving it from the
 // transcript instead loses the advances and keeps the refused writes.

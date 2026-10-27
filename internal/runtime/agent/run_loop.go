@@ -755,7 +755,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 
 	// Spend is checked before rounds: it is the axis a runaway is actually
 	// reported in, so on the turns both would catch it should be the one named.
-	if axis, detail := a.task.budget.exceeded(a.taskBudgetLimit(ctx)); axis != "" {
+	if axis, detail := a.exceededTaskBudget(ctx, state); axis != "" {
 		a.armFinalizationRound(state, landCause{kind: "task_budget", axis: axis, detail: detail})
 		return true, nil
 	}

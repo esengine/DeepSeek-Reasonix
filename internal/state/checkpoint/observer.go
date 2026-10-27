@@ -1,11 +1,11 @@
 package checkpoint
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"reasonix/internal/base/diff"
 )
@@ -13,9 +13,9 @@ import (
 // writerRegistry is shared across parent/child observers so background writer
 // registration is race-free under a single mutex.
 type writerRegistry struct {
-	mu          sync.Mutex
-	writers     map[string]ActiveWriter
-	barrierHeld map[string]bool
+	mu      sync.Mutex
+	publish sync.Mutex
+	writers map[string]*writerRegistration
 }
 
 // MutationObserver is the host-side unified file mutation observer that replaces
@@ -60,8 +60,7 @@ func NewMutationObserver(opts ObserverOptions) *MutationObserver {
 	return &MutationObserver{
 		store: opts.Store,
 		reg: &writerRegistry{
-			writers:     map[string]ActiveWriter{},
-			barrierHeld: map[string]bool{},
+			writers: map[string]*writerRegistration{},
 		},
 		ownershipTurn: opts.OwnershipTurn,
 		writerID:      opts.WriterID,
@@ -116,66 +115,38 @@ func (o *MutationObserver) OwnershipTurn() int {
 
 // BeginWrite retires undo durably before a tool or hook can modify files.
 func (o *MutationObserver) BeginWrite() (func(), error) {
+	return o.BeginWriteContext(context.Background())
+}
+
+// BeginWriteContext checks cancellation before admission and after preparation.
+// Durable undo retirement already completed is not reversed on cancellation.
+func (o *MutationObserver) BeginWriteContext(ctx context.Context) (permit func(), resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if o == nil || o.store == nil {
 		return nil, nil
 	}
 	barrier := o.store.Barrier()
-	if err := barrier.EnterWrite(); err != nil {
+	if err := barrier.EnterWriteContext(ctx); err != nil {
 		return nil, err
 	}
+	release := sync.OnceFunc(barrier.ExitWrite)
+	defer func() {
+		if permit == nil {
+			release()
+		}
+	}()
 	if err := o.store.InvalidateUndo(); err != nil {
-		barrier.ExitWrite()
 		return nil, fmt.Errorf("prepare workspace write: %w", err)
 	}
-	return barrier.ExitWrite, nil
-}
-
-// RegisterWriter marks a background writer as active. Rollback precheck returns
-// busy while any writer is registered.
-func (o *MutationObserver) RegisterWriter(id, kind string, turn int) error {
-	if o == nil || id == "" || o.reg == nil {
-		return nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	o.reg.mu.Lock()
-	defer o.reg.mu.Unlock()
-	if o.reg.writers == nil {
-		o.reg.writers = map[string]ActiveWriter{}
-	}
-	if o.reg.barrierHeld == nil {
-		o.reg.barrierHeld = map[string]bool{}
-	}
-	if o.reg.barrierHeld[id] {
-		return nil
-	}
-	o.reg.writers[id] = ActiveWriter{ID: id, Turn: turn, StartedAt: time.Now(), Kind: kind}
-	snap := o.snapshotWritersLocked()
-	if o.store != nil {
-		if _, err := o.BeginWrite(); err != nil {
-			delete(o.reg.writers, id)
-			return fmt.Errorf("register background writer: %w", err)
-		}
-		o.store.SetActiveWriters(snap)
-	}
-	o.reg.barrierHeld[id] = true
-	return nil
-}
-
-// UnregisterWriter removes a background writer.
-func (o *MutationObserver) UnregisterWriter(id string) {
-	if o == nil || id == "" || o.reg == nil {
-		return
-	}
-	o.reg.mu.Lock()
-	defer o.reg.mu.Unlock()
-	delete(o.reg.writers, id)
-	snap := o.snapshotWritersLocked()
-	if o.store != nil {
-		o.store.SetActiveWriters(snap)
-		if o.reg.barrierHeld[id] {
-			o.store.Barrier().ExitWrite()
-		}
-	}
-	delete(o.reg.barrierHeld, id)
+	return release, nil
 }
 
 // ActiveWriters returns a copy of currently registered writers.
@@ -195,7 +166,9 @@ func (o *MutationObserver) snapshotWritersLocked() []ActiveWriter {
 	}
 	out := make([]ActiveWriter, 0, len(o.reg.writers))
 	for _, w := range o.reg.writers {
-		out = append(out, w)
+		if w.release != nil {
+			out = append(out, w.writer)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

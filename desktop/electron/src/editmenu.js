@@ -13,6 +13,7 @@ const WORDS = {
     paste: "粘贴",
     selectAll: "全选",
     pasteAndMatchStyle: "粘贴并匹配样式",
+    quote: "加入对话",
     delete: "删除",
     substitutions: "替换",
     showSubstitutions: "显示替换",
@@ -33,6 +34,7 @@ const WORDS = {
     selectAll: "Select All",
     pasteAndMatchStyle: "Paste and Match Style",
     delete: "Delete",
+    quote: "Add to conversation",
     substitutions: "Substitutions",
     showSubstitutions: "Show Substitutions",
     smartQuotes: "Smart Quotes",
@@ -70,7 +72,8 @@ function editItems(lang, can) {
 // click: this only decides what to offer.
 function contextTemplate(params, lang) {
   if (!params.isEditable && !params.selectionText) return [];
-  return editItems(lang, params.editFlags ?? {});
+  const items = editItems(lang, params.editFlags ?? {});
+  return params.isEditable ? items : items.filter((item) => item.role === "copy" || item.role === "selectAll");
 }
 
 // Everything the platform's own Edit menu carries, with the same roles, so
@@ -128,4 +131,4 @@ function menuInstaller(Menu, platform = process.platform) {
   };
 }
 
-module.exports = { contextTemplate, editMenuTemplate, applicationMenuTemplate, menuInstaller };
+module.exports = { contextTemplate, editItems, wordsFor, editMenuTemplate, applicationMenuTemplate, menuInstaller };

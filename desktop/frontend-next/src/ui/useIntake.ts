@@ -39,7 +39,9 @@ export function useIntake({ root, onReceive }: Options): {
   const ref = useCallback(
     (node: HTMLElement | null) => {
       pane.current = node?.closest<HTMLElement>(".pane") ?? null;
-      const off = zone(node);
+      // The whole pane takes the drop: aiming at the composer is not something
+      // a reader should have to do with a file in hand.
+      const off = zone(pane.current ?? node);
       return () => {
         pane.current?.removeAttribute("data-intake");
         pane.current = null;

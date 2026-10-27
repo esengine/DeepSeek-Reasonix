@@ -15,10 +15,18 @@ import (
 
 type inboxDispatchRunner struct {
 	inputs chan string
+	// hold, when set, keeps a turn open after it has recorded its input.
+	hold chan struct{}
 }
 
-func (r *inboxDispatchRunner) Run(_ context.Context, input string) error {
+func (r *inboxDispatchRunner) Run(ctx context.Context, input string) error {
 	r.inputs <- input
+	if r.hold != nil {
+		select {
+		case <-r.hold:
+		case <-ctx.Done():
+		}
+	}
 	return nil
 }
 

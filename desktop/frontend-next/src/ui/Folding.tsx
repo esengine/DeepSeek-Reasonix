@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { t } from "../i18n";
-import { FOLD_CHOICES, FOLD_DEFAULTS, setFoldModes, type Fold, type FoldMode, type FoldModes } from "../state/prefs";
-import { startsOpen, useFoldModes } from "../state/foldpref";
+import { FOLD_CHOICES, FOLD_DEFAULTS, setFoldModes, setShowsThinkingPreview, type Fold, type FoldMode, type FoldModes } from "../state/prefs";
+import { startsOpen, useFoldModes, useThinkingPreview } from "../state/foldpref";
 import { ApplyNote } from "./Group";
+import { Switch } from "./Switch";
 
 const PARTS: [Fold, string, string][] = [
   ["thinking", "思考过程", "模型作答前的推理"],
@@ -14,7 +15,6 @@ const PARTS: [Fold, string, string][] = [
 
 const MODE: Record<FoldMode, string> = {
   folded: "收起",
-  peek: "收起并预览首句",
   live: "进行中展开",
   failed: "失败时展开",
   changed: "改动时展开",
@@ -37,6 +37,7 @@ const same = (a: FoldModes, b: FoldModes) => PARTS.every(([k]) => a[k] === b[k])
  *  reader has already opened or closed keeps that choice. */
 export function Folding() {
   const modes = useFoldModes();
+  const thinkingPreview = useThinkingPreview();
   const [hot, setHot] = useState<Fold | null>(null);
   const [live, setLive] = useState(false);
   const preset = PRESETS.find(([, , p]) => same(p, modes))?.[0];
@@ -57,25 +58,37 @@ export function Folding() {
         ))}
       </div>
 
-      <FoldPreview modes={modes} hot={hot} live={live} onLive={setLive} />
+      <FoldPreview modes={modes} thinkingPreview={thinkingPreview} hot={hot} live={live} onLive={setLive} />
 
       <div className="grp-items fold-rows" onMouseLeave={() => setHot(null)}>
         {PARTS.map(([kind, label, why]) => (
-          <div key={kind} className="fold-row" data-hot={hot === kind ? "" : undefined}
-            onMouseEnter={() => setHot(kind)} onFocus={() => setHot(kind)}>
-            <span className="tx">
-              <span className="lb">{t(label)}</span>
-              <span className="ds">{t(why)}</span>
-            </span>
-            <div className="seg" data-text role="radiogroup" aria-label={t(label)}>
-              {FOLD_CHOICES[kind].map((mode) => (
-                <button key={mode} role="radio" data-action="transcript.fold" data-value={`${kind}:${mode}`}
-                  aria-checked={modes[kind] === mode} onClick={() => setFoldModes({ [kind]: mode })}>
-                  {t((kind === "output" && OUTPUT_MODE[mode]) || MODE[mode])}
-                </button>
-              ))}
+          <Fragment key={kind}>
+            <div className="fold-row" data-hot={hot === kind ? "" : undefined}
+              onMouseEnter={() => setHot(kind)} onFocus={() => setHot(kind)}>
+              <span className="tx">
+                <span className="lb">{t(label)}</span>
+                <span className="ds">{t(why)}</span>
+              </span>
+              <div className="seg" data-text role="radiogroup" aria-label={t(label)}>
+                {FOLD_CHOICES[kind].map((mode) => (
+                  <button key={mode} role="radio" data-action="transcript.fold" data-value={`${kind}:${mode}`}
+                    aria-checked={modes[kind] === mode} onClick={() => setFoldModes({ [kind]: mode })}>
+                    {t((kind === "output" && OUTPUT_MODE[mode]) || MODE[mode])}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+            {kind === "thinking" && (
+              <div className="lrow" onMouseEnter={() => setHot(kind)} onFocus={() => setHot(kind)}>
+                <span className="tx">
+                  <span className="lb">{t("收起时预览思考开头")}</span>
+                  <span className="ds">{t("在思考标题下方显示一行开头文字；思考进行中也显示，展开后隐藏。")}</span>
+                </span>
+                <Switch data-action="transcript.thinking-preview" on={thinkingPreview} label={t("收起时预览思考开头")}
+                  onClick={() => setShowsThinkingPreview(!thinkingPreview)} />
+              </div>
+            )}
+          </Fragment>
         ))}
       </div>
       <ApplyNote id="folding" />
@@ -85,7 +98,7 @@ export function Folding() {
 
 // A schematic turn rather than real cards: it has to show a failed step and a
 // running one on demand, which no real conversation holds still for.
-function FoldPreview({ modes, hot, live, onLive }: { modes: FoldModes; hot: Fold | null; live: boolean; onLive: (v: boolean) => void }) {
+function FoldPreview({ modes, thinkingPreview, hot, live, onLive }: { modes: FoldModes; thinkingPreview: boolean; hot: Fold | null; live: boolean; onLive: (v: boolean) => void }) {
   const think = startsOpen(modes.thinking, live);
   const work = startsOpen(modes.activity, live, false, true);
   const step = (failed: boolean, changed = false) => startsOpen(modes.steps, false, failed, changed);
@@ -104,6 +117,7 @@ function FoldPreview({ modes, hot, live, onLive }: { modes: FoldModes; hot: Fold
         <div className="fp-block" {...part("thinking")} data-open={think ? "" : undefined}>
           <span className="fp-sum">{live ? t("思考中…") : t("思考了 6 秒")}</span>
           {think && <Lines n={2} dim />}
+          {!think && thinkingPreview && <span className="thinking-preview">{t("先检查配置，再决定改哪里。")}</span>}
         </div>
         {!live && <Lines n={2} />}
         <div className="fp-block fp-work" {...part("activity")} data-open={work ? "" : undefined}>

@@ -1,0 +1,2 @@
+- 修复：打开设置时不再每次遍历磁盘统计“存储”大小；这个数字延后读取，十分钟内再次打开沿用上次结果，设置打开更快。关联 #14315。
+- Fixed: opening Settings no longer walks the disk for the Storage total each time; it is read after the window is up and reused for ten minutes. Refs #14315.

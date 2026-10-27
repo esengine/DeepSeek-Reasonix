@@ -64,8 +64,27 @@ func inlineCodeFlagsFor(base string) (func(args []string) bool, bool) {
 		return inlineFlags("-e"), true
 	case "php":
 		return inlineFlags("-r"), true
+	case "awk", "gawk", "mawk", "nawk":
+		return awkCarriesProgram, true
 	}
 	return nil, false
+}
+
+// awkCarriesProgram: awk takes its program as the first operand, so a call
+// carries inline code unless a program file is named with -f or --file.
+func awkCarriesProgram(args []string) bool {
+	file := false
+	for _, arg := range args {
+		switch {
+		case arg == "--":
+			return !file
+		case arg == "-e" || arg == "--source" || strings.HasPrefix(arg, "--source="):
+			return true
+		case arg == "-f" || strings.HasPrefix(arg, "-f") && !strings.HasPrefix(arg, "--") || arg == "--file" || strings.HasPrefix(arg, "--file="):
+			file = true
+		}
+	}
+	return !file
 }
 
 func inlineFlags(candidates ...string) func(args []string) bool {

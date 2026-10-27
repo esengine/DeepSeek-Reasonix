@@ -20,6 +20,7 @@ func TestMCPPreviewSeparatesDisplayFromInstallValues(t *testing.T) {
 	root := testenv.TempDir(t)
 	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
+	closeSharedCatalogsOnCleanup(t)
 	t.Chdir(root)
 	resolver := &provider.StaticResolver{Descriptors: []provider.Descriptor{{Ref: "neutral/fixture", Model: "fixture", Default: true}}, Providers: map[string]provider.Provider{"neutral/fixture": credentialPreviewProvider{}}}
 	ctrl, err := boot.Build(t.Context(), boot.Options{Home: home, WorkspaceRoot: root, Model: "neutral/fixture", ProviderResolver: resolver, SessionDir: filepath.Join(root, "sessions"), TokenMode: boot.TokenModeFull, Sink: event.Discard})

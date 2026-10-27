@@ -276,6 +276,18 @@ pack states a shape, never a number the layout has to agree with.
 - `--read` is the conversation body's own size, separate from interface zoom, so
   "I cannot read this" adjusts one thing. The value here is the first-frame
   fallback; the real default is `look.ts`'s `readDefault()`.
+- Execution content derives size from `--read`. Appearance also projects
+  `--read-scale` as the selected body size divided by the language's default.
+- The root's `--activity-scale` multiplies that ratio by the interface text scale.
+  Activity groups inherit the product as their local `--fs-scale`, including
+  work folded at turn completion.
+- Composing at the root avoids self-reference and prevents nested activity
+  groups from multiplying the scale again.
+- Activity title, running, failed and action counts retain one 11px/500 scale,
+  1.5 line-height and the running chip's 2px vertical padding. Interface and
+  body-size changes scale all four equally; the common 500 weight stays fixed.
+  Tool rows and input details retain reading/weight preferences.
+- Labels use `--ui`; tool names, paths and input use `--mono`.
 - `--column` is the reading column's width. The composer is laid at it in
   every measure; the transcript takes it through `--doc`.
 - `--doc` is the column the transcript is laid in: `--column`, or the whole
@@ -292,6 +304,35 @@ pack states a shape, never a number the layout has to agree with.
   together. The Chinese tier is zeroed by `:lang(zh)` at the top of `app.css` —
   negative tracking squeezes a Han character's em box, not the air between
   letters.
+
+## Settings text
+
+- Every text run in the settings pages is one of nine roles, declared in
+  `settings-type.css`.
+- Sizes are `--fs-meta`, `--fs-ui`, `--fs-lead`, `--fs-title` and
+  `--fs-display`; weights are `--w-reg` and `--w-semi`; neutral colours are
+  `--text` and `--muted`.
+- Semantic colours (error, success, warning, accent) mark state and are not
+  part of the count.
+- Roles: group title (lead, semi, text); page title (title, semi, text);
+  emphasis (ui, semi, text); label (ui, reg, text); description (ui, reg,
+  muted); caption (meta, reg, muted); control (meta, reg, text); metric
+  (display, semi, text). The usage hero figure keeps its own larger size.
+- Inside `.prefs-col` the file re-points `--fs-micro` to `--fs-meta`.
+- It also re-points `--faint` and `--ghost` to `--muted`, and `--w-med` to
+  `--w-semi`, so a rule written against any of them lands on a role unedited.
+- The settings pages therefore have two neutral text tiers where the rest of
+  the interface has three. `--muted` is the darker of the tiers it replaces,
+  so the AA floor below still holds.
+- A walk over the 16 pages found 43 combinations of size, weight and colour
+  across 10 sizes, 4 weights and 11 colours. It is now 23 across 5 sizes, 3
+  weights and 9 colours, the 7 non-neutral ones being semantic.
+- Monospace is a family, not a role: a path in code type takes the role of the
+  text around it.
+- `tools/settings-type-sweep.mjs` reads computed styles from a running build
+  and fails on a size outside the scale.
+- `settings-type.test.ts` holds the stylesheet to tokens, so a literal size or
+  colour cannot be added to it.
 
 ## Weight and contrast
 

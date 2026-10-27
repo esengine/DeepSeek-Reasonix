@@ -43,3 +43,16 @@ it("opens at the size it was last left at", async () => {
   expect(sheet.hasAttribute("data-wide")).toBe(true);
   expect(screen.getByRole("button", { name: "放大设置窗口" }).getAttribute("aria-pressed")).toBe("true");
 });
+
+it("draws the arrows outward while the window is small and inward once it is enlarged", async () => {
+  draw();
+  const expand = screen.getByRole("button", { name: "放大设置窗口" });
+  const path = () => expand.querySelector("path")?.getAttribute("d");
+  const outward = path();
+  expect(expand.getAttribute("title")).toBe("放大设置窗口");
+  await userEvent.click(expand);
+  expect(path()).not.toBe(outward);
+  expect(expand.getAttribute("title")).toBe("缩小设置窗口");
+  await userEvent.click(expand);
+  expect(path()).toBe(outward);
+});

@@ -79,6 +79,9 @@ func VetFetchURL(ctx context.Context, rawURL string) error {
 }
 
 func internalForRemote(ip net.IP) bool {
+	if v4 := netclient.EmbeddedIPv4(ip); v4 != nil && v4.IsLoopback() {
+		return true
+	}
 	return ip.IsLoopback() || blockedFetchIP(ip)
 }
 

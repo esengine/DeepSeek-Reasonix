@@ -54,6 +54,10 @@ export interface ModelEntry {
   displayName?: string;
   model: string;
   modelAlias?: string;
+  // The vendor slug of the preset this provider came from; absent when none declared it.
+  mark?: string;
+  // The service's own vendor slug; differs from mark on a relay, whose models are others'.
+  serviceMark?: string;
   kind?: string;
   active?: boolean;
   // Configured but outside the access list the person added, so a role cannot pick it.

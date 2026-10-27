@@ -46,9 +46,18 @@ type record struct {
 	Reasoning  int       `json:"reasoning,omitempty"`
 	CacheHit   int       `json:"cache_hit,omitempty"`
 	CacheMiss  int       `json:"cache_miss,omitempty"`
-	Total      int       `json:"total,omitempty"`
-	Requests   int       `json:"requests,omitempty"` // provider requests represented by this row
-	Turn       bool      `json:"turn,omitempty"`     // true for TurnDone marker rows
+	// CacheWrite is the subset of CacheMiss written to the provider's cache;
+	// CacheWriteBilled is how many input-token units that write was billed as
+	// (Anthropic: 1.25x for a 5-minute write). Both price the row.
+	CacheWrite       int     `json:"cache_write,omitempty"`
+	CacheWriteBilled float64 `json:"cache_write_billed,omitempty"`
+	Total            int     `json:"total,omitempty"`
+	Requests         int     `json:"requests,omitempty"` // provider requests represented by this row
+	// Estimated mirrors provider.Usage.Estimated (not CostEstimated): false
+	// means the provider reported the counts, true means they were reconstructed
+	// (including an imputed cache split); absent means old/unknown, never zero.
+	Estimated *bool `json:"estimated,omitempty"`
+	Turn      bool  `json:"turn,omitempty"` // true for TurnDone marker rows
 	// Cost quote fields (additive; older readers ignore them).
 	UsageSource        string   `json:"usage_source,omitempty"`
 	CostAmount         string   `json:"cost_amount,omitempty"`     // original amount decimal

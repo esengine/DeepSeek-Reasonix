@@ -63,7 +63,7 @@ const instructionsClearedBlock = "# Instructions\n\nThis project's standing inst
 // not already have the current one. It rediscovers from disk each turn rather
 // than reading the snapshot a write left behind: an edit made past this process
 // is still an edit, and nothing announces one.
-func (m *memoryManager) owedInstructions() string {
+func (m *memoryManager) owedInstructions(unverified bool) string {
 	opts := m.current().LoadOptions()
 	if strings.TrimSpace(opts.CWD) == "" {
 		// No workspace was resolved for this session. Discovering from the
@@ -71,7 +71,7 @@ func (m *memoryManager) owedInstructions() string {
 		// sitting in, which is not this session's project.
 		return ""
 	}
-	block := memory.InstructionsBlockFor(opts)
+	block := memory.InstructionsBlockFor(opts, unverified)
 	if block == "" && m.instructions.visible(projectInstructionsTag) {
 		block = instructionsClearedBlock
 	}

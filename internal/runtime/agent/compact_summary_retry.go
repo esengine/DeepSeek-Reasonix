@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -25,12 +26,17 @@ func (e *summaryTruncation) Error() string {
 
 func (e *summaryTruncation) Unwrap() error { return errSummaryOutputTruncated }
 
+// summaryResetBackoff is the wait before the one retry of a summary whose
+// stream the peer reset.
+var summaryResetBackoff = 2 * time.Second
+
 var errSummaryPrefixNotDigest = fmt.Errorf("reused prefix: %w", errSummaryNotDigest)
 
-// A summary gets at most one independent-shape fallback and one output-cap retry.
+// A summary gets at most one independent-shape fallback, one output-cap retry
+// and one retry after the peer reset its stream.
 // Every attempt records its own spend; the returned usage is their aggregate.
 func (a *contextWindow) summarizeOnce(ctx context.Context, fold []provider.Message, instructions string) (string, *provider.Usage, error) {
-	allowPrefix, retried := true, false
+	allowPrefix, retried, reset := true, false, false
 	limit, above := summaryOutputMaxTokens, 0
 	var total *provider.Usage
 	for {
@@ -38,6 +44,14 @@ func (a *contextWindow) summarizeOnce(ctx context.Context, fold []provider.Messa
 		total = mergeSamplingUsage(total, usage)
 		if ctx.Err() != nil {
 			return summary, total, err
+		}
+		if !reset && provider.StreamInterruptReason(err) == provider.StreamInterruptConnectionReset {
+			reset = true
+			if !sleepUnlessDone(ctx, summaryResetBackoff) {
+				return summary, total, err
+			}
+			a.svc.sink.Emit(event.Event{Kind: event.CompactionProgress})
+			continue
 		}
 		if allowPrefix && (errors.Is(err, errSummaryPrefixNotDigest) || errors.Is(err, provider.ErrSummaryToolsUnsupported)) {
 			allowPrefix = false
@@ -76,4 +90,20 @@ func (a *contextWindow) summarizeOnce(ctx context.Context, fold []provider.Messa
 func (a *contextWindow) retryTruncatedSummary(ctx context.Context, fold []provider.Message, instructions string, cut *summaryTruncation, allowPrefix bool) (string, *provider.Usage, error) {
 	a.svc.sink.Emit(event.Event{Kind: event.CompactionProgress})
 	return a.summarizeAtMode(ctx, fold, instructions, summaryRetryOutputMaxTokens, cut.Cap, allowPrefix)
+}
+
+// sleepUnlessDone waits d and reports whether it ran to the end: false when ctx
+// ended first.
+func sleepUnlessDone(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }

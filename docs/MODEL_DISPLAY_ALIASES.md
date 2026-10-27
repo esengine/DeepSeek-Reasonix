@@ -16,6 +16,13 @@ The chat model picker and its active-model button show the alias. The picker kee
 the full model ID below it and searches both names. Duplicate aliases are allowed:
 the provider and raw model ID still identify the selection.
 
+Hovering the active-model button shows the connection's display name and model
+alias, using the picker's account naming. Saved settings refresh both names
+without changing the selected model.
+
+- Without a model alias, the tooltip shows the model ID.
+- If the active model is absent from the catalog, it shows the full reference.
+
 Aliases are scoped to one provider entry and one exact model ID, including case
 and any slash in the model ID. They do not change provider requests, defaults,
 role assignments, saved conversation references, or model availability. Editing

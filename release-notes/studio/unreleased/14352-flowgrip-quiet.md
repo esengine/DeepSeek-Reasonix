@@ -1,2 +1,0 @@
-- 调整：阅读栏左右两侧的拖动把手平时不再显示，鼠标移到栏边缘才出现，拖动和键盘调整不变。关联 #14352。
-- Changed: the reading column's resize grips no longer draw at rest; they appear under the pointer or on keyboard focus, and dragging and keyboard resizing are unchanged. Refs #14352.

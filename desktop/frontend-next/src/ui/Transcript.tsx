@@ -31,17 +31,21 @@ import { drawn, foldStats, repeatedSpeakers, sameMembers, transcriptRows, type S
 import { BroughtResults } from "./BroughtResults";
 import { ReceiptSlot } from "./ReceiptSlot";
 import { WorkFold } from "./WorkFold";
-import { opensTurn, useBlocks } from "./blocks";
+import { opensTurn, useBlocks, useBlockKeys } from "./blocks";
+import { useHistoryAnchor, useOlderPageIntent } from "./useHistoryAnchor";
+import { HistoryPageControl } from "./HistoryPageControl";
+import type { HistoryPaging } from "./useHistoryPages";
 import { Rail, type RailMark } from "./Rail";
 import { railMarks } from "./railmarks";
 import { StudioIcon } from "./StudioIcon";
 import { LiveWork, useStartsOpen } from "../state/foldpref";
-import { landingBox, useFindLanding, useFindPaint } from "./findland";
+import { landingBox, renderedBox, useFindLanding, useFindPaint } from "./findland";
 import { ScrollJump } from "./ScrollJump";
 import { landing as landingOf, type Direction } from "./jumpreach";
 import { chunkText, heldBlocks, type Held } from "./chunk_text";
 
 interface Props {
+  historyPaging?: HistoryPaging;
   items: Item[];
   port?: Pick<AgentPort, "workspaceImageURL"> & Partial<Pick<AgentPort, "surfaceAction" | "surfaceActionState" | "cancelQueued" | "engageQuestion" | "stopToolCall" | "refinePrompt" | "toolOutput">>;
   revision: number;
@@ -96,7 +100,7 @@ interface Props {
   brought?: { ids: string[]; bring: (id: string) => void; dismiss: (id: string) => void };
 }
 
-export function Transcript({ items, port, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, foldWork = false, turnRunning = false, scope = "" }: Props) {
+export function Transcript({ items, port, historyPaging, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, foldWork = false, turnRunning = false, scope = "" }: Props) {
   // A block the selection touches must not leave the DOM. Unmounting the node a
   // selection is anchored to makes the browser remap that selection onto
   // whatever is still mounted — which reads as "I selected up there and the
@@ -125,17 +129,10 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
   const wasAt = useRef(0);
   // Scroll events before this moment are the browser's, not the reader's.
   const quiet = useRef(0);
+  const landing = useRef(0);
 
-  // Scrolls inside the layout pass, not on the next frame. Deferring it left a
-  // window where the DOM had grown and the scroller had not moved yet, and the
-  // reveal clock — which appends characters on its own rAF — kept reopening it:
-  // two loops chasing each other, measured as the distance to the bottom
-  // swinging 0→142px through the whole stream. That swing is the jitter.
-  // Writing the scroller's own scrollTop rather than asking an element to bring
-  // itself into view: scrollIntoView resolves alignment against every scrollable
-  // ancestor, and a throttled CPU spent 13% of its self time in it — this runs
-  // twice per streamed delta, from the layout effect and from the size observer.
-  // The scroller is right here and "the bottom" is one assignment against it.
+  // Following must settle inside the layout pass. scrollIntoView also moves
+  // ancestor scrollers, so this owner writes only its own viewport.
   const follow = useCallback(() => {
     const root = scroll.current;
     if (!root) return;
@@ -177,6 +174,7 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
   // and a gesture that just left the bottom must not also license going back to
   // it. Only a downward one does.
   const release = useCallback(() => {
+    landing.current++;
     gesture.current = 0;
     if (!at.current) return;
     at.current = false;
@@ -187,6 +185,7 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
     const root = scroll.current;
     if (!root) return;
     const mark = () => {
+      landing.current++;
       gesture.current = performance.now();
     };
     const onWheel = (e: WheelEvent) => (e.deltaY < 0 ? release() : mark());
@@ -310,9 +309,8 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
   // pass then puts the message itself under the reader. Marked as a gesture,
   // or the follow would read this scroll as the transcript moving and stay
   // pinned to the bottom the reader just left.
-  const landing = useRef(0);
   const land = useCallback(
-    (block: number, into: number, selector: string, clear = 12, then?: (found: HTMLElement, root: HTMLElement) => boolean) => {
+    (block: number, into: number, selector: string, clear = 12, then?: (found: HTMLElement, root: HTMLElement) => boolean, highlight = true) => {
       const root = scroll.current;
       const inner = flow.current;
       if (!root || !inner) return;
@@ -326,10 +324,11 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
       // in the window" — writing that back as scrollTop barely moves anything.
       const topOf = (el: HTMLElement) => el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
       // A caller that can place a mounted target itself spares the row-top hop.
-      const ready = then && inner.querySelector<HTMLElement>(selector);
-      if (ready && then(ready, root)) return;
+      const ready = inner.querySelector<HTMLElement>(selector);
+      if (ready && then?.(ready, root)) return;
       const chunk = inner.querySelectorAll<HTMLElement>(".chunk")[block];
-      if (chunk) root.scrollTop = topOf(chunk) + into * chunk.offsetHeight - clear;
+      if (ready) root.scrollTop = topOf(renderedBox(ready)) - clear;
+      else if (chunk) root.scrollTop = topOf(chunk) + into * chunk.offsetHeight - clear;
       const settle = (tries: number, last = NaN) => {
         if (mine !== landing.current || !inner.isConnected) return;
         const found = inner.querySelector<HTMLElement>(selector);
@@ -343,8 +342,7 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
             requestAnimationFrame(() => settle(tries - 1, top));
             return;
           }
-          el.setAttribute("data-hit", "");
-          setTimeout(() => el.removeAttribute("data-hit"), 1200);
+          if (highlight) { el.setAttribute("data-hit", ""); setTimeout(() => el.removeAttribute("data-hit"), 1200); }
           then?.(found, root);
           return;
         }
@@ -409,11 +407,18 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
     return () => ro.disconnect();
   }, [follow]);
 
-  // Only a message still being written can grow; anything else is final the
-  // moment it lands, so the split is exactly one card wide.
-  const last = items.length > 0 ? items[items.length - 1] : undefined;
+  let tail = items.length - 1;
+  while (tail >= 0) {
+    const item = items[tail];
+    if (item.t !== "user" || !item.pending) break;
+    tail--;
+  }
+  const last = items[tail];
   const live = last?.t === "say" && !last.done ? last : undefined;
-  const blocks = useBlocks(items, live ? items.length - 1 : items.length, revision);
+  const blocks = useBlocks(items, live ? tail : items.length, revision);
+  const blockKeys = useBlockKeys(blocks);
+  const loadOlder = useHistoryAnchor(historyPaging, scroll, blocks, hidden, landing, release, land);
+  useOlderPageIntent({ scroll, hidden, load: loadOlder, generation: landing });
 
   useFindLanding(find, query ?? "", hidden, blocks, live, land);
 
@@ -472,16 +477,17 @@ export function Transcript({ items, port, entering, onEntered, brought, revision
       ref={scroll}
       hidden={hidden}
     >
-      <Rail marks={marks} total={items.length} scroll={scroll} flow={flow} onJump={jumpTo} bound={!hidden} scope={scope} />
+      <Rail marks={marks} total={items.length} scroll={scroll} flow={flow} onJump={jumpTo} bound={!hidden} scope={scope} earlier={historyPaging?.earlier ?? 0} onLoadEarlier={historyPaging?.hasMore ? loadOlder : undefined} />
       <div className="flow-edge" aria-hidden="true" />
       {/* 空转录是「窗口的空白」，壁纸该在那儿；一有内容它就是内容了。 */}
-      <div className="flow" ref={flow} data-empty={items.length === 0 ? "" : undefined}>
-        {items.length === 0 && (
+      <div className="flow" ref={flow} data-empty={items.length === 0 && !historyPaging?.hasMore && !historyPaging?.busy && !historyPaging?.failed ? "" : undefined}>
+        <HistoryPageControl paging={historyPaging} load={loadOlder} />
+        {items.length === 0 && !historyPaging?.hasMore && !historyPaging?.busy && !historyPaging?.failed && (
           <Hero needsProject={needsProject} onOpen={onOpenProject} onKeep={onKeepHere} />
         )}
         {blocks.map((block, i) => (
           <Block
-            key={i}
+            key={blockKeys[i]}
             items={block}
             checkpoints={checkpoints}
             watch={watch}

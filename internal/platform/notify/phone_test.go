@@ -201,14 +201,25 @@ func TestASinkReportsToPhonesAfterTheWindowEventAndReadsTheSwitchesLive(t *testi
 	}
 }
 
+type senderFunc func(ctx context.Context, kind string, count int) error
+
+func (f senderFunc) NotifyPhones(ctx context.Context, kind string, count int) error {
+	return f(ctx, kind, count)
+}
+
 func TestAPhoneLinkAttachedLaterIsUsedAndOneNotAttachedIsSilent(t *testing.T) {
 	link := &PhoneLink{}
 	if err := link.NotifyPhones(context.Background(), PhoneApproval, 1); !errors.Is(err, ErrNoPhoneLink) {
 		t.Fatalf("before attaching: %v", err)
 	}
-	p := NewPhone(link)
+	tried := make(chan struct{})
+	p := NewPhone(senderFunc(func(ctx context.Context, kind string, count int) error {
+		defer close(tried)
+		return link.NotifyPhones(ctx, kind, count)
+	}))
 	p.after = (&windows{}).after
 	p.Event(phoneCfg(allOn), event.Event{Kind: event.ApprovalRequest})
+	<-tried
 	rec := newPhoneRecorder()
 	link.Set(rec)
 	if err := link.NotifyPhones(context.Background(), PhoneError, 2); err != nil {

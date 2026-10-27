@@ -23,6 +23,13 @@ var plannerNonResearchTools = []string{
 // stay hidden. submit_plan is added only here, so the planner gaining a
 // structured exit leaves the executor's cache-stable tool prefix untouched.
 func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
+	return PlannerToolRegistryWithFrontend(parent, nil)
+}
+
+// PlannerToolRegistryWithFrontend keeps a fresh role frontend's ledger and audit
+// while binding its deferred reads to the planner's direct file tools.
+// The supplied frontend must not have been published to another agent.
+func PlannerToolRegistryWithFrontend(parent *tool.Registry, frontend *usecap.UseCapabilityTool) *tool.Registry {
 	exclude := append(SubagentMetaTools(), plannerNonResearchTools...)
 	base := FilterReadOnlyRegistry(parent, exclude...)
 	sub := tool.NewRegistry()
@@ -41,12 +48,9 @@ func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
 	}
 	if parent != nil {
 		if tl, ok := parent.Get("use_capability"); ok {
-			if uc, ok := tl.(*usecap.UseCapabilityTool); ok {
-				sub.Add(uc.CloneForAgent(nil, nil))
-			} else {
-				sub.Add(tl)
-			}
+			sub.Add(tl)
 		}
 	}
+	forkRoleFileViews(sub, frontend)
 	return sub
 }

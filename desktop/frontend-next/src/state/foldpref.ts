@@ -1,10 +1,14 @@
 import { createContext, useContext, useRef, useSyncExternalStore } from "react";
 import type { Item } from "./session_types";
-import { foldModes, onFoldModesChange, type Fold, type FoldMode, type FoldModes } from "./prefs";
+import { foldModes, onFoldModesChange, showsThinkingPreview, type Fold, type FoldMode, type FoldModes } from "./prefs";
 import { receiptPrefOf, type ReceiptPref, type ReceiptState } from "./receiptpref";
 
 export function useFoldModes(): FoldModes {
   return useSyncExternalStore(onFoldModesChange, foldModes, foldModes);
+}
+
+export function useThinkingPreview(): boolean {
+  return useSyncExternalStore(onFoldModesChange, showsThinkingPreview, showsThinkingPreview);
 }
 
 /** The receipt preference of the kernel this pane talks to; a transcript drawn

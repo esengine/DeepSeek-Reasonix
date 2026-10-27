@@ -4,25 +4,47 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"reasonix/internal/contract/provider"
 )
 
-// endpointFacts are what requests to this endpoint have established, each
-// written once and read by every later request. stream_options is the field a
-// gateway most often does not know: include_usage buys a token count and
-// nothing a turn needs, so an endpoint that rejects a body over it is asked
-// once whether it answers without it, and never asked again.
+// endpointFacts are what requests to this endpoint have established. authed is
+// one credential's, so it stays with the client; whether the endpoint accepts
+// stream_options is the endpoint's own, shared by every client of the same chat
+// URL: an endpoint that rejects a body over include_usage is asked once whether
+// it answers without it, and never asked again.
 type endpointFacts struct {
-	authed             atomic.Bool // a request has succeeded; gates transient-401 retry
-	omitStreamOptions  atomic.Bool // this endpoint refused the field and answered without it
-	streamOptionsAsked atomic.Bool // the question has been put once, however it answered
+	authed atomic.Bool // a request has succeeded; gates transient-401 retry
+	stream *streamOptionFacts
+	local  streamOptionFacts // used when the client was built without a shared record
+}
+
+// streamFacts is the record this client reads and writes.
+func (f *endpointFacts) streamFacts() *streamOptionFacts {
+	if f.stream != nil {
+		return f.stream
+	}
+	return &f.local
+}
+
+type streamOptionFacts struct {
+	omit  atomic.Bool // this endpoint refused the field and answered without it
+	asked atomic.Bool // the question has been put once, however it answered
+}
+
+var streamFactsByURL sync.Map
+
+// streamFactsFor is the shared record for one chat URL.
+func streamFactsFor(chatURL string) *streamOptionFacts {
+	v, _ := streamFactsByURL.LoadOrStore(chatURL, &streamOptionFacts{})
+	return v.(*streamOptionFacts)
 }
 
 // streamOptions asks for the usage record unless this endpoint refused it.
 func (c *client) streamOptions() *streamOptions {
-	if c.learned.omitStreamOptions.Load() {
+	if c.learned.streamFacts().omit.Load() {
 		return nil
 	}
 	return &streamOptions{IncludeUsage: true}
@@ -69,7 +91,7 @@ func (c *client) openResolvedChatStream(ctx context.Context, req provider.Reques
 	wire := c.buildRequest(req)
 	stream, err := c.openStream(ctx, c.chatURL, wire, req.Tools)
 	if err == nil || wire.StreamOptions == nil || !bodyRejected(err) || ctx.Err() != nil ||
-		!c.learned.streamOptionsAsked.CompareAndSwap(false, true) {
+		!c.learned.streamFacts().asked.CompareAndSwap(false, true) {
 		return stream, err
 	}
 	wire.StreamOptions = nil
@@ -77,6 +99,6 @@ func (c *client) openResolvedChatStream(ctx context.Context, req provider.Reques
 	if retryErr != nil {
 		return stream, err
 	}
-	c.learned.omitStreamOptions.Store(true)
+	c.learned.streamFacts().omit.Store(true)
 	return retried, nil
 }

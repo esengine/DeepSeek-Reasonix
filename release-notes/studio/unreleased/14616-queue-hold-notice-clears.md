@@ -1,0 +1,2 @@
+- 修复：点“继续派发”后，输入框上方“待发送已暂停”的黄色提示会随之消失，不再残留。修复 #14616。
+- Fixed: the yellow "queue paused" notice now goes away once dispatch resumes instead of lingering. Fixes #14616.

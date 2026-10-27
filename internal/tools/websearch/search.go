@@ -72,7 +72,9 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (string, error
 	}
 	var usage *provider.Usage
 	defer func() {
-		if u := provider.UsageWithRequestAttemptCount(ctx, usage); u != nil && t.ReportUsage != nil {
+		u := provider.UsageWithRequestAttemptCount(ctx, usage)
+		provider.ObserveAuxiliaryUsage(ctx, u)
+		if u != nil && t.ReportUsage != nil {
 			t.ReportUsage(u)
 		}
 	}()

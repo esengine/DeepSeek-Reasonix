@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useRef, useState } from "react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useModalFocus } from "./useModalFocus";
@@ -70,4 +70,19 @@ it("lets only the innermost of two open dialogs hold Tab", async () => {
   expect(document.activeElement).toBe(screen.getByText("inner first"));
   await userEvent.tab({ shift: true });
   expect(document.activeElement).toBe(screen.getByText("inner last"));
+});
+
+it.each([
+  { visible: false, expected: { preventScroll: true, focusVisible: false } },
+  { visible: true, expected: { preventScroll: true } },
+])("gives focus back with the ring only if the opener had one (visible=$visible)", async ({ visible, expected }) => {
+  const user = userEvent.setup();
+  render(<Page />);
+  const opener = screen.getByRole("button", { name: "open" });
+  const realMatches = opener.matches.bind(opener);
+  vi.spyOn(opener, "matches").mockImplementation(((selector: string) => (selector === ":focus-visible" ? visible : realMatches(selector))) as typeof opener.matches);
+  const focus = vi.spyOn(opener, "focus");
+  await user.click(opener);
+  await user.click(screen.getByRole("button", { name: "close outer" }));
+  expect(focus).toHaveBeenLastCalledWith(expected);
 });

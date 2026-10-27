@@ -4,11 +4,13 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
+import { EventEmitter } from "node:events";
 
 const require = createRequire(import.meta.url);
 const cuaContract = require("../../../internal/platform/computer/cua-driver.lock.json");
 const { parse, readActs, start } = require("../src/host.js");
 const { contextTemplate, editMenuTemplate, applicationMenuTemplate, menuInstaller } = require("../src/editmenu.js");
+const { textContextTemplate, textContextMenuHandler } = require("../src/textcontextmenu.js");
 const { uiLanguage } = require("../src/uilang.js");
 const { externalTarget } = require("../src/links.js");
 const { offerCleanup, ownBundle } = require("../src/legacy.js");
@@ -82,6 +84,136 @@ test("the context menu mirrors what the page says is possible", () => {
   assert.deepEqual(byRole, {
     undo: true, redo: false, cut: true, copy: true, paste: false, selectAll: true,
   });
+});
+
+test("a reader's generic text menu never offers mutation roles", () => {
+  const items = contextTemplate({ isEditable: false, selectionText: "picked",
+    editFlags: { canCopy: true, canSelectAll: true, canCut: true, canPaste: true, canUndo: true } }, "en");
+  assert.deepEqual(items.map((item) => item.role), ["copy", "selectAll"]);
+  assert.ok(items.every((item) => item.enabled));
+});
+
+const textMenuRequest = (over = {}) => ({
+  editable: true, selected: true, canUndo: true, canRedo: false, quote: true, x: 12.5, y: 24, ...over,
+});
+const menuRoles = (items) => Object.fromEntries(items.filter((item) => item.role || item.id)
+  .map((item) => [item.role ?? item.id, item.enabled]));
+
+test("workbench native menus distinguish editable and reader surfaces and translate quoting", () => {
+  const editable = textContextTemplate(textMenuRequest(), "en", () => {});
+  assert.deepEqual(menuRoles(editable), { undo: true, redo: false, cut: true, copy: true, paste: true, selectAll: true });
+  assert.equal(editable.at(-1).label, "Add to conversation");
+  assert.ok(editable.filter((item) => item.role).every((item) => !item.click));
+  const empty = textContextTemplate(textMenuRequest({ selected: false }), "en", () => {});
+  assert.deepEqual(menuRoles(empty), { undo: true, redo: false, cut: false, copy: false, paste: true, selectAll: true });
+  assert.equal(empty.filter((item) => item.click).length, 3);
+  const reader = textContextTemplate(textMenuRequest({ editable: false }), "zh", () => {});
+  assert.deepEqual(menuRoles(reader), { copy: true, selectAll: true });
+  assert.equal(reader.at(-1).label, "加入对话");
+  assert.deepEqual(textContextTemplate(textMenuRequest({ editable: false, selected: false }), "en", () => {}), []);
+  assert.equal(textContextTemplate(textMenuRequest({ quote: false }), "en", () => {}).filter((item) => item.click).length, 3);
+});
+
+function textMenuHarness() {
+  const contents = Object.assign(new EventEmitter(), {
+    mainFrame: { url: "http://127.0.0.1:8080/" }, getZoomFactor: () => 1.5,
+  });
+  const window = Object.assign(new EventEmitter(), { webContents: contents, isDestroyed: () => false });
+  const menus = [];
+  const Menu = { buildFromTemplate: (template) => {
+    const menu = { template, popup: (options) => { menu.options = options; },
+      closePopup: (target) => { assert.equal(target, window); menu.closed = true; } };
+    menus.push(menu);
+    return menu;
+  } };
+  const event = { sender: contents, senderFrame: contents.mainFrame };
+  const handle = textContextMenuHandler(Menu, (e) => e.sender === contents ? window : null,
+    () => "http://127.0.0.1:8080", () => "en");
+  return { contents, window, menus, event, handle };
+}
+
+test("native workbench popup returns quote or dismissal and uses zoomed client coordinates", async () => {
+  const h = textMenuHarness();
+  const picked = h.handle(h.event, textMenuRequest());
+  const menu = h.menus[0];
+  assert.equal(menu.options.window, h.window);
+  assert.equal(menu.options.x, 19);
+  assert.equal(menu.options.y, 36);
+  menu.template.at(-1).click();
+  menu.options.callback();
+  assert.equal(await picked, "quote");
+  const dismissed = h.handle(h.event, textMenuRequest());
+  h.menus[1].options.callback();
+  assert.equal(await dismissed, "");
+  assert.equal(h.contents.listenerCount("destroyed"), 0);
+  assert.equal(h.window.listenerCount("closed"), 0);
+});
+
+test("workbench history and select-all commands return editor actions, not native roles", async () => {
+  const h = textMenuHarness();
+  for (const [action, accelerator] of [
+    ["undo", "CommandOrControl+Z"],
+    ["redo", process.platform === "darwin" ? "CommandOrControl+Shift+Z" : "CommandOrControl+Y"],
+    ["selectAll", "CommandOrControl+A"],
+  ]) {
+    const result = h.handle(h.event, textMenuRequest({ canRedo: true }));
+    const menu = h.menus.at(-1);
+    const item = menu.template.find((entry) => entry.id === action);
+    assert.equal(item.role, undefined);
+    assert.equal(item.accelerator, accelerator);
+    assert.equal(item.enabled, true);
+    item.click();
+    menu.options.callback();
+    assert.equal(await result, action);
+  }
+  const disabled = textContextTemplate(textMenuRequest({ canUndo: false }), "en", () => {});
+  assert.equal(disabled.find((item) => item.id === "undo").enabled, false);
+  assert.equal(disabled.find((item) => item.id === "redo").enabled, false);
+});
+
+test("native workbench popup rejects foreign senders, subframes, origins and malformed capabilities", async () => {
+  const h = textMenuHarness();
+  for (const event of [
+    { ...h.event, sender: {} },
+    { ...h.event, senderFrame: { url: h.contents.mainFrame.url } },
+    { ...h.event, senderFrame: null },
+  ]) assert.equal(await h.handle(event, textMenuRequest()), "");
+  for (const url of ["http://127.0.0.1:8081/", "http://127.0.0.1:8080.evil/", "about:blank"]) {
+    h.contents.mainFrame.url = url;
+    assert.equal(await h.handle(h.event, textMenuRequest()), "");
+  }
+  h.contents.mainFrame.url = "http://127.0.0.1:8080/";
+  for (const request of [null, [], {}, textMenuRequest({ selected: "yes" }),
+    textMenuRequest({ canUndo: 1 }), textMenuRequest({ quote: undefined }),
+    textMenuRequest({ x: NaN }), textMenuRequest({ y: Infinity }), textMenuRequest({ x: "1" }),
+    textMenuRequest({ items: [{ role: "quit" }] })]) {
+    assert.equal(await h.handle(h.event, request), "");
+  }
+  assert.equal(await h.handle(h.event, textMenuRequest({ editable: false, selected: false })), "");
+  assert.equal(h.menus.length, 0);
+});
+
+test("native workbench popups settle and clean up on navigation, destruction and replacement", async () => {
+  for (const lifecycle of ["navigation", "contents", "window", "replacement"]) {
+    const h = textMenuHarness();
+    const pending = h.handle(h.event, textMenuRequest());
+    if (lifecycle === "navigation") {
+      h.contents.emit("did-start-navigation", { isMainFrame: false });
+      assert.equal(h.menus[0].closed, undefined);
+      h.contents.emit("did-start-navigation", { isMainFrame: true });
+    } else if (lifecycle === "contents") h.contents.emit("destroyed");
+    else if (lifecycle === "window") h.window.emit("closed");
+    else {
+      const next = h.handle(h.event, textMenuRequest());
+      h.menus[1].options.callback();
+      assert.equal(await next, "");
+    }
+    assert.equal(await pending, "");
+    assert.equal(h.menus[0].closed, true);
+    assert.equal(h.contents.listenerCount("did-start-navigation"), 0);
+    assert.equal(h.contents.listenerCount("destroyed"), 0);
+    assert.equal(h.window.listenerCount("closed"), 0);
+  }
 });
 
 test("the edit menu's labels follow the interface language, not the system's", () => {
@@ -2197,7 +2329,6 @@ test("packaging: a Windows installer named for x64 is renamed to amd64", async (
 });
 
 const { stateFile, loadState, saveState, placement, track } = require("../src/windowstate.js");
-const { EventEmitter } = require("node:events");
 
 const AREA = { x: 0, y: 0, width: 1920, height: 1040 };
 const SECOND = { x: 1920, y: 0, width: 1280, height: 1000 };

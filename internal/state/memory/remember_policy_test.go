@@ -25,6 +25,7 @@ func TestAssessRememberWriteAutoAllowsOnlyLowRiskProjectCreates(t *testing.T) {
 		"feedback":         json.RawMessage(`{"name":"concise","description":"Response style","type":"feedback","body":"Keep answers concise."}`),
 		"stable id update": json.RawMessage(`{"id":"mem-existing","expected_revision":1,"description":"Update","type":"project","body":"Updated body."}`),
 		"credential":       json.RawMessage(`{"name":"deploy-key","description":"Deploy credential","type":"project","body":"DEPLOY_API_KEY=sk-example-secret-value-123456"}`),
+		"pinned":           json.RawMessage(`{"name":"always-do","description":"Standing rule","type":"project","activation":"pinned","body":"Run make lint first."}`),
 		"email":            json.RawMessage(`{"name":"release-owner","description":"Release owner","type":"project","body":"Contact release-owner@example.test."}`),
 	}
 	for name, args := range cases {

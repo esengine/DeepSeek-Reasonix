@@ -1,2 +1,0 @@
-- 修复：打开反馈窗口后立刻粘贴截图，偶尔会被忽略；现在表单一出现就能接收粘贴。关联 #14333。
-- Fixed: pasting a screenshot the moment the feedback form appears was sometimes ignored; the form now takes a paste as soon as it is drawn. Refs #14333.

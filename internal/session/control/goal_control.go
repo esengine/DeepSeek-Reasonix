@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"reasonix/internal/base/i18n"
+	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/goaleval"
 )
 
@@ -64,6 +65,11 @@ func (c *Controller) ResumeGoal() bool {
 	if c.executor != nil {
 		if spentBudget {
 			c.executor.ResetTaskBudget()
+			if roles, ok := c.runner.(interface{ PlannerAgent() *agent.Agent }); ok {
+				if planner := roles.PlannerAgent(); planner != nil {
+					planner.ResetTaskBudget()
+				}
+			}
 		}
 		c.executor.RestoreDeliveryCheckpoint(c.goals.deliveryState())
 	}

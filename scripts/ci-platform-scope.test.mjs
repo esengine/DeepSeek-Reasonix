@@ -19,6 +19,13 @@ test("neutral paths do not need the macOS and Windows legs", () => {
 test("platform paths and unknown paths need them", () => {
   for (const f of [
     "internal/safety/sandbox/a.go",
+    "internal/runtime/isolation/store.go",
+    "internal/runtime/isolation/durable_test.go",
+    "internal/runtime/delegation/job_finalization.go",
+    "internal/runtime/delegation/writer_no_launch_test.go",
+    "internal/tools/jobs/finalization.go",
+    "internal/state/mutation/resources.go",
+    "internal/state/mutation/capacity_test.go",
     "internal/platform/update/a.go",
     "cmd/reasonix/main.go",
     "desktop/electron/main.ts",

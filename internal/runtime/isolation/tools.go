@@ -56,12 +56,12 @@ func (*ApplyTool) Schema() json.RawMessage { return json.RawMessage(idSchema) }
 
 func (*ApplyTool) ReadOnly() bool { return false }
 
-func (t *ApplyTool) DeclaredWritePaths(_ context.Context, raw json.RawMessage) ([]string, error) {
+func (t *ApplyTool) DeclaredWritePaths(ctx context.Context, raw json.RawMessage) ([]string, error) {
 	id, err := parseID(raw)
 	if err != nil {
 		return nil, err
 	}
-	return t.store.Paths(id)
+	return t.store.PathsContext(ctx, id)
 }
 
 func (t *ApplyTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

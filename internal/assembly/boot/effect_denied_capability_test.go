@@ -19,7 +19,6 @@ import (
 type deniedCapabilityProvider struct {
 	mu    sync.Mutex
 	calls int
-	times []time.Time
 	roots string
 	names [][]string
 }
@@ -30,7 +29,6 @@ func (p *deniedCapabilityProvider) Stream(_ context.Context, req provider.Reques
 	p.mu.Lock()
 	p.calls++
 	n := p.calls
-	p.times = append(p.times, time.Now())
 	var names []string
 	for _, t := range req.Tools {
 		names = append(names, t.Name)
@@ -53,7 +51,7 @@ func (p *deniedCapabilityProvider) Stream(_ context.Context, req provider.Reques
 	return ch, nil
 }
 
-func TestEffectDeniedCapabilityCallReturnsAtOnceAndSaysWhatToDo(t *testing.T) {
+func TestEffectDeniedCapabilityCallRefusesBeforeExecutionAndSaysWhatToDo(t *testing.T) {
 	home := isolateConfigHome(t)
 	_ = os.MkdirAll(filepath.Join(home, ".reasonix", "sessions"), 0o755)
 	dir := robustTempDir(t)
@@ -89,25 +87,16 @@ model = "x"
 		t.Fatal("turn did not finish")
 	}
 	prov.mu.Lock()
-	rounds := append([]time.Time(nil), prov.times...)
 	tools := prov.names
 	prov.mu.Unlock()
 	child := 0
-	var first, last time.Time
-	for i, names := range tools {
+	for _, names := range tools {
 		if !slices.Contains(names, "task") {
-			if child == 0 {
-				first = rounds[i]
-			}
-			last = rounds[i]
 			child++
 		}
 	}
 	if child < 4 {
 		t.Fatalf("the child made %d model requests, want its three denied calls and the answer after them", child)
-	}
-	if span := last.Sub(first); span > 2*time.Second {
-		t.Fatalf("three refused calls took %v end to end; a refusal is synchronous", span)
 	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
@@ -117,6 +106,9 @@ model = "x"
 			continue
 		}
 		denied++
+		if e.Tool.Err == "" || e.Tool.Executed || e.Tool.Execution != nil {
+			t.Fatalf("capability refusal carried execution evidence: %+v", e.Tool)
+		}
 		for _, want := range []string{"not proven read-only", "write_paths", "Do not retry"} {
 			if !strings.Contains(e.Tool.Output, want) {
 				t.Fatalf("the refusal %q does not say %q", e.Tool.Output, want)

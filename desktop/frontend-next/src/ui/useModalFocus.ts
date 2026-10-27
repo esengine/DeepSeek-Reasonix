@@ -21,12 +21,15 @@ const reachable = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>(
 
 /** Keeps Tab inside a dialog that declares itself modal, and gives focus back to
  *  whatever had it when the dialog opened. Without it a keyboard user tabs out of
- *  the sheet into the page it covers and cannot see where focus went. */
+ *  the sheet into the page it covers and cannot see where focus went. The opener
+ *  gets its ring back only if it had one: a mouse click that opened the dialog
+ *  must not turn into a keyboard-focus look because Esc closed it. */
 export function useModalFocus(ref: RefObject<HTMLElement | null>, active = true) {
   useEffect(() => {
     const root = ref.current;
     if (!active || !root) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const ringed = opener?.matches(":focus-visible") ?? false;
     open.push(root);
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Tab" || open[open.length - 1] !== root) return;
@@ -55,7 +58,7 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>, active = true)
       document.removeEventListener("keydown", onKey, true);
       const i = open.lastIndexOf(root);
       if (i >= 0) open.splice(i, 1);
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
+      if (opener?.isConnected) opener.focus(ringed ? { preventScroll: true } : { preventScroll: true, focusVisible: false });
     };
   }, [ref, active]);
 }

@@ -784,3 +784,22 @@ func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
 	}
 	return nil
 }
+
+func TestPasswordModeLoginRefusesAnOversizedForm(t *testing.T) {
+	ag := newAuthGate(config.ServeConfig{AuthMode: "password", PasswordHash: mustHash("correct")})
+	ts := httptest.NewServer(ag.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})))
+	defer ts.Close()
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	big := strings.Repeat("a", 1<<16)
+	resp, err := client.PostForm(ts.URL+"/login", url.Values{"password": {"correct"}, "pad": {big}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusFound {
+		t.Error("a login form larger than any password was parsed and accepted")
+	}
+}

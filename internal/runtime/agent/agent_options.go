@@ -128,10 +128,9 @@ type Options struct {
 	// queue. When nil, child construction shadows inherited queues.
 	MemoryQueue memory.Queue
 
-	// WriteScheduler is the session-scoped subagent concurrency/write-claim
-	// controller. When set on the parent executor, write-capable tools reserve
-	// paths for the duration of Execute so background writers cannot TOCTOU
-	// race parent writes. Subagents leave this nil (or depth > 0 skips it).
+	// WriteScheduler coordinates concrete writes with delegated claims. The parent
+	// and optimistic children share it; explicitly fenced children keep their
+	// existing path-bound wrapper owner.
 	WriteScheduler *writeclaim.SubagentScheduler
 	// WriteWorkspaceRoot normalizes parent write reservations.
 	WriteWorkspaceRoot string

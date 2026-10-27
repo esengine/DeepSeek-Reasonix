@@ -285,6 +285,9 @@ type RuntimeSettings interface {
 	NetworkSettings() NetworkSettings
 	SaveNetworkSettings(in NetworkSettings, password string, clearPassword bool) error
 	DiagnoseNetwork(ctx context.Context) []NetworkProbe
+	ProviderHealth(ctx context.Context, name string) (ProviderHealthReading, error)
+	ProviderHealthSettings() (ProviderHealthSettings, error)
+	SaveProviderHealthSettings(enabled bool) error
 	ShellSettings() ShellSettings
 	SaveShellSettings(prefer, path string, args ...string) error
 	PermissionRules() PermissionRules

@@ -28,6 +28,9 @@
 // commondir file or a damaged HEAD written afterwards cannot substitute
 // another repository's config. StageAll stages without entering a nested
 // repository, and host-created worktrees are opened as they are added.
+// Ambient index, object-directory and alternate-object-directory overrides are
+// removed before discovery and execution. Trusted callers may explicitly add a
+// private index afterward; repository-declared object alternates still apply.
 //
 // A checkout during `worktree add` runs in a child past the driver listing, so
 // callers add --no-checkout and populate through gitcmd in the new worktree.

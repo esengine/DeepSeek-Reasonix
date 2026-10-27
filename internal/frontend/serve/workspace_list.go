@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -58,6 +59,24 @@ func updateWorkspaceList(ctx context.Context, repair bool, mutate func(*workspac
 	return workspacelist.Update(ctx, workspacesPath(), repair, mutate)
 }
 
+// isAutoWorkspace says whether dir is the folder the app opens when nobody chose
+// one. It is where such a launch lands, not a project, so no list holds it.
+func isAutoWorkspace(dir string) bool {
+	auto := config.AutoWorkspaceDir()
+	return auto != "" && projectIdentity(dir) == projectIdentity(auto)
+}
+
+// ensureAutoWorkspace makes the app's own folder on demand and returns it, or ""
+// when the state root will not take it. A new session with no project behind it
+// opens there instead of being refused.
+func ensureAutoWorkspace() string {
+	auto := config.AutoWorkspaceDir()
+	if auto == "" || os.MkdirAll(auto, 0o755) != nil {
+		return ""
+	}
+	return auto
+}
+
 func rememberWorkspace(dir string) {
 	if err := addRememberedWorkspace(context.Background(), dir); err != nil {
 		slog.Warn("serve: remember workspace", "err", err)
@@ -65,7 +84,7 @@ func rememberWorkspace(dir string) {
 }
 
 func addRememberedWorkspace(ctx context.Context, dir string) error {
-	if dir == "" {
+	if dir == "" || isAutoWorkspace(dir) {
 		return nil
 	}
 	return updateWorkspaceList(ctx, true, func(list *workspaceList) error {
@@ -92,7 +111,7 @@ func addRememberedWorkspace(ctx context.Context, dir string) error {
 // adopted at launch is no folder anyone picked, and its conversations are
 // reachable only through a row for it.
 func keepUsedWorkspace(dir string) {
-	if dir == "" {
+	if dir == "" || isAutoWorkspace(dir) {
 		return
 	}
 	err := updateWorkspaceList(context.Background(), true, func(list *workspaceList) error {

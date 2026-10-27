@@ -156,8 +156,11 @@ func TestStatusExtensionTracksMultipleSessionsAndUsage(t *testing.T) {
 	if usage.PromptTokens != 15 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.CacheHitTokens != 7 || usage.CacheMissTokens != 8 {
 		t.Fatalf("cumulative usage = %+v", usage)
 	}
-	if usage.UsageSource != "mixed" || usage.CacheHitRatio == nil || usage.EstimatedCost == nil || usage.Currency == nil || *usage.Currency != "USD" {
+	if usage.UsageSource != "mixed" || usage.CacheHitRatio == nil || usage.EstimatedCost != nil || usage.Currency != nil {
 		t.Fatalf("usage metadata = %+v", usage)
+	}
+	if usage.CostComplete == nil || *usage.CostComplete || usage.CostQuote == nil || usage.CostQuote.Coverage != pricing.CoveragePartial || usage.CostQuote.Original.Amount != "0.0000187" {
+		t.Fatalf("mixed estimated/reported cost = %+v", usage)
 	}
 	if !usage.Estimated {
 		t.Fatalf("cumulative usage lost estimated marker: %+v", usage)

@@ -247,7 +247,8 @@ describe("screenshots", () => {
     const node = target === "heading" ? document.querySelector("#fbk-title")! : document.activeElement!;
     fireEvent.paste(node, { clipboardData: { files: [png("dialog.png")] } });
     expect(await screen.findByAltText("dialog.png")).toBeTruthy();
-    expect(heldDraft().shots.map((s) => s.name)).toEqual(["dialog.png"]);
+    // The draft is held from an effect, which can run after the thumbnail is on screen.
+    await waitFor(() => expect(heldDraft().shots.map((s) => s.name)).toEqual(["dialog.png"]));
   });
 
   it("does not route a paste on My feedback into the hidden report", async () => {

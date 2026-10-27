@@ -62,7 +62,9 @@ var providerNameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
 type providerView struct {
 	Name string `json:"name"`
 	// DisplayName is the label a person gave this entry; empty is none set.
-	DisplayName  string            `json:"displayName,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	// Mark is the vendor the preset declares; empty for a hand-written entry.
+	Mark         string            `json:"mark,omitempty"`
 	Kind         string            `json:"kind"`
 	BaseURL      string            `json:"baseUrl"`
 	Models       []string          `json:"models"`
@@ -190,6 +192,7 @@ func (s *Server) providers(w http.ResponseWriter, _ *http.Request) {
 			KeyEnv:               p.APIKeyEnv,
 			InUse:                p.Name == current,
 			Preset:               strings.TrimSpace(p.PresetID) != "",
+			Mark:                 providerMark(p),
 			ReasoningProtocol:    strings.ToLower(strings.TrimSpace(p.ReasoningProtocol)),
 			SupportedEfforts:     config.StoredEffortLevels(p.SupportedEfforts),
 			DefaultEffort:        strings.ToLower(strings.TrimSpace(p.DefaultEffort)),

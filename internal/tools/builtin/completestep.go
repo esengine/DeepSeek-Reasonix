@@ -286,7 +286,7 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if !everyCitationProven(ctx, e.Paths, func(p []string) bool {
 				return ledger.HasSuccessfulWrite(p) || verifyPathsFromSession(ctx, p, true)
 			}) {
-				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn%s", i+1, receiptHint("files written this turn", ledger.TouchedPaths(8, true)))
+				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn%s%s", i+1, receiptHint("files written this turn", ledger.TouchedPaths(8, true)), changedByCommandHint(ledger, e.Paths))
 			}
 			hostVerified++
 		case "files":
@@ -535,6 +535,17 @@ func failedCallIDs(msgs []provider.Message) map[string]bool {
 		}
 	}
 	return failed
+}
+
+// changedByCommandHint answers a diff citation for paths only a command
+// touched. A writer receipt comes from the file tools, so a change made by a
+// command never has one, but the same paths cited as files evidence are proven
+// by that command; without this the model retries diff until it gives up.
+func changedByCommandHint(ledger *evidence.Ledger, paths []string) string {
+	if !ledger.HasSuccessfulBashMentioningPaths(paths) {
+		return ""
+	}
+	return "; a command in this turn mentions these paths, and diff evidence counts only file-tool writes: cite them as files evidence instead, or cite the check you ran"
 }
 
 func receiptHint(label string, items []string) string {

@@ -6,19 +6,20 @@ import (
 	"strings"
 
 	"reasonix/internal/assembly/boot"
+	"reasonix/internal/contract/config"
 	"reasonix/internal/frontend/serve"
 )
 
-// launchWorkspace is the folder the first pane opens. The working directory
-// counts only when someone chose it: a Start-menu or Finder launch inherits the
+// launchWorkspace is the folder the first pane opens: a chosen directory, then
+// a remembered project, then the app's own auto workspace, never the home
+// directory. The working directory counts only when someone chose it: a Start-menu or Finder launch inherits the
 // install directory or the filesystem root, and taking that as a project puts
 // the app's own folder in the sidebar again after every removal.
 func launchWorkspace(appExe string) string {
-	home, _ := os.UserHomeDir()
-	return pickLaunchWorkspace(boot.ResolveWorkspaceRoot(""), appExe, serve.LaunchWorkspaces(), home)
+	return pickLaunchWorkspace(boot.ResolveWorkspaceRoot(""), appExe, serve.LaunchWorkspaces(), config.AutoWorkspaceDir())
 }
 
-func pickLaunchWorkspace(cwd, appExe string, remembered []string, home string) string {
+func pickLaunchWorkspace(cwd, appExe string, remembered []string, auto string) string {
 	if userChoseDir(cwd, appExe) {
 		return cwd
 	}
@@ -27,8 +28,8 @@ func pickLaunchWorkspace(cwd, appExe string, remembered []string, home string) s
 			return dir
 		}
 	}
-	if home != "" {
-		return home
+	if auto != "" && os.MkdirAll(auto, 0o755) == nil {
+		return auto
 	}
 	return cwd
 }

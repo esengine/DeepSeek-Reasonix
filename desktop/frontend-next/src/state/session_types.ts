@@ -1,7 +1,7 @@
 // What a session is made of, apart from the reducer that maintains it: the
 // rows the transcript draws and the state one turn hands the next.
 import type { StateTool } from "./outputcap";
-import type { Ask, Approval, Compaction, CostCoverage, ExtensionSurface, Guardian, Receipt, StoredAttachment, Tool, Via, WorkspaceLease } from "../port/wire";
+import type { Ask, Approval, Compaction, CostCoverage, ExtensionSurface, Guardian, Receipt, StoredAttachment, Via, WorkspaceLease } from "../port/wire";
 import type { Sample } from "../port/tokens";
 import type { Executions } from "./executions";
 
@@ -37,7 +37,7 @@ export type Item =
   | { t: "say"; id: string; text: string; reasoning?: string; done: boolean; thoughtMs?: number; source?: string; model?: string }
   // omitted counts the characters of a running call's output that the page let go of from the front.
   | { t: "tool"; id: string; tool: StateTool; running: boolean; children: StateTool[]; omitted?: number }
-  | { t: "reads"; id: string; tools: Tool[] }
+  | { t: "reads"; id: string; tools: StateTool[] }
   | { t: "guardian"; id: string; g: Guardian }
   // by is who settled it when that was not this screen: the device named on
   // the kernel's receipt, or the window when the receipt names none.

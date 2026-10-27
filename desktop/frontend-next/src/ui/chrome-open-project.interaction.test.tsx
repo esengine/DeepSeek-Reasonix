@@ -28,7 +28,6 @@ async function draw(shell: Record<string, unknown>, host?: string) {
       status={{ preset: "balanced", toolApprovalMode: "ask", workspaceRoot: ROOT, sessionPath: ROOT + "/s.jsonl" } as never}
       title="会话"
       steer={0}
-      onSettings={vi.fn()}
       account={null}
       theme="dark"
       onTheme={vi.fn()}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/runtime/writeclaim"
+	"reasonix/internal/state/workspacelease"
 	"strings"
 
 	"reasonix/internal/contract/event"
@@ -58,7 +59,7 @@ type toolCallPlan struct {
 	cctx                 context.Context
 	releaseParentWrite   func()
 	releaseMutationWrite func()
-	releaseLeaseHold     func()
+	leasePreparation     *workspacelease.PreparedCall
 
 	// pathsBefore is the state of the turn's known paths taken before an
 	// unclassifiable call ran, so its receipt can say what it actually touched.
@@ -78,8 +79,9 @@ type toolCallPlan struct {
 	mutationObserved  bool
 	mutationAfterDone bool
 	// ranClean: the tool's own Execute returned no error, before tool.after ruled.
-	ranClean bool
-	executed bool
+	ranClean           bool
+	executed           bool
+	hookMayHaveMutated bool
 	// spawned collects the external origins of calls this tool made on its own
 	// account, nested or through a sub-agent; it labels a result the tool
 	// declares nothing external for.
@@ -99,12 +101,12 @@ func (p *toolCallPlan) provenanceOf(t tool.Tool, args json.RawMessage) tool.Prov
 	return own
 }
 
-// executeOne runs a single tool call. It is pure with respect to the event sink
-// — the caller emits ToolDispatch/ToolResult — so it is safe to invoke from
-// parallel goroutines. Stages: parse → policy → prepare → finish.
+// executeOne publishes resource invalidation on every exit, independently of
+// its caller's ToolDispatch/ToolResult ordering.
 func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider.ToolCall) (out toolOutcome) {
 	ctx = a.withAgentContext(ctx)
 	plan := &toolCallPlan{call: call}
+	defer func() { recordWorkspaceMutation(a.svc.sink, out.workspaceMutation) }()
 	ctx = tool.WithInvoker(ctx, &nestedInvoker{a: a, turn: turn, parent: plan})
 	todosBefore := a.todoStateBefore(call)
 	defer func() { out.todoEcho = a.todoWriteEchoes(plan.call, todosBefore, out.errMsg) }()
@@ -115,8 +117,13 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		if plan.releaseMutationWrite != nil {
 			plan.releaseMutationWrite()
 		}
-		if plan.releaseLeaseHold != nil {
-			plan.releaseLeaseHold()
+		if err := plan.leasePreparation.Close(context.WithoutCancel(ctx)); err != nil {
+			out.output += "\nwarning: " + err.Error()
+			if out.errMsg == "" {
+				out.errMsg = err.Error()
+			} else {
+				out.errMsg += "; " + err.Error()
+			}
 		}
 		if plan.releaseParentWrite != nil {
 			plan.releaseParentWrite()
@@ -578,7 +585,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// check-before-write TOCTOU windows. Dynamic Economy/MCP tools are covered
 	// here after registry lookup without schema-changing wrappers.
 	// executeOne defers plan.releaseParentWrite so every return path releases.
-	if releaseParentWrite, perr := a.reserveParentWrite(plan.runTool, plan.runArgs, plan.readOnly, a.declareWritePaths(ctx, plan)); perr != nil {
+	if releaseParentWrite, perr := a.reserveToolWrite(ctx, plan.runTool, plan.runArgs, plan.readOnly, a.declareWritePaths(ctx, plan)); perr != nil {
 		out := toolOutcome{
 			output:  "blocked: " + perr.Error(),
 			blocked: true,
@@ -594,8 +601,8 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// Acquire the checkpoint barrier before preimage capture and any hook. It is
 	// held through post hooks and AfterMutation so rewind cannot interleave with
 	// writer-side user code.
-	if !plan.readOnly && a.svc.mutationObserver != nil {
-		release, err := a.svc.mutationObserver.BeginWrite()
+	if (!plan.readOnly || toolHooksMayMutateWorkspace(a.svc.hooks)) && a.svc.mutationObserver != nil {
+		release, err := a.svc.mutationObserver.BeginWriteContext(ctx)
 		if err != nil {
 			return toolOutcome{output: "blocked: " + err.Error(), blocked: true, errMsg: "blocked: checkpoint write preparation failed"}, true
 		}
@@ -644,6 +651,7 @@ func toolHooksMayMutateWorkspace(hooks ToolHooks) bool {
 // finishToolExecution performs the concrete Execute, records evidence, runs
 // post hooks and recovery observation, and truncates the model-facing result.
 func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) toolOutcome {
+	plan.leasePreparation.Retain()
 	plan.executed = true
 	a.announceDelegation(plan)
 	cctx := plan.cctx

@@ -24,6 +24,18 @@ export interface GraphicsInfo {
   compositing: string;
 }
 
+export interface TextContextMenuRequest {
+  editable: boolean;
+  selected: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
+  quote: boolean;
+  x: number;
+  y: number;
+}
+
+export type TextContextMenuResult = "quote" | "undo" | "redo" | "selectAll" | "";
+
 export interface HostPort {
   /** Whether this page runs inside the desktop shell, as opposed to a browser
    *  tab, where the browser's own keys (zoom among them) are the reader's. */
@@ -52,6 +64,8 @@ export interface HostPort {
    *  surface at all; "" means they dismissed the dialog, which is an answer. */
   saveText(name: string, content: string): Promise<string | null>;
   saveBytes(name: string, bytes: Uint8Array): Promise<string | null>;
+  /** null means unsupported; "" means dismissal or a standard native action. */
+  showTextContextMenu(request: TextContextMenuRequest): Promise<TextContextMenuResult | null>;
   /** Ask for a directory. null means this shell has no picker at all; "" means
    *  they dismissed it, the same two answers saveText gives. startIn is where
    *  to open: the shell owns the dialog, the kernel owns which workspace runs,
@@ -173,6 +187,7 @@ interface ElectronBridge {
   pathForFile(file: File): string;
   saveText(name: string, content: string): Promise<string>;
   saveBytes(name: string, bytes: Uint8Array): Promise<string>;
+  showTextContextMenu?(request: TextContextMenuRequest): Promise<TextContextMenuResult>;
   pickFolder(startIn: string): Promise<string>;
   revealPath?(base: string, path: string): Promise<Refusal | null>;
   openFile?(base: string, path: string): Promise<Refusal | null>;
@@ -228,6 +243,9 @@ class ElectronHost implements HostPort {
   }
   captureWindow() {
     return this.api.captureWindow?.().then((b) => (b?.byteLength ? new Uint8Array(b) : null)).catch(() => null) ?? Promise.resolve(null);
+  }
+  showTextContextMenu(request: TextContextMenuRequest) {
+    return this.api.showTextContextMenu?.(request) ?? Promise.resolve(null);
   }
   graphics() {
     return this.api.graphics?.().catch(() => null) ?? Promise.resolve(null);
@@ -332,6 +350,9 @@ class BrowserHost implements HostPort {
     return false;
   }
   captureWindow() {
+    return Promise.resolve(null);
+  }
+  showTextContextMenu() {
     return Promise.resolve(null);
   }
   graphics() {

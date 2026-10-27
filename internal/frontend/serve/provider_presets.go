@@ -16,6 +16,7 @@ type providerPresetView struct {
 	Label   string `json:"label"`
 	Kind    string `json:"kind"`
 	BaseURL string `json:"baseUrl"`
+	Vendor  string `json:"vendor"`
 }
 
 func (s *Server) providerPresets(w http.ResponseWriter, _ *http.Request) {
@@ -26,7 +27,7 @@ func (s *Server) providerPresets(w http.ResponseWriter, _ *http.Request) {
 		}
 		entry := preset.Entries[0]
 		out = append(out, providerPresetView{
-			ID: preset.ID, Label: preset.Label, Kind: entry.Kind, BaseURL: entry.BaseURL,
+			ID: preset.ID, Label: preset.Label, Kind: entry.Kind, BaseURL: entry.BaseURL, Vendor: preset.Vendor,
 		})
 	}
 	writeJSON(w, out)

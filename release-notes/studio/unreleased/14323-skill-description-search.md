@@ -1,2 +1,0 @@
-- 改进：输入 `/` 后可继续输入描述中的关键词查找技能和命令，无需额外搜索框。名称匹配仍优先于描述匹配，同组结果保持原有顺序。关联 #14323。
-- Improved: type description keywords after `/` to find skills and commands. Name matches rank first; catalogue order stays stable within each match group. Refs #14323.

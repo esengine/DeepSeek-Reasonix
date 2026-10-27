@@ -5,6 +5,8 @@ import { t } from "../i18n";
 // this build has no line for, such as one an MCP server declares.
 export function toolBlurb(name: string): string | undefined {
   switch (name) {
+    case "advise":
+      return t("向更强的模型求助：它读完到目前为止的对话后，用方案、诊断或审查回答你的问题；它自己不执行任何东西。");
     case "ask":
       return t("向你提问：遇到只有你能决定或提供的事时，模型用它来问你。");
     case "await_user":
@@ -13,6 +15,8 @@ export function toolBlurb(name: string): string | undefined {
       return t("在命令行里执行命令并返回输出，用于构建、测试、git、包管理等。");
     case "bash_output":
       return t("读取后台任务新产生的输出。");
+    case "best_of_n":
+      return t("把一个明确的编码任务并行做 2–4 遍，每遍在独立的 git 工作树里；再由评审比较，只把最好的一份写回工作区。");
     case "browser_act":
       return t("在浏览器页面上执行真实操作，比如点击和输入。");
     case "browser_open":
@@ -39,6 +43,8 @@ export function toolBlurb(name: string): string | undefined {
       return t("按名字从 Go 源文件里删除一个函数、方法或类型等符号。");
     case "dispatch_to_project":
       return t("把任务交给你另一个项目里的会话：指定项目并写明要做什么；对方没有等待中的会话时会在那里新开一个。");
+    case "open_projects":
+      return t("请你把一批文件夹加入项目列表：卡片逐条列出路径，你批准后才会加入并标记为可信，之后才能向它们派发任务。");
     case "docs":
       return t("搜索并阅读内置在本版本里的官方文档。");
     case "edit_file":
@@ -89,8 +95,12 @@ export function toolBlurb(name: string): string | undefined {
       return t("修改 Jupyter 笔记本（.ipynb）里的一个单元格，可替换或插入。");
     case "parallel_tasks":
       return t("同时派出多个只读子代理任务，全部完成后返回摘要。");
+    case "present_files":
+      return t("把已有的最终文件以可点击的卡片展示给你，包括命令行生成的文档；路径须在工作区或已授权的文件夹内，打开的是当前文件而不是快照，也不保证内容正确。");
     case "read_file":
       return t("读取文本文件，可指定起始行和行数，输出带行号。");
+    case "read_mcp_resource":
+      return t("读取已连接的 MCP 服务器自己列出的一份资源（文档、记录、文件）；服务器没列出的地址会被拒绝，返回的是服务器的数据，不是你的指令。");
     case "read_only_skill":
       return t("以只读方式调用一个技能；子代理类技能在只读的隔离会话里运行。");
     case "read_only_task":
@@ -111,6 +121,8 @@ export function toolBlurb(name: string): string | undefined {
       return t("在隔离的子代理里结合网页内容和本地代码做调研，适合既要外部资料又要本地验证的问题。");
     case "review":
       return t("在隔离的子代理里审查待提交的改动，指出正确性、安全、缺测试和隐藏的行为变化；只读。");
+    case "run_script":
+      return t("运行一小段 Starlark（类 Python）脚本来调用多个工具，几步相互依赖的操作只需一次往返，只返回脚本打印的内容；每次调用都和模型直接调用一样受检查和审批。");
     case "run_skill":
       return t("调用系统提示里技能索引中的一份技能手册。");
     case "security_review":

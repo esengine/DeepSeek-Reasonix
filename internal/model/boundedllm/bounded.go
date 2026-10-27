@@ -117,6 +117,7 @@ func Call(ctx context.Context, cfg Config, system, evidence string) (string, err
 	var usage *provider.Usage
 	defer func() {
 		usage = provider.UsageWithRequestAttemptCount(callCtx, usage)
+		provider.ObserveAuxiliaryUsage(callCtx, usage)
 		if usage != nil && cfg.UsageSource != "" && cfg.Sink != nil {
 			cfg.Sink.Emit(event.Event{
 				Kind:        event.Usage,

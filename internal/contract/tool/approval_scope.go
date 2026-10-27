@@ -11,6 +11,10 @@ type ApprovalScoper interface {
 // own tool calls without asking again.
 const ApprovalScopeUnattendedAttempts = "unattended_attempts"
 
+// ApprovalScopeOpenProjects: approving adds the folders the card lists to the
+// user's project list and marks them trusted.
+const ApprovalScopeOpenProjects = "open_projects"
+
 // ApprovalScopeOf is t's declared scope, or "" when approving it authorizes
 // the call alone.
 func ApprovalScopeOf(t Tool) string {

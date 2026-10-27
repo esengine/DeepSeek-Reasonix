@@ -13,14 +13,50 @@ import { draftKey } from "./drafts";
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 
-it("labels the active model with its alias while keeping the raw reference in details", async () => {
-  const port = new MockPort();
-  vi.spyOn(port, "models").mockResolvedValue([
-    { ref: "relay/vendor/long-v1", provider: "relay", model: "vendor/long-v1", modelAlias: "Short" },
-  ]);
-  draw({ port, st: status({ modelRef: "relay/vendor/long-v1" }) });
-  const trigger = await screen.findByRole("button", { name: /Short/ });
-  expect(trigger.title).toBe("relay/vendor/long-v1");
+describe("composer model tooltip", () => {
+  const models: ModelEntry[] = [
+    { ref: "relay/vendor/long-v1", provider: "relay", model: "vendor/long-v1", vendor: "relay.example", displayName: " My relay ", modelAlias: " Short " },
+    { ref: "other/plain-v2", provider: "other", model: "plain-v2", displayName: "Other account" },
+  ];
+
+  it("shows account and model aliases without replacing the selection reference", async () => {
+    const port = new MockPort();
+    vi.spyOn(port, "models").mockResolvedValue(models);
+    const pending = deferred<void>();
+    const pick = vi.spyOn(port, "setModel").mockReturnValue(pending.promise);
+    draw({ port, st: status({ modelRef: models[0].ref }), running: true });
+    const trigger = await screen.findByRole("button", { name: /Short/ });
+    await userEvent.setup().hover(trigger);
+    expect(trigger.title).toBe("My relay / Short");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: /plain-v2/ }));
+    await waitFor(() => expect(pick).toHaveBeenCalledWith("other/plain-v2"));
+    expect(trigger.title).toBe("My relay / Short");
+    expect(trigger.hasAttribute("data-pending")).toBe(true);
+    await act(async () => pending.resolve());
+  });
+
+  it("refreshes aliases after settings and follows the active provider and model", async () => {
+    const port = new MockPort();
+    const load = vi.spyOn(port, "models").mockResolvedValue(models);
+    const props = { port, running: false, onSubmit: vi.fn(async () => true), onChanged: vi.fn(), onError: vi.fn() };
+    const view = render(<Composer {...props} status={status({ modelRef: models[0].ref })} />);
+    expect((await screen.findByRole("button", { name: /Short/ })).title).toBe("My relay / Short");
+    load.mockResolvedValue([{ ...models[0], displayName: "Renamed account", modelAlias: "Renamed model" }, models[1]]);
+    view.rerender(<Composer {...props} pulse={1} status={status({ modelRef: models[0].ref })} />);
+    expect((await screen.findByRole("button", { name: /Renamed model/ })).title).toBe("Renamed account / Renamed model");
+    view.rerender(<Composer {...props} pulse={1} status={status({ modelRef: models[1].ref })} />);
+    expect(screen.getByRole("button", { name: /plain-v2/ }).title).toBe("Other account / plain-v2");
+    view.rerender(<Composer {...props} pulse={1} status={status({ modelRef: "missing/vendor/model" })} />);
+    expect(screen.getByRole("button", { name: "vendor/model" }).title).toBe("missing/vendor/model");
+  });
+
+  it("uses canonical provider naming when aliases are blank", async () => {
+    const port = new MockPort();
+    vi.spyOn(port, "models").mockResolvedValue([{ ref: "local/model", provider: "Local account", model: "model", displayName: " ", modelAlias: " " }]);
+    draw({ port, st: status({ modelRef: "local/model" }) });
+    expect((await screen.findByRole("button", { name: "model" })).title).toBe("Local account / model");
+  });
 });
 
 // The workspace's git answer, the way /workspace/git words it. Tests that name

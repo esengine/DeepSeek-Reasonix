@@ -160,24 +160,7 @@ func Apply(ctx context.Context, snap Snapshot, tree string, changes []Change) er
 	if current != snap.Tree {
 		return ErrWorkspaceMoved
 	}
-	var restore []string
-	for _, ch := range changes {
-		if ch.Status == "D" {
-			if err := os.Remove(filepath.Join(snap.RepoRoot, filepath.FromSlash(ch.Path))); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("apply deletion of %s: %w", ch.Path, err)
-			}
-			continue
-		}
-		restore = append(restore, ch.Path)
-	}
-	if len(restore) == 0 {
-		return nil
-	}
-	args := append([]string{"restore", "--source=" + tree, "--worktree", "--"}, restore...)
-	if _, stderr, err := runGit(ctx, source, args...); err != nil {
-		return fmt.Errorf("apply candidate files: %w%s", err, stderrSuffix(stderr))
-	}
-	return nil
+	return writeChanges(ctx, source, tree, changes)
 }
 
 // RemoveCandidate deletes a candidate worktree and its administrative entry.

@@ -1,0 +1,2 @@
+- 修复：命令或同一批调用被宿主拦截时（比如“修改和验证混在一起”“前面的修改失败，这一步跳过”），工具卡片现在用中文说明原因，不再显示英文的 blocked 提示。修复 #14652。
+- Fixed: when the host stops a command or a call in a batch before it runs, the tool card now explains why in your language instead of an English "blocked:" line. Fixes #14652.

@@ -122,20 +122,10 @@ type Policy struct {
 	ReadOnly         bool // denies every call that is not a read, whatever the rules allow
 	// AskOnOrigin puts a call that repeats external text to a person when only Mode allows it.
 	AskOnOrigin bool
-}
-
-// WithSessionAllow returns a copy of p with additional ephemeral allow rules.
-// Malformed entries are ignored consistently with New.
-func (p Policy) WithSessionAllow(rules []string) Policy {
-	p.SessionAllow = append(append([]Rule(nil), p.SessionAllow...), parseRules(rules)...)
-	return p
-}
-
-// WithAllowDynamicBashFallback enables the explicit advanced override for
-// dynamic shell shapes. Deny, ask, and exact allow rules retain precedence.
-func (p Policy) WithAllowDynamicBashFallback(enabled bool) Policy {
-	p.AllowDynamicBash = enabled
-	return p
+	// RepoPrograms lists the program-running config keys the repository at dir
+	// defines for itself; "" is the session's workspace. Nil means unknown, and a
+	// git read is then judged as it was before.
+	RepoPrograms func(ctx context.Context, dir string) []string
 }
 
 // New builds a Policy from config string slices and a mode string ("ask" by

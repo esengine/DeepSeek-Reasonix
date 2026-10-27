@@ -453,6 +453,10 @@ export class SsePort extends SseWorkspace implements AgentPort {
     return this.get<HistoryMessage[]>("/history");
   }
 
+  historyPage(cursor?: string) {
+    return this.get<import("./session").HistoryPage>("/history/page" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""));
+  }
+
   todos() {
     return this.get<HostTodo[]>("/todos");
   }

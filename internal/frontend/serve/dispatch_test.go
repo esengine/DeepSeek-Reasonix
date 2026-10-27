@@ -406,35 +406,36 @@ func TestTheSessionCeilingBoundsHowManyPanesOneSessionKeepsOpen(t *testing.T) {
 	}
 }
 
-func TestAnUndecidedProjectKeepsItsPaneOpenAndTheTaskIsNotSent(t *testing.T) {
+func TestAnUndecidedProjectInTheListIsTrustedAndTheTaskIsSent(t *testing.T) {
 	f := newDispatchFixture(t, dispatchOn)
 	a := f.project("alpha", true)
 	b := f.project("newcomer", false)
-	sender := f.sender(a)
-	ctx := context.Background()
 
-	_, err := sender.DispatchToProject(ctx, "newcomer", "do it")
+	got, err := f.sender(a).DispatchToProject(context.Background(), "newcomer", "do it")
+	if err != nil || got.Project != b || f.opened != 1 {
+		t.Fatalf("got %+v, %v, %d panes opened; want the task sent to a newly opened pane", got, err, f.opened)
+	}
+	if trust, _ := config.NewProjectGrantStore(f.home).Trust(b); trust != config.WorkspaceTrusted {
+		t.Fatalf("trust = %q, want the named project recorded as trusted", trust)
+	}
+}
+
+func TestAProjectThatCannotBeTrustedWholeKeepsItsPaneOpenAndTheTaskIsNotSent(t *testing.T) {
+	f := newDispatchFixture(t, dispatchOn)
+	a := f.project("alpha", true)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	rememberWorkspace(home)
+	sender := f.sender(a)
+
+	_, err = sender.DispatchToProject(context.Background(), filepath.Base(home), "do it")
 	if !errors.Is(err, control.ErrDispatchAwaitingTrust) {
 		t.Fatalf("err = %v, want dispatch.awaiting_trust", err)
 	}
-	if !strings.Contains(err.Error(), "newcomer") || !strings.Contains(err.Error(), "not sent") {
-		t.Fatalf("err = %q, want the project name and that the task was not sent", err)
-	}
-	if got := len(f.hub.localRuntimes()); got != 2 {
-		t.Fatalf("%d panes open, want the sender's and the waiting one", got)
-	}
-	for _, rt := range f.hub.localRuntimes() {
-		if c := rt.Server.Controller().(*control.Controller); c.WorkspaceRoot() == b && c.OpenedByDispatch() {
-			t.Fatal("the waiting pane was marked as opened by a dispatch before the user answered")
-		}
-	}
-
-	if err := config.NewProjectGrantStore(f.home).SetTrust(b, config.WorkspaceTrusted); err != nil {
-		t.Fatal(err)
-	}
-	got, err := sender.DispatchToProject(ctx, "newcomer", "do it")
-	if err != nil || got.Project != b || f.opened != 1 {
-		t.Fatalf("after the answer: %+v, %v, %d panes opened; want the same pane reused", got, err, f.opened)
+	if trust, _ := config.NewProjectGrantStore(f.home).Trust(home); trust != config.WorkspaceTrustUndecided {
+		t.Fatalf("trust = %q, want nothing recorded", trust)
 	}
 }
 
@@ -460,26 +461,5 @@ func TestADispatchToTheSendersOwnProjectOpensNothing(t *testing.T) {
 	_, err := f.sender(a).DispatchToProject(context.Background(), "alpha", "x")
 	if !errors.Is(err, control.ErrDispatchSameProject) || f.opened != 0 {
 		t.Fatalf("err = %v, opened %d; want dispatch.same_project and no pane", err, f.opened)
-	}
-}
-
-func TestPanesWaitingForATrustAnswerCountAgainstTheSessionCeiling(t *testing.T) {
-	f := newDispatchFixture(t, dispatchOn)
-	setPeersCeilings(t, 1, 2)
-	for _, name := range []string{"one", "two", "three"} {
-		f.project(name, false)
-	}
-	sender := f.sender(f.project("alpha", true))
-	ctx := context.Background()
-	for _, name := range []string{"one", "two"} {
-		if _, err := sender.DispatchToProject(ctx, name, "x"); !errors.Is(err, control.ErrDispatchAwaitingTrust) {
-			t.Fatalf("%s = %v, want awaiting_trust", name, err)
-		}
-	}
-	if _, err := sender.DispatchToProject(ctx, "one", "again"); !errors.Is(err, control.ErrDispatchAwaitingTrust) || f.opened != 2 {
-		t.Fatalf("retry of a waiting project = %v with %d panes opened; want awaiting_trust on the same pane", err, f.opened)
-	}
-	if _, err := sender.DispatchToProject(ctx, "three", "x"); !errors.Is(err, control.ErrDispatchLimit) || f.opened != 2 {
-		t.Fatalf("third undecided project = %v with %d panes opened; want dispatch.limit and no new pane", err, f.opened)
 	}
 }

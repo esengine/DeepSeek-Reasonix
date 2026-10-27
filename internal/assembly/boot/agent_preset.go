@@ -172,7 +172,7 @@ func applyUnifiedProviderToolSurface(reg *tool.Registry, goalTurnsUnreachable bo
 	}
 	// advise, best_of_n, run_script, the peer tools and read_mcp_resource are
 	// registered only when config asks, at boot; present_files follows the same rule.
-	for _, name := range []string{advisor.Name, bestof.Name, script.Name, "list_peers", "send_peer_message", "dispatch_to_project", "view_image", "present_files", plugin.ResourceReadToolName} {
+	for _, name := range []string{advisor.Name, bestof.Name, script.Name, "list_peers", "send_peer_message", "dispatch_to_project", "open_projects", "view_image", "present_files", plugin.ResourceReadToolName} {
 		if _, ok := reg.Get(name); ok {
 			allow = append(allow, name)
 		}

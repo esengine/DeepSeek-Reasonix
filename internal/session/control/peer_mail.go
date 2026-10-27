@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/state/peermail"
 	"reasonix/internal/state/sessioninbox"
@@ -292,7 +293,20 @@ func (c *Controller) peerIngest() {
 	for _, a := range audits {
 		_ = dir.Audit(a)
 	}
+	if len(newlyHeld) > 0 {
+		c.noteUnreadFromPeer(path)
+	}
 	c.releaseHeldPeerMessages(newlyHeld)
+}
+
+// noteUnreadFromPeer leaves the session unread, through the one fact the list
+// already reads, because something from another session now waits for the
+// person. The window in front clears it by looking, as it does for a turn.
+func (c *Controller) noteUnreadFromPeer(path string) {
+	if err := sessionstore.RecordSessionFinished(path, time.Now(), true); err != nil {
+		slog.Warn("controller: mark a session unread for a message from another session", "err", err)
+	}
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Audience: event.NoticeAudienceOperator, Code: event.NoticeCodePeerMessageArrived})
 }
 
 // releaseHeldPeerMessages approves what just arrived when the user's own file

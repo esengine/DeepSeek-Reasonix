@@ -19,7 +19,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"slices"
 	"sort"
 	"strings"
@@ -120,8 +119,9 @@ type Job struct {
 	done        chan struct{}
 	stalled     bool
 
-	watches  []*outputWatch
-	artifact jobArtifact
+	watches      []*outputWatch
+	artifact     jobArtifact
+	finalization *jobFinalizers
 
 	evidence          evidence.ChildEvidenceSummary
 	evidenceCommitted bool
@@ -345,7 +345,7 @@ func validatePathSegment(name, field string) error {
 // artifact was created. The job is observable to Wait / list calls as Failed
 // with the validation error recorded in artifactErr, and no run goroutine is
 // started so the manager's wg is unaffected.
-func (m *Manager) startInvalid(parentSession, kind, label string, validationErr error) *Job {
+func (m *Manager) startInvalid(parentSession, kind, label string, validationErr error, opts ...StartOption) *Job {
 	finishedAt := nowMs()
 	m.mu.Lock()
 	m.seq++
@@ -355,19 +355,19 @@ func (m *Manager) startInvalid(parentSession, kind, label string, validationErr 
 		Kind:        kind,
 		Label:       label,
 		SessionID:   parentSession,
-		status:      Failed,
+		status:      Running,
 		times:       jobTimes{started: finishedAt, activity: finishedAt, finished: finishedAt},
 		runReturned: true,
 		cancel:      func() {},
 		done:        make(chan struct{}),
 		artifact:    jobArtifact{complete: false, err: validationErr.Error()},
 	}
+	applyOptions(j, opts)
 	key := jobKey(parentSession, id)
 	m.jobs[key] = j
 	m.order = append(m.order, key)
 	m.mu.Unlock()
-	close(j.done)
-	m.publishCompletion(m.recordCompletion(parentSession, id, kind, label, "", Failed, validationErr))
+	m.finishUninvokedJob(j, Failed, validationErr)
 	return j
 }
 
@@ -377,10 +377,10 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	parentSession = strings.TrimSpace(parentSession)
 	kind = strings.TrimSpace(kind)
 	if err := validatePathSegment(parentSession, "parentSession"); err != nil {
-		return m.startInvalid(parentSession, kind, label, err)
+		return m.startInvalid(parentSession, kind, label, err, opts...)
 	}
 	if err := validatePathSegment(kind, "kind"); err != nil {
-		return m.startInvalid(parentSession, kind, label, err)
+		return m.startInvalid(parentSession, kind, label, err, opts...)
 	}
 	m.mu.Lock()
 	m.seq++
@@ -421,15 +421,6 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 
 	m.launchJob(ctx, j, run)
 	return j
-}
-
-func runRecovered(ctx context.Context, out io.Writer, run func(context.Context, io.Writer) (string, error)) (result string, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("internal error: panic: %v\n%s", r, debug.Stack())
-		}
-	}()
-	return run(ctx, out)
 }
 
 func (m *Manager) openArtifactLocked(parentSession, id string) (logPath, metaPath string, file *os.File, artifactErr string) {

@@ -173,10 +173,10 @@ func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 // by a live runtime other than the calling process. Callers use it to keep
 // destructive operations away from sessions another process may be writing;
 // leases held by this process report false because callers tear their own
-// runtimes down before acting. The lock file is only probed when a foreign
-// lease info file exists, so the common uncontended case never touches the
-// lock; a probe cannot steal a live lease because holders keep the lock held
-// for their whole lifetime.
+// runtimes down before acting. The lock decides whenever a lock file exists,
+// including when the sidecar is missing: a holder keeps the lock for its whole
+// lifetime and the sidecar can be deleted underneath it. With no lock file the
+// common uncontended case touches nothing, and a probe cannot steal a lease.
 func SessionLeaseHeldByOtherRuntime(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
@@ -189,9 +189,18 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 	info, err := LoadSessionLeaseInfo(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// No info file means no holder: live holders keep it present for
-			// their whole hold.
-			return false
+			// A missing sidecar does not mean the lease is free: the lock is what
+			// a live holder keeps. Ask it only when a lock file exists, using the
+			// package's existing existence probe (a lock has no sidecars).
+			if !sessionArtifactExists(store.SessionLeaseLock(path)) {
+				return false
+			}
+			unlock, lockErr := tryLockSessionLeaseFile(path)
+			if lockErr == nil {
+				unlock()
+				return false
+			}
+			return true
 		}
 		unlock, lockErr := tryLockSessionLeaseFile(path)
 		if lockErr == nil {

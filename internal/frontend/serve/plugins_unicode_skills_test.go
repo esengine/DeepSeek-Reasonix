@@ -39,6 +39,7 @@ func TestInstalledUnicodeSkillsMatchDisplayedInvocations(t *testing.T) {
 			t.Setenv("REASONIX_HOME", home)
 			t.Setenv("REASONIX_STATE_HOME", home)
 			t.Setenv("REASONIX_CACHE_HOME", filepath.Join(home, "cache"))
+			closeSharedCatalogsOnCleanup(t)
 			t.Chdir(root)
 			kind := fmt.Sprintf("unicode-plugin-skills-%d", unicodeSkillProviderSeq.Add(1))
 			rec := testutil.NewMock(kind, testutil.Turn{Text: "ok"}, testutil.Turn{Text: "ok"}, testutil.Turn{Text: "ok"})

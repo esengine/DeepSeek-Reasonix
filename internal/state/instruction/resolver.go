@@ -41,6 +41,8 @@ type Document struct {
 	Imports   []Import
 	Depth     int
 	Order     int
+	// Unverified marks text from a project folder the user has not trusted.
+	Unverified bool
 }
 
 type Diagnostic struct {

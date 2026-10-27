@@ -456,3 +456,27 @@ func TestUnleasedWriteOriginPointsPastTheSessionPackage(t *testing.T) {
 		t.Fatalf("origin = %q, want a frame outside %s", origin, prefix)
 	}
 }
+
+func TestALiveLockWithoutItsSidecarIsStillHeld(t *testing.T) {
+	userPath, key := leaseTestPath(t)
+	unlock, err := tryLockSessionLeaseFile(key)
+	if err != nil {
+		t.Fatalf("tryLockSessionLeaseFile: %v", err)
+	}
+	defer unlock()
+	// The lock is held and the sidecar is gone — what a person or a file scanner
+	// leaves behind when it deletes the metadata of a session somebody is using.
+	if !SessionLeaseHeldByOtherRuntime(userPath) {
+		t.Fatal("a live lease lock with no sidecar was reported free: a destructive caller may rewrite a session another runtime is writing")
+	}
+}
+
+func TestAProbeDoesNotCreateTheLeaseLock(t *testing.T) {
+	userPath, key := leaseTestPath(t)
+	if SessionLeaseHeldByOtherRuntime(userPath) {
+		t.Fatal("an unheld session was reported as held by another runtime")
+	}
+	if _, err := os.Stat(store.SessionLeaseLock(key)); !os.IsNotExist(err) {
+		t.Fatalf("a probe created the lease lock (stat err = %v); the common uncontended case must touch nothing", err)
+	}
+}

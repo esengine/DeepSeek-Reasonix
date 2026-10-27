@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "./testkit";
 import { Rail, railLocalY, type RailMark } from "./Rail";
@@ -86,6 +86,63 @@ describe("a rail longer than it can show", () => {
     // that holds the thousandth rather than on the thousandth itself.
     expect(Math.abs(picked - 1000)).toBeLessThanOrEqual(40);
   });
+
+  it("opens a folded run on hover, with no press at all", async () => {
+    const { view, onJump } = await rail(2000);
+    const nav = view.container.querySelector(".srail") as HTMLElement;
+    nav.getBoundingClientRect = () => ({ top: 0, height: 600, left: 0, width: 20, right: 20, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const run = view.container.querySelector<HTMLElement>(".srail-m[data-folded]")!;
+    // The pointer only arrives; it never presses. A run stands for several
+    // questions, so the list is the only answer that names one of them.
+    fireEvent.mouseMove(nav, { clientY: parseFloat(run.style.top) });
+    await waitFor(() => expect(view.container.querySelector(".srail-sub")).not.toBeNull());
+    expect(view.container.querySelectorAll(".srail-subrow").length).toBeGreaterThan(1);
+    expect(onJump).not.toHaveBeenCalled();
+  });
+
+  it("takes the run away again once the pointer leaves it", async () => {
+    const { view } = await rail(2000);
+    const nav = view.container.querySelector(".srail") as HTMLElement;
+    nav.getBoundingClientRect = () => ({ top: 0, height: 600, left: 0, width: 20, right: 20, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const run = view.container.querySelector<HTMLElement>(".srail-m[data-folded]")!;
+    fireEvent.mouseMove(nav, { clientY: parseFloat(run.style.top) });
+    await waitFor(() => expect(view.container.querySelector(".srail-sub")).not.toBeNull());
+    // Leaving closes it after a short grace, so crossing the gap to the list
+    // itself does not count as leaving.
+    fireEvent.mouseLeave(nav);
+    await waitFor(() => expect(view.container.querySelector(".srail-sub")).toBeNull());
+  });
+
+  it("opens a folded run instead of guessing which question it stands for", async () => {
+    const { view, onJump } = await rail(2000);
+    const run = view.container.querySelector<HTMLElement>(".srail-m[data-folded]");
+    expect(run, "2000 questions in 600px must fold").not.toBeNull();
+
+    // First press: nothing jumps, because the run names a range and the reader
+    // has not said which question in it yet.
+    fireEvent.click(run!);
+    expect(onJump).not.toHaveBeenCalled();
+    const rows = view.container.querySelectorAll<HTMLElement>(".srail-subrow");
+    expect(rows.length).toBeGreaterThan(1);
+
+    // Second press, on a row: that question, exactly.
+    const label = rows[1].textContent ?? "";
+    fireEvent.click(rows[1]);
+    expect(onJump).toHaveBeenCalledTimes(1);
+    expect((onJump.mock.calls[0][0] as RailMark).text).toBe(label);
+    expect(view.container.querySelector(".srail-sub")).toBeNull();
+  });
+
+  it("jumps on the second press when the run is already open", async () => {
+    const { view, onJump } = await rail(2000);
+    const run = view.container.querySelector<HTMLElement>(".srail-m[data-folded]")!;
+    fireEvent.click(run);
+    fireEvent.click(run);
+    // Open, then the same line again: the contract the run carried before rows
+    // existed, kept so a fast second press is not a dead click.
+    expect(onJump).toHaveBeenCalledTimes(1);
+    expect(view.container.querySelector(".srail-sub")).toBeNull();
+  });
 });
 
 describe("a star belongs to the question, not the row id", () => {
@@ -99,10 +156,12 @@ describe("a star belongs to the question, not the row id", () => {
       scrollHeight: { configurable: true, value: 2400 },
       scrollTop: { configurable: true, writable: true, value: 0 },
     });
-    return render(
+    const rail = (s: string) => (
       <Rail marks={marks} total={marks.length} scroll={{ current: root }} flow={{ current: flow }}
-        onJump={vi.fn()} bound scope={scope} />,
+        onJump={vi.fn()} bound scope={s} />
     );
+    const view = render(rail(scope));
+    return Object.assign(view, { rescope: (s: string) => view.rerender(rail(s)) });
   };
 
   it("keeps the star on the same question after a remount with fresh ids", async () => {
@@ -142,5 +201,79 @@ describe("a star belongs to the question, not the row id", () => {
     const again = draw([mark("j1", 1, "第一条", 2), mark("j2", 2, "第二条", 3)], "s1");
     await waitFor(() => expect(again.getAllByRole("button")[0].getAttribute("data-starred")).toBe(""));
     expect(again.getAllByRole("button")[1].getAttribute("data-starred")).toBeNull();
+  });
+
+  it("keeps a star placed before the conversation's first save", async () => {
+    localStorage.clear();
+    const view = draw(two("i1", "i2"), "");
+    fireEvent.contextMenu(view.getAllByRole("button")[0]);
+    await waitFor(() => expect(view.getAllByRole("button")[0].getAttribute("data-starred")).toBe(""));
+
+    view.rescope("s1");
+    await waitFor(() => expect(view.getAllByRole("button")[0].getAttribute("data-starred")).toBe(""));
+    view.unmount();
+
+    const again = draw(two("j1", "j2"), "s1");
+    await waitFor(() => expect(again.getAllByRole("button")[0].getAttribute("data-starred")).toBe(""));
+    expect(again.getAllByRole("button")[1].getAttribute("data-starred")).toBeNull();
+  });
+
+  it("does not hand an unsaved conversation's stars to the next one", async () => {
+    localStorage.clear();
+    const first = draw(two("i1", "i2"), "");
+    fireEvent.contextMenu(first.getAllByRole("button")[0]);
+    await waitFor(() => expect(first.getAllByRole("button")[0].getAttribute("data-starred")).toBe(""));
+    first.unmount();
+
+    const next = draw(two("i1", "i2"), "");
+    expect(next.getAllByRole("button")[0].getAttribute("data-starred")).toBeNull();
+  });
+
+  it("opening a saved conversation from an unstarred draft keeps that conversation's stars", async () => {
+    localStorage.clear();
+    const saved = draw(two("i1", "i2"), "s1");
+    fireEvent.contextMenu(saved.getAllByRole("button")[1]);
+    await waitFor(() => expect(saved.getAllByRole("button")[1].getAttribute("data-starred")).toBe(""));
+    saved.unmount();
+
+    const view = draw(two("j1", "j2"), "");
+    view.rescope("s1");
+    await waitFor(() => expect(view.getAllByRole("button")[1].getAttribute("data-starred")).toBe(""));
+    expect(view.getAllByRole("button")[0].getAttribute("data-starred")).toBeNull();
+  });
+});
+
+describe("a mark that kept focus after a press", () => {
+  const draw = () => {
+    const root = document.createElement("div");
+    const flow = document.createElement("div");
+    Object.defineProperties(root, {
+      clientHeight: { configurable: true, value: 600 },
+      scrollHeight: { configurable: true, value: 2400 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    const marks = [mark("a", 0, "第一条"), mark("b", 50, "第二条"), mark("c", 99, "第三条")];
+    return render(<Rail marks={marks} total={100} scroll={{ current: root }} flow={{ current: flow }} onJump={vi.fn()} bound scope="focus" />);
+  };
+
+  it("does not magnify its neighbours when the window hands the focus back", async () => {
+    const view = draw();
+    const buttons = view.getAllByRole("button");
+    await waitFor(() => expect(buttons[0].style.top).not.toBe(""));
+    // The element is not the keyboard's: it kept the focus a press gave it.
+    const visible = vi.fn((selector: string) => selector !== ":focus-visible");
+    Object.defineProperty(buttons[1], "matches", { configurable: true, value: visible });
+    fireEvent.focus(buttons[1]);
+    expect(visible).toHaveBeenCalledWith(":focus-visible");
+    expect(view.container.querySelector("[data-on]")).toBeNull();
+  });
+
+  it("still follows the keyboard", async () => {
+    const view = draw();
+    const buttons = view.getAllByRole("button");
+    await waitFor(() => expect(buttons[0].style.top).not.toBe(""));
+    fireEvent.keyDown(document.body, { key: "Tab" });
+    act(() => { buttons[1].focus(); });
+    expect(view.container.querySelector("[data-on]")).toBe(buttons[1]);
   });
 });

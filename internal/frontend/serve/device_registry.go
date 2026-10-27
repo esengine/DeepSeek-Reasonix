@@ -194,8 +194,8 @@ func (d *DeviceRegistry) Revoke(id string) bool {
 	d.rev++
 	saved := d.snapshotLocked()
 	rev := d.rev
-	d.mu.Unlock()
 	dev.cut()
+	d.mu.Unlock()
 	d.flush(saved, rev)
 	return true
 }

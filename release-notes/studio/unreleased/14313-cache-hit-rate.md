@@ -1,2 +1,0 @@
-- 修复：接口明确报告“缓存命中 0”时，这次请求现在算作完全未命中，缓存命中率不再虚高；命中数超过输入数的异常报告会被截断，显示不再把 99.5% 以上都写成 100%。关联 #14313。
-- Fixed: a request an endpoint reports with zero cache hits is now a full miss, so the hit rate no longer drifts up; over-reported hits are clamped and 99.5% no longer shows as 100%. Refs #14313.

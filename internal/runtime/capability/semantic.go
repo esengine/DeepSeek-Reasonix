@@ -172,6 +172,7 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 		if usage == nil {
 			return
 		}
+		provider.ObserveAuxiliaryUsage(ctx, usage)
 		if (usage.PromptTokens > 0 || usage.CompletionTokens > 0) && r.Audit != nil {
 			// Host-side audit only: cost is estimated from the rate card and never
 			// enters the model request. Prefer CostQuote when wiring new audit sinks.

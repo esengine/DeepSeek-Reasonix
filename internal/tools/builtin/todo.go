@@ -27,6 +27,15 @@ type todoItem struct {
 	StepID     string `json:"step_id,omitempty"`
 }
 
+// validSerialListExample is what a list rule's refusal ends with: the rules say
+// what is wrong, and a model that has to guess a whole valid list from them
+// spends several calls doing it. One phase holds its sub-steps and stays
+// pending until the last is done; the first unfinished item is the current one.
+const validSerialListExample = `; a valid serial list: {"todos":[` +
+	`{"content":"Phase","status":"pending","level":0},` +
+	`{"content":"First sub-step","status":"in_progress","level":1},` +
+	`{"content":"Second sub-step","status":"pending","level":1}]}; a flat list needs the first unfinished item in_progress`
+
 func (todoWrite) Name() string { return "todo_write" }
 
 func (todoWrite) Description() string {
@@ -93,7 +102,7 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 		}
 	}
 	if err := evidence.ValidateSerialTodos(toEvidenceTodos(p.Todos)); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w%s", err, validSerialListExample)
 	}
 	if err := verifyUniqueStepIDs(p.Todos); err != nil {
 		return "", err

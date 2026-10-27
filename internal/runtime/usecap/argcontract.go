@@ -18,6 +18,10 @@ type ArgumentContract struct {
 	// the wrong kind of value. Neither unknown nor missing: the name is right
 	// and it is there, so only the value can be.
 	Mistyped []mistypedField
+	// Example is a minimal call the schema admits, built from the schema
+	// alone. It is set only when required fields are missing: naming a field is
+	// not always enough for a caller to write the whole value.
+	Example string
 }
 
 // mistypedField is one field whose value is not a kind its schema admits.
@@ -50,11 +54,11 @@ func ReadArgumentContract(schema, arguments json.RawMessage) (ArgumentContract, 
 	}
 	contract := declared.compare(got, "")
 	if contract.Broken() {
-		return contract, true
+		return contract.withExample(schema), true
 	}
 	for _, field := range slices.Sorted(maps.Keys(declared.Properties)) {
 		if nested, found := itemContract(declared.Properties[field], got[field], field); found {
-			return nested, true
+			return nested.withExample(schema), true
 		}
 	}
 	return contract, true
@@ -191,6 +195,9 @@ func (c ArgumentContract) Hint() string {
 	if len(c.Unknown) > 0 || len(c.Missing) > 0 {
 		fmt.Fprintf(&b, "; %s accepts %s", owner, strings.Join(quoted(c.Accepts), ", "))
 	}
+	if c.Example != "" {
+		fmt.Fprintf(&b, "; a minimal valid call: %s", c.Example)
+	}
 	return b.String()
 }
 
@@ -214,4 +221,76 @@ func (s schemaLevel) compare(got map[string]json.RawMessage, level string) Argum
 	slices.Sort(contract.Unknown)
 	slices.Sort(contract.Missing)
 	return contract
+}
+
+// withExample attaches a minimal valid call when required fields are missing.
+func (c ArgumentContract) withExample(schema json.RawMessage) ArgumentContract {
+	if len(c.Missing) == 0 {
+		return c
+	}
+	if example, ok := exampleOf(schema, 0); ok {
+		if raw, err := json.Marshal(example); err == nil {
+			c.Example = string(raw)
+		}
+	}
+	return c
+}
+
+// maxExampleDepth bounds the walk over a schema that nests itself.
+const maxExampleDepth = 4
+
+// exampleOf builds the smallest value a schema admits: required properties
+// only, the first enum member, the declared minimum, one element of an array.
+// It reads structure and invents no wording beyond a placeholder for text.
+func exampleOf(schema json.RawMessage, depth int) (any, bool) {
+	if depth > maxExampleDepth || len(schema) == 0 {
+		return nil, false
+	}
+	var s struct {
+		Enum       []json.RawMessage          `json:"enum"`
+		Minimum    *float64                   `json:"minimum"`
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+		Items      json.RawMessage            `json:"items"`
+	}
+	if json.Unmarshal(schema, &s) != nil {
+		return nil, false
+	}
+	if len(s.Enum) > 0 {
+		var first any
+		if json.Unmarshal(s.Enum[0], &first) == nil {
+			return first, true
+		}
+		return nil, false
+	}
+	types := declaredTypes(schema)
+	if len(types) == 0 {
+		return nil, false
+	}
+	switch types[0] {
+	case "string":
+		return "…", true
+	case "integer", "number":
+		if s.Minimum != nil {
+			return *s.Minimum, true
+		}
+		return 0, true
+	case "boolean":
+		return false, true
+	case "array":
+		item, ok := exampleOf(s.Items, depth+1)
+		if !ok {
+			return []any{}, true
+		}
+		return []any{item}, true
+	case "object":
+		out := map[string]any{}
+		for _, name := range s.Required {
+			if v, ok := exampleOf(s.Properties[name], depth+1); ok {
+				out[name] = v
+			}
+		}
+		return out, true
+	}
+	return nil, false
 }

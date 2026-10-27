@@ -40,6 +40,10 @@ export function toolErrorDetail(tool: Tool): string {
     case "video.ffmpeg_missing":
     case "video.unsupported_container":
     case "video.too_large":
+    case "shell.mixed_mutation_verification":
+    case "shell.inline_interpreter_not_last":
+    case "batch.skipped_after_failed_change":
+    case "batch.check_after_stopped_call":
       if (toolRefusalReason(tool)) return "";
   }
   return tool.err ?? "";

@@ -197,6 +197,7 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 	}
 	c.Attachments = cloneAttachments(h.attachments)
 	ws := workspaceDir(root)
+	h.narrowPromptFile(c, r, ws)
 	c.Tools.Shell.Env = h.shell.Env
 	c.Tools.Shell.Args = h.shell.Args
 	warnShellEnvProblems(c, projectMeta)
@@ -491,5 +492,23 @@ func (c *Config) keepUserSearchBackends(h heldScope) {
 	if !slices.Equal(c.Tools.WebFetchPaidAllowed, h.webFetchPaid) {
 		c.ignoreProject("tools.web_fetch_paid_allowed", strings.Join(c.Tools.WebFetchPaidAllowed, ","), ProjectUserOnly)
 		c.Tools.WebFetchPaidAllowed = slices.Clone(h.webFetchPaid)
+	}
+}
+
+// narrowPromptFile keeps a project's own system_prompt_file out of an untrusted
+// folder: it replaces the base prompt the session runs under, so it is chosen by
+// the person who trusts the folder, not by whoever wrote the checkout.
+func (h heldScope) narrowPromptFile(c *Config, r Roots, ws string) {
+	if c.systemPromptFileSource != promptFileSourceProject {
+		return
+	}
+	if trust, _ := NewProjectGrantStore(r.Home()).Trust(ws); trust == WorkspaceTrusted {
+		return
+	}
+	c.ignoreProject("agent.system_prompt_file", c.Agent.SystemPromptFile, ProjectAwaitingApproval)
+	c.Agent.SystemPromptFile = h.endpoints.agent.SystemPromptFile
+	c.systemPromptFileSource = promptFileSourceUnknown
+	if c.Agent.SystemPromptFile != "" {
+		c.systemPromptFileSource = promptFileSourceUser
 	}
 }

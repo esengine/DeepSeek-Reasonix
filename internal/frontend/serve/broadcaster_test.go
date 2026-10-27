@@ -173,3 +173,19 @@ func TestBroadcasterKeepsSubagentStatusBehindABacklog(t *testing.T) {
 
 	read(t, ch, `"output":"failed"`)
 }
+
+// A message from another session changes what the session list says about a
+// session, so the list is read again, without any frame a person would see.
+func TestBroadcasterRefreshesTheListWhenAPeerMessageArrives(t *testing.T) {
+	b := NewBroadcaster()
+	var refreshed int
+	b.observeTree(func() { refreshed++ })
+	b.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Audience: event.NoticeAudienceOperator, Code: event.NoticeCodePeerMessageArrived})
+	if refreshed != 1 {
+		t.Fatalf("the list was read again %d times, want once", refreshed)
+	}
+	b.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: "some_other_notice"})
+	if refreshed != 1 {
+		t.Fatalf("an unrelated notice read the list again")
+	}
+}

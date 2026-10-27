@@ -66,7 +66,10 @@ func (p *isolationScriptProvider) Stream(_ context.Context, req provider.Request
 			p.mu.Unlock()
 			ch <- provider.Chunk{Type: provider.ChunkText, Text: "wrote out.txt"}
 		} else {
-			found, _ := filepath.Glob(filepath.Join(p.managed, "*", "*"))
+			found, err := isolatedWorktreeRoots(p.managed)
+			if err != nil {
+				return nil, err
+			}
 			p.mu.Lock()
 			if len(found) > 0 {
 				p.childWorktree = found[0]
@@ -88,6 +91,34 @@ func (p *isolationScriptProvider) Stream(_ context.Context, req provider.Request
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil
+}
+
+func isolatedWorktreeRoots(managed string) ([]string, error) {
+	slots, err := os.ReadDir(managed)
+	if err != nil {
+		return nil, err
+	}
+	var found []string
+	for _, slot := range slots {
+		if !slot.IsDir() {
+			continue
+		}
+		dir := filepath.Join(managed, slot.Name())
+		children, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			if !child.IsDir() {
+				continue
+			}
+			path := filepath.Join(dir, child.Name())
+			if info, err := os.Lstat(filepath.Join(path, ".git")); err == nil && info.Mode().IsRegular() {
+				found = append(found, path)
+			}
+		}
+	}
+	return found, nil
 }
 
 func (p *isolationScriptProvider) requests() []provider.Request {
@@ -166,9 +197,18 @@ func TestEffectIsolatedTaskIsHeldUntilApplied(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(dir, "out.txt")); err != nil || strings.ReplaceAll(string(b), "\r\n", "\n") != "made in isolation\n" {
 		t.Fatalf("out.txt after apply = %q, %v", b, err)
 	}
-	left, _ := filepath.Glob(filepath.Join(config.RootsForHome(home).DeliveryWorktreeDir(), "isolated", "*", "*"))
-	if len(left) != 0 {
+	left, err := isolatedWorktreeRoots(filepath.Join(config.RootsForHome(home).DeliveryWorktreeDir(), "isolated"))
+	if err != nil || len(left) != 0 {
 		t.Fatalf("worktrees left after Close: %v", left)
+	}
+	if rec.childWorktree == "" {
+		t.Fatal("the fixture did not observe its child's actual worktree")
+	}
+	if _, err := os.Stat(rec.childWorktree); !os.IsNotExist(err) {
+		t.Fatalf("applied child worktree was retained: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(rec.childWorktree)); !os.IsNotExist(err) {
+		t.Fatalf("applied result publication directory was retained: %v", err)
 	}
 }
 

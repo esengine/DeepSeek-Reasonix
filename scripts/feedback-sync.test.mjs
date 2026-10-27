@@ -327,6 +327,14 @@ test("open rows are capped", async () => {
   assert.equal(d.calls.filter((c) => c[0] === "status").length, MAX_OPEN);
 });
 
+test("a backlog past the old 200-row cap is still evaluated", async () => {
+  const letters = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
+  const open = Array.from({ length: 263 }, (_, i) => ({ receipt: `FB-AAAA-${letters[i % 30]}${letters[Math.floor(i / 30)]}AA`, issueNumber: i + 1, status: "recorded" }));
+  const d = fakes({ pending: [], open, changed: open.map((r) => ({ number: r.issueNumber, state: "open", labels: [{ name: "in-progress" }] })) });
+  await run(d);
+  assert.equal(d.calls.filter((c) => c[0] === "status").length, 263);
+});
+
 test("an unreachable worker is a warning, not a failed job", async () => {
   const real = globalThis.fetch;
   globalThis.fetch = async () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } }); };

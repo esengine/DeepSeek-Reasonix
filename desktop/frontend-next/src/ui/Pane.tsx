@@ -12,7 +12,7 @@ import { hasPendingDecision, posture, runState } from "./decisions";
 import { createPortal } from "react-dom";
 import type { Checkpoint, ContextBreakdown, JobEntry, McpEntry, SessionStatus, WorkspaceChanges, WorkspaceGit } from "../port/port";
 import type { TrajectoryRead } from "../port/wire";
-import { chipLabel, fromHistory, initialState, quoteAmount, reduce } from "../state/session";
+import { chipLabel, initialState, quoteAmount, reduce } from "../state/session";
 import type { CurrencyAmount } from "../state/session";
 import { pairCheckpoints } from "../state/checkpoints";
 import { useReplyActions } from "./reply";
@@ -23,6 +23,7 @@ import { ReloadNotice } from "./RestoreNotice";
 import { RewindNotice } from "./RewindNotice";
 import { initialTraj, reduceTraj } from "../state/trajectory";
 import { Transcript } from "./Transcript";
+import { useHistoryPages, useHistorySearch } from "./useHistoryPages";
 import { useBackgroundDeltas } from "./deltas";
 import { PaneShown } from "./shown";
 import { Composer } from "./Composer";
@@ -48,14 +49,13 @@ import type { PaneProps, PaneReport } from "./panetypes";
 import { useRate, useTrail } from "./num";
 import { useCompactNow } from "./CompactNow";
 import { DOCK, Gutter } from "./Gutter";
-import { FlowGrips } from "./FlowResizer";
 import { Find } from "./Find";
 import { useFind } from "./usefind";
 import { RunAnalysis } from "./RunAnalysis";
 import { useBrowserTabs } from "./BrowserPanel";
 import { useRevealAgentPages, useRevealBrowserOpen } from "./browserreveal";
 import { WorkbenchPanel } from "./WorkbenchPanel";
-import { useBrowserWide } from "./browserwide";
+import { useBrowserFull } from "./browserfull";
 import { refreshTodos } from "../state/restore";
 import { speedOf } from "./speed";
 import { RuntimeBar } from "./RuntimeBar";
@@ -96,7 +96,7 @@ const totalsOf = (st: SessionStatus) => ({
   incompleteReason: st.sessionCostQuote?.incompleteReason,
 });
 
-function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, onTurnDone, pulse, findPulse, findTogglePulse = 0, filesPulse = 0, viewRequest, sessionRef, onSettings, onFeedback, onOpenSession, needsProject, onOpenProject, onKeepHere, connect, theme, dockW, dockMax, onDockW, column, manualBrowser = false, onManualBrowser, alert }: PaneProps) {
+function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, onTurnDone, pulse, findPulse, findTogglePulse = 0, filesPulse = 0, viewRequest, sessionRef, onSettings, onFeedback, onOpenSession, needsProject, onOpenProject, onKeepHere, connect, theme, dockW, dockMax, onDockW, manualBrowser = false, onManualBrowser, alert }: PaneProps) {
   const [s, dispatch] = useReducer(reduce, initialState);
   const [traj, trajDispatch] = useReducer(reduceTraj, initialTraj);
   const [sessionRead, setSessionRead] = useState<SessionRead>({ kind: "pending" });
@@ -161,6 +161,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   const { pacer, shown } = useBackgroundDeltas(visible, dispatch, trajDispatch);
 
   const surfaceReplay = useSurfaceReplay(port, dispatch);
+  const { load: readHistory, paging: historyPaging } = useHistoryPages(port, dispatch);
 
   const reloadMcp = useCallback(() => {
     void port.mcp().then((c) => setMcp(c.servers)).catch(() => setMcp([]));
@@ -171,14 +172,8 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   // is how a hole gets filled rather than rendered as a quiet turn.
   const rebuild = useCallback(() => {
     void surfaceReplay.refresh();
-    port
-      .history()
-      .then((msgs) => {
-        const restored = fromHistory(msgs);
-        dispatch({ kind: "__restore", ...restored });
-      })
-      .catch(() => {});
-  }, [port, surfaceReplay.refresh]);
+    void readHistory().catch(() => {});
+  }, [readHistory, surfaceReplay.refresh]);
 
   // /status is polled four times a second while a turn runs, and most of those
   // answers are word-for-word the previous one. Swapping in an equal object
@@ -267,11 +262,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     // to the network — the provider's wallet endpoint rides it — and pairing the
     // two made the conversation wait on a round trip that has nothing to do with
     // it. Whichever lands first shows what it knows.
-    port.history().then((msgs) => {
-      if (!alive) return;
-      const restored = fromHistory(msgs);
-      dispatch({ kind: "__restore", ...restored });
-    });
+    void readHistory(() => alive).catch(() => {});
     port.status().then((st) => {
       if (!alive) return;
       applyStatus(st);
@@ -282,7 +273,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     return () => {
       alive = false;
     };
-  }, [port, applyStatus]);
+  }, [port, applyStatus, readHistory, replayTrajectory]);
 
   useEffect(() => {
     if (!running) {
@@ -308,11 +299,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     port.checkpoints().then((cps) => { if (current()) setCheckpoints(cps); }).catch(() => { if (current()) setCheckpoints([]); });
     // Two reads, the same way the first mount takes them: the record does not
     // wait behind the numbers over it.
-    const history = port.history().then((msgs) => {
-      if (!current()) return;
-      const r = fromHistory(msgs);
-      dispatch({ kind: "__restore", ...r });
-    });
+    const history = readHistory(current);
     port.status().then((st) => {
       if (!current()) return;
       applyStatus(st);
@@ -322,7 +309,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     refreshWallet();
     onSessionChanged();
     return history;
-  }, [port, applyStatus, statusRead, refreshWallet, onSessionChanged, replayTrajectory, fail, surfaceReplay.refresh]);
+  }, [port, applyStatus, statusRead, refreshWallet, onSessionChanged, replayTrajectory, fail, surfaceReplay.refresh, readHistory]);
 
   // Both of these read only the user and tool cards, so they key off the
   // revision rather than the items array: a streamed answer leaves every card
@@ -434,6 +421,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
 
   const receiptPref = receiptPrefOf(port);
   const find = useFind(s.items, findPulse, active, useCallback(() => showView("flow"), [showView]), receiptPref, findTogglePulse);
+  useHistorySearch(historyPaging, find.open, find.query);
 
   const onRunDetail = useCallback(() => showView("analysis"), [showView]);
   const previewScope = JSON.stringify([rt.id, rt.root, status?.sessionPath ?? rt.sessionPath]);
@@ -459,7 +447,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   // Chinese literals that the reducer had written — a translation key deciding
   // whether the run reads as moving.
   const blocked = hasPendingDecision(status);
-  const browserSize = useBrowserWide(docked, active && visible, blocked);
+  const browserSize = useBrowserFull(docked, active && visible, blocked);
   const run = runState({ blocked, running, hasItems: s.items.length > 0, terminal: s.terminal });
   const cost = s.metrics.coverage === "none" ? NO_COST : s.metrics.cost;
   const contextPercent = ctx && ctx.window > 0 ? Math.min(100, Math.round((ctx.used / ctx.window) * 100)) : null;
@@ -496,6 +484,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       className="pane"
       data-browser-size={browserSize.size}
       data-run={run}
+      data-plan={tab === "flow" && (s.plan.length > 0 || status?.goal) ? "" : undefined}
       data-off={visible ? undefined : ""}
       aria-hidden={visible ? undefined : true}
       data-active={active ? "" : undefined}
@@ -503,10 +492,9 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       onMouseDownCapture={active ? undefined : onFocus}
       onFocusCapture={active ? undefined : onFocus}
     >
-      <Find find={find} />
+      <Find find={find} pending={historyPaging.hasMore || historyPaging.busy || historyPaging.failed} failed={historyPaging.failed} />
 
       <div className="pbody rewind-notice-host" ref={body} data-dock={tab === "flow" ? "" : undefined} data-full={tab === "browser" ? "" : undefined}>
-      {column && tab === "flow" && <FlowGrips column={column} />}
       <RewindNotice key={JSON.stringify([rt.id, rt.root, status?.sessionPath ?? rt.sessionPath])} readUndo={onReadUndo} onUndo={onUndoAvailable} busy={!!restoreNotice?.working || !!reloadFailure?.working} refreshKey={checkpoints} moved={s.rewindMoved} running={running} shown={visible && tab === "flow" && !rt.readOnly} />
       <div className="pviews">
       <div className="worktree-stage-host" ref={setWorktreeTarget} hidden={tab !== "flow" || !worktreePhase}/>
@@ -515,8 +503,8 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
-      <Transcript port={port}
-        scope={rt.sessionPath || rt.id}
+      <Transcript port={port} historyPaging={historyPaging}
+        scope={rt.sessionPath}
         onSettings={onSettings}
         brought={brought}
         foldWork={foldWork}
@@ -581,7 +569,6 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             fileRequest={conversationFiles.request}
             agentRequest={agentRuns.request}
             tabs={pages}
-            wideMode={docked ? { wide: browserSize.size === "wide", onToggle: browserSize.toggle } : undefined}
             fullMode={docked ? { full: browserSize.size === "full", onToggle: browserSize.toggleFull } : undefined}
             manual={manualBrowser}
             shown={visible && workbench}
@@ -649,7 +636,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         {alert && <div className="cmpalert">{alert}</div>}
         <RootMissingBanner items={s.items} onPick={onOpenProject} />
         {pill && <ChangedFilesPill changes={tree?.changes ?? []} onOpen={openChanges} />}
-        <Composer worktreeTarget={worktreeTarget} onWorktreePhase={setWorktreePhase} port={port} fresh={ready && !rt.host && s.items.length === 0} status={status} running={running} quote={quote} restore={restored} inject={inserted} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={notify} onSettings={onSettings} side={sideAsk} onSide={() => setSideAsk((on) => !on)} sidePanel={sideAsk ? <SidePanel port={port} onClose={() => setSideAsk(false)} /> : null} changeCount={changeCount} countElsewhere={pill} git={git} onTreeChanged={refreshTree} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
+        <Composer worktreeTarget={worktreeTarget} onWorktreePhase={setWorktreePhase} port={port} fresh={ready && !historyPaging.hasMore && !historyPaging.busy && !historyPaging.failed && !rt.host && s.items.length === 0} status={status} running={running} quote={quote} restore={restored} inject={inserted} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={notify} onSettings={onSettings} side={sideAsk} onSide={() => setSideAsk((on) => !on)} sidePanel={sideAsk ? <SidePanel port={port} onClose={() => setSideAsk(false)} /> : null} changeCount={changeCount} countElsewhere={pill} git={git} onTreeChanged={refreshTree} pulse={pulse} draftKey={draftKey(rt.host ?? "", rt.root, rt.sessionPath || status?.sessionPath || "")} />
         <MeterRail
           tps={tps} trail={trail} running={running} speed={speed} metrics={s.metrics} ctx={ctx} mcp={mcp} compact={compact} cost={cost} turnCost={s.metrics.coverage === "none" ? NO_COST : s.metrics.turn}
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}

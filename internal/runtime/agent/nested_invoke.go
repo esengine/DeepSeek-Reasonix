@@ -32,13 +32,15 @@ func (n *nestedInvoker) Invoke(ctx context.Context, name string, args json.RawMe
 	started := time.Now()
 	out := n.a.executeOne(tool.MarkNested(ctx), n.turn, call)
 	elapsed := time.Since(started).Milliseconds()
-	n.a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+	resultEvent := event.Tool{
 		ID: call.ID, Name: name, Args: call.ExecutionArguments(), ArgumentNormalization: call.ArgumentNormalization, Output: out.output, Err: out.errMsg,
 		RefusalCode: out.refusalCode, Bound: out.bound, DurationMs: elapsed,
 		WorkspaceLease: out.workspaceLease,
 		StartedAt:      started.UnixMilli(), EndedAt: started.UnixMilli() + elapsed, Issuer: event.IssuedByModel,
 		Executed: out.executed,
-	}})
+	}
+	attachWorkspaceMutation(&resultEvent, out.workspaceMutation)
+	n.a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: resultEvent})
 	// The bound fits a result to the model's context; the calling tool reads
 	// the result itself, and a window or spill pointer in its place is not it.
 	result := out.output

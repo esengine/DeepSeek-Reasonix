@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"io"
 )
 
@@ -13,20 +14,7 @@ func (m *Manager) launchJob(ctx context.Context, j *Job, run func(context.Contex
 	m.mu.Lock()
 	if err := m.root.Err(); err != nil {
 		m.mu.Unlock()
-		j.mu.Lock()
-		j.times.finished = nowMs()
-		j.artifact.close()
-		if metaErr := m.writeJobMetaLocked(j, Interrupted); metaErr != nil {
-			j.noteArtifactErr(metaErr.Error())
-		}
-		resultRef := j.artifactRefLocked()
-		j.mu.Unlock()
-		ev := m.recordCompletion(parentSession, id, kind, label, resultRef, Interrupted, err)
-		j.mu.Lock()
-		j.status = Interrupted
-		j.mu.Unlock()
-		close(j.done)
-		m.publishCompletion(ev)
+		m.finishUninvokedJob(j, Interrupted, err)
 		return
 	}
 	m.wg.Add(1)
@@ -38,7 +26,14 @@ func (m *Manager) launchJob(ctx context.Context, j *Job, run func(context.Contex
 	go func() {
 		defer m.wg.Done()
 		result, err := runRecovered(ctx, jobWriter{j}, run)
+		cleanupErr := j.finalize(Finalization{Invoked: true, Err: err})
+		if cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 		j.mu.Lock()
+		if cleanupErr != nil {
+			j.noteArtifactErr(cleanupErr.Error())
+		}
 		j.runReturned = true
 		j.mu.Unlock()
 

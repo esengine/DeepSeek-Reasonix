@@ -35,6 +35,10 @@ func mcpCommand(args []string) int {
 	}
 	switch args[0] {
 	case "list", "ls":
+		if len(args) > 1 {
+			fmt.Fprintf(os.Stderr, "mcp list: unexpected argument %q\n", args[1])
+			return 2
+		}
 		return mcpList()
 	case "add":
 		if len(args) > 1 && (args[1] == "-h" || args[1] == "--help") {
@@ -363,7 +367,7 @@ func mcpList() int {
 }
 
 func mcpGetCLI(args []string) int {
-	if len(args) == 0 {
+	if len(args) != 1 {
 		fmt.Fprintln(os.Stderr, "usage: reasonix mcp get <name>")
 		return 2
 	}

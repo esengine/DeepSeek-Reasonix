@@ -35,8 +35,9 @@ func (t *TaskTool) SetIsolation(store *isolation.Store, root string, runner isol
 // isolatedCall is the part of a task call an isolated run reads, and the
 // arguments it has to refuse rather than silently drop.
 type isolatedCall struct {
-	mode, prompt, model string
-	unsupported         []string
+	mode, prompt, model, effort string
+	maxSteps                    int
+	unsupported                 []string
 }
 
 func (t *TaskTool) executeIsolated(ctx context.Context, call isolatedCall) (string, error) {
@@ -50,7 +51,17 @@ func (t *TaskTool) executeIsolated(ctx context.Context, call isolatedCall) (stri
 		return "", tool.Refusal{Code: codeIsolationUnsupported, Message: "an isolated task runs as its own agent and cannot take " +
 			strings.Join(call.unsupported, ", ") + "; drop them or run without isolation"}
 	}
-	return t.isolated.store.Execute(ctx, t.isolated.runner, t.isolated.root, call.prompt, strings.TrimSpace(call.model))
+	model, effort := t.resolveModelEffort("", "", call.model, call.effort, "", "")
+	if model == "" {
+		model = t.baseModel
+	}
+	model, effort = t.childRuntimeRef(ctx, model, effort)
+	steps := t.childMaxStepsForContext(ctx, call.maxSteps)
+	runner := func(ctx context.Context, run isolation.Run) (isolation.Outcome, error) {
+		run.Effort, run.MaxSteps = effort, steps
+		return t.isolated.runner(ctx, run)
+	}
+	return t.isolated.store.Execute(ctx, runner, t.isolated.root, call.prompt, model)
 }
 
 // isolatedUnsupported names the task arguments that were set and that an

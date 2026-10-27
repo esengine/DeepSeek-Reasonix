@@ -22,29 +22,16 @@ function paneless(opts: { folders: boolean }) {
     return port;
   };
   const open = hub.open.bind(hub);
-  const opened: boolean[] = [];
+  const opened: Array<string | undefined> = [];
   let live = false;
   hub.runtimes = async () => (live ? [await open({ root: "~/projects/DeepSeek-Reasonix" })] : []);
   hub.open = async (req) => {
     live = true;
-    opened.push(true);
+    opened.push(req.root);
     return open(req);
   };
   if (!opts.folders) hub.tree = async () => [];
   return { hub, opened };
-}
-
-function folderless() {
-  const { hub } = paneless({ folders: false });
-  const roots: string[] = [];
-  hub.tree = async () => roots.map((root) => ({ root, name: root, open: false, remembered: true, sessions: [] }));
-  const add = hub.addWorkspace.bind(hub);
-  hub.addWorkspace = (path) => {
-    roots.push(path);
-    return add(path);
-  };
-  hub.pickFolder = async () => "~/projects/new";
-  return { hub };
 }
 
 describe("feedback and settings with no pane open", () => {
@@ -53,65 +40,24 @@ describe("feedback and settings with no pane open", () => {
     render(<App hub={hub} />);
     await userEvent.click(await screen.findByRole("button", { name: /发送反馈/ }));
     expect(await screen.findByRole("dialog", { name: "反馈" })).toBeTruthy();
-    expect(opened.length).toBe(1);
+    expect(opened).toEqual(["~/projects/DeepSeek-Reasonix"]);
     expect(document.querySelector(".errbar")).toBeNull();
   });
 
-  it("says why feedback cannot open when there is no folder to start in", async () => {
-    const { hub } = paneless({ folders: false });
+  it("opens the feedback form in the app's own workspace when there is no folder", async () => {
+    const { hub, opened } = paneless({ folders: false });
     render(<App hub={hub} />);
     await userEvent.click(await screen.findByRole("button", { name: /发送反馈/ }));
-    const bar = await waitFor(() => {
-      const el = document.querySelector(".errbar");
-      expect(el).toBeTruthy();
-      return el!;
-    });
-    expect(bar.textContent).toContain("反馈需要一个打开的会话");
-    expect(screen.queryByRole("dialog", { name: "反馈" })).toBeNull();
+    expect(await screen.findByRole("dialog", { name: "反馈" })).toBeTruthy();
+    expect(opened).toEqual([undefined]);
+    expect(document.querySelector(".errbar")).toBeNull();
   });
 
-  it("drops the refusal once a folder is added", async () => {
-    const { hub } = paneless({ folders: false });
-    const roots: string[] = [];
-    hub.tree = async () => roots.map((root) => ({ root, name: root, open: false, remembered: true, sessions: [] }));
-    const add = hub.addWorkspace.bind(hub);
-    hub.addWorkspace = (path) => {
-      roots.push(path);
-      return add(path);
-    };
-    hub.pickFolder = async () => "~/projects/new";
-    render(<App hub={hub} />);
-    await userEvent.click(await screen.findByRole("button", { name: /发送反馈/ }));
-    await waitFor(() => expect(document.querySelector(".errbar")).toBeTruthy());
-    await userEvent.click(await screen.findByRole("button", { name: "添加文件夹" }));
-    await waitFor(() => expect(document.querySelector(".errbar")).toBeNull());
-  });
-
-  it("drops the settings refusal once a folder is added", async () => {
-    const { hub } = folderless();
+  it("opens settings in the app's own workspace when there is no folder", async () => {
+    const { hub, opened } = paneless({ folders: false });
     render(<App hub={hub} />);
     await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
-    await waitFor(() => expect(document.querySelector(".errbar")!.textContent).toContain("设置需要一个打开的会话"));
-    await userEvent.click(await screen.findByRole("button", { name: "添加文件夹" }));
-    await waitFor(() => expect(document.querySelector(".errbar")).toBeNull());
-  });
-
-  it("keeps a different error that replaced the refusal when a folder then appears", async () => {
-    const { hub } = folderless();
-    const add = hub.addWorkspace.bind(hub);
-    let tries = 0;
-    hub.addWorkspace = async (path) => {
-      if (tries++ === 0) throw new Error("disk is read-only");
-      return add(path);
-    };
-    render(<App hub={hub} />);
-    await userEvent.click(await screen.findByRole("button", { name: /发送反馈/ }));
-    await waitFor(() => expect(document.querySelector(".errbar")!.textContent).toContain("反馈需要"));
-    await userEvent.click(await screen.findByRole("button", { name: "添加文件夹" }));
-    await waitFor(() => expect(document.querySelector(".errbar")!.textContent).toContain("disk is read-only"));
-    await userEvent.click(await screen.findByRole("button", { name: "添加文件夹" }));
-    await waitFor(() => expect(tries).toBe(2));
-    await screen.findByText("~/projects/new");
-    expect(document.querySelector(".errbar")!.textContent).toContain("disk is read-only");
+    await waitFor(() => expect(opened).toEqual([undefined]));
+    expect(document.querySelector(".errbar")).toBeNull();
   });
 });

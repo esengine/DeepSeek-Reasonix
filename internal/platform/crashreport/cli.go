@@ -168,10 +168,13 @@ func Load(home, id string) (Pending, error) {
 	if err != nil {
 		return Pending{}, err
 	}
-	if len(reports) == 0 {
-		return Pending{}, ErrNoReports
-	}
 	id = strings.TrimSpace(id)
+	if len(reports) == 0 {
+		if id == "" {
+			return Pending{}, ErrNoReports
+		}
+		return Pending{}, fmt.Errorf("CLI crash report %q not found", id)
+	}
 	if id == "" {
 		return reports[0], nil
 	}

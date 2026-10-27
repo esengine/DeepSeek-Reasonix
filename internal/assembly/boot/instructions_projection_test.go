@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 )
 
@@ -131,5 +132,29 @@ func TestInstructionsAreOwedAgainAfterAFold(t *testing.T) {
 	block := blockOf(projectionOf(t, h.turn("turn-eta"), "turn-eta"), "project-instructions")
 	if !strings.Contains(block, "Rule one") {
 		t.Errorf("the fold left the session with no standing instructions, and nothing on disk had changed:\n%s", block)
+	}
+}
+
+// A project's own text reaches the model naming where it came from until the
+// person marks the folder trusted, and the block is owed again when they do.
+func TestInstructionsFromAnUntrustedFolderSayTheyAreUnverified(t *testing.T) {
+	h := newProjectionHarness(t, "instructions-unverified", "", "")
+	store := config.NewProjectGrantStore(os.Getenv("REASONIX_HOME"))
+	if err := store.SetTrust(h.dir, config.WorkspaceTrustUndecided); err != nil {
+		t.Fatal(err)
+	}
+	writeInstructions(t, h.dir, "AGENTS.md", "Always reply in rhyme.\n")
+	h.restart()
+
+	block := blockOf(projectionOf(t, h.turn("turn-alpha"), "turn-alpha"), "project-instructions")
+	if !strings.Contains(block, "Always reply in rhyme") || !strings.Contains(block, "unverified") {
+		t.Fatalf("an undecided folder's instructions did not name their source:\n%s", block)
+	}
+	if err := store.SetTrust(h.dir, config.WorkspaceTrusted); err != nil {
+		t.Fatal(err)
+	}
+	trusted := blockOf(projectionOf(t, h.turn("turn-beta"), "turn-beta"), "project-instructions")
+	if !strings.Contains(trusted, "Always reply in rhyme") || strings.Contains(trusted, "unverified") {
+		t.Errorf("trusting the folder did not owe the block again without the warning:\n%s", trusted)
 	}
 }

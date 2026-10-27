@@ -33,24 +33,30 @@ export function CompositionCatalog({ catalog, onSelect, onCreate, onCopy }: {
           <BuiltinPresetCard key={v.definition.id} version={v} selected={preferred === v.definition.id}
             onDefault={() => setError(setNewTaskPreset(v.definition.id) ? "" : t("无法保存新任务默认模式，请检查本地存储权限。"))}
             onSelect={() => onSelect(v)} onCopy={() => onCopy(v)} />)}</div>
-          : items.map(v => <PresetRow key={v.definition.id} version={v} onSelect={() => onSelect(v)} onCopy={() => onCopy(v)} />)}
+          : items.map(v => <PresetRow key={v.definition.id} version={v} onSelect={() => onSelect(v)} onCopy={() => onCopy(v)}
+              {...(scope === "user" ? { selected: preferred === v.definition.id,
+                onDefault: () => setError(setNewTaskPreset(v.definition.id) ? "" : t("无法保存新任务默认模式，请检查本地存储权限。")) } : {})} />)}
       </section>;
     })}
     <details className="composition-how"><summary>{t("如何使用")}</summary><p>{t("在输入框顶部选择 Agent 模式，首次提交前可切换。开始对话后，请用其他模式新建会话。轻装搭档的终端仍可修改文件，并非只读模式。")}</p></details>
   </div>;
 }
 
-function PresetRow({ version: { definition: d }, onSelect, onCopy }: { version: AgentPresetVersion; onSelect: () => void; onCopy: () => void }) {
+function PresetRow({ version: { definition: d }, onSelect, onCopy, selected, onDefault }: {
+  version: AgentPresetVersion; onSelect: () => void; onCopy: () => void; selected?: boolean; onDefault?: () => void;
+}) {
   const builtin = d.id.startsWith("builtin:");
   const name = builtin ? t(d.name) : d.name;
   return <article className="composition-row">
     <button className="composition-row-main" data-action="agent-preset.view" data-target={d.id}
       aria-label={t(builtin ? "查看 {name}" : "编辑 {name}", { name })} onClick={onSelect}>
       <span className="composition-row-icon"><StudioIcon name={d.id === "builtin:minimal" ? "code" : "layers"} /></span>
-      <span className="composition-row-copy"><strong>{name}{d.id === "builtin:general" && <small>{t("默认")}</small>}</strong>
+      <span className="composition-row-copy"><strong>{name}{d.id === "builtin:general" && <small>{t("默认")}</small>}{selected && <small>{t("新任务默认")}</small>}</strong>
         <span>{builtin ? t(d.description) : d.description}</span></span>
       <StudioIcon name="chevron" />
     </button>
+    {onDefault && <button className="act" data-action="agent-preset.new-task-default" data-target={d.id} aria-pressed={!!selected}
+      aria-label={t("将{name}设为新任务默认", { name })} disabled={selected} onClick={onDefault}>{t(selected ? "新任务默认" : "设为默认")}</button>}
     <button className="act" data-action="agent-preset.copy" data-target={d.id} aria-label={t("复制 {name}", { name })} onClick={onCopy}>{t("复制")}</button>
   </article>;
 }

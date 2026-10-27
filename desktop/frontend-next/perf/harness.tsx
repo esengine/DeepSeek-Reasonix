@@ -2,11 +2,12 @@ import { createRoot } from "react-dom/client";
 import { boot as bootLang } from "../src/i18n";
 import { track as trackWidth } from "../src/ui/viewport";
 import { pushToast } from "../src/state/toasts";
+import { apply as applyPack } from "../src/ui/theme";
+import { mount as mountEditor } from "./syntax-mount";
 import "../src/styles/tokens.css";
 import "../src/styles/app.css";
 import "../src/styles/dock.css";
 import "../src/styles/studio.css";
-import "../src/styles/flowgrip.css";
 import "../src/styles/changedpill.css";
 import "../src/styles/askskip.css";
 import "../src/styles/pastekeep.css";
@@ -54,6 +55,7 @@ import { MockPort } from "../src/port/mock";
 import { fromHistory } from "../src/state/session";
 import { HttpError } from "../src/port/port";
 import type { AgentPort, Appearance, ChipCall, HistoryMessage, McpEntry } from "../src/port/port";
+import type { HistoryPage } from "../src/port/session";
 import type { UpdateProgress } from "../src/port/version";
 import type { ThemePack } from "../src/port/look";
 import type { RuntimeView, TreeWindow, TreeWorkspace } from "../src/port/hub";
@@ -103,6 +105,11 @@ function benchPack(): ThemePack | null {
 class BenchPort extends MockPort {
   opensFiles() { return query.has("deliveries") || super.opensFiles(); }
   revealsFiles() { return query.has("deliveries") || super.revealsFiles(); }
+  async account() {
+    const state = await super.account();
+    const label = query.get("accountLabel");
+    return label && state.signedIn && state.user ? { ...state, user: { ...state.user, label } } : state;
+  }
   // ?mcpactions=1 adds a server whose tools are withheld and one that is followed.
   constructor() {
     super();
@@ -351,6 +358,20 @@ class BenchPort extends MockPort {
     return query.has("deliveries") ? deliveryHistory() : storedHistory();
   }
 
+  // ?paged=N serves that transcript the way a paging kernel does: N messages a
+  // page, counted back from the newest. Without the parameter the answer is 404
+  // and the read falls back to full history, so scripts written before paging
+  // keep measuring what they measured.
+  async historyPage(cursor?: string): Promise<HistoryPage> {
+    const size = Number(query.get("paged") ?? 0);
+    if (!(size > 0)) throw new HttpError(404, "paged history is off");
+    const all = query.has("deliveries") ? deliveryHistory() : storedHistory();
+    const end = cursor ? Number(cursor) : all.length;
+    const start = Math.max(0, end - size);
+    return { messages: all.slice(start, end), toolContext: [], snapshot: "harness", start, end, total: all.length,
+      hasMoreBefore: start > 0, nextCursor: start > 0 ? String(start) : undefined };
+  }
+
   // ?queue= fills the pending queue to the count under measurement. Seeded
   // here rather than by calling steer sixty-four times: what the guard asks is
   // what a full queue does to the layout, not how it got full.
@@ -484,6 +505,7 @@ const JOBS = Number(query.get("jobs") ?? 0);
 // window can be seen before the kernel has named a single folder.
 const TREE_AT = performance.now() + Number(query.get("treems") ?? 0);
 // ?panes=0 opens the window with no conversation open; ?panes=N opens N.
+// ?tree=none answers every tree read with no folders.
 const PANES = query.has("panes") ? Number(query.get("panes")) : 1;
 const NO_PANES = PANES === 0;
 
@@ -500,6 +522,12 @@ class BenchHub extends MockHub {
   }
 
   private readonly settingsPort = new BenchPort();
+  private opened = false;
+
+  async open(req: Parameters<MockHub["open"]>[0]) {
+    this.opened = true;
+    return super.open(req);
+  }
 
   machinePort(): AgentPort {
     return this.settingsPort;
@@ -512,7 +540,7 @@ class BenchHub extends MockHub {
   }
 
   runtimes(): Promise<RuntimeView[]> {
-    if (NO_PANES) return Promise.resolve([]);
+    if (NO_PANES && !this.opened) return Promise.resolve([]);
     if (PANES <= 1) return super.runtimes();
     return Promise.resolve(
       Array.from({ length: PANES }, (_, i) => ({
@@ -545,6 +573,7 @@ class BenchHub extends MockHub {
     }
     const wait = TREE_AT - performance.now();
     if (wait > 0) return new Promise((resolve) => setTimeout(() => resolve(this.tree()), wait));
+    if (query.get("tree") === "none") return Promise.resolve([]);
     if (!WORKSPACES && query.has("trustpending") && PANES > 1) {
       return super.tree().then((all) => all.map((ws, i) => i > 0 ? ws : { ...ws, sessions: Array.from({ length: PANES }, (_, k) => ({
         path: `/sessions/pane-${k + 1}.jsonl`, name: `pane-${k + 1}`, title: `并行会话 ${k + 1}`, turns: 3, runtimeId: `r${k + 1}`,
@@ -607,9 +636,11 @@ declare global {
     __refuse: (method: string, message: string) => void;
     // Put a notice in the window's corner the way a failed setting does.
     __toast: (text: string) => void;
+    __syntax: { apply: typeof applyPack; mount: typeof mountEditor };
   }
 }
 window.__toast = pushToast;
+window.__syntax = { apply: applyPack, mount: mountEditor };
 window.__feed = (ev) => hub.feeds.forEach((p) => p.feed(ev));
 window.__panes = () => hub.feeds.size;
 window.__previewFiles = (files) => hub.feeds.forEach((port) => {

@@ -47,9 +47,31 @@ it("holds the main area's add-folder prompt until the first tree read settles", 
   render(<App hub={hub} />);
 
   expect(await screen.findByText("没有打开的会话")).toBeTruthy();
-  expect(screen.queryByText("会话在文件夹里打开，先添加一个")).toBeNull();
+  expect(screen.queryByText("没有文件夹也能开始：会话会在应用自己的目录里打开")).toBeNull();
 
   await act(async () => answer([]));
 
-  expect(await screen.findByText("会话在文件夹里打开，先添加一个")).toBeTruthy();
+  expect(await screen.findByText("没有文件夹也能开始：会话会在应用自己的目录里打开")).toBeTruthy();
+});
+
+// A session with no folder opens in the app's own workspace, so an empty folder
+// list still offers a way to start one; adding a folder stays beside it.
+it("offers a new session in the main area when there are no folders", async () => {
+  const { hub, answer } = hubWithHeldTree();
+  hub.runtimes = async () => [];
+  const opened: Array<{ root?: string }> = [];
+  const open = hub.open.bind(hub);
+  hub.open = async (req) => { opened.push(req); return open(req); };
+  const { container } = render(<App hub={hub} />);
+  await screen.findByText("没有打开的会话");
+  await act(async () => answer([]));
+
+  await screen.findByText("没有文件夹也能开始：会话会在应用自己的目录里打开");
+  const empty = container.querySelector<HTMLElement>(".panes-empty")!;
+  const start = empty.querySelector<HTMLButtonElement>('button[data-action="session.new"]');
+  expect(start).toBeTruthy();
+  expect(empty.querySelector('button[data-action="workspace.add"]')).toBeTruthy();
+
+  await act(async () => { start!.click(); });
+  expect(opened).toEqual([{ root: undefined }]);
 });

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reasonix/internal/contract/config"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ func TestBuildMissingSystemPromptFileFallsBackToInlinePrompt(t *testing.T) {
 	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	writeFile(t, root, "reasonix.toml", systemPromptFileTestConfig("prompts/missing.md"))
 	approveWorkspace(t, root)
+	trustWorkspaceFolder(t, root)
 
 	var notices []event.Event
 	ctrl, err := Build(context.Background(), Options{
@@ -47,6 +49,7 @@ func TestBuildNonMissingSystemPromptReadFailureStaysFatal(t *testing.T) {
 	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	writeFile(t, root, "reasonix.toml", systemPromptFileTestConfig("prompts"))
 	approveWorkspace(t, root)
+	trustWorkspaceFolder(t, root)
 	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -76,4 +79,11 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 `
+}
+
+func trustWorkspaceFolder(t *testing.T, root string) {
+	t.Helper()
+	if err := config.NewProjectGrantStore(config.RootsForHome("").Home()).SetTrust(root, config.WorkspaceTrusted); err != nil {
+		t.Fatal(err)
+	}
 }

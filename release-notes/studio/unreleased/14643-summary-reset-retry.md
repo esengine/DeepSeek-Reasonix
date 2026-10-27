@@ -1,0 +1,2 @@
+- 修复：压缩上下文时如果摘要请求的连接被对方中途重置（比如本地网关重启），会自动重试一次，不再直接失败。关联 #14643。
+- Fixed: when the connection of a context-summary request is reset mid-stream (for example a local gateway restarting), compaction now retries once instead of failing at once. Refs #14643.

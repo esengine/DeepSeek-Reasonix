@@ -2,6 +2,7 @@ package workspacelease
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 )
@@ -9,21 +10,27 @@ import (
 // holdState is what the claim's lifetime depends on besides runs: calls that
 // are executing under it, and sessions waiting on a person who took it off.
 type holdState struct {
-	inFlight  int
-	yielders  int
-	parked    []string
-	parkedSet bool
-	// parkedMark is the claim record when the parked extent was given up.
+	generation     uint64
+	retained       leaseExtent
+	parkedRetained leaseExtent
+	calls          map[*callHold]struct{}
+	inFlight       int
+	yielders       int
+	parked         []string
+	parkedSet      bool
+	// parkedMark is the claim record at the first outstanding yield request.
 	parkedMark claimMark
 }
 
 // callHold is one writing call's share of inFlight. It stays reachable from the
 // call's context so a question that call asks can suspend it.
 type callHold struct {
-	owner *Owner
-	paths []string
-	live  bool
-	done  bool
+	owner      *Owner
+	paths      []string
+	live       bool
+	done       bool
+	retained   bool
+	generation uint64
 }
 
 type callKey struct{}
@@ -32,19 +39,15 @@ type callKey struct{}
 // runs, the claim is not given back by Yield, except by a Yield made with the
 // returned context, which is the call itself asking before it writes.
 func (o *Owner) HoldPaths(ctx context.Context, paths []string) (context.Context, func(), error) {
-	h, err := o.acquire(ctx, paths, true)
-	if err != nil || h == nil {
+	if o == nil {
+		return ctx, func() {}, nil
+	}
+	h := o.newCall(true)
+	err := o.acquire(ctx, paths, h)
+	if err != nil {
 		return ctx, func() {}, err
 	}
 	return context.WithValue(ctx, callKey{}, h), h.end, nil
-}
-
-func (o *Owner) holdLocked(hold bool, paths []string) *callHold {
-	if !hold {
-		return nil
-	}
-	o.holds.inFlight++
-	return &callHold{owner: o, paths: paths, live: true}
 }
 
 func (h *callHold) end() {
@@ -55,12 +58,20 @@ func (h *callHold) end() {
 		h.live = false
 		o.holds.inFlight--
 	}
+	delete(o.holds.calls, h)
+	release := o.releaseIfIdleLocked()
 	o.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // Resume ends a yield. It takes the claim again, queueing behind any session
 // that claimed it meanwhile, and names the sessions that did.
 type Resume func(context.Context) (Contention, error)
+
+// ErrHoldEnded refuses restoration after the call or run's lifetime ended.
+var ErrHoldEnded = errors.New("workspace write hold has ended")
 
 // Yield gives the claim back while the session waits on a person and returns
 // the func that ends that wait. Waits nest: the claim is taken again only when
@@ -76,6 +87,14 @@ func (o *Owner) Yield(ctx context.Context) Resume {
 	}
 	mark := o.claimMark()
 	o.mu.Lock()
+	if o.activeRuns == 0 && !o.acquired && !o.acquiring && o.holds.inFlight == 0 {
+		o.mu.Unlock()
+		return noResume
+	}
+	generation := o.holds.generation
+	if o.holds.yielders == 0 {
+		o.holds.parkedMark = mark
+	}
 	o.holds.yielders++
 	var suspended *callHold
 	if h, _ := ctx.Value(callKey{}).(*callHold); h != nil && h.owner == o && h.live {
@@ -85,28 +104,40 @@ func (o *Owner) Yield(ctx context.Context) Resume {
 	}
 	var release func()
 	if o.acquired && !o.acquiring && o.holds.inFlight == 0 {
-		held := slices.Clone(o.scope.paths)
-		if o.holds.parkedSet {
-			held = mergePaths(o.holds.parked, held)
-		} else {
-			o.holds.parkedMark = mark
-		}
-		o.holds.parked, o.holds.parkedSet = held, true
-		release = o.releaseLocked(false)
+		release = o.parkLocked()
 	}
 	o.mu.Unlock()
 	if release != nil {
 		release()
 	}
 	var once sync.Once
-	return func(ctx context.Context) (c Contention, err error) {
-		once.Do(func() { c, err = o.resume(ctx, suspended) })
-		return c, err
+	var contention Contention
+	var resumeErr error
+	return func(ctx context.Context) (Contention, error) {
+		once.Do(func() { contention, resumeErr = o.resume(ctx, suspended, generation) })
+		return contention, resumeErr
 	}
 }
 
-func (o *Owner) resume(ctx context.Context, suspended *callHold) (Contention, error) {
+func (o *Owner) parkLocked() func() {
+	held := slices.Clone(o.scope.paths)
+	if o.holds.parkedSet {
+		held = mergePaths(o.holds.parked, held)
+	}
+	o.holds.parked, o.holds.parkedSet = held, true
+	if o.holds.retained.set {
+		o.holds.parkedRetained.add(o.holds.retained.paths)
+		o.holds.retained = leaseExtent{}
+	}
+	return o.releaseLocked(false)
+}
+
+func (o *Owner) resume(ctx context.Context, suspended *callHold, generation uint64) (Contention, error) {
 	o.mu.Lock()
+	if generation != o.holds.generation || o.holds.yielders == 0 {
+		o.mu.Unlock()
+		return Contention{}, ErrHoldEnded
+	}
 	o.holds.yielders--
 	last := o.holds.yielders == 0 && o.holds.parkedSet
 	parked, mark := o.holds.parked, o.holds.parkedMark
@@ -115,37 +146,41 @@ func (o *Owner) resume(ctx context.Context, suspended *callHold) (Contention, er
 	}
 	o.mu.Unlock()
 	var contention Contention
+	var restored *PreparedCall
 	if last {
-		if err := o.AcquirePaths(ctx, parked); err != nil {
-			return Contention{}, err
+		o.mu.Lock()
+		extent := o.restoreExtentLocked()
+		o.mu.Unlock()
+		if extent.set {
+			restore := &callHold{owner: o, generation: generation}
+			if err := o.acquire(ctx, extent.paths, restore); err != nil {
+				return Contention{}, err
+			}
+			restored = &PreparedCall{hold: restore}
+			o.mu.Lock()
+			valid := generation == o.holds.generation
+			if valid && o.holds.parkedRetained.set {
+				o.holds.retained.add(o.holds.parkedRetained.paths)
+				o.holds.parkedRetained = leaseExtent{}
+			}
+			o.mu.Unlock()
+			if !valid {
+				return Contention{}, errors.Join(ErrHoldEnded, restored.Close(ctx))
+			}
 		}
 		contention = o.contendersSince(mark, parked)
 	}
+	var err error
 	if suspended != nil {
-		if err := o.rehold(ctx, suspended); err != nil {
-			return contention, err
-		}
+		err = o.rehold(ctx, suspended)
 	}
-	return contention, nil
+	return contention, errors.Join(err, restored.Close(ctx))
 }
 
 // rehold puts a suspended call back under the claim it gave up, waiting for it
 // if another session has it.
 func (o *Owner) rehold(ctx context.Context, h *callHold) error {
-	again, err := o.acquire(ctx, h.paths, true)
-	if err != nil || again == nil {
-		return err
-	}
-	o.mu.Lock()
-	if h.done {
-		o.mu.Unlock()
-		again.end()
-		return nil
-	}
-	again.live = false
-	h.live = true
-	o.mu.Unlock()
-	return nil
+	return o.acquire(ctx, h.paths, h)
 }
 
 func noResume(context.Context) (Contention, error) { return Contention{}, nil }

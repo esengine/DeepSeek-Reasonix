@@ -68,7 +68,7 @@ func (c *Controller) turnBlocksFor(source string, includeOwed bool, notes []stri
 			turnBlock{currentDateTag, wrapTurnBlock(currentDateTag, c.date.owed())},
 			turnBlock{sessionScratchTag, wrapTurnBlock(sessionScratchTag, c.scratch.owed())},
 			turnBlock{availableSkillsTag, wrapTurnBlock(availableSkillsTag, c.skills.owedCatalog())},
-			turnBlock{projectInstructionsTag, wrapTurnBlock(projectInstructionsTag, c.memory.owedInstructions())},
+			turnBlock{projectInstructionsTag, wrapTurnBlock(projectInstructionsTag, c.memory.owedInstructions(c.WorkspaceTrust() != config.WorkspaceTrusted))},
 			turnBlock{projectRulesTag, wrapTurnBlock(projectRulesTag, always)},
 			turnBlock{scopedRulesTag, wrapTurnBlock(scopedRulesTag, scoped)},
 			turnBlock{"mcp-prompt-failure", wrapTurnBlock("mcp-prompt-failure", c.mcp.promptFailures.owed())},

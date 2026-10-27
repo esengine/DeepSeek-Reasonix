@@ -7,11 +7,19 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.removeItem(NEW_T
 
 it("leaves old installations unselected and ignores unsupported stored identities", () => {
   expect(newTaskComposition()).toBeUndefined();
-  for (const raw of ["", "default", "user:review", "project:review", "builtin:retired", "{bad"]) {
+  for (const raw of ["", "default", "user:", "user:has space", "project:review", "builtin:retired", "{bad"]) {
     localStorage.setItem(NEW_TASK_PRESET_KEY, raw);
     expect(newTaskPreset()).toBeUndefined();
   }
   expect(setNewTaskPreset("project:review")).toBe(false);
+});
+
+it("accepts a personal preset as the default, which a project's shared preset cannot be", () => {
+  expect(setNewTaskPreset("user:review-pro")).toBe(true);
+  expect(newTaskPreset()).toBe("user:review-pro");
+  expect(newTaskComposition()).toBe("user:review-pro");
+  expect(setNewTaskPreset("project:review")).toBe(false);
+  expect(newTaskPreset()).toBe("user:review-pro");
 });
 
 it("round-trips explicit built-in choices while preserving request and history choices", () => {

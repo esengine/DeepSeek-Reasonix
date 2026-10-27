@@ -30,13 +30,13 @@ it("waits 400ms for hover and cancels both pending and visible hints on leave", 
 it("supports keyboard focus, Escape, current-state labels and the existing button ref", () => {
   const ref = createRef<HTMLButtonElement>();
   const clicked = vi.fn();
-  const view = render(<TooltipButton ref={ref} title="加宽工作台" shortcut="⌘Shift+B" onClick={clicked}>Wide</TooltipButton>);
+  const view = render(<TooltipButton ref={ref} title="Expand" shortcut="Shortcut" onClick={clicked}>Toggle</TooltipButton>);
   const button = screen.getByRole("button");
   expect(ref.current).toBe(button);
   fireEvent.focus(button);
-  expect(screen.getByRole("tooltip").textContent).toContain("⌘Shift+B");
-  view.rerender(<TooltipButton ref={ref} title="恢复分栏" onClick={clicked}>Wide</TooltipButton>);
-  expect(screen.getByRole("tooltip").textContent).toBe("恢复分栏");
+  expect(screen.getByRole("tooltip").textContent).toContain("Shortcut");
+  view.rerender(<TooltipButton ref={ref} title="Restore" onClick={clicked}>Toggle</TooltipButton>);
+  expect(screen.getByRole("tooltip").textContent).toBe("Restore");
   fireEvent.keyDown(button, { key: "Escape" });
   expect(screen.queryByRole("tooltip")).toBeNull();
   fireEvent.blur(button);

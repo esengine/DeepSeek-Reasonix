@@ -53,12 +53,19 @@ var Tokens = map[string]TokenKind{
 	"synString":   TokenColour,
 	"synNumber":   TokenColour,
 	"synFunction": TokenColour,
-	"shadowFloat": TokenShadow,
-	"radiusXs":    TokenLength,
-	"radiusSm":    TokenLength,
-	"radiusMd":    TokenLength,
-	"fontUi":      TokenFont,
-	"fontMono":    TokenFont,
+	// The five optional code colours. A pack that sets none keeps what each
+	// surface draws today; see docs/THEME_AUTHOR_GUIDE.md.
+	"synComment":     TokenColour,
+	"synType":        TokenColour,
+	"synOperator":    TokenColour,
+	"synPunctuation": TokenColour,
+	"synVariable":    TokenColour,
+	"shadowFloat":    TokenShadow,
+	"radiusXs":       TokenLength,
+	"radiusSm":       TokenLength,
+	"radiusMd":       TokenLength,
+	"fontUi":         TokenFont,
+	"fontMono":       TokenFont,
 }
 
 // TokenNames returns the vocabulary sorted, for callers that report it.

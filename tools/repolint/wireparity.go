@@ -125,6 +125,8 @@ var mirroredWireTypes = []wireMirror{
 	// use_capability where the live one drew what it reached.
 	{"internal/frontend/serve/history.go", "historyToolCall", tsSessionFile, "HistoryToolCall"},
 	{"internal/frontend/serve/history.go", "historyMessage", tsSessionFile, "HistoryMessage"},
+	{"internal/frontend/serve/history_page.go", "historyPageResponse", tsSessionFile, "HistoryPage"},
+	{"internal/frontend/serve/history_page.go", "historyPageToolContext", tsSessionFile, "HistoryToolContext"},
 	// Who can reach this window from another device. A device the page cannot
 	// list is one the person at the window cannot see to disconnect.
 	{"internal/frontend/serve/device_share.go", "ShareStatus", tsShareFile, "ShareStatus"},
@@ -352,6 +354,11 @@ var partialWireMirrors = []partialWireMirror{
 		[]string{"revision", "paused", "readonly", "recoveredCount", "items", "capacity"}},
 	{"internal/state/sessioninbox/types.go", "Capacity", tsPortFile, "QueueCapacity",
 		[]string{"items", "maxItems", "bytes", "maxBytes"}},
+	// The terminal's copy of /history's tool call. Its card draws the arguments
+	// the proxy rewrote, so the record must carry the evidence too, or a
+	// reopened session shows the rewrite as the model's own.
+	{"internal/frontend/serve/history.go", "historyToolCall", "internal/frontend/tui/client.go", "HistoryToolCall",
+		[]string{"id", "name", "arguments", "argumentNormalization", "resolvedName", "capabilityId"}},
 }
 
 // partialWireMirror is one declared subset: readerFile's readerType must carry

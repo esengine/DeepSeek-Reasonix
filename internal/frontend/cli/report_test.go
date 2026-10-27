@@ -79,8 +79,8 @@ func TestReportCommandInteractiveConfirmationSendsAndDeletes(t *testing.T) {
 	if calls != 1 || !strings.Contains(out.String(), "[y/N]") || !strings.Contains(out.String(), "Sent CLI crash report") {
 		t.Fatalf("calls=%d output=%q", calls, out.String())
 	}
-	if _, err := crashreport.Load(home, pending.ID); !errors.Is(err, crashreport.ErrNoReports) {
-		t.Fatalf("sent report remains: %v", err)
+	if _, err := crashreport.Load(home, pending.ID); err == nil {
+		t.Fatal("sent report remains")
 	}
 }
 

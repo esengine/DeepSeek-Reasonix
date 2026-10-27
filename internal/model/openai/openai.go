@@ -240,6 +240,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		keySource:          keySource,
 		baseURL:            strings.TrimRight(cfg.BaseURL, "/"),
 		chatURL:            chatURL,
+		learned:            endpointFacts{stream: streamFactsFor(chatURL)},
 		prefixChatURL:      prefixChatURL,
 		headers:            cleanCustomHeaders(headers),
 		extraBody:          cleanExtraBody(extraBody),

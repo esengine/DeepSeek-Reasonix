@@ -3,8 +3,8 @@ package event
 import "reasonix/internal/base/nilutil"
 
 // RunBudgetTotals is one scope's accumulated spend: counts and money, never
-// content. Priced is false when no price table covered it, so a reader can
-// tell a genuinely free stretch from an unpriced one.
+// content. Priced requires usage and prices for every observed round; Cost
+// otherwise contains only the known priced subtotal, not an estimate.
 type RunBudgetTotals struct {
 	Rounds       int     `json:"rounds"`
 	Requests     int     `json:"requests"`

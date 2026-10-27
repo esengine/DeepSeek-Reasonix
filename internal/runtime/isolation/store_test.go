@@ -181,14 +181,33 @@ func TestPendingResultOutlivesItsStore(t *testing.T) {
 	if got := resumed.Pending(); len(got) != 1 || got[0] != id {
 		t.Fatalf("pending after rebuild = %v, want [%s]", got, id)
 	}
+	entry, err := resumed.lookup(id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := NewApplyTool(resumed).Execute(context.Background(), args(id)); err != nil {
 		t.Fatalf("apply after rebuild: %v", err)
 	}
 	if read(t, repo, "a.txt") != "isolated\n" {
 		t.Fatal("the rebuilt store did not apply the result")
 	}
-	if left, _ := filepath.Glob(filepath.Join(managed, "*", "*")); len(left) != 0 {
-		t.Fatalf("an applied result left %v behind", left)
+	if _, err := os.Stat(entry.Cand.WorktreeRoot); !os.IsNotExist(err) {
+		t.Fatalf("an applied result retained its worktree: %v", err)
+	}
+	if _, err := os.Stat(entryPath(entry.Cand)); !os.IsNotExist(err) {
+		t.Fatalf("an applied result retained its publication: %v", err)
+	}
+	if pending := resumed.Pending(); len(pending) != 0 {
+		t.Fatalf("an applied result remains pending: %v", pending)
+	}
+	left, err := os.ReadDir(managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range left {
+		if entry.Name() != resultLockDirectory {
+			t.Fatalf("an applied result left an unexpected directory: %s", entry.Name())
+		}
 	}
 }
 

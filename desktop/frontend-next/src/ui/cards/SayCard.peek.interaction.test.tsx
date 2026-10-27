@@ -1,66 +1,102 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SayCard } from "./SayCard";
-import { FOLD_CHOICES, FOLD_DEFAULTS, setFoldModes } from "../../state/prefs";
-import { firstSentence } from "../thoughtPeek";
+import { Folding } from "../Folding";
+import { FOLD_DEFAULTS, setFoldModes, setShowsThinkingPreview } from "../../state/prefs";
 
 afterEach(() => {
   cleanup();
   setFoldModes(FOLD_DEFAULTS);
+  setShowsThinkingPreview(false);
 });
 
 const item = { t: "say" as const, id: "s", text: "answer", reasoning: "先检查配置文件。然后再看日志。", done: true };
-const peek = (el: HTMLElement) => el.querySelector(".peek");
+const peek = (el: HTMLElement) => el.querySelector(".thinking-preview");
 
-describe("firstSentence", () => {
-  it("takes the first sentence of Chinese and Latin text", () => {
-    expect(firstSentence("先检查配置文件。然后再看日志。", 80)).toBe("先检查配置文件。");
-    expect(firstSentence("Check the config first. Then the logs.", 80)).toBe("Check the config first.");
+describe("collapsed thinking previews", () => {
+  it("shows the opening text only when enabled and collapsed", async () => {
+    const { container } = render(<SayCard item={item} />);
+    expect(peek(container)).toBeNull();
+    act(() => setShowsThinkingPreview(true));
+    expect(peek(container)?.textContent).toBe(item.reasoning);
+    await userEvent.click(container.querySelector("summary")!);
+    expect(peek(container)).toBeNull();
+    await userEvent.click(container.querySelector("summary")!);
+    expect(peek(container)?.textContent).toBe(item.reasoning);
+    act(() => setShowsThinkingPreview(false));
+    expect(peek(container)).toBeNull();
   });
-  it("cuts a long first sentence at the limit with an ellipsis", () => {
-    const out = firstSentence("a".repeat(200), 20);
-    expect([...out]).toHaveLength(21);
-    expect(out.endsWith("…")).toBe(true);
+
+  it("retains the opening as more reasoning streams, then survives completion", () => {
+    setShowsThinkingPreview(true);
+    const { container, rerender } = render(<SayCard item={{ ...item, done: false, text: "", reasoning: "  First step." }} />);
+    expect(peek(container)?.textContent).toBe("First step.");
+    const reasoning = `  First step.\n${"More reasoning. ".repeat(30)}`;
+    rerender(<SayCard item={{ ...item, done: false, text: "", reasoning }} />);
+    expect(peek(container)?.textContent).toBe(reasoning.trimStart());
+    rerender(<SayCard item={{ ...item, reasoning }} />);
+    expect(peek(container)?.textContent).toBe(reasoning.trimStart());
   });
-  it("ignores leading blank lines and whitespace", () => {
-    expect(firstSentence("\n\n  hello there.  More", 80)).toBe("hello there.");
+
+  it("opens while thinking, then previews when the answer starts, unless manually overridden", async () => {
+    setFoldModes({ thinking: "live" });
+    setShowsThinkingPreview(true);
+    const { container, rerender } = render(<SayCard item={{ ...item, done: false, text: "" }} />);
+    const details = () => container.querySelector("details")!;
+    expect(details().open).toBe(true);
+    expect(peek(container)).toBeNull();
+    rerender(<SayCard item={{ ...item, done: false }} />);
+    expect(details().open).toBe(false);
+    expect(peek(container)?.textContent).toBe(item.reasoning);
+    await userEvent.click(container.querySelector("summary")!);
+    rerender(<SayCard item={item} />);
+    expect(details().open).toBe(true);
+    expect(peek(container)).toBeNull();
+    act(() => setFoldModes({ thinking: "folded" }));
+    expect(details().open).toBe(true);
   });
-  it("is empty for blank reasoning", () => {
-    expect(firstSentence("  \n ", 80)).toBe("");
+
+  it("lets a manually collapsed block preview even when the default is expanded", async () => {
+    setFoldModes({ thinking: "open" });
+    setShowsThinkingPreview(true);
+    const { container } = render(<SayCard item={item} />);
+    expect(peek(container)).toBeNull();
+    await userEvent.click(container.querySelector("summary")!);
+    expect(peek(container)?.textContent).toBe(item.reasoning);
+    act(() => setFoldModes({ thinking: "live" }));
+    expect(peek(container)?.textContent).toBe(item.reasoning);
+  });
+
+  it("does not render a disclosure or preview for blank reasoning", () => {
+    setShowsThinkingPreview(true);
+    const { container } = render(<SayCard item={{ ...item, reasoning: " \n " }} />);
+    expect(container.querySelector("details")).toBeNull();
+    expect(peek(container)).toBeNull();
   });
 });
 
-describe("the thinking peek", () => {
-  it("is a choice for thinking only, and not the default", () => {
-    expect(FOLD_CHOICES.thinking).toContain("peek");
-    expect(FOLD_CHOICES.activity).not.toContain("peek");
-    expect(FOLD_DEFAULTS.thinking).not.toBe("peek");
-  });
-
-  it("shows nothing beside a folded block under the default", () => {
-    expect(peek(render(<SayCard item={item} />).container)).toBeNull();
-  });
-
-  it("shows the first sentence beside a folded block and hides it once opened", async () => {
-    setFoldModes({ thinking: "peek" });
-    const { container } = render(<SayCard item={item} />);
-    expect(peek(container)?.textContent).toBe("先检查配置文件。");
-    expect((container.querySelector("details") as HTMLDetailsElement).open).toBe(false);
-    await userEvent.click(container.querySelector("summary") as HTMLElement);
-    expect(peek(container)).toBeNull();
-  });
-
-  it("follows the setting for a block already on screen", () => {
-    const { container } = render(<SayCard item={item} />);
-    expect(peek(container)).toBeNull();
-    act(() => setFoldModes({ thinking: "peek" }));
-    expect(peek(container)).not.toBeNull();
-  });
-
-  it("shows no peek while the thought is still streaming", () => {
-    setFoldModes({ thinking: "peek" });
-    expect(peek(render(<SayCard item={{ ...item, done: false, text: "" }} />).container)).toBeNull();
+describe("the independent preview setting", () => {
+  it("changes the transcript and demonstration without presets changing the preview preference", async () => {
+    const settings = render(<Folding />);
+    const card = render(<SayCard item={item} />);
+    const sw = screen.getByRole("switch");
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(sw);
+    expect(peek(card.container)?.textContent).toBe(item.reasoning);
+    expect(settings.container.querySelector('.fp-block[data-part="thinking"] .thinking-preview')).not.toBeNull();
+    const choices = settings.container.querySelector('[role="radiogroup"][aria-label]')!;
+    const presets = within(choices as HTMLElement).getAllByRole("radio");
+    await userEvent.click(presets[3]);
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(card.container.querySelector("details")!.open).toBe(true);
+    expect(peek(card.container)).toBeNull();
+    await userEvent.click(presets[1]);
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(peek(card.container)?.textContent).toBe(item.reasoning);
+    await userEvent.click(sw);
+    expect(peek(card.container)).toBeNull();
+    expect(settings.container.querySelector(".thinking-preview")).toBeNull();
   });
 });

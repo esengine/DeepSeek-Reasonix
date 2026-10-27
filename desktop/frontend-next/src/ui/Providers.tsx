@@ -8,6 +8,7 @@ import { ProviderDetail } from "./ProviderDetail";
 import { accountKey, accountLabel, disambiguate, hostOf } from "./vendors";
 import { reason } from "../i18n/kernel";
 import { providerDot } from "./providerdot";
+import { ServiceMark } from "./ServiceMark";
 import { moveAccount, orderAccounts, useProviderOrder, writeProviderOrder } from "../state/providerorder";
 import { StudioIcon } from "./StudioIcon";
 import { RemovalNotice, removalChangedRoles, type Removal } from "./ProviderRemoval";
@@ -273,6 +274,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
                     }
                   }}
                   onClick={() => leave(() => { setAdding(false); setPicked(a.key); }, a.key !== selected)}>
+                  <ServiceMark mark={Object.values(a.byKind).find((e) => e.mark)?.mark} label={a.label} id={a.key} />
                   <span className="tx">
                     <span className="nm">{a.label}</span>
                     <Clip className="ds">{a.host}</Clip>

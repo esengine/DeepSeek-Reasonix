@@ -75,16 +75,6 @@ func (t *TaskTool) openDelegation(ctx context.Context, spec *ProfileExecSpec, re
 	return life, nil
 }
 
-// settleOnReturn closes a delegation the caller still owns. A handoff has moved
-// that ownership to the job, and settling here would record work as let go of
-// while its child is still running.
-func (d *delegationLifecycle) settleOnReturn(ctx context.Context, handedOff *bool, out *string, err *error) {
-	if *handedOff {
-		return
-	}
-	d.settle(ctx, *out, *err)
-}
-
 // executionID is what this run is recorded under. A lone delegation's child is
 // stored against its own node, so the journal, the graph and the store's parent
 // are one identity and a rebuild can join them; a fan-out item already runs

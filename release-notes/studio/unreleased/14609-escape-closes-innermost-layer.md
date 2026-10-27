@@ -1,0 +1,2 @@
+- 修复：在弹窗里放大查看截图时，按 Esc 只退出大图，不再把整个反馈弹窗一起关掉；所有“弹窗里再开一层”的地方都先关最里面一层。修复 #14609。
+- Fixed: pressing Esc on an enlarged screenshot now closes only the screenshot instead of the whole feedback dialog, and every nested layer closes innermost first. Fixes #14609.

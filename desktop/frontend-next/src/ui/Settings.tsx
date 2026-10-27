@@ -1,3 +1,4 @@
+import { WindowControls } from "./WindowControls";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { onSettingsWideChange, setSettingsWide, settingsWide } from "../state/settingsWide";
 import { StudioIcon } from "./StudioIcon";
@@ -8,7 +9,9 @@ import { listenAction } from "./listen";
 import { useRuntimeReload } from "./RuntimeReload";
 import type { CapabilityScope, McpEntry, ModelEntry, PluginPackage, SkillEntry } from "../port/port";
 import { useSettingsSearch } from "./useSettingsSearch";
+import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
+import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
 import { SECTION_NAME } from "./prefsnav";
 import { SettingsNav } from "./SettingsNav";
 import { Group, SCOPE_SAID } from "./Group";
@@ -182,12 +185,14 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
     let alive = true;
     setTally({});
     const put = (k: Section, v: string) => { if (alive) setTally((prev) => ({ ...prev, [k]: v })); };
-    homePort.storage().then((st) => put("storage", bytes(st.roots.reduce((n, r) => n + (r.bytes || 0), 0)))).catch(() => {});
+    const known = cachedStorageTotal(homePort);
+    if (known !== undefined) put("storage", bytes(known));
+    const walk = known !== undefined ? undefined : setTimeout(() => { storageTotal(homePort).then((n) => put("storage", bytes(n))).catch(() => {}); }, STORAGE_TALLY_DELAY);
     // The same window Usage itself opens on, or the list and the page it opens
     // would report two different totals for one word.
     homePort.usage(DEFAULT_DAYS).then((u) => put("usage", fmtTokens(u.tokens))).catch(() => {});
     homePort.versions().then((v) => put("versions", v.current || "dev")).catch(() => {});
-    return () => { alive = false; };
+    return () => { alive = false; clearTimeout(walk); };
   }, [homePort]);
 
   // Focus lands once, when the pane opens, and goes back where it came from on
@@ -316,32 +321,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       if (section === "ext") setExtTab(anchor === "market" ? "market" : "installed");
     });
   };
-  useEffect(() => {
-    if (!landed) return;
-    const el = root.current?.querySelector<HTMLElement>(`#set-${CSS.escape(landed)}`);
-    // 折叠起来的块在 DOM 里，但不在屏幕上 —— 滚过去会停在一片空白上。要开哪一
-    // 个由结构回答：不需要再维护一张「哪些设置是高级」的表，也不需要把落点穿到
-    // 每个页面里去。
-    for (let d = el?.closest("details"); d; d = d.parentElement?.closest("details") ?? null) d.open = true;
-    const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    const aim = () => el?.scrollIntoView({ block: "start", behavior });
-    aim();
-    // The page is still growing under the scroll: theme packs and the font list
-    // arrive late and push the anchor below a target already locked in. A jump
-    // owns its landing until it lapses, so re-aim for as long as it is owed.
-    const grew = new ResizeObserver(aim);
-    const col = root.current?.querySelector(".prefs-col");
-    if (col) grew.observe(col);
-    // 「就是这里」是一次导航反馈，不是这个设置变了 —— 所以它只是元素上短暂的
-    // 一个标记，不进 React 状态，也不用往每个块穿一个纯表现的 prop。
-    el?.setAttribute("data-landed", "");
-    const done = setTimeout(() => setLanded(""), 900);
-    return () => {
-      clearTimeout(done);
-      grew.disconnect();
-      el?.removeAttribute("data-landed");
-    };
-  }, [landed, at]);
+  useSettingLanding(root, landed, at, setLanded);
 
   return (
     <SettingsLeaveContext.Provider value={navigation.register}><div
@@ -379,12 +359,13 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             }
           }}
         />
-        <button className="btn sm" type="button" data-action="settings.expand" aria-pressed={wide} aria-label={t("放大设置窗口")} title={t("放大设置窗口")} onClick={() => setSettingsWide(!wide)}>
-          <StudioIcon name="expand" />
+        <button className="btn sm" type="button" data-action="settings.expand" aria-pressed={wide} aria-label={t("放大设置窗口")} title={t(wide ? "缩小设置窗口" : "放大设置窗口")} onClick={() => setSettingsWide(!wide)}>
+          <StudioIcon name={wide ? "collapseAll" : "expand"} />
         </button>
         <button className="btn sm" data-action="settings.close" disabled={updatingPkg.applying} onClick={close}>
           {t("关闭")} <span className="esc">Esc</span>
         </button>
+        {wide && <WindowControls />}
         {found !== null && (
           <div className="prefs-found" role="listbox" aria-label={t("搜索设置")}>
             {found.length === 0 ? (
@@ -420,9 +401,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       </div>
       <ConfigTrouble port={port} onRepaired={onChanged} />
       <div className="prefs-body">
-        <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at) navigation.leave(() => setAt(section)); }} />
+        <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at) navigation.leave(() => { setLanded(""); setAt(section); }); }} />
 
-        <div className="prefs-main" role="tabpanel" aria-labelledby={`prefs-${at}`} data-sec={at}>
+        <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={`prefs-${at}`} data-sec={at}>
           <Boundary
             fallback={
               <div className="find" data-lvl="err" role="alert">

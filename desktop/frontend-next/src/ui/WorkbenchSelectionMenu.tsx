@@ -1,21 +1,24 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { pinToViewport } from "./place";
+import type { TextContextMenuRequest } from "../port/host";
+import type { TextMenuAction } from "./workbench_text_menu";
 
-export type SelectionMenu = { text: string; x: number; y: number; anchor: HTMLElement };
-
-/** The right-click menu over text selected in an open workspace file: it is the
- *  way to bring a passage, not the whole file, into the conversation. */
-export function WorkbenchSelectionMenu({ menu, onQuote, onClose }: { menu: SelectionMenu; onQuote: (text: string) => void; onClose: () => void }) {
+export function WorkbenchSelectionMenu({ menu, onAction, onClose }: {
+  menu: TextContextMenuRequest;
+  onAction: (action: TextMenuAction | "quote") => Promise<void>;
+  onClose: (restore: boolean) => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const shut = () => onClose();
+    const shut = (event: Event) => { if (!box.current?.contains(event.target as Node)) onClose(false); };
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape" && e.key !== "Tab") return;
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); }
-      menu.anchor.focus({ preventScroll: true });
-      onClose();
+      onClose(true);
     };
+    box.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
     addEventListener("click", shut);
     addEventListener("keydown", key, true);
     addEventListener("blur", shut);
@@ -29,13 +32,26 @@ export function WorkbenchSelectionMenu({ menu, onQuote, onClose }: { menu: Selec
     <div
       className="tabmenu"
       role="menu"
-      aria-label={t("选中的内容")}
+      aria-label={t("文本操作")}
       data-action-keydown="layer.dismiss"
-      ref={(el) => { if (el) pinToViewport(el, menu.x, menu.y); }}
+      ref={(el) => { box.current = el; if (el) pinToViewport(el, menu.x, menu.y); }}
+      onKeyDown={(e) => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+        e.preventDefault();
+        const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+        const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        buttons[e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+      }}
     >
-      <button role="menuitem" autoFocus data-action="workbench.quote-selection" onClick={() => { onQuote(menu.text); menu.anchor.focus({ preventScroll: true }); onClose(); }}>
-        {t("加入对话")}
-      </button>
+      {menu.editable && <>
+        <button role="menuitem" disabled={!menu.canUndo} data-action="workbench.text-undo" onClick={() => void onAction("undo")}>{t("撤销编辑")}</button>
+        <button role="menuitem" disabled={!menu.canRedo} data-action="workbench.text-redo" onClick={() => void onAction("redo")}>{t("重做")}</button>
+        <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-cut" onClick={() => void onAction("cut")}>{t("剪切")}</button>
+      </>}
+      <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-copy" onClick={() => void onAction("copy")}>{t("复制")}</button>
+      {menu.editable && <button role="menuitem" data-action="workbench.text-paste" onClick={() => void onAction("paste")}>{t("粘贴")}</button>}
+      <button role="menuitem" data-action="workbench.text-select-all" onClick={() => void onAction("selectAll")}>{t("全选")}</button>
+      {menu.quote && menu.selected && <button role="menuitem" data-action="workbench.quote-selection" onClick={() => void onAction("quote")}>{t("加入对话")}</button>}
     </div>, document.body,
   );
 }

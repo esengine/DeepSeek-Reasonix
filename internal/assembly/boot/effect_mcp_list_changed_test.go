@@ -198,6 +198,7 @@ func TestEffectMCPListChangedReachesTheNextRequest(t *testing.T) {
 			}}
 			provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
 			writeFile(t, workspace, "reasonix.toml", listChangedConfig(kind, listChangedServerBlock(t, transport)))
+			writeUserConfig(t, "[tools.mcp_load]\nlive = \"always\"\n")
 			approveWorkspace(t, workspace)
 			approveProjectServer(t, workspace, "live")
 
@@ -332,6 +333,7 @@ func TestEffectMCPListChangedKeepsAPinnedToolSurface(t *testing.T) {
 	var rec atomic.Pointer[listChangedProvider]
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec.Load(), nil })
 	writeFile(t, workspace, "reasonix.toml", listChangedConfig(kind, listChangedServerBlock(t, "stdio")))
+	writeUserConfig(t, "[tools.mcp_load]\nlive = \"always\"\n")
 	approveWorkspace(t, workspace)
 	approveProjectServer(t, workspace, "live")
 

@@ -35,6 +35,7 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		DeliveryProfile:   t.deliveryProfile,
 		Ablation:          t.ablation,
 		WorkspaceLease:    t.workspaceLease,
+		WriteScheduler:    t.scheduler,
 		RecoveryGate:      t.recoveryGate,
 		RecoveryAgentID:   "subagent",
 		RecoveryTaskID:    recoveryTaskID,

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/safety/evidence"
 )
 
@@ -435,5 +436,27 @@ func TestTodoWriteRejectsDroppingActiveSubStep(t *testing.T) {
 		{"content":"rewrite everything","status":"in_progress","level":1}]}`))
 	if err == nil || !strings.Contains(err.Error(), "cannot be removed or replaced") {
 		t.Fatalf("dropping the active sub-step should be rejected: %v", err)
+	}
+}
+
+func TestTodoWriteSchemaErrorsCarryAMinimalValidCall(t *testing.T) {
+	contract, ok := usecap.ReadArgumentContract(todoWrite{}.Schema(), json.RawMessage(`{"todos":[{"content":"a step"}]}`))
+	if !ok || len(contract.Missing) != 1 || contract.Missing[0] != "status" {
+		t.Fatalf("contract = %+v", contract)
+	}
+	if hint := contract.Hint(); !strings.Contains(hint, `{"todos":[{"content":"…","status":"pending"}]}`) {
+		t.Fatalf("hint %q carries no valid call", hint)
+	}
+}
+
+func TestTodoWriteListRuleErrorsShowAValidSerialList(t *testing.T) {
+	_, err := todoWrite{}.Execute(context.Background(), json.RawMessage(`{"todos":[{"content":"one","status":"pending"},{"content":"two","status":"pending"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "no in_progress item") {
+		t.Fatalf("error = %v", err)
+	}
+	for _, want := range []string{`"level":0`, `"level":1`, `"status":"in_progress"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q lacks the valid list marker %s", err, want)
+		}
 	}
 }

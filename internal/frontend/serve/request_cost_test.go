@@ -41,6 +41,7 @@ func TestHotEndpointsStayInsideTheirPackageParseBudget(t *testing.T) {
 		{"/hooks", 0},
 		{"/sessions", 0},
 		{"/history", 0},
+		{"/history/page", 0},
 		{"/skills", 1},
 		{"/complete?lang=en&line=/", 0},
 		{"/complete?lang=en&line=/mo", 0},

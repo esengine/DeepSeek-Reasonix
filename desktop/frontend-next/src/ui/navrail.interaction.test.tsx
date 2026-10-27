@@ -59,12 +59,18 @@ const app = () => document.querySelector<HTMLElement>(".app")!;
 const toggleSidebar = () => userEvent.click(document.querySelector<HTMLElement>(".gutter-l .grip")!);
 
 async function openAppearance() {
-  await userEvent.click(screen.getByRole("button", { name: "沙盒" }));
+  await userEvent.click(document.querySelector<HTMLElement>('[data-action="chrome.settings"]')!);
   await userEvent.click(await screen.findByRole("tab", { name: /外观/ }));
   await screen.findByRole("group", { name: "图标栏" });
 }
 const choice = (name: string) => screen.getByRole("button", { name });
 const pressed = (name: string) => choice(name).getAttribute("aria-pressed");
+
+it("offers the tools destination only through the navigation entries, not a second button in the top bar", async () => {
+  await open();
+  expect(screen.queryByRole("button", { name: "沙盒" })).toBeNull();
+  expect(within(screen.getByRole("navigation", { name: "主导航" })).getByRole("button", { name: "工具与权限" })).toBeTruthy();
+});
 
 it("always draws the rail by default, with every entry in it", async () => {
   await open();

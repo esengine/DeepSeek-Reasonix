@@ -127,13 +127,30 @@ func TestCheckProviderNoChatModelsCarriesTheCount(t *testing.T) {
 	}
 }
 
-func TestCheckProviderUnreachableHasItsOwnCode(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+// refusedAddr returns a loopback address nothing is listening on. A port taken
+// from a listener and then closed can be handed to another server of the same
+// test binary before it is used, so each candidate is dialled once to see it refuse.
+func refusedAddr(t *testing.T) string {
+	t.Helper()
+	for range 20 {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		_ = ln.Close()
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err != nil {
+			return addr
+		}
+		_ = conn.Close()
 	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
+	t.Fatal("no loopback port stayed closed")
+	return ""
+}
+
+func TestCheckProviderUnreachableHasItsOwnCode(t *testing.T) {
+	addr := refusedAddr(t)
 
 	got, raw := checkSavedProvider(t, "http://"+addr+"/v1")
 	if got["ok"] != false || got["code"] != "provider.probe.unreachable" {

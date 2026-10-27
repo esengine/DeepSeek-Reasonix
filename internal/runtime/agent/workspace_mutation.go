@@ -26,12 +26,28 @@ func finalizeWorkspaceMutationOutcome(out *toolOutcome, plan *toolCallPlan) {
 			name: plan.evidenceName, args: append([]byte(nil), plan.evidenceArgs...), readOnly: plan.readOnly,
 		}
 	}
+	if plan.hookMayHaveMutated {
+		out.workspaceMutation = &event.WorkspaceMutation{
+			ToolID: plan.call.ID, ToolName: plan.evidenceName,
+			AllPaths: true, Content: true, Tree: true, WorkingTree: true, GitMeta: true,
+		}
+		return
+	}
 	if !plan.executed || isMCPLifecycleConnectTarget(plan.runTool) {
 		return
 	}
 	if mutation, ok := workspaceMutationForCall(plan.call.ID, plan.evidenceName, plan.evidenceArgs, plan.readOnly); ok {
 		out.workspaceMutation = &mutation
 	}
+}
+
+func attachWorkspaceMutation(result *event.Tool, mutation *event.WorkspaceMutation) {
+	if mutation == nil {
+		return
+	}
+	result.WorkspaceMutation = true
+	result.WorkspacePaths = append([]string(nil), mutation.Paths...)
+	result.WorkspaceAllPaths = mutation.AllPaths
 }
 
 // tool.before can turn nominally read-only parallel calls into writers. Keep

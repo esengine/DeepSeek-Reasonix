@@ -370,7 +370,13 @@ func (s *Server) reloadExtensionsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Both admitted content types require a CORS preflight, which the server does
-// not answer. Binary bodies are admitted only at the attachment upload route.
+// not answer. Binary bodies are admitted only at the routes that take a file.
+// binaryUploadPath names the routes that take a file as the request body rather
+// than as JSON: the attachment upload and the wallpaper picture.
+func binaryUploadPath(p string) bool {
+	return strings.HasSuffix(p, "/attachments/upload") || strings.HasSuffix(p, "/appearance/wallpaper")
+}
+
 func csrfGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -378,7 +384,7 @@ func csrfGuard(next http.Handler) http.Handler {
 			if i := strings.IndexByte(ct, ';'); i >= 0 {
 				ct = ct[:i]
 			}
-			binaryUpload := strings.HasSuffix(r.URL.Path, "/attachments/upload") && strings.EqualFold(strings.TrimSpace(ct), "application/octet-stream")
+			binaryUpload := binaryUploadPath(r.URL.Path) && strings.EqualFold(strings.TrimSpace(ct), "application/octet-stream")
 			if !strings.EqualFold(strings.TrimSpace(ct), "application/json") && !binaryUpload {
 				refuse(w, http.StatusUnsupportedMediaType, "request.bad_content_type", "the body must be application/json", nil)
 				return
@@ -775,6 +781,11 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 				NotAdded: !cfg.ProviderAdded(p.Name),
 			}
 			capabilitiesFor(cfg, p, model, &entry)
+			vendor, relay := presetVendor(p)
+			entry.ServiceMark = vendor
+			if !relay {
+				entry.Mark = vendor
+			}
 			out = append(out, entry)
 		}
 	}

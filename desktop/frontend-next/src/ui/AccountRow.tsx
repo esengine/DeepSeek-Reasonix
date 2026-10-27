@@ -13,7 +13,7 @@ export function AccountRow({ account, unread, onOpen }: { account: AccountState 
   return (
     <button className="acctrow" data-action="chrome.account" onClick={onOpen} aria-label={t("账号")} title={identityError ? `${signedIn ? name : t("未登录")} — ${identityError}` : undefined}>
       <span className="ini" aria-hidden="true" data-off={signedIn ? undefined : ""}>
-        {signedIn ? initial : "·"}
+        <span>{signedIn ? initial : "·"}</span>
       </span>
       <span className="who">
         <span className="n">{signedIn ? name : t("未登录")}</span>

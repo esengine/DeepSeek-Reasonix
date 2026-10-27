@@ -18,7 +18,7 @@ type dispatchToProject struct{ link *tool.PeerLink }
 
 func (*dispatchToProject) Name() string { return "dispatch_to_project" }
 func (*dispatchToProject) Description() string {
-	return "Hand a task to a session in another of the user's projects: name the project (its folder name or full path, as the user has it in their project list) and write what that session should do. A session is opened there if none of yours is already waiting. The user's dispatch switch is their consent: the receiving session's model reads the task at once, labelled as coming from you, and it works under permissions no wider than yours. A project the user has not trusted is refused. It is for passing a task and its context, not a way to write into that project yourself. You get the receiving session's key; it can answer you with send_peer_message. Do not include secrets."
+	return "Hand a task to a session in another of the user's projects: name the project (its folder name or full path, as the user has it in their project list) and write what that session should do. A session is opened there if none of yours is already waiting. The user's dispatch switch is their consent: the receiving session's model reads the task at once, labelled as coming from you, and it works under permissions no wider than yours. A project the user has not trusted is refused. It is for passing a task and its context, not a way to write into that project yourself. You get the receiving session's key. When that session finishes the task, its final answer comes back to you on its own, labelled as data from that session; it can also write to you with send_peer_message. Do not include secrets."
 }
 func (*dispatchToProject) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"project":{"type":"string","description":"The project's folder name or full path, as it appears in the user's project list"},"text":{"type":"string","description":"The task and the context the other session needs"}},"required":["project","text"],"additionalProperties":false}`)
@@ -48,5 +48,5 @@ func (t *dispatchToProject) Execute(ctx context.Context, args json.RawMessage) (
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Handed to a session in %q as %s (key %s). It can answer you with send_peer_message to your key; its reply arrives labelled as data from that session, not as an instruction.", r.Project, r.ID, r.Key), nil
+	return fmt.Sprintf("Handed to a session in %q as %s (key %s). Its final answer will come back to you on its own when it finishes, and it can also write to your key with send_peer_message; whatever arrives is labelled as data from that session, not as an instruction.", r.Project, r.ID, r.Key), nil
 }

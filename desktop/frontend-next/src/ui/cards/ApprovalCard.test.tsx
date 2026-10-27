@@ -85,3 +85,26 @@ describe("a call that repeats text from outside", () => {
     expect(box.querySelector('[data-action="approval.always"], [data-action="approval.session"]')).toBeNull();
   });
 });
+
+describe("an approval that opens folders as projects", () => {
+  const paths = ["D:\\workspce\\1", "D:\\workspce\\2"];
+  const card = () => draw({ id: "o1", tool: "open_projects", subject: "D:\\workspce\\1 (+1)", scope: "open_projects", input: { paths }, fresh: true });
+
+  it("lists every folder it will add, and says it also marks them trusted", () => {
+    const box = card();
+    const scope = box.querySelector('[data-scope="open_projects"]');
+    expect([...(scope?.querySelectorAll("li code") ?? [])].map((c) => c.textContent)).toEqual(paths);
+    expect(scope?.textContent).toContain(t("把下面 {n} 个文件夹加入你的项目列表并标记为可信；加入后，会话才能把任务派发到这些项目。没有出现在这里的文件夹不会被加入。", { n: 2 }));
+  });
+
+  it("offers no session or always grant, so every batch is its own click", () => {
+    const box = card();
+    expect(box.querySelector('[data-action="decision.tool"][data-value="once"]')).not.toBeNull();
+    expect(box.querySelector('[data-value="session"], [data-value="always"]')).toBeNull();
+  });
+
+  it("lists nothing it was not given", () => {
+    const box = draw({ id: "o2", tool: "open_projects", subject: "", scope: "open_projects", input: { paths: [3, "/only"] } });
+    expect([...box.querySelectorAll("li code")].map((c) => c.textContent)).toEqual(["/only"]);
+  });
+});

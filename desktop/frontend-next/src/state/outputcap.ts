@@ -12,7 +12,7 @@ const WHOLE = new Set(["todo_write", "remember", "update_goal", "read_file", "gr
 
 /** What the page keeps of a tool: the same call with `hidden` counting the
  *  characters of the middle of its output that it let go of. */
-export type StateTool = Tool & { hidden?: number };
+export type StateTool = Tool & { hidden?: number; historyId?: string };
 
 export function capToolOutput(tool: StateTool): StateTool {
   const out = tool.output;

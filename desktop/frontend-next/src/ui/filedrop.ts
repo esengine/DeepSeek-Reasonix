@@ -103,12 +103,15 @@ function carriesFiles(e: DragEvent): boolean {
   return types.includes(PATH_TYPE) || types.includes("Files") || types.includes("text/uri-list") || types.includes("text/plain");
 }
 
+// The innermost zone holding the target: a wide zone must not shadow a narrow
+// one inside it, whichever mounted first.
 function zoneAt(target: EventTarget | null): Zone | null {
   if (!(target instanceof Node)) return null;
+  let found: Zone | null = null;
   for (const zone of zones) {
-    if (zone.el.contains(target)) return zone;
+    if (zone.el.contains(target) && (!found || found.el.contains(zone.el))) found = zone;
   }
-  return null;
+  return found;
 }
 
 function light(next: Zone | null, dt: DataTransfer | null = null) {

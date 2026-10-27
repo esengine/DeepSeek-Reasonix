@@ -31,13 +31,17 @@ func (a *Agent) preToolUse(ctx context.Context, plan *toolCallPlan) (toolOutcome
 	if a.svc.hooks == nil {
 		return toolOutcome{}, false
 	}
-	if !plan.readOnly && toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
+	if toolHooksMayMutateWorkspace(a.svc.hooks) {
+		plan.leasePreparation.Retain()
+	}
+	if toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
 		a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{
 			Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName,
 			Detail: "user tool hook writes are outside the tool preimage capture",
 		})
 	}
 	// Resolved proxy calls use the concrete target name and arguments.
+	plan.hookMayHaveMutated = toolHooksMayMutateWorkspace(a.svc.hooks)
 	if block, msg := a.svc.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
 		if msg == "" {
 			msg = "blocked by a PreToolUse hook"

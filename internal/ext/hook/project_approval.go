@@ -69,7 +69,15 @@ func commandWords(command string) []string {
 	if err != nil || file == nil {
 		return strings.Fields(command)
 	}
+	// Bash reads a backslash as an escape, so an unquoted Windows path loses its
+	// separators; the fields as written keep it, and the cmd.exe that will run the
+	// line reads them that way.
 	var out []string
+	for field := range strings.FieldsSeq(command) {
+		if field = strings.Trim(field, `"'`); strings.Contains(field, `\`) {
+			out = append(out, field)
+		}
+	}
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if word, ok := node.(*syntax.Word); ok {
 			if value, ok := shellparse.StaticWord(word); ok && strings.ContainsAny(value, `/\.`) {

@@ -79,9 +79,9 @@ export function apply(look: Appearance | null, busy = false) {
   if (look?.textSize && look.textSize !== 1) style.setProperty("--fs-scale", String(look.textSize));
   else style.removeProperty("--fs-scale");
 
-  // Reading size moves the transcript's prose alone, so the frame around it
-  // stays where the layout put it.
-  style.setProperty("--read", `${readSizeOf(look?.readSize)}px`);
+  const readSize = readSizeOf(look?.readSize);
+  style.setProperty("--read", `${readSize}px`);
+  style.setProperty("--read-scale", String(readSize / readDefault()));
 
   // How far that prose runs is the other half of the same question, and the
   // only one with two honest answers: a line short enough to read without
@@ -98,7 +98,9 @@ export function apply(look: Appearance | null, busy = false) {
   const paper = look?.wallpaper;
   if (!paper) return;
   for (const v of IMAGE_VARS) style.removeProperty(v);
-  style.setProperty("--bg-image", `url("${paper.url}")`);
+  // A video is drawn by WallpaperVideo from the same variables; only a picture
+  // is a background image.
+  if (paper.kind !== "video" && !paper.layers?.length) style.setProperty("--bg-image", `url("${paper.url}")`);
   style.setProperty("--bg-x", `${pct(paper.focusX)}%`);
   style.setProperty("--bg-y", `${pct(paper.focusY)}%`);
   // At work it recedes to a third of what it is at rest, so the picture never

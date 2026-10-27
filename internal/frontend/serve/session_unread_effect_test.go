@@ -65,6 +65,7 @@ func newUnreadHarness(t *testing.T, mode string) *unreadHarness {
 	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_STATE_HOME", home)
+	closeSharedCatalogsOnCleanup(t)
 	root := testenv.TempDir(t)
 	model := &unreadModel{mode: mode, started: make(chan struct{})}
 	kind := fmt.Sprintf("unread-%s-%d", t.Name(), unreadKinds.Add(1))

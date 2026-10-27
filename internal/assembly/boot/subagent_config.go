@@ -99,29 +99,11 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 	inherited := resolveInheritedSubagentEffort(cfg, entry)
 	return subagentConfig{
 		resolveProvider: func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
-			me, selectedRef, err := subagentModelEntry(cfg, resolver, entry, modelRef)
+			me, selection, err := subagentProviderSelection(cfg, resolver, entry, modelRef, effort)
 			if err != nil {
 				return nil, nil, 0, err
 			}
-			var effortOverride *string
-			if selectedRef == modelRefFromEntry(entry) {
-				effortOverride = &me.Effort
-			}
-			if strings.TrimSpace(effort) != "" {
-				normalized, err := config.NormalizeEffort(&me, effort)
-				if err != nil {
-					if resolver == nil {
-						return nil, nil, 0, fmt.Errorf("subagent effort %q on %s: %w", effort, selectedRef, err)
-					}
-					normalized = effort
-				}
-				me.Effort = normalized
-				effortOverride = &normalized
-				if me.Kind == "anthropic" && strings.TrimSpace(me.Effort) != "" && strings.TrimSpace(me.Thinking) == "" {
-					me.Thinking = "adaptive"
-				}
-			}
-			p, err := resolveProvider(resolver, cfg, proxy, provider.Selection{Ref: selectedRef, Effort: effortOverride})
+			p, err := resolveProvider(resolver, cfg, proxy, selection)
 			if err != nil {
 				return nil, nil, 0, err
 			}
@@ -148,6 +130,32 @@ func newSubagentConfig(opts Options, cfg *config.Config, entry *config.ProviderE
 	}
 }
 
+func subagentProviderSelection(cfg *config.Config, resolver provider.Resolver, parent *config.ProviderEntry, modelRef, effort string) (config.ProviderEntry, provider.Selection, error) {
+	entry, selectedRef, err := subagentModelEntry(cfg, resolver, parent, modelRef)
+	if err != nil {
+		return entry, provider.Selection{}, err
+	}
+	selection := provider.Selection{Ref: selectedRef}
+	if selectedRef == modelRefFromEntry(parent) {
+		selection.Effort = &entry.Effort
+	}
+	if strings.TrimSpace(effort) != "" {
+		normalized, err := config.NormalizeEffort(&entry, effort)
+		if err != nil {
+			if resolver == nil {
+				return entry, selection, fmt.Errorf("subagent effort %q on %s: %w", effort, selectedRef, err)
+			}
+			normalized = effort
+		}
+		entry.Effort = normalized
+		selection.Effort = &normalized
+		if entry.Kind == "anthropic" && strings.TrimSpace(entry.Effort) != "" && strings.TrimSpace(entry.Thinking) == "" {
+			entry.Thinking = "adaptive"
+		}
+	}
+	return entry, selection, nil
+}
+
 func subagentModelEntry(cfg *config.Config, resolver provider.Resolver, parent *config.ProviderEntry, ref string) (config.ProviderEntry, string, error) {
 	ref = childModelRef(cfg, parent, ref)
 	if parent != nil && (ref == "" || ref == modelRefFromEntry(parent)) {
@@ -155,6 +163,9 @@ func subagentModelEntry(cfg *config.Config, resolver provider.Resolver, parent *
 	}
 	if cfg != nil {
 		if resolved, ok := cfg.ResolveModel(ref); ok {
+			if parent != nil && modelRefFromEntry(resolved) == modelRefFromEntry(parent) {
+				return *parent, modelRefFromEntry(parent), nil
+			}
 			return *resolved, modelRefFromEntry(resolved), nil
 		}
 	}

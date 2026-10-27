@@ -25,7 +25,6 @@ func (s *Server) registerBackupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /backups/{id}", s.deleteBackup)
 	mux.HandleFunc("POST /backups/{id}/preview", s.previewBackup)
 	mux.HandleFunc("POST /backups/apply", s.applyBackup)
-	s.registerBackupFileRoutes(mux)
 }
 
 // backupSession is the gate every backup route shares: the host must allow

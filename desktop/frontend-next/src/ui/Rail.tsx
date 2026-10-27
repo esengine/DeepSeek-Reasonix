@@ -31,11 +31,17 @@ interface Props {
   flow: RefObject<HTMLDivElement | null>;
   onJump: (mark: RailMark) => void;
   /** Which conversation these marks belong to. Stars are stored per conversation,
-   *  because the same position in two conversations is two different questions. */
+   *  because the same position in two conversations is two different questions.
+   *  Empty until the conversation is saved: its stars are then kept in memory. */
   scope: string;
   // Only the transcript on screen answers the keys; a pane on another tab keeps
   // its rail but must not fight for them.
   bound: boolean;
+  /** Raw messages still unloaded before the first mark. A paged conversation
+   *  mounts only its tail, so the rail would otherwise look complete while most
+   *  of the conversation is still on disk. */
+  earlier?: number;
+  onLoadEarlier?: () => void;
 }
 
 // The native scrollbar owns continuous position. The semantic rail is a compact
@@ -70,6 +76,7 @@ function bookmarkKey(scope: string) {
 }
 
 function loadBookmarks(scope: string): Set<string> {
+  if (!scope) return new Set();
   try {
     const raw = localStorage.getItem(bookmarkKey(scope));
     const list = raw ? (JSON.parse(raw) as unknown) : [];
@@ -80,6 +87,7 @@ function loadBookmarks(scope: string): Set<string> {
 }
 
 function saveBookmarks(scope: string, marks: Set<string>) {
+  if (!scope) return;
   try {
     localStorage.setItem(bookmarkKey(scope), JSON.stringify([...marks]));
   } catch {
@@ -144,20 +152,46 @@ export function railLocalY(clientY: number, rectTop: number, rectHeight: number,
   return (clientY - rectTop) * (railHeight / rectHeight);
 }
 
-export function Rail({ marks, total, scroll, flow, onJump, bound, scope }: Props) {
+export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier = 0, onLoadEarlier }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [tops, setTops] = useState<number[]>([]);
   // Null while every question keeps its own line; a list once they have to
   // share, because reading them apart has stopped working.
   const [groups, setGroups] = useState<RailView[] | null>(null);
   const [at, setAt] = useState(-1);
+  // Which folded run has been opened into its own questions. A run is one line
+  // standing for many; opening it lets the reader pick the question they meant.
+  const [opened, setOpened] = useState<number | null>(null);
+  // The pointer crosses a gap between a run and the list beside it, so closing
+  // waits briefly instead of dropping the list the moment the line is left.
+  const closer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hold = useCallback(() => {
+    if (closer.current !== undefined) { clearTimeout(closer.current); closer.current = undefined; }
+  }, []);
+  const release = useCallback(() => {
+    hold();
+    closer.current = setTimeout(() => setOpened(null), 200);
+  }, [hold]);
+  useEffect(() => () => { hold(); }, [hold]);
   // Which mark the keys last walked to. Kept apart from `at`, which the pointer
   // owns: hovering somewhere else must not move where the keys resume from.
   const here = useRef(-1);
   // Which questions the reader starred. Kept by message id so folding the rail
   // around them cannot lose one.
   const [stars, setStars] = useState<Set<string>>(() => loadBookmarks(scope));
-  useEffect(() => setStars(loadBookmarks(scope)), [scope]);
+  const starScope = useRef(scope);
+  useEffect(() => {
+    const from = starScope.current;
+    starScope.current = scope;
+    if (from === scope) return;
+    setStars((prev) => {
+      // The first save names the conversation the stars were placed in.
+      if (from || !scope || prev.size === 0) return loadBookmarks(scope);
+      const next = new Set([...loadBookmarks(scope), ...prev]);
+      saveBookmarks(scope, next);
+      return next;
+    });
+  }, [scope]);
   const star = useCallback((msgIndex: number | undefined) => {
     if (msgIndex === undefined) return;
     const key = String(msgIndex);
@@ -295,17 +329,36 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope }: Props
         best = i;
       }
     });
-    // Give every two-pixel mark a generous hit corridor; the visible line can
-    // stay quiet without demanding pixel-perfect pointing.
-    setAt(dist <= 40 ? best : -1);
+    const next = dist <= 40 ? best : -1;
+    setAt(next);
+    // A folded run stands for several questions and cannot say which one the
+    // pointer means, so reaching it opens the run itself. Reaching a single
+    // question closes it again; passing over bare track leaves both alone.
+    const hit = next >= 0 ? view[next] : null;
+    if (!hit) return;
+    hold();
+    setOpened(hit.single ? null : next);
   };
 
   if (marks.length === 0) return null;
-  const shown = at >= 0 && at < view.length ? view[at] : null;
+  const shown = opened === null && at >= 0 && at < view.length ? view[at] : null;
   const head = shown ? marks[shown.from] : null;
 
   return (
     <div className="railhost" ref={host} aria-hidden={undefined}>
+      {/* A paged conversation mounts only its tail. Without this the rail ends
+          where the loaded window begins and reads as a short conversation. */}
+      {earlier > 0 && onLoadEarlier && (
+        <button
+          type="button"
+          className="srail-earlier"
+          style={{ top: Math.max(6, (view[0]?.top ?? PAD) - 14) }}
+          aria-label={t("更早还有 {n} 条消息，点击加载", { n: earlier })}
+          title={t("更早还有 {n} 条消息，点击加载", { n: earlier })}
+          data-action="history.more"
+          onClick={onLoadEarlier}
+        />
+      )}
       <nav
         className="srail"
         aria-label={t("你说过的话")}
@@ -313,10 +366,12 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope }: Props
           const rect = e.currentTarget.getBoundingClientRect();
           aim(railLocalY(e.clientY, rect.top, rect.height, geom.current.rail));
         }}
-        onMouseLeave={() => setAt(-1)}
+        onMouseLeave={() => { setAt(-1); release(); }}
         onClick={(e) => {
           if (e.target !== e.currentTarget) return;
-          if (shown) onJump(marks[shown.from]);
+          // `at` rather than `shown`: a folded run opens on hover now, which
+          // suppresses the peek, but a press on bare track must still land.
+          if (at >= 0 && at < view.length) onJump(marks[view[at].from]);
         }}
       >
         {view.map((v, i) => {
@@ -345,9 +400,13 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope }: Props
               data-action-contextmenu="rail.star"
               data-action-keydown="rail.star"
               title={m.msgIndex === undefined ? undefined : starred ? t("右键取消这处星标") : t("右键给这处加星标")}
-              onFocus={() => setAt(i)}
+              onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) setAt(i); }}
               onBlur={() => setAt(-1)}
-              onClick={() => onJump(m)}
+              onClick={() => {
+                if (!folded) { onJump(m); return; }
+                if (opened === i) { setOpened(null); onJump(m); return; }
+                setOpened(i);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 star(m.msgIndex);
@@ -367,6 +426,34 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope }: Props
           );
         })}
       </nav>
+      {/* A folded run is one line standing for many, so a press on it can only
+          guess. Opening it first lets the reader pick the question they meant;
+          every row is one mark, and the run closes on the way out. */}
+      {opened !== null && view[opened] && !view[opened].single && (
+        <div
+          className="srail-sub"
+          style={{ top: Math.min(Math.max(view[opened].top, 60), Math.max(60, geom.current.rail - 60)) }}
+          onMouseEnter={hold}
+          onMouseLeave={release}
+        >
+          <div className="srail-subhd">{t("第 {a} 至 {b} 条", { a: view[opened].from + 1, b: view[opened].to + 1 })}</div>
+          {Array.from({ length: view[opened].to - view[opened].from + 1 }, (_, k) => {
+            const mk = marks[view[opened]!.from + k];
+            if (!mk) return null;
+            return (
+              <button
+                key={mk.id}
+                type="button"
+                className="srail-subrow"
+                data-action="rail.pick"
+                onClick={() => { setOpened(null); onJump(mk); }}
+              >
+                {mk.text.slice(0, 60)}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {/* 贴着轨道两端的那几条，预览要收进容器里 —— 否则它会被裁掉一半 */}
       {shown && (
         <div

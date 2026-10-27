@@ -5,7 +5,7 @@ import { HttpError } from "./http_error";
 // before the file is read: turning one into base64 is several copies of it in
 // the renderer's memory, and the kernel would refuse it anyway. A Go test pins
 // these numbers to the kernel's.
-export const UPLOAD_LIMIT_MB = { attachment: 25, image: 10, wallpaper: 12, theme: 48 } as const;
+export const UPLOAD_LIMIT_MB = { attachment: 25, image: 10, scene: 32, theme: 48 } as const;
 
 const MB = 1024 * 1024;
 

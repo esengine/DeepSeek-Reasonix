@@ -36,6 +36,20 @@ func (l barrierLevel) covers(mutates, verification bool) bool {
 	return false
 }
 
+// Refusal identities of the calls the host stops before they run, so a window
+// can say why in the reader's language while the model keeps the English text.
+const (
+	CodeBatchSkippedAfterFailedChange = "batch.skipped_after_failed_change"
+	CodeBatchCheckAfterStoppedCall    = "batch.check_after_stopped_call"
+)
+
+func (l barrierLevel) refusalCode() string {
+	if l == barrierVerificationOnly {
+		return CodeBatchCheckAfterStoppedCall
+	}
+	return CodeBatchSkippedAfterFailedChange
+}
+
 // message says which of the two happened: told a modification failed when none
 // ran, a model goes looking for a write it never made.
 func (l barrierLevel) message() string {
@@ -176,7 +190,6 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		if p := outcomes[i].preview; p != nil {
 			calls[i].Diff, calls[i].Added, calls[i].Removed = p.Diff, p.Added, p.Removed
 		}
-		recordWorkspaceMutation(a.svc.sink, outcomes[i].workspaceMutation)
 		if outcomes[i].executed {
 			surfaceWriters[i] = outcomes[i].workspaceMutation != nil
 		}
@@ -337,11 +350,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		if startedAt[i] > 0 {
 			tr.StartedAt = startedAt[i]
 			tr.EndedAt = startedAt[i] + durations[i]
-			if mutation := o.workspaceMutation; mutation != nil {
-				tr.WorkspaceMutation = true
-				tr.WorkspacePaths = append([]string(nil), mutation.Paths...)
-				tr.WorkspaceAllPaths = mutation.AllPaths
-			}
+			attachWorkspaceMutation(&tr, o.workspaceMutation)
 		}
 		a.emitToolCard(ctx, c, tr, o.todoEcho)
 		a.emitToolOutcomeWarnings(o)
@@ -381,7 +390,7 @@ func (a *Agent) barrierSkip(call provider.ToolCall, level barrierLevel) (toolOut
 			ex.Verification = tool.ShellVerificationNotRun
 		}
 	}
-	return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), execution: ex}, true
+	return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg), refusalCode: level.refusalCode(), execution: ex}, true
 }
 
 // batchFailureBarrier reports how far a finished call's failure reaches: a

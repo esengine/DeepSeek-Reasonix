@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerSaveBlocker, screen, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerSaveBlocker, screen, session, shell } = require("electron");
 const { relaunchForOzonePlatform } = require("./ozone");
 
 // Before the instance lock: this process must hold nothing its relaunch needs.
@@ -15,6 +15,7 @@ const { installTray } = require("./tray");
 const { instanceID, profileFor } = require("./instance");
 const { watchLauncher, consoleEcho } = require("./launcher");
 const { installApplicationMenu, installContextMenu } = require("./menu");
+const { textContextMenuHandler } = require("./textcontextmenu");
 const { uiLanguage } = require("./uilang");
 const { installFullScreenKey } = require("./fullscreen");
 const { installReload } = require("./reload");
@@ -406,6 +407,8 @@ nativeTheme.on("updated", () => {
 });
 
 ipcMain.handle("shell:graphics", (event) => graphicsHandler(app, fromWindow, gpuLaunch)(event));
+const showTextContextMenu = textContextMenuHandler(Menu, fromWindow, () => origin, uiLang);
+ipcMain.handle("text:context-menu", showTextContextMenu);
 ipcMain.handle("shell:process-memory", (event) => processMemoryHandler(app, fromWindow)(event));
 
 ipcMain.handle("window:unread-badge", (event, unread) => {

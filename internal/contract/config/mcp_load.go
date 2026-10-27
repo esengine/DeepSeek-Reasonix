@@ -24,8 +24,13 @@ func normalizeMCPLoad(mode string) (string, bool) {
 }
 
 // DeclaredMCPLoad is the mode the server's own declaration asks for. An
-// unknown value is deferred, the mode that costs nothing when it is wrong.
+// unknown value is deferred, the mode that costs nothing when it is wrong, and
+// so is any declaration made by a project folder: only the user decides what
+// enters the provider schema unannounced.
 func (e PluginEntry) DeclaredMCPLoad() string {
+	if e.Source.ProjectScoped() {
+		return MCPLoadDeferred
+	}
 	mode, _ := normalizeMCPLoad(e.Load)
 	return mode
 }

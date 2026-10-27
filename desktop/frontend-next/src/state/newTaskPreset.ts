@@ -2,11 +2,13 @@ import { useSyncExternalStore } from "react";
 
 export const NEW_TASK_PRESET_KEY = "rx-new-task-agent-preset";
 const listeners = new Set<() => void>();
-type BuiltinPreset = "builtin:general" | "builtin:minimal";
-const valid = (value: unknown): value is BuiltinPreset =>
-  value === "builtin:general" || value === "builtin:minimal";
+// A built-in preset, or one of the person's own: a project's shared preset is
+// not offered, because it exists only where that project is open.
+type NewTaskPresetId = "builtin:general" | "builtin:minimal" | `user:${string}`;
+const valid = (value: unknown): value is NewTaskPresetId =>
+  value === "builtin:general" || value === "builtin:minimal" || (typeof value === "string" && /^user:[\w.-]+$/.test(value));
 
-export function newTaskPreset(): BuiltinPreset | undefined {
+export function newTaskPreset(): NewTaskPresetId | undefined {
   try {
     const value = localStorage.getItem(NEW_TASK_PRESET_KEY);
     return valid(value) ? value : undefined;
@@ -19,6 +21,11 @@ export function setNewTaskPreset(id: string): boolean {
   catch { return false; }
   listeners.forEach(fn => fn());
   return true;
+}
+
+export function forgetNewTaskPreset() {
+  try { localStorage.removeItem(NEW_TASK_PRESET_KEY); } catch { return; }
+  listeners.forEach(fn => fn());
 }
 
 function subscribe(fn: () => void) {

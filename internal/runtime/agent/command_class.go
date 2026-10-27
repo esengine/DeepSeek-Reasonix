@@ -162,6 +162,7 @@ func (a *Agent) askTriage(ctx context.Context, systemPrompt, input, source strin
 
 	var usage *provider.Usage
 	defer func() {
+		observeRootTokenUsage(ctx, usage)
 		if usage != nil && usage.TotalTokens > 0 && a.svc.sink != nil {
 			// Reported as what it is, on the model that answered it. Billing a
 			// classification to compaction at the turn's own price hid both how

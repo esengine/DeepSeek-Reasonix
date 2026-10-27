@@ -19,6 +19,7 @@ var (
 var mimoPresets = []ProviderPreset{
 	{
 		ID:          "mimo-api",
+		Vendor:      "mimo",
 		Label:       "MiMo API",
 		Description: "Xiaomi MiMo direct API with text and vision-capable models.",
 		KeyEnv:      "MIMO_API_KEY",
@@ -37,6 +38,7 @@ var mimoPresets = []ProviderPreset{
 	},
 	{
 		ID:          "mimo-anthropic",
+		Vendor:      "mimo",
 		Label:       "MiMo Anthropic",
 		Description: "Xiaomi MiMo direct Anthropic-compatible endpoint.",
 		KeyEnv:      "MIMO_API_KEY",
@@ -56,6 +58,7 @@ var mimoPresets = []ProviderPreset{
 	},
 	{
 		ID:          "mimo-token-plan-cn",
+		Vendor:      "mimo",
 		Label:       "MiMo Token Plan CN",
 		Description: "Xiaomi MiMo token-plan China endpoint.",
 		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
@@ -74,6 +77,7 @@ var mimoPresets = []ProviderPreset{
 	},
 	{
 		ID:          "mimo-token-plan-cn-anthropic",
+		Vendor:      "mimo",
 		Label:       "MiMo Token Plan CN Anthropic",
 		Description: "Xiaomi MiMo token-plan China Anthropic-compatible endpoint.",
 		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
@@ -93,6 +97,7 @@ var mimoPresets = []ProviderPreset{
 	},
 	{
 		ID:          "mimo-token-plan-sgp",
+		Vendor:      "mimo",
 		Label:       "MiMo Token Plan SGP",
 		Description: "Xiaomi MiMo token-plan Singapore endpoint.",
 		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
@@ -110,6 +115,7 @@ var mimoPresets = []ProviderPreset{
 	},
 	{
 		ID:          "mimo-token-plan-sgp-anthropic",
+		Vendor:      "mimo",
 		Label:       "MiMo Token Plan SGP Anthropic",
 		Description: "Xiaomi MiMo token-plan Singapore Anthropic-compatible endpoint.",
 		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
@@ -128,6 +134,7 @@ var mimoPresets = []ProviderPreset{
 	},
 	{
 		ID:          "mimo-token-plan-ams",
+		Vendor:      "mimo",
 		Label:       "MiMo Token Plan AMS",
 		Description: "Xiaomi MiMo token-plan Amsterdam endpoint.",
 		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",
@@ -145,6 +152,7 @@ var mimoPresets = []ProviderPreset{
 	},
 	{
 		ID:          "mimo-token-plan-ams-anthropic",
+		Vendor:      "mimo",
 		Label:       "MiMo Token Plan AMS Anthropic",
 		Description: "Xiaomi MiMo token-plan Amsterdam Anthropic-compatible endpoint.",
 		KeyEnv:      "MIMO_TOKEN_PLAN_API_KEY",

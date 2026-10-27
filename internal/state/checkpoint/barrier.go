@@ -1,6 +1,7 @@
 package checkpoint
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -41,19 +42,12 @@ func (b *MutationBarrier) Generation() uint64 {
 
 // EnterWrite blocks until exclusive access is free, then increments the writer count.
 func (b *MutationBarrier) EnterWrite() error {
-	if b == nil {
-		return nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for b.exclusive || b.closed {
-		if b.closed {
-			return fmt.Errorf("mutation barrier closed")
-		}
-		b.cond.Wait()
-	}
-	b.writers++
-	return nil
+	return b.EnterWriteContext(context.Background())
+}
+
+// EnterWriteContext admits a writer unless its wait is cancelled.
+func (b *MutationBarrier) EnterWriteContext(ctx context.Context) error {
+	return b.enter(ctx, false)
 }
 
 // TryEnterWrite is a non-blocking EnterWrite.
@@ -90,19 +84,51 @@ func (b *MutationBarrier) ExitWrite() {
 
 // EnterExclusive waits until no writers hold the barrier, then takes exclusive.
 func (b *MutationBarrier) EnterExclusive() error {
+	return b.EnterExclusiveContext(context.Background())
+}
+
+// EnterExclusiveContext waits for exclusive access unless ctx is cancelled.
+func (b *MutationBarrier) EnterExclusiveContext(ctx context.Context) error {
+	return b.enter(ctx, true)
+}
+
+func (b *MutationBarrier) enter(ctx context.Context, exclusive bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if b == nil {
 		return nil
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for b.exclusive || b.writers > 0 || b.closed {
+	// Register under mu so cancellation cannot be lost between the context
+	// check and Wait. Stopping the callback never waits for it under mu.
+	stop := context.AfterFunc(ctx, func() {
+		b.mu.Lock()
+		b.cond.Broadcast()
+		b.mu.Unlock()
+	})
+	defer stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if b.closed {
 			return fmt.Errorf("mutation barrier closed")
 		}
+		if !b.exclusive && (!exclusive || b.writers == 0) {
+			if exclusive {
+				b.exclusive = true
+			} else {
+				b.writers++
+			}
+			return nil
+		}
 		b.cond.Wait()
 	}
-	b.exclusive = true
-	return nil
 }
 
 // TryEnterExclusive is a non-blocking EnterExclusive.

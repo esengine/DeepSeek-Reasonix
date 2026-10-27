@@ -1,3 +1,3 @@
 :root:not([data-fold~="scene"]) :is(.prefs, .fbk-veil, .image-preview, .cpv, .agent-tx-scrim) {
   border-bottom: var(--chrome-h, 39px) solid transparent;
-}
+} :root:not([data-fold~="scene"]) .prefs:has(> .prefs-sheet[data-wide]) { border-bottom-width: 0; } :root .prefs:has(> .prefs-sheet[data-wide]) { inset: 0; } .prefs-sheet[data-wide] { border-width: 0; border-radius: 0; } [data-titlebar="app"] .prefs-sheet[data-wide] .prefs-hd { -webkit-app-region: drag; } [data-titlebar="app"] .prefs-sheet[data-wide] .prefs-hd :is(button, a[href], input, .winctl) { -webkit-app-region: no-drag; } [data-titlebar="app"][data-platform="darwin"] .prefs-sheet[data-wide] .prefs-hd { padding-left: calc(var(--lights-w, 96px) + 8px); } .prefs-sheet[data-wide] .prefs-hd .winctl { margin-right: -16px; margin-left: 0; }

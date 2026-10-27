@@ -129,6 +129,7 @@
     --fs-lead: calc(15px * var(--fs-scale, 1)); --fs-title: calc(17px * var(--fs-scale, 1)); --fs-display: calc(22px * var(--fs-scale, 1));
 
     --read: 16px;
+    --activity-scale: calc(var(--fs-scale, 1) * var(--read-scale, 1));
 
     --column: 760px; --doc: min(100%, var(--column)); --wide: min(100%, 1120px);
 

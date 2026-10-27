@@ -19,6 +19,8 @@ interface Inputs {
  *  another window's lines in front of this one. */
 export function useQueueActions({ port, dispatch, fail, moved, sessionState = "settled", sessionPath }: Inputs) {
   const [queue, setQueue] = useState<QueueSnapshot | null>(null);
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
   // The last line taken back, numbered so the same text twice is two requests.
   const [restored, setRestored] = useState({ n: 0, text: "" });
   const onRestoreText = useCallback((text: string) => setRestored((r) => ({ n: r.n + 1, text })), []);
@@ -29,7 +31,11 @@ export function useQueueActions({ port, dispatch, fail, moved, sessionState = "s
   useEffect(() => {
     if (sessionState === "pending" && !moved) return;
     let current = true;
-    port.queue().then((q) => current && setQueue(q)).catch(() => current && setQueue(null));
+    port.queue().then((q) => {
+      if (!current) return;
+      setQueue(q);
+      if (!q.paused) dispatchRef.current({ kind: "__queue_resumed" } as never);
+    }).catch(() => current && setQueue(null));
     return () => { current = false; };
   }, [port, moved, sessionState, sessionPath]);
   const taking = useRef(new Set<string>());

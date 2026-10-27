@@ -32,6 +32,7 @@ export const NOTICE_TEXT: Record<string, string> = {
   web_search_backend_fallback: "搜索后端没有返回结果，已换用链里的下一个后端；详情见通知",
   web_fetch_backend_fallback: "网页抓取后端没有返回内容，已换用链里的下一个后端；详情见通知",
   web_fetch_backend_unusable: "配置的网页抓取后端无法使用，已跳过；检查用户配置里的 web_fetch_backends",
+  composition_tools_changed: "这个会话创建之后，有内置工具发生了变化；它按当时记录的工具继续，模型服务商的缓存需要重新建立，第一次回复可能稍慢",
   web_search_backend_unusable: "配置的搜索后端无法使用，已跳过；检查用户配置里的 web_search_backends 和 searxng_url",
   approval_mode_unrecognized: "配置里的默认审批档位本版本不认识，已按每次询问处理；在界面里选一个档位即可替换",
   memory_migration_backup: "旧版记忆文件没能先备份，所以没有迁移，保持原样；详情里有具体原因",

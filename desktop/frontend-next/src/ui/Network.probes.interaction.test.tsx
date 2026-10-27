@@ -4,7 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Network } from "./Network";
-import { boot, STORAGE } from "../i18n";
+import { boot, STORAGE, t } from "../i18n";
 import type { AgentPort, NetworkProbe } from "../port/port";
 
 afterEach(() => {
@@ -28,7 +28,7 @@ async function run(lang: "zh" | "en") {
     diagnoseNetwork: async () => probes,
   } as unknown as AgentPort;
   render(<Network port={port} />);
-  await userEvent.click(await screen.findByRole("button", { name: lang === "en" ? "Test it" : "测试连接" }));
+  await userEvent.click(await screen.findByRole("button", { name: t("测试已保存配置") }));
 }
 
 it("words each probe step in English from its code, with the pieces filled in", async () => {

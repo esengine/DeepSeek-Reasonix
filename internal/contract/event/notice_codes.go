@@ -60,6 +60,9 @@ const (
 	NoticeCodeMCPToolsFollowed = "mcp_tools_followed"
 	// An MCP server refused a call for want of access the user did not grant; Detail is the server name.
 	NoticeCodeMCPScopeUpgrade = "mcp_scope_upgrade"
+	// A message from another session reached this one and waits for the person. It is
+	// operator-only: nothing is drawn for it, but a window reads the session list again.
+	NoticeCodePeerMessageArrived = "peer_message_arrived"
 	// A conversation opened from a 1.x log went on in a new session of its own.
 	NoticeCodeSessionContinuedFrom1x = "session_continued_from_1x"
 	// The user config names a default approval mode this build does not know; it loads as ask.
@@ -134,6 +137,8 @@ const (
 	NoticeCodeWebSearchBackendUnusable    = "web_search_backend_unusable"
 	NoticeCodeWebFetchBackendFallback     = "web_fetch_backend_fallback"
 	NoticeCodeWebFetchBackendUnusable     = "web_fetch_backend_unusable"
+	// A conversation bound to an Agent composition was opened after a built-in tool's schema changed; it continues with the tools it recorded.
+	NoticeCodeCompositionToolsChanged = "composition_tools_changed"
 )
 
 // A saved fold was not reused when its session was bound: the whole history is

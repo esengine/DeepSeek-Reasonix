@@ -86,6 +86,21 @@ The authoritative vocabulary is the kernel's [`Tokens` map](../internal/ext/them
 
 The frontend maps the vocabulary to CSS variables in [`theme.ts`](../desktop/frontend-next/src/ui/theme.ts). The kernel's [`TestThemeTokenVocabularyMatchesTheFrontend`](../internal/ext/theme/tokens_test.go) checks that both sides agree.
 
+Code is coloured by nine optional tokens, in the file editor and in rendered
+code blocks alike. A pack that omits one keeps what each surface draws today.
+
+| Token | Colours | When omitted |
+| --- | --- | --- |
+| `synKeyword`, `synString`, `synNumber`, `synFunction` | keywords, strings, numbers, function names | Studio's own colour |
+| `synComment` | comments | the faint ink |
+| `synType` | type and class names | the `synFunction` colour |
+| `synOperator`, `synPunctuation` | operators, punctuation | the quiet ink in blocks, the text ink in the editor |
+| `synVariable` | variables | the surrounding text |
+
+A more specific code token, such as a function name, still takes its own colour.
+Hold every code colour you set to AA contrast on `codeBg`; the kernel's tests
+check it for the shipped packs.
+
 `accent` paints filled controls; `accentFg` is text on that fill. Optional
 `accentInk` paints accent-coloured text on ordinary surfaces and tinted washes.
 

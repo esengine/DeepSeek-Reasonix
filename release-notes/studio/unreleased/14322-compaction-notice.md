@@ -1,2 +1,0 @@
-- 修复：上下文压缩完成后的诊断行不再是一串英文“key=value”，现在按界面语言写成一句话（压缩方式、压缩前后大小、摘要请求用量）。关联 #14307。
-- Fixed: the line shown after a context fold is no longer an English key=value dump; it is one sentence in the interface language (how, size before and after, summary usage). Refs #14307.

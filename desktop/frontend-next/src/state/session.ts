@@ -1,3 +1,6 @@
+import { historyToolId, historyToolItem, prependHistory } from "./history_pages";
+import type { HistoryToolContext } from "../port/session";
+import { foldHistoryItems } from "./fold";
 import { measureInteractions } from "./interactions";
 import { foldExtension } from "./extension";
 import { surfaceHistory } from "../ui/surface/call";
@@ -23,9 +26,9 @@ import { nextId } from "./ids";
 import { worked } from "./worked";
 import { chipLabel, IDLE, RUNNING } from "./chip";
 import { foldStall } from "./stall";
-import { nameQueued, withoutPendingRow } from "./queued";
+import { nameQueued, QUEUE_HELD, withoutPendingRow } from "./queued";
 import { capToolOutput } from "./outputcap";
-import { dropTool, foldLastRead, foldProgress, foldTool, isSubagentProgress, mergeReads, notePhase, noteRan } from "./fold";
+import { dropTool, foldProgress, foldTool, isSubagentProgress, mergeReads, notePhase, noteRan } from "./fold";
 import { rebuild } from "./rebuild";
 export { chipLabel };
 export { quoteAmount };
@@ -208,6 +211,7 @@ function entering(prev: SessionState, next: SessionState, ev: SessionEvent): Par
 export type SessionEvent =
   | WireEvent
   | { kind: "__restore"; items: Item[]; plan?: PlanStep[]; executions: Executions }
+  | { kind: "__history_prepend"; items: Item[]; executions: Executions }
   | { kind: "__extension_snapshot"; surfaces: import("../port/wire").ExtensionSurface[] }
   | { kind: "__todos"; plan: PlanStep[] }
   | { kind: "__totals"; hit: number; miss: number; cost?: number; currency?: string; coverage?: CostCoverage; incompleteReason?: string }
@@ -221,6 +225,7 @@ export type SessionEvent =
   | { kind: "__decided"; id: string; verdict?: string; answers?: string[][]; values?: Record<string, unknown> }
   | { kind: "__forgot"; id: string }
   | { kind: "__runtime_seen"; id: string }
+  | { kind: "__queue_resumed" }
   // The transcript has drawn these cards, so their one entrance is spent.
   // Render says when, not the animation: a card can leave the document before
   // its animation ends, and reduced motion runs no animation at all.
@@ -238,6 +243,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
     return left.length === s.entranceOwed.length ? s : { ...s, entranceOwed: left };
   }
   if (ev.kind === "__runtime_seen") return { ...s, runtime: s.runtime.filter((n) => n.id !== ev.id) };
+  if (ev.kind === "__queue_resumed") return s.runtime.some((n) => n.code === QUEUE_HELD) ? { ...s, runtime: s.runtime.filter((n) => n.code !== QUEUE_HELD) } : s;
   if (ev.kind === "rewind_changed") return { ...s, rewindMoved: s.rewindMoved + 1 };
   if (ev.kind === "inbox_changed") return { ...s, queueMoved: s.queueMoved + 1 };
   if (ev.kind === "browser_tabs_changed") return { ...s, browserTabsMoved: s.browserTabsMoved + 1 };
@@ -305,6 +311,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
   // A rebuild re-reads the record while the turn may still be writing it; the
   // merge goes by identity, and an open prompt or extension is not in the
   // record at all — both belong to this pane until it is rebound.
+  if (ev.kind === "__history_prepend") return prependHistory(s, ev);
   if (ev.kind === "__restore") {
     const merged = rebuild(s, ev);
     return ev.plan ? { ...merged, plan: livePlan(ev.plan) } : merged;
@@ -687,15 +694,25 @@ export function todoStep(x: { content?: string; status?: string; activeForm?: st
 // task list is not rebuilt here and is not derivable here: complete_step
 // advances it without writing one, and a refused todo_write writes one the
 // kernel does not hold.
-export function fromHistory(msgs: HistoryMessage[]): { items: Item[]; executions: Executions } {
+export function fromHistory(msgs: HistoryMessage[], options: { snapshot?: string; toolContext?: HistoryToolContext[]; turnStartedAt?: number } = {}): { items: Item[]; executions: Executions } {
+  let index = 0, part = 0;
+  const allocate = () => options.snapshot ? `history:${options.snapshot}:${index}:${part++}` : nextId();
   const out: Item[] = [];
   const calls = new Map<string, number>();
   // What /history can say about a call: that it ran, and under what name. It
   // carries no error field, so a rebuilt execution has no outcome — which is
   // the honest answer, not the answer "succeeded".
   const executions: Executions = {};
-  let turnStart: number | undefined;
+  let turnStart: number | undefined = options.turnStartedAt;
+  for (const ref of options.toolContext ?? []) {
+    if (!ref.call.id) continue;
+    calls.set(ref.call.id, out.length);
+    executions[ref.call.id] = { name: ref.call.name };
+    out.push(historyToolItem(ref.call, historyToolId(options.snapshot ?? "", ref.messageIndex, ref.ordinal), true));
+  }
   for (const m of msgs) {
+    index = m.msgIndex ?? index + 1;
+    part = 0;
     if (m.role === "system") continue;
     if (m.role === "user") {
       if (!m.steer && !m.hostAuthored) turnStart = m.createdAt;
@@ -708,7 +725,7 @@ export function fromHistory(msgs: HistoryMessage[]): { items: Item[]; executions
       // after an upgrade as well as for newly written history.
       const legacyHostRepair = m.content.startsWith("The following tools are unavailable in the current workflow phase:");
       const text = m.hostAuthored || legacyHostRepair ? "" : stripControl(m.content);
-      if (text) out.push({ t: "user", id: nextId(), text, msgIndex: m.msgIndex, steer: m.steer, via: m.via, attachments: m.attachments, at: m.createdAt });
+      if (text) out.push({ t: "user", id: allocate(), text, msgIndex: m.msgIndex, steer: m.steer, via: m.via, attachments: m.attachments, at: m.createdAt });
       continue;
     }
     if (m.role === "assistant") {
@@ -722,45 +739,33 @@ export function fromHistory(msgs: HistoryMessage[]): { items: Item[]; executions
         // Thinking came before the search that follows it, so it cannot ride the
         // next text part when the turn opened with a search.
         if (reasoning && (parts.length === 0 || parts[0].search)) {
-          out.push({ t: "say", id: nextId(), text: "", reasoning, done: true, model: m.modelRef, thoughtMs: m.thoughtMs });
+          out.push({ t: "say", id: allocate(), text: "", reasoning, done: true, model: m.modelRef, thoughtMs: m.thoughtMs });
           reasoning = undefined;
         }
         for (const part of parts) {
           if (part.search) {
             out.push({
               t: "tool",
-              id: nextId(),
-              tool: { id: nextId(), name: "web_search", output: part.text, readOnly: true },
+              id: allocate(),
+              tool: { id: allocate(), name: "web_search", output: part.text, readOnly: true },
               running: false,
               children: [],
             });
             continue;
           }
           if (!part.text && !reasoning) continue;
-          out.push({ t: "say", id: nextId(), text: part.text, reasoning, done: true, model: m.modelRef, thoughtMs: reasoning ? m.thoughtMs : undefined });
+          out.push({ t: "say", id: allocate(), text: part.text, reasoning, done: true, model: m.modelRef, thoughtMs: reasoning ? m.thoughtMs : undefined });
           reasoning = undefined;
         }
-        out.push(...worked(m.workDurationMs, turnStart));
+        out.push(...worked(m.workDurationMs, turnStart).map((item) => options.snapshot ? { ...item, id: allocate() } : item));
       }
-      for (const c of m.toolCalls ?? []) {
+      for (const [ordinal, c] of (m.toolCalls ?? []).entries()) {
         if (c.id) {
           calls.set(c.id, out.length);
           executions[c.id] = { name: c.name };
         }
-        out.push({
-          t: "tool",
-          id: nextId(),
-          tool: {
-            id: c.id,
-            name: c.name,
-            args: c.arguments, argumentNormalization: c.argumentNormalization,
-            readOnly: true,
-            resolvedName: c.resolvedName,
-            capabilityId: c.capabilityId,
-          },
-          running: false,
-          children: [],
-        });
+        const id = options.snapshot ? historyToolId(options.snapshot, index, ordinal) : allocate();
+        out.push(historyToolItem(c, id, !!options.snapshot));
       }
       continue;
     }
@@ -790,10 +795,5 @@ export function fromHistory(msgs: HistoryMessage[]): { items: Item[]; executions
   }
   // A reload has to fold reads the same way the live stream does, or the same
   // conversation reads differently before and after a reopen.
-  const merged: Item[] = [];
-  for (const it of out) {
-    merged.push(surfaceHistory(it));
-    foldLastRead(merged);
-  }
-  return { items: merged, executions };
+  return { items: foldHistoryItems(out.map(surfaceHistory)), executions };
 }

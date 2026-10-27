@@ -93,16 +93,7 @@ func (r readFile) ReadTarget(args json.RawMessage) string {
 }
 
 func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	out, err := r.read(ctx, args)
-	if err == nil && r.views != nil {
-		var p struct {
-			Path string `json:"path"`
-		}
-		if json.Unmarshal(args, &p) == nil {
-			r.views.sawFile(ctx, r.overlay, resolveReadablePath(r.workDir, p.Path, r.paths).Path)
-		}
-	}
-	return out, err
+	return r.read(ctx, args)
 }
 
 // refuse is the read boundary: outside the read roots, or a forbidden path that
@@ -146,6 +137,7 @@ func (r readFile) read(ctx context.Context, args json.RawMessage) (string, error
 		p.Offset = 0
 	}
 	emit, limit := r.render(ctx, p.Limit)
+	emit = r.views.captureRead(p.Path, emit)
 	p.Limit = limit
 
 	// The host overlay (unsaved editor buffers) wins over the disk when it can

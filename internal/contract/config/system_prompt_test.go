@@ -109,6 +109,7 @@ func TestResolveSystemPromptProjectCannotReadReasonixHome(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	trustForPromptTest(t, home, root)
 	cfg, err := LoadForRootReadOnly(root)
 	if err != nil {
 		t.Fatalf("LoadForRootReadOnly: %v", err)
@@ -251,6 +252,7 @@ func TestResolveSystemPromptRejectsProjectPathEscapes(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), fmt.Appendf(nil, "[agent]\nsystem_prompt_file = %q\n", outside), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			trustForPromptTest(t, home, root)
 			cfg, err := LoadForRootReadOnly(root)
 			if err != nil {
 				t.Fatalf("LoadForRootReadOnly: %v", err)
@@ -279,6 +281,7 @@ func TestResolveSystemPromptRejectsProjectSymlinkEscape(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte("[agent]\nsystem_prompt_file = \"prompts/system.md\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	trustForPromptTest(t, home, root)
 	cfg, err := LoadForRootReadOnly(root)
 	if err != nil {
 		t.Fatalf("LoadForRootReadOnly: %v", err)
@@ -370,5 +373,51 @@ func TestResolveSystemPromptForRootDecodesGB18030(t *testing.T) {
 	}
 	if got != "请始终使用中文回答。" {
 		t.Fatalf("system prompt = %q, want decoded Chinese prompt", got)
+	}
+}
+
+func TestProjectSystemPromptFileWaitsForTheFolderToBeTrusted(t *testing.T) {
+	home := testenv.TempDir(t)
+	root := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte("[agent]\nsystem_prompt_file = \"prompts/system.md\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "prompts", "system.md"), []byte("workspace prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForRootReadOnly(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := cfg.ResolveSystemPromptForRoot(root); strings.Contains(got, "workspace prompt") {
+		t.Fatalf("an untrusted folder chose the system prompt: %q", got)
+	}
+	var ignored bool
+	for _, s := range cfg.IgnoredProjectSettings() {
+		ignored = ignored || (s.Key == "agent.system_prompt_file" && s.Reason == ProjectAwaitingApproval)
+	}
+	if !ignored {
+		t.Fatalf("the ignored file was not reported: %+v", cfg.IgnoredProjectSettings())
+	}
+	if err := NewProjectGrantStore(home).SetTrust(root, WorkspaceTrusted); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadForRootReadOnly(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := cfg.ResolveSystemPromptForRoot(root); got != "workspace prompt" {
+		t.Fatalf("a trusted folder's prompt file was not used: %q", got)
+	}
+}
+
+func trustForPromptTest(t *testing.T, home, root string) {
+	t.Helper()
+	if err := NewProjectGrantStore(home).SetTrust(root, WorkspaceTrusted); err != nil {
+		t.Fatal(err)
 	}
 }

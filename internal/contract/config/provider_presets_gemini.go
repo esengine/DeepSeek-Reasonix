@@ -11,6 +11,7 @@ var geminiNativeModels = []string{"gemini-3.8-flash", "gemini-4-argon", "gemini-
 var geminiNativePresets = []ProviderPreset{
 	{
 		ID:          "gemini-native",
+		Vendor:      "google",
 		Label:       "Google Gemini, native (experimental)",
 		Description: "Google's Gemini API through its Interactions API, with native video. Experimental: built from Google's documentation and not yet run against the real endpoint.",
 		KeyEnv:      "GEMINI_API_KEY",

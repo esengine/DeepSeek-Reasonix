@@ -49,12 +49,14 @@ type Store struct {
 	repo        gitcmd.Repo
 	mu          sync.Mutex
 	entries     map[string]*Entry
+	uninspected map[string]*Entry
 }
 
 // NewStore keeps worktrees under managedRoot and answers for results taken
 // from workspaceRoot, whose git identity repo was resolved when it opened.
 func NewStore(managedRoot, workspaceRoot string, repo gitcmd.Repo) *Store {
-	return &Store{managedRoot: managedRoot, workspace: workspaceRoot, repo: repo, entries: map[string]*Entry{}}
+	return &Store{managedRoot: managedRoot, workspace: workspaceRoot, repo: repo,
+		entries: map[string]*Entry{}, uninspected: map[string]*Entry{}}
 }
 
 // Begin checks the workspace out into a fresh worktree. A workspace git cannot
@@ -79,34 +81,60 @@ func (s *Store) Begin(ctx context.Context, workspaceRoot string) (*Entry, error)
 	return &Entry{ID: id, Workspace: workspaceRoot, Snap: snap, Cand: cand}, nil
 }
 
-// Finish records what the run changed. A run that changed nothing leaves no
-// entry and no worktree, and reports false.
+// Finish records what the run changed. Inspection errors retain its identity
+// and files for retry; a successfully inspected empty result reports false.
 func (s *Store) Finish(ctx context.Context, e *Entry) (bool, error) {
+	release, err := s.acquireResultOperation(ctx, e.ID, false)
+	if err != nil {
+		return true, s.rememberUnadmittedFinish(e, err)
+	}
+	defer release()
 	tree, changes, err := worktree.CandidateTree(ctx, e.Snap, e.Cand)
 	if err == nil && len(changes) > 0 {
 		e.Stats, err = worktree.DiffStat(ctx, e.Snap, tree, changes)
 	}
-	if err != nil || len(changes) == 0 {
-		s.remove(ctx, e)
+	if err != nil {
+		return true, s.retainInspection(e, err)
+	}
+	if len(changes) == 0 {
+		s.removeLocked(ctx, e)
 		return false, err
+	}
+	if err := s.recordFinished(e); err != nil {
+		return true, s.retainInspection(e, err)
 	}
 	e.Tree, e.Changes = tree, changes
-	if err := persist(e); err != nil {
-		s.remove(ctx, e)
-		return false, err
-	}
 	s.mu.Lock()
+	delete(s.uninspected, e.ID)
 	s.entries[e.ID] = e
 	s.mu.Unlock()
 	return true, nil
 }
 
 // Abort removes a run's worktree without recording anything.
-func (s *Store) Abort(ctx context.Context, e *Entry) { s.remove(ctx, e) }
+func (s *Store) Abort(ctx context.Context, e *Entry) error {
+	release, err := s.acquireResultOperation(ctx, e.ID, false)
+	if err != nil {
+		return err
+	}
+	defer release()
+	s.removeLocked(ctx, e)
+	return nil
+}
 
 // Paths is where an entry's changes land in the workspace.
 func (s *Store) Paths(id string) ([]string, error) {
-	e, err := s.lookup(id)
+	return s.PathsContext(context.Background(), id)
+}
+
+// PathsContext admits inspection, including empty-result cleanup, with ctx.
+func (s *Store) PathsContext(ctx context.Context, id string) ([]string, error) {
+	release, err := s.acquireKnownResultOperation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	e, err := s.lookupLocked(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +145,12 @@ func (s *Store) Paths(id string) ([]string, error) {
 // the workspace changed since the run began refuses the whole apply and keeps
 // the entry, so the parent can reconcile and try again or discard it.
 func (s *Store) Apply(ctx context.Context, id string) (*Entry, error) {
-	e, err := s.lookup(id)
+	release, err := s.acquireKnownResultOperation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	e, err := s.lookupLocked(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -130,17 +163,22 @@ func (s *Store) Apply(ctx context.Context, id string) (*Entry, error) {
 		}
 		return nil, err
 	}
-	s.drop(ctx, id)
+	s.dropLocked(ctx, e.ID)
 	return e, nil
 }
 
 // Discard forgets an entry and removes its worktree.
 func (s *Store) Discard(ctx context.Context, id string) (*Entry, error) {
-	e, err := s.lookup(id)
+	release, err := s.acquireKnownResultOperation(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	s.drop(ctx, id)
+	defer release()
+	e, err := s.lookupLocked(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	s.dropLocked(ctx, e.ID)
 	return e, nil
 }
 
@@ -151,7 +189,7 @@ func (s *Store) Pending() []string {
 	}
 	ids := s.durableIDs()
 	s.mu.Lock()
-	for id := range s.entries {
+	for id := range s.uninspected {
 		if !slices.Contains(ids, id) {
 			ids = append(ids, id)
 		}
@@ -162,38 +200,64 @@ func (s *Store) Pending() []string {
 }
 
 func (s *Store) lookup(id string) (*Entry, error) {
+	release, err := s.acquireKnownResultOperation(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return s.lookupLocked(context.Background(), id)
+}
+
+func (s *Store) lookupLocked(ctx context.Context, id string) (*Entry, error) {
 	if s == nil {
 		return nil, errUnavailable
 	}
 	id = strings.TrimSpace(id)
 	s.mu.Lock()
 	e, ok := s.entries[id]
+	unfinished := s.uninspected[id]
 	s.mu.Unlock()
-	if !ok {
-		e, ok = s.recover(id)
-	}
-	if !ok {
-		pending := s.Pending()
-		known := "none are pending"
-		if len(pending) > 0 {
-			known = "pending: " + strings.Join(pending, ", ")
+	if ok {
+		if err := s.checkCachedInspection(e); err != nil {
+			return nil, tool.Refusal{Code: CodeUnavailable, Message: err.Error()}
 		}
-		return nil, tool.Refusal{Code: CodeUnknownID, Message: fmt.Sprintf("no isolated result %q; %s", id, known)}
+	}
+	if unfinished != nil {
+		if err := s.persistInspection(unfinished); err != nil {
+			return nil, tool.Refusal{Code: CodeUnavailable, Message: fmt.Sprintf("record isolated result %s; files retained: %v", id, err)}
+		}
+	}
+	// Git objects outlive settled worktrees. Reinspect durable identity and
+	// content rather than treating a cached tree as settlement authority.
+	recovered, err := s.recover(ctx, id)
+	if err != nil {
+		return nil, tool.Refusal{Code: CodeUnavailable, Message: err.Error()}
+	}
+	if e != nil && recovered != nil && (e.Snap.Commit != recovered.Snap.Commit || e.Snap.Tree != recovered.Snap.Tree ||
+		e.Snap.Prefix != recovered.Snap.Prefix || e.Cand.WorktreeRoot != recovered.Cand.WorktreeRoot || e.Tree != recovered.Tree) {
+		return nil, tool.Refusal{Code: CodeUnavailable, Message: fmt.Sprintf("isolated result %s changed since it was inspected; inspect its paths again before settlement", id)}
+	}
+	e, ok = recovered, recovered != nil
+	if !ok {
+		return nil, unknownResultError(id, s.Pending())
 	}
 	return e, nil
 }
 
-func (s *Store) drop(ctx context.Context, id string) {
+func (s *Store) dropLocked(ctx context.Context, id string) {
 	s.mu.Lock()
 	e := s.entries[id]
 	delete(s.entries, id)
 	s.mu.Unlock()
 	if e != nil {
-		s.remove(ctx, e)
+		s.removeLocked(ctx, e)
 	}
 }
 
-func (s *Store) remove(ctx context.Context, e *Entry) {
+func (s *Store) removeLocked(ctx context.Context, e *Entry) {
+	s.mu.Lock()
+	delete(s.uninspected, e.ID)
+	s.mu.Unlock()
 	forget(e)
 	_ = worktree.RemoveCandidate(context.WithoutCancel(ctx), e.Snap, e.Cand)
 }

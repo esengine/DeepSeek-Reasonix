@@ -15,17 +15,47 @@ export function useBlocks(items: Item[], cut: number, revision: number): Item[][
   if (held.current.at === revision && held.current.cut === cut) return held.current.blocks;
 
   const prev = held.current.blocks;
+  const previousByFirst = new Map(prev.map((block) => [block[0]?.id, block]));
   const blocks: Item[][] = [];
   for (let at = 0, end = 0; at < cut; at = end) {
+    const candidate = previousByFirst.get(items[at].id);
+    const keep = candidate && at + candidate.length <= cut && candidate.every((item, index) => item === items[at + index]);
+    const boundary = keep && (at + candidate.length === cut || opensTurn(items[at + candidate.length]));
+    if (keep && boundary && (candidate !== prev[prev.length - 1] || at + candidate.length === cut || candidate.length >= BLOCK)) {
+      blocks.push(candidate);
+      end = at + candidate.length;
+      continue;
+    }
     end = turnEnd(items, at, cut);
-    while (end < cut && end - at < BLOCK) end = turnEnd(items, end, cut);
-    const old = prev[blocks.length];
-    let same = old !== undefined && old.length === end - at;
-    for (let i = 0; same && i < end - at; i++) same = old[i] === items[at + i];
-    blocks.push(same ? old : items.slice(at, end));
+    while (end < cut && end - at < BLOCK && !previousByFirst.has(items[end].id)) end = turnEnd(items, end, cut);
+    const old = candidate;
+    const same = old?.length === end - at && old.every((item, index) => item === items[at + index]);
+    blocks.push(same && old ? old : items.slice(at, end));
   }
   held.current = { at: revision, cut, blocks };
   return blocks;
+}
+
+// A late history read can put older rows before an existing form in its block.
+// The surviving rows own that mounting identity, not the new first row.
+export function useBlockKeys(blocks: Item[][]): string[] {
+  const held = useRef<{ blocks: Item[][] | null; keys: string[]; owners: Map<string, string>; next: number }>({ blocks: null, keys: [], owners: new Map(), next: 0 });
+  if (held.current.blocks === blocks) return held.current.keys;
+  const used = new Set<string>();
+  const next = new Map<string, string>();
+  const keys = blocks.map((block) => {
+    let retained: string | undefined;
+    for (const item of block) {
+      const prior = held.current.owners.get(item.id);
+      if (prior !== undefined && !used.has(prior)) { retained = prior; break; }
+    }
+    const key = retained ?? `block:${++held.current.next}`;
+    used.add(key);
+    for (const item of block) next.set(item.id, key);
+    return key;
+  });
+  held.current = { ...held.current, blocks, keys, owners: next };
+  return keys;
 }
 
 // A block ends only where a turn does: transcriptRows hangs work under its

@@ -167,5 +167,8 @@ func (h *Hub) resolveRoot(req OpenRequest) (string, error) {
 			return dir, nil
 		}
 	}
+	if dir := ensureAutoWorkspace(); dir != "" {
+		return dir, nil
+	}
 	return "", refusal(http.StatusConflict, "workspace.none", errors.New("no workspace to open in — add a folder first"), nil)
 }

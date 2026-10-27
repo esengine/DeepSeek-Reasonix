@@ -204,7 +204,7 @@ func UsageWithRequestAttemptCount(ctx context.Context, usage *Usage) *Usage {
 		if count <= 0 {
 			return nil
 		}
-		return &Usage{RequestCount: count}
+		return &Usage{RequestCount: count, Estimated: true}
 	}
 	result := *usage
 	if count > 0 {

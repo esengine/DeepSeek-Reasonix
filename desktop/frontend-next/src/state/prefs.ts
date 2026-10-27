@@ -195,16 +195,13 @@ export function setLiveGraceMinutes(minutes: number): void {
   liveGraceListeners.forEach((fn) => fn());
 }
 
-// How each foldable part of the transcript starts. "live" opens while the part
-// is still being written and folds once it is done; "failed" opens only a step
-// that failed; "changed" opens only what wrote a file. A block the reader opened
-// or closed keeps that choice.
+// Expansion defaults apply until the reader opens or closes a block.
 export type Fold = "thinking" | "activity" | "steps" | "output" | "compaction";
-export type FoldMode = "folded" | "peek" | "live" | "failed" | "changed" | "open";
+export type FoldMode = "folded" | "live" | "failed" | "changed" | "open";
 export type FoldModes = Readonly<Record<Fold, FoldMode>>;
 
 export const FOLD_CHOICES: Readonly<Record<Fold, readonly FoldMode[]>> = {
-  thinking: ["folded", "peek", "live", "open"],
+  thinking: ["folded", "live", "open"],
   activity: ["folded", "live", "changed", "open"],
   steps: ["folded", "failed", "changed", "open"],
   output: ["folded", "open"],
@@ -220,8 +217,9 @@ export const FOLD_DEFAULTS: FoldModes = {
 };
 
 const FOLD_KEY = "rx-transcript-fold";
+type FoldPreferences = { modes: FoldModes; thinkingPreview: boolean };
 
-function readFolds(): FoldModes {
+function readFolds(): FoldPreferences {
   let saved: Record<string, unknown> = {};
   try {
     const raw = JSON.parse(localStorage.getItem(FOLD_KEY) ?? "{}");
@@ -234,15 +232,23 @@ function readFolds(): FoldModes {
     const v = saved[kind];
     if (typeof v === "string" && (FOLD_CHOICES[kind] as readonly string[]).includes(v)) out[kind] = v as FoldMode;
   }
-  return out;
+  return { modes: out, thinkingPreview: saved.thinkingPreview === true || saved.thinking === "peek" };
 }
 
-let folds: FoldModes | null = null;
+let folds: FoldPreferences | null = null;
 const foldListeners = new Set<() => void>();
 
-export function foldModes(): FoldModes {
+function foldPreferences(): FoldPreferences {
   folds ??= readFolds();
   return folds;
+}
+
+export function foldModes(): FoldModes {
+  return foldPreferences().modes;
+}
+
+export function showsThinkingPreview(): boolean {
+  return foldPreferences().thinkingPreview;
 }
 
 export function onFoldModesChange(fn: () => void): () => void {
@@ -257,9 +263,17 @@ export function setFoldModes(patch: Partial<FoldModes>): void {
   for (const kind of Object.keys(patch) as Fold[]) {
     if (!FOLD_CHOICES[kind].includes(next[kind])) next[kind] = FOLD_DEFAULTS[kind];
   }
+  saveFolds({ ...foldPreferences(), modes: next });
+}
+
+export function setShowsThinkingPreview(on: boolean): void {
+  saveFolds({ ...foldPreferences(), thinkingPreview: on });
+}
+
+function saveFolds(next: FoldPreferences): void {
   folds = next;
   try {
-    localStorage.setItem(FOLD_KEY, JSON.stringify(next));
+    localStorage.setItem(FOLD_KEY, JSON.stringify({ ...next.modes, thinkingPreview: next.thinkingPreview }));
   } catch {
     /* the choice holds for this window and is forgotten on the next */
   }

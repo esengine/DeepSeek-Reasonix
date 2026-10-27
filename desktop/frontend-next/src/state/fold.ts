@@ -151,3 +151,17 @@ export function mergeReads(items: Item[]): Item[] {
   const next = items.slice();
   return foldLastRead(next) ? next : items;
 }
+
+export function foldHistoryItems(items: Item[]): Item[] {
+  const out: Item[] = [];
+  for (const item of items) {
+    const prev = out[out.length - 1];
+    if (lookup(item) && prev?.t === "reads") { prev.tools.push(toolOf(item)); continue; }
+    if (lookup(item) && lookup(prev) && (toolOf(item).name === "read_file" || toolOf(prev).name === "read_file")) {
+      out[out.length - 1] = { t: "reads", id: prev.id, tools: [toolOf(prev), toolOf(item)] };
+      continue;
+    }
+    out.push(item.t === "reads" ? { ...item, tools: [...item.tools] } : item);
+  }
+  return out;
+}

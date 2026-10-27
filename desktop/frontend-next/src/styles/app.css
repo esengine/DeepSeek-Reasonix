@@ -705,7 +705,7 @@
   .scroll[data-pane="browser"] { display: flex; flex-direction: column; overflow: hidden }
   .scroll[data-pane="browser"][hidden] { display: none }
 
-  .pbody { flex: 1; min-height: 0; display: flex; flex-direction: column }
+  .pbody { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative }
   .pviews { flex: 1; min-height: 0; display: flex; flex-direction: column }
   .pane > .scroll[data-pane="browser"] { flex: 1; min-height: 0 }
   /* The pages full width: the column holding the conversation is empty then,
@@ -1080,8 +1080,8 @@
   @keyframes bob { 0%, 100% { opacity: .22; transform: translateY(0) } 50% { opacity: 1; transform: translateY(-3px) } }
 
   .think { margin-top: 5px }
-  .think > summary { display: inline-flex; max-width: 100%; align-items: baseline; gap: 8px }
-  .think .peek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--faint) }
+  .think > summary { display: flex; flex-direction: column; max-width: 100%; gap: 0 }
+  .thinking-preview { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 5px 0 0 14px; padding-left: 10px; border-left: 1px solid var(--hair); font: var(--w-reg) var(--fs-ui)/1.68 var(--ui); color: var(--faint) }
   .think .tk {
     margin-top: 5px; padding-left: 14px;
     font: var(--w-reg) var(--fs-ui)/1.68 var(--ui); color: var(--faint); white-space: pre-wrap;
@@ -2356,7 +2356,7 @@
     animation: sheetin var(--t-panel) var(--ease-spring) both;
   }
   .prefs-sheet[data-wide] { width: 100%; height: 100% }
-  .prefs-sheet[data-wide] .prefs-main .prefs-col { max-width: min(1200px, 100%) }
+  .prefs-sheet[data-wide] .prefs-main .prefs-col { max-width: min(1200px, 100%); margin-inline: auto }
 
   @keyframes prefsin { from { opacity: 0 } to { opacity: 1 } }
   @keyframes sheetin { from { transform: translateY(14px) scale(.985) } to { transform: none } }
@@ -3132,7 +3132,7 @@
   .mp-source-line { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
   .mp-host { font-family: var(--mono); color: var(--text) }
   .mp-foreign { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px }
-  .mp-row select { padding: 6px 8px; font-size: var(--fs-meta) }
+  .mp-row select { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-meta) var(--mono) } .mp-row[data-own] select { border-color: var(--accent) }
   .ml-row .me-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-med) var(--fs-ui) var(--mono); color: var(--text) }
   .ml-row input::placeholder { color: var(--ghost) }
   .ml-row[data-own] .unit-field:has(input:not(:placeholder-shown)) { border-color: var(--accent) }
@@ -3893,12 +3893,12 @@
   .code-more .studio-icon { width: 13px; height: 13px; transform: rotate(90deg); transition: transform var(--m-line) }
   .code-more[aria-expanded="true"] .studio-icon { transform: rotate(-90deg) }
   .md pre.term code { font: inherit; color: inherit; white-space: pre }
-  .md pre.term .hljs-comment, .md pre.term .hljs-quote { color: var(--faint); font-style: italic }
-  .md pre.term :is(.hljs-punctuation, .hljs-operator, .hljs-meta, .hljs-params, .hljs-subst) { color: var(--muted) }
+  .md pre.term .hljs-comment, .md pre.term .hljs-quote { color: var(--syn-comment, var(--faint)); font-style: italic }
+  .md pre.term :is(.hljs-meta, .hljs-params, .hljs-subst) { color: var(--muted) } .md pre.term .hljs-punctuation { color: var(--syn-punc, var(--muted)) } .md pre.term .hljs-operator { color: var(--syn-op, var(--muted)) } .md pre.term .hljs-variable { color: var(--syn-var, inherit) }
   .md pre.term :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag, .hljs-variable.language_) { color: var(--syn-key) }
   .md pre.term :is(.hljs-string, .hljs-regexp, .hljs-char.escape_, .hljs-addition, .hljs-attribute, .hljs-meta .hljs-string) { color: var(--syn-str) }
   .md pre.term :is(.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link, .hljs-selector-attr, .hljs-template-variable) { color: var(--syn-num) }
-  .md pre.term :is(.hljs-title, .hljs-name, .hljs-section, .hljs-built_in, .hljs-type, .hljs-class, .hljs-attr, .hljs-property, .hljs-tag, .hljs-selector-class, .hljs-selector-id) { color: var(--syn-fn) }
+  .md pre.term :is(.hljs-title, .hljs-name, .hljs-section, .hljs-built_in, .hljs-attr, .hljs-property, .hljs-tag, .hljs-selector-class, .hljs-selector-id) { color: var(--syn-fn) } .md pre.term :is(.hljs-type, .hljs-class) { color: var(--syn-type, var(--syn-fn)) }
   .md pre.term .hljs-deletion { color: var(--del) }
   .md pre.term :is(.hljs-strong, .hljs-title.function_, .hljs-title.class_) { font-weight: var(--w-med) }
   .md pre.term .hljs-emphasis { font-style: italic }
@@ -4413,11 +4413,11 @@
   .ptab:hover { color: var(--text); background: var(--overlay) }
   .ptab[aria-selected="true"] { color: var(--text); background: var(--surface); box-shadow: inset 0 1px 0 var(--border) }
   .ptab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px }
-  .ptab-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis }
+  .ptab-nm { flex: 1; min-width: 4em; overflow: hidden; text-overflow: ellipsis }
   .ptab-x { margin-left: auto }
-  .ptab-ws { flex: none; font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost) }
-
-  .ptab-host { flex: none; font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--net) }
+  .ptab-ws, .ptab-host { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis }
+  .ptab-ws { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost) }
+  .ptab-host { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--net) }
   .ptab-host::before { content: "◦"; margin-right: 2px; opacity: .7 }
   .ptab .pip { flex: none; background: var(--ghost) }
 
@@ -5614,6 +5614,8 @@
   .compose .row { --m-step: 30ms }
 }
 
+.wvol-pop { max-height: 0; opacity: 0; overflow: hidden; transition: max-height var(--t-panel) var(--ease), opacity var(--t-panel) var(--ease) }
+.wvol:hover .wvol-pop, .wvol:focus-within .wvol-pop { max-height: 108px; opacity: 1 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-delay: 0s !important;

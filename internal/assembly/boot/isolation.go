@@ -56,7 +56,11 @@ func (b *builder) addIsolation() {
 	b.tools.reg.Add(isolation.NewDiscardTool(store))
 	parent, sink := b.opts, b.sink
 	b.tools.taskTool.SetIsolation(store, b.root, func(ctx context.Context, run isolation.Run) (isolation.Outcome, error) {
-		answer, unverified, err := runUnattended(ctx, parent, isolatedUsage{sink}, posture.mode(), run.WorkspaceRoot, run.Prompt, run.Model)
+		_, selection, err := subagentProviderSelection(b.cfg, b.providers.effective, b.model.entry, run.Model, run.Effort)
+		if err != nil {
+			return isolation.Outcome{}, err
+		}
+		answer, unverified, err := runUnattended(ctx, parent, isolatedUsage{sink}, posture.mode(), run.WorkspaceRoot, run.Prompt, selection, run.MaxSteps)
 		return isolation.Outcome{Answer: answer, Unverified: unverified}, err
 	})
 	// The registry canonicalizes a schema when a tool is added, and task was

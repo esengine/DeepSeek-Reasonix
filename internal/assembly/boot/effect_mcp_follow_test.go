@@ -73,6 +73,7 @@ load = "always"
 	if !first.ConfiguredMCPServers()[0].FollowsToolChanges {
 		t.Fatal("the server row does not say it is followed")
 	}
+	first.Close()
 
 	server.set(rewrittenDescription, true)
 	sink := &collectSink{}
@@ -97,6 +98,7 @@ load = "always"
 	if _, err := second.SetMCPFollowToolChanges("drift", false); err != nil {
 		t.Fatal(err)
 	}
+	second.Close()
 	server.set("THIRD_REWRITE_MARKER", true)
 	third, rec3 := session(event.Discard, "mcp__drift__write")
 	if held := third.ConfiguredMCPServers()[0].Held; len(held) != 1 || held[0].RawName != "write" {

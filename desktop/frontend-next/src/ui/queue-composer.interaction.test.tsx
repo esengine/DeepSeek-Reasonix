@@ -58,6 +58,17 @@ describe("queued submission and withdrawal", () => {
     expect(screen.getAllByText("待发送已暂停，这条消息已排入队列，点“继续派发”后才会发送")).toHaveLength(1);
   });
 
+  it("takes the held-queue notice back once the queue resumes", async () => {
+    const port = await open();
+    vi.spyOn(port, "steer").mockImplementation(async (text) => ({ ...(await port.queueFollowup(text)), paused: true }));
+    type(BODY);
+    fireEvent.click(screen.getByRole("button", { name: "插话" }));
+    await screen.findByText("待发送已暂停，这条消息已排入队列，点“继续派发”后才会发送");
+    await act(async () => { await port.setQueuePaused(true); });
+    await act(async () => { await port.setQueuePaused(false); });
+    await waitFor(() => expect(screen.queryByText("待发送已暂停，这条消息已排入队列，点“继续派发”后才会发送")).toBeNull());
+  });
+
   it("says the queue is paused when an idle skill send is held by it", async () => {
     const port = new MockPort();
     render(<Pane {...props} port={port} />);

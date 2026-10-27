@@ -998,3 +998,28 @@ func citeDiff(t *testing.T, root, written, cited string, crossTurn bool) error {
 	_, err := completeStep{}.Execute(ctx, json.RawMessage(body))
 	return err
 }
+
+// A change made by a command has no writer receipt, so diff evidence for it is
+// refused; the refusal has to say that the same paths are proven as files
+// evidence, which the first version left the model to find by trial.
+func TestCompleteStepDiffRefusalNamesFilesEvidenceForCommandChanges(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "python patch.py ../repo/app.py"})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	body := `{"step":"x","result":"y","evidence":[{"kind":"diff","summary":"patched","paths":["../repo/app.py"]}]}`
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(body))
+	if err == nil || !strings.Contains(err.Error(), "successful writer receipt") || !strings.Contains(err.Error(), "files evidence") {
+		t.Fatalf("diff refusal = %v, want it to name files evidence", err)
+	}
+
+	byFiles := `{"step":"x","result":"y","evidence":[{"kind":"files","summary":"patched by a command","paths":["../repo/app.py"]}]}`
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(byFiles)); err != nil {
+		t.Fatalf("the suggested files evidence is refused: %v", err)
+	}
+
+	unrelated := `{"step":"x","result":"y","evidence":[{"kind":"diff","summary":"claimed","paths":["other.go"]}]}`
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(unrelated)); err == nil || strings.Contains(err.Error(), "files evidence") {
+		t.Fatalf("a path no command mentions must not be steered to files evidence: %v", err)
+	}
+}

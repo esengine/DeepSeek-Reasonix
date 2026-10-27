@@ -59,6 +59,18 @@ function ApprovalScope({ scope, input }: { scope: string; input?: Record<string,
       </>
     );
   }
+  if (scope === "open_projects") {
+    const paths = Array.isArray(input?.paths) ? input.paths.filter((p): p is string => typeof p === "string") : [];
+    return (
+      <div className="apv-dt" data-scope={scope}>
+        <span className="apv-dt-label">{t("批准后还会发生")}</span>
+        <span>
+          {t("把下面 {n} 个文件夹加入你的项目列表并标记为可信；加入后，会话才能把任务派发到这些项目。没有出现在这里的文件夹不会被加入。", { n: paths.length })}
+          <ul className="apv-paths">{paths.map((p) => <li key={p}><code title={p}>{p}</code></li>)}</ul>
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="apv-dt" data-scope={scope}>
       <span className="apv-dt-label">{t("批准后还会发生")}</span>

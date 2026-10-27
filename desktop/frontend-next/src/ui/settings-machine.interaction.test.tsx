@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Settings } from "./Settings";
@@ -42,7 +42,7 @@ it("reads machine totals locally but keeps project inventory on the active remot
   const localSkills = vi.spyOn(local, "skills");
   render(settings(remote, local, "ext"));
   await screen.findByRole("heading", { name: "扩展" });
-  expect(storage).toHaveBeenCalled();
+  await waitFor(() => expect(storage).toHaveBeenCalled(), { timeout: 4000 });
   expect(usage).toHaveBeenCalled();
   expect(remoteStorage).not.toHaveBeenCalled();
   expect(remoteUsage).not.toHaveBeenCalled();

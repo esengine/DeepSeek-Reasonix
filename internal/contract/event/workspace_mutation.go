@@ -2,9 +2,9 @@ package event
 
 import "reasonix/internal/base/nilutil"
 
-// WorkspaceMutation is a host-only resource invalidation produced immediately
-// after one concrete writer finishes. It is separate from ToolResult ordering
-// and from the provider-visible delivery evidence ledger.
+// WorkspaceMutation invalidates resources after a tool invocation may have
+// changed them, including through hooks. It is neither proof of a write nor a
+// provider-visible delivery receipt, and is independent of ToolResult ordering.
 type WorkspaceMutation struct {
 	ToolID      string
 	ToolName    string

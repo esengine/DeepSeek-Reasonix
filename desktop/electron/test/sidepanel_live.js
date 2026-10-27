@@ -36,33 +36,32 @@ async function main() {
   await client.request("POST", `${base}/submit`, { input: "open the page" });
   const guest = await until("a page view", async () => guests()[0], 60000);
   await until("the page beside the conversation", async () => (guest.getBounds().x >= 0 ? true : null), 30000);
-  await until("the wide control", () => js(`!!document.querySelector('[data-action="browser.wide"]')`));
+  await until("the full-view control", () => js(`!!document.querySelector('[data-action="browser.full"]')`));
 
   const panelRect = () => js(`(() => { const e = document.querySelector('.sidepanel'); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height }; })()`);
   const covers = (view, rect) => view.x < rect.x + rect.width && view.x + view.width > rect.x && view.y < rect.y + rect.height && view.y + view.height > rect.y;
 
-  for (const [width, height, wide] of [[1440, 900, false], [1440, 900, true], [1100, 760, false], [1100, 760, true], [900, 700, true], [700, 700, true], [1440, 900, "panel-first"], [1100, 760, "panel-first"]]) {
+  for (const [width, height, full] of [[1440, 900, false], [1440, 900, true], [1100, 760, false], [1100, 760, true], [900, 700, true], [700, 700, true], [1440, 900, "panel-first"], [1100, 760, "panel-first"]]) {
     win.setContentSize(width, height);
     await wait(900);
-    const label = `${width}px ${wide === "panel-first" ? "side question open, then the browser widened" : wide ? "widened" : "beside the conversation"}`;
-    if (wide === true && (await js(`document.querySelector('.pane')?.getAttribute('data-browser-size')`)) !== "wide") {
-      await js(`document.querySelector('[data-action="browser.wide"]')?.click()`);
+    const label = `${width}px ${full === "panel-first" ? "side question open, then full view" : full ? "full view" : "beside the conversation"}`;
+    if (full === true && (await js(`document.querySelector('.pane')?.getAttribute('data-browser-size')`)) !== "full") {
+      await js(`document.querySelector('[data-action="browser.full"]')?.click()`);
       await wait(1200);
     }
-    if (wide === false && (await js(`document.querySelector('.pane')?.getAttribute('data-browser-size')`)) === "wide") {
-      await js(`document.querySelector('[data-action="browser.wide"]')?.click()`);
+    if (full === false && (await js(`document.querySelector('.pane')?.getAttribute('data-browser-size')`)) === "full") {
+      await js(`document.querySelector('[data-action="browser.full"]')?.click()`);
       await wait(1200);
     }
-    if (wide === "panel-first") {
-      // Back beside the conversation first, then the question, then the widening.
-      if ((await js(`document.querySelector('.pane')?.getAttribute('data-browser-size')`)) === "wide") {
-        await js(`document.querySelector('[data-action="browser.wide"]')?.click()`);
+    if (full === "panel-first") {
+      if ((await js(`document.querySelector('.pane')?.getAttribute('data-browser-size')`)) === "full") {
+        await js(`document.querySelector('[data-action="browser.full"]')?.click()`);
         await wait(1000);
       }
       await js(`document.querySelector('[data-action="side.toggle"]').click()`);
       await until("the side panel", async () => (await panelRect()) || null, 10000);
       await wait(800);
-      await js(`document.querySelector('[data-action="browser.wide"]')?.click()`);
+      await js(`document.querySelector('[data-action="browser.full"]')?.click()`);
       await wait(1500);
     } else {
       await js(`document.querySelector('[data-action="side.toggle"]').click()`);

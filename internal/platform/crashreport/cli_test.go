@@ -198,3 +198,17 @@ func TestSanitizingLimitPreservesUTF8(t *testing.T) {
 		t.Fatalf("sanitized text bytes=%d valid=%v", len(got), utf8.ValidString(got))
 	}
 }
+
+func TestLoadUnknownIDOnEmptyStoreReturnsNotFound(t *testing.T) {
+	home := testenv.TempDir(t)
+	if _, err := Load(home, ""); !errors.Is(err, ErrNoReports) {
+		t.Fatalf("Load without ID on empty store = %v", err)
+	}
+	_, err := Load(home, "deadbeef")
+	if err == nil || errors.Is(err, ErrNoReports) {
+		t.Fatalf("Load with unknown ID on empty store = %v", err)
+	}
+	if want := `CLI crash report "deadbeef" not found`; err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}

@@ -111,6 +111,10 @@ func serveDevice(w http.ResponseWriter, r *http.Request, next http.Handler, reg 
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if hostOnlyRoute(r.Method, r.URL.Path) {
+		refuse(w, http.StatusNotFound, codeDeviceHostOnly, "a paired device cannot use this", nil)
+		return
+	}
 	_, ordinal, _ := reg.Self(id)
 	ctx := withDeviceReach(r.Context(), id, ordinal)
 	if r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {

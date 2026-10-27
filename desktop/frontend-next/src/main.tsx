@@ -8,8 +8,8 @@ import "./styles/app.css";
 import "./styles/composition-picker.css";
 import "./styles/dock.css";
 import "./styles/studio.css";
-import "./styles/flowgrip.css";
 import "./styles/dialogcenter.css";
+import "./styles/settings-type.css";
 import "./styles/stophint.css";
 import "./styles/phonecomposer.css";
 import "./styles/tips.css";
@@ -204,6 +204,7 @@ pick().then(
     // drop: a window with no drop target mounted still has to refuse a file, or
     // the webview navigates to it and the app is replaced by what was dropped.
     installFileDrop();
+    try { localStorage.removeItem("rx-flow-w"); } catch { /* storage is a convenience */ }
     root.render(
       <StrictMode>
         <RemoteAwareApp hub={hub} remote={new URLSearchParams(location.search).get("device")?.trim() || null} />

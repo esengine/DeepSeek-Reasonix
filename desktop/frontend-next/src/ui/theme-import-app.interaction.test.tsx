@@ -40,7 +40,7 @@ it.each(["completed", "pending"])("keeps a %s machine theme import when the comm
   render(<App hub={hub} />);
   await screen.findByRole("combobox", { name: "任务输入" });
   await waitFor(() => expect(sessionStorage.getItem("rx-active-pane")).toBe(remote.id));
-  await userEvent.click(screen.getByRole("button", { name: "沙盒" }));
+  await userEvent.click(document.querySelector<HTMLElement>('[data-action="chrome.settings"]')!);
   await userEvent.click(await screen.findByRole("tab", { name: /外观/ }));
   const sheet = document.querySelector(".prefs")!;
   fireEvent.change(sheet.querySelector('input[data-action="theme.import"]')!, {

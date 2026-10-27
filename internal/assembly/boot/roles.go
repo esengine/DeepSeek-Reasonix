@@ -65,15 +65,15 @@ func (w roleWiring) planner(opts Options, executor *agent.Agent, executorModel, 
 	// from satisfying or poisoning the executor's delivery gates.
 	plannerLedger := capability.NewLedger()
 	plannerAudit := &capability.Audit{}
-	plannerTools := agent.PlannerToolRegistry(w.reg)
+	var plannerTools *tool.Registry
 	if capRuntime != nil {
-		if _, ok := plannerTools.Get("use_capability"); ok {
-			plannerTools.RemovePrefix("use_capability")
-		}
-		plannerTools.Add(capRuntime.NewFrontend(plannerLedger, plannerAudit))
+		plannerTools = agent.PlannerToolRegistryWithFrontend(w.reg, capRuntime.NewFrontend(plannerLedger, plannerAudit))
+	} else {
+		plannerTools = agent.PlannerToolRegistry(w.reg)
 	}
 	plannerOpts := agent.Options{
 		MaxSteps:                     0,
+		TaskBudget:                   taskBudgetFromConfig(w.cfg),
 		Gate:                         w.gate,
 		CheckTargetAccess:            w.checkTargetAccess,
 		Hooks:                        w.hooks.ForRole("planner"),
@@ -114,7 +114,7 @@ func (w roleWiring) guardian() *guardian.Session {
 		report(w.sink, event.Event{Level: event.LevelWarn, Text: "Guardian was disabled because it could not start.", Detail: fmt.Sprintf("guardian construction failed: %v — guardian disabled", err)})
 		return nil
 	}
-	guardianReg := agent.FilterReadOnlyRegistry(w.reg, agent.SubagentMetaTools()...)
+	guardianReg := agent.GuardianToolRegistry(w.reg)
 	g := guardian.NewSession(pProv, guardianReg, w.hooks.ForRole("guardian"), guardian.PolicyPrompt(), modelRefFromEntry(ge), w.cfg.Agent.GuardianTemperature, ge.Price, w.sink, w.checkTargetAccess)
 	report(w.sink, event.Event{Level: event.LevelInfo, Text: fmt.Sprintf("guardian enabled · model=%s", ge.Model)})
 	return g

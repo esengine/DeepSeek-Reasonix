@@ -12,11 +12,19 @@ import (
 func tryLockFile(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
-			return nil, ErrHeld
-		}
-		return nil, err
+		return nil, lockOpenError(err)
 	}
+	return tryLockOpenFile(f)
+}
+
+func lockOpenError(err error) error {
+	if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+		return ErrHeld
+	}
+	return err
+}
+
+func tryLockOpenFile(f *os.File) (func(), error) {
 	handle := windows.Handle(f.Fd())
 	var overlapped windows.Overlapped
 	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)

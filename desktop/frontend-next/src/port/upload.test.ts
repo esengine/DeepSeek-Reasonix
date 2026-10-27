@@ -39,11 +39,29 @@ describe("an upload past the kernel's cap is refused before it is read", () => {
     expect(fetched).not.toHaveBeenCalled();
   });
 
-  it("wallpapers, with the kernel's own code", async () => {
+  it("wallpapers go up as the body with no size guard, the type riding in the query", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return { ok: true, status: 200, json: async () => ({ language: "" }) };
+    });
+    const big = new Blob([new Uint8Array(1)], { type: "image/webp" });
+    Object.defineProperty(big, "size", { value: 600 * 1024 * 1024 });
+    await new SsePort("", "r1").uploadWallpaper(big);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("/appearance/wallpaper?mime=image%2Fwebp");
+    expect(calls[0].init.method).toBe("POST");
+    expect(calls[0].init.headers).toEqual({ "content-type": "application/octet-stream" });
+    expect(calls[0].init.body).toBe(big);
+  });
+
+  it("scene folders, before the package is read", async () => {
     const fetched = noNetwork();
     const read = vi.fn(async () => new ArrayBuffer(0));
-    const err = await new SsePort("", "r1").uploadWallpaper(sized(200, read)).catch((e) => e);
-    expect(err.reason).toMatchObject({ code: "wallpaper.too_large", params: { limit: 12 } });
+    const err = await new SsePort("", "r1")
+      .uploadScene({ project: sized(1, read), scene: sized(200, read) })
+      .catch((e) => e);
+    expect(err.reason).toMatchObject({ code: "wallpaper.scene_too_large", params: { limit: 32 } });
     expect(read).not.toHaveBeenCalled();
     expect(fetched).not.toHaveBeenCalled();
   });

@@ -265,7 +265,7 @@ func newQuoteBuildState(in QuoteInput) *quoteBuildState {
 		input: in, currency: currency, amount: amount, occurred: occurred,
 		valuationFailures: map[string]string{}, quote: q,
 	}
-	if !usageHasFacts(in.Usage) {
+	if in.Usage.Estimated || !usageHasFacts(in.Usage) {
 		state.markIncomplete("missing_price_or_usage")
 	}
 	state.matchOfficialCatalog()

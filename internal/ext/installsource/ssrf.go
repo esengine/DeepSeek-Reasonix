@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+
+	"reasonix/internal/base/netclient"
 )
 
 // ssrfGuardClient wraps base so every fetch refuses to connect to private,
@@ -34,7 +36,20 @@ func ssrfGuardClient(base *http.Client) *http.Client {
 		// always *http.Transport, so this branch only covers a bare &http.Client{}.
 		guarded.Transport = &http.Transport{DialContext: ssrfDial((&net.Dialer{}).DialContext)}
 	}
+	guarded.Transport = literalGuard{next: guarded.Transport}
 	return &guarded
+}
+
+// literalGuard refuses a request whose target is a blocked IP literal before it
+// is handed to a proxy: through one, the dial sees the proxy's address and never
+// the target's. A hostname is resolved by the proxy, which is trusted.
+type literalGuard struct{ next http.RoundTripper }
+
+func (g literalGuard) RoundTrip(req *http.Request) (*http.Response, error) {
+	if ip := net.ParseIP(req.URL.Hostname()); ip != nil && blockedFetchIP(ip) {
+		return nil, fmt.Errorf("refusing to fetch internal address %s", req.URL.Hostname())
+	}
+	return g.next.RoundTrip(req)
 }
 
 func ssrfDial(inner func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
@@ -74,6 +89,13 @@ func mustCIDR(s string) *net.IPNet {
 // blockedFetchIP reports whether ip is an address install_source must not reach.
 // Loopback is intentionally allowed (see ssrfGuardClient).
 func blockedFetchIP(ip net.IP) bool {
+	if v4 := netclient.EmbeddedIPv4(ip); v4 != nil && !v4.Equal(ip) && blockedFetchAddress(v4) {
+		return true
+	}
+	return blockedFetchAddress(ip)
+}
+
+func blockedFetchAddress(ip net.IP) bool {
 	return ip.IsPrivate() || // RFC1918 + IPv6 unique-local (fc00::/7)
 		ip.IsLinkLocalUnicast() || // 169.254.0.0/16 (incl. cloud metadata) + fe80::/10
 		ip.IsLinkLocalMulticast() ||

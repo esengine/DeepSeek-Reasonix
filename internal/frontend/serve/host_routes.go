@@ -3,6 +3,7 @@ package serve
 import (
 	"net/http"
 	"path"
+	"strings"
 )
 
 type hostRoute struct{ method, path string }
@@ -11,6 +12,7 @@ type hostRoute struct{ method, path string }
 // data off this machine, destroy it, or act for the account the window is signed in
 // as. Each handler reads it, and so does the proxy that forwards a remote pane's
 // requests with the host's own token. A HEAD request is judged as the GET it stands for.
+// The routes from /plugins on install or enable code the session then runs.
 var hostOnlyRoutes = []hostRoute{
 	{http.MethodGet, "/git/push"},
 	{http.MethodPost, "/git/push"},
@@ -18,6 +20,19 @@ var hostOnlyRoutes = []hostRoute{
 	{http.MethodGet, "/feedback/board/me"},
 	{http.MethodPost, "/feedback/board/join"},
 	{http.MethodPost, "/feedback/board/leave"},
+	{http.MethodPost, "/plugins/install"},
+	{http.MethodPost, "/plugins/enabled"},
+	{http.MethodDelete, "/plugins/{name}"},
+	{http.MethodPost, "/mcp/install"},
+	{http.MethodPost, "/mcp/trust"},
+	{http.MethodPost, "/mcp/enabled"},
+	{http.MethodPost, "/mcp/load"},
+	{http.MethodPost, "/mcp/follow"},
+	{http.MethodPost, "/mcp/upgrade"},
+	{http.MethodPost, "/hooks"},
+	{http.MethodPost, "/market/install"},
+	{http.MethodPost, "/market/mine/install"},
+	{http.MethodPost, "/workspace-trust"},
 }
 
 // GET /history/tool/{id} is not listed on purpose: it is a window onto what GET /history
@@ -27,12 +42,31 @@ func hostOnlyRoute(method, p string) bool {
 		method = http.MethodGet
 	}
 	p = path.Clean("/" + p)
+	if rest, ok := strings.CutPrefix(p, runtimePrefix); ok {
+		if _, tail, found := strings.Cut(rest, "/"); found {
+			p = "/" + tail
+		}
+	}
 	for _, r := range hostOnlyRoutes {
-		if r.method == method && r.path == p {
+		if r.method == method && routeMatches(r.path, p) {
 			return true
 		}
 	}
 	return false
+}
+
+// routeMatches compares segment by segment; a {name} segment matches any one.
+func routeMatches(pattern, p string) bool {
+	want, got := strings.Split(pattern, "/"), strings.Split(p, "/")
+	if len(want) != len(got) {
+		return false
+	}
+	for i, w := range want {
+		if w != got[i] && !(strings.HasPrefix(w, "{") && got[i] != "") {
+			return false
+		}
+	}
+	return true
 }
 
 // refuseDevice answers a paired device that reached a host-only route, before the

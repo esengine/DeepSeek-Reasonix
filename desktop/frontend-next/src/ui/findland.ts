@@ -89,6 +89,10 @@ export function landingBox(el: HTMLElement): HTMLElement {
   for (let fold = el.closest("details:not([open])"); fold; fold = fold.parentElement?.closest("details:not([open])") ?? null) {
     (fold as HTMLDetailsElement).open = true;
   }
+  return renderedBox(el);
+}
+
+export function renderedBox(el: HTMLElement): HTMLElement {
   if (el.getClientRects().length > 0) return el;
   return (el.firstElementChild as HTMLElement | null) ?? el;
 }

@@ -54,6 +54,7 @@ func (e *refreshEndpoint) snapshot() (auth []string, bodies []map[string]any) {
 func TestEffectProviderRefreshThroughBootBuild(t *testing.T) {
 	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
+	closeSharedCatalogsOnCleanup(t)
 	root := testenv.TempDir(t)
 	t.Chdir(root)
 

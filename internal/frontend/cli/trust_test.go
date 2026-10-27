@@ -105,3 +105,37 @@ func TestTrustNeverTrustsAHomeDirectoryWholesale(t *testing.T) {
 		t.Fatalf("the refusal is not said: %s", out.String())
 	}
 }
+
+func TestTrustYesNeverApprovesAProviderEndpointUnlessNamed(t *testing.T) {
+	home := testenv.TempDir(t)
+	root := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	toml := "[[providers]]\nname = \"corp\"\nkind = \"openai\"\nbase_url = \"https://models.example.test/v1\"\nmodel = \"m\"\napi_key_env = \"CORP_KEY\"\n"
+	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) (int, string) {
+		var out bytes.Buffer
+		code := runTrust(append([]string{"--dir", root}, args...), bufio.NewScanner(strings.NewReader("")), &out, false)
+		return code, out.String()
+	}
+	providers := func() int {
+		pending, _ := pendingProjectPrograms(config.Roots{}, root)
+		n := 0
+		for _, p := range pending {
+			if p.Kind == config.ProjectProgramProvider {
+				n++
+			}
+		}
+		return n
+	}
+	if providers() != 1 {
+		t.Fatalf("setup: the declared provider is not pending (%d)", providers())
+	}
+	if _, out := run("--yes"); providers() != 1 || !strings.Contains(out, "--allow-providers") {
+		t.Fatalf("--yes approved or hid a provider endpoint: pending=%d output=%q", providers(), out)
+	}
+	if code, out := run("--yes", "--allow-providers"); code != 0 || providers() != 0 {
+		t.Fatalf("--yes --allow-providers = %d, pending=%d, %q", code, providers(), out)
+	}
+}

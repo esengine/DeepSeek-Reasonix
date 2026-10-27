@@ -61,6 +61,9 @@ func TestEffectAlwaysLoadedMCPToolsReachTheProviderSchema(t *testing.T) {
 		t.Chdir(dir)
 		server := deployMCPServer(t, "")
 		writeFile(t, dir, "reasonix.toml", alwaysLoadConfig(server.URL, alwaysLoad))
+		if alwaysLoad {
+			writeUserConfig(t, "[tools.mcp_load]\nops = \"always\"\n")
+		}
 		approveWorkspace(t, dir)
 		approveProjectServer(t, dir, "ops")
 

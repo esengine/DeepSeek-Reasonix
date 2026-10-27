@@ -555,6 +555,17 @@ func MemoryUserDir() string { return processRoots().MemoryUserDir() }
 // MemoryUserDir is the user state root this binding resolves to.
 func (r Roots) MemoryUserDir() string { return r.userSupportDir() }
 
+// AutoWorkspaceDir is the folder a first launch opens when nobody has chosen a
+// project: a small one the app owns under the user state root, never the home
+// directory. The caller creates it.
+func AutoWorkspaceDir() string {
+	base := processRoots().MemoryUserDir()
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "workspaces", "auto")
+}
+
 // ConventionDirs are the parent directories scanned for agent assets (skills,
 // commands), in canonical-first order. .reasonix is ours; .agents / .agent /
 // .claude let users drop in assets authored for other agent tools without moving

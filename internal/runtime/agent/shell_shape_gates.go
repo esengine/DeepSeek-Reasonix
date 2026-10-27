@@ -6,6 +6,12 @@ import (
 	"reasonix/internal/safety/evidence"
 )
 
+// Refusal identities of the shell shapes the host refuses before running.
+const (
+	CodeShellMixedMutationVerification = "shell.mixed_mutation_verification"
+	CodeShellInlineInterpreterNotLast  = "shell.inline_interpreter_not_last"
+)
+
 // applyShellShapeGates holds the deterministic command-shape contract: shapes a
 // later segment could use to hide an earlier failure, and the shape a declared
 // check needs for its exit status to mean anything. Ordinary mode blocks only
@@ -51,19 +57,21 @@ func (a *Agent) applyShellShapeGates(ctx context.Context, plan *toolCallPlan) (t
 				msg = evidence.ShellContractMixedDeliveryMessage(plan.evidenceArgs)
 			}
 			return toolOutcome{
-				output:    msg,
-				blocked:   true,
-				errMsg:    "blocked: mixed mutation and verification command",
-				execution: shellPreflightExecution(plan, true),
+				output:      msg,
+				blocked:     true,
+				errMsg:      "blocked: mixed mutation and verification command",
+				refusalCode: CodeShellMixedMutationVerification,
+				execution:   shellPreflightExecution(plan, true),
 			}, true
 		}
 		if evidence.BashToolCallUsesNonTerminalInlineInterpreter(plan.evidenceArgs) {
 			msg := evidence.ShellContractInlineNonTerminalMessage(plan.evidenceArgs)
 			return toolOutcome{
-				output:    msg,
-				blocked:   true,
-				errMsg:    "blocked: non-terminal inline interpreter command",
-				execution: shellPreflightExecution(plan, false),
+				output:      msg,
+				blocked:     true,
+				errMsg:      "blocked: non-terminal inline interpreter command",
+				refusalCode: CodeShellInlineInterpreterNotLast,
+				execution:   shellPreflightExecution(plan, false),
 			}, true
 		}
 	}

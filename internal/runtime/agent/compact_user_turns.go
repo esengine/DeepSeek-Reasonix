@@ -64,14 +64,10 @@ func (a *contextWindow) keptUserTurnsBudget() int {
 	if a.budgets.UserTurnKeepTokens > 0 {
 		return a.budgets.UserTurnKeepTokens
 	}
-	window := a.effectiveContextWindow()
-	if window <= 0 {
-		return keptUserTurnsFloorTokens
-	}
 	// A fraction and nothing else: an absolute floor on top of it would let a
 	// small window spend a large share of itself on retention, which pads the
 	// candidate past the acceptance ceiling and fails the fold outright.
-	return max(1, int(float64(window)*keptUserTurnsWindowFrac))
+	return a.retentionBudget(keptUserTurnsWindowFrac, keptUserTurnsTriggerFrac)
 }
 
 // noticeDroppedUserTurns reports the turns the budget could not hold. Without

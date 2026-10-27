@@ -41,7 +41,6 @@ try {
     ['.chrome [data-action="settings.section"][data-value="tools"]', "沙盒与运行边界"],
     ['[data-action="pane.view"][data-value="analysis"]', "打开运行分析"],
     ['[data-action="pane.view"][data-value="browser"]', "关闭工作台"],
-    ['[data-action="browser.wide"]', "加宽工作台"],
     ['[data-action="browser.full"]', "全屏工作台"],
     ['[data-action="workbench.files"]', "展开文件树"],
     ['[data-action="workbench.new"]', "新建标签"],
@@ -56,13 +55,13 @@ try {
     assert.equal(await button.getAttribute("title"), null);
     const box = await tip.boundingBox();
     assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= 1440 && box.y + box.height <= 960);
-    if (selector.includes("browser.wide")) await page.screenshot({ path: "/tmp/reasonix-tooltip-workbench.png" });
+    if (selector.includes("browser.full")) await page.screenshot({ path: "/tmp/reasonix-tooltip-workbench.png" });
     if (selector.includes("reply.quote")) await page.screenshot({ path: "/tmp/reasonix-tooltip-reply.png" });
     await page.mouse.move(1, 1);
     await tip.waitFor({ state: "detached" });
   }
-  await page.locator('[data-action="browser.wide"]').focus();
-  await page.getByRole("tooltip").filter({ hasText: "加宽工作台" }).waitFor();
+  await page.locator('[data-action="browser.full"]').focus();
+  await page.getByRole("tooltip").filter({ hasText: "全屏工作台" }).waitFor();
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".icon-tooltip").count(), 0);
   await page.getByRole("button", { name: "下一页", exact: true }).click();

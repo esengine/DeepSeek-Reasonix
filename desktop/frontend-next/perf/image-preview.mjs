@@ -61,7 +61,7 @@ try {
       assert.equal(await page.locator(".user-image button").evaluate(el => el === document.activeElement), true);
       await page.locator(".activity-group > summary").click();
       const tool = page.locator('[data-call="image-shot"] .tool-disclosure');
-      await tool.locator("summary").click();
+      await tool.locator("summary .nm").click();
       await page.getByRole("button", { name: "查看图片 工具截图 1", exact: true }).click();
       assert.equal(await page.getByRole("dialog").locator("img").getAttribute("src"), data);
       await page.getByRole("button", { name: "关闭图片预览" }).click();

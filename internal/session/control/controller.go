@@ -38,6 +38,7 @@ import (
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/model/billing"
+	"reasonix/internal/model/providerhealth"
 	"reasonix/internal/platform/browser"
 	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/runtime/agent"
@@ -83,6 +84,7 @@ var errNoSessionPath = errors.New("session has content but no session path; conv
 // Controller drives one chat session. Construct with New; drive with the command
 // methods; observe through the Sink passed in Options.
 type Controller struct {
+	providerHealth        providerhealth.Checker
 	composition           *compositionControl
 	compositionMutationMu sync.Mutex
 	idleObserver          func()
@@ -490,6 +492,7 @@ func New(opts Options) *Controller {
 	if c.executor != nil {
 		c.bindProjectionSeer(c.deliveredNewest, c.deliveredSees)
 	}
+	c.policy.RepoPrograms = c.repoPrograms
 	c.approval.onGrantChange = func() { go c.persistSessionGrants() }
 	c.restoreSessionGrants(opts.SessionPath)
 	c.adoptSessionResources(opts)

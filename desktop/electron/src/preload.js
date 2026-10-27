@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld("reasonixHost", {
   closeWindow: () => ipcRenderer.invoke("window:close"),
   // A PNG of this window's own page, taking nothing: there is no way to name another.
   captureWindow: () => ipcRenderer.invoke("window:capture"),
+  showTextContextMenu: (request) => ipcRenderer.invoke("text:context-menu", request),
   // What the shell's graphics are running as this launch.
   graphics: () => ipcRenderer.invoke("shell:graphics"),
   // The window's processes as type and two sizes, for the memory a report may carry.

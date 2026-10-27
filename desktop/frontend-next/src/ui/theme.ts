@@ -33,6 +33,11 @@ const SURFACE: Record<string, string[]> = {
   synString: ["--syn-str"],
   synNumber: ["--syn-num"],
   synFunction: ["--syn-fn"],
+  synComment: ["--syn-comment"],
+  synType: ["--syn-type"],
+  synOperator: ["--syn-op"],
+  synPunctuation: ["--syn-punc"],
+  synVariable: ["--syn-var"],
   // Shape and type. --r-pill is absent because a pill is a shape rather than a
   // size: a pack that could set it would round a button into something else.
   radiusXs: ["--r-xs"],

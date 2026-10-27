@@ -138,8 +138,9 @@ func newPairSecret() ([]byte, error) {
 
 // openDispatchSession opens a fresh pane in root, or takes back the one an
 // earlier dispatch left waiting for the user's answer about the folder. A folder
-// the user declined is not opened for someone else's task; an undecided one keeps
-// its pane open so the trust card is in front of the user, and the task is not sent.
+// the user declined is not opened for someone else's task. A project in the
+// user's own list that nobody has decided about is trusted by being named; one
+// that cannot be trusted whole keeps its pane open on the trust card, task unsent.
 func (h *Hub) openDispatchSession(ctx context.Context, from *Runtime, sender *control.Controller, root string, secret []byte) (*Runtime, error) {
 	binding := sender.CompositionBinding()
 	if binding != nil && binding.Workspace != "" && binding.Workspace != root {
@@ -168,8 +169,10 @@ func (h *Hub) openDispatchSession(ctx context.Context, from *Runtime, sender *co
 		_ = h.Close(target.ID)
 		return nil, projectError(control.ErrDispatchUntrusted, root)
 	default:
-		h.dispatch.setPending(from.ID, root, target.ID)
-		return nil, projectError(control.ErrDispatchAwaitingTrust, root)
+		if err := ctrl.DecideWorkspaceTrust(config.WorkspaceTrusted); err != nil {
+			h.dispatch.setPending(from.ID, root, target.ID)
+			return nil, projectError(control.ErrDispatchAwaitingTrust, root)
+		}
 	}
 	ctrl.AdoptSessionGrant(grant)
 	ctrl.MarkOpenedByDispatch(sender.PeerKey(), secret, sender.DispatchDepth()+1)

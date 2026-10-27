@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { placeInViewport, useFollow, zoom } from "./place";
+import { hasVendorMark, VendorMark } from "./vendormarks";
 
 export interface MenuItem {
   value: string;
@@ -24,6 +25,8 @@ export interface MenuItem {
   disabled?: boolean;
   // A letter chip leading the row or heading, standing in for a vendor mark.
   mono?: { letter: string; tone: number };
+  // A vendor slug; when artwork exists for it, it replaces the letter chip.
+  mark?: string;
   // A switch rather than a choice: picking it flips this state, and the row
   // says which state it is in instead of being marked as the current value.
   toggle?: boolean;
@@ -243,7 +246,7 @@ export function Picker({
               {it.divide && i > 0 && <div className="div" />}
               {it.header ? (
                 <div className="mi head">
-                  {it.mono && <Mono {...it.mono} />}
+                  <Lead it={it} />
                   <span className="lb">{it.label}</span>
                   {it.right && <span className="rt">{it.right}</span>}
                 </div>
@@ -263,7 +266,7 @@ export function Picker({
                   data-recommended={it.recommended ? "" : undefined}
                   onClick={() => take(it.value)}
                 >
-                  {it.mono ? <Mono {...it.mono} /> : <span className="dot" />}
+                  {it.mono || hasVendorMark(it.mark) ? <Lead it={it} /> : <span className="dot" />}
                   <span className="tx">
                     <span className="studio-item-line">
                       <span className="lb">{it.label}</span>
@@ -288,6 +291,11 @@ export function Picker({
       )}
     </div>
   );
+}
+
+function Lead({ it }: { it: MenuItem }) {
+  if (hasVendorMark(it.mark)) return <VendorMark slug={it.mark} />;
+  return it.mono ? <Mono {...it.mono} /> : null;
 }
 
 function Mono({ letter, tone }: { letter: string; tone: number }) {

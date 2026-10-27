@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/tools/builtin"
 )
 
 // read_skill is deliberately not listed: it renders playbook text inline and
@@ -95,9 +96,10 @@ func SubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, names []stri
 	}
 	exclude = append(exclude, subagentJobTools...)
 	sub := FilterRegistry(parent, names, exclude...)
+	bindLocal := builtin.ForkFileViews(sub)
 	stripDirectMCPTools(sub)
 	AttachCompleteSubtaskTool(sub)
-	attachSubagentCapabilityProxy(parent, sub, names, runtime)
+	attachSubagentCapabilityProxy(parent, sub, names, runtime, bindLocal)
 	if bash, ok := sub.Get("bash"); ok {
 		sub.Add(foregroundOnlyBash{inner: bash})
 	}
@@ -221,7 +223,7 @@ func serversFromCapabilityAllowlist(allowed map[string]bool) map[string]bool {
 // state. No allowlist → full proxy. Explicit allowlist with MCP names →
 // restricted proxy. Explicit "use_capability" → full proxy. Explicit allowlist
 // without MCP entries → no proxy.
-func attachSubagentCapabilityProxy(parent, sub *tool.Registry, names []string, runtime *usecap.MCPCapabilityRuntime) {
+func attachSubagentCapabilityProxy(parent, sub *tool.Registry, names []string, runtime *usecap.MCPCapabilityRuntime, bindLocal func(tool.Tool) tool.Tool) {
 	if sub == nil {
 		return
 	}
@@ -233,6 +235,9 @@ func attachSubagentCapabilityProxy(parent, sub *tool.Registry, names []string, r
 	frontend := newSubagentCapabilityFrontend(parent, runtime)
 	if frontend == nil {
 		return
+	}
+	if local, ok := frontend.(*usecap.UseCapabilityTool); ok {
+		local.BindLocalTools(bindLocal)
 	}
 	if len(names) == 0 || allowlistRequestsUnrestrictedProxy(names) {
 		sub.Add(frontend)
@@ -403,7 +408,8 @@ func ReadOnlySubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, name
 		}
 		sub.Add(tl)
 	}
-	attachSubagentCapabilityProxy(parent, sub, names, runtime)
+	bindLocal := builtin.ForkFileViews(sub)
+	attachSubagentCapabilityProxy(parent, sub, names, runtime, bindLocal)
 	return sub
 }
 

@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"path/filepath"
 
 	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/platform/gitrepos"
@@ -39,4 +40,22 @@ func (c *Controller) RepoFor(ctx context.Context, dir string) (gitcmd.Repo, erro
 		return fresh.Find(dir)
 	}
 	return repo, nil
+}
+
+// repoPrograms is what a bash git read asks the gate about the repository it
+// runs in: the program-running keys that repository's own config defines. A
+// listing that fails is reported as such rather than read as none.
+func (c *Controller) repoPrograms(ctx context.Context, dir string) []string {
+	root := c.WorkspaceRoot()
+	switch {
+	case dir == "":
+		dir = root
+	case !filepath.IsAbs(dir):
+		dir = filepath.Join(root, dir)
+	}
+	keys, err := gitcmd.RepositoryPrograms(ctx, dir)
+	if err != nil {
+		return []string{"configuration that could not be listed"}
+	}
+	return keys
 }

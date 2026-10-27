@@ -93,26 +93,24 @@ func prepareServeFrontend(opts serveFrontendOptions) (_ *serveFrontendResources,
 		}
 	}()
 
-	if opts.portFile != "" || opts.command == "web" || opts.openBrowser {
-		if opts.command == "web" {
-			resources.listener, err = listenWebWithPortRetry(opts.address)
-		} else {
-			resources.listener, err = net.Listen("tcp", opts.address)
-		}
-		if err != nil {
+	if opts.command == "web" {
+		resources.listener, err = listenWebWithPortRetry(opts.address)
+	} else {
+		resources.listener, err = net.Listen("tcp", opts.address)
+	}
+	if err != nil {
+		return nil, err
+	}
+	resources.displayAddr = resources.listener.Addr().String()
+	requested, selected := requestedPort(opts.address), requestedPort(resources.displayAddr)
+	if opts.command == "web" && requested != 0 && requested != selected {
+		fmt.Fprintf(os.Stderr, "  port %d is in use; using %d instead\n", requested, selected)
+	}
+	if opts.portFile != "" {
+		if err = writeServeAddrFile(opts.portFile, resources.displayAddr); err != nil {
 			return nil, err
 		}
-		resources.displayAddr = resources.listener.Addr().String()
-		requested, selected := requestedPort(opts.address), requestedPort(resources.displayAddr)
-		if opts.command == "web" && requested != 0 && requested != selected {
-			fmt.Fprintf(os.Stderr, "  port %d is in use; using %d instead\n", requested, selected)
-		}
-		if opts.portFile != "" {
-			if err = writeServeAddrFile(opts.portFile, resources.displayAddr); err != nil {
-				return nil, err
-			}
-			resources.artifacts = append(resources.artifacts, opts.portFile)
-		}
+		resources.artifacts = append(resources.artifacts, opts.portFile)
 	}
 	if opts.pidFile != "" {
 		if err = writeServePidFile(opts.pidFile); err != nil {
@@ -217,13 +215,6 @@ func serveFrontendLoop(ctrl *control.Controller, srv serveHost, resources *serve
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	srv.StartRecoveryGC(ctx)
-	if resources.listener == nil {
-		if err := srv.RunGraceful(ctx, opts.address); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		return 0
-	}
 	var serveErr error
 	if opts.openBrowser {
 		sessionID := ""
@@ -272,6 +263,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	token := fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)")
 	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
 	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
+	allowOpenNetwork := fs.Bool("allow-open-network", false, "allow --auth none on an address other machines can reach (anyone on the network can then read sessions and history)")
 	behindProxy := fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy")
 	publicURL := fs.String("public-url", "", "the address a phone opens to reach this server, e.g. https://agent.example.com behind a TLS proxy; used for the share link and its QR code")
 	portFile := fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding")
@@ -344,6 +336,10 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	})
 	if code != 0 {
 		return code
+	}
+	if err := serve.OpenBindRefusal(serveCfg, *addr, *allowOpenNetwork); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
 	}
 
 	// Own the active session file for the server's lifetime; the serve

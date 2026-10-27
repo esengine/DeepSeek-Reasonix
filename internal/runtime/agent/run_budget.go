@@ -40,17 +40,19 @@ func normalizeTaskBudget(b TaskBudget) TaskBudget {
 // one read and how long the model thought, and the failures worth stopping are
 // reported in hours and tokens, never in rounds.
 type runBudget struct {
-	started       time.Time
-	rounds        int
-	requests      int
-	promptTokens  int
-	outputTokens  int
-	cost          float64
-	pricedRounds  int
-	unpricedTurns bool
+	started        time.Time
+	rounds         int
+	requests       int
+	promptTokens   int
+	outputTokens   int
+	cost           float64
+	pricedRounds   int
+	costIncomplete bool
 	// limit is configuration, not accumulation: it survives the reset that
 	// starts a new task.
-	limit TaskBudget
+	limit      TaskBudget
+	rootTokens *rootTokenBudget
+	rootOrigin rootBudgetOrigin
 }
 
 // observe folds one round's provider usage into the turn's running total.
@@ -59,13 +61,14 @@ type runBudget struct {
 func (b *runBudget) observe(usage *provider.Usage, pricing *provider.Pricing) {
 	b.rounds++
 	if usage == nil {
+		b.costIncomplete = true
 		return
 	}
 	b.requests += usageRequestCount(usage)
 	b.promptTokens += usage.PromptTokens
 	b.outputTokens += usage.CompletionTokens
-	if pricing == nil {
-		b.unpricedTurns = true
+	if pricing == nil || usage.Estimated {
+		b.costIncomplete = true
 		return
 	}
 	b.cost += pricing.Cost(usage)
@@ -87,21 +90,21 @@ func (b *runBudget) totals() event.RunBudgetTotals {
 		PromptTokens: b.promptTokens,
 		OutputTokens: b.outputTokens,
 		Cost:         b.cost,
-		Priced:       !b.unpricedTurns && b.pricedRounds > 0,
+		Priced:       !b.costIncomplete && b.pricedRounds > 0,
 		ElapsedMs:    b.elapsed().Milliseconds(),
 	}
 }
 
 // exceeded names the first axis the task has spent past, or "" while inside
-// the budget. Cost only counts when the turn was actually priced: an unpriced
-// model reads as free, and a free reading must never look like a crossing.
+// the budget. Known priced spend is a lower bound even when other rounds lack
+// usage or prices; unknown spend cannot erase a proven crossing.
 func (b *runBudget) exceeded(limit TaskBudget) (axis, detail string) {
 	if limit.Tokens > 0 {
 		if used := b.promptTokens + b.outputTokens; used >= limit.Tokens {
 			return "token", fmt.Sprintf("task used %d tokens, reaching the %d budget", used, limit.Tokens)
 		}
 	}
-	if limit.Cost > 0 && b.pricedRounds > 0 && !b.unpricedTurns && b.cost >= limit.Cost {
+	if limit.Cost > 0 && b.pricedRounds > 0 && b.cost >= limit.Cost {
 		return "cost", fmt.Sprintf("task spend %.4f reached the %.4f budget", b.cost, limit.Cost)
 	}
 	if limit.Wall > 0 {
@@ -135,6 +138,7 @@ func (a *Agent) observeRunBudget(state *turnRuntime, usage *provider.Usage) {
 	if state == nil {
 		return
 	}
+	state.budget.rootTokens.observe(usage)
 	state.budget.observe(usage, a.svc.pricing)
 	if a.task.budget.started.IsZero() {
 		a.task.budget.started = state.budget.started

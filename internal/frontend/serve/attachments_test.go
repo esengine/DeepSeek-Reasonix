@@ -202,7 +202,7 @@ func TestDesktopUploadCapsMatchTheKernels(t *testing.T) {
 	want := map[string]int{
 		"attachment": maxAttachmentUpload >> 20,
 		"image":      control.MaxImageAttachmentBytes >> 20,
-		"wallpaper":  maxWallpaperUpload >> 20,
+		"scene":      maxSceneAsset >> 20,
 		"theme":      maxThemeUpload >> 20,
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -65,7 +65,7 @@ const probe = (page) =>
     };
   });
 
-const CONTROLS = [".phone-action", ".find-action", ".theme-toggle", ".top-action", ".view-action"];
+const CONTROLS = [".phone-action", ".find-action", ".theme-toggle", ".view-action"];
 
 // Opens the fold when there is one, then presses nothing: asks whether each control is on screen with nothing over it.
 async function reachable(page) {

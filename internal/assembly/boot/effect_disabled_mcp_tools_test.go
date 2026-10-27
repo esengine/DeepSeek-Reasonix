@@ -77,6 +77,7 @@ url = %q
 load = %q
 disabled_tools = ["write"]
 `, server.URL, load))
+			writeUserConfig(t, "[tools.mcp_load]\nfiltered = "+fmt.Sprintf("%q", load)+"\n")
 			approveWorkspace(t, workspace)
 			approveProjectServer(t, workspace, "filtered")
 			for _, phase := range []string{"fresh", "cached restart"} {

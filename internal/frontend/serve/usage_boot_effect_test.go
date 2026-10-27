@@ -23,6 +23,7 @@ func TestUsageDateRangeThroughBootBuild(t *testing.T) {
 	home := testenv.TempDir(t)
 	workspace := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
+	closeSharedCatalogsOnCleanup(t)
 	seed := `default_model = "boot/openai-compatible"
 
 [[providers]]

@@ -1,5 +1,5 @@
 import { HttpError } from "./port";
-import type { Appearance } from "./port";
+import type { Appearance, SceneFolder } from "./port";
 import { STORAGE as LANG } from "../i18n";
 
 // The appearance half of the fixture. It is held in memory rather than written
@@ -31,7 +31,7 @@ export class MockLook {
 
   // The kernel refuses with a code, so the fixture does too — otherwise the
   // path that turns a code into a sentence is never exercised in development.
-  private static readonly TYPES = ["image/png", "image/jpeg", "image/webp", "image/avif", "image/gif"];
+  private static readonly TYPES = ["image/png", "image/jpeg", "image/webp", "image/avif", "image/gif", "video/mp4", "video/webm"];
 
   // An object URL stands in for the kernel's content-addressed one.
   async uploadWallpaper(blob: Blob): Promise<Appearance> {
@@ -41,12 +41,40 @@ export class MockLook {
     }
     this.look = {
       ...this.look,
-      wallpaper: { url: URL.createObjectURL(blob), opacity: 0.5, dim: 0.55, focusX: 0.5, focusY: 0.5 },
+      wallpaper: { url: URL.createObjectURL(blob), kind: blob.type.startsWith("video/") ? "video" : "image", opacity: 0.5, dim: 0.55, focusX: 0.5, focusY: 0.5 },
     };
     return this.appearance();
   }
 
   async clearWallpaper(): Promise<void> {
     this.look = { ...this.look, wallpaper: undefined };
+  }
+
+  async uploadScene(folder: SceneFolder): Promise<Appearance> {
+    if (!folder.project.size || !folder.scene.size) {
+      throw new HttpError(422, "the folder is incomplete", { code: "wallpaper.scene_invalid" });
+    }
+    let title = "";
+    try {
+      title = (JSON.parse(await folder.project.text()) as { title?: string }).title?.trim() ?? "";
+    } catch {
+      // A malformed project still leaves a scene the fixture can show.
+    }
+    this.look = {
+      ...this.look,
+      wallpaper: {
+        url: URL.createObjectURL(folder.preview ?? folder.scene),
+        kind: "scene",
+        title: title || "Wallpaper Engine scene",
+        parallax: 0.02,
+        muted: true,
+        volume: 1,
+        opacity: 0.5,
+        dim: 0.55,
+        focusX: 0.5,
+        focusY: 0.5,
+      },
+    };
+    return this.appearance();
   }
 }

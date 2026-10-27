@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"reasonix/internal/contract/provider"
 )
 
 // APIError is a refusal the kernel named. Code is the stable identity a
@@ -178,11 +180,15 @@ type HistoryMessage struct {
 }
 
 type HistoryToolCall struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Arguments    string `json:"arguments"`
-	ResolvedName string `json:"resolvedName,omitempty"`
-	CapabilityID string `json:"capabilityId,omitempty"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Arguments is the proxy's effective input, which is what the card draws.
+	// ArgumentNormalization keeps the model's own text when a proxy rewrote it,
+	// so a reopened session need not pass the rewrite off as the model's.
+	Arguments             string                          `json:"arguments"`
+	ArgumentNormalization *provider.ArgumentNormalization `json:"argumentNormalization,omitempty"`
+	ResolvedName          string                          `json:"resolvedName,omitempty"`
+	CapabilityID          string                          `json:"capabilityId,omitempty"`
 }
 
 func (c *Client) History(ctx context.Context) ([]HistoryMessage, error) {

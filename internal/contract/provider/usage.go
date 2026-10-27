@@ -14,8 +14,8 @@ import (
 // CompletionTokens reported by thinking-capable models. FinishReason carries
 // the model's last reported choices[0].finish_reason so the agent can surface
 // abnormal terminations ("length", "content_filter", "repetition_truncation").
-// Estimated marks counts reconstructed locally because the provider's terminal
-// usage record did not arrive; exact provider usage leaves it false.
+// Estimated marks reconstructed counts or partial interrupted-response usage.
+// Neither certifies a complete bill; exact terminal provider usage leaves it false.
 type Usage struct {
 	PromptTokens           int
 	CompletionTokens       int

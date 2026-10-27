@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import type { Column } from "./FlowResizer";
 import type { AgentPort, ContextBreakdown, McpEntry, SessionStatus } from "../port/port";
 import type { HubPort, RuntimeView } from "../port/hub";
 import type { ConnectOffer } from "./ConnectNote";
@@ -75,10 +74,6 @@ export interface PaneProps {
   dockW: number;
   dockMax: number;
   onDockW: (w: number) => void;
-  // The reading column's width, the two ends it is held between, and what the
-  // sidebars are drawn at once it asks. Absent where nothing can drag it: a pane
-  // rendered on its own keeps the width its stylesheet gives it.
-  column?: Column;
   manualBrowser?: boolean;
   onManualBrowser?: (on: boolean) => void;
   // The window's failed-request notice, handed only to the pane in front.

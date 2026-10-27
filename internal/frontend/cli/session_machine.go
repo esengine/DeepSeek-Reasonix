@@ -147,20 +147,26 @@ func runSessionCommand(args []string, out io.Writer) int {
 	return writeMachineError(out, command, "session_not_found", "session was not found")
 }
 
-// checkMachineDir refuses an explicit --dir that is not a directory: an absent
-// store reads as an empty one, so a mistyped path would answer "no sessions".
+// An absent project remains readable through its retained session store.
 func checkMachineDir(dir, projectRoot string) (string, string) {
-	if dir == "" || projectRoot != "" {
+	flag := "--dir"
+	if projectRoot != "" {
+		dir, flag = strings.TrimSpace(projectRoot), "--project-root"
+	}
+	if dir == "" {
 		return "", ""
 	}
 	info, err := os.Stat(dir)
+	if projectRoot != "" && errors.Is(err, fs.ErrNotExist) {
+		info, err = os.Stat(machineProjectSessionDir(projectRoot))
+	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return "invalid_argument", "--dir does not exist"
+		return "invalid_argument", flag + " does not exist"
 	case err != nil:
 		return "session_dir_unavailable", "session directory is unavailable"
 	case !info.IsDir():
-		return "invalid_argument", "--dir is not a directory"
+		return "invalid_argument", flag + " is not a directory"
 	}
 	return "", ""
 }

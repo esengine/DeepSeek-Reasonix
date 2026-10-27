@@ -29,7 +29,6 @@ interface Props {
   status: SessionStatus | null;
   title?: string;
   steer: number;
-  onSettings: (section?: string) => void;
   account: AccountState | null;
   theme: string;
   onTheme: () => void;
@@ -44,7 +43,7 @@ interface Props {
   onError?: (e: unknown) => void;
 }
 
-export function Chrome({ port, status, title, steer, onSettings, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, onError }: Props) {
+export function Chrome({ port, status, title, steer, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, onError }: Props) {
   const root = status?.workspaceRoot || status?.cwd || "";
   const project = root ? base(root) : "—";
   // The folder mark opens the project itself. Only a shell that can enter a
@@ -148,9 +147,6 @@ export function Chrome({ port, status, title, steer, onSettings, account, host, 
           ) : (
             <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.7" /><path d="M8 1.7v1.4M8 12.9v1.4M1.7 8h1.4M12.9 8h1.4M3.5 3.5l1 1M11.5 11.5l1 1M3.5 12.5l1-1M11.5 4.5l1-1" /></svg>
           )}
-        </TooltipButton>
-        <TooltipButton className="top-action" data-action="settings.section" data-value="tools" onClick={() => onSettings("tools")} aria-label={t("沙盒")} title={t("沙盒与运行边界")}>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2.5 5 2.7v5.6l-5 2.7-5-2.7V5.2Z" /><path d="m3 5.2 5 2.7 5-2.7M8 7.9v5.6" /></svg><span>{t("沙盒")}</span>
         </TooltipButton>
         {port && <ViewSwitch view={view} rows={rows} surfaces={surfaces} onView={onView} />}
         </div>

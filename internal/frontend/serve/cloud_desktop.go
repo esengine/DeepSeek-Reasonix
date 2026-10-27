@@ -62,7 +62,7 @@ func (h *Hub) CloudDesktop(ctx context.Context, input remotecloud.DesktopRequest
 	req := httptest.NewRequestWithContext(ctx, method, target.RequestURI(), bytes.NewReader(input.Body))
 	if method != http.MethodGet {
 		req.Header.Set("Content-Type", "application/json")
-		if strings.HasSuffix(target.Path, "/attachments/upload") {
+		if binaryUploadPath(target.Path) && method == http.MethodPost {
 			req.Header.Set("Content-Type", "application/octet-stream")
 		}
 	}

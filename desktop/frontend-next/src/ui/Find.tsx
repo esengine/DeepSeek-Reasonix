@@ -2,11 +2,11 @@ import { useEffect, useRef } from "react";
 import { t } from "../i18n";
 import type { Finding } from "./usefind";
 
-export function Find({ find }: { find: Finding }) {
-  return <div className="findhost">{find.open && <Bar find={find} />}</div>;
+export function Find({ find, pending = false, failed = false }: { find: Finding; pending?: boolean; failed?: boolean }) {
+  return <div className="findhost">{find.open && <Bar find={find} pending={pending} failed={failed} />}</div>;
 }
 
-function Bar({ find }: { find: Finding }) {
+function Bar({ find, pending, failed }: { find: Finding; pending: boolean; failed: boolean }) {
   const { query, total, index, capped, focus, regex, caseSensitive, setMode, ask: onQuery, step: onStep, close: onClose } = find;
   const box = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -15,7 +15,7 @@ function Bar({ find }: { find: Finding }) {
   }, [focus]);
 
   const asked = query.trim().length > 0;
-  const count = total > 0 ? `${index + 1} / ${total}${capped ? "+" : ""}` : asked ? t("无结果") : "";
+  const count = pending && asked ? failed ? t("部分历史尚未读取") : t("正在查找较早消息…") : total > 0 ? `${index + 1} / ${total}${capped ? "+" : ""}` : asked ? t("无结果") : "";
 
   return (
     <div className="tfind" role="search">
@@ -68,7 +68,7 @@ function Bar({ find }: { find: Finding }) {
       >
         .*
       </button>
-      <span className="n" data-empty={asked && total === 0 ? "" : undefined} aria-live="polite">
+      <span className="n" data-empty={asked && total === 0 && !pending ? "" : undefined} aria-live="polite">
         {count}
       </span>
       <button

@@ -154,4 +154,7 @@ func TestToolBeforeFailedWriterReplacementOpensDependencyBarrier(t *testing.T) {
 	if len(batch.results) != 2 || !strings.Contains(batch.results[1], "skipped because an earlier modification") {
 		t.Fatalf("dependency results = %+v", batch.results)
 	}
+	if got := batch.outcomes[1].refusalCode; got != CodeBatchSkippedAfterFailedChange {
+		t.Fatalf("the skipped call's refusal code = %q, want %q", got, CodeBatchSkippedAfterFailedChange)
+	}
 }

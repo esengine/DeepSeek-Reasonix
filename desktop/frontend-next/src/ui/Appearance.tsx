@@ -1,5 +1,5 @@
 import { ApplyNote } from "./Group";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { effectsMode, onEffectsChange, setEffectsMode, type EffectsMode } from "../state/prefs";
 import type { AgentPort, Appearance as Look, ThemePack } from "../port/port";
 import { ZOOM_PRESETS } from "./zoom";
@@ -9,6 +9,7 @@ import { MONO_FAMILIES, TEXT_STEPS, UI_FAMILIES, installed, readSizeOf, readStep
 import { STORAGE as LANG_KEY, t } from "../i18n";
 import { pct } from "../i18n/format";
 import { reason } from "../i18n/kernel";
+import { useCrop } from "./useCrop";
 import { Notifications } from "./Notifications";
 import { Folding } from "./Folding";
 import { WindowSection } from "./WindowSection";
@@ -28,6 +29,8 @@ import { EscStopSetting } from "./EscStopSetting";
 import { PageSleepSetting } from "./PageSleepSetting";
 import { ThemeImport } from "./ThemeImport";
 import { ThemeRemove } from "./ThemeRemove";
+import { WallpaperSceneImport } from "./WallpaperSceneImport";
+import { WallpaperVolumeSlider } from "./WallpaperVolumeSlider";
 import { useThemeInventory } from "./useThemeInventory";
 
 // "" follows the machine; the rest are explicit, the same shape the light/dark
@@ -95,39 +98,8 @@ const CONTRASTS: [string, string, string][] = [
 const at = (v: number, min: number, max: number) =>
   ({ "--at": `${Math.round(((v - min) / (max - min)) * 100)}%` }) as React.CSSProperties;
 
-/** useCrop answers which focal axis has room to move. A `cover` picture wider
- *  than its box is cropped left and right and nowhere else, so the other axis
- *  cannot move a pixel however far its slider is dragged. It measures the
- *  preview, which is drawn at the window's shape, rather than assuming one.
- *  Both axes count as free until the image decodes: never disable on a guess. */
-function useCrop(url: string | undefined, box: HTMLElement | null) {
-  const [image, setImage] = useState(0);
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    setImage(0);
-    if (!url) return;
-    const img = new Image();
-    img.onload = () => setImage(img.naturalHeight ? img.naturalWidth / img.naturalHeight : 0);
-    img.src = url;
-    return () => {
-      img.onload = null;
-    };
-  }, [url]);
-
-  useEffect(() => {
-    if (!box) return;
-    const read = () => setFrame(box.clientHeight ? box.clientWidth / box.clientHeight : 0);
-    read();
-    const ro = new ResizeObserver(read);
-    ro.observe(box);
-    return () => ro.disconnect();
-  }, [box]);
-
-  // Ratios a pixel apart leave no room either way, hence the 1% of slack.
-  const known = image > 0 && frame > 0;
-  return { known, x: !known || image > frame * 1.01, y: !known || image < frame / 1.01 };
-}
+/** What the picker offers: the kernel's list of wallpaper types. */
+export const WALLPAPER_ACCEPT = "image/png,image/jpeg,image/webp,image/avif,image/gif,video/mp4,video/webm";
 
 export function Appearance({ port, theme, onTheme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
   const { packs, unread, load } = useThemeInventory(port);
@@ -221,7 +193,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
   }, [port, look, onLook]);
 
   const [view, setView] = useState<HTMLDivElement | null>(null);
-  const crop = useCrop(look.wallpaper?.url, view);
+  const crop = useCrop(look.wallpaper?.url, look.wallpaper?.kind, view);
 
   // Only families this machine can really draw with, asked of the font system
   // rather than assumed per platform.
@@ -428,7 +400,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             ref={file}
               data-action="wallpaper.change"
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/avif,image/gif"
+            accept={WALLPAPER_ACCEPT}
             hidden
             onChange={(e) => {
               void pickPaper(e.target.files?.[0]);
@@ -441,8 +413,9 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 <path d="M8 3.7v8.6M3.7 8h8.6" />
               </svg>
             </span>
-            {t(look.wallpaper ? "换一张…" : "选择图片…")}
+            {t(look.wallpaper ? "换一张…" : "选择图片或视频…")}
           </button>
+          <WallpaperSceneImport port={port} look={look} onLook={onLook} setPaper={setPaper} onError={setFailed} />
           {/* Composited the way the window is: the picture, then page colour
               over it. The scrim fades out with the strength, or a picture
               turned down to nothing would still be sitting under a dark wash. */}
@@ -451,10 +424,20 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
               className="paperview"
               ref={setView}
               style={{
-                backgroundImage: `url("${look.wallpaper.url}")`,
+                backgroundImage: look.wallpaper.kind === "video" ? undefined : `url("${look.wallpaper.url}")`,
                 backgroundPosition: `${Math.round(look.wallpaper.focusX * 100)}% ${Math.round(look.wallpaper.focusY * 100)}%`,
               }}
             >
+              {look.wallpaper.kind === "video" && (
+                <video
+                  src={look.wallpaper.url}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  aria-hidden="true"
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none", objectPosition: `${Math.round(look.wallpaper.focusX * 100)}% ${Math.round(look.wallpaper.focusY * 100)}%` }}
+                />
+              )}
               <i style={{ opacity: 1 - look.wallpaper.opacity }} />
               <b style={{ opacity: look.wallpaper.dim * Math.min(look.wallpaper.opacity * 4, 1) }} />
             </div>
@@ -527,13 +510,16 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 />
                 <span className="now">{pct(look.wallpaper.focusY)}</span>
               </label>
+              {(look.wallpaper.audioTracks?.length || look.wallpaper.audios?.length || look.wallpaper.audio) && (
+                <WallpaperVolumeSlider volume={look.wallpaper.volume} onChange={setPaper} />
+              )}
               {crop.known && !(crop.x && crop.y) && (
                 <p className="note">
                   {crop.x
-                    ? t("当前窗口尺寸下，此图片只有左右会被裁剪，上下正好填满，因此纵向焦点无法调整。")
+                    ? t("当前窗口尺寸下，此壁纸只有左右会被裁剪，上下正好填满，因此纵向焦点无法调整。")
                     : crop.y
-                      ? t("当前窗口尺寸下，此图片只有上下会被裁剪，左右正好填满，因此横向焦点无法调整。")
-                      : t("此图片与窗口宽高比一致，四边均未裁剪；改变窗口尺寸后才可调整焦点。")}
+                      ? t("当前窗口尺寸下，此壁纸只有上下会被裁剪，左右正好填满，因此横向焦点无法调整。")
+                      : t("此壁纸与窗口宽高比一致，四边均未裁剪；改变窗口尺寸后才可调整焦点。")}
                 </p>
               )}
             </>

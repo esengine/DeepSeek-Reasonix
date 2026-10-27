@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"reasonix/internal/contract/config"
 )
 
 func TestUserChoseDirRejectsWhatALauncherInherits(t *testing.T) {
@@ -40,7 +43,8 @@ func TestPickLaunchWorkspaceFallbackOrder(t *testing.T) {
 		}
 		return d
 	}
-	a, b, home := mk("a"), mk("b"), mk("home")
+	a, b := mk("a"), mk("b")
+	auto := filepath.Join(base, "auto")
 	gone := filepath.Join(base, "gone")
 	proj := mk("proj")
 
@@ -53,11 +57,11 @@ func TestPickLaunchWorkspaceFallbackOrder(t *testing.T) {
 		{"chosen directory wins over the list", proj, []string{a}, proj},
 		{"list head", app, []string{a, b}, a},
 		{"stale head skipped", app, []string{gone, b}, b},
-		{"all stale falls to home", app, []string{gone}, home},
-		{"empty list falls to home", app, nil, home},
+		{"all stale falls to the auto workspace", app, []string{gone}, auto},
+		{"empty list falls to the auto workspace", app, nil, auto},
 	}
 	for _, c := range cases {
-		if got := pickLaunchWorkspace(c.cwd, exe, c.remembered, home); got != c.want {
+		if got := pickLaunchWorkspace(c.cwd, exe, c.remembered, auto); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -88,5 +92,56 @@ func TestLaunchWorkspaceKeepsLaunchProjectAfterSidebarReorder(t *testing.T) {
 	}
 	if got := launchWorkspace(exe); got != b {
 		t.Fatalf("missing launch project = %q, want next remembered folder %q", got, b)
+	}
+}
+
+func TestLaunchWithNothingChosenOrRememberedOpensTheAutoWorkspaceNotHome(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "state")
+	home := filepath.Join(base, "home")
+	app := filepath.Join(base, "app")
+	for _, dir := range []string{state, home, app} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("REASONIX_HOME", state)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Chdir(app)
+	exe := filepath.Join(app, "Reasonix Studio")
+
+	got := launchWorkspace(exe)
+	if got == home {
+		t.Fatalf("a first launch opened the home directory %q", got)
+	}
+	if want := config.AutoWorkspaceDir(); got != want {
+		t.Fatalf("launchWorkspace = %q, want the auto workspace %q", got, want)
+	}
+	if st, err := os.Stat(got); err != nil || !st.IsDir() {
+		t.Fatalf("the auto workspace was not created: %v", err)
+	}
+	if rel, err := filepath.Rel(state, got); err != nil || strings.HasPrefix(rel, "..") {
+		t.Fatalf("the auto workspace %q is not under the state root %q", got, state)
+	}
+}
+
+func TestPickLaunchWorkspaceCreatesTheAutoWorkspaceLast(t *testing.T) {
+	base := t.TempDir()
+	app := filepath.Join(base, "app")
+	exe := filepath.Join(app, "Reasonix Studio")
+	auto := filepath.Join(base, "state", "workspaces", "auto")
+	if got := pickLaunchWorkspace(app, exe, nil, auto); got != auto {
+		t.Fatalf("got %q, want %q", got, auto)
+	}
+	if st, err := os.Stat(auto); err != nil || !st.IsDir() {
+		t.Fatalf("not created: %v", err)
+	}
+	chosen := filepath.Join(base, "proj")
+	if err := os.MkdirAll(chosen, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := pickLaunchWorkspace(chosen, exe, nil, auto); got != chosen {
+		t.Fatalf("a chosen directory must win over the auto workspace: %q", got)
 	}
 }

@@ -12,7 +12,7 @@ export class SseBoundary extends SseShell {
   agentPresets() { return this.get<AgentPresetCatalog>("/agent-presets"); }
   saveAgentPreset(definition: AgentComposition, expectedRevision: string) { return this.post0<AgentPresetVersion>("/agent-presets", { definition, expectedRevision }); }
   deleteAgentPreset(id: string, revision: string) { return this.del(`/agent-presets/${encodeURIComponent(id)}?revision=${encodeURIComponent(revision)}`); }
-  setDefaultAgentPreset(id: string, workspace: boolean) { return this.post0<void>("/agent-presets/default", { id, workspace }); }
+  setDefaultAgentPreset(id: string, workspace: boolean) { return this.post("/agent-presets/default", { id, workspace }); }
   exportAgentPreset(id: string) { return this.get<AgentComposition>(`/agent-presets/${encodeURIComponent(id)}/export`); }
   importAgentPreset(content: AgentComposition) { return this.post0<{definition:AgentComposition;diagnostics:AgentPresetCatalog["diagnostics"]}>("/agent-presets/import", { content }); }
   agentComposition() { return this.get<CompositionSummary | null>("/agent-composition"); }

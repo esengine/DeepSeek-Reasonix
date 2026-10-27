@@ -65,6 +65,10 @@ func AssessRememberWrite(store Store, args json.RawMessage) RememberAssessment {
 		assessment.Reason = "memory updates require confirmation"
 		return assessment
 	}
+	if NormalizeActivation(in.Activation) == ActivationPinned {
+		assessment.Reason = "pinning a memory loads it into every session and requires confirmation"
+		return assessment
+	}
 	if assessment.Name == "" {
 		assessment.Reason = "memory name cannot be derived"
 		return assessment

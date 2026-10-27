@@ -63,7 +63,24 @@ func (s *Server) requestTitle(ctx context.Context, firstMsg string, model titleP
 	return title
 }
 
+// A title is a handful of words, so the first request asks for very little. A
+// model that ignores the request to think less spends all of it on reasoning
+// and returns nothing; that is the one failure whose cause the host can name and
+// repair, by asking once more with room for the thought and the title.
+const (
+	titleMaxTokens         = 60
+	titleThinkingMaxTokens = 1024
+)
+
 func (s *Server) tryRequestTitle(ctx context.Context, firstMsg string, model titleProviderState) (string, error) {
+	title, err := s.requestTitleWithin(ctx, firstMsg, model, titleMaxTokens)
+	if errors.Is(err, errTitleThought) {
+		return s.requestTitleWithin(ctx, firstMsg, model, titleThinkingMaxTokens)
+	}
+	return title, err
+}
+
+func (s *Server) requestTitleWithin(ctx context.Context, firstMsg string, model titleProviderState, maxTokens int) (string, error) {
 	ctx = provider.WithRequestAttemptCounter(ctx)
 	var usage *provider.Usage
 	defer func() {
@@ -83,7 +100,7 @@ func (s *Server) tryRequestTitle(ctx context.Context, firstMsg string, model tit
 			{Role: provider.RoleUser, Content: firstMsg},
 		},
 		Temperature: provider.TemperaturePtr(0),
-		MaxTokens:   60,
+		MaxTokens:   maxTokens,
 	})
 	if err != nil {
 		return "", titleFailure(ctx, err)

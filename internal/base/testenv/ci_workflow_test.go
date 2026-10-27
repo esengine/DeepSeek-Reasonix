@@ -86,11 +86,8 @@ func goTestArgs(script string) [][]string {
 	return out
 }
 
-// A root-module package list run on Windows with go test's result cache on
-// pays, before and after each package, one filepath.EvalSymlinks per path its
-// binary recorded outside the module. internal/assembly/boot records ~1.9M, so
-// the step spends minutes printing nothing and runs into its job timeout.
-func TestWindowsCILegsBypassTheTestResultCache(t *testing.T) {
+func readCIWorkflow(t *testing.T) ciWorkflow {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +96,15 @@ func TestWindowsCILegsBypassTheTestResultCache(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &wf); err != nil {
 		t.Fatal(err)
 	}
+	return wf
+}
+
+// A root-module package list run on Windows with go test's result cache on
+// pays, before and after each package, one filepath.EvalSymlinks per path its
+// binary recorded outside the module. internal/assembly/boot records ~1.9M, so
+// the step spends minutes printing nothing and runs into its job timeout.
+func TestWindowsCILegsBypassTheTestResultCache(t *testing.T) {
+	wf := readCIWorkflow(t)
 	checked := 0
 	for jobName, job := range wf.Jobs {
 		if !job.runsOnWindows() {
@@ -118,5 +124,57 @@ func TestWindowsCILegsBypassTheTestResultCache(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("ci.yml has no root-module go test step that runs on Windows; this guard no longer reads the workflow's shape")
+	}
+}
+
+func prOwnerTestArgs(wf ciWorkflow, windows bool) [][]string {
+	job := wf.Jobs["race"]
+	if windows {
+		job = wf.Jobs["test"]
+		if !job.runsOnWindows() {
+			return nil
+		}
+	}
+	var commands [][]string
+	for _, step := range job.Steps {
+		if !job.rootModule(step) || strings.Contains(step.If, "github.event_name != 'pull_request'") ||
+			(windows && strings.Contains(step.If, "runner.os != 'Windows'")) {
+			continue
+		}
+		for _, args := range goTestArgs(step.Run) {
+			if (!windows && !slices.Contains(args, "-race")) || slices.ContainsFunc(args, func(arg string) bool {
+				return arg == "-run" || strings.HasPrefix(arg, "-run=") || arg == "-list" || strings.HasPrefix(arg, "-list=")
+			}) {
+				continue
+			}
+			commands = append(commands, args)
+		}
+	}
+	return commands
+}
+
+func coversPackage(args []string, target string) bool {
+	return slices.ContainsFunc(args, func(pattern string) bool {
+		if pattern == target || pattern == "./..." {
+			return true
+		}
+		prefix, recursive := strings.CutSuffix(pattern, "/...")
+		return recursive && (target == prefix || strings.HasPrefix(target, prefix+"/"))
+	})
+}
+
+func TestPRCIExecutesIsolationOwnersOnWindowsAndRace(t *testing.T) {
+	wf := readCIWorkflow(t)
+	for _, windows := range []bool{true, false} {
+		t.Run(map[bool]string{true: "native_windows", false: "race"}[windows], func(t *testing.T) {
+			commands := prOwnerTestArgs(wf, windows)
+			for _, owner := range []string{"./internal/runtime/isolation", "./internal/platform/worktree", "./internal/state/mutation"} {
+				t.Run(owner, func(t *testing.T) {
+					if !slices.ContainsFunc(commands, func(args []string) bool { return coversPackage(args, owner) }) {
+						t.Fatalf("PR CI does not execute the full owning package %s in this matrix leg", owner)
+					}
+				})
+			}
+		})
 	}
 }

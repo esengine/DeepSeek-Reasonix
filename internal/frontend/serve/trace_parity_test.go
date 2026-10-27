@@ -76,6 +76,7 @@ type traceCase struct {
 func runTrace(t *testing.T, tc traceCase) traceReading {
 	t.Helper()
 	dir := testenv.TempDir(t)
+	closeSharedCatalogsOnCleanup(t)
 	kind := "trace-script-" + t.Name()
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) {
 		return &traceScript{script: tc.executor}, nil

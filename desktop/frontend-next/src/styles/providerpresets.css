@@ -17,5 +17,5 @@
 .addp-preset > span { font: var(--w-med) var(--fs-ui) var(--ui); overflow-wrap: anywhere }
 .addp-preset > small { font: var(--fs-micro) var(--ui); color: var(--muted) }
 .addp-presets-note { margin: 0 0 12px; color: var(--muted); font: var(--fs-meta) var(--ui) }
-.addp-presets-note .act { margin-inline-start: 8px }
+.addp-presets-note .act { margin-inline-start: 8px } .addp-vendors { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px } .addp-vendors > button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; cursor: pointer; border: 1px solid var(--border); border-radius: 999px; background: var(--raised); color: var(--text); font: var(--fs-meta) var(--ui) } .addp-vendors > button[aria-pressed="true"] { background: var(--overlay); border-color: var(--focus) } .addp-vendors > button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px } .addp-preset > span { display: inline-flex; align-items: center; gap: 7px }
 .addp-preset-form .fields { margin-top: 4px }

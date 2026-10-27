@@ -73,3 +73,21 @@ it("keeps the normal menu when the current model is absent from the catalog", ()
   expect(modelMenu(models, [], "removed/model")).toEqual(modelMenu(models));
   expect(modelMenu([], [], "removed/model")).toEqual(modelMenu([]));
 });
+
+it("carries the declared vendor mark onto the account heading and its rows, never guessing one", () => {
+  const items = modelMenu([
+    { ref: "ds/chat", provider: "ds", vendor: "api.deepseek.com", model: "chat", mark: "deepseek" },
+    { ref: "deepseek-lookalike/x", provider: "deepseek-lookalike", vendor: "lookalike.example", model: "x" },
+  ]);
+  const ds = items.find((it) => it.value === "ds/chat");
+  const plain = items.find((it) => it.value === "deepseek-lookalike/x");
+  expect(items.find((it) => it.header && it.right === "api.deepseek.com")?.mark).toBe("deepseek");
+  expect(ds?.mark).toBe("deepseek");
+  expect(plain?.mark).toBeUndefined();
+});
+
+it("puts a relay's own mark on its heading and leaves its model rows to the letter chip", () => {
+  const items = modelMenu([{ ref: "or/x", provider: "or", vendor: "openrouter.ai", model: "x", serviceMark: "openrouter" }]);
+  expect(items.find((it) => it.header)?.mark).toBe("openrouter");
+  expect(items.find((it) => it.value === "or/x")?.mark).toBeUndefined();
+});

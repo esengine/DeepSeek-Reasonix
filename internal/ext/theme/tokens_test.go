@@ -219,6 +219,16 @@ func TestShippedPacksMeetSyntaxContrast(t *testing.T) {
 					t.Errorf("%s %s: %s %s on codeBg %s is %.2f, below AA", pack.ID, scheme, name, fg, bg, got)
 				}
 			}
+			// The five optional code colours are held to the same line when a pack names them.
+			for _, name := range []string{"synComment", "synType", "synOperator", "synPunctuation", "synVariable"} {
+				fg, ok := tokens[name]
+				if !ok {
+					continue
+				}
+				if got := contrastRatio(t, fg, bg); got < aa {
+					t.Errorf("%s %s: %s %s on codeBg %s is %.2f, below AA", pack.ID, scheme, name, fg, bg, got)
+				}
+			}
 		}
 	}
 }

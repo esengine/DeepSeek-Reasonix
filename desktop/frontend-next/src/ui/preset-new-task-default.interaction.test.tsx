@@ -8,6 +8,7 @@ import { useOpenPane } from "./useOpenPane";
 import { useOpenRemotePane } from "./useOpenRemotePane";
 import { MockPort } from "../port/mock";
 import { MockHub } from "../port/mock_hub";
+import { HttpError } from "../port/http_error";
 import { NEW_TASK_PRESET_KEY, newTaskPreset, setNewTaskPreset } from "../state/newTaskPreset";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.removeItem(NEW_TASK_PRESET_KEY); });
@@ -81,4 +82,43 @@ it("keeps the old default badge and reports a storage refusal", async () => {
   await user.click(screen.getByRole("button", { name: "将轻装搭档设为新任务默认" }));
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(screen.getByRole("button", { name: "将日常搭档设为新任务默认" }).getAttribute("aria-pressed")).toBe("true");
+});
+
+it("lets a personal preset be the new task default, marked on its own row", async () => {
+  const port = new MockPort();
+  const base = (await port.agentPresets()).presets.find(v => v.definition.id === "builtin:general")!.definition;
+  await port.saveAgentPreset({ ...base, id: "user:daily-pro", name: "日常搭档pro" }, "");
+  render(<AgentPresets port={port} />);
+  const user = userEvent.setup();
+  const pick = await screen.findByRole("button", { name: "将日常搭档pro设为新任务默认" });
+  expect(pick.getAttribute("aria-pressed")).toBe("false");
+  await user.click(pick);
+  expect(newTaskPreset()).toBe("user:daily-pro");
+  expect(screen.getByRole("button", { name: "将日常搭档pro设为新任务默认" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "将日常搭档设为新任务默认" }).getAttribute("aria-pressed")).toBe("false");
+});
+
+it("forgets a personal default that no longer exists and opens the task with the built-in one", async () => {
+  const hub = new MockHub();
+  const open = vi.spyOn(hub, "open")
+    .mockRejectedValueOnce(new HttpError(404, "no such preset", { code: "agent_composition.not_found" }));
+  setNewTaskPreset("user:deleted");
+  const local = renderHook(() => useOpenPane({ hub, runtimes: [], panePorts: new Map(), active: "",
+    reportsRef: { current: {} }, runsRef: { current: {} }, setRuntimes: vi.fn(), setActive: vi.fn(),
+    setTakeover: vi.fn(), reloadPanes: async () => {}, sw: sw() }));
+  await act(async () => { await local.result.current({ root: "/task" }); });
+  expect(open).toHaveBeenNthCalledWith(1, { root: "/task", agentComposition: "user:deleted" });
+  expect(open).toHaveBeenNthCalledWith(2, { root: "/task" });
+  expect(newTaskPreset()).toBeUndefined();
+});
+
+it("does not hide a refusal the person asked for by name", async () => {
+  const hub = new MockHub();
+  vi.spyOn(hub, "open").mockRejectedValue(new HttpError(404, "no such preset", { code: "agent_composition.not_found" }));
+  setNewTaskPreset("user:kept");
+  const local = renderHook(() => useOpenPane({ hub, runtimes: [], panePorts: new Map(), active: "",
+    reportsRef: { current: {} }, runsRef: { current: {} }, setRuntimes: vi.fn(), setActive: vi.fn(),
+    setTakeover: vi.fn(), reloadPanes: async () => {}, sw: sw() }));
+  await expect(act(async () => { await local.result.current({ root: "/task", agentComposition: "user:asked" }); })).rejects.toBeTruthy();
+  expect(newTaskPreset()).toBe("user:kept");
 });

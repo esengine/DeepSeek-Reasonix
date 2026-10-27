@@ -227,18 +227,26 @@ func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, q
 	}
 	// Recording is best-effort: a stats file failure (disk full, permissions)
 	// must never interrupt the event stream, matching telemetry's append idiom.
+
+	// Estimated is the provenance only the executor knows: set when the cache
+	// split (or another count) was reconstructed. A nil marker means the row
+	// predates the field, so it reads as unknown rather than measured.
+	estimated := usage.Estimated
 	rec := record{
-		Timestamp:   time.Now(),
-		ModelRef:    modelRef,
-		Source:      r.source,
-		Prompt:      usage.PromptTokens,
-		Completion:  usage.CompletionTokens,
-		Reasoning:   usage.ReasoningTokens,
-		CacheHit:    usage.CacheHitTokens,
-		CacheMiss:   usage.CacheMissTokens,
-		Total:       usage.TotalTokens,
-		Requests:    usageRequestCount(usage),
-		UsageSource: strings.TrimSpace(usageSource),
+		Timestamp:        time.Now(),
+		ModelRef:         modelRef,
+		Source:           r.source,
+		Prompt:           usage.PromptTokens,
+		Completion:       usage.CompletionTokens,
+		Reasoning:        usage.ReasoningTokens,
+		CacheHit:         usage.CacheHitTokens,
+		CacheMiss:        usage.CacheMissTokens,
+		CacheWrite:       usage.CacheWriteTokens,
+		CacheWriteBilled: usage.CacheWriteBilledTokens,
+		Total:            usage.TotalTokens,
+		Requests:         usageRequestCount(usage),
+		Estimated:        &estimated,
+		UsageSource:      strings.TrimSpace(usageSource),
 	}
 	if quote != nil {
 		rec.CostAmount = quote.Original.Amount

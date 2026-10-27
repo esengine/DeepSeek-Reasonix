@@ -427,6 +427,8 @@ func (ag *authGate) loginPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // loginSubmit verifies the password and issues a session cookie.
+const maxLoginFormBytes = 4 << 10
+
 func (ag *authGate) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	// Rate limit.
 	ip := ag.clientIP(r)
@@ -439,6 +441,7 @@ func (ag *authGate) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse the password from the form.
+	r.Body = http.MaxBytesReader(w, r.Body, maxLoginFormBytes)
 	if err := r.ParseForm(); err != nil {
 		badBody(w)
 		return
@@ -702,4 +705,15 @@ func PlainHTTPAuthWarning(cfg config.ServeConfig, addr string) string {
 		return "warning: serve is listening on non-loopback HTTP with authentication disabled; anyone on this network can read sessions and history, and the launch token that changes need crosses it in clear — bind to 127.0.0.1 or set serve.auth_mode"
 	}
 	return "warning: authenticated serve is listening on non-loopback HTTP; use HTTPS via a trusted reverse proxy or bind to 127.0.0.1 for local-only access"
+}
+
+// OpenBindRefusal is why serve will not start with authentication off on an
+// address other machines can reach: sessions and history are then readable by
+// anyone on the network. allow is the operator saying they accept that.
+func OpenBindRefusal(cfg config.ServeConfig, addr string, allow bool) error {
+	mode, err := NormalizeAuthMode(cfg.AuthMode)
+	if err != nil || mode != "none" || allow || isLoopbackHost(addr) {
+		return nil
+	}
+	return fmt.Errorf("auth none on %s would let anyone on the network read sessions and history; use --auth token or password, bind to 127.0.0.1, or pass --allow-open-network", addr)
 }

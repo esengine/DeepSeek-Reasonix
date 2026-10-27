@@ -1,2 +1,0 @@
-- 修复：展开待办计划时，右侧消息细条和「跳到最新 / 回到顶部」按钮不再被向上顶；计划面板改为浮在输入框上方，不再挤压对话区。关联 #14321。
-- Fixed: opening the todo plan no longer pushes the message rail or the jump buttons up; the panel now floats above the composer instead of taking room from the conversation. Refs #14321.

@@ -1,2 +1,0 @@
-- 修复：还没确认的提问卡片，滚出视野再回来后，已勾选的选项、自填文字、补充说明和所在的题目会保留，不再被清空。关联 #14336。
-- Fixed: an ask card you have not answered yet keeps its picks, typed text, notes and current question when it scrolls out of view and back, instead of resetting. Refs #14336.

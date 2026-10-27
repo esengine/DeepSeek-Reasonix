@@ -122,7 +122,7 @@ func (b *Broadcaster) Emit(e event.Event) {
 				switch e.Code {
 				case event.NoticeCodeSessionRecoveryForked, event.NoticeCodeSessionRecoveryAdopted,
 					event.NoticeCodeSessionRecoveryAdoptedCovered, event.NoticeCodeSessionShutdownRecoveryForked,
-					event.NoticeCodeSessionContinuedFrom1x:
+					event.NoticeCodeSessionContinuedFrom1x, event.NoticeCodePeerMessageArrived:
 					observer()
 				}
 			}

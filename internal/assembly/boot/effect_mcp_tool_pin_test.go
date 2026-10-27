@@ -287,6 +287,7 @@ load = "always"
 	if _, err := ctrl.AcceptMCPHeldTools("drift", shown); !errors.Is(err, control.ErrMCPNothingHeld) {
 		t.Fatalf("second accept = %v, want ErrMCPNothingHeld", err)
 	}
+	ctrl.Close()
 
 	rec = &capabilityCallProvider{direct: "mcp__drift__write"}
 	again, err := Build(t.Context(), Options{Sink: event.Discard, Home: reasonixHome, WorkspaceRoot: workspace})

@@ -112,13 +112,8 @@ async function main() {
 
     const js = (src) => win.webContents.executeJavaScript(src);
     const reserved = () => js(`(() => { const e = document.querySelector('.bview'); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height }; })()`);
-    // The browser tab beside the conversation is a switch for that view itself, so
-    // the page is widened with the browser's own wide control, which is how the
-    // person makes it the whole pane.
-    await until("the wide control on the browser panel", () => js(`!!document.querySelector('[data-action="browser.wide"]')`));
-    await js(`document.querySelector('[data-action="browser.wide"]').click()`);
-    // A page that is put away is as wide as an agent's viewport, so wide means drawn
-    // and wider than it was beside the conversation.
+    await until("the full-view control on the browser panel", () => js(`!!document.querySelector('[data-action="browser.full"]')`));
+    await js(`document.querySelector('[data-action="browser.full"]').click()`);
     await until("the page drawn full width", async () => (!beneath() && width() > aside.width ? guest.getBounds() : null));
     // The panel widens over a moment; the rectangle is read once it has stopped.
     const same = still;
@@ -149,7 +144,7 @@ async function main() {
       process.stdout.write(`  (no screenshot: ${err.message})\n`);
     }
 
-    await js(`document.querySelector('[data-action="browser.wide"]').click()`);
+    await js(`document.querySelector('[data-action="browser.full"]').click()`);
     const back = await until("the page beside the conversation again", async () => (!beneath() && width() < placed.width ? guest.getBounds() : null));
     // The column settles a pixel or two after the first measurement, so beside means
     // the same place and size to within a few pixels.

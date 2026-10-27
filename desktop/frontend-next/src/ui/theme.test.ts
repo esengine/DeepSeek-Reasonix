@@ -176,6 +176,24 @@ describe("decorative roles are themeable and the status hues are not", () => {
     expect(read("--link")).toBe("#eeeeee");
   });
 
+  const SYNTAX = {
+    synKeyword: "--syn-key", synString: "--syn-str", synNumber: "--syn-num", synFunction: "--syn-fn",
+    synComment: "--syn-comment", synType: "--syn-type", synOperator: "--syn-op", synPunctuation: "--syn-punc", synVariable: "--syn-var",
+  };
+
+  it("maps each of the nine syntax tokens onto its own variable", () => {
+    const light = Object.fromEntries(Object.keys(SYNTAX).map((name, i) => [name, `#${String(i + 1).repeat(6)}`]));
+    apply({ ...pack, tokens: { ...pack.tokens, light: { ...pack.tokens.light, ...light } } }, "light");
+    Object.entries(SYNTAX).forEach(([name, variable]) => expect(read(variable), name).toBe(light[name]));
+    expect(new Set(Object.values(light)).size).toBe(9);
+  });
+
+  it("writes no variable for a syntax token the pack does not name, so each surface keeps its own default", () => {
+    apply({ ...pack, tokens: { ...pack.tokens, light: { ...pack.tokens.light, synKeyword: "#123456" } } }, "light");
+    expect(read("--syn-key")).toBe("#123456");
+    ["--syn-comment", "--syn-type", "--syn-op", "--syn-punc", "--syn-var"].forEach((variable) => expect(read(variable), variable).toBe(""));
+  });
+
   it("carries a pack's own shadow onto the one variable menus, popovers and dialogs cast", () => {
     const shadow = "0 0 0 1px #00000040, 0 8px 24px -8px #00000033";
     apply({ ...pack, tokens: { light: { ...pack.tokens.light, shadowFloat: shadow }, dark: pack.tokens.dark } }, "light");

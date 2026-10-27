@@ -11,7 +11,7 @@ import { WorktreeChip } from "./WorktreeChip";
 import { useWorktreeSetup, WorktreeSetupFailure } from "./useWorktreeSetup";
 import { WorktreeSetupPage } from "./WorktreeSetupPage";
 import { Policy } from "./Policy";
-import { chosenGroups, groupHeadings, modelMenu, narrowToGroups } from "./modelmenu";
+import { chosenGroups, groupHeadings, modelMenu, modelTooltip, narrowToGroups } from "./modelmenu";
 import { ModelGroupChips } from "./ModelGroupChips";
 import { effortMenu, effortReading, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
 import { CompletionMenu, useCompletion } from "./Completion";
@@ -710,7 +710,7 @@ export function Composer({ port, status, running, quote, restore, inject, focus,
             className="mode model-picker"
             data-action="model.select"
             place="bottom"
-            title={status?.modelRef ?? modelLb}
+            title={modelTooltip(models, status?.modelRef, modelLb)}
             current={status?.modelRef}
             items={narrowToGroups(menuItems, chosenModelGroups)}
             head={<ModelGroupChips headings={groupHeadings(menuItems)} chosen={chosenModelGroups} onChange={writeModelFilter} />}

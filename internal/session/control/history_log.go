@@ -1,6 +1,23 @@
 package control
 
-import "reasonix/internal/contract/provider"
+import (
+	"reasonix/internal/contract/provider"
+	"reasonix/internal/state/sessionstore"
+)
+
+func (c *Controller) ReadHistoryPage(request sessionstore.HistoryPageRequest) (sessionstore.HistoryPageRead, error) {
+	if c.executor == nil {
+		return sessionstore.HistoryPageRead{Messages: []provider.Message{}, ToolContext: []sessionstore.HistoryToolContext{}}, nil
+	}
+	return c.executor.Session().ReadHistoryPage(request)
+}
+
+func (c *Controller) ReadHistoryToolOutput(id string) (string, bool) {
+	if c.executor == nil {
+		return "", false
+	}
+	return c.executor.Session().ReadHistoryToolOutput(id)
+}
 
 // History returns the executor's current message log (for repopulating a
 // resumed frontend's view).

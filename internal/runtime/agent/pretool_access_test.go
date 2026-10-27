@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
+	"reasonix/internal/ext/hook"
 	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/sessionstore"
@@ -91,7 +92,7 @@ func TestPreToolAccessRejectsForbiddenFileTools(t *testing.T) {
 	}
 }
 
-func TestPreToolUseReadOnlyDoesNotRecordHookWriteGap(t *testing.T) {
+func TestPreToolUseReadOnlyWithoutMutationHooksDoesNotRecordHookWriteGap(t *testing.T) {
 	root := testenv.TempDir(t)
 	path := filepath.Join(root, "note.txt")
 	if err := os.WriteFile(path, []byte("status=draft\n"), 0o644); err != nil {
@@ -103,7 +104,7 @@ func TestPreToolUseReadOnlyDoesNotRecordHookWriteGap(t *testing.T) {
 	store := checkpoint.New("", root)
 	store.Begin(1, "read the file", 0)
 	a := New(nil, reg, sessionstore.NewSession(""), Options{
-		Hooks:             &stubHooks{},
+		Hooks:             hook.NewRunner(nil, root, nil, nil),
 		CheckTargetAccess: ws.TargetAccessCheck(),
 	}, event.Discard)
 	a.SetMutationObserver(checkpoint.NewMutationObserver(checkpoint.ObserverOptions{Store: store}))

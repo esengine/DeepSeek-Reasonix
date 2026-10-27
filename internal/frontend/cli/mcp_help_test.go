@@ -17,3 +17,19 @@ func TestMCPAddHelpPrintsUsage(t *testing.T) {
 		t.Fatalf("mcp add --help output omitted usage or wrote to stderr\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
 }
+
+func TestMCPListAndGetRejectExtraArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"mcp", "list", "--jsno"},
+		{"mcp", "ls", "extra"},
+		{"mcp", "get", "headroom", "--jsno"},
+	} {
+		var code int
+		stdout, stderr := captureCLIOutput(t, func() {
+			code = Run(args, "test")
+		})
+		if code != 2 || stdout != "" || stderr == "" {
+			t.Fatalf("%v exited %d, want 2 with an error\nstdout:\n%s\nstderr:\n%s", args, code, stdout, stderr)
+		}
+	}
+}

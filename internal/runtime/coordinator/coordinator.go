@@ -321,6 +321,7 @@ func (c *Coordinator) SetPlannerPlanApprover(g agent.PlannerPlanApprover) {
 
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
+	ctx = c.executor.PrepareRootTaskBudget(ctx)
 	// A host that announced this turn owns its boundary; opening a second one
 	// here would make planner work and executor work two turns to every sink
 	// that resets on a start.
@@ -540,6 +541,7 @@ func (c *Coordinator) planFromStream(ctx context.Context, input string) (string,
 	streamCompleted := false
 	defer func() {
 		accounted := provider.UsageWithRequestAttemptCount(ctx, usage)
+		provider.ObserveAuxiliaryUsage(ctx, accounted)
 		if accounted != nil || streamCompleted {
 			c.sink.Emit(event.Event{Kind: event.Usage, ModelRef: c.plannerModelRef, Usage: accounted, Pricing: c.plannerPricing, Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner})
 		}

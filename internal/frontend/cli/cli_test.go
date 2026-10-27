@@ -105,6 +105,19 @@ func TestServeRejectsUnknownAuthMode(t *testing.T) {
 	}
 }
 
+func TestServeRefusesNoAuthOnAReachableAddress(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := runServe([]string{"--auth", "none", "--addr", "0.0.0.0:0"}, "v1.20.0"); rc != 2 {
+			t.Fatalf("serve --auth none on 0.0.0.0 rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(errOut, "--allow-open-network") {
+		t.Fatalf("stderr = %q, want the refusal to name --allow-open-network", errOut)
+	}
+}
+
 func TestServePasswordAuthRequiresPasswordMaterial(t *testing.T) {
 	isolateCLIConfigHome(t)
 

@@ -97,7 +97,7 @@ func TestMachineSettingsAssetsStayLocalWithRemoteFirst(t *testing.T) {
 	far := fakeRemoteKernel(t)
 	remotePane(t, h, far.Listener.Addr().String())
 	hubRuntime(t, h, testenv.TempDir(t))
-	name, err := writeWallpaper("image/png", []byte("local wallpaper fixture"))
+	name, err := storeWallpaper("image/png", strings.NewReader("local wallpaper fixture"))
 	if err != nil {
 		t.Fatal(err)
 	}

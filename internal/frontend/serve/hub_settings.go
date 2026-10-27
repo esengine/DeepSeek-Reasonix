@@ -14,6 +14,7 @@ func (s *Server) registerMachineSettingsRoutes(mux *http.ServeMux) {
 	s.registerTurnNarrationRoutes(mux)
 	s.registerWebAccessRoutes(mux)
 	s.registerReceiptRoutes(mux)
+	s.registerBackupFileRoutes(mux)
 	mux.HandleFunc("GET /models", s.models)
 	mux.HandleFunc("GET /memory", s.memories)
 	mux.HandleFunc("POST /memory/forget", s.forgetMemory)

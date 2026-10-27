@@ -88,6 +88,8 @@ func (c *Config) UnrecognizedDesktopToolApprovalMode() string {
 // separate from top-level language and [ui] so desktop choices do not affect CLI
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
+	ProviderHealthChecks bool `toml:"provider_health_checks"`
+
 	Language   string `toml:"language"`    // auto|en|zh; empty/auto = browser/OS auto-detect
 	Currency   string `toml:"currency"`    // legacy display currency; migrated to [billing].display_currency
 	Theme      string `toml:"theme"`       // auto|dark|light; empty resolves to auto
@@ -178,15 +180,39 @@ type AppearanceConfig struct {
 	Wallpaper WallpaperConfig `toml:"wallpaper"`
 }
 
+type WallpaperLayer struct {
+	File    string   `toml:"file"`
+	X       float64  `toml:"x"`
+	Y       float64  `toml:"y"`
+	W       float64  `toml:"w"`
+	H       float64  `toml:"h"`
+	Alpha   float64  `toml:"alpha"`
+	Effects []string `toml:"effects,omitempty"`
+}
+
 // WallpaperConfig is the user's own background image. File is a name inside
 // the appearance directory, not a path: the bytes live where the app can find
 // them after the picture the user picked has moved or been deleted.
 type WallpaperConfig struct {
-	File    string  `toml:"file"`
-	Opacity float64 `toml:"opacity"` // at rest, 0..1
-	Dim     float64 `toml:"dim"`     // scrim of page colour over it, 0..1
-	FocusX  float64 `toml:"focus_x"` // 0..1, the point that survives cropping
-	FocusY  float64 `toml:"focus_y"` // 0..1
+	File string `toml:"file"`
+	// A scene keeps the extracted backdrop in File and the soundtrack beside it.
+	Kind         string           `toml:"kind,omitempty"`
+	Title        string           `toml:"title,omitempty"`
+	Audio        string           `toml:"audio,omitempty"`
+	Audios       []string         `toml:"audios,omitempty"`
+	AudioVolumes []float64        `toml:"audio_volumes,omitempty"`
+	AudioLoops   []bool           `toml:"audio_loops,omitempty"`
+	Layers       []WallpaperLayer `toml:"layers,omitempty"`
+	SceneWidth   float64          `toml:"scene_width,omitempty"`
+	SceneHeight  float64          `toml:"scene_height,omitempty"`
+	Parallax     float64          `toml:"parallax,omitempty"`
+	Muted        bool             `toml:"muted,omitempty"`
+	// 0..1; nil means the scene's default of 1.
+	Volume  *float64 `toml:"volume,omitempty"`
+	Opacity float64  `toml:"opacity"` // at rest, 0..1
+	Dim     float64  `toml:"dim"`     // scrim of page colour over it, 0..1
+	FocusX  float64  `toml:"focus_x"` // 0..1, the point that survives cropping
+	FocusY  float64  `toml:"focus_y"` // 0..1
 }
 
 // WorkspaceLimit is how many projects the sidebar may remember; zero is no limit.

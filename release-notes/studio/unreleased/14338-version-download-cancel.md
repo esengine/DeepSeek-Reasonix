@@ -1,2 +1,0 @@
-- 新增：版本列表里的下载和后台自动下载现在都可以取消；取消会停止传输，并删除这次下载留下的部分文件。关联 #14338。
-- Added: a version download, started from the version list or by automatic download, can now be cancelled; cancelling stops the transfer and removes the partial files it left. Refs #14338.

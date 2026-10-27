@@ -25,6 +25,11 @@ func TestArgvCarriesInlineCodeCoversEveryInterpreter(t *testing.T) {
 		{"/usr/bin/python3", "-c", "print(1)"},
 		{"pwsh", "-Command", "ls"},
 		{"cmd", "/c", "dir"},
+		{"awk", `BEGIN{system("id")}`},
+		{"gawk", "-F:", `{print $1}`, "/etc/passwd"},
+		{"mawk", "-v", "x=1", `BEGIN{print x}`},
+		{"/usr/bin/awk", `BEGIN{system("id")}`},
+		{"gawk", "-e", `BEGIN{system("id")}`},
 	}
 	for _, argv := range carries {
 		if !ArgvCarriesInlineCode(argv) {
@@ -38,6 +43,9 @@ func TestArgvCarriesInlineCodeCoversEveryInterpreter(t *testing.T) {
 		{"bash", "--", "-c"}, // after --, no more options
 		{"go", "test", "./..."},
 		{"grep", "-e", "pattern", "file.txt"}, // -e is not code here
+		{"awk", "-f", "report.awk", "data.txt"},
+		{"gawk", "--file=report.awk", "data.txt"},
+		{"awk", "-F,", "-freport.awk", "data.txt"},
 		{},
 	}
 	for _, argv := range plain {
@@ -66,7 +74,7 @@ func TestIsInlineCodeInterpreterMatchesTheFlagTable(t *testing.T) {
 	for _, program := range []string{
 		"python", "python3", "py", "pypy3", "node", "bun", "deno", "perl", "ruby",
 		"lua", "luajit", "r", "rscript", "osascript", "php", "bash", "sh", "zsh",
-		"ksh", "dash", "fish", "powershell", "pwsh", "cmd",
+		"ksh", "dash", "fish", "powershell", "pwsh", "cmd", "awk", "gawk", "mawk", "nawk",
 		"/usr/bin/python3", `C:\Python\python.exe`, "PYTHON",
 	} {
 		if !IsInlineCodeInterpreter(program) {

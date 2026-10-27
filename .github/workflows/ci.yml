@@ -198,7 +198,8 @@ jobs:
 
       # Pull requests run a Windows smoke suite: the packages that actually
       # carry *_windows.go code, the startup/checkpoint packages with portable
-      # filesystem contracts, plus cmd/. The full ./... sweep stays on pushes
+      # filesystem contracts, plus cmd/. Isolation/worktree/mutation have a
+      # complete JSON inventory below. The full ./... sweep stays on pushes
       # to main-v2; the Unix legs always run the full suite. Keep the job-level
       # budget above normal 7-9 minute runner variance; each package test binary
       # remains independently bounded by Go's per-package timeout below.
@@ -222,11 +223,578 @@ jobs:
           WINDOWS_SANDBOX_WAIT_MS: "20000"
         run: go test -count=1 -p 4 -timeout=18m ./internal/runtime/agent/... ./internal/platform/appidentity/... ./internal/assembly/boot/... ./internal/state/checkpoint/... ./internal/frontend/cli/... ./internal/session/control/... ./internal/base/filelock/... ./internal/base/fileutil/... ./internal/ext/hook/... ./internal/state/instruction/... ./internal/ext/mcplaunch/... ./internal/platform/notify/... ./internal/base/proc/... ./internal/platform/remote/... ./internal/platform/repair/... ./internal/safety/sandbox/... ./internal/base/sysproxy/... ./internal/state/workspacelease/... ./cmd/...
 
-      # Worktree rollback is absent from the broad Windows PR smoke list.
-      - name: test (Windows worktree rollback)
+      - name: test (Windows published command job owner)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 3
-        run: go test -count=1 -timeout=2m -run '^TestDiscardUnpublished.*OnWindows$|^TestCreateFromDetachedHEADAndOccupiedBranch$' ./internal/platform/worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/published-job-owner"
+          mkdir -p "$evidence"
+          go test -count=1 -timeout=3m -json -run '^TestPublishedJob' ./internal/base/proc | tee "$evidence/positive.jsonl"
+          node scripts/published-job-evidence.mjs positive "$evidence/positive.jsonl"
+          node scripts/published-job-evidence.mjs overlay "$evidence"
+          set +e
+          go test -count=1 -timeout=3m -json -overlay="$evidence/overlay.json" -run '^TestPublishedJob' ./internal/base/proc > "$evidence/negative.jsonl"
+          old_result=$?
+          set -e
+          test "$old_result" -eq 1
+          node scripts/published-job-evidence.mjs negative "$evidence/negative.jsonl"
+
+      - name: upload Windows published command job owner evidence
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: published-job-owner-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/published-job-owner/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: test (Windows isolation owners)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -p 4 -timeout=18m -json ./internal/runtime/isolation/... ./internal/platform/worktree/... ./internal/state/mutation/... | tee "$RUNNER_TEMP/isolation-owners.jsonl" |
+            jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $passed |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            (["reasonix/internal/runtime/isolation", "reasonix/internal/platform/worktree", "reasonix/internal/state/mutation"] - $passed | length) == 0 and
+            (["TestResultOperationUsesCrossProcessOwnership",
+              "TestActualResultOperationHoldsOwnershipThroughWriteAndCleanup/restore",
+              "TestActualResultOperationHoldsOwnershipThroughWriteAndCleanup/remove",
+              "TestApplyPathsWithUntrustedModesPreservesTheIndex/content",
+              "TestApplyPathsWithUntrustedModesPreservesTheIndex/source_index_mode",
+              "TestApplyPathsWithUntrustedModesPreservesTheIndex/candidate_mode",
+              "TestApplyPathsWithUntrustedModesPreservesTheIndex/candidate_type",
+              "TestApplyPathsEmulatedLinksUseSnapshotFilters",
+              "TestHeldPathsCoverOnlyTheSameFileAcrossCaseSpellings",
+              "TestLegacyWaitDoesNotConsumeExecutionCapacity"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/isolation-owners.jsonl"
+
+      - name: upload Windows isolation test inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: isolation-owners-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/isolation-owners.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows background resource owners)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -p 2 -timeout=18m -json ./internal/tools/jobs/... ./internal/runtime/delegation/... | tee "$RUNNER_TEMP/background-resources.jsonl" |
+            jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            (["reasonix/internal/tools/jobs", "reasonix/internal/runtime/delegation"] - $packages | length) == 0 and
+            (["TestJobFinalizationCoversInvokedAndUninvoked/success",
+              "TestJobFinalizationCoversInvokedAndUninvoked/error",
+              "TestJobFinalizationCoversInvokedAndUninvoked/panic",
+              "TestJobFinalizationCoversInvokedAndUninvoked/closed",
+              "TestJobFinalizationCoversInvokedAndUninvoked/invalid_session",
+              "TestJobFinalizationCoversInvokedAndUninvoked/invalid_kind",
+              "TestJobFinalizationFailuresAttemptAllCallbacksAndKeepCauses/invoked",
+              "TestJobFinalizationFailuresAttemptAllCallbacksAndKeepCauses/uninvoked",
+              "TestJobFinalizationPrecedesCompletionPublication",
+              "TestJobFinalizationCloseBetweenPublicationAndLaunch",
+              "TestJobFinalizationWaitsForClosureAfterLogicalCancellation",
+              "TestBackgroundNoLaunchFinalizesOwnedResources/task/closed_manager",
+              "TestBackgroundNoLaunchFinalizesOwnedResources/task/invalid_session",
+              "TestBackgroundNoLaunchFinalizesOwnedResources/fleet/closed_manager",
+              "TestBackgroundNoLaunchFinalizesOwnedResources/fleet/invalid_session"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/background-resources.jsonl"
+
+      - name: upload Windows background resource inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: background-resources-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/background-resources.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows planner local budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^TestEffectPlannerConfiguredTaskBudget$' ./internal/assembly/boot | tee "$RUNNER_TEMP/planner-local-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestEffectPlannerConfiguredTaskBudget", "TestEffectPlannerConfiguredTaskBudget/tokens",
+              "TestEffectPlannerConfiguredTaskBudget/cost", "TestEffectPlannerConfiguredTaskBudget/wall",
+              "TestEffectPlannerConfiguredTaskBudget/unconfigured", "TestEffectPlannerConfiguredTaskBudget/explicit_zero",
+              "TestEffectPlannerConfiguredTaskBudget/unpriced_cost", "TestEffectPlannerConfiguredTaskBudget/missing_usage_cost",
+              "TestEffectPlannerConfiguredTaskBudget/context_bound", "TestEffectPlannerConfiguredTaskBudget/context_disables",
+              "TestEffectPlannerConfiguredTaskBudget/executor_only"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/planner-local-budget.jsonl"
+
+      - name: upload Windows planner local budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: planner-local-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/planner-local-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows Controller routing root budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(SemanticRootUsage|EffectRoutingRootBudget)$' ./internal/runtime/capability ./internal/assembly/boot | tee "$RUNNER_TEMP/controller-routing-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/capability", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            ([
+              "TestEffectRoutingRootBudget",
+              "TestEffectRoutingRootBudget/balanced",
+              "TestEffectRoutingRootBudget/cached_continuation",
+              "TestEffectRoutingRootBudget/cached_new_scope",
+              "TestEffectRoutingRootBudget/cached_new_task",
+              "TestEffectRoutingRootBudget/cached_reset",
+              "TestEffectRoutingRootBudget/context_zero",
+              "TestEffectRoutingRootBudget/dual",
+              "TestEffectRoutingRootBudget/headless",
+              "TestEffectRoutingRootBudget/interactive",
+              "TestEffectRoutingRootBudget/missing",
+              "TestEffectRoutingRootBudget/unconfigured",
+              "TestSemanticRootUsage",
+              "TestSemanticRootUsage/billed_error",
+              "TestSemanticRootUsage/cache",
+              "TestSemanticRootUsage/estimated",
+              "TestSemanticRootUsage/invalid_answer",
+              "TestSemanticRootUsage/missing",
+              "TestSemanticRootUsage/nil_sink",
+              "TestSemanticRootUsage/no_observer",
+              "TestSemanticRootUsage/reported"
+            ] - $tests | length) == 0
+          ' "$RUNNER_TEMP/controller-routing-budget.jsonl"
+
+      - name: upload Windows Controller routing root budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: controller-routing-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/controller-routing-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows Coordinator root budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(PreparedRootBudget|CoordinatorRootBudget|EffectCoordinatorRoot)' ./internal/runtime/agent ./internal/runtime/coordinator ./internal/assembly/boot | tee "$RUNNER_TEMP/coordinator-root-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/agent", "reasonix/internal/runtime/coordinator", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestPreparedRootBudgetLifetime", "TestPreparedRootBudgetLifetime/continuation",
+              "TestPreparedRootBudgetLifetime/new_scope", "TestPreparedRootBudgetLifetime/new_task",
+              "TestPreparedRootBudgetLifetime/reset", "TestPreparedRootBudgetLifetime/new_session",
+              "TestPreparedRootBudgetProjectionAndPreservedTurn", "TestCoordinatorRootBudgetRoutes",
+              "TestCoordinatorRootBudgetRoutes/raw", "TestCoordinatorRootBudgetRoutes/tool_planner",
+              "TestCoordinatorRootBudgetRoutes/failure_fallback", "TestCoordinatorRootBudgetRoutes/plan_only_continuation",
+              "TestCoordinatorRootBudgetRoutes/approval_declined_continuation", "TestCoordinatorRootBudgetRoutes/approval_allowed",
+              "TestEffectCoordinatorRootTokenBudget", "TestEffectCoordinatorRootTokenBudget/shared",
+              "TestEffectCoordinatorRootTokenBudget/unconfigured", "TestEffectCoordinatorRootTokenBudget/context_disables",
+              "TestEffectCoordinatorRootTokenBudget/missing_planner", "TestEffectCoordinatorRootTokenBudget/executor_only"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/coordinator-root-budget.jsonl"
+
+      - name: upload Windows Coordinator root budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coordinator-root-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coordinator-root-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows resumed Goal planner budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(GoalResumeRenewsPlannerBudget|GoalNonBudgetResumeKeepsPlannerBudget|GoalTokenBudgetPausesAndResumes|EffectGoalResumeRenewsPlannerBudget)$' ./internal/session/control ./internal/assembly/boot | tee "$RUNNER_TEMP/goal-planner-resume.jsonl"
+          jq -se '
+            ["TestGoalResumeRenewsPlannerBudget",
+             "TestGoalNonBudgetResumeKeepsPlannerBudget",
+             "TestGoalNonBudgetResumeKeepsPlannerBudget/manual_pause",
+             "TestGoalNonBudgetResumeKeepsPlannerBudget/not_resumable",
+             "TestGoalTokenBudgetPausesAndResumes",
+             "TestEffectGoalResumeRenewsPlannerBudget"] as $required |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $passed |
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            all(.[]; .Action != "fail" and .Action != "skip") and
+            (($required - $passed) | length == 0) and
+            ((["reasonix/internal/session/control", "reasonix/internal/assembly/boot"] - $packages) | length == 0)
+          ' "$RUNNER_TEMP/goal-planner-resume.jsonl"
+
+      - name: upload Windows resumed Goal planner budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: goal-planner-resume-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/goal-planner-resume.jsonl
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: test (Windows root wall budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(RootWall|EffectRootWall)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-wall-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestRootWallBudgetReachesDelegatedAgents", "TestRootWallBudgetReachesDelegatedAgents/foreground",
+              "TestRootWallBudgetReachesDelegatedAgents/nested", "TestRootWallBudgetReachesDelegatedAgents/siblings",
+              "TestRootWallBudgetReachesDelegatedAgents/context", "TestRootWallBudgetReachesDelegatedAgents/unconfigured",
+              "TestRootWallBudgetReachesDelegatedAgents/explicit_zero", "TestRootWallBudgetContinuationAndReset",
+              "TestRootWallBudgetContinuationAndReset/continuation", "TestRootWallBudgetContinuationAndReset/new_task",
+              "TestRootWallBudgetContinuationAndReset/reset", "TestRootWallBudgetContinuationAndReset/override",
+              "TestRootWallBudgetProjectionKeepsJobDeadline", "TestEffectRootWallBudgetReachesManagedJobs",
+              "TestEffectRootWallBudgetReachesManagedJobs/task", "TestEffectRootWallBudgetReachesManagedJobs/capability",
+              "TestEffectRootWallBudgetReachesManagedJobs/fleet"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/root-wall-budget.jsonl"
+
+      - name: upload Windows root wall budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: root-wall-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-wall-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows root token budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(RootToken|EffectRootToken)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-token-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestRootTokenBudgetIncludesChildProviderUsage", "TestRootTokenBudgetIncludesChildProviderUsage/configured",
+              "TestRootTokenBudgetIncludesChildProviderUsage/context", "TestRootTokenBudgetIncludesChildProviderUsage/unconfigured",
+              "TestRootTokenBudgetIncludesChildProviderUsage/explicit_zero", "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren",
+              "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren/nested", "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren/siblings",
+              "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren/child_override", "TestRootTokenBudgetContinuationAndReset",
+              "TestRootTokenBudgetContinuationAndReset/continuation", "TestRootTokenBudgetContinuationAndReset/new_task",
+              "TestRootTokenBudgetContinuationAndReset/reset", "TestRootTokenScopeAtomicAccountingAndJobCancellation",
+              "TestEffectRootTokenBudgetReachesDelegatedJobs", "TestEffectRootTokenBudgetReachesDelegatedJobs/foreground",
+              "TestEffectRootTokenBudgetReachesDelegatedJobs/foreground_capability", "TestEffectRootTokenBudgetReachesDelegatedJobs/background",
+              "TestEffectRootTokenBudgetReachesDelegatedJobs/background_capability", "TestEffectRootTokenBudgetReachesDelegatedJobs/background_fleet"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/root-token-budget.jsonl"
+
+      - name: upload Windows root token budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: root-token-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-token-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows budget usage completeness)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(RequestOnlyUsage|RunBudgetMissingUsage|TaskBudgetKnownCost|RunBudgetExplicitZero|TaskBudgetUsageCompleteness|TaskBudgetCostUses|EffectBudgetCompleteness|TaskBudgetGateIgnoresCostWhenUnpriced)' ./internal/contract/provider ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/budget-usage.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/contract/provider", "reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestRequestOnlyUsageDoesNotCertifyTokenAccounting", "TestRunBudgetMissingUsageKeepsCostIncomplete",
+              "TestRunBudgetMissingUsageKeepsCostIncomplete/complete", "TestRunBudgetMissingUsageKeepsCostIncomplete/missing_first",
+              "TestRunBudgetMissingUsageKeepsCostIncomplete/missing_last", "TestRunBudgetMissingUsageKeepsCostIncomplete/all_missing",
+              "TestTaskBudgetKnownCostStillLandsAfterMissingUsage", "TestRunBudgetExplicitZeroUsageIsPriced",
+              "TestTaskBudgetUsageCompletenessFollowsItsLifetime", "TestTaskBudgetUsageCompletenessFollowsItsLifetime/continuation",
+              "TestTaskBudgetUsageCompletenessFollowsItsLifetime/new_task", "TestTaskBudgetUsageCompletenessFollowsItsLifetime/explicit_reset",
+              "TestTaskBudgetCostUsesOnlyTheReportedSubtotal", "TestTaskBudgetGateIgnoresCostWhenUnpriced",
+              "TestEffectBudgetCompletenessFromOpenAIStream", "TestEffectBudgetCompletenessFromOpenAIStream/missing_0",
+              "TestEffectBudgetCompletenessFromOpenAIStream/missing_1", "TestEffectBudgetCompletenessFromOpenAIStream/missing_2"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/budget-usage.jsonl"
+
+      - name: upload Windows budget usage inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: budget-usage-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/budget-usage.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+
+      - name: test (Windows Git storage environment)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(HostStorageEnvironment|HostObjectStorage|HostExplicitStorageControls|DetachedStorageEnvironment|WorktreePreparationOwnsItsIndex|EffectIsolatedTaskOwnsGitStorage)$' ./internal/platform/gitcmd ./internal/platform/worktree ./internal/assembly/boot | tee "$RUNNER_TEMP/git-storage-environment.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/platform/gitcmd", "reasonix/internal/platform/worktree", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            ([
+              "TestDetachedStorageEnvironment",
+              "TestDetachedStorageEnvironment/explicit_env",
+              "TestDetachedStorageEnvironment/inherited_env",
+              "TestEffectIsolatedTaskOwnsGitStorage",
+              "TestEffectIsolatedTaskOwnsGitStorage/ambient_existing",
+              "TestEffectIsolatedTaskOwnsGitStorage/ambient_missing",
+              "TestEffectIsolatedTaskOwnsGitStorage/control",
+              "TestHostExplicitStorageControls",
+              "TestHostExplicitStorageControls/explicit_object_directory",
+              "TestHostExplicitStorageControls/private_index",
+              "TestHostExplicitStorageControls/repository_declared_alternate",
+              "TestHostObjectStorage",
+              "TestHostObjectStorage/ambient_alternate_not_read",
+              "TestHostObjectStorage/writes_stay_in_repository",
+              "TestHostStorageEnvironment",
+              "TestHostStorageEnvironment/GIT_ALTERNATE_OBJECT_DIRECTORIES",
+              "TestHostStorageEnvironment/GIT_INDEX_FILE",
+              "TestHostStorageEnvironment/GIT_OBJECT_DIRECTORY",
+              "TestWorktreePreparationOwnsItsIndex",
+              "TestWorktreePreparationOwnsItsIndex/candidate_ambient_existing",
+              "TestWorktreePreparationOwnsItsIndex/candidate_ambient_missing",
+              "TestWorktreePreparationOwnsItsIndex/candidate_control",
+              "TestWorktreePreparationOwnsItsIndex/delivery_ambient_existing",
+              "TestWorktreePreparationOwnsItsIndex/delivery_ambient_missing",
+              "TestWorktreePreparationOwnsItsIndex/delivery_control"
+            ] - $tests | length) == 0
+          ' "$RUNNER_TEMP/git-storage-environment.jsonl"
+
+      - name: upload Windows Git storage environment inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: git-storage-environment-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/git-storage-environment.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows Anthropic interrupted usage)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(InterruptedUsage|EffectAnthropicPartialUsageRecovery)' ./internal/model/anthropic ./internal/assembly/boot | tee "$RUNNER_TEMP/anthropic-interrupted-usage.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/model/anthropic", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestInterruptedUsageTerminal", "TestInterruptedUsageTerminal/upstream_error",
+              "TestInterruptedUsageTerminal/payload_error", "TestInterruptedUsageTerminal/premature_eof",
+              "TestInterruptedUsageTerminal/decode_error", "TestInterruptedUsageTerminal/reported_zero",
+              "TestInterruptedUsageTerminal/missing_control", "TestInterruptedUsageTerminal/complete_control",
+              "TestInterruptedUsageBoundedConsumer", "TestInterruptedUsageReadErrorAndCancellation",
+              "TestInterruptedUsageReadErrorAndCancellation/read_error", "TestInterruptedUsageReadErrorAndCancellation/cancelled_buffered_reader",
+              "TestInterruptedUsageAbandonedConsumer", "TestInterruptedUsageIdleTimeout",
+              "TestEffectAnthropicPartialUsageRecovery", "TestEffectAnthropicPartialUsageRecovery/upstream_error",
+              "TestEffectAnthropicPartialUsageRecovery/premature_eof", "TestEffectAnthropicPartialUsageRecovery/complete_control"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/anthropic-interrupted-usage.jsonl"
+
+      - name: upload Windows Anthropic interrupted usage inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: anthropic-interrupted-usage-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/anthropic-interrupted-usage.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows root websearch budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(RootWebSearch|EffectRootWebSearch)' ./internal/tools/websearch ./internal/assembly/boot | tee "$RUNNER_TEMP/root-websearch-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/tools/websearch", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestRootWebSearchUsageTerminal", "TestRootWebSearchUsageTerminal/reported",
+              "TestRootWebSearchUsageTerminal/no_reporter", "TestRootWebSearchUsageTerminal/missing",
+              "TestRootWebSearchUsageTerminal/no_observer", "TestRootWebSearchUsageTerminal/input_refused",
+              "TestRootWebSearchUsageTerminal/no_factory", "TestRootWebSearchUsageTerminal/factory_error",
+              "TestRootWebSearchUsageTerminal/billed_failure", "TestRootWebSearchUsageTerminal/cancel_after_usage",
+              "TestRootWebSearchUsageTerminal/cancel_before_start", "TestRootWebSearchUsageTerminal/stream_error",
+              "TestEffectRootWebSearchTokenBudget", "TestEffectRootWebSearchTokenBudget/reported",
+              "TestEffectRootWebSearchTokenBudget/disabled", "TestEffectRootWebSearchTokenBudget/missing"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/root-websearch-budget.jsonl"
+
+      - name: upload Windows root websearch budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: root-websearch-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-websearch-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows root triage budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(RootTriage|EffectRootTriage)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-triage-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestRootTriageTokenBudget", "TestRootTriageTokenBudget/classifier", "TestRootTriageTokenBudget/screen",
+              "TestRootTriageTokenBudget/billed_failure", "TestRootTriageTokenBudget/missing", "TestRootTriageTokenBudget/disabled",
+              "TestRootTriageTokenBudget/no_sink", "TestRootTriageTokenBudget/counts_without_total",
+              "TestRootTriageOutsideRunDoesNotCreateScope", "TestEffectRootTriageScreenBudget",
+              "TestEffectRootTriageScreenBudget/reported", "TestEffectRootTriageScreenBudget/flagged",
+              "TestEffectRootTriageScreenBudget/disabled", "TestEffectRootTriageScreenBudget/missing",
+              "TestEffectRootTriageScreenBudget/screen_disabled"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/root-triage-budget.jsonl"
+
+      - name: upload Windows root triage budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: root-triage-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-triage-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows root auxiliary budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(RootAuxiliary|EffectRootAuxiliary)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-auxiliary-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestRootAuxiliaryAutomaticCompaction", "TestRootAuxiliaryTokenBudget",
+              "TestRootAuxiliaryTokenBudget/summary", "TestRootAuxiliaryTokenBudget/summary_failed",
+              "TestRootAuxiliaryTokenBudget/summary_missing", "TestRootAuxiliaryTokenBudget/summary_disabled",
+              "TestRootAuxiliaryTokenBudget/diagnosis", "TestRootAuxiliaryTokenBudget/diagnosis_failed",
+              "TestRootAuxiliaryTokenBudget/diagnosis_missing", "TestRootAuxiliaryTokenBudget/diagnosis_disabled",
+              "TestRootAuxiliaryManualCompactionOutsideRun", "TestRootAuxiliaryBudgetProjectionKeepsOldTask",
+              "TestEffectRootAuxiliarySummaryBudget", "TestEffectRootAuxiliarySummaryBudget/configured",
+              "TestEffectRootAuxiliarySummaryBudget/disabled", "TestEffectRootAuxiliarySummaryBudget/missing_usage"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/root-auxiliary-budget.jsonl"
+
+      - name: upload Windows root auxiliary budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: root-auxiliary-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-auxiliary-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows estimated usage quotes)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(EstimatedUsage|EffectEstimatedUsage|ToWireUsagePayloadJSON$|StatusExtensionTracksMultipleSessionsAndUsage$|CacheSplitProvenanceIsRecorded$|RecordedPlainCallIsUnchanged$)' ./internal/contract/pricing ./internal/contract/event ./internal/contract/config ./internal/assembly/boot ./internal/contract/eventwire ./internal/frontend/acp ./internal/state/stats | tee "$RUNNER_TEMP/estimated-quote.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/contract/pricing", "reasonix/internal/contract/event", "reasonix/internal/contract/config", "reasonix/internal/assembly/boot",
+              "reasonix/internal/contract/eventwire", "reasonix/internal/frontend/acp", "reasonix/internal/state/stats"] - $packages | length) == 0 and
+            (["TestEstimatedUsageQuotePreservesAmountsWithoutCompleteFacts", "TestEstimatedUsageQuotePreservesAmountsWithoutCompleteFacts/CNY",
+              "TestEstimatedUsageQuotePreservesAmountsWithoutCompleteFacts/USD", "TestEstimatedUsageLedgerRetainsPartialCoverage",
+              "TestEstimatedUsageLedgerRetainsPartialCoverage/separate_keys", "TestEstimatedUsageLedgerRetainsPartialCoverage/same_key",
+              "TestEstimatedUsageSavedQuoteReader", "TestEstimatedUsageQuoteSinkCoversTurnAndGuardian",
+              "TestEstimatedUsageQuoteSinkCoversTurnAndGuardian/turn", "TestEstimatedUsageQuoteSinkCoversTurnAndGuardian/guardian",
+              "TestEstimatedUsageConfiguredQuote", "TestEffectEstimatedUsageQuoteAfterStreamRecovery",
+              "TestEffectEstimatedUsageQuoteAfterStreamRecovery/reported_control", "TestEffectEstimatedUsageQuoteAfterStreamRecovery/interrupted",
+              "TestToWireUsagePayloadJSON", "TestStatusExtensionTracksMultipleSessionsAndUsage", "TestCacheSplitProvenanceIsRecorded", "TestRecordedPlainCallIsUnchanged"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/estimated-quote.jsonl"
+
+      - name: upload Windows estimated quote inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: estimated-quote-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/estimated-quote.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows bounded root budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(AuxiliaryUsageObserver|BoundedUsageObserver|RootBounded|EffectRootBounded)' ./internal/contract/provider ./internal/model/boundedllm ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/bounded-root-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/contract/provider", "reasonix/internal/model/boundedllm",
+              "reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestAuxiliaryUsageObserverReplacesAndCopies",
+              "TestBoundedUsageObserverOwnsOneTerminal", "TestBoundedUsageObserverOwnsOneTerminal/reported",
+              "TestBoundedUsageObserverOwnsOneTerminal/billed_failure", "TestBoundedUsageObserverOwnsOneTerminal/without_sink",
+              "TestBoundedUsageObserverOwnsOneTerminal/missing", "TestBoundedUsageObserverOwnsOneTerminal/input_refused",
+              "TestRootBoundedReviewerBudget", "TestRootBoundedReviewerBudget/reported",
+              "TestRootBoundedReviewerBudget/billed_failure", "TestRootBoundedReviewerBudget/missing_usage",
+              "TestRootBoundedReviewerBudget/disabled", "TestRootBoundedReviewerBudget/no_emission",
+              "TestRootBoundedReviewerBudget/projected_job_context", "TestRootBoundedNestedBudgetChargesOnce",
+              "TestRootBoundedLateProjectionStaysWithOldTask", "TestEffectRootBoundedAdvisorBudget",
+              "TestEffectRootBoundedAdvisorBudget/reported", "TestEffectRootBoundedAdvisorBudget/disabled",
+              "TestEffectRootBoundedAdvisorBudget/missing_usage"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/bounded-root-budget.jsonl"
+
+      - name: upload Windows bounded root budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bounded-root-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bounded-root-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
 
       # The general Windows PR smoke list intentionally omits internal/contract/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -315,7 +883,7 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
-        run: go test -race ./internal/runtime/agent/... ./internal/ext/plugin/... ./internal/tools/jobs/... ./internal/base/proc/... ./internal/safety/sandbox/... ./internal/base/filelock/... ./internal/contract/eventwire/... ./internal/platform/remote/... ./internal/ext/extension/... ./internal/assembly/boot/... ./internal/session/control/... ./internal/contract/tool/...
+        run: go test -race ./internal/runtime/agent/... ./internal/runtime/delegation/... ./internal/runtime/isolation/... ./internal/platform/worktree/... ./internal/state/mutation/... ./internal/ext/plugin/... ./internal/tools/jobs/... ./internal/base/proc/... ./internal/safety/sandbox/... ./internal/base/filelock/... ./internal/contract/eventwire/... ./internal/platform/remote/... ./internal/ext/extension/... ./internal/assembly/boot/... ./internal/session/control/... ./internal/contract/tool/...
 
       - name: test -race (full)
         if: github.event_name != 'pull_request'

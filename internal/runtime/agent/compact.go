@@ -639,6 +639,7 @@ func (a *contextWindow) summarizeAtMode(ctx context.Context, region []provider.M
 	}()
 	defer func() {
 		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
+		observeRootTokenUsage(ctx, usage)
 		if usage != nil && (usage.TotalTokens > 0 || usage.RequestCount > 0) {
 			// Recorded beside the emit, not at the call site that keeps the
 			// answer: a repair whose digest is discarded was still charged.

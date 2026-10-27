@@ -11,6 +11,7 @@ var (
 func deepSeekAnthropicPreset() ProviderPreset {
 	return ProviderPreset{
 		ID:          "deepseek-anthropic",
+		Vendor:      "deepseek",
 		Label:       "DeepSeek Official Anthropic",
 		Description: "Separate official DeepSeek Anthropic-compatible entry for Flash and Pro.",
 		KeyEnv:      "DEEPSEEK_API_KEY",
@@ -39,6 +40,7 @@ func deepSeekAnthropicPreset() ProviderPreset {
 func deepSeekResponsesPreset() ProviderPreset {
 	return ProviderPreset{
 		ID:          "deepseek-responses",
+		Vendor:      "deepseek",
 		Label:       "DeepSeek Official Responses API",
 		Description: "Official stateless DeepSeek Responses API for Flash with server-side web search.",
 		KeyEnv:      "DEEPSEEK_API_KEY",

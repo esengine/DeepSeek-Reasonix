@@ -4,7 +4,8 @@ import type { AgentPort } from "../port/port";
 import type { PaneReport } from "./Pane";
 import { t } from "../i18n";
 import { openSessionLimit } from "../state/prefs";
-import { newTaskComposition } from "../state/newTaskPreset";
+import { forgetNewTaskPreset, newTaskComposition } from "../state/newTaskPreset";
+import { HttpError } from "../port/http_error";
 import { pushNote, pushToast } from "../state/toasts";
 import { reason } from "../i18n/kernel";
 import type { SessionSwitch } from "./sessionswitch";
@@ -35,7 +36,8 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
   const placePane = useCallback(
     async (req: { root?: string; sessionPath?: string; agentComposition?: string }): Promise<Placed> => {
       const composition = newTaskComposition(req.agentComposition, req.sessionPath);
-      if (composition !== undefined && req.agentComposition === undefined) req = { ...req, agentComposition: composition };
+      const defaulted = composition !== undefined && req.agentComposition === undefined;
+      if (defaulted) req = { ...req, agentComposition: composition };
       // Blank means never written to and not working: a new session mid-turn has
       // no path in a stale pane list yet, and taking it over would hide its run.
       const blank = runtimes.find(
@@ -92,7 +94,16 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
         folded(idle[0]);
         await hub.close(retired);
       }
-      const rt = await hub.open(req);
+      let rt: RuntimeView;
+      try {
+        rt = await hub.open(req);
+      } catch (e) {
+        // A personal default whose preset was deleted since: the refusal names it,
+        // so it is dropped and the task opens as it would with no default.
+        if (!defaulted || !(e instanceof HttpError) || e.reason?.code !== "agent_composition.not_found") throw e;
+        forgetNewTaskPreset();
+        rt = await hub.open({ ...req, agentComposition: undefined });
+      }
       // Another folder needs its own runtime, so the blank one is retired
       // rather than left behind.
       if (blank && blank.id !== rt.id) await hub.close(blank.id);

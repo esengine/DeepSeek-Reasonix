@@ -73,7 +73,7 @@ func (b *builder) addBestOf() {
 func candidateRunner(parent Options, sink event.Sink, approval *candidateApproval) bestof.Runner {
 	return func(ctx context.Context, run bestof.Run) (bestof.Outcome, error) {
 		cs := &candidateSink{parent: sink}
-		answer, unverified, err := runUnattended(ctx, parent, cs, approval.mode(), run.WorkspaceRoot, run.Prompt, run.Model)
+		answer, unverified, err := runUnattended(ctx, parent, cs, approval.mode(), run.WorkspaceRoot, run.Prompt, provider.Selection{Ref: run.Model}, 0)
 		return bestof.Outcome{Answer: answer, Unverified: unverified, Host: cs.summary()}, err
 	}
 }
@@ -82,7 +82,7 @@ func candidateRunner(parent Options, sink event.Sink, approval *candidateApprova
 // its end. Its transcript lives in a temp dir removed with it; only what sink
 // forwards reaches the parent session. A run that stopped without proving its
 // work is not an error: its readiness reason comes back as unverified.
-func runUnattended(ctx context.Context, parent Options, sink event.Sink, mode, root, prompt, model string) (answer, unverified string, err error) {
+func runUnattended(ctx context.Context, parent Options, sink event.Sink, mode, root, prompt string, selection provider.Selection, maxSteps int) (answer, unverified string, err error) {
 	sessDir, err := os.MkdirTemp("", "reasonix-candidate-")
 	if err != nil {
 		return "", "", err
@@ -92,7 +92,9 @@ func runUnattended(ctx context.Context, parent Options, sink event.Sink, mode, r
 		ComputerDriver:       parent.ComputerDriver,
 		WorkspaceRoot:        root,
 		Home:                 parent.Home,
-		Model:                model,
+		Model:                selection.Ref,
+		EffortOverride:       selection.Effort,
+		MaxSteps:             maxSteps,
 		AgentPreset:          parent.AgentPreset,
 		ProviderResolver:     parent.ProviderResolver,
 		Sink:                 sink,

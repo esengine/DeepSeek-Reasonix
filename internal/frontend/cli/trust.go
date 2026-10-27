@@ -14,9 +14,10 @@ import (
 )
 
 type trustOptions struct {
-	dir    string
-	yes    bool
-	revoke bool
+	dir            string
+	yes            bool
+	revoke         bool
+	allowProviders bool
 }
 
 func trustCommand(args []string) int {
@@ -84,11 +85,24 @@ func runTrust(args []string, in *bufio.Scanner, out io.Writer, interactive bool)
 			return 1
 		}
 	}
+	pending, held := splitProviderEndpoints(pending)
+	if len(held) > 0 && !opts.allowProviders {
+		if interactive && !opts.yes {
+			if answer := ask(in, out, "Send your API key to the provider address(es) above?", "y/N"); strings.EqualFold(strings.TrimSpace(answer), "y") {
+				pending, held = append(pending, held...), nil
+			}
+		}
+	} else {
+		pending, held = append(pending, held...), nil
+	}
 	if len(pending) > 0 {
 		if err := store.Approve(root, pending...); err != nil {
 			fmt.Fprintln(out, "approve:", err)
 			return 1
 		}
+	}
+	for _, p := range held {
+		fmt.Fprintf(out, "Not approved: [%s] %s receives your API key at its own address; approve it by name with --allow-providers.\n", p.Kind, p.Name)
 	}
 	if canTrust {
 		if err := grants.SetTrust(root, config.WorkspaceTrusted); err != nil {
@@ -98,6 +112,19 @@ func runTrust(args []string, in *bufio.Scanner, out io.Writer, interactive bool)
 	}
 	fmt.Fprintln(out, "Approved. Any change to a program it names needs approval again.")
 	return 0
+}
+
+// splitProviderEndpoints separates the pending approvals that hand the user's
+// API key to an address the folder wrote from the programs the folder runs.
+func splitProviderEndpoints(pending []config.ProjectProgram) (rest, endpoints []config.ProjectProgram) {
+	for _, p := range pending {
+		if p.Kind == config.ProjectProgramProvider || p.Kind == config.ProjectProgramEndpoint {
+			endpoints = append(endpoints, p)
+		} else {
+			rest = append(rest, p)
+		}
+	}
+	return rest, endpoints
 }
 
 func pendingProjectPrograms(roots config.Roots, root string) ([]config.ProjectProgram, error) {
@@ -120,13 +147,15 @@ func parseTrustOptions(args []string) (trustOptions, error) {
 			opts.yes = true
 		case arg == "--revoke":
 			opts.revoke = true
+		case arg == "--allow-providers":
+			opts.allowProviders = true
 		case arg == "--dir" && i+1 < len(args):
 			i++
 			opts.dir = args[i]
 		case strings.HasPrefix(arg, "--dir="):
 			opts.dir = strings.TrimPrefix(arg, "--dir=")
 		default:
-			return opts, fmt.Errorf("usage: reasonix trust [--dir PATH] [--yes|--revoke] (unknown argument %q)", arg)
+			return opts, fmt.Errorf("usage: reasonix trust [--dir PATH] [--yes [--allow-providers]|--revoke] (unknown argument %q)", arg)
 		}
 	}
 	if opts.yes && opts.revoke {

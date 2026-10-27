@@ -37,6 +37,22 @@ type ProjectDispatcher interface {
 	DispatchToProject(ctx context.Context, project, text string) (DispatchReceipt, error)
 }
 
+// OpenedProject is what became of one folder the model asked to have opened.
+// Code is the refusal identity when it was not; an empty Code with Added false
+// means the folder was already in the list.
+type OpenedProject struct {
+	Path  string
+	Added bool
+	Code  string
+}
+
+// ProjectOpener is what the open_projects tool asks of the session that owns
+// it: add folders to the user's project list as trusted, after the user has
+// answered a card that names every one of them.
+type ProjectOpener interface {
+	OpenProjects(ctx context.Context, paths []string) ([]OpenedProject, error)
+}
+
 // PeerLink joins the peer tools, built with the registry, to the controller
 // that exists only afterwards. Until the controller binds it the tools answer
 // that no session is listening.

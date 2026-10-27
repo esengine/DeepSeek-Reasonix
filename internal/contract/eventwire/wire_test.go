@@ -409,12 +409,21 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 		`"cacheHitTokens":900`, `"cacheMissTokens":100`, `"reasoningTokens":33`,
 		`"estimated":true`,
 		`"source":"title"`, `"sessionCacheHitTokens":8000`, `"sessionCacheMissTokens":2000`,
-		`"currency":"¥"`, `"costUsd":`, `"cacheDiagnostics":`, `"prefixHash":"p"`,
+		`"costComplete":false`, `"coverage":"incomplete"`, `"incompleteReason":"missing_price_or_usage"`,
+		`"cacheDiagnostics":`, `"prefixHash":"p"`,
 		`"prefixChanged":true`, `"prefixChangeReasons":["log_rewrite"]`, `"toolSchemaTokens":42`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("usage JSON = %s, want it to contain %s", s, want)
 		}
+	}
+	if w.Usage.CostQuote == nil || w.Usage.CostQuote.Original.Amount != "0.000518" || w.Usage.Currency != "" || w.Usage.CostUSD != 0 {
+		t.Fatalf("estimated quote/selected aliases = %+v", w.Usage)
+	}
+	u := &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100}
+	control := ToWire(event.Event{Kind: event.Usage, Usage: u, Pricing: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2}})
+	if control.Usage.Currency != "¥" || control.Usage.CostUSD == 0 || !control.Usage.CostComplete {
+		t.Fatalf("reported usage lost selected aliases: %+v", control.Usage)
 	}
 }
 

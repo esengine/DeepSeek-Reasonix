@@ -6,17 +6,16 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
-const keptFailuresWindowFrac = 0.05
+const (
+	keptFailuresWindowFrac  = 0.05
+	keptFailuresTriggerFrac = 0.10
+)
 
 // keptFailuresBudget caps what retained failures may spend of a checkpoint. A
 // retained failure rides into the next fold's region, so without its own bound
 // the retention grows by each round's failures until the acceptance ceiling.
 func (a *contextWindow) keptFailuresBudget() int {
-	window := a.effectiveContextWindow()
-	if window <= 0 {
-		return keptUserTurnsFloorTokens
-	}
-	return max(1, int(float64(window)*keptFailuresWindowFrac))
+	return a.retentionBudget(keptFailuresWindowFrac, keptFailuresTriggerFrac)
 }
 
 // keepFailuresWithinBudget retains the newest failed tool results that fit the

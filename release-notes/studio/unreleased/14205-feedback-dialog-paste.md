@@ -1,2 +1,0 @@
-- 修复：切回「发送反馈」标签或点击反馈窗口标题后，Ctrl+V 也能添加截图；不会把图片添加到隐藏、发送中或已发送的反馈里。关联 #14205。
-- Fixed: pasting a screenshot works after returning to the Send feedback tab or clicking the feedback dialog heading, without adding images to hidden, sending, or completed reports. Refs #14205.

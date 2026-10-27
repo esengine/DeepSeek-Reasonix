@@ -87,11 +87,48 @@ export interface Appearance {
   wallpaper?: Wallpaper;
 }
 
+export interface WallpaperLayer {
+  url: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  alpha: number;
+  effects?: string[];
+}
+
+export interface WallpaperAudioTrack {
+  url: string;
+  volume: number;
+  loop: boolean;
+}
+
 export interface Wallpaper {
   // Content-addressed, so the bytes at this address never change.
   url: string;
+  // A picture is drawn as the window's background, a video as an element
+  // behind it; a scene adds its soundtrack and pointer parallax. The kernel
+  // decides which from the type it was uploaded as.
+  kind: "image" | "video" | "scene";
+  // A Wallpaper Engine scene's title and soundtrack, when it has one.
+  title?: string;
+  audio?: string;
+  audios?: string[];
+  audioTracks?: WallpaperAudioTrack[];
+  layers?: WallpaperLayer[];
+  sceneWidth?: number;
+  sceneHeight?: number;
+  parallax?: number;
+  muted?: boolean;
+  volume?: number;
   opacity: number;
   dim: number;
   focusX: number;
   focusY: number;
+}
+
+export interface SceneFolder {
+  project: File;
+  scene: File;
+  preview?: File;
 }

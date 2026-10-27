@@ -53,6 +53,59 @@ func toCRLF(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
 }
 
+// lineEndingAt names the terminator of the line holding offset at: that line's
+// own newline, or the previous line's when it is the file's last and unterminated.
+func lineEndingAt(content string, at int) string {
+	i := strings.IndexByte(content[at:], '\n')
+	if i >= 0 {
+		i += at
+	} else {
+		i = strings.LastIndexByte(content[:at], '\n')
+	}
+	if i > 0 && content[i-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+// replaceLiteral swaps exact matches of old and gives each replacement the line
+// ending of the line it lands in, so a CRLF line never receives a bare LF and an
+// LF line in a mixed file never receives a CR. It returns the first replacement
+// as written, for the receipt.
+func replaceLiteral(content, old, replacement string, all bool) (updated, first string, n int) {
+	if old == "" {
+		if all {
+			return strings.ReplaceAll(content, old, replacement), replacement, strings.Count(content, old)
+		}
+		return strings.Replace(content, old, replacement, 1), replacement, 1
+	}
+	var b strings.Builder
+	pos := 0
+	for {
+		i := strings.Index(content[pos:], old)
+		if i < 0 {
+			break
+		}
+		i += pos
+		rep := replacement
+		if lineEndingAt(content, i) == "\r\n" {
+			rep = toCRLF(replacement)
+		}
+		if n == 0 {
+			first = rep
+		}
+		b.WriteString(content[pos:i])
+		b.WriteString(rep)
+		pos = i + len(old)
+		n++
+		if !all {
+			break
+		}
+	}
+	b.WriteString(content[pos:])
+	return b.String(), first, n
+}
+
 func matchReplacementLineEndings(content, replacement string) string {
 	if strings.Contains(content, "\r\n") {
 		return toCRLF(replacement)
@@ -93,13 +146,14 @@ func applyOldStringEdit(content, oldString, newString string, replaceAll bool) e
 	old, newStr := matchLineEndings(content, oldString, newString)
 	if replaceAll {
 		if count := strings.Count(content, old); count > 0 {
+			updated, first, _ := replaceLiteral(content, old, newStr, true)
 			return editApplyResult{
-				updated: strings.ReplaceAll(content, old, newStr),
+				updated: updated,
 				applied: count,
 				matches: count,
 				receipt: editReplacementReceipt{
 					matched:     old,
-					replacement: newStr,
+					replacement: first,
 					occurrences: count,
 				},
 			}
@@ -142,13 +196,14 @@ func applyOldStringEdit(content, oldString, newString string, replaceAll bool) e
 			},
 		}
 	case 1:
+		updated, replacement, _ := replaceLiteral(content, old, newStr, false)
 		return editApplyResult{
-			updated: strings.Replace(content, old, newStr, 1),
+			updated: updated,
 			applied: 1,
 			matches: 1,
 			receipt: editReplacementReceipt{
 				matched:     old,
-				replacement: newStr,
+				replacement: replacement,
 				occurrences: 1,
 			},
 		}

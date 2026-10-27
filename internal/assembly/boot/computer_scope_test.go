@@ -50,7 +50,7 @@ func TestComputerDriverReachesStudioUnattendedChildSchema(t *testing.T) {
 	approveWorkspace(t, root)
 	driver := computer.NewDriver("/unused", nil)
 	defer driver.Close()
-	_, _, err := runUnattended(t.Context(), Options{ComputerDriver: driver}, event.Discard, "deny", root, "answer briefly", "")
+	_, _, err := runUnattended(t.Context(), Options{ComputerDriver: driver}, event.Discard, "deny", root, "answer briefly", provider.Selection{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

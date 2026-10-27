@@ -583,6 +583,10 @@ func (h *Hub) openRuntime(w http.ResponseWriter, r *http.Request) {
 		badBody(w)
 		return
 	}
+	if !hostReach(r) && !deviceMayOpenRoot(req.Root, h.knownRoots()) {
+		refuse(w, http.StatusNotFound, codeDeviceHostOnly, "a paired device cannot use this", nil)
+		return
+	}
 	rt, err := h.Open(r.Context(), req)
 	if err != nil {
 		// Every refusal Open produces carries its own status; what is left is
@@ -678,6 +682,7 @@ func (h *Hub) publish(rt *Runtime) error {
 		}
 		if concrete {
 			ctrl.SetProjectDispatcher(h.dispatcherFor(rt))
+			ctrl.SetProjectOpener(openProjects)
 		}
 		rt.Server.bindMu.Unlock()
 		rt.Server.bc.observeTree(h.treeChanged)

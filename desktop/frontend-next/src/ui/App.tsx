@@ -26,7 +26,6 @@ import { useLinkRouting } from "./links";
 import { Pane, type PaneReport } from "./Pane";
 import { clearDraftForSession } from "./drafts";
 import { DOCK, Gutter, RAIL, dockMax, keepWidth, widthOf } from "./Gutter";
-import { useColumn } from "./FlowResizer";
 import { useWindowKeys, type Shortcut } from "./windowkeys";
 import { useEscStop } from "../state/escstop";
 import { startUpdateWatch } from "../state/updatewatch";
@@ -50,7 +49,7 @@ import { useZoomKeys } from "./zoomkeys";
 import { rememberActivePane, savedActivePane } from "./activepane";
 import { Sidebar } from "./Sidebar";
 import { PeerThreadsProvider } from "./peerthreads";
-import { Sky } from "./Sky";import { useAddWorkspace } from "./addws";
+import { WallpaperStage } from "./WallpaperStage";import { useAddWorkspace } from "./addws";
 import { AddWorkspacePrompt } from "./AddWorkspacePrompt";
 import { PaneTabs } from "./PaneTabs";
 import { paneReader } from "../state/paneread";
@@ -398,10 +397,6 @@ export function App({ hub }: { hub: HubPort }) {
   useEffect(() => onRoomWidth((width) => setDockLimit(dockMax(width))), []);
   const shownDockW = Math.min(dockW, dockLimit);
 
-  // The reading column owns its width and what it takes from the sidebars; the
-  // window only says how much room there is.
-  const col = useColumn(railW, shownDockW, RAIL.min, DOCK.min);
-
   const onRailW = useCallback((w: number) => { setRailW(w); keepWidth(RAIL, w); }, []);
   const onDockW = useCallback((w: number) => { setDockW(w); keepWidth(DOCK, w); }, []);
 
@@ -494,17 +489,11 @@ export function App({ hub }: { hub: HubPort }) {
     panes: runtimes.length,
     root: newSessionRoot,
     openPane,
-    refuse: (message) => {
-      setSettings(false);
-      setFeedback(null);
-      setError(message);
-    },
     fail: (e) => {
       setSettings(false);
       setFeedback(null);
       fail(e);
     },
-    clear: (message) => setError((cur) => (cur === message ? "" : cur)),
   });
 
   // The tab strip has nowhere to await: closing is the end of the gesture there,
@@ -563,7 +552,7 @@ export function App({ hub }: { hub: HubPort }) {
       data-apv={report.status?.toolApprovalMode ?? "ask"}
       data-prefs={settings ? "" : undefined}
       data-tabs={runtimes.length > 1 ? "" : undefined}
-      style={{ "--rail-open": `${col.rail}px`, "--dock-open": `${col.dock}px`, ...(col.dragged > 0 ? { "--flow-w": `${col.width}px` } : null) } as CSSProperties}
+      style={{ "--rail-open": `${railW}px`, "--dock-open": `${shownDockW}px` } as CSSProperties}
     >
       {ask && <RemoteAsk ask={ask} onAnswer={answerRemote} />}
       <BrowserLogin />
@@ -574,7 +563,6 @@ export function App({ hub }: { hub: HubPort }) {
         status={report.status}
         title={tabs.find((tab) => tab.rt.id === active)?.title ?? report.title}
         steer={report.steer}
-        onSettings={showPrefs}
         account={account}
         theme={scheme}
         onTheme={() => setTheme(scheme === "dark" ? "light" : "dark")}
@@ -583,7 +571,7 @@ export function App({ hub }: { hub: HubPort }) {
         hub={hub} onError={fail}
       />
 
-      {pack?.sky && effects !== "reduced" && <Sky />}
+      <WallpaperStage sky={!!pack?.sky && effects !== "reduced"} look={look} onLook={onLook} />
 
       <div className="cols">
         {navRail.drawn && (
@@ -710,10 +698,9 @@ export function App({ hub }: { hub: HubPort }) {
                   onFeedback={openFeedback}
                   onOpenSession={openSessionFor(rt.id)}
                   theme={scheme}
-                  dockW={col.dock}
+                  dockW={shownDockW}
                   dockMax={dockLimit}
                   onDockW={onDockW}
-                  column={col}
                   manualBrowser={rt.id === active && browser}
                   onManualBrowser={setBrowser}
                 />
@@ -725,11 +712,10 @@ export function App({ hub }: { hub: HubPort }) {
                   ⌘
                 </span>
                 <p className="t">{t("没有打开的会话")}</p>
-                {/* With no folder there is nowhere a session could open, so the
-                    one button offered is the step that makes it possible. */}
                 {!treeRead ? null : tree.length === 0 ? (
                   <>
-                    <p className="h">{t("会话在文件夹里打开，先添加一个")}</p>
+                    <p className="h">{t("没有文件夹也能开始：会话会在应用自己的目录里打开")}</p>
+                    <button data-action="session.new" onClick={() => void startConversation().catch(fail)}>{t("新建会话")}</button>
                     <button data-action="workspace.add" disabled={adder.busy} onClick={() => adder.add()}>{t("添加文件夹")}</button>
                   </>
                 ) : (

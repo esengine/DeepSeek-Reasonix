@@ -56,7 +56,7 @@ func TestResumePreemptsProjectionButTreeRefreshDoesNot(t *testing.T) {
 	release()
 	mux := http.NewServeMux()
 	rt.Server.registerHistoryRoutes(mux)
-	for _, path := range []string{"/history", "/history/tool/missing"} {
+	for _, path := range []string{"/history", "/history/page", "/history/tool/missing"} {
 		job, release, err := backgroundwork.Shared.Acquire(t.Context(), backgroundwork.Rebuild)
 		if err != nil {
 			t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/extension"
 	"reasonix/internal/ext/skill"
@@ -207,7 +208,11 @@ func (b *builder) finishComposition(ctrl *control.Controller, snap *extension.Ru
 	}
 	if binding.Digest != "" {
 		if binding.ToolSchemaDigest != agentcomposition.Digest(b.tools.reg.Schemas()) {
-			return fmt.Errorf("%w: tool contract changed", agentcomposition.ErrUnavailable)
+			if err := verifySelected("tools", binding.Resolved.Tools, b.tools.reg.AllNames(), func(v string) string { return v }); err != nil {
+				return err
+			}
+			report(b.opts.Sink, event.Event{Level: event.LevelInfo, Code: event.NoticeCodeCompositionToolsChanged,
+				Text: "A built-in tool changed after this conversation started. It continues with the tools it recorded; the first reply may take longer while the model provider's cache is rebuilt."})
 		}
 	} else {
 		if err := verifySelected("tools", binding.Resolved.Tools, b.tools.reg.AllNames(), func(v string) string { return v }); err != nil {

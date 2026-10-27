@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -83,7 +84,9 @@ func TestFinalObservationIsBoundedAfterACompletedAnswer(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			var want error
-			wait := time.Second
+			// Run still seals the bundle once its context ends, so the wait
+			// only catches an observation holding the turn, never latency.
+			wait := testenv.Budget(t)
 			if end == "cancel" {
 				want = context.Canceled
 			}
@@ -91,16 +94,15 @@ func TestFinalObservationIsBoundedAfterACompletedAnswer(t *testing.T) {
 				ctx, cancel = context.WithTimeout(t.Context(), 2*time.Second)
 				defer cancel()
 				want = context.DeadlineExceeded
-				wait = 3 * time.Second
 			}
 			if end == "observation_budget" {
-				wait = snapshotWait + 3*time.Second
+				wait += snapshotWait
 			}
 			done := make(chan error, 1)
 			go func() { done <- a.Run(ctx, "Answer the question.") }()
 			select {
 			case <-store.blocked:
-			case <-time.After(5 * time.Second):
+			case <-time.After(testenv.Budget(t)):
 				t.Fatal("final workspace observation was not reached")
 			}
 			msgs := sess.Snapshot()

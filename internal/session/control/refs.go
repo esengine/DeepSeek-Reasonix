@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reasonix/internal/contract/config"
 	"regexp"
 	"sort"
 	"strings"
@@ -756,6 +757,9 @@ func (c *Controller) resolveReferencedInstructions(r ref, baseDir string, includ
 		includedPaths[pathKey] = true
 		includedBodies[doc.Body] = true
 		delta = append(delta, doc)
+	}
+	if c.WorkspaceTrust() != config.WorkspaceTrusted {
+		delta = instruction.MarkUnverified(delta)
 	}
 	return instruction.Block(delta), resolved.Diagnostics
 }

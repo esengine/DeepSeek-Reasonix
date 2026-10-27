@@ -1,0 +1,2 @@
+- 修复：工作区里有多个 Git 仓库时，工作台的改动列表不再撑出面板，现在有自己的滚动条，下面的文件列表也不会被挤出去。修复 #14628。
+- Fixed: with several Git repositories in a workspace, the workbench changes list no longer grows past the panel; it scrolls on its own and the file list stays visible. Fixes #14628.

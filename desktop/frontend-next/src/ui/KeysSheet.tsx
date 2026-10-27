@@ -12,7 +12,6 @@ const KEYS: Array<[string, string]> = [
   [`${chord("↑")} / ${chord("↓")}`, "在提问之间移动"],
   [chord("Shift+E"), "优化提示词"],
   [chord("Shift+F"), "工作台全屏"],
-  [chord("Shift+B"), "工作台加宽"],
   [`${chord("-")} / ${chord("+")} / ${chord("0")}`, "缩小 / 放大 / 复原界面"],
   [chord("Enter"), "发送（发送键设为修饰键 + Enter 时）"],
   ["Enter / Shift+Enter", "发送，或用 Shift 换行"],
