@@ -28,6 +28,22 @@ function SavedImage({ path, src }: { path: string; src: string }) {
   </div>;
 }
 
+// The thumbnail stands for a stored image, so the token that carried it into
+// the turn is not drawn again as prose. A removed token leaves a placeholder,
+// and only the whitespace beside one is collapsed; any other message text is
+// returned byte for byte, so paragraph breaks and indentation survive.
+export function stripAttachmentTokens(text: string, paths: string[]): string {
+  const covered = paths.filter(Boolean).map((p) => p.replace(/[.*+()?^${}|[\]\\]/g, "\\$&"));
+  if (covered.length === 0) return text;
+  const token = new RegExp("(?:^|\\s)@(?:" + covered.join("|") + ")(?=$|\\s)", "g");
+  const HOLD = "\u0000";
+  return text
+    .replace(token, HOLD)
+    .replace(/^\u0000[ \t\r\n]*/, "")
+    .replace(/\u0000[ \t]/g, " ")
+    .replace(/\u0000/g, "");
+}
+
 export function UserCard({
   item,
   port,
@@ -57,6 +73,9 @@ export function UserCard({
   const rewind = !!(cp && onPrepareRewind && onCommitRewind);
   const pin = useMemo(() => parseSkillPin(item.text), [item.text]);
   const images = useMemo(() => [...new Set((item.attachments ?? []).map((a) => a.path))], [item.attachments]);
+  // What the row says is the words without the paths the thumbnails already
+  // stand for; empty means the message was only its attachments, so no bubble.
+  const shown = useMemo(() => stripAttachmentTokens(item.text, images), [item.text, images]);
 
   useEffect(() => {
     const el = box.current;
@@ -97,7 +116,7 @@ export function UserCard({
                 const src = port.workspaceImageURL(path);
                 return <SavedImage key={src} path={path} src={src} />;
               })}</div>}
-              {pin ? <SkillPinView pin={pin} /> : <div className="txt" dir="auto">{item.text}</div>}
+              {pin ? <SkillPinView pin={pin} /> : shown ? <div className="txt" dir="auto">{shown}</div> : null}
             </>
           ) : (
             <div className="reask">
