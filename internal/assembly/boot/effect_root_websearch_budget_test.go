@@ -125,7 +125,7 @@ api_key_env = "ROOT_SEARCH_KEY"
 			t.Cleanup(ctrl.Close)
 			ctrl.SetSessionPath(sessionstore.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 			ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
-			err = ctrl.Run(t.Context(), "search the native fixture")
+			err = ctrl.Run(reportedBudgetEffectContext(t, t.Context()), "search the native fixture")
 			if tc.limit == 0 {
 				if err != nil {
 					t.Fatal(err)

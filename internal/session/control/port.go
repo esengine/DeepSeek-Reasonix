@@ -444,10 +444,12 @@ type PeerMail interface {
 // running or finished, and any one run's conversation.
 type SubagentView interface {
 	SubagentRuns() ([]delegation.RunInfo, error)
+	FleetRecoveryPlans(ref string) ([]delegation.FleetRecoveryPlan, error)
+	RequestFleetRecovery(ref, id, snapshot string) error
 	SubagentTranscript(ref string, after, limit int) (delegation.RunTranscript, error)
 	// SteerSubagent sends the person's guidance to a running sub-agent; see the
 	// delegation errors for what is refused and why.
-	SteerSubagent(ref, text string) error
+	SteerSubagent(ref, text string, handoff ...delegation.GuidanceContext) error
 }
 
 // Mods is Claude Code mods: which are installed and what became of each, and the

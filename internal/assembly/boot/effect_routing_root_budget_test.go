@@ -157,9 +157,9 @@ api_key_env = "ROUTING_ROOT_EFFECT_KEY"
 				input = control.PlannerRouteMarker + " " + input
 			}
 			if tc.interactive {
-				err = ctrl.RunTurn(ctx, input)
+				err = ctrl.RunTurn(reportedBudgetEffectContext(t, ctx), input)
 			} else {
-				err = ctrl.Run(ctx, input)
+				err = ctrl.Run(reportedBudgetEffectContext(t, ctx), input)
 			}
 			if tc.limit > 0 && !tc.disable {
 				if p, ok := agent.InspectRunPause(err); !ok || p.Key != "token" {
@@ -188,7 +188,7 @@ api_key_env = "ROUTING_ROOT_EFFECT_KEY"
 				if tc.repeat == "new_scope" {
 					ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: "next-routing-scope", TaskText: "next fixture task"})
 				}
-				err = ctrl.Run(ctx, input)
+				err = ctrl.Run(reportedBudgetEffectContext(t, ctx), input)
 				if p, ok := agent.InspectRunPause(err); !ok || p.Key != "token" {
 					t.Fatalf("second pause=%+v err=%v", p, err)
 				}

@@ -3,6 +3,7 @@ package agent
 
 import (
 	"reasonix/internal/state/sessionstore"
+	"strings"
 	"sync"
 
 	"reasonix/internal/contract/event"
@@ -185,6 +186,12 @@ func (a *Agent) Steer(text string) bool {
 	return a.SteerItem("", func() (string, error) { return text, nil })
 }
 
+// SteerWithContext keeps selected third-party data out of the user-authored
+// text that grants address access. Context-only delivery has host provenance.
+func (a *Agent) SteerWithContext(text, userText string) bool {
+	return a.queueSteer(steerEntry{load: func() (string, error) { return text, nil }, display: userText, host: strings.TrimSpace(userText) == ""})
+}
+
 // SteerHostNotice queues runtime-authored guidance on the same path as Steer,
 // attributed to the host instead of the user.
 func (a *Agent) SteerHostNotice(text string) bool {
@@ -276,7 +283,7 @@ func (a *Agent) steerQueueLen() int {
 }
 
 func (a *Agent) landSteer(text string, entry steerEntry) {
-	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(sessionstore.MidTurnSteerMessage(text, entry.host)), RawContent: entry.display, Via: entry.via})
+	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(sessionstore.MidTurnSteerMessage(text, entry.host)), RawContent: entry.display, Via: entry.via, HostAuthored: entry.host})
 	display := entry.display
 	if display == "" {
 		display = text

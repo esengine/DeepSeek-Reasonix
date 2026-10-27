@@ -19,6 +19,13 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (st
 	if t == nil {
 		return "", fmt.Errorf("task tool is not configured")
 	}
+	ctx, err := t.continuationScopeContext(ctx, spec)
+	if err != nil {
+		return "", err
+	}
+	if result, err, handled := t.dispatchProfile(ctx, spec); handled {
+		return result, err
+	}
 	exit := &profileCompletion{track: newSubagentProgressTracker(ctx, subSink(ctx))}
 	defer func() {
 		if !exit.handedOff {

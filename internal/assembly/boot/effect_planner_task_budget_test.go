@@ -28,17 +28,18 @@ func TestEffectPlannerConfiguredTaskBudget(t *testing.T) {
 		skipPlan   bool
 		wantReads  int32
 		wantRounds int32
+		wantPause  string
 	}{
-		{name: "tokens", config: "task_token_budget = 1000", wantReads: 1, wantRounds: 2},
-		{name: "cost", config: "task_cost_budget = 0.0002", wantReads: 1, wantRounds: 2},
-		{name: "wall", config: "task_time_budget_minutes = 0.000001", wantReads: 1, wantRounds: 2},
+		{name: "tokens", config: "task_token_budget = 1000", wantPause: "token"},
+		{name: "cost", config: "task_cost_budget = 0.0002", wantPause: "cost"},
+		{name: "wall", config: "task_time_budget_minutes = 0.000001", wantPause: "time"},
 		{name: "unconfigured", wantReads: 3, wantRounds: 4},
 		{name: "explicit_zero", config: "task_token_budget = 0\ntask_cost_budget = 0\ntask_time_budget_minutes = 0", wantReads: 3, wantRounds: 4},
-		{name: "unpriced_cost", config: "task_cost_budget = 0.0002", unpriced: true, wantReads: 3, wantRounds: 4},
-		{name: "missing_usage_cost", config: "task_cost_budget = 0.0002", missing: true, wantReads: 3, wantRounds: 4},
-		{name: "context_bound", override: &agent.TaskBudget{Tokens: 1000}, wantReads: 1, wantRounds: 2},
+		{name: "unpriced_cost", config: "task_cost_budget = 0.0002", unpriced: true, wantPause: "cost"},
+		{name: "missing_usage_cost", config: "task_cost_budget = 0.0002", missing: true, wantPause: "cost"},
+		{name: "context_bound", override: &agent.TaskBudget{Tokens: 1000}, wantPause: "token"},
 		{name: "context_disables", config: "task_token_budget = 1000", override: &agent.TaskBudget{}, wantReads: 3, wantRounds: 4},
-		{name: "executor_only", config: "task_token_budget = 1000", skipPlan: true},
+		{name: "executor_only", config: "task_token_budget = 1000", skipPlan: true, wantPause: "token"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home, root := statedBootHome(t), t.TempDir()
@@ -145,11 +146,18 @@ api_key_env = "BOOT_PLANNER_BUDGET_KEY"
 			if !tc.skipPlan {
 				input = control.PlannerRouteMarker + " " + input
 			}
-			if err := ctrl.Run(ctx, input); err != nil {
+			err = ctrl.Run(ctx, input)
+			wantExecutor := int32(1)
+			if tc.wantPause != "" {
+				wantExecutor = 0
+				if pause, ok := agent.InspectRunPause(err); !ok || pause.Key != tc.wantPause {
+					t.Fatalf("pause=%+v err=%v, want pre-request %s refusal", pause, err, tc.wantPause)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
-			if plannerCalls.Load() != tc.wantRounds || reads.Load() != tc.wantReads || executorCalls.Load() != 1 {
-				t.Fatalf("planner HTTP=%d actual reads=%d executor HTTP=%d; want %d/%d/1", plannerCalls.Load(), reads.Load(), executorCalls.Load(), tc.wantRounds, tc.wantReads)
+			if plannerCalls.Load() != tc.wantRounds || reads.Load() != tc.wantReads || executorCalls.Load() != wantExecutor {
+				t.Fatalf("planner HTTP=%d actual reads=%d executor HTTP=%d; want %d/%d/%d", plannerCalls.Load(), reads.Load(), executorCalls.Load(), tc.wantRounds, tc.wantReads, wantExecutor)
 			}
 			mu.Lock()
 			defer mu.Unlock()

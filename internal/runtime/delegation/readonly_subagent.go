@@ -32,6 +32,7 @@ func (t *TaskTool) prepareSubSession(ctx context.Context, prompt string, opts ag
 	// The pristine task, before framing: delivery classification judges the
 	// task and not the wrapper.
 	opts.ClassifierTaskText = prompt
+	ctx = agent.WithRawUserInput(ctx, agent.RawUserInput(ctx, prompt))
 	opts.ExpectCompletionReport, opts.HandoffEntrance = true, entrance
 	prompt = agent.SubagentImageNote(ctx) + t.withWorkspaceContext(upstreamNote(ctx)+prompt) + "\n\n" + agent.CompleteSubtaskContract
 	return agent.WithUserImages(ctx, agent.SubagentImageCandidates(ctx)), prompt, opts

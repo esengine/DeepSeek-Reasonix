@@ -53,7 +53,7 @@ func TestRootTokenBudgetSurvivesNestedAndConcurrentChildren(t *testing.T) {
 				rootTools.Add(siblings)
 			}
 			root := New(&spendingProvider{max: 1}, rootTools, sessionstore.NewSession("root"), Options{TaskBudget: TaskBudget{Tokens: 1500}}, event.Discard)
-			pause, ok := InspectRunPause(root.Run(t.Context(), "delegate work"))
+			pause, ok := InspectRunPause(root.Run(reportedBudgetContext(t.Context()), "delegate work"))
 			if !ok || pause.Kind != "task_budget" || pause.Key != "token" || !pause.HostOwned {
 				t.Fatalf("root pause = %+v (%v), want token budget", pause, ok)
 			}
@@ -100,7 +100,7 @@ func TestRootTokenBudgetIncludesChildProviderUsage(t *testing.T) {
 			if test.override != nil {
 				ctx = WithTaskBudget(ctx, *test.override)
 			}
-			err := parent.Run(ctx, "delegate a read")
+			err := parent.Run(reportedBudgetContext(ctx), "delegate a read")
 			if got := childProvider.rounds.Load(); got != test.wantChild {
 				t.Errorf("child provider requests = %d, want %d including its existing finalization round", got, test.wantChild)
 			}

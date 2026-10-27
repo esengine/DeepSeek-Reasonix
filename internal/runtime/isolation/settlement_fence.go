@@ -9,9 +9,12 @@ import (
 
 const settlementFenceDirectory = ".settlements-v1"
 
-// This reader never interprets settlement bytes. Their presence fences ordinary
-// legacy operations until a compatible recovery owner settles the record.
+// Only a validated continuation permits ordinary operations. All other records
+// fence settlement until a compatible recovery owner handles them.
 func (s *Store) checkSettlementFence(id string) error {
+	if _, ok := s.readContinuation(id); ok {
+		return nil
+	}
 	managed, err := os.OpenRoot(s.managedRoot)
 	if err != nil {
 		return fmt.Errorf("inspect settlement namespace: %w", err)

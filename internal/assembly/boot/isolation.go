@@ -2,11 +2,15 @@ package boot
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"reasonix/internal/contract/event"
+	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/runtime/isolation"
 	"reasonix/internal/session/control"
 )
@@ -54,14 +58,35 @@ func (b *builder) addIsolation() {
 	b.tools.isolation = &isolationWiring{store: store, posture: posture}
 	b.tools.reg.Add(isolation.NewApplyTool(store))
 	b.tools.reg.Add(isolation.NewDiscardTool(store))
-	parent, sink := b.opts, b.sink
-	b.tools.taskTool.SetIsolation(store, b.root, func(ctx context.Context, run isolation.Run) (isolation.Outcome, error) {
-		_, selection, err := subagentProviderSelection(b.cfg, b.providers.effective, b.model.entry, run.Model, run.Effort)
+	parent := b.opts
+	b.tools.taskTool.SetIsolation(store, b.root, func(ctx context.Context, run isolation.Run, spec delegation.ProfileExecSpec) (isolation.Outcome, error) {
+		_, selection, err := subagentProviderSelection(b.cfg, b.providers.effective, b.model.entry, spec.Worker.Model, spec.Worker.Effort)
 		if err != nil {
 			return isolation.Outcome{}, err
 		}
-		answer, unverified, err := runUnattended(ctx, parent, isolatedUsage{sink}, posture.mode(), run.WorkspaceRoot, run.Prompt, selection, run.MaxSteps)
-		return isolation.Outcome{Answer: answer, Unverified: unverified}, err
+		dir, err := os.MkdirTemp("", "reasonix-isolated-")
+		if err != nil {
+			return isolation.Outcome{}, err
+		}
+		defer os.RemoveAll(dir)
+		child := &builder{timer: newPhaseTimer(), compositionBinding: newLiveCompositionBinding}
+		res, err := child.build(ctx, Options{
+			ComputerDriver: parent.ComputerDriver, WorkspaceRoot: run.WorkspaceRoot, Home: parent.Home,
+			Model: selection.Ref, EffortOverride: selection.Effort, MaxSteps: spec.Sched.MaxSteps,
+			AgentPreset: parent.AgentPreset, ProviderResolver: b.providers.effective, Sink: event.Discard, Stderr: io.Discard,
+			SessionDir: dir, HeadlessApprovalMode: posture.mode(), ApprovalTimeout: time.Second,
+			GoalTurnsUnreachable: true, UnattendedChild: true,
+		})
+		if err != nil {
+			return isolation.Outcome{}, err
+		}
+		defer res.Controller.Close()
+		if child.tools.taskTool == nil {
+			return isolation.Outcome{}, fmt.Errorf("isolated delegation is unavailable")
+		}
+		child.tools.taskTool.InheritDelegationOwner(b.tools.taskTool)
+		answer, err := child.tools.taskTool.RunProfileSpec(ctx, spec)
+		return isolation.Outcome{Answer: answer}, err
 	})
 	// The registry canonicalizes a schema when a tool is added, and task was
 	// added before it could offer isolation.
@@ -72,16 +97,4 @@ func (w *isolationWiring) bind(ctrl *control.Controller) {
 	if w != nil {
 		w.posture.bind(ctrl)
 	}
-}
-
-// isolatedUsage forwards an isolated run's billable usage to the parent session
-// as sub-agent spend and drops everything else it emits.
-type isolatedUsage struct{ parent event.Sink }
-
-func (s isolatedUsage) Emit(e event.Event) {
-	if e.Kind != event.Usage || s.parent == nil {
-		return
-	}
-	e.UsageSource, e.Source = event.UsageSourceSubagent, event.UsageSourceSubagent
-	s.parent.Emit(e)
 }

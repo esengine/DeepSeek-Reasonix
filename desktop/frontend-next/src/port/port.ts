@@ -29,7 +29,7 @@ import type { NetworkProbe, NetworkSettings } from "./network";
 import type { ApprovalDefault, ApprovalMode, WorkspaceTrust, ApprovalVerdict, BrowserTab, Checkpoint, HistoryMessage, HostTodo, JobEntry, JobOutput, Preset, RewindPlan, ToolOutputPage, RewindResult, RewindUndo, RewindScope, SessionEntry, SessionStatus, SessionUsage, SourceUsage, WalletLine, WalletReading, PlanAction } from "./session";
 import type { ContextBreakdown, ShellOption, ShellSettings } from "./shell";
 import type { SkillCatalog, SkillEntry, SkillUpdateChange, SkillUpdatePlan } from "./skill";
-import type { SubagentRun, SubagentTranscript } from "./subagent";
+import type { SubagentPort } from "./subagent";
 import type { StudioCrash, StudioLogs, UpdateMode, UpdateProgress, VersionEntry, VersionHub, VersionNotes } from "./version";
 import type { ChangeDiff, CommitFile, CommitProposal, CommitRequest, CommitResult, DiscardRequest, GitCommitFiles, GitRepos, PushRequest, PushResult, PushPlan, StageRequest, WorkspaceBranch, WorkspaceBranches, WorkspaceChange, WorkspaceChanges, WorkspaceEntry, WorkspaceFile, WorkspaceFiles, WorkspaceGit, WorkspaceInfo, WorkspacePreviewPort } from "./workspace";
 
@@ -183,7 +183,7 @@ export interface TrayPrefs {
   closeToTray: boolean;
 }
 
-export interface AgentPort extends WorkspacePreviewPort {
+export interface AgentPort extends WorkspacePreviewPort, SubagentPort {
   providerSetup(): Promise<ProviderSetup | null>;
   saveProviderKey(apiKey: string): Promise<void>;
   // The models that answer the job asked about; "chat" when none is named.
@@ -709,15 +709,6 @@ export interface AgentPort extends WorkspacePreviewPort {
   // Ends one running tool call and lets the turn go on; a call that already
   // finished is refused (tool_call.not_running).
   stopToolCall(callId: string): Promise<void>;
-  // The sub-agent runs this conversation spawned, running or finished, newest
-  // first, and one run's conversation a page at a time: a running run is read
-  // live. A run of another conversation is refused (subagent.not_owned).
-  subagents(): Promise<SubagentRun[]>;
-  subagentTranscript(ref: string, after?: number, limit?: number): Promise<SubagentTranscript>;
-  // The person's guidance to a sub-agent that is still running, read at its next
-  // tool call. Refused with a code when it is not running (subagent.not_running),
-  // is empty, over the size or rate limit, or is another conversation's.
-  steerSubagent(ref: string, text: string): Promise<void>;
   // The end of a running job's output, for the person looking at it. It does
   // not take output from the model's own reader; a job that ended is refused
   // (job.not_running).

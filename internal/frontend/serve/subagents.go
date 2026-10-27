@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -22,6 +23,9 @@ func (s *Server) registerSubagentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /subagents", s.subagentRuns)
 	mux.HandleFunc("GET /subagents/{ref}/transcript", s.subagentTranscript)
 	mux.HandleFunc("POST /subagents/{ref}/steer", s.subagentSteer)
+	mux.HandleFunc("POST /subagents/{ref}/handoff", s.subagentHandoff)
+	mux.HandleFunc("GET /subagents/{ref}/recovery", s.fleetRecoveryPlans)
+	mux.HandleFunc("POST /subagents/{ref}/recovery", s.fleetRecoveryRequest)
 }
 
 type subagentRunView struct {
@@ -38,6 +42,7 @@ type subagentRunView struct {
 }
 
 type subagentTranscriptView struct {
+	Snapshot string           `json:"snapshot,omitempty"`
 	Run      subagentRunView  `json:"run"`
 	Messages []historyMessage `json:"messages"`
 	After    int              `json:"after"`
@@ -72,37 +77,58 @@ func (s *Server) subagentRuns(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) subagentTranscript(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	after = max(after, 0)
+	if after != -1 {
+		after = max(after, 0)
+	}
 	limit = min(max(limit, 0), subagentPageMax)
 	page, err := s.ctl().SubagentTranscript(r.PathValue("ref"), after, limit)
 	if err != nil {
 		refuseSubagent(w, err)
 		return
 	}
-	rows := historyMessages(provider.RedactMessages(page.Messages))
+	calls := map[string]provider.ToolCall{}
+	for _, ref := range page.ToolContext {
+		masked := provider.RedactMessages([]provider.Message{{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{ref.Call}}})
+		calls[ref.Call.ID] = masked[0].ToolCalls[0]
+	}
+	worked := page.WorkMs
+	if len(worked) != len(page.Messages) {
+		worked = make([]int64, len(page.Messages))
+	}
+	rows := historyMessageWindow(provider.RedactMessages(page.Messages), nil, page.After, worked, calls)
 	shown := make([]historyMessage, 0, len(rows))
 	for _, m := range rows {
 		if m.Role == string(provider.RoleSystem) {
 			continue
 		}
-		m.MsgIndex += page.After
 		shown = append(shown, m)
 	}
-	writeJSON(w, subagentTranscriptView{Run: subagentRunOf(page.Info), Messages: shown, After: page.After, Next: page.Next, Total: page.Total, Live: page.Live})
+	writeJSON(w, subagentTranscriptView{Snapshot: page.Snapshot, Run: subagentRunOf(page.Info), Messages: shown, After: page.After, Next: page.Next, Total: page.Total, Live: page.Live})
 }
 
 // subagentSteer sends the person's guidance to a running sub-agent. It is the
 // window's alone: a paired device reaches the kernel's pane routes, and what
 // steers a delegated run is not something a phone is given.
 func (s *Server) subagentSteer(w http.ResponseWriter, r *http.Request) {
+	s.subagentGuidance(w, r, false)
+}
+
+func (s *Server) subagentHandoff(w http.ResponseWriter, r *http.Request) {
+	s.subagentGuidance(w, r, true)
+}
+
+func (s *Server) subagentGuidance(w http.ResponseWriter, r *http.Request, handoff bool) {
 	if !hostReach(r) {
 		refuse(w, http.StatusNotFound, codeDeviceHostOnly, "a paired device cannot use this", nil)
 		return
 	}
 	var body struct {
-		Text string `json:"text"`
+		Text    string                      `json:"text"`
+		Context *delegation.GuidanceContext `json:"context,omitempty"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, subagentSteerBodyMax)).Decode(&body); err != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, subagentSteerBodyMax))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
 		var over *http.MaxBytesError
 		if errors.As(err, &over) {
 			refuse(w, http.StatusRequestEntityTooLarge, "subagent.steer_too_large", "the guidance is too large", map[string]any{"limit_bytes": subagentSteerBodyMax})
@@ -111,7 +137,22 @@ func (s *Server) subagentSteer(w http.ResponseWriter, r *http.Request) {
 		badBody(w)
 		return
 	}
-	if err := s.ctl().SteerSubagent(r.PathValue("ref"), body.Text); err != nil {
+	if decoder.Decode(new(any)) != io.EOF {
+		badBody(w)
+		return
+	}
+	var selected []delegation.GuidanceContext
+	if handoff {
+		if body.Context == nil {
+			badBody(w)
+			return
+		}
+		selected = append(selected, *body.Context)
+	} else if body.Context != nil {
+		badBody(w)
+		return
+	}
+	if err := s.ctl().SteerSubagent(r.PathValue("ref"), body.Text, selected...); err != nil {
 		refuseSubagent(w, err)
 		return
 	}
@@ -132,6 +173,8 @@ func refuseSubagent(w http.ResponseWriter, err error) {
 		refuse(w, http.StatusNotFound, "subagent.not_found", err.Error(), nil)
 	case errors.Is(err, delegation.ErrSubagentNotOwned):
 		refuse(w, http.StatusForbidden, "subagent.not_owned", err.Error(), nil)
+	case errors.Is(err, delegation.ErrHandoffInvalid):
+		refuse(w, http.StatusBadRequest, "subagent.handoff_invalid", err.Error(), map[string]any{"detail": err.Error()})
 	default:
 		refuse(w, http.StatusInternalServerError, "subagent.read_failed", err.Error(), map[string]any{"detail": err.Error()})
 	}

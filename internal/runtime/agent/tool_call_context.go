@@ -20,6 +20,7 @@ import (
 // preferences it must honor. Every binding is optional, so a degraded
 // assembly loses the capability rather than the call.
 func (a *Agent) toolCallContext(ctx context.Context, plan *toolCallPlan) context.Context {
+	ctx = a.childMessageContext(ctx)
 	cctx, spawned := tool.WithProvenanceSink(ctx)
 	plan.spawned = spawned
 	cctx = tool.WithContextCompressor(WithCallContext(cctx, plan.call.ID, a.svc.sink, a.svc.asker, a.PlanningPhase()), a)

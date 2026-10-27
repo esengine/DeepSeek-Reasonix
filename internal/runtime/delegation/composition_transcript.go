@@ -11,6 +11,8 @@ import (
 func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *tool.Registry, modelRef, effortRef, parentSession, execution, parentID, continueFrom, legacyForkFrom, systemPrompt, kind, name string) (run *SubagentRun, err error) {
 	defer func() {
 		if err == nil {
+			run.executionPath = t.executionSessionPath(ctx)
+			bindChildCommunication(subReg, run, execution, upstreamFromContext(ctx))
 			if bindErr := agent.BindChildComposition(ctx, run.Session, false); bindErr != nil {
 				run.Release()
 				run = nil
@@ -41,9 +43,12 @@ func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *t
 	}
 	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
 	spec := SubagentSpec{
+		BudgetScope:      agent.SharedTaskBudgetScope(ctx),
+		IsolationRef:     isolatedBinding(ctx).ID,
+		IsolationGrant:   isolatedBinding(ctx).Grant,
 		Kind:             kind,
 		Name:             name,
-		WorkspaceRoot:    t.workspaceRoot,
+		WorkspaceRoot:    firstNonEmpty(t.transcriptRoot, t.workspaceRoot),
 		ParentSession:    parentSession,
 		ExecutionID:      execution,
 		ParentToolCallID: parentID,
@@ -54,6 +59,7 @@ func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *t
 		Effort:           identityEffort,
 		ResumedFrom:      firstNonEmpty(continueFrom, legacyForkFrom),
 		UpstreamFrom:     upstreamSources(upstreamFromContext(ctx)),
+		ResultRefs:       upstreamRefs(upstreamFromContext(ctx)),
 	}
 	if continueFrom != "" {
 		return t.transcripts.PrepareContinue(continueFrom, spec)

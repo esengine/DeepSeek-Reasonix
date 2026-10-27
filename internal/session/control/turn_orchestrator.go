@@ -116,7 +116,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	turnStartedAt := time.Now()
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
-	ctx = agent.WithParentSession(ctx, parentSession)
+	ctx = c.withDelegationContext(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
 	ctx = agent.WithUserImages(ctx, images.userImages)
 	ctx = o.c.withVisionRouting(agent.WithSubagentImageCandidates(ctx, images.candidates))
@@ -193,7 +193,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	c := o.c
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
-	ctx = agent.WithParentSession(ctx, parentSession)
+	ctx = c.withDelegationContext(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
 	ctx, images := c.bindOrchestratedTurnImages(ctx, turn)
 	ctx = agent.WithRawUserInput(ctx, turn.raw)

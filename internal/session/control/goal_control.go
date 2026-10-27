@@ -56,15 +56,20 @@ func (c *Controller) SetGoalWithResearchMode(goal string, researchMode GoalResea
 // ResumeGoal re-enters a recoverable blocked/stopped Goal without resetting its
 // delivery evidence scope or accumulated usage statistics.
 func (c *Controller) ResumeGoal() bool {
+	prior := c.goals.capture()
 	spentBudget := c.goals.runtimeView().StopCause == stopCauseBudgetSpend
 	path, data, persist, resumed := c.goals.resume(c.goalTodos())
 	if !resumed {
 		return false
 	}
-	c.persistGoalState(path, data, persist)
 	if c.executor != nil {
 		if spentBudget {
-			c.executor.ResetTaskBudget()
+			scope, _, _ := c.goals.deliveryScope()
+			if err := c.executor.ResetPersistedTaskBudget(scope); err != nil {
+				c.goals.restore(prior)
+				c.notice("Task budget could not be renewed: " + err.Error())
+				return false
+			}
 			if roles, ok := c.runner.(interface{ PlannerAgent() *agent.Agent }); ok {
 				if planner := roles.PlannerAgent(); planner != nil {
 					planner.ResetTaskBudget()
@@ -73,6 +78,7 @@ func (c *Controller) ResumeGoal() bool {
 		}
 		c.executor.RestoreDeliveryCheckpoint(c.goals.deliveryState())
 	}
+	c.persistGoalState(path, data, persist)
 	return true
 }
 

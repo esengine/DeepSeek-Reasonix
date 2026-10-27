@@ -12,6 +12,12 @@ import (
 )
 
 type turnIdentityContextKey struct{}
+type executionSessionKey struct{}
+
+// WithExecutionSessionPath binds the real parent transcript, including imported sessions.
+func WithExecutionSessionPath(ctx context.Context, path string) context.Context {
+	return context.WithValue(ctx, executionSessionKey{}, path)
+}
 
 // WithTurnIdentity carries the parent turn's durable identity through the tool
 // calls it makes. It is the in-flight marker's id rather than a transcript
@@ -31,6 +37,9 @@ func TurnIdentity(ctx context.Context) string {
 // way the sub-agent store resolves it. Empty when this run has no persisted
 // parent — a headless run keeps nothing, so there is nowhere to record to.
 func (t *TaskTool) executionSessionPath(ctx context.Context) string {
+	if path, _ := ctx.Value(executionSessionKey{}).(string); path != "" {
+		return path
+	}
 	if t == nil || t.transcripts == nil {
 		return ""
 	}
@@ -111,6 +120,17 @@ func (t *TaskTool) settleExecution(ctx context.Context, id string) {
 	if path := t.executionSessionPath(ctx); path != "" {
 		execjournal.Settle(path, id)
 	}
+}
+
+func (r *SubagentRun) recordExecutionOutcome() {
+	if r.executionPath == "" || r.Meta.ExecutionID == "" || r.Ref == "" {
+		return
+	}
+	result := &execjournal.Result{Ref: r.Ref, State: string(r.Meta.Status)}
+	for _, source := range r.Meta.Capsule.Inherited.ResultRefs {
+		result.ContextRefs = append(result.ContextRefs, source.Ref)
+	}
+	execjournal.Settle(r.executionPath, r.Meta.ExecutionID, result)
 }
 
 // adoptedDisposition marks an item that stands in for running. Nothing executes

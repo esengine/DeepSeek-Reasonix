@@ -26,6 +26,8 @@ func adoptedItemExecutionKnob(item fleetTaskItem) string {
 		set  bool
 	}{
 		{"profile", strings.TrimSpace(item.Profile) != ""},
+		{"context_summary", item.ContextSummary != ""},
+		{"context_refs", len(item.ContextRefs) != 0},
 		{"write_paths", len(item.WritePaths) > 0},
 		{"tools", len(item.Tools) > 0},
 		{"max_steps", item.MaxSteps != 0},

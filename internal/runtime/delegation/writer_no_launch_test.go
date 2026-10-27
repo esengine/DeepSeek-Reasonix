@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/filelock"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/sessionstore"
+	"reasonix/internal/state/store"
 	"reasonix/internal/tools/jobs"
 )
 
@@ -108,4 +111,26 @@ func TestBackgroundNoLaunchFinalizesOwnedResources(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestBackgroundFleetNoLaunchReleasesItsRecoveryLease(t *testing.T) {
+	root := t.TempDir()
+	prov := &blockingProvider{started: make(chan struct{})}
+	task := NewTaskTool(prov, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(mustSubagentStore(t), root, "base", "high")
+	manager := jobs.NewManager(event.Discard)
+	manager.Close()
+	parent := filepath.Join(t.TempDir(), "parent.jsonl")
+	ctx := jobs.WithManager(agent.WithCallContext(context.Background(), "no-launch", &recordSink{}, nil, false), manager)
+	ctx = WithExecutionSessionPath(jobs.WithSession(agent.WithParentSession(ctx, "parent-session"), "closed-session"), parent)
+	out, execErr := NewFleetTool(task).Execute(ctx, json.RawMessage(`{"run_in_background":true,"tasks":[{"prompt":"one","write_paths":["one"]},{"prompt":"two","write_paths":["two"]}]}`))
+	_, id, ok := strings.Cut(out, "Fleet recovery id: ")
+	if !ok {
+		t.Fatalf("fleet saved no recovery record: %q %v", out, execErr)
+	}
+	release, err := filelock.TryAcquire(filepath.Join(store.SessionFleetRecoveryDir(parent), strings.TrimSpace(id)+".lock"))
+	if err != nil {
+		t.Fatalf("a fleet whose job never ran still holds its recovery lease: %v", err)
+	}
+	release()
 }

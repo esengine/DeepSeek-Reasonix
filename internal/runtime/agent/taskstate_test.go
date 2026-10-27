@@ -22,13 +22,14 @@ var taskCarryOver = map[string]bool{
 func TestTaskRuntimeRestartCarriesScopeAndResetsAccounting(t *testing.T) {
 	ledger := evidence.NewLedger()
 	before := &taskRuntime{
-		scopeID:    "scope-1",
-		checkpoint: evidence.DeliveryCheckpoint{ScopeID: "scope-1"},
-		ledger:     ledger,
-		outcome:    evidence.NewOutcomeTracker(),
-		budget:     runBudget{rounds: 4, requests: 9, cost: 1.5, limit: TaskBudget{}},
-		witness:    map[string][]string{"tally.go": {"total += x"}},
-		origins:    &originLedger{},
+		scopeID:      "scope-1",
+		checkpoint:   evidence.DeliveryCheckpoint{ScopeID: "scope-1"},
+		ledger:       ledger,
+		outcome:      evidence.NewOutcomeTracker(),
+		budget:       runBudget{rounds: 4, requests: 9, cost: 1.5, limit: TaskBudget{}},
+		sharedBudget: newSharedBudget(TaskBudget{Tokens: 100}, nil),
+		witness:      map[string][]string{"tally.go": {"total += x"}},
+		origins:      &originLedger{},
 	}
 	after := *before
 	after.restartLedger()
@@ -46,6 +47,9 @@ func TestTaskRuntimeRestartCarriesScopeAndResetsAccounting(t *testing.T) {
 	if after.budget.rounds != 0 || after.budget.requests != 0 || after.budget.cost != 0 {
 		t.Errorf("budget = %+v, want a fresh bill for the new task", after.budget)
 	}
+	if after.sharedBudget != nil {
+		t.Fatal("shared branch spend survived a new task")
+	}
 	if after.origins == nil || after.origins == before.origins {
 		t.Error("origin ledger not replaced; text one task read must not stand for another's")
 	}
@@ -58,10 +62,11 @@ func TestTaskRuntimeRestartCarriesScopeAndResetsAccounting(t *testing.T) {
 // from. Together with taskCarryOver it must cover taskRuntime exactly, so a
 // field added to the type fails here until someone states which side it is on.
 var taskRestarted = map[string]bool{
-	"outcome": true,
-	"budget":  true,
-	"witness": true,
-	"origins": true,
+	"sharedBudget": true,
+	"outcome":      true,
+	"budget":       true,
+	"witness":      true,
+	"origins":      true,
 	// A new task begins under whatever the tree says then, so what an earlier
 	// one was held to is not carried into it.
 	"baselineCriteria": true,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ type steerChildProvider struct {
 	parent      int
 	child       int
 	childReqs   [][]provider.Message
+	childTools  [][]provider.ToolSchema
 	started     chan struct{}
 	release     chan struct{}
 	startedOnce sync.Once
@@ -51,6 +53,7 @@ func (p *steerChildProvider) Stream(ctx context.Context, req provider.Request) (
 		p.child++
 		n := p.child
 		p.childReqs = append(p.childReqs, append([]provider.Message(nil), req.Messages...))
+		p.childTools = append(p.childTools, append([]provider.ToolSchema(nil), req.Tools...))
 		p.mu.Unlock()
 		if n == 1 {
 			p.startedOnce.Do(func() { close(p.started) })
@@ -146,7 +149,7 @@ model = "x"
 		t.Fatalf("runs = %+v err=%v, want one running", runs, err)
 	}
 
-	if err := ctrl.SteerSubagent(runs[0].Ref, "prefer the shallow listing"); err != nil {
+	if err := ctrl.SteerSubagent(runs[0].Ref, "prefer the shallow listing", delegation.GuidanceContext{Summary: "Reuse the completed audit; keep existing permissions."}); err != nil {
 		t.Fatalf("SteerSubagent: %v", err)
 	}
 	close(prov.release)
@@ -164,9 +167,13 @@ model = "x"
 
 	prov.mu.Lock()
 	reqs := prov.childReqs
+	tools := prov.childTools
 	prov.mu.Unlock()
 	if len(reqs) < 2 {
 		t.Fatalf("the child made %d requests, want at least 2", len(reqs))
+	}
+	if !reflect.DeepEqual(tools[0], tools[1]) || len(reqs[1]) < len(reqs[0]) || !reflect.DeepEqual(reqs[0], reqs[1][:len(reqs[0])]) {
+		t.Fatal("handoff changed the provider-visible prefix")
 	}
 	var second strings.Builder
 	for _, m := range reqs[1] {
@@ -177,6 +184,9 @@ model = "x"
 	}
 	if strings.Contains(strings.Join(messagesText(reqs[0]), "\n"), "prefer the shallow listing") {
 		t.Fatal("guidance appeared in a request made before it was sent")
+	}
+	if !strings.Contains(second.String(), "Reuse the completed audit") || strings.Contains(strings.Join(messagesText(reqs[0]), "\n"), "Reuse the completed audit") {
+		t.Fatal("selected context was not appended at the turn tail")
 	}
 	if err := ctrl.SteerSubagent(runs[0].Ref, "too late"); err == nil {
 		t.Fatal("a finished sub-agent accepted guidance")

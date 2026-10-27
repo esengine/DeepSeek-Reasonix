@@ -38,10 +38,13 @@ const (
 // SubagentMeta is the sidecar for a persisted sub-agent transcript. It captures
 // the execution identity that must stay stable for continuation/fork.
 type SubagentMeta struct {
-	Ref       string         `json:"ref"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-	Status    SubagentStatus `json:"status"`
+	BudgetScope    string         `json:"budgetScope,omitempty"`
+	IsolationRef   string         `json:"isolationRef,omitempty"`
+	IsolationGrant string         `json:"isolationGrant,omitempty"`
+	Ref            string         `json:"ref"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt"`
+	Status         SubagentStatus `json:"status"`
 	// TerminalReason refines a terminal status the way its producer meant it,
 	// so a reader tells a deadline from a cancellation without a second status.
 	TerminalReason string `json:"terminalReason,omitempty"`
@@ -159,15 +162,21 @@ func (e *SubagentMetaDecodeError) Unwrap() error { return e.Err }
 // caller asked for it; this record exists so that stays a decision rather than
 // an accident.
 type InheritedContext struct {
-	StandingInstructions bool `json:"standingInstructions"`
-	Memory               bool `json:"memory"`
-	ParentConversation   bool `json:"parentConversation"`
-	Goal                 bool `json:"goal"`
-	PlannerOutput        bool `json:"plannerOutput"`
+	ResultRefs           []ContextResultRef `json:"resultRefs,omitempty"`
+	StandingInstructions bool               `json:"standingInstructions"`
+	Memory               bool               `json:"memory"`
+	ParentConversation   bool               `json:"parentConversation"`
+	Goal                 bool               `json:"goal"`
+	PlannerOutput        bool               `json:"plannerOutput"`
 	// UpstreamFrom names the dependencies whose answers opened this run, which
 	// a bool in its place could not. Nil means none; empty means a legacy
 	// record that knew there were sources without naming them.
 	UpstreamFrom []string `json:"upstreamFrom"`
+}
+
+type ContextResultRef struct {
+	ID  string `json:"id"`
+	Ref string `json:"ref"`
 }
 
 // ContextCapsule is the immutable manifest of what one child run was actually

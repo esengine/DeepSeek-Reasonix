@@ -18,12 +18,13 @@ import (
 	"strings"
 )
 
-// Steerer is how the host speaks to a running sub-agent. Both methods report
+// Steerer is how the host speaks to a running sub-agent. These methods report
 // whether the child was inside a run to take it: on false nothing was queued.
 // Steer is the user's guidance; SteerHostNotice is the runtime's own, which the
 // child is told the user did not send.
 type Steerer interface {
 	Steer(text string) bool
+	SteerWithContext(text, userText string) bool
 	SteerHostNotice(text string) bool
 }
 

@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/surfacespec"
 	"reasonix/internal/state/sessioninbox"
+	"reasonix/internal/state/sessionstore"
 )
 
 // TurnAdmission is the exported classification of TrySubmitInboxItem /
@@ -33,17 +34,18 @@ const (
 
 // InboxRequest is the frontend-facing enqueue payload.
 type InboxRequest struct {
-	SurfaceAction *surfacespec.Action
-	Intent        sessioninbox.InboxIntent
-	Origin        sessioninbox.PromptOrigin
-	Display       string
-	Raw           string
-	Submit        string
-	Format        string
-	Source        string
-	Idempotency   string
-	Invocations   []InvocationRequest
-	Extra         map[string]string
+	expectedSession string
+	SurfaceAction   *surfacespec.Action
+	Intent          sessioninbox.InboxIntent
+	Origin          sessioninbox.PromptOrigin
+	Display         string
+	Raw             string
+	Submit          string
+	Format          string
+	Source          string
+	Idempotency     string
+	Invocations     []InvocationRequest
+	Extra           map[string]string
 	// FreezeRefs lists workspace-relative paths to freeze at enqueue time.
 	FreezeRefs []string
 	// Via is the paired device the item came from; nil is the window.
@@ -206,6 +208,7 @@ func (c *Controller) adoptInboxLocked(path string) (*sessioninbox.Store, error) 
 
 // ErrInboxNeedsSession: the queue lives beside a saved session, and this one has no path yet.
 var ErrInboxNeedsSession = errors.New("inbox requires a persisted session path")
+var errInboxSessionChanged = errors.New("the target inbox belongs to a different conversation")
 
 func (c *Controller) ensureInbox() (*sessioninbox.Store, error) {
 	path := c.SessionPath()
@@ -327,6 +330,9 @@ func (c *Controller) EnqueueInbox(req InboxRequest) (sessioninbox.InboxReceipt, 
 	if err != nil {
 		return sessioninbox.InboxReceipt{}, err
 	}
+	if req.expectedSession != "" && sessionstore.BranchID(st.SessionPath()) != req.expectedSession {
+		return sessioninbox.InboxReceipt{}, errInboxSessionChanged
+	}
 	submit := strings.TrimSpace(firstNonEmptyStr(req.Submit, req.Raw))
 	if submit == "" && len(req.Invocations) == 0 {
 		submit = strings.TrimSpace(req.Display)
@@ -366,7 +372,7 @@ func (c *Controller) EnqueueInbox(req InboxRequest) (sessioninbox.InboxReceipt, 
 		Envelope:    env,
 		Source:      req.Source,
 		Idempotency: req.Idempotency,
-		SessionID:   c.parentSessionID(),
+		SessionID:   sessionstore.BranchID(st.SessionPath()),
 	})
 	if err != nil {
 		if errors.Is(err, sessioninbox.ErrCapacityItems) || errors.Is(err, sessioninbox.ErrCapacityBytes) || errors.Is(err, sessioninbox.ErrItemTooLarge) {

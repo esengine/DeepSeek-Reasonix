@@ -75,7 +75,7 @@ func TestTaskBudgetKnownCostStillLandsAfterMissingUsage(t *testing.T) {
 		Pricing:    &provider.Pricing{CacheHit: 1, Input: 1, Output: 2, Currency: "USD"},
 		TaskBudget: TaskBudget{Cost: 1e-3},
 	}, sink)
-	err := a.Run(context.Background(), "read a few files")
+	err := a.Run(reportedBudgetContext(context.Background()), "read a few files")
 	pause, ok := InspectRunPause(err)
 	if !ok || pause.Key != "cost" || !pause.HostOwned {
 		t.Fatalf("pause = %+v (%v), want host-owned cost landing", pause, err)

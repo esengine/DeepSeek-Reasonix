@@ -11,6 +11,7 @@ import (
 // provider-visible schemas, and neither reader changes between turns.
 func addDelegationTools(reg *tool.Registry, taskTool *delegation.TaskTool) {
 	reg.Add(taskTool)
+	reg.Add(delegation.NewTeamTool(taskTool))
 	reg.Add(delegation.NewParallelTasksTool(taskTool, reg))
 	reg.Add(delegation.NewFleetTool(taskTool))
 	reg.Add(delegation.NewSubagentResultTool(taskTool))

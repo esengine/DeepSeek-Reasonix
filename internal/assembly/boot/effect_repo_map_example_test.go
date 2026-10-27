@@ -193,7 +193,7 @@ model = "x"
 			if !strings.HasPrefix(systemMessage(req.Messages), profileBody) {
 				t.Fatal("installed profile body did not reach the child")
 			}
-			if !slices.Equal(toolSchemaNames(req.Tools), []string{"complete_subtask", "glob", "grep", "ls", "read_file"}) {
+			if !slices.Equal(toolSchemaNames(req.Tools), []string{"complete_subtask", "glob", "grep", "ls", "read_file", "read_task_context", "reply_to_parent"}) {
 				t.Fatalf("child tool ceiling = %v", toolSchemaNames(req.Tools))
 			}
 			var user string

@@ -154,6 +154,8 @@ type CapabilityGrant struct {
 // is given: a prior transcript to resume, and the answers of the dependencies
 // that had to finish first.
 type ContextRequest struct {
+	Summary    string
+	ResultRefs []string
 	// ContinueFrom / ForkFrom are transcript continuation refs (writer path).
 	ContinueFrom string
 	ForkFrom     string
@@ -171,6 +173,7 @@ type ContextRequest struct {
 // SchedulerPolicy is when and how the run executes. It never changes what the
 // child is asked to do or what it is allowed to touch.
 type SchedulerPolicy struct {
+	Isolation string
 	// MaxSteps is the optional per-call step budget (0 = default).
 	MaxSteps int
 	// RunInBackground starts a jobs.Manager background job.

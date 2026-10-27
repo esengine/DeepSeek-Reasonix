@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MAX, saidBy, search, stepped } from "./find";
 import type { Item } from "./session";
 
@@ -47,7 +47,16 @@ describe("searching a conversation", () => {
 
   it("stops counting past the cap", () => {
     const many = Array.from({ length: MAX + 50 }, (_, i) => say(`s${i}`, "x"));
-    expect(search(many, "x")).toHaveLength(MAX);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+    try { expect(search(many, "x")).toHaveLength(MAX); }
+    finally { clock.mockRestore(); }
+  });
+
+  it("stops scanning when its time budget expires before the count cap", () => {
+    let elapsed = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => elapsed += 30);
+    try { expect(search([say("a", "x"), say("b", "x"), say("c", "x")], "x")).toHaveLength(1); }
+    finally { clock.mockRestore(); }
   });
 
   it("keeps a row's text stable across repeated searches", () => {

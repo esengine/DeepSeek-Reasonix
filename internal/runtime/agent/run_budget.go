@@ -131,6 +131,7 @@ func (a *Agent) taskBudgetLimit(ctx context.Context) TaskBudget {
 // after a resumable explicit-budget pause, while no Agent Run is active.
 func (a *Agent) ResetTaskBudget() {
 	a.task.budget = runBudget{limit: a.task.budget.limit}
+	a.task.sharedBudget = nil
 }
 
 // observeRunBudget folds a round into both scopes and reports them.
@@ -140,6 +141,9 @@ func (a *Agent) observeRunBudget(state *turnRuntime, usage *provider.Usage) {
 	}
 	state.budget.rootTokens.observe(usage)
 	state.budget.observe(usage, a.svc.pricing)
+	if !state.sharedBudget.limited() {
+		state.sharedBudget.observe(usage, a.svc.pricing)
+	}
 	if a.task.budget.started.IsZero() {
 		a.task.budget.started = state.budget.started
 	}

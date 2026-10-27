@@ -146,6 +146,9 @@ func TestWritePathSetAllowsPath(t *testing.T) {
 	if !claim.AllowsPath(inside) {
 		t.Fatalf("should allow %s", inside)
 	}
+	if !claim.AllowsPath(filepath.Join("docs", "x.md")) || claim.AllowsPath(filepath.Join("..", "elsewhere.go")) {
+		t.Fatal("relative paths must resolve in the claimed workspace")
+	}
 	outside := filepath.Join(root, "other.md")
 	if claim.AllowsPath(outside) {
 		t.Fatalf("should reject %s", outside)

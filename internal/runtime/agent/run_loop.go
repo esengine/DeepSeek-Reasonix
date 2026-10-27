@@ -265,6 +265,7 @@ func (a *Agent) openUserTurn(ctx context.Context, providerInput, rawInput string
 func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 	ctx = a.withAgentContext(ctx)
 	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
+		a.finalizeSharedBudget(state)
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
@@ -764,12 +765,6 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 			"budget (%s=%d) exhausted: one grace round to finalize", state.runMaxStepsKey, state.runMaxSteps)})
 	}
 	return true, nil
-}
-
-func (a *Agent) pairUnexecutedGraceCalls(calls []provider.ToolCall, msg string) {
-	for _, call := range calls {
-		a.sess.conversation.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
-	}
 }
 
 func (a *Agent) unavailableContextualToolCalls(ctx context.Context, calls []provider.ToolCall) []string {

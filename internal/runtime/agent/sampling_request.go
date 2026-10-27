@@ -14,7 +14,8 @@ import (
 // round. All stream retries replay this exact payload — no synthetic recovery
 // messages, no schema reorder, no previous_response_id drift from failed attempts.
 type samplingRequest struct {
-	req provider.Request
+	budgetOutput int
+	req          provider.Request
 	// overflowFolded records that this round already answered a context-overflow
 	// rejection by folding. The recovery is one-shot: a second rejection means
 	// the fold did not reach far enough, not that another one will.
@@ -27,8 +28,19 @@ type samplingRequest struct {
 	sent usageAnchor
 }
 
-func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	ch, err := a.svc.prov.Stream(ctx, req)
+func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request, frozen ...*samplingRequest) (<-chan provider.Chunk, error) {
+	b, _ := ctx.Value(sharedBudgetKey{}).(*sharedBudget)
+	fixed := false
+	if len(frozen) > 0 && frozen[0] != nil && frozen[0].budgetOutput > 0 {
+		req.MaxTokens = frozen[0].budgetOutput
+		fixed = true
+	}
+	prompt := a.window().estimatedRequestTokens(req)
+	ch, err := budgetedStream(ctx, a.svc.prov, &req, b, prompt, a.svc.pricing, fixed)
+	if len(frozen) > 0 && frozen[0] != nil && b.limited() && req.MaxTokens > 0 {
+		frozen[0].budgetOutput = req.MaxTokens
+		frozen[0].req.MaxTokens = req.MaxTokens
+	}
 	if err == nil {
 		a.window().rememberSummaryPrefix(req)
 	}

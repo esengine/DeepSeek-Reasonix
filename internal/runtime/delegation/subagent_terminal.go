@@ -31,5 +31,9 @@ func (s *SubagentStore) saveTerminal(run *SubagentRun, status sessionstore.Subag
 	meta.Status, meta.TerminalReason = status, reason
 	meta.UpdatedAt = time.Now().UTC()
 	run.Meta = meta
-	return errors.Join(branchErr, sessionErr, s.saveMeta(meta))
+	metaErr := s.saveMeta(meta)
+	if metaErr == nil {
+		run.recordExecutionOutcome()
+	}
+	return errors.Join(branchErr, sessionErr, metaErr)
 }

@@ -63,8 +63,9 @@ func TestDelegationSpecMembersStaySeparate(t *testing.T) {
 	// TopLevel is what the child starts from in the sense that matters here:
 	// whether it descends from a call at all. It is not a scheduling choice and
 	// not a capability — it says there is no parent call to inherit.
-	assertFieldSet(t, "ContextRequest", ContextRequest{}, []string{"ContinueFrom", "ForkFrom", "Ephemeral", "Upstream", "TopLevel"})
+	assertFieldSet(t, "ContextRequest", ContextRequest{}, []string{"ContinueFrom", "ForkFrom", "Ephemeral", "Upstream", "TopLevel", "Summary", "ResultRefs"})
 	assertFieldSet(t, "SchedulerPolicy", SchedulerPolicy{}, []string{
+		"Isolation",
 		"MaxSteps", "RunInBackground", "BackgroundWriter", "Nested", "Priority", "OnStart", "OnQueued", "OnHeld",
 	})
 }

@@ -670,7 +670,8 @@ func (a *contextWindow) summarizeAtMode(ctx context.Context, region []provider.M
 	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
 	}
-	ch, err := a.svc.prov.Stream(ctx, req)
+	budget, _ := ctx.Value(sharedBudgetKey{}).(*sharedBudget)
+	ch, err := budgetedStream(ctx, a.svc.prov, &req, budget, a.estimatedRequestTokens(req), a.svc.pricing, false)
 	if err != nil {
 		return "", usage, err
 	}

@@ -509,6 +509,8 @@ const SAID: Record<string, string> = {
   "subagent.read_failed": "读取子代理记录失败：{detail}",
   "subagent.not_running": "这个子代理已经不在运行，读不到新的指示",
   "subagent.steer_empty": "指示不能是空的",
+  "subagent.handoff_invalid": "上下文交接未能发送：{detail}",
+  "subagent.recovery_refused": "任务恢复请求未能发送，请刷新计划后重试：{detail}",
   "subagent.steer_too_large": "这条指示太长了，超过了发给子代理的单条上限",
   "subagent.steer_rate_limited": "短时间内发给这个子代理的指示太多了，请稍后再发",
   "tool.cancelled_by_user": "你停止了这条调用，它在外部已经做了什么无法确定",

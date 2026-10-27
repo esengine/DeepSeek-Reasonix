@@ -254,11 +254,9 @@ model = "x"
 	}
 }
 
-// The token axis is the one that generalises: a loop serving 99.9% of its
-// prompt from cache still accumulates them, where wall clock catches only a
-// slow loop and money reads as free on an unpriced model. It reached the
-// runtime through nothing until this wiring existed.
-func TestEffectTaskTokenBudgetLandsARunawayThroughRealBuild(t *testing.T) {
+// A configured token allowance must reject an unreservable assembled request
+// before the provider can charge for it, even on an unpriced model.
+func TestEffectTaskTokenBudgetReservesBeforeProviderThroughRealBuild(t *testing.T) {
 	t.Parallel()
 	home := statedBootHome(t)
 	dir := testenv.TempDir(t)
@@ -272,7 +270,7 @@ default_model = "test-model"
 
 [agent]
 system_prompt = "BASE"
-task_token_budget = 5000
+task_token_budget = 1
 
 [[providers]]
 name = "test-model"
@@ -295,8 +293,8 @@ model = "x"
 	if !ok || pause.Kind != "task_budget" || pause.Key != "token" {
 		t.Fatalf("Run error = %v (pause=%+v, ok=%v), want token task-budget pause", runErr, pause, ok)
 	}
-	if rec.roundCount() == 0 {
-		t.Fatal("no round reached the provider; the run never started")
+	if rec.roundCount() != 0 {
+		t.Fatal("an unreservable request reached the provider")
 	}
 }
 

@@ -171,7 +171,8 @@ func TestFleetGraphShowsAdoptedWorkAsExternal(t *testing.T) {
 	root := testenv.TempDir(t)
 	store := mustSubagentStore(t)
 	first := newAdoptionFleet(t, store, root, &upstreamProbeProvider{answer: "ARTIFACT-42"})
-	out, err := first.Execute(adoptionCtx(event.Discard), json.RawMessage(fleetGraphSeedTasks))
+	seedCtx := agent.WithCallContext(adoptionCtx(event.Discard), "seed-fleet", event.Discard, nil, false)
+	out, err := first.Execute(seedCtx, json.RawMessage(fleetGraphSeedTasks))
 	if err != nil {
 		t.Fatalf("first fleet: %v\n%s", err, out)
 	}

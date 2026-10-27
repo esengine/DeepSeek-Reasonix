@@ -43,6 +43,7 @@ const sessionDisplayIndexMaxLineBytes = 16 << 20
 // or an older Reasonix build may leave that model behind; consumers compare
 // TranscriptSize and identity before reading and rebuild it on mismatch.
 type SessionDisplayIndex struct {
+	PageMetadata   int                 `json:"page_metadata,omitempty"`
 	SchemaVersion  int                 `json:"schema_version"`
 	Revision       int64               `json:"revision"`
 	RevisionKnown  bool                `json:"revision_known"`
@@ -59,6 +60,10 @@ type SessionDisplayIndex struct {
 // SessionPreviewFromMessages semantics (IsUserAuthoredTurn over
 // UserMessageText); messages before the first authored turn carry 0.
 type DisplayIndexEntry struct {
+	WorkMs       int64         `json:"work_ms,omitempty"`
+	CallKnown    bool          `json:"call_known,omitempty"`
+	CallMessage  int           `json:"call_message,omitempty"`
+	CallOrdinal  int           `json:"call_ordinal,omitempty"`
 	Index        int           `json:"index"`
 	Offset       int64         `json:"offset"`
 	Length       int64         `json:"length"`
@@ -98,6 +103,7 @@ func BuildSessionDisplayIndex(messages []provider.Message, revision int64, revis
 	if _, _, err := encodeDisplayIndexEntries(idx, messages, 0, 0, 0); err != nil {
 		return nil
 	}
+	addDisplayPageMetadata(idx, messages)
 	return idx
 }
 
@@ -172,6 +178,7 @@ func extendSessionDisplayIndex(indexPath string, msgs []provider.Message, digest
 	if _, _, err := encodeDisplayIndexEntries(idx, msgs, appendFrom, prev.TranscriptSize, prev.AuthoredTurns); err != nil {
 		return nil
 	}
+	addDisplayPageMetadata(idx, msgs)
 	return idx
 }
 
@@ -212,6 +219,9 @@ func WriteSessionDisplayIndex(path string, idx *SessionDisplayIndex) error {
 	if err := fileutil.AtomicWriteFile(path, b, 0o600); err != nil {
 		return fmt.Errorf("write session display index: %w", err)
 	}
+	if windowPath := store.WindowIndexForDisplayIndex(path); windowPath != "" {
+		return writeWindowIndex(windowPath, idx)
+	}
 	return nil
 }
 
@@ -238,6 +248,9 @@ func LoadSessionDisplayIndex(path string) (*SessionDisplayIndex, error) {
 	}
 	expectedOffset := int64(0)
 	for i, entry := range idx.Entries {
+		if entry.CallKnown && (entry.CallMessage < 0 || entry.CallMessage >= i || entry.CallOrdinal < 0) {
+			return nil, fmt.Errorf("session display index entry %d has invalid tool context", i)
+		}
 		if entry.Index != i {
 			return nil, fmt.Errorf("session display index entry %d has index %d", i, entry.Index)
 		}
@@ -293,6 +306,7 @@ func ScanSessionDisplayIndex(transcriptPath string) (*SessionDisplayIndex, error
 	}
 	h := sha256.New()
 	reader := bufio.NewReaderSize(f, 1<<20)
+	history := newHistoryReadIndex(0)
 	offset := int64(0)
 	turn := 0
 	for {
@@ -311,6 +325,10 @@ func ScanSessionDisplayIndex(transcriptPath string) (*SessionDisplayIndex, error
 			var entry DisplayIndexEntry
 			entry, turn = classifyDisplayIndexMessage(m, len(idx.Entries), offset, int64(len(line)), turn)
 			idx.Entries = append(idx.Entries, entry)
+			for i := range m.ToolCalls {
+				m.ToolCalls[i].Arguments = ""
+			}
+			history.appendMessage(m)
 			offset += int64(len(line))
 		}
 		if errors.Is(readErr, io.EOF) {
@@ -326,6 +344,7 @@ func ScanSessionDisplayIndex(transcriptPath string) (*SessionDisplayIndex, error
 	var digest [sha256.Size]byte
 	copy(digest[:], h.Sum(nil))
 	idx.ContentDigest = digestString(digest)
+	applyDisplayPageMetadata(idx, history)
 	return idx, nil
 }
 

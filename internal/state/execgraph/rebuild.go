@@ -1,6 +1,7 @@
 package execgraph
 
 import (
+	"slices"
 	"time"
 
 	"reasonix/internal/contract/agentgraph"
@@ -23,9 +24,11 @@ const (
 // caller asked for, and filling it from the resolved one puts a third meaning
 // on the field.
 type ChildOutcome struct {
-	Execution string
-	Ref       string
-	Status    string
+	ContextKnown bool
+	ContextRefs  []string
+	Execution    string
+	Ref          string
+	Status       string
 }
 
 // Interruption is an execution whose owner disappeared. Started separates the
@@ -64,6 +67,14 @@ func Rebuild(entries []execjournal.Entry, children []ChildOutcome, owned Owned) 
 			byExecution[c.Execution] = c
 		}
 	}
+	for _, e := range entries {
+		if e.Result != nil {
+			if _, valid := terminalState(e.Result.State); valid {
+				c := ChildOutcome{Execution: e.ID, Ref: e.Result.Ref, Status: e.Result.State, ContextKnown: true, ContextRefs: e.Result.ContextRefs}
+				byExecution[e.ID] = c
+			}
+		}
+	}
 	answered := answeredSet(entries, byExecution)
 
 	var out Result
@@ -77,8 +88,20 @@ func Rebuild(entries []execjournal.Entry, children []ChildOutcome, owned Owned) 
 			out.LegacyIdentity = append(out.LegacyIdentity, e.ID)
 		}
 		out.Graph.Apply(agentgraph.Delta{Nodes: []agentgraph.Node{nodeFor(e, child, state)}})
-		out.Graph.Apply(edgesFor(e, answered))
+		edges := edgesFor(e, answered)
+		if child.ContextKnown {
+			edges.Edges = slices.DeleteFunc(edges.Edges, func(edge agentgraph.Edge) bool { return edge.Kind == agentgraph.Context })
+		}
+		out.Graph.Apply(edges)
 	}
+	resolved := make([]ChildOutcome, 0, len(entries))
+	for _, e := range entries {
+		if c, ok := byExecution[e.ID]; ok {
+			resolved = append(resolved, c)
+		}
+	}
+	recoverContextEdges(&out.Graph, resolved)
+	recoverGroups(&out.Graph)
 	return out
 }
 
@@ -108,9 +131,10 @@ func resolveState(e execjournal.Entry, terminal string, live bool) (agentgraph.N
 			return agentgraph.StatePending, false
 		}
 	}
-	// Settled with nothing in the store: it never ran. Reaching the scheduler
-	// and being released without admission is a cancellation; never reaching it
-	// is a branch the orchestration cut.
+	if e.Started() {
+		return "", true
+	}
+	// Only an execution without admission can be classified from its queue state.
 	if e.Queued() {
 		return agentgraph.StateCancelled, false
 	}

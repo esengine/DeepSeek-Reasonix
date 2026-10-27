@@ -115,6 +115,7 @@ var mirroredWireTypes = []wireMirror{
 	// a task it can only call by its short preview.
 	{"internal/tools/jobs/jobs_view.go", "View", tsSessionFile, "JobEntry"},
 	{"internal/frontend/serve/subagents.go", "subagentRunView", tsSubagentFile, "SubagentRun"},
+	{"internal/runtime/delegation/subagent_handoff.go", "GuidanceContext", tsSubagentFile, "SubagentHandoff"},
 	{"internal/frontend/serve/subagents.go", "subagentTranscriptView", tsSubagentFile, "SubagentTranscript"},
 	{"internal/frontend/serve/session_usage.go", "SourceUsage", tsSessionFile, "SourceUsage"},
 	// The agent's tabs. The target id is what the window draws a view by, so a

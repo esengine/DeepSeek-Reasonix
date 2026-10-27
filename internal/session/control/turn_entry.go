@@ -227,7 +227,7 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 	}
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
-	ctx = agent.WithParentSession(ctx, parentSession)
+	ctx = c.withDelegationContext(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
 	rawInput := input
 	ctx, turnImgs := c.withTurnImages(ctx, rawInput)
@@ -299,7 +299,7 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
-	ctx = agent.WithParentSession(ctx, parentSession)
+	ctx = c.withDelegationContext(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
 	ctx, turnImgs := c.withTurnImages(ctx, task)
 	ctx = langpref.WithResponseLanguagePreference(ctx, c.display.responseLanguage)

@@ -39,7 +39,7 @@ func TestRootAuxiliaryAutomaticCompaction(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(readProbe{})
 	a := New(p, reg, foldableSessionOverForce(30), Options{ContextWindow: 5000, CompactRatio: 0.5, RecentKeep: 2, ArchiveDir: t.TempDir(), TaskBudget: TaskBudget{Tokens: 1500}}, event.Discard)
-	err := a.Run(t.Context(), "read a few files")
+	err := a.Run(reportedBudgetContext(t.Context()), "read a few files")
 	if pause, ok := InspectRunPause(err); !ok || pause.Key != "token" {
 		t.Fatalf("pause=%+v err=%v, want token landing", pause, err)
 	}
@@ -110,7 +110,7 @@ func TestRootAuxiliaryTokenBudget(t *testing.T) {
 			if tc.disabled {
 				ctx = WithTaskBudget(ctx, TaskBudget{})
 			}
-			err := root.Run(ctx, "run maintenance")
+			err := root.Run(reportedBudgetContext(ctx), "run maintenance")
 			if tc.disabled {
 				if err != nil {
 					t.Fatal(err)
@@ -167,13 +167,13 @@ func TestRootAuxiliaryBudgetProjectionKeepsOldTask(t *testing.T) {
 	root := New(&spendingProvider{max: 1}, reg, sessionstore.NewSession("root"), Options{}, event.Discard)
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
-	if err := root.Run(ctx, "capture root scope"); err != nil {
+	if err := root.Run(reportedBudgetContext(ctx), "capture root scope"); err != nil {
 		t.Fatal(err)
 	}
 	old := root.task.budget.rootTokens
 	before := old.used.Load()
 	cancel()
-	if err := root.Run(t.Context(), "new task"); err != nil {
+	if err := root.Run(reportedBudgetContext(t.Context()), "new task"); err != nil {
 		t.Fatal(err)
 	}
 	current := root.task.budget.rootTokens

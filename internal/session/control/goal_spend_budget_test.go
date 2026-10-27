@@ -36,9 +36,11 @@ func TestGoalStartsWithNoTurnQuota(t *testing.T) {
 // A configured token budget pauses the loop on its own axis, with the goal
 // resumable rather than finished.
 func TestGoalTokenBudgetPausesAndResumes(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{billedGoalTurn()}}
+	billed := billedGoalTurn()
+	billed[1].Usage = &provider.Usage{PromptTokens: 2000, CompletionTokens: 10, TotalTokens: 2010, RequestCount: 1}
+	prov := &scriptedTurns{turns: [][]provider.Chunk{billed}}
 	c, _, events := goalRuntimeControllerWithTokenBudget(t, prov,
-		&fakeGoalEvaluator{outcome: goaleval.OutcomeContinue, reason: "ongoing"}, 150)
+		&fakeGoalEvaluator{outcome: goaleval.OutcomeContinue, reason: "ongoing"}, 4000)
 
 	c.Submit("/goal keep going forever")
 	waitGoalTurnDone(t, events)
@@ -47,8 +49,8 @@ func TestGoalTokenBudgetPausesAndResumes(t *testing.T) {
 	if c.GoalStatus() != GoalStatusBlocked || rt.StopCause != stopCauseBudgetSpend {
 		t.Fatalf("status = %q runtime = %+v, want a spend-budget pause", c.GoalStatus(), rt)
 	}
-	if rt.TokensUsed < rt.TokensLimit {
-		t.Fatalf("paused at %d/%d tokens, want the budget actually reached", rt.TokensUsed, rt.TokensLimit)
+	if rt.TokensUsed <= 0 || rt.TokensUsed > rt.TokensLimit {
+		t.Fatalf("paused at %d/%d tokens, want observed usage within the reservation limit", rt.TokensUsed, rt.TokensLimit)
 	}
 
 	// Unlike openai/codex#34215, a spend pause resumes with its budget granted
@@ -57,7 +59,7 @@ func TestGoalTokenBudgetPausesAndResumes(t *testing.T) {
 		t.Fatalf("spend pause did not resume: status = %q", c.GoalStatus())
 	}
 	resumed := c.GoalRuntime()
-	if resumed.TokensUsed != rt.TokensUsed || resumed.RequestsUsed != rt.RequestsUsed || resumed.TurnsUsed != rt.TurnsUsed || resumed.TokensLimit != rt.TokensUsed+150 {
+	if resumed.TokensUsed != rt.TokensUsed || resumed.RequestsUsed != rt.RequestsUsed || resumed.TurnsUsed != rt.TurnsUsed || resumed.TokensLimit != rt.TokensUsed+4000 {
 		t.Fatalf("resumed runtime = %+v, want cumulative statistics plus one fresh budget slice after %+v", resumed, rt)
 	}
 

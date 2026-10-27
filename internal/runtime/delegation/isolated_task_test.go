@@ -31,7 +31,7 @@ func TestTaskSchemaOffersIsolationOnlyWhenSet(t *testing.T) {
 	if schemaOffersIsolation(t, tt) {
 		t.Fatal("isolation offered without a runner")
 	}
-	tt.SetIsolation(isolation.NewStore(testenv.TempDir(t), testenv.TempDir(t), gitcmd.Repo{}), testenv.TempDir(t), func(context.Context, isolation.Run) (isolation.Outcome, error) {
+	tt.SetIsolation(isolation.NewStore(testenv.TempDir(t), testenv.TempDir(t), gitcmd.Repo{}), testenv.TempDir(t), func(context.Context, isolation.Run, ProfileExecSpec) (isolation.Outcome, error) {
 		return isolation.Outcome{}, nil
 	})
 	if !schemaOffersIsolation(t, tt) {
@@ -60,12 +60,12 @@ func TestIsolatedTaskRefusals(t *testing.T) {
 		t.Fatalf("no isolation: err = %v", err)
 	}
 	ran := false
-	tt.SetIsolation(isolation.NewStore(testenv.TempDir(t), testenv.TempDir(t), gitcmd.Repo{}), testenv.TempDir(t), func(context.Context, isolation.Run) (isolation.Outcome, error) {
+	tt.SetIsolation(isolation.NewStore(testenv.TempDir(t), testenv.TempDir(t), gitcmd.Repo{}), testenv.TempDir(t), func(context.Context, isolation.Run, ProfileExecSpec) (isolation.Outcome, error) {
 		ran = true
 		return isolation.Outcome{}, nil
 	})
-	_, err = tt.Execute(ctx, json.RawMessage(`{"prompt":"x","isolation":"worktree","profile":"p","run_in_background":true}`))
-	if refusalCode(err) != codeIsolationUnsupported || !strings.Contains(err.Error(), "profile, run_in_background") || ran {
+	_, err = tt.Execute(ctx, json.RawMessage(`{"prompt":"x","isolation":"worktree","continue_from":"sa_previous"}`))
+	if err == nil || !strings.Contains(err.Error(), "continue_from") || ran {
 		t.Fatalf("unsupported args: err = %v, ran = %v", err, ran)
 	}
 	_, err = tt.Execute(ctx, json.RawMessage(`{"prompt":"x","isolation":"copy"}`))

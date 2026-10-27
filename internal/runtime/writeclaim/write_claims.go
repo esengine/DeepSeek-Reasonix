@@ -171,6 +171,9 @@ func (s WritePathSet) AllowsPath(target string) bool {
 	if s.Empty() {
 		return false
 	}
+	if !filepath.IsAbs(target) && s.WorkspaceRoot != "" {
+		target = filepath.Join(s.WorkspaceRoot, target)
+	}
 	abs, err := realPathForClaim(target)
 	if err != nil {
 		return false

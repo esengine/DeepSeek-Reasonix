@@ -9,6 +9,7 @@ import (
 	"io"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/writeclaim"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,7 @@ func (*FleetTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
+	"recovery":{"type":"object","description":"Explicit recovery of a saved fleet in this root conversation. list discovers ids; inspect shows tasks and reused results; resume reruns unfinished work under current permissions, retaining completed answers. Unfinished tasks may have partial writes. Mutually exclusive with tasks, fail_fast and run_in_background; never runs on startup.","properties":{"action":{"type":"string","enum":["list","inspect","resume"]},"id":{"type":"string"}},"required":["action"],"additionalProperties":false},
   "tasks":{
     "type":"array",
     "description":"Array of 2–64 sub-tasks to run under the session scheduler.",
@@ -60,6 +62,8 @@ func (*FleetTool) Schema() json.RawMessage {
         "id":{"type":"string","description":"Optional stable id for this task, referenced by other tasks' depends_on. Defaults to the 1-based position."},
         "depends_on":{"type":"array","items":{"type":"string"},"description":"Ids of tasks that must complete before this one starts. This task begins with each dependency's final answer in its context, bounded and split evenly across them, so it need not re-derive their work. Unknown ids, self-edges, and cycles fail preflight. A task whose dependency fails or is skipped is skipped too. Ordered tasks may share write_paths; only tasks that can run at the same time need disjoint claims."},
         "description":{"type":"string","description":"Optional short label shown in the job list."},
+        "context_summary":{"type":"string","description":"Optional selected background, up to 16384 UTF-8 bytes; not a permission grant."},
+        "context_refs":{"type":"array","items":{"type":"string"},"maxItems":64,"description":"Completed sa_... results from this conversation to supply as context, in addition to depends_on results."},
         "profile":{"type":"string","description":"Optional runAs=subagent profile name."},
         "write_paths":{"type":"array","items":{"type":"string"},"description":"Write targets for this item, as file paths when the targets are known: a directory overlaps every path beneath it and serializes writers. Writers that can run at the same time must declare non-overlapping paths; writers ordered by depends_on may share them. Omitting write_paths claims the whole workspace (not under write_lease = optimistic); two concurrent whole-workspace claims (or any overlap between concurrent writers) fail preflight and start nothing."},
         "read_only":{"type":"boolean","description":"Force the read-only registry even if the profile is writable."},
@@ -73,13 +77,14 @@ func (*FleetTool) Schema() json.RawMessage {
   "fail_fast":{"type":"boolean","description":"Stop starting new tasks after the first failure. Tasks already running are left to finish so partial writes are not abandoned mid-flight. Omitted (the default) means independent branches keep going; a failed task's dependents are skipped either way."},
   "run_in_background":{"type":"boolean","description":"Run the whole fleet asynchronously and return a job id collectable with wait. Items queue for concurrency/write slots inside the job."}
 },
-"required":["tasks"]
+"anyOf":[{"required":["tasks"]},{"required":["recovery"]}]
 }`)
 }
 
 func (*FleetTool) ReadOnly() bool { return false }
 
 type fleetTaskItem struct {
+	taskContextArgs
 	Prompt      string   `json:"prompt"`
 	AdoptRef    string   `json:"adopt_ref"`
 	ID          string   `json:"id"`
@@ -104,6 +109,33 @@ type fleetItemResult struct {
 	ref     string
 }
 
+type fleetParams struct {
+	Recovery        *fleetRecoveryRequest `json:"recovery"`
+	Tasks           []fleetTaskItem       `json:"tasks"`
+	FailFast        bool                  `json:"fail_fast"`
+	RunInBackground bool                  `json:"run_in_background"`
+}
+
+func decodeFleetParams(args json.RawMessage) (fleetParams, error) {
+	var params fleetParams
+	dec := json.NewDecoder(bytes.NewReader(args))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&params); err != nil {
+		return params, fmt.Errorf("invalid args: %w", err)
+	}
+	if dec.Decode(new(any)) != io.EOF {
+		return params, fmt.Errorf("expected one fleet request")
+	}
+	if params.Recovery != nil {
+		if params.Tasks != nil || params.FailFast || params.RunInBackground {
+			return params, fmt.Errorf("recovery is mutually exclusive with tasks, fail_fast and run_in_background")
+		}
+	} else if n := len(params.Tasks); n < fleetMinTasks || n > fleetMaxTasks {
+		return params, fmt.Errorf("fleet requires between %d and %d tasks (got %d)", fleetMinTasks, fleetMaxTasks, n)
+	}
+	return params, nil
+}
+
 func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result string, err error) {
 	if f == nil || f.taskTool == nil {
 		return "", fmt.Errorf("fleet is not configured")
@@ -119,6 +151,7 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 		groupParentID = "fleet"
 		groupSink = event.Discard
 	}
+	groupParentID = f.recoveryGroup(ctx, groupParentID)
 	// The merger emits already-namespaced group/child IDs, so it must use the
 	// raw call sink. A nested subSink would prefix the group ID a second time
 	// (group/group), leaving the frontend unable to match its lifecycle card.
@@ -138,18 +171,12 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 	}()
 	ctx = withSubagentProgressMerger(ctx, merger)
 
-	var params struct {
-		Tasks           []fleetTaskItem `json:"tasks"`
-		FailFast        bool            `json:"fail_fast"`
-		RunInBackground bool            `json:"run_in_background"`
+	params, err := decodeFleetParams(args)
+	if err != nil {
+		return "", err
 	}
-	dec := json.NewDecoder(bytes.NewReader(args))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&params); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if n := len(params.Tasks); n < fleetMinTasks || n > fleetMaxTasks {
-		return "", fmt.Errorf("fleet requires between %d and %d tasks (got %d)", fleetMinTasks, fleetMaxTasks, n)
+	if params.Recovery != nil {
+		return f.executeRecovery(ctx, *params.Recovery)
 	}
 
 	call, err := f.preflight(ctx, params.Tasks, params.FailFast)
@@ -157,6 +184,12 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 		return "", err
 	}
 	plan, specs, adopted := call.plan, call.specs, call.adopted
+	recovery, err := f.saveRecovery(ctx, params.Tasks, call, groupParentID)
+	if err != nil {
+		return "", err
+	}
+	recoveryHandoff := false
+	defer recovery.finish(&result, &recoveryHandoff)
 
 	if params.RunInBackground {
 		for i := range specs {
@@ -191,22 +224,22 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 			}
 		}
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "fleet", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
-			jobCtx = agent.InheritRootTokenBudget(jobCtx, ctx)
 			// Execute returns as soon as the job is registered, so the job owns
 			// the handed-off merger until every child preview and terminal has
 			// flushed. Closing it in Execute would strand child cards at running.
-			jobCtx = agent.WithParentSession(jobCtx, parentSession)
+			jobCtx = agent.WithChildMessageReceiver(f.taskTool.backgroundContext(jobCtx, ctx, parentSession), agent.ChildMessageReceiverFrom(ctx))
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
 			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
 			// The job shares the Execute-level merger so the group lifecycle
 			// events and the child previews ride the same pacing budget.
 			jobCtx = withSubagentProgressMerger(jobCtx, merger)
 			return f.runFleet(jobCtx, groupSink, specs, plan, adopted, parentID)
-		}, uninvokedFleetFinalizer(ctx, merger, groupParentID), jobCleanup(releaseWriter))
+		}, uninvokedFleetFinalizer(ctx, merger, groupParentID), jobCleanup(releaseWriter), jobCleanup(recovery.close))
 		// The Manager finalizes the merger even when no closure is invoked.
 		// Foreground Execute retains ownership until its synchronous return.
 		lifecycleHandoff = true
 		mergerCloseHandoff = true
+		recoveryHandoff = true
 		return fmt.Sprintf("Started background fleet %q (%s). Collect results with wait; you will be notified when it finishes.", job.ID, label), nil
 	}
 
@@ -267,6 +300,10 @@ func (f *FleetTool) buildItemSpecs(ctx context.Context, items []fleetTaskItem, a
 		forceBackgroundClaim := !item.ReadOnly
 		spec, err := f.taskTool.buildTaskSpec(ctx, item.Prompt, item.Description, item.Profile, item.WritePaths, item.Tools, item.MaxSteps, item.Model, item.Effort, "", "", false, item.ReadOnly)
 		if err != nil {
+			return nil, nil, fmt.Errorf("task %d: %w", i+1, err)
+		}
+		item.apply(&spec)
+		if err := f.taskTool.resolveTaskContext(ctx, &spec); err != nil {
 			return nil, nil, fmt.Errorf("task %d: %w", i+1, err)
 		}
 		if forceBackgroundClaim && !spec.Grant.ReadOnly && spec.Grant.WritePaths.Empty() {
@@ -342,7 +379,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 
 	startOne := func(idx int) {
 		spec := specs[idx]
-		spec.Context.Upstream = f.upstreamFor(plan, idx, results)
+		spec.Context.Upstream = append(slices.Clone(spec.Context.Upstream), f.upstreamFor(plan, idx, results)...)
 		label := spec.Task.Description
 		subID := fleetNodeID(parentID, idx)
 		spec.Sched.Priority = plan.rank[idx]

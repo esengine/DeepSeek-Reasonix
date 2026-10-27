@@ -89,6 +89,10 @@ func (s *Store) Finish(ctx context.Context, e *Entry) (bool, error) {
 		return true, s.rememberUnadmittedFinish(e, err)
 	}
 	defer release()
+	return s.finishLocked(ctx, e)
+}
+
+func (s *Store) finishLocked(ctx context.Context, e *Entry) (bool, error) {
 	tree, changes, err := worktree.CandidateTree(ctx, e.Snap, e.Cand)
 	if err == nil && len(changes) > 0 {
 		e.Stats, err = worktree.DiffStat(ctx, e.Snap, tree, changes)
@@ -96,7 +100,8 @@ func (s *Store) Finish(ctx context.Context, e *Entry) (bool, error) {
 	if err != nil {
 		return true, s.retainInspection(e, err)
 	}
-	if len(changes) == 0 {
+	_, resumable := s.readContinuation(e.ID)
+	if len(changes) == 0 && !resumable {
 		s.removeLocked(ctx, e)
 		return false, err
 	}
@@ -188,6 +193,7 @@ func (s *Store) Pending() []string {
 		return nil
 	}
 	ids := s.durableIDs()
+	ids = append(ids, s.continuationIDs()...)
 	s.mu.Lock()
 	for id := range s.uninspected {
 		if !slices.Contains(ids, id) {
@@ -196,7 +202,7 @@ func (s *Store) Pending() []string {
 	}
 	s.mu.Unlock()
 	slices.Sort(ids)
-	return ids
+	return slices.Compact(ids)
 }
 
 func (s *Store) lookup(id string) (*Entry, error) {
@@ -255,6 +261,12 @@ func (s *Store) dropLocked(ctx context.Context, id string) {
 }
 
 func (s *Store) removeLocked(ctx context.Context, e *Entry) {
+	if _, ok := s.readContinuation(e.ID); ok {
+		if root, err := s.continuationRoot(false); err == nil {
+			_ = root.Remove(continuationName(e.ID))
+			root.Close()
+		}
+	}
 	s.mu.Lock()
 	delete(s.uninspected, e.ID)
 	s.mu.Unlock()

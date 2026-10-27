@@ -104,7 +104,7 @@ api_key_env = "GOAL_PLANNER_RESUME_EFFECT_KEY"
 	ctrl.SetGoal("investigate the planner resume fixtures")
 	run := func() {
 		t.Helper()
-		if err := ctrl.RunTurn(t.Context(), control.PlannerRouteMarker+" inspect the next fixture"); err != nil {
+		if err := ctrl.RunTurn(reportedBudgetEffectContext(t, t.Context()), control.PlannerRouteMarker+" inspect the next fixture"); err != nil {
 			t.Fatal(err)
 		}
 		if ctrl.GoalStatus() != control.GoalStatusBlocked {

@@ -64,7 +64,10 @@ func RepairSessionDisplayReadModel(path string) error {
 		return fmt.Errorf("lock session file: %w", err)
 	}
 	defer unlockFile()
+	return repairSessionDisplayReadModelUnlocked(path)
+}
 
+func repairSessionDisplayReadModelUnlocked(path string) error {
 	msgs, state, repairable, err := loadSessionDisplayMessagesUnlocked(path)
 	if err != nil {
 		return err

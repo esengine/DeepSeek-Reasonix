@@ -24,6 +24,7 @@ function reader(pages: SubagentTranscript[]) {
     workspaceImageURL: () => "",
     subagentTranscript: vi.fn(async (_ref: string, after = 0) => {
       calls.push(after);
+      if (after === -1) return pages[0];
       return pages.find((p) => p.after === after) ?? pages[pages.length - 1];
     }),
   } as unknown as AgentPort;
@@ -58,18 +59,22 @@ describe("a sub-agent run read from the kernel's record", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
     const settled = calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
-    expect(calls.slice(0, 3)).toEqual([0, 1, 2]);
+    expect(calls.slice(0, 3)).toEqual([-1, 1, 2]);
     expect(calls.length).toBe(settled);
   });
 
-  it("reads further pages straight away when the run holds more than one page", async () => {
+  it("loads older pages only when the reader requests them", async () => {
     const { port, calls } = reader([
-      page([say("one", 1)], 0, { total: 2 }),
       page([say("two", 2)], 1, { live: false, run: run({ state: "completed" }) }),
+      page([say("one", 1)], 0, { total: 2, live: false }),
     ]);
     render(<AgentRunView port={port} run={{ ref: "sa_1", name: "audit" }} shown />);
     await screen.findByText(/two/);
-    expect(calls).toEqual([0, 1]);
+    expect(calls).toEqual([-1]);
+    expect(screen.queryByText("one")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "加载更早的消息" }));
+    await screen.findByText("one");
+    expect(calls).toEqual([-1, 0]);
   });
 
   it("says why it cannot be read instead of staying empty", async () => {

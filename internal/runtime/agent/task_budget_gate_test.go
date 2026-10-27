@@ -41,14 +41,14 @@ func TestTaskBudgetGateLandsARunawayOnCost(t *testing.T) {
 	if last.Task.Rounds > 20 {
 		t.Fatalf("ran %d rounds before landing; the gate should fire on spend, not drift", last.Task.Rounds)
 	}
-	if last.Task.Cost < 1e-3 {
-		t.Fatalf("task cost %v landed below its own budget", last.Task.Cost)
+	if last.Task.Cost <= 0 || last.Task.Cost > 1e-3 {
+		t.Fatalf("task cost %v must stop before a further request would exceed the allowance", last.Task.Cost)
 	}
 }
 
 // Landing is one tool-free summary, not a truncated turn: the work stays in
 // the session and the next message continues it.
-func TestTaskBudgetGateKeepsTheWorkAndAsksForASummary(t *testing.T) {
+func TestTaskBudgetGateKeepsTheWorkWhenASummaryCannotBeReserved(t *testing.T) {
 	sink := newBudgetSink()
 	reg := tool.NewRegistry()
 	reg.Add(readProbe{})
@@ -58,19 +58,16 @@ func TestTaskBudgetGateKeepsTheWorkAndAsksForASummary(t *testing.T) {
 			TaskBudget: TaskBudget{Cost: 1e-3},
 		}, sink)
 
-	_ = a.Run(context.Background(), "read everything")
+	err := a.Run(context.Background(), "read everything")
+	if pause, ok := InspectRunPause(err); !ok || pause.Key != "cost" {
+		t.Fatalf("pause=%+v %v", pause, err)
+	}
 
-	var sawNudge, sawToolResult bool
+	var sawToolResult bool
 	for _, m := range a.sess.conversation.Messages {
-		if m.Role == provider.RoleUser && strings.Contains(m.Content, "reached its cost budget") {
-			sawNudge = true
-		}
 		if m.Role == provider.RoleTool {
 			sawToolResult = true
 		}
-	}
-	if !sawNudge {
-		t.Fatal("no finalization request in the session; the model was cut off instead of asked to land")
 	}
 	if !sawToolResult {
 		t.Fatal("completed tool work was dropped from the session")

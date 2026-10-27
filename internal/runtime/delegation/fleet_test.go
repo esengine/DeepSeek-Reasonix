@@ -220,7 +220,19 @@ func TestFleetSchemaStableAndBounds(t *testing.T) {
 		}
 	}
 	// Profile names must not be enumerated in schema (cache stability).
-	if strings.Contains(schema, "doc-rewriter") || strings.Contains(schema, "enum") {
+	var parsed struct {
+		Properties struct {
+			Tasks struct {
+				Items struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				} `json:"items"`
+			} `json:"tasks"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(schema), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(schema, "doc-rewriter") || strings.Contains(string(parsed.Properties.Tasks.Items.Properties["profile"]), `"enum"`) {
 		t.Fatalf("schema must not embed profile names: %s", schema)
 	}
 	if f.Name() != "fleet" {
@@ -433,7 +445,7 @@ func (p *fleetBarrierProvider) Stream(_ context.Context, req provider.Request) (
 
 func mustSubagentStore(t *testing.T) *SubagentStore {
 	t.Helper()
-	return NewSubagentStore(testenv.TempDir(t))
+	return NewSubagentStore(filepath.Join(testenv.TempDir(t), "subagents"))
 }
 
 func TestFleetAggregatePreservesEveryReferenceUnderToolLimit(t *testing.T) {

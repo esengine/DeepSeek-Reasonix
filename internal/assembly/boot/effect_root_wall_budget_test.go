@@ -78,7 +78,7 @@ model = "child-b"
 			ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
 			runCtx, cancel := context.WithCancel(agent.WithTaskBudget(t.Context(), agent.TaskBudget{Wall: time.Nanosecond}))
 			defer cancel()
-			runErr := ctrl.Run(runCtx, "delegate a fixture read")
+			runErr := ctrl.Run(reportedBudgetEffectContext(t, runCtx), "delegate a fixture read")
 			cancel()
 			close(unblock)
 			pause, ok := agent.InspectRunPause(runErr)

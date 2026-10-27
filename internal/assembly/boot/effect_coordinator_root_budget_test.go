@@ -101,7 +101,7 @@ api_key_env = "COORDINATOR_ROOT_EFFECT_KEY"
 			if !tc.skip {
 				input = control.PlannerRouteMarker + " " + input
 			}
-			err = ctrl.Run(ctx, input)
+			err = ctrl.Run(reportedBudgetEffectContext(t, ctx), input)
 			if tc.limit > 0 && !tc.disable {
 				if p, ok := agent.InspectRunPause(err); !ok || p.Key != "token" {
 					t.Fatalf("pause=%+v err=%v", p, err)

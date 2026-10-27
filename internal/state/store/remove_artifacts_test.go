@@ -24,11 +24,16 @@ func TestRemoveSessionArtifactsTakesTheOutputsDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(outputs, "call-1.txt"), "spilled\n")
+	recovery := SessionFleetRecoveryDir(path)
+	if err := os.MkdirAll(recovery, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(recovery, "fr_test.json"), `{"tasks":["private instruction"]}`)
 
 	if err := RemoveSessionArtifacts(path, extra); err != nil {
 		t.Fatalf("RemoveSessionArtifacts: %v", err)
 	}
-	for _, gone := range []string{path, SessionEventLog(path), extra, outputs} {
+	for _, gone := range []string{path, SessionEventLog(path), extra, outputs, recovery} {
 		if _, err := os.Stat(gone); !os.IsNotExist(err) {
 			t.Errorf("survived the delete: %s (err=%v)", filepath.Base(gone), err)
 		}

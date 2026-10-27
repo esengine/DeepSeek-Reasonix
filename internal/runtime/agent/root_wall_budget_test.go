@@ -64,7 +64,7 @@ func TestRootWallBudgetReachesDelegatedAgents(t *testing.T) {
 			case "explicit_zero":
 				ctx = WithTaskBudget(ctx, TaskBudget{})
 			}
-			err := root.Run(ctx, "delegate reads")
+			err := root.Run(reportedBudgetContext(ctx), "delegate reads")
 			bounded := mode != "unconfigured" && mode != "explicit_zero"
 			want := int32(11)
 			if bounded {

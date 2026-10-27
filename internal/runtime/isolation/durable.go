@@ -108,6 +108,9 @@ func (s *Store) durableIDs() []string {
 // recover rebuilds a result from its worktree. Inspection errors retain the
 // result for retry; a successfully inspected empty result is removed.
 func (s *Store) recover(ctx context.Context, id string) (*Entry, error) {
+	if record, ok := s.readContinuation(id); ok {
+		return s.recoverEntry(ctx, record.Entry)
+	}
 	for _, record := range s.inspections() {
 		if record.Entry.ID != id {
 			continue
@@ -135,7 +138,8 @@ func (s *Store) recoverEntry(ctx context.Context, d durableEntry) (*Entry, error
 	if err != nil {
 		return nil, fmt.Errorf("inspect isolated result %s; files retained: %w", d.ID, err)
 	}
-	if len(changes) == 0 {
+	_, resumable := s.readContinuation(d.ID)
+	if len(changes) == 0 && !resumable {
 		s.removeLocked(ctx, e)
 		return nil, nil
 	}

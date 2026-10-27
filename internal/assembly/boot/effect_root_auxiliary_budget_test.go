@@ -100,7 +100,7 @@ api_key_env = "ROOT_AUXILIARY_KEY"
 				ctrl.Executor().Session().Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("history word ", 1200)})
 				ctrl.Executor().Session().Add(provider.Message{Role: provider.RoleUser, Content: "continue"})
 			}
-			err = ctrl.Run(t.Context(), "read fixture.txt")
+			err = ctrl.Run(reportedBudgetEffectContext(t, t.Context()), "read fixture.txt")
 			if tc.limit == 0 {
 				if err != nil {
 					t.Fatal(err)

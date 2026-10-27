@@ -16,6 +16,12 @@ type landCause struct {
 	detail string
 }
 
+func (a *Agent) pairUnexecutedGraceCalls(calls []provider.ToolCall, msg string) {
+	for _, call := range calls {
+		a.sess.conversation.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
+	}
+}
+
 func (c landCause) nudge(state *turnRuntime) string {
 	const close = "Do not call any more tools. Synthesize a final answer from the work already completed: what was accomplished, what remains, and any decision the user should make."
 	if c.kind == "task_budget" {

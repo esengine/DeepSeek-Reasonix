@@ -71,10 +71,11 @@ func validateMeta(meta sessionstore.SubagentMeta, spec SubagentSpec) error {
 	if meta.Status == sessionstore.SubagentRunning {
 		return fmt.Errorf("subagent reference %q is still in progress", meta.Ref)
 	}
-	if meta.Status == sessionstore.SubagentFailed {
+	retained := meta.IsolationRef != "" && meta.IsolationRef == spec.IsolationRef && meta.IsolationGrant != "" && meta.IsolationGrant == spec.IsolationGrant
+	if meta.Status == sessionstore.SubagentFailed && !retained {
 		return fmt.Errorf("subagent reference %q failed and cannot be continued", meta.Ref)
 	}
-	if meta.Status == sessionstore.SubagentInterrupted {
+	if meta.Status == sessionstore.SubagentInterrupted && !retained {
 		return fmt.Errorf("subagent reference %q was interrupted by a previous shutdown or crash and cannot be continued or forked; run a fresh subagent instead", meta.Ref)
 	}
 	want := metaFromSpec(meta.Ref, meta.Status, meta.CreatedAt, meta.UpdatedAt, spec)

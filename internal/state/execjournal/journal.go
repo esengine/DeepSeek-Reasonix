@@ -56,6 +56,7 @@ type WorkerSpec struct {
 // carries only the id, because identity was already declared and restating it
 // would let two lines disagree.
 type record struct {
+	Result      *Result     `json:"result,omitempty"`
 	Execution   string      `json:"execution"`
 	Status      string      `json:"status"`
 	Group       string      `json:"group,omitempty"`
@@ -109,6 +110,7 @@ type Opening struct {
 // and either the orchestration let go of it or it did not. An adopted opening
 // is closed on arrival — nothing ran, so nothing can be left running.
 type Entry struct {
+	Result      *Result  `json:"result,omitempty"`
 	ID          string   `json:"id"`
 	Group       string   `json:"group,omitempty"`
 	Turn        string   `json:"turn,omitempty"`
@@ -244,14 +246,24 @@ func Start(sessionPath, id string) error {
 	return appendRecord(sessionPath, record{Execution: id, Status: statusStarted, At: time.Now().UTC()})
 }
 
-// Settle records that the orchestration has let go of an execution. Best-effort:
-// the result already reached its caller, and failing here would strand a live
-// turn over a record whose only reader is a process that does not exist yet.
-func Settle(sessionPath, id string) {
+// Result preserves one execution's terminal snapshot when its transcript is later reused.
+type Result struct {
+	Ref         string   `json:"ref"`
+	State       string   `json:"state"`
+	ContextRefs []string `json:"contextRefs,omitempty"`
+}
+
+// Settle records release and an optional persisted result snapshot. Best-effort:
+// a recording failure cannot revoke work already performed by the child.
+func Settle(sessionPath, id string, results ...*Result) {
 	if strings.TrimSpace(id) == "" {
 		return
 	}
-	_ = appendRecord(sessionPath, record{Execution: id, Status: statusSettled, At: time.Now().UTC()})
+	var result *Result
+	if len(results) > 0 {
+		result = results[0]
+	}
+	_ = appendRecord(sessionPath, record{Execution: id, Status: statusSettled, At: time.Now().UTC(), Result: result})
 	owned.claim(sessionPath, id, false)
 }
 
@@ -360,6 +372,7 @@ func History(sessionPath string) []Entry {
 			}
 		case statusSettled:
 			out[at].SettledAt = rec.At
+			out[at].Result = rec.Result
 		}
 	}
 	return out

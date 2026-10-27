@@ -3,6 +3,7 @@
 // code adds one here. i18n.test.ts is what stops one from being forgotten.
 
 export const EN_KERNEL: Record<string, string> = {
+  "任务恢复请求未能发送，请刷新计划后重试：{detail}": "Task recovery could not be requested. Refresh the plan and retry: {detail}",
   "历史内容已改变，正在重新读取最近的消息": "History changed. Reloading the latest messages.",
   "当前内核不支持历史分页": "This kernel does not support history paging.",
   "此会话的组合已绑定原项目，请在目标项目新建会话": "This conversation's composition is bound to its project. Start a new conversation in the target project",
@@ -117,6 +118,7 @@ export const EN_KERNEL: Record<string, string> = {
   "读取子代理记录失败：{detail}": "Could not read the sub-agent record: {detail}",
   "这个子代理已经不在运行，读不到新的指示": "That sub-agent is no longer running, so it cannot read new guidance",
   "指示不能是空的": "Guidance cannot be empty",
+  "上下文交接未能发送：{detail}": "Context handoff could not be sent: {detail}",
   "这条指示太长了，超过了发给子代理的单条上限": "That guidance is longer than the limit for one message to a sub-agent",
   "短时间内发给这个子代理的指示太多了，请稍后再发": "Too much guidance was sent to this sub-agent a moment ago; send it again shortly",
   "你停止了这条调用，它在外部已经做了什么无法确定": "You stopped this call; what it had already done outside the workspace is unknown",

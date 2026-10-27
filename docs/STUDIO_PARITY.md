@@ -57,6 +57,10 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | "Add to chat" bar on selected transcript text | Missing | #11954 |
 | Find in the conversation | Have | `ui/Find.tsx` |
 | Turn navigator | Have differently | Scroll rail with marks in `ui/Transcript.tsx` |
+| Guidance to a running subagent / 给运行中的子代理追加指导 | Have differently | `ui/AgentRunView.tsx`: full-record pane queues guidance and retains rejected drafts. 完整记录面板可追加指导，失败时保留草稿。 |
+| Subagent reports and context handoff / 子代理报告与上下文交接 | Have differently | Report text and send receipts in tool cards and the full-record report section; selected summaries and completed results can be handed to a running child. 工具卡片与完整记录报告区展示正文和发送回执；可向运行中子代理交接摘要及已完成结果。 |
+| Subagent history paging / 子代理历史分页 | Have differently | Latest 100 messages first; stored pages decode bounded bodies through the display index, with cross-page call context. Live polling and rewrite detection remain. 首次显示最近 100 条，落盘历史按索引读取目标消息并补齐跨页工具调用，保留实时轮询和重写检测。 |
+| Explicit fleet recovery / 显式任务图恢复 | Have differently | Child detail previews and queues recovery through the root conversation. Fleet revalidates permissions and reuses completed results. No startup replay. 子代理详情可预览并请求恢复，由当前会话执行；校验权限、复用完成结果，启动不重跑。 |
 | Model picker with vendor icons, search and favourites | Missing | #12354, #11403 |
 | Reasoning effort picker | Have differently | Names plus one-line descriptions, only levels the model supports; do not revert to raw `high` and `max` |
 | Agent composition / Agent 组合 | Have differently | One composer status-row menu for selection and management; Standard/Minimal cards and separate custom presets in Settings → Agent presets (`ui/AgentPresets.tsx`). 输入框顶部统一菜单选择和管理组合，管理页提供标准、精简两种内置卡片和独立自定义区域，默认不绑定，明确选择精简／自定义组合后启用；人设保留前后缀与运行时上下文开关。 |

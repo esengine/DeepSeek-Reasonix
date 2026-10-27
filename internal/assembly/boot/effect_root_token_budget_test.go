@@ -119,7 +119,7 @@ model = "child-b"
 			ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
 			runCtx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			runErr := ctrl.Run(runCtx, "delegate a fixture read")
+			runErr := ctrl.Run(reportedBudgetEffectContext(t, runCtx), "delegate a fixture read")
 			cancel()
 			close(unblock)
 			if !background {

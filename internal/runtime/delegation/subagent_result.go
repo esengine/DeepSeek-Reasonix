@@ -15,6 +15,8 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
+var ErrSubagentResultUnavailable = errors.New("subagent result is not available")
+
 const (
 	// Leave room for the generic tool-result guard to add metadata without
 	// clipping a task manifest. The aggregate itself owns fair per-task preview
@@ -154,7 +156,7 @@ func (s *SubagentStore) read(ref, parentSession, workspaceRoot string, partialOK
 	}
 	readable := meta.Status == sessionstore.SubagentCompleted || (partialOK && meta.Status == sessionstore.SubagentCancelled)
 	if !readable {
-		return "", meta.Status, fmt.Errorf("subagent reference %q is %s; only completed results can be read", ref, meta.Status)
+		return "", meta.Status, fmt.Errorf("%w: subagent reference %q is %s; only completed results can be read", ErrSubagentResultUnavailable, ref, meta.Status)
 	}
 
 	sess, err := sessionstore.LoadSession(s.sessionPath(ref))
@@ -170,7 +172,7 @@ func (s *SubagentStore) read(ref, parentSession, workspaceRoot string, partialOK
 			return v.Content, meta.Status, nil
 		}
 	}
-	return "", meta.Status, fmt.Errorf("subagent reference %q has no final assistant answer", ref)
+	return "", meta.Status, fmt.Errorf("%w: subagent reference %q has no final assistant answer", ErrSubagentResultUnavailable, ref)
 }
 
 type subagentAggregateItem struct {

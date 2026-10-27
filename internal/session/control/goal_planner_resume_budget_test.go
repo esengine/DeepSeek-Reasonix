@@ -66,7 +66,7 @@ func TestGoalResumeRenewsPlannerBudget(t *testing.T) {
 	c.SetGoal("read the fixture until the investigation is complete")
 	run := func() {
 		t.Helper()
-		if err := newTurnOrchestrator(c).runTurnLoop(t.Context(), orchestratedTurn{input: "continue", raw: "continue"}); err != nil {
+		if err := newTurnOrchestrator(c).runTurnLoop(goalReportedBudgetContext(t, t.Context()), orchestratedTurn{input: "continue", raw: "continue"}); err != nil {
 			t.Fatal(err)
 		}
 		if c.GoalStatus() != GoalStatusBlocked || c.GoalRuntime().StopCause != stopCauseBudgetSpend {
@@ -102,7 +102,7 @@ func TestGoalNonBudgetResumeKeepsPlannerBudget(t *testing.T) {
 				agent.Options{}, executor, 0, event.Discard, nil)
 			c := New(Options{Runner: coord, Executor: executor})
 			t.Cleanup(c.Close)
-			ctx := agent.WithTaskBudget(agent.WithDeliveryExecutionScope(t.Context(), agent.DeliveryExecutionScope{ID: "preserved"}), agent.TaskBudget{Tokens: 3000})
+			ctx := goalReportedBudgetContext(t, agent.WithTaskBudget(agent.WithDeliveryExecutionScope(t.Context(), agent.DeliveryExecutionScope{ID: "preserved"}), agent.TaskBudget{Tokens: 3000}))
 			planner := coord.PlannerAgent()
 			if _, ok := agent.InspectRunPause(planner.Run(ctx, "inspect the fixture")); !ok {
 				t.Fatal("planner did not actually exhaust its local budget")

@@ -59,12 +59,25 @@ func (p *restartReviewProvider) Name() string { return "boot-restart-review" }
 func (p *restartReviewProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.mu.Lock()
 	p.reqs = append(p.reqs, req)
+	settled := 0
+	for _, prev := range p.reqs {
+		if phaseOf(prev) == phaseOf(req) && len(prev.Tools) > 0 {
+			if _, pending := nextPlanned(prev); !pending {
+				settled++
+			}
+		}
+	}
 	p.mu.Unlock()
 	ch := make(chan provider.Chunk, 3)
-	// Every reply spends budget, so a goal that can never finish stops the way a
-	// real one does, on its own token budget.
-	ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 900, CompletionTokens: 100, TotalTokens: 1000}}
-	switch next, ok := nextPlanned(req); {
+	// Permit planned work and readiness feedback before a terminal usage sample
+	// bounds the fixture. The review invariant does not depend on round cost.
+	next, ok := nextPlanned(req)
+	spent := 1000
+	if !ok && len(req.Tools) > 0 && settled >= 3 {
+		spent = 100000
+	}
+	ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: spent - 100, CompletionTokens: 100, TotalTokens: spent}}
+	switch {
 	case strings.Contains(systemText(req), "decide whether the goal is complete"):
 		ch <- provider.Chunk{Type: provider.ChunkText, Text: `{"outcome":"complete","reason":"the work is done"}`}
 	case ok:
@@ -189,14 +202,14 @@ func runReviewArm(t *testing.T, kind string, restart bool) restartArm {
 	t.Chdir(dir)
 	rec := &restartReviewProvider{}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
-	// A reply costs 1000 tokens: 8000 buys each phase its planned calls and a few
-	// refused claims. Each extra refused turn only adds a full host turn of wall clock.
+	// The allowance must reserve the real assembled prompt before the fixture
+	// reaches its planned writes and review checks; usage then bounds each phase.
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
 [agent]
 system_prompt = "BASE"
-goal_token_budget = 8000
+goal_token_budget = 100000
 
 [codegraph]
 enabled = false

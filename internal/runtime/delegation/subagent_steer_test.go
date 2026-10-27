@@ -14,6 +14,12 @@ type fakeSteerer struct {
 	user  []string
 	host  []string
 	calls int
+	raw   []string
+}
+
+func (f *fakeSteerer) SteerWithContext(text, userText string) bool {
+	f.raw = append(f.raw, userText)
+	return f.Steer(text)
 }
 
 func (f *fakeSteerer) Steer(text string) bool {

@@ -10,6 +10,7 @@ import (
 // Run is one isolated run: the task as a new agent would receive it, and the
 // worktree it runs in.
 type Run struct {
+	ID            string
 	WorkspaceRoot string
 	Prompt        string
 	Model         string

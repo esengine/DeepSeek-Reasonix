@@ -1,7 +1,6 @@
 package delegation
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,30 +18,8 @@ import (
 
 	"reasonix/internal/base/fileutil"
 	fileencoding "reasonix/internal/base/fileutil/encoding"
-	"reasonix/internal/contract/tool"
 	"reasonix/internal/state/store"
 )
-
-// SubagentSpec describes the current invocation identity.
-type SubagentSpec struct {
-	Kind             string
-	Name             string
-	WorkspaceRoot    string
-	ParentSession    string
-	ParentToolCallID string
-	SystemPrompt     string
-	// ExecutionID is the execution this run belongs to, allocated before the
-	// work was opened. A store ref cannot stand in for it: work the scheduler
-	// is holding back has an execution and no transcript yet.
-	ExecutionID string
-	Registry    *tool.Registry
-	ToolContext context.Context
-	Model       string
-	Effort      string
-	// ResumedFrom and UpstreamFrom feed the context capsule only.
-	ResumedFrom  string
-	UpstreamFrom []string
-}
 
 // SubagentRun is a prepared transcript run. Call Release exactly once.
 type SubagentRun struct {
@@ -51,8 +28,9 @@ type SubagentRun struct {
 	Meta       sessionstore.SubagentMeta
 	ForkedFrom string
 
-	store   *SubagentStore
-	release func()
+	store         *SubagentStore
+	release       func()
+	executionPath string
 }
 
 func (r *SubagentRun) Release() {
@@ -85,8 +63,9 @@ type SubagentStore struct {
 	// cleanupBeforeReread is a test seam for deterministic lease interleavings.
 	cleanupBeforeReread func(parentSession, ref string)
 
-	mu     sync.Mutex
-	locked map[string]bool
+	mu      sync.Mutex
+	locked  map[string]bool
+	members map[string]bool
 	// live holds the conversation of every run this process is executing, so a
 	// reader sees a child while it works: its file is written only at the end.
 	live  map[string]*liveRun
@@ -333,6 +312,7 @@ func (s *SubagentStore) PrepareContinue(ref string, spec SubagentSpec) (*Subagen
 	}
 	meta.ParentSession = spec.ParentSession
 	meta.ParentToolCallID = spec.ParentToolCallID
+	meta.ExecutionID = spec.ExecutionID
 	return &SubagentRun{Ref: ref, Session: sess, Meta: meta, store: s, release: release}, nil
 }
 
@@ -593,7 +573,11 @@ func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
 	meta.Status = sessionstore.SubagentCompleted
 	meta.UpdatedAt = time.Now().UTC()
 	run.Meta = meta
-	return s.saveMeta(meta)
+	err := s.saveMeta(meta)
+	if err == nil {
+		run.recordExecutionOutcome()
+	}
+	return err
 }
 
 func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
@@ -634,6 +618,13 @@ func (s *SubagentStore) LoadMeta(ref string) (sessionstore.SubagentMeta, error) 
 		return meta, fmt.Errorf("load subagent metadata %q: %w", ref, err)
 	}
 	if err := json.Unmarshal(data, &meta); err != nil {
+		return meta, &sessionstore.SubagentMetaDecodeError{Ref: ref, Err: err}
+	}
+	meta.Ref = ref
+	if err := s.restoreIsolationBinding(&meta); err != nil {
+		return meta, &sessionstore.SubagentMetaDecodeError{Ref: ref, Err: err}
+	}
+	if err := s.restoreBudgetBinding(&meta); err != nil {
 		return meta, &sessionstore.SubagentMetaDecodeError{Ref: ref, Err: err}
 	}
 	return meta, nil
@@ -716,7 +707,7 @@ func (s *SubagentStore) lock(ref string) (func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.locked[ref] {
-		return nil, fmt.Errorf("subagent reference %q is already running; retry after it finishes", ref)
+		return nil, fmt.Errorf("%w: subagent reference %q is already running; retry after it finishes", ErrSubagentBusy, ref)
 	}
 	s.locked[ref] = true
 	return func() {
@@ -750,6 +741,12 @@ func (s *SubagentStore) metaPath(ref string) string    { return filepath.Join(s.
 
 func (s *SubagentStore) saveMeta(meta sessionstore.SubagentMeta) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return err
+	}
+	if err := s.preserveIsolationBinding(meta); err != nil {
+		return err
+	}
+	if err := s.preserveBudgetBinding(meta); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")
@@ -787,13 +784,5 @@ func bytesHash(data []byte) string {
 }
 
 func sameStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(a, b)
 }

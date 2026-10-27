@@ -58,51 +58,55 @@ func newHistoryReadIndex(rewrite int) *historyReadIndex {
 }
 
 func (idx *historyReadIndex) extend(messages []provider.Message, version uint64) {
+	for i := len(idx.prefix); i < len(messages); i++ {
+		idx.appendMessage(messages[i])
+	}
+	idx.version = version
+}
+
+func (idx *historyReadIndex) appendMessage(m provider.Message) {
 	state := historyRun{closing: -1}
 	if len(idx.prefix) > 0 {
 		state = idx.prefix[len(idx.prefix)-1]
 	}
-	for i := len(idx.prefix); i < len(messages); i++ {
-		m := messages[i]
-		visible := !m.LocalOnly || m.Name != surfacespec.ActionMessageName
-		idx.work = append(idx.work, 0)
-		idx.closedAt = append(idx.closedAt, 0)
-		switch m.Role {
-		case provider.RoleUser:
-			_, _, steer := SteerKind(m.Content)
-			if !steer && !m.HostAuthored && !(m.LocalOnly && m.Name == surfacespec.ActionMessageName) {
-				state.started = m.CreatedAt
-			}
-			class := ClassifyTurn(m, 0)
-			if !class.Steer {
-				state.turn, state.run = state.turn+state.run, 0
-				if class.StartsTurn {
-					if state.closing >= 0 {
-						idx.work[state.closing], idx.closedAt[state.closing] = state.turn, i
-					}
-					state = historyRun{closing: -1, started: state.started}
+	i := len(idx.prefix)
+	visible := !m.LocalOnly || m.Name != surfacespec.ActionMessageName
+	idx.work = append(idx.work, 0)
+	idx.closedAt = append(idx.closedAt, 0)
+	switch m.Role {
+	case provider.RoleUser:
+		_, _, steer := SteerKind(m.Content)
+		if !steer && !m.HostAuthored && !(m.LocalOnly && m.Name == surfacespec.ActionMessageName) {
+			state.started = m.CreatedAt
+		}
+		class := ClassifyTurn(m, 0)
+		if !class.Steer {
+			state.turn, state.run = state.turn+state.run, 0
+			if class.StartsTurn {
+				if state.closing >= 0 {
+					idx.work[state.closing], idx.closedAt[state.closing] = state.turn, i
 				}
-			}
-		case provider.RoleAssistant:
-			if len(m.ToolCalls) == 0 && m.WorkDurationMs > 0 {
-				state.run, state.closing = max(state.run, m.WorkDurationMs), i
-			}
-			for ordinal, call := range m.ToolCalls {
-				if visible {
-					idx.calls[call.ID] = HistoryToolContext{MessageIndex: i, Ordinal: ordinal, Call: call}
-				}
-			}
-		case provider.RoleTool:
-			if visible {
-				idx.outputs[m.ToolCallID] = i
-			}
-			if call, ok := idx.calls[m.ToolCallID]; ok && visible {
-				idx.results[i] = call
+				state = historyRun{closing: -1, started: state.started}
 			}
 		}
-		idx.prefix = append(idx.prefix, state)
+	case provider.RoleAssistant:
+		if len(m.ToolCalls) == 0 && m.WorkDurationMs > 0 {
+			state.run, state.closing = max(state.run, m.WorkDurationMs), i
+		}
+		for ordinal, call := range m.ToolCalls {
+			if visible {
+				idx.calls[call.ID] = HistoryToolContext{MessageIndex: i, Ordinal: ordinal, Call: call}
+			}
+		}
+	case provider.RoleTool:
+		if visible {
+			idx.outputs[m.ToolCallID] = i
+		}
+		if call, ok := idx.calls[m.ToolCallID]; ok && visible {
+			idx.results[i] = call
+		}
 	}
-	idx.version = version
+	idx.prefix = append(idx.prefix, state)
 }
 
 // ReadHistoryPage captures range, identity and projection context under one session lock.

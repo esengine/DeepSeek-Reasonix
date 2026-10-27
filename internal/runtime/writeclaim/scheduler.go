@@ -66,8 +66,11 @@ type claim struct {
 type SubagentScheduler struct {
 	mu sync.Mutex
 
-	maxTotal   int
-	maxWriters int
+	maxTotal      int
+	maxWriters    int
+	adaptiveTotal int
+	recoveryTotal int
+	healthyRuns   int
 
 	activeTotal   int
 	activeWriters int
@@ -279,7 +282,7 @@ const parentWriteLabel = "the main agent's write in progress"
 // them are answered by a setting and the third only by a path or an edge, and a
 // reader cannot tell those apart from "queued".
 func (s *SubagentScheduler) canStartLocked(req AcquireRequest) (bool, Held) {
-	if s.maxTotal > 0 && s.activeTotal >= s.maxTotal {
+	if limit := s.effectiveLimitLocked(); limit > 0 && s.activeTotal >= limit {
 		return false, Held{Cause: agentgraph.WaitSlots}
 	}
 	if !req.Writer {
@@ -304,7 +307,7 @@ func (s *SubagentScheduler) canStartLocked(req AcquireRequest) (bool, Held) {
 func (s *SubagentScheduler) waitDetailLocked(cause agentgraph.WaitCause) string {
 	switch cause {
 	case agentgraph.WaitSlots:
-		return fmt.Sprintf("total concurrency %d/%d", s.activeTotal, s.maxTotal)
+		return fmt.Sprintf("total concurrency %d/%d", s.activeTotal, s.effectiveLimitLocked())
 	case agentgraph.WaitWriters:
 		return fmt.Sprintf("writer concurrency %d/%d", s.activeWriters, s.maxWriters)
 	default:

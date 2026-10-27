@@ -783,20 +783,28 @@ A child inherits nothing implicitly. What it receives is exactly this:
 | Delegation guidance | `<subagent-context>` on a nested child's fresh session |
 | Plan-mode marker, reasoning/response language | run options, when set |
 | A prior transcript | only via `continue_from` / `fork_from` |
-| A dependency's final answer | `<upstream-results>` on the first user turn, only for a fleet item that declared `depends_on` (§3.14) |
+| Selected background | `context_summary` on the task turn, never in the system prompt |
+| Supplied results | Bounded previews from `context_refs` or fleet `depends_on`, with full snapshots available through scoped `read_task_context` |
 
 Not inherited, by construction: `REASONIX.md`, `AGENTS.md`, `CLAUDE.md`, project
 and global memory (the memory queue is disabled, so a child cannot record memory
 either), the parent conversation, the current Goal, planner output, and the
 results of siblings it did not declare a dependency on. A constraint that must
 reach a child today has to be in its profile body, in the task text, or on a
-`depends_on` edge — there is no ambient channel.
+`context_summary`, an explicit `context_refs` selection, or a `depends_on` edge.
+See [Subagent collaboration / 子代理协作](./SUBAGENT_COLLABORATION.md) for
+guidance, parent reports, snapshot retrieval, isolated delegation, reusable members,
+shared task budgets and their permission boundaries.
+
+子代理的精选背景及结果引用由调用方显式提供，完整结果可按范围分页读取；指导及父子报告
+不改变稳定系统前缀，也不充当用户授权。隔离委派、可复用成员、共享任务预算及兼容性边界
+见上述协作文档。
 
 Every run records a `ContextCapsule` in its transcript sidecar: the workspace,
 the system-prompt source and hash, the resolved tool scope and schema hash, the
 model and effort, the parent session and tool-call id, any resumed transcript,
-and an `inherited` block whose fields are all false except `upstream` on an item
-a `depends_on` edge fed. `capsuleHash` is its stable
+and an `inherited` block recording `upstreamFrom` and optional `resultRefs`
+for explicitly supplied results. `capsuleHash` is its stable
 identity, so *why did this reviewer not see that constraint* is answered from
 the record, and two runs that behaved differently can be diffed instead of
 guessed at. The capsule holds references and digests only — never copied parent

@@ -77,8 +77,16 @@ func (c *Controller) executionChildren(path string, history []execjournal.Entry)
 	}
 	out := make([]execgraph.ChildOutcome, 0, len(artifacts))
 	for _, a := range artifacts {
+		if a.Meta.WorkspaceRoot != c.WorkspaceRoot() {
+			continue
+		}
 		identity := delegation.ResolveExecutionIdentity(a.Meta, func(id string) bool { return opened[id] })
+		refs := make([]string, 0, len(a.Meta.Capsule.Inherited.ResultRefs))
+		for _, source := range a.Meta.Capsule.Inherited.ResultRefs {
+			refs = append(refs, source.Ref)
+		}
 		out = append(out, execgraph.ChildOutcome{
+			ContextKnown: len(refs) > 0, ContextRefs: refs,
 			Execution: identity.Execution, Ref: a.Ref, Status: string(a.Meta.Status),
 		})
 	}

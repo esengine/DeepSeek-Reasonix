@@ -16,6 +16,7 @@ const LABEL: Record<string, string> = {
   delete_range: "删除内容", delete_symbol: "删除符号", move_file: "移动文件",
   notebook_edit: "编辑笔记本", submit_plan: "提交计划", ask: "询问用户",
   fleet: "并行任务", read_only_task: "只读任务", read_subagent_result: "读取子任务结果",
+  reply_to_parent: "向父代理报告", read_task_context: "读取交接上下文",
   complete_subtask: "完成子任务", lsp_diagnostics: "代码诊断",
   lsp_definition: "Definition", lsp_references: "References", lsp_hover: "Hover",
   parallel_tasks: "Tasks", list_subagents: "Subagents",
@@ -59,7 +60,7 @@ const WRITE = new Set(["delete_range", "delete_symbol", "move_file", "notebook_e
 // colour is the row's only sign that the work left this context.
 const DELEG = new Set([
   "task", "fleet", "read_only_task", "read_subagent_result", "complete_subtask",
-  "parallel_tasks", "run_skill", "read_only_skill", "list_subagents",
+  "parallel_tasks", "run_skill", "read_only_skill", "list_subagents", "reply_to_parent", "read_task_context",
 ]);
 const READ = new Set([
   "read_file", "grep", "glob", "ls", "code_index", "read_skill",

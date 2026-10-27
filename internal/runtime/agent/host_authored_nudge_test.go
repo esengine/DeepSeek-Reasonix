@@ -28,7 +28,7 @@ func TestLoopComposedUserMessagesAreHostAuthored(t *testing.T) {
 				reg.Add(readProbe{})
 				return New(&spendingProvider{max: 500}, reg, sessionstore.NewSession("sys"), Options{
 					Pricing:    &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2},
-					TaskBudget: TaskBudget{Cost: 1e-3},
+					TaskBudget: TaskBudget{Tokens: 1000},
 				}, event.Discard)
 			},
 		},

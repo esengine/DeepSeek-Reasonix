@@ -5,3 +5,24 @@
 .agentrun-hd .rt { margin-left: auto; flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint); }
 .agentrun[data-state="running"] .agentrun-hd .rt { color: var(--net); }
 .agentrun > .scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.agentrun-guidance { flex: none; padding: 10px 14px; border-top: 1px solid var(--hair); display: flex; flex-direction: column; gap: 8px; }
+.agentrun-guidance label { display: flex; flex-direction: column; gap: 6px; font: var(--w-reg) var(--fs-ui) var(--ui); }
+.agentrun-guidance textarea { width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; padding: 8px; border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; }
+.agentrun-guidance-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agentrun-guidance-note, .agentrun-guidance p { margin: 0; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); }
+.agentrun-guidance { max-height: 55%; overflow-y: auto; }
+.agentrun-context fieldset { min-width: 0; margin: 8px 0 0; padding: 0; border: 0; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.agentrun-context fieldset > button { align-self: flex-start; }
+.agentrun-context-results { max-height: 120px; overflow-y: auto; font: var(--w-reg) var(--fs-meta) var(--ui); }
+.agentrun-guidance .agentrun-context-result { flex-direction: row; align-items: flex-start; padding: 4px 0; }
+.agentrun-context-result span { min-width: 0; overflow-wrap: anywhere; }
+.agentrun-context-result small { display: block; color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--mono); }
+.agentrun-reports { flex: none; border-bottom: 1px solid var(--hair); padding: 8px 14px; font: var(--w-reg) var(--fs-ui) var(--ui); }
+.agentrun-reports summary { cursor: pointer; }
+.agentrun-reports p { color: var(--faint); }
+.agentrun-report-list { max-height: 160px; overflow-y: auto; }
+.agent-report { border-left: 2px solid var(--hair); padding: 7px 10px; margin: 6px 0; }
+.agent-report-status { color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); }
+.agent-report-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 5px; color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); }
+.agent-report-error { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--bad); }
+.agentrun-recovery-prompt { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }

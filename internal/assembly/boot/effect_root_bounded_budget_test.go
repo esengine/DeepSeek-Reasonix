@@ -116,7 +116,7 @@ api_key_env = "BOUNDED_ROOT_EFFECT_KEY"
 			t.Cleanup(ctrl.Close)
 			ctrl.SetSessionPath(sessionstore.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 			ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
-			err = ctrl.Run(t.Context(), "review lock ownership")
+			err = ctrl.Run(reportedBudgetEffectContext(t, t.Context()), "review lock ownership")
 			if tc.limit == 0 {
 				if err != nil {
 					t.Fatal(err)

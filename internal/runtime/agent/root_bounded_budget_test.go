@@ -84,7 +84,7 @@ func TestRootBoundedReviewerBudget(t *testing.T) {
 			if tc.disabled {
 				ctx = WithTaskBudget(ctx, TaskBudget{})
 			}
-			err := root.Run(ctx, "obtain a review")
+			err := root.Run(reportedBudgetContext(ctx), "obtain a review")
 			if tc.disabled {
 				if err != nil {
 					t.Fatal(err)
@@ -122,7 +122,7 @@ func TestRootBoundedNestedBudgetChargesOnce(t *testing.T) {
 	parentTools.Add(&tokenBudgetChildTool{child: child})
 	parentProv := &spendingProvider{max: 1}
 	root := New(parentProv, parentTools, sessionstore.NewSession("root"), Options{TaskBudget: TaskBudget{Tokens: 2500}}, event.Discard)
-	err := root.Run(t.Context(), "delegate the review")
+	err := root.Run(reportedBudgetContext(t.Context()), "delegate the review")
 	if pause, ok := InspectRunPause(err); !ok || pause.Key != "token" {
 		t.Fatalf("pause=%+v err=%v", pause, err)
 	}
@@ -142,13 +142,13 @@ func TestRootBoundedLateProjectionStaysWithOldTask(t *testing.T) {
 	root := New(&spendingProvider{max: 1}, reg, sessionstore.NewSession("root"), Options{}, event.Discard)
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
-	if err := root.Run(ctx, "capture budget"); err != nil {
+	if err := root.Run(reportedBudgetContext(ctx), "capture budget"); err != nil {
 		t.Fatal(err)
 	}
 	old := root.task.budget.rootTokens
 	before := old.used.Load()
 	cancel()
-	if err := root.Run(t.Context(), "new task"); err != nil {
+	if err := root.Run(reportedBudgetContext(t.Context()), "new task"); err != nil {
 		t.Fatal(err)
 	}
 	current := root.task.budget.rootTokens

@@ -23,6 +23,7 @@ import { registerNest } from "./nestreveal";
 import { useFullOutput, type ReadOutput } from "./useFullOutput";
 import type { StateTool } from "../../state/outputcap";
 import { ImagePreview } from "../ImagePreview";
+import { AgentReport } from "../AgentReports";
 
 // The spec pops a symbol as it settles — colour arriving is the finish signal.
 // Only the transition may fire it: a restored transcript is all settled cards,
@@ -320,6 +321,8 @@ export function ToolCard({
         <Sym glyph={glyphFor(shown)} done={settling.pop && !bad} />
       </div>
       <div className="c">
+        <AgentReport tool={tool} />
+        {!open && children.map((child) => <AgentReport key={child.id} tool={child} />)}
         {hasBody ? (
           <details className="tool-disclosure" data-lazy={nestMounted ? undefined : ""} open={open} onToggle={(event) => event.currentTarget.open !== open && setOpen(event.currentTarget.open)}>
             <summary className="hl" data-swap={settling.swap ? "" : undefined}>{heading}</summary>
@@ -392,6 +395,7 @@ export function NestedCall({ tool, whole = false, read }: { tool: StateTool; who
         <Sym glyph={glyphFor(shown)} />
       </div>
       <div className="c">
+        <AgentReport tool={tool} />
         <div className="hl">
           <span className="nm" title={shown}>{labelFor(shown)}</span>
           {tag && <span className="tag" title={tagHint(tool)}>{tag}</span>}

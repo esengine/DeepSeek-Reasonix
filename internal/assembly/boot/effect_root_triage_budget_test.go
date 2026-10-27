@@ -152,7 +152,7 @@ api_key_env = "ROOT_TRIAGE_KEY"
 			reg := tool.NewRegistry()
 			reg.Add(probe)
 			ctrl.Executor().SetTools(reg)
-			err = ctrl.Run(t.Context(), "read screening fixture")
+			err = ctrl.Run(reportedBudgetEffectContext(t, t.Context()), "read screening fixture")
 			if tc.limit == 0 {
 				if err != nil {
 					t.Fatal(err)

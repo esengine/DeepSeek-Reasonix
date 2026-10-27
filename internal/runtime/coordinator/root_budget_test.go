@@ -71,7 +71,11 @@ func TestCoordinatorRootBudgetRoutes(t *testing.T) {
 				route = agent.PlannerRouteExecutorOnly
 				err = coord.Run(ctx, "continue")
 			}
-			if p, ok := agent.InspectRunPause(err); !ok || p.Key != "token" || reads.calls != 1 || len(exec.requests) != 2 {
+			wantRequests := 2
+			if mode == "raw" || mode == "tool_planner" || mode == "approval_allowed" {
+				wantRequests = 1
+			}
+			if p, ok := agent.InspectRunPause(err); !ok || p.Key != "token" || reads.calls != 1 || len(exec.requests) != wantRequests {
 				t.Fatalf("read=%d HTTP=%d pause=%+v err=%v", reads.calls, len(exec.requests), p, err)
 			}
 		})

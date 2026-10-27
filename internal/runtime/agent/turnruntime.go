@@ -31,7 +31,8 @@ type turnRuntime struct {
 	answeredMs int64
 
 	// budget is the turn's spend axis: tokens, money, wall clock.
-	budget runBudget
+	budget       runBudget
+	sharedBudget *sharedBudget
 	// landCause records why the grace round was armed, so the pause the Run
 	// ends with names the axis that actually stopped it.
 	landCause landCause

@@ -263,7 +263,7 @@ func (p fleetPlan) upstreamFor(idx int, results []fleetItemResult) []UpstreamRes
 		if !results[dep].status.Answered() {
 			continue
 		}
-		out = append(out, UpstreamResult{ID: p.ids[dep], Answer: results[dep].output})
+		out = append(out, UpstreamResult{ID: p.ids[dep], Ref: results[dep].ref, Answer: results[dep].output})
 	}
 	return out
 }

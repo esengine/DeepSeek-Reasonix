@@ -73,7 +73,7 @@ func TestRootTriageTokenBudget(t *testing.T) {
 			if tc.disabled {
 				ctx = WithTaskBudget(ctx, TaskBudget{})
 			}
-			err := root.Run(ctx, "classify fixture")
+			err := root.Run(reportedBudgetContext(ctx), "classify fixture")
 			if tc.disabled {
 				if err != nil {
 					t.Fatal(err)

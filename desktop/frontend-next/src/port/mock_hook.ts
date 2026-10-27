@@ -16,6 +16,8 @@ export class MockHook extends MockMcp {
   async subagents(): Promise<SubagentRun[]> {
     return [];
   }
+  async fleetRecoveryPlans() { return []; }
+  async requestFleetRecovery() { throw new Error("Recovery is unavailable in this preview."); }
 
   async steerSubagent(_ref: string, _text: string): Promise<void> {
     throw new HttpError(404, "no sub-agent run answers to that reference", { code: "subagent.not_found" });

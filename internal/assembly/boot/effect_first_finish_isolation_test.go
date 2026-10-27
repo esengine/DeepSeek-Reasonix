@@ -91,6 +91,11 @@ model = "x"
 	rec.mu.Unlock()
 	id := isoIDPattern.FindString(result)
 	if id == "" {
+		for _, message := range ctrl.History() {
+			if message.Role == provider.RoleTool {
+				t.Logf("tool %s: %s", message.Name, message.Content)
+			}
+		}
 		t.Fatalf("task result did not disclose unfinished inspection and recovery identity: %q", result)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "out.txt")); !os.IsNotExist(err) {
