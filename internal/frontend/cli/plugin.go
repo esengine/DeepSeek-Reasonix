@@ -310,6 +310,7 @@ func printPluginInventory(pluginName string, inv pluginpkg.Inventory) {
 			fmt.Printf("  %s\t%s\n", theme.Name, theme.Path)
 		}
 	}
+	printFrames(inv.Frames)
 	if len(inv.Hooks) > 0 {
 		fmt.Println("hooks:")
 		for _, hook := range inv.Hooks {
@@ -548,4 +549,14 @@ func findInstalledPlugin(name string) (pluginpkg.InstalledPlugin, bool, error) {
 		}
 	}
 	return pluginpkg.InstalledPlugin{}, false, nil
+}
+
+func printFrames(frames []pluginpkg.FrameRef) {
+	if len(frames) == 0 {
+		return
+	}
+	fmt.Println("frames:")
+	for _, f := range frames {
+		fmt.Printf("  %s\t%s\t%s\n", f.ID, f.Title, f.Entry)
+	}
 }

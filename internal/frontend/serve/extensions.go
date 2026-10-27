@@ -15,6 +15,7 @@ func (s *Server) registerExtensionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /extensions/surfaces", s.extensionSurfaces)
 	mux.HandleFunc("POST /extensions/action", s.invokeExtensionAction)
 	mux.HandleFunc("POST /extensions/submit", s.submitExtensionForm)
+	mux.HandleFunc("GET /extensions/frames/{plugin}/{frame}", s.extensionFrame)
 }
 
 type extensionActionEntry struct {

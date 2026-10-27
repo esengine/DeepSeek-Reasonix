@@ -579,5 +579,57 @@ export const SCRIPT: Beat[] = [
       },
     },
   },
+  {
+    wait: 50,
+    ev: {
+      kind: "extension_surface",
+      extension: {
+        pluginId: "ci-watch", surfaceId: "build", kind: "view",
+        view: { slot: "session.header", body: [{ kind: "row", children: [{ kind: "pip", tone: "warn" }, { kind: "text", value: "CI 2/3" }] }] },
+      },
+    },
+  },
+  {
+    wait: 50,
+    ev: {
+      kind: "extension_surface",
+      extension: {
+        pluginId: "board", surfaceId: "kanban", kind: "view",
+        view: {
+          slot: "pane.tab",
+          body: [
+            { kind: "text", value: "进行中", tone: "strong" },
+            { kind: "kv", key: "重构 slots.ts", value: "@me" },
+            { kind: "kv", key: "补插槽测试", value: "@me" },
+            { kind: "divider" },
+            { kind: "button", label: "刷新", actionId: "board:refresh" },
+          ],
+        },
+      },
+    },
+  },
+  {
+    wait: 50,
+    ev: {
+      kind: "extension_surface",
+      extension: {
+        pluginId: "board", surfaceId: "kanban-frame", generation: 1, kind: "frame",
+        frame: {
+          frame: "board", slot: "pane.tab", title: "任务看板", fallback: "进行中 2 · 待办 1",
+          props: { columns: { 待办: [{ id: "c", title: "写插槽文档" }], 进行中: [{ id: "a", title: "重构 slots.ts" }, { id: "b", title: "补插槽测试" }], 完成: [] } },
+        },
+      },
+    },
+  },
+  {
+    wait: 50,
+    ev: {
+      kind: "extension_surface",
+      extension: {
+        pluginId: "sync", surfaceId: "state", kind: "view",
+        view: { body: [{ kind: "kv", key: "同步", value: "3 个文件待推送", tone: "dim" }] },
+      },
+    },
+  },
   { wait: 300, ev: { kind: "turn_done" } },
 ];

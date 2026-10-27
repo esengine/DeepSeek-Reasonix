@@ -238,6 +238,7 @@ func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
 			fmt.Fprintf(b, "  %s - %s\n", theme.Name, theme.Path)
 		}
 	}
+	appendFrameInventoryText(b, inv.Frames)
 	if len(inv.Hooks) > 0 {
 		b.WriteString("hooks:\n")
 		for _, hook := range inv.Hooks {
@@ -267,7 +268,7 @@ func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
 			fmt.Fprintf(b, "  %s [%s] - %s\n", server.Name, server.Transport, target)
 		}
 	}
-	if len(inv.Skills) == 0 && len(inv.Agents) == 0 && len(inv.Commands) == 0 && len(inv.Prompts) == 0 && len(inv.Themes) == 0 && len(inv.Hooks) == 0 && len(inv.MCPServers) == 0 {
+	if inventoryEmpty(inv) {
 		b.WriteString("capabilities: no detailed inventory available\n")
 	}
 }
@@ -288,4 +289,18 @@ func appendAgentInventoryText(b *strings.Builder, pluginName string, agents []Ag
 
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
+}
+
+func appendFrameInventoryText(b *strings.Builder, frames []FrameRef) {
+	if len(frames) == 0 {
+		return
+	}
+	b.WriteString("frames:\n")
+	for _, f := range frames {
+		fmt.Fprintf(b, "  %s - %s (%s)\n", f.ID, f.Title, f.Entry)
+	}
+}
+
+func inventoryEmpty(inv Inventory) bool {
+	return len(inv.Skills)+len(inv.Agents)+len(inv.Commands)+len(inv.Prompts)+len(inv.Themes)+len(inv.Frames)+len(inv.Hooks)+len(inv.MCPServers) == 0
 }

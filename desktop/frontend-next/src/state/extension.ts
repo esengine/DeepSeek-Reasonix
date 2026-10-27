@@ -30,7 +30,7 @@ export function foldExtension(s: SessionState, ext: ExtensionSurface): SessionSt
   if (ext.kind === "view" && ext.view?.anchor) {
     return { ...s, takeovers: { ...s.takeovers, [ext.view.anchor]: ext } };
   }
-  if (ext.kind === "view") {
+  if (ext.kind === "view" || ext.kind === "frame") {
     const at = s.views.findIndex(same);
     const views = s.views.slice();
     if (at < 0) views.push(ext);

@@ -13,29 +13,30 @@ import (
 
 // Where the desktop re-declares the kernel's wire types by hand.
 const (
-	tsWireFile      = "desktop/frontend-next/src/port/wire.ts"
-	tsPortFile      = "desktop/frontend-next/src/port/port.ts"
-	tsLeaseFile     = "desktop/frontend-next/src/port/workspace_lease.ts"
-	tsBoundaryFile  = "desktop/frontend-next/src/port/boundary.ts"
-	tsRemoteFile    = "desktop/frontend-next/src/port/remote.ts"
-	tsSessionFile   = "desktop/frontend-next/src/port/session.ts"
-	tsSubagentFile  = "desktop/frontend-next/src/port/subagent.ts"
-	tsVersionFile   = "desktop/frontend-next/src/port/version.ts"
-	tsModelFile     = "desktop/frontend-next/src/port/model.ts"
-	tsMcpFile       = "desktop/frontend-next/src/port/mcp.ts"
-	tsScheduleFile  = "desktop/frontend-next/src/port/schedule.ts"
-	tsReplayFile    = "desktop/frontend-next/src/port/surface_replay.ts"
-	tsShellFile     = "desktop/frontend-next/src/port/shell.ts"
-	tsShareFile     = "desktop/frontend-next/src/port/share.ts"
-	tsProviderFile  = "desktop/frontend-next/src/port/provider.ts"
-	tsFeedbackFile  = "desktop/frontend-next/src/port/feedback.ts"
-	tsWorkspaceFile = "desktop/frontend-next/src/port/workspace.ts"
-	tsLookFile      = "desktop/frontend-next/src/port/look.ts"
-	tsHubFile       = "desktop/frontend-next/src/port/hub.ts"
-	tsMuxFile       = "desktop/frontend-next/src/port/mux.ts"
-	tsPluginFile    = "desktop/frontend-next/src/port/plugin.ts"
-	tsChartFile     = "desktop/frontend-next/src/ui/chart/spec.ts"
-	tsSurfaceFile   = "desktop/frontend-next/src/ui/surface/spec.ts"
+	tsWireFile          = "desktop/frontend-next/src/port/wire.ts"
+	tsPortFile          = "desktop/frontend-next/src/port/port.ts"
+	tsLeaseFile         = "desktop/frontend-next/src/port/workspace_lease.ts"
+	tsBoundaryFile      = "desktop/frontend-next/src/port/boundary.ts"
+	tsRemoteFile        = "desktop/frontend-next/src/port/remote.ts"
+	tsSessionFile       = "desktop/frontend-next/src/port/session.ts"
+	tsSubagentFile      = "desktop/frontend-next/src/port/subagent.ts"
+	tsVersionFile       = "desktop/frontend-next/src/port/version.ts"
+	tsModelFile         = "desktop/frontend-next/src/port/model.ts"
+	tsMcpFile           = "desktop/frontend-next/src/port/mcp.ts"
+	tsScheduleFile      = "desktop/frontend-next/src/port/schedule.ts"
+	tsReplayFile        = "desktop/frontend-next/src/port/surface_replay.ts"
+	tsShellFile         = "desktop/frontend-next/src/port/shell.ts"
+	tsShareFile         = "desktop/frontend-next/src/port/share.ts"
+	tsProviderFile      = "desktop/frontend-next/src/port/provider.ts"
+	tsFeedbackFile      = "desktop/frontend-next/src/port/feedback.ts"
+	tsWorkspaceFile     = "desktop/frontend-next/src/port/workspace.ts"
+	tsLookFile          = "desktop/frontend-next/src/port/look.ts"
+	tsHubFile           = "desktop/frontend-next/src/port/hub.ts"
+	tsMuxFile           = "desktop/frontend-next/src/port/mux.ts"
+	tsPluginFile        = "desktop/frontend-next/src/port/plugin.ts"
+	tsChartFile         = "desktop/frontend-next/src/ui/chart/spec.ts"
+	tsSurfaceFile       = "desktop/frontend-next/src/ui/surface/spec.ts"
+	tsWireExtensionFile = "desktop/frontend-next/src/port/wire_extension.ts"
 )
 
 // tuiInboxFile is where the terminal re-declares the kernel's inbox wire types
@@ -63,18 +64,19 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/contract/event/event.go", "AskAnswer", tsWireFile, "AskAnswer"},
 	{"internal/contract/eventwire/ask.go", "AskQuestion", tsWireFile, "AskQuestion"},
 	{"internal/contract/surfacespec/spec.go", "Spec", tsSurfaceFile, "SurfaceSpec"},
-	{"internal/contract/surfacespec/spec.go", "Node", tsWireFile, "ExtensionViewNode"},
-	{"internal/contract/surfacespec/spec.go", "Field", tsWireFile, "SurfaceField"},
-	{"internal/contract/surfacespec/spec.go", "Diff", tsWireFile, "SurfaceDiff"},
-	{"internal/contract/surfacespec/spec.go", "Option", tsWireFile, "SurfaceOption"},
+	{"internal/contract/surfacespec/spec.go", "Node", tsWireExtensionFile, "ExtensionViewNode"},
+	{"internal/contract/surfacespec/spec.go", "Field", tsWireExtensionFile, "SurfaceField"},
+	{"internal/contract/surfacespec/spec.go", "Diff", tsWireExtensionFile, "SurfaceDiff"},
+	{"internal/contract/surfacespec/spec.go", "Option", tsWireExtensionFile, "SurfaceOption"},
 	{"internal/contract/surfacespec/image.go", "Image", "desktop/frontend-next/src/port/surface-rich.ts", "SurfaceImage"},
 	{"internal/contract/surfacespec/rich.go", "Location", "desktop/frontend-next/src/port/surface-rich.ts", "SurfaceLocation"},
 	{"internal/contract/surfacespec/rich.go", "Fact", "desktop/frontend-next/src/port/surface-rich.ts", "SurfaceFact"},
 	{"internal/contract/surfacespec/rich.go", "Dataset", "desktop/frontend-next/src/port/surface-rich.ts", "SurfaceDataset"},
 	{"internal/contract/surfacespec/rich.go", "Series", "desktop/frontend-next/src/port/surface-rich.ts", "SurfaceSeries"},
 
-	{"internal/contract/eventwire/extension.go", "ExtensionViewNode", tsWireFile, "ExtensionViewNode"},
-	{"internal/contract/eventwire/extension.go", "ExtensionSurface", tsWireFile, "ExtensionSurface"},
+	{"internal/contract/eventwire/extension.go", "ExtensionViewNode", tsWireExtensionFile, "ExtensionViewNode"},
+	{"internal/contract/eventwire/extension.go", "ExtensionSurface", tsWireExtensionFile, "ExtensionSurface"},
+	{"internal/contract/eventwire/extension.go", "ExtensionFrame", tsWireExtensionFile, "ExtensionFrame"},
 	{"internal/frontend/serve/surface_history.go", "surfaceReplay", tsReplayFile, "ExtensionSurfaceReplay"},
 	{"internal/contract/event/notice_payload.go", "DormantPermissionRule", tsBoundaryFile, "DormantPermissionRule"},
 	{"internal/frontend/serve/branch.go", "workspaceBranchesView", tsWorkspaceFile, "WorkspaceBranches"},
@@ -152,6 +154,7 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/session/control/mods.go", "ModStatus", tsBoundaryFile, "ModStatus"},
 	{"internal/session/control/mods.go", "ModRuntime", tsBoundaryFile, "ModRuntime"},
 	{"internal/session/control/mods.go", "ModsSettings", tsBoundaryFile, "ModsSettings"},
+	{"internal/ext/installsource/plugin_frames.go", "FramePlanInfo", tsPluginFile, "PluginFrame"},
 	{"internal/ext/modpreview/types.go", "Preview", tsPluginFile, "ModPreview"},
 	{"internal/ext/modpreview/types.go", "Event", tsPluginFile, "ModPreviewEvent"},
 	{"internal/ext/modpreview/types.go", "Call", tsPluginFile, "ModPreviewCall"},

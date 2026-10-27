@@ -1,4 +1,5 @@
 import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
+import type { ExtensionUIPort } from "./port_extension";
 import type { AgentComposition, AgentPresetVersion, AgentPresetCatalog, CompositionSummary } from "./composition";
 export type * from "./composition";
 import { DeliveryError, HttpError } from "./http_error";
@@ -183,7 +184,7 @@ export interface TrayPrefs {
   closeToTray: boolean;
 }
 
-export interface AgentPort extends WorkspacePreviewPort {
+export interface AgentPort extends WorkspacePreviewPort, ExtensionUIPort {
   providerSetup(): Promise<ProviderSetup | null>;
   saveProviderKey(apiKey: string): Promise<void>;
   // The models that answer the job asked about; "chat" when none is named.
@@ -772,13 +773,9 @@ export interface AgentPort extends WorkspacePreviewPort {
   importTheme(files: File[]): Promise<ThemeImport>;
   // Shows where installed packs live and answers that directory.
   openThemeFolder(): Promise<string>;
-  // Extension surfaces arrive on the event stream; these carry the user's half
-  // back — an action the card offered, or a published form's values.
+  // Native surface actions: the queued or steered half of a model-authored card.
   surfaceAction(request: SurfaceActionRequest): Promise<Queued>;
   surfaceActionState(callId: string): Promise<SurfaceActionRecord>;
-  extensionSurfaces(): Promise<import("./surface_replay").ExtensionSurfaceReplay>;
-  invokeExtensionAction(name: string): Promise<string>;
-  submitExtensionForm(pluginId: string, surfaceId: string, values: Record<string, unknown>): Promise<void>;
 
   setPlanMode(on: boolean): Promise<void>;
   setApprovalMode(mode: ApprovalMode): Promise<void>;

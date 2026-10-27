@@ -30,7 +30,9 @@ import { Composer } from "./Composer";
 import { draftKey } from "./drafts";
 import { Queue, waiting } from "./Queue";
 import { SlottedView } from "./SlottedView";
-import { key as slotKey } from "./slots";
+import { headerBody, key as slotKey } from "./slots";
+import type { FrameHost } from "./frame/FrameView";
+import { FrameState } from "./frame/state";
 import { Metrics } from "./Metrics";
 import { railOf } from "./panels/derive";
 import { accountOf, useHidesAmounts, useWallet } from "./wallet";
@@ -96,7 +98,7 @@ const totalsOf = (st: SessionStatus) => ({
   incompleteReason: st.sessionCostQuote?.incompleteReason,
 });
 
-function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, onTurnDone, pulse, findPulse, findTogglePulse = 0, filesPulse = 0, viewRequest, sessionRef, onSettings, onFeedback, onOpenSession, needsProject, onOpenProject, onKeepHere, connect, theme, dockW, dockMax, onDockW, manualBrowser = false, onManualBrowser, alert }: PaneProps) {
+function PaneView({ port, hub, rt, title, active, visible, sideHost, side, headerHost, onFocus, onReport, onSessionChanged, onTurnDone, pulse, findPulse, findTogglePulse = 0, filesPulse = 0, viewRequest, sessionRef, onSettings, onFeedback, onOpenSession, needsProject, onOpenProject, onKeepHere, connect, theme, dockW, dockMax, onDockW, manualBrowser = false, onManualBrowser, alert }: PaneProps) {
   const [s, dispatch] = useReducer(reduce, initialState);
   const [traj, trajDispatch] = useReducer(reduceTraj, initialTraj);
   const [sessionRead, setSessionRead] = useState<SessionRead>({ kind: "pending" });
@@ -395,7 +397,8 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   // not echo, so a live turn has to re-read it rather than infer from events.
   useStatusPoll(running && visible, refreshStatus);
 
-  const { slots, moveSurface, atComposer, inRail } = useSurfaceSlots(port, s.views, notify);
+  const { slots, moveSurface, bySlot } = useSurfaceSlots(port, s.views, notify);
+  const atComposer = bySlot["composer-trailing"];
 
   const submit = useSubmit({ port, running, dispatch, trajDispatch, refreshStatus, fail });
 
@@ -418,6 +421,18 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     fail,
     onRevise: () => setAskFocus((n) => n + 1),
   });
+  const frameState = useMemo(() => new FrameState(), [port]);
+  useEffect(() => frameState.retain(s.views), [frameState, s.views]);
+  const frames = useMemo<FrameHost>(() => ({
+    state: frameState,
+    url: (ext) => port.extensionFrameUrl(ext.pluginId, ext.frame?.frame ?? "", ext.generation ?? 0),
+    act: (ext, actionId, args) => onExtInvoke(`/${ext.pluginId}:${actionId}`, args),
+    submit: (ext, values) => void onExtSubmit(ext.pluginId, ext.surfaceId, values).catch(() => {}),
+  }), [port, frameState, onExtInvoke, onExtSubmit]);
+  const extensions = useMemo(
+    () => ({ rail: bySlot.sidebar, panels: s.panels, tabs: bySlot["pane-tab"], assigned: slots, frames, onInvoke: onExtInvoke, onMove: moveSurface }),
+    [bySlot, s.panels, slots, frames, onExtInvoke, moveSurface],
+  );
 
   const receiptPref = receiptPrefOf(port);
   const find = useFind(s.items, findPulse, active, useCallback(() => showView("flow"), [showView]), receiptPref, findTogglePulse);
@@ -584,6 +599,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             onExternal={(url) => void port.openExternal(url).catch(notify)}
             onAddToChat={(reference) => setInserted((was) => ({ n: was.n + 1, text: reference }))}
             onQuoteSelection={reply.onQuoteFile}
+            extensions={extensions}
           />
       </div>
 
@@ -626,7 +642,9 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
                   key={slotKey(ext)}
                   ext={ext}
                   assigned={slots}
-                  onAction={(id) => void port.invokeExtensionAction(id).catch(notify)}
+                  frames={frames}
+                  onAction={onExtInvoke}
+                  shown={visible && tab === "flow"}
                   onMove={(slot) => void moveSurface(ext, slot)}
                 />
               ))}
@@ -657,6 +675,15 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         </div>
       </div>
 
+      {headerHost && bySlot["session-header"].length > 0 && createPortal(
+        <span className="slothead">
+          {bySlot["session-header"].map((ext) => (
+            <SlottedView key={slotKey(ext)} ext={ext} body={headerBody(ext.view?.body ?? [])} assigned={slots}
+              onAction={onExtInvoke} onMove={(slot) => void moveSurface(ext, slot)} />
+          ))}
+        </span>,
+        headerHost,
+      )}
       {active &&
         side &&
         sideHost &&
@@ -684,7 +711,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             yolo={status?.toolApprovalMode === "yolo"}
             onSettings={onSettings}
             panels={s.panels}
-            views={inRail}
+            views={bySlot.sidebar}
             onMoveSurface={moveSurface}
             onExtInvoke={onExtInvoke}
           />,

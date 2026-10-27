@@ -28,6 +28,7 @@ import (
 	"reasonix/internal/ext/extension"
 	"reasonix/internal/ext/extension/protocol"
 	"reasonix/internal/ext/extension/sidecar"
+	"reasonix/internal/ext/pluginpkg"
 )
 
 // UIHandler is the sidecar package's Extension → Host UI call surface,
@@ -111,6 +112,7 @@ type Hub struct {
 	crashed    map[string]bool
 	surfaces   map[string]surfaceRecord
 	actions    map[string]map[string]protocol.UIActionDecl
+	frames     map[string]pluginpkg.Package
 }
 
 // New builds a Hub bound to one session ID and generation.
@@ -132,6 +134,7 @@ func New(opts Options) *Hub {
 		crashed:    map[string]bool{},
 		surfaces:   map[string]surfaceRecord{},
 		actions:    map[string]map[string]protocol.UIActionDecl{},
+		frames:     map[string]pluginpkg.Package{},
 	}
 }
 
@@ -569,6 +572,10 @@ func decodePublishEvent(pluginID string, p protocol.UIPublishParams) (*event.Ext
 		out.Panel = panel
 	case protocol.UIViewPayload:
 		out.View = &event.ExtensionViewSurface{Slot: payload.Slot, Anchor: payload.Anchor, Body: redactViewNodes(payload.Body)}
+	case protocol.UIFramePayload:
+		if out.Frame, err = frameView(payload); err != nil {
+			return nil, &protocol.ProtocolError{Reason: protocol.ErrInvalidParams, Message: "invalid frame props: " + err.Error()}
+		}
 	}
 	return out, nil
 }

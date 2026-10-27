@@ -146,6 +146,7 @@ type ManifestExpectation struct {
 	Replaces     []string          `json:"replaces,omitempty"`
 	Providers    []string          `json:"providers,omitempty"`
 	UIActions    []string          `json:"uiActions,omitempty"`
+	UIFrames     []string          `json:"uiFrames,omitempty"`
 	Tools        []string          `json:"tools,omitempty"`
 	Capabilities []string          `json:"capabilities,omitempty"`
 	Requires     []RequirementWire `json:"requires,omitempty"`
@@ -184,6 +185,7 @@ type SessionContext struct {
 type HostCapabilities struct {
 	ContentRefs             bool       `json:"contentRefs"`
 	UIHost                  UIHostKind `json:"uiHost"`
+	UIFrames                bool       `json:"uiFrames,omitempty"`
 	ProtocolVersion         string     `json:"protocolVersion" validate:"nonempty"`
 	DependencySchemaVersion int        `json:"dependencySchemaVersion,omitempty" validate:"min=0"`
 }
@@ -580,6 +582,7 @@ const (
 	UISurfaceNotification UISurfaceKind = "notification"
 	UISurfacePanel        UISurfaceKind = "panel"
 	UISurfaceView         UISurfaceKind = "view"
+	UISurfaceFrame        UISurfaceKind = "frame"
 )
 
 // UIPublishResult is a generated Extension Protocol v2 wire DTO.
@@ -739,6 +742,15 @@ const (
 	UIToneErr    UITone = "err"
 	UIToneAccent UITone = "accent"
 )
+
+// UIFramePayload is a generated Extension Protocol v2 wire DTO.
+type UIFramePayload struct {
+	Frame    string          `json:"frame" validate:"nonempty"`
+	Slot     string          `json:"slot,omitempty"`
+	Title    string          `json:"title" validate:"nonempty"`
+	Fallback string          `json:"fallback" validate:"nonempty"`
+	Props    json.RawMessage `json:"props,omitempty"`
+}
 
 // ProtocolErrorData is a generated Extension Protocol v2 wire DTO.
 type ProtocolErrorData struct {

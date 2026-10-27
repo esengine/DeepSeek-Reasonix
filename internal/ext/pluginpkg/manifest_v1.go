@@ -132,6 +132,7 @@ type v1Contributes struct {
 	Commands   json.RawMessage              `json:"commands"`
 	Prompts    json.RawMessage              `json:"prompts"`
 	Themes     json.RawMessage              `json:"themes"`
+	Frames     json.RawMessage              `json:"frames"`
 	Hooks      map[string][]json.RawMessage `json:"hooks"`
 	MCPServers map[string]json.RawMessage   `json:"mcpServers"`
 }

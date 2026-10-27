@@ -334,6 +334,7 @@ export const ACTIONS: UIAction[] = [
   { id: "config.repair", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.reload", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.refresh", kind: "repeatable", target: "none", proof: "interaction" },
+  { id: "extensions.frame-retry", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "extensions.inspect", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "extensions.install", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "extensions.update", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

@@ -5,7 +5,11 @@
 // event is emitted.
 package event
 
-import "reasonix/internal/contract/surfacespec"
+import (
+	"encoding/json"
+
+	"reasonix/internal/contract/surfacespec"
+)
 
 // Surface kinds carried by ExtensionSurfacePayload.Kind, mirroring the
 // protocol's own. "request" is reserved: a blocking prompt currently routes
@@ -19,6 +23,7 @@ const (
 	ExtensionSurfaceNotification = "notification"
 	ExtensionSurfaceRequest      = "request"
 	ExtensionSurfaceView         = "view"
+	ExtensionSurfaceFrame        = "frame"
 )
 
 // ExtensionSurfacePayload carries one sidecar's UI contribution for the
@@ -30,13 +35,24 @@ type ExtensionSurfacePayload struct {
 	SurfaceID    string
 	SessionID    string
 	Generation   uint64
-	Kind         string // status | card | form | notification | panel | view
+	Kind         string // status | card | form | notification | panel | view | frame
 	Status       *ExtensionStatusView
 	Card         *ExtensionCardView
 	Form         *ExtensionFormView
 	Notification *ExtensionNotificationView
 	Panel        *ExtensionPanelView
 	View         *ExtensionViewSurface
+	Frame        *ExtensionFrameView
+}
+
+// ExtensionFrameView names a document the plugin package ships (mirrors
+// UIFramePayload). Props is a redacted JSON object handed to that document.
+type ExtensionFrameView struct {
+	Frame    string
+	Slot     string
+	Title    string
+	Fallback string
+	Props    json.RawMessage
 }
 
 // ExtensionViewSurface is a surface composed from host primitives rather than

@@ -135,6 +135,18 @@ async function run() {
   check("the renderer is sandboxed", prefs.sandbox === true);
   check("webview tags are off", prefs.webviewTag !== true);
   check("web security is on", prefs.webSecurity !== false);
+  check("subframes get no node integration", prefs.nodeIntegrationInSubFrames !== true);
+
+  // An opaque-origin sandbox, the shape an extension frame has.
+  await js(`(() => { const f = document.createElement('iframe'); f.id = 'smoke-sandbox'; f.sandbox = 'allow-scripts'; f.srcdoc = '<p>x</p>'; document.body.append(f); })()`);
+  await wait(400);
+  const sandboxed = win.webContents.mainFrame.frames.find((f) => f.url === "about:srcdoc");
+  check("a sandboxed subframe exists", !!sandboxed);
+  if (sandboxed) {
+    check("a sandboxed subframe runs in its own process", sandboxed.osProcessId !== win.webContents.mainFrame.osProcessId, { frame: sandboxed.osProcessId, page: win.webContents.mainFrame.osProcessId });
+    check("a sandboxed subframe has no host bridge", (await sandboxed.executeJavaScript("typeof window.reasonixHost")) === "undefined");
+  }
+  await js(`document.getElementById('smoke-sandbox')?.remove()`);
 
   const bounds = win.getBounds();
   const [minWidth, minHeight] = win.getMinimumSize();

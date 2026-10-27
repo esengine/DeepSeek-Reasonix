@@ -140,6 +140,7 @@ func startLoadedPackages(ctx context.Context, packages []pluginpkg.InstalledPack
 		clientUI := ui
 		if binder != nil {
 			clientUI = binder.HandlerFor(pluginID)
+			bindFrames(binder, pluginID, item.Package)
 		}
 		jobs[i] = packageStartJob{item: item, opts: ClientOptions{
 			Package:   item.Package,

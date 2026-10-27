@@ -1,6 +1,7 @@
 import type { ExtensionSurface } from "../../port/wire";
 import { t } from "../../i18n";
 import { SlottedView } from "../SlottedView";
+import type { FrameHost } from "../frame/FrameView";
 
 // Standing surfaces an extension published. They live here rather than in the
 // transcript because they describe a state that is still true — a watcher, a
@@ -8,16 +9,22 @@ import { SlottedView } from "../SlottedView";
 export function Extensions({
   panels,
   views = [],
+  assigned,
+  frames,
   onInvoke,
   onMove,
+  shown = true,
 }: {
   panels: ExtensionSurface[];
   // Composed views that landed here: either the user put them here, or nobody
   // named a place they could be put. The rail is where a standing surface goes
   // when no one said otherwise.
   views?: ExtensionSurface[];
+  assigned?: Record<string, string>;
+  frames?: FrameHost;
   onInvoke: (name: string) => void;
   onMove?: (ext: ExtensionSurface, slot: string) => void;
+  shown?: boolean;
 }) {
   if (panels.length === 0 && views.length === 0) return null;
   return (
@@ -29,6 +36,9 @@ export function Extensions({
         <div className="extpanel" key={`${v.pluginId}:${v.surfaceId}`}>
           <SlottedView
             ext={v}
+            assigned={assigned}
+            frames={frames}
+            shown={shown}
             onAction={onInvoke}
             onMove={(slot) => onMove?.(v, slot)}
           />

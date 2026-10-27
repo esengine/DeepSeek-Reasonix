@@ -170,6 +170,8 @@ func DecodeUIPublishPayload(kind UISurfaceKind, raw json.RawMessage) (any, error
 		typ = reflect.TypeFor[UIPanelPayload]()
 	case UISurfaceView:
 		typ = reflect.TypeFor[UIViewPayload]()
+	case UISurfaceFrame:
+		typ = reflect.TypeFor[UIFramePayload]()
 	default:
 		return nil, fmt.Errorf("protocol: unknown UI surface kind %q", kind)
 	}

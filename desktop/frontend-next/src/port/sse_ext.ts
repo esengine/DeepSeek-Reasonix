@@ -23,9 +23,12 @@ export class SseExtensions extends SseLook {
     const replay = await this.get<import("./surface_replay").ExtensionSurfaceReplay>("/extensions/surfaces");
     return { ...replay, surfaces: replay.surfaces ?? [] };
   }
-  async invokeExtensionAction(name: string) {
-    const out = await this.post0<{ message?: string }>("/extensions/action", { name });
+  async invokeExtensionAction(name: string, args?: Record<string, string>) {
+    const out = await this.post0<{ message?: string }>("/extensions/action", args ? { name, args } : { name });
     return out.message ?? "";
+  }
+  extensionFrameUrl(pluginId: string, frameId: string, generation: number) {
+    return `${this.base}/extensions/frames/${encodeURIComponent(pluginId)}/${encodeURIComponent(frameId)}?generation=${generation}`;
   }
   submitExtensionForm(pluginId: string, surfaceId: string, values: Record<string, unknown>) {
     return this.post("/extensions/submit", { pluginId, surfaceId, values });

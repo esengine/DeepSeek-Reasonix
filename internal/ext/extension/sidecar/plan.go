@@ -155,6 +155,7 @@ func startOne(ctx context.Context, item pluginpkg.InstalledPackage, sessionCtx p
 	clientUI := ui
 	if binder != nil {
 		clientUI = binder.HandlerFor(pluginID)
+		bindFrames(binder, pluginID, item.Package)
 	}
 	return StartClient(ctx, ClientOptions{
 		Package:   item.Package,

@@ -1,0 +1,20 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "task-board",
+  "version": "0.1.0",
+  "description": "A task board drawn in a sandboxed frame",
+  "provides": [
+    { "namespace": "plugin/task-board", "kind": "interceptors", "id": "default", "version": "1.0.0" },
+    { "namespace": "plugin/task-board", "kind": "uiaction", "id": "advance", "version": "1.0.0", "schemaHash": "sha256:77b0f39d59c99a870a396039009cca99d519ef6ec2646e4716c01face5fb7fa9" },
+    { "namespace": "plugin/task-board", "kind": "uiaction", "id": "refresh", "version": "1.0.0", "schemaHash": "sha256:057def5c94ca47ac70bdb505bcc8f8096c71e1eb87bc5e73416c9bcfea898d47" }
+  ],
+  "contributes": {
+    "frames": [{ "id": "board", "entry": "frames/board.html", "title": "Task board" }]
+  },
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/task-board.exe",
+    "required": false,
+    "intercepts": ["session.start"],
+    "capabilities": ["interceptors", "ui"]
+  }
+}

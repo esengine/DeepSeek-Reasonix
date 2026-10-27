@@ -138,3 +138,18 @@ func TestToWireExtensionViewShape(t *testing.T) {
 		}
 	}
 }
+
+func TestToWireExtensionFrameShape(t *testing.T) {
+	out := ToWireExtensionSurface(&event.ExtensionSurfacePayload{
+		PluginID: "board", SurfaceID: "kanban", Kind: event.ExtensionSurfaceFrame,
+		Frame: &event.ExtensionFrameView{Frame: "board", Slot: "pane.tab", Title: "Task board", Fallback: "3 cards", Props: []byte(`{"n":3}`)},
+	})
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"pluginId":"board","surfaceId":"kanban","kind":"frame","frame":{"frame":"board","slot":"pane.tab","title":"Task board","fallback":"3 cards","props":{"n":3}}}`
+	if string(raw) != want {
+		t.Fatalf("wire = %s\nwant %s", raw, want)
+	}
+}

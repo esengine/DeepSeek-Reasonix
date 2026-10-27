@@ -312,6 +312,13 @@ export function Candidate({ a }: { a: PluginAction }) {
         </div>
       ))}
       {a.mod && <ModPreviewBlock mod={a.mod} />}
+      {a.frames?.map((f) => (
+        <div className="risk" data-kind="frame" key={f.id}>
+          <span className="lb">{t("界面文档")}</span>
+          <span className="dt">{[f.title, f.entry, f.error ?? `${(f.bytes / 1024).toFixed(1)} KB`, f.sha256?.slice(0, 12)].filter(Boolean).join(" · ")}</span>
+          <span className="why">{t("在隔离的沙箱里显示，碰不到 Studio 页面、凭证和网络")}</span>
+        </div>
+      ))}
       {adds.length > 0 && (
         <div className="risk">
           <span className="lb">{t("将添加")}</span>

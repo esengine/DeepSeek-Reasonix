@@ -368,3 +368,19 @@ func TestUpdateSinkWarningCarriesItsNoticeCode(t *testing.T) {
 		t.Fatalf("an uncoded warning must carry no notice metadata")
 	}
 }
+
+func TestUpdateSinkExtensionFrameFallsBackToItsText(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	sink.Emit(event.Event{
+		Kind: event.ExtensionSurface,
+		Extension: &event.ExtensionSurfacePayload{
+			PluginID: "board", SurfaceID: "kanban", Kind: event.ExtensionSurfaceFrame,
+			Frame: &event.ExtensionFrameView{Frame: "board", Title: "Task board", Fallback: "3 cards in progress", Props: []byte(`{"secret":"never shown"}`)},
+		},
+	})
+	text := chunkText(t, fn.updateMap(t, 0))
+	if !strings.Contains(text, "[board] Task board") || !strings.Contains(text, "3 cards in progress") || strings.Contains(text, "never shown") {
+		t.Fatalf("frame fallback = %q", text)
+	}
+}

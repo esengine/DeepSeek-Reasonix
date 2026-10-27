@@ -24,6 +24,16 @@ type ExtensionSurface struct {
 	Notification *ExtensionNotification `json:"notification,omitempty"`
 	Panel        *ExtensionPanel        `json:"panel,omitempty"`
 	View         *ExtensionView         `json:"view,omitempty"`
+	Frame        *ExtensionFrame        `json:"frame,omitempty"`
+}
+
+// ExtensionFrame is the JSON form of an event.ExtensionFrameView.
+type ExtensionFrame struct {
+	Frame    string          `json:"frame"`
+	Slot     string          `json:"slot,omitempty"`
+	Title    string          `json:"title"`
+	Fallback string          `json:"fallback"`
+	Props    json.RawMessage `json:"props,omitempty"`
 }
 
 // ExtensionView is the JSON form of an event.ExtensionViewSurface: a tree the
@@ -184,6 +194,9 @@ func ToWireExtensionSurface(p *event.ExtensionSurfacePayload) *ExtensionSurface 
 	}
 	if v := p.View; v != nil {
 		out.View = &ExtensionView{Slot: v.Slot, Anchor: v.Anchor, Body: viewNodes(v.Body)}
+	}
+	if f := p.Frame; f != nil {
+		out.Frame = &ExtensionFrame{Frame: f.Frame, Slot: f.Slot, Title: f.Title, Fallback: f.Fallback, Props: f.Props}
 	}
 	return out
 }

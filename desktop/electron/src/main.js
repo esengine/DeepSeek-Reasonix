@@ -41,6 +41,7 @@ const { openLogs, redactArgv, failStartup } = require("./shelllog");
 const { raise } = require("./raise");
 const { keepCredential, restoreIfStale } = require("./credential");
 const { actHandler } = require("./acts");
+const { fromMainFrame, guardFrames, guardPermissions } = require("./frameguard");
 const { crashDir, recordHostExit, pendingHostExit, clearHostExit, hostExitNotice } = require("./hostexit");
 
 // A page in a minimized or fully covered window counts as hidden, and a hidden
@@ -49,6 +50,8 @@ const { crashDir, recordHostExit, pendingHostExit, clearHostExit, hostExitNotice
 // another app, so occlusion must not reach its pages. The cost is that this
 // application's renderers keep running at full rate while nobody is looking.
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+// Extension frames are opaque-origin sandboxes; this gives each its own process.
+app.commandLine.appendSwitch("enable-features", "IsolateSandboxedIframes");
 
 // Must match serve.TokenCookie and the path the kernel serves the page on. The
 // page owns the root: its assets are relative, so a path the kernel does not
@@ -204,9 +207,11 @@ cua = await startEmbedded(computerDriver, contract, text => logs.host.raw(text))
     if (details.method === "POST" && details.statusCode < 300 && details.url.endsWith("submit")) void powerGuard?.refresh();
   });
   followTheme();
+  guardPermissions(session.defaultSession);
   win = createWindow();
   closeStarting();
   guard(win.webContents);
+  guardFrames(win.webContents, () => origin);
   win.webContents.once("render-process-gone", (_event, details) => {
     if (win.isVisible() || details.reason !== "crashed") return;
     const cause = unpaintedWindowCause(grants, app.getLocale());
@@ -366,6 +371,7 @@ function createWindow() {
         // Stated rather than left to the defaults: this is the list a reviewer
         // reads to know what the renderer may reach.
         nodeIntegration: false,
+        nodeIntegrationInSubFrames: false,
         contextIsolation: true,
         sandbox: true,
         webviewTag: false,
@@ -387,9 +393,9 @@ function guard(contents) {
 }
 
 // Every handler answers the one window this launch owns. A sender that is not
-// its contents is refused rather than served.
+// its top document — another contents, or a frame inside it — is refused.
 function fromWindow(event) {
-  return win && !win.isDestroyed() && event.sender === win.webContents ? win : null;
+  return fromMainFrame(win, event);
 }
 
 // The page reads navigator.languages[0], which is the first preferred system

@@ -55,6 +55,7 @@ type Inventory struct {
 	Commands   []CommandRef
 	Prompts    []PromptRef
 	Themes     []ThemeRef
+	Frames     []FrameRef
 	Hooks      []HookRef
 	MCPServers []MCPServerRef
 }
@@ -109,13 +110,6 @@ type PromptRef struct {
 	Path        string
 }
 
-// ThemeRef is one theme file (*.reasonix-theme) a plugin contributes,
-// resolved from the manifest's themes list (plain paths and globs).
-type ThemeRef struct {
-	Name string
-	Path string
-}
-
 type HookRef struct {
 	Event       string
 	Match       string
@@ -164,6 +158,8 @@ type Manifest struct {
 	// Themes are *.reasonix-theme file paths or per-segment glob patterns
 	// (e.g. "themes/*.reasonix-theme"), all lexically inside the plugin root.
 	Themes []string
+	// Frames are HTML documents the host serves into isolated frames.
+	Frames []FrameRef
 	// Runtime declares a plugin-owned runtime process (native v2).
 	// nil for Claude and Codex packages.
 	Runtime  *RuntimeSpec
@@ -921,6 +917,7 @@ func (p Package) Inventory() Inventory {
 		Commands:   p.commandRefs(),
 		Prompts:    p.promptRefs(),
 		Themes:     p.ThemeFiles(),
+		Frames:     slices.Clone(p.Manifest.Frames),
 		Hooks:      p.hookRefs(),
 		MCPServers: p.mcpServerRefs(),
 	}
@@ -967,41 +964,6 @@ func (p Package) promptRefs() []PromptRef {
 			Path:        c.Source,
 		})
 	}
-	return out
-}
-
-// ThemeFiles resolves the manifest's themes list (plain paths and
-// per-segment globs) to concrete theme files. Parse-time validation has
-// already rejected escapes and non-regular files, so unreadable entries
-// here simply drop out (they were reported as parse warnings).
-func (p Package) ThemeFiles() []ThemeRef {
-	seen := map[string]bool{}
-	var out []ThemeRef
-	for _, pattern := range p.Manifest.Themes {
-		var matches []string
-		if hasGlobMeta(pattern) {
-			matches, _ = globThemePattern(p.Root, pattern)
-		} else {
-			abs := filepath.Join(p.Root, filepath.FromSlash(pattern))
-			if info, err := os.Stat(abs); err == nil && info.Mode().IsRegular() {
-				matches = []string{abs}
-			}
-		}
-		for _, match := range matches {
-			match = filepath.Clean(match)
-			if seen[match] {
-				continue
-			}
-			seen[match] = true
-			out = append(out, ThemeRef{
-				Name: themeFileName(match),
-				Path: match,
-			})
-		}
-	}
-	slices.SortStableFunc(out, func(a, b ThemeRef) int {
-		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Path, b.Path))
-	})
 	return out
 }
 

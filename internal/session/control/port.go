@@ -558,6 +558,7 @@ type SideSessions interface {
 type SurfaceHistory interface {
 	NativeSurfaces() bool
 	ExtensionSurfaces() []event.ExtensionSurfacePayload
+	ExtensionFrameDocument(pluginID, frameID string, generation uint64) ([]byte, error)
 }
 
 type SessionAPI interface {

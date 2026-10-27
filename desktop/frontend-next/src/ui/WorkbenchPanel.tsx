@@ -20,7 +20,8 @@ import type { LocalRefs } from "./Markdown";
 import { useGlance } from "./glance";
 import { useWorkbenchFiles } from "./useWorkbenchFiles";
 import { documentRefs, parseGrantedFile } from "./grantedfiles";
-import { keyOf, labelOf, type Surface } from "./workbench_tabs";
+import { hasTabMenu, keyOf, labelOf, type Surface } from "./workbench_tabs";
+import { extensionSurfaces, releaseTabs, WorkbenchExtensionBody, type WorkbenchExtensions } from "./workbench_extensions";
 import { useTabNames } from "./useTabNames";
 import { useTabClose } from "./useTabClose";
 import { BrowserTabMenu } from "./BrowserTabMenu";
@@ -72,6 +73,7 @@ export function WorkbenchPanel({
   fullMode,
   fileRequest,
   agentRequest,
+  extensions,
 }: {
   port: AgentPort;
   tabs: BrowserTab[];
@@ -103,6 +105,7 @@ export function WorkbenchPanel({
   // Text selected in an open file, with the file it came from, on its way to the composer.
   onQuoteSelection?: (text: string, path: string) => void;
   fullMode?: { full: boolean; onToggle: () => void };
+  extensions?: WorkbenchExtensions;
   fileRequest?: { path: string; consumed?: () => void };
   agentRequest?: AgentRequest;
 }) {
@@ -276,13 +279,13 @@ export function WorkbenchPanel({
   );
   const surfaces = useMemo<Surface[]>(
     () =>
-      [
+      ([
         ...browsers.map((id) => ({ kind: "manual", id }) as const),
         ...tabs.map((tab) => ({ kind: "browser", tab }) as const),
         ...openFiles.map((path) => ({ kind: "file", path }) as const),
         ...agents.map((run) => ({ kind: "agent", ...run }) as const),
-      ].filter((s) => !dismissed.has(keyOf(s))),
-    [browsers, tabs, openFiles, agents, dismissed],
+      ] as Surface[]).filter((s) => !dismissed.has(keyOf(s))).concat(extensionSurfaces(extensions)),
+    [browsers, tabs, openFiles, agents, dismissed, extensions],
   );
   const active =
     surfaces.find((s) => keyOf(s) === selected) ??
@@ -410,13 +413,13 @@ export function WorkbenchPanel({
     }
   };
   const { close: closeTabs, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles: showFiles || launcher, fromExplorer, setBrowsers, setOpenFiles, setAgents, setDismissed, setSelected, setShowFiles, setLauncher, onCloseManual, onCloseSelected: () => setFailed("") });
-  const close = (targets: Surface[]) => { supersede(); return closeTabs(targets); };
+  const close = (targets: Surface[]) => { supersede(); return closeTabs(releaseTabs(targets, extensions)); };
   const dismissTabMenu = useCallback(() => setTabMenu(null), []);
   const [tabMenu, setTabMenu] = useState<{ surface: Surface; x: number; y: number; anchor: HTMLElement } | null>(null);
-  const pages = surfaces.filter((s) => s.kind !== "file");
+  const pages = surfaces.filter(hasTabMenu);
   const tabAt = tabMenu ? surfaces.findIndex((s) => keyOf(s) === keyOf(tabMenu.surface)) : -1;
   const tabOthers = tabMenu ? pages.filter((s) => keyOf(s) !== keyOf(tabMenu.surface)) : [];
-  const tabRight = tabAt < 0 ? [] : surfaces.slice(tabAt + 1).filter((s) => s.kind !== "file");
+  const tabRight = tabAt < 0 ? [] : surfaces.slice(tabAt + 1).filter(hasTabMenu);
   const returning = useRef("");
   useEffect(() => {
     if (tabMenu && tabAt < 0) setTabMenu(null);
@@ -427,7 +430,7 @@ export function WorkbenchPanel({
     (back ?? newTab.current)?.focus();
   }, [tabMenu, tabAt, surfaces, closing]);
   const offerTabMenu = (e: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>, surface: Surface) => {
-    if (surface.kind === "file" || closing || document.getSelection()?.isCollapsed === false) return;
+    if (!hasTabMenu(surface) || closing || document.getSelection()?.isCollapsed === false) return;
     e.preventDefault();
     e.stopPropagation();
     const anchor = e.currentTarget.matches("button") ? e.currentTarget : e.currentTarget.querySelector<HTMLElement>(".workbench-tab-pick")!;
@@ -487,8 +490,8 @@ export function WorkbenchPanel({
 ` : ""}${surface.tab.url}`
                   : labelFor(surface)
               }
-              aria-haspopup={surface.kind === "file" ? undefined : "menu"}
-              aria-expanded={surface.kind === "file" ? undefined : tabMenu !== null && keyOf(tabMenu.surface) === keyOf(surface)}
+              aria-haspopup={hasTabMenu(surface) ? "menu" : undefined}
+              aria-expanded={hasTabMenu(surface) ? tabMenu !== null && keyOf(tabMenu.surface) === keyOf(surface) : undefined}
               onClick={() => pick(keyOf(surface))}
               onDoubleClick={surface.kind === "browser" ? () => setRenaming(keyOf(surface)) : undefined}
               data-action-dblclick="workbench.rename-tab"
@@ -497,11 +500,11 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "agent" ? "branch" : "globe"} />
+              <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "agent" ? "branch" : surface.kind.startsWith("extension") ? "plug" : "globe"} />
               <span>{labelFor(surface)}</span>
             </button>
             )}
-            <button
+            {surface.kind !== "extensions" && <button
               className="workbench-tab-close"
               data-action="workbench.close"
               data-target={keyOf(surface)}
@@ -511,7 +514,7 @@ export function WorkbenchPanel({
               onClick={() => void close([surface])}
             >
               <StudioIcon name="close" />
-            </button>
+            </button>}
           </div>
         ))}
         </div>
@@ -574,6 +577,7 @@ export function WorkbenchPanel({
               onOpenDocument={(path) => port.openDocument(path)}
             />
           )}
+          {extensions && active && <WorkbenchExtensionBody surface={active} ext={extensions} shown={shown && !launcher} />}
           {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} />}
           {active?.kind === "file" && (
             <>

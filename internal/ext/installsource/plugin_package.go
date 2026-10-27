@@ -366,29 +366,11 @@ func (t *Tool) pluginPackageAction(req request, pkg pluginpkg.Package, source st
 		PromptCount:         pkg.PromptCount(),
 		ThemeCount:          pkg.ThemeCount(),
 		Runtime:             runtimePlanInfo(pkg.Manifest.Runtime),
+		Frames:              framePlanInfo(pkg),
 		RiskLevel:           RiskMedium,
 		RiskReasons:         []string{"installs a plugin package that can add skills, commands, hooks, and MCP servers"},
 	}
-	if a.Mode == "link" {
-		a.RiskReasons = append(a.RiskReasons, "links a plugin package from a mutable local directory")
-	}
-	if hooks > 0 {
-		a.RiskLevel = RiskHigh
-		a.RiskReasons = append(a.RiskReasons, "registers shell hooks that execute during Reasonix sessions")
-	}
-	if mcp > 0 {
-		a.RiskLevel = RiskHigh
-		a.RiskReasons = append(a.RiskReasons, "adds MCP servers that can change provider-visible tool schemas")
-	}
-	if a.Runtime != nil {
-		a.RiskLevel = RiskHigh
-		a.RiskReasons = append(a.RiskReasons, "FULL TRUST: declares a runtime process that runs inside Reasonix — it can read the full session and environment, bypass permissions, and operate this machine directly. Command: "+hostLiteral(pluginpkg.RuntimeCommandLine(pkg.Manifest.Runtime)))
-	}
-	if len(pkg.Manifest.Mods) > 0 {
-		a.RiskLevel = RiskHigh
-		a.RiskReasons = append(a.RiskReasons, "FULL TRUST: a Claude Code mod — its hooks module runs on this machine as you, with no sandbox, when \"Run Claude Code mods\" is on; the listing below is read from the module's syntax tree and is not a guarantee of what it does")
-		a.Mod = modPreview(pkg)
-	}
+	assessPluginRisk(&a, pkg, hooks, mcp)
 	slices.Sort(a.Skills)
 	slices.Sort(a.Agents)
 	return a, nil
@@ -528,7 +510,7 @@ func (t *Tool) applyInstallPluginPackage(ctx context.Context, req request, act *
 	act.Version = pkg.Manifest.Version
 	act.SkillCount, act.CommandCount, act.HookCount, act.ToolCount = pkg.CapabilityCounts()
 	act.AgentCount = pkg.AgentCount()
-	act.PromptCount, act.ThemeCount = pkg.PromptCount(), pkg.ThemeCount()
+	act.PromptCount, act.ThemeCount, act.Frames = pkg.PromptCount(), pkg.ThemeCount(), framePlanInfo(pkg)
 	act.Runtime = runtimePlanInfo(pkg.Manifest.Runtime)
 	act.Compatibility = pkg.Compatibility.Status
 	act.MappedCapabilities = append([]string(nil), pkg.Compatibility.Mapped...)

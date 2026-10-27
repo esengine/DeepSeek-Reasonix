@@ -83,9 +83,8 @@ export function useGateActions({ port, dispatch, refreshStatus, fail, onRevise }
   // An extension action reports back in its own words. Surfacing the result as
   // a notice keeps it in the transcript where the card that offered it sits.
   const onExtInvoke = useCallback(
-    (name: string) => {
-      port
-        .invokeExtensionAction(name)
+    (name: string, args?: Record<string, string>) => {
+      (args ? port.invokeExtensionAction(name, args) : port.invokeExtensionAction(name))
         .then((message) => {
           if (message.trim()) dispatch({ kind: "notice", level: "info", text: message });
         })

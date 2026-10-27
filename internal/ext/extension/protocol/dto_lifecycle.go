@@ -44,10 +44,12 @@ type InitializeParams struct {
 // derived from its installed manifest. The sidecar must not use anything
 // outside this set; doing so fails with capability_not_declared.
 type ManifestExpectation struct {
-	Intercepts   []string          `json:"intercepts,omitempty"`
-	Replaces     []string          `json:"replaces,omitempty"`
-	Providers    []string          `json:"providers,omitempty"`
-	UIActions    []string          `json:"uiActions,omitempty"`
+	Intercepts []string `json:"intercepts,omitempty"`
+	Replaces   []string `json:"replaces,omitempty"`
+	Providers  []string `json:"providers,omitempty"`
+	UIActions  []string `json:"uiActions,omitempty"`
+	// UIFrames are the frame ids the package declares; publishing another fails.
+	UIFrames     []string          `json:"uiFrames,omitempty"`
 	Tools        []string          `json:"tools,omitempty"`
 	Capabilities []string          `json:"capabilities,omitempty"`
 	Requires     []RequirementWire `json:"requires,omitempty"`
@@ -65,10 +67,12 @@ type SessionContext struct {
 
 // HostCapabilities tells the sidecar what this host supports.
 type HostCapabilities struct {
-	ContentRefs             bool       `json:"contentRefs"`
-	UIHost                  UIHostKind `json:"uiHost"`
-	ProtocolVersion         string     `json:"protocolVersion" validate:"nonempty"`
-	DependencySchemaVersion int        `json:"dependencySchemaVersion,omitempty" validate:"min=0"`
+	ContentRefs bool       `json:"contentRefs"`
+	UIHost      UIHostKind `json:"uiHost"`
+	// UIFrames is true when this host draws frame surfaces; otherwise publish a view.
+	UIFrames                bool   `json:"uiFrames,omitempty"`
+	ProtocolVersion         string `json:"protocolVersion" validate:"nonempty"`
+	DependencySchemaVersion int    `json:"dependencySchemaVersion,omitempty" validate:"min=0"`
 }
 
 // InitializeResult is the sidecar's handshake answer: its identity plus the

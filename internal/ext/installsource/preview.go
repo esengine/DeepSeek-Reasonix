@@ -36,7 +36,7 @@ func themesOnly(actions []action) bool {
 	}
 	for _, a := range actions {
 		others := a.SkillCount + a.AgentCount + a.CommandCount + a.HookCount + a.ToolCount + a.PromptCount
-		if a.Kind != "plugin" || a.ThemeCount == 0 || others != 0 || a.Runtime != nil {
+		if a.Kind != "plugin" || a.ThemeCount == 0 || others != 0 || a.Runtime != nil || len(a.Frames) != 0 {
 			return false
 		}
 	}
@@ -140,7 +140,7 @@ func previewAction(a action) action {
 	a.Skills, a.Agents, a.Commands = p.identities(a.Skills), p.identities(a.Agents), p.identities(a.Commands)
 	a.MappedCapabilities = p.identities(a.MappedCapabilities)
 	a.SkippedCapabilities = p.skipped(a.SkippedCapabilities)
-	a.Runtime = p.runtime(a.Runtime)
+	a.Runtime, a.Frames = p.runtime(a.Runtime), p.frames(a.Frames)
 	a.RiskReasons, a.Warnings = p.proses(a.RiskReasons), p.proses(a.Warnings)
 	a.Error, a.Next = p.prose(a.Error), p.prose(a.Next)
 	a.PreviewTruncated = p.cut

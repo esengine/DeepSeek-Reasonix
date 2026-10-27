@@ -377,6 +377,7 @@ out of how a path is spelled, which cannot tell `internal/auth` from
 - sensitive: internal/session/control/git_push.go
 - sensitive: internal/frontend/serve/git_push.go
 - sensitive: internal/frontend/serve/host_routes.go
+- sensitive: internal/frontend/serve/extension_frames.go
 
 One declaration, two effects: the same list is also the coverage gate's subject.
 `make coverage-gate` holds each path to the coverage it already has, because

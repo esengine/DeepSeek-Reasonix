@@ -206,6 +206,9 @@ func parseNativeV2(b []byte, root, apiVersion string) (Package, []string, error)
 	if err := validateV2Capabilities(&manifest); err != nil {
 		return Package{}, nil, err
 	}
+	if err := addFrames(root, &manifest, contrib.Frames); err != nil {
+		return Package{}, nil, err
+	}
 	var warnings []string
 	pathWarnings, err := validateV1Paths(root, &manifest)
 	warnings = append(warnings, pathWarnings...)
@@ -327,6 +330,9 @@ func MigrateManifestToV2(pkg Package) ([]byte, error) {
 	}
 	if len(pkg.Manifest.Prompts) > 0 {
 		contrib["prompts"] = pkg.Manifest.Prompts
+	}
+	if len(pkg.Manifest.Frames) > 0 {
+		contrib["frames"] = pkg.Manifest.Frames
 	}
 	if len(pkg.Manifest.Themes) > 0 {
 		contrib["themes"] = pkg.Manifest.Themes

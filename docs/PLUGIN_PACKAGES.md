@@ -476,6 +476,14 @@ New resource types:
   - packs are read in place, never copied into the user's library, and leave
     with the plugin;
   - any other file listed under `themes` is ignored.
+- `frames` are HTML documents Studio draws in an isolated frame:
+  - each entry is `{"id", "entry", "title"}`; `id` is a lowercase slug of at
+    most 32 characters, `entry` a `.html` file inside the package;
+  - at most eight per package, and the package needs a runtime with the `ui`
+    capability to publish them;
+  - an entry that is missing, not a regular file, or reached through a link
+    out of the package fails the parse;
+  - the install plan lists each one with its size and SHA-256.
 
 The [native prompt example](../examples/work-note-kit/README.md) shows a
 template-only package, nested names, argument substitution, and the

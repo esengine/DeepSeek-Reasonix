@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Task board</title>
+<style>
+  body { margin: 0; padding: 12px 14px; font: 13px/1.5 var(--ui, system-ui); color: var(--text, #222); background: transparent; }
+  .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  h3 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--muted, #666); text-transform: capitalize; }
+  .card { padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--border, #ddd); border-radius: var(--r-md, 8px); background: var(--raised, #fff); }
+  button { font: inherit; padding: 2px 8px; border: 0; border-radius: var(--r-sm, 6px); color: var(--accent-fg, #fff); background: var(--accent, #333); }
+</style>
+<div class="cols" id="cols"></div>
+<script>
+  // reasonix.frame.v1: the host hands a MessagePort in a "connect" message,
+  // and this document says "ready" on it before anything else.
+  let port = null;
+  const cols = document.getElementById("cols");
+
+  function paint(props) {
+    cols.replaceChildren();
+    for (const [name, cards] of Object.entries((props && props.columns) || {})) {
+      const col = document.createElement("section");
+      const h = document.createElement("h3");
+      h.textContent = name + " · " + cards.length;
+      col.append(h);
+      for (const card of cards) {
+        const el = document.createElement("div");
+        el.className = "card";
+        el.textContent = card.title + " ";
+        if (name !== "done") {
+          const next = document.createElement("button");
+          next.textContent = "→";
+          next.onclick = () => port.postMessage({ type: "action", actionId: "advance", args: { card: card.id } });
+          el.append(next);
+        }
+        col.append(el);
+      }
+      cols.append(col);
+    }
+    port.postMessage({ type: "size", height: document.documentElement.scrollHeight });
+  }
+
+  function theme(t) {
+    for (const [name, value] of Object.entries((t && t.tokens) || {})) document.documentElement.style.setProperty(name, value);
+  }
+
+  addEventListener("message", (event) => {
+    if (!event.data || event.data.type !== "connect" || !event.ports[0]) return;
+    port = event.ports[0];
+    port.onmessage = (m) => {
+      if (m.data.type === "init") { theme(m.data.theme); paint(m.data.props); }
+      if (m.data.type === "props") paint(m.data.props);
+      if (m.data.type === "theme") theme(m.data.theme);
+    };
+    port.postMessage({ type: "ready" });
+  });
+</script>

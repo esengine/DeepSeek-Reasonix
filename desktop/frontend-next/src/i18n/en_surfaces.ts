@@ -40,5 +40,19 @@ export const EN_SURFACES: Record<string, string> = {
   "合计": "Total",
   "平均值": "Average",
   "最新值": "Latest value",
-  "数据明细": "Data details"
+  "数据明细": "Data details",
+  "扩展页签": "Extensions tab",
+  "输入框上方": "Above the input box",
+  "会话标题栏": "Session title bar",
+  "单独的页签": "A tab of its own",
+  "这个扩展界面属于已重载的运行时，请等扩展重新发布": "This extension view belongs to a runtime that has reloaded. Wait for the extension to publish it again.",
+  "插件没有声明这个界面文档": "The plugin does not declare this view document.",
+  "插件包里找不到这个界面文档": "The view document is missing from the plugin package.",
+  "界面文档不在插件包内，已拒绝读取": "The view document is outside the plugin package and was not read.",
+  "界面文档超过 2 MiB 上限": "The view document is larger than 2 MiB.",
+  "界面文档不是 UTF-8 文本": "The view document is not UTF-8 text.",
+  "界面文档读取失败，请重试": "The view document could not be read. Try again.",
+  "扩展内容": "Extension content",
+  "界面文档": "View document",
+  "在隔离的沙箱里显示，碰不到 Studio 页面、凭证和网络": "Shown in an isolated sandbox with no access to the Studio page, credentials or the network"
 };

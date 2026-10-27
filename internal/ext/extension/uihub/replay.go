@@ -32,6 +32,9 @@ func (h *Hub) rememberSurface(p *event.ExtensionSurfacePayload) (bool, error) {
 	if p.SessionID != h.sessionID || p.Generation != h.generation || h.crashed[p.PluginID] || h.owner.Gate.IsStale(p.Generation) {
 		return false, nil
 	}
+	if err := h.admitFrameLocked(p); err != nil {
+		return false, err
+	}
 	if p.Kind == event.ExtensionSurfaceNotification {
 		return true, nil
 	}

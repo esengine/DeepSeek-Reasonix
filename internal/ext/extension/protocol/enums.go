@@ -120,6 +120,9 @@ const (
 	// host primitives, so an extension that needs a shape the fixed kinds do
 	// not have builds one without the protocol growing a kind for it.
 	UISurfaceView UISurfaceKind = "view"
+	// UISurfaceFrame names a document the plugin package ships; the host
+	// serves it into an isolated frame and passes it the payload's props.
+	UISurfaceFrame UISurfaceKind = "frame"
 )
 
 // UIRequestKind is the kind of blocking UI prompt the host shows on an

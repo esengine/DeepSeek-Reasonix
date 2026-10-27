@@ -108,9 +108,9 @@ Extensions with the `session.read` capability read the session (`host/session/re
 
 A queued prompt is the host's message about the extension, labelled with its source, never the user's words; the host may refuse it with a `refused` identity in the result (`submit_per_turn`, `submit_bytes`, `no_session`).
 
-Extensions with the `ui` capability publish `status`, `card`, `form`, `notification`, `panel`, and `view` payloads (`host/ui/publish`) and ask questions (`host/ui/request`: confirm, input, select, multiselect).
+Extensions with the `ui` capability publish `status`, `card`, `form`, `notification`, `panel`, `view` and `frame` payloads (`host/ui/publish`) and ask questions (`host/ui/request`: confirm, input, select, multiselect).
 
-Surfaces are **structured only**: no HTML, CSS, JavaScript, remote scripts, arbitrary frontend components, or uncontrolled URLs; Markdown renders through each frontend's existing safe renderer.
+Protocol messages are **structured only**: no HTML, CSS, JavaScript, remote scripts, arbitrary frontend components, or uncontrolled URLs; Markdown renders through each frontend's existing safe renderer. A `frame` names a document the installed package ships; the markup never crosses the protocol (see Frames).
 
 Every surface update carries the plugin ID, surface ID, session ID, and runtime generation; stale-generation updates are dropped so late results after a tab switch or reload can never overwrite current state.
 
@@ -119,9 +119,71 @@ past in the transcript: re-publishing the same surface id updates what is
 already on screen. A `view` is composed rather than filled in: its payload is a
 tree of host primitives, for a shape the fixed kinds do not have.
 
+A `view` names where it would like to stand in `slot` (at most 64 bytes), or replaces a tool card's body through `anchor: "tool:<callId>"`, never both. Slot names are advisory, not an enum: a frontend maps the names it has, and every other name falls back to `rail`.
+
+| Slot | Studio draws it as | Capacity in Studio |
+| --- | --- | --- |
+| `rail` | The workbench's Extensions tab, beside the extension panels | unbounded |
+| `composer.above` | The band above the composer | 2 |
+| `session.header` | The title bar after the session name; only `text`, `pip`, `meter` and `button` are drawn, any other node as its text | 3 |
+| `pane.tab` | A workbench tab of its own, after every tab a person or the agent opened; closing it moves the view to `rail` | 4 per session |
+
+1. Views beyond a slot's capacity stand in `rail`. Within a slot, views are ordered by plugin ID, then surface ID, so a republish never moves one.
+2. A user's placement overrides the extension's request. Studio stores it in `desktop.surface_slots`.
+3. `above_prompt` is an alias of `composer.above`. `settings.section` and `home.card` are reserved for app-scoped surfaces, which the protocol cannot publish yet, and fall back to `rail`.
+4. ACP clients that negotiated `reasonix.extensionSurface` receive a view with its `slot` and place it themselves. Other ACP clients receive no text for a view.
+
 Actions declared at initialize are namespaced `/<plugin>:<action>` and are
 invoked via `extension/ui/action`; form submissions arrive via
 `extension/ui/submit`.
+
+### Frames
+
+A frame is an HTML document the package declares under `contributes.frames` (`{id, entry, title}`) and the host draws in an isolated frame. Publishing one sends only JSON:
+
+| Field | Rule |
+| --- | --- |
+| `frame` | A declared id, `^[a-z][a-z0-9-]{0,31}$`; an undeclared one fails with `capability_not_declared`. |
+| `slot` | As for a view, except `session.header`, which falls back to `rail`. Frames take no `anchor`. |
+| `title` | Required, at most 200 characters. |
+| `fallback` | Required plain text, at most 600 bytes: what a frontend that cannot draw a frame shows instead. |
+| `props` | Optional JSON object, at most 64 KiB. Every string in it is credential-redacted before it reaches a frontend. |
+
+1. `HostCapabilities.uiFrames` is true when the host accepts frame surfaces; `ManifestExpectation.uiFrames` lists the declared ids.
+2. A session keeps at most six live frame surfaces; admission and storage share one lock. Changing another surface kind to a frame consumes a slot; republishing an existing live frame does not.
+3. The host serves the document at `GET /extensions/frames/{plugin}/{frame}?generation=N`, only for the current generation of a live plugin, from the package the runtime runs.
+4. The response's CSP is `sandbox allow-scripts` with `default-src 'none'`, `connect-src 'none'`, `form-action 'none'` and `frame-ancestors 'self'`.
+5. The document must be self-contained: inline scripts and styles, images and fonts as `data:` URIs, at most 2 MiB of UTF-8.
+6. Refusals are typed: `ui.frame_stale`, `ui.frame_not_declared`, `ui.frame_missing`, `ui.frame_outside_root`, `ui.frame_too_large`, `ui.frame_not_utf8`.
+7. ACP and terminal frontends show `title` and `fallback` as text.
+
+The document talks to its host over `reasonix.frame.v1`. The host posts `{type: "connect", protocol}` with a `MessagePort`; every later message uses that port.
+
+| Direction | Message | Limits |
+| --- | --- | --- |
+| host → frame | `init {protocol, props, theme {scheme, tokens}, locale, readOnly, state?, reason}` | once per load, after `ready`; `reason` is `publish` or `remount` |
+| host → frame | `props {props}`, `theme {theme}` | the document is not reloaded |
+| frame → host | `ready {}` | first message, accepted once per document load |
+| frame → host | `size {height}` | ≤ 10/s, clamped to the place's range |
+| frame → host | `action {actionId, args?}` | a declared action of the same plugin; `args` ≤ 16 string pairs of ≤ 1 KiB; ≤ 5/s |
+| frame → host | `submit {values}` | delivered as `extension/ui/submit` for the frame's surface; ≤ 64 KiB; ≤ 1/s |
+| frame → host | `state {value}` | ≤ 16 KiB, ≤ 10/s; kept within the owning pane/runtime and handed back on remount |
+
+Any other message, an extra field or an over-limit value is dropped; three drops in ten seconds close the channel and the host shows the fallback. No message submits a prompt, answers an approval, changes a setting, reads the session or opens a URL.
+
+Bridge values must be JSON, with at most 32 nested levels and 4096 visited values; byte limits use UTF-8. Cycles, BigInt and non-JSON objects are dropped.
+
+Document identity includes the host, session, generation, plugin, surface and frame. Replacing it closes the old channel; retiring the surface clears its saved state. Moving a live surface within its pane preserves state.
+
+桥接消息只接受 JSON，最多嵌套 32 层、访问 4096 个值，字节限制按 UTF-8 计算；循环引用、BigInt 和非 JSON 对象会被丢弃。
+
+文档身份包含宿主、会话、代次、插件、界面和文档 ID；身份变化立即关闭旧通道，界面退役清除保存状态，同一窗格内移动仍保留状态。`ready` 每次加载只接受一次；六个界面的配额检查与写入原子执行，其他类型改成 frame 也占用配额。
+
+Native validation: build the Studio host and frontend, then run `cd desktop/electron && pnpm frame-isolation-live`. It installs the SDK example in a disposable home and drives the real kernel, sandbox, CSP, action path, reload and malformed-message shutdown.
+
+Set `REASONIX_FRAME_EVIDENCE` to an external directory to capture the running frame.
+
+原生验证：构建 Studio 宿主与前端后执行 `cd desktop/electron && pnpm frame-isolation-live`。脚本使用临时数据目录安装 SDK 示例，验证真实内核、沙箱、CSP、动作调用、重载和非法消息关闭；可设置 `REASONIX_FRAME_EVIDENCE` 到仓库外目录保存截图。
 
 ## Tools
 

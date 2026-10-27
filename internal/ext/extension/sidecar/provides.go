@@ -18,6 +18,7 @@ func (c *Client) initializeParams() protocol.InitializeParams {
 		Capabilities: protocol.HostCapabilities{
 			ContentRefs:             true,
 			UIHost:                  c.uiHost,
+			UIFrames:                drawsFrames(c.ui),
 			ProtocolVersion:         protocol.ProtocolVersion,
 			DependencySchemaVersion: protocol.DependencySchemaVersion,
 		},
@@ -31,6 +32,7 @@ func (c *Client) manifestExpectation() protocol.ManifestExpectation {
 		Replaces:     append([]string(nil), rt.Replaces...),
 		Capabilities: append([]string(nil), rt.Capabilities...),
 		Tools:        rt.ToolNames(),
+		UIFrames:     append([]string(nil), c.frames...),
 		Requires:     requirementWires(c.requires),
 		Provides:     capabilityWires(c.provides),
 	}
@@ -43,6 +45,11 @@ func (c *Client) manifestExpectation() protocol.ManifestExpectation {
 		}
 	}
 	return expectation
+}
+
+func drawsFrames(ui UIHandler) bool {
+	d, ok := ui.(frameDrawer)
+	return ok && d.DrawsFrames()
 }
 
 func capabilityAddress(ref pluginpkg.CapabilityRef) string {

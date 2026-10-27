@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentPort } from "../port/port";
 import type { SessionState } from "../state/session_types";
-import { placement } from "./slots";
+import { arrange } from "./slots";
 
 type Views = SessionState["views"];
 
-/** Where the user put each extension surface, and the split of the pane's views
- *  into those beside the composer and those in the rail. */
+/** Where the user put each extension surface, and the pane's views split by
+ *  the place each one stands in. */
 export function useSurfaceSlots(port: AgentPort, views: Views, fail: (e: unknown) => void) {
   const [slots, setSlots] = useState<Record<string, string>>({});
 
@@ -31,13 +31,8 @@ export function useSurfaceSlots(port: AgentPort, views: Views, fail: (e: unknown
   );
 
   // Split once per change rather than per frame: a new array each render is a
-  // changed prop, and that alone would keep the rail re-rendering all turn.
-  const [atComposer, inRail] = useMemo(() => {
-    const at: Views = [];
-    const rail: Views = [];
-    for (const v of views) (placement(v, slots) === "composer-trailing" ? at : rail).push(v);
-    return [at, rail];
-  }, [views, slots]);
+  // changed prop, and that alone would keep every place re-rendering all turn.
+  const bySlot = useMemo(() => arrange(views, slots), [views, slots]);
 
-  return { slots, moveSurface, atComposer, inRail };
+  return { slots, moveSurface, bySlot };
 }

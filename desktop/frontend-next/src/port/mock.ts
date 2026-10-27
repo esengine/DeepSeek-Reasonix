@@ -1,3 +1,4 @@
+import { mockFrameUrl } from "./mock_frame";
 import { sessionCompletion } from "./mock_sessions";
 import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
 import type { JobOutput, PlanAction } from "./session";
@@ -757,6 +758,7 @@ export class MockPort extends MockWorkspace implements AgentPort {
     return `${name} 在 mock 里没有真实扩展可执行`;
   }
   async submitExtensionForm(_pluginId: string, _surfaceId: string, _values: Record<string, unknown>) {}
+  extensionFrameUrl(_pluginId: string, _frameId: string, _generation: number) { return mockFrameUrl(); }
 
   async setPlanMode(on: boolean) {
     this.state.plan = on;

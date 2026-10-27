@@ -104,7 +104,9 @@ describe("add, edit and detail read one declaration", () => {
   it("Add provider enables the thinking switch for a Responses source and words it the same way", async () => {
     const port = { protocols: vi.fn(async () => catalog), saveProvider: vi.fn() } as unknown as Port;
     render(<AddProvider port={port} taken={[]} known={[]} onDone={() => {}} onCancel={() => {}} />);
-    await userEvent.selectOptions(await screen.findByLabelText("接口协议"), "responses");
+    const protocol = await screen.findByLabelText("接口协议");
+    await waitFor(() => expect(protocol.querySelector('option[value="responses"]')).not.toBeNull());
+    await userEvent.selectOptions(protocol, "responses");
     await userEvent.click(screen.getByText("高级连接选项"));
     const sw = screen.getByRole("switch", { name: "发送思考控制" }) as HTMLButtonElement;
     expect(sw.disabled).toBe(false);

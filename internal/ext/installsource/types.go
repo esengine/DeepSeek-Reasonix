@@ -127,6 +127,8 @@ type action struct {
 	// frontends can render the full-trust implications before approval.
 	// Purely additive: older consumers ignore it.
 	Runtime *RuntimePlanInfo `json:"runtime,omitempty"`
+	// Frames lists the HTML documents the package ships for isolated frames.
+	Frames []FramePlanInfo `json:"frames,omitempty"`
 	// Mod describes the hooks module of a Claude Code mod from its syntax tree.
 	// It is a listing, not a guarantee, and the frontend says so.
 	Mod       *modpreview.Preview `json:"mod,omitempty"`

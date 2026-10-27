@@ -280,6 +280,8 @@ func (t *Transcript) Apply(ev eventwire.Event) {
 		t.Phase = ev.Phase
 	case "notice":
 		t.foldNotice(ev)
+	case "extension_surface":
+		t.foldExtensionFrame(ev.Extension)
 	case "turn_done":
 		t.Running = false
 		t.grown = nil

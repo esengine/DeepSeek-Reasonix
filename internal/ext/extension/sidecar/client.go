@@ -148,6 +148,7 @@ type Client struct {
 	rt               *pluginpkg.RuntimeSpec
 	requires         []pluginpkg.CapabilityRef // manifest v2 dependency requirements
 	provides         []pluginpkg.CapabilityRef // manifest v2 capability ceiling
+	frames           []string                  // frame ids the manifest declares
 	session          protocol.SessionContext
 	uiHost           protocol.UIHostKind
 	handshakeTimeout time.Duration
@@ -232,6 +233,7 @@ func newClient(p *process, opts ClientOptions) *Client {
 		rt:               opts.Package.Manifest.Runtime,
 		requires:         append([]pluginpkg.CapabilityRef(nil), opts.Package.Manifest.Requires...),
 		provides:         append([]pluginpkg.CapabilityRef(nil), opts.Package.Manifest.Provides...),
+		frames:           frameIDs(opts.Package.Manifest.Frames),
 		session:          opts.Session,
 		uiHost:           uiHost,
 		handshakeTimeout: handshakeTimeout,

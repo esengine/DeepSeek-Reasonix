@@ -67,6 +67,10 @@ install runtimes you trust completely.
   rendered natively in the CLI transcript, the Desktop app, and ACP clients
   (with text fallbacks), plus `/<plugin>:<action>` actions in the slash
   menu, the Desktop command palette, and ACP's discoverable commands.
+- **Frames** — HTML documents under `contributes.frames`, drawn by Studio in
+  a sandbox with no network or permissions and fed the props the runtime
+  publishes. See [Frames](EXTENSION_PROTOCOL.md#frames) and the
+  [example](../sdk/go/examples/frameextension/README.md).
 - **Prompts and themes** — `/<plugin>:<name>` prompt templates, discovered
   with the package's commands, and theme packs (`theme.json` directories)
   offered read-only in Studio's appearance settings as
@@ -175,4 +179,7 @@ enforces:
   are credential-redacted by the host before they reach the UI, logs, or error
   surfaces; ordinary provider/model content is preserved as product data;
 - a crashed sidecar fails its own operations explicitly — Reasonix never
-  silently falls back to another model or strategy.
+  silently falls back to another model or strategy;
+- a frame document has no origin of its own: it cannot reach the Studio page,
+  the kernel's credential or the network, and the shell refuses its IPC,
+  permissions and navigation. Studio labels it with the plugin's name.

@@ -117,6 +117,16 @@ export interface PluginPackage {
   error?: string;
 }
 
+// A frame document a package ships, as the plan lists it before anything is written.
+export interface PluginFrame {
+  id: string;
+  title: string;
+  entry: string;
+  bytes: number;
+  sha256?: string;
+  error?: string;
+}
+
 // One step of an install plan. riskLevel is the kernel's own grading — the
 // confirmation page groups by it rather than deciding for itself what is
 // dangerous, so the two can never disagree.
@@ -152,6 +162,7 @@ export interface PluginAction {
   headers?: Record<string, string>;
   runtime?: PluginRuntime & { fullTrust: boolean };
   mod?: ModPreview;
+  frames?: PluginFrame[];
   warnings?: string[];
   error?: string;
   next?: string;

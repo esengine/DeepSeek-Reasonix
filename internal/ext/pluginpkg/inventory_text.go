@@ -35,6 +35,10 @@ func (inv Inventory) bounded() Inventory {
 	for i := range inv.Themes {
 		inv.Themes[i].Name, inv.Themes[i].Path = id(inv.Themes[i].Name), loc(inv.Themes[i].Path)
 	}
+	for i := range inv.Frames {
+		f := &inv.Frames[i]
+		f.ID, f.Entry, f.Title = id(f.ID), loc(f.Entry), prose(f.Title)
+	}
 	for i := range inv.Hooks {
 		h := &inv.Hooks[i]
 		h.Event, h.Match, h.Command, h.ContextFile, h.Description = id(h.Event), loc(h.Match), loc(h.Command), loc(h.ContextFile), prose(h.Description)
