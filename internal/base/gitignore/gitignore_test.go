@@ -182,17 +182,27 @@ func TestInfoExcludeIsReadWhenDotGitIsAFile(t *testing.T) {
 	writeTestFile(t, filepath.Join(common, "worktrees", "wt", "commondir"), "../..\n")
 	modules := filepath.Join(base, "main", ".git", "modules", "sub")
 	writeTestFile(t, filepath.Join(modules, "info", "exclude"), "private.txt\n")
+	for _, gitDir := range []string{common, filepath.Join(common, "worktrees", "wt"), modules} {
+		writeTestFile(t, filepath.Join(gitDir, "HEAD"), "ref: refs/heads/main\n")
+	}
+	// Directories that hold an info/exclude but no HEAD are not git directories,
+	// so a pointer to one is not followed.
+	writeTestFile(t, filepath.Join(base, "fake", "info", "exclude"), "other.txt\n")
+	writeTestFile(t, filepath.Join(base, "fake-wt", "commondir"), "../fake\n")
+	writeTestFile(t, filepath.Join(base, "fake-wt", "HEAD"), "ref: refs/heads/main\n")
 
 	cases := map[string]struct {
 		pointer string
 		ignored string
 	}{
-		"plain repository":     {pointer: "", ignored: "plain.txt"},
-		"linked worktree":      {pointer: "gitdir: " + filepath.Join(common, "worktrees", "wt") + "\n", ignored: "secret.txt"},
-		"relative gitdir":      {pointer: "gitdir: ../main/.git/worktrees/wt\n", ignored: "secret.txt"},
-		"submodule":            {pointer: "gitdir: ../main/.git/modules/sub\n", ignored: "private.txt"},
-		"unreadable gitdir":    {pointer: "gitdir: ../nowhere\n", ignored: ""},
-		"not a gitdir pointer": {pointer: "garbage\n", ignored: ""},
+		"plain repository":       {pointer: "", ignored: "plain.txt"},
+		"linked worktree":        {pointer: "gitdir: " + filepath.Join(common, "worktrees", "wt") + "\n", ignored: "secret.txt"},
+		"relative gitdir":        {pointer: "gitdir: ../main/.git/worktrees/wt\n", ignored: "secret.txt"},
+		"submodule":              {pointer: "gitdir: ../main/.git/modules/sub\n", ignored: "private.txt"},
+		"unreadable gitdir":      {pointer: "gitdir: ../nowhere\n", ignored: ""},
+		"not a gitdir pointer":   {pointer: "garbage\n", ignored: ""},
+		"gitdir without HEAD":    {pointer: "gitdir: ../fake\n", ignored: ""},
+		"commondir without HEAD": {pointer: "gitdir: ../fake-wt\n", ignored: ""},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -67,11 +67,25 @@ func infoExcludeFile(root string) string {
 			return filepath.Join(gitPath, "info", "exclude")
 		}
 		dir = resolveFrom(root, strings.TrimSpace(target))
+		if !looksLikeGitDir(dir) {
+			return filepath.Join(gitPath, "info", "exclude")
+		}
 		if common, ok := readOneLine(filepath.Join(dir, "commondir")); ok && common != "" {
 			dir = resolveFrom(dir, common)
+			if !looksLikeGitDir(dir) {
+				return filepath.Join(gitPath, "info", "exclude")
+			}
 		}
 	}
 	return filepath.Join(dir, "info", "exclude")
+}
+
+// looksLikeGitDir reports whether dir holds a HEAD file, the check git itself
+// makes before it accepts a directory named by a "gitdir:" or "commondir"
+// pointer. A pointer to anything else is not followed.
+func looksLikeGitDir(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "HEAD"))
+	return err == nil && info.Mode().IsRegular()
 }
 
 // resolveFrom reads p relative to base unless it is absolute.
