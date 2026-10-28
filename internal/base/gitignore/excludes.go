@@ -52,12 +52,11 @@ func reanchorPattern(line, relDir string) string {
 	return neg + "/" + relDir + "/**/" + line
 }
 
-// infoExcludeFile is the repository's own exclude file. In a plain repository
-// that is .git/info/exclude. In a linked worktree or a submodule .git is a file
-// reading "gitdir: <path>"; a linked worktree's gitdir names the common
-// directory in a "commondir" file, and info/exclude lives there, shared by every
-// worktree of the repository. Every pointer is read through read, the same
-// reader the ignore files go through, so nothing else touches the disk here.
+// infoExcludeFile is the repository's own exclude file: .git/info/exclude, or,
+// when .git is a file reading "gitdir: <path>" (linked worktree, submodule),
+// the info/exclude of the directory it names, following a worktree's
+// "commondir" to the shared directory. Every pointer is read through read, the
+// reader the ignore files use, so nothing else touches the disk here.
 func infoExcludeFile(root string, read func(string) []string) string {
 	gitPath := filepath.Join(root, ".git")
 	plain := filepath.Join(gitPath, "info", "exclude")
