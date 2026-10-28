@@ -52,6 +52,59 @@ func reanchorPattern(line, relDir string) string {
 	return neg + "/" + relDir + "/**/" + line
 }
 
+// infoExcludeFile is the repository's own exclude file: .git/info/exclude, or,
+// when .git is a file reading "gitdir: <path>" (linked worktree, submodule),
+// the info/exclude of the directory it names, following a worktree's
+// "commondir" to the shared directory. Every pointer is read through read, the
+// reader the ignore files use, so nothing else touches the disk here.
+func infoExcludeFile(root string, read func(string) []string) string {
+	gitPath := filepath.Join(root, ".git")
+	plain := filepath.Join(gitPath, "info", "exclude")
+	// A .git directory (or no .git at all) reads as nothing.
+	pointer := firstLine(read(gitPath))
+	if pointer == "" {
+		return plain
+	}
+	target, cut := strings.CutPrefix(pointer, "gitdir:")
+	if !cut {
+		return plain
+	}
+	dir := resolveFrom(root, strings.TrimSpace(target))
+	if !looksLikeGitDir(dir, read) {
+		return plain
+	}
+	if common := firstLine(read(filepath.Join(dir, "commondir"))); common != "" {
+		dir = resolveFrom(dir, common)
+		if !looksLikeGitDir(dir, read) {
+			return plain
+		}
+	}
+	return filepath.Join(dir, "info", "exclude")
+}
+
+// looksLikeGitDir reports whether dir holds a non-empty HEAD file, the check
+// git itself makes before it accepts a directory named by a "gitdir:" or
+// "commondir" pointer. A pointer to anything else is not followed.
+func looksLikeGitDir(dir string, read func(string) []string) bool {
+	return firstLine(read(filepath.Join(dir, "HEAD"))) != ""
+}
+
+// resolveFrom reads p relative to base unless it is absolute.
+func resolveFrom(base, p string) string {
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	return filepath.Join(base, p)
+}
+
+// firstLine returns the first line of a file's lines, trimmed.
+func firstLine(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(lines[0])
+}
+
 // globalExcludesFile returns git's effective global ignore file: core.excludesFile
 // from the user/global git config when set and present, else git's default
 // ($XDG_CONFIG_HOME/git/ignore, then ~/.config/git/ignore). "" when none exists.
