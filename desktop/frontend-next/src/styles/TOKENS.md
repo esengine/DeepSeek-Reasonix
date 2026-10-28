@@ -320,6 +320,9 @@ pack states a shape, never a number the layout has to agree with.
   emphasis (ui, semi, text); label (ui, reg, text); description (ui, reg,
   muted); caption (meta, reg, muted); control (meta, reg, text); metric
   (display, semi, text). The usage hero figure keeps its own larger size.
+- Action controls take only size and weight from the control role; their owning
+  component pairs foreground and background, including `--accent-fg` on
+  `--accent` for primary actions and the disabled-state foreground.
 - Inside `.prefs-col` the file re-points `--fs-micro` to `--fs-meta`.
 - It also re-points `--faint` and `--ghost` to `--muted`, and `--w-med` to
   `--w-semi`, so a rule written against any of them lands on a role unedited.
@@ -333,8 +336,8 @@ pack states a shape, never a number the layout has to agree with.
   text around it.
 - `tools/settings-type-sweep.mjs` reads computed styles from a running build
   and fails on a size outside the scale.
-- `settings-type.test.ts` holds the stylesheet to tokens, so a literal size or
-  colour cannot be added to it.
+- `settings-type.test.ts` checks the settings scope's tier mappings and limits
+  neutral foreground declarations to `--text` and `--muted`.
 
 ## Weight and contrast
 

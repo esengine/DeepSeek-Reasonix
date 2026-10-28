@@ -112,6 +112,25 @@ it("typing the stored value back, or toggling a row off and on, is clean again",
   expect(state()).toBe("没有更改");
 });
 
+it("saves model edits with Ctrl+S and keeps Save disabled while the write is pending", async () => {
+  const gate = deferred();
+  const h = harness({ edit: () => gate.promise });
+  await open();
+  const model = within(detail()).getByRole("checkbox", { name: "选用 vision-chat" });
+  await userEvent.click(model);
+  expect(save().disabled).toBe(false);
+  expect(revert().disabled).toBe(false);
+  await userEvent.keyboard("{Control>}s{/Control}");
+  await waitFor(() => expect(h.edits).toHaveLength(1));
+  expect(h.edits[0]).toMatchObject({ models: ["chat"] });
+  expect(save().textContent).toBe("保存中…");
+  expect(save().matches(":disabled")).toBe(true);
+  expect(revert().matches(":disabled")).toBe(true);
+  gate.resolve();
+  await waitFor(() => expect(state()).toBe("已保存"));
+  expect(save().disabled).toBe(true);
+});
+
 it("a typed key, and a field the form cannot parse, both count as pending", async () => {
   harness();
   await open();

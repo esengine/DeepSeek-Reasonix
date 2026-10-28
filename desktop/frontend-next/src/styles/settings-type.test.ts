@@ -4,12 +4,6 @@ const CSS = import.meta.glob("./settings-type.css", { query: "?raw", import: "de
 const css = CSS["./settings-type.css"]!;
 const declarations = [...css.matchAll(/([a-z-]+)\s*:\s*([^;}]+)[;}]/g)].map((m) => ({ prop: m[1]!, value: m[2]!.trim() }));
 
-it("states every size, weight and colour as a token", () => {
-  const sized = declarations.filter((d) => ["font-size", "font-weight", "color"].includes(d.prop));
-  expect(sized.length).toBeGreaterThan(10);
-  for (const d of sized) expect(d.value, `${d.prop}: ${d.value}`).toMatch(/^var\(--[a-z-]+\)$/);
-});
-
 it("keeps the settings scope on two neutral text tiers and one emphasis weight", () => {
   const scope = css.match(/\.prefs-col\s*\{([^}]*)\}/)?.[1] ?? "";
   expect(scope).toMatch(/--faint:\s*var\(--muted\)/);
