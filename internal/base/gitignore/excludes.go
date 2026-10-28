@@ -56,36 +56,38 @@ func reanchorPattern(line, relDir string) string {
 // that is .git/info/exclude. In a linked worktree or a submodule .git is a file
 // reading "gitdir: <path>"; a linked worktree's gitdir names the common
 // directory in a "commondir" file, and info/exclude lives there, shared by every
-// worktree of the repository.
-func infoExcludeFile(root string) string {
+// worktree of the repository. Every pointer is read through read, the same
+// reader the ignore files go through, so nothing else touches the disk here.
+func infoExcludeFile(root string, read func(string) []string) string {
 	gitPath := filepath.Join(root, ".git")
-	dir := gitPath
-	if info, err := os.Stat(gitPath); err == nil && !info.IsDir() {
-		pointer, ok := readOneLine(gitPath)
-		target, cut := strings.CutPrefix(pointer, "gitdir:")
-		if !ok || !cut {
-			return filepath.Join(gitPath, "info", "exclude")
-		}
-		dir = resolveFrom(root, strings.TrimSpace(target))
-		if !looksLikeGitDir(dir) {
-			return filepath.Join(gitPath, "info", "exclude")
-		}
-		if common, ok := readOneLine(filepath.Join(dir, "commondir")); ok && common != "" {
-			dir = resolveFrom(dir, common)
-			if !looksLikeGitDir(dir) {
-				return filepath.Join(gitPath, "info", "exclude")
-			}
+	plain := filepath.Join(gitPath, "info", "exclude")
+	// A .git directory (or no .git at all) reads as nothing.
+	pointer := firstLine(read(gitPath))
+	if pointer == "" {
+		return plain
+	}
+	target, cut := strings.CutPrefix(pointer, "gitdir:")
+	if !cut {
+		return plain
+	}
+	dir := resolveFrom(root, strings.TrimSpace(target))
+	if !looksLikeGitDir(dir, read) {
+		return plain
+	}
+	if common := firstLine(read(filepath.Join(dir, "commondir"))); common != "" {
+		dir = resolveFrom(dir, common)
+		if !looksLikeGitDir(dir, read) {
+			return plain
 		}
 	}
 	return filepath.Join(dir, "info", "exclude")
 }
 
-// looksLikeGitDir reports whether dir holds a HEAD file, the check git itself
-// makes before it accepts a directory named by a "gitdir:" or "commondir"
-// pointer. A pointer to anything else is not followed.
-func looksLikeGitDir(dir string) bool {
-	info, err := os.Stat(filepath.Join(dir, "HEAD"))
-	return err == nil && info.Mode().IsRegular()
+// looksLikeGitDir reports whether dir holds a non-empty HEAD file, the check
+// git itself makes before it accepts a directory named by a "gitdir:" or
+// "commondir" pointer. A pointer to anything else is not followed.
+func looksLikeGitDir(dir string, read func(string) []string) bool {
+	return firstLine(read(filepath.Join(dir, "HEAD"))) != ""
 }
 
 // resolveFrom reads p relative to base unless it is absolute.
@@ -96,14 +98,12 @@ func resolveFrom(base, p string) string {
 	return filepath.Join(base, p)
 }
 
-// readOneLine returns the first line of a small file, trimmed.
-func readOneLine(path string) (string, bool) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
+// firstLine returns the first line of a file's lines, trimmed.
+func firstLine(lines []string) string {
+	if len(lines) == 0 {
+		return ""
 	}
-	line, _, _ := strings.Cut(string(body), "\n")
-	return strings.TrimSpace(line), true
+	return strings.TrimSpace(lines[0])
 }
 
 // globalExcludesFile returns git's effective global ignore file: core.excludesFile
