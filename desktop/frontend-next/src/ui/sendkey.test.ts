@@ -36,3 +36,32 @@ describe("platform send chords", () => {
     expect(sendsOnKey(key(), "enter", true)).toBe(false);
   });
 });
+
+describe("the send verb", () => {
+  it("is the turn's verb while a turn is live, whatever the gate says", async () => {
+    const { sendAction } = await import("./sendkey");
+    expect(sendAction(true, true)).toBe("steer");
+    expect(sendAction(true, undefined)).toBe("steer");
+  });
+
+  it("is a queue while the kernel is only delivering the last result", async () => {
+    const { sendAction } = await import("./sendkey");
+    expect(sendAction(false, true)).toBe("queue");
+  });
+
+  it("is a plain send when nothing says the gate is shut", async () => {
+    const { sendAction } = await import("./sendkey");
+    expect(sendAction(false, false)).toBe("send");
+    // An older kernel sends no `busy`, and that missing key is not a delivery.
+    expect(sendAction(false, undefined)).toBe("send");
+  });
+
+  it("words the button from the same state", async () => {
+    const { sendLabel } = await import("./sendkey");
+    expect(sendLabel(false, false, undefined)).toBe("发送");
+    expect(sendLabel(false, false, false)).toBe("发送");
+    expect(sendLabel(false, false, true)).toBe("排队发送");
+    expect(sendLabel(false, true, true)).toBe("插话");
+    expect(sendLabel(true, false, true)).toBe("正在发送…");
+  });
+});

@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/surface"
 	"reasonix/internal/session/control"
+	"reasonix/internal/tools/jobs"
 )
 
 func (s *Server) preset(w http.ResponseWriter, r *http.Request) {
@@ -190,83 +191,213 @@ func (s *Server) effort(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// status returns a combined status snapshot.
-func (s *Server) status(w http.ResponseWriter, r *http.Request) {
-	used, window := s.ctl().ContextSnapshot()
-	hit, miss := s.ctl().SessionCache()
-	sess := map[string]any{
-		"agentCompositionLocked": compositionLocked(s.ctl()),
-		"label":                  s.ctl().Label(),
-		// running is what a window shows; busy is what refuses a new turn, which
-		// also holds through the delivery of the previous turn's TurnDone.
-		"running":          s.ctl().TurnInFlight(),
-		"busy":             s.ctl().Running(),
-		"plan":             s.ctl().PlanMode(),
-		"autoApproveTools": s.ctl().AutoApproveTools(),
-		"bypass":           s.ctl().AutoApproveTools(),
-		"toolApprovalMode": s.ctl().ToolApprovalMode(),
-		"approvalDefault":  s.ctl().Posture(),
-		"preset":           s.ctl().AgentPreset(),
-		"goal":             s.ctl().Goal(),
-		"goalStatus":       s.ctl().GoalStatus(),
-		"cwd":              s.ctl().SessionDir(),
-		"workspaceRoot":    s.ctl().WorkspaceRoot(),
-		"sessionPath":      s.ctl().SessionPath(),
-		"used":             used,
-		"window":           window,
-		"cacheHit":         hit,
-		"cacheMiss":        miss,
-	}
-	if binding := compositionControllerView(s.ctl()); binding != nil {
-		sess["agentComposition"] = binding
-	}
-	if view := s.goalRuntime(); view != nil {
-		sess["goalRuntime"] = view
-	}
+// sessionStatus is GET /status as a value: every key it sends, named. It was a
+// map literal, whose shape no guard can read — which is how `busy` came to be
+// sent without the desktop declaring it. Fields are alphabetical by JSON name,
+// the order a map's keys marshal in; reordering them changes the bytes of an
+// identical snapshot, and TestStatusPayloadSendsTheBytesTheMapSent pins that.
+type sessionStatus struct {
+	AgentComposition       *compositionSummary   `json:"agentComposition,omitempty"`
+	AgentCompositionLocked bool                  `json:"agentCompositionLocked"`
+	ApprovalDefault        control.PostureReport `json:"approvalDefault"`
+	AutoApproveTools       bool                  `json:"autoApproveTools"`
+	// Busy is the admission gate; Running is the turn. They differ for as long
+	// as the previous turn's TurnDone is still being delivered, and that gap is
+	// the one state a window cannot describe from Running alone.
+	Busy      bool   `json:"busy"`
+	Bypass    bool   `json:"bypass"`
+	CacheHit  int    `json:"cacheHit"`
+	CacheMiss int    `json:"cacheMiss"`
+	Cwd       string `json:"cwd"`
+	// A pointer to the slice: the key is absent from a controller projecting no
+	// decisions and [] from one projecting an empty set, which omitempty on a
+	// bare slice would collapse into one silence.
+	Decisions *[]control.Decision `json:"decisions,omitempty"`
+	// The model face arrives or does not as a whole; once it does, its four keys
+	// keep their zero values. Pointers, because a bare string or bool under
+	// omitempty would turn a stated zero into an absent key.
+	Effort              *string                  `json:"effort,omitempty"`
+	Goal                string                   `json:"goal"`
+	GoalRuntime         *control.GoalRuntimeView `json:"goalRuntime,omitempty"`
+	GoalStatus          string                   `json:"goalStatus"`
+	Jobs                []jobs.View              `json:"jobs,omitempty"`
+	Label               string                   `json:"label"`
+	LastUsage           *provider.Usage          `json:"lastUsage,omitempty"`
+	ModelRef            *string                  `json:"modelRef,omitempty"`
+	Modes               []control.ModelModeView  `json:"modes,omitempty"`
+	Plan                bool                     `json:"plan"`
+	PlanPhase           string                   `json:"planPhase,omitempty"`
+	Preset              string                   `json:"preset"`
+	ProviderDisplayName string                   `json:"providerDisplayName,omitempty"`
+	Running             bool                     `json:"running"`
+	SessionCostQuote    pricing.CostQuote        `json:"sessionCostQuote"`
+	SessionPath         string                   `json:"sessionPath"`
+	SessionUsage        SessionUsage             `json:"sessionUsage"`
+	Tariff              map[string]any           `json:"tariff,omitempty"`
+	ToolApprovalMode    string                   `json:"toolApprovalMode"`
+	Used                int                      `json:"used"`
+	Vision              *bool                    `json:"vision,omitempty"`
+	VisionDeclared      *bool                    `json:"visionDeclared,omitempty"`
+	Window              int                      `json:"window"`
+	WorkspaceRoot       string                   `json:"workspaceRoot"`
+}
 
+// statusFacts is what GET /status reads, gathered once. Shaping it is a
+// separate, pure step so the golden test can build both this build's payload
+// and the map it replaced from one set of inputs: a key dropped on either side
+// is then a diff, not a coincidence.
+type statusFacts struct {
+	AgentCompositionLocked bool
+	Label                  string
+	Running                bool
+	Busy                   bool
+	Plan                   bool
+	AutoApproveTools       bool
+	ToolApprovalMode       string
+	Posture                control.PostureReport
+	Preset                 string
+	Goal                   string
+	GoalStatus             string
+	Cwd                    string
+	WorkspaceRoot          string
+	SessionPath            string
+	Used                   int
+	Window                 int
+	CacheHit               int
+	CacheMiss              int
+	Composition            *compositionSummary
+	GoalRuntime            *control.GoalRuntimeView
+	Decisions              *[]control.Decision
+	PlanPhase              planmode.Phase
+	LastUsage              *provider.Usage
+	Face                   *control.ModelFace
+	ProviderDisplayName    string
+	Modes                  []control.ModelModeView
+	SessionCostQuote       pricing.CostQuote
+	SessionUsage           SessionUsage
+	Jobs                   []jobs.View
+	Tariff                 *pricing.Tariff
+}
+
+// statusFacts reads the session once for GET /status.
+func (s *Server) statusFacts() statusFacts {
+	ctl := s.ctl()
+	used, window := ctl.ContextSnapshot()
+	hit, miss := ctl.SessionCache()
+	facts := statusFacts{
+		AgentCompositionLocked: compositionLocked(ctl),
+		Label:                  ctl.Label(),
+		Running:                ctl.TurnInFlight(),
+		Busy:                   ctl.Running(),
+		Plan:                   ctl.PlanMode(),
+		AutoApproveTools:       ctl.AutoApproveTools(),
+		ToolApprovalMode:       ctl.ToolApprovalMode(),
+		Posture:                ctl.Posture(),
+		Preset:                 ctl.AgentPreset(),
+		Goal:                   ctl.Goal(),
+		GoalStatus:             ctl.GoalStatus(),
+		Cwd:                    ctl.SessionDir(),
+		WorkspaceRoot:          ctl.WorkspaceRoot(),
+		SessionPath:            ctl.SessionPath(),
+		Used:                   used,
+		Window:                 window,
+		CacheHit:               hit,
+		CacheMiss:              miss,
+		Composition:            compositionControllerView(ctl),
+		GoalRuntime:            s.goalRuntime(),
+	}
 	// Additive: planPhase absent means outside the workflow, so a client that
 	// reads it can say "executing an approved plan" while one that reads only
 	// `plan` keeps the behaviour it always had.
-	if v, ok := s.ctl().(decisionViewer); ok {
-		sess["decisions"] = v.Decisions()
-		if phase := v.PlanPhase(); phase != planmode.Inactive {
-			sess["planPhase"] = phase.String()
-		}
+	if v, ok := ctl.(decisionViewer); ok {
+		decisions := v.Decisions()
+		facts.Decisions = &decisions
+		facts.PlanPhase = v.PlanPhase()
 	}
-	if u := s.ctl().LastUsage(); u != nil {
-		sess["lastUsage"] = u
+	facts.LastUsage = ctl.LastUsage()
+	if face, ok := ctl.ModelFace(); ok {
+		facts.Face = &face
+		facts.ProviderDisplayName = providerLabel(face.Ref)
 	}
-	if face, ok := s.ctl().ModelFace(); ok {
-		sess["effort"] = face.Effort
-		sess["modelRef"] = face.Ref
-		if label := providerLabel(face.Ref); label != "" {
-			sess["providerDisplayName"] = label
-		}
-		// Whether this model reads images at all. A composer that cannot ask
-		// lets the user paste a screenshot into a text-only model and watch
-		// nothing happen.
-		sess["vision"] = face.Vision
-		// And whether that false is an answer or a silence: a relay forwards
-		// models nothing here has a label for, and telling its user the model
-		// cannot read images states a limitation that was never established.
-		sess["visionDeclared"] = face.VisionDeclared
-	}
-	// Only a model that declares modes lists any, which is what keeps the
-	// switch off every other model's effort menu.
-	if modes := s.ctl().ModelModes(); len(modes) > 0 {
-		sess["modes"] = modes
-	}
-	sess["sessionCostQuote"] = s.bc.SessionCostQuote()
-	sess["sessionUsage"] = s.bc.SessionUsage()
-	if j := s.ctl().Jobs(); len(j) > 0 {
-		sess["jobs"] = j
-	}
+	facts.Modes = ctl.ModelModes()
+	facts.SessionCostQuote = s.bc.SessionCostQuote()
+	facts.SessionUsage = s.bc.SessionUsage()
+	facts.Jobs = ctl.Jobs()
 	// Additive: present only where the vendor's own schedule bills the model's
 	// rate, so a custom price or a relay shows no window it does not charge.
-	if tariff, ok := s.ctl().Tariff(); ok {
-		sess["tariff"] = tariffBody(tariff)
+	if tariff, ok := ctl.Tariff(); ok {
+		facts.Tariff = &tariff
 	}
-	writeJSON(w, sess)
+	return facts
+}
+
+// view is the wire shape: one field per key, in the order the JSON encoder
+// writes them. The conditionals are the same ones the map literal applied, so
+// an absent key still means exactly what it meant.
+func (f statusFacts) view() sessionStatus {
+	v := sessionStatus{
+		AgentCompositionLocked: f.AgentCompositionLocked,
+		ApprovalDefault:        f.Posture,
+		AutoApproveTools:       f.AutoApproveTools,
+		Busy:                   f.Busy,
+		// A second key for the same fact, kept because a client may read
+		// either name; it is not a second opinion.
+		Bypass:           f.AutoApproveTools,
+		CacheHit:         f.CacheHit,
+		CacheMiss:        f.CacheMiss,
+		Cwd:              f.Cwd,
+		Goal:             f.Goal,
+		GoalStatus:       f.GoalStatus,
+		Label:            f.Label,
+		Plan:             f.Plan,
+		Preset:           f.Preset,
+		Running:          f.Running,
+		SessionCostQuote: f.SessionCostQuote,
+		SessionPath:      f.SessionPath,
+		SessionUsage:     f.SessionUsage,
+		ToolApprovalMode: f.ToolApprovalMode,
+		Used:             f.Used,
+		Window:           f.Window,
+		WorkspaceRoot:    f.WorkspaceRoot,
+		AgentComposition: f.Composition,
+		GoalRuntime:      f.GoalRuntime,
+		LastUsage:        f.LastUsage,
+	}
+	if f.Decisions != nil {
+		v.Decisions = f.Decisions
+		if f.PlanPhase != planmode.Inactive {
+			v.PlanPhase = f.PlanPhase.String()
+		}
+	}
+	if f.Face != nil {
+		effort, ref := f.Face.Effort, f.Face.Ref
+		vision, declared := f.Face.Vision, f.Face.VisionDeclared
+		v.Effort, v.ModelRef = &effort, &ref
+		// Whether this model reads images at all, and whether that answer was
+		// ever given: a relay forwards models nothing here has a label for, and
+		// an undeclared one is not the same claim as a text-only one.
+		v.Vision, v.VisionDeclared = &vision, &declared
+		if f.ProviderDisplayName != "" {
+			v.ProviderDisplayName = f.ProviderDisplayName
+		}
+	}
+	// Only a model that declares modes lists any, which is what keeps the switch
+	// off every other model's effort menu.
+	if len(f.Modes) > 0 {
+		v.Modes = f.Modes
+	}
+	if len(f.Jobs) > 0 {
+		v.Jobs = f.Jobs
+	}
+	if f.Tariff != nil {
+		v.Tariff = tariffBody(*f.Tariff)
+	}
+	return v
+}
+
+// status returns a combined status snapshot.
+func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.statusFacts().view())
 }
 
 type modelEntry struct {

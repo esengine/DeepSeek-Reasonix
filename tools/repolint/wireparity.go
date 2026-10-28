@@ -361,6 +361,18 @@ var partialWireMirrors = []partialWireMirror{
 	// reopened session shows the rewrite as the model's own.
 	{"internal/frontend/serve/history.go", "historyToolCall", "internal/frontend/tui/client.go", "HistoryToolCall",
 		[]string{"id", "name", "arguments", "argumentNormalization", "resolvedName", "capabilityId"}},
+	// GET /status, polled by every window. The page's copy is honestly smaller:
+	// it declares no `lastUsage`, which nothing in desktop/src reads. Every
+	// field it does declare is named, including the delivery fact `busy`.
+	{"internal/frontend/serve/settings.go", "sessionStatus", tsSessionFile, "SessionStatus",
+		[]string{
+			"agentComposition", "agentCompositionLocked", "approvalDefault", "autoApproveTools",
+			"busy", "bypass", "cacheHit", "cacheMiss", "cwd", "decisions", "effort", "goal",
+			"goalRuntime", "goalStatus", "jobs", "label", "modelRef", "modes", "plan",
+			"planPhase", "preset", "providerDisplayName", "running", "sessionCostQuote",
+			"sessionPath", "sessionUsage", "tariff", "toolApprovalMode", "used", "vision",
+			"visionDeclared", "window", "workspaceRoot",
+		}},
 }
 
 // partialWireMirror is one declared subset: readerFile's readerType must carry

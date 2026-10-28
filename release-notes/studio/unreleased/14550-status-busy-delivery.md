@@ -1,0 +1,2 @@
+- 修复：上一轮结果仍在投递时，发送按钮显示「排队发送」并带 `data-delivering`，不再看起来像空闲会话。关联 #14550。
+- Fixed: while the previous turn's result is still being delivered, the send button reads "Queue" and carries `data-delivering` instead of looking idle. Refs #14550.

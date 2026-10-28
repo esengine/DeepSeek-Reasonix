@@ -261,6 +261,12 @@ export interface SessionStatus {
   visionDeclared?: boolean;
   label: string;
   running: boolean;
+  // The kernel's admission gate. It stays true through the delivery of the
+  // previous turn's TurnDone, after `running` has gone false: the turn is over
+  // and its result is still landing. The two together are the only way a window
+  // can tell that gap from an idle session. Absent from an older kernel, where
+  // `running` alone is the whole answer.
+  busy?: boolean;
   // plan drives the composer toggle and nothing else: it is the legacy
   // projection, false once a plan is approved. planPhase is the lifecycle, and
   // it is absent when the run is outside the workflow entirely.

@@ -19,7 +19,7 @@ import { useIme } from "./ime";
 import { usePlaceholderFit } from "./placeholderfit";
 import { useFitHeight } from "./fitHeight";
 import { useSendShortcut } from "../state/prefs";
-import { sendAria, sendHint, sendsOnKey } from "./sendkey";
+import { sendAction, sendAria, sendHint, sendLabel, sendsOnKey } from "./sendkey";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
 import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
@@ -779,6 +779,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
             data-primary={running ? undefined : ""}
             data-action="session.send"
             data-running={running ? "" : undefined}
+            data-delivering={sendAction(running, status?.busy) === "queue" ? "" : undefined}
             disabled={sendDisabled}
             aria-busy={submitting}
             onClick={send}
@@ -788,7 +789,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 <path d="M8 12.8V3.4M4.2 7.2 8 3.4l3.8 3.8" />
               </svg>
             </span>
-            <span>{t(submitting ? "正在发送…" : running ? "插话" : "发送")}</span>
+            <span>{sendLabel(submitting, running, status?.busy)}</span>
           </button>}
         </span>
       </div>
