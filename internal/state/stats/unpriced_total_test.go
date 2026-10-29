@@ -62,9 +62,15 @@ func TestARangeTotalSaysHowManyCallsItCouldNotPrice(t *testing.T) {
 		// predates the cost fields. Two distinct reasons stand behind them.
 		"unpricedCalls":     float64(3),
 		"incompleteReasons": []any{"missing_price_or_usage", "no_price"},
-		"active_days":       float64(1),
-		"top_model":         "deepseek/deepseek-chat",
-		"top_provider":      "deepseek",
+		// The denominator those three are read against, and the card facts:
+		// one priced row names no card, three rows record no price fact at all.
+		"countedCalls":          float64(4),
+		"estimatedCalls":        float64(0),
+		"unnamedCardCalls":      float64(1),
+		"unclassifiedCardCalls": float64(3),
+		"active_days":           float64(1),
+		"top_model":             "deepseek/deepseek-chat",
+		"top_provider":          "deepseek",
 	}
 	if !reflect.DeepEqual(payload, want) {
 		t.Fatalf("total payload = %s\nwant %s", mustJSON(t, payload), mustJSON(t, want))

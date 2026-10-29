@@ -25,9 +25,9 @@ import (
 
 // SchemaVersion names the projection file, so a bump retires the old one
 // rather than migrating it: every column here is replayable from the JSONL.
-// Version 8 adds the reason a row was unpriced; opening it reindexes the daily
-// files, so an older projection's rows regain their reason from the source.
-const SchemaVersion = 8
+// Version 8 adds the unpriced reason; version 9 adds the pricing fingerprint,
+// and opening either reindexes the daily files that supply both.
+const SchemaVersion = 9
 
 type AppendReceipt struct {
 	Path     string
@@ -64,7 +64,10 @@ type Entry struct {
 	// BillingMode is the mode the quote was made in; a plan's estimate is kept
 	// apart from billed cost.
 	BillingMode string
-	Valuations  map[string]int64 // vendor-table amounts by currency, fixed-point
+	// PricingFingerprint names the rate card the quote used. Empty means the
+	// row does not name one, not that it was priced for free.
+	PricingFingerprint string
+	Valuations         map[string]int64 // vendor-table amounts by currency, fixed-point
 }
 
 // CostAmount is one currency's total. Currencies never add, so they never share
@@ -184,6 +187,7 @@ CREATE TABLE usage_records(
  cost INTEGER NOT NULL DEFAULT 0,cost_currency TEXT NOT NULL DEFAULT '',cost_estimated INTEGER NOT NULL DEFAULT 0,
  cost_incomplete INTEGER NOT NULL DEFAULT 0,incomplete_reason TEXT NOT NULL DEFAULT '',
  valuation_cny INTEGER,valuation_usd INTEGER,billing_mode TEXT NOT NULL DEFAULT '',
+ pricing_fingerprint TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(file_path,byte_offset)
 );
 CREATE TABLE usage_rollups(
@@ -399,11 +403,11 @@ func insertRecord(ctx context.Context, tx *sql.Tx, receipt AppendReceipt, entry 
 	}
 	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_records(file_path,byte_offset,byte_length,line_hash,day,source,
         model_ref,provider,prompt,completion,reasoning,cache_hit,cache_miss,total,requests,turns,cost,cost_currency,cost_estimated,
-        cost_incomplete,incomplete_reason,valuation_cny,valuation_usd,billing_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        cost_incomplete,incomplete_reason,valuation_cny,valuation_usd,billing_mode,pricing_fingerprint) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		receipt.Path, receipt.Offset, receipt.Length, receipt.LineHash, entry.Day, entry.Source, entry.ModelRef, entry.Provider,
 		entry.Prompt, entry.Completion, entry.Reasoning, entry.CacheHit, entry.CacheMiss, entry.Total, entry.Requests, entry.Turns,
 		entry.Cost, entry.CostCurrency, estimated, incomplete, entry.IncompleteReason,
-		valuationArg(entry, "CNY"), valuationArg(entry, "USD"), entry.BillingMode)
+		valuationArg(entry, "CNY"), valuationArg(entry, "USD"), entry.BillingMode, entry.PricingFingerprint)
 	return err
 }
 
@@ -492,6 +496,8 @@ type rawRecord struct {
 	ValuationCNY     string `json:"valuation_cny"`
 	ValuationUSD     string `json:"valuation_usd"`
 	BillingMode      string `json:"billing_mode"`
+	// The rate card the quote named; empty when the row does not name one.
+	PricingFingerprint string `json:"pricing_fingerprint"`
 }
 
 func providerOf(model string) string {
@@ -509,7 +515,7 @@ func entryFromRaw(day string, raw rawRecord) Entry {
 	reason, incomplete := UnpricedReason(raw.CostComplete, raw.Total, raw.CostAmount, raw.IncompleteReason)
 	return Entry{Day: day, Source: raw.Source, ModelRef: raw.ModelRef, Provider: providerOf(raw.ModelRef), Prompt: raw.Prompt,
 		Completion: raw.Completion, Reasoning: raw.Reasoning, CacheHit: raw.CacheHit, CacheMiss: raw.CacheMiss,
-		Total: raw.Total, Requests: raw.Requests, Turns: turns}.WithCost(Priced{Amount: raw.CostAmount,
+		Total: raw.Total, Requests: raw.Requests, Turns: turns, PricingFingerprint: raw.PricingFingerprint}.WithCost(Priced{Amount: raw.CostAmount,
 		Currency: raw.CostCurrency, CNY: raw.ValuationCNY, USD: raw.ValuationUSD, Estimated: raw.CostEstimated,
 		Incomplete: incomplete, Reason: reason, BillingMode: raw.BillingMode})
 }
