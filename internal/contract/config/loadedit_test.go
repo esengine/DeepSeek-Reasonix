@@ -44,7 +44,7 @@ api_key_env = "X_KEY"
 func TestMergeTOMLProviderAccessPreservesExplicitEmpty(t *testing.T) {
 	userPath := writeUserProviderAccess(t, "[desktop]\nprovider_access = []\n")
 
-	access, declared, err := mergeTOMLProviderAccess([]string{userPath})
+	access, declared, err := configReadPaths(nil).mergeTOMLProviderAccess([]string{userPath})
 	if err != nil {
 		t.Fatalf("mergeTOMLProviderAccess: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestMergeTOMLProviderAccessIgnoresProjectOnlyList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	access, declared, err := mergeTOMLProviderAccess([]string{userPath, projectPath})
+	access, declared, err := configReadPaths(nil).mergeTOMLProviderAccess([]string{userPath, projectPath})
 	if err != nil {
 		t.Fatalf("mergeTOMLProviderAccess: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestMergeTOMLProviderAccessUnionsWhenUserDeclares(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	access, declared, err := mergeTOMLProviderAccess([]string{userPath, projectPath})
+	access, declared, err := configReadPaths(nil).mergeTOMLProviderAccess([]string{userPath, projectPath})
 	if err != nil {
 		t.Fatalf("mergeTOMLProviderAccess: %v", err)
 	}

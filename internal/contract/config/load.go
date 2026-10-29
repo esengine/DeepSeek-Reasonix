@@ -71,32 +71,32 @@ func (r Roots) LoadForRootReadOnly(root string) (*Config, error) {
 }
 
 func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Config, error) {
-	root = resolveRoot(root)
-	var expansionEnv map[string]string
+	root, readPaths, expansionEnv := resolveRoot(root), configReadPaths{}, map[string]string(nil)
+	defer readPaths.close()
 	if withProject {
-		expansionEnv = r.loadDotEnvForRoot(root)
+		expansionEnv = r.loadDotEnvForRoot(root, readPaths)
 	} else {
-		r.loadCredentialStoreForScope(root, false)
+		r.loadCredentialStoreForScope(root, false, readPaths)
 	}
 	cfg := r.defaultConfig()
 	cfg.setExpansionEnv(expansionEnv)
-	cfg.CredentialsStore = r.credentialsStoreMode()
+	cfg.CredentialsStore = r.credentialsStoreModeWithPaths(readPaths)
 
 	projectTOML := ProjectConfigPath(root)
 	if primary := r.userConfigPath(); primary != "" {
-		if _, err := resolveConfigAccessPath(primary, true); err != nil {
+		if _, err := readPaths.resolve(primary, true); err != nil {
 			return nil, err
 		}
 	}
 	if withProject {
-		if _, err := resolveConfigAccessPath(projectTOML, false); err != nil {
+		if _, err := readPaths.resolve(projectTOML, false); err != nil {
 			return nil, err
 		}
 	}
 
-	mergeTOML := mergeFileSnapshot
+	mergeTOML := readPaths.mergeFileSnapshot
 	if migrateOnDisk {
-		mergeTOML = mergeRuntimeTOMLFileSnapshot
+		mergeTOML = readPaths.mergeRuntimeTOMLFileSnapshot
 	}
 
 	var tomlSources []string
@@ -110,7 +110,7 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 			// the rest of the app stays usable.
 			lkgCfg := r.defaultConfig()
 			lkgCfg.setExpansionEnv(expansionEnv)
-			lkgCfg.CredentialsStore = r.credentialsStoreMode()
+			lkgCfg.CredentialsStore = r.credentialsStoreModeWithPaths(readPaths)
 			if lkgErr := r.loadLastKnownGoodUserConfig(lkgCfg); lkgErr == nil {
 				*cfg = *lkgCfg
 				cfg.addLoadWarning(fmt.Sprintf(
@@ -152,20 +152,20 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
 	// mergeTOMLPlugins only reads files; it does not run on-disk migrations.
-	plugins, err := mergeTOMLPlugins(tomlSources)
+	plugins, err := readPaths.mergeTOMLPlugins(tomlSources)
 	if err != nil {
 		cfg.addLoadWarning(fmt.Sprintf("plugin configuration could not be merged (%v); continuing without those entries", err))
 	} else {
 		cfg.Plugins = plugins
 	}
-	if providers, providerSources, shadowedProjectProviders, ok, err := mergeTOMLProviders(tomlSources); err != nil {
+	if providers, providerSources, shadowedProjectProviders, ok, err := readPaths.mergeTOMLProviders(tomlSources); err != nil {
 		cfg.addLoadWarning(fmt.Sprintf("provider configuration could not be merged (%v); keeping providers already loaded", err))
 	} else if ok {
 		cfg.Providers = providers
 		cfg.providerSources = providerSources
 		cfg.shadowedProjectProviders = shadowedProjectProviders
 	}
-	if access, ok, err := mergeTOMLProviderAccess(tomlSources); err != nil {
+	if access, ok, err := readPaths.mergeTOMLProviderAccess(tomlSources); err != nil {
 		cfg.addLoadWarning(fmt.Sprintf("provider access configuration could not be merged (%v)", err))
 	} else if ok {
 		cfg.Desktop.ProviderAccess = access
@@ -208,7 +208,7 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 	if userDefaultModelExplicit {
 		restoreUnresolvableProjectDefaultModel(cfg, userDefaultModel)
 	}
-	cfg.CredentialsStore = r.credentialsStoreMode()
+	cfg.CredentialsStore = r.credentialsStoreModeWithPaths(readPaths)
 	cfg.setExpansionEnv(expansionEnv)
 	r.resolveProviderCredentialsForRoot(root, cfg)
 	return cfg, nil
@@ -398,11 +398,11 @@ func normalizeLegacyEffort(c *Config) {
 }
 
 // mergeTOMLPlugins merges [[plugins]] across TOML sources by name (later source wins).
-func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
+func (readPaths configReadPaths) mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 	var merged []PluginEntry
 	index := map[string]int{}
 	for _, path := range paths {
-		_, exists, err := statConfigPath(path)
+		_, exists, err := readPaths.stat(path)
 		if err != nil {
 			return nil, fmt.Errorf("config %s: %w", path, err)
 		}
@@ -410,7 +410,7 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 			continue
 		}
 		var f Config
-		if _, err := decodeTOMLFile(path, &f); err != nil {
+		if _, err := readPaths.decodeTOMLFile(path, &f); err != nil {
 			return nil, fmt.Errorf("config %s: %w", path, err)
 		}
 		for _, p := range f.Plugins {
@@ -437,14 +437,14 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 // only fill names the global config does not define. Keep official legacy aliases
 // distinct here: they can carry different default models and effort capabilities,
 // and the later desktop normalization layer handles canonical Settings access.
-func mergeTOMLProviders(paths []string) ([]ProviderEntry, map[string]providerSourceScope, []ProviderEntry, bool, error) {
+func (readPaths configReadPaths) mergeTOMLProviders(paths []string) ([]ProviderEntry, map[string]providerSourceScope, []ProviderEntry, bool, error) {
 	var merged []ProviderEntry
 	var shadowedProject []ProviderEntry
 	index := map[string]int{}
 	sources := map[string]providerSourceScope{}
 	saw := false
 	for _, path := range paths {
-		_, exists, err := statConfigPath(path)
+		_, exists, err := readPaths.stat(path)
 		if err != nil {
 			return nil, nil, nil, false, fmt.Errorf("config %s: %w", path, err)
 		}
@@ -452,7 +452,7 @@ func mergeTOMLProviders(paths []string) ([]ProviderEntry, map[string]providerSou
 			continue
 		}
 		var f Config
-		if _, err := decodeTOMLFile(path, &f); err != nil {
+		if _, err := readPaths.decodeTOMLFile(path, &f); err != nil {
 			return nil, nil, nil, false, fmt.Errorf("config %s: %w", path, err)
 		}
 		markPersistedDeepSeekOfficialPricing(&f)
@@ -497,13 +497,13 @@ func providerMergeKey(p ProviderEntry) string {
 // mergeTOMLProviderAccess merges desktop.provider_access across TOML sources so
 // project desktop settings do not hide account-level providers from the desktop
 // model switcher.
-func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
+func (readPaths configReadPaths) mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 	var merged []string
 	seen := map[string]bool{}
 	saw := false
 	userDeclared := false
 	for _, path := range paths {
-		_, exists, err := statConfigPath(path)
+		_, exists, err := readPaths.stat(path)
 		if err != nil {
 			return nil, false, fmt.Errorf("config %s: %w", path, err)
 		}
@@ -511,7 +511,7 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 			continue
 		}
 		var f Config
-		meta, err := decodeTOMLFile(path, &f)
+		meta, err := readPaths.decodeTOMLFile(path, &f)
 		if err != nil {
 			return nil, false, fmt.Errorf("config %s: %w", path, err)
 		}
@@ -762,7 +762,9 @@ func loadDotEnvForEditPath(path string) {
 		loadDotEnv()
 		return
 	}
-	processRoots().loadDotEnvForRoot(filepath.Dir(path))
+	readPaths := configReadPaths{}
+	defer readPaths.close()
+	processRoots().loadDotEnvForRoot(filepath.Dir(path), readPaths)
 }
 
 // mergeFile decodes a TOML file onto cfg if it exists. An absent file is not an error.
@@ -771,63 +773,13 @@ func mergeFile(cfg *Config, path string) error {
 	return err
 }
 
-// mergeFileSnapshot decodes one immutable read of a TOML file onto cfg and
-// returns metadata from those exact bytes. Callers that derive source or
-// precedence decisions from metadata must use this result instead of reading
-// the path again: a config file may be atomically replaced between reads.
-func mergeFileSnapshot(cfg *Config, path string) (toml.MetaData, error) {
-	return mergeFileSnapshotWithRead(cfg, path, fileencoding.ReadFileUTF8)
-}
-
-func mergeFileSnapshotWithRead(cfg *Config, path string, readFile func(string) ([]byte, error)) (toml.MetaData, error) {
-	resolved, exists, err := statConfigPath(path)
-	if err != nil {
-		return toml.MetaData{}, err
-	}
-	if !exists {
-		return toml.MetaData{}, nil
-	}
-	data, err := readFile(resolved)
-	if err != nil {
-		return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
-	}
-	// BurntSushi/toml decodes struct fields incrementally and can leave earlier
-	// fields mutated when a later value has the wrong type. Validate the complete
-	// snapshot against a disposable Config before merging those same bytes into
-	// the active object. This makes user LKG fallback, project-level isolation,
-	// and metadata-derived provenance transactional with respect to file changes.
-	var validated Config
-	if _, err := decodeTOMLBytes(data, &validated); err != nil {
-		return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
-	}
-	meta, err := decodeTOMLBytes(data, cfg)
-	if err != nil {
-		return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
-	}
-	if meta.IsDefined("providers") {
-		var persisted Config
-		if _, err := decodeTOMLBytes(data, &persisted); err != nil {
-			return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
-		}
-		markPersistedDeepSeekOfficialPricing(&persisted)
-		markers := map[string]string{}
-		for i := range persisted.Providers {
-			markers[providerMergeKey(persisted.Providers[i])] = persisted.Providers[i].persistedOfficialCurrency
-		}
-		for i := range cfg.Providers {
-			cfg.Providers[i].persistedOfficialCurrency = markers[providerMergeKey(cfg.Providers[i])]
-		}
-	}
-	return meta, nil
-}
-
-func mergeRuntimeTOMLFileSnapshot(cfg *Config, path string) (toml.MetaData, error) {
+func (readPaths configReadPaths) mergeRuntimeTOMLFileSnapshot(cfg *Config, path string) (toml.MetaData, error) {
 	if _, err := os.Stat(path); err == nil {
 		if err := migrateLegacyMCPTiersFile(path); err != nil {
 			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
 		}
 	}
-	return mergeFileSnapshot(cfg, path)
+	return readPaths.mergeFileSnapshot(cfg, path)
 }
 
 // normalizeLegacyMCPTiers keeps loaded legacy config files on the new product

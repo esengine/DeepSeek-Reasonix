@@ -22,7 +22,9 @@ type dotEnvFile struct {
 // workspace .env values returned by loadDotEnvForRoot are ignored here because
 // loadDotEnv has no Config to carry a workspace-scoped expansion environment.
 func loadDotEnv() {
-	processRoots().loadDotEnvForRoot(".")
+	readPaths := configReadPaths{}
+	defer readPaths.close()
+	processRoots().loadDotEnvForRoot(".", readPaths)
 }
 
 // loadDotEnvForRoot returns workspace .env values for scoped plugin/MCP/proxy
@@ -31,9 +33,9 @@ func loadDotEnv() {
 // environment, so multiple desktop/ACP workspaces cannot leak tokens into each
 // other and project files cannot redirect Reasonix's own config/credential
 // paths.
-func (r Roots) loadDotEnvForRoot(root string) map[string]string {
+func (r Roots) loadDotEnvForRoot(root string, readPaths configReadPaths) map[string]string {
 	projectEnv := r.loadProjectDotEnvForExpansion(root)
-	r.loadCredentialStoreForRoot(root)
+	r.loadCredentialStoreForScope(root, true, readPaths)
 	return projectEnv
 }
 

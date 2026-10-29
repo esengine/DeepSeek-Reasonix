@@ -258,6 +258,21 @@ command-line flags
 - Both paths have the same project-scope restrictions: neither can set user-only
   options or resolve through a symlink outside the project.
 
+- Ordinary sources resolve each distinct config access path once per load,
+  sharing the result across credential discovery, credential-store selection
+  and TOML merges. Directory handles live only for that load.
+- Project metadata and content reads stay relative to the validated workspace
+  directory. User config links retain the user's explicit choice of target,
+  including targets outside Reasonix home.
+- If directory access is unavailable or a rooted operation reports a supported
+  permission/capability error, that source uses the original guarded logical-path
+  route. Every fallback access resolves afresh; these exceptional sources are not
+  covered by the once-per-load count.
+- File existence and TOML contents are read afresh, including after an in-load
+  migration or atomic file replacement. A later load observes changed symlinks.
+- Provider and plugin provenance follows the logical user/project source, not
+  the resolved target. Migration snapshots and edit locks remain independent.
+
 To keep local configuration self-contained, put `*` in `.reasonix/.gitignore`
 and store the configuration in `.reasonix/reasonix.toml`.
 

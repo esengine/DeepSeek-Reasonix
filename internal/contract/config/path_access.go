@@ -20,43 +20,55 @@ func resolveConfigAccessPath(path string, userConfig bool) (string, error) {
 }
 
 func resolveConfigAccessPathUnpinned(path string, userConfig bool) (string, error) {
+	resolved, _, err := resolveConfigAccessPathWithRoot(path, userConfig)
+	return resolved, err
+}
+
+func resolveConfigAccessPathWithRoot(path string, userConfig bool) (string, string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return "", fmt.Errorf("config path is empty")
+		return "", "", fmt.Errorf("config path is empty")
 	}
 	logical, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
-		return "", fmt.Errorf("resolve config path %q: %w", path, err)
+		return "", "", fmt.Errorf("resolve config path %q: %w", path, err)
 	}
 	resolved, err := evalSymlinksAllowMissing(logical)
 	if err != nil && plainConfigEntry(logical) {
-		return logical, nil
+		if userConfig {
+			return logical, filepath.Dir(logical), nil
+		}
+		return logical, projectConfigAccessRoot(logical), nil
 	}
 	if err != nil {
 		scope := "project"
 		if userConfig {
 			scope = "user"
 		}
-		return "", fmt.Errorf("resolve %s config path %q: %w", scope, logical, err)
+		return "", "", fmt.Errorf("resolve %s config path %q: %w", scope, logical, err)
 	}
 	resolved = filepath.Clean(resolved)
 	if userConfig {
-		return resolved, nil
+		return resolved, filepath.Dir(resolved), nil
 	}
 
-	projectRoot := filepath.Dir(logical)
-	if filepath.Base(projectRoot) == ".reasonix" && filepath.Base(logical) == projectConfigFile {
-		projectRoot = filepath.Dir(projectRoot)
-	}
-	root, err := evalSymlinksAllowMissing(projectRoot)
+	root, err := evalSymlinksAllowMissing(projectConfigAccessRoot(logical))
 	if err != nil {
-		return "", fmt.Errorf("resolve project root %q: %w", root, err)
+		return "", "", fmt.Errorf("resolve project root %q: %w", root, err)
 	}
 	root = filepath.Clean(root)
 	if !pathWithinRoot(root, resolved) {
-		return "", fmt.Errorf("project config path %q resolves outside project root %q: %q", logical, root, resolved)
+		return "", "", fmt.Errorf("project config path %q resolves outside project root %q: %q", logical, root, resolved)
 	}
-	return resolved, nil
+	return resolved, root, nil
+}
+
+func projectConfigAccessRoot(logical string) string {
+	root := filepath.Dir(logical)
+	if filepath.Base(root) == ".reasonix" && filepath.Base(logical) == projectConfigFile {
+		return filepath.Dir(root)
+	}
+	return root
 }
 
 // plainConfigEntry reports whether path is absent or a non-link file. Such an
