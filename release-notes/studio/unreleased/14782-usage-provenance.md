@@ -1,0 +1,2 @@
+- 新增：`reasonix doctor usage` 只读审计——报出分母、未定价笔数及原因、估算定价笔数、未记录费率卡的笔数，并说明金额是账单还是下限。关联 #14782。
+- New: `reasonix doctor usage` audits a range — the denominator, unpriced calls with reasons, estimated-card calls, calls with no recorded card, and whether the money is a bill or a floor. Refs #14782.
