@@ -119,15 +119,78 @@ export interface HostPort {
   onBrowserLoadState(listener: (state: BrowserLoadState) => void): () => void;
   /** A page or a proxy asking for a login; answered with answerBrowserLogin. */
   onBrowserLogin(listener: (ask: BrowserLogin) => void): () => void;
+  /** The picker's key, pressed while the page itself held the keyboard and
+   *  the window's own page could not hear it. */
+  onBrowserPickShortcut(listener: (target: string) => void): () => void;
   /** An empty username cancels the login. */
   answerBrowserLogin(id: string, username: string, password: string): void;
   /** Proceed past the certificate this page was refused for, for this run. */
   trustBrowserCertificate(target: string): Promise<boolean>;
+  /** Arm this page's element picker and wait for the person to point at
+   *  something. A pick is the person's, so it answers only when they choose
+   *  or give up: cancelled is a real answer, not a failure. */
+  pickBrowserElement(target: string, labels?: PickLabels): Promise<PickedElement>;
+  /** Disarm the picker; a pick still waiting answers cancelled. */
+  cancelBrowserPick(target: string): void;
+  /** Re-find a selector the page answered before, with a fresh picture. */
+  verifyBrowserElement(target: string, selector: string): Promise<{ found: boolean; tag?: string; rect?: { x: number; y: number; width: number; height: number }; shot?: string }>;
 }
 
 /** Why the shell will not load a typed address: a scheme it never opens, or a
  *  file on another machine. */
 export type BrowserRefusal = "" | "scheme" | "network_file";
+
+/** What the element picker answers: the element the person pointed at, or
+ *  nothing when they pressed Escape, navigated away, or the pick ran out of
+ *  time. The page builds every field; the host adds only where it came from. */
+/** The words the picker draws inside the page, in the window's language. */
+export interface PickLabels {
+  color?: string;
+  background?: string;
+  font?: string;
+  frame?: string;
+  shadow?: string;
+}
+
+export interface PickedDetail {
+  pageUrl: string;
+  pageTitle: string;
+  tagName: string;
+  role?: string;
+  accessibleName?: string;
+  selector: string;
+  /** Which of the four the selector came from: a stable identity the page
+   *  declares, or a styling class a deploy can change. */
+  selectorBasis?: "testid" | "aria-label" | "id" | "class";
+  xpath: string;
+  text?: string;
+  nearbyText?: string;
+  htmlExcerpt: string;
+  attributes: Record<string, string>;
+  rect: { x: number; y: number; width: number; height: number };
+  style: {
+    color: string;
+    display: string;
+    fontFamily: string;
+    fontSize: string;
+    fontWeight: string;
+    backgroundColor?: string;
+  };
+  capturedAt: number;
+}
+
+export interface PickedElement {
+  cancelled: boolean;
+  /** Why a pick ended without an element: the person's own Escape or a
+   *  dismissal, or one this window had to make — a timeout, a page put away
+   *  behind another layer, a navigation, a page that is gone. */
+  reason?: "escape" | "dismissed" | "timeout" | "hidden" | "navigation" | "gone";
+  /** A PNG of the element as the view drew it, when the page could be captured. */
+  shot?: string;
+  element?: PickedDetail;
+  /** A Shift-click set: one entry per element, in the order picked. */
+  elements?: PickedDetail[];
+}
 
 /** A kernel refusal as the shell hands it back: the code, and English fallback. */
 export interface Refusal {
@@ -215,8 +278,12 @@ interface ElectronBridge {
   navigateBrowserView?(target: string, address: string): Promise<BrowserRefusal>;
   onBrowserLoadState?(listener: (state: BrowserLoadState) => void): () => void;
   onBrowserLogin?(listener: (ask: BrowserLogin) => void): () => void;
+  onBrowserPickShortcut?(listener: (ask: { targetId?: string }) => void): () => void;
   answerBrowserLogin?(id: string, username: string, password: string): Promise<void>;
   trustBrowserCertificate?(target: string): Promise<boolean>;
+  pickBrowserElement?(target: string, labels?: PickLabels): Promise<PickedElement>;
+  cancelBrowserPick?(target: string): Promise<boolean>;
+  verifyBrowserElement?(target: string, selector: string): Promise<{ found: boolean; tag?: string; rect?: { x: number; y: number; width: number; height: number }; shot?: string }>;
 }
 
 const bridge = () => (window as unknown as { reasonixHost?: ElectronBridge }).reasonixHost;
@@ -348,11 +415,23 @@ class ElectronHost implements HostPort {
   onBrowserLogin(listener: (ask: BrowserLogin) => void) {
     return this.api.onBrowserLogin?.(listener) ?? (() => {});
   }
+  onBrowserPickShortcut(listener: (target: string) => void) {
+    return this.api.onBrowserPickShortcut?.((ask) => listener(String(ask?.targetId ?? ""))) ?? (() => {});
+  }
   answerBrowserLogin(id: string, username: string, password: string) {
     void this.api.answerBrowserLogin?.(id, username, password);
   }
   trustBrowserCertificate(target: string) {
     return this.api.trustBrowserCertificate?.(target) ?? Promise.resolve(false);
+  }
+  pickBrowserElement(target: string, labels?: PickLabels) {
+    return this.api.pickBrowserElement?.(target, labels) ?? Promise.resolve<PickedElement>({ cancelled: true });
+  }
+  cancelBrowserPick(target: string) {
+    void this.api.cancelBrowserPick?.(target);
+  }
+  verifyBrowserElement(target: string, selector: string) {
+    return this.api.verifyBrowserElement?.(target, selector) ?? Promise.resolve({ found: false });
   }
 }
 
@@ -450,9 +529,19 @@ class BrowserHost implements HostPort {
   onBrowserLogin() {
     return () => {};
   }
+  onBrowserPickShortcut() {
+    return () => {};
+  }
   answerBrowserLogin() {}
   trustBrowserCertificate() {
     return Promise.resolve(false);
+  }
+  pickBrowserElement() {
+    return Promise.resolve<PickedElement>({ cancelled: true });
+  }
+  cancelBrowserPick() {}
+  verifyBrowserElement() {
+    return Promise.resolve({ found: false });
   }
 }
 

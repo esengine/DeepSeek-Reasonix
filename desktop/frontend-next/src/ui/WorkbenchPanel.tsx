@@ -10,6 +10,7 @@ import type {
 import { openPage, observePageTabs } from "./browser_open";
 import { useBrowserSelection } from "./useBrowserSelection";
 import { useColumnOpening } from "./useColumnOpening";
+import type { PickedSnapshot } from "./composerChips";
 import { WorkbenchLauncher } from "./WorkbenchLauncher";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
 import { DiffView } from "./cards/DiffView";
@@ -68,6 +69,9 @@ export function WorkbenchPanel({
   onActiveFile,
   onExternal,
   onAddToChat,
+  onAddElement,
+  onAddElements,
+  onAddFiles,
   onQuoteSelection,
   fullMode,
   fileRequest,
@@ -100,6 +104,9 @@ export function WorkbenchPanel({
   onActiveFile?: (path: string | undefined) => void;
   onExternal: (url: string) => void;
   onAddToChat?: (reference: string) => void;
+  onAddElement?: (picked: PickedSnapshot) => void;
+  onAddElements?: (picked: PickedSnapshot[]) => void;
+  onAddFiles?: (files: File[]) => void;
   // Text selected in an open file, with the file it came from, on its way to the composer.
   onQuoteSelection?: (text: string, path: string) => void;
   fullMode?: { full: boolean; onToggle: () => void };
@@ -572,6 +579,11 @@ export function WorkbenchPanel({
               shown={shown && !launcher}
               showTabs={false}
               onOpenDocument={(path) => port.openDocument(path)}
+              onAddToChat={onAddToChat}
+              onAddElement={onAddElement}
+              onAddElements={onAddElements}
+              onAddFiles={onAddFiles}
+              workspaceRoot={workspaceRoot}
             />
           )}
           {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} />}
