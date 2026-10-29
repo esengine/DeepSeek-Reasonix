@@ -119,6 +119,20 @@ past in the transcript: re-publishing the same surface id updates what is
 already on screen. A `view` is composed rather than filled in: its payload is a
 tree of host primitives, for a shape the fixed kinds do not have.
 
+A `view` names where it would like to stand in `slot` (at most 64 bytes), or replaces a tool card's body through `anchor: "tool:<callId>"`, never both. Slot names are advisory, not an enum: a frontend maps the names it has, and every other name falls back to `rail`.
+
+| Slot | Studio draws it as | Capacity in Studio |
+| --- | --- | --- |
+| `rail` | The workbench's Extensions tab, beside the extension panels | unbounded |
+| `composer.above` | The band above the composer | 2 |
+| `session.header` | The title bar after the session name; only `text`, `pip`, `meter` and `button` are drawn, any other node as its text | 3 |
+| `pane.tab` | A workbench tab of its own, after every tab a person or the agent opened; closing it moves the view to `rail` | 4 per session |
+
+1. Views beyond a slot's capacity stand in `rail`. Within a slot, views are ordered by plugin ID, then surface ID, so a republish never moves one.
+2. A user's placement overrides the extension's request. Studio stores it in `desktop.surface_slots`.
+3. `above_prompt` is an alias of `composer.above`. `settings.section` and `home.card` are reserved for app-scoped surfaces, which the protocol cannot publish yet, and fall back to `rail`.
+4. ACP clients that negotiated `reasonix.extensionSurface` receive a view with its `slot` and place it themselves. Other ACP clients receive no text for a view.
+
 Actions declared at initialize are namespaced `/<plugin>:<action>` and are
 invoked via `extension/ui/action`; form submissions arrive via
 `extension/ui/submit`.

@@ -11,6 +11,7 @@ import "./styles/studio.css";
 import "./styles/dialogcenter.css";
 import "./styles/settings-type.css";
 import "./styles/stophint.css";
+import "./styles/extslots.css";
 import "./styles/phonecomposer.css";
 import "./styles/tips.css";
 import "./styles/skillpin.css";

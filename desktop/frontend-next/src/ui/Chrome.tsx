@@ -42,9 +42,11 @@ interface Props {
   // The window's port, for what belongs to the window rather than a pane.
   hub?: HubPort;
   onError?: (e: unknown) => void;
+  // Hands out the room after the session name where the focused pane draws its header views.
+  onSlot?: (el: HTMLElement | null) => void;
 }
 
-export function Chrome({ port, status, title, steer, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, onError }: Props) {
+export function Chrome({ port, status, title, steer, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, onError, onSlot }: Props) {
   const root = status?.workspaceRoot || status?.cwd || "";
   const project = root ? base(root) : "—";
   // The folder mark opens the project itself. Only a shell that can enter a
@@ -109,6 +111,7 @@ export function Chrome({ port, status, title, steer, account, host, theme, onThe
           <span className="crumbsep">/</span>
         </span>
         <b title={status?.sessionPath}>{sessionName(title, status?.sessionPath)}</b>
+        <span className="crumb-slot" ref={onSlot} />
       </div>
 
       <span className="badge" hidden={steer === 0}>

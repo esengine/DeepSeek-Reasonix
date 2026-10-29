@@ -39,6 +39,8 @@ export interface PaneProps {
   // column stays on the window's edge instead of appearing between two panes.
   sideHost: HTMLElement | null;
   side: boolean;
+  // Where the title bar keeps room for the focused pane's header views.
+  headerHost?: HTMLElement | null;
   onFocus: () => void;
   // Every pane reports, not just the focused one: a tab has to show that the
   // conversation behind it is still working.

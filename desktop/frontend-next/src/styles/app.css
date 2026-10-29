@@ -4132,30 +4132,6 @@
   }
   .slotted:hover .movegrip, .movegrip:focus-visible { color: var(--ghost) }
   .movegrip:hover { color: var(--muted) }
-  .movemenu {
-    position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 30;
-    display: flex; flex-direction: column; min-width: 132px; padding: 4px;
-    border: 1px solid var(--border); border-radius: var(--r-sm);
-    background: var(--float); box-shadow: var(--shadow-float);
-    transition: opacity var(--t-card) var(--ease-out),
-                transform var(--t-card) var(--ease-out),
-                display var(--t-card) allow-discrete;
-  }
-  .movemenu[hidden] {
-    display: none; opacity: 0; pointer-events: none;
-    transform: translateY(-4px) scaleY(.985);
-  }
-  @starting-style {
-    .movemenu:not([hidden]) { opacity: 0; transform: translateY(-4px) scaleY(.985) }
-  }
-  .movemenu .who { padding: 3px 8px 5px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--ghost) }
-  .movemenu button {
-    padding: 5px 8px; border: 0; border-radius: var(--r-xs); background: none;
-    color: var(--muted); font: var(--w-reg) var(--fs-ui) var(--ui); text-align: left; cursor: pointer;
-  }
-  .movemenu button:hover { background: var(--float-hi); color: var(--text) }
-  .movemenu button[aria-checked="true"] { color: var(--text) }
-  .movemenu button[aria-checked="true"]::after { content: " ·" }
 
   .drawnby { margin-top: 6px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
 

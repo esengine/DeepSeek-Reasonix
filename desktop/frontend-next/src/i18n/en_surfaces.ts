@@ -40,5 +40,9 @@ export const EN_SURFACES: Record<string, string> = {
   "合计": "Total",
   "平均值": "Average",
   "最新值": "Latest value",
-  "数据明细": "Data details"
+  "数据明细": "Data details",
+  "扩展页签": "Extensions tab",
+  "输入框上方": "Above the input box",
+  "会话标题栏": "Session title bar",
+  "单独的页签": "A tab of its own"
 };

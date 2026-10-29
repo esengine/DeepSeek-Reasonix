@@ -120,6 +120,7 @@ export function App({ hub }: { hub: HubPort }) {
   // A connect stopped for a question. One at a time by construction: the link
   // that asked is blocked until it is answered.
   const [ask, setAsk] = useState<RemoteAskT | null>(null);
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
   // 窄到放不下工作区栏时它是收起的，而不是消失的：栏一旦从 DOM 里拿掉，把手也
   // 跟着没了，剩下的入口只有一个没人知道的快捷键。
   const [rail, setRail] = useState(() => !roomGaveUp("rail"));
@@ -568,7 +569,7 @@ export function App({ hub }: { hub: HubPort }) {
         onTheme={() => setTheme(scheme === "dark" ? "light" : "dark")}
         onFind={find.toggle}
         view={report.view} rows={report.rows} surfaces={report.surfaces} onView={showView}
-        hub={hub} onError={fail}
+        hub={hub} onError={fail} onSlot={setHeaderSlot}
       />
 
       <WallpaperStage sky={!!pack?.sky && effects !== "reduced"} look={look} onLook={onLook} />
@@ -675,6 +676,7 @@ export function App({ hub }: { hub: HubPort }) {
                   active={rt.id === active}
                   sideHost={null}
                   side={false}
+                  headerHost={rt.id === active ? headerSlot : null}
                   onFocus={focusFor(rt.id)}
                   visible={rt.id === active}
                   onReport={onReport}
