@@ -1221,10 +1221,7 @@
   .peek button.row[data-bad] .n { color: var(--err-ink) }
   .peek button.row:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs) }
 
-  .out-clip { position: relative }
-
-  .call:not([data-running]):not(:has(> .c > .hl .fail, > .c > .tool-disclosure > .hl .fail)) .out-clip { --out-peek: 5.5rem }
-  .call:not([data-running]):not(:has(> .c > .hl .fail, > .c > .tool-disclosure > .hl .fail)) .out-clip[data-over]:not([data-open])::after { height: 2rem }
+  .call:not([data-running]):not(:has(> .c > .hl .fail, > .c > .tool-disclosure > .hl .fail)) .out-clip { --out-peek: 5.5rem; --out-fade: 2rem }
   .out-body {
     max-height: var(--out-peek, 16rem); overflow: auto;
     transition: max-height var(--t-panel) var(--ease-out);
@@ -1233,24 +1230,11 @@
   .out-clip > .out-body > .term { width: max-content; min-width: 100%; overflow: visible; box-sizing: border-box }
 
   .out-clip[data-open] .out-body { max-height: max-content }
-  .out-clip[data-over]::after {
-    content: ""; position: absolute; inset-inline: 0; bottom: 0; height: 3rem; pointer-events: none;
-    background: linear-gradient(to bottom, transparent, var(--face-sunk));
-    transition: opacity var(--t-card) var(--ease-out);
+  .out-clip[data-over]:not([data-open]) > .out-body {
+    mask-image: linear-gradient(#000 calc(100% - var(--out-fade, 3rem)), transparent);
   }
-  .out-clip[data-open][data-over]::after { opacity: 0 }
-  .out-clip { timeline-scope: --out-x }
-  .out-clip > .out-body { scroll-timeline: --out-x inline }
-  .out-clip::before {
-    content: ""; position: absolute; inset-block: 0; right: 0; width: 2.25rem; z-index: 1;
-    pointer-events: none; opacity: 0;
-    background: linear-gradient(to right, transparent, var(--face-sunk));
-    animation: out-x-more linear both; animation-timeline: --out-x;
-  }
-  @keyframes out-x-more { 0%, 88% { opacity: 1 } 100% { opacity: 0 } }
 
   .out-more {
-    position: relative; z-index: 1;
     margin-top: 5px; padding: 2px 7px; border: 0; border-radius: var(--r-xs); background: var(--overlay);
     font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); cursor: pointer;
   }
