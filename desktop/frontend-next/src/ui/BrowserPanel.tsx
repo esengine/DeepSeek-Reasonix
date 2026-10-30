@@ -241,13 +241,13 @@ export function pickNoticeFor(reason: PickedElement["reason"]): string {
   return "";
 }
 
-export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddElement?: (picked: PickedSnapshot) => void; onAddElements?: (picked: PickedSnapshot[]) => void; onAddFiles?: (files: File[]) => void; workspaceRoot?: string }) {
+export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddElement?: (picked: PickedSnapshot) => void; onAddElements?: (picked: PickedSnapshot[]) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   if (host().drawsBrowserViews()) return <AgentBrowserView {...props} />;
   const current = props.tabs.find((tab) => tab.active) ?? props.tabs[0];
   return <div className="bpanel">{current && <AgentPageNote tab={current} />}</div>;
 }
 
-function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddToChat, onAddElement, onAddElements, onAddFiles, workspaceRoot }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddElement?: (picked: PickedSnapshot) => void; onAddElements?: (picked: PickedSnapshot[]) => void; onAddFiles?: (files: File[]) => void; workspaceRoot?: string }) {
+function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddToChat, onAddElement, onAddElements, onAddFiles, onAddPick, workspaceRoot }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddElement?: (picked: PickedSnapshot) => void; onAddElements?: (picked: PickedSnapshot[]) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   const slot = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState("");
   const [picking, setPicking] = useState(false);
@@ -404,13 +404,17 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
     setCopied(false);
     // The chat gets the whole element as a chip; the clipboard gets the one
     // field worth pasting somewhere else.
-    if (picked.length > 1) {
+    const shot = answer.shot ? [dataUrlFile(answer.shot, `${first.tagName.toLowerCase()}.png`)] : [];
+    // One injection carries the elements and their picture, so a later turn
+    // cannot replay this pick's fields. The fallbacks below are older callers
+    // and deliberately do not send the picture separately: two updates would
+    // overwrite each other.
+    if (onAddPick) onAddPick(picked.map(snapshotOf), shot);
+    else if (picked.length > 1) {
       if (onAddElements) onAddElements(picked.map(snapshotOf));
       else onAddToChat?.(picked.map((one) => elementReference(one, workspaceRoot)).join("\n\n"));
     } else if (onAddElement) onAddElement(snapshotOf(first));
     else onAddToChat?.(elementReference(first, workspaceRoot));
-    // The picture is what the person saw, so it rides along as an attachment.
-    if (answer.shot && onAddFiles) onAddFiles([dataUrlFile(answer.shot, `${first.tagName.toLowerCase()}.png`)]);
     void navigator.clipboard?.writeText(first.selector).then(
       () => setCopied(true),
       () => setCopied(false),

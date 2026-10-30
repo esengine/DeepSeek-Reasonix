@@ -402,7 +402,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
 
   const submit = useSubmit({ port, running, dispatch, trajDispatch, refreshStatus, fail });
 
-  const [inserted, setInserted] = useState<{ n: number; text: string; session?: { id: string; title: string }; element?: PickedSnapshot; elements?: PickedSnapshot[]; files?: File[] }>({ n: 0, text: "" });
+  const [inserted, setInserted] = useState<{ n: number; text: string; session?: { id: string; title: string }; element?: PickedSnapshot; elements?: PickedSnapshot[]; files?: File[]; pick?: { elements: PickedSnapshot[]; files?: File[] } }>({ n: 0, text: "" });
   const { queue, restored, onRestoreText, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel } = useQueueActions({
     port,
     dispatch,
@@ -586,10 +586,11 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             workspaceRoot={status?.workspaceRoot ?? rt.root}
             onCloseManual={() => onManualBrowser?.(false)}
             onExternal={(url) => void port.openExternal(url).catch(notify)}
-            onAddToChat={(reference) => setInserted((was) => ({ ...was, n: was.n + 1, text: reference }))}
-            onAddElement={(picked) => setInserted((was) => ({ ...was, n: was.n + 1, text: "", element: picked }))}
-            onAddElements={(picked) => setInserted((was) => ({ ...was, n: was.n + 1, text: "", elements: picked }))}
-            onAddFiles={(files) => setInserted((was) => ({ ...was, n: was.n + 1, text: "", files }))}
+            onAddToChat={(reference) => setInserted((was) => ({ n: was.n + 1, text: reference }))}
+            onAddElement={(picked) => setInserted((was) => ({ n: was.n + 1, text: "", element: picked }))}
+            onAddElements={(picked) => setInserted((was) => ({ n: was.n + 1, text: "", elements: picked }))}
+            onAddFiles={(files) => setInserted((was) => ({ n: was.n + 1, text: "", files }))}
+            onAddPick={(elements, files) => setInserted((was) => ({ n: was.n + 1, text: "", pick: { elements, files } }))}
             onQuoteSelection={reply.onQuoteFile}
           />
       </div>

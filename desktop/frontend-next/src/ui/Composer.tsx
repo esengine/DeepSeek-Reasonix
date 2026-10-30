@@ -55,7 +55,7 @@ interface Props {
   restore?: { n: number; text: string };
   // Text another surface hands the composer, such as a file reference; it goes
   // in at the caret with a space on either side.
-  inject?: { n: number; text?: string; session?: { id: string; title: string }; element?: PickedSnapshot; elements?: PickedSnapshot[]; files?: File[] };
+  inject?: { n: number; text?: string; session?: { id: string; title: string }; element?: PickedSnapshot; elements?: PickedSnapshot[]; files?: File[]; pick?: { elements: PickedSnapshot[]; files?: File[] } };
   // Resolves false when the line never left, so what was typed comes back
   // rather than being lost to a refusal the user could not have prevented.
   // Bumped when something outside asks for the cursor — answering a plan card
