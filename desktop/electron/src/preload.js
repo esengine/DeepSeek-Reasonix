@@ -55,6 +55,10 @@ contextBridge.exposeInMainWorld("reasonixHost", {
       return "";
     }
   },
+  // The files the clipboard carries, named by the platform's own file formats.
+  // The page asks this rather than reading the pasted text, so a copied file
+  // and a copied path string stay two different things.
+  clipboardFiles: () => ipcRenderer.invoke("shell:clipboard-files"),
   saveText: (name, content) => ipcRenderer.invoke("dialog:save-text", String(name), String(content)),
   saveBytes: (name, bytes) => ipcRenderer.invoke("dialog:save-bytes", String(name), bytes),
   pickFolder: (startIn) => ipcRenderer.invoke("dialog:pick-folder", String(startIn)),

@@ -1,0 +1,2 @@
+- 修复：粘贴剪贴板里复制的文件时，改走与拖放相同的宿主判定——工作区内的图片成为附件、文件成为引用、区外的被拒绝；以文本粘贴的路径仍按普通文本插入。关联 #14787，参见 #14554。
+- Fixed: a copied file is pasted like a dropped one: the host decides attachment, reference or refusal; a path pasted as text is still text. Refs #14787, see #14554.

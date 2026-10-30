@@ -7,6 +7,7 @@ import { Composer } from "./Composer";
 import { MockPort } from "../port/mock";
 import { SsePort } from "../port/sse";
 import { host } from "../port/host";
+import * as hostMod from "../port/host";
 import { DeliveryError, HttpError } from "../port/port";
 import type { AgentPort, ApprovalMode, Attachment, Completion, ModelEntry, Preset, SessionStatus, WorkspaceGit } from "../port/port";
 import { draftKey } from "./drafts";
@@ -1020,5 +1021,82 @@ describe("a command typed in full beside longer commands that share its name", (
     fireEvent.change(box, { target: { value: "/reload", selectionStart: 7 } });
     await act(async () => {});
     expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+});
+
+describe("a pasted file is handled like a drop", () => {
+  // The shell reads the clipboard's file formats and names what it carries.
+  // The page asks it; it never reads the pasted text to find out.
+  const electron = (paths: string[]) =>
+    ({ inShell: () => true, clipboardFiles: async () => paths }) as unknown as ReturnType<typeof host>;
+
+  it("routes a copied file through the host instead of inserting it", async () => {
+    vi.spyOn(hostMod, "host").mockReturnValue(electron(["C:\\Users\\me\\Documents\\photo.png"]));
+    const port = new MockPort();
+    const dropRefs = vi.spyOn(port, "dropRefs").mockImplementation((p) => Promise.resolve(p.map((path) => ({ ref: "@" + path, path }))));
+    const { box } = draw({ port });
+    const pasted = fireEvent.paste(box, { clipboardData: { files: [new File(["x"], "photo.png")], getData: () => "" } });
+    // The paste is taken over: the file's own path never reaches the box.
+    expect(pasted).toBe(false);
+    await waitFor(() => expect(dropRefs).toHaveBeenCalledWith(["C:\\Users\\me\\Documents\\photo.png"]));
+    expect(box.value).toBe("");
+  });
+
+  it("carries the bytes when the shell cannot name the file", async () => {
+    vi.spyOn(hostMod, "host").mockReturnValue(electron([]));
+    const port = new MockPort();
+    const attach = vi.spyOn(port, "attach");
+    const { box } = draw({ port });
+    fireEvent.paste(box, { clipboardData: { files: [new File(["x"], "photo.png", { type: "image/png" })], getData: () => "" } });
+    await waitFor(() => expect(attach).toHaveBeenCalled());
+  });
+
+  // A path copied as text is text, and pasting it to ask about it is ordinary
+  // work: it is never swallowed and never turned into a file.
+  it("leaves a pasted path alone", async () => {
+    vi.spyOn(hostMod, "host").mockReturnValue(electron([]));
+    const port = new MockPort();
+    const dropRefs = vi.spyOn(port, "dropRefs");
+    const { box } = draw({ port });
+    const pasted = fireEvent.paste(box, { clipboardData: { files: [], getData: () => "C:\\Users\\me\\Documents\\photo.png" } });
+    expect(pasted).toBe(true);
+    await act(async () => {});
+    expect(dropRefs).not.toHaveBeenCalled();
+    expect(box.value).toBe("");
+  });
+
+  it("leaves ordinary short text alone", async () => {
+    const port = new MockPort();
+    const dropRefs = vi.spyOn(port, "dropRefs");
+    const { box } = draw({ port });
+    const pasted = fireEvent.paste(box, { clipboardData: { files: [], getData: () => "just some notes" } });
+    expect(pasted).toBe(true);
+    await act(async () => {});
+    expect(dropRefs).not.toHaveBeenCalled();
+    expect(box.value).toBe("");
+  });
+
+  // A clipboard that names a file but hands the view no File, and also carries
+  // that path as text/plain, must land as a reference only: the path text must
+  // not be inserted, or the box ends up with the path twice — once as text,
+  // once beside the attachment. The view advertises the file in its own types
+  // (text/uri-list), so the default paste is prevented synchronously and the
+  // shell's path is awaited afterwards.
+  it("takes a named file as a reference and drops its path text", async () => {
+    vi.spyOn(hostMod, "host").mockReturnValue(electron(["C:\\Users\\me\\Documents\\photo.png"]));
+    const port = new MockPort();
+    const dropRefs = vi.spyOn(port, "dropRefs").mockImplementation((p) => Promise.resolve(p.map((path) => ({ ref: "@" + path, path }))));
+    const { box } = draw({ port });
+    const pasted = fireEvent.paste(box, {
+      clipboardData: {
+        files: [],
+        types: ["text/uri-list", "text/plain"],
+        getData: (type: string) => (type === "text/plain" ? "C:\\Users\\me\\Documents\\photo.png" : ""),
+      },
+    });
+    // The paste is taken over: the path text never reaches the box.
+    expect(pasted).toBe(false);
+    await waitFor(() => expect(dropRefs).toHaveBeenCalledWith(["C:\\Users\\me\\Documents\\photo.png"]));
+    expect(box.value).toBe("");
   });
 });

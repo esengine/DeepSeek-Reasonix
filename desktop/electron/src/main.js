@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, powerSaveBlocker, screen, session, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeTheme, powerSaveBlocker, screen, session, shell } = require("electron");
 const { relaunchForOzonePlatform } = require("./ozone");
 
 // Before the instance lock: this process must hold nothing its relaunch needs.
@@ -37,6 +37,7 @@ const { stateFile, openWindow } = require("./windowstate");
 const { accelerationOff, shouldDisableGpu, graphicsHandler } = require("./graphics");
 const { processMemoryHandler } = require("./procmem");
 const { captureHandler } = require("./capture");
+const { clipboardFiles } = require("./clipboardfiles");
 const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
 const { raise } = require("./raise");
@@ -418,6 +419,11 @@ registerGlobalShortcutIPC(ipcMain, fromWindow, () => windowShortcut);
 const showTextContextMenu = textContextMenuHandler(Menu, fromWindow, () => origin, uiLang);
 ipcMain.handle("text:context-menu", showTextContextMenu);
 ipcMain.handle("shell:process-memory", (event) => processMemoryHandler(app, fromWindow)(event));
+// What the clipboard carries, read from the formats that carry files. The
+// page asks this instead of reading the pasted text: a copied file and a
+// copied path string are different payloads, and only the formats tell them
+// apart.
+ipcMain.handle("shell:clipboard-files", (event) => (fromWindow(event) ? clipboardFiles(clipboard) : []));
 
 ipcMain.handle("window:unread-badge", (event, unread) => {
   const target = fromWindow(event);

@@ -20,9 +20,10 @@ import { usePlaceholderFit } from "./placeholderfit";
 import { useFitHeight } from "./fitHeight";
 import { onComposerHintChange, showsComposerHint, useRunningMessageIntent, useSendShortcut } from "../state/prefs";
 import { sendAria, sendHint, sendsOnKey } from "./sendkey";
-import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
+import { countLines, planTone, planVerb } from "./intake";
 import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
+import { usePasteFiles } from "./usePasteFiles";
 import type { Dropped } from "./filedrop";
 import type { Quote } from "./cards/SayCard";
 import { StudioIcon } from "./StudioIcon";
@@ -386,6 +387,21 @@ export function Composer({ port, status, running, queued = false, quote, restore
     onReceive: receive,
   });
 
+  // A pasted file is handled the way a dropped file is handled: the shell
+  // names it and the host decides what it becomes. Text is left alone.
+  const paste = usePasteFiles({
+    submitting,
+    onFiles: (paths, files) => {
+      if (paths.length > 0) {
+        refIn(paths);
+        return;
+      }
+      // No path to point at: the bytes are still worth carrying.
+      attach(files.map((file) => new File([file], file.name, { type: file.type })));
+    },
+    onLongText: (body) => setShots((prev) => [...prev, { k: "paste", id: chipId(), body, lines: countLines(body) }]),
+  });
+
   const efforts = effortsFor(models, status?.modelRef);
   // Whether this model says anything about reasoning levels at all. The session
   // may still carry one from a model that did, and printing that would be the
@@ -560,26 +576,9 @@ export function Composer({ port, status, running, queued = false, quote, restore
           onKeyUp={(e) => setCaret(chips.snap(e.currentTarget, caret))}
           onClick={(e) => setCaret(chips.snap(e.currentTarget, caret))}
           data-action-paste="session.attach"
-          // Clipboard files are copied into host-owned attachments. Their native
-          // paths can belong to a source application's restricted or short-lived cache.
-          onPaste={(e) => {
-            if (submitting) {
-              e.preventDefault();
-              return;
-            }
-            const files = [...e.clipboardData.files];
-            if (files.length > 0) {
-              e.preventDefault();
-              attach(files.map((file) => new File([file], file.name, { type: file.type })));
-              return;
-            }
-            const body = e.clipboardData.getData("text/plain");
-            if (!pasteIsLong(body)) return;
-            // Long enough to bury the composer. It still goes with the turn — it
-            // is just held beside the box instead of becoming it.
-            e.preventDefault();
-            setShots((prev) => [...prev, { k: "paste", id: chipId(), body, lines: countLines(body) }]);
-          }}
+          // A pasted file is named by the shell and handled like a dropped one;
+          // pasted text is text, and the browser pastes it as it is.
+          onPaste={paste}
           {...ime.handlers}
           onKeyDown={(e) => {
             if (!ime.isIme(e.nativeEvent) && refine.onKey(e)) return;

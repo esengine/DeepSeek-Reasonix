@@ -71,6 +71,10 @@ export interface HostPort {
   /** Where dropped files live. Empty where the shell cannot say — a browser
    *  tab never learns a path. */
   pathsForFiles(files: File[]): string[];
+  /** The files the clipboard carries, named by the shell from the formats that
+   *  carry files. Empty where the shell has none to name — a browser tab asks
+   *  nobody, and a clipboard holding text names no file. */
+  clipboardFiles(): Promise<string[]>;
   /** Put text on disk where the user picks. null means this shell has no save
    *  surface at all; "" means they dismissed the dialog, which is an answer. */
   saveText(name: string, content: string): Promise<string | null>;
@@ -199,6 +203,7 @@ interface ElectronBridge {
   openExternal(url: string): Promise<void>;
   setUnreadBadge?(unread: boolean): Promise<void>;
   pathForFile(file: File): string;
+  clipboardFiles?(): Promise<string[]>;
   saveText(name: string, content: string): Promise<string>;
   saveBytes(name: string, bytes: Uint8Array): Promise<string>;
   showTextContextMenu?(request: TextContextMenuRequest): Promise<TextContextMenuResult>;
@@ -286,6 +291,11 @@ class ElectronHost implements HostPort {
     // Resolved one at a time because that is the shape the platform offers;
     // a file the shell cannot place answers with "" and is dropped here.
     return files.map((f) => this.api.pathForFile(f)).filter(Boolean);
+  }
+  clipboardFiles() {
+    // A shell older than the verb has no clipboard to ask, and answers with
+    // nothing rather than with a guess.
+    return this.api.clipboardFiles?.().then((paths) => (Array.isArray(paths) ? paths : [])).catch(() => []) ?? Promise.resolve<string[]>([]);
   }
   saveText(name: string, content: string) {
     return this.api.saveText(name, content);
@@ -399,6 +409,9 @@ class BrowserHost implements HostPort {
   }
   pathsForFiles() {
     return [];
+  }
+  clipboardFiles() {
+    return Promise.resolve<string[]>([]);
   }
   saveText() {
     return Promise.resolve(null);

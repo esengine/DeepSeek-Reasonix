@@ -3805,3 +3805,60 @@ test("only the app's own window is answered, and nothing is read from the asker"
   assert.deepEqual(processMemoryHandler(app, () => null)({}), []);
   assert.deepEqual(processMemoryHandler({ getAppMetrics: () => { throw new Error("x"); } }, () => true)({}), []);
 });
+
+const { clipboardFiles, fileNamePaths, fileUrlPaths, uriListPaths } = require("../src/clipboardfiles.js");
+const { pathToFileURL } = require("node:url");
+
+// The clipboard names a copied file in its own formats. A path copied as text
+// is text, and the line between the two is the format, never the wording.
+test("the clipboard's file format names the files a copy carried", async () => {
+  const one = pathToFileURL(path.resolve("one.txt")).href;
+  const two = pathToFileURL(path.resolve("two.txt")).href;
+  const clipboard = {
+    read: async () => [{ types: ["text/uri-list"], getType: async () => new Blob([`${one}\r\n${two}\r\n`]) }],
+  };
+  assert.deepEqual(await clipboardFiles(clipboard), [path.resolve("one.txt"), path.resolve("two.txt")]);
+});
+
+test("a clipboard holding only text names no file", async () => {
+  const clipboard = {
+    read: async () => [{ types: ["text/plain"], getType: async () => new Blob(["C:\\Users\\me\\photo.png"]) }],
+  };
+  assert.deepEqual(await clipboardFiles(clipboard), []);
+});
+
+test("a clipboard that cannot be read names no file", async () => {
+  const clipboard = { read: async () => { throw new Error("no clipboard"); } };
+  assert.deepEqual(await clipboardFiles(clipboard), []);
+});
+
+test("a uri list skips its comments and every uri that names no file", () => {
+  const one = pathToFileURL(path.resolve("one.txt")).href;
+  assert.deepEqual(uriListPaths(`# a comment\r\n${one}\r\nhttps://example.com/x\r\n\r\n`), [path.resolve("one.txt")]);
+});
+
+test("the windows file-name format holds its paths as utf-16, each ended by a null", () => {
+  const bytes = Buffer.from("C:\\Users\\me\\a.txt\0C:\\Users\\me\\b.txt\0\0", "utf16le");
+  assert.deepEqual(fileNamePaths(bytes), ["C:\\Users\\me\\a.txt", "C:\\Users\\me\\b.txt"]);
+});
+
+// When more than one format names the same file, the result collapses to a
+// single entry instead of attaching that file twice.
+test("formats naming the same file collapse to one entry", async () => {
+  const one = pathToFileURL(path.resolve("one.txt")).href;
+  const type = 'electron application/osclipboard;format="FileNameW"';
+  const bytes = Buffer.from(path.resolve("one.txt") + "\0\0", "utf16le");
+  const clipboard = {
+    read: async () => [{
+      types: ["text/uri-list", type],
+      getType: async (t) => new Blob([t === "text/uri-list" ? `${one}\r\n` : bytes]),
+    }],
+  };
+  assert.deepEqual(await clipboardFiles(clipboard), [path.resolve("one.txt")]);
+});
+
+test("the macos file url names one file", () => {
+  const url = pathToFileURL(path.resolve("a.txt")).href;
+  assert.deepEqual(fileUrlPaths(url), [path.resolve("a.txt")]);
+  assert.deepEqual(fileUrlPaths("https://example.com/x"), []);
+});
