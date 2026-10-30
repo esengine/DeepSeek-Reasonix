@@ -426,6 +426,11 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
     setVerifyNote(answer.found ? t("元素仍在页面上") : t("页面上找不到这个元素了"));
     if (answer.shot && onAddFiles) onAddFiles([dataUrlFile(answer.shot, "element-again.png")]);
   }, [target, pickedNote, onAddFiles]);
+  // The note belongs to the page it came from: another tab starts clean.
+  useEffect(() => {
+    setPickedNote(null);
+    setVerifyNote("");
+  }, [target]);
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape" && pickingRef.current) {

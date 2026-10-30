@@ -27,7 +27,10 @@ const ELEMENT: NonNullable<PickedElement["element"]> = {
   capturedAt: 1700000000000,
 };
 
-const tabs: BrowserTab[] = [{ id: "t1", target: "view-a", url: ELEMENT.pageUrl, title: "GitHub", active: true }];
+const tabs: BrowserTab[] = [
+  { id: "t1", target: "view-a", url: ELEMENT.pageUrl, title: "GitHub", active: true },
+  { id: "t2", target: "view-b", url: "https://example.test/", title: "Other", active: false },
+];
 
 let shortcut: (ask: { targetId?: string }) => void = () => {};
 
@@ -54,7 +57,7 @@ async function mount(onAddToChat: (reference: string) => void = () => {}) {
   vi.resetModules();
   (window as unknown as { reasonixHost: typeof bridge }).reasonixHost = bridge;
   const { BrowserPanel } = await import("./BrowserPanel");
-  return render(<BrowserPanel tabs={tabs} shown onAddToChat={onAddToChat} />);
+  return { view: render(<BrowserPanel tabs={tabs} shown onAddToChat={onAddToChat} />), BrowserPanel };
 }
 
 const pickButton = () => document.querySelector('[data-action="browser.pick"]') as HTMLButtonElement;
@@ -83,6 +86,18 @@ describe("picking an element from the agent's page", () => {
     expect(reference).toContain("size: 732×249");
     expect(reference).toContain('<img src="h.png" alt="logo">');
     expect(noteRow()?.textContent).toContain("img 732×249");
+  });
+
+  it("drops the note when another tab is shown", async () => {
+    const user = userEvent.setup();
+    const onAddToChat = vi.fn();
+    await mount(onAddToChat);
+    await user.click(pickButton());
+    expect(noteRow()?.textContent).toContain("img 732×249");
+
+    const tabButtons = document.querySelectorAll('[data-action="browser.tab"]');
+    await user.click(tabButtons[1] as HTMLElement);
+    expect(noteRow()).toBeNull();
   });
 
   it("leaves the chat alone when the person picks nothing", async () => {
