@@ -7,6 +7,7 @@ import type { PickedSnapshot } from "./composerChips";
 import { PickIcon } from "./pickicon";
 import { elementBlock } from "./composerChips";
 import { pressedChord, typingElsewhere } from "./keys";
+import { listenAction } from "./listen";
 import { SWAP_MARK } from "./swap";
 import { occluded, visibleBox } from "./occlusion";
 import { BrowserFailure } from "./BrowserFailure";
@@ -438,8 +439,7 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
       if (pickingRef.current) stopPick();
       else void startPick();
     };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
+    return listenAction(window, "keydown", { action: "browser.pick-shortcut", listener: onKey as EventListener });
   }, [stopPick, startPick]);
   // The page holds the keyboard while the person is looking at it, so the key
   // arrives from the shell instead of from this page.
@@ -487,7 +487,7 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
       {pickedNote && (
         <p className="studio-browser-note" data-action="browser.picked">
           <span title={pickedNote.selector}>{t(copied ? "已拾取元素，选择器已复制" : "已拾取元素，选择器未能复制")} · {pickedNote.line}</span>
-          <button type="button" onClick={() => void navigator.clipboard?.writeText(pickedNote.selector).catch(() => {})}>{t("复制选择器")}</button>
+          <button type="button" data-action="browser.copy-selector" onClick={() => void navigator.clipboard?.writeText(pickedNote.selector).catch(() => {})}>{t("复制选择器")}</button>
           <button type="button" data-action="browser.verify" onClick={() => void verify()}>{t("重新定位")}</button>
           {verifyNote && <span data-action="browser.verify-result">{verifyNote}</span>}
         </p>

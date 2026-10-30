@@ -141,6 +141,11 @@ export const ACTIONS: UIAction[] = [
   { id: "browser.reload", kind: "repeatable", target: "none", proof: "interaction" },
   { id: "browser.address", kind: "view", target: "none", proof: "static" },
   { id: "browser.external", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "browser.pick", kind: "interaction", target: "none", proof: "interaction" },
+  { id: "browser.verify", kind: "interaction", target: "none", proof: "interaction" },
+  { id: "browser.pick-shortcut", kind: "interaction", target: "none", proof: "interaction" },
+  { id: "browser.copy-selector", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "browser.edit-element", kind: "interaction", target: "none", proof: "interaction" },
   { id: "tool.copy-output", kind: "shell-native", target: "none", proof: "interaction" },
   // The way out of a window whose assets an update replaced underneath it.
   { id: "chrome.reload", kind: "navigation", target: "none", proof: "interaction" },

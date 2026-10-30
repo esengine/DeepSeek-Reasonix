@@ -11,7 +11,7 @@ export function ElementShot({ picked, name, onInsert }: { picked: PickedSnapshot
       <span className="meta">
         <span className="nm" title={picked.selector}>{name}</span>
         <span className="sz">{t("网页元素")}</span>
-        <button className="undo" onClick={() => onInsert(elementInstruction(picked))}>{t("让 Agent 修改")}</button>
+        <button className="undo" data-action="browser.edit-element" onClick={() => onInsert(elementInstruction(picked))}>{t("让 Agent 修改")}</button>
       </span>
     </>
   );
