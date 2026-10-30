@@ -69,8 +69,6 @@ export function WorkbenchPanel({
   onActiveFile,
   onExternal,
   onAddToChat,
-  onAddElement,
-  onAddElements,
   onAddFiles,
   onAddPick,
   onQuoteSelection,
@@ -105,8 +103,6 @@ export function WorkbenchPanel({
   onActiveFile?: (path: string | undefined) => void;
   onExternal: (url: string) => void;
   onAddToChat?: (reference: string) => void;
-  onAddElement?: (picked: PickedSnapshot) => void;
-  onAddElements?: (picked: PickedSnapshot[]) => void;
   onAddFiles?: (files: File[]) => void;
   onAddPick?: (elements: PickedSnapshot[], files: File[]) => void;
   // Text selected in an open file, with the file it came from, on its way to the composer.
@@ -582,8 +578,6 @@ export function WorkbenchPanel({
               showTabs={false}
               onOpenDocument={(path) => port.openDocument(path)}
               onAddToChat={onAddToChat}
-              onAddElement={onAddElement}
-              onAddElements={onAddElements}
               onAddFiles={onAddFiles}
               onAddPick={onAddPick}
               workspaceRoot={workspaceRoot}
@@ -624,7 +618,7 @@ export function WorkbenchPanel({
                 </Suspense>
               ) : mode === "preview" ? (
                 previewTab ? (
-                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} onAddToChat={onAddToChat} onAddElement={onAddElement} onAddElements={onAddElements} onAddFiles={onAddFiles} onAddPick={onAddPick} />
+                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} onAddToChat={onAddToChat} onAddFiles={onAddFiles} onAddPick={onAddPick} />
                 ) : (
                   <div className="workbench-empty">{t("正在读取…")}</div>
                 )

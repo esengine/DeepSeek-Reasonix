@@ -241,13 +241,13 @@ export function pickNoticeFor(reason: PickedElement["reason"]): string {
   return "";
 }
 
-export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddElement?: (picked: PickedSnapshot) => void; onAddElements?: (picked: PickedSnapshot[]) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
+export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   if (host().drawsBrowserViews()) return <AgentBrowserView {...props} />;
   const current = props.tabs.find((tab) => tab.active) ?? props.tabs[0];
   return <div className="bpanel">{current && <AgentPageNote tab={current} />}</div>;
 }
 
-function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddToChat, onAddElement, onAddElements, onAddFiles, onAddPick, workspaceRoot }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddElement?: (picked: PickedSnapshot) => void; onAddElements?: (picked: PickedSnapshot[]) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
+function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddToChat, onAddFiles, onAddPick, workspaceRoot }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   const slot = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState("");
   const [picking, setPicking] = useState(false);
@@ -410,16 +410,13 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
     // and deliberately do not send the picture separately: two updates would
     // overwrite each other.
     if (onAddPick) onAddPick(picked.map(snapshotOf), shot);
-    else if (picked.length > 1) {
-      if (onAddElements) onAddElements(picked.map(snapshotOf));
-      else onAddToChat?.(picked.map((one) => elementReference(one, workspaceRoot)).join("\n\n"));
-    } else if (onAddElement) onAddElement(snapshotOf(first));
+    else if (picked.length > 1) onAddToChat?.(picked.map((one) => elementReference(one, workspaceRoot)).join("\n\n"));
     else onAddToChat?.(elementReference(first, workspaceRoot));
     void navigator.clipboard?.writeText(first.selector).then(
       () => setCopied(true),
       () => setCopied(false),
     );
-  }, [target, onAddToChat, onAddElement, onAddElements, onAddFiles, workspaceRoot]);
+  }, [target, onAddToChat, onAddPick, onAddFiles, workspaceRoot]);
   // The page may have changed since the pick: re-finding the selector is how a
   // person checks that an edit landed where they pointed.
   const verify = useCallback(async () => {
@@ -518,6 +515,6 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
   );
 }
 
-export function BrowserPanel(props: ManualProps | { tabs: BrowserTab[]; shown: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddElement?: (picked: PickedSnapshot) => void; onAddElements?: (picked: PickedSnapshot[]) => void; onAddFiles?: (files: File[]) => void; workspaceRoot?: string }) {
+export function BrowserPanel(props: ManualProps | { tabs: BrowserTab[]; shown: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   return "tabs" in props ? <AgentBrowserPanel {...props} /> : <ManualBrowserPanel {...props} />;
 }

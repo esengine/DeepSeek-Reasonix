@@ -5,8 +5,6 @@ export interface Injects {
   n: number;
   text?: string;
   session?: { id: string; title: string };
-  element?: PickedSnapshot;
-  elements?: PickedSnapshot[];
   files?: File[];
   pick?: { elements: PickedSnapshot[]; files?: File[] };
 }
@@ -39,16 +37,6 @@ export function useInjects(args: {
     if (inject.pick) {
       for (const one of inject.pick.elements) addElement(one);
       if (inject.pick.files?.length) attach(inject.pick.files);
-      queueMicrotask(focus);
-      return;
-    }
-    if (inject.element) {
-      addElement(inject.element);
-      queueMicrotask(focus);
-      return;
-    }
-    if (inject.elements?.length) {
-      for (const one of inject.elements) addElement(one);
       queueMicrotask(focus);
       return;
     }

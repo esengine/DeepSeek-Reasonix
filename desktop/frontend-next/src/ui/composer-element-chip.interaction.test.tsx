@@ -37,7 +37,7 @@ function draw() {
   const port = new MockPort();
   const onSubmit = vi.fn(async (_text: string) => true as boolean | "shell_unavailable");
   const st = status();
-  const make = (inject?: { n: number; text?: string; element?: PickedSnapshot }) => (
+  const make = (inject?: { n: number; text?: string; pick?: { elements: PickedSnapshot[]; files?: File[] } }) => (
     <Composer
       port={port as unknown as AgentPort}
       status={st}
@@ -53,7 +53,7 @@ function draw() {
   );
   const view = render(make({ n: 0 }));
   const box = view.container.querySelector('textarea[aria-label="任务输入"]') as HTMLTextAreaElement;
-  const pick = (element: PickedSnapshot) => view.rerender(make({ n: 1, element }));
+  const pick = (element: PickedSnapshot) => view.rerender(make({ n: 1, pick: { elements: [element] } }));
   return { ...view, port, onSubmit, box, pick };
 }
 
