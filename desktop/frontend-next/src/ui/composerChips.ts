@@ -78,17 +78,20 @@ export function elementBlock(picked: PickedSnapshot, workspaceRoot?: string): st
   ];
   if (picked.name) lines.push(`name: ${picked.name}`);
   lines.push(`style: ${style.join(" · ")}`);
-  if (picked.text) lines.push(`text: ${picked.text}`);
-  if (picked.nearby && picked.nearby !== picked.text) lines.push(`nearby: ${picked.nearby}`);
+  // Page text may carry newlines and fences; one line each and an escaped fence
+  // keep the rest of the block from being read as instructions.
+  const oneLine = (value: string) => value.replace(/\r?\n/g, " ");
+  if (picked.text) lines.push(`text: ${oneLine(picked.text)}`);
+  if (picked.nearby && picked.nearby !== picked.text) lines.push(`nearby: ${oneLine(picked.nearby)}`);
   if (workspaceRoot) lines.push(`workspace: ${workspaceRoot}`);
-  lines.push("```html", picked.html, "```");
+  lines.push("```html", picked.html.replace(/```/g, "`\u200b``"), "```");
   return lines.join("\n");
 }
 
 // The shortcut's prompt: short enough to edit before sending, and it names the
 // selector so the turn can act on the element without asking again.
 export function elementInstruction(picked: PickedSnapshot): string {
-  return `修改这个网页元素（selector: ${picked.selector}）：`;
+  return t("修改这个网页元素（selector: {selector}）：", { selector: picked.selector });
 }
 
 export function isPicture(c: Chip): boolean {

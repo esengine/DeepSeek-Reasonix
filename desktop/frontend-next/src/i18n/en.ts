@@ -62,6 +62,8 @@ export const EN: Record<string, string> = {
   "元素在 Shadow DOM 内，暂不支持拾取": "Element inside a shadow root — not supported",
   "取消选择元素": "Stop picking an element",
   "已拾取元素，选择器已复制": "Element picked; its selector is copied",
+  "已拾取元素，选择器未能复制": "Element picked; the selector could not be copied",
+  "修改这个网页元素（selector: {selector}）：": "Change this page element (selector: {selector}):",
   "网页元素": "Web element",
   "让 Agent 修改": "Ask the agent to change it",
   "复制选择器": "Copy selector",

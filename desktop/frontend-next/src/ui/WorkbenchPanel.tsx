@@ -621,7 +621,7 @@ export function WorkbenchPanel({
                 </Suspense>
               ) : mode === "preview" ? (
                 previewTab ? (
-                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} />
+                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} onAddToChat={onAddToChat} onAddElement={onAddElement} onAddElements={onAddElements} onAddFiles={onAddFiles} />
                 ) : (
                   <div className="workbench-empty">{t("正在读取…")}</div>
                 )

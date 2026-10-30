@@ -33,18 +33,13 @@ export function useInjects(args: {
       queueMicrotask(focus);
       return;
     }
-    if (inject.element) {
-      addElement(inject.element);
-      queueMicrotask(focus);
-      return;
-    }
-    if (inject.elements?.length) {
-      for (const picked of inject.elements) addElement(picked);
-      queueMicrotask(focus);
-      return;
-    }
-    if (inject.files?.length) {
-      attach(inject.files);
+    // A pick can arrive as an element and its picture in one update; both are
+    // applied, because the chip and the attachment are one act.
+    const fromPage = Boolean(inject.element || inject.elements?.length || inject.files?.length);
+    if (inject.element) addElement(inject.element);
+    if (inject.elements?.length) for (const one of inject.elements) addElement(one);
+    if (inject.files?.length) attach(inject.files);
+    if (fromPage) {
       queueMicrotask(focus);
       return;
     }

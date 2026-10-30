@@ -6,7 +6,7 @@ import { host, type BrowserControl, type BrowserLoadFailure, type BrowserRefusal
 import type { PickedSnapshot } from "./composerChips";
 import { PickIcon } from "./pickicon";
 import { elementBlock } from "./composerChips";
-import { pressedChord } from "./keys";
+import { pressedChord, typingElsewhere } from "./keys";
 import { SWAP_MARK } from "./swap";
 import { occluded, visibleBox } from "./occlusion";
 import { BrowserFailure } from "./BrowserFailure";
@@ -255,6 +255,7 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
   // its copy button hands over.
   const [pickedNote, setPickedNote] = useState<{ line: string; selector: string } | null>(null);
   const [verifyNote, setVerifyNote] = useState("");
+  const [copied, setCopied] = useState(false);
   // Why the last pick ended without an element, when this window caused it.
   const [pickEnded, setPickEnded] = useState("");
   const current = tabs.find((tab) => tab.target === picked) ?? tabs.find((tab) => tab.active) ?? tabs[0];
@@ -399,14 +400,21 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
       line: `${first.tagName} ${Math.round(first.rect.width)}×${Math.round(first.rect.height)}${picked.length > 1 ? ` +${picked.length - 1}` : ""}`,
       selector: first.selector,
     });
+    setVerifyNote("");
+    setCopied(false);
     // The chat gets the whole element as a chip; the clipboard gets the one
     // field worth pasting somewhere else.
-    if (picked.length > 1 && onAddElements) onAddElements(picked.map(snapshotOf));
-    else if (onAddElement) onAddElement(snapshotOf(first));
+    if (picked.length > 1) {
+      if (onAddElements) onAddElements(picked.map(snapshotOf));
+      else onAddToChat?.(picked.map((one) => elementReference(one, workspaceRoot)).join("\n\n"));
+    } else if (onAddElement) onAddElement(snapshotOf(first));
     else onAddToChat?.(elementReference(first, workspaceRoot));
     // The picture is what the person saw, so it rides along as an attachment.
     if (answer.shot && onAddFiles) onAddFiles([dataUrlFile(answer.shot, `${first.tagName.toLowerCase()}.png`)]);
-    void navigator.clipboard?.writeText(first.selector).catch(() => {});
+    void navigator.clipboard?.writeText(first.selector).then(
+      () => setCopied(true),
+      () => setCopied(false),
+    );
   }, [target, onAddToChat, onAddElement, onAddElements, onAddFiles, workspaceRoot]);
   // The page may have changed since the pick: re-finding the selector is how a
   // person checks that an edit landed where they pointed.
@@ -423,6 +431,7 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
         stopPick();
         return;
       }
+      if (!shown || event.repeat || typingElsewhere(event.target)) return;
       if (!pressedChord(event, "c", true)) return;
       event.preventDefault();
       if (pickingRef.current) stopPick();
@@ -476,7 +485,7 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddT
       {pickEnded && <p className="studio-browser-note" data-action="browser.pick-ended"><span>{pickEnded}</span></p>}
       {pickedNote && (
         <p className="studio-browser-note" data-action="browser.picked">
-          <span title={pickedNote.selector}>{t("已拾取元素，选择器已复制")} · {pickedNote.line}</span>
+          <span title={pickedNote.selector}>{t(copied ? "已拾取元素，选择器已复制" : "已拾取元素，选择器未能复制")} · {pickedNote.line}</span>
           <button type="button" onClick={() => void navigator.clipboard?.writeText(pickedNote.selector).catch(() => {})}>{t("复制选择器")}</button>
           <button type="button" data-action="browser.verify" onClick={() => void verify()}>{t("重新定位")}</button>
           {verifyNote && <span data-action="browser.verify-result">{verifyNote}</span>}

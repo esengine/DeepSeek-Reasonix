@@ -586,10 +586,10 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             workspaceRoot={status?.workspaceRoot ?? rt.root}
             onCloseManual={() => onManualBrowser?.(false)}
             onExternal={(url) => void port.openExternal(url).catch(notify)}
-            onAddToChat={(reference) => setInserted((was) => ({ n: was.n + 1, text: reference }))}
-            onAddElement={(picked) => setInserted((was) => ({ n: was.n + 1, text: "", element: picked }))}
-            onAddElements={(picked) => setInserted((was) => ({ n: was.n + 1, text: "", elements: picked }))}
-            onAddFiles={(files) => setInserted((was) => ({ n: was.n + 1, text: "", files }))}
+            onAddToChat={(reference) => setInserted((was) => ({ ...was, n: was.n + 1, text: reference }))}
+            onAddElement={(picked) => setInserted((was) => ({ ...was, n: was.n + 1, text: "", element: picked }))}
+            onAddElements={(picked) => setInserted((was) => ({ ...was, n: was.n + 1, text: "", elements: picked }))}
+            onAddFiles={(files) => setInserted((was) => ({ ...was, n: was.n + 1, text: "", files }))}
             onQuoteSelection={reply.onQuoteFile}
           />
       </div>
