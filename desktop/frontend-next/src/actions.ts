@@ -387,6 +387,11 @@ export const ACTIONS: UIAction[] = [
   { id: "transcript.find", kind: "view", target: "none", proof: "interaction" },
   { id: "turn.edit", kind: "view", target: "entity", proof: "interaction" },
   { id: "turn.resend", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
+  // Copying a turn reaches the window, not the kernel. The button copies the
+  // words with the images the turn was about; the arrow beside it asks which
+  // of the two copies is wanted, and its rows carry the choice as their value.
+  { id: "turn.copy", kind: "shell-native", target: "none", proof: "interaction" },
+  { id: "turn.copy-menu", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "session.new", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   // The bytes reach the host as the file is chosen, before anything is sent:
   // the picker's button only opens a dialog, and this is where the upload is.

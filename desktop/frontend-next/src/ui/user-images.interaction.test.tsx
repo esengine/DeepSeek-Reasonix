@@ -73,12 +73,15 @@ describe("saved images in user messages", () => {
     expect(url).toHaveBeenCalledWith(path);
   });
 
-  it("shows a saved image through the pane's workspace endpoint and keeps the reference", () => {
+  it("shows a saved image through the pane's workspace endpoint without repeating its reference in the body", () => {
     render(<UserCard item={item} port={port} />);
     const image = screen.getByRole("img", { name: path.split("/").at(-1) });
     expect(image.getAttribute("src")).toBe(port.workspaceImageURL(path));
     expect(image.getAttribute("loading")).toBe("lazy");
-    expect(screen.getByText(text)).toBeTruthy();
+    // The storage token is an implementation detail; the bubble shows the words
+    // the person typed, not the path the attachment rode in on.
+    expect(screen.queryByText(text)).toBeNull();
+    expect(screen.getByText("请看这张图片")).toBeTruthy();
   });
 
   it("shows the same attachment after history is restored", () => {
@@ -142,12 +145,12 @@ describe("saved images in user messages", () => {
     expect(screen.getByRole("img").getAttribute("src")).toBe("/rt/other/image");
   });
 
-  it("copies and edits the original message including its attachment token", async () => {
+  it("copies the message without its attachment token, and edits the original including it", async () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, "writeText");
     render(<UserCard item={item} port={port} cp={{ turn: 1, prompt: text, files: 0, msgIndex: 1 }} onResend={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "复制" }));
-    expect(write).toHaveBeenCalledExactlyOnceWith(text);
+    expect(write).toHaveBeenCalledExactlyOnceWith("请看这张图片");
     await user.click(screen.getByRole("button", { name: "改写" }));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(text);
     expect(screen.queryByRole("img")).toBeNull();

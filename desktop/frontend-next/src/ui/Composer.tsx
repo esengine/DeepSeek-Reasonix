@@ -21,7 +21,7 @@ import { useFitHeight } from "./fitHeight";
 import { onComposerHintChange, showsComposerHint, useRunningMessageIntent, useSendShortcut } from "../state/prefs";
 import { sendAria, sendHint, sendsOnKey } from "./sendkey";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
-import { kindOf, nameOf, previewURL } from "./chipfile";
+import { kindOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
 import type { Dropped } from "./filedrop";
 import type { Quote } from "./cards/SayCard";
@@ -35,6 +35,8 @@ import { touchKeyboard } from "./touchKeyboard";
 import { ImagePreview } from "./ImagePreview";
 import { SideAskButton } from "./SideAskButton";
 import { chipId, chipName, isPicture, quoteBlock, releaseChip, type Chip } from "./composerChips";
+import { parseImagePaths } from "./imagepaths";
+import { useRefIn, useTakeImages } from "./composerImage";
 
 interface Props {
   worktreeTarget?: HTMLElement | null;
@@ -338,34 +340,9 @@ export function Composer({ port, status, running, queued = false, quote, restore
     [upload],
   );
 
-  // A dropped file is referenced where it lives. Copying it in is what let a
-  // turn edit the copy and report the edit as done while the file the user
-  // pointed at never changed. Only the host can mint the token: whether a path
-  // is inside the workspace compares two spellings of one location.
-  const refIn = useCallback(
-    (paths: string[]) => {
-      port
-        .dropRefs(paths)
-        .then((refs) => {
-          const took = refs.flatMap((r) =>
-            r.ref
-              ? [{
-                  k: "attachment" as const,
-                  id: chipId(),
-                  name: nameOf(r.path ?? r.ref),
-                  state: "ready" as const,
-                  a: { path: r.path ?? "", ref: r.ref, image: r.image },
-                }]
-              : [],
-          );
-          if (took.length > 0) setShots((prev) => [...prev, ...took]);
-          const refused = refs.flatMap((r) => (r.error ? [r.error] : []));
-          if (refused.length > 0) onError(new Error(refused.join("\n")));
-        })
-        .catch(onError);
-    },
-    [port, onError],
-  );
+
+  const refIn = useRefIn(port, onError, (took) => setShots((prev) => [...prev, ...took]));
+  const takeImages = useTakeImages(port, status?.workspaceRoot ?? "", attach, refIn, onError);
 
   // One place decides what a payload becomes, whichever channel carried it.
   const receive = useCallback(
@@ -574,6 +551,19 @@ export function Composer({ port, status, running, queued = false, quote, restore
               return;
             }
             const body = e.clipboardData.getData("text/plain");
+            // A copied image arrives as a path the copy wrote. It is taken as
+            // the image it names, so the path never becomes part of what is
+            // sent: what the box shows is the image itself.
+            const { paths, text } = parseImagePaths(body);
+            if (paths.length > 0) {
+              e.preventDefault();
+              if (text) {
+                if (pasteIsLong(text)) setShots((prev) => [...prev, { k: "paste", id: chipId(), body: text, lines: countLines(text) }]);
+                else insert(text);
+              }
+              void takeImages(paths);
+              return;
+            }
             if (!pasteIsLong(body)) return;
             // Long enough to bury the composer. It still goes with the turn — it
             // is just held beside the box instead of becoming it.

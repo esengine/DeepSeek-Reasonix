@@ -9,14 +9,28 @@ import (
 	"reasonix/internal/contract/event"
 )
 
-// StoredAttachments lists the images under .reasonix/attachments that the
-// message references. It reads the references through detectRefs, the same
-// resolution that decides what the model is shown, and returns each file once
-// under its normalized workspace-relative path.
+// StoredAttachments lists the images a message references that the host stored or
+// was handed this session: workspace attachments under .reasonix/attachments, and
+// images the session was given outside the workspace. Each is returned once,
+// normalized to the spelling the model resolves — a workspace image by its
+// workspace-relative Path and an empty Ref, an external one by its absolute Path plus the opaque Ref the surface drops.
 func (c *Controller) StoredAttachments(text string) []event.Attachment {
 	var out []event.Attachment
 	for _, r := range c.detectRefs(text) {
-		if r.baseDir != "" || !isImageAttachmentRef(r.path) {
+		if !isImageAttachmentRef(r.path) {
+			continue
+		}
+		if r.baseDir != "" {
+			// An image handed to this session outside the workspace. Its absolute
+			// path is what a copy reads back, and the opaque token it arrived as
+			// is what the surface hides; only a file that is still there is named.
+			abs := filepath.ToSlash(filepath.Join(r.baseDir, filepath.FromSlash(r.path)))
+			if info, err := os.Stat(filepath.FromSlash(abs)); err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			if !slices.ContainsFunc(out, func(a event.Attachment) bool { return a.Path == abs }) {
+				out = append(out, event.Attachment{Path: abs, Ref: r.raw})
+			}
 			continue
 		}
 		rel := path.Clean(filepath.ToSlash(r.path))

@@ -78,7 +78,7 @@ describe("copying without the Clipboard API", () => {
     });
     const result = copyText("第一行\n  /tool:run");
     if (ok) await expect(result).resolves.toBeUndefined();
-    else await expect(result).rejects.toThrow("copy rejected");
+    else await expect(result).rejects.toThrow(t("剪贴板不可用，请手动复制：{text}", { text: "第一行\n  /tool:run" }));
     expect(exec).toHaveBeenCalledExactlyOnceWith("copy");
     expect(document.querySelector("textarea")).toBeNull();
     expect(document.activeElement).toBe(button);
@@ -91,7 +91,10 @@ describe("copying without the Clipboard API", () => {
     button.focus();
     const failure = new DOMException("clipboard unavailable", "InvalidStateError");
     legacy(() => { throw failure; });
-    await expect(copyText("/project")).rejects.toBe(failure);
+    // The reader is told what to do instead, and the cause is kept for whoever
+    // reads the log.
+    await expect(copyText("/project")).rejects.toThrow(t("剪贴板不可用，请手动复制：{text}", { text: "/project" }));
+    await expect(copyText("/project")).rejects.toMatchObject({ cause: failure });
     expect(document.querySelector("textarea")).toBeNull();
     expect(document.activeElement).toBe(button);
   });
@@ -146,20 +149,62 @@ describe("copying without the Clipboard API", () => {
     expect(document.querySelector("textarea")).toBeNull();
   });
 
-  it.each([true, false])("uses the modern Clipboard API exclusively when it succeeds = %s", async (ok) => {
+  it("uses the modern Clipboard API exclusively when it succeeds", async () => {
+    render(<button>Copy</button>);
+    const button = screen.getByRole("button");
+    button.focus();
+    const exec = legacy(() => true);
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    await expect(copyText("line one\nline two")).resolves.toBeUndefined();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("line one\nline two");
+    expect(exec).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(button);
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
+  it("falls back to the legacy command when the modern API refuses", async () => {
     render(<button>Copy</button>);
     const button = screen.getByRole("button");
     button.focus();
     const exec = legacy(() => true);
     const failure = new DOMException("denied", "NotAllowedError");
-    const writeText = vi.fn(() => ok ? Promise.resolve() : Promise.reject(failure));
+    const writeText = vi.fn(() => Promise.reject(failure));
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    const result = copyText("line one\nline two");
-    if (ok) await expect(result).resolves.toBeUndefined();
-    else await expect(result).rejects.toBe(failure);
+    // A refused modern API is not a dead clipboard: the copy still happens.
+    await expect(copyText("line one\nline two")).resolves.toBeUndefined();
     expect(writeText).toHaveBeenCalledExactlyOnceWith("line one\nline two");
-    expect(exec).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledExactlyOnceWith("copy");
     expect(document.activeElement).toBe(button);
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
+  it("gives up with a readable message when both ways refuse", async () => {
+    render(<button>Copy</button>);
+    const button = screen.getByRole("button");
+    button.focus();
+    const exec = legacy(() => false);
+    const failure = new DOMException("denied", "NotAllowedError");
+    const writeText = vi.fn(() => Promise.reject(failure));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    await expect(copyText("line one\nline two")).rejects.toThrow(
+      t("剪贴板不可用，请手动复制：{text}", { text: "line one\nline two" }),
+    );
+    expect(exec).toHaveBeenCalledExactlyOnceWith("copy");
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
+  it("stops waiting on a clipboard write that never settles", async () => {
+    render(<button>Copy</button>);
+    const button = screen.getByRole("button");
+    button.focus();
+    const exec = legacy(() => true);
+    const writeText = vi.fn(() => new Promise<void>(() => {}));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    // A write that hangs is a copy that never happened: it is given a
+    // deadline, and the older way of copying answers instead.
+    await expect(copyText("line one\nline two")).resolves.toBeUndefined();
+    expect(exec).toHaveBeenCalledExactlyOnceWith("copy");
     expect(document.querySelector("textarea")).toBeNull();
   });
 });

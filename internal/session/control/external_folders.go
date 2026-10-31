@@ -1,6 +1,7 @@
 package control
 
 import (
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -58,4 +59,24 @@ func (f *externalFolders) roots() []externalRootRef {
 		out = append(out, externalRootRef{token: token, abs: abs})
 	}
 	return out
+}
+
+// readableUnder answers where an absolute path may be read from, among the
+// folders this session was given. A path in none of them answers nothing: the
+// grant is what makes a file readable here, and a file nobody brought in is
+// not readable at all.
+func (f *externalFolders) readableUnder(abs string) (root string, rel string, ok bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for _, registered := range f.byToken {
+		if registered == abs {
+			// The grant is the file itself: its folder is the base and its
+			// name the path under it.
+			return filepath.Dir(registered), filepath.Base(registered), true
+		}
+		if r, rel, ok := pathUnder(registered, abs); ok {
+			return r, rel, true
+		}
+	}
+	return "", "", false
 }

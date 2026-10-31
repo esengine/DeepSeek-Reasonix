@@ -7,7 +7,50 @@ import { TooltipButton } from "./TooltipButton";
 // hosts are not a secure context and navigator.clipboard is undefined there.
 // execCommand is deprecated and is still the only path they have.
 export async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  // A write can be refused (no permission, a document that lost focus) or
+  // simply never settle. A copy that hangs says nothing at all, so it is given
+  // a deadline — and the legacy path is tried before the reader is told
+  // anything went wrong, because a refused modern API is not a dead clipboard.
+  const modern = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+  if (modern) {
+    try {
+      await withDeadline(modern(text), clipboardTimeout);
+      return;
+    } catch (e) {
+      try {
+        legacyCopy(text);
+        return;
+      } catch {
+        throw new Error(t("剪贴板不可用，请手动复制：{text}", { text }), { cause: e });
+      }
+    }
+  }
+  try {
+    legacyCopy(text);
+  } catch (e) {
+    throw new Error(t("剪贴板不可用，请手动复制：{text}", { text }), { cause: e });
+  }
+}
+
+// A clipboard write that hangs is a copy that never happened, and the reader
+// is left waiting for a confirmation that will not come.
+const clipboardTimeout = 1500;
+
+async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: number | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error("clipboard write timed out")), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+}
+
+function legacyCopy(text: string) {
   const focused = document.activeElement;
   const carrier = document.createElement("textarea");
   carrier.value = text;

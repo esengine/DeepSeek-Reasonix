@@ -5,6 +5,7 @@ import { RewindControl } from "./RewindControl";
 import { SkillPinView } from "./SkillPinView";
 import { parseSkillPin } from "./skillpin";
 import { CopyButton } from "../CopyButton";
+import { CopyImagesButton } from "../CopyImagesButton";
 import { reason } from "../../i18n/kernel";
 import { t } from "../../i18n";
 import { clock } from "../../i18n/format";
@@ -17,13 +18,25 @@ import { touchKeyboard } from "../touchKeyboard";
 import { useFitHeight } from "../fitHeight";
 import { useViewer } from "../../state/viewer";
 import { ImagePreview } from "../ImagePreview";
+import { stripAttachmentRefs } from "../attachrefs";
 
-function SavedImage({ path, src }: { path: string; src: string }) {
+function SavedImage({ path, src, onError, onLoad }: { path: string; src: string; onError?: (path: string) => void; onLoad?: (path: string) => void }) {
   const [failed, setFailed] = useState(false);
   const name = path.split("/").at(-1) ?? path;
   return <div className="user-image">
     {failed ? <span>{t("图片不可用")}</span> : <ImagePreview src={src} name={name} className="user-image-trigger">
-      <img src={src} alt={name} loading="lazy" width={240} height={160} onError={() => setFailed(true)} />
+      <img
+        src={src}
+        alt={name}
+        loading="lazy"
+        width={240}
+        height={160}
+        onError={() => {
+          setFailed(true);
+          onError?.(path);
+        }}
+        onLoad={() => onLoad?.(path)}
+      />
     </ImagePreview>}
   </div>;
 }
@@ -51,12 +64,22 @@ export function UserCard({
   const [draft, setDraft] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState("");
+  const [copyNotice, setCopyNotice] = useState("");
+  const [failedImages, setFailedImages] = useState<Set<string>>(() => new Set());
   const box = useRef<HTMLTextAreaElement>(null);
   const source = messageSource(item.via, useViewer());
   const reopen = editable && draft === null;
   const rewind = !!(cp && onPrepareRewind && onCommitRewind);
   const pin = useMemo(() => parseSkillPin(item.text), [item.text]);
   const images = useMemo(() => [...new Set((item.attachments ?? []).map((a) => a.path))], [item.attachments]);
+  // The attachment's storage token is implementation detail, not user prose, so
+  // the bubble drops it from the text — but only when a port is present to draw
+  // the thumbnail it refers to, and only while that thumbnail loads. A token
+  // whose image failed to load stays readable as a fallback. Copy carries the
+  // same cleaned text so a copy/paste of an image message no longer re-inserts
+  // the raw path (the bytes are not on the clipboard anyway).
+  const displayText = port ? stripAttachmentRefs(item.text, item.attachments, failedImages) : item.text;
+  const copyText = useMemo(() => stripAttachmentRefs(item.text, item.attachments), [item.text, item.attachments]);
 
   useEffect(() => {
     const el = box.current;
@@ -95,9 +118,25 @@ export function UserCard({
             <>
               {port && images.length > 0 && <div className="user-images">{images.map((path) => {
                 const src = port.workspaceImageURL(path);
-                return <SavedImage key={src} path={path} src={src} />;
+                return <SavedImage
+                  key={src}
+                  path={path}
+                  src={src}
+                  onError={(p) => setFailedImages((prev) => {
+                    if (prev.has(p)) return prev;
+                    const next = new Set(prev);
+                    next.add(p);
+                    return next;
+                  })}
+                  onLoad={(p) => setFailedImages((prev) => {
+                    if (!prev.has(p)) return prev;
+                    const next = new Set(prev);
+                    next.delete(p);
+                    return next;
+                  })}
+                />;
               })}</div>}
-              {pin ? <SkillPinView pin={pin} /> : <div className="txt" dir="auto">{item.text}</div>}
+              {pin ? <SkillPinView pin={pin} /> : <div className="txt" dir="auto">{displayText}</div>}
             </>
           ) : (
             <div className="reask">
@@ -152,7 +191,20 @@ export function UserCard({
         </div>
         <div className="user-acts">
           {item.at && <time className="user-time" dateTime={new Date(item.at).toISOString()} title={new Date(item.at).toLocaleString()}>{clock(item.at)}</time>}
-          <CopyButton text={item.text} iconOnly showFeedback label={t("复制")} />
+          {port && images.length > 0 ? (
+            // A message that carries images has two copies — the words, or the
+            // words with the images the message was about — so the arrow beside
+            // the button offers the other one.
+            <CopyImagesButton
+              text={copyText}
+              images={images}
+              imageURL={(path) => port.workspaceImageURL(path)}
+              label={t("复制")}
+              onNotice={setCopyNotice}
+            />
+          ) : (
+            <CopyButton text={copyText} iconOnly showFeedback label={t("复制")} />
+          )}
           {reopen && (
             <button type="button" className="reask-open" data-action="turn.edit" data-target={item.id}
               title={t("改写这条消息并重新发送")} aria-label={t("改写")}
@@ -164,6 +216,7 @@ export function UserCard({
             <RewindControl cp={cp!} compact onPrepare={onPrepareRewind!} onCommit={(planId) => onCommitRewind!(planId, item.text)} />
           )}
         </div>
+        {copyNotice && <div className="copy-note" role="status">{copyNotice}</div>}
       </div>
     </div>
   );

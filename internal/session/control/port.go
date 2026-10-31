@@ -121,6 +121,16 @@ type FolderTrust interface {
 	DecideWorkspaceTrust(trust config.WorkspaceTrust) error
 }
 
+// ExternalReads answers whether a file outside the workspace may be read, and
+// from where. It is a permission answer rather than a setting, and it is apart
+// because only a surface that shows a picture outside the tree asks it.
+type ExternalReads interface {
+	// ReadableExternalPath answers where a path outside the workspace may be
+	// read from: the root it is under, and the path under that root. A path
+	// no grant covers answers nothing — naming a path is not a grant.
+	ReadableExternalPath(path string) (root string, rel string, ok bool)
+}
+
 // PlanDecisions answers the plan card. It is apart from Approvals because a
 // plan decision is a workflow transition rather than a permission answer, and
 // only a frontend that draws the three outcomes drives it — the chat gateway
@@ -571,6 +581,7 @@ type SessionAPI interface {
 	Approvals
 	QuestionInteraction
 	FolderTrust
+	ExternalReads
 	PlanDecisions
 	Goals
 	SessionHistory

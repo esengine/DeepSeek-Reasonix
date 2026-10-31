@@ -100,6 +100,52 @@ func TestStoredAttachmentsNeverCreateTheAttachmentDirectory(t *testing.T) {
 	}
 }
 
+// An image the session was handed outside the workspace is reported by its
+// absolute path (what a paste reads back) and by the opaque external-folder
+// token it arrived as (what the surface hides from the body).
+func TestStoredAttachmentsCarryExternalImagesByAbsolutePath(t *testing.T) {
+	workspace := testenv.TempDir(t)
+	c := newAttachmentController(t, workspace)
+	outside := testenv.TempDir(t)
+	image := filepath.Join(outside, "outside.png")
+	if err := os.WriteFile(image, []byte("png-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token := externalFolderRefToken(outside)
+	c.externalFolders.register(token, outside)
+
+	ref := token + "/outside.png"
+	got := c.StoredAttachments("@" + ref)
+	want := filepath.ToSlash(image)
+	if len(got) != 1 || got[0].Path != want || got[0].Ref != ref {
+		t.Fatalf("attachments = %+v, want one {Path: %q, Ref: %q}", got, want, ref)
+	}
+
+	// The token is the body's spelling; the absolute path is what the copy writes.
+	if got[0].Path == ref {
+		t.Fatalf("external image reported under its opaque token, not its absolute path: %q", got[0].Path)
+	}
+
+	// An external image no grant covers is not named.
+	if len(c.StoredAttachments("@__reasonix_external_folder/unknown/dead.png")) != 0 {
+		t.Fatal("an external image outside any grant was reported")
+	}
+
+	// A non-image external file is not an attachment.
+	txt := filepath.Join(outside, "notes.txt")
+	if err := os.WriteFile(txt, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.StoredAttachments("@"+token+"/notes.txt")) != 0 {
+		t.Fatal("a non-image external file was reported as an attachment")
+	}
+
+	// A path that was a directory grant, not an image, is not an attachment.
+	if len(c.StoredAttachments("@"+token)) != 0 {
+		t.Fatal("the folder grant itself was reported as an attachment")
+	}
+}
+
 func TestTurnStartedCarriesTheStoredAttachments(t *testing.T) {
 	workspace := testenv.TempDir(t)
 	rel := writeAttachment(t, workspace, "clipboard-20260101-000000.000000-000002.png")
