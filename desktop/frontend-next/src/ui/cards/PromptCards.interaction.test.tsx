@@ -27,11 +27,11 @@ describe("decision cards", () => {
     const approve = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
     render(<ApprovalCard item={item} onApprove={approve} onFullAccess={vi.fn(pending)} onPlan={vi.fn(pending)} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "允许这一次" }));
+    await userEvent.click(screen.getByRole("button", { name: "允许一次" }));
     expect(screen.getByText("正在提交…")).toBeTruthy();
     for (const button of screen.getAllByRole("button")) expect((button as HTMLButtonElement).disabled).toBe(true);
     release();
-    await waitFor(() => expect((screen.getByRole("button", { name: "允许这一次" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((screen.getByRole("button", { name: "允许一次" }) as HTMLButtonElement).disabled).toBe(false));
     expect(approve).toHaveBeenCalledTimes(1);
   });
 
@@ -45,9 +45,9 @@ describe("decision cards", () => {
       .mockResolvedValueOnce(undefined);
     render(<ApprovalCard item={item} onApprove={approve} onFullAccess={vi.fn(pending)} onPlan={vi.fn(pending)} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "允许这一次" }));
-    await waitFor(() => expect((screen.getByRole("button", { name: "允许这一次" }) as HTMLButtonElement).disabled).toBe(false));
-    await userEvent.click(screen.getByRole("button", { name: "允许这一次" }));
+    await userEvent.click(screen.getByRole("button", { name: "允许一次" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "允许一次" }) as HTMLButtonElement).disabled).toBe(false));
+    await userEvent.click(screen.getByRole("button", { name: "允许一次" }));
     expect(failed).toHaveBeenCalledTimes(1);
     expect(approve).toHaveBeenCalledTimes(2);
   });
@@ -67,18 +67,18 @@ describe("decision cards", () => {
     const names = () => screen.getAllByRole("button").map((b) => b.textContent);
 
     const fresh = card({});
-    expect(names()).toEqual(["允许这一次", "拒绝"]);
+    expect(names()).toEqual(["拒绝", "允许一次"]);
     cleanup();
 
     const scoped = card({ allowsSession: true });
-    expect(names()).toEqual(["允许这一次", "本会话允许此类操作，不再询问", "拒绝"]);
-    await userEvent.click(screen.getByRole("button", { name: "本会话允许此类操作，不再询问" }));
+    expect(names()).toEqual(["本会话允许", "拒绝", "允许一次"]);
+    await userEvent.click(screen.getByRole("button", { name: "本会话允许" }));
     expect(scoped.approve).toHaveBeenCalledWith("row", "gate", "session");
     cleanup();
 
     const full = card({ allowsSession: true, allowsPersist: true });
-    expect(names()).toEqual(["允许这一次", "本会话允许此类操作，不再询问", "始终允许此类操作，不再询问", "拒绝"]);
-    await userEvent.click(screen.getByRole("button", { name: "始终允许此类操作，不再询问" }));
+    expect(names()).toEqual(["本会话允许", "始终允许", "拒绝", "允许一次"]);
+    await userEvent.click(screen.getByRole("button", { name: "始终允许" }));
     expect(full.approve).toHaveBeenCalledWith("row", "gate", "always");
     void fresh;
   });
@@ -92,7 +92,7 @@ describe("decision cards", () => {
     } as Extract<Item, { t: "approval" }>;
     render(<ApprovalCard item={item} onApprove={vi.fn(pending)} onFullAccess={fullAccess} onPlan={vi.fn(pending)} />);
 
-    expect(screen.getByRole("button", { name: "本会话允许此类操作，不再询问" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "本会话允许" })).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "切换全部放行…" }));
     expect(fullAccess).not.toHaveBeenCalled();
     expect(screen.getByText("全部放行会跳过后续工具确认")).toBeTruthy();
