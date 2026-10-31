@@ -15,11 +15,18 @@ import type {
   ProviderProbe,
 } from "./port";
 import { MockBoundary } from "./mock_boundary";
+import type { ProviderHealth } from "./provider";
 
 // The sources half of the fixture. Chained on for the reason the others are:
 // MockPort satisfies AgentPort in one declaration, and each face keeps its own
 // file.
 export class MockProvider extends MockBoundary {
+  private healthEnabled = false;
+  async providerHealthSettings() { return { enabled: this.healthEnabled }; }
+  async saveProviderHealthSettings(enabled: boolean) { this.healthEnabled = enabled; return { enabled }; }
+  async providerHealth(_name: string): Promise<ProviderHealth> {
+    return { connection: "unknown", wallet: "unsupported", checkedAt: Date.now() };
+  }
   // Whether this machine has been given a provider. The fixture opens without
   // one so the connect card can be designed, and every port the same window
   // builds reads the same answer: a key belongs to the machine, not to the

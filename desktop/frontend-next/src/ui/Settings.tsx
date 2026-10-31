@@ -33,6 +33,7 @@ import { Packages } from "./Packages";
 import { ExtTabs, MarketGroup } from "./Market";
 import { InstalledLocation } from "./InstalledLocation";
 import { Switch } from "./Switch";
+import { ProviderHealthSetting } from "./ProviderHealthSetting";
 import { ServerRow } from "./ServerRow";
 import { SkillGroups } from "./SkillRow";
 import { Hooks } from "./Hooks";
@@ -491,6 +492,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {at === "persona" && <AgentPresets port={port} focusPersona={landed === "persona"} />}
 
           {at === "providers" && (
+            <>
+            <ProviderHealthSetting port={port} onChanged={onChanged} onFailed={setFailed} />
             <Group id="providers" title={t("模型服务")}
               hint={t("选择一个服务查看和修改；地址、密钥与模型列表保存后生效。自定义中转站的协议与模型会在连接后自动探测。")}>
               <Providers port={port} onChanged={() => { loadModels(); onChanged(); }} onFailed={setFailed} protocol={protocol}
@@ -498,6 +501,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                 declare={declare}
                 onProtocol={(a, kind) => switchProtocol(a.key, kind)} />
             </Group>
+            </>
           )}
 
           {at === "model" && (

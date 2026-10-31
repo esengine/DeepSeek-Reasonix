@@ -1,9 +1,19 @@
 import { SseBoundary } from "./sse_boundary";
+import type { ProviderHealth, ProviderHealthSettings } from "./provider";
 import type { Protocol, ProviderCheck, ProviderCheckDraft, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderRemoval, ProviderPreset, ProviderPresetInstall } from "./port";
 
 // Where models come from: the accounts, the protocols their endpoints answer,
 // and what probing one found.
 export class SseProvider extends SseBoundary {
+  providerHealthSettings(): Promise<ProviderHealthSettings> {
+    return this.get<ProviderHealthSettings>("/providers/health/settings");
+  }
+  saveProviderHealthSettings(enabled: boolean): Promise<ProviderHealthSettings> {
+    return this.post0<ProviderHealthSettings>("/providers/health/settings", { enabled });
+  }
+  providerHealth(name: string): Promise<ProviderHealth> {
+    return this.post0<ProviderHealth>("/providers/health", { name });
+  }
   providers() {
     return this.get<ProviderEntry[]>("/providers");
   }

@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import { UNCONFIGURED_REF } from "./ConnectNote";
 import { KIND_LABEL } from "./vendors";
 import { orderAccounts } from "../state/providerorder";
+import { modelHealthStatus, type ModelHealth } from "./modelhealth";
 
 // modelTooltip names the active model with the picker's canonical account label.
 export function modelTooltip(models: ModelEntry[], current: string | undefined, label: string): string {
@@ -25,7 +26,7 @@ export function modelLabel(models: ModelEntry[], status: { modelRef?: string; la
 // Every account gets a heading with its endpoint: the provider name is the
 // config's word for an entry, not the user's for an endpoint, and two doors onto
 // one account share it. Rows carry the wire format beside the model name.
-export function modelMenu(models: ModelEntry[], order: readonly string[] = [], current?: string): MenuItem[] {
+export function modelMenu(models: ModelEntry[], order: readonly string[] = [], current?: string, health: ModelHealth = {}): MenuItem[] {
   const accounts = orderAccounts(groupVendors(models), order);
   const out: MenuItem[] = [];
   for (const [i, a] of accounts.entries()) {
@@ -38,6 +39,7 @@ export function modelMenu(models: ModelEntry[], order: readonly string[] = [], c
           value: m.ref,
           label: m.modelAlias?.trim() || m.modelShort || m.model,
           desc: m.modelAlias?.trim() ? m.model : undefined,
+          status: modelHealthStatus(health[m.provider]),
           meta: t(KIND_LABEL[kind] ?? kind),
           badge: m.vision ? t("读图") : undefined,
           mono,
