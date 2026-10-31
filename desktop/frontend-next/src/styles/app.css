@@ -98,7 +98,6 @@
   .app {
     --chrome-h: 45px;
     --lights-w: 0px;
-    --lights-h: 0px;
     background: var(--page); border: 0; border-radius: 0; box-shadow: none;
     overflow: clip; display: flex; flex-direction: column; height: calc(100dvh / var(--zoom, 1));
   }
@@ -143,16 +142,7 @@
   }
 
   [data-titlebar="app"][data-platform="darwin"] .app {
-    --chrome-h: 51px; --lights-w: 96px; --lights-h: var(--chrome-h);
-  }
-  [data-titlebar="app"][data-platform="darwin"] .app[data-rail="off"] .chrome {
-    padding-left: calc(var(--lights-w) + var(--rail-toggle-gap) - var(--nav-w));
-  }
-  [data-titlebar="app"][data-platform="darwin"] .app[data-rail="on"] .studio-rail-head {
-    padding-top: var(--lights-h); -webkit-app-region: drag;
-  }
-  [data-titlebar="app"][data-platform="darwin"] .app[data-rail="on"] .studio-rail-head > * {
-    -webkit-app-region: no-drag;
+    --chrome-h: 51px; --lights-w: 96px;
   }
 
   [data-titlebar="app"][data-platform="darwin"] .brand {
@@ -4787,7 +4777,7 @@
     animation: pcin var(--t-card, .14s) var(--ease-out, ease-out) both;
   }
   .chrome:has(.pc-note-pop) { z-index: 40 }
-  .app:has(> .devicebar) .rail { top: 30px }
+  .app:has(> .devicebar) :is(.rail, .nav) { top: calc(var(--chrome-h) + 30px) }
   .viamark {
     flex: none; padding: 1px 7px; border-radius: var(--r-pill);
     background: color-mix(in srgb, var(--net) 14%, transparent); color: var(--text);
