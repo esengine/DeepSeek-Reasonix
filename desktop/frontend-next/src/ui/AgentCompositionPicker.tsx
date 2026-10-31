@@ -28,7 +28,7 @@ export function AgentCompositionPicker({ port, binding, locked: statusLocked, ru
   onError: (e: unknown) => void;
 }) {
   const [catalog, setCatalog] = useState<AgentPresetCatalog | null>(null);
-  const [current, setCurrent] = useState<CompositionSummary | null>(null);
+  const [selection, setSelection] = useState<{ port: AgentPort; value: CompositionSummary | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const enabled = useShowsCompositionPicker();
@@ -37,19 +37,28 @@ export function AgentCompositionPicker({ port, binding, locked: statusLocked, ru
     if (!enabled) return;
     let active = true;
     setUnavailable(false);
-    Promise.all([port.agentPresets(), port.agentComposition()]).then(([list, binding]) => {
-      if (active) { setCatalog(list); setCurrent(binding); }
+    port.agentPresets().then((list) => {
+      if (active) setCatalog(list);
     }).catch(() => { if (active) setUnavailable(true); });
     return () => { active = false; };
-  }, [enabled, port, running, binding?.digest, binding?.started]);
+  }, [enabled, port, running]);
+  useEffect(() => {
+    if (!enabled || binding !== undefined) return;
+    let active = true;
+    port.agentComposition().then((value) => {
+      if (active) setSelection({ port, value });
+    }).catch(() => { if (active) setUnavailable(true); });
+    return () => { active = false; };
+  }, [enabled, port, running, binding]);
+  const current = binding !== undefined ? binding : selection?.port === port ? selection.value : undefined;
   if (!enabled) return null;
-  if (unavailable) return <button className="mode composition-trigger" onClick={onSettings}
+  if (unavailable && !current) return <button className="mode composition-trigger" onClick={onSettings}
     data-action="agent-composition.unavailable">{t("Agent 预设暂不可用")}</button>;
-  if (!catalog) return null;
-  const selected = catalog.presets.find((v) => v.definition.id === (current?.id ?? "builtin:general"))?.definition;
+  if (current === undefined) return null;
+  const selected = catalog?.presets.find((v) => v.definition.id === (current?.id ?? "builtin:general"))?.definition;
   const locked = running || statusLocked || !!current?.started;
   const label = current ? compositionName(current.id, current.name) : t(selected?.name ?? "日常搭档");
-  const items: MenuItem[] = locked && !createNew ? [] : catalog.presets.map(({ definition }) => ({
+  const items: MenuItem[] = locked && !createNew ? [] : (catalog?.presets ?? []).map(({ definition }) => ({
     value: definition.id,
     label: compositionName(definition.id, definition.name),
     meta: compositionSource(definition.id),
@@ -63,7 +72,7 @@ export function AgentCompositionPicker({ port, binding, locked: statusLocked, ru
     if (busy) return;
     if (locked) { createNew?.(id); return; }
     setBusy(true);
-    port.selectAgentComposition(id).then((binding) => { setCurrent(binding); onChanged(); })
+    port.selectAgentComposition(id).then((value) => { setSelection({ port, value }); onChanged(); })
       .catch((e) => onError(reason(e))).finally(() => setBusy(false));
   };
   return <span className="composition-picker">

@@ -39,6 +39,10 @@ The mode picker is hidden by default. Enable **Show mode picker** on the Persona
 management page to add it above the chat input in every pane. Settings search
 also leads directly to this switch. Hiding it leaves the conversation's mode intact.
 
+When restoring history, the picker displays the saved persona from session status
+without waiting for the tool and skill catalog. The catalog populates menu choices;
+a failed catalog read does not replace a known persona with Everyday partner.
+
 Everyday partner is the initial mode. Clicking a built-in card explicitly sets
 this machine's new-task default, including local and remote tasks.
 
