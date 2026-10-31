@@ -11,7 +11,7 @@ import (
 // bindMachineTools binds the tools that reach past the workspace into this
 // machine: its browser, and its applications when the host provides a driver. They
 // replace the unbound built-ins, so they are bound after those are registered.
-func bindMachineTools(reg *tool.Registry, cfg *config.Config, root string, reused *browser.Session, driver *computer.Driver) *browser.Session {
+func bindMachineTools(reg *tool.Registry, cfg *config.Config, root, profile string, reused *browser.Session, driver *computer.Driver) *browser.Session {
 	if driver != nil {
 		for _, t := range builtin.ComputerTools(computer.NewSession(driver)) {
 			reg.Add(t)
@@ -22,7 +22,7 @@ func bindMachineTools(reg *tool.Registry, cfg *config.Config, root string, reuse
 		// can see and cannot use is a turn spent discovering that.
 		suspendComputerTools(reg)
 	}
-	return bindBrowser(reg, cfg, root, reused)
+	return bindBrowser(reg, cfg, root, profile, reused)
 }
 
 // suspendComputerTools takes the computer-use tools out of the registry and

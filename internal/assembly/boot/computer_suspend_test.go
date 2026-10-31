@@ -36,7 +36,7 @@ func TestBindMachineToolsKeepsComputerOutOfTheSchemaWithoutAHelper(t *testing.T)
 		t.Fatalf("computer tools seeded = %v, want both in the registry first", got)
 	}
 
-	bindMachineTools(reg, &config.Config{}, "/tmp/workspace", nil, nil)
+	bindMachineTools(reg, &config.Config{}, "/tmp/workspace", "workspace", nil, nil)
 
 	if got := computerToolNames(reg); len(got) != 0 {
 		t.Fatalf("computer tools still offered on a host with no helper: %v", got)

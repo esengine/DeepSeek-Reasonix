@@ -113,10 +113,13 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	// refresh the inbox from that event and must not observe already-consumed
 	// steers in the completed turn. Dispatch still waits for finishing to clear.
 	owed := c.replyOwed()
+	teamTurn := c.currentTeamTurn()
 	c.onInboxTurnDone()
 	c.recordTurnFinished(done.Cancelled)
 	c.sink.Emit(done)
 	c.replyToOpener(owed, done)
+	c.releaseTurnCeiling()
+	c.settleTeamTurn(teamTurn, err, done.Cancelled)
 }
 
 // Cancel aborts the in-flight turn. A goroutine blocked awaiting approval

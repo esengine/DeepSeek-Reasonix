@@ -130,7 +130,7 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 	gate := recovery.NewGate(recovery.Options{
 		Headless: headless,
 		Mode: func() string {
-			return c.ToolApprovalMode()
+			return c.effectiveApprovalMode()
 		},
 		EmitPrompt:      c.emitRecoveryPrompt,
 		WaitingOnPerson: c.yieldForRecoveryCard,
