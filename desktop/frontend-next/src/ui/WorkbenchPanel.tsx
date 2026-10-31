@@ -690,6 +690,7 @@ export function WorkbenchPanel({
               openFile(path);
               setMode("diff");
             }}
+            onMenu={offerMenu}
             onChanged={onTreeChanged}
             remote={remote}
           />

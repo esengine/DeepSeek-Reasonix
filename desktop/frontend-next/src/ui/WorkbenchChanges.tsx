@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, StageRequest, WorkspaceChange } from "../port/port";
@@ -15,6 +15,8 @@ interface Props {
   // The path whose diff is on screen, "" when none is.
   current: string;
   onOpen: (path: string) => void;
+  // A right-click or the context-menu key on a row; the path is workspace-relative.
+  onMenu?: (e: MouseEvent<HTMLElement>, path: string, folder: boolean) => void;
   // Asked for when staging or discarding changed the tree. Absent means this
   // surface cannot refresh the list, so it offers neither.
   onChanged?: () => void;
@@ -37,7 +39,7 @@ const withRepo = (repo: string | undefined, req: StageRequest): StageRequest => 
 // What differs as a folder tree, without opening anything, and which of it the next
 // commit will record: the index is what a commit reads, so it is shown and changed
 // here, a folder at a time or a file at a time. A change can also be thrown away.
-export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, onOpen, onChanged, commit, actions, below }: Props) {
+export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, onOpen, onMenu, onChanged, commit, actions, below }: Props) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
   const [shut, setShut] = useState<Set<string>>(new Set());
@@ -84,8 +86,9 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
                   <StudioIcon name="check" aria-hidden="true" />
                 </button>
               )}
-              <button type="button" className="workbench-change-row workbench-folder-row" style={inset} data-action="workbench.change-folder" data-target={node.path}
+              <button type="button" className="workbench-change-row workbench-folder-row" style={inset} data-action-click="workbench.change-folder" data-target={node.path}
                 {...workspaceDrag(workspaceRoot, repo ? `${repo}/${node.path}` : node.path)}
+                data-action-contextmenu={onMenu ? "workbench.menu" : undefined} onContextMenu={onMenu && ((e) => onMenu(e, repo ? `${repo}/${node.path}` : node.path, true))}
                 aria-expanded={open} onClick={() => fold(node.path)}>
                 <StudioIcon name={open ? "down" : "chevron"} aria-hidden="true" />
                 <span>{node.name}</span>
@@ -110,8 +113,9 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
                 <StudioIcon name="check" aria-hidden="true" />
               </button>
             )}
-            <button className="workbench-change-row" style={inset} data-action="workbench.diff" data-target={item.path} title={item.path}
+            <button className="workbench-change-row" style={inset} data-action-click="workbench.diff" data-target={item.path} title={item.path}
               {...workspaceDrag(workspaceRoot, repo ? `${repo}/${item.path}` : item.path)}
+              data-action-contextmenu={onMenu ? "workbench.menu" : undefined} onContextMenu={onMenu && ((e) => onMenu(e, repo ? `${repo}/${item.path}` : item.path, false))}
               aria-current={current === item.path ? "page" : undefined} onClick={() => onOpen(item.path)}>
               <em data-status={item.status}>{item.status || "M"}</em>
               <span>{node.name}</span>
