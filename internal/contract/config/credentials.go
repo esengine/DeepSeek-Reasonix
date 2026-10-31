@@ -133,17 +133,11 @@ func normalizeCredentialsStore(mode string) string {
 	}
 }
 
-func (r Roots) credentialsStoreMode() string {
+func (r Roots) credentialsStoreModeWithPaths(readPaths configReadPaths) string {
 	if mode := strings.TrimSpace(os.Getenv("REASONIX_CREDENTIALS_STORE")); mode != "" {
 		return normalizeCredentialsStore(mode)
 	}
-	var partial struct {
-		CredentialsStore string `toml:"credentials_store"`
-	}
-	if path := r.userConfigLoadPath(); path != "" {
-		_, _ = decodeTOMLFile(path, &partial)
-	}
-	return normalizeCredentialsStore(partial.CredentialsStore)
+	return r.readCredentialsStoreMode(readPaths)
 }
 
 func credentialEnvNamesFromConfig(cfg *Config) []string {
