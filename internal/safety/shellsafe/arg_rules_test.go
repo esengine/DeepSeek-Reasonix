@@ -25,6 +25,8 @@ func TestReadOnlyCommandsRefuseTheirEscapes(t *testing.T) {
 		"rg --hostname-bin=./e --hyperlink-format=default x", "rg --hostname-bin ./e x",
 		"info -o out ls", "git reflog write x", "git reflog main",
 		"go list -mod=mod ./...", "go doc -http", "env -S'sh -c x'", "env --split-string=sh",
+		"python3 -v payload.py", "python -v payload.py", "python3 -v -m http.server", "python3 -v",
+		"python3 -V payload.py", "python3 --version payload.py", "node -v payload.js",
 	}
 	for _, c := range escapes {
 		if base, sub, fields, ok := ClassifyReadOnlyCommand(c); ok && !ArgsMakeReadOnlyCommandWrite(base, sub, fields) {
@@ -40,6 +42,7 @@ func TestReadOnlyCommandsRefuseTheirEscapes(t *testing.T) {
 		"kubectl get pods -n x", "go vet ./...", "go list -json ./...", "gofmt -l .",
 		"more README.md", "cargo search serde", "date -Iseconds", "git reflog show", "git reflog --all",
 		"go env GOFLAGS", "env", "env -i",
+		"python3 -V", "python3 --version", "python -V", "python --version", "node -v", "node --version",
 	}
 	for _, c := range reads {
 		base, sub, fields, ok := ClassifyReadOnlyCommand(c)
