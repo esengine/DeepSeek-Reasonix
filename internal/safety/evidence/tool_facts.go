@@ -12,4 +12,6 @@ type ToolFacts struct {
 	// EffectsUnstated marks a tool acting through a program the host does not
 	// see into, whose call is a mutation only if the workspace shows one.
 	EffectsUnstated bool
+	// HostStateOnly marks a tool whose every effect is state the host owns.
+	HostStateOnly bool
 }

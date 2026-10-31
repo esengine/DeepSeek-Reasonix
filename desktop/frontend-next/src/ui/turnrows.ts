@@ -1,6 +1,7 @@
 import { visibleSurfaceOfTool } from "./surface/call";
 import type { Item } from "../state/session";
 import { chartOfTool } from "./chart/spec";
+import { asksThePerson } from "./team/asks";
 
 export type Row = { item: Item; activity?: Item[] } | { activity: Item[] };
 export type FoldRow = { fold: Row[]; id: string };
@@ -48,10 +49,11 @@ export function transcriptRows(all: Item[], foldWork?: { running: boolean }): Sh
   const rows: Shown[] = [];
   for (let at = 0; at < items.length;) {
     let end = at + 1;
-    while (end < items.length && items[end].t !== "user") end++;
+    // A turn opens with the person's line, or with the origin of one the host ran.
+    while (end < items.length && items[end].t !== "user" && items[end].t !== "origin") end++;
     const turn: Row[] = [];
     for (const item of items.slice(at, end)) {
-      const work = (item.t === "tool" && !chartOfTool(item.tool) && !visibleSurfaceOfTool(item.tool)) || item.t === "reads";
+      const work = (item.t === "tool" && !chartOfTool(item.tool) && !visibleSurfaceOfTool(item.tool) && !asksThePerson(item.tool)) || item.t === "reads";
       const last = turn[turn.length - 1];
       if (work && last && "activity" in last && !("item" in last)) last.activity.push(item);
       else turn.push(work ? { activity: [item] } : { item });

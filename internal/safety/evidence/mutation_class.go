@@ -55,6 +55,9 @@ func ToolCallMutationClass(toolName string, args json.RawMessage, readOnly bool)
 // known: a tool with unstated effects is unknown rather than proven, so the
 // workspace it ran against says whether it changed anything.
 func ToolCallMutationClassWith(toolName string, args json.RawMessage, facts ToolFacts) string {
+	if facts.HostStateOnly {
+		return MutationNone
+	}
 	class := ToolCallMutationClass(toolName, args, facts.ReadOnly)
 	if class == MutationProven && facts.EffectsUnstated {
 		return MutationUnknown

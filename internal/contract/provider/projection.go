@@ -1,6 +1,8 @@
 package provider
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // Two copies of a transcript are derived from the stored one: the bytes a
 // provider receives, and the projection compaction writes back. They differ in
@@ -46,6 +48,7 @@ func projectMessages(msgs []Message, keepExecution bool) []Message {
 		candidate.HostAuthored = false
 		candidate.ModelRef = ""
 		candidate.Via = nil
+		candidate.Origin = nil
 		candidate.DecisionReceipt = nil
 		candidate.DecisionReceipts = nil
 		if !keepExecution {
@@ -69,7 +72,7 @@ func needsProjection(m Message, keepExecution bool) bool {
 	if (hasArgumentNormalization(m.ToolCalls) || m.AgentComposition != nil || len(m.UnavailableImages) > 0 || m.ToolExecution != nil || m.ToolFailure != nil) && !keepExecution {
 		return true
 	}
-	return m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.HostAuthored || m.ModelRef != "" || m.Via != nil || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0
+	return m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.HostAuthored || m.ModelRef != "" || m.Via != nil || m.Origin != nil || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0
 }
 
 // videoAnswered says, per message, whether the model has answered since it; nil

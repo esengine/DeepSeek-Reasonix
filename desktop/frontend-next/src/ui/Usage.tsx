@@ -4,6 +4,7 @@ import { count, money, tokens as fmtTokens } from "../i18n/format";
 import { reason } from "../i18n/kernel";
 import { DEFAULT_USAGE_DAYS, type AgentPort, type Money, type UsageQuery, type UsageReport } from "../port/port";
 import { hostOf } from "./vendors";
+import { useCurrentTeam } from "../state/team";
 
 const RANGES: [number, string][] = [[7, "7 天"], [30, "30 天"], [365, "全部"]];
 
@@ -229,6 +230,8 @@ export function Usage({ port }: { port: AgentPort }) {
   const [month, setMonth] = useState("");
   const [providerLabels, setProviderLabels] = useState<Record<string, string>>({});
   const [report, setReport] = useState<UsageReport | null>(null);
+  const { view: team } = useCurrentTeam();
+  const agentName = (id: string) => team?.agents.find((a) => a.id === id)?.name ?? t("已删除的 Agent");
   const [err, setErr] = useState("");
 
   const query = useMemo<UsageQuery>(() => {
@@ -464,6 +467,13 @@ export function Usage({ port }: { port: AgentPort }) {
           <Bars rows={report.providers.map((p) => [p.provider, providerLabels[p.provider] ?? t("未知来源"), p.tokens, `${fmtTokens(p.tokens)}  ${p.percent.toFixed(1)}%`, sourceColor(p.provider)])} />
         </section>
       </div>
+      {!!report.agents?.length && (
+        <section className="ucard">
+          <div className="ucard-h"><h3>{t("按 Agent")}</h3></div>
+          <Bars rows={report.agents.map((a) => [a.agent, agentName(a.agent), a.tokens, `${fmtTokens(a.tokens)}  ${a.percent.toFixed(1)}%`])} />
+          <div className="unote">{t("只算团队里 Agent 发出的调用，其余对话不记在任何 Agent 名下。")}</div>
+        </section>
+      )}
       </>}
     </div>
   );

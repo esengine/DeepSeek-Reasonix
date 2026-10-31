@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -33,7 +34,7 @@ func (n *nestedInvoker) Invoke(ctx context.Context, name string, args json.RawMe
 	out := n.a.executeOne(tool.MarkNested(ctx), n.turn, call)
 	elapsed := time.Since(started).Milliseconds()
 	resultEvent := event.Tool{
-		ID: call.ID, Name: name, Args: call.ExecutionArguments(), ArgumentNormalization: call.ArgumentNormalization, Output: out.output, Err: out.errMsg,
+		ID: call.ID, Name: name, Args: call.ExecutionArguments(), ArgumentNormalization: call.ArgumentNormalization, Output: out.output, Err: secrets.Masker().String(out.errMsg),
 		RefusalCode: out.refusalCode, Bound: out.bound, DurationMs: elapsed,
 		WorkspaceLease: out.workspaceLease,
 		StartedAt:      started.UnixMilli(), EndedAt: started.UnixMilli() + elapsed, Issuer: event.IssuedByModel,

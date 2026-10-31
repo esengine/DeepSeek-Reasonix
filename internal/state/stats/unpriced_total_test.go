@@ -65,6 +65,7 @@ func TestARangeTotalSaysHowManyCallsItCouldNotPrice(t *testing.T) {
 		"active_days":       float64(1),
 		"top_model":         "deepseek/deepseek-chat",
 		"top_provider":      "deepseek",
+		"agents":            []any{},
 	}
 	if !reflect.DeepEqual(payload, want) {
 		t.Fatalf("total payload = %s\nwant %s", mustJSON(t, payload), mustJSON(t, want))

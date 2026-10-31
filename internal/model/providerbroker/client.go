@@ -157,6 +157,7 @@ type brokered struct {
 func (b *brokered) Name() string { return b.name }
 
 func (b *brokered) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	req = provider.MaskOutbound(req, provider.Signed{})
 	body, err := json.Marshal(streamRequest{Selection: b.selection, Request: req})
 	if err != nil {
 		return nil, err

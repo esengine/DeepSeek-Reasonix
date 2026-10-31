@@ -41,6 +41,7 @@ type record struct {
 	Timestamp  time.Time `json:"ts"`
 	ModelRef   string    `json:"model,omitempty"`  // canonical "provider/model"
 	Source     string    `json:"source,omitempty"` // desktop | cli | serve | bot | remote
+	Agent      string    `json:"agent,omitempty"`  // the team agent whose seat made the call
 	Prompt     int       `json:"prompt,omitempty"`
 	Completion int       `json:"completion,omitempty"`
 	Reasoning  int       `json:"reasoning,omitempty"`

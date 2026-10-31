@@ -1,18 +1,17 @@
 .projects-header { flex: none; margin: 8px 15px 6px; }
 .projects-heading { display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding-inline: 7px; color: var(--faint); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); }
 .projects-heading-actions { display: flex; align-items: center; gap: 2px; }
-.projects-heading-title { display: flex; align-items: center; gap: 6px; }
+.rail-section-heading { margin: 0; color: inherit; font: inherit; }
+.rail-section-heading .rail-section-toggle { display: flex; align-items: center; gap: 6px; width: auto; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.rail-section-heading .rail-section-toggle .studio-icon { width: 14px; height: 14px; margin-inline: 5px; }
+.rail-section-heading .rail-section-toggle:hover { background: var(--overlay); color: var(--text); }
+.rail-section-heading .rail-section-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .projects-add { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .projects-add .studio-icon { width: 16px; height: 16px; }
 .projects-add.projects-recent { width: auto; padding-inline: 6px; font: inherit; }
 .projects-add:hover:not(:disabled), .projects-heading .wsmore:is(:hover, [aria-expanded="true"]) { background: var(--overlay); color: var(--text); }
 .projects-add:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
 .projects-add:disabled { opacity: .4; cursor: default; }
-.projects-toggle { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--faint); cursor: pointer; }
-.projects-toggle .studio-icon { width: 15px; height: 15px; }
-.projects-toggle:hover:not(:disabled) { background: var(--overlay); color: var(--text); }
-.projects-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
-.projects-toggle:disabled { opacity: .4; cursor: default; }
 .projects-open { display: flex; align-items: center; gap: 9px; min-height: 34px; border: 0; border-radius: 6px; padding: 6px 8px; background: transparent; color: var(--text); font: var(--w-med) var(--fs-ui)/1.4 var(--ui); cursor: pointer; text-align: left; }
 .projects-open { width: 100%; }
 .projects-open:disabled { opacity: .5; cursor: default; }

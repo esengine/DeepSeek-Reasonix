@@ -37,6 +37,14 @@ describe("what a turn looks like once it is laid out", () => {
       .toEqual(["user", "say", "say+3", "say"]);
   });
 
+  // A turn the host ran — another agent's message, a group's turn, a schedule —
+  // opens with its origin, not the person's line; its work is its own answer's.
+  it("files a host-run turn's work under that turn's answer, not the one before", () => {
+    const from = (id: string): Item => ({ t: "origin", id, origin: { kind: "group_turn" }, text: "" });
+    expect(shape([from("o1"), said("s1", "first answer"), from("o2"), ran("t1"), said("s2", "second answer")]))
+      .toEqual(["origin", "say", "origin", "say+1"]);
+  });
+
   it("keeps work under the model that did it while no sentence has come yet", () => {
     const blank: Item = { t: "say", id: "s0", text: "", reasoning: "\n", done: true };
     expect(shape([me("u1", "go"), blank, ran("t1"), ran("t2")])).toEqual(["user", "say+2"]);
@@ -46,6 +54,14 @@ describe("what a turn looks like once it is laid out", () => {
 describe("folding a turn's work under one line", () => {
   const folded = (items: Item[], running = false) =>
     transcriptRows(items, { running }).map((r) => ("fold" in r ? `fold(${r.fold.length})` : "item" in r ? r.item.t : "work"));
+
+  // A card asking the person for something is not the turn's work: folded, it
+  // would wait unseen for an answer nobody knew was owed.
+  it("keeps a call that asks the person for something in view", () => {
+    const asks: Item = { t: "tool", id: "t1", tool: { id: "t1", name: "request_secret" } as never, running: false, children: [] };
+    expect(shape([me("u", "q"), asks, said("s1", "asked for it")])).toEqual(["user", "tool", "say"]);
+    expect(folded([me("u", "q"), said("s0", "checking"), ran("t0"), asks, said("s1", "asked for it")])).toEqual(["user", "fold(1)", "tool", "say"]);
+  });
 
   it("leaves only the last sentence outside, with the work and the earlier sentences folded", () => {
     expect(folded([me("u", "q"), said("s1", "let me look"), ran("t1"), said("s2", "found it"), ran("t2"), said("s3", "done")])).toEqual(["user", "fold(2)", "say"]);

@@ -50,6 +50,7 @@ func (h *Hub) projectPage(roots []string, name string, open map[string]string, w
 	}
 	sortTreeSessions(listed, window.recent)
 	heldBy := openLookup(open)
+	teamOwned := h.team.sessionPaths()
 	out := make([]treeSession, 0, min(len(listed), max(limit, 0)))
 	var total, archived, remaining, windowed int
 	workspaceNamed := window.query != "" && strings.Contains(strings.ToLower(name), window.query)
@@ -62,7 +63,7 @@ func (h *Hub) projectPage(roots []string, name string, open map[string]string, w
 		byID, titles := byDir[dir], titlesByDir[dir]
 		lineage := dir + "\x00" + recoveryLineageRoot(si, byID)
 		base := filepath.Base(si.Path)
-		if store.IsSubagentTranscriptName(base) {
+		if hiddenFromProject(base, si.Path, teamOwned) {
 			continue
 		}
 		runtimeID := heldBy(si.Path)
@@ -232,4 +233,10 @@ func activeAtMs(si sessionstore.SessionInfo) int64 {
 		return 0
 	}
 	return si.LastActivityAt.UnixMilli()
+}
+
+// hiddenFromProject reports a conversation the project list leaves out: a
+// sub-agent's transcript, or one of the team's agents'.
+func hiddenFromProject(base, path string, team map[string]bool) bool {
+	return store.IsSubagentTranscriptName(base) || team[sessionstore.CanonicalSessionPath(path)]
 }

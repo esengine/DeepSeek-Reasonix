@@ -36,7 +36,7 @@ func finalizeWorkspaceMutationOutcome(out *toolOutcome, plan *toolCallPlan) {
 	if !plan.executed || isMCPLifecycleConnectTarget(plan.runTool) {
 		return
 	}
-	if mutation, ok := workspaceMutationForCall(plan.call.ID, plan.evidenceName, plan.evidenceArgs, plan.readOnly); ok {
+	if mutation, ok := workspaceMutationForCall(plan.call.ID, plan.evidenceName, plan.evidenceArgs, plan.readOnly || plan.facts().HostStateOnly); ok {
 		out.workspaceMutation = &mutation
 	}
 }

@@ -22,6 +22,9 @@ import (
 // Preview computes the change write_file would make. A path that does not yet
 // exist is a Create; an existing one is a Modify.
 func (w writeFile) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
+	if err := refuseMaskedWrite(args); err != nil {
+		return diff.Change{}, err
+	}
 	var p struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -52,6 +55,9 @@ func (w writeFile) Preview(ctx context.Context, args json.RawMessage) (diff.Chan
 // "old_string must occur exactly once" rule as Execute, returning that error
 // when it doesn't — so a preview never shows a change the call couldn't make.
 func (e editFile) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
+	if err := refuseMaskedWrite(args); err != nil {
+		return diff.Change{}, err
+	}
 	var p struct {
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`
@@ -95,6 +101,9 @@ func (e editFile) Preview(ctx context.Context, args json.RawMessage) (diff.Chang
 // result against the original. Any edit error surfaces here too, so a preview
 // of an invalid batch fails the same way the call would.
 func (m multiEdit) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
+	if err := refuseMaskedWrite(args); err != nil {
+		return diff.Change{}, err
+	}
 	var p struct {
 		Path  string     `json:"path"`
 		Edits []editStep `json:"edits"`

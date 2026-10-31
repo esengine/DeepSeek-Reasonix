@@ -2,6 +2,7 @@ import { MARKET_ACTIONS } from "./actions_market";
 import { SCHEDULE_ACTIONS } from "./actions_schedule";
 import { DOCUMENT_ACTIONS } from "./actions_document";
 import { FEEDBACK_ACTIONS } from "./actions_feedback";
+import { TEAM_ACTIONS } from "./actions_team";
 
 // The census oracle is independent of production literals so disagreements fail.
 // An id names the intent; data-target and data-value name its entity and choice.
@@ -426,6 +427,7 @@ export const ACTIONS: UIAction[] = [
   { id: "remote.read", kind: "repeatable", target: "entity", proof: "authority-effect" },
   { id: "workspace.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "workspace.fold-all", kind: "view", target: "none", proof: "interaction" },
+  { id: "workspace.section-fold", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.add-cancel", kind: "view", target: "none", proof: "interaction" },
   { id: "root-missing.reselect", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.move", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
@@ -766,6 +768,7 @@ export const ACTIONS: UIAction[] = [
   { id: "rail.toggle", kind: "view", target: "none", proof: "interaction" },
   ...SCHEDULE_ACTIONS,
   ...DOCUMENT_ACTIONS,
+  ...TEAM_ACTIONS,
 ];
 
 // No action in Studio is reachable from the keyboard alone: every shortcut in

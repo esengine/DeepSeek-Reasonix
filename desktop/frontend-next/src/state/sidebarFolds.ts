@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 const KEY = "rx-sidebar-folds";
 
@@ -22,4 +22,33 @@ export function useSidebarFolds(): [Set<string>, (next: Set<string>) => void] {
     }
   };
   return [folded, save];
+}
+
+const PROJECTS_KEY = "rx-projects-folded";
+const projectListeners = new Set<() => void>();
+let volatileProjectsFolded: boolean | undefined;
+
+function projectsFolded(): boolean {
+  if (volatileProjectsFolded !== undefined) return volatileProjectsFolded;
+  try { return localStorage.getItem(PROJECTS_KEY) === "1"; } catch { return false; }
+}
+
+export function setProjectsFolded(next: boolean) {
+  try {
+    localStorage.setItem(PROJECTS_KEY, next ? "1" : "0");
+    volatileProjectsFolded = undefined;
+  } catch {
+    // A private window still keeps the choice until the page closes.
+    volatileProjectsFolded = next;
+  }
+  for (const listener of projectListeners) listener();
+}
+
+/** Navigation and the heading share the section's visibility owner. */
+export function useProjectsFolded(): [boolean, (next: boolean) => void] {
+  const folded = useSyncExternalStore((listener) => {
+    projectListeners.add(listener);
+    return () => { projectListeners.delete(listener); };
+  }, projectsFolded);
+  return [folded, setProjectsFolded];
 }

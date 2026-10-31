@@ -38,6 +38,11 @@ function draw(withRemote = false, runtimes: RuntimeView[] = []) {
 
 const scope = (value: string) => document.querySelector(`[data-action="session.filter"][data-value="${value}"]`)!;
 
+async function foldAll(label: string) {
+  await userEvent.click(screen.getByRole("button", { name: "项目列表的更多操作" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: label }));
+}
+
 it("keeps scope filters quiet without showing local-only totals for a unified list", () => {
   draw();
   for (const value of ["all", "live", "pinned", "archived"]) expect(scope(value).querySelector("b")).toBeNull();
@@ -56,30 +61,31 @@ it("starts directly with projects instead of a local machine parent", () => {
   expect(document.querySelector('.sessrow')?.getAttribute("aria-level")).toBe("2");
 });
 
-it("collapses and expands local and SSH projects together from one heading control", async () => {
+it("collapses and expands local and SSH projects together from the projects menu", async () => {
   draw(true);
   expect(screen.getByText("first")).toBeTruthy();
   expect(screen.getByText("Remote task")).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "收起所有项目" }));
+  await foldAll("收起所有项目");
   expect(screen.queryByText("first")).toBeNull();
   expect(screen.queryByText("Remote task")).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: "展开所有项目" }));
+  await foldAll("展开所有项目");
   expect(screen.getByText("first")).toBeTruthy();
   expect(screen.getByText("Remote task")).toBeTruthy();
 });
 
 it("reveals search results after collapsing everything and disables a misleading fold action", async () => {
   draw(true);
-  await userEvent.click(screen.getByRole("button", { name: "收起所有项目" }));
+  await foldAll("收起所有项目");
   await userEvent.type(screen.getByRole("searchbox", { name: "搜索会话 / 项目" }), "Remote task");
   expect(screen.getByText("Remote task")).toBeTruthy();
-  expect((screen.getByRole("button", { name: "收起所有项目" }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: "项目列表的更多操作" }));
+  expect((screen.getByRole("menuitem", { name: "收起所有项目" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("includes remote runtime-only projects in collapse all", async () => {
   draw(true, [{ id: "new", base: "/r/new", host: "gpu", root: "/srv/new", name: "Fresh task" }]);
   expect(screen.getByRole("treeitem", { name: "Fresh task" })).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "收起所有项目" }));
+  await foldAll("收起所有项目");
   expect(screen.queryByRole("treeitem", { name: "Fresh task" })).toBeNull();
 });
 

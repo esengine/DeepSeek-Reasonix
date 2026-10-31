@@ -1,12 +1,28 @@
 package providerconv
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/secrets/secretstest"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/extension/protocol"
 )
+
+func TestExtensionRequestMasksToolDefinitions(t *testing.T) {
+	secretstest.Hold("EXT_SCHEMA", "extension-schema-secret-012345")
+	req := provider.Request{Tools: []provider.ToolSchema{{Name: "fixture", Description: "extension-schema-secret-012345",
+		Parameters: json.RawMessage(`{"type":"object","properties":{"token":{"type":"string","default":"\u0065xtension-schema-secret-012345"}}}`)}}}
+	out := RequestToProtocol(req)
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "extension-schema-secret-012345") || strings.Count(string(raw), "[secret:EXT_SCHEMA]") != 2 {
+		t.Fatalf("extension request leaked a tool definition: %s", raw)
+	}
+}
 
 // Round trips through the wire DTOs must preserve every provider-visible
 // field and drop nothing the extension side needs.

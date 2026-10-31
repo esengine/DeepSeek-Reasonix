@@ -83,6 +83,8 @@ node perf/narrow.mjs    # 窄窗口 + 1.8 倍缩放：标题栏与输入区的�
 node perf/sidebar.mjs   # 侧栏开关只有一个且位置不变（图标栏 开/仅收起时/关 × 浅/深）；同一模型连续回复只在首条带头
 node perf/stickyfold.mjs # 展开的长执行过程：滚动时头部吸在顶部、有自己的底（浅/深）
 node perf/crumb.mjs # 标题栏里会话标题紧跟项目名，长名字也不溢出（宽/窄）
+node perf/team-rail.mjs # 团队区块 30 个 Agent + 10 个群：挂载不动；重排只滑动换了位置的行、不重挂；侧栏滚过或滑到一半再排也不跳
+node perf/group-log.mjs # 2000 行的群聊：打开在最新一页的底部；往前翻页时眼前的行不动；读旧消息时来新行不被拽走，在底部时跟随
 node perf/hoverradius.mjs # 输入框底行的按钮悬停时圆角和底色一致（浅/深）
 node perf/jump-ends.mjs # 回到顶部/跳到最新按钮一次点击直达两端（中间有展开块也一样）
 node perf/sessionrows.mjs # 会话行样式：34px、1px 紧凑间距、单行省略；本机/远程、悬浮/焦点、浅/深、窄/宽
@@ -104,6 +106,9 @@ and `BrowserWindow` background effects, including rejected IPC reporters.
 `switch.mjs` 收 `PERF_TURNS` 和 `PERF_STATUS_MS`——后者把内核 `/status` 的
 往返摆进来，用来分清「等的是这份记录」还是「等的是一次状态读」。
 性能台自己也读 `?ws=&sess=` 来决定左栏那棵树有多大。
+
+团队区块读 `?team=&groups=&grouplog=`：几个 Agent、几个群、第一个群有多少行。
+`window.__team` 之后再挪动它们。
 
 - `composer-reflow.mjs` arms frame sampling before each viewport change;
   sampling only after `setViewportSize` returns can miss the stale-mirror frame.

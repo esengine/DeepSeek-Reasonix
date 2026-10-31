@@ -12,6 +12,7 @@ type NotifyMessages struct {
 	NotifyFeedbackReply    string // a feedback report has a new reply
 	NotifyDiskLow          string // a volume is nearly full; formatted with the free space, then the folder's name
 	AskTimeoutMessages
+	TeamCommandMessages
 	UnattendedMessages
 	PaidSearchMessages
 	MCPSignInMessages

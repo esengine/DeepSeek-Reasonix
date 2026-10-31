@@ -490,7 +490,8 @@ var builtinToolFacts = func() func(string) evidence.ToolFacts {
 	byName := sync.OnceValue(func() map[string]evidence.ToolFacts {
 		m := make(map[string]evidence.ToolFacts)
 		for _, t := range tool.Builtins() {
-			m[t.Name()] = evidence.ToolFacts{ReadOnly: t.ReadOnly(), WritesNamedPaths: tool.WritesNamedPaths(t), EffectsUnstated: tool.EffectsUnstated(t)}
+			m[t.Name()] = evidence.ToolFacts{ReadOnly: t.ReadOnly(), WritesNamedPaths: tool.WritesNamedPaths(t), EffectsUnstated: tool.EffectsUnstated(t),
+				HostStateOnly: tool.WritesHostStateOnly(t)}
 		}
 		return m
 	})

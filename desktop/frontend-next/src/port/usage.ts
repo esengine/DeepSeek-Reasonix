@@ -60,6 +60,15 @@ export interface UsageProvider {
   percent: number;
 }
 
+// What one team agent's seats spent. Calls made off the team carry no agent,
+// so the shares need not add up to the whole.
+export interface UsageAgent {
+  agent: string;
+  tokens: number;
+  requests: number;
+  percent: number;
+}
+
 export interface UsageReport {
   from: string;
   to: string;
@@ -91,6 +100,8 @@ export interface UsageReport {
   hourly?: UsageHour[];
   models: UsageModel[];
   providers: UsageProvider[];
+  // Absent from a kernel that does not record which agent spent.
+  agents?: UsageAgent[];
 }
 
 export interface UploadDay {

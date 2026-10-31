@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/base/textutil"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
@@ -236,6 +237,8 @@ func displayToolName(name string) string {
 // return is the truncation notice, empty unless something was lost. failed comes
 // from the caller because reading it back out of the body would guess at wording.
 func (a *Agent) boundToolOutput(body, toolName, toolCallID, toolArgs string, failed bool) (string, event.OutputBound, string) {
+	// Masked before anything is spilled to disk or handed to a nested caller.
+	body = secrets.Masker().String(body)
 	bound := event.OutputBound{Lines: strings.Count(body, "\n") + 1, Bytes: len(body)}
 	paged := a.toolIsPaged(toolName) || a.readsSpilledOutput(toolName, toolArgs)
 	if !paged {

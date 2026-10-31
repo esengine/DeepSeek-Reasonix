@@ -17,6 +17,8 @@ export const EN_WINDOW: Record<string, string> = {
   "打开第一个项目": "Open your first project",
   "展开所有项目": "Expand all projects",
   "收起所有项目": "Collapse all projects",
+  "收起项目": "Collapse projects",
+  "展开项目": "Expand projects",
   "搜索时自动展开项目": "Projects expand automatically while searching",
   "这台机器的更多操作": "More actions for this machine",
   "使用系统默认应用打开": "Open with default application",

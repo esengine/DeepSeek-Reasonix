@@ -12,7 +12,7 @@ func toolFacts(t tool.Tool) evidence.ToolFacts {
 	if t == nil {
 		return readOnlyFacts
 	}
-	return evidence.ToolFacts{ReadOnly: t.ReadOnly(), WritesNamedPaths: tool.WritesNamedPaths(t), EffectsUnstated: tool.EffectsUnstated(t)}
+	return evidence.ToolFacts{ReadOnly: t.ReadOnly(), WritesNamedPaths: tool.WritesNamedPaths(t), EffectsUnstated: tool.EffectsUnstated(t), HostStateOnly: tool.WritesHostStateOnly(t)}
 }
 
 // readOnlyFacts is what an unresolvable call is credited with. A replay of a
@@ -26,6 +26,7 @@ func (p *toolCallPlan) facts() evidence.ToolFacts {
 	facts := evidence.ToolFacts{ReadOnly: p.readOnly}
 	if p.execTool != nil {
 		facts.WritesNamedPaths, facts.EffectsUnstated = tool.WritesNamedPaths(p.execTool), tool.EffectsUnstated(p.execTool)
+		facts.HostStateOnly = tool.WritesHostStateOnly(p.execTool)
 	}
 	return facts
 }

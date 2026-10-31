@@ -69,7 +69,11 @@ func (bashOutput) ProviderVisible(ctx context.Context) bool {
 	return ok
 }
 
-func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (t bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	return maskedShell(ctx, args, t.execute)
+}
+
+func (bashOutput) execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		JobID  string `json:"job_id"`
 		Filter string `json:"filter"`
@@ -239,7 +243,11 @@ func (waitJob) ProviderVisible(ctx context.Context) bool {
 	return ok
 }
 
-func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (t waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	return maskedShell(ctx, args, t.execute)
+}
+
+func (waitJob) execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		JobIDs         []string `json:"job_ids"`
 		TimeoutSeconds int      `json:"timeout_seconds"`

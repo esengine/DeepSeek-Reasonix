@@ -19,6 +19,7 @@ import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
 import { PlanApproval, DefaultMode } from "./PlanApproval";
 import { PeersSection } from "./PeersSection";
+import { TeamSection } from "./team/TeamSection";
 import { SessionCoordination } from "./SessionCoordination";
 import type { Section } from "./prefsnav";
 import { AddServer } from "./AddServer";
@@ -296,6 +297,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
     providers: models.length ? t("{n} 个服务", { n: groupVendors(models).length }) : "",
     tools: ruleCount ? `${approval} · ${ruleCount}` : approval,
     peers: "",
+    team: "",
     hooks: hookCount ? t("{n} 条", { n: hookCount }) : t("关"),
     ext: broken ? t("{n} 个异常", { n: broken }) : packages.length ? t("{n} 个包", { n: packages.length }) : `${looseMcp.length + looseOn}`,
     network: netMode,
@@ -590,6 +592,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
 
           {at === "peers" && <PeersSection port={port} hub={hub} />}
+          {at === "team" && <TeamSection hub={hub} />}
 
           {at === "hooks" && (
             <>

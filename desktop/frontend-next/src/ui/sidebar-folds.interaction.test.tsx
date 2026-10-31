@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Sidebar } from "./Sidebar";
 import { MockHub } from "../port/mock_hub";
 import { NO_PAGING } from "./treewindow";
+import { setProjectsFolded } from "../state/sidebarFolds";
 
 beforeEach(() => localStorage.clear());
-afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); setProjectsFolded(false); localStorage.clear(); });
 
 function draw(remote = false) {
   const noop = vi.fn();
@@ -45,13 +46,45 @@ it("remembers individual collapse and expansion across sidebar remounts", async 
 
 it("remembers collapse-all and expand-all across sidebar remounts", async () => {
   let view = draw();
-  await userEvent.click(screen.getByRole("button", { name: "收起所有项目" }));
+  await userEvent.click(screen.getByRole("button", { name: "项目列表的更多操作" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "收起所有项目" }));
   view.unmount();
   view = draw();
   expect(project().getAttribute("aria-expanded")).toBe("false");
-  await userEvent.click(screen.getByRole("button", { name: "展开所有项目" }));
+  await userEvent.click(screen.getByRole("button", { name: "项目列表的更多操作" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "展开所有项目" }));
   view.unmount();
   draw();
+  expect(project().getAttribute("aria-expanded")).toBe("true");
+});
+
+it("folds the whole projects section without resetting filters or local and remote folds", async () => {
+  draw(true);
+  await userEvent.click(screen.getByRole("treeitem", { name: /remote-alpha/ }));
+  await userEvent.click(screen.getByRole("button", { name: "进行中" }));
+  await userEvent.click(within(screen.getByRole("heading", { name: "项目" })).getByText("项目"));
+  expect(screen.queryByRole("group", { name: "会话范围" })).toBeNull();
+  expect(screen.queryByRole("tree")).toBeNull();
+  expect(screen.getByRole("button", { name: "打开项目" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "项目列表的更多操作" })).toBeTruthy();
+  const toggle = screen.getByRole("button", { name: "展开项目" });
+  toggle.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("button", { name: "进行中" }).getAttribute("aria-pressed")).toBe("true");
+  await userEvent.click(screen.getByRole("button", { name: "全部" }));
+  expect(screen.getByRole("treeitem", { name: /remote-alpha/ }).getAttribute("aria-expanded")).toBe("false");
+  expect(screen.getByRole("treeitem", { name: /^alpha/ }).getAttribute("aria-expanded")).toBe("true");
+});
+
+it("remembers the section fold independently and reveals selection from its menu", async () => {
+  const view = draw();
+  await userEvent.click(screen.getByRole("button", { name: "收起项目" }));
+  view.unmount();
+  draw();
+  expect(screen.queryByRole("tree")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "项目列表的更多操作" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "选择本机会话" }));
+  expect(screen.getByRole("tree").getAttribute("aria-multiselectable")).toBe("true");
   expect(project().getAttribute("aria-expanded")).toBe("true");
 });
 
@@ -62,6 +95,10 @@ it("keeps folding usable when storage cannot be written", async () => {
   expect(project().getAttribute("aria-expanded")).toBe("false");
   await userEvent.click(project());
   expect(project().getAttribute("aria-expanded")).toBe("true");
+  await userEvent.click(screen.getByRole("button", { name: "收起项目" }));
+  expect(screen.queryByRole("tree")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "展开项目" }));
+  expect(screen.getByRole("tree")).toBeTruthy();
 });
 
 

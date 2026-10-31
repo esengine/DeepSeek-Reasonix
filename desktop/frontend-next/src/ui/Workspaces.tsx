@@ -1,4 +1,5 @@
 import { inScope, sessionRuntime } from "./sessionScope";
+import { newlyDone } from "./runTransitions";
 import { Fragment, type ReactNode, memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { hidesLegacySessions, onHidesLegacySessionsChange } from "../state/prefs";
 import { onSessionQuickActionsChange, showsSessionQuickActions } from "../state/sessionQuick";
@@ -33,6 +34,7 @@ import { PeerThreadMark } from "./peerthreads";
 import { NO_PAGING, atCap, sessionCount, answers, unloaded, type TreePaging, type TreeView } from "./treewindow";
 import { SessionBatch, useSelectedRows } from "./SessionBatch";
 import { ProjectsHeader } from "./ProjectsHeader";
+import { useProjectsFolded } from "../state/sidebarFolds";
 import { useWorkspaceDrag } from "./useWorkspaceDrag";
 import { SessionAge } from "./SessionAge";
 import { SessionArchiveAction, SessionPinAction } from "./SessionRowActions";
@@ -94,6 +96,7 @@ const rowLabel = (session: TreeSession) =>
 
 function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active, folded, reload, retry, paging = NO_PAGING, previewLimit = Infinity, onFold, onToggleAll, onRecent, allFolded, canFold, opening = "", onOpen, onFocus, onClose, liveIds, listedIds = liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onBranch, onArchive = async () => {}, onRename, onError, adder, children, hasOtherRows }: Props) {
   const [busy, setBusy] = useState("");
+  const [projectsFolded, setProjectsFolded] = useProjectsFolded();
   const [confirm, setConfirm] = useState("");
   const [selection, setSelection] = useState<Set<string> | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -205,7 +208,6 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
       setBusy("");
     }
   };
-
   // Dragging reorders the whole remembered list, so a search that hides rows turns it off.
   const drag = useWorkspaceDrag(needle ? [] : tree.filter((w) => w.remembered).map((w) => w.root), async (root, before) => {
     try {
@@ -361,16 +363,16 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
   return (
     <>
       {moveTo.dialog}
-      <SessionBatch hub={hub} selection={selection} selected={selected} displayed={displayed} onSelect={setSelection}
-        onExit={() => treeKeys.ref.current?.parentElement?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
+      <div hidden={projectsFolded}><SessionBatch hub={hub} selection={selection} selected={selected} displayed={displayed} onSelect={setSelection}
+        onExit={() => treeKeys.ref.current?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
         onBusy={(pending) => { setBusy(pending ? "batch" : ""); if (pending) { setSessionMenu(""); setEditing(""); setConfirm(""); } }}
-        onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} />
-      <ProjectsHeader adder={adder} onRecent={onRecent}
-        onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle}
-        canSelect={displayed.length > 0} selecting={selection !== null}
-        onSelect={() => setSelection(new Set())} />
+        onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} /></div>
       <div className="scroll">
-        <div role="tree" aria-label={t("项目与会话")} aria-multiselectable={selection !== null} inert={busy === "batch"} data-action-keydown="tree.navigate" ref={treeKeys.ref} onKeyDown={treeKeys.onKeyDown}>
+          <ProjectsHeader adder={adder} folded={projectsFolded} onFold={setProjectsFolded} onRecent={onRecent}
+            onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle}
+            canSelect={displayed.length > 0} selecting={selection !== null}
+            onSelect={() => setSelection(new Set())} />
+        <div hidden={projectsFolded} role="tree" aria-label={t("项目与会话")} aria-multiselectable={selection !== null} inert={busy === "batch" || projectsFolded} data-action-keydown="tree.navigate" ref={treeKeys.ref} onKeyDown={treeKeys.onKeyDown}>
           {shownTree.map((ws) => {
             // A fold is a resting-state preference; while a query is on it would hide
             // the very rows the query just found.
@@ -783,18 +785,3 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
 // Panes report upward on every usage round, so the window repaints often; the
 // tree it holds does not change nearly that often.
 export const Workspaces = memo(WorkspacesView);
-
-// Which runs reached "done" since `before` last recorded them. A state is not
-// an event: `done` persists, so only a change no first sighting can produce —
-// both sides known and different — is the completion this window watched.
-export function newlyDone(
-  before: Record<string, string>,
-  runs: Record<string, { run: string; live: boolean }>,
-): string[] {
-  const fresh: string[] = [];
-  for (const [id, st] of Object.entries(runs)) {
-    if (st.run === "done" && before[id] !== undefined && before[id] !== "done") fresh.push(id);
-    before[id] = st.run;
-  }
-  return fresh;
-}

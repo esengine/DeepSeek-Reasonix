@@ -450,6 +450,7 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	req = provider.MaskOutbound(req, provider.Signed{ToolCalls: usesGeminiThoughtSignatures(c.baseURL, c.model)})
 	stream, err := c.openChatStream(ctx, req)
 	if err != nil {
 		return nil, err

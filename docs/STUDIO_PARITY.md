@@ -34,6 +34,8 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Pin a session | Have | `ui/Workspaces.tsx` (`session.pin`) |
 | Compact session rows / 紧凑会话列表 | Have | `styles/studio.css`: single-line ellipsis, 34px rows and full titles on hover. 单行省略、34px 行高，悬浮查看完整标题。 |
 | Batch selection of local sessions / 本机会话批量选择 | Have differently | `ui/LocalMachine.tsx`: “Select local sessions” is in this machine's More actions menu; `ui/SessionBatch.tsx` shows the batch toolbar only during selection. “选择本机会话”移至“这台机器”的更多菜单，仅在选择模式显示批量工具栏；保留批量归档与删除。 Refs #10651. |
+| Session scope filters (all, live, pinned, archived) / 会话范围筛选 | Have differently | `ui/ProjectsHeader.tsx`: under the Projects heading, since they scope the project list only; the Team block (`ui/team/TeamRail.tsx`) sits above that heading. 位于“项目”标题下方，只作用于项目列表；团队区块在标题上方。 |
+| Sidebar section disclosure / 侧栏分区折叠 | Have | Team and Projects share a clickable title/chevron. Folding Projects hides its filters and local/SSH rows while retaining their state; the more menu owns collapse/expand all projects. 团队和项目共用标题/箭头折叠入口；项目折叠隐藏筛选及本机/远程列表并保留状态，展开/收起所有项目位于更多菜单。 |
 | Archive and restore a session | Have | `ui/Sidebar.tsx`, `ui/Workspaces.tsx`; the quick row action is #12318 (open PR) |
 | Recycle bin page for deleted sessions | Unverified | Studio has "delete session" in `ui/Workspaces.tsx`; no recycle-bin page was found, recovery not checked |
 | Manual rename | Have | `renameSession` in `ui/App.tsx` |

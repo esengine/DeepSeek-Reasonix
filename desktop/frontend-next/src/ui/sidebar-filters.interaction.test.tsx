@@ -39,3 +39,16 @@ it("a scope filter still presses in and the find box still takes a query", async
   expect(box.value).toBe("abc");
   expect(pinned.getAttribute("aria-pressed")).toBe("true");
 });
+
+// The scope filters say which sessions the project list shows; the team above
+// it is not filtered by them, so they sit under the projects' own heading.
+it("the scope filters sit under the projects heading, after the team", async () => {
+  const { container } = render(<App hub={hub()} />);
+  const group = await screen.findByRole("group", { name: "会话范围" });
+  const team = await screen.findByRole("region", { name: "团队" });
+  expect(group.closest(".projects-header")).toBeTruthy();
+  // One scroll for both: a long team scrolls with the projects, not over them.
+  expect(team.closest(".scroll")).toBe(group.closest(".scroll"));
+  expect(team.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(container.querySelector(".projects-heading")!.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
