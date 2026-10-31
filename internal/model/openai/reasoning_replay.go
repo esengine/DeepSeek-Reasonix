@@ -9,6 +9,8 @@ func (c *client) toolCallReasoning(m provider.Message) *string {
 		return nil
 	}
 	switch {
+	case c.minimax && m.ReasoningContent != "":
+		return &m.ReasoningContent
 	case c.kimiK3 && (m.ReasoningContent != "" || len(m.ToolCalls) > 0):
 		// Kimi K3 requires the complete assistant message on multi-turn and
 		// tool-call requests, including provider-issued reasoning.

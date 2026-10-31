@@ -97,6 +97,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, effort := resolveReasoning(root, cfg.Extra)
+	thinking, effort, err := resolveMiniMaxReasoning(cfg, thinking, effort)
+	if err != nil {
+		return nil, err
+	}
 	vision, _ := cfg.Extra["vision"].(bool)
 	// DeepSeek's Anthropic-compatible endpoint documents image source blocks, so
 	// the constraint is the model's rather than the endpoint's. Defense in depth,
@@ -480,7 +484,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 		}
 		switch t {
 		case "adaptive":
-			r.Thinking = &thinkingConfig{Type: "adaptive", Display: "summarized"}
+			r.Thinking = c.adaptiveThinkingConfig()
 			if c.effort != "" {
 				r.OutputConfig = &outputConfig{Effort: c.effort}
 			}
