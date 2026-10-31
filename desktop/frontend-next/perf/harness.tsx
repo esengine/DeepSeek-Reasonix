@@ -202,6 +202,18 @@ class BenchPort extends MockPort {
     const roots = await super.workspaceRoots();
     return query.has("grant") ? { ...roots, extra: ["/library"] } : roots;
   }
+  async workspaceFiles(path = "", search = "", hidden = false) {
+    if (!query.has("deliveries")) return super.workspaceFiles(path, search, hidden);
+    const paths = Object.keys(deliveryContents);
+    if (search) return { files: paths.filter((file) => file.toLowerCase().includes(search.toLowerCase())), directories: [] };
+    const prefix = path ? `${path}/` : "";
+    const entries = paths.filter((file) => file.startsWith(prefix));
+    return {
+      files: entries.filter((file) => !file.slice(prefix.length).includes("/")),
+      directories: [...new Set(entries.filter((file) => file.slice(prefix.length).includes("/")).map((file) => prefix + file.slice(prefix.length).split("/")[0]))],
+    };
+  }
+
 
   async workspaceFile(path: string, root?: string) {
     if (query.has("deliveries") && path in deliveryContents) return { path, content: deliveryContents[path], revision: "delivery-fixture" };

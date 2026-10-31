@@ -30,6 +30,7 @@ function DeliveryEntry({ file, reply, showLocation }: { file: DeliveredFile; rep
   const path = file.root ? `${file.root.replace(/[\\/]+$/, "")}/${file.path}` : file.path;
   const href = path.split("/").map(encodeURIComponent).join("/");
   const open = reply?.files?.file?.(file) ?? reply?.files?.link(href);
+  const locate = reply?.files?.locate?.(href);
   const absolute = file.root ? path : reply?.files?.title?.(href) || path;
   const reference = fileReference(path);
   const name = file.path.split("/").at(-1)!;
@@ -60,6 +61,7 @@ function DeliveryEntry({ file, reply, showLocation }: { file: DeliveredFile; rep
     }
   };
   const actions: DeliveryAction[] = [];
+  if (locate) actions.push({ kind: "locate", label: t("在文件树中显示"), icon: "folder", run: locate });
   if (reply?.onAddFile) actions.push({ kind: "add", label: t("添加到对话"), icon: "plus", disabled: !reference,
     title: reference ? undefined : t("此名称不能表示为 @ 引用"),
     run: () => void run(() => reply.onAddFile!(reference), t("已添加到输入框")) });
@@ -68,7 +70,17 @@ function DeliveryEntry({ file, reply, showLocation }: { file: DeliveredFile; rep
   if (!file.root && reply?.revealDeliveredFile)
     actions.push({ kind: "reveal", label: t("在文件夹中显示"), icon: "folder", run: () => void run(() => reply.revealDeliveredFile!(file.path), t("已请求显示文件位置")) });
   actions.push({ kind: "copy", label: t("复制路径"), icon: "copy", run: () => void run(() => copyText(absolute), t("已复制路径")) });
-  return <div className="delivery-file" data-current={current ? "" : undefined}>
+  return <div className="delivery-file" data-current={current ? "" : undefined}
+    data-action-contextmenu="delivery.more" data-action-keydown="delivery.more"
+    onContextMenu={(event) => {
+      if (document.getSelection()?.isCollapsed === false || feedback?.kind === "busy") return;
+      event.preventDefault(); event.stopPropagation(); trigger.current?.focus(); setMenu(true);
+    }}
+    onKeyDown={(event) => {
+      if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
+      if (feedback?.kind === "busy") return;
+      event.preventDefault(); event.stopPropagation(); trigger.current?.focus(); setMenu(true);
+    }}>
     <button type="button" className="delivery-open" data-action="delivery.preview" data-target={path} disabled={!open} title={`${absolute}\n${description}`}
       aria-label={t("预览 {name}", { name })} aria-describedby={detailID} aria-current={current ? "true" : undefined} onClick={() => open?.()}>
       <FileTypeIcon path={file.path} />

@@ -92,7 +92,7 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Scheduled tasks (heartbeat) | Have differently | Scheduled runs exist (`ui/ScheduledRuns.tsx` and the schedule API, with budgets, breakers and pause reasons); 1.x's separate heartbeat loop was not ported; #11384 |
 | Keyboard shortcuts cheat sheet | Unverified | Key handling is in `ui/keys.ts`, `ui/windowkeys.ts`; no cheat sheet found by name; no issue yet |
 | CSV and media preview in the workspace panel | Have differently | `ui/document`: CSV/TSV, PDF and still images render in the workbench; audio/video remain unsupported. CSV/TSV、PDF 和图片可直接阅读，音视频仍不支持内联预览。 |
-| File delivery cards / 文件交付卡片 | Have | `present_files` and `ui/document/DeliveryCard.tsx`: validated file references reopen in the shared workbench; auxiliary actions live in More. 已验证文件引用复用工作台标签，辅助操作位于“更多”。 |
+| File delivery cards / 文件交付卡片 | Have | `present_files`, `ui/document/DeliveryCard.tsx`: preview in the workbench; More or context menus offer file-tree location and supported system actions. 工作台预览；“更多”或右键菜单可定位文件树并执行受支持的系统操作。 |
 | IM gateway (WeChat, Feishu, QQ) | Removed on purpose | Commit `f352dfbec` "remove the IM bot gateway"; `docs/MIGRATING.md` keeps the `[bot]` section untouched; #11952 asks for it back |
 
 ## Rows added by Studio
