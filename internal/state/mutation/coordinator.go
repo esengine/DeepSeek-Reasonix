@@ -137,6 +137,7 @@ func (c *Coordinator) Acquire(ctx context.Context, intent Intent) (acquired *Lea
 		return nil, err
 	}
 	probe := versionProbe{}
+	var previous *blocker
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -144,7 +145,7 @@ func (c *Coordinator) Acquire(ctx context.Context, intent Intent) (acquired *Lea
 		if err := probe.check(ctx, intent.Expected, paths); err != nil {
 			return nil, err
 		}
-		held, err := c.tryGrant(ctx, l)
+		held, err := c.retryGrant(ctx, l, previous)
 		if err != nil {
 			return nil, err
 		}
@@ -154,6 +155,7 @@ func (c *Coordinator) Acquire(ctx context.Context, intent Intent) (acquired *Lea
 		if intent.tryOnly {
 			return nil, ErrBusy
 		}
+		previous = held
 		if !waiting {
 			waiting = true
 			l.record.waitKind = held.kind
