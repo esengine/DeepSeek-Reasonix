@@ -82,6 +82,17 @@ export interface UsageReport {
   // reasons the rows recorded (the kernel's incomplete-reason vocabulary).
   unpricedCalls?: number;
   incompleteReasons?: string[];
+  // The denominator the unpriced count is read against: one per non-turn row
+  // that carried tokens, a price, or a quote that could not price the call.
+  countedCalls?: number;
+  // Calls priced from an estimated/fallback rate card rather than a
+  // provider-reported amount.
+  estimatedCalls?: number;
+  // Counted calls that recorded a price but no pricing_fingerprint.
+  unnamedCardCalls?: number;
+  // Counted calls that recorded no price fact at all: whether their card was
+  // named was never recorded, so a zero here means a measured zero.
+  unclassifiedCardCalls?: number;
   active_days: number;
   top_model: string;
   top_provider: string;

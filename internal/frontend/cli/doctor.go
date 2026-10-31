@@ -60,6 +60,9 @@ func doctorCommand(args []string, version string) int {
 	if len(args) > 0 && args[0] == "billing" {
 		return doctorBillingCommand(args[1:])
 	}
+	if len(args) > 0 && args[0] == "usage" {
+		return doctorUsageCommand(args[1:])
+	}
 	if len(args) > 0 && args[0] == "repair" {
 		return doctorRepairCommand(args[1:])
 	}

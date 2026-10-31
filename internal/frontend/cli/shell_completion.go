@@ -289,6 +289,10 @@ func doctorCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
 		completionSpec("capabilities", []cliCompletionFlag{
 			completionFlag("--root --timeout", cliCompletionStaticValue), completionFlag("--json --live", cliCompletionNoValue), help,
 		}),
+		completionSpec("usage", []cliCompletionFlag{
+			completionFlag("--from --to --source --currency", cliCompletionStaticValue), completionFlag("--days", cliCompletionStaticValue),
+			completionFlag("--json", cliCompletionNoValue), help,
+		}),
 	)
 }
 
