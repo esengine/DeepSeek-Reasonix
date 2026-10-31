@@ -10,8 +10,21 @@ import (
 var errRuntimeGone = errors.New("no such runtime")
 
 // Close retires a runtime: the conversation is persisted, the assembly torn
-// down, and the session file released for another window to open.
+// down, and the session file released for another window to open. An agent's
+// seat the team still holds goes back behind the window instead.
 func (h *Hub) Close(id string) error {
+	if h.team != nil && h.team.releaseWindow(id) {
+		h.treeChanged()
+		return nil
+	}
+	return h.closeRuntimeNow(id)
+}
+
+// closeRuntimeNow retires a runtime whoever holds it.
+func (h *Hub) closeRuntimeNow(id string) error {
+	if h.team != nil {
+		h.team.forget(id)
+	}
 	h.mu.Lock()
 	rt := h.runtimes[id]
 	if rt == nil {
@@ -53,12 +66,16 @@ func (h *Hub) Close(id string) error {
 	return nil
 }
 
-// Shutdown closes every runtime, newest first.
+// Shutdown closes every runtime, the team's background seats included, and
+// gives up the team's writer lease.
 func (h *Hub) Shutdown() {
 	defer h.closeLegacyListings()
-	for _, view := range h.List() {
-		if err := h.Close(view.ID); err != nil {
-			slog.Warn("serve: close runtime", "id", view.ID, "err", err)
+	for _, rt := range h.Runtimes() {
+		if err := h.closeRuntimeNow(rt.ID); err != nil {
+			slog.Warn("serve: close runtime", "id", rt.ID, "err", err)
 		}
+	}
+	if h.team != nil {
+		h.team.close()
 	}
 }

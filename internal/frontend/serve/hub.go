@@ -84,6 +84,8 @@ type Hub struct {
 	muxes   *eventMuxes
 	// dispatch remembers the panes a task was handed to; see dispatch.go.
 	dispatch dispatchBook
+	// team is the user's team when the host turned it on; see hub_team.go.
+	team *hubTeam
 }
 
 // approvalStance is the Ask/Auto/YOLO posture the frontend is in, held by the
@@ -203,6 +205,9 @@ type HubOptions struct {
 	// Share is the window's door for paired devices. Nil leaves its routes
 	// unregistered: a networked server has no window to open one from.
 	Share *DeviceShare
+	// Team turns the user's team of agents on. Nil leaves it off and its
+	// routes unregistered.
+	Team *TeamHostOptions
 }
 
 // NewHub returns an empty hub. Adopt or Open publishes the first runtime.
@@ -211,7 +216,7 @@ func NewHub(opts HubOptions) *Hub {
 	if opts.NotesTransport != nil {
 		notes = update.NotesReaderOver(&http.Client{Transport: opts.NotesTransport}, opts.NotesDir)
 	}
-	return &Hub{
+	h := &Hub{
 		notes:    notes,
 		runtimes: map[string]*Runtime{},
 		opts:     opts,
@@ -221,6 +226,10 @@ func NewHub(opts HubOptions) *Hub {
 		changes:  NewBroadcaster(),
 		muxes:    newEventMuxes(),
 	}
+	if opts.Team != nil {
+		h.team = newHubTeam(h, *opts.Team)
+	}
+	return h
 }
 
 // AuthToken and AuthMode report the gate every runtime shares, so a host still
@@ -342,27 +351,12 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 	}
 	bc := NewBroadcaster()
 	paneSink := h.decorateSink(bc)
+	if req.team != nil && h.team != nil {
+		paneSink = h.team.observe(req.team.seat, paneSink)
+	}
 	build := func(model string, fallback bool) (*boot.BuildResult, error) {
-		opts := boot.Options{
-			AgentComposition:         req.AgentComposition,
-			Composition:              binding,
-			ComputerDriver:           h.opts.ComputerDriver,
-			Model:                    strings.TrimSpace(model),
-			AgentPreset:              preset,
-			WorkspaceRoot:            root,
-			SessionDir:               SessionDirFor(root),
-			Sink:                     paneSink,
-			NativeSurfaces:           h.opts.NativeSurfaces,
-			Stderr:                   os.Stderr,
-			StatsSource:              h.surface(),
-			FeedbackSurface:          feedbackSurface(h.surface()),
-			AccountsURL:              accountsBaseURL(),
-			BalanceStore:             h.wallets,
-			OpenOnFallbackModel:      fallback,
-			ProviderResolver:         h.opts.ProviderResolver,
-			CleanupPendingReconciler: BackgroundCleanupReconciler,
-			NewConversation:          strings.TrimSpace(req.SessionPath) == "",
-		}
+		opts := h.paneBuildOptions(req, root, binding, preset, paneSink)
+		opts.Model, opts.OpenOnFallbackModel = strings.TrimSpace(model), fallback
 		if inherited != nil {
 			return boot.BuildRuntime(ctx, opts)
 		}
@@ -396,7 +390,7 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 	srv.stance = h.stance
 	// Ask/Auto/YOLO is a posture the user set on the window, not a per-session
 	// default, so a pane opened later starts where the others already are.
-	if mode := h.stance.get(); mode != "" {
+	if mode := h.paneStance(req); mode != "" {
 		built.Controller.SetToolApprovalMode(mode)
 	}
 	// Own the session file for as long as this pane lives, so a second pane —
@@ -414,10 +408,12 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 			return nil, keepRefusalStatus(status, err)
 		}
 	}
-	if err := addRememberedWorkspace(ctx, root); err != nil {
-		built.Controller.Close()
-		leases.Release()
-		return nil, err
+	if req.team == nil {
+		if err := addRememberedWorkspace(ctx, root); err != nil {
+			built.Controller.Close()
+			leases.Release()
+			return nil, err
+		}
 	}
 	rt := &Runtime{ID: h.nextID(), Root: root, Server: srv, Events: bc, leases: leases}
 	// Before publishing: Close reads rt.stop, and a pane must not be reachable
@@ -434,6 +430,30 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 	return rt, nil
 }
 
+// paneBuildOptions is what every pane this hub opens is built with; the model
+// and whether it may fall back are the caller's.
+func (h *Hub) paneBuildOptions(req OpenRequest, root string, binding *agentcomposition.Binding, preset string, sink event.Sink) boot.Options {
+	return boot.Options{
+		AgentComposition:         req.AgentComposition,
+		Composition:              binding,
+		ComputerDriver:           h.opts.ComputerDriver,
+		AgentPreset:              preset,
+		WorkspaceRoot:            root,
+		SessionDir:               SessionDirFor(root),
+		Sink:                     sink,
+		NativeSurfaces:           h.opts.NativeSurfaces,
+		Stderr:                   os.Stderr,
+		StatsSource:              h.surface(),
+		FeedbackSurface:          feedbackSurface(h.surface()),
+		AccountsURL:              accountsBaseURL(),
+		BalanceStore:             h.wallets,
+		ProviderResolver:         h.opts.ProviderResolver,
+		CleanupPendingReconciler: BackgroundCleanupReconciler,
+		NewConversation:          strings.TrimSpace(req.SessionPath) == "",
+		TeamSeat:                 h.team.seatFor(req),
+	}
+}
+
 // Get returns a runtime by ID, or nil.
 func (h *Hub) Get(id string) *Runtime {
 	h.mu.RLock()
@@ -447,11 +467,24 @@ func (h *Hub) List() []RuntimeView {
 	defer h.mu.RUnlock()
 	out := make([]RuntimeView, 0, len(h.order))
 	for _, id := range h.order {
-		if rt := h.runtimes[id]; rt != nil {
-			out = append(out, rt.view())
+		if rt := h.runtimes[id]; rt != nil && h.shown(rt) {
+			out = append(out, h.viewOf(rt))
 		}
 	}
 	return out
+}
+
+// shown reports whether the window draws rt as a pane. An agent's seat the
+// team keeps open behind the window is not one until the window opens it.
+func (h *Hub) shown(rt *Runtime) bool { return h.team == nil || h.team.shown(rt.ID) }
+
+// paneStance is the approval mode a new pane opens in: the agent's own for a
+// team seat that was given one, otherwise the window's.
+func (h *Hub) paneStance(req OpenRequest) string {
+	if req.team != nil && req.team.mode != "" {
+		return req.team.mode
+	}
+	return h.stance.get()
 }
 
 // Local reports whether this pane's kernel runs in this process. A remote one
@@ -535,6 +568,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("POST /runtimes", h.openRuntime)
 	mux.HandleFunc("POST /runtimes/{id}/close", h.closeRuntime)
 	h.registerTreeRoutes(mux)
+	h.registerTeamRoutes(mux)
 	h.registerMuxRoutes(mux)
 	h.registerStudioVersionRoutes(mux)
 	mux.HandleFunc("GET /device", notADevice)
@@ -595,7 +629,7 @@ func (h *Hub) openRuntime(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, rt.view())
+	writeJSON(w, h.viewOf(rt))
 }
 
 func (h *Hub) closeRuntime(w http.ResponseWriter, r *http.Request) {
@@ -629,7 +663,7 @@ func (h *Hub) routeDefault(w http.ResponseWriter, r *http.Request) {
 	var local, far *Runtime
 	for _, id := range h.order {
 		rt := h.runtimes[id]
-		if rt == nil {
+		if rt == nil || !h.shown(rt) {
 			continue
 		}
 		if rt.remote == nil {

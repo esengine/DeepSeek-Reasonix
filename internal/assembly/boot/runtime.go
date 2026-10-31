@@ -22,6 +22,7 @@ import (
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/platform/computer"
 	"reasonix/internal/session/control"
+	"reasonix/internal/session/team"
 )
 
 // BuildResult is the full product of one runtime build: the ready-to-drive
@@ -103,6 +104,11 @@ func nextRuntimeGeneration() uint64 { return runtimeGeneration.Add(1) }
 // otherwise-successful build fail: an assembly error degrades to a nil
 // Snapshot with a logged warning.
 func BuildRuntime(ctx context.Context, opts Options) (*BuildResult, error) {
+	if opts.TeamSeat != nil {
+		if err := team.CheckPlatform(); err != nil {
+			return nil, err
+		}
+	}
 	res, err := build(ctx, opts)
 	if err == nil {
 		noteHealthyConfig(opts.Version)

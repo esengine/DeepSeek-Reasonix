@@ -32,6 +32,7 @@ const (
 	tsWorkspaceFile = "desktop/frontend-next/src/port/workspace.ts"
 	tsLookFile      = "desktop/frontend-next/src/port/look.ts"
 	tsHubFile       = "desktop/frontend-next/src/port/hub.ts"
+	tsTeamFile      = "desktop/frontend-next/src/port/team.ts"
 	tsMuxFile       = "desktop/frontend-next/src/port/mux.ts"
 	tsPluginFile    = "desktop/frontend-next/src/port/plugin.ts"
 	tsChartFile     = "desktop/frontend-next/src/ui/chart/spec.ts"
@@ -129,6 +130,18 @@ var mirroredWireTypesHead = []wireMirror{
 	// use_capability where the live one drew what it reached.
 	{"internal/frontend/serve/history.go", "historyToolCall", tsSessionFile, "HistoryToolCall"},
 	{"internal/frontend/serve/history.go", "historyMessage", tsSessionFile, "HistoryMessage"},
+	// The user's team. A field the window cannot read is an agent, a group or
+	// a line of a group it draws wrong or not at all.
+	{"internal/contract/eventwire/wire.go", "Origin", tsTeamFile, "MessageOrigin"},
+	{"internal/frontend/serve/team_view.go", "teamView", tsTeamFile, "TeamView"},
+	{"internal/frontend/serve/team_view.go", "teamAgentView", tsTeamFile, "TeamAgent"},
+	{"internal/frontend/serve/team_view.go", "teamAvatarView", tsTeamFile, "TeamAvatar"},
+	{"internal/frontend/serve/team_view.go", "teamActivityView", tsTeamFile, "TeamActivity"},
+	{"internal/frontend/serve/team_view.go", "teamGroupView", tsTeamFile, "TeamGroup"},
+	{"internal/frontend/serve/team_view.go", "teamRoundView", tsTeamFile, "TeamRound"},
+	{"internal/frontend/serve/team_view.go", "teamUsageView", tsTeamFile, "TeamUsage"},
+	{"internal/state/teamroster/grouplog.go", "GroupLine", tsTeamFile, "GroupLine"},
+	{"internal/state/teamroster/exchange.go", "Exchange", tsTeamFile, "TeamExchange"},
 	{"internal/frontend/serve/history_page.go", "historyPageResponse", tsSessionFile, "HistoryPage"},
 	{"internal/frontend/serve/history_page.go", "historyPageToolContext", tsSessionFile, "HistoryToolContext"},
 	// Who can reach this window from another device. A device the page cannot
