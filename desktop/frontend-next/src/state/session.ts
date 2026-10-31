@@ -656,7 +656,7 @@ function withReceipt(items: Item[], r?: Receipt): Item[] {
 // eleven. The server strips these before /history now — this is what covers
 // sessions already on disk.
 const CONTROL =
-  /<(reasoning-language|turn-narration|response-language|execution-policy|memory-update|background-jobs|active-goal|autoresearch-runtime|hook-context|available-skills|current-date|session-scratch|project-instructions|project-rules|scoped-rules|capability-route|interrupted-turn-recovery|workspace|scheduled-run|mcp-prompt-failure|refused-calls)[\s\S]*?<\/\1>\s*/g;
+  /<(reasoning-language|turn-narration|response-language|execution-policy|memory-update|background-jobs|active-goal|autoresearch-runtime|hook-context|available-skills|current-date|session-scratch|project-instructions|project-rules|scoped-rules|capability-route|interrupted-turn-recovery|workspace|scheduled-run|mcp-prompt-failure|refused-calls|agent-identity|team-roster|group-roster)[\s\S]*?<\/\1>\s*/g;
 const stripControl = (s: string) => s.replace(CONTROL, "").trim();
 
 // A plan that ran to the end is spent: struck through in the rail it reads as
@@ -726,6 +726,7 @@ export function fromHistory(msgs: HistoryMessage[], options: { snapshot?: string
       const legacyHostRepair = m.content.startsWith("The following tools are unavailable in the current workflow phase:");
       const text = m.hostAuthored || legacyHostRepair ? "" : stripControl(m.content);
       if (text) out.push({ t: "user", id: allocate(), text, msgIndex: m.msgIndex, steer: m.steer, via: m.via, attachments: m.attachments, at: m.createdAt });
+      if (m.origin) out.push({ t: "origin", id: allocate(), origin: m.origin, text: m.content, msgIndex: m.msgIndex });
       continue;
     }
     if (m.role === "assistant") {

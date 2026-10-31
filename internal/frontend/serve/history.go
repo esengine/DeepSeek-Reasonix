@@ -54,6 +54,8 @@ type historyMessage struct {
 	// Via is the paired device a user message was sent from; absent is the
 	// window. Written when the message landed, so a reload still says it.
 	Via *eventwire.Via `json:"via,omitempty"`
+	// Origin is who a host-run turn was for: another agent, a reply, a group.
+	Origin *eventwire.Origin `json:"origin,omitempty"`
 	// Which model wrote this assistant turn. A reopened transcript has no
 	// turn_started to read it off, and the composer's current setting is a
 	// different fact that has usually moved on.
@@ -109,7 +111,7 @@ func historyMessageWindow(msgs []provider.Message, attachments func(string) []ev
 				}
 				out = append(out, historyMessage{
 					Role: string(provider.RoleUser), Content: steerText, Steer: true,
-					HostAuthored: host || m.HostAuthored, MsgIndex: offset + i, Via: eventwire.ToWireVia(m.Via),
+					HostAuthored: host || m.HostAuthored, MsgIndex: offset + i, Via: eventwire.ToWireVia(m.Via), Origin: eventwire.ToWireOrigin(m.Origin),
 				})
 				if !host && !m.HostAuthored {
 					out[len(out)-1].Attachments = attached(steerText)
@@ -124,6 +126,7 @@ func historyMessageWindow(msgs []provider.Message, attachments func(string) []ev
 			hm.Content = sessionstore.UserMessageText(m)
 			hm.Images = len(m.Images)
 			hm.Via = eventwire.ToWireVia(m.Via)
+			hm.Origin = eventwire.ToWireOrigin(m.Origin)
 			hm.CreatedAt = m.CreatedAt
 			if !m.HostAuthored {
 				hm.Attachments = attached(hm.Content)

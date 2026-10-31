@@ -33,6 +33,13 @@ var hostOnlyRoutes = []hostRoute{
 	{http.MethodPost, "/market/install"},
 	{http.MethodPost, "/market/mine/install"},
 	{http.MethodPost, "/workspace-trust"},
+	{http.MethodPost, "/team/bootstrap"},
+	{http.MethodPost, "/team/agents"},
+	{http.MethodPatch, "/team/agents/{id}"},
+	{http.MethodDelete, "/team/agents/{id}"},
+	{http.MethodPost, "/team/groups"},
+	{http.MethodPatch, "/team/groups/{id}"},
+	{http.MethodDelete, "/team/groups/{id}"},
 }
 
 // GET /history/tool/{id} is not listed on purpose: it is a window onto what GET /history

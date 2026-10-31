@@ -2,6 +2,7 @@ import { MARKET_ACTIONS } from "./actions_market";
 import { SCHEDULE_ACTIONS } from "./actions_schedule";
 import { DOCUMENT_ACTIONS } from "./actions_document";
 import { FEEDBACK_ACTIONS } from "./actions_feedback";
+import { TEAM_ACTIONS } from "./actions_team";
 
 // The census oracle is independent of production literals so disagreements fail.
 // An id names the intent; data-target and data-value name its entity and choice.
@@ -766,6 +767,7 @@ export const ACTIONS: UIAction[] = [
   { id: "rail.toggle", kind: "view", target: "none", proof: "interaction" },
   ...SCHEDULE_ACTIONS,
   ...DOCUMENT_ACTIONS,
+  ...TEAM_ACTIONS,
 ];
 
 // No action in Studio is reachable from the keyboard alone: every shortcut in

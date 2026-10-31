@@ -628,6 +628,8 @@ type Event struct {
 	// the window. Text carries the message itself, which a client that did not
 	// send it has no other way to draw.
 	Via *provider.Via
+	// TurnStarted: the agent or group the host ran this turn for; nil is the user.
+	Origin *provider.Origin
 	// TurnStarted / Steer: the stored attachments the message references, as
 	// the host resolved them.
 	Attachments []Attachment

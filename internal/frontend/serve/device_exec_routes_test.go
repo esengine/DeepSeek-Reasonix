@@ -44,6 +44,14 @@ func TestPairedDeviceCannotGrantStandingExecutionAuthority(t *testing.T) {
 		{http.MethodPost, "/market/install"},
 		{http.MethodPost, "/market/mine/install"},
 		{http.MethodPost, "/workspace-trust"},
+		{http.MethodPost, "/team/bootstrap"},
+		{http.MethodPost, "/team/agents"},
+		{http.MethodPatch, "/team/agents/a-0123456789abcdef"},
+		{http.MethodDelete, "/team/agents/a-0123456789abcdef"},
+		{http.MethodPost, "/team/groups"},
+		{http.MethodPatch, "/team/groups/g-0123456789abcdef"},
+		{http.MethodDelete, "/team/groups/g-0123456789abcdef"},
+		{http.MethodPatch, "/rt/abc123/team/agents/a-0123456789abcdef"},
 		{http.MethodPost, "/rt/abc123/plugins/install"},
 		{http.MethodPost, "/rt/abc123/hooks"},
 	} {
@@ -64,6 +72,9 @@ func TestPairedDeviceStillReadsAndPlansExtensions(t *testing.T) {
 		{http.MethodPost, "/submit"},
 		{http.MethodPost, "/runtimes"},
 		{http.MethodPost, "/tool-approval-mode"},
+		{http.MethodGet, "/team"},
+		{http.MethodPost, "/team/groups/g-0123456789abcdef/messages"},
+		{http.MethodPost, "/team/agents/a-0123456789abcdef/stop"},
 	} {
 		reached := 0
 		gate, cookie := pairedGate(t, &reached)

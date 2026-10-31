@@ -85,6 +85,9 @@ type Server struct {
 	// stance is the hub's Ask/Auto/YOLO posture, shared by every pane it drives.
 	// Nil for a server outside a hub, which speaks only for itself.
 	stance *approvalStance
+	// ownPosture, when set, owns this pane's approval mode instead of the
+	// window: an agent's seat keeps the mode its agent was given.
+	ownPosture func(mode string)
 	// siblings lists the other local panes open on the same workspace, set by
 	// the hub; nil for a server outside one.
 	siblings func(self *Server) []*Server

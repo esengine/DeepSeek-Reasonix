@@ -153,9 +153,10 @@ func (h *Hub) resolveRoot(req OpenRequest) (string, error) {
 	}
 	h.mu.RLock()
 	first := ""
-	if len(h.order) > 0 {
-		if rt := h.runtimes[h.order[0]]; rt != nil {
+	for _, id := range h.order {
+		if rt := h.runtimes[id]; rt != nil && rt.remote == nil && h.shown(rt) {
 			first = rt.Server.Controller().WorkspaceRoot()
+			break
 		}
 	}
 	h.mu.RUnlock()

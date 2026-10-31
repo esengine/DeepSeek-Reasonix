@@ -5,7 +5,7 @@ import { t } from "../i18n";
 /** The settings table of contents: which sections exist, what each is called,
  *  what mark it carries and which question it answers. Kept out of Settings
  *  itself because it is a table, not a screen — the screen reads it. */
-export type Section = "session" | "persona" | "model" | "providers" | "tools" | "peers" | "hooks" | "ext" | "network" | "remote" | "memory" | "usage" | "storage" | "account" | "versions" | "appearance" | "advanced";
+export type Section = "session" | "persona" | "model" | "providers" | "tools" | "peers" | "team" | "hooks" | "ext" | "network" | "remote" | "memory" | "usage" | "storage" | "account" | "versions" | "appearance" | "advanced";
 
 // Drawn on the same 16-unit grid at 1.45 stroke as the rest of this screen's
 // marks. The rail in Nav.tsx draws a section's entry from this table, so one
@@ -31,6 +31,15 @@ export const ICON: Record<Section, ReactNode> = {
       <rect x="2.4" y="2.6" width="11.2" height="4.2" rx="1.2" />
       <rect x="2.4" y="9.2" width="11.2" height="4.2" rx="1.2" />
       <path d="M5 4.7h3.4M5 11.3h3.4M11 4.7h.01M11 11.3h.01" />
+    </>
+  ),
+  // Three heads: the agents of a team.
+  team: (
+    <>
+      <circle cx="8" cy="5.2" r="2.2" />
+      <circle cx="3.8" cy="9.6" r="1.8" />
+      <circle cx="12.2" cy="9.6" r="1.8" />
+      <path d="M4.6 13.6c.7-1.9 2-2.8 3.4-2.8s2.7.9 3.4 2.8" />
     </>
   ),
   // Two conversations with a line between them.
@@ -112,6 +121,7 @@ export const NAV: [string, [Section, string][]][] = [
       ["providers", "模型服务"],
       ["tools", "工具与权限"],
       ["peers", "会话间消息"],
+      ["team", "团队"],
       ["hooks", "自动化"],
       ["ext", "扩展"],
     ],
@@ -265,6 +275,10 @@ export const SETTINGS: SettingEntry[] = [
   // The lease is built with the session and a rebuild adopts the one it holds, so
   // the save reaches only sessions opened afterwards; the handler rebuilds nothing.
   { section: "peers", anchor: "peers", title: "会话间消息（实验）", scope: "machine", apply: "next-turn", keywords: ["peer", "会话间", "消息", "发送", "批准", "挂起", "另一个会话"] },
+  // Kept in this window's storage and read by the page at once.
+  { section: "team", anchor: "team-motion", title: "Agent 动效", scope: "machine", apply: "immediate", keywords: ["动画", "动效", "安静", "活泼", "眨眼", "motion"] },
+  // A roster write; the sidebar draws the row again on the change notice.
+  { section: "team", anchor: "team-hidden", title: "已隐藏的 Agent 和群聊", scope: "machine", apply: "immediate", keywords: ["隐藏", "侧栏", "恢复", "显示"] },
   { section: "peers", anchor: "peer-projects", title: "放行的项目", scope: "machine", apply: "next-turn", keywords: ["放行", "项目", "不再询问", "长期", "撤销", "peer", "release", "会话间"] },
   { section: "tools", anchor: "write-lease", title: "多个会话同时写一个项目", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "等待"] },
   { section: "tools", anchor: "subagent-claims", title: "子代理的写入范围", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "子代理", "并发", "write_paths", "乐观", "optimistic", "写锁"] },

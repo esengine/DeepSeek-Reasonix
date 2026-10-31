@@ -9,22 +9,19 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/hostframe"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/state/peermail"
 	"reasonix/internal/state/sessioninbox"
 	"reasonix/internal/state/sessionstore"
 )
-
-var peerFrameTag = regexp.MustCompile(`(?i)<(\s*/?\s*` + peerMessageTag + `)`)
 
 const (
 	peerIngestEvery   = 2 * time.Second
@@ -500,11 +497,9 @@ func peerMessageTexts(m peermail.Message, consent peermail.Consent) (display, su
 		from = fmt.Sprintf("%s · %s", from, project)
 	}
 	display = "message from another session: " + from
-	body := peerFrameTag.ReplaceAllString(m.Body, `<\$1`)
 	var b strings.Builder
-	fmt.Fprintf(&b, "<%s from=%q session=%q id=%q>\n", peerMessageTag, from, m.From.SessionID, m.ID)
-	b.WriteString(body)
-	b.WriteString("\n</" + peerMessageTag + ">\n\n")
+	b.WriteString(hostframe.Block(peerMessageTag, []hostframe.Attr{{Name: "from", Value: from}, {Name: "session", Value: m.From.SessionID}, {Name: "id", Value: m.ID}}, m.Body))
+	b.WriteString("\n")
 	b.WriteString("Another Reasonix session on this machine sent the message above, ")
 	if consent == peermail.ConsentDispatch {
 		b.WriteString("one this session was paired with by a dispatch. The user's dispatch switch let it in without a card, so the user has not read this message. ")
@@ -516,17 +511,4 @@ func peerMessageTexts(m peermail.Message, consent peermail.Consent) (display, su
 }
 
 // peerAttribute reduces a name the sender chose to a short printable token.
-func peerAttribute(s string) string {
-	var b strings.Builder
-	n := 0
-	for _, r := range strings.TrimSpace(s) {
-		if n >= peerAttributeRune {
-			break
-		}
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || strings.ContainsRune("._-", r) {
-			b.WriteRune(r)
-			n++
-		}
-	}
-	return strings.TrimSpace(b.String())
-}
+func peerAttribute(s string) string { return hostframe.Token(s, peerAttributeRune) }

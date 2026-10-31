@@ -312,7 +312,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 // it when the turn opens an authored one.
 func (c *Controller) announceAuthoredTurn(ctx context.Context, raw string, msgIndex int) context.Context {
 	via := turnVia(ctx)
-	boundary := agent.HostTurnBoundary{Via: via}
+	boundary := agent.HostTurnBoundary{Via: via, Origin: turnOrigin(ctx)}
 	// The turn names the model it runs on. Under a host boundary this is the
 	// only start the turn gets, so a reply attributed from anywhere else — the
 	// composer's current setting — is attributed from something that moves.
@@ -342,12 +342,26 @@ func (c *Controller) announceAuthoredTurn(ctx context.Context, raw string, msgIn
 func (c *Controller) openTurnBoundary(ctx context.Context, turn orchestratedTurn, msgIndex int) (context.Context, sessionstore.InFlightTurnMeta) {
 	ctx, marker := c.beginTurn(ctx, msgIndex, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
 	if turn.synthetic {
+		origin := turnOrigin(ctx)
 		if turn.opensTurn {
-			c.sink.Emit(event.Event{Kind: event.TurnStarted, ModelRef: c.modelRef})
+			c.sink.Emit(c.hostTurnStarted(origin, firstNonEmpty(turn.raw, turn.input), msgIndex))
 		}
-		return c.continueAnnouncedTurn(ctx), marker
+		return agent.WithHostTurnBoundary(ctx, agent.HostTurnBoundary{HostAuthored: true, Origin: origin}), marker
 	}
 	return c.announceAuthoredTurn(ctx, firstNonEmpty(turn.raw, turn.input), msgIndex), marker
+}
+
+// hostTurnStarted announces a turn the host opened. One run for another agent
+// or a group carries what it was handed and the index it lands on, so a window
+// watching draws the row a reload would; any other host turn names neither.
+func (c *Controller) hostTurnStarted(origin *provider.Origin, raw string, msgIndex int) event.Event {
+	started := event.Event{Kind: event.TurnStarted, ModelRef: c.modelRef}
+	if origin != nil {
+		index := msgIndex
+		started.Origin, started.MsgIndex = origin, &index
+		started.Text = sessionstore.UserMessageText(provider.Message{Role: provider.RoleUser, RawContent: raw})
+	}
+	return started
 }
 
 // continueAnnouncedTurn hands a run the boundary of the turn it belongs to. A

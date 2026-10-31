@@ -1,6 +1,8 @@
 package boot
 
 import (
+	"path/filepath"
+
 	"reasonix/internal/contract/config"
 	"reasonix/internal/state/instruction"
 	"reasonix/internal/state/memory"
@@ -33,6 +35,7 @@ func buildMemoryAssembly(opts Options, cfg *config.Config, root, sysPrompt strin
 		PinnedBudgetChars: cfg.Memory.PinnedBudgetChars,
 		RecallLimit:       cfg.Memory.RecallLimit,
 		RecallMaxChars:    cfg.Memory.RecallMaxChars,
+		FactsDir:          agentMemoryDir(opts),
 	})
 	return memoryAssembly{
 		set:       set,
@@ -40,4 +43,19 @@ func buildMemoryAssembly(opts Options, cfg *config.Config, root, sysPrompt strin
 		sensitive: instruction.ExtractSensitivePaths(set.Docs),
 		sysPrompt: memory.Compose(sysPrompt, set),
 	}
+}
+
+// agentMemoryDir is where an agent on the user's team keeps its facts: one
+// place for its own chat and every group seat, whatever folder each works in.
+// Empty for an ordinary session, which keeps its project's.
+func agentMemoryDir(opts Options) string {
+	if opts.TeamSeat == nil {
+		return ""
+	}
+	_, ref := opts.TeamSeat.Team()
+	dir := opts.roots().TeamDir()
+	if ref.Agent == "" || dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "agents", ref.Agent, "memory")
 }

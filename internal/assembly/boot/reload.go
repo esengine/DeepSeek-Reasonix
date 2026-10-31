@@ -73,6 +73,9 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	if opts.BrowserSession == nil {
 		opts.BrowserSession = old.BrowserSession()
 	}
+	if opts.TeamSeat == nil {
+		opts.TeamSeat = old.BoundTeamSeat()
+	}
 	if opts.WorkspaceRepo.Dir == "" {
 		opts.WorkspaceRepo = old.WorkspaceRepo()
 	}

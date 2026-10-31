@@ -178,6 +178,12 @@ grid to break.
   there would read as "running" or "succeeded". `--io-down` is `--cat-5`, which
   already is this figure — the context bar's output segment.
 
+### Agent avatars
+
+- An agent's colour is one of `--cat-1` to `--cat-5`, chosen by the person or derived from its id.
+- Five hues cannot keep a large team apart, so the glyph is the second channel; the name always sits beside the mark, so colour never carries identity alone.
+- Badges keep to the status roles: `net` for working, `accent` for waiting on the person, `brand` for a main agent.
+
 ## Shape
 
 `--chev` masks one stroked polyline wherever a corner is drawn, with the colour
