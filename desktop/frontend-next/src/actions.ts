@@ -134,6 +134,23 @@ export const ACTIONS: UIAction[] = [
   { id: "session.selection", kind: "view", target: "optional", proof: "interaction" },
   { id: "session.batch-archive", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "session.batch-delete", kind: "destructive", target: "none", proof: "authority-effect" },
+
+  // ── The standalone session-management view ────────────────────────────────
+  // A modal that lists every conversation, filters them, and deletes in bulk.
+  // manage/open raise the panel; the row's open reaches the kernel like
+  // session.open; scope/search/project/select-all/toggle are view-only filters;
+  // delete and its confirm are destructive and reach the batch endpoint.
+  { id: "session-manager.manage", kind: "view", target: "none", proof: "interaction" },
+  { id: "session-manager.open", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "session-manager.close", kind: "navigation", target: "none", proof: "interaction" },
+  { id: "session-manager.scope", kind: "view", target: "none", proof: "interaction" },
+  { id: "session-manager.search", kind: "view", target: "none", proof: "interaction" },
+  { id: "session-manager.project", kind: "view", target: "none", proof: "interaction" },
+  { id: "session-manager.select-all", kind: "view", target: "none", proof: "interaction" },
+  { id: "session-manager.toggle", kind: "view", target: "none", proof: "interaction" },
+  { id: "session-manager.delete", kind: "destructive", target: "none", proof: "authority-effect" },
+  { id: "session-manager.delete-confirm", kind: "destructive", target: "none", proof: "authority-effect" },
+
   { id: "chrome.settings", kind: "navigation", target: "none", proof: "interaction" },
   { id: "browser.open", kind: "view", target: "none", proof: "interaction" },
   { id: "browser.full", kind: "view", target: "none", proof: "interaction" },

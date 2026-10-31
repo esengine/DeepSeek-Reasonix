@@ -1,0 +1,2 @@
+- 新增：桌面端新增「管理会话」视图，可集中浏览全部会话，按范围、搜索与项目筛选，勾选后批量删除。关联 #14772、#14611。
+- New: a new "Manage conversations" view in the desktop app lists every conversation, filters them by scope, search and project, and deletes the selected ones in bulk. Refs #14772, #14611.

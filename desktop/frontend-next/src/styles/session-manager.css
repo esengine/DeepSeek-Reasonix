@@ -1,0 +1,241 @@
+/* 会话管理：独立会话管理界面的样式 */
+.sm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--page, #000) 55%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.sm-panel {
+  width: min(880px, 94vw);
+  height: min(78vh, 760px);
+  display: flex;
+  flex-direction: column;
+  background: var(--float, #fff);
+  color: var(--text, #111);
+  border: 1px solid var(--border, #ddd);
+  border-radius: var(--r-md, 12px);
+  box-shadow: 0 24px 60px rgb(0 0 0 / .28);
+  overflow: hidden;
+}
+
+.sm-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border, #eee);
+}
+.sm-head h2 {
+  margin: 0;
+  font: var(--w-semi, 600) var(--fs-lead) / 1 var(--ui);
+  color: var(--text, #111);
+}
+.sm-count {
+  color: var(--muted, #888);
+  font: var(--w-reg, 400) var(--fs-meta) var(--ui);
+}
+.sm-x {
+  margin-left: auto;
+  display: inline-flex;
+  padding: 6px;
+  border-radius: var(--r-sm, 8px);
+  background: transparent;
+  border: none;
+  color: var(--muted, #888);
+  cursor: pointer;
+}
+.sm-x:hover { background: var(--overlay, #0001); color: var(--text, #111); }
+
+.sm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, #eee);
+}
+.sm-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: var(--r-sm, 8px);
+  color: var(--muted, #888);
+  background: var(--page, #fff);
+}
+.sm-search input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text, #111);
+  font: var(--w-reg, 400) var(--fs-ui) var(--ui);
+  width: 100%;
+}
+.sm-seg {
+  display: inline-flex;
+  border: 1px solid var(--border, #ddd);
+  border-radius: var(--r-sm, 8px);
+  overflow: hidden;
+}
+.sm-seg button {
+  border: none;
+  background: transparent;
+  color: var(--muted, #888);
+  padding: 6px 12px;
+  font: var(--w-med, 500) var(--fs-ui) var(--ui);
+  cursor: pointer;
+}
+.sm-seg button[aria-pressed="true"] {
+  background: var(--accent, #4b6bfb);
+  color: var(--accent-fg, #fff);
+}
+.sm-ws {
+  border: 1px solid var(--border, #ddd);
+  border-radius: var(--r-sm, 8px);
+  padding: 6px 10px;
+  background: var(--page, #fff);
+  color: var(--text, #111);
+  font: var(--w-reg, 400) var(--fs-ui) var(--ui);
+  max-width: 220px;
+}
+
+.sm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border, #eee);
+}
+.sm-selall {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text, #111);
+  font: var(--w-med, 500) var(--fs-ui) var(--ui);
+  cursor: pointer;
+}
+.sm-status { color: var(--muted, #888); font: var(--w-reg, 400) var(--fs-meta) var(--ui); }
+.sm-spacer { flex: 1; }
+.sm-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--danger, #e5484d);
+  background: var(--danger, #e5484d);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: var(--r-sm, 8px);
+  font: var(--w-semi, 600) var(--fs-ui) var(--ui);
+  cursor: pointer;
+}
+.sm-danger:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.sm-list {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 8px;
+}
+.sm-empty {
+  color: var(--muted, #888);
+  text-align: center;
+  padding: 32px 0;
+  font: var(--w-reg, 400) var(--fs-ui) var(--ui);
+}
+.sm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm, 8px);
+}
+.sm-row.is-sel { background: color-mix(in srgb, var(--accent, #4b6bfb) 12%, transparent); }
+.sm-row.is-running { opacity: .72; }
+.sm-check { width: 16px; height: 16px; }
+.sm-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text, #111);
+  padding: 2px 0;
+}
+.sm-open:hover .sm-title { color: var(--accent, #4b6bfb); }
+.sm-title {
+  font: var(--w-med, 500) var(--fs-lead) / 1.2 var(--ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sm-meta {
+  display: flex;
+  gap: 10px;
+  color: var(--muted, #888);
+  font: var(--w-reg, 400) var(--fs-meta) var(--ui);
+}
+.sm-meta .sm-ws { color: var(--muted, #888); }
+.sm-badges { display: inline-flex; gap: 6px; flex: none; }
+.sm-badge {
+  font: var(--w-reg, 400) var(--fs-micro) var(--ui);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted, #888) 18%, transparent);
+  color: var(--muted, #888);
+}
+.sm-badge.running { background: color-mix(in srgb, var(--accent, #4b6bfb) 18%, transparent); color: var(--accent, #4b6bfb); }
+.sm-badge.unread { background: color-mix(in srgb, var(--danger, #e5484d) 16%, transparent); color: var(--danger, #e5484d); }
+
+.sm-note {
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--muted, #888);
+  font: var(--w-reg, 400) var(--fs-meta) var(--ui);
+  border-top: 1px solid var(--border, #eee);
+}
+
+/* The confirm step names every conversation it will erase, each beside the
+   workspace it belongs to, so the blast radius is legible before the delete. */
+.sm-confirm-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 38vh;
+  overflow: auto;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--border, #eee);
+  border-radius: var(--r-sm, 8px);
+  background: color-mix(in srgb, var(--muted, #888) 8%, transparent);
+}
+.sm-confirm-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+}
+.sm-confirm-name {
+  font: var(--w-med, 500) var(--fs-reg) var(--ui);
+  color: var(--text, #111);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sm-confirm-ws {
+  flex: none;
+  color: var(--muted, #888);
+  font: var(--w-reg, 400) var(--fs-meta) var(--ui);
+}

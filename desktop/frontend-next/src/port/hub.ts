@@ -204,6 +204,8 @@ export interface HubPort extends SharePort {
   /** Drop a project before another remembered one, or at the end when `before` is empty. */
   placeWorkspace(path: string, before: string): Promise<void>;
   removeSession(path: string): Promise<void>;
+  /** Deletes several conversations in one request; rejects as a unit if any is busy or outside a known workspace. */
+  removeSessions(paths: string[]): Promise<void>;
   /** The conversation moves into the named project; originalRemoved is false when the copy arrived but the original could not be taken away. */
   moveSessionTo(path: string, target: string): Promise<{ path: string; originalRemoved: boolean }>;
   archiveSession(path: string, archived: boolean, host?: string): Promise<void>;
@@ -416,6 +418,11 @@ export class SseHub implements HubPort {
 
   async removeSession(path: string) {
     await this.post<void>("/tree/sessions/remove", { path });
+  }
+
+  async removeSessions(paths: string[]) {
+    if (paths.length === 0) return;
+    await this.post<void>("/tree/sessions/remove-many", { paths });
   }
 
   async archiveSession(path: string, archived: boolean, host?: string) {

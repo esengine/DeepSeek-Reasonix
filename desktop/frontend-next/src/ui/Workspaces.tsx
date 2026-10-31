@@ -361,7 +361,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
   return (
     <>
       {moveTo.dialog}
-      <SessionBatch hub={hub} selection={selection} selected={selected} displayed={displayed} onSelect={setSelection}
+      <SessionBatch hub={hub} selection={selection} selected={selected} displayed={displayed} workspaces={shownTree} onSelect={setSelection}
         onExit={() => treeKeys.ref.current?.parentElement?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
         onBusy={(pending) => { setBusy(pending ? "batch" : ""); if (pending) { setSessionMenu(""); setEditing(""); setConfirm(""); } }}
         onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} />

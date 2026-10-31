@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { current, t } from "../i18n";
-import type { HubPort, TreeSession } from "../port/hub";
+import type { HubPort, TreeSession, TreeWorkspace } from "../port/hub";
 import { clearDraftForSession } from "./drafts";
+import { pushNote } from "../state/toasts";
 import "../styles/session-batch.css";
 
 /** The selected rows that are still on screen; a row that leaves the displayed set leaves the selection. */
@@ -18,11 +19,12 @@ export function useSelectedRows(displayed: TreeSession[], selection: Set<string>
   return [...new Map(displayed.filter((row) => selection?.has(row.path)).map((row) => [row.path, row])).values()];
 }
 
-export function SessionBatch({ hub, selection, selected, displayed, onSelect, onExit, onBusy, onClose, onArchive, liveIds, reload, onError }: {
+export function SessionBatch({ hub, selection, selected, displayed, workspaces, onSelect, onExit, onBusy, onClose, onArchive, liveIds, reload, onError }: {
   hub: HubPort;
   selection: Set<string> | null;
   selected: TreeSession[];
   displayed: TreeSession[];
+  workspaces?: TreeWorkspace[];
   onSelect: (next: Set<string> | null) => void;
   onExit: () => void;
   onBusy: (busy: boolean) => void;
@@ -32,6 +34,10 @@ export function SessionBatch({ hub, selection, selected, displayed, onSelect, on
   reload: () => Promise<void>;
   onError: (e: unknown) => void;
 }) {
+  // A selected row names only its own root; the confirm step pairs it with the
+  // workspace it belongs to so the person sees the full blast radius.
+  const wsName = (root?: string) =>
+    workspaces?.find((w) => w.root === root || w.workspaceRoots?.includes(root ?? ""))?.name ?? "";
   const [phase, setPhase] = useState<"idle" | "confirm" | "archive" | "restore" | "delete">("idle");
   const wasSelecting = useRef(selection !== null);
   const deleteButton = useRef<HTMLButtonElement>(null);
@@ -59,20 +65,37 @@ export function SessionBatch({ hub, selection, selected, displayed, onSelect, on
     const failed = new Set<string>();
     let firstError: unknown;
     let removed = false;
-    for (const row of selected) {
-      try {
-        if (row.runtimeId && liveIds([row.runtimeId]).length > 0) throw new Error(t("所选会话正在运行，停止后才能操作"));
-        if (action === "delete") {
-          if (row.runtimeId) await onClose([row.runtimeId]);
-          await hub.removeSession(row.path);
-          clearDraftForSession("", row.path);
-          removed = true;
-        } else {
-          await onArchive(row.path, action === "archive", row.runtimeId);
+    if (action === "delete") {
+      // Close panes for any selected session still driving a runtime, then delete
+      // every selected path in one request. A refusal (e.g. a still-running
+      // conversation) falls back to per-item calls so the caller still learns
+      // which paths failed.
+      for (const row of selected) {
+        if (row.runtimeId) {
+          try { await onClose([row.runtimeId]); } catch (e) { failed.add(row.path); firstError ??= e; }
         }
+      }
+      const deletable = selected.filter((row) => !failed.has(row.path)).map((row) => row.path);
+      try {
+        await hub.removeSessions(deletable);
+        for (const p of deletable) clearDraftForSession("", p);
+        removed = true;
       } catch (e) {
-        failed.add(row.path);
         firstError ??= e;
+        for (const p of deletable) {
+          try { await hub.removeSession(p); clearDraftForSession("", p); removed = true; }
+          catch (err) { failed.add(p); firstError ??= err; }
+        }
+      }
+    } else {
+      for (const row of selected) {
+        try {
+          if (row.runtimeId && liveIds([row.runtimeId]).length > 0) throw new Error(t("所选会话正在运行，停止后才能操作"));
+          await onArchive(row.path, action === "archive", row.runtimeId);
+        } catch (e) {
+          failed.add(row.path);
+          firstError ??= e;
+        }
       }
     }
     if (removed) {
@@ -81,6 +104,10 @@ export function SessionBatch({ hub, selection, selected, displayed, onSelect, on
     onSelect(failed);
     setPhase("idle");
     onBusy(false);
+    if (removed) {
+      const deleted = selected.length - failed.size;
+      if (deleted > 0) pushNote(t("已删除 {n} 个会话", { n: deleted }));
+    }
     if (firstError) onError(firstError);
     deleteButton.current?.focus();
   };
@@ -110,9 +137,12 @@ export function SessionBatch({ hub, selection, selected, displayed, onSelect, on
       {phase === "confirm" && (
         <div className="wsconfirm" role="alertdialog" aria-label={t("删除 {n} 个会话？", { n: selected.length })}
           data-action-keydown="layer.dismiss" onKeyDown={(ev) => { if (ev.key === "Escape") { ev.stopPropagation(); cancel(); } }}>
-          <div className="wsconfirm-t">
+            <div className="wsconfirm-t">
             <span className="q">{t("删除 {n} 个会话？", { n: selected.length })}</span>
-            <span className="session-batch-names">{selected.map((row) => row.title || row.name).join(current() === "zh" ? "、" : ", ")}</span>
+            <span className="session-batch-names">{selected.map((row) => {
+              const ws = wsName(row.workspaceRoot);
+              return ws ? `${row.title || row.name}（${ws}）` : (row.title || row.name);
+            }).join(current() === "zh" ? "、" : ", ")}</span>
             <span className="h">{t("连同其记录一并删除")}</span>
           </div>
           <div className="wsconfirm-a">

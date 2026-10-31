@@ -22,6 +22,7 @@ import { chord } from "./keys";
 import { Palette, type Command } from "./Palette";
 import { Workspaces } from "./Workspaces";
 import { OpenProject } from "./OpenProject";
+import { SessionManager } from "./SessionManager";
 import type { TreePaging, TreeView } from "./treewindow";
 import { MASK, useHidesAmounts } from "./wallet";
 import { useFileDrop } from "./filedrop";
@@ -159,6 +160,7 @@ export function Sidebar({
   const paletteTree = useMemo(() => [...tree, ...shownRemotes.flatMap((host) =>
     remoteWorkspaces(host, remoteTrees[host.name]).map((ws) => ({ ...ws, host: host.name })))], [tree, shownRemotes, remoteTrees]);
   const [over, setOver] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
   const drop = useFileDrop((d) => {
     if (collapsed || adder.busy || d.text) return;
     if (d.paths.length !== 1) {
@@ -210,6 +212,8 @@ export function Sidebar({
         run: () => onSettings("versions:community") },
       { id: "settings", label: t("设置"), icon: "settings", keywords: "settings preferences 设置 偏好",
         run: () => onSettings() },
+      { id: "manage-sessions", label: t("管理会话"), icon: "layers", keywords: "session manage batch delete 会话 管理 批量 删除",
+        run: () => setManagerOpen(true) },
     ],
     [newSessionRoot, onNew, onOpen, onOpenRemote, runtimes, active, onFiles, onView, onSettings, onFeedback, feedbackUnread, onFind, onError],
   );
@@ -259,6 +263,8 @@ export function Sidebar({
         await onOpenRemote(host, root);
         await reloadRemoteTrees();
       }} />}
+    {managerOpen && <SessionManager hub={hub} tree={tree} liveIds={liveIds} reload={reloadTree}
+      onOpen={onOpen} onError={onError} onCloseManager={() => setManagerOpen(false)} />}
     {/* Outside the column's inert wrapper: a collapsed rail must still be
         reachable by the shortcut that opens this. */}
     <Palette
@@ -292,6 +298,9 @@ export function Sidebar({
         </button>
         <button className="studio-search" data-action="workspace.search" title="Ctrl K" onClick={() => setPalette(true)}>
           <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索与快捷操作")}</b>
+        </button>
+        <button className="studio-search" data-action="session-manager.manage" title={t("管理会话")} onClick={() => setManagerOpen(true)}>
+          <span aria-hidden="true"><StudioIcon name="layers" /></span><b className="studio-label">{t("管理会话")}</b>
         </button>
         {!navShown && (
           <div className="studio-quicknav">
