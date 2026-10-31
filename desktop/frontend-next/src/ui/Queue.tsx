@@ -43,6 +43,9 @@ const theirs = (it: QueueItem) => it.origin !== "host" || it.state === "blocked"
 // Codes whose entry the kernel knows never reached the model, so sending it
 // again cannot repeat an effect. Every other uncertain code may have run.
 const RETRY_SAFE = new Set(["steer_unapplied"]);
+// The kernel edits, reorders and re-freezes only a line nobody has taken yet; a
+// line already accepted as guidance can only be withdrawn or sent now.
+const editable = (it: QueueItem) => it.state === "queued" || it.state === "blocked" || it.state === "uncertain";
 const retryable = (it: QueueItem) =>
   it.state === "blocked" || (it.state === "uncertain" && !!it.blockCode && RETRY_SAFE.has(it.blockCode));
 
@@ -264,7 +267,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
               )}
               {live && (
                 <span className="qacts">
-                  {items.length > 1 && <>
+                  {items.length > 1 && editable(it) && <>
                     <button className="qmove" data-action="queue.move" data-target={it.id} data-value="up" onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("上移")} aria-label={t("上移")}>
                       <StudioIcon name="arrow" />
                     </button>
@@ -272,9 +275,11 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                       <StudioIcon name="arrow" data-flip="" />
                     </button>
                   </>}
-                  <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("编辑")} aria-label={t("改")}>
-                    <StudioIcon name="edit" />
-                  </button>
+                  {editable(it) && (
+                    <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("编辑")} aria-label={t("改")}>
+                      <StudioIcon name="edit" />
+                    </button>
+                  )}
                   {/* Waiting is the normal case and needs no button. This is the
                       other one: the turn in front of this line is not worth
                       finishing, and nothing else can end it. */}
@@ -295,7 +300,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                     </button>
                   )}
                   {/* Only an entry that quoted files has anything to re-freeze. */}
-                  {!!it.refs?.length && (
+                  {editable(it) && !!it.refs?.length && (
                     <button data-action="queue.refresh" data-target={it.id} onClick={() => onRefresh(it.id)} title={t("重新冻结引用的文件")}>
                       {t("刷新")}
                     </button>

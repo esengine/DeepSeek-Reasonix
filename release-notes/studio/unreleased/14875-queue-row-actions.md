@@ -1,0 +1,2 @@
+- 修复：待发送区里已被当前轮接收的插话不再显示「改」和上下移按钮，只留「立即发送」与「取回」，不会再点出"当前状态不允许此操作"。修复 #14875。
+- Fixed: guidance the running turn already accepted no longer shows edit and move buttons in the pending panel, only send-now and withdraw. Fixes #14875.
