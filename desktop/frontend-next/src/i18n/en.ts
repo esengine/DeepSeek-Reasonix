@@ -141,6 +141,7 @@ export const EN: Record<string, string> = {
   "已复制": "Copied",
   "复制不了": "Copy blocked",
   "复制失败，请重试": "Copy failed. Try again.",
+  "剪贴板不可用，请手动复制：{text}": "The clipboard is unavailable. Copy this by hand: {text}",
   "复制这段回答": "Copy this answer",
   "复制这段代码": "Copy this code",
   "复制路径": "Copy path",
