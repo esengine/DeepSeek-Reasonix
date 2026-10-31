@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/platform/worktree"
+	"reasonix/internal/runtime/isolation"
 )
 
 // Name is the tool name the model calls.
@@ -57,7 +58,8 @@ type Runner func(ctx context.Context, run Run) (Outcome, error)
 
 // Spec is what the host supplies once at boot.
 type Spec struct {
-	Repo        gitcmd.Repo // the workspace's identity, resolved when it opened
+	Store       *isolation.Store // shared with the session's result tools
+	Repo        gitcmd.Repo      // the workspace's identity, resolved when it opened
 	ManagedRoot string
 	Runner      Runner
 	KnownModel  func(ref string) bool
@@ -69,7 +71,12 @@ type bestOf struct{ spec Spec }
 // New returns the best_of_n tool.
 func init() { tool.RegisterConditional(bestOf{}) }
 
-func New(spec Spec) tool.Tool { return bestOf{spec: spec} }
+func New(spec Spec) tool.Tool {
+	if spec.Store == nil && spec.ManagedRoot != "" {
+		spec.Store = isolation.NewStore(spec.ManagedRoot, spec.Repo.Dir, spec.Repo)
+	}
+	return bestOf{spec: spec}
+}
 
 func (bestOf) Name() string { return Name }
 
@@ -115,29 +122,32 @@ func (b bestOf) Execute(ctx context.Context, raw json.RawMessage) (string, error
 			return "", fmt.Errorf("invalid args: model %q is not configured", m)
 		}
 	}
-	snap, err := worktree.TakeSnapshot(ctx, b.spec.Repo)
+	prepared, err := b.spec.Store.Prepare(ctx)
 	if err != nil {
 		return "", fmt.Errorf("best_of_n needs a Git workspace: %w", err)
 	}
-	cands, err := b.createCandidates(ctx, snap, a.N)
+	cands, err := b.createCandidates(ctx, prepared, a.N)
 	if err != nil {
 		return "", err
 	}
-	results := b.runCandidates(ctx, snap, cands, a)
-	return b.settle(ctx, snap, cands, results, a)
+	results := b.runCandidates(ctx, cands, a)
+	return b.settle(ctx, cands, results, a)
 }
 
-func (b bestOf) createCandidates(ctx context.Context, snap worktree.Snapshot, n int) ([]worktree.Candidate, error) {
-	cands := make([]worktree.Candidate, 0, n)
+func (b bestOf) createCandidates(ctx context.Context, prepared *isolation.Preparation, n int) ([]*isolation.ManagedRun, error) {
+	cands := make([]*isolation.ManagedRun, 0, n)
 	for range n {
-		c, err := worktree.CreateCandidate(ctx, snap, b.spec.ManagedRoot)
+		c, err := prepared.BeginManaged(ctx)
+		if c != nil {
+			cands = append(cands, c)
+		}
 		if err != nil {
 			for _, made := range cands {
-				_ = worktree.RemoveCandidate(context.WithoutCancel(ctx), snap, made)
+				_, cleanupErr := b.spec.Store.Discard(context.WithoutCancel(ctx), made.ID())
+				err = errors.Join(err, cleanupErr)
 			}
-			return nil, err
+			return nil, fmt.Errorf("candidate preparation failed; original results %s: %w", candidateIDs(cands), err)
 		}
-		cands = append(cands, c)
 	}
 	return cands, nil
 }
@@ -145,6 +155,7 @@ func (b bestOf) createCandidates(ctx context.Context, snap worktree.Snapshot, n 
 // result is one candidate after its run: what it said, what it changed, or why
 // it has neither.
 type result struct {
+	id    string
 	model string
 	Outcome
 	tree    string
@@ -155,7 +166,7 @@ type result struct {
 
 func (r result) finished() bool { return r.err == nil }
 
-func (b bestOf) runCandidates(ctx context.Context, snap worktree.Snapshot, cands []worktree.Candidate, a args) []result {
+func (b bestOf) runCandidates(ctx context.Context, cands []*isolation.ManagedRun, a args) []result {
 	out := make([]result, len(cands))
 	var wg sync.WaitGroup
 	for i, c := range cands {
@@ -164,18 +175,27 @@ func (b bestOf) runCandidates(ctx context.Context, snap worktree.Snapshot, cands
 			model = strings.TrimSpace(a.Models[i%len(a.Models)])
 		}
 		out[i].model = model
+		out[i].id = c.ID()
 		wg.Add(1)
-		go func(i int, c worktree.Candidate) {
+		go func(i int, c *isolation.ManagedRun) {
 			defer wg.Done()
 			r := &out[i]
-			r.Outcome, r.err = b.spec.Runner(ctx, Run{Index: i + 1, WorkspaceRoot: c.WorkspaceRoot, Prompt: a.Prompt, Model: model})
+			if r.err = c.Start(ctx); r.err != nil {
+				return
+			}
+			r.Outcome, r.err = invokeCandidate(ctx, b.spec.Runner, Run{Index: i + 1, WorkspaceRoot: c.WorkspaceRoot(), Prompt: a.Prompt, Model: model})
 			if r.err != nil {
+				r.err = errors.Join(r.err, c.RetainUnknown(context.WithoutCancel(ctx)))
 				return
 			}
-			if r.tree, r.changes, r.err = worktree.CandidateTree(ctx, snap, c); r.err != nil {
+			if r.err = c.Complete(context.WithoutCancel(ctx)); r.err != nil {
 				return
 			}
-			r.patch, r.err = worktree.Patch(ctx, snap, r.tree)
+			var entry *isolation.Entry
+			entry, r.patch, r.err = b.spec.Store.Preview(ctx, c.ID())
+			if r.err == nil {
+				r.tree, r.changes = entry.Tree, entry.Changes
+			}
 		}(i, c)
 	}
 	wg.Wait()
@@ -185,38 +205,48 @@ func (b bestOf) runCandidates(ctx context.Context, snap worktree.Snapshot, cands
 // settle judges, applies the winner, and removes every worktree it no longer
 // needs. A winner that could not be applied keeps its worktree so its work is
 // not lost; everything else is removed.
-func (b bestOf) settle(ctx context.Context, snap worktree.Snapshot, cands []worktree.Candidate, results []result, a args) (string, error) {
+func (b bestOf) settle(ctx context.Context, cands []*isolation.ManagedRun, results []result, a args) (string, error) {
 	cleanup := context.WithoutCancel(ctx)
-	keep := -1
-	defer func() {
-		for i, c := range cands {
-			if i != keep {
-				_ = worktree.RemoveCandidate(cleanup, snap, c)
-			}
-		}
-	}()
 	var eligible []int
+	var failures []error
 	for i, r := range results {
 		if r.finished() {
 			eligible = append(eligible, i)
+		} else {
+			failures = append(failures, fmt.Errorf("attempt %d (%s): %w", i+1, r.id, r.err))
 		}
 	}
 	if len(eligible) == 0 {
-		return "", fmt.Errorf("%w: %s", ErrNoCandidateFinished, failureSummary(results))
+		return retainedReport(cands), errors.Join(append(failures, ErrNoCandidateFinished)...)
+	}
+	if len(failures) != 0 {
+		return retainedReport(cands), errors.Join(failures...)
 	}
 	winner, reason := eligible[0], "the only attempt that finished"
 	if len(eligible) > 1 {
-		w, why, err := judge(ctx, b.spec.Judge, a, results, eligible)
+		w, why, err := invokeJudge(ctx, b.spec.Judge, a, results, eligible)
 		if err != nil {
-			return "", fmt.Errorf("best_of_n: the judge could not decide, so nothing was applied: %w", err)
+			return retainedReport(cands), fmt.Errorf("best_of_n: the judge could not decide, so nothing was applied: %w", err)
 		}
 		winner, reason = w, why
 	}
-	applyErr := worktree.Apply(ctx, snap, results[winner].tree, results[winner].changes)
-	if applyErr != nil {
-		keep = winner
+	_, applyErr := b.spec.Store.ApplyPrepared(ctx, cands[winner].ID())
+	var cleanupErr error
+	for i, c := range cands {
+		if i == winner {
+			continue
+		}
+		_, err := b.spec.Store.Discard(cleanup, c.ID())
+		cleanupErr = errors.Join(cleanupErr, err)
 	}
-	return report(results, winner, reason, applyErr, cands[winner].WorkspaceRoot), nil
+	out := report(results, winner, reason, applyErr, cands[winner].ID())
+	if cleanupErr != nil {
+		out += "\nCleanup needs retry for original Store result IDs: " + candidateIDs(cands)
+	}
+	if applyErr != nil && !errors.Is(applyErr, worktree.ErrWorkspaceMoved) {
+		return out, errors.Join(applyErr, cleanupErr)
+	}
+	return out, cleanupErr
 }
 
 // ApprovalScope says that approving best_of_n also starts attempts that run

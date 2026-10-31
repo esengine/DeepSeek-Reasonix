@@ -120,6 +120,13 @@ func (s *Store) Paths(id string) ([]string, error) {
 
 // PathsContext admits inspection, including empty-result cleanup, with ctx.
 func (s *Store) PathsContext(ctx context.Context, id string) ([]string, error) {
+	id = strings.TrimSpace(id)
+	if _, found, err := s.managedRecord(id); found {
+		if err != nil {
+			return nil, err
+		}
+		return s.managedPaths(ctx, id)
+	}
 	release, err := s.acquireKnownResultOperation(ctx, id)
 	if err != nil {
 		return nil, err
@@ -136,6 +143,13 @@ func (s *Store) PathsContext(ctx context.Context, id string) ([]string, error) {
 // the workspace changed since the run began refuses the whole apply and keeps
 // the entry, so the parent can reconcile and try again or discard it.
 func (s *Store) Apply(ctx context.Context, id string) (*Entry, error) {
+	id = strings.TrimSpace(id)
+	if _, found, err := s.managedRecord(id); found {
+		if err != nil {
+			return nil, err
+		}
+		return s.settleManaged(ctx, id, true, false)
+	}
 	release, err := s.acquireKnownResultOperation(ctx, id)
 	if err != nil {
 		return nil, err
@@ -160,6 +174,13 @@ func (s *Store) Apply(ctx context.Context, id string) (*Entry, error) {
 
 // Discard forgets an entry and removes its worktree.
 func (s *Store) Discard(ctx context.Context, id string) (*Entry, error) {
+	id = strings.TrimSpace(id)
+	if _, found, err := s.managedRecord(id); found {
+		if err != nil {
+			return nil, err
+		}
+		return s.settleManaged(ctx, id, false, false)
+	}
 	release, err := s.acquireKnownResultOperation(ctx, id)
 	if err != nil {
 		return nil, err
@@ -179,6 +200,7 @@ func (s *Store) Pending() []string {
 		return nil
 	}
 	ids := s.durableIDs()
+	ids = append(ids, s.managedIDs()...)
 	s.mu.Lock()
 	for id := range s.uninspected {
 		if !slices.Contains(ids, id) {

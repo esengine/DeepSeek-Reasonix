@@ -61,6 +61,7 @@ func (b *builder) addBestOf() {
 	}
 	cfg := b.cfg
 	b.tools.reg.Add(bestof.New(bestof.Spec{
+		Store:       b.ensureIsolationStore(),
 		Repo:        b.repo,
 		ManagedRoot: filepath.Join(b.roots.DeliveryWorktreeDir(), "candidates"),
 		Runner:      candidateRunner(b.opts, b.sink, approval),

@@ -79,15 +79,45 @@ func (c Candidate) repo(ctx context.Context) (gitcmd.Repo, error) {
 
 // CreateCandidate checks snap out into a new detached worktree under managedRoot.
 func CreateCandidate(ctx context.Context, snap Snapshot, managedRoot string) (Candidate, error) {
-	id, err := randomID()
+	plan, err := PlanCandidate(ctx, snap, managedRoot)
 	if err != nil {
 		return Candidate{}, err
+	}
+	return plan.Create(ctx)
+}
+
+// CandidatePlan allocates a host-selected destination without creating it.
+// A lifecycle owner can persist its original identity before materialization.
+type CandidatePlan struct {
+	snap      Snapshot
+	candidate Candidate
+	source    gitcmd.Repo
+}
+
+func PlanCandidate(ctx context.Context, snap Snapshot, managedRoot string) (*CandidatePlan, error) {
+	id, err := randomID()
+	if err != nil {
+		return nil, err
 	}
 	source, err := snap.repo(ctx)
 	if err != nil {
-		return Candidate{}, err
+		return nil, err
 	}
 	root := filepath.Join(managedRoot, id, safePathComponent(filepath.Base(snap.RepoRoot)))
+	workspace := root
+	if snap.Prefix != "" {
+		workspace = filepath.Join(root, filepath.FromSlash(snap.Prefix))
+	}
+	return &CandidatePlan{snap: snap, source: source, candidate: Candidate{WorktreeRoot: root, WorkspaceRoot: workspace}}, nil
+}
+
+func (p *CandidatePlan) Candidate() Candidate { return p.candidate }
+
+func (p *CandidatePlan) Create(ctx context.Context) (Candidate, error) {
+	snap, source, root := p.snap, p.source, p.candidate.WorktreeRoot
+	if err := source.Verify(); err != nil {
+		return Candidate{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
 		return Candidate{}, fmt.Errorf("create candidate parent: %w", err)
 	}

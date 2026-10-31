@@ -42,6 +42,24 @@ func (s *Store) resultLockRoot() (*os.Root, error) {
 }
 
 func (s *Store) acquireResultOperation(ctx context.Context, id string, try bool) (func(), error) {
+	release, err := s.acquireResultLock(ctx, id, try)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkSettlementFence(id); err != nil {
+		release()
+		return nil, operationAdmissionError(id, err)
+	}
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, operationAdmissionError(id, err)
+	}
+	return release, nil
+}
+
+// The versioned lifecycle owner takes the same lock as legacy operations, then
+// validates its own record. Legacy callers must also check the settlement fence.
+func (s *Store) acquireResultLock(ctx context.Context, id string, try bool) (func(), error) {
 	root, err := s.resultLockRoot()
 	if err != nil {
 		return nil, operationAdmissionError(id, err)
@@ -59,14 +77,6 @@ func (s *Store) acquireResultOperation(ctx context.Context, id string, try bool)
 		return nil, operationAdmissionError(id, err)
 	}
 	// Filelock bounds waiting and may take a free lock after cancellation.
-	if err := ctx.Err(); err != nil {
-		release()
-		return nil, operationAdmissionError(id, err)
-	}
-	if err := s.checkSettlementFence(id); err != nil {
-		release()
-		return nil, operationAdmissionError(id, err)
-	}
 	if err := ctx.Err(); err != nil {
 		release()
 		return nil, operationAdmissionError(id, err)

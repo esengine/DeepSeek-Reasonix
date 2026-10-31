@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/model/boundedllm"
 	"reasonix/internal/platform/worktree"
+	"reasonix/internal/runtime/isolation"
 )
 
 // JudgeSpec is the model that compares finished attempts.
@@ -109,6 +110,8 @@ func parseVerdict(text string, eligible []int) (int, string, error) {
 func report(results []result, winner int, reason string, applyErr error, keptAt string) string {
 	var b strings.Builder
 	switch {
+	case errors.Is(applyErr, isolation.ErrCandidateCleanupPending):
+		fmt.Fprintf(&b, "Attempt %d was applied; cleanup is pending for original result %s: %v.\n", winner+1, keptAt, applyErr)
 	case applyErr == nil && len(results[winner].changes) == 0:
 		fmt.Fprintf(&b, "Attempt %d won and changed nothing, so the workspace is as it was.\n", winner+1)
 	case applyErr == nil:
@@ -116,7 +119,7 @@ func report(results []result, winner int, reason string, applyErr error, keptAt 
 	case errors.Is(applyErr, worktree.ErrWorkspaceMoved):
 		fmt.Fprintf(&b, "Attempt %d won but was NOT applied: the workspace changed while the attempts ran. Its result is kept at %s.\n", winner+1, keptAt)
 	default:
-		fmt.Fprintf(&b, "Attempt %d won but was NOT applied: %v. Its result is kept at %s.\n", winner+1, applyErr, keptAt)
+		fmt.Fprintf(&b, "Attempt %d won but publication did not complete: %v. Inspect and recover original result %s; some writes may have landed.\n", winner+1, applyErr, keptAt)
 	}
 	if reason != "" {
 		b.WriteString("Judge: " + reason + "\n")
@@ -166,14 +169,6 @@ func hostRecord(c *event.CompletionSummaryInfo) string {
 	}
 	if len(c.CriteriaRewritten) > 0 {
 		parts = append(parts, "rewrote or removed existing tests: "+clipText(strings.Join(c.CriteriaRewritten, ", "), 512))
-	}
-	return strings.Join(parts, "; ")
-}
-
-func failureSummary(results []result) string {
-	parts := make([]string, 0, len(results))
-	for i, r := range results {
-		parts = append(parts, fmt.Sprintf("attempt %d: %v", i+1, r.err))
 	}
 	return strings.Join(parts, "; ")
 }

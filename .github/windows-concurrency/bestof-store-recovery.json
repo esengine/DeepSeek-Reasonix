@@ -1,0 +1,56 @@
+[
+  {
+    "package": "reasonix/internal/assembly/boot",
+    "tests": [
+      "TestEffectBestOfRetainsOriginalIDsAcrossBoots/conflict",
+      "TestEffectBestOfRetainsOriginalIDsAcrossBoots/panic",
+      "TestEffectBestOfRetainsOriginalIDsAcrossBoots",
+      "TestEffectBestOfRunsAttemptsInWorktreesAndLandsTheWinner"
+    ]
+  },
+  {
+    "package": "reasonix/internal/runtime/bestof",
+    "tests": [
+      "TestBestOfAppliesTheJudgesPickAndRemovesEveryWorktree",
+      "TestBestOfShowsEachAttemptsHostRecord",
+      "TestBestOfRetainsTheGroupWhenOneRunnerFailed",
+      "TestBestOfAppliesNothingWhenTheJudgeDoesNotDecide",
+      "TestBestOfReportsWhenEveryAttemptFailed",
+      "TestBestOfKeepsTheWinnerWhenTheWorkspaceMoved",
+      "TestBestOfRefusesBadArguments",
+      "TestBestOfPanicKeepsOriginalStoreResultsAcrossRestart",
+      "TestBestOfConflictRecoversTheOriginalWinner",
+      "TestBestOfNilPanicIsNotACompletedCandidate",
+      "TestBestOfJudgePanicRetainsRecoverableOriginalIDs"
+    ]
+  },
+  {
+    "package": "reasonix/internal/runtime/isolation",
+    "tests": [
+      "TestManagedCandidateCannotBypassFenceThroughLegacyOwners",
+      "TestManagedCandidateSweepExpiresReadyButPreservesUnknown",
+      "TestManagedCandidateApplyingCannotBeDiscardedOrExpired",
+      "TestManagedCandidateEmptyResultStillFollowsExecutionState/ready",
+      "TestManagedCandidateEmptyResultStillFollowsExecutionState/unknown",
+      "TestManagedCandidateEmptyResultStillFollowsExecutionState",
+      "TestManagedCandidateCorruptImageRemainsNamedAndRefusesSettlement/identity",
+      "TestManagedCandidateCorruptImageRemainsNamedAndRefusesSettlement/result",
+      "TestManagedCandidateCorruptImageRemainsNamedAndRefusesSettlement",
+      "TestManagedCandidateUnknownVersionPreservesProgressBytes",
+      "TestManagedCandidateMaterializationFailureKeepsOriginalID",
+      "TestManagedCandidateOppositeDispositionCannotReportSuccess",
+      "TestManagedCandidateSurvivesActualProcessExit/prepared",
+      "TestManagedCandidateSurvivesActualProcessExit/running",
+      "TestManagedCandidateSurvivesActualProcessExit/ready",
+      "TestManagedCandidateSurvivesActualProcessExit/cleanup",
+      "TestManagedCandidateSurvivesActualProcessExit",
+      "TestManagedCandidateKeepsIdentityAcrossRestart",
+      "TestManagedCandidateUnknownCannotSettleAfterRestart",
+      "TestManagedCandidateUnstartedCanBeDiscardedAfterRestart",
+      "TestManagedCandidateAppliedCleanupRetriesWithoutRepublishing",
+      "TestManagedCandidatePartialRemovalRetainsRecoverableIdentity",
+      "TestManagedCandidatePartialDirectoryRemovalCanRetry",
+      "TestManagedCandidateCleanupRejectsReplacedNativeDirectory"
+    ]
+  }
+]
