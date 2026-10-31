@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -47,21 +46,24 @@ func sessionRefIDs(line string) []string {
 	return ids
 }
 
-func hasSessionRef(line string) bool { return len(sessionRefIDs(line)) > 0 }
+func hasSessionRef(line string) bool {
+	return len(sessionRefIDs(line)) > 0 || len(agentRefIDs(line)) > 0
+}
 
 // withSessionRefs resolves the other @references of a line, then appends one
 // framed block per referenced conversation.
 func (c *Controller) withSessionRefs(ctx context.Context, line string, scoped bool) (string, []string) {
-	ids := sessionRefIDs(line)
-	if len(ids) == 0 {
+	ids, agents, mates := sessionRefIDs(line), agentRefIDs(line), c.teammates()
+	if len(ids) == 0 && len(agents) == 0 && len(mates) == 0 {
 		return c.resolveRefs(ctx, line, scoped)
 	}
-	rest := line
-	sorted := append([]string(nil), ids...)
-	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
-	for _, id := range sorted {
-		rest = strings.ReplaceAll(rest, "@"+sessionRefPrefix+id, "")
+	names := make(map[string]bool, len(mates))
+	for _, a := range mates {
+		names[a.Name] = true
 	}
+	rest := withoutRefTokens(line, func(tok string) bool {
+		return strings.HasPrefix(tok, sessionRefPrefix) || strings.HasPrefix(tok, agentRefPrefix) || names[tok]
+	})
 	block, errs := c.resolveRefs(ctx, rest, scoped)
 	var b strings.Builder
 	b.WriteString(block)
@@ -73,7 +75,38 @@ func (c *Controller) withSessionRefs(ctx context.Context, line string, scoped bo
 		}
 		appendRefBlock(&b, "session", attrs, text)
 	}
+	for _, id := range agents {
+		attrs, text, err := c.readAgentRef(id)
+		if err != nil {
+			errs = append(errs, "@"+agentRefPrefix+id+" — "+err.Error())
+			continue
+		}
+		appendRefBlock(&b, "agent-chat", attrs, text)
+	}
 	return b.String(), errs
+}
+
+// withoutRefTokens drops each @reference whose whole token drop names, by the
+// same boundaries parseRefTokens reads, so a mention of "Ada" leaves a file
+// reference "@Adam.txt" as it was.
+func withoutRefTokens(line string, drop func(tok string) bool) string {
+	var b strings.Builder
+	for i := 0; i < len(line); i++ {
+		if line[i] != '@' {
+			b.WriteByte(line[i])
+			continue
+		}
+		j := i + 1
+		for j < len(line) && !isRefTokenBoundary(line[j]) {
+			j++
+		}
+		if drop(line[i+1 : j]) {
+			i = j - 1
+			continue
+		}
+		b.WriteByte('@')
+	}
+	return b.String()
 }
 
 func (c *Controller) readSessionRef(id string) (attrs []xml.Attr, text string, err error) {

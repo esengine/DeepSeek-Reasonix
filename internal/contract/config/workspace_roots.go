@@ -60,6 +60,9 @@ func (c *Config) ForbiddenRootsForRoot(root string) []string {
 	if peers := c.Roots().PeersDir(); peers != "" {
 		base = appendUniqueResolved(base, peers)
 	}
+	if team := c.Roots().TeamDir(); team != "" {
+		base = appendUniqueResolved(base, team)
+	}
 	if dir := c.Roots().SandboxDir(); dir != "" {
 		base = appendUniqueResolved(base, dir)
 	}

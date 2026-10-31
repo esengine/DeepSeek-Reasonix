@@ -413,7 +413,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 
 	// A hub, so this frontend drives several sessions at once the way the studio
 	// window does. The session this command was started for is the first pane.
-	hub := serve.NewHub(serve.HubOptions{Serve: serveCfg, NativeSurfaces: true, DecorateSink: reporter.Wrap, ProviderResolver: providerResolver, Page: pageOrWarn(*page)})
+	hub := serve.NewHub(serve.HubOptions{Serve: serveCfg, NativeSurfaces: true, DecorateSink: reporter.Wrap, ProviderResolver: providerResolver, Page: pageOrWarn(*page), Team: serve.DefaultTeamHost()})
 	adoptFirstPane(hub, ctrl, bc, paneSink, serveCfg, leases)
 	return runServeFrontend(ctrl, hub, serveCfg, serveFrontendOptions{
 		command: opts.command, address: *addr,

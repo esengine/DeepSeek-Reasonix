@@ -64,6 +64,9 @@ type bash struct {
 	// paths is the read tools' resolver, held here only to recognise a token
 	// bash cannot reach — see refuseExternalRef.
 	paths *PathResolver
+	// secretEnv lists the secrets this session's commands receive, read on
+	// each command; nil gives none.
+	secretEnv func() []string
 }
 
 type bashParams struct {
@@ -158,6 +161,12 @@ func (b bash) ExecutionDescriptor(args json.RawMessage) *tool.ShellExecution {
 // metadata for host UI / session persistence. Provider-visible output stays in
 // DetailedResult.Output; metadata never enters tool schemas.
 func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.DetailedResult, error) {
+	res, err := b.executeDetailed(ctx, args)
+	res.Output = secrets.MaskRegistered(res.Output)
+	return res, err
+}
+
+func (b bash) executeDetailed(ctx context.Context, args json.RawMessage) (tool.DetailedResult, error) {
 	start := time.Now()
 	ex := shellrun.DescriptorFromShell(b.resolved())
 	ex.State = tool.ShellStateRunning
@@ -216,7 +225,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 	}
 
 	argv, wrapped := prepared.Argv, prepared.Wrapped
-	cmdEnv := applyEnvOverrides(shellrun.CommandEnv(ctx), append(shellEnvOverrides(b.sb.ShellEnv), prepared.EnvOverrides...))
+	cmdEnv := applyEnvOverrides(shellrun.CommandEnv(ctx), slices.Concat(shellEnvOverrides(b.sb.ShellEnv), b.secrets(p.Command), prepared.EnvOverrides))
 	if err := checkCommandLine(argv); err != nil {
 		return refusedBeforeLaunch(ex, start, tool.ShellPhasePreflight, err)
 	}
@@ -273,6 +282,22 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 		Output:    appendSessionDataHint(appendSessionDataHint(b.confinementNotes(out, wrapped, prepared.EgressToken), b.guard.CommandHint(b.workDir, p.Command)), nul.note()),
 		Execution: ex,
 	}, err
+}
+
+// secrets are the secret variables this command receives.
+func (b bash) secrets(command string) []string {
+	if b.secretEnv == nil {
+		return nil
+	}
+	names := shellparse.ExpandedVariables(command)
+	var selected []string
+	for _, assignment := range b.secretEnv() {
+		name, _, ok := strings.Cut(assignment, "=")
+		if ok && names[name] {
+			selected = append(selected, assignment)
+		}
+	}
+	return selected
 }
 
 func applyTerminalResult(ex *tool.ShellExecution, err error) {

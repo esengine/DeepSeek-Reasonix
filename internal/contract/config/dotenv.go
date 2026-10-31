@@ -110,7 +110,7 @@ func loadDotEnvFileAs(path string, source CredentialSource) {
 	}
 	for key, val := range file.Values {
 		key = strings.TrimSpace(key)
-		if key == "" {
+		if key == "" || IsHostCredentialSlot(key) {
 			continue
 		}
 		if _, exists := os.LookupEnv(key); exists && source.Kind != CredentialSourceCredentials {

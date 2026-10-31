@@ -88,6 +88,7 @@ type toolStage struct {
 	lsp         *lsp.Manager
 	browser     *browser.Session
 	peerLink    *tool.PeerLink
+	teamLink    *tool.TeamLink
 	subagents   *delegation.SubagentStore
 	settingLink *tool.SettingsLink
 	peerTools   func(enabled, dispatch bool)
@@ -371,11 +372,12 @@ func (b *builder) wireTools() error {
 	t.env = resolveToolEnvironment(opts, cfg, b.roots, root, b.additionalDirs, b.shell, b.stderr)
 	env := t.env
 	// The full inventory registers for use_capability; the provider-visible surface narrows later.
-	addBuiltins(t.reg, cfg.Tools.Enabled, env.writeRoots, env.bash, env.bashTimeout, env.search, b.stderr, root, b.proxy, env.forbidReadRoots, env.readRoots, env.readPaths, env.sessionGuard, env.managedConfig, opts.FileOverlay, opts.TerminalRunner, env.sessionTemp, b.fileWriteReceipt)
+	addBuiltins(t.reg, cfg.Tools.Enabled, env.writeRoots, env.bash, env.bashTimeout, env.search, b.stderr, root, b.proxy, env.forbidReadRoots, env.readRoots, env.readPaths, env.sessionGuard, env.managedConfig, opts.FileOverlay, opts.TerminalRunner, env.sessionTemp, b.fileWriteReceipt, teamSecretEnv(opts.TeamSeat))
 	addViewImage(t.reg, cfg, b.model.entry, env, root)
 	addPresentFiles(t.reg, cfg, env, root)
 	bindFileViews(t.reg, cfg.Tools.ChangedFilesProtected())
 	t.peerLink, t.peerTools = peerTools(t.reg, cfg)
+	t.teamLink = teamTools(t.reg, cfg, opts.TeamSeat != nil)
 	t.settingLink = addSettingTool(t.reg, cfg)
 	addSystemOne(t.reg, cfg.Tools.Enabled, cfg, b.keyedClient)
 	addAdvisor(t.reg, cfg, b.proxy, b.sink)
@@ -388,7 +390,7 @@ func (b *builder) wireTools() error {
 	if err := b.wireMCP(); err != nil {
 		return err
 	}
-	t.browser = bindMachineTools(t.reg, cfg, root, opts.BrowserSession, opts.ComputerDriver)
+	t.browser = bindMachineTools(t.reg, cfg, root, browserProfileKey(root, opts.TeamSeat), opts.BrowserSession, opts.ComputerDriver)
 	b.timer.mark("mcp")
 
 	t.maxSteps = max(opts.MaxSteps, 0)
@@ -596,6 +598,7 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 		SystemPrompt:                   b.prompt.prompt,
 		SessionDir:                     b.session.dir,
 		Peers:                          peersOptions(cfg, t.peerLink, t.peerTools),
+		Team:                           control.TeamOptions{Link: t.teamLink, Seat: b.opts.TeamSeat},
 		Subagents:                      subagentReader(t.subagents),
 		Settings:                       t.settingLink,
 		Host:                           t.host,

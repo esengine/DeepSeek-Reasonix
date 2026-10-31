@@ -75,6 +75,7 @@ func (c *Controller) turnBlocksFor(source string, includeOwed bool, notes []stri
 			turnBlock{"refused-calls", c.refusedCallsBlock()},
 		)
 	}
+	blocks = append(blocks, c.team.owed()...)
 	return append(blocks,
 		turnBlock{"scheduled-run", c.scheduledRunBlock()},
 		turnBlock{"background-jobs", c.backgroundJobsBlock()},

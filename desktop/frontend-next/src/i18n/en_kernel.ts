@@ -3,6 +3,20 @@
 // code adds one here. i18n.test.ts is what stops one from being forgotten.
 
 export const EN_KERNEL: Record<string, string> = {
+  "团队正在另一个 Reasonix 窗口中编辑，这里只能查看": "The team is being edited in another Reasonix window; it is read-only here",
+  "团队数据未能读写，请稍后重试": "The team's records could not be read or saved. Try again later",
+  "团队中没有这个 Agent": "That agent is not on the team",
+  "没有这个群聊": "That group does not exist",
+  "该 Agent 不是这个群的成员": "That agent is not a member of the group",
+  "群聊需要 2 到 12 名成员": "A group needs between 2 and 12 members",
+  "这个名字已被使用": "That name is already taken",
+  "团队至少需要一个主 Agent": "The team needs at least one main agent",
+  "内容超出长度上限": "That is longer than allowed",
+  "内容不符合要求，请检查后重试": "That value is not valid; check it and try again",
+  "团队已被其他操作修改，请刷新后重试": "The team changed in the meantime. Refresh and try again",
+  "团队数据由更新版本的 Reasonix 写入，这里只能查看": "The team was saved by a newer Reasonix; it is read-only here",
+  "这个群聊已归档，不再接收新消息": "This group is archived and takes no new messages",
+  "该 Agent 的会话暂时无法打开": "That agent's session could not be opened",
   "历史内容已改变，正在重新读取最近的消息": "History changed. Reloading the latest messages.",
   "当前内核不支持历史分页": "This kernel does not support history paging.",
   "此会话的组合已绑定原项目，请在目标项目新建会话": "This conversation's composition is bound to its project. Start a new conversation in the target project",
@@ -691,4 +705,10 @@ export const EN_KERNEL: Record<string, string> = {
   "它的某个钩子超过了时间预算，进程已被结束；多次发生后会被停用": "One of its hooks ran past its time budget and the process was ended; after repeats it is disabled",
   "它的某个钩子抛出了异常": "One of its hooks threw an exception",
   "它用到了本宿主不支持的功能": "It uses something this host does not support",
+  "这一轮超时了": "the turn timed out",
+  "这张头像照片已不存在": "That photo no longer exists",
+  "没有这个定时任务": "No such scheduled task",
+  "没有这个机密": "No such secret",
+  "多次尝试后仍未通过交付检查": "it did not pass the delivery checks after several attempts",
+  "这一轮在一个明确的边界处暂停了": "the turn paused at a deliberate boundary",
 };
