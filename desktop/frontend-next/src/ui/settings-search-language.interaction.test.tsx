@@ -25,6 +25,8 @@ async function draw() {
       return (...args: unknown[]) => { calls.push(key); return value.apply(own, args); };
     },
   }) as unknown as AgentPort;
+  // Search owns no storage work; cold-window timing has its own regression.
+  await storageTotal(watched);
   const onClose = vi.fn();
   // The pane tallies the disk usage a beat after it opens, and that walk reads
   // the port. A known total means no walk is scheduled at all, so the search

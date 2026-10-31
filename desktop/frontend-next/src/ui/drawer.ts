@@ -1,5 +1,6 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { folded } from "./viewport";
+import { subscribeGroupStage } from "../state/teamStage";
 
 /** Under the scene fold the rail is a drawer laid over the conversation rather
  *  than a column beside it, so going somewhere from it — another session, the
@@ -8,4 +9,7 @@ export function useDrawerCloses(setRail: Dispatch<SetStateAction<boolean>>, acti
   useEffect(() => {
     if (folded("scene")) setRail(false);
   }, [active, settings, setRail]);
+  useEffect(() => subscribeGroupStage(() => {
+    if (folded("scene")) setRail(false);
+  }), [setRail]);
 }

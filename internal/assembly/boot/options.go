@@ -171,6 +171,9 @@ type Options struct {
 	WorkspaceRepo gitcmd.Repo
 	// SessionTemp is the session-private temp manager; Rebuild reuses old's.
 	SessionTemp *sessiontemp.Manager
+	// TeamSeat, when set, makes this a session of an agent on the user's team:
+	// the build registers the team tools and the controller speaks for the seat.
+	TeamSeat control.TeamSeat
 	// BrowserSession is the agent's browser and the tabs it has open; Rebuild
 	// reuses old's so a model switch does not close them.
 	BrowserSession *browser.Session

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { host as hostBridge } from "../port/host";
-import type { HubPort } from "../port/hub";
+import type { HubPort, RuntimeView } from "../port/hub";
 import type { AccountState, AgentPort, SessionStatus, WorkspaceInfo } from "../port/port";
 import { DeviceBar } from "./DeviceBar";
 import { useDismiss } from "./dismiss";
@@ -12,6 +12,8 @@ import { ViewSwitch } from "./ViewSwitch";
 import { TooltipButton } from "./TooltipButton";
 import { workspaceDirectoryDescription } from "./workspaceDirectory";
 import { WindowControls, zoomOnTitleBar } from "./WindowControls";
+import { SeatCrumb } from "./team/SeatCrumb";
+import { useGroupStage } from "../state/teamStage";
 import type { PaneView } from "../state/paneview";
 
 const base = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || p;
@@ -42,10 +44,13 @@ interface Props {
   onView: (to: PaneView) => void;
   // The window's port, for what belongs to the window rather than a pane.
   hub?: HubPort;
+  // The team seat the focused pane holds; its folder is the host's, not a project.
+  seat?: RuntimeView["team"];
   onError?: (e: unknown) => void;
 }
 
-export function Chrome({ port, status, workspace: ws, title, steer, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, onError }: Props) {
+export function Chrome({ port, status, workspace: ws, title, steer, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, seat, onError }: Props) {
+  const stage = useGroupStage();
   const root = status?.workspaceRoot || status?.cwd || "";
   const project = root ? base(root) : "—";
   // The folder mark opens the project itself. Only a shell that can enter a
@@ -80,6 +85,7 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
 
       <div className="crumb">
         <span className="crumb-context">
+          {stage && hub ? <SeatCrumb hub={hub} group={stage} /> : seat && hub ? <SeatCrumb hub={hub} agent={seat.agent} group={seat.group} /> : <>
           <button
             type="button"
             className="crumb-folder"
@@ -97,12 +103,13 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
           {ws?.isolated && ws.current === root && <span className="isolab" title={`${workspaceDirectoryDescription(true)}\n${root}`}>
             {t("独立工作树")}
           </span>}
+          </>}
           <span className="isolab hostlab" hidden={!host}>
             {host}
           </span>
-          <span className="crumbsep">/</span>
+          {!(stage && hub) && <span className="crumbsep">/</span>}
         </span>
-        <b title={status?.sessionPath}>{sessionName(title, status?.sessionPath)}</b>
+        {!(stage && hub) && <b title={status?.sessionPath}>{sessionName(title, status?.sessionPath)}</b>}
       </div>
 
       <span className="badge" hidden={steer === 0}>

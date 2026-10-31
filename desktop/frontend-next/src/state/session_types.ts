@@ -32,6 +32,9 @@ export type Item =
       // into a running turn has none.
       at?: number;
     }
+  // A turn the host ran for someone other than the person: another agent's
+  // message, its reply, or a group's turn. text is what the host delivered.
+  | { t: "origin"; id: string; origin: import("../port/team").MessageOrigin; text: string; msgIndex?: number }
   // source names which model wrote it — a turn can carry two, and the card is
   // where the answer has to survive.
   | { t: "say"; id: string; text: string; reasoning?: string; done: boolean; thoughtMs?: number; source?: string; model?: string }
