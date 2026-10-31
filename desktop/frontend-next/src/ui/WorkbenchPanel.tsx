@@ -10,6 +10,7 @@ import type {
 import { openPage, observePageTabs } from "./browser_open";
 import { useBrowserSelection } from "./useBrowserSelection";
 import { useColumnOpening } from "./useColumnOpening";
+import type { PickedSnapshot } from "./composerChips";
 import { WorkbenchLauncher } from "./WorkbenchLauncher";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
 import { DiffView } from "./cards/DiffView";
@@ -68,6 +69,8 @@ export function WorkbenchPanel({
   onActiveFile,
   onExternal,
   onAddToChat,
+  onAddFiles,
+  onAddPick,
   onQuoteSelection,
   fullMode,
   fileRequest,
@@ -100,6 +103,8 @@ export function WorkbenchPanel({
   onActiveFile?: (path: string | undefined) => void;
   onExternal: (url: string) => void;
   onAddToChat?: (reference: string) => void;
+  onAddFiles?: (files: File[]) => void;
+  onAddPick?: (elements: PickedSnapshot[], files: File[]) => void;
   // Text selected in an open file, with the file it came from, on its way to the composer.
   onQuoteSelection?: (text: string, path: string) => void;
   fullMode?: { full: boolean; onToggle: () => void };
@@ -572,6 +577,10 @@ export function WorkbenchPanel({
               shown={shown && !launcher}
               showTabs={false}
               onOpenDocument={(path) => port.openDocument(path)}
+              onAddToChat={onAddToChat}
+              onAddFiles={onAddFiles}
+              onAddPick={onAddPick}
+              workspaceRoot={workspaceRoot}
             />
           )}
           {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} />}
@@ -609,7 +618,7 @@ export function WorkbenchPanel({
                 </Suspense>
               ) : mode === "preview" ? (
                 previewTab ? (
-                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} />
+                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} onAddToChat={onAddToChat} onAddFiles={onAddFiles} onAddPick={onAddPick} />
                 ) : (
                   <div className="workbench-empty">{t("正在读取…")}</div>
                 )

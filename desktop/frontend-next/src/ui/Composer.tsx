@@ -34,7 +34,9 @@ import type { Submitted } from "./usesubmit";
 import { touchKeyboard } from "./touchKeyboard";
 import { ImagePreview } from "./ImagePreview";
 import { SideAskButton } from "./SideAskButton";
-import { chipId, chipName, isPicture, quoteBlock, releaseChip, type Chip } from "./composerChips";
+import { chipId, chipName, elementBlock, isPicture, quoteBlock, releaseChip, type Chip, type PickedSnapshot } from "./composerChips";
+import { ElementShot, withElement } from "./elementchip";
+import { useInjects } from "./useInjects";
 
 interface Props {
   worktreeTarget?: HTMLElement | null;
@@ -53,7 +55,7 @@ interface Props {
   restore?: { n: number; text: string };
   // Text another surface hands the composer, such as a file reference; it goes
   // in at the caret with a space on either side.
-  inject?: { n: number; text: string; session?: { id: string; title: string } };
+  inject?: { n: number; text?: string; session?: { id: string; title: string }; files?: File[]; pick?: { elements: PickedSnapshot[]; files?: File[] } };
   // Resolves false when the line never left, so what was typed comes back
   // rather than being lost to a refusal the user could not have prevented.
   // Bumped when something outside asks for the cursor — answering a plan card
@@ -163,32 +165,13 @@ export function Composer({ port, status, running, queued = false, quote, restore
     queueMicrotask(() => box.current?.focus());
   }, [restore?.n]);
 
-  const injectedAt = useRef(inject?.n ?? 0);
-  useEffect(() => {
-    if (!inject?.n || inject.n === injectedAt.current) return;
-    injectedAt.current = inject.n;
-    if (inject.session) {
-      addSession(inject.session);
-      queueMicrotask(() => box.current?.focus());
-      return;
-    }
-    const where = caret;
-    setText((prev) => {
-      const at = Math.min(where, prev.length);
-      const lead = at > 0 && !/\s$/.test(prev.slice(0, at)) ? " " : "";
-      const piece = lead + inject.text + " ";
-      pending.current = at + piece.length;
-      return prev.slice(0, at) + piece + prev.slice(at).replace(/^ /, "");
-    });
-    queueMicrotask(() => box.current?.focus());
-  }, [inject?.n]);
-
   const moveTo = useCallback((next: string, at: number) => {
     pending.current = at;
     type(next, at);
   }, []);
   const chips = useSkillChips(box, text, moveTo);
   const addSession = useCallback((s: { id: string; title: string }) => setShots((prev) => prev.some((c) => c.k === "session" && c.session === s.id) ? prev : [...prev, { k: "session", id: chipId(), session: s.id, title: s.title }]), []);
+  const addElement = useCallback((picked: PickedSnapshot) => setShots((prev) => withElement(prev, picked)), []);
   const menu = useCompletion(port, text, caret, (next, at) => {
     moveTo(next, at);
     box.current?.focus();
@@ -237,7 +220,10 @@ export function Composer({ port, status, running, queued = false, quote, restore
     // A quote is what the question is about, so it leads; a held-back paste is
     // the material the answer needs and follows what was typed.
     const quotes = shots.flatMap((c) => (c.k === "quote" ? [quoteBlock(c)] : []));
-    const compose = (t: string) => [...quotes, [...refs, t.trim()].filter(Boolean).join(" "), ...pastes].filter(Boolean).join("\n\n");
+    // A picked element is material too: it travels as the block the browser
+    // panel used to paste in, so an existing reader sees the same shape.
+    const elements = shots.flatMap((c) => (c.k === "element" ? [elementBlock(c.picked)] : []));
+    const compose = (t: string) => [...quotes, ...elements, [...refs, t.trim()].filter(Boolean).join(" "), ...pastes].filter(Boolean).join("\n\n");
     const line = compose(v);
     const call = chips.call(compose);
     const draft = { text, shots, caret: caretRef.current, chips: chips.held() };
@@ -337,6 +323,9 @@ export function Composer({ port, status, running, queued = false, quote, restore
     },
     [upload],
   );
+
+  // What the window hands the composer, applied in one place (see useInjects).
+  useInjects({ inject, caret, pending, setText, addSession, addElement, attach, focus: () => box.current?.focus() });
 
   // A dropped file is referenced where it lives. Copying it in is what let a
   // turn edit the copy and report the edit as done while the file the user
@@ -492,6 +481,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
                     <span className="sz">{t("历史会话 · 只读资料")}</span>
                   </span>
                 </>
+              ) : c.k === "element" ? (
+                <ElementShot picked={c.picked} name={chipName(c)} onInsert={insert} />
               ) : (
                 <>
                   <span className="glyph" aria-hidden="true">{c.k === "quote" ? "❝" : "TXT"}</span>
