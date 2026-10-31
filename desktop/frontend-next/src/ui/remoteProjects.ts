@@ -7,24 +7,20 @@ import { pinnedFirst } from "./pinorder";
 
 const leaf = (dir: string) => dir.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || dir;
 
-export interface RemoteWorkspace extends TreeWorkspace {
-  booked?: boolean;
-}
-
 export const remoteProjectKey = (host: string, root: string) => JSON.stringify([host, root]);
 
-export function remoteWorkspaces(host: RemoteHost, tree: TreeWorkspace[] | null | undefined, panes: RuntimeView[] = []): RemoteWorkspace[] {
+export function remoteWorkspaces(host: RemoteHost, tree: TreeWorkspace[] | null | undefined, panes: RuntimeView[] = []): TreeWorkspace[] {
   const known = workspacesOf(host);
-  const out: RemoteWorkspace[] = tree ? tree.map((ws) => ({ ...ws, booked: known.some((root) => workspaceContains(ws, root)) })) : [];
+  const out = [...(tree ?? [])];
   for (const dir of known) {
-    if (!out.some((ws) => workspaceContains(ws, dir))) out.push({ root: dir, name: leaf(dir), sessions: [], booked: true });
+    if (!out.some((ws) => workspaceContains(ws, dir))) out.push({ root: dir, name: leaf(dir), sessions: [] });
   }
   for (const pane of panes) {
     if (pane.host === host.name && pane.root && !out.some((ws) => workspaceContains(ws, pane.root))) {
       out.push({ root: pane.root, name: leaf(pane.root), sessions: [] });
     }
   }
-  return out;
+  return out.filter((ws) => !host.hiddenWorkspaces?.includes(ws.root) || known.some((root) => workspaceContains(ws, root)));
 }
 
 export function remoteProjects(host: RemoteHost, tree: TreeWorkspace[] | null | undefined, runtimes: RuntimeView[], scope: SessionScope, needle: string, listedIds: (ids: string[]) => string[], hideLegacy = false) {

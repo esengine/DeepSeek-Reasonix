@@ -54,6 +54,9 @@ func renderRemoteSection(b *strings.Builder, r RemoteConfig) {
 		if len(h.Workspaces) > 0 {
 			fmt.Fprintf(b, "workspaces = %s   # the other projects on this machine\n", renderStringArray(h.Workspaces))
 		}
+		if len(h.HiddenWorkspaces) > 0 {
+			fmt.Fprintf(b, "hidden_workspaces = %s\n", renderStringArray(h.HiddenWorkspaces))
+		}
 		if h.ServeInstall != "" {
 			fmt.Fprintf(b, "serve_install = %q   # auto|npm|upload|never\n", h.ServeInstall)
 		}

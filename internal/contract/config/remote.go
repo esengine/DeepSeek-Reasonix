@@ -40,11 +40,12 @@ type RemoteHostEntry struct {
 	// Workspaces are the other folders worked in on this machine. One machine
 	// holds several projects, and the default is only the one a bare connect
 	// lands in — read them together through WorkspaceList.
-	Workspaces   []string             `toml:"workspaces,omitempty"`
-	ServeInstall string               `toml:"serve_install"`  // remote CLI: auto|npm|upload|never
-	Provider     string               `toml:"provider"`       // model credentials: local (this machine, over the tunnel) | remote (that host's own)
-	UseSSHConfig bool                 `toml:"use_ssh_config"` // layer ~/.ssh/config values under unset fields
-	Forwards     []RemoteForwardEntry `toml:"forwards"`
+	Workspaces       []string             `toml:"workspaces,omitempty"`
+	HiddenWorkspaces []string             `toml:"hidden_workspaces,omitempty"`
+	ServeInstall     string               `toml:"serve_install"`  // remote CLI: auto|npm|upload|never
+	Provider         string               `toml:"provider"`       // model credentials: local (this machine, over the tunnel) | remote (that host's own)
+	UseSSHConfig     bool                 `toml:"use_ssh_config"` // layer ~/.ssh/config values under unset fields
+	Forwards         []RemoteForwardEntry `toml:"forwards"`
 	// Disabled keeps the row in the book but stops this machine from being
 	// dialed. Written as "disabled" rather than "enabled" so an entry written
 	// before the field existed still means what it always did.
@@ -89,6 +90,7 @@ func (r RemoteConfig) Clone() RemoteConfig {
 		for i, h := range r.Hosts {
 			h.Forwards = append([]RemoteForwardEntry(nil), h.Forwards...)
 			h.Workspaces = append([]string(nil), h.Workspaces...)
+			h.HiddenWorkspaces = slices.Clone(h.HiddenWorkspaces)
 			out.Hosts[i] = h
 		}
 	}
@@ -332,6 +334,13 @@ func (c *Config) RemoteHost(name string) (RemoteHostEntry, bool) {
 // (preserving position). Mirrors UpsertPlugin.
 func (c *Config) UpsertRemoteHost(e RemoteHostEntry) error {
 	e = e.withWorkspaceList(e.WorkspaceList())
+	if previous, ok := c.RemoteHost(e.Name); ok {
+		e.HiddenWorkspaces = append(slices.Clone(e.HiddenWorkspaces), previous.HiddenWorkspaces...)
+	}
+	e.HiddenWorkspaces = (RemoteHostEntry{Workspaces: e.HiddenWorkspaces}).WorkspaceList()
+	e.HiddenWorkspaces = slices.DeleteFunc(e.HiddenWorkspaces, func(dir string) bool {
+		return slices.Contains(e.WorkspaceList(), dir)
+	})
 	if err := validateRemoteHost(e); err != nil {
 		return err
 	}
@@ -375,9 +384,10 @@ func (c *Config) RemoveRemoteWorkspace(name, dir string) bool {
 	}
 	list := entry.WorkspaceList()
 	kept := slices.DeleteFunc(slices.Clone(list), func(x string) bool { return x == dir })
-	if len(kept) == len(list) {
+	if len(kept) == len(list) && slices.Contains(entry.HiddenWorkspaces, dir) {
 		return false
 	}
+	entry.HiddenWorkspaces = append(slices.Clone(entry.HiddenWorkspaces), dir)
 	return c.UpsertRemoteHost(entry.withWorkspaceList(kept)) == nil
 }
 

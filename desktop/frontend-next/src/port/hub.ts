@@ -244,7 +244,7 @@ export interface HubPort extends SharePort {
   // replaces a whole row; a control that knows one folder must not, or it sends
   // back blanks for every field it never displayed.
   addRemoteWorkspace(host: string, path: string): Promise<void>;
-  removeRemoteWorkspace(host: string, path: string): Promise<void>;
+  removeRemoteWorkspace(host: string, path: string, paths?: string[]): Promise<void>;
   saveRemoteHost(entry: RemoteHostEdit): Promise<void>;
   removeRemoteHost(name: string): Promise<void>;
   // Puts a machine before another in the book, or last when before is empty.
@@ -507,8 +507,8 @@ export class SseHub implements HubPort {
     await this.post<void>(`/remotes/${encodeURIComponent(host)}/workspaces`, { path });
   }
 
-  async removeRemoteWorkspace(host: string, path: string) {
-    await this.post<void>(`/remotes/${encodeURIComponent(host)}/workspaces/remove`, { path });
+  async removeRemoteWorkspace(host: string, path: string, paths?: string[]) {
+    await this.post<void>(`/remotes/${encodeURIComponent(host)}/workspaces/remove`, { path, paths });
   }
 
   async saveRemoteHost(entry: RemoteHostEdit) {

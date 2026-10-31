@@ -5,9 +5,9 @@ import { t } from "../i18n";
 import type { HubPort, RuntimeView, TreeWorkspace } from "../port/hub";
 import { workspaceContains } from "../port/hub";
 import { REMOTE_STEP_LABEL, type RemoteHost } from "../port/remote";
-import { RemoteProjectMenu } from "./RemoteProjectMenu";
+import { RemoteProjectMenu, type RemoteProjectMenuAnchor } from "./RemoteProjectMenu";
 import type { SessionScope } from "./sessionScope";
-import { remoteProjectKey, remoteProjects, type RemoteWorkspace } from "./remoteProjects";
+import { remoteProjectKey, remoteProjects } from "./remoteProjects";
 import { workspacesOf } from "./Remotes";
 export { remoteProjectKey, remoteWorkspaces } from "./remoteProjects";
 import { StudioIcon } from "./StudioIcon";
@@ -68,6 +68,7 @@ function note(host: RemoteHost): string {
 
 function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload, trees, reloadTrees, readTree, onClose, liveIds, listedIds = liveIds, scope = "all", previewLimit = Infinity, folded: foldedProjects, onFold, onError }: Props) {
   const [busy, setBusy] = useState("");
+  const [projectMenu, setProjectMenu] = useState<RemoteProjectMenuAnchor>();
   // The conversation whose deletion is being confirmed, keyed by host and path.
   const [confirm, setConfirm] = useState("");
   const deletionFocus = useRef<(() => void) | null>(null);
@@ -111,16 +112,14 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
 
   // Dropping a folder from this window's book. Nothing on the far machine is
   // touched, which is what makes it a one-click action rather than a question.
-  const drop = async (host: RemoteHost, workspace: RemoteWorkspace) => {
+  const drop = async (host: RemoteHost, workspace: TreeWorkspace) => {
     setBusy(host.name + workspace.root);
     try {
-      // Idle panes in the folder close here so this list stays in step; the
-      // kernel refuses the removal while any of them is running.
       const open = runtimes.filter((rt) => rt.host === host.name && workspaceContains(workspace, rt.root)).map((rt) => rt.id);
-      if (open.length && liveIds(open).length === 0) await onClose(open);
-      for (const root of workspacesOf(host).filter((root) => workspaceContains(workspace, root))) {
-        await hub.removeRemoteWorkspace(host.name, root);
-      }
+      const roots = [...new Set([workspace.root, ...(workspace.workspaceRoots ?? []),
+        ...workspacesOf(host).filter((root) => workspaceContains(workspace, root))])];
+      await hub.removeRemoteWorkspace(host.name, workspace.root, roots);
+      if (open.length) await onClose(open);
       await reload();
     } catch (e) {
       onError(e);
@@ -186,6 +185,20 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
             <div key={key} className="wsnode rmtws-node" data-state={host.status}
               data-current={current ? "" : undefined}>
               <div className="wsrow rmtwsrow" role="treeitem" aria-level={1} aria-expanded={hasChildren ? !folded : undefined}
+                aria-haspopup="menu" tabIndex={-1} data-action-contextmenu="workspace.menu" data-action-keydown="workspace.menu"
+                onContextMenu={(event) => {
+                  if ((event.target as HTMLElement).closest("input, textarea, [role='menu']")) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setProjectMenu({ key, trigger: event.currentTarget,
+                    point: event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined });
+                }}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget || (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setProjectMenu({ key, trigger: event.currentTarget });
+                }}
                 data-action-click="tree.navigate" data-target={key} onClick={() => { if (hasChildren) { if (onFold) onFold(key, !folded); else fold(key); } }}>
                 <StudioIcon name="folder" className="wsfolder" />
                 <span className="wsname" title={host.name + " · " + ws.root} dir="ltr">{ws.name}</span>
@@ -204,8 +217,10 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                       <StudioIcon name="chat" />
                     </button>
                     <RemoteProjectMenu name={ws.name} root={ws.root} host={host.name} defaultRoot={host.workspace} busy={!!busy}
+                      anchor={projectMenu?.key === key ? projectMenu : undefined}
+                      onOpen={(trigger) => setProjectMenu({ key, trigger })} onClose={() => setProjectMenu(undefined)}
                       onRefresh={() => void readBook(host.name)}
-                      onRemove={ws.booked ? () => void drop(host, ws) : undefined} onMove={moves} />
+                      onRemove={() => void drop(host, ws)} onMove={moves} />
                   </span>
                 </span>
               </div>
