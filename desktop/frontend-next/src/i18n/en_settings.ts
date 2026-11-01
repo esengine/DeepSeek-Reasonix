@@ -1159,6 +1159,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "收起时显示计划进度": "Show collapsed plan progress",
   "在收起的计划卡片下方显示进度条，随已完成步骤更新。默认关闭，仅保存在本机。": "Show a progress bar below the collapsed plan card, updated as steps complete. Off by default; saved only on this machine.",
   "输入框提示": "Composer hint",
+  "在工作台里只读预览 Word（.docx）和 Excel（.xlsx）。首次打开这类文件时才加载，在隔离的框中显示，不运行宏和脚本。关闭后只能用系统应用打开。仅保存在本机。": "Read-only preview of Word (.docx) and Excel (.xlsx) files in the workbench. It loads the first time such a file is opened and renders in an isolated frame without running macros or scripts. When off, these files open only in the system app. Saved on this device only.",
   "在空白任务输入框中显示任务和排队提示。默认显示，仅保存在本机，不影响输入和发送。": "Show task and queue guidance in the empty composer. On by default; saved only on this machine. Does not affect typing or sending.",
   "计划进度": "Plan progress",
   "折叠预设": "Folding preset",
