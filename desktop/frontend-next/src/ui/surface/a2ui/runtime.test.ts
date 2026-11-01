@@ -26,9 +26,10 @@ it("maps field ids to safe bindings and returns typed values from the library da
 it("does not expose executable components or library functions through the Studio catalogue", () => {
   const runtime = createSurfaceRuntime([{ kind: "text", value: '<script>bad</script> {"path":"/secret"}' }]);
   try {
-    expect(runtime.surface.defaultCatalog.functions.size).toBe(0);
-    expect(runtime.surface.defaultCatalog.components.has("Image")).toBe(false);
-    expect(runtime.surface.defaultCatalog.components.has("Video")).toBe(false);
-    expect(runtime.surface.defaultCatalog.components.has("Modal")).toBe(false);
+    const catalog = runtime.surface.defaultCatalog;
+    expect(catalog?.functions.size).toBe(0);
+    expect(catalog?.components.has("Image")).toBe(false);
+    expect(catalog?.components.has("Video")).toBe(false);
+    expect(catalog?.components.has("Modal")).toBe(false);
   } finally { runtime.dispose(); }
 });
