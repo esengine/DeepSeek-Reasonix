@@ -1,0 +1,2 @@
+- 修复：运行中发送带技能卡片的消息时，按钮和提示如实显示「排队发送」，不再写着「插话」却悄悄排队（插话只能带纯文字）。关联 #14889。
+- Fixed: while a turn runs, a message with a skill card shows "Queue" on the button and hint instead of "Steer", since steering carries plain text only. Refs #14889.

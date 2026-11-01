@@ -13,6 +13,12 @@ export function sendAria(mode: SendShortcut, touch = false): string | undefined 
   return mode === "modifier_enter" ? ariaChord("Enter") : touch ? undefined : "Enter Shift+Enter";
 }
 
+// Steering carries plain text only, so a line with a skill card queues
+// whatever the preference says; the button and hint name what will happen.
+export function runningSendIntent(preferred: RunningMessageIntent, hasChips: boolean): RunningMessageIntent {
+  return hasChips ? "followup" : preferred;
+}
+
 export function sendHint(mode: SendShortcut, running: boolean, touch: boolean, intent: RunningMessageIntent = "steer"): string {
   if (running && intent === "followup") {
     if (touch) return t("点按排队 · 回车换行");

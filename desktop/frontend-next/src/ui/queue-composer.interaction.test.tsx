@@ -123,6 +123,22 @@ describe("queued submission and withdrawal", () => {
     expect(box().value).toBe("");
   });
 
+  it("names a running send with a skill card as queued, because only plain text can steer", async () => {
+    const port = await open();
+    const steer = vi.spyOn(port, "steer");
+    const followup = vi.spyOn(port, "queueFollowup");
+    type("先看一下 /in");
+    await screen.findByRole("option", { name: /init/ });
+    fireEvent.keyDown(box(), { key: "Enter" });
+    await waitFor(() => expect(box().value).toBe("先看一下 /init "));
+    type("先看一下 /init 再说");
+    expect(screen.queryByRole("button", { name: "插话" })).toBeNull();
+    expect(screen.getByText("Enter 排队 · Shift+Enter 换行")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "排队发送" }));
+    await waitFor(() => expect(followup).toHaveBeenCalled());
+    expect(steer).not.toHaveBeenCalled();
+  });
+
   it("stays quiet when the queue is not paused", async () => {
     const port = await open();
     vi.spyOn(port, "steer").mockResolvedValue({ itemId: "steer-1", disposition: "steer_accepted" });
