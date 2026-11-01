@@ -59,7 +59,9 @@ export const waiting = (queue: QueueSnapshot | null): QueueItem[] =>
 // these call sites, and a table of strings looked up later is invisible to it —
 // which is how a row would render Chinese inside an English window.
 function label(it: QueueItem): string {
-  if (it.origin === "host" && it.state !== "blocked" && it.state !== "uncertain") {
+  if (it.origin === "host") {
+    if (it.state === "blocked") return t("后台 · 受阻");
+    if (it.state === "uncertain") return t("后台 · 状态不明");
     return t("后台任务续接");
   }
   switch (it.state) {
@@ -226,7 +228,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
               {ordinary(it) ? (
                 <span className="qdot" aria-hidden="true" />
               ) : (
-                <span className="pill" data-tone={tone(it.state)} title={it.state === "steer_accepted" ? t("下个工具边界送入") : undefined}>
+                <span className="pill" data-tone={tone(it.state)} title={it.state === "steer_accepted" ? t("下个工具边界送入") : it.origin === "host" ? t("后台任务续接") : undefined}>
                   {label(it)}
                 </span>
               )}

@@ -141,7 +141,10 @@ describe("what the pending strip says back", () => {
   // to reach them here.
   it("shows a host continuation that needs a decision", () => {
     const html = draw(snapshot({ items: [item({ origin: "host", state: "blocked", intent: "followup" })] }));
-    expect(html).toContain("受阻");
+    expect(html).toContain("后台 · 受阻");
+    expect(html).toContain('title="后台任务续接"');
+    const uncertain = draw(snapshot({ items: [item({ origin: "host", state: "uncertain", intent: "followup" })] }));
+    expect(uncertain).toContain("后台 · 状态不明");
   });
 
   it("names an accepted steer as taken, not as waiting", () => {

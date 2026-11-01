@@ -662,6 +662,8 @@ export const EN: Record<string, string> = {
   "含图片，本轮结束后发送": "Has an image: sent when this turn ends",
   "插话排队": "Steer queued",
   "后台任务续接": "Background job follow-on",
+  "后台 · 受阻": "Background · blocked",
+  "后台 · 状态不明": "Background · uncertain",
   "插话已收": "Steer accepted",
   "下个工具边界送入": "goes in at the next tool boundary",
   "已送入": "delivered",
