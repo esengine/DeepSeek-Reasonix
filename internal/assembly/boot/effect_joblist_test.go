@@ -85,6 +85,9 @@ system_prompt = "BASE"
 	if !strings.HasPrefix(launch, "Started background job ") {
 		t.Fatalf("bash background launch result = %q", launch)
 	}
+	if !strings.Contains(launch, "a new turn starts with its status") {
+		t.Fatalf("launch result = %q, want the host's resume-on-completion note", launch)
+	}
 	var result string
 	for _, m := range rec.reqs[2].Messages {
 		if m.Role == provider.RoleTool && m.ToolCallID == "c2" {
