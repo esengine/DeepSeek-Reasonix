@@ -61,6 +61,18 @@ func (m *Manager) SetCompletionObserver(o CompletionObserver) {
 	m.mu.Unlock()
 }
 
+// ResumesOnCompletion reports whether a job of session reaching a terminal
+// status opens a turn there: an observer is installed and serves that session.
+func (m *Manager) ResumesOnCompletion(session string) bool {
+	session = strings.TrimSpace(session)
+	if m == nil || session == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.completionObserver != nil && m.active == session
+}
+
 // Recorder is the installed task recorder, nil when none.
 func (m *Manager) Recorder() TaskRecorder { return m.taskRecorder }
 

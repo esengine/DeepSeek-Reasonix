@@ -1,0 +1,2 @@
+- 修复：让模型盯后台长任务（如打包）时，它不再轮询几次就写「未完成」收尾；工具结果会告诉它任务结束后会自动开一轮继续。关联 #14879。
+- Fixed: a model watching a long background job such as a build no longer gives up and reports it unfinished; it is told a new turn starts when the job ends. Refs #14879.

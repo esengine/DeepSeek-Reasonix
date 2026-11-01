@@ -255,6 +255,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 			return "", jobExit(normalizeBashRunError(jobCtx, runErr, p.PreserveBackgroundProcesses))
 		}, jobs.WithPresentation(p.Description, p.Command))
 		msg := fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID)
+		msg += resumeNote(ctx, jm)
 		// Background start is not a completed execution: completion is reported
 		// later by bash_output/wait. Do not masquerade as success with exit 0.
 		ex.State = tool.ShellStateBackgroundStarted
