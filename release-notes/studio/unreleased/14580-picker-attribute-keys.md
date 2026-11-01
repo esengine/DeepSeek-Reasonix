@@ -1,2 +1,0 @@
-- 修复：内置浏览器拾取元素时，属性名的长度也按属性值同样的上限裁剪，避免页面用超长属性名撑大交给模型的答案。关联 #14580。
-- Fixed: when the built-in browser picks an element, attribute names are clipped to the same limit as their values, so a page cannot grow the answer the model receives with oversized names. Refs #14580.

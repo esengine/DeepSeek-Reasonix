@@ -1,2 +1,0 @@
-- 修复：启动环境摘要优先复用当前数据目录的有效可信快照，避免其他目录的探测结果改变系统提示。此前使用了其他目录结果的会话可能发生一次前缀切换，并在首次请求时降低缓存命中率。修复 #14676。
-- Fixed: startup summaries prefer each data home's valid trusted snapshot. Previously affected sessions may change prefix once, reducing cache reuse for the first request. Fixes #14676.

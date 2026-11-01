@@ -1,2 +1,0 @@
-- 修复：`reasonix doctor runtime` 在没有可询问的 runtime 时不再报告 `clean=true`，而是显示 unknown（JSON 为 null）并说明原因。关联 #14825。
-- Fixed: `reasonix doctor runtime` no longer reports `clean=true` when there is no runtime to ask; it says unknown (JSON null) and why. Refs #14825.

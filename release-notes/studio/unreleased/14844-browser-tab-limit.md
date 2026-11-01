@@ -1,2 +1,0 @@
-- 修复：模型同时打开的网页上限为 12 个，超过时 `browser_open` 会提示先关闭用完的页面，避免一次搜索开出几十个页面占用数 GB 内存；你自己打开的页面不受限。修复 #14844。
-- Fixed: the model can have at most 12 pages open; past that `browser_open` asks it to close finished ones, so one search no longer opens dozens. Your own pages are not limited. Fixes #14844.

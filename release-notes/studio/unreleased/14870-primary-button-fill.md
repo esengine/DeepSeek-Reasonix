@@ -1,2 +1,0 @@
-- 修复：设置页里「自动化 → 定时运行」的「预览」和「确认创建」按钮在编辑时变成空白，现在主要按钮在设置页各处都有填充色。修复 #14870。
-- Fixed: the "Preview" and "Confirm" buttons of Automation → Scheduled runs showed blank in Settings; primary buttons now keep their fill everywhere on that page. Fixes #14870.

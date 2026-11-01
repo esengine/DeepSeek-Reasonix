@@ -1,2 +1,0 @@
-- 改进：工作区在网络盘（如 SMB 映射盘）上时，运行无法判断写入范围的命令前，登记测试基准的目录遍历改为并发读取，大目录树上等待大幅缩短。关联 #14813。
-- Improved: with the workspace on a network drive such as a mapped SMB share, the walk that holds test criteria before an unclassified command reads concurrently, much faster on big trees. Refs #14813.
