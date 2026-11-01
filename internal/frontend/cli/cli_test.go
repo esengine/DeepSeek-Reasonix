@@ -126,7 +126,7 @@ func TestServePasswordAuthRequiresPasswordMaterial(t *testing.T) {
 			t.Fatalf("serve --auth password without password rc = %d, want 1", rc)
 		}
 	})
-	if !strings.Contains(errOut, "auth mode password requires --password or serve.password_hash") {
+	if !strings.Contains(errOut, "auth mode password requires --password-file, --password or serve.password_hash") {
 		t.Fatalf("serve --auth password stderr = %q, want password material validation", errOut)
 	}
 }

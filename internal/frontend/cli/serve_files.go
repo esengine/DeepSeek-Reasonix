@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/base/fileutil"
 	"reasonix/internal/base/i18n"
+	"reasonix/internal/base/secrets"
 	"reasonix/internal/frontend/serve"
 )
 
@@ -22,6 +23,20 @@ func readServeTokenFile(path string) (string, error) {
 		return "", err
 	}
 	return lines[0], nil
+}
+
+// servePassword is --password, or the single line of --password-file, which
+// wins and is registered as a host secret so the password never sits in argv.
+func servePassword(password, file string) (string, error) {
+	if file == "" {
+		return password, nil
+	}
+	pw, err := readServeTokenFile(file)
+	if err != nil {
+		return "", err
+	}
+	secrets.RegisterHostSecretPath(file)
+	return pw, nil
 }
 
 // readPrivateLines reads a file this serve's owner alone may read, holding
@@ -85,12 +100,17 @@ func writeServePidFile(path string) error {
 // printPasswordHash answers --hash-password: print a bcrypt hash of password
 // and stop, rather than starting a server. The second return says whether the
 // caller is done; the first is its exit code.
-func printPasswordHash(asked bool, password string) (int, bool) {
+func printPasswordHash(asked bool, password, file string) (int, bool) {
 	if !asked {
 		return 0, false
 	}
+	password, err := servePassword(password, file)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1, true
+	}
 	if password == "" {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--hash-password requires --password")
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--hash-password requires --password-file or --password")
 		return 1, true
 	}
 	h, err := serve.HashPassword(password)

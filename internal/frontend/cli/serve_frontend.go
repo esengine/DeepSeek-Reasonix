@@ -262,7 +262,8 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	auth := fs.String("auth", "", authHelp)
 	token := fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)")
 	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
-	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
+	passwordFile := fs.String("password-file", "", "read the auth=password password from this file (overrides --password; keeps the secret out of argv)")
+	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password or --password-file and exit")
 	allowOpenNetwork := fs.Bool("allow-open-network", false, "allow --auth none on an address other machines can reach (anyone on the network can then read sessions and history)")
 	behindProxy := fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy")
 	publicURL := fs.String("public-url", "", "the address a phone opens to reach this server, e.g. https://agent.example.com behind a TLS proxy; used for the share link and its QR code")
@@ -312,7 +313,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 		return 2
 	}
 
-	if code, done := printPasswordHash(*hashPassword, *password); done {
+	if code, done := printPasswordHash(*hashPassword, *password, *passwordFile); done {
 		return code
 	}
 
@@ -332,7 +333,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	// Build serve config, merging CLI flags over config file.
 	serveCfg, code := serveConfigFromFlags(opts.command, authExplicit, cfg.Serve, serveFlagValues{
 		auth: *auth, token: *token, tokenFile: *tokenFile,
-		password: *password, behindProxy: *behindProxy,
+		password: *password, passwordFile: *passwordFile, behindProxy: *behindProxy,
 	})
 	if code != 0 {
 		return code
@@ -437,7 +438,7 @@ func applyServePassword(serveCfg *config.ServeConfig, password string) int {
 		serveCfg.PasswordHash = h
 	}
 	if serveCfg.AuthMode == "password" && strings.TrimSpace(serveCfg.PasswordHash) == "" {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "auth mode password requires --password or serve.password_hash")
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "auth mode password requires --password-file, --password or serve.password_hash")
 		return 1
 	}
 	return 0
@@ -446,11 +447,12 @@ func applyServePassword(serveCfg *config.ServeConfig, password string) int {
 // serveFlagValues are the serve flags whose effect lands on the serve config
 // rather than on the frontend.
 type serveFlagValues struct {
-	auth        string
-	token       string
-	tokenFile   string
-	password    string
-	behindProxy bool
+	auth         string
+	token        string
+	tokenFile    string
+	password     string
+	passwordFile string
+	behindProxy  bool
 }
 
 // serveConfigFromFlags merges the serve flags over the config file. Both
@@ -483,7 +485,12 @@ func serveConfigFromFlags(command string, authExplicit bool, base config.ServeCo
 		return serveCfg, 1
 	}
 	serveCfg.AuthMode = mode
-	if code := applyServePassword(&serveCfg, flags.password); code != 0 {
+	password, err := servePassword(flags.password, flags.passwordFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return serveCfg, 1
+	}
+	if code := applyServePassword(&serveCfg, password); code != 0 {
 		return serveCfg, code
 	}
 	return serveCfg, 0
