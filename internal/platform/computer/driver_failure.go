@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"reasonix/internal/base/textutil"
 )
@@ -58,7 +59,11 @@ func checkDriverResult(result DriverResult) error {
 	}
 	if reason != "" {
 		if len(reason) > 2048 {
-			reason = reason[:2048] + "…"
+			cut := 2048
+			for cut > 0 && !utf8.RuneStart(reason[cut]) {
+				cut--
+			}
+			reason = reason[:cut] + "…"
 		}
 		bounded, _ := textutil.BoundLiteral(reason, textutil.PreviewLimit{Graphemes: 2048, Lines: 1})
 		detail += ": " + fmt.Sprintf("%q", strings.TrimSpace(bounded))
