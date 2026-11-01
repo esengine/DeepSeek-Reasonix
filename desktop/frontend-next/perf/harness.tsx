@@ -607,7 +607,7 @@ declare global {
     __panes: () => number;
     // Answer every completion request with this one, as the kernel would for a command typed in full.
     __complete: (answer: import("../src/port/port").Completion) => void;
-    __previewFiles: (files: Record<string, { kind: PreviewInfo["kind"]; text: string }>) => void;
+    __previewFiles: (files: Record<string, { kind: PreviewInfo["kind"]; text?: string; base64?: string }>) => void;
     // Sub-agent runs the kernel would list, each with the conversation it would return.
     __subagents: (runs: { run: SubagentRun; messages: HistoryMessage[] }[]) => void;
     // What folding a stored transcript into cards costs on its own, with no
@@ -628,13 +628,15 @@ window.__toast = pushToast;
 window.__syntax = { apply: applyPack, mount: mountEditor };
 window.__feed = (ev) => hub.feeds.forEach((p) => p.feed(ev));
 window.__panes = () => hub.feeds.size;
+const fixtureBytes = (f: { text?: string; base64?: string }) =>
+  f.base64 !== undefined ? Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0)) : new TextEncoder().encode(f.text ?? "");
 window.__previewFiles = (files) => hub.feeds.forEach((port) => {
   port.workspacePreviewInfo = async (ref) => ({
-    ref, kind: files[ref.path].kind, size: new TextEncoder().encode(files[ref.path].text).length,
+    ref, kind: files[ref.path].kind, size: fixtureBytes(files[ref.path]).length,
     version: "fixture", limit: 32 << 20, readOnly: false,
   });
   port.workspacePreviewContent = async (ref) => ({
-    data: new TextEncoder().encode(files[ref.path].text).buffer, version: "fixture",
+    data: fixtureBytes(files[ref.path]).buffer, version: "fixture",
   });
 });
 window.__subagents = (runs) => hub.feeds.forEach((port) => {

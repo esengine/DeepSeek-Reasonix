@@ -39,4 +39,11 @@ export const EN_DOCUMENT: Record<string, string> = {
   "文件不是有效的 UTF-8 文本": "The file is not valid UTF-8 text.",
   "读取期间文件发生变化，请刷新": "The file changed while being read. Refresh to try again.",
   "文件预览读取失败，请重试": "Could not read the file preview. Try again.",
+  "只读预览，宏、脚本和外部资源未加载": "Read-only preview. Macros, scripts and external resources are not loaded.",
+  "无法解析这个文件，可以用系统应用打开": "This file could not be read. Open it in the system app instead.",
+  "工作表": "Sheets",
+  "只显示前 {rows} 行、{cols} 列": "Showing the first {rows} rows and {cols} columns only.",
+  "这个工作簿没有可见的工作表": "This workbook has no visible sheets.",
+  "Office 文档预览": "Office document preview",
+  "Office 文档预览已在设置中关闭": "Office document preview is turned off in Settings.",
 };

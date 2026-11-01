@@ -1,0 +1,2 @@
+- 新增：工作台可只读预览 Word（.docx）和 Excel（.xlsx），含多工作表、数字格式和合并单元格；在隔离框中显示、不运行宏和脚本，可在设置里关闭。关联 #14622。
+- New: the workbench previews Word (.docx) and Excel (.xlsx) read-only in an isolated frame with no macros or scripts; it can be turned off in Settings. Refs #14622.

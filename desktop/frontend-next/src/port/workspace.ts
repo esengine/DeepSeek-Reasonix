@@ -106,7 +106,7 @@ export interface FileRef {
 
 export interface PreviewInfo {
   ref: FileRef;
-  kind: "markdown" | "text" | "image" | "pdf" | "table" | "html" | "unsupported";
+  kind: "markdown" | "text" | "image" | "pdf" | "table" | "html" | "office" | "unsupported";
   size: number;
   version: string;
   limit: number;

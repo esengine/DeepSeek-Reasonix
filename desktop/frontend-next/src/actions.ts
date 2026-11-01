@@ -110,6 +110,7 @@ export const ACTIONS: UIAction[] = [
   { id: "appearance.new-answer-marker", kind: "view", target: "none", proof: "interaction" },
   { id: "appearance.plan-progress", kind: "view", target: "none", proof: "interaction" },
   { id: "appearance.composer-hint", kind: "view", target: "none", proof: "interaction" },
+  { id: "appearance.office-preview", kind: "view", target: "none", proof: "interaction" },
   { id: "appearance.graphics", kind: "view", target: "none", proof: "interaction" },
   { id: "window.global-shortcut", kind: "shell-native", target: "none", proof: "browser" },
   { id: "appearance.session-tabs", kind: "view", target: "none", proof: "interaction" },

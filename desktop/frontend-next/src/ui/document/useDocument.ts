@@ -3,6 +3,7 @@ import type { AgentPort } from "../../port/port";
 import type { PreviewInfo } from "../../port/workspace";
 import { parseGrantedFile } from "../grantedfiles";
 import { reason } from "../../i18n/kernel";
+import { previewsOffice } from "../../state/prefs";
 
 type Loaded = { info: PreviewInfo; data?: ArrayBuffer; error?: string };
 
@@ -31,7 +32,7 @@ export function useDocument(port: AgentPort, path: string, shown: boolean, refre
         observed = info;
         if (controller.signal.aborted) return;
         let value: Loaded;
-        if (info.kind === "unsupported" || info.size > info.limit) value = { info };
+        if (info.kind === "unsupported" || info.size > info.limit || (info.kind === "office" && !previewsOffice())) value = { info };
         else if (!force && cache.current?.data && cache.current.info.version === info.version) value = { ...cache.current, info, error: undefined };
         else {
           const loaded = await port.workspacePreviewContent(ref, controller.signal);

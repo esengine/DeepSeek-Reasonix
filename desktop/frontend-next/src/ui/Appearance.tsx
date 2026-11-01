@@ -20,6 +20,7 @@ import { LiveStreamBudgetSection } from "./LiveStreamBudgetSection";
 import { NewAnswerSection } from "./NewAnswerSection";
 import { PlanProgressSection } from "./PlanProgressSection";
 import { ComposerHintSection } from "./ComposerHintSection";
+import { OfficePreviewSection } from "./OfficePreviewSection";
 import { SessionQuickSection } from "./SessionQuickSection";
 import { NavEntriesSection } from "./NavEntriesSection";
 import { NavRailSection } from "./NavRailSection";
@@ -576,6 +577,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
       <GraphicsSection />
       <SendShortcut />
       <ComposerHintSection />
+      <OfficePreviewSection />
       <RunningMessageSetting />
       <EscStopSetting />
       <GlobalShortcutSection />
