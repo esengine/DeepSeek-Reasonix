@@ -1,0 +1,2 @@
+- 修复：重启后出现在待发送区、需要你决定的后台任务完成通知，标签写明「后台 · 状态不明」或「后台 · 受阻」，不再和你自己发的消息混在一起。关联 #14885。
+- Fixed: a background job's follow-on that needs a decision in the pending panel is now labelled "Background · uncertain" or "Background · blocked", apart from your own lines. Refs #14885.
