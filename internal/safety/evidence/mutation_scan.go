@@ -3,6 +3,7 @@ package evidence
 import (
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"reasonix/internal/base/shellparse"
 )
@@ -113,7 +114,11 @@ func namedInlineNonTerminalPair(args json.RawMessage) (string, string) {
 func boundedSegment(segment string) string {
 	segment = strings.TrimSpace(segment)
 	if len(segment) > unprovenSegmentLimit {
-		segment = segment[:unprovenSegmentLimit] + "…"
+		cut := unprovenSegmentLimit
+		for cut > 0 && !utf8.RuneStart(segment[cut]) {
+			cut--
+		}
+		segment = segment[:cut] + "…"
 	}
 	return segment
 }
