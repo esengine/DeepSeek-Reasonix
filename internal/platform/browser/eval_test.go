@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestEvalStepRunsPageJavaScriptAndReturnsItsValue(t *testing.T) {
@@ -224,5 +225,30 @@ func TestEvaluateKeepsTheCallersOwnCancellationDistinctFromTheScriptLimit(t *tes
 	_, _, err := s.Evaluate(caller, "", `await new Promise(() => {})`, "https://example.com")
 	if err == nil || CodeOf(err) == CodeScriptTimeout {
 		t.Fatalf("Evaluate error = %v; a stop by the caller is not the script limit", err)
+	}
+}
+
+func TestEvaluateTruncatesALongResultOnACharacterBoundary(t *testing.T) {
+	// 30,000 three-byte characters stay under the in-page limit (counted in UTF-16
+	// units) but exceed maxEvalResult bytes, and byte maxEvalResult falls inside a
+	// character.
+	long := strings.Repeat("测", 30000)
+	page := &fakePage{evalRemote: map[string]any{"type": "string", "value": long}}
+	s, tb := newFakeSession(t, page)
+	tb.url, tb.mainFrame = "https://example.com", "f1"
+	tb.runtime.contexts["f1"] = "context-1"
+	got, _, err := s.Evaluate(context.Background(), "", `"x".repeat(1)`, "https://example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("Evaluate split a character: %q", got[len(got)-40:])
+	}
+	kept, ok := strings.CutSuffix(got, "\n… result truncated")
+	if !ok || !strings.HasPrefix(long, kept) {
+		t.Fatalf("Evaluate = …%q, want a prefix of the result and the truncation note", got[len(got)-40:])
+	}
+	if len(kept) > maxEvalResult || len(kept) < maxEvalResult-3 {
+		t.Fatalf("Evaluate kept %d bytes, want just under %d", len(kept), maxEvalResult)
 	}
 }
