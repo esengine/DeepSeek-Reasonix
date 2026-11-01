@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const maxEvalResult = 64 << 10
@@ -93,7 +94,14 @@ func (s *Session) Evaluate(ctx context.Context, tabID, script, approvedOrigin st
 		}
 	}
 	if len(value) > maxEvalResult {
-		value = value[:maxEvalResult] + "\n… result truncated"
+		// The page caps the result in UTF-16 units, so a result of non-ASCII text
+		// can still be longer than maxEvalResult bytes; cut it before the
+		// character that crosses the limit, not inside it.
+		cut := maxEvalResult
+		for cut > 0 && !utf8.RuneStart(value[cut]) {
+			cut--
+		}
+		value = value[:cut] + "\n… result truncated"
 	}
 	return value, t.info(true), nil
 }
