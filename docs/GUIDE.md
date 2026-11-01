@@ -403,8 +403,13 @@ token out of request URLs, browser history, referrers, and access logs. Pass `--
 `[serve].token` to reuse a stable token. Password mode requires either
 `--password` at startup or a stored bcrypt hash:
 
+- Prefer `--password-file` over `--password`: argv is visible to every local
+  user through `ps` and `/proc/<pid>/cmdline`.
+- The file holds a single line and is readable only by its owner (`chmod 600`).
+
 ```bash
-reasonix serve --hash-password --password 'strong-password'
+reasonix serve --auth password --password-file ~/.reasonix-serve.password
+reasonix serve --hash-password --password-file ~/.reasonix-serve.password
 
 # <Reasonix home>/config.toml
 [serve]

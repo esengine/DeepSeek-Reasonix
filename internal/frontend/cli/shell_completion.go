@@ -300,7 +300,7 @@ func cliServeCompletionFlags(model, profile, help cliCompletionFlag) []cliComple
 		// Serve/Web resume accepts file paths, not branch IDs.
 		completionFlag("--resume", cliCompletionPathValue),
 		completionFlag("--auth", cliCompletionStaticValue, "none", "token", "password"),
-		completionFlag("--token --password --port-file --token-file --pid-file", cliCompletionStaticValue),
+		completionFlag("--token --password --password-file --port-file --token-file --pid-file", cliCompletionStaticValue),
 		completionFlag("--hash-password --behind-proxy --open --no-open", cliCompletionNoValue), help,
 	}
 }
