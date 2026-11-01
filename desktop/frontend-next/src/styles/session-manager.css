@@ -1,0 +1,35 @@
+/* The session manager reuses the pick sheet's frame; only the parts a list of
+   checkboxes adds are its own. Width stays inside .pickcard's default so a
+   390 px window keeps its margins. */
+.session-manager { width: min(560px, calc(100vw - 48px)); }
+.session-manager-description { margin: -4px 0 10px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); }
+
+.session-manager-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.session-manager-tools span[role="status"] { margin-right: auto; color: var(--muted); font: var(--w-med) var(--fs-micro) var(--ui); }
+.session-manager-tools button {
+  padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--r-xs);
+  background: transparent; color: var(--muted); font: var(--w-med) var(--fs-ui) var(--ui); cursor: pointer;
+}
+.session-manager-tools button:hover:not(:disabled) { background: var(--overlay); color: var(--text); }
+.session-manager-tools button[data-action="session.batch-delete"] { color: var(--err-ink); }
+.session-manager-tools button:disabled { opacity: .42; cursor: default; }
+.session-manager-tools button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.session-manager-list { margin-top: 8px; }
+.session-manager-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; border-radius: var(--r-xs); color: var(--muted); cursor: pointer;
+  font: var(--w-reg) var(--fs-ui) var(--ui);
+}
+.session-manager-row:hover { background: var(--overlay); color: var(--text); }
+.session-manager-row input { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.session-manager-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.session-manager-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-med); }
+.session-manager-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ghost); font: var(--w-reg) var(--fs-micro) var(--ui); }
+.session-manager-row[data-archived] .session-manager-text b { color: var(--faint); }
+.session-manager-row[data-live] .session-manager-text small { color: var(--accent-ink); }
+
+.session-manager-note { margin: 8px 0 0; color: var(--muted); font: var(--w-reg) var(--fs-micro) var(--ui); }
+.session-manager-confirm { margin-top: 10px; flex-wrap: wrap; gap: 8px; }
+.session-manager-confirm .wsconfirm-t { flex-basis: 100%; }
+.session-manager-names { color: var(--text); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); overflow-wrap: anywhere; max-height: 96px; overflow-y: auto; }

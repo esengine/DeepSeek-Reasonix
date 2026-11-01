@@ -33,7 +33,8 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | --- | --- | --- |
 | Pin a session | Have | `ui/Workspaces.tsx` (`session.pin`) |
 | Compact session rows / 紧凑会话列表 | Have | `styles/studio.css`: single-line ellipsis, 34px rows and full titles on hover. 单行省略、34px 行高，悬浮查看完整标题。 |
-| Batch selection of local sessions / 本机会话批量选择 | Have differently | `ui/LocalMachine.tsx`: “Select local sessions” is in this machine's More actions menu; `ui/SessionBatch.tsx` shows the batch toolbar only during selection. “选择本机会话”移至“这台机器”的更多菜单，仅在选择模式显示批量工具栏；保留批量归档与删除。 Refs #10651. |
+| Batch selection of local sessions / 本机会话批量选择 | Have differently | `ui/ProjectsHeader.tsx` (the project list's More actions menu) with `ui/Workspaces.tsx` and `ui/SessionBatch.tsx`: “Select local sessions” enters a selection mode whose toolbar exists only while selecting. “选择本机会话”在项目列表的更多菜单里，仅在选择模式显示批量工具栏；保留批量归档与删除。 Refs #10651. |
+| Session management sheet for batch archive and delete / 会话管理 | Have | `ui/SessionManager.tsx`: “Manage sessions” in the same More actions menu and the Ctrl-K palette opens a paged, searchable list of local sessions across projects, with per-row checkboxes, archive, and a named confirmation before delete. “管理会话”在同一菜单和 Ctrl-K 搜索里打开跨项目的本机会话列表，可多选归档或删除，删除前列出名称确认。 Refs #14611. |
 | Archive and restore a session | Have | `ui/Sidebar.tsx`, `ui/Workspaces.tsx`; the quick row action is #12318 (open PR) |
 | Recycle bin page for deleted sessions | Unverified | Studio has "delete session" in `ui/Workspaces.tsx`; no recycle-bin page was found, recovery not checked |
 | Manual rename | Have | `renameSession` in `ui/App.tsx` |

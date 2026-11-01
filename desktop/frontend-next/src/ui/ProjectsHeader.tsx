@@ -7,11 +7,12 @@ import { pinToViewport } from "./place";
 import { StudioIcon } from "./StudioIcon";
 import { workspaceMenuKeys } from "./WorkspaceOrder";
 
-export function ProjectsHeader({ adder, canSelect, selecting, onSelect, onRecent, onToggleAll, allFolded, canFold, searching }: {
+export function ProjectsHeader({ adder, canSelect, selecting, onSelect, onManage, onRecent, onToggleAll, allFolded, canFold, searching }: {
   adder: Adder;
   canSelect: boolean;
   selecting: boolean;
   onSelect: () => void;
+  onManage?: () => void;
   onRecent?: () => void;
   onToggleAll?: () => void;
   allFolded?: boolean;
@@ -63,6 +64,11 @@ export function ProjectsHeader({ adder, canSelect, selecting, onSelect, onRecent
           data-action-keydown="machine.menu" onKeyDown={workspaceMenuKeys}>
           <div className="session-pop-head"><b>{t("项目")}</b></div>
           <div className="session-pop-group">
+            {onManage && (
+              <button role="menuitem" data-action="session.manage" onClick={() => { close(); onManage(); }}>
+                <StudioIcon name="list" /><span>{t("管理会话")}</span>
+              </button>
+            )}
             <button role="menuitem" data-action="session.selection" data-value="start"
               disabled={!canSelect || selecting} onClick={() => { close(); onSelect(); }}>
               <StudioIcon name="check" /><span>{t("选择本机会话")}</span>

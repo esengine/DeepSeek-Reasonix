@@ -27,6 +27,7 @@ import { MASK, useHidesAmounts } from "./wallet";
 import { useFileDrop } from "./filedrop";
 import type { PaneView } from "../state/paneview";
 import { RecentSessions } from "./RecentSessions";
+import { SessionManager } from "./SessionManager";
 import { sessionRuntime } from "./sessionScope";
 
 interface Props {
@@ -140,6 +141,7 @@ export function Sidebar({
   const [palette, setPalette] = useState(false);
   const [projectPicker, setProjectPicker] = useState(false);
   const [recent, setRecent] = useState(false);
+  const [manage, setManage] = useState(false);
   const [located, setLocated] = useState<{ target: string } | null>(null);
   const locatedOnce = useRef<typeof located>(null);
   const [folded, setFolded] = useSidebarFolds();
@@ -188,6 +190,8 @@ export function Sidebar({
         run: () => void startConversation().catch(onError) },
       { id: "find", label: t("在这段对话里查找"), icon: "search", keywords: "find search conversation 查找 搜索 对话",
         keys: chord("F"), run: onFind },
+      { id: "manage", label: t("管理会话"), icon: "list", keywords: "manage sessions batch archive delete cleanup 管理 会话 批量 删除 清理",
+        run: () => setManage(true) },
       { id: "view-flow", label: t("显示对话"), icon: "menu", keywords: "conversation chat flow 对话 会话", keys: chord("1"), run: () => onView("flow") },
       { id: "view-analysis", label: t("显示运行分析"), icon: "list", keywords: "run analysis trace 运行 分析", keys: chord("2"), run: () => onView("analysis") },
       { id: "view-browser", label: t("显示工作台"), icon: "panel", keywords: "workbench browser files 工作台 浏览器", keys: chord("3"), run: () => onView("browser") },
@@ -254,6 +258,8 @@ export function Sidebar({
   return (
     <>
     {recent && <RecentSessions hub={hub} hosts={shownRemotes} onPick={pickRecent} onClose={() => setRecent(false)} />}
+    {manage && <SessionManager hub={hub} liveIds={liveIds} onClosePanes={onClosePanes} onArchive={onArchive}
+      onChanged={reloadTree} onClose={() => setManage(false)} onError={onError} />}
     {projectPicker && <OpenProject hub={hub} adder={adder} hosts={shownRemotes}
       onClose={() => setProjectPicker(false)} onError={onError} onOpen={async (host, root) => {
         await onOpenRemote(host, root);
@@ -328,6 +334,7 @@ export function Sidebar({
         onToggleAll={toggleAll}
         allFolded={allFolded}
         onRecent={() => setRecent(true)}
+        onManage={() => setManage(true)}
         canFold={foldable.length > 0}
         onFold={onFold}
         reload={reloadTree}

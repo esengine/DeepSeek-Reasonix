@@ -58,6 +58,9 @@ interface Props {
   previewLimit?: number;
   onToggleAll?: () => void;
   onRecent?: () => void;
+  // The cross-project management sheet. Optional so a caller that only draws a
+  // tree (tests, an embedded list) does not have to offer a dialog it cannot host.
+  onManage?: () => void;
   allFolded?: boolean;
   canFold?: boolean;
   // The session path being opened, or empty. The row shows it selected and busy
@@ -92,7 +95,7 @@ interface Props {
 const rowLabel = (session: TreeSession) =>
   session.title || (session.runtimeId && !session.turns ? t("新会话") : session.name);
 
-function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active, folded, reload, retry, paging = NO_PAGING, previewLimit = Infinity, onFold, onToggleAll, onRecent, allFolded, canFold, opening = "", onOpen, onFocus, onClose, liveIds, listedIds = liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onBranch, onArchive = async () => {}, onRename, onError, adder, children, hasOtherRows }: Props) {
+function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active, folded, reload, retry, paging = NO_PAGING, previewLimit = Infinity, onFold, onToggleAll, onRecent, onManage, allFolded, canFold, opening = "", onOpen, onFocus, onClose, liveIds, listedIds = liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onBranch, onArchive = async () => {}, onRename, onError, adder, children, hasOtherRows }: Props) {
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
   const [selection, setSelection] = useState<Set<string> | null>(null);
@@ -365,7 +368,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
         onExit={() => treeKeys.ref.current?.parentElement?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
         onBusy={(pending) => { setBusy(pending ? "batch" : ""); if (pending) { setSessionMenu(""); setEditing(""); setConfirm(""); } }}
         onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} />
-      <ProjectsHeader adder={adder} onRecent={onRecent}
+      <ProjectsHeader adder={adder} onRecent={onRecent} onManage={onManage}
         onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle}
         canSelect={displayed.length > 0} selecting={selection !== null}
         onSelect={() => setSelection(new Set())} />
