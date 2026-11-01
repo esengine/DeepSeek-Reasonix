@@ -775,7 +775,9 @@ func humanSize(b int64) string {
 		_MiB = 1024 * _KiB
 	)
 	switch {
-	case b >= _MiB:
+	// From _MiB-51 bytes up, the KiB figure rounds to "1024.0" at one decimal
+	// place, so show it as MiB instead.
+	case b >= _MiB-51:
 		return fmt.Sprintf("%.1f MiB", float64(b)/float64(_MiB))
 	case b >= _KiB:
 		return fmt.Sprintf("%.1f KiB", float64(b)/float64(_KiB))

@@ -339,7 +339,9 @@ func stillRunning(p *jobs.Progress) string {
 
 func byteCount(n int64) string {
 	switch {
-	case n >= 1<<20:
+	// From 1<<20 - 51 bytes up, the KB figure rounds to "1024.0" at one
+	// decimal place, so show it as MB instead.
+	case n >= 1<<20-51:
 		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 	case n >= 1<<10:
 		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
