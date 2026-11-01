@@ -206,6 +206,12 @@ func TestHumanSize(t *testing.T) {
 		{500, "500 B"},
 		{2048, "2.0 KiB"},
 		{19_000_000, "18.1 MiB"},
+		// Sizes just under the next unit round up to it: show "1.0 MiB",
+		// never "1024.0 KiB".
+		{1_048_524, "1023.9 KiB"},
+		{1_048_525, "1.0 MiB"},
+		{1_048_575, "1.0 MiB"},
+		{1_023, "1023 B"},
 	}
 	for _, tt := range tests {
 		if got := humanSize(tt.bytes); got != tt.want {
