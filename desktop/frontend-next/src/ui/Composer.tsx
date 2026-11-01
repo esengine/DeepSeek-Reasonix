@@ -19,7 +19,7 @@ import { useIme } from "./ime";
 import { usePlaceholderFit } from "./placeholderfit";
 import { useFitHeight } from "./fitHeight";
 import { onComposerHintChange, showsComposerHint, useRunningMessageIntent, useSendShortcut } from "../state/prefs";
-import { sendAria, sendHint, sendsOnKey } from "./sendkey";
+import { runningSendIntent, sendAria, sendHint, sendsOnKey } from "./sendkey";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
 import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
@@ -195,7 +195,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
   }, chips, addSession);
   const ime = useIme();
   const sendShortcut = useSendShortcut();
-  const runningIntent = useRunningMessageIntent();
+  const runningIntent = runningSendIntent(useRunningMessageIntent(), chips.list.length > 0);
 
   // A counter, not a boolean: asking twice in a row has to move the cursor twice.
   useEffect(() => {
