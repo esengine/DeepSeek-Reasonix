@@ -33,7 +33,8 @@ it("renders a workbook in a sandboxed frame", async () => {
   const { port } = officePort(await sheetBytes());
   render(<DocumentPreview port={port} path="budget.xlsx" shown refresh="" view={{}} />);
   const frame = await screen.findByTitle("Office 文档预览", undefined, { timeout: 5000 });
-  expect(frame.getAttribute("sandbox")).toBe("");
+  expect(frame.getAttribute("sandbox")).toBe("allow-same-origin");
+  expect(frame.getAttribute("sandbox")).not.toContain("allow-scripts");
   expect(frame.getAttribute("srcdoc")).toContain("1100");
   expect(frame.getAttribute("srcdoc")).toContain("Content-Security-Policy");
 });

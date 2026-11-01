@@ -35,8 +35,9 @@ function Picture({ data, path, view }: { data: ArrayBuffer; path: string; view: 
   </>;
 }
 
-export default function DocumentPreview({ port, path, shown, refresh, onOpenExternal, view }: {
+export default function DocumentPreview({ port, path, shown, refresh, onOpenExternal, view, onQuote }: {
   port: AgentPort; path: string; shown: boolean; refresh: string; onOpenExternal?: () => void;
+  onQuote?: (text: string, source: string) => void;
   view: DocumentViewState;
 }) {
   const { value, reload } = useDocument(port, path, shown, refresh);
@@ -57,7 +58,7 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
       case "table": body = <DelimitedPreview path={path} text={text()} view={view} />; break;
       case "html": body = <StaticHtmlPreview text={text()} />; break;
       case "image": body = <Picture data={data} path={path} view={view} />; break;
-      case "office": body = <OfficePreview data={data} path={path} view={view} />; break;
+      case "office": body = <OfficePreview data={data} path={path} view={view} onQuote={onQuote} />; break;
       default: body = fallback;
     }
   }

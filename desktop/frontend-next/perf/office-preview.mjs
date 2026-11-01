@@ -34,9 +34,35 @@ try {
       await page.locator(".delivery-open").filter({ hasText: name }).click();
       const frame = page.frameLocator('iframe[title="Office 文档预览"]');
       await frame.locator(name.endsWith("docx") ? "section.docx" : "table").first().waitFor({ timeout: 15000 });
-      assert.equal(await page.locator('iframe[title="Office 文档预览"]').getAttribute("sandbox"), "");
+      const sandbox = await page.locator('iframe[title="Office 文档预览"]').getAttribute("sandbox");
+      assert.equal(sandbox, "allow-same-origin");
       await page.waitForTimeout(300);
       await page.screenshot({ path: join(out, `office-${name.split(".")[1]}-${scheme}-${width}.png`) });
+      if (name === "report.docx") {
+        await page.frameLocator('iframe[title="Office 文档预览"]').getByText("续约率", { exact: false }).click({ clickCount: 3 });
+        await page.locator('[data-action="document.quote"]').filter({ hasText: "正文第" }).waitFor();
+        await page.screenshot({ path: join(out, `office-word-select-${scheme}-${width}.png`) });
+      }
+      if (name === "sales.xlsx" && width >= 600) {
+        const sheet = page.frameLocator('iframe[title="Office 文档预览"]');
+        const centre = async (cell) => {
+          const box = await sheet.locator(`[data-cell="${cell}"]`).boundingBox();
+          return [box.x + box.width / 2, box.y + box.height / 2];
+        };
+        const [bx, by] = await centre("B2");
+        await page.mouse.move(bx, by);
+        await page.mouse.down();
+        const [dx, dy] = await centre("D4");
+        await page.mouse.move(dx, dy, { steps: 6 });
+        await page.mouse.up();
+        const quote = page.locator('[data-action="document.quote"]');
+        await quote.filter({ hasText: "B2:D4" }).waitFor();
+        await page.screenshot({ path: join(out, `office-select-${scheme}-${width}.png`) });
+        await quote.click();
+        await page.locator(".compose").getByText("sales.xlsx", { exact: false }).first().waitFor();
+        await page.waitForTimeout(800);
+        await page.screenshot({ path: join(out, `office-quoted-${scheme}-${width}.png`) });
+      }
     }
     assert.deepEqual(errors, []);
     assert.deepEqual(requests.filter((u) => !u.startsWith("http://127.0.0.1") && !u.startsWith("http://localhost") && !u.startsWith("data:") && !u.startsWith("blob:")), []);
