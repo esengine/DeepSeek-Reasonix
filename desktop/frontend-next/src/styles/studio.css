@@ -4218,3 +4218,8 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .other-field .studio-control-tip { left: auto; right: 0; }
 .other-wrap .refine-card { margin: 8px 0 0; }
 .keys-row .ds kbd { display: inline-block; min-width: 13em }
+:root[data-effects="reduced"] .studio-runstate .rmark path { stroke-dasharray: 100; stroke-dashoffset: 0; animation: none; }
+:root[data-effects="reduced"] .rail .sessrow[data-run]::after,
+:root[data-effects="reduced"] .rail .sessrow[data-run="halt"],
+:root[data-effects="reduced"] .tool-state[data-state="running"] .studio-icon,
+:root[data-effects="reduced"] .ws-reading .studio-icon { animation: none; }

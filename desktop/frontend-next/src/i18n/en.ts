@@ -764,7 +764,7 @@ export const EN: Record<string, string> = {
   "等宽字体": "Monospace font",
   "文字粗细": "Text weight",
   "视觉效果": "Visual effects",
-  "窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空和颗粒这几层。": "If the window keeps your GPU busy, choose Reduced: the layout stays as it is, only frosted glass, the animated sky and the grain layer go.",
+  "窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空、颗粒和运行中的循环动画。": "If the window keeps your GPU busy, choose Reduced: the layout stays as it is, only frosted glass, the animated sky, the grain layer and the looping run animations go.",
   "节能": "Reduced",
   "背景模糊、动态天空与颗粒质感全部开启": "Background blur, the animated sky and the grain layer are all on",
   "关闭背景模糊、动态天空与颗粒质感，集成显卡或老旧电脑上更省电": "Turns off background blur, the animated sky and the grain layer; lighter on integrated graphics and older machines",
