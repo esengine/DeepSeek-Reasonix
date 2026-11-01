@@ -1,2 +1,0 @@
-- 修复：`/migrate` 读不到遗留会话目录时不再说「没有需要迁移的会话」，而是报出该目录与原因，且不再写入一次性完成标记。关联 #14823。
-- Fixed: `/migrate` no longer claims there were no legacy sessions when the directory could not be read; it names the directory and the cause, and does not stamp the one-time marker. Refs #14823.

@@ -1,2 +1,0 @@
-- 修复：手机窄屏上，侧栏菜单按钮不再紧贴 Reasonix 标志；设置页的「关闭」与放大按钮并排在标题行，设置标签按内容宽度排列，同屏能看到更多。修复 #14865、#14867、#14868。
-- Fixed: on a phone, the sidebar menu button no longer touches the logo, Settings puts Close beside expand, and its tabs fit their content. Fixes #14865, #14867, #14868.

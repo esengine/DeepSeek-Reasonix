@@ -1,2 +1,0 @@
-- 安全：只读命令判定现在只把 `node` 和 `python` 单独的版本探针（如 `python3 -V`）当作只读，带脚本或模块的调用都需要批准。关联 #14886。
-- Security: the read-only check treats only a bare `node` or `python` version probe (such as `python3 -V`) as a read; any call naming a script or module needs approval. Refs #14886.

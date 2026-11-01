@@ -1,2 +1,0 @@
-- 修复：`doctor repair` 遇到读不到的配置时不再报「missing (defaults apply)」，而是 unreadable 加原因、以非零退出；`--apply` 不再改写它。关联 #14824。
-- Fixed: `doctor repair` no longer reports "missing (defaults apply)" for a config it cannot read; it says unreadable with the cause, exits non-zero, and `--apply` leaves it untouched. Refs #14824.
