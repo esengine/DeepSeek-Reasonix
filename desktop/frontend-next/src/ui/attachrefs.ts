@@ -31,9 +31,45 @@ export function stripAttachmentRefs(text: string, attachments?: AttachmentPath[]
   // an opaque hash, so once an image names it the surface hides it either way.
   const dropPaths = new Set(paths?.filter((p) => !keep?.has(p)) ?? []);
   if (dropPaths.size === 0 && refs.length === 0) return text;
-  return text
-    .replace(attachmentRefRe, (tok) => (dropPaths.has(tok.slice(1)) ? "" : tok))
-    .replace(externalRefRe, (tok) => (refs.includes(tok.slice(1)) ? "" : tok))
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
+
+  // Walk the string once. For each dropped token we remove the marker and at
+  // most one adjacent space, then compact only the whitespace the removal
+  // leaves behind — never the whitespace elsewhere in the message. A code
+  // block's indentation (a four-space Python block, a pasted snippet) must
+  // survive in both the bubble and the copy payload, so we never run a global
+  // whitespace-compacting pass over the whole text.
+  const shouldDrop = (tok: string): boolean =>
+    tok.startsWith("@__") ? refs.includes(tok.slice(1)) : dropPaths.has(tok.slice(1));
+
+  // Collect every marker across both token shapes, in document order.
+  const markers: { start: number; end: number; tok: string }[] = [];
+  for (const re of [attachmentRefRe, externalRefRe]) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) markers.push({ start: m.index, end: m.index + m[0].length, tok: m[0] });
+  }
+  markers.sort((a, b) => a.start - b.start);
+
+  let out = "";
+  let cursor = 0;
+  for (const { start, end, tok } of markers) {
+    if (!shouldDrop(tok)) {
+      out += text.slice(cursor, end);
+      cursor = end;
+      continue;
+    }
+    let pre = text.slice(cursor, start);
+    let dropTrailing = 0;
+    if (pre.length > 0 && (pre[pre.length - 1] === " " || pre[pre.length - 1] === "\t")) dropTrailing = 1;
+    let dropLeading = 0;
+    if (text[end] === " " || text[end] === "\t") dropLeading = 1;
+    if (dropTrailing && dropLeading) {
+      dropTrailing = 1;
+      dropLeading = 0;
+    }
+    out += pre.slice(0, pre.length - dropTrailing);
+    cursor = end + dropLeading;
+  }
+  out += text.slice(cursor);
+  return out;
 }

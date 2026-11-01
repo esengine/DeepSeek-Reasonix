@@ -29,4 +29,30 @@ describe("stripAttachmentRefs", () => {
     const out = stripAttachmentRefs(text, [{ path: ".reasonix/attachments/x.png" }], new Set([".reasonix/attachments/x.png"]));
     expect(out).toBe(text);
   });
+
+  it("keeps a code block's indentation when a workspace token is stripped", () => {
+    const text = "@.reasonix/attachments/x.png\n    def foo():\n        return 1";
+    const out = stripAttachmentRefs(text, [{ path: ".reasonix/attachments/x.png" }]);
+    expect(out).toBe("\n    def foo():\n        return 1");
+  });
+
+  it("keeps a code block's indentation when an external token is stripped", () => {
+    const text = "@__reasonix_external_folder/ab12cd/outside.png\n    def foo():\n        return 1";
+    const out = stripAttachmentRefs(text, [
+      { path: "c:/folder/outside.png", ref: "__reasonix_external_folder/ab12cd/outside.png" },
+    ]);
+    expect(out).toBe("\n    def foo():\n        return 1");
+  });
+
+  it("drops at most one adjacent space and collapses only the local gap", () => {
+    const text = "word1 @.reasonix/attachments/x.png word2";
+    const out = stripAttachmentRefs(text, [{ path: ".reasonix/attachments/x.png" }]);
+    expect(out).toBe("word1 word2");
+  });
+
+  it("does not compact whitespace elsewhere in the message", () => {
+    const text = "@.reasonix/attachments/x.png see:\n\n    line one\n    line two";
+    const out = stripAttachmentRefs(text, [{ path: ".reasonix/attachments/x.png" }]);
+    expect(out).toBe("see:\n\n    line one\n    line two");
+  });
 });
