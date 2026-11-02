@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"reasonix/internal/runtime/completion"
+	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/workspacelease"
 )
 
@@ -41,8 +42,13 @@ func (a *Agent) NoteClaimContended(c workspacelease.Contention) {
 	}
 	a.NoteHostFact(CodeClaimContended + ": " + claimContendedText(c))
 	a.sess.claimYields.mu.Lock()
-	a.sess.claimYields.pending = append(a.sess.claimYields.pending, claimContenderNames(c))
+	detail := claimContenderNames(c)
+	a.sess.claimYields.pending = append(a.sess.claimYields.pending, detail)
 	a.sess.claimYields.mu.Unlock()
+	a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{
+		Reason: checkpoint.GapWorkspaceClaimYielded,
+		Detail: detail,
+	})
 }
 
 // quoted renders text another session wrote as one bounded, escaped token.

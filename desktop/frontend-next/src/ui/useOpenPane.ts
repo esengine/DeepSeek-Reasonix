@@ -6,7 +6,7 @@ import { t } from "../i18n";
 import { openSessionLimit } from "../state/prefs";
 import { forgetNewTaskPreset, newTaskComposition } from "../state/newTaskPreset";
 import { HttpError } from "../port/http_error";
-import { pushNote, pushToast } from "../state/toasts";
+import { pushNote, pushOffer, pushToast } from "../state/toasts";
 import { reason } from "../i18n/kernel";
 import type { SessionSwitch } from "./sessionswitch";
 
@@ -113,6 +113,28 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
     [hub, runtimes, panePorts, active, reportsRef, runsRef, setRuntimes, setTakeover],
   );
 
+  // A history over the safe read limit cannot open whole; the newest part of it
+  // can, as a new session, and the original file is never touched.
+  const offerTail = (req: { root?: string; sessionPath?: string }) => {
+    const source = runtimes.find((rt) => !rt.host && rt.root === req.root && panePorts.has(rt.id)) ?? runtimes.find((rt) => panePorts.has(rt.id));
+    const port = source && panePorts.get(source.id);
+    const path = req.sessionPath;
+    if (!port || !path) return false;
+    pushOffer(t("这个会话的历史超过了安全读取上限，没有打开（文件完好，未改动）。可以只取最近的内容，另存为新会话继续。"), {
+      label: t("从最近的内容继续"),
+      run: () => void (async () => {
+        try {
+          const tail = await port.continueFromTail(path);
+          await openPane({ root: req.root, sessionPath: tail.path });
+          pushNote(t("已从最近的内容另存为新会话，较早的 {n} 条没有带入；原会话文件保持不变。", { n: tail.dropped }));
+        } catch (e) {
+          pushToast(reason(e));
+        }
+      })(),
+    });
+    return true;
+  };
+
   const flights = useRef(new Map<string, Promise<Placed>>());
   const openPane = useCallback(
     async (req: { root?: string; sessionPath?: string; agentComposition?: string }) => {
@@ -138,6 +160,7 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
         if (!placed.changed) return sw.end(ticket);
       } catch (e) {
         sw.end(ticket);
+        if (wanted && e instanceof HttpError && e.reason?.code === "session.replay_limit" && offerTail(req)) return;
         throw e;
       }
       void reloadPanes().finally(() => sw.end(ticket));

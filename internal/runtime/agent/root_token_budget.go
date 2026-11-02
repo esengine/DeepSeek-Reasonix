@@ -39,7 +39,7 @@ func (a *Agent) bindRootTokenBudget(ctx context.Context, state *turnRuntime) con
 		previous := a.task.budget.rootTokens
 		if previous == nil {
 			previous = &rootTokenBudget{used: new(atomic.Uint64)}
-			previous.observe(&provider.Usage{PromptTokens: a.task.budget.promptTokens, CompletionTokens: a.task.budget.outputTokens})
+			previous.used.Store(a.task.budget.tokens)
 		}
 		started := a.task.budget.started
 		if started.IsZero() {
@@ -60,13 +60,10 @@ func (b *rootTokenBudget) observe(usage *provider.Usage) {
 	if b == nil || usage == nil {
 		return
 	}
-	delta := uint64(max(0, usage.PromptTokens)) + uint64(max(0, usage.CompletionTokens))
+	delta := budgetUsageTokens(usage)
 	for {
 		old := b.used.Load()
-		next := old + delta
-		if next < old {
-			next = ^uint64(0)
-		}
+		next := addBudgetTokens(old, delta)
 		if b.used.CompareAndSwap(old, next) {
 			return
 		}

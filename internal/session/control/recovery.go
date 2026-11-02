@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reasonix/internal/contract/hostaudit"
+	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/sessionstore"
 	"slices"
 	"strings"
@@ -86,6 +87,28 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 	return nil
 }
 
+// recoveryTaskSummaryRunes matches the bound the agent puts on its own
+// recovery task summary (boundedRecoveryTaskSummary in runtime/agent).
+const recoveryTaskSummaryRunes = 800
+
+// latestUserTaskSummary returns the most recent non-blank user message as the
+// recovery reviewer's task summary. It is the fallback for proposals that do
+// not carry their own summary. The bound counts runes, not bytes, so a task
+// written in CJK or another multi-byte script is not cut mid-character.
+func latestUserTaskSummary(msgs []provider.Message) string {
+	for _, v := range slices.Backward(msgs) {
+		if string(v.Role) == "user" && strings.TrimSpace(v.Content) != "" {
+			text := sessionstore.UserMessageText(v)
+			if utf8.RuneCountInString(text) > recoveryTaskSummaryRunes {
+				runes := []rune(text)
+				return string(runes[:recoveryTaskSummaryRunes]) + "…"
+			}
+			return text
+		}
+	}
+	return ""
+}
+
 func clipUTF8(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if n <= 0 || len(s) <= n {
@@ -120,17 +143,7 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 			if c.executor == nil || c.executor.Session() == nil {
 				return ""
 			}
-			msgs := c.executor.Session().Snapshot()
-			for _, v := range slices.Backward(msgs) {
-				if string(v.Role) == "user" && strings.TrimSpace(v.Content) != "" {
-					text := sessionstore.UserMessageText(v)
-					if len(text) > 800 {
-						return text[:800] + "…"
-					}
-					return text
-				}
-			}
-			return ""
+			return latestUserTaskSummary(c.executor.Session().Snapshot())
 		},
 	})
 	c.mu.Lock()

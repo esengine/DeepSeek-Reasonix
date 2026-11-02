@@ -8,7 +8,7 @@ import { host } from "../port/host";
 import type { AgentPort } from "../port/port";
 import { CopyButton } from "./CopyButton";
 import { StudioIcon } from "./StudioIcon";
-import { dropDraft, heldDraft, holdDraft } from "./feedbackdraft";
+import { dropDraft, heldDraft, holdDraft, rememberContact } from "./feedbackdraft";
 import { feedbackFailure, type FeedbackFailure } from "./feedbackfailure";
 import { FeedbackShot } from "./FeedbackShot";
 import { LazyMarkdown } from "./LazyMarkdown";
@@ -210,6 +210,7 @@ export function FeedbackForm({ port, pasteRoot, active, onMine, onClose, onFile,
         ...(shellMemory.length > 0 ? { memory: shellMemory } : {}),
       });
       shotEpoch.current++;
+      rememberContact(contact.trim());
       dropDraft();
       setSent(receipt);
       setPhase("sent");

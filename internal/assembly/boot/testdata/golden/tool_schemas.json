@@ -257,7 +257,7 @@
   },
   {
     "Name": "browser_open",
-    "Description": "Load a page in your browser and return its snapshot: one element per line, with [eN] refs for browser_act. url is http(s), about:blank or a workspace file. Without url, tab switches to that tab; close closes it.",
+    "Description": "Load a page and return its snapshot, one element per line with [eN] refs. url: http(s), about:blank or a workspace file; no url switches to tab; close closes. The user sees tabs: web_fetch reads static text, close tabs when done.",
     "ReadOnly": false,
     "Schema": {
       "properties": {

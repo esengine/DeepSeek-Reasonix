@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"testing"
@@ -62,6 +63,13 @@ func TestCompactionReportsDroppedUserTurns(t *testing.T) {
 	}
 	if notice.Level != event.LevelWarn {
 		t.Errorf("dropped-turn notice level = %v, want warn", notice.Level)
+	}
+	if notice.Code != event.NoticeCodeUserTurnsDropped || !event.DetailIsPayload(notice.Code) {
+		t.Errorf("dropped-turn notice code = %q, want %q whose Detail is its payload", notice.Code, event.NoticeCodeUserTurnsDropped)
+	}
+	var p event.TurnsDropped
+	if err := json.Unmarshal([]byte(notice.Detail), &p); err != nil || p.Count != 1 || p.Tokens == 0 || p.Budget == 0 {
+		t.Errorf("payload = %+v err=%v from %q, want one dropped turn with its tokens and budget", p, err, notice.Detail)
 	}
 	tele, ok := telemetryNotice(events)
 	if !ok {

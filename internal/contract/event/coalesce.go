@@ -269,6 +269,10 @@ func (c *coalescer) RecordWorkspaceMutation(m WorkspaceMutation) {
 	RecordWorkspaceMutation(c.inner, m)
 }
 
+func (c *coalescer) CaptureUsageScope() any {
+	return CaptureUsageScope(c.inner)
+}
+
 func (c *coalescer) RecordRunBudget(sample RunBudgetSample) {
 	c.mu.Lock()
 	c.enqueueFlushLocked()

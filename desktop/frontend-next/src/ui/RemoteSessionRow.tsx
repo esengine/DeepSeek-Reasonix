@@ -8,7 +8,6 @@ import { pinToViewport } from "./place";
 import { SessionAge } from "./SessionAge";
 import { SessionArchiveAction, SessionPinAction } from "./SessionRowActions";
 import { StudioIcon } from "./StudioIcon";
-import { UnreadDot } from "./UnreadMark";
 import { workspaceMenuKeys } from "./WorkspaceOrder";
 import { asksDelete } from "./keys";
 import type { SessionMutation } from "./useSessionMutation";
@@ -61,8 +60,7 @@ export function RemoteSessionRow({ host, target, session, held, active, busy, pe
     <i className="pip" />
     <SessionPinAction target={target} title={title} pinned={!!session.pinned} enabled={quick} disabled={!!pending || busy} onPin={() => write("pin")} />
     <span className="sesstitle" title={title}><span>{title}</span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("隔离")}</em>}{session.archived && <em className="sessarch">{t("已归档")}</em>}</span>
-    {session.unread && <UnreadDot />}
-    <SessionAge at={session.lastActiveAt} />
+    <SessionAge at={session.lastActiveAt} unread={session.unread} />
     {session.legacy && <span className="sesslegacy" title={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")}
       aria-label={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")}>{t("旧")}</span>}
     {quick && <SessionArchiveAction target={target} title={title} archived={!!session.archived} disabled={!!pending || busy || live} onArchive={() => write("archive")} />}

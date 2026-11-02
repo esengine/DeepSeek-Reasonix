@@ -66,7 +66,8 @@ type toolCallPlan struct {
 	pathsBefore pathSnapshot
 	// scanBefore is the whole workspace before the same call, which is what
 	// lets an unclassifiable one be settled as having changed nothing.
-	scanBefore workspaceScan
+	scanBefore            workspaceScan
+	claimObservationEpoch uint64
 
 	// mutationPath is set when a Previewer described a concrete workspace path
 	// for AfterMutation fingerprint capture (success or failure).
@@ -611,6 +612,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	if blocked, early := a.preToolUse(ctx, plan); early {
 		return blocked, true
 	}
+	plan.claimObservationEpoch = plan.leasePreparation.ObservationEpoch()
 	if !plan.readOnly {
 		a.observeBeforeMutation(ctx, plan)
 		plan.mutationObserved = plan.mutationPath != "" || len(plan.declaredPaths) > 0

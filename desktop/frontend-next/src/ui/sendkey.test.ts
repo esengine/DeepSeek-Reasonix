@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sendHint } from "./sendkey";
 
 afterEach(() => { vi.restoreAllMocks(); vi.resetModules(); });
 const key = (patch = {}) => ({ key: "Enter", code: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...patch });
@@ -34,5 +35,12 @@ describe("platform send chords", () => {
     expect(sendsOnKey(key({ altKey: true }), "enter")).toBe(true);
     expect(sendsOnKey(key({ shiftKey: true }), "enter")).toBe(false);
     expect(sendsOnKey(key(), "enter", true)).toBe(false);
+  });
+
+  it("describes follow-up submission for both send shortcuts and touch without changing idle hints", () => {
+    expect(sendHint("enter", true, false, "followup")).toBe("Enter 排队 · Shift+Enter 换行");
+    expect(sendHint("modifier_enter", true, false, "followup")).toContain("排队 · Enter 换行");
+    expect(sendHint("enter", true, true, "followup")).toBe("点按排队 · 回车换行");
+    expect(sendHint("enter", false, false, "followup")).toBe(sendHint("enter", false, false, "steer"));
   });
 });

@@ -25,6 +25,7 @@ async function draw(shell: Record<string, unknown>, host?: string) {
   render(
     <Chrome
       port={null}
+      workspace={null}
       status={{ preset: "balanced", toolApprovalMode: "ask", workspaceRoot: ROOT, sessionPath: ROOT + "/s.jsonl" } as never}
       title="会话"
       steer={0}

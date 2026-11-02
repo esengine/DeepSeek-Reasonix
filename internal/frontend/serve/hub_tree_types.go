@@ -8,6 +8,7 @@ type treeWorkspace struct {
 	CountsComplete  *bool  `json:"countsComplete,omitempty"`
 	PendingMetadata int    `json:"pendingMetadata,omitempty"`
 	FailedMetadata  int    `json:"failedMetadata,omitempty"`
+	RecentOffset    *int   `json:"recentOffset,omitempty"`
 	Root            string `json:"root"`
 	Name            string `json:"name"`
 	// WorkspaceRoots are the working directories belonging to this project.

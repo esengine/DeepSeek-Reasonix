@@ -25,7 +25,7 @@ func (c *Coordinator) resources(i Intent) ([]string, error) {
 			return nil, ErrInvalidIntent
 		}
 		return nil, nil
-	case Workspace:
+	case Workspace, OpaqueWrite:
 		paths = append([]string{c.root}, paths...)
 		paths = append(paths, c.workspaceResources...)
 	case NamedPaths, GitMetadata:

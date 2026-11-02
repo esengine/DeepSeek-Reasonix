@@ -297,15 +297,21 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 		return "", fmt.Errorf("subagent skill runner is unavailable for %q", name)
 	}
 
-	c.maybeSessionStart(ctx)
-	parentSession := c.parentSessionID()
-	ctx = agent.WithParentSession(ctx, parentSession)
-	ctx = jobs.WithSession(ctx, parentSession)
-	ctx, turnImgs := c.withTurnImages(ctx, task)
-	ctx = langpref.WithResponseLanguagePreference(ctx, c.display.responseLanguage)
-	ctx = langpref.WithReasoningLanguagePreference(ctx, c.display.reasoningLanguage)
-	ctx = agent.WithSubagentDepth(ctx, 0)
-	answer, err := runner(ctx, sk, c.imageRoutingPrefix(turnImgs)+task, skill.SubagentRunOptions{HostInitiated: true})
+	var answer string
+	err := c.runSynchronousTurn(ctx, nil, func(ctx context.Context) error {
+		c.maybeSessionStart(ctx)
+		parentSession := c.parentSessionID()
+		ctx = agent.WithParentSession(ctx, parentSession)
+		ctx = jobs.WithSession(ctx, parentSession)
+		ctx, turnImgs := c.withTurnImages(ctx, task)
+		ctx = langpref.WithResponseLanguagePreference(ctx, c.display.responseLanguage)
+		ctx = langpref.WithReasoningLanguagePreference(ctx, c.display.reasoningLanguage)
+		ctx = agent.WithSubagentDepth(ctx, 0)
+		ctx = c.prepareTurnRootBudget(ctx)
+		var err error
+		answer, err = runner(ctx, sk, c.imageRoutingPrefix(turnImgs)+task, skill.SubagentRunOptions{HostInitiated: true})
+		return err
+	})
 	if err != nil {
 		return "", err
 	}

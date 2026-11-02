@@ -53,7 +53,7 @@ export function WorktreeSetupPage({ stage, task, files, busy, onRetry, onCancel,
   const icon = ready || retained ? "check" : failed || uncertain ? "warning" : cancelled ? "close" : "clock";
   const phase = error || t(phases[stage.phase] || "正在等待状态确认");
   return <section className="worktree-setup" data-phase={stage.phase} aria-label={t("工作目录准备")}>
-    <header className="worktree-setup-header"><span className="worktree-setup-context"><StudioIcon name="folder"/><strong>{workspaceName(stage.sourceRoot)}</strong><span>{t("独立 worktree")}</span></span><h1 ref={heading} tabIndex={-1} aria-live="polite">{t(headline)}</h1><p className="worktree-setup-description">{t(description)}</p></header>
+    <header className="worktree-setup-header"><span className="worktree-setup-context"><StudioIcon name="folder"/><strong>{workspaceName(stage.sourceRoot)}</strong><span>{t("独立工作树")}</span></span><h1 ref={heading} tabIndex={-1} aria-live="polite">{t(headline)}</h1><p className="worktree-setup-description">{t(description)}</p></header>
     <div className="worktree-setup-phase"><span>{active ? <span className="worktree-spinner"/> : <StudioIcon name={icon}/>}<span>{phase}</span></span>{active && <span className="worktree-setup-elapsed">{t("已等待 {n} 秒", { n: elapsed })}</span>}</div>
     {slow && <p className="worktree-setup-slow" role="status">{t("仍在等待创建完成。你可以继续等待、查看详情，或取消创建。")}</p>}
     {stage.phase === "cleanup_failed" && <p className="worktree-setup-slow" role="note">{t("请先保存任务与附件，在终端核对并处理保留的目录和任务分支。确认处理完成后，在会话菜单中关闭此会话，再从源目录新建会话重试。")}</p>}

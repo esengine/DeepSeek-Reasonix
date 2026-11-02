@@ -55,3 +55,18 @@ it("closes on Escape and offers nothing where the kernel's machine cannot open p
   draw(false);
   expect(screen.queryByRole("button", { name: "用其他程序打开项目" })).toBeNull();
 });
+
+it("says why an installed program is not offered, and also when nothing is", async () => {
+  shell.reveals = true;
+  const blocked = { id: "cursor", name: "Cursor", available: false, why: "inside_project", within: "/home/u" };
+  const openWith = vi.fn().mockResolvedValue(undefined);
+  const openWithTargets = vi.fn().mockResolvedValue([blocked]);
+  render(<OpenWithMenu hub={{ openWith, openWithTargets }} root="/w" onError={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "用其他程序打开项目" }));
+  const item = await screen.findByRole("menuitem", { name: /用 Cursor 打开/ });
+  expect(item.hasAttribute("disabled")).toBe(true);
+  expect(item.getAttribute("title")).toContain("/home/u");
+  expect(screen.queryByText("没有找到可用的程序")).toBeNull();
+  await userEvent.click(item);
+  expect(openWith).not.toHaveBeenCalled();
+});

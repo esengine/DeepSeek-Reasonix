@@ -406,15 +406,15 @@ func (c *Config) SetCLITelemetryMode(mode string) error {
 }
 
 // SetDesktopConversationWidth sets the max transcript width preference.
-// standard reads; full widens the transcript; full-all the composer too.
+// full widens the transcript; full-all the composer too; custom uses WidthPercent.
 func (c *Config) SetDesktopConversationWidth(width string) error {
 	switch strings.ToLower(strings.TrimSpace(width)) {
 	case "", "standard":
 		c.Desktop.ConversationWidth = "standard"
-	case "full", "full-all":
+	case "full", "full-all", "custom":
 		c.Desktop.ConversationWidth = strings.ToLower(strings.TrimSpace(width))
 	default:
-		return fmt.Errorf("conversation width %q: must be standard|full|full-all", width)
+		return fmt.Errorf("conversation width %q: must be standard|full|full-all|custom", width)
 	}
 	return nil
 }
@@ -950,28 +950,6 @@ func removePluginFromSourceForRootLocked(entry PluginEntry, path string) (bool, 
 		return false, path, err
 	}
 	return true, path, nil
-}
-
-// RemovePluginFromEffectiveSourceForRoot removes only the declaration currently
-// selected by the project-over-global precedence rules.
-func RemovePluginFromEffectiveSourceForRoot(root, name string) (PluginEntry, bool, string, error) {
-	unlock, err := LockConfigFilesEdits(mcpConfigSourcePathsForRoot(root)...)
-	if err != nil {
-		return PluginEntry{}, false, "", fmt.Errorf("remove effective MCP server: %w", err)
-	}
-	defer unlock()
-
-	cfg, err := LoadForRootReadOnly(root)
-	if err != nil {
-		return PluginEntry{}, false, "", err
-	}
-	entry, found := pluginEntryByName(cfg.Plugins, strings.TrimSpace(name))
-	if !found {
-		return PluginEntry{}, false, "", nil
-	}
-	path := MCPConfigPathForEntry(root, entry)
-	removed, path, err := removePluginFromSourceForRootLocked(entry, path)
-	return entry, removed, path, err
 }
 
 // mcpConfigSourcePathsForRoot returns every writable source whose precedence can

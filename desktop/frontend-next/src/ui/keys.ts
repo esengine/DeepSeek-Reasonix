@@ -15,6 +15,13 @@ export function chord(key: string): string {
   return mac ? `⌘${key}` : `Ctrl ${key}`;
 }
 
+export function acceleratorLabel(binding: string): string {
+  const names: Record<string, string> = mac
+    ? { CommandOrControl: "⌘", CmdOrCtrl: "⌘", Command: "⌘", Cmd: "⌘", Control: "⌃", Ctrl: "⌃", Alt: "⌥", Option: "⌥", Shift: "⇧", Super: "⌘", Meta: "⌘", Space: "Space", Up: "↑", Down: "↓", Left: "←", Right: "→" }
+    : { CommandOrControl: "Ctrl", CmdOrCtrl: "Ctrl", Control: "Ctrl", Command: "Super", Cmd: "Super", Meta: "Super", Option: "Alt", Up: "↑", Down: "↓", Left: "←", Right: "→" };
+  return binding.split("+").map(part => names[part] ?? part).join(mac ? "" : "+");
+}
+
 // asksDelete reads the key that deletes whatever holds focus: Delete everywhere,
 // and ⌘⌫ on macOS, whose main key sends Backspace.
 export function asksDelete(ev: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }): boolean {

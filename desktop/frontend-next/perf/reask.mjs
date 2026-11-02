@@ -73,7 +73,7 @@ for (const [label, width, height] of [["wide", 1440, 900], ["phone", 390, 800]])
   await page.goto(`${PAGE}?queue=2&queuebody`, { waitUntil: "networkidle" });
   await page.waitForSelector(".queue .qi", { timeout: 15000 });
   await page.waitForTimeout(600);
-  await page.locator('.queue .qi').first().locator('button:has-text("改")').click();
+  await page.locator('.queue .qi').first().getByRole("button", { name: "改", exact: true }).click();
   await page.waitForTimeout(600);
   const q = await page.evaluate(() => {
     const el = document.querySelector(".queue .qedit");
@@ -92,7 +92,7 @@ for (const [label, width, height] of [["wide", 1440, 900], ["phone", 390, 800]])
     await page.goto(`${PAGE}?queue=4&queuebody`, { waitUntil: "networkidle" });
     await page.waitForSelector(".queue .qi", { timeout: 15000 });
     await page.waitForTimeout(600);
-    await page.locator(".queue .qi").nth(1).locator('button:has-text("改")').click();
+    await page.locator(".queue .qi").nth(1).getByRole("button", { name: "改", exact: true }).click();
     await page.waitForTimeout(600);
     if (fill) { await page.locator(".queue .qedit").fill(fill); await page.waitForTimeout(400); }
     const g = await page.evaluate(() => {

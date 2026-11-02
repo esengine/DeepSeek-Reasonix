@@ -104,10 +104,3 @@ func (r *sessionRecordReader) next() ([]byte, int64, error) {
 	}
 	return r.buffer, start, nil
 }
-
-func checkSessionPayloadBytes(path string, n int64) error {
-	if n > sessionReplayMaxPayloadBytes {
-		return sessionReplayLimitError(path, "message_payload_bytes", n, sessionReplayMaxPayloadBytes)
-	}
-	return nil
-}

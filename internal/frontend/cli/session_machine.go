@@ -29,6 +29,12 @@ const (
 	machineSchemaVersion    = 1
 	machineIdentityKeyBytes = 32
 	machineIdentityKeyFile  = "machine-id.key"
+
+	// machineStateUnknown is what the machine surfaces report when the lease
+	// probe could not prove ownership. It is neither active nor idle: the
+	// evidence supports no claim either way, and the schema keeps state a
+	// string so consumers that ignore unknown values keep working.
+	machineStateUnknown = "unknown"
 )
 
 type machineSession struct {
@@ -313,12 +319,20 @@ func machineSessions(dir string, identityKey []byte) ([]machineSession, error) {
 		}
 		meta, ok, _ := sessionstore.LoadBranchMeta(info.Path)
 		state := "idle"
-		if sessionstore.SessionLeaseHeld(info.Path) {
+		switch leaseErr := sessionstore.SessionLeaseOwnership(info.Path); {
+		case leaseErr == nil:
+			if ok && meta.InFlightTurn != nil {
+				state = "interrupted"
+			} else if info.Recovered {
+				state = "recovered"
+			}
+		case errors.Is(leaseErr, sessionstore.ErrSessionLeaseHeld):
 			state = "active"
-		} else if ok && meta.InFlightTurn != nil {
-			state = "interrupted"
-		} else if info.Recovered {
-			state = "recovered"
+		default:
+			// The probe could not prove the lease either way. Reporting active
+			// would claim a holder that was never observed; falling back to
+			// idle/interrupted would claim the opposite. Say unknown.
+			state = machineStateUnknown
 		}
 		scope := info.Scope
 		if scope == "" {

@@ -73,3 +73,16 @@ it("is not offered by a window that cannot start programs on this machine", asyn
   expect(screen.queryByRole("menuitem", { name: /用 .* 打开/ })).toBeNull();
   expect(openWithTargets).not.toHaveBeenCalled();
 });
+
+it("names the project folder that keeps an installed program off the list", async () => {
+  const { openWith } = draw([
+    { id: "vscode", name: "Visual Studio Code", available: true },
+    { id: "cursor", name: "Cursor", available: false, why: "inside_project", within: "C:\\Users\\u" },
+  ]);
+  await openMenu();
+  const blocked = await screen.findByRole("menuitem", { name: /用 Cursor 打开/ });
+  expect(blocked.hasAttribute("disabled")).toBe(true);
+  expect(blocked.getAttribute("title")).toContain("C:\\Users\\u");
+  await userEvent.click(blocked);
+  expect(openWith).not.toHaveBeenCalled();
+});

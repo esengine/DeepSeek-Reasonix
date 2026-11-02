@@ -1,9 +1,9 @@
 import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import logoWordmark from "../assets/logo-wordmark.svg";
 import type { AccountState } from "../port/port";
-import type { HubPort, RuntimeView, TreeWorkspace } from "../port/hub";
+import type { HubPort, RuntimeView, TreeSession, TreeWorkspace } from "../port/hub";
 import { workspaceContains } from "../port/hub";
 import type { RemoteHost } from "../port/remote";
 import type { Adder } from "./addws";
@@ -26,6 +26,8 @@ import type { TreePaging, TreeView } from "./treewindow";
 import { MASK, useHidesAmounts } from "./wallet";
 import { useFileDrop } from "./filedrop";
 import type { PaneView } from "../state/paneview";
+import { RecentSessions } from "./RecentSessions";
+import { sessionRuntime } from "./sessionScope";
 
 interface Props {
   hub: HubPort;
@@ -137,6 +139,9 @@ export function Sidebar({
   const destinations = useDestinations();
   const [palette, setPalette] = useState(false);
   const [projectPicker, setProjectPicker] = useState(false);
+  const [recent, setRecent] = useState(false);
+  const [located, setLocated] = useState<{ target: string } | null>(null);
+  const locatedOnce = useRef<typeof located>(null);
   const [folded, setFolded] = useSidebarFolds();
   const hideAmounts = useHidesAmounts();
   const hiddenHosts = useHiddenHosts();
@@ -225,9 +230,30 @@ export function Sidebar({
   const toggleAll = () => setFolded(allFolded
     ? new Set([...folded].filter((key) => !foldable.includes(key))) : new Set([...folded, ...foldable]));
 
+  const pickRecent = async (host: string, workspace: TreeWorkspace, session: TreeSession) => {
+    const held = sessionRuntime(session, runtimes, host);
+    if (held) onFocusPane(held.id);
+    else if (host) {
+      await onOpenRemote(host, session.workspaceRoot || workspace.root, session.path);
+      await readRemoteTree(host);
+    } else await onOpen({ root: session.workspaceRoot || workspace.root, sessionPath: session.path });
+    setRailScope("all");
+    onFold(host ? remoteProjectKey(host, workspace.root) : workspace.root, false);
+    setLocated({ target: host ? remoteProjectKey(host, workspace.root) + ":" + session.path : session.path });
+  };
+  useEffect(() => {
+    if (!located || recent || locatedOnce.current === located) return;
+    const row = [...document.querySelectorAll<HTMLElement>('.rail [role="treeitem"]')]
+      .find((element) => element.dataset.target === located.target);
+    if (!row) return;
+    row.scrollIntoView?.({ block: "nearest" });
+    row.focus({ preventScroll: true });
+    locatedOnce.current = located;
+  }, [located, recent, tree, remoteTrees]);
 
   return (
     <>
+    {recent && <RecentSessions hub={hub} hosts={shownRemotes} onPick={pickRecent} onClose={() => setRecent(false)} />}
     {projectPicker && <OpenProject hub={hub} adder={adder} hosts={shownRemotes}
       onClose={() => setProjectPicker(false)} onError={onError} onOpen={async (host, root) => {
         await onOpenRemote(host, root);
@@ -289,7 +315,7 @@ export function Sidebar({
           </div>
         </div>
       </div>
-      <RailSearch>
+      <RailSearch resetKey={located}>
       <ContentMatches hub={hub} tree={tree} onOpen={onOpen} onError={onError} onReference={onReferenceSession} />
       <Workspaces
         hub={hub}
@@ -301,6 +327,7 @@ export function Sidebar({
         folded={folded}
         onToggleAll={toggleAll}
         allFolded={allFolded}
+        onRecent={() => setRecent(true)}
         canFold={foldable.length > 0}
         onFold={onFold}
         reload={reloadTree}

@@ -481,6 +481,8 @@ export const EN_KERNEL: Record<string, string> = {
   "打不开这个会话": "Could not open that conversation",
   "该路径位于会话目录之外": "That path is outside the conversations directory",
   "没有这个会话": "No such conversation",
+  "这个会话的历史超过了安全读取上限，没有打开；文件完好未改动": "This conversation's history is over the safe read limit, so it was not opened; the file is intact and unchanged",
+  "没能取出这个会话最近的内容": "Could not take the most recent part of this conversation",
   "该地址不接受此种请求方式": "That address does not accept this request method",
   "请求体必须是 application/json": "The request body must be application/json",
   "这台服务器未开放权限编辑": "This server does not open permission editing",

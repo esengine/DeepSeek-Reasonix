@@ -287,7 +287,8 @@ func (b *builder) load() error {
 	if opts.resolvedShell != nil {
 		b.shell = *opts.resolvedShell
 	} else {
-		b.shell = resolveShellWithNotice(opts, cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, cfg.Tools.Shell.Args, b.stderr, b.sink)
+		confine := sandbox.BashConfine(effectiveBashMode(opts, cfg), opts.roots().SandboxDir())
+		b.shell = resolveShellWithNotice(opts, cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, cfg.Tools.Shell.Args, confine, b.stderr, b.sink)
 	}
 	// Record the resolved interpreter for diagnostics, staying at Debug because
 	// headless `run` must leave stderr empty unless --debug is passed. A launch
@@ -304,9 +305,9 @@ func (b *builder) load() error {
 // resolveShellWithNotice keeps shell-discovery warnings on stderr for CLI
 // diagnostics and also reports them through the boot sink, where the settings
 // surface can show which interpreter actually runs.
-func resolveShellWithNotice(opts Options, prefer, path string, args []string, stderr io.Writer, sink event.Sink) sandbox.Shell {
+func resolveShellWithNotice(opts Options, prefer, path string, args []string, confine func(string) bool, stderr io.Writer, sink event.Sink) sandbox.Shell {
 	var warnings strings.Builder
-	d := sandbox.ShellDiscovery{Prefer: prefer, Path: path, Args: args, Warn: io.MultiWriter(stderr, &warnings), ProofDir: opts.roots().CacheDir()}
+	d := sandbox.ShellDiscovery{Prefer: prefer, Path: path, Args: args, Confine: confine, Warn: io.MultiWriter(stderr, &warnings), ProofDir: opts.roots().CacheDir()}
 	if opts.tuneShell != nil {
 		opts.tuneShell(&d)
 	}

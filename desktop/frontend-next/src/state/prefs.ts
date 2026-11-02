@@ -160,6 +160,87 @@ export function setNavRailMode(mode: NavRailMode): void {
   navRailListeners.forEach((fn) => fn());
 }
 
+const COMPOSER_HINT_KEY = "rx-composer-hint";
+const composerHintListeners = new Set<() => void>();
+
+export function showsComposerHint(): boolean {
+  try {
+    return localStorage.getItem(COMPOSER_HINT_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function onComposerHintChange(fn: () => void): () => void {
+  composerHintListeners.add(fn);
+  return () => {
+    composerHintListeners.delete(fn);
+  };
+}
+
+export function setShowsComposerHint(on: boolean): void {
+  try {
+    localStorage.setItem(COMPOSER_HINT_KEY, on ? "on" : "off");
+  } catch {
+    /* unavailable storage keeps the default */
+  }
+  composerHintListeners.forEach((fn) => fn());
+}
+
+const OFFICE_PREVIEW_KEY = "rx-office-preview";
+const officePreviewListeners = new Set<() => void>();
+
+export function previewsOffice(): boolean {
+  try {
+    return localStorage.getItem(OFFICE_PREVIEW_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function onOfficePreviewChange(fn: () => void): () => void {
+  officePreviewListeners.add(fn);
+  return () => {
+    officePreviewListeners.delete(fn);
+  };
+}
+
+export function setPreviewsOffice(on: boolean): void {
+  try {
+    localStorage.setItem(OFFICE_PREVIEW_KEY, on ? "on" : "off");
+  } catch {
+    /* unavailable storage keeps the default */
+  }
+  officePreviewListeners.forEach((fn) => fn());
+}
+
+const PLAN_PROGRESS_KEY = "rx-plan-progress";
+const planProgressListeners = new Set<() => void>();
+
+export function showsPlanProgress(): boolean {
+  try {
+    return localStorage.getItem(PLAN_PROGRESS_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function onPlanProgressChange(fn: () => void): () => void {
+  planProgressListeners.add(fn);
+  return () => {
+    planProgressListeners.delete(fn);
+  };
+}
+
+export function setShowsPlanProgress(on: boolean): void {
+  try {
+    localStorage.setItem(PLAN_PROGRESS_KEY, on ? "on" : "off");
+  } catch {
+    /* unavailable storage keeps the default */
+  }
+  planProgressListeners.forEach((fn) => fn());
+}
+
 // How long a session that finished its turn stays in the sidebar's running list,
 // in minutes. Off (0) unless this machine chose a value: leaving the list the
 // moment a turn ends is the long-standing behaviour, and keeping a row there is
@@ -486,6 +567,40 @@ function subscribeSendShortcut(fn: () => void): () => void {
 
 export function useSendShortcut(): SendShortcut {
   return useSyncExternalStore(subscribeSendShortcut, sendShortcut, sendShortcut);
+}
+
+export type RunningMessageIntent = "steer" | "followup";
+const RUNNING_MESSAGE_KEY = "rx-running-message-intent";
+const runningMessageListeners = new Set<() => void>();
+let transientRunningMessage: RunningMessageIntent = "steer";
+let runningMessageStorageFailed = false;
+
+export function runningMessageIntent(): RunningMessageIntent {
+  if (runningMessageStorageFailed) return transientRunningMessage;
+  try {
+    return localStorage.getItem(RUNNING_MESSAGE_KEY) === "followup" ? "followup" : "steer";
+  } catch {
+    return transientRunningMessage;
+  }
+}
+
+export function setRunningMessageIntent(next: RunningMessageIntent): void {
+  transientRunningMessage = next;
+  try { localStorage.setItem(RUNNING_MESSAGE_KEY, next); runningMessageStorageFailed = false; } catch { runningMessageStorageFailed = true; }
+  runningMessageListeners.forEach((fn) => fn());
+}
+
+function subscribeRunningMessage(fn: () => void): () => void {
+  runningMessageListeners.add(fn);
+  const storage = (event: StorageEvent) => {
+    if (event.key === RUNNING_MESSAGE_KEY || event.key === null) fn();
+  };
+  window.addEventListener("storage", storage);
+  return () => { runningMessageListeners.delete(fn); window.removeEventListener("storage", storage); };
+}
+
+export function useRunningMessageIntent(): RunningMessageIntent {
+  return useSyncExternalStore(subscribeRunningMessage, runningMessageIntent, runningMessageIntent);
 }
 
 // The sidebar remains the default session switcher. Tabs are a local display

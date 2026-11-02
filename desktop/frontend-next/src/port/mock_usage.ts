@@ -1,4 +1,4 @@
-import type { UsageHour, UsageQuery, UsageReport } from "./port";
+import type { UploadReport, UsageHour, UsageQuery, UsageReport } from "./port";
 import { USAGE_PRICED, USAGE_TOKENS } from "./mock_memory";
 import { DEFAULT_USAGE_DAYS } from "./usage";
 
@@ -105,6 +105,23 @@ export function mockUsage(query: number | UsageQuery): UsageReport {
     providers: [
       { provider: "deepseek", tokens: Math.round(tokens * 0.599), percent: 59.9 },
       { provider: "deepseek-flash", tokens: Math.round(tokens * 0.401), percent: 40.1 },
+    ],
+  };
+}
+
+// A fortnight of uploads with quiet days, two providers and one heavy day.
+export function mockUploadUsage(days: number): UploadReport {
+  const shown = Math.min(days, 14);
+  const daily = Array.from({ length: shown }, (_, i) => ({
+    day: new Date(Date.now() - (shown - 1 - i) * DAY_MS).toISOString().slice(0, 10),
+    bytes: [0, 18e6, 240e6, 410e6, 95e6, 0, 0, 120e6, 760e6, 330e6, 40e6, 0, 210e6, 150e6][i] ?? 0,
+  }));
+  const total = daily.reduce((n, d) => n + d.bytes, 0);
+  return {
+    from: daily[0]?.day ?? "", to: daily[daily.length - 1]?.day ?? "", bytes: total, requests: 1280, daily,
+    providers: [
+      { provider: "deepseek", bytes: Math.round(total * 0.86), requests: 1100, percent: 86 },
+      { provider: "relay-work", bytes: Math.round(total * 0.14), requests: 180, percent: 14 },
     ],
   };
 }

@@ -20,10 +20,25 @@ plugins {
 }
 
 // One version, read by the About screen and the update check.
+//
+// A published build takes its version from the tag it was cut for, so the About
+// screen and the update check name that release rather than the number this file
+// was last edited to. Without the property — a local build — the numbers below
+// are the answer.
+def publishedVersion = findProperty("reasonixVersion") as String
 def versionMajor = 2
 def versionMinor = 0
 def versionPatch = 0
 def versionBuild = 1
+if (publishedVersion) {
+    def parsed = publishedVersion =~ /^(\d+)\.(\d+)\.(\d+)/
+    if (!parsed.find()) {
+        throw new GradleException("reasonixVersion must start with MAJOR.MINOR.PATCH, got: ${publishedVersion}")
+    }
+    versionMajor = parsed.group(1) as int
+    versionMinor = parsed.group(2) as int
+    versionPatch = parsed.group(3) as int
+}
 
 // Where the two build inputs are expected. Both are produced from the checkout
 // beside this module, by the scripts named in each message.
@@ -53,6 +68,12 @@ android {
         // what `MainActivity` feeds real inset values for, since a WebView does
         // not implement `env(safe-area-inset-*)`.
         targetSdk 35
+        // versionCode must strictly increase, because Android refuses an update
+        // whose versionCode is not higher. The build digit is a single decimal
+        // place, so the scheme collides once a patch reaches 10: 2.55.10 and
+        // 2.56.0 both come out as 25601. Patch releases above 9 are not expected
+        // on Studio, and widening the digit now would renumber every build, so
+        // the constraint is recorded rather than fixed.
         versionCode versionMajor * 10000 + versionMinor * 100 + versionPatch * 10 + versionBuild
         versionName "${versionMajor}.${versionMinor}.${versionPatch}"
 

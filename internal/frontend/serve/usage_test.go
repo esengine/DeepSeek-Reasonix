@@ -163,3 +163,37 @@ func TestUsageReadsInTheSessionDisplayCurrency(t *testing.T) {
 		t.Fatalf("CNY display = %+v, want the vendor's CNY price", got)
 	}
 }
+
+func TestUploadUsageReadsWhatTheMeterWrote(t *testing.T) {
+	s := newListenerTestServer(t)
+	day := time.Now().Format("2006-01-02")
+	dir := filepath.Join(config.StatsDir(), "upload")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := `{"day":"` + day + `","providers":{"deepseek":{"bytes":2048,"requests":4},"relay":{"bytes":1024,"requests":1}}}`
+	if err := os.WriteFile(filepath.Join(dir, day+".test.json"), []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.uploadUsage(rec, httptest.NewRequest(http.MethodGet, "/usage/upload?days=7", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var got stats.UploadStats
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Bytes != 3072 || got.Requests != 5 || len(got.Daily) != 7 || len(got.Providers) != 2 || got.Providers[0].Provider != "deepseek" {
+		t.Fatalf("report = %+v, want 3072 bytes in 5 requests over 7 days, deepseek first", got)
+	}
+}
+
+func TestUploadUsageRefusesTheSameBadRangesAsUsage(t *testing.T) {
+	s := newListenerTestServer(t)
+	rec := httptest.NewRecorder()
+	s.uploadUsage(rec, httptest.NewRequest(http.MethodGet, "/usage/upload?days=0", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("days=0 status = %d, want 400", rec.Code)
+	}
+}

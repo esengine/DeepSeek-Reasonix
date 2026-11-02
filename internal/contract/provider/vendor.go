@@ -69,13 +69,21 @@ func IsGeminiEndpoint(baseURL string) bool {
 	return strings.EqualFold(u.Hostname(), "generativelanguage.googleapis.com")
 }
 
-// IsMiniMaxEndpoint reports whether baseURL points at MiniMax's OpenAI-compatible
-// endpoint (api.minimaxi.com or any *.minimaxi.com subdomain).
-//
-// The host string is matched exactly — the spelling is `minimaxi`, not
-// `minimax` — to avoid clashing with any future minimax-branded gateway.
+// IsMiniMaxEndpoint reports whether baseURL points at MiniMax's China or
+// international endpoint, including their subdomains.
 func IsMiniMaxEndpoint(baseURL string) bool {
-	return matchVendorHost(baseURL, "minimaxi.com", "api.minimaxi.com")
+	return matchVendorHost(baseURL, "minimaxi.com", "api.minimaxi.com") ||
+		matchVendorHost(baseURL, "minimax.io", "api.minimax.io")
+}
+
+// IsMiniMaxFlash identifies the direct API model with always-on, tunable thinking.
+func IsMiniMaxFlash(model string) bool {
+	return strings.EqualFold(model, "MiniMax-M3.1-Flash")
+}
+
+// MiniMaxFlashEfforts are the supported depth levels, in ascending order.
+func MiniMaxFlashEfforts() []string {
+	return []string{"low", "medium", "high", "xhigh", "max"}
 }
 
 // IsZhipuEndpoint reports whether baseURL is Zhipu's endpoint for GLM models,

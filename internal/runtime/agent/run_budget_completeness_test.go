@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/pricing"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/state/sessionstore"
@@ -88,7 +89,8 @@ func TestTaskBudgetKnownCostStillLandsAfterMissingUsage(t *testing.T) {
 
 func TestRunBudgetExplicitZeroUsageIsPriced(t *testing.T) {
 	var b runBudget
-	b.observe(&provider.Usage{}, &provider.Pricing{Input: 1, Output: 2})
+	u := &provider.Usage{}
+	b.observe(u, budgetTestQuote(u, &provider.Pricing{Input: 1, Output: 2}))
 	if got := b.totals(); !got.Priced || got.Cost != 0 || got.Rounds != 1 {
 		t.Fatalf("totals = %+v, want reported zero usage to stay distinguishable from absent usage", got)
 	}
@@ -131,17 +133,22 @@ func TestTaskBudgetUsageCompletenessFollowsItsLifetime(t *testing.T) {
 func TestTaskBudgetCostUsesOnlyTheReportedSubtotal(t *testing.T) {
 	var b runBudget
 	price := &provider.Pricing{Input: 1}
-	b.observe(&provider.Usage{PromptTokens: 2_000_000, Estimated: true}, price)
+	observe := func(u *provider.Usage, p *provider.Pricing) { b.observe(u, budgetTestQuote(u, p)) }
+	observe(&provider.Usage{PromptTokens: 2_000_000, Estimated: true}, price)
 	if axis, _ := b.exceeded(TaskBudget{Cost: 1}); axis != "" {
 		t.Fatalf("axis = %q, an estimate cannot prove a cost crossing", axis)
 	}
-	b.observe(&provider.Usage{PromptTokens: 500_000}, price)
+	observe(&provider.Usage{PromptTokens: 500_000}, price)
 	b.observe(&provider.Usage{PromptTokens: 2_000_000}, nil)
 	if got := b.totals(); got.Cost != 0.5 || got.Priced {
 		t.Fatalf("totals = %+v, want only the known priced subtotal and incomplete coverage", got)
 	}
-	b.observe(&provider.Usage{PromptTokens: 500_000}, price)
+	observe(&provider.Usage{PromptTokens: 500_000}, price)
 	if axis, _ := b.exceeded(TaskBudget{Cost: 1}); axis != "cost" {
 		t.Fatalf("axis = %q, unknown rounds must not erase a proven crossing", axis)
 	}
+}
+
+func budgetTestQuote(u *provider.Usage, p *provider.Pricing) *pricing.CostQuote {
+	return event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: u, Pricing: p}, nil)
 }

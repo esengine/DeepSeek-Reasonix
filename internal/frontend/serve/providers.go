@@ -69,6 +69,10 @@ type providerView struct {
 	BaseURL      string            `json:"baseUrl"`
 	Models       []string          `json:"models"`
 	ModelAliases map[string]string `json:"modelAliases,omitempty"`
+	// HideModelPrefix and ModelShorts say how the models are drawn once the shared
+	// prefix is left out; ids never change.
+	HideModelPrefix bool              `json:"hideModelPrefix,omitempty"`
+	ModelShorts     map[string]string `json:"modelShorts,omitempty"`
 	// VisionModels is which of them read images, so the form shows the current
 	// answer instead of asking the user to remember it.
 	VisionModels []string `json:"visionModels"`
@@ -176,6 +180,8 @@ func (s *Server) providers(w http.ResponseWriter, _ *http.Request) {
 			BaseURL:              p.BaseURL,
 			Models:               nonNilStrings(p.ChatModelList()),
 			ModelAliases:         p.ModelAliases,
+			HideModelPrefix:      p.HideModelPrefix,
+			ModelShorts:          modelShorts(p),
 			VisionModels:         nonNilStrings(visionModelsOf(cfg, p)),
 			CanSetVision:         len(settable) > 0 || config.CanConfigureVision(p),
 			VisionSettable:       nonNilStrings(settable),

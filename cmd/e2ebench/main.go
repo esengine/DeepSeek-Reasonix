@@ -233,20 +233,9 @@ func (r result) class() string {
 const defaultSuiteTokenBudget = 800_000
 
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "e2ebench — Reasonix end-to-end benchmark.\n\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", flag.CommandLine.Name())
-		flag.PrintDefaults()
-		fmt.Fprintf(flag.CommandLine.Output(), "\nExamples:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  # Run the committed suite:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s\n\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
-		fmt.Fprintf(flag.CommandLine.Output(), "  # Grade a PR's diff with a retry budget:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -mode diff -base origin/main-v2 -repo . -attempts 3 -timeout 1800\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
-		fmt.Fprintf(flag.CommandLine.Output(), "\n  # Run the same suite with the delivery contract:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -profile delivery\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
-	}
+	flag.Usage = printUsage
 
-	mode := flag.String("mode", "suite", "suite | diff | swebench | compare | rollout | traj | barrier | sft | serve")
+	mode := flag.String("mode", "suite", "suite | diff | swebench | compare | rollout | traj | barrier | sft | serve | audit")
 	addr := flag.String("addr", "127.0.0.1:7480", "serve mode: live dashboard listen address")
 	subset := flag.String("subset", "benchmarks/swebench/subset.json", "swebench mode: instance subset file")
 	reportIn := flag.String("report", "", "sft mode: the run report (-json output) whose grader verdicts decide which runs are exported")
@@ -276,6 +265,7 @@ func main() {
 	forcePlanner := flag.Bool("force-planner", false, "suite mode: prefix each prompt with a plan-first directive so the two-model turn engages regardless of the planner gate")
 	anchorFlag := flag.String("anchor", anchorBlind, "suite mode: hypothesis arm — blind (no hypothesis) | correct | wrong; correct/wrong prefix each prompt with the task's authored seed and skip tasks that have none")
 	outJSON := flag.String("json", "", "write the JSON report here (optional)")
+	batchDir := flag.String("batch", "", "suite mode: write results.jsonl (one row per run) and batch.json (manifest v1) here, so a later -mode audit can re-derive the report's figures; audit mode: read the batch from here")
 	budget := flag.Int("budget", defaultSuiteTokenBudget, "abort once total tokens cross this (0 = no cap)")
 	// diff-mode flags
 	repo := flag.String("repo", ".", "repo root (diff mode)")
@@ -298,6 +288,10 @@ func main() {
 		os.Exit(2)
 	}
 	profile, arm, cache, anchor := axes.profile, axes.arm, axes.cache, axes.anchor
+	if *batchDir != "" && *mode != "suite" && *mode != "audit" {
+		fmt.Fprintln(os.Stderr, "e2ebench: -batch is written by -mode suite and read by -mode audit; -mode "+*mode+" does neither")
+		os.Exit(2)
+	}
 
 	if *mode == "swebench" {
 		if _, err := permissionFlag(*permission); err != nil {
@@ -321,6 +315,7 @@ func main() {
 
 	if dispatchOfflineMode(*mode, offlineModeArgs{
 		trajDir: *trajDir, suite: *suite, reportIn: *reportIn, outMD: *outMD, outJSON: *outJSON, addr: *addr,
+		batchDir: *batchDir,
 	}) {
 		return
 	}
@@ -342,10 +337,10 @@ func main() {
 		cacheArm: cache, effort: *effort, checkpoints: *checkpoints, policy: *policyFlag,
 		meterConfig: meterSource, meterFaults: faults, segments: segments, steers: steers,
 		replyLanguage: agentReplyLanguage(),
-	}, *suite, *taskFilter, *outMD, *outJSON)
+	}, *suite, *taskFilter, *outMD, *outJSON, *batchDir)
 }
 
-func runSuiteMode(cfg suiteConfig, suite, taskFilter, outMD, outJSON string) {
+func runSuiteMode(cfg suiteConfig, suite, taskFilter, outMD, outJSON, batchDir string) {
 	tasks, err := loadTasks(suite)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load suite:", err)
@@ -363,7 +358,19 @@ func runSuiteMode(cfg suiteConfig, suite, taskFilter, outMD, outJSON string) {
 		os.Exit(2)
 	}
 
+	// The provenance is captured before the first run: the commit a run ends
+	// on is not necessarily the commit it started from.
+	var batch batchProvenance
+	if batchDir != "" {
+		batch = captureBatchProvenance(batchDir, cfg, tasks, taskFilter)
+	}
 	results := runSuite(cfg, tasks)
+	if batchDir != "" {
+		if err := writeBatch(batch, results); err != nil {
+			fmt.Fprintln(os.Stderr, "write batch:", err)
+			os.Exit(1)
+		}
+	}
 
 	report := render(results)
 	if outMD != "" {

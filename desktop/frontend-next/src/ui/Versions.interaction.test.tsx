@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Versions } from "./Versions";
@@ -93,6 +93,16 @@ describe("the version panel", () => {
     render(<Versions port={port} />);
     expect(await screen.findByText("2.21.0 下载卡住了")).toBeTruthy();
     expect(screen.getByRole("link", { name: "下载完整安装包" })).toBeTruthy();
+  });
+
+  it("opens the full installer page in the system browser, where a file can be saved", async () => {
+    const openExternal = vi.fn(() => Promise.resolve());
+    const port = { ...portAt({ version: "2.21.0", phase: "error", received: 0, total: 0, code: "update.not_applied", err: "update: set aside app.exe: access denied" }), openExternal };
+    render(<Versions port={port} />);
+    const link = await screen.findByRole("link", { name: "下载完整安装包" });
+    const notPrevented = fireEvent.click(link);
+    expect(notPrevented).toBe(false);
+    expect(openExternal).toHaveBeenCalledWith("https://github.com/esengine/DeepSeek-Reasonix/releases/tag/studio-v2.21.0");
   });
 
   it("explains a move that did not land by its code, with the way out", async () => {

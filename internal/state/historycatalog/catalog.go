@@ -637,13 +637,9 @@ func (c *Catalog) Purge(ctx context.Context, path string) error {
 }
 
 func (c *Catalog) refreshStatus(ctx context.Context) {
-	var indexed, total, pending, failed int64
-	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_sources WHERE health='ok'`).Scan(&indexed)
-	_ = c.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(total),0) FROM history_roots`).Scan(&total)
-	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_roots WHERE state<>'ready'`).Scan(&pending)
-	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history_sources WHERE health='corrupt'`).Scan(&failed)
+	counts := readStatusCounts(ctx, c.db)
 	c.statusMu.Lock()
-	c.status.Indexed, c.status.Total, c.status.Pending, c.status.Failed = indexed, total, pending, failed
+	c.status.Indexed, c.status.Total, c.status.Pending, c.status.Failed = counts.Indexed, counts.Total, counts.Pending, counts.Failed
 	c.status.Revision = c.revision.Load()
 	c.statusMu.Unlock()
 }

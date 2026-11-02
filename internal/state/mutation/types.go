@@ -14,6 +14,7 @@ const (
 	GitMetadata  Effect = "git_metadata"
 	External     Effect = "external"
 	CapacityOnly Effect = "capacity"
+	OpaqueWrite  Effect = "opaque_write"
 )
 
 var (

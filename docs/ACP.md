@@ -375,6 +375,51 @@ names rather than constructing vendor method strings.
 bodies. A recovered inbox is paused; clients should let users inspect it before
 calling `setPaused` with `false`.
 
+### When an inbox call is refused
+
+A refused inbox call answers with an implementation-defined JSON-RPC code and a
+`data.code` a client branches on; `message` stays Reasonix's English, which
+clients still show. The identities are the HTTP frontend's, so one vocabulary
+names the queue's conditions on both surfaces.
+
+```json
+{"error": {"code": -32020, "message": "inbox item not found", "data": {"code": "inbox.not_found"}}}
+```
+
+`-32020` is "the queue refused this call" and `-32021` is "the work may already
+have run". The class is the client's instruction:
+
+- **terminal** — the same call cannot start succeeding; repair the client's view
+  instead of retrying it;
+- **retry-after-repair** — the same call succeeds once the named condition is
+  repaired;
+- **do not retry** — the work may already have run, so retrying could run it
+  twice.
+
+| `data.code` | JSON-RPC | Class | Refusal |
+| --- | --- | --- | --- |
+| `inbox.not_found` | `-32020` | terminal | No item with this id is in the queue. Read `list` and drop it. |
+| `inbox.invalid_state` | `-32020` | terminal | This item's state does not allow this verb. Read `list` for the state, then pick a verb that fits. |
+| `inbox.retry_may_repeat` | `-32021` | do not retry | Its block code is not `steer_unapplied`, so the turn may already have run. Retrying could run the work twice. |
+| `inbox.item_too_large` | `-32020` | retry-after-repair | The body is over the single-item limit. Send a shorter one. |
+| `inbox.capacity_items` | `-32020` | retry-after-repair | The queue holds its maximum count. Delete pending work, then retry. |
+| `inbox.capacity_bytes` | `-32020` | retry-after-repair | The queue holds its maximum bytes. Delete pending work, then retry. |
+| `inbox.paused` | `-32020` | retry-after-repair | The queue is paused. Resume it where the pause is one a client may lift; a host-set pause is for the person to inspect first, then retry. |
+| `inbox.unrecovered` | `-32020` | retry-after-repair | The queue could not be read, so its contents are unknown. Inspect the queue directory before resuming. |
+| `inbox.closed` | `-32020` | terminal | This queue is closed. Open the session again. |
+| `inbox.schema_readonly` | `-32020` | terminal | A newer Reasonix wrote the queue and this build may read it only. Upgrade to write it. |
+| `inbox.foreign_run` | `-32020` | terminal | Another run owns this item. Change it from the session that owns it. |
+| `inbox.idempotency_conflict` | `-32020` | terminal | The key already belongs to different input. The same body still refuses; new input needs a new key. |
+| `steer.already_applied` | `-32020` | terminal | The steer reached the turn before this call did. Nothing is lost and nothing is left to do. |
+| `inbox.empty` | `-32602` | terminal | The request carries no text. Send a non-empty body. |
+
+Three answers are not queue refusals:
+
+- `-32602` with no `data.code`: the request cannot address a queue at all — an
+  unknown `sessionId`, or params that do not parse;
+- `-32600`: a malformed JSON-RPC frame (no method, or not an object);
+- `-32603`: the queue, or the session's path to it, failed rather than refused.
+
 ## Goal pause and resume extension
 
 Selecting `goal` with `session/set_mode` always drafts a **new** Goal: the next

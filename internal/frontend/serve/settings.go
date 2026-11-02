@@ -276,7 +276,10 @@ type modelEntry struct {
 	DisplayName string `json:"displayName,omitempty"`
 	Model       string `json:"model"`
 	ModelAlias  string `json:"modelAlias,omitempty"`
-	Kind        string `json:"kind,omitempty"`
+	// ModelShort is the model drawn with its entry's shared prefix left out, when
+	// that was asked for; empty draws the model as it is.
+	ModelShort string `json:"modelShort,omitempty"`
+	Kind       string `json:"kind,omitempty"`
 	// What this model produces, projected from the protocol table so a chooser
 	// filters on a declaration rather than on a kind's spelling.
 	Answers string `json:"answers,omitempty"`

@@ -8,6 +8,8 @@ export interface Toast {
   text: string;
   // A note tells the person what the window did on its own; it is not a failure.
   tone?: "note";
+  // A way out the notice offers; running it dismisses the notice.
+  action?: { label: string; run: () => void };
 }
 
 export const MAX_TOASTS = 3;
@@ -31,6 +33,12 @@ export function pushToast(text: string): void {
 export function pushNote(text: string): void {
   if (!text.trim() || toasts.some((toast) => toast.text === text)) return;
   publish([...toasts, { id: ++serial, text, tone: "note" as const }].slice(-MAX_TOASTS));
+}
+
+/** A note with one button that does what the note offers. */
+export function pushOffer(text: string, action: { label: string; run: () => void }): void {
+  if (!text.trim() || toasts.some((toast) => toast.text === text)) return;
+  publish([...toasts, { id: ++serial, text, tone: "note" as const, action }].slice(-MAX_TOASTS));
 }
 
 export function dismissToast(id: number): void {

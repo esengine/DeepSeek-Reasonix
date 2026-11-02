@@ -24,7 +24,15 @@ type Status struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Available bool   `json:"available"`
+	// Why and Within say what kept a program that is installed from being
+	// offered: it sits inside a project folder, which is named in Within.
+	Why    string `json:"why,omitempty"`
+	Within string `json:"within,omitempty"`
 }
+
+// WhyInsideProject marks a program that exists but lies in a project folder, so
+// whatever an agent can write there could be started from the list.
+const WhyInsideProject = "inside_project"
 
 // machine is what discovery and launching read of the computer.
 type machine struct {
@@ -71,9 +79,32 @@ func (m machine) list() []Status {
 	out := make([]Status, 0, len(targets))
 	for _, t := range targets {
 		_, ok := m.resolve(t, "")
-		out = append(out, Status{ID: t.id, Name: t.name, Available: ok})
+		st := Status{ID: t.id, Name: t.name, Available: ok}
+		if !ok {
+			st.Why, st.Within = m.whyNot(t)
+		}
+		out = append(out, st)
 	}
 	return out
+}
+
+// whyNot names the project folder holding a program the target would have used
+// had it been elsewhere; a program that is simply not installed has no reason.
+func (m machine) whyNot(t target) (why, within string) {
+	for _, r := range t.by[m.goos] {
+		for _, c := range m.candidates(r) {
+			if !m.absolute(c.path) || (!c.bundle && !m.isFile(c.path)) {
+				continue
+			}
+			if m.goos == "windows" && !strings.EqualFold(filepath.Ext(c.path), ".exe") {
+				continue
+			}
+			if root := m.containing(c.path); root != "" {
+				return WhyInsideProject, root
+			}
+		}
+	}
+	return "", ""
 }
 
 func (m machine) open(id, dir string) (string, error) {
@@ -244,7 +275,10 @@ func (m machine) launchable(c candidate) bool {
 
 // inside is whether c lies within a forbidden folder, compared against each
 // folder as named and as it resolves, since either may be reached through a link.
-func (m machine) inside(c string) bool {
+func (m machine) inside(c string) bool { return m.containing(c) != "" }
+
+// containing is the forbidden folder c lies within, as it was named, or "".
+func (m machine) containing(c string) string {
 	clean := filepath.Clean(c)
 	for _, root := range m.forbidden {
 		roots := []string{filepath.Clean(root)}
@@ -257,11 +291,11 @@ func (m machine) inside(c string) bool {
 			}
 			rel, err := filepath.Rel(r, clean)
 			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
-				return true
+				return root
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 // startDetached starts exe and returns without waiting. Not in the project: a

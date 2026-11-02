@@ -35,6 +35,7 @@ func (h *Hub) registerTreeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tree/workspaces/remove", h.removeWorkspace)
 	mux.HandleFunc("POST /tree/workspaces/move", h.moveWorkspace)
 	mux.HandleFunc("POST /tree/sessions/remove", h.removeSession)
+	mux.HandleFunc("POST /tree/sessions/remove-many", h.removeSessions)
 	mux.HandleFunc("POST /tree/sessions/archive", h.archiveSession)
 	mux.HandleFunc("POST /tree/sessions/pin", h.pinSession)
 	mux.HandleFunc("POST /tree/sessions/viewed", h.markSessionViewed)
@@ -89,7 +90,11 @@ func (h *Hub) tree(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, node)
 	}
-	h.reportOrphanPanes(out)
+	if window.recent {
+		pageRecentTree(out, window.offset, window.limit)
+	} else {
+		h.reportOrphanPanes(out)
+	}
 	writeJSON(w, out)
 }
 

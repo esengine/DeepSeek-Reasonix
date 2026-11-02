@@ -508,7 +508,7 @@ func redactHomeAll(paths []string) []string {
 // resolvedShellSummary reports which interpreter the bash tool would run
 // commands under, e.g. "bash (~/bin/bash)" or "powershell (C:\...\pwsh.exe)".
 func resolvedShellSummary(cfg *config.Config) string {
-	sh := sandbox.ShellDiscovery{Prefer: cfg.Tools.Shell.Prefer, Path: cfg.Tools.Shell.Path, Args: cfg.Tools.Shell.Args, Warn: io.Discard}.Resolve()
+	sh := sandbox.ShellDiscovery{Prefer: cfg.Tools.Shell.Prefer, Path: cfg.Tools.Shell.Path, Args: cfg.Tools.Shell.Args, Confine: sandbox.BashConfine(cfg.BashMode(), cfg.Roots().SandboxDir()), Warn: io.Discard}.Resolve()
 	if sh.Path == "" {
 		return sh.Kind.String() + " (not found)"
 	}

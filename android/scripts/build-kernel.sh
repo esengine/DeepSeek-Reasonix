@@ -47,7 +47,7 @@ app_gradle="$android/app/build.gradle"
 version_field() {
   sed -n "s/^def $1 *= *\([0-9]*\).*/\1/p" "$app_gradle" | head -n1
 }
-app_version="$(version_field versionMajor).$(version_field versionMinor).$(version_field versionPatch)"
+app_version="${REASONIX_APP_VERSION:-$(version_field versionMajor).$(version_field versionMinor).$(version_field versionPatch)}"
 build_time_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ldflags="-s -w"
 ldflags="$ldflags -X main.version=v$app_version"

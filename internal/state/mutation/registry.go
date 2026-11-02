@@ -195,7 +195,7 @@ func (c *Coordinator) recordsBlocker(r record, records []record) (*blocker, erro
 
 func pathBlocker(r record, records []record) *record {
 	for _, other := range records {
-		if other.ID != r.ID && (other.Active || other.Order < r.Order) && overlaps(r.Paths, other.Paths) {
+		if other.ID != r.ID && (other.Active || other.Order < r.Order) && recordsOverlap(r, other) {
 			return &other
 		}
 	}

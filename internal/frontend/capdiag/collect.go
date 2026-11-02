@@ -686,7 +686,7 @@ func sanitizeErrTextWithPaths(s, workspace, home, reasonixHome string) string {
 	// Cap length after redaction.
 	const max = 400
 	if len(s) > max {
-		s = s[:max] + "…"
+		s = s[:runeBoundary(s, max)] + "…"
 	}
 	return s
 }

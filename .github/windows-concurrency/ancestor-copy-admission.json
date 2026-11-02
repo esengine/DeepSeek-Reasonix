@@ -1,0 +1,24 @@
+[
+  {
+    "package": "reasonix/internal/runtime/delegation",
+    "tests": [
+      "TestAncestorCopyAdmissionCoversUnpublishedRun",
+      "TestAncestorCopyAdmissionCoversUnpublishedRun/continue_then_continue",
+      "TestAncestorCopyAdmissionCoversUnpublishedRun/continue_then_legacy",
+      "TestAncestorCopyAdmissionCoversUnpublishedRun/legacy_then_continue",
+      "TestAncestorCopyAdmissionCoversUnpublishedRun/legacy_then_legacy",
+      "TestAncestorCopyAdmissionAllowsDifferentParents",
+      "TestAncestorCopyAdmissionReleasesAbandonedPreparation",
+      "TestAncestorCopyAdmissionReleasesAfterInvalidCopy",
+      "TestAncestorCopyAdmissionAllowsDifferentSources",
+      "TestAncestorCopyAdmissionUsesNearestSourceIdentity",
+      "TestAncestorCopyAdmissionReleasesAfterBusyCurrentReference",
+      "TestTaskAncestorCopyAdmissionBeforeRunningMetadata",
+      "TestTaskAncestorCopyAdmissionBeforeRunningMetadata/continue_from",
+      "TestTaskAncestorCopyAdmissionBeforeRunningMetadata/fork_from",
+      "TestTaskAncestorCopyAdmissionReleasesUnstartedBackground",
+      "TestTaskAncestorCopyAdmissionReleasesUnstartedBackground/continue_from",
+      "TestTaskAncestorCopyAdmissionReleasesUnstartedBackground/fork_from"
+    ]
+  }
+]

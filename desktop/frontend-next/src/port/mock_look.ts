@@ -17,15 +17,17 @@ export class MockLook {
 
   // What the kernel announces; the zoom test holds it equal to config.ZoomMin..ZoomMax.
   private static readonly ZOOM = { min: 0.8, max: 1.8, step: 0.05 };
+  private static readonly WIDTH = { min: 30, max: 100, step: 1 };
 
   async appearance(): Promise<Appearance> {
-    return { ...this.look, zoomRange: MockLook.ZOOM };
+    return { ...this.look, zoomRange: MockLook.ZOOM, widthPercent: this.look.widthPercent || 80, widthRange: MockLook.WIDTH };
   }
 
   async saveAppearance(look: Appearance): Promise<Appearance> {
     const { min, max } = MockLook.ZOOM;
     const zoom = look.zoom ? Math.min(Math.max(look.zoom, min), max) : look.zoom;
-    this.look = { ...look, zoom, wallpaper: this.look.wallpaper && { ...this.look.wallpaper, ...look.wallpaper } };
+    const widthPercent = look.widthPercent ? Math.min(Math.max(Math.round(look.widthPercent), MockLook.WIDTH.min), MockLook.WIDTH.max) : this.look.widthPercent;
+    this.look = { ...look, zoom, widthPercent, wallpaper: this.look.wallpaper && { ...this.look.wallpaper, ...look.wallpaper } };
     return this.appearance();
   }
 

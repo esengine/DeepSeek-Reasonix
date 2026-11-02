@@ -770,6 +770,23 @@ leave the workspace are still reported as claim violations.
 Declaring paths is what buys parallelism; it costs `bash` on hosts where the OS
 sandbox cannot enforce write roots.
 
+- On resume after yielding for user input, the owner-side claim record identifies
+  other sessions that claimed overlapping paths during the wait.
+- A foreign claim or incomplete history adds a persistent `workspace_claim_yielded`
+  checkpoint coverage gap alongside the model notice and completion-receipt gap.
+- A crossing observation cannot attribute watched paths or a whole-workspace
+  diff to its tool, even when files look unchanged. Unknown mutations retain
+  their `unproven_mutation` obligation.
+- The lease owner tracks observation boundaries per prepared call, including
+  child calls and optimistic calls that claim no additional paths.
+- Fresh or disjoint operations are not tainted by another waiter's repeated
+  notice, and cannot discharge the earlier operation's debt.
+
+The existing bounded claim log reports unknown coverage when a full retained
+history no longer includes the yield's mark; a short complete history is not
+treated as truncation. These facts describe cooperating lease owners, not writes
+by external processes that bypass the claim protocol.
+
 ### 3.13 Sub-agent context inheritance is explicit
 
 A child inherits nothing implicitly. What it receives is exactly this:

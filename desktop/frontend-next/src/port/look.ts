@@ -14,6 +14,20 @@ export interface ThemeBackground {
   taskOpacity: number;
   overlayStrength: number;
   textGlow?: "default" | "none";
+  surfaceOpacity?: ThemeSurfaceOpacities;
+}
+
+export interface ThemeSurfaceOpacities {
+  light?: ThemeSurfaceOpacity;
+  dark?: ThemeSurfaceOpacity;
+}
+
+export interface ThemeSurfaceOpacity {
+  nav?: number;
+  rail?: number;
+  chrome?: number;
+  side?: number;
+  compose?: number;
 }
 
 // A live backdrop the window draws, rather than a picture it places. Absent on
@@ -80,10 +94,10 @@ export interface Appearance {
   textSize?: number;
   fontUi?: string;
   fontMono?: string;
-  // How far prose may run: "standard" holds it to a reading line length,
-  // "full" lets it use the window. Cards, commands and output are not
-  // governed by it.
+  // Custom width sizes the conversation and composer as a percentage of the pane.
   width?: string;
+  widthPercent?: number;
+  widthRange?: ZoomRange;
   wallpaper?: Wallpaper;
 }
 

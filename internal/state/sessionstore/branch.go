@@ -178,7 +178,7 @@ func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
 	if metaPath == "" {
 		return BranchMeta{}, false, nil
 	}
-	b, err := fileencoding.ReadFileUTF8(metaPath)
+	b, err := os.ReadFile(metaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return BranchMeta{}, false, nil
@@ -190,9 +190,15 @@ func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
 	if len(b) > 0 && len(bytes.Trim(b, "\x00")) == 0 {
 		return BranchMeta{}, false, nil
 	}
+	// The sidecar is JSON this package wrote, so UTF-8 by construction: one stray
+	// byte must not send the whole file through GB18030, where a lead byte eats a
+	// path's backslash. Transcoding is only for a file an editor re-encoded.
 	var m BranchMeta
 	if err := json.Unmarshal(b, &m); err != nil {
-		return BranchMeta{}, false, fmt.Errorf("decode branch meta %s: %w", metaPath, err)
+		m = BranchMeta{}
+		if json.Unmarshal(fileencoding.DecodeToUTF8(b), &m) != nil {
+			return BranchMeta{}, false, fmt.Errorf("decode branch meta %s: %w", metaPath, err)
+		}
 	}
 	if m.ID == "" {
 		m.ID = BranchID(sessionPath)

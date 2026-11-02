@@ -5,7 +5,7 @@ import { activeKind, contextLabel, groupVendors, type Vendor } from "./Models";
 import { orderAccounts, useProviderOrder } from "../state/providerorder";
 
 type RoleKey = keyof RoleAssignments["roles"];
-type Answers = "chat" | "decision" | "search";
+type Answers = "chat" | "decision" | "search" | "vision";
 
 // Decision is the one job that cannot follow the main model: it asks a question
 // set, which a chat model has no answer for, so its row offers the decision
@@ -19,8 +19,10 @@ const ROLES: [RoleKey, string, string, Answers][] = [
   ["decision", "决策", "system_one 询问的后端", "decision"],
 ];
 
+const shown = (m: ModelEntry) => m.modelAlias?.trim() || m.modelShort || m.model;
 const answersOf = (m: ModelEntry): Answers => (m.answers === "decision" ? "decision" : "chat");
-const answersMatch = (m: ModelEntry, answers: Answers) => answers === "search" ? m.webSearch === true : answersOf(m) === answers;
+const answersMatch = (m: ModelEntry, answers: Answers) =>
+  answers === "search" ? m.webSearch === true : answers === "vision" ? m.vision === true && answersOf(m) === "chat" : answersOf(m) === answers;
 
 // Only what the config or the catalog declares: an inferred "reads images" sends
 // the user to a request the endpoint rejects.
@@ -90,13 +92,13 @@ export function ModelUsage({ models, roles, main, busy, protocol, effort = "auto
           const set = roles.roles[key];
           const roleModel = byRef(set || (key === "title" || answers === "decision" ? "" : main));
           const roleEffort = roles.efforts?.[key] || "auto";
-          const offered = models.filter((m) => answersOf(m) === answers);
+          const offered = models.filter((m) => answersMatch(m, answers));
           const none = answers === "decision" && offered.length === 0;
           return (
             <div className="usage-row" role="row" key={key}>
               <span className="usage-job" role="rowheader"><b>{t(name)}</b><small>{t(tag)}</small></span>
               <span role="cell">
-                <Choices vendors={vendors} protocol={protocol} main={main} value={set} answers={answers}
+                <Choices vendors={vendors} protocol={protocol} main={main} value={set} answers={key === "vision" ? "vision" : answers}
                   label={t(name)} role disabled={busy !== "" || none}
                   empty={t(key === "title" ? "不使用" : answers === "chat" ? "跟随主模型" : none ? "尚无可用来源" : "不使用")}
                   onPick={(ref) => onRole(key, ref, "auto")} />
@@ -217,10 +219,11 @@ function Choices({
       onChange={(e) => onPick(e.target.value)}>
       {empty !== undefined && <option value="">{empty}</option>}
       {answers === "search" && value && !groups.some((g) => g.rows.some((m) => m.ref === value)) && <option value={value}>{t("{model}（不可用）", { model: value })}</option>}
+      {answers === "vision" && value && !groups.some((g) => g.rows.some((m) => m.ref === value)) && <option value={value}>{t("{model}（未声明读图）", { model: value })}</option>}
       {groups.map(({ v, rows }) => (
         <optgroup key={v.key} label={v.label}>
           {rows.map((m) => (
-            <option key={m.ref} value={m.ref}>{m.vision ? `${m.model} · ${t("读图")}` : m.model}</option>
+            <option key={m.ref} value={m.ref}>{m.vision ? `${shown(m)} · ${t("读图")}` : shown(m)}</option>
           ))}
         </optgroup>
       ))}

@@ -84,6 +84,7 @@ const Settings = lazy(async () => {
 
 const NO_REPORT: PaneReport = {
   status: null,
+  workspace: null,
   title: "",
   steer: 0,
   run: "idle",
@@ -561,6 +562,7 @@ export function App({ hub }: { hub: HubPort }) {
         host={runtimes.find((rt) => rt.id === active)?.host}
         port={activePort}
         status={report.status}
+        workspace={report.workspace}
         title={tabs.find((tab) => tab.rt.id === active)?.title ?? report.title}
         steer={report.steer}
         account={account}

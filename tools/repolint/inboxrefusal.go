@@ -15,41 +15,71 @@ import (
 // one that carries a sentence.
 const (
 	inboxFamilyFile = "internal/state/sessioninbox/types.go"
-	inboxWriterFile = "internal/frontend/serve/inbox.go"
-	inboxWriterFunc = "writeInboxError"
+
+	// Both frontends answer inbox calls from the same family, so both writers
+	// are named here. A writer that moved would otherwise compare clean against
+	// an empty set, which is the failure this check exists to catch.
+	inboxHTTPWriterFile = "internal/frontend/serve/inbox.go"
+	inboxHTTPWriterFunc = "writeInboxError"
+	inboxACPWriterFile  = "internal/frontend/acp/inbox.go"
+	inboxACPWriterFunc  = "inboxRefusal"
 )
+
+// inboxWriter is one frontend's refusal writer and the calls that carry an
+// identity in that frontend's shape: the HTTP helpers take the dotted code as an
+// argument, and the ACP one returns it as data beside the JSON-RPC code.
+type inboxWriter struct {
+	file string
+	fn   string
+	// coded names the functions a case must call, one argument of which is the
+	// dotted identity. A code assembled at runtime is one neither side can read.
+	coded map[string]bool
+}
 
 // The writers that give a refusal a dotted code. writeErr is deliberately not
 // among them: it renders an identity a deeper layer assigned and otherwise
 // falls back to prose, which is the diagnostic path, not an answer a frontend
 // can say in the reader's language.
-var codedWriters = map[string]bool{"refuse": true, "busy": true, "refusal": true, "Refusal": true, "saveFailed": true}
+var inboxWriters = []inboxWriter{
+	{
+		file:  inboxHTTPWriterFile,
+		fn:    inboxHTTPWriterFunc,
+		coded: map[string]bool{"refuse": true, "busy": true, "refusal": true, "Refusal": true, "saveFailed": true},
+	},
+	{
+		file:  inboxACPWriterFile,
+		fn:    inboxACPWriterFunc,
+		coded: map[string]bool{"refuseInbox": true},
+	},
+}
 
-// checkInboxRefusalParity holds the inbox's HTTP boundary to the store's error
-// family. A sentinel with no case of its own is answered as an internal fault —
-// three of them were — and one whose case writes prose reaches the frontend as
-// English nobody translated. Both are the same defect: the condition is known
-// where it happens and unnamed by the time anyone has to act on it.
+// checkInboxRefusalParity holds each frontend's inbox boundary to the store's
+// error family. A sentinel with no case of its own is answered as an internal
+// fault — three were on HTTP, and every one of them was on ACP — and one whose
+// case writes prose reaches the client as English nobody translated. Both are
+// the same defect: a name lost between the kernel and the client.
 func checkInboxRefusalParity(root string) []Finding {
 	family, err := inboxSentinels(root)
 	if err != nil {
 		return []Finding{{inboxFamilyFile, 1, ruleRefusalPath, err.Error(), 1}}
 	}
-	coded, uncoded, line, err := inboxHandledSentinels(root)
-	if err != nil {
-		return []Finding{{inboxWriterFile, 1, ruleRefusalPath, err.Error(), 1}}
-	}
-
 	var out []Finding
-	for _, name := range family {
-		switch {
-		case coded[name]:
-		case uncoded[name]:
-			out = append(out, Finding{inboxWriterFile, line, ruleRefusalPath, fmt.Sprintf(
-				"%s is refused without a code: the frontend gets an English sentence it cannot translate or branch on", name), 1})
-		default:
-			out = append(out, Finding{inboxWriterFile, line, ruleRefusalPath, fmt.Sprintf(
-				"%s has no case in %s, so a known refusal is answered as an internal fault", name, inboxWriterFunc), 1})
+	for _, w := range inboxWriters {
+		coded, uncoded, line, err := inboxHandledSentinels(root, w)
+		if err != nil {
+			out = append(out, Finding{w.file, 1, ruleRefusalPath, err.Error(), 1})
+			continue
+		}
+		for _, name := range family {
+			switch {
+			case coded[name]:
+			case uncoded[name]:
+				out = append(out, Finding{w.file, line, ruleRefusalPath, fmt.Sprintf(
+					"%s is refused without a code in %s: the frontend gets an English sentence it cannot translate or branch on", name, w.fn), 1})
+			default:
+				out = append(out, Finding{w.file, line, ruleRefusalPath, fmt.Sprintf(
+					"%s has no case in %s, so a known refusal is answered as an internal fault", name, w.fn), 1})
+			}
 		}
 	}
 	return out
@@ -85,12 +115,12 @@ func inboxSentinels(root string) ([]string, error) {
 	return out, nil
 }
 
-// inboxHandledSentinels splits the switch's cases by what their body writes.
+// inboxHandledSentinels splits the writer's cases by what their body writes.
 // Which sentinel a case is about comes from the selector it names, never from
 // the code string beside it — the two can disagree, and then the guard would be
 // reading the wrong one of them.
-func inboxHandledSentinels(root string) (coded, uncoded map[string]bool, line int, err error) {
-	file, fset, err := parseRepoFile(root, inboxWriterFile)
+func inboxHandledSentinels(root string, w inboxWriter) (coded, uncoded map[string]bool, line int, err error) {
+	file, fset, err := parseRepoFile(root, w.file)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -98,7 +128,7 @@ func inboxHandledSentinels(root string) (coded, uncoded map[string]bool, line in
 	found := false
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != inboxWriterFunc {
+		if !ok || fn.Name.Name != w.fn {
 			continue
 		}
 		found = true
@@ -109,7 +139,7 @@ func inboxHandledSentinels(root string) (coded, uncoded map[string]bool, line in
 				return true
 			}
 			named := caseSentinels(clause.List)
-			writes := writesACode(clause.Body)
+			writes := writesACode(clause.Body, w.coded)
 			for _, name := range named {
 				if writes {
 					coded[name] = true
@@ -121,7 +151,7 @@ func inboxHandledSentinels(root string) (coded, uncoded map[string]bool, line in
 		})
 	}
 	if !found {
-		return nil, nil, 0, fmt.Errorf("%s no longer declares %s: this check has lost its subject", inboxWriterFile, inboxWriterFunc)
+		return nil, nil, 0, fmt.Errorf("%s no longer declares %s: this check has lost its subject", w.file, w.fn)
 	}
 	return coded, uncoded, line, nil
 }
@@ -147,8 +177,8 @@ func caseSentinels(list []ast.Expr) []string {
 // writesACode reports whether the branch answers with an identity. The code has
 // to be a literal at the call: that is also what the frontend's own catalogue
 // guard reads, so a code assembled at runtime is one neither side can check.
-func writesACode(body []ast.Stmt) bool {
-	coded := false
+func writesACode(body []ast.Stmt, coded map[string]bool) bool {
+	writes := false
 	for _, stmt := range body {
 		ast.Inspect(stmt, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -156,18 +186,18 @@ func writesACode(body []ast.Stmt) bool {
 				return true
 			}
 			id, ok := call.Fun.(*ast.Ident)
-			if !ok || !codedWriters[id.Name] {
+			if !ok || !coded[id.Name] {
 				return true
 			}
 			for _, arg := range call.Args {
 				if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING && strings.Contains(lit.Value, ".") {
-					coded = true
+					writes = true
 				}
 			}
 			return true
 		})
 	}
-	return coded
+	return writes
 }
 
 func parseRepoFile(root, rel string) (*ast.File, *token.FileSet, error) {

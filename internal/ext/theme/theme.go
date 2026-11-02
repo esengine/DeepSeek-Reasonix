@@ -76,10 +76,28 @@ type Background struct {
 	// can be kept away from it: left | center | right.
 	SafeArea string `json:"safeArea,omitempty"`
 	// HomeOpacity applies when nothing is running, TaskOpacity while a turn is.
-	HomeOpacity     float64 `json:"homeOpacity"`
-	TaskOpacity     float64 `json:"taskOpacity"`
-	OverlayStrength float64 `json:"overlayStrength"`
-	TextGlow        string  `json:"textGlow,omitempty"`
+	HomeOpacity     float64           `json:"homeOpacity"`
+	TaskOpacity     float64           `json:"taskOpacity"`
+	OverlayStrength float64           `json:"overlayStrength"`
+	TextGlow        string            `json:"textGlow,omitempty"`
+	SurfaceOpacity  *SurfaceOpacities `json:"surfaceOpacity,omitempty"`
+}
+
+// SurfaceOpacities names independent backdrop surface alphas for each scheme.
+// Omitted schemes and surfaces leave the frontend's existing paint unchanged.
+type SurfaceOpacities struct {
+	Light *SurfaceOpacity `json:"light,omitempty"`
+	Dark  *SurfaceOpacity `json:"dark,omitempty"`
+}
+
+// SurfaceOpacity is the alpha of each shell surface's own background.
+// Pointers distinguish a fully transparent surface from an omitted value.
+type SurfaceOpacity struct {
+	Nav     *float64 `json:"nav,omitempty"`
+	Rail    *float64 `json:"rail,omitempty"`
+	Chrome  *float64 `json:"chrome,omitempty"`
+	Side    *float64 `json:"side,omitempty"`
+	Compose *float64 `json:"compose,omitempty"`
 }
 
 // Sky is a live backdrop rather than a picture: drifting cloud, a sun, and a
@@ -124,14 +142,15 @@ type manifestSky struct {
 }
 
 type manifestBackground struct {
-	Image           string   `json:"image"`
-	FocusX          *float64 `json:"focusX"`
-	FocusY          *float64 `json:"focusY"`
-	SafeArea        string   `json:"safeArea"`
-	HomeOpacity     *float64 `json:"homeOpacity"`
-	TaskOpacity     *float64 `json:"taskOpacity"`
-	OverlayStrength *float64 `json:"overlayStrength"`
-	TextGlow        string   `json:"textGlow"`
+	Image           string                         `json:"image"`
+	FocusX          *float64                       `json:"focusX"`
+	FocusY          *float64                       `json:"focusY"`
+	SafeArea        string                         `json:"safeArea"`
+	HomeOpacity     *float64                       `json:"homeOpacity"`
+	TaskOpacity     *float64                       `json:"taskOpacity"`
+	OverlayStrength *float64                       `json:"overlayStrength"`
+	TextGlow        string                         `json:"textGlow"`
+	SurfaceOpacity  map[string]map[string]*float64 `json:"surfaceOpacity"`
 }
 
 // Dir is where user-installed packs live: one directory per pack, each with a
@@ -234,7 +253,12 @@ func decode(raw []byte, dirID string) (Pack, error) {
 	if err != nil {
 		return Pack{}, err
 	}
-	pack.Background = backgroundOf(m.Background, hasAsset(dirID, assetBackground))
+	if hasAsset(dirID, assetBackground) {
+		if pack.Background == nil {
+			pack.Background = backgroundOf(nil, nil)
+		}
+		pack.Background.Image = true
+	}
 	pack.Sky = skyOf(m.Sky)
 	pack.HasPreview = hasAsset(dirID, assetPreview)
 	return pack, nil
@@ -286,10 +310,14 @@ func decodeManifest(raw []byte, dirID string) (Pack, manifest, error) {
 			bg.TextGlow = ""
 		}
 	}
+	var background *Background
+	if m.Background != nil {
+		background = backgroundOf(m.Background, &warnings)
+	}
 	// Map iteration order would otherwise make the same pack report its
 	// problems in a different order on every read.
 	slices.Sort(warnings)
-	pack := Pack{ID: id, Name: name, Author: strings.TrimSpace(m.Author), Description: strings.TrimSpace(m.Description), Tokens: tokens, Recipes: recipes, Warnings: warnings}
+	pack := Pack{ID: id, Name: name, Author: strings.TrimSpace(m.Author), Description: strings.TrimSpace(m.Description), Tokens: tokens, Recipes: recipes, Background: background, Warnings: warnings}
 	return pack, m, nil
 }
 
@@ -363,15 +391,13 @@ func skyOf(m *manifestSky) *Sky {
 // declares a focus and two opacities has said how it wants to be shown, and a
 // user dropping their own background.webp next to the manifest should get that
 // placement rather than a centred default.
-func backgroundOf(m *manifestBackground, image bool) *Background {
-	if m == nil && !image {
-		return nil
-	}
-	out := &Background{Image: image, FocusX: 0.5, FocusY: 0.5, HomeOpacity: 1, TaskOpacity: 0.2, OverlayStrength: 0.65}
+func backgroundOf(m *manifestBackground, warnings *[]string) *Background {
+	out := &Background{FocusX: 0.5, FocusY: 0.5, HomeOpacity: 1, TaskOpacity: 0.2, OverlayStrength: 0.65}
 	if m == nil {
 		return out
 	}
 	out.TextGlow = m.TextGlow
+	out.SurfaceOpacity = surfaceOpacitiesOf(m.SurfaceOpacity, warnings)
 	if m.FocusX != nil {
 		out.FocusX = clamp01(*m.FocusX)
 	}
@@ -390,6 +416,50 @@ func backgroundOf(m *manifestBackground, image bool) *Background {
 	}
 	if m.OverlayStrength != nil {
 		out.OverlayStrength = clamp01(*m.OverlayStrength)
+	}
+	return out
+}
+
+func surfaceOpacitiesOf(raw map[string]map[string]*float64, warnings *[]string) *SurfaceOpacities {
+	out := &SurfaceOpacities{}
+	for scheme, surfaces := range raw {
+		var target **SurfaceOpacity
+		switch scheme {
+		case "light":
+			target = &out.Light
+		case "dark":
+			target = &out.Dark
+		default:
+			*warnings = append(*warnings, fmt.Sprintf("background.surfaceOpacity: %q is not a scheme", scheme))
+			continue
+		}
+		values := &SurfaceOpacity{}
+		for name, value := range surfaces {
+			var field **float64
+			switch name {
+			case "nav":
+				field = &values.Nav
+			case "rail":
+				field = &values.Rail
+			case "chrome":
+				field = &values.Chrome
+			case "side":
+				field = &values.Side
+			case "compose":
+				field = &values.Compose
+			default:
+				*warnings = append(*warnings, fmt.Sprintf("background.surfaceOpacity.%s: %q is not a surface", scheme, name))
+				continue
+			}
+			if value != nil {
+				clamped := clamp01(*value)
+				*field = &clamped
+				*target = values
+			}
+		}
+	}
+	if out.Light == nil && out.Dark == nil {
+		return nil
 	}
 	return out
 }

@@ -3,6 +3,7 @@ package capdiag
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"reasonix/internal/base/testenv"
 )
@@ -55,5 +56,18 @@ func TestSanitizeErrTextRedactsVendorTokenShapes(t *testing.T) {
 		if strings.Contains(out, tc.leaked) {
 			t.Fatalf("%s: credential leaked in %q", tc.name, out)
 		}
+	}
+}
+
+func TestSanitizeErrTextCapsOnRuneBoundary(t *testing.T) {
+	// "无" is three bytes, so the 400-byte cap falls one byte into a rune.
+	in := "stderr: " + strings.Repeat("无", 200)
+	out := sanitizeErrText(in)
+	if !utf8.ValidString(out) {
+		t.Fatalf("capped text is not valid UTF-8: %q", out)
+	}
+	want := "stderr: " + strings.Repeat("无", 130) + "…"
+	if out != want {
+		t.Fatalf("got %q, want %q", out, want)
 	}
 }

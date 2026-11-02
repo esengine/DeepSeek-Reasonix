@@ -32,7 +32,8 @@ fi
 
 # 32 random bytes as hex — the same shape `Kernel.mintToken` writes.
 token=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
-printf '%s\n' "$token" > "$work/home/remote/launch.token"
+# The kernel refuses a token file other users can read.
+(umask 077; printf '%s\n' "$token" > "$work/home/remote/launch.token")
 
 export REASONIX_HOME="$work/home"
 export HOME="$work/home"

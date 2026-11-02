@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // CompletionStatus is a sub-agent's claim about its own run. The host may lower
@@ -247,7 +248,11 @@ func quoteShort(s string) string {
 		return "an unnamed command"
 	}
 	if len(s) > max {
-		s = s[:max] + "…"
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
 	}
 	return strconv.Quote(s)
 }

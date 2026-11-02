@@ -58,9 +58,11 @@ type appearanceView struct {
 	TextSize float64 `json:"textSize,omitempty"`
 	FontUI   string  `json:"fontUi,omitempty"`
 	FontMono string  `json:"fontMono,omitempty"`
-	// standard | full — how far the transcript's prose runs.
-	Width     string         `json:"width,omitempty"`
-	Wallpaper *wallpaperView `json:"wallpaper,omitempty"`
+	// standard | full | full-all | custom; custom uses WidthPercent.
+	Width        string         `json:"width,omitempty"`
+	WidthPercent int            `json:"widthPercent"`
+	WidthRange   zoomRangeView  `json:"widthRange"`
+	Wallpaper    *wallpaperView `json:"wallpaper,omitempty"`
 }
 
 type zoomRangeView struct {
@@ -155,14 +157,16 @@ func wallpaperVolume(w config.WallpaperConfig) float64 {
 
 func viewOf(a config.AppearanceConfig, language, width string) appearanceView {
 	out := appearanceView{
-		Language:  language,
-		Zoom:      config.ClampZoom(a.Zoom),
-		ZoomRange: zoomRangeView{Min: config.ZoomMin, Max: config.ZoomMax, Step: config.ZoomStep},
-		ReadSize:  a.ReadSize,
-		TextSize:  config.ClampTextSize(a.TextSize),
-		FontUI:    a.FontUI,
-		FontMono:  a.FontMono,
-		Width:     width,
+		Language:     language,
+		Zoom:         config.ClampZoom(a.Zoom),
+		ZoomRange:    zoomRangeView{Min: config.ZoomMin, Max: config.ZoomMax, Step: config.ZoomStep},
+		ReadSize:     a.ReadSize,
+		TextSize:     config.ClampTextSize(a.TextSize),
+		FontUI:       a.FontUI,
+		FontMono:     a.FontMono,
+		Width:        width,
+		WidthPercent: config.EffectiveWidthPercent(a.WidthPercent),
+		WidthRange:   zoomRangeView{Min: config.WidthPercentMin, Max: config.WidthPercentMax, Step: config.WidthPercentStep},
 	}
 	if a.Wallpaper.File != "" {
 		kind := wallpaperKind(a.Wallpaper.File)
@@ -231,19 +235,20 @@ func (s *Server) appearance(w http.ResponseWriter, r *http.Request) {
 // that got away, and refusing the whole save would lose the rest of it.
 func (s *Server) saveAppearance(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Language string   `json:"language"`
-		Zoom     float64  `json:"zoom"`
-		ReadSize float64  `json:"readSize"`
-		TextSize float64  `json:"textSize"`
-		FontUI   string   `json:"fontUi"`
-		FontMono string   `json:"fontMono"`
-		Width    string   `json:"width"`
-		Opacity  float64  `json:"opacity"`
-		Dim      float64  `json:"dim"`
-		FocusX   float64  `json:"focusX"`
-		FocusY   float64  `json:"focusY"`
-		Muted    bool     `json:"muted"`
-		Volume   *float64 `json:"volume"`
+		Language     string   `json:"language"`
+		Zoom         float64  `json:"zoom"`
+		ReadSize     float64  `json:"readSize"`
+		TextSize     float64  `json:"textSize"`
+		FontUI       string   `json:"fontUi"`
+		FontMono     string   `json:"fontMono"`
+		Width        string   `json:"width"`
+		WidthPercent *int     `json:"widthPercent"`
+		Opacity      float64  `json:"opacity"`
+		Dim          float64  `json:"dim"`
+		FocusX       float64  `json:"focusX"`
+		FocusY       float64  `json:"focusY"`
+		Muted        bool     `json:"muted"`
+		Volume       *float64 `json:"volume"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		badBody(w)
@@ -259,6 +264,11 @@ func (s *Server) saveAppearance(w http.ResponseWriter, r *http.Request) {
 		edit.Desktop.Language = ""
 	}
 	a := &edit.Desktop.Appearance
+	if body.WidthPercent != nil {
+		if percent := config.EffectiveWidthPercent(*body.WidthPercent); percent != config.EffectiveWidthPercent(a.WidthPercent) {
+			a.WidthPercent = percent
+		}
+	}
 	// The page posts back the clamped value it was shown, so one equal to what
 	// the stored value reads as is the user leaving it alone.
 	if body.Zoom != config.ClampZoom(a.Zoom) {
@@ -268,8 +278,7 @@ func (s *Server) saveAppearance(w http.ResponseWriter, r *http.Request) {
 	a.TextSize = config.ClampTextSize(body.TextSize)
 	a.FontUI = sanitizeFamily(body.FontUI)
 	a.FontMono = sanitizeFamily(body.FontMono)
-	// Anything but the one named alternative is the default, the same way the
-	// language field above resolves an answer it does not know.
+	// Unknown width modes fall back to the standard preset.
 	if err := edit.SetDesktopConversationWidth(body.Width); err != nil {
 		_ = edit.SetDesktopConversationWidth("standard")
 	}

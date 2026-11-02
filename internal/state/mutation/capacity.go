@@ -41,6 +41,10 @@ func coversCapacities(held, requested []Capacity) bool {
 }
 
 func validRecordResources(r record) bool {
+	if r.Version == 3 {
+		_, err := normalizedCapacities(r.Capacities)
+		return r.Effect == OpaqueWrite && len(r.Paths) > 0 && filepath.IsAbs(r.Workspace) && err == nil
+	}
 	if r.Version == 1 {
 		// The original path-only protocol permitted an omitted effect.
 		knownEffect := r.Effect == "" || r.Effect == NamedPaths || r.Effect == Workspace || r.Effect == GitMetadata

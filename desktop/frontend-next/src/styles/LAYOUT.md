@@ -21,11 +21,15 @@ and selected states, while long titles truncate within the remaining width.
 
 ## Project header actions
 
+- The project header is a non-shrinking sibling of the tree scroller. Local and
+  remote rows share that scroller; adding a project, folding all projects and
+  entering batch selection remain reachable at either end of the list.
+- Batch selection returns focus to the header menu when it ends.
 - The open-project and more-actions buttons share `--overlay` hover fill and
   `--text` ink. The more-actions button retains both while its menu is open.
   Project-row actions keep their `--raised` fill.
-- `perf/project-header.mjs` checks hover parity, menu dismissal, keyboard focus
-  and the folder picker in both schemes.
+- `perf/project-header.mjs` checks hover parity, menu dismissal, keyboard focus,
+  the folder picker and a long mixed local/remote list in both schemes.
 
 ## Reset and the window
 
@@ -257,8 +261,8 @@ and selected states, while long titles truncate within the remaining width.
   back into scope, draws its tick and nothing else. `data-just-done` carries
   that event and `data-run="done"` carries the state; keeping them apart is
   what stops history from replaying as news.
-- Unread is a fact the kernel owns, drawn beside the run tick and never merged with it: an 8px dot at the row end, so titles keep their column and it cannot be read as the project's status dot, a semibold title, and a spoken "未读" on the dot.
-- In dark an unread row also takes a 4% tint, below hover and selection. In light it would sit one step from the selected row, so light has none. A remote row keeps its dot left of the delete button, and its turn count shifts left to make room.
+- Unread is a fact the kernel owns, separate from run state: a green 8px dot replaces the session's date until it is marked viewed, with a semibold title and a localized spoken "未读" on the dot. Local and remote rows use the same date slot; a missing timestamp does not hide an unread completion.
+- In dark an unread row also takes a 4% tint, below hover and selection. In light it would sit one step from the selected row, so light has none.
 - A folded project row sums the unread sessions under it into an outlined count among its action buttons, unlike the filled feedback badge, and drops it when the project opens. A pane tab carries a 6px dot; the tab strip is currently hidden by the Studio sheet. Nothing here animates.
 
 ## The queue
@@ -267,21 +271,22 @@ and selected states, while long titles truncate within the remaining width.
   that land", so the state is a chip on the row. The count and the byte total
   each refuse alone: a header showing one of them is wrong about the other
   exactly when it matters.
-- The number of entries is capped (64); their height is not. The head stays put
-  and the rows grow; total height comes from `.composeaux`, and the rule here
-  only says that the rows scroll rather than the head scrolling away with them.
-- `steer_consumed` means this turn has already read the line into its context:
-  it cannot be taken back, and `AckDequeue` removes it when the turn ends. It
-  stops being a card and becomes a record — still visible, because a crash before
-  the write has to leave it on screen, but no longer a card's height. Its border
-  goes transparent rather than away, or the column loses its alignment.
-- Its actions are quiet but present: a row of controls that exists only under the
-  pointer reads as a row that does nothing.
+- The queue is the upper half of the composer, sharing its surface and outer
+  frame. Transparent 38px rows have 12px horizontal padding and 2px gaps; only
+  status pills carry status colour. A quiet separator leads into the input.
+- The head stays put while roughly five rows fit before internal scrolling,
+  with edge fades. `.composeaux` still owns the shared height budget.
+- `steer_consumed` and `running` entries leave this pending strip: they have
+  already reached the transcript and are not input waiting to be sent.
+- Edit and withdraw use icons with unchanged accessible names and titles.
+  Withdraw restores input, never discards it. Move controls reveal on hover or
+  focus and remain visible on touch; their keyboard order is unchanged.
 - Everything stacked above the input shares one ceiling, `--aux-budget`, so a
   full queue scrolls inside it instead of taking the transcript.
-- The studio composer's chrome is taller than the one the budget was set
-  against, so studio lowers it (28vh, 19vh when short): with 64 queued lines the
-  transcript keeps 40% of the pane, which `perf/budget.mjs` holds.
+- Without notices, a queue gets a 44vh auxiliary budget (28vh when short),
+  capped at 420px (260px when short), so about five compact rows fit. Notices
+  restore the smaller 28vh/19vh budget to protect transcript space; the input
+  stays visible under the 64-entry pressure case in `perf/budget.mjs`.
 - The queued line is the only thing on screen that has not happened yet, so its
   cancel sits beside "queued" and stays visible. A cancel revealed on hover is no
   cancel.
@@ -342,6 +347,9 @@ and selected states, while long titles truncate within the remaining width.
   the pane's tab-row line so the two rows read as one: the strip is
   `--pane-bar-h` less the card's top inset and border. `perf/dock.mjs` holds
   the two lines together.
+- The file toolbar gives spare width to the truncated path; optional controls
+  and Save keep their intrinsic widths. Enabled Save uses accent foreground ink;
+  disabled Save uses opaque muted ink on a neutral surface.
 - The workbench is hidden, not unmounted. It holds the open files and a browser
   per tab, each with its own history, and a glance at the conversation must not
   cost them. `.scroll[data-pane="browser"][hidden]` was already written for it.
@@ -453,7 +461,25 @@ and selected states, while long titles truncate within the remaining width.
   keeps the reading width, where the line being typed stays one glance. The
   full-all measure is the opt-in that moves `--column` with it, for a reader who
   wants the composer on the same edges as the transcript.
-- Below 680px both columns take the phone rule instead (see *Phones*).
+- Custom percentage sets `--doc`, `--column` and `--wide` from
+  `--measure-width`: 30–100% of the conversation pane, with rail clearance.
+- Settings → Appearance → Size → Line width offers presets and a 1% slider,
+  initially 80%. `desktop.appearance.width_percent` persists independently of
+  `desktop.conversation_width`, so selecting a preset retains the custom value.
+- An unchanged effective percentage stays unset in the stored configuration.
+- Only custom mode shows the conversation-and-composer hint; presets retain
+  the prose-width guidance for code, commands and tool output.
+- The composer is a `conversation` container as well as the pane: toolbar labels
+  respond to the width of the composer, including a custom percentage, rather
+  than assuming it fills the pane.
+- The default reading-width composer retains mode and workspace labels: labels
+  retire at 720px of actual composer space rather than at the pane's old 780px.
+- The workspace control remains available even below 360px of composer space.
+  Model and effort labels shrink together before the toolbar wraps below 280px;
+  compacting labels must not remove access to workspace configuration.
+- Below 760px the transcript and composer take the phone width instead. The
+  populated flow selector must retain enough specificity to override its
+  percentage width, not just the empty conversation's rule.
 - Docking the agent's browser puts the pane on a grid, and the browser's column
   spans the body's row and the composer's. Inside the conversation column `100%`
   is that column, so the composer's own centring keeps it off the divider, and
@@ -846,6 +872,9 @@ what exists.
   only content.
 - A very faint gilt line under the header says this is the window's own thing,
   not content.
+- The header's expand/restore and close buttons share a 32px hit-region height,
+  matching the search control's minimum height. Inline-flex centres SVG and text
+  content independently of font fallback; native window controls retain their own sizing.
 - The search entry sits beside the title. That position used to hold one
   explanation addressed to two of the three tiers; that sentence now lives on
   each settings block (`.apply`). Results are laid under the header without
@@ -1597,7 +1626,7 @@ A sub-agent row, by the list's own width:
 - The title takes every pixel the row's visible content leaves it. The age sits against the row's right padding and the earlier-versions badge beside it; nothing is held back on the right for a control that is not showing.
 - The hover buttons (archive) take no width until the row is hovered or focused, then 24px plus 6px; on a device without hover they are always drawn.
 - Taking the room only while shown means the title shortens when the buttons appear, never before. Pinning stays an overlay at the left, so the pin never moves the title.
-- An unread dot is an overlay 11px from the right edge: an unread row keeps 22px after its age (or after its badge, 26px) for it, and the dot hides while the buttons are shown.
+- The unread dot takes the age's place in normal flow, before the versions or legacy badge. It stays visible beside hover actions without overlay spacing; clearing canonical unread restores the original age.
 - A legacy `margin-right: 44px` on the age made room for a delete button the rail has long since hidden; the rail's rule sets it to zero.
 - The current session reads as current in its fill and a 1px neutral outline, never in a state colour. The fill is a 13% text tint against hover's 4%.
 - The outline is drawn inside the border box (`outline-offset: -1px`): the row's transparent 2px left border would push an inset shadow off the edge.
@@ -1618,6 +1647,10 @@ A sub-agent row, by the list's own width:
   the edited title; pending requests disable all editing and dismissal.
 - The native dialog owns focus containment and the backdrop. Its colours follow
   the active light or dark palette.
+- Typography follows the shared modal hierarchy: `--fs-title`/`--w-semi` for
+  the heading and `--fs-ui`/`--w-reg` for hints, input, errors and actions.
+  Interface size and weight preferences apply at every width; narrow screens
+  retain the same type roles rather than introducing another font size.
 
 ## Card shell
 
@@ -1657,6 +1690,7 @@ A sub-agent row, by the list's own width:
 - Project headings have no separate chevron. Clicking a heading or using the tree arrow keys toggles its conversations; known empty projects do not advertise expansion. The heading toolbar switches all projects together, while search reveals matching conversations independently of saved folds.
 - The project toolbar keeps collapse/expand beside the label and open-project plus and overflow at the right. The plus opens the common local/SSH location picker; project-row chat icons create conversations. Empty lists retain a text entry.
 - Each project previews five recent sessions and keeps an older active/opening session visible. Search and explicit scopes show their matches. Show more reveals loaded rows and uses the existing bounded kernel paging path.
+- Recent stays in the project toolbar rather than adding a fifth session segment. Its modal shows session identity, owning project and activity age. A separate page-status line keeps the three footer buttons on one row at phone widths.
 - Time metadata comes only from canonical last-active timestamps. Loaded/total session counts remain available to assistive technology without visible badges.
 - The sidebar defaults to 316px, respects saved widths and retains its existing 232px floor. Folder glyphs, titles, action slots and conversation indents align across environments. Hover actions reserve their space.
 - The diagonal toolbar glyphs reuse Tabler's MIT-licensed [collapse][tabler-collapse] and [expand][tabler-expand] paths through the existing Studio icon component.
@@ -1709,3 +1743,9 @@ A sub-agent row, by the list's own width:
 - Thinking expansion and collapsed previews are independent display preferences. Folding presets change expansion only; manual disclosure choices keep their priority.
 - The optional preview occupies one line below the header, with a left rule and width-based ellipsis. It shows the opening text, including during streaming, rather than following the newest tokens.
 - The preview remains inside the disclosure summary so it is visible and clickable while collapsed. Expanded reasoning replaces it; the settings demonstration uses the same preview styling.
+
+## Collapsed plan progress
+
+- Appearance → Conversation display offers “Show collapsed plan progress,” off by default and persisted on this machine. Changing it immediately updates mounted plan cards.
+- A nonempty collapsed plan draws the expanded plan's `.prog2` track below its summary, using completed steps over total steps from `stepDone`. Pending and running steps do not count as complete.
+- Opening the card replaces the optional track with the existing expanded progress. Goal-only, empty and hidden cards have no progress track; collapse, Escape, outside dismissal and focus return remain unchanged.

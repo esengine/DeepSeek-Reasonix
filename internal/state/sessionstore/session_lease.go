@@ -20,6 +20,12 @@ import (
 
 var ErrSessionLeaseHeld = errors.New("session lease held by another runtime")
 
+// ErrSessionLeaseUnprovable means the ownership probe could not decide whether
+// a runtime owns the session. It is neither held nor free: an unopenable lock
+// or unreadable metadata is not evidence of a writer, so fail-closed callers
+// refuse on it and state surfaces report unknown.
+var ErrSessionLeaseUnprovable = errors.New("session lease ownership could not be proven")
+
 // sessionLeaseOwners reserves a canonical session path for one in-process
 // acquisition attempt or live lease. sessionLeaseActiveOwners contains only
 // generations that have acquired the cross-process lock and written their
@@ -169,22 +175,32 @@ func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 	return lease, nil
 }
 
-// SessionLeaseHeldByOtherRuntime reports whether path's session lease is held
-// by a live runtime other than the calling process. Callers use it to keep
-// destructive operations away from sessions another process may be writing;
-// leases held by this process report false because callers tear their own
-// runtimes down before acting. The lock decides whenever a lock file exists,
-// including when the sidecar is missing: a holder keeps the lock for its whole
-// lifetime and the sidecar can be deleted underneath it. With no lock file the
-// common uncontended case touches nothing, and a probe cannot steal a lease.
-func SessionLeaseHeldByOtherRuntime(path string) bool {
+// SessionLeaseOwnership reports who owns path's session lease: nil when free,
+// ErrSessionLeaseHeld when a live runtime (this process included) holds it, and
+// ErrSessionLeaseUnprovable when the probe cannot obtain evidence either way.
+// The third answer is not a flavour of held: callers that cannot prove a
+// session safe refuse it, and listings report unknown.
+func SessionLeaseOwnership(path string) error {
 	if strings.TrimSpace(path) == "" {
-		return false
+		return nil
 	}
 	path = canonicalSessionSavePath(path)
+	if _, ok := sessionLeaseOwners.Load(path); ok {
+		// A reservation or live generation in this process owns the path. A
+		// pending acquisition reports held too: the caller must not act on a
+		// session this process is already acquiring.
+		return ErrSessionLeaseHeld
+	}
+	return probeSessionLeaseOwnership(path)
+}
+
+// probeSessionLeaseOwnership asks the OS lock. A held lock proves a holder even
+// without a sidecar; a free lock with no sidecar touches nothing; any other
+// probe failure leaves ownership unproven.
+func probeSessionLeaseOwnership(path string) error {
 	if _, ok := sessionLeaseActiveOwners.Load(path); ok {
 		// Held by this process; no need to touch the lock file.
-		return false
+		return nil
 	}
 	info, err := LoadSessionLeaseInfo(path)
 	if err != nil {
@@ -193,14 +209,14 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 			// a live holder keeps. Ask it only when a lock file exists, using the
 			// package's existing existence probe (a lock has no sidecars).
 			if !sessionArtifactExists(store.SessionLeaseLock(path)) {
-				return false
+				return nil
 			}
 			unlock, lockErr := tryLockSessionLeaseFile(path)
 			if lockErr == nil {
 				unlock()
-				return false
+				return nil
 			}
-			return true
+			return sessionLeaseLockVerdict(path, nil, lockErr)
 		}
 		unlock, lockErr := tryLockSessionLeaseFile(path)
 		if lockErr == nil {
@@ -208,23 +224,49 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 			// bad metadata so future probes do not keep reporting a ghost owner.
 			_ = os.Remove(sessionLeaseInfoPath(path))
 			unlock()
-			return false
+			return nil
 		}
-		// An unreadable info file with a live lock still hides the holder's
-		// identity, so err on the side of treating the session as busy.
-		return true
+		// Unreadable metadata hides the holder's identity, so only the lock can
+		// answer. A lock that is not provably held leaves ownership unproven.
+		return sessionLeaseLockVerdict(path, nil, lockErr)
 	}
 	if info != nil && info.PID == os.Getpid() && info.WriterID == SessionWriterID() {
-		return false
+		return nil
 	}
-	unlock, err := tryLockSessionLeaseFile(path)
-	if err == nil {
+	unlock, lockErr := tryLockSessionLeaseFile(path)
+	if lockErr == nil {
 		// Foreign info but a free lock: leftover from a crashed process.
 		_ = os.Remove(sessionLeaseInfoPath(path))
 		unlock()
+		return nil
+	}
+	return sessionLeaseLockVerdict(path, info, lockErr)
+}
+
+// sessionLeaseLockVerdict names the state one failed non-blocking lease-lock
+// attempt proves. ErrSessionLeaseHeld is the only failure that proves a live
+// holder; anything else is unprovable, with the underlying cause attached so
+// the caller can say why.
+func sessionLeaseLockVerdict(path string, info *SessionLeaseInfo, lockErr error) error {
+	if errors.Is(lockErr, ErrSessionLeaseHeld) {
+		return &SessionLeaseError{Path: path, Info: info}
+	}
+	if lockErr == nil {
+		return ErrSessionLeaseUnprovable
+	}
+	return fmt.Errorf("%w: %w", ErrSessionLeaseUnprovable, lockErr)
+}
+
+// SessionLeaseHeldByOtherRuntime reports whether path's session lease may be
+// held by a live runtime other than this one, keeping destructive operations
+// away from sessions another process may be writing. Unprovable probes answer
+// true: a caller that only skips work wants "may be busy", not a claim about
+// who is writing. Callers that must not guess use SessionLeaseOwnership.
+func SessionLeaseHeldByOtherRuntime(path string) bool {
+	if strings.TrimSpace(path) == "" {
 		return false
 	}
-	return true
+	return probeSessionLeaseOwnership(canonicalSessionSavePath(path)) != nil
 }
 
 // SessionLeaseHeldByCurrentRuntime reports whether this process has completed

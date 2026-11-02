@@ -105,3 +105,18 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, report)
 }
+
+// uploadUsage answers how much the model providers were sent over the window.
+func (s *Server) uploadUsage(w http.ResponseWriter, r *http.Request) {
+	from, to, err := usageWindow(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	report, err := stats.QueryUpload(config.StatsDir(), from, to)
+	if err != nil {
+		refuse(w, http.StatusInternalServerError, "internal.failed", "could not read the upload records", nil)
+		return
+	}
+	writeJSON(w, report)
+}

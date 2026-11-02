@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"cmp"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"reasonix/internal/contract/config"
@@ -46,7 +48,7 @@ func (h *Hub) projectPage(roots []string, name string, open map[string]string, w
 			byDir[dir][sessionstore.BranchID(si.Path)] = si
 		}
 	}
-	sortSessions(listed)
+	sortTreeSessions(listed, window.recent)
 	heldBy := openLookup(open)
 	out := make([]treeSession, 0, min(len(listed), max(limit, 0)))
 	var total, archived, remaining, windowed int
@@ -89,7 +91,7 @@ func (h *Hub) projectPage(roots []string, name string, open map[string]string, w
 		if inWindow {
 			windowed++
 		}
-		if !inWindow && runtimeID == "" && !(si.Pinned && !si.Archived) {
+		if !inWindow && !window.keepsOutsideWindow(si, runtimeID) {
 			if matches {
 				remaining++
 			}
@@ -115,7 +117,9 @@ func (h *Hub) projectPage(roots []string, name string, open map[string]string, w
 	unlisted := []treeSession{}
 	for _, root := range roots {
 		attachVersions(SessionDirFor(root), out, h.openSessionsIn(root))
-		unlisted = append(unlisted, h.unlistedOpenSessions(root, out, listed)...)
+		if !window.recent {
+			unlisted = append(unlisted, h.unlistedOpenSessions(root, out, listed)...)
+		}
 	}
 	// Never nil: the frontend iterates rows, and a null blanks the window.
 	rows := append(append([]treeSession{}, unlisted...), out...)
@@ -130,6 +134,23 @@ func (h *Hub) projectPage(roots []string, name string, open map[string]string, w
 		h.prioritizeTreeRows(byDir, rows)
 	}
 	return sessionPage{Sessions: rows, Total: total + len(unlisted), Archived: archived, Remaining: remaining, Said: said, Status: status}
+}
+
+func sortTreeSessions(listed []sessionstore.SessionInfo, recent bool) {
+	if !recent {
+		sortSessions(listed)
+		return
+	}
+	slices.SortFunc(listed, func(a, b sessionstore.SessionInfo) int {
+		if c := cmp.Compare(activeAtMs(b), activeAtMs(a)); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Path, b.Path)
+	})
+}
+
+func (w treeWindow) keepsOutsideWindow(si sessionstore.SessionInfo, runtimeID string) bool {
+	return !w.recent && (runtimeID != "" || si.Pinned && !si.Archived)
 }
 
 func decorateWorkingDirectory(rows []treeSession, root string) {
@@ -183,6 +204,9 @@ func rowTitle(titles titleSnapshot, si sessionstore.SessionInfo, name string) fu
 // The word is read against the title, or the name where there is none, and a
 // folder whose own name holds it keeps every row.
 func (w treeWindow) matchesRow(si sessionstore.SessionInfo, title func() string, name string, workspaceNamed bool) bool {
+	if w.hideLegacy && w.query == "" && sessionstore.IsForeignSessionLog(si.Path) {
+		return false
+	}
 	if (w.scope == scopeArchived && !si.Archived) || (w.scope == scopeActive && si.Archived) {
 		return false
 	}

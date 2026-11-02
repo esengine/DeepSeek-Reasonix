@@ -6,11 +6,15 @@ import (
 	"testing"
 
 	"reasonix/internal/base/testenv"
+	"reasonix/internal/base/testscope"
 )
 
 func TestMain(m *testing.M) {
 	if os.Getenv("REASONIX_CONFIG_LOCK_HELPER") == "1" {
-		os.Exit(m.Run())
+		restore := testscope.InstallHome(os.Getenv("REASONIX_TEST_HOME"))
+		code := m.Run()
+		restore()
+		os.Exit(code)
 	}
 	// RunWithIsolatedUserState redirects every path-shaped location, but the OS
 	// keyring has no environment variable in front of it, so legacy migration

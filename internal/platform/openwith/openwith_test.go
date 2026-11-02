@@ -256,3 +256,35 @@ func TestALinkIntoAProjectIsNeverStarted(t *testing.T) {
 		t.Fatalf("a link to an installed program was refused: %v %v", c, ok)
 	}
 }
+
+func TestAProgramInsideAProjectIsReportedWithWhereAndWhy(t *testing.T) {
+	f := newFake(t, "linux", map[string]string{"PATH": "/home/u/.local/bin:/usr/bin"})
+	f.files["/home/u/.local/bin/cursor"] = true
+	f.m.forbidden = []string{"/home/u"}
+	var cursor, idea Status
+	for _, s := range f.m.list() {
+		switch s.ID {
+		case "cursor":
+			cursor = s
+		case "idea":
+			idea = s
+		}
+	}
+	if cursor.Available || cursor.Why != WhyInsideProject || cursor.Within != "/home/u" {
+		t.Fatalf("cursor = %+v, want it unavailable because it sits inside the project folder, naming that folder", cursor)
+	}
+	if idea.Available || idea.Why != "" || idea.Within != "" {
+		t.Fatalf("idea = %+v, want a program that is simply not installed to carry no reason", idea)
+	}
+}
+
+func TestAProgramOutsideEveryProjectCarriesNoReason(t *testing.T) {
+	f := newFake(t, "linux", map[string]string{"PATH": "/home/u/.local/bin:/usr/bin"})
+	f.files["/home/u/.local/bin/cursor"] = true
+	f.m.forbidden = []string{"/home/u/project"}
+	for _, s := range f.m.list() {
+		if s.ID == "cursor" && (!s.Available || s.Why != "" || s.Within != "") {
+			t.Fatalf("cursor = %+v, want it listed and carrying no reason", s)
+		}
+	}
+}

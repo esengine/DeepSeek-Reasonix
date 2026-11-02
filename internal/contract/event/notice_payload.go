@@ -7,7 +7,7 @@ import "encoding/json"
 func DetailIsPayload(code string) bool {
 	return code == NoticeCodeUnappliedSteer || code == NoticeCodeExtensionSkipped || code == NoticeCodeInboxRecovered ||
 		code == NoticeCodeInboxUnrecovered ||
-		code == NoticeCodePermissionRulesDormant || code == NoticeCodeSubagentWaiting || code == NoticeCodeContextComposition || code == NoticeCodeCompactionTelemetry || code == NoticeCodeJobStarted || code == NoticeCodeJobFinished || code == NoticeCodeJobKilled || code == NoticeCodeJobFailed || code == NoticeCodeJobStalled
+		code == NoticeCodePermissionRulesDormant || code == NoticeCodeSubagentWaiting || code == NoticeCodeContextComposition || code == NoticeCodeCompactionTelemetry || code == NoticeCodeUserTurnsDropped || code == NoticeCodeKeptTurnsFolded || code == NoticeCodeJobStarted || code == NoticeCodeJobFinished || code == NoticeCodeJobKilled || code == NoticeCodeJobFailed || code == NoticeCodeJobStalled
 }
 
 // ExtensionSkipReasonNoLiveSidecar: the extension's companion process is not running.
@@ -235,6 +235,24 @@ type CompactionNotice struct {
 
 // Encode renders the payload as the notice's Detail.
 func (p CompactionNotice) Encode() string {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// TurnsDropped is the Detail payload of NoticeCodeUserTurnsDropped and
+// NoticeCodeKeptTurnsFolded: how many user turns the fold left to the summary,
+// their estimated tokens, and the budget they exceeded.
+type TurnsDropped struct {
+	Count  int `json:"count"`
+	Tokens int `json:"tokens"`
+	Budget int `json:"budget"`
+}
+
+// Encode renders the payload as the notice's Detail.
+func (p TurnsDropped) Encode() string {
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return ""

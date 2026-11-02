@@ -1,6 +1,7 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const { PREF_KEY: SHORTCUT_PREF } = require("./globalshortcut");
 
 // The page's own preferences, kept past the origin that stored them. The kernel
 // listens on a fresh loopback port each launch and localStorage is keyed by
@@ -20,13 +21,12 @@ function pageSleepAfterMs(prefs) {
   return prefs && prefs["rx-page-sleep"] === "on" ? PAGE_SLEEP_MS : Infinity;
 }
 
-// Anything that is not one of the page's own string preferences is dropped, in
-// both directions: a hand-edited file or a page bug cannot widen what is kept.
+// Only page string preferences and the shell-owned shortcut survive a disk read.
 function pick(value) {
   const out = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return out;
   for (const [key, v] of Object.entries(value)) {
-    if (key.startsWith(PREFIX) && typeof v === "string") out[key] = v;
+    if ((key.startsWith(PREFIX) || key === SHORTCUT_PREF) && typeof v === "string") out[key] = v;
   }
   return out;
 }
@@ -52,14 +52,17 @@ function savePrefs(file, prefs) {
 // in the same process and must not reach this file.
 // fileOf is asked on each use: the profile directory is settled during boot,
 // after these handlers exist.
-function registerPrefs(ipcMain, fileOf, fromWindow, onSave = () => {}) {
+function registerPrefs(ipcMain, fileOf, fromWindow, onSave = () => {}, onTheme = () => {}) {
   ipcMain.on("prefs:load", (event) => {
-    event.returnValue = fromWindow(event) ? loadPrefs(fileOf()) : {};
+    event.returnValue = fromWindow(event) ? pickPagePrefs(loadPrefs(fileOf())) : {};
   });
   ipcMain.on("prefs:save", (event, prefs) => {
     if (fromWindow(event)) {
       try {
-        savePrefs(fileOf(), prefs);
+        const current = loadPrefs(fileOf());
+        const next = pickPagePrefs(prefs);
+        if (current[SHORTCUT_PREF] !== undefined) next[SHORTCUT_PREF] = current[SHORTCUT_PREF];
+        savePrefs(fileOf(), next);
         onSave();
       } catch {
         // A preference that did not save is one relaunch of lost state, not a
@@ -68,6 +71,21 @@ function registerPrefs(ipcMain, fileOf, fromWindow, onSave = () => {}) {
     }
     event.returnValue = true;
   });
+  ipcMain.on("prefs:theme", (event, paint) => {
+    if (!fromWindow(event) || !event.senderFrame || event.senderFrame !== event.sender.mainFrame) return;
+    if (!paint || typeof paint !== "object" || Array.isArray(paint)) return;
+    const { mode, scheme } = paint;
+    if (mode !== "auto" && mode !== "scheduled" && mode !== "light" && mode !== "dark") return;
+    if (scheme !== "light" && scheme !== "dark") return;
+    if ((mode === "light" || mode === "dark") && mode !== scheme) return;
+    onTheme({ mode, scheme });
+  });
+}
+
+function pickPagePrefs(prefs) {
+  const page = pick(prefs);
+  delete page[SHORTCUT_PREF];
+  return page;
 }
 
 module.exports = { PREFIX, PAGE_SLEEP_MS, pageSleepAfterMs, prefsFile, pick, loadPrefs, savePrefs, registerPrefs };

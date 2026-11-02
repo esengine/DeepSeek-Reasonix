@@ -3,6 +3,7 @@ package workspacelease
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -234,5 +235,194 @@ func TestACorruptClaimLogIsUnknownNotEmpty(t *testing.T) {
 	got, err := resume(context.Background())
 	if err != nil || !got.Unknown {
 		t.Fatalf("resume = %+v, %v; a log started over after corruption must read as unknown", got, err)
+	}
+}
+
+func TestEachResumedCallReportsContentionBeforeTheLastWaiter(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		corrupt bool
+		want    bool
+	}{
+		{name: "overlapping", path: "x.go", want: true},
+		{name: "disjoint", path: "other.go"},
+		{name: "unknown", path: "other.go", corrupt: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b, root := yieldPair(t)
+			named(a, "alpha", "sess-a")
+			named(b, "beta", "sess-b")
+			a.BeginRun()
+			b.BeginRun()
+			xctx, xend, err := a.HoldPaths(t.Context(), []string{filepath.Join(root, "x.go")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer xend()
+			yctx, yend, err := a.HoldPaths(t.Context(), []string{filepath.Join(root, "y.go")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer yend()
+			first, last := a.Yield(xctx), a.Yield(yctx)
+			if a.State().Acquired {
+				t.Fatal("both suspended calls kept the claim")
+			}
+			if tc.corrupt {
+				if err := os.WriteFile(claimLog(a), []byte("{broken"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := b.AcquirePaths(t.Context(), []string{filepath.Join(root, tc.path)}); err != nil {
+				t.Fatal(err)
+			}
+			b.EndRun()
+			got, err := first(t.Context())
+			if err != nil || got.Any() != tc.want || got.Unknown != tc.corrupt {
+				t.Fatalf("first call resumed without its contention: %+v, %v", got, err)
+			}
+			if !a.State().Acquired {
+				t.Fatal("first call resumed without its hold")
+			}
+			xend()
+			if _, err := last(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestResumeReportsUnknownWhenTheClaimHistoryWasTruncated(t *testing.T) {
+	for _, emptyAtYield := range []bool{false, true} {
+		for _, claims := range []int{1, claimLogKeep + 1} {
+			t.Run(fmt.Sprintf("empty=%v/claims=%d", emptyAtYield, claims), func(t *testing.T) {
+				a, b, root := yieldPair(t)
+				named(a, "alpha", "sess-a")
+				named(b, "beta", "sess-b")
+				a.BeginRun()
+				if err := a.AcquirePaths(t.Context(), []string{filepath.Join(root, "x.go")}); err != nil {
+					t.Fatal(err)
+				}
+				if emptyAtYield {
+					if err := os.Remove(claimLog(a)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				resume := a.Yield(t.Context())
+				for i := range claims {
+					path := "other.go"
+					if i == 0 {
+						path = "x.go"
+					}
+					b.BeginRun()
+					if err := b.AcquirePaths(t.Context(), []string{filepath.Join(root, path)}); err != nil {
+						t.Fatal(err)
+					}
+					b.EndRun()
+				}
+				got, err := resume(t.Context())
+				if err != nil || got.Unknown != (claims > claimLogKeep) || !got.Any() {
+					t.Fatalf("truncated versus complete history misclassified: %+v, %v", got, err)
+				}
+			})
+		}
+	}
+}
+
+func TestEveryNewForeignClaimInterruptsTheOriginatingCallObservation(t *testing.T) {
+	for _, unknown := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unknown=%v", unknown), func(t *testing.T) {
+			a, b, _ := yieldPair(t)
+			named(a, "alpha", "sess-a")
+			named(b, "beta", "sess-b")
+			a.BeginRun()
+			ctx, prepared := prepareCall(t, a, []string{"held"})
+			defer prepared.Close(t.Context())
+			for range 2 {
+				before := prepared.ObservationEpoch()
+				resume := a.Yield(ctx)
+				if unknown {
+					if err := os.WriteFile(claimLog(a), []byte("{broken"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				b.BeginRun()
+				if err := b.AcquirePaths(t.Context(), []string{"held"}); err != nil {
+					t.Fatal(err)
+				}
+				b.EndRun()
+				if _, err := resume(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if prepared.ObservationEpoch() == before {
+					t.Fatal("a new foreign claim did not interrupt this call's observation")
+				}
+			}
+		})
+	}
+}
+
+func TestNestedWaitMarksTheOriginEvenWhenItDidNotSuspendTheHold(t *testing.T) {
+	a, b, _ := yieldPair(t)
+	named(a, "alpha", "sess-a")
+	named(b, "beta", "sess-b")
+	a.BeginRun()
+	ctx, prepared := prepareCall(t, a, []string{"held"})
+	defer prepared.Close(t.Context())
+	first, last := a.Yield(ctx), a.Yield(ctx)
+	b.BeginRun()
+	if err := b.AcquirePaths(t.Context(), []string{"held"}); err != nil {
+		t.Fatal(err)
+	}
+	b.EndRun()
+	if _, err := first(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	before := prepared.ObservationEpoch()
+	if _, err := last(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if prepared.ObservationEpoch() == before {
+		t.Fatal("the final nested wait lost the originating observation")
+	}
+	var absent *PreparedCall
+	if absent.ObservationEpoch() != 0 {
+		t.Fatal("an absent lease invented an observation boundary")
+	}
+}
+
+func TestConcurrentNestedResumesKeepTheOriginObservation(t *testing.T) {
+	a, b, _ := yieldPair(t)
+	named(a, "alpha", "sess-a")
+	named(b, "beta", "sess-b")
+	for range 16 {
+		a.BeginRun()
+		ctx, prepared := prepareCall(t, a, []string{"held"})
+		first, last := a.Yield(ctx), a.Yield(ctx)
+		b.BeginRun()
+		if err := b.AcquirePaths(t.Context(), []string{"held"}); err != nil {
+			t.Fatal(err)
+		}
+		b.EndRun()
+		done := make(chan error, 2)
+		for _, resume := range []Resume{first, last} {
+			go func() {
+				_, err := resume(t.Context())
+				done <- err
+			}()
+		}
+		for range 2 {
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		}
+		if prepared.ObservationEpoch() == 0 {
+			t.Fatal("concurrent nested restoration lost the observation boundary")
+		}
+		if err := prepared.Close(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		a.EndRun()
 	}
 }

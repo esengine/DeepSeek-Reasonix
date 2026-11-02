@@ -34,6 +34,28 @@ type SkippedSession struct {
 	Reason SkipReason
 }
 
+// LegacySourceError reports a legacy source directory the import could not
+// list. It embeds the typed SkippedSession the explicit report records for the
+// same directory, so an implicit caller still names the path and classifies the
+// failure with the same vocabulary. Err is the underlying read failure.
+type LegacySourceError struct {
+	SkippedSession
+	Err error
+}
+
+// Error says what could not be read and where. The cause is kept as-is so a
+// permission denial stays recognisable to the caller that has to fix it.
+func (e *LegacySourceError) Error() string {
+	return "could not read legacy sessions directory " + e.Path + ": " + e.Err.Error()
+}
+
+func (e *LegacySourceError) Unwrap() error { return e.Err }
+
+// readSkip is the typed record for a source path an import could not read.
+func readSkip(path string, err error) SkippedSession {
+	return SkippedSession{Name: filepath.Base(path), Path: path, Reason: classifySkip(err)}
+}
+
 // classifySkip maps a failure to read a source entry to its class. Size is
 // checked before damage because an oversized record is reported as both; a read
 // failure with no sentinel is an entry this reader cannot make sense of.
@@ -65,7 +87,9 @@ func (r *LegacyReport) skip(path string, reason SkipReason) {
 }
 
 func (r *LegacyReport) skipRead(path string, err error) {
-	r.skip(path, classifySkip(err))
+	if r != nil {
+		r.Skipped = append(r.Skipped, readSkip(path, err))
+	}
 }
 
 func (r *LegacyReport) skipWrite(path string, err error) {

@@ -3,7 +3,7 @@
 .worktree-setup-context { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 24px }
 .worktree-setup-context > .studio-icon { color: var(--brand); width: 24px; height: 24px; flex-shrink: 0 }
 .worktree-setup-context strong { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-lead); font-weight: var(--w-med) }
-.worktree-setup-context > span { margin-left: auto; flex-shrink: 0; border-radius: 6px; padding: 3px 8px; background: var(--brand-wash); color: var(--brand); font-size: var(--fs-micro) }
+.worktree-setup-context > span { margin-left: auto; flex-shrink: 0; border-radius: 6px; padding: 3px 8px; background: var(--overlay); color: var(--muted); font-size: var(--fs-micro) }
 .worktree-setup h1 { margin: 0; font: var(--w-med) var(--fs-display)/1.3 var(--ui); letter-spacing: -.025em }
 .worktree-setup-description { margin: 10px 0 22px; color: var(--muted); font-size: var(--fs-ui); line-height: 1.7 }
 .worktree-setup-phase { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 13px 14px; border-radius: 9px; background: var(--brand-wash); color: var(--brand); font-size: var(--fs-ui) }

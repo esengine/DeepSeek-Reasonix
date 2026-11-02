@@ -11,6 +11,8 @@ import (
 // capabilities at multiple wrappers even while their owning tests stayed green.
 type AuditForwarder struct{ Inner Sink }
 
+func (f AuditForwarder) CaptureUsageScope() any { return CaptureUsageScope(f.Inner) }
+
 func (f AuditForwarder) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
 	RecordReadinessAudit(f.Inner, a)
 }

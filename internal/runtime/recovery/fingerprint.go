@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // CallFingerprint builds a one-shot authorization fingerprint from the
@@ -60,7 +61,11 @@ func ArgsSummary(args json.RawMessage, max int) string {
 	}
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > max {
-		return s[:max] + "…"
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut] + "…"
 	}
 	return s
 }

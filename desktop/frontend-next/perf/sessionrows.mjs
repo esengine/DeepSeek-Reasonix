@@ -36,8 +36,9 @@ try {
             <time class="sessmeta sessage">9 天前</time>
             <span class="sessquick"><button data-action="session.archive">归档</button></span>
           </div>
-          <div class="sessrow sesscopy">
+          <div class="sessrow sesscopy" tabindex="0">
             <span class="sesstitle" title="早先版本 · 4 轮"><span>早先版本 · 4 轮</span></span>
+            <button class="wsdel" data-action="session.delete" aria-label="删除该会话"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" /></svg></button>
           </div>
         </div>
       </div>`);
@@ -96,7 +97,26 @@ try {
           assert.ok(contained, "quick actions fit inside the compact row");
         }
       }
-      console.log(`${scheme}/${width}: 34px rows, 1px spacing, single-line ellipsis, hover/focus stable`);
+      // An earlier version has no row menu: its × is the only way a pointer deletes it.
+      for (const how of ["hover", "focus"]) {
+        await page.mouse.move(width + 200, 400);
+        if (how === "hover") await page.locator(".sesscopy").hover();
+        else await page.locator(".sesscopy").focus();
+        await page.waitForFunction(() => getComputedStyle(document.querySelector(".sesscopy .wsdel")).opacity === "1", null, { timeout: 1000 }).catch(() => {});
+        const del = await page.evaluate(() => {
+          const row = document.querySelector(".sesscopy");
+          const button = row.querySelector(".wsdel");
+          const box = button.getBoundingClientRect();
+          const edge = row.getBoundingClientRect();
+          return {
+            shown: box.width > 0 && box.height > 0 && getComputedStyle(button).opacity === "1",
+            inside: box.top >= edge.top && box.bottom <= edge.bottom && box.left >= edge.left && box.right <= edge.right,
+          };
+        });
+        assert.ok(del.shown, `${scheme}/${width}/${how}: an earlier version shows its delete button`);
+        assert.ok(del.inside, `${scheme}/${width}/${how}: the delete button sits inside its row`);
+      }
+      console.log(`${scheme}/${width}: 34px rows, 1px spacing, single-line ellipsis, hover/focus stable, an earlier version's × shows`);
       await page.close();
     }
   }

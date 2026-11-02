@@ -27,16 +27,7 @@ var diffFoldLines = diffPreviewLines
 func renderItem(it *Item, width, shown int, hideRail bool) string {
 	switch it.Kind {
 	case ItemUser:
-		mark := "› "
-		if it.Steer {
-			mark = "↳ "
-		}
-		rows := strings.Split(termrender.Hardwrap(strings.TrimRight(it.Text, "\n"), max(width-5, 10)), "\n")
-		for i, r := range rows {
-			rows[i] = "  " + termrender.Accent(mark+r)
-			mark = "  "
-		}
-		return "\n" + strings.Join(rows, "\n")
+		return renderUser(it, width)
 	case ItemSay:
 		// Thinking with nothing said after it is a step, not an answer: it gets
 		// its marker and no speaker header.
@@ -77,6 +68,35 @@ func renderItem(it *Item, width, shown int, hideRail bool) string {
 		return termrender.Dim("  " + fmt.Sprintf(i18n.M.ChatWorkedForFmt, i18n.Elapsed(time.Duration(it.WorkedMs)*time.Millisecond)))
 	}
 	return ""
+}
+
+// renderUser draws the person's line and what came with it. A turn can carry
+// no words and still be a turn — the record says so by its image count — so
+// the attachment gets its own line rather than the row quietly disappearing.
+// Via is only ever set on a restored turn, and says which paired device the
+// line came from without touching the window's own rows.
+func renderUser(it *Item, width int) string {
+	mark := "› "
+	if it.Steer {
+		mark = "↳ "
+	}
+	var lines []string
+	if strings.TrimSpace(it.Text) != "" {
+		for r := range strings.SplitSeq(termrender.Hardwrap(strings.TrimRight(it.Text, "\n"), max(width-5, 10)), "\n") {
+			lines = append(lines, "  "+termrender.Accent(mark+r))
+			mark = "  "
+		}
+	}
+	if it.Images > 0 {
+		lines = append(lines, "  "+termrender.Dim(mark+fmt.Sprintf(i18n.M.ChatImageAttachedFmt, it.Images)))
+	}
+	if it.Via != nil {
+		lines = append(lines, termrender.Dim("  "+fmt.Sprintf(i18n.M.ChatFromDeviceFmt, it.Via.Ordinal)))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(lines, "\n")
 }
 
 // renderSayPart renders a stretch of an answer. Only the first stretch carries

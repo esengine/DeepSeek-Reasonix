@@ -7,13 +7,9 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
-// goalUsageTee wraps the controller's event sink and attributes billable usage
-// events to the active goal turn's recorder, so every model request under the
-// same Goal scope — executor, planner, subagent, compaction, classifier,
-// capability router, recovery reviewer, and goal evaluator — accumulates into
-// the goal's observational token total. There is no token hard limit; the
-// total is for display and diagnostics only. Title generation and unrelated
-// background calls are excluded. The tee forwards every event unchanged.
+// goalUsageTee attributes delegated usage to its captured Goal recorder and
+// unscoped usage to the active turn. Title generation is excluded. These totals
+// are observational; the Agent's task budget owns enforcement.
 type goalUsageTee struct {
 	event.AuditForwarder
 	inner event.Sink
@@ -36,16 +32,16 @@ func NewGoalUsageTee(inner event.Sink) event.Sink {
 	return &goalUsageTee{AuditForwarder: event.AuditForwarder{Inner: inner}, inner: inner, tally: newUsageTally()}
 }
 
-// Emit forwards the event and, for billable usage while a goal turn is active,
-// folds the tokens into the turn recorder.
+// Emit preserves delivery and session accounting while selecting the Goal owner.
 func (t *goalUsageTee) Emit(e event.Event) {
 	if t == nil {
 		return
 	}
 	if e.Kind == event.Usage && e.Usage != nil && e.UsageSource != event.UsageSourceTitle {
-		t.mu.Lock()
-		rec := t.active
-		t.mu.Unlock()
+		rec := t.activeRecorder()
+		if scope, ok := event.UsageScope(e).(*goalUsageScope); ok && scope.owner == t {
+			rec = scope.recorder
+		}
 		if rec != nil {
 			rec.addUsageWithRequests(usageTotalTokens(e.Usage), e.Usage.RequestCount)
 		}
@@ -54,6 +50,15 @@ func (t *goalUsageTee) Emit(e event.Event) {
 	if t.inner != nil {
 		t.inner.Emit(e)
 	}
+}
+
+type goalUsageScope struct {
+	owner    *goalUsageTee
+	recorder *goalTurnRecorder
+}
+
+func (t *goalUsageTee) CaptureUsageScope() any {
+	return &goalUsageScope{owner: t, recorder: t.activeRecorder()}
 }
 
 // writeUsageRecord persists the session's accounting beside the transcript at

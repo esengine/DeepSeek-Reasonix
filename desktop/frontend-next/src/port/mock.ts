@@ -3,7 +3,7 @@ import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
 import type { JobOutput, PlanAction } from "./session";
 import { approvalKind } from "./mock_approval";
 import { HttpError } from "./port";
-import type { AccountState, AgentPort, Completion, CompletionItem, DeviceGrant, StudioLogs, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, Attachment, DroppedRef, Queue, QueueItem, Queued, ChipCall, NotifyPrefs, TrayPrefs, UsageQuery } from "./port";
+import type { AccountState, AgentPort, Completion, CompletionItem, DeviceGrant, StudioLogs, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, UploadReport, MemoryEntry, WorkspaceInfo, Attachment, DroppedRef, Queue, QueueItem, Queued, ChipCall, NotifyPrefs, TrayPrefs, UsageQuery } from "./port";
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import { MockWorkspace, mockWorkspaces, mockWorktreeSources, MockPreparations } from "./mock_workspace";
 import { SCRIPT, mockMsgIndex, mockTurnStart } from "./fixture";
@@ -11,7 +11,7 @@ import { MockExecutionHold, mockExecutionGraph } from "./mock_graph";
 import { mockStorage, mockStoragePlan } from "./mock_storage";
 import { MEMORIES, mockMemoryCatalog } from "./mock_memory";
 import { mockModels } from "./mock_models";
-import { mockUsage } from "./mock_usage";
+import { mockUploadUsage, mockUsage } from "./mock_usage";
 
 export class MockPort extends MockWorkspace implements AgentPort {
   private listeners = new Set<(ev: WireEvent) => void>();
@@ -112,9 +112,9 @@ export class MockPort extends MockWorkspace implements AgentPort {
 
   private mem: MemoryEntry[] = MEMORIES.map((m) => ({ ...m }));
 
-  async usage(query: number | UsageQuery): Promise<UsageReport> {
-    return mockUsage(query);
-  }
+  async usage(query: number | UsageQuery): Promise<UsageReport> { return mockUsage(query); }
+
+  uploadUsage(days: number): Promise<UploadReport> { return Promise.resolve(mockUploadUsage(days)); }
 
   async memories(): Promise<MemoryCatalog> {
     return mockMemoryCatalog(this.mem);
@@ -414,6 +414,10 @@ export class MockPort extends MockWorkspace implements AgentPort {
 
   async branchAt(turn: number): Promise<string> {
     return `/mock/branch-${turn}.jsonl`;
+  }
+
+  async continueFromTail(path: string): Promise<{ path: string; dropped: number }> {
+    return { path: path.replace(/\.jsonl$/, "-tail.jsonl"), dropped: 12 };
   }
 
   // The second prompt onwards is scripted to have run bash, so mock mode can

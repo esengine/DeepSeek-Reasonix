@@ -115,6 +115,8 @@ var English = Messages{
 	ChatThinking:                    "thinking…",
 	ChatThoughtForFmt:               "thought for %ds",
 	ChatWorkedForFmt:                "worked for %s",
+	ChatImageAttachedFmt:            "%d image(s) attached — this terminal shows no image",
+	ChatFromDeviceFmt:               "from device %d",
 	ChatStatusThinkingFmt:           "%s thinking… (%s · %s cancels)",
 	TurnPhaseWorking:                "working",
 	TurnPhaseChecking:               "checking",

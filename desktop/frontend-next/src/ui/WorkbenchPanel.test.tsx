@@ -370,7 +370,7 @@ describe("WorkbenchPanel", () => {
     expect(screen.getByRole("tab", { name: "百度热搜" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("keeps the column while another tab is open, and folds it with the last", async () => {
+  it("keeps the column while another tab is open, and offers a new tab with the last", async () => {
     const user = userEvent.setup();
     const onCloseManual = vi.fn();
     const pages = [
@@ -382,7 +382,8 @@ describe("WorkbenchPanel", () => {
     expect(onCloseManual).not.toHaveBeenCalled();
     expect(screen.getByRole("tab", { name: "My page" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "关闭 My page" }));
-    expect(onCloseManual).toHaveBeenCalledTimes(1);
+    expect(onCloseManual).not.toHaveBeenCalled();
+    expect(screen.getByRole("group", { name: "开始" })).toBeTruthy();
   });
 
   it("keeps the column when its last tab closes while the explorer is open", async () => {

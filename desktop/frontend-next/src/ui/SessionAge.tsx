@@ -1,6 +1,8 @@
 import { since } from "./wallet";
+import { UnreadDot } from "./UnreadMark";
 
-export function SessionAge({ at }: { at?: number }) {
+export function SessionAge({ at, unread }: { at?: number; unread?: boolean }) {
+  if (unread) return <UnreadDot />;
   if (!at) return null;
   const date = new Date(at);
   if (!Number.isFinite(date.valueOf())) return null;

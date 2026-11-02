@@ -7,11 +7,30 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/store"
 )
+
+// installUnopenableLease leaves a readable foreign sidecar and a lease lock the
+// probe cannot open. Ownership is then neither provably held nor free — the
+// state redaction used to fold into "active lease held".
+func installUnopenableLease(t *testing.T, sessionPath string) {
+	t.Helper()
+	if err := sessionstore.SaveSessionLeaseInfo(sessionPath, sessionstore.SessionLeaseInfo{
+		SessionPath: sessionPath,
+		WriterID:    "other-host-1234-deadbeef",
+		PID:         os.Getpid() + 1,
+		AcquiredAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("SaveSessionLeaseInfo: %v", err)
+	}
+	if err := os.Mkdir(store.SessionLeaseLock(sessionstore.CanonicalSessionPath(sessionPath)), 0o755); err != nil {
+		t.Fatalf("make unopenable lease lock: %v", err)
+	}
+}
 
 func TestRedactSessionsScrubsHistoricalSessionArtifacts(t *testing.T) {
 	dir := testenv.TempDir(t)
@@ -181,8 +200,12 @@ func TestRedactSessionsSkipsLeasedSession(t *testing.T) {
 	defer lease.Release()
 
 	res := RedactSessions(RedactSessionsOptions{Dirs: []string{dir}})
-	if res.FilesSkipped != 1 {
-		t.Fatalf("FilesSkipped = %d, want 1", res.FilesSkipped)
+	if res.FilesSkipped != 1 || res.FilesSkippedHeld != 1 || res.FilesSkippedUnprovable != 0 {
+		t.Fatalf("skip counts = total %d, held %d, unprovable %d; want 1/1/0",
+			res.FilesSkipped, res.FilesSkippedHeld, res.FilesSkippedUnprovable)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("a proven holder is a skip, not an error: %v", res.Errors)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -190,6 +213,71 @@ func TestRedactSessionsSkipsLeasedSession(t *testing.T) {
 	}
 	if !strings.Contains(string(data), secret) {
 		t.Fatalf("leased session should not be rewritten:\n%s", data)
+	}
+}
+
+// TestRedactSessionsRefusesAnUnprovableLease pins the third state's consequence:
+// a probe that cannot prove ownership must not authorize a rewrite, and must not
+// be reported as an active lease held by somebody.
+func TestRedactSessionsRefusesAnUnprovableLease(t *testing.T) {
+	dir := testenv.TempDir(t)
+	const secret = "sk-real-secret-value-123456"
+	path := filepath.Join(dir, "abc.jsonl")
+	body := `{"role":"tool","content":"DEEPSEEK_API_KEY=` + secret + `"}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installUnopenableLease(t, path)
+
+	res := RedactSessions(RedactSessionsOptions{Dirs: []string{dir}})
+	if res.FilesSkipped != 1 || res.FilesSkippedUnprovable != 1 || res.FilesSkippedHeld != 0 {
+		t.Fatalf("skip counts = total %d, held %d, unprovable %d; want 1/0/1",
+			res.FilesSkipped, res.FilesSkippedHeld, res.FilesSkippedUnprovable)
+	}
+	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0], "could not be proven") {
+		t.Fatalf("refusal must say the lease could not be proven: %v", res.Errors)
+	}
+	if strings.Contains(strings.Join(res.Errors, "\n"), "held") {
+		t.Fatalf("unprovable lease was reported as held: %v", res.Errors)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != body || !strings.Contains(string(data), secret) {
+		t.Fatalf("redaction rewrote a session whose ownership it could not prove:\n%s", data)
+	}
+}
+
+// TestRedactSessionsStillRewritesACrashedLeftover is the free control: a foreign
+// sidecar whose lock is free is a leftover, not an unprovable lease, and must
+// still be scrubbed.
+func TestRedactSessionsStillRewritesACrashedLeftover(t *testing.T) {
+	dir := testenv.TempDir(t)
+	const secret = "sk-real-secret-value-123456"
+	path := filepath.Join(dir, "abc.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"tool","content":"DEEPSEEK_API_KEY=`+secret+`"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionstore.SaveSessionLeaseInfo(path, sessionstore.SessionLeaseInfo{
+		SessionPath: path,
+		WriterID:    "other-host-1234-deadbeef",
+		PID:         os.Getpid() + 1,
+		AcquiredAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res := RedactSessions(RedactSessionsOptions{Dirs: []string{dir}})
+	if len(res.Errors) != 0 || res.FilesChanged != 1 || res.FilesSkipped != 0 {
+		t.Fatalf("crashed leftover = %+v, want one rewrite and no skip", res)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), secret) {
+		t.Fatalf("crashed leftover's secret survived:\n%s", data)
 	}
 }
 

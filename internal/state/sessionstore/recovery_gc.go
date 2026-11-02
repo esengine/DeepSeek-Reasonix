@@ -57,17 +57,15 @@ type recoveryTrashPendingMeta struct {
 }
 
 // SessionLeaseHeld reports whether ANY live runtime — this process included —
-// holds the session's write lease. SessionLeaseHeldByOtherRuntime deliberately
-// answers false for the current process; GC needs the stricter question, since
-// a branch open in one of our own tabs is just as much in use.
+// may hold the session's write lease; GC needs the stricter question because a
+// branch open in one of our own tabs is just as much in use. An unprovable
+// probe counts as held here: these callers only skip work, and the three-state
+// question belongs to SessionLeaseOwnership.
 func SessionLeaseHeld(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
 	}
-	if _, ok := sessionLeaseOwners.Load(canonicalSessionSavePath(path)); ok {
-		return true
-	}
-	return SessionLeaseHeldByOtherRuntime(path)
+	return SessionLeaseOwnership(path) != nil
 }
 
 // RecoveryBranchCoveredByParent reports whether a conflict-recovery branch

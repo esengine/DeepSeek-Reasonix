@@ -164,7 +164,7 @@ const settled = async (page) => {
 };
 
 const found = new Map();
-for (const scheme of ["light", "dark"]) {
+for (const scheme of ["light", "dark"]) for (const tier of ["", "soft"]) {
   const page = await browser.newPage({ viewport: { width: 1512, height: 950 }, locale: "zh-CN", colorScheme: scheme });
   page.on("pageerror", (e) => fails.push("页面异常: " + e.message));
   // The receipt card is off unless a machine asked for it, and an unrendered
@@ -177,6 +177,11 @@ for (const scheme of ["light", "dark"]) {
   });
   await page.goto(PAGE, { waitUntil: "networkidle" });
   await page.waitForSelector(".compose");
+  await page.evaluate(({ scheme, tier }) => {
+    document.documentElement.dataset.theme = scheme;
+    if (tier) document.documentElement.dataset.contrast = tier;
+    else delete document.documentElement.dataset.contrast;
+  }, { scheme, tier });
   await page.waitForTimeout(400);
 
   // 一屏里画不出所有状态：审批、提问、失败的调用、设置页各自带着自己的配色。
@@ -223,11 +228,11 @@ for (const scheme of ["light", "dark"]) {
     f({ kind: "turn_done", receipt: { verdict: "partial", changes: [{ path: "a.go", reviewed: true }], verifications: [{ command: "go test ./...", passed: false, stale: true }], gaps: [{ kind: "unverified_mutation", detail: "改了没跑" }], risks: ["只在 darwin 验过"], unverified: ["Windows"], saysSomething: true } });
   });
   await settled(page);
-  for (const row of await sweep(page, scheme, "工作台")) found.set(row.key, row);
+  for (const row of await sweep(page, `${scheme}/${tier || "unset"}`, "工作台")) found.set(row.key, row);
 
   await page.locator('[data-action="chrome.settings"]').first().click();
   await settled(page);
-  for (const row of await sweep(page, scheme, "设置")) if (!found.has(row.key)) found.set(row.key, row);
+  for (const row of await sweep(page, `${scheme}/${tier || "unset"}`, "设置")) if (!found.has(row.key)) found.set(row.key, row);
   await page.close();
 }
 

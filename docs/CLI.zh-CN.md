@@ -367,6 +367,9 @@ ID，需要一并保留该私有身份密钥。任务仍在运行时
 `artifact_complete=true`。没有 live session lease 的 `running` 记录会显示为
 `interrupted`；再次打开该 session 时也会自动修复持久化生命周期状态。
 
+lease 探针无法判定是否有 runtime 持有该 session 时（lease lock 或 sidecar 不可读），
+`task list` 把 `running` 记录显示为 `unknown`，`session list` 把状态显示为 `unknown`。
+
 Schema version 1 的兼容规则：
 
 - 消费端必须忽略未知字段；

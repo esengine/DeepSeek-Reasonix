@@ -25,7 +25,7 @@ it("keeps open a menu opened between the chip's commit and its mount effects", a
     });
     watch.observe(root, { childList: true, subtree: true });
   });
-  mounted.render(<WorktreeChip port={port} sources={sources} canCreate={false} selection={null} branch="main" busy={false}
+  mounted.render(<WorktreeChip port={port} workspace={null} sources={sources} canCreate={false} selection={null} branch="main" busy={false}
     changeCount={0} onSelect={vi.fn()} refresh={async () => sources} onChanged={vi.fn()} onError={vi.fn()} />);
   await clicked;
   await new Promise((resolve) => setTimeout(resolve, 100));

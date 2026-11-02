@@ -26,6 +26,7 @@ const (
 	codeSessionBadPath         = "session.bad_path"
 	codeSessionPathUnreadable  = "session.path_unreadable"
 	codeSessionUnknown         = "session.unknown"
+	codeSessionReplayLimit     = "session.replay_limit"
 	codeSessionOutside         = "session.outside_dir"
 	codeSessionActive          = "busy.session_active"
 	codeSwitchModel            = "busy.switch_model"

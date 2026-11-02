@@ -1,9 +1,10 @@
-.projects-header { margin: 8px 15px 6px; }
+.projects-header { flex: none; margin: 8px 15px 6px; }
 .projects-heading { display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding-inline: 7px; color: var(--faint); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); }
 .projects-heading-actions { display: flex; align-items: center; gap: 2px; }
 .projects-heading-title { display: flex; align-items: center; gap: 6px; }
 .projects-add { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .projects-add .studio-icon { width: 16px; height: 16px; }
+.projects-add.projects-recent { width: auto; padding-inline: 6px; font: inherit; }
 .projects-add:hover:not(:disabled), .projects-heading .wsmore:is(:hover, [aria-expanded="true"]) { background: var(--overlay); color: var(--text); }
 .projects-add:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
 .projects-add:disabled { opacity: .4; cursor: default; }
@@ -47,8 +48,7 @@
 .rail .rmtws-node .sessdel { opacity: 0; }
 .rail .rmtws-node .sessrow:is(:hover, :focus-within) .sessdel { opacity: 1; }
 .rail .sessage { margin-left: auto; margin-right: 0; font-size: var(--fs-micro); }
-.rail .sessage + .sesscopies { margin-inline-start: 6px; }
-.rail .sessrow[data-unread]:not(:has(> .sesscopies)) > .sessage { margin-inline-end: 22px; }
+.rail :is(.sessage, .unread-dot) + .sesscopies { margin-inline-start: 6px; }
 .rail .sessmore { width: calc(100% - 12px); margin: 2px 0 5px 3px; padding-left: 9px; text-align: left; }
 .rail .sessrow:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .rail .sessrow[aria-selected="true"] { background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--text); font-weight: var(--w-reg); box-shadow: none; }
@@ -64,3 +64,15 @@
 @media (hover: none) { .rowbtns { opacity: 1; } }
 .studio-session-segments button { font-size: calc(12px * var(--fs-scale, 1)); }
 .studio-session-segments b { font-size: calc(10px * var(--fs-scale, 1)); }
+.recent-description { margin: 0 0 12px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.recent-machine { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); }
+.recent-machine select { flex: 1; min-width: 0; padding: 5px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-xs); font: var(--w-reg) var(--fs-ui) var(--ui); }
+.recent-sessions .picklist { min-height: 160px; }
+.recent-session { min-height: 48px; }
+.recent-session .recent-session-text { display: flex; flex: 1; flex-direction: column; gap: 3px; }
+.recent-session-text b, .recent-session-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-session-text b { color: var(--text); font-weight: var(--w-med); }
+.recent-session-text small { color: var(--muted); font-size: var(--fs-micro); }
+.recent-session .sessage { flex: none; margin-left: auto; color: var(--muted); }
+.recent-sessions .pickact { flex-wrap: wrap; }
+.recent-page { order: -1; flex-basis: 100%; text-align: center; white-space: nowrap; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }

@@ -52,6 +52,7 @@ var table = []Entry{
 	{ID: "desktop.pinned_version", Class: Guarded, Effect: OnOpen},
 	{ID: "desktop.update_mode", Class: Guarded, Effect: OnOpen},
 	{ID: "desktop.appearance.zoom", Class: Preference, Effect: OnOpen},
+	{ID: "desktop.appearance.width_percent", Class: Preference, Effect: OnOpen},
 	{ID: "desktop.appearance.read_size", Class: Preference, Effect: OnOpen},
 	{ID: "desktop.appearance.text_size", Class: Preference, Effect: OnOpen},
 	{ID: "desktop.appearance.font_ui", Class: Preference, Effect: OnOpen},

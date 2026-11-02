@@ -11,9 +11,10 @@ const RailQuery = createContext("");
 /** What the rail is searching for, trimmed and lowercased. Empty when idle. */
 export const useRailQuery = () => useContext(RailQuery).trim().toLowerCase();
 
-export function RailSearch({ children }: { children: ReactNode }) {
+export function RailSearch({ children, resetKey }: { children: ReactNode; resetKey?: unknown }) {
   const [q, setQ] = useState("");
   const find = useRef<HTMLInputElement>(null);
+  useEffect(() => { setQ(""); }, [resetKey]);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {

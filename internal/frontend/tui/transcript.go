@@ -35,18 +35,21 @@ type Item struct {
 	ReceiptLine bool
 
 	// ItemUser. Pending is input the kernel has not taken into a turn yet;
-	// Steer is input a running turn read at a tool boundary. MsgIndex is the
-	// kernel's name for the message once a turn has started on it.
+	// Steer is guidance a running turn read; Images is all an image-only turn
+	// has, and Via is the paired device it came from (nil: the window).
 	Text     string
 	Pending  bool
 	Steer    bool
 	QueueID  string
 	MsgIndex int
+	Images   int
+	Via      *eventwire.Via
 
-	// ItemSay.
+	// ItemSay. ModelRef is the model the record says wrote this answer.
 	Reasoning string
 	Done      bool
 	ThoughtMs int64
+	ModelRef  string
 	// Framed is set once the kernel's message frame has settled the answer; a
 	// dispatch closes one before its frame arrives.
 	Framed bool

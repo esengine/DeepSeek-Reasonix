@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("reasonixHost", {
   platform: process.platform,
   titleBar,
   setUnreadBadge: (unread) => ipcRenderer.invoke("window:unread-badge", unread),
+  syncTheme: (mode, scheme) => ipcRenderer.send("prefs:theme", { mode, scheme }),
   minimiseWindow: () => ipcRenderer.invoke("window:minimise"),
   toggleMaximiseWindow: () => ipcRenderer.invoke("window:toggle-maximise"),
   isWindowMaximised: () => ipcRenderer.invoke("window:is-maximised"),
@@ -31,6 +32,8 @@ contextBridge.exposeInMainWorld("reasonixHost", {
   showTextContextMenu: (request) => ipcRenderer.invoke("text:context-menu", request),
   // What the shell's graphics are running as this launch.
   graphics: () => ipcRenderer.invoke("shell:graphics"),
+  globalShortcut: () => ipcRenderer.invoke("shell:global-shortcut"),
+  setGlobalShortcut: (binding) => ipcRenderer.invoke("shell:set-global-shortcut", binding),
   // The window's processes as type and two sizes, for the memory a report may carry.
   processMemory: () => ipcRenderer.invoke("shell:process-memory"),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", String(url)),
@@ -62,10 +65,17 @@ contextBridge.exposeInMainWorld("reasonixHost", {
   freezeBrowserView: () => ipcRenderer.invoke("browser:freeze"),
   controlBrowserView: (targetId, action) => ipcRenderer.invoke("browser:control", String(targetId), String(action)),
   navigateBrowserView: (targetId, address) => ipcRenderer.invoke("browser:navigate", String(targetId), String(address)),
+  // Arm this page's element picker, and let a person put it away again. The
+  // answer is the element they pointed at, or that they picked nothing.
+  pickBrowserElement: (targetId, labels) => ipcRenderer.invoke("browser:pick", String(targetId), labels),
+  cancelBrowserPick: (targetId) => ipcRenderer.invoke("browser:pick-cancel", String(targetId)),
+  verifyBrowserElement: (targetId, selector) => ipcRenderer.invoke("browser:verify", String(targetId), String(selector)),
   // Why a page did not load, and a login a page or proxy asks for. The password
   // goes back to this window's main process only; the kernel never sees it.
   onBrowserLoadState: (listener) => subscribe("browser:load-state", listener),
   onBrowserLogin: (listener) => subscribe("browser:login", listener),
+  // The picker's key, pressed in the page rather than in this one.
+  onBrowserPickShortcut: (listener) => subscribe("browser:pick-shortcut", listener),
   trustBrowserCertificate: (targetId) => ipcRenderer.invoke("browser:trust-certificate", String(targetId)),
   answerBrowserLogin: (id, username, password) =>
     ipcRenderer.invoke("browser:login-answer", String(id), String(username || ""), String(password || "")),

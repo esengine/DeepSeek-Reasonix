@@ -26,6 +26,12 @@ type syncSink struct {
 	inner Sink
 }
 
+func (s *syncSink) CaptureUsageScope() any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return CaptureUsageScope(s.inner)
+}
+
 func (s *syncSink) Emit(e Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

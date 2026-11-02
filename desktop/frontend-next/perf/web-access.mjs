@@ -23,6 +23,7 @@ for (const scheme of ["light", "dark"]) {
     await page.evaluate(() => document.querySelector('[data-action="chrome.settings"]')?.click());
     await page.waitForSelector(".prefs-nav button");
     await page.evaluate(() => [...document.querySelectorAll(".prefs-nav button")].find((b) => b.textContent.includes("工具与权限"))?.click());
+    await page.evaluate(() => document.getElementById("prefs-tools-web")?.click());
     await page.waitForSelector("#set-web-access");
     const r = await page.evaluate(() => {
       const g = document.querySelector("#set-web-access");

@@ -89,9 +89,10 @@ export function pricesToSend(picked: string[], text: Record<string, PriceText>, 
 }
 
 export function ModelPrices({
-  models, value, onChange, official = false, stored = {}, onOpenSource,
+  models, value, onChange, official = false, stored = {}, onOpenSource, labels,
 }: {
   models: string[];
+  labels?: Record<string, string>;
   value: Record<string, PriceText>;
   onChange: (next: Record<string, PriceText>) => void;
   official?: boolean;
@@ -114,7 +115,7 @@ export function ModelPrices({
           const freeCached = foreign && cur.hit !== "" && Number(cur.hit) === 0 && Number(cur.inp) > 0;
           return (
             <li key={model} className="ml-row mp-row" data-model={model} data-own={own || undefined}>
-              <span className="me-name" title={model}>{shortId(model)}</span>
+              <span className="me-name" title={model}>{labels?.[model] ?? shortId(model)}</span>
               <span className="unit-field">
                 <input data-action="provider.draft" data-value="model-price-input" aria-label={t("{model} 的输入单价", { model })}
                   aria-invalid={incomplete(cur) && cur.inp === "" ? true : undefined} inputMode="decimal" value={cur.inp} placeholder={t("未知")}

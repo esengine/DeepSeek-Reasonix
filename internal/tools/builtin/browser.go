@@ -76,8 +76,9 @@ type browserOpen struct{ session *browser.Session }
 func (browserOpen) Name() string { return "browser_open" }
 
 func (browserOpen) Description() string {
-	return "Load a page in your browser and return its snapshot: one element per line, with [eN] refs for browser_act. " +
-		"url is http(s), about:blank or a workspace file. Without url, tab switches to that tab; close closes it."
+	return "Load a page and return its snapshot, one element per line with [eN] refs. " +
+		"url: http(s), about:blank or a workspace file; no url switches to tab; close closes. " +
+		"The user sees tabs: web_fetch reads static text, close tabs when done."
 }
 
 func (browserOpen) Schema() json.RawMessage {

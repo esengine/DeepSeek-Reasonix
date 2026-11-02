@@ -26,6 +26,7 @@ func TestPluginWarningsUsesThemeValidationWithoutRegistration(t *testing.T) {
 		{name: "missing scheme", file: manifestName, raw: `{"schemaVersion":1,"tokens":{"light":{"bg":"#FFFFFF"}}}`, want: []string{"no dark tokens"}},
 		{name: "no usable tokens", file: manifestName, raw: `{"schemaVersion":1,"tokens":{"light":{"sidebar":"#FFFFFF"},"dark":{"bg":"#111111"}}}`, want: []string{"no usable light tokens"}},
 		{name: "partial", file: manifestName, raw: `{"schemaVersion":1,"tokens":{"light":{"bg":"#FFFFFF","fg":"not-a-colour","sidebar":"#111111"},"dark":{"bg":"#111111"}}}`, want: []string{`"fg"`, `"sidebar" is not a theme token`}},
+		{name: "unknown surface", file: manifestName, raw: strings.Replace(valid, `"tokens":`, `"background":{"surfaceOpacity":{"dark":{"sidebar":0.45}}},"tokens":`, 1), want: []string{`background.surfaceOpacity.dark: "sidebar" is not a surface`}},
 		{name: "other file", file: "ignored.txt", raw: "Not a theme manifest."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,6 +1,6 @@
 import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
 import { PLAN_ACTIONS, type PlanAction } from "./session";
-import type { AccountState, AgentPort, ChipCall, CompactionSettings, Completion, DeviceGrant, UpdateProgress, StudioLogs, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, MemoryEntry, UsageQuery, UsageReport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
+import type { AccountState, AgentPort, ChipCall, CompactionSettings, Completion, DeviceGrant, UpdateProgress, StudioLogs, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, MemoryEntry, UsageQuery, UsageReport, UploadReport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
 import { HttpError, type CommitProposal, type CommitRequest, type CommitResult, type WorkspaceFile, type WorkspaceFiles } from "./port";
 import { SseWorkspace } from "./sse_workspace";
 import type { StoragePlan, StorageQuery, StorageState } from "./storage";
@@ -82,6 +82,9 @@ export class SsePort extends SseWorkspace implements AgentPort {
       if (query.source && query.source !== "all") q.set("source", query.source);
     }
     return this.get<UsageReport>("/usage?" + q);
+  }
+  uploadUsage(days: number) {
+    return this.get<UploadReport>(`/usage/upload?days=${days}`);
   }
   memories() {
     return this.get<MemoryCatalog>("/memory");
@@ -475,6 +478,9 @@ export class SsePort extends SseWorkspace implements AgentPort {
 
   async branchAt(turn: number, name: string) {
     return (await this.post0<{ path: string }>("/branch/at", { turn, name })).path;
+  }
+  continueFromTail(path: string) {
+    return this.post0<{ path: string; dropped: number }>("/session/tail", { path });
   }
   availableUndo() { return this.get<RewindUndo | null>("/rewind/undo"); }
 

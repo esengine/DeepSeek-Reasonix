@@ -21,6 +21,7 @@ func quotedSink(cfg *config.Config, opts Options, trace *otlp.Exporter) (event.S
 	quoted := otlp.NewSink(opts.Sink, trace, "reasonix")
 	if opts.StatsSource.Valid() {
 		quoted = stats.NewRecorder(quoted, opts.roots().StatsDir(), opts.StatsSource.String())
+		stats.StartUploadMeter(opts.roots().StatsDir())
 	}
 	return event.Sync(event.NewCostQuoteSink(quoted, ctx)), ctx
 }

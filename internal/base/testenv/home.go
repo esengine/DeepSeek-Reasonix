@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"reasonix/internal/base/testscope"
 )
 
 // TestingM is the subset of testing.M needed by RunWithIsolatedUserState.
@@ -17,10 +19,9 @@ type savedEnvironment struct {
 	set   bool
 }
 
-// IsolateUserState redirects default user-scoped Reasonix paths to a disposable
-// home and clears inherited explicit path overrides. Tests may still override
-// any of these variables for a focused scenario after this process-level guard
-// is installed.
+// IsolateUserState redirects user-scoped paths and test-only config edit locks
+// to a disposable home, clearing inherited explicit path overrides. Tests may
+// override these variables for a focused scenario after this guard is installed.
 func IsolateUserState() (func(), error) {
 	originalHome, _ := os.UserHomeDir()
 	home, err := os.MkdirTemp(originalHome, ".reasonix-test-home-*")
@@ -32,13 +33,14 @@ func IsolateUserState() (func(), error) {
 	}
 
 	set := map[string]string{
-		"HOME":            home,
-		"USERPROFILE":     home,
-		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
-		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
-		"XDG_STATE_HOME":  filepath.Join(home, ".local", "state"),
-		"AppData":         filepath.Join(home, "AppData", "Roaming"),
-		"LocalAppData":    filepath.Join(home, "AppData", "Local"),
+		"HOME":               home,
+		"USERPROFILE":        home,
+		"REASONIX_TEST_HOME": home,
+		"XDG_CONFIG_HOME":    filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":     filepath.Join(home, ".cache"),
+		"XDG_STATE_HOME":     filepath.Join(home, ".local", "state"),
+		"AppData":            filepath.Join(home, "AppData", "Roaming"),
+		"LocalAppData":       filepath.Join(home, "AppData", "Local"),
 	}
 	unset := []string{
 		"REASONIX_HOME",
@@ -82,9 +84,11 @@ func IsolateUserState() (func(), error) {
 		}
 	}
 
+	restoreScope := testscope.InstallHome(home)
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			restoreScope()
 			restore()
 			_ = os.RemoveAll(home)
 		})

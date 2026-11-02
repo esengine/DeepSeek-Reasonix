@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/xml"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -151,8 +152,25 @@ func TestSessionReferenceTitleCannotBreakOutOfItsAttribute(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("errors = %v", errs)
 	}
-	open, _, _ := strings.Cut(block, "\n")
-	if !strings.HasPrefix(open, "<session ") || strings.Contains(open, `" injected="`) || strings.Count(open, `\"`) == 0 {
-		t.Fatalf("the title closed its attribute or the tag is not one line:\n%s", open)
+	token, err := xml.NewDecoder(strings.NewReader(block)).Token()
+	if err != nil {
+		t.Fatalf("invalid opening element: %v", err)
+	}
+	open, ok := token.(xml.StartElement)
+	if !ok || open.Name.Local != "session" || len(open.Attr) != 3 {
+		t.Fatalf("unexpected opening element: %+v", token)
+	}
+	var title string
+	for _, attr := range open.Attr {
+		switch attr.Name.Local {
+		case "title":
+			title = attr.Value
+		case "id", "included":
+		default:
+			t.Fatalf("injected attribute: %+v", attr)
+		}
+	}
+	if title != `evil" injected="1" x="` {
+		t.Fatalf("title did not round-trip: %q", title)
 	}
 }

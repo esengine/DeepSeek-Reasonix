@@ -276,12 +276,7 @@ func ApplyMigrations(ctx context.Context, db *sql.DB, migrations []Migration, no
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
 		return err
 	}
-	supported := 0
-	for _, migration := range migrations {
-		if migration.Version > supported {
-			supported = migration.Version
-		}
-	}
+	supported := SupportedVersion(migrations)
 	if current > supported {
 		return &FutureSchemaError{Found: current, Supported: supported}
 	}
@@ -321,6 +316,62 @@ type Inspection struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// Recorded is what a projection's own tables say it could not index. It is
+// read back, never derived from the source files: only the database knows what
+// it recorded as failed, and why.
+type Recorded struct {
+	Failed       int64     `json:"failed,omitempty"`
+	Pending      int64     `json:"pending,omitempty"`
+	LagBytes     int64     `json:"lagBytes,omitempty"`
+	CorruptLines int64     `json:"corruptLines,omitempty"`
+	Failures     []Failure `json:"failures,omitempty"`
+}
+
+// Failure is one source a projection recorded as unindexable. Health is the
+// projection's own word for the state; projections that do not classify leave
+// it empty.
+type Failure struct {
+	Path      string `json:"path"`
+	Health    string `json:"health,omitempty"`
+	LastError string `json:"lastError,omitempty"`
+}
+
+// SupportedVersion is the newest migration this build can apply. A projection
+// recording a higher version is the one Open serves as StateDegraded.
+func SupportedVersion(migrations []Migration) int {
+	supported := 0
+	for _, migration := range migrations {
+		if migration.Version > supported {
+			supported = migration.Version
+		}
+	}
+	return supported
+}
+
+// OpenReadOnly opens an existing projection for inspection. It never creates,
+// migrates, repairs, or quarantines one. mode=ro is tried first because
+// immutable=1 makes SQLite skip a live WAL, so a catalog another process holds
+// open would read as its last checkpoint; immutable=1 stays the fallback for
+// media where the shared-memory sidecar cannot be created.
+func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
+	var firstErr error
+	for _, dsn := range []string{diskFileDSN(path) + "&mode=ro", diskFileDSN(path) + "&mode=ro&immutable=1"} {
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			firstErr = err
+			continue
+		}
+		db.SetMaxOpenConns(1)
+		if err := db.PingContext(ctx); err != nil {
+			_ = db.Close()
+			firstErr = err
+			continue
+		}
+		return db, nil
+	}
+	return nil, firstErr
+}
+
 // Inspect is deliberately read-only: it never creates, migrates, repairs, or
 // quarantines a database.
 func Inspect(ctx context.Context, path string) Inspection {
@@ -335,7 +386,7 @@ func Inspect(ctx context.Context, path string) Inspection {
 	}
 	out.Exists = true
 	out.Size = info.Size()
-	db, err := sql.Open("sqlite", diskFileDSN(path)+"&mode=ro&immutable=1")
+	db, err := OpenReadOnly(ctx, path)
 	if err != nil {
 		out.Error = err.Error()
 		return out

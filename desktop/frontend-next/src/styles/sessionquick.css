@@ -30,7 +30,6 @@
 .rail .sessrow:has(> .sessedit) > :is(.sesspin-action, .sesspin-marker, .sessquick) { visibility: hidden; pointer-events: none; }
 .rail .sessrow:has(.sesspin-action):is(:hover, :focus-within)::before,
 .rail .sessrow:has(.sesspin-action):is(:hover, :focus-within) > .pip { visibility: hidden; }
-.rail .sessrow:has(.sessquick):is(:hover, :focus-within) > .unread-dot { visibility: hidden; }
 @media (hover: none) {
   .rail .sessquick { width: 24px; margin-inline-end: 6px; opacity: 1; pointer-events: auto; }
   .rail .sesspin-action { opacity: 1; pointer-events: auto; }

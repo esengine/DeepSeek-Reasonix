@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 import type { ModelEntry } from "../port/port";
 import { accountKey } from "./vendors";
-import { modelMenu } from "./modelmenu";
+import { modelLabel, modelMenu } from "./modelmenu";
+import { UNCONFIGURED_REF } from "./ConnectNote";
 
 it("groups the composer model menu by saved account order", () => {
   const models: ModelEntry[] = [
@@ -90,4 +91,19 @@ it("puts a relay's own mark on its heading and leaves its model rows to the lett
   const items = modelMenu([{ ref: "or/x", provider: "or", vendor: "openrouter.ai", model: "x", serviceMark: "openrouter" }]);
   expect(items.find((it) => it.header)?.mark).toBe("openrouter");
   expect(items.find((it) => it.value === "or/x")?.mark).toBeUndefined();
+});
+
+it("names the session's model by alias, then short form, then the id without its provider", () => {
+  const models: ModelEntry[] = [
+    { ref: "relay/grp/aliased", provider: "relay", vendor: "relay.example", model: "grp/aliased", modelAlias: " 快模型 ", modelShort: "aliased" },
+    { ref: "relay/grp/short", provider: "relay", vendor: "relay.example", model: "grp/short", modelShort: "short" },
+    { ref: "relay/plain", provider: "relay", vendor: "relay.example", model: "plain" },
+  ];
+  expect(modelLabel(models, { modelRef: "relay/grp/aliased" })).toBe("快模型");
+  expect(modelLabel(models, { modelRef: "relay/grp/short" })).toBe("short");
+  expect(modelLabel(models, { modelRef: "relay/plain" })).toBe("plain");
+  expect(modelLabel(models, { modelRef: "gone/other/model", label: "x" })).toBe("other/model");
+  expect(modelLabel(models, { label: "from-status" })).toBe("from-status");
+  expect(modelLabel(models, null)).toBe("—");
+  expect(modelLabel(models, { modelRef: UNCONFIGURED_REF })).toBe("未连接");
 });

@@ -459,7 +459,7 @@ func (c *Config) DesktopDisplayMode() string {
 func (c *Config) DesktopConversationWidth() string {
 	if c != nil {
 		switch w := strings.ToLower(strings.TrimSpace(c.Desktop.ConversationWidth)); w {
-		case "full", "full-all":
+		case "full", "full-all", "custom":
 			return w
 		}
 	}

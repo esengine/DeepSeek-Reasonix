@@ -11,13 +11,13 @@ import type { AgentPort, SessionStatus } from "../port/port";
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
-function draw() {
+function draw(onClose = vi.fn()) {
   render(<Settings
     hub={new MockHub() as never} port={new MockPort() as unknown as AgentPort}
     status={{ preset: "balanced", toolApprovalMode: "ask" } as SessionStatus}
     theme="light" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
     look={{} as never} onLook={() => {}} reloadThemes={() => {}}
-    onClose={vi.fn()} onChanged={vi.fn()} onError={() => {}} at="appearance"
+    onClose={onClose} onChanged={vi.fn()} onError={() => {}} at="appearance"
     account={null} accountUnread="" reloadAccount={() => {}}
   />);
   return document.querySelector<HTMLElement>(".prefs-sheet")!;
@@ -55,4 +55,23 @@ it("draws the arrows outward while the window is small and inward once it is enl
   expect(expand.getAttribute("title")).toBe("缩小设置窗口");
   await userEvent.click(expand);
   expect(path()).toBe(outward);
+});
+
+it("keeps search Escape and dismissal available after expanding and restoring", async () => {
+  const onClose = vi.fn();
+  const sheet = draw(onClose);
+  const expand = screen.getByRole("button", { name: "放大设置窗口" });
+  await userEvent.click(expand);
+  const search = screen.getByRole<HTMLInputElement>("textbox", { name: "搜索设置" });
+  await userEvent.type(search, "模型");
+  await userEvent.keyboard("{Escape}");
+  expect(search.value).toBe("");
+  expect(onClose).not.toHaveBeenCalled();
+  expect(sheet.hasAttribute("data-wide")).toBe(true);
+  await userEvent.click(expand);
+  expect(sheet.hasAttribute("data-wide")).toBe(false);
+  await userEvent.click(screen.getByRole("button", { name: /关闭.*Esc/ }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await userEvent.keyboard("{Escape}");
+  expect(onClose).toHaveBeenCalledTimes(2);
 });

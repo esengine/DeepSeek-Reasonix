@@ -14,7 +14,7 @@ func doctorRuntimeCommand(args []string) int {
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
 	}
-	// Process-wide gate/metrics report (no live BuildResult in CLI doctor).
+	// The CLI has no live BuildResult, so runtime verdicts stay unobserved.
 	report := boot.CollectRuntimeDoctor(nil)
 	if *jsonOut {
 		raw, err := boot.RenderRuntimeDoctorJSON(report)

@@ -49,17 +49,19 @@ type ShellSettings struct {
 func (c *Controller) ShellSettings() ShellSettings {
 	prefer, path := "auto", ""
 	var args []string
+	var confine func(string) bool
 	if cfg, err := config.Load(); err == nil {
 		if p := strings.TrimSpace(cfg.Tools.Shell.Prefer); p != "" {
 			prefer = strings.ToLower(p)
 		}
 		path = strings.TrimSpace(cfg.Tools.Shell.Path)
 		args = cfg.Tools.Shell.Args
+		confine = sandbox.BashConfine(cfg.BashMode(), cfg.Roots().SandboxDir())
 	}
-	auto := sandbox.ResolveShell("", "", nil)
+	auto := sandbox.ShellDiscovery{Confine: confine}.Resolve()
 	effective := auto
 	if prefer != "auto" || path != "" {
-		effective = sandbox.ShellDiscovery{Prefer: prefer, Path: path, Args: args}.Resolve()
+		effective = sandbox.ShellDiscovery{Prefer: prefer, Path: path, Args: args, Confine: confine}.Resolve()
 	}
 	out := ShellSettings{
 		Prefer:    prefer,

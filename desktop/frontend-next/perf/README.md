@@ -39,9 +39,12 @@ node perf/rail.mjs       # 左栏会话树：2×8 / 10×50 / 20×200 / 40×500 �
 node perf/profile.mjs    # CPU 采样，按自耗时列热点（流式那一段）
 node perf/switchprof.mjs # CPU 采样，量点开一份长会话的那一下
 node perf/panes.mjs      # 并行窗格的代价：两个会话同时流式
+node perf/rail-toggle-panes.mjs # Rail-fold frame cost with 1/3/6 panes; existing-pane scroll retention and background-output follow
 node perf/verify.mjs     # 行为验证：跟随、块的装卸、切页往返、大会话树
 node perf/panels.mjs     # 两侧栏：收起补间、拖动改宽、上下限、窄屏退场
 node perf/look.mjs       # 外观验证：字号、界面缩放、自定义字体、壁纸上传与调节（含焦点）
+node perf/measure.mjs    # Custom conversation percentage, preset retention, narrow composer controls and populated phone layout
+node perf/theme-schedule.mjs # Scheduled appearance: daily boundaries, midnight, reload/resume, modes, active packs and DST; THEME_SCHEDULE_SHOTS writes wide/phone light/dark screenshots
 node perf/pick.mjs       # 补全菜单：/ 和 @ 的选中态，深浅两色下各走一遍
 node perf/models.mjs     # 连接面板：网关报出一百多个模型时，这一屏还能不能用
 node perf/side.mjs       # 右栏：端点自己写的一句话有多长，都不该改变栏宽
@@ -49,6 +52,7 @@ node perf/queue.mjs      # 待送达：正文读不回来时，「改」不许�
 node perf/reask.mjs      # 改写框：没有换行的长段落，框要长到让人读得到全文，宽屏和手机宽度各一遍
 node perf/composer-reflow.mjs # Draft and skill-chip wrapping during column transitions, interface zoom and native scrollbar gutters
 node perf/composer-toolbar-row.mjs # The buttons under the composer stay on one row from 900 to 400 px of conversation width, with the widest realistic labels
+node perf/workbench-save.mjs # File toolbar sizing, Save contrast and edit/save/read states: light/dark × Chinese/English × desktop/browser × wide/phone
 node perf/onboarding.mjs # First-run setup: zoom-aware card bounds, resize, scrolling, focus and completion
 node perf/running.mjs    # 执行过程：在跑的步骤自己在动、收起后由标题接着动，步骤行没有空栏
 node perf/lang.mjs       # 双语验证：英文启动、界面译文到位、切回中文
@@ -72,6 +76,7 @@ node perf/focus.mjs      # 专注的守卫：拿走外围之后，退出时世�
 node perf/tooltip.mjs    # 控件提示的守卫：文字不溢出提示框、不在半透明祖先之下、对比度达 AA（深浅×中英×宽窄）
 node perf/navhint.mjs   # Icon-rail hover hints: drawn, inside the window, clipped by no ancestor, painted over by nothing (light/dark × on/collapsed)
 node perf/runningtool.mjs # 还没输出的运行中调用：行能展开、写明仍在运行与已运行多久、写出命令自带的超时
+node perf/tool-output-clip.mjs # Clipped results: no painted shadows; expand/collapse, horizontal scroll, full copy and reopen state (light/dark × wide/phone); TOOL_OUTPUT_SHOTS saves screenshots
 node perf/gutterhit.mjs # 分栏拖拽手柄不压在相邻滚动条上：滚动条拇指处按下命中的不是手柄，握把仍可拖开收起的栏
 node perf/dock.mjs      # 停靠的浏览器列从 pane 顶部起、与导航行并排，取消停靠后行归还（浅/深 × 宽/窄 × 首开/重载）
 node perf/signals.mjs   # 运行分析的信号轨说明：它是什么、为什么标记不能拖（浅/深 × 宽/手机）
@@ -82,8 +87,17 @@ node perf/crumb.mjs # 标题栏里会话标题紧跟项目名，长名字也不�
 node perf/hoverradius.mjs # 输入框底行的按钮悬停时圆角和底色一致（浅/深）
 node perf/jump-ends.mjs # 回到顶部/跳到最新按钮一次点击直达两端（中间有展开块也一样）
 node perf/sessionrows.mjs # 会话行样式：34px、1px 紧凑间距、单行省略；本机/远程、悬浮/焦点、浅/深、窄/宽
+node perf/recent-sessions.mjs # Recent: global history paging, finished-session discovery and project location (light/dark × wide/390px)
 node perf/start.mjs     # 经工作台标签/边缘把手打开工作台先出入口页（文件/改动/浏览器），不替人开浏览器；标题栏 Browser 按钮仍直达浏览器（浅/深 × 宽/窄）
 ```
+
+`theme-schedule.mjs` is a manual smoke, not a default guard. For real native
+effects, build the normal Studio page and host, then run `pnpm theme-live` from
+`desktop/electron` with an isolated `REASONIX_HOME`.
+
+Run it again with the same home and `REASONIX_THEME_RESTART=1` to check restart
+tint and current-clock reconciliation. It reads actual `nativeTheme.themeSource`
+and `BrowserWindow` background effects, including rejected IPC reporters.
 
 `lang.mjs` 从仓库外跑时用 `PERF_SRC` 指向 `src/`（它要读固件源码来决定
 哪些中文不必翻）。`PERF_URL` 可以指向别的地址；`bench.mjs` 和 `scale.mjs` 另收 `PERF_SCALES`、
@@ -98,6 +112,13 @@ node perf/start.mjs     # 经工作台标签/边缘把手打开工作台先出�
   1440 → 960 → 640 → 420 → 1440px at each zoom.
 - The native-scrollbar case requires a space-consuming gutter, not an exact
   pixel width; overlay-scrollbar browsers explicitly skip that case.
+- `?panes=N` seeds the mock hub's shared runtime/session book. Tree rows and open
+  panes must agree on both transcript path and runtime ID.
+- `rail-toggle-panes.mjs` selects two existing sessions by path, verifies that the
+  original transcript DOM node is hidden and restored, and checks scroll retention
+  while new output arrives in the background.
+- The same guard checks that a neighbouring pane following the latest output
+  continues to do so. `RAIL_TOGGLE_SHOTS` saves its before/hidden/returned views.
 
 ## 判据
 

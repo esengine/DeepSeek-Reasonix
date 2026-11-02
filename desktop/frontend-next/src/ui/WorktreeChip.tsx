@@ -5,6 +5,7 @@ import type { WorkspaceInfo, WorktreeSelection, WorktreeSources } from "../port/
 import type { AgentPort, WorkspaceGit } from "../port/port";
 import { useWorkspaceBranches } from "./useWorkspaceBranches";
 import { StudioIcon } from "./StudioIcon";
+import { workspaceDirectoryDescription } from "./workspaceDirectory";
 import { WorkspacePath, WorkspaceBranchName, compactWorkspaceValue, workspaceName } from "./WorkspacePath";
 import { listenAction } from "./listen";
 import { beside, pinToViewport, useFollow, zoom } from "./place";
@@ -16,6 +17,7 @@ interface Props {
   onSwitched?: (git: WorkspaceGit) => void;
   onError: (error: unknown) => void;
   sources: WorktreeSources;
+  workspace: WorkspaceInfo | null;
   canCreate: boolean;
   selection: WorktreeSelection | null;
   branch: string;
@@ -25,11 +27,10 @@ interface Props {
   refresh: () => Promise<WorktreeSources>;
 }
 
-export function WorktreeChip({ sources, canCreate, selection, branch, busy, changeCount, onSelect, refresh, port, onChanged, onSwitched, onError }: Props) {
+export function WorktreeChip({ sources, workspace, canCreate, selection, branch, busy, changeCount, onSelect, refresh, port, onChanged, onSwitched, onError }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [sourceError, setSourceError] = useState(false);
-  const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -43,16 +44,14 @@ export function WorktreeChip({ sources, canCreate, selection, branch, busy, chan
   const isolated = workspace?.current === sources.sourceRoot && !!workspace.isolated;
   const chosen = sources.sources.find((source) => source.ref === selection?.ref);
   const label = chosen?.name ?? selection?.ref ?? branch;
+  const creationDescription = t("发送消息时创建独立工作树，基于所选分支的已提交版本，不包含未提交修改；端口、数据库等运行资源仍可能共享。");
+  const directoryDescription = selection ? creationDescription : workspaceDirectoryDescription(isolated);
   const scope = useRef({ port, root: sources.sourceRoot });
   useEffect(() => {
-    let live = true;
     if (scope.current.port !== port || scope.current.root !== sources.sourceRoot) {
       scope.current = { port, root: sources.sourceRoot };
       returnFocus.current = false; setOpen(false); setQuery("");
     }
-    setWorkspace(null);
-    void port.workspaces().then((value) => { if (live) setWorkspace(value); }).catch(() => {});
-    return () => { live = false; };
   }, [port, sources.sourceRoot]);
   const put = useCallback(() => {
     if (!trigger.current || !panel.current) return;
@@ -96,13 +95,16 @@ export function WorktreeChip({ sources, canCreate, selection, branch, busy, chan
   const failed = selection ? sourceError : reading === "failed";
   const loading = !selection && (reading === "idle" || reading === "loading") && locals.length === 0;
   return <div className="studio-branch-pop">
-    <button ref={trigger} type="button" className="mode plain studio-branch worktree-trigger" data-on={selection || isolated ? "" : undefined} data-pending={moving !== null ? "" : undefined} data-action="workspace.configure" aria-label={t("配置工作目录")} title={selection ? label : branch} aria-haspopup="dialog" aria-expanded={open} disabled={busy || moving !== null} onClick={show}>
-      <StudioIcon name="branch"/><span className="lb">{moving ? t("正在切换到 {branch}…", { branch: moving }) : selection || isolated ? t("独立 worktree · {branch}", { branch: compactWorkspaceValue(label) }) : t("当前目录 · {branch}", { branch: compactWorkspaceValue(branch) })}</span>{changeCount > 0 && <small>{t("{n} 个变更", { n: changeCount })}</small>}<StudioIcon name="down"/>
+    <button ref={trigger} type="button" className="mode plain studio-branch worktree-trigger" data-on={selection || isolated ? "" : undefined} data-pending={moving !== null ? "" : undefined} data-action="workspace.configure" aria-label={t("配置工作目录")} title={`${directoryDescription}\n${selection ? label : branch}\n${sources.sourceRoot}`} aria-haspopup="dialog" aria-expanded={open} disabled={busy || moving !== null} onClick={show}>
+      <StudioIcon name="branch"/><span className="lb">{moving ? t("正在切换到 {branch}…", { branch: moving }) : selection || isolated ? t("独立工作树 · {branch}", { branch: compactWorkspaceValue(label) }) : compactWorkspaceValue(branch)}</span>{changeCount > 0 && <small>{t("{n} 个变更", { n: changeCount })}</small>}<StudioIcon name="down"/>
     </button>
     {open && createPortal(<div ref={panel} className="workspace-palette" role="dialog" aria-labelledby={title}>
       <div className="workspace-palette-heading"><span id={title}>{t("配置工作目录")}</span><button data-action="workspace.configure" className="workspace-palette-close" aria-label={t("关闭工作目录配置")} onClick={close}><StudioIcon name="close"/></button></div>
-      <div className="workspace-palette-identity"><StudioIcon name="folder"/><strong title={sources.sourceRoot}>{workspaceName(sources.sourceRoot)}</strong><span>{t(selection ? "新建 worktree" : isolated ? "独立 worktree" : "当前目录")}</span></div>
-      {canCreate && <div className="worktree-modes"><button data-action="workspace.worktree-toggle" aria-pressed={!selection} disabled={busy || moving !== null} onClick={() => { onSelect(null); setQuery(""); }}><StudioIcon name="folder"/>{t("使用当前目录")}</button><button data-action="workspace.worktree-toggle" aria-pressed={!!selection} disabled={busy || moving !== null || !sources.available} onClick={selectWorktree}><StudioIcon name="branch"/>{t("新建 worktree")}</button></div>}
+      <div className="workspace-palette-identity"><StudioIcon name="folder"/><strong title={sources.sourceRoot}>{workspaceName(sources.sourceRoot)}</strong>{(selection || isolated) && <span title={directoryDescription}>{t("独立工作树")}</span>}</div>
+      {canCreate && <div className="worktree-modes">
+        <button data-action="workspace.worktree-toggle" title={workspaceDirectoryDescription(false)} aria-pressed={!selection} disabled={busy || moving !== null} onClick={() => { onSelect(null); setQuery(""); }}><StudioIcon name="folder"/>{t("当前目录")}{!selection && <StudioIcon name="check"/>}</button>
+        <button data-action="workspace.worktree-toggle" title={creationDescription} aria-pressed={!!selection} disabled={busy || moving !== null || !sources.available} onClick={selectWorktree}><StudioIcon name="branch"/>{t("独立工作树")}{selection && <StudioIcon name="check"/>}</button>
+      </div>}
       {selection && <div className="workspace-palette-base"><span>{t("起始分支")}</span><strong title={label}>{compactWorkspaceValue(label)}</strong><small>{t("任务分支自动创建")}</small></div>}
       <div className="workspace-palette-search"><StudioIcon name="search"/><input data-action-change="workspace.source-search" data-action-keydown="workspace.source-navigate" ref={search} type="search" aria-label={t("搜索分支")} placeholder={t(selection ? "搜索起始分支…" : "搜索本地分支…")} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
         if (event.key === "ArrowDown") { event.preventDefault(); panel.current?.querySelector<HTMLElement>('[role="option"]:not(:disabled)')?.focus(); }

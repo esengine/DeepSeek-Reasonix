@@ -22,8 +22,10 @@ var capabilityContracts = map[string]reflect.Type{
 	"RunBudget":         reflect.TypeFor[RunBudgetSink](),
 	"SubagentHandoff":   reflect.TypeFor[SubagentHandoffSink](),
 	"TurnCompletion":    reflect.TypeFor[TurnCompletionSink](),
+	"UsageQuote":        reflect.TypeFor[UsageQuoter](),
 	"VerificationDrift": reflect.TypeFor[VerificationContractDriftSink](),
 	"WorkspaceMutation": reflect.TypeFor[WorkspaceMutationSink](),
+	"UsageScope":        reflect.TypeFor[UsageScopeSource](),
 }
 
 // CapabilityNames lists every optional capability in stable order.

@@ -1,0 +1,26 @@
+[
+  {
+    "package": "reasonix/internal/runtime/agent",
+    "tests": [
+      "TestCarriedProofInvalidatesPermissionChange",
+      "TestCarriedProofFileStateCompatibility",
+      "TestCarriedProofFileStateCompatibility/legacy_file",
+      "TestCarriedProofFileStateCompatibility/legacy_absent",
+      "TestCarriedProofFileStateCompatibility/future",
+      "TestCarriedProofFileStateCompatibility/current_file",
+      "TestCarriedProofFileStateCompatibility/current_absent",
+      "TestCarriedProofRejectsDirectoryState",
+      "TestCarriedProofStandsOnlyForUnchangedContent",
+      "TestCarriedProofSeesADeletion"
+    ]
+  },
+  {
+    "package": "reasonix/internal/assembly/boot",
+    "tests": [
+      "TestEffectCarriedProofTracksFileState",
+      "TestEffectCarriedProofTracksFileState/unchanged",
+      "TestEffectCarriedProofTracksFileState/content",
+      "TestEffectCarriedProofTracksFileState/mode"
+    ]
+  }
+]

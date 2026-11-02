@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
+	"reasonix/internal/state/store"
 )
 
 func TestSessionMachineListIsStableAndRedacted(t *testing.T) {
@@ -191,5 +192,56 @@ func saveMachineTestSession(t *testing.T, dir, id string, updatedAt time.Time) {
 	}
 	if got, _, _ := sessionstore.LoadBranchMeta(path); !got.UpdatedAt.Equal(updatedAt) {
 		t.Fatalf("saved meta says updated %v, the fixture asked for %v: ordering would follow the write clock", got.UpdatedAt, updatedAt)
+	}
+}
+
+// installUnprovableMachineLease leaves a readable foreign sidecar and a lease
+// lock the probe cannot open, so ownership is neither provably held nor free.
+func installUnprovableMachineLease(t *testing.T, sessionPath string) {
+	t.Helper()
+	if err := sessionstore.SaveSessionLeaseInfo(sessionPath, sessionstore.SessionLeaseInfo{
+		SessionPath: sessionPath,
+		WriterID:    "other-host-1234-deadbeef",
+		PID:         os.Getpid() + 1,
+		AcquiredAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save foreign lease info: %v", err)
+	}
+	if err := os.Mkdir(store.SessionLeaseLock(sessionstore.CanonicalSessionPath(sessionPath)), 0o755); err != nil {
+		t.Fatalf("make unopenable lease lock: %v", err)
+	}
+}
+
+// An unprovable lease supports no state claim: neither active (a holder was
+// never observed) nor idle/interrupted/recovered (nobody proved it free).
+func TestSessionMachineSaysUnknownWhenLeaseOwnershipIsUnprovable(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
+	dir := testenv.TempDir(t)
+	saveMachineTestSession(t, dir, "unknown", time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC))
+	installUnprovableMachineLease(t, filepath.Join(dir, "unknown.jsonl"))
+
+	var listOut bytes.Buffer
+	if code := runSessionCommand([]string{"list", "--json", "--dir", dir}, &listOut); code != 0 {
+		t.Fatalf("list exit code = %d, output = %s", code, listOut.String())
+	}
+	var list machineSessionList
+	if err := json.Unmarshal(listOut.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Sessions) != 1 || list.Sessions[0].State != machineStateUnknown {
+		t.Fatalf("sessions = %+v, want one session in state %q", list.Sessions, machineStateUnknown)
+	}
+
+	var showOut bytes.Buffer
+	args := []string{"status", "--json", machineSessionIDWithKey("unknown", identityKey), "--dir", dir}
+	if code := runSessionCommand(args, &showOut); code != 0 {
+		t.Fatalf("status exit code = %d, output = %s", code, showOut.String())
+	}
+	var show machineSessionShow
+	if err := json.Unmarshal(showOut.Bytes(), &show); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if show.Session.State != machineStateUnknown {
+		t.Fatalf("status = %+v, want state %q", show.Session, machineStateUnknown)
 	}
 }

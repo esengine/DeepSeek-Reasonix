@@ -10,10 +10,16 @@ export interface FeedbackDraft {
 
 const EMPTY: FeedbackDraft = { category: "bug", body: "", contact: "", shots: [] };
 
-let held: FeedbackDraft = EMPTY;
+const CONTACT_KEY = "rx-feedback-contact";
+let held: FeedbackDraft | null = null;
 
 export function heldDraft(): FeedbackDraft {
-  return held;
+  if (held) return held;
+  try {
+    return { ...EMPTY, contact: localStorage.getItem(CONTACT_KEY) ?? "" };
+  } catch {
+    return EMPTY;
+  }
 }
 
 export function holdDraft(next: FeedbackDraft): void {
@@ -21,5 +27,13 @@ export function holdDraft(next: FeedbackDraft): void {
 }
 
 export function dropDraft(): void {
-  held = EMPTY;
+  held = null;
+}
+
+export function rememberContact(contact: string): void {
+  try {
+    localStorage.setItem(CONTACT_KEY, contact);
+  } catch {
+    // Unavailable storage must not turn an accepted report into a failed send.
+  }
 }

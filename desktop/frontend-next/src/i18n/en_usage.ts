@@ -31,6 +31,14 @@ export const EN_USAGE: Record<string, string> = {
   "美元 USD": "US dollar (USD)",
   "无法读取币种设置。": "Could not read the currency setting.",
   "用量与成本": "Usage & cost",
+  "上传量": "Upload volume",
+  "发给模型服务商的请求内容大小（不含连接本身的开销，也不含下载）。每次请求都会带上完整的对话，所以它取决于上下文有多长、请求有多少次，缓存命中只省费用、不省流量。":
+    "The size of the request bodies sent to model providers (without the connection's own overhead, and without downloads). Every request carries the whole conversation, so it depends on how long the context is and how many requests are made; cache hits save cost, not bandwidth.",
+  "还没有记录：从这个版本起开始统计。": "Nothing recorded yet: counting starts with this version.",
+  "今天上传": "Uploaded today",
+  "近 {n} 天上传": "Uploaded in the last {n} days",
+  "{size}，{n} 次请求，平均每次 {avg}": "{size} in {n} requests, {avg} each on average",
+  "{size}（{share}）": "{size} ({share})",
   "本机记录的 token 用量与花费，仅保存在这台机器上，不会上传。命中缓存的输入按缓存价计费，因此命中率直接影响费用。":
     "Token usage and cost recorded on this machine only; nothing is uploaded. Input that hits the cache is billed at the cache rate, so the hit rate drives the bill.",
   "正在读取记录…": "Reading the records…",
@@ -62,6 +70,7 @@ export const EN_USAGE: Record<string, string> = {
   "花费": "Spend",
   "含估算": "includes estimates",
   "未定价调用未计入": "unpriced calls not included",
+  "其中 {n} 笔未定价": "{n} calls unpriced",
   "{day} 起 · {n} 天有记录": "from {day} · {n} days recorded",
   "这段时间 {tok} tokens 里有 {rate}% 命中前缀缓存 —— 命中的部分按缓存价计费，比未命中便宜一个量级。": "{rate}% of these {tok} tokens hit the prefix cache — a hit bills at the cache rate, an order of magnitude under a miss.",
   "命中 {a} · 未命中 {b}": "{a} hit · {b} missed",

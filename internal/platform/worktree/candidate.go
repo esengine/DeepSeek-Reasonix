@@ -94,16 +94,16 @@ func CreateCandidate(ctx context.Context, snap Snapshot, managedRoot string) (Ca
 	// --no-checkout, then populate through gitcmd inside the new worktree: a
 	// checkout during add runs in a child whose gitdir is the new worktree,
 	// where the reset's driver listing sees an includeIf keyed on that gitdir.
-	if _, stderr, err := runGit(ctx, source, "worktree", "add", "--no-checkout", "--detach", root, snap.Commit); err != nil {
+	if _, stderr, err := runWorktree(ctx, source, "add", "--no-checkout", "--detach", root, snap.Commit); err != nil {
 		return Candidate{}, fmt.Errorf("create candidate worktree: %w%s", err, stderrSuffix(stderr))
 	}
 	repo, err := gitcmd.Open(ctx, root)
 	if err != nil {
-		_, _, _ = runGit(ctx, source, "worktree", "remove", "--force", root)
+		_, _, _ = runWorktree(ctx, source, "remove", "--force", root)
 		return Candidate{}, fmt.Errorf("resolve candidate worktree: %w", err)
 	}
 	if _, stderr, err := runGit(ctx, repo, "reset", "--hard", snap.Commit); err != nil {
-		_, _, _ = runGit(ctx, source, "worktree", "remove", "--force", root)
+		_, _, _ = runWorktree(ctx, source, "remove", "--force", root)
 		return Candidate{}, fmt.Errorf("populate candidate worktree: %w%s", err, stderrSuffix(stderr))
 	}
 	c := Candidate{WorkspaceRoot: root, WorktreeRoot: root, Repo: repo}
@@ -169,15 +169,15 @@ func RemoveCandidate(ctx context.Context, snap Snapshot, c Candidate) error {
 	if err != nil {
 		return err
 	}
-	if _, stderr, err := runGit(ctx, source, "worktree", "remove", "--force", c.WorktreeRoot); err != nil {
+	if _, stderr, err := runWorktree(ctx, source, "remove", "--force", c.WorktreeRoot); err != nil {
 		return fmt.Errorf("remove candidate worktree: %w%s", err, stderrSuffix(stderr))
 	}
 	_ = os.Remove(filepath.Dir(c.WorktreeRoot))
 	return nil
 }
 
-// workingTree writes repo's working state as a tree through a private copy of
-// its index, so only changed files are hashed and the real index is untouched.
+// workingTree hashes actual workspace bytes through a rebuilt private index.
+// Git's cached stat identity is not a content version; the real index is untouched.
 func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
 	indexPath, _, err := runGit(ctx, repo, "rev-parse", "--git-path", "index")
 	if err != nil {
@@ -199,6 +199,29 @@ func workingTree(ctx context.Context, repo gitcmd.Repo) (string, error) {
 	env := []string{"GIT_INDEX_FILE=" + private}
 	stageCtx, cancel := context.WithTimeout(ctx, gitWorktreeAddTimeout)
 	defer cancel()
+	if _, err := os.Stat(private); err == nil {
+		unmerged, stderr, err := runGitEnv(stageCtx, repo, env, "ls-files", "--unmerged", "-z")
+		if err != nil {
+			return "", fmt.Errorf("read private index: %w%s", err, stderrSuffix(stderr))
+		}
+		if unmerged != "" {
+			if err := repo.StageAll(stageCtx, env...); err != nil {
+				return "", fmt.Errorf("stage conflicted workspace snapshot: %w", err)
+			}
+		}
+		indexTree, stderr, err := runGitEnv(stageCtx, repo, env, "write-tree")
+		if err != nil {
+			return "", fmt.Errorf("record private index: %w%s", err, stderrSuffix(stderr))
+		}
+		if err := os.Remove(private); err != nil {
+			return "", err
+		}
+		if _, stderr, err := runGitEnv(stageCtx, repo, env, "read-tree", strings.TrimSpace(indexTree)); err != nil {
+			return "", fmt.Errorf("rebuild private index: %w%s", err, stderrSuffix(stderr))
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
 	if err := repo.StageAll(stageCtx, env...); err != nil {
 		return "", fmt.Errorf("stage workspace snapshot: %w", err)
 	}
@@ -240,9 +263,8 @@ func runGitEnv(parent context.Context, repo gitcmd.Repo, env []string, args ...s
 	return outBuf.String(), strings.TrimSpace(errBuf.String()), err
 }
 
-// copyFile copies an index keeping its modification time: git re-hashes an
-// entry written in the index's own second only while the index file's mtime
-// says so, and a fresh mtime would hide a same-size edit made in that second.
+// copyFile preserves the index bytes and timestamp. workingTree rebuilds its
+// cached entries before staging the current workspace content.
 func copyFile(from, to string) error {
 	in, err := os.Open(from)
 	if err != nil {

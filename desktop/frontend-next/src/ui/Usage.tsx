@@ -393,7 +393,12 @@ export function Usage({ port }: { port: AgentPort }) {
           <div className="uhero-v">{moneyList(report.cost)}</div>
           {pricedFrom && <span className="uhero-scope">{t("{day} 起 · {n} 天有记录", { day: pricedFrom.slice(5), n: priced.length })}</span>}
           {report.costEstimated && <span className="uhero-scope">{t("含估算")}</span>}
-          {report.costIncomplete && <span className="uhero-scope">{t("未定价调用未计入")}</span>}
+          {report.costIncomplete && (
+            <span className="uhero-scope">
+              {t("未定价调用未计入")}
+              {report.unpricedCalls ? ` · ${t("其中 {n} 笔未定价", { n: report.unpricedCalls })}` : null}
+            </span>
+          )}
         </div>
         {report.estimateCost?.length ? (
           <div className="uhero-est">

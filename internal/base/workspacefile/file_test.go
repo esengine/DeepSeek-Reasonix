@@ -87,3 +87,23 @@ func TestGrantedRootAndCancellation(t *testing.T) {
 		t.Fatalf("canceled read = %v", err)
 	}
 }
+
+func TestOfficeDocumentsPreviewAsBinaryWithinTheirLimit(t *testing.T) {
+	root := t.TempDir()
+	zip := []byte("PK\x03\x04\x00binary office package")
+	s := Service{Primary: root}
+	for _, name := range []string{"报告.docx", "budget.XLSX"} {
+		if err := os.WriteFile(filepath.Join(root, name), zip, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, info, err := s.Content(context.Background(), Ref{Path: name})
+		if err != nil || info.Kind != "office" || info.Limit != OfficeLimit || string(got) != string(zip) {
+			t.Fatalf("%s: kind=%q limit=%d err=%v", name, info.Kind, info.Limit, err)
+		}
+	}
+	for _, name := range []string{"old.doc", "old.xls", "slides.pptx", "old.ppt"} {
+		if kind, _ := Format(name); kind != "unsupported" {
+			t.Fatalf("%s: kind %q, want unsupported", name, kind)
+		}
+	}
+}

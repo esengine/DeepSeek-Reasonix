@@ -12,18 +12,18 @@ function draw(fresh = true, branch = "main", isolated = false) {
   const readSources = port.worktreeSources.bind(port);
   vi.spyOn(port, "worktreeSources").mockImplementation(async () => ({ ...await readSources(), sourceRoot: "/work/demo" }));
   vi.spyOn(port, "status").mockResolvedValue({ workspaceRoot: "~/projects/DeepSeek-Reasonix" } as SessionStatus);
-  vi.spyOn(port, "workspaces").mockResolvedValue({ current: "/work/demo", canSwitch: true, canIsolate: true, recents: [], isolated });
+  const workspace = { current: "/work/demo", canSwitch: true, canIsolate: true, recents: [], isolated };
   const isolate = vi.spyOn(port, "isolateWorkspace").mockResolvedValue();
   const submit = vi.fn(async () => true);
   const error = vi.fn();
   const status = { workspaceRoot: "/work/demo", modelRef: "deepseek/deepseek-v4-pro", preset: "balanced", toolApprovalMode: "ask", plan: false } as SessionStatus;
-  render(<Composer port={port} status={status} running={false} fresh={fresh} git={{ repo: true, name: "demo", branch, detached: false, added: 0, removed: 0, untracked: 0 }} onSubmit={submit} onChanged={vi.fn()} onTreeChanged={vi.fn()} onError={error} />);
+  render(<Composer port={port} workspace={workspace} status={status} running={false} fresh={fresh} git={{ repo: true, name: "demo", branch, detached: false, added: 0, removed: 0, untracked: 0 }} onSubmit={submit} onChanged={vi.fn()} onTreeChanged={vi.fn()} onError={error} />);
   return { port, isolate, submit, error };
 }
 
 async function choose() {
   fireEvent.click(await screen.findByRole("button", { name: "配置工作目录" }));
-  fireEvent.click(await screen.findByRole("button", { name: "新建 worktree" }));
+  fireEvent.click(await screen.findByRole("button", { name: "独立工作树" }));
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "studio" } });
   fireEvent.click(screen.getByRole("option", { name: /studio/ }));
   fireEvent.keyDown(window, { key: "Escape" });
@@ -33,8 +33,14 @@ async function choose() {
 it("selects a source without switching the checkout and creates only when sending", async () => {
   const { port, isolate, submit } = draw();
   const switchBranch = vi.spyOn(port, "switchBranch");
-  expect((await screen.findByRole("button", { name: "配置工作目录" })).closest(".turntools")).not.toBeNull();
+  const trigger = await screen.findByRole("button", { name: "配置工作目录" });
+  expect(trigger.closest(".turntools")).not.toBeNull();
+  expect(trigger.textContent).toBe("main");
+  expect(trigger.title).toContain("直接在已打开的项目文件夹中工作");
+  expect(trigger.title).toContain("/work/demo");
   await choose();
+  expect(trigger.textContent).toContain("独立工作树 · studio");
+  expect(trigger.title).toContain("发送消息时创建独立工作树");
   expect(isolate).not.toHaveBeenCalled();
   expect(switchBranch).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -73,7 +79,7 @@ it("keeps workspace configuration and branch switching in existing conversations
   expect(trigger.closest(".turntools")).not.toBeNull();
   fireEvent.click(trigger);
   expect(screen.getByLabelText("查看完整路径")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "新建 worktree" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "独立工作树" })).toBeNull();
   fireEvent.click(await screen.findByRole("option", { name: /studio/ }));
   await waitFor(() => expect(move).toHaveBeenCalledWith("studio"));
 });
@@ -82,13 +88,15 @@ it("shows a completed worktree's actual identity, full branch and path", async (
   const branch = "reasonix/delivery-20261017-170557-387acbfc21";
   draw(false, branch, true);
   const trigger = await screen.findByRole("button", { name: "配置工作目录" });
-  await waitFor(() => expect(trigger.textContent).toContain("独立 worktree"));
-  expect(trigger.title).toBe(branch);
+  await waitFor(() => expect(trigger.textContent).toContain("独立工作树"));
+  expect(trigger.title).toContain(branch);
+  expect(trigger.title).toContain("在单独的 Git 工作目录中修改代码；端口、数据库等运行资源仍可能共享。");
+  expect(trigger.title).toContain("/work/demo");
   fireEvent.click(trigger);
   expect(screen.getByLabelText("查看完整路径")).toBeTruthy();
   expect(screen.getByRole("searchbox", { name: "搜索分支" })).toBeTruthy();
   expect(screen.getByText("选择后立即切换，同目录会话也会受影响")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "新建 worktree" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "独立工作树" })).toBeNull();
 });
 
 it("shows real preparation state and restores the draft only after confirmed cancellation", async () => {
@@ -131,8 +139,36 @@ it("offers local branch switching while worktree mode is off", async () => {
 it("defaults a new worktree to the actual branch after an earlier branch switch", async () => {
   draw(true, "studio");
   fireEvent.click(await screen.findByRole("button", { name: "配置工作目录" }));
-  fireEvent.click(await screen.findByRole("button", { name: "新建 worktree" }));
+  fireEvent.click(await screen.findByRole("button", { name: "独立工作树" }));
   expect(screen.getByRole("option", { name: "studio" }).getAttribute("aria-selected")).toBe("true");
+});
+
+it("keeps both directory choices in the picker without adding a default badge or creating a checkout", async () => {
+  const { isolate, port } = draw();
+  const move = vi.spyOn(port, "switchBranch");
+  const trigger = await screen.findByRole("button", { name: "配置工作目录" });
+  fireEvent.click(trigger);
+  const toggle = screen.getByRole("button", { name: "独立工作树" });
+  const current = screen.getByRole("button", { name: "当前目录" });
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(current.getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByText("项目目录")).toBeNull();
+  expect(document.querySelector(".workspace-palette-identity > span")).toBeNull();
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expect(current.getAttribute("aria-pressed")).toBe("false");
+  expect(trigger.textContent).toBe("独立工作树 · main");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(current);
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(current.getAttribute("aria-pressed")).toBe("true");
+  expect(trigger.textContent).toBe("main");
+  expect(trigger.title).toContain("直接在已打开的项目文件夹中工作");
+  expect(screen.queryByText("项目目录")).toBeNull();
+  expect(document.querySelector(".workspace-palette-identity > span")).toBeNull();
+  expect(isolate).not.toHaveBeenCalled();
+  expect(move).not.toHaveBeenCalled();
 });
 
 it("searches branches immediately and prevents switching an occupied branch", async () => {

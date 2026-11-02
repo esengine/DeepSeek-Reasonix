@@ -25,12 +25,13 @@ type holdState struct {
 // callHold is one writing call's share of inFlight. It stays reachable from the
 // call's context so a question that call asks can suspend it.
 type callHold struct {
-	owner      *Owner
-	paths      []string
-	live       bool
-	done       bool
-	retained   bool
-	generation uint64
+	owner            *Owner
+	paths            []string
+	live             bool
+	done             bool
+	retained         bool
+	generation       uint64
+	observationEpoch uint64
 }
 
 type callKey struct{}
@@ -96,11 +97,14 @@ func (o *Owner) Yield(ctx context.Context) Resume {
 		o.holds.parkedMark = mark
 	}
 	o.holds.yielders++
-	var suspended *callHold
-	if h, _ := ctx.Value(callKey{}).(*callHold); h != nil && h.owner == o && h.live {
-		h.live = false
-		o.holds.inFlight--
-		suspended = h
+	var suspended, observing *callHold
+	if h, _ := ctx.Value(callKey{}).(*callHold); h != nil && h.owner == o && !h.done && h.generation == generation {
+		observing = h
+		if h.live {
+			h.live = false
+			o.holds.inFlight--
+			suspended = h
+		}
 	}
 	var release func()
 	if o.acquired && !o.acquiring && o.holds.inFlight == 0 {
@@ -114,7 +118,7 @@ func (o *Owner) Yield(ctx context.Context) Resume {
 	var contention Contention
 	var resumeErr error
 	return func(ctx context.Context) (Contention, error) {
-		once.Do(func() { contention, resumeErr = o.resume(ctx, suspended, generation) })
+		once.Do(func() { contention, resumeErr = o.resume(ctx, suspended, observing, generation) })
 		return contention, resumeErr
 	}
 }
@@ -132,7 +136,7 @@ func (o *Owner) parkLocked() func() {
 	return o.releaseLocked(false)
 }
 
-func (o *Owner) resume(ctx context.Context, suspended *callHold, generation uint64) (Contention, error) {
+func (o *Owner) resume(ctx context.Context, suspended, observing *callHold, generation uint64) (Contention, error) {
 	o.mu.Lock()
 	if generation != o.holds.generation || o.holds.yielders == 0 {
 		o.mu.Unlock()
@@ -141,6 +145,10 @@ func (o *Owner) resume(ctx context.Context, suspended *callHold, generation uint
 	o.holds.yielders--
 	last := o.holds.yielders == 0 && o.holds.parkedSet
 	parked, mark := o.holds.parked, o.holds.parkedMark
+	var observedPaths []string
+	if observing != nil {
+		observedPaths = observing.paths
+	}
 	if last {
 		o.holds.parked, o.holds.parkedSet = nil, false
 	}
@@ -173,6 +181,20 @@ func (o *Owner) resume(ctx context.Context, suspended *callHold, generation uint
 	var err error
 	if suspended != nil {
 		err = o.rehold(ctx, suspended)
+	}
+	if observing != nil && err == nil {
+		if !last {
+			contention = o.contendersSince(mark, observedPaths)
+		}
+		affected := contention.Unknown
+		for _, contender := range contention.Contenders {
+			affected = affected || pathsOverlap(observedPaths, contender.Paths)
+		}
+		if affected {
+			o.mu.Lock()
+			observing.observationEpoch++
+			o.mu.Unlock()
+		}
 	}
 	return contention, errors.Join(err, restored.Close(ctx))
 }

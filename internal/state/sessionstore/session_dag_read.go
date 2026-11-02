@@ -291,9 +291,19 @@ func (st *sessionDAGState) selectedHead() string {
 // patches and redactions applied, and the head's system message first. A
 // chain that reaches a parent the log no longer holds starts there.
 func (st *sessionDAGState) materialize(f io.ReaderAt, headID string, limits sessionReplayLimits) ([]provider.Message, error) {
+	refs, _, err := st.chain(headID, limits)
+	if err != nil {
+		return nil, err
+	}
+	return readDAGPayloads(f, st.path, refs, limits)
+}
+
+// chain is the payloads of one head in order, the head's system message first.
+// With a tail budget it keeps the newest that fit and counts the rest as dropped.
+func (st *sessionDAGState) chain(headID string, limits sessionReplayLimits) (refs []sessionDAGPayload, dropped int, err error) {
 	h := st.heads[headID]
 	if h == nil {
-		return nil, nil
+		return nil, 0, nil
 	}
 	var ids []string
 	seen := map[string]bool{}
@@ -307,7 +317,7 @@ func (st *sessionDAGState) materialize(f io.ReaderAt, headID string, limits sess
 		id = n.parent
 	}
 	slices.Reverse(ids)
-	refs := make([]sessionDAGPayload, 0, len(ids)+1)
+	refs = make([]sessionDAGPayload, 0, len(ids)+1)
 	for _, id := range ids {
 		m := st.nodes[id].payload
 		if p, ok := st.patches[id]; ok {
@@ -325,22 +335,76 @@ func (st *sessionDAGState) materialize(f io.ReaderAt, headID string, limits sess
 			refs = append([]sessionDAGPayload{*h.system}, refs...)
 		}
 	}
+	if limits.tailBudget > 0 {
+		refs, dropped = tailOfDAGPayloads(refs, limits.tailBudget)
+	}
 	var payloadBytes int64
 	for _, ref := range refs {
 		payloadBytes += ref.end - ref.start
-		if err := checkSessionPayloadBytes(st.path, payloadBytes); err != nil {
-			return nil, err
+		if err := limits.payloadErr(st.path, payloadBytes); err != nil {
+			return nil, 0, err
 		}
 	}
+	return refs, dropped, nil
+}
+
+func readDAGPayloads(f io.ReaderAt, path string, refs []sessionDAGPayload, limits sessionReplayLimits) ([]provider.Message, error) {
 	msgs := make([]provider.Message, 0, len(refs))
 	for _, ref := range refs {
-		m, err := ref.read(f, st.path, limits)
+		m, err := ref.read(f, path, limits)
 		if err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)
 	}
 	return msgs, nil
+}
+
+// tailOfDAGPayloads keeps the system prompt and the newest payloads within
+// budget, starting the rest at a user message when one follows the cut.
+func tailOfDAGPayloads(refs []sessionDAGPayload, budget int64) ([]sessionDAGPayload, int) {
+	start := 0
+	if len(refs) > 0 && refs[0].role == provider.RoleSystem {
+		start = 1
+	}
+	var total int64
+	for _, r := range refs {
+		total += r.end - r.start
+	}
+	cut := start
+	for cut < len(refs)-1 && total > budget {
+		total -= refs[cut].end - refs[cut].start
+		cut++
+	}
+	if cut == start {
+		return refs, 0
+	}
+	for next := cut; next < len(refs); next++ {
+		if refs[next].role == provider.RoleUser {
+			cut = next
+			break
+		}
+	}
+	return slices.Delete(refs, start, cut), cut - start
+}
+
+func loadSessionDAGTail(sessionPath string, limits sessionReplayLimits) (SessionTail, error) {
+	path := store.SessionEventLog(sessionPath)
+	f, err := os.Open(path)
+	if err != nil {
+		return SessionTail{}, err
+	}
+	defer f.Close()
+	st, err := replaySessionDAG(f, path, limits)
+	if err != nil {
+		return SessionTail{}, err
+	}
+	refs, dropped, err := st.chain(st.selectedHead(), limits)
+	if err != nil {
+		return SessionTail{}, err
+	}
+	msgs, err := readDAGPayloads(f, path, refs, limits)
+	return SessionTail{Messages: msgs, Dropped: dropped}, err
 }
 
 // loadSessionDAGMessages is the transcript a schema 2 log's selected head

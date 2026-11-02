@@ -46,6 +46,9 @@ type Priced struct {
 	// Incomplete says the quote could not price the row's usage: its money is
 	// unknown, not zero.
 	Incomplete bool
+	// Reason is the line's incomplete_reason, already normalized by the caller
+	// through UnpricedReason; empty when the row recorded none.
+	Reason string
 	// BillingMode is the mode the quote was made in; empty reads as billed.
 	BillingMode string
 }
@@ -62,10 +65,36 @@ func CostIncomplete(costComplete *bool, total int, amount string) bool {
 	return total > 0 && strings.TrimSpace(amount) == ""
 }
 
+// ReasonNoPrice is the reason the quote path already records for a call with
+// no price fact (event.EnsureCostQuote). A row written before the cost fields
+// existed carries no reason at all; this names the case it is.
+const ReasonNoPrice = "no_price"
+
+// UnpricedReason is CostIncomplete plus the reason behind it, in the
+// vocabulary the quote already writes. An unpriced row that recorded no reason
+// is still unpriced; only a row with no cost fact takes the existing
+// ReasonNoPrice, and no reason is invented for the others.
+func UnpricedReason(costComplete *bool, total int, amount, reason string) (string, bool) {
+	if !CostIncomplete(costComplete, total, amount) {
+		return "", false
+	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		return reason, true
+	}
+	if strings.TrimSpace(amount) == "" {
+		return ReasonNoPrice, true
+	}
+	return "", true
+}
+
 // WithCost attaches a line's quote. An amount that does not parse is dropped
 // rather than guessed: a missing total beats a wrong one.
 func (e Entry) WithCost(p Priced) Entry {
 	e.Cost, e.CostCurrency, e.CostEstimated, e.CostIncomplete, e.BillingMode = 0, "", p.Estimated, p.Incomplete, p.BillingMode
+	e.IncompleteReason = ""
+	if p.Incomplete {
+		e.IncompleteReason = p.Reason
+	}
 	if amount, ok := parseAmount(p.Amount); ok {
 		e.Cost, e.CostCurrency = amount, pricing.NormalizeCurrency(p.Currency)
 	}

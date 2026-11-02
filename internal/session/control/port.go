@@ -176,6 +176,7 @@ type SessionHistory interface {
 	CommitFileRevert(planID string, resolution checkpoint.ConflictResolution) (checkpoint.RewindResult, error)
 	Branch(name string) (string, error)
 	BranchAt(turn int, name string) (string, error)
+	ForkSessionTail(sourcePath string) (path string, dropped int, err error)
 	Branches() ([]sessionstore.BranchInfo, error)
 	BranchTreeText() string
 	SwitchBranch(ref string) (sessionstore.BranchInfo, error)

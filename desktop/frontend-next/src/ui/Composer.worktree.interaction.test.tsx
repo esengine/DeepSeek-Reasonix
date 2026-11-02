@@ -18,7 +18,7 @@ it.each(["failed", "cancelled"])("restores composer focus after dismissing %s pr
   const st = { workspaceRoot: "/source", modelRef: "deepseek/deepseek-v4-pro", preset: "balanced", effort: "auto", toolApprovalMode: "ask" } as SessionStatus;
   render(<Composer port={port} status={st} running={false} fresh git={{ repo: true, branch: "main", name: "project", detached: false, added: 0, removed: 0, untracked: 0 }} onSubmit={onSubmit} onChanged={vi.fn()} onError={vi.fn()}/>);
   fireEvent.click(await screen.findByRole("button", { name: "配置工作目录" }));
-  fireEvent.click(screen.getByRole("button", { name: "新建 worktree" }));
+  fireEvent.click(screen.getByRole("button", { name: "独立工作树" }));
   fireEvent.click(screen.getByRole("button", { name: "关闭工作目录配置" }));
   const box = screen.getByLabelText("任务输入") as HTMLTextAreaElement;
   box.focus();

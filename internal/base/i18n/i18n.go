@@ -108,6 +108,8 @@ type Messages struct {
 	ChatThinking                    string // live reasoning marker label, e.g. "thinking…"
 	ChatThoughtForFmt               string // collapsed reasoning summary, "%d" = elapsed s
 	ChatWorkedForFmt                string // end-of-turn line, "%s" = the turn's run time
+	ChatImageAttachedFmt            string // a restored turn's attachment line, "%d" = how many images
+	ChatFromDeviceFmt               string // where a restored user turn came from, "%d" = device number
 	ChatStatusThinkingFmt           string // "%s thinking… (%s · %s cancels)" — %s = spinner, %s = elapsed, %s = interrupt key
 	TurnPhaseWorking                string // host turn_phase label: working
 	TurnPhaseChecking               string // host turn_phase label: checking

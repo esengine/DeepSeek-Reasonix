@@ -49,6 +49,23 @@ it("keeps local project moves and host-qualified pin/archive calls on their owni
   } finally { vi.unstubAllGlobals(); }
 });
 
+it("carries the same global recent-page query to local and remote tree owners", async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const hub = new SseHub();
+    const window = { order: "recent" as const, scope: "active" as const, offset: 350, limit: 50, hideLegacy: true, q: "release plan" };
+    await hub.tree(window);
+    await hub.remoteTree("gpu box", window);
+    const paths = fetch.mock.calls.map(([path]) => new URL(path, "http://localhost"));
+    expect(paths[0].pathname).toBe("/tree");
+    expect(paths[1].pathname).toBe("/remotes/gpu%20box/tree");
+    for (const path of paths) {
+      expect(Object.fromEntries(path.searchParams)).toMatchObject({ order: "recent", scope: "active", offset: "350", limit: "50", hideLegacy: "1", q: "release plan" });
+    }
+  } finally { vi.unstubAllGlobals(); }
+});
+
 // The same defect SseHttp was fixed for, still standing in the hub port: asking
 // for JSON first threw away every answer that was not an envelope, and what
 // reached the window was "this request did not reach the kernel (HTTP 502)" —

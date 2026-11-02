@@ -248,6 +248,7 @@ export const SETTINGS: SettingEntry[] = [
   // is what the row promises, because the weaker one would be a promise this
   // block cannot keep.
   { section: "providers", anchor: "providers", title: "模型服务", scope: "machine", apply: "runtime-rebuild", keywords: ["模型来源", "连接", "提供商", "供应商", "api key", "密钥", "协议", "地址"] },
+  { section: "providers", anchor: "provider-health", title: "自动检测连接与余额", scope: "machine", apply: "immediate", keywords: ["检测", "余额", "连接", "health", "balance"] },
 
   // Takes effect on this session at once and is also persisted as the default
   // every later session starts from. Machine is the wider of the two answers
@@ -304,6 +305,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "versions", anchor: "sponsor", title: "赞助", scope: "machine", apply: "none", keywords: ["捐助", "支付宝", "微信支付", "收款码", "paypal", "donate", "sponsor", "support", "alipay", "wechat"] },
   { section: "memory", anchor: "memory", title: "记忆", scope: "chosen", apply: "immediate", keywords: ["记住", "忘记", "事实"] },
   { section: "usage", anchor: "currency", title: "费用显示币种", scope: "machine", apply: "immediate", keywords: ["币种", "货币", "人民币", "美元", "currency", "CNY", "USD", "汇率"] },
+  { section: "usage", anchor: "upload-usage", title: "上传量", scope: "machine", apply: "none", keywords: ["流量", "上传", "带宽", "请求", "upload", "traffic", "bandwidth"] },
   { section: "usage", anchor: "usage", title: "用量与成本", scope: "machine", apply: "none", keywords: ["token", "花费", "缓存命中"] },
   { section: "storage", anchor: "storage", title: "存储", scope: "machine", apply: "restart", keywords: ["搬家", "迁移", "磁盘", "位置"] },
   { section: "advanced", anchor: "elsewhere", title: "本版本尚未提供", scope: "machine", apply: "none", keywords: ["配置文件"] },
@@ -319,23 +321,28 @@ export const SETTINGS: SettingEntry[] = [
   { section: "appearance", anchor: "legacy-sessions", title: "1.x 旧会话", scope: "machine", apply: "immediate", keywords: ["1.x", "旧会话", "迁移", "隐藏", "legacy", "sessions", "sidebar"] },
   { section: "appearance", anchor: "live-grace", title: "进行中列表保留已完成会话", scope: "machine", apply: "immediate", keywords: ["进行中", "完成", "保留", "过滤", "running", "grace", "sidebar"] },
   { section: "appearance", anchor: "send-shortcut", title: "发送快捷键", scope: "machine", apply: "immediate", keywords: ["发送", "回车", "换行", "enter", "ctrl", "cmd"] },
+  { section: "appearance", anchor: "running-message-intent", title: "运行中发送消息", scope: "machine", apply: "immediate", keywords: ["插话", "排队", "下一轮", "steer", "queue", "followup", "running"] },
+  { section: "appearance", anchor: "global-shortcut", title: "全局显示 / 隐藏快捷键", scope: "machine", apply: "immediate", keywords: ["global", "show", "hide", "shortcut", "keyboard", "全局", "显示", "隐藏"] },
   { section: "appearance", anchor: "keys", title: "快捷键", scope: "machine", apply: "immediate", keywords: ["shortcut", "keyboard", "ctrl", "cmd", "esc", "home", "查找", "搜索", "运行分析", "工作台"] },
   { section: "appearance", anchor: "esc-stop", title: "Esc 停止任务", scope: "machine", apply: "immediate", keywords: ["esc", "停止", "中断", "确认", "误触", "stop"] },
   { section: "appearance", anchor: "page-sleep", title: "空闲网页休眠", scope: "machine", apply: "immediate", keywords: ["休眠", "睡眠", "空闲", "内存", "收起", "browser", "page", "sleep", "memory"] },
   { section: "appearance", anchor: "session-tabs", title: "会话标签栏", scope: "machine", apply: "immediate", keywords: ["标签", "会话切换", "tabs", "session"] },
   { section: "appearance", anchor: "folding", title: "会话折叠", scope: "machine", apply: "immediate", keywords: ["展开", "收起", "思考", "执行过程", "步骤", "输出", "简报", "fold"] },
+  { section: "appearance", anchor: "plan-progress", title: "收起时显示计划进度", scope: "machine", apply: "immediate", keywords: ["计划", "进度条", "待办", "收起", "todo", "plan", "progress", "collapsed"] },
+  { section: "appearance", anchor: "composer-hint", title: "输入框提示", scope: "machine", apply: "immediate", keywords: ["占位", "任务", "提示", "输入框", "placeholder", "composer", "hint"] },
+  { section: "appearance", anchor: "office-preview", title: "Office 文档预览", scope: "machine", apply: "immediate", keywords: ["office", "word", "excel", "docx", "xlsx", "工作台", "预览", "文档", "表格"] },
   { section: "appearance", anchor: "window", title: "窗口", scope: "machine", apply: "immediate", keywords: ["托盘", "关闭行为", "休眠", "睡眠"] },
   // Immediate because the endpoint hands the holder every running sink reads,
   // not because the file was written: writing it is what a restart would need.
   { section: "appearance", anchor: "notify", title: "通知", scope: "machine", apply: "immediate", keywords: ["提醒", "notification", "系统通知", "结束", "批准", "提问"] },
-  { section: "appearance", anchor: "size", title: "大小", scope: "machine", apply: "immediate", keywords: ["缩放", "字号"] },
+  { section: "appearance", anchor: "size", title: "大小", scope: "machine", apply: "immediate", keywords: ["缩放", "字号", "行宽", "对话区域宽度", "比例", "width", "percentage"] },
   { section: "appearance", anchor: "font", title: "字体", scope: "machine", apply: "immediate", keywords: ["等宽", "mono"] },
   { section: "appearance", anchor: "wallpaper", title: "壁纸", scope: "machine", apply: "immediate", keywords: ["背景", "图片"] },
   { section: "appearance", anchor: "advanced-appearance", title: "高级外观", scope: "machine", apply: "immediate", keywords: ["高级", "advanced"] },
   { section: "appearance", anchor: "weight", title: "文字粗细", scope: "machine", apply: "immediate", keywords: ["加粗", "字重"] },
   { section: "appearance", anchor: "contrast", title: "文字对比度", scope: "machine", apply: "immediate", keywords: ["柔和", "对比"] },
   { section: "appearance", anchor: "effects", title: "视觉效果", scope: "machine", apply: "immediate", keywords: ["磨砂", "模糊", "动画", "显卡", "gpu", "性能", "省电", "blur"] },
-  { section: "appearance", anchor: "mode", title: "明暗", scope: "machine", apply: "immediate", keywords: ["深色", "浅色", "跟随系统"] },
+  { section: "appearance", anchor: "mode", title: "明暗", scope: "machine", apply: "immediate", keywords: ["深色", "浅色", "跟随系统", "定时", "时间段", "schedule", "dark", "light"] },
   { section: "appearance", anchor: "scheme", title: "配色", scope: "machine", apply: "immediate", keywords: ["主题", "theme", "色板"] },
 ];
 

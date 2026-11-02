@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testscope"
 )
 
 func TestIsolateUserStateRedirectsAndRestoresCallerEnvironment(t *testing.T) {
@@ -20,6 +22,7 @@ func TestIsolateUserStateRedirectsAndRestoresCallerEnvironment(t *testing.T) {
 		"REASONIX_HOME":       filepath.Join(callerHome, "explicit-reasonix-home"),
 		"REASONIX_STATE_HOME": filepath.Join(callerHome, "caller-state"),
 		"REASONIX_CACHE_HOME": filepath.Join(callerHome, "caller-cache"),
+		"REASONIX_TEST_HOME":  filepath.Join(callerHome, "caller-test-home"),
 	}
 	for key, value := range callerEnvironment {
 		t.Setenv(key, value)
@@ -38,13 +41,14 @@ func TestIsolateUserStateRedirectsAndRestoresCallerEnvironment(t *testing.T) {
 		t.Fatalf("isolated home %q is not contained by caller home %q", isolateHome, callerHome)
 	}
 	wantIsolatedEnvironment := map[string]string{
-		"HOME":            isolateHome,
-		"USERPROFILE":     isolateHome,
-		"XDG_CONFIG_HOME": filepath.Join(isolateHome, ".config"),
-		"XDG_CACHE_HOME":  filepath.Join(isolateHome, ".cache"),
-		"XDG_STATE_HOME":  filepath.Join(isolateHome, ".local", "state"),
-		"AppData":         filepath.Join(isolateHome, "AppData", "Roaming"),
-		"LocalAppData":    filepath.Join(isolateHome, "AppData", "Local"),
+		"HOME":               isolateHome,
+		"REASONIX_TEST_HOME": isolateHome,
+		"USERPROFILE":        isolateHome,
+		"XDG_CONFIG_HOME":    filepath.Join(isolateHome, ".config"),
+		"XDG_CACHE_HOME":     filepath.Join(isolateHome, ".cache"),
+		"XDG_STATE_HOME":     filepath.Join(isolateHome, ".local", "state"),
+		"AppData":            filepath.Join(isolateHome, "AppData", "Roaming"),
+		"LocalAppData":       filepath.Join(isolateHome, "AppData", "Local"),
 	}
 	for key, want := range wantIsolatedEnvironment {
 		if got := os.Getenv(key); got != want {
@@ -65,5 +69,55 @@ func TestIsolateUserStateRedirectsAndRestoresCallerEnvironment(t *testing.T) {
 	}
 	if _, err := os.Stat(isolateHome); !os.IsNotExist(err) {
 		t.Fatalf("isolated home still exists after cleanup: %v", err)
+	}
+}
+
+func TestIsolateUserStateRestoresUnsetTestHomeAndNestedScopes(t *testing.T) {
+	callerScope := testscope.Home()
+	t.Setenv("REASONIX_TEST_HOME", "")
+	if err := os.Unsetenv("REASONIX_TEST_HOME"); err != nil {
+		t.Fatal(err)
+	}
+	cleanup, err := IsolateUserState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	outer := os.Getenv("REASONIX_TEST_HOME")
+	if got := testscope.Home(); got != outer {
+		t.Fatalf("installed scope = %q, want %q", got, outer)
+	}
+	nestedCleanup, err := IsolateUserState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nestedCleanup)
+	inner := os.Getenv("REASONIX_TEST_HOME")
+	if inner == "" || inner == outer {
+		t.Fatalf("nested test home = %q, outer = %q", inner, outer)
+	}
+	if got := testscope.Home(); got != inner {
+		t.Fatalf("nested scope = %q, want %q", got, inner)
+	}
+	nestedCleanup()
+	if got := os.Getenv("REASONIX_TEST_HOME"); got != outer {
+		t.Fatalf("restored test home = %q, want %q", got, outer)
+	}
+	if got := testscope.Home(); got != outer {
+		t.Fatalf("restored scope = %q, want %q", got, outer)
+	}
+	if _, err := os.Stat(inner); !os.IsNotExist(err) {
+		t.Fatalf("nested test home remains after cleanup: %v", err)
+	}
+	cleanup()
+	cleanup()
+	if got := testscope.Home(); got != callerScope {
+		t.Fatalf("scope after cleanup = %q, want %q", got, callerScope)
+	}
+	if _, ok := os.LookupEnv("REASONIX_TEST_HOME"); ok {
+		t.Fatal("test home remained set after cleanup")
+	}
+	if _, err := os.Stat(outer); !os.IsNotExist(err) {
+		t.Fatalf("test home remains after cleanup: %v", err)
 	}
 }

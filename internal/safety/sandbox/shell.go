@@ -60,10 +60,11 @@ func (k ShellKind) String() string {
 type FallbackReason string
 
 const (
-	FallbackNone         FallbackReason = ""
-	FallbackNotFound     FallbackReason = "not_found"
-	FallbackProbeTimeout FallbackReason = "probe_timeout"
-	FallbackProbeFailed  FallbackReason = "probe_failed"
+	FallbackNone           FallbackReason = ""
+	FallbackNotFound       FallbackReason = "not_found"
+	FallbackProbeTimeout   FallbackReason = "probe_timeout"
+	FallbackProbeFailed    FallbackReason = "probe_failed"
+	FallbackSandboxRefused FallbackReason = "sandbox_refused"
 )
 
 // Shell is the resolved interpreter the bash tool executes commands with: a kind
@@ -171,6 +172,9 @@ func (h shellHost) bashFallback() FallbackReason {
 	if slices.ContainsFunc(tried, bashProbeTimedOut) {
 		return FallbackProbeTimeout
 	}
+	if !slices.ContainsFunc(tried, func(p string) bool { _, refused := bashConfineRefusals.Load(p); return !refused }) {
+		return FallbackSandboxRefused
+	}
 	return FallbackProbeFailed
 }
 
@@ -182,9 +186,10 @@ func warnBashFallback(warn io.Writer, sh Shell) {
 		return
 	}
 	why := map[FallbackReason]string{
-		FallbackNotFound:     "no Git Bash was found",
-		FallbackProbeTimeout: "Git Bash did not answer in time",
-		FallbackProbeFailed:  "Git Bash did not run a command",
+		FallbackNotFound:       "no Git Bash was found",
+		FallbackProbeTimeout:   "Git Bash did not answer in time",
+		FallbackProbeFailed:    "Git Bash did not run a command",
+		FallbackSandboxRefused: "Git Bash cannot start inside the sandbox",
 	}[sh.Fallback]
 	// prefer="powershell" tries Windows PowerShell 5.1 before pwsh, so the advice
 	// names the interpreter actually in use rather than trading pwsh 7 away.
@@ -192,7 +197,11 @@ func warnBashFallback(warn io.Writer, sh Shell) {
 	if sh.SupportsChaining() {
 		keep = "pwsh"
 	}
-	fmt.Fprintf(warn, "warning: [tools.shell] %s; using PowerShell at %s. Commands written for bash that need POSIX tools such as head or grep will fail there. Install Git for Windows or set [tools.shell] path to its bash.exe; set prefer=%q to keep this interpreter and silence this.\n", why, quotedPath(sh.Path), keep)
+	fix := "Install Git for Windows or set [tools.shell] path to its bash.exe"
+	if sh.Fallback == FallbackSandboxRefused {
+		fix = "Turn the sandbox off to use Git Bash"
+	}
+	fmt.Fprintf(warn, "warning: [tools.shell] %s; using PowerShell at %s. Commands written for bash that need POSIX tools such as head or grep will fail there. %s; set prefer=%q to keep this interpreter and silence this.\n", why, quotedPath(sh.Path), fix, keep)
 }
 
 // available lists the interpreters this host really has, in the order auto

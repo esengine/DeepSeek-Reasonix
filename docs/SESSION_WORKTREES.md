@@ -9,9 +9,9 @@ reviewed: 2026-10-15
 
 ## 中文
 
-在有提交记录的 Git 项目中新建会话，点击输入框内底部工具栏的「当前目录 · 分支」：
+在有提交记录的 Git 项目中新建会话，点击输入框内底部工具栏的分支名：
 
-1. 开启「新建 worktree」。
+1. 在「当前目录 / 独立工作树」中选择「独立工作树」。选择「当前目录」可返回直接使用项目文件夹的模式。
 2. 点击「起始分支」，搜索并选择本地分支或已获取的远程分支。
 3. 输入任务并发送。Reasonix 此时创建独立目录和自动命名的任务分支，再在其中开始对话。
 
@@ -25,9 +25,9 @@ reviewed: 2026-10-15
 
 ## English
 
-Start a new conversation in a Git project with a commit, then open **Current folder · branch** in the composer's bottom toolbar:
+Start a new conversation in a Git project with a commit, then click the branch name in the composer's bottom toolbar:
 
-1. Enable **New worktree**.
+1. Choose **Isolated worktree** instead of **Current folder**. Select **Current folder** to return to working directly in the project folder.
 2. Open **Base branch** and search local or fetched remote-tracking branches.
 3. Send the task. Reasonix creates a separate directory and automatically named task branch before submitting the first message there.
 

@@ -73,6 +73,9 @@ func adoptCollectingNotices(t *testing.T, from *control.Controller, home, dir st
 	if err := ApplyRuntimeMigration(to, from, CaptureRuntimeMigration(from)); err != nil {
 		t.Fatalf("ApplyRuntimeMigration: %v", err)
 	}
+	if from.History()[0].Content != to.History()[0].Content {
+		t.Logf("system prompt changed during migration: %q", firstDivergence(from.History()[0].Content, to.History()[0].Content))
+	}
 	return notices
 }
 

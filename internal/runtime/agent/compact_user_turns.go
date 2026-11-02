@@ -75,20 +75,18 @@ func (a *contextWindow) keptUserTurnsBudget() int {
 // hatch is only useful to someone told it exists at the moment it is needed.
 func (a *contextWindow) noticeDroppedUserTurns(ret userTurnRetention) {
 	if ret.MarkedDropped > 0 {
-		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeKeptTurnsFolded,
 			Text: fmt.Sprintf("%s you marked [[keep]] %s past the room [[keep]] has, so the oldest now survive only through the summary.",
 				pluralTurns(ret.MarkedDropped), wereOrWas(ret.MarkedDropped)),
-			Detail: fmt.Sprintf("compaction folded %d [[keep]] turn(s) (~%d tokens) past the marked-turn budget of %d",
-				ret.MarkedDropped, ret.MarkedDroppedTokens, a.keptMarkedBudget())})
+			Detail: event.TurnsDropped{Count: ret.MarkedDropped, Tokens: ret.MarkedDroppedTokens, Budget: a.keptMarkedBudget()}.Encode()})
 	}
 	if ret.Dropped == 0 {
 		return
 	}
-	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeUserTurnsDropped,
 		Text: fmt.Sprintf("%s of yours %s too large to keep whole and now survive only through the summary. Prefix a turn with [[keep]] to hold it verbatim.",
 			pluralTurns(ret.Dropped), wereOrWas(ret.Dropped)),
-		Detail: fmt.Sprintf("compaction dropped %d user turn(s) (~%d tokens) past the retention budget of %d",
-			ret.Dropped, ret.DroppedTokens, a.keptUserTurnsBudget())})
+		Detail: event.TurnsDropped{Count: ret.Dropped, Tokens: ret.DroppedTokens, Budget: a.keptUserTurnsBudget()}.Encode()})
 }
 
 func pluralTurns(n int) string {

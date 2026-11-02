@@ -92,9 +92,3 @@ describe("what the appearance page says a person is doing", () => {
   });
 });
 
-describe("the line width choices", () => {
-  it("offer the composer-too width through the same action as the others", () => {
-    expect(SOURCE).toContain('["full-all", "连输入框一起铺满"');
-    expect(idsOf("appearance.measure").length).toBeGreaterThan(0);
-  });
-});

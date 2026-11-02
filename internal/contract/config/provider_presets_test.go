@@ -329,8 +329,8 @@ func TestCuratedProviderPresetReturnsDeepCopy(t *testing.T) {
 	if !ok {
 		t.Fatal("missing fresh minimax-cn-api preset")
 	}
-	if got := fresh.Entries[0].Models[0]; got != "MiniMax-M3" {
-		t.Fatalf("fresh minimax first model = %q, want MiniMax-M3", got)
+	if got := fresh.Entries[0].Models[0]; got != "MiniMax-M3.1-Flash" {
+		t.Fatalf("fresh minimax first model = %q, want MiniMax-M3.1-Flash", got)
 	}
 	if got, _ := fresh.Entries[0].ExtraBody["reasoning_split"].(bool); !got {
 		t.Fatalf("fresh minimax reasoning_split = %v, want true", fresh.Entries[0].ExtraBody["reasoning_split"])
@@ -483,14 +483,14 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("minimax-global-api provider missing")
 	}
-	if minimaxGlobalAPI.BaseURL != "https://api.minimax.io/v1" || !minimaxGlobalAPI.HasModel("MiniMax-M2.7-highspeed") {
+	if minimaxGlobalAPI.BaseURL != "https://api.minimax.io/v1" || !minimaxGlobalAPI.HasModel("MiniMax-M3.1-Flash") || minimaxGlobalAPI.HasModel("MiniMax-M2.7-highspeed") {
 		t.Fatalf("minimax-global-api capability mismatch: %+v", minimaxGlobalAPI)
 	}
 	minimaxPlan, ok := cfg.Provider("minimax-cn-anthropic")
 	if !ok {
 		t.Fatal("minimax-cn-anthropic provider missing")
 	}
-	if minimaxPlan.Kind != "anthropic" || !minimaxPlan.AuthHeader || !minimaxPlan.HasVisionModel("MiniMax-M3") || !minimaxPlan.HasModel("MiniMax-M2.7-highspeed") {
+	if minimaxPlan.Kind != "anthropic" || !minimaxPlan.AuthHeader || !minimaxPlan.HasVisionModel("MiniMax-M3") || !minimaxPlan.HasModel("MiniMax-M3.1-Flash") || minimaxPlan.HasModel("MiniMax-M2.7-highspeed") {
 		t.Fatalf("minimax-cn-anthropic capability mismatch: %+v", minimaxPlan)
 	}
 	minimaxGlobal, ok := cfg.Provider("minimax-global-anthropic")
@@ -665,7 +665,6 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 		"qwen3-coder-plus":     1_000_000,
 		"qwen3-max-2026-01-23": 262_144,
 		"qwen3-coder-next":     262_144,
-		"MiniMax-M2.5":         196_608,
 		"glm-5":                202_752,
 		"glm-4.7":              202_752,
 		"kimi-k2.5":            262_144,

@@ -171,7 +171,7 @@ func TestProbeCacheHitPersistsSnapshotSoExpiryKeepsTheAnswer(t *testing.T) {
 	}
 }
 
-func TestProbeCacheHitLeavesAnExistingSnapshotAlone(t *testing.T) {
+func TestFreshSnapshotTakesPrecedenceOverSharedMemory(t *testing.T) {
 	resetProbeCacheForTest(t, time.Unix(1000, 0))
 	dir := testenv.TempDir(t)
 	toolPath := writeProbeTool(t, filepath.Join(dir, "keeptool"), "keeptool 1.0")
@@ -182,7 +182,10 @@ func TestProbeCacheHitLeavesAnExistingSnapshotAlone(t *testing.T) {
 	saveProbeSnapshot(opts.SnapshotDir, key, []ProbeResult{{Command: commands[0], Binary: "keeptool", Found: true, Output: "keeptool 0.9", Path: toolPath}}, time.Unix(900, 0))
 	finishProbe(key, []ProbeResult{{Command: commands[0], Binary: "keeptool", Found: true, Output: "keeptool 1.0", Path: toolPath}}, time.Unix(1000, 0))
 
-	RunProbesWithOptions(context.Background(), commands, opts)
+	got := RunProbesWithOptions(context.Background(), commands, opts)
+	if len(got) != 1 || got[0].Output != "keeptool 0.9" {
+		t.Fatalf("shared memory overrode the snapshot's rendered answer: %+v", got)
+	}
 	snap, ok := loadProbeSnapshot(opts.SnapshotDir, key)
 	if !ok || len(snap.Results) != 1 || snap.Results[0].Output != "keeptool 0.9" || !snap.StoredAt.Equal(time.Unix(900, 0)) {
 		t.Fatalf("a cache hit rewrote the snapshot it found: %+v", snap)

@@ -7,11 +7,12 @@ import { pinToViewport } from "./place";
 import { StudioIcon } from "./StudioIcon";
 import { workspaceMenuKeys } from "./WorkspaceOrder";
 
-export function ProjectsHeader({ adder, canSelect, selecting, onSelect, onToggleAll, allFolded, canFold, searching }: {
+export function ProjectsHeader({ adder, canSelect, selecting, onSelect, onRecent, onToggleAll, allFolded, canFold, searching }: {
   adder: Adder;
   canSelect: boolean;
   selecting: boolean;
   onSelect: () => void;
+  onRecent?: () => void;
   onToggleAll?: () => void;
   allFolded?: boolean;
   canFold?: boolean;
@@ -42,6 +43,10 @@ export function ProjectsHeader({ adder, canSelect, selecting, onSelect, onToggle
           </button>}
         </span>
         <span className="projects-heading-actions">
+          {onRecent && <button className="projects-add projects-recent" data-action="session.recent"
+            title={t("最近的会话")} aria-label={t("最近的会话")} onClick={onRecent}>
+            <span>{t("最近")}</span>
+          </button>}
           <button className="projects-add" data-busy={adder.busy ? "" : undefined} disabled={adder.busy}
             title={t("打开项目")} aria-label={t("打开项目")} data-action="workspace.add" onClick={() => adder.add()}>
             <StudioIcon name="plus" />

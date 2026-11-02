@@ -1,6 +1,6 @@
 .worktree-trigger .lb { max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-:root .compose .mode.worktree-trigger[data-on] { color: var(--brand); background: var(--brand-wash) }
-:root .compose .mode.worktree-trigger[data-on] .lb, :root .compose .mode.worktree-trigger[data-on] .studio-icon { color: var(--brand) }
+:root .compose .mode.worktree-trigger[data-on] { color: var(--muted); background: var(--overlay) }
+:root .compose .mode.worktree-trigger[data-on] .lb, :root .compose .mode.worktree-trigger[data-on] .studio-icon { color: var(--muted) }
 .workspace-palette { position: fixed; z-index: 1000; width: min(400px, calc(100vw / var(--zoom, 1) - 24px)); max-height: calc(100vh / var(--zoom, 1) - 24px); overflow: auto; padding: 16px; border: 1px solid var(--hair); border-radius: 16px; background: var(--float); color: var(--text); box-shadow: var(--shadow-float); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui) }
 .workspace-palette .studio-icon { width: 18px; height: 18px; flex-shrink: 0 }
 .workspace-palette-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--hair); font-size: var(--fs-ui); font-weight: var(--w-med) }
@@ -9,7 +9,7 @@
 .workspace-palette-identity { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 16px }
 .workspace-palette-identity > .studio-icon { width: 23px; height: 23px; color: var(--brand) }
 .workspace-palette-identity > strong { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: var(--w-med) }
-.workspace-palette-identity > span { flex-shrink: 0; max-width: 46%; padding: 3px 7px; border-radius: 6px; color: var(--brand); background: var(--brand-wash); font-size: var(--fs-micro) }
+.workspace-palette-identity > span { flex-shrink: 0; max-width: 46%; padding: 3px 7px; border-radius: 6px; color: var(--muted); background: var(--overlay); font-size: var(--fs-micro) }
 .worktree-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; margin: 0 0 14px; background: var(--raised); border: 1px solid var(--hair); border-radius: 9px }
 .worktree-modes button { display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid transparent; border-radius: 6px; min-height: 36px; padding: 6px; color: var(--muted); background: none; font: inherit; font-size: var(--fs-meta); cursor: pointer }
 .worktree-modes button[aria-pressed="true"] { background: var(--float); border-color: var(--hair); color: var(--text) }

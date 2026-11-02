@@ -55,6 +55,8 @@ reasonix plugin doctor <name>
 
 Reports component status, plan, effect receipts, recoverability, lifecycle metrics, and the process-local `runtimeOwnerFallbacks` count. Product boot binds an isolated owner; a non-zero fallback count identifies compatibility code that reached the shared default owner and needs explicit wiring.
 
+With no live runtime to ask (the CLI's case), recoverability and resume are reported as unknown, which JSON writes as `null`: effect receipts live only in the process that owned the runtime.
+
 Plan diagnostics separate two facts: `prefixChanged` is computed after build by comparing the previous and current snapshot `CacheHash`; `providerChanged` reports provider capability additions, removals, or reloads.
 
 A provider-only backend roll therefore reports `prefixChanged=false, providerChanged=true` when the provider-visible system prompt and tool schemas remain byte-identical.

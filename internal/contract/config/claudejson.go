@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -42,28 +43,36 @@ func (r Roots) claudeConfigPath() string {
 // or malformed file yields nothing rather than failing the load — it belongs to
 // another tool, and refusing to start over a typo in it is the worse answer.
 func loadClaudeMCP(path, root string) []PluginEntry {
+	entries, _ := loadClaudeMCPStrict(path, root)
+	return entries
+}
+
+func loadClaudeMCPStrict(path, root string) ([]PluginEntry, error) {
 	if path == "" {
-		return nil
+		return nil, nil
 	}
 	resolved, err := resolveConfigAccessPath(path, false)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	b, err := fileencoding.ReadFileUTF8(resolved)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var doc struct {
 		MCPServers map[string]mcpServerSpec `json:"mcpServers"`
 		Projects   map[string]claudeProject `json:"projects"`
 	}
-	if json.Unmarshal(b, &doc) != nil {
-		return nil
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil, fmt.Errorf("parse Claude config %s: %w", path, err)
 	}
 	// Claude Code's own order: the project's own servers outrank the user-wide
 	// ones under the same name.
 	out := specsToEntries(claudeProjectServers(doc.Projects, root), MCPSourceClaudeLocal)
-	return append(out, specsToEntries(doc.MCPServers, MCPSourceClaudeUser)...)
+	return append(out, specsToEntries(doc.MCPServers, MCPSourceClaudeUser)...), nil
 }
 
 // claudeProject is one entry of Claude Code's per-project map. Only its servers

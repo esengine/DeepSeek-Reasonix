@@ -86,6 +86,22 @@ type sessionReplayLimits struct {
 	maxRecords         int
 	maxMessages        int
 	maxCollectionItems int
+	// maxPayloadBytes bounds the message bytes one replay holds; 0 is the default.
+	maxPayloadBytes int64
+	// tailBudget, when set, keeps only the newest messages within it instead of
+	// refusing a history that exceeds maxPayloadBytes.
+	tailBudget int64
+}
+
+func (l sessionReplayLimits) payloadErr(path string, n int64) error {
+	limit := l.maxPayloadBytes
+	if limit == 0 {
+		limit = sessionReplayMaxPayloadBytes
+	}
+	if n > limit {
+		return sessionReplayLimitError(path, "message_payload_bytes", n, limit)
+	}
+	return nil
 }
 
 var defaultSessionReplayLimits = sessionReplayLimits{
@@ -176,6 +192,9 @@ func sessionEventLogOversized(logSize, contentBytes int64, msgs []provider.Messa
 type sessionEventReplay struct {
 	msgs         []provider.Message
 	payloadBytes int64
+	// dropped counts the messages a tail read left out after the system prompt.
+	dropped int
+	sizes   []int64
 	// collectionItems counts the elements in every JSON array nested below a
 	// live message. Keeping this alongside msgs bounds slices such as tool calls,
 	// images, memory citations, and interrupted-turn recovery metadata without
@@ -269,9 +288,12 @@ func replaySessionEventRecords(path string, limits sessionReplayLimits) (session
 		}
 		switch rec.Type {
 		case sessionEventTypeReplace:
-			if err := checkSessionPayloadBytes(path, int64(len(rec.Messages))); err != nil {
-				return replay, err
+			if limits.tailBudget == 0 {
+				if err := limits.payloadErr(path, int64(len(rec.Messages))); err != nil {
+					return replay, err
+				}
 			}
+			replay.dropped, replay.sizes = 0, nil
 			msgs, collectionItems, err := decodeSessionEventMessages(path, rec.Messages, 0, 0, limits)
 			if err == nil {
 				collectionItems, err = resolveSessionEventImages(path, msgs, rec.ImageBlobs, collectionItems, limits)
@@ -287,13 +309,16 @@ func replaySessionEventRecords(path string, limits sessionReplayLimits) (session
 			replay.payloadBytes = int64(len(rec.Messages))
 			replay.collectionItems = collectionItems
 			replay.times = make([]time.Time, len(replay.msgs))
+			replay.trimToTail(limits)
 		case sessionEventTypeAppend:
-			if rec.MessageIndex != len(replay.msgs) {
+			if rec.MessageIndex != replay.dropped+len(replay.msgs) {
 				replay.damaged = true
 				return replay, nil
 			}
-			if err := checkSessionPayloadBytes(path, replay.payloadBytes+int64(len(rec.Messages))); err != nil {
-				return replay, err
+			if limits.tailBudget == 0 {
+				if err := limits.payloadErr(path, replay.payloadBytes+int64(len(rec.Messages))); err != nil {
+					return replay, err
+				}
 			}
 			msgs, collectionItems, err := decodeSessionEventMessages(
 				path, rec.Messages, len(replay.msgs), replay.collectionItems, limits,
@@ -314,6 +339,7 @@ func replaySessionEventRecords(path string, limits sessionReplayLimits) (session
 			for range msgs {
 				replay.times = append(replay.times, rec.CreatedAt)
 			}
+			replay.trimToTail(limits)
 		default:
 			return replay, fmt.Errorf("decode session event log %s: unsupported event type %q", path, rec.Type)
 		}

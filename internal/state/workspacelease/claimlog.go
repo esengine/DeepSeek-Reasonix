@@ -106,6 +106,9 @@ func (o *Owner) claimMark() claimMark {
 func (o *Owner) contendersSince(mark claimMark, paths []string) Contention {
 	entries, ok := readClaimLog(o.claimLogPath())
 	out := Contention{Unknown: !ok || !mark.readable || o.local.logFailures.Load() != mark.failures}
+	if len(entries) == claimLogKeep && entries[0].Seq > mark.seq {
+		out.Unknown = true
+	}
 	self := o.sessionID()
 	for _, e := range entries {
 		if e.Seq <= mark.seq {

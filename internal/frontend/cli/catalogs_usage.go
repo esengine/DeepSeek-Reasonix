@@ -13,6 +13,7 @@ import (
 func init() {
 	registerCatalogCommand(catalogCommand{
 		name: "usage", path: usagecatalog.DefaultPath, reindex: reindexUsageCatalog,
+		supportedSchema: usagecatalog.SupportedSchema, inspect: usagecatalog.Inspect,
 		completionFlags: []cliCompletionFlag{completionFlag("--json", cliCompletionNoValue)},
 	})
 }

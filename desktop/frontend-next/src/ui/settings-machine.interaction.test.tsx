@@ -41,7 +41,7 @@ it("reads machine totals locally but keeps project inventory on the active remot
   const skills = vi.spyOn(remote, "skills");
   const localSkills = vi.spyOn(local, "skills");
   render(settings(remote, local, "ext"));
-  await screen.findByRole("heading", { name: "扩展" });
+  await screen.findByRole("tab", { name: /^扩展/, selected: true });
   await waitFor(() => expect(storage).toHaveBeenCalled(), { timeout: 4000 });
   expect(usage).toHaveBeenCalled();
   expect(remoteStorage).not.toHaveBeenCalled();

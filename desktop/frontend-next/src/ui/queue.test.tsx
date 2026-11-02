@@ -41,6 +41,42 @@ const paint = (q: QueueSnapshot, running: boolean) =>
 const draw = (q: QueueSnapshot) => paint(q, true);
 const drawIdle = (q: QueueSnapshot) => paint(q, false);
 
+describe("compact queue presentation", () => {
+  it("keeps action identities and order when edit and withdraw become icons", () => {
+    const html = draw(snapshot({ items: [item({ state: "queued" }), item({ id: "i2", state: "queued" })] }));
+    expect(html).toContain('title="编辑" aria-label="改"');
+    expect(html).toContain('title="取回" aria-label="取回"');
+    const actions = [...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]);
+    expect(actions).toEqual(["queue.pause", "queue.move", "queue.move", "queue.edit", "queue.send-now", "queue.cancel",
+      "queue.move", "queue.move", "queue.edit", "queue.send-now", "queue.cancel"]);
+    expect(html).not.toContain("draggable");
+  });
+
+  it("offers only send-now and withdraw on guidance the turn has already accepted", () => {
+    const html = draw(snapshot({ items: [item(), item({ id: "i2" })] }));
+    const actions = [...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]);
+    expect(actions).toEqual(["queue.pause", "queue.send-now", "queue.cancel", "queue.send-now", "queue.cancel"]);
+  });
+
+  it("says paused once and preserves the resume control", () => {
+    const html = draw(snapshot({ paused: true }));
+    expect(html).toContain("发送已暂停");
+    expect(html).not.toContain('data-hold');
+    expect(html).toContain("继续派发");
+  });
+
+  it("keeps long reasons in titles and limits inline reasons to held entries", () => {
+    const why = "long delivery explanation";
+    const queued = draw(snapshot({ items: [item({ state: "queued", blockReason: why })] }));
+    expect(queued).toContain(`title="${why}"`);
+    expect(queued).not.toContain('class="qwhy"');
+    for (const state of ["blocked", "uncertain"] as const) {
+      expect(draw(snapshot({ items: [item({ state, blockReason: why })] })))
+        .toContain(`class="qwhy" title="${why}"`);
+    }
+  });
+});
+
 describe("why a held entry stopped", () => {
   const held = (over: Partial<QueueItem>) => draw(snapshot({ paused: true, items: [item({ state: "uncertain", ...over })] }));
 
@@ -105,7 +141,10 @@ describe("what the pending strip says back", () => {
   // to reach them here.
   it("shows a host continuation that needs a decision", () => {
     const html = draw(snapshot({ items: [item({ origin: "host", state: "blocked", intent: "followup" })] }));
-    expect(html).toContain("受阻");
+    expect(html).toContain("后台 · 受阻");
+    expect(html).toContain('title="后台任务续接"');
+    const uncertain = draw(snapshot({ items: [item({ origin: "host", state: "uncertain", intent: "followup" })] }));
+    expect(uncertain).toContain("后台 · 状态不明");
   });
 
   it("names an accepted steer as taken, not as waiting", () => {

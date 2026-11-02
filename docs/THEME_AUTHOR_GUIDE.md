@@ -145,6 +145,51 @@ The current `background` block controls `focusX`, `focusY`, `safeArea`
 Use a low task opacity so the image does not compete with a transcript.
 Check your image licence and avoid including workspace screenshots or secrets.
 
+### Backdrop surface opacity
+
+`background.surfaceOpacity` optionally sets each shell surface's background
+alpha over a backdrop, independently for light and dark:
+
+```json
+"background": {
+  "surfaceOpacity": {
+    "dark": { "nav": 0.45, "rail": 0.45, "chrome": 0.80, "side": 0.80, "compose": 0.88 },
+    "light": { "nav": 0.60, "rail": 0.60, "chrome": 0.86, "side": 0.86, "compose": 0.88 }
+  }
+}
+```
+
+| Surface key | Selector | Colour mixed with transparency |
+| --- | --- | --- |
+| `nav` | `.nav` (icon navigation) | `--page` |
+| `rail` | `.rail` (sessions) | `--page` |
+| `chrome` | `.chrome` (top bar) | `--page` |
+| `side` | `.side` (legacy details) | `--page` |
+| `compose` | `.compose` (composer card) | `--raised` |
+
+This takes effect only with `data-bg`, from a sky or background image.
+Blur, transcript backing and text shadows do not change.
+There is no scalar shorthand or new appearance control.
+
+Omitted values retain the current stylesheet paint; older packs look unchanged.
+
+| Surface | Current Studio default | Base layout fallback |
+| --- | --- | --- |
+| Navigation | 0.62 | 0.62 |
+| Sessions/top bar | 0.80 dark; 0.86 light | 0.62 |
+| Composer | 0.88 | 0.80 |
+| Legacy details | Opaque light overlay/dark surface | 0.62 |
+
+The current dock does not mount the legacy `.side` selector.
+
+- Numbers are clamped to 0–1; zero means fully transparent.
+- Unknown schemes/surfaces are dropped with theme warnings, also in plugin diagnostics.
+- Null means omitted. Wrong types fail manifest decoding.
+- Switching scheme/pack, clearing the pack, or removing the backdrop clears old values.
+
+Check ordinary and muted text over your image in both schemes and at phone width.
+
+
 ### Transcript text glow
 
 Set `background.textGlow` to `"none"` to disable the transcript's wallpaper

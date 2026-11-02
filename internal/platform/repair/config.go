@@ -11,9 +11,24 @@ import (
 	"reasonix/internal/contract/config"
 )
 
+// Config check states. State is the classification a caller branches on: a
+// missing config is fine (defaults apply), while an unreadable one is neither
+// present nor absent as far as this process can tell, and Error carries the
+// cause.
+const (
+	ConfigStateMissing    = "missing"
+	ConfigStateValid      = "valid"
+	ConfigStateInvalid    = "invalid"
+	ConfigStateUnreadable = "unreadable"
+)
+
 type ConfigCheck struct {
-	Scope        string `json:"scope"`
-	Path         string `json:"path"`
+	Scope string `json:"scope"`
+	Path  string `json:"path"`
+	// State is missing, valid, invalid, or unreadable. It, not Exists,
+	// decides whether the file was found: an unreadable probe leaves both
+	// Exists and Valid false without proving absence.
+	State        string `json:"state"`
 	Exists       bool   `json:"exists"`
 	Valid        bool   `json:"valid"`
 	Error        string `json:"error,omitempty"`
@@ -28,6 +43,13 @@ type ConfigCheck struct {
 type ConfigReport struct {
 	Checks  []ConfigCheck `json:"checks"`
 	Applied []string      `json:"applied"`
+}
+
+// NeedsAttention reports whether this check prevents a clean pass. Absence is
+// not a failure — the defaults apply — but an invalid config and one whose
+// state could not be inspected both are.
+func (c ConfigCheck) NeedsAttention() bool {
+	return c.State == ConfigStateInvalid || c.State == ConfigStateUnreadable
 }
 
 type ConfigOptions struct {
@@ -106,7 +128,10 @@ func inspectAndRepairConfigUnlocked(opts ConfigOptions) (ConfigReport, error) {
 			check.SnapshotRecordedAt, check.SnapshotAge = lastKnownGoodProvenance(opts.Now())
 		}
 		report.Checks = append(report.Checks, check)
-		if !opts.Apply || !check.Exists || check.Valid || (opts.OnlyScope != "" && item.scope != opts.OnlyScope) || (item.scope == "project" && !opts.IncludeProject) {
+		// A config this process cannot inspect is not one it can repair:
+		// quarantining it would destroy the node on the strength of a check
+		// that never ran. Leave it in place and let the caller report refusal.
+		if !opts.Apply || check.State == ConfigStateUnreadable || !check.Exists || check.Valid || (opts.OnlyScope != "" && item.scope != opts.OnlyScope) || (item.scope == "project" && !opts.IncludeProject) {
 			continue
 		}
 		if err := verifyRepairPlanFileState(item.path, opts.expectedStates); err != nil {
@@ -218,26 +243,43 @@ func configRepairTargetPaths(opts ConfigOptions) ([]string, error) {
 }
 
 func inspectConfig(scope, path string) ConfigCheck {
-	check := ConfigCheck{Scope: scope, Path: path, Valid: true}
+	check := ConfigCheck{Scope: scope, Path: path, State: ConfigStateMissing, Valid: true}
 	if path == "" {
 		return check
 	}
 	if _, err := os.Lstat(path); err != nil {
-		if !os.IsNotExist(err) {
-			check.Valid = false
-			check.Error = err.Error()
+		if os.IsNotExist(err) {
+			return check
 		}
+		// EACCES and ENOTDIR do not prove absence: the path may name a file
+		// this process is not allowed to see. Claiming "missing (defaults
+		// apply)" here would hide both the file and the error.
+		check.Valid = false
+		check.Error = err.Error()
+		check.State = ConfigStateUnreadable
 		return check
 	}
 	check.Exists = true
 	b, err := os.ReadFile(path)
-	if err == nil {
-		err = config.ValidateBytes(b)
-	}
 	if err != nil {
 		check.Valid = false
 		check.Error = err.Error()
+		check.State = ConfigStateInvalid
+		if os.IsPermission(err) {
+			// The node is there but this process may not read it. That is not
+			// evidence that its contents are invalid, and a repair that cannot
+			// read the file cannot claim to have fixed it.
+			check.State = ConfigStateUnreadable
+		}
+		return check
 	}
+	if err := config.ValidateBytes(b); err != nil {
+		check.Valid = false
+		check.Error = err.Error()
+		check.State = ConfigStateInvalid
+		return check
+	}
+	check.State = ConfigStateValid
 	return check
 }
 

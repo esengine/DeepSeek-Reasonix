@@ -224,3 +224,76 @@ func TestTaskMachineRejectsADirThatIsNotThere(t *testing.T) {
 		}
 	}
 }
+
+// A persisted running record is only as good as the lease evidence beside it:
+// a proven holder keeps it running, a proven-free session marks it interrupted,
+// and an unprovable probe must say unknown rather than pick either claim.
+func TestTaskMachineReportsUnknownOnlyWhenLeaseCannotBeProven(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, sessionPath string)
+		want  string
+	}{
+		{name: "free", setup: func(*testing.T, string) {}, want: string(jobs.Interrupted)},
+		{name: "held", setup: func(t *testing.T, sessionPath string) {
+			lease, err := sessionstore.TryAcquireSessionLease(sessionPath)
+			if err != nil {
+				t.Fatalf("TryAcquireSessionLease: %v", err)
+			}
+			t.Cleanup(lease.Release)
+		}, want: string(jobs.Running)},
+		{name: "unprovable", setup: installUnprovableMachineLease, want: machineStateUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := testenv.TempDir(t)
+			saveMachineTestSession(t, dir, "session", time.Now())
+			sessionPath := filepath.Join(dir, "session.jsonl")
+			tc.setup(t, sessionPath)
+
+			artifactDir := jobs.ArtifactDir(sessionPath)
+			if err := os.MkdirAll(artifactDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			jobMeta := `{"id":"task-1","kind":"task","status":"running","startedAt":1700000000000}`
+			if err := os.WriteFile(filepath.Join(artifactDir, "task-1.json"), []byte(jobMeta), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			subDir := filepath.Join(dir, "subagents")
+			if err := os.MkdirAll(subDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC()
+			meta, err := json.Marshal(sessionstore.SubagentMeta{
+				Ref: "sa_running", CreatedAt: now, UpdatedAt: now,
+				Status: sessionstore.SubagentRunning, Kind: "task", ParentSession: "session",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(subDir, "sa_running.meta.json"), meta, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			tasks, err := machineTasks(dir, machineSessionIDWithKey("session", identityKey), identityKey)
+			if err != nil {
+				t.Fatalf("machineTasks: %v", err)
+			}
+			byID := make(map[string]machineTask, len(tasks))
+			for _, task := range tasks {
+				byID[task.ID] = task
+			}
+			for _, id := range []string{"task-1", "sa_running"} {
+				got, ok := byID[id]
+				if !ok {
+					t.Fatalf("task %s missing from projection: %+v", id, tasks)
+				}
+				if got.Status != tc.want {
+					t.Fatalf("%s status = %q, want %q", id, got.Status, tc.want)
+				}
+			}
+		})
+	}
+}

@@ -75,6 +75,7 @@ var constraints = map[string]Entry{
 	"desktop.appearance.read_size":                  {Free: true},
 	"desktop.appearance.text_size":                  {Free: true},
 	"desktop.appearance.zoom":                       {Free: true},
+	"desktop.appearance.width_percent":              {Free: true},
 	"agent.keep":                                    {Free: true},
 	"skills.disabled_skills":                        {Free: true},
 	"mods.hook_budget_ms":                           {Min: 0, Max: 55000, Bounded: true},

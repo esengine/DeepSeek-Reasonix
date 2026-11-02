@@ -14,6 +14,7 @@ import (
 func init() {
 	registerCatalogCommand(catalogCommand{
 		name: "history", path: historycatalog.DefaultPath, reindex: reindexHistoryCatalog,
+		supportedSchema: historycatalog.SupportedSchema, inspect: historycatalog.Inspect,
 		completionFlags: []cliCompletionFlag{
 			completionFlag("--json", cliCompletionNoValue),
 			completionFlag("--dir", cliCompletionPathValue),

@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/event"
@@ -1513,7 +1514,11 @@ func summarizeFailureError(err error) string {
 	msg := strings.Join(strings.Fields(secrets.DiagnosticError(err).Error()), " ")
 	const max = 500
 	if len(msg) > max {
-		msg = msg[:max] + "..."
+		cut := max
+		for cut > 0 && !utf8.RuneStart(msg[cut]) {
+			cut--
+		}
+		msg = msg[:cut] + "..."
 	}
 	return msg
 }

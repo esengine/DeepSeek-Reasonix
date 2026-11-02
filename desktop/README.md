@@ -72,12 +72,78 @@ go run ./cmd/reasonix serve                       # from the repository root
 cd desktop/frontend-next && pnpm install && pnpm dev   # :5273, proxies API paths
 ```
 
+## Messages sent during a run
+
+**Settings → Appearance → Keyboard shortcuts → Messages sent while running** chooses the default:
+
+- **Steer at the next tool boundary** (default) adds guidance to the current run.
+- **Send after the whole run** queues a new turn until the active run finishes.
+
+The choice is local to this device's browser profile, applies across projects,
+and survives reloads. It does not change idle sends or messages already queued.
+Skill invocations continue to use follow-up turns.
+
+The queue still supports hold/resume, editing, and taking a message back into
+the composer. **Send now** overrides the wait for a selected message by stopping
+the current response and starting that message as a new turn; it is unavailable
+while the queue is held.
+
+Guidance not delivered before a run ends still becomes a follow-up through the
+kernel's existing queue.
+
+## Global show/hide shortcut
+
+In the desktop shell, **Settings → Appearance → Global show / hide shortcut**
+offers one opt-in binding, disabled by default.
+
+1. Click **Record shortcut**, then press a modifier and key combination.
+   Escape cancels recording.
+2. Review the platform-native label, then **Apply shortcut** to register it.
+3. **Clear shortcut** disables it immediately.
+
+You can also edit the Electron accelerator directly (up to 128 characters).
+The shell requires Control, Command, Alt or Super, even through IPC or when
+restored from disk. Shift may accompany one of them but cannot qualify alone.
+
+The shortcut hides a focused Studio window; otherwise it restores, shows and
+focuses the existing window. It does not change in-app shortcuts or tray settings.
+
+The primary Electron instance owns the binding and stores it in its local shell
+profile. Changes apply immediately; invalid or unavailable bindings leave the
+previous saved and registered binding intact.
+
+Startup registration failures are shown in settings rather than reported as
+success. An unavailable binding may be occupied, reserved by the OS, denied
+permission, or unsupported by the desktop.
+
+Native Wayland environments may not support registration with this Electron
+backend; no portal authorization or cross-platform success is implied.
+
+The binding exists only while Studio is running. It cannot launch a stopped
+application and no external daemon is installed. Browser and network viewers
+cannot configure a remote machine's global shortcut.
+
 ## Building and testing
 
 ```sh
 make studio-test                                  # go test ./... for this module
 cd frontend-next && pnpm typecheck && pnpm test && pnpm build
 ```
+
+The Linux/X11 and macOS shortcut smoke drives the real Studio window, chord
+capture, and OS key events. After building the host and frontend, run
+`pnpm shortcut-live` in `electron/`. macOS uses System Events and requires
+Accessibility/Automation permission for the launching process.
+
+Use isolated `REASONIX_HOME` and `XDG_CONFIG_HOME` directories; the smoke seeds
+a test provider at an unreachable loopback port.
+
+- On Linux/X11, `REASONIX_XDOTOOL` names `xdotool`.
+- On Linux/X11, `REASONIX_XMESSAGE` optionally names `xmessage` for the separate-app focus check.
+- `REASONIX_SCREENSHOTS` optionally names the screenshot output directory.
+
+This test requires a working display. Windows and Wayland are not covered by
+this native smoke; successful builds do not establish native shortcut behavior.
 
 Packaging runs through electron-builder; `release-studio.yml` drives it on all
 three platforms. Linux ships a `.deb` because that is what makes Studio

@@ -521,7 +521,7 @@ func migrateLegacySessionSources(sink event.Sink, verbose bool) sessionMigration
 		if err != nil {
 			result.errs = append(result.errs, fmt.Errorf("%s: %w", src.label, err))
 			if verbose {
-				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "migration rescue: skipped " + src.label + ": " + err.Error()})
+				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: legacySessionImportFailure(src.label, err)})
 			}
 			continue
 		}
@@ -534,6 +534,18 @@ func migrateLegacySessionSources(sink event.Sink, verbose bool) sessionMigration
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "migration rescue: no legacy sessions needed migration"})
 	}
 	return result
+}
+
+// legacySessionImportFailure is the rescue notice for a source the implicit
+// import could not take. A directory it could not even list is named by its
+// path and read failure, so the user can fix the permission or the mount;
+// other failures keep the historical "skipped <label>" wording.
+func legacySessionImportFailure(label string, err error) string {
+	var unreadable *sessionstore.LegacySourceError
+	if errors.As(err, &unreadable) {
+		return "migration rescue: " + unreadable.Error()
+	}
+	return "migration rescue: skipped " + label + ": " + err.Error()
 }
 
 // startMeta builds the meta an imported conversation begins with, asking the 1.x

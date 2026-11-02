@@ -14,6 +14,8 @@ import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
 import { SECTION_NAME } from "./prefsnav";
 import { SettingsNav } from "./SettingsNav";
+import { SettingsPageStyle } from "./SettingsPageStyle";
+import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
 import { PlanApproval, DefaultMode } from "./PlanApproval";
 import { PeersSection } from "./PeersSection";
@@ -31,6 +33,7 @@ import { Packages } from "./Packages";
 import { ExtTabs, MarketGroup } from "./Market";
 import { InstalledLocation } from "./InstalledLocation";
 import { Switch } from "./Switch";
+import { ProviderHealthSetting } from "./ProviderHealthSetting";
 import { ServerRow } from "./ServerRow";
 import { SkillGroups } from "./SkillRow";
 import { Hooks } from "./Hooks";
@@ -73,7 +76,6 @@ import { Storage } from "./Storage";
 import { Appearance, SCHEMES } from "./Appearance";
 import { ScopeBar } from "./CapabilityScope";
 import { savedNotApplied, reason } from "../i18n/kernel";
-import { SettingsHeading } from "./SettingsHeading";
 import type { SettingsProps as Props } from "./SettingsProps";
 import { APPROVALS, approvalName, approvalNote } from "./approvals";
 
@@ -93,6 +95,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const localPort = localWorkspacePort ?? homePort;
   const [openedSection, openedAnchor = ""] = (opened ?? "").split(":", 2);
   const [at, setAt] = useState<Section>((openedSection as Section) || "session");
+  const [pages, setPages] = useState<Partial<Record<Section, string>>>(() => {
+    const first = pageOf((openedSection as Section) || "session", openedAnchor);
+    return first ? { [(openedSection as Section) || "session"]: first } : {};
+  });
+  const pageNow = pages[at] ?? firstPage(at);
   // 搜索的语料是这张表，不是屏幕上的 DOM：分区是按需挂载的，读 DOM 就只搜得到
   // 当前这一页，而为了搜索把每一页都挂起来会让隐藏页面开始发请求。
   const [query, setQuery] = useState("");
@@ -316,6 +323,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const go = (section: Section, anchor: string) => {
     navigation.leave(() => {
       setAt(section);
+      const target = pageOf(section, anchor);
+      if (target) setPages((p) => ({ ...p, [section]: target }));
       setQuery("");
       setLanded(anchor);
       if (section === "ext") setExtTab(anchor === "market" ? "market" : "installed");
@@ -401,9 +410,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       </div>
       <ConfigTrouble port={port} onRepaired={onChanged} />
       <div className="prefs-body">
-        <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at) navigation.leave(() => { setLanded(""); setAt(section); }); }} />
+        <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at) navigation.leave(() => { setLanded(""); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />
 
-        <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={`prefs-${at}`} data-sec={at}>
+        <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
           <Boundary
             fallback={
               <div className="find" data-lvl="err" role="alert">
@@ -415,7 +424,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {/* Keyed on the section: replacing this column is the navigation,
               and it is the one thing here whose mount really is the cause. */}
           <div className="prefs-col" key={at}>
-          <SettingsHeading section={at} value={nav[at]} danger={danger(at)} />
+          <SettingsPageStyle section={at} page={pageNow} />
           {/* Every refused write on every page lands in one state, so it is
               said in one place. Copied onto the pages somebody remembered, it
               was missing from the third that writes it: 创建隔离副本 was
@@ -483,6 +492,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {at === "persona" && <AgentPresets port={port} focusPersona={landed === "persona"} />}
 
           {at === "providers" && (
+            <>
+            <ProviderHealthSetting port={port} onChanged={onChanged} onFailed={setFailed} />
             <Group id="providers" title={t("模型服务")}
               hint={t("选择一个服务查看和修改；地址、密钥与模型列表保存后生效。自定义中转站的协议与模型会在连接后自动探测。")}>
               <Providers port={port} onChanged={() => { loadModels(); onChanged(); }} onFailed={setFailed} protocol={protocol}
@@ -490,6 +501,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                 declare={declare}
                 onProtocol={(a, kind) => switchProtocol(a.key, kind)} />
             </Group>
+            </>
           )}
 
           {at === "model" && (

@@ -71,6 +71,7 @@ func capabilitiesFor(cfg *config.Config, p *config.ProviderEntry, model string, 
 		return
 	}
 	into.ModelAlias = p.ModelAlias(model)
+	into.ModelShort = p.ModelShort(model)
 	resolved, ok := cfg.ResolveModel(p.Name + "/" + model)
 	if !ok || resolved.Name != p.Name || resolved.Model != model {
 		into.Vendor = vendorOf(p.BaseURL)

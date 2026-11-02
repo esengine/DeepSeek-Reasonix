@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/testenv"
+	"reasonix/internal/base/testscope"
 )
 
 // TestLockUserConfigEditsSerializesRMW drives concurrent load-modify-save
@@ -617,6 +618,9 @@ func TestAcquireConfigEditLockPathTightensOwnLockDir(t *testing.T) {
 // TestConfigEditLockRegistryDirIsUnderUserHome: the lock directory must not be a
 // shared, predictable /tmp path another identity could create first.
 func TestConfigEditLockRegistryDirIsUnderUserHome(t *testing.T) {
+	restore := testscope.InstallHome("")
+	t.Cleanup(restore)
+	t.Setenv("REASONIX_TEST_HOME", testenv.TempDir(t))
 	current, err := osuser.Current()
 	if err != nil || strings.TrimSpace(current.HomeDir) == "" {
 		t.Skip("OS user home unavailable")
@@ -662,6 +666,8 @@ func TestIsolatedHomeKeepsItsConfigEditLocksInsideIt(t *testing.T) {
 // Only what the isolated home holds moves: a file elsewhere (a project's
 // reasonix.toml) keeps its lock where every other launch will look for it.
 func TestIsolatedHomeLeavesOtherFilesLockedUnderTheAccountHome(t *testing.T) {
+	restore := testscope.InstallHome("")
+	t.Cleanup(restore)
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	elsewhere := filepath.Join(testenv.TempDir(t), "reasonix.toml")
 	lock, err := configFileEditLockPath(elsewhere)
@@ -703,5 +709,84 @@ func TestPathWithin(t *testing.T) {
 		if got := pathWithin(base, path); got != want {
 			t.Errorf("pathWithin(%q, %q) = %v, want %v", base, path, got, want)
 		}
+	}
+}
+
+func TestIsolatedTestUserStateContainsConfigEditLocks(t *testing.T) {
+	cleanup, err := testenv.IsolateUserState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	home := os.Getenv("HOME")
+	for _, path := range []string{UserConfigPath(), filepath.Join(testenv.TempDir(t), "reasonix.toml")} {
+		lock, err := configFileEditLockPath(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("config %q chooses lock %q with isolated HOME %q", path, lock, home)
+		if !homeHolds(home, lock) {
+			t.Errorf("config edit lock escaped isolated test home: %q", lock)
+			continue
+		}
+		unlock, err := LockConfigFileEdits(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unlock()
+		if _, err := os.Stat(lock); err != nil {
+			t.Fatalf("lock file was not created in isolated home: %v", err)
+		}
+	}
+}
+
+func TestIsolatedTestUserStateConfigEditLocksInChildProcess(t *testing.T) {
+	if os.Getenv("REASONIX_CONFIG_TEST_SCOPE_HELPER") == "1" {
+		path := os.Getenv("REASONIX_CONFIG_TEST_SCOPE_PATH")
+		if path == "" {
+			path = UserConfigPath()
+		}
+		lock, err := configFileEditLockPath(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !homeHolds(os.Getenv("REASONIX_TEST_HOME"), lock) {
+			t.Fatalf("child process lock escaped isolated test home: %q", lock)
+		}
+		unlock, err := LockConfigFileEdits(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unlock()
+		t.Logf("child config %q uses isolated lock %q", path, lock)
+		return
+	}
+	cleanup, err := testenv.IsolateUserState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []struct {
+		name string
+		path string
+	}{
+		{name: "default"},
+		{name: "project", path: filepath.Join(testenv.TempDir(t), "reasonix.toml")},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Setenv("REASONIX_CONFIG_LOCK_HELPER", "1")
+			t.Setenv("REASONIX_CONFIG_TEST_SCOPE_HELPER", "1")
+			t.Setenv("REASONIX_CONFIG_TEST_SCOPE_PATH", scenario.path)
+			cmd := exec.Command(exe, "-test.run=^TestIsolatedTestUserStateConfigEditLocksInChildProcess$", "-test.v")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("child process: %v\n%s", err, output)
+			} else {
+				t.Logf("%s", output)
+			}
+		})
 	}
 }

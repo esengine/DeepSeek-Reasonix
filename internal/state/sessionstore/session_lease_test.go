@@ -480,3 +480,89 @@ func TestAProbeDoesNotCreateTheLeaseLock(t *testing.T) {
 		t.Fatalf("a probe created the lease lock (stat err = %v); the common uncontended case must touch nothing", err)
 	}
 }
+
+// The three ownership answers are different facts, and the probe must not fold
+// "I could not tell" into either of the other two. A lock it cannot open is
+// not a holder the evidence names: destructive callers get their own state to
+// refuse on, while the bool convenience keeps saying "may be busy".
+func TestSessionLeaseOwnershipKeepsTheThreeAnswersApart(t *testing.T) {
+	foreignInfo := func(t *testing.T, key string) {
+		t.Helper()
+		if err := SaveSessionLeaseInfo(key, SessionLeaseInfo{
+			SessionPath: key,
+			WriterID:    "other-host-1234-deadbeef",
+			PID:         os.Getpid() + 1,
+			AcquiredAt:  time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("SaveSessionLeaseInfo: %v", err)
+		}
+	}
+
+	t.Run("free without sidecar or lock", func(t *testing.T) {
+		userPath, _ := leaseTestPath(t)
+		if err := SessionLeaseOwnership(userPath); err != nil {
+			t.Fatalf("SessionLeaseOwnership = %v, want free", err)
+		}
+	})
+
+	t.Run("held by a foreign sidecar and a live lock", func(t *testing.T) {
+		userPath, key := leaseTestPath(t)
+		unlock, err := tryLockSessionLeaseFile(key)
+		if err != nil {
+			t.Fatalf("tryLockSessionLeaseFile: %v", err)
+		}
+		defer unlock()
+		foreignInfo(t, key)
+		t.Cleanup(func() { _ = os.Remove(sessionLeaseInfoPath(key)) })
+		if err := SessionLeaseOwnership(userPath); !errors.Is(err, ErrSessionLeaseHeld) {
+			t.Fatalf("SessionLeaseOwnership = %v, want ErrSessionLeaseHeld", err)
+		}
+	})
+
+	t.Run("held lock without a sidecar", func(t *testing.T) {
+		// The merged #14416 case: deleting the metadata does not free a lock a
+		// live holder keeps, and the three-state probe must agree with the bool.
+		userPath, key := leaseTestPath(t)
+		unlock, err := tryLockSessionLeaseFile(key)
+		if err != nil {
+			t.Fatalf("tryLockSessionLeaseFile: %v", err)
+		}
+		defer unlock()
+		if err := SessionLeaseOwnership(userPath); !errors.Is(err, ErrSessionLeaseHeld) {
+			t.Fatalf("SessionLeaseOwnership = %v, want ErrSessionLeaseHeld", err)
+		}
+	})
+
+	t.Run("crashed foreign leftover is free", func(t *testing.T) {
+		userPath, key := leaseTestPath(t)
+		foreignInfo(t, key)
+		t.Cleanup(func() { _ = os.Remove(sessionLeaseInfoPath(key)) })
+		if err := SessionLeaseOwnership(userPath); err != nil {
+			t.Fatalf("SessionLeaseOwnership = %v, want free (the lock is free)", err)
+		}
+		if _, err := os.Stat(sessionLeaseInfoPath(key)); !os.IsNotExist(err) {
+			t.Fatalf("stale sidecar should still be retired, stat err = %v", err)
+		}
+	})
+
+	t.Run("unopenable lock is unprovable", func(t *testing.T) {
+		userPath, key := leaseTestPath(t)
+		foreignInfo(t, key)
+		t.Cleanup(func() { _ = os.Remove(sessionLeaseInfoPath(key)) })
+		// A directory where the lock file belongs: the probe cannot open it, and
+		// the failure is not ErrSessionLeaseHeld.
+		if err := os.Mkdir(store.SessionLeaseLock(key), 0o755); err != nil {
+			t.Fatalf("mkdir lease lock: %v", err)
+		}
+		err := SessionLeaseOwnership(userPath)
+		if !errors.Is(err, ErrSessionLeaseUnprovable) {
+			t.Fatalf("SessionLeaseOwnership = %v, want ErrSessionLeaseUnprovable", err)
+		}
+		if errors.Is(err, ErrSessionLeaseHeld) {
+			t.Fatal("the unprovable answer also matched ErrSessionLeaseHeld")
+		}
+		if !SessionLeaseHeldByOtherRuntime(userPath) {
+			t.Fatal("the bool convenience stopped saying may-be-busy for an unprovable lease")
+		}
+	})
+}

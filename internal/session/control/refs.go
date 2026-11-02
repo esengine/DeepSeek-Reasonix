@@ -5,9 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"os"
@@ -16,6 +16,7 @@ import (
 	"reasonix/internal/contract/config"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,6 +61,7 @@ type ref struct {
 	baseDir     string // refFile override for session-authorized external roots
 	displayPath string // refFile label/path exposed in the resolved context block
 	raw         string // the original token after '@', for labelling
+	lines       *refLineRange
 }
 
 // ExternalFolderRefEntry is a session-authorized entry under a dropped external
@@ -442,29 +444,16 @@ func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 			refs = append(refs, ref{kind: refResource, server: tok[:i], uri: tok[i+1:], raw: tok})
 			continue
 		}
-		if r, ok := c.externalFolderRef(tok); ok {
-			refs = append(refs, r)
+		path, lines := splitRefLineRange(tok)
+		r, ok := c.detectFileRef(path, scopedOnly)
+		if !ok {
 			continue
 		}
-		if c.workspaceRoot != "" {
-			if rel, ok := workspaceRefPath(tok, c.workspaceRoot); ok {
-				kind := refFile
-				if isAttachmentRef(rel) && isImageAttachmentRef(rel) {
-					kind = refImage
-				}
-				refs = append(refs, ref{kind: kind, path: rel, raw: tok})
-			}
-			continue
+		r.raw, r.lines = tok, lines
+		if lines != nil {
+			r.kind = refFile
 		}
-		if scopedOnly {
-			continue
-		}
-		if r, ok := classifyRef(tok, known, func(p string) bool {
-			_, err := os.Stat(p)
-			return err == nil
-		}); ok {
-			refs = append(refs, r)
-		}
+		refs = append(refs, r)
 	}
 	return refs
 }
@@ -696,20 +685,27 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
 			}
-			appendRefBlock(&b, "resource", `ref="@`+r.raw+`"`, text)
+			appendRefBlock(&b, "resource", []xml.Attr{refAttr("ref", "@"+r.raw)}, text)
 		case refFile:
 			baseDir := c.workspaceRoot
 			if r.baseDir != "" {
 				baseDir = r.baseDir
 			}
-			text, isDir, err := readFileRef(r.path, baseDir)
+			var text string
+			var isDir bool
+			var err error
+			if r.lines != nil {
+				text, err = readFileRefLines(ctx, r.path, baseDir, *r.lines)
+			} else {
+				text, isDir, err = readFileRef(r.path, baseDir)
+			}
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
 			}
 			pathInstructions, diagnostics := c.resolveReferencedInstructions(r, baseDir, includedInstructionPaths, includedInstructionBodies)
 			if pathInstructions != "" {
-				appendRefBlock(&b, "path-instructions", `target="`+html.EscapeString(displayPathForRef(r))+`"`, pathInstructions)
+				appendRefBlock(&b, "path-instructions", []xml.Attr{refAttr("target", displayPathForRef(r))}, pathInstructions)
 			}
 			for _, diagnostic := range diagnostics {
 				errs = append(errs, "@"+r.raw+" — "+diagnostic.Message)
@@ -722,9 +718,13 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 			if r.displayPath != "" {
 				displayPath = r.displayPath
 			}
-			appendRefBlock(&b, tag, `path="`+displayPath+`"`, text)
+			attrs := []xml.Attr{refAttr("path", displayPath)}
+			if r.lines != nil {
+				attrs = append(attrs, refAttr("start-line", strconv.Itoa(r.lines.start)), refAttr("end-line", strconv.Itoa(r.lines.end)))
+			}
+			appendRefBlock(&b, tag, attrs, text)
 		case refImage:
-			appendRefBlock(&b, "image", `path="`+r.path+`"`, "[image attachment at @"+r.path+". Whether this model sees it, and what to do when it cannot, is stated once in the turn's attached-images note.]")
+			appendRefBlock(&b, "image", []xml.Attr{refAttr("path", r.path)}, "[image attachment at @"+r.path+". Whether this model sees it, and what to do when it cannot, is stated once in the turn's attached-images note.]")
 		}
 	}
 	return b.String(), errs
@@ -777,13 +777,6 @@ func cleanAbsPath(path string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Clean(abs)
-}
-
-func appendRefBlock(b *strings.Builder, tag, attr, body string) {
-	if b.Len() > 0 {
-		b.WriteString("\n\n")
-	}
-	fmt.Fprintf(b, "<%s %s>\n%s\n</%s>", tag, attr, body, tag)
 }
 
 // maxDirEntries caps how many directory entries are injected so @some-huge-dir

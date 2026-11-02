@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"io"
 	"os"
 	"reasonix/internal/state/sessionstore"
@@ -147,7 +148,9 @@ func machineTasks(dir, sessionFilter string, identityKey []byte) ([]machineTask,
 		if sessionFilter != "" && sessionID != sessionFilter {
 			continue
 		}
-		sessionActive := sessionstore.SessionLeaseHeld(session.Path)
+		leaseErr := sessionstore.SessionLeaseOwnership(session.Path)
+		sessionActive := errors.Is(leaseErr, sessionstore.ErrSessionLeaseHeld)
+		sessionUnknown := leaseErr != nil && !sessionActive
 		views, err := jobs.ListArtifactViews(session.Path)
 		if err != nil {
 			return nil, err
@@ -159,10 +162,19 @@ func machineTasks(dir, sessionFilter string, identityKey []byte) ([]machineTask,
 			status := view.Status
 			finishedAt := machineUnixMillis(view.FinishedAt)
 			artifactComplete := view.ArtifactComplete
-			if status == jobs.Running && !sessionActive {
-				status = jobs.Interrupted
-				finishedAt = ""
-				artifactComplete = false
+			if status == jobs.Running {
+				switch {
+				case sessionUnknown:
+					// The probe did not prove a holder, but it also did not prove
+					// none: neither running nor interrupted is supported.
+					status = jobs.Status(machineStateUnknown)
+					finishedAt = ""
+					artifactComplete = false
+				case !sessionActive:
+					status = jobs.Interrupted
+					finishedAt = ""
+					artifactComplete = false
+				}
 			}
 			out = append(out, machineTask{
 				ID:               view.ID,
@@ -186,7 +198,10 @@ func machineTasks(dir, sessionFilter string, identityKey []byte) ([]machineTask,
 			finishedAt := ""
 			artifactComplete := false
 			if status == sessionstore.SubagentRunning {
-				if !sessionActive {
+				switch {
+				case sessionUnknown:
+					status = sessionstore.SubagentStatus(machineStateUnknown)
+				case !sessionActive:
 					status = sessionstore.SubagentInterrupted
 				}
 			} else {

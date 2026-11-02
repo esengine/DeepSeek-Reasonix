@@ -46,11 +46,12 @@ type RunDiagnostics struct {
 type TrackedCommand struct {
 	cmd *exec.Cmd
 
-	mu     sync.Mutex
-	job    *TrackedJob
-	tree   *TreeTracker
-	killed bool
-	diag   RunDiagnostics
+	mu       sync.Mutex
+	job      *TrackedJob
+	tree     *TreeTracker
+	killed   bool
+	diag     RunDiagnostics
+	rootWait <-chan struct{}
 }
 
 // RunCommand starts cmd and waits for it. When tracking is enabled, cancellation
@@ -140,7 +141,13 @@ func normalizeRunOptions(opts RunOptions) RunOptions {
 
 func waitForTrackedCommand(ctx context.Context, tracked *TrackedCommand, wait func() error, grace, retryEvery, retryFor time.Duration) error {
 	waitCh := make(chan error, 1)
-	go func() { waitCh <- wait() }()
+	done := make(chan struct{})
+	tracked.mu.Lock()
+	tracked.rootWait = done
+	tracked.mu.Unlock()
+	go func() {
+		publishRootWait(done, waitCh, wait())
+	}()
 
 	select {
 	case err := <-waitCh:

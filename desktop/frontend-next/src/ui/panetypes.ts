@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { AgentPort, ContextBreakdown, McpEntry, SessionStatus } from "../port/port";
+import type { AgentPort, ContextBreakdown, McpEntry, SessionStatus, WorkspaceInfo } from "../port/port";
 import type { HubPort, RuntimeView } from "../port/hub";
 import type { ConnectOffer } from "./ConnectNote";
 import type { PaneView } from "../state/paneview";
@@ -8,6 +8,7 @@ import type { PaneView } from "../state/paneview";
 // focus: everything else about a session stays inside the pane that owns it.
 export interface PaneReport {
   status: SessionStatus | null;
+  workspace: WorkspaceInfo | null;
   title: string;
   steer: number;
   run: string;

@@ -46,6 +46,7 @@ export function EditConn({
   const [models, setModels] = useState<string[]>(seededModels);
   const [picked, setPicked] = useState<string[]>(entry.models);
   const [aliases, setAliases] = useState<Record<string, string>>(entry.modelAliases ?? {});
+  const [hidePrefix, setHidePrefix] = useState(entry.hideModelPrefix === true);
   const [vision, setVision] = useState<string[]>(seededVision);
   const [visionSettable, setVisionSettable] = useState<string[] | undefined>(
     entry.visionSettable ? [...new Set([...entry.visionSettable, ...(initialCheck?.vision ?? [])])] : undefined,
@@ -228,6 +229,7 @@ export function EditConn({
     baseUrl: baseUrl.trim(),
     apiKey: apiKey.trim(),
     models: picked,
+    ...(hidePrefix !== (entry.hideModelPrefix === true) && { hideModelPrefix: hidePrefix }),
     modelAliases: Object.fromEntries(Object.entries(aliases).filter(([m, value]) => picked.includes(m) && value.trim()).map(([m, value]) => [m, value.trim()])),
     default: picked.includes(def) ? def : picked[0] ?? "",
     vision: vision.filter((m) => picked.includes(m)),
@@ -356,11 +358,24 @@ export function EditConn({
           </label>
         </div>
         {(picked.length > 1 || picked.some((m) => entry.modelLimits?.[m])) && (
-          <ModelLimits models={picked} value={limitText} onChange={setLimitText} inherited={inheritedLimitsFor} />
+          <ModelLimits models={picked} value={limitText} onChange={setLimitText} inherited={inheritedLimitsFor} labels={entry.modelShorts} />
         )}
-        {picked.length > 0 && <ModelPrices models={picked} value={priceText} onChange={setPriceText} official={entry.officialPricing === true} stored={entry.modelPrices ?? {}}
+        {picked.length > 0 && <ModelPrices models={picked} value={priceText} onChange={setPriceText} official={entry.officialPricing === true} stored={entry.modelPrices ?? {}} labels={entry.modelShorts}
           onOpenSource={(url) => void Promise.resolve(port.openExternal(url)).catch(() => {})} />}
         {picked.length > 0 && <div className="fields"><BillingModeField value={billing} onChange={setBilling} /></div>}
+      </div>
+
+      <div className="vway" data-field="hide-model-prefix">
+        <span className="lb">{t("隐藏共同前缀")}</span>
+        <div className="seg" role="group" aria-label={t("{name} 的模型名前缀", { name: entry.displayName?.trim() || entry.name })}>
+          {[true, false].map((on) => (
+            <button key={String(on)} type="button" data-action="provider.draft" data-value={`hide-model-prefix:${on}`}
+              aria-pressed={hidePrefix === on} disabled={busy !== ""} onClick={() => setHidePrefix(on)}>
+              {t(on ? "开" : "关")}
+            </button>
+          ))}
+        </div>
+        <span className="why">{t("路由类服务给每个模型加的同一段前缀（如 group/）在显示时省略，只改显示；模型 ID 不变，自己填的别名优先，保存后生效。")}</span>
       </div>
 
       <div className="mlist">
@@ -403,6 +418,7 @@ export function EditConn({
           visionLocked={visionLocked}
           onCheck={checkModel}
           aliases={aliases}
+          labels={entry.modelShorts}
           onAlias={(m, value) => setAliases((current) => ({ ...current, [m]: value }))}
           checkDisabled={busy !== "" || testing}
           onToggle={(m) => toggle(picked, setPicked, m)}

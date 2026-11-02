@@ -15,6 +15,9 @@ func ArgsMakeReadOnlyCommandWrite(base, sub string, fields []string) bool {
 		return false
 	}
 	base = strings.ToLower(base)
+	if probes, runtime := runtimeProbes[base]; runtime {
+		return len(fields) != 2 || !slices.Contains(probes, fields[1])
+	}
 	args := fields[1:]
 	if sub != "" {
 		if len(args) == 0 {
@@ -26,6 +29,17 @@ func ArgsMakeReadOnlyCommandWrite(base, sub string, fields []string) bool {
 		return rule(sub, args)
 	}
 	return false
+}
+
+// runtimeProbes holds the one spelling of each language runtime's version probe
+// that is a read, exactly as typed: the tables match the second word
+// lowercased, which cannot tell python's -V (print the version) from -v
+// (trace imports and run the script). Anything else after the runtime's name
+// runs a program.
+var runtimeProbes = map[string][]string{
+	"node":    {"-v", "--version"},
+	"python":  {"-V", "--version"},
+	"python3": {"-V", "--version"},
 }
 
 // gitTagIsListing reports whether a `git tag` invocation only lists tags. A

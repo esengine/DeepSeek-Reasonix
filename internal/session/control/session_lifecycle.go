@@ -255,7 +255,7 @@ func (c *Controller) Branch(name string) (string, error) {
 		c.sessionPath = newPath
 		c.guardianPath = guardian.PathFor(newPath)
 		c.mu.Unlock()
-		c.bindExecutorProjection(newPath, false)
+		c.bindExecutorProjection(newPath, true)
 		c.ResetPlannerSession()
 		c.setActiveJobSession(newPath)
 		c.rebindCheckpoints(newPath)

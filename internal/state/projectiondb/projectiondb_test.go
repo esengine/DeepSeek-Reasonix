@@ -83,6 +83,38 @@ func TestInspectDoesNotCreateMissingDatabase(t *testing.T) {
 	}
 }
 
+// A live catalog keeps its recent rows in the WAL. Reading the file as
+// immutable=1 would answer from the last checkpoint, so an inspection would
+// call a row that just recorded a failure absent.
+func TestOpenReadOnlySeesRowsAWriterHasNotCheckpointed(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(testenv.TempDir(t), "catalog.sqlite")
+	handle, err := Open(context.Background(), OpenOptions{Path: path, MemoryName: "wal", Migrations: testMigrations()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.DB.Close()
+	// Settle the schema into the main file so only the row below is in the WAL.
+	if _, err := handle.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.DB.Exec(`INSERT INTO values_table(value) VALUES('wal-only')`); err != nil {
+		t.Fatal(err)
+	}
+	db, err := OpenReadOnly(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var rows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM values_table`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("rows = %d, want the row the writer has not checkpointed", rows)
+	}
+}
+
 func TestRebuildPublishesOnlyValidatedReplacement(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(testenv.TempDir(t), "catalog.sqlite")

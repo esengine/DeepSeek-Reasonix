@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { bytes } from "../i18n/format";
 import { current, t } from "../i18n";
 import type { UpdateProgress, VersionHub, VersionNotes } from "../port/port";
@@ -29,6 +29,7 @@ type Port = {
   restartToVersion(v: string, force: boolean): Promise<void>;
   onUpdateProgress(cb: (p: UpdateProgress) => void): () => void;
   versionNotes?(version: string, retry?: boolean): Promise<VersionNotes>;
+  openExternal?(url: string): Promise<void>;
 };
 
 // A document read stays read: it is kept for as long as the panel is mounted,
@@ -83,6 +84,13 @@ function say(p: UpdateProgress): string {
 
 // The newest few older releases stay on the page; the rest are history one click away.
 const PAST_SHOWN = 3;
+
+// An installer is a file to save, which the window's own browser does not do.
+function openInstallerPage(e: MouseEvent<HTMLAnchorElement>, port: Port, version: string) {
+  if (!port.openExternal) return;
+  e.preventDefault();
+  void port.openExternal(releasePage(version)).catch(() => {});
+}
 
 export function Versions({ port }: { port: Port }) {
   const [hub, setHub] = useState<VersionHub | null>(null);
@@ -349,7 +357,7 @@ export function Versions({ port }: { port: Port }) {
           <span className="why">
             {failure.why}
             {failure.manual && (
-              <a className="lnk" href={releasePage(progress.version)} target="_blank" rel="noreferrer noopener">
+              <a className="lnk" href={releasePage(progress.version)} target="_blank" rel="noreferrer noopener" data-action="versions.full-installer" onClick={(e) => openInstallerPage(e, port, progress.version)}>
                 {t("下载完整安装包")}
               </a>
             )}

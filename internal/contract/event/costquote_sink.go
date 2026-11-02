@@ -130,7 +130,7 @@ func (s *CostQuoteSink) Emit(e Event) {
 		s.Ctx.SetDisplay(e.Detail)
 	}
 	if e.Kind == Usage && e.Usage != nil && e.CostQuote == nil {
-		e.CostQuote = EnsureCostQuote(e, s.Ctx)
+		e.CostQuote = s.QuoteUsage(e)
 	}
 	if e.Kind == GuardianAssessment && e.Guardian.Usage != nil && e.Guardian.CostQuote == nil {
 		e.Guardian.CostQuote = EnsureCostQuote(guardianUsageEvent(e), s.Ctx)

@@ -119,8 +119,8 @@ func TestEffectGrantedWorkspaceRootIsWritableAndTheOtherIsNot(t *testing.T) {
 	if strings.Contains(userMessages(without[0]), "Additional folders") {
 		t.Fatal("a workspace with no grants carried the extra-folder line")
 	}
-	if extraRootPrefix(with[0]) != extraRootPrefix(without[0]) {
-		t.Fatalf("an extra root moved the cache-stable prefix")
+	if a, b := extraRootPrefix(with[0]), extraRootPrefix(without[0]); a != b {
+		t.Fatalf("an extra root moved the cache-stable prefix: %s", firstDifference(a, b))
 	}
 }
 

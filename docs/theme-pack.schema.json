@@ -50,6 +50,15 @@
         "taskOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "overlayStrength": { "type": "number", "minimum": 0, "maximum": 1 },
         "textGlow": { "type": "string", "enum": ["default", "none"], "default": "default", "description": "Studio transcript text shadow when a backdrop is active; does not change the frosted backing." },
+        "surfaceOpacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Studio backdrop surface alphas, independently per scheme. Omitted values retain the existing surface paint.",
+          "properties": {
+            "light": { "$ref": "#/$defs/surfaceOpacity" },
+            "dark": { "$ref": "#/$defs/surfaceOpacity" }
+          }
+        },
         "paneOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
@@ -62,6 +71,17 @@
     }
   ],
   "$defs": {
+    "surfaceOpacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nav": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rail": { "type": "number", "minimum": 0, "maximum": 1 },
+        "chrome": { "type": "number", "minimum": 0, "maximum": 1 },
+        "side": { "type": "number", "minimum": 0, "maximum": 1 },
+        "compose": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
     "hexColor": {
       "type": "string",
       "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"

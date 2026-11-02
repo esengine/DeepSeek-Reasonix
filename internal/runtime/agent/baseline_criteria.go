@@ -6,14 +6,12 @@ package agent
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"reasonix/internal/base/diff"
-	"reasonix/internal/base/fileutil"
 	"reasonix/internal/safety/evidence"
 )
 
@@ -117,23 +115,28 @@ func (a *Agent) captureCriteriaUnder(ctx context.Context, store *evidence.Baseli
 	if strings.TrimSpace(root) == "" {
 		return nil
 	}
-	// A stop has to reach a walk that crosses the whole writable domain.
-	checked := 0
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if checked++; checked%criteriaWalkCancelCheckEvery == 0 && ctx.Err() != nil {
-			return filepath.SkipAll
+	candidates := criterionCandidates(ctx, root, os.ReadDir)
+	var wanted []string
+	for _, path := range candidates {
+		if !watchablePath(path, a.writeWorkspaceRoot) {
+			continue
 		}
-		if err != nil {
-			return nil
+		if _, held := a.task.baselineCriteria[path]; held {
+			continue
 		}
-		if d.IsDir() {
-			if fileutil.IsVCSStoreDir(d.Name()) && path != root {
-				return filepath.SkipDir
-			}
-			return nil
+		wanted = append(wanted, path)
+	}
+	contents := criterionBytes(ctx, wanted)
+	for _, path := range wanted {
+		content, ok := contents[path]
+		if !ok {
+			continue
 		}
-		return a.captureCriterionAt(store, path)
-	})
+		if err := a.holdCriterion(store, path, content); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // criteriaWalkCancelCheckEvery bounds how much walking a stop waits on, the way
@@ -159,6 +162,13 @@ func (a *Agent) captureCriterionAt(store *evidence.BaselineStore, path string) e
 	if err != nil || !evidence.HoldsTestCriteria(path, content) {
 		return nil
 	}
+	return a.holdCriterion(store, path, content)
+}
+
+// holdCriterion files bytes already known to hold criteria. The first capture of
+// a path stands; a store that cannot keep it refuses only a session that
+// promised to.
+func (a *Agent) holdCriterion(store *evidence.BaselineStore, path string, content []byte) error {
 	criterion, err := store.Capture(path, content)
 	if err != nil {
 		if !a.guaranteesBaselineProvenance() {

@@ -26,14 +26,19 @@ type RedactSessionsOptions struct {
 }
 
 // RedactSessionsResult summarizes a historical session-log redaction run.
+// FilesSkipped is the total refused because ownership was not free;
+// FilesSkippedHeld and FilesSkippedUnprovable split it by the state the probe
+// actually proved. Only the held split is a lease claim the evidence supports.
 type RedactSessionsResult struct {
-	Dirs           []string `json:"dirs"`
-	FilesScanned   int64    `json:"files_scanned"`
-	FilesChanged   int64    `json:"files_changed"`
-	FilesSkipped   int64    `json:"files_skipped"`
-	BytesRewritten int64    `json:"bytes_rewritten"`
-	DryRun         bool     `json:"dry_run"`
-	Errors         []string `json:"errors,omitempty"`
+	Dirs                   []string `json:"dirs"`
+	FilesScanned           int64    `json:"files_scanned"`
+	FilesChanged           int64    `json:"files_changed"`
+	FilesSkipped           int64    `json:"files_skipped"`
+	FilesSkippedHeld       int64    `json:"files_skipped_held"`
+	FilesSkippedUnprovable int64    `json:"files_skipped_unprovable"`
+	BytesRewritten         int64    `json:"bytes_rewritten"`
+	DryRun                 bool     `json:"dry_run"`
+	Errors                 []string `json:"errors,omitempty"`
 }
 
 // RedactSessions masks credential-shaped values already persisted in Reasonix
@@ -79,9 +84,20 @@ func RedactSessions(opts RedactSessionsOptions) RedactSessionsResult {
 		})
 		for _, path := range candidates {
 			res.FilesScanned++
-			if sessionPath := redactionSessionPath(path); sessionPath != "" && sessionRedactionLeaseHeld(sessionPath) {
-				res.FilesSkipped++
-				continue
+			if sessionPath := redactionSessionPath(path); sessionPath != "" {
+				if state := sessionRedactionLeaseState(sessionPath); state != nil {
+					res.FilesSkipped++
+					if errors.Is(state, sessionstore.ErrSessionLeaseHeld) {
+						res.FilesSkippedHeld++
+					} else {
+						// Not proof of a holder, so refuse and say so: rewriting a
+						// session whose ownership is unproven risks a live write,
+						// and "active lease held" would claim what was never seen.
+						res.FilesSkippedUnprovable++
+						res.Errors = append(res.Errors, fmt.Sprintf("%s: skipped: %v", path, state))
+					}
+					continue
+				}
 			}
 			changed, rewritten, err := redactSessionArtifact(path, opts.DryRun)
 			if err != nil {
@@ -178,15 +194,28 @@ func redactionSessionPath(path string) string {
 	}
 }
 
-func sessionRedactionLeaseHeld(sessionPath string) bool {
-	if sessionstore.SessionLeaseHeld(sessionPath) {
-		return true
+// sessionRedactionLeaseState reports the ownership state of the session an
+// artifact belongs to: nil when it is safe to rewrite, ErrSessionLeaseHeld for
+// a live holder, ErrSessionLeaseUnprovable when the probe cannot decide. A
+// guardian log belongs to its parent transcript; a proven holder wins over an
+// unprovable probe because it must never be rewritten.
+func sessionRedactionLeaseState(sessionPath string) error {
+	state := sessionstore.SessionLeaseOwnership(sessionPath)
+	before, guardian := strings.CutSuffix(sessionPath, ".guardian.jsonl")
+	if !guardian {
+		return state
 	}
-	if before, ok := strings.CutSuffix(sessionPath, ".guardian.jsonl"); ok {
-		parent := before + ".jsonl"
-		return sessionstore.SessionLeaseHeld(parent)
+	parent := sessionstore.SessionLeaseOwnership(before + ".jsonl")
+	switch {
+	case errors.Is(state, sessionstore.ErrSessionLeaseHeld):
+		return state
+	case errors.Is(parent, sessionstore.ErrSessionLeaseHeld):
+		return parent
+	case state != nil:
+		return state
+	default:
+		return parent
 	}
-	return false
 }
 
 // redactSessionArtifact dispatches one candidate file to a format-aware

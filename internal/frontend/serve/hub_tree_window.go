@@ -11,16 +11,19 @@ import (
 // the request does not ask for more.
 const defaultTreeWindow = 50
 
-// treeWindow says how much of each workspace /tree builds. A window is a
-// request for the newest N rows; the counts beside them always cover all rows.
+// treeWindow bounds each project's sidebar rows, or a global recent page.
+// Counts cover the matching history, not only the rows returned.
 type treeWindow struct {
 	progressive   bool
 	retryMetadata bool
 	limit         int
+	recent        bool
+	offset        int
+	hideLegacy    bool
 	limits        map[string]int
-	// scope picks which rows the window counts: every row, the active (not
-	// archived) ones, or only the archived. A pinned active conversation is
-	// always built, whatever the scope, so the pinned count never moves with it.
+	// scope counts every row, only active rows, or only archived rows.
+	// Ordinary windows also include open and pinned active rows; recent
+	// pages contain only their matching activity-ordered rows.
 	scope treeScope
 	// query keeps the rows whose title or name contains it, case-blind; a
 	// workspace whose own name contains it keeps all of its rows.
@@ -45,6 +48,12 @@ const maxTreeQuery = 200
 
 // limitFor is the row bound for one workspace; 0 means every row.
 func (w treeWindow) limitFor(root string) int {
+	if w.recent {
+		if w.limit == 0 {
+			return 0
+		}
+		return w.offset + w.limit
+	}
 	if n, ok := w.limits[root]; ok {
 		return n
 	}
@@ -59,6 +68,24 @@ func parseTreeWindow(w http.ResponseWriter, r *http.Request) (treeWindow, bool) 
 	q := r.URL.Query()
 	window.progressive = q.Get("progressive") == "1"
 	window.retryMetadata = q.Get("retryMetadata") == "1"
+	window.hideLegacy = q.Get("hideLegacy") == "1"
+	switch q.Get("order") {
+	case "":
+	case "recent":
+		window.recent = true
+		window.progressive = false
+	default:
+		badValue(w, "order", "recent")
+		return window, false
+	}
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > int(^uint(0)>>1)-maxTreeWindow || !window.recent {
+			badValue(w, "offset", "a non-negative recent-page offset")
+			return window, false
+		}
+		window.offset = n
+	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 0 {

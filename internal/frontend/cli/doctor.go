@@ -116,12 +116,19 @@ func doctorRepairCommand(args []string) int {
 		fmt.Println("Reasonix repair report")
 		for _, check := range report.Checks {
 			status := "ok"
-			if !check.Exists {
+			switch {
+			case check.State == repair.ConfigStateUnreadable:
+				// The file may be right there; this process cannot tell.
+				status = "unreadable: cannot tell whether it is valid"
+			case check.State == repair.ConfigStateMissing, !check.Exists && check.Valid:
 				status = "missing (defaults apply)"
-			} else if !check.Valid {
+			case check.State == repair.ConfigStateInvalid, !check.Valid:
 				status = "invalid: " + check.Error
 			}
 			fmt.Printf("  %-8s %s\n             %s\n", check.Scope, status, check.Path)
+			if check.State == repair.ConfigStateUnreadable {
+				fmt.Printf("             cause: %s\n", check.Error)
+			}
 			if check.SnapshotAge != "" {
 				fmt.Printf("             snapshot %s (%s old)\n", check.SnapshotRecordedAt, check.SnapshotAge)
 			}
@@ -129,19 +136,34 @@ func doctorRepairCommand(args []string) int {
 		for _, action := range report.Applied {
 			fmt.Println("  applied:", action)
 		}
+		for _, check := range report.Checks {
+			if check.State != repair.ConfigStateUnreadable || (check.Scope == "project" && !*includeProject) {
+				continue
+			}
+			if *apply {
+				// A repair cannot replace what it could not read, so it must
+				// say why it left the file alone instead of claiming a fix.
+				fmt.Printf("  --apply refused: %s config is unreadable, so nothing was written to it: %s\n", check.Scope, check.Error)
+			} else {
+				fmt.Printf("  --apply would refuse: %s config is unreadable: %s\n", check.Scope, check.Error)
+			}
+		}
 		if !*apply {
 			// Name the age here: --apply reinstates the snapshot over the
 			// user's file, reverting every setting changed since it was taken.
 			fmt.Println("  dry run; pass --apply to repair the global config")
 			for _, check := range report.Checks {
-				if check.Scope == "global" && check.Exists && !check.Valid && check.SnapshotAge != "" {
+				if check.State == repair.ConfigStateInvalid && check.Scope == "global" && check.Exists && check.SnapshotAge != "" {
 					fmt.Printf("  --apply would restore a snapshot %s old, discarding config changes made since\n", check.SnapshotAge)
 				}
 			}
 		}
 	}
+	// An inconclusive check is not a clean bill of health: exit 1 when the
+	// probe could not run, as doctor redact-sessions does. Missing stays a pass
+	// because the defaults apply.
 	for _, check := range report.Checks {
-		if check.Exists && !check.Valid {
+		if check.NeedsAttention() {
 			return 1
 		}
 	}
@@ -238,7 +260,18 @@ func doctorRedactSessionsCommand(args []string) int {
 		}
 		fmt.Fprintf(os.Stdout, "session secret cleanup %s %d/%d files", action, res.FilesChanged, res.FilesScanned)
 		if res.FilesSkipped > 0 {
-			fmt.Fprintf(os.Stdout, " (%d skipped: active lease held)", res.FilesSkipped)
+			// Say which state kept each file from being rewritten. Only a proven
+			// holder may be reported as an active lease; a probe that could not
+			// decide is its own reason, never folded into that claim.
+			switch {
+			case res.FilesSkippedUnprovable == 0:
+				fmt.Fprintf(os.Stdout, " (%d skipped: active lease held)", res.FilesSkipped)
+			case res.FilesSkippedHeld == 0:
+				fmt.Fprintf(os.Stdout, " (%d skipped: could not prove the lease)", res.FilesSkipped)
+			default:
+				fmt.Fprintf(os.Stdout, " (%d skipped: %d active lease held, %d could not prove the lease)",
+					res.FilesSkipped, res.FilesSkippedHeld, res.FilesSkippedUnprovable)
+			}
 		}
 		fmt.Fprintln(os.Stdout)
 	}

@@ -9,12 +9,14 @@ reviewed: 2026-10-17
 
 ## User flow / 用户流程
 
-In a new conversation, **Configure workspace** offers **Use current folder**
-and **New worktree**. The current-folder branch picker switches local branches
+In a new conversation, **Configure workspace** offers **Current folder** and
+**Isolated worktree** choices.
+
+In Current folder mode, the branch picker switches local branches
 immediately through the existing guarded branch API. Branches checked out in
 another worktree remain visible with their occupied path and cannot be selected.
 
-新会话中的「配置工作目录」提供「使用当前目录」和「新建 worktree」。当前目录的
+新会话中的「配置工作目录」保留「当前目录 / 独立工作树」双选项，并标明选中项。选择当前目录时，
 分支选择器通过既有受保护接口立即切换本地分支；其他 worktree 占用的分支显示
 占用路径，并禁止切换。
 

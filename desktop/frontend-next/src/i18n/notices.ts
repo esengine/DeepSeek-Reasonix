@@ -51,6 +51,8 @@ export const NOTICE_TEXT: Record<string, string> = {
   compact_declined: "无需压缩：{why}",
   compact_failed: "压缩失败：{why}",
   context_composition: "上下文约 {total}，已超过压缩阈值 {at}，没有更多可折叠的内容。占用最多：{top}。{active}",
+  user_turns_dropped: "你有 {n} 条较早的消息过长，没能完整保留，现在只通过摘要保留。在消息开头加上 [[keep]] 可以让它原样保留。",
+  kept_turns_folded: "你用 [[keep]] 标记的消息中，有 {n} 条超出了 [[keep]] 的容量，最早的几条现在只通过摘要保留。",
   subagent_waiting: "子代理「{task}」在等 {by} 先结束：{why}",
   compact_held: "自动压缩暂缓，上次尝试没有完成：{why}",
   permission_rules_dormant: "有 {n} 条权限规则没有对应的工具，匹配不到任何调用，因此起不到限制作用（如「{list}」里的 {rule}）；到「设置 → 权限」里删除或改写，命令要写成 Bash(命令:*)",

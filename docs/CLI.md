@@ -421,6 +421,10 @@ Task `finished_at` is empty while a task is running, and
 artifact exists. A `running` record without a live session lease is reported as
 `interrupted`; opening that session also repairs the persisted lifecycle state.
 
+When the lease probe cannot decide whether a runtime holds a session (an
+unreadable lease lock or sidecar), `task list` reports a `running` record as
+`unknown` and `session list` reports the state as `unknown`.
+
 Schema compatibility rules for version 1:
 
 - consumers must ignore unknown fields;

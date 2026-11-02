@@ -87,7 +87,7 @@ func (r *Rules) Ignored(abs string, isDir bool) bool {
 		return false
 	}
 	rel := RelSlash(r.repoRoot, AbsClean(abs))
-	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
 		return false
 	}
 	if isDir && r.matcher.MatchesPath(rel+"/") {

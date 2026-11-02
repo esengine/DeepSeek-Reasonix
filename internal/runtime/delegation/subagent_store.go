@@ -85,8 +85,9 @@ type SubagentStore struct {
 	// cleanupBeforeReread is a test seam for deterministic lease interleavings.
 	cleanupBeforeReread func(parentSession, ref string)
 
-	mu     sync.Mutex
-	locked map[string]bool
+	mu      sync.Mutex
+	locked  map[string]bool
+	copying map[ancestorCopyKey]bool
 	// live holds the conversation of every run this process is executing, so a
 	// reader sees a child while it works: its file is written only at the end.
 	live  map[string]*liveRun
@@ -376,11 +377,7 @@ func (s *SubagentStore) PrepareLegacyForkFrom(ref string, spec SubagentSpec) (*S
 	return s.PrepareContinue(ref, spec)
 }
 
-func (s *SubagentStore) prepareContinueFromAncestor(sourceRef string, spec SubagentSpec) (*SubagentRun, error) {
-	sourceRef, err := s.nearestLineageSource(sourceRef, spec)
-	if err != nil {
-		return nil, err
-	}
+func (s *SubagentStore) prepareContinueFromSource(sourceRef string, spec SubagentSpec) (*SubagentRun, error) {
 	copies, err := s.compatibleCopiesFromSource(sourceRef, spec)
 	if err != nil {
 		return nil, err

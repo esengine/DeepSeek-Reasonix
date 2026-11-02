@@ -294,6 +294,7 @@ func TestEditingAHostKeepsForwardsThePageCannotSee(t *testing.T) {
 // for itself and gives it back, so the book of a machine that is not connected
 // can still be listed, and listing it opens nothing.
 func TestRemoteTreeIsReadWithOrWithoutAnOpenPane(t *testing.T) {
+	noLinger(t)
 	writeOpenableConfig(t)
 	saveTestRemoteHosts(t, "gpu-box")
 	far := NewHub(HubOptions{})
@@ -636,6 +637,7 @@ func TestReopeningAKnownFolderLeavesTheConfigAlone(t *testing.T) {
 // a link taken for the call, and a refusal comes back under that kernel's own
 // code: it knows the conversation is open there, the window does not.
 func TestRemoteSessionIsRemovedByTheFarKernel(t *testing.T) {
+	noLinger(t)
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	saveTestRemoteHosts(t, "gpu-box")
 	var got []string

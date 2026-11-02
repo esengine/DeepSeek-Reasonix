@@ -356,6 +356,7 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			return nil, fmt.Errorf("%s: build request: %w", opts.Provider, err)
 		}
 		recordRequestAttempt(ctx)
+		noteUpload(opts.Provider, req.ContentLength)
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("%s: request failed: %w", opts.Provider, err)

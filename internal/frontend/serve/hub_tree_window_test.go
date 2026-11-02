@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionstore"
+	"reasonix/internal/state/store"
 )
 
 // seedAged writes n conversations whose age rises with their number, so
@@ -24,8 +25,15 @@ func seedAged(t *testing.T, root string, n int) []string {
 		p := filepath.Join(SessionDirFor(root), fmt.Sprintf("session-%03d.jsonl", i))
 		writeSessionAt(t, p)
 		at := base.Add(time.Duration(i) * time.Hour)
-		for _, f := range []string{p, p + ".meta"} {
-			if _, err := os.Stat(f); err == nil {
+		// The listing reads activity from the branch meta before any file time.
+		if err := sessionstore.UpdateBranchMeta(p, false, func(m *sessionstore.BranchMeta) error {
+			m.UpdatedAt = at
+			return nil
+		}); err != nil {
+			t.Fatalf("age session meta: %v", err)
+		}
+		for _, f := range []string{p, p + ".meta", store.SessionEventLog(p)} {
+			if _, err := os.Stat(f); f != "" && err == nil {
 				_ = os.Chtimes(f, at, at)
 			}
 		}
@@ -91,7 +99,7 @@ func TestTreeRefusesAnUnreadableWindow(t *testing.T) {
 	hubRuntime(t, h, testenv.TempDir(t))
 	srv := httptest.NewServer(operatorHandler(h))
 	defer srv.Close()
-	for _, q := range []string{"?limit=-1", "?limit=many", "?limits=nope", `?limits=%7B%22a%22%3A-2%7D`} {
+	for _, q := range []string{"?limit=-1", "?limit=many", "?limits=nope", `?limits=%7B%22a%22%3A-2%7D`, "?order=unknown", "?offset=1", "?order=recent&offset=-1", "?order=recent&offset=9223372036854775807"} {
 		resp, err := http.Get(srv.URL + "/tree" + q)
 		if err != nil {
 			t.Fatal(err)

@@ -2,7 +2,7 @@
 owner: @esengine
 backup: @SivanCola
 status: active
-reviewed: 2026-10-08
+reviewed: 2026-10-29
 ---
 
 # Studio parity with the 1.x desktop app
@@ -89,7 +89,7 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Browser panel | Have | `ui/BrowserPanel.tsx` |
 | Integrated terminal panel | Unverified | `ui/Shell.tsx` only chooses the shell; no terminal view was found by name; no issue yet |
 | Worktree merge dialog | Unverified | Worktree handling exists in `ui/Workspaces.tsx`; the merge flow was not checked |
-| Scheduled tasks (heartbeat) | Missing | #11384 |
+| Scheduled tasks (heartbeat) | Have differently | Scheduled runs exist (`ui/ScheduledRuns.tsx` and the schedule API, with budgets, breakers and pause reasons); 1.x's separate heartbeat loop was not ported; #11384 |
 | Keyboard shortcuts cheat sheet | Unverified | Key handling is in `ui/keys.ts`, `ui/windowkeys.ts`; no cheat sheet found by name; no issue yet |
 | CSV and media preview in the workspace panel | Have differently | `ui/document`: CSV/TSV, PDF and still images render in the workbench; audio/video remain unsupported. CSV/TSV、PDF 和图片可直接阅读，音视频仍不支持内联预览。 |
 | File delivery cards / 文件交付卡片 | Have | `present_files` and `ui/document/DeliveryCard.tsx`: validated file references reopen in the shared workbench; auxiliary actions live in More. 已验证文件引用复用工作台标签，辅助操作位于“更多”。 |
@@ -100,6 +100,7 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Feature | Status | Studio location |
 | --- | --- | --- |
 | Per-model display aliases | Have | Model service settings and chat picker; [configuration and scope](MODEL_DISPLAY_ALIASES.md); #11774 |
+| Model connection health | Have | Opt-in status chips in the existing grouped picker; [scope and limits](MODEL_CONNECTION_HEALTH.md). 默认关闭，保留账户分组与接口域名。 |
 | Icon rail with three display modes | Have | #12377, #12428; sidebar footer entries appear only when icon navigation is hidden (#12478) |
 | Usage, feedback, account and settings footer / 用量、反馈、账号与设置底部入口 | Have differently | `ui/Nav.tsx` when navigation is visible; `ui/Sidebar.tsx` otherwise, including the narrow-window drawer. 导航可见时使用图标栏入口，隐藏时保留侧栏入口 (#12478) |
 | Completed-unread marker on sessions | Have | #12218 |

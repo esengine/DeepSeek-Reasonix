@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { App } from "./App";
 import { MockHub } from "../port/mock_hub";
-import type { RuntimeView, TreeWorkspace } from "../port/hub";
+import type { RuntimeView } from "../port/hub";
 import type { AgentPort } from "../port/port";
 
 const renders = vi.hoisted(() => new Map<string, number>());
@@ -26,30 +26,15 @@ afterEach(cleanup);
 
 const PANES = 6;
 
-const views: RuntimeView[] = Array.from({ length: PANES }, (_, i) => ({
-  id: `r${i + 1}`, base: i === 0 ? "" : `/rt/r${i + 1}`, root: "~/projects/DeepSeek-Reasonix", name: "DeepSeek-Reasonix",
-  sessionPath: `/sessions/pane-${i + 1}.jsonl`,
-}));
-
 class SixPaneHub extends MockHub {
-  open(req: { root?: string; sessionPath?: string }) {
-    const held = views.find((v) => v.sessionPath === req.sessionPath);
-    return held ? Promise.resolve(held) : super.open(req);
+  constructor() {
+    super(PANES);
   }
   portFor(rt: RuntimeView): AgentPort {
     const port = super.portFor(rt);
     port.providerSetup = async () => null;
     port.welcomeSeen = async () => true;
     return port;
-  }
-  runtimes(): Promise<RuntimeView[]> {
-    return Promise.resolve([...views]);
-  }
-  tree(): Promise<TreeWorkspace[]> {
-    return Promise.resolve([{
-      root: "~/projects/DeepSeek-Reasonix", name: "DeepSeek-Reasonix", open: true,
-      sessions: Array.from({ length: PANES }, (_, i) => ({ path: `/sessions/pane-${i + 1}.jsonl`, name: `pane-${i + 1}`, title: `会话 ${i + 1}`, turns: 3 })),
-    }]);
   }
 }
 
@@ -85,4 +70,27 @@ it("still makes the chosen pane the visible one, and its focus callback works", 
   await waitFor(() => expect([...shown.entries()].filter(([, p]) => p.visible).map(([id]) => id)).toEqual(["r5"]));
   shown.get("r2")!.focus();
   await waitFor(() => expect([...shown.entries()].filter(([, p]) => p.visible).map(([id]) => id)).toEqual(["r2"]));
+});
+
+it("focuses existing seeded conversations without reopening or rebinding their panes", async () => {
+  const hub = new SixPaneHub();
+  const initial = await hub.runtimes();
+  const identities = initial.map((runtime) => [runtime.id, runtime.sessionPath]);
+  const open = vi.spyOn(hub, "open");
+  const { container } = render(<App hub={hub} />);
+  const pick = async (id: string) => {
+    const row = await waitFor(() => {
+      const path = initial.find((runtime) => runtime.id === id)!.sessionPath;
+      const found = [...container.querySelectorAll<HTMLElement>(".sessrow")].find((row) => row.dataset.target === path);
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    await userEvent.click(row);
+    await waitFor(() => expect([...shown.entries()].filter(([, pane]) => pane.visible).map(([runtime]) => runtime)).toEqual([id]));
+  };
+  await pick(initial[1].id);
+  await pick(initial[0].id);
+  expect(open).not.toHaveBeenCalled();
+  expect((await hub.runtimes()).map((runtime) => [runtime.id, runtime.sessionPath])).toEqual(
+    identities);
 });

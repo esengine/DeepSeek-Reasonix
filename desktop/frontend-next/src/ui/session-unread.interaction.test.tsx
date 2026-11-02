@@ -84,6 +84,7 @@ function kernel(unread: string[], present = true): Kernel {
       name,
       title,
       turns: 3,
+      lastActiveAt: 1_700_000_000_000,
       runtimeId: open.get(path),
       ...(field.present && unreadSet.has(path) ? { unread: true } : {}),
     });
@@ -131,10 +132,13 @@ describe("an unread session is marked on its row", () => {
     const unread = await row(/Release notes/);
     await waitFor(() => expect(dotIn(unread)).toBeTruthy());
     expect(unread.hasAttribute("data-unread")).toBe(true);
+    expect(unread.querySelector("time")).toBeNull();
+    expect(unread.querySelectorAll(".unread-dot")).toHaveLength(1);
     expect(dotIn(unread)!.compareDocumentPosition(unread.querySelector(".sesstitle")!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     const read = await row(/Docs sweep/);
     expect(dotIn(read)).toBeNull();
     expect(read.hasAttribute("data-unread")).toBe(false);
+    expect(read.querySelector("time")?.dateTime).toBe(new Date(1_700_000_000_000).toISOString());
   });
 
   it("treats a kernel that sends no unread field as everything read, without an error", async () => {
@@ -169,6 +173,7 @@ describe("opening a session clears its mark", () => {
 
     await waitFor(() => expect(k.port(RELEASE)?.markSessionViewed).toHaveBeenCalledTimes(1));
     expect(dotIn(await row(/Release notes/))).toBeNull();
+    expect((await row(/Release notes/)).querySelector("time")).not.toBeNull();
     act(() => k.gate.release());
     await waitFor(() => expect(k.unread.has(RELEASE)).toBe(false));
     expect(dotIn(await row(/Release notes/))).toBeNull();
@@ -186,6 +191,7 @@ describe("opening a session clears its mark", () => {
 
     await waitFor(() => expect(k.port(RELEASE)?.markSessionViewed).toHaveBeenCalled());
     await waitFor(() => expect(dotIn(screen.getByRole("treeitem", { name: /Release notes/ }))).toBeTruthy());
+    expect(screen.getByRole("treeitem", { name: /Release notes/ }).querySelector("time")).toBeNull();
     expect(document.querySelector('[role="alert"]')).toBeNull();
     await waitFor(() => expect(badge).toHaveBeenLastCalledWith(true));
   });
@@ -368,6 +374,7 @@ it("does not clear a completion when focus returns to settings covering the conv
   render(<App hub={k.hub} />);
   await row(/Billing refactor/);
   await userEvent.click(screen.getByRole("button", { name: "设置" }));
+  await screen.findByRole("dialog", { name: "设置" });
   focused(false);
   k.unread.add(MAIN);
   await k.emit(MAIN, { kind: "turn_started" });
@@ -379,7 +386,9 @@ it("does not clear a completion when focus returns to settings covering the conv
   expect(k.viewed).not.toContain(MAIN);
   expect(badge).toHaveBeenLastCalledWith(true);
   await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull());
   await waitFor(() => expect(badge).toHaveBeenLastCalledWith(false));
+  expect(k.viewed).toContain(MAIN);
 });
 
 describe("mark as read from the row menu", () => {

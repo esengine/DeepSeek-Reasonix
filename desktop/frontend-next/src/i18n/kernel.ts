@@ -174,6 +174,8 @@ const SAID: Record<string, string> = {
   "session.open_failed": "打不开这个会话",
   "session.outside_dir": "该路径位于会话目录之外",
   "session.unknown": "没有这个会话",
+  "session.replay_limit": "这个会话的历史超过了安全读取上限，没有打开；文件完好未改动",
+  "session.tail_failed": "没能取出这个会话最近的内容",
   "request.method_not_allowed": "该地址不接受此种请求方式",
   "request.bad_content_type": "请求体必须是 application/json",
   "permissions.editing_disabled": "这台服务器未开放权限编辑",

@@ -7,6 +7,26 @@ reviewed: 2026-09-22
 
 # Reasonix Studio frontend
 
+## Feedback contact
+
+- Studio prefills new reports with the contact value from the last successful
+  submission, stored in this device's local browser storage.
+- The field stays editable; submitting it empty clears the remembered value.
+  Failed submissions do not replace it.
+- An unsent draft takes precedence while the page is open.
+- No feedback body or screenshots are persisted by this preference.
+
+## Pane workspace metadata
+
+- Each pane owns one workspace-metadata read after its initial status settles.
+  Chrome and the composer's workspace chip consume that same result.
+- A failed initial status still allows the read using the runtime's known root;
+  history loads independently of both status and workspace metadata.
+- Changing the pane's port or directory reads again and discards superseded
+  responses. Focusing an already-open pane reuses its own result.
+- Opening the workspace chooser still refreshes its branches and worktree
+  sources; it does not issue another workspace-metadata read.
+
 ## Tests
 
 `pnpm test` runs one worker per test file on the threads pool. Threads rather

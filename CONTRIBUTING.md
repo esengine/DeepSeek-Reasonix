@@ -117,6 +117,22 @@ go test ./internal/runtime/agent/ -v            # verbose, one package
 go test ./internal/tools/builtin/ -run TestGrep  # one test
 ```
 
+`testenv.IsolateUserState` installs a disposable user home and config-edit lock
+scope. Default-path tests can clear `REASONIX_HOME` without losing the test
+registry, while explicitly isolated Reasonix homes retain their own locks.
+
+`REASONIX_TEST_HOME` carries the scope to helper subprocesses. A helper that
+skips the isolation guard must install the inherited home with
+`testscope.InstallHome` before running tests.
+
+The environment variable alone cannot activate a test scope. Production
+executables still use the OS account's home for shared config locks.
+
+The guard removes its scratch home on normal completion. Scratch homes are
+created under the original home, so an interrupted run can still leave
+`.reasonix-test-home-*` directories; this is separate from persistent
+config-edit locks in the real `.reasonix/locks` directory.
+
 ### Code style
 
 - `gofmt` is enforced by CI — format before committing

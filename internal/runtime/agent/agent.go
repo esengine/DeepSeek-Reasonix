@@ -91,7 +91,7 @@ type callContext struct {
 // not import this package (for example internal/tools/builtin) can still read it.
 func WithCallContext(ctx context.Context, parentID string, sink event.Sink, asker Asker, planMode bool) context.Context {
 	ctx = planmode.WithActive(ctx, planMode)
-	return context.WithValue(ctx, callContextKey{}, callContext{parentID: parentID, sink: sink, asker: asker, planMode: planMode})
+	return context.WithValue(ctx, callContextKey{}, callContext{parentID: parentID, sink: event.BindUsageScope(sink), asker: asker, planMode: planMode})
 }
 
 // WithToolCallContext stamps ctx as a host-initiated top-level tool call.

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"reasonix/internal/base/proc"
 	"reasonix/internal/platform/gitcmd"
@@ -133,7 +134,7 @@ func CreateFromProgress(ctx context.Context, repo gitcmd.Repo, managedRoot, ref 
 		// --no-checkout, then populate through gitcmd inside the new worktree,
 		// where the reset's driver listing sees an includeIf keyed on that
 		// worktree's gitdir or new branch (a checkout during add would not).
-		_, stderr, addErr := runGit(ctx, info.repo, "worktree", "add", "--no-checkout", "-b", branch, worktreeRoot, info.head)
+		_, stderr, addErr := runWorktree(ctx, info.repo, "add", "--no-checkout", "-b", branch, worktreeRoot, info.head)
 		if addErr != nil {
 			// A random branch collision is retryable. We deliberately leave any
 			// non-empty partial directory untouched rather than risk deleting user
@@ -343,7 +344,12 @@ func stderrSuffix(stderr string) string {
 	}
 	const max = 500
 	if len(stderr) > max {
-		stderr = stderr[:max] + "…"
+		// Cut on a rune boundary: git may print localized, multi-byte messages.
+		cut := max
+		for cut > 0 && !utf8.RuneStart(stderr[cut]) {
+			cut--
+		}
+		stderr = stderr[:cut] + "…"
 	}
 	return ": " + stderr
 }

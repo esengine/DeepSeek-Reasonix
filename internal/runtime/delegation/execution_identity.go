@@ -3,10 +3,13 @@
 package delegation
 
 import (
+	"errors"
 	"fmt"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 )
+
+var errUnsupportedSubagentStatus = errors.New("unsupported subagent status")
 
 // How a stored child's execution was established. The three answers are kept
 // apart because only the first two may be joined on, and a reader that folded
@@ -76,6 +79,9 @@ func validateMeta(meta sessionstore.SubagentMeta, spec SubagentSpec) error {
 	}
 	if meta.Status == sessionstore.SubagentInterrupted {
 		return fmt.Errorf("subagent reference %q was interrupted by a previous shutdown or crash and cannot be continued or forked; run a fresh subagent instead", meta.Ref)
+	}
+	if meta.Status != sessionstore.SubagentCompleted && meta.Status != sessionstore.SubagentCancelled {
+		return fmt.Errorf("subagent reference %q: %w %q", meta.Ref, errUnsupportedSubagentStatus, meta.Status)
 	}
 	want := metaFromSpec(meta.Ref, meta.Status, meta.CreatedAt, meta.UpdatedAt, spec)
 	switch {

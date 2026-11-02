@@ -8,11 +8,12 @@ const rule = (selector: string) => {
 };
 
 describe("the unread mark in the rail", () => {
-  it("sits at the row end without moving the title", () => {
+  it("uses a green mark in the date slot without overlaying the title or quick actions", () => {
     const dot = rule(".rail .sessrow > .unread-dot");
-    expect(dot).toMatch(/position:\s*absolute/);
-    expect(dot).toMatch(/inset-inline-end/);
-    expect(dot).not.toMatch(/margin/);
+    expect(dot).toMatch(/margin-inline-start:\s*auto/);
+    expect(dot).toMatch(/flex:\s*none/);
+    expect(dot).toMatch(/background:\s*var\(--ok\)/);
+    expect(dot).not.toMatch(/position:\s*absolute|inset-inline-end/);
     expect(rule(".rail .sessrow[data-unread] .sesstitle")).not.toMatch(/padding-inline-start|margin/);
   });
 
@@ -20,12 +21,6 @@ describe("the unread mark in the rail", () => {
     expect(css.split("\n").some((l) => l.startsWith(".rail .sessrow[data-unread]:not("))).toBe(false);
     const dark = css.match(/:root\[data-theme="dark"\] \.rail \.sessrow\[data-unread\]:not\(:hover\):not\(\[aria-selected="true"\]\)\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(dark).toMatch(/background:\s*color-mix\(in srgb, var\(--text\) 4%, transparent\)/);
-  });
-
-  it("keeps the dot clear of the remote row's delete button", () => {
-    const more = 27 + 4;
-    const end = Number(rule(".rail .sessrow-remote > .unread-dot").match(/inset-inline-end:\s*(\d+)px/)?.[1]);
-    expect(end).toBeGreaterThanOrEqual(more + 4);
   });
 
   it("draws the folded count unlike the feedback badge", () => {

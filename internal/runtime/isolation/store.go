@@ -65,20 +65,11 @@ func (s *Store) Begin(ctx context.Context, workspaceRoot string) (*Entry, error)
 	if s == nil {
 		return nil, errUnavailable
 	}
-	snap, err := worktree.TakeSnapshot(ctx, s.repo)
-	if err != nil {
-		return nil, tool.Refusal{Code: CodeNotGit, Message: "worktree isolation needs a Git workspace with a commit: " + err.Error()}
-	}
-	cand, err := worktree.CreateCandidate(ctx, snap, s.managedRoot)
+	snap, err := s.captureSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	id, err := newID()
-	if err != nil {
-		_ = worktree.RemoveCandidate(context.WithoutCancel(ctx), snap, cand)
-		return nil, err
-	}
-	return &Entry{ID: id, Workspace: workspaceRoot, Snap: snap, Cand: cand}, nil
+	return s.beginSnapshot(ctx, workspaceRoot, snap)
 }
 
 // Finish records what the run changed. Inspection errors retain its identity

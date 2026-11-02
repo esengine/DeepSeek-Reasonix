@@ -593,6 +593,9 @@ func (t *TaskTool) runProfileSpec(ctx context.Context, spec ProfileExecSpec, exi
 	agent.AttachReviewReport(subReg, grant)
 	run, err := t.prepareTranscriptRunWithPrompt(withUpstream(ctx, spec.Context.Upstream), subReg, modelRef, effortRef, spec.Context.parentSession(ctx), execution, spec.Context.executionParent(execution), spec.Context.ContinueFrom, spec.Context.ForkFrom, spec.Worker.SystemPrompt, spec.Worker.Kind, spec.Worker.Name)
 	if err != nil {
+		if errors.Is(err, ErrAncestorCopyBusy) {
+			return "", fmt.Errorf("%s: %w", steerCode(ErrSubagentSettling), err)
+		}
 		return "", err
 	}
 	exit.run = run

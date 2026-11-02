@@ -87,3 +87,19 @@ it("keeps naming effort fixed off even when the model exposes effort levels", as
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "子代理的思考强度" }), "max");
   expect(onRole).toHaveBeenCalledWith("subagent", models[1].ref, "max");
 });
+
+it("offers the vision row only models that read images, and no other row loses its models", () => {
+  draw();
+  const vision = [...(screen.getByRole("combobox", { name: "看图" }) as HTMLSelectElement).options].map((o) => o.textContent);
+  expect(vision).toEqual(["跟随主模型", "deepseek-flash · 读图"]);
+  const subagent = [...(screen.getByRole("combobox", { name: "子代理" }) as HTMLSelectElement).options].map((o) => o.textContent);
+  expect(subagent).toContain("deepseek-pro");
+});
+
+it("keeps a vision model chosen earlier visible when it is not declared to read images", () => {
+  const roles: RoleAssignments = { ...ROLES, roles: { ...ROLES.roles, vision: "deepseek/deepseek-pro" } };
+  render(<ModelUsage models={MODELS} roles={roles} main="deepseek/deepseek-flash" busy="" protocol={{}} onMain={vi.fn()} onRole={vi.fn()} />);
+  const select = screen.getByRole("combobox", { name: "看图" }) as HTMLSelectElement;
+  expect(select.value).toBe("deepseek/deepseek-pro");
+  expect(select.selectedOptions[0]?.textContent).toBe("deepseek/deepseek-pro（未声明读图）");
+});

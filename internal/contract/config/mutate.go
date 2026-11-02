@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testscope"
 )
 
 // userEditMu serializes in-process read-modify-write cycles. The public lock
@@ -339,9 +340,12 @@ func configEditLockRegistryDir() (string, error) {
 		return "", fmt.Errorf("lock config edits: OS user identity unavailable")
 	}
 	digest := sha256.Sum256([]byte(identity))
-	// Per-user home from the account database, not $HOME or TMPDIR; a shared
-	// /tmp path let another identity pre-create it. The owner check backs this up.
+	// Production locks use the account database, not HOME or TMPDIR; the owner
+	// check also rejects a registry another identity pre-created.
 	home := strings.TrimSpace(current.HomeDir)
+	if testHome := testscope.Home(); testHome != "" {
+		home = testHome
+	}
 	if home == "" {
 		if runtime.GOOS == "windows" {
 			return "", fmt.Errorf("lock config edits: OS user home unavailable")

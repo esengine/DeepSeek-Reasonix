@@ -1,17 +1,18 @@
 package agent
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
+	"reasonix/internal/base/fileutil"
 	"reasonix/internal/safety/evidence"
 )
 
 // absentPath is the fingerprint of a path that does not exist, which is itself
 // a state a change can leave behind.
-const absentPath = "absent"
+const absentPath = "file-state-v1:absent"
 
 // carryProof writes what outlives this process into the checkpoint: the review
 // still owed, and the proof a pending change has earned. A settled change
@@ -61,7 +62,7 @@ func (a *Agent) provenMutation() *evidence.ProvenMutation {
 }
 
 // carriedProof is the checkpoint's proof if every path it covers still holds
-// the content it was proven with. A path that moved while no process was
+// the file state it was proven with. A path that moved while no process was
 // watching voids all of it: the host cannot say which proof that edit broke.
 func (a *Agent) carriedProof() *evidence.ProvenMutation {
 	proven := a.task.checkpoint.Proven
@@ -76,19 +77,30 @@ func (a *Agent) carriedProof() *evidence.ProvenMutation {
 	return proven
 }
 
-// pathFingerprint is a path's content hash, absentPath for a missing one, and
-// "" when it cannot be read — which never matches anything.
+// The version prefix refuses legacy byte-only proof in both reader directions.
+// Links and other non-regular files cannot carry proof of their referents.
 func (a *Agent) pathFingerprint(p string) string {
 	if !filepath.IsAbs(p) && a.writeWorkspaceRoot != "" {
 		p = filepath.Join(a.writeWorkspaceRoot, p)
 	}
-	b, err := os.ReadFile(p)
+	before, err := os.Lstat(p)
 	switch {
 	case os.IsNotExist(err):
 		return absentPath
 	case err != nil:
 		return ""
 	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+	if !before.Mode().IsRegular() {
+		return ""
+	}
+	version, err := fileutil.ReadContentVersion(context.Background(), p)
+	if err != nil || version.Kind != "file" || version.Mode != uint32(before.Mode().Perm()) {
+		return ""
+	}
+	after, err := os.Lstat(p)
+	if err != nil || !os.SameFile(before, after) || before.Mode() != after.Mode() ||
+		before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		return ""
+	}
+	return fmt.Sprintf("file-state-v1:%08x:%s", uint32(before.Mode()), version.Digest)
 }

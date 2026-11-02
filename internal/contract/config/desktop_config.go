@@ -126,7 +126,7 @@ type DesktopConfig struct {
 	ProviderAccess          []string         `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking          bool             `toml:"expand_thinking"`            // deprecated compatibility alias: true maps to auto
 	ReasoningDisplayMode    string           `toml:"reasoning_display_mode"`
-	ConversationWidth       string           `toml:"conversation_width"` // standard|full|full-all; how far prose (and the composer, for full-all) runs; empty = standard
+	ConversationWidth       string           `toml:"conversation_width"` // standard|full|full-all|custom; custom uses appearance.width_percent; empty = standard
 	PinnedVersion           string           `toml:"pinned_version"`     // release pinned by a rollback; empty follows the channel
 	UpdateMode              string           `toml:"update_mode"`        // manual (default) | notify | download; user file only
 	Appearance              AppearanceConfig `toml:"appearance"`
@@ -166,18 +166,35 @@ func ClampTextSize(v float64) float64 {
 	return min(max(v, TextSizeMin), TextSizeMax)
 }
 
+// Conversation viewport percentages share these bounds across config and UI.
+const (
+	WidthPercentMin     = 30
+	WidthPercentMax     = 100
+	WidthPercentStep    = 1
+	WidthPercentDefault = 80
+)
+
+// EffectiveWidthPercent resolves an unset percentage and clamps manual edits.
+func EffectiveWidthPercent(v int) int {
+	if v == 0 {
+		return WidthPercentDefault
+	}
+	return min(max(v, WidthPercentMin), WidthPercentMax)
+}
+
 // AppearanceConfig is what the user set for themselves, on top of whichever
 // theme pack is active: how large it all is, what it is set in, and their own
 // picture. A pack ships a palette; these are the reader's own eyes and desk.
-// Zero means "unset" throughout, so an untouched config resolves to the
-// stylesheet's own defaults rather than to a number written here.
+// Zero means "unset"; width uses WidthPercentDefault while sizes and fonts
+// resolve to the stylesheet's defaults.
 type AppearanceConfig struct {
-	Zoom      float64         `toml:"zoom"`      // whole-interface scale within ZoomMin..ZoomMax; 0 = 1.0
-	ReadSize  float64         `toml:"read_size"` // transcript body size in px; 0 = the stylesheet's
-	TextSize  float64         `toml:"text_size"` // interface text scale within TextSizeMin..TextSizeMax, spacing untouched; 0 = 1.0
-	FontUI    string          `toml:"font_ui"`   // CSS font-family list for the interface
-	FontMono  string          `toml:"font_mono"` // CSS font-family list for code and output
-	Wallpaper WallpaperConfig `toml:"wallpaper"`
+	WidthPercent int             `toml:"width_percent"` // custom conversation viewport percentage, 30..100; 0 = 80; retained for other width modes
+	Zoom         float64         `toml:"zoom"`          // whole-interface scale within ZoomMin..ZoomMax; 0 = 1.0
+	ReadSize     float64         `toml:"read_size"`     // transcript body size in px; 0 = the stylesheet's
+	TextSize     float64         `toml:"text_size"`     // interface text scale within TextSizeMin..TextSizeMax, spacing untouched; 0 = 1.0
+	FontUI       string          `toml:"font_ui"`       // CSS font-family list for the interface
+	FontMono     string          `toml:"font_mono"`     // CSS font-family list for code and output
+	Wallpaper    WallpaperConfig `toml:"wallpaper"`
 }
 
 type WallpaperLayer struct {

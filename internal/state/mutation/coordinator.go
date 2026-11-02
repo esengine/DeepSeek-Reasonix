@@ -99,7 +99,8 @@ func (c *Coordinator) Acquire(ctx context.Context, intent Intent) (acquired *Lea
 		return &Lease{}, nil
 	}
 	if parent, _ := ctx.Value(leaseContextKey{}).(*Lease); parent != nil && parent.coordinator == c {
-		if parent.closed.Load() || !covers(parent.record.Paths, paths) || !coversCapacities(parent.record.Capacities, capacities) {
+		if parent.closed.Load() || !coversEffect(parent.record.Effect, intent.Effect) ||
+			!covers(parent.record.Paths, paths) || !coversCapacities(parent.record.Capacities, capacities) {
 			return nil, ErrInvalidIntent
 		}
 		if err := c.validate(ctx, intent, paths); err != nil {
@@ -117,6 +118,9 @@ func (c *Coordinator) Acquire(ctx context.Context, intent Intent) (acquired *Lea
 	}}
 	if len(capacities) != 0 {
 		l.record.Version = 2
+	}
+	if intent.Effect == OpaqueWrite {
+		l.record.Version = 3
 	}
 	l.record.ID = l.ID
 	defer func() {

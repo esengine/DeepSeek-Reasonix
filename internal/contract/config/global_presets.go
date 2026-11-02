@@ -5,11 +5,11 @@ var (
 	openRouterModels = []string{
 		"deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro",
 		"openai/gpt-6-sol", "google/gemini-3.8-flash",
-		"moonshotai/kimi-k3", "z-ai/glm-5.2", "qwen/qwen3.7-max", "minimax/minimax-m3",
+		"moonshotai/kimi-k3", "z-ai/glm-5.2", "qwen/qwen3.7-max", "minimax/minimax-m3.1-flash:free", "minimax/minimax-m3",
 	}
 	openRouterVisionModels = []string{
 		"openai/gpt-6-sol", "google/gemini-3.8-flash",
-		"moonshotai/kimi-k3", "minimax/minimax-m3",
+		"moonshotai/kimi-k3", "minimax/minimax-m3.1-flash:free", "minimax/minimax-m3",
 	}
 	openAIModels       = []string{"gpt-6-sol", "gpt-6-astra", "gpt-6-luna"}
 	openAIWindow       = 1_050_000
@@ -46,6 +46,11 @@ var globalProviderPresets = []ProviderPreset{
 			BalanceURL:    "https://openrouter.ai/api/v1/credits",
 			ContextWindow: 1_000_000,
 			Headers:       openRouterAttributionHeaders(),
+			ModelOverrides: map[string]ProviderModelOverride{
+				"minimax/minimax-m3.1-flash:free": {
+					ContextWindow: 1000000, SupportedEfforts: []string{"low", "medium", "high", "xhigh", "max"}, DefaultEffort: "max",
+				},
+			},
 		}},
 	},
 	{

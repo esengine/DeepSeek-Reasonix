@@ -32,18 +32,19 @@ type CoverageGap struct {
 
 // Common coverage-gap reasons.
 const (
-	GapBashSideEffect   = "bash_side_effect"
-	GapHookWrite        = "hook_write"
-	GapMCPExternal      = "mcp_external"
-	GapOutsideWorkspace = "outside_workspace"
-	GapSymlink          = "symlink"
-	GapHardlink         = "hardlink"
-	GapUnreadable       = "unreadable"
-	GapOversized        = "oversized"
-	GapBackgroundWriter = "background_writer_cross_turn"
-	GapLegacyUnverified = "legacy_unverified"
-	GapCaptureFailed    = "capture_failed"
-	GapExpiredPayload   = "expired_file_payload"
+	GapBashSideEffect        = "bash_side_effect"
+	GapHookWrite             = "hook_write"
+	GapMCPExternal           = "mcp_external"
+	GapOutsideWorkspace      = "outside_workspace"
+	GapSymlink               = "symlink"
+	GapHardlink              = "hardlink"
+	GapUnreadable            = "unreadable"
+	GapOversized             = "oversized"
+	GapBackgroundWriter      = "background_writer_cross_turn"
+	GapWorkspaceClaimYielded = "workspace_claim_yielded"
+	GapLegacyUnverified      = "legacy_unverified"
+	GapCaptureFailed         = "capture_failed"
+	GapExpiredPayload        = "expired_file_payload"
 )
 
 // CaptureSource identifies how a preimage was obtained.

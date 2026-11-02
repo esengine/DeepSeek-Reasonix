@@ -83,12 +83,10 @@ export function apply(look: Appearance | null, busy = false) {
   style.setProperty("--read", `${readSize}px`);
   style.setProperty("--read-scale", String(readSize / readDefault()));
 
-  // How far that prose runs is the other half of the same question, and the
-  // only one with two honest answers: a line short enough to read without
-  // losing your place, or a window used to the edge. Cards, commands and
-  // output answer to neither — they always have the width.
-  if (look?.width === "full" || look?.width === "full-all") root.dataset.measure = look.width;
+  if (look?.width === "full" || look?.width === "full-all" || look?.width === "custom") root.dataset.measure = look.width;
   else delete root.dataset.measure;
+  if (look?.width === "custom" && look.widthPercent) style.setProperty("--measure-width", `${look.widthPercent}%`);
+  else style.removeProperty("--measure-width");
 
   if (look?.fontUi) style.setProperty("--ui", `${look.fontUi}, ${FALLBACK_UI}`);
   else style.removeProperty("--ui");

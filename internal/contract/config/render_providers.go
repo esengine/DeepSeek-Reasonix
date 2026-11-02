@@ -36,6 +36,7 @@ func renderProviderEntryAnnotated(b *strings.Builder, p ProviderEntry) {
 	}
 	renderProviderIdentity(b, p.APIKeyEnv, p.DisplayName)
 	renderModelAliases(b, p.ModelAliases)
+	renderHideModelPrefix(b, p)
 	if p.PresetID != "" {
 		fmt.Fprintf(b, "preset_id   = %q   # curated preset identity; settings UI uses it to avoid duplicate installs\n", p.PresetID)
 	}
@@ -161,6 +162,7 @@ func renderProviderEntryPlain(b *strings.Builder, p ProviderEntry) {
 	}
 	renderProviderIdentity(b, p.APIKeyEnv, p.DisplayName)
 	renderModelAliases(b, p.ModelAliases)
+	renderHideModelPrefix(b, p)
 	if p.PresetID != "" {
 		fmt.Fprintf(b, "preset_id   = %q\n", p.PresetID)
 	}

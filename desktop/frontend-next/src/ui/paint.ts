@@ -6,11 +6,14 @@ import type { HubPort, RuntimeView } from "../port/hub";
 import { apply as applyLook } from "./look";
 import { apply as applyThemePack } from "./theme";
 import { trailing } from "./trailing";
+import { onThemeScheduleChange, themeSchedule } from "../state/themeSchedule";
+import { nextScheduledBoundary, scheduledScheme } from "./scheduledTheme";
+import { host } from "../port/host";
 
 export interface Paint {
   theme: string;
   setTheme: (v: string) => void;
-  // What "auto" resolved to. Panes take it as a prop, not off the root.
+  // The resolved colour mode, independent of the selected preference.
   scheme: "light" | "dark";
   contrast: string;
   setContrast: (v: string) => void;
@@ -28,7 +31,13 @@ export interface Paint {
  *  writes `documentElement`'s dataset, so nothing else has to know the order
  *  a pack and a look have to be applied in. */
 export function usePaint(hub: HubPort, runtimes: RuntimeView[], running: boolean, onError: (e: unknown) => void): Paint {
-  const [theme, setTheme] = useState(() => localStorage.getItem("rx-theme") ?? "auto");
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem("rx-theme");
+      return saved && ["auto", "light", "dark", "scheduled"].includes(saved) ? saved : "auto";
+    } catch { return "auto"; }
+  });
+  const schedule = useSyncExternalStore(onThemeScheduleChange, themeSchedule);
   const [scheme, setScheme] = useState<"light" | "dark">("dark");
   // "" means never chosen, which is what lets the system's own contrast setting
   // decide. Any explicit pick wins over it from then on.
@@ -86,8 +95,12 @@ export function usePaint(hub: HubPort, runtimes: RuntimeView[], running: boolean
   // in flight — the transition is in CSS, this only moves the target.
   useEffect(() => {
     const mq = matchMedia("(prefers-color-scheme: dark)");
+    let timer: number | undefined;
     const paint = () => {
-      const now = theme === "auto" ? (mq.matches ? "dark" : "light") : theme;
+      clearTimeout(timer);
+      const clock = new Date();
+      const now = theme === "scheduled" ? scheduledScheme(schedule, clock) :
+        theme === "auto" ? (mq.matches ? "dark" : "light") : theme;
       document.documentElement.dataset.theme = now;
       setScheme(now as "light" | "dark");
       // The active pack is the same state shown by the appearance picker.
@@ -100,12 +113,31 @@ export function usePaint(hub: HubPort, runtimes: RuntimeView[], running: boolean
       // After the pack, never before: size and type are the reader's, and a
       // palette someone else authored does not get to overrule them.
       applyLook(look, running);
+      try {
+        localStorage.setItem("rx-theme", theme);
+        localStorage.setItem("rx-theme-resolved", now);
+      } catch { /* this window keeps its choice */ }
+      host().syncTheme(theme, now as "light" | "dark");
+      if (theme === "scheduled") {
+        const delay = nextScheduledBoundary(schedule, clock);
+        if (delay !== null) timer = window.setTimeout(paint, delay);
+      }
     };
     paint();
     mq.addEventListener("change", paint);
-    localStorage.setItem("rx-theme", theme);
-    return () => mq.removeEventListener("change", paint);
-  }, [theme, pack, running, look, contrast]);
+    if (theme === "scheduled") {
+      window.addEventListener("focus", paint);
+      window.addEventListener("pageshow", paint);
+      document.addEventListener("visibilitychange", paint);
+    }
+    return () => {
+      clearTimeout(timer);
+      mq.removeEventListener("change", paint);
+      window.removeEventListener("focus", paint);
+      window.removeEventListener("pageshow", paint);
+      document.removeEventListener("visibilitychange", paint);
+    };
+  }, [theme, schedule, pack, running, look, contrast]);
 
   useEffect(() => {
     if (contrast) document.documentElement.dataset.contrast = contrast;

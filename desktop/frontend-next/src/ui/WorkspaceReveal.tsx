@@ -3,7 +3,7 @@ import type { HubPort, OpenWithTarget, TreeWorkspace } from "../port/hub";
 import { host } from "../port/host";
 import { t } from "../i18n";
 import { StudioIcon } from "./StudioIcon";
-import { openWithName } from "./openwith_label";
+import { blockedInProject, blockedNote, openWithName } from "./openwith_label";
 
 export function WorkspaceReveal({ ws, hub, dismiss, onError }: {
   ws: TreeWorkspace;
@@ -18,7 +18,7 @@ export function WorkspaceReveal({ ws, hub, dismiss, onError }: {
   useEffect(() => {
     if (!shell) return;
     let alive = true;
-    void hub.openWithTargets().then((list) => alive && setTargets(list.filter((x) => x.available && x.id !== "file-manager"))).catch(() => {});
+    void hub.openWithTargets().then((list) => alive && setTargets(list.filter((x) => (x.available || blockedInProject(x)) && x.id !== "file-manager"))).catch(() => {});
     return () => { alive = false; };
   }, [hub, shell]);
   if (!shell) return null;
@@ -44,13 +44,15 @@ export function WorkspaceReveal({ ws, hub, dismiss, onError }: {
           data-action="workspace.open-with"
           data-target={ws.root}
           data-value={target.id}
-          disabled={ws.missing}
+          disabled={ws.missing || !target.available}
+          title={target.available ? undefined : blockedNote(target)}
           onClick={() => {
             dismiss();
             hub.openWith(ws.root, target.id).catch(onError);
           }}
         >
           <StudioIcon name="external" /><span>{t("用 {name} 打开", { name: openWithName(target) })}</span>
+          {!target.available && <small>{t("位于项目文件夹内")}</small>}
         </button>
       ))}
     </div>

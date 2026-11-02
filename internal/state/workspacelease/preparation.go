@@ -46,6 +46,17 @@ type PreparedCall struct {
 	closeErr  error
 }
 
+// ObservationEpoch changes when this call resumes across unobserved foreign claims.
+func (p *PreparedCall) ObservationEpoch() uint64 {
+	if p == nil || p.hold == nil {
+		return 0
+	}
+	o := p.hold.owner
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return p.hold.observationEpoch
+}
+
 // PreparePaths acquires a call's complete extent without retaining new paths
 // for the run. Close removes only this call's contribution unless Retain ran.
 // The returned context permits the call itself to Yield before execution.

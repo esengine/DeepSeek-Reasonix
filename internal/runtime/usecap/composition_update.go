@@ -6,6 +6,21 @@ import (
 	"strings"
 )
 
+// ServerIdentity returns the retained declaration identity without refreshing
+// configuration or exposing the server's launch parameters.
+func (r *MCPCapabilityRuntime) ServerIdentity(name string) (config.PluginEntry, bool) {
+	if r == nil {
+		return config.PluginEntry{}, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	server, found := r.servers[strings.TrimSpace(name)]
+	if !found {
+		return config.PluginEntry{}, false
+	}
+	return config.PluginEntry{Name: server.entry.Name, Source: server.entry.Source}, true
+}
+
 // UpsertServer makes a hot-added or updated MCP spec authoritative for every
 // frontend on this controller. Dynamic state stays host-local and never changes
 // the provider-visible use_capability schema.

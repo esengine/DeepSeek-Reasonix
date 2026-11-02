@@ -40,44 +40,56 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// resumeInto binds this runtime to the transcript at path, answering with the
-// status a refusal deserves so both the HTTP handler and a hub opening a
-// session in a new pane refuse for the same reasons.
-func (s *Server) resumeInto(path string) (int, error) {
-	defer backgroundwork.Shared.Foreground()()
+// sessionFileInDir resolves path to a transcript inside the session directory,
+// answering with the status a refusal deserves.
+func (s *Server) sessionFileInDir(path string) (string, int, error) {
 	dir := s.ctl().SessionDir()
 	if dir == "" {
-		return http.StatusBadRequest, refusal(http.StatusBadRequest, "session.disabled", errors.New("sessions disabled"), nil)
+		return "", http.StatusBadRequest, refusal(http.StatusBadRequest, "session.disabled", errors.New("sessions disabled"), nil)
 	}
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
-		return http.StatusBadRequest, refusal(http.StatusBadRequest, codeSessionBadPath, errors.New("invalid session dir"), nil)
+		return "", http.StatusBadRequest, refusal(http.StatusBadRequest, codeSessionBadPath, errors.New("invalid session dir"), nil)
 	}
 	realDir, dirErr := filepath.EvalSymlinks(absDir)
 	absPath, err := filepath.Abs(strings.TrimSpace(path))
 	name := filepath.Base(absPath)
 	if err != nil || !store.IsSessionTranscriptName(name) {
-		return http.StatusBadRequest, refusal(http.StatusBadRequest, codeSessionBadPath, errors.New("invalid session path"), nil)
+		return "", http.StatusBadRequest, refusal(http.StatusBadRequest, codeSessionBadPath, errors.New("invalid session path"), nil)
 	}
 	// A 1.x v4 conversation the list offered becomes a transcript here first.
 	if absPath, err = prepareResumeSessionPath(absDir, absPath); err != nil {
-		return http.StatusBadRequest, fmt.Errorf("open 1.x session: %w", err)
+		return "", http.StatusBadRequest, fmt.Errorf("open 1.x session: %w", err)
 	}
 	// A transcript that is gone lands here: the delete took the file, and the
 	// list the click came from was drawn before it did.
 	realPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		return pathUnresolved(err)
+		status, err := pathUnresolved(err)
+		return "", status, err
 	}
 	// A transcript that exists cannot be inside a directory that does not.
 	if errors.Is(dirErr, fs.ErrNotExist) {
-		return http.StatusForbidden, refusal(http.StatusForbidden, codeSessionOutside, errors.New("path outside session dir"), nil)
+		return "", http.StatusForbidden, refusal(http.StatusForbidden, codeSessionOutside, errors.New("path outside session dir"), nil)
 	}
 	if dirErr != nil {
-		return pathUnresolved(dirErr)
+		status, err := pathUnresolved(dirErr)
+		return "", status, err
 	}
 	if realPath == realDir || !strings.HasPrefix(realPath, realDir+string(os.PathSeparator)) {
-		return http.StatusForbidden, refusal(http.StatusForbidden, codeSessionOutside, errors.New("path outside session dir"), nil)
+		return "", http.StatusForbidden, refusal(http.StatusForbidden, codeSessionOutside, errors.New("path outside session dir"), nil)
+	}
+	return realPath, 0, nil
+}
+
+// resumeInto binds this runtime to the transcript at path, answering with the
+// status a refusal deserves so both the HTTP handler and a hub opening a
+// session in a new pane refuse for the same reasons.
+func (s *Server) resumeInto(path string) (int, error) {
+	defer backgroundwork.Shared.Foreground()()
+	realPath, status, err := s.sessionFileInDir(path)
+	if err != nil {
+		return status, err
 	}
 	if sessionstore.IsCleanupPending(realPath) {
 		return http.StatusBadRequest, refusal(http.StatusBadRequest, "session.pending_cleanup", errors.New("session is pending cleanup"), nil)
@@ -108,6 +120,9 @@ func (s *Server) resumeInto(path string) (int, error) {
 		// The lease already moved to the target; re-point it at the session the
 		// controller still owns (best-effort).
 		_ = s.rebindSessionLease(s.ctl().SessionPath())
+		if errors.Is(err, sessionstore.ErrSessionReplayLimitExceeded) {
+			return http.StatusRequestEntityTooLarge, refusal(http.StatusRequestEntityTooLarge, codeSessionReplayLimit, err, map[string]any{"path": realPath})
+		}
 		return http.StatusBadRequest, fmt.Errorf("load session: %w", err)
 	}
 	if hook := resumeBindHookForTest; hook != nil {

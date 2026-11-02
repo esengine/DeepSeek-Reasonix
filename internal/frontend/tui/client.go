@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"reasonix/internal/contract/eventwire"
 	"reasonix/internal/contract/provider"
 )
 
@@ -162,12 +163,24 @@ func (c *Client) SetApprovalMode(ctx context.Context, mode string) error {
 
 // HistoryMessage is one record of the session as /history returns it.
 type HistoryMessage struct {
-	Role           string            `json:"role"`
-	Content        string            `json:"content"`
-	Reasoning      string            `json:"reasoning,omitempty"`
-	MsgIndex       int               `json:"msgIndex"`
-	HostAuthored   bool              `json:"hostAuthored,omitempty"`
-	Steer          bool              `json:"steer,omitempty"`
+	Role         string `json:"role"`
+	Content      string `json:"content"`
+	Reasoning    string `json:"reasoning,omitempty"`
+	MsgIndex     int    `json:"msgIndex"`
+	HostAuthored bool   `json:"hostAuthored,omitempty"`
+	Steer        bool   `json:"steer,omitempty"`
+	// Images is how many attachments the turn carried. A turn that was only an
+	// image has no text left once the host's blocks come off, so without the
+	// count Restore cannot tell it from host chrome and drops it.
+	Images int `json:"images,omitempty"`
+	// Via is the paired device a user message was sent from; absent is the
+	// window. The record wrote it when the message landed, so a reload can
+	// still say where the line came from.
+	Via *eventwire.Via `json:"via,omitempty"`
+	// ModelRef is which model wrote an assistant turn. A reopened transcript
+	// has no turn_started to read it off, and the composer's current setting is
+	// a different fact that has usually moved on.
+	ModelRef       string            `json:"modelRef,omitempty"`
 	ThoughtMs      int64             `json:"thoughtMs,omitempty"`
 	WorkDurationMs int64             `json:"workDurationMs,omitempty"`
 	ToolCalls      []HistoryToolCall `json:"toolCalls,omitempty"`

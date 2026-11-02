@@ -298,8 +298,8 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		prefixShape.BodyChain = streamed.bodyChain // what actually went out
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage, contentReasons)
 		if err != nil {
-			a.emitTurnUsage(usage, &cacheDiagnostics, streamed.attemptID)
-			a.observeRunBudget(state, usage)
+			quote := a.emitTurnUsage(usage, &cacheDiagnostics, streamed.attemptID)
+			a.observeRunBudget(state, usage, quote)
 			if msg, ok := finishReasonMessage(usage); ok {
 				a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 			}
@@ -311,8 +311,8 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		}
 		a.sess.lastPrefixShape = prefixShape
 		a.sess.haveLastPrefixShape = true
-		a.emitTurnUsage(usage, &cacheDiagnostics, streamed.attemptID)
-		a.observeRunBudget(state, usage)
+		quote := a.emitTurnUsage(usage, &cacheDiagnostics, streamed.attemptID)
+		a.observeRunBudget(state, usage, quote)
 		// Classify the terminal before anything commits: a call the output limit
 		// cut in half must reach neither history nor execution, and why it did
 		// not is the host's to state, not the model's to infer.

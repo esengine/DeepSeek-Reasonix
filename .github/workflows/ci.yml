@@ -170,6 +170,23 @@ jobs:
         shell: pwsh
         run: Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
 
+      - name: test (Windows concurrency contracts)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          node --test scripts/windows-concurrency-tests.test.mjs
+          node scripts/windows-concurrency-tests.mjs "$RUNNER_TEMP/concurrency-windows.jsonl"
+
+      - name: upload Windows concurrency inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: concurrency-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/concurrency-windows.jsonl
+          if-no-files-found: error
+          retention-days: 7
+
       - name: test
         if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
         env:
@@ -178,6 +195,35 @@ jobs:
           # built around.
           REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
+
+      - name: test (Windows subagent status admission)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^TestSubagent(PersistedStatusAdmission|UnknownStatusStillReadableForDiagnosis)$' ./internal/runtime/delegation | tee "$RUNNER_TEMP/subagent-status-admission.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            ["future-paused", "missing", "empty", "COMPLETED", "completed", "cancelled", "failed", "interrupted", "running"] as $states |
+            ["continue", "copy", "ancestor", "legacy_ancestor", "current_copy"] as $routes |
+            (["TestSubagentPersistedStatusAdmission", "TestSubagentUnknownStatusStillReadableForDiagnosis"] +
+              [$states[] | "TestSubagentPersistedStatusAdmission/" + .] +
+              [$states[] as $state | $routes[] | "TestSubagentPersistedStatusAdmission/" + $state + "/" + .]) as $required |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/runtime/delegation"] - $packages | length) == 0 and
+            ($required - $tests | length) == 0
+          ' "$RUNNER_TEMP/subagent-status-admission.jsonl"
+
+      - name: upload Windows subagent status admission inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: subagent-status-admission-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/subagent-status-admission.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: test (Windows composition links)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
@@ -272,6 +318,32 @@ jobs:
               "TestHeldPathsCoverOnlyTheSameFileAcrossCaseSpellings",
               "TestLegacyWaitDoesNotConsumeExecutionCapacity"] - $tests | length) == 0
           ' "$RUNNER_TEMP/isolation-owners.jsonl"
+          jq -se '
+            . as $events |
+            {"reasonix/internal/platform/worktree": [
+               "TestApplyPathsRejectsRedirectedAncestors",
+               "TestApplyPathsRejectsRedirectedAncestors/outside_delete",
+               "TestApplyPathsRejectsRedirectedAncestors/inside_delete",
+               "TestApplyPathsRejectsRedirectedAncestors/dangling_delete",
+               "TestApplyPathsRejectsRedirectedAncestors/outside_write",
+               "TestApplyPathsRejectsRedirectedAncestors/inside_write",
+               "TestApplyPathsRejectsRedirectedAncestors/regular_parent",
+               "TestApplyPathsRejectsRedirectedAncestors/unchanged",
+               "TestApplyPathsRejectsRedirectedAncestors/missing_creation",
+               "TestWriteChangesRejectsRedirectedDeletion",
+               "TestWriteChangesUnlinksLeafDirectoryLink",
+               "TestWholeWorkspaceApplyPreservesFileToDirectoryTransition"],
+             "reasonix/internal/runtime/isolation": [
+               "TestApplyToolRetainsResultAfterAncestorReplacement"]} |
+            to_entries | all(.[]; . as $package |
+              ([ $events[] | select(.Package == $package.key and .Test == null and
+                 (.Action == "pass" or .Action == "fail" or .Action == "skip")) ] |
+               length == 1 and .[0].Action == "pass") and
+              all(.value[]; . as $test |
+                [ $events[] | select(.Package == $package.key and .Test == $test and
+                  (.Action == "pass" or .Action == "fail" or .Action == "skip")) ] |
+                length == 1 and .[0].Action == "pass"))
+          ' "$RUNNER_TEMP/isolation-owners.jsonl"
 
       - name: upload Windows isolation test inventory
         if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
@@ -318,6 +390,38 @@ jobs:
           name: background-resources-windows-${{ github.run_attempt }}
           path: ${{ runner.temp }}/background-resources.jsonl
           if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows delegated Goal usage scope)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(UsageScope.*|DelegatedUsageKeepsGoalOwner|EffectDelegatedUsageKeepsGoalOwner)$' ./internal/contract/event ./internal/session/control ./internal/assembly/boot | tee "$RUNNER_TEMP/goal-usage-scope.jsonl"
+          jq -se '
+            ["TestUsageScopePreservesCapturedOwnerAndWire", "TestUsageScopeKeepsEarlierEventOwner",
+             "TestUsageScopeWithoutCapability", "TestDelegatedUsageKeepsGoalOwner",
+             "TestDelegatedUsageKeepsGoalOwner/chat_to_goal", "TestDelegatedUsageKeepsGoalOwner/replaced_goal",
+             "TestDelegatedUsageKeepsGoalOwner/cleared_goal", "TestDelegatedUsageKeepsGoalOwner/resumed_goal",
+             "TestDelegatedUsageKeepsGoalOwner/same_goal_next_turn", "TestDelegatedUsageKeepsGoalOwner/between_turns",
+             "TestDelegatedUsageKeepsGoalOwner/nested_after_replacement", "TestEffectDelegatedUsageKeepsGoalOwner",
+             "TestEffectDelegatedUsageKeepsGoalOwner/chat_to_goal", "TestEffectDelegatedUsageKeepsGoalOwner/replaced_goal",
+             "TestEffectDelegatedUsageKeepsGoalOwner/nested_chat_to_goal", "TestEffectDelegatedUsageKeepsGoalOwner/same_goal",
+             "TestEffectDelegatedUsageKeepsGoalOwner/completed_before_goal"] as $required |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $passed |
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            all(.[]; .Action != "fail" and .Action != "skip") and
+            (($required - $passed) | length == 0) and
+            ((["reasonix/internal/contract/event", "reasonix/internal/session/control", "reasonix/internal/assembly/boot"] - $packages) | length == 0)
+          ' "$RUNNER_TEMP/goal-usage-scope.jsonl"
+
+      - name: upload Windows delegated Goal usage scope inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: goal-usage-scope-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/goal-usage-scope.jsonl
+          if-no-files-found: error
           retention-days: 7
 
       - name: test (Windows planner local budget)
@@ -495,7 +599,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(RootToken|EffectRootToken)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-token-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(RootToken|EffectRootToken|BudgetCountsKnownReportedTokens|ReportedToken|EffectReportedTotalTokenBudget)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-token-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
@@ -511,6 +615,38 @@ jobs:
               "TestEffectRootTokenBudgetReachesDelegatedJobs", "TestEffectRootTokenBudgetReachesDelegatedJobs/foreground",
               "TestEffectRootTokenBudgetReachesDelegatedJobs/foreground_capability", "TestEffectRootTokenBudgetReachesDelegatedJobs/background",
               "TestEffectRootTokenBudgetReachesDelegatedJobs/background_capability", "TestEffectRootTokenBudgetReachesDelegatedJobs/background_fleet"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/root-token-budget.jsonl"
+          jq -se '
+            . as $events |
+            {"reasonix/internal/runtime/agent": [
+               "TestBudgetCountsKnownReportedTokens",
+               "TestBudgetCountsKnownReportedTokens/split",
+               "TestBudgetCountsKnownReportedTokens/total_only",
+               "TestBudgetCountsKnownReportedTokens/partial_split",
+               "TestBudgetCountsKnownReportedTokens/lower_total",
+               "TestBudgetCountsKnownReportedTokens/missing_total",
+               "TestBudgetCountsKnownReportedTokens/negative_split",
+               "TestBudgetCountsKnownReportedTokens/zero",
+               "TestBudgetCountsKnownReportedTokens/negative",
+               "TestReportedTokensEnforceLocalCapOnInheritedRoot",
+               "TestReportedTokensFollowOriginalAuxiliaryRoot",
+               "TestReportedTokenCountersSaturate"],
+             "reasonix/internal/assembly/boot": [
+               "TestEffectReportedTotalTokenBudget",
+               "TestEffectReportedTotalTokenBudget/split",
+               "TestEffectReportedTotalTokenBudget/total_only",
+               "TestEffectReportedTotalTokenBudget/partial_split",
+               "TestEffectReportedTotalTokenBudget/lower_total",
+               "TestEffectReportedTotalTokenBudget/missing_total",
+               "TestEffectReportedTotalTokenBudget/disabled"]} |
+            to_entries | all(.[]; . as $package |
+              ([ $events[] | select(.Package == $package.key and .Test == null and
+                 (.Action == "pass" or .Action == "fail" or .Action == "skip")) ] |
+               length == 1 and .[0].Action == "pass") and
+              all(.value[]; . as $test |
+                [ $events[] | select(.Package == $package.key and .Test == $test and
+                  (.Action == "pass" or .Action == "fail" or .Action == "skip")) ] |
+                length == 1 and .[0].Action == "pass"))
           ' "$RUNNER_TEMP/root-token-budget.jsonl"
 
       - name: upload Windows root token budget inventory
@@ -668,6 +804,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: test (Windows explicit skill root budget)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^(TestProfileRootBudgetLifetime|TestProfileBudgetPreparationUsesTurnAdmission|TestEffectExplicitSkillRootBudget)$' ./internal/session/control ./internal/assembly/boot | tee "$RUNNER_TEMP/explicit-skill-root-budget.jsonl"
+          jq -se '
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
+            all(.[]; .Action != "skip" and .Action != "fail") and
+            (["reasonix/internal/session/control", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["TestProfileRootBudgetLifetime", "TestProfileRootBudgetLifetime/new_task",
+              "TestProfileRootBudgetLifetime/same_scope", "TestProfileRootBudgetLifetime/new_scope",
+              "TestProfileRootBudgetLifetime/reset", "TestProfileRootBudgetLifetime/new_session",
+              "TestProfileRootBudgetLifetime/inherited", "TestProfileRootBudgetLifetime/context_zero",
+              "TestProfileBudgetPreparationUsesTurnAdmission", "TestEffectExplicitSkillRootBudget",
+              "TestEffectExplicitSkillRootBudget/profile", "TestEffectExplicitSkillRootBudget/preview",
+              "TestEffectExplicitSkillRootBudget/slash", "TestEffectExplicitSkillRootBudget/chips",
+              "TestEffectExplicitSkillRootBudget/goal", "TestEffectExplicitSkillRootBudget/context_zero",
+              "TestEffectExplicitSkillRootBudget/unconfigured"] - $tests | length) == 0
+          ' "$RUNNER_TEMP/explicit-skill-root-budget.jsonl"
+
+      - name: upload Windows explicit skill root budget inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: explicit-skill-root-budget-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/explicit-skill-root-budget.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: test (Windows root triage budget)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 5
@@ -727,6 +895,34 @@ jobs:
           name: root-auxiliary-budget-windows-${{ github.run_attempt }}
           path: ${{ runner.temp }}/root-auxiliary-budget.jsonl
           if-no-files-found: ignore
+          retention-days: 7
+
+      - name: test (Windows local cost quote)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=3m -json -run '^Test(LocalBudgetUsesOccurrenceQuote|LocalCost.*|UsageQuote.*|EffectLocalCostUsesOccurrenceQuote)$' ./internal/contract/event ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/local-cost-quote.jsonl"
+          jq -se '
+            ["TestLocalBudgetUsesOccurrenceQuote", "TestLocalBudgetUsesOccurrenceQuote/peak", "TestLocalBudgetUsesOccurrenceQuote/offpeak",
+             "TestLocalCostKeepsOriginalCurrencyBuckets", "TestLocalCostFixedPointThresholdAndUnknown",
+             "TestUsageQuoteUsesOneOwnerAndOccurrence", "TestUsageQuoteLegacyAndNilSinks",
+             "TestEffectLocalCostUsesOccurrenceQuote", "TestEffectLocalCostUsesOccurrenceQuote/peak",
+             "TestEffectLocalCostUsesOccurrenceQuote/offpeak", "TestEffectLocalCostUsesOccurrenceQuote/relay"] as $required |
+            [.[] | select(.Test != null and .Action == "pass") | .Test] as $passed |
+            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
+            all(.[]; .Action != "fail" and .Action != "skip") and
+            (($required - $passed) | length == 0) and
+            ((["reasonix/internal/contract/event", "reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages) | length == 0)
+          ' "$RUNNER_TEMP/local-cost-quote.jsonl"
+
+      - name: upload Windows local cost quote inventory
+        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: local-cost-quote-windows-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/local-cost-quote.jsonl
+          if-no-files-found: error
           retention-days: 7
 
       - name: test (Windows estimated usage quotes)
@@ -813,12 +1009,12 @@ jobs:
         timeout-minutes: 5
         run: go test -count=1 -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tools/builtin
 
-      # Full push suite uses the same 18m package timeout as Windows smoke and a
-      # 35m step budget above it. -count=1 as at the smoke step. A failure prints
-      # the failed tests' output and the 15 slowest boot tests.
+      # Full push suite: a 36m package timeout inside a 45m step budget. -count=1
+      # as at the smoke step. A failure prints the failed tests' output and the 15
+      # slowest boot tests.
       - name: test (full)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
-        timeout-minutes: 35
+        timeout-minutes: 45
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
@@ -829,9 +1025,9 @@ jobs:
           WINDOWS_SANDBOX_WAIT_MS: "20000"
         shell: bash
         run: |
-          # internal/assembly/boot alone takes 14-15 minutes on a Windows runner;
+          # internal/assembly/boot alone can take over 25 minutes on a Windows runner;
           # the package limit leaves headroom inside the step limit above.
-          go test -count=1 -p 4 -timeout=28m -json ./... | tee "$RUNNER_TEMP/full.jsonl" |
+          go test -count=1 -p 4 -timeout=36m -json ./... | tee "$RUNNER_TEMP/full.jsonl" |
             jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
 
       - name: test (full) failure detail

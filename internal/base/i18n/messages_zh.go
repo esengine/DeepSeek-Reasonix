@@ -115,6 +115,8 @@ var Chinese = Messages{
 	ChatThinking:                    "思考中…",
 	ChatThoughtForFmt:               "思考了 %d 秒",
 	ChatWorkedForFmt:                "耗时 %s",
+	ChatImageAttachedFmt:            "附有 %d 张图片 — 终端不显示图片",
+	ChatFromDeviceFmt:               "来自 设备 %d",
 	ChatStatusThinkingFmt:           "%s 思考中… (%s · %s 取消)",
 	TurnPhaseWorking:                "工作中",
 	TurnPhaseChecking:               "检查中",

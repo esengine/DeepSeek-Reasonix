@@ -23,6 +23,7 @@ export function ToastStack({ onFeedback, port, idle = false, look = {}, onLook =
       {toasts.map((toast) => toast.tone === "note" ? (
         <div className="toast note" role="status" key={toast.id}>
           <span>{toast.text}</span>
+          {toast.action && <button data-action="toast.act" data-target={String(toast.id)} onClick={() => { dismissToast(toast.id); toast.action?.run(); }}>{toast.action.label}</button>}
           <button data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
         </div>
       ) : (

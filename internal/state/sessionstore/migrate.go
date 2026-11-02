@@ -116,10 +116,9 @@ func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker st
 		// mtime so a session the user imported and then deleted is not revived.
 		return rehomeStrandedSessions(srcDir, globalDest, marker, projectDir)
 	}
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		rep.skipRead(srcDir, err)
-		return 0, nil
+	entries, done, err := legacySourceEntries(srcDir, rep)
+	if err != nil || done {
+		return 0, err
 	}
 
 	hasEvents := legacyEventBases(srcDir, entries)

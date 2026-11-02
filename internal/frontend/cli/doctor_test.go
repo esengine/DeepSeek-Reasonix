@@ -10,6 +10,8 @@ import (
 
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
+	"reasonix/internal/state/sessionstore"
+	"reasonix/internal/state/store"
 )
 
 func TestDoctorCommandPrintsJSON(t *testing.T) {
@@ -170,5 +172,52 @@ func TestDoctorRedactSessionsCommand(t *testing.T) {
 	}
 	if strings.Contains(string(data), secret) {
 		t.Fatalf("doctor redact-sessions leaked secret:\n%s", data)
+	}
+}
+
+// The summary line is a report about evidence. When the lease probe cannot
+// decide, it must not repeat the held claim; refusing makes the incomplete
+// scrub visible and exits non-zero.
+func TestDoctorRedactSessionsNamesAnUnprovableLease(t *testing.T) {
+	dir := testenv.TempDir(t)
+	const secret = "sensitive-value-that-must-not-leak"
+	path := filepath.Join(dir, "abc.jsonl")
+	body := `{"role":"tool","content":"DEEPSEEK_API_KEY=` + secret + `"}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionstore.SaveSessionLeaseInfo(path, sessionstore.SessionLeaseInfo{
+		SessionPath: path,
+		WriterID:    "other-host-1234-deadbeef",
+		PID:         os.Getpid() + 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(store.SessionLeaseLock(sessionstore.CanonicalSessionPath(path)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var rc int
+	stdout, stderr := captureCLIOutput(t, func() {
+		rc = doctorCommand([]string{"redact-sessions", "--dir", dir}, "test-version")
+	})
+	if rc != 1 {
+		t.Fatalf("rc = %d, want 1 (an incomplete scrub is not success)", rc)
+	}
+	if !strings.Contains(stdout, "(1 skipped: could not prove the lease)") {
+		t.Fatalf("summary does not name the unprovable lease:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "active lease held") {
+		t.Fatalf("summary claimed an active lease the probe never proved:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "could not be proven") {
+		t.Fatalf("refusal reason missing from stderr:\n%s", stderr)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != body {
+		t.Fatalf("redaction rewrote a session it could not prove:\n%s", data)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/plugin"
 )
 
@@ -246,6 +247,7 @@ func (c *Controller) configuredMCPServer(name string) (config.PluginEntry, error
 // A persistence failure must not produce a false-successful session-only removal.
 // MCPs contributed by installed plugin packages cannot be removed independently.
 func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error) {
+	name = strings.TrimSpace(name)
 	cfg, lerr := config.LoadForRoot(c.workspaceRoot)
 	if lerr != nil {
 		return false, lerr
@@ -258,9 +260,21 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 		return false, rerr
 	}
 	if !removed {
-		return false, fmt.Errorf("no removable MCP server named %q", name)
+		if entry.Name != "" {
+			return false, fmt.Errorf("no removable MCP server named %q", name)
+		}
+		var known bool
+		entry, known = c.staleMCPEntry(name)
+		if !known {
+			return false, fmt.Errorf("no removable MCP server named %q", name)
+		}
+		if entry.Source == config.MCPSourcePluginPackage {
+			return false, fmt.Errorf("MCP server %q is managed by a plugin; disable or remove the plugin instead", name)
+		}
 	}
-	_ = config.DefaultActivationStore().ClearServerEverywhere(entry, c.workspaceRoot)
+	if entry.Source != "" {
+		_ = config.DefaultActivationStore().ClearServerEverywhere(entry, c.workspaceRoot)
+	}
 	removedState := reconcileRemovedMCPState(c.workspaceRoot, name)
 	if c.capabilityRuntime != nil {
 		// Revoke before touching the shared Host so an overlapping resolver cannot
@@ -270,6 +284,9 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 	disconnected = c.mcp.disconnect(name)
 	if !disconnected {
 		c.mcp.removeToolPrefix(name)
+	}
+	if host := c.mcp.hostRef(); host != nil {
+		host.ClearFailure(name)
 	}
 	// A lower-priority same-name declaration may now be effective. Restore its
 	// cached/on-demand surface without starting a process; otherwise ensure the
@@ -288,6 +305,49 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 		c.syncCapabilityRuntimeFromConfig(name, nil)
 	}
 	return disconnected, removedState.cleanupErr
+}
+
+func (c *Controller) staleMCPEntry(name string) (config.PluginEntry, bool) {
+	entry, found := c.capabilityRuntime.ServerIdentity(name)
+	if entry.Source == config.MCPSourcePluginPackage {
+		return entry, true
+	}
+	host := c.mcp.hostRef()
+	if host != nil {
+		for _, server := range host.Servers() {
+			if server.Name != name {
+				continue
+			}
+			source := config.MCPConfigSource(server.ConfigSource)
+			if source == config.MCPSourcePluginPackage {
+				return config.PluginEntry{Name: name, Source: source}, true
+			}
+			if !found {
+				entry, found = config.PluginEntry{Name: name, Source: source}, true
+			}
+		}
+	}
+	if reg := c.mcp.registry(); reg != nil {
+		for _, toolName := range reg.AllNames() {
+			registered, _ := reg.Get(toolName)
+			if meta, ok := registered.(tool.MCPMetadata); ok && meta.MCPServerName() == name {
+				if owned, ok := registered.(tool.MCPPackageMetadata); ok && owned.MCPPackageName() != "" {
+					return config.PluginEntry{Name: name, Source: config.MCPSourcePluginPackage}, true
+				}
+				if !found {
+					entry, found = config.PluginEntry{Name: name}, true
+				}
+			}
+		}
+	}
+	if !found && host != nil {
+		for _, failure := range host.Failures() {
+			if failure.Name == name {
+				return config.PluginEntry{Name: name}, true
+			}
+		}
+	}
+	return entry, found
 }
 
 // DisconnectMCPServer disconnects a live server for this session without touching

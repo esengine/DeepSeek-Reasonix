@@ -188,6 +188,7 @@ jobs:
           node perf/web-access.mjs
           node perf/peers-settings.mjs
           node perf/output-cap.mjs
+          node perf/tool-output-clip.mjs
           node perf/agent-run-tab.mjs
           node perf/changes-cap.mjs
           node perf/session-menu-fit.mjs

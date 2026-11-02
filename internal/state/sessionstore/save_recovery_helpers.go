@@ -89,6 +89,8 @@ func (s *Session) writeRecoveryBranchAtPath(
 // InheritCompactionState gives targetPath the context projection saved beside
 // sourcePath when it still covers msgs, written in this build's schema. It
 // reports whether targetPath now holds one; sourcePath's file is only read.
+// The projection is durable content, but recall budget and blocked/failed
+// suppression belong to the source session's runtime generation.
 func InheritCompactionState(sourcePath, targetPath string, msgs []provider.Message) bool {
 	if _, ok, err := LoadCompactionState(targetPath); err == nil && ok {
 		return true
@@ -102,6 +104,12 @@ func InheritCompactionState(sourcePath, targetPath string, msgs []provider.Messa
 		st.Projection.CoveredPrefixHash == "" ||
 		CoveredPrefixHash(msgs, n) != st.Projection.CoveredPrefixHash {
 		return false
+	}
+	st.Recall = RecallLedger{}
+	st.BlockedInputHash = ""
+	st.BlockedReason = ""
+	if st.LastReceipt != nil && st.LastReceipt.Status != "applied" {
+		st.LastReceipt = nil
 	}
 	if err := SaveCompactionState(targetPath, st); err != nil {
 		slog.Warn("session: context projection not inherited", "path", targetPath, "err", err)

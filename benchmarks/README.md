@@ -420,7 +420,7 @@ own outcome).
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `-mode` | `suite` | `suite` \| `diff` \| `swebench` \| `compare` \| `traj` (`diff` generates tests for the PR diff; `swebench` runs the official per-instance evaluation; `compare` renders KPI/Pareto readouts from 2+ `-json` reports; `traj` re-digests recorded trajectory files without spending tokens). |
+| `-mode` | `suite` | `suite` \| `diff` \| `swebench` \| `compare` \| `traj` (`diff` generates tests for the PR diff; `swebench` runs the official per-instance evaluation; `compare` renders KPI/Pareto readouts from 2+ `-json` reports; `traj` re-digests recorded trajectory files without spending tokens; `audit` checks a batch's published figures against its retained rows). |
 | `-suite` | `benchmarks/e2e` | Suite root (must contain `tasks/<id>/`). |
 | `-task` | *(all)* | Suite mode: run only these comma-separated task IDs (e.g. `-task fix-add-bug`); unknown IDs fail with the available list. |
 | `-attempts` | `1` | Suite and diff modes: retry a task until an attempt passes, up to N; enables the `Pass@≤N` KPI, and TTCS charges a retried solve with its failed attempts' wall. |
@@ -433,6 +433,7 @@ own outcome).
 | `-ablate` | *(none)* | Ablation arm: comma-separated subsystems to switch off — `evidence`, `planner`, `subagent`, `retrieval`, `compaction`, `upstream` and `recall-search`; `none` \| `all`. |
 | `-out` | *(stdout)* | Write the markdown report here. |
 | `-json` | *(none)* | Write the JSON report here (optional). |
+| `-batch` | *(none)* | Suite mode: write `results.jsonl` (one row per attempt) and `batch.json` (manifest v1) here, so the report's figures can be audited later. Audit mode: read the batch from here. See [Auditing a batch](#auditing-a-batch). |
 | `-trajectories` | *(none)* | Suite mode: write one `<task-id>.trajectory.jsonl` per task into this directory (the agent's full event stream with timestamps — see `reasonix run --trajectory`). The report gains a time-attribution line (tools vs. model) and each JSON result a `trajectory` digest. |
 | `-force-planner` | `false` | Suite mode: prefix each prompt with a plan-first directive so the two-model turn engages regardless of the planner gate. Use for the "with planner" arm of an A/B; results carry `plan_forced` so arms are only comparable with equal forcing. |
 | `-anchor` | `blind` | Suite mode: which hypothesis the agent holds before it looks at anything — `blind` (none, the control) \| `correct` \| `wrong`. The seeded arms prefix each prompt with the task's authored seed and **skip** tasks that have none, so an unseeded control run never lands in a seeded denominator. Results carry `anchor`. See [Anchor resistance](#anchor-resistance). |
@@ -455,10 +456,65 @@ Diff-mode flags:
 | `-timeout` | `1200` | Agent timeout in seconds (diff mode). |
 | `-attempts` | `1` | Diff mode: retry up to N times until a run passes (stochastic agent). |
 
+## Auditing a batch
+
+`-batch DIR` writes two files from a suite run: `results.jsonl` (one row per
+attempt — the raw record every figure is computed from) and `batch.json`
+(manifest v1). `-mode audit -batch DIR` re-derives the report's headline figures
+from `results.jsonl`, prints the manifest's claim beside the recomputed value,
+and exits non-zero naming any figure that moved. It also refuses a batch whose
+manifest is missing, records no commit, or whose rows are truncated.
+
+This is an **aggregation audit, not a replay**: it proves the published figures
+follow from the retained rows. It does not re-execute the model, tools or
+environment, and cannot show the experiment would reproduce. A real replay would
+need the commit, a corpus fingerprint, the model and provider configuration, the
+seed, the flags, the raw results and the runtime version; it is not implemented.
+
+`schema_version` is top level. The rest is three groups:
+
+| Group | Fields | Answers |
+| --- | --- | --- |
+| `over` | `command.mode` and `command.axes` (every flag that changes what a figure means; paths omitted); `tasks.count` and `tasks.digest` (sha256 over sorted, NUL-separated task ids — the corpus identity, never the task text); `filters`; `denominator` (`unit`, `definition`, `value`) | what the figures are over |
+| `producer` | `commit` (or an explicit `unknown`, never a guess), `commit_source`, `dirty`, `model`, `provider`, `seed`, `started_at`, `finished_at`, `harness_version`, `go_version` | which run produced them |
+| `trust` | `results_sha256`, `claimed` (the headline figures), `ledger`, `retention` | why they can still be checked |
+
+The ledger accounts for every planned run, and the audit checks that the counts
+form a funnel (`scored ≤ completed ≤ attempted`, `failed ≤ scored`,
+`scored = pass1 + failed`, `rows = attempted + skipped`). A row count is never a
+denominator: `denominator.value` is a count of scored tasks, and `rows` is
+published only to show what was retained.
+
+| Count | Meaning |
+| --- | --- |
+| `planned` | graded runs the batch set out to attempt: filtered tasks × trials |
+| `attempted` | retained rows for runs that started (skipped rows are not attempts) |
+| `completed` | attempts that ended and left a row; this harness writes a row only after an attempt ends, so it equals `attempted` and the equality is checked, not assumed |
+| `scored` | completed first attempts of solvable, non-skipped tasks — the pass@1 denominator |
+| `failed` | scored attempts the grader did not pass |
+| `unmeasured` | attempts whose cost and tokens are unknown because no metrics landed; kept out of spend totals, never counted as zero |
+| `excluded` | rows kept out of the accuracy denominator: skipped, `no_solution`, and retry entries |
+
+Spend and cache fields are omitted from `claimed` when nothing was measured, so
+an absent figure reads as unknown rather than as a measured zero. `seed` is
+omitted for the same reason: the harness does not set a sampling seed.
+`results_sha256` covers the values and the presence of every row; line endings,
+indentation and key order are normalised away because none of them is evidence,
+while number spelling is kept (a rewritten `1` is not `1.0`).
+A successful audit records the verifier version (`audit.verifier_version`) and
+the digest it checked in `batch.json`, so a re-verification can tell which code
+checked the batch.
+
+`results.jsonl` is retained unredacted beside the manifest — task prompts and
+agent notes included — and is not public. The manifest itself carries a task-id
+digest, no prompt text, no absolute paths, no endpoints or keys and no model
+output. A claim whose rows are gone cannot be audited: there is nothing to
+recompute from, and this tool will not certify it.
+
 ## Dataset retention
 
-Keep every `-json` report and `-trajectories` directory from real runs: they
-are the accumulating corpus — per-task contracts-to-be, full event
+Keep every `-json` report, `-trajectories` directory and `-batch` directory from
+real runs: they are the accumulating corpus — per-task contracts-to-be, full event
 trajectories, checkpoint oracle verdicts, stop curves and phase traces — that
 any future offline learning (routing, stop policies, budgets) would train
 and evaluate on. The control plane stays deterministic and interpretable

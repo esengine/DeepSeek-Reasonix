@@ -94,30 +94,24 @@ func DefaultProbes() []string {
 func RunProbesWithOptions(ctx context.Context, commands []string, opts ProbeOptions) []ProbeResult {
 	key := probeFingerprint(commands, opts)
 	now := probeNow()
+	snapshot, hasSnapshot := loadProbeSnapshot(opts.SnapshotDir, key)
+	if hasSnapshot && now.Sub(snapshot.StoredAt) < probeSnapshotTTL && reusableHere(snapshot.Results, opts.DenyRoots) {
+		return cloneProbeResults(snapshot.Results)
+	}
 	if results, ok := cachedProbeResults(key, now); ok && reusableHere(results, opts.DenyRoots) {
-		adoptSnapshot(opts.SnapshotDir, key, results, now)
-		return results
+		return adoptSharedProbe(opts, key, snapshot, results, now)
 	}
 	if call, ok := beginProbe(key); ok {
 		<-call.done
 		if reusableHere(call.results, opts.DenyRoots) {
-			adoptSnapshot(opts.SnapshotDir, key, call.results, now)
-			return cloneProbeResults(call.results)
+			return adoptSharedProbe(opts, key, snapshot, call.results, now)
 		}
 		// Someone else's answer ran something this workspace will not. Its own
 		// run below is not shared back, so it neither reads nor writes the key.
 		return runProbesUncached(ctx, commands, opts)
 	}
-	// A fresh persisted snapshot substitutes for a live run entirely: rebuilds
-	// and app relaunches within the TTL render the exact bytes the sessions on
-	// this machine were recorded with, so the provider prefix cache survives.
-	snapshot, hasSnapshot := loadProbeSnapshot(opts.SnapshotDir, key)
-	if hasSnapshot && now.Sub(snapshot.StoredAt) < probeSnapshotTTL && reusableHere(snapshot.Results, opts.DenyRoots) {
-		finishProbe(key, snapshot.Results, now)
-		return cloneProbeResults(snapshot.Results)
-	}
 	results := runProbesUncached(ctx, commands, opts)
-	if hasSnapshot {
+	if hasSnapshot && reusableHere(snapshot.Results, opts.DenyRoots) {
 		// Even an expired snapshot anchors the flap merge: transient failures
 		// (timeout, nonzero exit) keep the previous successful observation so
 		// a slow tool cannot rewrite the prompt prefix.

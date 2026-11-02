@@ -117,6 +117,10 @@ const (
 	NoticeCodeInboxUnrecovered = "inbox_unrecovered"
 	// A context fold finished; Detail is the CompactionNotice payload, its text the English fallback.
 	NoticeCodeCompactionTelemetry = "compaction_telemetry"
+	// A fold left earlier user turns only in the summary; Detail is the TurnsDropped payload, its text the English fallback.
+	NoticeCodeUserTurnsDropped = "user_turns_dropped"
+	// A fold left turns marked [[keep]] only in the summary; Detail is the TurnsDropped payload, its text the English fallback.
+	NoticeCodeKeptTurnsFolded = "kept_turns_folded"
 	// A background job started; Detail is the JobNotice payload, its text the English fallback.
 	NoticeCodeJobStarted = "job_started"
 	// A background job ended; Detail is the JobNotice payload, its text the English fallback.

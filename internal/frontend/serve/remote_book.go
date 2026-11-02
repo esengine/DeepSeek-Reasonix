@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/platform/wsl"
@@ -304,7 +305,11 @@ func (h *Hub) remoteTree(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	var tree json.RawMessage
-	if err := farRequest(r.Context(), ep, http.MethodGet, "/tree", nil, &tree); err != nil {
+	path := "/tree"
+	if r.URL.RawQuery != "" {
+		path += "?" + r.URL.RawQuery
+	}
+	if err := farRequest(r.Context(), ep, http.MethodGet, path, nil, &tree); err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
@@ -344,8 +349,13 @@ func (h *Hub) removeRemoteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// remoteLinkLinger keeps a link taken for one request past its answer. The
+// tree, a delete and a flag change arrive in quick succession, and a link
+// dropped between them is re-dialled — on a stopped WSL distribution, booted.
+var remoteLinkLinger = 45 * time.Second
+
 // remoteLink is an endpoint on host: a pane's link when one is open, or one
-// taken for this request and handed back by release.
+// taken for this request and handed back by release after remoteLinkLinger.
 func (h *Hub) remoteLink(r *http.Request, host string) (RemoteEndpoint, func(), error) {
 	// Disabling a host must also refuse reads that could reuse an existing pane.
 	workspace, err := h.remoteHostWorkspace(host)
@@ -355,7 +365,17 @@ func (h *Hub) remoteLink(r *http.Request, host string) (RemoteEndpoint, func(), 
 	if ep, ok := h.remotePane(host, workspace); ok {
 		return ep, func() {}, nil
 	}
-	return h.opts.Remote.Attach(operationContext(r), host, workspace)
+	ep, release, err := h.opts.Remote.Attach(operationContext(r), host, workspace)
+	if err != nil {
+		return RemoteEndpoint{}, nil, err
+	}
+	return ep, func() {
+		if remoteLinkLinger <= 0 {
+			release()
+			return
+		}
+		time.AfterFunc(remoteLinkLinger, release)
+	}, nil
 }
 
 // remoteHostWorkspace resolves the user-held default before a link can be taken.

@@ -1,0 +1,293 @@
+name: Android
+
+# The Android shell under `android/` ships from the same tag the desktop line
+# publishes, and lands on the same release page.
+#
+# It is a separate workflow rather than a job inside release-studio.yml for two
+# reasons. The toolchains share nothing — Go, the Android SDK, a Gradle wrapper —
+# so a runner carrying both would install three toolchains to build one artifact.
+# And `signing-contract` pins which workflows may reach the SignPath credentials;
+# this one never touches them, and keeping it out of that graph is what keeps the
+# fingerprint stable.
+#
+# A failure here does not hold back the desktop release: the two are independent
+# by construction, and an APK is worth less than the desktop builds it sits
+# beside.
+on:
+  push:
+    tags: ['studio-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing studio tag to build for and attach to (for example studio-v2.51.0)"
+        required: false
+        type: string
+      ref:
+        description: "A branch to build as a trial run of this workflow; nothing is attached to any release"
+        required: false
+        type: string
+
+permissions:
+  contents: write # upload the APK to the release the tag belongs to
+
+concurrency:
+  group: android-${{ inputs.tag || inputs.ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: resolve the tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
+      candidate: ${{ steps.release.outputs.candidate }}
+      publish: ${{ steps.release.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The same tag grammar release-studio.yml enforces, spelled the same way:
+      # two workflows that disagree about which tags name a release would publish
+      # one artifact for a tag the other refused.
+      - name: Resolve tag and version
+        id: release
+        env:
+          IN_TAG: ${{ inputs.tag }}
+          IN_REF: ${{ inputs.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          # A trial run builds a branch as a throwaway version and publishes nothing.
+          if [ -n "$IN_REF" ] && [ -z "$IN_TAG" ]; then
+            sha="$(git rev-parse --verify "origin/$IN_REF^{commit}")"
+            { echo "tag="; echo "version=v0.0.0-dev.${sha:0:7}"; echo "sha=$sha"
+              echo "candidate=false"; echo "publish=false"; } >> "$GITHUB_OUTPUT"
+            echo "trial build of $IN_REF at $sha"
+            exit 0
+          fi
+          tag="${IN_TAG:-$REF_NAME}"
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$tag" =~ ^studio-v(.+)$ ]] || [[ ! "${BASH_REMATCH[1]}" =~ $semver ]]; then
+            echo "::error::studio release tag must be studio-vMAJOR.MINOR.PATCH[-PRERELEASE], got: $tag"
+            exit 1
+          fi
+          sha="$(git rev-parse --verify "refs/tags/$tag^{commit}")"
+          if ! git merge-base --is-ancestor "$sha" origin/studio; then
+            echo "::error::$tag is not on studio history"
+            exit 1
+          fi
+          version="${tag#studio-}"
+          candidate=false
+          if [[ "${version#v}" =~ $semver ]] && [ -n "${BASH_REMATCH[4]}" ]; then
+            candidate=true
+          fi
+          { echo "tag=$tag"; echo "version=$version"; echo "sha=$sha"
+            echo "candidate=$candidate"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
+          echo "resolved $tag -> $version at $sha (candidate=$candidate)"
+
+  build:
+    name: build the APK
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # `publish` decides whether to attach anything, and the only honest answer to
+    # "will this APK install" is whether a key was restored.
+    outputs:
+      signed: ${{ steps.key.outputs.signed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # pnpm first: setup-node's pnpm cache needs the executable to exist.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend-next/pnpm-lock.yaml
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      # The SDK is the one thing nothing sets for you, per android/README.md. The
+      # runner image carries one; this asserts the two pieces the build names
+      # rather than re-installing them, so a missing package fails here by name
+      # instead of surfacing later as an unresolved compileSdk.
+      - name: Provide the Android SDK
+        run: |
+          if [ -z "${ANDROID_HOME:-}" ]; then
+            echo "::error::ANDROID_HOME is unset; the runner image is expected to provide the Android SDK"
+            exit 1
+          fi
+          for piece in "platforms/android-35" "build-tools/35.0.0"; do
+            if [ ! -d "$ANDROID_HOME/$piece" ]; then
+              echo "::error::the Android SDK at $ANDROID_HOME has no $piece; android/README.md names it as a requirement"
+              exit 1
+            fi
+          done
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      # A key that exists signs; a key that does not leaves the artifact
+      # unsigned, which is what a release with no key has always produced. The
+      # decision is the repository's, not this workflow's: it reads the four
+      # secrets android/README.md already names.
+      - name: Restore the signing key
+        id: key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.REASONIX_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.REASONIX_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.REASONIX_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.REASONIX_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "no signing key configured: the APK will be unsigned"
+            exit 0
+          fi
+          mkdir -p android/keystore
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/keystore/release.jks
+          {
+            echo "storeFile=keystore/release.jks"
+            echo "storePassword=${STORE_PASSWORD}"
+            echo "keyAlias=${KEY_ALIAS}"
+            # PKCS#12 keystores use one password for both; only write the second
+            # when it is genuinely a different fact.
+            [ -n "$KEY_PASSWORD" ] && echo "keyPassword=${KEY_PASSWORD}"
+          } > android/keystore/keystore.properties
+          chmod 600 android/keystore/*
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "signing key restored"
+
+      - name: Build the kernel and the page
+        working-directory: android
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          export REASONIX_APP_VERSION="${VERSION#v}"
+          bash ./scripts/build-kernel.sh
+          bash ./scripts/sync-page.sh
+
+      # The one end-to-end check that needs no phone: the kernel the shell starts,
+      # serving the page the APK carries. Running it here means an APK that would
+      # open blank fails the build instead of the install.
+      - name: Verify the packaged page
+        working-directory: android
+        run: |
+          (cd .. && go build -o reasonix-verify ./cmd/reasonix)
+          KERNEL_BIN="$PWD/../reasonix-verify" bash ./scripts/verify-page.sh
+
+      - name: Assemble
+        working-directory: android
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          # The version comes from the tag, so the About screen and the update
+          # check name this release. versionCode keeps its existing shape, which
+          # is why the build digit stays 1: it is a single decimal place, and a
+          # number that grows past it would collide with the next patch.
+          ./gradlew assembleRelease --no-daemon "-PreasonixVersion=${VERSION#v}"
+
+      - name: Name the artifact
+        id: apk
+        working-directory: android/app/build/outputs/apk/release
+        run: |
+          src="$(ls ./*.apk | head -n 1)"
+          if [ -z "$src" ]; then
+            echo "::error::assembleRelease produced no APK"
+            exit 1
+          fi
+          case "$src" in
+            *-unsigned.apk) name="ReasonixMobile-${{ needs.resolve.outputs.version }}-unsigned.apk" ;;
+            *)              name="ReasonixMobile-${{ needs.resolve.outputs.version }}.apk" ;;
+          esac
+          mv "$src" "$name"
+          sha256sum "$name" > "$name.sha256"
+          {
+            echo "path=$PWD/$name"
+            echo "name=$name"
+          } >> "$GITHUB_OUTPUT"
+          ls -l "$name" "$name.sha256"
+
+      # An unsigned package is not a lesser APK, it is an unusable one: Android's
+      # package manager rejects it outright rather than reporting a signature
+      # mismatch. Say so where the run summary can be read, instead of letting a
+      # green build imply a shippable artifact.
+      - name: Say what an unsigned build means
+        if: steps.key.outputs.signed != 'true'
+        run: |
+          echo "::warning::no signing key configured, so this APK is unsigned. Android refuses to install an unsigned package, so the release will carry no APK; the file stays a workflow artifact for whoever signs it."
+          {
+            echo "### No APK on this release"
+            echo ""
+            echo "The build produced an unsigned APK, which Android refuses to install."
+            echo "It is attached to this run as a workflow artifact only. Add the four"
+            echo "signing secrets to publish one."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v8
+        with:
+          name: android-apk
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/release/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: attach the APK
+    needs: [resolve, build]
+    # Nothing to attach unless the build was signed. Skipping is the honest
+    # outcome: a release page with an APK nobody can install is worse than a
+    # release page without one.
+    if: needs.build.outputs.signed == 'true' && needs.resolve.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-apk
+          path: dist
+
+      # The release itself belongs to release-studio.yml, which creates it and
+      # owns its notes. This waits for it rather than creating a second one: two
+      # jobs racing to define a release is how a page ends up with the wrong body.
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          # 90 minutes: on the last Studio release the page appeared about 40
+          # minutes after the tag run started, and the APK build spends part of
+          # that before this wait begins.
+          for _ in $(seq 1 360); do
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+              gh release upload "$TAG" dist/*.apk dist/*.sha256 --repo "$REPO" --clobber
+              echo "attached to $TAG"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::release $TAG did not appear within 90 minutes; the APK was built but not published"
+          exit 1

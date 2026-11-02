@@ -28,14 +28,14 @@ it.each([
   panel.scrollTop = 1800;
   panel.scrollLeft = 120;
   await userEvent.click(screen.getByRole("tab", { name: new RegExp(`^${to}(?!间消息)`) }));
-  expect(screen.getByRole("heading", { name: to, level: 2 })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: new RegExp(`^${to}(?!间消息)`), selected: true })).toBeTruthy();
   expect(screen.getByRole("tabpanel").scrollTop).toBe(0);
   expect(screen.getByRole("tabpanel").scrollLeft).toBe(0);
 });
 
 it("starts a keyboard-selected category at the top and keeps focus on its tab", async () => {
   draw("tools");
-  const current = screen.getByRole("tab", { name: /^工具与权限/ });
+  const current = screen.getByRole("tab", { name: /子代理与协作/ });
   current.focus();
   screen.getByRole("tabpanel").scrollTop = 1600;
   await userEvent.keyboard("{ArrowDown}");
@@ -80,7 +80,7 @@ it("keeps a search result's anchor after switching away from a scrolled category
 it("opens an initial anchor inside its disclosure", async () => {
   const scroll = anchorScrolling();
   draw("appearance:contrast");
-  await screen.findByRole("heading", { name: "外观", level: 2 });
+  await screen.findByRole("tab", { name: "外观与主题", selected: true });
   const target = document.querySelector<HTMLElement>('[data-setting="contrast"]')!;
   expect(target.closest<HTMLDetailsElement>("details")?.open).toBe(true);
   expect(scroll.mock.contexts).toContain(target);

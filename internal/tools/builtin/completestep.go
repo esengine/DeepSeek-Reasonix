@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"reasonix/internal/contract/planmode"
 	"reasonix/internal/contract/provider"
@@ -653,7 +654,11 @@ func allCommandHints(ctx context.Context, ledger *evidence.Ledger) string {
 	// Truncate long entries for readability.
 	for i, c := range cmds {
 		if len(c) > 80 {
-			cmds[i] = c[:80] + "…"
+			cut := 80
+			for cut > 0 && !utf8.RuneStart(c[cut]) {
+				cut--
+			}
+			cmds[i] = c[:cut] + "…"
 		}
 	}
 	return fmt.Sprintf("; commands that ran: %q — pick the matching one and retry complete_step", cmds)

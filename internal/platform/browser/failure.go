@@ -18,6 +18,7 @@ const (
 	CodeNavigationFailed  Code = "browser.navigation_failed"
 	CodeNavigationTimeout Code = "browser.navigation_timeout"
 	CodeNoTab             Code = "browser.no_tab"
+	CodeTooManyTabs       Code = "browser.too_many_tabs"
 	CodeTabClosed         Code = "browser.tab_closed"
 	CodeUnknownRef        Code = "browser.unknown_ref"
 	CodeStaleRef          Code = "browser.stale_ref"

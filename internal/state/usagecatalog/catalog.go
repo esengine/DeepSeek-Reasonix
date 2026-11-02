@@ -25,7 +25,9 @@ import (
 
 // SchemaVersion names the projection file, so a bump retires the old one
 // rather than migrating it: every column here is replayable from the JSONL.
-const SchemaVersion = 7
+// Version 8 adds the reason a row was unpriced; opening it reindexes the daily
+// files, so an older projection's rows regain their reason from the source.
+const SchemaVersion = 8
 
 type AppendReceipt struct {
 	Path     string
@@ -56,6 +58,9 @@ type Entry struct {
 	// CostIncomplete marks a row that counted usage but whose money is
 	// unknown, so a total folding it in is a floor, not a bill.
 	CostIncomplete bool
+	// IncompleteReason names why, in the quote's vocabulary; empty when the
+	// row is priced or its reason was never recorded.
+	IncompleteReason string
 	// BillingMode is the mode the quote was made in; a plan's estimate is kept
 	// apart from billed cost.
 	BillingMode string
@@ -177,7 +182,7 @@ CREATE TABLE usage_records(
  prompt INTEGER NOT NULL,completion INTEGER NOT NULL,reasoning INTEGER NOT NULL,cache_hit INTEGER NOT NULL,
  cache_miss INTEGER NOT NULL,total INTEGER NOT NULL,requests INTEGER NOT NULL,turns INTEGER NOT NULL,
  cost INTEGER NOT NULL DEFAULT 0,cost_currency TEXT NOT NULL DEFAULT '',cost_estimated INTEGER NOT NULL DEFAULT 0,
- cost_incomplete INTEGER NOT NULL DEFAULT 0,
+ cost_incomplete INTEGER NOT NULL DEFAULT 0,incomplete_reason TEXT NOT NULL DEFAULT '',
  valuation_cny INTEGER,valuation_usd INTEGER,billing_mode TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(file_path,byte_offset)
 );
@@ -194,6 +199,7 @@ CREATE TABLE usage_cost(
  PRIMARY KEY(day,source,model_ref,view,currency,mode)
 );
 CREATE INDEX idx_usage_rollups_range ON usage_rollups(day,source,model_ref);
+CREATE INDEX idx_usage_records_unpriced ON usage_records(day,source,cost_incomplete,incomplete_reason);
 `
 
 func migrations() []projectiondb.Migration {
@@ -393,10 +399,11 @@ func insertRecord(ctx context.Context, tx *sql.Tx, receipt AppendReceipt, entry 
 	}
 	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_records(file_path,byte_offset,byte_length,line_hash,day,source,
         model_ref,provider,prompt,completion,reasoning,cache_hit,cache_miss,total,requests,turns,cost,cost_currency,cost_estimated,
-        cost_incomplete,valuation_cny,valuation_usd,billing_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        cost_incomplete,incomplete_reason,valuation_cny,valuation_usd,billing_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		receipt.Path, receipt.Offset, receipt.Length, receipt.LineHash, entry.Day, entry.Source, entry.ModelRef, entry.Provider,
 		entry.Prompt, entry.Completion, entry.Reasoning, entry.CacheHit, entry.CacheMiss, entry.Total, entry.Requests, entry.Turns,
-		entry.Cost, entry.CostCurrency, estimated, incomplete, valuationArg(entry, "CNY"), valuationArg(entry, "USD"), entry.BillingMode)
+		entry.Cost, entry.CostCurrency, estimated, incomplete, entry.IncompleteReason,
+		valuationArg(entry, "CNY"), valuationArg(entry, "USD"), entry.BillingMode)
 	return err
 }
 
@@ -480,9 +487,11 @@ type rawRecord struct {
 	CostCurrency  string `json:"cost_currency"`
 	CostEstimated bool   `json:"cost_estimated"`
 	CostComplete  *bool  `json:"cost_complete"`
-	ValuationCNY  string `json:"valuation_cny"`
-	ValuationUSD  string `json:"valuation_usd"`
-	BillingMode   string `json:"billing_mode"`
+	// The reason the quote recorded, if any.
+	IncompleteReason string `json:"incomplete_reason"`
+	ValuationCNY     string `json:"valuation_cny"`
+	ValuationUSD     string `json:"valuation_usd"`
+	BillingMode      string `json:"billing_mode"`
 }
 
 func providerOf(model string) string {
@@ -497,12 +506,12 @@ func entryFromRaw(day string, raw rawRecord) Entry {
 	if raw.Turn {
 		turns = 1
 	}
-	incomplete := CostIncomplete(raw.CostComplete, raw.Total, raw.CostAmount)
+	reason, incomplete := UnpricedReason(raw.CostComplete, raw.Total, raw.CostAmount, raw.IncompleteReason)
 	return Entry{Day: day, Source: raw.Source, ModelRef: raw.ModelRef, Provider: providerOf(raw.ModelRef), Prompt: raw.Prompt,
 		Completion: raw.Completion, Reasoning: raw.Reasoning, CacheHit: raw.CacheHit, CacheMiss: raw.CacheMiss,
 		Total: raw.Total, Requests: raw.Requests, Turns: turns}.WithCost(Priced{Amount: raw.CostAmount,
 		Currency: raw.CostCurrency, CNY: raw.ValuationCNY, USD: raw.ValuationUSD, Estimated: raw.CostEstimated,
-		Incomplete: incomplete, BillingMode: raw.BillingMode})
+		Incomplete: incomplete, Reason: reason, BillingMode: raw.BillingMode})
 }
 
 // recordDays is every day the file's records were filed under, plus the day it
@@ -715,8 +724,7 @@ func bump(ctx context.Context, tx *sql.Tx) (uint64, error) {
 func (c *Catalog) NoteFallback() { c.fallback.Add(1) }
 
 func (c *Catalog) refresh(ctx context.Context) {
-	var files, lag, corrupt int64
-	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(MAX(size-indexed_offset,0)),0),COALESCE(SUM(corrupt_lines),0) FROM usage_files`).Scan(&files, &lag, &corrupt)
+	files, lag, corrupt := readStatusCounts(ctx, c.db)
 	c.statusMu.Lock()
 	c.status.Revision, c.status.IndexedFiles, c.status.LagBytes, c.status.CorruptLines = c.revision.Load(), files, lag, corrupt
 	c.status.Fallbacks = c.fallback.Load()

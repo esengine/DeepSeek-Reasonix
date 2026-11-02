@@ -1,8 +1,65 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
-import { liveGraceMinutes, LIVE_GRACE_CHOICES, onLiveGraceChange, onOpenSessionLimitChange, openSessionLimit, setLiveGraceMinutes, setOpenSessionLimit } from "./prefs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { liveGraceMinutes, LIVE_GRACE_CHOICES, onLiveGraceChange, onOpenSessionLimitChange, openSessionLimit, runningMessageIntent, setLiveGraceMinutes, setOpenSessionLimit, setRunningMessageIntent, onPlanProgressChange, setShowsPlanProgress, showsPlanProgress } from "./prefs";
 
 beforeEach(() => localStorage.clear());
+afterEach(() => { vi.restoreAllMocks(); setRunningMessageIntent("steer"); localStorage.clear(); });
+
+describe("default intent for messages sent during a run", () => {
+  it("defaults to steering and reads only the offered follow-up choice", () => {
+    expect(runningMessageIntent()).toBe("steer");
+    for (const raw of ["", "queued", "invalid"]) {
+      localStorage.setItem("rx-running-message-intent", raw);
+      expect(runningMessageIntent()).toBe("steer");
+    }
+    setRunningMessageIntent("followup");
+    expect(runningMessageIntent()).toBe("followup");
+    expect(localStorage.getItem("rx-running-message-intent")).toBe("followup");
+  });
+
+  it("holds the choice for this window if storage cannot be written", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("unavailable"); });
+    setRunningMessageIntent("followup");
+    expect(runningMessageIntent()).toBe("followup");
+  });
+});
+
+describe("collapsed plan progress on this machine", () => {
+  it("is off by default and only accepts an explicit on preference", () => {
+    expect(showsPlanProgress()).toBe(false);
+    for (const raw of ["", "true", "off", "garbage"]) {
+      localStorage.setItem("rx-plan-progress", raw);
+      expect(showsPlanProgress()).toBe(false);
+    }
+    setShowsPlanProgress(true);
+    expect(showsPlanProgress()).toBe(true);
+    expect(localStorage.getItem("rx-plan-progress")).toBe("on");
+    setShowsPlanProgress(false);
+    expect(showsPlanProgress()).toBe(false);
+  });
+
+  it("notifies mounted subscribers and removes them on unsubscribe", () => {
+    const heard = vi.fn();
+    const stop = onPlanProgressChange(heard);
+    setShowsPlanProgress(true);
+    stop();
+    setShowsPlanProgress(false);
+    expect(heard).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays usable with unavailable storage", () => {
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("unavailable"); });
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("unavailable"); });
+    try {
+      expect(showsPlanProgress()).toBe(false);
+      expect(() => setShowsPlanProgress(true)).not.toThrow();
+      expect(showsPlanProgress()).toBe(false);
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+});
 
 describe("how long a finished session stays in the running list", () => {
   it("is off until this machine chooses otherwise", () => {

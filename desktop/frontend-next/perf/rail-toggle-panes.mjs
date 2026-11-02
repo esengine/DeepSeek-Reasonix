@@ -3,6 +3,8 @@
 // median frame with PERF_GUARD panes stays within FRAME_RATIO_MAX of the one-pane median, a pane that
 // was hidden comes back at the scroll position it left, and the transcript does not inherit the animated
 // column widths: with a long transcript the fold costs style recalculation of every element under it.
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
 
 const CPU = Number(process.env.PERF_CPU ?? 4);
@@ -12,6 +14,8 @@ const COUNTS = (process.env.PERF_N ?? "1,3,6").split(",").map(Number);
 const GUARD = Number(process.env.PERF_GUARD ?? 3);
 const FRAME_RATIO_MAX = Number(process.env.PERF_FRAME_RATIO ?? 2.5);
 const URL = process.env.PERF_URL ?? "http://localhost:4399/perf.html";
+const SHOTS = process.env.RAIL_TOGGLE_SHOTS;
+if (SHOTS) await mkdir(SHOTS, { recursive: true });
 const pct = (a, p) => [...a].sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * p))];
 const browser = await chromium.launch();
 const rows = [];
@@ -62,13 +66,41 @@ for (const n of COUNTS) {
   }
   rows.push({ panes: n, frames: frames.length, p50: pct(frames, 0.5).toFixed(1), p95: pct(frames, 0.95).toFixed(1), worst: Math.max(...frames).toFixed(1), over50: frames.filter((f) => f > 50).length });
   if (n === GUARD) {
-    await page.evaluate(() => { document.querySelector(".pane:not([data-off]) .scroll[data-pane]:not([hidden])").scrollTop = 400; });
+    const first = page.locator('.sessrow[data-target="/sessions/pane-1.jsonl"]');
+    const second = page.locator('.sessrow[data-target="/sessions/pane-2.jsonl"]');
+    assert.equal(await first.getAttribute("data-live"), "", "the first row must identify an existing pane");
+    assert.equal(await second.getAttribute("data-live"), "", "the second row must identify another existing pane");
+    assert.equal(await first.getAttribute("aria-selected"), "true", "the measured pane must be the first session");
+    const scroller = await page.locator('.pane:not([data-off]) .scroll[data-pane="flow"]').elementHandle();
+    assert.ok(scroller);
+    await scroller.evaluate((root) => { root.scrollTop = 400; });
     await page.waitForTimeout(200);
-    await page.locator(".sessrow").nth(1).click();
-    await page.waitForTimeout(500);
-    await page.locator(".sessrow").nth(0).click();
-    await page.waitForTimeout(500);
-    kept = await page.evaluate(() => document.querySelector(".pane:not([data-off]) .scroll[data-pane]:not([hidden])").scrollTop);
+    assert.equal(await scroller.evaluate((root) => root.scrollTop), 400, "the initial reading position must be reachable");
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/before-hidden.png` });
+    await second.click();
+    await page.waitForFunction(() => document.querySelector('.sessrow[data-target="/sessions/pane-2.jsonl"]')?.getAttribute("aria-selected") === "true");
+    assert.ok(await scroller.evaluate((root) => root.closest(".pane").hasAttribute("data-off")), "the original pane must actually be hidden");
+    assert.equal(await page.locator(".pane").count(), n, "switching existing conversations must not open a new pane");
+    await page.evaluate(() => {
+      window.__feed({ kind: "turn_started" });
+      window.__feed({ kind: "text", text: "Background scroll preservation probe." });
+      window.__feed({ kind: "message" });
+      window.__feed({ kind: "turn_done" });
+    });
+    await page.waitForFunction(() => document.querySelector(".pane:not([data-off]) .flow")?.textContent.includes("Background scroll preservation probe."));
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/while-hidden.png` });
+    await first.click();
+    await page.waitForFunction(() => document.querySelector('.sessrow[data-target="/sessions/pane-1.jsonl"]')?.getAttribute("aria-selected") === "true");
+    assert.ok(await scroller.evaluate((root) => root === document.querySelector('.pane:not([data-off]) .scroll[data-pane="flow"]')), "scroll-retention precondition: inspect the originally hidden transcript");
+    kept = await scroller.evaluate((root) => root.scrollTop);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/after-return.png` });
+    await second.click();
+    await page.waitForFunction(() => {
+      if (document.querySelector('.sessrow[data-target="/sessions/pane-2.jsonl"]')?.getAttribute("aria-selected") !== "true") return false;
+      const root = document.querySelector('.pane:not([data-off]) .scroll[data-pane="flow"]');
+      return root && root.scrollHeight - root.clientHeight - root.scrollTop <= 48;
+    });
+    console.log(`existing pane round trip: scrollTop 400 -> hidden with new output -> ${kept}; following neighbour remains at latest`);
   }
   await ctx.close();
 }

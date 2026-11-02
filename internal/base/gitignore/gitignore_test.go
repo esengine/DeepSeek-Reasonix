@@ -222,3 +222,35 @@ func TestInfoExcludeIsReadWhenDotGitIsAFile(t *testing.T) {
 		})
 	}
 }
+
+// A root entry whose name starts with two dots, like "..env", is inside the
+// repository. Only ".." itself or a path under "../" is outside it.
+func TestIgnoredNameStartingWithTwoDotsIsInsideTheRepo(t *testing.T) {
+	dir := testenv.TempDir(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("..env\n..cache/\n*.log\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rules := At(dir, Options{})
+	cases := []struct {
+		path  string
+		isDir bool
+		want  bool
+	}{
+		{"..env", false, true},
+		{"..cache", true, true},
+		{"..notes.log", false, true},
+		{"..keep", false, false},
+		{"debug.log", false, true},
+	}
+	for _, tc := range cases {
+		if got := rules.Ignored(filepath.Join(dir, tc.path), tc.isDir); got != tc.want {
+			t.Errorf("Ignored(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+	if rules.Ignored(filepath.Join(filepath.Dir(dir), "x.log"), false) {
+		t.Errorf("a path outside the repository must not be ignored")
+	}
+}

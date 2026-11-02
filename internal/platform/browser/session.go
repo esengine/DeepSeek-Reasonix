@@ -31,6 +31,7 @@ type Session struct {
 	eng      *engine
 	stopEng  func()
 	tabs     []*tab
+	opening  int
 	active   *tab
 	nextTab  int
 	refs     refTable
@@ -260,7 +261,15 @@ func (s *Session) open(ctx context.Context, rawURL, tabID string, newTab, untilL
 	}
 	var t *tab
 	if newTab || (tabID == "" && s.activeTab() == nil) {
+		release := func() {}
+		if untilLoaded {
+			var ok bool
+			if release, ok = s.reserveTab(); !ok {
+				return TabInfo{}, fail(CodeTooManyTabs, "%d pages are already open (the limit is %d); close pages you are done with (browser_open with close=true and a tab), then open this one", s.tabCount(), maxTabs)
+			}
+		}
 		t, err = s.createTab(ctx, eng)
+		release()
 	} else {
 		t, err = s.tab(tabID)
 	}
@@ -290,6 +299,35 @@ func (s *Session) open(ctx context.Context, rawURL, tabID string, newTab, untilL
 // the person closed it, the page closed itself, or the browser went away.
 func closedOutside(what string) *Failure {
 	return fail(CodeTabClosed, "%s was closed outside the agent (by the person, by the page itself, or because the browser exited); ask whether to open it again rather than reopening it", what)
+}
+
+// maxTabs bounds the pages open in a session when the agent asks for another.
+// Each page is a renderer process, so a model that opens one per search result
+// would otherwise take gigabytes. Pages the person opened count toward the
+// total, but a page the person opens is never refused.
+const maxTabs = 12
+
+func (s *Session) tabCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.tabs)
+}
+
+// reserveTab claims room for one page the agent is about to create, counting the
+// pages still being created, so two opens that overlap cannot both pass at the
+// limit. The returned func gives the claim back once the page is in the list.
+func (s *Session) reserveTab() (release func(), ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.tabs)+s.opening >= maxTabs {
+		return nil, false
+	}
+	s.opening++
+	return func() {
+		s.mu.Lock()
+		s.opening--
+		s.mu.Unlock()
+	}, true
 }
 
 func (s *Session) activeTab() *tab {

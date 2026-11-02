@@ -91,7 +91,7 @@ func renderDesktopSection(b *strings.Builder, c *Config) {
 	renderDesktopReasoningDisplayMode(b, c)
 	fmt.Fprintf(b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
 	if width := c.DesktopConversationWidth(); width != "standard" {
-		fmt.Fprintf(b, "conversation_width = %q   # desktop: standard|full|full-all (full-all widens the composer too); empty = standard\n", width)
+		fmt.Fprintf(b, "conversation_width = %q   # desktop: standard|full|full-all|custom; custom uses appearance.width_percent; empty = standard\n", width)
 	}
 	renderAppearanceSection(b, c.Desktop.Appearance)
 	b.WriteString("\n")
@@ -112,13 +112,16 @@ func renderDesktopSection(b *strings.Builder, c *Config) {
 // written.
 func renderAppearanceSection(b *strings.Builder, a AppearanceConfig) {
 	paper := strings.TrimSpace(a.Wallpaper.File)
-	if a.Zoom == 0 && a.ReadSize == 0 && a.TextSize == 0 && a.FontUI == "" && a.FontMono == "" && paper == "" {
+	if a.WidthPercent == 0 && a.Zoom == 0 && a.ReadSize == 0 && a.TextSize == 0 && a.FontUI == "" && a.FontMono == "" && paper == "" {
 		return
 	}
 	// The child table implies the parent, so an empty [desktop.appearance] is
 	// noise in a file people read.
-	if a.Zoom != 0 || a.ReadSize != 0 || a.TextSize != 0 || a.FontUI != "" || a.FontMono != "" {
+	if a.WidthPercent != 0 || a.Zoom != 0 || a.ReadSize != 0 || a.TextSize != 0 || a.FontUI != "" || a.FontMono != "" {
 		b.WriteString("\n[desktop.appearance]\n")
+	}
+	if a.WidthPercent != 0 {
+		fmt.Fprintf(b, "width_percent = %d   # custom conversation viewport percentage, %d..%d; retained for other width modes\n", EffectiveWidthPercent(a.WidthPercent), WidthPercentMin, WidthPercentMax)
 	}
 	if a.Zoom != 0 {
 		fmt.Fprintf(b, "zoom = %g   # whole-interface scale, %g..%g\n", a.Zoom, ZoomMin, ZoomMax)

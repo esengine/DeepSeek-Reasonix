@@ -21,7 +21,7 @@ func DiscardUnpublished(ctx context.Context, repo gitcmd.Repo, managedRoot strin
 		return fmt.Errorf("unpublished worktree is outside its managed root: %s", result.WorktreeRoot)
 	}
 	candidate := filepath.Join(managedRoot, relative)
-	registered, _, err := runGit(ctx, repo, "worktree", "list", "--porcelain", "-z")
+	registered, _, err := runWorktree(ctx, repo, "list", "--porcelain", "-z")
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func DiscardUnpublished(ctx context.Context, repo gitcmd.Repo, managedRoot strin
 	if err != nil || strings.TrimSpace(head) != result.Head {
 		return fmt.Errorf("unpublished worktree branch changed; retained %s", result.WorktreeRoot)
 	}
-	if _, _, err := runGit(ctx, repo, "worktree", "remove", "--force", candidate); err != nil {
+	if _, _, err := runWorktree(ctx, repo, "remove", "--force", candidate); err != nil {
 		return err
 	}
 	_, _, err = runGit(ctx, repo, "update-ref", "-d", "refs/heads/"+result.Branch, result.Head)

@@ -102,6 +102,9 @@ func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if strings.TrimSpace(text) == "" {
 		text = "(no new output)"
 	}
+	if status == jobs.Running {
+		text += resumeNote(ctx, jm)
+	}
 	return header + "\n" + text, jobsFailed([]jobs.Result{{ID: p.JobID, Status: status}})
 }
 
@@ -280,9 +283,12 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 	if outcome == jobs.WaitMatched {
 		b.WriteString("Returned early: a job wrote something matching until_output_matches.\n\n")
 	}
+	running := false
 	for i, r := range results {
 		if r.Status != jobs.Running {
 			collectBackgroundEvidence(ctx, jm, r.ID)
+		} else {
+			running = true
 		}
 		if i > 0 {
 			b.WriteString("\n\n")
@@ -296,6 +302,9 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 		if strings.TrimSpace(r.Output) != "" {
 			b.WriteString("\n" + r.Output)
 		}
+	}
+	if running {
+		b.WriteString(resumeNote(ctx, jm))
 	}
 	return b.String(), jobsFailed(results)
 }
@@ -314,6 +323,16 @@ func clampWaitSeconds(requested int) (seconds int, capped bool) {
 		return waitCeilingSeconds, true
 	}
 	return requested, false
+}
+
+// resumeNote states the host's resume promise for a running job, and only where
+// the manager keeps it; without it a model that stops polling reports the job
+// as abandoned.
+func resumeNote(ctx context.Context, jm *jobs.Manager) string {
+	if !jm.ResumesOnCompletion(jobs.SessionFromContext(ctx)) {
+		return ""
+	}
+	return "\n\nWhen a running job finishes, a new turn starts with its status, so you can end this turn instead of polling; the job keeps running and is not abandoned."
 }
 
 // stillRunning states what happened while the caller waited. No thresholds and
@@ -339,7 +358,9 @@ func stillRunning(p *jobs.Progress) string {
 
 func byteCount(n int64) string {
 	switch {
-	case n >= 1<<20:
+	// From 1<<20 - 51 bytes up, the KB figure rounds to "1024.0" at one
+	// decimal place, so show it as MB instead.
+	case n >= 1<<20-51:
 		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 	case n >= 1<<10:
 		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))

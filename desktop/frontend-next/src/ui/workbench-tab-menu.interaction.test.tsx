@@ -90,13 +90,14 @@ it("retains a refused right-side page and disables close controls while awaiting
   expect((screen.getByRole("button", { name: "关闭 Gamma" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
-it("disables empty bulk choices and folds the column with its last browser", async () => {
+it("disables empty bulk choices and offers a new tab with its last browser", async () => {
   const pane = draw([pages[0]!]);
   offer("Alpha");
   expect((screen.getByRole("menuitem", { name: "关闭其他浏览器标签" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("menuitem", { name: "关闭右侧浏览器标签" }) as HTMLButtonElement).disabled).toBe(true);
   await userEvent.click(screen.getByRole("menuitem", { name: "关闭" }));
-  expect(pane.onCloseManual).toHaveBeenCalledTimes(1);
+  expect(pane.onCloseManual).not.toHaveBeenCalled();
+  expect(screen.getByRole("group", { name: "开始" })).toBeTruthy();
   expect(screen.queryByRole("menu")).toBeNull();
 });
 

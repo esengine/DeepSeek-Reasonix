@@ -58,6 +58,7 @@ type offlineModeArgs struct {
 	outMD    string
 	outJSON  string
 	addr     string
+	batchDir string
 }
 
 // dispatchOfflineMode runs mode if it is one of the offline ones and reports
@@ -82,6 +83,8 @@ func dispatchOfflineMode(mode string, a offlineModeArgs) bool {
 		emit(report, a.outMD, "")
 	case "sft":
 		fail("sft", runSFTMode(a.trajDir, a.suite, a.reportIn, a.outMD))
+	case "audit":
+		fail("audit", runAuditMode(a.batchDir, a.outMD))
 	case "serve":
 		fail("serve", runServeMode(a.trajDir, a.suite, a.addr))
 	default:

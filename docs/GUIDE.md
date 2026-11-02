@@ -30,6 +30,7 @@
 - [Embedded documentation retrieval](#embedded-documentation-retrieval)
 - [@ references](#-references)
 - [Two-model collaboration](#two-model-collaboration)
+- [Cross-project task dispatch](#cross-project-task-dispatch)
 - [Letting the model change a setting](#letting-the-model-change-a-setting)
 - [Google Gemini, native (experimental)](#google-gemini-native-experimental)
 
@@ -178,6 +179,14 @@ tool_timeout_seconds = { "generate_video" = 1800 }   # optional raw MCP tool nam
 ```
 
 For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-configuration-toml).
+
+The startup tool summary reuses a trusted snapshot in the current Reasonix data
+directory for up to 24 hours. Probes refreshed by another data directory do not
+replace that valid snapshot.
+
+On expiry, transient probe failures retain previous
+successful observations, keeping the system prefix stable across rebuilds and
+restarts; definitive changes, such as a removed tool, are adopted on refresh.
 
 Installed and project-configured MCP servers need no per-tool trust
 list. The dedicated two-model Planner may use every non-destructive MCP tool,
@@ -394,8 +403,13 @@ token out of request URLs, browser history, referrers, and access logs. Pass `--
 `[serve].token` to reuse a stable token. Password mode requires either
 `--password` at startup or a stored bcrypt hash:
 
+- Prefer `--password-file` over `--password`: argv is visible to every local
+  user through `ps` and `/proc/<pid>/cmdline`.
+- The file holds a single line and is readable only by its owner (`chmod 600`).
+
 ```bash
-reasonix serve --hash-password --password 'strong-password'
+reasonix serve --auth password --password-file ~/.reasonix-serve.password
+reasonix serve --hash-password --password-file ~/.reasonix-serve.password
 
 # <Reasonix home>/config.toml
 [serve]
@@ -944,6 +958,36 @@ and `PreCompact` fire in every agent a session runs. Each fires under a
 - `SubagentStop` fires on every end: answer, failure, cancel or refusal;
 - neither can block: exit 2 only warns.
 
+## Studio appearance schedule
+
+In **Settings → Appearance → Light and dark**, choose **Scheduled** to use
+dark mode during a daily local-time range and light mode outside it. The initial
+range is 20:00–07:00; edit either time to apply it immediately.
+
+The start is inclusive and the end is exclusive. Overnight ranges cross
+midnight. Equal times mean light all day; choose **Dark** for dark all day.
+
+**Follow the system**, **Light**, and **Dark** retain their existing behaviour.
+Choosing one stops the schedule without forgetting its times. The title-bar
+theme toggle also chooses a fixed mode.
+
+The range and mode stay on this device, using the same local preferences as
+other theme choices. Desktop restores these across launches; web preferences
+belong to the browser origin. If storage cannot be written, the choice lasts
+only for the current window.
+
+Scheduling uses the device's clock and timezone, not a server timezone. Skipped
+or repeated daylight-saving times follow the actual local clock. Returning to
+the window, restoring a page, or reloading recalculates the current scheme.
+
+The active theme pack and text contrast still apply. Scheduling changes the
+pack's light/dark variant, not the selected pack. The desktop window's native
+frame and background follow the same resolved scheme.
+
+Before the page loads, the shell uses the last saved resolved scheme as a
+startup tint. The page then recalculates from the current clock and updates
+the shell. CLI/TUI theme settings are unchanged.
+
 ## Keyboard shortcuts
 
 Shortcuts are documented by client because users usually look for the keys that
@@ -1000,6 +1044,14 @@ Composer shortcuts:
 | Plain `Up` / `Down` at the prompt boundary | Recalls older or newer submitted prompts | Modified arrows and native text navigation stay with the textarea. |
 | `Esc` while a turn is running | Cancels the running turn | If the turn has not produced a response yet, the draft is restored. |
 
+**Settings → Appearance → Conversation display → Composer hint** controls
+guidance in the empty task input. It is on by default. Turning it off hides
+both task and queue placeholders immediately and persists on this machine.
+
+The input's accessible name, entered text, queue content, IME handling and
+send shortcuts stay unchanged. Turning the hint back on restores the
+responsive guidance at the theme's normal contrast.
+
 Remembered projects have Move up / Move down in their project menu. Open it with the keyboard, navigate with arrows or Home/End, and use Escape to return to the trigger. Moving a project changes sidebar order without changing the launch project.
 
 Studio remembers which local and remote projects you collapse in the sidebar,
@@ -1007,10 +1059,44 @@ including Collapse all / Expand all, when you reopen it in the same browser or
 desktop profile. New projects start expanded. These display choices stay on
 this device; they do not change sessions or synchronize to another client.
 
+**Recent** in the project heading finds saved conversations across projects,
+including completed work that has left **Running**. It uses each conversation's
+last saved activity, not its unread status, pin order or last opening time.
+
+The picker reads 50 conversations per page from the complete matching history.
+**Previous page**, **Next page** and its session/project search reach older
+conversations without the sidebar's 300-row display ceiling.
+
+Selecting a conversation opens it, or focuses its existing pane, switches the
+sidebar to **All**, clears its search and expands the owning project. Worktree
+conversations retain their own working directory. On phones, opening a session
+closes the rail as usual; reopening it shows the selected project and session.
+
+Archived conversations stay in **Archived**. Recent respects the saved
+hide-legacy preference; an explicit search can still find legacy history.
+Deleted files or unavailable folders report the normal opening error.
+
+The environment selector starts with this machine. Selecting a remote host
+reads its recent history through the existing connection flow; hidden or disabled
+hosts are not offered. Older kernels ask for an update rather than showing a
+partial sidebar window as complete recent history.
+
+Activity comes from persisted session metadata and survives restart. The picker
+reopens on the first page with no search; it does not create a separate visit
+history or change the saved project order.
+
 Ordinary Reasonix-managed worktree chats appear under their original project,
-without a separate project row for each checkout. The chat header shows Local
-checkout or Worktree, with its actual working directory available on hover;
-worktree chats also carry a sidebar marker.
+without a separate project row for each checkout.
+
+Only isolated worktrees carry a neutral Isolated worktree label in the chat
+header and composer directory picker. Otherwise, the header has no directory
+badge and the picker shows just the branch name.
+
+Hover for an explanation and the actual directory path. Worktrees separate code
+directories; ports, databases, and other runtime resources may still be shared.
+
+Before sending, a selected worktree explains that creation starts when the
+message is sent. Worktree chats also carry a sidebar marker.
 
 Reopening history uses that chat's working directory, while starting a chat
 from the project uses the original directory. Ordering, search, paging, pins
@@ -1540,6 +1626,16 @@ background tool-call failure. Removing the MCP server also removes its local
 OAuth state unless a lower-priority declaration for the same resource becomes
 effective.
 
+If a server's configuration file or source directory was deleted outside
+Reasonix, **Remove** in the running session also clears its retained connection,
+startup failure, or on-demand tools.
+
+An unknown name still reports an error, and unreadable or unwritable
+configuration is not treated as a successful removal.
+
+Servers managed by a plugin package must be disabled or removed with that
+package; removing a writable declaration may reveal a same-name fallback.
+
 Browse the official MCP Registry from **Settings → MCP servers → Browse
 registry**, or use `reasonix mcp browse [query]` and
 `reasonix mcp install <registry-name>`. Registry access is explicit and never
@@ -2032,6 +2128,20 @@ so ordinary `@mentions` stay literal. Typing `/` or `@` opens an autocomplete
 menu — slash commands, or hierarchical file navigation (one directory level at a
 time, descend into folders) plus MCP resources.
 
+- **Line snapshots:** `@path/to/file:10-20` attaches source lines 10 through 20,
+  inclusive and starting at 1. The file is read when the message is sent, with
+  its original start and end lines recorded for accurate citations.
+- **Paths:** keep the existing space escape spelling, e.g.
+  `@src/my\ file.go:10-20`. Only a final digits-only range suffix is recognized;
+  Windows drive colons are preserved.
+- **Literal mentions:** if the path does not resolve to an existing local entry,
+  the token stays literal, including `@alice:1-2` and `@10-12`.
+- **Refusals:** for existing paths, zero, inverted, or out-of-file ranges produce
+  a visible notice without falling back to the whole file. Ranges require a
+  readable regular text file; selected text over 64 KiB is refused rather than truncated.
+- Whole-file references and text selected in the workspace viewer remain
+  available.
+
 In Studio's file panel, right-click one file or folder:
 
 - **Copy path** copies its absolute workspace path, including remote roots.
@@ -2482,6 +2592,110 @@ Not built, and why:
 
 - Gemini: its video input is in the native Gemini API (inline data, the Files API, YouTube URLs); the OpenAI-compatible page does not list a video content part, and Reasonix reaches Gemini through that endpoint.
 - Zhipu GLM: the documentation shows `video_url` with a public HTTPS address only and says nothing about base64 or limits, so a local file cannot be sent without Reasonix uploading it somewhere.
+
+## Cross-project task dispatch
+
+Use this when one project needs an answer from another project's session, rather
+than letting the current session edit across project roots. Dispatch is
+experimental and off by default.
+
+Start from a **local session in Reasonix Studio
+or the web UI**; terminal/protocol sessions and SSH-driven panes cannot open the
+receiving session.
+
+1. Add the target folder to your projects in the sidebar and open it. Answer its
+   workspace trust question there before dispatching. The target must be an
+   existing directory in your project list; use its full path if several projects
+   share a folder name.
+2. In the sending session, open **Settings → Session messages → Messages between
+   sessions (experimental)**. Turn on **Turn on session messages**, then **Let the
+   model hand a task to another session**.
+
+   These save to your user config, not
+   `reasonix.toml`. They apply between turns; if a turn is running, send the task
+   on the next turn after saving. No session restart is needed for these UI
+   switches.
+3. Make a concrete request, including the context the other project needs:
+
+   > In `/work/shop-web`, we need to show an order's delivery status. Hand a task
+   > to the `shop-api` project at `/work/shop-api`: inspect its order-status API,
+   > report the endpoint, response fields and possible status values, and do not
+   > change files. Bring its answer back here and explain how this frontend
+   > should call it.
+
+   The model uses `dispatch_to_project` to open a session in the target project.
+   Later dispatches from this sender to the same project reuse that dispatched
+   session while it remains open; they do not take over an arbitrary existing
+   conversation.
+4. You can inspect the work in the target project's session. When its turn ends,
+   its final answer is sent back automatically to the **sending session**, as a
+   message labelled as data from the other session.
+
+   Return to the sending
+   conversation for the reply and the model's continuation. The initial dispatch
+   receipt only confirms delivery, not completion.
+
+   If you paused the receiving
+   queue yourself, standing consent does not resume it: resume it to process the
+   queued task or reply.
+
+The equivalent user configuration is:
+
+```toml
+[peers]
+enabled = true
+dispatch = true
+```
+
+**Consent and permissions.** Enabling dispatch is standing consent for tasks and
+replies between the paired sessions: there is no separate message-approval card
+for each one.
+
+Ordinary messages between unpaired sessions still need approval
+unless you separately release the receiving project under **Projects allowed through**.
+
+That list is optional for dispatch and is not workspace trust; releasing a
+project skips incoming-message consent, not tool permissions or sandbox rules.
+You can revoke a released project there.
+
+A newly dispatched session inherits the sender's model, preset, approval mode
+and planning mode.
+
+In particular, a YOLO sender opens a YOLO session: the target
+project's `ask` permission rules are auto-allowed in that mode, while `deny`
+rules still hold.
+
+Workspace permissions and sandbox restrictions still apply;
+dispatch consent is not a promise that no files will change. Choose the sender's
+mode and task scope accordingly.
+
+**Trust and limits.** Naming an undecided project already in your sidebar can
+trust it automatically where whole-workspace trust is allowed. A declined
+project is refused.
+
+If trust needs a user answer, its pane opens with the trust
+question and the task is **not sent**: answer there, then ask to dispatch again.
+
+For a folder not yet in your project list, add it yourself, or let the model
+request `open_projects`; its card lists the paths and requires your explicit
+approval even in YOLO mode before adding or trusting them.
+
+`open_projects` is unavailable in plan mode until the plan is approved.
+
+Dispatch refuses unknown or ambiguous projects and the current project itself
+(work locally or use a sub-agent instead).
+
+The default ceilings are one dispatch
+level and eight open dispatched sessions per sender; user-only
+`peers.max_dispatch_depth` and `peers.max_dispatched_sessions` can change them
+(`0` removes a ceiling).
+
+A workspace-bound agent composition cannot dispatch
+into another workspace.
+
+Disabling dispatch also stops automatic replies; live
+pairings are held in memory, so do not rely on them surviving an application
+restart.
 
 ## Letting the model change a setting
 

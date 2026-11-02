@@ -8,6 +8,7 @@ import (
 )
 
 func TestRemoteSessionFlagsUseFarKernel(t *testing.T) {
+	noLinger(t)
 	for _, action := range []string{"pin", "archive"} {
 		for _, value := range []bool{true, false} {
 			t.Run(action+map[bool]string{true: "/on", false: "/off"}[value], func(t *testing.T) {

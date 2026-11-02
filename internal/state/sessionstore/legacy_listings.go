@@ -125,6 +125,9 @@ func (s *LegacyListings) Snapshot(dir string) ([]SessionInfo, ListingStatus) {
 			continue
 		}
 		info := legacySessionInfo(dir, row.source, row.listing, row.state == "ready")
+		if !IsVisibleSession(info.Path) {
+			continue
+		}
 		info.MetadataState = row.state
 		rows = append(rows, info)
 	}
@@ -311,7 +314,11 @@ func (s *LegacyListings) scan(ctx context.Context, dir string) error {
 			return ctx.Err()
 		}
 		id := entry.Name()
-		if !entry.IsDir() || !isV4SessionID(id) || sessionArtifactExists(v4ImportPath(dir, id)) {
+		if !entry.IsDir() || !isV4SessionID(id) {
+			continue
+		}
+		path := v4ImportPath(dir, id)
+		if !IsVisibleSession(path) || sessionArtifactExists(path) {
 			continue
 		}
 		source, openErr := sessionv4.Open(filepath.Join(v4RootFor(dir), id))

@@ -25,8 +25,12 @@ type ShellDiscovery struct {
 	// user's own data tree; a proof never changes a sandbox decision.
 	ProofDir string
 	// Probe replaces the bash launch probe. The in-process memo is private to this call; proofs still persist to ProofDir.
-	Probe  func(string) bool
-	Budget time.Duration
+	Probe func(string) bool
+	// Confine asks whether the bash at a path starts inside the OS sandbox this
+	// session enforces. A bash that cannot is passed over like one that fails its
+	// probe, so a shell that only works unconfined is never the one chosen.
+	Confine func(path string) bool
+	Budget  time.Duration
 	// LookPath replaces the PATH lookup, so a caller can drive a lookup that never returns.
 	LookPath func(string) (string, error)
 	Hedge    time.Duration
@@ -56,7 +60,7 @@ func (d ShellDiscovery) Resolve() Shell {
 				}
 				run = runBashProbe
 			}
-			return proveBash(path, run, store, memo)
+			return proveBash(path, run, store, memo) && confinedAt(path, d.Confine)
 		}
 		h.search = search
 		return h
@@ -241,6 +245,19 @@ func settleAtBudget(cands []string, answers []chan bool, i int, unanswered func(
 		}
 	}
 	return won, won != ""
+}
+
+// bashConfineRefusals holds the bash paths the sandbox refused, so a fallback to
+// PowerShell can say the sandbox was the reason and not a broken install.
+var bashConfineRefusals sync.Map
+
+func confinedAt(path string, confine func(string) bool) bool {
+	if confine == nil || confine(path) {
+		bashConfineRefusals.Delete(path)
+		return true
+	}
+	bashConfineRefusals.Store(path, struct{}{})
+	return false
 }
 
 // bashProbeIdentity is the file a successful probe vouched for. The same path

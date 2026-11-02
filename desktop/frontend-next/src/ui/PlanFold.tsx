@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { currentStep, stepDone, stepLabel, type PlanStep } from "../state/session";
+import { onPlanProgressChange, showsPlanProgress } from "../state/prefs";
 import { Plan } from "./Plan";
 import type { GoalRuntime } from "../port/session";
 import { goalStatusText, goalStopText, goalUsageText } from "./goalusage";
@@ -12,13 +13,15 @@ import { useDismiss } from "./dismiss";
  *  visit to another view. */
 export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }: { plan: PlanStep[]; goal?: string; goalStatus?: string; goalRuntime?: GoalRuntime; shown: boolean; paused?: boolean }) {
   const [open, setOpen] = useState(false);
+  const progress = useSyncExternalStore(onPlanProgressChange, showsPlanProgress, showsPlanProgress);
   const bar = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const put = () => { setOpen(false); bar.current?.focus(); };
   useDismiss(open, root, put);
   if ((plan.length === 0 && !goal) || !shown) return null;
+  const done = plan.filter(stepDone).length;
   const running = plan.filter((s) => !stepDone(s) && plan.indexOf(s) === currentStep(plan)).length;
-  const waiting = plan.length - plan.filter(stepDone).length - running;
+  const waiting = plan.length - done - running;
   return (
     <div className="studio-todo" data-open={open ? "" : undefined} ref={root}>
       {/* One line by default. The composer already carries the run line,
@@ -35,9 +38,15 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }:
         <StudioIcon name="list" />
         <b>{t(plan.length ? "计划" : "目标")}</b>
         <span>{plan.length ? stepLabel(plan[currentStep(plan)] ?? plan[0]) : goal}</span>
-        {plan.length > 0 && <small>{plan.filter(stepDone).length}/{plan.length}</small>}
+        {plan.length > 0 && <small>{done}/{plan.length}</small>}
         <StudioIcon name="down" className="studio-todo-fold" />
       </button>
+      {!open && progress && plan.length > 0 && (
+        <div className="prog2 studio-todo-progress" role="progressbar" aria-label={t("计划进度")}
+          aria-valuemin={0} aria-valuemax={plan.length} aria-valuenow={done}>
+          <span className="track"><i style={{ width: `${Math.round((done / plan.length) * 100)}%` }} /></span>
+        </div>
+      )}
       {open && (
         <div className="studio-todo-body">
           <div className="studio-todo-head">

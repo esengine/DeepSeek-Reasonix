@@ -13,7 +13,7 @@ import type { SessionStatus } from "../port/port";
 const answer: { now: GraphicsInfo | null } = { now: null };
 vi.mock("../port/host", async (original) => {
   const real = await original<typeof import("../port/host")>();
-  return { ...real, host: () => ({ ...real.host(), graphics: () => Promise.resolve(answer.now) }) };
+  return { ...real, host: () => Object.assign(Object.create(real.host()), { graphics: () => Promise.resolve(answer.now) }) };
 });
 
 afterEach(() => {
@@ -23,7 +23,7 @@ afterEach(() => {
   boot();
 });
 
-async function search(q: string) {
+async function search(q: string, anchor = "graphics") {
   render(<Settings
     hub={new MockHub() as never} port={new MockPort()}
     status={{ preset: "balanced", toolApprovalMode: "ask" } as SessionStatus}
@@ -34,7 +34,7 @@ async function search(q: string) {
   />);
   await act(async () => {});
   await userEvent.type(screen.getByRole("textbox", { name: t("搜索设置") }), q);
-  return screen.queryAllByRole("option").some((o) => (o as HTMLElement).dataset.target === "graphics");
+  return screen.queryAllByRole("option").some((o) => (o as HTMLElement).dataset.target === anchor);
 }
 
 it("does not offer the graphics setting in a browser tab", async () => {
@@ -44,4 +44,8 @@ it("does not offer the graphics setting in a browser tab", async () => {
 it("offers the graphics setting where the shell answers", async () => {
   answer.now = { launchedOff: false, savedOff: false, compositing: "enabled" };
   expect(await search("gpu")).toBe(true);
+});
+
+it("does not offer a local shell global shortcut in a browser or network viewer", async () => {
+  expect(await search("global", "global-shortcut")).toBe(false);
 });

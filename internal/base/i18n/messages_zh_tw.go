@@ -116,6 +116,8 @@ var ChineseTraditional = Messages{
 	ChatThinking:                    "思考中…",
 	ChatThoughtForFmt:               "思考了 %d 秒",
 	ChatWorkedForFmt:                "耗時 %s",
+	ChatImageAttachedFmt:            "附有 %d 張圖片 — 終端不顯示圖片",
+	ChatFromDeviceFmt:               "來自 裝置 %d",
 	ChatStatusThinkingFmt:           "%s 思考中… (%s · %s 取消)",
 	TurnPhaseWorking:                "工作中",
 	TurnPhaseChecking:               "檢查中",

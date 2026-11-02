@@ -871,7 +871,7 @@ body { background: var(--page) !important; }
 .activity-group { --fs-scale: var(--activity-scale, 1); margin: var(--sp-4) 0 0; overflow: clip; }
 .activity-group > summary {
   min-height: 28px; padding: 0; display: flex; align-items: center; gap: var(--sp-3);
-  color: var(--faint); font-size: calc(11px * var(--fs-scale, 1)); font-weight: 500; line-height: 1.5;
+  color: var(--faint); font-size: var(--fs-meta); font-weight: 500; line-height: 1.5;
   cursor: pointer; user-select: none;
 }
 .activity-group > summary:hover { color: var(--muted); }
@@ -894,11 +894,11 @@ body { background: var(--page) !important; }
   border-radius: 4px;
   color: var(--net);
   background: var(--net-wash);
-  font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--ui);
+  font: 500 var(--fs-meta)/1.5 var(--ui);
 }
-.activity-title { color: inherit; font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--ui); }
-.activity-errors { color: var(--err-ink); font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--ui); }
-.activity-count { margin-left: 0; color: var(--faint); font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--ui); }
+.activity-title { color: inherit; font: 500 var(--fs-meta)/1.5 var(--ui); }
+.activity-errors { color: var(--err-ink); font: 500 var(--fs-meta)/1.5 var(--ui); }
+.activity-count { margin-left: 0; color: var(--faint); font: 500 var(--fs-meta)/1.5 var(--ui); }
 .activity-fold-icon { margin-left: 2px; color: var(--faint); transition: transform 140ms ease; }
 .activity-group[open] .activity-fold-icon { transform: rotate(180deg); }
 .activity-group[open] > summary { position: sticky; top: 0; z-index: 1; }
@@ -1084,7 +1084,8 @@ body { background: var(--page) !important; }
 .compose::after { border-color: var(--border); }
 .compose:hover::after { border-color: var(--border); }
 .compose { --aux-budget: min(calc(28vh / var(--zoom, 1)), 280px); }
-[data-fold~="short"] .compose { --aux-budget: min(calc(19vh / var(--zoom, 1)), 150px); }
+.compose:has(.queue):not(:has(.composenotes > *)) { --aux-budget: min(calc(44vh / var(--zoom, 1)), 420px); }
+[data-fold~="short"] .compose { --aux-budget: min(calc(19vh / var(--zoom, 1)), 150px); } [data-fold~="short"] .compose:has(.queue):not(:has(.composenotes > *)) { --aux-budget: min(calc(28vh / var(--zoom, 1)), 260px); }
 .compose:focus-within { box-shadow: 0 0 0 3px rgb(197 201 192 / .055), 0 20px 48px -32px #000; }
 .compose:focus-within::after { border-color: #4a4e47; }
 .compose .prompt { display: none; }
@@ -1173,7 +1174,7 @@ body { background: var(--page) !important; }
 .btn.send { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-fg); }
 .btn.send:hover { background: var(--accent); transform: translateY(-1px); }
 .btn.send:disabled { background: var(--hair); color: var(--ghost); }
-.composeaux,
+.composeaux { width: 100%; margin-inline: 0; }
 .composenotes { width: min(var(--column), calc(100% - var(--srail-w) - 42px)); margin-inline: auto; }
 .composenotes { color: var(--ghost); }
 .studio-meterrail {
@@ -1298,7 +1299,7 @@ body { background: var(--page) !important; }
 }
 
 /* The inspector is contextual, not a permanent dashboard. */
-.side { background: var(--page); border-left: 1px solid var(--hair); }
+.side { background: var(--bg-side-background, var(--page)); border-left: 1px solid var(--hair); }
 .side .scroll { background: var(--page); }
 .side .meter { border-color: var(--hair); }
 
@@ -1422,14 +1423,14 @@ body { background: var(--page) !important; }
 .workbench-filelist span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workbench-filelist em { color: var(--warn-ink); font-style: normal; }
 .workbench-no-files { margin: 18px 12px; color: var(--faint); font: 500 calc(10px * var(--fs-scale, 1))/1.4 var(--ui); text-align: center; }
-.workbench-filebar { min-height: 39px; padding: 0 10px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--hair); }
-.workbench-filebar strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--mono); }
+.workbench-filebar { min-height: 39px; padding: 0 10px; flex: none; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--hair); }
+.workbench-filebar strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--mono); }
+.workbench-filebar > :not(strong) { flex-shrink: 0; }
 .workbench-filebar [role="group"] { display: flex; padding: 2px; background: var(--page); border: 1px solid var(--hair); border-radius: 5px; }
 .workbench-filebar button { min-height: 25px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: 600 calc(10px * var(--fs-scale, 1))/1 var(--ui); }
 .workbench-filebar button[aria-pressed="true"] { background: var(--raised); color: var(--text); }
-.workbench-filebar .workbench-save { display: flex; align-items: center; gap: 5px; }
-.workbench-filebar .workbench-save { background: var(--accent); color: white; }
-.workbench-filebar .workbench-save:disabled { opacity: .35; }
+.workbench-filebar .workbench-save { display: flex; align-items: center; gap: 5px; background: var(--accent); color: var(--accent-fg); }
+.workbench-filebar .workbench-save:disabled { background: var(--overlay); color: var(--muted); cursor: default; }
 .workbench-filebar .workbench-readonly { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); white-space: nowrap; }
 .workbench-filebar svg { width: 13px; height: 13px; }
 .workbench-editor { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--face-code); }
@@ -1485,7 +1486,6 @@ body { background: var(--page) !important; }
   .app[data-rail="off"] .rail { pointer-events: none; }
   .flow,
   .compose,
-  .composeaux,
   .composenotes { width: calc(100% - 24px); }
   .flow { left: 0; padding-inline: 0; }
   .chrome .crumb-proj,
@@ -1582,7 +1582,7 @@ body { background: var(--page) !important; }
 }
 :root[data-theme="light"] .btn.send { background: var(--accent); color: var(--accent-fg); }
 :root[data-theme="light"] .btn.send:hover { background: #111210; }
-:root[data-theme="light"] .side,
+:root[data-theme="light"] .side { background: var(--bg-side-background, var(--overlay)); border-color: var(--border); }
 :root[data-theme="light"] .side .scroll { background: var(--overlay); border-color: var(--border); }
 :root[data-theme="light"] .prefs-sheet,
 :root[data-theme="light"] .prefs-hd,
@@ -1682,8 +1682,9 @@ body { background: var(--page) !important; }
 .onb-foot { flex: none; padding: 14px 24px 18px; text-align: center; color: var(--ghost); font: 500 calc(10px * var(--fs-scale, 1))/1 var(--ui); }
 
 @media (max-width: 760px) {
+  .studio-brand-lockup { padding-left: 14px; }
   .studio-brand-sub { display: none; }
-  .flow { width: calc(100% - 20px); margin-inline: auto; padding-inline: 0; }
+  .flow, .flow:not([data-empty]) { width: calc(100% - 20px); margin-inline: auto; padding-inline: 0; }
   .compose { width: calc(100% - 20px); margin-inline: auto; }
 }
 
@@ -1839,9 +1840,8 @@ body { background: var(--page) !important; }
 :root[data-bg] .pane:has([data-pane="flow"] .flow[data-empty]) {
   background-color: transparent !important;
 }
-:root[data-bg] :is(.rail, .chrome) {
-  background: color-mix(in srgb, var(--page) 80%, transparent) !important;
-}
+:root[data-bg] .rail { background: var(--bg-rail-background, color-mix(in srgb, var(--page) 80%, transparent)) !important; }
+:root[data-bg] .chrome { background: var(--bg-chrome-background, color-mix(in srgb, var(--page) 80%, transparent)) !important; }
 
 .hero .rmark {
   filter: drop-shadow(0 0 28px var(--studio-light-primary));
@@ -1929,11 +1929,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 }
 .rail .sessrow[data-run="done"] { animation: none; }
 .rail .sessrow[data-just-done] { animation: studio-session-done 1.2s ease-out both; }
-.rail .sessrow > .unread-dot { position: absolute; inset-inline-end: 11px; top: 50%; translate: 0 -50%; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-ink); pointer-events: none; }
-.rail .sessrow[data-unread] > .sesscopies { margin-inline-end: 26px; }
-.rail .sessrow-context[data-unread] > .sesstitle { padding-inline-end: 26px; }
-.rail .sessrow-remote > .unread-dot { inset-inline-end: 36px; }
-.rail .sessrow-remote[data-unread] > .sessmeta { margin-inline-end: 58px; }
+.rail .sessrow > .unread-dot { flex: none; margin-inline-start: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); pointer-events: none; }
 .rail .sessrow[data-unread] .sesstitle { color: var(--text); font-weight: var(--w-semi); }
 :root[data-theme="dark"] .rail .sessrow[data-unread]:not(:hover):not([aria-selected="true"]) { background: color-mix(in srgb, var(--text) 4%, transparent); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rail .sessrow[data-unread]:not(:hover):not([aria-selected="true"]) { background: color-mix(in srgb, var(--text) 4%, transparent); } }
@@ -1941,7 +1937,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 @keyframes studio-session-run { 55%, 100% { transform: translateX(110%); } }
 @keyframes studio-session-wait { 50% { background: color-mix(in srgb, var(--warn) 8%, transparent); } }
 @keyframes studio-session-done { from { background: color-mix(in srgb, var(--ok) 18%, transparent); } }
-.rail .sessrow > .wsdel { display: none; }
 .rail .session-more {
   position: absolute; top: 7px; right: 4px;
   width: 27px;
@@ -2043,7 +2038,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .studio-todo-sum > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .studio-todo-sum small { flex: none; color: var(--faint); font: 600 calc(9px * var(--fs-scale, 1))/1 var(--mono); font-variant-numeric: tabular-nums; }
 .studio-todo-fold { transition: transform var(--m-line) }
-.studio-todo[data-open] .studio-todo-fold { transform: rotate(180deg) }
+.studio-todo[data-open] .studio-todo-fold { transform: rotate(180deg) } .studio-todo-progress { padding: 0 12px 8px; }
 .studio-todo-body {
   position: absolute; left: -1px; right: -1px; bottom: calc(100% + 6px); z-index: 8; max-height: min(46vh, 380px); overflow-y: auto; overscroll-behavior: contain;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-float); animation: todo-in var(--m-card) var(--ease-out) both;
@@ -2385,14 +2380,12 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .compose .policy > .mode { min-height: 32px; padding-inline: 7px; font-size: calc(10px * var(--fs-scale, 1)); }
 .btn.send { width: 32px; height: 32px; }
 
-/* The composer adapts to its conversation column, including when Browser is
-   open. Retire labels by priority before allowing controls to wrap. */
-.pane { container: conversation / inline-size; }
+.pane, .compose { container: conversation / inline-size; }
 .turntools { min-width: 0; min-height: 32px; align-items: center; }
 .studio-model-control .model-picker { width: auto; max-width: 100%; }
 .studio-model-control .model-picker .nm { min-width: 0; }
 
-@container conversation (max-width: 780px) {
+@container conversation (max-width: 720px) {
   .studio-branch-pop .studio-branch { width: 30px; justify-content: center; padding-inline: 0; }
   .studio-branch-pop .studio-branch .lb,
   .studio-branch-pop .studio-branch small { display: none; }
@@ -2431,7 +2424,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 }
 
 @container conversation (max-width: 360px) {
-  .studio-branch-pop { display: none; }
   .studio-meterrail .studio-meter-tariff i,
   .studio-meterrail .studio-meter-cost,
   .studio-meterrail .studio-meter-mask { display: none; }
@@ -3266,9 +3258,8 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .studio-workspace-kind { color: var(--muted); }
 .studio-user-foot .acctrow:hover,
 .studio-settings:hover { background: var(--accent-wash); color: var(--text); }
-:root[data-theme="light"][data-bg] :is(.rail, .chrome) {
-  background: color-mix(in srgb, var(--page) 86%, transparent) !important;
-}
+:root[data-theme="light"][data-bg] .rail { background: var(--bg-rail-background, color-mix(in srgb, var(--page) 86%, transparent)) !important; }
+:root[data-theme="light"][data-bg] .chrome { background: var(--bg-chrome-background, color-mix(in srgb, var(--page) 86%, transparent)) !important; }
 :root[data-theme="light"][data-bg] .railfoot {
   box-shadow: 0 -1px color-mix(in srgb, var(--border) 62%, transparent);
 }
@@ -3283,10 +3274,10 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   background: var(--accent-wash);
   color: var(--text);
 }
-.side,
 .side .scroll,
 .studio-browser,
 .studio-browser-toolbar { background: var(--surface); border-color: var(--hair); color: var(--text); }
+.side { background: var(--bg-side-background, var(--surface)); border-color: var(--hair); color: var(--text); }
 .studio-browser-address { background: var(--raised); border-color: var(--border); }
 .studio-browser-address input { color: var(--text); }
 /* A wallpaper remains visible, while cards keep enough of the selected pack's
@@ -3297,7 +3288,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   -webkit-backdrop-filter: blur(11px) saturate(1.04);
   backdrop-filter: blur(11px) saturate(1.04);
 }
-:root[data-bg] .compose { background: color-mix(in srgb, var(--raised) 88%, transparent) !important; }
+:root[data-bg] .compose { background: var(--bg-compose-background, color-mix(in srgb, var(--raised) 88%, transparent)) !important; }
 :root[data-bg] .flow:not([data-empty]) { isolation: isolate; }
 :root[data-bg] .flow:not([data-empty])::before {
   content: "";
@@ -3358,8 +3349,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   background: color-mix(in srgb, var(--page) 82%, var(--float)) !important;
   scrollbar-color: color-mix(in srgb, var(--muted) 34%, transparent) transparent;
 }
-.prefs-intro { border-color: var(--hair); }
-.prefs-intro-mark { background: var(--accent-wash); border-color: var(--hair); color: var(--accent); }
 .grp,
 .advset,
 .setting {
@@ -3587,7 +3576,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .prefs {
   --prefs-body: var(--fs-ui);
   --prefs-meta: var(--fs-meta);
-  --prefs-title: var(--fs-title);
   font-family: var(--ui);
   font-size: var(--prefs-body);
 }
@@ -3595,17 +3583,13 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .prefs-find,
 .prefs-nav button,
 .prefs-found .what { font-size: var(--fs-ui); }
-.prefs-nav .navsec,
-.prefs-intro-overline {
+.prefs-nav .navsec {
   font-size: calc(11.5px * var(--fs-scale, 1));
   letter-spacing: .08em;
   text-transform: none;
 }
 .prefs-nav .nv,
-.prefs-intro-meta > span,
 .apply { font-size: var(--prefs-meta); }
-.prefs-intro h2 { font-size: var(--prefs-title); }
-.prefs-intro-meta strong { font-family: var(--ui); font-size: var(--fs-ui); }
 .grp > .grp-hd h3, .grp > h3.grp-hd { font-size: var(--fs-lead); }
 .grp .hint,
 .grp .note,
@@ -4234,3 +4218,8 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .other-field .studio-control-tip { left: auto; right: 0; }
 .other-wrap .refine-card { margin: 8px 0 0; }
 .keys-row .ds kbd { display: inline-block; min-width: 13em }
+:root[data-effects="reduced"] .studio-runstate .rmark path { stroke-dasharray: 100; stroke-dashoffset: 0; animation: none; }
+:root[data-effects="reduced"] .rail .sessrow[data-run]::after,
+:root[data-effects="reduced"] .rail .sessrow[data-run="halt"],
+:root[data-effects="reduced"] .tool-state[data-state="running"] .studio-icon,
+:root[data-effects="reduced"] .ws-reading .studio-icon { animation: none; }

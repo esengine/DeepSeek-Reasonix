@@ -101,6 +101,8 @@ export interface OpenWithTarget {
   id: string;
   name: string;
   available: boolean;
+  why?: string;
+  within?: string;
 }
 
 export interface TreeWorkspace {
@@ -109,6 +111,8 @@ export interface TreeWorkspace {
 	countsComplete?: boolean;
 	pendingMetadata?: number;
 	failedMetadata?: number;
+  // Echoed only by kernels that serve globally ordered recent pages.
+  recentOffset?: number;
   root: string;
   name: string;
   workspaceRoots?: string[];
@@ -123,8 +127,7 @@ export interface TreeWorkspace {
   // paging sends neither, and then `sessions` is all there is.
   total?: number;
   archived?: number;
-  // How many rows the request's scope and word match that `sessions` does not
-  // carry. Absent on a kernel that predates it, and then only `total` says.
+  // Matching rows after this page/window. Absent on kernels predating paging.
   remaining?: number;
   sessions: TreeSession[];
 }
@@ -133,14 +136,18 @@ export function workspaceContains(workspace: TreeWorkspace, root: string | undef
   return root !== undefined && (workspace.root === root || !!workspace.workspaceRoots?.includes(root));
 }
 
-// How much of each folder tree() builds: `limit` for all of them (0 is every
-// row), `limits` overriding it per folder root.
+// The sessions a tree request counts, independently of its ordering.
 export type TreeScope = "" | "active" | "archived";
 
-// `scope` says which rows the window counts (active ones, only the archived, or
-// every row) and `q` keeps them to those whose title or name contains it.
+// Ordinary windows bound each project; recent windows page across all projects.
+// `q` filters titles/names and project names before either window is selected.
 export interface TreeWindow {
 	retryMetadata?: boolean;
+  order?: "recent";
+  // Recent pages are global across projects, unlike each project's tree window.
+  offset?: number;
+  hideLegacy?: boolean;
+  // 0 means all rows; `limits` overrides this per project in ordinary windows.
   limit?: number;
   limits?: Record<string, number>;
   scope?: TreeScope;
@@ -150,6 +157,9 @@ export interface TreeWindow {
 export function treeQuery(window: TreeWindow | undefined): string {
   const q = new URLSearchParams();
   if (window?.retryMetadata) q.set("retryMetadata", "1");
+  if (window?.order) q.set("order", window.order);
+  if (window?.offset !== undefined) q.set("offset", String(window.offset));
+  if (window?.hideLegacy) q.set("hideLegacy", "1");
   if (window?.limit !== undefined) q.set("limit", String(window.limit));
   if (window?.limits && Object.keys(window.limits).length > 0) q.set("limits", JSON.stringify(window.limits));
   if (window?.scope) q.set("scope", window.scope);
@@ -220,7 +230,7 @@ export interface HubPort extends SharePort {
   openRemote(req: { host: string; workspace?: string; sessionPath?: string; agentComposition?:string }): Promise<RuntimeView>;
   // The far machine's own workspaces, or null while nothing is open on it:
   // there is no kernel over there to ask until a pane puts one there.
-  remoteTree(host: string): Promise<TreeWorkspace[] | null>;
+  remoteTree(host: string, window?: TreeWindow): Promise<TreeWorkspace[] | null>;
   // Erases a conversation on that machine; its kernel decides whether it may.
   removeRemoteSession(host: string, path: string): Promise<void>;
   // Folders on the far machine, read over the link alone — no kernel has to be
@@ -473,8 +483,8 @@ export class SseHub implements HubPort {
     await this.post<void>(`/remotes/${encodeURIComponent(host)}/sessions/remove`, { path });
   }
 
-  async remoteTree(host: string) {
-    const path = `/remotes/${encodeURIComponent(host)}/tree`;
+  async remoteTree(host: string, window?: TreeWindow) {
+    const path = `/remotes/${encodeURIComponent(host)}/tree` + treeQuery(window);
     const res = await fetch(path, { credentials: "same-origin" });
     if (!res.ok) await SseHub.fail(path, res);
     return (await res.json()) as TreeWorkspace[];

@@ -38,7 +38,7 @@ check("播出来的行在", (await rows.count()) === 3, `${await rows.count()} �
 
 const first = rows.nth(0);
 const wasFirst = await first.locator(".pv").innerText();
-await first.locator('button:has-text("改")').click();
+await first.getByRole("button", { name: "改", exact: true }).click();
 await page.waitForTimeout(500);
 
 const box = await page.locator(".queue .qedit").count();
@@ -50,7 +50,7 @@ check("这一行说了为什么", await why.isVisible().catch(() => false), (awa
 // 说明是这一行的,不是面板的:换一行再点,上一行的说明得跟着走。一条粘住不动的
 // 提示会让下一次失败看起来像上一次的余音。
 const second = rows.nth(1);
-await second.locator('button:has-text("改")').click();
+await second.getByRole("button", { name: "改", exact: true }).click();
 await page.waitForTimeout(500);
 check("说明跟着被点的那一行走", (await first.locator(".qwhy[data-err]").count()) === 0);
 check("新的那一行才带着说明", await second.locator(".qwhy[data-err]").isVisible().catch(() => false));

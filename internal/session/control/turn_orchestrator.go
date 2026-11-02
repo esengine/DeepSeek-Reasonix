@@ -82,13 +82,8 @@ func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, sk
 	expectedContinuationEpoch := o.c.goals.continuationToken()
 	images := o.c.resolveTurnImages(raw)
 	ctx = o.c.withVisionRouting(agent.WithSubagentImageCandidates(ctx, images.candidates))
-	// The skill turn's model requests count against the active goal's token
-	// budget, so bind a recorder for the span even though the sub-agent cannot
-	// call update_goal itself.
 	if scopeID, goal, ok := o.c.goals.deliveryScope(); ok {
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: scopeID, TaskText: goal})
-		recorder := o.c.goals.newTurnRecorder(scopeID, o.c.goals.continuationToken())
-		o.c.goalUsageTee.setActiveRecorder(recorder)
 	}
 	startMessages := o.c.sessionMessageCount()
 	err := o.runSubagentSkillTurns(ctx, skills, task, raw, display, runner, planMode, images)
@@ -151,6 +146,8 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	}
 	ctx, marker = c.beginTurn(ctx, startMessages, true)
 	ctx = c.announceAuthoredTurn(ctx, firstNonEmpty(raw, task), startMessages)
+	ctx = c.bindTurnScope(ctx, nil)
+	ctx = c.prepareTurnRootBudget(ctx)
 	c.executor.LandAuthoredUserMessage(ctx, provider.Message{Role: provider.RoleUser, Content: input, Images: images.userImages, CreatedAt: time.Now().UnixMilli()})
 
 	for _, sk := range skills {

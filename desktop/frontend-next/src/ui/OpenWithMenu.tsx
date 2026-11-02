@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { openWithName } from "./openwith_label";
+import { blockedInProject, blockedNote, openWithName } from "./openwith_label";
 import type { HubPort, OpenWithTarget } from "../port/hub";
 import { host } from "../port/host";
 import { t } from "../i18n";
@@ -19,7 +19,7 @@ export function OpenWithMenu({ hub, root, onError }: {
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    void hub.openWithTargets().then((list) => alive && setTargets(list.filter((x) => x.available))).catch(() => {});
+    void hub.openWithTargets().then((list) => alive && setTargets(list.filter((x) => x.available || blockedInProject(x)))).catch(() => {});
     return () => { alive = false; };
   }, [hub, open]);
   if (!shell || !root) return null;
@@ -51,12 +51,15 @@ export function OpenWithMenu({ hub, root, onError }: {
               data-action="workspace.open-with"
               data-target={root}
               data-value={target.id}
+              disabled={!target.available}
+              title={target.available ? undefined : blockedNote(target)}
               onClick={() => {
                 setOpen(false);
                 hub.openWith(root, target.id).catch(onError);
               }}
             >
               <span>{t("用 {name} 打开", { name: openWithName(target) })}</span>
+              {!target.available && <small>{t("位于项目文件夹内")}</small>}
             </button>
           ))}
         </div>

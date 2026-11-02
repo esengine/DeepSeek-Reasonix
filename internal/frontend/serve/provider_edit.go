@@ -60,6 +60,9 @@ func (s *Server) editProvider(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusBadRequest, bad.code, bad.message, bad.detail)
 		return
 	}
+	if body.HideModelPrefix != nil {
+		entry.HideModelPrefix = *body.HideModelPrefix
+	}
 	applyVisionSelection(entry, trimmedNonEmpty(body.Vision))
 
 	if !applyNumericFields(w, entry, body.ContextWindow, body.MaxOutputTokens, body.IdleTimeoutSeconds) {
@@ -152,6 +155,8 @@ type providerEditBody struct {
 	ModelLimits  *map[string]modelLimitsView `json:"modelLimits"`
 	ModelPrices  *map[string]*modelPriceView `json:"modelPrices"`
 	ModelAliases *map[string]string          `json:"modelAliases"`
+	// HideModelPrefix leaves the prefix every model shares out of how they are drawn.
+	HideModelPrefix *bool `json:"hideModelPrefix"`
 	// Declarations a panel used to write one click at a time. Pointers, so
 	// an unsent one leaves the stored choice alone. Whether thinking
 	// parameters are sent is reasoningProtocol "none", not a field of its own.

@@ -48,6 +48,9 @@ func (c *Controller) resolveInputImageCandidates(line string) ([]string, []error
 }
 
 func visionRefImageDataURL(r ref, baseDir string) (string, error) {
+	if r.lines != nil {
+		return "", fmt.Errorf("line references are not image attachments")
+	}
 	switch r.kind {
 	case refImage:
 		return visionImageDataURL(baseDir, r.path)

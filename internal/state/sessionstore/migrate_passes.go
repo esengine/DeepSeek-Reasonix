@@ -1,10 +1,33 @@
 package sessionstore
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// legacySourceEntries lists the legacy source directory before any pass runs.
+// An explicit import records a directory it could not list as a typed skip; an
+// implicit import gets a LegacySourceError, so an unreadable source is not read
+// as an empty one. Only an absent directory — the normal fresh install — exits
+// silently, and neither exit path can stamp the one-time marker as imported.
+func legacySourceEntries(srcDir string, rep *LegacyReport) (entries []os.DirEntry, done bool, err error) {
+	entries, err = os.ReadDir(srcDir)
+	if err == nil {
+		return entries, false, nil
+	}
+	skip := readSkip(srcDir, err)
+	if rep != nil {
+		rep.Skipped = append(rep.Skipped, skip)
+		return nil, true, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, true, nil
+	}
+	return nil, true, &LegacySourceError{SkippedSession: skip, Err: err}
+}
 
 // LegacyReport lists what an import found in the source but could not bring
 // over, one entry per file, so a caller can count it instead of losing it.

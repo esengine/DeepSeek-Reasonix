@@ -44,6 +44,39 @@ function draw() {
 }
 
 describe("finding a setting", () => {
+  it("finds the composer hint and opens its immediate machine-local control", async () => {
+    const { find, block } = draw();
+    await userEvent.type(find(), "placeholder");
+    const hit = await screen.findByRole("option", { name: /输入框提示/ });
+    expect(hit.getAttribute("data-target")).toBe("composer-hint");
+    await userEvent.click(hit);
+    await waitFor(() => expect(block("composer-hint")).toBeTruthy());
+    const section = block("composer-hint")!;
+    expect(section.closest("[hidden]")).toBeNull();
+    expect(section.querySelector("[data-apply]")?.getAttribute("data-apply")).toBe("immediate");
+    expect(section.querySelector("[data-scope]")?.getAttribute("data-scope")).toBe("machine");
+    await userEvent.click(section.querySelector<HTMLButtonElement>('[data-value="off"]')!);
+    expect(localStorage.getItem("rx-composer-hint")).toBe("off");
+    await userEvent.click(section.querySelector<HTMLButtonElement>('[data-value="on"]')!);
+    expect(localStorage.getItem("rx-composer-hint")).toBe("on");
+  });
+  it("finds collapsed todo progress and opens its immediate machine-local control", async () => {
+    const { find, block } = draw();
+    await userEvent.type(find(), "todo");
+    const hit = await screen.findByRole("option", { name: /收起时显示计划进度/ });
+    expect(hit.getAttribute("data-value")).toBe("appearance");
+    expect(hit.getAttribute("data-target")).toBe("plan-progress");
+    await userEvent.click(hit);
+    await waitFor(() => expect(block("plan-progress")).toBeTruthy());
+    const section = block("plan-progress")!;
+    expect(section.closest("[hidden]")).toBeNull();
+    expect(section.querySelector("[data-apply]")?.getAttribute("data-apply")).toBe("immediate");
+    expect(section.querySelector("[data-scope]")?.getAttribute("data-scope")).toBe("machine");
+    await userEvent.click(section.querySelector<HTMLButtonElement>('[data-value="on"]')!);
+    expect(localStorage.getItem("rx-plan-progress")).toBe("on");
+    await userEvent.click(section.querySelector<HTMLButtonElement>('[data-value="off"]')!);
+    expect(localStorage.getItem("rx-plan-progress")).toBe("off");
+  });
   it("finds file delivery by its config key and opens its switch under tools", async () => {
     const { find, block } = draw();
     await userEvent.type(find(), "tools.present_files");
@@ -54,7 +87,7 @@ describe("finding a setting", () => {
     expect(block("present-files")?.previousElementSibling?.getAttribute("data-setting")).toBe("approval");
     expect((await screen.findByRole("switch", { name: "启用 AI 文件交付卡片" })).getAttribute("aria-checked")).toBe("false");
     expect(block("present-files")?.querySelector("[data-apply]")?.getAttribute("data-apply")).toBe("on-open");
-    expect(screen.getByRole("switch", { name: "启用内置浏览器" })).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "启用内置浏览器" })).toBeNull();
   });
   it("finds the mode picker visibility switch on the persona management page", async () => {
     const { find, block } = draw();

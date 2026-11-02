@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inScope, listedAsLive } from "./sessionScope";
+import { inScope, listedAsLive, sessionRuntime } from "./sessionScope";
 
 const live = { path: "/a.jsonl", name: "a", archived: false };
 const archived = { path: "/b.jsonl", name: "b", archived: true };
@@ -39,4 +39,16 @@ describe("a finished session stays listed as running for the grace the reader ch
   it("never lists a session that was not seen finishing", () => {
     expect(listedAsLive(false, undefined, 5 * MIN, 30)).toBe(false);
   });
+});
+
+it("resolves open session identity by host and path without trusting a stale runtime ID", () => {
+  const runtimes = [
+    { id: "local", base: "", root: "/w", name: "local", sessionPath: "/same.jsonl" },
+    { id: "remote", base: "", root: "/w", name: "remote", host: "gpu", sessionPath: "/same.jsonl" },
+    { id: "changed", base: "", root: "/w", name: "changed", sessionPath: "/other.jsonl" },
+  ];
+  const session = { path: "/same.jsonl", name: "same", runtimeId: "changed" };
+  expect(sessionRuntime(session, runtimes)?.id).toBe("local");
+  expect(sessionRuntime(session, runtimes, "gpu")?.id).toBe("remote");
+  expect(sessionRuntime({ ...session, path: "/closed.jsonl" }, runtimes)).toBeUndefined();
 });

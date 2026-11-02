@@ -1,4 +1,4 @@
-import { inScope } from "./sessionScope";
+import { inScope, sessionRuntime } from "./sessionScope";
 import { Fragment, type ReactNode, memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { hidesLegacySessions, onHidesLegacySessionsChange } from "../state/prefs";
 import { onSessionQuickActionsChange, showsSessionQuickActions } from "../state/sessionQuick";
@@ -28,7 +28,7 @@ import { useSessionMove } from "./useSessionMove";
 import { useSessionMoveTo } from "./useSessionMoveTo";
 import { pinnedFirst } from "./pinorder";
 import { Confirm, removeHint, sessionDeleteHint } from "./WorkspaceConfirm";
-import { UnreadCount, UnreadDot } from "./UnreadMark";
+import { UnreadCount } from "./UnreadMark";
 import { PeerThreadMark } from "./peerthreads";
 import { NO_PAGING, atCap, sessionCount, answers, unloaded, type TreePaging, type TreeView } from "./treewindow";
 import { SessionBatch, useSelectedRows } from "./SessionBatch";
@@ -57,6 +57,7 @@ interface Props {
   paging?: TreePaging;
   previewLimit?: number;
   onToggleAll?: () => void;
+  onRecent?: () => void;
   allFolded?: boolean;
   canFold?: boolean;
   // The session path being opened, or empty. The row shows it selected and busy
@@ -91,7 +92,7 @@ interface Props {
 const rowLabel = (session: TreeSession) =>
   session.title || (session.runtimeId && !session.turns ? t("新会话") : session.name);
 
-function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active, folded, reload, retry, paging = NO_PAGING, previewLimit = Infinity, onFold, onToggleAll, allFolded, canFold, opening = "", onOpen, onFocus, onClose, liveIds, listedIds = liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onBranch, onArchive = async () => {}, onRename, onError, adder, children, hasOtherRows }: Props) {
+function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active, folded, reload, retry, paging = NO_PAGING, previewLimit = Infinity, onFold, onToggleAll, onRecent, allFolded, canFold, opening = "", onOpen, onFocus, onClose, liveIds, listedIds = liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onBranch, onArchive = async () => {}, onRename, onError, adder, children, hasOtherRows }: Props) {
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
   const [selection, setSelection] = useState<Set<string> | null>(null);
@@ -182,8 +183,9 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     // The tree and runtime list arrive from separate reads. During a close or
     // restore the tree can briefly retain an id that no longer exists; focusing
     // that stale id changes no pane and makes the row look unclickable.
-    if (session.runtimeId && runtimes.some((rt) => rt.id === session.runtimeId)) {
-      onFocus(session.runtimeId);
+    const held = sessionRuntime(session, runtimes);
+    if (held) {
+      onFocus(held.id);
       return;
     }
     try {
@@ -360,14 +362,14 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     <>
       {moveTo.dialog}
       <SessionBatch hub={hub} selection={selection} selected={selected} displayed={displayed} onSelect={setSelection}
-        onExit={() => treeKeys.ref.current?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
+        onExit={() => treeKeys.ref.current?.parentElement?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
         onBusy={(pending) => { setBusy(pending ? "batch" : ""); if (pending) { setSessionMenu(""); setEditing(""); setConfirm(""); } }}
         onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} />
+      <ProjectsHeader adder={adder} onRecent={onRecent}
+        onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle}
+        canSelect={displayed.length > 0} selecting={selection !== null}
+        onSelect={() => setSelection(new Set())} />
       <div className="scroll">
-          <ProjectsHeader adder={adder}
-            onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle}
-            canSelect={displayed.length > 0} selecting={selection !== null}
-            onSelect={() => setSelection(new Set())} />
         <div role="tree" aria-label={t("项目与会话")} aria-multiselectable={selection !== null} inert={busy === "batch"} data-action-keydown="tree.navigate" ref={treeKeys.ref} onKeyDown={treeKeys.onKeyDown}>
           {shownTree.map((ws) => {
             // A fold is a resting-state preference; while a query is on it would hide
@@ -616,8 +618,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                           </span>
                         )}
                         <PeerThreadMark path={session.path} />
-                        {session.unread && <UnreadDot />}
-                        <SessionAge at={session.lastActiveAt} />
+                        <SessionAge at={session.lastActiveAt} unread={session.unread} />
                         {kept.length > 0 && (
                           <button
                             className="sesscopies"
@@ -775,7 +776,6 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
           {children}
         </div>
       </div>
-
     </>
   );
 }

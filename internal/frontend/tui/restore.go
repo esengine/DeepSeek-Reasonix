@@ -13,14 +13,16 @@ func (t *Transcript) Restore(msgs []HistoryMessage) {
 	for _, m := range msgs {
 		switch m.Role {
 		case "user":
-			// A line the host composed is not something the person said.
-			if m.HostAuthored || m.Content == "" {
+			// A line the host composed is not something the person said. A turn
+			// with neither words nor an image is host chrome; one with a count
+			// is a turn that carried only an image.
+			if m.HostAuthored || (m.Content == "" && m.Images == 0) {
 				continue
 			}
-			t.Items = append(t.Items, Item{ID: t.id(), Kind: ItemUser, Text: m.Content, Steer: m.Steer})
+			t.Items = append(t.Items, Item{ID: t.id(), Kind: ItemUser, Text: m.Content, Steer: m.Steer, Images: m.Images, Via: m.Via})
 		case "assistant":
 			if m.Content != "" || m.Reasoning != "" {
-				t.Items = append(t.Items, Item{ID: t.id(), Kind: ItemSay, Text: m.Content, Reasoning: m.Reasoning, Done: true, Framed: true, ThoughtMs: m.ThoughtMs})
+				t.Items = append(t.Items, Item{ID: t.id(), Kind: ItemSay, Text: m.Content, Reasoning: m.Reasoning, Done: true, Framed: true, ThoughtMs: m.ThoughtMs, ModelRef: m.ModelRef})
 			}
 			t.addWorked(m.WorkDurationMs)
 			for _, c := range m.ToolCalls {

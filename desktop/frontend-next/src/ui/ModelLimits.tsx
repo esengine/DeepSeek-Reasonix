@@ -31,9 +31,11 @@ export function limitsToSend(picked: string[], text: Record<string, LimitText>, 
 }
 
 export function ModelLimits({
-  models, value, onChange, inherited,
+  models, value, onChange, inherited, labels,
 }: {
   models: string[];
+  // How a model reads when its shared prefix is left out; absent draws it as it is.
+  labels?: Record<string, string>;
   value: Record<string, LimitText>;
   onChange: (next: Record<string, LimitText>) => void;
   inherited: (model: string) => ModelLimit | null | undefined;
@@ -53,7 +55,7 @@ export function ModelLimits({
           const own = cur.win !== "" || cur.out !== "";
           return (
             <li key={model} className="ml-row" data-model={model} data-own={own || undefined}>
-              <span className="me-name" title={model}>{shortId(model)}</span>
+              <span className="me-name" title={model}>{labels?.[model] ?? shortId(model)}</span>
               <span className="unit-field">
                 <input
                   data-action="provider.draft" data-value="model-window"

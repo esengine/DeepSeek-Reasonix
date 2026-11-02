@@ -12,12 +12,23 @@ export class MockHub implements HubPort {
   private readonly machine = { configured: false };
   private readonly settings = new MockPort();
   private readonly remoteSettings = new Map<string, MockPort>();
-  private readonly views: RuntimeView[] = [
-    { id: "r1", base: "", root: "~/projects/DeepSeek-Reasonix", name: "DeepSeek-Reasonix", sessionPath: "/sessions/mock.jsonl" },
-  ];
+  private readonly views: RuntimeView[];
+  private readonly seeded: TreeSession[];
   private readonly roots = ["~/projects/DeepSeek-Reasonix", "~/projects/my-website"];
-  private seq = 1;
+  private seq: number;
   private readonly flags = new Map<string, Pick<TreeSession, "pinned" | "archived" | "unread">>();
+
+  constructor(panes = 1) {
+    this.seeded = panes > 1 ? Array.from({ length: panes }, (_, i) => ({
+      path: `/sessions/pane-${i + 1}.jsonl`, name: `pane-${i + 1}`, title: `并行会话 ${i + 1}`, turns: 3,
+    })) : [];
+    const initial = panes === 1 ? [{ path: "/sessions/mock.jsonl" }] : this.seeded;
+    this.views = initial.map((session, i) => ({
+      id: `r${i + 1}`, base: i === 0 ? "" : `/rt/r${i + 1}`, root: this.roots[0],
+      name: "DeepSeek-Reasonix", sessionPath: session.path,
+    }));
+    this.seq = this.views.length;
+  }
 
   private decorate(tree: TreeWorkspace[], host = ""): TreeWorkspace[] {
     return tree.map((ws) => ({ ...ws, sessions: ws.sessions.map((session) => ({ ...session,
@@ -68,9 +79,9 @@ export class MockHub implements HubPort {
 
   // The fixture's own far machine: one workspace with a conversation in it, so
   // the tree under a connected host can be designed without one.
-  remoteTree(host: string) {
+  remoteTree(host: string, window?: TreeWindow) {
     if (host !== "gpu-box") return Promise.resolve(null);
-    return Promise.resolve<TreeWorkspace[]>(this.decorate([
+    return Promise.resolve<TreeWorkspace[]>(this.recentTree(this.decorate([
       {
         root: "/srv/training",
         name: "training",
@@ -80,7 +91,7 @@ export class MockHub implements HubPort {
         ],
       },
       { root: "/srv/scratch", name: "scratch", sessions: [] },
-    ], host));
+    ], host), window));
   }
 
   async openRemote(req: { host: string; workspace?: string; sessionPath?: string; agentComposition?: string }) {
@@ -183,23 +194,39 @@ export class MockHub implements HubPort {
 
   onTreeChanged(_listener: () => void) { return () => {}; }
 
-  tree(_window?: TreeWindow) {
+  tree(window?: TreeWindow) {
     const open = new Map(this.views.filter((v) => v.sessionPath).map((v) => [v.sessionPath!, v.id]));
     return Promise.resolve(
-      this.decorate(this.roots.map<TreeWorkspace>((root, i) => ({
+      this.recentTree(this.decorate(this.roots.map<TreeWorkspace>((root, i) => ({
         root,
         name: root.split("/").pop() ?? root,
         open: this.views.some((v) => v.root === root),
         remembered: true,
         sessions: this.placed(root,
           i === 0
-            ? [
+            ? this.seeded.length ? this.seeded.map((session) => ({ ...session, runtimeId: open.get(session.path) })) : [
                 { path: "/sessions/mock.jsonl", name: "mock", title: "并行会话演示", turns: 3, runtimeId: open.get("/sessions/mock.jsonl") },
                 { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12, runtimeId: open.get("/sessions/older.jsonl"), legacy: true },
               ]
             : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5, runtimeId: open.get("/sessions/site.jsonl") }]),
-      }))),
+      }))), window),
     );
+  }
+
+  protected recentTree(tree: TreeWorkspace[], window?: TreeWindow): TreeWorkspace[] {
+    if (window?.order !== "recent") return tree;
+    const q = window.q?.trim().toLowerCase() || "";
+    const rows = tree.flatMap((ws, workspace) => ws.sessions
+      .filter((session) => !session.archived && !(window.hideLegacy && !q && session.legacy) &&
+        (!q || ws.name.toLowerCase().includes(q) || (session.title || session.name).toLowerCase().includes(q)))
+      .map((session) => ({ workspace, session })))
+      .sort((a, b) => (b.session.lastActiveAt ?? 0) - (a.session.lastActiveAt ?? 0) || (a.session.path < b.session.path ? -1 : a.session.path > b.session.path ? 1 : 0));
+    const offset = window.offset ?? 0;
+    const end = window.limit === 0 ? rows.length : offset + (window.limit ?? 50);
+    return tree.map((ws, workspace) => ({ ...ws, recentOffset: offset,
+      remaining: rows.slice(end).filter((row) => row.workspace === workspace).length,
+      sessions: rows.slice(offset, end).filter((row) => row.workspace === workspace).map((row) => row.session),
+    }));
   }
 
   addWorkspace(path: string) {

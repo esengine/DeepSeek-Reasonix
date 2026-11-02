@@ -83,6 +83,14 @@ func ApplyPaths(ctx context.Context, snap Snapshot, tree string, changes []Chang
 	if err != nil {
 		return err
 	}
+	root, err := os.OpenRoot(source.WorkTree)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := checkApplyAncestors(root, changes); err != nil {
+		return err
+	}
 	live, err := liveBlobs(ctx, source, paths, trust)
 	if err != nil {
 		return err
@@ -104,7 +112,7 @@ func ApplyPaths(ctx context.Context, snap Snapshot, tree string, changes []Chang
 	if len(conflicts) > 0 {
 		return &ConflictError{Paths: conflicts}
 	}
-	return writeChanges(ctx, source, tree, pending)
+	return writeChangesInRoot(ctx, source, root, tree, pending)
 }
 
 // ChangePaths is where each change lands in the source workspace, refusing any
@@ -267,16 +275,33 @@ func hashText(ctx context.Context, repo gitcmd.Repo, text string) (string, error
 
 // writeChanges writes tree's version of each change into repo's files.
 func writeChanges(ctx context.Context, repo gitcmd.Repo, tree string, changes []Change) error {
-	repoRoot := repo.WorkTree
+	root, err := os.OpenRoot(repo.WorkTree)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return writeChangesInRoot(ctx, repo, root, tree, changes)
+}
+
+func writeChangesInRoot(ctx context.Context, repo gitcmd.Repo, root *os.Root, tree string, changes []Change) error {
+	var deletions []Change
 	var restore []string
 	for _, ch := range changes {
 		if ch.Status == "D" {
-			if err := os.Remove(filepath.Join(repoRoot, filepath.FromSlash(ch.Path))); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("apply deletion of %s: %w", ch.Path, err)
-			}
-			continue
+			deletions = append(deletions, ch)
+		} else {
+			restore = append(restore, ch.Path)
 		}
-		restore = append(restore, ch.Path)
+	}
+	// Restored paths may need directories created by these deletions. Git owns
+	// their checkout; deletion must not follow a redirected source ancestor.
+	if err := checkApplyAncestors(root, deletions); err != nil {
+		return err
+	}
+	for _, ch := range deletions {
+		if err := root.Remove(filepath.FromSlash(ch.Path)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("apply deletion of %s: %w", ch.Path, err)
+		}
 	}
 	if len(restore) == 0 {
 		return nil

@@ -51,6 +51,8 @@ interface Props {
   // be a dead control. One endpoint can serve both kinds, so it is not a
   // property of the connection.
   visionLocked?: (m: string) => boolean;
+  // How a model reads with its shared prefix left out; the id stays in the tooltip.
+  labels?: Record<string, string>;
   facts?: Record<string, ModelFact>;
   onCheck?: (m: string) => void;
   checkDisabled?: boolean;
@@ -64,7 +66,7 @@ interface Props {
 }
 
 export function ModelChoice({
-  models, aliases, onAlias, picked, vision, def, onDefault, onVision, visionLocked, facts, onCheck, checkDisabled, onToggle, onAdd,
+  models, aliases, onAlias, picked, vision, def, onDefault, onVision, visionLocked, labels, facts, onCheck, checkDisabled, onToggle, onAdd,
   onFetch, fetching, fetchDisabled, fetchFail,
 }: Props) {
   const [q, setQ] = useState("");
@@ -132,7 +134,7 @@ export function ModelChoice({
               <i />
             </button>
             <span className="mid">
-              <span className="nm">{m}</span>
+              <span className="nm" title={labels?.[m] ? m : undefined}>{labels?.[m] ?? m}</span>
               {onAlias && <input className="malias" value={aliasFor(m)} spellCheck={false}
                 data-action="provider.draft" data-value="model-alias" data-target={m}
                 aria-label={t("{name} 的显示别名", { name: m })}

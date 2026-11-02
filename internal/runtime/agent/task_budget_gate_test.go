@@ -122,8 +122,8 @@ func TestTaskBudgetAxesSetIndependently(t *testing.T) {
 // lands it. This is the promise the defaults make.
 func TestUnconfiguredBudgetNeverCrosses(t *testing.T) {
 	b := runBudget{started: time.Now().Add(-8 * time.Hour)}
-	b.observe(&provider.Usage{PromptTokens: 50_000_000, CompletionTokens: 5_000_000, RequestCount: 1},
-		&provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2})
+	u := &provider.Usage{PromptTokens: 50_000_000, CompletionTokens: 5_000_000, RequestCount: 1}
+	b.observe(u, budgetTestQuote(u, &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2}))
 	if axis, detail := b.exceeded(normalizeTaskBudget(TaskBudget{})); axis != "" {
 		t.Fatalf("unconfigured budget crossed %q (%s); nothing should stop by default", axis, detail)
 	}

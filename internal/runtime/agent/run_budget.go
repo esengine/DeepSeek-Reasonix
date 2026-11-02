@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"reasonix/internal/contract/event"
+	"reasonix/internal/contract/pricing"
 	"reasonix/internal/contract/provider"
 )
 
@@ -40,14 +41,13 @@ func normalizeTaskBudget(b TaskBudget) TaskBudget {
 // one read and how long the model thought, and the failures worth stopping are
 // reported in hours and tokens, never in rounds.
 type runBudget struct {
-	started        time.Time
-	rounds         int
-	requests       int
-	promptTokens   int
-	outputTokens   int
-	cost           float64
-	pricedRounds   int
-	costIncomplete bool
+	started      time.Time
+	rounds       int
+	requests     int
+	promptTokens int
+	outputTokens int
+	tokens       uint64
+	cost         runCost
 	// limit is configuration, not accumulation: it survives the reset that
 	// starts a new task.
 	limit      TaskBudget
@@ -58,21 +58,16 @@ type runBudget struct {
 // observe folds one round's provider usage into the turn's running total.
 // A round whose usage never arrived still counts as a round, so the axis never
 // reads cheaper than the turn actually was.
-func (b *runBudget) observe(usage *provider.Usage, pricing *provider.Pricing) {
+func (b *runBudget) observe(usage *provider.Usage, quote *pricing.CostQuote) {
 	b.rounds++
+	b.tokens = addBudgetTokens(b.tokens, budgetUsageTokens(usage))
+	b.cost.observe(usage, quote)
 	if usage == nil {
-		b.costIncomplete = true
 		return
 	}
 	b.requests += usageRequestCount(usage)
 	b.promptTokens += usage.PromptTokens
 	b.outputTokens += usage.CompletionTokens
-	if pricing == nil || usage.Estimated {
-		b.costIncomplete = true
-		return
-	}
-	b.cost += pricing.Cost(usage)
-	b.pricedRounds++
 }
 
 func (b *runBudget) elapsed() time.Duration {
@@ -89,8 +84,8 @@ func (b *runBudget) totals() event.RunBudgetTotals {
 		Requests:     b.requests,
 		PromptTokens: b.promptTokens,
 		OutputTokens: b.outputTokens,
-		Cost:         b.cost,
-		Priced:       !b.costIncomplete && b.pricedRounds > 0,
+		Cost:         b.cost.amount().Float64(),
+		Priced:       b.cost.complete(),
 		ElapsedMs:    b.elapsed().Milliseconds(),
 	}
 }
@@ -100,12 +95,12 @@ func (b *runBudget) totals() event.RunBudgetTotals {
 // usage or prices; unknown spend cannot erase a proven crossing.
 func (b *runBudget) exceeded(limit TaskBudget) (axis, detail string) {
 	if limit.Tokens > 0 {
-		if used := b.promptTokens + b.outputTokens; used >= limit.Tokens {
+		if used := b.tokens; used >= uint64(limit.Tokens) {
 			return "token", fmt.Sprintf("task used %d tokens, reaching the %d budget", used, limit.Tokens)
 		}
 	}
-	if limit.Cost > 0 && b.pricedRounds > 0 && b.cost >= limit.Cost {
-		return "cost", fmt.Sprintf("task spend %.4f reached the %.4f budget", b.cost, limit.Cost)
+	if limit.Cost > 0 && b.cost.pricedRounds > 0 && b.cost.amount() >= max(pricing.Amount(1), pricing.NewAmountFromFloat(limit.Cost)) {
+		return "cost", fmt.Sprintf("task spend %.4f reached the %.4f budget", b.cost.amount().Float64(), limit.Cost)
 	}
 	if limit.Wall > 0 {
 		if elapsed := b.elapsed(); elapsed >= limit.Wall {
@@ -134,19 +129,22 @@ func (a *Agent) ResetTaskBudget() {
 }
 
 // observeRunBudget folds a round into both scopes and reports them.
-func (a *Agent) observeRunBudget(state *turnRuntime, usage *provider.Usage) {
+func (a *Agent) observeRunBudget(state *turnRuntime, usage *provider.Usage, quote *pricing.CostQuote) {
 	if state == nil {
 		return
 	}
 	state.budget.rootTokens.observe(usage)
-	state.budget.observe(usage, a.svc.pricing)
+	state.budget.observe(usage, quote)
 	if a.task.budget.started.IsZero() {
 		a.task.budget.started = state.budget.started
 	}
-	a.task.budget.observe(usage, a.svc.pricing)
+	a.task.budget.observe(usage, quote)
 	currency := ""
 	if a.svc.pricing != nil {
 		currency = a.svc.pricing.Symbol()
+	}
+	if state.budget.cost.currency != "" {
+		currency = pricing.CurrencySymbol(state.budget.cost.currency)
 	}
 	event.RecordRunBudget(a.svc.sink, event.RunBudgetSample{
 		Turn:     state.budget.totals(),

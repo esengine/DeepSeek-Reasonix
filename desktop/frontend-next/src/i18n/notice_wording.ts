@@ -7,6 +7,7 @@ import { EXTENSION_SKIPPED, extensionSkippedVars } from "./extension_skipped";
 import { INBOX_RECOVERED, inboxRecoveredVars } from "./inbox_recovered";
 import { JOB_FAILED, JOB_FINISHED, JOB_STARTED, JOB_KILLED, JOB_STALLED, jobErrorText, jobNoticeVars, jobStalledVars } from "./job_notice";
 import { NOTICE_TEXT } from "./notices";
+import { KEPT_TURNS_FOLDED, USER_TURNS_DROPPED, turnsDroppedVars } from "./turns_dropped";
 import { PERMISSION_RULES_DORMANT, permissionRulesDormantVars } from "./permission_rules_dormant";
 
 export type NoticeVars = Record<string, string | number>;
@@ -30,6 +31,8 @@ const VARS: Record<string, (detail: string | undefined) => NoticeVars | undefine
   [COMPACTION_TELEMETRY]: compactionNoticeVars,
   [CONTEXT_COMPOSITION]: contextCompositionVars,
   [SUBAGENT_WAITING]: subagentWaitingVars,
+  [USER_TURNS_DROPPED]: turnsDroppedVars,
+  [KEPT_TURNS_FOLDED]: turnsDroppedVars,
   display_currency: (detail) => ({ mode: detail || "auto" }),
   compact_declined: compactReason("compact_declined"),
   compact_failed: compactReason("compact_failed"),

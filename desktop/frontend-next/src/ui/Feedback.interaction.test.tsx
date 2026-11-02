@@ -11,7 +11,10 @@ import { HttpError, type AgentPort } from "../port/port";
 import { FEEDBACK_CODE, type FeedbackEnv } from "../port/feedback";
 import { host } from "../port/host";
 
-beforeEach(dropDraft);
+beforeEach(() => {
+  localStorage.clear();
+  dropDraft();
+});
 
 afterEach(() => {
   cleanup();
@@ -59,6 +62,52 @@ async function fill(text = "侧栏在缩放窗口后丢失选中项", nick = "ad
 }
 
 describe("feedback form", () => {
+  it("remembers submitted contact across fresh forms and lets an empty submission clear it", async () => {
+    const contact = () => screen.getByRole<HTMLInputElement>("textbox", { name: /联系方式/ });
+    setup();
+    await fill();
+    await userEvent.type(contact(), "ada@example.com");
+    await userEvent.click(send());
+    await screen.findByText("已收到你的反馈");
+    cleanup();
+    dropDraft();
+    setup();
+    await fill();
+    expect(contact().value).toBe("ada@example.com");
+    await userEvent.clear(contact());
+    await userEvent.click(send());
+    await screen.findByText("已收到你的反馈");
+    cleanup();
+    dropDraft();
+    setup();
+    await ready();
+    expect(contact().value).toBe("");
+  });
+
+  it("keeps an unsent draft ahead of remembered contact without persisting a failed submission", async () => {
+    const contact = () => screen.getByRole<HTMLInputElement>("textbox", { name: /联系方式/ });
+    const { port } = setup();
+    await fill();
+    await userEvent.type(contact(), "saved@example.com");
+    await userEvent.click(send());
+    await screen.findByText("已收到你的反馈");
+    await userEvent.click(screen.getByRole("button", { name: "再写一条" }));
+    await userEvent.type(body(), "another report");
+    await userEvent.clear(contact());
+    vi.spyOn(port, "sendFeedback").mockRejectedValueOnce(new Error("offline"));
+    await userEvent.click(send());
+    await screen.findByRole("button", { name: "重试发送" });
+    cleanup();
+    setup();
+    await ready();
+    expect(contact().value).toBe("");
+    cleanup();
+    dropDraft();
+    setup();
+    await ready();
+    expect(contact().value).toBe("saved@example.com");
+  });
+
   it("holds Send back until there is text and a nickname, and counts UTF-8 bytes", async () => {
     setup();
     await ready();

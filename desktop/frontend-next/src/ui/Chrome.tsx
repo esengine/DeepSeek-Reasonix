@@ -10,6 +10,7 @@ import { ariaChord, chord } from "./keys";
 import { PhonePop } from "./PhonePop";
 import { ViewSwitch } from "./ViewSwitch";
 import { TooltipButton } from "./TooltipButton";
+import { workspaceDirectoryDescription } from "./workspaceDirectory";
 import { WindowControls, zoomOnTitleBar } from "./WindowControls";
 import type { PaneView } from "../state/paneview";
 
@@ -27,6 +28,7 @@ interface Props {
   // controls that need a session simply do nothing until one is focused.
   port: AgentPort | null;
   status: SessionStatus | null;
+  workspace: WorkspaceInfo | null;
   title?: string;
   steer: number;
   account: AccountState | null;
@@ -43,7 +45,7 @@ interface Props {
   onError?: (e: unknown) => void;
 }
 
-export function Chrome({ port, status, title, steer, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, onError }: Props) {
+export function Chrome({ port, status, workspace: ws, title, steer, account, host, theme, onTheme, onFind, view, rows, surfaces, onView, hub, onError }: Props) {
   const root = status?.workspaceRoot || status?.cwd || "";
   const project = root ? base(root) : "—";
   // The folder mark opens the project itself. Only a shell that can enter a
@@ -55,13 +57,6 @@ export function Chrome({ port, status, title, steer, account, host, theme, onThe
   const openProject = () => {
     if (hub && root) void hub.openWorkspace(root).catch((e) => onError?.(e));
   };
-  const [ws, setWs] = useState<WorkspaceInfo | null>(null);
-  useEffect(() => {
-    let current = true;
-    setWs(null);
-    if (port) port.workspaces().then((value) => { if (current) setWs(value); }).catch(() => { if (current) setWs(null); });
-    return () => { current = false; };
-  }, [port, root]);
 
   const gathered = useFolded("bar");
   const [more, setMore] = useState(false);
@@ -99,9 +94,9 @@ export function Chrome({ port, status, title, steer, account, host, theme, onThe
           <span className="crumb-proj" title={root}>
             {project}
           </span>
-          <span className="isolab" hidden={!ws || ws.current !== root} title={root}>
-            {ws?.isolated ? t("隔离目录") : t("原目录")}
-          </span>
+          {ws?.isolated && ws.current === root && <span className="isolab" title={`${workspaceDirectoryDescription(true)}\n${root}`}>
+            {t("独立工作树")}
+          </span>}
           <span className="isolab hostlab" hidden={!host}>
             {host}
           </span>

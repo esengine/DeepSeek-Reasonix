@@ -28,8 +28,10 @@ the gate is named.
 - The selector ties the contrast tiers (`:root[data-theme][data-contrast]`) and
   beats them by order. With no pack there is no element: the tiers alone carry
   the inks, and the reader's contrast is theirs.
-- A pack's own inks take the reader's contrast as a relative-colour lightness
-  offset inside that rule; the built-in inks need none.
+- A pack's own inks take normal/strong as relative-colour lightness offsets
+  inside that rule. Unset and soft preserve the author's baseline: arbitrary
+  inks and grounds may already meet AA only narrowly, so a blind negative
+  offset is not safe. This is not an accessibility guarantee for user packs.
 - `--ok --warn --err --net --deleg --add --del --focus` are not in the pack
   vocabulary and are never written.
 - Decoration that is not a status has its own tokens, which a pack may set
@@ -56,6 +58,15 @@ and at every contrast step, so nothing paints differently until a pack sets one.
   variable, set to `--net` while a turn runs, and stays a status.
 - The running compose ring, call lines, pips, carets and the delegated nest keep
   `net` and `deleg`.
+
+## Composer guidance
+
+- Composer guidance keeps its theme-owned `--ghost` ink at full opacity. The
+  Appearance visibility preference suppresses the placeholder text at its
+  choice owner, not by lowering contrast or changing shared neutral inks.
+- `perf/composer-placeholder.mjs` checks the default-on preference, live
+  visibility changes and reload persistence through Appearance, alongside
+  entered text, focus, IME, submission and queued guidance.
 
 ## Elevation
 
@@ -105,6 +116,10 @@ grid to break.
   listing are two things. One mix served both and stepped down from `--raised`
   while the column actually lays `--surface`: measured, the step came to 2.7 L
   in dark, just past the line where a layer is visible.
+- Clipped tool output fades its own content with an alpha mask on `.out-body`.
+  Result lists and terminal blocks have different grounds, so no coloured
+  overlay may cover either one or the Show all control. Long lines retain
+  native horizontal scrolling without an edge overlay.
 
 ## Hues
 
@@ -333,6 +348,11 @@ pack states a shape, never a number the layout has to agree with.
   and fails on a size outside the scale.
 - `settings-type.test.ts` holds the stylesheet to tokens, so a literal size or
   colour cannot be added to it.
+- The neutral ink the roles set on buttons would land on a primary action's
+  fill, where the component pairs `--accent-fg` with `--accent`; an enabled
+  `[data-primary]` button therefore keeps `--accent-fg` and carries its
+  `--accent` fill with it, so a container with no fill rule of its own never
+  shows light text on no fill. Nothing else is recoloured.
 
 ## Weight and contrast
 
@@ -348,26 +368,53 @@ pack states a shape, never a number the layout has to agree with.
   pack sheet. The backdrop transcript rule defaults to its 2px shadow and 7px
   halo when this variable is absent. The choice affects text only; the frosted
   backing remains. Reduced effects overrides the text shadow.
+- `background.surfaceOpacity.{light,dark}` paints `--bg-{nav,rail,chrome,side,compose}-background`
+  through the pack sheet, only for a backdrop. Omitted values keep existing paint.
+- Shell opacity mixes `--page`; composer opacity mixes `--raised`. Existing
+  Studio scheme-specific overrides and blur remain the defaults.
 
 - Stroke weight is an axis beside contrast, not part of it: however bright the
   colour, 400 Han at 11px is thin. Han strokes are dense and blur at a size
   Latin still holds, so the Chinese interface starts at medium.
 - The `heavy` tier steps further for Chinese, whose default is already the Latin
   bold tier, and stops at 700: above it a Han character's closed strokes fill in.
-- Text contrast has three tiers; backgrounds and semantic colours do not
-  participate. The floor is AA body text: `--ghost` must reach 4.5:1 on the
-  darkest ground it actually lands on, because it appears at 10–11px and the
-  large-text exemption starts at 18.66px. That ground is `--page` — the rail,
-  the side column and the chrome all lay it, where `--ghost` appears two orders
-  of magnitude more often than on `--raised`. The default tier starts at that
-  line and the other two step up; the body end does not move, because near-white
-  on a dark ground haloes and narrowing the span is what "softer" means.
-  Enforced by `perf/contrast.mjs`.
-- `--ghost` is `--faint`'s value in every tier: a lighter one fails the floor.
-- `perf/tiers.mjs` holds every tier: each ink is at least as legible as the
-  default palette stepped once (3.0/10.1, 3.5/7.5 and 3.5/7.0 lightness points
-  for text, muted and faint) and as the floors recorded there, on both grounds.
+- The proposed decision for #12019 retains **soft** as a lower-contrast built-in
+  body/muted palette. Unlike the previous contract, the body end now moves.
+- Unset, normal and strong remain unchanged. Pack-authored inks keep their
+  baseline for soft, as described under Theme packs.
+- Every text ink, including 10–11px faint/ghost, must clear 4.5:1 on its actual
+  grounds; these sizes do not qualify for the large-text exemption. Applicable
+  non-text graphics still need 3:1. No semantic colours or graphics are softened.
+- Faint/ghost keep the default AA floor: light is only 4.532:1 on `--overlay`,
+  dark only 4.504:1 on `--float-hi`. Softening them would fail AA despite passing
+  on page. `--ghost` equals `--faint` in every tier.
+- Light soft previously made faint/ghost stronger than unset; it now preserves
+  the actual default instead.
+- `perf/tiers.mjs` measures Chromium colours on page, surface, raised, overlay,
+  float and float-hi. It pins unset/normal/strong and requires softer body/muted,
+  stable faint/ghost, and AA. The higher tiers keep their stepped-palette floors.
+- `perf/contrast.mjs` and `tools/contrast-sweep.mjs` also audit rendered text and
+  composited grounds.
 - `prefers-contrast: more` is followed when the user has not chosen a tier.
   Light and dark are judged separately: a manual dark choice under a light
   system scheme would otherwise paint the light theme's dark body text onto a
   dark ground.
+
+### Soft contrast decision measurements
+
+Chromium, canonical Studio palette, WCAG sRGB relative luminance. Each cell is
+**page / surface**, rounded to three decimals; thresholds use unrounded ratios.
+These are small-text measurements, not large-text exemptions.
+
+| Scheme / tier | text | muted | faint | ghost |
+| --- | --- | --- | --- | --- |
+| Light / unset (unchanged) | 12.496 / 13.653 | 5.445 / 5.949 | 4.831 / 5.279 | 4.831 / 5.279 |
+| Light / previous soft | 12.496 / 13.653 | 7.695 / 8.407 | 5.815 / 6.353 | 5.815 / 6.353 |
+| Light / soft | 9.324 / 10.187 | 5.140 / 5.616 | 4.831 / 5.279 | 4.831 / 5.279 |
+| Light / normal (unchanged) | 14.198 / 15.513 | 10.316 / 11.271 | 7.933 / 8.668 | 7.933 / 8.668 |
+| Light / strong (unchanged) | 18.018 / 19.686 | 13.669 / 14.934 | 10.510 / 11.483 | 10.510 / 11.483 |
+| Dark / unset and previous soft | 14.730 / 14.314 | 8.934 / 8.682 | 5.722 / 5.560 | 5.722 / 5.560 |
+| Dark / soft | 10.822 / 10.516 | 7.411 / 7.202 | 5.722 / 5.560 | 5.722 / 5.560 |
+| Dark / normal (unchanged) | 16.125 / 15.670 | 10.065 / 9.781 | 7.565 / 7.352 | 7.565 / 7.352 |
+| Dark / strong (unchanged) | 18.099 / 17.588 | 13.163 / 12.792 | 9.916 / 9.636 | 9.916 / 9.636 |
+

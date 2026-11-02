@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { clearToasts, pushNote, pushToast } from "../state/toasts";
+import { clearToasts, pushNote, pushOffer, pushToast } from "../state/toasts";
 import { ToastStack } from "./ToastStack";
 
 globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
@@ -34,5 +34,22 @@ describe("a note in the window's corner", () => {
     const failure = screen.getByText("it broke").closest(".toast")!;
     expect(failure.getAttribute("role")).toBe("alert");
     expect(failure.querySelector('[data-action="toast.report"]')).not.toBeNull();
+  });
+
+  it("runs what a note offers when its button is pressed, and then goes away", () => {
+    const run = vi.fn();
+    render(<ToastStack onFeedback={() => {}} />);
+    act(() => pushOffer("太大了", { label: "取最近的内容", run }));
+    const note = screen.getByText("太大了").closest(".toast")!;
+    expect(note.getAttribute("role")).toBe("status");
+    fireEvent.click(note.querySelector('[data-action="toast.act"]')!);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("太大了")).toBeNull();
+  });
+
+  it("offers no button when the note has nothing to offer", () => {
+    render(<ToastStack onFeedback={() => {}} />);
+    act(() => pushNote("fyi"));
+    expect(document.querySelector('[data-action="toast.act"]')).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import type { AgentPort } from "../port/port";
 import { DisplayCurrency } from "./DisplayCurrency";
 import { Group } from "./Group";
+import { UploadUsage } from "./UploadUsage";
 import { Usage } from "./Usage";
 
 // The report is keyed on the currency choice: its amounts are read once, so a
@@ -18,6 +19,7 @@ export function UsageSettings({ port, onChanged }: { port: AgentPort; onChanged:
       >
         <Usage key={rev} port={port} />
       </Group>
+      <UploadUsage port={port} />
     </>
   );
 }

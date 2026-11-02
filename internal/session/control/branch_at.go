@@ -118,6 +118,9 @@ func (c *Controller) createBranchPrefix(src []provider.Message, name string) (*s
 		if err := c.checkpoints.storeRef().CopyConversationPrefixTo(ckptDir(path), sessionstore.BranchID(path), len(src)); err != nil {
 			return err
 		}
+		// A fold may travel only while its digest ends inside the branch;
+		// history after the fork point must never leak into its summary.
+		sessionstore.InheritCompactionState(c.SessionPath(), path, child.Messages)
 		if name != "" {
 			return sessionstore.RenameSession(path, name)
 		}

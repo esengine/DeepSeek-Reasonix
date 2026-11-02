@@ -182,6 +182,13 @@ function declarations(pack: ThemePack, scheme: "light" | "dark", busy: boolean, 
 
   const bg = pack.background;
   if (bg?.textGlow === "none") out.push(["--flow-text-shadow", "none"]);
+  if (sky || bg?.image) {
+    const opacity = bg?.surfaceOpacity?.[scheme];
+    for (const surface of ["nav", "rail", "chrome", "side", "compose"] as const) {
+      const value = opacity?.[surface];
+      if (value !== undefined) out.push([`--bg-${surface}-background`, `color-mix(in srgb, var(${surface === "compose" ? "--raised" : "--page"}) ${value * 100}%, transparent)`]);
+    }
+  }
   if (!bg?.image) return out;
   // The server owns freshness for this mutable URL. encodeURIComponent keeps
   // a pack id out of the CSS url() grammar.

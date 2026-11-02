@@ -70,7 +70,7 @@ type DeliveryCheckpoint struct {
 	Contract string `json:"contract,omitempty"`
 }
 
-// ProvenMutation pairs the proof a pending change had earned with a content
+// ProvenMutation pairs the proof a pending change had earned with a file-state
 // fingerprint of each path it changed, taken when that proof was current.
 type ProvenMutation struct {
 	Paths         map[string]string `json:"paths"`

@@ -43,6 +43,9 @@ const theirs = (it: QueueItem) => it.origin !== "host" || it.state === "blocked"
 // Codes whose entry the kernel knows never reached the model, so sending it
 // again cannot repeat an effect. Every other uncertain code may have run.
 const RETRY_SAFE = new Set(["steer_unapplied"]);
+// The kernel edits, reorders and re-freezes only a line nobody has taken yet; a
+// line already accepted as guidance can only be withdrawn or sent now.
+const editable = (it: QueueItem) => it.state === "queued" || it.state === "blocked" || it.state === "uncertain";
 const retryable = (it: QueueItem) =>
   it.state === "blocked" || (it.state === "uncertain" && !!it.blockCode && RETRY_SAFE.has(it.blockCode));
 
@@ -56,7 +59,9 @@ export const waiting = (queue: QueueSnapshot | null): QueueItem[] =>
 // these call sites, and a table of strings looked up later is invisible to it —
 // which is how a row would render Chinese inside an English window.
 function label(it: QueueItem): string {
-  if (it.origin === "host" && it.state !== "blocked" && it.state !== "uncertain") {
+  if (it.origin === "host") {
+    if (it.state === "blocked") return t("后台 · 受阻");
+    if (it.state === "uncertain") return t("后台 · 状态不明");
     return t("后台任务续接");
   }
   switch (it.state) {
@@ -190,7 +195,6 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                 ? t("尚未送达，可以改，也可以取回")
                 : t("正在送出…")}
         </span>
-        {queue.paused && <span className="qflag" data-hold="">{t("已暂停")}</span>}
         {queue.readonly && <span className="qflag" data-ro="">{t("只读")}</span>}
         {/* The kernel pauses itself when it recovers entries: something was
             said that no one has since re-confirmed. */}
@@ -218,13 +222,13 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
           const coded = it.blockCode ? BLOCK_WHY[it.blockCode] : undefined;
           const why = coded ? t(coded) : it.blockReason;
           return (
-            <div key={it.id} className="qi" data-state={it.state}>
+            <div key={it.id} className="qi" data-state={it.state} title={why || undefined}>
               {/* The chip is the answer to "did that land". Its wording says
                   which turn the line goes into; the title says when. */}
               {ordinary(it) ? (
                 <span className="qdot" aria-hidden="true" />
               ) : (
-                <span className="pill" data-tone={tone(it.state)} title={it.state === "steer_accepted" ? t("下个工具边界送入") : undefined}>
+                <span className="pill" data-tone={tone(it.state)} title={it.state === "steer_accepted" ? t("下个工具边界送入") : it.origin === "host" ? t("后台任务续接") : undefined}>
                   {label(it)}
                 </span>
               )}
@@ -257,7 +261,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                 <Overflow className="pv" text={it.preview} />
               )}
               {!!it.refs?.length && <span className="rf">{t("冻结 {n} 文件", { n: it.refs.length })}</span>}
-              {why && <span className="qwhy">{why}</span>}
+              {why && (it.state === "blocked" || it.state === "uncertain") && <span className="qwhy" title={why}>{why}</span>}
               {unread?.id === it.id && (
                 <span className="qwhy" data-err="" role="alert">
                   {t("无法读取该条的正文，未打开编辑：{why}", { why: unread.why })}
@@ -265,17 +269,19 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
               )}
               {live && (
                 <span className="qacts">
-                  {items.length > 1 && <>
-                    <button data-action="queue.move" data-target={it.id} data-value="up" onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("上移")} aria-label={t("上移")}>
+                  {items.length > 1 && editable(it) && <>
+                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="up" onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("上移")} aria-label={t("上移")}>
                       <StudioIcon name="arrow" />
                     </button>
-                    <button data-action="queue.move" data-target={it.id} data-value="down" onClick={() => onMove(it.id, i + 1)} disabled={i === items.length - 1} title={t("下移")} aria-label={t("下移")}>
+                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="down" onClick={() => onMove(it.id, i + 1)} disabled={i === items.length - 1} title={t("下移")} aria-label={t("下移")}>
                       <StudioIcon name="arrow" data-flip="" />
                     </button>
                   </>}
-                  <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("编辑")}>
-                    {t("改")}
-                  </button>
+                  {editable(it) && (
+                    <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("编辑")} aria-label={t("改")}>
+                      <StudioIcon name="edit" />
+                    </button>
+                  )}
                   {/* Waiting is the normal case and needs no button. This is the
                       other one: the turn in front of this line is not worth
                       finishing, and nothing else can end it. */}
@@ -296,7 +302,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                     </button>
                   )}
                   {/* Only an entry that quoted files has anything to re-freeze. */}
-                  {!!it.refs?.length && (
+                  {editable(it) && !!it.refs?.length && (
                     <button data-action="queue.refresh" data-target={it.id} onClick={() => onRefresh(it.id)} title={t("重新冻结引用的文件")}>
                       {t("刷新")}
                     </button>
@@ -304,8 +310,8 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                 </span>
               )}
               {live && (
-                <button className="x" data-action="queue.cancel" data-target={it.id} onClick={() => onCancel(it.id)} title={t("取回")}>
-                  {t("取回")}
+                <button className="x" data-action="queue.cancel" data-target={it.id} onClick={() => onCancel(it.id)} title={t("取回")} aria-label={t("取回")}>
+                  <StudioIcon name="rewind" />
                 </button>
               )}
             </div>
