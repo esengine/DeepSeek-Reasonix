@@ -6,6 +6,20 @@ chain-of-thought is requested on the wire. The `openai` provider adapts the
 request shape per backend; this table is the reference for which protocol each
 known backend uses and which parameters it honours or ignores.
 
+## Reasoning without an answer
+
+Reasoning text is not a final answer. If a response has no tool calls and its
+answer content is empty or whitespace-only, Reasonix asks the model for a visible
+answer and shows a retry notice.
+
+This also applies to DeepSeek thinking responses with `finish_reason="stop"`:
+a normal generation stop does not establish that an answer was delivered.
+
+Recovery permits two additional model rounds. Three consecutive empty final
+responses end the run with an error instead of silently succeeding. An output
+limit (`finish_reason="length"`) retains its truncation notice and cause in the
+recovery request. Reasoning remains separate from answer content.
+
 ## Auto-detected backends
 
 These are recognised by base URL (see `internal/model/openai/host.go`) and

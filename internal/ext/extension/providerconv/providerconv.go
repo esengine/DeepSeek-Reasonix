@@ -170,22 +170,21 @@ func UsageFromProtocol(u *protocol.ProviderUsage) *provider.Usage {
 // host's descriptor form. The DTO mirrors provider.Descriptor field-for-field.
 func DescriptorFromProtocol(d protocol.ProviderDescriptor) provider.Descriptor {
 	return provider.Descriptor{
-		Ref:                            d.Ref,
-		DisplayName:                    d.DisplayName,
-		Model:                          d.Model,
-		ContextWindow:                  d.ContextWindow,
-		PricingCurrency:                d.PricingCurrency,
-		CacheHitPerMillion:             d.CacheHitPerMillion,
-		InputPerMillion:                d.InputPerMillion,
-		OutputPerMillion:               d.OutputPerMillion,
-		Vision:                         d.Vision,
-		Tools:                          d.Tools,
-		Reasoning:                      d.Reasoning,
-		Efforts:                        append([]string(nil), d.Efforts...),
-		DefaultEffort:                  d.DefaultEffort,
-		ToolCallReasoning:              d.ToolCallReasoning,
-		ReasoningRoundTrip:             d.ReasoningRoundTrip,
-		WarnOnMissingToolCallReasoning: d.WarnOnMissingToolCallReasoning,
+		Ref:                d.Ref,
+		DisplayName:        d.DisplayName,
+		Model:              d.Model,
+		ContextWindow:      d.ContextWindow,
+		PricingCurrency:    d.PricingCurrency,
+		CacheHitPerMillion: d.CacheHitPerMillion,
+		InputPerMillion:    d.InputPerMillion,
+		OutputPerMillion:   d.OutputPerMillion,
+		Vision:             d.Vision,
+		Tools:              d.Tools,
+		Reasoning:          d.Reasoning,
+		Efforts:            append([]string(nil), d.Efforts...),
+		DefaultEffort:      d.DefaultEffort,
+		ToolCallReasoning:  d.ToolCallReasoning,
+		ReasoningRoundTrip: d.ReasoningRoundTrip,
 	}
 }
 

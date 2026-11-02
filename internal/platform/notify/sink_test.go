@@ -33,9 +33,9 @@ func TestSinkForwardsProtocolRecoveryWithoutNotification(t *testing.T) {
 	sender := &recordSender{}
 	sink := NewSink(inner, sender, i18n.English, NewSettings(config.NotificationsConfig{Enabled: true, TurnDone: true}))
 
-	event.RecordProtocolRecovery(sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+	event.RecordProtocolRecovery(sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryKind("test")})
 
-	if len(inner.recovery) != 1 || inner.recovery[0].Kind != event.ProtocolRecoveryMissingReasoningFallback {
+	if len(inner.recovery) != 1 || inner.recovery[0].Kind != event.ProtocolRecoveryKind("test") {
 		t.Fatalf("forwarded protocol recovery = %+v", inner.recovery)
 	}
 	if len(sender.messages) != 0 {

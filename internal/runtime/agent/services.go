@@ -40,10 +40,6 @@ type agentServices struct {
 	// sink receives the turn's typed event stream. Frontends decide how to
 	// render it; never nil because New defaults it to event.Discard.
 	sink event.Sink
-	// warnState rate-limits recovery retries across sessions and processes by an
-	// opaque provider-configuration fingerprint (#7059). The legacy type and file
-	// names preserve the on-disk v2 contract. nil keeps in-memory gating only.
-	warnState *missingReasoningWarnState
 	// gate is the per-call permission gate for both standard and Plan
 	// workflows. nil disables gating entirely.
 	gate              Gate
@@ -98,9 +94,6 @@ type agentServices struct {
 	// just-made memory change into the next turn, so it applies this session
 	// without touching the cache-stable prefix.
 	memQueue memory.Queue
-	// evidenceSeal is where the turn's shadow evidence bundle is sealed; nil
-	// seals nothing. Only the root agent's options carry it.
-	evidenceSeal *EvidenceSeal
 	// pathObserver is told which workspace files this agent's completed tool
 	// calls touched. Sub-agents have none: their reads are not the session's.
 	pathObserver PathObserver
@@ -133,8 +126,6 @@ func newAgentServices(
 		memQueue:          opts.MemoryQueue,
 		writeScheduler:    opts.WriteScheduler,
 		workspaceLease:    opts.WorkspaceLease,
-		warnState:         missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
 		mutationObserver:  opts.MutationObserver,
-		evidenceSeal:      opts.EvidenceSeal,
 	}
 }

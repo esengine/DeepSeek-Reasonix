@@ -237,8 +237,8 @@ func TestEffectYoloKeepsTheSandbox(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(escape) })
 	outside := filepath.Join(escape, "escaped.txt")
-	if !sandbox.WriteProtects(sandbox.Spec{Mode: "enforce"}, escape) {
-		t.Skipf("%s lies under a directory the sandbox leaves writable on this host", escape)
+	if !sandbox.IntegrityEnforced(sandbox.Spec{Mode: "enforce"}) {
+		t.Skip("no sandbox backend enforces writes on this host")
 	}
 	run := buildPostureRun(t, "[sandbox]\nbash = \"enforce\"\n", bashCall("b", "echo x > "+shellQuoteForTest(outside)))
 	run.runIn(t, control.ToolApprovalYolo)

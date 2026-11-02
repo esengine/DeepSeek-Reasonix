@@ -72,29 +72,6 @@ func TestLoadRefusesARecordOfAnotherKind(t *testing.T) {
 	}
 }
 
-// Plan criteria are positional within one plan, so what a revision freezes is
-// the commands the plan names for them: renumbering or rewording the criteria
-// between two plans changes nothing, dropping a command is a relaxation.
-func TestPlanChecksAreFrozenByCommandIdentity(t *testing.T) {
-	first, _ := Accept(nil, "", Derive(Sources{PlanChecks: []string{"go test ./...", "go vet ./..."}}), "t")
-	same := Derive(Sources{PlanChecks: []string{"go vet ./...", "go test ./...", "go test ./..."}})
-	if _, dec := Accept(&first, "r", same, "t"); dec != Unchanged {
-		t.Fatalf("the same commands in another order were %s, want unchanged", dec)
-	}
-	fewer := Derive(Sources{PlanChecks: []string{"go test ./..."}})
-	if _, dec := Accept(&first, "r", fewer, "t"); dec != RelaxationRefused {
-		t.Fatalf("dropping a command was %s, want refused", dec)
-	}
-	dropped := Dropped(&first, fewer)
-	if len(dropped) != 1 || dropped[0].Verifier.Identity != "go vet ./..." || dropped[0].Source != SourcePlan {
-		t.Fatalf("Dropped = %+v, want the vet check", dropped)
-	}
-	relaxed := AcceptRelaxation(first, "r", fewer, "user:plan_approval")
-	if relaxed.Revision != 2 || relaxed.Parent != "r" || relaxed.AcceptedBy != "user:plan_approval" || len(relaxed.Criteria) != 1 {
-		t.Fatalf("relaxed = %+v", relaxed)
-	}
-}
-
 // A plan naming files to touch makes a proven change a deliverable. Losing it
 // — a later plan naming no files — is a relaxation like any other.
 func TestPlanDeliverableIsACriterion(t *testing.T) {

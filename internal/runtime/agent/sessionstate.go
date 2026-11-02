@@ -33,7 +33,6 @@ type sessionRuntime struct {
 	// claimYields are contended write-claim yields awaiting a receipt.
 	claimYields claimYieldLog
 
-	missingReasoning missingReasoningWatch
 	// mode is the model mode the conversation asked for; a new one starts off.
 	mode requestModeState
 	// effort is the depth a session switched to without rebuilding the provider.
@@ -70,7 +69,6 @@ func (r *sessionRuntime) reset(s *sessionstore.Session) {
 	r.cacheHit.Store(0)
 	r.cacheMiss.Store(0)
 	r.output.reset()
-	r.missingReasoning = missingReasoningWatch{}
 	r.mode.reset()
 	r.win.reset()
 }

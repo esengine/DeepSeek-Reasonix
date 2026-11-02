@@ -39,13 +39,11 @@ func (a *Agent) handleSamplingError(
 	ctx context.Context,
 	attemptID string,
 	attempt int,
-	streamSink *deferredStreamSink,
 	frozen *samplingRequest,
 	result, last streamedTurn,
 	billable *provider.Usage,
 ) (retry bool, terminal streamedTurn) {
 	if provider.IsStreamInterrupted(result.err) && attempt < maxSamplingAttempts {
-		streamSink.Discard()
 		reason := provider.StreamInterruptReason(result.err)
 		a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, reason, result.err, 0)
 		delay := streamRetryDelay(attempt)
@@ -60,13 +58,11 @@ func (a *Agent) handleSamplingError(
 		return true, streamedTurn{}
 	}
 	if attempt < maxSamplingAttempts && a.window().recoverContextOverflow(ctx, frozen, result.err) {
-		streamSink.Discard()
 		a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, "context overflow", result.err, 0)
 		return true, streamedTurn{}
 	}
 	// Exhausted retries or non-retryable error: leave the last speculative UI
 	// visible (no discard) so LocalOnly can mirror it.
-	streamSink.Flush()
 	if frozen != nil && frozen.overflowRecovery != nil && last.err != nil {
 		last.err = fmt.Errorf("%w (context recovery did not help: %w)", last.err, frozen.overflowRecovery)
 	}

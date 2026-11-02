@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/runtime/contract"
 	"reasonix/internal/runtime/plancontract"
 	"reasonix/internal/safety/evidence"
 )
@@ -96,124 +95,6 @@ func TestAnUnclassifiedPlanCheckSettlesItsCriterion(t *testing.T) {
 	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: `python -c "import pay"`, Mutation: true, Success: true})
 	if outstanding := a.outstandingPlanCriteria(); len(outstanding) != 0 {
 		t.Fatalf("outstanding = %v, want the check that ran after the edit to settle its criteria", outstanding)
-	}
-}
-
-// The sealed verdict answers a frozen plan check against the same baseline.
-func TestAnUnclassifiedPlanCheckSettlesItsFrozenCriterion(t *testing.T) {
-	plan := checkedPlan()
-	a := rejectionAgent(t, &plan)
-	command := `python -c "import pay"`
-	a.task.ledger.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, MutationEvidence: evidence.MutationProven, Write: true, Success: true, Paths: []string{"pay.go"}})
-	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: command, Mutation: true, Success: true})
-	got := a.frozenResults([]contract.Criterion{{ID: "command@x", Source: contract.SourcePlan, Required: true,
-		Verifier: contract.Verifier{Kind: contract.VerifierCommand, Identity: evidence.VerificationIdentity(command)}}})
-	if len(got) != 1 || !got[0].Satisfied {
-		t.Fatalf("frozen = %+v, want the check that ran after the edit satisfied", got)
-	}
-}
-
-// A plan naming files to change holds an answer that changed nothing, and the
-// hold lifts on each legitimate end: the change itself, a declared blocker, a
-// wait on the user, or a change a restart carried in.
-func TestAPlanNamingFilesHoldsAnAnswerThatChangedNothing(t *testing.T) {
-	held := func(a *Agent) bool {
-		return strings.Contains(a.finalReadinessCheckFor().reason, "names files to change")
-	}
-	plan := deliverablePlan()
-	if !held(rejectionAgent(t, &plan)) {
-		t.Fatal("an answer that changed nothing finished under a plan naming files to change")
-	}
-	for name, r := range map[string]evidence.Receipt{
-		"changed":  {ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"parser.go"}},
-		"blocked":  {ToolName: "conclude_blocked", Success: true},
-		"awaiting": {ToolName: evidence.UserGateTool, Success: true, Args: []byte(`{"need":"the sample file"}`)},
-	} {
-		a := rejectionAgent(t, &plan)
-		a.task.ledger.Record(r)
-		if held(a) {
-			t.Fatalf("%s: the deliverable still held the answer", name)
-		}
-	}
-	analysis := deliverablePlan()
-	analysis.Steps[0].CandidateFiles = nil
-	if held(rejectionAgent(t, &analysis)) {
-		t.Fatal("a plan naming no files was held for a change")
-	}
-	a := rejectionAgent(t, &plan)
-	if got := a.appendPlanDeliverableGap(&finalReadinessCheck{}, nil, true); len(got) != 0 {
-		t.Fatalf("a change a restart carried in still owed the deliverable: %v", got)
-	}
-}
-
-// What a run of exactly the plan's check writes is the check's own residue — an
-// import writes bytecode, and the scan proves it — so it does not void the check.
-// A run that does more than the check still counts as a change.
-func TestAPlanCheckDoesNotVoidItselfByWhatItWrites(t *testing.T) {
-	const check = `python -c "import pay"`
-	plan := checkedPlan()
-	plan.Steps[0].Verification = []plancontract.Verification{{Command: check}}
-	edit := evidence.Receipt{ToolName: "edit_file", Mutation: true, MutationEvidence: evidence.MutationProven, Write: true, Success: true, Paths: []string{"pay.py"}}
-	frozen := []contract.Criterion{{ID: "command@x", Source: contract.SourcePlan, Required: true,
-		Verifier: contract.Verifier{Kind: contract.VerifierCommand, Identity: evidence.VerificationIdentity(check)}}}
-
-	a := rejectionAgent(t, &plan)
-	a.task.ledger.Record(edit)
-	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: check, Mutation: true, MutationEvidence: evidence.MutationProven, Success: true, PathsComplete: true, Paths: []string{"__pycache__/pay.cpython-312.pyc"}, Created: []string{"__pycache__/pay.cpython-312.pyc"}})
-	if outstanding := a.outstandingPlanCriteria(); len(outstanding) != 0 {
-		t.Fatalf("outstanding = %v, want the check's own bytecode not to void it", outstanding)
-	}
-	if got := a.frozenResults(frozen); !got[0].Satisfied {
-		t.Fatalf("frozen = %+v, want the check satisfied", got)
-	}
-
-	b := rejectionAgent(t, &plan)
-	b.task.ledger.Record(edit)
-	b.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: check + ` && sed -i s/a/b/ pay.py`, Mutation: true, MutationEvidence: evidence.MutationProven, Success: true, Paths: []string{"pay.py"}})
-	if len(b.outstandingPlanCriteria()) == 0 {
-		t.Fatal("a run that rewrote source beside the check settled the check it ran before the rewrite")
-	}
-}
-
-// A check's own residue is not the change a plan naming files is owed.
-func TestAPlanChecksResidueIsNotTheDeliverable(t *testing.T) {
-	const check = `python -c "import parser"`
-	plan := deliverablePlan()
-	plan.Steps[0].Verification = []plancontract.Verification{{Command: check}}
-	a := rejectionAgent(t, &plan)
-	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: check, Mutation: true, MutationEvidence: evidence.MutationProven, Success: true, PathsComplete: true, Paths: []string{"__pycache__/parser.cpython-312.pyc"}, Created: []string{"__pycache__/parser.cpython-312.pyc"}})
-	if !strings.Contains(a.finalReadinessCheckFor().reason, "names files to change") {
-		t.Fatal("the bytecode a check wrote stood in for the planned change")
-	}
-}
-
-// Only a check's own runs are left out of its baseline: another check that
-// rewrites a file voids a pass taken before it, and a check that never ran is
-// not settled because the only write came from a different check.
-func TestAnotherPlanChecksWriteVoidsAPass(t *testing.T) {
-	const verify, build = "sh verify.sh", "sh build.sh"
-	plan := checkedPlan()
-	plan.Steps[0].Verification = []plancontract.Verification{{Command: verify}, {Command: build}}
-	cmd := func(id, c string) contract.Criterion {
-		return contract.Criterion{ID: id, Source: contract.SourcePlan, Required: true,
-			Verifier: contract.Verifier{Kind: contract.VerifierCommand, Identity: evidence.VerificationIdentity(c)}}
-	}
-	frozen := []contract.Criterion{cmd("command@verify", verify), cmd("command@build", build)}
-
-	a := rejectionAgent(t, &plan)
-	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: verify, Success: true})
-	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: build, Mutation: true, MutationEvidence: evidence.MutationProven, Success: true, PathsComplete: true, Paths: []string{"out.txt"}, Created: []string{"out.txt"}})
-	if joined := strings.Join(a.outstandingPlanCriteria(), "; "); !strings.Contains(joined, "run "+verify) {
-		t.Fatalf("outstanding = %q, want verify.sh owed after build.sh rewrote out.txt", joined)
-	}
-	if got := a.frozenResults(frozen); got[0].Satisfied || !got[1].Satisfied {
-		t.Fatalf("frozen = %+v, want verify.sh stale and build.sh settled", got)
-	}
-
-	b := rejectionAgent(t, &plan)
-	b.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: build, Mutation: true, MutationEvidence: evidence.MutationProven, Success: true, PathsComplete: true, Paths: []string{"out.txt"}, Created: []string{"out.txt"}})
-	if got := b.frozenResults(frozen); got[0].Satisfied {
-		t.Fatalf("frozen = %+v, want verify.sh unsettled: it never ran and build.sh changed out.txt", got)
 	}
 }
 

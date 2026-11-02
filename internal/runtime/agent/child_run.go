@@ -72,9 +72,6 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	if kind := opts.RequireReviewReportKind; kind != "" {
 		prompt = prompt + "\n\n" + reviewReportTaskContract(kind)
 	}
-	// Nested reasoning stays isolated; the parent consumes only final Content.
-	// Require it so a reasoning-only stop cannot fall back to older tool text.
-	opts.RequireVisibleFinal = true
 	ctx = WithoutRunTimeSink(ctx)
 	sub := newDelegatedAgent(ctx, prov, reg, sess, opts, sink)
 	// One defer: this returns from a salvage, a review failure, a provider
@@ -151,9 +148,6 @@ func NewPlannerAgent(prov provider.Provider, reg *tool.Registry, sess *sessionst
 	opts.EventSource = event.UsageSourcePlanner
 	opts.ReadOnlyExecution = true
 	opts.PlannerMCPExecution = true
-	// The coordinator needs visible plan text to hand off to the executor;
-	// reasoning shown in a frontend is not a substitute for that contract.
-	opts.RequireVisibleFinal = true
 	// Keep construction-time filter for ordinary tools; use_capability stays
 	// because it is ReadOnly. Direct mcp__* tools are already excluded by
 	// PlannerToolRegistry. Dynamic MCP targets are re-checked after resolve.

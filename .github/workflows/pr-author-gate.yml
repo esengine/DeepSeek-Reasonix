@@ -1,0 +1,27 @@
+name: PR author gate
+
+# Pull requests are limited to maintainers and the logins in .github/pr-authors.txt.
+# This runs in the base repository's context, checks out the base branch only, and
+# never executes pull-request code; the allowlist it reads is the base branch's.
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-author-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: node scripts/pr-author-gate.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

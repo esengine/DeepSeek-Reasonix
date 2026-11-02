@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"reasonix/internal/runtime/plancontract"
@@ -223,4 +224,8 @@ func (a *Agent) mutationEscapesPlan(toolName string, args json.RawMessage) bool 
 		}
 	}
 	return false
+}
+
+func planChangesOf(plan *plancontract.Plan) bool {
+	return plan != nil && slices.ContainsFunc(plan.Steps, func(s plancontract.Step) bool { return len(s.CandidateFiles) > 0 })
 }

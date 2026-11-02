@@ -167,7 +167,6 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	durations := make([]int64, len(calls))
 	startedAt := make([]int64, len(calls))
 	completedStepInBatch := false
-	receiptMark := a.ledgerMark()
 	surfaceWriters := make([]bool, len(calls))
 	run := func(i int) {
 		t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
@@ -355,7 +354,6 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		a.emitToolCard(ctx, c, tr, o.todoEcho)
 		a.emitToolOutcomeWarnings(o)
 	}
-	a.observeOutcomeShadow(cancelled, receiptMark)
 	images := make([][]string, len(calls))
 	videos := make([][]provider.VideoRef, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))

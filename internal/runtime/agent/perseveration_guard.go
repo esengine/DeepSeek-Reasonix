@@ -194,7 +194,6 @@ func (a *Agent) settlePerseveration(ctx context.Context, state *turnRuntime, str
 	}
 	if streamed.perseverationDetected {
 		if a.progressWatchConfig().Pause {
-			a.emitTurnShadows(ctx, a.turn.turnInput, true)
 			return false, newPerseverationPause("progress_watch.pause",
 				"the model got stuck repeating the same text", "turn off progress_watch.pause")
 		}

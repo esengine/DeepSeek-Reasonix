@@ -73,8 +73,6 @@ type Options struct {
 	// unless a caller says otherwise, so a two-model stream says which model
 	// wrote each one rather than leaving it to be inferred.
 	EventSource string
-	// RequireVisibleFinal makes internal callers reject reasoning-only responses.
-	RequireVisibleFinal bool
 	// Gate is the per-call permission gate. nil disables gating.
 	Gate Gate
 	// CheckTargetAccess applies workspace path policy before hooks or previews.
@@ -114,13 +112,6 @@ type Options struct {
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
 	Hooks ToolHooks
-
-	// MissingReasoningWarnStateDir, when non-empty, points at the shared
-	// directory where missing tool-call thinking recovery retries are gated by
-	// opaque provider-configuration fingerprint (#7059). The field name is kept
-	// for source compatibility. Boot always supplies it; direct construction
-	// with an empty value keeps in-memory gating.
-	MissingReasoningWarnStateDir string
 
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
@@ -168,10 +159,6 @@ type Options struct {
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks         []instruction.VerifyCheck
 	ProjectSensitivePaths []string
-
-	// EvidenceSeal seals each turn's shadow evidence bundle into Trusted Host
-	// State. nil seals nothing.
-	EvidenceSeal *EvidenceSeal
 
 	// DeliveryProfile enforces acceptance criteria before mutations and requires
 	// post-change review, verification, and evidence-backed sign-off before a

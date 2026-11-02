@@ -1,9 +1,7 @@
 package agent
 
 import (
-	"reasonix/internal/runtime/completion"
 	"reasonix/internal/runtime/taskpolicy"
-	"reasonix/internal/runtime/verdict"
 
 	"reasonix/internal/safety/evidence"
 )
@@ -40,9 +38,6 @@ type turnRuntime struct {
 	// the ledger whenever a live view is needed, so one replay serves both the
 	// per-round observation and the end-of-turn record.
 	turnInput string
-	// completion is the report built as the turn ends; the host reads it while
-	// emitting TurnDone, before the next turn resets this state.
-	completion *completion.Report
 	// deliveryCriteriaEstablished may inherit an unfinished canonical task list
 	// on continuation, but the flag itself is recomputed every turn.
 	deliveryCriteriaEstablished bool
@@ -72,11 +67,6 @@ type turnRuntime struct {
 	reviewWarnings []string
 	// lastReadiness is the verdict the turn last asked to stop under.
 	lastReadiness *finalReadinessCheck
-	// snapshot is the workspace as this turn found it; nil when unobserved.
-	snapshot *turnSnapshot
-	// outcome is the host-evidence verdict sealed for this turn; nil when no
-	// contract revision was in force to answer from.
-	outcome *verdict.Result
 	// uncountedCheckNoted marks that the model was told this turn why a command
 	// it ran was not a check; once a turn is enough to be learned.
 	uncountedCheckNoted bool

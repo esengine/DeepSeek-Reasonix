@@ -140,7 +140,7 @@ func TestSessionChainDeliversAudits(t *testing.T) {
 	recorder := &capturingSink{}
 	chain := Coalesce(Sync(NewCostQuoteSink(recorder, nil)), 5*time.Millisecond)
 
-	RecordProtocolRecovery(chain, ProtocolRecoveryAudit{Kind: ProtocolRecoveryMissingReasoningRetryAttempted})
+	RecordProtocolRecovery(chain, ProtocolRecoveryAudit{Kind: ProtocolRecoveryKind("test")})
 
 	if len(recorder.recorded) != 1 || recorder.recorded[0] != "ProtocolRecovery" {
 		t.Fatalf("protocol recovery never reached the recorder: %v", recorder.recorded)

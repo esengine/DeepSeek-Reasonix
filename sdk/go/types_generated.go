@@ -217,22 +217,21 @@ type InitializeResult struct {
 
 // ProviderDescriptor is a generated Extension Protocol v2 wire DTO.
 type ProviderDescriptor struct {
-	Ref                            string   `json:"ref" validate:"nonempty"`
-	DisplayName                    string   `json:"displayName,omitempty"`
-	Model                          string   `json:"model,omitempty"`
-	ContextWindow                  int      `json:"contextWindow,omitempty" validate:"min=0"`
-	PricingCurrency                string   `json:"pricingCurrency,omitempty"`
-	CacheHitPerMillion             float64  `json:"cacheHitPerMillion,omitempty" validate:"min=0"`
-	InputPerMillion                float64  `json:"inputPerMillion,omitempty" validate:"min=0"`
-	OutputPerMillion               float64  `json:"outputPerMillion,omitempty" validate:"min=0"`
-	Vision                         bool     `json:"vision,omitempty"`
-	Tools                          bool     `json:"tools,omitempty"`
-	Reasoning                      bool     `json:"reasoning,omitempty"`
-	Efforts                        []string `json:"efforts,omitempty"`
-	DefaultEffort                  string   `json:"defaultEffort,omitempty"`
-	ToolCallReasoning              bool     `json:"toolCallReasoning,omitempty"`
-	ReasoningRoundTrip             bool     `json:"reasoningRoundTrip,omitempty"`
-	WarnOnMissingToolCallReasoning bool     `json:"warnOnMissingToolCallReasoning,omitempty"`
+	Ref                string   `json:"ref" validate:"nonempty"`
+	DisplayName        string   `json:"displayName,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	ContextWindow      int      `json:"contextWindow,omitempty" validate:"min=0"`
+	PricingCurrency    string   `json:"pricingCurrency,omitempty"`
+	CacheHitPerMillion float64  `json:"cacheHitPerMillion,omitempty" validate:"min=0"`
+	InputPerMillion    float64  `json:"inputPerMillion,omitempty" validate:"min=0"`
+	OutputPerMillion   float64  `json:"outputPerMillion,omitempty" validate:"min=0"`
+	Vision             bool     `json:"vision,omitempty"`
+	Tools              bool     `json:"tools,omitempty"`
+	Reasoning          bool     `json:"reasoning,omitempty"`
+	Efforts            []string `json:"efforts,omitempty"`
+	DefaultEffort      string   `json:"defaultEffort,omitempty"`
+	ToolCallReasoning  bool     `json:"toolCallReasoning,omitempty"`
+	ReasoningRoundTrip bool     `json:"reasoningRoundTrip,omitempty"`
 }
 
 // UIActionDecl is a generated Extension Protocol v2 wire DTO.

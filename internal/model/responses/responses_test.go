@@ -593,12 +593,11 @@ func TestVendorCapabilityTableCoversKnownEndpoints(t *testing.T) {
 		url, vendor          string
 		stateless, reasoning bool
 		ignoresTemp          bool
-		singleSegment        bool
 	}{
-		{"https://api.deepseek.com", "deepseek", true, true, false, false},
-		{"https://api.xiaomimimo.com/v1", "mimo", true, true, true, true},
-		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", false, false, false, false},
-		{"https://example.com/v1", "", false, false, false, false},
+		{"https://api.deepseek.com", "deepseek", true, true, false},
+		{"https://api.xiaomimimo.com/v1", "mimo", true, true, true},
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", false, false, false},
+		{"https://example.com/v1", "", false, false, false},
 	}
 	for _, test := range tests {
 		vendor := DetectVendor(test.url)
@@ -614,9 +613,6 @@ func TestVendorCapabilityTableCoversKnownEndpoints(t *testing.T) {
 		}
 		if caps.ignoresTemperature != test.ignoresTemp {
 			t.Errorf("capabilities(%q).ignoresTemperature = %v, want %v", vendor, caps.ignoresTemperature, test.ignoresTemp)
-		}
-		if caps.singleSegmentReasoning != test.singleSegment {
-			t.Errorf("capabilities(%q).singleSegmentReasoning = %v, want %v", vendor, caps.singleSegmentReasoning, test.singleSegment)
 		}
 	}
 }
@@ -676,19 +672,6 @@ func TestRequiresToolCallReasoningForStatelessVendors(t *testing.T) {
 	}
 }
 
-func TestMissingToolCallReasoningWarningFingerprintTracksResponsesConfiguration(t *testing.T) {
-	first := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: "high"})
-	same := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com/", Model: "deepseek-v4-flash", Effort: "high"})
-	changedEffort := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: "max"})
-	got := provider.MissingToolCallReasoningWarningFingerprint(first)
-	if got != provider.MissingToolCallReasoningWarningFingerprint(same) {
-		t.Fatal("equivalent Responses configurations produced different fingerprints")
-	}
-	if got == provider.MissingToolCallReasoningWarningFingerprint(changedEffort) {
-		t.Fatal("Responses effort change did not re-key the warning fingerprint")
-	}
-}
-
 func TestReasoningIDRoundTripsThroughInput(t *testing.T) { // The OpenAI Responses schema marks Reasoning.id required. A message
 	// carrying a captured ReasoningID must echo it back on the input
 	// reasoning item (and omit it when absent).
@@ -733,31 +716,6 @@ func TestReasoningIDRoundTripsThroughInput(t *testing.T) { // The OpenAI Respons
 				t.Fatalf("reasoning id must be omitted when not captured, got %#v", item["id"])
 			}
 		}
-	}
-}
-
-func TestWarnOnMissingToolCallReasoningIsModelScoped(t *testing.T) {
-	// DeepSeek pro-tier: warns (endpoint reliably emits tool-call reasoning).
-	pro := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"})
-	if !provider.WarnOnMissingToolCallReasoning(pro) {
-		t.Fatal("DeepSeek pro must warn on missing tool-call reasoning")
-	}
-	// DeepSeek flash-tier: no warning (flash does not emit tool-call reasoning).
-	flash := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"})
-	if provider.WarnOnMissingToolCallReasoning(flash) {
-		t.Fatal("DeepSeek flash must not warn on missing tool-call reasoning")
-	}
-	// MiMo: preserves reasoning on replay but does not guarantee it every
-	// round — a missing chain-of-thought is endpoint-conditional, not a
-	// degradation worth a warning (observed: mimo-v2.5-pro tool-call turn
-	// with empty reasoning).
-	mimo := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro"})
-	if provider.WarnOnMissingToolCallReasoning(mimo) {
-		t.Fatal("MiMo must not warn on missing tool-call reasoning (endpoint-conditional)")
-	}
-	other := New(Config{Name: "other", BaseURL: "https://example.com", Model: "m"})
-	if provider.WarnOnMissingToolCallReasoning(other) {
-		t.Fatal("unknown Responses endpoint must not warn on missing tool-call reasoning")
 	}
 }
 
@@ -1082,28 +1040,6 @@ func TestConversationDigestMirrorsWireKnobs(t *testing.T) {
 	ds.caps = capabilitiesFor("dashscope")
 	if ds.caps.summary == summaryEcho && ds.conversationDigest(messages) == plain.conversationDigest(messages) {
 		t.Fatal("dashscope summary must change the digest (wire sends summary)")
-	}
-}
-
-// TestSingleSegmentReasoningWiredIntoWarningPolicy：singleSegmentReasoning
-// capability 驱动警告策略（评审 #7234 Copilot：wire into behavior）。
-func TestSingleSegmentReasoningWiredIntoWarningPolicy(t *testing.T) {
-	cases := []struct {
-		name, baseURL, model string
-		want                 bool
-	}{
-		{"mimo 单段不警告", "https://api.xiaomimimo.com/v1", "mimo-v2.5-pro", false},
-		{"dashscope 无回传契约不警告", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3", false},
-		{"deepseek pro 多段警告", "https://api.deepseek.com", "deepseek-v4-pro", true},
-		{"deepseek flash 豁免", "https://api.deepseek.com", "deepseek-v4-flash", false},
-	}
-	for _, tc := range cases {
-		pro := New(Config{Name: "t", APIKey: "k", BaseURL: tc.baseURL, Model: tc.model}).(interface {
-			WarnOnMissingToolCallReasoning() bool
-		})
-		if got := pro.WarnOnMissingToolCallReasoning(); got != tc.want {
-			t.Errorf("%s: WarnOnMissingToolCallReasoning = %v, want %v", tc.name, got, tc.want)
-		}
 	}
 }
 

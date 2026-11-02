@@ -49,7 +49,7 @@ var methodFixtures = map[Method]struct {
 				PricingCurrency: "$", CacheHitPerMillion: 0.1, InputPerMillion: 1, OutputPerMillion: 2,
 				Vision: true, Tools: true, Reasoning: true,
 				Efforts: []string{"low", "high"}, DefaultEffort: "low",
-				ToolCallReasoning: true, ReasoningRoundTrip: true, WarnOnMissingToolCallReasoning: true,
+				ToolCallReasoning: true, ReasoningRoundTrip: true,
 			}},
 			UIActions:          []UIActionDecl{{ActionID: "acme.refresh", Label: "Refresh"}},
 			StateSchemaVersion: 2,

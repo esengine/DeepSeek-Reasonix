@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/runtime/taskcontract"
 	"reasonix/internal/safety/evidence"
 )
 
@@ -85,34 +84,6 @@ func TestReadinessAcceptsBlockedOnlyWithAnActualCheck(t *testing.T) {
 	}
 }
 
-func TestBlockedCriterionResolvesContractToBlocked(t *testing.T) {
-	c := taskcontract.New("make the suite pass")
-	c.AddRequirement("r1", "DefaultLimit satisfies both suites", true)
-	resolveBlockedCriteria(c, evidence.Receipt{
-		ToolName: "conclude_blocked",
-		Success:  true,
-		Args:     json.RawMessage(`{"blocker":"mutually exclusive","criterion_id":"r1"}`),
-	})
-	if got := c.GoalVerdict(); got != taskcontract.VerdictBlocked {
-		t.Fatalf("verdict = %v, want blocked", got)
-	}
-}
-
 // A rejected call proves nothing, so it must leave the contract alone. A call
 // the host accepted is a fact about the task even when it names no single
 // criterion — the turn is stuck either way.
-func TestBlockedContractIgnoresRejectedCallsButNotUncitedOnes(t *testing.T) {
-	rejected := taskcontract.New("make the suite pass")
-	rejected.AddRequirement("r1", "DefaultLimit satisfies both suites", true)
-	resolveBlockedCriteria(rejected, evidence.Receipt{ToolName: "conclude_blocked", Success: false, Args: json.RawMessage(`{"criterion_id":"r1"}`)})
-	if got := rejected.GoalVerdict(); got == taskcontract.VerdictBlocked {
-		t.Fatal("a rejected call must not block the contract")
-	}
-
-	uncited := taskcontract.New("make the suite pass")
-	uncited.AddRequirement("r1", "DefaultLimit satisfies both suites", true)
-	resolveBlockedCriteria(uncited, evidence.Receipt{ToolName: "conclude_blocked", Success: true, Args: json.RawMessage(`{"blocker":"x"}`)})
-	if got := uncited.GoalVerdict(); got != taskcontract.VerdictBlocked {
-		t.Fatalf("verdict = %v, want blocked even without a criterion id", got)
-	}
-}

@@ -284,10 +284,6 @@ type Agent struct {
 	progressWatch     atomic.Pointer[ProgressWatch]
 	reasoningLanguage atomic.Value // string: auto|zh|en
 
-	// unwrittenResolve is the resolve watermark a failed state write still owes.
-	// It outlives the conversation, which is why it is not in sessionRuntime.
-	unwrittenResolve unwrittenResolve
-
 	// planRuntime is the plan lifecycle: which phase, under which authority
 	// epoch. Replaceable, so a controller can hand several agents the one
 	// lifecycle they share. Never a permission or sandbox boundary.
@@ -806,15 +802,6 @@ func usageSourceOrDefault(source, fallback string) string {
 	return fallback
 }
 
-// missingReasoningWarnStateFor returns nil when no state dir is configured, so
-// direct Agent construction keeps the historical once-per-session notice scope.
-func missingReasoningWarnStateFor(dir string) *missingReasoningWarnState {
-	if strings.TrimSpace(dir) == "" {
-		return nil
-	}
-	return newMissingReasoningWarnState(dir)
-}
-
 // reserveParentWrite holds write claims for the duration of a parent-agent
 // write tool call. Returns a no-op release when reservation is not needed
 // (subagent, read-only, no scheduler, or non-write tool).
@@ -899,9 +886,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 
 	_, state := a.beginRunTurn(ctx, input)
 	ctx = a.bindRootTokenBudget(ctx, state)
-	if state.snapshot != nil {
-		defer state.snapshot.cancel()
-	}
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
 	state.runLimitHostOwned = runLimitHostOwned
@@ -1121,28 +1105,6 @@ Use your available tools now to carry out the task. If carrying out the planner'
 
 func hasVisibleFinalAnswer(text string) bool {
 	return strings.TrimSpace(text) != ""
-}
-
-// reasoningOnlyFinishHonoured reports whether the model finished with a stop
-// signal but placed its answer in the reasoning stream rather than the content
-// block. DeepSeek thinking mode does this occasionally: it streams a long
-// reasoning_content, then returns finish_reason="stop" with an empty content.
-// The model has signalled completion, so the host accepts the turn instead of
-// retrying and forcing another expensive thinking round.
-//
-// The accept is scoped to DeepSeek thinking mode (ToolCallReasoningPolicy):
-// for other providers a reasoning-only turn keeps the empty-final retry
-// safety net — local <think>-tag models often recover a visible answer on
-// the second attempt, and a gateway that mislabels truncation as "stop"
-// must not have a degenerate turn committed as the final answer.
-func reasoningOnlyFinishHonoured(p provider.Provider, u *provider.Usage, reasoning string) bool {
-	if !provider.RequiresToolCallReasoning(p) {
-		return false
-	}
-	if u == nil || u.FinishReason != "stop" {
-		return false
-	}
-	return strings.TrimSpace(reasoning) != ""
 }
 
 func emptyFinalNotice() string {

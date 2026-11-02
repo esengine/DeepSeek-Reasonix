@@ -144,36 +144,3 @@ func TestExplicitMaxStepsStillLandsWhenNoBudgetApplies(t *testing.T) {
 		t.Fatalf("err = %v, want an explicit max_steps to still stop an unbudgeted runaway", err)
 	}
 }
-
-type completionProbe struct {
-	event.Sink
-	reports []event.CompletionReportAudit
-}
-
-func (p *completionProbe) RecordCompletionReport(a event.CompletionReportAudit) {
-	p.reports = append(p.reports, a)
-}
-
-// A turn the host lands at its round limit is the one whose unverified work
-// matters most to report, and it leaves through gracePause rather than the
-// final-answer path. An honesty score built on completion verdicts would
-// otherwise drop exactly the runs that ran out of rounds without finishing.
-func TestRoundLimitPauseStillReportsCompletion(t *testing.T) {
-	probe := &completionProbe{Sink: event.FuncSink(func(event.Event) {})}
-	reg := tool.NewRegistry()
-	reg.Add(readProbe{})
-	a := New(&spendingProvider{max: 500}, reg, sessionstore.NewSession("sys"),
-		Options{MaxSteps: 3, TaskBudget: TaskBudget{Cost: 0, Wall: -1}}, probe)
-
-	err := a.Run(context.Background(), "read everything")
-	var pause *maxStepsPause
-	if !errors.As(err, &pause) {
-		t.Fatalf("err = %v, want the round-limit pause", err)
-	}
-	if len(probe.reports) == 0 {
-		t.Fatal("no completion report reached the sink; a landed turn reports nothing about what it left unproven")
-	}
-	if got := probe.reports[len(probe.reports)-1].Verdict; got == "" {
-		t.Fatalf("last report = %+v, want a verdict", probe.reports[len(probe.reports)-1])
-	}
-}

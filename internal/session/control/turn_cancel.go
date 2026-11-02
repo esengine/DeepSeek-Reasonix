@@ -102,7 +102,6 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 		CheckpointTurn: c.validatedCheckpointTurn(completion),
 		WorkDurationMs: turnWorkMs(err, cancelRequested, completion),
 		WorkStartedAt:  turnWorkStartedAt(err, cancelRequested, completion),
-		Receipt:        c.executor.CompletionReceipt(),
 		ItemID:         activeInboxID,
 	}
 	var readinessErr *agent.FinalReadinessError

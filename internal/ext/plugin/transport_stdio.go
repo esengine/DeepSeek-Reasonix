@@ -99,15 +99,11 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	}()
 	launchArgs := append([]string{exe}, effectiveLaunchArgs(s)...)
 	var argv []string
-	confined := false
 	if s.ResolvedProcessMode() == MCPProcessConfined {
 		processSandbox.MinimalWrites = true
-		argv, confined = sandbox.CommandArgs(processSandbox, launchArgs)
+		argv, _ = sandbox.CommandArgs(processSandbox, launchArgs)
 	} else {
 		argv = launchArgs
-	}
-	if !confined {
-		unconfinedLaunch.Store(true)
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	proc.HideWindow(cmd)

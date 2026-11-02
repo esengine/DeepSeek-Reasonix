@@ -90,16 +90,6 @@ func estimateFailedAttemptUsage(usage *provider.Usage, frozen samplingRequest, r
 	return est
 }
 
-// usageReasoningTokens reports the thinking tokens one attempt was billed for.
-// Zero also covers providers that never report the split, which keeps the
-// missing-reasoning classifier from calling a silent model a lost field.
-func usageReasoningTokens(u *provider.Usage) int {
-	if u == nil {
-		return 0
-	}
-	return u.ReasoningTokens
-}
-
 func sawSpeculativeSamplingOutput(result streamedTurn) bool {
 	return result.text != "" || result.reasoning != "" || result.maxArgChars > 0 ||
 		result.partialToolStarted || len(result.calls) > 0 || len(result.partialCalls) > 0

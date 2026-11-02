@@ -515,7 +515,6 @@ func TestProviderReasoningPoliciesComeFromDescriptor(t *testing.T) {
 	descriptor := demoDescriptor()
 	descriptor.ToolCallReasoning = true
 	descriptor.ReasoningRoundTrip = true
-	descriptor.WarnOnMissingToolCallReasoning = true
 	fc := newFakeClient("demo", descriptor)
 	r := testResolver(t, baseCatalog(), nil, fc)
 
@@ -523,11 +522,8 @@ func TestProviderReasoningPoliciesComeFromDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if !provider.RequiresToolCallReasoning(p) || !provider.RequiresReasoningRoundTrip(p) || !provider.WarnOnMissingToolCallReasoning(p) {
+	if !provider.RequiresToolCallReasoning(p) || !provider.RequiresReasoningRoundTrip(p) {
 		t.Fatal("descriptor reasoning policies did not propagate")
-	}
-	if identity := p.(interface{ MissingToolCallReasoningWarningIdentity() string }).MissingToolCallReasoningWarningIdentity(); !strings.Contains(identity, "demo") || !strings.Contains(identity, "plugin/demo/fake/x") {
-		t.Fatalf("warning identity = %q", identity)
 	}
 }
 

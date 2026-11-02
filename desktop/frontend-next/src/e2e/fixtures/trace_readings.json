@@ -216,6 +216,18 @@
      "attempt": 1,
      "max": 6
     }
+   },
+   {
+    "kind": "turn_done",
+    "err": "final-answer readiness failed 1 times: the verification owed after the latest write is still owed, as already explained: run a relevant verification command after it",
+    "outcome": "final_readiness",
+    "readiness": {
+     "attempts": 1,
+     "missing": [
+      "verification"
+     ]
+    },
+    "checkpointTurn": 0
    }
   ],
   "replay": [
@@ -399,6 +411,18 @@
      "attempt": 1,
      "max": 6
     }
+   },
+   {
+    "kind": "turn_done",
+    "err": "final-answer readiness failed 1 times: the verification owed after the latest write is still owed, as already explained: run a relevant verification command after it",
+    "outcome": "final_readiness",
+    "readiness": {
+     "attempts": 1,
+     "missing": [
+      "verification"
+     ]
+    },
+    "checkpointTurn": 0
    }
   ]
  },

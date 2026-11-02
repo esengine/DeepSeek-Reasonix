@@ -6,8 +6,6 @@ package provider
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -582,59 +580,6 @@ func RequiresReasoningRoundTrip(p Provider) bool {
 	}
 	policy, ok := p.(ReasoningRoundTripPolicy)
 	return ok && policy.RequiresReasoningRoundTrip()
-}
-
-// MissingToolCallReasoningWarningPolicy is optionally implemented by providers
-// whose replay protocol requires reasoning_content, but whose active model may
-// not reliably emit it. The legacy Warning name is retained for source
-// compatibility; the agent now uses this policy for silent bounded recovery and
-// emits no user-visible protocol notice.
-type MissingToolCallReasoningWarningPolicy interface {
-	WarnOnMissingToolCallReasoning() bool
-}
-
-// MissingToolCallReasoningWarningIdentityPolicy optionally supplies the stable,
-// non-credential configuration identity used to rate-limit missing-reasoning
-// recovery attempts. The legacy name preserves adapters and persisted state.
-// Implementations may include adapter kind, endpoint, model, and thinking
-// controls; the raw identity never leaves memory and is hashed before
-// persistence.
-type MissingToolCallReasoningWarningIdentityPolicy interface {
-	MissingToolCallReasoningWarningIdentity() string
-}
-
-// WarnOnMissingToolCallReasoning reports whether a tool_calls turn with empty
-// reasoning_content should enter silent recovery. Its legacy name is preserved
-// for provider implementations compiled against the original diagnostic API.
-func WarnOnMissingToolCallReasoning(p Provider) bool {
-	if nilutil.IsNil(p) {
-		return false
-	}
-	policy, ok := p.(MissingToolCallReasoningWarningPolicy)
-	if ok {
-		return policy.WarnOnMissingToolCallReasoning()
-	}
-	return RequiresToolCallReasoning(p)
-}
-
-// MissingToolCallReasoningWarningFingerprint returns an opaque stable key for
-// one provider configuration's recovery cooldown. Concrete adapters distinguish
-// endpoint/model/protocol changes; providers without the optional policy retain
-// a safe type-and-name fallback. The legacy name preserves the on-disk state
-// contract. The digest prevents local state from exposing raw endpoints or
-// model identifiers.
-func MissingToolCallReasoningWarningFingerprint(p Provider) string {
-	if nilutil.IsNil(p) {
-		return ""
-	}
-	identity := fmt.Sprintf("%T\x00%s", p, strings.TrimSpace(p.Name()))
-	if policy, ok := p.(MissingToolCallReasoningWarningIdentityPolicy); ok {
-		if configured := strings.TrimSpace(policy.MissingToolCallReasoningWarningIdentity()); configured != "" {
-			identity = configured
-		}
-	}
-	digest := sha256.Sum256([]byte(identity))
-	return hex.EncodeToString(digest[:])
 }
 
 // AuthError reports that a provider rejected the API key (HTTP 401/403). Its

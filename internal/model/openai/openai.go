@@ -314,36 +314,6 @@ func (c *client) RequiresReasoningRoundTrip() bool {
 	return c != nil && (c.minimax || c.kimiK3 || c.glmThinkingEnabled())
 }
 
-func (c *client) WarnOnMissingToolCallReasoning() bool {
-	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model, c.thinkingType)
-}
-
-func expectsDeepSeekToolCallReasoning(model, thinkingType string) bool {
-	if strings.EqualFold(strings.TrimSpace(thinkingType), "enabled") {
-		return true
-	}
-	model = strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(model, "deepseek-v4-flash") ||
-		strings.Contains(model, "deepseek-v4-pro") ||
-		strings.Contains(model, "deepseek-v3.2") ||
-		strings.Contains(model, "deepseek-reasoner") ||
-		strings.Contains(model, "deepseek-r1")
-}
-
-func (c *client) MissingToolCallReasoningWarningIdentity() string {
-	if c == nil {
-		return ""
-	}
-	protocol := "openai"
-	if c.deepseek {
-		protocol = "deepseek"
-	}
-	return strings.Join([]string{
-		"openai", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
-		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinkingType), strings.TrimSpace(c.effort),
-	}, "\x00")
-}
-
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
 		Provider:      c.name,

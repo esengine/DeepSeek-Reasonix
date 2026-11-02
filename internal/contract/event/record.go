@@ -36,19 +36,6 @@ func RecordReadinessAudit(s Sink, a hostaudit.ReadinessAudit) {
 // provider implementation details.
 type ProtocolRecoveryKind string
 
-const (
-	ProtocolRecoveryMissingReasoningDetected        ProtocolRecoveryKind = "missing_reasoning_detected"
-	ProtocolRecoveryMissingReasoningRetryAttempted  ProtocolRecoveryKind = "missing_reasoning_retry_attempted"
-	ProtocolRecoveryMissingReasoningRetryRecovered  ProtocolRecoveryKind = "missing_reasoning_retry_recovered"
-	ProtocolRecoveryMissingReasoningRetryReplaced   ProtocolRecoveryKind = "missing_reasoning_retry_replaced_response"
-	ProtocolRecoveryMissingReasoningRetrySuppressed ProtocolRecoveryKind = "missing_reasoning_retry_suppressed"
-	ProtocolRecoveryMissingReasoningFallback        ProtocolRecoveryKind = "missing_reasoning_fallback_used"
-	// ProtocolRecoveryMissingReasoningModelSilent is a tool-call turn the provider
-	// billed no thinking tokens for. Recorded to keep the shape visible, never
-	// replayed: nothing was lost in transit, so an identical request buys nothing.
-	ProtocolRecoveryMissingReasoningModelSilent ProtocolRecoveryKind = "missing_reasoning_model_silent"
-)
-
 type ProtocolRecoveryAudit struct {
 	Kind ProtocolRecoveryKind
 	// ChildID names the delegated run this repair happened inside, stamped by

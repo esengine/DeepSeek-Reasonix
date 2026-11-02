@@ -126,7 +126,7 @@ func TestDescriptorFromProtocolCopiesFields(t *testing.T) {
 		CacheHitPerMillion: 0.1, InputPerMillion: 1.0, OutputPerMillion: 2.0,
 		Vision: true, Tools: true, Reasoning: true,
 		Efforts: []string{"low", "high"}, DefaultEffort: "low",
-		ToolCallReasoning: true, ReasoningRoundTrip: true, WarnOnMissingToolCallReasoning: true,
+		ToolCallReasoning: true, ReasoningRoundTrip: true,
 	}
 	d := DescriptorFromProtocol(wire)
 	if d.Ref != wire.Ref || d.DisplayName != wire.DisplayName || d.Model != wire.Model ||
@@ -135,7 +135,6 @@ func TestDescriptorFromProtocolCopiesFields(t *testing.T) {
 		d.OutputPerMillion != wire.OutputPerMillion || d.Vision != wire.Vision || d.Tools != wire.Tools ||
 		d.Reasoning != wire.Reasoning || d.DefaultEffort != wire.DefaultEffort ||
 		d.ToolCallReasoning != wire.ToolCallReasoning || d.ReasoningRoundTrip != wire.ReasoningRoundTrip ||
-		d.WarnOnMissingToolCallReasoning != wire.WarnOnMissingToolCallReasoning ||
 		len(d.Efforts) != 2 || d.Efforts[1] != "high" {
 		t.Fatalf("descriptor = %+v", d)
 	}

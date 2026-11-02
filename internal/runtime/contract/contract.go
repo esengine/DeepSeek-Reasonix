@@ -128,13 +128,6 @@ func Dropped(current *Contract, derived []Criterion) []Criterion {
 	return out
 }
 
-// AcceptRelaxation records a derivation the User accepted although it drops
-// criteria. by names the act that carried the User's acceptance; host policy
-// never calls this.
-func AcceptRelaxation(current Contract, parentDigest string, derived []Criterion, by string) Contract {
-	return Contract{ID: current.ID, Revision: current.Revision + 1, Parent: parentDigest, Criteria: derived, AcceptedBy: by}
-}
-
 // Accept applies host policy to derived criteria against the current revision
 // (nil for a task with no contract yet). It returns the revision now in force
 // and whether it is new. id names a first revision's contract.

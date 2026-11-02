@@ -118,7 +118,7 @@ func TestRecorderRecordsAndForwardsOptionalCapabilities(t *testing.T) {
 	}
 
 	r.RecordReadinessAudit(hostaudit.ReadinessAudit{Result: hostaudit.ReadinessBlocked, MissingVerification: 2})
-	r.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+	r.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryKind("test")})
 	r.RecordTurnCompletion()
 	r.RecordOutcomeProgress(hostaudit.OutcomeSample{Round: 3, Exploration: 2, Objective: 1, LegacyGain: 4})
 	r.RecordCompletionReport(event.CompletionReportAudit{
@@ -135,7 +135,7 @@ func TestRecorderRecordsAndForwardsOptionalCapabilities(t *testing.T) {
 	if recs[0].ReadinessAudit == nil || recs[0].ReadinessAudit.Result != "blocked" || recs[0].ReadinessAudit.MissingVerification != 2 {
 		t.Errorf("readiness record = %+v", recs[0].ReadinessAudit)
 	}
-	if recs[1].ProtocolRecovery != string(event.ProtocolRecoveryMissingReasoningDetected) {
+	if recs[1].ProtocolRecovery != string(event.ProtocolRecoveryKind("test")) {
 		t.Errorf("protocol recovery record = %q", recs[1].ProtocolRecovery)
 	}
 	if !recs[2].TurnCompletion {

@@ -15,22 +15,21 @@ import (
 // ProviderDescriptor mirrors provider.Descriptor field-for-field as a public
 // DTO. It never carries endpoints, credentials, headers, or env names.
 type ProviderDescriptor struct {
-	Ref                            string   `json:"ref" validate:"nonempty"`
-	DisplayName                    string   `json:"displayName,omitempty"`
-	Model                          string   `json:"model,omitempty"`
-	ContextWindow                  int      `json:"contextWindow,omitempty" validate:"min=0"`
-	PricingCurrency                string   `json:"pricingCurrency,omitempty"`
-	CacheHitPerMillion             float64  `json:"cacheHitPerMillion,omitempty" validate:"min=0"`
-	InputPerMillion                float64  `json:"inputPerMillion,omitempty" validate:"min=0"`
-	OutputPerMillion               float64  `json:"outputPerMillion,omitempty" validate:"min=0"`
-	Vision                         bool     `json:"vision,omitempty"`
-	Tools                          bool     `json:"tools,omitempty"`
-	Reasoning                      bool     `json:"reasoning,omitempty"`
-	Efforts                        []string `json:"efforts,omitempty"`
-	DefaultEffort                  string   `json:"defaultEffort,omitempty"`
-	ToolCallReasoning              bool     `json:"toolCallReasoning,omitempty"`
-	ReasoningRoundTrip             bool     `json:"reasoningRoundTrip,omitempty"`
-	WarnOnMissingToolCallReasoning bool     `json:"warnOnMissingToolCallReasoning,omitempty"`
+	Ref                string   `json:"ref" validate:"nonempty"`
+	DisplayName        string   `json:"displayName,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	ContextWindow      int      `json:"contextWindow,omitempty" validate:"min=0"`
+	PricingCurrency    string   `json:"pricingCurrency,omitempty"`
+	CacheHitPerMillion float64  `json:"cacheHitPerMillion,omitempty" validate:"min=0"`
+	InputPerMillion    float64  `json:"inputPerMillion,omitempty" validate:"min=0"`
+	OutputPerMillion   float64  `json:"outputPerMillion,omitempty" validate:"min=0"`
+	Vision             bool     `json:"vision,omitempty"`
+	Tools              bool     `json:"tools,omitempty"`
+	Reasoning          bool     `json:"reasoning,omitempty"`
+	Efforts            []string `json:"efforts,omitempty"`
+	DefaultEffort      string   `json:"defaultEffort,omitempty"`
+	ToolCallReasoning  bool     `json:"toolCallReasoning,omitempty"`
+	ReasoningRoundTrip bool     `json:"reasoningRoundTrip,omitempty"`
 }
 
 // PluginRefOwner extracts the plugin ID from a plugin-namespaced provider ref

@@ -183,20 +183,6 @@ func New(_ string) *Contract {
 	return &Contract{}
 }
 
-// Atomic is the zero-overhead contract for a simple ask: the ask itself is the
-// one requirement (auto-satisfied by mutation evidence) and the one check is
-// "the workspace changed". Whether a turn gets this shape is the caller's call
-// and belongs on evidence — a turn that changed something has a change to
-// account for, whatever its wording was.
-func Atomic(input string) *Contract {
-	c := New(input)
-	c.Requirements = append(c.Requirements, Requirement{
-		ID: "r1", Text: input, Required: true, Auto: true, AutoKind: EvidenceMutation,
-	})
-	c.Checks = append(c.Checks, Check{Kind: CheckMutation})
-	return c
-}
-
 // PlanFacts is a completed full plan's contract-relevant output, extracted
 // by the coordinator (plain data; this package never sees the plan text).
 type PlanFacts struct {
@@ -214,37 +200,6 @@ type PlanFacts struct {
 type PlanCriterion struct {
 	ID   string
 	Text string
-}
-
-// FromPlan builds the contract straight from a plan the planner already
-// produced, so the executor consumes the plan's own acceptance criteria
-// instead of re-deriving a parallel set: Planner → Contract → Executor.
-func FromPlan(input string, facts PlanFacts) *Contract {
-	c := New(input)
-	add := func(criteria []PlanCriterion, kind, fallback string, required bool) {
-		for i, criterion := range criteria {
-			id := criterion.ID
-			if id == "" {
-				id = fmt.Sprintf("%s%d", fallback, i+1)
-			}
-			c.Requirements = append(c.Requirements, Requirement{
-				ID: id, Kind: kind, Text: criterion.Text, Required: required,
-			})
-		}
-	}
-	add(facts.AcceptanceCriteria, "behavior", "r", true)
-	add(facts.Regressions, "regression", "g", true)
-	add(facts.Optional, "behavior", "o", false)
-	for _, command := range facts.Verifications {
-		c.AddCheck(command)
-	}
-	c.MergeSignals(Signals{
-		MediumRisk: facts.Risky,
-		Anchored:   len(facts.Touchpoints) > 0,
-		MultiFile:  len(facts.Touchpoints) > 1,
-		Paths:      facts.Touchpoints,
-	})
-	return c
 }
 
 // ExecutionView renders the contract as the executor's todo list — a view,

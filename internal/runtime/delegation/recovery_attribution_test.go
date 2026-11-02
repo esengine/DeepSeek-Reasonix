@@ -18,10 +18,10 @@ func TestProtocolRecoveryCarriesTheChildItHappenedIn(t *testing.T) {
 	defer tracker.finish(nil, nil)
 
 	event.RecordProtocolRecovery(tracker.wrap(), event.ProtocolRecoveryAudit{
-		Kind: event.ProtocolRecoveryMissingReasoningDetected,
+		Kind: event.ProtocolRecoveryKind("test"),
 	})
 	event.RecordProtocolRecovery(parent, event.ProtocolRecoveryAudit{
-		Kind: event.ProtocolRecoveryMissingReasoningDetected,
+		Kind: event.ProtocolRecoveryKind("test"),
 	})
 
 	if len(parent.audits) != 2 {
