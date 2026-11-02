@@ -1,0 +1,2 @@
+- 修复：ACP 的会话租约拒绝现在带机器码——`-32022`（被另一窗口持有）与 `-32023`（所有权无法证明），不再一律回 `-32600`/`-32603`。关联 #14948。
+- Fixed: ACP lease refusals now carry codes — `-32022` for a session held by another window, `-32023` for ownership that cannot be proven — instead of `-32600`/`-32603`. Refs #14948.
