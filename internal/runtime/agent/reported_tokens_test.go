@@ -1,14 +1,10 @@
 package agent
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 
-	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
-	"reasonix/internal/contract/tool"
-	"reasonix/internal/state/sessionstore"
 )
 
 func TestBudgetCountsKnownReportedTokens(t *testing.T) {
@@ -48,56 +44,6 @@ func TestBudgetCountsKnownReportedTokens(t *testing.T) {
 				t.Fatal("budget accounting invented a token split")
 			}
 		})
-	}
-}
-
-type reportedTotalProvider struct{ spendingProvider }
-
-func (p *reportedTotalProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	input, err := p.spendingProvider.Stream(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	out := make(chan provider.Chunk, 4)
-	for c := range input {
-		if c.Usage != nil {
-			c.Usage = &provider.Usage{TotalTokens: c.Usage.TotalTokens, RequestCount: 1}
-		}
-		out <- c
-	}
-	close(out)
-	return out, nil
-}
-
-func TestReportedTokensEnforceLocalCapOnInheritedRoot(t *testing.T) {
-	parent := New(&mockProvider{}, tool.NewRegistry(), sessionstore.NewSession("parent"), Options{TaskBudget: TaskBudget{Tokens: 100000}}, event.Discard)
-	ctx := InheritRootTokenBudget(t.Context(), parent.PrepareRootTaskBudget(t.Context()))
-	reg := tool.NewRegistry()
-	reg.Add(readProbe{})
-	p := &reportedTotalProvider{spendingProvider: spendingProvider{max: 3}}
-	child := New(p, reg, sessionstore.NewSession("child"), Options{TaskBudget: TaskBudget{Tokens: 1500}}, event.Discard)
-	err := child.Run(ctx, "read fixtures")
-	pause, ok := InspectRunPause(err)
-	if !ok || pause.Key != "token" || !pause.HostOwned {
-		t.Fatalf("local cap did not pause: %v", err)
-	}
-	if p.rounds.Load() != 3 {
-		t.Fatalf("requests=%d, want two tool rounds and finalization", p.rounds.Load())
-	}
-}
-
-func TestReportedTokensFollowOriginalAuxiliaryRoot(t *testing.T) {
-	a := New(&mockProvider{}, tool.NewRegistry(), sessionstore.NewSession("root"), Options{TaskBudget: TaskBudget{Tokens: 1500}}, event.Discard)
-	first := a.PrepareRootTaskBudget(t.Context())
-	old := first.Value(rootTokenBudgetKey{}).(*rootTokenBudget)
-	provider.ObserveAuxiliaryUsage(first, &provider.Usage{TotalTokens: 1100})
-	a.ResetTaskBudget()
-	second := a.PrepareRootTaskBudget(t.Context())
-	current := second.Value(rootTokenBudgetKey{}).(*rootTokenBudget)
-	late := InheritRootTokenBudget(context.Background(), first)
-	provider.ObserveAuxiliaryUsage(late, &provider.Usage{TotalTokens: 1100})
-	if old.used.Load() != 2200 || current.used.Load() != 0 {
-		t.Fatalf("old=%d new=%d", old.used.Load(), current.used.Load())
 	}
 }
 

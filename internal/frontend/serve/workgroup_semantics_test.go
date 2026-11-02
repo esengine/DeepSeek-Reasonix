@@ -207,8 +207,8 @@ func hostAdvanceCase() traceCase {
 func subagentCase() traceCase {
 	return traceCase{input: "go", executor: [][]provider.Chunk{
 		{say("delegating"), provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
-			ID: "call-task", Name: "task",
-			Arguments: `{"prompt":"read reasonix.toml and report","description":"probe"}`,
+			ID: "call-task", Name: "spawn_agents",
+			Arguments: `{"tasks":[{"title":"probe","task":"read reasonix.toml and report"}]}`,
 		}}},
 		{provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
 			ID: "child-read", Name: "read_file", Arguments: `{"path":"reasonix.toml"}`,

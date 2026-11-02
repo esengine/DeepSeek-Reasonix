@@ -69,7 +69,7 @@ func TestEffectPreToolAccessRejectsBeforePreview(t *testing.T) {
 }
 
 func TestEffectPreToolAccessInheritedByDelegatedAgents(t *testing.T) {
-	for _, entry := range []string{"task", "read_only_task", "parallel_tasks", "run_skill", "read_only_skill"} {
+	for _, entry := range []string{"spawn_agents", "run_skill", "read_only_skill"} {
 		t.Run(entry, func(t *testing.T) {
 			isolateConfigHome(t)
 			dir := robustTempDir(t)

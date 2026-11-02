@@ -35,7 +35,7 @@ func TestAblationRemovesOnlyTheTargetedToolSurfaces(t *testing.T) {
 	t.Chdir(robustTempDir(t))
 
 	full := builtToolNames(t, ablation.Set{})
-	for _, name := range []string{"task", "read_only_task", "history", "memory", "remember", "list_sessions"} {
+	for _, name := range []string{"spawn_agents", "read_subagent_result", "history", "memory", "remember", "list_sessions"} {
 		if !full[name] {
 			t.Fatalf("control arm is missing %s; the ablation assertions below would be vacuous", name)
 		}
@@ -45,7 +45,7 @@ func TestAblationRemovesOnlyTheTargetedToolSurfaces(t *testing.T) {
 	}
 
 	noSubagent := builtToolNames(t, ablation.New(ablation.Subagent))
-	for _, name := range []string{"task", "read_only_task", "parallel_tasks", "fleet"} {
+	for _, name := range []string{"spawn_agents", "read_subagent_result"} {
 		if noSubagent[name] {
 			t.Errorf("subagent ablation left %s registered", name)
 		}
@@ -60,7 +60,7 @@ func TestAblationRemovesOnlyTheTargetedToolSurfaces(t *testing.T) {
 			t.Errorf("retrieval ablation left the BM25-backed %s registered", name)
 		}
 	}
-	for _, name := range []string{"remember", "forget", "list_sessions", "read_session", "task"} {
+	for _, name := range []string{"remember", "forget", "list_sessions", "read_session", "spawn_agents"} {
 		if !noRetrieval[name] {
 			t.Errorf("retrieval ablation dropped %s, which is not a retrieval surface", name)
 		}

@@ -14,7 +14,6 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/hook"
-	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/sessionstore"
 	"reasonix/internal/tools/builtin"
@@ -234,41 +233,6 @@ func TestPreToolAccessNestedAndBatch(t *testing.T) {
 	}
 	if b, err := os.ReadFile(path); err != nil || string(b) != original {
 		t.Fatalf("protected file changed: %q %v", b, err)
-	}
-}
-
-func TestPreToolAccessThroughPathBoundSubagentWriter(t *testing.T) {
-	root := testenv.TempDir(t)
-	path := filepath.Join(root, "private.txt")
-	const original = "INTERNAL_NOTE=review-canary-do-not-disclose\n"
-	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ws := builtin.Workspace{Dir: root, ForbidReadRoots: []string{path}}
-	probe := &accessProbeTool{Tool: ws.Tools("edit_file")[0]}
-	reg := tool.NewRegistry()
-	reg.Add(probe)
-	claim, err := writeclaim.NormalizeWritePaths(root, []string{"private.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bound, removed := BindWritePaths(reg, writeclaim.NewWriteGrant(claim), nil, writeclaim.NewSubagentScheduler(4, 2), root, false)
-	if len(removed) != 0 {
-		t.Fatalf("writer removed: %v", removed)
-	}
-	wrapped, _ := bound.Get("edit_file")
-	if _, ok := wrapped.(pathBoundWriter); !ok {
-		t.Fatalf("not the production wrapper: %T", wrapped)
-	}
-	h := &stubHooks{}
-	a := New(nil, bound, sessionstore.NewSession(""), Options{Hooks: h, CheckTargetAccess: ws.TargetAccessCheck()}, event.Discard)
-	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"private.txt","old_string":"missing","new_string":"x"}`})
-	if !out.blocked || !strings.Contains(out.output, "forbidden-read list") || probe.previews != 0 || probe.executions != 0 || len(h.preSeen) != 0 {
-		t.Fatalf("wrapped writer bypassed admission: %+v previews=%d execute=%d hooks=%v", out, probe.previews, probe.executions, h.preSeen)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || string(data) != original {
-		t.Fatalf("private file changed: %q %v", data, err)
 	}
 }
 

@@ -70,7 +70,6 @@ func (s *SubagentStore) setLive(ref string, sess *sessionstore.Session) {
 	defer s.mu.Unlock()
 	if sess == nil {
 		delete(s.live, ref)
-		delete(s.steer.sent, ref)
 		return
 	}
 	s.live[ref] = &liveRun{sess: sess}

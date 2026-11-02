@@ -5,7 +5,6 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"strings"
 
-	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/state/execjournal"
 )
 
@@ -16,7 +15,7 @@ func (c *Controller) beginTurn(ctx context.Context, startMessageIndex int, prese
 	c.applyPeerSwitches()
 	c.settings.proposals.Store(0)
 	marker := c.markInFlightTurn(startMessageIndex, preserveUser)
-	return delegation.WithTurnIdentity(ctx, marker.ID), marker
+	return ctx, marker
 }
 
 // A delegation opened mid-turn is a fact no later state can re-derive: its turn
@@ -33,14 +32,6 @@ func (c *Controller) InterruptedExecutions() []execjournal.Entry {
 		return nil
 	}
 	return execjournal.Interrupted(c.SessionPath())
-}
-
-// ExecutionHistory is every delegation this session opened, in the order it
-// opened them. It states what the orchestration declared, never what a child
-// produced: the sub-agent store owns that, and a second copy is a second
-// authority to reconcile.
-func ExecutionHistory(sessionPath string) []execjournal.Entry {
-	return execjournal.History(sessionPath)
 }
 
 // interruptedExecutionContext is what the host owes the next request about

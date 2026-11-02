@@ -165,14 +165,14 @@ func TestEffectDelegationIDsCarryTheirSchema(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &inspected); err != nil {
 		t.Fatalf("inspect result is not the documented JSON shape: %v\n%s", err, results[0])
 	}
-	if inspected.ToolName != "task" {
-		t.Errorf("task:subagent inspects as tool %q, want task", inspected.ToolName)
+	if inspected.ToolName != "spawn_agents" {
+		t.Errorf("task:subagent inspects as tool %q, want spawn_agents", inspected.ToolName)
 	}
 	if len(inspected.InputSchema) == 0 {
 		t.Errorf("no input schema for a dispatcher the provider schema hides:\n%s", results[0])
 	}
-	if !strings.Contains(string(inspected.InputSchema), "prompt") {
-		t.Errorf("task schema names no prompt argument:\n%s", inspected.InputSchema)
+	if !strings.Contains(string(inspected.InputSchema), "tasks") {
+		t.Errorf("spawn_agents schema names no tasks argument:\n%s", inspected.InputSchema)
 	}
 	if !strings.Contains(results[1], "task:subagent") {
 		t.Errorf("action=list never names task:subagent, so nothing points a model at it:\n%s", results[1])

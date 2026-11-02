@@ -120,11 +120,10 @@ func TestEffectModelCannotReachUserOnlySkillByAnyPath(t *testing.T) {
 		{"use_capability", `{"action":"list"}`},
 		{"slash_command", `{"command":"ship-it"}`},
 		{"slash_command", `{"command":"list"}`},
-		{"task", `{"prompt":"do it","profile":"ship-sub"}`},
 		{"run_skill", `{"name":"ship-sub","arguments":"go"}`},
 	}
 	p, _ := runScriptedSkillTurn(t, "skillpaths-effect", calls, "check")
-	refused := map[int]bool{0: true, 1: true, 2: true, 3: true, 9: true, 10: true}
+	refused := map[int]bool{0: true, 1: true, 2: true, 3: true, 9: true}
 	for i, c := range calls {
 		res := p.resultOf(i)
 		if res == "" {

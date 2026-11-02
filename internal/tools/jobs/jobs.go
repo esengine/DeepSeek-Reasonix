@@ -190,16 +190,6 @@ func WithStalledWarningAfter(d time.Duration) Option {
 	}
 }
 
-// WithTeardownGrace overrides the Close/destroy grace window. Tests can set a
-// short value; production uses DefaultTeardownGrace.
-func WithTeardownGrace(d time.Duration) Option {
-	return func(m *Manager) {
-		if d >= 0 {
-			m.teardownGrace = d
-		}
-	}
-}
-
 // WithSessionOwnershipProbe supplies the runtime ownership check used when
 // loading persisted Running artifacts. The probe must return true only when the
 // current runtime owns the session transcript for writing.
@@ -1691,44 +1681,6 @@ func WithSession(ctx context.Context, parentSession string) context.Context {
 func SessionFromContext(ctx context.Context) string {
 	session, _ := ctx.Value(sessionCtxKey{}).(string)
 	return strings.TrimSpace(session)
-}
-
-// PublishEvidence attaches a background agent's host-observed receipts to its
-// job. The receipts stay independent of the parent turn ledger until the
-// parent collects the terminal result with wait or bash_output.
-func PublishEvidence(ctx context.Context, summary evidence.ChildEvidenceSummary) {
-	j, _ := ctx.Value(jobCtxKey{}).(*Job)
-	if j == nil || len(summary.Receipts) == 0 {
-		return
-	}
-	j.mu.Lock()
-	j.evidence.Receipts = append(j.evidence.Receipts, summary.Receipts...)
-	j.mu.Unlock()
-}
-
-// HasJob reports whether ctx belongs to a running background job. A runner whose
-// work never reaches the job's own streams asks this before promising to report.
-func HasJob(ctx context.Context) bool {
-	j, _ := ctx.Value(jobCtxKey{}).(*Job)
-	return j != nil
-}
-
-// NoteProgress records that the job's runner is alive: it refreshes the job's
-// activity stamp, and counts the work unit when steps is non-zero. A sub-agent
-// writes a transcript and calls tools; none of that is job output, so counting
-// bytes alone reports a busy job as silent for its whole life. This claims
-// liveness and step count, never that any output text was produced.
-func NoteProgress(ctx context.Context, steps int) {
-	j, _ := ctx.Value(jobCtxKey{}).(*Job)
-	if j == nil {
-		return
-	}
-	j.mu.Lock()
-	if steps > 0 {
-		j.times.steps += int64(steps)
-	}
-	j.times.touch()
-	j.mu.Unlock()
 }
 
 // LeaseEvidenceForSession returns a copy of a terminal job's evidence without

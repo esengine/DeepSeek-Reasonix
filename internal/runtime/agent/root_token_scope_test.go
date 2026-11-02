@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/contract/event"
@@ -67,39 +66,5 @@ func TestRootTokenBudgetContinuationAndReset(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestRootTokenScopeAtomicAccountingAndJobCancellation(t *testing.T) {
-	root := &rootTokenBudget{used: new(atomic.Uint64), limit: 500}
-	var group sync.WaitGroup
-	for range 100 {
-		group.Go(func() { root.observe(&provider.Usage{PromptTokens: 7, CompletionTokens: 3}) })
-	}
-	group.Wait()
-	if root.used.Load() != 1000 {
-		t.Fatal("concurrent usage was lost or counted twice")
-	}
-	root.observe(nil)
-	root.observe(&provider.Usage{PromptTokens: -3, CompletionTokens: -4})
-	if root.used.Load() != 1000 {
-		t.Fatal("missing or negative usage credited the root")
-	}
-	root.used.Store(^uint64(0) - 1)
-	root.observe(&provider.Usage{PromptTokens: 10})
-	if root.used.Load() != ^uint64(0) {
-		t.Fatal("usage overflow reopened the budget")
-	}
-	parent, cancelParent := context.WithCancel(context.WithValue(t.Context(), rootTokenBudgetKey{}, root))
-	job, cancelJob := context.WithCancel(t.Context())
-	defer cancelJob()
-	projected := InheritRootTokenBudget(job, parent)
-	cancelParent()
-	if projected.Err() != nil || projected.Value(rootTokenBudgetKey{}) != root {
-		t.Fatal("job inherited parent cancellation or lost the budget")
-	}
-	cancelJob()
-	if projected.Err() != context.Canceled {
-		t.Fatal("budget projection lost job cancellation")
 	}
 }

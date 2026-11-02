@@ -1,7 +1,6 @@
 package boot
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"reasonix/internal/base/netclient"
@@ -423,44 +422,6 @@ func TestExplicitSubagentModelAndGlobalEffortRemainStrict(t *testing.T) {
 	}
 	if _, _, _, err := sub.resolveProvider(sub.taskModel, pairEffort); err == nil {
 		t.Fatal("explicit model/effort pair should remain strict")
-	}
-}
-
-func TestSkillEffortUsesResolvedInheritedDefault(t *testing.T) {
-	cfg := config.Default()
-	cfg.Agent.SubagentEffort = "max"
-	cfg.Providers = []config.ProviderEntry{{
-		Name: "custom", Kind: "openai", Models: []string{"fallback"}, Default: "fallback",
-		SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high",
-	}}
-	entry, ok := cfg.ResolveModel("custom/fallback")
-	if !ok {
-		t.Fatal("custom/fallback should resolve")
-	}
-	resolver := &effortSelectionResolver{rejectEffort: true}
-	sub := newSubagentConfig(Options{}, cfg, entry, "custom/fallback", resolver, netclient.ProxySpec{}, nil)
-	runner := &skillSubagents{
-		cfg:             cfg,
-		provider:        nil,
-		entry:           entry,
-		inheritedFor:    sub.inheritedFor,
-		resolveProvider: sub.resolveProvider,
-	}
-
-	_, _, _, modelRef, effortRef, err := runner.resolveModel(context.Background(), skill.Skill{Name: "review", RunAs: skill.RunSubagent})
-	if err != nil {
-		t.Fatalf("skill without own effort should use provider default: %v", err)
-	}
-	if modelRef != "" || effortRef != "" || len(resolver.selections) != 0 {
-		t.Fatalf("skill resolution = %q/%q, selections=%+v; want no override", modelRef, effortRef, resolver.selections)
-	}
-
-	_, _, _, _, _, err = runner.resolveModel(context.Background(), skill.Skill{Name: "review", RunAs: skill.RunSubagent, Effort: "max"})
-	if err == nil {
-		t.Fatal("explicit skill effort should remain strict")
-	}
-	if got := skillProfile(cfg, sub.inheritedFor)(skill.Skill{Name: "review", RunAs: skill.RunSubagent}); got != nil {
-		t.Fatalf("fallback skill profile = %+v, want no stale inherited effort", got)
 	}
 }
 

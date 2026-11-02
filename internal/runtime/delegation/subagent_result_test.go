@@ -14,7 +14,7 @@ import (
 )
 
 func TestSubagentResultToolContractIsStableAndReadOnly(t *testing.T) {
-	reader := NewSubagentResultTool(nil)
+	reader := NewSubagentResultTool(nil, "")
 	if reader.Name() != "read_subagent_result" || !reader.ReadOnly() || !reader.PlanModeSafe() {
 		t.Fatalf("reader contract = name %q readOnly=%v planSafe=%v", reader.Name(), reader.ReadOnly(), reader.PlanModeSafe())
 	}

@@ -94,37 +94,3 @@ func TestProjectCannotSetTheProviderRetryLimit(t *testing.T) {
 		t.Fatalf("the project file overrode the user's limit: %d", cfg.Agent.MaxProviderRetries)
 	}
 }
-
-func TestSubagentGuidanceLimitsDefaultToANamedBoundAndZeroLiftsThem(t *testing.T) {
-	if b, m := Default().SubagentSteerLimits(); b != 16384 || m != 30 {
-		t.Fatalf("defaults = %d bytes, %d per minute, want 16384 and 30", b, m)
-	}
-	cfg, _ := loadScoped(t, "[agent]\nmax_subagent_steer_bytes = 0\nmax_subagent_steers_per_minute = 0\n", "")
-	if b, m := cfg.SubagentSteerLimits(); b != 0 || m != 0 {
-		t.Fatalf("explicit zeros read as %d and %d, want both lifted", b, m)
-	}
-	cfg, _ = loadScoped(t, "[agent]\nmax_subagent_steer_bytes = -5\n", "")
-	if b, _ := cfg.SubagentSteerLimits(); b != 0 {
-		t.Fatalf("a negative value read as %d, want lifted", b)
-	}
-	cfg, _ = loadScoped(t, "", "")
-	if b, m := cfg.SubagentSteerLimits(); b != 16384 || m != 30 {
-		t.Fatalf("absent keys read as %d and %d, want the defaults", b, m)
-	}
-}
-
-func TestProjectCannotLoosenTheSubagentGuidanceLimits(t *testing.T) {
-	cfg, _ := loadScoped(t, "", "[agent]\nmax_subagent_steer_bytes = 0\nmax_subagent_steers_per_minute = 0\n")
-	if b, m := cfg.SubagentSteerLimits(); b != 16384 || m != 30 {
-		t.Fatalf("a cloned repo's reasonix.toml moved the limits to %d and %d", b, m)
-	}
-	for _, key := range []string{"agent.max_subagent_steer_bytes", "agent.max_subagent_steers_per_minute"} {
-		if !slices.Contains(ignoredKeys(cfg), key) {
-			t.Fatalf("ignored = %v, want %s reported", ignoredKeys(cfg), key)
-		}
-	}
-	cfg, _ = loadScoped(t, "[agent]\nmax_subagent_steer_bytes = 4096\n", "[agent]\nmax_subagent_steer_bytes = 1\n")
-	if b, _ := cfg.SubagentSteerLimits(); b != 4096 {
-		t.Fatalf("the project file overrode the user's limit: %d", b)
-	}
-}

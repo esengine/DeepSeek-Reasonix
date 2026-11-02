@@ -86,9 +86,6 @@ export class SseWorkspace extends SseFeedback {
     const query = [after ? `after=${after}` : "", limit ? `limit=${limit}` : ""].filter(Boolean).join("&");
     return this.get<SubagentTranscript>("/subagents/" + encodeURIComponent(ref) + "/transcript" + (query ? "?" + query : ""));
   }
-  steerSubagent(ref: string, text: string) {
-    return this.post("/subagents/" + encodeURIComponent(ref) + "/steer", { text });
-  }
   cancelJob(jobId: string) {
     return this.post("/jobs/" + encodeURIComponent(jobId) + "/cancel");
   }

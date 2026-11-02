@@ -16,33 +16,23 @@ import (
 )
 
 // Delegation spawns work rather than changing state, so a failed one does not
-// open the dependency barrier — batchCallIsMutatingFailure exempts it. Being
-// skipped BY the barrier is the same question, and a bare !ReadOnly answers it
-// the other way, dropping every delegation left in the batch.
+// open the dependency barrier. Being skipped BY the barrier is the same
+// question, and a bare !ReadOnly answers it the other way.
 func TestBatchDoesNotSkipDelegationAsADependentModification(t *testing.T) {
 	reg := tool.NewRegistry()
-	reg.Add(&delegation.TaskTool{})
+	reg.Add(delegation.NewSpawner(nil))
 
-	for _, name := range []string{"task"} {
-		call := provider.ToolCall{Name: name, Arguments: `{"prompt":"do a thing","description":"d"}`}
-		if agent.BatchCallStaticallySkippable(reg, call) {
-			t.Errorf("%s is skippable as a dependent modification, but a failed %s does not open the barrier either",
-				name, name)
-		}
+	call := provider.ToolCall{Name: delegation.SpawnToolName, Arguments: `{"tasks":[{"title":"t","task":"do a thing"}]}`}
+	if agent.BatchCallStaticallySkippable(reg, call) {
+		t.Errorf("%s is skippable as a dependent modification, but a failed one does not open the barrier either", call.Name)
 	}
 }
 
-// TestDelegationSurvivesTheProxyBoundary is the gate the frontend depended on
-// and never had. The model only ever calls use_capability, so a dispatch that
-// loses its profile there reaches the UI anonymous: the panel counted no
-// sub-agents at all, and the card fell back to reading a delegate's step count
-// as a number of delegates.
+// The model only ever calls use_capability, so a dispatch that loses its
+// profile there reaches the UI anonymous: the panel counts no sub-agents at all.
 func TestDelegationSurvivesTheProxyBoundary(t *testing.T) {
 	reg := tool.NewRegistry()
-	task := &delegation.TaskTool{}
-	reg.Add(task)
-	reg.Add(delegation.NewFleetTool(task))
-	reg.Add(delegation.NewReadOnlyTaskTool(task))
+	reg.Add(delegation.NewSpawner(nil))
 	catalog := func() capability.Catalog {
 		return capability.BuildCatalog(capability.CatalogOptions{Tools: reg.AllContractEntries()})
 	}
@@ -53,9 +43,8 @@ func TestDelegationSurvivesTheProxyBoundary(t *testing.T) {
 		wantName  string
 		wantCount int
 	}{
-		{`task:subagent`, `{"prompt":"x"}`, "task", 1},
-		{`task:subagent`, `{"prompt":"x","profile":"implementer"}`, "implementer", 1},
-		{`task:fleet`, `{"tasks":[{"prompt":"a"},{"prompt":"b"},{"prompt":"c"}]}`, "fleet", 3},
+		{`task:subagent`, `{"tasks":[{"title":"a","task":"x"}]}`, delegation.SpawnToolName, 1},
+		{`task:subagent`, `{"tasks":[{"title":"a","task":"x"},{"title":"b","task":"y"},{"title":"c","task":"z"}]}`, delegation.SpawnToolName, 3},
 	} {
 		call := `{"action":"call","capability_id":"` + tc.id + `","arguments":` + tc.args + `}`
 		rc, err := uc.ResolveCall(context.Background(), json.RawMessage(call))
@@ -73,24 +62,16 @@ func TestDelegationSurvivesTheProxyBoundary(t *testing.T) {
 	}
 }
 
-// Planning keeps the delegation it was designed around. read_only_task exists
-// so a plan can research in an isolated context; a barrier reading "delegation"
-// as "side effect" would take that away, and one reading "no mutation receipt"
-// as "safe" lets the writer-capable ones through — the hole this closes.
-func TestPlanningPhaseSplitsDelegationByWriterCapability(t *testing.T) {
-	task := &delegation.TaskTool{}
+// Planning keeps the delegation it was designed around: sub-agents are
+// read-only, so a plan can research in an isolated context.
+func TestPlanningPhaseKeepsReadOnlyDelegation(t *testing.T) {
 	reg := tool.NewRegistry()
 	a := agent.New(nil, reg, sessionstore.NewSession(""), agent.Options{}, event.Discard)
 	a.SetPlanMode(true)
 
-	blocked := map[string]bool{}
 	for _, tl := range []tool.Tool{
-		task,
-		delegation.NewReadOnlyTaskTool(task),
-		delegation.NewFleetTool(task),
-		delegation.NewParallelTasksTool(task, reg),
-		delegation.NewSubagentResultTool(task),
-		delegation.NewSubagentListTool(task),
+		delegation.NewSpawner(nil),
+		delegation.NewSubagentResultTool(nil, ""),
 	} {
 		safety := planmode.PlanSafetyUnknown
 		if c, ok := tl.(tool.PlanModeClassifier); ok {
@@ -99,30 +80,8 @@ func TestPlanningPhaseSplitsDelegationByWriterCapability(t *testing.T) {
 				safety = planmode.PlanSafetySafe
 			}
 		}
-		got := agent.PlanModeDecision(a, tl, safety)
-		blocked[tl.Name()] = got.Blocked
-		// The verdict has to follow what the tool declares about itself, or the
-		// barrier has started classifying delegation by name.
-		want := !tl.ReadOnly() && safety != planmode.PlanSafetySafe
-		if got.Blocked != want {
-			t.Errorf("%q readOnly=%v safety=%v blocked=%v, want %v", tl.Name(), tl.ReadOnly(), safety, got.Blocked, want)
-		}
-	}
-
-	for name, wantBlocked := range map[string]bool{
-		"read_only_task":       false,
-		"parallel_tasks":       false,
-		"read_subagent_result": false,
-		"list_subagents":       false,
-		"task":                 true,
-	} {
-		got, ok := blocked[name]
-		if !ok {
-			t.Errorf("%q was not registered; the anchor no longer measures anything", name)
-			continue
-		}
-		if got != wantBlocked {
-			t.Errorf("%q blocked=%v during planning, want %v", name, got, wantBlocked)
+		if got := agent.PlanModeDecision(a, tl, safety); got.Blocked {
+			t.Errorf("%q blocked during planning, want allowed", tl.Name())
 		}
 	}
 }

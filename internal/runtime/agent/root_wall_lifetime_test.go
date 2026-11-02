@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -47,35 +46,5 @@ func TestRootWallBudgetContinuationAndReset(t *testing.T) {
 				t.Fatal("a new run mutated the wall budget already handed to an old job")
 			}
 		})
-	}
-}
-
-func TestRootWallBudgetProjectionKeepsJobDeadline(t *testing.T) {
-	root := &rootTokenBudget{wall: rootWallBudget{started: time.Now().Add(-time.Hour), limit: time.Minute}}
-	parent, cancelParent := context.WithTimeout(context.WithValue(t.Context(), rootTokenBudgetKey{}, root), 2*time.Hour)
-	defer cancelParent()
-	job, cancelJob := context.WithTimeout(t.Context(), time.Hour)
-	defer cancelJob()
-	projected := InheritRootTokenBudget(job, parent)
-	want, _ := job.Deadline()
-	got, ok := projected.Deadline()
-	if !ok || !got.Equal(want) || projected.Value(rootTokenBudgetKey{}) != root {
-		t.Fatal("budget projection changed job deadline or lost the immutable root scope")
-	}
-	cancelParent()
-	if projected.Err() != nil {
-		t.Fatal("parent cancellation canceled the Manager-owned job")
-	}
-	if axis, _ := root.wall.exceeded(); axis != "time" {
-		t.Fatalf("axis = %q, want inherited elapsed limit without context cancellation", axis)
-	}
-	cancelJob()
-	if projected.Err() != context.Canceled {
-		t.Fatal("job cancellation no longer controls its context")
-	}
-	for _, wall := range []rootWallBudget{{limit: time.Second}, {started: time.Now().Add(-time.Hour)}} {
-		if axis, _ := wall.exceeded(); axis != "" {
-			t.Fatalf("axis = %q, an unknown start or disabled limit cannot certify a crossing", axis)
-		}
 	}
 }

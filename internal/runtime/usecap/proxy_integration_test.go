@@ -20,11 +20,11 @@ import (
 // nor what that level accepts. One observed run tried "name", then "title",
 // then "description", paying a round trip for each before finding "prompt".
 func TestContractHintDescendsIntoArrayItems(t *testing.T) {
-	schema := (&delegation.FleetTool{}).Schema()
-	got := usecap.ContractHint(schema, json.RawMessage(`{"tasks":[{"name":"fix-alpha","prompt":"do it"}]}`))
+	schema := (delegation.NewSpawner(nil)).Schema()
+	got := usecap.ContractHint(schema, json.RawMessage(`{"tasks":[{"name":"fix-alpha","task":"do it"}]}`))
 	// Membership, not position: the accepted list is alphabetical, so anchoring
 	// on whichever key sorts first breaks every time one is added.
-	for _, want := range []string{`"name" is not a parameter of a ` + "`tasks`" + ` item`, ` accepts `, `"depends_on"`, `"prompt"`} {
+	for _, want := range []string{`"name" is not a parameter of a ` + "`tasks`" + ` item`, ` accepts `, `"title"`, `"task"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("hint = %q, want it to contain %q", got, want)
 		}
@@ -37,8 +37,8 @@ func TestContractHintDescendsIntoArrayItems(t *testing.T) {
 // Well-formed items stay silent: descending must not invent a contract breach
 // where the call matches the schema at every level.
 func TestContractHintSilentOnWellFormedItems(t *testing.T) {
-	schema := (&delegation.FleetTool{}).Schema()
-	if got := usecap.ContractHint(schema, json.RawMessage(`{"tasks":[{"prompt":"a"},{"prompt":"b","model":"m"}]}`)); got != "" {
+	schema := (delegation.NewSpawner(nil)).Schema()
+	if got := usecap.ContractHint(schema, json.RawMessage(`{"tasks":[{"title":"a","task":"a"},{"title":"b","task":"b","tools":["read_file"]}]}`)); got != "" {
 		t.Errorf("well-formed items produced hint %q, want silence", got)
 	}
 }
@@ -48,8 +48,8 @@ func TestContractHintSilentOnWellFormedItems(t *testing.T) {
 func TestCapabilityCallFailureCarriesTheItemContract(t *testing.T) {
 	uc := &usecap.UseCapabilityTool{}
 	resolved := tool.ResolvedCall{
-		Target: &delegation.FleetTool{},
-		Args:   json.RawMessage(`{"tasks":[{"name":"fix-alpha","prompt":"do it"}]}`),
+		Target: delegation.NewSpawner(nil),
+		Args:   json.RawMessage(`{"tasks":[{"name":"fix-alpha","task":"do it"}]}`),
 	}
 	err := usecap.RecordCallFailure(uc, resolved, errors.New(`invalid args: json: unknown field "name"`))
 	if err == nil || !strings.Contains(err.Error(), "`tasks`"+" item") {

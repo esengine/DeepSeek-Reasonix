@@ -40,12 +40,9 @@ func (p *subagentHookProvider) Stream(_ context.Context, req provider.Request) (
 	case 0:
 		emitReadFile(ch, "parent-read", "secret.txt")
 	case 1:
-		args := `{"prompt":"read secret.txt"}`
+		args := `{"tasks":[{"title":"t","task":"read secret.txt","tools":["read_file"]}]}`
 		if strings.HasSuffix(p.delegationTool, "skill") {
 			args = `{"name":"hook-probe","arguments":"read secret.txt"}`
-		}
-		if p.delegationTool == "parallel_tasks" {
-			args = `{"tasks":[{"prompt":"read secret.txt","tools":["read_file"]},{"prompt":"read secret.txt","tools":["read_file"]}]}`
 		}
 		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "delegate-1", Name: p.delegationTool, Arguments: args}}
 	case 2:
@@ -53,15 +50,7 @@ func (p *subagentHookProvider) Stream(_ context.Context, req provider.Request) (
 	default:
 		// Parallel children can start in either order. Their tool list excludes
 		// delegation, so a child without a tool result still needs its read.
-		parent := false
-		for _, tl := range req.Tools {
-			parent = parent || tl.Name == "parallel_tasks"
-		}
-		if p.delegationTool == "parallel_tasks" && !parent && len(effectToolResults(req)) == 0 {
-			emitReadFile(ch, "child-read", "secret.txt")
-		} else {
-			ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
-		}
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
 	}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
@@ -122,7 +111,7 @@ func useSubagentHookProvider(t *testing.T, p *subagentHookProvider) {
 // executor can call: task and read_only_task (TaskTool.subagentOptions), and
 // run_skill and read_only_skill (RunProfileSpec and skillRunOptions).
 func TestBuildRunsPreToolUseInsideTaskSubagent(t *testing.T) {
-	for _, delegationTool := range []string{"task", "read_only_task", "run_skill", "read_only_skill"} {
+	for _, delegationTool := range []string{"spawn_agents", "run_skill", "read_only_skill"} {
 		t.Run(delegationTool, func(t *testing.T) {
 			isolateConfigHome(t)
 			dir := robustTempDir(t)

@@ -553,64 +553,13 @@ func captureTokenProfileSurface(t *testing.T, tokenMode string) (provider.Reques
 	return reqs[0], ctrl.ToolContractEntries()
 }
 
-func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {
-	isolateConfigHome(t)
-	dir := robustTempDir(t)
-	t.Chdir(dir)
-
-	registerBootSubagentTestProvider()
-	prov := &bootSubagentTestProvider{}
-	setBootSubagentTestProvider(t, prov)
-	writeFile(t, dir, "reasonix.toml", `
-default_model = "test-model"
-
-[agent]
-system_prompt = "BASE"
-
-[[providers]]
-name = "test-model"
-kind = "boot-subagent-test"
-model = "x"
-`)
-	approveWorkspace(t, dir)
-
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
+func onlySubagentRef(t *testing.T, dir string) string {
+	t.Helper()
+	metas, err := filepath.Glob(filepath.Join(dir, "*.meta.json"))
+	if err != nil || len(metas) != 1 {
+		t.Fatalf("subagent metas in %s = %v err=%v, want exactly one", dir, metas, err)
 	}
-	defer ctrl.Close()
-	sessionPath := sessionstore.NewSessionPath(ctrl.SessionDir(), ctrl.Label())
-	ctrl.SetSessionPath(sessionPath)
-
-	if err := ctrl.Run(context.Background(), "first review"); err != nil {
-		t.Fatalf("first Run: %v", err)
-	}
-	ref := subagentRefFromHistory(t, ctrl.History())
-	prov.setContinueRef(ref)
-
-	if err := ctrl.Run(context.Background(), "continue review"); err != nil {
-		t.Fatalf("second Run: %v", err)
-	}
-	store := delegation.NewSubagentStore(filepath.Join(config.SessionDir(), "subagents"))
-	meta, err := store.LoadMeta(ref)
-	if err != nil {
-		t.Fatalf("LoadMeta: %v", err)
-	}
-	if meta.Status != sessionstore.SubagentFailed {
-		t.Fatalf("status = %q, want failed", meta.Status)
-	}
-	if meta.ParentSession != sessionstore.BranchID(sessionPath) {
-		t.Fatalf("parent session = %q, want %q", meta.ParentSession, sessionstore.BranchID(sessionPath))
-	}
-	sess, err := sessionstore.LoadSession(filepath.Join(config.SessionDir(), "subagents", ref+".jsonl"))
-	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
-	}
-	msgs := sess.Snapshot()
-	modelMessages := provider.ModelMessages(msgs)
-	if len(msgs) < 5 || len(modelMessages) < 4 || !strings.Contains(modelMessages[1].Content, "first skill task") || modelMessages[2].Content != "first skill answer" || !strings.Contains(modelMessages[3].Content, "second skill task") || !msgs[len(msgs)-1].LocalOnly {
-		t.Fatalf("failed skill transcript = %+v, want tasks plus provider-excluded failure recovery", msgs)
-	}
+	return strings.TrimSuffix(filepath.Base(metas[0]), ".meta.json")
 }
 
 func TestBuildSubagentStoreHonorsSessionDirOverride(t *testing.T) {
@@ -646,7 +595,7 @@ model = "x"
 	if err := ctrl.Run(context.Background(), "first review"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	ref := subagentRefFromHistory(t, ctrl.History())
+	ref := onlySubagentRef(t, filepath.Join(sessionDir, "subagents"))
 
 	overrideStore := delegation.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
 	meta, err := overrideStore.LoadMeta(ref)
@@ -1072,6 +1021,65 @@ model = "x"
 	}
 }
 
+func TestSpawnAgentsChildCarriesTheThreeBaseToolsAndOnlyReadsInPlanMode(t *testing.T) {
+	registerBootTokenProfileTestProvider()
+	for _, plan := range []bool{false, true} {
+		isolateConfigHome(t)
+		dir := robustTempDir(t)
+		t.Chdir(dir)
+
+		prov := testutil.NewMock("spawn-base-tools",
+			testutil.Turn{ToolCalls: []provider.ToolCall{
+				{ID: "s-1", Name: "spawn_agents", Arguments: `{"tasks":[{"title":"look","task":"look around"}]}`},
+			}},
+			testutil.Turn{Text: "child done"},
+			testutil.Turn{Text: "done"},
+		)
+		setBootTokenProfileTestProvider(t, prov)
+		writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+tool_approval = "yolo"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+		approveWorkspace(t, dir)
+		ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		ctrl.SetPlanMode(plan)
+		runErr := ctrl.Run(context.Background(), "delegate")
+		ctrl.Close()
+		if runErr != nil {
+			t.Fatalf("plan=%v Run: %v", plan, runErr)
+		}
+		reqs := prov.Requests()
+		if len(reqs) < 2 {
+			t.Fatalf("plan=%v provider requests = %d, want the child's request among them", plan, len(reqs))
+		}
+		child := reqs[1]
+		for _, name := range []string{"read_file", "bash"} {
+			if !requestHasTool(child, name) {
+				t.Errorf("plan=%v child lacks %s; tools=%v", plan, name, toolSchemaNames(child.Tools))
+			}
+		}
+		if got := requestHasTool(child, "write_file"); got == plan {
+			t.Errorf("plan=%v child write_file present = %v; tools=%v", plan, got, toolSchemaNames(child.Tools))
+		}
+		for _, name := range []string{"edit_file", "grep", "spawn_agents"} {
+			if requestHasTool(child, name) {
+				t.Errorf("plan=%v child carries %s beyond its base tools", plan, name)
+			}
+		}
+	}
+}
+
 const bootSubagentTestProviderKind = "boot-subagent-test"
 
 var (
@@ -1117,12 +1125,6 @@ type bootSubagentTestProvider struct {
 }
 
 func (p *bootSubagentTestProvider) Name() string { return "boot-subagent-test" }
-
-func (p *bootSubagentTestProvider) setContinueRef(ref string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.continueRef = ref
-}
 
 func (p *bootSubagentTestProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.mu.Lock()
@@ -1226,22 +1228,6 @@ func bootLastUser(req provider.Request) string {
 	return ""
 }
 
-func subagentRefFromHistory(t *testing.T, msgs []provider.Message) string {
-	t.Helper()
-	for _, msg := range msgs {
-		if msg.Role != provider.RoleTool {
-			continue
-		}
-		for line := range strings.SplitSeq(msg.Content, "\n") {
-			if after, ok := strings.CutPrefix(line, "Subagent reference: "); ok {
-				return strings.TrimSpace(after)
-			}
-		}
-	}
-	t.Fatalf("no subagent reference in history: %+v", msgs)
-	return ""
-}
-
 // TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath reproduces headless
 // `reasonix run`: a controller built via Build with NO SetSessionPath (exactly
 // what internal/frontend/cli.runAgent does) must still be able to run a `task` sub-agent.
@@ -1291,9 +1277,9 @@ model = "x"
 		t.Fatalf("task subagent failed in headless run mode: %s", toolContent.String())
 	}
 	if !strings.Contains(toolContent.String(), "subagent answer") {
-		t.Fatalf("task tool result = %q, want sub-agent answer", toolContent.String())
+		t.Fatalf("spawn_agents result = %q, want sub-agent answer", toolContent.String())
 	}
-	if strings.Contains(toolContent.String(), "Subagent reference") {
+	if strings.Contains(toolContent.String(), `"ref":"sa_`) {
 		t.Fatalf("ephemeral headless run should not persist a transcript reference: %s", toolContent.String())
 	}
 }
@@ -1349,7 +1335,7 @@ func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-
 	var chunks []provider.Chunk
 	switch call {
 	case 0:
-		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "task", Arguments: `{"prompt":"find callers"}`}}}
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "spawn_agents", Arguments: `{"tasks":[{"title":"callers","task":"find callers"}]}`}}}
 	case 1:
 		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "subagent answer"}, {Type: provider.ChunkDone}}
 	default:
@@ -1599,7 +1585,7 @@ func (p *headlessTaskWriteTestProvider) Stream(context.Context, provider.Request
 	var chunks []provider.Chunk
 	switch call {
 	case 0:
-		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "task", Arguments: `{"prompt":"write a file"}`}}}
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "spawn_agents", Arguments: `{"tasks":[{"title":"writer","task":"write a file"}]}`}}}
 	case 1:
 		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "write-1", Name: "write_file", Arguments: `{"path":"sub.txt","content":"hi"}`}}}
 	case 2:

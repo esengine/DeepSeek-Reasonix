@@ -3,11 +3,9 @@ package boot
 import (
 	"context"
 	"fmt"
-	"reasonix/internal/state/sessionstore"
 	"strings"
 
 	"reasonix/internal/contract/config"
-	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/skill"
@@ -30,7 +28,7 @@ type skillSubagents struct {
 	// tasks is the one runner every delegated execution goes through. A skill
 	// that kept its own would be a second owner of admission, of the child's
 	// loop and of how a run ended, and the three drifted apart once already.
-	tasks      *delegation.TaskTool
+	runner     *delegation.Runner
 	scheduler  *writeclaim.SubagentScheduler
 	provider   provider.Provider
 	entry      *config.ProviderEntry
@@ -92,111 +90,33 @@ func (r *skillSubagents) stepsFor(runOpts skill.SubagentRunOptions) int {
 // resolveModel picks the child's provider: the parent's unless the skill or
 // config names one of its own, or the images the child is to look at need the
 // vision role.
-func (r *skillSubagents) resolveModel(ctx context.Context, sk skill.Skill) (provider.Provider, *provider.Pricing, int, string, string, error) {
-	prov, price, ctxWin := r.provider, r.entry.Price, r.entry.ContextWindow
-	modelRef := subagentModelRef(r.cfg, sk)
-	effortRef := subagentEffortRef(r.cfg, sk, r.inheritedFor)
-	modelRef, effortRef = agent.VisionRefFor(ctx, modelRef), agent.VisionEffortFor(ctx, modelRef, effortRef)
-	if modelRef == "" && effortRef == "" {
-		return prov, price, ctxWin, modelRef, effortRef, nil
-	}
-	p, pr, cw, err := r.resolveProvider(modelRef, effortRef)
-	if err != nil {
-		return nil, nil, 0, "", "", err
-	}
-	return p, pr, cw, modelRef, effortRef, nil
-}
-
 func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
-	if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
-		return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
-	}
-	releaseSlot, err := r.scheduler.Acquire(sctx, writeclaim.AcquireRequest{
-		Writer: false,
-		Nested: agent.SubagentDepth(sctx) > 0,
-		Label:  sk.Name,
-	})
-	if err != nil {
-		return "", err
-	}
-	defer releaseSlot()
-	sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(r.registry))
-	sctx = agent.BindTaskImages(sctx, task)
-	prov, price, ctxWin, modelRef, effortRef, err := r.resolveModel(sctx, sk)
-	if err != nil {
-		return "", fmt.Errorf("read-only subagent skill %q profile: %w", sk.Name, err)
-	}
-	childDepth := agent.SubagentDepth(sctx) + 1
-	if childDepth > r.maxDepth {
-		return "", fmt.Errorf("subagent delegation depth limit reached (max_subagent_depth=%d)", r.maxDepth)
-	}
-	subReg := agent.ReadOnlySubagentToolRegistryForDepthWithRuntime(r.registry, sk.AllowedTools, childDepth, r.maxDepth, r.capRuntime)
-	if subReg.Len() == 0 {
-		return "", fmt.Errorf("read_only_skill: skill %q has no read-only tools available", sk.Name)
-	}
-	// Custom and named built-in profiles fully control their system prompt
-	// (no implicit concise/DefaultReadOnlyTaskSystemPrompt overlay).
-	sysPrompt := r.systemPrompt(sk)
-	runOptions := r.runOptions(sctx, r.halfSteps(), price, ctxWin, childDepth)
-	usageModelRef, _ := r.identity(modelRef, effortRef)
-	runOptions.ModelRef = usageModelRef
-	// Provider serializers decide whether these images are wire-visible from
-	// the child model's own vision capability. Text-only children retain the
-	// attachment metadata locally but never receive image parts on the wire.
-	childCtx := agent.WithUserImages(sctx, agent.SubagentImageCandidates(sctx))
-	return agent.RunReadOnlySubAgentWithSession(childCtx, prov, subReg, sessionstore.NewSession(sysPrompt), agent.SubagentImageNote(sctx)+task,
-		runOptions, delegation.NestedSink(sctx, event.Discard))
+	return r.runWith(sctx, sk, task, runOpts, true)
 }
 
-// run executes a subagent skill as what it is: one delegated execution. It owns
-// the skill's own facts — the body, the workspace note, the tool ceiling, the
-// verdict a reviewer owes — and nothing about how an execution is admitted,
-// carried out or ended, which belong to the runner every other delegation uses.
 func (r *skillSubagents) run(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
+	return r.runWith(sctx, sk, task, runOpts, false)
+}
+
+func (r *skillSubagents) runWith(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions, readOnly bool) (string, error) {
+	if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
+		return "", fmt.Errorf("subagent skill %q does not support continue_from or fork_from", sk.Name)
+	}
 	if runOpts.MaxSteps > 0 {
-		// A cap the entry point chose is the host's, not the user's: the round
-		// it grants to finalize ends with the answer instead of a pause.
 		sctx = agent.WithRunStepLimit(sctx, r.stepsFor(runOpts), sk.Name+" rounds")
 	}
-	spec, err := r.compile(sctx, sk, task, runOpts)
-	if err != nil {
-		return "", err
-	}
-	return r.tasks.RunProfileSpec(sctx, spec)
-}
-
-// compile turns a skill and one invocation into the shared execution spec. Every
-// value here is one the skill layer alone knows; anything the runner can resolve
-// for itself is left to it, so the two cannot come to disagree.
-func (r *skillSubagents) compile(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (delegation.ProfileExecSpec, error) {
 	sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(r.registry))
-	spec := delegation.ProfileExecSpec{
-		Task: delegation.TaskSpec{Objective: task, Description: sk.Name},
-		Worker: delegation.WorkerSpec{
-			Kind: "skill", Name: sk.Name, Profile: sk.Name,
-			// The body alone is not the prefix: the workspace facts a child
-			// cannot discover for free are part of it, and letting the runner
-			// resolve the profile again would silently drop them.
-			SystemPrompt: r.systemPrompt(sk), UseProfilePrompt: true,
-			Model:  subagentModelRef(r.cfg, sk),
-			Effort: subagentEffortRef(r.cfg, sk, r.inheritedFor),
-		},
-		Grant: delegation.CapabilityGrant{ReadOnly: sk.ReadOnly, ProfileTools: sk.AllowedTools},
-		Context: delegation.ContextRequest{
-			ContinueFrom: runOpts.ContinueFrom, ForkFrom: runOpts.ForkFrom,
-			TopLevel: runOpts.HostInitiated,
-		},
-		Sched: delegation.SchedulerPolicy{MaxSteps: r.stepsFor(runOpts), Nested: agent.SubagentDepth(sctx) > 0},
-	}
-	if !sk.ReadOnly {
-		// Writer skills without declared paths claim the whole workspace, so
-		// they serialize against fleet and task writers that declared disjoint
-		// ones rather than racing them.
-		whole, err := r.tasks.UndeclaredWriteClaim()
-		if err != nil {
-			return delegation.ProfileExecSpec{}, fmt.Errorf("subagent skill %q write claim: %w", sk.Name, err)
-		}
-		spec.Grant.WritePaths = whole
-	}
-	return spec, nil
+	out, err := r.runner.Run(sctx, delegation.RunSpec{
+		Title:        sk.Name,
+		Task:         task,
+		Kind:         "skill",
+		Name:         sk.Name,
+		SystemPrompt: r.systemPrompt(sk),
+		Tools:        sk.AllowedTools,
+		Model:        subagentModelRef(r.cfg, sk),
+		Effort:       subagentEffortRef(r.cfg, sk, r.inheritedFor),
+		MaxSteps:     r.stepsFor(runOpts),
+		ReadOnly:     readOnly || sk.ReadOnly,
+	})
+	return out.Answer, err
 }

@@ -29,7 +29,7 @@ func TestEffectProxiedDelegationArrivesNamed(t *testing.T) {
 	})
 
 	probe := &capabilityProbeProvider{calls: []string{
-		`{"action":"call","capability_id":"task:subagent","arguments":{"description":"probe","prompt":"reply done and stop"}}`,
+		`{"action":"call","capability_id":"task:subagent","arguments":{"tasks":[{"title":"probe","task":"reply done and stop"}]}}`,
 	}}
 	runProbeWith(t, "boot-delegation-identity", probe, sink)
 

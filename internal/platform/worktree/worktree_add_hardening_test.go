@@ -84,31 +84,6 @@ func TestCreateDoesNotRunConditionallyIncludedDrivers(t *testing.T) {
 	markerAbsent(t, marker, "Create")
 }
 
-// CreateCandidate checks a snapshot out detached; a conditional include keyed
-// on the new worktree's gitdir is evaluated in that checkout child.
-func TestCreateCandidateDoesNotRunConditionallyIncludedDrivers(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("payload script is POSIX shell")
-	}
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	repo := testenv.TempDir(t)
-	marker := plantConditionalDriver(t, repo, "gitdir:**/worktrees/**")
-	snap, err := TakeSnapshot(context.Background(), opened(t, repo))
-	if err != nil {
-		t.Fatalf("TakeSnapshot: %v", err)
-	}
-	c, err := CreateCandidate(context.Background(), snap, filepath.Join(testenv.TempDir(t), "candidates"))
-	if err != nil {
-		t.Fatalf("CreateCandidate: %v", err)
-	}
-	if got := readRepoFile(t, c.WorkspaceRoot, "f.txt"); got != "hello\n" {
-		t.Fatalf("candidate f.txt = %q, want the committed bytes", got)
-	}
-	markerAbsent(t, marker, "CreateCandidate")
-}
-
 // When populating the new worktree fails, Create leaves neither the worktree
 // nor the branch its add created behind.
 func TestCreateCleansUpBranchWhenPopulateFails(t *testing.T) {

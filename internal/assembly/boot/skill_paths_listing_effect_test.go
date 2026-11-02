@@ -203,7 +203,7 @@ func TestEffectExplicitSlashInvocationIgnoresPathGating(t *testing.T) {
 // skill appear in the delegating session's listing.
 func TestEffectSubagentTouchDoesNotListAGatedSkillInTheParent(t *testing.T) {
 	ctrl, p, _ := buildGatedSkillController(t, "gated-subagent", []scriptedCall{
-		{"task", `{"prompt":"read src/a.go and report"}`},
+		{"spawn_agents", `{"tasks":[{"title":"t","task":"read src/a.go and report"}]}`},
 		{"read_file", `{"path":"src/a.go"}`},
 	})
 	if err := ctrl.Run(context.Background(), "delegate"); err != nil {

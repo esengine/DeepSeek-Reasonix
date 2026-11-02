@@ -98,13 +98,11 @@ type toolStage struct {
 	hookRunner  *hook.Runner
 	roles       roleWiring
 	sub         subagentConfig
-	taskTool    *delegation.TaskTool
+	runner      *delegation.Runner
 	skillRun    *skillSubagents
 	runners     skillRunners
 	cmds        []command.Command
 	caps        *capabilitySurface
-	candidates  *candidateApproval // nil unless best_of_n is offered
-	isolation   *isolationWiring   // nil unless worktree isolation is offered
 	// mcpSchemaKnown names the configured servers whose tools were known at
 	// registration, the only ones an always-load can show this session.
 	mcpSchemaKnown map[string]bool
@@ -159,8 +157,6 @@ func (b *builder) build(ctx context.Context, opts Options) (*BuildResult, error)
 		return nil, err
 	}
 	constructed = ctrl
-	b.tools.candidates.bind(ctrl)
-	b.tools.isolation.bind(ctrl)
 	res, err := b.freeze(ctrl)
 	if err == nil {
 		if cancelErr := detach(); cancelErr != nil {
@@ -381,7 +377,6 @@ func (b *builder) wireTools() error {
 	addAdvisor(t.reg, cfg, b.proxy, b.sink)
 	addWebSearch(t.reg, cfg, b.proxy, b.sink)
 	addFetchChain(t.reg, cfg, b.proxy, b.sink)
-	b.addBestOf()
 	if cfg.Agent.CodeMode {
 		t.reg.Add(script.New())
 	}
@@ -425,10 +420,9 @@ func (b *builder) wireTools() error {
 			Detail: fmt.Sprintf("Inherited subagent effort %q is not supported by the current execution model %q; subagents that follow it will use the provider/model default effort. The persisted setting was not changed.", firstNonEmpty(cfg.Agent.RoleEfforts["subagent"], cfg.Agent.SubagentEffort), b.model.ref),
 		})
 	}
-	t.taskTool, t.skillRun = t.roles.delegation(delegationInputs{opts: opts, sub: t.sub, exec: b.execProv, entry: b.model.entry,
+	t.runner, t.skillRun = t.roles.delegation(delegationInputs{opts: opts, sub: t.sub, exec: b.execProv, entry: b.model.entry,
 		modelName: b.model.name, root: root, maxSteps: t.maxSteps, delivery: b.model.delivery, store: subagentStore,
 		session: b.session, bashEnforced: env.bash.Enforce, extraRoots: b.workspaceExtraRoots(), childTools: childViewImage(cfg, env, root)})
-	b.addIsolation()
 	registerSessionTools(t.reg, opts.Ablation, b.roots, b.session.dir, b.prompt.memory.Store)
 	if opts.NativeSurfaces {
 		t.reg.Add(agent.NewRenderSurfaceTool())
@@ -478,18 +472,11 @@ func (b *builder) controller() (*control.Controller, error) {
 	}
 	reportDormantPermissionRules(b.sink, b.cfg, ctrl)
 	b.ext.publish(ctrl)
-	// Task and fleet sub-agents share the root agent's recovery checkpoint.
-	if t.taskTool != nil {
-		if g := ctrl.Executor(); g != nil {
-			t.taskTool.WithRecoveryGate(g.RecoveryGate())
-		}
-	}
 	if t.caps.runtime != nil {
 		ctrl.SetCapabilityProxyTools(t.caps.runtime.ConnectedProxyTools)
 	}
-	// The task tool was built before the capability runtime existed.
-	if t.taskTool != nil && t.caps.runtime != nil {
-		t.taskTool.WithCapabilityRuntime(t.caps.runtime)
+	if t.caps.runtime != nil {
+		t.runner.SetCapabilityRuntime(t.caps.runtime)
 	}
 	router := t.roles.semanticRouter(t.sub, b.execProv, b.model.ref, b.model.entry.Price, t.caps.audit)
 	ctrl.WireCapabilityRouting(b.cfg.Plugins, t.caps.specs, router, t.caps.audit)

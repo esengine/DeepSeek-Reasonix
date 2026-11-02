@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,64 +51,6 @@ func TestWithin(t *testing.T) {
 func TestConfineUnconfinedWhenNoRoots(t *testing.T) {
 	if err := confine(nil, "/anywhere/at/all"); err != nil {
 		t.Errorf("empty roots should be unconfined, got %v", err)
-	}
-}
-
-func TestRebindBashWriteRootsUsesMinimalWriteSurface(t *testing.T) {
-	root := testenv.TempDir(t)
-	claim := filepath.Join(root, "claimed")
-	tool, ok := RebindBashWriteRoots(ConfineBash(sandbox.Spec{
-		Mode:       "enforce",
-		WriteRoots: []string{root},
-	}, SessionDataGuard{}), []string{claim})
-	if !ok {
-		t.Fatal("expected confined bash to be rebound")
-	}
-	rebound, ok := tool.(bash)
-	if !ok {
-		t.Fatalf("rebound tool type = %T, want bash", tool)
-	}
-	if !rebound.sb.MinimalWrites {
-		t.Fatal("rebound bash must disable write allowances outside claim roots")
-	}
-	want := realRoots([]string{claim})
-	if len(rebound.sb.WriteRoots) != 1 || rebound.sb.WriteRoots[0] != want[0] {
-		t.Fatalf("write roots = %v, want %v", rebound.sb.WriteRoots, want)
-	}
-	if len(rebound.sb.AppContainerWriteRoots) != 1 || rebound.sb.AppContainerWriteRoots[0] != want[0] {
-		t.Fatalf("app-container write roots = %v, want %v", rebound.sb.AppContainerWriteRoots, want)
-	}
-}
-
-func TestReboundBashCannotWriteOutsideClaim(t *testing.T) {
-	root := testenv.TempDir(t)
-	spec := sandbox.Spec{Mode: "enforce", WriteRoots: []string{root}}
-	if !sandbox.AvailableFor(spec) {
-		t.Skip("OS sandbox unavailable")
-	}
-	claim := filepath.Join(root, "claimed")
-	if err := os.MkdirAll(claim, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	rebound, ok := RebindBashWriteRoots(ConfineBash(spec, SessionDataGuard{}), []string{claim})
-	if !ok {
-		t.Fatal("expected confined bash to be rebound")
-	}
-
-	inside := filepath.Join(claim, "inside.txt")
-	args, _ := json.Marshal(map[string]string{"command": fmt.Sprintf("printf inside > %q", inside)})
-	if _, err := rebound.Execute(context.Background(), args); err != nil {
-		t.Fatalf("write inside claim failed: %v", err)
-	}
-	if _, err := os.Stat(inside); err != nil {
-		t.Fatalf("write inside claim did not land: %v", err)
-	}
-
-	outside := filepath.Join(testenv.TempDir(t), "escaped.txt")
-	args, _ = json.Marshal(map[string]string{"command": fmt.Sprintf("printf escaped > %q", outside)})
-	_, _ = rebound.Execute(context.Background(), args)
-	if _, err := os.Stat(outside); !os.IsNotExist(err) {
-		t.Fatalf("rebound bash wrote outside claim, stat err=%v", err)
 	}
 }
 

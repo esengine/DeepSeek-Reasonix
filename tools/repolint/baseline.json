@@ -5,23 +5,23 @@
     "claude-dialect": 1,
     "codeowners": 0,
     "commented-code": 0,
-    "complexity": 674,
+    "complexity": 666,
     "css-important": 204,
     "css-size": 9804,
     "doc-language": 0,
     "doc-owner": 27,
     "doc-prose": 2128,
     "error-text": 9,
-    "essay": 2576,
-    "file-size": 18415,
+    "essay": 2538,
+    "file-size": 18201,
     "flat-view": 0,
     "frontend-parity": 13,
-    "function-size": 2485,
+    "function-size": 2393,
     "layer-order": 0,
     "layering": 0,
     "marker": 0,
     "narrative": 0,
-    "orphan": 64,
+    "orphan": 61,
     "process-input": 96,
     "refusal-path": 0,
     "release-note": 661,
@@ -265,7 +265,7 @@
     },
     "internal/contract/config/config.go": {
       "essay": 30,
-      "file-size": 845,
+      "file-size": 838,
       "process-input": 3
     },
     "internal/contract/config/credentials.go": {
@@ -1058,31 +1058,8 @@
     "internal/runtime/coordinator/coordinator_test.go": {
       "essay": 3
     },
-    "internal/runtime/delegation/fleet.go": {
-      "essay": 3
-    },
-    "internal/runtime/delegation/parallel_tasks.go": {
-      "essay": 3,
-      "function-size": 37
-    },
-    "internal/runtime/delegation/parallel_tasks_test.go": {
-      "essay": 2
-    },
-    "internal/runtime/delegation/profile_spec.go": {
-      "essay": 4
-    },
-    "internal/runtime/delegation/subagent_progress.go": {
-      "essay": 10
-    },
     "internal/runtime/delegation/subagent_store.go": {
-      "essay": 5
-    },
-    "internal/runtime/delegation/task.go": {
-      "complexity": 8,
-      "essay": 9,
-      "file-size": 159,
-      "function-size": 55,
-      "orphan": 1
+      "essay": 4
     },
     "internal/runtime/guardian/guardian.go": {
       "essay": 23
@@ -1146,9 +1123,6 @@
     },
     "internal/runtime/writeclaim/scheduler.go": {
       "essay": 1
-    },
-    "internal/runtime/writeclaim/write_claims.go": {
-      "orphan": 1
     },
     "internal/safety/evidence/evidence.go": {
       "essay": 2
@@ -1464,7 +1438,7 @@
       "essay": 10
     },
     "internal/tools/builtin/bgjobs_test.go": {
-      "essay": 6
+      "essay": 2
     },
     "internal/tools/builtin/builtin_test.go": {
       "essay": 3
@@ -1516,12 +1490,11 @@
       "essay": 2
     },
     "internal/tools/jobs/artifacts_test.go": {
-      "essay": 5
+      "essay": 3
     },
     "internal/tools/jobs/jobs.go": {
       "essay": 35,
-      "file-size": 1044,
-      "orphan": 1
+      "file-size": 996
     },
     "internal/tools/jobs/jobs_extra_test.go": {
       "essay": 1

@@ -9,7 +9,6 @@ import (
 type SubagentReader interface {
 	Runs(parentSession, workspaceRoot string) ([]delegation.RunInfo, error)
 	Transcript(ref, parentSession, workspaceRoot string, after, limit int) (delegation.RunTranscript, error)
-	Steer(ref, parentSession, workspaceRoot, text string, from delegation.SteerSource) error
 }
 
 // SubagentRuns lists the sub-agent runs this session spawned, newest first. A
@@ -30,15 +29,4 @@ func (c *Controller) SubagentTranscript(ref string, after, limit int) (delegatio
 		return delegation.RunTranscript{}, delegation.ErrSubagentNotFound
 	}
 	return c.subagents.Transcript(ref, parent, c.WorkspaceRoot(), after, limit)
-}
-
-// SteerSubagent sends the person's guidance to one of this session's running
-// sub-agents, to be read at its next tool boundary. The limits on size and rate
-// are the user's own settings, and a run that is not inside a turn refuses.
-func (c *Controller) SteerSubagent(ref, text string) error {
-	parent := c.parentSessionID()
-	if c.subagents == nil || parent == "" {
-		return delegation.ErrSubagentNotFound
-	}
-	return c.subagents.Steer(ref, parent, c.WorkspaceRoot(), text, delegation.SteerFromUser)
 }

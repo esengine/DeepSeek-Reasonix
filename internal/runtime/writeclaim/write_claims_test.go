@@ -123,19 +123,6 @@ func TestWritePathOverlapParentChildAndCase(t *testing.T) {
 	}
 }
 
-func TestValidateNonOverlappingWriteClaims(t *testing.T) {
-	root := testenv.TempDir(t)
-	a, _ := NormalizeWritePaths(root, []string{"a.md"})
-	b, _ := NormalizeWritePaths(root, []string{"b.md"})
-	if err := ValidateNonOverlappingWriteClaims([]WritePathSet{a, b}); err != nil {
-		t.Fatal(err)
-	}
-	c, _ := NormalizeWritePaths(root, []string{"a.md"})
-	if err := ValidateNonOverlappingWriteClaims([]WritePathSet{a, c}); err == nil {
-		t.Fatal("expected conflict")
-	}
-}
-
 func TestWritePathSetAllowsPath(t *testing.T) {
 	root := testenv.TempDir(t)
 	claim, err := NormalizeWritePaths(root, []string{"docs"})
@@ -164,35 +151,5 @@ func TestWriteClaimRefusesNetworkPathBeforeAnyLookup(t *testing.T) {
 		if _, err := NormalizeWritePaths(root, []string{p}); err == nil {
 			t.Errorf("NormalizeWritePaths(%q) accepted a network path", p)
 		}
-	}
-}
-
-func TestOptimisticClaimIsScopedToTheWorkspaceButCollidesWithNothing(t *testing.T) {
-	root := t.TempDir()
-	optimistic, err := OptimisticWorkspaceClaim(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	whole, _ := WholeWorkspaceWriteClaim(root)
-	declared, _ := NormalizeWritePaths(root, []string{"a.txt"})
-	if !optimistic.Optimistic || optimistic.Empty() || !optimistic.WholeWorkspace {
-		t.Fatalf("claim = %+v, want a non-empty whole-workspace optimistic claim", optimistic)
-	}
-	for name, other := range map[string]WritePathSet{"whole": whole, "declared": declared, "optimistic": optimistic} {
-		if optimistic.Overlaps(other) || other.Overlaps(optimistic) {
-			t.Errorf("an optimistic claim collided with a %s claim", name)
-		}
-	}
-	if !whole.Overlaps(declared) {
-		t.Error("strict claims must keep colliding")
-	}
-	if !optimistic.AllowsPath(filepath.Join(root, "x", "y.txt")) || optimistic.AllowsPath(filepath.Join(filepath.Dir(root), "elsewhere.txt")) {
-		t.Error("an optimistic claim is scoped to its workspace for audit")
-	}
-	if roots := optimistic.Roots(); len(roots) != 1 {
-		t.Errorf("roots = %v, want the workspace root for bash confinement", roots)
-	}
-	if err := ValidateNonOverlappingWriteClaims([]WritePathSet{optimistic, whole, optimistic}); err != nil {
-		t.Errorf("a fleet of optimistic writers failed preflight: %v", err)
 	}
 }

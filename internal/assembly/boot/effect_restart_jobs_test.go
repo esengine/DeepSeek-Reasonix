@@ -141,3 +141,16 @@ func TestEffectRestartNamesWhyABackgroundJobEnded(t *testing.T) {
 		t.Fatalf("after a restart the job reads %q, want it attributed as %q", restarted, want)
 	}
 }
+
+func toolResultAfterLastUser(req provider.Request) bool {
+	seen := false
+	for _, m := range req.Messages {
+		switch m.Role {
+		case provider.RoleUser:
+			seen = false
+		case provider.RoleTool:
+			seen = true
+		}
+	}
+	return seen
+}

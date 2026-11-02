@@ -59,9 +59,3 @@ func WithRequestEffort(ctx context.Context, level string) context.Context {
 	}
 	return context.WithValue(ctx, requestEffortKey{}, level)
 }
-
-// RequestEffortFromContext is the depth WithRequestEffort carried, "" when none.
-func RequestEffortFromContext(ctx context.Context) string {
-	level, _ := ctx.Value(requestEffortKey{}).(string)
-	return level
-}

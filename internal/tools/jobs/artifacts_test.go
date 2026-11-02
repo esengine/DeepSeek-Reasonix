@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -516,96 +515,6 @@ func TestRunningJobArtifactMetadataIsIncomplete(t *testing.T) {
 	}
 }
 
-func TestTaskMutationEvidencePersistsWithoutSensitiveReceiptData(t *testing.T) {
-	sessionPath := filepath.Join(testenv.TempDir(t), "session.jsonl")
-	first := NewManager(event.Discard)
-	first.SetActiveSessionPath("session", sessionPath)
-	const secret = "private-receipt-value-123456"
-	j := first.StartForSession("session", "task", "writer", func(ctx context.Context, _ io.Writer) (string, error) {
-		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{
-			{
-				ToolName: "write_file",
-				Args:     json.RawMessage(`{"path":"internal/runtime/agent/task.go","content":"` + secret + `"}`),
-				Success:  true,
-				Write:    true,
-				Mutation: true,
-				Paths:    []string{"internal/runtime/agent/task.go"},
-			},
-			{
-				ToolName: "bash",
-				Success:  true,
-				Command:  "go test ./... --token=" + secret,
-			},
-		}})
-		return "persisted answer", nil
-	})
-	<-j.done
-	first.Close()
-
-	metaPath := filepath.Join(ArtifactDir(sessionPath), j.ID+jobMetaExt)
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	for _, leaked := range []string{secret, "content", "go test ./..."} {
-		if strings.Contains(text, leaked) {
-			t.Fatalf("job metadata persisted sensitive receipt data %q:\n%s", leaked, text)
-		}
-	}
-	for _, want := range []string{`"mutationEvidenceVersion": 1`, `"risk": "medium"`, `"internal/runtime/agent/task.go"`} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("job metadata missing %q:\n%s", want, text)
-		}
-	}
-
-	second := NewManager(event.Discard)
-	defer second.Close()
-	second.SetActiveSessionPath("session", sessionPath)
-	summary := second.LeaseEvidenceForSession("session", j.ID)
-	if len(summary.Receipts) != 1 {
-		t.Fatalf("restored evidence = %+v, want one synthetic mutation", summary)
-	}
-	receipt := summary.Receipts[0]
-	if !receipt.Success || !receipt.Mutation || !receipt.Write || receipt.ToolName != recoveredBackgroundTaskToolName {
-		t.Fatalf("restored receipt = %+v, want successful recovered mutation", receipt)
-	}
-	if len(receipt.Paths) != 1 || filepath.ToSlash(receipt.Paths[0]) != "internal/runtime/agent/task.go" {
-		t.Fatalf("restored paths = %v, want internal/runtime/agent/task.go", receipt.Paths)
-	}
-	if len(receipt.Args) != 0 || receipt.Command != "" || receipt.Read {
-		t.Fatalf("restored receipt retained stale sign-off data: %+v", receipt)
-	}
-
-	ledger := evidence.NewLedger()
-	ledger.MergeChild(summary)
-	mutation, ok := ledger.LatestSuccessfulMutationIndex()
-	if !ok || ledger.HasSuccessfulReviewAfter(mutation) || ledger.HasSuccessfulVerificationCommand() {
-		t.Fatalf("restored evidence bypassed fresh review/verification: %+v", ledger.Summary())
-	}
-	if got := ledger.MutationRiskAfter(mutation, nil); got != evidence.RiskMedium {
-		t.Fatalf("restored mutation risk = %s, want medium", got)
-	}
-	// Lease does not consume: the receipts stay available until the collecting
-	// turn commits. Only then is the persisted summary drained.
-	if again := second.LeaseEvidenceForSession("session", j.ID); len(again.Receipts) != 1 {
-		t.Fatalf("restored evidence not re-leasable before commit: %+v", again)
-	}
-	second.CommitEvidenceForSession("session", j.ID)
-	if afterCommit := second.LeaseEvidenceForSession("session", j.ID); len(afterCommit.Receipts) != 0 {
-		t.Fatalf("committed evidence still leasable: %+v", afterCommit)
-	}
-
-	// The commit drained the persisted copy too — a further restart must not
-	// offer the same mutation again.
-	third := NewManager(event.Discard)
-	defer third.Close()
-	third.SetActiveSessionPath("session", sessionPath)
-	if thirdLease := third.LeaseEvidenceForSession("session", j.ID); len(thirdLease.Receipts) != 0 {
-		t.Fatalf("committed evidence resurrected after restart: %+v", thirdLease)
-	}
-}
-
 func TestHighRiskTaskMutationEvidenceRestoresAsOpaque(t *testing.T) {
 	meta := artifactMeta{
 		Kind:                    "task",
@@ -684,53 +593,6 @@ func TestFutureVersionTaskArtifactRecoversAsOpaqueHighRiskMutation(t *testing.T)
 	mutation, ok := ledger.LatestSuccessfulMutationIndex()
 	if !ok || ledger.MutationRiskAfter(mutation, nil) != evidence.RiskHigh {
 		t.Fatalf("future-version mutation was not recovered conservatively: %+v", ledger.Summary())
-	}
-}
-
-func TestLeasedEvidenceResurrectsUntilCommitted(t *testing.T) {
-	// Collection is provisional. A lease that is never committed — the
-	// collecting turn was cancelled, errored, or the process exited before
-	// delivery — must leave the mutation recoverable after a restart, so a
-	// background change can never ship unreviewed. Only a commit drains the
-	// persisted copy.
-	sessionPath := filepath.Join(testenv.TempDir(t), "session.jsonl")
-	first := NewManager(event.Discard)
-	first.SetActiveSessionPath("session", sessionPath)
-	j := first.StartForSession("session", "task", "writer", func(ctx context.Context, _ io.Writer) (string, error) {
-		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"changed.go"},
-		}}})
-		return "done", nil
-	})
-	<-j.done
-	// Lease without committing (the turn never delivered), then restart.
-	if leased := first.LeaseEvidenceForSession("session", j.ID); !leased.HasMutation() {
-		t.Fatalf("live lease = %+v, want the published mutation", leased)
-	}
-	first.Close()
-
-	data, err := os.ReadFile(filepath.Join(ArtifactDir(sessionPath), j.ID+jobMetaExt))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"mutationEvidence"`) {
-		t.Fatalf("uncommitted lease drained the persisted mutation summary:\n%s", data)
-	}
-
-	second := NewManager(event.Discard)
-	defer second.Close()
-	second.SetActiveSessionPath("session", sessionPath)
-	if summary := second.LeaseEvidenceForSession("session", j.ID); !summary.HasMutation() {
-		t.Fatalf("uncommitted evidence lost after restart: %+v", summary)
-	}
-	// Committing after the restart drains it; a further restart offers nothing.
-	second.CommitEvidenceForSession("session", j.ID)
-	second.Close()
-	third := NewManager(event.Discard)
-	defer third.Close()
-	third.SetActiveSessionPath("session", sessionPath)
-	if summary := third.LeaseEvidenceForSession("session", j.ID); len(summary.Receipts) != 0 {
-		t.Fatalf("committed evidence resurrected after restart: %+v", summary)
 	}
 }
 

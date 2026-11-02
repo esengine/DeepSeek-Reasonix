@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reasonix/internal/runtime/writeclaim"
 	"reasonix/internal/state/checkpoint"
 	"runtime"
 	"slices"
@@ -462,57 +461,6 @@ func TestObserveRootAloneLetsAChildSettle(t *testing.T) {
 	}
 	if New(nil, nil, nil, Options{WriteWorkspaceRoot: root}, nil).observeRoot != root {
 		t.Fatal("an agent with a write root observes it when no observe root is set")
-	}
-}
-
-// A run that declared its write paths takes a change inside them as its own
-// even while siblings write beside it; a change outside them is theirs.
-func TestADeclaredScopeAttributesOnlyWhatFallsInsideIt(t *testing.T) {
-	root := testenv.TempDir(t)
-	mine, theirs := filepath.Join(root, "billing"), filepath.Join(root, "notify")
-	for _, d := range []string{mine, theirs} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	claim, err := writeclaim.NormalizeWritePaths(root, []string{"billing"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := writeclaim.WithSubagentWriteGrant(t.Context(), writeclaim.NewWriteGrant(claim))
-	a := &Agent{}
-	a.observeRoot = root
-	a.svc.mutationObserver = checkpoint.NewMutationObserver(checkpoint.ObserverOptions{})
-	if err := a.svc.mutationObserver.RegisterWriter("sibling", "background_subagent", 0); err != nil {
-		t.Fatal(err)
-	}
-	unknown := func() evidence.Receipt {
-		return evidence.Receipt{ToolName: "bash", Success: true, Mutation: true, MutationEvidence: evidence.MutationUnknown, Command: "sed -i s/a/b/ total.py"}
-	}
-	plan := &toolCallPlan{evidenceName: "bash", evidenceArgs: []byte(`{"command":"sed -i s/a/b/ total.py"}`)}
-	plan.scanBefore = a.scanBeforeUnprovenCall(ctx, plan)
-	if !plan.scanBefore.complete {
-		t.Fatal("a run with declared paths should walk even beside another writer")
-	}
-	writeTo := func(p string) {
-		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeTo(filepath.Join(mine, "total.py"))
-	writeTo(filepath.Join(theirs, "subject.py"))
-	rec := unknown()
-	a.settleUnchangedWorkspace(ctx, &rec, plan)
-	if rec.MutationEvidence != evidence.MutationProven || len(rec.Paths) != 1 || !holdsPath(rec.Paths, filepath.Join(mine, "total.py")) {
-		t.Fatalf("receipt = %+v, want only the write inside billing attributed", rec)
-	}
-
-	outside := &toolCallPlan{scanBefore: scanWorkspace(t.Context(), root)}
-	writeTo(filepath.Join(theirs, "other.py"))
-	onlyTheirs := unknown()
-	a.settleUnchangedWorkspace(ctx, &onlyTheirs, outside)
-	if onlyTheirs.MutationEvidence != evidence.MutationUnknown || !onlyTheirs.Mutation {
-		t.Fatalf("receipt = %+v, want a call that only saw a sibling's write to stay unknown, never unchanged", onlyTheirs)
 	}
 }
 

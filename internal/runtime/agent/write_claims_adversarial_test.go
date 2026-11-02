@@ -1,124 +1,14 @@
 package agent
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
 	"path/filepath"
 	"reasonix/internal/runtime/writeclaim"
 	"strings"
 	"testing"
 
 	"reasonix/internal/base/testenv"
-	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/evidence"
 )
-
-// boundWriterFixture builds a workspace with an in-claim directory and an
-// out-of-claim file at the root, plus a write_file bound to the claim.
-func boundWriterFixture(t *testing.T) (root string, writer tool.Tool, inner *recordingWriter) {
-	t.Helper()
-	root = testenv.TempDir(t)
-	if err := os.MkdirAll(filepath.Join(root, "auth"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	claim, err := writeclaim.NormalizeWritePaths(root, []string{"auth"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	inner = &recordingWriter{name: "write_file", writesPaths: true}
-	reg := tool.NewRegistry()
-	reg.Add(inner)
-	bound, _ := BindWritePaths(reg, writeclaim.NewWriteGrant(claim), nil, writeclaim.NewSubagentScheduler(4, 2), root, false)
-	return root, mustGet(t, bound, "write_file"), inner
-}
-
-// The fixture above binds no gate, which is the case these fixtures are about:
-// with nobody to ask, widening cannot be granted, so every escape below is
-// still refused and the inner writer never runs. A run that could widen its own
-// fence wherever the host happened to have no approver would not be confined.
-func mustRejectWrite(t *testing.T, writer tool.Tool, inner *recordingWriter, args string) {
-	t.Helper()
-	out, err := writer.Execute(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Fatalf("write %s was allowed (result %q); it escapes the declared write_paths", args, out)
-	}
-	if !errors.Is(err, writeclaim.ErrWriteFenceClosed) {
-		t.Fatalf("unexpected rejection reason: %v", err)
-	}
-	if inner.calls != 0 {
-		t.Fatalf("inner writer ran %d times; the boundary must reject before execution", inner.calls)
-	}
-}
-
-// A symlink inside the claim that points out of it must not launder a write.
-func TestWriteClaimBlocksSymlinkEscape(t *testing.T) {
-	root, writer, inner := boundWriterFixture(t)
-	link := filepath.Join(root, "auth", "link.json")
-	if err := os.Symlink(filepath.Join(root, "package.json"), link); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	mustRejectWrite(t, writer, inner, `{"path":`+jsonPath(link)+`,"content":"x"}`)
-}
-
-func TestWriteClaimBlocksParentTraversal(t *testing.T) {
-	root, writer, inner := boundWriterFixture(t)
-	escape := filepath.Join(root, "auth", "..", "package.json")
-	mustRejectWrite(t, writer, inner, `{"path":`+jsonPath(escape)+`,"content":"x"}`)
-}
-
-// move_file has two path arguments; a destination outside the claim is still an
-// escape even when the source is legitimately inside it.
-func TestWriteClaimChecksMoveDestination(t *testing.T) {
-	root := testenv.TempDir(t)
-	if err := os.MkdirAll(filepath.Join(root, "auth"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	claim, err := writeclaim.NormalizeWritePaths(root, []string{"auth"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	inner := &recordingWriter{name: "move_file", writesPaths: true}
-	reg := tool.NewRegistry()
-	reg.Add(inner)
-	bound, _ := BindWritePaths(reg, writeclaim.NewWriteGrant(claim), nil, writeclaim.NewSubagentScheduler(4, 2), root, false)
-	mover := mustGet(t, bound, "move_file")
-
-	args := `{"source_path":` + jsonPath(filepath.Join(root, "auth", "a.go")) +
-		`,"destination_path":` + jsonPath(filepath.Join(root, "escaped.go")) + `}`
-	if _, err := mover.Execute(context.Background(), json.RawMessage(args)); err == nil {
-		t.Fatal("move_file out of the claim was allowed")
-	}
-	if inner.calls != 0 {
-		t.Fatalf("move_file ran %d times despite an out-of-claim destination", inner.calls)
-	}
-}
-
-// A writer the host cannot path-scope is dropped, never silently trusted.
-func TestWriteClaimDropsUnbindableWriters(t *testing.T) {
-	root := testenv.TempDir(t)
-	claim, err := writeclaim.NormalizeWritePaths(root, []string{"."})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := tool.NewRegistry()
-	reg.Add(&recordingWriter{name: "deploy_release"})
-	reg.Add(&recordingWriter{name: "read_notes", readOnly: true})
-	bound, removed := BindWritePaths(reg, writeclaim.NewWriteGrant(claim), nil, writeclaim.NewSubagentScheduler(4, 2), root, false)
-	if _, ok := bound.Get("deploy_release"); ok {
-		t.Fatal("an unbindable writer survived the write_paths boundary")
-	}
-	if len(removed) != 1 || removed[0] != "deploy_release" {
-		t.Fatalf("removed = %v, want [deploy_release]", removed)
-	}
-	if _, ok := bound.Get("read_notes"); !ok {
-		t.Fatal("read-only tools must survive the boundary")
-	}
-}
 
 // Layer 5: even if a write reaches the workspace through a surface the claim
 // could not bind, the host reports it to the parent rather than staying silent.
@@ -167,9 +57,4 @@ func TestUndeclaredWriterHasNoIntraWorkspaceEnforcement(t *testing.T) {
 	if got := claimViolations(outside, whole); len(got) != 1 {
 		t.Fatalf("violations = %v, want the out-of-workspace write flagged", got)
 	}
-}
-
-func jsonPath(path string) string {
-	b, _ := json.Marshal(path)
-	return string(b)
 }

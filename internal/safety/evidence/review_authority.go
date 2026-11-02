@@ -15,11 +15,6 @@ type ReviewAuthority struct {
 	Satisfies []ReviewKind `json:"satisfies,omitempty"`
 }
 
-// GrantReviewAuthority builds a grant over the given obligations.
-func GrantReviewAuthority(kinds ...ReviewKind) ReviewAuthority {
-	return ReviewAuthority{Satisfies: slices.Clone(kinds)}
-}
-
 // Proves reports whether this grant covers the obligation.
 func (a ReviewAuthority) Proves(kind ReviewKind) bool {
 	return slices.Contains(a.Satisfies, kind)

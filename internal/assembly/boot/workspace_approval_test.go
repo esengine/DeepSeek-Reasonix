@@ -1,8 +1,6 @@
 package boot
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"reasonix/internal/contract/config"
@@ -19,20 +17,4 @@ func approveWorkspace(t *testing.T, dir string) {
 func approveWorkspaceAt(t *testing.T, home, dir string) {
 	t.Helper()
 	_, _ = config.RootsForHome(home).ApproveWorkspacePrograms(dir)
-}
-
-// mirrorToUserConfig copies dir's reasonix.toml into the user config, for a
-// test whose model must reach folders other than dir.
-func mirrorToUserConfig(t *testing.T, dir string) {
-	t.Helper()
-	mirrorToUserConfigAt(t, "", dir)
-}
-
-func mirrorToUserConfigAt(t *testing.T, home, dir string) {
-	t.Helper()
-	body, err := os.ReadFile(filepath.Join(dir, "reasonix.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeUserConfigAt(t, home, string(body))
 }

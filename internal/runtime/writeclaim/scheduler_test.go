@@ -306,23 +306,6 @@ func TestSchedulerNamesWhoseClaimHeldARequestBack(t *testing.T) {
 	}
 }
 
-func TestOptimisticWriterLeavesTheParentFreeToWriteElsewhere(t *testing.T) {
-	root := t.TempDir()
-	s := NewSubagentScheduler(4, 2)
-	optimistic, _ := OptimisticWorkspaceClaim(root)
-	release, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: optimistic, Label: "child"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-	a, _ := NormalizeWritePaths(root, []string{"a.txt"})
-	free, err := s.ReserveWrite(a)
-	if err != nil {
-		t.Fatalf("the parent could not write while an optimistic sub-agent ran: %v", err)
-	}
-	free()
-}
-
 func TestStrictWholeWorkspaceWriterStillBlocksTheParent(t *testing.T) {
 	root := t.TempDir()
 	s := NewSubagentScheduler(4, 2)
@@ -361,25 +344,4 @@ func TestTwoWritesToOnePathCollideWithATypedRefusalAndNothingElseDoes(t *testing
 		t.Fatalf("the path stayed reserved after release: %v", err)
 	}
 	again()
-}
-
-func TestOptimisticWriteStillRespectsADeclaredClaimBesideIt(t *testing.T) {
-	root := t.TempDir()
-	s := NewSubagentScheduler(4, 3)
-	declared, _ := NormalizeWritePaths(root, []string{"owned"})
-	releaseDeclared, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: declared, Label: "owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer releaseDeclared()
-	optimistic, _ := OptimisticWorkspaceClaim(root)
-	releaseOptimistic, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: optimistic, Label: "free"})
-	if err != nil {
-		t.Fatalf("an optimistic writer should start beside a declared one: %v", err)
-	}
-	defer releaseOptimistic()
-	inside, _ := NormalizeWritePaths(root, []string{"owned/x.txt"})
-	if _, err := s.ReserveWrite(inside); !errors.Is(err, ErrWritePathBusy) {
-		t.Fatalf("a write into another run's declared claim: err = %v, want a typed refusal", err)
-	}
 }

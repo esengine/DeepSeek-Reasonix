@@ -16,16 +16,6 @@ type rootTokenBudget struct {
 
 type rootTokenBudgetKey struct{}
 
-// InheritRootTokenBudget carries the opaque Agent-root budget scope into a job.
-// Token and wall bounds share its lifetime; job cancellation remains separate.
-func InheritRootTokenBudget(ctx, parent context.Context) context.Context {
-	if scope, ok := parent.Value(rootTokenBudgetKey{}).(*rootTokenBudget); ok {
-		ctx = context.WithValue(ctx, rootTokenBudgetKey{}, scope)
-		return provider.WithAuxiliaryUsageObserver(ctx, scope.observe)
-	}
-	return ctx
-}
-
 // Auxiliary requests share the active context's scope. Using that scope rather
 // than Agent task state also keeps late usage attached to its original task.
 func observeRootTokenUsage(ctx context.Context, usage *provider.Usage) {

@@ -28,8 +28,6 @@ func (s *Server) registerBoundaryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /present-files", s.savePresentFilesSettings)
 	mux.HandleFunc("GET /subagent-claims", s.subagentClaimsSettings)
 	mux.HandleFunc("POST /subagent-claims", s.saveSubagentClaimsSettings)
-	mux.HandleFunc("GET /subagent-steer-limits", s.subagentSteerSettings)
-	mux.HandleFunc("POST /subagent-steer-limits", s.saveSubagentSteerSettings)
 	mux.HandleFunc("GET /write-lease", s.writeLeaseSettings)
 	mux.HandleFunc("POST /write-lease", s.saveWriteLeaseSettings)
 	mux.HandleFunc("GET /plan-approval", s.planApprovalSettings)
@@ -271,37 +269,4 @@ func (s *Server) saveWriteLeaseSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, s.ctl().WriteLeaseSettings())
-}
-
-func (s *Server) subagentSteerSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, s.ctl().SubagentSteerSettings())
-}
-
-// saveSubagentSteerSettings rides the provider-edit grant: raising or lifting a
-// limit on what can be said to a running sub-agent is the machine owner's call,
-// not a networked client's.
-func (s *Server) saveSubagentSteerSettings(w http.ResponseWriter, r *http.Request) {
-	if !s.grants.at(r).providerEdit {
-		refuse(w, http.StatusForbidden, "subagent_steer.editing_disabled", "sub-agent guidance limit editing is not enabled on this server", nil)
-		return
-	}
-	var body struct {
-		MaxBytes  *int `json:"maxBytes"`
-		PerMinute *int `json:"perMinute"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		badBody(w)
-		return
-	}
-	for field, v := range map[string]*int{"maxBytes": body.MaxBytes, "perMinute": body.PerMinute} {
-		if v == nil || *v < 0 {
-			missingField(w, field)
-			return
-		}
-	}
-	if err := s.ctl().SaveSubagentSteerSettings(*body.MaxBytes, *body.PerMinute); err != nil {
-		saveFailed(w, http.StatusInternalServerError, "subagent_steer.save_failed", err)
-		return
-	}
-	writeJSON(w, s.ctl().SubagentSteerSettings())
 }

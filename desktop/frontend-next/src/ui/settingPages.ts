@@ -11,7 +11,7 @@ export const PAGES: Partial<Record<Section, readonly SettingPage[]>> = {
     { id: "approval", label: "批准与规则", anchors: ["approval", "plan-approval", "external-origin", "rules", "tool-list", "present-files"] },
     { id: "sandbox", label: "沙箱与执行", anchors: ["sandbox", "shell"] },
     { id: "web", label: "联网与浏览器", anchors: ["web-access", "browser-tools"] },
-    { id: "subagents", label: "子代理与协作", anchors: ["subagent-claims", "subagent-steer", "write-lease"] },
+    { id: "subagents", label: "子代理与协作", anchors: ["subagent-claims", "write-lease"] },
   ],
   appearance: [
     { id: "look", label: "外观与主题", anchors: ["mode", "scheme", "font", "size", "weight", "contrast", "effects", "wallpaper", "language", "advanced-appearance"] },

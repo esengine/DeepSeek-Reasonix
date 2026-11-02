@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/state/sessionstore"
@@ -32,11 +31,8 @@ type SubagentResultTool struct {
 	workspaceRoot string
 }
 
-func NewSubagentResultTool(task *TaskTool) *SubagentResultTool {
-	if task == nil {
-		return &SubagentResultTool{}
-	}
-	return &SubagentResultTool{store: task.transcripts, workspaceRoot: task.workspaceRoot}
+func NewSubagentResultTool(store *SubagentStore, workspaceRoot string) *SubagentResultTool {
+	return &SubagentResultTool{store: store, workspaceRoot: workspaceRoot}
 }
 
 func (*SubagentResultTool) Name() string { return "read_subagent_result" }
@@ -173,104 +169,6 @@ func (s *SubagentStore) read(ref, parentSession, workspaceRoot string, partialOK
 	return "", meta.Status, fmt.Errorf("subagent reference %q has no final assistant answer", ref)
 }
 
-type subagentAggregateItem struct {
-	header string
-	status string
-	answer string
-	ref    string
-	detail string
-}
-
-func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem) string {
-	// Attestations are reserved before prose gets any budget: a long child
-	// answer must never truncate away what the host saw it change. They
-	// degrade to header plus violations only if they would starve previews.
-	prose := make([]string, len(items))
-	receipts := make([]string, len(items))
-	receiptBytes := 0
-	for i, item := range items {
-		prose[i], receipts[i] = splitHostReceipts(item.answer)
-		receiptBytes += len(receipts[i]) + 1
-	}
-	if reserve := subagentAggregateBudgetBytes / 2; receiptBytes > reserve && len(items) > 0 {
-		receiptBytes = 0
-		for i := range receipts {
-			receipts[i] = boundedHostReceipts(receipts[i], reserve/len(items))
-			receiptBytes += len(receipts[i]) + 1
-		}
-	}
-
-	baseBytes := len(prefix) + receiptBytes
-	completed := 0
-	for i, item := range items {
-		baseBytes += len(item.header) + len(item.status) + len(item.detail)
-		if item.ref != "" {
-			baseBytes += len("Subagent reference: \n") + len(item.ref)
-		}
-		if prose[i] != "" {
-			baseBytes += len("Final answer preview:\n\n")
-			completed++
-		}
-	}
-	available := max(subagentAggregateBudgetBytes-baseBytes, 0)
-	perAnswer := 0
-	if completed > 0 {
-		perAnswer = available / completed
-	}
-
-	var b strings.Builder
-	b.Grow(min(subagentAggregateBudgetBytes, baseBytes+available))
-	b.WriteString(prefix)
-	for i, item := range items {
-		b.WriteString(item.header)
-		b.WriteString(item.status)
-		if item.ref != "" {
-			fmt.Fprintf(&b, "Subagent reference: %s\n", item.ref)
-		}
-		if item.detail != "" {
-			b.WriteString(item.detail)
-		}
-		if prose[i] != "" {
-			b.WriteString("Final answer preview:\n")
-			b.WriteString(subagentAnswerPreview(prose[i], item.ref, perAnswer))
-			b.WriteByte('\n')
-		}
-		if receipts[i] != "" {
-			b.WriteString(receipts[i])
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
-}
-
-func subagentAnswerPreview(answer, ref string, limit int) string {
-	marker := "\n…[preview truncated; full result unavailable in this ephemeral run]…\n"
-	if ref != "" {
-		marker = fmt.Sprintf("\n…[preview truncated; read the full result with read_subagent_result(ref=%q)]…\n", ref)
-	}
-	return boundedAnswerPreview(answer, marker, limit)
-}
-
-// boundedAnswerPreview keeps a head and a tail around marker so a clipped
-// answer still carries its conclusion, which is where a sub-agent puts what
-// the caller asked it for.
-func boundedAnswerPreview(answer, marker string, limit int) string {
-	answer = strings.TrimSpace(answer)
-	if len(answer) <= limit {
-		return answer
-	}
-	if limit <= 0 {
-		return ""
-	}
-	if len(marker) >= limit {
-		return utf8Prefix(answer, limit)
-	}
-	keep := limit - len(marker)
-	headBytes := keep / 2
-	tailBytes := keep - headBytes
-	return utf8Prefix(answer, headBytes) + marker + utf8Suffix(answer, tailBytes)
-}
-
 func utf8Prefix(s string, limit int) string {
 	if limit >= len(s) {
 		return s
@@ -282,20 +180,6 @@ func utf8Prefix(s string, limit int) string {
 		limit--
 	}
 	return s[:limit]
-}
-
-func utf8Suffix(s string, limit int) string {
-	if limit >= len(s) {
-		return s
-	}
-	if limit <= 0 {
-		return ""
-	}
-	start := len(s) - limit
-	for start < len(s) && !utf8.RuneStart(s[start]) {
-		start++
-	}
-	return s[start:]
 }
 
 func boundedInline(s string, limit int) string {
@@ -335,42 +219,6 @@ func extractSubagentRef(output string) string {
 		return ref
 	}
 	return ""
-}
-
-// stoppedRunError carries the transcript of a child that was cancelled before
-// it answered. What it had read by then is in that transcript, so the reference has to reach the parent with the
-// failure instead of dying with the error.
-type stoppedRunError struct {
-	err error
-	ref string
-}
-
-func (e *stoppedRunError) Error() string {
-	return e.err.Error() + "\nSubagent reference (cancelled before answering): " + e.ref +
-		". read_subagent_result returns what it had gathered."
-}
-
-func (e *stoppedRunError) Unwrap() error { return e.err }
-
-// withStoppedRunRef attaches the run's reference to a cancellation. A failed
-// run's transcript is not readable back, so its reference stays off.
-func withStoppedRunRef(err error, run *SubagentRun) error {
-	if run == nil || run.Ref == "" {
-		return err
-	}
-	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		return err
-	}
-	return &stoppedRunError{err: err, ref: run.Ref}
-}
-
-// stoppedRun splits a cancellation into its cause and the transcript left.
-func stoppedRun(err error) (ref string, cause error) {
-	var stopped *stoppedRunError
-	if errors.As(err, &stopped) {
-		return stopped.ref, stopped.err
-	}
-	return "", err
 }
 
 const (

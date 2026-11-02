@@ -46,7 +46,7 @@ import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import type { PluginExport, PluginInstallRequest, PluginPackage, PluginPlan } from "./plugin";
 import type { MarketDetail, MarketList, MarketOwnRequest, MarketPackage, MarketPlan, MarketPublished, MarketQuery, MarketRequest, MarketSubmission, MarketVote } from "./market";
 import type { Appearance, SceneFolder, ThemeImport, ThemePack } from "./look";
-import type { AskTimeoutSettings, ModStatus, ModsSettings, ModsSettingsEdit, SessionRefSettings, AutoArchiveSettings, ChangedFilesSettings, FeedbackLevelNotices, FoldWorkSettings, TurnNarrationSettings, ObservabilityPatch, ObservabilitySettings, WebAccessPatch, WebAccessSettings, SearxngProbe, BrowserToolsSettings, SubagentClaimsSettings, SubagentSteerSettings, WriteLeaseSettings, PlanApprovalSettings, DefaultModeSettings, ToolSettings, PeerReceipt, PeersState, PeersSettings, PeersSettingsEdit, PeerRemember, ConfigProblem, ConfigRepair, DisplayCurrencyMode, DisplayCurrencySettings, PermissionLists, PermissionRules, ProgressWatchSettings, SandboxSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
+import type { AskTimeoutSettings, ModStatus, ModsSettings, ModsSettingsEdit, SessionRefSettings, AutoArchiveSettings, ChangedFilesSettings, FeedbackLevelNotices, FoldWorkSettings, TurnNarrationSettings, ObservabilityPatch, ObservabilitySettings, WebAccessPatch, WebAccessSettings, SearxngProbe, BrowserToolsSettings, SubagentClaimsSettings, WriteLeaseSettings, PlanApprovalSettings, DefaultModeSettings, ToolSettings, PeerReceipt, PeersState, PeersSettings, PeersSettingsEdit, PeerRemember, ConfigProblem, ConfigRepair, DisplayCurrencyMode, DisplayCurrencySettings, PermissionLists, PermissionRules, ProgressWatchSettings, SandboxSettings, WorkspaceRoots, ReceiptSettings } from "./boundary";
 import type { ScheduleBoard, ScheduleDraft, SchedulePreview, ScheduleResultView, ScheduleView } from "./schedule";
 import type { Protocol, ProviderHealth, ProviderCheck, ProviderCheckDraft, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderSetup, ProviderRemoval, ProviderPreset, ProviderPresetInstall } from "./provider";
 export type { ModelEffort, ModelLimit, ModelRate, Protocol, ProviderHealth, ProviderCheck, ProviderCheckDraft, ProviderDraft, ProviderEdit, ProviderEntry, ProviderModelCheck, ProviderModelCheckRequest, ProviderProbe, ProviderSetup, ProviderRemoval, ProviderPreset, ProviderPresetInstall } from "./provider";
@@ -300,8 +300,6 @@ export interface AgentPort extends WorkspacePreviewPort, SessionTailPort, Upload
   savePresentFiles(enabled: boolean): Promise<PresentFilesSettings>;
   subagentClaims(): Promise<SubagentClaimsSettings>;
   saveSubagentClaims(optimistic: boolean): Promise<SubagentClaimsSettings>;
-  subagentSteerSettings(): Promise<SubagentSteerSettings>;
-  saveSubagentSteerSettings(maxBytes: number, perMinute: number): Promise<SubagentSteerSettings>;
   planApproval(): Promise<PlanApprovalSettings>;
   savePlanApproval(auto: boolean): Promise<PlanApprovalSettings>;
   defaultMode(): Promise<DefaultModeSettings>;
@@ -717,7 +715,6 @@ export interface AgentPort extends WorkspacePreviewPort, SessionTailPort, Upload
   // The person's guidance to a sub-agent that is still running, read at its next
   // tool call. Refused with a code when it is not running (subagent.not_running),
   // is empty, over the size or rate limit, or is another conversation's.
-  steerSubagent(ref: string, text: string): Promise<void>;
   // The end of a running job's output, for the person looking at it. It does
   // not take output from the model's own reader; a job that ended is refused
   // (job.not_running).

@@ -32,11 +32,6 @@ type WriteGrant struct {
 	granted  []string
 }
 
-// NewWriteGrant opens a grant over the paths a run declared up front.
-func NewWriteGrant(declared WritePathSet) *WriteGrant {
-	return &WriteGrant{declared: declared}
-}
-
 // Declared returns the up-front claim, which is what scheduling reads. A path
 // granted mid-run is deliberately absent: it was cleared against the runs that
 // were live at the time, not against the ones that had yet to start.

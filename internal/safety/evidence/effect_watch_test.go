@@ -66,7 +66,7 @@ func TestEffectWatchStateAndDelegation(t *testing.T) {
 		{ToolName: "write_file", Success: true, Write: true},
 		{ToolName: "bash", Command: "make gen", Success: true, Mutation: true},
 		{ToolName: "complete_step", Success: true, StepProof: true},
-		{ToolName: "task", Success: true, OutputBytes: 10},
+		{ToolName: "spawn_agents", Success: true, OutputBytes: 10},
 	}
 	for _, r := range cases {
 		if !NewEffectWatch().RoundHadEffect([]Receipt{r}, nil) {

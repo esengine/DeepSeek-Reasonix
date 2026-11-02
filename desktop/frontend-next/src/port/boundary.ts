@@ -114,17 +114,6 @@ export interface SubagentClaimsSettings {
   path: string;
 }
 
-// The bounds on guidance sent to a running sub-agent, as the user file records
-// them: bytes in one message and messages per minute to one sub-agent, zero
-// lifting a bound. A project file cannot set them.
-export interface SubagentSteerSettings {
-  maxBytes: number;
-  perMinute: number;
-  defaultMaxBytes: number;
-  defaultPerMinute: number;
-  path: string;
-}
-
 // How this machine's sessions hold the workspace write lease against one
 // another, as the user file records it. A project file cannot set it. A running
 // session keeps the lease it was built with, so a change reaches sessions

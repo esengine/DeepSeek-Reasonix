@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -13,15 +12,11 @@ import (
 const (
 	// subagentPageMax bounds the messages one transcript read returns.
 	subagentPageMax = 2000
-	// subagentSteerBodyMax bounds what is read of one guidance request; the
-	// user's own size limit applies after it, to the text.
-	subagentSteerBodyMax = 1 << 20
 )
 
 func (s *Server) registerSubagentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /subagents", s.subagentRuns)
 	mux.HandleFunc("GET /subagents/{ref}/transcript", s.subagentTranscript)
-	mux.HandleFunc("POST /subagents/{ref}/steer", s.subagentSteer)
 }
 
 type subagentRunView struct {
@@ -91,43 +86,8 @@ func (s *Server) subagentTranscript(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, subagentTranscriptView{Run: subagentRunOf(page.Info), Messages: shown, After: page.After, Next: page.Next, Total: page.Total, Live: page.Live})
 }
 
-// subagentSteer sends the person's guidance to a running sub-agent. It is the
-// window's alone: a paired device reaches the kernel's pane routes, and what
-// steers a delegated run is not something a phone is given.
-func (s *Server) subagentSteer(w http.ResponseWriter, r *http.Request) {
-	if !hostReach(r) {
-		refuse(w, http.StatusNotFound, codeDeviceHostOnly, "a paired device cannot use this", nil)
-		return
-	}
-	var body struct {
-		Text string `json:"text"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, subagentSteerBodyMax)).Decode(&body); err != nil {
-		var over *http.MaxBytesError
-		if errors.As(err, &over) {
-			refuse(w, http.StatusRequestEntityTooLarge, "subagent.steer_too_large", "the guidance is too large", map[string]any{"limit_bytes": subagentSteerBodyMax})
-			return
-		}
-		badBody(w)
-		return
-	}
-	if err := s.ctl().SteerSubagent(r.PathValue("ref"), body.Text); err != nil {
-		refuseSubagent(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func refuseSubagent(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, delegation.ErrSubagentNotRunning):
-		refuse(w, http.StatusConflict, "subagent.not_running", err.Error(), nil)
-	case errors.Is(err, delegation.ErrSteerEmpty):
-		refuse(w, http.StatusBadRequest, "subagent.steer_empty", err.Error(), nil)
-	case errors.Is(err, delegation.ErrSteerTooLarge):
-		refuse(w, http.StatusRequestEntityTooLarge, "subagent.steer_too_large", err.Error(), nil)
-	case errors.Is(err, delegation.ErrSteerRateLimited):
-		refuse(w, http.StatusTooManyRequests, "subagent.steer_rate_limited", err.Error(), nil)
 	case errors.Is(err, delegation.ErrSubagentNotFound):
 		refuse(w, http.StatusNotFound, "subagent.not_found", err.Error(), nil)
 	case errors.Is(err, delegation.ErrSubagentNotOwned):

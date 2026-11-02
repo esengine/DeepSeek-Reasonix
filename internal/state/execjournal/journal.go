@@ -244,17 +244,6 @@ func Start(sessionPath, id string) error {
 	return appendRecord(sessionPath, record{Execution: id, Status: statusStarted, At: time.Now().UTC()})
 }
 
-// Settle records that the orchestration has let go of an execution. Best-effort:
-// the result already reached its caller, and failing here would strand a live
-// turn over a record whose only reader is a process that does not exist yet.
-func Settle(sessionPath, id string) {
-	if strings.TrimSpace(id) == "" {
-		return
-	}
-	_ = appendRecord(sessionPath, record{Execution: id, Status: statusSettled, At: time.Now().UTC()})
-	owned.claim(sessionPath, id, false)
-}
-
 // Live reports whether this process still owns an execution the journal shows
 // as open.
 func Live(sessionPath, id string) bool {

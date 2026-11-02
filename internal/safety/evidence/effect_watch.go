@@ -51,7 +51,7 @@ func (w *EffectWatch) receiptEffect(r Receipt, exists Exists) bool {
 		return true
 	case r.StepProof || r.TodoStep != nil:
 		return true
-	case r.ToolName == "task" || r.ToolName == "parallel_tasks" || r.ToolName == "fleet":
+	case r.ToolName == "spawn_agents":
 		return true
 	}
 	moved := w.checkMoved(r)

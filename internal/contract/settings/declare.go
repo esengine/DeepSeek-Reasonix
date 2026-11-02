@@ -132,8 +132,6 @@ var table = []Entry{
 	{ID: "agent.task_token_budget", Class: Guarded, Effect: OnOpen},
 	{ID: "agent.goal_token_budget", Class: Guarded, Effect: OnOpen},
 	{ID: "agent.max_subagent_concurrency", Class: Guarded, Effect: OnOpen},
-	{ID: "agent.max_subagent_steer_bytes", Class: Guarded, Effect: Immediate},
-	{ID: "agent.max_subagent_steers_per_minute", Class: Guarded, Effect: Immediate},
 	{ID: "agent.max_parallel_writers", Class: Guarded, Effect: OnOpen},
 	{ID: "agent.subagent_claims", Class: Guarded, Effect: OnOpen},
 	{ID: "agent.write_lease", Class: Elevated, Effect: OnOpen},

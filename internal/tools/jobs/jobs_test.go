@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"reasonix/internal/contract/event"
-	"reasonix/internal/safety/evidence"
 )
 
 type recordingSink struct {
@@ -149,122 +148,6 @@ func TestReserveStartForSessionCountsKilledJobUntilExit(t *testing.T) {
 	} else {
 		release()
 	}
-}
-
-func TestLeaseEvidenceWaitsForKilledJobExit(t *testing.T) {
-	m := NewManager(event.Discard)
-	defer m.Close()
-	exit := make(chan struct{})
-	j := m.StartForSession("session-a", "task", "partial writer", func(ctx context.Context, _ io.Writer) (string, error) {
-		<-exit
-		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"partial.go"},
-		}}})
-		return "stopped", nil
-	})
-	if !m.KillForSession("session-a", j.ID) {
-		t.Fatal("KillForSession did not find running job")
-	}
-	if early := m.LeaseEvidenceForSession("session-a", j.ID); len(early.Receipts) != 0 {
-		t.Fatalf("collected evidence before killed job exited: %+v", early)
-	}
-	close(exit)
-	if res, _ := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, WaitOptions{Timeout: 5 * time.Second}); len(res) != 1 || res[0].Status != Killed {
-		t.Fatalf("killed job result = %+v", res)
-	}
-	if got := m.LeaseEvidenceForSession("session-a", j.ID); !got.HasMutation() {
-		t.Fatalf("partial evidence lost after killed job exit: %+v", got)
-	}
-	// Lease does not consume: a second lease still returns the receipts, and a
-	// commit is required to drain them.
-	if again := m.LeaseEvidenceForSession("session-a", j.ID); !again.HasMutation() {
-		t.Fatalf("lease consumed evidence without a commit: %+v", again)
-	}
-	m.CommitEvidenceForSession("session-a", j.ID)
-	if after := m.LeaseEvidenceForSession("session-a", j.ID); len(after.Receipts) != 0 {
-		t.Fatalf("committed evidence still leasable: %+v", after)
-	}
-}
-
-func TestTryLeaseEvidenceForSessionReportsReadiness(t *testing.T) {
-	m := NewManager(event.Discard)
-	defer m.Close()
-	exit := make(chan struct{})
-	j := m.StartForSession("session-a", "task", "partial writer", func(ctx context.Context, _ io.Writer) (string, error) {
-		<-exit
-		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"partial.go"},
-		}}})
-		return "stopped", nil
-	})
-	if _, ready := m.TryLeaseEvidenceForSession("session-a", "no-such-job"); ready {
-		t.Fatal("unknown job reported ready")
-	}
-	if _, ready := m.TryLeaseEvidenceForSession("session-a", j.ID); ready {
-		t.Fatal("running job reported ready before it reached a terminal state")
-	}
-	if !m.KillForSession("session-a", j.ID) {
-		t.Fatal("KillForSession did not find running job")
-	}
-	// Killed flips the status synchronously but the goroutine has not exited yet
-	// (still blocked on exit): must not report ready.
-	if _, ready := m.TryLeaseEvidenceForSession("session-a", j.ID); ready {
-		t.Fatal("killed-but-unwinding job reported ready before its evidence was flushed")
-	}
-	close(exit)
-	if res, _ := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, WaitOptions{Timeout: 5 * time.Second}); len(res) != 1 || res[0].Status != Killed {
-		t.Fatalf("killed job result = %+v", res)
-	}
-	summary, ready := m.TryLeaseEvidenceForSession("session-a", j.ID)
-	if !ready || !summary.HasMutation() {
-		t.Fatalf("ready/summary after exit = %v/%+v, want ready with the published mutation", ready, summary)
-	}
-	m.CommitEvidenceForSession("session-a", j.ID)
-	if summary, ready := m.TryLeaseEvidenceForSession("session-a", j.ID); !ready || len(summary.Receipts) != 0 {
-		t.Fatalf("post-commit ready/summary = %v/%+v, want ready with no receipts", ready, summary)
-	}
-}
-
-func TestPendingEvidenceJobIDsForSession(t *testing.T) {
-	m := NewManager(event.Discard)
-	defer m.Close()
-
-	running := m.StartForSession("session-a", "task", "still going", func(ctx context.Context, _ io.Writer) (string, error) {
-		<-ctx.Done()
-		return "", ctx.Err()
-	})
-	mutator := m.StartForSession("session-a", "task", "writer", func(ctx context.Context, _ io.Writer) (string, error) {
-		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"changed.go"},
-		}}})
-		return "done", nil
-	})
-	readOnly := m.StartForSession("session-a", "task", "reader", func(context.Context, io.Writer) (string, error) {
-		return "no changes", nil
-	})
-	otherSession := m.StartForSession("session-b", "task", "writer", func(ctx context.Context, _ io.Writer) (string, error) {
-		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"other.go"},
-		}}})
-		return "done", nil
-	})
-	if res, _ := m.WaitForSession(context.Background(), "session-a", []string{mutator.ID, readOnly.ID}, WaitOptions{Timeout: 5 * time.Second}); len(res) != 2 {
-		t.Fatalf("wait = %+v, want mutator and read-only jobs done", res)
-	}
-	if res, _ := m.WaitForSession(context.Background(), "session-b", []string{otherSession.ID}, WaitOptions{Timeout: 5 * time.Second}); len(res) != 1 {
-		t.Fatalf("wait = %+v, want other-session job done", res)
-	}
-
-	pending := m.PendingEvidenceJobIDsForSession("session-a")
-	if len(pending) != 1 || pending[0] != mutator.ID {
-		t.Fatalf("pending = %v, want only %q (running job excluded, read-only job has no receipts, other session excluded)", pending, mutator.ID)
-	}
-
-	m.CommitEvidenceForSession("session-a", mutator.ID)
-	if pending := m.PendingEvidenceJobIDsForSession("session-a"); len(pending) != 0 {
-		t.Fatalf("pending after commit = %v, want none", pending)
-	}
-	_ = running // still running when the test ends; Close() cancels and reaps it
 }
 
 func TestStalledWarningIgnoresReturnedJobBeforeTerminalStatusPublished(t *testing.T) {

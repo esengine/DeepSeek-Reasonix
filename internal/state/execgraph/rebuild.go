@@ -181,37 +181,6 @@ func edgesFor(e execjournal.Entry, answered map[string]bool) agentgraph.Delta {
 	return delta
 }
 
-// SkipCause names the upstream a cut branch was cut by: the first of its
-// unanswered dependencies to be released. A fan-out cuts a branch when it
-// processes the first result that did not complete, and releases that item in
-// the same handler, so the order the journal records is the order the choice
-// was made in.
-func SkipCause(entries []execjournal.Entry, children []ChildOutcome, execution string) string {
-	byExecution := map[string]ChildOutcome{}
-	for _, c := range children {
-		byExecution[c.Execution] = c
-	}
-	answered := answeredSet(entries, byExecution)
-	index := map[string]execjournal.Entry{}
-	for _, e := range entries {
-		index[e.ID] = e
-	}
-	target, ok := index[execution]
-	if !ok {
-		return ""
-	}
-	cause := ""
-	for _, up := range target.DependsOn {
-		if answered[up] {
-			continue
-		}
-		if cause == "" || index[up].SettledAt.Before(index[cause].SettledAt) {
-			cause = up
-		}
-	}
-	return cause
-}
-
 // milli renders a timestamp the way the graph carries them, keeping zero as
 // zero: the graph reads an absent stamp as "not learned yet", and 1970 would
 // read as a moment that happened.

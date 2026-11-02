@@ -22,20 +22,6 @@ type jobFinalizers struct {
 	err       error
 }
 
-// WithFinalizer registers host cleanup before terminal publication, including
-// no-launch paths. Callbacks run without Manager/Job locks; all are attempted.
-func WithFinalizer(fn func(Finalization) error) StartOption {
-	return func(j *Job) {
-		if fn == nil {
-			return
-		}
-		if j.finalization == nil {
-			j.finalization = &jobFinalizers{}
-		}
-		j.finalization.callbacks = append(j.finalization.callbacks, fn)
-	}
-}
-
 func (j *Job) finalize(state Finalization) error {
 	f := j.finalization
 	if f == nil {

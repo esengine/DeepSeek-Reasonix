@@ -34,20 +34,29 @@ type delegationInputs struct {
 	childTools func(modelRef string) []tool.Tool
 }
 
-// delegation builds the task tool and the skill sub-agent runner. Wired after
-// built-ins and MCP, so a child inherits the full tool set minus task itself.
-// The capability runtime does not exist yet; the caller binds it later.
-func (w roleWiring) delegation(in delegationInputs) (*delegation.TaskTool, *skillSubagents) {
-	var taskTool *delegation.TaskTool
+func (w roleWiring) delegation(in delegationInputs) (*delegation.Runner, *skillSubagents) {
+	runner := delegation.NewRunner(delegation.RunnerOptions{
+		Registry:      w.reg,
+		Provider:      in.exec,
+		Price:         in.entry.Price,
+		ContextWindow: in.entry.ContextWindow,
+		Store:         in.store,
+		WorkspaceRoot: in.root,
+		MaxDepth:      in.sub.maxDepth,
+		MaxSteps:      in.maxSteps,
+		SystemPrompt:  delegation.DefaultReadOnlyTaskSystemPrompt,
+		Resolve:       in.sub.resolveProvider,
+		Identity:      in.sub.identity,
+		RunOptions:    w.skillRunOptions(in),
+	})
 	if !in.opts.Ablation.Off(ablation.Subagent) {
-		taskTool = w.taskTool(in)
-		addDelegationTools(w.reg, taskTool)
+		addDelegationTools(w.reg, runner, in.store, in.root)
 	}
-	return taskTool, &skillSubagents{
+	return runner, &skillSubagents{
 		root:            in.root,
 		cfg:             w.cfg,
 		registry:        w.reg,
-		tasks:           taskTool,
+		runner:          runner,
 		scheduler:       in.sub.scheduler,
 		provider:        in.exec,
 		entry:           in.entry,
@@ -58,44 +67,6 @@ func (w roleWiring) delegation(in delegationInputs) (*delegation.TaskTool, *skil
 		inheritedFor:    in.sub.inheritedFor,
 		runOptions:      w.skillRunOptions(in),
 	}
-}
-
-func (w roleWiring) taskTool(in delegationInputs) *delegation.TaskTool {
-	return delegation.NewTaskToolWithOptions(delegation.TaskToolOptions{
-		Provider:          in.exec,
-		Pricing:           in.entry.Price,
-		ParentRegistry:    w.reg,
-		MaxSteps:          in.maxSteps,
-		ContextWindow:     in.entry.ContextWindow,
-		RecentKeep:        w.cfg.Agent.RecentKeep,
-		CompactionBudgets: compactionBudgets(w.cfg),
-		CompactRatio:      w.cfg.Agent.CompactRatio,
-		ContextEditing:    w.cfg.Agent.ContextEditing,
-		Temperature:       w.cfg.Agent.Temperature,
-		ArchiveDir:        w.roots.ArchiveDir(),
-		SysPrompt:         "",
-		Gate:              w.gate,
-		CheckTargetAccess: w.checkTargetAccess,
-		KeepPolicy:        w.keep,
-		SubagentModel:     in.sub.taskModel,
-		SubagentEffort:    in.sub.taskEffort,
-		InheritedEffort:   in.sub.inheritedFor,
-		ResolveProvider:   in.sub.resolveProvider,
-		HooksForRole:      func(role string) agent.ToolHooks { return w.hooks.ForRole(role) },
-	}).
-		WithTranscripts(in.store, in.root, in.modelName, in.entry.Effort).
-		WithExtraRoots(in.extraRoots).
-		WithTranscriptIdentityResolver(in.sub.identity).
-		WithMaxSubagentDepth(in.sub.maxDepth).
-		WithDeliveryProfile(in.delivery).
-		WithAblation(in.opts.Ablation).
-		WithWorkspaceLease(in.session.lease).
-		WithScheduler(in.sub.scheduler).
-		WithProfileLookup(in.sub.profileLookup).
-		WithProfileConfigResolvers(in.sub.profileModel, in.sub.profileEffort).
-		WithBashSandboxEnforced(in.bashEnforced).
-		WithChildTools(in.childTools).
-		WithOptimisticClaims(w.cfg.SubagentClaimsOptimistic())
 }
 
 // skillRunOptions is the one place skill sub-agent options are built, so the

@@ -8,13 +8,13 @@ import (
 )
 
 // knownDirectChildRunners are the entry points that still construct a child
-// outside TaskTool.RunProfileSpec. Each one re-resolves tools, depth, and
+// outside delegation.Runner.Run. Each one re-resolves tools, depth, and
 // permissions on its own, which is exactly how a boundary added in one place
 // gets missed in another. The list may shrink; adding to it needs a reason in
 // the pull request.
 var knownDirectChildRunners = map[string]string{
 	"internal/runtime/agent/child_run.go":      "defines the runners",
-	"internal/runtime/delegation/task.go":      "the unified path itself",
+	"internal/runtime/delegation/runner.go":    "the unified path itself",
 	"internal/assembly/boot/skill_subagent.go": "run_skill + read_only_skill runners",
 	"internal/assembly/boot/side_session.go":   "side conversation: one in-memory session reused across questions",
 	"internal/frontend/cli/review.go":          "reasonix review",
@@ -61,7 +61,7 @@ func TestChildConstructionForksStayEnumerated(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(found) > 0 {
-		t.Fatalf("these files construct a sub-agent outside the unified runner: %s\n\nCompile the call into a ProfileExecSpec and run it through TaskTool.RunProfileSpec so it inherits tool scoping, depth caps, write claims, scheduler slots, and the completion contract. If a direct runner is genuinely required, add the file to knownDirectChildRunners with a reason.",
+		t.Fatalf("these files construct a sub-agent outside the unified runner: %s\n\nCompile the call into a ProfileExecSpec and run it through delegation.Runner.Run so it inherits tool scoping, depth caps, write claims, scheduler slots, and the completion contract. If a direct runner is genuinely required, add the file to knownDirectChildRunners with a reason.",
 			strings.Join(found, ", "))
 	}
 }

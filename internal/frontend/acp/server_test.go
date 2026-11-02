@@ -102,8 +102,6 @@ type commandFactory struct {
 	dir      string
 }
 
-func (f *commandFactory) SessionDir() string { return f.dir }
-
 func (f *commandFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
 	runner := &fakeRunner{
 		sink: p.Sink,
@@ -189,44 +187,6 @@ func (f *configurableFactory) NewSession(_ context.Context, p SessionParams) (*c
 	}
 	ctrl = control.New(opts)
 	return ctrl, nil
-}
-
-func (f *configurableFactory) SessionDir() string { return f.dir }
-
-type teardownFactory struct {
-	dir     string
-	grace   time.Duration
-	mu      sync.Mutex
-	manager *jobs.Manager
-}
-
-func (f *teardownFactory) SessionDir() string { return f.dir }
-
-func (f *teardownFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
-	jm := jobs.NewManager(event.Discard, jobs.WithTeardownGrace(f.grace))
-	f.mu.Lock()
-	f.manager = jm
-	f.mu.Unlock()
-	runner := &fakeRunner{
-		sink:     p.Sink,
-		behavior: func(context.Context, event.Sink, string) error { return nil },
-	}
-	return control.New(control.Options{
-		Runner:     runner,
-		Sink:       p.Sink,
-		SessionDir: f.dir,
-		Jobs:       jm,
-	}), nil
-}
-
-func (f *teardownFactory) lastManager(t *testing.T) *jobs.Manager {
-	t.Helper()
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.manager == nil {
-		t.Fatal("session manager was not created")
-	}
-	return f.manager
 }
 
 func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionConfigStateParams) (SessionConfigState, error) {
@@ -2363,52 +2323,6 @@ func TestServeSessionClose(t *testing.T) {
 	}
 }
 
-func TestSessionDeleteWithStuckJobReturnsAfterSingleGrace(t *testing.T) {
-	dir := testenv.TempDir(t)
-	grace := time.Second
-	maxElapsed := grace + 750*time.Millisecond
-	factory := &teardownFactory{dir: dir, grace: grace}
-	client, stop := startServer(t, factory)
-	defer stop()
-
-	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
-	newResp := client.call(t, "session/new", SessionNewParams{Cwd: testenv.TempDir(t)})
-	var nr SessionNewResult
-	if err := json.Unmarshal(newResp.Result, &nr); err != nil || nr.SessionID == "" {
-		t.Fatalf("session/new: %v (%q)", err, nr.SessionID)
-	}
-	path := transcriptPath(dir, nr.SessionID)
-	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("write transcript: %v", err)
-	}
-	releaseJob := startNonCooperativeACPJob(t, factory.lastManager(t), path)
-	defer releaseJob()
-
-	start := time.Now()
-	resp := client.call(t, "session/delete", SessionDeleteParams{SessionID: nr.SessionID})
-	elapsed := time.Since(start)
-	if resp.Error != nil {
-		t.Fatalf("session/delete errored: %+v", resp.Error)
-	}
-	if elapsed > maxElapsed {
-		t.Fatalf("session/delete took %s, want one teardown grace plus scheduling slack", elapsed)
-	}
-	if !sessionstore.IsCleanupPending(path) {
-		t.Fatalf("stuck ACP delete should mark cleanup pending")
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("stuck ACP transcript should remain until delayed cleanup: %v", err)
-	}
-	releaseJob()
-	deadline := time.Now().Add(2 * time.Second)
-	for sessionstore.IsCleanupPending(path) {
-		if time.Now().After(deadline) {
-			t.Fatalf("cleanup-pending marker was not cleared after stuck job release")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 func TestServeRejectsPathLikeSessionID(t *testing.T) {
 	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error { return nil }}
 	client, stop := startServer(t, factory)
@@ -2539,31 +2453,6 @@ func writeACPSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
 	}
 }
 
-func startNonCooperativeACPJob(t *testing.T, jm *jobs.Manager, sessionPath string) func() {
-	t.Helper()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	jm.StartForSession(sessionstore.BranchID(sessionPath), "bash", "stuck job", func(ctx context.Context, _ io.Writer) (string, error) {
-		close(started)
-		<-ctx.Done()
-		<-release
-		return "", ctx.Err()
-	})
-	select {
-	case <-started:
-	case <-time.After(rpcCallBudget(t)):
-		t.Fatal("background job never started")
-	}
-	released := false
-	return func() {
-		if released {
-			return
-		}
-		released = true
-		close(release)
-	}
-}
-
 func TestServeUnknownMethod(t *testing.T) {
 	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error { return nil }}
 	client, stop := startServer(t, factory)
@@ -2577,3 +2466,7 @@ func TestServeUnknownMethod(t *testing.T) {
 		t.Errorf("error code = %d, want %d", resp.Error.Code, ErrMethodNotFound)
 	}
 }
+
+func (f *commandFactory) SessionDir() string { return f.dir }
+
+func (f *configurableFactory) SessionDir() string { return f.dir }

@@ -71,7 +71,7 @@ func TestEffectCompletedReadsFeedTheSkillPathSet(t *testing.T) {
 // delegated; its parent only sees the answer it returns.
 func TestEffectSubagentReadsDoNotFeedTheSessionPathSet(t *testing.T) {
 	ctrl, _, prov := buildTouchedPathsController(t, "touched-effect-sub", []scriptedCall{
-		{"task", `{"prompt":"read src/a.go and report"}`},
+		{"spawn_agents", `{"tasks":[{"title":"t","task":"read src/a.go and report"}]}`},
 		{"read_file", `{"path":"src/a.go"}`},
 	})
 	if err := ctrl.Run(context.Background(), "delegate"); err != nil {

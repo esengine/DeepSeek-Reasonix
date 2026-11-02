@@ -38,8 +38,6 @@ export const SETTING_SCREEN: Record<string, string> = {
   "observability.otlp.service_name": "network:trace-export",
   "tools.video_url_passthrough": "tools:web-access",
   "agent.subagent_claims": "tools:subagent-claims",
-  "agent.max_subagent_steer_bytes": "tools:subagent-steer",
-  "agent.max_subagent_steers_per_minute": "tools:subagent-steer",
   "agent.write_lease": "tools:write-lease",
   "ui.show_receipt": "session:receipt",
   "ui.show_changed_files": "session:changed-files",

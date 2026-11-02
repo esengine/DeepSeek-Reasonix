@@ -8,8 +8,8 @@ import (
 
 func TestMetaToolsDoNotMutate(t *testing.T) {
 	for _, name := range []string{
-		"run_skill", "read_skill", "read_only_skill", "task", "read_only_task",
-		"parallel_tasks", "explore", "research", "review", "security_review", "use_capability",
+		"run_skill", "read_skill", "read_only_skill", "spawn_agents",
+		"explore", "research", "review", "security_review", "use_capability",
 	} {
 		if ToolCallMutates(name, json.RawMessage(`{}`), false) {
 			t.Fatalf("%s must not count as mutation", name)
@@ -19,7 +19,7 @@ func TestMetaToolsDoNotMutate(t *testing.T) {
 
 func TestMergeChildPropagatesRealWrites(t *testing.T) {
 	parent := NewLedger()
-	parent.Record(ReceiptFromToolCall("task", json.RawMessage(`{"prompt":"edit"}`), true, ToolFacts{}))
+	parent.Record(ReceiptFromToolCall("spawn_agents", json.RawMessage(`{"prompt":"edit"}`), true, ToolFacts{}))
 	if _, ok := parent.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("task alone must not create a mutation index")
 	}
@@ -110,42 +110,6 @@ func TestClassifyMutationRisk(t *testing.T) {
 	}
 	if got := ClassifyMutationRisk(opaqueHighPath, 0, []string{"internal/safety/permission/**"}); got != RiskHigh {
 		t.Fatalf("opaque+declared risk = %s, want high", got)
-	}
-}
-
-func TestStructuredReviewReportGate(t *testing.T) {
-	ledger := NewLedger()
-	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, ToolFacts{WritesNamedPaths: true}))
-	mutation, ok := ledger.LatestSuccessfulMutationIndex()
-	if !ok {
-		t.Fatal("expected mutation")
-	}
-
-	raw := json.RawMessage(`{
-		"kind":"review",
-		"verdict":"pass",
-		"reviewed_paths":["internal/a.go"],
-		"findings":[]
-	}`)
-	reviewAuth := GrantReviewAuthority(ReviewKindReview)
-	ledger.Record(Receipt{ToolName: "review_report", Args: raw, Success: true,
-		ReportKind: ReviewKindReview, ReviewAuthority: &reviewAuth, SourceExecutionID: "exec-probe"})
-	if !ledger.HasSuccessfulStructuredReviewAfter(ReviewKindReview, mutation, []string{"internal/a.go"}) {
-		t.Fatal("expected structured review coverage")
-	}
-
-	block := json.RawMessage(`{
-		"kind":"security",
-		"verdict":"block",
-		"reviewed_paths":["internal/a.go"],
-		"findings":[{"severity":"critical","summary":"hardcoded secret","path":"internal/a.go","line":1}]
-	}`)
-	securityAuth := GrantReviewAuthority(ReviewKindSecurity)
-	ledger.Record(Receipt{ToolName: "review_report", Args: block, Success: true,
-		ReportKind: ReviewKindSecurity, ReviewAuthority: &securityAuth, SourceExecutionID: "exec-probe"})
-	ok, blocking, _ := ledger.HasStructuredReviewAfter(ReviewKindSecurity, mutation, []string{"internal/a.go"})
-	if !ok || !blocking {
-		t.Fatalf("security block: ok=%v blocking=%v", ok, blocking)
 	}
 }
 

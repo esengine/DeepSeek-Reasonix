@@ -3,13 +3,10 @@
 package delegation
 
 import (
-	"errors"
 	"fmt"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 )
-
-var errUnsupportedSubagentStatus = errors.New("unsupported subagent status")
 
 // How a stored child's execution was established. The three answers are kept
 // apart because only the first two may be joined on, and a reader that folded
@@ -68,37 +65,4 @@ func ResolveExecutionIdentity(meta sessionstore.SubagentMeta, opened func(execut
 		return ExecutionIdentity{Source: ExecutionUnknown}
 	}
 	return ExecutionIdentity{Execution: parent, Source: ExecutionLegacyConfirmed}
-}
-
-func validateMeta(meta sessionstore.SubagentMeta, spec SubagentSpec) error {
-	if meta.Status == sessionstore.SubagentRunning {
-		return fmt.Errorf("subagent reference %q is still in progress", meta.Ref)
-	}
-	if meta.Status == sessionstore.SubagentFailed {
-		return fmt.Errorf("subagent reference %q failed and cannot be continued", meta.Ref)
-	}
-	if meta.Status == sessionstore.SubagentInterrupted {
-		return fmt.Errorf("subagent reference %q was interrupted by a previous shutdown or crash and cannot be continued or forked; run a fresh subagent instead", meta.Ref)
-	}
-	if meta.Status != sessionstore.SubagentCompleted && meta.Status != sessionstore.SubagentCancelled {
-		return fmt.Errorf("subagent reference %q: %w %q", meta.Ref, errUnsupportedSubagentStatus, meta.Status)
-	}
-	want := metaFromSpec(meta.Ref, meta.Status, meta.CreatedAt, meta.UpdatedAt, spec)
-	switch {
-	case meta.Kind != want.Kind:
-		return fmt.Errorf("subagent reference %q has kind %q, want %q", meta.Ref, meta.Kind, want.Kind)
-	case meta.Name != want.Name:
-		return fmt.Errorf("subagent reference %q has name %q, want %q", meta.Ref, meta.Name, want.Name)
-	case meta.WorkspaceRoot != want.WorkspaceRoot:
-		return fmt.Errorf("subagent reference %q belongs to workspace %q, current workspace is %q", meta.Ref, meta.WorkspaceRoot, want.WorkspaceRoot)
-	case meta.SystemPromptHash != want.SystemPromptHash:
-		return fmt.Errorf("subagent reference %q uses a different subagent persona; run a fresh subagent to use the current persona", meta.Ref)
-	case !sameStrings(meta.ToolScope, want.ToolScope):
-		return fmt.Errorf("subagent reference %q uses a different tool scope", meta.Ref)
-	case meta.ToolSchemaHash != want.ToolSchemaHash:
-		return fmt.Errorf("subagent reference %q uses different tool schemas", meta.Ref)
-	case meta.Model != want.Model || meta.Effort != want.Effort:
-		return fmt.Errorf("subagent reference %q uses model/effort %q/%q, current run would use %q/%q", meta.Ref, meta.Model, meta.Effort, want.Model, want.Effort)
-	}
-	return nil
 }

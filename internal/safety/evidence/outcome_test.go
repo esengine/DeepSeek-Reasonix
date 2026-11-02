@@ -48,7 +48,7 @@ func TestOutcomeTrackerSeparatesExplorationFromObjective(t *testing.T) {
 func TestOutcomeTrackerDelegationAndRepeatsAreExplorationAtBest(t *testing.T) {
 	tr := NewOutcomeTracker()
 
-	task := ReceiptFromToolCall("task", json.RawMessage(`{"prompt":"dig"}`), true, ToolFacts{})
+	task := ReceiptFromToolCall("spawn_agents", json.RawMessage(`{"prompt":"dig"}`), true, ToolFacts{})
 	s := tr.ScoreRound([]Receipt{task})
 	if s.Exploration != 1 || s.Objective != 0 {
 		t.Fatalf("delegation = %+v, want exploration 1 objective 0", s)
@@ -66,7 +66,7 @@ func TestOutcomeTrackerDelegationAndRepeatsAreExplorationAtBest(t *testing.T) {
 
 	// A repeat delegation still returned content the host cannot judge — it
 	// stays exploration and can never move the objective dimension.
-	repeat := ReceiptFromToolCall("task", json.RawMessage(`{"prompt":"dig"}`), true, ToolFacts{})
+	repeat := ReceiptFromToolCall("spawn_agents", json.RawMessage(`{"prompt":"dig"}`), true, ToolFacts{})
 	s = tr.ScoreRound([]Receipt{repeat})
 	if s.Exploration != 1 || s.Objective != 0 {
 		t.Fatalf("repeated delegation = %+v, want exploration 1 objective 0", s)

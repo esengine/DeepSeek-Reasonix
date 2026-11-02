@@ -84,13 +84,6 @@ func NormalizeWritePaths(workspaceRoot string, raw []string) (WritePathSet, erro
 
 type subagentWriteClaimKey struct{}
 
-// WithSubagentWriteGrant carries a child's write grant into its run. The grant
-// itself rather than a snapshot: the tools bound into the run widen it while
-// the run is going, and the audit at the end has to see what was added.
-func WithSubagentWriteGrant(ctx context.Context, grant *WriteGrant) context.Context {
-	return context.WithValue(ctx, subagentWriteClaimKey{}, grant)
-}
-
 // SubagentWriteGrant returns the running child's grant, or nil outside one.
 func SubagentWriteGrant(ctx context.Context) *WriteGrant {
 	grant, _ := ctx.Value(subagentWriteClaimKey{}).(*WriteGrant)
@@ -111,14 +104,6 @@ func WholeWorkspaceWriteClaim(workspaceRoot string) (WritePathSet, error) {
 		return WritePathSet{}, err
 	}
 	return WritePathSet{WholeWorkspace: true, WorkspaceRoot: root}, nil
-}
-
-// OptimisticWorkspaceClaim is the claim an undeclared writer takes when the user
-// chose optimistic sub-agent claims: workspace-scoped, reserving nothing.
-func OptimisticWorkspaceClaim(workspaceRoot string) (WritePathSet, error) {
-	whole, err := WholeWorkspaceWriteClaim(workspaceRoot)
-	whole.Optimistic = true
-	return whole, err
 }
 
 // Overlaps reports whether two write claims conflict (identical, parent/child,
@@ -145,25 +130,6 @@ func (s WritePathSet) Overlaps(other WritePathSet) bool {
 		}
 	}
 	return false
-}
-
-// ValidateNonOverlappingWriteClaims fails if any pair of claims overlaps.
-// Used by fleet preflight so no task starts when path division is invalid.
-func ValidateNonOverlappingWriteClaims(claims []WritePathSet) error {
-	for i := range claims {
-		if claims[i].Empty() {
-			continue
-		}
-		for j := i + 1; j < len(claims); j++ {
-			if claims[j].Empty() {
-				continue
-			}
-			if claims[i].Overlaps(claims[j]) {
-				return fmt.Errorf("write path conflict between task %d and task %d", i+1, j+1)
-			}
-		}
-	}
-	return nil
 }
 
 // AllowsPath reports whether target is inside this claim (for re-bound writers).

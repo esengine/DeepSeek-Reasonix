@@ -364,10 +364,6 @@ func newSubagentStore(sessionDir string, parentLive func(sessionPath string) boo
 		return nil, nil
 	}
 	store := delegation.NewSubagentStore(filepath.Join(sessionDir, "subagents")).WithParentSessionProbe(parentLive)
-	store.WithSteerLimits(func() delegation.SteerLimits {
-		bytes, perMinute := config.LoadForEditWithoutCredentials(config.UserConfigPath()).SubagentSteerLimits()
-		return delegation.SteerLimits{MaxBytes: bytes, PerMinute: perMinute}
-	})
 	if _, err := store.CleanupStaleRunning(); err != nil {
 		return nil, fmt.Errorf("cleanup stale subagents: %w", err)
 	}

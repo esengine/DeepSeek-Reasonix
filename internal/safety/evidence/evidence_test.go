@@ -96,22 +96,6 @@ func TestLedgerRequiresReviewCoverageAfterMutation(t *testing.T) {
 	}
 }
 
-func TestLedgerAcceptsCollectedStructuredReviewReport(t *testing.T) {
-	ledger := NewLedger()
-	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, ToolFacts{WritesNamedPaths: true}))
-	auth := GrantReviewAuthority(ReviewKindReview)
-	ledger.Record(Receipt{ToolName: "review_report", Success: true, ReportKind: ReviewKindReview,
-		ReviewAuthority: &auth, SourceExecutionID: "exec-probe", Args: json.RawMessage(`{
-		"kind":"review",
-		"verdict":"block",
-		"reviewed_paths":["changed.go"],
-		"findings":[{"severity":"critical","summary":"must fix","path":"changed.go"}]
-	}`)})
-	if !ledger.HasCompletedReview() {
-		t.Fatal("a structured report completes the review activity even when its verdict requires follow-up")
-	}
-}
-
 func TestLedgerHasWriteOrCommandSince(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{ToolName: "todo_write", Success: true, Todos: []TodoItem{{Content: "edit", Status: "in_progress"}}})
@@ -913,7 +897,7 @@ func TestToolCallMutatesForDeliveryProfile(t *testing.T) {
 	}{
 		{name: "trusted reader", toolName: "read_file", args: `{"path":"a.go"}`, readOnly: true},
 		{name: "file writer", toolName: "edit_file", args: `{"path":"a.go"}`, want: true},
-		{name: "delegated task meta", toolName: "task", args: `{"prompt":"fix it"}`},
+		{name: "delegated task meta", toolName: "spawn_agents", args: `{"tasks":[{"title":"t","task":"fix it"}]}`},
 		{name: "run_skill meta", toolName: "run_skill", args: `{"name":"review"}`},
 		{name: "review meta", toolName: "review", args: `{"task":"review changes"}`},
 		{name: "security_review meta", toolName: "security_review", args: `{"task":"security"}`},

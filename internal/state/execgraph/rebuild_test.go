@@ -179,39 +179,6 @@ func TestEdgesFollowFromTheOpenings(t *testing.T) {
 	}
 }
 
-// TestSkipCauseIsTheFirstUnansweredReleased: a fan-out cuts a branch when it
-// processes the first result that did not complete and releases that item in
-// the same handler, so the cause is the earliest released upstream that holds
-// no answer — not the first one declared.
-func TestSkipCauseIsTheFirstUnansweredReleased(t *testing.T) {
-	children := []ChildOutcome{
-		{Execution: "call/a", Status: ChildFailed},
-		{Execution: "call/b", Status: ChildFailed},
-	}
-	for name, tc := range map[string]struct {
-		aAt, bAt int
-		want     string
-	}{
-		"a released first": {aAt: 2, bAt: 5, want: "call/a"},
-		"b released first": {aAt: 5, bAt: 2, want: "call/b"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			entries := []execjournal.Entry{
-				settled(started(opened("call/a"), 1), tc.aAt),
-				settled(started(opened("call/b"), 1), tc.bAt),
-				withDeps(settled(opened("call/c"), 6), "call/a", "call/b"),
-			}
-			if got := SkipCause(entries, children, "call/c"); got != tc.want {
-				t.Errorf("cause = %q, want %q", got, tc.want)
-			}
-			g := Rebuild(entries, children, nil).Graph
-			if state := stateOf(g, "call/c"); state != agentgraph.StateSkipped {
-				t.Errorf("state = %q, want skipped", state)
-			}
-		})
-	}
-}
-
 // TestRebuildIsDeterministic: two folds of the same facts must draw the same
 // picture, or a comparison against one of them proves nothing about the other.
 func TestRebuildIsDeterministic(t *testing.T) {

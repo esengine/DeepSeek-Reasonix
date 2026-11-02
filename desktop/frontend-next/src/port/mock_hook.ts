@@ -17,10 +17,6 @@ export class MockHook extends MockMcp {
     return [];
   }
 
-  async steerSubagent(_ref: string, _text: string): Promise<void> {
-    throw new HttpError(404, "no sub-agent run answers to that reference", { code: "subagent.not_found" });
-  }
-
   async subagentTranscript(_ref: string): Promise<SubagentTranscript> {
     throw new HttpError(404, "no sub-agent run answers to that reference", { code: "subagent.not_found" });
   }
