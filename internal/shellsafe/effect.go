@@ -223,7 +223,7 @@ func classifyStaticFields(fields []string) CommandEffect {
 		}
 		return effect
 	}
-	if len(args) > 0 && readOnlyPrefixes[base][strings.ToLower(args[0])] {
+	if len(args) > 0 && readOnlyPrefix(base, args[0]) {
 		effect := knownReader(joinFamily(base, strings.ToLower(args[0])))
 		if base == "docker" || base == "kubectl" {
 			effect.UsesNetwork = true
