@@ -130,6 +130,39 @@ write roots.
 - Resuming an already-open session with a different set is refused
   (`acp.additional_directories.session_open`); close it first.
 
+### When a session is already open elsewhere
+
+`session/new`, `session/load` and `session/resume` take the transcript's lease
+for the session's lifetime. A lease refusal answers with an implementation-defined
+JSON-RPC code and a `data.code` a client branches on; `message` stays Reasonix's
+English, which clients still show.
+
+```json
+{"error": {"code": -32022, "message": "session/load: this session is already open elsewhere in this Reasonix (since 09:14); close the other Reasonix window or process first", "data": {"code": "busy.session_in_use"}}}
+```
+
+- `-32022` is "another runtime owns this session" and `-32023` is "ownership
+  could not be proven". They are different answers: the first names a holder a
+  person can close, the second names missing evidence, and reporting it as held
+  would blame a window that may not exist.
+- `-32600` is not a lease refusal. A malformed request gets that code before any
+  session method runs, and a lease refusal never uses it.
+- `-32603` means the lease could not be taken for a reason the store cannot
+  classify, such as a metadata write that failed.
+
+| `data.code` | JSON-RPC | Refusal | What the client does |
+| --- | --- | --- | --- |
+| `busy.session_in_use` | `-32022` | Another runtime owns this session's transcript lease. | Do not bind it elsewhere or retry blindly. Ask the person to close the other Reasonix window or process, then retry once that holder exits. The transcript is intact and nothing already written is lost. |
+| `session.lease_unprovable` | `-32023` | The lease probe could not prove ownership either way: the lock or the lease metadata could not be read. | Treat it as neither held nor free, and do not tell the person a window holds it. Ask them to check the session directory's `.lease.lock` and `.lease.json` entries, then retry once the probe can decide. |
+
+`busy.session_in_use` is the HTTP frontend's identity for the same conflict, so one
+vocabulary names it on both surfaces. `session.lease_unprovable` has no HTTP answer
+because no HTTP path asks the three-state probe.
+
+ACP has no read-only attach: `session/load` and `session/resume` bind the transcript
+for writing, so a client that cannot close the other holder reports the refusal
+instead of loading.
+
 ## Session controls
 
 Reasonix exposes independent controls instead of combining unrelated choices in

@@ -16,7 +16,7 @@ func TestInboxRefusalParityIsCleanInTree(t *testing.T) {
 	if got := checkInboxRefusalParity("../.."); len(got) != 0 {
 		t.Fatalf("checkInboxRefusalParity = %v, want none", got)
 	}
-	family, err := inboxSentinels("../..")
+	family, err := refusalSentinels("../..", inboxFamily)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestInboxRefusalParityIsCleanInTree(t *testing.T) {
 	// subject" and files the finding against the writer, so a clean run above
 	// is evidence both were read.
 	for _, w := range inboxWriters {
-		if _, _, _, err := inboxHandledSentinels("../..", w); err != nil {
+		if _, _, _, err := refusalHandledSentinels("../..", inboxFamily, w); err != nil {
 			t.Fatalf("%s: %v", w.file, err)
 		}
 	}
@@ -154,14 +154,129 @@ func inboxRefusal(err error) error {
 	}
 }
 
+// The lease family is read through the same mechanism as the inbox one: the
+// store's sentinels and the ACP session writer are both matched by shape, so a
+// clean tree is evidence both sides were read.
+func TestSessionLeaseRefusalParityIsCleanInTree(t *testing.T) {
+	if got := checkSessionLeaseRefusalParity("../.."); len(got) != 0 {
+		t.Fatalf("checkSessionLeaseRefusalParity = %v, want none", got)
+	}
+	family, err := refusalSentinels("../..", leaseFamily)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ErrSessionLeaseHeld", "ErrSessionLeaseUnprovable"} {
+		if !slices.Contains(family, name) {
+			t.Fatalf("family = %v, want %s among them", family, name)
+		}
+	}
+	for _, w := range sessionLeaseWriters {
+		if _, _, _, err := refusalHandledSentinels("../..", leaseFamily, w); err != nil {
+			t.Fatalf("%s: %v", w.file, err)
+		}
+	}
+}
+
+// TestSessionLeaseRefusalParityNamesALeaseSentinelWithNoCase is the guard this
+// change exists for: a sentinel added beside the two the lease already declares
+// must fail the check by name, against the writer that dropped it, not reach a
+// client as an internal fault.
+func TestSessionLeaseRefusalParityNamesALeaseSentinelWithNoCase(t *testing.T) {
+	root := fakeLeaseTree(t,
+		`package sessionstore
+
+import "errors"
+
+var (
+	ErrSessionLeaseHeld       = errors.New("held")
+	ErrSessionLeaseUnprovable = errors.New("unprovable")
+	ErrSessionLeaseExpired    = errors.New("expired")
+)
+`,
+		`package acp
+
+func sessionLeaseRefusal(method string, err error) *RPCError {
+	switch {
+	case errors.Is(err, sessionstore.ErrSessionLeaseHeld):
+		return refuseSessionLease(ErrSessionLeaseHeld, "busy.session_in_use", method)
+	case errors.Is(err, sessionstore.ErrSessionLeaseUnprovable):
+		return refuseSessionLease(ErrSessionLeaseUnprovable, "session.lease_unprovable", method)
+	default:
+		return &RPCError{Code: ErrInternal, Message: err.Error()}
+	}
+}
+`)
+	got := checkSessionLeaseRefusalParity(root)
+	if len(got) != 1 {
+		t.Fatalf("findings = %v, want one for the undeclared lease sentinel", got)
+	}
+	if !strings.Contains(got[0].Msg, "ErrSessionLeaseExpired") ||
+		!strings.Contains(got[0].Msg, sessionLeaseACPWriterFunc) ||
+		got[0].File != sessionLeaseACPWriterFile {
+		t.Fatalf("finding = %+v, want ErrSessionLeaseExpired with no case in %s", got[0], sessionLeaseACPWriterFunc)
+	}
+}
+
+// A lease case that writes prose instead of data keeps the holder and the
+// unprovable state indistinguishable on the wire.
+func TestSessionLeaseRefusalParityNamesACaselessIdentity(t *testing.T) {
+	root := fakeLeaseTree(t,
+		"package sessionstore\n\nimport \"errors\"\n\nvar ErrSessionLeaseHeld = errors.New(\"held\")\n",
+		`package acp
+
+func sessionLeaseRefusal(method string, err error) *RPCError {
+	switch {
+	case errors.Is(err, sessionstore.ErrSessionLeaseHeld):
+		return &RPCError{Code: ErrSessionLeaseHeld, Message: method + ": " + err.Error()}
+	}
+	return nil
+}
+`)
+	got := checkSessionLeaseRefusalParity(root)
+	if len(got) != 1 || got[0].File != sessionLeaseACPWriterFile || !strings.Contains(got[0].Msg, "without a code") {
+		t.Fatalf("findings = %+v, want one naming the lease case that writes no identity", got)
+	}
+}
+
+// The lease check says when either side went missing, instead of comparing two
+// empty sets and reporting clean.
+func TestSessionLeaseRefusalParitySaysWhenItLostItsSubject(t *testing.T) {
+	root := fakeLeaseTree(t, "package sessionstore\n", "package acp\n\nfunc somethingElse() {}\n")
+	got := checkSessionLeaseRefusalParity(root)
+	if len(got) != 1 || !strings.Contains(got[0].Msg, "lost its subject") || got[0].File != sessionLeaseFamilyFile {
+		t.Fatalf("findings = %+v, want one saying the lease family is gone", got)
+	}
+
+	root = fakeLeaseTree(t,
+		"package sessionstore\n\nimport \"errors\"\n\nvar ErrSessionLeaseHeld = errors.New(\"held\")\n",
+		"package acp\n\nfunc somethingElse() {}\n")
+	got = checkSessionLeaseRefusalParity(root)
+	if len(got) != 1 || !strings.Contains(got[0].Msg, "lost its subject") || got[0].File != sessionLeaseACPWriterFile {
+		t.Fatalf("findings = %+v, want one saying the lease writer is gone", got)
+	}
+}
+
 func fakeInboxTree(t *testing.T, family, httpWriter, acpWriter string) string {
 	t.Helper()
-	root := t.TempDir()
-	for rel, body := range map[string]string{
+	return fakeRefusalTree(t, map[string]string{
 		inboxFamilyFile:     family,
 		inboxHTTPWriterFile: httpWriter,
 		inboxACPWriterFile:  acpWriter,
-	} {
+	})
+}
+
+func fakeLeaseTree(t *testing.T, family, acpWriter string) string {
+	t.Helper()
+	return fakeRefusalTree(t, map[string]string{
+		sessionLeaseFamilyFile:    family,
+		sessionLeaseACPWriterFile: acpWriter,
+	})
+}
+
+func fakeRefusalTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for rel, body := range files {
 		path := filepath.Join(root, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)

@@ -584,7 +584,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	lease, leaseErr := sessionstore.TryAcquireSessionLease(path)
 	if leaseErr != nil {
 		ctrl.Close()
-		return SessionConfigState{}, sessionLeaseBindError(method, leaseErr)
+		return SessionConfigState{}, sessionLeaseAcquireRefusal(method, path, leaseErr)
 	}
 	loaded, err := sessionstore.LoadSession(path)
 	if err != nil {
@@ -593,7 +593,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
 	}
 	if err := resumeACPControllerForWrite(ctrl, loaded, path, lease); err != nil {
-		return SessionConfigState{}, sessionLeaseBindError(method, err)
+		return SessionConfigState{}, sessionLeaseRefusal(method, err)
 	}
 	toolApprovalMode, keptApproval := s.restoredPosture(saved.ToolApprovalMode)
 	ctrl.SetToolApprovalMode(toolApprovalMode)

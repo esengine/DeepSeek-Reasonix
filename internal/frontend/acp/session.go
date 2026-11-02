@@ -22,17 +22,56 @@ import (
 	"reasonix/internal/state/sessioninbox"
 )
 
-// sessionLeaseBindError maps a lease-acquisition failure to the protocol
-// error the client sees: a held session names its holder with the shared CLI
-// wording; anything else is an internal error.
-func sessionLeaseBindError(method string, err error) *RPCError {
-	if errors.Is(err, sessionstore.ErrSessionLeaseHeld) {
-		return &RPCError{
-			Code:    ErrInvalidRequest,
-			Message: method + ": " + control.SessionInUseMessage(err) + "; " + control.SessionLeaseCloseHint,
-		}
+// Implementation-defined JSON-RPC codes for a session lease refusal, beside the
+// inbox pair. ACP has no schema code for "another runtime owns this session", and
+// -32600 says only that the request was malformed.
+const (
+	ErrSessionLeaseHeld       = -32022
+	ErrSessionLeaseUnprovable = -32023
+)
+
+// SessionLeaseRefusalData is the data member of a lease refusal: the dotted
+// identity a client branches on, the HTTP frontend's where it has one.
+type SessionLeaseRefusalData struct {
+	Code string `json:"code"`
+}
+
+func refuseSessionLease(rpcCode int, dataCode, message string) *RPCError {
+	return &RPCError{Code: rpcCode, Message: message, Data: SessionLeaseRefusalData{Code: dataCode}}
+}
+
+// sessionLeaseRefusal names every condition the transcript lease can refuse a
+// session method with. A sentinel with no case here reached the client as an
+// internal fault, so a holder could not be told from a disk that would not
+// write; repolint reads this switch against the store's exported lease family.
+func sessionLeaseRefusal(method string, err error) *RPCError {
+	switch {
+	case errors.Is(err, sessionstore.ErrSessionLeaseHeld):
+		return refuseSessionLease(ErrSessionLeaseHeld, "busy.session_in_use",
+			method+": "+control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
+	case errors.Is(err, sessionstore.ErrSessionLeaseUnprovable):
+		// The store's third answer is not a flavour of held: no holder was
+		// observed, so the client must not be told to close a window.
+		return refuseSessionLease(ErrSessionLeaseUnprovable, "session.lease_unprovable",
+			method+": "+err.Error())
+	default:
+		return &RPCError{Code: ErrInternal, Message: method + ": session lease: " + err.Error()}
 	}
-	return &RPCError{Code: ErrInternal, Message: method + ": session lease: " + err.Error()}
+}
+
+// sessionLeaseAcquireRefusal answers a refused acquisition. A held lock arrives
+// with its sentinel, but a lock that would not open arrives raw; the store's
+// three-state probe says which of its answers that failure is.
+func sessionLeaseAcquireRefusal(method, path string, err error) *RPCError {
+	if errors.Is(err, sessionstore.ErrSessionLeaseHeld) || errors.Is(err, sessionstore.ErrSessionLeaseUnprovable) {
+		return sessionLeaseRefusal(method, err)
+	}
+	switch ownership := sessionstore.SessionLeaseOwnership(path); {
+	case errors.Is(ownership, sessionstore.ErrSessionLeaseHeld),
+		errors.Is(ownership, sessionstore.ErrSessionLeaseUnprovable):
+		return sessionLeaseRefusal(method, ownership)
+	}
+	return sessionLeaseRefusal(method, err)
 }
 
 // sessionOpenError answers a session that could not open: a model with no
@@ -141,13 +180,13 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		lease, err := sessionstore.TryAcquireSessionLease(sess.transcript)
 		if err != nil {
 			ctrl.Close()
-			return nil, sessionLeaseBindError("session/new", err)
+			return nil, sessionLeaseAcquireRefusal("session/new", sess.transcript, err)
 		}
 		sess.lease = lease
 		ctrl.SetFreshSessionPath(sess.transcript)
 		if err := bindACPWriteAuthorityOrClose(ctrl, lease); err != nil {
 			sess.lease = nil
-			return nil, sessionLeaseBindError("session/new", err)
+			return nil, sessionLeaseRefusal("session/new", err)
 		}
 	}
 
