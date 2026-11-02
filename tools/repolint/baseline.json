@@ -13,10 +13,10 @@
     "doc-prose": 2128,
     "error-text": 9,
     "essay": 2579,
-    "file-size": 18429,
+    "file-size": 18427,
     "flat-view": 0,
     "frontend-parity": 13,
-    "function-size": 2486,
+    "function-size": 2485,
     "layer-order": 0,
     "layering": 0,
     "marker": 0,
@@ -265,7 +265,7 @@
     },
     "internal/contract/config/config.go": {
       "essay": 30,
-      "file-size": 846,
+      "file-size": 845,
       "process-input": 3
     },
     "internal/contract/config/credentials.go": {
@@ -343,8 +343,8 @@
     "internal/contract/config/render.go": {
       "complexity": 86,
       "essay": 1,
-      "file-size": 273,
-      "function-size": 375
+      "file-size": 272,
+      "function-size": 374
     },
     "internal/contract/config/vision.go": {
       "essay": 1,

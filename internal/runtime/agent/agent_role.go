@@ -16,16 +16,11 @@ type agentRole struct {
 	// non-destructive MCP targets without readOnlyHint. Writers, bash and
 	// destructive MCP stay blocked, and read-only sub-agents leave it false.
 	plannerMCPExecution bool
-	// waiveOwedChecks is the user's choice to drop the check, review and
-	// sign-off a turn that changed files owes before it may finish. The turn's
-	// own unfinished plan and a capability the user required still hold it.
-	waiveOwedChecks bool
 }
 
 func newAgentRole(opts Options) agentRole {
 	return agentRole{
 		readOnlyExecution:   opts.ReadOnlyExecution,
 		plannerMCPExecution: opts.PlannerMCPExecution,
-		waiveOwedChecks:     opts.WaiveOwedChecks,
 	}
 }

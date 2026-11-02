@@ -141,7 +141,6 @@ var table = []Entry{
 	{ID: "agent.plan_approval", Class: Guarded, Effect: OnOpen},
 	{ID: "agent.default_mode", Class: Preference, Effect: OnOpen},
 	{ID: "agent.goal_auto_retry", Class: Guarded, Effect: OnOpen},
-	{ID: "agent.host_verification", Class: Guarded, Effect: OnOpen},
 	{ID: "agent.output_style", Class: Preference, Effect: OnOpen},
 	{ID: "agent.auto_plan", Class: Preference, Effect: OnOpen},
 	{ID: "agent.reasoning_language", Class: Preference, Effect: OnOpen},

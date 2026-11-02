@@ -61,7 +61,7 @@ func TestBoundaryKeysAreGuarded(t *testing.T) {
 		}
 	}
 	for _, id := range []string{
-		"desktop.default_tool_approval_mode", "agent.plan_approval", "agent.host_verification", "agent.subagent_claims",
+		"desktop.default_tool_approval_mode", "agent.plan_approval", "agent.subagent_claims",
 		"agent.max_steps", "agent.max_subagent_depth", "agent.max_subagent_concurrency", "agent.max_parallel_writers",
 		"agent.task_token_budget", "agent.guardian_model", "agent.system_prompt", "agent.screen_external_content",
 		"tools.shell.path", "tools.enabled", "statusline.command", "skills.paths", "providers", "plugins",

@@ -80,7 +80,7 @@ func runPlannedChecks(t *testing.T, files map[string]string, planArgs string, ca
 	isolateConfigHome(t)
 	// The subject is what the checks write, not the jail: a host without an OS
 	// sandbox refuses bash fail-closed, and the checks would never run.
-	writeUserConfig(t, holdChangedTurns+"\n[sandbox]\nbash = \"off\"\n")
+	writeUserConfig(t, "[sandbox]\nbash = \"off\"\n")
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	// A declared project check makes the turn answer to readiness in the

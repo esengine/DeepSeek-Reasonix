@@ -83,7 +83,6 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # subagent_claims = "strict"          # user file only; default optimistic: a sub-agent that declares no write_paths holds only the path it is writing; strict makes it hold the whole workspace
 # plan_approval = "auto"             # user file only; a submitted plan starts executing without the approval click, and the transcript says so; default ask
 # default_mode = "plan"              # user file only; a new conversation starts in plan mode (a resumed one keeps its own; Settings has a switch); default normal
-# host_verification = "on"           # user file only; "on" holds a turn that changed files open until a check, a review and a sign-off exist; unset or "off" does not (unset still holds them under the delivery preset); the receipt always says what was checked
 # compact_ratio = 0.85             # sole auto trigger; presets 0.70 / 0.80 / 0.85
 # max_output_tokens = 0            # recommended: automatic (DeepSeek default high → ~64K; not unlimited)
 # max_output_tokens = 32768        # ordinary coding / cost control

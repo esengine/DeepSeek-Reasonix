@@ -539,7 +539,6 @@ func (b *builder) executor() *agent.Agent {
 		ProjectChecks: b.prompt.projectChecks, ProjectSensitivePaths: b.prompt.sensitivePaths,
 		AgentPreset:       b.model.preset,
 		DeliveryProfile:   b.model.delivery,
-		WaiveOwedChecks:   cfg.WaivesOwedChecks(b.model.delivery) && !b.opts.HoldOwedChecks,
 		Ablation:          b.opts.Ablation,
 		WorkspaceLease:    b.session.lease,
 		CapabilityLedger:  t.caps.ledger,

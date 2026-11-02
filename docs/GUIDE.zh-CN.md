@@ -92,7 +92,6 @@ reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # plan_approval = "auto"             # 仅用户配置文件；提交的计划不再等待批准点击，直接开始执行，对话里会留下说明，默认 ask
 # default_mode = "plan"              # 仅用户配置文件；新对话从计划模式开始（恢复的对话保持自己的模式；设置里有对应开关），默认 normal
 # subagent_claims = "strict"          # 仅用户配置文件；默认 optimistic：没有声明 write_paths 的子代理只占用正在写的路径；strict 则让它占整个工作区
-# host_verification = "on"           # 仅用户配置文件；设为 on 时，改过文件的回合要先有检查、复核和签收才能结束；不设或设为 off 则不要求（不设时交付预设仍会要求）；交付回执始终如实写明检查了什么
 # compact_ratio 是唯一自动维护阈值（默认 0.85；预设 0.70/0.80/0.85）
 # max_output_tokens = 0            # 推荐：自动（DeepSeek 默认 high → 约 64K；不是无限）
 # max_output_tokens = 32768        # 普通编码 / 控制费用

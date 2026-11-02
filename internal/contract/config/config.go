@@ -1137,12 +1137,11 @@ type AgentConfig struct {
 	// declare non-overlapping write_paths. 0, the default, sets no limit: the
 	// path claims keep writers apart, not a count. The user file only.
 	MaxParallelWriters int    `toml:"max_parallel_writers"`
-	SubagentClaims     string `toml:"subagent_claims"`   // "optimistic" (default) or "strict"; the user file only
-	WriteLease         string `toml:"write_lease"`       // "optimistic" (default) or "strict"; the user file only
-	PlanApproval       string `toml:"plan_approval"`     // "ask" (default) or "auto": the plan card answers itself; the user file only
-	DefaultMode        string `toml:"default_mode"`      // "normal" (default) or "plan": how a new conversation starts; the user file only
-	GoalAutoRetry      int    `toml:"goal_auto_retry"`   // 0 (default) stops at an unavailable completion check; N retries it up to N times in a row; the user file only
-	HostVerification   string `toml:"host_verification"` // unset (the default), "on" or "off"; the user file only
+	SubagentClaims     string `toml:"subagent_claims"` // "optimistic" (default) or "strict"; the user file only
+	WriteLease         string `toml:"write_lease"`     // "optimistic" (default) or "strict"; the user file only
+	PlanApproval       string `toml:"plan_approval"`   // "ask" (default) or "auto": the plan card answers itself; the user file only
+	DefaultMode        string `toml:"default_mode"`    // "normal" (default) or "plan": how a new conversation starts; the user file only
+	GoalAutoRetry      int    `toml:"goal_auto_retry"` // 0 (default) stops at an unavailable completion check; N retries it up to N times in a row; the user file only
 
 	// WriteLeaseMaxWaitMinutes bounds one wait behind another session's write
 	// claim; 0, the default, waits for as long as the turn lasts. The user file only.

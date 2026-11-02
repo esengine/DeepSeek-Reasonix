@@ -31,7 +31,6 @@ type heldScope struct {
 	limits         agentLimits
 	goalAutoRetry  int
 	subagentClaims string
-	hostVerif      string
 	shell          ShellConfig
 	rgPath         string
 	lsp            map[string]LSPServer
@@ -92,7 +91,6 @@ func holdUserScope(c *Config) heldScope {
 		limits:          holdAgentLimits(c),
 		goalAutoRetry:   c.Agent.GoalAutoRetry,
 		subagentClaims:  c.Agent.SubagentClaims,
-		hostVerif:       c.Agent.HostVerification,
 		shell:           shell,
 		rgPath:          c.Tools.Search.RgPath,
 		lsp:             maps.Clone(c.LSP.Servers),
@@ -258,12 +256,6 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 	if c.Agent.SubagentClaims != h.subagentClaims {
 		c.ignoreProject("agent.subagent_claims", c.Agent.SubagentClaims, ProjectUserOnly)
 		c.Agent.SubagentClaims = h.subagentClaims
-	}
-	// What the host asks of a turn before it may finish is the user's own call,
-	// so a cloned repo can neither switch it off nor undo the user's choice.
-	if c.Agent.HostVerification != h.hostVerif {
-		c.ignoreProject("agent.host_verification", c.Agent.HostVerification, ProjectUserOnly)
-		c.Agent.HostVerification = h.hostVerif
 	}
 	// Keeping paired phones across restarts is the user's alone: it widens how
 	// long a device stays trusted, which is not a clone's to give away.

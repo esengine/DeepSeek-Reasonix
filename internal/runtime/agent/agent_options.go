@@ -167,11 +167,6 @@ type Options struct {
 	// AgentPreset is empty for one compatibility version of direct constructors.
 	DeliveryProfile bool
 
-	// WaiveOwedChecks is the user's choice to drop the check, review and
-	// sign-off a turn that changed files owes before it may finish. It never
-	// comes from a project file.
-	WaiveOwedChecks bool
-
 	// AgentPreset is the session role setting (balanced|delivery). Empty
 	// falls back to balanced unless DeliveryProfile is true (then delivery).
 	// Switching the preset mid-session does not rebuild the agent; the value is

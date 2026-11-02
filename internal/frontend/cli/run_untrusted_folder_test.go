@@ -76,7 +76,7 @@ func (r *untrustedFolderRun) modelSaw() string {
 
 // In a folder nobody trusted, a headless run that could not write says so on
 // stderr with the refusal's identity and the remedy, tells the model the same
-// cause, and exits 4 (3 under --fail-on-unverified); trusting the folder lets the
+// cause, and exits 4; trusting the folder lets the
 // identical command write.
 func TestRunInUntrustedFolderSaysWhyNothingWasDone(t *testing.T) {
 	r := newUntrustedFolderRun(t)
@@ -96,11 +96,6 @@ func TestRunInUntrustedFolderSaysWhyNothingWasDone(t *testing.T) {
 		if !strings.Contains(saw, want) {
 			t.Fatalf("the model was told %q, want %q", saw, want)
 		}
-	}
-
-	_, _ = captureCLIOutput(t, func() { code = Run([]string{"run", "--fail-on-unverified", "write notes.md"}, "test") })
-	if code != runExitUnverified {
-		t.Fatalf("--fail-on-unverified exited %d, want %d: every write was refused by project trust", code, runExitUnverified)
 	}
 
 	stdout, _ := captureCLIOutput(t, func() { code = Run([]string{"-p", "--output-format", "json", "write notes.md"}, "test") })

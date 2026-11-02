@@ -139,7 +139,6 @@ type Options struct {
 	Observe *ObserveOptions
 
 	GoalTurnsUnreachable bool // this assembly never arms a Goal turn; see GoalOnlyToolNames
-	HoldOwedChecks       bool // the caller asked for a verified result, so a changed turn owes its check whatever host_verification says
 	UnattendedChild      bool // an unattended child run: it offers neither best_of_n nor isolation
 	// SessionRecoveryMeta and OnSessionRecovered let richer frontends attach
 	// local UI metadata to automatic transcript recovery branches.

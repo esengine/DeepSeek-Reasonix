@@ -109,7 +109,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		effort, permissionMode,
 		completionFlag("--auto -y", cliCompletionNoValue), completionFlag("--dangerously-skip-permissions --yolo", cliCompletionNoValue),
 		completionFlag("--print -p", cliCompletionNoValue),
-		completionFlag("--events-jsonl", cliCompletionNoValue), completionFlag("--fail-on-unverified", cliCompletionNoValue),
+		completionFlag("--events-jsonl", cliCompletionNoValue),
 		completionFlag("--output-format", cliCompletionStaticValue, "text", "json", "stream-json"),
 		completionFlag("--add-dir", cliCompletionPathValue),
 		completionFlag("--allowed-tools --allowedTools", cliCompletionStaticValue),

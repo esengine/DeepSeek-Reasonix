@@ -17,7 +17,6 @@ type runFlags struct {
 	takeover                          *bool
 	autoApprove, yolo                 *bool
 	printOnly, eventsJSONL            *bool
-	failOnUnverified                  *bool
 	additionalDirs, allowedToolValues []string
 }
 
@@ -45,7 +44,6 @@ func newRunFlags() *runFlags {
 	f.permissionMode = fs.String("permission-mode", "", "permission mode: read-only | manual | ask | auto | acceptEdits | dontAsk | bypassPermissions (default: auto where the OS sandbox confines writes and the folder is trusted, otherwise ask)")
 	f.autoApprove, f.yolo = registerRunApprovalFlags(fs)
 	f.printOnly = fs.BoolP("print", "p", false, "print only the final response")
-	f.failOnUnverified = fs.Bool("fail-on-unverified", false, "exit 3 when the model finished but the host could not verify the result (final readiness unmet, or edits and commands refused because the folder is not trusted)")
 	f.eventsJSONL = fs.Bool("events-jsonl", false, "emit a redacted structured event stream as JSONL")
 	f.outputFormat = fs.String("output-format", "text", "output format: text | json | stream-json")
 	fs.StringArrayVar(&f.additionalDirs, "add-dir", nil, "allow tool access to an additional directory (repeatable)")

@@ -501,7 +501,7 @@ func runAgent(args []string, version string) int {
 	// executor, not just the top-level one. Ask fails closed because no UI can
 	// answer; with no mode named, the build's sandbox claim and the folder's
 	// trust decide between that and auto once the controller exists.
-	overrides := runBuildOverrides(effortOverride, allowedTools, f.additionalDirs, workspaceRoot, permissions.approval, cliSessionRecoveredHandler(leases), ablated, *f.failOnUnverified)
+	overrides := runBuildOverrides(effortOverride, allowedTools, f.additionalDirs, workspaceRoot, permissions.approval, cliSessionRecoveredHandler(leases), ablated)
 	overrides.Version = version
 	overrides = withComposition(overrides, *f.agentComposition, resumeSession)
 	ctrl, err := setupProfileWithOverrides(ctx, *f.model, *f.maxSteps, true, sink, profile, overrides)
@@ -527,7 +527,7 @@ func runAgent(args []string, version string) int {
 	chain.begin(ctrl, version, prompt)
 	runErr := ctrl.Run(ctx, prompt)
 	reporter.RecordRecovery(ctrl.DrainRecoveryMetrics())
-	completion := classifyRunCompletion(runErr).withFolderRefusal(chain.refusedByFolderTrust(os.Stderr)).withFailOnUnverified(*f.failOnUnverified)
+	completion := classifyRunCompletion(runErr).withFolderRefusal(chain.refusedByFolderTrust(os.Stderr))
 	if cfg != nil {
 		notify.SendEvent(newNotificationSender(), i18n.M, cfg.Notifications, event.Event{
 			Kind:    event.TurnDone,

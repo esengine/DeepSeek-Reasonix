@@ -85,7 +85,7 @@ When a folder is trustable, its writes are sandbox-confined and no decision is r
 1.x wrote files and ran commands in any folder. In 2.x an untrusted folder has nobody to approve edits and shell commands, so a headless run refuses them. Nothing is loosened: the run now says so instead of looking like success.
 
 - stderr names the refused tools, the code `permission.untrusted_folder` and the remedy.
-- The process exits `4` (`3` under `--fail-on-unverified`); the work was not done.
+- The process exits `4`; the work was not done.
 - `--output-format json` and `stream-json` list each refusal in `permission_denials` with its `code` and `remedy`, and set `unverified_by`.
 
 To make a script behave as it did in 1.x, trust the folder once (`reasonix trust --dir <folder>`), or pass `--permission-mode auto` or `--yolo` knowingly for that run. Other exit codes are as in 1.x: `1` for an error, `2` for a usage error.

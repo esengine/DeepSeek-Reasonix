@@ -49,7 +49,7 @@ func TestRunProseOnlyFinishHasNoReadinessDebt(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "note.txt")); err != nil {
 		t.Fatal(err)
 	}
-	code, result, stderr := runCLIJSONResult(t, "run", "-y", "--fail-on-unverified", "--output-format", "json", "write a note")
+	code, result, stderr := runCLIJSONResult(t, "run", "-y", "--output-format", "json", "write a note")
 	if code != 0 || result["is_error"] != false || result["readiness"] != nil {
 		t.Fatalf("prose finish exited %d with %v; stderr: %s", code, result, stderr)
 	}

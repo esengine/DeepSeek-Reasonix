@@ -95,15 +95,6 @@ func runTrace(t *testing.T, tc traceCase) traceReading {
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(toml), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	// A turn that changed files owes its check only when the user asks the host to
-	// hold it, and these readings include what that hold emits.
-	userConfig := config.RootsForHome(dir).UserConfigPath()
-	if err := os.MkdirAll(filepath.Dir(userConfig), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(userConfig, []byte("[agent]\nhost_verification = \"on\"\n"), 0o600); err != nil {
-		t.Fatalf("write user config: %v", err)
-	}
 	// The home this run states is where the person's approval would be.
 	if _, err := config.RootsForHome(dir).ApproveWorkspacePrograms(dir); err != nil {
 		t.Fatal(err)
