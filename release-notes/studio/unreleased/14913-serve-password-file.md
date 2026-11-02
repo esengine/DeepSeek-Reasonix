@@ -1,2 +1,0 @@
-- 修复：`reasonix serve` 新增 `--password-file`，密码从仅所有者可读的文件读取，不再出现在进程命令行里；`--hash-password` 同样支持。关联 #14913。
-- Fixed: `reasonix serve` takes `--password-file`, reading the password from an owner-only file instead of argv where `ps` shows it; `--hash-password` accepts it too. Refs #14913.
