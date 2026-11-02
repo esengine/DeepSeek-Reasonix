@@ -87,6 +87,9 @@ and Microsoft YaHei, neither of which carries a 500 or a 600: CSS then rounds
 weights into two and thinning the body text. Both shipped files are variable, so
 every step exists on every platform. Licences sit beside them (both OFL 1.1).
 
+Reply-menu buttons use normal letter spacing, including copy controls portaled
+outside `.flow`. `perf/selection-menu.mjs` checks typography and copy/quote interactions.
+
 The Chinese face is subset to GB2312 plus the interface's own characters —
 1.6MB instead of 14MB. A character outside the subset falls through the stack
 rather than disappearing.
