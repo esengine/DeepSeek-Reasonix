@@ -1,2 +1,0 @@
-- 修复：视觉效果设为「节能」后，运行中的循环动画（状态标志描线、会话行流光、工具旋转图标）也会停下，长时间等待任务时不再让显卡持续工作。关联 #14919。
-- Fixed: Reduced visual effects now also stop the looping run animations (status mark, session-row sweep, tool spinner), so a long wait no longer keeps the GPU busy. Refs #14919.
