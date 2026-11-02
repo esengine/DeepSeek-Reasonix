@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
-import type { HistoryHit, HubPort, TreeWorkspace } from "../port/hub";
+import type { HistoryHit, HistoryIndex, HistorySearch, HubPort, TreeWorkspace } from "../port/hub";
 import { useRailQuery } from "./railsearch";
 
 const MIN_CHARS = 2;
 const SETTLE_MS = 300;
 
-type Reading = { for: string; hits: HistoryHit[] | "failed" };
+type Reading = { for: string; answer: HistorySearch | "failed" };
 
 function titleOf(hit: HistoryHit, tree: TreeWorkspace[]): string {
   const listed = tree.flatMap((w) => w.sessions).find((s) => s.path === hit.path);
@@ -19,6 +19,22 @@ function rootOf(hit: HistoryHit, tree: TreeWorkspace[]): string | undefined {
     if (session) return session.workspaceRoot || workspace.root;
   }
   return hit.workspace || undefined;
+}
+
+/** One line when the index could not answer for every session it knows. Without
+ *  it, a source it failed to read and a query that matched nothing reach this
+ *  rail as the same empty list. */
+function indexNote(index: HistoryIndex | undefined): { reason: "failed" | "building"; note: string } | null {
+  if (!index?.partial) return null;
+  if (index.reason === "failed") {
+    return { reason: "failed", note: t("有些历史内容没能索引，搜索结果可能不完整") };
+  }
+  return {
+    reason: "building",
+    note: index.total > 0
+      ? t("历史索引还在建立（{indexed}/{total}），搜索结果可能不完整", { indexed: index.indexed, total: index.total })
+      : t("历史索引还在建立，搜索结果可能不完整"),
+  };
 }
 
 /** Conversations whose words, not names, match what the rail is searching for.
@@ -40,8 +56,8 @@ export function ContentMatches({ hub, tree, onOpen, onError, onReference }: {
     let current = true;
     const timer = window.setTimeout(() => {
       hub.searchHistory(needle).then(
-        (hits) => current && setRead({ for: needle, hits }),
-        () => current && setRead({ for: needle, hits: "failed" }),
+        (answer) => current && setRead({ for: needle, answer }),
+        () => current && setRead({ for: needle, answer: "failed" }),
       );
     }, SETTLE_MS);
     return () => {
@@ -51,15 +67,21 @@ export function ContentMatches({ hub, tree, onOpen, onError, onReference }: {
   }, [asks, needle, hub]);
 
   if (!asks) return null;
-  const answered = read?.for === needle ? read.hits : null;
-  if (answered === null) return <div className="content-matches" role="status" data-state="reading">{t("正在搜索对话内容…")}</div>;
-  if (answered === "failed") return <div className="content-matches" role="status" data-state="failed">{t("对话内容暂时搜不了，稍后再试")}</div>;
-  if (answered.length === 0) return null;
+  const answer = read?.for === needle ? read.answer : null;
+  if (answer === null) return <div className="content-matches" role="status" data-state="reading">{t("正在搜索对话内容…")}</div>;
+  if (answer === "failed") return <div className="content-matches" role="status" data-state="failed">{t("对话内容暂时搜不了，稍后再试")}</div>;
+  const note = indexNote(answer.index);
+  if (answer.hits.length === 0) {
+    return note
+      ? <div className="content-matches" role="status" data-state="incomplete" data-reason={note.reason}>{note.note}</div>
+      : null;
+  }
   return (
     <section className="content-matches" aria-label={t("对话内容匹配")}>
       <h3>{t("对话内容匹配")}</h3>
+      {note && <p className="content-matches-note" role="status" data-state="incomplete" data-reason={note.reason}>{note.note}</p>}
       <ul>
-        {answered.map((hit) => (
+        {answer.hits.map((hit) => (
           <li key={hit.path}>
             <button
               type="button"

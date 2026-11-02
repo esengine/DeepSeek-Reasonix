@@ -381,11 +381,46 @@ func (s *IndexedSearcher) Around(ctx context.Context, req AroundRequest) ([]Mess
 	return s.legacy.Around(ctx, req)
 }
 
-func (s *IndexedSearcher) IndexStatus() historycatalog.Status {
+func (s *IndexedSearcher) IndexStatus() historycatalog.Status { return SearchIndexStatus() }
+
+// Why a search answered from an incomplete projection.
+const (
+	// SearchIndexBuilding: the projection is still opening or scanning, so it
+	// has not seen every session yet.
+	SearchIndexBuilding = "building"
+	// SearchIndexFailed: at least one source could not be read or decoded. Its
+	// rows are hidden from the query, so a search over it can match nothing.
+	SearchIndexFailed = "failed"
+)
+
+// SearchIndexStatus reports the shared projection's own state for callers that
+// answer a search without holding a searcher. It reads the counters the catalog
+// already publishes; it never queries the projection.
+func SearchIndexStatus() historycatalog.Status {
 	if catalog := processHistoryCatalog.get(); catalog != nil {
 		return catalog.Status()
 	}
 	return historycatalog.Status{State: "opening", Pending: 1}
+}
+
+// SearchIndexProgress says whether a search answered for every session the
+// index knows, and why not. The predicate is the one the history tool has
+// always used, with the read failure split out: a source the catalog could not
+// index is a different fact from an index still building, and either way a
+// surface must not report it as a query that matched nothing.
+func SearchIndexProgress(status historycatalog.Status) (partial bool, reason string) {
+	switch {
+	case status.Failed > 0:
+		return true, SearchIndexFailed
+	case status.Pending > 0 || (status.Total > 0 && status.Indexed < status.Total):
+		return true, SearchIndexBuilding
+	// "degraded" is a projection living in memory, not one that has stopped
+	// scanning: once its counters agree it answered for every source it knows.
+	case status.State != "ready" && status.State != "degraded":
+		return true, SearchIndexBuilding
+	default:
+		return false, ""
+	}
 }
 
 func contextError(message string) error { return &indexedInputError{message: message} }

@@ -89,7 +89,7 @@ func (t historyTool) Execute(ctx context.Context, args json.RawMessage) (string,
 		formatted := formatHits(in.Query, hits)
 		if statusProvider, ok := t.searcher.(interface{ IndexStatus() historycatalog.Status }); ok {
 			status := statusProvider.IndexStatus()
-			if status.State != "ready" || status.Pending > 0 || (status.Total > 0 && status.Indexed < status.Total) {
+			if partial, _ := SearchIndexProgress(status); partial {
 				formatted = fmt.Sprintf("History index is still building (%d/%d); results may be incomplete.\n\n%s", status.Indexed, status.Total, formatted)
 			}
 		}

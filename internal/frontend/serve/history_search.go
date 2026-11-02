@@ -20,6 +20,24 @@ type historySearchHit struct {
 	Score        float64 `json:"score"`
 }
 
+// historySearchIndex is what the projection could answer for, in the counters
+// the catalog already keeps. A source it could not read is left out of the
+// hits; without this beside them, that search and a search that genuinely
+// matched nothing would reach the rail as the same answer.
+type historySearchIndex struct {
+	State   string `json:"state"`
+	Indexed int64  `json:"indexed"`
+	Total   int64  `json:"total"`
+	Failed  int64  `json:"failed"`
+	Partial bool   `json:"partial"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+type historySearchResponse struct {
+	Hits  []historySearchHit `json:"hits"`
+	Index historySearchIndex `json:"index"`
+}
+
 // historySearch answers across every workspace this process has indexed. It is
 // a hub route: the rail asks it with no session open.
 func historySearch(w http.ResponseWriter, r *http.Request) {
@@ -41,5 +59,15 @@ func historySearch(w http.ResponseWriter, r *http.Request) {
 			Role: string(h.Role), MessageIndex: h.MessageIndex, Score: h.Score,
 		})
 	}
-	writeJSON(w, out)
+	// Read the projection's state after the search: a transcript the query
+	// pulled up but could not be read has just been recorded there.
+	status := history.SearchIndexStatus()
+	partial, reason := history.SearchIndexProgress(status)
+	writeJSON(w, historySearchResponse{
+		Hits: out,
+		Index: historySearchIndex{
+			State: status.State, Indexed: status.Indexed, Total: status.Total,
+			Failed: status.Failed, Partial: partial, Reason: reason,
+		},
+	})
 }

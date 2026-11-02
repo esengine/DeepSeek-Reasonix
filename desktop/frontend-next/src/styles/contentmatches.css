@@ -1,5 +1,6 @@
 .content-matches { margin: 4px 0 8px; padding: 0 4px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
 .content-matches h3 { margin: 6px 8px 4px; font: var(--w-med) var(--fs-meta) var(--ui); color: var(--muted) }
+.content-matches .content-matches-note { margin: 0 8px 6px; color: var(--faint) }
 .content-matches ul { margin: 0; padding: 0; list-style: none }
 .content-matches button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); text-align: left; cursor: pointer }
 .content-matches button:hover { background: var(--hover, color-mix(in srgb, var(--text) 6%, transparent)) }
