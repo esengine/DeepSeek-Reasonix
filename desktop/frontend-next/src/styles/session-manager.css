@@ -1,6 +1,3 @@
-/* The session manager reuses the pick sheet's frame; only the parts a list of
-   checkboxes adds are its own. Width stays inside .pickcard's default so a
-   390 px window keeps its margins. */
 .session-manager { width: min(560px, calc(100vw - 48px)); }
 .session-manager-description { margin: -4px 0 10px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); }
 

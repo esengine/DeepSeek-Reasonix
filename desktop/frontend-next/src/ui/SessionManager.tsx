@@ -11,14 +11,9 @@ import { TREE_PAGE } from "./treewindow";
 import { useModalFocus } from "./useModalFocus";
 import "../styles/session-manager.css";
 
-// A conversation list you can act on without hunting for each row's menu. The
-// sidebar keeps its own in-place selection for the rows already on screen; this
-// sheet is the cross-project answer to "delete a lot of them at once", and it
-// reads one page at a time for the same reason the recent list does — a history
-// is unbounded and a dialog should not try to draw all of it.
-//
-// Local sessions only: a remote pane's transcript lives on another machine and
-// its removal is that host's business, which is why the entry says 本机.
+// Local sessions only, one kernel page at a time; the sidebar keeps its own
+// in-place selection for the rows already on screen. Deleting here follows the
+// row's order: close an idle pane, remove the session, clear its draft.
 
 type Phase = "idle" | "confirm" | "archive" | "restore" | "delete";
 
@@ -70,8 +65,8 @@ export function SessionManager({ hub, liveIds, onClosePanes, onArchive, onChange
     let stale = false;
     setBusy(true);
     setError("");
-    const window = { order: "recent" as const, scope: "" as const, limit: TREE_PAGE, offset: view.offset, q: view.q, hideLegacy };
-    void hub.tree(window).then((next) => {
+    const pageWindow = { order: "recent" as const, scope: "" as const, limit: TREE_PAGE, offset: view.offset, q: view.q, hideLegacy };
+    void hub.tree(pageWindow).then((next) => {
       if (stale) return;
       if (next?.some((ws) => ws.recentOffset !== view.offset)) throw new Error(t("此运行环境不支持会话管理，请更新 Reasonix"));
       if (!next?.some((ws) => ws.sessions.length > 0) && view.offset > 0) {
@@ -138,8 +133,8 @@ export function SessionManager({ hub, liveIds, onClosePanes, onArchive, onChange
         // gap, and closing its pane would stop work a delete never announced.
         if (session.runtimeId && liveIds([session.runtimeId]).length > 0) throw new Error(t("所选会话正在运行，停止后才能操作"));
         if (action === "delete") {
-          // Same order as the row's own delete: an idle pane's runtime holds the
-          // transcript's lease until it is down, and the kernel refuses otherwise.
+          // An idle pane's runtime holds the transcript's lease until it is down;
+          // the kernel refuses a delete before that.
           if (session.runtimeId) await onClosePanes([session.runtimeId]);
           await hub.removeSession(session.path);
           clearDraftForSession("", session.path);
@@ -162,6 +157,8 @@ export function SessionManager({ hub, liveIds, onClosePanes, onArchive, onChange
     if (firstError) onError(firstError);
   };
 
+  // Wider than the pick card so a title and its project share a line, while
+  // 100vw - 48px keeps 24px margins at 390px.
   return createPortal(
     <div className="pickveil" role="dialog" aria-modal="true" aria-label={t("管理会话")} ref={sheet}>
       <div className="pickcard session-manager">

@@ -1,2 +1,2 @@
 - 新增：项目列表的「更多操作」和搜索面板里可以打开「管理会话」，跨项目多选本机会话，一次归档或删除；删除前列出会话名称再确认，正在运行的会话不会被关掉。关联 #14611。
-- New: "Manage sessions" in the project list menu and the search palette opens a cross-project sheet where local conversations can be selected and archived or deleted together; deletion lists their names and asks first, and running sessions are left alone. Refs #14611.
+- New: "Manage sessions" in the project menu and search palette lists local conversations across projects for batch archive or delete; deletion names them and asks first. Refs #14611.

@@ -19,6 +19,18 @@ Session rows reserve an 8px inline-end inset inside their highlight. The shared
 row owns this space so timestamps and trailing actions retain it in both hover
 and selected states, while long titles truncate within the remaining width.
 
+## Session management sheet
+
+- The sheet is a `.pickcard`, not a second dialog frame: the veil, the scrim
+  dismissal and the height cap come from the pick sheet, and only what a
+  multi-select list adds — the toolbar, the checkbox row, the named
+  confirmation — is its own.
+- A row is one scan per name: the title takes the line and ellipsizes, while the
+  project and the archived or running state wait on a second line at micro size.
+- The toolbar wraps rather than truncating, because the delete button has to
+  stay reachable at phone width; the confirmation's names take a full-width line
+  under the question so a long batch cannot push the buttons out of reach.
+
 ## Project header actions
 
 - The project header is a non-shrinking sibling of the tree scroller. Local and

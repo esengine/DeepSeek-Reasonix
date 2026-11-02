@@ -57,10 +57,7 @@ interface Props {
   paging?: TreePaging;
   previewLimit?: number;
   onToggleAll?: () => void;
-  onRecent?: () => void;
-  // The cross-project management sheet. Optional so a caller that only draws a
-  // tree (tests, an embedded list) does not have to offer a dialog it cannot host.
-  onManage?: () => void;
+  onRecent?: () => void; onManage?: () => void;
   allFolded?: boolean;
   canFold?: boolean;
   // The session path being opened, or empty. The row shows it selected and busy
