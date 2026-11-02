@@ -11,6 +11,8 @@ import { MockPort } from "../port/mock";
 import { MockHub } from "../port/mock_hub";
 import type { AgentPort, SessionStatus } from "../port/port";
 
+vi.mock("./storageTally", () => ({ STORAGE_TALLY_DELAY: 1500, cachedStorageTotal: () => 0, storageTotal: vi.fn() }));
+
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.setItem(STORAGE, "zh"); boot(); });
 const language = (lang: string) => { localStorage.setItem(STORAGE, lang); boot(); };
 const block = (anchor: string) => document.querySelector<HTMLElement>(`[data-setting="${anchor}"]`);

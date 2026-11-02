@@ -1,6 +1,16 @@
 // provider.ts — a model source as the connection panel edits it: what was
 // probed, what was confirmed, and the few fields no probe can answer.
 
+export interface ProviderHealthSettings {
+  enabled: boolean;
+}
+
+export interface ProviderHealth {
+  connection: string;
+  wallet: string;
+  checkedAt: number;
+}
+
 export interface ProviderEntry {
   name: string;
   // The label a person gave this source. Only ever shown: every ref, the

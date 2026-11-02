@@ -80,7 +80,7 @@ func TestProbeIdentifiesAnAnthropicEndpoint(t *testing.T) {
 // list cannot separate them. The probe must say it is unsure rather than
 // quietly calling every such endpoint OpenAI.
 func TestProbeAdmitsWhenBothProtocolsAnswer(t *testing.T) {
-	srv := modelsServer(t, bearer, "MiniMax-M2")
+	srv := modelsServer(t, bearer, "MiniMax-M3.1-Flash")
 	got, err := ProbeEndpoint(context.Background(), ProbeOptions{BaseURL: srv.URL, APIKey: "k"})
 	if err != nil {
 		t.Fatalf("ProbeEndpoint: %v", err)
@@ -105,7 +105,7 @@ func TestProbeAdmitsWhenBothProtocolsAnswer(t *testing.T) {
 // strongest evidence available, and it is the same knowledge the model-fetch
 // compat suffixes already encode.
 func TestProbePrefersAnthropicWhenThePathSaysSo(t *testing.T) {
-	srv := modelsServer(t, bearer, "MiniMax-M2")
+	srv := modelsServer(t, bearer, "MiniMax-M3.1-Flash")
 	got, err := ProbeEndpoint(context.Background(), ProbeOptions{BaseURL: srv.URL + "/anthropic", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("ProbeEndpoint: %v", err)

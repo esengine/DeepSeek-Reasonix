@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	TextLimit  = 2 << 20
-	ImageLimit = 10 << 20
-	PDFLimit   = 32 << 20
+	TextLimit   = 2 << 20
+	ImageLimit  = 10 << 20
+	PDFLimit    = 32 << 20
+	OfficeLimit = 32 << 20
 )
 
 var (
@@ -208,7 +209,7 @@ func (s Service) content(ctx context.Context, ref Ref, textOnly bool) ([]byte, I
 	if metadata(ref, after).Version != info.Version {
 		return nil, info, ErrChanged
 	}
-	if info.Kind != "pdf" && info.Kind != "image" && (!utf8.Valid(data) || strings.IndexByte(string(data), 0) >= 0) {
+	if info.Kind != "pdf" && info.Kind != "image" && info.Kind != "office" && (!utf8.Valid(data) || strings.IndexByte(string(data), 0) >= 0) {
 		return nil, info, ErrNotText
 	}
 	return data, info, nil
@@ -226,7 +227,9 @@ func Format(path string) (string, int64) {
 		return "pdf", PDFLimit
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".ico", ".svg":
 		return "image", ImageLimit
-	case ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".gz", ".7z", ".rar", ".exe", ".dll", ".bin":
+	case ".docx", ".xlsx":
+		return "office", OfficeLimit
+	case ".doc", ".xls", ".ppt", ".pptx", ".zip", ".gz", ".7z", ".rar", ".exe", ".dll", ".bin":
 		return "unsupported", 0
 	default:
 		return "text", TextLimit

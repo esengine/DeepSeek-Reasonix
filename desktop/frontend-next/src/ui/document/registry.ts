@@ -7,7 +7,8 @@ export const renderers: ReadonlyArray<{ kind: Kind; extensions: RegExp; source: 
   { kind: "pdf", extensions: /\.pdf$/i, source: false },
   { kind: "table", extensions: /\.(csv|tsv)$/i, source: true },
   { kind: "html", extensions: /\.html?$/i, source: true },
-  { kind: "unsupported", extensions: /\.(docx?|xlsx?|pptx?|zip|gz|7z|rar|exe|dll|bin)$/i, source: false },
+  { kind: "office", extensions: /\.(docx|xlsx)$/i, source: false },
+  { kind: "unsupported", extensions: /\.(doc|xls|pptx?|zip|gz|7z|rar|exe|dll|bin)$/i, source: false },
 ];
 
 export function previewKind(path: string): Kind {

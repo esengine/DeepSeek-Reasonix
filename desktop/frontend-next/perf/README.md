@@ -76,6 +76,7 @@ node perf/focus.mjs      # 专注的守卫：拿走外围之后，退出时世�
 node perf/tooltip.mjs    # 控件提示的守卫：文字不溢出提示框、不在半透明祖先之下、对比度达 AA（深浅×中英×宽窄）
 node perf/navhint.mjs   # Icon-rail hover hints: drawn, inside the window, clipped by no ancestor, painted over by nothing (light/dark × on/collapsed)
 node perf/runningtool.mjs # 还没输出的运行中调用：行能展开、写明仍在运行与已运行多久、写出命令自带的超时
+node perf/tool-output-clip.mjs # Clipped results: no painted shadows; expand/collapse, horizontal scroll, full copy and reopen state (light/dark × wide/phone); TOOL_OUTPUT_SHOTS saves screenshots
 node perf/gutterhit.mjs # 分栏拖拽手柄不压在相邻滚动条上：滚动条拇指处按下命中的不是手柄，握把仍可拖开收起的栏
 node perf/dock.mjs      # 停靠的浏览器列从 pane 顶部起、与导航行并排，取消停靠后行归还（浅/深 × 宽/窄 × 首开/重载）
 node perf/signals.mjs   # 运行分析的信号轨说明：它是什么、为什么标记不能拖（浅/深 × 宽/手机）

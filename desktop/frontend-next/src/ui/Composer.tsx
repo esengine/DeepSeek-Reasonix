@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import { keepPasteAsFile, PasteKeep, type PasteChip } from "./pastekeep";
-import type { AgentPort, ChipCall, ModelEntry, SessionStatus, WorkspaceGit, WorkspaceInfo } from "../port/port";
+import type { AgentPort, ChipCall, SessionStatus, WorkspaceGit, WorkspaceInfo } from "../port/port";
 import { Picker } from "./Menu";
 import { BranchChip } from "./BranchChip";
 import { WorktreeChip } from "./WorktreeChip";
@@ -12,6 +12,7 @@ import { WorktreeSetupPage } from "./WorktreeSetupPage";
 import { Policy } from "./Policy";
 import { chosenGroups, groupHeadings, modelLabel, modelMenu, modelTooltip, narrowToGroups } from "./modelmenu";
 import { ModelGroupChips } from "./ModelGroupChips";
+import { useModelHealth } from "./modelhealth";
 import { effortMenu, effortReading, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
 import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
@@ -102,8 +103,9 @@ export function Composer({ port, status, running, queued = false, quote, restore
   const submittingRef = useRef(false);
   const stoppingRef = useRef(false);
   const picker = useRef<HTMLInputElement>(null);
-  const [models, setModels] = useState<ModelEntry[]>([]);
-  const menuItems = modelMenu(models, providerOrder, status?.modelRef);
+  const modelHealth = useModelHealth(port, pulse);
+  const { models, loadModels } = modelHealth;
+  const menuItems = modelMenu(models, providerOrder, status?.modelRef, modelHealth.readings);
   const chosenModelGroups = chosenGroups(menuItems, modelGroups);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const box = useRef<HTMLTextAreaElement>(null);
@@ -123,11 +125,6 @@ export function Composer({ port, status, running, queued = false, quote, restore
   // Set only when a completion moved the caret: the browser puts it at the end
   // of a programmatic value, which is wrong for anything accepted mid-line.
   const pending = useRef<number | [number, number] | null>(null);
-
-  const loadModels = useCallback(() => {
-    port.models().then(setModels).catch(() => setModels([]));
-  }, [port]);
-  useEffect(loadModels, [loadModels, pulse]);
 
   // A drop lands where the caret is, and the handler that receives it was built
   // once — so the position it reads has to be a ref, not the render's copy.
@@ -719,7 +716,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
             searchAlways
             searchPlaceholder={t("搜索模型或服务商…")}
             menuTitle={<><b>{t("选择模型")}</b><small>{t("用于后续任务")}</small></>}
-            onOpen={loadModels}
+            onOpen={() => { void modelHealth.check(loadModels()); }}
             pending={busy["model"]}
             onPick={(ref) => ref === "__manage-models" ? onSettings("providers") : change("model", () => port.setModel(ref))}
             label={<><span className="nm">{modelLb}</span><StudioIcon name="down" /></>}

@@ -3,12 +3,20 @@ import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { placeInViewport, useFollow, zoom } from "./place";
 import { hasVendorMark, VendorMark } from "./vendormarks";
+import { CircleAlert, CircleDot, LoaderCircle } from "lucide-react";
+
+export interface MenuStatus {
+  label: string;
+  tone: "warning" | "positive" | "neutral" | "checking";
+  detail?: string;
+}
 
 export interface MenuItem {
   value: string;
   label: string;
   desc?: string;
   right?: string;
+  status?: MenuStatus;
   // Dense choice menus sometimes need one short machine-facing label beside
   // the human one (for example "深入  High") without pushing that label to
   // the far edge of the row.
@@ -259,6 +267,8 @@ export function Picker({
                   role={it.toggle === undefined ? "menuitem" : "menuitemcheckbox"}
                   aria-checked={it.toggle}
                   aria-current={it.value === current ? true : undefined}
+                  aria-description={it.status?.detail}
+                  title={it.status?.detail}
                   disabled={it.disabled}
                   data-on={it.value === current ? "" : undefined}
                   data-lead={it.value === lead ? "" : undefined}
@@ -282,6 +292,10 @@ export function Picker({
                   )}
                   {it.toggle !== undefined && <span className="studio-item-switch" aria-hidden="true" />}
                   {it.right && <span className="rt">{it.right}</span>}
+                  {it.status && <span className="menu-item-status" data-tone={it.status.tone}>
+                    {it.status.tone === "warning" ? <CircleAlert aria-hidden="true" /> : it.status.tone === "checking" ? <LoaderCircle aria-hidden="true" /> : <CircleDot aria-hidden="true" />}
+                    {it.status.label}
+                  </span>}
                 </button>
               )}
             </Fragment>

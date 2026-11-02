@@ -187,6 +187,33 @@ export function setShowsComposerHint(on: boolean): void {
   composerHintListeners.forEach((fn) => fn());
 }
 
+const OFFICE_PREVIEW_KEY = "rx-office-preview";
+const officePreviewListeners = new Set<() => void>();
+
+export function previewsOffice(): boolean {
+  try {
+    return localStorage.getItem(OFFICE_PREVIEW_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function onOfficePreviewChange(fn: () => void): () => void {
+  officePreviewListeners.add(fn);
+  return () => {
+    officePreviewListeners.delete(fn);
+  };
+}
+
+export function setPreviewsOffice(on: boolean): void {
+  try {
+    localStorage.setItem(OFFICE_PREVIEW_KEY, on ? "on" : "off");
+  } catch {
+    /* unavailable storage keeps the default */
+  }
+  officePreviewListeners.forEach((fn) => fn());
+}
+
 const PLAN_PROGRESS_KEY = "rx-plan-progress";
 const planProgressListeners = new Set<() => void>();
 

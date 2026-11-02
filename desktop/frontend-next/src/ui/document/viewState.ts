@@ -3,6 +3,7 @@ export interface DocumentViewState {
   left?: number;
   page?: number;
   zoom?: number;
+  sheet?: number;
 }
 
 export function documentState(states: Map<string, DocumentViewState>, path: string): DocumentViewState {

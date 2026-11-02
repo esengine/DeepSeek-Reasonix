@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { onOfficePreviewChange, previewsOffice } from "../../state/prefs";
 import type { AgentPort } from "../../port/port";
 import { t } from "../../i18n";
 import { useDocument } from "./useDocument";
@@ -9,6 +10,7 @@ import type { DocumentViewState } from "./viewState";
 const PdfPreview = lazy(() => import("./PdfPreview"));
 const DelimitedPreview = lazy(() => import("./DelimitedPreview"));
 const StaticHtmlPreview = lazy(() => import("./StaticHtmlPreview"));
+const OfficePreview = lazy(() => import("./OfficePreview"));
 
 function Picture({ data, path, view }: { data: ArrayBuffer; path: string; view: DocumentViewState }) {
   const [url, setURL] = useState("");
@@ -38,11 +40,15 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
   view: DocumentViewState;
 }) {
   const { value, reload } = useDocument(port, path, shown, refresh);
+  const officeOn = useSyncExternalStore(onOfficePreviewChange, previewsOffice, previewsOffice);
   const { info, data, error } = value ?? {};
+  const officeWaiting = officeOn && info?.kind === "office" && !data && !error;
+  useEffect(() => { if (officeWaiting) reload(); }, [officeWaiting, reload]);
   const fallback = <p role="alert">{t("此文件暂不支持预览")}</p>;
   let body = <p role="status">{t("正在读取…")}</p>;
   if (error) body = <p role="alert">{error}</p>;
   else if (info?.kind === "unsupported") body = fallback;
+  else if (info?.kind === "office" && !officeOn) body = <p role="status">{t("Office 文档预览已在设置中关闭")}</p>;
   else if (info && info.size > info.limit) body = <p role="alert">{t("文件超过预览大小限制")}</p>;
   else if (data && info) {
     const text = () => new TextDecoder("utf-8", { fatal: true }).decode(data);
@@ -51,6 +57,7 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
       case "table": body = <DelimitedPreview path={path} text={text()} view={view} />; break;
       case "html": body = <StaticHtmlPreview text={text()} />; break;
       case "image": body = <Picture data={data} path={path} view={view} />; break;
+      case "office": body = <OfficePreview data={data} path={path} view={view} />; break;
       default: body = fallback;
     }
   }

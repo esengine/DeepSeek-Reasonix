@@ -20,6 +20,7 @@ import { LiveStreamBudgetSection } from "./LiveStreamBudgetSection";
 import { NewAnswerSection } from "./NewAnswerSection";
 import { PlanProgressSection } from "./PlanProgressSection";
 import { ComposerHintSection } from "./ComposerHintSection";
+import { OfficePreviewSection } from "./OfficePreviewSection";
 import { SessionQuickSection } from "./SessionQuickSection";
 import { NavEntriesSection } from "./NavEntriesSection";
 import { NavRailSection } from "./NavRailSection";
@@ -576,6 +577,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
       <GraphicsSection />
       <SendShortcut />
       <ComposerHintSection />
+      <OfficePreviewSection />
       <RunningMessageSetting />
       <EscStopSetting />
       <GlobalShortcutSection />
@@ -634,7 +636,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           <div className="grp-hd">
             <h3>{t("视觉效果")}</h3>
           </div>
-          <p className="hint">{t("窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空和颗粒这几层。")}</p>
+          <p className="hint">{t("窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空、颗粒和运行中的循环动画。")}</p>
           <div className="grp-items">
             <div className="seg" data-text role="group" aria-label={t("视觉效果")}>
               {EFFECTS.map(([id, name, why]) => (

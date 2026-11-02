@@ -324,8 +324,12 @@ HttpOnly Cookie，再启动 API 与 SSE 请求，从而避免 Token 进入请求
 Referrer 和访问日志。可通过 `--token` 或 `[serve].token`
 复用固定 token。Password 模式必须在启动时传 `--password`，或在配置里保存 bcrypt hash：
 
+- 优先用 `--password-file` 而不是 `--password`：命令行参数对本机所有用户可见（`ps`、`/proc/<pid>/cmdline`）。
+- 密码文件只能有一行，且只允许所有者读取（`chmod 600`）。
+
 ```bash
-reasonix serve --hash-password --password 'strong-password'
+reasonix serve --auth password --password-file ~/.reasonix-serve.password
+reasonix serve --hash-password --password-file ~/.reasonix-serve.password
 
 # <Reasonix home>/config.toml
 [serve]

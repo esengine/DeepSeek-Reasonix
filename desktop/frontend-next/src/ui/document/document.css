@@ -1,4 +1,4 @@
-.document-preview, .document-pdf {
+.document-preview, .document-pdf, .document-office-view {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -22,6 +22,15 @@
 }
 .document-notice, .document-preview > p {
   padding: 8px 12px;
+}
+.document-office-view > .document-notice {
+  margin: 0;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--muted);
+}
+.document-controls [role="tab"][aria-selected="true"] {
+  border-color: var(--text);
 }
 .document-html {
   flex: 1;
