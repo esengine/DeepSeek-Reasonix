@@ -12,6 +12,7 @@ $script:PeExtensions = @(".exe", ".dll", ".node")
 $script:ReleaseSignedPe = @(
     "Reasonix Studio.exe",
     "dxcompiler.dll",
+    "electron_wer.dll",
     "ffmpeg.dll",
     "resources/bin/cua-driver.exe",
     "resources/bin/reasonix-studio-host.exe",
@@ -20,8 +21,7 @@ $script:ReleaseSignedPe = @(
 )
 # Shipped by Electron already signed by Microsoft, and kept that way.
 $script:MicrosoftSignedPe = @(
-    "d3dcompiler_47.dll",
-    "dxil.dll"
+    "d3dcompiler_47.dll"
 )
 # Microsoft Root Certificate Authority 2010, the root their signer chains to.
 $script:MicrosoftRootThumbprint = "3B1EFD3A66EA28B16697394703A72CA340A05BD5"

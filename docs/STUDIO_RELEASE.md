@@ -242,7 +242,7 @@ What is signed:
 | File | Signed by | Why |
 | --- | --- | --- |
 | The release PE files | the project | Windows loads each one, and Smart App Control judges an unsigned DLL on its own reputation. |
-| `d3dcompiler_47.dll`, `dxil.dll` | Microsoft, left as shipped | Verified to carry a trusted, timestamped signature from an `O=Microsoft Corporation` signer under a Microsoft PCA, chaining to Microsoft Root Certificate Authority 2010 by thumbprint. |
+| `d3dcompiler_47.dll` | Microsoft, left as shipped | Verified to carry a trusted, timestamped signature from an `O=Microsoft Corporation` signer under a Microsoft PCA, chaining to Microsoft Root Certificate Authority 2010 by thumbprint. |
 | The installer | the project | Signed only after `windows-verify-package` has matched its contents. |
 | `resources/elevate.exe` | nobody | `windows-package` writes it after the payload is signed; its SHA-256 is pinned instead. |
 | The NSIS uninstaller | nobody | electron-builder signs it only through an in-process hook, which would put the session in the packaging job. |
@@ -254,7 +254,7 @@ A bundle holding a PE file the list does not name fails with `studio-signing.und
 The release PE files:
 
 - `Reasonix Studio.exe`, `resources/bin/reasonix-studio-host.exe`, `resources/bin/cua-driver.exe`
-- `dxcompiler.dll`, `ffmpeg.dll`, `vk_swiftshader.dll`, `vulkan-1.dll`
+- `dxcompiler.dll`, `electron_wer.dll`, `ffmpeg.dll`, `vk_swiftshader.dll`, `vulkan-1.dll`
 
 | Rule | Detail |
 | --- | --- |
