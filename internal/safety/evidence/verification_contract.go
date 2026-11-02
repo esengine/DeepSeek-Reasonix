@@ -15,13 +15,6 @@ type VerificationContract struct {
 	Checks []string `json:"checks,omitempty"`
 }
 
-// FreezeVerificationContract canonicalises a declaration into the contract a
-// Goal begins under. A declaration naming nothing freezes an empty contract,
-// which is a contract — distinct from a checkpoint that never carried one.
-func FreezeVerificationContract(commands []string) VerificationContract {
-	return VerificationContract{Epoch: 1, Checks: criterionIdentities(commands)}
-}
-
 // DriftsFrom reports whether a declaration names a different set of criteria
 // than this contract was frozen under. It compares identities as sets and says
 // nothing about which of the two should govern.

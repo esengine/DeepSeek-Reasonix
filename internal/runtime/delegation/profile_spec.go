@@ -124,14 +124,6 @@ type WorkerSpec struct {
 	// (after config override → call params → frontmatter → global → parent).
 	Model  string
 	Effort string
-	// ReviewReport is the typed verdict this worker owes its caller, empty when
-	// it owes none. It follows from who the worker is — a reviewer answers with
-	// a report — and the gate reads that rather than the answer's wording.
-	ReviewReport evidence.ReviewKind
-	// ReviewAuthority is what this worker's report may close. A worker can owe
-	// a report it is not authorized to prove anything with, and did: the pair
-	// is two fields because it was one.
-	ReviewAuthority evidence.ReviewAuthority
 }
 
 // CapabilityGrant is what the run may touch. Profile frontmatter supplies a

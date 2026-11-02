@@ -12,7 +12,6 @@ import (
 
 	fileencoding "reasonix/internal/base/fileutil/encoding"
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/goaleval"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/store"
@@ -67,14 +66,13 @@ func budgetClassForLegacyMode(_ string, researchMode GoalResearchMode) string {
 type goalMachine struct {
 	// mu guards the FSM fields below; every critical section under it is short
 	// and non-blocking (no disk I/O, no executor calls).
-	mu                 sync.Mutex
-	goal               string
-	status             string
-	scopeID            string
-	deliveryCheckpoint evidence.DeliveryCheckpoint
-	block              string
-	strict             bool
-	continuationEpoch  uint64
+	mu                sync.Mutex
+	goal              string
+	status            string
+	scopeID           string
+	block             string
+	strict            bool
+	continuationEpoch uint64
 
 	tokenBudget int // configured ceiling for an unattended loop; 0 = unbounded
 
@@ -114,14 +112,13 @@ type goalState struct {
 	ResearchMode GoalResearchMode `json:"researchMode,omitempty"`
 	// AutoResearchTaskID is read-only migration detection: a sidecar naming the
 	// retired research archive is rewritten as ordinary Goal state. Never written.
-	AutoResearchTaskID string                      `json:"autoResearchTaskID,omitempty"`
-	ScopeID            string                      `json:"scopeID,omitempty"`
-	DeliveryCheckpoint evidence.DeliveryCheckpoint `json:"deliveryCheckpoint,omitempty"`
-	Turns              int                         `json:"turns,omitempty"`
-	Blocks             int                         `json:"blocks,omitempty"`
-	Block              string                      `json:"block,omitempty"`
-	Strict             bool                        `json:"strict,omitempty"`
-	Todos              []evidence.TodoItem         `json:"todos,omitempty"`
+	AutoResearchTaskID string              `json:"autoResearchTaskID,omitempty"`
+	ScopeID            string              `json:"scopeID,omitempty"`
+	Turns              int                 `json:"turns,omitempty"`
+	Blocks             int                 `json:"blocks,omitempty"`
+	Block              string              `json:"block,omitempty"`
+	Strict             bool                `json:"strict,omitempty"`
+	Todos              []evidence.TodoItem `json:"todos,omitempty"`
 
 	BudgetClass            string   `json:"budgetClass,omitempty"`
 	TurnsUsed              int      `json:"turnsUsed,omitempty"`
@@ -144,8 +141,7 @@ type goalState struct {
 // decision point: it applies readiness and decides complete / continue /
 // blocked / evaluator fail-closed pause.
 type goalAdvanceInput struct {
-	report           *goalTurnReport // validated update_goal report; nil when none
-	readiness        agent.ReadinessResult
+	report           *goalTurnReport       // validated update_goal report; nil when none
 	evaluator        *goalEvaluatorVerdict // evaluator verdict; nil when not run
 	evaluatorFailed  string                // evaluator error/timeout text; pause fail-closed
 	todos            []evidence.TodoItem
@@ -269,18 +265,18 @@ func (g *goalMachine) statusForDisplay() string {
 // the per-goal runtime counters, and returns the state to persist. ok is
 // false (no persistence) when the goal is unchanged or no state path is
 // configured.
-func (g *goalMachine) set(goal, preferredBudgetClass string, contract evidence.VerificationContract, todos []evidence.TodoItem) (string, []byte, bool) {
+func (g *goalMachine) set(goal, preferredBudgetClass string, todos []evidence.TodoItem) (string, []byte, bool) {
 	goal = strings.TrimSpace(goal)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if goal != "" && g.goal == goal && g.status == GoalStatusRunning && g.budgetClass == preferredBudgetClass {
 		return "", nil, false
 	}
-	g.installGoalLocked(goal, preferredBudgetClass, contract)
+	g.installGoalLocked(goal, preferredBudgetClass)
 	return g.buildStateLocked(todos)
 }
 
-func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string, contract evidence.VerificationContract) {
+func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string) {
 	g.continuationEpoch++
 	g.turnsUsed, g.tokensUsed, g.requestsUsed, g.noProgressTurns = 0, 0, 0, 0
 	g.workDurationMs = 0
@@ -295,15 +291,9 @@ func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string, contr
 		g.turnsLimit = 0
 		g.noProgressLimit = 0
 		g.scopeID = ""
-		g.deliveryCheckpoint = evidence.DeliveryCheckpoint{}
 	} else {
 		g.goal, g.status = goal, GoalStatusRunning
 		g.scopeID = newGoalScopeID()
-		// The Goal is accepted here, under the declaration this process read.
-		// Freezing it at creation is what makes it a contract rather than a
-		// re-reading of whatever the file says at the moment it is consulted.
-		frozen := contract
-		g.deliveryCheckpoint = evidence.DeliveryCheckpoint{ScopeID: g.scopeID, Verification: &frozen}
 		g.budgetClass = preferredBudgetClass
 		g.turnsLimit = unlimitedGoalTurns
 		g.tokensLimit = g.tokenBudget
@@ -446,7 +436,7 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	// Terminal dispositions first, then evaluator fail-closed; otherwise continue.
 	reportBlocked := in.report != nil && in.report.status == GoalStatusBlocked
 	reportComplete := in.report != nil && in.report.status == GoalStatusComplete
-	completeOK := (reportComplete || evaluatorComplete) && formatIncompleteTodos(in.todos, in.readiness.Reason) == ""
+	completeOK := (reportComplete || evaluatorComplete) && formatIncompleteTodos(in.todos, "") == ""
 	switch {
 	case reportBlocked:
 		// A single blocked report ends the goal immediately; the host no longer
@@ -511,23 +501,13 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		// into the next turn; a continue report carries its next_action.
 		switch {
 		case reportComplete:
-			intercept = formatIncompleteTodos(in.todos, in.readiness.Reason)
+			intercept = formatIncompleteTodos(in.todos, "")
 			interceptNotice = "Goal is not ready to complete yet; continuing the remaining work."
-			g.lastContinuationReason = clipGoalReason("readiness missing: " + in.readiness.Reason)
 		case in.report != nil && in.report.status == GoalStatusRunning:
 			g.lastContinuationReason = clipGoalReason(in.report.reason)
 			if in.report.nextAction != "" {
 				intercept = in.report.nextAction
 			}
-		case len(in.readiness.Missing) > 0:
-			intercept = formatIncompleteTodos(in.todos, in.readiness.Reason)
-			interceptNotice = "Goal is not ready to complete yet; continuing the remaining work."
-			g.lastContinuationReason = clipGoalReason("readiness missing: " + in.readiness.Reason)
-		case evaluatorComplete:
-			intercept = formatIncompleteTodos(in.todos, in.readiness.Reason)
-			interceptNotice = "Goal is not ready to complete yet; continuing the remaining work."
-			g.lastEvaluatorReason = clipGoalReason(in.evaluator.reason)
-			g.lastContinuationReason = clipGoalReason("readiness missing: " + in.readiness.Reason)
 		case in.evaluator != nil && in.evaluator.outcome == goaleval.OutcomeContinue:
 			g.lastEvaluatorReason = clipGoalReason(in.evaluator.reason)
 		}
@@ -586,7 +566,6 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 		Goal:                   g.goal,
 		Status:                 g.status,
 		ScopeID:                g.scopeID,
-		DeliveryCheckpoint:     g.deliveryCheckpoint,
 		Turns:                  g.turnsUsed,
 		Block:                  g.block,
 		Strict:                 g.strict,
@@ -704,19 +683,8 @@ func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []
 		migrated = true
 	}
 	g.scopeID = strings.TrimSpace(state.ScopeID)
-	if g.scopeID == "" {
-		g.scopeID = strings.TrimSpace(state.DeliveryCheckpoint.ScopeID)
-	}
 	if g.goal != "" && g.scopeID == "" {
 		g.scopeID = newGoalScopeID()
-	}
-	g.deliveryCheckpoint = state.DeliveryCheckpoint
-	if g.scopeID == "" {
-		g.deliveryCheckpoint = evidence.DeliveryCheckpoint{}
-	} else if g.deliveryCheckpoint.ScopeID == "" {
-		g.deliveryCheckpoint.ScopeID = g.scopeID
-	} else if g.deliveryCheckpoint.ScopeID != g.scopeID {
-		g.deliveryCheckpoint = evidence.DeliveryCheckpoint{ScopeID: g.scopeID}
 	}
 	g.block = state.Block
 	g.strict = state.Strict
@@ -925,10 +893,6 @@ func (r *goalTurnRecorder) RecordGoalReport(report tool.GoalReport) (string, err
 	return fmt.Sprintf("update_goal: %s recorded for this turn.", wireStatus), nil
 }
 
-func (r *goalTurnRecorder) addUsage(tokens int) {
-	r.addUsageWithRequests(tokens, 0)
-}
-
 func (r *goalTurnRecorder) addUsageWithRequests(tokens, requests int) {
 	if tokens <= 0 && requests <= 0 {
 		return
@@ -991,3 +955,12 @@ func (g *goalMachine) turnActive(scopeID string, epoch uint64) bool {
 	return strings.TrimSpace(g.goal) != "" && g.status == GoalStatusRunning &&
 		g.scopeID == scopeID && g.continuationEpoch == epoch
 }
+
+// completionWaysOut is every action the completion guard lets through. It is one
+// string because two host prompts state it, and a run told two different things
+// about which door is open walks into the one that is shut.
+const completionWaysOut = "Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. " +
+	"If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. " +
+	"If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. " +
+	"If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. " +
+	"If one cannot be done as specified, call conclude_blocked with the evidence for why."

@@ -2,7 +2,6 @@ package delegation
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"path/filepath"
@@ -896,61 +895,6 @@ func TestTaskToolBackgroundCapRefusesFanOut(t *testing.T) {
 	}
 }
 
-func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
-	reg := evidenceRegistry()
-	finalText := []provider.Chunk{{Type: provider.ChunkText, Text: "done, explanations added"}, {Type: provider.ChunkDone}}
-	sub := &scriptedProvider{name: "sub", turns: [][]provider.Chunk{
-		{toolCallChunk("criteria", "todo_write", `{"todos":[{"content":"Add explanations","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("write", "write_file", `{"path":"qa/bank.md"}`), {Type: provider.ChunkDone}},
-		finalText,
-		finalText,
-		finalText,
-	}}
-	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil,
-		func(context.Context, tool.Tool, json.RawMessage) error { return nil }).
-		WithTranscripts(NewSubagentStore(testenv.TempDir(t)), testenv.TempDir(t), "base-model", "base-effort").
-		WithDeliveryProfile(true)
-
-	jm := jobs.NewManager(event.Discard)
-	defer jm.Close()
-	parentLedger := evidence.NewLedger()
-	ctx := testTaskContext()
-	ctx = jobs.WithSession(ctx, "parent-session")
-	ctx = jobs.WithManager(ctx, jm)
-	ctx = evidence.WithLedger(ctx, parentLedger)
-
-	out, err := task.Execute(ctx, []byte(`{"prompt":"add explanations to the question bank","run_in_background":true}`))
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	jobID := extractJobID(out)
-	res, _ := jm.WaitForSession(context.Background(), "parent-session", []string{jobID}, jobs.WaitOptions{Timeout: 5 * time.Second})
-	if len(res) != 1 || res[0].Status != jobs.Done || !strings.Contains(res[0].Output, "[unverified]") {
-		t.Fatalf("background salvage = %+v, want done unverified result", res)
-	}
-	if parentLedger.Summary().HasMutation() {
-		t.Fatal("background goroutine wrote directly into the parent turn ledger")
-	}
-
-	summary := jm.LeaseEvidenceForSession("parent-session", jobID)
-	if !summary.HasMutation() {
-		t.Fatal("terminal background task did not publish its mutation evidence")
-	}
-	paths := summary.MutationPaths()
-	if len(paths) != 1 || filepath.ToSlash(paths[0]) != "qa/bank.md" {
-		t.Fatalf("background mutation paths = %v, want qa/bank.md", paths)
-	}
-	// Lease does not consume: the evidence stays available until the collecting
-	// turn commits, so a cancelled/errored turn can re-collect it.
-	if again := jm.LeaseEvidenceForSession("parent-session", jobID); !again.HasMutation() {
-		t.Fatalf("lease consumed background evidence without a commit: %+v", again)
-	}
-	jm.CommitEvidenceForSession("parent-session", jobID)
-	if after := jm.LeaseEvidenceForSession("parent-session", jobID); len(after.Receipts) != 0 {
-		t.Fatalf("committed background evidence still leasable: %+v", after)
-	}
-}
-
 // startTerminalBackgroundMutation registers a background task job that publishes
 // one mutation and returns after it reaches a terminal state, ready to collect.
 func startTerminalBackgroundMutation(t *testing.T, jm *jobs.Manager, session, path string) string {
@@ -974,38 +918,6 @@ func waitBuiltin(t *testing.T, reg *tool.Registry) {
 		t.Fatal("wait builtin not registered")
 	}
 	reg.Add(wait)
-}
-
-func TestBackgroundEvidenceNotCommittedWhenTurnFails(t *testing.T) {
-	// The delivery turn collects a background writer's mutation via wait, then
-	// fails to sign it off, exhausting readiness. Because the turn never
-	// delivered, the lease must not be committed: the mutation stays collectable
-	// so the next turn can review it instead of shipping it unreviewed.
-	jm := jobs.NewManager(event.Discard)
-	defer jm.Close()
-	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "qa/bank.md")
-
-	reg := evidenceRegistry()
-	waitBuiltin(t, reg)
-	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		{toolCallChunk("w", "wait", `{"job_ids":["`+jobID+`"]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}}, // no sign-off
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
-	}}
-	a := agent.New(prov, reg, sessionstore.NewSession(""), agent.Options{DeliveryProfile: true, Jobs: jm}, event.Discard)
-	ctx := jobs.WithManager(agent.WithParentSession(context.Background(), "parent-session"), jm)
-	ctx = jobs.WithSession(ctx, "parent-session")
-
-	err := a.Run(ctx, "collect and finish the background task")
-	var readiness *agent.FinalReadinessError
-	if !errors.As(err, &readiness) {
-		t.Fatalf("turn = %v, want readiness exhaustion on the uncollected sign-off", err)
-	}
-	// The failed turn must not have consumed the evidence.
-	if leased := jm.LeaseEvidenceForSession("parent-session", jobID); !leased.HasMutation() {
-		t.Fatalf("failed delivery turn consumed the background evidence: %+v", leased)
-	}
 }
 
 func TestBackgroundEvidenceCommittedWhenTurnDelivers(t *testing.T) {
@@ -1034,95 +946,6 @@ func TestBackgroundEvidenceCommittedWhenTurnDelivers(t *testing.T) {
 	}
 	if leased := jm.LeaseEvidenceForSession("parent-session", jobID); len(leased.Receipts) != 0 {
 		t.Fatalf("delivered turn did not commit the background lease: %+v", leased)
-	}
-}
-
-// TestFailedTurnBackgroundMutationForcesReadinessOnNextRunWithoutWait extends
-// TestBackgroundEvidenceNotCommittedWhenTurnFails: after the first turn collects
-// a background mutation via wait but fails to sign it off, Run's Reset wipes the
-// per-turn ledger before the second turn starts. Without re-injecting the still
-// uncommitted mutation, a second turn that never calls wait/bash_output again
-// would sail through final-readiness having never seen it. Run must re-lease it
-// automatically so the gate still blocks.
-func TestFailedTurnBackgroundMutationForcesReadinessOnNextRunWithoutWait(t *testing.T) {
-	jm := jobs.NewManager(event.Discard)
-	defer jm.Close()
-	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "qa/bank.md")
-
-	reg := evidenceRegistry()
-	waitBuiltin(t, reg)
-	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		{toolCallChunk("w", "wait", `{"job_ids":["`+jobID+`"]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}}, // no sign-off
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
-		// Second Run: the model never calls wait/bash_output again.
-		{{Type: provider.ChunkText, Text: "sure, here you go"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "sure, here you go"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "sure, here you go"}, {Type: provider.ChunkDone}},
-	}}
-	a := agent.New(prov, reg, sessionstore.NewSession(""), agent.Options{DeliveryProfile: true, Jobs: jm}, event.Discard)
-	ctx := jobs.WithManager(agent.WithParentSession(context.Background(), "parent-session"), jm)
-	ctx = jobs.WithSession(ctx, "parent-session")
-
-	var readiness *agent.FinalReadinessError
-	if err := a.Run(ctx, "collect and finish the background task"); !errors.As(err, &readiness) {
-		t.Fatalf("first turn = %v, want readiness exhaustion on the uncollected sign-off", err)
-	}
-	if leased := jm.LeaseEvidenceForSession("parent-session", jobID); !leased.HasMutation() {
-		t.Fatalf("first failed turn consumed the background evidence: %+v", leased)
-	}
-
-	readiness = nil
-	if err := a.Run(ctx, "never mind, just answer directly"); !errors.As(err, &readiness) {
-		t.Fatalf("second turn (no wait call) = %v, want readiness exhaustion on the still-pending mutation", err)
-	}
-	if leased := jm.LeaseEvidenceForSession("parent-session", jobID); !leased.HasMutation() {
-		t.Fatalf("second failed turn consumed the background evidence: %+v", leased)
-	}
-}
-
-// TestRestartRecoversPendingBackgroundMutationForcesReadinessWithoutWait mirrors
-// the same guarantee across a process restart: a background task mutates and
-// finishes while no turn is collecting it, the process exits before any turn
-// commits (or even leases) that evidence, and a fresh Manager + Agent pair —
-// standing in for the restarted process — must still see it and enforce
-// final-readiness on the very first turn, with no wait/bash_output call at all.
-func TestRestartRecoversPendingBackgroundMutationForcesReadinessWithoutWait(t *testing.T) {
-	sessionPath := filepath.Join(testenv.TempDir(t), "session.jsonl")
-	first := jobs.NewManager(event.Discard)
-	first.SetActiveSessionPath("parent-session", sessionPath)
-	j := first.StartForSession("parent-session", "task", "bg writer", func(ctx context.Context, _ io.Writer) (string, error) {
-		jobs.PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"qa/bank.md"},
-		}}})
-		return "background answer", nil
-	})
-	if res, _ := first.WaitForSession(context.Background(), "parent-session", []string{j.ID}, jobs.WaitOptions{Timeout: 5 * time.Second}); len(res) != 1 || res[0].Status != jobs.Done {
-		t.Fatalf("background job = %+v, want done", res)
-	}
-	first.Close() // the process exits before any turn ever leased this evidence
-
-	second := jobs.NewManager(event.Discard)
-	defer second.Close()
-	second.SetActiveSessionPath("parent-session", sessionPath)
-
-	reg := evidenceRegistry()
-	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
-	}}
-	a := agent.New(prov, reg, sessionstore.NewSession(""), agent.Options{DeliveryProfile: true, Jobs: second}, event.Discard)
-	ctx := jobs.WithManager(agent.WithParentSession(context.Background(), "parent-session"), second)
-	ctx = jobs.WithSession(ctx, "parent-session")
-
-	var readiness *agent.FinalReadinessError
-	if err := a.Run(ctx, "what's the status?"); !errors.As(err, &readiness) {
-		t.Fatalf("post-restart turn = %v, want readiness exhaustion on the recovered mutation", err)
-	}
-	if leased := second.LeaseEvidenceForSession("parent-session", j.ID); !leased.HasMutation() {
-		t.Fatalf("recovered evidence lost after the failed post-restart turn: %+v", leased)
 	}
 }
 

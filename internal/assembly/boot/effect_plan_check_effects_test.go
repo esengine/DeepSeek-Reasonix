@@ -3,7 +3,6 @@ package boot
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -140,12 +139,6 @@ model = "planner-model"
 	return held, dir
 }
 
-func readTrimmed(t *testing.T, path string) string {
-	t.Helper()
-	b, _ := os.ReadFile(path)
-	return strings.TrimSpace(string(b))
-}
-
 // What a check leaves behind outside anything the plan or the turn wrote is
 // its own residue and does not void it.
 func TestEffectPlanCheckResidueDoesNotVoidItself(t *testing.T) {
@@ -162,99 +155,5 @@ func TestEffectPlanCheckResidueDoesNotVoidItself(t *testing.T) {
 	})
 	if held {
 		t.Fatal("a check's own residue voided the pass it had just produced")
-	}
-}
-
-// One check's write is a change for every other check: verify.sh passed against
-// a stale build, and build.sh then rewrote what it had checked.
-func TestEffectPlanCheckWriteVoidsAnotherChecksPass(t *testing.T) {
-	plan := `{"objective":"change src","steps":[{"id":"s1","title":"change src and rebuild","candidate_files":["src.txt"],
-	  "acceptance":[{"text":"the built output works"}],
-	  "verification":[{"command":"sh verify.sh"},{"command":"sh build.sh"}]}]}`
-	held, dir := runPlannedChecks(t, map[string]string{
-		"src.txt": "ok\n", "out.txt": "ok\n",
-		"build.sh": "cp src.txt out.txt\n", "verify.sh": "grep -qx ok out.txt\n",
-	}, plan, []plannedCall{
-		{"write_file", map[string]any{"path": "src.txt", "content": "broken\n"}},
-		{"bash", map[string]any{"command": "sh verify.sh"}},
-		{"bash", map[string]any{"command": "sh build.sh"}},
-	})
-	if got := readTrimmed(t, filepath.Join(dir, "out.txt")); got != "broken" {
-		t.Fatalf("out.txt = %q, want build.sh to have rebuilt it", got)
-	}
-	if !held {
-		t.Fatal("verify.sh passed only against the stale build, and the turn finished without it running again")
-	}
-}
-
-// A check that rewrites a file the plan names has changed the deliverable it
-// just checked, so its own pass is stale.
-func TestEffectPlanCheckRewritingPlannedFileVoidsItself(t *testing.T) {
-	plan := `{"objective":"fix src","steps":[{"id":"s1","title":"fix src","candidate_files":["src.txt"],
-	  "acceptance":[{"text":"src is fixed"}],
-	  "verification":[{"command":"sh check.sh"}]}]}`
-	held, dir := runPlannedChecks(t, map[string]string{
-		"src.txt": "bug\n", "check.sh": "grep -qx fixed src.txt && echo reformatted > src.txt\n",
-	}, plan, []plannedCall{
-		{"write_file", map[string]any{"path": "src.txt", "content": "fixed\n"}},
-		{"bash", map[string]any{"command": "sh check.sh"}},
-	})
-	if got := readTrimmed(t, filepath.Join(dir, "src.txt")); got != "reformatted" {
-		t.Fatalf("src.txt = %q, want check.sh to have rewritten it", got)
-	}
-	if !held {
-		t.Fatal("check.sh rewrote the file it had just checked, and its own earlier pass still settled it")
-	}
-}
-
-// A file that was there before the turn is someone's source whether or not
-// anything named it, so a check that rewrites it has changed the work — the
-// way go generate, a whole-tree formatter or a lockfile rewrite would.
-func TestEffectPlanCheckRewritingAnUnnamedSourceVoidsItself(t *testing.T) {
-	plan := `{"objective":"fix src","steps":[{"id":"s1","title":"fix src","candidate_files":["src.txt"],
-	  "acceptance":[{"text":"src is fixed"}],
-	  "verification":[{"command":"sh check.sh"}]}]}`
-	for name, tc := range map[string]struct{ lib, script string }{
-		"alone": {"lib.txt", "grep -qx fixed src.txt && echo clobbered > lib.txt\n"},
-		// A new top-level entry proves a change on its own; the rewrite deeper
-		// in the tree must still be seen.
-		// Deleting the file on one run lets the next run look like its creator.
-		"deleted then recreated": {"lib.txt", "grep -qx fixed src.txt || exit 1; if [ -f lib.txt ]; then rm lib.txt; else echo clobbered > lib.txt; fi\n"},
-		"beside new residue":     {"lib/a.txt", "grep -qx fixed src.txt && mkdir -p .cache && echo $$ > .cache/stamp && echo clobbered > lib/a.txt\n"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			held, dir := runPlannedChecks(t, map[string]string{"src.txt": "bug\n", tc.lib: "good\n", "check.sh": tc.script}, plan, []plannedCall{
-				{"write_file", map[string]any{"path": "src.txt", "content": "fixed\n"}},
-				{"bash", map[string]any{"command": "sh check.sh"}},
-				{"bash", map[string]any{"command": "sh check.sh"}},
-			})
-			if got := readTrimmed(t, filepath.Join(dir, tc.lib)); got != "clobbered" {
-				t.Fatalf("%s = %q, want check.sh to have rewritten it", tc.lib, got)
-			}
-			if !held {
-				t.Fatalf("check.sh rewrote %s, which predates the turn, and its own earlier pass still settled it", tc.lib)
-			}
-		})
-	}
-}
-
-// The plan names a file by a symlink to it; the check rewrites the target
-// under its own name, which no spelling of the plan's path reaches.
-func TestEffectPlanCheckRewritingASymlinkTargetVoidsItself(t *testing.T) {
-	plan := `{"objective":"fix src","steps":[{"id":"s1","title":"fix src","candidate_files":["link.txt"],
-	  "acceptance":[{"text":"src is fixed"}],
-	  "verification":[{"command":"sh check.sh"}]}]}`
-	held, dir := runPlannedChecks(t, map[string]string{
-		"src.txt": "fixed\n", "check.sh": "grep -qx fixed src.txt && echo reformatted > src.txt\n",
-	}, plan, []plannedCall{
-		{"bash", map[string]any{"command": "ln -s src.txt link.txt"}},
-		{"write_file", map[string]any{"path": "notes.txt", "content": "fixed through link.txt\n"}},
-		{"bash", map[string]any{"command": "sh check.sh"}},
-	})
-	if got := readTrimmed(t, filepath.Join(dir, "src.txt")); got != "reformatted" {
-		t.Fatalf("src.txt = %q, want check.sh to have rewritten it", got)
-	}
-	if !held {
-		t.Fatal("check.sh rewrote the target of the planned symlink, and its own earlier pass still settled it")
 	}
 }

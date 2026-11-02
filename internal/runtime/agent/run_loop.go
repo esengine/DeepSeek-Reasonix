@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
-	"reasonix/internal/contract/hostaudit"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"sync/atomic"
@@ -94,7 +93,6 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	if scoped && a.task.checkpoint.ScopeID != scope.ID {
 		a.task.checkpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
 	}
-	a.captureBaselineChecks()
 	// Re-lease this session's background-job mutations that no turn has
 	// committed yet. The Reset above just wiped any lease a failed or
 	// cancelled turn held (its ledger is gone), and a process restart starts
@@ -449,12 +447,7 @@ func sleepStreamRetryBackoff(ctx context.Context, d time.Duration) bool {
 // final compaction. cont=true continues the tool loop; cont=false returns err
 // from Run (err may be nil for a clean final answer).
 func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, text, reasoning string, usage *provider.Usage) (cont bool, err error) {
-	// A captured criterion is owed until it has run. The run costs a build, so
-	// it happens where the turn asks whether it may stop, not per tool call.
-	a.evaluateBaselineCriteriaOnce(ctx)
-	readiness := a.finalReadinessCheckFor()
-	a.turn.lastReadiness = &readiness
-	if state.graceRound && (readiness.reason != "" || !hasVisibleFinalAnswer(text)) {
+	if state.graceRound && !hasVisibleFinalAnswer(text) {
 		return false, a.gracePause(ctx, state)
 	}
 	if state.graceRound && (state.landCause.kind == "task_budget" || !state.runLimitHostOwned) {
@@ -471,20 +464,6 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(executorHandoffRetryMessage()), HostAuthored: true})
 		return true, nil
 	}
-	if readiness.reason != "" {
-		// Delivery no longer retries readiness with hidden model messages: the
-		// run ends immediately with the missing requirements, and the host owns
-		// what happens next. In Goal mode the FSM auto-continues under budget
-		// with the missing list as the next turn; plain Delivery turns surface
-		// the recovery card for an explicit user continuation.
-		event.RecordReadinessAudit(a.svc.sink, readiness.audit(hostaudit.ReadinessErrored, false))
-		a.pending.deliveryRecovery = true
-		a.noteObligationsExplained()
-		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs(), Signature: readiness.progressSignature()}
-	}
-	// The turn has earned its stop. What the gate let through on a warn verdict
-	// is reported here, where it is still the outcome of this turn.
-	a.reportReviewWarnings()
 	if !hasVisibleFinalAnswer(text) {
 		state.emptyFinalBlocks++
 		if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
@@ -493,9 +472,6 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
 		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage(usage)), HostAuthored: true})
 		return true, nil
-	}
-	if readiness.applies {
-		event.RecordReadinessAudit(a.svc.sink, readiness.audit(hostaudit.ReadinessAllowed, a.turn.readinessRecovered))
 	}
 	if !a.closeSteerIntakeIfIdle() {
 		return true, nil

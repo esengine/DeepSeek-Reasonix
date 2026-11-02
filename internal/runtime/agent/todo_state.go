@@ -38,15 +38,6 @@ func (a *Agent) CanonicalTodoState() []evidence.TodoItem {
 	return append([]evidence.TodoItem(nil), a.sess.todoState...)
 }
 
-func (a *Agent) incompleteCanonicalTodos() ([]evidence.TodoStepMatch, bool) {
-	a.sess.todoMu.Lock()
-	defer a.sess.todoMu.Unlock()
-	if len(a.sess.todoState) == 0 {
-		return nil, false
-	}
-	return evidence.IncompleteTodos(a.sess.todoState), true
-}
-
 func (a *Agent) hasIncompleteCanonicalCriteria() bool {
 	a.sess.todoMu.Lock()
 	defer a.sess.todoMu.Unlock()

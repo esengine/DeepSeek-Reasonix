@@ -48,26 +48,6 @@ func ordinaryTurnAgent(t *testing.T, turns ...testutil.Turn) (*Agent, *testutil.
 	return a, prov
 }
 
-// An unfinished task list still stops the turn, and the out-of-sight write is
-// reported beside it rather than in place of it. The new gap must not stand in
-// for the readiness contract the list already carries.
-func TestAnUnfinishedListStillHoldsUnderAnOutOfSightWrite(t *testing.T) {
-	a, prov := ordinaryTurnAgent(t,
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w1", Name: "write_file", Arguments: fmt.Sprintf(`{"path":%q}`, outsideTarget("a.desktop"))}}},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "t1", Name: "todo_write",
-			Arguments: `{"todos":[{"content":"写快捷方式","status":"in_progress"},{"content":"实测启动","status":"pending"}]}`}}},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w2", Name: "write_file", Arguments: fmt.Sprintf(`{"path":%q}`, outsideTarget("b.desktop"))}}},
-		testutil.Turn{Text: "写好了。"},
-	)
-	err := a.Run(context.Background(), "两步：写快捷方式，然后实测启动")
-	if !readinessBlocked(err) {
-		t.Fatalf("error = %v, want the unfinished list to hold the turn", err)
-	}
-	if prov.CallCount() != 4 {
-		t.Fatalf("provider calls = %d, want the gate to speak instead of a continuation", prov.CallCount())
-	}
-}
-
 // The write is reported, never enforced: the turn still ends, and the person
 // decides. Anything else would turn a receipt into a gate nobody asked for.
 func TestAnOutOfSightWriteDoesNotHoldTheTurn(t *testing.T) {

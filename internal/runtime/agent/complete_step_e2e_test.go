@@ -140,46 +140,6 @@ func TestE2ECommandDriftAcceptedInTurn(t *testing.T) {
 	}
 }
 
-// Cross-turn: a prior turn left an unfinished plan in the canonical state. A new
-// turn that does work and prematurely claims "all done" without re-asserting the
-// todos is blocked by the canonical fallback, then clears once both steps are
-// actually signed off (host-advanced) — the loop that #2917 could not close.
-func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
-	sess := sessionstore.NewSession("sys")
-	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
-		ID: "t0", Name: "todo_write",
-		Arguments: `{"todos":[{"content":"alpha","status":"in_progress"},{"content":"beta","status":"pending"}]}`}}})
-	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "t0", Name: "todo_write", Content: "Todos updated"})
-
-	// The premature "all done" ends the first Run immediately (no readiness
-	// retries). A follow-up turn signs the steps off with complete_step (the
-	// cited diff paths are proven from the session history) and clears the gate.
-	mp := testutil.NewMock("m",
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w1", Name: "write_file", Arguments: `{"path":"alpha.go"}`}}},
-		testutil.Turn{Text: "all done"},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
-			Arguments: `{"step":"alpha","result":"done","evidence":[{"kind":"diff","summary":"edited","paths":["alpha.go"]}]}`}}},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "complete_step",
-			Arguments: `{"step":"beta","result":"done","evidence":[{"kind":"manual","summary":"verified by inspection"}]}`}}},
-		testutil.Turn{Text: "all done now"},
-	)
-	a := New(mp, evidenceRegistry(), sess, Options{CheckTargetAccess: allowTestFileAccess}, event.Discard)
-	a.SetSession(sess) // rebuilds canonical {alpha in_progress, beta pending}
-
-	firstErr := a.Run(context.Background(), "finish up")
-	if !readinessBlocked(firstErr) {
-		t.Fatalf("premature 'all done' error = %v, want FinalReadinessError from the cross-turn canonical gate", firstErr)
-	}
-	if err := a.Run(context.Background(), "finish up"); err != nil {
-		t.Fatalf("follow-up Run: %v", err)
-	}
-	for i, td := range a.sess.todoState {
-		if canonicalTodoStatus(td.Status) != "completed" {
-			t.Fatalf("canonical todo %d (%q) = %s after sign-off, want completed", i+1, td.Content, td.Status)
-		}
-	}
-}
-
 func TestE2ECrossTurnPendingSignoffIsRejectedUntilCurrentAdvances(t *testing.T) {
 	sess := sessionstore.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{

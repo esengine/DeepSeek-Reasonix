@@ -270,7 +270,6 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	}
 	err = c.runWithRunner(ctx, modelInput)
 	c.captureGoalRunWorkDuration(startMessages)
-	c.persistGoalDeliveryCheckpoint()
 	if err != nil {
 		// When the user explicitly cancels, keep the real prompt and any fully
 		// paired tool work. Partial reasoning/output remains durable for display
@@ -494,13 +493,9 @@ func (o *turnOrchestrator) runTurnLoopWithPreparedTurn(ctx context.Context, turn
 			return err
 		}
 		if !o.c.goals.active() {
-			// No Goal, but the host knows what the turn still owes. Finish it
-			// rather than handing the user a card that only says "continue".
 			o.c.goalUsageTee.setActiveRecorder(nil)
-			return o.continueUntilReady(ctx, err)
+			return err
 		}
-		// FinalReadinessError is absorbed below: the Goal FSM continues with
-		// the missing requirements as the next turn's prompt.
 	}
 	return o.continueGoal(ctx, expectedContinuationEpoch, err)
 }
@@ -556,10 +551,6 @@ func (o *turnOrchestrator) continueGoal(ctx context.Context, expectedContinuatio
 }
 
 func goalTurnErrorAbsorbable(err error) bool {
-	var readinessErr *agent.FinalReadinessError
-	if errors.As(err, &readinessErr) {
-		return true
-	}
 	_, _, ok := goalPauseFromRunError(err)
 	return ok
 }
@@ -596,22 +587,9 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 		return goalAdvanceResult{cont: false}
 	}
 
-	var readiness agent.ReadinessResult
-	var readinessErr *agent.FinalReadinessError
 	pauseCause, pauseReason, runPaused := goalPauseFromRunError(turnErr)
-	if errors.As(turnErr, &readinessErr) {
-		readiness = agent.ReadinessResult{
-			Ready:       false,
-			Missing:     append([]string(nil), readinessErr.Missing...),
-			Reason:      readinessErr.Reason,
-			ProgressKey: readinessErr.Reason,
-		}
-	} else if turnErr != nil && !runPaused {
-		// Terminal provider/host error: stop auto-continue without an FSM
-		// transition; the goal stays running for the next user turn.
+	if turnErr != nil && !runPaused {
 		return goalAdvanceResult{cont: false}
-	} else if c.executor != nil {
-		readiness = c.executor.ReadinessResult()
 	}
 	if gate := c.turnUserGate(); pauseCause == "" && gate != "" {
 		pauseCause, pauseReason = stopCauseUserGate, gate
@@ -622,11 +600,9 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 		report = recorder.validReport(expectedContinuationEpoch)
 	}
 
-	// The bounded evaluator runs once, only when the model gave no report and
-	// readiness has no definite missing list. Failures fail closed in the FSM.
 	var evaluator *goalEvaluatorVerdict
 	var evaluatorFailed string
-	if pauseCause == "" && report == nil && len(readiness.Missing) == 0 {
+	if pauseCause == "" && report == nil {
 		if c.evaluator == nil {
 			evaluatorFailed = "goal evaluator unavailable"
 		} else if verdict, err := c.evaluator.Evaluate(ctx, c.goalEvaluatorEvidence()); err != nil {
@@ -643,7 +619,6 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 
 	res := c.goals.advance(goalAdvanceInput{
 		report:           report,
-		readiness:        readiness,
 		evaluator:        evaluator,
 		evaluatorFailed:  evaluatorFailed,
 		todos:            c.goalTodos(),

@@ -7,11 +7,9 @@ package evidence
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -40,14 +38,6 @@ func DigestOf(content []byte) string {
 // rewritten, so what was captured cannot be edited afterwards under its own
 // name. The root must not be inside the workspace.
 type BaselineStore struct{ root string }
-
-func NewBaselineStore(root string) *BaselineStore {
-	root = strings.TrimSpace(root)
-	if root == "" {
-		return nil
-	}
-	return &BaselineStore{root: root}
-}
 
 // Capture files content and returns the criterion naming it.
 func (s *BaselineStore) Capture(logicalID string, content []byte) (TestCriterion, error) {
@@ -142,119 +132,4 @@ type BaselineEvidence struct {
 	StateEpoch uint64          `json:"stateEpoch"`
 	Result     CriterionResult `json:"result"`
 	Backend    string          `json:"backend"`
-}
-
-// CompareCriterion reports what the workspace did to a captured criterion.
-// present says whether the workspace still holds it; current is what it holds
-// now. Neither answer is a verdict.
-func CompareCriterion(c TestCriterion, current []byte, present bool) CriterionProvenance {
-	switch {
-	case !present:
-		return CriterionRemoved
-	case DigestOf(current) == c.Digest:
-		return CriterionUnchanged
-	default:
-		return CriterionRewritten
-	}
-}
-
-// BaselineTestObligations owes every captured criterion the final state has no
-// passing evidence for. Evidence must name the digest and the epoch it ran
-// against: the workspace's own test of the same name is a different criterion,
-// which is the whole reason the bytes were captured.
-func BaselineTestObligations(facts []BaselineTestFact, epoch uint64) []Obligation {
-	var out []Obligation
-	for _, fact := range facts {
-		if e := fact.Evaluation; e != nil && e.Criterion == fact.Criterion &&
-			e.StateEpoch == epoch && e.Result == CriterionPass {
-			continue
-		}
-		out = append(out, Obligation{
-			ID:        "baseline_test@" + fact.Criterion.Identity(),
-			Kind:      ObligationBaselineTest,
-			Cause:     baselineCause(fact),
-			Discharge: "run the captured criterion against the final state",
-		})
-	}
-	return out
-}
-
-func baselineCause(fact BaselineTestFact) string {
-	cause := "the task began under " + fact.Criterion.LogicalID
-	if fact.Provenance != CriterionUnchanged {
-		cause += ", which the workspace has since " + string(fact.Provenance)
-	}
-	if e := fact.Evaluation; e != nil && e.Result != CriterionPass {
-		cause += "; the captured criterion " + string(e.Result)
-	}
-	return cause
-}
-
-// EvaluableCriterionNames lists the criteria in captured bytes whose execution
-// semantics a plain `go test` run establishes. Only TestXxx qualifies today: a
-// benchmark does not run without -bench, and an example without an output
-// comment is compiled and not run. Capture stays wider on purpose — a pre-image
-// lost is lost — but nothing signs evidence for a kind the host cannot run.
-func EvaluableCriterionNames(src []byte) []string {
-	bodies, ok := testFunctionBodies(string(src))
-	if !ok {
-		return nil
-	}
-	var names []string
-	for name := range bodies {
-		if strings.HasPrefix(name, "Test") {
-			names = append(names, name)
-		}
-	}
-	slices.Sort(names)
-	return names
-}
-
-// BaselineOutcomeFromTestJSON reads a `go test -json` stream for a verdict about
-// the named criteria and nothing else. A package that failed while none of them
-// did is not a verdict about them — an unrelated test, or a build that never
-// produced one, must not be reported as the captured criterion failing.
-func BaselineOutcomeFromTestJSON(stream []byte, criteria []string) CriterionResult {
-	if len(criteria) == 0 {
-		return CriterionUnavailable
-	}
-	seen := map[string]string{}
-	for line := range strings.SplitSeq(string(stream), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var event struct {
-			Action string `json:"Action"`
-			Test   string `json:"Test"`
-		}
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
-		}
-		// Subtests answer for their parent, and only the parent is a criterion.
-		name, _, _ := strings.Cut(event.Test, "/")
-		if name == "" || !slices.Contains(criteria, name) {
-			continue
-		}
-		switch event.Action {
-		case "pass", "fail", "skip":
-			if _, decided := seen[name]; !decided || event.Test == name {
-				seen[name] = event.Action
-			}
-		}
-	}
-	if len(seen) != len(criteria) {
-		// Something the criteria name never reported. The host has no verdict for
-		// them, whatever the package as a whole did.
-		return CriterionUnavailable
-	}
-	for _, action := range seen {
-		if action == "fail" {
-			return CriterionFail
-		}
-		if action != "pass" {
-			return CriterionUnavailable
-		}
-	}
-	return CriterionPass
 }

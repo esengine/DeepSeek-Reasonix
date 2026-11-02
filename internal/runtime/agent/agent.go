@@ -873,9 +873,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			a.svc.jobs.CommitEvidenceForSession(lease.Session, lease.JobID)
 		}
 	}()
-	if _, scoped := DeliveryExecutionScopeFromContext(ctx); scoped {
-		defer func() { a.updateDeliveryCheckpoint(runErr) }()
-	}
 	defer a.activeTurnCreatedAt.Store(0)
 
 	// agent.before_start: an extension may abort the run before the user turn
@@ -895,13 +892,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	return err
 }
 
-func boolInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 // DeliveryCheckpoint returns the compact Goal-scoped delivery state. It is safe
 // to persist next to the Goal sidecar because it contains no raw arguments.
 func (a *Agent) DeliveryCheckpoint() evidence.DeliveryCheckpoint {
@@ -917,56 +907,6 @@ func (a *Agent) RestoreDeliveryCheckpoint(checkpoint evidence.DeliveryCheckpoint
 	}
 	a.task.checkpoint = checkpoint
 	a.task.scopeID = checkpoint.ScopeID
-}
-
-// PrepareDeliveryRecovery preserves the exhausted turn's evidence for exactly
-// one explicit continuation. It returns false when there is no matching
-// readiness failure, so normal follow-up turns cannot inherit stale mutations.
-func (a *Agent) PrepareDeliveryRecovery() bool {
-	if !a.deliveryProfile {
-		return false
-	}
-	return a.prepareEvidenceContinuation()
-}
-
-func (a *Agent) updateDeliveryCheckpoint(runErr error) {
-	if !a.turn.deliveryScopeActive || a.task.scopeID == "" || a.task.ledger == nil {
-		return
-	}
-	cp := a.task.checkpoint
-	if cp.ScopeID != a.task.scopeID {
-		cp = evidence.DeliveryCheckpoint{ScopeID: a.task.scopeID}
-	}
-	cp.CriteriaEstablished = cp.CriteriaEstablished || a.turn.deliveryCriteriaEstablished || a.task.ledger.HasSuccessfulTodoWrite()
-	cp.WorkObserved = cp.WorkObserved || a.task.ledger.HasSuccessfulWorkReceipt()
-	persistentOnlyReady := a.task.ledger.HasSuccessfulToolReceipt("remember") &&
-		!a.task.ledger.HasSuccessfulMutationOtherThan("remember")
-	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok && !persistentOnlyReady {
-		cp.MutationObserved = true
-		cp.PendingMutation = true
-	}
-	if persistentOnlyReady {
-		cp.MutationObserved = true
-	}
-	if runErr == nil && cp.PendingMutation && a.deliveryMutationCheckpointReady() {
-		cp.PendingMutation = false
-	}
-	a.carryProof(&cp)
-	a.task.checkpoint = cp
-}
-
-func (a *Agent) deliveryMutationCheckpointReady() bool {
-	if a.task.ledger == nil || !a.turn.deliveryCriteriaEstablished {
-		return false
-	}
-	mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex()
-	if !ok {
-		mutation = -1
-	}
-	return a.task.ledger.HasSuccessfulCompleteStepAfter(mutation) &&
-		a.task.ledger.HasSuccessfulDeliverySignoffAfter(mutation) &&
-		a.task.ledger.HasSuccessfulReviewAfter(mutation) &&
-		a.reviewGateFailure() == ""
 }
 
 func (a *Agent) setTodoState(todos []evidence.TodoItem) {

@@ -1,14 +1,9 @@
 package control
 
 import (
-	"context"
-	"reasonix/internal/state/sessionstore"
 	"testing"
 
-	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
-	"reasonix/internal/contract/tool"
-	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/goaleval"
 )
 
@@ -68,23 +63,5 @@ func TestGoalTokenBudgetPausesAndResumes(t *testing.T) {
 	again := c.GoalRuntime()
 	if c.GoalStatus() != GoalStatusBlocked || again.StopCause != stopCauseBudgetSpend || again.TokensUsed <= resumed.TokensUsed {
 		t.Fatalf("second spend slice = status:%q runtime:%+v", c.GoalStatus(), again)
-	}
-}
-
-func TestGoalReadinessFailurePausesOnExplicitSpendBudget(t *testing.T) {
-	runner := &deliveryScopeErrorRunner{}
-	executor := agent.New(nil, tool.NewRegistry(), sessionstore.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{Runner: runner, Executor: executor, GoalTokenBudget: 200})
-	runner.usage = c.goalUsageTee
-	c.SetGoal("ship the integration")
-
-	if err := newTurnOrchestrator(c).runTurnLoop(context.Background(), orchestratedTurn{input: "start", raw: "start"}); err != nil {
-		t.Fatalf("run err = %v, want the explicit budget pause absorbed by the Goal FSM", err)
-	}
-	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus = %q, want blocked (spend-budget pause)", got)
-	}
-	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetSpend {
-		t.Fatalf("runtime = %+v, want %q", rt, stopCauseBudgetSpend)
 	}
 }

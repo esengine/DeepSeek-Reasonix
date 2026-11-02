@@ -90,9 +90,6 @@ func (c *Controller) SubmitDisplay(display, input string) {
 // from an older/reloaded session this safely degrades to an ordinary turn.
 func (c *Controller) SubmitDeliveryRecovery(display, input string) {
 	c.runGuarded(func(ctx context.Context) error {
-		if c.executor != nil {
-			c.executor.PrepareDeliveryRecovery()
-		}
 		return c.runTurnLoop(ctx, orchestratedTurn{input: input, raw: input, display: display})
 	})
 }

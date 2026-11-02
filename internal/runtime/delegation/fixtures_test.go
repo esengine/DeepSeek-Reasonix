@@ -16,22 +16,6 @@ import (
 	"time"
 )
 
-// evidenceRegistry wires the real complete_step + todo_write builtins (the
-// enforcement surface under test) alongside bash/write stubs that emit real
-// receipts without touching the host — so the whole turn loop, ledger, gate,
-// and host-advance run end to end.
-func evidenceRegistry() *tool.Registry {
-	reg := tool.NewRegistry()
-	for _, bt := range tool.Builtins() {
-		if bt.Name() == "complete_step" || bt.Name() == "todo_write" {
-			reg.Add(bt)
-		}
-	}
-	reg.Add(stubBash{})
-	reg.Add(stubWrite{})
-	return reg
-}
-
 // fakeReadFileTool is a minimal read-only tool whose successful calls produce
 // Read receipts with an extractable path, like the real read_file.
 type fakeReadFileTool struct{}
@@ -266,10 +250,6 @@ func (p *consumingStreamProvider) Stream(context.Context, provider.Request) (<-c
 	return ch, nil
 }
 
-type stubBash struct{}
-
-type stubWrite struct{}
-
 func (fakeReadFileTool) Name() string { return "read_file" }
 
 func (fakeReadFileTool) Description() string { return "fake read" }
@@ -281,32 +261,6 @@ func (fakeReadFileTool) Schema() json.RawMessage { return json.RawMessage(`{"typ
 func (fakeReadFileTool) Execute(context.Context, json.RawMessage) (string, error) {
 	return "contents", nil
 }
-
-func (stubWrite) Name() string { return "write_file" }
-
-func (stubWrite) Description() string { return "stub write" }
-
-func (stubWrite) ReadOnly() bool { return false }
-
-func (stubWrite) WritesNamedPaths() bool { return true }
-
-func (stubWrite) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)
-}
-
-func (stubWrite) Execute(context.Context, json.RawMessage) (string, error) { return "wrote", nil }
-
-func (stubBash) Name() string { return "bash" }
-
-func (stubBash) Description() string { return "stub bash" }
-
-func (stubBash) ReadOnly() bool { return false }
-
-func (stubBash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`)
-}
-
-func (stubBash) Execute(context.Context, json.RawMessage) (string, error) { return "ok", nil }
 
 func (readOnlyBoundaryProxy) Name() string { return "use_capability" }
 

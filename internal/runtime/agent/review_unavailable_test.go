@@ -1,16 +1,9 @@
 package agent
 
 import (
-	"context"
 	"errors"
-	"reasonix/internal/state/sessionstore"
 	"strings"
 	"testing"
-
-	"reasonix/internal/contract/event"
-	"reasonix/internal/contract/provider"
-	"reasonix/internal/contract/tool"
-	"reasonix/internal/safety/evidence"
 )
 
 func TestReviewUnavailableErrorIsPartialPath(t *testing.T) {
@@ -23,30 +16,6 @@ func TestReviewUnavailableErrorIsPartialPath(t *testing.T) {
 	}
 	if !errors.As(err, new(*ReviewUnavailableError)) {
 		t.Fatal("errors.As should unwrap")
-	}
-}
-
-func TestRequireReviewReportRetriesOnceThenUnavailable(t *testing.T) {
-	// Multi-turn mock that never calls review_report.
-	scripted := &scriptedProvider{name: "review-script", turns: [][]provider.Chunk{
-		{{Type: provider.ChunkText, Text: "first"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "retry"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "should-not-run"}, {Type: provider.ChunkDone}},
-	}}
-	reg := tool.NewRegistry()
-	AttachReviewReportTool(reg, reviewGrant(evidence.ReviewKindReview))
-	sess := sessionstore.NewSession("sys")
-	out, err := RunSubAgentWithSession(context.Background(), scripted, reg, sess, "review a.go",
-		Options{RequireReviewReportKind: evidence.ReviewKindReview, MaxSteps: 2, DeliveryProfile: true}, event.Discard)
-	if err == nil {
-		t.Fatalf("expected reviewer unavailable, got out=%q", out)
-	}
-	if !IsReviewUnavailable(err) {
-		t.Fatalf("err = %v, want ReviewUnavailableError", err)
-	}
-	// First run + one retry nudge consumes at most 2 provider turns.
-	if got := scripted.call; got > 2 {
-		t.Fatalf("consumed %d turns, want at most 2 (one retry)", got)
 	}
 }
 

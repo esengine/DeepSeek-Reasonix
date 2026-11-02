@@ -15,7 +15,6 @@ type goalMachineSnapshot struct {
 	goal                   string
 	status                 string
 	scopeID                string
-	deliveryCheckpoint     evidence.DeliveryCheckpoint
 	block                  string
 	strict                 bool
 	budgetClass            string
@@ -44,8 +43,8 @@ func (g *goalMachine) capture() goalMachineSnapshot {
 func (g *goalMachine) captureLocked() goalMachineSnapshot {
 	return goalMachineSnapshot{
 		goal: g.goal, status: g.status,
-		scopeID: g.scopeID, deliveryCheckpoint: g.deliveryCheckpoint,
-		block: g.block, strict: g.strict,
+		scopeID: g.scopeID,
+		block:   g.block, strict: g.strict,
 		budgetClass: g.budgetClass, turnsUsed: g.turnsUsed,
 		turnsLimit: g.turnsLimit, tokensUsed: g.tokensUsed,
 		requestsUsed:   g.requestsUsed,
@@ -64,7 +63,7 @@ func (g *goalMachine) restore(snapshot goalMachineSnapshot) {
 	g.mu.Lock()
 	g.goal, g.status = snapshot.goal, snapshot.status
 	g.scopeID = snapshot.scopeID
-	g.deliveryCheckpoint, g.block = snapshot.deliveryCheckpoint, snapshot.block
+	g.block = snapshot.block
 	g.strict = snapshot.strict
 	g.budgetClass = snapshot.budgetClass
 	g.turnsUsed, g.turnsLimit = snapshot.turnsUsed, snapshot.turnsLimit

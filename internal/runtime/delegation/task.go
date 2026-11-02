@@ -455,8 +455,6 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 		// What the worker owes comes with the worker, and so does what it may
 		// prove. Deriving either from the profile's name here would put an
 		// undeclared rule in a second place.
-		spec.Worker.ReviewReport = def.Delivery.ReviewReport
-		spec.Worker.ReviewAuthority = def.Authority.Review
 		profileTools = def.AllowedTools
 		profileModel, profileEffort = def.Model, def.Effort
 		if def.ReadOnly {
@@ -585,12 +583,6 @@ func (t *TaskTool) runProfileSpec(ctx context.Context, spec ProfileExecSpec, exi
 	// which provider-visible call it descends from. They are the same string
 	// for everything a model delegated and cannot be for anything else.
 	execution := life.executionID(parentID)
-	// Never on the parent surface: the gate reads a child's report, and exposing
-	// it upward would let a turn file a verdict on its own behalf. Mounted here
-	// rather than with the rest of the registry because it is bound to a grant,
-	// and the execution that grant names does not exist until now.
-	grant := reviewGrantFor(spec.Worker, execution)
-	agent.AttachReviewReport(subReg, grant)
 	run, err := t.prepareTranscriptRunWithPrompt(withUpstream(ctx, spec.Context.Upstream), subReg, modelRef, effortRef, spec.Context.parentSession(ctx), execution, spec.Context.executionParent(execution), spec.Context.ContinueFrom, spec.Context.ForkFrom, spec.Worker.SystemPrompt, spec.Worker.Kind, spec.Worker.Name)
 	if err != nil {
 		if errors.Is(err, ErrAncestorCopyBusy) {
@@ -616,9 +608,9 @@ func (t *TaskTool) runProfileSpec(ctx context.Context, spec ProfileExecSpec, exi
 			defer releaseWriter()
 		}
 		if spec.Grant.ReadOnly {
-			return t.runReadOnlySubSession(withUpstream(runCtx, spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, "read_only_"+spec.Worker.Kind, grant)
+			return t.runReadOnlySubSession(withUpstream(runCtx, spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, "read_only_"+spec.Worker.Kind)
 		}
-		return t.runSubSession(t.withChildEffort(withUpstream(writeclaim.WithSubagentWriteGrant(runCtx, writeGrant), spec.Context.Upstream), ctx, modelRef, effortRef), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, spec.Worker.Kind, grant, t.observeRootFor(backgroundWriter, writeGrant))
+		return t.runSubSession(t.withChildEffort(withUpstream(writeclaim.WithSubagentWriteGrant(runCtx, writeGrant), spec.Context.Upstream), ctx, modelRef, effortRef), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, spec.Worker.Kind, t.observeRootFor(backgroundWriter, writeGrant))
 	}
 
 	if spec.Sched.RunInBackground {
@@ -824,12 +816,11 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *sessionstore.Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string, grant agent.ReviewReportGrant, observeRoot string) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *sessionstore.Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string, observeRoot string) (string, error) {
 	opts := t.steerable(t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver), sess)
 	opts.ModelRef = modelRef
 	opts.RequestEffort, _ = ctx.Value(childEffortKey{}).(string)
 	opts.ObserveRoot = observeRoot
-	opts.RequireReviewReportKind = grant.Delivery
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
@@ -841,9 +832,8 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	return agent.RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
-func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *sessionstore.Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string, grant agent.ReviewReportGrant) (string, error) {
+func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *sessionstore.Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string) (string, error) {
 	opts := t.steerable(t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver), sess)
-	opts.RequireReviewReportKind = grant.Delivery
 	ctx, prompt, opts = t.prepareSubSession(ctx, prompt, opts, modelRef, entrance)
 	return agent.RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
@@ -956,13 +946,6 @@ func NestedSink(ctx context.Context, fallback event.Sink) event.Sink {
 		return fallback
 	}
 	return subSinkFor(parentID, parent)
-}
-
-// reviewGrantFor issues the grant for one delegated run. Both halves come from
-// the worker's own declaration, so no entry point can widen either by asking
-// differently.
-func reviewGrantFor(worker WorkerSpec, execution string) agent.ReviewReportGrant {
-	return agent.IssueReviewGrant(worker.ReviewReport, worker.ReviewAuthority, execution)
 }
 
 // observeRootFor is where a writer child may observe its own effects. A

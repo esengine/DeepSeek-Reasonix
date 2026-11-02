@@ -10,7 +10,6 @@ import (
 
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/runtime/agent"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/store"
 )
@@ -168,20 +167,6 @@ func TestGoalNumericPauseMigrationWriteFailureRollsBackMemory(t *testing.T) {
 	}
 	if string(onDisk) != string(raw) {
 		t.Fatalf("failed atomic migration changed original sidecar: %s", onDisk)
-	}
-}
-
-func TestGoalCompletionAndRealBlockedStillTerminate(t *testing.T) {
-	complete := &goalMachine{goal: "ship", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
-	res := complete.advance(goalAdvanceInput{report: &goalTurnReport{status: GoalStatusComplete}, readiness: agent.ReadinessResult{Ready: true}})
-	if res.notice != goalCompleteNotice || complete.status != GoalStatusComplete {
-		t.Fatalf("complete result=%+v runtime=%+v", res, complete.runtimeView())
-	}
-
-	blocked := &goalMachine{goal: "ship", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
-	res = blocked.advance(goalAdvanceInput{report: &goalTurnReport{status: GoalStatusBlocked, reason: "need user credentials"}})
-	if res.cont || blocked.status != GoalStatusBlocked || blocked.stopCause != "" {
-		t.Fatalf("blocked result=%+v runtime=%+v", res, blocked.runtimeView())
 	}
 }
 

@@ -25,10 +25,8 @@ type taskRuntime struct {
 	ledger         *evidence.Ledger
 	// origins keeps the text of this task's external results, apart from the messages.
 	origins *originLedger
-	// explained holds the obligations whose full explanation an ended turn already carried.
-	explained []string
-	outcome   *evidence.OutcomeTracker
-	budget    runBudget
+	outcome *evidence.OutcomeTracker
+	budget  runBudget
 	// witness holds, per changed path, the lines a later output has to carry to
 	// have shown that change. It is working state, not evidence: the verdict
 	// lands on the receipt, so the ledger never holds file content.
@@ -63,18 +61,6 @@ func (t *taskRuntime) workspaceOverScanLimit() bool {
 func (t *taskRuntime) noteWorkspaceOverScanLimit() {
 	if t != nil && t.overScanLimit != nil {
 		t.overScanLimit.Store(true)
-	}
-}
-
-// criteriaHeldAt reports that the capture already ran against this state, so
-// walking again would re-derive an answer nothing has moved.
-func (t *taskRuntime) criteriaHeldAt(epoch uint64) bool {
-	return t != nil && t.criteriaEpoch != nil && t.criteriaEpoch.Load() == epoch+1
-}
-
-func (t *taskRuntime) noteCriteriaCaptured(epoch uint64) {
-	if t != nil && t.criteriaEpoch != nil {
-		t.criteriaEpoch.Store(epoch + 1)
 	}
 }
 

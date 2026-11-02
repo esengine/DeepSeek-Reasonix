@@ -96,13 +96,6 @@ func (c CheckContract) WithDelivery(delivery bool) CheckContract {
 	return c
 }
 
-// CaptureCheckContract canonicalises both declarations into criterion
-// identities. Capture is the host's act: a contract derived from the workspace
-// each time it is asked would be no provenance at all.
-func CaptureCheckContract(baseline, current []string) CheckContract {
-	return CheckContract{baseline: criterionIdentities(baseline), current: criterionIdentities(current)}
-}
-
 // WithCapturedTests preserves criteria even when their current bytes are unchanged.
 func (c CheckContract) WithCapturedTests(count int) CheckContract {
 	c.capturedTests = count
@@ -360,22 +353,4 @@ func (l *Ledger) commandAt(at int) string {
 		return r.Command
 	}
 	return r.ToolName
-}
-
-// DiffObligations reports what changed between two derivations. It is the only
-// way an ObligationDelta is built: nothing announces a debt, the ledger is asked
-// what it owes and the answers are compared.
-func DiffObligations(before, after []Obligation) ObligationDelta {
-	var delta ObligationDelta
-	for _, o := range after {
-		if !slices.ContainsFunc(before, func(b Obligation) bool { return b.ID == o.ID }) {
-			delta.Added = append(delta.Added, o)
-		}
-	}
-	for _, o := range before {
-		if !slices.ContainsFunc(after, func(a Obligation) bool { return a.ID == o.ID }) {
-			delta.Discharged = append(delta.Discharged, o)
-		}
-	}
-	return delta
 }

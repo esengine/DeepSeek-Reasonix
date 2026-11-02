@@ -10,7 +10,6 @@ import (
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/state/sessionstore"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,7 +25,6 @@ import (
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/runtime/capability"
-	"reasonix/internal/safety/evidence"
 	"reasonix/internal/safety/permission"
 )
 
@@ -719,114 +717,6 @@ func TestUseCapabilityProxyHonorsRealMCPPermissionDeny(t *testing.T) {
 	}
 }
 
-func TestReviewReportToolValidatesSchema(t *testing.T) {
-	tl := NewReviewReportTool(reviewGrant(evidence.ReviewKindSecurity))
-	led := evidence.NewLedger()
-	led.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
-	ctx := evidence.WithLedger(context.Background(), led)
-	if _, err := tl.Execute(ctx, json.RawMessage(`{"kind":"security","verdict":"pass","reviewed_paths":[]}`)); err == nil {
-		t.Fatal("empty reviewed_paths should fail")
-	}
-	out, err := tl.Execute(ctx, json.RawMessage(`{"kind":"security","verdict":"block","reviewed_paths":["a.go"],"findings":[{"severity":"critical","summary":"secret"}]}`))
-	if err != nil || !strings.Contains(out, "blocking") {
-		t.Fatalf("out=%q err=%v", out, err)
-	}
-}
-
-func TestReviewReportRequiresHostReadEvidence(t *testing.T) {
-	tl := NewReviewReportTool(reviewGrant(evidence.ReviewKindReview))
-	// No ledger on ctx: fail closed.
-	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["a.go"]}`)); err == nil {
-		t.Fatal("expected failure without a host evidence ledger")
-	}
-	led := evidence.NewLedger()
-	ctx := evidence.WithLedger(context.Background(), led)
-	// Claimed paths without any host-observed read: rejected, names the path.
-	_, err := tl.Execute(ctx, json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["internal/runtime/agent/agent.go"]}`))
-	if err == nil || !strings.Contains(err.Error(), "internal/runtime/agent/agent.go") {
-		t.Fatalf("expected fake-coverage rejection naming the path, got %v", err)
-	}
-	// A successful read receipt makes the same report acceptable.
-	led.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/runtime/agent/agent.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
-	if _, err := tl.Execute(ctx, json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["internal/runtime/agent/agent.go"]}`)); err != nil {
-		t.Fatalf("host-read path should be accepted: %v", err)
-	}
-	// A shell receipt whose output carried the change counts the same way.
-	led2 := evidence.NewLedger()
-	diffRec := evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"git diff -- internal/assembly/boot/boot.go"}`), true, evidence.ToolFacts{ReadOnly: true})
-	diffRec.OutputBytes = 512
-	diffRec.Showed = []string{"internal/assembly/boot/boot.go"}
-	led2.Record(diffRec)
-	ctx2 := evidence.WithLedger(context.Background(), led2)
-	if _, err := tl.Execute(ctx2, json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["internal/assembly/boot/boot.go"]}`)); err != nil {
-		t.Fatalf("diffed path should be accepted: %v", err)
-	}
-}
-
-func TestReviewReportRejectsNonContentEvidence(t *testing.T) {
-	tl := NewReviewReportTool(reviewGrant(evidence.ReviewKindReview))
-	report := json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["internal/runtime/agent/agent.go"]}`)
-
-	// git status mentions the path but never shows content.
-	led := evidence.NewLedger()
-	led.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"git status --short -- internal/runtime/agent/agent.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
-	if _, err := tl.Execute(evidence.WithLedger(context.Background(), led), report); err == nil {
-		t.Fatal("git status must not count as review evidence")
-	}
-	// echo output containing the path shows nothing either.
-	led = evidence.NewLedger()
-	led.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"echo internal/runtime/agent/agent.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
-	if _, err := tl.Execute(evidence.WithLedger(context.Background(), led), report); err == nil {
-		t.Fatal("echo must not count as review evidence")
-	}
-	// Writing a file is not reviewing it.
-	led = evidence.NewLedger()
-	led.Record(evidence.ReceiptFromToolCall("write_file", json.RawMessage(`{"path":"internal/runtime/agent/agent.go"}`), true, evidence.ToolFacts{}))
-	if _, err := tl.Execute(evidence.WithLedger(context.Background(), led), report); err == nil {
-		t.Fatal("a write receipt must not count as review evidence")
-	}
-	// A bare basename read must not satisfy a claim for a specific full path.
-	led = evidence.NewLedger()
-	led.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"agent.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
-	if _, err := tl.Execute(evidence.WithLedger(context.Background(), led), report); err == nil {
-		t.Fatal("reverse basename matching must not count as review evidence")
-	}
-	// A command that names the path and printed something proves nothing on its
-	// own: what it printed may be a count, a status, or another segment's
-	// output. Only the host's record of what the output carried counts.
-	for _, cmd := range []string{
-		"cat internal/runtime/agent/agent.go",
-		"cat internal/runtime/agent/agent.go >/dev/null",
-		"git diff --stat -- internal/runtime/agent/agent.go",
-		"cat internal/runtime/agent/agent.go | wc -l",
-		"git diff HEAD~1 -- internal/runtime/agent/agent.go && echo done",
-		"cat internal/runtime/agent/agent.go.bak",
-	} {
-		led := evidence.NewLedger()
-		rec := evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":`+strconv.Quote(cmd)+`}`), true, evidence.ToolFacts{ReadOnly: true})
-		rec.OutputBytes = 512
-		led.Record(rec)
-		if _, err := tl.Execute(evidence.WithLedger(context.Background(), led), report); err == nil {
-			t.Fatalf("%q printed something, but nothing said it printed the change", cmd)
-		}
-	}
-	// The same commands, with the host's record that the output carried the
-	// file: the shape never mattered, and a compound one is no longer a wall.
-	for _, cmd := range []string{
-		"cat internal/runtime/agent/agent.go",
-		"git diff HEAD~1 -- internal/runtime/agent/agent.go && echo done",
-	} {
-		led := evidence.NewLedger()
-		rec := evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":`+strconv.Quote(cmd)+`}`), true, evidence.ToolFacts{ReadOnly: true})
-		rec.OutputBytes = 512
-		rec.Showed = []string{"internal/runtime/agent/agent.go"}
-		led.Record(rec)
-		if _, err := tl.Execute(evidence.WithLedger(context.Background(), led), report); err != nil {
-			t.Fatalf("%q carried the change and should count as review evidence: %v", cmd, err)
-		}
-	}
-}
-
 func TestUseCapabilityServerConnectHonorsPermissionInPlanMode(t *testing.T) {
 	host := plugin.NewHost()
 	defer host.Close()
@@ -924,42 +814,6 @@ func TestCompletedProxyCallCountsOnAgentSkipExecutePath(t *testing.T) {
 	}
 }
 
-func TestCapabilityGateRecoveryIsAudited(t *testing.T) {
-	reg := tool.NewRegistry()
-	audit := &capability.Audit{}
-	a := New(&scriptedProvider{name: "p"}, reg, sessionstore.NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger(), CapabilityAudit: audit}, event.Discard)
-	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
-		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
-	}})
-	a.task.ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
-	if check := a.finalReadinessCheckFor(); check.reason == "" {
-		t.Fatal("expected a require miss first")
-	}
-	a.capabilityLedger.MarkInvoked("skill:review")
-	a.capabilityLedger.MarkSucceeded("skill:review")
-	if check := a.finalReadinessCheckFor(); strings.Contains(check.reason, "required capabilities") {
-		t.Fatalf("gate should be clean after success, reason=%q", check.reason)
-	}
-	if snap := audit.Snapshot(); snap.RequireRecovered != 1 {
-		t.Fatalf("RequireRecovered=%d, want 1", snap.RequireRecovered)
-	}
-}
-
-func TestRunSubAgentRequiresReviewReport(t *testing.T) {
-	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		{{Type: provider.ChunkText, Text: "looks fine"}, {Type: provider.ChunkDone}},
-	}}
-	_, err := RunSubAgentWithSession(context.Background(), prov, tool.NewRegistry(), sessionstore.NewSession("sys"), "review it",
-		Options{RequireReviewReportKind: evidence.ReviewKindReview, DeliveryProfile: true}, event.Discard)
-	if err == nil {
-		t.Fatal("expected missing-report failure")
-	}
-	if !IsReviewUnavailable(err) && !strings.Contains(err.Error(), "review_report") && !strings.Contains(err.Error(), "reviewer unavailable") {
-		t.Fatalf("expected review unavailable / review_report failure, got %v", err)
-	}
-}
-
 func TestUseCapabilityInspectDoesNotStartServer(t *testing.T) {
 	host := plugin.NewHost()
 	defer host.Close()
@@ -1047,21 +901,6 @@ func TestPlanModeBlocksAuthorizedDestructiveMCPThroughUseCapability(t *testing.T
 	})
 	if !out.blocked || gate.normalCalls != 0 {
 		t.Fatalf("destructive proxy should be blocked before permission, outcome=%+v normal=%d", out, gate.normalCalls)
-	}
-}
-
-func TestCapabilityGateAppliesToReadOnlyTasks(t *testing.T) {
-	reg := tool.NewRegistry()
-	a := New(&scriptedProvider{name: "p"}, reg, sessionstore.NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger()}, event.Discard)
-	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
-		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
-	}})
-	// Only ordinary reads happened — no writer. The require gate must still hold.
-	a.task.ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
-	check := a.finalReadinessCheckFor()
-	if !strings.Contains(check.reason, "required capabilities") {
-		t.Fatalf("read-only answer must not skip the require gate; reason = %q", check.reason)
 	}
 }
 

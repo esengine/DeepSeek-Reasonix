@@ -88,3 +88,18 @@ func insideSessionScratch(path, tempRoot string) bool {
 	first, _, _ := strings.Cut(rel, string(filepath.Separator))
 	return strings.HasPrefix(first, sessiontemp.Prefix())
 }
+
+func (a *Agent) relativeUnique(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if filepath.IsAbs(p) && a.observeRoot != "" {
+			if rel, err := filepath.Rel(a.observeRoot, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				p = rel
+			}
+		}
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}

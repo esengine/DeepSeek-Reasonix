@@ -287,12 +287,6 @@ func (a *Agent) mutationBaseline(delivery bool) (int, bool) {
 	return a.task.ledger.LatestSuccessfulWriterIndexFunc(a.survives)
 }
 
-// writerBaselineThrough is the non-delivery baseline as it stood at receipt
-// through.
-func (a *Agent) writerBaselineThrough(through int) (int, bool) {
-	return a.task.ledger.LatestSuccessfulWriterIndexThrough(through, a.survives)
-}
-
 func (a *Agent) survives(r evidence.Receipt) bool {
 	return a.touchedTheWorkspace(r) && leftSomethingBehind(a.task.ledger, r, a.writeWorkspaceRoot)
 }
@@ -316,7 +310,6 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 		if c, described := tool.PreviewChange(ctx, plan.runTool, plan.runArgs); described {
 			change = c
 			plan.criteriaRewritten = evidence.RewrittenTestCriteria(c.Path, c.OldText, c.NewText)
-			a.captureRewrittenCriteria(c, plan.criteriaRewritten)
 		}
 		a.publishToolPreview(ctx, plan, change)
 	}

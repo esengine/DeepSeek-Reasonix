@@ -14,36 +14,7 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/agent"
-	"reasonix/internal/safety/evidence"
 )
-
-// The Goal loop is what would otherwise drive through a gate. It must stop, and
-// must not read the turn as finished.
-func TestUserGatePausesTheGoal(t *testing.T) {
-	g := &goalMachine{goal: "work the news list with me", status: GoalStatusRunning}
-	g.turnsLimit = unlimitedGoalTurns
-	g.noProgressLimit = 0
-
-	res := g.advance(goalAdvanceInput{
-		readiness:   agent.ReadinessResult{Ready: true},
-		todos:       []evidence.TodoItem{{StepID: "n2", Content: "the second item", Status: "pending"}},
-		pauseCause:  stopCauseUserGate,
-		pauseReason: "your view on the first item",
-	})
-
-	if res.cont {
-		t.Fatal("a gated turn must stop the goal loop")
-	}
-	if res.intercept != "" {
-		t.Fatalf("a gated turn must not be continued with %q", res.intercept)
-	}
-	if g.status != GoalStatusBlocked || g.stopCause != stopCauseUserGate {
-		t.Fatalf("status = %q, stopCause = %q", g.status, g.stopCause)
-	}
-	if !strings.Contains(res.notice, "your view on the first item") {
-		t.Fatalf("notice = %q, want what the turn is waiting for", res.notice)
-	}
-}
 
 // Only this cause is lifted by the next user turn. A spend boundary or an
 // unavailable evaluator stays the user's to lift, and a synthetic turn is not

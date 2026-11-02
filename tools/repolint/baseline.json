@@ -5,18 +5,18 @@
     "claude-dialect": 1,
     "codeowners": 0,
     "commented-code": 0,
-    "complexity": 676,
+    "complexity": 674,
     "css-important": 204,
     "css-size": 9804,
     "doc-language": 0,
     "doc-owner": 27,
     "doc-prose": 2128,
     "error-text": 9,
-    "essay": 2600,
-    "file-size": 18533,
+    "essay": 2579,
+    "file-size": 18429,
     "flat-view": 0,
     "frontend-parity": 13,
-    "function-size": 2492,
+    "function-size": 2486,
     "layer-order": 0,
     "layering": 0,
     "marker": 0,
@@ -971,7 +971,7 @@
     "internal/runtime/agent/agent.go": {
       "complexity": 32,
       "essay": 26,
-      "file-size": 1148,
+      "file-size": 1088,
       "function-size": 95
     },
     "internal/runtime/agent/agent_options.go": {
@@ -987,27 +987,18 @@
       "essay": 1
     },
     "internal/runtime/agent/capability_gate.go": {
-      "essay": 7
-    },
-    "internal/runtime/agent/capability_gate_test.go": {
       "essay": 1
     },
     "internal/runtime/agent/child_registry.go": {
       "essay": 16
     },
     "internal/runtime/agent/child_run.go": {
-      "essay": 7
+      "essay": 4
     },
     "internal/runtime/agent/compact_test.go": {
       "essay": 1
     },
     "internal/runtime/agent/context_manager.go": {
-      "essay": 1
-    },
-    "internal/runtime/agent/delivery_hardening_test.go": {
-      "essay": 3
-    },
-    "internal/runtime/agent/delivery_scope_test.go": {
       "essay": 1
     },
     "internal/runtime/agent/dependent_writer_preview_test.go": {
@@ -1039,7 +1030,7 @@
       "orphan": 1
     },
     "internal/runtime/agent/run_loop.go": {
-      "essay": 15
+      "essay": 13
     },
     "internal/runtime/agent/run_usage.go": {
       "complexity": 1,
@@ -1091,13 +1082,10 @@
     },
     "internal/runtime/delegation/task.go": {
       "complexity": 8,
-      "essay": 10,
-      "file-size": 177,
-      "function-size": 61,
+      "essay": 9,
+      "file-size": 160,
+      "function-size": 55,
       "orphan": 1
-    },
-    "internal/runtime/delegation/task_test.go": {
-      "essay": 4
     },
     "internal/runtime/guardian/guardian.go": {
       "essay": 23
@@ -1254,9 +1242,8 @@
       "essay": 5
     },
     "internal/session/control/goal.go": {
-      "complexity": 2,
       "essay": 6,
-      "file-size": 193,
+      "file-size": 166,
       "struct-state": 9
     },
     "internal/session/control/goal_control.go": {

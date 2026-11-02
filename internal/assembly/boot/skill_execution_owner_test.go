@@ -107,66 +107,6 @@ func orNone(s string) string {
 	return s
 }
 
-// The compiled spec carries every fact only the skill layer knows. Each of these
-// is a semantic the shared runner cannot recover for itself, so a migration that
-// dropped one would change the product while the execution records looked right.
-func TestCompiledSkillSpecKeepsWhatOnlyTheSkillLayerKnows(t *testing.T) {
-	runner, _, _, _ := skillOwnerFixture(t, "skill-call")
-	sk := probeSkill()
-	sk.AllowedTools = []string{"read_file"}
-
-	spec, err := runner.compile(context.Background(), sk, "task text", skill.SubagentRunOptions{ContinueFrom: "sa_x"})
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	if !strings.Contains(spec.Worker.SystemPrompt, "## Workspace") {
-		t.Fatalf("system prompt lost the workspace facts:\n%s", spec.Worker.SystemPrompt)
-	}
-	if !strings.HasPrefix(spec.Worker.SystemPrompt, strings.TrimSpace(sk.Body)) {
-		t.Fatal("system prompt no longer starts with the skill body")
-	}
-	if !spec.Worker.UseProfilePrompt {
-		t.Fatal("the body must be used verbatim; a task default would replace it")
-	}
-	if spec.Grant.WritePaths.Empty() {
-		t.Fatal("a writer skill lost its whole-workspace claim and can now race a fleet writer")
-	}
-	if len(spec.Grant.ProfileTools) == 0 {
-		t.Fatal("the skill's allowed-tools ceiling was dropped")
-	}
-	if spec.Context.ContinueFrom != "sa_x" {
-		t.Fatalf("continue_from = %q, want it carried through", spec.Context.ContinueFrom)
-	}
-	if spec.Sched.MaxSteps != runner.halfSteps() {
-		t.Fatalf("max steps = %d, want the skill's half budget %d", spec.Sched.MaxSteps, runner.halfSteps())
-	}
-
-	// The verdict a reviewer owes comes from its declaration, so the compiler
-	// carries it and reads nothing out of the name.
-	review := probeSkill()
-	review.Name = "some-reviewer"
-	review.Delivery = skill.DeliveryContract{ReviewReport: skill.ReviewReportReview}
-	reviewSpec, err := runner.compile(context.Background(), review, "task text", skill.SubagentRunOptions{})
-	if err != nil {
-		t.Fatalf("compile review: %v", err)
-	}
-	if reviewSpec.Worker.ReviewReport == "" {
-		t.Fatal("a declared reviewer no longer owes a typed verdict")
-	}
-	impostor := probeSkill()
-	impostor.Name = "review"
-	impostorSpec, err := runner.compile(context.Background(), impostor, "task text", skill.SubagentRunOptions{})
-	if err != nil {
-		t.Fatalf("compile impostor: %v", err)
-	}
-	if impostorSpec.Worker.ReviewReport != "" {
-		t.Fatal("a worker acquired a review contract by wearing the name")
-	}
-	if spec.Worker.ReviewReport != "" {
-		t.Fatal("an ordinary skill was given a review contract it never had")
-	}
-}
-
 func probeSkill() skill.Skill {
 	return skill.Skill{
 		Name: "probe-worker", RunAs: skill.RunSubagent,

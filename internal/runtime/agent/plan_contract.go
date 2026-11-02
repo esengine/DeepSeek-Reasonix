@@ -3,10 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	"reasonix/internal/runtime/plancontract"
 	"reasonix/internal/runtime/taskcontract"
@@ -118,84 +115,6 @@ func (a *Agent) withContractState(ctx context.Context) context.Context {
 	return evidence.WithAcceptanceCriteria(ctx, a.acceptanceCriterionIDs())
 }
 
-// outstandingPlanCriteria lists the approved plan's required criteria whose
-// step names a check that has not passed since the latest change, or has never
-// passed when nothing changed. A criterion no command checks is not held here:
-// the host cannot settle it, and a citation would only be the model's word.
-func (a *Agent) outstandingPlanCriteria() []string {
-	plan := a.PlanContract()
-	if a == nil || plan == nil || a.task.ledger == nil {
-		return nil
-	}
-	runs := a.checkRunsOf(planCheckIdentities(plan))
-	var out []string
-	for _, step := range plan.Steps {
-		var failing []string
-		for _, v := range step.Verification {
-			id := evidence.VerificationIdentity(strings.TrimSpace(v.Command))
-			if id == "" {
-				continue
-			}
-			at, changed := runs.baseline([]string{id})
-			if !changed {
-				at = -1
-			}
-			if !a.task.ledger.HasSuccessfulCommandAfter(id, at) {
-				failing = append(failing, v.Command)
-			}
-		}
-		if len(failing) == 0 {
-			continue
-		}
-		for _, c := range step.Acceptance {
-			if !c.Optional {
-				out = append(out, fmt.Sprintf("%s: %s — run %s after the latest change", c.ID, c.Text, strings.Join(failing, ", ")))
-			}
-		}
-	}
-	return out
-}
-
-// appendPlanDeliverableGap holds a turn whose plan names files to change and
-// which changed nothing, unless it concluded blocked or is waiting on the user:
-// either is a legitimate end that no change could follow. carried is a change
-// a restart brought in, which the ledger of this run cannot see.
-func (a *Agent) appendPlanDeliverableGap(out *finalReadinessCheck, missing []string, carried bool) []string {
-	ledger := a.task.ledger
-	plan := a.PlanContract()
-	if carried || !planChangesOf(plan) {
-		return missing
-	}
-	checks := planCheckIdentities(plan)
-	if _, changed := a.checkRunsOf(checks).baseline(checks); changed || ledger.HasBlockedConclusionAfter(-1) {
-		return missing
-	}
-	if _, gated := ledger.UserGateThisTurn(); gated {
-		return missing
-	}
-	out.applies = true
-	out.missingAcceptanceCriteria++
-	return append(missing, "the approved plan names files to change and nothing has changed: make the planned change, "+
-		"or call conclude_blocked with what stops it, or await_user if it waits on them")
-}
-
-// planCheckIdentities lists every verification command the plan names, by
-// identity, whether or not a required criterion rests on it.
-func planCheckIdentities(plan *plancontract.Plan) []string {
-	if plan == nil {
-		return nil
-	}
-	var out []string
-	for _, step := range plan.Steps {
-		for _, v := range step.Verification {
-			if id := evidence.VerificationIdentity(strings.TrimSpace(v.Command)); id != "" {
-				out = append(out, id)
-			}
-		}
-	}
-	return out
-}
-
 // mutationEscapesPlan reports whether a pending write touches a path the
 // approved plan never named. A plan that named no touchpoints says nothing
 // about scope, so nothing escapes it: silence is not a claim that everything is
@@ -224,8 +143,4 @@ func (a *Agent) mutationEscapesPlan(toolName string, args json.RawMessage) bool 
 		}
 	}
 	return false
-}
-
-func planChangesOf(plan *plancontract.Plan) bool {
-	return plan != nil && slices.ContainsFunc(plan.Steps, func(s plancontract.Step) bool { return len(s.CandidateFiles) > 0 })
 }

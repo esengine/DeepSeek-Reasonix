@@ -110,14 +110,6 @@ def test_inside_a_string():
 	}
 }
 
-// Detection reads pytest modules; holding them does not, because no backend
-// re-runs a captured Python criterion.
-func TestPytestModulesAreNotHeld(t *testing.T) {
-	if PathMayHoldTestCriteria("tests/test_calc.py") || HoldsTestCriteria("tests/test_calc.py", []byte(pytestBase)) {
-		t.Fatal("a pytest module was offered for capture")
-	}
-}
-
 func TestPyLexerKeepsStringsWhole(t *testing.T) {
 	lines, ok := pyLogicalLines("x = rb'a\\'b' + f\"{y}\" + '''multi\nline''' \\\n  + 1\n")
 	if !ok || len(lines) != 1 {

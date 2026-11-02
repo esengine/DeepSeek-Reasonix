@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -445,50 +444,6 @@ func TestGoalRestartClearsBlockedAndCompletesOnRetry(t *testing.T) {
 	}
 }
 
-// TestIncompleteGoalTodos verifies that formatIncompleteTodos detects
-// unfinished tasks and returns a formatted reminder, and returns empty
-// when all todos are complete.
-func TestIncompleteGoalTodos(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{textTurn("done")}}
-	ag := agent.New(prov, tool.NewRegistry(), sessionstore.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{Runner: ag, Executor: ag, Sink: event.Discard})
-	reminder := func() string { return formatIncompleteTodos(c.goalTodos(), ag.ReadinessResult().Reason) }
-
-	// Seed with incomplete todos.
-	ag.SeedTodoState([]evidence.TodoItem{
-		{Content: "Fix the parser", Status: "in_progress"},
-		{Content: "Add tests", Status: "pending"},
-	})
-	msg := reminder()
-	if msg == "" {
-		t.Fatal("formatIncompleteTodos() returned empty string, expected reminder")
-	}
-	if !strings.Contains(msg, "Fix the parser") {
-		t.Fatalf("reminder should mention 'Fix the parser', got: %q", msg)
-	}
-	if !strings.Contains(msg, "Add tests") {
-		t.Fatalf("reminder should mention 'Add tests', got: %q", msg)
-	}
-	if !strings.Contains(msg, "todo_write") {
-		t.Fatalf("reminder should suggest updating todos via todo_write, got: %q", msg)
-	}
-
-	// Mark all complete.
-	ag.ReplaceTodoState([]evidence.TodoItem{
-		{Content: "Fix the parser", Status: "completed"},
-		{Content: "Add tests", Status: "completed"},
-	})
-	if got := reminder(); got != "" {
-		t.Fatalf("formatIncompleteTodos() with all-complete = %q, want empty", got)
-	}
-
-	// Empty todo list.
-	ag.ReplaceTodoState(nil)
-	if got := reminder(); got != "" {
-		t.Fatalf("formatIncompleteTodos() with empty list = %q, want empty", got)
-	}
-}
-
 // TestGoalInterceptsCompleteWithIncompleteTodos verifies that a complete report
 // with unfinished canonical todos is always rejected: the FSM continues with
 // the missing requirements, and completion is accepted only once the todos are
@@ -563,73 +518,6 @@ func TestGoalInterceptsCompleteWithIncompleteTodos(t *testing.T) {
 	if c.GoalStatus() != GoalStatusComplete {
 		t.Fatalf("GoalStatus() = %q, want complete after the todos were actually finished", c.GoalStatus())
 	}
-}
-
-func TestGoalAdvanceResultCannotCrossGoalLifecycle(t *testing.T) {
-	newResult := func(t *testing.T, g *goalMachine) goalAdvanceResult {
-		t.Helper()
-		g.set("old goal", "", evidence.VerificationContract{}, nil)
-		res := g.advance(goalAdvanceInput{
-			report: &goalTurnReport{status: GoalStatusComplete, reason: ""},
-			todos: []evidence.TodoItem{{
-				Content: "unfinished work from old goal",
-				Status:  "in_progress",
-			}},
-		})
-		if res.intercept == "" {
-			t.Fatal("test setup: expected an incomplete-todo intercept")
-		}
-		return res
-	}
-
-	t.Run("current result is accepted", func(t *testing.T) {
-		var g goalMachine
-		res := newResult(t, &g)
-		if got, ok := g.acceptContinuation(res); !ok || got != res.intercept {
-			t.Fatalf("acceptContinuation() = (%q, %v), want current intercept", got, ok)
-		}
-	})
-
-	t.Run("replacement goal invalidates result", func(t *testing.T) {
-		var g goalMachine
-		res := newResult(t, &g)
-		g.set("replacement goal", "", evidence.VerificationContract{}, nil)
-		if got, ok := g.acceptContinuation(res); ok {
-			t.Fatalf("replacement goal accepted stale intercept %q", got)
-		}
-	})
-
-	t.Run("resuming a running goal is refused and keeps the result", func(t *testing.T) {
-		var g goalMachine
-		res := newResult(t, &g)
-		if _, _, _, resumed := g.resume(nil); resumed {
-			t.Fatal("resume accepted a goal that is already running")
-		}
-		if got, ok := g.acceptContinuation(res); !ok || got != res.intercept {
-			t.Fatalf("acceptContinuation() after a refused resume = (%q, %v), want the in-flight intercept", got, ok)
-		}
-	})
-
-	t.Run("stop and resume invalidates result", func(t *testing.T) {
-		var g goalMachine
-		res := newResult(t, &g)
-		g.stop(GoalStatusStopped, nil)
-		if _, _, _, resumed := g.resume(nil); !resumed {
-			t.Fatal("test setup: goal did not resume")
-		}
-		if got, ok := g.acceptContinuation(res); ok {
-			t.Fatalf("resumed goal accepted stale intercept %q", got)
-		}
-	})
-
-	t.Run("newer advance invalidates result", func(t *testing.T) {
-		var g goalMachine
-		res := newResult(t, &g)
-		g.advance(goalAdvanceInput{report: &goalTurnReport{status: GoalStatusRunning, reason: "keep going"}})
-		if got, ok := g.acceptContinuation(res); ok {
-			t.Fatalf("newer FSM step accepted stale intercept %q", got)
-		}
-	})
 }
 
 // TestGoalCompletionRequiresAllTodosDone verifies that a goal with seeded
@@ -843,71 +731,6 @@ func TestSessionRotationClearsActiveGoal(t *testing.T) {
 	}
 	if composed := c.Compose("hello"); strings.Contains(composed, "<active-goal") {
 		t.Fatalf("old goal leaked into the cleared session's turn: %q", composed)
-	}
-}
-
-func TestGoalSidecarRoundTripPreservesBlockedDeliveryCheckpoint(t *testing.T) {
-	dir := testenv.TempDir(t)
-	path := filepath.Join(dir, "session.jsonl")
-	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
-	c.SetGoal("finish the delivery")
-	scopeID, _, ok := c.goals.deliveryScope()
-	if !ok || scopeID == "" {
-		t.Fatal("Goal did not allocate a delivery scope")
-	}
-	cp := evidence.DeliveryCheckpoint{
-		ScopeID:             scopeID,
-		CriteriaEstablished: true,
-		WorkObserved:        true,
-		MutationObserved:    true,
-		PendingMutation:     true,
-	}
-	statePath, data, persist := c.goals.setDeliveryCheckpoint(cp, nil)
-	c.persistGoalState(statePath, data, persist)
-	// The Goal froze a verification contract when it was created and the
-	// executor's checkpoint carries none, so the round trip must show the
-	// acceptance surviving a report that knows nothing about it.
-	want := c.goals.deliveryState()
-	if want.Verification == nil {
-		t.Fatal("the executor's checkpoint cleared the contract the Goal was created under")
-	}
-	c.stopGoal(GoalStatusBlocked)
-
-	freshExec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
-	fresh := New(Options{Executor: freshExec, SessionDir: dir, Label: "fresh"})
-	fresh.Resume(sessionstore.NewSession("sys"), path)
-	if fresh.Goal() != "finish the delivery" || fresh.GoalStatus() != GoalStatusBlocked {
-		t.Fatalf("restored Goal = (%q, %q), want blocked Goal", fresh.Goal(), fresh.GoalStatus())
-	}
-	if got := freshExec.DeliveryCheckpoint(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("restored checkpoint = %+v, want %+v", got, want)
-	}
-	if !fresh.ResumeGoal() {
-		t.Fatal("ResumeGoal rejected a restored blocked Goal")
-	}
-	id, _, ok := fresh.goals.deliveryScope()
-	if !ok || id != scopeID {
-		t.Fatalf("resumed scope = %q, want %q", id, scopeID)
-	}
-}
-
-func TestLegacyRunningGoalSidecarAllocatesScope(t *testing.T) {
-	dir := testenv.TempDir(t)
-	path := filepath.Join(dir, "legacy.jsonl")
-	data := []byte(`{"goal":"legacy goal","status":"running"}`)
-	if err := os.WriteFile(store.SessionGoalState(path), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
-	c.Resume(sessionstore.NewSession("sys"), path)
-	id, task, ok := c.goals.deliveryScope()
-	if !ok || id == "" || task != "legacy goal" {
-		t.Fatalf("legacy delivery scope = (%q, %q, %v)", id, task, ok)
-	}
-	if got := exec.DeliveryCheckpoint(); got.ScopeID != id {
-		t.Fatalf("legacy checkpoint scope = %q, want %q", got.ScopeID, id)
 	}
 }
 

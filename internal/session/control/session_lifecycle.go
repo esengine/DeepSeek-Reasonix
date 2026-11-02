@@ -364,10 +364,6 @@ func (c *Controller) resume(s *sessionstore.Session, path string, announceColdRe
 	if migrated {
 		c.persistGoalState(migPath, migData, true)
 	}
-	if c.executor != nil {
-		c.executor.RestoreDeliveryCheckpoint(c.goals.deliveryState())
-		c.observeVerificationContractDrift()
-	}
 	c.restoreTerminalGoalTodos(path)
 	c.loadGuardianSession()
 	c.loadRecoveryState(path)

@@ -51,11 +51,8 @@ func TestDelegationSpecMembersStaySeparate(t *testing.T) {
 		"Task", "Worker", "Grant", "Context", "Sched",
 	})
 	assertFieldSet(t, "TaskSpec", TaskSpec{}, []string{"Objective", "Description"})
-	// ReviewReport and ReviewAuthority are the worker's, not the call's: a
-	// reviewer owes a typed verdict whichever entry point invoked it, and may
-	// close only what its own definition was granted.
 	assertFieldSet(t, "WorkerSpec", WorkerSpec{}, []string{
-		"Kind", "Name", "Profile", "SystemPrompt", "UseProfilePrompt", "Model", "Effort", "ReviewReport", "ReviewAuthority",
+		"Kind", "Name", "Profile", "SystemPrompt", "UseProfilePrompt", "Model", "Effort",
 	})
 	assertFieldSet(t, "CapabilityGrant", CapabilityGrant{}, []string{
 		"ReadOnly", "AllowNoTools", "CallTools", "ProfileTools", "WritePaths",

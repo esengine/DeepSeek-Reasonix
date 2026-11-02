@@ -134,25 +134,12 @@ func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task 
 	if subReg.Len() == 0 {
 		return "", fmt.Errorf("read_only_skill: skill %q has no read-only tools available", sk.Name)
 	}
-	// The tool that produces a verdict, bound to what this worker may prove.
-	// Outside the delegation lifecycle there is no execution to name, so the
-	// grant withholds authority: the report is owed and a block still lands.
-	def := delegation.ProfileFromSkill(sk)
-	review := def.Delivery.ReviewReport
-	grant := agent.IssueReviewGrant(review, def.Authority.Review, "")
-	if review != "" {
-		agent.AttachReviewReportTool(subReg, grant)
-	}
 	// Custom and named built-in profiles fully control their system prompt
 	// (no implicit concise/DefaultReadOnlyTaskSystemPrompt overlay).
 	sysPrompt := r.systemPrompt(sk)
 	runOptions := r.runOptions(sctx, r.halfSteps(), price, ctxWin, childDepth)
 	usageModelRef, _ := r.identity(modelRef, effortRef)
 	runOptions.ModelRef = usageModelRef
-	// A verdict the parent must act on carries an identity, never a sentence,
-	// so the typed report is required at every role setting. How much review a
-	// change set owes is still the delivery contract's separate call.
-	runOptions.RequireReviewReportKind = review
 	// Provider serializers decide whether these images are wire-visible from
 	// the child model's own vision capability. Text-only children retain the
 	// attachment metadata locally but never receive image parts on the wire.
@@ -193,11 +180,6 @@ func (r *skillSubagents) compile(sctx context.Context, sk skill.Skill, task stri
 			SystemPrompt: r.systemPrompt(sk), UseProfilePrompt: true,
 			Model:  subagentModelRef(r.cfg, sk),
 			Effort: subagentEffortRef(r.cfg, sk, r.inheritedFor),
-			// A verdict the parent must act on carries an identity, never a
-			// sentence, so the typed report is required at every role setting.
-			// What that verdict may close is the separate grant beside it.
-			ReviewReport:    delegation.ProfileFromSkill(sk).Delivery.ReviewReport,
-			ReviewAuthority: delegation.ProfileFromSkill(sk).Authority.Review,
 		},
 		Grant: delegation.CapabilityGrant{ReadOnly: sk.ReadOnly, ProfileTools: sk.AllowedTools},
 		Context: delegation.ContextRequest{

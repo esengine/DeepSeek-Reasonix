@@ -14,7 +14,6 @@ import (
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/sessionstore"
 )
 
@@ -58,34 +57,6 @@ func TestNetworkPathCallIsRefusedBeforeAnythingLooksItUp(t *testing.T) {
 	}
 	if len(a.task.baselineCriteria) != 0 {
 		t.Fatalf("baseline criteria read through a network spelling: %v", a.task.baselineCriteria)
-	}
-}
-
-func TestHostBookkeepingNeverLooksUpANetworkPath(t *testing.T) {
-	holdWindowsHost(t)
-	dir := testenv.TempDir(t)
-	file := filepath.Join(dir, "evil_test.go")
-	if err := os.WriteFile(file, []byte("package p\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	net := networkSpelling(t, file)
-	if got := statePathOf(net, dir); got.exists {
-		t.Error("statePathOf looked up a network path")
-	}
-	if got := statePathOf(file, dir); !got.exists {
-		t.Error("statePathOf lost a local path")
-	}
-	ledger := evidence.NewLedger()
-	snap := snapshotPaths(ledger, dir, []string{net, file})
-	for key, w := range snap.state {
-		if w.path == net {
-			t.Errorf("snapshot watched a network path (%s)", key)
-		}
-	}
-	a, _ := agentWithCriteriaStore(t)
-	a.writeWorkspaceRoot = dir
-	if err := a.captureCriterionAt(a.baselineCriteriaStore(), net); err != nil || len(a.task.baselineCriteria) != 0 {
-		t.Fatalf("captureCriterionAt read a network path: %v %v", err, a.task.baselineCriteria)
 	}
 }
 

@@ -136,98 +136,10 @@
     }
    },
    {
-    "kind": "notice",
-    "text": "finishing what this turn still owes",
-    "detail": "Host: this turn ended with work still outstanding. The user did not send this; it is the host's own account of what the turn owes.\n- run a relevant verification command after the latest write for the current role setting (not documentation-only: \"note.txt\" changed)\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
-    "level": "info"
-   },
-   {
-    "kind": "turn_phase",
-    "text": "working",
-    "source": "executor",
-    "phase": "working"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r3",
-     "action": "begin",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
-    "kind": "text",
-    "text": "done"
-   },
-   {
-    "kind": "message",
-    "text": "done",
-    "source": "executor"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r3",
-     "action": "commit",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
-    "kind": "notice",
-    "text": "finishing what this turn still owes",
-    "detail": "Host: this turn ended with work still outstanding. The user did not send this; it is the host's own account of what the turn owes.\n- the verification owed after the latest write is still owed, as already explained: run a relevant verification command after it\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
-    "level": "info"
-   },
-   {
-    "kind": "turn_phase",
-    "text": "working",
-    "source": "executor",
-    "phase": "working"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r4",
-     "action": "begin",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
-    "kind": "text",
-    "text": "done"
-   },
-   {
-    "kind": "message",
-    "text": "done",
-    "source": "executor"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r4",
-     "action": "commit",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
     "kind": "turn_done",
-    "err": "final-answer readiness failed 1 times: the verification owed after the latest write is still owed, as already explained: run a relevant verification command after it",
-    "outcome": "final_readiness",
-    "readiness": {
-     "attempts": 1,
-     "missing": [
-      "verification"
-     ]
-    },
-    "checkpointTurn": 0
+    "checkpointTurn": 0,
+    "workDurationMs": 1,
+    "workStartedAt": 1
    }
   ],
   "replay": [
@@ -351,78 +263,10 @@
     }
    },
    {
-    "kind": "notice",
-    "text": "finishing what this turn still owes",
-    "detail": "Host: this turn ended with work still outstanding. The user did not send this; it is the host's own account of what the turn owes.\n- run a relevant verification command after the latest write for the current role setting (not documentation-only: \"note.txt\" changed)\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
-    "level": "info"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r3",
-     "action": "begin",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
-    "kind": "message",
-    "text": "done",
-    "source": "executor"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r3",
-     "action": "commit",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
-    "kind": "notice",
-    "text": "finishing what this turn still owes",
-    "detail": "Host: this turn ended with work still outstanding. The user did not send this; it is the host's own account of what the turn owes.\n- the verification owed after the latest write is still owed, as already explained: run a relevant verification command after it\nDo the remaining work, then verify it. Mark each finished item with complete_step — that is what advances the list; a todo_write that flips an item to completed is rejected. If an item should no longer be done — the request changed, or it was superseded — send a todo_write without it. If one turns on a decision only the user can make, put it to them with ask; not having heard back is not an answer to assume one from. If one cannot go on until the user says something only they can say, call await_user naming it — the list is kept and this message stops. If one cannot be done as specified, call conclude_blocked with the evidence for why.",
-    "level": "info"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r4",
-     "action": "begin",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
-    "kind": "message",
-    "text": "done",
-    "source": "executor"
-   },
-   {
-    "kind": "stream_attempt",
-    "source": "executor",
-    "streamAttempt": {
-     "id": "r4",
-     "action": "commit",
-     "attempt": 1,
-     "max": 6
-    }
-   },
-   {
     "kind": "turn_done",
-    "err": "final-answer readiness failed 1 times: the verification owed after the latest write is still owed, as already explained: run a relevant verification command after it",
-    "outcome": "final_readiness",
-    "readiness": {
-     "attempts": 1,
-     "missing": [
-      "verification"
-     ]
-    },
-    "checkpointTurn": 0
+    "checkpointTurn": 0,
+    "workDurationMs": 1,
+    "workStartedAt": 1
    }
   ]
  },
