@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"reasonix/internal/state/sessionstore"
 	"testing"
-	"time"
 )
 
 // sessionReset names the fields a new conversation starts from. taskRuntime
@@ -14,14 +13,13 @@ import (
 // holding atomics and mutexes cannot be assigned, so reset must name each field
 // and this list is what keeps it honest.
 var sessionReset = map[string]bool{
-	"mu":               true,
-	"conversation":     true,
-	"output":           true,
-	"cacheHit":         true,
-	"cacheMiss":        true,
-	"missingReasoning": true,
-	"mode":             true,
-	"win":              true, // windowState.reset, held to its own lists below
+	"mu":           true,
+	"conversation": true,
+	"output":       true,
+	"cacheHit":     true,
+	"cacheMiss":    true,
+	"mode":         true,
+	"win":          true, // windowState.reset, held to its own lists below
 }
 
 // sessionCarryOver names the fields reset deliberately leaves alone, each with
@@ -178,11 +176,9 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	a := &Agent{}
 	a.sess.cacheHit.Store(11)
 	a.sess.cacheMiss.Store(7)
-	a.sess.missingReasoning = missingReasoningWatch{active: true, stateRecorded: true, healthyStreak: 2}
 	a.sess.win.compaction.stuck = true
 	a.sess.win.compaction.lastReported = maintenanceReport{reason: NoopNoNewClosedPrefix, turn: 9}
 	a.sess.win.compactionState = sessionstore.CompactionState{}
-	a.unwrittenResolve.at = time.Unix(1, 0)
 
 	next := sessionstore.NewSession("")
 	a.SetSession(next)
@@ -193,17 +189,11 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	if a.sess.cacheHit.Load() != 0 || a.sess.cacheMiss.Load() != 0 {
 		t.Errorf("cache tallies = %d/%d, want a fresh aggregate", a.sess.cacheHit.Load(), a.sess.cacheMiss.Load())
 	}
-	if a.sess.missingReasoning != (missingReasoningWatch{}) {
-		t.Errorf("missingReasoning = %+v, want the incident to end with its conversation", a.sess.missingReasoning)
-	}
 	if a.sess.win.compaction.stuck || a.sess.win.compaction.lastReported.turn != 0 {
 		t.Errorf("compaction progress = stuck:%t lastReported:%+v, want it restarted",
 			a.sess.win.compaction.stuck, a.sess.win.compaction.lastReported)
 	}
 	if a.sess.win.cacheState != CacheStateUnknown {
 		t.Errorf("cacheState = %q, want %q", a.sess.win.cacheState, CacheStateUnknown)
-	}
-	if a.unwrittenResolve.at.IsZero() {
-		t.Error("unwrittenResolve was cleared; the retry it owes belongs to the provider configuration, not the conversation")
 	}
 }

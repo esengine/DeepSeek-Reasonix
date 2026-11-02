@@ -87,7 +87,7 @@ func TestRecorderCapturesGuardianUsageAndPreservesProtocolAudit(t *testing.T) {
 		ModelRef: "deepseek/deepseek-v4-flash",
 		Guardian: event.GuardianResult{Usage: &provider.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
 	})
-	event.RecordProtocolRecovery(r, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
+	event.RecordProtocolRecovery(r, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryKind("test")})
 	flushRecorder(t, r)
 
 	day := dayStart(time.Now())
@@ -98,7 +98,7 @@ func TestRecorderCapturesGuardianUsageAndPreservesProtocolAudit(t *testing.T) {
 	if got.Tokens != 15 || got.TopModel != "deepseek/deepseek-v4-flash" {
 		t.Fatalf("guardian usage = %+v", got)
 	}
-	if len(inner.protocol) != 1 || inner.protocol[0].Kind != event.ProtocolRecoveryMissingReasoningRetryRecovered {
+	if len(inner.protocol) != 1 || inner.protocol[0].Kind != event.ProtocolRecoveryKind("test") {
 		t.Fatalf("protocol audit was not forwarded: %+v", inner.protocol)
 	}
 }

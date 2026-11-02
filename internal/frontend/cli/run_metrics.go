@@ -125,14 +125,8 @@ type RunMetrics struct {
 	// Goal resumes that carried a frozen verification contract, and how many of
 	// those found the current declaration naming different criteria. Neither
 	// says which declaration should govern.
-	GoalResumesWithContract    int `json:"goal_resumes_with_verification_contract"`
-	GoalVerificationDrifts     int `json:"goal_verification_contract_drifts"`
-	MissingReasoningDetected   int `json:"missing_reasoning_detected,omitempty"`
-	MissingReasoningRetries    int `json:"missing_reasoning_retries,omitempty"`
-	MissingReasoningRecovered  int `json:"missing_reasoning_recovered,omitempty"`
-	MissingReasoningReplaced   int `json:"missing_reasoning_retry_replaced_response,omitempty"`
-	MissingReasoningSuppressed int `json:"missing_reasoning_retry_suppressed,omitempty"`
-	MissingReasoningFallbacks  int `json:"missing_reasoning_fallbacks,omitempty"`
+	GoalResumesWithContract int `json:"goal_resumes_with_verification_contract"`
+	GoalVerificationDrifts  int `json:"goal_verification_contract_drifts"`
 	// Fanout times what the delegation counters only count: what the run waited
 	// on its fan-outs, against what the same work costs one at a time.
 	Fanout *FanoutMetrics `json:"fanout,omitempty"`
@@ -620,25 +614,6 @@ func (s *metricsSink) RecordProjectCheckProbe(p event.ProjectCheckProbe) {
 }
 
 func (s *metricsSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	s.mu.Lock()
-	switch a.Kind {
-	case event.ProtocolRecoveryMissingReasoningDetected:
-		s.m.MissingReasoningDetected++
-	case event.ProtocolRecoveryMissingReasoningRetryAttempted:
-		s.m.MissingReasoningRetries++
-		// Usage from the original and recovery responses is intentionally merged
-		// into one invisible UI event, but Steps remains a true model-call count.
-		s.m.Steps++
-	case event.ProtocolRecoveryMissingReasoningRetryRecovered:
-		s.m.MissingReasoningRecovered++
-	case event.ProtocolRecoveryMissingReasoningRetryReplaced:
-		s.m.MissingReasoningReplaced++
-	case event.ProtocolRecoveryMissingReasoningRetrySuppressed:
-		s.m.MissingReasoningSuppressed++
-	case event.ProtocolRecoveryMissingReasoningFallback:
-		s.m.MissingReasoningFallbacks++
-	}
-	s.mu.Unlock()
 	if a.ChildID != "" {
 		s.m.SubagentRecoveries++
 	}

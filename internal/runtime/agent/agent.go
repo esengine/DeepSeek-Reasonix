@@ -284,10 +284,6 @@ type Agent struct {
 	progressWatch     atomic.Pointer[ProgressWatch]
 	reasoningLanguage atomic.Value // string: auto|zh|en
 
-	// unwrittenResolve is the resolve watermark a failed state write still owes.
-	// It outlives the conversation, which is why it is not in sessionRuntime.
-	unwrittenResolve unwrittenResolve
-
 	// planRuntime is the plan lifecycle: which phase, under which authority
 	// epoch. Replaceable, so a controller can hand several agents the one
 	// lifecycle they share. Never a permission or sandbox boundary.
@@ -804,15 +800,6 @@ func usageSourceOrDefault(source, fallback string) string {
 		return source
 	}
 	return fallback
-}
-
-// missingReasoningWarnStateFor returns nil when no state dir is configured, so
-// direct Agent construction keeps the historical once-per-session notice scope.
-func missingReasoningWarnStateFor(dir string) *missingReasoningWarnState {
-	if strings.TrimSpace(dir) == "" {
-		return nil
-	}
-	return newMissingReasoningWarnState(dir)
 }
 
 // reserveParentWrite holds write claims for the duration of a parent-agent

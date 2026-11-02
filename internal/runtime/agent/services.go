@@ -40,10 +40,6 @@ type agentServices struct {
 	// sink receives the turn's typed event stream. Frontends decide how to
 	// render it; never nil because New defaults it to event.Discard.
 	sink event.Sink
-	// warnState rate-limits recovery retries across sessions and processes by an
-	// opaque provider-configuration fingerprint (#7059). The legacy type and file
-	// names preserve the on-disk v2 contract. nil keeps in-memory gating only.
-	warnState *missingReasoningWarnState
 	// gate is the per-call permission gate for both standard and Plan
 	// workflows. nil disables gating entirely.
 	gate              Gate
@@ -133,7 +129,6 @@ func newAgentServices(
 		memQueue:          opts.MemoryQueue,
 		writeScheduler:    opts.WriteScheduler,
 		workspaceLease:    opts.WorkspaceLease,
-		warnState:         missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
 		mutationObserver:  opts.MutationObserver,
 		evidenceSeal:      opts.EvidenceSeal,
 	}

@@ -356,22 +356,6 @@ func RemoteKnownHostsPath() string {
 	return filepath.Join(dir, "known_hosts")
 }
 
-// MissingReasoningWarnStateDir is the shared directory for the rate-limited
-// missing tool-call thinking recovery gate (#7059): <Reasonix home>/state. The
-// legacy name preserves callers and the existing state-file contract. Routed
-// through the home resolver so REASONIX_HOME isolation holds.
-func MissingReasoningWarnStateDir() string { return processRoots().MissingReasoningWarnStateDir() }
-
-// MissingReasoningWarnStateDir is the recovery gate's state directory under
-// this binding's home.
-func (r Roots) MissingReasoningWarnStateDir() string {
-	home := r.Home()
-	if strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, "state")
-}
-
 // WorkspaceLeaseDir stores cross-process Delivery writer locks outside user
 // workspaces. It intentionally follows the cache root rather than project or
 // session state: taking a lease must never dirty the repository it protects.

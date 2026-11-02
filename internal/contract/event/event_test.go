@@ -139,9 +139,9 @@ func TestSyncForwardsProtocolRecoveryWithoutEmittingUIEvent(t *testing.T) {
 	rec := &readinessAuditRecorder{}
 	sink := Sync(rec)
 
-	RecordProtocolRecovery(sink, ProtocolRecoveryAudit{Kind: ProtocolRecoveryMissingReasoningRetryReplaced})
+	RecordProtocolRecovery(sink, ProtocolRecoveryAudit{Kind: ProtocolRecoveryKind("test")})
 
-	if len(rec.recovery) != 1 || rec.recovery[0].Kind != ProtocolRecoveryMissingReasoningRetryReplaced {
+	if len(rec.recovery) != 1 || rec.recovery[0].Kind != ProtocolRecoveryKind("test") {
 		t.Fatalf("protocol recovery not forwarded through Sync: %+v", rec.recovery)
 	}
 }

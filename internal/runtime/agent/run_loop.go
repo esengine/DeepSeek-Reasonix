@@ -54,72 +54,6 @@ type streamedTurn struct {
 	err                   error
 }
 
-// deferredStreamSink keeps selected stream events local until the caller
-// chooses which provider response to adopt. On an ordinary healthy DeepSeek
-// turn, reasoning arrives before tool calls and unlocks live tool-card events.
-// On the rare malformed turn with no reasoning, only the speculative partial
-// tool cards remain buffered, so retrying does not flash duplicate cards in the
-// UI. A recovery attempt buffers everything because it may be discarded.
-type deferredStreamSink struct {
-	inner               event.Sink
-	deferAll            bool
-	waitingForReasoning bool
-	sawReasoning        bool
-	events              []event.Event
-}
-
-func newReasoningAwareStreamSink(inner event.Sink) *deferredStreamSink {
-	return &deferredStreamSink{inner: inner, waitingForReasoning: true}
-}
-
-func newDeferredStreamSink(inner event.Sink) *deferredStreamSink {
-	return &deferredStreamSink{inner: inner, deferAll: true}
-}
-
-func (s *deferredStreamSink) Emit(e event.Event) {
-	if s == nil {
-		return
-	}
-	if s.deferAll {
-		s.events = append(s.events, e)
-		return
-	}
-	if s.waitingForReasoning && e.Kind == event.Reasoning && strings.TrimSpace(e.Text) != "" {
-		s.sawReasoning = true
-		s.inner.Emit(e)
-		s.flushBuffered()
-		return
-	}
-	if s.waitingForReasoning && !s.sawReasoning && e.Kind == event.ToolDispatch {
-		s.events = append(s.events, e)
-		return
-	}
-	s.inner.Emit(e)
-}
-
-func (s *deferredStreamSink) flushBuffered() {
-	if s == nil {
-		return
-	}
-	for _, e := range s.events {
-		s.inner.Emit(e)
-	}
-	s.events = nil
-}
-
-func (s *deferredStreamSink) Flush() {
-	if s == nil {
-		return
-	}
-	s.flushBuffered()
-}
-
-func (s *deferredStreamSink) Discard() {
-	if s != nil {
-		s.events = nil
-	}
-}
-
 // beginRunTurn handles evidence scope, delivery classification, background-job
 // evidence re-lease, and the initial user-turn persistence. Callers still own
 // all Run-level defers (workspace lease, evidence commit, delivery checkpoint,
@@ -441,14 +375,7 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		attemptID := newStreamAttemptID(attempt)
 		a.emitStreamAttempt(attemptID, event.StreamAttemptBegin, attempt, "", nil, 0)
 
-		var streamSink *deferredStreamSink
-		attemptSink := a.svc.sink
-		if provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
-			streamSink = newReasoningAwareStreamSink(a.svc.sink)
-			attemptSink = streamSink
-		}
-
-		result := runAttempt(attemptID, attemptSink)
+		result := runAttempt(attemptID, a.svc.sink)
 		billable = mergeSamplingUsage(billable, result.usage)
 		// lastUsage is the latest single-request shape (prompt+completion+cache
 		// for that attempt only). Never the multi-attempt billable aggregate —
@@ -458,68 +385,13 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		last.usage = finalizeSamplingUsage(billable, result.usage)
 
 		if result.err != nil {
-			retry, terminal := a.handleSamplingError(ctx, attemptID, attempt, streamSink, &frozen, result, last, billable)
+			retry, terminal := a.handleSamplingError(ctx, attemptID, attempt, &frozen, result, last, billable)
 			if retry {
 				continue
 			}
 			return terminal
 		}
 
-		// Clean terminal. Optionally repair missing reasoning with one extra
-		// exact replay of the same frozen request (no synthetic prompt).
-		observed := a.observeMissingToolCallReasoning(result.calls, result.reasoning, usageReasoningTokens(result.usage))
-		if observed == reasoningModelSilent {
-			event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningModelSilent})
-		}
-		if observed.missing() {
-			event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
-			if observed == reasoningLostReplay && strings.TrimSpace(result.text) == "" {
-				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
-				retrySink := newDeferredStreamSink(a.svc.sink)
-				retry := runAttempt(attemptID, retrySink)
-				billable = mergeSamplingUsage(billable, retry.usage)
-				if retry.err != nil {
-					retrySink.Discard()
-					if ctx.Err() != nil {
-						streamSink.Discard()
-						a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, provider.StreamInterruptReason(retry.err), retry.err, 0)
-						// Use the cancelled retry as the "latest" shape so
-						// FinishReason=interrupted is preserved for accounting.
-						return streamedTurn{usage: finalizeSamplingUsage(billable, retry.usage), attemptID: attemptID, err: retry.err}
-					}
-					// Fall back to the first complete response; no tool ran.
-					streamSink.Flush()
-					a.storeLatestRequestUsage(result.usage)
-					result.usage = finalizeSamplingUsage(billable, result.usage)
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
-					a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil, result.firstTokenMs)
-					return result
-				}
-				streamSink.Discard()
-				retrySink.Flush()
-				a.storeLatestRequestUsage(retry.usage)
-				retryObserved := a.classifyTurnReasoning(retry)
-				retry.usage = finalizeSamplingUsage(billable, retry.usage)
-				if retryObserved.missing() {
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
-				} else if len(retry.calls) == 0 {
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
-				} else {
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
-				}
-				a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil, retry.firstTokenMs)
-				return retry
-			}
-			if observed != reasoningLostReplay || strings.TrimSpace(result.text) != "" {
-				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
-				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
-			} else {
-				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
-			}
-		}
-
-		streamSink.Flush()
 		a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil, result.firstTokenMs)
 		result.usage = finalizeSamplingUsage(billable, result.usage)
 		return result

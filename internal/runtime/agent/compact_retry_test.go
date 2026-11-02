@@ -6,11 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/runtime/agent/testutil"
 )
 
 func TestMaybeCompactIgnoresRetryAggregateBelowContextThreshold(t *testing.T) {
@@ -64,49 +62,5 @@ func TestMaybeCompactStillTriggersAtLatestContextThreshold(t *testing.T) {
 
 	if !hasCompactionSummary(visibleContext(a)) {
 		t.Fatal("latest prompt at the configured threshold did not trigger compaction")
-	}
-}
-
-func TestMissingReasoningRetryAggregateDoesNotTriggerEarlyCompaction(t *testing.T) {
-	mp := testutil.NewMock("deepseek-proxy",
-		testutil.Turn{
-			ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}},
-			Usage:     &provider.Usage{PromptTokens: 4000, CompletionTokens: 2, TotalTokens: 4002, CacheMissTokens: 4000, ReasoningTokens: billedThinkingTokens, FinishReason: "tool_calls"},
-		},
-		testutil.Turn{
-			Reasoning: "retry reasoning",
-			ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}},
-			Usage:     &provider.Usage{PromptTokens: 4000, CompletionTokens: 3, TotalTokens: 4003, CacheHitTokens: 4000, ReasoningTokens: 2, FinishReason: "tool_calls"},
-		},
-		testutil.Turn{
-			Text:  "done",
-			Usage: &provider.Usage{PromptTokens: 4100, CompletionTokens: 1, TotalTokens: 4101, CacheHitTokens: 4000, CacheMissTokens: 100},
-		},
-	)
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "original task"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("old analysis ", 100)},
-		{Role: provider.RoleUser, Content: "follow-up"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("more old work ", 100)},
-	}}
-	sink := &recordSink{}
-	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), sess, Options{
-		ContextWindow: 10_000,
-		ArchiveDir:    testenv.TempDir(t),
-	}, sink)
-
-	if err := a.Run(context.Background(), "go"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if got := len(sink.kinds(event.CompactionStarted)); got != 0 {
-		t.Fatalf("compactions = %d, want none while latest prompt is below threshold", got)
-	}
-	usageEvents := sink.kinds(event.Usage)
-	if len(usageEvents) == 0 || usageEvents[0].Usage == nil {
-		t.Fatalf("missing recovery usage event: %+v", usageEvents)
-	}
-	if got := usageEvents[0].Usage; got.PromptTokens != 8000 || got.ContextPromptTokens != 4000 {
-		t.Fatalf("recovery usage = %+v, want aggregate prompt 8000 and latest context prompt 4000", got)
 	}
 }

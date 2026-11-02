@@ -51,27 +51,6 @@ func (p *Provider) RequiresReasoningRoundTrip() bool {
 	return p != nil && p.descriptor.ReasoningRoundTrip
 }
 
-// WarnOnMissingToolCallReasoning reports the descriptor's warning policy.
-func (p *Provider) WarnOnMissingToolCallReasoning() bool {
-	return p != nil && p.descriptor.WarnOnMissingToolCallReasoning
-}
-
-// MissingToolCallReasoningWarningIdentity supplies the stable, non-credential
-// configuration identity used to rate-limit missing-reasoning diagnostics.
-func (p *Provider) MissingToolCallReasoningWarningIdentity() string {
-	if p == nil {
-		return ""
-	}
-	effort := ""
-	if p.effort != nil {
-		effort = strings.TrimSpace(*p.effort)
-	}
-	return strings.Join([]string{
-		"extension-sidecar", strings.TrimSpace(p.client.PluginID()), strings.TrimSpace(p.ref),
-		strings.TrimSpace(p.descriptor.Model), effort,
-	}, "\x00")
-}
-
 // Stream opens one sidecar stream. Each call re-resolves the live backend so
 // rolling replacement keeps the same provider-visible ref (cache-stable).
 func (p *Provider) Stream(ctx context.Context, request provider.Request) (<-chan provider.Chunk, error) {

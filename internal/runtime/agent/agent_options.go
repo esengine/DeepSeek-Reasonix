@@ -113,13 +113,6 @@ type Options struct {
 	// disables hook firing.
 	Hooks ToolHooks
 
-	// MissingReasoningWarnStateDir, when non-empty, points at the shared
-	// directory where missing tool-call thinking recovery retries are gated by
-	// opaque provider-configuration fingerprint (#7059). The field name is kept
-	// for source compatibility. Boot always supplies it; direct construction
-	// with an empty value keeps in-memory gating.
-	MissingReasoningWarnStateDir string
-
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
 	// MemoryQueue optionally gives a child agent an explicitly owned live-memory
