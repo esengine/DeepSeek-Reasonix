@@ -146,6 +146,13 @@ func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
 // controller reads, either way round, as a choice that was never made.
 func (s *Server) applyApprovalMode(mode string) {
 	s.ctl().SetToolApprovalMode(mode)
+	s.mu.RLock()
+	own := s.ownPosture
+	s.mu.RUnlock()
+	if own != nil {
+		own(mode)
+		return
+	}
 	s.stance.set(mode)
 	// A terminal states its posture on its own command line; recording its
 	// switch would make a terminal's YOLO the window's next default.

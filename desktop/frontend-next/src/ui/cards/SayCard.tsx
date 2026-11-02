@@ -17,6 +17,8 @@ import { ReplyMenu } from "./ReplyMenu";
 import { useDismiss } from "../dismiss";
 import { pinToViewport } from "../place";
 import type { LocalRefs } from "../Markdown";
+import { AgentAvatar } from "../team/AgentAvatar";
+import { useReplySpeaker } from "../team/TeamSpeaker";
 
 // Folded, the only thing left of a thought is how much of the turn it was. The
 // spec puts both halves there — how long, and how much — because either alone
@@ -101,6 +103,7 @@ function download(text: string) {
 }
 
 export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { item: Extract<Item, { t: "say" }>; afterAnswer?: ReactNode; settled?: boolean; reply?: ReplyActions; quiet?: boolean }) {
+  const speaker = useReplySpeaker();
   const [branching, setBranching] = useState(false);
   const start = useStartsOpen("thinking", !item.done && !item.text);
   const [touched, setOpen] = useState<boolean | null>(null);
@@ -139,11 +142,11 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
   return (
     <div className="call" data-k="say" data-quiet={quiet ? "" : undefined}>
       <div className="g">
-        <Sym glyph="◦" />
+        {speaker ? <AgentAvatar agent={speaker} size={21} badges={false} /> : <Sym glyph="◦" />}
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">reasonix</span>
+          <span className="nm">{speaker?.name ?? "reasonix"}</span>
           {/* Which model wrote this one. A turn can carry two, and without it
               both read as whatever the composer happens to name now. */}
           {item.model && <span className="src" title={item.model}>{modelName(item.model)}</span>}

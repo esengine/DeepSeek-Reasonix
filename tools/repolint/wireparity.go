@@ -14,6 +14,7 @@ import (
 // Where the desktop re-declares the kernel's wire types by hand.
 const (
 	tsWireFile      = "desktop/frontend-next/src/port/wire.ts"
+	tsGraphFile     = "desktop/frontend-next/src/port/execution_graph.ts"
 	tsPortFile      = "desktop/frontend-next/src/port/port.ts"
 	tsLeaseFile     = "desktop/frontend-next/src/port/workspace_lease.ts"
 	tsBoundaryFile  = "desktop/frontend-next/src/port/boundary.ts"
@@ -32,6 +33,7 @@ const (
 	tsWorkspaceFile = "desktop/frontend-next/src/port/workspace.ts"
 	tsLookFile      = "desktop/frontend-next/src/port/look.ts"
 	tsHubFile       = "desktop/frontend-next/src/port/hub.ts"
+	tsTeamFile      = "desktop/frontend-next/src/port/team.ts"
 	tsMuxFile       = "desktop/frontend-next/src/port/mux.ts"
 	tsPluginFile    = "desktop/frontend-next/src/port/plugin.ts"
 	tsChartFile     = "desktop/frontend-next/src/ui/chart/spec.ts"
@@ -88,16 +90,16 @@ var mirroredWireTypesHead = []wireMirror{
 	{"internal/platform/gitstatus/history.go", "Commit", tsWorkspaceFile, "GitCommit"},
 	{"internal/contract/eventwire/wire.go", "AskOrigin", tsWireFile, "AskOrigin"},
 	{"internal/session/control/goal_runtime_view.go", "GoalRuntimeView", tsSessionFile, "GoalRuntime"},
-	{"internal/contract/agentgraph/graph.go", "Node", tsWireFile, "GraphNode"},
-	{"internal/contract/agentgraph/graph.go", "Edge", tsWireFile, "GraphEdge"},
-	{"internal/contract/agentgraph/graph.go", "Delta", tsWireFile, "GraphDelta"},
+	{"internal/contract/agentgraph/graph.go", "Node", tsGraphFile, "GraphNode"},
+	{"internal/contract/agentgraph/graph.go", "Edge", tsGraphFile, "GraphEdge"},
+	{"internal/contract/agentgraph/graph.go", "Delta", tsGraphFile, "GraphDelta"},
 	// The snapshot is the execution model's whole authority: no delta carries an
 	// interruption or an unrecorded identity, and a watermark the page cannot
 	// find is a bootstrap that resumes from zero.
-	{"internal/contract/agentgraph/graph.go", "Graph", tsWireFile, "ExecutionGraph"},
-	{"internal/session/control/execution_graph.go", "ExecutionGraphSnapshot", tsWireFile, "ExecutionGraphSnapshot"},
-	{"internal/session/control/execution_graph.go", "ExecutionInterruption", tsWireFile, "ExecutionInterruption"},
-	{"internal/frontend/serve/executiongraph.go", "executionGraphView", tsWireFile, "ExecutionGraphView"},
+	{"internal/contract/agentgraph/graph.go", "Graph", tsGraphFile, "ExecutionGraph"},
+	{"internal/session/control/execution_graph.go", "ExecutionGraphSnapshot", tsGraphFile, "ExecutionGraphSnapshot"},
+	{"internal/session/control/execution_graph.go", "ExecutionInterruption", tsGraphFile, "ExecutionInterruption"},
+	{"internal/frontend/serve/executiongraph.go", "executionGraphView", tsGraphFile, "ExecutionGraphView"},
 	// Whether a replayed trajectory covers the session or only a prefix of it.
 	// A page that cannot read the coverage is back to the empty array that meant
 	// three different things.
@@ -129,6 +131,21 @@ var mirroredWireTypesHead = []wireMirror{
 	// use_capability where the live one drew what it reached.
 	{"internal/frontend/serve/history.go", "historyToolCall", tsSessionFile, "HistoryToolCall"},
 	{"internal/frontend/serve/history.go", "historyMessage", tsSessionFile, "HistoryMessage"},
+	// The user's team. A field the window cannot read is an agent, a group or
+	// a line of a group it draws wrong or not at all.
+	{"internal/contract/eventwire/wire.go", "Origin", tsTeamFile, "MessageOrigin"},
+	{"internal/frontend/serve/team_view.go", "teamView", tsTeamFile, "TeamView"},
+	{"internal/frontend/serve/team_view.go", "teamAgentView", tsTeamFile, "TeamAgent"},
+	{"internal/frontend/serve/team_view.go", "teamAvatarView", tsTeamFile, "TeamAvatar"},
+	{"internal/frontend/serve/team_view.go", "teamActivityView", tsTeamFile, "TeamActivity"},
+	{"internal/frontend/serve/team_view.go", "teamGroupView", tsTeamFile, "TeamGroup"},
+	{"internal/frontend/serve/team_view.go", "teamRoundView", tsTeamFile, "TeamRound"},
+	{"internal/frontend/serve/team_view.go", "teamUsageView", tsTeamFile, "TeamUsage"},
+	{"internal/frontend/serve/team_view.go", "teamPrefsView", tsTeamFile, "TeamPrefs"},
+	{"internal/state/teamroster/grouplog.go", "GroupLine", tsTeamFile, "GroupLine"},
+	{"internal/state/teamroster/exchange.go", "Exchange", tsTeamFile, "TeamExchange"},
+	{"internal/state/teamroster/schedule.go", "Schedule", tsTeamFile, "TeamSchedule"},
+	{"internal/frontend/serve/team_memory_routes.go", "sharedMemoryView", tsTeamFile, "SharedMemory"},
 	{"internal/frontend/serve/history_page.go", "historyPageResponse", tsSessionFile, "HistoryPage"},
 	{"internal/frontend/serve/history_page.go", "historyPageToolContext", tsSessionFile, "HistoryToolContext"},
 	// Who can reach this window from another device. A device the page cannot

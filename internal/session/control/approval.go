@@ -180,7 +180,7 @@ func (a *approvalManager) requiredHumanAnsweredLocked(tool, subject string) bool
 	if requiresFreshApprovalTool(tool) {
 		return false
 	}
-	return a.posture.mode == ToolApprovalYolo || a.sessionGrantAllowsLocked(tool, subject)
+	return a.posture.effective() == ToolApprovalYolo || a.sessionGrantAllowsLocked(tool, subject)
 }
 
 // register allocates an approval ID, records the pending prompt, and returns the
@@ -449,11 +449,18 @@ func (a *approvalManager) hasPending() bool {
 
 // approvalPosture is the runtime approval posture — "ask" prompts, "auto" lets
 // the policy auto-approve the writer fallback while preserving ask/deny rules,
-// "yolo" skips ordinary prompts while deny rules and fresh decisions hold — and
-// whether it is the session's default rather than a posture somebody named.
+// "yolo" skips ordinary prompts while deny rules and fresh decisions hold —
+// whether it is the session's default rather than one somebody named, and the
+// ceiling a team delivery holds the turn in flight to, which only lowers it.
 type approvalPosture struct {
 	mode      string
 	defaulted bool
+	ceiling   string
+}
+
+// effective is the mode tool decisions are made under now.
+func (p approvalPosture) effective() string {
+	return stricterApproval(normalizeToolApprovalMode(p.mode), p.ceiling)
 }
 
 // setDefaultMode applies mode as the default nobody named, draining what it
@@ -465,8 +472,8 @@ func (a *approvalManager) setDefaultMode(mode string, onlyIfDefaulted bool) ([]d
 	if onlyIfDefaulted && !a.posture.defaulted {
 		return nil, false
 	}
-	a.posture = approvalPosture{mode: mode, defaulted: true}
-	return a.drainForLocked(mode), true
+	a.posture = approvalPosture{mode: mode, defaulted: true, ceiling: a.posture.ceiling}
+	return a.drainForLocked(a.posture.effective()), true
 }
 
 func (a *approvalManager) defaulted() bool {
@@ -482,14 +489,41 @@ func (a *approvalManager) mode() string {
 	return normalizeToolApprovalMode(a.posture.mode)
 }
 
+// effectiveMode is the mode tool decisions are made under now: the session's,
+// held to the ceiling of the turn in flight.
+func (a *approvalManager) effectiveMode() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.posture.effective()
+}
+
+// holdCeiling lowers the turn's ceiling to ceiling, and reports whether that
+// changed the mode decisions are made under.
+func (a *approvalManager) holdCeiling(ceiling string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	before := a.posture.effective()
+	a.posture.ceiling = stricterApproval(a.posture.ceiling, ceiling)
+	return a.posture.effective() != before
+}
+
+// releaseCeiling lifts the turn's ceiling, reporting whether one was held.
+func (a *approvalManager) releaseCeiling() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	held := a.posture.ceiling != ""
+	a.posture.ceiling = ""
+	return held
+}
+
 // setMode applies a (pre-normalized) posture and drains any pending approvals
 // the new posture should auto-allow, returning them for the caller to signal
 // {allow:true} after unlocking.
 func (a *approvalManager) setMode(mode string) []drainedApproval {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.posture = approvalPosture{mode: mode}
-	return a.drainForLocked(mode)
+	a.posture = approvalPosture{mode: mode, ceiling: a.posture.ceiling}
+	return a.drainForLocked(a.posture.effective())
 }
 
 func (a *approvalManager) drainForLocked(mode string) []drainedApproval {
@@ -551,7 +585,7 @@ func (a *approvalManager) bypassAllowsLocked(tool, subject string, args json.Raw
 	if requiresFreshApprovalTool(tool) {
 		return false
 	}
-	if a.posture.mode == ToolApprovalYolo {
+	if a.posture.effective() == ToolApprovalYolo {
 		return true
 	}
 	if !a.planAutoApprove {
@@ -652,7 +686,7 @@ func ParseToolApprovalMode(mode string) (string, bool) {
 // narrow operation in interactive or headless mode.
 func RequiresFreshHumanApprovalTool(tool string) bool {
 	switch tool {
-	case planApprovalTool, memoryRememberTool, memoryForgetTool, permission.ConfirmTool, permission.OriginConfirmTool, SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool, NetworkEgressApprovalTool, PaidSearchApprovalTool, MCPSignInApprovalTool, MCPScopeUpgradeApprovalTool, SettingApprovalTool, SettingElevatedApprovalTool:
+	case planApprovalTool, memoryRememberTool, memoryForgetTool, memorySharedTool, permission.ConfirmTool, permission.OriginConfirmTool, SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool, NetworkEgressApprovalTool, PaidSearchApprovalTool, MCPSignInApprovalTool, MCPScopeUpgradeApprovalTool, SettingApprovalTool, SettingElevatedApprovalTool, TeamChangeApprovalTool:
 		return true
 	default:
 		return false
@@ -711,7 +745,7 @@ func permissionRequestHookPayload(tool, subject string, args json.RawMessage) (s
 	switch tool {
 	case planApprovalTool:
 		return "", nil, false
-	case memoryRememberTool, memoryForgetTool:
+	case memoryRememberTool, memoryForgetTool, memorySharedTool:
 		return "", nil, true
 	default:
 		return subject, args, true

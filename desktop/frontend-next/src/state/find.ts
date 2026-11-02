@@ -42,6 +42,8 @@ export function saidBy(it: Item): string[] {
       return [it.m.title, it.m.description, it.m.body];
     case "worked":
       return [];
+    case "origin":
+      return [it.text];
     case "receipt":
       return [
         ...(it.r.changes ?? []).map((c) => c.path),

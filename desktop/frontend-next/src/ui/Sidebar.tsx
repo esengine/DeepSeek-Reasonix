@@ -1,3 +1,4 @@
+import { TeamRail } from "./team/TeamRail";
 import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
@@ -64,6 +65,7 @@ interface Props {
   onNew?: () => Promise<void>;
   onOpenRemote: (host: string, workspace?: string, sessionPath?: string) => Promise<void>;
   onFocusPane: (id: string) => void;
+  onAdoptPane?: (rt: RuntimeView | Promise<RuntimeView>) => void;
   onClosePanes: (ids: string[]) => Promise<void>;
   onPause: (runtimeId: string) => void;
   onBranch?: (runtimeId: string, name: string) => Promise<void>;
@@ -88,6 +90,9 @@ interface Props {
  *  is signed in. It owns only what nothing outside it reads — which scope the
  *  session filter is on, whether the switcher is open, and which workspaces are
  *  folded. Everything else belongs to the window and arrives as a prop. */
+// A pane the team opened, for a caller that only knows how to focus panes.
+const onFocusPaneOf = (focus: (id: string) => void) => async (rt: RuntimeView | Promise<RuntimeView>) => focus((await rt).id);
+
 export function Sidebar({
   hub,
   collapsed,
@@ -117,6 +122,7 @@ export function Sidebar({
   onNew,
   onOpenRemote,
   onFocusPane,
+  onAdoptPane,
   onClosePanes,
   onPause,
   onBranch,
@@ -315,6 +321,7 @@ export function Sidebar({
           </div>
         </div>
       </div>
+      <TeamRail hub={hub} active={active} onAdoptPane={onAdoptPane ?? onFocusPaneOf(onFocusPane)} />
       <RailSearch resetKey={located}>
       <ContentMatches hub={hub} tree={tree} onOpen={onOpen} onError={onError} onReference={onReferenceSession} />
       <Workspaces

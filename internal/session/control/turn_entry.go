@@ -91,6 +91,7 @@ func (c *Controller) RunTurnWithRaw(ctx context.Context, input, raw, invokedSkil
 type turnTags struct {
 	format string
 	via    *provider.Via
+	origin *provider.Origin
 	// refuseUnknownSlash answers a slash command nothing resolves with a notice
 	// instead of sending the line to the model as prose.
 	refuseUnknownSlash bool
@@ -98,9 +99,21 @@ type turnTags struct {
 
 type turnViaKey struct{}
 
+type turnOriginKey struct{}
+
 // withTurnTags binds a submission's tags to the turn context.
 func (c *Controller) withTurnTags(ctx context.Context, tags turnTags) context.Context {
-	return withTurnVia(c.withTurnFormat(ctx, tags.format), tags.via)
+	ctx = withTurnVia(c.withTurnFormat(ctx, tags.format), tags.via)
+	if tags.origin != nil {
+		ctx = context.WithValue(ctx, turnOriginKey{}, tags.origin)
+	}
+	return ctx
+}
+
+// turnOrigin is who the host ran this turn for, nil for the user.
+func turnOrigin(ctx context.Context) *provider.Origin {
+	origin, _ := ctx.Value(turnOriginKey{}).(*provider.Origin)
+	return origin
 }
 
 func withTurnVia(ctx context.Context, via *provider.Via) context.Context {
