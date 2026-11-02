@@ -590,16 +590,6 @@ func (c *Config) DesktopUpdateChannel() string {
 	return NormalizeDesktopUpdateChannel(c.Desktop.UpdateChannel)
 }
 
-// ColdResumePruneEnabled reports whether stale tool results are elided when a
-// session resumes past the provider cache window. Default true (cheaper cold
-// restart); users keep full history by disabling it.
-func (c *Config) ColdResumePruneEnabled() bool {
-	if c == nil || c.Agent.ColdResumePrune == nil {
-		return true
-	}
-	return *c.Agent.ColdResumePrune
-}
-
 // ResponseLanguage normalizes the top-level language preference for final
 // answers. Empty means auto: replies follow the current user turn.
 func (c *Config) ResponseLanguage() string {
@@ -1157,14 +1147,8 @@ type AgentConfig struct {
 	TurnNarration     string `toml:"turn_narration"` // brief|detailed: how much the model says between tool calls; a turn-tail instruction, user-level only
 	// Deprecated compatibility field paired with AutoPlan. Old TOML remains
 	// readable, but loading clears it and rendering omits it.
-	AutoPlanClassifier string `toml:"auto_plan_classifier"`
-	// Soft/snip/force are retired compatibility keys; only CompactRatio is active.
-	SoftCompactRatio    float64 `toml:"soft_compact_ratio"`
-	ToolResultSnipRatio float64 `toml:"tool_result_snip_ratio"`
-	CompactRatio        float64 `toml:"compact_ratio"`
-	CompactForceRatio   float64 `toml:"compact_force_ratio"`
-	// ContextEditing is retired; native tool clearing is no longer an auto path.
-	ContextEditing string `toml:"context_editing"`
+	AutoPlanClassifier string  `toml:"auto_plan_classifier"`
+	CompactRatio       float64 `toml:"compact_ratio"`
 	// Keep controls which compactable messages stay verbatim beyond the current
 	// user-fact/digest floor and recent tail. Empty uses the conservative default
 	// of keeping error tool results.
@@ -1180,11 +1164,6 @@ type AgentConfig struct {
 	// CheckpointCeilingRatio is how small an automatic fold's result must be,
 	// as a fraction of the window, before it is accepted. 0 selects 0.50.
 	CheckpointCeilingRatio float64 `toml:"checkpoint_ceiling_ratio"`
-	// Folds on input size, not window share: 1M declared makes 300k legal, never economical.
-	ContextSoftLimitTokens int `toml:"context_soft_limit_tokens"`
-	// ColdResumePrune elides stale tool results when a session reopens past the
-	// provider cache window. nil = default enabled.
-	ColdResumePrune *bool `toml:"cold_resume_prune"`
 	// EmbeddedDiffDetection marks a shell result that is a whole unified diff; nil = off.
 	EmbeddedDiffDetection *bool             `toml:"embedded_diff_detection"`
 	AskTimeoutSeconds     AskTimeoutSetting `toml:"ask_timeout_seconds"` // user file only; 0 waits
@@ -1385,11 +1364,7 @@ func Default() *Config {
 			PlannerMaxSteps: 0,
 			AutoPlan:        "off",
 			// Soft/snip/force are load-only compatibility; CompactRatio alone drives maintenance.
-			SoftCompactRatio:       0,
-			ToolResultSnipRatio:    0,
-			CompactRatio:           0.85,
-			CompactForceRatio:      0,
-			ContextEditing:         "",
+			CompactRatio:           0.90,
 			MaxSubagentDepth:       8,
 			MaxProviderRetries:     10,
 			MaxSubagentConcurrency: 0,

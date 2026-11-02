@@ -1,35 +1,16 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { t } from "../i18n";
-import { reason, savedNotApplied } from "../i18n/kernel";
-import { SaveNote } from "./SaveNote";
 import type { AgentPort, CompactionSettings } from "../port/port";
-import { foldModeOf, foldModeValue, type FoldMode as Mode } from "./foldbound";
 
 const tokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
-// Capacity is the default. A fixed token threshold is an explicit override and
-// stays visible because hiding the policy made it hard to discover and audit.
-export function Compaction({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {
+export function Compaction({ port }: { port: AgentPort }) {
   const [box, setBox] = useState<CompactionSettings | null>(null);
   const [used, setUsed] = useState<number | null>(null);
-  const [draft, setDraft] = useState("");
-  // What the reader has asked for, which leads the stored value: "custom" is a
-  // choice before it is a number, and deriving the mode from storage alone left
-  // that click with nothing to show — the field appears only once a value has
-  // been committed, so it could never be committed.
-  const [choice, setChoice] = useState<Mode | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ text: string; unapplied: boolean } | null>(null);
-  const field = useId();
-
   useEffect(() => {
     port
       .compaction()
-      .then((s) => {
-        setBox(s);
-        setDraft(String(s.soft_limit_tokens > 0 ? s.soft_limit_tokens : Math.round(s.context_window * s.ratio)));
-        setChoice(null);
-      })
+      .then(setBox)
       .catch(() => setBox(null));
     // The threshold is a number until it is next to the session's own usage,
     // and then it is a distance. A gauge that fails to load costs the reader
@@ -37,63 +18,11 @@ export function Compaction({ port, onChanged }: { port: AgentPort; onChanged: ()
     port.context().then((c) => setUsed(c.used)).catch(() => setUsed(null));
   }, [port]);
 
-  const sent = useRef<number | null>(null);
-
   if (!box) return <div className="empty">{t("无法读取压缩配置。")}</div>;
-
-  const save = async (value: number) => {
-    setBusy(true);
-    setNote(null);
-    try {
-      const saved = await port.saveCompaction(value);
-      setBox(saved);
-      setDraft(String(saved.soft_limit_tokens > 0 ? saved.soft_limit_tokens : Math.round(saved.context_window * saved.ratio)));
-      setChoice(null);
-      onChanged();
-    } catch (e) {
-      setNote({ text: reason(e), unapplied: savedNotApplied(e) });
-    } finally {
-      sent.current = null;
-      setBusy(false);
-    }
-  };
-
-  // Declaring the bound rebuilds the runtime, so one gesture must reach the
-  // kernel once: Enter commits and then blurs, which runs a text field's commit
-  // twice for a single keystroke.
-  const send = (value: number) => {
-    if (value === sent.current || value === box.soft_limit_tokens) return;
-    sent.current = value;
-    void save(value);
-  };
-
-  const mode = choice ?? foldModeOf(box.soft_limit_tokens);
-  const commitCustom = () => {
-    const text = draft.trim();
-    if (text === "") return;
-    const next = Number(text);
-    if (!Number.isFinite(next) || !Number.isInteger(next) || next < 1000 || (!off && next >= win)) {
-      setNote({ text: t("阈值需至少为 1,000，并小于模型上下文窗口。"), unapplied: false });
-      return;
-    }
-    setNote(null);
-    send(next);
-  };
-
-  const pick = (next: Mode) => {
-    setNote(null);
-    setChoice(next);
-    const value = foldModeValue[next];
-    if (value !== undefined) return send(value);
-    // Custom is not a value on its own — it opens the field on whatever is
-    // already there, and the write happens when a number is committed.
-  };
 
   const win = box.context_window;
   const capacity = Math.round(win * box.ratio);
   const off = win === 0;
-  const economicWins = !off && mode !== "capacity" && box.trigger < capacity;
-  const capped = !off && box.soft_limit_tokens > 0 && box.trigger < box.soft_limit_tokens;
   const pct = off || !used ? 0 : Math.min((used / box.trigger) * 100, 100);
 
   return (
@@ -122,80 +51,10 @@ export function Compaction({ port, onChanged }: { port: AgentPort; onChanged: ()
                 <i style={{ width: `${pct}%` }} />
               </div>
             )}
-            <p className="note">
-              {economicWins
-                ? t("经济维护阈值会先到，因此本会话预计在 {n} tokens 左右自动整理上下文。", { n: tokens(box.trigger) })
-                : t("模型窗口的容量保护会先到，因此本会话预计在 {n} tokens 左右自动整理上下文。", { n: tokens(box.trigger) })}
-            </p>
+            <p className="note">{t("本会话预计在 {n} tokens 左右自动整理上下文。", { n: tokens(box.trigger) })}</p>
           </>
         )}
       </div>
-
-      <div className="lrow">
-            <span className="tx">
-              <span className="lb">{t("整理策略")}</span>
-              <span className="ds">
-                {t("默认跟随模型容量；需要提前整理时再设置固定阈值。")}
-              </span>
-            </span>
-            <div className="seg" data-text role="group" aria-label={t("整理策略")}>
-              {([
-                ["capacity", t("按模型容量（默认）")],
-                ["custom", t("自定义")],
-              ] as [Mode, string][]).map(([m, label]) => (
-                <button
-                  key={m}
-                  data-action="compaction.threshold"
-                  data-value={m}
-                  aria-pressed={mode === m}
-                  disabled={busy}
-                  onClick={() => pick(m)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-      </div>
-
-          {mode === "custom" && (
-            <div className="lrow threshold-row">
-              <span className="tx">
-                <label className="lb" htmlFor={field}>{t("阈值")}</label>
-                <span className="ds">
-                  {capped
-                    ? t("被容量保护（{p}%）限制，实际 {n} tokens", { p: String(Math.round(box.ratio * 100)), n: tokens(box.trigger) })
-                    : t("达到这个用量时开始整理")}
-                </span>
-              </span>
-              <div className="threshold-control">
-                <span className="unit-field">
-                  <input
-                    id={field}
-                    type="text"
-                    inputMode="numeric"
-                    value={draft}
-                    disabled={busy}
-                    placeholder={String(capacity)}
-                    onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
-                    onBlur={commitCustom}
-                    data-action-keydown="compaction.threshold"
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      commitCustom();
-                      e.currentTarget.blur();
-                    }}
-                  />
-                  <i>tokens</i>
-                </span>
-                <span className="threshold-presets" aria-label={t("常用阈值")}>
-                  {[0.5, 0.7, 0.85].map((ratio) => {
-                    const value = Math.round(win * ratio / 1000) * 1000;
-                    return <button key={ratio} type="button" data-action="compaction.threshold" data-value={String(ratio)} disabled={busy || off} onClick={() => { setDraft(String(value)); send(value); }}>{Math.round(ratio * 100)}%</button>;
-                  })}
-                </span>
-              </div>
-            </div>
-          )}
 
       <div className="lrow">
             <span className="tx">
@@ -206,7 +65,6 @@ export function Compaction({ port, onChanged }: { port: AgentPort; onChanged: ()
             </span>
             <span className="sc">{off ? "—" : tokens(capacity)}</span>
       </div>
-      <SaveNote note={note} />
     </>
   );
 }

@@ -317,7 +317,6 @@ type RuntimeSettings interface {
 	ToolSettings() ToolSettings
 	SaveToolDisabled(name string, disabled bool) error
 	CompactionSettings() CompactionSettings
-	SaveCompactionSettings(softLimitTokens int) error
 	DisplayCurrencySettings() DisplayCurrencySettings
 	SaveDisplayCurrency(mode string) error
 	ChangedFilesSettings() ChangedFilesSettings

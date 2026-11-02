@@ -8,24 +8,6 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
-// keptForProjection is the form a verbatim-retained message takes in the
-// projection. Retention promises the message survives the fold, not that every
-// byte it arrived with does: a failure keeps its diagnosis without its passing
-// noise.
-func (a *contextWindow) keptForProjection(m provider.Message) provider.Message {
-	if !failedExecution(m.ToolExecution) {
-		return m
-	}
-	// A recorded selection is a model's reading of this exact output, so it
-	// wins over the word list and the position floor, which only approximate it.
-	if sel := m.ToolExecution.DiagnosticLines; len(sel) > 0 {
-		m.Content = keepFromSelection(m.Content, sel)
-		return m
-	}
-	m.Content = snipFailureTail(m.Content, recordedTailLines(m.ToolExecution))
-	return m
-}
-
 // supersedeStandingState drops each standing-state block a later turn — kept or
 // in the verbatim tail — repeats. Only a newer block with the same tag AND the
 // same attributes supersedes: a short reminder must never displace the fuller

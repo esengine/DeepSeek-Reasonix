@@ -107,16 +107,6 @@ func TestUserTurnRetentionBudgetHoldsMoreRealTurns(t *testing.T) {
 	}
 }
 
-// Standing state is superseded across the retained slice, never per message:
-// keptForProjection shapes one message and cannot know what a later one repeats.
-func TestKeptForProjectionLeavesStandingStateToTheSupersedePass(t *testing.T) {
-	a := &Agent{}
-	turn := provider.Message{Role: provider.RoleUser, Content: testGoalBlock + "\n\nwords"}
-	if got := a.window().keptForProjection(turn); got.Content != turn.Content {
-		t.Fatalf("a single-message pass rewrote standing state: %q", got.Content)
-	}
-}
-
 // The newest block of each variant survives; older ones of that same variant go.
 // A short reminder and the full statement it points at are different variants,
 // so the reminder must never displace the contract.

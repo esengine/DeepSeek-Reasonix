@@ -5,7 +5,6 @@ import { SaveNote } from "../SaveNote";
 import type { AgentPort, ContextBreakdown } from "../../port/port";
 import { pct as percent, tokens } from "../../i18n/format";
 import { pinToViewport } from "../place";
-import { useFoldBound } from "./useFoldBound";
 import { Row } from "./kit";
 import { CompactNow, type CompactAction } from "../CompactNow";
 
@@ -82,13 +81,7 @@ export function Context({ ctx, legend = false, port, onCtx, compact }: {
   // other: side by side they would be two boxes of numbers with no way to tell
   // which figure each answers for.
   const [editing, setEditing] = useState(false);
-  const [tuning, setTuning] = useState(false);
   const bar = useRef<HTMLDivElement>(null);
-  // The handle is the capacity bar's own mark, so its state lives here rather
-  // than in a control mounted beside it: an editor that owned the track would
-  // rebuild it on every open, and a bar remounted animates from zero, which
-  // reads as the session's usage jumping.
-  const fold = useFoldBound(port, ctx?.window ?? 0, onCtx);
 
   // A bubble placed once against the viewport goes stale the moment anything
   // moves it, and there is nothing useful to show mid-scroll — so it closes.
@@ -112,10 +105,7 @@ export function Context({ ctx, legend = false, port, onCtx, compact }: {
   const field = settable && (
     <DeclareWindow port={port} onSet={onCtx} was={ctx.window} onDone={() => setEditing(false)} />
   );
-  const openWindow = () => {
-    setEditing((v) => !v);
-    setTuning(false);
-  };
+  const openWindow = () => setEditing((v) => !v);
   // A window nobody declared has no denominator to draw against — but the
   // number still matters, and so does what else a zero window means: it is
   // what turns automatic compaction off. Vanishing said neither.
@@ -136,10 +126,7 @@ export function Context({ ctx, legend = false, port, onCtx, compact }: {
   // placed where usage cannot reach it. There is no deadline left to count
   // down to, so the capacity row is the whole gauge rather than a footnote.
   const folds = ctx.compact_at > 0 && ctx.compact_at <= ctx.window;
-  // While the handle is held, it owns the figure: a mark that moves under the
-  // pointer while the number above it stays put is two controls disagreeing
-  // about one setting.
-  const at = fold.reading ?? ctx.compact_at;
+  const at = ctx.compact_at;
   const denom = folds ? ctx.compact_at : ctx.window;
   const pct = Math.min((used / denom) * 100, 100);
   // The kernel's own two rungs, not a second opinion: it tells the model to
@@ -217,22 +204,7 @@ export function Context({ ctx, legend = false, port, onCtx, compact }: {
             k={t("下次维护")}
             v={
               <span className="ctxq">
-                {settable ? (
-                  <button
-                    className="ctxden"
-                    data-action="compaction.advanced"
-                    aria-expanded={tuning}
-                    title={t("点这里改维护点")}
-                    onClick={() => {
-                      setTuning((v) => !v);
-                      setEditing(false);
-                    }}
-                  >
-                    {tokens(at)}
-                  </button>
-                ) : (
-                  tokens(at)
-                )}
+                {tokens(at)}
                 <em>{percent(used / at)}</em>
               </span>
             }
@@ -241,72 +213,10 @@ export function Context({ ctx, legend = false, port, onCtx, compact }: {
           {/* The fold point marked on the window it is a fraction of. Read as
               two numbers, 160k against 1M is arithmetic nobody does; read as a
               notch this far along the bar, it is the whole answer at a glance. */}
-          <div className="ctxcapbar" data-live={tuning || undefined}>
+          <div className="ctxcapbar">
             <i style={{ width: `${Math.min((used / ctx.window) * 100, 100)}%` }} />
             <b style={{ left: `${Math.min((at / ctx.window) * 100, 100)}%` }} />
-            {/* The mark, made to move. A native range brings the keyboard, the
-                touch target and the announced value with it; everything drawn
-                here is the bar that was already on screen, so the control the
-                reader grabs is the one they were already reading.
-                The track spans the window because the bar does: given its own
-                min..max the handle sat at one fraction of the track while the
-                mark sat at another, and the two drifted apart by the width of
-                everything the track had cut off. */}
-            {settable && tuning && fold.ready && (
-              <input
-                className="ctxslide"
-                type="range"
-                min={fold.step}
-                max={ctx.window}
-                step={fold.step}
-                value={Math.min(Math.max(fold.preview ?? ctx.compact_at, fold.step), ctx.window)}
-                disabled={fold.busy}
-                autoFocus
-                data-action-change="compaction.threshold"
-                data-action-pointerup="compaction.threshold"
-                data-action-keyup="compaction.threshold"
-                aria-label={t("维护点")}
-                aria-valuetext={tokens(at)}
-                onChange={(e) => fold.move(Number(e.currentTarget.value))}
-                onPointerUp={(e) => void fold.commit(Number(e.currentTarget.value))}
-                onKeyUp={(e) => {
-                  if (e.key === "Escape") return setTuning(false);
-                  void fold.commit(Number(e.currentTarget.value));
-                }}
-              />
-            )}
           </div>
-          {/* Which bound is holding, said only where it is not self-evident: a
-              fold at the window's own share explains itself, and a fold at a
-              fixed size against a window twenty times larger does not. It
-              stands down while the editor is open — the chosen mode says what
-              it does there, and two greyed paragraphs stacked on one column
-              read as one nobody finishes. */}
-          {ctx.boundary === "economic" && ctx.capacity_at > ctx.compact_at && !tuning && (
-            <p className="ctxwhy">
-              {t("维护点是固定输入量，不随窗口放大 —— 输入越大，每轮越慢。窗口那条线在 {n}。", {
-                n: tokens(ctx.capacity_at),
-              })}
-            </p>
-          )}
-          {settable && tuning && fold.ready && (
-            <div className="ctxfold">
-              {fold.error && <p className="ctxnote" data-lvl="warn">{fold.error}</p>}
-              {/* Which of the three the handle is expressing, and where the
-                  other end is — one line, because a control that explains
-                  itself in a paragraph has stopped being a control. */}
-              <p className="ctxnote">
-                {fold.preview !== null
-                  ? fold.preview >= fold.capacity
-                    ? t("松开即按窗口容量")
-                    : t("松开即生效")
-                  : fold.mode === "capacity"
-                    ? t("按窗口容量（默认）· {n}", { n: tokens(fold.capacity) })
-                    : t("自定义 {n} · 拖到最右恢复按窗口容量", { n: tokens(fold.stored) })}
-              </p>
-              <p className="ctxfine">{t("会重建运行时；任务运行中改不了。")}</p>
-            </div>
-          )}
         </div>
       )}
       {folds && editing && field}

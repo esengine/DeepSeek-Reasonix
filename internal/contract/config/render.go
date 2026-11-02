@@ -160,7 +160,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# turn_narration = \"detailed\"   # between tool calls: brief|detailed (detailed asks for a few lines per batch)\n")
 	}
-	fmt.Fprintf(&b, "compact_ratio       = %s   # fold at this share of the model window (default 0.85)\n", formatFloat(c.Agent.CompactRatio))
+	fmt.Fprintf(&b, "compact_ratio       = %s   # fold at this share of the model window (default 0.90)\n", formatFloat(c.Agent.CompactRatio))
 	if c.Agent.Keep != nil {
 		fmt.Fprintf(&b, "keep                = %s   # compaction keep policy: errors, user_marked\n", renderStringArray(c.Agent.Keep))
 	} else {
@@ -181,7 +181,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# checkpoint_ceiling_ratio = 0.50   # how small a fold's result must be to be accepted\n")
 	}
-	fmt.Fprintf(&b, "context_soft_limit_tokens = %d   # optional earlier absolute fold size; 0 or negative = use model capacity\n", c.Agent.ContextSoftLimitTokens)
 	if c.Agent.RecentKeep > 0 {
 		fmt.Fprintf(&b, "recent_keep         = %d   # minimum recent messages kept verbatim\n", c.Agent.RecentKeep)
 	} else {

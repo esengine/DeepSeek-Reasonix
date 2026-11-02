@@ -19,7 +19,6 @@ function why(c: Compaction): string {
   if (c.trigger !== "auto") return c.trigger ?? "";
   if (!c.triggerTokens) return t("上下文达到阈值，自动触发");
   const n = tokens(c.triggerTokens);
-  if (c.boundary === "economic") return t("自动触发 · 输入到达固定维护线 {n}", { n });
   if (c.boundary === "capacity") return t("自动触发 · 输入到达窗口容量线 {n}", { n });
   return t("自动触发 · 输入到达 {n}", { n });
 }

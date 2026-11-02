@@ -21,7 +21,6 @@ type windowHost interface {
 	prepareSamplingRequest(ctx context.Context) (samplingRequest, error)
 	interceptCompactionPrepare(ctx context.Context, fold []provider.Message, guidance string) ([]provider.Message, string, error)
 	interceptCompactionComplete(ctx context.Context, summary string) (string, error)
-	annotateFailureDiagnostics(ctx context.Context, region []provider.Message, protected []bool) []provider.Message
 	Session() *sessionstore.Session
 }
 

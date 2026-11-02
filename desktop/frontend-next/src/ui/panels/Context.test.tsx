@@ -3,12 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Context } from "./Context";
 import type { ContextBreakdown } from "../../port/port";
 
-// A 1M window running under the default economic limit: the session folds at
-// 160k, which is 16% of what the model could hold. Everything here turns on the
+// A session that folds at 160k, which is 16% of a 1M window. Everything here turns on the
 // two numbers being different.
 const wide = (over: Partial<ContextBreakdown> = {}): ContextBreakdown => ({
   used: 82_000, window: 1_000_000, compact_at: 160_000,
-  boundary: "economic", capacity_at: 800_000,
+  boundary: "capacity", capacity_at: 800_000,
   system: 20_000, tools: 12_000, user: 10_000, reply: 20_000, output: 20_000,
   ...over,
 });
@@ -64,13 +63,6 @@ describe("why the fold point is where it is", () => {
     const html = draw(wide());
     const notch = html.match(/class="ctxcapbar"[^>]*>.*?left:\s*([\d.]+)%/s)?.[1];
     expect(Number(notch)).toBeCloseTo(16, 1);
-  });
-
-  it("says the bound is absolute and where the window's own line sits", () => {
-    const html = draw(wide());
-    expect(html).toContain("ctxwhy");
-    expect(html).toContain("不随窗口放大");
-    expect(html).toContain("800k");
   });
 
   // A fold at the window's own share explains itself; repeating it there would

@@ -725,16 +725,7 @@ func normalizeRetiredMultiThresholdCompaction(c *Config) bool {
 	if c == nil {
 		return false
 	}
-	changed := c.Agent.SoftCompactRatio != 0 ||
-		c.Agent.ToolResultSnipRatio != 0 ||
-		c.Agent.CompactForceRatio != 0 ||
-		c.Agent.ColdResumePrune != nil ||
-		strings.TrimSpace(c.Agent.ContextEditing) != ""
-	c.Agent.SoftCompactRatio = 0
-	c.Agent.ToolResultSnipRatio = 0
-	c.Agent.CompactForceRatio = 0
-	c.Agent.ColdResumePrune = nil
-	c.Agent.ContextEditing = ""
+	changed := false
 	if c.Agent.CompactRatio <= 0 {
 		c.Agent.CompactRatio = Default().Agent.CompactRatio
 		changed = true

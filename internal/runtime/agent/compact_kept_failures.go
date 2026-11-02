@@ -23,7 +23,7 @@ func (a *contextWindow) keptFailuresBudget() int {
 func (a *contextWindow) keepFailuresWithinBudget(region []provider.Message, keep []bool, failures []int) {
 	budget := a.keptFailuresBudget()
 	for _, i := range slices.Backward(failures) {
-		cost := fixedTokenEstimate(a.keptForProjection(region[i]))
+		cost := fixedTokenEstimate(region[i])
 		if cost > budget {
 			continue
 		}

@@ -72,7 +72,7 @@ func (m configMigrations) report(sink event.Sink, cfg *config.Config) {
 	reportRetiredKey(sink, m.multiThreshold, m.multiThresholdErr,
 		"上下文维护已简化为单一自动压缩阈值。",
 		"Deprecated multi-threshold compaction keys were ignored.",
-		"Context maintenance now follows compact_ratio of the model window by default (0.85). Set context_soft_limit_tokens only when an earlier fixed boundary is wanted. soft_compact_ratio, tool_result_snip_ratio, compact_force_ratio, cold_resume_prune, and context_editing were removed from config.",
+		"Context maintenance now follows compact_ratio of the model window (0.90 by default) and nothing else. soft_compact_ratio, tool_result_snip_ratio, compact_force_ratio, cold_resume_prune, context_editing, and context_soft_limit_tokens were removed from config.",
 		" The old keys could not be removed: ")
 }
 

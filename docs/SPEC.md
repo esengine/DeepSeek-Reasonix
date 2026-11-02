@@ -263,7 +263,7 @@ canonical transcript and installs a short **provider-visible checkpoint** only
 when the sole automatic threshold is crossed.
 
 - Each provider declares `context_window` (tokens). The only automatic trigger is
-  `agent.compact_ratio` (default **0.85**; presets 0.70 / 0.80 / 0.85; range
+  `agent.compact_ratio` (default **0.90**; presets 0.70 / 0.80 / 0.90; range
   strictly between 0 and 1).
   `triggerTokens = floor(context_window × compact_ratio)`.
 - Ratio bounds follow `CompactRatioMin` / `CompactRatioMax` in

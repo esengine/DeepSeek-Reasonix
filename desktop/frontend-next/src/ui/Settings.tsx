@@ -522,7 +522,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               </Group>
               <Group id="context" title={t("上下文维护")}
                 hint={t("默认按模型容量自动整理。自定义中转站若无法提供最大上下文，先按 160k 计算；你可以在这里填写实际容量。")}>
-                <Compaction port={port} onChanged={onChanged} />
+                <Compaction port={port} />
               </Group>
             </>
           )}

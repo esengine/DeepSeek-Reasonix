@@ -55,3 +55,11 @@ func TestManualCompactAnnouncesBeforeAnyModelCall(t *testing.T) {
 		t.Fatalf("model calls = %d, want only the summary: folded failures are not diagnosed", len(prov.got))
 	}
 }
+
+func padded(prefix string, n int) []string {
+	out := make([]string, n)
+	for i := range n {
+		out[i] = fmt.Sprintf("%s%03d", prefix, i)
+	}
+	return out
+}

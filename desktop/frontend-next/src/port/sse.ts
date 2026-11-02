@@ -603,9 +603,6 @@ export class SsePort extends SseWorkspace implements AgentPort {
   compaction() {
     return this.get<CompactionSettings>("/compaction");
   }
-  saveCompaction(softLimitTokens: number) {
-    return this.post0<CompactionSettings>("/compaction", { soft_limit_tokens: softLimitTokens });
-  }
   setGoal(text: string) {
     return this.post("/goal", { goal: text });
   }

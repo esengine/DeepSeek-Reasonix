@@ -1903,7 +1903,7 @@ func TestAdoptHistoryPreservesRewriteBaseline(t *testing.T) {
 	msgs[0].Content = "new sys"
 
 	exec := agent.New(nil, nil, sessionstore.NewSession("new sys"), agent.Options{}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", DisableColdResumePrune: true})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
 	c.AdoptHistory(msgs, path)
 	rewrite := exec.Session().Snapshot()
 	rewrite[3].Content = "[elided tool result]"
@@ -1943,7 +1943,7 @@ func TestAdoptEmptyHistoryRestoresPersistedGoalState(t *testing.T) {
 	old.stopGoal(GoalStatusBlocked)
 
 	newExec := agent.New(nil, nil, sessionstore.NewSession(""), agent.Options{}, event.Discard)
-	replacement := New(Options{Executor: newExec, SessionDir: dir, Label: "replacement", DisableColdResumePrune: true})
+	replacement := New(Options{Executor: newExec, SessionDir: dir, Label: "replacement"})
 	replacement.AdoptHistory(nil, path)
 
 	if got := replacement.Goal(); got != "preserve the zero-turn goal" {
@@ -1973,7 +1973,7 @@ func TestAdoptHistoryRejectsStaleCarriedHistoryBaseline(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "one"},
 	}
 	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", DisableColdResumePrune: true})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
 	c.AdoptHistory(stale, path)
 	if err := c.SnapshotRewrite(); err != nil {
 		t.Fatalf("SnapshotRewrite stale adopted history: %v", err)

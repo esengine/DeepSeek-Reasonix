@@ -84,7 +84,6 @@ func (w roleWiring) skillRunOptions(in delegationInputs) func(context.Context, i
 			RecentKeep:          w.cfg.Agent.RecentKeep,
 			CompactionBudgets:   compactionBudgets(w.cfg),
 			CompactRatio:        w.cfg.Agent.CompactRatio,
-			ContextEditing:      w.cfg.Agent.ContextEditing,
 			ArchiveDir:          w.roots.ArchiveDir(),
 			KeepPolicy:          w.keep,
 			ResponseLanguage:    langpref.ResponseLanguageFromContext(sctx),

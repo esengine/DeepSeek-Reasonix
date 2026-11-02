@@ -792,6 +792,5 @@ export interface AgentPort extends WorkspacePreviewPort, SessionTailPort, Upload
   // "" turns the session's model mode off.
   setModelMode(mode: string): Promise<void>;
   compaction(): Promise<CompactionSettings>;
-  saveCompaction(softLimitTokens: number): Promise<CompactionSettings>;
   setGoal(text: string): Promise<void>;
 }

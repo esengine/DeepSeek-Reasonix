@@ -30,7 +30,6 @@ func conflictCodeOf(t *testing.T, resp *http.Response) string {
 // that saves then rebuilds must answer with that identity.
 func TestSavesWhileBusyReportSavedNotFailed(t *testing.T) {
 	for _, tc := range []struct{ name, path, body string }{
-		{"compaction", "/compaction", `{"soft_limit_tokens":100000}`},
 		{"shell", "/shell", `{"prefer":"","path":""}`},
 		{"roles", "/roles", `{"role":"planner","ref":""}`},
 	} {

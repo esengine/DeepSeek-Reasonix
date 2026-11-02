@@ -42,7 +42,7 @@ func TestContextBreakdownReportsZeroForClassesWithNoMessages(t *testing.T) {
 // fires it rather than recomputed by whoever draws it.
 func TestContextBreakdownCarriesTheBoundaryInForce(t *testing.T) {
 	a := New(nil, nil, sessionstore.NewSession("你是一个助手"), Options{ContextWindow: 1_000_000}, nil)
-	if got, want := a.ContextBreakdown().CompactAt, 850_000; got != want {
+	if got, want := a.ContextBreakdown().CompactAt, 900_000; got != want {
 		t.Fatalf("CompactAt = %d, want capacity boundary %d against a 1M window", got, want)
 	}
 

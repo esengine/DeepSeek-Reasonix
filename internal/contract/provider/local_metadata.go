@@ -26,8 +26,4 @@ type ToolExecution struct {
 	MutationRisk   string `json:"mutationRisk,omitempty"`
 	Verification   string `json:"verification,omitempty"`
 	DurationMs     int64  `json:"durationMs,omitempty"`
-	// DiagnosticLines are 1-based line numbers of Content a model picked out as
-	// carrying the failure, recorded once so every later fold shortens the same
-	// way. Written during compaction, never by the tool run.
-	DiagnosticLines []int `json:"diagnosticLines,omitempty"`
 }

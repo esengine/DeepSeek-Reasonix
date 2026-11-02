@@ -55,7 +55,7 @@ func (c *Controller) maybeColdResumePrune(path string, announce bool) {
 	}
 	c.executor.SetCacheState(state)
 	slog.Debug("controller: resume cache state", "path", path, "cache_state", state, "idle", time.Since(last).Round(time.Minute).String())
-	if !announce || c.disableColdResumePrune || state != agent.CacheStateCold {
+	if !announce || state != agent.CacheStateCold {
 		return
 	}
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(

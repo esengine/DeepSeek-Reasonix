@@ -128,8 +128,6 @@ export interface RoleOverride {
 export interface CompactionSettings {
   // The stored value, not the resolved one: 0 means the default, negative
   // means off, and a caller that cannot tell those apart cannot offer them.
-  soft_limit_tokens: number;
-  default_soft_limit: number;
   ratio: number;
   // Zero when nobody declared a window, which is also what turns automatic
   // maintenance off entirely.

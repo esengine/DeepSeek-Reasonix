@@ -451,9 +451,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 	}
 
 	sourceTokens := a.announceCompaction(trigger, len(fold), msgs)
-	// Each diagnosis is a model call, so it waits until the card is up, and only
-	// retained failures ask: a folded one never reads its selection.
-	kept, _, _, _ := a.partitionFoldWith(a.annotateFailureDiagnostics(ctx, region, policyKeep), msgs[start:], policy)
+	kept, _, _, _ := a.partitionFoldWith(region, msgs[start:], policy)
 	if a.svc.hooks != nil {
 		if hookInstr := a.svc.hooks.PreCompact(ctx, trigger); hookInstr != "" {
 			if instructions != "" {
@@ -681,7 +679,7 @@ func (a *contextWindow) partitionFoldWith(region, tail []provider.Message, polic
 				fold = append(fold, *rest)
 			}
 		case policyKeep[i]:
-			kept = append(kept, a.keptForProjection(m))
+			kept = append(kept, m)
 		default:
 			fold = append(fold, m)
 		}

@@ -177,5 +177,6 @@ func stripLegacyMultiThresholdCompactionLines(raw string) (string, bool) {
 		"compact_force_ratio",
 		"cold_resume_prune",
 		"context_editing",
+		"context_soft_limit_tokens",
 	)
 }

@@ -22,7 +22,7 @@ import (
 // checkpoint is installed (stable prefix + one structured digest + recent tail).
 // 50% is only the normal acceptance ceiling — candidates are never padded up to it.
 const (
-	defaultCompactRatio          = 0.85 // capacity share of the window before maintenance
+	defaultCompactRatio          = 0.90 // capacity share of the window before maintenance
 	checkpointCeilingRatio       = 0.50 // normal auto-checkpoint acceptance ceiling
 	recentTailBudgetRatio        = 0.10 // recent verbatim tail as a fraction of the window
 	minRecentTailTokens          = 32 * 1024
@@ -103,21 +103,6 @@ func (a *contextWindow) capacityCompactTrigger() int {
 	return max(1, int(float64(window)*ratio))
 }
 
-// economicCompactTrigger answers what a prompt costs to replay, which is a
-// property of its size and not of what the model could have held. It is an
-// explicit override: an unset or negative value leaves capacity as the only
-// automatic boundary.
-func (a *contextWindow) economicCompactTrigger() int {
-	if a.ablation.Off(ablation.Compaction) {
-		return 0
-	}
-	limit := a.budgets.ContextSoftLimitTokens
-	if limit <= 0 {
-		return 0
-	}
-	return limit
-}
-
 // CompactTrigger is the boundary in force, which is the number a frontend has
 // to show: the two bounds are configured separately and only one of them fires,
 // so a panel that renders the settings alone cannot say which.
@@ -131,9 +116,6 @@ func (a *contextWindow) compactTrigger() int {
 	capacity := a.capacityCompactTrigger()
 	if capacity <= 0 || a.compactRatio > 1 {
 		return capacity
-	}
-	if economic := a.economicCompactTrigger(); economic > 0 && economic < capacity {
-		return economic
 	}
 	return capacity
 }

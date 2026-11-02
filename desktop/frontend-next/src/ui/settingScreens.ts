@@ -51,7 +51,6 @@ export const SETTING_SCREEN: Record<string, string> = {
   "progress_watch.token_multiple": "session:progress-watch",
   "progress_watch.perseveration_retries": "session:progress-watch",
   "agent.compact_ratio": "model:context",
-  "agent.context_soft_limit_tokens": "model:context",
   "default_model": "model:model",
   "providers": "providers:providers",
   "billing.display_currency": "usage:currency",

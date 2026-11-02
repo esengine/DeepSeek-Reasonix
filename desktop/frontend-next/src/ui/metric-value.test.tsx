@@ -20,7 +20,7 @@ const metrics = (over: Partial<Metrics> = {}): Metrics =>
      ...over } as Metrics);
 
 const ctx = (used: number): ContextBreakdown =>
-  ({ used, window: 1_000_000, compact_at: 160_000, boundary: "economic", capacity_at: 800_000,
+  ({ used, window: 1_000_000, compact_at: 160_000, boundary: "capacity", capacity_at: 800_000,
      system: 20_000, tools: 12_000, user: 10_000, reply: 20_000, output: 20_000 });
 
 // Every distinct rendering of a metric, in order. An update that eases from its

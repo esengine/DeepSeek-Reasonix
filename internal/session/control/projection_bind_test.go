@@ -36,7 +36,7 @@ func TestNewSessionRebindsProjectionSidecarPath(t *testing.T) {
 		ModelRef:      "test/model",
 		WorkspaceID:   "ws",
 	}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", DisableColdResumePrune: true})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
 	c.Resume(sess, oldPath)
 	if got := exec.SessionPath(); got != oldPath {
 		t.Fatalf("after resume SessionPath = %q, want %q", got, oldPath)
@@ -94,7 +94,7 @@ func TestClearSessionRebindsProjectionSidecarPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{SessionPath: path}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", DisableColdResumePrune: true})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
 	c.Resume(sess, path)
 
 	if err := c.ClearSession(); err != nil {
@@ -121,7 +121,7 @@ func TestBranchRebindsProjectionSidecarPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{SessionPath: path, ContextWindow: 1000}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", DisableColdResumePrune: true})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
 	c.Resume(sess, path)
 
 	newPath, err := c.Branch("side")

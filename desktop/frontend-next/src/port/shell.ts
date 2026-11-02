@@ -10,13 +10,7 @@ export interface ContextBreakdown {
   user: number;
   reply: number;
   output: number;
-  // Where this session actually folds — the lower of the window share and the
-  // economic soft limit. Zero means nothing folds automatically. The window is
-  // not a substitute: against a 1M window the default limit fires at 16%.
   compact_at: number;
-  // Which of the two bounds that is, and where the window's own line sits.
-  // The kernel decides; a panel comparing the pair itself would own a second
-  // copy of the rule, and one without them shows a fold point it cannot explain.
   boundary: string;
   capacity_at: number;
   // The largest single messages of each class, largest first; sizes and the

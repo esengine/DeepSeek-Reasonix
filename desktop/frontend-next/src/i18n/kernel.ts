@@ -551,7 +551,6 @@ const SAID: Record<string, string> = {
   "permissions.rejected": "该权限未能保存：{detail}",
   "sandbox.rejected": "沙箱设置未能保存：{detail}",
   "compaction.rejected": "压缩阈值未能保存：{detail}",
-  "compaction.no_soft_limit": "本次请求未包含阈值，未做任何修改",
   "browser_tools.save_failed": "内置浏览器设置未能保存：{detail}",
   "browser_tools.no_enabled": "本次请求未说明开关状态，未做任何修改",
   "subagent_claims.editing_disabled": "这台服务器未开放子代理写入范围设置",

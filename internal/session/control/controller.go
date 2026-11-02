@@ -402,9 +402,6 @@ type Options struct {
 	ReasoningLanguage string
 	// TurnNarration is brief (default) or detailed; see config.TurnNarration.
 	TurnNarration string
-	// DisableColdResumePrune suppresses the cold-resume cache-state notice.
-	// Resume never rewrites history regardless of this flag.
-	DisableColdResumePrune bool
 	// EmbeddedDiffDetection marks a shell result whose whole output is a unified diff.
 	EmbeddedDiffDetection bool
 	// Shell is the interpreter user-invoked "!" commands run under, so /shell

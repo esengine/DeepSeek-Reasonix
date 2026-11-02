@@ -123,9 +123,6 @@ func (a *contextWindow) compactBoundary() string {
 	if capacity <= 0 || a.compactRatio > 1 {
 		return ""
 	}
-	if economic := a.economicCompactTrigger(); economic > 0 && economic < capacity {
-		return "economic"
-	}
 	return "capacity"
 }
 
