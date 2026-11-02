@@ -86,6 +86,7 @@ export default defineConfig(({ mode }) => {
       outDir: "dist",
       emptyOutDir: true,
       rolldownOptions: {
+        input: ["index.html", "mermaid-frame.html"],
         output: {
           codeSplitting: {
             groups: [
