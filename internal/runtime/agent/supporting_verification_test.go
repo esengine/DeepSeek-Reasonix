@@ -6,12 +6,9 @@ import (
 	"testing"
 
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/runtime/completion"
-	"reasonix/internal/runtime/taskcontract"
 	"reasonix/internal/runtime/taskpolicy"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/state/instruction"
-	"reasonix/internal/state/trustedstate"
 )
 
 func TestProseWaiverRequiresEntireMutationDomain(t *testing.T) {
@@ -118,21 +115,5 @@ func TestBalancedSupportingVerificationFloor(t *testing.T) {
 				t.Errorf("stale verification = %v", stale)
 			}
 		})
-	}
-}
-
-func TestDeliveryProseDebtSurvivesEvidenceSeal(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("neutral"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	store := trustedstate.Open(t.TempDir(), nil)
-	a, sink := contractAgent(t, &scriptedProvider{}, "", store)
-	a.observeRoot = root
-	a.deliveryProfile = true
-	a.task.ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Mutation: true, MutationEvidence: evidence.MutationProven, Paths: []string{"notes.md"}})
-	a.sealShadowBundle(t.Context(), "write a neutral note", taskcontract.New("write a neutral note"), completion.Report{}, a.task.ledger.Receipts(), false)
-	if got := sealedVerdict(t, store, sealedRecord(t, sink.last(t)), "stale_verification@0"); got != "owed" {
-		t.Fatalf("sealed prose debt = %q, want owed", got)
 	}
 }

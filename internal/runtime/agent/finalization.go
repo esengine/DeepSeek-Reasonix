@@ -54,7 +54,6 @@ func (a *Agent) armFinalizationRound(state *turnRuntime, cause landCause) {
 // end-of-turn summary is reported here too: a turn that ran out of rounds is
 // the one whose unverified work matters most to report.
 func (a *Agent) gracePause(ctx context.Context, state *turnRuntime) error {
-	a.emitTurnShadows(ctx, a.turn.turnInput, true)
 	if state.landCause.kind == "task_budget" {
 		return &taskBudgetPause{axis: state.landCause.axis, detail: state.landCause.detail}
 	}

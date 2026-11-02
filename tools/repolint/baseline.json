@@ -13,10 +13,10 @@
     "doc-prose": 2128,
     "error-text": 9,
     "essay": 2600,
-    "file-size": 18536,
+    "file-size": 18533,
     "flat-view": 0,
     "frontend-parity": 13,
-    "function-size": 2494,
+    "function-size": 2492,
     "layer-order": 0,
     "layering": 0,
     "marker": 0,
@@ -971,7 +971,7 @@
     "internal/runtime/agent/agent.go": {
       "complexity": 32,
       "essay": 26,
-      "file-size": 1151,
+      "file-size": 1148,
       "function-size": 95
     },
     "internal/runtime/agent/agent_options.go": {
@@ -1015,7 +1015,7 @@
     },
     "internal/runtime/agent/execute_batch.go": {
       "complexity": 18,
-      "function-size": 97
+      "function-size": 95
     },
     "internal/runtime/agent/execute_one.go": {
       "essay": 10

@@ -95,7 +95,6 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 		a.task.checkpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
 	}
 	a.captureBaselineChecks()
-	a.startTurnSnapshot(ctx)
 	// Re-lease this session's background-job mutations that no turn has
 	// committed yet. The Reset above just wiped any lease a failed or
 	// cancelled turn held (its ledger is gone), and a process restart starts
@@ -481,10 +480,6 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(hostaudit.ReadinessErrored, false))
 		a.pending.deliveryRecovery = true
 		a.noteObligationsExplained()
-		// The blocked turn is the one whose summary matters most — it is where
-		// a rewritten check or an unverified mutation is still outstanding —
-		// and it was the only turn that never reported one.
-		a.emitTurnShadows(ctx, a.turn.turnInput, true)
 		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs(), Signature: readiness.progressSignature()}
 	}
 	// The turn has earned its stop. What the gate let through on a warn verdict
@@ -502,7 +497,6 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 	if readiness.applies {
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(hostaudit.ReadinessAllowed, a.turn.readinessRecovered))
 	}
-	a.emitTurnShadows(ctx, a.turn.turnInput, false)
 	if !a.closeSteerIntakeIfIdle() {
 		return true, nil
 	}
@@ -538,7 +532,6 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 		return false, boundaryErr
 	}
 
-	state.snapshot.await(ctx, snapshotWait)
 	mark := a.markProgressRound()
 	batch := a.executeBatch(ctx, state, calls)
 	results, images := batch.results, batch.images

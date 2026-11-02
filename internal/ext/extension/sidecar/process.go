@@ -212,7 +212,6 @@ func startProcess(pkg pluginpkg.Package, installed pluginpkg.InstalledPlugin) (*
 	stderr := &tailBuffer{limit: stderrTailBytes}
 	cmd.Stderr = stderr
 
-	unconfinedLaunch.Store(true)
 	job, err := proc.StartTracked(cmd)
 	if err != nil {
 		if notExecutableFormat(err) {

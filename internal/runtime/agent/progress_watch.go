@@ -54,6 +54,15 @@ type progressMark struct {
 	todo     int
 }
 
+// ledgerMark is the receipt count to score a round against, or zero before any
+// ledger exists.
+func (a *Agent) ledgerMark() int {
+	if a.task.ledger == nil {
+		return 0
+	}
+	return a.task.ledger.Len()
+}
+
 func (a *Agent) markProgressRound() progressMark {
 	return progressMark{receipts: a.ledgerMark(), todo: a.task.todoRevs.progress}
 }
@@ -90,7 +99,6 @@ func (a *Agent) settleProgressRound(ctx context.Context, state *turnRuntime, mar
 	if !report.Pausing {
 		return nil
 	}
-	a.emitTurnShadows(ctx, a.turn.turnInput, true)
 	return newNoProgressPause(report)
 }
 

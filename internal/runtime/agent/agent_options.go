@@ -160,10 +160,6 @@ type Options struct {
 	ProjectChecks         []instruction.VerifyCheck
 	ProjectSensitivePaths []string
 
-	// EvidenceSeal seals each turn's shadow evidence bundle into Trusted Host
-	// State. nil seals nothing.
-	EvidenceSeal *EvidenceSeal
-
 	// DeliveryProfile enforces acceptance criteria before mutations and requires
 	// post-change review, verification, and evidence-backed sign-off before a
 	// final answer. It changes host control flow, not tool schemas.

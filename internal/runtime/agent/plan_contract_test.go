@@ -6,7 +6,6 @@ import (
 
 	"reasonix/internal/runtime/plancontract"
 	"reasonix/internal/runtime/taskcontract"
-	"reasonix/internal/safety/evidence"
 )
 
 func contractPlan() plancontract.Plan {
@@ -64,67 +63,5 @@ func TestPlanFactsSeparatesCriteriaByKind(t *testing.T) {
 	// Scope is where work is expected, so an inferred path belongs in it.
 	if !slices.Equal(facts.Touchpoints, []string{"internal/contract/provider/cache.go", "internal/assembly/boot/boot.go"}) {
 		t.Errorf("touchpoints = %v", facts.Touchpoints)
-	}
-}
-
-// The contract's requirements are the plan's acceptance criteria, not a
-// restatement of the step titles the todo list happens to carry.
-func TestShadowContractPrefersPlanCriteriaOverTodoTitles(t *testing.T) {
-	receipts := []evidence.Receipt{
-		{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{
-			{Content: "thread the model ref through", Status: "completed", StepID: "p1"},
-		}},
-	}
-	c := buildShadowContract("fix the cache key", receipts, new(contractPlan()))
-
-	texts := make([]string, 0, len(c.Requirements))
-	for _, req := range c.Requirements {
-		texts = append(texts, req.Text)
-	}
-	if slices.Contains(texts, "thread the model ref through") {
-		t.Fatalf("a todo title became a requirement alongside the plan's criteria: %v", texts)
-	}
-	if !slices.Contains(texts, "two model refs never share an entry") {
-		t.Fatalf("requirements = %v, want the plan's acceptance criteria", texts)
-	}
-	if len(c.Checks) == 0 {
-		t.Fatal("the plan's verification command did not become a check")
-	}
-}
-
-// An optional criterion is recorded but must never hold completion open.
-func TestOptionalCriterionDoesNotBlockCompletion(t *testing.T) {
-	c := taskcontract.FromPlan("o", taskcontract.PlanFacts{
-		AcceptanceCriteria: []taskcontract.PlanCriterion{{Text: "required one"}},
-		Optional:           []taskcontract.PlanCriterion{{Text: "nice to have"}},
-	})
-	for _, req := range c.Requirements {
-		if req.Text == "required one" {
-			c.Resolve(req.ID, taskcontract.Satisfied)
-		}
-		if req.Text == "nice to have" && req.Required {
-			t.Fatal("an optional criterion must not be required")
-		}
-	}
-	if !c.Complete() {
-		t.Fatalf("optional work left the contract incomplete: %s", c.Summary())
-	}
-}
-
-func TestShadowContractFallsBackToTodosWithoutAPlan(t *testing.T) {
-	receipts := []evidence.Receipt{
-		{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{
-			{Content: "fix add()", Status: "completed"},
-		}},
-	}
-	c := buildShadowContract("fix the add bug", receipts, nil)
-	found := false
-	for _, req := range c.Requirements {
-		if req.Text == "fix add()" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("without a plan the todo list must still stand in as the requirement set")
 	}
 }

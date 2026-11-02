@@ -886,9 +886,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 
 	_, state := a.beginRunTurn(ctx, input)
 	ctx = a.bindRootTokenBudget(ctx, state)
-	if state.snapshot != nil {
-		defer state.snapshot.cancel()
-	}
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
 	state.runLimitHostOwned = runLimitHostOwned

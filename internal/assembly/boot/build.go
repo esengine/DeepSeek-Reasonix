@@ -537,7 +537,6 @@ func (b *builder) executor() *agent.Agent {
 		WriteScheduler:     t.sub.scheduler,
 		WriteWorkspaceRoot: b.root, ExtraWorkspaceRoots: b.workspaceExtraRoots(), WorkspaceScanLimit: b.opts.WorkspaceScanLimit, WorkspaceVCS: b.prompt.workspaceVCS, WorkspaceUnversioned: b.prompt.workspaceVCS == "", RenderRoot: renderRoot(t.browser, entry, b.root),
 		ProjectChecks: b.prompt.projectChecks, ProjectSensitivePaths: b.prompt.sensitivePaths,
-		EvidenceSeal:      t.env.evidenceSeal,
 		AgentPreset:       b.model.preset,
 		DeliveryProfile:   b.model.delivery,
 		WaiveOwedChecks:   cfg.WaivesOwedChecks(b.model.delivery) && !b.opts.HoldOwedChecks,

@@ -94,9 +94,6 @@ type agentServices struct {
 	// just-made memory change into the next turn, so it applies this session
 	// without touching the cache-stable prefix.
 	memQueue memory.Queue
-	// evidenceSeal is where the turn's shadow evidence bundle is sealed; nil
-	// seals nothing. Only the root agent's options carry it.
-	evidenceSeal *EvidenceSeal
 	// pathObserver is told which workspace files this agent's completed tool
 	// calls touched. Sub-agents have none: their reads are not the session's.
 	pathObserver PathObserver
@@ -130,6 +127,5 @@ func newAgentServices(
 		writeScheduler:    opts.WriteScheduler,
 		workspaceLease:    opts.WorkspaceLease,
 		mutationObserver:  opts.MutationObserver,
-		evidenceSeal:      opts.EvidenceSeal,
 	}
 }

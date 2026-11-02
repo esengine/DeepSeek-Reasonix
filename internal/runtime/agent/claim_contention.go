@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"reasonix/internal/runtime/completion"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/workspacelease"
 )
@@ -112,17 +111,4 @@ func claimContendedText(c workspacelease.Contention) string {
 	}
 	b.WriteString(". Files there may have changed since this session last read or wrote them; read them again before editing or relying on an earlier read.")
 	return b.String()
-}
-
-// takeClaimYieldGaps hands the receipt every contended yield since the last one.
-func (a *Agent) takeClaimYieldGaps() []completion.Gap {
-	a.sess.claimYields.mu.Lock()
-	pending := a.sess.claimYields.pending
-	a.sess.claimYields.pending = nil
-	a.sess.claimYields.mu.Unlock()
-	gaps := make([]completion.Gap, 0, len(pending))
-	for _, names := range pending {
-		gaps = append(gaps, completion.Gap{Kind: completion.GapWorkspaceClaimYielded, Detail: names})
-	}
-	return gaps
 }
