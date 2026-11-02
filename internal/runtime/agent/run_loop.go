@@ -7,7 +7,6 @@ import (
 	"math/rand/v2"
 	"reasonix/internal/contract/hostaudit"
 	"reasonix/internal/state/sessionstore"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -620,19 +619,13 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 	// is reported here, where it is still the outcome of this turn.
 	a.reportReviewWarnings()
 	if !hasVisibleFinalAnswer(text) {
-		// A DeepSeek reasoning-only stop is honoured: retrying it forces another
-		// thinking round after the task is done. Tool results with no visible
-		// synthesis after them are the exception and get exactly one retry.
-		owedSynthesis := state.usedAnyTool && state.emptyFinalBlocks == 0 && silentSinceLastToolRound(a.sess.conversation.Messages)
-		if a.role.requireVisibleFinal || owedSynthesis || !reasoningOnlyFinishHonoured(a.svc.prov, usage, reasoning) {
-			state.emptyFinalBlocks++
-			if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
-				return false, &EmptyFinalError{Blocks: state.emptyFinalBlocks, FinishReason: finishReasonOf(usage)}
-			}
-			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage(usage)), HostAuthored: true})
-			return true, nil
+		state.emptyFinalBlocks++
+		if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
+			return false, &EmptyFinalError{Blocks: state.emptyFinalBlocks, FinishReason: finishReasonOf(usage)}
 		}
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
+		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage(usage)), HostAuthored: true})
+		return true, nil
 	}
 	if readiness.applies {
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(hostaudit.ReadinessAllowed, a.turn.readinessRecovered))
@@ -645,25 +638,6 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 	// carries into the next turn un-folded and can overflow the model window.
 	// No-op below the trigger, so normal turns keep their warm cache.
 	return false, nil // model gave a final answer
-}
-
-// silentSinceLastToolRound reports whether the transcript holds a tool result
-// with no visible assistant text after it.
-func silentSinceLastToolRound(messages []provider.Message) bool {
-	for _, message := range slices.Backward(messages) {
-		if message.LocalOnly {
-			continue
-		}
-		switch message.Role {
-		case provider.RoleTool:
-			return true
-		case provider.RoleAssistant:
-			if hasVisibleFinalAnswer(message.Content) {
-				return false
-			}
-		}
-	}
-	return false
 }
 
 // handleToolRound executes a tool batch, persists tool messages, handles
