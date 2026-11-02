@@ -75,6 +75,8 @@ import { ChangedFilesPill } from "./ChangedFilesPill";
 import { RootMissingBanner } from "./RootMissingBanner";
 import { useConversationFiles } from "./useConversationFiles";
 import { NewAnswerAnchor } from "./NewAnswerLine";
+import { AgentHero } from "./team/AgentHero";
+import { TeamSpeaker } from "./team/TeamSpeaker";
 import { useFrozenNewAnswerAnchor } from "./newAnswerMark";
 import { onNewAnswerMarkerChange, sessionKey, showsNewAnswerMarker, useUnreadSince } from "../state/newAnswers";
 
@@ -506,6 +508,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
+      <TeamSpeaker seat={rt.team}>
       <Transcript port={port} historyPaging={historyPaging}
         scope={rt.sessionPath}
         onSettings={onSettings}
@@ -538,9 +541,11 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         onPrepareFileRevert={onPrepareFileRevert}
         onCommitFileRevert={onCommitFileRevert}
         needsProject={needsProject}
+        hero={rt.team && <AgentHero port={port} seat={rt.team} model={status?.modelRef} onModel={refreshStatus} onStarter={(text) => setInserted((was) => ({ n: was.n + 1, text }))} />}
         onOpenProject={onOpenProject}
         onKeepHere={onKeepHere}
       />
+      </TeamSpeaker>
       </NewAnswerAnchor.Provider>
       </LiveWork.Provider>
       </PaneShown.Provider>

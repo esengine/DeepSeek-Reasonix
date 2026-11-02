@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WireEvent } from "../port/wire";
 import { nameTurnStart, othersSteer } from "./turn_start";
 import type { SessionState } from "./session_types";
+import { initialState, reduce } from "./session";
 
 const started = (text: string, msgIndex: number, via?: { device: string; ordinal: number }) =>
   ({ kind: "turn_started", text, authoredTurn: msgIndex, msgIndex, via }) as WireEvent;
@@ -44,5 +45,28 @@ describe("guidance another client said into the running turn", () => {
   it("is drawn once per item", () => {
     const once = othersSteer([], steer({ itemId: "i1" }));
     expect(othersSteer(once, steer({ itemId: "i1" }))).toHaveLength(1);
+  });
+});
+
+describe("a turn the host ran for another agent or a group", () => {
+  const handed = (msgIndex: number) =>
+    ({ kind: "turn_started", text: "<agent-message from=\"Ada\">\ndraft it\n</agent-message>", msgIndex, origin: { kind: "message", agent: "a-1", exchange: "x-1" } }) as WireEvent;
+
+  it("is drawn as the row a reload draws, not as the person's words", () => {
+    const s = nameTurnStart(empty(), handed(4));
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0]).toMatchObject({ t: "origin", msgIndex: 4, origin: { kind: "message", agent: "a-1" }, text: expect.stringContaining("draft it") });
+  });
+
+  it("is drawn once, not again over the row a rebuild already holds", () => {
+    const held = [{ t: "origin", id: "o", origin: { kind: "message", agent: "a-1" }, text: "x", msgIndex: 4 }] as SessionState["items"];
+    expect(nameTurnStart(empty(held), handed(4)).items).toHaveLength(1);
+  });
+
+  it("reaches the transcript through the reducer while the turn opens", () => {
+    const s = reduce(initialState, handed(2));
+    expect(s.running).toBe(true);
+    expect(s.items.filter((i) => i.t === "origin")).toHaveLength(1);
+    expect(s.items.some((i) => i.t === "user")).toBe(false);
   });
 });

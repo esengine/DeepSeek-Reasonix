@@ -58,6 +58,8 @@ type Event struct {
 	// turn_started / steer: the sending device (absent is the window); the message rides text.
 	Via         *Via         `json:"via,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"` // turn_started / steer
+	// turn_started: the agent or group the host ran this turn for.
+	Origin *Origin `json:"origin,omitempty"`
 	// steer: the host wrote this guidance, not the person.
 	HostAuthored bool `json:"hostAuthored,omitempty"`
 	// Which model wrote this. None means the turn's own, which a client
@@ -195,6 +197,7 @@ func ToWire(e event.Event) Event {
 		w.AuthoredTurn = e.AuthoredTurn
 		w.MsgIndex = e.MsgIndex
 		w.Via = ToWireVia(e.Via)
+		w.Origin = ToWireOrigin(e.Origin)
 	case event.Steer:
 		w.Via = ToWireVia(e.Via)
 		w.HostAuthored = e.HostAuthored
@@ -314,6 +317,22 @@ func ToWireVia(in *provider.Via) *Via {
 		return nil
 	}
 	return &Via{Device: in.Device, Ordinal: in.Ordinal}
+}
+
+// Origin names who a host-run turn was for, when it was not the user.
+type Origin struct {
+	Kind     string `json:"kind"`
+	Agent    string `json:"agent,omitempty"`
+	Exchange string `json:"exchange,omitempty"`
+	Group    string `json:"group,omitempty"`
+}
+
+// ToWireOrigin converts a turn's origin; nil stays nil, the user's own.
+func ToWireOrigin(in *provider.Origin) *Origin {
+	if in == nil {
+		return nil
+	}
+	return &Origin{Kind: in.Kind, Agent: in.Agent, Exchange: in.Exchange, Group: in.Group}
 }
 
 type FinalReadiness struct {

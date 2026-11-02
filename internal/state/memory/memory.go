@@ -43,6 +43,10 @@ type Options struct {
 	PinnedBudgetChars int
 	RecallLimit       int
 	RecallMaxChars    int
+	// FactsDir, when set, holds the project-scope facts in place of the
+	// working directory's: an agent on the user's team keeps one memory across
+	// every folder and group it works in.
+	FactsDir string
 }
 
 // Load discovers all memory for a session: the hierarchical docs and the
@@ -62,6 +66,9 @@ func Load(opts Options) *Set {
 			InstructionDiagnostics: resolved.Diagnostics, opts: opts}
 	}
 	store := StoreFor(opts.UserDir, cwd)
+	if opts.FactsDir != "" && store.Dir != "" {
+		store.Dir = opts.FactsDir
+	}
 	store.PinnedBudgetChars = opts.PinnedBudgetChars
 	pinned, storeErr := store.pinnedGuidanceForProject()
 	var recall *RecallIndex

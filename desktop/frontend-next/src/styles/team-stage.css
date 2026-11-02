@@ -1,0 +1,90 @@
+.team-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+}
+.team-stage-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--hair); }
+.team-stage-head button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.team-stage-head button svg { width: 16px; height: 16px; }
+.team-stage-head button:hover { background: var(--press-wash); color: var(--text); }
+.team-stage-title { flex: 1; min-width: 0; }
+.team-stage-title h2 { margin: 0; overflow: hidden; font-size: var(--fs-title); font-weight: var(--w-semi); white-space: nowrap; text-overflow: ellipsis; }
+.team-stage-title p { margin: 2px 0 0; overflow: hidden; color: var(--muted); font-size: var(--fs-meta); white-space: nowrap; text-overflow: ellipsis; }
+.team-stage-log { display: flex; flex: 1; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; padding: 16px 24px; }
+.team-line { display: flex; align-items: flex-start; gap: 10px; max-width: 760px; }
+.team-line[data-from="user"] { align-self: flex-end; flex-direction: row-reverse; }
+.team-line-body { min-width: 0; padding: 8px 12px; border-radius: var(--r-lg); background: var(--raised); }
+.team-line[data-from="user"] .team-line-body { background: var(--sunk); }
+.team-line-body header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--fs-meta); }
+.team-line-body p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.team-line-to { color: var(--muted); }
+.team-line-tag { padding: 0 6px; border-radius: var(--r-pill); background: var(--deleg-wash); color: var(--muted); }
+.team-event { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: var(--fs-meta); }
+.team-event[data-event="failed"],
+.team-event[data-event="cut"] { color: var(--err-ink); }
+.team-event[data-event="paused"] { color: var(--warn-ink); }
+.team-event button,
+.team-dock button {
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.team-dock { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 24px; border-top: 1px solid var(--hair); color: var(--muted); font-size: var(--fs-meta); }
+.team-dock-item { display: inline-flex; align-items: center; gap: 6px; }
+.team-dock-item button { display: grid; place-items: center; width: 24px; padding: 0; }
+.team-dock-item button svg { width: 12px; height: 12px; }
+.team-dock .team-dock-ask { border-color: var(--accent); color: var(--accent-ink); }
+.team-compose { position: relative; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 12px 24px 16px; border-top: 1px solid var(--hair); }
+.team-compose textarea {
+  flex: 1;
+  min-height: 44px;
+  max-height: 200px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.team-chips { display: flex; flex-basis: 100%; flex-wrap: wrap; gap: 6px; }
+.team-chips button { padding: 2px 8px; border: 1px solid var(--hair); border-radius: var(--r-pill); background: var(--deleg-wash); color: var(--text); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.team-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 24px;
+  z-index: 3;
+  min-width: 180px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  list-style: none;
+}
+.team-picker button { display: block; width: 100%; padding: 6px 10px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.team-picker button:hover,
+.team-picker button:focus-visible { background: var(--press-wash); }
