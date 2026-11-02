@@ -63,6 +63,10 @@ const endpointOf = (n, path) => endpointsOf(n, path)[0] ?? null;
 // against the tree it belongs to — an entry that excuses nothing fails.
 const DECLARED_NON_MUTATION = {
   src: {
+    "POST /providers/health": { class: "repeatable-external-probe", why:
+      "control.ProviderHealth reads the saved connection and calls providerhealth.Checker, which " +
+      "fetches model listings and configured wallets with GET requests. Only an in-memory TTL " +
+      "cache changes; no configuration, session or model selection is written. External network effect: yes." },
     "POST /providers/probe": { class: "repeatable-external-probe", why:
       "config.ProbeEndpoint asks the endpoint what models it has and the answer is written back to the " +
       "caller; no canonical host state is written. External network effect: yes — this set decides " +

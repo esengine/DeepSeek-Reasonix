@@ -100,6 +100,7 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Feature | Status | Studio location |
 | --- | --- | --- |
 | Per-model display aliases | Have | Model service settings and chat picker; [configuration and scope](MODEL_DISPLAY_ALIASES.md); #11774 |
+| Model connection health | Have | Opt-in status chips in the existing grouped picker; [scope and limits](MODEL_CONNECTION_HEALTH.md). 默认关闭，保留账户分组与接口域名。 |
 | Icon rail with three display modes | Have | #12377, #12428; sidebar footer entries appear only when icon navigation is hidden (#12478) |
 | Usage, feedback, account and settings footer / 用量、反馈、账号与设置底部入口 | Have differently | `ui/Nav.tsx` when navigation is visible; `ui/Sidebar.tsx` otherwise, including the narrow-window drawer. 导航可见时使用图标栏入口，隐藏时保留侧栏入口 (#12478) |
 | Completed-unread marker on sessions | Have | #12218 |

@@ -270,6 +270,8 @@ var mirroredWireTypesHead = []wireMirror{
 	{"internal/frontend/serve/providers.go", "protocolView", tsProviderFile, "Protocol"},
 	{"internal/frontend/serve/provider_presets.go", "providerPresetView", tsProviderFile, "ProviderPreset"},
 	{"internal/frontend/serve/provider_check.go", "providerCheck", tsProviderFile, "ProviderCheck"},
+	{"internal/model/providerhealth/check.go", "Reading", tsProviderFile, "ProviderHealth"},
+	{"internal/session/control/provider_health.go", "ProviderHealthSettings", tsProviderFile, "ProviderHealthSettings"},
 	{"internal/frontend/serve/providers.go", "providerRemovalView", tsProviderFile, "ProviderRemoval"},
 	{"internal/frontend/serve/provider_check.go", "providerModelCheck", tsProviderFile, "ProviderModelCheck"},
 	{"internal/frontend/serve/settings.go", "modelEntry", tsModelFile, "ModelEntry"},
