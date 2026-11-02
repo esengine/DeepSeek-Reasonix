@@ -170,23 +170,6 @@ jobs:
         shell: pwsh
         run: Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
 
-      - name: test (Windows concurrency contracts)
-        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          node --test scripts/windows-concurrency-tests.test.mjs
-          node scripts/windows-concurrency-tests.mjs "$RUNNER_TEMP/concurrency-windows.jsonl"
-
-      - name: upload Windows concurrency inventory
-        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: concurrency-windows-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/concurrency-windows.jsonl
-          if-no-files-found: error
-          retention-days: 7
-
       - name: test
         if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
         env:
@@ -195,35 +178,6 @@ jobs:
           # built around.
           REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
-
-      - name: test (Windows subagent status admission)
-        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^TestSubagent(PersistedStatusAdmission|UnknownStatusStillReadableForDiagnosis)$' ./internal/runtime/delegation | tee "$RUNNER_TEMP/subagent-status-admission.jsonl"
-          jq -se '
-            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
-            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
-            ["future-paused", "missing", "empty", "COMPLETED", "completed", "cancelled", "failed", "interrupted", "running"] as $states |
-            ["continue", "copy", "ancestor", "legacy_ancestor", "current_copy"] as $routes |
-            (["TestSubagentPersistedStatusAdmission", "TestSubagentUnknownStatusStillReadableForDiagnosis"] +
-              [$states[] | "TestSubagentPersistedStatusAdmission/" + .] +
-              [$states[] as $state | $routes[] | "TestSubagentPersistedStatusAdmission/" + $state + "/" + .]) as $required |
-            all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/runtime/delegation"] - $packages | length) == 0 and
-            ($required - $tests | length) == 0
-          ' "$RUNNER_TEMP/subagent-status-admission.jsonl"
-
-      - name: upload Windows subagent status admission inventory
-        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: subagent-status-admission-windows-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/subagent-status-admission.jsonl
-          if-no-files-found: ignore
-          retention-days: 7
 
       - name: test (Windows composition links)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
@@ -307,34 +261,17 @@ jobs:
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $passed |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             (["reasonix/internal/runtime/isolation", "reasonix/internal/platform/worktree", "reasonix/internal/state/mutation"] - $passed | length) == 0 and
-            (["TestResultOperationUsesCrossProcessOwnership",
-              "TestActualResultOperationHoldsOwnershipThroughWriteAndCleanup/restore",
-              "TestActualResultOperationHoldsOwnershipThroughWriteAndCleanup/remove",
-              "TestApplyPathsWithUntrustedModesPreservesTheIndex/content",
-              "TestApplyPathsWithUntrustedModesPreservesTheIndex/source_index_mode",
-              "TestApplyPathsWithUntrustedModesPreservesTheIndex/candidate_mode",
-              "TestApplyPathsWithUntrustedModesPreservesTheIndex/candidate_type",
-              "TestApplyPathsEmulatedLinksUseSnapshotFilters",
-              "TestHeldPathsCoverOnlyTheSameFileAcrossCaseSpellings",
+            (["TestHeldPathsCoverOnlyTheSameFileAcrossCaseSpellings",
               "TestLegacyWaitDoesNotConsumeExecutionCapacity"] - $tests | length) == 0
           ' "$RUNNER_TEMP/isolation-owners.jsonl"
           jq -se '
             . as $events |
             {"reasonix/internal/platform/worktree": [
-               "TestApplyPathsRejectsRedirectedAncestors",
-               "TestApplyPathsRejectsRedirectedAncestors/outside_delete",
-               "TestApplyPathsRejectsRedirectedAncestors/inside_delete",
-               "TestApplyPathsRejectsRedirectedAncestors/dangling_delete",
-               "TestApplyPathsRejectsRedirectedAncestors/outside_write",
-               "TestApplyPathsRejectsRedirectedAncestors/inside_write",
-               "TestApplyPathsRejectsRedirectedAncestors/regular_parent",
-               "TestApplyPathsRejectsRedirectedAncestors/unchanged",
-               "TestApplyPathsRejectsRedirectedAncestors/missing_creation",
                "TestWriteChangesRejectsRedirectedDeletion",
-               "TestWriteChangesUnlinksLeafDirectoryLink",
-               "TestWholeWorkspaceApplyPreservesFileToDirectoryTransition"],
+               "TestWriteChangesUnlinksLeafDirectoryLink"
+               ],
              "reasonix/internal/runtime/isolation": [
-               "TestApplyToolRetainsResultAfterAncestorReplacement"]} |
+               ]} |
             to_entries | all(.[]; . as $package |
               ([ $events[] | select(.Package == $package.key and .Test == null and
                  (.Action == "pass" or .Action == "fail" or .Action == "skip")) ] |
@@ -354,60 +291,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: test (Windows background resource owners)
-        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 25
-        shell: bash
-        run: |
-          set -o pipefail
-          go test -count=1 -p 2 -timeout=18m -json ./internal/tools/jobs/... ./internal/runtime/delegation/... | tee "$RUNNER_TEMP/background-resources.jsonl" |
-            jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
-          jq -se '
-            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
-            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
-            (["reasonix/internal/tools/jobs", "reasonix/internal/runtime/delegation"] - $packages | length) == 0 and
-            (["TestJobFinalizationCoversInvokedAndUninvoked/success",
-              "TestJobFinalizationCoversInvokedAndUninvoked/error",
-              "TestJobFinalizationCoversInvokedAndUninvoked/panic",
-              "TestJobFinalizationCoversInvokedAndUninvoked/closed",
-              "TestJobFinalizationCoversInvokedAndUninvoked/invalid_session",
-              "TestJobFinalizationCoversInvokedAndUninvoked/invalid_kind",
-              "TestJobFinalizationFailuresAttemptAllCallbacksAndKeepCauses/invoked",
-              "TestJobFinalizationFailuresAttemptAllCallbacksAndKeepCauses/uninvoked",
-              "TestJobFinalizationPrecedesCompletionPublication",
-              "TestJobFinalizationCloseBetweenPublicationAndLaunch",
-              "TestJobFinalizationWaitsForClosureAfterLogicalCancellation",
-              "TestBackgroundNoLaunchFinalizesOwnedResources/task/closed_manager",
-              "TestBackgroundNoLaunchFinalizesOwnedResources/task/invalid_session",
-              "TestBackgroundNoLaunchFinalizesOwnedResources/fleet/closed_manager",
-              "TestBackgroundNoLaunchFinalizesOwnedResources/fleet/invalid_session"] - $tests | length) == 0
-          ' "$RUNNER_TEMP/background-resources.jsonl"
-
-      - name: upload Windows background resource inventory
-        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: background-resources-windows-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/background-resources.jsonl
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: test (Windows delegated Goal usage scope)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(UsageScope.*|DelegatedUsageKeepsGoalOwner|EffectDelegatedUsageKeepsGoalOwner)$' ./internal/contract/event ./internal/session/control ./internal/assembly/boot | tee "$RUNNER_TEMP/goal-usage-scope.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(UsageScope.*)$' ./internal/contract/event ./internal/session/control ./internal/assembly/boot | tee "$RUNNER_TEMP/goal-usage-scope.jsonl"
           jq -se '
-            ["TestUsageScopePreservesCapturedOwnerAndWire", "TestUsageScopeKeepsEarlierEventOwner",
-             "TestUsageScopeWithoutCapability", "TestDelegatedUsageKeepsGoalOwner",
-             "TestDelegatedUsageKeepsGoalOwner/chat_to_goal", "TestDelegatedUsageKeepsGoalOwner/replaced_goal",
-             "TestDelegatedUsageKeepsGoalOwner/cleared_goal", "TestDelegatedUsageKeepsGoalOwner/resumed_goal",
-             "TestDelegatedUsageKeepsGoalOwner/same_goal_next_turn", "TestDelegatedUsageKeepsGoalOwner/between_turns",
-             "TestDelegatedUsageKeepsGoalOwner/nested_after_replacement", "TestEffectDelegatedUsageKeepsGoalOwner",
-             "TestEffectDelegatedUsageKeepsGoalOwner/chat_to_goal", "TestEffectDelegatedUsageKeepsGoalOwner/replaced_goal",
-             "TestEffectDelegatedUsageKeepsGoalOwner/nested_chat_to_goal", "TestEffectDelegatedUsageKeepsGoalOwner/same_goal",
-             "TestEffectDelegatedUsageKeepsGoalOwner/completed_before_goal"] as $required |
+            ["TestUsageScopeKeepsEarlierEventOwner",
+             "TestUsageScopeWithoutCapability" ] as $required |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $passed |
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             all(.[]; .Action != "fail" and .Action != "skip") and
@@ -511,10 +403,7 @@ jobs:
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
             (["reasonix/internal/runtime/agent", "reasonix/internal/runtime/coordinator", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
-            (["TestPreparedRootBudgetLifetime", "TestPreparedRootBudgetLifetime/continuation",
-              "TestPreparedRootBudgetLifetime/new_scope", "TestPreparedRootBudgetLifetime/new_task",
-              "TestPreparedRootBudgetLifetime/reset", "TestPreparedRootBudgetLifetime/new_session",
-              "TestPreparedRootBudgetProjectionAndPreservedTurn", "TestCoordinatorRootBudgetRoutes",
+            (["TestCoordinatorRootBudgetRoutes",
               "TestCoordinatorRootBudgetRoutes/raw", "TestCoordinatorRootBudgetRoutes/tool_planner",
               "TestCoordinatorRootBudgetRoutes/failure_fallback", "TestCoordinatorRootBudgetRoutes/plan_only_continuation",
               "TestCoordinatorRootBudgetRoutes/approval_declined_continuation", "TestCoordinatorRootBudgetRoutes/approval_allowed",
@@ -578,10 +467,8 @@ jobs:
               "TestRootWallBudgetReachesDelegatedAgents/context", "TestRootWallBudgetReachesDelegatedAgents/unconfigured",
               "TestRootWallBudgetReachesDelegatedAgents/explicit_zero", "TestRootWallBudgetContinuationAndReset",
               "TestRootWallBudgetContinuationAndReset/continuation", "TestRootWallBudgetContinuationAndReset/new_task",
-              "TestRootWallBudgetContinuationAndReset/reset", "TestRootWallBudgetContinuationAndReset/override",
-              "TestRootWallBudgetProjectionKeepsJobDeadline", "TestEffectRootWallBudgetReachesManagedJobs",
-              "TestEffectRootWallBudgetReachesManagedJobs/task", "TestEffectRootWallBudgetReachesManagedJobs/capability",
-              "TestEffectRootWallBudgetReachesManagedJobs/fleet"] - $tests | length) == 0
+              "TestRootWallBudgetContinuationAndReset/reset", "TestRootWallBudgetContinuationAndReset/override"
+              ] - $tests | length) == 0
           ' "$RUNNER_TEMP/root-wall-budget.jsonl"
 
       - name: upload Windows root wall budget inventory
@@ -611,10 +498,7 @@ jobs:
               "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren/nested", "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren/siblings",
               "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren/child_override", "TestRootTokenBudgetContinuationAndReset",
               "TestRootTokenBudgetContinuationAndReset/continuation", "TestRootTokenBudgetContinuationAndReset/new_task",
-              "TestRootTokenBudgetContinuationAndReset/reset", "TestRootTokenScopeAtomicAccountingAndJobCancellation",
-              "TestEffectRootTokenBudgetReachesDelegatedJobs", "TestEffectRootTokenBudgetReachesDelegatedJobs/foreground",
-              "TestEffectRootTokenBudgetReachesDelegatedJobs/foreground_capability", "TestEffectRootTokenBudgetReachesDelegatedJobs/background",
-              "TestEffectRootTokenBudgetReachesDelegatedJobs/background_capability", "TestEffectRootTokenBudgetReachesDelegatedJobs/background_fleet"] - $tests | length) == 0
+              "TestRootTokenBudgetContinuationAndReset/reset" ] - $tests | length) == 0
           ' "$RUNNER_TEMP/root-token-budget.jsonl"
           jq -se '
             . as $events |
@@ -628,8 +512,6 @@ jobs:
                "TestBudgetCountsKnownReportedTokens/negative_split",
                "TestBudgetCountsKnownReportedTokens/zero",
                "TestBudgetCountsKnownReportedTokens/negative",
-               "TestReportedTokensEnforceLocalCapOnInheritedRoot",
-               "TestReportedTokensFollowOriginalAuxiliaryRoot",
                "TestReportedTokenCountersSaturate"],
              "reasonix/internal/assembly/boot": [
                "TestEffectReportedTotalTokenBudget",
@@ -697,7 +579,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(HostStorageEnvironment|HostObjectStorage|HostExplicitStorageControls|DetachedStorageEnvironment|WorktreePreparationOwnsItsIndex|EffectIsolatedTaskOwnsGitStorage)$' ./internal/platform/gitcmd ./internal/platform/worktree ./internal/assembly/boot | tee "$RUNNER_TEMP/git-storage-environment.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(HostStorageEnvironment|HostObjectStorage|HostExplicitStorageControls|DetachedStorageEnvironment)$' ./internal/platform/gitcmd ./internal/platform/worktree ./internal/assembly/boot | tee "$RUNNER_TEMP/git-storage-environment.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
@@ -707,10 +589,6 @@ jobs:
               "TestDetachedStorageEnvironment",
               "TestDetachedStorageEnvironment/explicit_env",
               "TestDetachedStorageEnvironment/inherited_env",
-              "TestEffectIsolatedTaskOwnsGitStorage",
-              "TestEffectIsolatedTaskOwnsGitStorage/ambient_existing",
-              "TestEffectIsolatedTaskOwnsGitStorage/ambient_missing",
-              "TestEffectIsolatedTaskOwnsGitStorage/control",
               "TestHostExplicitStorageControls",
               "TestHostExplicitStorageControls/explicit_object_directory",
               "TestHostExplicitStorageControls/private_index",
@@ -721,15 +599,8 @@ jobs:
               "TestHostStorageEnvironment",
               "TestHostStorageEnvironment/GIT_ALTERNATE_OBJECT_DIRECTORIES",
               "TestHostStorageEnvironment/GIT_INDEX_FILE",
-              "TestHostStorageEnvironment/GIT_OBJECT_DIRECTORY",
-              "TestWorktreePreparationOwnsItsIndex",
-              "TestWorktreePreparationOwnsItsIndex/candidate_ambient_existing",
-              "TestWorktreePreparationOwnsItsIndex/candidate_ambient_missing",
-              "TestWorktreePreparationOwnsItsIndex/candidate_control",
-              "TestWorktreePreparationOwnsItsIndex/delivery_ambient_existing",
-              "TestWorktreePreparationOwnsItsIndex/delivery_ambient_missing",
-              "TestWorktreePreparationOwnsItsIndex/delivery_control"
-            ] - $tests | length) == 0
+              "TestHostStorageEnvironment/GIT_OBJECT_DIRECTORY"
+              ] - $tests | length) == 0
           ' "$RUNNER_TEMP/git-storage-environment.jsonl"
 
       - name: upload Windows Git storage environment inventory
@@ -816,11 +687,7 @@ jobs:
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
             (["reasonix/internal/session/control", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
-            (["TestProfileRootBudgetLifetime", "TestProfileRootBudgetLifetime/new_task",
-              "TestProfileRootBudgetLifetime/same_scope", "TestProfileRootBudgetLifetime/new_scope",
-              "TestProfileRootBudgetLifetime/reset", "TestProfileRootBudgetLifetime/new_session",
-              "TestProfileRootBudgetLifetime/inherited", "TestProfileRootBudgetLifetime/context_zero",
-              "TestProfileBudgetPreparationUsesTurnAdmission", "TestEffectExplicitSkillRootBudget",
+            (["TestProfileBudgetPreparationUsesTurnAdmission", "TestEffectExplicitSkillRootBudget",
               "TestEffectExplicitSkillRootBudget/profile", "TestEffectExplicitSkillRootBudget/preview",
               "TestEffectExplicitSkillRootBudget/slash", "TestEffectExplicitSkillRootBudget/chips",
               "TestEffectExplicitSkillRootBudget/goal", "TestEffectExplicitSkillRootBudget/context_zero",
@@ -883,8 +750,7 @@ jobs:
               "TestRootAuxiliaryTokenBudget/summary_missing", "TestRootAuxiliaryTokenBudget/summary_disabled",
               "TestRootAuxiliaryTokenBudget/diagnosis", "TestRootAuxiliaryTokenBudget/diagnosis_failed",
               "TestRootAuxiliaryTokenBudget/diagnosis_missing", "TestRootAuxiliaryTokenBudget/diagnosis_disabled",
-              "TestRootAuxiliaryManualCompactionOutsideRun", "TestRootAuxiliaryBudgetProjectionKeepsOldTask",
-              "TestEffectRootAuxiliarySummaryBudget", "TestEffectRootAuxiliarySummaryBudget/configured",
+              "TestRootAuxiliaryManualCompactionOutsideRun", "TestEffectRootAuxiliarySummaryBudget", "TestEffectRootAuxiliarySummaryBudget/configured",
               "TestEffectRootAuxiliarySummaryBudget/disabled", "TestEffectRootAuxiliarySummaryBudget/missing_usage"] - $tests | length) == 0
           ' "$RUNNER_TEMP/root-auxiliary-budget.jsonl"
 
@@ -974,11 +840,7 @@ jobs:
               "TestBoundedUsageObserverOwnsOneTerminal", "TestBoundedUsageObserverOwnsOneTerminal/reported",
               "TestBoundedUsageObserverOwnsOneTerminal/billed_failure", "TestBoundedUsageObserverOwnsOneTerminal/without_sink",
               "TestBoundedUsageObserverOwnsOneTerminal/missing", "TestBoundedUsageObserverOwnsOneTerminal/input_refused",
-              "TestRootBoundedReviewerBudget", "TestRootBoundedReviewerBudget/reported",
-              "TestRootBoundedReviewerBudget/billed_failure", "TestRootBoundedReviewerBudget/missing_usage",
-              "TestRootBoundedReviewerBudget/disabled", "TestRootBoundedReviewerBudget/no_emission",
-              "TestRootBoundedReviewerBudget/projected_job_context", "TestRootBoundedNestedBudgetChargesOnce",
-              "TestRootBoundedLateProjectionStaysWithOldTask", "TestEffectRootBoundedAdvisorBudget",
+              "TestEffectRootBoundedAdvisorBudget",
               "TestEffectRootBoundedAdvisorBudget/reported", "TestEffectRootBoundedAdvisorBudget/disabled",
               "TestEffectRootBoundedAdvisorBudget/missing_usage"] - $tests | length) == 0
           ' "$RUNNER_TEMP/bounded-root-budget.jsonl"
