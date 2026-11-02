@@ -1,0 +1,7 @@
+# Logins allowed to open pull requests, one per line, matched case-insensitively.
+# Repository owners, members and collaborators, and bots, are always allowed.
+lancy69
+chuiwenwei
+xxoingr
+kevin9327
+imcreazy
