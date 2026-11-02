@@ -93,7 +93,6 @@ func TestNeedsApprovalOnlyOnExpansion(t *testing.T) {
 		"a new step":      func(p *Plan) { p.Steps = append(p.Steps, Step{ID: "s4", Title: "extra"}) },
 		"a new objective": func(p *Plan) { p.Objective = "something else entirely" },
 		"a new risk":      func(p *Plan) { p.Steps[0].Risks = []string{"data loss"} },
-		"a new criterion": func(p *Plan) { p.Steps[0].Acceptance = []Criterion{{Text: "must hold"}} },
 		"a wider surface": func(p *Plan) { p.Steps[1].CandidateFiles = []string{"api.go", "schema.go"} },
 	}
 	for name, mutate := range expansions {

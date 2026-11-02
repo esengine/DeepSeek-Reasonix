@@ -19,7 +19,7 @@ import (
 	"reasonix/internal/state/sessionstore"
 )
 
-var observeCeilingTools = []string{"ask", "code_index", "conclude_blocked", "glob", "grep", "ls", "read_file"}
+var observeCeilingTools = []string{"ask", "code_index", "glob", "grep", "ls", "read_file"}
 
 func TestScheduleExecWithoutASupervisorRefuses(t *testing.T) {
 	isolateCLIConfigHome(t)

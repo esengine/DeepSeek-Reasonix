@@ -227,7 +227,7 @@ func TestHeadlessRefusalDoesNotBlameAUser(t *testing.T) {
 	if strings.Contains(reason, "the user declined") {
 		t.Errorf("refusal blames a user who was never asked: %q", reason)
 	}
-	for _, want := range []string{"no interactive approver", "conclude_blocked"} {
+	for _, want := range []string{"no interactive approver", "what was refused"} {
 		if !strings.Contains(reason, want) {
 			t.Errorf("reason = %q, missing %q", reason, want)
 		}

@@ -12,7 +12,7 @@
     "doc-owner": 27,
     "doc-prose": 2128,
     "error-text": 9,
-    "essay": 2579,
+    "essay": 2576,
     "file-size": 18416,
     "flat-view": 0,
     "frontend-parity": 13,
@@ -1164,10 +1164,7 @@
     },
     "internal/safety/evidence/verification_command.go": {
       "complexity": 6,
-      "essay": 18
-    },
-    "internal/safety/evidence/verification_summary_test.go": {
-      "essay": 1
+      "essay": 17
     },
     "internal/safety/permission/bash_decompose.go": {
       "essay": 23
@@ -1474,9 +1471,6 @@
     },
     "internal/tools/builtin/clientio.go": {
       "essay": 14
-    },
-    "internal/tools/builtin/completestep.go": {
-      "essay": 1
     },
     "internal/tools/builtin/confine.go": {
       "essay": 16

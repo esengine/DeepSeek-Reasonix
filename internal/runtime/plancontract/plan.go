@@ -38,32 +38,13 @@ type Assumption struct {
 // is a sub-step of that phase. DependsOn orders siblings and is advisory: the
 // todo projection is serial, so a dependency becomes order, not gating.
 type Step struct {
-	ID             string         `json:"id,omitempty"`
-	ParentID       string         `json:"parent_id,omitempty"`
-	Title          string         `json:"title"`
-	DependsOn      []string       `json:"depends_on,omitempty"`
-	VerifiedFiles  []string       `json:"verified_files,omitempty"`  // paths the planner read
-	CandidateFiles []string       `json:"candidate_files,omitempty"` // paths the planner inferred
-	Acceptance     []Criterion    `json:"acceptance,omitempty"`
-	Verification   []Verification `json:"verification,omitempty"`
-	Risks          []string       `json:"risks,omitempty"`
-}
-
-// Criterion is one acceptance criterion. Regression marks must-keep-passing
-// behavior; Optional marks a nice-to-have that never blocks completion. ID is
-// host-assigned so it can key an evidence requirement downstream.
-type Criterion struct {
-	ID         string `json:"-"`
-	Text       string `json:"text"`
-	Regression bool   `json:"regression,omitempty"`
-	Optional   bool   `json:"optional,omitempty"`
-}
-
-// Verification is a command-level check. An empty Command accepts any
-// delivery-verification command; Expect describes what a pass looks like.
-type Verification struct {
-	Command string `json:"command,omitempty"`
-	Expect  string `json:"expect,omitempty"`
+	ID             string   `json:"id,omitempty"`
+	ParentID       string   `json:"parent_id,omitempty"`
+	Title          string   `json:"title"`
+	DependsOn      []string `json:"depends_on,omitempty"`
+	VerifiedFiles  []string `json:"verified_files,omitempty"`  // paths the planner read
+	CandidateFiles []string `json:"candidate_files,omitempty"` // paths the planner inferred
+	Risks          []string `json:"risks,omitempty"`
 }
 
 // Normalize returns a canonical copy: trimmed text, dropped empty entries,
@@ -102,13 +83,10 @@ func normalizeSteps(steps []Step) []Step {
 			DependsOn:      cleanStrings(s.DependsOn),
 			VerifiedFiles:  cleanStrings(s.VerifiedFiles),
 			CandidateFiles: cleanStrings(s.CandidateFiles),
-			Acceptance:     cleanCriteria(s.Acceptance),
-			Verification:   cleanVerifications(s.Verification),
 			Risks:          cleanStrings(s.Risks),
 		})
 	}
 	assignStepIDs(out)
-	assignCriterionIDs(out)
 	repairParents(out)
 	repairDependencies(out)
 	return out
@@ -139,37 +117,6 @@ func assignStepIDs(steps []Step) {
 				used[id] = true
 				steps[i].ID = id
 				break
-			}
-		}
-	}
-}
-
-func assignCriterionIDs(steps []Step) {
-	used := make(map[string]bool)
-	for i := range steps {
-		for j := range steps[i].Acceptance {
-			id := steps[i].Acceptance[j].ID
-			if id == "" || used[id] {
-				steps[i].Acceptance[j].ID = ""
-				continue
-			}
-			used[id] = true
-		}
-	}
-	next := 1
-	for i := range steps {
-		for j := range steps[i].Acceptance {
-			if steps[i].Acceptance[j].ID != "" {
-				continue
-			}
-			for {
-				id := fmt.Sprintf("c%d", next)
-				next++
-				if !used[id] {
-					used[id] = true
-					steps[i].Acceptance[j].ID = id
-					break
-				}
 			}
 		}
 	}
@@ -260,42 +207,6 @@ func cleanStrings(in []string) []string {
 		}
 		seen[s] = true
 		out = append(out, s)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func cleanCriteria(in []Criterion) []Criterion {
-	out := make([]Criterion, 0, len(in))
-	for _, c := range in {
-		text := strings.TrimSpace(c.Text)
-		if text == "" {
-			continue
-		}
-		out = append(out, Criterion{
-			ID:         strings.TrimSpace(c.ID),
-			Text:       text,
-			Regression: c.Regression,
-			Optional:   c.Optional,
-		})
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func cleanVerifications(in []Verification) []Verification {
-	out := make([]Verification, 0, len(in))
-	for _, v := range in {
-		command := strings.TrimSpace(v.Command)
-		expect := strings.TrimSpace(v.Expect)
-		if command == "" && expect == "" {
-			continue
-		}
-		out = append(out, Verification{Command: command, Expect: expect})
 	}
 	if len(out) == 0 {
 		return nil

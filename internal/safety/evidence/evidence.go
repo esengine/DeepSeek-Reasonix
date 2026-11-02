@@ -430,13 +430,6 @@ func WithDeliveryProfile(ctx context.Context) context.Context {
 	return context.WithValue(ctx, deliveryProfileKey{}, true)
 }
 
-// DeliveryProfileFromContext reports whether the current tool call must produce
-// evidence that the delivery final-readiness gate can accept.
-func DeliveryProfileFromContext(ctx context.Context) bool {
-	enabled, _ := ctx.Value(deliveryProfileKey{}).(bool)
-	return enabled
-}
-
 // WithSessionMessages attaches a lazy transcript accessor so verifyStepEvidence
 // can fall back to scanning the conversation when the per-turn ledger misses a
 // command (cross-turn references, non-bash tool calls, truncated command
@@ -445,16 +438,6 @@ func DeliveryProfileFromContext(ctx context.Context) bool {
 // ordinary tool calls never pay for a full transcript copy.
 func WithSessionMessages(ctx context.Context, snapshot func() []provider.Message) context.Context {
 	return context.WithValue(ctx, sessionMessagesKey{}, snapshot)
-}
-
-// SessionMessagesFromContext resolves the transcript accessor attached by
-// WithSessionMessages, taking the snapshot at call time.
-func SessionMessagesFromContext(ctx context.Context) ([]provider.Message, bool) {
-	snapshot, ok := ctx.Value(sessionMessagesKey{}).(func() []provider.Message)
-	if !ok || snapshot == nil {
-		return nil, false
-	}
-	return snapshot(), true
 }
 
 // WithTodoState attaches the host's canonical task list to a tool call. The
@@ -468,53 +451,6 @@ func WithTodoState(ctx context.Context, todos []TodoItem) context.Context {
 func TodoStateFromContext(ctx context.Context) ([]TodoItem, bool) {
 	todos, ok := ctx.Value(todoStateKey{}).([]TodoItem)
 	return append([]TodoItem(nil), todos...), ok
-}
-
-// PathsProvenInSession reports whether every path is covered by a successful
-// (non-errored) tool call somewhere in msgs — the cross-turn fallback for diff
-// and files evidence, whose per-turn ledger resets each turn. wantWrite
-// restricts to writer tools (diff); false accepts either. A replay carries only
-// names, so facts resolves each to the contracts its tool declares.
-func PathsProvenInSession(msgs []provider.Message, paths []string, wantWrite bool, facts func(string) ToolFacts) bool {
-	wanted := pathSet(normalizePaths(paths))
-	if len(wanted) == 0 {
-		return false
-	}
-	failed := failedSessionCallIDs(msgs)
-	found := map[string]bool{}
-	for _, msg := range msgs {
-		for _, tc := range msg.ToolCalls {
-			if failed[tc.ID] {
-				continue
-			}
-			r := ReceiptFromToolCall(tc.Name, json.RawMessage(tc.ExecutionArguments()), true, facts(tc.Name))
-			if wantWrite && !r.Write {
-				continue
-			}
-			if !wantWrite && !r.Read && !r.Write {
-				continue
-			}
-			for _, p := range normalizePaths(r.Paths) {
-				if _, ok := wanted[p]; ok {
-					found[p] = true
-				}
-			}
-		}
-	}
-	return len(found) == len(wanted)
-}
-
-func failedSessionCallIDs(msgs []provider.Message) map[string]bool {
-	failed := map[string]bool{}
-	for _, msg := range msgs {
-		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
-			continue
-		}
-		if strings.HasPrefix(msg.Content, "error:") || strings.HasPrefix(msg.Content, "blocked:") {
-			failed[msg.ToolCallID] = true
-		}
-	}
-	return failed
 }
 
 func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, facts ToolFacts) Receipt {
@@ -539,7 +475,7 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, fa
 		}
 		if toolName == "complete_step" {
 			r.Step = completeStepIdentity(fields)
-			r.StepProof = completeStepHasProof(fields)
+			r.StepProof = strings.TrimSpace(stringField(fields, "result")) != ""
 			r.CitedChecks = completeStepCitedChecks(fields)
 		}
 		if toolName == "todo_write" {
@@ -609,11 +545,6 @@ func ToolCallRequiresDeliveryCriteria(toolName string, args json.RawMessage, rea
 		return true
 	}
 	return bashCommandIsVerification(stringField(fields, "command"))
-}
-
-type verificationCommandRecommendation struct {
-	label    string
-	examples []string
 }
 
 // writeOutputFlags are test-runner and linter flags that write snapshot,

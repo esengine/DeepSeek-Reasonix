@@ -526,46 +526,6 @@ func completeStepCitedChecks(fields map[string]json.RawMessage) []string {
 	return out
 }
 
-func completeStepHasProof(fields map[string]json.RawMessage) bool {
-	if strings.TrimSpace(stringField(fields, "result")) == "" {
-		return false
-	}
-	raw, ok := fields["evidence"]
-	if !ok {
-		return false
-	}
-	var items []struct {
-		Kind    string   `json:"kind"`
-		Summary string   `json:"summary"`
-		Command string   `json:"command"`
-		Paths   []string `json:"paths"`
-	}
-	if err := json.Unmarshal(raw, &items); err != nil || len(items) == 0 {
-		return false
-	}
-	for _, item := range items {
-		kind := strings.TrimSpace(item.Kind)
-		if kind == "" || strings.TrimSpace(item.Summary) == "" {
-			return false
-		}
-		switch kind {
-		case "verification":
-			if strings.TrimSpace(item.Command) == "" {
-				return false
-			}
-		case "diff", "files":
-			if len(normalizePaths(item.Paths)) == 0 {
-				return false
-			}
-		case "manual":
-			// Summary is enough for manual evidence.
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 func normalizeTodos(todos []TodoItem) []TodoItem {
 	out := make([]TodoItem, 0, len(todos))
 	for _, t := range todos {

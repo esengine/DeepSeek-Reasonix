@@ -262,32 +262,6 @@ func TestTodoWriteRejectsFailedCompleteStepReceipt(t *testing.T) {
 	}
 }
 
-func TestTodoWriteRejectsFailedCompleteStepWithoutProof(t *testing.T) {
-	ledger := evidence.NewLedger()
-	ledger.Record(evidence.Receipt{
-		ToolName: "todo_write",
-		Success:  true,
-		Todos:    []evidence.TodoItem{{Content: "Run project script", Status: "in_progress"}},
-	})
-	ledger.Record(evidence.Receipt{
-		ToolName: "bash",
-		Success:  true,
-		Command:  `python "script.py"`,
-	})
-	ledger.Record(evidence.ReceiptFromToolCall("complete_step", json.RawMessage(`{
-		"step":"Run project script",
-		"result":"script ran",
-		"evidence":[]
-	}`), false, evidence.ToolFacts{ReadOnly: true}))
-	ctx := evidence.WithLedger(context.Background(), ledger)
-	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
-
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("failed complete_step without proof should not authorize completion, got %v", err)
-	}
-}
-
 func TestTodoWriteRejectsFailedCompleteStepMissingResult(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{

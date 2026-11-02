@@ -135,13 +135,13 @@ func TestEffectDisabledToolTheHostNeedsStaysAndSaysSo(t *testing.T) {
 // The tools the loop itself reads stay on when a project file names them, and
 // the user is told which feature needs each.
 func TestEffectDisabledToolsTheLoopReadsStayAndSaySo(t *testing.T) {
-	kept := []string{"complete_step", "todo_write", "await_user", "conclude_blocked"}
-	rec, sink := disabledToolsBuild(t, "[tools]\ndisabled = [\"complete_step\", \"todo_write\", \"await_user\", \"conclude_blocked\", \"recall\"]\n", "bash")
+	kept := []string{"complete_step", "todo_write", "await_user"}
+	rec, sink := disabledToolsBuild(t, "[tools]\ndisabled = [\"complete_step\", \"todo_write\", \"await_user\", \"recall\"]\n", "bash")
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	names := requestToolNames(rec.reqs[0])
 	for _, name := range kept {
-		if name != "conclude_blocked" && !slices.Contains(names, name) {
+		if !slices.Contains(names, name) {
 			t.Fatalf("request tools = %v, want %s kept", names, name)
 		}
 		if !sink.has(func(ev event.Event) bool {

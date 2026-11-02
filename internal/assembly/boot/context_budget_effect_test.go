@@ -97,7 +97,7 @@ func budgetFixtureAgent(t *testing.T, kind, models, overrides string, sink event
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	rec := &budgetEffectProvider{bulk: strings.Repeat("work output line with detail. ", 400)}
+	rec := &budgetEffectProvider{bulk: strings.Repeat("work output line with detail. ", 380)}
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return rec, nil })
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "conn/`+strings.Split(models, ",")[0]+`"

@@ -75,8 +75,6 @@ func changedFields(before, after Step) []string {
 	add("depends_on", slices.Equal(before.DependsOn, after.DependsOn))
 	add("verified_files", slices.Equal(before.VerifiedFiles, after.VerifiedFiles))
 	add("candidate_files", slices.Equal(before.CandidateFiles, after.CandidateFiles))
-	add("acceptance", slices.Equal(before.Acceptance, after.Acceptance))
-	add("verification", slices.Equal(before.Verification, after.Verification))
 	add("risks", slices.Equal(before.Risks, after.Risks))
 	return fields
 }
@@ -91,7 +89,6 @@ func (d Diff) NeedsApproval() bool {
 	}
 	for _, change := range d.Changed {
 		if grew(change.Before.Risks, change.After.Risks) ||
-			grew(change.Before.Acceptance, change.After.Acceptance) ||
 			grew(change.Before.VerifiedFiles, change.After.VerifiedFiles) ||
 			grew(change.Before.CandidateFiles, change.After.CandidateFiles) {
 			return true

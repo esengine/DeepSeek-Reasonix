@@ -215,8 +215,6 @@ func TestAnnotateFailureDiagnosticsFallsBackWhenTheModelIsNoHelp(t *testing.T) {
 func TestHandoffNudgeReadsThePlanContract(t *testing.T) {
 	action := plancontract.Plan{Objective: "fix it", Steps: []plancontract.Step{
 		{Title: "edit the parser", CandidateFiles: []string{"parser.go"}}}}
-	verify := plancontract.Plan{Objective: "check it", Steps: []plancontract.Step{
-		{Title: "run the suite", Verification: []plancontract.Verification{{Command: "go test ./..."}}}}}
 	prose := plancontract.Plan{Objective: "explain it", Steps: []plancontract.Step{
 		{Title: "describe how the retry budget works"}}}
 
@@ -227,7 +225,6 @@ func TestHandoffNudgeReadsThePlanContract(t *testing.T) {
 	}{
 		{"no contract trusts the answer", nil, false},
 		{"plan naming files expects action", &action, true},
-		{"plan naming a command expects action", &verify, true},
 		{"prose-only plan does not", &prose, false},
 	} {
 		a := New(nil, tool.NewRegistry(), sessionstore.NewSession("sys"), Options{}, event.Discard)

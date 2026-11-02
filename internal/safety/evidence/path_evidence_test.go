@@ -2,7 +2,6 @@ package evidence
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -41,32 +40,5 @@ func TestTouchedPathsAreRecentFirstDistinctBoundedAndSayWhetherTheyWereWritten(t
 	var nilLedger *Ledger
 	if nilLedger.TouchedPaths(5, false) != nil || l.TouchedPaths(0, false) != nil {
 		t.Fatal("a nil ledger and a zero limit touch nothing")
-	}
-}
-
-func TestCitationFormsNamesTheSameFileRelativeAndAbsoluteButNeverOneOutsideTheRoot(t *testing.T) {
-	root := t.TempDir()
-	abs := filepath.Join(root, "pkg", "a.go")
-	rel := filepath.Join("pkg", "a.go")
-	for name, tc := range map[string]struct {
-		cited string
-		want  []string
-	}{
-		"relative inside":    {rel, []string{normalizePath(rel), normalizePath(abs)}},
-		"absolute inside":    {abs, []string{normalizePath(abs), normalizePath(rel)}},
-		"relative escaping":  {filepath.Join("..", "x.go"), []string{normalizePath(filepath.Join("..", "x.go"))}},
-		"absolute outside":   {filepath.Join(filepath.Dir(root), "other", "x.go"), []string{normalizePath(filepath.Join(filepath.Dir(root), "other", "x.go"))}},
-		"the root itself":    {root, []string{normalizePath(root)}},
-		"backslash relative": {"pkg\\a.go", []string{normalizePath(rel), normalizePath(abs)}},
-	} {
-		if got := CitationForms(root, tc.cited); !slices.Equal(got, tc.want) {
-			t.Errorf("%s: CitationForms(%q) = %v, want %v", name, tc.cited, got, tc.want)
-		}
-	}
-	if got := CitationForms("", rel); !slices.Equal(got, []string{normalizePath(rel)}) {
-		t.Errorf("no root: %v", got)
-	}
-	if got := CitationForms(root, "   "); got != nil {
-		t.Errorf("a blank citation names no file: %v", got)
 	}
 }

@@ -18,7 +18,7 @@ import (
 )
 
 func TestPlanApprovedMessageStatesAutoSemantics(t *testing.T) {
-	for _, want := range []string{"ordinary writer fallback", "explicit ask/deny rules", "forced fresh reviews"} {
+	for _, want := range []string{"ordinary writer fallback", "explicit ask/deny rules"} {
 		if !strings.Contains(planApprovedMessage, want) {
 			t.Fatalf("planApprovedMessage missing %q: %s", want, planApprovedMessage)
 		}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"runtime"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -308,24 +306,6 @@ func TestReceiptFromToolCallExtractsCompleteStep(t *testing.T) {
 	}`), false, ToolFacts{ReadOnly: true})
 	if missingResult.StepProof {
 		t.Fatalf("complete_step without result should not count as proof: %+v", missingResult)
-	}
-
-	missingCommand := ReceiptFromToolCall("complete_step", json.RawMessage(`{
-		"step":"Add parser",
-		"result":"parser added",
-		"evidence":[{"kind":"verification","summary":"checked manually"}]
-	}`), false, ToolFacts{ReadOnly: true})
-	if missingCommand.StepProof {
-		t.Fatalf("verification evidence without command should not count as proof: %+v", missingCommand)
-	}
-
-	emptyProof := ReceiptFromToolCall("complete_step", json.RawMessage(`{
-		"step":"Add parser",
-		"result":"parser added",
-		"evidence":[]
-	}`), false, ToolFacts{ReadOnly: true})
-	if emptyProof.StepProof {
-		t.Fatalf("empty complete_step evidence should not count as proof: %+v", emptyProof)
 	}
 }
 
@@ -1319,19 +1299,5 @@ func TestLedgerDeliverySignoffRejectsInspectionCommandMasqueradingAsVerification
 	}`), true, ToolFacts{ReadOnly: true}))
 	if ledger.HasSuccessfulDeliverySignoffAfter(mutation) {
 		t.Fatal("inspection-only git status must not count as delivery verification")
-	}
-}
-
-func TestCitationFormsAnchorAWindowsCitationToTheWorkspace(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("drive-letter paths are absolute only on Windows")
-	}
-	forms := CitationForms(`C:\ws`, "src/a.go")
-	if !slices.Contains(forms, NormalizePath(`C:\ws\src\a.go`)) {
-		t.Fatalf("forms %q miss the workspace path", forms)
-	}
-	forms = CitationForms(`C:\ws`, `c:\WS\src\a.go`)
-	if !slices.Contains(forms, NormalizePath("src/a.go")) {
-		t.Fatalf("forms %q miss the relative path", forms)
 	}
 }

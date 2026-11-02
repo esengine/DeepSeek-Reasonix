@@ -1,11 +1,8 @@
 package evidence
 
 import (
-	"encoding/json"
 	"slices"
 	"testing"
-
-	"reasonix/internal/contract/provider"
 )
 
 func recorded(receipts ...Receipt) *Ledger {
@@ -62,35 +59,6 @@ func TestReceiptProgressSummaryCountsOnlySuccessfulWork(t *testing.T) {
 	var nilLedger *Ledger
 	if nilLedger.ReceiptProgressSummary() != (ReceiptProgressSummary{}) {
 		t.Fatal("a nil ledger has no progress")
-	}
-}
-
-func TestPathsProvenInSessionNeedsEveryPathAndIgnoresFailedCalls(t *testing.T) {
-	call := func(id, name, path string) provider.ToolCall {
-		args, _ := json.Marshal(map[string]string{"path": path})
-		return provider.ToolCall{ID: id, Name: name, Arguments: string(args)}
-	}
-	facts := func(name string) ToolFacts {
-		return ToolFacts{ReadOnly: name == "read_file", WritesNamedPaths: name == "edit_file"}
-	}
-	msgs := []provider.Message{
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{call("1", "edit_file", "a.go"), call("2", "edit_file", "b.go"), call("3", "read_file", "c.go")}},
-		{Role: provider.RoleTool, ToolCallID: "2", Content: "error: permission denied"},
-	}
-	if !PathsProvenInSession(msgs, []string{"a.go"}, true, facts) {
-		t.Fatal("a.go was written by a call that did not fail")
-	}
-	if PathsProvenInSession(msgs, []string{"a.go", "b.go"}, true, facts) {
-		t.Fatal("b.go's write failed, so both paths are not proven")
-	}
-	if PathsProvenInSession(msgs, []string{"c.go"}, true, facts) {
-		t.Fatal("a read does not prove a write")
-	}
-	if !PathsProvenInSession(msgs, []string{"c.go"}, false, facts) {
-		t.Fatal("a read proves the path was looked at when writes are not required")
-	}
-	if PathsProvenInSession(msgs, nil, false, facts) {
-		t.Fatal("no paths proves nothing")
 	}
 }
 

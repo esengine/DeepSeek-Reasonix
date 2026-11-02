@@ -72,7 +72,7 @@
   },
   {
     "Name": "await_user",
-    "Description": "Hand control back to the user with the task list still open, when what the current item needs next is something only they can give: their view on what you just showed them, the material they said they would add, the judgement the list exists to collect. The list is kept as it stands and the turn ends; their next message resumes it, and the host will not continue the list on its own in the meantime. This is not `ask`, which offers options you wrote and answers inside the same turn, and not `conclude_blocked`, which says the work cannot be done at all. When what you wait for is a pick among choices you can name — which way to proceed, which option to take — call `ask` instead: the user answers it with one click and you carry on in this turn. Name the waiting item with `step_id`, and put in `need` one short line saying what you are waiting for, addressed to them. Say the substance — the item you are presenting, the question you want answered — in your own reply; this call records the wait, it does not speak for you.",
+    "Description": "Hand control back to the user with the task list still open, when what the current item needs next is something only they can give: their view on what you just showed them, the material they said they would add, the judgement the list exists to collect. The list is kept as it stands and the turn ends; their next message resumes it, and the host will not continue the list on its own in the meantime. This is not `ask`, which offers options you wrote and answers inside the same turn. When what you wait for is a pick among choices you can name — which way to proceed, which option to take — call `ask` instead: the user answers it with one click and you carry on in this turn. Name the waiting item with `step_id`, and put in `need` one short line saying what you are waiting for, addressed to them. Say the substance — the item you are presenting, the question you want answered — in your own reply; this call records the wait, it does not speak for you.",
     "ReadOnly": true,
     "Schema": {
       "properties": {
@@ -318,54 +318,10 @@
   },
   {
     "Name": "complete_step",
-    "Description": "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: a completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the list for you — it marks this step completed and moves the next to in_progress, so a todo_write that marks such an item completed on its own is REJECTED too. Sign off one step per tool-call ROUND, not one per call: the sign-off promotes the next item, and a second sign-off sent beside it signs against the list as it stood before.",
+    "Description": "Mark ONE step of an approved plan as done. Call it as you finish each step. The host advances the list for you: it marks this step completed and moves the next to in_progress, so a todo_write that marks such an item completed on its own is REJECTED. Sign off one step per tool-call ROUND, not one per call: the sign-off promotes the next item, and a second sign-off sent beside it signs against the list as it stood before.",
     "ReadOnly": true,
     "Schema": {
       "properties": {
-        "evidence": {
-          "description": "Proof the step is done. At least one item is required.",
-          "items": {
-            "properties": {
-              "command": {
-                "description": "REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history.",
-                "type": "string"
-              },
-              "criterion_id": {
-                "description": "The acceptance criterion this proof satisfies, as the plan renders it (e.g. \"c2\" from \"accept [c2]: ...\"). Cite it whenever the step has criteria: a command succeeding is not the same as a criterion being met, and the host records the proof against the criterion you name.",
-                "type": "string"
-              },
-              "kind": {
-                "description": "verification = a command/test was run (command REQUIRED); review = a built-in review run completed and, after changes, inspected the latest changed result (the verdict/findings still apply separately); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check.",
-                "enum": [
-                  "verification",
-                  "review",
-                  "diff",
-                  "files",
-                  "manual"
-                ],
-                "type": "string"
-              },
-              "paths": {
-                "description": "REQUIRED for diff/files evidence: the files this evidence refers to, as the paths were passed to the tools that touched them.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "summary": {
-                "description": "The evidence itself: the test result, what the diff does, or what was confirmed.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind",
-              "summary"
-            ],
-            "type": "object"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
         "notes": {
           "description": "Optional caveats, follow-ups, or anything deferred.",
           "type": "string"
@@ -389,7 +345,6 @@
         }
       },
       "required": [
-        "evidence",
         "result"
       ],
       "type": "object"

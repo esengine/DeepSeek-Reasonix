@@ -131,7 +131,7 @@ func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 		// rule that puts a call here, so the decision stays unresolved.
 		return "unresolved: this run has no interactive user, and the answer is the user's to give — " +
 			"nothing here can supply it, including you. Do not choose on their behalf. Do whatever the task " +
-			"allows without this decision, then call conclude_blocked naming the decision that is missing.", nil
+			"allows without this decision, then say in your reply which decision is missing.", nil
 	}
 
 	answers, err := asker.Ask(ctx, qs)
@@ -203,5 +203,5 @@ func (e *AskTimedOutError) result() string {
 	return fmt.Sprintf("skipped: the user did not answer within %d seconds, so the host skipped this question under their ask-timeout setting. "+
 		"That is a timeout, not an answer: no option was chosen for them and none counts as their preference. "+
 		"Carry on with whatever the task allows without this decision and state the assumption you proceed under in your reply, "+
-		"or call conclude_blocked naming the decision that is missing.", int(e.After.Seconds()))
+		"and say in your reply which decision is missing.", int(e.After.Seconds()))
 }

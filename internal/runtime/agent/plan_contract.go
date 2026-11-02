@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"reasonix/internal/runtime/plancontract"
-	"reasonix/internal/runtime/taskcontract"
 	"reasonix/internal/safety/evidence"
 )
 
@@ -41,78 +40,12 @@ func (a *Agent) PlanContract() *plancontract.Plan {
 	return &copied
 }
 
-// planFacts projects a plan onto the contract-relevant facts. The projection
-// lives here rather than in either package so taskcontract keeps never seeing a
-// plan and plancontract keeps depending on nothing above it.
-func planFacts(plan plancontract.Plan) taskcontract.PlanFacts {
-	facts := taskcontract.PlanFacts{}
-	seen := map[string]bool{}
-	for _, step := range plan.Steps {
-		for _, c := range step.Acceptance {
-			criterion := taskcontract.PlanCriterion{ID: c.ID, Text: c.Text}
-			switch {
-			case c.Optional:
-				facts.Optional = append(facts.Optional, criterion)
-			case c.Regression:
-				facts.Regressions = append(facts.Regressions, criterion)
-			default:
-				facts.AcceptanceCriteria = append(facts.AcceptanceCriteria, criterion)
-			}
-		}
-		for _, v := range step.Verification {
-			if seen[v.Command] {
-				continue
-			}
-			seen[v.Command] = true
-			facts.Verifications = append(facts.Verifications, v.Command)
-		}
-		if len(step.Risks) > 0 {
-			facts.Risky = true
-		}
-		// Scope is where work is expected, not a claim of fact, so a candidate
-		// path belongs in it even though it was never read.
-		facts.Touchpoints = appendUnseen(facts.Touchpoints, seen, step.VerifiedFiles)
-		facts.Touchpoints = appendUnseen(facts.Touchpoints, seen, step.CandidateFiles)
-	}
-	return facts
-}
-
-func appendUnseen(dst []string, seen map[string]bool, add []string) []string {
-	for _, s := range add {
-		if s == "" || seen["path:"+s] {
-			continue
-		}
-		seen["path:"+s] = true
-		dst = append(dst, s)
-	}
-	return dst
-}
-
-// acceptanceCriterionIDs lists the approved plan's criterion ids so a tool call
-// can check a citation against the plan the user approved.
-func (a *Agent) acceptanceCriterionIDs() []string {
-	plan := a.PlanContract()
-	if plan == nil {
-		return nil
-	}
-	var ids []string
-	for _, step := range plan.Steps {
-		for _, c := range step.Acceptance {
-			if c.ID != "" {
-				ids = append(ids, c.ID)
-			}
-		}
-	}
-	return ids
-}
-
 // withContractState attaches what a tool call needs to check a claim against the
 // approved work: the canonical task list, and the criterion ids a proof may
 // cite. They travel together because both answer "does this claim name
 // something real".
 func (a *Agent) withContractState(ctx context.Context) context.Context {
-	ctx = evidence.WithTodoState(ctx, a.CanonicalTodoState())
-	return evidence.WithAcceptanceCriteria(ctx, a.acceptanceCriterionIDs())
+	return evidence.WithTodoState(ctx, a.CanonicalTodoState())
 }
 
 // mutationEscapesPlan reports whether a pending write touches a path the

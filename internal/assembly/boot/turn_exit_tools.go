@@ -15,5 +15,4 @@ func addTurnExitTools(reg *tool.Registry) {
 	// ask stays unresolved, await_user refuses.
 	reg.Add(agent.NewAskTool())
 	reg.Add(agent.NewAwaitUserTool())
-	reg.Add(agent.NewConcludeBlockedTool())
 }

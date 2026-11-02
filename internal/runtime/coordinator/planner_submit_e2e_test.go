@@ -84,7 +84,6 @@ func TestSubmittedPlanReachesTheExecutorHandoff(t *testing.T) {
 		"1. thread the model ref through",
 		"   - extend cacheKey",
 		"verified: internal/contract/provider/cache.go",
-		"verify: go test ./internal/contract/provider/ — all green",
 	} {
 		if !strings.Contains(handoff, want) {
 			t.Errorf("executor handoff missing %q:\n%s", want, handoff)

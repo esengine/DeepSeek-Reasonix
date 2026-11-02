@@ -26,7 +26,7 @@ func NewAwaitUserTool() *AwaitUserTool { return &AwaitUserTool{} }
 func (*AwaitUserTool) Name() string { return "await_user" }
 
 func (*AwaitUserTool) Description() string {
-	return "Hand control back to the user with the task list still open, when what the current item needs next is something only they can give: their view on what you just showed them, the material they said they would add, the judgement the list exists to collect. The list is kept as it stands and the turn ends; their next message resumes it, and the host will not continue the list on its own in the meantime. This is not `ask`, which offers options you wrote and answers inside the same turn, and not `conclude_blocked`, which says the work cannot be done at all. When what you wait for is a pick among choices you can name — which way to proceed, which option to take — call `ask` instead: the user answers it with one click and you carry on in this turn. Name the waiting item with `step_id`, and put in `need` one short line saying what you are waiting for, addressed to them. Say the substance — the item you are presenting, the question you want answered — in your own reply; this call records the wait, it does not speak for you."
+	return "Hand control back to the user with the task list still open, when what the current item needs next is something only they can give: their view on what you just showed them, the material they said they would add, the judgement the list exists to collect. The list is kept as it stands and the turn ends; their next message resumes it, and the host will not continue the list on its own in the meantime. This is not `ask`, which offers options you wrote and answers inside the same turn. When what you wait for is a pick among choices you can name — which way to proceed, which option to take — call `ask` instead: the user answers it with one click and you carry on in this turn. Name the waiting item with `step_id`, and put in `need` one short line saying what you are waiting for, addressed to them. Say the substance — the item you are presenting, the question you want answered — in your own reply; this call records the wait, it does not speak for you."
 }
 
 func (*AwaitUserTool) Schema() json.RawMessage {
@@ -68,7 +68,7 @@ func (*AwaitUserTool) Execute(ctx context.Context, args json.RawMessage) (string
 	// No asker means no answer can arrive. The error records no gate, so the
 	// turn's readiness is unchanged.
 	if _, _, asker, ok := CallContext(ctx); !ok || asker == nil {
-		return "", fmt.Errorf("await_user needs an interactive user and this run has none, so there is nobody whose answer would arrive; do whatever the list allows without them, then call conclude_blocked naming the input that is missing")
+		return "", fmt.Errorf("await_user needs an interactive user and this run has none, so there is nobody whose answer would arrive; do whatever the list allows without them, then say in your reply which input is missing")
 	}
 	todos := awaitUserTodos(ctx)
 	if len(todos) == 0 {

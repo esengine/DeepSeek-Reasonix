@@ -602,34 +602,6 @@ func TestExecuteBatchSegmentsAroundWrites(t *testing.T) {
 	}
 }
 
-func TestExecuteBatchFeedsReceiptsToCompleteStep(t *testing.T) {
-	completeStep, ok := tool.LookupBuiltin("complete_step")
-	if !ok {
-		t.Fatal("complete_step builtin not registered")
-	}
-	reg := tool.NewRegistry()
-	reg.Add(fakeTool{name: "bash", readOnly: false})
-	reg.Add(completeStep)
-	a := New(nil, reg, sessionstore.NewSession(""), Options{}, event.Discard)
-
-	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
-		{Name: "bash", Arguments: `{"command":"go test ./internal/..."}`},
-		{Name: "complete_step", Arguments: `{
-			"step":"Run checks",
-			"result":"checks passed",
-			"evidence":[{"kind":"verification","summary":"tests passed","command":"go test ./internal/..."}]
-		}`},
-	})
-	results := batch.results
-
-	if len(results) != 2 {
-		t.Fatalf("got %d results, want 2", len(results))
-	}
-	if !strings.Contains(results[1], "host-verified 1") {
-		t.Fatalf("complete_step did not see bash receipt: %q", results[1])
-	}
-}
-
 func TestExecuteOneFailedReceiptDoesNotVerify(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "bash", readOnly: false, err: errors.New("boom")})

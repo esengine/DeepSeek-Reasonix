@@ -213,51 +213,6 @@ func IsDeliveryVerificationCommand(command string) bool {
 	return bashCommandIsVerification(command)
 }
 
-// verificationCommandRecommendations is the single source for the concrete
-// model-readable examples and the family labels used to diagnose test failures.
-// It is intentionally a safe recommended subset rather than an exhaustive
-// rendering of bashSegmentIsVerification: accepted commands that may install
-// dependencies or create workspace outputs should not be suggested as the
-// first recovery action.
-func verificationCommandRecommendations() []verificationCommandRecommendation {
-	return []verificationCommandRecommendation{
-		{label: "go test|vet", examples: []string{"go test ./...", "go vet ./..."}},
-		{label: "git diff --check", examples: []string{"git diff --check"}},
-		{label: "pytest/py.test", examples: []string{"pytest tests/", "py.test tests/"}},
-		{label: "gotestsum", examples: []string{"gotestsum"}},
-		{label: "staticcheck", examples: []string{"staticcheck ./..."}},
-		{label: "golangci-lint", examples: []string{"golangci-lint run"}},
-		{label: "tsc", examples: []string{"tsc --noEmit"}},
-		{label: "mypy (no report flag)", examples: []string{"mypy src/"}},
-		{label: "npm|pnpm|yarn|bun test|check|lint", examples: []string{"npm test", "pnpm check", "yarn lint", "bun test"}},
-		{label: "npm run test|check|lint|typecheck", examples: []string{"npm run typecheck"}},
-		{label: "cargo test|check|clippy", examples: []string{"cargo test", "cargo check", "cargo clippy"}},
-		{label: "node --check|--test", examples: []string{"node --check index.js", "node --test"}},
-		{label: "make|just test|check|lint|verify|ci", examples: []string{"make test", "just verify"}},
-		{label: "python -m pytest|unittest", examples: []string{"python -m pytest", "python -m unittest"}},
-		{label: "dotnet test", examples: []string{"dotnet test"}},
-		{label: "swift test", examples: []string{"swift test"}},
-		{label: "mvn|gradle test|check|verify", examples: []string{"mvn test", "gradle check"}},
-	}
-}
-
-// VerificationCommandSummary returns compact, model-readable recovery
-// guidance. It lists only recommended command families that the classifier
-// accepts, while omitting known self-installing and direct workspace-output
-// command forms from first-line guidance.
-func VerificationCommandSummary() string {
-	recommendations := verificationCommandRecommendations()
-	commands := make([]string, 0, len(recommendations))
-	for _, recommendation := range recommendations {
-		commands = append(commands, recommendation.examples...)
-	}
-	return "recommended recognized verification commands: " + strings.Join(commands, ", ") + ". " +
-		"Read-only inspection commands (grep/find/cat/wc/head/tail) are NOT verification; " +
-		"inline interpreters (node -e, python -c) are blocked in delivery mode. " +
-		"A read-only extraction pipeline ending in a recognized verifier " +
-		"(e.g. tail -n +1 file | node --check -) is accepted."
-}
-
 func bashSegmentIsVerification(fields []string) bool {
 	if len(fields) == 0 {
 		return false

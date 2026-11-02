@@ -989,7 +989,7 @@ func TestCoordinatorDoesNotSkipExecutorForPartialNoOpPlanWithActions(t *testing.
 }
 
 func TestCoordinatorHandoffAffirmsExecutorToolSchemasWhenPlannerClaimsNoMCP(t *testing.T) {
-	planner := &mockProvider{name: "planner", streams: submitPlanCall(`{"objective":"search GitHub for the issue","steps":[{"title":"query the GitHub MCP capability","verification":[{"command":"search issues"}]}]}`)}
+	planner := &mockProvider{name: "planner", streams: submitPlanCall(`{"objective":"search GitHub for the issue","steps":[{"title":"query the GitHub MCP capability","candidate_files":["github"]}]}`)}
 	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
 		{
 			{Type: provider.ChunkText, Text: "GitHub MCP is unavailable."},
@@ -1230,7 +1230,6 @@ func TestDefaultPlannerPromptDefinesLightAndFullEvidenceContracts(t *testing.T) 
 		"depth=light",
 		"depth=full",
 		"submit_plan",
-		"command-level verification",
 		"assumptions",
 	} {
 		// The verified/candidate split is asserted where it is enforced: the schema.

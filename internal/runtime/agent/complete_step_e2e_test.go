@@ -112,25 +112,6 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	}
 }
 
-// A command cited with a different string than it ran under (#2917: the model
-// drops the cd-prefix) is still accepted via segment matching, in-turn.
-func TestE2ECommandDriftAcceptedInTurn(t *testing.T) {
-	mp := testutil.NewMock("m",
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "b1", Name: "bash",
-			Arguments: `{"command":"cd /Users/x/repo && git merge upstream/main --ff-only"}`}}},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
-			Arguments: `{"step":"sync","result":"synced","evidence":[{"kind":"verification","summary":"fast-forwarded","command":"git merge upstream/main --ff-only"}]}`}}},
-		testutil.Turn{Text: "synced"},
-	)
-	a := New(mp, evidenceRegistry(), sessionstore.NewSession("sys"), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "sync the branch"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !sessionContains(a, "signed off") {
-		t.Fatal("cd-prefixed command drift rejected a real verification")
-	}
-}
-
 func TestE2ECrossTurnPendingSignoffIsRejectedUntilCurrentAdvances(t *testing.T) {
 	sess := sessionstore.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
@@ -187,27 +168,6 @@ func TestE2ECrossTurnDiffEvidenceViaSessionFallback(t *testing.T) {
 	}
 	if !sessionContains(a, "signed off") {
 		t.Fatal("turn 2 rejected a cross-turn diff citation the session proves")
-	}
-}
-
-// A diff citation for a file no turn ever wrote stays rejected — the session
-// fallback widens what counts as proof, it does not wave through fabrication.
-func TestE2EUnbackedDiffEvidenceStillRejected(t *testing.T) {
-	mp := testutil.NewMock("m",
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
-			Arguments: `{"step":"x","result":"y","evidence":[{"kind":"diff","summary":"claimed","paths":["never/written.go"]}]}`}}},
-		testutil.Turn{Text: "done"},
-	)
-	a := New(mp, evidenceRegistry(), sessionstore.NewSession("sys"), Options{}, event.Discard)
-
-	if err := a.Run(context.Background(), "sign off without doing the work"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !sessionContains(a, "no matching successful writer") {
-		t.Fatal("a diff citation for a never-written file was accepted")
-	}
-	if sessionContains(a, "signed off") {
-		t.Fatal("an unbacked diff citation was signed off")
 	}
 }
 

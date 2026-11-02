@@ -1023,11 +1023,11 @@ func (a *Agent) shouldNudgeExecutorHandoff() bool {
 }
 
 // planContractExpectsAction reports whether carrying out the plan requires
-// touching the workspace: a step that names files or a verification command
-// cannot be delivered as prose alone.
+// touching the workspace: a step that names files cannot be
+// delivered as prose alone.
 func planContractExpectsAction(plan plancontract.Plan) bool {
 	for _, step := range plan.Steps {
-		if len(step.VerifiedFiles) > 0 || len(step.CandidateFiles) > 0 || len(step.Verification) > 0 {
+		if len(step.VerifiedFiles) > 0 || len(step.CandidateFiles) > 0 {
 			return true
 		}
 	}

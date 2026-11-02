@@ -88,28 +88,6 @@ func renderDetail(b *strings.Builder, step Step, indent string) {
 	if len(step.CandidateFiles) > 0 {
 		fmt.Fprintf(b, "%scandidate: %s\n", indent, strings.Join(step.CandidateFiles, ", "))
 	}
-	for _, c := range step.Acceptance {
-		label := "accept"
-		if c.Regression {
-			label = "regression"
-		}
-		if c.Optional {
-			label += " (optional)"
-		}
-		// The id is rendered because a proof has to cite it: a criterion the
-		// executor cannot name is one it cannot satisfy.
-		fmt.Fprintf(b, "%s%s [%s]: %s\n", indent, label, c.ID, c.Text)
-	}
-	for _, v := range step.Verification {
-		command := v.Command
-		if command == "" {
-			command = "any verification command"
-		}
-		if v.Expect != "" {
-			command += " — " + v.Expect
-		}
-		fmt.Fprintf(b, "%sverify: %s\n", indent, command)
-	}
 	for _, risk := range step.Risks {
 		fmt.Fprintf(b, "%srisk: %s\n", indent, risk)
 	}

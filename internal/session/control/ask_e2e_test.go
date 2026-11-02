@@ -109,7 +109,7 @@ func TestAskLeavesTheDecisionUnresolvedWhenNoAskerIsWired(t *testing.T) {
 	if err := c.runOneTurn(context.Background(), orchestratedTurn{input: "pick one", raw: "pick one"}); err != nil {
 		t.Fatalf("runOneTurn: %v", err)
 	}
-	if result := lastToolResult(prov); !strings.Contains(result, "unresolved") || !strings.Contains(result, "conclude_blocked") {
+	if result := lastToolResult(prov); !strings.Contains(result, "unresolved") || !strings.Contains(result, "which decision is missing") {
 		t.Fatalf("a headless ask returned %q, want the decision left unresolved", result)
 	}
 }

@@ -22,7 +22,7 @@ func NewSubmitPlanTool() *SubmitPlanTool { return &SubmitPlanTool{} }
 func (*SubmitPlanTool) Name() string { return "submit_plan" }
 
 func (*SubmitPlanTool) Description() string {
-	return "Submit your finished plan as structured data. This is how a plan reaches the host — the host renders it for the user and hands it to the executor, so do NOT also restate the plan in prose. Every step needs a `title`; a step with a `parent_id` is a sub-step of that phase (two levels, keep phases few). Record what you actually READ as `verified_files` and what you only INFERRED as `candidate_files` — never present a guess as a verified path. Attach `acceptance` criteria and command-level `verification` to the steps they belong to, mark must-keep-passing behavior with `regression`, and label anything unproven in `assumptions`. Set `requires_approval` when execution should stop for the user first; the host decides whether it actually gates."
+	return "Submit your finished plan as structured data. This is how a plan reaches the host — the host renders it for the user and hands it to the executor, so do NOT also restate the plan in prose. Every step needs a `title`; a step with a `parent_id` is a sub-step of that phase (two levels, keep phases few). Record what you actually READ as `verified_files` and what you only INFERRED as `candidate_files` — never present a guess as a verified path. Label anything unproven in `assumptions`. Set `requires_approval` when execution should stop for the user first; the host decides whether it actually gates."
 }
 
 func (*SubmitPlanTool) Schema() json.RawMessage {
@@ -56,30 +56,6 @@ func (*SubmitPlanTool) Schema() json.RawMessage {
         "depends_on":{"type":"array","items":{"type":"string"},"description":"Ids of sibling steps that must happen first."},
         "verified_files":{"type":"array","items":{"type":"string"},"description":"Paths you actually opened and read."},
         "candidate_files":{"type":"array","items":{"type":"string"},"description":"Paths you inferred but did NOT read. Never list an unread path as verified."},
-        "acceptance":{
-          "type":"array",
-          "description":"Checkable conditions this step must meet.",
-          "items":{
-            "type":"object",
-            "properties":{
-              "text":{"type":"string","description":"The condition, stated so it can be checked."},
-              "regression":{"type":"boolean","description":"True when this is existing behavior that must keep working."},
-              "optional":{"type":"boolean","description":"True for a nice-to-have that must never block completion."}
-            },
-            "required":["text"]
-          }
-        },
-        "verification":{
-          "type":"array",
-          "description":"Commands that prove the step.",
-          "items":{
-            "type":"object",
-            "properties":{
-              "command":{"type":"string","description":"The command as the executor should run it."},
-              "expect":{"type":"string","description":"What a pass looks like."}
-            }
-          }
-        },
         "risks":{"type":"array","items":{"type":"string"},"description":"What could go wrong in this step."}
       },
       "required":["title"]

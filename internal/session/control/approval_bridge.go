@@ -87,7 +87,7 @@ func (f *folderRefusal) explains(tool, subject, policyReason string, args json.R
 }
 
 func (f folderRefusal) reason() string {
-	return fmt.Sprintf("this workspace folder %s %s, so file edits and shell commands in it need approval, and this run has nobody to give it. Nobody declined this call and retrying or rewriting it cannot change that. The person can %s. Do the part that needs no approval, then call conclude_blocked naming the untrusted folder.", strconv.Quote(f.root), UntrustedFolderCause(f.declined), UntrustedFolderRemedy(f.root, f.declined))
+	return fmt.Sprintf("this workspace folder %s %s, so file edits and shell commands in it need approval, and this run has nobody to give it. Nobody declined this call and retrying or rewriting it cannot change that. The person can %s. Do the part that needs no approval, then say in your reply that the untrusted folder blocked the rest.", strconv.Quote(f.root), UntrustedFolderCause(f.declined), UntrustedFolderRemedy(f.root, f.declined))
 }
 
 // ApproveWithReason says which refusal this is: without a reason the gate reports
@@ -104,7 +104,7 @@ func (a denyPermissionApprover) ApproveWithPolicyReason(_ context.Context, tool,
 	if a.folder.explains(tool, subject, policyReason, args) {
 		return false, false, a.folder.reason(), nil
 	}
-	reason := "this session has no interactive approver, so any call that needs approval is refused — nobody declined it, and neither retrying nor rewriting it can change that. If this work is meant to run unattended, it needs a permission mode that does not ask (or an explicit allow rule for this tool). Otherwise do the part that needs no approval and call conclude_blocked naming what was refused."
+	reason := "this session has no interactive approver, so any call that needs approval is refused — nobody declined it, and neither retrying nor rewriting it can change that. If this work is meant to run unattended, it needs a permission mode that does not ask (or an explicit allow rule for this tool). Otherwise do the part that needs no approval and say in your reply what was refused."
 	if why := explicitApprovalReason(tool, subject); why != "" {
 		reason = why + " " + reason
 	}

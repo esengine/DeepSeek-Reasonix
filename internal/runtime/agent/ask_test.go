@@ -185,7 +185,7 @@ func TestAskToolWithNoUserLeavesTheDecisionUnresolved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	for _, want := range []string{"unresolved", "the user's to give", "Do not choose on their behalf", "conclude_blocked"} {
+	for _, want := range []string{"unresolved", "the user's to give", "Do not choose on their behalf", "which decision is missing"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("headless answer = %q, want it to contain %q", out, want)
 		}
@@ -257,7 +257,7 @@ func TestAskToolTellsTheModelTheQuestionTimedOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a timeout surfaced as a tool failure: %v", err)
 	}
-	for _, want := range []string{"skipped:", "90 seconds", "timeout, not an answer", "no option was chosen", "conclude_blocked"} {
+	for _, want := range []string{"skipped:", "90 seconds", "timeout, not an answer", "no option was chosen", "which decision is missing"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("result lacks %q:\n%s", want, out)
 		}

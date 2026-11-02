@@ -30,7 +30,7 @@ import (
 // observeCeiling is the whole tool surface of the read-only posture. A tool
 // added to the tree is absent from it until it declares a reach, and one that
 // declares a reach shows up here as a failing diff to be reviewed.
-var observeCeiling = []string{"ask", "code_index", "conclude_blocked", "glob", "grep", "ls", "read_file"}
+var observeCeiling = []string{"ask", "code_index", "glob", "grep", "ls", "read_file"}
 
 func observeProject(t *testing.T) string {
 	t.Helper()
@@ -632,7 +632,7 @@ func TestEffectObserveGrantNarrowsReadToolsButKeepsHostControl(t *testing.T) {
 	if err := ctrl.Run(context.Background(), "look"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	want := []string{"ask", "conclude_blocked", "read_file"}
+	want := []string{"ask", "read_file"}
 	if got := toolNameList(agentRequests(prov.Requests())[0]); !slices.Equal(got, want) {
 		t.Fatalf("offered %v, want %v: a name the grant lists but the ceiling refuses (bash) must not appear", got, want)
 	}

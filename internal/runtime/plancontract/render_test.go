@@ -49,8 +49,6 @@ func richPlan() Plan {
 			},
 			{
 				ID: "s1", ParentID: "p1", Title: "extend cacheKey",
-				Acceptance:   []Criterion{{Text: "two model refs never share an entry"}, {Text: "existing hits keep hitting", Regression: true}},
-				Verification: []Verification{{Command: "go test ./internal/contract/provider/", Expect: "all green"}},
 			},
 			{ID: "p2", Title: "record the hit rate"},
 		},
@@ -89,9 +87,6 @@ func TestRenderKeepsStepDetailOffTheList(t *testing.T) {
 		"   verified: internal/contract/provider/cache.go",
 		"   candidate: internal/assembly/boot/boot.go",
 		"   risk: existing warm caches invalidate once",
-		"     accept [c1]: two model refs never share an entry",
-		"     regression [c2]: existing hits keep hitting",
-		"     verify: go test ./internal/contract/provider/ — all green",
 	} {
 		if !strings.Contains(out, want+"\n") {
 			t.Errorf("rendered plan missing detail line %q:\n%s", want, out)

@@ -82,7 +82,7 @@ func TestAwaitUserRejectsWhatItCannotPark(t *testing.T) {
 		// No asker, so no gate is recorded and readiness is unchanged.
 		"headless run": {
 			todos: newsList(), interactive: false,
-			args: `{"need":"your view"}`, want: "conclude_blocked",
+			args: `{"need":"your view"}`, want: "which input is missing",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

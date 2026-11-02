@@ -38,26 +38,6 @@ func TestNormalizeReassignsDuplicateStepIDs(t *testing.T) {
 	}
 }
 
-func TestNormalizeAssignsCriterionIDsAcrossSteps(t *testing.T) {
-	p := Plan{Objective: "o", Steps: []Step{
-		{ID: "a", Title: "first", Acceptance: []Criterion{{Text: "one"}}},
-		{ID: "b", Title: "second", Acceptance: []Criterion{{Text: "two"}, {Text: "three"}}},
-	}}.Normalize()
-
-	seen := map[string]bool{}
-	for _, step := range p.Steps {
-		for _, c := range step.Acceptance {
-			if c.ID == "" {
-				t.Fatalf("criterion %q has no id", c.Text)
-			}
-			if seen[c.ID] {
-				t.Fatalf("criterion id %q reused across steps", c.ID)
-			}
-			seen[c.ID] = true
-		}
-	}
-}
-
 func TestNormalizeDropsEmptyEntriesAndDeduplicates(t *testing.T) {
 	p := Plan{
 		Objective:   "  ship it  ",
@@ -65,9 +45,7 @@ func TestNormalizeDropsEmptyEntriesAndDeduplicates(t *testing.T) {
 		Assumptions: []Assumption{{Text: "  "}, {Text: "cache is warm", Confirm: " check hit rate "}},
 		Steps: []Step{
 			{Title: "   "},
-			{Title: " do it ", VerifiedFiles: []string{"a.go", "a.go", " b.go "}, Risks: []string{""},
-				Acceptance:   []Criterion{{Text: "  "}},
-				Verification: []Verification{{Command: " ", Expect: " "}}},
+			{Title: " do it ", VerifiedFiles: []string{"a.go", "a.go", " b.go "}, Risks: []string{""}},
 		},
 	}.Normalize()
 
@@ -87,7 +65,7 @@ func TestNormalizeDropsEmptyEntriesAndDeduplicates(t *testing.T) {
 	if len(step.VerifiedFiles) != 2 || step.VerifiedFiles[1] != "b.go" {
 		t.Fatalf("verified files = %v", step.VerifiedFiles)
 	}
-	if step.Risks != nil || step.Acceptance != nil || step.Verification != nil {
+	if step.Risks != nil {
 		t.Fatalf("empty entries survived: %+v", step)
 	}
 }

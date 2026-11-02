@@ -5,7 +5,6 @@ package evidence
 // never carried one, where wording and position are all there is to go on.
 
 import (
-	"context"
 	"slices"
 	"strconv"
 	"strings"
@@ -106,21 +105,3 @@ func todoContentRelates(todo TodoItem, match TodoStepMatch) bool {
 func textOverlaps(a, b string) bool {
 	return stepTextContains(normalizeStepText(a), normalizeStepText(b))
 }
-
-// WithAcceptanceCriteria carries the ids of the approved plan's criteria into a
-// tool call, so a proof citing one can be checked against the plan the user
-// approved instead of resolving into nothing.
-func WithAcceptanceCriteria(ctx context.Context, ids []string) context.Context {
-	if len(ids) == 0 {
-		return ctx
-	}
-	return context.WithValue(ctx, acceptanceCriteriaKey{}, append([]string(nil), ids...))
-}
-
-// AcceptanceCriteriaFromContext returns the approved plan's criterion ids.
-func AcceptanceCriteriaFromContext(ctx context.Context) ([]string, bool) {
-	ids, ok := ctx.Value(acceptanceCriteriaKey{}).([]string)
-	return ids, ok && len(ids) > 0
-}
-
-type acceptanceCriteriaKey struct{}
