@@ -1,0 +1,2 @@
+- 新增：用量逐日也给出可信度——分母、未定价笔数与原因、估算定价笔数、未记录费率卡的笔数；面板会标出"下限"的日子。关联 #14946。
+- New: each day of the usage series carries its denominator, unpriced calls with reasons, estimated-card calls and calls with no card; the panel marks days whose money is a floor. Refs #14946.
