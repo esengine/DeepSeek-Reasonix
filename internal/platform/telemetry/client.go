@@ -40,9 +40,6 @@ var uploadSignals = map[string]bool{
 	// hold was contended or not, how long it waited, and how much of it was
 	// spent holding and not writing.
 	"lease_hold": true, "lease_wait": true, "lease_idle": true,
-	// Recorded by RecordProtocolRecovery since it shipped and dropped here ever
-	// since: the bucket is a ProtocolRecoveryKind, a closed enum, never content.
-	"tool_call_reasoning_recovery": true,
 }
 
 // queuedSurface reads a payload's surface. A queue predating the field can only

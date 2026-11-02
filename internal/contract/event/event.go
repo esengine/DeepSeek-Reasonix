@@ -14,7 +14,6 @@ package event
 import (
 	"encoding/json"
 	"reasonix/internal/contract/delivery"
-	"reasonix/internal/contract/hostaudit"
 	"reasonix/internal/contract/pricing"
 
 	"reasonix/internal/contract/agentgraph"
@@ -208,8 +207,6 @@ type StreamAttemptInfo struct {
 	// request to the first output; 0 = not measured.
 	FirstTokenMs int64
 }
-
-const TurnOutcomeFinalReadiness = "final_readiness"
 
 // TurnOutcomeNoProgress marks a run the user's progress-watch setting paused.
 const TurnOutcomeNoProgress = "no_progress"
@@ -542,14 +539,6 @@ type AskAnswer struct {
 	Value      json.RawMessage `json:",omitempty"`
 }
 
-// FinalReadiness carries machine-readable recovery requirements on TurnDone.
-// Missing values are stable category ids; user-facing detail stays localized in
-// the frontend instead of scraping the diagnostic error string.
-type FinalReadiness struct {
-	Attempts int
-	Missing  []string
-}
-
 const (
 	UsageSourceExecutor         = "executor"
 	UsageSourcePlanner          = "planner"
@@ -610,7 +599,6 @@ type Event struct {
 	Err            error                    // TurnDone: non-nil on failure
 	Cancelled      bool                     // TurnDone: Cancel was requested while the turn was active
 	Outcome        string                   // TurnDone: optional machine-readable recoverable outcome
-	Readiness      *FinalReadiness          // TurnDone: structured final-readiness recovery state
 	Receipt        *CompletionReceipt       // TurnDone: what the host verified, and what it could not
 	CheckpointTurn *int                     // TurnDone: authoritative checkpoint for this turn's visible user message
 	// TurnDone: wall-clock ms the turn's runs took up to their final answers,
@@ -688,12 +676,6 @@ type WorkspaceChangedPayload struct {
 	AllPaths   bool
 	Source     string
 	WatchState WorkspaceWatchState
-}
-
-// ReadinessAuditSink is an optional sink capability. Sinks that do not care
-// about readiness audit receipts can implement only Sink and will ignore them.
-type ReadinessAuditSink interface {
-	RecordReadinessAudit(hostaudit.ReadinessAudit)
 }
 
 // TurnCompletionSink is an optional sink capability for synchronous controller

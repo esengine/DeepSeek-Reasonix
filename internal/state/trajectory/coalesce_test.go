@@ -88,7 +88,7 @@ func TestNonDeltaEventFlushesTheRunInOrder(t *testing.T) {
 	rec, path := recorderAt(t, "order.jsonl", &capabilitySink{})
 	rec.Emit(event.Event{Kind: event.Reasoning, Text: "a"})
 	rec.Emit(event.Event{Kind: event.Reasoning, Text: "b"})
-	rec.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: "some_kind"})
+	rec.RecordTurnCompletion()
 	rec.Emit(event.Event{Kind: event.Reasoning, Text: "c"})
 	if err := rec.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -100,8 +100,8 @@ func TestNonDeltaEventFlushesTheRunInOrder(t *testing.T) {
 	if got[0].Event == nil || got[0].Event.Text != "ab" {
 		t.Errorf("first record = %+v, want the merged \"ab\"", got[0].Event)
 	}
-	if got[1].ProtocolRecovery != "some_kind" {
-		t.Errorf("second record = %+v, want the recovery", got[1])
+	if !got[1].TurnCompletion {
+		t.Errorf("second record = %+v, want the turn completion", got[1])
 	}
 	if got[2].Event == nil || got[2].Event.Text != "c" {
 		t.Errorf("third record = %+v, want \"c\"", got[2].Event)

@@ -11,7 +11,6 @@ import (
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
-	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/goaleval"
 	"reasonix/internal/safety/evidence"
@@ -469,56 +468,4 @@ func (f minimalFakeTool) Schema() json.RawMessage { return json.RawMessage(`{"ty
 func (f minimalFakeTool) ReadOnly() bool          { return f.readOnly }
 func (f minimalFakeTool) Execute(context.Context, json.RawMessage) (string, error) {
 	return f.name + " done", nil
-}
-
-// TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff covers the
-// Goal + Delivery combination: the model works (edit → verify → review →
-// complete_step), reports complete via update_goal, and the goal completes —
-// no user-facing recovery card.
-func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
-	todoWrite, _ := tool.LookupBuiltin("todo_write")
-	completeStep, _ := tool.LookupBuiltin("complete_step")
-	reg := goalRegistry()
-	reg.Add(todoWrite)
-	reg.Add(completeStep)
-	reg.Add(minimalFakeTool{name: "write_file"})
-	reg.Add(minimalFakeTool{name: "read_file", readOnly: true})
-	reg.Add(minimalFakeTool{name: "bash"})
-
-	prov := &scriptedTurns{turns: flattenTurns(
-		[][]provider.Chunk{
-			{toolCallChunk("t0", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
-			{toolCallChunk("w1", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-			{toolCallChunk("rv", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-			{toolCallChunk("vf", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
-			{toolCallChunk("sg", "complete_step", `{"step":"Ship main","result":"implemented","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
-			{toolCallChunk("ug", "update_goal", `{"status":"complete","reason":""}`), {Type: provider.ChunkDone}},
-			textTurn("Ship main delivered."),
-		},
-	)}
-	ag := agent.New(prov, reg, sessionstore.NewSession(""), agent.Options{DeliveryProfile: true}, event.Discard)
-	done := make(chan event.Event, 1)
-	var doneReadiness *event.FinalReadiness
-	c := New(Options{
-		Runner:   ag,
-		Executor: ag,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.TurnDone {
-				doneReadiness = e.Readiness
-				done <- e
-			}
-		}),
-	})
-	c.Submit("/goal implement main")
-	<-done
-
-	if got := c.GoalStatus(); got != GoalStatusComplete {
-		t.Fatalf("GoalStatus() = %q, want complete after verified sign-off", got)
-	}
-	if doneReadiness != nil {
-		t.Fatalf("TurnDone.Readiness = %+v, want nil (Goal absorbs readiness; no recovery card)", doneReadiness)
-	}
-	if got := c.Goal(); got != "" {
-		t.Fatalf("completed goal should be cleared, got %q", got)
-	}
 }

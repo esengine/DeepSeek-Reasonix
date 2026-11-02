@@ -59,23 +59,10 @@ type RunMetrics struct {
 	// CompletionVerdict and CompletionGapKinds are the turn's own verdict on
 	// itself. Outcome answers only whether the run errored, so without these a
 	// reader is told "success" by a file the same run warned a human about.
-	CompletionVerdict                string   `json:"completion_verdict,omitempty"`
-	CompletionGapKinds               []string `json:"completion_gap_kinds,omitempty"`
-	Estimated                        bool     `json:"estimated,omitempty"`
-	Compactions                      int      `json:"compactions"`
-	ReadinessChecks                  int      `json:"readiness_checks"`
-	ReadinessAllowed                 int      `json:"readiness_allowed"`
-	ReadinessBlocks                  int      `json:"readiness_blocks"`
-	ReadinessRecoveries              int      `json:"readiness_recoveries"`
-	ReadinessErrors                  int      `json:"readiness_errors"`
-	ReadinessMissingProjectChecks    int      `json:"readiness_missing_project_checks"`
-	ReadinessIncompleteTodos         int      `json:"readiness_incomplete_todos"`
-	ReadinessMissingAcceptance       int      `json:"readiness_missing_acceptance_criteria"`
-	ReadinessMissingVerification     int      `json:"readiness_missing_verification"`
-	ReadinessMissingStructuredReview int      `json:"readiness_missing_structured_review"`
-	ReadinessMissingPathInspection   int      `json:"readiness_missing_path_inspection"`
-	ReadinessMissingSignoff          int      `json:"readiness_missing_signoff"`
-	ReadinessMissingMutation         int      `json:"readiness_missing_mutation"`
+	CompletionVerdict  string   `json:"completion_verdict,omitempty"`
+	CompletionGapKinds []string `json:"completion_gap_kinds,omitempty"`
+	Estimated          bool     `json:"estimated,omitempty"`
+	Compactions        int      `json:"compactions"`
 	// Project-check shadow: the two derivations compared, by what explains a
 	// disagreement. Only the last two classes are candidate defects.
 	ProjectCheckProbes            int `json:"project_check_probes"`
@@ -498,48 +485,6 @@ func (s *metricsSink) RecordDelegationAudit(a hostaudit.DelegationAudit) {
 	}
 }
 
-func (s *metricsSink) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
-	if s == nil {
-		return
-	}
-	defer event.RecordReadinessAudit(s.inner, a)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.m.ReadinessChecks++
-	switch a.Result {
-	case hostaudit.ReadinessAllowed:
-		s.m.ReadinessAllowed++
-	case hostaudit.ReadinessBlocked:
-		s.m.ReadinessBlocks++
-	case hostaudit.ReadinessErrored:
-		s.m.ReadinessErrors++
-	}
-	if a.Recovered {
-		s.m.ReadinessRecoveries++
-	}
-	s.m.ReadinessMissingProjectChecks += a.MissingProjectChecks
-	s.m.ReadinessIncompleteTodos += a.IncompleteTodos
-	s.m.ReadinessMissingAcceptance += a.MissingAcceptanceCriteria
-	s.m.ReadinessMissingVerification += a.MissingVerification
-	s.m.ReadinessMissingStructuredReview += a.MissingStructuredReview
-	s.m.ReadinessMissingPathInspection += a.MissingPathInspection
-	s.m.ReadinessMissingSignoff += a.MissingSignoff
-	s.m.ReadinessMissingMutation += a.MissingMutation
-}
-
-func (s *metricsSink) RecordVerificationContractDrift(d event.VerificationContractDrift) {
-	if s == nil {
-		return
-	}
-	defer event.RecordVerificationContractDrift(s.inner, d)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.m.GoalResumesWithContract++
-	if d.Drift {
-		s.m.GoalVerificationDrifts++
-	}
-}
-
 func (s *metricsSink) RecordSubagentHandoff(a event.SubagentHandoffAudit) {
 	if s == nil {
 		return
@@ -584,40 +529,6 @@ func (s *metricsSink) RecordSubagentHandoff(a event.SubagentHandoffAudit) {
 	s.m.SubagentHandoffNeedsWork += a.NeedsWork
 	s.m.SubagentHandoffToolsAfter += a.ToolCallsAfterReport
 	s.m.SubagentHandoffLowered += a.LoweredClaims
-}
-
-func (s *metricsSink) RecordProjectCheckProbe(p event.ProjectCheckProbe) {
-	if s == nil {
-		return
-	}
-	defer event.RecordProjectCheckProbe(s.inner, p)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.m.ProjectCheckProbes++
-	if p.LegacyBlocked == p.CandidateBlocked {
-		s.m.ProjectCheckStopParity++
-	}
-	for _, d := range p.Diffs {
-		switch d.Class {
-		case event.ProjectCheckBaselinePreservation:
-			s.m.ProjectCheckBaselinePreserved++
-		case event.ProjectCheckMutationIndex:
-			s.m.ProjectCheckMutationIndex++
-		case event.ProjectCheckIdentityNormalization:
-			s.m.ProjectCheckIdentityNorm++
-		case event.ProjectCheckCandidateOnly:
-			s.m.ProjectCheckCandidateOnly++
-		case event.ProjectCheckLegacyOnly:
-			s.m.ProjectCheckLegacyOnly++
-		}
-	}
-}
-
-func (s *metricsSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	if a.ChildID != "" {
-		s.m.SubagentRecoveries++
-	}
-	event.RecordProtocolRecovery(s.inner, a)
 }
 
 // MergeCapabilityAuditCounters copies capability counters into RunMetrics.

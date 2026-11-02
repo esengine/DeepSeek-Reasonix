@@ -32,7 +32,7 @@ func TestEffectRefusedCallReachesTheNextRequestOnce(t *testing.T) {
 		testutil.Turn{Text: "third"},
 	)
 	setBootTokenProfileTestProvider(t, prov)
-	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, AgentPreset: AgentPresetBalanced, Sink: &bundleAuditSink{}, HeadlessApprovalMode: control.ToolApprovalDontAsk})
+	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, AgentPreset: AgentPresetBalanced, HeadlessApprovalMode: control.ToolApprovalDontAsk})
 	if err != nil {
 		t.Fatal(err)
 	}

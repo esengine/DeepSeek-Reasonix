@@ -104,10 +104,6 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 		WorkStartedAt:  turnWorkStartedAt(err, cancelRequested, completion),
 		ItemID:         activeInboxID,
 	}
-	var readinessErr *agent.FinalReadinessError
-	if errors.As(err, &readinessErr) {
-		done.Readiness = &event.FinalReadiness{Attempts: readinessErr.Attempts, Missing: append([]string(nil), readinessErr.Missing...)}
-	}
 	// Ack active durable items before exposing TurnDone. Frontends commonly
 	// refresh the inbox from that event and must not observe already-consumed
 	// steers in the completed turn. Dispatch still waits for finishing to clear.

@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
@@ -66,11 +65,6 @@ func hostAdvances(sink *recordSink) int {
 	return n
 }
 
-func readinessBlocked(err error) bool {
-	var readinessErr *FinalReadinessError
-	return errors.As(err, &readinessErr)
-}
-
 // sessionContains reports whether any message body holds sub — used to assert a
 // tool's own result text (a complete_step "signed off" or its rejection reason),
 // since Run returns nil whether or not a tool call was rejected mid-turn.
@@ -115,9 +109,6 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	}
 	if n := hostAdvances(sink); n < 2 {
 		t.Fatalf("host advanced %d times, want >=2 (one per complete_step)", n)
-	}
-	if readinessBlocked(runErr) {
-		t.Fatal("a correctly signed-off plan should not trip the readiness gate")
 	}
 }
 

@@ -3,7 +3,6 @@ package boot
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"testing"
 
 	"reasonix/internal/contract/provider"
-	"reasonix/internal/runtime/agent"
 )
 
 // writingProvider asks to write one file, then ends once it has seen the result.
@@ -86,10 +84,7 @@ model = "x"
 		t.Fatalf("Build: %v", err)
 	}
 	defer ctrl.Close()
-	// A write nobody verified ends the turn with a readiness pause, which is
-	// the turn doing its job here, not a failure of the build.
-	var paused *agent.FinalReadinessError
-	if err := ctrl.Run(context.Background(), "write the file"); err != nil && !errors.As(err, &paused) {
+	if err := ctrl.Run(context.Background(), "write the file"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	_, statErr := os.Stat(filepath.Join(dir, "out.txt"))

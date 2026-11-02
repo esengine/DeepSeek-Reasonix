@@ -13,34 +13,10 @@ type AuditForwarder struct{ Inner Sink }
 
 func (f AuditForwarder) CaptureUsageScope() any { return CaptureUsageScope(f.Inner) }
 
-func (f AuditForwarder) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
-	RecordReadinessAudit(f.Inner, a)
-}
-
 func (f AuditForwarder) RecordTurnCompletion() { RecordTurnCompletion(f.Inner) }
-
-func (f AuditForwarder) RecordContractShadow(a ContractShadowAudit) {
-	RecordContractShadow(f.Inner, a)
-}
-
-func (f AuditForwarder) RecordEvidenceBundle(a EvidenceBundleAudit) {
-	RecordEvidenceBundle(f.Inner, a)
-}
-
-func (f AuditForwarder) RecordCompletionReport(a CompletionReportAudit) {
-	RecordCompletionReport(f.Inner, a)
-}
 
 func (f AuditForwarder) RecordMemoryRecall(a MemoryRecallAudit) {
 	RecordMemoryRecall(f.Inner, a)
-}
-
-func (f AuditForwarder) RecordOutcomeProgress(s hostaudit.OutcomeSample) {
-	RecordOutcomeProgress(f.Inner, s)
-}
-
-func (f AuditForwarder) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
-	RecordProtocolRecovery(f.Inner, a)
 }
 
 func (f AuditForwarder) RecordDelegationAudit(a hostaudit.DelegationAudit) {
@@ -55,16 +31,8 @@ func (f AuditForwarder) RecordRunBudget(s RunBudgetSample) {
 	RecordRunBudget(f.Inner, s)
 }
 
-func (f AuditForwarder) RecordProjectCheckProbe(p ProjectCheckProbe) {
-	RecordProjectCheckProbe(f.Inner, p)
-}
-
 func (f AuditForwarder) RecordSubagentHandoff(a SubagentHandoffAudit) {
 	RecordSubagentHandoff(f.Inner, a)
-}
-
-func (f AuditForwarder) RecordVerificationContractDrift(d VerificationContractDrift) {
-	RecordVerificationContractDrift(f.Inner, d)
 }
 
 // DelegationAuditSink receives one receipt per completed sub-agent run.

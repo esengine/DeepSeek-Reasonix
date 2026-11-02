@@ -106,12 +106,12 @@ func TestToWireContextMaintenanceJSON(t *testing.T) {
 }
 
 func TestToWireNoticeCarriesCode(t *testing.T) {
-	w := ToWire(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeFinalReadiness, Text: "readiness copy"})
+	w := ToWire(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: "empty copy"})
 	b, err := json.Marshal(w)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !strings.Contains(string(b), `"code":"final_readiness"`) {
+	if !strings.Contains(string(b), `"code":"empty_final"`) {
 		t.Fatalf("notice JSON = %s, want a stable code field", b)
 	}
 
@@ -265,23 +265,6 @@ func TestToWireToolOmitsHostOnlyWorkspaceMutationMetadata(t *testing.T) {
 }
 
 func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
-	readiness := ToWire(event.Event{
-		Kind:      event.TurnDone,
-		Err:       errors.New("final-answer readiness failed 3 times: missing verification"),
-		Outcome:   event.TurnOutcomeFinalReadiness,
-		Readiness: &event.FinalReadiness{Attempts: 3, Missing: []string{"verification", "review"}},
-	})
-	if readiness.Outcome != event.TurnOutcomeFinalReadiness || readiness.Err == "" || readiness.Readiness == nil || readiness.Readiness.Attempts != 3 {
-		t.Fatalf("readiness wire event = %+v", readiness)
-	}
-	b, err := json.Marshal(readiness)
-	if err != nil {
-		t.Fatalf("marshal readiness: %v", err)
-	}
-	if !strings.Contains(string(b), `"outcome":"final_readiness"`) || !strings.Contains(string(b), `"missing":["verification","review"]`) {
-		t.Fatalf("readiness JSON = %s, want structured outcome", b)
-	}
-
 	ordinary, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone, Err: errors.New("provider failed")}))
 	if err != nil {
 		t.Fatalf("marshal ordinary error: %v", err)

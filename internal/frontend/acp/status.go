@@ -3,7 +3,6 @@ package acp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"reasonix/internal/contract/pricing"
 	"runtime"
@@ -15,7 +14,6 @@ import (
 	"reasonix/internal/base/secrets"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
-	"reasonix/internal/runtime/agent"
 	"reasonix/internal/session/control"
 )
 
@@ -351,11 +349,6 @@ func (t *statusTelemetry) onEvent(e event.Event) (string, bool) {
 		return "phase", true
 	case event.ToolDispatch:
 		t.mutate(func(t *statusTelemetry) { t.phase = "implementing" })
-	case event.Notice:
-		if e.Code == event.NoticeCodeFinalReadiness {
-			t.mutate(func(t *statusTelemetry) { t.phase = "checking_readiness" })
-			return "phase", true
-		}
 	}
 	return "", false
 }
@@ -386,13 +379,7 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 			t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: "goal blocked"}
 			eventName = "pause"
 		default:
-			var readinessErr *agent.FinalReadinessError
 			switch {
-			case errors.As(runErr, &readinessErr):
-				t.phase = "readiness_paused"
-				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(readinessErr.Error(), 2_048)}
-				t.finalReadiness.Risks = redactStatusTexts(readinessErr.Missing, 2_048)
-				eventName = "pause"
 			case runErr != nil:
 				t.phase = "error"
 				t.turnOutcome = ReasonixTurnOutcome{Kind: "error", Reason: clipStatusText(runErr.Error(), 2_048)}

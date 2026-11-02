@@ -1,7 +1,6 @@
 package event
 
 import (
-	"reasonix/internal/contract/hostaudit"
 	"sync"
 	"testing"
 
@@ -79,21 +78,11 @@ func TestSyncTreatsTypedNilSinkAsDiscard(t *testing.T) {
 }
 
 type readinessAuditRecorder struct {
-	events    []hostaudit.ReadinessAudit
-	recovery  []ProtocolRecoveryAudit
 	workspace []WorkspaceMutation
 	turns     int
 }
 
 func (r *readinessAuditRecorder) Emit(Event) {}
-
-func (r *readinessAuditRecorder) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
-	r.events = append(r.events, a)
-}
-
-func (r *readinessAuditRecorder) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
-	r.recovery = append(r.recovery, a)
-}
 
 func (r *readinessAuditRecorder) RecordTurnCompletion() { r.turns++ }
 
@@ -115,34 +104,6 @@ func TestSyncForwardsWorkspaceMutationWithoutUIEvent(t *testing.T) {
 	RecordWorkspaceMutation(sink, WorkspaceMutation{ToolName: "write_file", Paths: []string{"a.go"}, Content: true})
 	if len(rec.workspace) != 1 || rec.workspace[0].ToolName != "write_file" || len(rec.workspace[0].Paths) != 1 {
 		t.Fatalf("workspace mutation not forwarded through Sync: %+v", rec.workspace)
-	}
-}
-
-func TestSyncForwardsReadinessAuditReceipts(t *testing.T) {
-	rec := &readinessAuditRecorder{}
-	sink := Sync(rec)
-
-	RecordReadinessAudit(sink, hostaudit.ReadinessAudit{
-		Result:               hostaudit.ReadinessBlocked,
-		MissingProjectChecks: 1,
-	})
-
-	if len(rec.events) != 1 {
-		t.Fatalf("readiness audit events = %d, want 1", len(rec.events))
-	}
-	if rec.events[0].Result != hostaudit.ReadinessBlocked || rec.events[0].MissingProjectChecks != 1 {
-		t.Fatalf("readiness audit not forwarded through Sync: %+v", rec.events[0])
-	}
-}
-
-func TestSyncForwardsProtocolRecoveryWithoutEmittingUIEvent(t *testing.T) {
-	rec := &readinessAuditRecorder{}
-	sink := Sync(rec)
-
-	RecordProtocolRecovery(sink, ProtocolRecoveryAudit{Kind: ProtocolRecoveryKind("test")})
-
-	if len(rec.recovery) != 1 || rec.recovery[0].Kind != ProtocolRecoveryKind("test") {
-		t.Fatalf("protocol recovery not forwarded through Sync: %+v", rec.recovery)
 	}
 }
 

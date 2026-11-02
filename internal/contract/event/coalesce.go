@@ -185,20 +185,6 @@ func (c *coalescer) RecordDelegationAudit(a hostaudit.DelegationAudit) {
 	RecordDelegationAudit(c.inner, a)
 }
 
-func (c *coalescer) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordReadinessAudit(c.inner, a)
-}
-
-func (c *coalescer) RecordProjectCheckProbe(p ProjectCheckProbe) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordProjectCheckProbe(c.inner, p)
-}
-
 func (c *coalescer) RecordSubagentHandoff(a SubagentHandoffAudit) {
 	c.mu.Lock()
 	c.enqueueFlushLocked()
@@ -206,53 +192,11 @@ func (c *coalescer) RecordSubagentHandoff(a SubagentHandoffAudit) {
 	RecordSubagentHandoff(c.inner, a)
 }
 
-func (c *coalescer) RecordVerificationContractDrift(d VerificationContractDrift) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordVerificationContractDrift(c.inner, d)
-}
-
 func (c *coalescer) RecordTurnCompletion() {
 	c.mu.Lock()
 	c.enqueueFlushLocked()
 	c.drainAndUnlock()
 	RecordTurnCompletion(c.inner)
-}
-
-func (c *coalescer) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordProtocolRecovery(c.inner, a)
-}
-
-func (c *coalescer) RecordContractShadow(a ContractShadowAudit) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordContractShadow(c.inner, a)
-}
-
-func (c *coalescer) RecordCompletionReport(a CompletionReportAudit) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordCompletionReport(c.inner, a)
-}
-
-func (c *coalescer) RecordEvidenceBundle(a EvidenceBundleAudit) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordEvidenceBundle(c.inner, a)
-}
-
-func (c *coalescer) RecordOutcomeProgress(sample hostaudit.OutcomeSample) {
-	c.mu.Lock()
-	c.enqueueFlushLocked()
-	c.drainAndUnlock()
-	RecordOutcomeProgress(c.inner, sample)
 }
 
 func (c *coalescer) RecordMemoryRecall(a MemoryRecallAudit) {

@@ -6,7 +6,6 @@ package control
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reasonix/internal/state/sessionstore"
 	"slices"
@@ -23,10 +22,6 @@ import (
 )
 
 func turnOutcome(err error) string {
-	var readinessErr *agent.FinalReadinessError
-	if errors.As(err, &readinessErr) {
-		return event.TurnOutcomeFinalReadiness
-	}
 	if info, ok := agent.InspectRunPause(err); ok &&
 		(info.Kind == agent.PauseKindNoProgress || info.Kind == agent.PauseKindPerseveration) {
 		return event.TurnOutcomeNoProgress

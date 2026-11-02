@@ -2213,61 +2213,6 @@ func TestServePromptFailureIsAJSONRPCErrorWithTypedCode(t *testing.T) {
 	}
 }
 
-func TestServeReadinessPauseEndsTheTurnWithAReceiptAndTypedOutcome(t *testing.T) {
-	factory := &fakeFactory{behavior: func(_ context.Context, sink event.Sink, _ string) error {
-		sink.Emit(event.Event{Kind: event.Text, Text: "all done"})
-		return &agent.FinalReadinessError{Attempts: 1, Reason: "run a relevant verification command", Missing: []string{"verification"}}
-	}}
-	client, stop := startServer(t, factory)
-	defer stop()
-
-	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
-	newResp := client.call(t, "session/new", SessionNewParams{})
-	var nr SessionNewResult
-	json.Unmarshal(newResp.Result, &nr)
-
-	promptCh := client.callAsync("session/prompt", SessionPromptParams{
-		SessionID: nr.SessionID,
-		Prompt:    []ContentBlock{{Type: "text", Text: "write something"}},
-	})
-	notifs, resp := drainPrompt(t, client, promptCh)
-	if resp.Error != nil {
-		t.Fatalf("a readiness pause is not a failure: %+v", resp.Error)
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(resp.Result, &raw); err != nil {
-		t.Fatalf("prompt result: %v", err)
-	}
-	if string(raw["stopReason"]) != `"end_turn"` {
-		t.Errorf("stopReason = %s, want end_turn", raw["stopReason"])
-	}
-	var meta struct {
-		Reasonix struct {
-			TurnOutcome ReasonixTurnOutcome `json:"turnOutcome"`
-		} `json:"reasonix.io"`
-	}
-	if err := json.Unmarshal(raw["_meta"], &meta); err != nil || meta.Reasonix.TurnOutcome.Kind != "paused" {
-		t.Errorf("_meta = %s (%v), want turnOutcome kind paused", raw["_meta"], err)
-	}
-	var text strings.Builder
-	for _, n := range notifs {
-		var p struct {
-			Update struct {
-				SessionUpdate string `json:"sessionUpdate"`
-				Content       struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			} `json:"update"`
-		}
-		if json.Unmarshal(n.Params, &p) == nil && p.Update.SessionUpdate == "agent_message_chunk" {
-			text.WriteString(p.Update.Content.Text)
-		}
-	}
-	if got := text.String(); !strings.Contains(got, "all done") || !strings.Contains(got, "[paused]") || !strings.Contains(got, "verification") {
-		t.Errorf("streamed text = %q, want the answer followed by a [paused] receipt naming the missing verification", got)
-	}
-}
-
 // statusUpdatesCaps is the initialize declaration that opts a test client in to
 // the unsolicited vendor status notifications.
 var statusUpdatesCaps = ClientCapabilities{Meta: map[string]any{"reasonix.io": map[string]any{

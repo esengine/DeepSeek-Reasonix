@@ -44,22 +44,6 @@ func (s *syncSink) RecordDelegationAudit(a hostaudit.DelegationAudit) {
 	RecordDelegationAudit(s.inner, a)
 }
 
-func (s *syncSink) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rs, ok := s.inner.(ReadinessAuditSink); ok {
-		rs.RecordReadinessAudit(a)
-	}
-}
-
-func (s *syncSink) RecordProjectCheckProbe(p ProjectCheckProbe) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if ps, ok := s.inner.(ProjectCheckProbeSink); ok {
-		ps.RecordProjectCheckProbe(p)
-	}
-}
-
 func (s *syncSink) RecordSubagentHandoff(a SubagentHandoffAudit) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -68,59 +52,11 @@ func (s *syncSink) RecordSubagentHandoff(a SubagentHandoffAudit) {
 	}
 }
 
-func (s *syncSink) RecordVerificationContractDrift(d VerificationContractDrift) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if ds, ok := s.inner.(VerificationContractDriftSink); ok {
-		ds.RecordVerificationContractDrift(d)
-	}
-}
-
 func (s *syncSink) RecordTurnCompletion() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ts, ok := s.inner.(TurnCompletionSink); ok {
 		ts.RecordTurnCompletion()
-	}
-}
-
-func (s *syncSink) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rs, ok := s.inner.(ProtocolRecoveryAuditSink); ok {
-		rs.RecordProtocolRecovery(a)
-	}
-}
-
-func (s *syncSink) RecordContractShadow(a ContractShadowAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rs, ok := s.inner.(ContractShadowAuditSink); ok {
-		rs.RecordContractShadow(a)
-	}
-}
-
-func (s *syncSink) RecordCompletionReport(a CompletionReportAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rs, ok := s.inner.(CompletionReportAuditSink); ok {
-		rs.RecordCompletionReport(a)
-	}
-}
-
-func (s *syncSink) RecordEvidenceBundle(a EvidenceBundleAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if es, ok := s.inner.(EvidenceBundleAuditSink); ok {
-		es.RecordEvidenceBundle(a)
-	}
-}
-
-func (s *syncSink) RecordOutcomeProgress(sample hostaudit.OutcomeSample) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if op, ok := s.inner.(OutcomeProgressSink); ok {
-		op.RecordOutcomeProgress(sample)
 	}
 }
 

@@ -2,7 +2,6 @@ package boot
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -110,11 +109,7 @@ func runUnattended(ctx context.Context, parent Options, sink event.Sink, mode, r
 	}
 	defer ctrl.Close()
 	if err := ctrl.Run(agent.WithoutRunTimeSink(ctx), prompt); err != nil {
-		var unready *agent.FinalReadinessError
-		if !errors.As(err, &unready) {
-			return "", "", err
-		}
-		unverified = unready.Reason
+		return "", "", err
 	}
 	return finalAnswer(ctrl), unverified, nil
 }

@@ -18,17 +18,12 @@ import (
 // silently, with the tests still green. Pure forwarders should embed
 // event.AuditForwarder instead of repeating the nine methods.
 func TestAuditCapabilitiesAreForwardedByEveryWrapper(t *testing.T) {
-	reference := reflect.TypeFor[event.CompletionReportAuditSink]()
+	reference := reflect.TypeFor[event.DelegationAuditSink]()
 	required := map[string]reflect.Type{
-		"DelegationAuditSink":       reflect.TypeFor[event.DelegationAuditSink](),
-		"ReadinessAuditSink":        reflect.TypeFor[event.ReadinessAuditSink](),
-		"ContractShadowAuditSink":   reflect.TypeFor[event.ContractShadowAuditSink](),
-		"EvidenceBundleAuditSink":   reflect.TypeFor[event.EvidenceBundleAuditSink](),
-		"MemoryRecallSink":          reflect.TypeFor[event.MemoryRecallSink](),
-		"OutcomeProgressSink":       reflect.TypeFor[event.OutcomeProgressSink](),
-		"ProtocolRecoveryAuditSink": reflect.TypeFor[event.ProtocolRecoveryAuditSink](),
-		"TurnCompletionSink":        reflect.TypeFor[event.TurnCompletionSink](),
-		"SubagentHandoffSink":       reflect.TypeFor[event.SubagentHandoffSink](),
+		"DelegationAuditSink": reflect.TypeFor[event.DelegationAuditSink](),
+		"MemoryRecallSink":    reflect.TypeFor[event.MemoryRecallSink](),
+		"TurnCompletionSink":  reflect.TypeFor[event.TurnCompletionSink](),
+		"SubagentHandoffSink": reflect.TypeFor[event.SubagentHandoffSink](),
 	}
 	wrappers := []event.Sink{
 		event.Sync(event.Discard),

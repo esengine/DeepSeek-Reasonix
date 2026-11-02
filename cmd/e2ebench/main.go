@@ -85,8 +85,6 @@ type runMetrics struct {
 	// graph, which is where a scheduling wait is recorded and nowhere else.
 	Fanout *fanoutMetrics `json:"fanout,omitempty"`
 	// Optional Delivery capability counters (omitempty for baseline/old metrics).
-	ReadinessChecks            int     `json:"readiness_checks,omitempty"`
-	ReadinessRecoveries        int     `json:"readiness_recoveries,omitempty"`
 	CapabilityRoutes           int     `json:"capability_routes,omitempty"`
 	CapabilityRoutedCandidates int     `json:"capability_routed_candidates,omitempty"`
 	CapabilityRoutedRequire    int     `json:"capability_routed_require,omitempty"`

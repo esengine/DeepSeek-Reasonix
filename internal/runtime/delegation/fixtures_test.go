@@ -112,9 +112,8 @@ func (p readOnlyBoundaryProxy) ResolveCall(context.Context, json.RawMessage) (to
 }
 
 type recordSink struct {
-	mu       sync.Mutex
-	evs      []event.Event
-	recovery []event.ProtocolRecoveryAudit
+	mu  sync.Mutex
+	evs []event.Event
 }
 
 func (s *recordSink) Emit(e event.Event) {
@@ -133,12 +132,6 @@ func (s *recordSink) kinds(k event.Kind) []event.Event {
 		}
 	}
 	return out
-}
-
-func (s *recordSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.recovery = append(s.recovery, a)
 }
 
 type recordingWriter struct {
@@ -324,16 +317,6 @@ type recordingAsker struct {
 func (r *recordingAsker) Ask(_ context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
 	r.questions = questions
 	return []event.AskAnswer{{QuestionID: "q1", Selected: []string{"Keep going"}}}, nil
-}
-
-type recoverySink struct {
-	audits []event.ProtocolRecoveryAudit
-}
-
-func (s *recoverySink) Emit(event.Event) {}
-
-func (s *recoverySink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	s.audits = append(s.audits, a)
 }
 
 type workspaceSignalSink struct {

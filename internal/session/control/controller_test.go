@@ -402,16 +402,6 @@ func TestReconcileCleanupPendingRemovesOrphanedArtifacts(t *testing.T) {
 	}
 }
 
-func TestTurnOutcomeClassifiesFinalReadiness(t *testing.T) {
-	err := &agent.FinalReadinessError{Attempts: 3, Reason: "missing verification"}
-	if got := turnOutcome(err); got != event.TurnOutcomeFinalReadiness {
-		t.Fatalf("turnOutcome() = %q, want %q", got, event.TurnOutcomeFinalReadiness)
-	}
-	if got := turnOutcome(errors.New("provider failed")); got != "" {
-		t.Fatalf("ordinary turn outcome = %q, want empty", got)
-	}
-}
-
 func TestRunTurnSnapshotsActivityWhenTranscriptChanges(t *testing.T) {
 	dir := testenv.TempDir(t)
 	sess := sessionstore.NewSession("sys")

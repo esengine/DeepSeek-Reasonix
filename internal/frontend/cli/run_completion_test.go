@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-
-	"reasonix/internal/runtime/agent"
 )
 
 func TestClassifyRunCompletionNamesTheFailureClass(t *testing.T) {
@@ -15,7 +13,6 @@ func TestClassifyRunCompletionNamesTheFailureClass(t *testing.T) {
 		want string
 	}{
 		{nil, "success"},
-		{&agent.FinalReadinessError{Attempts: 3, Reason: "incomplete todos"}, "final_readiness"},
 		{fmt.Errorf("run: %w", context.DeadlineExceeded), "timeout"},
 		{context.Canceled, "cancelled"},
 		{errors.New("provider 500"), "error_during_execution"},
@@ -23,14 +20,5 @@ func TestClassifyRunCompletionNamesTheFailureClass(t *testing.T) {
 		if got := classifyRunCompletion(tc.err).class; got != tc.want {
 			t.Errorf("class for %v = %q, want %q", tc.err, got, tc.want)
 		}
-	}
-}
-
-// An unmet final-readiness judgement is a verdict on a finished run: it keeps
-// its benchmark class and exits 0.
-func TestFinalReadinessIsAVerdictNotAFailure(t *testing.T) {
-	readiness := classifyRunCompletion(&agent.FinalReadinessError{Attempts: 3})
-	if readiness.isError || readiness.exitCode != 0 || !readiness.unverified || readiness.subtype != "success" {
-		t.Fatalf("final-readiness completion = %+v, want a successful, unverified run", readiness)
 	}
 }

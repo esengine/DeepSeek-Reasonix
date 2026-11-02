@@ -13,7 +13,7 @@
     "doc-prose": 2128,
     "error-text": 9,
     "essay": 2579,
-    "file-size": 18427,
+    "file-size": 18416,
     "flat-view": 0,
     "frontend-parity": 13,
     "function-size": 2485,
@@ -670,9 +670,6 @@
     },
     "internal/frontend/acp/session_config.go": {
       "essay": 6
-    },
-    "internal/frontend/acp/status.go": {
-      "file-size": 11
     },
     "internal/frontend/acp/switch_recovery_test.go": {
       "essay": 7

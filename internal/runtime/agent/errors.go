@@ -25,10 +25,6 @@ func PauseClass(err error) string {
 	if errors.As(err, &repeated) {
 		return PauseKindPerseveration
 	}
-	var readiness *FinalReadinessError
-	if errors.As(err, &readiness) {
-		return "final_readiness"
-	}
 	return ""
 }
 
@@ -62,24 +58,6 @@ func InspectRunPause(err error) (RunPauseInfo, bool) {
 		return RunPauseInfo{Kind: PauseKindPerseveration, Key: repeated.key, Reason: repeated.detail}, true
 	}
 	return RunPauseInfo{}, false
-}
-
-// FinalReadinessError reports that the model exhausted its recovery attempts
-// before satisfying the host-observed delivery checks.
-type FinalReadinessError struct {
-	Attempts int
-	Reason   string
-	Missing  []string
-	// Signature is the full unmet-requirement state. Missing names only the
-	// categories, which stay put while the counts inside them move.
-	Signature string
-}
-
-func (e *FinalReadinessError) Error() string {
-	if e == nil {
-		return "final-answer readiness failed"
-	}
-	return fmt.Sprintf("final-answer readiness failed %d times: %s", e.Attempts, e.Reason)
 }
 
 // EmptyFinalError reports that the model ended its response with no visible

@@ -398,7 +398,6 @@ func TestEverySignalTheSinkRecordsSurvivesTheUploadAllowList(t *testing.T) {
 	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{Err: "permission denied"}})
 	sink.Emit(event.Event{Kind: event.Notice, Code: event.NoticeCodeEmptyFinal})
 	sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: "auto"}})
-	event.RecordProtocolRecovery(sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryKind("test")})
 	sink.Emit(event.Event{Kind: event.TurnDone})
 	reporter.RecordRecovery(hostaudit.RecoveryMetrics{FailureEvents: 1, ReviewLatencyMsSum: 400, ReviewLatencyCount: 1})
 

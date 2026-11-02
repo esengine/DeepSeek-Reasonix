@@ -11,7 +11,6 @@ const (
 	NoticeCodeCheckpointRecordingFailed                         = "checkpoint_recording_failed"
 	NoticeCodeTurnIdentityMismatch                              = "turn_identity_mismatch"
 	NoticeCodePlanAutoApproved                                  = "plan_auto_approved"
-	NoticeCodeFinalReadiness                                    = "final_readiness"
 	NoticeCodeEmptyFinal                                        = "empty_final"
 	NoticeCodeExecutorHandoff                                   = "executor_handoff"
 	NoticeCodeToolBudget                                        = "tool_budget"

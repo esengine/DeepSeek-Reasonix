@@ -78,7 +78,7 @@ func TestRecorderCountsMergedProviderRequests(t *testing.T) {
 	}
 }
 
-func TestRecorderCapturesGuardianUsageAndPreservesProtocolAudit(t *testing.T) {
+func TestRecorderCapturesGuardianUsage(t *testing.T) {
 	dir := testenv.TempDir(t)
 	inner := &auditSpySink{}
 	r := NewRecorder(inner, dir, "desktop")
@@ -87,7 +87,6 @@ func TestRecorderCapturesGuardianUsageAndPreservesProtocolAudit(t *testing.T) {
 		ModelRef: "deepseek/deepseek-v4-flash",
 		Guardian: event.GuardianResult{Usage: &provider.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
 	})
-	event.RecordProtocolRecovery(r, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryKind("test")})
 	flushRecorder(t, r)
 
 	day := dayStart(time.Now())
@@ -97,9 +96,6 @@ func TestRecorderCapturesGuardianUsageAndPreservesProtocolAudit(t *testing.T) {
 	}
 	if got.Tokens != 15 || got.TopModel != "deepseek/deepseek-v4-flash" {
 		t.Fatalf("guardian usage = %+v", got)
-	}
-	if len(inner.protocol) != 1 || inner.protocol[0].Kind != event.ProtocolRecoveryKind("test") {
-		t.Fatalf("protocol audit was not forwarded: %+v", inner.protocol)
 	}
 }
 
@@ -470,15 +466,10 @@ type spySink struct{ events []event.Event }
 func (s *spySink) Emit(e event.Event) { s.events = append(s.events, e) }
 
 type auditSpySink struct {
-	events   []event.Event
-	protocol []event.ProtocolRecoveryAudit
+	events []event.Event
 }
 
 func (s *auditSpySink) Emit(e event.Event) { s.events = append(s.events, e) }
-func (s *auditSpySink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	s.protocol = append(s.protocol, a)
-}
-
 func usageEvent(model string, prompt, completion, reasoning, hit, miss, total int) event.Event {
 	return event.Event{
 		Kind:     event.Usage,

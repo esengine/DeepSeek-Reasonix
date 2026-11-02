@@ -13,7 +13,6 @@ import (
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
-	"reasonix/internal/runtime/agent"
 )
 
 type statusFactory struct {
@@ -207,19 +206,8 @@ func TestStatusNormalizesPhaseAndRedactsPublicText(t *testing.T) {
 	if got := telemetry.snapshot().phase; got != "working" {
 		t.Fatalf("unknown phase = %q, want working", got)
 	}
-	telemetry.finishTurn(&agent.FinalReadinessError{
-		Attempts: 1,
-		Reason:   "token=secret-reason",
-		Missing:  []string{"api_key=secret-risk"},
-	}, false, "running", "authorization: bearer secret-summary")
+	telemetry.finishTurn(errors.New("token=secret-reason"), false, "running", "authorization: bearer secret-summary")
 	snapshot := telemetry.snapshot()
-	encoded, err := json.Marshal(snapshot.finalReadiness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "secret-") || !strings.Contains(string(encoded), "[redacted]") {
-		t.Fatalf("status text was not redacted: %s", encoded)
-	}
 	if strings.Contains(snapshot.turnOutcome.Reason, "secret-") {
 		t.Fatalf("turn outcome was not redacted: %q", snapshot.turnOutcome.Reason)
 	}
@@ -308,13 +296,6 @@ func TestStatusRecomputesPlannerModeAfterWorkModeSwitch(t *testing.T) {
 
 func TestStatusClassifiesPauseAndError(t *testing.T) {
 	telemetry := newStatusTelemetry()
-	telemetry.beginTurn()
-	pauseEvent := telemetry.finishTurn(&agent.FinalReadinessError{Attempts: 3, Reason: "missing verification", Missing: []string{"verify"}}, false, "running", "partial")
-	paused := telemetry.snapshot()
-	if pauseEvent != "pause" || paused.turnOutcome.Kind != "paused" || len(paused.finalReadiness.Risks) != 1 {
-		t.Fatalf("pause classification = event %q snapshot %+v", pauseEvent, paused)
-	}
-
 	telemetry.beginTurn()
 	errorEvent := telemetry.finishTurn(errors.New("provider failed"), false, "running", "")
 	failed := telemetry.snapshot()

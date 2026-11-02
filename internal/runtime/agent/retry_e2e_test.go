@@ -17,9 +17,8 @@ import (
 )
 
 type recordSink struct {
-	mu       sync.Mutex
-	evs      []event.Event
-	recovery []event.ProtocolRecoveryAudit
+	mu  sync.Mutex
+	evs []event.Event
 }
 
 func (s *recordSink) Emit(e event.Event) {
@@ -38,12 +37,6 @@ func (s *recordSink) kinds(k event.Kind) []event.Event {
 		}
 	}
 	return out
-}
-
-func (s *recordSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.recovery = append(s.recovery, a)
 }
 
 // TestAgentEmitsRetryingThenStreams drives the whole chain end-to-end: a real

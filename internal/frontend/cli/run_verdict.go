@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/eventwire"
-	"reasonix/internal/runtime/agent"
 	"reasonix/internal/safety/permission"
 	"reasonix/internal/session/control"
 )
@@ -120,15 +118,6 @@ func (t *runDenialTally) snapshot() []runPermissionDenial {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]runPermissionDenial(nil), t.denials...)
-}
-
-// runReadiness is the unmet final-readiness judgement a run ended with, or nil.
-func runReadiness(runErr error) *eventwire.FinalReadiness {
-	var readiness *agent.FinalReadinessError
-	if !errors.As(runErr, &readiness) || readiness == nil {
-		return nil
-	}
-	return &eventwire.FinalReadiness{Attempts: readiness.Attempts, Missing: append([]string(nil), readiness.Missing...)}
 }
 
 // withFolderRefusal marks a run whose edits and commands were refused because

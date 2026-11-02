@@ -67,7 +67,6 @@ type TurnControl interface {
 	// *Controller for tests. All of them now take display before input — they
 	// are pairs of strings, and the odd one out was a swap no compiler catches.
 	SubmitDisplay(display, input string)
-	SubmitDeliveryRecovery(display, input string)
 	SubmitInvocationDisplay(display, input string, invocations []InvocationRequest)
 	SubmitHTTPFormat(input, format string) Admission
 	Send(input string)

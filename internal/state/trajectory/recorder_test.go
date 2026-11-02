@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reasonix/internal/contract/hostaudit"
 	"strings"
 	"testing"
 	"time"
@@ -14,29 +13,12 @@ import (
 )
 
 type capabilitySink struct {
-	events     []event.Event
-	readiness  []hostaudit.ReadinessAudit
-	recoveries []event.ProtocolRecoveryAudit
-	outcomes   []hostaudit.OutcomeSample
-	reports    []event.CompletionReportAudit
-	turns      int
+	events []event.Event
+	turns  int
 }
 
-func (s *capabilitySink) Emit(e event.Event) { s.events = append(s.events, e) }
-func (s *capabilitySink) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
-	s.readiness = append(s.readiness, a)
-}
-func (s *capabilitySink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	s.recoveries = append(s.recoveries, a)
-}
+func (s *capabilitySink) Emit(e event.Event)    { s.events = append(s.events, e) }
 func (s *capabilitySink) RecordTurnCompletion() { s.turns++ }
-func (s *capabilitySink) RecordOutcomeProgress(sample hostaudit.OutcomeSample) {
-	s.outcomes = append(s.outcomes, sample)
-}
-func (s *capabilitySink) RecordCompletionReport(a event.CompletionReportAudit) {
-	s.reports = append(s.reports, a)
-}
-
 func readRecords(t *testing.T, path string) []Record {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -117,38 +99,14 @@ func TestRecorderRecordsAndForwardsOptionalCapabilities(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	r.RecordReadinessAudit(hostaudit.ReadinessAudit{Result: hostaudit.ReadinessBlocked, MissingVerification: 2})
-	r.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryKind("test")})
 	r.RecordTurnCompletion()
-	r.RecordOutcomeProgress(hostaudit.OutcomeSample{Round: 3, Exploration: 2, Objective: 1, LegacyGain: 4})
-	r.RecordCompletionReport(event.CompletionReportAudit{
-		Verdict: "partial", Changes: 2, ChangesUnreviewed: 1, Gaps: 1, GapKinds: []string{"unreviewed_change"},
-	})
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
 	recs := readRecords(t, path)
-	if len(recs) != 5 {
-		t.Fatalf("got %d records, want 5", len(recs))
-	}
-	if recs[0].ReadinessAudit == nil || recs[0].ReadinessAudit.Result != "blocked" || recs[0].ReadinessAudit.MissingVerification != 2 {
-		t.Errorf("readiness record = %+v", recs[0].ReadinessAudit)
-	}
-	if recs[1].ProtocolRecovery != string(event.ProtocolRecoveryKind("test")) {
-		t.Errorf("protocol recovery record = %q", recs[1].ProtocolRecovery)
-	}
-	if !recs[2].TurnCompletion {
-		t.Errorf("turn completion record = %+v", recs[2])
-	}
-	if recs[3].OutcomeProgress == nil || recs[3].OutcomeProgress.Round != 3 || recs[3].OutcomeProgress.Objective != 1 || recs[3].OutcomeProgress.LegacyGain != 4 {
-		t.Errorf("outcome progress record = %+v", recs[3].OutcomeProgress)
-	}
-	if rec := recs[4].CompletionReport; rec == nil || rec.Verdict != "partial" || rec.ChangesUnreviewed != 1 || len(rec.GapKinds) != 1 {
-		t.Errorf("completion report record = %+v", recs[4].CompletionReport)
-	}
-	if len(inner.readiness) != 1 || len(inner.recoveries) != 1 || inner.turns != 1 || len(inner.outcomes) != 1 || len(inner.reports) != 1 {
-		t.Errorf("inner capabilities = %d/%d/%d/%d/%d, want 1/1/1/1/1", len(inner.readiness), len(inner.recoveries), inner.turns, len(inner.outcomes), len(inner.reports))
+	if len(recs) != 1 || !recs[0].TurnCompletion {
+		t.Fatalf("turn completion records = %+v", recs)
 	}
 }
 

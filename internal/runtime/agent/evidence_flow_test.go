@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"reasonix/internal/contract/hostaudit"
 	"reasonix/internal/state/sessionstore"
 	"reflect"
 	"strings"
@@ -97,16 +96,6 @@ func sessionHasUserMessageContaining(s *sessionstore.Session, needle string) boo
 		}
 	}
 	return false
-}
-
-type readinessAuditSink struct {
-	events []hostaudit.ReadinessAudit
-}
-
-func (s *readinessAuditSink) Emit(event.Event) {}
-
-func (s *readinessAuditSink) RecordReadinessAudit(a hostaudit.ReadinessAudit) {
-	s.events = append(s.events, a)
 }
 
 // TestEvidenceFlowEndToEnd drives a full Run(): turn 1 runs bash then signs the
@@ -393,46 +382,6 @@ func TestFinalReadinessAllowsWriterWithoutChecksOrTodos(t *testing.T) {
 	if prov.call != 2 {
 		t.Fatalf("provider calls = %d, want 2", prov.call)
 	}
-}
-
-func TestFinalReadinessAuditSkipsWhenGateDoesNotApply(t *testing.T) {
-	t.Run("no writer", func(t *testing.T) {
-		prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-			{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
-		}}
-		sink := &readinessAuditSink{}
-		a := New(prov, tool.NewRegistry(), sessionstore.NewSession(""), Options{
-			ProjectChecks: []instruction.VerifyCheck{{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3}},
-		}, sink)
-
-		if err := a.Run(context.Background(), "inspect only"); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		if len(sink.events) != 0 {
-			t.Fatalf("readiness audit events = %d, want 0: %+v", len(sink.events), sink.events)
-		}
-	})
-
-	t.Run("writer without checks or todo", func(t *testing.T) {
-		reg := tool.NewRegistry()
-		reg.Add(fakeTool{name: "write_file", readOnly: false, writesPaths: true})
-		prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-			{
-				toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
-				{Type: provider.ChunkDone},
-			},
-			{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
-		}}
-		sink := &readinessAuditSink{}
-		a := New(prov, reg, sessionstore.NewSession(""), Options{}, sink)
-
-		if err := a.Run(context.Background(), "simple edit"); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		if len(sink.events) != 0 {
-			t.Fatalf("readiness audit events = %d, want 0: %+v", len(sink.events), sink.events)
-		}
-	})
 }
 
 func TestTodoWriteOnlyTurnMayEndWithIncompleteTodos(t *testing.T) {

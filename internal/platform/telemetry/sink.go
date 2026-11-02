@@ -157,11 +157,6 @@ func (s *sink) Emit(e event.Event) {
 	s.inner.Emit(e)
 }
 
-func (s *sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
-	add(s.counts, "tool_call_reasoning_recovery", string(a.Kind), 1)
-	event.RecordProtocolRecovery(s.inner, a)
-}
-
 func (s *sink) observe(e event.Event) {
 	switch e.Kind {
 	case event.TurnStarted:

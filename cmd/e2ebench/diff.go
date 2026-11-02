@@ -243,11 +243,11 @@ func renderDiff(r diffReport) string {
 	fmt.Fprintf(&b, "| Tokens (prompt / completion) | %s / %s |\n", comma(r.m.PromptTokens), comma(r.m.CompletionTokens))
 	fmt.Fprintf(&b, "| Model calls | %d |\n", r.m.Steps)
 	fmt.Fprintf(&b, "| Cost | %s%.4f |\n", currencySym(r.m.Currency), r.m.Cost)
-	if r.m.CapabilityRoutes > 0 || r.m.CapabilitySkillInvocations > 0 || r.m.CapabilityMCPCall > 0 || r.m.ReadinessChecks > 0 {
+	if r.m.CapabilityRoutes > 0 || r.m.CapabilitySkillInvocations > 0 || r.m.CapabilityMCPCall > 0 {
 		fmt.Fprintf(&b, "| Capability routes (semantic) | %d (%d) |\n", r.m.CapabilityRoutes, r.m.CapabilitySemanticRoutes)
 		fmt.Fprintf(&b, "| Routed candidates (require / prefer / suggest / declined) | %d (%d / %d / %d / %d) |\n", r.m.CapabilityRoutedCandidates, r.m.CapabilityRoutedRequire, r.m.CapabilityRoutedPrefer, r.m.CapabilityRoutedSuggest, r.m.CapabilityDeclines)
 		fmt.Fprintf(&b, "| Skill invocations / MCP proxy calls | %d / %d |\n", r.m.CapabilitySkillInvocations, r.m.CapabilityMCPCall)
-		fmt.Fprintf(&b, "| Review blocks / readiness recoveries | %d / %d |\n", r.m.CapabilityReviewBlocks, r.m.ReadinessRecoveries)
+		fmt.Fprintf(&b, "| Review blocks | %d |\n", r.m.CapabilityReviewBlocks)
 		if r.m.CapabilityRouterCost > 0 || r.m.CapabilityRouterLatencyMs > 0 {
 			fmt.Fprintf(&b, "| Capability-router cost / latency | %s%.4f / %dms |\n", currencySym(r.m.Currency), r.m.CapabilityRouterCost, r.m.CapabilityRouterLatencyMs)
 		}

@@ -99,7 +99,6 @@ type runResult struct {
 	PermissionDenials []runPermissionDenial `json:"permission_denials"`
 	// PermissionMode is the posture the run settled on, named or defaulted.
 	PermissionMode string                       `json:"permission_mode,omitempty"`
-	Readiness      *eventwire.FinalReadiness    `json:"readiness,omitempty"`
 	UnverifiedBy   string                       `json:"unverified_by,omitempty"`
 	Completion     *eventwire.CompletionSummary `json:"completion,omitempty"`
 }
@@ -156,8 +155,7 @@ type machineRunDone struct {
 	NumTurns      int               `json:"num_turns"`
 	Usage         machineEventUsage `json:"usage"`
 	// PermissionDenials counts refused calls; the list itself carries content.
-	PermissionDenials int                       `json:"permission_denials,omitempty"`
-	Readiness         *eventwire.FinalReadiness `json:"readiness,omitempty"`
+	PermissionDenials int `json:"permission_denials,omitempty"`
 }
 
 type runOutputSink struct {
@@ -339,7 +337,6 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 			Usage:         machineEventUsage{InputTokens: s.usage.InputTokens, OutputTokens: s.usage.OutputTokens, CacheHitTokens: s.usage.CacheReadInputTokens, CacheMissTokens: s.usage.CacheCreationInputTokens},
 
 			PermissionDenials: len(s.permissions.denials),
-			Readiness:         runReadiness(runErr),
 		})
 	}
 	resultText := s.final
@@ -393,7 +390,6 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 		Usage:             s.usage,
 		PermissionDenials: append([]runPermissionDenial{}, s.permissions.denials...),
 		PermissionMode:    s.permissions.mode,
-		Readiness:         runReadiness(runErr),
 		UnverifiedBy:      unverifiedBy(s.permissions.denials),
 		Completion:        s.verdict.completion,
 	})

@@ -1,7 +1,6 @@
 package event
 
 import (
-	"reasonix/internal/contract/hostaudit"
 	"strings"
 	"sync"
 	"testing"
@@ -11,9 +10,7 @@ import (
 type coalesceRecordSink struct {
 	mu        sync.Mutex
 	events    []Event
-	readiness int
 	turns     int
-	recovery  int
 	workspace int
 }
 
@@ -23,22 +20,10 @@ func (s *coalesceRecordSink) Emit(e Event) {
 	s.events = append(s.events, e)
 }
 
-func (s *coalesceRecordSink) RecordReadinessAudit(hostaudit.ReadinessAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.readiness++
-}
-
 func (s *coalesceRecordSink) RecordTurnCompletion() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.turns++
-}
-
-func (s *coalesceRecordSink) RecordProtocolRecovery(ProtocolRecoveryAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.recovery++
 }
 
 func (s *coalesceRecordSink) RecordWorkspaceMutation(WorkspaceMutation) {
@@ -141,17 +126,15 @@ func TestCoalesceCapabilitiesFlushFirstAndForward(t *testing.T) {
 	c := Coalesce(inner, time.Hour)
 	c.Emit(Event{Kind: Text, Text: "lead"})
 	c.Emit(Event{Kind: Text, Text: "tail"})
-	c.(ReadinessAuditSink).RecordReadinessAudit(hostaudit.ReadinessAudit{})
 	c.(TurnCompletionSink).RecordTurnCompletion()
-	c.(ProtocolRecoveryAuditSink).RecordProtocolRecovery(ProtocolRecoveryAudit{})
 	c.(WorkspaceMutationSink).RecordWorkspaceMutation(WorkspaceMutation{Content: true})
 
 	got := inner.snapshot()
 	if len(got) != 2 || got[1].Text != "tail" {
 		t.Fatalf("capability call must flush the buffered delta first: %+v", got)
 	}
-	if inner.readiness != 1 || inner.turns != 1 || inner.recovery != 1 || inner.workspace != 1 {
-		t.Fatalf("capabilities not forwarded: %d/%d/%d/%d", inner.readiness, inner.turns, inner.recovery, inner.workspace)
+	if inner.turns != 1 || inner.workspace != 1 {
+		t.Fatalf("capabilities not forwarded: %d/%d", inner.turns, inner.workspace)
 	}
 }
 

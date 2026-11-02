@@ -84,16 +84,6 @@ func (c *Controller) SubmitDisplay(display, input string) {
 	c.submit(input, display, "")
 }
 
-// SubmitDeliveryRecovery runs the same visible prompt path as SubmitDisplay but
-// first authorizes the executor to retain the immediately preceding exhausted
-// delivery ledger. The agent consumes that authorization once; if the card came
-// from an older/reloaded session this safely degrades to an ordinary turn.
-func (c *Controller) SubmitDeliveryRecovery(display, input string) {
-	c.runGuarded(func(ctx context.Context) error {
-		return c.runTurnLoop(ctx, orchestratedTurn{input: input, raw: input, display: display})
-	})
-}
-
 // SubmitInvocationDisplay executes composer-selected invocation entities
 // independently of slash-command parsing. Plain string submit entry points keep
 // their existing behavior for CLI, HTTP, and backward-compatible clients.

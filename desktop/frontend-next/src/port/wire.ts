@@ -763,8 +763,8 @@ export interface WireEvent {
   attachments?: StoredAttachment[];
   // steer: the host wrote this guidance, so it is never drawn as the person's.
   hostAuthored?: boolean;
-  // recovery_paused is no longer emitted; sessions recorded before the retry
-  // budgets were removed still carry it, so a reader has to render it.
+  // final_readiness and recovery_paused are no longer emitted; sessions recorded
+  // before they were removed still carry them, so a reader has to render them.
   outcome?: "final_readiness" | "recovery_paused" | "no_progress";
   phase?: string;
   retryAttempt?: number;
