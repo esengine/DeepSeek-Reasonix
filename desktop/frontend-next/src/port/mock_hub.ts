@@ -1,3 +1,4 @@
+import { MockTeam } from "./mock_team";
 import type { AgentPort } from "./port";
 import type { HistoryHit, HubPort, RuntimeView, TreeSession, TreeWindow, TreeWorkspace } from "./hub";
 import type { RemoteHost, RemoteListing, RemoteProbe } from "./remote";
@@ -37,6 +38,17 @@ export class MockHub implements HubPort {
 
   runtimes() {
     return Promise.resolve([...this.views]);
+  }
+
+  private teamMock: MockTeam | null = null;
+  private readonly treeListeners = new Set<() => void>();
+
+  team(): MockTeam {
+    this.teamMock ??= new MockTeam(
+      (view) => { if (!this.views.some((v) => v.id === view.id)) this.views.push(view); },
+      () => { for (const l of this.treeListeners) l(); },
+    );
+    return this.teamMock;
   }
 
   async open(req: { root?: string; sessionPath?: string; agentComposition?:string }) {
@@ -192,7 +204,10 @@ export class MockHub implements HubPort {
     return Promise.resolve();
   }
 
-  onTreeChanged(_listener: () => void) { return () => {}; }
+  onTreeChanged(listener: () => void) {
+    this.treeListeners.add(listener);
+    return () => void this.treeListeners.delete(listener);
+  }
 
   tree(window?: TreeWindow) {
     const open = new Map(this.views.filter((v) => v.sessionPath).map((v) => [v.sessionPath!, v.id]));

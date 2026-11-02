@@ -1,6 +1,11 @@
 package provider
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+
+	"reasonix/internal/base/secrets"
+)
 
 // Two copies of a transcript are derived from the stored one: the bytes a
 // provider receives, and the projection compaction writes back. They differ in
@@ -20,7 +25,7 @@ func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs,
 
 func projectMessages(msgs []Message, keepExecution bool) []Message {
 	answered := videoAnswered(msgs, keepExecution)
-	needsCopy := false
+	needsCopy := secrets.HasRegistered()
 	for i, m := range msgs {
 		if (answered != nil && len(m.Videos) > 0 && answered[i]) || needsProjection(m, keepExecution) {
 			needsCopy = true
@@ -46,6 +51,7 @@ func projectMessages(msgs []Message, keepExecution bool) []Message {
 		candidate.HostAuthored = false
 		candidate.ModelRef = ""
 		candidate.Via = nil
+		candidate.Origin = nil
 		candidate.DecisionReceipt = nil
 		candidate.DecisionReceipts = nil
 		if !keepExecution {
@@ -59,9 +65,27 @@ func projectMessages(msgs []Message, keepExecution bool) []Message {
 				candidate.UnavailableImages = nil
 			}
 		}
-		out = append(out, candidate)
+		out = append(out, maskRegistered(candidate))
 	}
 	return out
+}
+
+// maskRegistered keeps a secret the host holds for the person out of what a
+// model reads: the text, the reasoning, and every tool call's arguments.
+func maskRegistered(m Message) Message {
+	if !secrets.HasRegistered() {
+		return m
+	}
+	m.Content = secrets.MaskRegistered(m.Content)
+	m.ReasoningContent = secrets.MaskRegistered(m.ReasoningContent)
+	if len(m.ToolCalls) > 0 {
+		calls := slices.Clone(m.ToolCalls)
+		for i := range calls {
+			calls[i].Arguments = secrets.MaskRegistered(calls[i].Arguments)
+		}
+		m.ToolCalls = calls
+	}
+	return m
 }
 
 // needsProjection reports a host-only field this message carries.
@@ -69,7 +93,7 @@ func needsProjection(m Message, keepExecution bool) bool {
 	if (hasArgumentNormalization(m.ToolCalls) || m.AgentComposition != nil || len(m.UnavailableImages) > 0 || m.ToolExecution != nil || m.ToolFailure != nil) && !keepExecution {
 		return true
 	}
-	return m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.HostAuthored || m.ModelRef != "" || m.Via != nil || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0
+	return m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.HostAuthored || m.ModelRef != "" || m.Via != nil || m.Origin != nil || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0
 }
 
 // videoAnswered says, per message, whether the model has answered since it; nil

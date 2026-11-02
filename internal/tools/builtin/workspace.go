@@ -59,6 +59,9 @@ type Workspace struct {
 	// write_file mutation. It is instance-scoped so concurrent runtimes never
 	// record into another session's recovery ledger.
 	FileWriteReceipt func(path string, hadPrior bool, prior []byte)
+	// SecretEnv lists the secrets the user gave this session's agent, as
+	// NAME=value lines bash adds to each command; nil gives none.
+	SecretEnv func() []string
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -90,7 +93,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"delete_range":     deleteRange{readPolicy: editReadPolicy{readRoots: readRoots, forbidRoots: forbidRoots}, workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
 		"delete_symbol":    deleteSymbol{readPolicy: editReadPolicy{readRoots: readRoots, forbidRoots: forbidRoots}, workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
 		"code_index":       codeIndex{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, forbidRoots: forbidRoots},
-		"bash":             bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout, guard: w.SessionGuard, terminal: w.Terminal, sessionTemp: w.SessionTemp, paths: w.ReadPaths},
+		"bash":             bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout, guard: w.SessionGuard, terminal: w.Terminal, sessionTemp: w.SessionTemp, paths: w.ReadPaths, secretEnv: w.SecretEnv},
 		"ls":               listDir{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"glob":             globTool{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"grep":             grepTool{workDir: w.Dir, netRoots: netRoots, readRoots: readRoots, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp},

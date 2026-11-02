@@ -22,6 +22,7 @@ type SaveOptions struct {
 	ExpectedRevision        int
 	RequireExpectedRevision bool
 	RequireCreate           bool
+	RequireUnpinned         bool
 	ClearExpiry             bool // drop an inherited expires_at instead of preserving it
 }
 
@@ -228,6 +229,9 @@ func (s Store) SaveWithOptions(m Memory, opts SaveOptions) (SaveResult, error) {
 	}
 	if opts.RequireCreate && exists {
 		return SaveResult{}, fmt.Errorf("memory %q already exists; automatic writes are create-only", existing.Name)
+	}
+	if opts.RequireUnpinned && exists && ResolveActivation(existing) == ActivationPinned {
+		return SaveResult{}, ErrPinnedReview
 	}
 
 	if inputRef.raw == "" {

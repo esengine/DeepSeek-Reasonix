@@ -646,7 +646,9 @@ func (h *Hub) roots() []rootRef {
 		add(dir)
 	}
 	for _, rt := range h.localRuntimes() {
-		add(rt.Server.Controller().WorkspaceRoot())
+		if !h.teamRuntime(rt) {
+			add(rt.Server.Controller().WorkspaceRoot())
+		}
 	}
 	return out
 }
@@ -674,7 +676,7 @@ func sameFolder(a, b string) bool {
 func (h *Hub) openSessionsIn(root string) map[string]string {
 	out := map[string]string{}
 	for _, rt := range h.localRuntimes() {
-		if !drivesRoot(rt, root) {
+		if !drivesRoot(rt, root) || h.teamRuntime(rt) {
 			continue
 		}
 		if path := sessionstore.CanonicalSessionPath(rt.Server.Controller().SessionPath()); path != "" {
@@ -687,6 +689,9 @@ func (h *Hub) openSessionsIn(root string) map[string]string {
 func (h *Hub) openSessions() map[string]string {
 	out := map[string]string{}
 	for _, rt := range h.localRuntimes() {
+		if h.teamRuntime(rt) {
+			continue
+		}
 		if path := sessionstore.CanonicalSessionPath(rt.Server.Controller().SessionPath()); path != "" {
 			out[path] = rt.ID
 		}
@@ -697,7 +702,7 @@ func (h *Hub) openSessions() map[string]string {
 func (h *Hub) rootPanes(root string) int {
 	n := 0
 	for _, rt := range h.localRuntimes() {
-		if sameFolder(rt.Server.Controller().WorkspaceRoot(), root) {
+		if sameFolder(rt.Server.Controller().WorkspaceRoot(), root) && !h.teamRuntime(rt) {
 			n++
 		}
 	}

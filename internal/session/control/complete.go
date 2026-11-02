@@ -64,6 +64,14 @@ type CompletionData struct {
 	// Sessions are the past conversations a #-word may name; read only when the
 	// cursor is in one.
 	Sessions []SessionOption
+	// Agents are this seat's teammates: an @-word may mention one, and a #-word
+	// may name its conversation. Empty off the team.
+	Agents []AgentOption
+}
+
+// AgentOption is a teammate the composer may offer.
+type AgentOption struct {
+	ID, Name, Role string
 }
 
 // CompletionNeedsArgData says whether completing line reads anything beyond the
@@ -83,13 +91,13 @@ func Complete(line string, cursor int, d CompletionData) Completion {
 	// An @-reference under the cursor wins — it can appear mid-line, even inside
 	// a slash command's arguments ("/review @file").
 	if from, to, query, ok := ActiveRefToken(line, cursor); ok {
-		if items := dropTyped(d.refItems(query), line[from:to]); len(items) > 0 {
+		if items := dropTyped(append(agentMentionItems(d.Agents, query), d.refItems(query)...), line[from:to]); len(items) > 0 {
 			_, frag := SplitPathToken(query)
 			return Completion{Kind: CompleteRef, From: from, To: to, Query: UnescapeRefPath(frag), Items: items}
 		}
 	}
 	if from, to, query, ok := ActiveSessionToken(line, cursor); ok {
-		if items := SessionRefItems(d.Sessions, query); len(items) > 0 {
+		if items := append(agentChatItems(d.Agents, query), SessionRefItems(d.Sessions, query)...); len(items) > 0 {
 			return Completion{Kind: CompleteSession, From: from, To: to, Query: query, Items: items}
 		}
 	}
@@ -111,6 +119,35 @@ func Complete(line string, cursor int, d CompletionData) Completion {
 		return Completion{Kind: CompleteSlashArg, From: from, To: to, Query: line[from:to], Items: items}
 	}
 	return noCompletion()
+}
+
+// agentMentionItems are the teammates whose name starts with what follows the
+// '@'. A mention is words for the agent reading it, which decides whether to
+// reach that teammate; nothing routes it.
+func agentMentionItems(agents []AgentOption, query string) []SlashItem {
+	if strings.ContainsAny(query, "/:") {
+		return nil
+	}
+	needle := strings.ToLower(query)
+	var items []SlashItem
+	for _, a := range agents {
+		if strings.HasPrefix(strings.ToLower(a.Name), needle) {
+			items = append(items, SlashItem{Label: "@" + a.Name, Insert: "@" + a.Name, Hint: a.Role, Kind: "agent"})
+		}
+	}
+	return items
+}
+
+// agentChatItems are the teammates' conversations a #-word may name.
+func agentChatItems(agents []AgentOption, query string) []SlashItem {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	var items []SlashItem
+	for _, a := range agents {
+		if strings.Contains(strings.ToLower(a.Name), needle) {
+			items = append(items, SlashItem{Label: a.Name, Insert: "@" + agentRefPrefix + a.ID, Hint: a.Role, Kind: "agent-chat"})
+		}
+	}
+	return items
 }
 
 // dropTyped removes the row that would replace the token with itself. It is the
