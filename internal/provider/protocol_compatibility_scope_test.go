@@ -117,17 +117,17 @@ func TestProtocolCompatibilityCancellationDoesNotPoisonHint(t *testing.T) {
 	hints := freshProtocolHints()
 	key := [32]byte{}
 	now := time.Now()
-	hints.failedHTTP2(key, "PROTOCOL_ERROR", now, now)
+	hints.failedHTTP2(key, "PROTOCOL_ERROR", hints.begin(), now)
 	h := hints.selectHTTP1(key, now)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	tr := &protocolTransport{hints: hints}
-	tr.failed(ctx, key, h, now, ctx.Err())
+	tr.failed(ctx, key, h, hints.begin(), ctx.Err())
 	if hints.selectHTTP1(key, now) == nil {
 		t.Fatal("caller cancellation disabled compatibility")
 	}
 	// Cancellation without HTTP/2 evidence must not install a new hint.
-	tr.failed(ctx, [32]byte{1}, nil, now, ctx.Err())
+	tr.failed(ctx, [32]byte{1}, nil, hints.begin(), ctx.Err())
 	if len(hints.entries) != 1 {
 		t.Fatal("caller cancellation created a hint")
 	}
