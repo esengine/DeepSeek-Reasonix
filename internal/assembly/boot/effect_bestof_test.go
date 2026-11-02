@@ -140,6 +140,9 @@ model = "x"
 	if !toolNames(session[0])["best_of_n"] {
 		t.Fatalf("best_of_n missing from the session's schema: %v", toolSchemaNames(session[0].Tools))
 	}
+	if toolNames(session[0])["apply_isolated"] || toolNames(session[0])["discard_isolated"] {
+		t.Fatal("best-of Store ownership implicitly expanded the tool registry")
+	}
 	if len(attempts) != 4 {
 		t.Fatalf("attempt requests = %d, want 2 attempts × 2 rounds", len(attempts))
 	}

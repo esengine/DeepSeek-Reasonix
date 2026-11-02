@@ -159,19 +159,20 @@ func TestBestOfShowsEachAttemptsHostRecord(t *testing.T) {
 	}
 }
 
-// With one attempt finished there is nothing to compare, so no judge is paid.
-func TestBestOfSkipsTheJudgeWhenOneAttemptFinished(t *testing.T) {
+// A runner error supplies no physical completion receipt; do not judge or
+// publish a sibling while that execution remains unknown.
+func TestBestOfRetainsTheGroupWhenOneRunnerFailed(t *testing.T) {
 	repo := repoWithFile(t)
 	judge := &judgeStub{reply: `{"winner": 1}`}
 	tl := New(Spec{Repo: opened(t, repo), ManagedRoot: filepath.Join(testenv.TempDir(t), "c"), Runner: writer(1), Judge: JudgeSpec{Provider: judge}})
 	out, err := tl.Execute(t.Context(), json.RawMessage(`{"prompt":"rewrite a.txt","n":2}`))
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
+	if err == nil {
+		t.Fatal("failed runner did not retain the group")
 	}
-	if readA(t, repo) != "attempt 2\n" || len(judge.seen) != 0 {
+	if readA(t, repo) != "start\n" || len(judge.seen) != 0 || worktreeCount(t, repo) != 3 {
 		t.Fatalf("a.txt = %q, judge calls = %d", readA(t, repo), len(judge.seen))
 	}
-	if !strings.Contains(out, "failed — attempt crashed") {
+	if !strings.Contains(out, "Original Store result IDs:") {
 		t.Fatalf("the failed attempt is not reported: %q", out)
 	}
 }
@@ -185,8 +186,8 @@ func TestBestOfAppliesNothingWhenTheJudgeDoesNotDecide(t *testing.T) {
 	if _, err := tl.Execute(t.Context(), json.RawMessage(`{"prompt":"rewrite a.txt","n":2}`)); !errors.Is(err, errJudgeReply) {
 		t.Fatalf("err = %v, want errJudgeReply", err)
 	}
-	if readA(t, repo) != "start\n" || worktreeCount(t, repo) != 1 {
-		t.Fatal("an undecided run touched the workspace or left worktrees")
+	if readA(t, repo) != "start\n" || worktreeCount(t, repo) != 3 {
+		t.Fatal("an undecided run touched the workspace or lost its candidates")
 	}
 }
 

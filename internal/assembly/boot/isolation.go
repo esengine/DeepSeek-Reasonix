@@ -48,10 +48,8 @@ func (b *builder) addIsolation() {
 	if !b.cfg.Agent.WorktreeIsolation || b.opts.UnattendedChild || b.tools.taskTool == nil {
 		return
 	}
-	store := isolation.NewStore(filepath.Join(b.roots.DeliveryWorktreeDir(), "isolated"), b.root, b.repo)
-	go store.SweepExpired(context.WithoutCancel(b.ctx), isolatedResultTTL)
-	posture := &isolationPosture{}
-	b.tools.isolation = &isolationWiring{store: store, posture: posture}
+	store := b.ensureIsolationStore()
+	posture := b.tools.isolation.posture
 	b.tools.reg.Add(isolation.NewApplyTool(store))
 	b.tools.reg.Add(isolation.NewDiscardTool(store))
 	parent, sink := b.opts, b.sink
@@ -66,6 +64,18 @@ func (b *builder) addIsolation() {
 	// The registry canonicalizes a schema when a tool is added, and task was
 	// added before it could offer isolation.
 	b.tools.reg.Add(b.tools.taskTool)
+}
+
+// Best-of and ordinary isolation share result identity and restart discovery.
+// Owning a Store does not expose any tool: addIsolation keeps its existing gate.
+func (b *builder) ensureIsolationStore() *isolation.Store {
+	if b.tools.isolation != nil {
+		return b.tools.isolation.store
+	}
+	store := isolation.NewStore(filepath.Join(b.roots.DeliveryWorktreeDir(), "isolated"), b.root, b.repo)
+	b.tools.isolation = &isolationWiring{store: store, posture: &isolationPosture{}}
+	go store.SweepExpired(context.WithoutCancel(b.ctx), isolatedResultTTL)
+	return store
 }
 
 func (w *isolationWiring) bind(ctrl *control.Controller) {

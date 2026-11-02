@@ -153,6 +153,7 @@ func (s *Store) SweepExpired(ctx context.Context, maxAge time.Duration) {
 	if s == nil {
 		return
 	}
+	s.sweepManaged(ctx, maxAge)
 	for _, d := range s.durable() {
 		release, err := s.acquireResultOperation(ctx, d.ID, true)
 		if err != nil {
