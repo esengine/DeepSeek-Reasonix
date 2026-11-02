@@ -1,3 +1,5 @@
+import { OriginLine } from "./team/OriginLine";
+import { SecretCard } from "./team/SecretCard";
 import { Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { t } from "../i18n";
 import type { Item, Waiting } from "../state/session";
@@ -82,6 +84,8 @@ interface Props {
   needsProject: boolean;
   onOpenProject: () => void;
   onKeepHere: () => void;
+  // What an empty conversation shows in place of the window's own hero.
+  hero?: ReactNode;
   foldWork?: boolean;
   turnRunning?: boolean;
   scope?: string;
@@ -100,7 +104,7 @@ interface Props {
   brought?: { ids: string[]; bring: (id: string) => void; dismiss: (id: string) => void };
 }
 
-export function Transcript({ items, port, historyPaging, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, foldWork = false, turnRunning = false, scope = "" }: Props) {
+export function Transcript({ items, port, historyPaging, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, hero, foldWork = false, turnRunning = false, scope = "" }: Props) {
   // A block the selection touches must not leave the DOM. Unmounting the node a
   // selection is anchored to makes the browser remap that selection onto
   // whatever is still mounted — which reads as "I selected up there and the
@@ -483,7 +487,7 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
       <div className="flow" ref={flow} data-empty={items.length === 0 && !historyPaging?.hasMore && !historyPaging?.busy && !historyPaging?.failed ? "" : undefined}>
         <HistoryPageControl paging={historyPaging} load={loadOlder} />
         {items.length === 0 && !historyPaging?.hasMore && !historyPaging?.busy && !historyPaging?.failed && (
-          <Hero needsProject={needsProject} onOpen={onOpenProject} onKeep={onKeepHere} />
+          hero ?? <Hero needsProject={needsProject} onOpen={onOpenProject} onKeep={onKeepHere} />
         )}
         {blocks.map((block, i) => (
           <Block
@@ -734,6 +738,7 @@ const Row = memo(function Row({
       // needs. Drawing the tool call too put two copies of the same question on
       // screen, each answerable.
       if (it.tool.name === "ask") return null;
+      if (it.tool.name === "request_secret") return <SecretCard tool={it.tool} running={it.running} />;
       { const surface = surfaceTool(it.tool, it.running, port); if (surface !== undefined) return surface; }
       return (() => {
         const card = (
@@ -780,6 +785,8 @@ const Row = memo(function Row({
       return <ExtensionCard ext={it.ext} onInvoke={onExtInvoke} onSubmit={onExtSubmit} />;
     case "notice":
       return <NoticeCard item={it} onSettings={onSettings} />;
+    case "origin":
+      return <OriginLine origin={it.origin} text={it.text} />;
   }
       })()}
     </div>

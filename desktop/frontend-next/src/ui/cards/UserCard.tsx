@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentPort, Checkpoint, RewindPlan, RewindResult, RewindScope } from "../../port/port";
 import type { Item } from "../../state/session";
+import { UserText } from "../team/UserText";
 import { RewindControl } from "./RewindControl";
 import { SkillPinView } from "./SkillPinView";
 import { parseSkillPin } from "./skillpin";
@@ -97,7 +98,7 @@ export function UserCard({
                 const src = port.workspaceImageURL(path);
                 return <SavedImage key={src} path={path} src={src} />;
               })}</div>}
-              {pin ? <SkillPinView pin={pin} /> : <div className="txt" dir="auto">{item.text}</div>}
+              {pin ? <SkillPinView pin={pin} /> : <UserText text={item.text} />}
             </>
           ) : (
             <div className="reask">

@@ -27,7 +27,7 @@ func (h *Hub) orphanPanes(tree []treeWorkspace) []orphanPane {
 	for _, rt := range h.localRuntimes() {
 		ctrl := rt.Server.Controller()
 		path := ctrl.SessionPath()
-		if path == "" || !sessionstore.IsVisibleSession(path) || rows[rt.ID] {
+		if path == "" || !sessionstore.IsVisibleSession(path) || rows[rt.ID] || h.teamRuntime(rt) {
 			continue
 		}
 		out = append(out, orphanPane{Runtime: rt.ID, Workspace: ctrl.WorkspaceRoot(), Session: sessionstore.CanonicalSessionPath(path)})

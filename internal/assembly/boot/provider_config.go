@@ -47,6 +47,8 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 	if !config.Answering(e.Kind, config.AnswersChat) {
 		return nil, &config.AnswersMismatchError{Ref: e.Name + "/" + e.Model, Has: config.AnswersFor(e.Kind), Want: config.AnswersChat}
 	}
+	// A process may reach a model without building a session, as review does.
+	watchTeamSecrets(config.RootsForHome(""))
 	return provider.New(e.Kind, providerConfig(e, proxy))
 }
 

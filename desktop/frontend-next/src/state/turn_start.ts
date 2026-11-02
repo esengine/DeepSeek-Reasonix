@@ -7,6 +7,7 @@ import type { Item, SessionState } from "./session_types";
 // sent, and one that no longer names a row — taken back, or replaced by a
 // rebuild — is dropped rather than handed to the wrong turn.
 export function nameTurnStart(s: SessionState, ev: WireEvent): SessionState {
+  if (ev.origin) return drawHandedTurn(s, ev);
   if (ev.authoredTurn === undefined || ev.msgIndex === undefined) return s;
   const at = s.awaitingTurnStart.findIndex((id) => s.items.some((i) => i.t === "user" && i.id === id));
   if (at < 0) return drawOthersTurn({ ...s, awaitingTurnStart: [] }, ev);
@@ -31,6 +32,14 @@ function drawOthersTurn(s: SessionState, ev: WireEvent): SessionState {
   const text = (ev.text ?? "").trim();
   if (!text || s.items.some((i) => i.t === "user" && i.msgIndex === ev.msgIndex)) return s;
   const row: Item = { t: "user", id: `turn-${ev.msgIndex}`, text, authoredTurn: ev.authoredTurn, msgIndex: ev.msgIndex, via: ev.via, attachments: ev.attachments };
+  return { ...s, items: [...s.items, row] };
+}
+
+// A turn the host ran for another agent or a group: the row a reload draws from
+// the same message, once, keyed by the index the kernel says it landed on.
+function drawHandedTurn(s: SessionState, ev: WireEvent): SessionState {
+  if (!ev.origin || ev.msgIndex === undefined || s.items.some((i) => i.t === "origin" && i.msgIndex === ev.msgIndex)) return s;
+  const row: Item = { t: "origin", id: `origin-${ev.msgIndex}`, origin: ev.origin, text: ev.text ?? "", msgIndex: ev.msgIndex };
   return { ...s, items: [...s.items, row] };
 }
 

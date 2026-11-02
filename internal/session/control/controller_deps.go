@@ -136,6 +136,8 @@ type controllerDeps struct {
 
 	// dispatch is the state behind the cross-project dispatch tool; see peer_dispatch.go.
 	dispatch dispatchState
+	// team is the team seat this session speaks through, if any; see team_seat.go.
+	team teamSeat
 
 	// goalRetry is the unattended retry of an evaluator pause; see goal_retry.go.
 	goalRetry goalRetry

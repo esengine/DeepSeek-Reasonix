@@ -453,13 +453,6 @@ func parseCredentialLines(lines []string) map[string]string {
 	return out
 }
 
-func pinCredentialAssignments(assignments map[string]string) {
-	for key, value := range assignments {
-		_ = os.Setenv(key, value)
-		recordCredentialSource(key, value, CredentialSource{Kind: CredentialSourceCredentials, Path: UserCredentialsPath(), Label: "Reasonix credentials (.env)"})
-	}
-}
-
 func recordExistingCredentialSource(key string) {
 	key = strings.TrimSpace(key)
 	value := os.Getenv(key)

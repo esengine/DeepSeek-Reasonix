@@ -43,6 +43,9 @@ func (editFile) ReadOnly() bool { return false }
 func (editFile) WritesNamedPaths() bool { return true }
 
 func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := refuseMaskedWrite(args); err != nil {
+		return "", err
+	}
 	var p struct {
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`

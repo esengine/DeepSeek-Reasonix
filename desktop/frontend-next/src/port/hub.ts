@@ -3,6 +3,7 @@ import { HttpError, type AgentPort } from "./port";
 import type { RemoteAsk, RemoteHost, RemoteHostEdit, RemoteListing, RemoteProbe, WSLDistros } from "./remote";
 import type { CloudShareOffer, DeviceSelf, PhoneAction, PhoneList, ShareOffer, SharePort, ShareStatus } from "./share";
 import { SsePort } from "./sse";
+import { SseTeam } from "./team";
 import { host } from "./host";
 
 // How often a client waiting on a dial looks for the question it might be
@@ -32,6 +33,9 @@ export interface RuntimeView {
   // write lease for. It reads and scrolls like any other; what it cannot do is
   // add to it.
   readOnly?: boolean;
+  // Set on a pane holding one of the team's seats: the agent, and the group
+  // when it is that agent's conversation in a group.
+  team?: { agent: string; group?: string };
 }
 
 export interface TreeSession {
@@ -184,6 +188,8 @@ export interface HistoryHit {
 
 export interface HubPort extends SharePort {
   runtimes(): Promise<RuntimeView[]>;
+  /** The user's team of agents; null where this hub has none to offer. */
+  team(): import("./team").TeamPort | null;
   open(req: { root?: string; sessionPath?: string; agentComposition?: string }): Promise<RuntimeView>;
   close(id: string): Promise<void>;
   tree(window?: TreeWindow): Promise<TreeWorkspace[]>;
@@ -333,6 +339,13 @@ export class SseHub implements HubPort {
     });
     if (!res.ok) await SseHub.fail(path, res);
     return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  }
+
+  private teamPort: import("./team").TeamPort | null = null;
+
+  team() {
+    this.teamPort ??= new SseTeam();
+    return this.teamPort;
   }
 
   // The ceiling comes back on the response rather than being hardcoded here:

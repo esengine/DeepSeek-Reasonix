@@ -4,6 +4,7 @@ import { track as trackWidth } from "../src/ui/viewport";
 import { pushToast } from "../src/state/toasts";
 import { apply as applyPack } from "../src/ui/theme";
 import { mount as mountEditor } from "./syntax-mount";
+import { seedTeam } from "./team-seed";
 import "../src/styles/tokens.css";
 import "../src/styles/app.css";
 import "../src/styles/dock.css";
@@ -594,6 +595,10 @@ bootLang();
 trackWidth();
 
 const hub = new BenchHub();
+// ?team=N seats N agents beside the projects, ?groups=M adds M group chats and
+// ?grouplog=L gives the first one L lines; window.__team moves them after.
+if (query.has("team")) void seedTeam(hub.team(), Number(query.get("team")), Number(query.get("groups") ?? 0), Number(query.get("grouplog") ?? 0));
+window.__team = hub.team();
 // No StrictMode: its double render is the thing under measurement here.
 createRoot(document.getElementById("root")!).render(<App hub={hub} />);
 
@@ -622,6 +627,7 @@ declare global {
     // Put a notice in the window's corner the way a failed setting does.
     __toast: (text: string) => void;
     __syntax: { apply: typeof applyPack; mount: typeof mountEditor };
+    __team: import("../src/port/mock_team").MockTeam;
   }
 }
 window.__toast = pushToast;

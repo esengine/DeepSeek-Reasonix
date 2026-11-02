@@ -140,6 +140,8 @@ jobs:
           node perf/contrast.mjs
           node perf/stickyfold.mjs
           node perf/crumb.mjs
+          node perf/team-rail.mjs
+          node perf/group-log.mjs
           node perf/hoverradius.mjs
           node perf/jump-ends.mjs
           node perf/modelrows.mjs

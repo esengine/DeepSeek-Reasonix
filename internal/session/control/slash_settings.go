@@ -39,7 +39,7 @@ func (c *Controller) settingsNotice(fields []string, trimmed string) bool {
 	case "/ask-timeout":
 		c.askTimeoutNotice(fields)
 	default:
-		return false
+		return c.teamNotice(fields, trimmed)
 	}
 	return true
 }

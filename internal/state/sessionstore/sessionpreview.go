@@ -1,6 +1,7 @@
 package sessionstore
 
 import (
+	"slices"
 	"strings"
 
 	"reasonix/internal/contract/provider"
@@ -68,6 +69,31 @@ func TruncatePreview(s string) string {
 		return string(r[:77]) + "…"
 	}
 	return s
+}
+
+// LatestPreview is the line a list shows for where a conversation stands now:
+// its latest answer, or the latest message the person wrote, whichever came
+// last. SessionPreview answers what a conversation is about instead.
+func LatestPreview(path string) string {
+	msgs, _, _, err := loadSessionMessages(path)
+	if err != nil {
+		return ""
+	}
+	return LatestPreviewFromMessages(msgs)
+}
+
+// LatestPreviewFromMessages is LatestPreview over messages already in memory.
+func LatestPreviewFromMessages(msgs []provider.Message) string {
+	for _, m := range slices.Backward(msgs) {
+		switch {
+		case m.LocalOnly:
+		case m.Role == provider.RoleAssistant && strings.TrimSpace(m.Content) != "":
+			return TruncatePreview(strings.Join(strings.Fields(m.Content), " "))
+		case m.Role == provider.RoleUser && !m.HostAuthored && IsUserAuthoredTurn(UserMessageText(m)):
+			return TruncatePreview(strings.Join(strings.Fields(PreviewProse(UserMessageText(m))), " "))
+		}
+	}
+	return ""
 }
 
 // UserMessagesTitleSource returns the last 300 runes of all human-authored turns joined in order.

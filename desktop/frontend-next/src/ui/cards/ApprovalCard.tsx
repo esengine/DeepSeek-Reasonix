@@ -18,6 +18,8 @@ const FENCE_TOOL = "extend_write_paths";
 // the kernel; the elevated one offers no session grant, which `allowsSession` already says.
 const SETTING_TOOL = "setting_change";
 const SETTING_ELEVATED_TOOL = "setting_change_elevated";
+// A team change a model proposed that widens what an agent reaches.
+const TEAM_CHANGE_TOOL = "team_change";
 // A call that repeats text from outside; the card says so instead of showing the tool id.
 const ORIGIN_TOOL = "origin_check";
 
@@ -111,6 +113,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
   // Full access cannot answer the origin question, so the card does not offer it.
   const explicit = item.a.tool !== ORIGIN_TOOL && (!!item.a.reasonCode || item.a.reason?.toLowerCase().includes("nested or indirect shell execution"));
   const isSetting = item.a.tool === SETTING_TOOL || item.a.tool === SETTING_ELEVATED_TOOL;
+  const teamChange = item.a.tool === TEAM_CHANGE_TOOL ? { agent: String(item.a.input?.agent ?? item.a.subject), folder: String(item.a.input?.to ?? "") } : null;
   const decide = async (verdict: ApprovalVerdict) => {
     if (submitting) return;
     setSubmitting(verdict);
@@ -139,17 +142,22 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">{item.a.tool === FENCE_TOOL ? t("要求扩大可改范围") : isSetting ? t("请求修改设置") : t("请求执行权限")}</span>
+          <span className="nm">{item.a.tool === FENCE_TOOL ? t("要求扩大可改范围") : isSetting ? t("请求修改设置") : teamChange ? t("请求给 Agent 指定文件夹") : t("请求执行权限")}</span>
           <span className="tag">{sealed ? t("已处理") : t("等待确认")}</span>
         </div>
         <div className="out">
           <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>
             <div className="apv-hd" data-whole={item.a.tool === ORIGIN_TOOL ? "" : undefined}>
-              <span className="tool">{item.a.tool === FENCE_TOOL ? t("这个子任务声明之外的文件") : isSetting ? t("设置") : item.a.tool === ORIGIN_TOOL ? t("来自外部的文字") : item.a.tool}</span>
+              <span className="tool">{item.a.tool === FENCE_TOOL ? t("这个子任务声明之外的文件") : isSetting ? t("设置") : item.a.tool === ORIGIN_TOOL ? t("来自外部的文字") : teamChange ? t("团队") : item.a.tool}</span>
               <span className="sub" title={item.a.subject}>{item.a.subject}</span>
             </div>
             {item.a.scope && <ApprovalScope scope={item.a.scope} input={item.a.input} />}
-            {approvalReason(item.a) && (
+            {teamChange ? (
+              <div className="apv-dt" data-team="folder">
+                <span className="apv-dt-label">{t("需要确认的原因")}</span>
+                <span>{t("允许 {agent} 在 {folder} 中读写文件？这会扩大它能接触的范围，所以每次都要你亲自确认。", teamChange)}</span>
+              </div>
+            ) : approvalReason(item.a) && (
               <div className="apv-dt">
                 <span className="apv-dt-label">{t("需要确认的原因")}</span>
                 <span style={isSetting ? { whiteSpace: "pre-line" } : undefined}>{approvalReason(item.a)}</span>

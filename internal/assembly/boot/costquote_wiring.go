@@ -20,7 +20,13 @@ func quotedSink(cfg *config.Config, opts Options, trace *otlp.Exporter) (event.S
 	// JSONL stores the CostQuote.
 	quoted := otlp.NewSink(opts.Sink, trace, "reasonix")
 	if opts.StatsSource.Valid() {
-		quoted = stats.NewRecorder(quoted, opts.roots().StatsDir(), opts.StatsSource.String())
+		rec := stats.NewRecorder(quoted, opts.roots().StatsDir(), opts.StatsSource.String())
+		if opts.TeamSeat != nil {
+			if _, ref := opts.TeamSeat.Team(); ref.Agent != "" {
+				rec = rec.ForAgent(ref.Agent)
+			}
+		}
+		quoted = rec
 		stats.StartUploadMeter(opts.roots().StatsDir())
 	}
 	return event.Sync(event.NewCostQuoteSink(quoted, ctx)), ctx

@@ -53,7 +53,7 @@ it("pages the complete recent history, returning to the previous page and retryi
   expect(asked.at(-1)).toMatchObject({ order: "recent", scope: "active", limit: 50, offset: 300 });
 });
 
-it("discovers a finished conversation outside All's loaded window and locates its collapsed project", async () => {
+it("discovers a finished conversation and reveals its collapsed project section", async () => {
   const hub = setup();
   const ordinary = hub.tree.bind(hub);
   const open = vi.spyOn(hub, "open");
@@ -68,6 +68,7 @@ it("discovers a finished conversation outside All's loaded window and locates it
   render(<App hub={hub} />);
   const project = await screen.findByRole("treeitem", { name: /my-website/ });
   await userEvent.click(project);
+  await userEvent.click(screen.getByRole("button", { name: "收起项目" }));
   await userEvent.click(screen.getByRole("button", { name: "最近的会话" }));
   await userEvent.click(await screen.findByRole("button", { name: "Finished release · my-website" }));
   await waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ root, sessionPath: path })));

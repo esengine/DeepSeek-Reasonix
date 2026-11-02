@@ -161,3 +161,14 @@ func TestAReadingFindExecDoesNotCountAsAMutation(t *testing.T) {
 		t.Fatal("find -exec rm writes and must still count")
 	}
 }
+
+// A tool whose every effect is state the host owns changes no work product,
+// whatever else would have classed it as a write.
+func TestAHostStateOnlyCallIsNoMutation(t *testing.T) {
+	if got := ToolCallMutationClassWith("create_agent", json.RawMessage(`{"name":"Ada"}`), ToolFacts{HostStateOnly: true}); got != MutationNone {
+		t.Fatalf("host-state call = %q", got)
+	}
+	if got := ToolCallMutationClassWith("create_agent", json.RawMessage(`{"name":"Ada"}`), ToolFacts{}); got != MutationProven {
+		t.Fatalf("an undeclared opaque call = %q, still proven", got)
+	}
+}

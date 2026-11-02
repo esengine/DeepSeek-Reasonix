@@ -84,6 +84,9 @@ type notebook struct {
 }
 
 func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := refuseMaskedWrite(raw); err != nil {
+		return "", err
+	}
 	a, err := parseNotebookArgs(raw)
 	if err != nil {
 		return "", err
@@ -121,6 +124,9 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 // writes — same arg parsing and targeting rules, so the previewed change equals
 // what Execute would persist.
 func (n notebookEdit) Preview(ctx context.Context, raw json.RawMessage) (diff.Change, error) {
+	if err := refuseMaskedWrite(raw); err != nil {
+		return diff.Change{}, err
+	}
 	a, err := parseNotebookArgs(raw)
 	if err != nil {
 		return diff.Change{}, err

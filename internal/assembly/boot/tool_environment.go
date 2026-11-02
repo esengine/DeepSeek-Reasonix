@@ -56,9 +56,12 @@ func (env toolEnvironment) targetAccessCheck() tool.TargetAccessCheck {
 func resolveToolEnvironment(opts Options, cfg *config.Config, roots config.Roots, root string, additionalDirs []string, shell sandbox.Shell, stderr io.Writer) toolEnvironment {
 	// The protected set masks a directory only if it exists when the sandbox is
 	// built, so the store's directory has to be there before any command runs.
-	if dir := roots.ScheduleDir(); dir != "" {
-		_ = os.MkdirAll(dir, 0o700)
+	for _, dir := range []string{roots.ScheduleDir(), roots.TeamDir()} {
+		if dir != "" {
+			_ = os.MkdirAll(dir, 0o700)
+		}
 	}
+	watchTeamSecrets(roots)
 	env := toolEnvironment{
 		forbidReadRoots: RuntimeForbidReadRoots(cfg, root),
 		network:         cfg.Sandbox.Network,

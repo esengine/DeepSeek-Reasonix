@@ -23,6 +23,7 @@ type Recorder struct {
 	writer     *Writer
 	dispatcher *recordDispatcher
 	source     string
+	agent      string
 }
 
 const recorderQueueSize = 2048
@@ -132,6 +133,12 @@ func NewRecorder(inner event.Sink, dir, source string) *Recorder {
 	}
 }
 
+// ForAgent labels every record with the team agent whose seat makes the calls.
+func (r *Recorder) ForAgent(id string) *Recorder {
+	r.agent = strings.TrimSpace(id)
+	return r
+}
+
 // Emit forwards user-visible events unchanged, then queues any usage/turn
 // record without waiting for filesystem I/O. Request-only usage is internal
 // accounting for failed provider calls, so it is persisted without surfacing a
@@ -179,7 +186,7 @@ func (r *Recorder) recordTurn() {
 	if r == nil || r.dispatcher == nil {
 		return
 	}
-	r.dispatcher.enqueue(record{Timestamp: time.Now(), Source: r.source, Turn: true})
+	r.dispatcher.enqueue(record{Timestamp: time.Now(), Source: r.source, Agent: r.agent, Turn: true})
 }
 
 // Flush waits until records already accepted by this recorder's shared queue
@@ -236,6 +243,7 @@ func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, q
 		Timestamp:        time.Now(),
 		ModelRef:         modelRef,
 		Source:           r.source,
+		Agent:            r.agent,
 		Prompt:           usage.PromptTokens,
 		Completion:       usage.CompletionTokens,
 		Reasoning:        usage.ReasoningTokens,

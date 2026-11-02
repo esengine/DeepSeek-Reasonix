@@ -161,6 +161,9 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 	if blocked, early := a.refuseNetworkToolPaths(plan); early {
 		return blocked
 	}
+	if blocked, early := a.refuseMarkedMCPCall(plan); early {
+		return blocked
+	}
 	if blocked, early := a.resolveToolPolicy(ctx, turn, plan); early {
 		return blocked
 	}
@@ -374,6 +377,9 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 		}
 		if rc.Target != nil {
 			plan.execTool = rc.Target
+		}
+		if outcome, blocked := a.refuseMarkedMCPCall(plan); blocked {
+			return outcome, true
 		}
 		if outcome, blocked := a.typedUnavailableOutcome(rc, call.Name, json.RawMessage(call.ExecutionArguments())); blocked {
 			return outcome, true

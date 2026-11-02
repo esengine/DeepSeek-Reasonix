@@ -56,6 +56,9 @@ func (writeFile) ReadOnly() bool { return false }
 func (writeFile) WritesNamedPaths() bool { return true }
 
 func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := refuseMaskedWrite(args); err != nil {
+		return "", err
+	}
 	var p struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`

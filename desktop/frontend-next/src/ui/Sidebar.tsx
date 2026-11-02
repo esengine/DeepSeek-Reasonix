@@ -1,3 +1,4 @@
+import { TeamRail } from "./team/TeamRail";
 import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
@@ -12,12 +13,13 @@ import { ContentMatches } from "./ContentMatches";
 import { useDestinations } from "./navdest";
 import { ICON, type Section } from "./prefsnav";
 import { RailSearch } from "./railsearch";
+import { RailSlots } from "./railSlots";
 import { RemoteHosts, remoteProjectKey, remoteWorkspaces } from "./RemoteHosts";
 import { remoteProjects } from "./remoteProjects";
 import { StudioIcon } from "./StudioIcon";
 import { UpdateDot } from "./UpdateDot";
 import { useHiddenHosts } from "../state/remotehide";
-import { useSidebarFolds } from "../state/sidebarFolds";
+import { setProjectsFolded, useSidebarFolds } from "../state/sidebarFolds";
 import { chord } from "./keys";
 import { Palette, type Command } from "./Palette";
 import { Workspaces } from "./Workspaces";
@@ -64,6 +66,7 @@ interface Props {
   onNew?: () => Promise<void>;
   onOpenRemote: (host: string, workspace?: string, sessionPath?: string) => Promise<void>;
   onFocusPane: (id: string) => void;
+  onAdoptPane?: (rt: RuntimeView | Promise<RuntimeView>) => void;
   onClosePanes: (ids: string[]) => Promise<void>;
   onPause: (runtimeId: string) => void;
   onBranch?: (runtimeId: string, name: string) => Promise<void>;
@@ -88,6 +91,9 @@ interface Props {
  *  is signed in. It owns only what nothing outside it reads — which scope the
  *  session filter is on, whether the switcher is open, and which workspaces are
  *  folded. Everything else belongs to the window and arrives as a prop. */
+// A pane the team opened, for a caller that only knows how to focus panes.
+const onFocusPaneOf = (focus: (id: string) => void) => async (rt: RuntimeView | Promise<RuntimeView>) => focus((await rt).id);
+
 export function Sidebar({
   hub,
   collapsed,
@@ -117,6 +123,7 @@ export function Sidebar({
   onNew,
   onOpenRemote,
   onFocusPane,
+  onAdoptPane,
   onClosePanes,
   onPause,
   onBranch,
@@ -238,6 +245,7 @@ export function Sidebar({
       await readRemoteTree(host);
     } else await onOpen({ root: session.workspaceRoot || workspace.root, sessionPath: session.path });
     setRailScope("all");
+    setProjectsFolded(false);
     onFold(host ? remoteProjectKey(host, workspace.root) : workspace.root, false);
     setLocated({ target: host ? remoteProjectKey(host, workspace.root) + ":" + session.path : session.path });
   };
@@ -251,6 +259,16 @@ export function Sidebar({
     locatedOnce.current = located;
   }, [located, recent, tree, remoteTrees]);
 
+  const filters = (
+    <div className="studio-session-filters" role="group" aria-label={t("会话范围")}>
+      <div className="studio-session-segments">
+        <button data-action="session.filter" data-value="all" aria-pressed={railScope === "all"} onClick={() => setRailScope("all")}><span>{t("全部")}</span></button>
+        <button data-action="session.filter" data-value="live" aria-pressed={railScope === "live"} onClick={() => setRailScope("live")}><span>{t("进行中")}</span></button>
+        <button data-action="session.filter" data-value="pinned" aria-pressed={railScope === "pinned"} onClick={() => setRailScope("pinned")}><span>{t("置顶")}</span></button>
+        <button data-action="session.filter" data-value="archived" aria-pressed={railScope === "archived"} onClick={() => setRailScope("archived")}><span>{t("归档")}</span></button>
+      </div>
+    </div>
+  );
   return (
     <>
     {recent && <RecentSessions hub={hub} hosts={shownRemotes} onPick={pickRecent} onClose={() => setRecent(false)} />}
@@ -306,15 +324,8 @@ export function Sidebar({
             ))}
           </div>
         )}
-        <div className="studio-session-filters" role="group" aria-label={t("会话范围")}>
-          <div className="studio-session-segments">
-            <button data-action="session.filter" data-value="all" aria-pressed={railScope === "all"} onClick={() => setRailScope("all")}><span>{t("全部")}</span></button>
-            <button data-action="session.filter" data-value="live" aria-pressed={railScope === "live"} onClick={() => setRailScope("live")}><span>{t("进行中")}</span></button>
-            <button data-action="session.filter" data-value="pinned" aria-pressed={railScope === "pinned"} onClick={() => setRailScope("pinned")}><span>{t("置顶")}</span></button>
-            <button data-action="session.filter" data-value="archived" aria-pressed={railScope === "archived"} onClick={() => setRailScope("archived")}><span>{t("归档")}</span></button>
-          </div>
-        </div>
       </div>
+      <RailSlots.Provider value={{ lead: <TeamRail hub={hub} active={active} onAdoptPane={onAdoptPane ?? onFocusPaneOf(onFocusPane)} />, filters }}>
       <RailSearch resetKey={located}>
       <ContentMatches hub={hub} tree={tree} onOpen={onOpen} onError={onError} onReference={onReferenceSession} />
       <Workspaces
@@ -377,6 +388,7 @@ export function Sidebar({
         ) : null}
       </Workspaces>
       </RailSearch>
+      </RailSlots.Provider>
       </div>
       {!navShown && <div className="railfoot">
         {destinations.some(([mark]) => mark === "usage") && <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("钱包与用量")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>}

@@ -1687,10 +1687,12 @@ A sub-agent row, by the list's own width:
 ## Unified project list
 
 - The sidebar is one project list: local roots and SSH roots share alignment and keyboard levels. Machine names are secondary project metadata, never parent groups. Remote folds use the host and root together as identity.
-- Project headings have no separate chevron. Clicking a heading or using the tree arrow keys toggles its conversations; known empty projects do not advertise expansion. The heading toolbar switches all projects together, while search reveals matching conversations independently of saved folds.
+- Project headings have no separate chevron. Clicking a heading or using the tree arrow keys toggles its conversations; known empty projects do not advertise expansion. The more menu switches all projects together, while search reveals matching conversations independently of saved folds.
 - The project toolbar keeps collapse/expand beside the label and open-project plus and overflow at the right. The plus opens the common local/SSH location picker; project-row chat icons create conversations. Empty lists retain a text entry.
 - Each project previews five recent sessions and keeps an older active/opening session visible. Search and explicit scopes show their matches. Show more reveals loaded rows and uses the existing bounded kernel paging path.
 - Recent stays in the project toolbar rather than adding a fifth session segment. Its modal shows session identity, owning project and activity age. A separate page-status line keeps the three footer buttons on one row at phone widths.
+- Choosing a recent session reveals the projects section before locating and focusing its row; other project folds keep their saved choices.
+- 从最近会话选择目标时，先展开项目区，再定位并聚焦会话；其他项目的折叠选择保持不变。
 - Time metadata comes only from canonical last-active timestamps. Loaded/total session counts remain available to assistive technology without visible badges.
 - The sidebar defaults to 316px, respects saved widths and retains its existing 232px floor. Folder glyphs, titles, action slots and conversation indents align across environments. Hover actions reserve their space.
 - The diagonal toolbar glyphs reuse Tabler's MIT-licensed [collapse][tabler-collapse] and [expand][tabler-expand] paths through the existing Studio icon component.
@@ -1744,6 +1746,50 @@ A sub-agent row, by the list's own width:
 - The optional preview occupies one line below the header, with a left rule and width-based ellipsis. It shows the opening text, including during streaming, rather than following the newest tokens.
 - The preview remains inside the disclosure summary so it is visible and clickable while collapsed. Expanded reasoning replaces it; the settings demonstration uses the same preview styling.
 
+## Team block
+
+- The team leads the rail's scroll, above the project list and in the same scroll, so a long team scrolls with the projects instead of pushing them out of reach. The session filters sit under the projects' heading: they filter sessions, never the team.
+- The team's heading matches the projects': title, fold, new agent, and a more menu (new group chat), at the same inset and button size. Folded, it keeps a count of the agents waiting on the person.
+- The first main agent leads; other agents and groups mix below it, pinned first, then by when they last moved. Reordering moves rows and never remounts them.
+- Every row has a fixed avatar column, so names start at one edge whether the mark is an agent or a group. The main agent wears a star; unread is a dot after the name.
+- A row's second line says what the agent is doing — waiting on the person, working, or waiting for named agents — and falls back to its latest message or role. A group's line names the speaker, says it is paused, or phrases its latest event as the chat does.
+- The row's own click always opens the conversation. Settings sit on a hover button; the right-click menu (and the ContextMenu key) carries the rest — pin, unread, duplicate, main role, hide, delete — with delete taking a second press.
+- Unread is this machine's fact: a row is unread when it moved after it was last looked at, or when the person marked it. Hidden rows are counted under the list and drawn on request, dimmed.
+- An agent's pane names the agent in the chrome crumb, not its folder, and offers no folder door: the host chose that folder, and entering it as a project would make it one of the user's.
+- The avatar picker keeps shapes and colours in separate rows, each with one pressed choice; one wrapping grid runs colours on after shapes and shows two selections in what reads as a single set.
+- Team dialogs dim the window with the same thin black scrim as the rename dialog. `--overlay` is an opaque surface colour, not a scrim, and would hide the window.
+
+## Team motion
+
+- Three levels, chosen in settings and held on this machine: quiet keeps only the animations that say a state (the working pulse); normal adds the answer to a pointer (a tilt on hover, a press on click) and rows sliding to a new place; lively adds idle blinks, fidgets and a repeating hop on "needs you".
+- Every animation sits under `prefers-reduced-motion: no-preference`, so the system setting stops all of it without a rule having to outweigh the others.
+- A row slides only when its place changes. A row met for the first time — on mount, or newly added — has no earlier place and stays still, and reordering moves the same elements rather than remounting them.
+- Each agent's ambient loops start at a phase taken from its id, so a column of avatars does not blink in step.
+
+## Agent greeting
+
+- An agent's empty conversation shows the agent instead of the window's hero: its avatar, a greeting, the chat models as chips with the one in use pressed, and for a main agent three first requests.
+- The host writes the greeting, so it costs nothing, works before any provider is set up, and never lands as a message in a conversation whose prefix the cache holds.
+- A starter fills the composer; it never sends. A model chip switches the conversation's model and records it as the agent's model for a first open.
+
+## Agent reply identity
+
+- Reply headers use the runtime seat's agent avatar and name, including a member's group conversation. The model badge remains the model recorded on that reply. Ordinary sessions retain the default Reasonix identity.
+- 回复标题显示所属会话 Agent 的头像和昵称，群聊成员的独立会话也遵循此规则；模型标签保留该回复实际使用的模型。普通会话保留 Reasonix 默认身份。
+
+## Agent details drawer
+
+- The agent's name in the chrome crumb is the drawer's switch. The drawer sits over the right edge of the panes area rather than in the `.side` rail, so it needs no column of its own and the conversation keeps its width when it closes.
+- Whether it is open is one window-wide answer: moving to another agent keeps it open and shows that agent. A group's chat takes the whole area, so the drawer steps aside while one is up.
+- Only what applies at once is edited in place (the permission). The folder is recorded at once and read when the conversation next opens, and the drawer says so; everything else goes through the settings dialog.
+
+## Group chat stage
+
+- A group is not a pane, so its chat is drawn over the panes, filling the same area, and the panes underneath keep their state. Focusing any pane puts the stage away.
+- While the stage is up the chrome crumb names the group and drops the session name: the pane it would name is hidden underneath.
+- A failed turn's line words the kernel's code when there are words for it, and offers the member's conversation, where the full error is, rather than printing a bare code.
+- The member dock sits between the log and the composer and appears only while someone is speaking, working, or waiting on the person.
+- Mentions are chips carrying member ids; typing `@` opens the member list rather than parsing names out of the text.
 ## Collapsed plan progress
 
 - Appearance → Conversation display offers “Show collapsed plan progress,” off by default and persisted on this machine. Changing it immediately updates mounted plan cards.
