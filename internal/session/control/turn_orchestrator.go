@@ -126,8 +126,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	// The checkpoint prompt labels the turn in the rewind picker (and is
 	// prefilled into the composer after a conversation rewind), so it must be
 	// the user's own text — never the composed provider input with its
-	// transient <response-language>/<reasoning-language>/memory/hook blocks.
-	if err := c.beginCheckpoint(ctx, firstNonEmpty(raw, task)); err != nil {
+	// transient <response-language>/<reasoning-language>/memory/hook blocks, and
+	// never the host's attachment tokens either: the picture is the attachment.
+	if err := c.beginCheckpoint(ctx, sessionstore.StripAttachmentTokens(firstNonEmpty(raw, task))); err != nil {
 		return err
 	}
 	if c.hooks.Enabled() {
@@ -328,9 +329,11 @@ func (c *Controller) announceAuthoredTurn(ctx context.Context, raw string, msgIn
 		// The message itself, for every client that did not send it: each one
 		// mints its own row, and the others have nothing to draw it from. Read
 		// the way history reads it, so a reload draws the same line.
-		started.Text = sessionstore.UserMessageText(provider.Message{Role: provider.RoleUser, RawContent: raw})
+		started.Text = sessionstore.UserDisplayText(provider.Message{Role: provider.RoleUser, RawContent: raw})
 		started.Via = via
-		started.Attachments = c.StoredAttachments(started.Text)
+		// Attachments are named by the line the model was given: the display
+		// text shows the picture, which is why it no longer carries the token.
+		started.Attachments = c.StoredAttachments(raw)
 	}
 	c.sink.Emit(started)
 	return agent.WithHostTurnBoundary(ctx, boundary)

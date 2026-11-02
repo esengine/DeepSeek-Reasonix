@@ -48,8 +48,12 @@ export function useSubmit({ port, running, dispatch, trajDispatch, refreshStatus
     async (text: string, chips?: ChipCall): Promise<Submitted> => {
       const queuedWhileRunning = running;
       const id = localId();
-      dispatch({ kind: "__user", text, pending: queuedWhileRunning, id } as never);
-      trajDispatch({ kind: "__user", text });
+      // What this window draws is what the kernel will draw after a reload: the
+      // line without the host's attachment tokens, which are not the person's
+      // words. The line itself still carries them.
+      const shown = chips?.display ?? text;
+      dispatch({ kind: "__user", text: shown, pending: queuedWhileRunning, id } as never);
+      trajDispatch({ kind: "__user", text: shown });
       try {
         if (queuedWhileRunning) {
           const followup = !!chips || runningIntent === "followup";

@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/base/proc"
 	"reasonix/internal/base/secrets"
 	"reasonix/internal/state/instruction"
+	"reasonix/internal/state/sessionstore"
 )
 
 // maxFileRefBytes caps how much of an @-referenced file is injected into a
@@ -187,7 +188,7 @@ func classifyRef(token string, known map[string]bool, exists func(string) bool) 
 }
 
 func isAttachmentRef(token string) bool {
-	return strings.HasPrefix(filepath.ToSlash(token), ".reasonix/attachments/")
+	return sessionstore.IsAttachmentToken(token)
 }
 
 // RefIsImage reports whether a reference resolves as a picture rather than as

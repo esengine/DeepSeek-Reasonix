@@ -4,7 +4,7 @@ import type { Item } from "../../state/session";
 import { RewindControl } from "./RewindControl";
 import { SkillPinView } from "./SkillPinView";
 import { parseSkillPin } from "./skillpin";
-import { CopyButton } from "../CopyButton";
+import { MessageCopy } from "../MessageCopy";
 import { reason } from "../../i18n/kernel";
 import { t } from "../../i18n";
 import { clock } from "../../i18n/format";
@@ -57,6 +57,9 @@ export function UserCard({
   const rewind = !!(cp && onPrepareRewind && onCommitRewind);
   const pin = useMemo(() => parseSkillPin(item.text), [item.text]);
   const images = useMemo(() => [...new Set((item.attachments ?? []).map((a) => a.path))], [item.attachments]);
+  // Rewriting sends the line the model reads, so it keeps the pictures the
+  // transcript now shows instead of spelling their tokens in the body.
+  const rewriteText = () => [item.text, ...images.map((path) => "@" + path).filter((ref) => !item.text.includes(ref))].join(" ").trim();
 
   useEffect(() => {
     const el = box.current;
@@ -152,11 +155,11 @@ export function UserCard({
         </div>
         <div className="user-acts">
           {item.at && <time className="user-time" dateTime={new Date(item.at).toISOString()} title={new Date(item.at).toLocaleString()}>{clock(item.at)}</time>}
-          <CopyButton text={item.text} iconOnly showFeedback label={t("复制")} />
+          <MessageCopy text={item.text} images={port ? images : []} imageURL={(path) => port?.workspaceImageURL(path) ?? ""} />
           {reopen && (
             <button type="button" className="reask-open" data-action="turn.edit" data-target={item.id}
               title={t("改写这条消息并重新发送")} aria-label={t("改写")}
-              onClick={() => setDraft(item.text)}>
+              onClick={() => setDraft(rewriteText())}>
               <StudioIcon name="edit" />
             </button>
           )}

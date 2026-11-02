@@ -638,6 +638,11 @@ export const ACTIONS: UIAction[] = [
   { id: "workbench.menu", kind: "view", target: "entity", proof: "interaction" },
   { id: "palette.pick", kind: "view", target: "entity", proof: "interaction" },
   { id: "palette.search", kind: "view", target: "none", proof: "interaction" },
+  // Copying a message touches the shell's clipboard, and the menu only opens a
+  // second way to do it.
+  { id: "message.copy-all", kind: "shell-native", target: "entity", proof: "interaction" },
+  { id: "message.copy-menu", kind: "view", target: "entity", proof: "interaction" },
+  { id: "message.copy-text", kind: "shell-native", target: "entity", proof: "interaction" },
   { id: "reply.quote", kind: "view", target: "entity", proof: "interaction" },
   { id: "reply.branch", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "reply.selection.menu", kind: "view", target: "entity", proof: "interaction" },

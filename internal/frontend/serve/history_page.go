@@ -163,18 +163,23 @@ func pageAttachments(ctrl control.SessionAPI, messages []provider.Message) (map[
 		if message.Role != provider.RoleUser || message.HostAuthored {
 			continue
 		}
-		text := sessionstore.UserMessageText(message)
+		told, said := message.Content, sessionstore.UserDisplayText(message)
+		if message.RawContent != "" {
+			told = message.RawContent
+		}
 		if steer, host, ok := sessionstore.SteerKind(message.Content); ok {
 			if host {
 				continue
 			}
-			text = steer
+			told, said = steer, sessionstore.StripAttachmentTokens(steer)
 			if message.RawContent != "" {
-				text = message.RawContent
+				told, said = message.RawContent, sessionstore.StripAttachmentTokens(message.RawContent)
 			}
 		}
-		files := ctrl.StoredAttachments(text)
-		byText[text] = files
+		files := ctrl.StoredAttachments(told)
+		// The window looks these up by what it draws, which is the display
+		// text: the tokens that name the pictures are not in it any more.
+		byText[said] = files
 		stamp = append(stamp, files)
 	}
 	return byText, stamp

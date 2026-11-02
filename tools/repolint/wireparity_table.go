@@ -112,7 +112,7 @@ var mirroredWireTypesTail = []wireMirror{
 	{"internal/ext/pluginpkg/pluginpkg.go", "CompatibilityIssue", tsPluginFile, "PluginSkipped"},
 	{"internal/frontend/serve/plugins.go", "pluginView", tsPluginFile, "PluginPackage"},
 	// port
-	{"internal/session/control/input.go", "InvocationRequest", tsPortFile, "InvocationRequest"},
+	{"internal/session/control/input.go", "InvocationRequest", tsChipFile, "InvocationRequest"},
 	{"internal/frontend/serve/tray.go", "TrayPrefs", tsPortFile, "TrayPrefs"},
 	// provider
 	{"internal/frontend/serve/provider_check.go", "providerModelCheckRequest", tsProviderFile, "ProviderModelCheckRequest"},

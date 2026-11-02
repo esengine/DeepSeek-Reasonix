@@ -53,7 +53,8 @@ it("sends the reference with the typed text, ahead of it like an attachment, and
   expect(screen.getAllByText("Rotate the signing key")).toHaveLength(1);
   type("what did we decide");
   fireEvent.keyDown(box, { key: "Enter" });
-  await waitFor(() => expect(onSubmit).toHaveBeenCalledExactlyOnceWith("@session:20261018-020806-test what did we decide"));
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+  expect((onSubmit.mock.calls[0] as unknown[])[0]).toBe("@session:20261018-020806-test what did we decide");
   await waitFor(() => expect(screen.queryByText("Rotate the signing key")).toBeNull());
 });
 
@@ -63,7 +64,8 @@ it("sends a chip on its own, and puts it back with the draft when the send fails
   type("#");
   fireEvent.mouseDown(await screen.findByRole("option", { name: /Fix the flaky branch menu/ }));
   fireEvent.keyDown(box, { key: "Enter" });
-  await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("@session:20261017-101010-test"));
+  await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+  expect((onSubmit.mock.calls[0] as unknown[])[0]).toBe("@session:20261017-101010-test");
   await waitFor(() => expect(screen.getByText("Fix the flaky branch menu")).toBeTruthy());
   expect(port.complete).toHaveBeenCalled();
 });

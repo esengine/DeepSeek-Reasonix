@@ -15,6 +15,7 @@ import (
 const (
 	tsWireFile      = "desktop/frontend-next/src/port/wire.ts"
 	tsPortFile      = "desktop/frontend-next/src/port/port.ts"
+	tsChipFile      = "desktop/frontend-next/src/port/chip.ts"
 	tsLeaseFile     = "desktop/frontend-next/src/port/workspace_lease.ts"
 	tsBoundaryFile  = "desktop/frontend-next/src/port/boundary.ts"
 	tsRemoteFile    = "desktop/frontend-next/src/port/remote.ts"

@@ -104,15 +104,16 @@ func historyMessageWindow(msgs []provider.Message, attachments func(string) []ev
 		// rides the same prefix and is not theirs to have said.
 		if m.Role == provider.RoleUser {
 			if steerText, host, isSteer := sessionstore.SteerKind(m.Content); isSteer {
+				said := steerText
 				if m.RawContent != "" {
-					steerText = m.RawContent
+					said = m.RawContent
 				}
 				out = append(out, historyMessage{
-					Role: string(provider.RoleUser), Content: steerText, Steer: true,
+					Role: string(provider.RoleUser), Content: sessionstore.StripAttachmentTokens(said), Steer: true,
 					HostAuthored: host || m.HostAuthored, MsgIndex: offset + i, Via: eventwire.ToWireVia(m.Via),
 				})
 				if !host && !m.HostAuthored {
-					out[len(out)-1].Attachments = attached(steerText)
+					out[len(out)-1].Attachments = attached(said)
 				}
 				continue
 			}
@@ -121,12 +122,18 @@ func historyMessageWindow(msgs []provider.Message, attachments func(string) []ev
 		if m.Role == provider.RoleUser {
 			// Content is what the model saw, and one @-reference expands into a
 			// whole file. A reopened session has to show what was typed.
-			hm.Content = sessionstore.UserMessageText(m)
+			hm.Content = sessionstore.UserDisplayText(m)
 			hm.Images = len(m.Images)
 			hm.Via = eventwire.ToWireVia(m.Via)
 			hm.CreatedAt = m.CreatedAt
 			if !m.HostAuthored {
-				hm.Attachments = attached(hm.Content)
+				// The tokens are in the line the model was given, which is what
+				// names the pictures; the display text shows the pictures.
+				told := m.Content
+				if m.RawContent != "" {
+					told = m.RawContent
+				}
+				hm.Attachments = attached(told)
 			}
 		}
 		if m.Role == provider.RoleAssistant {

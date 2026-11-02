@@ -20,7 +20,7 @@ import { usePlaceholderFit } from "./placeholderfit";
 import { useFitHeight } from "./fitHeight";
 import { onComposerHintChange, showsComposerHint, useRunningMessageIntent, useSendShortcut } from "../state/prefs";
 import { runningSendIntent, sendAria, sendHint, sendsOnKey } from "./sendkey";
-import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
+import { countLines, planTone, planVerb } from "./intake";
 import { kindOf, nameOf, previewURL } from "./chipfile";
 import { useIntake } from "./useIntake";
 import type { Dropped } from "./filedrop";
@@ -34,7 +34,8 @@ import type { Submitted } from "./usesubmit";
 import { touchKeyboard } from "./touchKeyboard";
 import { ImagePreview } from "./ImagePreview";
 import { SideAskButton } from "./SideAskButton";
-import { chipId, chipName, isPicture, quoteBlock, releaseChip, type Chip } from "./composerChips";
+import { chipId, chipName, isPicture, lineCall, quoteBlock, releaseChip, type Chip } from "./composerChips";
+import { PasteLost, useClipboardPaste } from "./clipboardpaste";
 
 interface Props {
   worktreeTarget?: HTMLElement | null;
@@ -237,9 +238,17 @@ export function Composer({ port, status, running, queued = false, quote, restore
     // A quote is what the question is about, so it leads; a held-back paste is
     // the material the answer needs and follows what was typed.
     const quotes = shots.flatMap((c) => (c.k === "quote" ? [quoteBlock(c)] : []));
-    const compose = (t: string) => [...quotes, [...refs, t.trim()].filter(Boolean).join(" "), ...pastes].filter(Boolean).join("\n\n");
+    // Two readings of one line: what the model is given, and what the person
+    // reads. An attachment's token is the host's addressing, not their words;
+    // a session reference stays said.
+    const compose = (t: string, refsIn = refs) => {
+      const said = [...refsIn, t.trim()].filter(Boolean).join(" ");
+      return [...quotes, said, ...pastes].filter(Boolean).join("\n\n");
+    };
     const line = compose(v);
+    const shown = compose(v, shots.flatMap((c) => (c.k === "session" ? ["@session:" + c.session] : [])));
     const call = chips.call(compose);
+    const chipCall = lineCall(line, shown, call);
     const draft = { text, shots, caret: caretRef.current, chips: chips.held() };
     if (worktree.selection || worktree.stage) setSetupDraft({ text: v, files: shots.map(chipName) });
     const restoreDraft = (select = false) => {
@@ -255,13 +264,14 @@ export function Composer({ port, status, running, queued = false, quote, restore
     setSubmitting(true);
     type("", 0);
     setShots([]);
+    paste.clear();
     void (async () => {
       try {
         if (worktree.selection || worktree.stage) {
           const prepared = await worktree.prepare(draft.shots.flatMap((chip) => chip.k === "attachment" && chip.a ? [chip.a.path] : chip.k === "paste" && chip.saved ? [chip.saved.path] : []));
           if (!prepared) { restoreDraft(); return; }
         }
-        const sent = await (call ? onSubmit(line, call) : onSubmit(line));
+        const sent = await (chipCall ? onSubmit(line, chipCall) : onSubmit(line));
         if (sent === true) {
           finishSubmit(true);
           worktree.dismiss();
@@ -338,6 +348,14 @@ export function Composer({ port, status, running, queued = false, quote, restore
     [upload],
   );
 
+  const paste = useClipboardPaste({
+    port,
+    onError,
+    attach,
+    insert,
+    hold: (added) => setShots((prev) => [...prev, ...added]),
+  });
+
   // A dropped file is referenced where it lives. Copying it in is what let a
   // turn edit the copy and report the edit as done while the file the user
   // pointed at never changed. Only the host can mint the token: whether a path
@@ -412,7 +430,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
   const hasDraft = text.trim().length > 0 || shots.some((c) => c.k !== "attachment" || c.state === "ready");
   const lines = countLines(text);
   const showCount = text.length >= 240 || lines > 3;
-  const sendDisabled = submitting || stopping || adding || failed || !hasDraft || !!worktree.stage;
+  const sendDisabled = submitting || stopping || adding || failed || paste.restoring > 0 || !hasDraft || !!worktree.stage;
   const warnPictures = status?.vision === false && shots.some((c) => c.k === "attachment" && c.state === "ready" && isPicture(c));
 
   const setupPage = worktree.stage && <WorktreeSetupPage stage={worktree.stage} task={setupDraft.text} files={setupDraft.files} busy={submitting} onRetry={send} onCancel={() => void worktree.cancel()} onEdit={worktree.dismiss}/>;
@@ -521,6 +539,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
           ))}
         </ul>
       )}
+      <PasteLost n={paste.lost} />
       {/* A warning cannot be the last horizontally scrolling attachment: that
           is exactly where it disappears when there are enough files to matter. */}
       {warnPictures && (
@@ -560,26 +579,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
           onKeyUp={(e) => setCaret(chips.snap(e.currentTarget, caret))}
           onClick={(e) => setCaret(chips.snap(e.currentTarget, caret))}
           data-action-paste="session.attach"
-          // Clipboard files are copied into host-owned attachments. Their native
-          // paths can belong to a source application's restricted or short-lived cache.
-          onPaste={(e) => {
-            if (submitting) {
-              e.preventDefault();
-              return;
-            }
-            const files = [...e.clipboardData.files];
-            if (files.length > 0) {
-              e.preventDefault();
-              attach(files.map((file) => new File([file], file.name, { type: file.type })));
-              return;
-            }
-            const body = e.clipboardData.getData("text/plain");
-            if (!pasteIsLong(body)) return;
-            // Long enough to bury the composer. It still goes with the turn — it
-            // is just held beside the box instead of becoming it.
-            e.preventDefault();
-            setShots((prev) => [...prev, { k: "paste", id: chipId(), body, lines: countLines(body) }]);
-          }}
+          onPaste={(e) => paste.onPaste(e, submitting)}
           {...ime.handlers}
           onKeyDown={(e) => {
             if (!ime.isIme(e.nativeEvent) && refine.onKey(e)) return;
@@ -636,7 +636,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
             ? t("正在停止…")
             : submitting
             ? t("正在发送…")
-            : adding
+            : adding || paste.restoring > 0
               ? t("正在添加附件…")
               : failed
                 ? t("有附件添加失败，请重试或移除")

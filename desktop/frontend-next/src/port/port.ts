@@ -8,6 +8,7 @@ import type { SideProgress } from "./side";
  *  way to give its connection up and take it again without losing the cursor. */
 export type Subscription = (() => void) & { pause?: () => void; resume?: () => void; holdsConnection?: () => boolean };
 import type { Attachment, DroppedRef, KeptText } from "./attachment";
+import type { ChipCall } from "./chip";
 export { DeliveryError, HttpError };
 export type { DeliveryFault };
 export type { Attachment, DroppedRef, KeptText };
@@ -76,18 +77,7 @@ export type * from "./look";
 export type * from "./boundary";
 export type * from "./provider";
 
-/** A skill chip as the kernel takes it; offset only orders chips in a line. */
-export interface InvocationRequest {
-  name: string;
-  kind: "skill" | "subagent";
-  offset: number;
-}
-
-/** A line holding chips: submit is what the model reads, chips taken out. */
-export interface ChipCall {
-  submit: string;
-  invocations: InvocationRequest[];
-}
+export type { ChipCall, InvocationRequest } from "./chip";
 
 /** What the kernel answers when a line is queued — mid-turn guidance or a whole
  *  turn waiting its go. itemId is the durable entry, and it is the whole reason
@@ -658,6 +648,10 @@ export interface AgentPort extends WorkspacePreviewPort, SessionTailPort, Upload
   keepText(text: string): Promise<KeptText>;
   // Names what dropped paths are called inside a turn, in the order given.
   dropRefs(paths: string[]): Promise<DroppedRef[]>;
+  // Names the stored attachments a copied message carried, for a paste in this
+  // workspace. A path this workspace no longer holds answers with why instead
+  // of a token — the line keeps the words and drops the picture.
+  restoreAttachments(paths: string[]): Promise<DroppedRef[]>;
   // onGap fires when frames were lost beyond what the stream can replay: the
   // cue to re-read each model from its own authority rather than to keep
   // rendering a conversation with a hole in it.

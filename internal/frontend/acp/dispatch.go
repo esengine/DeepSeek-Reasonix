@@ -354,14 +354,14 @@ func (s *updateSink) replay(msgs []provider.Message) {
 		switch m.Role {
 		case provider.RoleUser:
 			// Replay the user-authored view, not the persisted wire form:
-			// UserMessageText strips injected transient blocks (<response-language>
-			// etc.) and unwraps memory-compiler contracts, same as every other
-			// surface (#6882). A turn that was pure injection replays as nothing.
+			// UserDisplayText strips injected blocks and the host's attachment
+			// tokens, same as every other surface. A pure injection replays as
+			// nothing, and a picture replays as the picture it carried.
 			text := m.Content
 			if steer, ok := sessionstore.SteerText(text); ok {
-				text = steer
+				text = sessionstore.StripAttachmentTokens(steer)
 			} else {
-				text = sessionstore.UserMessageText(m)
+				text = sessionstore.UserDisplayText(m)
 			}
 			if text != "" {
 				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})

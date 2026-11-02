@@ -23,6 +23,11 @@ func TestHistoryNamesStoredAttachmentsFromTheHost(t *testing.T) {
 	if len(got[0].Attachments) != 1 || got[0].Attachments[0].Path != ref {
 		t.Fatalf("attachments = %+v", got[0].Attachments)
 	}
+	// The picture is drawn beside the words; the token that resolves it is not
+	// part of what the person said, and a reopened window shows the same line.
+	if got[0].Content != "look" {
+		t.Fatalf("content = %q, want the words without the attachment token", got[0].Content)
+	}
 	if len(got[1].Attachments) != 0 {
 		t.Fatalf("text the host did not resolve carried attachments: %+v", got[1].Attachments)
 	}

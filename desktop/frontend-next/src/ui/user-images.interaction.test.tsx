@@ -13,8 +13,9 @@ import { MockPort } from "../port/mock";
 import { UserCard } from "./cards/UserCard";
 import { Pane } from "./Pane";
 import { Composer } from "./Composer";
+import { CLIP_MANIFEST, readClipText } from "./clipboard";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 const path = ".reasonix/attachments/clipboard-20261008-002000.123456-000001.png";
 const text = `@${path} 请看这张图片`;
@@ -34,7 +35,8 @@ describe("saved images in user messages", () => {
     await waitFor(() => expect(upload).toHaveBeenCalled());
     await waitFor(() => expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    await waitFor(() => expect(submit).toHaveBeenCalledWith(`@${path}`));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect((submit.mock.calls[0] as unknown[])[0]).toBe(`@${path}`);
     view.unmount();
     const named = nameTurnStart(
       { ...initialState, items: [{ t: "user", id: "me", text: submit.mock.calls[0][0] }], awaitingTurnStart: ["me"] },
@@ -142,17 +144,73 @@ describe("saved images in user messages", () => {
     expect(screen.getByRole("img").getAttribute("src")).toBe("/rt/other/image");
   });
 
-  it("copies and edits the original message including its attachment token", async () => {
+  it("copies the words with their picture, and rewriting still carries the picture", async () => {
     const user = userEvent.setup();
-    const write = vi.spyOn(navigator.clipboard, "writeText");
-    render(<UserCard item={item} port={port} cp={{ turn: 1, prompt: text, files: 0, msgIndex: 1 }} onResend={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "复制" }));
-    expect(write).toHaveBeenCalledExactlyOnceWith(text);
+    const written: { data: Record<string, Blob> }[] = [];
+    class Item {
+      constructor(readonly data: Record<string, Blob>) {}
+    }
+    vi.stubGlobal("ClipboardItem", Item);
+    const write = vi.fn(async (items: { data: Record<string, Blob> }[]) => { written.push(...items); });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write, writeText: vi.fn() } });
+    vi.stubGlobal("fetch", async () => new Response(new Blob(["png"], { type: "image/png" }), { headers: { "content-type": "image/png" } }));
+    render(<UserCard item={{ ...item, text: "请看这张图片" }} port={port} cp={{ turn: 1, prompt: text, files: 0, msgIndex: 1 }} onResend={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "复制全部" }));
+    await waitFor(() => expect(write).toHaveBeenCalledOnce());
+    expect(readClipText(await written[0].data["text/plain"].text())).toEqual({ text: "请看这张图片", images: [{ path }] });
     await user.click(screen.getByRole("button", { name: "改写" }));
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(text);
+    // The rewrite box carries the line the model reads, which is the only place
+    // the picture's token belongs.
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(`请看这张图片 @${path}`);
     expect(screen.queryByRole("img")).toBeNull();
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByRole("img")).toBeTruthy();
-    write.mockRestore();
+  });
+});
+
+describe("pasting a message that was copied with its pictures", () => {
+  const copyAllOf = (name: string, pictures: string[]) => ({
+    files: [],
+    getData: (type: string) => type === CLIP_MANIFEST ? JSON.stringify({ v: 1, text: name, images: pictures.map((p) => ({ path: p })) }) : "",
+  });
+
+  it("puts the picture back as an attachment and leaves only the words in the box", async () => {
+    const submit = vi.fn(async () => true);
+    render(<Composer port={port as AgentPort} status={{ modelRef: "deepseek/m" } as SessionStatus} running={false} onSubmit={submit} onChanged={vi.fn()} onError={vi.fn()} />);
+    const box = screen.getByRole("combobox", { name: "任务输入" }) as HTMLTextAreaElement;
+    fireEvent.paste(box, { clipboardData: copyAllOf("请看这张图", [path]) });
+    await screen.findByText(path.split("/").at(-1)!);
+    expect(box.value).toBe("请看这张图 ");
+    expect(box.value).not.toContain(path);
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    const [line, call] = submit.mock.calls[0] as unknown as [string, { display?: string }];
+    expect(line).toBe(`@${path} 请看这张图`);
+    // The row this window draws is the words alone: the kernel stores the same
+    // reading, so a reload does not bring the path back.
+    expect(call?.display).toBe("请看这张图");
+  });
+
+  it("keeps the words and says how many pictures this workspace no longer has", async () => {
+    const restore = vi.spyOn(port, "restoreAttachments");
+    render(<Composer port={port as AgentPort} status={{ modelRef: "deepseek/m" } as SessionStatus} running={false} onSubmit={vi.fn(async () => true)} onChanged={vi.fn()} onError={vi.fn()} />);
+    const box = screen.getByRole("combobox", { name: "任务输入" }) as HTMLTextAreaElement;
+    fireEvent.paste(box, { clipboardData: copyAllOf("上次的图", ["./old/.reasonix/attachments/gone.png"]) });
+    expect(await screen.findByText("1 张图片不在当前工作区，粘贴时已忽略")).toBeTruthy();
+    expect(box.value).toBe("上次的图 ");
+    expect(box.value).not.toContain(".reasonix/attachments");
+    expect(restore).toHaveBeenCalledWith(["./old/.reasonix/attachments/gone.png"]);
+  });
+
+  it("does not restore anything from a text-only copy", async () => {
+    const restore = vi.spyOn(port, "restoreAttachments");
+    render(<Composer port={port as AgentPort} status={{ modelRef: "deepseek/m" } as SessionStatus} running={false} onSubmit={vi.fn(async () => true)} onChanged={vi.fn()} onError={vi.fn()} />);
+    const box = screen.getByRole("combobox", { name: "任务输入" }) as HTMLTextAreaElement;
+    const notHijacked = fireEvent.paste(box, { clipboardData: { files: [], getData: (type: string) => type === "text/plain" ? "只有文字" : "" } });
+    // A short plain paste is still the browser's: the handler only watches for
+    // the manifest a "copy all" writes.
+    expect(notHijacked).toBe(true);
+    expect(box.value).toBe("");
+    expect(restore).not.toHaveBeenCalled();
   });
 });

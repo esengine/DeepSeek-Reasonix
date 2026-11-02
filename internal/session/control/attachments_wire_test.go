@@ -121,6 +121,11 @@ func TestTurnStartedCarriesTheStoredAttachments(t *testing.T) {
 			if len(e.Attachments) != 1 || e.Attachments[0].Path != rel {
 				t.Fatalf("turn_started attachments = %+v", e.Attachments)
 			}
+			// Another window draws this line, so it must not read the host's
+			// token back to the person as text they typed.
+			if e.Text != "describe" {
+				t.Fatalf("turn_started text = %q, want the words without the token", e.Text)
+			}
 			return
 		}
 	}

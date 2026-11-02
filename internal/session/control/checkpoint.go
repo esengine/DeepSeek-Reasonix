@@ -263,7 +263,10 @@ func (m *checkpointManager) namesUserMessage(index int, msg provider.Message) bo
 	}
 	for _, meta := range m.list() {
 		if meta.Turn == next {
-			return sessionstore.UserMessageText(msg) == strings.TrimSpace(sessionstore.StripTransientUserBlocks(meta.Prompt))
+			// The recorded prompt is the person's own text, so the attachment
+			// tokens the model was given are not part of what it compares.
+			said := sessionstore.StripAttachmentTokens(sessionstore.UserMessageText(msg))
+			return said == strings.TrimSpace(sessionstore.StripTransientUserBlocks(meta.Prompt))
 		}
 	}
 	return false

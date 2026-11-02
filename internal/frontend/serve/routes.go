@@ -122,8 +122,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /workspace/editor", s.openInEditor)
 	mux.HandleFunc("POST /workspace/open-document", s.openDocument)
 	mux.HandleFunc("GET /workspace/locate", s.workspaceLocate)
-	mux.HandleFunc("POST /attachments", s.attachments)
-	mux.HandleFunc("POST /attachments/upload", s.attachmentUpload)
+	s.attachmentRoutes(mux)
 	mux.HandleFunc("POST /drop", s.drop)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
 	return mux

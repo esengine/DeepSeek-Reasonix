@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import type { Attachment } from "../port/port";
+import type { Attachment, ChipCall } from "../port/port";
 import type { PasteChip } from "./pastekeep";
 
 // What is riding along with this turn. An attachment travels as bytes or a path
@@ -49,3 +49,11 @@ export function releaseChip(c: Chip) {
 
 let chipSeq = 0;
 export const chipId = () => `c${++chipSeq}`;
+
+// lineCall names the two readings of one outgoing line: what the model is
+// given, and what the transcript draws back. They differ only when the line
+// carries host tokens the person never typed, and then only the drawn one.
+export function lineCall(line: string, shown: string, call?: ChipCall): ChipCall | undefined {
+  if (!call && shown === line) return undefined;
+  return { submit: call?.submit ?? line, invocations: call?.invocations ?? [], ...(shown === line ? {} : { display: shown }) };
+}

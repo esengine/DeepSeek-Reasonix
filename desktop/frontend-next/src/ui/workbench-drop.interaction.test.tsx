@@ -61,7 +61,8 @@ it.each(["/workspace", "C:\\work\\project", "\\\\server\\share\\project"])("refe
   expect(document.activeElement).toBe(box);
   expect(screen.queryByRole("tab", { name: "README.md" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
-  await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("@README.md Review this"));
+  await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+  expect((onSubmit.mock.calls[0] as unknown[])[0]).toBe("@README.md Review this");
 });
 
 it("references a folder without expanding it", async () => {

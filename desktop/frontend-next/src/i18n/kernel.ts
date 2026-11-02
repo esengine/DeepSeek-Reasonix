@@ -239,6 +239,7 @@ const SAID: Record<string, string> = {
   "settings.unknown_model": "没有找到这个模型，默认模型没有改动",
   "settings.default_model_brokered": "这个窗格的默认模型由模型所在的那台机器决定，请在本机的窗格里设置",
   "drop.too_many_paths": "本次拖入 {count} 个，最多允许 {limit} 个",
+  "attachment.too_many_paths": "本次粘贴带回 {count} 张图片，一次最多还原 {limit} 张",
   "attachment.unsupported_image": "这个文件的格式暂不支持（{format}）。支持的图片格式：{supported}。可以先转换格式再添加。",
   "attachment.too_large": "这个文件超过 {limit_mb} MB 的上限，请压缩或拆分后再添加。",
   "attachment.empty": "这个文件是空的（0 字节），没有可添加的内容。",

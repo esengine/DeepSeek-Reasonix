@@ -371,13 +371,13 @@ export class MockPort extends MockWorkspace implements AgentPort {
   }
 
   // No host behind the fixture, so a paste resolves to a token nothing reads.
-  async attach(): Promise<Attachment> {
-    return { path: ".reasonix/attachments/mock.png", ref: "@.reasonix/attachments/mock.png" };
-  }
+  async attach(): Promise<Attachment> { return { path: ".reasonix/attachments/mock.png", ref: "@.reasonix/attachments/mock.png" }; }
 
   async dropRefs(paths: string[]): Promise<DroppedRef[]> {
     return paths.map((path) => ({ ref: "@" + path, path }));
   }
+
+  async restoreAttachments(paths: string[]): Promise<DroppedRef[]> { return paths.map((path) => path.startsWith(".reasonix/attachments/") ? { ref: "@" + path, path, image: true } : { path, image: false, error: "attachment is not in this workspace" }); }
 
   async workspaceFiles(path = "", query = "", hidden = false) {
     const all = ["README.md", "internal/provider/retry.go", ...(hidden ? [".gitignore", ".reasonix/REASONIX.local.md"] : [])];

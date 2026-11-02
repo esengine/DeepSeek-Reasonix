@@ -51,4 +51,8 @@ export class SseIntake extends SseTheme {
   dropRefs(paths: string[]) {
     return this.post0<DroppedRef[]>("/drop", { paths });
   }
+
+  restoreAttachments(paths: string[]) {
+    return this.post0<DroppedRef[]>("/attachments/restore", { paths });
+  }
 }

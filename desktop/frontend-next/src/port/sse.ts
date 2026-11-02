@@ -496,13 +496,15 @@ export class SsePort extends SseWorkspace implements AgentPort {
   }
 
   submit(text: string, chips?: ChipCall) {
-    return this.postMaybe<Queued>("/submit", { input: text, ...chips });
+    // display is drawn locally and never posted: the kernel derives the same
+    // text from the line it stores, from one rule rather than two.
+    return this.postMaybe<Queued>("/submit", { input: text, submit: chips?.submit, invocations: chips?.invocations });
   }
   steer(text: string) {
     return this.post0<Queued>("/inbox/items", { input: text, intent: "steer" });
   }
   queueFollowup(text: string, chips?: ChipCall) {
-    return this.post0<Queued>("/inbox/items", { input: text, intent: "followup", ...chips });
+    return this.post0<Queued>("/inbox/items", { input: text, intent: "followup", submit: chips?.submit, invocations: chips?.invocations });
   }
   async cancelQueued(itemId: string) {
     await this.del("/inbox/items/" + encodeURIComponent(itemId));

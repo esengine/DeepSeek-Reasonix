@@ -114,6 +114,14 @@ func (s *Server) keepText(w http.ResponseWriter, root, text string) {
 	writeJSON(w, map[string]any{"path": saved, "pointer": control.TextAttachmentPointer(saved, text)})
 }
 
+// attachmentRoutes are the three ways bytes or a stored path become a turn
+// reference: inline bytes, a streamed file, and a path a copy recorded.
+func (s *Server) attachmentRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /attachments", s.attachments)
+	mux.HandleFunc("POST /attachments/upload", s.attachmentUpload)
+	mux.HandleFunc("POST /attachments/restore", s.restoreAttachments)
+}
+
 func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, (maxAttachmentUpload/3)*4+1024)
 	var body struct {

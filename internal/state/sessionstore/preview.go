@@ -231,9 +231,11 @@ func memoryCompilerSourceEvent(body string) string {
 	return strings.TrimSpace(contract.SourceEvent)
 }
 
-// UserPreviewText returns the user-authored part of a persisted user message.
+// UserPreviewText returns the user-authored part of a persisted user message:
+// its wrappers gone, and the host's attachment tokens with them, so a preview
+// or a branch title names what the person said rather than a stored path.
 func UserPreviewText(content string) string {
-	return userAuthoredText(content)
+	return StripAttachmentTokens(userAuthoredText(content))
 }
 
 // pasteDisplayLabelPattern matches the standalone label desktop prepends to a
