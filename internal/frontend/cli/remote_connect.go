@@ -40,8 +40,9 @@ func buildRemoteClient(nameOrTarget string) (*remote.Client, func(), error) {
 		return nil, nil, err
 	}
 	client, err := attach.Dial(cfg, nameOrTarget, attach.Prompts{
-		Secret:  terminalSecretPrompt,
-		HostKey: terminalHostKeyPrompt,
+		Secret:    terminalSecretPrompt,
+		HostKey:   terminalHostKeyPrompt,
+		Challenge: terminalChallengePrompt,
 	})
 	if err != nil {
 		return nil, nil, err

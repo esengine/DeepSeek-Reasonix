@@ -47,6 +47,8 @@ type Options struct {
 	Password string
 	// AuthorizedKey, when set, enables publickey auth accepting this key.
 	AuthorizedKey ssh.PublicKey
+	// KeyboardInteractive handles server-provided authentication challenges.
+	KeyboardInteractive func(ssh.ConnMetadata, ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error)
 	// Exec handles `exec` requests; nil => a default echoing the command.
 	Exec func(cmd string) (stdout string, stderr string, exit int)
 	// SFTPRoot enables the SFTP subsystem rooted at this directory.
@@ -91,7 +93,8 @@ func Start(t *testing.T, opts Options) *Server {
 			return nil, errors.New("unknown key")
 		}
 	}
-	if opts.Password == "" && opts.AuthorizedKey == nil {
+	cfg.KeyboardInteractiveCallback = opts.KeyboardInteractive
+	if opts.Password == "" && opts.AuthorizedKey == nil && opts.KeyboardInteractive == nil {
 		cfg.NoClientAuth = true
 	}
 

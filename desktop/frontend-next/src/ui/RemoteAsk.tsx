@@ -9,14 +9,13 @@ interface Props {
   onAnswer: (id: string, ok: boolean, text: string) => void;
 }
 
-// A connect is stopped on this. Two shapes: a fingerprint to compare, or a
-// secret to type — and the first is the one that must not be made easy.
 export function RemoteAsk({ ask, onAnswer }: Props) {
   const sheet = useRef<HTMLDivElement>(null);
   useModalFocus(sheet);
   const [text, setText] = useState("");
   const box = useRef<HTMLInputElement>(null);
   const secret = ask.kind !== "hostkey";
+  const challenge = ask.kind === "keyboard-interactive";
 
   useEffect(() => {
     setText("");
@@ -38,31 +37,45 @@ export function RemoteAsk({ ask, onAnswer }: Props) {
     <div ref={sheet} className="askveil" role="dialog" aria-modal="true" aria-labelledby="ask-t">
       <div className="askcard">
         <h2 id="ask-t">
-          {secret
-            ? ask.kind === "password"
-              ? t("{host} 需要密码", { host: ask.host })
-              : t("私钥已被口令锁定")
-            : t("首次连接 {host}", { host: ask.host })}
+          {challenge
+            ? ask.name || ask.host
+            : secret
+              ? ask.kind === "password"
+                ? t("{host} 需要密码", { host: ask.host })
+                : t("私钥已被口令锁定")
+              : t("首次连接 {host}", { host: ask.host })}
         </h2>
 
         {secret ? (
           <>
-            <p className="h">
-              {ask.identityFile
-                ? t("解锁 {file}。该口令仅存在于本次连接的内存中，不会写入任何文件。", { file: ask.identityFile })
-                : t("仅存在于本次连接的内存中，不会写入任何文件。如需保存，请在设置中填写环境变量名。")}
-            </p>
-            <input
-              ref={box}
-              data-action-keydown="remote-ask.answer"
-              type="password"
-              value={text}
-              autoFocus
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onAnswer(ask.askId, true, text);
-              }}
-            />
+            {challenge ? (
+              <>
+                <p className="h">{ask.host}</p>
+                <p className="h" style={{ whiteSpace: "pre-wrap" }}>{ask.instruction}</p>
+                {ask.answerRequired && <label htmlFor="remote-challenge" style={{ whiteSpace: "pre-wrap" }}>{ask.question}</label>}
+              </>
+            ) : (
+              <p className="h">
+                {ask.identityFile
+                  ? t("解锁 {file}。该口令仅存在于本次连接的内存中，不会写入任何文件。", { file: ask.identityFile })
+                  : t("仅存在于本次连接的内存中，不会写入任何文件。如需保存，请在设置中填写环境变量名。")}
+              </p>
+            )}
+            {(!challenge || ask.answerRequired) && (
+              <input
+                ref={box}
+                id="remote-challenge"
+                data-action-keydown="remote-ask.answer"
+                type={challenge && ask.echo ? "text" : "password"}
+                autoComplete="off"
+                value={text}
+                autoFocus
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onAnswer(ask.askId, true, text);
+                }}
+              />
+            )}
           </>
         ) : (
           <>

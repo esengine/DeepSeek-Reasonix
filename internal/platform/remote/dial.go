@@ -27,7 +27,7 @@ type dialConfig struct {
 // target's Password/Passphrase closures: a jump host must not be authenticated
 // with the target's stored credentials.
 func (cfg dialConfig) hopAuthFor(hop ResolvedHost) *AuthOptions {
-	return &AuthOptions{SecretPrompt: cfg.auth.SecretPrompt, DisableAgent: cfg.auth.DisableAgent}
+	return &AuthOptions{SecretPrompt: cfg.auth.SecretPrompt, ChallengePrompt: cfg.auth.ChallengePrompt, DisableAgent: cfg.auth.DisableAgent}
 }
 
 func (cfg dialConfig) resolvedHop(raw string) (ResolvedHost, *AuthOptions, error) {
@@ -114,13 +114,15 @@ func dialSSH(ctx context.Context, cfg dialConfig) (*ssh.Client, []*ssh.Client, e
 // dial, not the version/key exchange, so a host that accepts TCP but never
 // sends a banner would otherwise hang NewClientConn — and Close — forever).
 func newSSHClient(ctx context.Context, conn net.Conn, host ResolvedHost, auth *AuthOptions, hostKeys *HostKeyPolicy, timeout time.Duration) (*ssh.Client, error) {
-	methods, authCallback, cleanupAuth, err := buildAuthMethods(ctx, host, auth)
+	hsCtx, cancel := context.WithTimeout(ctx, handshakeTimeout(timeout))
+	defer cancel()
+	methods, authCallback, cleanupAuth, err := buildAuthMethods(hsCtx, host, auth)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 	defer cleanupAuth()
-	hkCallback, err := hostKeys.Callback(ctx, host.Label())
+	hkCallback, err := hostKeys.Callback(hsCtx, host.Label())
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -142,7 +144,6 @@ func newSSHClient(ctx context.Context, conn net.Conn, host ResolvedHost, auth *A
 	// SetDeadline method returns "deadline not supported". A watcher closes the
 	// connection on timeout/cancellation; the acknowledgement prevents a late
 	// watcher from closing a successfully established client.
-	hsCtx, cancel := context.WithTimeout(ctx, handshakeTimeout(timeout))
 	stopWatch := make(chan struct{})
 	watchDone := make(chan struct{})
 	go func() {
@@ -159,7 +160,6 @@ func newSSHClient(ctx context.Context, conn net.Conn, host ResolvedHost, auth *A
 	c, chans, reqs, err := ssh.NewClientConn(conn, host.Addr(), clientCfg)
 	close(stopWatch)
 	<-watchDone
-	cancel()
 	if err != nil {
 		conn.Close()
 		return nil, classifyDialError(err)
