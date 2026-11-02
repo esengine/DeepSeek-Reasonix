@@ -16,7 +16,7 @@ func (b *builder) liveSkillSource() func() *skill.Store {
 			ProjectRoot: b.root, ReasonixHomeDir: b.roots.Home(), CustomPaths: cfg.SkillCustomPaths(),
 			PluginPaths: cfg.PluginPackageSkillOwners(), PluginAgentPaths: cfg.PluginPackageAgentOwners(),
 			ExcludedPaths: cfg.SkillExcludedPaths(), DisabledNames: func() []string { return disabledSkillNames(cfg, b.root) },
-			MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard, SuppressWarnings: true,
+			MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard, SuppressWarnings: cfg.Skills.SuppressWarnings,
 		})
 	}
 }

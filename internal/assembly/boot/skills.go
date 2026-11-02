@@ -27,8 +27,8 @@ func buildSkillAssembly(opts Options, cfg *config.Config, root string, implicit 
 	reuse := opts.ReuseAssembly != nil && shouldReuseDiscovery(opts.PreviousPlan) &&
 		opts.ReuseAssembly.ImplicitSkillInvocation == implicit
 	stderr := opts.Stderr
-	if reuse {
-		stderr = io.Discard
+	if opts.DiagnosticSink != nil {
+		stderr = skillDiagnosticWriter{sink: opts.DiagnosticSink}
 	}
 	a.store = skill.New(skill.Options{
 		ProjectRoot: root, ReasonixHomeDir: home, CustomPaths: cfg.SkillCustomPaths(), PluginPaths: cfg.PluginPackageSkillOwners(),

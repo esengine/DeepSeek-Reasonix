@@ -32,6 +32,7 @@ type cliBuildOverrides struct {
 	GoalTurnsUnreachable bool
 	HoldOwedChecks       bool
 	Stderr               io.Writer
+	DiagnosticSink       event.Sink
 	OnSessionRecovered   func(control.SessionRecoveryInfo) error
 	Ablation             ablation.Set
 	// NewConversation marks an interactive start that is not resuming anything, so the user's default mode applies.
@@ -82,6 +83,7 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		StatsSource:          surface.CLI,
 		FeedbackSurface:      feedback.SurfaceTUI,
 		Stderr:               overrides.Stderr,
+		DiagnosticSink:       overrides.DiagnosticSink,
 		OnSessionRecovered:   overrides.OnSessionRecovered,
 		Ablation:             overrides.Ablation,
 		NewConversation:      overrides.NewConversation,
