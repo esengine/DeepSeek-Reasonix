@@ -2,6 +2,67 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.39.11",
+      "date": "2026-11-02",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.39.11",
+        "zh": "Reasonix 1.39.11"
+      },
+      "summary": {
+        "en": "A security fix: python3 -v script.py is no longer treated as a read-only version probe, so it needs approval like any other code that runs.",
+        "zh": "安全修复：python3 -v 脚本 不再被当成只读的版本探针，和其他会运行代码的命令一样需要先批准。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "security",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "python -v no longer counts as a read-only version probe",
+            "zh": "python -v 不再被当作只读的版本探针"
+          },
+          "body": {
+            "en": "In Python, -v is verbose import tracing, not a version flag, so python3 -v script.py runs the script. Reasonix treated it as a read-only command and ran it without asking, in Ask mode and in read-only mode. Now only the exact spellings --version and -V of python and python3 are read-only; anything else needs approval. A repository you open from an untrusted folder can no longer use this to run its own script without a prompt. See GHSA-qrrg-f72x-hx7r.",
+            "zh": "Python 里 -v 是显示模块导入过程，不是版本参数，所以 python3 -v 脚本 会运行这个脚本。Reasonix 过去把它当作只读命令，在「询问」模式和只读模式下都不经询问就直接运行。现在 python、python3 只有 --version 和 -V 这两种精确写法算只读，其余都需要批准。从不可信文件夹打开的仓库，不能再借此不经提示地运行它自带的脚本。详见 GHSA-qrrg-f72x-hx7r。"
+          },
+          "refs": [
+            14928
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [],
+        "fixed": []
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.39.11",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.39.10...desktop-v1.39.11",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.39.11",
+      "baseVersion": "1.39.11",
+      "status": "reviewed",
+      "previousRelease": "1.39.10",
+      "builds": {
+        "cli": "v1.39.11",
+        "desktop": "v1.39.11",
+        "npm": "1.39.11"
+      }
+    },
+    {
       "version": "1.39.10",
       "date": "2026-10-21",
       "channel": "stable",
