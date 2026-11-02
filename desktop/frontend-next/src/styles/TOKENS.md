@@ -116,6 +116,10 @@ grid to break.
   listing are two things. One mix served both and stepped down from `--raised`
   while the column actually lays `--surface`: measured, the step came to 2.7 L
   in dark, just past the line where a layer is visible.
+- Clipped tool output fades its own content with an alpha mask on `.out-body`.
+  Result lists and terminal blocks have different grounds, so no coloured
+  overlay may cover either one or the Show all control. Long lines retain
+  native horizontal scrolling without an edge overlay.
 
 ## Hues
 
