@@ -13,10 +13,10 @@
     "doc-prose": 2128,
     "error-text": 9,
     "essay": 2538,
-    "file-size": 18201,
+    "file-size": 18157,
     "flat-view": 0,
     "frontend-parity": 13,
-    "function-size": 2393,
+    "function-size": 2392,
     "layer-order": 0,
     "layering": 0,
     "marker": 0,
@@ -265,7 +265,7 @@
     },
     "internal/contract/config/config.go": {
       "essay": 30,
-      "file-size": 838,
+      "file-size": 813,
       "process-input": 3
     },
     "internal/contract/config/credentials.go": {
@@ -288,7 +288,7 @@
     },
     "internal/contract/config/edit.go": {
       "essay": 9,
-      "file-size": 1213,
+      "file-size": 1207,
       "process-input": 2
     },
     "internal/contract/config/effort.go": {
@@ -302,7 +302,7 @@
     },
     "internal/contract/config/load.go": {
       "essay": 24,
-      "file-size": 1181,
+      "file-size": 1172,
       "function-size": 22,
       "orphan": 1
     },
@@ -343,8 +343,8 @@
     "internal/contract/config/render.go": {
       "complexity": 86,
       "essay": 1,
-      "file-size": 272,
-      "function-size": 374
+      "file-size": 271,
+      "function-size": 373
     },
     "internal/contract/config/vision.go": {
       "essay": 1,
@@ -1195,7 +1195,7 @@
     },
     "internal/session/control/controller.go": {
       "essay": 29,
-      "file-size": 421
+      "file-size": 418
     },
     "internal/session/control/controller_test.go": {
       "essay": 9
