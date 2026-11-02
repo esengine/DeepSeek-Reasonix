@@ -13,7 +13,7 @@
     "doc-prose": 2128,
     "error-text": 9,
     "essay": 2576,
-    "file-size": 18416,
+    "file-size": 18415,
     "flat-view": 0,
     "frontend-parity": 13,
     "function-size": 2485,
@@ -1080,7 +1080,7 @@
     "internal/runtime/delegation/task.go": {
       "complexity": 8,
       "essay": 9,
-      "file-size": 160,
+      "file-size": 159,
       "function-size": 55,
       "orphan": 1
     },

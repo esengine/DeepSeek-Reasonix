@@ -37,9 +37,6 @@ func (s *capturingSink) RecordWorkspaceMutation(WorkspaceMutation) {
 func (s *capturingSink) RecordRunBudget(RunBudgetSample) {
 	s.recorded = append(s.recorded, "RunBudget")
 }
-func (s *capturingSink) RecordSubagentHandoff(SubagentHandoffAudit) {
-	s.recorded = append(s.recorded, "SubagentHandoff")
-}
 
 // AuditForwarder is why a new capability does not have to be repeated at every
 // layer, so it must itself be complete. It reads the registry rather than a

@@ -31,10 +31,6 @@ func (f AuditForwarder) RecordRunBudget(s RunBudgetSample) {
 	RecordRunBudget(f.Inner, s)
 }
 
-func (f AuditForwarder) RecordSubagentHandoff(a SubagentHandoffAudit) {
-	RecordSubagentHandoff(f.Inner, a)
-}
-
 // DelegationAuditSink receives one receipt per completed sub-agent run.
 type DelegationAuditSink interface {
 	RecordDelegationAudit(a hostaudit.DelegationAudit)

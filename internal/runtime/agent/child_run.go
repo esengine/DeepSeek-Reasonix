@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reasonix/internal/contract/hostaudit"
 	"reasonix/internal/runtime/writeclaim"
@@ -65,14 +64,8 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	if planWorkflow && !strings.Contains(prompt, planmode.Marker) {
 		prompt = planmode.Marker + "\n\n" + prompt
 	}
-	if kind := opts.RequireReviewReportKind; kind != "" {
-		prompt = prompt + "\n\n" + reviewReportTaskContract(kind)
-	}
 	ctx = WithoutRunTimeSink(ctx)
 	sub := newDelegatedAgent(ctx, prov, reg, sess, opts, sink)
-	// One defer: this returns from a salvage, a review failure, a provider
-	// error and a clean answer, and per-path calls would miss one.
-	defer func() { observeSubagentHandoff(sink, sub, sess, opts, answer, err) }()
 	sub.SetPlanMode(planWorkflow)
 	if err := sub.Run(ctx, prompt); err != nil {
 		// Still merge any partial child evidence so parent gates see real writes.
@@ -230,15 +223,10 @@ func (a *Agent) EvidenceSummary() evidence.ChildEvidenceSummary {
 }
 
 // composeSubagentAnswer assembles everything the parent is shown for one child
-// run: the host-adjudicated completion claim when the child submitted one, the
-// child's own prose, then the host's receipts.
+// run: the child's own prose, then the host's receipts.
 func composeSubagentAnswer(ctx context.Context, answer string, sub *Agent, claims writeclaim.WritePathSet, delegationText string) string {
 	summary := sub.EvidenceSummary()
-	report, reasons, hasReport := sub.CompletionReport()
-	if hasReport {
-		answer = strings.TrimSpace(formatCompletionReport(report, reasons) + "\n\n" + answer)
-	}
-	recordDelegationAudit(ctx, summary, claims, report, reasons, hasReport, delegationText)
+	recordDelegationAudit(ctx, summary, claims, delegationText)
 	return AppendHostReceipts(answer, summary, claims)
 }
 
@@ -257,52 +245,6 @@ func newDelegatedAgent(ctx context.Context, prov provider.Provider, reg *tool.Re
 		opts.OnStart(sub)
 	}
 	return sub
-}
-
-// observeSubagentHandoff records one child run's closing protocol. Called from
-// a single defer so every exit path is counted the same: a salvage, a review
-// failure and a clean answer are all runs that either submitted a report or
-// did not.
-func observeSubagentHandoff(sink event.Sink, sub *Agent, sess *sessionstore.Session, opts Options, answer string, runErr error) {
-	if sub == nil || sess == nil {
-		return
-	}
-	audit := event.SubagentHandoffAudit{
-		Entrance: opts.HandoffEntrance,
-		Depth:    opts.SubagentDepth,
-		ReadOnly: opts.ReadOnlyExecution,
-		Expected: opts.ExpectCompletionReport,
-		Exit:     handoffExit(answer, runErr),
-	}
-	countReportCalls(&audit, sess.Snapshot())
-	// Claimed and adjudicated are both kept: a child that submits reports
-	// readily and has them lowered every time is a different problem from one
-	// that does not submit, and a single status cannot say which.
-	if sub.task.ledger != nil {
-		verdicts := sub.task.ledger.ClosureVerdicts()
-		audit.Closed, audit.NeedsWork = verdicts.Closed, verdicts.NeedsWork
-		if claimed, ok := sub.task.ledger.LatestCompletionReport(); ok {
-			adjudicated, reasons := sub.task.ledger.AdjudicateCompletion(claimed)
-			audit.ClaimedStatus = string(claimed.Status)
-			audit.AdjudicatedStatus = string(adjudicated.Status)
-			audit.LoweredClaims = len(reasons)
-			audit.Criteria = len(adjudicated.Criteria)
-			audit.Unresolved = len(adjudicated.Unresolved)
-			for _, c := range adjudicated.Criteria {
-				audit.Evidence += len(c.Evidence)
-			}
-		}
-	}
-	event.RecordSubagentHandoff(sink, audit)
-}
-
-// reviewReportTaskContract is appended to the task prompt of a review subagent
-// whose run must end with a typed report. The skill body describes how to
-// review; this states the non-negotiable submission protocol.
-func reviewReportTaskContract(kind evidence.ReviewKind) string {
-	return fmt.Sprintf(`<review-report-contract event="SubagentReviewReport">
-Before your final answer you MUST call the review_report tool exactly once with kind=%q, your verdict (pass | warn | block), reviewed_paths listing only files you actually read this run, and your findings. The host discards a review run that ends without a successful review_report call — your prose summary alone does not count.
-</review-report-contract>`, string(kind))
 }
 
 const subagentStartContext = `<subagent-context event="SubagentStart">
@@ -325,52 +267,20 @@ type mutationObserverSetter interface {
 	SetMutationObserver(*checkpoint.MutationObserver)
 }
 
-// formatCompletionReport renders the child's claim after the host has lowered
-// whatever its receipts could not back. Downgrades are shown, never silently
-// applied: a parent that cannot see the adjudication cannot trust the status.
-func formatCompletionReport(report evidence.CompletionReport, reasons []string) string {
-	var b strings.Builder
-	b.WriteString("status: ")
-	b.WriteString(string(report.Status))
-	if len(reasons) > 0 {
-		b.WriteString(" (lowered by the host: unbacked criterion claims)")
-	}
-	b.WriteString("\nsummary: ")
-	b.WriteString(report.Summary)
-	for _, c := range report.Criteria {
-		b.WriteString("\n  " + c.ID + " " + string(c.Status))
-		if proof := criterionProof(c); proof != "" {
-			b.WriteString(" — " + proof)
-		}
-	}
-	for _, reason := range reasons {
-		b.WriteString("\n  host lowered " + reason)
-	}
-	for _, u := range report.Unresolved {
-		b.WriteString("\nunresolved: " + u)
-	}
-	return b.String()
-}
-
 // recordDelegationAudit emits one structured receipt per child run. It reports
 // what the host observed and what it refused to back, so an orchestration
 // benchmark can separate real gains from extra tokens spent. delegationText is
 // the parent-authored task before host framing, which is what makes the
 // evidence-origin split a host record rather than a claim.
-func recordDelegationAudit(ctx context.Context, summary evidence.ChildEvidenceSummary, claims writeclaim.WritePathSet, report evidence.CompletionReport, reasons []string, hasReport bool, delegationText string) {
+func recordDelegationAudit(ctx context.Context, summary evidence.ChildEvidenceSummary, claims writeclaim.WritePathSet, delegationText string) {
 	audit := hostaudit.DelegationAudit{
 		Depth:           SubagentDepth(ctx),
 		ToolCalls:       len(summary.Receipts),
 		MutationPaths:   summary.MutationPaths(),
 		ClaimViolations: len(claimViolations(summary, claims)),
-		HasReport:       hasReport,
-		Downgrades:      len(reasons),
 	}
 	audit.Mutations = len(audit.MutationPaths)
 	evidence.ClassifyEvidenceOrigin(&audit, delegationText, summary.EvidencePaths())
-	if hasReport {
-		audit.AdjudicatedStatus = string(report.Status)
-	}
 	_, sink, _, _ := CallContext(ctx)
 	event.RecordDelegationAudit(sink, audit)
 }
@@ -390,57 +300,6 @@ func AppendHostReceipts(answer string, summary evidence.ChildEvidenceSummary, cl
 	return answer + "\n\n" + block
 }
 
-// handoffExit classifies how the run ended. A provider failure that produced no
-// report is not a compliance failure, and counting it as one would make the
-// denominator answer a different question.
-func handoffExit(answer string, runErr error) string {
-	switch {
-	case errors.Is(runErr, context.Canceled):
-		return "cancelled"
-	case runErr != nil:
-		return "error"
-	case strings.TrimSpace(answer) == "":
-		return "no_answer"
-	default:
-		return "completed"
-	}
-}
-
-// countReportCalls walks the child's transcript for complete_subtask calls and
-// what the tool made of them. Attempted-and-refused is a schema problem;
-// never-attempted is a protocol one, and only the counts can tell them apart.
-func countReportCalls(audit *event.SubagentHandoffAudit, msgs []provider.Message) {
-	calls := map[string]bool{}
-	round := 0
-	for _, m := range msgs {
-		if len(m.ToolCalls) > 0 {
-			round++
-		}
-		for _, tc := range m.ToolCalls {
-			if tc.Name != completeSubtaskToolName {
-				if audit.ReportRound > 0 {
-					audit.ToolCallsAfterReport++
-				}
-				continue
-			}
-			calls[tc.ID] = true
-			audit.Attempts++
-			if audit.ReportRound == 0 {
-				audit.ReportRound = round
-			}
-		}
-		if m.Role != provider.RoleTool || !calls[m.ToolCallID] {
-			continue
-		}
-		if isErrorMessage(m) {
-			audit.Malformed++
-			continue
-		}
-		audit.Accepted++
-	}
-	audit.FinalRound = round
-}
-
 // claimViolations returns the mutations the host observed outside the write
 // claim the child declared. Tool-level confinement already refuses these, so a
 // non-empty result means a write reached the workspace through a surface the
@@ -456,21 +315,6 @@ func claimViolations(summary evidence.ChildEvidenceSummary, claims writeclaim.Wr
 		}
 	}
 	return out
-}
-
-func criterionProof(c evidence.AcceptanceCriterion) string {
-	var parts []string
-	for _, e := range c.Evidence {
-		switch {
-		case strings.TrimSpace(e.Command) != "":
-			parts = append(parts, e.Command)
-		case len(e.Paths) > 0:
-			parts = append(parts, strings.Join(e.Paths, " "))
-		case strings.TrimSpace(e.Summary) != "":
-			parts = append(parts, e.Kind+": "+e.Summary)
-		}
-	}
-	return joinBoundedReceipts(parts)
 }
 
 // formatHostReceipts renders only what the host is willing to attest to: files

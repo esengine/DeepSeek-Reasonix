@@ -32,12 +32,10 @@ type Record struct {
 	RecoveryChild    string               `json:"protocol_recovery_child,omitempty"`
 	TurnCompletion   bool                 `json:"turn_completion,omitempty"`
 	ContractShadow   *ContractShadowAudit `json:"contract_shadow,omitempty"`
-	CompletionReport *CompletionReport    `json:"completion_report,omitempty"`
 	EvidenceBundle   *EvidenceBundle      `json:"evidence_bundle,omitempty"`
 	OutcomeProgress  *OutcomeProgress     `json:"outcome_progress,omitempty"`
 	MemoryRecall     *MemoryRecall        `json:"memory_recall,omitempty"`
 	ProjectCheck     *ProjectCheckProbe   `json:"project_check_probe,omitempty"`
-	SubagentHandoff  *SubagentHandoff     `json:"subagent_handoff,omitempty"`
 	// Deltas counts the streamed increments merged into this record; absent
 	// means one. TS stays the first increment's — that is the observation
 	// time-to-first-token readers key on — and EndTS carries the last's.
@@ -127,31 +125,6 @@ type ContractShadowAudit struct {
 	ReadyToFinalize       bool   `json:"ready_to_finalize,omitempty"`
 }
 
-// SubagentHandoff mirrors event.SubagentHandoffAudit: how one delegated child
-// closed. Every field travels, because which cut explains a refusal — entrance,
-// depth, read-only, how long the run was — is what the aggregate cannot say.
-type SubagentHandoff struct {
-	Entrance             string `json:"entrance,omitempty"`
-	Depth                int    `json:"depth,omitempty"`
-	ReadOnly             bool   `json:"read_only,omitempty"`
-	Expected             bool   `json:"expected,omitempty"`
-	Exit                 string `json:"exit,omitempty"`
-	Attempts             int    `json:"attempts,omitempty"`
-	Accepted             int    `json:"accepted,omitempty"`
-	Malformed            int    `json:"malformed,omitempty"`
-	Closed               int    `json:"closed,omitempty"`
-	NeedsWork            int    `json:"needs_work,omitempty"`
-	ReportRound          int    `json:"report_round,omitempty"`
-	FinalRound           int    `json:"final_round,omitempty"`
-	ToolCallsAfterReport int    `json:"tool_calls_after_report,omitempty"`
-	ClaimedStatus        string `json:"claimed_status,omitempty"`
-	AdjudicatedStatus    string `json:"adjudicated_status,omitempty"`
-	LoweredClaims        int    `json:"lowered_claims,omitempty"`
-	Criteria             int    `json:"criteria,omitempty"`
-	Evidence             int    `json:"evidence,omitempty"`
-	Unresolved           int    `json:"unresolved,omitempty"`
-}
-
 // ProjectCheckProbe mirrors event.ProjectCheckProbe: the shadow comparison
 // between the readiness gate's project-check derivation and the ledger's
 // obligations. Identities are recorded, not counted — a class is only
@@ -171,26 +144,6 @@ type ProjectCheckProbe struct {
 type ProjectCheckDiff struct {
 	Identity string `json:"identity"`
 	Class    string `json:"class"`
-}
-
-// CompletionReport mirrors event.CompletionReportAudit with stable keys.
-type CompletionReport struct {
-	Verdict                   string   `json:"verdict"`
-	Risk                      string   `json:"risk,omitempty"`
-	Criteria                  int      `json:"criteria,omitempty"`
-	CriteriaSatisfied         int      `json:"criteria_satisfied,omitempty"`
-	Changes                   int      `json:"changes,omitempty"`
-	ChangesUnreviewed         int      `json:"changes_unreviewed,omitempty"`
-	Verifications             int      `json:"verifications,omitempty"`
-	VerificationsFailed       int      `json:"verifications_failed,omitempty"`
-	VerificationsStale        int      `json:"verifications_stale,omitempty"`
-	VerificationsInconclusive int      `json:"verifications_inconclusive,omitempty"`
-	Gaps                      int      `json:"gaps,omitempty"`
-	GapKinds                  []string `json:"gap_kinds,omitempty"`
-	ClaimsVerified            int      `json:"claims_verified,omitempty"`
-	ClaimsUnbacked            int      `json:"claims_unbacked,omitempty"`
-	OriginRecorded            int      `json:"origin_recorded,omitempty"`
-	OriginMatched             int      `json:"origin_matched,omitempty"`
 }
 
 // EvidenceBundle mirrors event.EvidenceBundleAudit with stable keys.
@@ -355,31 +308,6 @@ func (r *Recorder) Emit(e event.Event) {
 // aggregated by run metrics, and the trajectory schema stays unchanged.
 func (r *Recorder) RecordDelegationAudit(a hostaudit.DelegationAudit) {
 	event.RecordDelegationAudit(r.inner, a)
-}
-
-func (r *Recorder) RecordSubagentHandoff(a event.SubagentHandoffAudit) {
-	r.append(Record{SubagentHandoff: &SubagentHandoff{
-		Entrance:             a.Entrance,
-		Depth:                a.Depth,
-		ReadOnly:             a.ReadOnly,
-		Expected:             a.Expected,
-		Exit:                 a.Exit,
-		Attempts:             a.Attempts,
-		Accepted:             a.Accepted,
-		Malformed:            a.Malformed,
-		Closed:               a.Closed,
-		NeedsWork:            a.NeedsWork,
-		ReportRound:          a.ReportRound,
-		FinalRound:           a.FinalRound,
-		ToolCallsAfterReport: a.ToolCallsAfterReport,
-		ClaimedStatus:        a.ClaimedStatus,
-		AdjudicatedStatus:    a.AdjudicatedStatus,
-		LoweredClaims:        a.LoweredClaims,
-		Criteria:             a.Criteria,
-		Evidence:             a.Evidence,
-		Unresolved:           a.Unresolved,
-	}})
-	event.RecordSubagentHandoff(r.inner, a)
 }
 
 func (r *Recorder) RecordMemoryRecall(a event.MemoryRecallAudit) {

@@ -44,14 +44,6 @@ func (s *syncSink) RecordDelegationAudit(a hostaudit.DelegationAudit) {
 	RecordDelegationAudit(s.inner, a)
 }
 
-func (s *syncSink) RecordSubagentHandoff(a SubagentHandoffAudit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if hs, ok := s.inner.(SubagentHandoffSink); ok {
-		hs.RecordSubagentHandoff(a)
-	}
-}
-
 func (s *syncSink) RecordTurnCompletion() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -19,7 +19,6 @@ func (t *TaskTool) readOnlySubRegistry(spec *ProfileExecSpec, toolNames []string
 	if sub.Len() == 0 && !spec.Grant.AllowNoTools {
 		return nil, fmt.Errorf("no read-only tools available for this sub-agent")
 	}
-	agent.AttachCompleteSubtaskTool(sub)
 	return sub, nil
 }
 
@@ -32,7 +31,6 @@ func (t *TaskTool) prepareSubSession(ctx context.Context, prompt string, opts ag
 	// The pristine task, before framing: delivery classification judges the
 	// task and not the wrapper.
 	opts.ClassifierTaskText = prompt
-	opts.ExpectCompletionReport, opts.HandoffEntrance = true, entrance
-	prompt = agent.SubagentImageNote(ctx) + t.withWorkspaceContext(upstreamNote(ctx)+prompt) + "\n\n" + agent.CompleteSubtaskContract
+	prompt = agent.SubagentImageNote(ctx) + t.withWorkspaceContext(upstreamNote(ctx)+prompt)
 	return agent.WithUserImages(ctx, agent.SubagentImageCandidates(ctx)), prompt, opts
 }

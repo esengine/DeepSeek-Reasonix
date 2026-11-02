@@ -15,7 +15,7 @@ func TestEffectConditionalDeclarationsDoNotReachTheProviderPrefix(t *testing.T) 
 	for _, schema := range req.Tools {
 		sent[schema.Name] = true
 	}
-	for _, n := range []string{"advise", "best_of_n", "apply_isolated", "discard_isolated", "complete_subtask", "system_one", "submit_plan", "conclude_no_changes", "review_report"} {
+	for _, n := range []string{"advise", "best_of_n", "apply_isolated", "discard_isolated", "system_one", "submit_plan", "conclude_no_changes", "review_report"} {
 		if sent[n] {
 			t.Errorf("%s is declared conditional but reached the default request tools", n)
 		}

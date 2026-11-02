@@ -92,7 +92,6 @@ type Ledger struct {
 	mu               sync.Mutex
 	receipts         []Receipt
 	backgroundLeases []BackgroundLease
-	closure          ClosureTally
 }
 
 func NewLedger() *Ledger { return &Ledger{} }
@@ -106,7 +105,6 @@ func (l *Ledger) Reset() {
 	defer l.mu.Unlock()
 	l.receipts = nil
 	l.backgroundLeases = nil
-	l.closure = ClosureTally{}
 }
 
 // Record appends a receipt. Failed receipts are retained for auditability but

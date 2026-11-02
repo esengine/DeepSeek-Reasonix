@@ -66,15 +66,11 @@ type runMetrics struct {
 
 	// Delegation counters mirror internal/frontend/cli.RunMetrics. They are what makes a
 	// single-agent arm comparable against a delegated one for the same model.
-	SubagentRuns          int `json:"subagent_runs,omitempty"`
-	SubagentNestedRuns    int `json:"subagent_nested_runs,omitempty"`
-	SubagentMutations     int `json:"subagent_mutations,omitempty"`
-	CompletionReports     int `json:"completion_reports,omitempty"`
-	CompletionsProsedOnly int `json:"completions_prose_only,omitempty"`
-	FalseCompletions      int `json:"false_completions,omitempty"`
-	CriterionDowngrades   int `json:"criterion_downgrades,omitempty"`
-	WriteScopeViolations  int `json:"write_scope_violations,omitempty"`
-	DuplicateWorkPaths    int `json:"duplicate_work_paths,omitempty"`
+	SubagentRuns         int `json:"subagent_runs,omitempty"`
+	SubagentNestedRuns   int `json:"subagent_nested_runs,omitempty"`
+	SubagentMutations    int `json:"subagent_mutations,omitempty"`
+	WriteScopeViolations int `json:"write_scope_violations,omitempty"`
+	DuplicateWorkPaths   int `json:"duplicate_work_paths,omitempty"`
 	// Evidence origin: what the parent's own delegation text scoped and named,
 	// and how much of what the children looked at they had to find themselves.
 	ParentScopeHints     int `json:"parent_scope_hints,omitempty"`

@@ -98,7 +98,6 @@ func SubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, names []stri
 	sub := FilterRegistry(parent, names, exclude...)
 	bindLocal := builtin.ForkFileViews(sub)
 	stripDirectMCPTools(sub)
-	AttachCompleteSubtaskTool(sub)
 	attachSubagentCapabilityProxy(parent, sub, names, runtime, bindLocal)
 	if bash, ok := sub.Get("bash"); ok {
 		sub.Add(foregroundOnlyBash{inner: bash})

@@ -8,7 +8,6 @@ import (
 	"reasonix/internal/ext/extension/dispatch"
 	"reasonix/internal/runtime/capability"
 	"reasonix/internal/runtime/writeclaim"
-	"reasonix/internal/safety/evidence"
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/instruction"
@@ -182,20 +181,13 @@ type Options struct {
 	// classification judges it instead of the raw Run input, so framing verbs
 	// cannot arm expectations; the delegation audit scores evidence origin
 	// against it, so only locations the parent wrote itself count as hints.
-	ClassifierTaskText     string
-	ExpectCompletionReport bool   // set where the contract is appended, never inferred
-	HandoffEntrance        string // delegation path, for telemetry only
+	ClassifierTaskText string
 
 	// CapabilityLedger is the optional turn-scoped capability route ledger for
 	// Delivery require/prefer gates. Nil disables capability gates.
 	CapabilityLedger *capability.Ledger
 	// CapabilityAudit is the optional non-persisted metrics sink for routing.
 	CapabilityAudit *capability.Audit
-
-	// RequireReviewReportKind, when non-empty, makes RunSubAgentWithSession fail
-	// unless the subagent recorded a successful review_report of this kind —
-	// review/security subagents must return typed, host-verifiable reports.
-	RequireReviewReportKind evidence.ReviewKind
 
 	// ReasoningLanguage controls visible reasoning language preference as transient
 	// user-turn context. Empty/auto injects nothing.

@@ -7,7 +7,7 @@ import "fmt"
 // arm costs more: did the extra agents produce verified work, or just tokens.
 func renderDelegation(results []result) string {
 	var runs, nested, childCalls, parentCalls, mutations, dupes int
-	var reports, prose, falseDone, downgrades, violations int
+	var violations int
 	var scopeHints, namedFiles, evidencePaths, discoveredPaths int
 	solved, total, childTokens := 0, 0, 0
 	for _, r := range results {
@@ -24,10 +24,6 @@ func renderDelegation(results []result) string {
 		parentCalls += r.ToolCalls - r.SubagentToolCalls
 		mutations += r.SubagentMutations
 		dupes += r.DuplicateWorkPaths
-		reports += r.CompletionReports
-		prose += r.CompletionsProsedOnly
-		falseDone += r.FalseCompletions
-		downgrades += r.CriterionDowngrades
 		violations += r.WriteScopeViolations
 		scopeHints += r.ParentScopeHints
 		namedFiles += r.ParentNamedFiles
@@ -69,11 +65,6 @@ func renderDelegation(results []result) string {
 	}
 	if dupes > 0 {
 		b += fmt.Sprintf("- **duplicate work**: %d file(s) mutated by more than one child\n", dupes)
-	}
-	closed := reports + prose
-	b += fmt.Sprintf("- closed with a checkable claim: **%d/%d** (%s)\n", reports, closed, pct(reports, closed))
-	if falseDone > 0 {
-		b += fmt.Sprintf("- **false completions**: %d run(s), %d criterion claim(s) the host refused\n", falseDone, downgrades)
 	}
 	if violations > 0 {
 		b += fmt.Sprintf("- **write-scope violations**: %d\n", violations)

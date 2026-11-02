@@ -27,9 +27,7 @@ func TestRenderDelegationExposesWhatDelegationCost(t *testing.T) {
 		runMetrics: runMetrics{
 			ToolCalls: 30, SubagentToolCalls: 24,
 			SubagentRuns: 3, SubagentNestedRuns: 1, SubagentMutations: 5,
-			DuplicateWorkPaths: 2,
-			CompletionReports:  2, CompletionsProsedOnly: 1,
-			FalseCompletions: 1, CriterionDowngrades: 3,
+			DuplicateWorkPaths:   2,
 			WriteScopeViolations: 1,
 		},
 	}})
@@ -38,8 +36,6 @@ func TestRenderDelegationExposesWhatDelegationCost(t *testing.T) {
 		"parent **6** tool calls",
 		"children **24**",
 		"duplicate work**: 2",
-		"checkable claim: **2/3**",
-		"false completions**: 1 run(s), 3 criterion",
 		"write-scope violations**: 1",
 	} {
 		if !strings.Contains(got, want) {
@@ -92,14 +88,11 @@ func TestRenderDelegationSaysWhenEvidenceOriginIsUnscored(t *testing.T) {
 func TestRenderDelegationStaysQuietWhenNothingWentWrong(t *testing.T) {
 	got := renderDelegation([]result{{
 		Passed:     true,
-		runMetrics: runMetrics{ToolCalls: 12, SubagentToolCalls: 8, SubagentRuns: 2, CompletionReports: 2},
+		runMetrics: runMetrics{ToolCalls: 12, SubagentToolCalls: 8, SubagentRuns: 2},
 	}})
 	for _, unwanted := range []string{"duplicate work", "false completions", "write-scope violations"} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("clean run reported %q:\n%s", unwanted, got)
 		}
-	}
-	if !strings.Contains(got, "checkable claim: **2/2**") {
-		t.Errorf("clean run lost its completion coverage:\n%s", got)
 	}
 }
