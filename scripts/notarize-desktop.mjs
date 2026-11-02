@@ -8,7 +8,8 @@ import { pathToFileURL } from "node:url";
 export function notarizeDesktop({ archive, target, kind, diagnosticsDir, env = process.env,
   run = (command, args) => spawnSync(command, args, {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 16 * 1024 * 1024,
-  }), warn = console.warn }) {
+  }), warn = console.warn, stapleAttempts = 4, stapleDelayMs = 20_000,
+  sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) }) {
   if (!["app", "dmg"].includes(kind)) throw new Error("Expected notarization kind app or dmg");
   for (const name of ["APPLE_API_KEY_PATH", "APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID"]) {
     if (!env[name]) throw new Error(`Missing ${name}`);
@@ -55,8 +56,19 @@ export function notarizeDesktop({ archive, target, kind, diagnosticsDir, env = p
   if (submission.status !== 0 || submission.error || !id || status !== "Accepted") {
     throw new Error(`Notarization ${status ?? "unknown"} (${id ?? "no submission ID"}); see ${kind}-submission.json and the notary log`);
   }
-  checked("xcrun", ["stapler", "staple", target]);
-  checked("xcrun", ["stapler", "validate", target]);
+  // Stapling fetches the accepted ticket from Apple's CDN, so a dropped
+  // connection says nothing about the submission; only that pair is retried.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      checked("xcrun", ["stapler", "staple", target]);
+      checked("xcrun", ["stapler", "validate", target]);
+      break;
+    } catch (error) {
+      if (attempt >= stapleAttempts) throw error;
+      warn(`${error.message} (attempt ${attempt} of ${stapleAttempts}); retrying in ${stapleDelayMs / 1000}s`);
+      sleep(stapleDelayMs);
+    }
+  }
   // Gatekeeper requires notarization; it is not a pre-submission signature test.
   checked("spctl", ["--assess", "--verbose=4", "--type", kind === "app" ? "exec" : "open",
     ...(kind === "dmg" ? ["--context", "context:primary-signature"] : []), target]);

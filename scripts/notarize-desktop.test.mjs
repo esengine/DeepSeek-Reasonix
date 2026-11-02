@@ -13,11 +13,11 @@ const ok = (value = {}) => ({ status: 0, stdout: JSON.stringify(value) });
 function fixture(t, { kind = "app", status = "Accepted", submit, log, fail } = {}) {
   const diagnosticsDir = mkdtempSync(join(tmpdir(), "reasonix-notary-test-"));
   t.after(() => rmSync(diagnosticsDir, { recursive: true, force: true }));
-  const calls = [], warnings = [];
+  const calls = [], warnings = [], sleeps = [];
   const execute = () => notarizeDesktop({
     archive: kind === "app" ? "upload.zip" : "Reasonix.dmg",
     target: kind === "app" ? "Reasonix.app" : "Reasonix.dmg",
-    kind, diagnosticsDir, env, warn: (message) => warnings.push(message),
+    kind, diagnosticsDir, env, warn: (message) => warnings.push(message), sleep: (ms) => sleeps.push(ms),
     run: (command, args) => {
       calls.push([command, ...args]);
       if (fail?.(command, args)) return { status: 65, stdout: "" };
@@ -27,7 +27,7 @@ function fixture(t, { kind = "app", status = "Accepted", submit, log, fail } = {
     },
   });
   const report = (name) => JSON.parse(readFileSync(join(diagnosticsDir, `${kind}-${name}.json`), "utf8"));
-  return { execute, calls, warnings, report, diagnosticsDir };
+  return { execute, calls, warnings, sleeps, report, diagnosticsDir };
 }
 
 for (const kind of ["app", "dmg"]) {
@@ -118,7 +118,9 @@ for (const stage of ["codesign", "staple", "validate", "spctl"]) {
   test(`${stage} failure stops the pipeline`, (t) => {
     const f = fixture(t, { fail: (command, args) => command === stage || args[1] === stage });
     assert.throws(f.execute, /failed/);
-    assert.equal(f.calls.length, { codesign: 1, staple: 4, validate: 5, spctl: 6 }[stage]);
+    const stapling = stage === "staple" || stage === "validate";
+    assert.equal(f.calls.length, { codesign: 1, staple: 3 + 4, validate: 3 + 4 * 2, spctl: 6 }[stage]);
+    assert.equal(f.sleeps.length, stapling ? 3 : 0);
   });
 }
 
@@ -190,3 +192,14 @@ else fs.writeFileSync(args.at(-1), JSON.stringify({jobId: args[2], status: 'Inva
     }
   });
 }
+
+test("a dropped connection while stapling is retried and the pipeline completes", (t) => {
+  let dropped = 0;
+  const f = fixture(t, { fail: (command, args) => args[1] === "staple" && ++dropped < 3 });
+  f.execute();
+  assert.equal(dropped, 3);
+  assert.equal(f.sleeps.length, 2);
+  assert.equal(f.calls.filter((call) => call[2] === "staple").length, 3);
+  assert.deepEqual(f.calls.at(-1).slice(0, 2), ["spctl", "--assess"]);
+  assert.equal(f.calls.filter((call) => call[1] === "notarytool" && call[2] === "submit").length, 1);
+});
