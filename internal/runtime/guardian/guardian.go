@@ -78,13 +78,12 @@ func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, hooks agent.
 	}
 	sess := sessionstore.NewSession(policyPrompt)
 	ag := agent.New(prov, readOnlyReg, sess, agent.Options{
-		ModelRef:            strings.TrimSpace(modelRef),
-		MaxSteps:            6, // guardian reviews: enough for a few read-only tool calls
-		Temperature:         temperature,
-		RequireVisibleFinal: true, // each review must produce its own parseable verdict
-		Hooks:               hooks,
-		CheckTargetAccess:   checkTargetAccess,
-		ReadOnlyExecution:   true,
+		ModelRef:          strings.TrimSpace(modelRef),
+		MaxSteps:          6, // guardian reviews: enough for a few read-only tool calls
+		Temperature:       temperature,
+		Hooks:             hooks,
+		CheckTargetAccess: checkTargetAccess,
+		ReadOnlyExecution: true,
 		// Use the shared context window so the guardian session can compact
 		// itself when it grows too large across many reviews.
 		ContextWindow:          100_000,

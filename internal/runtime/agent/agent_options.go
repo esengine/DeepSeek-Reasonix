@@ -73,8 +73,6 @@ type Options struct {
 	// unless a caller says otherwise, so a two-model stream says which model
 	// wrote each one rather than leaving it to be inferred.
 	EventSource string
-	// RequireVisibleFinal makes internal callers reject reasoning-only responses.
-	RequireVisibleFinal bool
 	// Gate is the per-call permission gate. nil disables gating.
 	Gate Gate
 	// CheckTargetAccess applies workspace path policy before hooks or previews.
