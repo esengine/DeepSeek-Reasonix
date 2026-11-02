@@ -86,8 +86,19 @@ var readOnlyPrefixes = map[string]map[string]bool{
 	},
 	// Version/help probes for common runtimes (the second word is a flag).
 	"node":    {"-v": true, "--version": true},
-	"python":  {"--version": true, "-v": true, "-V": true},
-	"python3": {"--version": true, "-v": true, "-V": true},
+	"python":  {},
+	"python3": {},
+}
+
+// readOnlyPrefix reports whether word, the second word of a call to base, keeps
+// it read-only. Python's probes are matched by exact spelling: lowercasing would
+// read -V as -v, and -v is verbose import tracing, so `python3 -v script.py`
+// runs the script.
+func readOnlyPrefix(base, word string) bool {
+	if base == "python" || base == "python3" {
+		return word == "--version" || word == "-V"
+	}
+	return readOnlyPrefixes[base][strings.ToLower(word)]
 }
 
 // ContainsShellSyntax reports whether a command uses shell operators or
@@ -128,9 +139,9 @@ func ClassifyReadOnlyCommand(command string) (base, sub string, fields []string,
 		return base, "", fields, true
 	}
 	if len(fields) > 1 {
-		if subs, prefixed := readOnlyPrefixes[base]; prefixed {
+		if _, prefixed := readOnlyPrefixes[base]; prefixed {
 			sub = strings.ToLower(fields[1])
-			if subs[sub] {
+			if readOnlyPrefix(base, fields[1]) {
 				return base, sub, fields, true
 			}
 		}
@@ -260,7 +271,7 @@ func readOnlyFields(fields []string) (base, sub string, ok bool) {
 	}
 	if len(fields) > 1 {
 		sub = strings.ToLower(fields[1])
-		if readOnlyPrefixes[base][sub] {
+		if readOnlyPrefix(base, fields[1]) {
 			return base, sub, true
 		}
 	}
