@@ -255,12 +255,12 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -p 4 -timeout=18m -json ./internal/runtime/isolation/... ./internal/platform/worktree/... ./internal/state/mutation/... | tee "$RUNNER_TEMP/isolation-owners.jsonl" |
+          go test -count=1 -p 4 -timeout=18m -json ./internal/platform/worktree/... ./internal/state/mutation/... | tee "$RUNNER_TEMP/isolation-owners.jsonl" |
             jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $passed |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
-            (["reasonix/internal/runtime/isolation", "reasonix/internal/platform/worktree", "reasonix/internal/state/mutation"] - $passed | length) == 0 and
+            (["reasonix/internal/platform/worktree", "reasonix/internal/state/mutation"] - $passed | length) == 0 and
             (["TestHeldPathsCoverOnlyTheSameFileAcrossCaseSpellings",
               "TestLegacyWaitDoesNotConsumeExecutionCapacity"] - $tests | length) == 0
           ' "$RUNNER_TEMP/isolation-owners.jsonl"
@@ -269,8 +269,6 @@ jobs:
             {"reasonix/internal/platform/worktree": [
                "TestWriteChangesRejectsRedirectedDeletion",
                "TestWriteChangesUnlinksLeafDirectoryLink"
-               ],
-             "reasonix/internal/runtime/isolation": [
                ]} |
             to_entries | all(.[]; . as $package |
               ([ $events[] | select(.Package == $package.key and .Test == null and
@@ -941,7 +939,7 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
-        run: go test -race ./internal/runtime/agent/... ./internal/runtime/delegation/... ./internal/runtime/isolation/... ./internal/platform/worktree/... ./internal/state/mutation/... ./internal/ext/plugin/... ./internal/tools/jobs/... ./internal/base/proc/... ./internal/safety/sandbox/... ./internal/base/filelock/... ./internal/contract/eventwire/... ./internal/platform/remote/... ./internal/ext/extension/... ./internal/assembly/boot/... ./internal/session/control/... ./internal/contract/tool/...
+        run: go test -race ./internal/runtime/agent/... ./internal/runtime/delegation/... ./internal/platform/worktree/... ./internal/state/mutation/... ./internal/ext/plugin/... ./internal/tools/jobs/... ./internal/base/proc/... ./internal/safety/sandbox/... ./internal/base/filelock/... ./internal/contract/eventwire/... ./internal/platform/remote/... ./internal/ext/extension/... ./internal/assembly/boot/... ./internal/session/control/... ./internal/contract/tool/...
 
       - name: test -race (full)
         if: github.event_name != 'pull_request'
