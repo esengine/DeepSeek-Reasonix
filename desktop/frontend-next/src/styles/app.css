@@ -3964,7 +3964,7 @@
   .vers .find .acts { display: flex; gap: 8px; margin: 8px 0 0; align-items: center }
   .vlist {
     display: grid; margin-top: 3px; column-gap: 10px;
-    grid-template-columns: minmax(104px, max-content) minmax(0, 1fr) max-content minmax(0, max-content);
+    grid-template-columns: minmax(104px, max-content) minmax(0, 1fr) max-content max-content minmax(0, max-content);
   }
   .vrow {
     grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline;
@@ -3982,10 +3982,10 @@
   .vrow[data-side="past"] .nm, .vrow[data-side="past"] .ds { color: var(--faint) }
   .vrow .ds { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--muted) }
-  .vrow .sc { grid-column: 3; justify-self: end; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
+  .vrow .sc { grid-column: 4; justify-self: end; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
 
   .vrow .sa {
-    grid-column: 4; justify-self: start; max-width: 100%; margin-left: 0;
+    grid-column: 5; justify-self: start; max-width: 100%; margin-left: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     opacity: 0; transition: opacity var(--t-line) var(--ease-out);
   }
@@ -3994,6 +3994,7 @@
     .vlist { grid-template-columns: max-content minmax(min-content, 1fr) max-content }
     .vrow { position: relative }
     .vrow .ds { white-space: normal }
+    .vrow .sc { grid-column: 3 }
     .vrow .sa { grid-column: 1 / -1; grid-row: 2; margin-top: 4px }
     @media (hover: hover) {
       .vrow .sa:not([data-keep]) { grid-area: auto; position: absolute; right: 12px; top: 50%; translate: 0 -50%; margin: 0; max-width: 62% }

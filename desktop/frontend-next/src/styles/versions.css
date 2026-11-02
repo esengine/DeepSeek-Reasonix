@@ -1,5 +1,4 @@
-.vrow .ds { grid-row: 1 }
-.vrow .vn { grid-column: 2; grid-row: 1; justify-self: end; text-decoration: none }
+.vrow .vn { grid-column: 3; grid-row: 1; text-decoration: none }
 .vrow .sa { display: inline-flex; align-items: baseline; gap: 8px }
 .vrow .sa-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .vrow .sa .lnk { flex: none; text-decoration: none }
