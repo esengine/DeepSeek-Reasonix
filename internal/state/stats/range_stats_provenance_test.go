@@ -54,12 +54,16 @@ var rangeStatsProvenance = map[string]rangeStatsField{
 
 	// Money and price caveats: the rollups carry them, but a range without
 	// such a fact legitimately answers zero/nil on both paths.
-	"Cost":              {paths: answeredByBoth, optional: "nil when no row in range carried a price"},
-	"EstimateCost":      {paths: answeredByBoth, optional: "nil when the range quoted no subscription-equivalent usage"},
-	"CostEstimated":     {paths: answeredByBoth, optional: "false when no row folded in a fallback rate card"},
-	"CostIncomplete":    {paths: answeredByBoth, optional: "false when every counted call is priced"},
-	"UnpricedCalls":     {paths: answeredByBoth, optional: "0 when every counted call is priced"},
-	"IncompleteReasons": {paths: answeredByBoth, optional: "nil when no unpriced call recorded a reason"},
+	"Cost":                  {paths: answeredByBoth, optional: "nil when no row in range carried a price"},
+	"EstimateCost":          {paths: answeredByBoth, optional: "nil when the range quoted no subscription-equivalent usage"},
+	"CostEstimated":         {paths: answeredByBoth, optional: "false when no row folded in a fallback rate card"},
+	"CostIncomplete":        {paths: answeredByBoth, optional: "false when every counted call is priced"},
+	"UnpricedCalls":         {paths: answeredByBoth, optional: "0 when every counted call is priced"},
+	"CountedCalls":          {paths: answeredByBoth},
+	"EstimatedCalls":        {paths: answeredByBoth, optional: "0 when no counted call was priced from a fallback card"},
+	"UnnamedCardCalls":      {paths: answeredByBoth, optional: "0 when every priced call named its card"},
+	"UnclassifiedCardCalls": {paths: answeredByBoth, optional: "0 when no counted call lacks a price fact"},
+	"IncompleteReasons":     {paths: answeredByBoth, optional: "nil when no unpriced call recorded a reason"},
 
 	// Rolled-up views: both paths derive them from the same rows.
 	"ActiveDays":  {paths: answeredByBoth},

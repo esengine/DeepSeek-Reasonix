@@ -12,12 +12,12 @@ import (
 	"reasonix/internal/base/testenv"
 )
 
-// provenanceFixture is one range with every provenance class in it: a pricier
+// usageProvenanceFixture is one range with every provenance class in it: a pricier
 // call named by its card, one priced from an estimated card, two unpriced calls
 // with a quote (one of which names no card), and two rows written before the
 // card field existed. It also carries a request-only failure and a turn marker,
 // neither of which is a call.
-func provenanceFixture(t *testing.T) string {
+func usageProvenanceFixture(t *testing.T) string {
 	t.Helper()
 	dir := testenv.TempDir(t)
 	lines := provenanceLines(t)
@@ -84,7 +84,7 @@ func TestATotalSaysWhatItsMoneyIsOver(t *testing.T) {
 // JSONL read and the projection honest: the same rows must yield the same
 // denominator, unpriced count, estimate count, and card classification.
 func TestBothReadPathsAgreeOnEveryProvenanceCount(t *testing.T) {
-	dir := provenanceFixture(t)
+	dir := usageProvenanceFixture(t)
 	filter := provenanceFilter()
 	fromFiles, err := NewWriter(dir).Query(filter)
 	if err != nil {
@@ -116,7 +116,7 @@ func TestBothReadPathsAgreeOnEveryProvenanceCount(t *testing.T) {
 	}
 }
 
-// provenanceLines is provenanceFixture's row set, so the append path builds
+// provenanceLines is usageProvenanceFixture's row set, so the append path builds
 // the same projection the reindex builds from the files.
 func provenanceLines(t *testing.T) []map[string]any {
 	t.Helper()
