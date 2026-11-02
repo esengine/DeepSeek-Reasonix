@@ -2,6 +2,7 @@ package boot
 
 import (
 	"path/filepath"
+	"reasonix/internal/session/control"
 	"runtime"
 	"strings"
 
@@ -38,7 +39,7 @@ var browserPool = &browser.Pool{}
 // reused, the one the replaced runtime had, otherwise a new one. Which browser
 // runs is found at first use, so the schema answers to the config alone and a
 // machine without one hears browser.engine_missing then.
-func bindBrowser(reg *tool.Registry, conf *config.Config, root string, reused *browser.Session) *browser.Session {
+func bindBrowser(reg *tool.Registry, conf *config.Config, root, profile string, reused *browser.Session) *browser.Session {
 	profiles := conf.Roots().BrowserProfilesDir()
 	if !conf.Tools.BrowserToolsEnabled() || root == "" || profiles == "" {
 		// The tools stay in the schema when the switch is off, and answering
@@ -59,7 +60,7 @@ func bindBrowser(reg *tool.Registry, conf *config.Config, root string, reused *b
 		session = browser.NewSession(browser.Config{
 			Launch: browser.LaunchSpec{
 				Executable: cfg.Executable,
-				ProfileDir: filepath.Join(profiles, strings.ReplaceAll(workspaceid.Key(root), ":", "-")),
+				ProfileDir: filepath.Join(profiles, profile),
 				Headless:   cfg.Headless,
 			},
 			Roots: []string{root},
@@ -70,6 +71,18 @@ func bindBrowser(reg *tool.Registry, conf *config.Config, root string, reused *b
 		reg.Add(t)
 	}
 	return session
+}
+
+// browserProfileKey names the profile a session's browser runs on: its
+// workspace's, so the sessions of one project share their logins, or an
+// agent's own, so one agent's logins are never another's.
+func browserProfileKey(root string, seat control.TeamSeat) string {
+	if seat != nil {
+		if _, ref := seat.Team(); ref.Agent != "" {
+			return "agent-" + ref.Agent
+		}
+	}
+	return strings.ReplaceAll(workspaceid.Key(root), ":", "-")
 }
 
 // suspendBrowserTools takes the browser tools out of the registry and keeps them

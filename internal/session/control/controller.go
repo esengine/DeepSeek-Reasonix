@@ -329,6 +329,8 @@ type Options struct {
 	SessionPath         string
 	// Peers opens this session to messages from other sessions; zero is off.
 	Peers PeersOptions
+	// Team seats this session on the user's team; zero is an ordinary session.
+	Team TeamOptions
 	// Settings, when set, is bound to this controller so the setting tool can reach it.
 	Settings      *tool.SettingsLink
 	Host          *plugin.Host
@@ -510,6 +512,7 @@ func New(opts Options) *Controller {
 	c.peers = newPeerMail(opts.Peers)
 	c.rebindInbox()
 	c.startPeers()
+	c.startTeam(opts.Team)
 	c.startSettings(opts.Settings)
 	// Observe Steer / unapplied-steer for durable inbox state transitions.
 	// Must wrap both the controller sink and the executor sink: agent.Steer

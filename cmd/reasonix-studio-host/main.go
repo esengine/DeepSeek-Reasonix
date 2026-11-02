@@ -452,6 +452,7 @@ func assemble(ctx context.Context, logs, handshakeTo io.Writer, shell shellIdent
 		Update:         studioUpdateHost(shell, owner),
 		Share:          share,
 		LogsDir:        shell.logsDir,
+		Team:           serve.DefaultTeamHost(),
 	})
 	share.Attach(hub.Handler())
 	// A share the person had open reopens where it was: the phone that paired

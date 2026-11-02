@@ -174,7 +174,7 @@ func RootIDs() []RootID {
 var StateRootEntries = []string{
 	"sessions", "archive", "stats", "projects", "appearance", "themes", "repair",
 	"serve-workspaces.json", "memory", "schedules", "peers", "trusted", "machine-id.key", "mcp-global-migration-v1", "commands", "rules",
-	"agent-presets", "sandbox", "workspaces",
+	"agent-presets", "sandbox", "workspaces", "team",
 	"REASONIX.md", "AGENTS.md", "CLAUDE.md", "REASONIX.local.md", "AGENTS.local.md", "CLAUDE.local.md",
 }
 

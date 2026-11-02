@@ -316,6 +316,22 @@ func ToWireVia(in *provider.Via) *Via {
 	return &Via{Device: in.Device, Ordinal: in.Ordinal}
 }
 
+// Origin names who a host-run turn was for, when it was not the user.
+type Origin struct {
+	Kind     string `json:"kind"`
+	Agent    string `json:"agent,omitempty"`
+	Exchange string `json:"exchange,omitempty"`
+	Group    string `json:"group,omitempty"`
+}
+
+// ToWireOrigin converts a turn's origin; nil stays nil, the user's own.
+func ToWireOrigin(in *provider.Origin) *Origin {
+	if in == nil {
+		return nil
+	}
+	return &Origin{Kind: in.Kind, Agent: in.Agent, Exchange: in.Exchange, Group: in.Group}
+}
+
 type FinalReadiness struct {
 	Attempts int      `json:"attempts,omitempty"`
 	Missing  []string `json:"missing,omitempty"`

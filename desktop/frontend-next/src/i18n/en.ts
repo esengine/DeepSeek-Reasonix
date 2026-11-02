@@ -25,6 +25,7 @@ import { EN_BACKUP } from "./en_backup";
 import { EN_FEEDBACK } from "./en_feedback";
 import { EN_COMMUNITY } from "./en_community";
 import { EN_SPONSOR } from "./en_sponsor";
+import { EN_TEAM } from "./en_team";
 
 export const EN: Record<string, string> = {
   "检测中": "Checking",
@@ -88,6 +89,7 @@ export const EN: Record<string, string> = {
   ...EN_SETTINGS,
   ...EN_TOOL_BLURBS,
   ...EN_PERSONA,
+  ...EN_TEAM,
   ...EN_COMMUNITY,
   ...EN_SPONSOR,
   ...EN_METRICS,

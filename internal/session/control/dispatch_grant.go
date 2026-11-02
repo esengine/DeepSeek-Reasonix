@@ -16,7 +16,7 @@ type SessionGrant struct {
 
 // DispatchGrant reads the grant this session would pass on.
 func (c *Controller) DispatchGrant() SessionGrant {
-	return SessionGrant{Model: c.ModelRef(), Preset: c.AgentPreset(), Approval: c.ToolApprovalMode(), Plan: c.PlanMode()}
+	return SessionGrant{Model: c.ModelRef(), Preset: c.AgentPreset(), Approval: c.effectiveApprovalMode(), Plan: c.PlanMode()}
 }
 
 // AdoptSessionGrant sets this session's posture to the grant's. A field the grant

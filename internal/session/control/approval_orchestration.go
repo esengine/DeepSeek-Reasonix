@@ -193,7 +193,7 @@ func (c *Controller) EnableInteractiveApproval() {
 
 func (c *Controller) newInteractiveGate() *permission.Gate {
 	policy := c.policy
-	mode := c.approval.mode()
+	mode := c.effectiveApprovalMode()
 	switch mode {
 	case ToolApprovalAuto, ToolApprovalYolo:
 		policy.Mode = permission.Allow
@@ -501,7 +501,7 @@ func (c *Controller) switchApprovalMode(mode string, set func() ([]drainedApprov
 		}
 	}
 	if c.subagentGate != nil {
-		c.subagentGate.UpdateAttended(mode)
+		c.subagentGate.UpdateAttended(c.effectiveApprovalMode())
 	}
 	c.refreshInteractiveGate()
 	// Clear recovery cards dismissed by the mode switch outside the gate lock.

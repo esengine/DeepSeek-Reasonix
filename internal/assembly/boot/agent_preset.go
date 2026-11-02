@@ -177,6 +177,12 @@ func applyUnifiedProviderToolSurface(reg *tool.Registry, goalTurnsUnreachable bo
 			allow = append(allow, name)
 		}
 	}
+	// The team tools are registered at boot, in an agent's sessions only.
+	for _, name := range builtin.TeamToolNames() {
+		if _, ok := reg.Get(name); ok {
+			allow = append(allow, name)
+		}
+	}
 	allow = append(allow, alwaysLoadedMCPTools(reg, alwaysLoad)...)
 	// Always keep use_capability if somehow only that remains.
 	if len(allow) == 0 {
