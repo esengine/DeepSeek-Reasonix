@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { t } from "../i18n";
 import { count, money, tokens as fmtTokens } from "../i18n/format";
 import { reason } from "../i18n/kernel";
-import { DEFAULT_USAGE_DAYS, type AgentPort, type Money, type UsageQuery, type UsageReport } from "../port/port";
+import { DEFAULT_USAGE_DAYS, type AgentPort, type Money, type UsageDay, type UsageQuery, type UsageReport } from "../port/port";
 import { hostOf } from "./vendors";
 
 const RANGES: [number, string][] = [[7, "7 天"], [30, "30 天"], [365, "全部"]];
@@ -59,6 +59,16 @@ function moneyList(list?: Money[]): string {
   return list.map((m) => money(Number(m.amount), m.currency)).join("  ·  ");
 }
 
+// A day whose money is a floor: at least one counted call had no price, so the
+// day's figure understates it. The count is the kernel's per-day unpricedCalls,
+// not a second tally the panel keeps; a day that predates the field stays silent
+// rather than reading as measured. The same string goes into the chart tooltip
+// and the exact day row.
+function floorNote(day: UsageDay): string | undefined {
+  if (!day.unpricedCalls) return undefined;
+  return t("下限 · {n} 笔未定价", { n: day.unpricedCalls });
+}
+
 // A tick ladder a person reads: round the top up to a 1/2/5-ish step. An empty
 // series still needs two distinct halves, or both upper ticks label as 1.
 function niceMax(raw: number): number {
@@ -72,6 +82,9 @@ interface PlotPoint {
   axis: string;
   tip: string;
   value: number;
+  // Why this day's figure is a floor, when it is. Short: the tooltip already
+  // carries the day and the figure.
+  floor?: string;
 }
 
 interface PlotProps {
@@ -150,6 +163,7 @@ function Plot({ points, label, aria }: PlotProps) {
         <div className="utip" style={{ left: `${(x(at) / W) * 100}%`, top: `${(y(hover.value) / H) * 100}%` }}>
           <div className="d">{hover.tip}</div>
           <div className="v">{label(hover.value)}</div>
+          {hover.floor && <div className="d ufloor">{hover.floor}</div>}
         </div>
       )}
     </div>
@@ -189,6 +203,9 @@ interface BreakdownRow {
   requests: number;
   cost?: Money[];
   estimateCost?: Money[];
+  // Why this day's spend is a floor. The same string the chart tooltip shows,
+  // so the two readings of one day cannot disagree.
+  floor?: string;
 }
 
 // A chart is an overview; a phone cannot hover it precisely. This list is the
@@ -211,6 +228,7 @@ function BreakdownTable({ rows, hourly }: { rows: BreakdownRow[]; hourly: boolea
                 <td>
                   {moneyList(row.cost)}
                   {row.estimateCost?.length ? <span className="udaily-est" title={t("按 API 价格估算的订阅用量，不是实际扣费")}>{t("等价估算")} {moneyList(row.estimateCost)}</span> : null}
+                  {row.floor ? <span className="udaily-est udaily-floor">{row.floor}</span> : null}
                 </td>
                 <td>{count(row.requests)}</td>
               </tr>
@@ -329,11 +347,11 @@ export function Usage({ port }: { port: AgentPort }) {
     : hours;
   const usagePoints: PlotPoint[] = hourView
     ? visibleHours.map((h) => ({ key: h.hour, axis: h.hour, tip: h.hour, value: h.total }))
-    : (report?.daily ?? []).map((d) => ({ key: d.day, axis: d.day.slice(5), tip: d.day, value: d.total }));
+    : (report?.daily ?? []).map((d) => ({ key: d.day, axis: d.day.slice(5), tip: d.day, value: d.total, floor: floorNote(d) }));
   const dayRows: BreakdownRow[] = (report?.daily ?? [])
     .slice()
     .sort((a, b) => b.day.localeCompare(a.day))
-    .map((d) => ({ key: d.day, label: d.day, total: d.total, requests: d.requests, cost: d.cost, estimateCost: d.estimateCost }));
+    .map((d) => ({ key: d.day, label: d.day, total: d.total, requests: d.requests, cost: d.cost, estimateCost: d.estimateCost, floor: floorNote(d) }));
   const hourRows: BreakdownRow[] = visibleHours.map((h) => ({
     key: h.hour, label: h.hour, total: h.total, requests: h.requests, cost: h.cost, estimateCost: h.estimateCost,
   }));

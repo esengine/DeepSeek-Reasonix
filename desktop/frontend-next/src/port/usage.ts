@@ -30,6 +30,15 @@ export interface UsageDay {
   cost?: Money[];
   // A subscription's API-priced estimate for the day: not money billed, never added to cost.
   estimateCost?: Money[];
+  // The day's call accounting, the same facts the range total carries: the
+  // denominator the day's money is over and the three unknowns that make it a
+  // floor. A day with unpricedCalls > 0 is a floor, not a measurement.
+  countedCalls?: number;
+  unpricedCalls?: number;
+  estimatedCalls?: number;
+  unnamedCardCalls?: number;
+  unclassifiedCardCalls?: number;
+  incompleteReasons?: string[];
 }
 
 // One hour of a single-day window. `hour` is "09:00"; the bucket set is the

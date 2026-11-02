@@ -1,8 +1,8 @@
 package stats
 
-// RangeStats is answered by two read paths: the exact JSONL read (aggregateDays)
-// and the projection (rangeStatsFromCatalog -> rangeStatsFromRollups). This guard
-// makes every field say which of them fills it, and checks that claim.
+// RangeStats is answered by the exact JSONL read (aggregateDays) and the
+// projection (rangeStatsFromCatalog -> rangeStatsFromRollups). Every field and
+// every per-day field declares which paths fill it, and this guard checks it.
 
 import (
 	"fmt"
@@ -80,6 +80,36 @@ var rangeStatsProvenance = map[string]rangeStatsField{
 		reason:      "the day rollup has no hour column, and Query sends a one-day range to the exact read",
 		consequence: "a projection answer has no hourly series, so an hourly view must keep taking the exact read",
 	},
+}
+
+// dailyTokensProvenance declares, one line per DailyTokens field, which read
+// paths answer each day in the series. A day row is where a floor is told
+// apart from a measurement, so every per-day count must say whether both paths
+// fill it. Adding a per-day field without a line here fails
+// TestEverySeriesFieldDeclaresItsProvenance.
+var dailyTokensProvenance = map[string]rangeStatsField{
+	// The day's totals: both paths group the same rows by day.
+	"Day":        {paths: answeredByBoth},
+	"Total":      {paths: answeredByBoth},
+	"ByModel":    {paths: answeredByBoth},
+	"ByProvider": {paths: answeredByBoth},
+	"Requests":   {paths: answeredByBoth},
+	"Turns":      {paths: answeredByBoth},
+	"CacheHit":   {paths: answeredByBoth},
+	"CacheMiss":  {paths: answeredByBoth},
+
+	// Money: a day that carried no price legitimately answers nil on both.
+	"Cost":         {paths: answeredByBoth, optional: "nil when that day carried no price"},
+	"EstimateCost": {paths: answeredByBoth, optional: "nil when that day quoted no subscription-equivalent usage"},
+
+	// The per-day call accounting: the denominator and the three unknowns,
+	// from the same predicates as the range total above the series.
+	"CountedCalls":          {paths: answeredByBoth},
+	"UnpricedCalls":         {paths: answeredByBoth, optional: "0 when every counted call that day is priced"},
+	"EstimatedCalls":        {paths: answeredByBoth, optional: "0 when no counted call that day was priced from a fallback card"},
+	"UnnamedCardCalls":      {paths: answeredByBoth, optional: "0 when every priced call that day named its card"},
+	"UnclassifiedCardCalls": {paths: answeredByBoth, optional: "0 when no counted call that day lacks a price fact"},
+	"IncompleteReasons":     {paths: answeredByBoth, optional: "nil when no unpriced call that day recorded a reason"},
 }
 
 // provenanceShapeProblems checks the declaration's shape: every field of typ is
@@ -172,9 +202,112 @@ func provenanceRealityProblems(typ reflect.Type, declared map[string]rangeStatsF
 	return problems
 }
 
+// anySeriesFieldNonZero reports whether at least one day in rows fills name.
+// The series guard asks "did this path answer it anywhere", and the parity test
+// asks "do they answer it the same everywhere".
+func anySeriesFieldNonZero(rows reflect.Value, name string) bool {
+	if !rows.IsValid() {
+		return false
+	}
+	for i := range rows.Len() {
+		if !rows.Index(i).FieldByName(name).IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
+// seriesProvenanceShapeProblems is the series half of the shape check: every
+// DailyTokens field is named, every name still exists, and every "exact only"
+// line explains itself. It is factored out so the demonstration test can drive
+// it over a local struct, just like the aggregate guard.
+func seriesProvenanceShapeProblems(typ reflect.Type, declared map[string]rangeStatsField, projection reflect.Value) []string {
+	const where = "dailyTokensProvenance (internal/state/stats/range_stats_provenance_test.go)"
+	var problems []string
+	for field := range typ.Fields() {
+		decl, ok := declared[field.Name]
+		if !ok {
+			filled := anySeriesFieldNonZero(projection, field.Name)
+			state := "the projection leaves every day zero: if it is truly filled by both paths, extend provenanceFixture until the projection fills it; if only the exact read fills it, declare \"exact only\" and give the reason and consequence"
+			if filled {
+				state = "the projection already fills it: declare \"both\""
+			}
+			problems = append(problems, fmt.Sprintf(
+				"%s.%s has no provenance declaration: add a line to %s saying whether both read paths fill it (\"both\") or only the exact read (\"exact only\", with a reason and a consequence). In the provenance fixture %s.",
+				typ.Name(), field.Name, where, state))
+			continue
+		}
+		switch decl.paths {
+		case answeredByBoth:
+		case answeredByExactOnly:
+			if decl.reason == "" || decl.consequence == "" {
+				problems = append(problems, fmt.Sprintf(
+					"%s entry for %q declares \"exact only\" but has no %s: tell the next reader why the projection cannot answer it and what a projection series shows instead.",
+					where, field.Name, missingParts(decl.reason, decl.consequence)))
+			}
+		default:
+			problems = append(problems, fmt.Sprintf(
+				"%s entry for %q names paths %q; use answeredByBoth or answeredByExactOnly.",
+				where, field.Name, decl.paths))
+		}
+	}
+	for name := range declared {
+		if _, ok := typ.FieldByName(name); !ok {
+			problems = append(problems, fmt.Sprintf(
+				"%s names %q, but %s has no such field: remove the stale line, or restore the field it describes.",
+				where, name, typ.Name()))
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+// seriesProvenanceRealityProblems checks the series declaration against the
+// same fixture the aggregate guard uses: a "both" field must be filled by both
+// paths on at least one day, an "exact only" field by neither projection day.
+func seriesProvenanceRealityProblems(typ reflect.Type, declared map[string]rangeStatsField, exact, projection reflect.Value) []string {
+	const where = "dailyTokensProvenance (internal/state/stats/range_stats_provenance_test.go)"
+	var problems []string
+	for field := range typ.Fields() {
+		name := field.Name
+		decl, ok := declared[name]
+		if !ok {
+			continue // seriesProvenanceShapeProblems already reported the missing line.
+		}
+		inExact := anySeriesFieldNonZero(exact, name)
+		inProjection := anySeriesFieldNonZero(projection, name)
+		switch decl.paths {
+		case answeredByBoth:
+			if !inProjection {
+				problems = append(problems, fmt.Sprintf(
+					"%s.%s is declared answered by both read paths in %s, but every projection day left it zero: either the projection stopped filling it (fix the projection) or it is exact-only (correct the declaration).",
+					typ.Name(), name, where))
+			}
+			if !inExact {
+				problems = append(problems, fmt.Sprintf(
+					"%s.%s is declared answered by both read paths in %s, but the exact JSONL read left every day zero: the fixture no longer exercises it, so extend provenanceFixture or correct the declaration.",
+					typ.Name(), name, where))
+			}
+		case answeredByExactOnly:
+			if inProjection {
+				problems = append(problems, fmt.Sprintf(
+					"%s.%s is declared exact-only in %s, but a projection day filled it: if the projection now answers it, update the declaration and its reason/consequence; otherwise the projection wrongly duplicates the exact read.",
+					typ.Name(), name, where))
+			}
+			if !inExact {
+				problems = append(problems, fmt.Sprintf(
+					"%s.%s is declared exact-only in %s, but no fixture day fills it: the declaration would hide a dead field, so extend provenanceFixture or correct the declaration.",
+					typ.Name(), name, where))
+			}
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
 // provenanceFixture returns the exact read, a projection read and a one-day
 // exact read of one two-day history. The history exercises every field the
-// declaration says both paths answer: a billed fallback-priced call, a
+// declarations say both paths answer: a billed fallback-priced call, a
 // subscription-equivalent estimate, a completed turn and an unpriced call.
 func provenanceFixture(t *testing.T) (exact, projection, singleDay RangeStats) {
 	t.Helper()
@@ -220,6 +353,45 @@ func TestEveryAggregateFieldDeclaresItsProvenance(t *testing.T) {
 	}
 	if problems := provenanceRealityProblems(typ, rangeStatsProvenance, reflect.ValueOf(exact), reflect.ValueOf(projection), reflect.ValueOf(singleDay)); len(problems) > 0 {
 		t.Fatalf("the provenance declaration disagrees with the read paths:\n%s", strings.Join(problems, "\n"))
+	}
+}
+
+// TestEverySeriesFieldDeclaresItsProvenance is the series' control: the same
+// committed fixture, asked of every DailyTokens field. A per-day field that
+// neither path fills, or that only one path fills without declaring it, fails
+// here with the field named.
+func TestEverySeriesFieldDeclaresItsProvenance(t *testing.T) {
+	typ := reflect.TypeFor[DailyTokens]()
+	exact, projection, _ := provenanceFixture(t)
+	if problems := seriesProvenanceShapeProblems(typ, dailyTokensProvenance, reflect.ValueOf(projection.Daily)); len(problems) > 0 {
+		t.Fatalf("the committed DailyTokens does not pass its own provenance guard:\n%s", strings.Join(problems, "\n"))
+	}
+	if problems := seriesProvenanceRealityProblems(typ, dailyTokensProvenance, reflect.ValueOf(exact.Daily), reflect.ValueOf(projection.Daily)); len(problems) > 0 {
+		t.Fatalf("the series provenance declaration disagrees with the read paths:\n%s", strings.Join(problems, "\n"))
+	}
+}
+
+// TestTheSeriesGuardCatchesAnUndeclaredDayField proves the series guard fires
+// without deleting a field from DailyTokens, using the same seam the aggregate
+// guard uses.
+func TestTheSeriesGuardCatchesAnUndeclaredDayField(t *testing.T) {
+	type dayWithAnUndeclaredCount struct {
+		Day           string
+		UnpricedCalls int
+	}
+	declared := map[string]rangeStatsField{
+		"Day": {paths: answeredByBoth},
+		// UnpricedCalls was added to the day row without a line here.
+	}
+	problems := seriesProvenanceShapeProblems(reflect.TypeFor[dayWithAnUndeclaredCount](), declared, reflect.Value{})
+	if len(problems) != 1 {
+		t.Fatalf("guard reported %d problems, want exactly the one undeclared field:\n%s",
+			len(problems), strings.Join(problems, "\n"))
+	}
+	for _, want := range []string{"dayWithAnUndeclaredCount.UnpricedCalls", "dailyTokensProvenance", "leaves every day zero"} {
+		if !strings.Contains(problems[0], want) {
+			t.Errorf("the undeclared-field message does not contain %q: %s", want, problems[0])
+		}
 	}
 }
 

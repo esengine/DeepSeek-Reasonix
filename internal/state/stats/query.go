@@ -26,6 +26,15 @@ type DailyTokens struct {
 	// EstimateCost is what a plan's API-priced estimates add up to; it never
 	// shares a figure with Cost.
 	EstimateCost []pricing.Money `json:"estimateCost,omitempty"`
+	// The same call accounting the range total carries, per day: the
+	// denominator the day's money is over, and the three unknowns that make
+	// that money a floor. A zero is a measurement, not an absent path.
+	CountedCalls          int      `json:"countedCalls"`
+	UnpricedCalls         int      `json:"unpricedCalls"`
+	EstimatedCalls        int      `json:"estimatedCalls"`
+	UnnamedCardCalls      int      `json:"unnamedCardCalls"`
+	UnclassifiedCardCalls int      `json:"unclassifiedCardCalls"`
+	IncompleteReasons     []string `json:"incompleteReasons,omitempty"`
 }
 
 // HourlyTokens is one hour's usage in a single-day range. Hour is "09:00".
@@ -158,8 +167,8 @@ func (w *Writer) Query(f SourceFilter) (RangeStats, error) {
 
 // rangeStatsFromCatalog reads a ready projection, then the per-call facts the
 // rollups keep only as sums: how many calls the money is over, whose money is
-// unknown, and how each price was reached. Both come from the same stored
-// rows, so this answers what the exact read answers.
+// unknown, and how each price was reached. The same read answers each day, so
+// the series and the total cannot straddle a reconcile.
 func rangeStatsFromCatalog(f SourceFilter, days []string, catalog *usagecatalog.Catalog) (RangeStats, bool) {
 	ctx := context.Background()
 	from, to := f.From.Format(dayLayout), f.To.Format(dayLayout)
@@ -167,11 +176,11 @@ func rangeStatsFromCatalog(f SourceFilter, days []string, catalog *usagecatalog.
 	if err != nil {
 		return RangeStats{}, false
 	}
-	prov, err := catalog.ProvenanceInRange(ctx, from, to, f.Source)
+	prov, byDay, err := catalog.ProvenanceByDay(ctx, from, to, f.Source)
 	if err != nil {
 		return RangeStats{}, false
 	}
-	out := rangeStatsFromRollups(f, days, rows)
+	out := rangeStatsFromRollups(f, days, rows, byDay)
 	out.CountedCalls, out.UnpricedCalls, out.EstimatedCalls = prov.CountedCalls, prov.UnpricedCalls, prov.EstimatedCalls
 	out.UnnamedCardCalls, out.UnclassifiedCardCalls = prov.UnnamedCardCalls, prov.UnclassifiedCardCalls
 	out.IncompleteReasons = prov.Reasons
@@ -207,11 +216,12 @@ func aggregateDays(recordsByDay map[string][]record, days []string, f SourceFilt
 	modelTotals := map[string]int64{}
 	providerTotals := map[string]int64{}
 	totalCost := newCostBooks()
-	unpricedReasons := map[string]bool{}
+	rangeCalls := callCounts{}
 	active := map[string]bool{} // day -> active
 	for _, day := range days {
 		recs := recordsByDay[day]
 		dayCost := newCostBooks()
+		dayCalls := callCounts{}
 		dayTotals := map[string]int64{}
 		dayTurns := 0
 		dayRequests := 0
@@ -264,7 +274,8 @@ func aggregateDays(recordsByDay map[string][]record, days []string, f SourceFilt
 				totalCost.add(mode, currency, pricing.Amount(amount))
 				out.CostEstimated = out.CostEstimated || (mode == "" && entry.CostEstimated)
 			}
-			countCall(&out, rec, entry, unpricedReasons)
+			rangeCalls.addCall(rec, entry)
+			dayCalls.addCall(rec, entry)
 			dayActive = dayActive || rec.Total > 0 || requests > 0
 		}
 		if dayActive {
@@ -283,10 +294,10 @@ func aggregateDays(recordsByDay map[string][]record, days []string, f SourceFilt
 			byProvider[providerOf(m)] += v
 		}
 		out.Daily = append(out.Daily, dailyRow(day, byModel, byProvider, dayCost,
-			dayRequests, dayTurns, dayCacheHit, dayCacheMiss))
+			dayRequests, dayTurns, dayCacheHit, dayCacheMiss, dayCalls))
 	}
 	out.ActiveDays = len(active)
-	out.IncompleteReasons = sortedReasons(unpricedReasons)
+	rangeCalls.intoRange(&out)
 	out.Cost, out.EstimateCost = moneySorted(totalCost.billed), moneySorted(totalCost.estimate)
 	out.Models = modelsSorted(modelTotals)
 	out.Providers = providersSorted(providerTotals)
@@ -308,33 +319,60 @@ func aggregateDays(recordsByDay map[string][]record, days []string, f SourceFilt
 	return out
 }
 
-// countCall adds one row's provenance facts to the range: whether it is a
-// counted call, and how its price was reached. Counted is the denominator the
-// unpriced count is a subset of; a turn marker or a request-only failure (no
-// tokens, no price, no failed quote) is not a call the money is over.
-func countCall(out *RangeStats, rec record, entry usagecatalog.Entry, reasons map[string]bool) {
+// callCounts is one call-accounting tally: a range's, or one day's. Both add
+// rows through addCall, so a day in the series cannot answer by a different
+// predicate than the total above it.
+type callCounts struct {
+	Counted, Unpriced, Estimated, UnnamedCard, UnclassifiedCard int
+	reasons                                                     map[string]bool
+}
+
+// addCall records one row's provenance: whether it is a counted call, and how
+// its price was reached. Counted is the denominator the unpriced count is a
+// subset of; a turn marker or a request-only failure (no tokens, no price, no
+// failed quote) is not a call the money is over.
+func (c *callCounts) addCall(rec record, entry usagecatalog.Entry) {
 	counted := rec.Total > 0 || entry.CostCurrency != "" || entry.CostIncomplete
 	if counted {
-		out.CountedCalls++
+		c.Counted++
 	}
 	if entry.CostIncomplete {
-		out.CostIncomplete = true
-		out.UnpricedCalls++
+		c.Unpriced++
 		if entry.IncompleteReason != "" {
-			reasons[entry.IncompleteReason] = true
+			if c.reasons == nil {
+				c.reasons = map[string]bool{}
+			}
+			c.reasons[entry.IncompleteReason] = true
 		}
 	} else if entry.CostCurrency != "" && entry.CostEstimated {
-		out.EstimatedCalls++
+		c.Estimated++
 	}
 	if counted {
 		// No price fact at all: whether the card was named was never
 		// recorded, which is unknown rather than zero.
 		if entry.CostCurrency == "" {
-			out.UnclassifiedCardCalls++
+			c.UnclassifiedCard++
 		} else if rec.PricingFingerprint == "" {
-			out.UnnamedCardCalls++
+			c.UnnamedCard++
 		}
 	}
+}
+
+// intoRange writes the tally onto the aggregate, including the floor flag: a
+// range with one unpriced call sums to a floor, not a bill.
+func (c callCounts) intoRange(out *RangeStats) {
+	out.CountedCalls, out.UnpricedCalls, out.EstimatedCalls = c.Counted, c.Unpriced, c.Estimated
+	out.UnnamedCardCalls, out.UnclassifiedCardCalls = c.UnnamedCard, c.UnclassifiedCard
+	out.CostIncomplete = c.Unpriced > 0
+	out.IncompleteReasons = sortedReasons(c.reasons)
+}
+
+// intoDay writes the tally onto one day of the series. Every count is stated,
+// so a measured zero cannot be mistaken for an unanswered path.
+func (c callCounts) intoDay(day *DailyTokens) {
+	day.CountedCalls, day.UnpricedCalls, day.EstimatedCalls = c.Counted, c.Unpriced, c.Estimated
+	day.UnnamedCardCalls, day.UnclassifiedCardCalls = c.UnnamedCard, c.UnclassifiedCard
+	day.IncompleteReasons = sortedReasons(c.reasons)
 }
 
 // querySingleDay adds the hour buckets a day rollup cannot answer. One day's
@@ -402,7 +440,7 @@ func hourlyBuckets(day string, recs []record, f SourceFilter) []HourlyTokens {
 	return buckets
 }
 
-func rangeStatsFromRollups(f SourceFilter, days []string, rows []usagecatalog.Rollup) RangeStats {
+func rangeStatsFromRollups(f SourceFilter, days []string, rows []usagecatalog.Rollup, provenance map[string]usagecatalog.Provenance) RangeStats {
 	out := RangeStats{From: f.From.Format(dayLayout), To: f.To.Format(dayLayout), Daily: []DailyTokens{}, Models: []ModelUsage{}, Providers: []ProviderUsage{}}
 	byDay := map[string][]usagecatalog.Rollup{}
 	for _, row := range rows {
@@ -461,9 +499,13 @@ func rangeStatsFromRollups(f SourceFilter, days []string, rows []usagecatalog.Ro
 				active[day] = true
 			}
 		}
+		dayProv := provenance[day]
 		out.Daily = append(out.Daily, DailyTokens{Day: day, Total: int(sum(dayModels)), ByModel: dayModels, ByProvider: dayProviders,
 			Requests: int(dayRequests), Turns: int(dayTurns), CacheHit: dayCacheHit, CacheMiss: dayCacheMiss,
-			Cost: moneySorted(dayCost.billed), EstimateCost: moneySorted(dayCost.estimate)})
+			Cost: moneySorted(dayCost.billed), EstimateCost: moneySorted(dayCost.estimate),
+			CountedCalls: dayProv.CountedCalls, UnpricedCalls: dayProv.UnpricedCalls, EstimatedCalls: dayProv.EstimatedCalls,
+			UnnamedCardCalls: dayProv.UnnamedCardCalls, UnclassifiedCardCalls: dayProv.UnclassifiedCardCalls,
+			IncompleteReasons: dayProv.Reasons})
 	}
 	out.ActiveDays = len(active)
 	out.Cost, out.EstimateCost = moneySorted(totalCost.billed), moneySorted(totalCost.estimate)
@@ -488,13 +530,15 @@ func rangeStatsFromRollups(f SourceFilter, days []string, rows []usagecatalog.Ro
 
 // dailyRow assembles one day of the trend series.
 func dailyRow(day string, byModel, byProvider map[string]int64, cost costBooks,
-	requests, turns int, cacheHit, cacheMiss int64,
+	requests, turns int, cacheHit, cacheMiss int64, calls callCounts,
 ) DailyTokens {
-	return DailyTokens{
+	row := DailyTokens{
 		Day: day, Total: int(sum(byModel)), ByModel: byModel, ByProvider: byProvider,
 		Requests: requests, Turns: turns, CacheHit: cacheHit, CacheMiss: cacheMiss,
 		Cost: moneySorted(cost.billed), EstimateCost: moneySorted(cost.estimate),
 	}
+	calls.intoDay(&row)
+	return row
 }
 
 // costBooks tallies cost per currency, billed and estimated apart.

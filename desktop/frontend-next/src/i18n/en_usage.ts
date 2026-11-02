@@ -71,6 +71,7 @@ export const EN_USAGE: Record<string, string> = {
   "含估算": "includes estimates",
   "未定价调用未计入": "unpriced calls not included",
   "其中 {n} 笔未定价": "{n} calls unpriced",
+  "下限 · {n} 笔未定价": "floor · {n} unpriced",
   "{day} 起 · {n} 天有记录": "from {day} · {n} days recorded",
   "这段时间 {tok} tokens 里有 {rate}% 命中前缀缓存 —— 命中的部分按缓存价计费，比未命中便宜一个量级。": "{rate}% of these {tok} tokens hit the prefix cache — a hit bills at the cache rate, an order of magnitude under a miss.",
   "命中 {a} · 未命中 {b}": "{a} hit · {b} missed",
