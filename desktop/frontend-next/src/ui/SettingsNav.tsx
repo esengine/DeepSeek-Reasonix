@@ -54,3 +54,14 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
     </nav>
   );
 }
+
+export function SettingsTitle({ at }: { at: Section }) {
+  const group = NAV.find(([, items]) => items.some(([id]) => id === at));
+  const name = group?.[1].find(([id]) => id === at)?.[1] ?? at;
+  return (
+    <div className="prefs-pagetitle">
+      {group && <span className="group">{t(group[0])}</span>}
+      <h2>{t(name)}</h2>
+    </div>
+  );
+}

@@ -13,7 +13,7 @@ import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
 import { SECTION_NAME } from "./prefsnav";
-import { SettingsNav } from "./SettingsNav";
+import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
@@ -413,6 +413,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
         <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at) navigation.leave(() => { setLanded(""); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />
 
         <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
+          <SettingsTitle at={at} />
           <Boundary
             fallback={
               <div className="find" data-lvl="err" role="alert">
