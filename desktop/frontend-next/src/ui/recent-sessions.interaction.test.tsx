@@ -88,14 +88,15 @@ it("focuses an already-open session without opening it again, and resets Running
   const open = vi.spyOn(hub, "open");
   render(<App hub={hub} />);
   await screen.findByRole("treeitem", { name: "并行会话演示" });
-  const segments = document.querySelector(".studio-session-segments")!;
-  await userEvent.click(within(segments as HTMLElement).getByRole("button", { name: "进行中" }));
+  const filter = document.querySelector(".session-filter-trigger") as HTMLElement;
+  await userEvent.click(filter);
+  await userEvent.click(document.querySelector('[data-action="session.filter"][data-value="live"]')!);
   await userEvent.type(screen.getByRole("searchbox", { name: "搜索会话 / 项目" }), "unrelated");
   await userEvent.click(screen.getByRole("button", { name: "最近的会话" }));
   await userEvent.click(await screen.findByRole("button", { name: "Recent finished · DeepSeek-Reasonix" }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "最近的会话" })).toBeNull());
   expect(open).not.toHaveBeenCalled();
-  expect(within(segments as HTMLElement).getByRole("button", { name: "全部" }).getAttribute("aria-pressed")).toBe("true");
+  expect(filter.textContent).toContain("全部");
   expect(screen.getByRole("searchbox", { name: "搜索会话 / 项目" })).toHaveProperty("value", "");
   expect(await screen.findByRole("treeitem", { name: "并行会话演示" })).toBeTruthy();
 });
@@ -125,8 +126,9 @@ it("keeps a just-completed session discoverable after it leaves Running", async 
   render(<App hub={hub} />);
   await screen.findByRole("treeitem", { name: "并行会话演示" });
   await waitFor(() => expect(document.querySelector(".studio-runstate[data-running]")).not.toBeNull());
-  const segments = within(document.querySelector(".studio-session-segments") as HTMLElement);
-  await userEvent.click(segments.getByRole("button", { name: "进行中" }));
+  const filterButton = document.querySelector(".session-filter-trigger") as HTMLElement;
+  await userEvent.click(filterButton);
+  await userEvent.click(document.querySelector('[data-action="session.filter"][data-value="live"]')!);
   expect(screen.getByRole("treeitem", { name: "并行会话演示" })).toBeTruthy();
   running = false;
   act(() => deliver?.({ kind: "turn_done" }));
@@ -134,7 +136,7 @@ it("keeps a just-completed session discoverable after it leaves Running", async 
   await userEvent.click(screen.getByRole("button", { name: "最近的会话" }));
   await userEvent.click(await screen.findByRole("button", { name: "并行会话演示 · DeepSeek-Reasonix" }));
   expect(await screen.findByRole("treeitem", { name: "并行会话演示" })).toBeTruthy();
-  expect(segments.getByRole("button", { name: "全部" }).getAttribute("aria-pressed")).toBe("true");
+  expect(filterButton.textContent).toContain("全部");
 });
 
 it("uses activity rather than unread or pin state, and applies search before paging with the saved legacy preference", async () => {

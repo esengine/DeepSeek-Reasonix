@@ -62,7 +62,11 @@ function pagedHub() {
   return { hub, asked, change: () => change() };
 }
 
-const filter = (name: RegExp) => screen.getAllByRole("button", { name }).find((b) => b.closest(".studio-session-segments"))!;
+const VALUE: Record<string, string> = { "全部": "all", "归档": "archived", "置顶": "pinned" };
+const filter = (name: RegExp) => {
+  const word = Object.keys(VALUE).find((w) => name.test(w))!;
+  return document.querySelector<HTMLElement>(`[data-action="session.filter"][data-value="${VALUE[word]}"]`)!;
+};
 
 it("keeps the pages the reader opened across a tree refresh", async () => {
   const { hub, asked, change } = pagedHub();
@@ -104,6 +108,7 @@ it("reaches an archived conversation far outside the window instead of a dead en
   render(<App hub={hub} />);
   await screen.findByRole("button", { name: /显示更多/ });
 
+  await userEvent.click(document.querySelector(".session-filter-trigger")!);
   await userEvent.click(filter(/^归档/));
   await waitFor(() => expect(asked.at(-1)).toMatchObject({ scope: "archived" }));
   expect(await screen.findByText("chat 0")).toBeTruthy();
@@ -115,6 +120,7 @@ it("shows the pinned conversation that is far outside the window", async () => {
   const { hub } = pagedHub();
   render(<App hub={hub} />);
   await screen.findByRole("button", { name: /显示更多/ });
+  await userEvent.click(document.querySelector(".session-filter-trigger")!);
   await userEvent.click(filter(/^置顶/));
   expect(await screen.findByText("chat 5")).toBeTruthy();
 });

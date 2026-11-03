@@ -4127,7 +4127,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 :root[data-pack] .studio-brand-accent { color: var(--brand); }
 :root[data-pack] .navbtn[aria-current],
 :root[data-pack] .navbtn[aria-current]::before { background: var(--accent); }
-:root[data-pack] .studio-session-segments button[aria-pressed="true"] b { color: var(--accent-ink); }
 :root[data-pack] .btn.send:not(:disabled) { background: var(--accent); color: var(--accent-fg); }
 :root[data-pack] .studio-effort-menu .studio-effort-strength i[data-on] { background: var(--accent); }
 :root[data-pack] .compose:hover::after,
