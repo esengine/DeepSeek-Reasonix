@@ -41,7 +41,7 @@ function startPage(scheme: "light" | "dark"): string {
     main{width:min(520px,100%);text-align:center}.mark{width:42px;height:42px;margin:0 auto 18px;display:grid;place-items:center;border:1px solid ${border};border-radius:12px;background:${surface};color:#7188c4;font-size:22px}
     h1{margin:0 0 8px;font-size:18px;font-weight:620;letter-spacing:-.02em}p{margin:0;color:${muted};font-size:13px;line-height:1.7}
     .hint{margin-top:22px;padding:11px 14px;border:1px solid ${border};border-radius:9px;background:${surface};color:${muted};font-size:12px;text-align:left}
-  </style></head><body><main><div class="mark">◎</div><h1>Reasonix Browser</h1><p>${t("在上方地址栏输入网址，即可在当前任务旁浏览资料。")}</p><div class="hint">${t("浏览内容不会替换或中断当前会话。部分网站禁止嵌入时，可使用右上角的外部打开。")}</div></main></body></html>`;
+  </style></head><body><main><div class="mark">◎</div><h1>${t("内置浏览器")}</h1><p>${t("在上方输入网址，和对话并排看资料。模型操作这个页面时，页签上会有蓝点。")}</p><div class="hint">${t("有的网站不允许嵌入，可以用右上角在系统浏览器打开。")}</div></main></body></html>`;
 }
 
 interface ManualProps {
