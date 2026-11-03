@@ -81,3 +81,6 @@
 .recent-session .sessage { flex: none; margin-left: auto; color: var(--muted); }
 .recent-sessions .pickact { flex-wrap: wrap; }
 .recent-page { order: -1; flex-basis: 100%; text-align: center; white-space: nowrap; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
+.sessword { flex: none; margin-left: auto; font: var(--w-reg) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
+.sessword[data-run="running"] { color: var(--net-ink); }
+.sessword[data-run="halt"] { color: var(--warn-ink); }

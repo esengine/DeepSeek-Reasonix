@@ -618,7 +618,9 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                           </span>
                         )}
                         <PeerThreadMark path={session.path} />
-                        <SessionAge at={session.lastActiveAt} unread={session.unread} />
+                        {run === "running" || run === "halt"
+                          ? <span className="sessword" data-run={run}>{t(run === "running" ? "运行中" : "等你确认")}</span>
+                          : <SessionAge at={session.lastActiveAt} unread={session.unread} />}
                         {kept.length > 0 && (
                           <button
                             className="sesscopies"
