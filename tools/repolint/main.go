@@ -208,6 +208,7 @@ func run(root string) ([]Finding, error) {
 	findings = append(findings, wires.findings(root)...)
 	findings = append(findings, checkTransientTagParity(root)...)
 	findings = append(findings, checkInboxRefusalParity(root)...)
+	findings = append(findings, checkSessionLeaseRefusalParity(root)...)
 	parity, err := checkFrontendParity(root)
 	if err != nil {
 		return nil, err

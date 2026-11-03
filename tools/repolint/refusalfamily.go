@@ -14,7 +14,8 @@ import (
 // the kernel, and no spelling tells the writer that carries an identity from
 // one that carries a sentence.
 const (
-	inboxFamilyFile = "internal/state/sessioninbox/types.go"
+	inboxFamilyFile        = "internal/state/sessioninbox/types.go"
+	sessionLeaseFamilyFile = "internal/state/sessionstore/session_lease.go"
 
 	// Both frontends answer inbox calls from the same family, so both writers
 	// are named here. A writer that moved would otherwise compare clean against
@@ -23,12 +24,22 @@ const (
 	inboxHTTPWriterFunc = "writeInboxError"
 	inboxACPWriterFile  = "internal/frontend/acp/inbox.go"
 	inboxACPWriterFunc  = "inboxRefusal"
+
+	sessionLeaseACPWriterFile = "internal/frontend/acp/session.go"
+	sessionLeaseACPWriterFunc = "sessionLeaseRefusal"
 )
 
-// inboxWriter is one frontend's refusal writer and the calls that carry an
+// refusalFamily is one store package's exported error family: the file that
+// declares it and the selector a frontend switch names it by.
+type refusalFamily struct {
+	file string
+	pkg  string
+}
+
+// refusalWriter is one frontend's refusal writer and the calls that carry an
 // identity in that frontend's shape: the HTTP helpers take the dotted code as an
 // argument, and the ACP one returns it as data beside the JSON-RPC code.
-type inboxWriter struct {
+type refusalWriter struct {
 	file string
 	fn   string
 	// coded names the functions a case must call, one argument of which is the
@@ -40,7 +51,12 @@ type inboxWriter struct {
 // among them: it renders an identity a deeper layer assigned and otherwise
 // falls back to prose, which is the diagnostic path, not an answer a frontend
 // can say in the reader's language.
-var inboxWriters = []inboxWriter{
+var (
+	inboxFamily = refusalFamily{file: inboxFamilyFile, pkg: "sessioninbox"}
+	leaseFamily = refusalFamily{file: sessionLeaseFamilyFile, pkg: "sessionstore"}
+)
+
+var inboxWriters = []refusalWriter{
 	{
 		file:  inboxHTTPWriterFile,
 		fn:    inboxHTTPWriterFunc,
@@ -53,24 +69,48 @@ var inboxWriters = []inboxWriter{
 	},
 }
 
+// A lease refusal is a transport answer too: the session methods take the
+// transcript's lease, and a client that cannot tell "held" from "unprovable"
+// cannot decide whether to close a window or retry.
+var sessionLeaseWriters = []refusalWriter{
+	{
+		file:  sessionLeaseACPWriterFile,
+		fn:    sessionLeaseACPWriterFunc,
+		coded: map[string]bool{"refuseSessionLease": true},
+	},
+}
+
 // checkInboxRefusalParity holds each frontend's inbox boundary to the store's
-// error family. A sentinel with no case of its own is answered as an internal
-// fault — three were on HTTP, and every one of them was on ACP — and one whose
-// case writes prose reaches the client as English nobody translated. Both are
-// the same defect: a name lost between the kernel and the client.
+// error family, through the same mechanism the lease family uses.
 func checkInboxRefusalParity(root string) []Finding {
-	family, err := inboxSentinels(root)
+	return checkRefusalParity(root, inboxFamily, inboxWriters)
+}
+
+// checkSessionLeaseRefusalParity holds the ACP session methods to the lease
+// family: a sentinel added beside these two must be named here before it can
+// reach a client as prose.
+func checkSessionLeaseRefusalParity(root string) []Finding {
+	return checkRefusalParity(root, leaseFamily, sessionLeaseWriters)
+}
+
+// checkRefusalParity holds each frontend's boundary to one store family. A
+// sentinel with no case of its own is answered as an internal fault — three were
+// on HTTP, and every one of them was on ACP — and one whose case writes prose
+// reaches the client as English nobody translated. Both are the same defect: a
+// name lost between the kernel and the client.
+func checkRefusalParity(root string, family refusalFamily, writers []refusalWriter) []Finding {
+	sentinels, err := refusalSentinels(root, family)
 	if err != nil {
-		return []Finding{{inboxFamilyFile, 1, ruleRefusalPath, err.Error(), 1}}
+		return []Finding{{family.file, 1, ruleRefusalPath, err.Error(), 1}}
 	}
 	var out []Finding
-	for _, w := range inboxWriters {
-		coded, uncoded, line, err := inboxHandledSentinels(root, w)
+	for _, w := range writers {
+		coded, uncoded, line, err := refusalHandledSentinels(root, family, w)
 		if err != nil {
 			out = append(out, Finding{w.file, 1, ruleRefusalPath, err.Error(), 1})
 			continue
 		}
-		for _, name := range family {
+		for _, name := range sentinels {
 			switch {
 			case coded[name]:
 			case uncoded[name]:
@@ -85,11 +125,11 @@ func checkInboxRefusalParity(root string) []Finding {
 	return out
 }
 
-// inboxSentinels reads the family from its declaration. A hand-kept list here
+// refusalSentinels reads the family from its declaration. A hand-kept list here
 // would be the thing that rots: the sentinel added next is exactly the one
 // nobody remembers to add twice.
-func inboxSentinels(root string) ([]string, error) {
-	file, _, err := parseRepoFile(root, inboxFamilyFile)
+func refusalSentinels(root string, family refusalFamily) ([]string, error) {
+	file, _, err := parseRepoFile(root, family.file)
 	if err != nil {
 		return nil, err
 	}
@@ -110,16 +150,16 @@ func inboxSentinels(root string) ([]string, error) {
 		return true
 	})
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no errors.New sentinels found in %s: this check has lost its subject", inboxFamilyFile)
+		return nil, fmt.Errorf("no errors.New sentinels found in %s: this check has lost its subject", family.file)
 	}
 	return out, nil
 }
 
-// inboxHandledSentinels splits the writer's cases by what their body writes.
+// refusalHandledSentinels splits the writer's cases by what their body writes.
 // Which sentinel a case is about comes from the selector it names, never from
 // the code string beside it — the two can disagree, and then the guard would be
 // reading the wrong one of them.
-func inboxHandledSentinels(root string, w inboxWriter) (coded, uncoded map[string]bool, line int, err error) {
+func refusalHandledSentinels(root string, family refusalFamily, w refusalWriter) (coded, uncoded map[string]bool, line int, err error) {
 	file, fset, err := parseRepoFile(root, w.file)
 	if err != nil {
 		return nil, nil, 0, err
@@ -138,7 +178,7 @@ func inboxHandledSentinels(root string, w inboxWriter) (coded, uncoded map[strin
 			if !ok {
 				return true
 			}
-			named := caseSentinels(clause.List)
+			named := caseSentinels(clause.List, family.pkg)
 			writes := writesACode(clause.Body, w.coded)
 			for _, name := range named {
 				if writes {
@@ -156,8 +196,8 @@ func inboxHandledSentinels(root string, w inboxWriter) (coded, uncoded map[strin
 	return coded, uncoded, line, nil
 }
 
-// caseSentinels names the sessioninbox errors a case matches on.
-func caseSentinels(list []ast.Expr) []string {
+// caseSentinels names the family errors a case matches on.
+func caseSentinels(list []ast.Expr, pkg string) []string {
 	var out []string
 	for _, expr := range list {
 		ast.Inspect(expr, func(n ast.Node) bool {
@@ -165,7 +205,7 @@ func caseSentinels(list []ast.Expr) []string {
 			if !ok {
 				return true
 			}
-			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "sessioninbox" && strings.HasPrefix(sel.Sel.Name, "Err") {
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == pkg && strings.HasPrefix(sel.Sel.Name, "Err") {
 				out = append(out, sel.Sel.Name)
 			}
 			return true
