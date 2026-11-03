@@ -2098,7 +2098,7 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 .session-pop {
   position: fixed;
   z-index: 70;
-  width: 228px; max-height: calc(100vh / var(--zoom, 1) - 24px); overflow-y: auto;
+  width: 260px; max-height: calc(100vh / var(--zoom, 1) - 24px); overflow-y: auto;
   display: grid;
   padding: 6px;
   border: 1px solid var(--border);
@@ -2140,6 +2140,13 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 .session-pop-group > button:focus-visible { background: var(--overlay); color: var(--text); outline: none; }
 .session-pop-group > button:disabled { opacity: .55; cursor: wait; }
 .session-pop-divider { height: 1px; margin: 5px 7px; background: var(--hair); }
+.session-pop-group > button > span > .session-pop-why { display: block; margin: 2px 0 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
+.session-pop-export { display: flex; align-items: center; gap: 9px; padding: 8px 9px; min-height: 35px; box-sizing: border-box; }
+.session-pop-export > .studio-icon { width: 14px; height: 14px; flex: 0 0 14px; color: var(--faint); }
+.session-pop-export > span { flex: 1; white-space: nowrap; color: var(--text); font: 500 calc(11px * var(--fs-scale, 1))/1.2 var(--ui); }
+.session-pop-export > button { flex: none; height: 20px; padding: 0 7px; border: 0; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-reg) var(--fs-micro) var(--ui); cursor: pointer; }
+.session-pop-export > button:hover:not(:disabled), .session-pop-export > button:focus-visible { background: var(--border); color: var(--text); outline: none; }
+.session-pop-export > button:disabled { opacity: .55; cursor: wait; }
 .session-pop-group > button.danger { color: var(--err-ink); }
 .session-pop-group > button.danger > .studio-icon { color: var(--err-ink); }
 
