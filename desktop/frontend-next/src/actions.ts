@@ -476,11 +476,6 @@ export const ACTIONS: UIAction[] = [
   { id: "roles.override.clear", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "permissions.rule-level", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "sandbox.workspace-root", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
-  // Where compaction starts. Declaring it rebuilds the runtime, which is why
-  // it must not be able to fire twice for one keystroke.
-  { id: "compaction.threshold", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
-  // Which bound is in force is the setting; how much of it is on screen is not.
-  { id: "compaction.advanced", kind: "view", target: "none", proof: "interaction" },
   { id: "context.largest", kind: "view", target: "none", proof: "interaction" },
   { id: "compaction.confirm", kind: "view", target: "none", proof: "interaction" },
   { id: "compaction.now", kind: "kernel-mutation", target: "none", proof: "interaction" },
