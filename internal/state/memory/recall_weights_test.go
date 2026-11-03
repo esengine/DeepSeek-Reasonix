@@ -108,3 +108,10 @@ func TestAnExpiredConstraintIsNeverRecalled(t *testing.T) {
 		}
 	}
 }
+
+func TestAOneLetterGalaxyNameDoesNotTouchEveryQuery(t *testing.T) {
+	docs := []autoRecallDoc{{memory: Memory{ID: "m", Galaxy: "a", Type: TypeConstraint}}}
+	if got := touchedGalaxies("a long question about anything", nil, docs); len(got) != 0 {
+		t.Fatalf("touched = %v, want none for a one-letter galaxy", got)
+	}
+}
