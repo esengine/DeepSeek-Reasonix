@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { t } from "../i18n";
+import { ToastRow } from "./ToastRow";
 import { host } from "../port/host";
 import type { Appearance } from "../port/port";
 
@@ -50,23 +51,21 @@ export function useSizeAsk(look: Appearance, onLook: (next: Appearance) => void)
     return {
       open: true,
       node: (
-        <div className="toast size-ask" role="status">
-          <span>{t("界面已改为 {n}%。合适吗？", { n: now })}</span>
-          <button data-action="size.keep" onClick={close}>{t("好")}</button>
-          <button data-action="size.restore" onClick={() => { onLook({ ...look, zoom: was }); close(); }}>{t("恢复 {n}%", { n: Math.round(was * 100) })}</button>
-        </div>
+        <ToastRow kind="size" role="status" className="size-ask" actions={<>
+          <button className="act ghost" data-action="size.restore" onClick={() => { onLook({ ...look, zoom: was }); close(); }}>{t("恢复 {n}%", { n: Math.round(was * 100) })}</button>
+          <button className="act" data-action="size.keep" onClick={close}>{t("好")}</button>
+        </>}>{t("界面已改为 {n}%。合适吗？", { n: now })}</ToastRow>
       ),
     };
   }
   return {
     open: true,
     node: (
-      <div className="toast size-ask" role="status">
-        <span>{t("界面是不是偏小？可以在这里放大，之后也能在「外观」里调整。")}</span>
-        <button data-action="size.set" data-value="1.25" onClick={() => apply(1.25)}>125%</button>
-        <button data-action="size.set" data-value="1.5" onClick={() => apply(1.5)}>150%</button>
-        <button data-action="size.keep" onClick={close}>{t("不用了")}</button>
-      </div>
+      <ToastRow kind="size" role="status" className="size-ask" stacked actions={<>
+        <button className="act" data-action="size.set" data-value="1.25" onClick={() => apply(1.25)}>125%</button>
+        <button className="act" data-action="size.set" data-value="1.5" onClick={() => apply(1.5)}>150%</button>
+        <button className="act ghost" data-action="size.keep" onClick={close}>{t("不用了")}</button>
+      </>}>{t("界面是不是偏小？可以在这里放大，之后也能在「外观」里调整。")}</ToastRow>
     ),
   };
 }

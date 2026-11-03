@@ -33,6 +33,7 @@ const PATHS = {
   stop: "M6 6h12v12H6z",
   play: "m8 4 12 8-12 8V4z",
   pause: "M8 5v14M16 5v14",
+  info: "M12 11v5M12 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
   warning: "M12 3 2 21h20L12 3zM12 9v5M12 17h.01",
   copy: "M8 8h13v13H8V8zM16 8V3H3v13h5",
   quote: "M7 7H3v6h6V9m0-2v8a2 2 0 0 1-2 2H5m16-10h-4v6h6V9m0-2v8a2 2 0 0 1-2 2h-2",

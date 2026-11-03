@@ -5,6 +5,7 @@ import { dismissToast, useToasts } from "../state/toasts";
 import { useUpdateReady } from "../state/updatewatch";
 import { reportProblem } from "./reportproblem";
 import { useSizeAsk } from "./SizeAsk";
+import { ToastRow } from "./ToastRow";
 import { UpdateReady } from "./UpdateReady";
 
 /** The window's corner for failures that do not block what the person is doing.
@@ -21,17 +22,15 @@ export function ToastStack({ onFeedback, port, idle = false, look = {}, onLook =
       {ask.node}
       {port && <UpdateReady port={port} idle={idle} />}
       {toasts.map((toast) => toast.tone === "note" ? (
-        <div className="toast note" role="status" key={toast.id}>
-          <span>{toast.text}</span>
-          {toast.action && <button data-action="toast.act" data-target={String(toast.id)} onClick={() => { dismissToast(toast.id); toast.action?.run(); }}>{toast.action.label}</button>}
-          <button data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
-        </div>
+        <ToastRow kind="note" role="status" className="note" key={toast.id} actions={<>
+          {toast.action && <button className="act" data-action="toast.act" data-target={String(toast.id)} onClick={() => { dismissToast(toast.id); toast.action?.run(); }}>{toast.action.label}</button>}
+          <button className="act ghost" data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
+        </>}>{toast.text}</ToastRow>
       ) : (
-        <div className="toast" role="alert" key={toast.id}>
-          <span>{toast.text}</span>
-          <button data-action="toast.report" onClick={() => { reportProblem(toast.text); onFeedback(); dismissToast(toast.id); }}>{t("报告此问题")}</button>
-          <button data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
-        </div>
+        <ToastRow kind="error" role="alert" key={toast.id} actions={<>
+          <button className="act ghost" data-action="toast.report" onClick={() => { reportProblem(toast.text); onFeedback(); dismissToast(toast.id); }}>{t("报告此问题")}</button>
+          <button className="act ghost" data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
+        </>}>{toast.text}</ToastRow>
       ))}
     </div>
   );

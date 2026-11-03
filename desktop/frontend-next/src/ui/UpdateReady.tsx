@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import { HttpError, type AgentPort } from "../port/port";
 import { useUpdateReady } from "../state/updatewatch";
+import { ToastRow } from "./ToastRow";
 
 const RESTART_BUSY = "update.restart_busy";
 
@@ -25,10 +26,9 @@ export function UpdateReady({ port, idle }: { port: Pick<AgentPort, "restartToVe
     }
   };
   return (
-    <div className="toast update-ready" role="status">
-      <span>{says || t("新版本 {v} 已下载。重启后使用，不会自动重启。", { v: version })}</span>
-      <button data-action="update.restart" onClick={() => void restart()}>{t("重启并更新")}</button>
-      <button data-action="update.later" onClick={() => setPutOff(version)}>{t("稍后")}</button>
-    </div>
+    <ToastRow kind="update" role="status" className="update-ready" actions={<>
+      <button className="act ghost" data-action="update.later" onClick={() => setPutOff(version)}>{t("稍后")}</button>
+      <button className="act" data-primary data-action="update.restart" onClick={() => void restart()}>{t("重启并更新")}</button>
+    </>}>{says || t("新版本 {v} 已下载。重启后使用，不会自动重启。", { v: version })}</ToastRow>
   );
 }
