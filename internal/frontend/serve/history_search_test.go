@@ -125,17 +125,31 @@ func TestHistorySearchSaysNothingExtraWhenTheIndexAnsweredForEverySource(t *test
 	waitHistorySearch(t, "zebra migration", 1)
 
 	for _, query := range []string{"zebra", "quux nonexistent"} {
-		rec := httptest.NewRecorder()
-		historySearch(rec, httptest.NewRequest(http.MethodGet, "/history/search?q="+url.QueryEscape(query), nil))
-		var got historySearchResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-			t.Fatal(err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%q: status %d body %q, want 200", query, rec.Code, rec.Body.String())
-		}
-		if got.Index.Partial || got.Index.Reason != "" || got.Index.Failed != 0 || got.Index.Indexed != got.Index.Total {
-			t.Fatalf("%q: a complete projection raised an incomplete-index signal: %+v", query, got.Index)
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			rec := httptest.NewRecorder()
+			historySearch(rec, httptest.NewRequest(http.MethodGet, "/history/search?q="+url.QueryEscape(query), nil))
+			var got historySearchResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%q: status %d body %q, want 200", query, rec.Code, rec.Body.String())
+			}
+			if got.Index.Failed != 0 || got.Index.Reason == history.SearchIndexFailed {
+				t.Fatalf("%q: a readable source was reported as unreadable: %+v", query, got.Index)
+			}
+			settled := got.Index.State == "ready" && got.Index.Total > 0 && got.Index.Indexed == got.Index.Total
+			if settled && history.SearchIndexStatus().Pending == 0 {
+				if got.Index.Partial || got.Index.Reason != "" {
+					t.Fatalf("%q: a complete projection raised an incomplete-index signal: %+v", query, got.Index)
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%q: the projection never settled: %+v", query, got.Index)
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
