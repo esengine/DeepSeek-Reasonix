@@ -1,4 +1,4 @@
-.changedpill-row { display: flex; justify-content: center; min-width: 0; margin: 0 0 8px; }
+.changedpill-row { display: flex; justify-content: flex-end; min-width: 0; margin: -30px 0 4px; }
 .changedpill {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0;
   padding: 3px 12px; border-radius: 999px; cursor: pointer;
