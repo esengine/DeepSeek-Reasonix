@@ -5,18 +5,19 @@ export function WorkbenchLauncher({ changes, focus = false, onFiles, onChanges, 
   return (
     <div className="workbench-launcher" role="group" aria-label={t("开始")}>
       <StudioIcon name="spark" />
-      <button autoFocus={focus} data-action="workbench.launch-files" onClick={onFiles}>
+      <p className="workbench-launcher-title">{t("在工作台打开")}</p>
+      <button autoFocus={focus} aria-label={t("文件")} data-action="workbench.launch-files" onClick={onFiles}>
         <StudioIcon name="folder" />
-        <b>{t("文件")}</b>
+        <span><b>{t("文件")}</b><i>{t("资源管理器：改动、提交历史和文件")}</i></span>
       </button>
-      <button data-action="workbench.launch-changes" disabled={changes === 0} onClick={onChanges}>
+      <button aria-label={t("改动")} data-action="workbench.launch-changes" disabled={changes === 0} onClick={onChanges}>
         <StudioIcon name="branch" />
-        <b>{t("改动")}</b>
+        <span><b>{t("改动")}</b><i>{t("这次会话改了哪些文件")}</i></span>
         {changes > 0 && <small>{changes}</small>}
       </button>
-      <button data-action="workbench.launch-browser" onClick={onBrowser}>
+      <button aria-label={t("浏览器")} data-action="workbench.launch-browser" onClick={onBrowser}>
         <StudioIcon name="globe" />
-        <b>{t("浏览器")}</b>
+        <span><b>{t("浏览器")}</b><i>{t("和对话并排看网页")}</i></span>
       </button>
     </div>
   );

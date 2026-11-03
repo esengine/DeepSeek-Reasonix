@@ -246,6 +246,10 @@ export const EN: Record<string, string> = {
   // ── 运行状态 ─────────────────────────────────────────────────────
   "空闲": "Idle",
   "运行中": "Running",
+  "在工作台打开": "Open in the workbench",
+  "资源管理器：改动、提交历史和文件": "Explorer: changes, history and files",
+  "这次会话改了哪些文件": "Which files this session changed",
+  "和对话并排看网页": "View web pages beside the chat",
   "更早的 {n} 项": "{n} earlier steps",
   "联网": "Network",
   "子任务": "Subtask",
