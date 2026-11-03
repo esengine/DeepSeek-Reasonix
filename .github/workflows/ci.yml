@@ -314,60 +314,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: test (Windows planner local budget)
-        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^TestEffectPlannerConfiguredTaskBudget$' ./internal/assembly/boot | tee "$RUNNER_TEMP/planner-local-budget.jsonl"
-          jq -se '
-            [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
-            [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
-            all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/assembly/boot"] - $packages | length) == 0 and
-            (["TestEffectPlannerConfiguredTaskBudget", "TestEffectPlannerConfiguredTaskBudget/tokens",
-              "TestEffectPlannerConfiguredTaskBudget/cost", "TestEffectPlannerConfiguredTaskBudget/wall",
-              "TestEffectPlannerConfiguredTaskBudget/unconfigured", "TestEffectPlannerConfiguredTaskBudget/explicit_zero",
-              "TestEffectPlannerConfiguredTaskBudget/unpriced_cost", "TestEffectPlannerConfiguredTaskBudget/missing_usage_cost",
-              "TestEffectPlannerConfiguredTaskBudget/context_bound", "TestEffectPlannerConfiguredTaskBudget/context_disables",
-              "TestEffectPlannerConfiguredTaskBudget/executor_only"] - $tests | length) == 0
-          ' "$RUNNER_TEMP/planner-local-budget.jsonl"
-
-      - name: upload Windows planner local budget inventory
-        if: always() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: planner-local-budget-windows-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/planner-local-budget.jsonl
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: test (Windows Controller routing root budget)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 5
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(SemanticRootUsage|EffectRoutingRootBudget)$' ./internal/runtime/capability ./internal/assembly/boot | tee "$RUNNER_TEMP/controller-routing-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(SemanticRootUsage)$' ./internal/runtime/capability | tee "$RUNNER_TEMP/controller-routing-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/runtime/capability", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["reasonix/internal/runtime/capability"] - $packages | length) == 0 and
             ([
-              "TestEffectRoutingRootBudget",
-              "TestEffectRoutingRootBudget/balanced",
-              "TestEffectRoutingRootBudget/cached_continuation",
-              "TestEffectRoutingRootBudget/cached_new_scope",
-              "TestEffectRoutingRootBudget/cached_new_task",
-              "TestEffectRoutingRootBudget/cached_reset",
-              "TestEffectRoutingRootBudget/context_zero",
-              "TestEffectRoutingRootBudget/dual",
-              "TestEffectRoutingRootBudget/headless",
-              "TestEffectRoutingRootBudget/interactive",
-              "TestEffectRoutingRootBudget/missing",
-              "TestEffectRoutingRootBudget/unconfigured",
               "TestSemanticRootUsage",
               "TestSemanticRootUsage/billed_error",
               "TestSemanticRootUsage/cache",
@@ -395,19 +354,17 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(PreparedRootBudget|CoordinatorRootBudget|EffectCoordinatorRoot)' ./internal/runtime/agent ./internal/runtime/coordinator ./internal/assembly/boot | tee "$RUNNER_TEMP/coordinator-root-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(PreparedRootBudget|CoordinatorRootBudget|EffectCoordinatorRoot)' ./internal/runtime/agent ./internal/runtime/coordinator | tee "$RUNNER_TEMP/coordinator-root-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/runtime/agent", "reasonix/internal/runtime/coordinator", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["reasonix/internal/runtime/agent", "reasonix/internal/runtime/coordinator"] - $packages | length) == 0 and
             (["TestCoordinatorRootBudgetRoutes",
               "TestCoordinatorRootBudgetRoutes/raw", "TestCoordinatorRootBudgetRoutes/tool_planner",
               "TestCoordinatorRootBudgetRoutes/failure_fallback", "TestCoordinatorRootBudgetRoutes/plan_only_continuation",
-              "TestCoordinatorRootBudgetRoutes/approval_declined_continuation", "TestCoordinatorRootBudgetRoutes/approval_allowed",
-              "TestEffectCoordinatorRootTokenBudget", "TestEffectCoordinatorRootTokenBudget/shared",
-              "TestEffectCoordinatorRootTokenBudget/unconfigured", "TestEffectCoordinatorRootTokenBudget/context_disables",
-              "TestEffectCoordinatorRootTokenBudget/missing_planner", "TestEffectCoordinatorRootTokenBudget/executor_only"] - $tests | length) == 0
+              "TestCoordinatorRootBudgetRoutes/approval_declined_continuation", "TestCoordinatorRootBudgetRoutes/approval_allowed"
+              ] - $tests | length) == 0
           ' "$RUNNER_TEMP/coordinator-root-budget.jsonl"
 
       - name: upload Windows Coordinator root budget inventory
@@ -484,12 +441,12 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(RootToken|EffectRootToken|BudgetCountsKnownReportedTokens|ReportedToken|EffectReportedTotalTokenBudget)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-token-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(RootToken|EffectRootToken|BudgetCountsKnownReportedTokens|ReportedToken)' ./internal/runtime/agent | tee "$RUNNER_TEMP/root-token-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["reasonix/internal/runtime/agent"] - $packages | length) == 0 and
             (["TestRootTokenBudgetIncludesChildProviderUsage", "TestRootTokenBudgetIncludesChildProviderUsage/configured",
               "TestRootTokenBudgetIncludesChildProviderUsage/context", "TestRootTokenBudgetIncludesChildProviderUsage/unconfigured",
               "TestRootTokenBudgetIncludesChildProviderUsage/explicit_zero", "TestRootTokenBudgetSurvivesNestedAndConcurrentChildren",
@@ -512,13 +469,7 @@ jobs:
                "TestBudgetCountsKnownReportedTokens/negative",
                "TestReportedTokenCountersSaturate"],
              "reasonix/internal/assembly/boot": [
-               "TestEffectReportedTotalTokenBudget",
-               "TestEffectReportedTotalTokenBudget/split",
-               "TestEffectReportedTotalTokenBudget/total_only",
-               "TestEffectReportedTotalTokenBudget/partial_split",
-               "TestEffectReportedTotalTokenBudget/lower_total",
-               "TestEffectReportedTotalTokenBudget/missing_total",
-               "TestEffectReportedTotalTokenBudget/disabled"]} |
+               ]} |
             to_entries | all(.[]; . as $package |
               ([ $events[] | select(.Package == $package.key and .Test == null and
                  (.Action == "pass" or .Action == "fail" or .Action == "skip")) ] |
@@ -648,20 +599,19 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(RootWebSearch|EffectRootWebSearch)' ./internal/tools/websearch ./internal/assembly/boot | tee "$RUNNER_TEMP/root-websearch-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(RootWebSearch|EffectRootWebSearch)' ./internal/tools/websearch | tee "$RUNNER_TEMP/root-websearch-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/tools/websearch", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["reasonix/internal/tools/websearch"] - $packages | length) == 0 and
             (["TestRootWebSearchUsageTerminal", "TestRootWebSearchUsageTerminal/reported",
               "TestRootWebSearchUsageTerminal/no_reporter", "TestRootWebSearchUsageTerminal/missing",
               "TestRootWebSearchUsageTerminal/no_observer", "TestRootWebSearchUsageTerminal/input_refused",
               "TestRootWebSearchUsageTerminal/no_factory", "TestRootWebSearchUsageTerminal/factory_error",
               "TestRootWebSearchUsageTerminal/billed_failure", "TestRootWebSearchUsageTerminal/cancel_after_usage",
-              "TestRootWebSearchUsageTerminal/cancel_before_start", "TestRootWebSearchUsageTerminal/stream_error",
-              "TestEffectRootWebSearchTokenBudget", "TestEffectRootWebSearchTokenBudget/reported",
-              "TestEffectRootWebSearchTokenBudget/disabled", "TestEffectRootWebSearchTokenBudget/missing"] - $tests | length) == 0
+              "TestRootWebSearchUsageTerminal/cancel_before_start", "TestRootWebSearchUsageTerminal/stream_error"
+              ] - $tests | length) == 0
           ' "$RUNNER_TEMP/root-websearch-budget.jsonl"
 
       - name: upload Windows root websearch budget inventory
@@ -679,17 +629,13 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^(TestProfileRootBudgetLifetime|TestProfileBudgetPreparationUsesTurnAdmission|TestEffectExplicitSkillRootBudget)$' ./internal/session/control ./internal/assembly/boot | tee "$RUNNER_TEMP/explicit-skill-root-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^(TestProfileRootBudgetLifetime|TestProfileBudgetPreparationUsesTurnAdmission|TestEffectExplicitSkillRootBudget)$' ./internal/session/control | tee "$RUNNER_TEMP/explicit-skill-root-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/session/control", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
-            (["TestProfileBudgetPreparationUsesTurnAdmission", "TestEffectExplicitSkillRootBudget",
-              "TestEffectExplicitSkillRootBudget/profile", "TestEffectExplicitSkillRootBudget/preview",
-              "TestEffectExplicitSkillRootBudget/slash", "TestEffectExplicitSkillRootBudget/chips",
-              "TestEffectExplicitSkillRootBudget/goal", "TestEffectExplicitSkillRootBudget/context_zero",
-              "TestEffectExplicitSkillRootBudget/unconfigured"] - $tests | length) == 0
+            (["reasonix/internal/session/control"] - $packages | length) == 0 and
+            (["TestProfileBudgetPreparationUsesTurnAdmission" ] - $tests | length) == 0
           ' "$RUNNER_TEMP/explicit-skill-root-budget.jsonl"
 
       - name: upload Windows explicit skill root budget inventory
@@ -707,19 +653,16 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(RootTriage|EffectRootTriage)' ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/root-triage-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(RootTriage|EffectRootTriage)' ./internal/runtime/agent | tee "$RUNNER_TEMP/root-triage-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
-            (["reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+            (["reasonix/internal/runtime/agent"] - $packages | length) == 0 and
             (["TestRootTriageTokenBudget", "TestRootTriageTokenBudget/classifier", "TestRootTriageTokenBudget/screen",
               "TestRootTriageTokenBudget/billed_failure", "TestRootTriageTokenBudget/missing", "TestRootTriageTokenBudget/disabled",
               "TestRootTriageTokenBudget/no_sink", "TestRootTriageTokenBudget/counts_without_total",
-              "TestRootTriageOutsideRunDoesNotCreateScope", "TestEffectRootTriageScreenBudget",
-              "TestEffectRootTriageScreenBudget/reported", "TestEffectRootTriageScreenBudget/flagged",
-              "TestEffectRootTriageScreenBudget/disabled", "TestEffectRootTriageScreenBudget/missing",
-              "TestEffectRootTriageScreenBudget/screen_disabled"] - $tests | length) == 0
+              "TestRootTriageOutsideRunDoesNotCreateScope" ] - $tests | length) == 0
           ' "$RUNNER_TEMP/root-triage-budget.jsonl"
 
       - name: upload Windows root triage budget inventory
@@ -736,18 +679,17 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(LocalBudgetUsesOccurrenceQuote|LocalCost.*|UsageQuote.*|EffectLocalCostUsesOccurrenceQuote)$' ./internal/contract/event ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/local-cost-quote.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(LocalBudgetUsesOccurrenceQuote|LocalCost.*|UsageQuote.*)$' ./internal/contract/event ./internal/runtime/agent | tee "$RUNNER_TEMP/local-cost-quote.jsonl"
           jq -se '
             ["TestLocalBudgetUsesOccurrenceQuote", "TestLocalBudgetUsesOccurrenceQuote/peak", "TestLocalBudgetUsesOccurrenceQuote/offpeak",
              "TestLocalCostKeepsOriginalCurrencyBuckets", "TestLocalCostFixedPointThresholdAndUnknown",
-             "TestUsageQuoteUsesOneOwnerAndOccurrence", "TestUsageQuoteLegacyAndNilSinks",
-             "TestEffectLocalCostUsesOccurrenceQuote", "TestEffectLocalCostUsesOccurrenceQuote/peak",
-             "TestEffectLocalCostUsesOccurrenceQuote/offpeak", "TestEffectLocalCostUsesOccurrenceQuote/relay"] as $required |
+             "TestUsageQuoteUsesOneOwnerAndOccurrence", "TestUsageQuoteLegacyAndNilSinks"
+             ] as $required |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $passed |
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             all(.[]; .Action != "fail" and .Action != "skip") and
             (($required - $passed) | length == 0) and
-            ((["reasonix/internal/contract/event", "reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages) | length == 0)
+            ((["reasonix/internal/contract/event", "reasonix/internal/runtime/agent"] - $packages) | length == 0)
           ' "$RUNNER_TEMP/local-cost-quote.jsonl"
 
       - name: upload Windows local cost quote inventory
@@ -797,20 +739,18 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout=3m -json -run '^Test(AuxiliaryUsageObserver|BoundedUsageObserver|RootBounded|EffectRootBounded)' ./internal/contract/provider ./internal/model/boundedllm ./internal/runtime/agent ./internal/assembly/boot | tee "$RUNNER_TEMP/bounded-root-budget.jsonl"
+          go test -count=1 -timeout=3m -json -run '^Test(AuxiliaryUsageObserver|BoundedUsageObserver|RootBounded|EffectRootBounded)' ./internal/contract/provider ./internal/model/boundedllm ./internal/runtime/agent | tee "$RUNNER_TEMP/bounded-root-budget.jsonl"
           jq -se '
             [.[] | select(.Test == null and .Action == "pass") | .Package] as $packages |
             [.[] | select(.Test != null and .Action == "pass") | .Test] as $tests |
             all(.[]; .Action != "skip" and .Action != "fail") and
             (["reasonix/internal/contract/provider", "reasonix/internal/model/boundedllm",
-              "reasonix/internal/runtime/agent", "reasonix/internal/assembly/boot"] - $packages | length) == 0 and
+              "reasonix/internal/runtime/agent"] - $packages | length) == 0 and
             (["TestAuxiliaryUsageObserverReplacesAndCopies",
               "TestBoundedUsageObserverOwnsOneTerminal", "TestBoundedUsageObserverOwnsOneTerminal/reported",
               "TestBoundedUsageObserverOwnsOneTerminal/billed_failure", "TestBoundedUsageObserverOwnsOneTerminal/without_sink",
-              "TestBoundedUsageObserverOwnsOneTerminal/missing", "TestBoundedUsageObserverOwnsOneTerminal/input_refused",
-              "TestEffectRootBoundedAdvisorBudget",
-              "TestEffectRootBoundedAdvisorBudget/reported", "TestEffectRootBoundedAdvisorBudget/disabled",
-              "TestEffectRootBoundedAdvisorBudget/missing_usage"] - $tests | length) == 0
+              "TestBoundedUsageObserverOwnsOneTerminal/missing", "TestBoundedUsageObserverOwnsOneTerminal/input_refused"
+              ] - $tests | length) == 0
           ' "$RUNNER_TEMP/bounded-root-budget.jsonl"
 
       - name: upload Windows bounded root budget inventory

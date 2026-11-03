@@ -73,7 +73,6 @@ func (w roleWiring) planner(opts Options, executor *agent.Agent, executorModel, 
 	}
 	plannerOpts := agent.Options{
 		MaxSteps:          0,
-		TaskBudget:        taskBudgetFromConfig(w.cfg),
 		Gate:              w.gate,
 		CheckTargetAccess: w.checkTargetAccess,
 		Hooks:             w.hooks.ForRole("planner"),

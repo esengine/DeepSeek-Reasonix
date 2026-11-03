@@ -96,6 +96,7 @@ var retiredUserConfigKeys = []func(string) (string, bool){
 	stripLegacyRedactToolOutputLines,
 	stripLegacyMemoryCompilerLines,
 	stripLegacyMultiThresholdCompactionLines,
+	stripLegacyTaskBudgetLines,
 	func(raw string) (string, bool) {
 		return stripTOMLKeyLines(raw, "agent", "auto_plan", "auto_plan_classifier")
 	},

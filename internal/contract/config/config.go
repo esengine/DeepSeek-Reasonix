@@ -1105,12 +1105,6 @@ type AgentConfig struct {
 	MaxSideSessions    int               `toml:"max_side_sessions"`    // 0 (default) opens as many side conversations as asked; the user file only
 	MaxQueuedInputs    int               `toml:"max_queued_inputs"`    // 0 (default) queues as many prompts as asked; the user file only
 	MaxProviderRetries int               `toml:"max_provider_retries"` // default 10; 0 retries until cancelled; the user file only
-	// TaskCostBudget lands a task on one summary once it spends this much.
-	TaskCostBudget float64 `toml:"task_cost_budget"`
-	// TaskTimeBudgetMinutes is the same gate on wall clock. All three ship off.
-	TaskTimeBudgetMinutes float64 `toml:"task_time_budget_minutes"`
-	// The same gate on cumulative prompt+output tokens, cached input included.
-	TaskTokenBudget int `toml:"task_token_budget"`
 	// GoalTokenBudget bounds an unattended Goal loop by cumulative tokens.
 	// Off unless set: a Goal runs until it finishes or you stop it.
 	GoalTokenBudget int `toml:"goal_token_budget"`

@@ -561,11 +561,10 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   strategy redirects and intervention-epoch resets, never a Goal pause. Turns,
   tokens, provider requests, and active work duration remain observational when
   the corresponding budget is not configured. Positive user-selected
-  `[agent].goal_token_budget`, `max_steps`, time, and cost budgets remain
+  `[agent].goal_token_budget` and `max_steps` remain
   explicit resumable boundaries. The Goal token budget defaults to `0` (off);
   resuming a `budget_spend` pause grants a fresh slice without clearing
-  cumulative Goal statistics. `task_time_budget_minutes = 0` (and legacy
-  negative values) disables the time boundary.
+  cumulative Goal statistics.
   `/goal clear` removes the active goal. Switching into plan/normal mode clears
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.

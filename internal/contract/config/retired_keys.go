@@ -22,6 +22,7 @@ var (
 	retiredRedactToolOutput = retiredKey{"deprecated redact_tool_output", stripLegacyRedactToolOutputLines}
 	retiredMemoryCompiler   = retiredKey{"deprecated memory_compiler", stripLegacyMemoryCompilerLines}
 	retiredMultiThreshold   = retiredKey{"deprecated multi-threshold compaction keys", stripLegacyMultiThresholdCompactionLines}
+	retiredTaskBudget       = retiredKey{"deprecated task budget keys", stripLegacyTaskBudgetLines}
 )
 
 // RetiredKeyResult is what one retired-key migration did: whether it removed
@@ -37,6 +38,7 @@ type RetiredKeyMigrations struct {
 	RedactToolOutput RetiredKeyResult
 	MemoryCompiler   RetiredKeyResult
 	MultiThreshold   RetiredKeyResult
+	TaskBudget       RetiredKeyResult
 }
 
 // MigrateRetiredKeysForRoot removes the retired agent step-limit, redact_tool_output,
@@ -52,8 +54,8 @@ func (r Roots) MigrateRetiredKeysForRoot(root string) RetiredKeyMigrations {
 // config already read: a file with no retired key is neither locked nor read
 // again, and one that has any is read once more under its lock to be rewritten.
 func (r Roots) MigrateRetiredKeysForRootFrom(root string, user *ConfigSnapshot) RetiredKeyMigrations {
-	res := r.migrateRetiredKeys(root, fileencoding.ReadFileUTF8, user, []retiredKey{retiredStepLimits, retiredRedactToolOutput, retiredMemoryCompiler, retiredMultiThreshold})
-	return RetiredKeyMigrations{StepLimits: res[0], RedactToolOutput: res[1], MemoryCompiler: res[2], MultiThreshold: res[3]}
+	res := r.migrateRetiredKeys(root, fileencoding.ReadFileUTF8, user, []retiredKey{retiredStepLimits, retiredRedactToolOutput, retiredMemoryCompiler, retiredMultiThreshold, retiredTaskBudget})
+	return RetiredKeyMigrations{StepLimits: res[0], RedactToolOutput: res[1], MemoryCompiler: res[2], MultiThreshold: res[3], TaskBudget: res[4]}
 }
 
 // migrateRetiredKeys runs migs over the user and project config. A migration
@@ -168,6 +170,10 @@ func stripLegacyRedactToolOutputLines(raw string) (string, bool) {
 
 func stripLegacyMemoryCompilerLines(raw string) (string, bool) {
 	return stripTOMLKeyLines(raw, "agent", "memory_compiler")
+}
+
+func stripLegacyTaskBudgetLines(raw string) (string, bool) {
+	return stripTOMLKeyLines(raw, "agent", "task_cost_budget", "task_time_budget_minutes", "task_token_budget")
 }
 
 func stripLegacyMultiThresholdCompactionLines(raw string) (string, bool) {

@@ -21,6 +21,8 @@ type configMigrations struct {
 	memoryCompilerErr   error
 	multiThreshold      bool
 	multiThresholdErr   error
+	taskBudget          bool
+	taskBudgetErr       error
 }
 
 func runConfigMigrations(roots config.Roots, root string) configMigrations {
@@ -34,6 +36,7 @@ func runConfigMigrations(roots config.Roots, root string) configMigrations {
 	m.redactToolOutput, m.redactToolOutputErr = retired.RedactToolOutput.Changed, retired.RedactToolOutput.Err
 	m.memoryCompiler, m.memoryCompilerErr = retired.MemoryCompiler.Changed, retired.MemoryCompiler.Err
 	m.multiThreshold, m.multiThresholdErr = retired.MultiThreshold.Changed, retired.MultiThreshold.Err
+	m.taskBudget, m.taskBudgetErr = retired.TaskBudget.Changed, retired.TaskBudget.Err
 	return m
 }
 
@@ -73,6 +76,11 @@ func (m configMigrations) report(sink event.Sink, cfg *config.Config) {
 		"上下文维护已简化为单一自动压缩阈值。",
 		"Deprecated multi-threshold compaction keys were ignored.",
 		"Context maintenance now follows compact_ratio of the model window (0.90 by default) and nothing else. soft_compact_ratio, tool_result_snip_ratio, compact_force_ratio, cold_resume_prune, context_editing, and context_soft_limit_tokens were removed from config.",
+		" The old keys could not be removed: ")
+	reportRetiredKey(sink, m.taskBudget, m.taskBudgetErr,
+		"任务预算设置已移除。",
+		"Deprecated task budget keys were ignored.",
+		"task_cost_budget, task_time_budget_minutes and task_token_budget no longer stop a task: Reasonix does not cap what a task may spend. They were removed from config.",
 		" The old keys could not be removed: ")
 }
 

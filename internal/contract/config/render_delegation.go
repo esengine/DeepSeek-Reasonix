@@ -85,21 +85,6 @@ func renderAgentDelegation(b *strings.Builder, c *Config) {
 	} else {
 		b.WriteString("# screen_external_content = true   # triage flags external results that address the agent\n")
 	}
-	if c.Agent.TaskCostBudget > 0 {
-		fmt.Fprintf(b, "task_cost_budget = %s   # a task lands on one summary once it spends this much\n", formatFloat(c.Agent.TaskCostBudget))
-	} else {
-		b.WriteString("# task_cost_budget = 0.50   # a task lands on one summary once it spends this much\n")
-	}
-	if c.Agent.TaskTimeBudgetMinutes > 0 {
-		fmt.Fprintf(b, "task_time_budget_minutes = %s   # the same landing, measured in wall clock\n", formatFloat(c.Agent.TaskTimeBudgetMinutes))
-	} else {
-		b.WriteString("# task_time_budget_minutes = 10   # the same landing, measured in wall clock\n")
-	}
-	if c.Agent.TaskTokenBudget > 0 {
-		fmt.Fprintf(b, "task_token_budget = %d   # the same landing, measured in cumulative model tokens\n", c.Agent.TaskTokenBudget)
-	} else {
-		b.WriteString("# task_token_budget = 2000000   # the same landing, measured in cumulative model tokens\n")
-	}
 	if c.Agent.GoalTokenBudget > 0 {
 		fmt.Fprintf(b, "goal_token_budget = %d   # what a /goal loop may spend before it stops\n", c.Agent.GoalTokenBudget)
 	} else {

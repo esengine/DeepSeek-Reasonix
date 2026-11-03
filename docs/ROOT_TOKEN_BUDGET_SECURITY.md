@@ -7,12 +7,12 @@ reviewed: 2026-10-26
 
 # Agent-root token budget / Agent 根任务 token 预算
 
-An explicit `task_token_budget` now counts the main-loop reported prompt and
+The Goal token budget (`goal_token_budget`) counts the main-loop reported prompt and
 completion tokens of an Agent-root delegation tree. Cached input still counts.
 The default threshold remains zero. This is a cooperative landing gate after
 tool rounds, followed by the existing finalization round.
 
-显式 `task_token_budget` 现在累计一个 Agent 根委派树的主循环已报告输入及输出
+宿主提供的 token 预算（即 Goal 预算 `goal_token_budget`）累计一个 Agent 根委派树的主循环已报告输入及输出
 token，缓存命中输入同样计入。默认阈值仍为零。这是在工具轮次结束后触发的协作式
 收尾门禁，仍保留既有的最后收尾轮次。
 

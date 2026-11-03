@@ -508,7 +508,6 @@ func (b *builder) executor() *agent.Agent {
 		MaxSteps:       t.maxSteps,
 		MaxStepsKey:    b.opts.MaxStepsKey,
 		Temperature:    cfg.Agent.Temperature,
-		TaskBudget:     taskBudgetFromConfig(cfg),
 		ProgressWatch:  control.ProgressWatchFromConfig(cfg),
 		Pricing:        entry.Price,
 		ModelRef:       b.model.ref,
@@ -562,7 +561,6 @@ func (b *builder) controllerOptions(runner agent.Runner, executor *agent.Agent, 
 	providerIdentity := ResolveProviderBuildIdentity(entry, b.proxy, nil)
 	return control.Options{
 		Observe:                        b.observeRun(),
-		TaskBudget:                     taskBudgetFromConfig(cfg),
 		GoalTokenBudget:                cfg.Agent.GoalTokenBudget,
 		Runner:                         runner,
 		Executor:                       executor,

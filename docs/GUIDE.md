@@ -2269,28 +2269,6 @@ diverge.
 
 Setting the key negative disables the guard entirely.
 
-An optional spend gate is available when you want one. It bounds a whole task
-(every "continue" included, until you start unrelated work), and on crossing it
-the task produces one tool-free summary and pauses; the work is saved and the
-next message continues it.
-
-```toml
-[agent]
-task_cost_budget = 5.0            # in the model's pricing currency
-task_time_budget_minutes = 60     # wall clock across the whole task
-```
-
-Both are off unless set. In particular, `task_time_budget_minutes = 0` (and
-legacy negative values) disables the time gate; only a positive value enables
-it. Neither has a default, because a stop is a judgement
-only you can make: no amount of money is portable across models — a budget
-loose enough for a cheap model would land a frontier model within a couple of
-answers — and a long task is as often the job you asked for as it is a runaway.
-
-Cost applies only to a priced model. Without a price table that axis stays
-inactive rather than reading the task as free; use the time axis for a free or
-local model.
-
 Rounds are deliberately not an axis. A turn that reaches a high round count
 without spending much is one whose rounds are individually cheap and fast,
 which is the case least worth interrupting. Use the one-off `--max-steps` flag
