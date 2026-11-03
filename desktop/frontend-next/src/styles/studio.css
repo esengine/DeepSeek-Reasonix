@@ -820,7 +820,7 @@ body { background: var(--page) !important; }
 .acts-pop > button {
   width: 100%; min-height: 30px; display: flex; align-items: center; gap: 8px;
   padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--muted);
-  font: 450 calc(11.5px * var(--fs-scale, 1))/1.35 var(--ui); text-align: start; cursor: pointer;
+  font: 450 calc(11.5px * var(--fs-scale, 1))/1.35 var(--ui); text-align: start; cursor: pointer; letter-spacing: normal;
 }
 .acts-pop > button .studio-icon { width: 14px; height: 14px; flex: none; color: var(--faint); }
 .acts-pop > button > span { flex: 1; min-width: 0; }
