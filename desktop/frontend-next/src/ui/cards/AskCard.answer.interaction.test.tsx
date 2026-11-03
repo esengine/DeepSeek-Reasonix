@@ -31,6 +31,29 @@ describe("ask card free-text answer", () => {
     expect(answer).toHaveBeenCalledWith("row", "ask", [{ questionId: "q1", selected: ["my own plan"] }]);
   });
 
+  it("clicking into the empty box chooses Other", async () => {
+    render(<AskCard item={card(false)} onAnswer={vi.fn(async () => {})} />);
+    await userEvent.click(box());
+    expect(other().getAttribute("aria-pressed")).toBe("true");
+    expect(document.activeElement).toBe(box());
+  });
+
+  it("clicking into the box beside multi-choice picks keeps them and adds Other", async () => {
+    render(<AskCard item={card(true)} onAnswer={vi.fn(async () => {})} />);
+    await userEvent.click(screen.getByRole("button", { name: "a" }));
+    await userEvent.click(box());
+    expect(other().getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "a" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("clicking into a single pick's note box keeps that pick", async () => {
+    render(<AskCard item={card(false)} onAnswer={vi.fn(async () => {})} />);
+    await userEvent.click(screen.getByRole("button", { name: "a" }));
+    await userEvent.click(screen.getByRole("textbox", { name: "补充说明（可选）" }));
+    expect(screen.getByRole("button", { name: "a" }).getAttribute("aria-pressed")).toBe("true");
+    expect(other().getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("typing alongside multi-choice picks rides with them", async () => {
     const answer = vi.fn(async () => {});
     render(<AskCard item={card(true)} onAnswer={answer} />);

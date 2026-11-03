@@ -132,6 +132,12 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
     if (on && !qs[qi].multi) setPicks((prev) => at(prev, qi, []));
   };
 
+  const enterBox = (qi: number) => {
+    if (sealed || noting(qi) || otherOn[qi]) return;
+    setOtherOn((prev) => at(prev, qi, true));
+    if (!qs[qi].multi) setPicks((prev) => at(prev, qi, []));
+  };
+
   const type = (qi: number, text: string) => {
     if (noting(qi)) return setNote((prev) => at(prev, qi, text));
     setOther((prev) => at(prev, qi, text));
@@ -262,6 +268,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                     readOnly={sealed}
                     placeholder={noteShown(i) ? t("补充说明（可选），会随所选项一起发送") : t("或直接输入你的回答")}
                     onChange={(text) => type(i, text)}
+                    onFocus={() => enterBox(i)}
                     onEnter={onEnter}
                     isIme={ime.isIme}
                     imeHandlers={ime.handlers}

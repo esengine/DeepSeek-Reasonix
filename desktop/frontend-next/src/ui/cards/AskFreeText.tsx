@@ -10,6 +10,7 @@ interface Props {
   readOnly: boolean;
   inputRef: Ref<HTMLInputElement>;
   onChange: (text: string) => void;
+  onFocus?: () => void;
   onEnter: () => void;
   isIme: (e: { isComposing?: boolean; keyCode?: number }) => boolean;
   imeHandlers: ReturnType<typeof useIme>["handlers"];
@@ -19,7 +20,7 @@ interface Props {
 // The free-text answer of one question. A rewrite is offered the way the
 // composer offers it, by the same hook, so the keys and the card behave alike;
 // the box is one line, so an adopted rewrite is joined onto one.
-export function AskFreeText({ value, label, placeholder, readOnly, inputRef, onChange, onEnter, isIme, imeHandlers, refine: ask }: Props) {
+export function AskFreeText({ value, label, placeholder, readOnly, inputRef, onChange, onFocus, onEnter, isIme, imeHandlers, refine: ask }: Props) {
   const refine = usePromptRefine({ refinePrompt: ask ?? NO_REFINE }, value, (next) => onChange(next.replace(/\s*\n+\s*/g, " ").trim()));
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (isIme(e.nativeEvent)) return;
@@ -39,6 +40,7 @@ export function AskFreeText({ value, label, placeholder, readOnly, inputRef, onC
           readOnly={readOnly}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
+          onFocus={onFocus}
           onKeyDown={onKeyDown}
           {...imeHandlers}
         />
