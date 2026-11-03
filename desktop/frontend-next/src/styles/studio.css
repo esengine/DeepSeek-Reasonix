@@ -255,6 +255,10 @@ body { background: var(--page); }
 .composeguide { display: none; }
 .btn.send { width: 32px; height: 32px; padding: 0; justify-content: center; border-radius: 50%; }
 .btn.send > :not(.ic) { display: none; }
+.compose .btn.send[data-running]:not(:disabled) { width: auto; gap: 6px; padding: 0 14px; border-radius: 999px; background: var(--text); color: var(--surface); }
+.compose .btn.send[data-running]:not(:disabled) > :not(.ic) { display: inline; font: var(--w-med) var(--fs-ui)/1 var(--ui); }
+.compose .btn.stop, .compose .btn.stop[data-primary] { width: 32px; height: 32px; padding: 0; justify-content: center; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--err) 45%, var(--border)); background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err-ink); }
+.compose .btn.stop > :not(.ic) { display: none; }
 .btn.send::before { display: none; }
 .glowring { display: none; }
 

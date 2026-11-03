@@ -15,6 +15,7 @@ import { ModelGroupChips } from "./ModelGroupChips";
 import { useModelHealth } from "./modelhealth";
 import { effortMenu, effortReading, effortShort, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
 import { EffortColumn } from "./EffortColumn";
+import { hasVendorMark, VendorMark } from "./vendormarks";
 import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
@@ -217,7 +218,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
   }, []);
   useFitHeight(box, text, placeCaret);
   const showHint = useSyncExternalStore(onComposerHintChange, showsComposerHint, showsComposerHint);
-  const fittedPlaceholder = usePlaceholderFit(box, queued ? [t("继续输入以排队后续修改"), t("继续输入…"), "…"] : [t("描述任务、问题或要改的内容…"), t("描述任务…"), "…"]);
+  const fittedPlaceholder = usePlaceholderFit(box, queued ? [t("继续输入以排队后续修改"), t("继续输入…"), "…"] : running ? [t("运行中也可以继续输入…"), t("继续输入…"), "…"] : [t("描述任务、问题或要改的内容…"), t("描述任务…"), "…"]);
   const placeholder = showHint ? fittedPlaceholder : "";
 
   // Attachments ride into the turn as path references, exactly as they do from
@@ -385,6 +386,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
   });
 
   const efforts = effortsFor(models, status?.modelRef);
+  const currentMark = models.find((m) => m.ref === status?.modelRef)?.mark;
   // Whether this model says anything about reasoning levels at all. The session
   // may still carry one from a model that did, and printing that would be the
   // composer answering for an endpoint that never spoke.
@@ -737,7 +739,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 }}
               />
             ) : undefined}
-            label={<><span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading">{declared ? effortShort(status.effort, status.modes) : t("未声明")}</span></>}<StudioIcon name="down" /></>}
+            label={<>{hasVendorMark(currentMark) && <VendorMark slug={currentMark} size={14} />}<span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading">{declared ? effortShort(status.effort, status.modes) : t("未声明")}</span></>}<StudioIcon name="down" /></>}
           />
         </div>
         </div>
@@ -748,6 +750,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
               data-primary
               data-action="session.stop"
               data-pending={stopping ? "" : undefined}
+              aria-label={t(stopping ? "正在停止…" : "停下")}
               disabled={stopping}
               aria-busy={stopping}
               onClick={() => {
@@ -769,8 +772,9 @@ export function Composer({ port, status, running, queued = false, quote, restore
               <span>{t(stopping ? "正在停止…" : "停下")}</span>
             </button>
           )}
-          {(!running || hasDraft) && <button
+          <button
             className="btn send"
+            aria-label={t(submitting ? "正在发送…" : running ? runningIntent === "followup" ? "排队发送" : "插话" : "发送")}
             data-primary={running ? undefined : ""}
             data-action="session.send"
             data-running={running ? "" : undefined}
@@ -784,7 +788,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
               </svg>
             </span>
             <span>{t(submitting ? "正在发送…" : running ? runningIntent === "followup" ? "排队发送" : "插话" : "发送")}</span>
-          </button>}
+          </button>
         </span>
       </div>
     </div></>

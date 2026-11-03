@@ -1759,7 +1759,6 @@
   .btn.stop .ic > svg { fill: currentColor; stroke: none }
   .btn.stop:hover { border-color: var(--err); color: var(--err-ink) }
 
-  .pane[data-run="running"] .btn.send:disabled { display: none }
 
   .pill {
     margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none;
