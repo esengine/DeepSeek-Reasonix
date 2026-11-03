@@ -64,6 +64,26 @@ select:not([multiple]):focus-visible { outline: none; border-color: var(--focus)
 select:not([multiple]):disabled { background-color: var(--overlay); color: var(--ghost); cursor: default }
 select[data-size="sm"] { height: 24px; padding: 0 26px 0 8px; font-size: var(--fs-meta); background-position: right 8px center }
 
+.prefs-main :is(input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], input[type="time"]):not(.prefs-find):not(.unit-field input), .prefs-main textarea, .prefs-main .unit-field {
+  box-sizing: border-box; height: 32px; min-width: 0; margin: 0; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised);
+  color: var(--text); font-size: var(--fs-ui); font-weight: var(--w-reg); line-height: 1.3;
+  transition: border-color var(--m-line), box-shadow var(--m-line);
+}
+.prefs-main .unit-field { display: flex; align-items: stretch; padding: 0; overflow: hidden }
+.prefs-main .unit-field input { height: 100%; padding: 0 10px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: inherit; box-shadow: none }
+.prefs-main textarea { height: auto; min-height: 64px; padding: 8px 10px; line-height: 1.55; resize: vertical }
+.prefs-main :is(input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], input[type="time"]):not(.prefs-find):not(.unit-field input):hover:not(:disabled), .prefs-main textarea:hover:not(:disabled), .prefs-main .unit-field:hover { border-color: var(--muted) }
+.prefs-main :is(input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], input[type="time"]):not(.prefs-find):not(.unit-field input):focus, .prefs-main textarea:focus, .prefs-main .unit-field:focus-within {
+  outline: none; border-color: var(--focus); box-shadow: 0 0 0 2px color-mix(in oklab, var(--focus) 26%, transparent);
+}
+.prefs-main [aria-invalid="true"]:is(input, textarea), .prefs-main .unit-field:has(input[aria-invalid="true"]) {
+  border-color: var(--err); box-shadow: 0 0 0 2px color-mix(in oklab, var(--err) 18%, transparent);
+}
+.prefs-main :is(input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], input[type="time"]):disabled, .prefs-main textarea:disabled { background: var(--overlay); color: var(--ghost) }
+.prefs-main .ml-row :is(input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], input[type="time"]):not(.unit-field input), .prefs-main .ml-row .unit-field { height: 24px; font-size: var(--fs-meta) }
+.prefs-main .ml-row .unit-field input { padding: 0 8px }
+
 @media (prefers-reduced-motion: reduce) {
   :is(.kbtn, .act, .btn), select { transition: none }
   :is(.kbtn, .act, .btn):active:not(:disabled) { transform: none }

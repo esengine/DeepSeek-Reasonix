@@ -2856,11 +2856,11 @@
   .skrow[data-local] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent) }
 
   .msearch { display: flex; align-items: center; gap: 10px; margin-bottom: 12px }
-  .msearch input, .mline .malias {
+  .msearch input {
     flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--border);
     border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui);
   }
-  .msearch input:focus, .mline .malias:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .msearch input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .msearch .cnt { flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
 
   .vway { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 2px 12px 10px;
@@ -3003,7 +3003,6 @@
   .addp .fields input[aria-invalid="true"] { border-color: var(--err) }
   .addp .fields .name-cell { flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 4px }
   .addp .fields .name-cell label { display: flex; flex-direction: column; gap: 4px }
-  .addp .fields input[aria-invalid="true"]:focus { outline-color: var(--err) }
   .addp .fields .name-rule { margin: 0; font: var(--w-reg) var(--fs-micro)/1.45 var(--ui); color: var(--ghost) }
   .addp .fields .name-rule[data-bad] { color: var(--err-ink) }
   .addp .fields .tip { font: var(--w-reg) var(--fs-micro)/1.45 var(--ui); font-style: normal; color: var(--ghost) }
@@ -3015,10 +3014,9 @@
   .addp-section-head span { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
   .addp-section-head .quiet { flex: none; background: transparent; color: var(--muted) }
   .probe-ok { margin: 8px 0 0; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ok-ink) }
-  .unit-field { display: flex; min-width: 0; align-items: stretch; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--raised); overflow: hidden }
-  .unit-field:focus-within { outline: 2px solid var(--focus); outline-offset: 1px }
+  .unit-field { display: flex; min-width: 0; align-items: stretch }
   .unit-field:has(input[aria-invalid="true"]) { border-color: var(--err) }
-  .unit-field input { min-width: 0; width: 100%; border: 0 !important; outline: 0 !important; background: transparent !important; color: var(--text) }
+  .unit-field input { min-width: 0; width: 100% }
   .unit-field > i { flex: none; display: flex; align-items: center; padding: 0 9px; border-left: 1px solid var(--hair); color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--mono); font-style: normal }
   .addp-footer { justify-content: flex-end; padding-top: 14px; border-top: 1px solid var(--hair) }
 
@@ -3041,7 +3039,6 @@
   .ml-head strong { font: var(--w-semi) var(--fs-ui) var(--ui); color: var(--text) }
   .ml-head span { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
   .ml-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px 150px; align-items: center; gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid var(--hair) }
-  .addp .ml-row .unit-field input { padding: 6px 8px; font-size: var(--fs-meta) }
   .mp-row { grid-template-columns: repeat(4, minmax(0, 1fr)) }
   .mp-row .me-name { grid-column: 1 / -1 }
   .mp-row .why { grid-column: 1 / -1 }
@@ -3064,12 +3061,8 @@
   .addp .fields .me-chips .me-extra { width: 110px; padding: 3px 9px; border-radius: var(--r-pill); font-size: var(--fs-meta) }
   .addp .fields label.me-default { flex-direction: row; align-items: center; gap: 8px }
   .addp .more { margin-top: 14px }
-  .addp .fields span { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
-  .addp .fields input, .addp .ml-row input {
-    padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--r-xs);
-    background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
-  }
-  .addp .fields input:focus, .addp .ml-row input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .addp .fields span:not(.unit-field) { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
+  .addp .fields input, .addp .ml-row input { font-family: var(--mono) }
   .addp .acts { display: flex; align-items: center; gap: 8px; margin-top: 12px }
   .addp .acts-bar {
     position: sticky; bottom: calc(var(--main-pad-b, 0px) * -1); z-index: 2; display: flex; flex-direction: column; gap: 8px;
@@ -3264,7 +3257,7 @@
   .cmp .note { margin-top: 8px }
   .threshold-row { flex-wrap: wrap } .threshold-row .tx { flex-basis: 14em } .threshold-control { width: min(360px, 100%); display: flex; align-items: center; gap: 7px }
   .threshold-control .unit-field { flex: 1 }
-  .threshold-control input { height: 30px; padding: 4px 8px; color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono) }
+  .threshold-control input { font-family: var(--mono) }
   .threshold-presets { display: flex; align-items: center; gap: 3px }
   .threshold-presets button { padding: 4px 6px; border: 1px solid var(--hair); border-radius: var(--r-xs); background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-micro) var(--ui); cursor: pointer }
   .threshold-presets button:hover { background: var(--overlay); color: var(--text); border-color: var(--border) }
@@ -3512,11 +3505,7 @@
   .net .fields label.grow { flex: 1; min-width: 150px }
   .net .fields label.full { flex-basis: 100% }
   .net .fields span { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
-  .net .fields input {
-    padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--r-xs);
-    background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
-  }
-  .net .fields input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .net .fields input { font-family: var(--mono) }
   .net .fields .port { width: 76px }
   .net .fields label.chk { flex-direction: row; align-items: center; gap: 7px; align-self: flex-end; padding-bottom: 7px }
   .net .fields label.chk span { color: var(--muted) }
@@ -3817,11 +3806,6 @@
   .bk-fields label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 150px }
   .bk-fields label.full { flex-basis: 100% }
   .bk-fields span { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
-  .bk-fields input {
-    padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--r-xs);
-    background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui);
-  }
-  .bk-fields input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .bk-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px }
   .bk-list, .bk-plan { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair) }
   .bk-row { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--hair) }
@@ -4619,12 +4603,7 @@
   .rmtf > span { flex: none; width: 13ch }
   .rmthint { margin: -2px 0 2px calc(13ch + 10px); font: var(--w-reg) var(--fs-meta)/1.55 var(--ui); color: var(--faint) }
   .rmtf select { flex: 1 }
-  .rmtf input {
-    flex: 1; min-width: 0; padding: 5px 8px;
-    border: 1px solid var(--border); border-radius: var(--r-xs);
-    background: var(--surface); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
-  }
-  .rmtf input:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
+  .rmtf input { flex: 1; font-family: var(--mono) }
   .rmtck { gap: 8px }
   .rmtkinds { display: flex; gap: 6px; flex: 1; flex-wrap: wrap }
   .rmtkinds button {
@@ -4766,7 +4745,6 @@
   .pc-note { margin: 0; padding-top: 10px; border-top: 1px solid var(--border); color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui) }
   [data-fold~="scene"] .phonecard { position: fixed; top: calc(var(--chrome-h, 45px) + 6px); right: 12px; left: 12px; width: auto }
   .share .rmtf { margin-top: 10px }
-  .share .rmtf input { background: var(--raised); border-radius: var(--r-sm) }
   .shareopen { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px }
   .shareopen .rmtadd { margin-top: 0; justify-self: start }
   .shareqr { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap }
@@ -4911,13 +4889,8 @@
   .rmtopen:disabled { opacity: .38; cursor: default; background: none; color: var(--faint) }
 
   .fontrow { display: flex; flex-direction: column; gap: 6px; width: 100% }
-  .fontown {
-    flex: 1 1 200px; min-width: 0; padding: 5px 8px;
-    border: 1px solid var(--border); border-radius: var(--r-sm);
-    background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui);
-  }
+  .fontown { flex: 1 1 200px }
   .fontown::placeholder { color: var(--ghost) }
-  .fontown:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
   .fontown[type="time"] { color-scheme: light }
   :root[data-theme="dark"] .fontown[type="time"] { color-scheme: dark }
 

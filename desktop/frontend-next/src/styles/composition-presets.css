@@ -58,7 +58,7 @@
 .composition-editor { display: grid; gap: 24px; padding-top: 24px; border-top: 1px solid var(--hair); }
 .composition-editor .pers-field { padding: 0; gap: 8px; }
 .composition-editor .pers-field .lb { font-weight: var(--w-med); }
-.composition-editor input { min-width: 0; max-width: 100%; width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); padding: 8px 12px; font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); }
+.composition-editor input { width: 100%; max-width: 100%; }
 .composition-editor textarea { width: 100%; min-height: 96px; }
 .composition-editor > .pers-field > select { max-width: 280px; }
 .composition-editor .ds { color: var(--muted); font-size: var(--fs-meta); line-height: 1.6; }

@@ -7,9 +7,8 @@
 .peerbody[data-clamped] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .peerform { display: grid; gap: 6px; }
 .peerreleased + .peerform, .peernote + .peerform { margin-top: 6px; padding: 10px 12px 4px; border-top: 1px solid var(--hair); }
-.peerfield { box-sizing: border-box; width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); }
+.peerfield { width: 100%; }
 textarea.peerfield { min-height: 4.5em; resize: vertical; }
-.peerfield:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .peerform .acts { display: flex; justify-content: flex-end; margin: 0; }
 .wa-sec { display: grid; border-top: 1px solid var(--hair); }
 .wa-sec:first-child { border-top: 0; }
