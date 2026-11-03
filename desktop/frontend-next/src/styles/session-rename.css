@@ -4,7 +4,7 @@
   margin: auto;
   padding: 24px;
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-float);
@@ -21,7 +21,7 @@
   height: 44px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--raised);
   color: var(--text);
   font: inherit;
@@ -31,7 +31,7 @@
   min-height: 40px;
   padding: 0 18px;
   border: 1px solid var(--hair);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--raised);
   color: var(--text);
   font: inherit;

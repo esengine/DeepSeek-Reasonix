@@ -1,13 +1,13 @@
 .rail .sessquick {
   flex: none; display: flex; align-items: center; width: 0; margin-inline-end: 0; overflow: hidden;
-  opacity: 0; pointer-events: none; transition: opacity 100ms ease;
+  opacity: 0; pointer-events: none; transition: opacity var(--t-line) ease;
 }
 .rail .sessrow:is(:hover, :focus-within) > .sessquick { width: 24px; margin-inline-end: 6px; opacity: 1; pointer-events: auto; }
 .rail .sessrow:is(:hover, :focus-within) > .sesspin-action { opacity: 1; pointer-events: auto; }
 .rail .sessquick > button,
 .rail .sesspin-action {
   flex: none; width: 24px; height: 28px; padding: 0; display: grid; place-items: center;
-  border: 0; border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer;
+  border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); cursor: pointer;
 }
 .rail .sessquick .studio-icon,
 .rail .sesspin-action .studio-icon { width: 14px; height: 14px; }

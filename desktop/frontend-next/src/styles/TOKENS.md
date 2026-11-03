@@ -199,10 +199,14 @@ A pack's `recipes.corners` is a factor on that tier rather than a radius of its
 own: `square` is 0, `soft` leaves the four radii as written, `round` is 1.5. A
 pack states a shape, never a number the layout has to agree with.
 
+The four steps are 5 / 7 / 10 / 15 px and the pill: a segment's button or a small
+tag, a field or a notice, a menu or a medium button, a card or a dialog. Two sizes
+of button only — a small one with the pill, a medium one with `--r-md`.
+
 ## Motion
 
-- Three durations for three weights: `--t-line` a line, `--t-card` a card,
-  `--t-panel` a panel. `--m-*` bundles the duration with its easing, because a
+- Three durations for three weights: `--t-line` (120ms) a line, `--t-card`
+  (180ms) a card, `--t-panel` (260ms) a panel. `--m-*` bundles the duration with its easing, because a
   weight decides both; `--m-step` is choreography — how far apart a batch of
   elements is staggered.
 - `--t-live` (.6s) is not a weight. A meter or a fill reports work that is

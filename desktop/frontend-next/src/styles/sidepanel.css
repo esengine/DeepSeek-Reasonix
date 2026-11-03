@@ -1,7 +1,7 @@
 .turntools .studio-attach[aria-pressed="true"] { color: var(--text); background: var(--hair); }
 .sidepanel {
   position: absolute; left: 0; bottom: calc(100% + 9px); z-index: 30; width: min(420px, 100%); max-height: var(--side-room, 420px);
-  display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; transform-origin: bottom left;
+  display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-md); transform-origin: bottom left;
   background: var(--raised); color: var(--text); box-shadow: 0 12px 32px -12px rgba(0, 0, 0, .45);
 }
 .sidepanel > header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -19,15 +19,15 @@
 .sideturn blockquote { margin: 0; padding: 4px 8px; border-left: 2px solid var(--border); color: var(--faint); font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 72px; overflow: hidden; }
 .sideerr { margin: 0 12px 8px; color: #e4675d; font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--ui); }
 .sidequotes { list-style: none; margin: 0; padding: 0 12px 6px; display: grid; gap: 4px; }
-.sidequotes li { display: flex; gap: 6px; align-items: flex-start; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--overlay); }
+.sidequotes li { display: flex; gap: 6px; align-items: flex-start; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--overlay); }
 .sidequotes li span { flex: 1; min-width: 0; max-height: 36px; overflow: hidden; font: 500 calc(11px * var(--fs-scale, 1))/1.5 var(--mono); overflow-wrap: anywhere; }
 .sidequotes li button { border: 0; background: none; color: var(--muted); cursor: pointer; }
 .sidecontent > footer { flex: none; display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px 12px 12px; border-top: 1px solid var(--border); }
 .sidecontent > footer .sidequote { grid-column: 1 / -1; justify-self: start; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--muted); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
 .sidecontent > footer .sidequote:hover { color: var(--text); background: var(--overlay); }
-.sidepanel textarea { resize: none; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: 500 calc(12px * var(--fs-scale, 1))/1.5 var(--ui); }
+.sidepanel textarea { resize: none; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: 500 calc(12px * var(--fs-scale, 1))/1.5 var(--ui); }
 .sidepanel textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.sidesend { padding: 0 12px; border: 1px solid var(--text); border-radius: 8px; background: var(--text); color: var(--surface); font: 600 calc(12px * var(--fs-scale, 1))/1 var(--ui); cursor: pointer; }
+.sidesend { padding: 0 12px; border: 1px solid var(--text); border-radius: var(--r-sm); background: var(--text); color: var(--surface); font: 600 calc(12px * var(--fs-scale, 1))/1 var(--ui); cursor: pointer; }
 .sidesend:disabled { opacity: .45; cursor: default; }
 
 .sidecontent { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }

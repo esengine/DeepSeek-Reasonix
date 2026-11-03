@@ -95,7 +95,7 @@
       .849 31.5%, .937 38.1%, .968 41.8%, .991 45.7%, 1.006 50.1%, 1.015 55%,
       1.017 63.9%, 1.001 84.2%, 1);
 
-    --t-line: .14s; --t-card: .22s; --t-panel: .34s;
+    --t-line: .12s; --t-card: .18s; --t-panel: .26s;
 
     --t-live: .6s;
     --tip-delay: .3s;
@@ -119,14 +119,14 @@
     --track-display: -.018em;
     --track-tight: -.02em; --track-lead: .06em; --track-cap: .12em;
 
-    --r-xs: calc(4px * var(--r-scale, 1)); --r-sm: calc(6px * var(--r-scale, 1));
-    --r-md: calc(9px * var(--r-scale, 1)); --r-lg: calc(12px * var(--r-scale, 1)); --r-pill: 999px;
+    --r-xs: calc(5px * var(--r-scale, 1)); --r-sm: calc(7px * var(--r-scale, 1));
+    --r-md: calc(10px * var(--r-scale, 1)); --r-lg: calc(15px * var(--r-scale, 1)); --r-pill: 999px;
 
     --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px;
     --sp-5: 10px; --sp-6: 12px; --sp-7: 16px; --sp-8: 24px;
 
     --fs-micro: calc(11px * var(--fs-scale, 1)); --fs-meta: calc(12px * var(--fs-scale, 1)); --fs-ui: calc(13px * var(--fs-scale, 1));
-    --fs-lead: calc(15px * var(--fs-scale, 1)); --fs-title: calc(17px * var(--fs-scale, 1)); --fs-display: calc(22px * var(--fs-scale, 1));
+    --fs-lead: calc(14px * var(--fs-scale, 1)); --fs-title: calc(17px * var(--fs-scale, 1)); --fs-display: calc(22px * var(--fs-scale, 1));
 
     --read: 16px;
     --activity-scale: calc(var(--fs-scale, 1) * var(--read-scale, 1));

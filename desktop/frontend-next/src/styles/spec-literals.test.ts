@@ -1,0 +1,32 @@
+import { describe, expect, it } from "vitest";
+
+const SHEETS = import.meta.glob("./*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const line = (css: string, at: number) => css.slice(0, at).split("\n").length;
+
+describe("a stylesheet outside the token file", () => {
+  it("draws every corner from the four radius tokens, the pill or a hairline", () => {
+    const bare: string[] = [];
+    for (const [name, css] of Object.entries(SHEETS)) {
+      if (name === "./tokens.css") continue;
+      for (const m of css.matchAll(/border(?:-[a-z]+)*-radius\s*:\s*([^;}]+)/g)) {
+        if (/var\(/.test(m[1])) continue;
+        for (const n of m[1].matchAll(/(?<![\w.-])([0-9.]+)px/g)) {
+          const px = Number(n[1]);
+          if (px >= 3 && px < 999) bare.push(`${name}:${line(css, m.index!)} ${m[0].trim().slice(0, 50)}`);
+        }
+      }
+    }
+    expect(bare).toEqual([]);
+  });
+
+  it("times a transition from --t-line, --t-card or --t-panel, never a bare 100–150ms", () => {
+    const bare: string[] = [];
+    for (const [name, css] of Object.entries(SHEETS)) {
+      if (name === "./tokens.css") continue;
+      for (const m of css.matchAll(/(?<![\w-])(?:transition|animation)(?:-duration)?\s*:\s*([^;}]+)/g)) {
+        for (const n of m[1].matchAll(/(?<![\w.-])(1[0-5][0-9])ms\b/g)) bare.push(`${name}:${line(css, m.index!)} ${n[0]}`);
+      }
+    }
+    expect(bare).toEqual([]);
+  });
+});

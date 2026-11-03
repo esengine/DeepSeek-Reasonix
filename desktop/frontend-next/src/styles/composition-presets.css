@@ -13,7 +13,7 @@
 .composition-list-group { margin-bottom: 28px; }
 .composition-list-group h3 { color: var(--muted); font-size: var(--fs-ui); font-weight: var(--w-med); margin: 0 0 12px; }
 .composition-builtin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; }
-.composition-builtin-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: 22px; overflow: hidden; background: var(--surface); }
+.composition-builtin-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
 .composition-builtin-card[data-selected] { background: var(--overlay); border-color: var(--faint); }
 .composition-builtin-card:focus-within { border-color: var(--focus); }
 .composition-builtin-select { flex: 1; min-width: 0; padding: 24px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }

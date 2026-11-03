@@ -10,7 +10,7 @@
   gap: 0;
   padding: 8px;
   border: 1px solid var(--hair);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--float);
   color: var(--text);
   box-shadow: var(--shadow-float);

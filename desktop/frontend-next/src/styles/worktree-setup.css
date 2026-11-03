@@ -3,10 +3,10 @@
 .worktree-setup-context { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 24px }
 .worktree-setup-context > .studio-icon { color: var(--brand); width: 24px; height: 24px; flex-shrink: 0 }
 .worktree-setup-context strong { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-lead); font-weight: var(--w-med) }
-.worktree-setup-context > span { margin-left: auto; flex-shrink: 0; border-radius: 6px; padding: 3px 8px; background: var(--overlay); color: var(--muted); font-size: var(--fs-micro) }
+.worktree-setup-context > span { margin-left: auto; flex-shrink: 0; border-radius: var(--r-sm); padding: 3px 8px; background: var(--overlay); color: var(--muted); font-size: var(--fs-micro) }
 .worktree-setup h1 { margin: 0; font: var(--w-med) var(--fs-display)/1.3 var(--ui); letter-spacing: -.025em }
 .worktree-setup-description { margin: 10px 0 22px; color: var(--muted); font-size: var(--fs-ui); line-height: 1.7 }
-.worktree-setup-phase { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 13px 14px; border-radius: 9px; background: var(--brand-wash); color: var(--brand); font-size: var(--fs-ui) }
+.worktree-setup-phase { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 13px 14px; border-radius: var(--r-md); background: var(--brand-wash); color: var(--brand); font-size: var(--fs-ui) }
 .worktree-setup-phase > span:first-child { display: flex; align-items: center; gap: 10px; min-width: 0 }
 .worktree-setup-elapsed { white-space: nowrap; color: var(--muted); font-size: var(--fs-micro) }
 .worktree-setup-phase .studio-icon { width: 19px; height: 19px; flex-shrink: 0 }
@@ -27,9 +27,9 @@
 .worktree-setup-location { padding: 8px 0; border-bottom: 1px solid var(--hair) }
 .worktree-setup-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; bottom: 0; z-index: 1; padding: 16px 0 4px; background: var(--surface) }
 .worktree-setup-actions > div { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 9px }
-.worktree-setup-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 8px 14px; border-radius: 8px; font-size: var(--fs-ui) }
+.worktree-setup-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 8px 14px; border-radius: var(--r-sm); font-size: var(--fs-ui) }
 .worktree-setup-actions .studio-icon { width: 17px; height: 17px; flex-shrink: 0 }
-.worktree-setup-detail-button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 8px 0; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: var(--fs-meta); cursor: pointer }
+.worktree-setup-detail-button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 8px 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font: inherit; font-size: var(--fs-meta); cursor: pointer }
 .worktree-setup-detail-button:hover { color: var(--text) }
 .worktree-setup-handoff { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-size: var(--fs-meta) }
 .worktree-setup-slow { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-meta); line-height: 1.7 }
@@ -37,7 +37,7 @@
 .worktree-setup-details dd { font-family: var(--mono); font-size: var(--fs-micro) }
 .worktree-setup-details .copy { padding: 3px; flex-shrink: 0 }
 .worktree-setup-details .copy .studio-icon { width: 14px; height: 14px }
-.worktree-setup-details pre { padding: 12px; background: var(--raised); border-radius: 7px; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-micro)/1.7 var(--mono) }
+.worktree-setup-details pre { padding: 12px; background: var(--raised); border-radius: var(--r-sm); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-micro)/1.7 var(--mono) }
 .worktree-setup[data-phase="failed"] .worktree-setup-phase, .worktree-setup[data-phase="cleanup_failed"] .worktree-setup-phase { background: color-mix(in srgb, var(--err) 8%, transparent); color: var(--err) }
 .worktree-setup[data-phase="ready"] .worktree-setup-phase, .worktree-setup[data-phase="retained"] .worktree-setup-phase { background: color-mix(in srgb, var(--ok) 8%, transparent); color: var(--ok) }
 .worktree-setup[data-phase="cancelled"] .worktree-setup-phase { background: var(--raised); color: var(--muted) }

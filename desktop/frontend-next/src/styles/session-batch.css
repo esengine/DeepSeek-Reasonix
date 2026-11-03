@@ -1,9 +1,9 @@
 .session-batch button { font: var(--w-med) var(--fs-micro) var(--ui); }
-.session-batch { margin: 4px 12px 8px; padding: 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--page); }
+.session-batch { margin: 4px 12px 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--page); }
 .session-batch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: var(--fs-micro); }
-.session-batch-head button { flex: none; color: var(--muted); background: transparent; padding: 4px; border: 0; border-radius: 4px; cursor: pointer; }
+.session-batch-head button { flex: none; color: var(--muted); background: transparent; padding: 4px; border: 0; border-radius: var(--r-xs); cursor: pointer; }
 .session-batch-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-.session-batch-actions button { padding: 5px 7px; background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+.session-batch-actions button { padding: 5px 7px; background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-xs); }
 .session-batch-actions button:hover:not(:disabled) { background: var(--overlay); }
 .session-batch [data-action="session.batch-delete"] { color: var(--err-ink); }
 .session-batch p { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-micro); }

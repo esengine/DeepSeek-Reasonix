@@ -2,7 +2,7 @@
 
   * { scrollbar-width: thin; scrollbar-color: var(--border) transparent }
   ::-webkit-scrollbar { width: 10px; height: 10px }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9px; border: 3px solid transparent; background-clip: content-box }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--r-md); border: 3px solid transparent; background-clip: content-box }
   ::-webkit-scrollbar-track { background: transparent }
   body {
     margin: 0; padding: 0; background: var(--page); color: var(--text);
@@ -4673,7 +4673,7 @@
   }
   .pc-note-pop {
     position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; white-space: nowrap;
-    padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
     background: var(--raised); box-shadow: 0 12px 30px -16px #000;
     color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui);
     animation: pcin var(--t-card, .14s) var(--ease-out, ease-out) both;
@@ -4707,7 +4707,7 @@
     position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
     width: min(318px, calc(100vw - 24px)); max-height: calc(100dvh - var(--chrome-h, 45px) - 24px); overflow: auto;
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 11px; padding: 13px;
-    border: 1px solid var(--border); border-radius: 10px;
+    border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--raised); box-shadow: 0 20px 50px -20px #000;
     color: var(--faint); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); cursor: default; text-align: left;
     animation: pcin var(--t-card, .14s) var(--ease-out, ease-out) both;
@@ -4721,10 +4721,10 @@
   .phonecard > header b { color: var(--text); font: var(--w-semi) var(--fs-ui)/1.3 var(--ui) }
   .phonecard > header small { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.45 var(--ui) }
   .pc-code { display: grid; justify-items: center; gap: 7px; padding-top: 2px }
-  .pc-code[data-cloud] { padding: 10px 8px; border-radius: 8px; background: color-mix(in srgb, var(--net) 9%, transparent) }
+  .pc-code[data-cloud] { padding: 10px 8px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--net) 9%, transparent) }
   .pc-code img {
     width: 148px; height: 148px; padding: 8px; box-sizing: content-box;
-    border: 1px solid var(--hair); border-radius: 8px; background: #fff; image-rendering: pixelated;
+    border: 1px solid var(--hair); border-radius: var(--r-sm); background: #fff; image-rendering: pixelated;
   }
   .pc-when { color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui) }
   .pc-acts { display: flex; align-items: center; gap: 9px }
@@ -4749,7 +4749,7 @@
   .pc-hd small { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1 var(--mono) }
   .pc-dev {
     min-height: 24px; display: grid; grid-template-columns: 6px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
-    padding: 0 5px; border-radius: 5px;
+    padding: 0 5px; border-radius: var(--r-xs);
   }
   .pc-dev:hover { background: var(--overlay) }
   .pc-dev > i { width: 6px; height: 6px; border-radius: 50%; background: var(--ghost); opacity: .6 }

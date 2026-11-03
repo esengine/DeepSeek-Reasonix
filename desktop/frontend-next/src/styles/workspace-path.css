@@ -1,13 +1,13 @@
 .workspace-path { display: flex; align-items: flex-start; gap: 6px; min-width: 0; color: var(--muted); font: var(--fs-meta)/1.5 var(--ui) }
 .workspace-path details { flex: 1; min-width: 0 }
-.workspace-path summary { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 6px 4px; border-radius: 6px; list-style: none; cursor: pointer }
+.workspace-path summary { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 6px 4px; border-radius: var(--r-sm); list-style: none; cursor: pointer }
 .workspace-path summary::-webkit-details-marker { display: none }
 .workspace-path summary > span { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 .workspace-path summary > .studio-icon { width: 17px; height: 17px; flex-shrink: 0 }
 .workspace-path details[open] summary > .studio-icon:last-child { transform: rotate(180deg) }
 .workspace-path summary:hover { color: var(--text); background: var(--float-hi) }
 .workspace-path code { display: block; padding: 6px 4px 10px; overflow-wrap: anywhere; user-select: text; color: var(--text); font: var(--fs-micro)/1.7 var(--mono) }
-.workspace-path .workspace-path-copy { display: grid; place-items: center; width: 36px; min-width: 36px; height: 38px; margin: 0; padding: 6px; color: var(--muted); background: none; border: 0; border-radius: 6px; cursor: pointer }
+.workspace-path .workspace-path-copy { display: grid; place-items: center; width: 36px; min-width: 36px; height: 38px; margin: 0; padding: 6px; color: var(--muted); background: none; border: 0; border-radius: var(--r-sm); cursor: pointer }
 .workspace-path .workspace-path-copy:hover { color: var(--text); background: var(--float-hi) }
 .workspace-path .workspace-path-copy .studio-icon { width: 18px; height: 18px }
 .workspace-path :is(summary, button):focus-visible { outline: 2px solid var(--focus); outline-offset: -2px }
