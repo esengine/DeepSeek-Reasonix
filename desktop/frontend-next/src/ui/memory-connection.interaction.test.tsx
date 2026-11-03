@@ -30,7 +30,7 @@ function fixture(label: string, revision = 2, name = "shared-note") {
 }
 
 async function open(label: string) {
-  await userEvent.click(await screen.findByRole("button", { name: label }));
+  await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${label}`) }));
 }
 
 async function edit(label: string, body: string) {
@@ -40,7 +40,7 @@ async function edit(label: string, body: string) {
 }
 
 async function history(label: string, revision: number) {
-  await screen.findByRole("button", { name: label });
+  await screen.findByRole("button", { name: new RegExp(`^${label}`) });
   const name = `第 ${revision} 版，查看历史`;
   if (!screen.queryByRole("button", { name })) await open(label);
   await userEvent.click(screen.getByRole("button", { name }));
@@ -53,13 +53,13 @@ it.each(["success", "failure"])("ignores an old catalog %s after the new connect
   old.read.mockReturnValue(read.promise);
   const view = render(<Memory port={old.port} />);
   view.rerender(<Memory port={next.port} />);
-  await screen.findByRole("button", { name: "next" });
+  await screen.findByRole("button", { name: /^next/ });
   await act(async () => {
     if (outcome === "success") read.resolve(old.catalog);
     else read.reject(new Error("old read failed"));
   });
-  expect(screen.getByRole("button", { name: "next" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "old" })).toBeNull();
+  expect(screen.getByRole("button", { name: /^next/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^old/ })).toBeNull();
   expect(screen.queryByText("old read failed")).toBeNull();
   expect(document.querySelector(".recall")?.textContent).toContain("next query");
 });
@@ -77,18 +77,18 @@ it.each(["save", "forget", "restore"])("cannot route an old %s control to a pend
   else if (action === "restore") {
     await history("old", 2);
     await screen.findByText("old older body");
-  } else await screen.findByRole("button", { name: "忘记" });
+  } else await screen.findByRole("button", { name: "归档" });
   view.rerender(<Memory port={next.port} />);
-  const label = action === "save" ? "保存" : action === "restore" ? "恢复此版本" : "忘记";
+  const label = action === "save" ? "保存" : action === "restore" ? "恢复此版本" : "归档";
   const staleControl = screen.queryByRole("button", { name: label });
   if (staleControl) await userEvent.click(staleControl);
   expect(save).not.toHaveBeenCalled();
   expect(forget).not.toHaveBeenCalled();
   expect(restore).not.toHaveBeenCalled();
   expect(screen.getByText("正在读取记忆…")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "old" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^old/ })).toBeNull();
   await act(async () => read.resolve(next.catalog));
-  await screen.findByRole("button", { name: "next" });
+  await screen.findByRole("button", { name: /^next/ });
 });
 
 it("starts a fresh same-name editor after switching connections", async () => {
@@ -98,12 +98,12 @@ it("starts a fresh same-name editor after switching connections", async () => {
   const view = render(<Memory port={old.port} />);
   await edit("old", "old draft");
   view.rerender(<Memory port={next.port} />);
-  await screen.findByRole("button", { name: "next" });
+  await screen.findByRole("button", { name: /^next/ });
   expect(screen.queryByRole("textbox", { name: "正文" })).toBeNull();
   await edit("next", "next draft");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
   expect(save).toHaveBeenCalledExactlyOnceWith({ name: next.current.name, title: "next", description: "next description",
-    body: "next draft", activation: "relevant" });
+    body: "next draft", activation: "relevant", type: "project", galaxy: "", importance: 2 });
 });
 
 it("reads the new connection's history instead of restoring a cached same-name revision", async () => {
@@ -114,7 +114,7 @@ it("reads the new connection's history instead of restoring a cached same-name r
   await history("old", 2);
   await screen.findByText("old older body");
   view.rerender(<Memory port={next.port} />);
-  await screen.findByRole("button", { name: "next" });
+  await screen.findByRole("button", { name: /^next/ });
   expect(screen.queryByText("old older body")).toBeNull();
   await history("next", 7);
   await screen.findByText("next older body");
@@ -133,7 +133,7 @@ it.each(["success", "failure"])("ignores a history %s from the previous connecti
   const view = render(<Memory port={old.port} />);
   await history("old", 2);
   view.rerender(<Memory port={next.port} />);
-  await screen.findByRole("button", { name: "next" });
+  await screen.findByRole("button", { name: /^next/ });
   const expanded = screen.queryByRole("button", { name: "收起旧版本" });
   if (expanded) await userEvent.click(expanded);
   await history("next", 7);
@@ -156,14 +156,14 @@ it.each(["success", "failure"])("does not reuse a catalog from an earlier lifeti
   old.read.mockReturnValueOnce(read.promise).mockResolvedValue(returned);
   const view = render(<Memory port={old.port} />);
   view.rerender(<Memory port={next.port} />);
-  await screen.findByRole("button", { name: "next" });
+  await screen.findByRole("button", { name: /^next/ });
   view.rerender(<Memory port={old.port} />);
-  await screen.findByRole("button", { name: "returned" });
+  await screen.findByRole("button", { name: /^returned/ });
   await act(async () => {
     if (outcome === "success") read.resolve(old.catalog);
     else read.reject(new Error("earlier lifetime failed"));
   });
-  expect(screen.getByRole("button", { name: "returned" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^returned/ })).toBeTruthy();
   expect(screen.queryByText("earlier lifetime failed")).toBeNull();
   expect(old.read).toHaveBeenCalledTimes(2);
 });
@@ -180,7 +180,7 @@ it.each(["save", "restore", "forget"])("keeps an old %s completion out of the ne
   const view = render(<Memory port={old.port} />);
   if (action === "save") { await edit("old", "old submitted"); await userEvent.click(screen.getByRole("button", { name: "保存" })); }
   else if (action === "restore") { await history("old", 2); await screen.findByText("old older body"); await userEvent.click(screen.getByRole("button", { name: "恢复此版本" })); }
-  else await userEvent.click(await screen.findByRole("button", { name: "忘记" }));
+  else await userEvent.click(await screen.findByRole("button", { name: "归档" }));
   view.rerender(<Memory port={next.port} />);
   await edit("next", "next submitted");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -207,7 +207,7 @@ it.each(["save", "restore", "forget"])("keeps an old %s failure out of the new e
   const view = render(<Memory port={old.port} />);
   if (action === "save") { await edit("old", "old submitted"); await userEvent.click(screen.getByRole("button", { name: "保存" })); }
   else if (action === "restore") { await history("old", 2); await screen.findByText("old older body"); await userEvent.click(screen.getByRole("button", { name: "恢复此版本" })); }
-  else await userEvent.click(await screen.findByRole("button", { name: "忘记" }));
+  else await userEvent.click(await screen.findByRole("button", { name: "归档" }));
   view.rerender(<Memory port={next.port} />);
   await edit("next", "next draft");
   await act(async () => write.reject(new Error("old write failed")));
@@ -230,7 +230,8 @@ it("preserves a draft through ordinary renders and a refused save before retryin
   await act(async () => write.reject(new Error("save refused")));
   expect(screen.getByText("save refused")).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
-  const expected = { name: current.current.name, title: "current", description: "current description", body: "edited body", activation: "pinned" };
+  const expected = { name: current.current.name, title: "current", description: "current description", body: "edited body", activation: "pinned",
+    type: "project", galaxy: "", importance: 2 };
   expect(save.mock.calls).toEqual([[expected], [expected]]);
   expect(current.read).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole("textbox", { name: "正文" })).toBeNull();
@@ -261,7 +262,7 @@ it("keeps save, appended restore history and forgetting usable on one connection
   await userEvent.click(screen.getByRole("button", { name: `第 ${(original.revision ?? 1) + 1} 版，查看历史` }));
   await userEvent.click(await screen.findByRole("button", { name: "恢复此版本" }));
   expect((await port.memoryRevisions(original.name))[0]!.revision).toBe((original.revision ?? 1) + 2);
-  await userEvent.click(screen.getByRole("button", { name: "忘记" }));
+  await userEvent.click(screen.getByRole("button", { name: "归档" }));
   expect(await screen.findByText("暂无记录。")).toBeTruthy();
   expect(screen.getByText("/remember")).toBeTruthy();
 });
@@ -277,7 +278,7 @@ it("clears a refused read on a new connection and retries its own catalog", asyn
   await screen.findByText("next refusal");
   expect(screen.queryByText("old refusal")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "重试" }));
-  await screen.findByRole("button", { name: "next" });
+  await screen.findByRole("button", { name: /^next/ });
   expect(old.read).toHaveBeenCalledTimes(1);
   expect(next.read).toHaveBeenCalledTimes(2);
 });
@@ -296,8 +297,8 @@ it("resets the memory panel when Settings receives a new active connection", asy
   await edit("old", "old settings draft");
   view.rerender(draw(next.port));
   expect(screen.queryByRole("textbox", { name: "正文" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "old" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^old/ })).toBeNull();
   expect(screen.getByText("正在读取记忆…")).toBeTruthy();
   await act(async () => read.resolve(next.catalog));
-  expect(await screen.findByRole("button", { name: "next" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: /^next/ })).toBeTruthy();
 });

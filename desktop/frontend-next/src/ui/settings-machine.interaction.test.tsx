@@ -25,8 +25,8 @@ it("reads and forgets memory on this machine while a remote pane is active", asy
   const localForget = vi.spyOn(local, "forgetMemory").mockResolvedValue();
   const remoteForget = vi.spyOn(remote, "forgetMemory");
   render(settings(remote, local));
-  await screen.findByText("Local fact");
-  await userEvent.click(screen.getByRole("button", { name: "忘记" }));
+  await screen.findAllByText("Local fact");
+  await userEvent.click(document.querySelector<HTMLButtonElement>('.memdetail [data-action="memory.forget"]')!);
   expect(localForget).toHaveBeenCalledWith("local-fact");
   expect(remoteRead).not.toHaveBeenCalled();
   expect(remoteForget).not.toHaveBeenCalled();
@@ -59,10 +59,10 @@ it("keeps the current machine memory after an old owner's read settles late", as
   const oldForget = vi.spyOn(first, "forgetMemory");
   const view = render(settings(remote, first));
   view.rerender(settings(remote, current));
-  await screen.findByText("Current fact");
+  await screen.findAllByText("Current fact");
   await act(async () => finish({ memories: [{ name: "old", title: "Old fact", activation: "relevant" }], recallQuery: "" }));
   expect(screen.queryByText("Old fact")).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: "忘记" }));
+  await userEvent.click(document.querySelector<HTMLButtonElement>('.memdetail [data-action="memory.forget"]')!);
   expect(forget).toHaveBeenCalledWith("current");
   expect(oldForget).not.toHaveBeenCalled();
 });
@@ -75,6 +75,6 @@ it("reports a missing local owner and retries locally without falling back to th
   expect((await screen.findByRole("alert")).textContent).toContain("请先打开一个本机会话");
   read.mockResolvedValue({ memories: [], recallQuery: "" });
   await userEvent.click(screen.getByRole("button", { name: "重试" }));
-  await screen.findByText("暂无记录。");
+  await screen.findAllByText("暂无记录。");
   expect(remoteRead).not.toHaveBeenCalled();
 });

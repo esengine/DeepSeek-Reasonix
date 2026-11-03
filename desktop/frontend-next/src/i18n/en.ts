@@ -25,6 +25,7 @@ import { EN_BACKUP } from "./en_backup";
 import { EN_FEEDBACK } from "./en_feedback";
 import { EN_COMMUNITY } from "./en_community";
 import { EN_SPONSOR } from "./en_sponsor";
+import { EN_MEMORY } from "./en_memory";
 
 export const EN: Record<string, string> = {
   "检测中": "Checking",
@@ -90,6 +91,7 @@ export const EN: Record<string, string> = {
   ...EN_PERSONA,
   ...EN_COMMUNITY,
   ...EN_SPONSOR,
+  ...EN_MEMORY,
   ...EN_METRICS,
   ...EN_FIND,
   ...EN_STORAGE,
@@ -1211,15 +1213,11 @@ export const EN: Record<string, string> = {
 
   // ── 记忆 ─────────────────────────────────────────────────────────
   "暂无记录。": "No entries yet.",
-  "始终生效": "Always on",
   "相关时才会检索": "Recalled when relevant",
-  "仅在当前轮次相关时才会被检索": "Only surfaced when this turn looks like it needs them",
   "工作目录与「我的」中的技能。带 / 的可以由你直接调用，其余的由模型根据任务判断是否使用。关掉一个立刻生效：从你的下一条消息起模型不再拿到它，直接点名也调不动，不用新建会话。":
     "Skills from the working directory and from My skills. Those with a / you can invoke yourself; the rest the model decides on per task. Switching one off takes effect at once: from your next message the model no longer has it, and naming it yourself stops working too — no new session needed.",
   "模型自动发现已关闭：仅显式指定的技能会运行。开关立即生效，自下一条消息起，无需新建会话。":
     "Model discovery is off: only the skills you name by hand will run. The switch takes effect at once, from your next message — no new session needed.",
-  "每轮均写入提示词，等同于长期指令":
-    "In the prompt every turn — the same standing as an instruction you gave it yourself",
   "，命中 {n} 条": " · {n} of them used",
   "，未命中任何条目": " · none of them used",
   "上一轮已使用": "Used last turn",

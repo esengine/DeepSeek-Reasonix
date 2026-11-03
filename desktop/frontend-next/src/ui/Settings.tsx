@@ -743,7 +743,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {at === "memory" && (
             <Group id="memory"
               title={t("记忆")}
-              hint={t("agent 自动记录的内容：未经配置，但会据此执行。此处按触发时机分组，并标出上一轮实际使用的条目。")}
+              hint={t("agent 自动记录的内容：未经配置，但会据此执行。可以按类型和星系查找，刚记住的在「新的」里等你确认。")}
             >
               <Memory port={localPort} />
             </Group>

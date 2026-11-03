@@ -33,17 +33,25 @@ async function fixture(count = 1) {
   const facts = (await read()).memories.filter((m) => originals.some((o) => o.name === m.name));
   const revisions = vi.spyOn(port, "memoryRevisions");
   const view = render(<Memory port={port} />);
-  await screen.findByRole("button", { name: "fact-0" });
+  await screen.findByRole("button", { name: /^fact-0/ });
   return { port, originals, facts, catalog, revisions, view };
 }
 
+function item(index = 0) {
+  return document.querySelector<HTMLElement>(`.memrow[data-target="${names[index]}"]`)!;
+}
+
 function row(index = 0) {
-  return Array.from(document.querySelectorAll<HTMLElement>(".memrow"))
-    .find((el) => el.querySelector<HTMLButtonElement>('[data-action="memory.forget"]')?.dataset.target === names[index])!;
+  return document.querySelector<HTMLElement>(`.memdetail[data-target="${names[index]}"]`)!;
 }
 
 async function expand(index = 0) {
-  if (!row(index).querySelector(".peek")) await userEvent.click(row(index).querySelector<HTMLButtonElement>(".nm")!);
+  if (!row(index)) await userEvent.click(item(index).querySelector<HTMLButtonElement>(".nm")!);
+}
+
+async function forget(index = 0) {
+  await expand(index);
+  await userEvent.click(within(row(index)).getByRole("button", { name: "归档" }));
 }
 
 async function history(revision: number, index = 0) {
@@ -62,7 +70,7 @@ async function draft(body: string, index = 0) {
 async function save(body: string, index = 0) {
   await draft(body, index);
   await userEvent.click(within(row(index)).getByRole("button", { name: "保存" }));
-  await waitFor(() => expect(row(index).querySelector(".peek > pre")?.textContent).toBe(body));
+  await waitFor(() => expect(row(index).querySelector(".memdetail > pre")?.textContent).toBe(body));
 }
 
 function versions(index = 0) {
@@ -85,7 +93,7 @@ it("offers every retained intermediate save and restores the selected revision b
   await waitFor(() => expect(versions()).toEqual(["第 3 版", "第 2 版", "第 1 版"]));
   const write = vi.spyOn(port, "restoreMemory");
   await restore(3);
-  await waitFor(() => expect(row().querySelector(".peek > pre")?.textContent).toBe("revision three"));
+  await waitFor(() => expect(row().querySelector(".memdetail > pre")?.textContent).toBe("revision three"));
   expect(write).toHaveBeenCalledExactlyOnceWith(facts[0].name, 3);
   await history(5);
   await waitFor(() => expect(versions()).toEqual(["第 4 版", "第 3 版", "第 2 版", "第 1 版"]));
@@ -135,7 +143,7 @@ it.each(["success", "failure"])("ignores a superseded history %s after restoring
   await history(2);
   await waitFor(() => expect(versions()).toEqual(["第 1 版"]));
   await restore(1);
-  await waitFor(() => expect(row().querySelector(".peek > pre")?.textContent).toBe(oldList[1].body?.trim()));
+  await waitFor(() => expect(row().querySelector(".memdetail > pre")?.textContent).toBe(oldList[1].body?.trim()));
   await save("after restore");
   await history(4);
   await waitFor(() => expect(versions()).toEqual(["第 3 版", "第 2 版", "第 1 版"]));
@@ -159,9 +167,11 @@ it("preserves a refused save's draft and cache, then retries the exact edit", as
   expect(revisions).toHaveBeenCalledTimes(1);
   await draft("retry body");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
-  expect(write.mock.calls).toEqual([0, 1].map(() => [{ name: facts[0].name, title: "fact-0",
-    description: facts[0].description ?? "", body: "retry body", activation: facts[0].activation }]));
-  await waitFor(() => expect(row().querySelector(".peek > pre")?.textContent).toBe("retry body"));
+  expect(write.mock.calls).toHaveLength(2);
+  expect(write.mock.calls[1]).toEqual(write.mock.calls[0]);
+  expect(write.mock.calls[0][0]).toMatchObject({ name: facts[0].name, title: "fact-0",
+    description: facts[0].description ?? "", body: "retry body", activation: facts[0].activation });
+  await waitFor(() => expect(row().querySelector(".memdetail > pre")?.textContent).toBe("retry body"));
   await history(3);
   await waitFor(() => expect(versions()).toEqual(["第 2 版", "第 1 版"]));
   expect(revisions).toHaveBeenCalledTimes(2);
@@ -178,7 +188,7 @@ it("keeps history and the exact restore target after refusal", async () => {
   expect(revisions).toHaveBeenCalledTimes(1);
   await restore(1);
   expect(write.mock.calls).toEqual([[facts[0].name, 1], [facts[0].name, 1]]);
-  await waitFor(() => expect(row().querySelector(".peek > pre")?.textContent).not.toBe("fact-0 revision two"));
+  await waitFor(() => expect(row().querySelector(".memdetail > pre")?.textContent).not.toBe("fact-0 revision two"));
   await history(3);
   await waitFor(() => expect(versions()).toEqual(["第 2 版", "第 1 版"]));
 });
@@ -188,11 +198,11 @@ it("keeps a refused forget's cached history and retries the same fact", async ()
   await history(2);
   await waitFor(() => expect(versions()).toEqual(["第 1 版"]));
   const write = vi.spyOn(port, "forgetMemory").mockRejectedValueOnce(new Error("forget refused"));
-  await userEvent.click(within(row()).getByRole("button", { name: "忘记" }));
+  await forget();
   await screen.findByText("forget refused");
   expect(versions()).toEqual(["第 1 版"]);
   expect(revisions).toHaveBeenCalledTimes(1);
-  await userEvent.click(within(row()).getByRole("button", { name: "忘记" }));
+  await forget();
   expect(await screen.findByText("暂无记录。")).toBeTruthy();
   expect(write.mock.calls).toEqual([[facts[0].name], [facts[0].name]]);
 });
@@ -202,11 +212,11 @@ it("does not surface an obsolete history refusal after forgetting its fact", asy
   const old = pending<MemoryEntry[]>();
   revisions.mockReturnValueOnce(old.promise);
   await history(2);
-  await userEvent.click(within(row()).getByRole("button", { name: "忘记" }));
-  await waitFor(() => expect(screen.queryByRole("button", { name: "fact-0" })).toBeNull());
+  await forget();
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^fact-0/ })).toBeNull());
   await act(async () => old.reject(new Error("forgotten history refusal")));
   expect(screen.queryByText("forgotten history refusal")).toBeNull();
-  expect(screen.getByRole("button", { name: "fact-1" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^fact-1/ })).toBeTruthy();
 });
 
 it.each(["save", "restore", "forget"])("preserves another fact's in-flight history across %s", async (action) => {
@@ -231,7 +241,7 @@ it.each(["save", "restore", "forget"])("preserves another fact's in-flight histo
     revisions.mockReturnValueOnce(other.promise);
     await history(2, 1);
     if (action === "save") { await save("fact zero saved"); await expand(1); }
-    else await userEvent.click(within(row()).getByRole("button", { name: "忘记" }));
+    else await forget();
   }
   await act(async () => other.resolve(otherList));
   expect(versions(1)).toEqual(["第 1 版"]);
@@ -248,5 +258,5 @@ it("reuses unchanged history across rerenders, collapsing and a cancelled edit",
   await history(2);
   expect(versions()).toEqual(["第 1 版"]);
   expect(revisions).toHaveBeenCalledTimes(1);
-  expect(row().querySelector(".peek > pre")?.textContent).toBe("fact-0 revision two");
+  expect(row().querySelector(".memdetail > pre")?.textContent).toBe("fact-0 revision two");
 });

@@ -1,0 +1,91 @@
+.prefs-main[data-sec="memory"] .prefs-col { max-width: min(1120px, 100%) }
+.mem { container-type: inline-size }
+.mem .recall { margin: 0 0 14px; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--muted) }
+.mem > .why { margin-top: 10px; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--err-ink) }
+.mem .memi { flex: none }
+
+.memgrid {
+  display: grid; grid-template-columns: 148px minmax(0, 1fr) minmax(220px, 300px);
+  border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+}
+.mem[data-view="new"] .memgrid { grid-template-columns: 148px minmax(0, 1fr) }
+
+.memrail { display: flex; flex-direction: column; gap: 1px; padding: 10px 8px; border-right: 1px solid var(--hair); min-width: 0 }
+.memrail .sec { padding: 12px 10px 4px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
+.memrail .sec:empty { padding-top: 8px }
+.memnav {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 10px; border: 0; border-radius: var(--r-sm);
+  background: none; text-align: left; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--muted); cursor: pointer;
+}
+.memnav:hover { background: var(--overlay); color: var(--text) }
+.memnav[aria-pressed="true"] { background: var(--overlay); color: var(--text) }
+.memnav:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px }
+.memnav .lb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.memnav .c { flex: none; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); font-variant-numeric: tabular-nums }
+
+.memlist { padding: 10px; min-width: 0 }
+.memsearch {
+  display: flex; align-items: center; gap: 8px; margin: 0 4px 8px; padding: 5px 0; border-bottom: 1px solid var(--hair); color: var(--faint);
+}
+.memsearch input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--text) }
+.memsearch:focus-within { border-bottom-color: var(--focus) }
+.memlist .empty { padding: 18px 12px; border: 0; color: var(--faint) }
+.memlist .more { margin: 8px 12px 2px }
+
+.memrow { display: flex; align-items: center; gap: 8px; padding-right: 8px; border-radius: var(--r-sm) }
+.memrow:hover { background: color-mix(in srgb, var(--overlay) 60%, transparent) }
+.memrow[aria-current="true"] { background: var(--overlay) }
+.memrow .nm {
+  flex: 1; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+  border: 0; background: none; text-align: left; overflow-wrap: anywhere; color: var(--text); cursor: pointer;
+}
+.memrow .nm:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--r-sm) }
+.memrow .txt { flex: 1; min-width: 0 }
+.memrow .ti { font: var(--w-reg) calc(14px * var(--fs-scale, 1)) var(--ui); color: var(--text) }
+.memrow .badge {
+  margin-left: 8px; padding: 0 7px; border-radius: var(--r-pill); background: var(--accent-wash);
+  font: var(--w-reg) var(--fs-micro) var(--ui); color: var(--text); white-space: nowrap;
+}
+.memrow .gx { display: block; margin-top: 1px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
+.memrow[data-dim] .nm, .memrow[data-dim] .ti { color: var(--faint) }
+.memrow .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--net) }
+.memrow .st { flex: none; display: flex; color: var(--muted) }
+.memrow .quick { flex: none; display: flex; gap: 6px }
+.memrow .act, .memrow .memchip { flex: none; white-space: nowrap }
+.memrow .memchip {
+  display: flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: none; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--muted); cursor: pointer;
+}
+.memrow .memchip:hover:not(:disabled) { color: var(--text); border-color: var(--muted) }
+
+.memdetail { padding: 14px 16px; border-left: 1px solid var(--hair); min-width: 0 }
+.memdetail > .ti { display: flex; gap: 10px; align-items: flex-start; font: var(--w-semi) var(--fs-lead)/1.45 var(--ui); color: var(--text); overflow-wrap: anywhere }
+.memdetail > .ti .memi { margin-top: 3px }
+.memdetail > .ds { margin: 8px 0 0 28px; font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--muted) }
+.memdetail .why-used { margin: 6px 0 0 28px; font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); color: var(--net) }
+.memdetail .stale { margin: 6px 0 0 28px; font: var(--w-med) var(--fs-meta) var(--ui); color: var(--warn-ink) }
+.memdetail .facts { margin: 12px 0 0; padding: 0 }
+.memdetail .facts > div { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-top: 1px solid var(--hair); font-size: var(--fs-ui) }
+.memdetail .facts dt { flex: none; display: flex; align-items: center; gap: 10px; width: 84px; color: var(--faint) }
+.memdetail .facts dd { flex: 1; min-width: 0; margin: 0; color: var(--text); overflow-wrap: anywhere }
+.memdetail > pre {
+  margin: 10px 0 0; padding: 9px 11px; border-radius: var(--r-sm); background: var(--overlay); max-height: 220px; overflow: auto;
+  font: var(--w-reg) var(--fs-meta)/1.7 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word;
+}
+.memdetail > .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px }
+.memdetail > .row .act { display: flex; align-items: center; gap: 5px; white-space: nowrap }
+.memdetail .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
+.memdetail .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost) }
+.memdetail > .row.sub { margin-top: 8px; gap: 10px }
+.memdetail .path { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost); word-break: break-all }
+.memedit .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px }
+.memedit .pair > label { min-width: 0 }
+.memedit .pair :is(input, select) { width: 100%; min-width: 0; box-sizing: border-box }
+
+@container (max-width: 620px) {
+  .memgrid, .mem[data-view="new"] .memgrid { grid-template-columns: minmax(0, 1fr) }
+  .memrail { flex-direction: row; flex-wrap: wrap; gap: 4px; border-right: 0; border-bottom: 1px solid var(--hair) }
+  .memrail .sec { display: none }
+  .memnav { width: auto }
+  .memdetail { border-left: 0; border-top: 1px solid var(--hair) }
+}

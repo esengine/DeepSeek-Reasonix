@@ -666,8 +666,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "当前安装的版本、可用更新，以及出现问题时如何回退。更新下载好后由你决定何时重启；回退后会固定在所选版本，不再提示新版本。":
     "The installed version, available updates, and how to go back if something breaks. A downloaded update waits for you to choose when to restart; after a rollback the chosen version is pinned and newer ones stop being offered.",
   "记忆": "Memory",
-  "agent 自动记录的内容：未经配置，但会据此执行。此处按触发时机分组，并标出上一轮实际使用的条目。":
-    "What the agent recorded on its own: you never configured it, but it acts on it. Grouped here by when each entry is recalled, with the ones actually used last turn marked.",
   "本版本尚未提供": "Not in this version yet",
   "以下项目尚未提供设置界面，此处仅说明它们当前的位置。": "The items below have no settings screen yet; this only states where they currently live.",
   "旧版桌面端": "Previous desktop app",

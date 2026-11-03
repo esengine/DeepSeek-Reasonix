@@ -3580,46 +3580,6 @@
 
   .probe .adv { flex-basis: 100%; margin-left: 91px; margin-top: 4px; font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); color: var(--muted) }
 
-  .mem .recall { margin: 0 0 14px; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--muted) }
-  .memgrp { margin-bottom: 22px }
-  .memgrp:last-of-type { margin-bottom: 0 }
-  .memgrp .hd { display: flex; align-items: baseline; gap: 9px }
-  .memgrp .hd .lb { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
-  .memgrp .hd .c { font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--ghost) }
-  .memgrp > .ds { margin: 3px 0 8px; font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); color: var(--faint) }
-
-  .memrow { border-top: 1px solid var(--hair) }
-  .memrow:last-of-type { border-bottom: 1px solid var(--hair) }
-  .memrow .line { display: flex; align-items: baseline; gap: 9px; padding: 8px 12px }
-  .memrow .dot {
-    flex: none; width: 5px; height: 5px; align-self: center; border-radius: 50%;
-    background: transparent; box-shadow: inset 0 0 0 1px var(--hair);
-  }
-  .memrow[data-used] .dot { background: var(--net); box-shadow: none }
-  .memrow .nm {
-    flex: 0 1 auto; min-width: 168px; max-width: 60%; padding: 0; border: 0; background: none; text-align: left;
-    overflow-wrap: anywhere;
-    font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--text); cursor: pointer;
-  }
-  .memrow .nm:hover { text-decoration: underline }
-  .memrow .nm:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs) }
-  .memrow .line > .ds { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--muted) }
-  .memrow .stale {
-    flex: none; padding: 1px 5px; border-radius: var(--r-pill); font: var(--w-med) var(--fs-micro) var(--ui); font-style: normal;
-    color: var(--warn-ink); background: color-mix(in srgb, var(--warn) 14%, transparent);
-  }
-  .memrow .act { flex: none; white-space: nowrap }
-  .memrow .sc { flex: none; min-width: 30px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
-  .memrow .at { flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--ghost); font-variant-numeric: tabular-nums }
-  .memrow .why-used { margin: -2px 0 8px 26px; font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); color: var(--net) }
-  .memrow .peek { margin: 0 12px 10px 26px }
-  .memrow .peek pre {
-    margin: 0; padding: 9px 11px; border-radius: var(--r-sm); background: var(--overlay);
-    font: var(--w-reg) var(--fs-meta)/1.7 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word;
-  }
-  .memrow .peek .path { display: block; margin-top: 5px; font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost); word-break: break-all }
-  .mem > .why { margin-top: 10px; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--err-ink) }
 
   .memhist { margin: 7px 0 0 12px; padding-left: 10px; border-left: 1px solid var(--hair);
     display: flex; flex-direction: column; gap: 8px }
@@ -5523,9 +5483,7 @@
 .memedit input:focus-visible, .memedit textarea:focus-visible, .memedit select:focus-visible {
   border-color: var(--focus); box-shadow: 0 0 0 2px color-mix(in oklab, var(--focus) 26%, transparent);
 }
-.memedit .when { max-width: 220px }
-.memedit .row, .memedit .peek .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
-.memedit .peek .row { margin-top: 8px }
+.memedit .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
 .memedit .hint { color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui) }
 
 .dif-act {

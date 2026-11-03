@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 const CSS = Object.values(
-  import.meta.glob("./app.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>,
+  import.meta.glob("./memory.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>,
 )[0];
 
 function declarations(selector: string): string {
@@ -21,6 +21,6 @@ describe("a memory row stays inside its container", () => {
   });
 
   it("keeps the trailing controls whole", () => {
-    expect(declarations(".memrow .act")).toMatch(/white-space:\s*nowrap/);
+    expect(declarations(".memrow .act, .memrow .memchip")).toMatch(/white-space:\s*nowrap/);
   });
 });

@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Memory } from "./Memory";
+import { typeOf } from "./MemoryDetail";
 import { MockPort } from "../port/mock";
 import type { AgentPort, MemoryEdit, MemoryEntry } from "../port/port";
 
@@ -30,13 +31,15 @@ async function fixture() {
   });
   const facts = (await read()).memories.filter((m) => originals.some((o) => o.name === m.name));
   const view = render(<Memory port={port} />);
-  await screen.findByRole("button", { name: "fact-0" });
+  await screen.findByRole("button", { name: /^fact-0/ });
   return { port, facts, view };
 }
 
 function row(fact: MemoryEntry) {
-  return Array.from(document.querySelectorAll<HTMLButtonElement>('[data-action="memory.forget"]'))
-    .find((button) => button.dataset.target === fact.name)!.closest<HTMLElement>(".memrow")!;
+  const shown = document.querySelector<HTMLElement>(`.memdetail[data-target="${fact.name}"]`);
+  if (shown) return shown;
+  fireEvent.click(document.querySelector<HTMLButtonElement>(`.memrow[data-target="${fact.name}"] .nm`)!);
+  return document.querySelector<HTMLElement>(`.memdetail[data-target="${fact.name}"]`)!;
 }
 
 function control(fact: MemoryEntry, action: "save" | "restore" | "forget") {
@@ -44,7 +47,7 @@ function control(fact: MemoryEntry, action: "save" | "restore" | "forget") {
 }
 
 async function open(fact: MemoryEntry) {
-  if (!row(fact).querySelector(".peek")) await userEvent.click(row(fact).querySelector<HTMLButtonElement>(".nm")!);
+  row(fact);
 }
 
 async function draft(fact: MemoryEntry, body: string) {
@@ -63,7 +66,7 @@ function body(fact: MemoryEntry) {
 
 function edit(fact: MemoryEntry, value: string): MemoryEdit {
   return { name: fact.name, title: fact.title ?? "", description: fact.description ?? "",
-    body: value, activation: fact.activation };
+    body: value, activation: fact.activation, type: typeOf(fact), galaxy: fact.galaxy ?? "", importance: fact.importance ?? 2 };
 }
 
 function hold(port: AgentPort, action: "save" | "restore" | "forget", name: string) {
@@ -123,7 +126,7 @@ it("retains edits made during a save, then submits the latest exact payload", as
   expect(within(row(a)).getByRole<HTMLSelectElement>("combobox", { name: "生效时机" }).value).toBe(activation);
   expect(control(a, "save").disabled).toBe(false);
   await userEvent.click(control(a, "save"));
-  await waitFor(() => expect(row(a).querySelector(".peek > pre")?.textContent).toBe("still writing"));
+  await waitFor(() => expect(row(a).querySelector(".memdetail > pre")?.textContent).toBe("still writing"));
   expect(vi.mocked(port.saveMemory).mock.calls).toEqual([[edit(a, "submitted")], [{ ...edit(a, "still writing"), activation }]]);
   const current = (await port.memories()).memories.find((m) => m.name === a.name)!;
   expect(current.body).toBe("still writing");
@@ -140,7 +143,7 @@ it("retains another fact's draft when an earlier save completes", async () => {
   expect(control(b, "save").disabled).toBe(false);
   expect(vi.mocked(port.saveMemory).mock.calls).toEqual([[edit(a, "submitted")]]);
   await userEvent.click(control(b, "save"));
-  await waitFor(() => expect(row(b).querySelector(".peek > pre")?.textContent).toBe("other draft"));
+  await waitFor(() => expect(row(b).querySelector(".memdetail > pre")?.textContent).toBe("other draft"));
   expect(vi.mocked(port.saveMemory).mock.calls).toEqual([[edit(a, "submitted")], [edit(b, "other draft")]]);
 });
 
@@ -163,7 +166,7 @@ it("closes an unchanged submitted draft after an ordinary rerender and save", as
   view.rerender(<Memory port={port} />);
   await act(async () => gate.resolve());
   expect(within(row(a)).queryByRole("textbox", { name: "正文" })).toBeNull();
-  expect(row(a).querySelector(".peek > pre")?.textContent).toBe("submitted");
+  expect(row(a).querySelector(".memdetail > pre")?.textContent).toBe("submitted");
   expect(control(a, "forget").disabled).toBe(false);
 });
 
@@ -174,7 +177,7 @@ it("keeps a cancelled editor closed when its pending save settles", async () => 
   await userEvent.click(within(row(a)).getByRole("button", { name: "取消" }));
   await act(async () => gate.resolve());
   expect(within(row(a)).queryByRole("textbox", { name: "正文" })).toBeNull();
-  expect(row(a).querySelector(".peek > pre")?.textContent).toBe("submitted");
+  expect(row(a).querySelector(".memdetail > pre")?.textContent).toBe("submitted");
 });
 
 it("keeps a refused draft editable and retries its exact payload", async () => {
@@ -187,7 +190,7 @@ it("keeps a refused draft editable and retries its exact payload", async () => {
   expect(body(a)).toBe("submitted");
   expect(control(a, "save").disabled).toBe(false);
   await userEvent.click(control(a, "save"));
-  await waitFor(() => expect(row(a).querySelector(".peek > pre")?.textContent).toBe("submitted"));
+  await waitFor(() => expect(row(a).querySelector(".memdetail > pre")?.textContent).toBe("submitted"));
   expect(write.mock.calls).toEqual([[edit(a, "submitted")], [edit(a, "submitted")]]);
 });
 
@@ -218,7 +221,7 @@ it.each(["save", "restore", "forget"] as const)("keeps the second save pending a
   await userEvent.click(control(b, "save"));
   expect(vi.mocked(port.saveMemory).mock.calls.filter(([value]) => value.name === b.name)).toHaveLength(1);
   await act(async () => second.resolve());
-  expect(row(b).querySelector(".peek > pre")?.textContent).toBe("second submitted");
+  expect(row(b).querySelector(".memdetail > pre")?.textContent).toBe("second submitted");
   expect(control(b, "forget").disabled).toBe(false);
 });
 
@@ -235,7 +238,7 @@ it.each(["save", "restore", "forget"] as const)("keeps the second save pending a
   expect(control(b, "forget").disabled).toBe(true);
   expect(control(a, "forget").disabled).toBe(false);
   await act(async () => second.resolve());
-  expect(row(b).querySelector(".peek > pre")?.textContent).toBe("second submitted");
+  expect(row(b).querySelector(".memdetail > pre")?.textContent).toBe("second submitted");
 });
 
 it.each(["save", "restore", "forget"] as const)("keeps the first save pending when a later %s completes first", async (action) => {
