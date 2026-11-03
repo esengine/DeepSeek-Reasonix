@@ -49,13 +49,11 @@ describe("what the composer shows when nothing is unusual", () => {
     await waitFor(() => expect(document.querySelector('[data-action="model.select"]')).toBeTruthy());
   });
 
-  // Effort is a model capability in the prototype, so the two controls share
-  // one group instead of being separated by an unrelated toolbar divider.
-  it("keeps model and effort in one capability group", () => {
+  it("keeps model and effort in one button", () => {
     const { container } = draw();
     const group = container.querySelector(".studio-model-group");
-    expect(group?.querySelector(".model-picker")).toBeTruthy();
-    expect(group?.querySelector(".studio-effort-picker")).toBeTruthy();
+    expect(group?.querySelector(".model-picker .studio-effort-reading")).toBeTruthy();
+    expect(group?.querySelectorAll("button.mode")).toHaveLength(1);
     expect(container.querySelectorAll(".turntools > .sep")).toHaveLength(0);
   });
 
@@ -69,7 +67,7 @@ describe("what the composer shows when nothing is unusual", () => {
 describe("every deviation is visible", () => {
   it.each([
 
-    ["effort", status({ effort: "high" }), /High/],
+    ["effort", status({ effort: "high" }), /深入/],
     ["approval", status({ toolApprovalMode: "auto" as ApprovalMode }), /自动批准/],
     ["a stricter approval", status({ toolApprovalMode: "dontAsk" as ApprovalMode }), /不询问/],
   ])("surfaces %s", (_what, st, want) => {
@@ -87,7 +85,7 @@ describe("every deviation is visible", () => {
     const { container } = draw(
       status({ effort: "high", toolApprovalMode: "yolo" as ApprovalMode, plan: true }),
     );
-    for (const want of [/High/, /全部放行/, /计划/]) expect(container.textContent).toMatch(want);
+    for (const want of [/深入/, /全部放行/, /计划/]) expect(container.textContent).toMatch(want);
   });
 });
 

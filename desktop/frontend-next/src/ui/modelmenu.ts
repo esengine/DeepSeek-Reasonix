@@ -9,10 +9,11 @@ import { orderAccounts } from "../state/providerorder";
 import { modelHealthStatus, type ModelHealth } from "./modelhealth";
 
 // modelTooltip names the active model with the picker's canonical account label.
-export function modelTooltip(models: ModelEntry[], current: string | undefined, label: string): string {
+export function modelTooltip(models: ModelEntry[], current: string | undefined, label: string, effort?: string): string {
   const account = groupVendors(models).find((a) =>
     a.kinds.some((kind) => a.byKind[kind].some((model) => model.ref === current)));
-  return account ? `${account.label} / ${label}` : current ?? label;
+  const named = account ? `${account.label} / ${label}` : current ?? label;
+  return effort ? `${named} · ${effort}` : named;
 }
 
 // modelLabel is how the composer names the session's model: the alias, else the

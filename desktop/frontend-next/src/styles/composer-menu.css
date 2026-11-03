@@ -68,3 +68,14 @@
 @container conversation (max-width: 470px) {
   :root .composer-menu.polmenu { left: 0; right: 0; width: auto; max-width: none; }
 }
+:root .composer-menu.has-aside { --choice-width: 700px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 340px); align-content: start; }
+:root .composer-menu.has-aside > :not(.menu-aside) { grid-column: 1; }
+:root .composer-menu.has-aside > .menu-aside { grid-column: 2; grid-row: 1 / span 400; width: auto; max-width: none; margin: -8px -8px -8px 8px; padding: 8px; border-left: 1px solid var(--hair); }
+.menu-aside .mi.head:first-child { border-bottom: 0; }
+@media (max-width: 720px) {
+  :root .composer-menu.has-aside { grid-template-columns: minmax(0, 1fr); }
+  :root .composer-menu.has-aside > .menu-aside { grid-column: 1; grid-row: auto; margin: 8px -8px -8px; border-left: 0; border-top: 1px solid var(--hair); }
+}
+.studio-model-sep { flex: none; width: 1px; height: 12px; margin-inline: 2px; background: var(--border); }
+.studio-effort-reading { flex: none; color: var(--muted); white-space: nowrap; }
+.model-picker .nm { min-width: 0; }

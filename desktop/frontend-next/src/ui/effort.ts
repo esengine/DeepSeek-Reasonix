@@ -37,6 +37,12 @@ const EFFORT_LABELS: Record<string, string> = {
   auto: "自动", disabled: "关闭", none: "不思考", minimal: "最轻量", low: "快速", medium: "平衡", high: "深入", xhigh: "超深入", max: "极致",
 };
 
+export function effortShort(value?: string, modes?: ModelMode[]): string {
+  const id = (value || "auto").toLowerCase();
+  const on = modes?.find((m) => m.active);
+  return `${t(EFFORT_LABELS[id] ?? id)}${on ? ` · ${modeLabel(on)}` : ""}`;
+}
+
 export function effortReading(value?: string, modes?: ModelMode[]): string {
   const id = (value || "auto").toLowerCase();
   const label = EFFORT_LABELS[id] ?? id;

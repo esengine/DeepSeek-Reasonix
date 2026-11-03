@@ -5,12 +5,6 @@
   .studio-model-control { flex: 0 1 auto; min-width: 0; }
   .studio-model-control .model-picker .nm { max-width: none; }
 }
-@container conversation (max-width: 360px) {
-  .studio-effort-control { flex: 0 1 auto; }
-  .studio-effort-control > .picker { min-width: 0; max-width: 100%; }
-  .studio-effort-picker { min-width: 0; max-width: 100%; }
-  .studio-effort-picker > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-}
 .chrome .r-fold { display: contents; }
 .chrome .crumb-context { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .chrome .crumb-context .isolab { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -19,7 +13,6 @@
 [data-fold~="bar"] .tab { flex: 0 1 auto; min-width: 0; padding-inline: 6px; overflow: hidden; text-overflow: ellipsis; }
 @container conversation (max-width: 280px) {
   .turntools { flex-wrap: wrap; }
-  .studio-effort-picker::before { display: none; }
   .studio-model-group { flex-basis: 100%; flex-wrap: wrap; }
 }
 @container conversation (max-width: 200px) { .studio-meterrail .studio-meter-cache { display: none; } }

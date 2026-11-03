@@ -13,7 +13,8 @@ import { Policy } from "./Policy";
 import { chosenGroups, groupHeadings, modelLabel, modelMenu, modelTooltip, narrowToGroups } from "./modelmenu";
 import { ModelGroupChips } from "./ModelGroupChips";
 import { useModelHealth } from "./modelhealth";
-import { effortMenu, effortReading, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
+import { effortMenu, effortReading, effortShort, effortsFor, forcesThinkingFor, routeEffortPick } from "./effort";
+import { EffortColumn } from "./EffortColumn";
 import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
@@ -708,7 +709,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
             className="mode model-picker"
             data-action="model.select"
             place="bottom"
-            title={modelTooltip(models, status?.modelRef, modelLb)}
+            align="end"
+            title={modelTooltip(models, status?.modelRef, modelLb, status && declared ? effortReading(status.effort, status.modes) : undefined)}
             current={status?.modelRef}
             items={narrowToGroups(menuItems, chosenModelGroups)}
             head={<ModelGroupChips headings={groupHeadings(menuItems)} chosen={chosenModelGroups} onChange={writeModelFilter} />}
@@ -716,34 +718,27 @@ export function Composer({ port, status, running, queued = false, quote, restore
             searchAlways
             searchPlaceholder={t("搜索模型或服务商…")}
             menuTitle={<><b>{t("选择模型")}</b><small>{t("用于后续任务")}</small></>}
-            onOpen={() => { void modelHealth.check(loadModels()); }}
-            pending={busy["model"]}
+            onOpen={() => { void modelHealth.check(loadModels()); loadModels(); }}
+            pending={busy["model"] || busy["effort"] || busy["mode"]}
+            asideClassName="studio-effort-menu"
+            stayOpen={(ref) => ref !== "__manage-models"}
             onPick={(ref) => ref === "__manage-models" ? onSettings("providers") : change("model", () => port.setModel(ref))}
-            label={<><span className="nm">{modelLb}</span><StudioIcon name="down" /></>}
-          />
-          {/* 推理强度属于模型能力，因此与模型共用一组轮廓。 */}
-          {status && (
-            <div className="studio-effort-control">
-              <Picker
-                className="mode studio-effort-picker"
-                data-action="reasoning.effort"
-                place="bottom"
-                align="end"
-                menuClassName="studio-effort-menu composer-menu"
-                onOpen={loadModels}
-                title={t("推理强度")}
-                current={declared ? status.effort || "auto" : ""}
-                pending={busy["effort"] || busy["mode"]}
+            aside={status ? (close) => (
+              <EffortColumn
                 items={effortMenu(efforts, modelLb, "__effort-declare", status.modes, forcedThinking)}
-                onPick={(value) => routeEffortPick(value, status.modes, {
-                  declare: () => onSettings("providers:effort-declare"),
-                  effort: (level) => change("effort", () => port.setEffort(level)),
-                  mode: (mode) => change("mode", () => port.setModelMode(mode)),
-                })}
-                label={<><span>{declared ? effortReading(status.effort, status.modes) : t("未声明")}</span><StudioIcon name="down" /></>}
+                current={declared ? status.effort || "auto" : ""}
+                onPick={(value) => {
+                  close();
+                  routeEffortPick(value, status.modes, {
+                    declare: () => onSettings("providers:effort-declare"),
+                    effort: (level) => change("effort", () => port.setEffort(level)),
+                    mode: (mode) => change("mode", () => port.setModelMode(mode)),
+                  });
+                }}
               />
-            </div>
-          )}
+            ) : undefined}
+            label={<><span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading">{declared ? effortShort(status.effort, status.modes) : t("未声明")}</span></>}<StudioIcon name="down" /></>}
+          />
         </div>
         </div>
         <span className="go">

@@ -820,7 +820,7 @@ it("keeps every segment after the provider in a namespaced model id", async () =
 describe("the effort ladder follows the source", () => {
   const relay = (efforts?: string[]): ModelEntry[] => [{ ref: "relay/model-x", provider: "relay", model: "model-x", efforts }];
   const onRelay = status({ modelRef: "relay/model-x" });
-  const trigger = (c: HTMLElement) => c.querySelector(".studio-effort-picker") as HTMLElement;
+  const trigger = (c: HTMLElement) => c.querySelector(".model-picker") as HTMLElement;
 
   it("re-reads the ladder when settings report a change", async () => {
     const port = new MockPort();
@@ -853,8 +853,8 @@ describe("a model mode switch", () => {
   const open = async (st: SessionStatus, port = new MockPort()) => {
     vi.spyOn(port, "models").mockResolvedValue(gpt);
     const view = draw({ port, st });
-    await waitFor(() => expect(view.container.querySelector(".studio-effort-picker")?.textContent).not.toContain("未声明"));
-    fireEvent.click(view.container.querySelector(".studio-effort-picker") as HTMLElement);
+    await waitFor(() => expect(view.container.querySelector(".model-picker")?.textContent).not.toContain("未声明"));
+    fireEvent.click(view.container.querySelector(".model-picker") as HTMLElement);
     return { ...view, port };
   };
 
@@ -879,7 +879,7 @@ describe("a model mode switch", () => {
     const port = new MockPort();
     const set = vi.spyOn(port, "setModelMode");
     const { container } = await open(status({ modelRef: "openai/gpt-5.6-sol", modes: pro(true) }), port);
-    expect(container.querySelector(".studio-effort-picker")?.textContent).toContain("Pro 模式");
+    expect(container.querySelector(".model-picker")?.textContent).toContain("Pro 模式");
     const row = screen.getByRole("menuitemcheckbox");
     expect(row.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(row);

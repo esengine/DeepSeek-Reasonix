@@ -77,13 +77,16 @@ interface Props {
   // Drawn under the field and above the rows: whatever the caller offers for
   // narrowing the list, owned by the caller so its inputs stay its own.
   head?: ReactNode;
+  aside?: (close: () => void) => ReactNode;
+  asideClassName?: string;
+  stayOpen?: (value: string) => boolean;
 }
 
 // data-* rides through to the item that raises the pick, the way Switch and Seg
 // carry theirs: the action's identity is written at the call site, and the
 // answer this menu gives is the item's own value.
 export function Picker({
-  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, ariaLabel, ariaDescribedBy, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, head, ...id
+  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, ariaLabel, ariaDescribedBy, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, head, aside, asideClassName, stayOpen, ...id
 }: Props & { [K in `data-${string}`]?: string | ((value: string) => string) }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -169,11 +172,24 @@ export function Picker({
       find.current?.focus();
       return;
     }
+    const rowsOf = (inAside: boolean) => [...(menu.current?.querySelectorAll<HTMLElement>("button.mi:not(:disabled)") ?? [])]
+      .filter((el) => !!el.closest(".menu-aside") === inAside);
+    const here = document.activeElement as HTMLElement | null;
+    const inAside = !!here?.closest(".menu-aside");
+    if (aside && (e.key === "ArrowRight" || e.key === "ArrowLeft") && here !== find.current) {
+      const toAside = e.key === "ArrowRight";
+      if (toAside === inAside) return;
+      const column = rowsOf(toAside);
+      const target = column.find((el) => el.hasAttribute("data-on")) ?? column[0];
+      if (!target) return;
+      e.preventDefault();
+      target.focus();
+      return;
+    }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const all = [...(menu.current?.querySelectorAll<HTMLElement>("button.mi:not(:disabled)") ?? [])];
+    const all = rowsOf(inAside);
     if (!all.length) return;
-    const i = all.indexOf(document.activeElement as HTMLElement);
-    // From the field, Down enters the list at the row Enter would have taken.
+    const i = all.indexOf(here as HTMLElement);
     if (i < 0) {
       if (e.key !== "ArrowDown") return;
       e.preventDefault();
@@ -181,7 +197,7 @@ export function Picker({
       return;
     }
     const to = e.key === "ArrowDown" ? i + 1 : i - 1;
-    if (to < 0 && filtering) {
+    if (to < 0 && filtering && !inAside) {
       e.preventDefault();
       find.current?.focus();
       return;
@@ -197,9 +213,17 @@ export function Picker({
   // of the page, so choosing costs a keyboard user their place and cancelling
   // does not.
   const take = (value: string) => {
+    if (stayOpen?.(value)) {
+      onPick(value);
+      return;
+    }
     setOpen(false);
     btn.current?.focus();
     onPick(value);
+  };
+  const closeMenu = () => {
+    setOpen(false);
+    btn.current?.focus();
   };
 
   return (
@@ -225,7 +249,7 @@ export function Picker({
       {createPortal(
         <div
           ref={menu}
-          className={[place === "top" ? "menu portmenu pm-down" : "menu portmenu pm-up", menuClassName].filter(Boolean).join(" ")}
+          className={[place === "top" ? "menu portmenu pm-down" : "menu portmenu pm-up", aside ? "has-aside" : "", menuClassName].filter(Boolean).join(" ")}
           role="menu"
           hidden={!open}
           onKeyDown={arrows}
@@ -259,51 +283,64 @@ export function Picker({
                   {it.right && <span className="rt">{it.right}</span>}
                 </div>
               ) : (
-                <button
-                  {...id}
-                  data-action={typeof id["data-action"] === "function" ? id["data-action"](it.value) : id["data-action"]}
-                  data-value={it.value}
-                  className={it.plain ? "mi plain" : "mi"}
-                  role={it.toggle === undefined ? "menuitem" : "menuitemcheckbox"}
-                  aria-checked={it.toggle}
-                  aria-current={it.value === current ? true : undefined}
-                  aria-description={it.status?.detail}
-                  title={it.status?.detail}
-                  disabled={it.disabled}
-                  data-on={it.value === current ? "" : undefined}
-                  data-lead={it.value === lead ? "" : undefined}
-                  data-strength={it.strength}
-                  data-recommended={it.recommended ? "" : undefined}
-                  onClick={() => take(it.value)}
-                >
-                  {it.mono || hasVendorMark(it.mark) ? <Lead it={it} /> : <span className="dot" />}
-                  <span className="tx">
-                    <span className="studio-item-line">
-                      <span className="lb">{it.label}</span>
-                      {it.meta && <span className="studio-item-meta">{it.meta}</span>}
-                      {it.badge && <span className="studio-item-badge">{it.badge}</span>}
-                    </span>
-                    {it.desc && <span className="ds">{it.desc}</span>}
-                  </span>
-                  {it.strength != null && (
-                    <span className="studio-effort-strength" aria-hidden="true">
-                      {[1, 2, 3, 4].map((level) => <i key={level} data-on={level <= (it.strength ?? 0) ? "" : undefined} />)}
-                    </span>
-                  )}
-                  {it.toggle !== undefined && <span className="studio-item-switch" aria-hidden="true" />}
-                  {it.right && <span className="rt">{it.right}</span>}
-                  {it.status && <span className="menu-item-status" data-tone={it.status.tone}>
-                    {it.status.tone === "warning" ? <CircleAlert aria-hidden="true" /> : it.status.tone === "checking" ? <LoaderCircle aria-hidden="true" /> : <CircleDot aria-hidden="true" />}
-                    {it.status.label}
-                  </span>}
-                </button>
+                <MenuRow it={it} id={id} current={current} lead={lead} onTake={take} />
               )}
             </Fragment>
           ))}
+          {aside && <div className={["menu-aside", asideClassName].filter(Boolean).join(" ")} role="group">{aside(closeMenu)}</div>}
         </div>,
         document.body,
       )}
     </div>
+  );
+}
+
+export function MenuRow({ it, id, current, lead, onTake }: {
+  it: MenuItem;
+  id: { [K in `data-${string}`]?: string | ((value: string) => string) };
+  current?: string;
+  lead?: string;
+  onTake: (value: string) => void;
+}) {
+  return (
+    <button
+      {...id}
+      data-action={typeof id["data-action"] === "function" ? id["data-action"](it.value) : id["data-action"]}
+      data-value={it.value}
+      className={it.plain ? "mi plain" : "mi"}
+      role={it.toggle === undefined ? "menuitem" : "menuitemcheckbox"}
+      aria-checked={it.toggle}
+      aria-current={it.value === current ? true : undefined}
+      aria-description={it.status?.detail}
+      title={it.status?.detail}
+      disabled={it.disabled}
+      data-on={it.value === current ? "" : undefined}
+      data-lead={it.value === lead ? "" : undefined}
+      data-strength={it.strength}
+      data-recommended={it.recommended ? "" : undefined}
+      onClick={() => onTake(it.value)}
+    >
+      {it.mono || hasVendorMark(it.mark) ? <Lead it={it} /> : <span className="dot" />}
+      <span className="tx">
+        <span className="studio-item-line">
+          <span className="lb">{it.label}</span>
+          {it.meta && <span className="studio-item-meta">{it.meta}</span>}
+          {it.badge && <span className="studio-item-badge">{it.badge}</span>}
+        </span>
+        {it.desc && <span className="ds">{it.desc}</span>}
+      </span>
+      {it.strength != null && (
+        <span className="studio-effort-strength" aria-hidden="true">
+          {[1, 2, 3, 4].map((level) => <i key={level} data-on={level <= (it.strength ?? 0) ? "" : undefined} />)}
+        </span>
+      )}
+      {it.toggle !== undefined && <span className="studio-item-switch" aria-hidden="true" />}
+      {it.right && <span className="rt">{it.right}</span>}
+      {it.status && <span className="menu-item-status" data-tone={it.status.tone}>
+        {it.status.tone === "warning" ? <CircleAlert aria-hidden="true" /> : it.status.tone === "checking" ? <LoaderCircle aria-hidden="true" /> : <CircleDot aria-hidden="true" />}
+        {it.status.label}
+      </span>}
+    </button>
   );
 }
 
