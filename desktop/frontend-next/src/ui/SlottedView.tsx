@@ -46,7 +46,7 @@ export function SlottedView({
             aria-checked={here === slot.id}
             onClick={() => close(() => onMove(slot.id))}
           >
-            {slot.label}
+            {t(slot.label)}
           </button>
         ))}
         {/* Clearing hands the choice back to the extension rather than

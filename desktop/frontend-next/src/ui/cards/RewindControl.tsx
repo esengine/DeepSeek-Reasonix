@@ -147,7 +147,7 @@ export function RewindControl({
                       <span className="ds">
                         {(stage.plan.coverageGaps ?? [])
                           .map((g) => t(GAP_REASONS[g.reason] ?? g.detail))
-                          .join("；") || t("rewindControl.someOfTheChangesAre")}
+                          .join(t("common.clauseSeparator")) || t("rewindControl.someOfTheChangesAre")}
                       </span>
                     </span>
                   </div>

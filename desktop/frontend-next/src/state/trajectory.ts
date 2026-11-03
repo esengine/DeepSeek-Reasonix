@@ -1,5 +1,6 @@
 import type { TrajectoryAvailability, WireEvent } from "../port/wire";
 import { seconds, tokens } from "../i18n/format";
+import { t } from "../i18n";
 
 export type Span = { t: string } | { b: string } | { n: string };
 
@@ -168,7 +169,7 @@ function record(ev: WireEvent): Made | null {
 
     case "ask_request":
       return ev.ask
-        ? { kind: "event", payload: [{ t: "ask_request · " }, { n: String(ev.ask.questions.length) }, { t: " 个问题" }] }
+        ? { kind: "event", payload: [{ t: "ask_request · " }, { n: String(ev.ask.questions.length) }, { t: t("trajectory.questionsSuffix") }] }
         : null;
 
     case "compaction_started":
@@ -177,7 +178,7 @@ function record(ev: WireEvent): Made | null {
     case "compaction_done":
       return {
         kind: "outcome_progress",
-        payload: [{ t: "compaction done · " }, { n: String(ev.compaction?.messages ?? 0) }, { t: " 条" }],
+        payload: [{ t: "compaction done · " }, { n: String(ev.compaction?.messages ?? 0) }, { t: t("trajectory.messagesSuffix") }],
       };
 
     case "retrying":

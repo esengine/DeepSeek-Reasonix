@@ -103,7 +103,7 @@ export function ToolCard({
   // Showing that count is the difference between a card that is visibly filling
   // and one that sits blank until the whole file arrives at once.
   const streaming = running && !tool.args && (tool.argChars ?? 0) > 0;
-  const arg = tool.name === "todo_write" ? "" : streaming ? `${tokens(tool.argChars!)} 字符` : shortArgs(tool.args ?? "");
+  const arg = tool.name === "todo_write" ? "" : streaming ? t("toolCard.chars", { n: tokens(tool.argChars!) }) : shortArgs(tool.args ?? "");
   const bad = toolFailed(tool);
   // The number is the actionable half; the state only says that something went
   // wrong, which the colour already says.
@@ -463,15 +463,15 @@ const tagFor = (tool: Tool): string | null => {
 };
 
 const SHELL_HINT: Record<string, string> = {
-  bash: "命令交给 bash 执行",
-  "git-bash": "命令交给 Git Bash 执行",
-  pwsh: "命令交给 PowerShell 7 执行 —— 语法是 PowerShell，不是 bash",
-  powershell: "本机没有 bash，命令交由 Windows PowerShell 执行 —— 它不支持 && 和 ||",
+  bash: "toolCard.commandsRunInBash",
+  "git-bash": "toolCard.commandsRunInGitBash",
+  pwsh: "toolCard.commandsRunInPowerShell7",
+  powershell: "toolCard.commandsRunInWindowsPowerShell",
 };
 
 const tagHint = (tool: Tool) => {
   const ex = tool.execution;
-  return ex?.kind === "shell" && ex.shell ? SHELL_HINT[ex.shell] : undefined;
+  return ex?.kind === "shell" && ex.shell ? t(SHELL_HINT[ex.shell]) : undefined;
 };
 
 // Only the categories the spec gives a colour to; the rest stay neutral.

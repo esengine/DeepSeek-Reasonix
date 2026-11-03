@@ -33,8 +33,8 @@ export interface Removal {
 // after the removal was already written.
 export function RemovalNotice({ removal }: { removal: Removal }) {
   const { name, why, report } = removal;
-  const moved = report?.moved.map(roleLabel).join("、") ?? "";
-  const cleared = report?.cleared.map(roleLabel).join("、") ?? "";
+  const moved = report?.moved.map(roleLabel).join(t("common.listSeparator")) ?? "";
+  const cleared = report?.cleared.map(roleLabel).join(t("common.listSeparator")) ?? "";
   return (
     <div className="find" data-lvl="warn" role={why ? "alert" : "status"}>
       <span className="t">{why ? t("providerRemoval.removingDidNotFullyComplete", { name }) : t("providerRemoval.removed", { name })}</span>

@@ -329,7 +329,7 @@ function LeftBehind({ at }: { at: { dir: string; names: string[] } }) {
       <p className="note">
         {t("storage.theseAreStillInA", {
           dir: at.dir,
-          names: at.names.join("、"),
+          names: at.names.join(t("common.listSeparator")),
         })}
       </p>
     </section>

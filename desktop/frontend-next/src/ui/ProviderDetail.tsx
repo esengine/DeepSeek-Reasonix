@@ -111,7 +111,7 @@ export function ProviderDetail({
             {found.ok && unlisted.length > 0 &&
               " " + t("providerDetail.thisEndpointHasMoreModels", {
                 n: unlisted.length,
-                names: unlisted.slice(0, 3).join("、") + (unlisted.length > 3 ? "…" : ""),
+                names: unlisted.slice(0, 3).join(t("common.listSeparator")) + (unlisted.length > 3 ? "…" : ""),
               })}
           </span>
         </div>

@@ -78,7 +78,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
   // free text is whatever came back that no option offered.
   const sealedFree = (i: number) => {
     const offered = new Set(qs[i].options.map((o) => o.label));
-    return (chosen[i] ?? []).filter((v) => !offered.has(v)).join("、");
+    return (chosen[i] ?? []).filter((v) => !offered.has(v)).join(t("common.listSeparator"));
   };
   const freeShown = (i: number) => (sealed ? sealedFree(i) : noting(i) ? note[i] : other[i]);
   const customOption = (i: number) => qs[i].options.find((option) => isOtherOption(option.label));
@@ -284,7 +284,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                       <span key={q.id}>
                         {i > 0 && "　·　"}
                         <b>{q.header || t("askCard.question", { n: i + 1 })}：</b>
-                        {chosen[i]?.length ? chosen[i].join("、") : t("askCard.unanswered")}
+                        {chosen[i]?.length ? chosen[i].join(t("common.listSeparator")) : t("askCard.unanswered")}
                       </span>
                     ))}
                   </>

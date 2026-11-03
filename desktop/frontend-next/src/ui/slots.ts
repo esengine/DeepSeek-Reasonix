@@ -6,8 +6,8 @@ import type { ExtensionSurface } from "../port/wire";
 // a slot as a request; a name we do not have falls back to the rail, which is
 // what lets the same extension show up in a window and in a terminal.
 export const SLOTS: { id: string; label: string }[] = [
-  { id: "sidebar", label: "侧栏" },
-  { id: "composer-trailing", label: "输入框上方" },
+  { id: "sidebar", label: "slots.sidebar" },
+  { id: "composer-trailing", label: "slots.aboveTheComposer" },
 ];
 
 export const DEFAULT_SLOT = "sidebar";

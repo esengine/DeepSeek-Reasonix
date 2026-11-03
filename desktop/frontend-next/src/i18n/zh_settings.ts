@@ -533,7 +533,7 @@ export const ZH_SETTINGS: Record<string, string> = {
   "modelPrices.restoreOfficialPrice": "{model} 恢复官方价",
   "modelPrices.restoreOfficialPrice2": "恢复官方价",
   "settings.text": "{model}（{currency}）",
-  "settings.text2": "、",
+  "common.listSeparator": "、",
   "displayCurrency.theseModelsPricesAreNot": "这些模型的价格不在官方价目表里，无法换算成所选币种，费用只能按原币种显示：{models}。到「服务商」编辑该模型，点「恢复官方价」即可。",
   "modelPrices.pricePerMillionTokensLeft": "每百万 token 的单价。留空表示未知，用量页会如实显示「未知」，而不是 0；填 0 表示免费。缓存命中价留空时按输入价计算。",
   "modelPrices.inputPrice": "{model} 的输入单价",

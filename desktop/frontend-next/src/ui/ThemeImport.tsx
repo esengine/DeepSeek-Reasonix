@@ -49,7 +49,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
       const got = await port.importTheme(files);
       if (currentOwner.current !== owner) return;
       onImported();
-      const skipped = got.ignored?.length ? " " + t("themeImport.notRead", { names: got.ignored.join("、") }) : "";
+      const skipped = got.ignored?.length ? " " + t("themeImport.notRead", { names: got.ignored.join(t("common.listSeparator")) }) : "";
       setNote(t("themeImport.imported", { name: got.pack.name }) + skipped);
       setLanded(got.pack.id);
     } catch (e) {

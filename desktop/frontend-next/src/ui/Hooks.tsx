@@ -318,15 +318,15 @@ function DryRun({ res, blocking }: { res: HookDryRun; blocking: boolean }) {
   const verdict = res.timedOut
     ? "hooks.timedOutThisStepCounts"
     : res.blocks
-      ? "这一次它会挡住这一步"
+      ? "hooks.wouldBlockThisStep"
       : res.decision === "block" && !blocking
-        ? "这个事件挡不住东西，只会提醒你"
+        ? "hooks.eventCannotBlockOnlyWarns"
         : res.decision === "warn"
-          ? "会作为提醒显示出来"
-          : "将放行";
+          ? "hooks.wouldShowAsWarning"
+          : "hooks.wouldAllow";
   return (
     <span className="dryrun" data-blocks={res.blocks ? "" : undefined}>
-      <b>{verdict}</b>
+      <b>{t(verdict)}</b>
       <span className="meta">
         exit {res.exitCode} · {res.durationMs}ms
       </span>

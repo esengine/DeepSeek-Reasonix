@@ -170,7 +170,7 @@ function BackupInput({ port }: { port: AgentPort }) {
                 <span className="meta">
                   {new Date(b.createdAt).toLocaleString()} · {b.platform} · {b.appVersion || "—"} · {Math.max(1, Math.round(b.ciphertextBytes / 1024))} KB
                 </span>
-                <span className="meta">{b.categories.map((c) => t(CATEGORY_LABEL[c] ?? c)).join("、")}</span>
+                <span className="meta">{b.categories.map((c) => t(CATEGORY_LABEL[c] ?? c)).join(t("common.listSeparator"))}</span>
               </div>
               <button className="btn sm" data-action="backup.restore" data-target={b.id} onClick={() => setRestoring(b)}>
                 {t("backup.restore")}

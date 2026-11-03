@@ -3,11 +3,11 @@ import type { MemoryEdit, MemoryEntry } from "../port/port";
 import { Icon, StateIcon } from "./memicons";
 
 export const TYPES: [string, string][] = [
-  ["user", "common.user"], ["feedback", "common.feedback"], ["project", "common.project"], ["reference", "参考"], ["constraint", "common.constraints"],
+  ["user", "common.user"], ["feedback", "common.feedback"], ["project", "common.project"], ["reference", "memoryDetail.reference"], ["constraint", "common.constraints"],
 ];
 const TYPE_NAME = Object.fromEntries(TYPES);
-const IMPORTANCE = ["", "低", "memoryDetail.medium", "高"];
-const SCOPE: Record<string, string> = { project: "common.thisProject", global: "所有项目" };
+const IMPORTANCE = ["", "memoryDetail.low", "memoryDetail.medium", "memoryDetail.high"];
+const SCOPE: Record<string, string> = { project: "common.thisProject", global: "memoryDetail.allProjects" };
 
 export const typeOf = (m: MemoryEntry) => (m.type && TYPE_NAME[m.type] ? m.type : "project");
 
@@ -86,9 +86,9 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
     ["importance", "memoryDetail.importance", t(IMPORTANCE[m.importance ?? 2] || "memoryDetail.medium")],
     ["", "memoryDetail.state", stateSaid(m)],
     ["clock", "common.recent", daysAgo(m.lastUsedAt)],
-    ["uses", "用过", t("memoryDetail.times", { n: m.uses ?? 0 })],
-    ["pin", "生效", t(m.activation === "pinned" ? "memoryDetail.inEveryTurn" : "memoryDetail.recalledWhenRelevant")],
-    ["project", "范围", t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")],
+    ["uses", "memoryDetail.used", t("memoryDetail.times", { n: m.uses ?? 0 })],
+    ["pin", "memoryDetail.applies", t(m.activation === "pinned" ? "memoryDetail.inEveryTurn" : "memoryDetail.recalledWhenRelevant")],
+    ["project", "memoryDetail.scope", t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")],
   ];
   return (
     <div className="memdetail" data-target={m.name}>

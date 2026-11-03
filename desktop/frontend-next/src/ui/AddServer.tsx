@@ -14,9 +14,9 @@ npx -y chrome-devtools-mcp@latest
 https://mcp.example.com/sse`;
 
 const KIND_LABEL: Record<string, string> = {
-  shell: "将在本机运行",
+  shell: "addServer.runsOnThisMachine",
   "unknown-host": "common.willConnectTo",
-  secret: "密钥",
+  secret: "addServer.secret",
 };
 
 interface Props {

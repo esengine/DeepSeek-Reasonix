@@ -224,7 +224,7 @@ function Package({
           {exported.savedTo ? t("packages.savedTo", { path: exported.savedTo }) : t("packages.exported")}
           {" "}
           {exported.required.length
-            ? t("packages.theKeyValuesWereStripped", { names: exported.required.join("、") })
+            ? t("packages.theKeyValuesWereStripped", { names: exported.required.join(t("common.listSeparator")) })
             : t("packages.thisPackageAsksForNo")}
         </div>
       )}

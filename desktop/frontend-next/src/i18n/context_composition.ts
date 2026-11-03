@@ -34,7 +34,7 @@ export function contextCompositionVars(detail: string | undefined): Record<strin
   const top = p.parts
     .slice(0, 3)
     .map((x) => `${t(PART[x.name] ?? x.name)} ${tokens(x.tokens)}`)
-    .join("、");
+    .join(t("common.listSeparator"));
   const active = typeof p.active === "number" && p.active > 0 ? t("common.theTurnInProgressHolds", { n: tokens(p.active) }) : "";
   return { total: tokens(p.total), at: tokens(p.at), top, active };
 }

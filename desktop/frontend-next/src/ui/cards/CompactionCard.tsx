@@ -72,7 +72,7 @@ const PART: Record<string, string> = {
 function Remains({ c }: { c: Compaction }) {
   const r = c.remains;
   if (!r || r.total <= 0 || r.parts.length === 0) return null;
-  const top = r.parts.filter((p) => p.tokens > 0).slice(0, 3).map((p) => `${t(PART[p.name] ?? p.name)} ${tokens(p.tokens)}`).join("、");
+  const top = r.parts.filter((p) => p.tokens > 0).slice(0, 3).map((p) => `${t(PART[p.name] ?? p.name)} ${tokens(p.tokens)}`).join(t("common.listSeparator"));
   const big = r.largest?.[0];
   return (
     <div className="comp-l">

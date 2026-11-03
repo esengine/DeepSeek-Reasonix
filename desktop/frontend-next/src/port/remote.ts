@@ -63,13 +63,13 @@ export interface RemoteHost {
 export const REMOTE_STEPS = ["detect", "install", "waiting_lock", "launch", "health_check", "ready", "reuse"] as const;
 
 export const REMOTE_STEP_LABEL: Record<string, string> = {
-  detect: "探测平台",
-  install: "安装 reasonix",
-  waiting_lock: "等待其他连接",
-  launch: "启动 serve",
-  health_check: "等待就绪",
-  ready: "挂载端口转发",
-  reuse: "接入已运行的实例",
+  detect: "remote.detectingThePlatform",
+  install: "remote.installingReasonix",
+  waiting_lock: "remote.waitingForAnotherClient",
+  launch: "remote.startingServe",
+  health_check: "remote.waitingForItToBecome",
+  ready: "remote.attachingThePortForward",
+  reuse: "remote.reusingTheRunningInstance",
 };
 
 // One row as the settings page writes it. Secrets are named, never carried:

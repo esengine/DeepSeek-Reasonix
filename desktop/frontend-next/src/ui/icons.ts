@@ -27,8 +27,8 @@ const LABEL: Record<string, string> = {
 };
 
 const RUNNING: Record<string, string> = {
-  plan: "正在写计划…", read: "common.loading", net: "正在联网…", deleg: "正在派活…",
-  bash: "正在执行…", write: "正在改写…", mem: "正在写入记忆…", mcp: "正在调 MCP…",
+  plan: "icons.writingAPlan", read: "common.loading", net: "icons.goingOnline", deleg: "icons.delegating",
+  bash: "icons.running", write: "icons.editing", mem: "icons.savingToMemory", mcp: "icons.callingMCP",
 };
 
 // The name slot is a word a person reads, never an identifier: the spec renders

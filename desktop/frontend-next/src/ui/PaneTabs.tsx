@@ -231,7 +231,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
               ? t("paneTabs.theyHaveAllStopped")
               : (liveNow.length === 1
                   ? t("paneTabs.isStillRunning", { names: nameOf(liveNow[0]) })
-                  : t("paneTabs.ofThemAreStillRunning", { n: liveNow.length, names: liveNow.slice(0, 3).map(nameOf).join("、") })) +
+                  : t("paneTabs.ofThemAreStillRunning", { n: liveNow.length, names: liveNow.slice(0, 3).map(nameOf).join(t("common.listSeparator")) })) +
                 t("paneTabs.closingStopsIt")}
           </span>
           <div className="a">

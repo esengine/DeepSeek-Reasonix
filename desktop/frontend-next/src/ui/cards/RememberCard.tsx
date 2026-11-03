@@ -10,11 +10,11 @@ import { LineRow } from "./LineRow";
 // away, when that will apply, and offers the one-click take-back that is only
 // cheap right now, while the user still remembers the conversation.
 const ACTIVATION: Record<string, string> = {
-  pinned: "后续每轮均会携带",
-  relevant: "后续相关时会被检索",
+  pinned: "rememberCard.carriedOnEveryTurn",
+  relevant: "rememberCard.retrievedWhenRelevant",
 };
 
-const SCOPE: Record<string, string> = { project: "common.thisProjectOnly", global: "在所有项目里" };
+const SCOPE: Record<string, string> = { project: "common.thisProjectOnly", global: "rememberCard.inAllProjects" };
 
 export const RememberCard = memo(function RememberCard({
   m, forgotten, onForget,

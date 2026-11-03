@@ -59,6 +59,7 @@ export default defineConfig(({ mode }) => {
       setupFiles: ["./src/testsetup.ts"],
       testTimeout: 60_000,
       hookTimeout: 60_000,
+      sequence: { hooks: "list" },
       pool: "threads",
       maxWorkers: Math.min(navigator.hardwareConcurrency, 10),
     },

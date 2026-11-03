@@ -42,8 +42,8 @@ const TOOLS: [string, string][] = [
 // gate files it in. They are not offered above, because a rule typed for one of
 // these is only honoured when it names its subject exactly.
 const GRANTED: [string, string][] = [
-  ["Computer", "操作应用（逐个应用授权）"],
-  ["Browser", "浏览器（逐个来源授权）"],
+  ["Computer", "rules.operateAppsPerApp"],
+  ["Browser", "rules.browserPerOrigin"],
 ];
 
 const TOOL_LABEL = new Map([...TOOLS, ...GRANTED]);
@@ -95,8 +95,8 @@ const MATCHING: Record<string, string> = {
   grep: "rules.matchedAgainstTheSearchPattern",
   glob: "rules.matchedAgainstTheSearchPattern",
   web_fetch: "rules.matchedAgainstTheURL",
-  Computer: "比对应用 id，放行必须写全；通配符只拦不放",
-  Browser: "比对页面来源（协议://主机:端口）",
+  Computer: "rules.matchedAgainstTheAppID",
+  Browser: "rules.matchedAgainstThePageOrigin",
 };
 const pathMatching = "rules.matchedByPathCrosses";
 

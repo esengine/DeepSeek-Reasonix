@@ -85,7 +85,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
   const unreadableNotice = unreadable.length > 0 ? (
     <div className="find" data-lvl="warn" role="alert">
       <span className="t">{t("memory.theseMemoriesCouldNotBe")}</span>
-      <span className="why">{unreadable.map((u) => `${u.name}: ${u.error}`).join("；")}</span>
+      <span className="why">{unreadable.map((u) => `${u.name}: ${u.error}`).join(t("common.clauseSeparator"))}</span>
     </div>
   ) : null;
 

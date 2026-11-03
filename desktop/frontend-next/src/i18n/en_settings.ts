@@ -541,7 +541,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "modelPrices.restoreOfficialPrice": "{model} restore official price",
   "modelPrices.restoreOfficialPrice2": "Restore official price",
   "settings.text": "{model} ({currency})",
-  "settings.text2": ", ",
+  "common.listSeparator": ", ",
   "displayCurrency.theseModelsPricesAreNot": "These models' prices are not in the vendor's price list, so they cannot be converted to the chosen currency and cost shows in the original one: {models}. Edit the model under Providers and choose Restore official price.",
   "modelPrices.pricePerMillionTokensLeft": "Price per million tokens. Left empty it is unknown, and the usage page says unknown rather than 0; enter 0 for free. An empty cache-hit price is charged at the input price.",
   "modelPrices.inputPrice": "{model} input price",

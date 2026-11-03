@@ -45,8 +45,8 @@ describe("package export feedback", () => {
     expect(details.open).toBe(true);
     const status = row.getByRole("status");
     expect(status.textContent).toContain(destination === "saved" ? t("packages.savedTo", { path: result.savedTo! }) : t("packages.exported"));
-    expect(status.textContent).toContain(t("packages.theKeyValuesWereStripped", { names: "REVIEW_TOKEN、NOTES_TOKEN" }));
-    if (lang === "en") expect(status.textContent).toBe(`${destination === "saved" ? "Saved to /tmp/review-kit.zip." : "Exported."} The key values were stripped out; whoever installs it supplies their own: REVIEW_TOKEN、NOTES_TOKEN`);
+    expect(status.textContent).toContain(t("packages.theKeyValuesWereStripped", { names: ["REVIEW_TOKEN", "NOTES_TOKEN"].join(t("common.listSeparator")) }));
+    if (lang === "en") expect(status.textContent).toBe(`${destination === "saved" ? "Saved to /tmp/review-kit.zip." : "Exported."} The key values were stripped out; whoever installs it supplies their own: REVIEW_TOKEN, NOTES_TOKEN`);
     expect(exportPlugin).toHaveBeenCalledExactlyOnceWith("review-kit");
     expect(row.getByRole<HTMLButtonElement>("button", { name: t("common.export") }).disabled).toBe(false);
   });

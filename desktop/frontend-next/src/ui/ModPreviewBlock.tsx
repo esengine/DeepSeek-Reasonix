@@ -28,7 +28,7 @@ const SESSION_READ = new Set(["messages", "usage"]);
 
 const IMPORT_KIND: Record<string, string> = { static: "import", require: "require", dynamic: "import()" };
 
-const list = (xs: string[]) => xs.join("、");
+const list = (xs: string[]) => xs.join(t("common.listSeparator"));
 
 /** What the install preview says about a Claude Code mod: it runs on this
  *  machine with the user's full trust, and the listing below is read from the

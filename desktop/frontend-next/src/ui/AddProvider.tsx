@@ -404,7 +404,7 @@ export function AddProvider({
           {searchSplit && (
             <p className="acct-note">
               {t("addProvider.thisAddressAnswersOnBoth", {
-                on: searchOn.map((k) => t(KIND_LABEL[k] ?? k)).join("、"),
+                on: searchOn.map((k) => t(KIND_LABEL[k] ?? k)).join(t("common.listSeparator")),
               })}
             </p>
           )}

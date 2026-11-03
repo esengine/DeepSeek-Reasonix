@@ -109,8 +109,8 @@ function ModHostBlock({ port }: { port: AgentPort }) {
             </div>
             {m.code && <div className="ds">{say({ code: m.code, error: m.detail })}</div>}
             {m.restarts > 0 && <div className="ds">{t("modHost.restartedTimes", { n: m.restarts })}</div>}
-            {!!m.events?.length && <div className="ds">{t("modHost.eventsItRegistered")}：{m.events.join("、")}</div>}
-            {!!m.unserved?.length && <div className="ds">{t("modHost.eventsThisAppNeverRaises")}：{m.unserved.join("、")}</div>}
+            {!!m.events?.length && <div className="ds">{t("modHost.eventsItRegistered")}：{m.events.join(t("common.listSeparator"))}</div>}
+            {!!m.unserved?.length && <div className="ds">{t("modHost.eventsThisAppNeverRaises")}：{m.unserved.join(t("common.listSeparator"))}</div>}
           </li>
         ))}
         {mods && mods.length === 0 && <li className="ds">{t("modHost.noInstalledPackageCarriesA")}</li>}

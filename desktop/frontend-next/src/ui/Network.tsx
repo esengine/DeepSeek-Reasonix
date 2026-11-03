@@ -7,8 +7,8 @@ import { reason, say } from "../i18n/kernel";
 // http_proxy or https_proxy — it is "use what the system uses" or "here is mine".
 const MODES: [string, string, string][] = [
   ["auto", "common.followTheSystem", "network.usesWhateverProxyTheSystem"],
-  ["custom", "network.setManually", "手动指定代理服务器"],
-  ["off", "common.direct", "不使用任何代理"],
+  ["custom", "network.setManually", "network.useTheProxyYouSpecify"],
+  ["off", "common.direct", "network.useNoProxy"],
 ];
 
 const STEP_LABEL: Record<string, string> = {
