@@ -47,6 +47,7 @@ export const PRIMITIVES: Primitive[] = [
   { file: "ui/TooltipButton.tsx", callbacks: { onClick: "click", onPointerDown: "pointerdown" } },
   { file: "ui/Switch.tsx", callbacks: { onClick: "click" } },
   { file: "ui/Menu.tsx", callbacks: { onPick: "click" } },
+  { file: "ui/kit/Button.tsx", callbacks: { onClick: "click" } },
 ];
 
 export const LIBRARY_PRIMITIVES: { module: string; name: string; callbacks: Record<string, string> }[] = [

@@ -74,8 +74,6 @@
 }
 .memdetail > .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px }
 .memdetail > .row .act { display: flex; align-items: center; gap: 5px; white-space: nowrap }
-.memdetail .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
-.memdetail .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost) }
 .memdetail > .row.sub { margin-top: 8px; gap: 10px }
 .memdetail .path { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost); word-break: break-all }
 .memedit .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px }

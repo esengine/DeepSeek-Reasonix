@@ -1,6 +1,7 @@
 import { t } from "../i18n";
 import type { MemoryEdit, MemoryEntry } from "../port/port";
 import { Icon, StateIcon } from "./memicons";
+import { Button } from "./kit/Button";
 
 export const TYPES: [string, string][] = [
   ["user", "用户"], ["feedback", "反馈"], ["project", "项目"], ["reference", "参考"], ["constraint", "约束"],
@@ -67,13 +68,13 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
             </select>
           </label>
           <div className="row">
-            <button className="act" data-action="memory.save" data-target={m.name} disabled={busy} onClick={onSave}>
+            <Button data-action="memory.save" data-target={m.name} disabled={busy} onClick={onSave}>
               {t(busy ? "正在保存…" : "保存")}
-            </button>
-            <button className="act ghost" data-action="memory.cancel" data-target={m.name} onClick={() => setEdit(null)}>{t("取消")}</button>
-            <button className="act ghost" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}>
+            </Button>
+            <Button variant="ghost" data-action="memory.cancel" data-target={m.name} onClick={() => setEdit(null)}>{t("取消")}</Button>
+            <Button variant="ghost" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}>
               {t(busy ? "…" : "归档")}
-            </button>
+            </Button>
             <span className="hint">{t("保存将记为新版本，旧版本仍保留")}</span>
           </div>
         </div>
@@ -106,18 +107,18 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
       </dl>
       <pre>{m.body?.trim() || t("（无正文）")}</pre>
       <div className="row">
-        <button className="act" data-primary="" data-action="memory.confirm" data-target={m.name} disabled={busy} onClick={onConfirm}>
+        <Button variant="primary" data-action="memory.confirm" data-target={m.name} disabled={busy} onClick={onConfirm}>
           <Icon name="check" size={14} />{t("没错")}
-        </button>
-        <button className="act ghost" data-action="memory.edit" data-target={m.name} onClick={() => setEdit({
+        </Button>
+        <Button variant="ghost" data-action="memory.edit" data-target={m.name} onClick={() => setEdit({
           name: m.name, title: m.title ?? "", description: m.description ?? "", body: m.body ?? "",
           activation: m.activation, type: typeOf(m), galaxy: m.galaxy ?? "", importance: m.importance ?? 2,
         })}>
           <Icon name="edit" size={14} />{t("编辑")}
-        </button>
-        <button className="act ghost" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}>
+        </Button>
+        <Button variant="ghost" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}>
           <Icon name="archive" size={14} />{t(busy ? "…" : "归档")}
-        </button>
+        </Button>
       </div>
       <div className="row sub">
         {(m.revision ?? 1) > 1 && (
@@ -148,9 +149,9 @@ export function History({ list, current, busy, onRestore }: {
           <span className="rev">{t("第 {n} 版", { n: m.revision ?? 1 })}</span>
           <span className="at">{m.updatedAt || m.createdAt}</span>
           <span className="ds" title={m.title}>{m.title}</span>
-          <button className="act ghost" data-action="memory.restore" data-target={m.name} disabled={busy} onClick={() => onRestore(m.revision ?? 1)}>
+          <Button variant="ghost" data-action="memory.restore" data-target={m.name} disabled={busy} onClick={() => onRestore(m.revision ?? 1)}>
             {t(busy ? "…" : "恢复此版本")}
-          </button>
+          </Button>
           <pre>{clipBody(m.body)}</pre>
         </div>
       ))}

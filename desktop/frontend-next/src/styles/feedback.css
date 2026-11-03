@@ -134,9 +134,6 @@
 }
 .fbk-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fbk-acts .act { padding: 6px 14px; font: var(--w-med) var(--fs-ui) var(--ui); }
-.fbk-acts .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
-.fbk-acts .act[data-primary]:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
-.fbk-acts .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost); }
 
 .fbk-sent { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 8px 0; }
 .fbk-sent > .studio-icon { width: 30px; height: 30px; padding: 6px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 14%, var(--raised)); color: var(--ok-ink); }

@@ -6,6 +6,7 @@ import { apply as applyPack } from "../src/ui/theme";
 import { mount as mountEditor } from "./syntax-mount";
 import "../src/styles/tokens.css";
 import "../src/styles/app.css";
+import "../src/styles/kit.css";
 import "../src/styles/dock.css";
 import "../src/styles/studio.css";
 import "../src/styles/changedpill.css";

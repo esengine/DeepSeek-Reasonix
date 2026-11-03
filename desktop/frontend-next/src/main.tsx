@@ -5,6 +5,7 @@ import { reason } from "./i18n/kernel";
 import { track as trackWidth } from "./ui/viewport";
 import "./styles/tokens.css";
 import "./styles/app.css";
+import "./styles/kit.css";
 import "./styles/composition-picker.css";
 import "./styles/dock.css";
 import "./styles/studio.css";

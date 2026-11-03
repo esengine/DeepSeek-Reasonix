@@ -134,9 +134,9 @@ body { background: var(--page); }
 .chrome .crumb b { max-width: min(44vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chrome .r { gap: 5px; }
 .chrome .thbtn {
-  min-width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  min-width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -499,14 +499,14 @@ body { background: var(--page) !important; }
 .chrome .r { gap: 5px; }
 .chrome .thbtn,
 .chrome .top-action {
-  height: 30px;
+  height: 28px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--faint);
   box-shadow: none;
 }
-.chrome .thbtn { min-width: 30px; display: grid; place-items: center; padding: 0; cursor: pointer; }
+.chrome .thbtn { min-width: 28px; display: grid; place-items: center; padding: 0; cursor: pointer; }
 .chrome .thbtn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
 .chrome .top-action { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; font: 500 calc(11px * var(--fs-scale, 1))/1 var(--ui); cursor: pointer; }
 .chrome .top-action svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linejoin: round; }
@@ -785,7 +785,7 @@ body { background: var(--page) !important; }
 }
 .flow .call[data-k="say"] .copy[data-icon] {
   width: var(--close-h); height: var(--close-h); padding: 0; display: grid; place-items: center;
-  border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent;
+  border: 1px solid transparent; border-radius: var(--r-sm); color: var(--muted); background: transparent;
 }
 .flow .call[data-k="say"] .copy[data-icon] .studio-icon { width: 15px; height: 15px; }
 .flow .call[data-k="say"] .copy[data-icon]:hover { color: var(--text); background: var(--overlay); border-color: var(--hair); }
@@ -795,7 +795,7 @@ body { background: var(--page) !important; }
 .flow .call[data-k="say"] .acts > button,
 .flow .call[data-k="say"] .acts-menu > button {
   width: var(--close-h); height: var(--close-h); padding: 0; display: grid; place-items: center;
-  border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent;
+  border: 1px solid transparent; border-radius: var(--r-sm); color: var(--muted); background: transparent;
   cursor: pointer; transition: color var(--m-line), background var(--m-line), border-color var(--m-line);
 }
 .flow .call[data-k="say"] .acts > button .studio-icon,
@@ -843,8 +843,8 @@ body { background: var(--page) !important; }
 .flow .user-acts > button,
 .flow .user-acts .stepctl button {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
-  width: 26px; height: 26px; padding: 0; opacity: 1; line-height: 15px;
-  border: 0; border-radius: 6px; background: transparent; color: var(--muted);
+  width: 28px; height: 28px; padding: 0; opacity: 1; line-height: 15px;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted);
 }
 .flow .user-acts .studio-icon { width: 15px; height: 15px; }
 .flow .call[data-k="me"] .user-acts > button:hover,
@@ -3772,7 +3772,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   gap: 5px;
   min-height: 32px;
   border-style: dashed;
-  border-radius: 8px;
+  border-radius: var(--r-md); font-size: var(--fs-ui);
 }
 .plist .padd[aria-pressed="true"] { border-style: solid; background: var(--overlay); }
 .plist .padd b { font: var(--w-reg) var(--fs-lead)/1 var(--ui); }
@@ -3793,10 +3793,10 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   flex: none;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -3979,7 +3979,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   margin-bottom: 0;
 }
 .chrome .thbtn,
-.chrome .top-action { min-height: 30px; }
+.chrome .top-action { min-height: 28px; }
 .chrome .crumb,
 .chrome .r { align-self: center; }
 

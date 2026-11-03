@@ -1,0 +1,58 @@
+:is(.kbtn, .act, .btn) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: none;
+  box-sizing: border-box; height: 24px; padding: 0 10px; margin: 0;
+  border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: transparent; color: var(--text);
+  font: var(--w-reg) var(--fs-meta)/1 var(--ui); letter-spacing: normal; white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--m-line), border-color var(--m-line), color var(--m-line), transform var(--t-press);
+}
+:is(.kbtn, .act, .btn):hover:not(:disabled) { background: var(--overlay); border-color: var(--muted); color: var(--text) }
+:is(.kbtn, .act, .btn):active:not(:disabled) { transform: var(--press) }
+:is(.kbtn, .act, .btn):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
+:is(.kbtn, .act, .btn):disabled { border-color: var(--border); background: transparent; color: var(--ghost); cursor: default; transform: none }
+
+.kbtn[data-size="md"], .btn:not(.sm) {
+  height: 32px; padding: 0 14px; border-radius: var(--r-md); font-size: var(--fs-ui);
+}
+
+:is(.kbtn, .act, .btn)[data-primary], .kbtn[data-variant="primary"] {
+  border-color: var(--accent); background: var(--accent); color: var(--accent-fg);
+}
+:is(.kbtn, .act, .btn)[data-primary]:hover:not(:disabled), .kbtn[data-variant="primary"]:hover:not(:disabled) {
+  border-color: var(--accent); background: var(--accent); color: var(--accent-fg); filter: brightness(1.18);
+}
+
+:is(.kbtn, .act, .btn)[data-primary]:disabled, .kbtn[data-variant="primary"]:disabled {
+  border-color: var(--border); background: transparent; color: var(--ghost); filter: none;
+}
+
+:is(.act.ghost, .kbtn[data-variant="ghost"]) { border-color: transparent; color: var(--muted) }
+:is(.act.ghost, .kbtn[data-variant="ghost"]):hover:not(:disabled) { border-color: transparent; background: var(--overlay); color: var(--text) }
+:is(.act.ghost, .kbtn[data-variant="ghost"]):disabled { border-color: transparent }
+
+:is(.act.danger, .act[data-danger], .kbtn[data-variant="danger"]) {
+  border-color: color-mix(in srgb, var(--err) 45%, var(--border)); color: var(--err-ink);
+}
+:is(.act.danger, .act[data-danger], .kbtn[data-variant="danger"]):hover:not(:disabled) {
+  border-color: var(--err); background: color-mix(in srgb, var(--err) 9%, transparent); color: var(--err-ink);
+}
+
+:is(.lnk, .kbtn[data-variant="link"]) {
+  display: inline; height: auto; padding: 2px 0; border: 0; border-radius: var(--r-xs); background: none;
+  color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); text-align: left; cursor: pointer;
+  transition: color var(--m-line);
+}
+:is(.lnk, .kbtn[data-variant="link"]):hover:not(:disabled) {
+  background: none; color: var(--text); text-decoration: underline; text-underline-offset: 3px;
+}
+:is(.lnk, .kbtn[data-variant="link"]):disabled, .lnk[disabled] { color: var(--ghost); cursor: default; pointer-events: none }
+:is(.lnk, .kbtn[data-variant="link"]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
+
+.kbtn[data-icon-only] { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); color: var(--muted) }
+.kbtn[data-icon-only]:hover:not(:disabled) { border: 0; background: var(--overlay); color: var(--text) }
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.kbtn, .act, .btn) { transition: none }
+  :is(.kbtn, .act, .btn):active:not(:disabled) { transform: none }
+}

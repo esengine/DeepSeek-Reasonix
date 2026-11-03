@@ -187,18 +187,6 @@
     flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .chrome .r { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-  .btn {
-    padding: 4px 11px; border-radius: var(--r-sm); border: 1px solid var(--border);
-    background: transparent; color: var(--muted); font: var(--w-med) var(--fs-ui) var(--ui);
-    cursor: pointer; white-space: nowrap;
-    transition: color var(--m-line), border-color var(--m-line), background var(--m-line), transform var(--m-line);
-  }
-  .btn:hover { color: var(--text); border-color: var(--faint); }
-  .btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  .btn[data-primary] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); box-shadow: var(--lit); }
-  .btn[data-primary]:hover { filter: brightness(1.08); }
-  .btn[disabled] { opacity: .4; cursor: default; pointer-events: none; }
-  .btn.sm { padding: 2.5px 8px; font-size: var(--fs-meta); }
 
   .picker { position: relative; flex: none }
   .isolab { flex: none; white-space: nowrap; font: var(--w-med) var(--fs-micro) var(--ui); letter-spacing: var(--track-cap); color: var(--muted); padding: 1.5px 6px; border-radius: var(--r-pill); background: var(--overlay) }
@@ -673,13 +661,6 @@
   .ws[data-iso="on"] .where .tag { color: var(--ok-ink) }
 
   .railfoot { flex: none; display: flex; gap: 14px; padding: 9px 12px 11px; border-top: 1px solid var(--hair) }
-  .lnk {
-    border: 0; background: none; padding: 2px 0; cursor: pointer;
-    color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); text-align: left; transition: color var(--m-line);
-  }
-  .lnk:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px }
-  .lnk[disabled] { opacity: .4; cursor: default; pointer-events: none }
-  .lnk:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm) }
 
   .main { position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--surface) }
 
@@ -1112,7 +1093,7 @@
   .copy {
     display: inline-flex; align-items: center; gap: 5px;
     border: 0; background: transparent; color: var(--faint); cursor: pointer;
-    font: var(--w-med) var(--fs-micro) var(--ui); letter-spacing: var(--track-cap); padding: 4px 7px;
+    font: var(--w-med) var(--fs-micro) var(--ui); letter-spacing: var(--track-cap); min-width: 28px; min-height: 28px; justify-content: center; padding: 0 7px;
     border-radius: var(--r-sm); transition: color var(--m-line), background var(--m-line);
   }
   .copy:hover { background: var(--overlay); color: var(--text) }
@@ -2719,15 +2700,7 @@
   .srv .peek .trow .face .dg { color: var(--err-ink); border: 1px solid var(--err) }
 
   .acts { display: flex; align-items: center; gap: 8px; margin-left: 14px; flex: none }
-  .act {
-    padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--r-pill);
-    background: transparent; color: var(--text); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
-    transition: background var(--m-line), border-color var(--m-line);
-  }
-  .act:hover:not(:disabled) { background: var(--overlay); border-color: var(--muted) }
-  .act:disabled { color: var(--ghost); cursor: default }
   .srv .act:disabled { opacity: .45 }
-  .act:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
 
   .reload { display: inline-flex; align-items: center; gap: 6px }
   .reload .rdot {
@@ -2763,10 +2736,7 @@
   .sw:disabled { cursor: default; opacity: .55 }
   .sw:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
 
-  .act.ghost { border-color: transparent; color: var(--faint) }
   .srv:hover .act.ghost, .act.ghost:focus-visible { border-color: var(--hair); color: var(--muted) }
-  .act.danger { border-color: color-mix(in srgb, var(--err) 42%, transparent); color: var(--err-ink) }
-  .act.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 10%, transparent) }
   .confirm {
     display: flex; align-items: center; gap: 9px; margin: 8px 0 2px 15px; padding: 9px 11px;
     border-radius: var(--r-sm); background: var(--overlay);
@@ -2783,8 +2753,6 @@
   .addsrv .paste:focus, .addpkg .paste:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .addsrv .acts, .addpkg .acts { display: flex; align-items: center; gap: 8px; margin-top: 10px }
   .addsrv .acts .note, .addpkg .acts .note { flex: 1; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
-  .addsrv .act[data-primary], .addpkg .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
-  .addsrv .act[data-primary]:disabled, .addpkg .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost) }
   .addpkg > .why { margin-top: 9px; font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--err-ink) }
 
   .addpkg[data-over] .paste { border-color: var(--accent); background: var(--overlay) }
@@ -2919,7 +2887,7 @@
   .mlhead .ttl { flex: none; white-space: nowrap; font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
   .mlhead .count { flex: none; white-space: nowrap; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
   .mlhead .mrefresh {
-    margin-left: auto; padding: 3px 7px; border: 0; border-radius: var(--r-xs);
+    margin-left: auto; height: 24px; padding: 0 10px; border: 0; border-radius: var(--r-pill);
     background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
   }
   .mlhead .mrefresh + .mrefresh { margin-left: 0 }
@@ -2928,7 +2896,7 @@
   .mlhead .mrefresh:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px }
   .mlhead .mrefresh:disabled { opacity: .45; cursor: default }
   .msearch .mfetch {
-    flex: none; padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--r-xs);
+    flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill);
     background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
   }
   .msearch .mfetch:hover { background: var(--overlay); color: var(--text) }
@@ -2971,8 +2939,8 @@
   .mevidence > i[data-state="checking"] { background: var(--net) }
   .mops { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 5px }
   .mline .mverify {
-    min-height: 26px; padding: 2px 6px; border: 0; border-radius: var(--r-xs);
-    background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-micro) var(--ui); cursor: pointer;
+    height: 24px; padding: 0 10px; border: 0; border-radius: var(--r-pill);
+    background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
   }
   .mline .mverify:hover { background: var(--overlay); color: var(--text) }
   .mline .mverify:disabled { opacity: .38; cursor: default }
@@ -3117,9 +3085,6 @@
   .acts-state[data-state="saving"] .acts-dot { background: var(--accent) }
   .acts-state[data-state="unapplied"] .acts-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--warn) }
   .addp .acts .act:disabled { opacity: .55; cursor: default }
-  .addp .act[data-primary]:disabled { border-style: dashed }
-  .addp .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
-  .addp .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost) }
   .chip {
     padding: 4px 9px; border: 1px solid var(--border); border-radius: var(--r-pill);
     background: transparent; color: var(--muted); cursor: pointer;
@@ -3215,8 +3180,6 @@
   .mkt-facts dd[data-missing] { color: var(--warn-ink) }
   .mkt .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 0 }
   .mkt .acts .note { flex: 1; min-width: 180px; margin: 0; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
-  .mkt .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
-  .mkt .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost) }
   .mkt-names { margin: 6px 0 0; padding-left: 18px; font: var(--w-reg) var(--fs-ui)/1.6 var(--mono); color: var(--text) }
   .mkt-seen { display: flex; align-items: center; gap: 7px; margin-top: 8px; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--text); cursor: pointer }
   .mkt-views { align-self: flex-start; margin-bottom: 12px }
@@ -3274,7 +3237,7 @@
 
   .more {
     margin-top: 14px; display: flex; align-items: baseline; gap: 10px; padding: 0;
-    border: 0; background: none; color: var(--muted); font: var(--w-reg) var(--fs-ui) var(--ui); cursor: pointer;
+    border: 0; background: none; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
   }
   .more:hover { color: var(--text) }
   .more .c { font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--ghost) }
@@ -3331,7 +3294,6 @@
   }
   .rule .note { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
   .rule .why { margin-top: 6px; font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); color: var(--err-ink) }
-  .rule .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
 
   .dryrun { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; margin-top: 8px }
   .dryrun b { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--ok-ink) }
@@ -3564,8 +3526,6 @@
   .net .fields label.chk { flex-direction: row; align-items: center; gap: 7px; align-self: flex-end; padding-bottom: 7px }
   .net .fields label.chk span { color: var(--muted) }
   .net .acts { display: flex; gap: 8px; margin-top: 14px }
-  .net .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
-  .net .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost) }
   .net > .why { margin-top: 10px; font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--err-ink) }
 
   .probes { margin-top: 14px; display: flex; flex-direction: column }
@@ -3868,8 +3828,6 @@
   }
   .bk-fields input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .bk-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px }
-  .bk-acts .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg) }
-  .bk-acts .act[data-primary]:disabled { border-color: var(--border); background: transparent; color: var(--ghost) }
   .bk-list, .bk-plan { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair) }
   .bk-row { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--hair) }
   .bk-row .who { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0 }
@@ -4704,9 +4662,9 @@
   .rmtform .rmtact button[data-go] { border-color: var(--accent); color: var(--accent-ink) }
   .rmtform .rmtact button:disabled { opacity: .4; cursor: default }
   .rmtadd {
-    margin-top: 12px; padding: 6px 12px; border-radius: var(--r-pill);
+    margin-top: 12px; height: 24px; padding: 0 10px; border-radius: var(--r-pill);
     border: 1px solid var(--border); background: transparent; color: var(--muted);
-    font: var(--w-med) var(--fs-ui) var(--ui); cursor: pointer;
+    font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
   }
   .rmtadd:hover { border-color: var(--accent); color: var(--text) }
 
@@ -4985,9 +4943,9 @@
 
   .paperpick {
     display: flex; align-items: center; gap: 7px; width: 100%;
-    padding: 8px 10px; border: 1px dashed var(--border); border-radius: var(--r-sm);
+    min-height: 32px; padding: 0 14px; border: 1px dashed var(--border); border-radius: var(--r-md);
     background: none; cursor: pointer; text-align: left;
-    font: var(--w-med) var(--fs-ui) var(--ui); color: var(--faint);
+    font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--faint);
     transition: color var(--m-line), background var(--m-line);
   }
   .paperpick:hover { color: var(--text); background: var(--overlay) }
