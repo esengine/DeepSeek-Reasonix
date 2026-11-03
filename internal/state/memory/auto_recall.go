@@ -161,10 +161,14 @@ func FindOverrides(all []Memory) []Override {
 }
 
 type autoRecallDoc struct {
-	memory Memory
-	text   string
-	counts map[string]int
-	length int
+	memory      Memory
+	text        string
+	counts      map[string]int
+	length      int
+	mainCounts  map[string]int
+	mainLength  int
+	aliasCounts map[string]int
+	aliasLength int
 }
 
 // AutoRecall conservatively selects saved facts for a real user turn. It is
@@ -221,13 +225,15 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 	}
 
 	counts := make([]map[string]int, 0, len(docs))
-	totalLen := 0
+	mainLen, aliasLen := 0, 0
 	for _, doc := range docs {
 		counts = append(counts, doc.counts)
-		totalLen += doc.length
+		mainLen += doc.mainLength
+		aliasLen += doc.aliasLength
 	}
 	df := retrieval.DocumentFrequency(counts)
-	avgLen := float64(totalLen) / float64(len(docs))
+	avgMain := float64(mainLen) / float64(len(docs))
+	avgAlias := float64(aliasLen) / float64(len(docs))
 	snippetRunes := recallSnippetRunes(opts)
 	now := opts.Now
 	if now.IsZero() {
@@ -240,10 +246,12 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 		if !strongRecallMatch(result.Query, queryTerms, matched) {
 			continue
 		}
-		score := retrieval.BM25Score(doc.counts, doc.length, queryTerms, df, len(docs), avgLen)
-		if score <= 0 {
+		raw := retrieval.BM25Score(doc.mainCounts, doc.mainLength, queryTerms, df, len(docs), avgMain) +
+			aliasWeight*retrieval.BM25Score(doc.aliasCounts, doc.aliasLength, queryTerms, df, len(docs), avgAlias)
+		if raw <= 0 {
 			continue
 		}
+		score := raw * importanceWeight(doc.memory) * recentUseWeight(doc.memory, now)
 		if NormalizeFactScope(string(doc.memory.Scope)) == FactScopeProject {
 			score *= 1.08
 		}
@@ -264,7 +272,8 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 			Snippet:   retrieval.MakeSnippet(doc.text, result.Query, queryTerms, snippetRunes),
 		})
 	}
-	if len(hits) == 0 {
+	constraints := constraintHitsFor(docs, hits, queryTerms, result.Query, now, snippetRunes)
+	if len(hits) == 0 && len(constraints) == 0 {
 		result.Suppress(SuppressNoMatch, "no sufficiently distinctive match")
 		return result
 	}
@@ -283,6 +292,7 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 		result.OmittedByLimit = len(hits) - limit
 		hits = hits[:limit]
 	}
+	hits = append(constraints, withoutHits(hits, constraints)...)
 
 	result.Hits, result.block, result.OmittedByBudget = buildRecallBlock(hits, result.CharBudget, result.OmittedByLimit)
 	result.UsedChars = utf8.RuneCountInString(result.block)
@@ -368,6 +378,10 @@ func strongRecallMatch(query string, queryTerms, matched []string) bool {
 
 func autoRecallSearchText(memory Memory) string {
 	return strings.Join([]string{memory.Name, memory.Title, memory.Description, memory.Keywords, memory.Body}, "\n")
+}
+
+func autoRecallMainText(memory Memory) string {
+	return strings.Join([]string{memory.Name, memory.Title, memory.Description, memory.Galaxy, memory.Body}, "\n")
 }
 
 func distinctiveQueryTerm(query, normalizedTerm string) bool {
