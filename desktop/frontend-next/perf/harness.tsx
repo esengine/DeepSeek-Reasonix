@@ -56,7 +56,7 @@ import { fromHistory } from "../src/state/session";
 import { HttpError } from "../src/port/port";
 import type { AgentPort, Appearance, ChipCall, HistoryMessage, McpEntry } from "../src/port/port";
 import type { HistoryPage } from "../src/port/session";
-import type { UpdateProgress } from "../src/port/version";
+import type { UpdateProgress, VersionHub } from "../src/port/version";
 import type { ThemePack } from "../src/port/look";
 import type { RuntimeView, TreeWindow, TreeWorkspace } from "../src/port/hub";
 import type { WireEvent } from "../src/port/wire";
@@ -218,8 +218,17 @@ class BenchPort extends MockPort {
     return query.has("update") ? "notify" : super.updateMode();
   }
 
-  async versions() {
+  async versions(): Promise<VersionHub> {
     if (query.has("update")) return { current: "2.42.0", pinned: "", stalePin: false, latest: "2.43.0", newer: true, versions: [] };
+    if (query.has("versionlayout")) {
+      return {
+        current: "2.56.0", pinned: "", stalePin: false, latest: "2.57.0", newer: true,
+        versions: ["2.57.0", "2.56.1", "2.56.0", "2.55.0", "2.54.0", "2.53.1"].map((version, i) => ({
+          version, tag: `studio-v${version}`, publishedAt: new Date(Date.now() - i * 86400000).toISOString(),
+          hasNotes: i !== 4, current: i === 2, older: i > 2,
+        })),
+      };
+    }
     if (!query.has("versions")) return super.versions();
     const names = ["2.38.0", "2.37.0", "2.36.0", "2.35.0", "2.34.0", "2.33.0", "2.32.0", "2.31.0", "2.30.0", "2.29.0"];
     return {
@@ -447,10 +456,22 @@ class BenchPort extends MockPort {
     return super.switchBranch(name);
   }
 
+  async versionNotes(version: string) {
+    if (!query.has("versionlayout")) return super.versionNotes(version);
+    return { version, markdown: "# Release notes\n\nDownload and rollback improvements.", cached: false };
+  }
+
   async goToVersion() {}
 
   onUpdateProgress(cb?: (p: UpdateProgress) => void) {
     if (cb && query.has("update")) queueMicrotask(() => cb({ version: "2.43.0", phase: "ready", received: 0, total: 0 }));
+    const phase = query.get("versionlayout");
+    if (cb && (phase === "downloading" || phase === "verifying" || phase === "ready")) {
+      queueMicrotask(() => cb({
+        version: query.has("rollback") ? "2.55.0" : "2.57.0", phase,
+        received: 178_900_000, total: 183_900_000,
+      }));
+    }
     return () => {};
   }
 

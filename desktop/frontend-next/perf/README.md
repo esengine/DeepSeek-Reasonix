@@ -43,6 +43,7 @@ node perf/rail-toggle-panes.mjs # Rail-fold frame cost with 1/3/6 panes; existin
 node perf/verify.mjs     # 行为验证：跟随、块的装卸、切页往返、大会话树
 node perf/panels.mjs     # 两侧栏：收起补间、拖动改宽、上下限、窄屏退场
 node perf/look.mjs       # 外观验证：字号、界面缩放、自定义字体、壁纸上传与调节（含焦点）
+node perf/versions-row.mjs # Version rows: download/rollback, notes, restart-ready and the 600px breakpoint in English and Chinese
 node perf/measure.mjs    # Custom conversation percentage, preset retention, narrow composer controls and populated phone layout
 node perf/theme-schedule.mjs # Scheduled appearance: daily boundaries, midnight, reload/resume, modes, active packs and DST; THEME_SCHEDULE_SHOTS writes wide/phone light/dark screenshots
 node perf/pick.mjs       # 补全菜单：/ 和 @ 的选中态，深浅两色下各走一遍
