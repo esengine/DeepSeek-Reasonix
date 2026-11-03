@@ -608,7 +608,7 @@ func (c *Controller) submitInboxItem(id string, ignoringPause bool) (sessioninbo
 		return sessioninbox.InboxReceipt{}, materializeErr
 	}
 	if block != "" {
-		_ = st.SetState(id, sessioninbox.StateBlocked, block)
+		_ = st.SetStateCoded(id, sessioninbox.StateBlocked, blockCodeFor(env), block)
 		_ = st.Pause(sessioninbox.PauseReferenceBlocked)
 		return sessioninbox.InboxReceipt{}, fmt.Errorf("%w: %s", sessioninbox.ErrInvalidState, block)
 	}

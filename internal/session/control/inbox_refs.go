@@ -29,9 +29,14 @@ func (c *Controller) freezeInboxReferences(ctx context.Context, submit string, e
 	return block, images, errs
 }
 
+const foreignImagesBlock = "queued with images by another version of Reasonix; this build cannot read them, so the line was held instead of being sent without them"
+
 func applyInboxReferences(env sessioninbox.PromptEnvelope) (submit string, images []string, blockReason string, err error) {
 	if len(env.ReferenceErrors) > 0 {
 		return "", nil, strings.Join(env.ReferenceErrors, "; "), nil
+	}
+	if env.HasForeignImages() {
+		return "", nil, foreignImagesBlock, nil
 	}
 	submit = env.SubmitText
 	images = append([]string(nil), env.FrozenImages...)
@@ -47,4 +52,11 @@ func applyInboxReferences(env sessioninbox.PromptEnvelope) (submit string, image
 		return "", nil, legacyBlock, materializeErr
 	}
 	return sessioninbox.ApplyFrozenRefs(submit, bodies), images, "", nil
+}
+
+func blockCodeFor(env sessioninbox.PromptEnvelope) sessioninbox.BlockCode {
+	if env.HasForeignImages() {
+		return sessioninbox.BlockForeignImages
+	}
+	return ""
 }

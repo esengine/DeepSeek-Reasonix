@@ -6,4 +6,5 @@ export const BLOCK_WHY: Record<string, string> = {
   turn_ack_failed: "本轮已结束，但队列没能确认这一条",
   owner_inactive: "运行这一条的会话已不在了",
   manifest_salvaged: "队列记录损坏，这一条是从残留文件里找回的",
+  foreign_images: "这一条带着 1.x 排队的图片，这个版本读不了，所以先停住，没有去掉图片照发",
 };

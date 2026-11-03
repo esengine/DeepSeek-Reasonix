@@ -379,7 +379,7 @@ func (s *Store) Enqueue(req EnqueueRequest) (InboxReceipt, error) {
 		Idempotency: idem,
 		Origin:      req.Origin,
 		Refs:        refSummaries(env.Refs),
-		Images:      len(env.FrozenImages) > 0,
+		Images:      env.CarriesImages(),
 		RunID:       s.runID,
 	}
 
@@ -510,7 +510,7 @@ func (s *Store) UpdateItemWithIdempotency(id string, env PromptEnvelope, alias s
 	next.Items[i].Checksum = checksum
 	next.Items[i].Preview = PreviewText(env.DisplayText, DefaultPreviewRunes)
 	next.Items[i].Refs = refSummaries(env.Refs)
-	next.Items[i].Images = len(env.FrozenImages) > 0
+	next.Items[i].Images = env.CarriesImages()
 	next.Items[i].UpdatedAt = time.Now().UTC()
 	next.Items[i].Revision = next.Revision + 1
 	bindIdempotency(next, alias, id, aliasHash)

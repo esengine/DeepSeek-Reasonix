@@ -10,6 +10,7 @@ const (
 	BlockAckFailed        BlockCode = "turn_ack_failed"
 	BlockOwnerInactive    BlockCode = "owner_inactive"
 	BlockManifestSalvaged BlockCode = "manifest_salvaged"
+	BlockForeignImages    BlockCode = "foreign_images"
 )
 
 // RetrySafe reports whether an uncertain item carrying this code never reached

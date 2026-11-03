@@ -29,7 +29,7 @@ func (c *Controller) RunInboxTurn(ctx context.Context, id string) error {
 		return err
 	}
 	if block != "" {
-		_ = st.SetState(id, sessioninbox.StateBlocked, block)
+		_ = st.SetStateCoded(id, sessioninbox.StateBlocked, blockCodeFor(env), block)
 		_ = st.Pause(sessioninbox.PauseReferenceBlocked)
 		return fmt.Errorf("%w: %s", sessioninbox.ErrInvalidState, block)
 	}

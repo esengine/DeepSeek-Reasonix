@@ -709,6 +709,7 @@ export const EN: Record<string, string> = {
   "本轮已结束，但队列没能确认这一条": "The turn ended, but the queue could not acknowledge this item",
   "运行这一条的会话已不在了": "The session that was running this item is gone",
   "队列记录损坏，这一条是从残留文件里找回的": "The queue record was corrupt; this item was salvaged from leftover files",
+  "这一条带着 1.x 排队的图片，这个版本读不了，所以先停住，没有去掉图片照发": "This entry was queued with images by Reasonix 1.x that this build cannot read, so it was held instead of being sent without them",
   "冻结 {n} 文件": "{n} frozen",
   "无法读取该条的正文，未打开编辑：{why}":
     "Could not read this entry back, so it was not opened for editing: {why}",

@@ -96,7 +96,7 @@ describe("why a held entry stopped", () => {
 
   it("covers exactly the codes the kernel sends", () => {
     expect(Object.keys(BLOCK_WHY).sort()).toEqual(
-      ["manifest_salvaged", "owner_inactive", "steer_unapplied", "turn_ack_failed", "turn_snapshot_failed"],
+      ["foreign_images", "manifest_salvaged", "owner_inactive", "steer_unapplied", "turn_ack_failed", "turn_snapshot_failed"],
     );
   });
 
@@ -104,7 +104,7 @@ describe("why a held entry stopped", () => {
     expect(held({ blockCode: "steer_unapplied" })).toContain('data-action="queue.retry"');
   });
 
-  it.each(["turn_ack_failed", "turn_snapshot_failed", "owner_inactive", "manifest_salvaged", "future_code"])(
+  it.each(["turn_ack_failed", "turn_snapshot_failed", "owner_inactive", "manifest_salvaged", "foreign_images", "future_code"])(
     "offers no Retry on an uncertain %s entry, which may already have run",
     (code) => {
       expect(held({ blockCode: code })).not.toContain('data-action="queue.retry"');

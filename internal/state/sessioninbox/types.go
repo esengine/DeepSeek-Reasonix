@@ -1,15 +1,14 @@
 package sessioninbox
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
 	"reasonix/internal/contract/provider"
 )
 
-// SchemaVersion is the on-disk format version. Unknown higher versions load
-// read-only and force pause; they never auto-execute.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // Default capacity limits.
 const (
@@ -148,20 +147,25 @@ type StructuredInvocation struct {
 
 // PromptEnvelope is the full durable body stored only in blobs/<id>.json.
 type PromptEnvelope struct {
-	DisplayText string `json:"displayText"`
-	RawText     string `json:"rawText"`
-	SubmitText  string `json:"submitText"`
+	FingerprintVersion int    `json:"fingerprintVersion,omitempty"`
+	RequestFingerprint string `json:"requestFingerprint,omitempty"`
+	DisplayText        string `json:"displayText"`
+	RawText            string `json:"rawText"`
+	SubmitText         string `json:"submitText"`
 	// Invocation is retained for schema-v1 compatibility. New writers use
 	// Invocations so multiple rich-composer entities preserve visual order.
-	Invocation  *StructuredInvocation  `json:"invocation,omitempty"`
-	Invocations []StructuredInvocation `json:"invocations,omitempty"`
-	Format      string                 `json:"format,omitempty"`
-	Attachments []string               `json:"attachments,omitempty"`
-	Refs        []RefSnapshot          `json:"refs,omitempty"`
+	Invocation           *StructuredInvocation  `json:"invocation,omitempty"`
+	Invocations          []StructuredInvocation `json:"invocations,omitempty"`
+	Format               string                 `json:"format,omitempty"`
+	Attachments          []string               `json:"attachments,omitempty"`
+	AttachmentIdentities []string               `json:"attachmentIdentities,omitempty"`
+	Refs                 []RefSnapshot          `json:"refs,omitempty"`
 	// FrozenRefBlock is the exact typed reference context rendered at enqueue.
 	// FrozenImages contains already-authorized data URLs for direct image input.
 	FrozenRefBlock  string            `json:"frozenRefBlock,omitempty"`
 	FrozenImages    []string          `json:"frozenImages,omitempty"`
+	ImageInputs     json.RawMessage   `json:"imageInputs,omitempty"`
+	ImageSourceRefs map[string]string `json:"imageSourceRefs,omitempty"`
 	ReferenceErrors []string          `json:"referenceErrors,omitempty"`
 	ExplicitRefs    []string          `json:"explicitRefs,omitempty"`
 	Idempotency     string            `json:"idempotencyKey,omitempty"`
@@ -265,4 +269,19 @@ func (l Limits) withDefaults() Limits {
 		l.MaxTotalBytes = DefaultMaxTotalBytes
 	}
 	return l
+}
+
+func (e PromptEnvelope) CarriesImages() bool {
+	return len(e.FrozenImages) > 0 || e.HasForeignImages()
+}
+
+func (e PromptEnvelope) HasForeignImages() bool {
+	if len(e.ImageInputs) == 0 {
+		return false
+	}
+	var inputs []json.RawMessage
+	if err := json.Unmarshal(e.ImageInputs, &inputs); err != nil {
+		return true
+	}
+	return len(inputs) > 0
 }
