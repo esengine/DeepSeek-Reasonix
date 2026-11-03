@@ -1,8 +1,8 @@
 .workbench-launcher { margin: auto; width: min(100%, 380px); padding: 24px 16px; display: grid; gap: 10px; justify-items: stretch; }
 .workbench-launcher > .studio-icon { justify-self: center; width: 40px; height: 40px; margin-bottom: 14px; color: var(--ghost); }
-.workbench-launcher button { height: 56px; display: flex; align-items: center; gap: 14px; padding: 0 18px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--raised); color: var(--text); font: var(--w-med) calc(13px * var(--fs-scale, 1))/1 var(--ui); cursor: pointer; text-align: left; }
+.workbench-launcher button { height: 56px; display: flex; align-items: center; gap: 14px; padding: 0 18px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--raised); color: var(--text); font: var(--w-med) var(--fs-ui)/1 var(--ui); cursor: pointer; text-align: left; }
 .workbench-launcher button .studio-icon { width: 17px; height: 17px; color: var(--muted); }
-.workbench-launcher button small { margin-left: auto; color: var(--faint); font: var(--w-reg) calc(11px * var(--fs-scale, 1))/1 var(--mono); }
+.workbench-launcher button small { margin-left: auto; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1 var(--mono); }
 .workbench-launcher button:hover:not(:disabled) { background: var(--overlay); }
 .workbench-launcher button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .workbench-launcher button:disabled { opacity: .5; cursor: default; }

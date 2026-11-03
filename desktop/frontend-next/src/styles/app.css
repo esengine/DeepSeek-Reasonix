@@ -1170,7 +1170,7 @@
   .term {
     margin-top: 8px; padding: 11px 13px 12px; border-radius: var(--r-lg);
     background: var(--face-sunk);
-    font: var(--w-reg) var(--fs-ui)/calc(19px * var(--fs-scale, 1)) var(--mono); color: var(--muted); overflow-x: auto;
+    font: var(--w-reg) var(--fs-ui)/var(--fs-title) var(--mono); color: var(--muted); overflow-x: auto;
   }
   .term-l { white-space: pre }
   .term[data-one] { margin: 5px 0 0; padding: 0; background: none; border-radius: 0 }
@@ -1230,7 +1230,7 @@
   .hits { margin-top: 7px; display: flex; flex-direction: column; gap: 1px }
   .hit-row { display: grid; grid-template-columns: 16px 1fr; gap: 9px; padding: 6px 8px; border-radius: var(--r-xs) }
   .hit-row:hover { background: var(--overlay) }
-  .hit-row .i { font: var(--w-reg) var(--fs-micro)/calc(17px * var(--fs-scale, 1)) var(--mono); color: var(--ghost); text-align: right; font-variant-numeric: tabular-nums }
+  .hit-row .i { font: var(--w-reg) var(--fs-micro)/var(--fs-title) var(--mono); color: var(--ghost); text-align: right; font-variant-numeric: tabular-nums }
   .hit-row .t { font-size: var(--fs-ui); color: var(--text); line-height: 1.45 }
   .hit-row .u { margin-top: 2px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--link); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   .hit-row .q { margin-top: 4px; font-size: var(--fs-ui); line-height: 1.55; color: var(--muted); border-left: 2px solid var(--border); padding-left: 8px }
@@ -1262,10 +1262,10 @@
   .dif-hd .ro { margin-left: auto; font-size: var(--fs-micro); letter-spacing: var(--track-cap); text-transform: uppercase; color: var(--ghost) }
 
   .dlwrap { overflow-x: auto; overscroll-behavior-x: contain }
-  .dl { display: grid; grid-template-columns: 42px 14px 1fr; font: var(--w-reg) var(--fs-ui)/calc(20px * var(--fs-scale, 1)) var(--mono); white-space: pre; min-width: max-content }
+  .dl { display: grid; grid-template-columns: 42px 14px 1fr; font: var(--w-reg) var(--fs-ui)/var(--fs-display) var(--mono); white-space: pre; min-width: max-content }
 
   .dhunk {
-    display: grid; grid-template-columns: 42px 1fr; font: var(--w-reg) var(--fs-micro)/calc(18px * var(--fs-scale, 1)) var(--mono);
+    display: grid; grid-template-columns: 42px 1fr; font: var(--w-reg) var(--fs-micro)/var(--fs-title) var(--mono);
     color: var(--ghost); background: color-mix(in srgb, var(--overlay) 55%, transparent);
     border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
   }
@@ -3733,7 +3733,7 @@
   .code-body { display: flex; align-items: flex-start }
   .code-gutter {
     flex: none; padding: 11px 10px 12px 12px; text-align: end;
-    font: var(--w-reg) var(--fs-ui)/calc(19px * var(--fs-scale, 1)) var(--mono); color: var(--ghost); user-select: none;
+    font: var(--w-reg) var(--fs-ui)/var(--fs-title) var(--mono); color: var(--ghost); user-select: none;
     border-inline-end: 1px solid var(--hair);
   }
   .code-gutter > span { display: block }
@@ -5325,7 +5325,7 @@
 }
 .uhero-est { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hair) }
 .uhero-estk { color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); letter-spacing: var(--track-lead) }
-.uhero-estv { font: var(--w-med) calc(20px * var(--fs-scale, 1))/1.2 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted) }
+.uhero-estv { font: var(--w-med) var(--fs-display)/1.2 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted) }
 .udaily-est { display: block; color: var(--faint); font-size: var(--fs-meta) }
 .uhero-note { margin: 11px 0 0; max-width: 62ch; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.6 var(--ui) }
 

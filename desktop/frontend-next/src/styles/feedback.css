@@ -242,11 +242,11 @@
 
 .studio-feedback .fbk-badge {
   margin-left: auto; min-width: 16px; height: 16px; padding: 0 5px; box-sizing: border-box; display: inline-grid; place-items: center;
-  border-radius: var(--r-pill); background: var(--accent); color: var(--accent-fg); font: var(--w-med) calc(10px * var(--fs-scale, 1))/1 var(--ui);
+  border-radius: var(--r-pill); background: var(--accent); color: var(--accent-fg); font: var(--w-med) var(--fs-micro)/1 var(--ui);
 }
 .fbk-msg { unicode-bidi: isolate; }
 .fbk-tl li[data-tone="neutral"] i { border-color: var(--ghost); background: var(--ghost); }
-.palette-hit > small[data-alert] { color: var(--text); font: 600 calc(11px * var(--fs-scale, 1))/1 var(--ui); }
+.palette-hit > small[data-alert] { color: var(--text); font: 600 var(--fs-micro)/1 var(--ui); }
 
 .fbk { --badge-ink: var(--muted); --badge-lock: var(--faint); }
 .lvl-badge { flex: none; color: var(--badge-ink); }

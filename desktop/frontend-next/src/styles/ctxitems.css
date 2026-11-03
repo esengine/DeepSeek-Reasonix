@@ -1,14 +1,14 @@
 .chrome-context-parts .chrome-context-more {
   display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border: 1px solid var(--border); border-radius: 999px; background: transparent; cursor: pointer;
-  color: var(--muted); font: 550 calc(9px * var(--fs-scale, 1))/1.5 var(--mono);
+  color: var(--muted); font: 550 var(--fs-micro)/1.5 var(--mono);
 }
 .chrome-context-parts .chrome-context-more::after { content: "›"; transition: transform .12s; }
 .chrome-context-parts .chrome-context-more[aria-expanded="true"] { color: var(--text); background: var(--overlay); }
 .chrome-context-parts .chrome-context-more[aria-expanded="true"]::after { transform: rotate(90deg); }
 .chrome-context-parts .chrome-context-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .chrome-context-items { list-style: none; margin: 6px 0 0; padding: 0 0 0 8px; border-left: 1px solid var(--border); display: grid; gap: 3px; }
-.chrome-context-items li { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 500 calc(10px * var(--fs-scale, 1))/1.4 var(--ui); }
+.chrome-context-items li { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 500 var(--fs-micro)/1.4 var(--ui); }
 .chrome-context-items span[data-tool] { font-family: var(--mono); }
 .chrome-context-items em { font-style: normal; color: var(--accent); }
-.chrome-context-items b { margin-left: auto; color: var(--text); font: 550 calc(9px * var(--fs-scale, 1))/1 var(--mono); }
-.chrome-context-items li.head { color: var(--ghost); font: 550 calc(9px * var(--fs-scale, 1))/1.4 var(--ui); }
+.chrome-context-items b { margin-left: auto; color: var(--text); font: 550 var(--fs-micro)/1 var(--mono); }
+.chrome-context-items li.head { color: var(--ghost); font: 550 var(--fs-micro)/1.4 var(--ui); }

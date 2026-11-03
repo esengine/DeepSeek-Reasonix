@@ -41,7 +41,7 @@
 }
 .memrow .nm:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--r-sm) }
 .memrow .txt { flex: 1; min-width: 0 }
-.memrow .ti { font: var(--w-reg) calc(14px * var(--fs-scale, 1)) var(--ui); color: var(--text) }
+.memrow .ti { font: var(--w-reg) var(--fs-lead) var(--ui); color: var(--text) }
 .memrow .badge {
   margin-left: 8px; padding: 0 7px; border-radius: var(--r-pill); background: var(--accent-wash);
   font: var(--w-reg) var(--fs-micro) var(--ui); color: var(--text); white-space: nowrap;

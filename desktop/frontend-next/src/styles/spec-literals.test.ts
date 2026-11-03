@@ -29,4 +29,18 @@ describe("a stylesheet outside the token file", () => {
     }
     expect(bare).toEqual([]);
   });
+
+  it("sets type from the six size tokens, never a bare calc of 7–23px", () => {
+    const bare: string[] = [];
+    for (const [name, css] of Object.entries(SHEETS)) {
+      if (name === "./tokens.css") continue;
+      for (const m of css.matchAll(/(?<![-\w])(?:font-size|font)\s*:\s*[^;}]*/g)) {
+        for (const n of m[0].matchAll(/calc\(([0-9.]+)px \* var\(--fs-scale, 1\)\)/g)) {
+          const px = Number(n[1]);
+          if (px >= 7 && px < 24 && px !== 16) bare.push(`${name}:${line(css, m.index!)} ${n[0]}`);
+        }
+      }
+    }
+    expect(bare).toEqual([]);
+  });
 });

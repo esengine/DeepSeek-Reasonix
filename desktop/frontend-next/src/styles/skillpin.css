@@ -6,4 +6,4 @@
 .skillpin-more { margin-left: auto; padding-left: 12px; color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); }
 .skillpin[open] .skillpin-more { visibility: hidden; }
 .skillpin-desc { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-meta); }
-.skillpin-text { max-height: 280px; margin: 8px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: var(--w-reg) calc(11.5px * var(--fs-scale, 1))/1.6 var(--mono); }
+.skillpin-text { max-height: 280px; margin: 8px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.6 var(--mono); }

@@ -21,50 +21,50 @@
 :root .composer-menu.composition-menu { --choice-width: 320px; }
 :root .composition-menu .studio-item-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
 :root .composition-menu .mi :is(.lb, .ds) { white-space: normal; overflow-wrap: anywhere; }
-:root .composition-menu .composition-menu-note { margin: 0 8px 6px; color: var(--muted); font: 400 calc(11px * var(--fs-scale, 1))/1.45 var(--ui); }
-:root .composer-menu :is(.studio-picker-title, .studio-policy-head, .worktree-heading), :root .composer-menu > .mi.head:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: auto; min-height: 30px; margin: 0 0 4px; padding: 2px 8px 8px; border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; color: var(--muted); font: 500 calc(12px * var(--fs-scale, 1))/1.4 var(--ui); }
+:root .composition-menu .composition-menu-note { margin: 0 8px 6px; color: var(--muted); font: 400 var(--fs-micro)/1.45 var(--ui); }
+:root .composer-menu :is(.studio-picker-title, .studio-policy-head, .worktree-heading), :root .composer-menu > .mi.head:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: auto; min-height: 30px; margin: 0 0 4px; padding: 2px 8px 8px; border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; color: var(--muted); font: 500 var(--fs-meta)/1.4 var(--ui); }
 :root .composer-menu :is(.studio-picker-title b, .studio-policy-head b), :root .composer-menu > .mi.head:first-child .lb { color: var(--muted); font: inherit; letter-spacing: 0; }
-:root .composer-menu :is(.studio-picker-title small, .studio-policy-head small), :root .composer-menu > .mi.head:first-child .rt { margin-left: auto; color: var(--muted); font: 400 calc(11px * var(--fs-scale, 1))/1.4 var(--ui); text-align: right; }
+:root .composer-menu :is(.studio-picker-title small, .studio-policy-head small), :root .composer-menu > .mi.head:first-child .rt { margin-left: auto; color: var(--muted); font: 400 var(--fs-micro)/1.4 var(--ui); text-align: right; }
 :root .composer-menu :is(button.mi, .studio-permission-option, .worktree-row, .worktree-sources button) { min-height: 36px; padding: 8px 10px; gap: 8px; border-radius: var(--r-sm); color: var(--text); font: 500 var(--choice-size)/1.4 var(--ui); }
 :root .composer-menu :is(.mi .lb, .studio-permission-option b, .studio-policy-boundary b, .worktree-toggle span) { color: inherit; font: 500 var(--choice-size)/1.4 var(--ui); }
 :root .composer-menu :is(.mi .ds, .studio-permission-option small, .studio-policy-boundary small, .worktree-toggle small) { display: block; margin-top: 2px; color: var(--muted); font: 400 var(--choice-note)/1.45 var(--ui); }
 :root .composer-menu .studio-permission-option > span:first-child { gap: 0; }
 :root .composer-menu :is(button.mi, .studio-permission-option, .worktree-sources button):is([data-on], [aria-selected="true"]) { background: var(--overlay); color: var(--text); }
 :root .composer-menu :is(button.mi, .studio-permission-option, button.worktree-row, .worktree-sources button):not(:disabled):hover { background: var(--float-hi); }
-:root .composer-menu .mi[data-on]::after, :root .composer-menu .studio-permission-check { flex-shrink: 0; color: var(--text); font-size: calc(13px * var(--fs-scale, 1)); }
+:root .composer-menu .mi[data-on]::after, :root .composer-menu .studio-permission-check { flex-shrink: 0; color: var(--text); font-size: var(--fs-ui); }
 :root .composer-menu :is(button, input):focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 :root .composer-menu :is(.studio-policy-note, .worktree-note) { margin: 4px 0 0; padding: 8px; border-top: 1px solid var(--hair); color: var(--muted); font: 400 var(--choice-note)/1.45 var(--ui); }
 :root .composer-menu .studio-policy-primary { padding: 0; }
-:root .composer-menu .studio-policy-risk { padding: 8px 10px 2px; color: var(--warn-ink); font: 500 calc(11px * var(--fs-scale, 1))/1.4 var(--ui); }
+:root .composer-menu .studio-policy-risk { padding: 8px 10px 2px; color: var(--warn-ink); font: 500 var(--fs-micro)/1.4 var(--ui); }
 :root .composer-menu .studio-permission-option.studio-permission-yolo b { color: var(--warn-ink); }
 :root .composer-menu .studio-policy-boundary { min-height: 36px; padding: 8px 10px; border-top-color: var(--hair); border-radius: 0 0 var(--r-sm) var(--r-sm); }
 :root .composer-menu .studio-policy-boundary > span:first-child { gap: 0; }
 :root .composer-menu .worktree-toggle { padding: 8px 10px; gap: 8px; margin: 0; border-bottom: 0; }
 :root .composer-menu .worktree-toggle > .studio-icon, :root .composer-menu .worktree-row > .studio-icon { width: 16px; height: 16px; }
-:root .composer-menu .worktree-value { font-size: calc(12px * var(--fs-scale, 1)); }
+:root .composer-menu .worktree-value { font-size: var(--fs-meta); }
 :root .composer-menu .sw { width: 32px; height: 18px; }
 :root .composer-menu .sw i { width: 14px; height: 14px; margin-left: 2px; }
 :root .composer-menu .sw[aria-checked="true"] i { transform: translateX(14px); }
-:root .composer-menu :is(.mfind, input[type="search"]) { position: static; width: calc(100% - 16px); margin: 4px 8px 6px; padding: 6px 8px; border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: 400 calc(12px * var(--fs-scale, 1))/1.5 var(--ui); }
+:root .composer-menu :is(.mfind, input[type="search"]) { position: static; width: calc(100% - 16px); margin: 4px 8px 6px; padding: 6px 8px; border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: 400 var(--fs-meta)/1.5 var(--ui); }
 :root .composer-menu .mchips { margin: 0 8px 6px; padding: 0; }
-:root .composer-menu .mchip { font-size: calc(11px * var(--fs-scale, 1)); }
+:root .composer-menu .mchip { font-size: var(--fs-micro); }
 :root .composer-menu.studio-model-menu .mi.head { position: static; min-height: 28px; margin: 4px 0 2px; padding: 6px 10px; border: 0; background: transparent; }
-:root .composer-menu.studio-model-menu .mi.head .lb { color: var(--muted); font: 500 calc(11px * var(--fs-scale, 1))/1.4 var(--ui); }
-:root .composer-menu.studio-model-menu .mi.head .rt { color: var(--muted); font: 400 calc(11px * var(--fs-scale, 1))/1.4 var(--mono); }
+:root .composer-menu.studio-model-menu .mi.head .lb { color: var(--muted); font: 500 var(--fs-micro)/1.4 var(--ui); }
+:root .composer-menu.studio-model-menu .mi.head .rt { color: var(--muted); font: 400 var(--fs-micro)/1.4 var(--mono); }
 :root .composer-menu.studio-model-menu .mi.head .mi-mono { display: none; }
-:root .composer-menu.studio-model-menu .mi .rt { color: var(--muted); font-size: calc(11px * var(--fs-scale, 1)); }
+:root .composer-menu.studio-model-menu .mi .rt { color: var(--muted); font-size: var(--fs-micro); }
 :root .composer-menu.studio-model-menu .studio-item-line { flex-wrap: wrap; row-gap: 2px; }
 :root .composer-menu.studio-model-menu .studio-item-line > .lb { flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
 :root .composer-menu.studio-effort-menu .mi:not(.head) { min-height: 36px; grid-template-columns: minmax(0, 1fr) 13px; }
 :root .composer-menu .studio-effort-strength { display: none; }
-:root .composer-menu .studio-item-meta { color: var(--muted); font-size: calc(11px * var(--fs-scale, 1)); }
-:root .composer-menu .studio-item-badge { font-size: calc(11px * var(--fs-scale, 1)); }
+:root .composer-menu .studio-item-meta { color: var(--muted); font-size: var(--fs-micro); }
+:root .composer-menu .studio-item-badge { font-size: var(--fs-micro); }
 :root .composer-menu.studio-effort-menu > .mi.head:last-child { min-height: 0; margin: 4px 0 0; padding: 8px; border: 0; border-top: 1px solid var(--hair); }
-:root .composer-menu.studio-effort-menu > .mi.head:last-child :is(.lb, .rt) { color: var(--muted); font: 400 calc(11px * var(--fs-scale, 1))/1.45 var(--ui); }
+:root .composer-menu.studio-effort-menu > .mi.head:last-child :is(.lb, .rt) { color: var(--muted); font: 400 var(--fs-micro)/1.45 var(--ui); }
 :root .composer-menu .worktree-sources { max-height: 320px; margin: 0; }
-:root .composer-menu .worktree-sources > div > small { padding: 6px 10px 2px; font-size: calc(11px * var(--fs-scale, 1)); }
-:root .composer-menu .worktree-sources button small { color: var(--muted); font-size: calc(11px * var(--fs-scale, 1)); }
-:root .composer-menu .worktree-back { margin: 4px 0 0; padding: 6px 10px; font-size: calc(12px * var(--fs-scale, 1)); }
+:root .composer-menu .worktree-sources > div > small { padding: 6px 10px 2px; font-size: var(--fs-micro); }
+:root .composer-menu .worktree-sources button small { color: var(--muted); font-size: var(--fs-micro); }
+:root .composer-menu .worktree-back { margin: 4px 0 0; padding: 6px 10px; font-size: var(--fs-meta); }
 @container conversation (max-width: 470px) {
   :root .composer-menu.polmenu { left: 0; right: 0; width: auto; max-width: none; }
 }
