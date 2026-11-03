@@ -1346,21 +1346,22 @@ body { background: var(--page) !important; }
   box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent), 0 12px 30px -20px color-mix(in srgb, var(--text) 32%, transparent);
 }
 .studio-browser :is(.bview, .studio-browser-frame) { margin: 0 6px 6px; width: auto; border-radius: var(--r-sm); overflow: hidden; }
-.workbench-tabs { height: 39px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 var(--pane-gutter); border-bottom: 1px solid var(--hair); background: var(--surface); }
-.workbench-tablist { min-width: 0; display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
+.workbench-tabs { height: 39px; flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 7px var(--pane-gutter) 0; border-bottom: 1px solid var(--hair); background: var(--page); }
+.workbench-tablist { min-width: 0; display: flex; align-items: flex-end; gap: 2px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
 .workbench-files {
-  flex: none; width: 28px; height: 28px; display: grid; place-items: center;
+  flex: none; align-self: center; width: 28px; height: 28px; display: grid; place-items: center;
   border: 0; border-radius: var(--r-sm); background: transparent; color: var(--faint); cursor: pointer;
   transition: color var(--m-line), background var(--m-line);
 }
 .workbench-files .studio-icon { width: 14px; height: 14px; }
 .workbench-files:hover { color: var(--text); background: var(--overlay); }
 .workbench-files[aria-pressed="true"] { color: var(--accent); background: var(--overlay); }
-.workbench-new { width: 26px; height: 26px; flex: none; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--faint); cursor: pointer; }
+.workbench-new { align-self: center; width: 26px; height: 26px; flex: none; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--faint); cursor: pointer; }
 .workbench-new:hover { background: var(--overlay); color: var(--text); }
-.workbench-tab { max-width: 220px; min-width: 72px; height: 27px; flex: 0 1 auto; display: grid; grid-template-columns: minmax(0, 1fr) 22px; border-radius: var(--r-sm); color: var(--muted); }
+.workbench-tab { max-width: 220px; min-width: 72px; height: 32px; margin-bottom: -1px; box-sizing: border-box; flex: 0 1 auto; display: grid; grid-template-columns: minmax(0, 1fr) 22px; border: 1px solid transparent; border-bottom: 0; border-radius: var(--r-md) var(--r-md) 0 0; color: var(--muted); }
 .workbench-tab:hover { background: var(--overlay); color: var(--text); }
-.workbench-tab[aria-selected="true"] { background: var(--raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+.workbench-tab[aria-selected="true"] { background: var(--surface); color: var(--text); border-color: var(--border); box-shadow: 0 1px 0 var(--surface); }
+.workbench-tab[aria-selected="true"] .workbench-tab-pick { font-weight: var(--w-med); }
 .workbench-tab button { min-width: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; color: inherit; cursor: pointer; }
 .workbench-tab-pick { display: flex; align-items: center; gap: 6px; padding-left: 9px !important; font: 500 calc(11px * var(--fs-scale, 1))/1 var(--ui); }
 .workbench-tab-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
