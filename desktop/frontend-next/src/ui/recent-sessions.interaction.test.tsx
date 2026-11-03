@@ -212,3 +212,40 @@ it("names the environment choice by its accessible name alone", async () => {
   await screen.findByRole("combobox", { name: "运行环境" });
   expect(document.querySelector(".recent-machine")?.textContent).not.toContain("运行环境");
 });
+
+it("reads 运行中 beside a conversation a pane is running, instead of its time", async () => {
+  const hub = setup();
+  hub.tree = async () => [{ root: "/w", name: "w", recentOffset: 0, remaining: 0, sessions: [
+    { path: "/w/a.jsonl", name: "a", title: "running one", lastActiveAt: Date.now(), runtimeId: "r1" },
+    { path: "/w/b.jsonl", name: "b", title: "idle one", lastActiveAt: Date.now() },
+  ] }];
+  render(<RecentSessions hub={hub} hosts={[]} runs={{ r1: { run: "running" } }} onPick={async () => {}} onClose={() => {}} />);
+  const dialog = within(screen.getByRole("dialog", { name: "最近的会话" }));
+  const row = await dialog.findByRole("button", { name: /running one/ });
+  expect(within(row).getByText("运行中")).toBeTruthy();
+  expect(within(await dialog.findByRole("button", { name: /idle one/ })).queryByText("运行中")).toBeNull();
+});
+
+it("walks the rows with Up and Down from the search field and opens one with Enter", async () => {
+  const hub = setup();
+  const picked = vi.fn(async () => {});
+  hub.tree = async () => [{ root: "/w", name: "w", recentOffset: 0, remaining: 0, sessions: [
+    { path: "/w/a.jsonl", name: "a", title: "first", lastActiveAt: 3000 },
+    { path: "/w/b.jsonl", name: "b", title: "second", lastActiveAt: 2000 },
+  ] }];
+  render(<RecentSessions hub={hub} hosts={[]} onPick={picked} onClose={() => {}} />);
+  const dialog = within(screen.getByRole("dialog", { name: "最近的会话" }));
+  const first = await dialog.findByRole("button", { name: /first/ });
+  const second = await dialog.findByRole("button", { name: /second/ });
+  const field = dialog.getByRole("searchbox");
+  field.focus();
+  await userEvent.keyboard("{ArrowDown}");
+  expect(document.activeElement).toBe(first);
+  await userEvent.keyboard("{ArrowDown}");
+  expect(document.activeElement).toBe(second);
+  await userEvent.keyboard("{ArrowUp}{ArrowUp}");
+  expect(document.activeElement).toBe(field);
+  await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+  expect(picked).toHaveBeenCalledTimes(1);
+  expect(dialog.getByText(/↑↓/)).toBeTruthy();
+});

@@ -11,9 +11,10 @@ import { TREE_PAGE } from "./treewindow";
 import { useModalFocus } from "./useModalFocus";
 import { listenAction } from "./listen";
 
-export function RecentSessions({ hub, hosts, onPick, onClose }: {
+export function RecentSessions({ hub, hosts, runs = {}, onPick, onClose }: {
   hub: HubPort;
   hosts: RemoteHost[];
+  runs?: Record<string, { run: string }>;
   onPick: (host: string, workspace: TreeWorkspace, session: TreeSession) => Promise<void>;
   onClose: () => void;
 }) {
@@ -53,6 +54,16 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
   }, [hub, view, hideLegacy, retry]);
   const rows = (tree ?? []).flatMap((ws) => ws.sessions.map((session) => ({ ws, session })))
     .sort((a, b) => (b.session.lastActiveAt ?? 0) - (a.session.lastActiveAt ?? 0) || (a.session.path < b.session.path ? -1 : a.session.path > b.session.path ? 1 : 0));
+  const walkRows = (event: React.KeyboardEvent) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const all = [...(sheet.current?.querySelectorAll<HTMLElement>(".recent-session:not(:disabled)") ?? [])];
+    const at = all.indexOf(document.activeElement as HTMLElement);
+    if (at < 0) return;
+    event.preventDefault();
+    if (event.key === "ArrowDown") all[Math.min(at + 1, all.length - 1)].focus();
+    else if (at === 0) sheet.current?.querySelector<HTMLInputElement>("input")?.focus();
+    else all[at - 1].focus();
+  };
   const startOfToday = new Date().setHours(0, 0, 0, 0);
   const isToday = (at?: number) => !!at && at >= startOfToday;
   const remaining = (tree ?? []).reduce((n, ws) => n + (ws.remaining ?? 0), 0);
@@ -73,7 +84,7 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
       <div className="pickcard recent-sessions">
         <h2>{t("最近的会话")}</h2>
         <p className="recent-description">{t("按最近活动排列，包含已完成的会话。选择后定位到所属项目。")}</p>
-        <div className="recent-filters">
+        <div className="recent-filters" onKeyDown={(event) => { if (event.key === "ArrowDown" && (event.target as HTMLElement).tagName === "INPUT") { const first = sheet.current?.querySelector<HTMLElement>(".recent-session:not(:disabled)"); if (first) { event.preventDefault(); first.focus(); } } }}>
           <label className="recent-search"><StudioIcon name="search" /><input data-action="workspace.search" type="search" aria-label={t("搜索最近会话 / 项目")} placeholder={t("搜索最近会话 / 项目")} value={draft} disabled={opening} onChange={(event) => setDraft(event.target.value)} /></label>
           {hosts.some((host) => !host.disabled) && (
             <select className="recent-machine" data-action="session.recent-environment" aria-label={t("运行环境")} value={view.host} disabled={opening} onChange={(event) => setView({ host: event.target.value, q: view.q, offset: 0 })}>
@@ -82,7 +93,7 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
             </select>
           )}
         </div>
-        <div className="picklist" aria-busy={busy} data-busy={busy ? "" : undefined}>
+        <div className="picklist" aria-busy={busy} data-busy={busy ? "" : undefined} onKeyDown={walkRows}>
           {!busy && !error && !rows.length && <p className="pickempty">{t("没有匹配的会话")}</p>}
           {busy && <p className="picknote" role="status">{t("正在读取会话…")}</p>}
           {!busy && !error && rows.map(({ ws, session }, i) => [
@@ -92,11 +103,14 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
             title={`${session.workspaceRoot || ws.root}\n${session.path}`} onClick={() => void pick(ws, session)}>
             <StudioIcon name="chat" />
             <span className="recent-session-text"><b>{session.title || session.name}</b><small>{ws.name} · {session.workspaceRoot || ws.root}</small></span>
-            <SessionAge at={session.lastActiveAt} />
+            {session.runtimeId && (runs[session.runtimeId]?.run === "running" || runs[session.runtimeId]?.run === "halt")
+              ? <span className="sessword" data-run={runs[session.runtimeId].run}>{t(runs[session.runtimeId].run === "running" ? "运行中" : "等你确认")}</span>
+              : <SessionAge at={session.lastActiveAt} />}
           </button>,
           ])}
           {error && <><p className="picknote" role="alert">{error}</p><button className="pickgo" data-action="session.recent-retry" onClick={() => setRetry((n) => n + 1)}>{t("重试")}</button></>}
         </div>
+        <p className="recent-keys">{t("↑↓ 选择 · Enter 打开")}</p>
         <div className="pickact">
           <button data-action="session.recent-page" data-value="previous" disabled={busy || opening || view.offset === 0} onClick={() => setView({ ...view, offset: Math.max(0, view.offset - TREE_PAGE) })}>{t("上一页")}</button>
           <span className="recent-page">{t("第 {n} 页", { n: view.offset / TREE_PAGE + 1 })}</span>

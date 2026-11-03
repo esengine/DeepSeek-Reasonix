@@ -84,3 +84,4 @@
 .sessword { flex: none; margin-left: auto; font: var(--w-reg) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
 .sessword[data-run="running"] { color: var(--net-ink); }
 .sessword[data-run="halt"] { color: var(--warn-ink); }
+.recent-keys { margin: 8px 0 0; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }

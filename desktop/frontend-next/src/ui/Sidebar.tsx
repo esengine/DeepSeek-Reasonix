@@ -253,7 +253,7 @@ export function Sidebar({
 
   return (
     <>
-    {recent && <RecentSessions hub={hub} hosts={shownRemotes} onPick={pickRecent} onClose={() => setRecent(false)} />}
+    {recent && <RecentSessions hub={hub} hosts={shownRemotes} runs={runs} onPick={pickRecent} onClose={() => setRecent(false)} />}
     {projectPicker && <OpenProject hub={hub} adder={adder} hosts={shownRemotes}
       onClose={() => setProjectPicker(false)} onError={onError} onOpen={async (host, root) => {
         await onOpenRemote(host, root);
