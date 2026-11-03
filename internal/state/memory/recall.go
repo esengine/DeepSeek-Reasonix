@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"reasonix/internal/base/retrieval"
 	"reasonix/internal/contract/tool"
@@ -87,7 +88,10 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		if !ok {
 			return "", fmt.Errorf("memory %q not found", slug(in.Name))
 		}
-		return formatMemory(t.store, m), nil
+		m = t.store.withUsage([]Memory{m})[0]
+		out := formatMemory(t.store, m)
+		_ = t.store.RecordUse([]Memory{m}, false, time.Now())
+		return out, nil
 	case "list":
 		report, err := t.store.ListActive()
 		if err != nil {
@@ -280,8 +284,8 @@ func formatMemoryHits(query string, hits []memoryHit, omitted int) string {
 	fmt.Fprintf(&b, "Memory search results for %s:\n", strconvQuote(query))
 	for i, hit := range hits {
 		m := hit.Memory
-		fmt.Fprintf(&b, "\n%d. score=%.3f id=%s revision=%d name=%s scope=%s type=%s title=%s\n   reference: %s\n   description: %s\n   snippet: %s\n",
-			i+1, hit.Score, m.ID, m.Revision, m.Name, NormalizeFactScope(string(m.Scope)), NormalizeType(string(m.Type)), displayTitle(m.Title, m.Name), providerMemoryReference(m), oneLine(m.Description), hit.Snippet)
+		fmt.Fprintf(&b, "\n%d. score=%.3f id=%s revision=%d name=%s scope=%s type=%s state=%s title=%s\n   reference: %s\n   description: %s\n   snippet: %s\n",
+			i+1, hit.Score, m.ID, m.Revision, m.Name, NormalizeFactScope(string(m.Scope)), NormalizeType(string(m.Type)), m.RetentionState(time.Now()), displayTitle(m.Title, m.Name), providerMemoryReference(m), oneLine(m.Description), hit.Snippet)
 	}
 	if omitted > 0 {
 		fmt.Fprintf(&b, "\n%s\n", omittedNote(omitted, "fact(s)", "the result limit or the relevance floor"))
@@ -305,6 +309,7 @@ func formatMemory(_ Store, m Memory) string {
 		fmt.Fprintf(&b, "galaxy: %s\n", g)
 	}
 	fmt.Fprintf(&b, "importance: %d\n", m.ResolvedImportance())
+	fmt.Fprintf(&b, "state: %s\n", m.RetentionState(time.Now()))
 	fmt.Fprintf(&b, "reference: %s\n\n%s", providerMemoryReference(m), strings.TrimSpace(m.Body))
 	return strings.TrimSpace(b.String())
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/contract/event"
 	"reasonix/internal/state/memory"
@@ -118,7 +119,15 @@ func (m *memoryManager) claimAutoRemember(args json.RawMessage) bool {
 
 func (m *memoryManager) recall(query string) memory.RecallResult {
 	m.refreshDelivered()
-	result := m.current().AutoRecall(query, memory.RecallOptions{})
+	set := m.current()
+	result := set.AutoRecall(query, memory.RecallOptions{})
+	if set != nil && len(result.Hits) > 0 {
+		used := make([]memory.Memory, 0, len(result.Hits))
+		for _, hit := range result.Hits {
+			used = append(used, hit.Memory)
+		}
+		_ = set.Store.RecordUse(used, true, time.Now())
+	}
 	m.recordRecall(result)
 	m.recordDelivered(result)
 	return result

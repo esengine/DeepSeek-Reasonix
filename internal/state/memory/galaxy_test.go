@@ -7,15 +7,18 @@ import (
 )
 
 func TestNewFieldsRoundTripThroughTheFile(t *testing.T) {
-	used := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
 	m := Memory{
 		ID: "mem_1", Revision: 3, Name: "ship-rule", Description: "d", Type: TypeConstraint,
 		Scope: FactScopeProject, Body: "never ship on a friday",
-		Galaxy: "  release   process ", Importance: 3, Strength: 54.5, LastUsedAt: used, Uses: 6,
+		Galaxy: "  release   process ", Importance: 3, Strength: 54.5, LastUsedAt: time.Now(), Uses: 6,
 	}
-	got := parseMemory("ship-rule.md", []byte(render(m, "ship-rule")))
-	if got.Type != TypeConstraint || got.Galaxy != "release process" || got.Importance != 3 || got.Strength != 54.5 || !got.LastUsedAt.Equal(used) || got.Uses != 6 {
+	out := render(m, "ship-rule")
+	got := parseMemory("ship-rule.md", []byte(out))
+	if got.Type != TypeConstraint || got.Galaxy != "release process" || got.Importance != 3 {
 		t.Fatalf("round trip lost a field: %+v", got)
+	}
+	if strings.Contains(out, "strength") || strings.Contains(out, "uses") || strings.Contains(out, "last_used") {
+		t.Fatalf("usage state belongs in the usage file, not the fact file:\n%s", out)
 	}
 }
 
@@ -65,10 +68,9 @@ func TestConstraintsPinnedAndEvergreenNeverDecay(t *testing.T) {
 }
 
 func TestAnUpdateThatOmitsTheNewFieldsKeepsThem(t *testing.T) {
-	used := time.Now().UTC()
-	existing := Memory{Galaxy: "release", Importance: 3, Strength: 80, LastUsedAt: used, Uses: 4}
+	existing := Memory{Galaxy: "release", Importance: 3}
 	got := inheritOnUpdate(Memory{}, existing, false)
-	if got.Galaxy != "release" || got.Importance != 3 || got.Strength != 80 || !got.LastUsedAt.Equal(used) || got.Uses != 4 {
+	if got.Galaxy != "release" || got.Importance != 3 {
 		t.Fatalf("an update dropped state: %+v", got)
 	}
 	got = inheritOnUpdate(Memory{Galaxy: "other", Importance: 1}, existing, false)

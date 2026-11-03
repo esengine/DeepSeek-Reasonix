@@ -75,6 +75,7 @@ func (s Store) ListActive() (ListReport, error) {
 			report.Facts = append(report.Facts, memory)
 		}
 	}
+	report.Facts = s.withUsage(report.Facts)
 	slices.SortFunc(report.Facts, func(a, b Memory) int {
 		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Scope, b.Scope), cmp.Compare(a.ID, b.ID))
 	})

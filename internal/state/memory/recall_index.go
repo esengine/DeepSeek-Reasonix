@@ -14,6 +14,7 @@ import (
 type RecallIndex struct {
 	docs    []autoRecallDoc
 	fielded []retrieval.FieldedDoc // V2 shadow pool, prebuilt field split
+	links   map[string]float64
 	// unreadable names the fact files that exist but could not be read while
 	// this index was built. They are carried, not treated as absent: a turn
 	// still recalls from the facts that did load and the audit names the rest.
@@ -33,7 +34,7 @@ func BuildRecallIndex(store Store) (*RecallIndex, error) {
 	if len(memories) == 0 && len(report.Unreadable) == 0 {
 		return nil, nil
 	}
-	index := &RecallIndex{unreadable: report.Unreadable}
+	index := &RecallIndex{unreadable: report.Unreadable, links: store.links()}
 	for _, memory := range memories {
 		index.fielded = append(index.fielded, retrieval.FieldedDoc{ID: memory.ID, Fields: map[string]string{
 			"name": memory.Name, "title": memory.Title, "keywords": memory.Keywords,

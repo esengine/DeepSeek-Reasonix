@@ -261,9 +261,7 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 		if freshness == FreshnessExpired {
 			continue
 		}
-		if freshness == FreshnessStale {
-			score *= 0.92
-		}
+		score *= retentionWeight(doc.memory.Retention(now))
 		hits = append(hits, RecallHit{
 			Memory:    doc.memory,
 			Score:     score,
@@ -292,6 +290,7 @@ func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptio
 		result.OmittedByLimit = len(hits) - limit
 		hits = hits[:limit]
 	}
+	hits = append(hits, neighborsOf(hits, docs, index.links, now)...)
 	hits = append(constraints, withoutHits(hits, constraints)...)
 
 	result.Hits, result.block, result.OmittedByBudget = buildRecallBlock(hits, result.CharBudget, result.OmittedByLimit)

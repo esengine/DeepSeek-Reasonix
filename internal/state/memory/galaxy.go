@@ -2,9 +2,7 @@ package memory
 
 import (
 	"math"
-	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -76,27 +74,4 @@ func (m Memory) StrengthDays() float64 {
 		return m.Strength
 	}
 	return InitialStrengthDays(m)
-}
-
-func parseStrength(value string) float64 {
-	f, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-	if err != nil || f <= 0 || math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	return f
-}
-
-func parseUses(value string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
-
-func timeOrZero(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339Nano)
 }
