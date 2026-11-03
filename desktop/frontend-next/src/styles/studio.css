@@ -2220,7 +2220,7 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 .studio-mode-picker,
 .studio-effort-picker,
 .model-picker { gap: 5px; padding-inline: 7px !important; font-size: calc(10px * var(--fs-scale, 1)) !important; font-weight: 500 !important; }
-.studio-mode-picker { min-height: 32px !important; font-size: calc(11px * var(--fs-scale, 1)) !important; }
+.studio-mode-picker { min-height: 28px !important; font-size: calc(11px * var(--fs-scale, 1)) !important; }
 .studio-mode-picker > .studio-icon:first-child {
   width: 15px;
   height: 15px;
@@ -2324,9 +2324,9 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 
 .studio-attach {
   position: relative;
-  width: 29px !important;
-  min-width: 29px !important;
-  height: 29px !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
   padding: 0 !important;
   display: grid;
   place-items: center;
@@ -2383,8 +2383,8 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 
 .compose { border-radius: var(--r-lg); }
 .compose .mode { font-family: var(--ui); }
-.compose .studio-branch { min-height: 29px; padding-inline: 6px; font-size: calc(10px * var(--fs-scale, 1)); }
-.compose .policy > .mode { min-height: 32px; padding-inline: 7px; font-size: calc(10px * var(--fs-scale, 1)); }
+.compose .studio-branch { min-height: 28px; padding-inline: 6px; font-size: calc(10px * var(--fs-scale, 1)); }
+.compose .policy > .mode { min-height: 28px; padding-inline: 7px; font-size: calc(10px * var(--fs-scale, 1)); }
 .btn.send { width: 32px; height: 32px; }
 
 .pane, .compose { container: conversation / inline-size; }
@@ -2397,7 +2397,7 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
   .studio-branch-pop .studio-branch .lb,
   .studio-branch-pop .studio-branch small { display: none; }
   .studio-model-control { max-width: clamp(84px, 28cqw, 142px); }
-  .studio-mode-picker { width: 30px; justify-content: center; padding-inline: 0 !important; }
+  .studio-mode-picker { width: 28px; justify-content: center; padding-inline: 0 !important; }
   .studio-mode-picker > span:not(.studio-sr-label),
   .studio-mode-picker > .studio-icon:last-child { display: none; }
 }
