@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -45,9 +46,7 @@ func readUsage(dir string) usageData {
 	if json.Unmarshal(raw, &parsed) != nil {
 		return data
 	}
-	for id, rec := range parsed.Facts {
-		data.Facts[id] = rec
-	}
+	maps.Copy(data.Facts, parsed.Facts)
 	for key, w := range parsed.Links {
 		if w > 0 && !math.IsNaN(w) && !math.IsInf(w, 0) {
 			data.Links[key] = w
