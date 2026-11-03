@@ -36,15 +36,16 @@ type Store struct {
 type Type string
 
 const (
-	TypeUser      Type = "user"      // who the user is: role, preferences, expertise
-	TypeFeedback  Type = "feedback"  // guidance on how to work (with why + how-to-apply)
-	TypeProject   Type = "project"   // ongoing work / goals / constraints not in the code
-	TypeReference Type = "reference" // pointers to external resources (URLs, tickets)
+	TypeUser       Type = "user"
+	TypeFeedback   Type = "feedback"
+	TypeProject    Type = "project"
+	TypeReference  Type = "reference"
+	TypeConstraint Type = "constraint"
 )
 
 // validTypes is the closed set the `remember` tool accepts; anything else
 // normalises to TypeProject.
-var validTypes = map[Type]bool{TypeUser: true, TypeFeedback: true, TypeProject: true, TypeReference: true}
+var validTypes = map[Type]bool{TypeUser: true, TypeFeedback: true, TypeProject: true, TypeReference: true, TypeConstraint: true}
 
 // NormalizeType coerces an arbitrary string to a known Type, defaulting to
 // TypeProject so a sloppy tool argument never blocks a save.
@@ -92,7 +93,12 @@ type Memory struct {
 	ExpiresAt      time.Time  // hard freshness boundary; zero = never expires
 	LastVerifiedAt time.Time  // last explicit confirmation; renews the freshness clock
 	Keywords       string     // search aliases (bilingual synonyms, related commands); recall-only, never rendered into the index
-	Body           string     // the fact itself (Markdown)
+	Galaxy         string
+	Importance     int
+	Strength       float64
+	LastUsedAt     time.Time
+	Uses           int
+	Body           string
 }
 
 // ArchivedMemory is a saved fact that has been removed from active memory but

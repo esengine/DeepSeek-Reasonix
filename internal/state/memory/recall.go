@@ -301,6 +301,10 @@ func formatMemory(_ Store, m Memory) string {
 	if desc := oneLine(m.Description); desc != "" {
 		fmt.Fprintf(&b, "description: %s\n", desc)
 	}
+	if g := NormalizeGalaxy(m.Galaxy); g != "" {
+		fmt.Fprintf(&b, "galaxy: %s\n", g)
+	}
+	fmt.Fprintf(&b, "importance: %d\n", m.ResolvedImportance())
 	fmt.Fprintf(&b, "reference: %s\n\n%s", providerMemoryReference(m), strings.TrimSpace(m.Body))
 	return strings.TrimSpace(b.String())
 }

@@ -30,6 +30,8 @@ type rememberRequest struct {
 	ExpiresAt        string `json:"expires_at"`
 	Verified         bool   `json:"verified"`
 	Keywords         string `json:"keywords"`
+	Galaxy           string `json:"galaxy"`
+	Importance       int    `json:"importance"`
 	Body             string `json:"body"`
 }
 
@@ -64,13 +66,15 @@ func (rememberTool) Schema() json.RawMessage {
 			"name": {"type": "string", "description": "Stable project/<name>.md or global/<name>.md reference returned by memory search/read/list, or a short kebab-case slug for a new fact. Reusing a reference updates that exact memory. Omit to derive a new slug from the description."},
 			"title": {"type": "string", "description": "Short human-readable label shown in the memory index, e.g. \"Prefers tabs\". Omit to derive one from the name."},
 			"description": {"type": "string", "description": "One-line hook shown in the index — the phrase a future session reads to decide whether to open this memory. Make it specific."},
-			"type": {"type": "string", "enum": ["user", "feedback", "project", "reference"], "description": "Category of the fact."},
+			"type": {"type": "string", "enum": ["user", "feedback", "project", "reference", "constraint"], "description": "Category of the fact. Use constraint for a rule that must always hold, such as something never to do: it is always recalled and never fades."},
 			"scope": {"type": "string", "enum": ["project", "global"], "description": "Where the fact applies. For a new fact, omit for the safe default, project. When updating an existing name, omit to preserve its current scope. Use global only when it should affect every workspace."},
 			"activation": {"type": "string", "enum": ["relevant", "pinned"], "description": "How the fact reaches the model: relevant (the default) is retrieval-only; pinned loads the body into every session's stable prefix. Use pinned ONLY when the user explicitly asks for an always-available fact — pinned space is budget-limited, and rules that must always hold belong in REASONIX.md/AGENTS.md instructions instead. Omit on update to preserve the current choice."},
 			"volatility": {"type": "string", "enum": ["evergreen", "stable", "volatile"], "description": "How fast the fact ages, independent of type: volatile for facts that die in days (a current release branch, this week's task), stable for slow-changing ones, evergreen for facts that never age (a README location, a fixed preference). Omit to use the type default, or on update to preserve the current choice."},
 			"subject_key": {"type": "string", "description": "Dotted key naming the question this fact answers, e.g. project.package_manager, project.release_branch, user.response_style. One active value per scope+subject: saving a new fact for a held subject is rejected with the holder's id — update that id so the change becomes a revision, not a contradiction. Search existing memories first and reuse their keys; omit for narrative facts that are not a single-valued answer."},
 			"expires_at": {"type": "string", "description": "Hard expiry as RFC3339 or YYYY-MM-DD. Past this moment the fact stops being auto-recalled entirely. Set it when the fact has a known end of life. Omit on update to preserve; \"never\" clears an existing expiry."},
 			"verified": {"type": "boolean", "description": "Set true only when you have JUST re-confirmed the fact still holds (checked the file, ran the command). Renews the freshness clock without changing the meaning of updated_at."},
+			"galaxy": {"type": "string", "description": "Short name of the group of related facts this one belongs to, e.g. \"release process\". Reuse an existing galaxy name when one fits; omit when none does."},
+			"importance": {"type": "integer", "enum": [1, 2, 3], "description": "How much the fact matters: 1 low, 2 normal (default), 3 high. Higher importance is recalled first and fades more slowly."},
 			"keywords": {"type": "string", "description": "Space-separated search aliases a future query might use where the body's own words would miss: synonyms, translations of key terms (recall matching is lexical, so give Chinese facts English aliases and vice versa), related command or tool names. Omit when the body already carries the likely query words. When updating, omit to preserve existing keywords."},
 			"body": {"type": "string", "description": "The fact itself (Markdown). For feedback/project, include a \"**Why:**\" line and a \"**How to apply:**\" line; link related memories with [[their-name]]."}
 		},
@@ -122,6 +126,8 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 		ExpiresAt:      expiresAt,
 		LastVerifiedAt: verifiedAt,
 		Keywords:       in.Keywords,
+		Galaxy:         NormalizeGalaxy(in.Galaxy),
+		Importance:     NormalizeImportance(in.Importance),
 		Body:           in.Body,
 	}, SaveOptions{
 		ExpectedRevision:        in.ExpectedRevision,

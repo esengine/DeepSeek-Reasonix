@@ -15,19 +15,24 @@ import (
 // value containing ": ", '#', or quotes is escaped instead of corrupting the
 // block; plain values render byte-identically to the previous hand-built form.
 type memoryFrontmatter struct {
-	ID             string `yaml:"id,omitempty"`
-	Revision       int    `yaml:"revision,omitempty"`
-	CreatedAt      string `yaml:"created_at,omitempty"`
-	UpdatedAt      string `yaml:"updated_at,omitempty"`
-	Name           string `yaml:"name"`
-	Title          string `yaml:"title,omitempty"`
-	Desc           string `yaml:"description"`
-	Keywords       string `yaml:"keywords,omitempty"`
-	Activation     string `yaml:"activation,omitempty"`
-	Volatility     string `yaml:"volatility,omitempty"`
-	SubjectKey     string `yaml:"subject_key,omitempty"`
-	ExpiresAt      string `yaml:"expires_at,omitempty"`
-	LastVerifiedAt string `yaml:"last_verified_at,omitempty"`
+	ID             string  `yaml:"id,omitempty"`
+	Revision       int     `yaml:"revision,omitempty"`
+	CreatedAt      string  `yaml:"created_at,omitempty"`
+	UpdatedAt      string  `yaml:"updated_at,omitempty"`
+	Name           string  `yaml:"name"`
+	Title          string  `yaml:"title,omitempty"`
+	Desc           string  `yaml:"description"`
+	Keywords       string  `yaml:"keywords,omitempty"`
+	Galaxy         string  `yaml:"galaxy,omitempty"`
+	Importance     int     `yaml:"importance,omitempty"`
+	Strength       float64 `yaml:"strength,omitempty"`
+	LastUsedAt     string  `yaml:"last_used_at,omitempty"`
+	Uses           int     `yaml:"uses,omitempty"`
+	Activation     string  `yaml:"activation,omitempty"`
+	Volatility     string  `yaml:"volatility,omitempty"`
+	SubjectKey     string  `yaml:"subject_key,omitempty"`
+	ExpiresAt      string  `yaml:"expires_at,omitempty"`
+	LastVerifiedAt string  `yaml:"last_verified_at,omitempty"`
 	Metadata       struct {
 		Type     string `yaml:"type"`
 		FactType string `yaml:"fact_type,omitempty"`
@@ -42,6 +47,7 @@ func render(m Memory, name string) string {
 		Keywords: oneLine(m.Keywords), Activation: string(NormalizeActivation(string(m.Activation))),
 		Volatility: string(NormalizeVolatility(string(m.Volatility))),
 		SubjectKey: NormalizeSubjectKey(m.SubjectKey),
+		Galaxy:     NormalizeGalaxy(m.Galaxy), Importance: NormalizeImportance(m.Importance), Strength: m.Strength, LastUsedAt: timeOrZero(m.LastUsedAt), Uses: max(m.Uses, 0),
 	}
 	if !m.CreatedAt.IsZero() {
 		fm.CreatedAt = m.CreatedAt.UTC().Format(time.RFC3339Nano)

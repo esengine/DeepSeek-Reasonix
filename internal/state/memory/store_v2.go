@@ -152,6 +152,21 @@ func inheritOnUpdate(m Memory, existing Memory, clearExpiry bool) Memory {
 	if strings.TrimSpace(m.Keywords) == "" {
 		m.Keywords = existing.Keywords
 	}
+	if NormalizeGalaxy(m.Galaxy) == "" {
+		m.Galaxy = existing.Galaxy
+	}
+	if NormalizeImportance(m.Importance) == 0 {
+		m.Importance = existing.Importance
+	}
+	if m.Strength <= 0 {
+		m.Strength = existing.Strength
+	}
+	if m.LastUsedAt.IsZero() {
+		m.LastUsedAt = existing.LastUsedAt
+	}
+	if m.Uses == 0 {
+		m.Uses = existing.Uses
+	}
 	return m
 }
 
