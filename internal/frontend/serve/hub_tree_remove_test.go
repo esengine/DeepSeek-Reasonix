@@ -83,7 +83,7 @@ func TestExportSessionReadsOnlyAKnownWorkspaceTranscript(t *testing.T) {
 	}
 	link := filepath.Join(SessionDirFor(root), "linked.jsonl")
 	if err := os.Symlink(outside, link); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	linked := postExportSession(t, srv, link)
 	defer linked.Body.Close()

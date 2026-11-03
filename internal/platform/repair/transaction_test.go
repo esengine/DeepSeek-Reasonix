@@ -256,7 +256,7 @@ func TestUndoLastRepairRejectsLinkDifferentFromVerifiedBackup(t *testing.T) {
 	}
 	quarantine := configPath + ".reasonix-quarantine-20260714T000000Z"
 	if err := os.Symlink(linkTarget, quarantine); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	if err := os.WriteFile(configPath, []byte("current"), 0o600); err != nil {
 		t.Fatal(err)
@@ -297,7 +297,7 @@ func TestReadLastRepairRejectsRestoreBackupParentSymlinkEscape(t *testing.T) {
 	}
 	outside := testenv.TempDir(t)
 	if err := os.Symlink(outside, restoreRoot); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	previous := filepath.Join(restoreRoot, "forged.toml")
 	if err := os.WriteFile(filepath.Join(outside, "forged.toml"), []byte("outside"), 0o600); err != nil {
@@ -337,7 +337,7 @@ func TestUndoLastRepairRestoresSymlink(t *testing.T) {
 	quarantine := configPath + ".reasonix-quarantine-20260714T000000Z"
 	// The repair's os.Rename moves the link itself into quarantine.
 	if err := os.Symlink(linkTarget, quarantine); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	// The repair then materialized a regular replacement config.
 	if err := os.WriteFile(configPath, []byte("repaired"), 0o600); err != nil {
@@ -378,7 +378,7 @@ func TestUndoLastRepairRestoresDanglingSymlink(t *testing.T) {
 	linkTarget := filepath.Join(testenv.TempDir(t), "missing-config.toml")
 	quarantine := configPath + ".reasonix-quarantine-20260714T000000Z"
 	if err := os.Symlink(linkTarget, quarantine); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	tx := newRepairTransaction(time.Now())
 	tx.Changes = []RepairChange{repairChangeForPrevious("global", configPath, quarantine)}

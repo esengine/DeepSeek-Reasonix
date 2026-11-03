@@ -930,7 +930,7 @@ func TestRestoreConfigSnapshotPreservesSymlinkThroughUndo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(dotfiles, dest); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	if err := RecordHealthyConfig("v1"); err != nil {
 		t.Fatal(err)
@@ -1034,7 +1034,7 @@ func TestRestoreConfigSnapshotCrossDeviceCleanupRestoresSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(dotfiles, dest); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	if err := RecordHealthyConfig("v1"); err != nil {
 		t.Fatal(err)
