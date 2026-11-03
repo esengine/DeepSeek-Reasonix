@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"reasonix/internal/base/retrieval"
 )
@@ -15,6 +16,7 @@ const (
 	constraintFloor    = 0.08
 	maxConstraintsHeld = 3
 	galaxySeeds        = 3
+	minGalaxyNameRunes = 2
 )
 
 func importanceWeight(m Memory) float64 {
@@ -33,7 +35,7 @@ func touchedGalaxies(query string, hits []RecallHit, docs []autoRecallDoc) map[s
 	touched := map[string]bool{}
 	for _, doc := range docs {
 		g := NormalizeGalaxy(doc.memory.Galaxy)
-		if g != "" && strings.Contains(lower, strings.ToLower(g)) {
+		if utf8.RuneCountInString(g) >= minGalaxyNameRunes && strings.Contains(lower, strings.ToLower(g)) {
 			touched[g] = true
 		}
 	}
