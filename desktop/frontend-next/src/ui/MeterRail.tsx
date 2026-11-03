@@ -87,7 +87,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
       </div>
       <div className="studio-overview-anchor" ref={overviewRef} data-open={overviewOpen ? "" : undefined}>
         <button className="studio-meter-cache" type="button" data-action="metrics.details" data-value="overview" aria-expanded={overviewOpen} aria-haspopup="dialog" aria-label={t("查看会话概览")} title={cacheRate === null ? t("尚无缓存数据") : t("命中 {hit} · 未命中 {miss}", { hit: metrics.hit.toLocaleString(), miss: metrics.miss.toLocaleString() })} onClick={() => { setMeterOpen(false); setOverviewOpen((open) => !open); }}>
-          <span>{t("缓存")}</span><b>{cacheRate === null ? "—" : `${cacheRate}%`}</b>
+          <StudioIcon name="bolt" /><span>{t("缓存")}</span><b>{cacheRate === null ? "—" : `${cacheRate}%`}</b>
         </button>
         <SessionOverviewCard className="studio-overview-popover" usage={usage} quote={quote} ctx={ctx} hideAmounts={hideAmounts} onContext={ctx && ctx.window > 0 ? () => { setOverviewOpen(false); setMeterOpen(true); } : undefined} />
       </div>
@@ -108,7 +108,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
         </div>
       )}
       {tariff && <TariffChip tariff={tariff} onFlip={onTariffFlip ?? (() => {})} />}
-      {cost.length > 0 && <span className="studio-meter-cost"><span>{t("本会话")}</span>{hideAmounts ? <b>{MASK}</b> : cost.map((m) => <b key={m.currency}>{money(m.amount, m.currency)}</b>)}</span>}
+      {cost.length > 0 && <span className="studio-meter-cost"><StudioIcon name="coin" /><span>{t("本会话")}</span>{hideAmounts ? <b>{MASK}</b> : cost.map((m) => <b key={m.currency}>{money(m.amount, m.currency)}</b>)}</span>}
       {cost.length > 0 && turnCost.some((m) => m.amount > 0) && <span className="studio-meter-cost"><span>{t("本轮")}</span>{hideAmounts ? <b>{MASK}</b> : turnCost.map((m) => <b key={m.currency}>{money(m.amount, m.currency)}</b>)}</span>}
       <button className="studio-meter-mask" type="button" data-action="metrics.hide-amounts" aria-pressed={hideAmounts} aria-label={hideAmounts ? t("显示金额") : t("隐藏金额")} title={hideAmounts ? t("显示金额") : t("隐藏金额")} onClick={() => setHidesAmounts(!hideAmounts)}><StudioIcon name={hideAmounts ? "eyeoff" : "eye"} /></button>
       {wallet.kind === "read" && <button className="studio-meter-wallet" data-short={wallet.reading.available ? undefined : "true"} title={wallet.reading.available ? undefined : t("余额不足")} data-action="settings.section" data-value="usage" aria-label={wallet.reading.available ? t("查看钱包余额") : `${t("查看钱包余额")}, ${t("余额不足")}`} onClick={() => onSettings("usage")}><StudioIcon name="wallet" /><b>{hideAmounts ? MASK : wallet.reading.display}</b></button>}

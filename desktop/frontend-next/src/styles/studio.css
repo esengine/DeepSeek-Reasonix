@@ -4186,3 +4186,7 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 .studio-meter-context[data-level="high"] { color: var(--warn-ink); }
 .studio-meter-context[data-level="high"] .studio-context-ring { background: conic-gradient(var(--warn) var(--fill), var(--border) 0); }
 :root[data-theme="light"] .studio-meter-context[data-level="high"] .studio-context-ring { background: conic-gradient(var(--warn) var(--fill), var(--border) 0); }
+.studio-meterrail .studio-icon { width: 12px; height: 12px; flex: none; color: var(--faint); }
+.studio-meterrail b { color: var(--text); }
+.studio-meter-cache > span, .studio-meter-cost > span:not(.studio-icon), .studio-meter-context > span:not(.studio-context-ring) { color: var(--faint); }
+.studio-meter-context[data-level="high"] b { color: var(--warn-ink); }
