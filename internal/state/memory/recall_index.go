@@ -44,11 +44,17 @@ func BuildRecallIndex(store Store) (*RecallIndex, error) {
 		if len(terms) == 0 {
 			continue
 		}
+		mainTerms := retrieval.Tokens(autoRecallMainText(memory))
+		aliasTerms := retrieval.Tokens(memory.Keywords)
 		index.docs = append(index.docs, autoRecallDoc{
-			memory: memory,
-			text:   text,
-			counts: retrieval.Counts(terms),
-			length: len(terms),
+			memory:      memory,
+			text:        text,
+			counts:      retrieval.Counts(terms),
+			length:      len(terms),
+			mainCounts:  retrieval.Counts(mainTerms),
+			mainLength:  len(mainTerms),
+			aliasCounts: retrieval.Counts(aliasTerms),
+			aliasLength: len(aliasTerms),
 		})
 	}
 	return index, nil
