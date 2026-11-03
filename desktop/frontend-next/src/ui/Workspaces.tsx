@@ -34,7 +34,7 @@ import { NO_PAGING, atCap, sessionCount, answers, unloaded, type TreePaging, typ
 import { SessionBatch, useSelectedRows } from "./SessionBatch";
 import { ProjectsHeader } from "./ProjectsHeader";
 import { useWorkspaceDrag } from "./useWorkspaceDrag";
-import { SessionAge } from "./SessionAge";
+import { SessionTail } from "./SessionAge";
 import { SessionArchiveAction, SessionPinAction } from "./SessionRowActions";
 import { useSessionMutation, type SessionMutation } from "./useSessionMutation";
 
@@ -618,9 +618,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                           </span>
                         )}
                         <PeerThreadMark path={session.path} />
-                        {run === "running" || run === "halt"
-                          ? <span className="sessword" data-run={run}>{t(run === "running" ? "运行中" : "等你确认")}</span>
-                          : <SessionAge at={session.lastActiveAt} unread={session.unread} />}
+                        <SessionTail run={run} at={session.lastActiveAt} unread={session.unread} />
                         {kept.length > 0 && (
                           <button
                             className="sesscopies"
