@@ -47,6 +47,10 @@ const (
 // normalises to TypeProject.
 var validTypes = map[Type]bool{TypeUser: true, TypeFeedback: true, TypeProject: true, TypeReference: true, TypeConstraint: true}
 
+func ValidType(s string) bool {
+	return validTypes[Type(strings.ToLower(strings.TrimSpace(s)))]
+}
+
 // NormalizeType coerces an arbitrary string to a known Type, defaulting to
 // TypeProject so a sloppy tool argument never blocks a save.
 func NormalizeType(s string) Type {
@@ -98,6 +102,7 @@ type Memory struct {
 	Strength       float64
 	LastUsedAt     time.Time
 	Uses           int
+	ReviewedAt     time.Time
 	Body           string
 }
 

@@ -19,6 +19,14 @@ export interface MemoryEntry {
   expired?: boolean;
   usedLastTurn?: boolean;
   why?: string;
+  galaxy?: string;
+  importance?: number;
+  state?: "clear" | "fuzzy" | "faded";
+  uses?: number;
+  lastUsedAt?: string;
+  clearForDays?: number;
+  noDecay?: boolean;
+  new?: boolean;
 }
 
 // A memory file that is present but could not be read. It is reported beside
@@ -46,4 +54,7 @@ export interface MemoryEdit {
   body: string;
   activation: string;
   keywords?: string;
+  galaxy?: string;
+  importance?: number;
+  type?: string;
 }

@@ -293,7 +293,34 @@ func (m *memoryManager) saveMemory(fact memory.Memory) (string, error) {
 	m.applyWrite(mem,
 		"Saved memory \""+fact.Name+"\": "+strings.Join(strings.Fields(fact.Description), " ")+"\n"+strings.TrimSpace(fact.Body),
 		result.Memory)
+	if err := mem.Store.MarkReviewed(result.Memory, time.Now()); err != nil {
+		return result.Path, err
+	}
 	return result.Path, nil
+}
+
+func (m *memoryManager) confirm(name string) error {
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+	mem := m.current()
+	if mem == nil {
+		return memory.ErrNoSuchFact
+	}
+	report, err := mem.Store.ListActive()
+	if err != nil {
+		return err
+	}
+	for _, fact := range report.Facts {
+		if fact.Name != name && fact.ID != name {
+			continue
+		}
+		now := time.Now()
+		if err := mem.Store.RecordUse([]memory.Memory{fact}, false, now); err != nil {
+			return err
+		}
+		return mem.Store.MarkReviewed(fact, now)
+	}
+	return memory.ErrNoSuchFact
 }
 
 // forget removes a saved auto-memory by name — the panel/TUI forget action, the

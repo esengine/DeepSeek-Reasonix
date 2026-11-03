@@ -257,6 +257,7 @@ export interface AgentPort extends WorkspacePreviewPort, SessionTailPort, Upload
   usage(query: UsageQuery): Promise<UsageReport>;
   // Archives rather than deletes: a fact dropped by mistake stays recoverable.
   forgetMemory(name: string): Promise<void>;
+  confirmMemory(name: string): Promise<void>;
   saveMemory(edit: MemoryEdit): Promise<void>;
   // Every save keeps the version it replaced. These are what let a reader see
   // that history and step back into it; restoring appends rather than rewinds,

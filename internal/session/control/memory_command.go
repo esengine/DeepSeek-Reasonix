@@ -567,6 +567,10 @@ func (c *Controller) ForgetMemory(name string) error {
 	return c.memory.forget(name)
 }
 
+func (c *Controller) ConfirmMemory(name string) error {
+	return c.memory.confirm(name)
+}
+
 // QueueMemory implements memory.Queue: when the model runs the remember/forget
 // tool, the tool calls this with the typed facts it wrote. The write refreshes
 // the snapshot a memory panel reads and records those facts as delivered, so the

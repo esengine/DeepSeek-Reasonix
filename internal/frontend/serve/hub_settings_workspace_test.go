@@ -103,7 +103,7 @@ func TestMachineSettingsSelectLocalWorkspace(t *testing.T) {
 	replacement := open("replacement", "home/chat-b")
 	read(replacement.ID, "replacement")
 	for _, id := range []string{second.ID, remote.ID, "missing"} {
-		for _, path := range []string{"/memory/save", "/memory/forget", "/memory/restore"} {
+		for _, path := range []string{"/memory/save", "/memory/forget", "/memory/confirm", "/memory/restore"} {
 			w := request(id, http.MethodPost, path, `{"name":"fact","body":"wrong","revision":1}`, http.StatusServiceUnavailable)
 			if !strings.Contains(w.Body.String(), `"settings.local_runtime_required"`) {
 				t.Fatalf("invalid owner %s: %s", id, w.Body.String())

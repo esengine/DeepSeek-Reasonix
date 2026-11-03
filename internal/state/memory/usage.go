@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
 	"maps"
 	"math"
 	"os"
@@ -26,6 +27,7 @@ type usageRecord struct {
 	Strength   float64   `json:"strength,omitempty"`
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 	Uses       int       `json:"uses,omitempty"`
+	ReviewedAt time.Time `json:"reviewed_at,omitempty"`
 }
 
 type usageData struct {
@@ -101,6 +103,9 @@ func applyUsage(memories []Memory, byDir map[string]usageData, dirOf func(Memory
 		}
 		if rec.Uses > 0 {
 			memories[i].Uses = rec.Uses
+		}
+		if !rec.ReviewedAt.IsZero() {
+			memories[i].ReviewedAt = rec.ReviewedAt
 		}
 	}
 }
@@ -209,16 +214,21 @@ func retentionWeight(r float64) float64 {
 	return math.Max(r/RetentionClearMin, fadedWeightFloor)
 }
 
-func (m Memory) Retention(now time.Time) float64 {
-	if m.NoDecay() {
-		return 1
-	}
+func (m Memory) retentionAnchor() time.Time {
 	ref := m.LastUsedAt
 	for _, t := range []time.Time{m.LastVerifiedAt, m.UpdatedAt, m.CreatedAt} {
 		if t.After(ref) {
 			ref = t
 		}
 	}
+	return ref
+}
+
+func (m Memory) Retention(now time.Time) float64 {
+	if m.NoDecay() {
+		return 1
+	}
+	ref := m.retentionAnchor()
 	if ref.IsZero() {
 		return 1
 	}
@@ -292,4 +302,44 @@ func neighborsOf(seeds []RecallHit, docs []autoRecallDoc, links map[string]float
 		out = append(out, RecallHit{Memory: c.doc.memory, Freshness: memoryFreshness(c.doc.memory, now), Reason: "often used together", Snippet: strings.TrimSpace(c.doc.memory.Description)})
 	}
 	return out
+}
+
+const newFactWindow = 14 * 24 * time.Hour
+
+var ErrNoSuchFact = errors.New("memory.not_found")
+
+func (m Memory) AwaitingReview(now time.Time) bool {
+	return m.ReviewedAt.IsZero() && !m.CreatedAt.IsZero() && now.Sub(m.CreatedAt) < newFactWindow
+}
+
+func (m Memory) ClearForDays(now time.Time) int {
+	if m.NoDecay() {
+		return 0
+	}
+	ref := m.retentionAnchor()
+	if ref.IsZero() {
+		ref = now
+	}
+	left := m.StrengthDays()*math.Log(1/RetentionClearMin) - now.Sub(ref).Hours()/24
+	if left <= 0 {
+		return 0
+	}
+	return int(math.Ceil(left))
+}
+
+func (s Store) MarkReviewed(m Memory, now time.Time) error {
+	if (s.Dir == "" && s.GlobalDir == "") || m.ID == "" {
+		return nil
+	}
+	release, err := s.lockMutations()
+	if err != nil {
+		return err
+	}
+	defer release()
+	dir := s.usageDirFor(m)
+	data := readUsage(dir)
+	rec := data.Facts[m.ID]
+	rec.ReviewedAt = now.UTC()
+	data.Facts[m.ID] = rec
+	return writeUsage(dir, data)
 }

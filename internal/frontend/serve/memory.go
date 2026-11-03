@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -29,6 +30,14 @@ type memoryEntry struct {
 	// fact to the behaviour the user just saw.
 	UsedLastTurn bool   `json:"usedLastTurn,omitempty"`
 	Why          string `json:"why,omitempty"`
+	Galaxy       string `json:"galaxy,omitempty"`
+	Importance   int    `json:"importance,omitempty"`
+	State        string `json:"state,omitempty"`
+	Uses         int    `json:"uses,omitempty"`
+	LastUsedAt   string `json:"lastUsedAt,omitempty"`
+	ClearForDays int    `json:"clearForDays,omitempty"`
+	NoDecay      bool   `json:"noDecay,omitempty"`
+	New          bool   `json:"new,omitempty"`
 }
 
 // unreadableMemory is one fact file that is present but could not be read. It
@@ -77,6 +86,9 @@ func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: stamp(m.CreatedAt), UpdatedAt: stamp(m.UpdatedAt),
 			Expired:      !m.ExpiresAt.IsZero() && m.ExpiresAt.Before(now),
 			UsedLastTurn: hit, Why: reason,
+			Galaxy: m.Galaxy, Importance: m.ResolvedImportance(),
+			State: string(m.RetentionState(now)), Uses: m.Uses, LastUsedAt: stamp(m.LastUsedAt),
+			ClearForDays: m.ClearForDays(now), NoDecay: m.NoDecay(), New: m.AwaitingReview(now),
 		})
 	}
 	unreadable := make([]unreadableMemory, 0, len(report.Unreadable))
@@ -113,6 +125,30 @@ func (s *Server) forgetMemory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) confirmMemory(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		missingField(w, "name")
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if s.ctl().Memory() == nil {
+		refuse(w, http.StatusConflict, "memory.unavailable", "memory is not enabled for this session", nil)
+		return
+	}
+	if err := s.ctl().ConfirmMemory(name); err != nil {
+		if errors.Is(err, memory.ErrNoSuchFact) {
+			notFound(w, "memory", name)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func stamp(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -130,6 +166,9 @@ type editable struct {
 	Body        string `json:"body"`
 	Activation  string `json:"activation"`
 	Keywords    string `json:"keywords"`
+	Galaxy      string `json:"galaxy,omitempty"`
+	Importance  int    `json:"importance,omitempty"`
+	Type        string `json:"type,omitempty"`
 }
 
 // saveMemory rewrites one fact in place. The store records it as a new audited
@@ -145,6 +184,14 @@ func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request) {
 	activation := memory.Activation(strings.TrimSpace(edit.Activation))
 	if activation != "" && activation != memory.ActivationRelevant && activation != memory.ActivationPinned {
 		badValue(w, "activation", "relevant, pinned")
+		return
+	}
+	if edit.Importance != 0 && memory.NormalizeImportance(edit.Importance) == 0 {
+		badValue(w, "importance", "1, 2, 3")
+		return
+	}
+	if t := strings.TrimSpace(edit.Type); t != "" && !memory.ValidType(t) {
+		badValue(w, "type", "user, feedback, project, reference, constraint")
 		return
 	}
 	ctl := s.ctl()
@@ -184,6 +231,15 @@ func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request) {
 	current.Keywords = strings.TrimSpace(edit.Keywords)
 	if activation != "" {
 		current.Activation = activation
+	}
+	if g := memory.NormalizeGalaxy(edit.Galaxy); g != "" {
+		current.Galaxy = g
+	}
+	if edit.Importance != 0 {
+		current.Importance = edit.Importance
+	}
+	if t := strings.TrimSpace(edit.Type); t != "" {
+		current.Type = memory.NormalizeType(t)
 	}
 	path, err := ctl.SaveMemory(current)
 	if err != nil {

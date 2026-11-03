@@ -139,12 +139,11 @@ export class MockPort extends MockWorkspace implements AgentPort {
   async saveMemory(edit: MemoryEdit) {
     const at = this.mem.findIndex((m) => m.name === edit.name);
     if (at >= 0) {
-      // Keep what it replaced, the way the store does: a history panel driven
-      // by a fixture that overwrites would show one entry and prove nothing.
-      this.memPast[edit.name] = [...(this.memPast[edit.name] ?? [this.mem[at]]), this.mem[at]];
-      this.mem[at] = { ...this.mem[at], title: edit.title, description: edit.description,
-        body: edit.body, activation: edit.activation, revision: (this.mem[at].revision ?? 1) + 1,
-        updatedAt: new Date().toISOString().slice(0, 10) };
+      const cur = this.mem[at];
+      this.memPast[edit.name] = [...(this.memPast[edit.name] ?? [cur]), cur];
+      this.mem[at] = { ...cur, title: edit.title, description: edit.description, body: edit.body,
+        activation: edit.activation, revision: (cur.revision ?? 1) + 1, updatedAt: new Date().toISOString().slice(0, 10),
+        new: false, galaxy: edit.galaxy || cur.galaxy, importance: edit.importance || cur.importance, type: edit.type || cur.type };
     }
   }
 
@@ -161,8 +160,6 @@ export class MockPort extends MockWorkspace implements AgentPort {
       .map((m) => ({ ...m }));
   }
 
-  // Restoring appends a revision rather than rewinding to one, so the entry a
-  // reader was just looking at is still there afterwards.
   async restoreMemory(name: string, revision: number) {
     const at = this.mem.findIndex((m) => m.name === name);
     const old = (await this.memoryRevisions(name)).find((m) => (m.revision ?? 1) === revision);
@@ -175,6 +172,9 @@ export class MockPort extends MockWorkspace implements AgentPort {
 
   async forgetMemory(name: string) {
     this.mem = this.mem.filter((m) => m.name !== name);
+  }
+  async confirmMemory(name: string) {
+    this.mem = this.mem.map((m) => (m.name === name ? { ...m, new: false, state: "clear", uses: (m.uses ?? 0) + 1 } : m));
   }
 
   async versions(_refresh?: boolean): Promise<VersionHub> {

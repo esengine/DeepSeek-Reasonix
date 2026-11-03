@@ -139,3 +139,43 @@ func TestOftenUsedTogetherBringsANeighbor(t *testing.T) {
 		t.Fatalf("hits = %+v, want the matched fact and its frequent companion", result.Hits)
 	}
 }
+
+func TestANewFactAwaitsReviewUntilMarked(t *testing.T) {
+	store := recallTestStore(t)
+	now := time.Now()
+	m := Memory{ID: "mem-n", Name: "n", Description: "n", Type: TypeProject, Scope: FactScopeProject, Body: "new fact", CreatedAt: now.Add(-time.Hour)}
+	recallTestWrite(t, store.Dir, m)
+	if !m.AwaitingReview(now) {
+		t.Fatal("a fact written an hour ago must await review")
+	}
+	if (Memory{CreatedAt: now.Add(-20 * 24 * time.Hour)}).AwaitingReview(now) {
+		t.Fatal("a fact older than the review window is not new")
+	}
+	if err := store.MarkReviewed(m, now); err != nil {
+		t.Fatal(err)
+	}
+	report, err := store.ListActive()
+	if err != nil || len(report.Facts) != 1 {
+		t.Fatalf("list = %+v, %v", report, err)
+	}
+	if report.Facts[0].AwaitingReview(now) {
+		t.Fatal("a reviewed fact still reads as new")
+	}
+}
+
+func TestClearForDaysCountsDownToTheFuzzyLine(t *testing.T) {
+	now := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	full := int(math.Ceil(30 * math.Log(1/RetentionClearMin)))
+	if got := (Memory{Type: TypeProject, CreatedAt: now}).ClearForDays(now); got != full {
+		t.Fatalf("fresh normal fact = %d days, want %d", got, full)
+	}
+	if got := (Memory{Type: TypeProject, CreatedAt: now.Add(-10 * 24 * time.Hour)}).ClearForDays(now); got != full-10 {
+		t.Fatalf("ten days on = %d, want %d", got, full-10)
+	}
+	if got := (Memory{Type: TypeProject, CreatedAt: now.Add(-60 * 24 * time.Hour)}).ClearForDays(now); got != 0 {
+		t.Fatalf("a fuzzy fact = %d days, want 0", got)
+	}
+	if got := (Memory{Type: TypeConstraint}).ClearForDays(now); got != 0 {
+		t.Fatalf("a constraint = %d days, want 0 since it never decays", got)
+	}
+}

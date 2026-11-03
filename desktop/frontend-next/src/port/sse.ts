@@ -102,6 +102,9 @@ export class SsePort extends SseWorkspace implements AgentPort {
   forgetMemory(name: string) {
     return this.post("/memory/forget", { name });
   }
+  confirmMemory(name: string) {
+    return this.post("/memory/confirm", { name });
+  }
   async memoryRevisions(name: string) {
     const r = await this.get<{ revisions: MemoryEntry[] }>("/memory/revisions?name=" + encodeURIComponent(name));
     return r.revisions ?? [];

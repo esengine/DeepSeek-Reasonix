@@ -20,6 +20,7 @@ func (s *Server) registerMachineSettingsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /memory", s.memories)
 	mux.HandleFunc("POST /memory/forget", s.forgetMemory)
 	mux.HandleFunc("POST /memory/save", s.saveMemory)
+	mux.HandleFunc("POST /memory/confirm", s.confirmMemory)
 	mux.HandleFunc("GET /memory/revisions", s.memoryRevisions)
 	mux.HandleFunc("POST /memory/restore", s.restoreMemory)
 	mux.HandleFunc("GET /network", s.network)

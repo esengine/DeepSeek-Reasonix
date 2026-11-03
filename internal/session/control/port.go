@@ -196,6 +196,7 @@ type MemoryControl interface {
 	SaveDoc(path, body string) (string, error)
 	SaveMemory(m memory.Memory) (string, error)
 	ForgetMemory(name string) error
+	ConfirmMemory(name string) error
 	QueueMemory(note string, delivered ...memory.Memory)
 	MemoryRevisions(ref string) ([]memory.Memory, error)
 	RestoreMemory(ref string, revision int) (memory.Memory, error)
