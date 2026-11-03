@@ -249,6 +249,11 @@ export const EN: Record<string, string> = {
   // ── 运行状态 ─────────────────────────────────────────────────────
   "空闲": "Idle",
   "运行中": "Running",
+  "{m} 分钟": "{m} min",
+  "{h} 小时 {m} 分": "{h}h {m}m",
+  "{h} 小时": "{h}h",
+  "停止？": "Stop?",
+  "确定停止后台任务：{cmd}": "Confirm stopping background task: {cmd}",
   "在工作台打开": "Open in the workbench",
   "资源管理器：改动、提交历史和文件": "Explorer: changes, history and files",
   "这次会话改了哪些文件": "Which files this session changed",

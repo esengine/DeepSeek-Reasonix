@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import "./testkit";
@@ -32,7 +32,24 @@ it("stops a running job from the deck, and offers no stop for one that ended", a
   await userEvent.click(chip());
   expect(screen.queryByRole("button", { name: "停止后台任务：go build" })).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "停止后台任务：npm run tauri:test" }));
+  expect(onCancelJob).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "确定停止后台任务：npm run tauri:test" }));
   expect(onCancelJob).toHaveBeenCalledWith("j1");
+});
+
+it("takes the stop back when it is not confirmed within three seconds", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const onCancelJob = vi.fn().mockResolvedValue(undefined);
+    render(<Host onCancelJob={onCancelJob} />);
+    await userEvent.click(chip());
+    await userEvent.click(screen.getByRole("button", { name: "停止后台任务：npm run tauri:test" }));
+    expect(screen.getByText("停止？")).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(3100); });
+    expect(screen.queryByText("停止？")).toBeNull();
+    expect(screen.getByRole("button", { name: "停止后台任务：npm run tauri:test" })).toBeTruthy();
+    expect(onCancelJob).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
 });
 
 it("closes on a press outside and on Escape, not only on its own chip", async () => {

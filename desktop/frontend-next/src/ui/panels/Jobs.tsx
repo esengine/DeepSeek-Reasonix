@@ -3,6 +3,7 @@ import { t } from "../../i18n";
 import type { JobEntry } from "../../port/port";
 import { StudioIcon } from "../StudioIcon";
 import { JobName, jobName } from "./JobName";
+import { jobElapsed } from "./jobElapsed";
 
 // How an ended job finished, by the kernel's status: only "done" is a success,
 // and a job someone stopped is neither a success nor a fault.
@@ -16,6 +17,13 @@ const ENDED: Record<string, { label: string; tone: string }> = {
 export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: (id: string) => Promise<void>; onView?: (id: string) => void }) {
   const [, tick] = useState(0);
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
+  const [armed, setArmed] = useState("");
+
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(""), 3000);
+    return () => clearTimeout(timer);
+  }, [armed]);
 
   useEffect(() => {
     if (!jobs.some((j) => j.status === "running")) return;
@@ -53,28 +61,44 @@ export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: 
                   <span className="cmd" tabIndex={0}>{jobName(j)}</span>
                 )}
               </JobName>
-              <span className="rt">{running ? `${Math.floor((Date.now() - j.startedAt) / 1000)}s` : ended ? t(ended.label) : j.status}</span>
-              {running && onCancel && (
+              <span className="rt">{running ? jobElapsed(Date.now() - j.startedAt) : ended ? t(ended.label) : j.status}</span>
+              {running && onCancel && (armed === j.id ? (
+                <span className="job-confirm">
+                  <span>{t("停止？")}</span>
+                  <button
+                    type="button"
+                    className="job-stop"
+                    data-action="job.cancel"
+                    data-target={j.id}
+                    disabled={stopping.has(j.id)}
+                    aria-label={t("确定停止后台任务：{cmd}", { cmd: jobName(j) })}
+                    onClick={() => {
+                      setArmed("");
+                      setStopping((prev) => new Set(prev).add(j.id));
+                      void onCancel(j.id).finally(() => setStopping((prev) => {
+                        const next = new Set(prev);
+                        next.delete(j.id);
+                        return next;
+                      }));
+                    }}
+                  >
+                    {t("确定")}
+                  </button>
+                </span>
+              ) : (
                 <button
                   type="button"
                   className="job-stop"
-                  data-action="job.cancel"
+                  data-action="job.arm"
                   data-target={j.id}
                   disabled={stopping.has(j.id)}
                   title={t("停止")}
                   aria-label={t("停止后台任务：{cmd}", { cmd: jobName(j) })}
-                  onClick={() => {
-                    setStopping((prev) => new Set(prev).add(j.id));
-                    void onCancel(j.id).finally(() => setStopping((prev) => {
-                      const next = new Set(prev);
-                      next.delete(j.id);
-                      return next;
-                    }));
-                  }}
+                  onClick={() => setArmed(j.id)}
                 >
                   <StudioIcon name="stop" />
                 </button>
-              )}
+              ))}
             </div>
           );
         })}
