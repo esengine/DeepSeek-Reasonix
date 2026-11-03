@@ -46,7 +46,7 @@ describe("first-run setup can be put off", () => {
     await waitFor(() => expect(document.querySelector(".onb-stage")).toBeNull());
 
     const connect = await screen.findByRole("button", { name: "去连接" });
-    expect(screen.getByText("还没连接模型服务")).toBeTruthy();
+    expect(screen.getByText("还没有连接模型服务，发不出去")).toBeTruthy();
 
     await user.click(connect);
     expect(await screen.findByRole("button", { name: "稍后再说" })).toBeTruthy();

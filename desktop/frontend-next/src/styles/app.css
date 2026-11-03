@@ -3669,7 +3669,8 @@
     font: var(--w-med) var(--fs-meta) var(--ui); text-decoration: underline; text-underline-offset: 3px;
   }
   .stallbar .why { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
-  .posturenote { flex-wrap: wrap; row-gap: 2px; margin: 0 0 9px }
+  .posturenote { flex-wrap: wrap; align-items: center; row-gap: 2px; margin: 0 0 9px }
+  .posturenote > .studio-icon { width: 14px; height: 14px; flex: none }
   .posturenote .why { order: 1; flex-basis: 100% }
   .posturenote button:first-of-type { margin-left: auto }
 
