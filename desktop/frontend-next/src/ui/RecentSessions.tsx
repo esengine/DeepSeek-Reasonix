@@ -53,6 +53,8 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
   }, [hub, view, hideLegacy, retry]);
   const rows = (tree ?? []).flatMap((ws) => ws.sessions.map((session) => ({ ws, session })))
     .sort((a, b) => (b.session.lastActiveAt ?? 0) - (a.session.lastActiveAt ?? 0) || (a.session.path < b.session.path ? -1 : a.session.path > b.session.path ? 1 : 0));
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  const isToday = (at?: number) => !!at && at >= startOfToday;
   const remaining = (tree ?? []).reduce((n, ws) => n + (ws.remaining ?? 0), 0);
   const pick = async (ws: TreeWorkspace, session: TreeSession) => {
     setOpening(true);
@@ -71,23 +73,28 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
       <div className="pickcard recent-sessions">
         <h2>{t("最近的会话")}</h2>
         <p className="recent-description">{t("按最近活动排列，包含已完成的会话。选择后定位到所属项目。")}</p>
-        {hosts.some((host) => !host.disabled) && <label className="recent-machine">{t("运行环境")}
-          <select data-action="session.recent-environment" aria-label={t("运行环境")} value={view.host} disabled={opening} onChange={(event) => setView({ host: event.target.value, q: view.q, offset: 0 })}>
-            <option value="">{t("本机")}</option>
-            {hosts.filter((host) => !host.disabled).map((host) => <option key={host.name} value={host.name}>{host.name}</option>)}
-          </select>
-        </label>}
-        <div className="pickpath"><input data-action="workspace.search" type="search" aria-label={t("搜索最近会话 / 项目")} placeholder={t("搜索最近会话 / 项目")} value={draft} disabled={opening} onChange={(event) => setDraft(event.target.value)} /></div>
+        <div className="recent-filters">
+          <label className="recent-search"><StudioIcon name="search" /><input data-action="workspace.search" type="search" aria-label={t("搜索最近会话 / 项目")} placeholder={t("搜索最近会话 / 项目")} value={draft} disabled={opening} onChange={(event) => setDraft(event.target.value)} /></label>
+          {hosts.some((host) => !host.disabled) && (
+            <select className="recent-machine" data-action="session.recent-environment" aria-label={t("运行环境")} value={view.host} disabled={opening} onChange={(event) => setView({ host: event.target.value, q: view.q, offset: 0 })}>
+              <option value="">{t("本机")}</option>
+              {hosts.filter((host) => !host.disabled).map((host) => <option key={host.name} value={host.name}>{host.name}</option>)}
+            </select>
+          )}
+        </div>
         <div className="picklist" aria-busy={busy} data-busy={busy ? "" : undefined}>
           {!busy && !error && !rows.length && <p className="pickempty">{t("没有匹配的会话")}</p>}
           {busy && <p className="picknote" role="status">{t("正在读取会话…")}</p>}
-          {!busy && !error && rows.map(({ ws, session }) => <button key={session.path} className="pickrow recent-session" disabled={opening}
+          {!busy && !error && rows.map(({ ws, session }, i) => [
+            (i === 0 || isToday(rows[i - 1].session.lastActiveAt) !== isToday(session.lastActiveAt)) && <p key={`g${session.path}`} className="recent-group">{t(isToday(session.lastActiveAt) ? "今天" : "更早")}</p>,
+            <button key={session.path} className="pickrow recent-session" disabled={opening}
             data-action="session.open" data-target={session.path} aria-label={`${session.title || session.name} · ${ws.name}`}
             title={`${session.workspaceRoot || ws.root}\n${session.path}`} onClick={() => void pick(ws, session)}>
             <StudioIcon name="chat" />
             <span className="recent-session-text"><b>{session.title || session.name}</b><small>{ws.name} · {session.workspaceRoot || ws.root}</small></span>
             <SessionAge at={session.lastActiveAt} />
-          </button>)}
+          </button>,
+          ])}
           {error && <><p className="picknote" role="alert">{error}</p><button className="pickgo" data-action="session.recent-retry" onClick={() => setRetry((n) => n + 1)}>{t("重试")}</button></>}
         </div>
         <div className="pickact">

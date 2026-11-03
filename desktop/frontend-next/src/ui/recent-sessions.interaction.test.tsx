@@ -186,3 +186,29 @@ it("keeps failed opens in the picker and reconciles a removed session on retry",
   expect(await screen.findByText("没有匹配的会话")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Removed elsewhere · w" })).toBeNull();
 });
+
+it("sets today's conversations apart from earlier ones under two headings", async () => {
+  const hub = setup();
+  const now = Date.now();
+  hub.tree = async () => [{ root: "/w", name: "w", recentOffset: 0, remaining: 0, sessions: [
+    { path: "/w/a.jsonl", name: "a", title: "right now", lastActiveAt: now },
+    { path: "/w/b.jsonl", name: "b", title: "last week", lastActiveAt: now - 7 * 86_400_000 },
+    { path: "/w/c.jsonl", name: "c", title: "never stamped" },
+  ] }];
+  render(<RecentSessions hub={hub} hosts={[]} onPick={async () => {}} onClose={() => {}} />);
+  const dialog = within(screen.getByRole("dialog", { name: "最近的会话" }));
+  await dialog.findByRole("button", { name: /right now/ });
+  const heads = [...document.querySelectorAll(".recent-group")];
+  expect(heads.map((h) => h.textContent)).toEqual(["今天", "更早"]);
+  const order = [...document.querySelectorAll(".picklist .recent-group, .picklist .recent-session")].map((e) => e.classList.contains("recent-group") ? e.textContent : (e.querySelector("b")?.textContent ?? ""));
+  expect(order).toEqual(["今天", "right now", "更早", "last week", "never stamped"]);
+});
+
+it("names the environment choice by its accessible name alone", async () => {
+  const hub = setup();
+  hub.remoteHosts = async () => [{ name: "gpu-box", host: "x", user: "u" } as never];
+  hub.tree = async () => [];
+  render(<RecentSessions hub={hub} hosts={[{ name: "gpu-box" } as never]} onPick={async () => {}} onClose={() => {}} />);
+  await screen.findByRole("combobox", { name: "运行环境" });
+  expect(document.querySelector(".recent-machine")?.textContent).not.toContain("运行环境");
+});

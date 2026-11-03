@@ -65,8 +65,13 @@
 .studio-session-segments button { font-size: calc(12px * var(--fs-scale, 1)); }
 .studio-session-segments b { font-size: calc(10px * var(--fs-scale, 1)); }
 .recent-description { margin: 0 0 12px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
-.recent-machine { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); }
-.recent-machine select { flex: 1; }
+.recent-filters { display: flex; gap: 8px; margin-bottom: 8px; }
+.recent-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; }
+.recent-search .studio-icon { position: absolute; left: 10px; width: 14px; height: 14px; color: var(--faint); pointer-events: none; }
+.recent-search input { flex: 1; min-width: 0; box-sizing: border-box; height: 32px; padding: 0 10px 0 30px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); }
+.recent-search input:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
+.recent-machine { flex: none; height: 32px; max-width: 140px; }
+.recent-group { text-transform: capitalize; margin: 0; padding: 8px 10px 2px; color: var(--faint); font: var(--w-med) var(--fs-micro)/1.4 var(--ui); }
 .recent-sessions .picklist { min-height: 160px; }
 .recent-session { min-height: 48px; }
 .recent-session .recent-session-text { display: flex; flex: 1; flex-direction: column; gap: 3px; }

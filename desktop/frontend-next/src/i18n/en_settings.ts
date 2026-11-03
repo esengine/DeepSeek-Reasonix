@@ -1424,6 +1424,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "引用「{title}」到输入框": "Reference \"{title}\" in the message box",
   "↑↓ 选择 · 回车添加到这条消息 · Esc 关闭": "↑↓ choose · Enter adds it to this message · Esc closes",
   "把「{name}」移到另一个项目": "Move \"{name}\" to another project",
+  "更早": "Earlier",
   "会带走": "Travels",
   "不会带走": "Stays behind",
   "对话本身": "The conversation itself",
