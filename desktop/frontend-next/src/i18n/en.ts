@@ -246,6 +246,9 @@ export const EN: Record<string, string> = {
   // ── 运行状态 ─────────────────────────────────────────────────────
   "空闲": "Idle",
   "运行中": "Running",
+  "更早的 {n} 项": "{n} earlier steps",
+  "联网": "Network",
+  "子任务": "Subtask",
   "等你确认": "Needs you",
   "只停止这一条调用": "Stop only this call",
   "把结果带到末尾": "Show this result again at the end",

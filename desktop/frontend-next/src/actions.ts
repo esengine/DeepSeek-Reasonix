@@ -444,6 +444,7 @@ export const ACTIONS: UIAction[] = [
   { id: "session.move-to-cancel", kind: "view", target: "none", proof: "interaction" },
   { id: "session.move-to-target", kind: "view", target: "none", proof: "interaction" },
   { id: "session.move-to-add", kind: "view", target: "none", proof: "interaction" },
+  { id: "activity.earlier", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.reorder", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
 
   // ── Taking a change back ─────────────────────────────────────────────────

@@ -26,6 +26,7 @@ import { NoticeCard } from "./cards/NoticeCard";
 import { RememberCard } from "./cards/RememberCard";
 import { ExtensionCard } from "./cards/ExtensionCard";
 import { toolChangedFile, toolFailed } from "./cards/outcome";
+import { foldEarlier } from "./activityEarlier";
 import { NewAnswerLine, useNewAnswerAnchor } from "./NewAnswerLine";
 import { drawn, foldStats, repeatedSpeakers, sameMembers, transcriptRows, type Shown } from "./turnrows";
 import { BroughtResults } from "./BroughtResults";
@@ -649,6 +650,9 @@ const ActivityGroup = memo(function ActivityGroup({
     [gid, onOpened],
   );
   const calls = items.reduce((count, item) => count + (item.t === "reads" ? item.tools.length : 1), 0);
+  const fold = useMemo(() => foldEarlier(items), [items]);
+  const [showEarlier, setShowEarlier] = useState(false);
+  const earlierCalls = fold.kinds.reduce((count, [, n]) => count + n, 0);
   const failures = items.reduce((count, item) => {
     if (item.t === "tool") return count + (toolFailed(item.tool) ? 1 : 0);
     if (item.t === "reads") return count + item.tools.filter(toolFailed).length;
@@ -665,7 +669,14 @@ const ActivityGroup = memo(function ActivityGroup({
         <StudioIcon name="down" className="activity-fold-icon" />
       </summary>
       <div className="activity-body">
-        {items.map((item) => <Row key={item.id} it={item} activity {...rowProps} cp={checkpoints.get(item.id)} />)}
+        {fold.earlier.length > 0 && (
+          <button type="button" className="activity-earlier" data-action="activity.earlier" aria-expanded={showEarlier} onClick={() => setShowEarlier((v) => !v)}>
+            <span>{t("更早的 {n} 项", { n: earlierCalls })}</span>
+            <span className="activity-earlier-kinds">{fold.kinds.map(([verb, n]) => `${verb} ${n}`).join(" · ")}</span>
+            <StudioIcon name="down" />
+          </button>
+        )}
+        {(showEarlier ? items : fold.recent).map((item) => <Row key={item.id} it={item} activity {...rowProps} cp={checkpoints.get(item.id)} />)}
       </div>
       <p className="activity-note">{t("点击步骤可原位查看详情、结果或文件差异")}</p>
     </details>

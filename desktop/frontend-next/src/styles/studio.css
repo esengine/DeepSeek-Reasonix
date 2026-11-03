@@ -4191,3 +4191,8 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 .studio-meterrail b { color: var(--text); }
 .studio-meter-cache > span, .studio-meter-cost > span:not(.studio-icon), .studio-meter-context > span:not(.studio-context-ring) { color: var(--faint); }
 .studio-meter-context[data-level="high"] b { color: var(--warn-ink); }
+.activity-earlier { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); cursor: pointer; text-align: left; }
+.activity-earlier:hover { background: var(--overlay); color: var(--text); }
+.activity-earlier-kinds { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
+.activity-earlier .studio-icon { width: 12px; height: 12px; flex: none; }
+.activity-earlier[aria-expanded="true"] .studio-icon { transform: rotate(180deg); }
