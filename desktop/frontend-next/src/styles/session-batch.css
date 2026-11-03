@@ -1,9 +1,9 @@
-.session-batch button { font: var(--w-med) var(--fs-micro) var(--ui); }
-.session-batch { margin: 4px 12px 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--page); }
+.session-batch button { font: var(--w-reg) var(--fs-meta) var(--ui); }
+.session-batch { position: sticky; bottom: 0; z-index: 2; margin: 4px 0 0; padding: 8px 12px 10px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: var(--float); box-shadow: var(--shadow-float); animation: card var(--m-panel) both; }
 .session-batch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: var(--fs-micro); }
-.session-batch-head button { flex: none; color: var(--muted); background: transparent; padding: 4px; border: 0; border-radius: var(--r-xs); cursor: pointer; }
+.session-batch-head button { flex: none; height: 24px; color: var(--muted); background: transparent; padding: 0 10px; border: 0; border-radius: var(--r-pill); cursor: pointer; }
 .session-batch-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-.session-batch-actions button { padding: 5px 7px; background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-xs); }
+.session-batch-actions button { height: 24px; padding: 0 10px; background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-pill); font-size: var(--fs-meta); }
 .session-batch-actions button:hover:not(:disabled) { background: var(--overlay); }
 .session-batch [data-action="session.batch-delete"] { color: var(--err-ink); }
 .session-batch p { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-micro); }
