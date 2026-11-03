@@ -66,7 +66,7 @@
 .studio-session-segments b { font-size: calc(10px * var(--fs-scale, 1)); }
 .recent-description { margin: 0 0 12px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .recent-machine { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); }
-.recent-machine select { flex: 1; min-width: 0; padding: 5px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-xs); font: var(--w-reg) var(--fs-ui) var(--ui); }
+.recent-machine select { flex: 1; }
 .recent-sessions .picklist { min-height: 160px; }
 .recent-session { min-height: 48px; }
 .recent-session .recent-session-text { display: flex; flex: 1; flex-direction: column; gap: 3px; }

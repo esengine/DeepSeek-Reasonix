@@ -285,7 +285,7 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
       {st.addresses.length > 1 && (
         <label className="pc-row">
           <span>{t("网络")}</span>
-          <select data-action="share.address" value={chosen} disabled={busy} onChange={(e) => pick(e.target.value)}>
+          <select data-size="sm" data-action="share.address" value={chosen} disabled={busy} onChange={(e) => pick(e.target.value)}>
             {st.addresses.map((a) => (
               <option key={a.ip} value={a.ip}>
                 {a.kind === "tailnet" ? `${a.ip} · Tailscale` : a.kind === "virtual" ? `${a.ip} · ${t("虚拟网卡")}` : `${a.ip} · ${a.interface}`}

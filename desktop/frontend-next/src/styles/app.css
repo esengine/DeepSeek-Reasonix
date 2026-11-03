@@ -3053,7 +3053,7 @@
   .mp-source-line { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
   .mp-host { font-family: var(--mono); color: var(--text) }
   .mp-foreign { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px }
-  .mp-row select { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-meta) var(--mono) } .mp-row[data-own] select { border-color: var(--accent) }
+  .mp-row select { font-family: var(--mono) } .mp-row[data-own] select { border-color: var(--accent) }
   .ml-row .me-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-med) var(--fs-ui) var(--mono); color: var(--text) }
   .ml-row input::placeholder { color: var(--ghost) }
   .ml-row[data-own] .unit-field:has(input:not(:placeholder-shown)) { border-color: var(--accent) }
@@ -3065,11 +3065,11 @@
   .addp .fields label.me-default { flex-direction: row; align-items: center; gap: 8px }
   .addp .more { margin-top: 14px }
   .addp .fields span { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
-  .addp .fields input, .addp .fields select, .addp .ml-row input {
+  .addp .fields input, .addp .ml-row input {
     padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--r-xs);
     background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
   }
-  .addp .fields input:focus, .addp .fields select:focus, .addp .ml-row input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .addp .fields input:focus, .addp .ml-row input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .addp .acts { display: flex; align-items: center; gap: 8px; margin-top: 12px }
   .addp .acts-bar {
     position: sticky; bottom: calc(var(--main-pad-b, 0px) * -1); z-index: 2; display: flex; flex-direction: column; gap: 8px;
@@ -3280,12 +3280,12 @@
   .rule[data-blocking] { box-shadow: inset 2px 0 var(--warn) }
   .rule .line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
   .rule .line + .line { margin-top: 8px }
-  .rule select, .rule input {
+  .rule input {
     padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--r-xs);
     background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
   }
   .rule select { width: 200px; max-width: 100%; min-width: 0; text-overflow: ellipsis }
-  .rule select:focus, .rule input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .rule input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .rule .match { flex: 1; min-width: 140px }
   .rule .cmd { display: block; width: 100%; margin-top: 8px }
   .rule .warn {
@@ -3418,12 +3418,12 @@
 
   .raddbox { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--overlay) }
   .raddbox .line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
-  .raddbox select, .raddbox input {
+  .raddbox input {
     padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--r-xs);
     background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
   }
   .raddbox input { flex: 1; min-width: 160px }
-  .raddbox select:focus, .raddbox input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .raddbox input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
 
   .raddbox .preview { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 0; flex-wrap: wrap }
   .raddbox .preview code { font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--text) }
@@ -3459,12 +3459,7 @@
   .rrow .pat { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
   .rrow .pat code { font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--text); word-break: break-all }
   .rrow .pat .says { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
-  .rrow select {
-    flex: none; padding: 3px 6px; border: 1px solid transparent; border-radius: var(--r-xs);
-    background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
-  }
-  .rrow:hover select { border-color: var(--border); background: var(--raised) }
-  .rrow select:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .rrow select { flex: none }
 
   .rrow .act.ghost { opacity: 0; transition: opacity var(--m-line) }
   .rrow:hover .act.ghost, .rrow:focus-within .act.ghost { opacity: 1 }
@@ -3517,11 +3512,11 @@
   .net .fields label.grow { flex: 1; min-width: 150px }
   .net .fields label.full { flex-basis: 100% }
   .net .fields span { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint) }
-  .net .fields input, .net .fields select {
+  .net .fields input {
     padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--r-xs);
     background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
   }
-  .net .fields input:focus, .net .fields select:focus { outline: 2px solid var(--focus); outline-offset: 1px }
+  .net .fields input:focus { outline: 2px solid var(--focus); outline-offset: 1px }
   .net .fields .port { width: 76px }
   .net .fields label.chk { flex-direction: row; align-items: center; gap: 7px; align-self: flex-end; padding-bottom: 7px }
   .net .fields label.chk span { color: var(--muted) }
@@ -4623,17 +4618,13 @@
   .rmtf { display: flex; align-items: center; gap: 10px; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--muted) }
   .rmtf > span { flex: none; width: 13ch }
   .rmthint { margin: -2px 0 2px calc(13ch + 10px); font: var(--w-reg) var(--fs-meta)/1.55 var(--ui); color: var(--faint) }
-  .rmtf select {
-    flex: 1; min-width: 0; padding: 5px 8px; color: var(--text);
-    background: var(--raised); border: 1px solid var(--border); border-radius: var(--r-sm);
-    font: var(--w-reg) var(--fs-ui) var(--ui);
-  }
+  .rmtf select { flex: 1 }
   .rmtf input {
     flex: 1; min-width: 0; padding: 5px 8px;
     border: 1px solid var(--border); border-radius: var(--r-xs);
     background: var(--surface); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--mono);
   }
-  .rmtf input:focus-visible, .rmtf select:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
+  .rmtf input:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
   .rmtck { gap: 8px }
   .rmtkinds { display: flex; gap: 6px; flex: 1; flex-wrap: wrap }
   .rmtkinds button {
@@ -4751,11 +4742,7 @@
     padding-top: 10px; border-top: 1px solid var(--border);
   }
   .pc-row > span { color: var(--ghost) }
-  .pc-row select {
-    min-width: 0; height: 24px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px;
-    background: var(--surface); color: var(--text); font: var(--w-reg) var(--fs-meta)/1 var(--ui);
-  }
-  .pc-row select:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
+  .pc-row select { flex: 1 }
   .phonecard > section { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--border) }
   .pc-hd { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 2px }
   .pc-hd > span { display: grid; gap: 3px; min-width: 0 }
@@ -5434,12 +5421,12 @@
 .memedit { display: flex; flex-direction: column; gap: 10px }
 .memedit label { display: flex; flex-direction: column; gap: 4px;
   color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); letter-spacing: var(--track-lead) }
-.memedit input, .memedit textarea, .memedit select {
+.memedit input, .memedit textarea {
   padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); outline: none;
 }
 .memedit textarea { resize: vertical; min-height: 120px; font-family: var(--mono); line-height: 1.6 }
-.memedit input:focus-visible, .memedit textarea:focus-visible, .memedit select:focus-visible {
+.memedit input:focus-visible, .memedit textarea:focus-visible {
   border-color: var(--focus); box-shadow: 0 0 0 2px color-mix(in oklab, var(--focus) 26%, transparent);
 }
 .memedit .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }

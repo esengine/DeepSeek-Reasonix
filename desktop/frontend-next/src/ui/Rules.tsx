@@ -359,7 +359,7 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
                         ? <span className="says" data-dormant="">{t("没有名为 {tool} 的工具，这条规则不会生效", { tool: g.tool })}</span>
                         : odd(g.tool, row.pattern) && <span className="says">{odd(g.tool, row.pattern)}</span>}
                     </span>
-                    <select value={row.level} data-action="permissions.rule-level" disabled={!!busy} aria-label={t("{rule} 的处理方式", { rule: row.rule })}
+                    <select data-size="sm" value={row.level} data-action="permissions.rule-level" disabled={!!busy} aria-label={t("{rule} 的处理方式", { rule: row.rule })}
                       onChange={(e) => move(row.rule, e.target.value as List)}>
                       {LEVELS.map(([id, label]) => (
                         <option key={id} value={id}>{t(label)}</option>

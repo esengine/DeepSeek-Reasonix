@@ -1870,7 +1870,7 @@ input,
 textarea,
 select { font-family: var(--ui); }
 body { font-size: calc(14px * var(--fs-scale, 1)); line-height: 1.75; }
-button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
+button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 
 .rail .wsnode { padding-left: 0; }
 .rail .kids { margin-left: 19px; padding-left: 0; border-left: 1px solid var(--hair); }
@@ -3612,7 +3612,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .addp-head p,
 .addp .fields .tip { font-size: var(--prefs-meta); line-height: 1.6; }
 .addp .fields input,
-.addp .fields select,
 .addp .fields textarea,
 .mline .nm { font-size: var(--fs-ui); }
 .mline .malias { min-width: 0; width: 100%; box-sizing: border-box; font-size: var(--fs-ui); }
@@ -3853,18 +3852,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .usage-conn { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--muted); }
 .usage-effort { min-width: 0; }
 .usage-effort-label { display: none; }
-.usage-pick {
-  width: 100%;
-  min-height: 32px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--raised);
-  color: var(--text);
-  font: var(--w-reg) var(--fs-ui) var(--ui);
-}
-.usage-pick:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.usage-pick:disabled { color: var(--faint); }
+.usage-pick { width: 100%; }
 .usage-override {
   display: flex;
   flex-wrap: wrap;
@@ -3946,7 +3934,7 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
 .advanced-field:last-child { border-bottom: 0; }
 .advanced-field > span { font-size: var(--fs-ui); font-weight: var(--w-med); color: var(--text); }
 .advanced-field > i { font-size: var(--fs-meta); line-height: 1.55; font-style: normal; color: var(--faint); }
-.advanced-field select,
+.advanced-field select { width: 100%; }
 .advanced-field textarea {
   width: 100%;
   box-sizing: border-box;
@@ -3958,7 +3946,6 @@ button, input, select, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)
   font: var(--w-reg) calc(13px * var(--fs-scale, 1))/1.55 var(--ui);
 }
 .advanced-field textarea { font-family: var(--mono); resize: vertical; }
-.advanced-field select:focus,
 .advanced-field textarea:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
 .advanced-field textarea[aria-invalid="true"] { border-color: var(--err); }
 .field-error { font-size: calc(12px * var(--fs-scale, 1)); font-style: normal; color: var(--err-ink); }
