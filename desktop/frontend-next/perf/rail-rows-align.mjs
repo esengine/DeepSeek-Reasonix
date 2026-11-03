@@ -63,7 +63,8 @@ try {
     const lockup = await page.evaluate(() => {
       const logo = document.querySelector(".studio-brand-logo").getBoundingClientRect();
       const first = document.querySelector(".studio-new-task").getBoundingClientRect();
-      return { above: logo.top, below: first.top - logo.bottom };
+      const rail = document.querySelector(".rail").getBoundingClientRect();
+      return { above: logo.top - rail.top, below: first.top - logo.bottom };
     });
     check(`${scheme}: the logo has the same space above and below it`, Math.abs(lockup.above - lockup.below) <= TOLERANCE, `above ${lockup.above}, below ${lockup.below}`);
     const logo = await page.evaluate(() => {
