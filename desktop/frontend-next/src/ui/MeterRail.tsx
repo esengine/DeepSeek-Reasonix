@@ -93,7 +93,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
       </div>
       {ctx && ctx.window > 0 && (
         <div className="studio-context-anchor" data-open={meterOpen ? "" : undefined}>
-          <button className="studio-meter-context" data-action="metrics.details" data-value="context" aria-expanded={meterOpen} aria-haspopup="dialog" aria-label={t("查看上下文与压缩")} onClick={() => { setOverviewOpen(false); setMeterOpen((open) => !open); }}>
+          <button className="studio-meter-context" data-level={contextPercent >= 80 ? "high" : undefined} data-action="metrics.details" data-value="context" aria-expanded={meterOpen} aria-haspopup="dialog" aria-label={t("查看上下文与压缩")} onClick={() => { setOverviewOpen(false); setMeterOpen((open) => !open); }}>
             <span className="studio-context-ring" style={{ "--fill": `${contextPercent}%` } as CSSProperties} aria-hidden="true" />
             <span>{t("上下文")}</span><b>{contextPercent}%</b>
           </button>
