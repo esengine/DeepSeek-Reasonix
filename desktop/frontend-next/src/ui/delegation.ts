@@ -36,13 +36,13 @@ export const ranShort = (p: Tool["profile"]): string => {
 
 export type DelegateStatus = "running" | "refused" | "failed" | "done";
 
-// A host refusal names a call that never started; "interrupted" is only true of
-// one that began and was cut short.
+// A host refusal names a call that never started; a failure is one that began
+// and ended in error.
 export const delegateStatus = (running: boolean, tool: Tool): DelegateStatus =>
   running ? "running" : tool.refusalCode ? "refused" : toolFailed(tool) ? "failed" : "done";
 
 export const delegateStatusLabel = (status: DelegateStatus): string =>
-  status === "running" ? t("运行中") : status === "refused" ? t("未执行") : status === "failed" ? t("已中断") : t("已交付");
+  status === "running" ? t("运行中") : status === "refused" ? t("未执行") : status === "failed" ? t("失败") : t("已交付");
 
 // What the kernel's own record says about one run, as opposed to the card's
 // reading above, which has only the progress stream to go on.

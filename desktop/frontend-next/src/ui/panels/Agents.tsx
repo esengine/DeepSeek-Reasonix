@@ -45,7 +45,7 @@ export function Agents({ tasks, onOpen }: { tasks: Task[]; onOpen?: (taskId: str
             </span>
             {x.tool.profile?.label && <span className="lbl" title={x.tool.profile.label}>{x.tool.profile.label}</span>}
             {ranLabel(x.tool.profile) && <span className="ran" title={ranLabel(x.tool.profile)}>{ranShort(x.tool.profile)}</span>}
-            <span className="rt">
+            <span className="rt" title={status === "failed" ? x.tool.err : undefined}>
               {status === "done" && x.tool.durationMs ? `${delegateStatusLabel(status)} · ${seconds(x.tool.durationMs, 0)}` : delegateStatusLabel(status)}
             </span>
             {onOpen && (

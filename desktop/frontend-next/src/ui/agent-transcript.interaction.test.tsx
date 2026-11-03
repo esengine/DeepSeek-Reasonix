@@ -97,15 +97,15 @@ it("counts only running delegates, then reads the total once the last one finish
   expect(n([task("a", false, "A"), task("b", false, "B")])).toBe("2");
 });
 
-it("heads a refused delegation as not run and a cut-short one as interrupted", () => {
+it("heads a refused delegation as not run and a cut-short one as failed", () => {
   const refused = { ...task("r", false, "explore"), tool: { id: "r", name: "task", profile: { name: "explore" }, err: "invalid arguments for explore", refusalCode: "tool.arguments_invalid" } } as unknown as Task;
   const { rerender } = render(<AgentTranscript task={refused} onClose={() => {}} />);
   const head = () => screen.getByRole("dialog").querySelector(".agent-tx-hd .rt")!.textContent;
   expect(head()).toContain("未执行");
-  expect(head()).not.toContain("已中断");
+  expect(head()).not.toContain("失败");
   const cut = { ...refused, tool: { ...refused.tool, refusalCode: undefined, err: "sub-agent: context canceled" } } as unknown as Task;
   rerender(<AgentTranscript task={cut} onClose={() => {}} />);
-  expect(head()).toContain("已中断");
+  expect(head()).toContain("失败");
 });
 
 it("names the model the sub-agent ran on in the header of its full record", () => {

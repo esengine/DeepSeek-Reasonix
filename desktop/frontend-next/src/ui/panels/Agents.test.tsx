@@ -57,12 +57,13 @@ describe("a delegation the host refused before it ran", () => {
     const out = html(refused);
     expect(out).toContain('data-status="refused"');
     expect(out).toContain("未执行");
-    expect(out).not.toContain("已中断");
+    expect(out).not.toContain("失败");
   });
-  it("still reads interrupted for a call that started and was cut short", () => {
+  it("reads failed, with the reason on hover, for a call that started and was cut short", () => {
     const out = html(interrupted);
     expect(out).toContain('data-status="failed"');
-    expect(out).toContain("已中断");
+    expect(out).toContain("失败");
+    expect(out).toContain('title="');
   });
 });
 
