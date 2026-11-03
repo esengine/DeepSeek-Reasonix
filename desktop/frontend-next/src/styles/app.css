@@ -823,6 +823,7 @@
     transition: width var(--m-line), opacity var(--m-line), background-color var(--m-line);
   }
   .srail-m[data-folded] > i { height: 3px }
+  .srail-m[data-edits] > i { width: calc(18px + 15px * var(--lit)) }
   .srail-m[data-starred]::after { content: ""; position: absolute; right: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-ink) }
   .srail-m:focus-visible > i { outline: 2px solid var(--focus); outline-offset: 3px }
   .srail-m[data-on] > i { background: var(--accent-ink) }

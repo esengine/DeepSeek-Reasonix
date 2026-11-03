@@ -394,6 +394,7 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
               data-on={i === at ? "" : undefined}
               data-folded={folded ? "" : undefined}
               data-starred={starred ? "" : undefined}
+              data-edits={!folded && m.files > 0 ? "" : undefined}
               aria-label={folded
                 ? t("定位到第 {a} 至 {b} 条", { a: v.from + 1, b: v.to + 1 })
                 : t("定位到你说的：{text}", { text: m.text.slice(0, 40) })}
