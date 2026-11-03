@@ -593,9 +593,7 @@ func (a *contextWindow) acceptCheckpointCandidate(trigger string, scope compacti
 	triggerTokens := a.compactTrigger()
 	ceiling := a.checkpointCeiling()
 	hard := a.hardInputCeiling()
-	manualBelowTrigger := trigger == CompactionTriggerManual && sourceTokens < triggerTokens
-	if manualBelowTrigger {
-		// Directed manual compress: any real savings is acceptable.
+	if trigger == CompactionTriggerManual {
 		return nil
 	}
 	if fixedPrefixTokens > ceiling {
