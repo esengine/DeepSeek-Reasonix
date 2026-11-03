@@ -104,7 +104,7 @@ export const EN_WINDOW: Record<string, string> = {
   "{done} / {total} 步骤": "{done} / {total} steps",
   "预计剩余 {clock}": "About {clock} left",
   "运行时长": "Elapsed",
-  "等待确认": "Waiting on you",
+  "等你处理": "Needs you",
   "等待你回答": "Waiting for your answer",
   "待命": "Idle",
   "资源使用": "Resource use",

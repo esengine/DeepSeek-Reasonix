@@ -4199,3 +4199,4 @@ button, input, textarea { font-size: var(--fs-ui); }
 .palette-scope { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--r-pill); background: var(--overlay); color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui); }
 .job-confirm { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); animation: card var(--m-card) both; }
 .job-confirm .job-stop { height: 24px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid color-mix(in srgb, var(--err) 45%, var(--border)); color: var(--err-ink); }
+.hl .tag[data-pending] { height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border)); border-radius: var(--r-pill); color: var(--accent-ink); font: var(--w-med) var(--fs-micro)/1 var(--ui); }

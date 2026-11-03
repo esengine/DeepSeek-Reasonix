@@ -188,7 +188,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
       <div className="c">
         <div className="hl">
           <span className="nm">{askHeading(qs)}</span>
-          <span className="tag">{t("{n} 个问题", { n: qs.length })}</span>
+          <span className="tag" data-pending={sealed ? undefined : ""}>{sealed ? t("已处理") : t("等你处理")}</span>
         </div>
         <div className="out">
           <div className="ask" data-sealed={sealed ? "" : undefined} aria-busy={submitting}

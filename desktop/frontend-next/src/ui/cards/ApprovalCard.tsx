@@ -140,7 +140,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
       <div className="c">
         <div className="hl">
           <span className="nm">{item.a.tool === FENCE_TOOL ? t("要求扩大可改范围") : isSetting ? t("请求修改设置") : t("请求执行权限")}</span>
-          <span className="tag">{sealed ? t("已处理") : t("等待确认")}</span>
+          <span className="tag" data-pending={sealed ? undefined : ""}>{sealed ? t("已处理") : t("等你处理")}</span>
         </div>
         <div className="out">
           <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>

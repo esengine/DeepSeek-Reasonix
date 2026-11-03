@@ -54,7 +54,7 @@ function ElicitFormCard({ item, onAnswer }: ElicitProps) {
       <div className="c">
         <div className="hl">
           <span className="nm">{t("MCP 服务器 {name} 请求信息", { name: origin?.source ?? "" })}</span>
-          <span className="tag">{t("{n} 项", { n: qs.length })}</span>
+          <span className="tag" data-pending={sealed ? undefined : ""}>{sealed ? t("已处理") : t("等你处理")}</span>
         </div>
         <div className="out">
           <div className="ask" data-sealed={sealed ? "" : undefined} aria-busy={submitting}>
