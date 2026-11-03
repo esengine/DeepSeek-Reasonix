@@ -26,4 +26,11 @@ export const EN_MEMORY: Record<string, string> = {
   "没错": "That's right",
   "agent 自动记录的内容：未经配置，但会据此执行。可以按类型和星系查找，刚记住的在「新的」里等你确认。":
     "What the agent wrote down on its own: nobody configured it, yet it acts on it. Find facts by type or galaxy; ones it just learned wait under New for you to confirm.",
+  "参考": "Reference",
+  "用过": "Used",
+  "生效": "Applies",
+  "范围": "Scope",
+  "低": "Low",
+  "高": "High",
+  "所有项目": "All projects",
 };
