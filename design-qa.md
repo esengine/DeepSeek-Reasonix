@@ -7,6 +7,64 @@ reviewed: 2026-10-18
 
 # Foundation palette verification
 
+## Compact tool approval / 紧凑工具审批 · 2026-10-22
+
+final result: passed
+
+Scope: Studio tool approval only. The user selected the four-action mock, then
+explicitly requested short labels, one explanatory line and less whitespace.
+This acceptance does not supersede the unrelated preset-editor findings below.
+范围：仅 Studio 工具审批；保留四种授权行为，按用户后续选择收紧文案和间距。
+
+Review follow-up / 评审修订 (2026-10-24): integrated `studio` at `ef79a2215e`.
+
+- The footer and receipt retain upstream's saved-with-conversation wording in both
+  languages, including persistence after resume and the tool-specific destinations
+  for paid search, network egress and MCP sign-in.
+- Upstream wording tests are kept; three additional card-level regressions cover
+  those destinations. The four short actions and original callbacks remain.
+  Session grant resume/revocation tests pass.
+- The October 22 screenshots below document layout only; their transient-session
+  wording is superseded. A fresh 390px browser check verifies both languages without
+  horizontal overflow.
+- The approval browser checks pass; the same seven previously recorded broader
+  output/alignment failures remain outside this change.
+
+更新说明与回执明确授权随对话保存；保留上游语义测试及四种操作，恢复/撤销测试通过。
+
+- Source visual truth: the selected four-action mock (2048 × 768), refined by
+  the approved compact-layout instructions. Visual evidence belongs on the PR.
+- Full view: `approval-compact-desktop.jpg`, 1280 × 800 CSS/image pixels, 1× density.
+- Focused comparison: `approval-compact-light.jpg`, 760 × 222 image pixels;
+  source and implementation opened together. Compare the component regions,
+  excluding the mock's outer canvas; reduced height and shorter text are the
+  approved compact refinement, not a pixel-identical recreation of the mock.
+- Additional states: `approval-compact-dark.jpg`, `approval-compact-narrow.jpg`
+  and `approval-compact-english-narrow.jpg`; narrow viewport 420 × 800 at 1×.
+- Typography: existing Studio UI/mono families; 14px heading, 13px command and
+  buttons, 12px note. Chinese and English labels remain readable without clipping.
+- Layout: four right-aligned actions on desktop, two columns below 460px card
+  width. Buttons are 36px tall on desktop and at least 44px on narrow layouts.
+- Colors: semantic theme tokens, neutral secondary buttons, one filled primary;
+  light-theme button text contrast measured 13.65:1, dark theme visually checked.
+- Assets: existing product shield icon reused; no new raster or icon geometry.
+- Content: session/always/deny/once retain their original verdicts and host-provided
+  availability. Short Chinese/English labels and the note are presentation only.
+- Interactions: all four decisions checked through the actual component in the
+  isolated browser fixture; settlement receipts match each verdict. Keyboard tab
+  order follows visual order. Browser console error log was empty.
+- Comparison history: the initial long-label version squeezed narrow buttons into
+  tall blocks; responsive layout fixed that. The approved compact refinement then
+  removed the repeated intro and combined the note. Re-capture confirmed two-column
+  narrow actions, no horizontal overflow, and correct light/dark hierarchy.
+- No remaining P0/P1/P2 findings within this approval-card scope. No P3 follow-up.
+- Checks: 490 component/i18n tests, production build, `make check`, UI census and
+  its 10 frozen fixture reports passed. `perf/cards.mjs` approval checks passed;
+  its seven broader tool-output/transcript-alignment failures also reproduce on
+  the unchanged `a708a88a75` baseline. They are not claimed as passing.
+- Limits: browser fixture, not a packaged Windows run; real permission-rule disk
+  persistence was not exercised. Backend authorization code was not changed.
+
 ## Current preset editor verification / 当前预设编辑页验收
 
 final result: blocked
