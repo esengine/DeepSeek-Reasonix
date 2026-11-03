@@ -10,7 +10,7 @@ import type { Adder } from "./addws";
 import { AccountRow } from "./AccountRow";
 import { ContentMatches } from "./ContentMatches";
 import { useDestinations } from "./navdest";
-import { ICON, type Section } from "./prefsnav";
+import { ICON, NAV, SETTINGS, type Section } from "./prefsnav";
 import { RailSearch } from "./railsearch";
 import { RemoteHosts, remoteProjectKey, remoteWorkspaces } from "./RemoteHosts";
 import { remoteProjects } from "./remoteProjects";
@@ -156,6 +156,10 @@ export function Sidebar({
     const runtime = runtimes.find((rt) => rt.id === active);
     return runtime?.host ? onOpenRemote(runtime.host, runtime.root) : onOpen({ root: newSessionRoot });
   };
+  const paletteSettings = useMemo(() => {
+    const names = new Map(NAV.flatMap(([, items]) => items));
+    return SETTINGS.filter((x) => !x.hidden).map((x) => ({ id: `${x.section}:${x.anchor}`, label: t(x.title), path: t(names.get(x.section) ?? x.section), keywords: (x.keywords ?? []).join(" ") }));
+  }, []);
   const paletteTree = useMemo(() => [...tree, ...shownRemotes.flatMap((host) =>
     remoteWorkspaces(host, remoteTrees[host.name]).map((ws) => ({ ...ws, host: host.name })))], [tree, shownRemotes, remoteTrees]);
   const [over, setOver] = useState(false);
@@ -266,6 +270,8 @@ export function Sidebar({
       onClose={() => setPalette(false)}
       commands={commands}
       tree={paletteTree}
+      settings={paletteSettings}
+      onOpenSetting={(target) => onSettings(target)}
       onOpenSession={(path, ws) => void (ws.host ? onOpenRemote(ws.host, ws.root, path) : onOpen({ sessionPath: path })).catch(onError)}
     />
     {/* 收起而不是卸载：卸掉就丢了侧栏的滚动位置、Inspector 的展开、当前选

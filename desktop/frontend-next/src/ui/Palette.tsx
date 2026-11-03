@@ -21,12 +21,26 @@ export interface Command {
 
 export interface PaletteWorkspace extends TreeWorkspace { host?: string; }
 
+export interface PaletteSetting {
+  id: string;
+  label: string;
+  path: string;
+  keywords: string;
+}
+
+type Scope = "" | "actions" | "sessions" | "settings";
+const SCOPES: Scope[] = ["", "actions", "sessions", "settings"];
+const SCOPE_LABEL: Record<Exclude<Scope, "">, string> = { actions: "操作", sessions: "会话", settings: "设置" };
+const PREFIX: Record<string, Exclude<Scope, "">> = { ">": "actions", "#": "sessions", ",": "settings" };
+
 interface Props {
   open: boolean;
   onClose: () => void;
   commands: Command[];
   tree: PaletteWorkspace[];
   onOpenSession: (path: string, workspace: PaletteWorkspace) => void;
+  settings?: PaletteSetting[];
+  onOpenSetting?: (target: string) => void;
 }
 
 interface Hit {
@@ -38,10 +52,11 @@ interface Hit {
   run: () => void;
 }
 
-const SESSION_LIMIT = 8;
+const LIMIT = 5;
 
-export function Palette({ open, onClose, commands, tree, onOpenSession }: Props) {
+export function Palette({ open, onClose, commands, tree, onOpenSession, settings = [], onOpenSetting }: Props) {
   const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<Scope>("");
   const [at, setAt] = useState(0);
   const box = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -53,33 +68,51 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
   useEffect(() => {
     if (!open) return;
     setQuery("");
+    setScope("");
     setAt(0);
     box.current?.focus();
   }, [open]);
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const matched = commands.filter((c) => !q || `${c.label} ${c.keywords}`.toLowerCase().includes(q));
+    const wants = (kind: Exclude<Scope, "">) => scope === "" || scope === kind;
+    const actions: Hit[] = wants("actions")
+      ? commands.filter((c) => !q || `${c.label} ${c.keywords}`.toLowerCase().includes(q)).slice(0, LIMIT)
+        .map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("操作"), alert: c.status !== undefined, run: c.run }))
+      : [];
     const sessions: Hit[] = [];
-    for (const workspace of tree) {
-      for (const session of workspace.sessions) {
-        if (sessions.length >= SESSION_LIMIT) break;
-        const title = session.title || session.name;
-        if (q && !`${title} ${workspace.name} ${workspace.host ?? ""}`.toLowerCase().includes(q)) continue;
-        sessions.push({
-          key: `s:${workspace.host ?? ""}:${session.path}`,
-          label: title,
-          icon: "clock",
-          note: [workspace.name, workspace.host].filter(Boolean).join(" · "),
-          run: () => onOpenSession(session.path, { ...workspace, root: session.workspaceRoot || workspace.root }),
-        });
+    if (wants("sessions")) {
+      for (const workspace of tree) {
+        for (const session of workspace.sessions) {
+          if (sessions.length >= LIMIT) break;
+          const title = session.title || session.name;
+          if (q && !`${title} ${workspace.name} ${workspace.host ?? ""}`.toLowerCase().includes(q)) continue;
+          sessions.push({
+            key: `s:${workspace.host ?? ""}:${session.path}`,
+            label: title,
+            icon: "clock",
+            note: [workspace.name, workspace.host].filter(Boolean).join(" · "),
+            run: () => onOpenSession(session.path, { ...workspace, root: session.workspaceRoot || workspace.root }),
+          });
+        }
       }
     }
-    return [
-      { label: t("快捷操作"), hits: matched.map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("操作"), alert: c.status !== undefined, run: c.run })) },
-      { label: t("会话"), hits: sessions },
-    ].filter((g) => g.hits.length > 0);
-  }, [commands, tree, query, onOpenSession]);
+    const found: Hit[] = wants("settings") && (q || scope === "settings")
+      ? settings.filter((x) => !q || `${x.label} ${x.keywords} ${x.path}`.toLowerCase().includes(q)).slice(0, LIMIT)
+        .map((x) => ({ key: `g:${x.id}`, label: x.label, icon: "settings" as StudioIconName, note: x.path, run: () => onOpenSetting?.(x.id) }))
+      : [];
+    const ordered = q || scope !== ""
+      ? [{ label: t("会话"), hits: sessions }, { label: t("设置"), hits: found }, { label: t("快捷操作"), hits: actions }]
+      : [{ label: t("快捷操作"), hits: actions }, { label: t("会话"), hits: sessions }];
+    if (q && scope === "") {
+      const lead = ordered.find((g) => g.hits.length > 0);
+      if (lead) {
+        const best = lead.hits[0];
+        return [{ label: t("最佳匹配"), hits: [best] }, ...ordered.map((g) => (g === lead ? { ...g, hits: g.hits.slice(1) } : g))].filter((g) => g.hits.length > 0);
+      }
+    }
+    return ordered.filter((g) => g.hits.length > 0);
+  }, [commands, tree, settings, query, scope, onOpenSession, onOpenSetting]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.hits), [groups]);
   // A cursor past the end of a shorter list selects nothing and Enter does
@@ -107,6 +140,7 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
       <div ref={sheet} className="palette" role="dialog" aria-modal="true" aria-label={t("搜索与快捷操作")}>
         <label className="palette-input">
           <StudioIcon name="search" />
+          {scope && <span className="palette-scope">{t(SCOPE_LABEL[scope])}</span>}
           <input
             ref={box}
             data-action-keydown="palette.search"
@@ -115,11 +149,26 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
             autoComplete="off"
             value={query}
             onChange={(e) => {
-              setQuery(e.target.value);
+              const value = e.target.value;
+              if (scope === "" && value.length === 1 && PREFIX[value]) {
+                setScope(PREFIX[value]);
+                setQuery("");
+              } else setQuery(value);
               setAt(0);
             }}
             onKeyDown={(e) => {
               if (e.key === "Escape") return onClose();
+              if (e.key === "Tab") {
+                e.preventDefault();
+                setScope((current) => SCOPES[(SCOPES.indexOf(current) + 1) % SCOPES.length]);
+                setAt(0);
+                return;
+              }
+              if (e.key === "Backspace" && query === "" && scope !== "") {
+                e.preventDefault();
+                setScope("");
+                return;
+              }
               if (e.key === "Enter") {
                 e.preventDefault();
                 return pick(flat[cursor]);
@@ -153,9 +202,9 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
               ))}
             </div>
           ))}
-          {flat.length === 0 && <div className="palette-empty">{t("没有匹配的会话或操作")}</div>}
+          {flat.length === 0 && <div className="palette-empty">{t("没有匹配的会话、设置或操作")}</div>}
         </div>
-        <div className="palette-help">{t("↑ ↓ 选择 · Enter 打开 · Esc 关闭")}</div>
+        <div className="palette-help">{t("↑↓ 选择 · Enter 打开 · Tab 切换范围 · > 操作 · # 会话 · , 设置")}</div>
       </div>
     </div>
   );
