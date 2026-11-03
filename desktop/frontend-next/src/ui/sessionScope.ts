@@ -1,16 +1,18 @@
 import type { RuntimeView, TreeSession } from "../port/hub";
 
-export type SessionScope = "all" | "live" | "pinned" | "archived";
+export type SessionScope = "all" | "live" | "waiting" | "unread" | "pinned" | "archived";
 
 // An archived conversation leaves every list but Archived — except that a
 // search is a request to find it, so it answers from the whole list and the row
 // says it is archived. A session 1.x wrote can be kept out of the lists the same
 // way, unless it is running or being searched for.
-export function inScope(session: TreeSession, scope: SessionScope, searching: boolean, live: boolean, pinned: boolean, hideLegacy = false): boolean {
+export function inScope(session: TreeSession, scope: SessionScope, searching: boolean, live: boolean, pinned: boolean, hideLegacy = false, waiting = false): boolean {
   if (scope === "archived") return !!session.archived;
   if (session.archived) return searching && scope === "all";
   if (hideLegacy && session.legacy && !live && !searching) return false;
   if (scope === "live") return live;
+  if (scope === "waiting") return waiting;
+  if (scope === "unread") return !!session.unread;
   if (scope === "pinned") return pinned;
   return true;
 }

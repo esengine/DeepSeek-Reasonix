@@ -1,4 +1,4 @@
-import { inScope, sessionRuntime } from "./sessionScope";
+import { inScope, sessionRuntime, type SessionScope } from "./sessionScope";
 import { Fragment, type ReactNode, memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { hidesLegacySessions, onHidesLegacySessionsChange } from "../state/prefs";
 import { onSessionQuickActionsChange, showsSessionQuickActions } from "../state/sessionQuick";
@@ -72,7 +72,7 @@ interface Props {
   // Which of these belong in the running list: the live ones, and the ones that finished within the chosen grace.
   listedIds?: (ids: string[]) => string[];
   runs: Record<string, { run: string; live: boolean }>;
-  scope?: "all" | "live" | "pinned" | "archived";
+  scope?: SessionScope;
   pinned?: Set<string>;
   onPin?: (path: string) => void;
   onPause?: (runtimeId: string) => void;
@@ -330,7 +330,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     .map((ws) => ({
       ...ws,
       sessions: pinnedFirst(ws.sessions.filter((session) =>
-        inScope(session, scope, !!needle, !!session.runtimeId && listedIds([session.runtimeId]).length > 0, pinned.has(session.path), hideLegacy)), pinned),
+        inScope(session, scope, !!needle, !!session.runtimeId && listedIds([session.runtimeId]).length > 0, pinned.has(session.path), hideLegacy, !!session.runtimeId && runs[session.runtimeId]?.run === "halt")), pinned),
     }))
     .filter((ws) => scope === "all" || ws.sessions.length > 0 || ws.countsComplete === false);
   // A fold is a resting-state preference: while a word is being typed it would

@@ -27,7 +27,8 @@ import { MASK, useHidesAmounts } from "./wallet";
 import { useFileDrop } from "./filedrop";
 import type { PaneView } from "../state/paneview";
 import { RecentSessions } from "./RecentSessions";
-import { sessionRuntime } from "./sessionScope";
+import { sessionRuntime, type SessionScope } from "./sessionScope";
+import { SessionFilter } from "./SessionFilter";
 
 interface Props {
   hub: HubPort;
@@ -135,7 +136,7 @@ export function Sidebar({
   onFind,
   onError,
 }: Props) {
-  const [railScope, setRailScope] = useState<"all" | "live" | "pinned" | "archived">("all");
+  const [railScope, setRailScope] = useState<SessionScope>("all");
   const destinations = useDestinations();
   const [palette, setPalette] = useState(false);
   const [projectPicker, setProjectPicker] = useState(false);
@@ -160,6 +161,17 @@ export function Sidebar({
     const names = new Map(NAV.flatMap(([, items]) => items));
     return SETTINGS.filter((x) => !x.hidden).map((x) => ({ id: `${x.section}:${x.anchor}`, label: t(x.title), path: t(names.get(x.section) ?? x.section), keywords: (x.keywords ?? []).join(" ") }));
   }, []);
+  const scopeCounts = useMemo(() => {
+    const open = tree.flatMap((ws) => ws.sessions).filter((x) => !x.archived);
+    const running = (x: { runtimeId?: string }) => !!x.runtimeId && runs[x.runtimeId]?.live;
+    return {
+      all: open.length,
+      live: open.filter(running).length,
+      waiting: open.filter((x) => !!x.runtimeId && runs[x.runtimeId]?.run === "halt").length,
+      unread: open.filter((x) => x.unread).length,
+      pinned: open.filter((x) => x.pinned).length,
+    };
+  }, [tree, runs]);
   const paletteTree = useMemo(() => [...tree, ...shownRemotes.flatMap((host) =>
     remoteWorkspaces(host, remoteTrees[host.name]).map((ws) => ({ ...ws, host: host.name })))], [tree, shownRemotes, remoteTrees]);
   const [over, setOver] = useState(false);
@@ -313,12 +325,7 @@ export function Sidebar({
           </div>
         )}
         <div className="studio-session-filters" role="group" aria-label={t("会话范围")}>
-          <div className="studio-session-segments">
-            <button data-action="session.filter" data-value="all" aria-pressed={railScope === "all"} onClick={() => setRailScope("all")}><span>{t("全部")}</span></button>
-            <button data-action="session.filter" data-value="live" aria-pressed={railScope === "live"} onClick={() => setRailScope("live")}><span>{t("进行中")}</span></button>
-            <button data-action="session.filter" data-value="pinned" aria-pressed={railScope === "pinned"} onClick={() => setRailScope("pinned")}><span>{t("置顶")}</span></button>
-            <button data-action="session.filter" data-value="archived" aria-pressed={railScope === "archived"} onClick={() => setRailScope("archived")}><span>{t("归档")}</span></button>
-          </div>
+          <SessionFilter scope={railScope} counts={scopeCounts} onScope={setRailScope} />
         </div>
       </div>
       <RailSearch resetKey={located}>

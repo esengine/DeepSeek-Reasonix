@@ -62,8 +62,6 @@
 .project-locations .pickrow .studio-icon { width: 18px; height: 18px; }
 .project-locations small { margin-left: auto; color: var(--faint); }
 @media (hover: none) { .rowbtns { opacity: 1; } }
-.studio-session-segments button { font-size: var(--fs-meta); }
-.studio-session-segments b { font-size: var(--fs-micro); }
 .recent-description { margin: 0 0 12px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .recent-filters { display: flex; gap: 8px; margin-bottom: 8px; }
 .recent-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; }

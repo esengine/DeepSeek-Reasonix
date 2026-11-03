@@ -91,6 +91,7 @@ it("reports no matches when neither local nor SSH projects match the search", as
 
 it("reports an empty unified pinned filter", async () => {
   draw(true);
+  await userEvent.click(document.querySelector(".session-filter-trigger")!);
   await userEvent.click(scope("pinned"));
   expect(screen.getByText("没有匹配的会话")).toBeTruthy();
 });

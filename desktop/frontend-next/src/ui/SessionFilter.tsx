@@ -1,0 +1,38 @@
+import { t } from "../i18n";
+import { Picker, type MenuItem } from "./Menu";
+import type { SessionScope } from "./sessionScope";
+import { StudioIcon } from "./StudioIcon";
+
+export interface ScopeCounts { all: number; live: number; waiting: number; unread: number; pinned: number }
+
+const NAME: Record<SessionScope, string> = { all: "全部", live: "进行中", waiting: "等你处理", unread: "未读", pinned: "置顶", archived: "已归档" };
+
+export function SessionFilter({ scope, counts, onScope }: { scope: SessionScope; counts: ScopeCounts; onScope: (next: SessionScope) => void }) {
+  const items: MenuItem[] = (["all", "live", "waiting", "unread", "pinned", "archived"] as const).map((value) => ({
+    value,
+    label: t(NAME[value]),
+    right: value === "archived" ? undefined : String(counts[value]),
+    divide: value === "archived",
+  }));
+  return (
+    <div className="session-filter">
+      <Picker
+        className="session-filter-trigger"
+        data-action="session.filter"
+        place="bottom"
+        align="end"
+        current={scope}
+        items={items}
+        menuClassName="session-filter-menu"
+        ariaLabel={t("会话范围")}
+        label={<><span>{t(NAME[scope])}</span><StudioIcon name="down" /></>}
+        onPick={(value) => onScope(value as SessionScope)}
+      />
+      {scope !== "all" && (
+        <button type="button" className="session-filter-clear" data-action="session.filter-clear" aria-label={t("清除筛选")} onClick={() => onScope("all")}>
+          <StudioIcon name="close" />
+        </button>
+      )}
+    </div>
+  );
+}
