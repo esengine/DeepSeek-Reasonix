@@ -839,6 +839,7 @@
   @keyframes peekin { from { opacity: 0; transform: translate(8px, -50%) } to { opacity: 1; transform: translateY(-50%) } }
   .srail-peek .hd { display: flex; align-items: baseline; gap: 8px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
   .srail-peek .hd .n { color: var(--accent-ink) }
+  .srail-peek .keys { margin-top: 6px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui) }
   .srail-peek .tx {
     margin-top: 5px; font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--text);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;

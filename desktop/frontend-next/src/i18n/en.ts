@@ -112,7 +112,10 @@ export const EN: Record<string, string> = {
   "第 {a} 至 {b} 条": "Questions {a} to {b}",
   "右键给这处加星标": "Right-click to star this question",
   "右键取消这处星标": "Right-click to remove the star",
-  "你的第 {n} 条消息": "Your message {n}",
+  "你的第{n}条": "Your message {n}",
+  "第{a}至{b}条": "Messages {a} to {b}",
+  "改了{n}个文件": "changed {n} files",
+  "点击跳过去 · 右键加星标": "Click to jump · right-click to star",
   // ── 转录：卡片与流 ───────────────────────────────────────────────
   "本次会话另外允许了 {n} 项": "{n} more allowed for this session",
   "只在这个会话里有效，没有写进文件": "This session only; not written to the file",

@@ -464,12 +464,13 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           <div className="hd">
             <span className="n">
               {shown.single
-                ? t("你的第 {n} 条消息", { n: shown.from + 1 })
-                : t("第 {a} 至 {b} 条", { a: shown.from + 1, b: shown.to + 1 })}
+                ? t("你的第{n}条", { n: shown.from + 1 })
+                : t("第{a}至{b}条", { a: shown.from + 1, b: shown.to + 1 })}
             </span>
-            {head && head.files > 0 && <span>{t("{n} 个文件", { n: head.files })}</span>}
+            {head && head.files > 0 && <span>· {t("改了{n}个文件", { n: head.files })}</span>}
           </div>
           <div className="tx">{head?.text}</div>
+          <div className="keys">{t("点击跳过去 · 右键加星标")}</div>
         </div>
       )}
     </div>
