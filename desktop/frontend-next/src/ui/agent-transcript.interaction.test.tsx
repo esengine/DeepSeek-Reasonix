@@ -90,11 +90,11 @@ it("caps what the overlay draws and says so", () => {
   expect(screen.getByRole("dialog").textContent).toContain("仅显示前 200000 个字符");
 });
 
-it("counts only running delegates, reaching 0 when the last one finishes", () => {
+it("counts only running delegates, then reads the total once the last one finishes", () => {
   const n = (ts: Task[]) => render(<Host tasks={ts} />).container.querySelector('[data-action="deck.agents"] b')?.textContent;
   expect(n([task("a", true, "A"), task("b", false, "B")])).toBe("1");
   cleanup();
-  expect(n([task("a", false, "A"), task("b", false, "B")])).toBe("0");
+  expect(n([task("a", false, "A"), task("b", false, "B")])).toBe("2");
 });
 
 it("heads a refused delegation as not run and a cut-short one as interrupted", () => {

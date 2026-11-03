@@ -50,7 +50,8 @@ describe("the deck readings", () => {
 
   it("keeps the history in the popover when every sub-agent has finished", () => {
     const box = draw([task(false, "a"), task(false, "b")], []);
-    expect(box.querySelector('[data-action="deck.agents"] b')?.textContent).toBe("0");
+    expect(box.querySelector('[data-action="deck.agents"] b')?.textContent).toBe("2");
+    expect(box.querySelector('[data-action="deck.agents"] span')?.textContent).toBe("个子代理已结束");
     expect(box.querySelector('[data-action="deck.agents"]')?.hasAttribute("data-live")).toBe(false);
     expect(box.querySelector(".studio-deck-pop")?.textContent).toContain("共 2");
   });
