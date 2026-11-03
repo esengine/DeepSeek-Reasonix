@@ -1,19 +1,13 @@
 export const ZH_METRICS: Record<string, string> = {
-  "metrics.largest": "最大项",
   "contextSummaryCard.runningTurn": "进行中的回合",
   "contextSummaryCard.showTheLargestItemsIn": "展开{name}中最大的几项",
   "contextSummaryCard.largestItemsIn": "{name}中最大的几项",
-  "metrics.running": "{n} 个运行中",
   "cache.prefixCache": "前缀缓存",
   "files.worktreeChanges": "工作树改动",
-  "metrics.noBackgroundJobsRunning": "没有在跑的后台任务",
   "files.autoApproved": "已放行",
   "files.forReview": "待审",
   "cache.prefixChanged": "前缀变了",
-  "metrics.prefixHeld": "前缀未变",
   "cache.bodyChanged": "正文变了",
-  "metrics.bodyHeld": "正文未变",
-  "metrics.messagesCarriedOver": "沿用的消息条数",
   "cache.prefixHash": "前缀哈希",
   "cost.fallbackPrice": "按兜底价估算",
   "cost.settled": "已结算",
@@ -22,7 +16,6 @@ export const ZH_METRICS: Record<string, string> = {
   "cost.twoSettlementCurrenciesDoNot": "两种结算币种不予合并 —— 合成单一总额需要虚构一个汇率。",
   "cache.toolSchema": "工具 schema",
   "metrics.remoteHosts": "远程主机",
-  "metrics.noRequestsYet": "还没有请求",
   "context.nobodyHasSaidHowLarge":
     "该来源未声明窗口大小，因此无法显示已用比例，也不会自动压缩。中转服务转发的是第三方模型，其容量只有你知道。",
   "context.whoeverEnteredThisWindowMay":

@@ -285,7 +285,6 @@ export const EN_KERNEL: Record<string, string> = {
   "kernel.thisSceneHasNoBackdrop": "This scene has no backdrop to show",
   "kernel.thatAudioFormatIsNot": "That audio format is not supported",
   "kernel.theCompactionThresholdWasNot": "The compaction threshold was not saved: {detail}",
-  "kernel.theRequestCarriedNoThreshold": "The request carried no threshold, so nothing changed",
   "kernel.theKernelOnIsNot": "The kernel on {host} is not answering — the connection may be down",
   "kernel.theKernelOnDidNot": "The kernel on {host} did not accept this request: {detail}",
   "kernel.theReasonixOnIsToo":
@@ -299,7 +298,6 @@ export const EN_KERNEL: Record<string, string> = {
   "kernel.thatPhoneWasNotFound": "That phone was not found; it may already have been removed",
   "kernel.theAccountServiceRefusedThat": "The account service refused that; refresh and try again",
   "kernel.couldNotReachTheAccount": "Could not reach the account service; check the network and try again",
-  "kernel.thisMachineIsNotAn": "This machine is not an SSH host, so this form cannot change it",
   "kernel.thatIsNotTheName": "That is not the name of a WSL distribution",
   "kernel.couldNotReadWhichWSL": "Could not read which WSL distributions are installed",
   "kernel.thisMachineIsReachedAnother": "This machine is reached another way than this form describes (SSH or WSL), so it cannot be changed like this",

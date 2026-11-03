@@ -37,14 +37,6 @@ export const EN_TRAJECTORY: Record<string, string> = {
   "runAnalysis.afterYouSendATask":
     "After you send a task, real events will show model, tool, retry and parallel time here.",
   "runAnalysis.timeline": "Timeline",
-  "trajectory.savedTo": "Saved to {path}",
-  "trajectory.downloaded": "Downloaded {name}",
   // What the rows cover. The three the host distinguishes plus the one the page
   // is in until it has been told: absence is not one of them.
-  "trajectory.theRecordStoppedAtIts":
-    "The record stopped at its size limit — whatever happened after the last row was not kept",
-  "trajectory.nothingRecordedThisRunWhat":
-    "Nothing recorded this run — what follows is only the live events this connection saw",
-  "trajectory.theWholeRecordReopeningThe": "The whole record · reopening the session rebuilds it as it is",
-  "trajectory.howMuchThisTrajectoryCovers": "How much this trajectory covers has not been read yet",
 };

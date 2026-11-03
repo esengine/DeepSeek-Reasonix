@@ -38,7 +38,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "peerHeldBar.sessionMessagesWaitingForYour": "Session messages waiting for your decision",
   "peerHeldBar.moreWaitingForYourDecision": "{n} more waiting for your decision",
   "peerMessages.couldNotReadTheState": "Could not read the state of messages between sessions.",
-  "settings.messagesBetweenSessionsAreOff": "Messages between sessions are off. Write [peers] enabled = true in your user config and reopen the session; it is off by default.",
   "peerMessages.deliveredToItIsRead": "Delivered to \u201c{to}\u201d; it is read only after that session\u2019s user approves it.",
   "peerMessages.noOtherSessionOnThis": "No other session on this machine is listening.",
   "peerMessages.sendTo": "Send to",
@@ -64,7 +63,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "sidePanel.askTheSideQuestion": "Ask the side question",
   "sidePanel.ask": "Ask…",
   "sidePanel.selectSomeTextInThe": "Select some text in the conversation first",
-  "settings.readingAndAnswering": "Reading and answering…",
   "sidePanel.askAboutThisCodeOr": "Ask about this code or this error here: it can only read files and search, and changes nothing.",
   "common.openWith": "Open with {name}",
   "scrollJump.backToTop": "Back to top",
@@ -117,17 +115,12 @@ export const EN_SETTINGS: Record<string, string> = {
   "common.sessionTabs": "Session tabs",
   "sessionTabsSetting.showSessionTabs": "Show session tabs",
   "sessionTabsSetting.showTabsAtTheTop": "Show tabs at the top when multiple sessions are open, for quick switching.",
-  "settings.step1ConnectService": "Step 1 · Connect service",
-  "settings.connectTheServiceThenChoose": "Connect the service, then choose which models to enable from it.",
   "common.sourceName": "Source name",
   "providerdot.lastTestFailed": "Last test failed: {why}",
   "providerdot.lastTestFailed2": "Last test failed",
   "providerdot.lastTestPassed": "Last test passed",
   "addProvider.madeAfterConnectingEditable": "Made after connecting; editable",
   "common.theAPIKeyIsStored": "The API key is stored only on the machine running the kernel.",
-  "settings.testAndContinue": "Test and continue",
-  "settings.protocolAndModelsAreDetected": "Protocol and models are detected automatically",
-  "settings.step2ConfirmProtocolAnd": "Step 2 · Confirm protocol and models",
   "providers.sources": "{n} sources",
   "common.modelServices": "Model services",
   "settings.chooseAModelAndReasoning": "Choose a model and reasoning effort per use; Auto uses the model default. Without a naming model, show a message preview. Switching preserves the conversation.",
@@ -161,8 +154,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "modelUsage.setByTheProjectConfig": "Set by the project config; change it there",
   "modelUsage.addADecisionSourceUnder": "Add a decision source under Model services",
   "common.modelsByUse": "Models by use",
-  "settings.theDefaultModelRunsThis":
-    "The default model runs this conversation and most tasks, and every other use follows it unless you give that job a model of its own. Web search uses the conversation model's built-in search by default; assigning a search model adds one billed request per search and sends it no conversation context. Switching keeps the conversation and rebuilds the runtime; it cannot be done while a task runs.",
   "providers.addModelService": "Add model service",
   "providers.searchAddedServices": "Search added services",
   "providers.moveUpAltUpArrow": "Move {name} up (Alt+Up Arrow)",
@@ -219,7 +210,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "providerRemoval.advisor": "Advisor",
 
   // ── 设置：会话 ───────────────────────────────────────────────────
-  "settings.setsWhatCountsAsFinished": "Sets what counts as finished. Switching takes effect immediately and does not rebuild the runtime.",
   "settings.normalExecutionApprovedWritesAre": "Normal execution: approved writes are performed directly",
   "settings.openOne": "Open one",
   "settings.opening": "Opening…",
@@ -239,24 +229,11 @@ export const EN_SETTINGS: Record<string, string> = {
 
   // ── 设置：模型 ───────────────────────────────────────────────────
   "prefsnav.primaryModel": "Primary model",
-  "settings.usedForThisConversationAnd":
-    "Used for this conversation and most tasks. Switching keeps the conversation and rebuilds the runtime; it is unavailable while a task is running. Capabilities the endpoint did not declare are left unlabelled.",
   "settings.inUse": "In use",
   "modelUsage.adjustableReasoning": "Adjustable reasoning",
   "modelUsage.context": "{size} context",
-  "settings.inputOutput1MTokens": "Input {input} · output {output} / 1M tokens",
-  "settings.manageProvidersAPIAddressesProtocols":
-    "Manage providers, API addresses, protocols, and keys. Models are read from the endpoint; unlisted models can still be added by exact ID and verified.",
-  "settings.advancedModelSettings": "Advanced model settings",
-  "settings.assignModelsByTaskAnd": "Assign models by task and tune context maintenance",
   "prefsnav.modelsByTask": "Models by task",
-  "settings.everythingUsesThePrimaryModel":
-    "Everything uses the primary model by default. Change this only when planning, subagents, vision, or review should use another model.",
   "prefsnav.roles": "Roles",
-  "settings.eachSlotUsesTheMain":
-    "Each slot uses the main model unless you assign one explicitly. Changing an assignment rebuilds the runtime just as changing the main model does, and cannot be done while a task is running.",
-  "settings.switchingKeepsTheConversationAnd":
-    "Switching keeps the conversation and rebuilds the runtime, and cannot be done while a task is running. Tags show only capabilities that could be detected; blank means the endpoint declared nothing, not that the feature is unsupported.",
   "common.reasoningEffort": "Reasoning effort",
   "skillDeclarations.subagentDeclarations": "Subagent declarations",
   "skillDeclarations.subagentDeclarationsFor": "Subagent declarations for {name}",
@@ -269,18 +246,9 @@ export const EN_SETTINGS: Record<string, string> = {
   "skillDeclarations.declaredTools": "Declared tools",
   "skillDeclarations.showsTheSkillSDeclarations":
     "Shows the skill's declarations. Runtime configuration also depends on current settings.",
-  "settings.theseLevelsAreTheOnes": "These levels are the ones the current model's endpoint accepts; auto leaves it at the endpoint's own default.",
-  "settings.theCurrentModelExposesNo": "The current model exposes no adjustable reasoning level, so the option is not shown.",
   "compaction.compactsAtOfTheModel": "Compacts at {p}% of the model window. Gateways without capacity metadata use 160k; set the actual value in the context panel.",
   "settings.compactsAutomaticallyFromModelCapaci": "Compacts automatically from model capacity. Custom gateways without a maximum context value start at 160k; enter the actual capacity here.",
-  "settings.releaseToUseWindowCapacity": "Release to use window capacity",
-  "settings.byWindowCapacityDefault": "By window capacity (default) · {n}",
-  "settings.customDragFullyRightTo": "Custom {n} · drag fully right to restore window capacity",
   "common.connections": "Connections",
-  "settings.whereModelsComeFromAdding":
-    "Where models come from. Adding one asks only for an address and a key; the protocol, the model list and image support are probed from the endpoint, and you fill in only what cannot be detected.",
-  "settings.readsTheModelCatalogFrom":
-    "Reads the model catalog from the endpoint; unlisted models can still be added by exact ID and verified individually. Image input is configured separately and defaults safely to off.",
 
   // ── 设置：工具与权限 ─────────────────────────────────────────────
   "common.toolApprovals": "Tool approvals",
@@ -300,15 +268,9 @@ export const EN_SETTINGS: Record<string, string> = {
   "rules.declaresPermissionsTooAndThat":
     "{path} declares permissions too, and that is what is in force. Edits here are saved, but only take effect once it stops declaring them.",
   "rules.keepEnvOffLimits": "Keep .env off limits",
-  "settings.fileToolsAreRefusedOutright":
-    "File tools are refused outright on .env. A cat inside bash goes through another path this rule cannot reach",
   "rules.neverPush": "Never push",
-  "settings.changeAnythingLocallyPushingStays": "Change anything locally; pushing stays yours alone",
   "rules.neverRewriteGitHistory": "Never rewrite git history",
-  "settings.rebaseAndResetCanEat":
-    "rebase and reset can eat commits you have not pushed, so both are refused",
   "rules.testsWithoutAsking": "Tests without asking",
-  "settings.testCommandsGoStraightThrough": "Test commands go straight through; everything else is unchanged",
   "common.refuse": "Refuse",
   "rules.aMatchIsFinalIt": "A match is final: it holds under full access, and no approval box appears",
   "common.ask": "Ask",
@@ -370,23 +332,14 @@ export const EN_SETTINGS: Record<string, string> = {
   "rules.aWriteNoRuleMatched": "A write no rule matched asks once before it happens",
   "rules.everythingElseThatWrites": "Everything else that writes",
   "rules.askForConfirmation": "Ask for confirmation",
-  "settings.aWriteNoListMatched": "A write no list matched asks once before it happens",
   "rules.aWriteMatchedByNo": "A write matched by no rule is performed directly",
   "rules.aWriteNoListMatched": "A write no list matched never happens",
   "settings.alwaysRefuse": "Always refuse",
-  "settings.checkedFirstAMatchIs":
-    "Checked first. A match is final: it holds even under full access, and no approval box appears.",
   "settings.alwaysAsk": "Always ask",
-  "settings.aMatchAlwaysStopsFor": "A match always stops for you, even with auto-approval on.",
   "settings.alwaysAllow": "Always allow",
-  "settings.aMatchStopsAskingAnything": "A match stops asking. Anything else falls through to the setting below.",
-  "settings.formatAToolNameOr":
-    "Format: a tool name, or tool name(what it matches). bash compares command words, so bash(git push:*) catches git push with any arguments; file tools compare paths, where * crosses /. file_mutation stands for every tool that writes a file.",
   "rules.delete": "Delete {rule}",
   "settings.fromProjectConfig": "From project config",
   "common.add": "Add",
-  "settings.eGBashGoBuild": "e.g. bash(go build:*)",
-  "settings.eGBashRm": "e.g. bash(rm:*)",
 
   "common.sandbox": "Sandbox",
   "settings.howFarAnApprovedAction":
@@ -512,9 +465,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "editConn.thinkingAndReasoningLevels": "Thinking and reasoning levels",
   "editConn.plusExtraHeadersAndBody": "Plus extra headers and body. A relay's reasoning effort is declared here",
   "context.contextWindowTokens": "Context window (tokens)",
-  "settings.leaveEmptyToUseThe": "Leave empty to use the known built-in value; a source you added yourself has none, and will not be compacted",
-  "settings.useTheContextLimitFrom":
-    "Use the context limit from the model's documentation, not its max output. Too small and it compacts constantly; too large and the endpoint refuses once the real limit is hit.",
   "common.thinkingParameter": "Thinking parameter",
   "editConn.reasoningLevels": "Reasoning levels",
   "editConn.thisThinkingParameterDoesNot": "This thinking parameter does not use custom levels. The ones listed are kept and apply once you pick another protocol.",
@@ -603,7 +553,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "editConn.mergedIntoTheTopLevel":
     "Merged into the top level of the request body. model, messages, tools and stream are controlled by the kernel and are ignored if set here.",
   "editConn.thisIsNotAValid": "This is not a valid JSON object, and saving would be refused.",
-  "settings.noCompaction": "no compaction",
   "editConn.headers": "{n} headers",
   "editConn.extraBody": "extra body",
   "common.whichProgramRunsCommands": "Which program runs commands",
@@ -687,14 +636,11 @@ export const EN_SETTINGS: Record<string, string> = {
   // ── 卡片与窗口控件 ───────────────────────────────────────────
   "common.thisProjectOnly": "This project only",
   "addServer.commitToTheRepo": "Commit to the repo",
-  "settings.settings": "Settings　⌘,",
   "cost.estimatedTokensThisStepLeaves": "Estimated tokens this step leaves in context",
   "cost.howLongThisStepHas": "How long this step has been running",
   "paneTabs.closeThisPane2": "Close this pane",
   "common.window": "Window",
   "windowControls.minimize": "Minimize",
-  "settings.machinesWorkspacesAndSessions": "Machines, workspaces and sessions",
-  "settings.projects": "{n} projects",
   "approvalCard.allowOnce": "Allow once",
   "rememberChoice.allowThisKindForThis": "Allow this kind for this session, stop asking",
   "rememberChoice.alwaysAllowThisKindStop": "Always allow this kind, stop asking",
@@ -711,7 +657,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "askCard.addANoteOptionalIt": "Add a note (optional) — it is sent with your choice",
   "askCard.question": "Question {n}",
   "askCard.unanswered": "Unanswered",
-  "settings.confirmLeft": "Confirm ({n} left)",
   "common.confirm": "Confirm",
   "askCard.skipTheChoiceAndReply": "Skip the choice and reply instead",
   "askCard.thisQuestionIsSkippedIn": "This question is skipped in {time}; click anywhere to keep it",
@@ -732,7 +677,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "elicitURLCard.completedContinue": "Completed, continue",
   "common.declined": "Declined",
   "common.decline": "Decline",
-  "settings.repairedOnce": " (repaired once)",
   "compactionCard.gapsKeptByTheHost": " (gaps kept by the host)",
   "compactionCard.foldingIntoADigest": "Folding into a digest",
   "compactionCard.thisPassFoldedNothing": "This pass folded nothing",
@@ -821,11 +765,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "onboarding.chooseTheDefaultModel": "Choose the default model",
   "onboarding.aModelCatalogConfirmsThe":
     "A model catalog confirms the account and models, but cannot rule out other chat protocols. Choose a protocol the provider supports; dedicated addresses for known services switch automatically.",
-  "settings.moreThanOneProtocolAnswered":
-    "More than one protocol answered at this endpoint, so the choice above is a preference rather than a fact. You can change it in Settings once connected.",
 
   // ── 状态与动作 ───────────────────────────────────────────────
-  "settings.noKey": " · no key",
   "versions.installThisVersion": "Install this version",
   "common.saving2": "Saving…",
   "common.couldNotSave": "Could not save",
@@ -833,7 +774,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "versions.currentVersion": "Current version",
   "common.reading": "Reading…",
   "addPlugin.replaceTheInstalledCopy": "Replace the installed copy",
-  "settings.onlyTheOnesMarkedReads": "Only the ones marked “reads images” receive them",
   "addPlugin.close": "Close",
   "versions.rollBackToThisVersion": "Roll back to this version",
   "versions.showEarlierVersions": "Show {n} earlier versions",
@@ -843,7 +783,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "askCard.multipleAllowed": "Multiple allowed",
   "network.youCanWrite": "You can write ${PROXY_PASSWORD}",
   "common.connecting3": "Connecting…",
-  "settings.tryConnecting": "Try connecting",
   "addProvider.leaveBlankToKeepThe": " (leave blank to keep the key from the existing source)",
   "packages.enable": "Enable",
   "account.confirmSignOut": "Confirm sign-out",
@@ -854,7 +793,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "compactionCard.compactionDone": "Compaction done",
   "compactionCard.triggeredByHand": "Triggered by hand",
   "compactionCard.automaticAContextThresholdWas": "Automatic: a context threshold was reached",
-  "settings.automaticInputReachedTheFixed": "Automatic · input reached the fixed maintenance line at {n}",
   "compactionCard.automaticInputReachedTheWindow": "Automatic · input reached the window's capacity line at {n}",
   "compactionCard.automaticInputReached": "Automatic · input reached {n}",
   "common.removing": "Removing…",
@@ -905,14 +843,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "skillRemove.removeTheSkill": "Remove the skill \"{name}\"?",
   "skillRemove.thisDeletesTheFolderBelow": "This deletes the folder below and everything in it from disk, and cannot be undone. To use it again you would have to install it again.",
   "skillRemove.thisDeletesTheFileBelow": "This deletes the file below from disk and cannot be undone. To use it again you would have to install it again.",
-  "settings.couldNotReadTheLimits": "Could not read the limits on guidance to sub-agents.",
-  "settings.bytesInOneMessageOf": "Bytes in one message of guidance",
-  "settings.messagesOfGuidancePerMinute": "Messages of guidance per minute",
-  "settings.defaultGuidanceOverItIs": "Default {n}. Guidance over it is refused and not sent to the sub-agent; 0 sets no limit.",
-  "settings.defaultGuidanceToOneSub": "Default {n}. Guidance to one sub-agent beyond this many in a minute is refused; 0 sets no limit.",
   "settings.perMinute": "per minute",
   "settings.guidanceToRunningSubAgents": "Guidance to running sub-agents",
-  "settings.extraGuidanceYouOrThe": "Extra guidance you or the model send a sub-agent that is still working, read at its next tool call. This limits how large each message is and how often they are sent; a change applies to running sub-agents at once.",
   "skillUpdate.thisFileIsTooLarge": "This file is too large to show here. Read it in the source folder: {path}",
   "skillUpdate.notATextFileSo": "Not a text file, so its content is not shown here.",
   "skillUpdate.noDifferenceToShow": "(no difference to show)",
@@ -991,7 +923,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "rememberCard.forgotten": "Forgotten",
   "endpointSwitches.someRelaysDoNotAccept": "Some relays do not accept the thinking-control fields and reject the whole request. If that happens, switch to Do not send.",
   "hooks.running": "Running…",
-  "settings.thisEndpointTakesNoImage": "This endpoint takes no image input; ticking it changes nothing",
   "account.opening": "Opening…",
   "common.compacting": "Compacting…",
   "endpointSwitches.sendsOnlyTheOrdinaryChat": "Sends only the ordinary chat parameters and stops specifying a thinking depth; the model reasons as it otherwise would.",
@@ -1037,29 +968,19 @@ export const EN_SETTINGS: Record<string, string> = {
   "prefsnav.whatItRemembers": "What it remembers",
   "prefsnav.thisMachine": "This machine",
   "settings.remoteMachines": "Remote machines",
-  "settings.machines": "{n} machines",
-  "settings.changesTakeEffectImmediatelyThe": "Changes take effect immediately; the ones that rebuild the runtime cannot be changed while a task is running",
   "common.contextMaintenance": "Context maintenance",
-  "settings.aLongConversationIsTidied": "A long conversation is tidied into a summary and carries on. That happens at whichever comes first, the economic threshold or the capacity guard.",
   "compaction.theCompactionSettingsCouldNot": "The compaction settings could not be read.",
-  "settings.enterAWholeNumberGreater": "Enter a whole number greater than 0.",
   "compaction.thisSourceDeclaresNoContext":
     "This source declares no context window, so nothing is tidied automatically. Declare this model's window in the Context panel on the right first.",
   "common.now": "Now",
   "compaction.nextMaintenance": "Next maintenance",
   "compaction.modelWindow": "Model window",
   "compaction.thisSessionShouldTidyIts": "This session should tidy its context automatically at around {n} tokens.",
-  "settings.custom": "Custom, {n}",
   "settings.advanced": "Advanced",
-  "settings.tidyUpOnceVisibleInput":
-    "Tidy up once visible input reaches this size, whatever window the model declares — the larger the input, the slower each round. Default {n}.",
   "settings.useTheDefault": "Use the default",
   "common.custom": "Custom",
-  "settings.capacityGuardOnly": "Capacity guard only",
   "settings.threshold": "Threshold",
   "compaction.capacityGuard": "Capacity guard",
-  "settings.ofTheModelSWindow":
-    "{p}% of the model's window, always in force — turning the economic threshold off does not turn this off.",
   // ── 装上/接上之后说了什么 ─────────────────────────────────────
   "account.typeThisCodeIntoThe":
     "Type this code into the page your browser opened. If none opened, go to {uri}",
@@ -1104,7 +1025,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "common.addressCompletedTo": "Address completed to {url}",
   "providerDetail.theModelListOnlyAnswers": "The model list only answers at {url}. If chat already works, no change is needed; optionally set the address to it.",
   "addProvider.enabledModels": "Enabled models",
-  "settings.theCatalogueIsForDiscovery": "The catalogue is for discovery, not a whitelist. You can enter any exact model ID supplied by the service.",
   "editConn.useTheModelDocumentationInstead": "Use the model documentation instead of endpoint guesses",
   "common.notDeclared": "Not declared",
   "editConn.theTotalInputToolResults": "The total input, tool results and output the model can hold.",
@@ -1140,7 +1060,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "addProvider.onlyForOptionalFieldsRequired": "Only for optional fields required by the service; model, messages, tools and stream stay runtime-managed.",
   "addProvider.enterAValidJSONObject": "Enter a valid JSON object.",
   "settings.thinkingControlsOff": "Thinking controls off",
-  "settings.thinkingAutomatic": "Thinking automatic",
   "common.transcriptFolding": "Transcript folding",
   "folding.whetherEachPartOfA": "Whether each part of a conversation starts open or folded. Failed steps and work still running can be handled on their own; a block you have already opened or closed stays as it is.",
   "common.showCollapsedPlanProgress": "Show collapsed plan progress",

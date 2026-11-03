@@ -2,21 +2,15 @@
 // touched outside the transcript. Split out for the same reason en_settings and
 // en_kernel were — one screen's worth of wording, read together.
 export const EN_METRICS: Record<string, string> = {
-  "metrics.largest": "Largest",
   "contextSummaryCard.runningTurn": "Running turn",
   "contextSummaryCard.showTheLargestItemsIn": "Show the largest items in {name}",
   "contextSummaryCard.largestItemsIn": "Largest items in {name}",
-  "metrics.running": "{n} running",
   "cache.prefixCache": "Prefix cache",
   "files.worktreeChanges": "Worktree changes",
-  "metrics.noBackgroundJobsRunning": "No background jobs running",
   "files.autoApproved": "auto-approved",
   "files.forReview": "for review",
   "cache.prefixChanged": "prefix changed",
-  "metrics.prefixHeld": "prefix held",
   "cache.bodyChanged": "body changed",
-  "metrics.bodyHeld": "body held",
-  "metrics.messagesCarriedOver": "Messages carried over",
   "cache.prefixHash": "Prefix hash",
   "cost.fallbackPrice": "fallback price",
   "cost.settled": "settled",
@@ -25,7 +19,6 @@ export const EN_METRICS: Record<string, string> = {
   "cost.twoSettlementCurrenciesDoNot": "Two settlement currencies do not add up — one total would mean inventing a rate.",
   "cache.toolSchema": "Tool schema",
   "metrics.remoteHosts": "Remote hosts",
-  "metrics.noRequestsYet": "no requests yet",
   "context.nobodyHasSaidHowLarge":
     "Nobody has said how large this source's window is, so there is no share to draw — and no automatic compaction either. A relay forwards somebody else's model, so only you know what it holds.",
   "context.whoeverEnteredThisWindowMay":

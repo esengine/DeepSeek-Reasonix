@@ -9,7 +9,6 @@ export const EN_REMOTE: Record<string, string> = {
   "remoteHosts.droppedReconnecting": "Dropped — reconnecting",
   "remoteHosts.connectedButAForwardDid": "Connected, but a forward did not attach",
   "common.disconnected": "Disconnected",
-  "remote.thisHostHasNoDefault": "This host has no default workspace set",
   // The bootstrap's steps. Looked up by key rather than written out at a call
   // site, so the scanner cannot see them — they are listed here by hand, and a
   // missing one shows up as Chinese in an English window rather than as a test
@@ -23,7 +22,6 @@ export const EN_REMOTE: Record<string, string> = {
   "remote.reusingTheRunningInstance": "Reusing the running instance",
 
   // ── 远程：挑一个目录 ─────────────────────────────────────────
-  "remote.pickAFolderOnTo": "Pick a folder on {name} to open",
   "remoteDirs.pickAFolderOn": "Pick a folder on {host}",
   "remotes.browse": "Browse…",
   "remoteDirs.aPathOnThatMachine": "A path on that machine",
@@ -140,10 +138,8 @@ export const EN_REMOTE: Record<string, string> = {
 
   // ── 手机访问 ─────────────────────────────────────────────────
   "common.phoneAccess": "Phone access",
-  "remote.openOnYourPhone": "Open on your phone",
   "phonePop.deviceAccess": "Device access",
   "phonePop.deviceAccessOnline": "Device access · {n} online",
-  "remote.seeAndManageDevicesControlling": "See and manage devices controlling this computer",
   "phonePop.scanWithYourPhoneTo": "Scan with your phone to open this computer's Studio",
   "main.remoteConnectionEnded": "Remote connection ended",
   "main.refreshPage": "Refresh page",
@@ -151,14 +147,12 @@ export const EN_REMOTE: Record<string, string> = {
   "main.itIsAnOlderBuild": "It is an older build that was opened earlier, and may show confusing errors. Refreshing switches to the latest.",
   "main.thisComputerHasStoppedWeb": "This computer has stopped web control. Reconnecting will verify the device again.",
   "main.reconnect": "Reconnect",
-  "remote.thisBrowserIsTooOld": "This browser is too old for the encryption remote control needs. Open it in a recent version of Chrome, Edge, Safari or Firefox.",
   "cloudRemote.couldNotLoadTheEncryption": "Could not load the encryption component this browser needs. Check the network and try again.",
   "common.remoteStudioDidNotRespond": "Remote Studio did not respond. Check that the computer is online and try again.",
   "cloudLink.thatIsTooLargeTo": "That is too large to send: remote control carries about {kb} KB at a time (about three quarters of that for a file upload). Add it on the computer instead, or use a smaller file.",
   "cloudLink.thatIsTooLargeTo2": "That is too large to send: remote control carries at most {mb} MB. Use a smaller file.",
   "common.theRemoteConnectionEndedReconnect": "The remote connection ended. Reconnect to continue.",
   "cloudLink.remoteStudioRefusedThisRequest": "Remote Studio refused this request.",
-  "remote.signInToReasonixBefore": "Sign in to Reasonix before opening Web Studio.",
   "cloudRemote.theRelayAddressThisComputer": "The relay address this computer uses is not recognised. Update Web Studio and try again.",
   "cloudRemote.updateStudioOnThisComputer": "Update Studio on this computer before connecting.",
   "cloudRemote.webStudioCouldNotBe": "Web Studio could not be authorized. Sign in again and retry.",
@@ -229,16 +223,11 @@ export const EN_REMOTE: Record<string, string> = {
   "phoneAccess.pairedOnline": "Paired {time} · online",
   "phonePop.deviceConnected": "Device {n} connected",
   "phonePop.deviceDisconnected": "Device {n} disconnected",
-  "remote.phoneAccessIsOnOnline": "Phone access is on · {n} online",
-  "remote.aPhoneOnTheSame": "A phone on the same network scans to work these sessions",
-  "remote.thisComputerHasNoPrivate": "This computer has no private network address",
-  "remote.scanToPairValidUntil": "Scan to pair · valid until {time}",
   "phonePop.localPairingValidUntil": "Local pairing · valid until {time}",
   "phonePop.copyLink": "Copy link",
   "common.newCode": "New code",
   "common.disconnect": "Disconnect?",
   "phonePop.noPhoneConnectedYet": "No phone connected yet",
-  "remote.plainHTTPOnYourLocal": "Plain HTTP on your local network — only turn this on where you trust the network",
   "phoneAccess.scanWithYourPhoneS": "Scan with your phone's camera",
   "phoneAccess.theCodePairsOnePhone": "The code pairs one phone and is valid until {time}. Do not post it to a group chat or share a screenshot of it.",
   "phoneAccess.showAPairingCode": "Show a pairing code",

@@ -279,7 +279,6 @@ export const ZH_KERNEL: Record<string, string> = {
   "kernel.thisSceneHasNoBackdrop": "这个场景里没有可用的主图",
   "kernel.thatAudioFormatIsNot": "不支持该音频格式",
   "kernel.theCompactionThresholdWasNot": "压缩阈值未能保存：{detail}",
-  "kernel.theRequestCarriedNoThreshold": "本次请求未包含阈值，未做任何修改",
   "kernel.theKernelOnIsNot": "{host} 上的内核没有应答，连接可能断了",
   "kernel.theKernelOnDidNot": "{host} 上的内核没有接受这次请求：{detail}",
   "kernel.theReasonixOnIsToo":
@@ -293,7 +292,6 @@ export const ZH_KERNEL: Record<string, string> = {
   "kernel.thatPhoneWasNotFound": "找不到这台手机，它可能已经被移除",
   "kernel.theAccountServiceRefusedThat": "账号服务拒绝了这个操作，请刷新后再试",
   "kernel.couldNotReachTheAccount": "连不上账号服务，请检查网络后重试",
-  "kernel.thisMachineIsNotAn": "这台机器不是 SSH 主机，此表单不能修改它",
   "kernel.thatIsNotTheName": "这不是有效的 WSL 发行版名称",
   "kernel.couldNotReadWhichWSL": "读不到已安装的 WSL 发行版",
   "kernel.thisMachineIsReachedAnother": "这台机器的接入方式与表单不同（SSH 或 WSL），不能这样修改它",

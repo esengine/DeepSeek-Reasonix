@@ -34,12 +34,4 @@ export const ZH_TRAJECTORY: Record<string, string> = {
   "runAnalysis.afterYouSendATask":
     "发送任务后，这里会按真实运行记录显示模型、工具、重试与并行耗时。",
   "runAnalysis.timeline": "时间轴",
-  "trajectory.savedTo": "已保存至 {path}",
-  "trajectory.downloaded": "已下载 {name}",
-  "trajectory.theRecordStoppedAtIts":
-    "记录已达容量上限而停止 —— 最后一行之后的内容未被保留",
-  "trajectory.nothingRecordedThisRunWhat":
-    "本次运行未记录轨迹 —— 以下仅为本次连接观察到的实时事件",
-  "trajectory.theWholeRecordReopeningThe": "完整记录 · 重新进入会话将原样重建",
-  "trajectory.howMuchThisTrajectoryCovers": "尚未读取该轨迹的覆盖范围",
 };
