@@ -1,7 +1,7 @@
 .studio-model-menu.portmenu .mi.head { margin: 6px -8px 3px; padding: 8px 17px 7px; gap: 9px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--text) 6%, var(--float)); }
 .studio-model-menu.portmenu .mi.head:first-of-type { margin-top: 0; border-top: 0; }
 .studio-model-menu.portmenu .mi.head .lb { color: var(--text); font: var(--w-semi) var(--fs-meta)/1.2 var(--ui); letter-spacing: 0; }
-.studio-model-menu.portmenu .mi.head .rt { color: var(--muted); font: 500 var(--fs-micro)/1 var(--mono); }
+.studio-model-menu.portmenu .mi.head .rt { color: var(--muted); font: var(--w-reg) var(--fs-micro)/1 var(--mono); }
 .studio-model-menu.portmenu .mi.head .mi-mono { width: 20px; height: 20px; font-size: var(--fs-micro); }
 .studio-model-menu.portmenu button.mi { padding-left: 24px; }
 .mchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px -2px 6px; padding: 4px 2px; }

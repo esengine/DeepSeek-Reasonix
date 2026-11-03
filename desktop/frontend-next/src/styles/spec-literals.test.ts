@@ -43,4 +43,13 @@ describe("a stylesheet outside the token file", () => {
     }
     expect(bare).toEqual([]);
   });
+
+  it("takes weights from --w-reg, --w-med or --w-semi, never a bare number", () => {
+    const bare: string[] = [];
+    for (const [name, css] of Object.entries(SHEETS)) {
+      if (name === "./tokens.css") continue;
+      for (const m of css.matchAll(/(?<![-\w])font-weight\s*:\s*([0-9]{3})(?![0-9.])|(?<![-\w])font\s*:\s*([0-9]{3}) /g)) bare.push(`${name}:${line(css, m.index!)} ${m[0].trim()}`);
+    }
+    expect(bare).toEqual([]);
+  });
 });

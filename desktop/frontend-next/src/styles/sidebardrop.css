@@ -12,7 +12,7 @@
   border-radius: var(--r-sm);
   background: var(--surface);
   color: var(--text);
-  font: 500 var(--fs-meta)/1.5 var(--ui);
+  font: var(--w-reg) var(--fs-meta)/1.5 var(--ui);
   pointer-events: none;
 }
 .rail-drop svg { flex: none; width: 18px; height: 18px; }

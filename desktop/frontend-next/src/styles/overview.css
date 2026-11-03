@@ -8,19 +8,19 @@
 .studio-overview-anchor[data-open] .studio-overview-popover { opacity: 1; visibility: visible; pointer-events: auto; transform: none; transition-delay: 0s; }
 .studio-meterrail .studio-overview-anchor > button {
   height: 25px; display: inline-flex; align-items: center; gap: 5px; padding: 0 6px; border: 0; border-radius: var(--r-xs); background: transparent;
-  color: var(--faint); white-space: nowrap; font: 500 var(--fs-micro)/1 var(--ui); font-variant-numeric: tabular-nums;
+  color: var(--faint); white-space: nowrap; font: var(--w-reg) var(--fs-micro)/1 var(--ui); font-variant-numeric: tabular-nums;
 }
 .studio-meterrail .studio-overview-anchor > button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); }
 :root[data-theme="light"] .studio-meterrail .studio-overview-anchor > button { color: var(--ghost); }
 .studio-overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 0; }
 .studio-overview-grid > div { display: grid; gap: 2px; align-content: start; min-width: 0; }
-.studio-overview-grid dt { color: var(--ghost); font: 500 var(--fs-micro)/1.3 var(--ui); }
-.studio-overview-grid dd { margin: 0; color: var(--text); font: 600 var(--fs-ui)/1.2 var(--mono); }
-.studio-overview-grid small { color: var(--ghost); font: 500 var(--fs-micro)/1.4 var(--ui); }
+.studio-overview-grid dt { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui); }
+.studio-overview-grid dd { margin: 0; color: var(--text); font: var(--w-med) var(--fs-ui)/1.2 var(--mono); }
+.studio-overview-grid small { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
 .studio-overview-row { display: grid; grid-template-columns: minmax(0, 1.3fr) 3.2ch 5ch 4.5ch minmax(0, 1.2fr); align-items: center; gap: 8px; min-height: 22px; padding: 0 5px; border-radius: var(--r-xs); }
 .studio-overview-row:hover { background: var(--overlay); }
 .studio-overview-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.studio-overview-row > b { color: var(--muted); font: 550 var(--fs-micro)/1 var(--mono); text-align: right; }
+.studio-overview-row > b { color: var(--muted); font: var(--w-reg) var(--fs-micro)/1 var(--mono); text-align: right; }
 .studio-overview-row > small { text-align: right; font-family: var(--mono); }
 @media (hover: hover) {
   .studio-overview-anchor:hover .studio-overview-popover { opacity: 1; visibility: visible; pointer-events: auto; transform: none; transition-delay: 0s; }

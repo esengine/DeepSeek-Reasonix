@@ -1,4 +1,4 @@
-.run-signal-line button b { position: absolute; z-index: 1; left: 50%; top: 50%; translate: -50% -50%; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r-md); box-sizing: border-box; font: 600 var(--fs-micro)/var(--fs-title) var(--font-mono, monospace); text-align: center; color: var(--raised); background: var(--ra-color); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ra-color) 62%, var(--border)); }
+.run-signal-line button b { position: absolute; z-index: 1; left: 50%; top: 50%; translate: -50% -50%; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r-md); box-sizing: border-box; font: var(--w-med) var(--fs-micro)/var(--fs-title) var(--font-mono, monospace); text-align: center; color: var(--raised); background: var(--ra-color); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ra-color) 62%, var(--border)); }
 .run-signal-line button:hover b,
 .run-signal-line button:focus-visible b { scale: 1.12; }
 .run-signal-group { margin: 6px 10px 0; }

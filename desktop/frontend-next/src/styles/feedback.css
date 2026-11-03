@@ -246,7 +246,7 @@
 }
 .fbk-msg { unicode-bidi: isolate; }
 .fbk-tl li[data-tone="neutral"] i { border-color: var(--ghost); background: var(--ghost); }
-.palette-hit > small[data-alert] { color: var(--text); font: 600 var(--fs-micro)/1 var(--ui); }
+.palette-hit > small[data-alert] { color: var(--text); font: var(--w-med) var(--fs-micro)/1 var(--ui); }
 
 .fbk { --badge-ink: var(--muted); --badge-lock: var(--faint); }
 .lvl-badge { flex: none; color: var(--badge-ink); }
@@ -288,7 +288,7 @@
 .fbk-filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; cursor: pointer; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); }
 .fbk-filter-chip small { font-variant-numeric: tabular-nums; color: var(--faint); }
 .fbk-filter-chip:hover, .fbk-filter-chip[aria-pressed="true"] { color: var(--text); background: var(--overlay); }
-.fbk-filter-chip[data-live] small { color: var(--accent-ink); font-weight: 600; }
+.fbk-filter-chip[data-live] small { color: var(--accent-ink); font-weight: var(--w-med); }
 .fbk-filter-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .fbk-withdraw-acts { display: flex; gap: 8px; margin-top: 6px; }

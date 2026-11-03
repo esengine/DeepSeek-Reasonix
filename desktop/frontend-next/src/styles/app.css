@@ -4097,13 +4097,13 @@
   }
 
   .oobe-brand {
-    margin: 16px 0 0; font: 650 var(--fs-display)/1 var(--mono); letter-spacing: .21em;
+    margin: 16px 0 0; font: var(--w-med) var(--fs-display)/1 var(--mono); letter-spacing: .21em;
     text-transform: uppercase; white-space: nowrap;
     color: rgb(255 255 255 / .72);
   }
 
   .oobe-sub {
-    margin: 14px 0 0; font: 400 var(--fs-ui) var(--mono); letter-spacing: .01em;
+    margin: 14px 0 0; font: var(--w-reg) var(--fs-ui) var(--mono); letter-spacing: .01em;
     color: rgb(255 255 255 / .48);
   }
   .oobe[data-play] .oobe-brand {
@@ -4117,9 +4117,9 @@
 
   .oobe-lines { position: relative; height: 96px; width: 100%; margin-top: 4px }
   .oobe-line { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0 }
-  .oobe-line b { display: block; font: 300 calc(30px * var(--fs-scale, 1))/1.35 var(--ui); color: #fff }
+  .oobe-line b { display: block; font: var(--w-reg) calc(30px * var(--fs-scale, 1))/1.35 var(--ui); color: #fff }
   .oobe-line span { display: block; margin-top: 12px; max-width: 40ch;
-                    font: 300 var(--fs-lead)/1.7 var(--ui); color: rgb(255 255 255 / .5) }
+                    font: var(--w-reg) var(--fs-lead)/1.7 var(--ui); color: rgb(255 255 255 / .5) }
   .oobe[data-play] .l1 { animation: oobesay 2.6s var(--ease-out) 4s forwards }
   .oobe[data-play] .l2 { animation: oobesay 2.6s var(--ease-out) 6s forwards }
   .oobe[data-play] .l3 { animation: oobesay 2.4s var(--ease-out) 8s forwards }
@@ -4291,7 +4291,7 @@
     text-align: center; color: var(--faint);
     animation: card var(--t-card) var(--ease-out) both;
   }
-  .panes-empty .mk { font: 300 calc(30px * var(--fs-scale, 1))/1 var(--ui); color: var(--ghost); margin-bottom: 2px }
+  .panes-empty .mk { font: var(--w-reg) calc(30px * var(--fs-scale, 1))/1 var(--ui); color: var(--ghost); margin-bottom: 2px }
   .panes-empty .t { margin: 0; font: var(--w-med) var(--fs-lead) var(--ui); color: var(--muted) }
   .panes-empty .h { margin: 0 0 4px; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--faint); max-width: 34ch }
   .panes-empty button {
