@@ -115,7 +115,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
   const quickActions = useSyncExternalStore(onSessionQuickActionsChange, showsSessionQuickActions, showsSessionQuickActions);
   const [sessionMenu, setSessionMenu] = useState("");
   const order = useSessionMove(hub, reload, onError, !!needle);
-  const moveTo = useSessionMoveTo(hub, tree, reload, rowLabel);
+  const moveTo = useSessionMoveTo(hub, tree, reload, rowLabel, () => adder.add());
   const [sessionMenuAt, setSessionMenuAt] = useState({ x: 0, y: 0 });
   const sessionMenuBox = useRef<HTMLDivElement>(null);
   const sessionMenuPortal = useRef<HTMLDivElement>(null);

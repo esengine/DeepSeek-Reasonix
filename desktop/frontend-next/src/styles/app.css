@@ -4472,7 +4472,26 @@
     padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--surface); box-shadow: var(--shadow-float);
   }
-  .movess select { margin-top: 12px }
+  .movess-label { margin: 2px 0 6px; font: var(--w-med) var(--fs-meta) var(--ui); color: var(--muted) }
+  .movess-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: var(--r-md); max-height: 200px; overflow-y: auto }
+  .movess-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; border-radius: var(--r-sm); cursor: pointer }
+  .movess-row input { position: absolute; opacity: 0; pointer-events: none }
+  .movess-row .studio-icon { width: 15px; height: 15px; flex: none; color: var(--faint) }
+  .movess-row:hover, .movess-row[data-on] { background: var(--overlay) }
+  .movess-row:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px }
+  .movess-row .movess-check { margin-left: auto; color: var(--accent-ink) }
+  .movess-name { display: flex; flex-direction: column; min-width: 0 }
+  .movess-name b { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
+  .movess-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--faint) }
+  .movess-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px }
+  .movess-cols h3 { margin: 0 0 4px; font: var(--w-med) var(--fs-meta) var(--ui); color: var(--text) }
+  .movess-cols ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px }
+  .movess-cols li { position: relative; padding-left: 16px; font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); color: var(--muted) }
+  .movess-cols section[data-part="travels"] li::before { content: "✓"; position: absolute; left: 0; color: var(--ok-ink) }
+  .movess-cols section[data-part="stays"] li::before { content: "×"; position: absolute; left: 2px; color: var(--warn-ink) }
+  .movess .picknote { margin: 10px 0 0 }
+  .movess-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px }
+  .movess-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 0 }
   .pickcard h2 { margin: 0 0 12px; font: var(--w-med) var(--fs-lead) var(--ui); color: var(--text) }
 
   .pickpath { display: flex; align-items: center; gap: 6px }
