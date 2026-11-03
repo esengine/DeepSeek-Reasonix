@@ -7,4 +7,5 @@
 
 ## Removed
 
-- Removed the task budget settings `task_cost_budget`, `task_time_budget_minutes` and `task_token_budget`: a task is no longer stopped by what it spends, and old configs carrying them are cleaned on start with a one-time notice (a341d5615).
+- Removed `task_cost_budget`, `task_time_budget_minutes` and `task_token_budget`: a task is no longer stopped by what it spends (a341d5615).
+- Old configs carrying these keys are cleaned on start with a one-time notice (a341d5615).
