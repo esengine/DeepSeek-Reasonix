@@ -5,7 +5,7 @@ import { refresh as refreshWidth } from "./viewport";
 /** 正文起点。汉字同字号下笔画更密，中文高一档。求值留到调用时：模块加载早于
  *  i18n 定语言。这一档和 --doc 一起定行长：两个数只有一起看才有意义。
  *  这就是界面实际渲染的字号 —— 各个阅读面从它换算，不再各写各的字面值。 */
-export const readDefault = (): number => (current() === "zh" ? 13 : 12.5);
+export const readDefault = (): number => 14;
 
 /** 正文曾被各个阅读面写死，档位是围着那时的字号排的。存下来的是"哪一档"而不
  *  是像素，所以旧值按档位读回，选过"标准"的人还是标准。 */
@@ -23,15 +23,15 @@ export const readSteps = (): [number, string][] =>
   current() === "zh"
     ? [
         [12, "小"],
-        [13, "标准"],
-        [15, "大"],
-        [17, "更大"],
+        [14, "标准"],
+        [16.5, "大"],
+        [19, "更大"],
       ]
     : [
-        [11.5, "小"],
-        [12.5, "标准"],
-        [14.5, "大"],
-        [16.5, "更大"],
+        [12, "小"],
+        [14, "标准"],
+        [16, "大"],
+        [18, "更大"],
       ];
 
 /** Interface text steps: a scale over every size the stylesheet writes, with

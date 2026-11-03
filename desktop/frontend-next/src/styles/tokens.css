@@ -128,7 +128,7 @@
     --fs-micro: calc(11px * var(--fs-scale, 1)); --fs-meta: calc(12px * var(--fs-scale, 1)); --fs-ui: calc(13px * var(--fs-scale, 1));
     --fs-lead: calc(14px * var(--fs-scale, 1)); --fs-title: calc(17px * var(--fs-scale, 1)); --fs-display: calc(22px * var(--fs-scale, 1));
 
-    --read: 16px;
+    --read: 14px;
     --activity-scale: calc(var(--fs-scale, 1) * var(--read-scale, 1));
 
     --column: 760px; --doc: min(100%, var(--column)); --wide: min(100%, 1120px);
