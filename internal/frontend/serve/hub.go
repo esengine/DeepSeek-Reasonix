@@ -354,6 +354,7 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 			Sink:                     paneSink,
 			NativeSurfaces:           h.opts.NativeSurfaces,
 			Stderr:                   os.Stderr,
+			DiagnosticSink:           paneSink,
 			StatsSource:              h.surface(),
 			FeedbackSurface:          feedbackSurface(h.surface()),
 			AccountsURL:              accountsBaseURL(),

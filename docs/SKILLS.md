@@ -179,6 +179,10 @@ When the listing changes:
   this project; add `--global` to apply everywhere.
 - `reasonix doctor` reports skill health warnings, such as a missing
   description or a required capability that is not available.
+- The terminal UI and Studio show discovery diagnostics as renderer-managed
+  notices, including new diagnostics discovered while completing a slash command.
+  Identical diagnostics are shown once per skill store; changed diagnostics remain
+  visible. Noninteractive commands keep their stderr diagnostics.
 
 ```toml
 [skills]

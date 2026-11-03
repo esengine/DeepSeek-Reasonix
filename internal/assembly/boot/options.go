@@ -66,6 +66,9 @@ type Options struct {
 	// Interactive terminals must pass a private writer (or io.Discard) so
 	// background output cannot corrupt the TUI's raw mode.
 	Stderr io.Writer
+	// DiagnosticSink receives skill discovery warnings as renderer-managed notices.
+	// Nil preserves the noninteractive stderr destination.
+	DiagnosticSink event.Sink
 	// OnPhase receives completed assembly timings synchronously, including on a later failure.
 	OnPhase func(Phase)
 	// Project root for config, skills, memory, commands, hooks, and tool

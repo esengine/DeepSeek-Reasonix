@@ -18,6 +18,7 @@ func (s *Store) discover(scan func(discoveryRoot) []Skill) []Skill {
 			return nil
 		}
 		current.admits = s.admits
+		current.stderr, current.said = s.stderr, s.said
 		return current.discover(current.discoverRoot)
 	}
 	var out []Skill
