@@ -436,7 +436,7 @@ export function WorkbenchPanel({
     setTabMenu({ surface, x: pointed ? e.clientX : rect.left, y: pointed ? e.clientY : rect.bottom, anchor });
   };
   return (
-    <section className="workbench" aria-label={t("工作台")} data-action-keydown="layer.dismiss" onKeyDown={(e) => {
+    <section className="workbench" aria-label={t("common.workbench")} data-action-keydown="layer.dismiss" onKeyDown={(e) => {
       if (launcher && e.key === "Escape") { e.stopPropagation(); toggleLauncher(); newTab.current?.focus(); }
     }}>
       <header className="workbench-tabs">
@@ -463,7 +463,7 @@ export function WorkbenchPanel({
                 <StudioIcon name="globe" />
                 <input
                   className="workbench-tab-in"
-                  aria-label={t("重命名页签")}
+                  aria-label={t("workbenchPanel.renameTab")}
                   autoFocus
                   defaultValue={labelFor(surface)}
                   ref={(el) => el?.select()}
@@ -483,7 +483,7 @@ export function WorkbenchPanel({
               data-target={keyOf(surface)}
               title={
                 surface.kind === "browser"
-                  ? `${surface.tab.active ? `${t("模型正在操作这个页面")}
+                  ? `${surface.tab.active ? `${t("workbenchPanel.theModelIsWorkingOn")}
 ` : ""}${surface.tab.url}`
                   : labelFor(surface)
               }
@@ -505,8 +505,8 @@ export function WorkbenchPanel({
               className="workbench-tab-close"
               data-action="workbench.close"
               data-target={keyOf(surface)}
-              aria-label={t("关闭 {name}", { name: labelFor(surface) })}
-              title={t("关闭")}
+              aria-label={t("common.disable", { name: labelFor(surface) })}
+              title={t("common.close")}
               disabled={closing}
               onClick={() => void close([surface])}
             >
@@ -519,8 +519,8 @@ export function WorkbenchPanel({
           className="workbench-files"
           data-action="workbench.files"
           aria-pressed={showFiles && !launcher}
-          aria-label={t("文件")}
-          title={showFiles && !launcher ? t("收起文件树") : t("展开文件树")}
+          aria-label={t("common.files2")}
+          title={showFiles && !launcher ? t("workbenchPanel.hideFileTree") : t("workbenchPanel.showFileTree")}
           onClick={toggleExplorer}
         >
           <StudioIcon name="folder" />
@@ -529,8 +529,8 @@ export function WorkbenchPanel({
           className="workbench-new"
           data-action="workbench.new"
           ref={newTab}
-          aria-label={t("新建标签")}
-          title={t("新建标签")}
+          aria-label={t("workbenchPanel.newTab")}
+          title={t("workbenchPanel.newTab")}
           aria-expanded={launcher}
           onClick={toggleLauncher}
         >
@@ -597,7 +597,7 @@ export function WorkbenchPanel({
                 </div>
               )}
               {mode === "document" || unpreviewableText ? (
-                <Suspense fallback={<div className="workbench-empty">{t("正在读取…")}</div>}>
+                <Suspense fallback={<div className="workbench-empty">{t("common.loading")}</div>}>
                   <DocumentPreview key={filePath} port={port} path={filePath} shown={shown && !showFiles && !launcher}
                     view={documentState(documentStates, filePath)}
                     refresh={JSON.stringify([changeKey, glance, running, wrote])}
@@ -611,10 +611,10 @@ export function WorkbenchPanel({
                 previewTab ? (
                   <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} />
                 ) : (
-                  <div className="workbench-empty">{t("正在读取…")}</div>
+                  <div className="workbench-empty">{t("common.loading")}</div>
                 )
               ) : busy && !file ? (
-                <div className="workbench-empty">{t("正在读取…")}</div>
+                <div className="workbench-empty">{t("common.loading")}</div>
               ) : mode === "diff" ? (
                 <div className="workbench-diff" tabIndex={0}>
                   <DiffView path={active.path} diff={diff} />
@@ -624,7 +624,7 @@ export function WorkbenchPanel({
                   <LazyMarkdown text={draft} local={docRefs} />
                 </div>
               ) : file && file.path === (grantedFile?.rel ?? active.path) ? (
-                <Suspense fallback={<div className="workbench-empty">{t("正在读取…")}</div>}>
+                <Suspense fallback={<div className="workbench-empty">{t("common.loading")}</div>}>
                   <CodeEditor
                     key={active.path}
                     path={grantedFile?.rel ?? active.path}
@@ -657,14 +657,14 @@ export function WorkbenchPanel({
           <label className="workbench-search">
             <StudioIcon name="search" />
             <input
-              aria-label={t("搜索文件")}
+              aria-label={t("workbenchPanel.searchFiles")}
               data-action="workbench.search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("搜索文件")}
+              placeholder={t("workbenchPanel.searchFiles")}
             />
             {query && (
-              <button data-action="workbench.clear-search" aria-label={t("清除搜索")} onClick={() => setQuery("")}>
+              <button data-action="workbench.clear-search" aria-label={t("common.clearSearch")} onClick={() => setQuery("")}>
                 <StudioIcon name="close" />
               </button>
             )}
@@ -745,7 +745,7 @@ export function WorkbenchPanel({
               ),
             )}
             {!rows.length && (
-              <p className="workbench-no-files">{t("没有匹配的文件")}</p>
+              <p className="workbench-no-files">{t("workbenchPanel.noMatchingFiles")}</p>
             )}
           </div>
           {menu?.scope === scope && shown && (

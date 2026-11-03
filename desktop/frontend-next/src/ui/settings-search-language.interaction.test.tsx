@@ -41,7 +41,7 @@ async function draw() {
     onClose={onClose} onChanged={() => {}} onError={() => {}}
     account={null} accountUnread="" reloadAccount={() => {}}
   />);
-  return { calls, onClose, find: () => screen.getByRole<HTMLInputElement>("textbox", { name: t("搜索设置") }) };
+  return { calls, onClose, find: () => screen.getByRole<HTMLInputElement>("textbox", { name: t("settings.searchSettings2") }) };
 }
 
 it.each(["market", "plugins", "mcp", "skills", "ext-runtime", "hooks", "composition-picker"])(
@@ -67,7 +67,7 @@ it.each(["market", "plugins", "mcp", "skills", "ext-runtime", "hooks", "composit
     await waitFor(() => expect(block(anchor)).not.toBeNull());
     expect(find().value).toBe("");
     if (entry.section === "ext") {
-      expect(screen.getByRole("tab", { name: t(anchor === "market" ? "发现" : "已安装") }).getAttribute("aria-selected")).toBe("true");
+      expect(screen.getByRole("tab", { name: t(anchor === "market" ? "common.discover" : "common.installed") }).getAttribute("aria-selected")).toBe("true");
     }
   },
 );
@@ -89,7 +89,7 @@ it("finds extension blocks by the displayed section name without mounting them",
   expect(onClose).not.toHaveBeenCalled();
   await userEvent.type(find(), "not-a-setting");
   expect(screen.queryByRole("option")).toBeNull();
-  expect(screen.getByText(t("没有匹配的设置"))).toBeTruthy();
+  expect(screen.getByText(t("settings.noMatchingSetting"))).toBeTruthy();
   await userEvent.clear(find());
   expect(screen.queryByRole("listbox")).toBeNull();
 });
@@ -105,8 +105,8 @@ it.each(["zh", "en"])("keeps every displayed %s catalogue title and section sear
 it("retains canonical names and existing literal aliases in the English interface", () => {
   language("en");
   for (const entry of SETTINGS) {
-    expect(settingMatches(entry, entry.title.toLowerCase()), entry.anchor).toBe(true);
-    for (const alias of entry.keywords ?? []) expect(settingMatches(entry, alias.toLowerCase()), `${entry.anchor}: ${alias}`).toBe(true);
+    expect(settingMatches(entry, t(entry.title).toLowerCase()), entry.anchor).toBe(true);
+    for (const alias of entry.keywords ?? []) expect(settingMatches(entry, t(alias).toLowerCase()), `${entry.anchor}: ${alias}`).toBe(true);
   }
   expect(settingMatches(SETTING_AT("plugins")!, "not-a-setting")).toBe(false);
 });

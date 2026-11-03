@@ -15,11 +15,11 @@ import type { StoragePlan, StorageRoot, StorageState } from "../port/storage";
 // name for still renders, under its own id: showing an unnamed row is better
 // than hiding storage someone is looking for.
 const NAMED: Record<string, [string, string]> = {
-  state: ["会话与归档", "转录、压缩归档、用量统计、回溯快照"],
-  cache: ["索引与缓存", "搜索索引与派生数据，删除后会自动重建"],
-  worktrees: ["隔离工作区", "交付模式检出的独立副本"],
-  home: ["配置与凭据", "设置与 API key，始终随用户配置文件保存"],
-  locks: ["进程锁", "用于多实例互斥，必须保留在本机固定位置。每个均为空文件；删除会破坏互斥，因此只保留不清理"],
+  state: ["storage.sessionsAndArchives", "storage.transcriptsCompactionArchivesUsageSt"],
+  cache: ["storage.indexesAndCaches", "storage.searchIndexesAndDerivedData"],
+  worktrees: ["storage.isolatedWorktrees", "storage.theSeparateCheckoutsDeliveryWorks"],
+  home: ["storage.configurationAndCredentials", "storage.settingsAndAPIKeysThese"],
+  locks: ["storage.processLocks", "storage.howInstancesExcludeEachOther"],
 };
 
 const LAYOUT_LIMIT_MS = 10_000;
@@ -84,7 +84,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
         }
       })
       .catch(() => {
-        if (mine === generation.current) setError(t("无法读取存储占用。"));
+        if (mine === generation.current) setError(t("storage.cannotReadWhatIsOn"));
       });
   }, [port]);
 
@@ -108,7 +108,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
         .then((layout) =>
           setState((prev) => (prev ? { ...layout, roots: prev.roots } : layout)),
         )
-        .catch(() => setError(t("无法读取存储占用。")));
+        .catch(() => setError(t("storage.cannotReadWhatIsOn")));
     }, 500);
     return () => clearInterval(timer);
   }, [running, read, port]);
@@ -140,7 +140,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
           setPlan(null);
           read();
         })
-        .catch(() => setError(t("迁移未能启动。")));
+        .catch(() => setError(t("storage.theMoveCouldNotBe")));
     },
     [port, read],
   );
@@ -154,7 +154,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
         setTyping(false);
         onRecovered();
       } catch {
-        setRecoveryError(t("未能扫描这个文件夹。请确认它是旧版 Reasonix 的数据目录。"));
+        setRecoveryError(t("storage.thisFolderCouldNotBe"));
       } finally {
         setRecovering(false);
       }
@@ -175,7 +175,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
   }, [hub, importFrom]);
 
   if (error) return <div className="empty">{error}</div>;
-  if (!state) return <div className="empty">{t("正在统计…")}</div>;
+  if (!state) return <div className="empty">{t("storage.measuring")}</div>;
 
   const measured = state.roots.filter((r) => !r.missing || r.relocatable);
   const largest = Math.max(1, ...measured.filter((r) => !r.pending).map((r) => r.bytes));
@@ -184,25 +184,25 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
     <div className="storage">
       <NativeSessionImport hub={hub} workspace={workspace} onImported={onRecovered} />
       <section className="grp">
-        <h3 className="lbl">{t("找回旧版会话")}</h3>
+        <h3 className="lbl">{t("storage.recoverOlderSessions")}</h3>
         <div className="item">
           <div className="l">
-            <b>{t("从旧版 Reasonix 导入")}</b>
-            <span className="hint">{t("选择旧版的数据文件夹。扫描只会复制会话，不会移动或删除原文件；找不到原工作区的会话会归入当前工作区。")}</span>
+            <b>{t("storage.importFromAnOlderReasonix")}</b>
+            <span className="hint">{t("storage.chooseTheOlderDataFolder")}</span>
             {recovery && (
               <span className="ready">
                 {recovery.imported > 0
-                  ? t("已找回 {n} 个会话。", { n: recovery.imported })
+                  ? t("storage.recoveredSessions", { n: recovery.imported })
                   : recovery.recognised
-                    ? t("没有发现尚未导入的旧会话。")
-                    : t("这个文件夹里没有找到旧版会话。请选择 Reasonix 的数据文件夹（里面有 sessions、projects 或 desktop-sessions-v5）。")}
-                {recovery.warnings > 0 ? " " + t("有 {n} 项无法读取。", { n: recovery.warnings }) : null}
+                    ? t("storage.nothingNewToImport")
+                    : t("storage.noOlderSessionsWereFound")}
+                {recovery.warnings > 0 ? " " + t("storage.itemsCouldNotBeRead", { n: recovery.warnings }) : null}
               </span>
             )}
             {recoveryError && <span className="held">{recoveryError}</span>}
           </div>
           <button className="btn" data-action="session.import-legacy" disabled={recovering || !workspace} onClick={() => void recoverLegacy()}>
-            {t(recovering ? "正在扫描…" : "选择旧版数据目录…")}
+            {t(recovering ? "storage.scanning" : "storage.chooseOlderDataFolder")}
           </button>
         </div>
         {typing && (
@@ -216,20 +216,20 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
             }}
           >
             <div className="l">
-              <span className="hint">{t("无法打开文件夹选择器。请输入旧版数据文件夹的路径（里面有 sessions、projects 或 desktop-sessions-v5）。")}</span>
+              <span className="hint">{t("storage.theFolderPanelCouldNot")}</span>
               <input
                 value={typed}
                 spellCheck={false}
                 dir="ltr"
                 placeholder="/home/you/.reasonix"
-                aria-label={t("旧版数据目录路径")}
+                aria-label={t("storage.olderDataFolderPath")}
                 data-action="session.import-legacy"
                 data-value="path"
                 onChange={(ev) => setTyped(ev.target.value)}
               />
             </div>
             <button className="btn" type="submit" data-action="session.import-legacy" data-value="path" disabled={recovering || !typed.trim()}>
-              {t("导入此文件夹")}
+              {t("storage.importThisFolder")}
             </button>
           </form>
         )}
@@ -237,7 +237,7 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
       </section>
 
       <section className="grp">
-        <h3 className="lbl">{t("占用")}</h3>
+        <h3 className="lbl">{t("common.spaceUsed")}</h3>
         {measured.map((root) => (
           <Bar key={root.id} root={root} largest={largest} stalled={stalled.has(root.id)} />
         ))}
@@ -247,12 +247,12 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
       {state.leftBehind && <LeftBehind at={state.leftBehind} />}
 
       <section className="grp">
-        <h3 className="lbl">{t("位置")}</h3>
+        <h3 className="lbl">{t("common.locations")}</h3>
         {/* Said once for the section rather than on each row: it is one fact
             about this kernel, not a property of any one path. Without it the
             rows lose their 「移动…」 with nothing in its place, which is the
             reading Row's own note exists to prevent. */}
-        {!state.editable && <p className="note">{t("这台服务器未开放存储迁移")}</p>}
+        {!state.editable && <p className="note">{t("common.thisServerDoesNotOpen")}</p>}
         {state.roots.map((root) => (
           <Row
             key={root.id}
@@ -299,14 +299,14 @@ function Bar({ root, largest, stalled }: { root: StorageRoot; largest: number; s
             drawn at its 1% floor. */}
         <span className="sz">
           {stalled
-            ? t("统计超时")
+            ? t("storage.measuringTimedOut")
             : root.pending
-              ? t("正在统计…")
+              ? t("storage.measuring")
               : (root.truncated ? "≥ " : "") + bytes(root.bytes)}
-          {!unknown && root.bytes > 0 && root.files > 0 && ` · ${t("{n} 个文件", { n: root.files })}`}
+          {!unknown && root.bytes > 0 && root.files > 0 && ` · ${t("common.files", { n: root.files })}`}
         </span>
       </div>
-      {root.truncated && !unknown && <p className="note">{t("目录过大，已统计到时间上限，实际占用不小于此数")}</p>}
+      {root.truncated && !unknown && <p className="note">{t("storage.thisFolderIsTooLarge")}</p>}
       {!unknown && (
         <div className="meter">
           <i style={{ width: `${Math.max(1, Math.round((root.bytes / largest) * 100))}%` }} />
@@ -325,9 +325,9 @@ function Bar({ root, largest, stalled }: { root: StorageRoot; largest: number; s
 function LeftBehind({ at }: { at: { dir: string; names: string[] } }) {
   return (
     <section className="grp">
-      <h3 className="lbl">{t("原位置仍有残留数据")}</h3>
+      <h3 className="lbl">{t("storage.dataRemainsInThePrevious")}</h3>
       <p className="note">
-        {t("以下内容仍位于 {dir}：{names}。迁移存储位置时未一并迁移，因此项目列表、全局指令与记忆、计划任务、壁纸、主题包或更新回滚备份可能显示为缺失。下次启动会自动并入当前位置；若仍显示，请退出后把这些文件或目录复制到当前位置，已有的文件不要覆盖。", {
+        {t("storage.theseAreStillInA", {
           dir: at.dir,
           names: at.names.join("、"),
         })}
@@ -346,7 +346,7 @@ function Drives({ roots }: { roots: StorageRoot[] }) {
     <div className="drives">
       {[...seen.values()].map((root) => (
         <p key={root.volume}>
-          {t("{drive} 剩余 {free} / {total}", {
+          {t("storage.freeOf", {
             drive: root.volume ?? "",
             free: bytes(root.volumeFree ?? 0),
             total: bytes(root.volumeTotal ?? 0),
@@ -386,9 +386,9 @@ function Row({
   // Every path on screen is either actionable or says why it is not. A row that
   // simply had no button would read as a bug.
   const held = root.pinnedBy
-    ? t("由 {env} 指定", { env: root.pinnedBy })
+    ? t("storage.setBy", { env: root.pinnedBy })
     : !root.relocatable
-      ? t("不可移动")
+      ? t("storage.cannotBeMoved")
       : "";
 
   return (
@@ -402,7 +402,7 @@ function Row({
       </div>
       {root.relocatable && !root.pinnedBy && editable && !open && (
         <button className="btn" disabled={busy} onClick={onOpen}>
-          {t("移动…")}
+          {t("storage.move")}
         </button>
       )}
       {open && (
@@ -412,16 +412,16 @@ function Row({
             ref={inputRef}
             value={target}
             spellCheck={false}
-            placeholder={t("目标文件夹的完整路径：空文件夹，或已存有该数据的文件夹")}
+            placeholder={t("storage.fullPathToTheDestination")}
             onChange={(e) => onTarget(e.target.value)}
           />
           {plan && <Verdict plan={plan} />}
           <div className="acts">
             <button className="btn" onClick={onCancel}>
-              {t("取消")}
+              {t("common.cancel")}
             </button>
             <button className="btn pri" data-action="storage.move" disabled={!plan?.ok} onClick={onStart}>
-              {t(plan?.adopt ? "指向这里" : "开始迁移")}
+              {t(plan?.adopt ? "storage.pointItHere" : "storage.startTheMigration")}
             </button>
           </div>
         </div>
@@ -448,19 +448,19 @@ function Verdict({ plan }: { plan: StoragePlan }) {
   if (plan.adopt) {
     return (
       <p className="ready">
-        {t("该文件夹中已存有此数据（{size}，{n} 个文件）。将直接指向该位置，不复制也不删除。重启后生效。", {
+        {t("storage.thisFolderAlreadyHoldsThat", {
           size: bytes(plan.bytes),
           n: plan.files,
         })}
         {(plan.stays ?? 0) > 0
-          ? " " + t("当前位置仍有 {size}，不会一并迁移。", { size: bytes(plan.stays ?? 0) })
+          ? " " + t("storage.theCurrentLocationStillHolds", { size: bytes(plan.stays ?? 0) })
           : null}
       </p>
     );
   }
   return (
     <p className="ready">
-      {t("将迁移 {size}（{n} 个文件），目标磁盘剩余 {free}。完成后需重启生效。", {
+      {t("storage.movesInFilesTheDestination", {
         size: bytes(plan.bytes),
         n: plan.files,
         free: bytes(plan.free),
@@ -470,18 +470,18 @@ function Verdict({ plan }: { plan: StoragePlan }) {
 }
 
 const PHASES: Record<string, string> = {
-  adopting: "正在指向新位置",
-  copying: "正在复制",
-  verifying: "正在校验",
-  committed: "已提交，正在清理原位置",
-  done: "已完成",
+  adopting: "storage.pointingAtTheNewLocation",
+  copying: "storage.copying",
+  verifying: "storage.verifying",
+  committed: "storage.committedClearingTheOldLocation",
+  done: "common.done",
 };
 
 function Moving({ move }: { move: NonNullable<StorageState["move"]> }) {
   const pct = move.total > 0 ? Math.min(100, Math.round((move.bytes / move.total) * 100)) : 0;
   return (
     <section className="grp moving">
-      <h3 className="lbl">{t("迁移")}</h3>
+      <h3 className="lbl">{t("common.migrate")}</h3>
       {move.err ? (
         <p className="failed">{move.err}</p>
       ) : (
@@ -495,7 +495,7 @@ function Moving({ move }: { move: NonNullable<StorageState["move"]> }) {
           <div className="meter">
             <i style={{ width: `${pct}%` }} />
           </div>
-          {move.done && <p className="ready">{t("迁移完成。重启后生效。")}</p>}
+          {move.done && <p className="ready">{t("storage.movedItTakesEffectAfter")}</p>}
           {move.detail && <p className="ready">{move.detail}</p>}
         </>
       )}

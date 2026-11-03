@@ -52,12 +52,12 @@ export function ContentMatches({ hub, tree, onOpen, onError, onReference }: {
 
   if (!asks) return null;
   const answered = read?.for === needle ? read.hits : null;
-  if (answered === null) return <div className="content-matches" role="status" data-state="reading">{t("正在搜索对话内容…")}</div>;
-  if (answered === "failed") return <div className="content-matches" role="status" data-state="failed">{t("对话内容暂时搜不了，稍后再试")}</div>;
+  if (answered === null) return <div className="content-matches" role="status" data-state="reading">{t("contentMatches.searchingConversationText")}</div>;
+  if (answered === "failed") return <div className="content-matches" role="status" data-state="failed">{t("contentMatches.conversationTextCannotBeSearched")}</div>;
   if (answered.length === 0) return null;
   return (
-    <section className="content-matches" aria-label={t("对话内容匹配")}>
-      <h3>{t("对话内容匹配")}</h3>
+    <section className="content-matches" aria-label={t("contentMatches.matchesInConversationText")}>
+      <h3>{t("contentMatches.matchesInConversationText")}</h3>
       <ul>
         {answered.map((hit) => (
           <li key={hit.path}>
@@ -72,7 +72,7 @@ export function ContentMatches({ hub, tree, onOpen, onError, onReference }: {
             </button>
             {onReference && (
               <button type="button" className="content-match-ref" data-action="session.reference-match" data-target={hit.path}
-                aria-label={t("引用「{title}」到输入框", { title: titleOf(hit, tree) })} title={t("引用到输入框")}
+                aria-label={t("contentMatches.referenceInTheMessageBox", { title: titleOf(hit, tree) })} title={t("common.quoteIntoTheComposer")}
                 onClick={() => onReference(hit.id, titleOf(hit, tree))}>#</button>
             )}
           </li>

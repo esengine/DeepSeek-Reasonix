@@ -33,9 +33,9 @@ export function ModelEfforts({
     onChange(out);
   };
   return (
-    <div className="grow full model-efforts" role="group" aria-label={t("按模型设置档位")}>
-      <span>{t("按模型设置档位")}</span>
-      <i className="tip">{t("同一接入下有多家厂商的模型时，可为单个模型指定档位；「继承接入设置」沿用上面的档位。模型自己的档位优先。")}</i>
+    <div className="grow full model-efforts" role="group" aria-label={t("modelEfforts.levelsPerModel")}>
+      <span>{t("modelEfforts.levelsPerModel")}</span>
+      <i className="tip">{t("modelEfforts.whenOneConnectionServesSeveral")}</i>
       <ul className="me-list">
         {models.map((model) => {
           const own = value[model];
@@ -45,7 +45,7 @@ export function ModelEfforts({
             <li key={model} className="me-row" data-model={model}>
               <span className="me-name" title={model}>{model}</span>
               <select
-                aria-label={t("{model} 的推理档位", { model })}
+                aria-label={t("modelEfforts.reasoningLevelsFor", { model })}
                 data-action="provider.draft" data-value="model-effort-mode"
                 value={own ? "own" : "inherit"}
                 disabled={dormant}
@@ -53,22 +53,22 @@ export function ModelEfforts({
                   ? { supportedEfforts: from?.supportedEfforts ?? [], defaultEffort: seededDefault(from) }
                   : undefined)}
               >
-                <option value="inherit">{from?.official ? t("继承官方档位") : t("继承接入设置")}</option>
-                <option value="own">{t("单独设置")}</option>
+                <option value="inherit">{from?.official ? t("modelEfforts.inheritOfficialLevels") : t("modelEfforts.inheritFromConnection")}</option>
+                <option value="own">{t("modelEfforts.itsOwnLevels")}</option>
               </select>
               {dormant ? (
-                <i className="tip me-note">{t("该模型的思考参数不使用自定义档位。")}</i>
+                <i className="tip me-note">{t("modelEfforts.thisModelSThinkingParameter")}</i>
               ) : own ? (
                 <OwnLevels model={model} own={own} from={from} onChange={(next) => set(model, next)} />
               ) : (
                 <i className="tip me-note">
                   {from === null
-                    ? t("继承：保存后按接入设置确定")
+                    ? t("modelEfforts.inheritsSettledByTheConnection")
                     : from?.official
                       ? officialNote(from)
                       : from?.supportedEfforts.length
-                        ? t("继承：{levels}", { levels: from.supportedEfforts.join(" · ") })
-                        : t("继承：端点未声明档位")}
+                        ? t("modelEfforts.inherits", { levels: from.supportedEfforts.join(" · ") })
+                        : t("modelEfforts.inheritsTheEndpointDeclaresNo")}
                 </i>
               )}
             </li>
@@ -105,22 +105,22 @@ function OwnLevels({ model, own, from, onChange }: {
           </button>
         ))}
         <input className="me-extra" data-action-change="provider.draft" data-action-keydown="provider.draft"
-          data-value="model-effort-extra" value={extra} spellCheck={false} placeholder={t("其他档位")}
-          aria-label={t("{model} 的其他档位", { model })}
+          data-value="model-effort-extra" value={extra} spellCheck={false} placeholder={t("modelEfforts.otherLevel")}
+          aria-label={t("modelEfforts.anotherLevelFor", { model })}
           onChange={(e) => setExtra(e.target.value)} onBlur={addTyped}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTyped(); } }} />
       </div>
       <label className="me-default">
-        <span>{t("默认档位")}</span>
-        <select aria-label={t("{model} 的默认档位", { model })} value={own.defaultEffort ?? ""}
+        <span>{t("common.defaultLevel")}</span>
+        <select aria-label={t("modelEfforts.defaultLevelFor", { model })} value={own.defaultEffort ?? ""}
           data-action="provider.draft" data-value="model-default-effort"
           disabled={levels.length === 0}
           onChange={(e) => onChange({ supportedEfforts: levels, defaultEffort: e.target.value })}>
-          <option value="">{levels[0] ? t("第一个档位（{level}）", { level: levels[0] }) : t("第一个档位")}</option>
+          <option value="">{levels[0] ? t("modelEfforts.theFirstLevel", { level: levels[0] }) : t("common.theFirstLevel")}</option>
           {levels.map((l) => <option key={l} value={l}>{l}</option>)}
         </select>
       </label>
-      {levels.length === 0 && <i className="tip me-note">{t("未选档位时按继承处理。")}</i>}
+      {levels.length === 0 && <i className="tip me-note">{t("modelEfforts.withNoLevelPickedThe")}</i>}
     </div>
   );
 }
@@ -128,8 +128,8 @@ function OwnLevels({ model, own, from, onChange }: {
 function officialNote(from: ModelEffort): string {
   const levels = from.supportedEfforts.join(" · ");
   return from.defaultEffort
-    ? t("官方档位：{levels}（默认 {def}）", { levels, def: from.defaultEffort })
-    : t("官方档位：{levels}", { levels });
+    ? t("modelEfforts.officialLevelsDefault", { levels, def: from.defaultEffort })
+    : t("modelEfforts.officialLevels", { levels });
 }
 
 function seededDefault(from?: ModelEffort | null): string {

@@ -3,13 +3,13 @@ import { current, t } from "../i18n";
 import type { FeedbackProfile } from "../port/feedback";
 import { LevelBadge } from "./LevelBadge";
 
-const LEVEL_NAME = ["新种", "萌芽", "幼苗", "小树", "繁花", "成荫", "共林"] as const;
+const LEVEL_NAME = ["common.newSeed", "common.sprout", "common.seedling", "common.sapling", "common.bloom", "common.canopy", "common.grove"] as const;
 
 const levelName = (level: number): string | null => (Number.isInteger(level) && level >= 0 && level < LEVEL_NAME.length ? t(LEVEL_NAME[level]!) : null);
 
 const levelLabel = (level: number): string => {
   const name = levelName(level);
-  return name ? t("L{n} · {name}", { n: level, name }) : t("L{n}", { n: level });
+  return name ? t("feedback.l", { n: level, name }) : t("feedback.l2", { n: level });
 };
 
 const day = (iso: string): string => new Date(iso).toLocaleDateString(current() === "zh" ? "zh-CN" : "en", { year: "numeric", month: "short", day: "numeric" });
@@ -17,22 +17,22 @@ const day = (iso: string): string => new Date(iso).toLocaleDateString(current() 
 const validDate = (iso: string | null | undefined): iso is string => typeof iso === "string" && !Number.isNaN(Date.parse(iso));
 
 function progressText(p: FeedbackProfile): string {
-  if (p.nextLevel === null || p.remaining === null) return t("已落地 {n} 条，已是最高等级", { n: p.adoptedCount });
+  if (p.nextLevel === null || p.remaining === null) return t("feedbackLevel.shippedTheHighestLevel", { n: p.adoptedCount });
   const next = levelName(p.nextLevel);
   return next
-    ? t("已落地 {n} 条，再 {left} 条升到「{name}」", { n: p.adoptedCount, left: p.remaining, name: next })
-    : t("已落地 {n} 条，再 {left} 条升到 L{level}", { n: p.adoptedCount, left: p.remaining, level: p.nextLevel });
+    ? t("feedbackLevel.shippedMoreToReach", { n: p.adoptedCount, left: p.remaining, name: next })
+    : t("feedbackLevel.shippedMoreToReachL", { n: p.adoptedCount, left: p.remaining, level: p.nextLevel });
 }
 
 function trustNote(p: FeedbackProfile): string | null {
-  if (!validDate(p.trustExpiresAt)) return p.trustState === "lapsed" ? t("较高的额度已经失效。等级和已落地的条数都保留，之后再有反馈落地就会续上。") : null;
+  if (!validDate(p.trustExpiresAt)) return p.trustState === "lapsed" ? t("feedbackLevel.yourHigherLimitsHaveLapsed") : null;
   switch (p.trustState) {
     case "legacy_active":
-      return t("你现在较高的额度保留到 {date}。", { date: day(p.trustExpiresAt) });
+      return t("feedbackLevel.yourCurrentHigherLimitsStay", { date: day(p.trustExpiresAt) });
     case "active":
-      return t("较高的额度有效期至 {date}，下一条落地的反馈会续上。", { date: day(p.trustExpiresAt) });
+      return t("feedbackLevel.yourHigherLimitsRunUntil", { date: day(p.trustExpiresAt) });
     case "lapsed":
-      return t("较高的额度已经失效。等级和已落地的条数都保留，之后再有反馈落地就会续上。");
+      return t("feedbackLevel.yourHigherLimitsHaveLapsed");
     default:
       return null;
   }
@@ -52,7 +52,7 @@ export function FeedbackLevel({ profile: p, offline }: Props) {
   const said = progressText(p);
   const meaning = useId();
   return (
-    <section className="fbk-level" aria-label={t("反馈等级")} data-level={p.level} data-trust={p.trustState} data-stale={offline ? "" : undefined}>
+    <section className="fbk-level" aria-label={t("feedbackLevel.feedbackLevel")} data-level={p.level} data-trust={p.trustState} data-stale={offline ? "" : undefined}>
       <div className="fbk-level-hd">
         <LevelBadge level={p.level} decorative size={32} />
         <div className="fbk-level-id">
@@ -65,7 +65,7 @@ export function FeedbackLevel({ profile: p, offline }: Props) {
           <div
             className="fbk-level-bar"
             role="progressbar"
-            aria-label={t("升级进度")}
+            aria-label={t("feedbackLevel.progressToTheNextLevel")}
             aria-valuemin={0}
             aria-valuenow={done}
             aria-valuemax={span}
@@ -79,12 +79,12 @@ export function FeedbackLevel({ profile: p, offline }: Props) {
           </span>
         </div>
       )}
-      <p className="fbk-level-meaning" id={meaning}>{t("「已落地」指你的反馈已被修复或实现，并随新版本发布。")}</p>
+      <p className="fbk-level-meaning" id={meaning}>{t("feedbackLevel.shippedMeansYourReportWas")}</p>
       <p className="fbk-level-limits">
-        {t("每小时最多 {h} 条反馈 · 每天 {d} 条 · 每小时 {r} 条回复", { h: limits.reportsPerHour, d: limits.reportsPerDay, r: limits.repliesPerHour })}
+        {t("feedbackLevel.upToReportsAnHour", { h: limits.reportsPerHour, d: limits.reportsPerDay, r: limits.repliesPerHour })}
       </p>
       {note && <p className="fbk-level-note">{note}</p>}
-      {offline && validDate(p.observedAt) && <p className="fbk-level-stale">{t("这是上次确认的等级（{date}），连上反馈服务后会更新。", { date: day(p.observedAt) })}</p>}
+      {offline && validDate(p.observedAt) && <p className="fbk-level-stale">{t("feedbackLevel.thisIsTheLastConfirmed", { date: day(p.observedAt) })}</p>}
     </section>
   );
 }

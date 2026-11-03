@@ -35,15 +35,15 @@ export function OpenWithMenu({ hub, root, onError }: {
         data-action="workbench.open-with-menu"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={t("用其他程序打开项目")}
-        title={t("用其他程序打开项目")}
+        aria-label={t("openWithMenu.openTheProjectInAnother")}
+        title={t("openWithMenu.openTheProjectInAnother")}
         onClick={() => setOpen((v) => !v)}
       >
         <StudioIcon name="external" /><StudioIcon name="down" />
       </button>
       {open && (
-        <div className="openwith-menu" role="menu" aria-label={t("用其他程序打开项目")}>
-          {targets.length === 0 && <small>{t("没有找到可用的程序")}</small>}
+        <div className="openwith-menu" role="menu" aria-label={t("openWithMenu.openTheProjectInAnother")}>
+          {targets.length === 0 && <small>{t("openWithMenu.noSupportedProgramFound")}</small>}
           {targets.map((target) => (
             <button
               key={target.id}
@@ -58,8 +58,8 @@ export function OpenWithMenu({ hub, root, onError }: {
                 hub.openWith(root, target.id).catch(onError);
               }}
             >
-              <span>{t("用 {name} 打开", { name: openWithName(target) })}</span>
-              {!target.available && <small>{t("位于项目文件夹内")}</small>}
+              <span>{t("common.openWith", { name: openWithName(target) })}</span>
+              {!target.available && <small>{t("common.insideAProjectFolder")}</small>}
             </button>
           ))}
         </div>

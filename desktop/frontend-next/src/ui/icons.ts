@@ -4,19 +4,19 @@ import { t } from "../i18n";
 // running line from its category, so a new tool needs no new copy. The raw id
 // is still on the row, in the tag beside the name.
 const LABEL: Record<string, string> = {
-  web_search: "网页搜索", web_fetch: "获取网页", task: "委派任务", bash: "运行命令",
-  bash_output: "命令输出", kill_shell: "停止命令", wait: "等待任务",
-  read_file: "读取文件", grep: "搜索代码", glob: "查找文件", ls: "列出目录",
-  edit_file: "编辑文件", write_file: "写入文件", multi_edit: "编辑多个文件",
-  todo_write: "更新计划", remember: "保存记忆", use_capability: "调用 MCP",
-  code_index: "建立索引", complete_step: "完成步骤", review_report: "审阅结果",
-  update_goal: "更新目标", guardian_assessment: "安全检查", compress: "压缩上下文",
+  web_search: "common.webSearch2", web_fetch: "icons.fetchPage", task: "icons.delegateTask", bash: "icons.runCommand",
+  bash_output: "icons.commandOutput", kill_shell: "icons.stopCommand", wait: "icons.wait",
+  read_file: "icons.readFile", grep: "icons.searchCode", glob: "common.findingFiles", ls: "common.listDirectory",
+  edit_file: "icons.editFile", write_file: "icons.writeFile", multi_edit: "icons.editFiles",
+  todo_write: "icons.updatePlan", remember: "icons.saveMemory", use_capability: "icons.callMCP",
+  code_index: "icons.buildIndex", complete_step: "icons.completeStep", review_report: "icons.reviewResults",
+  update_goal: "icons.updateGoal", guardian_assessment: "icons.safetyCheck", compress: "icons.compactContext",
   // Checked against the kernel's registered names, not guessed: these all ship
   // and were rendering as their raw id under a default icon.
-  delete_range: "删除内容", delete_symbol: "删除符号", move_file: "移动文件",
-  notebook_edit: "编辑笔记本", submit_plan: "提交计划", ask: "询问用户",
-  fleet: "并行任务", read_only_task: "只读任务", read_subagent_result: "读取子任务结果",
-  complete_subtask: "完成子任务", lsp_diagnostics: "代码诊断",
+  delete_range: "icons.deleteContent", delete_symbol: "icons.deleteSymbol", move_file: "icons.moveFile",
+  notebook_edit: "icons.editNotebook", submit_plan: "icons.submitPlan", ask: "icons.askUser",
+  fleet: "icons.parallelTasks", read_only_task: "icons.readOnlyTask", read_subagent_result: "icons.readSubtaskResult",
+  complete_subtask: "icons.completeSubtask", lsp_diagnostics: "icons.codeDiagnostics",
   lsp_definition: "Definition", lsp_references: "References", lsp_hover: "Hover",
   parallel_tasks: "Tasks", list_subagents: "Subagents",
   run_skill: "Skill", read_only_skill: "Skill", read_skill: "Playbook", install_skill: "Install",
@@ -27,7 +27,7 @@ const LABEL: Record<string, string> = {
 };
 
 const RUNNING: Record<string, string> = {
-  plan: "正在写计划…", read: "正在读取…", net: "正在联网…", deleg: "正在派活…",
+  plan: "正在写计划…", read: "common.loading", net: "正在联网…", deleg: "正在派活…",
   bash: "正在执行…", write: "正在改写…", mem: "正在写入记忆…", mcp: "正在调 MCP…",
 };
 
@@ -37,7 +37,7 @@ const RUNNING: Record<string, string> = {
 // resolved to belongs in the mono tag beside it — and anything else with no
 // entry here is title-cased rather than passed through.
 export const labelFor = (tool: string) =>
-  LABEL[tool] ? t(LABEL[tool]) : (isCapability(tool) ? t("调用 MCP") : titleCase(tool));
+  LABEL[tool] ? t(LABEL[tool]) : (isCapability(tool) ? t("icons.callMCP") : titleCase(tool));
 
 export const isCapability = (tool: string) => tool === "use_capability" || tool.startsWith("mcp__");
 
@@ -49,7 +49,7 @@ const titleCase = (id: string) =>
     .join(" ") || id;
 
 export function runLabelFor(tool: string) {
-  return t(RUNNING[categoryOf(tool)] ?? "正在处理…");
+  return t(RUNNING[categoryOf(tool)] ?? "common.working");
 }
 
 // A tool that changes the tree has to read as one: the neutral bucket drops the

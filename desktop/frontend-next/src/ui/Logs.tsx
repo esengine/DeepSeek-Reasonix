@@ -16,24 +16,24 @@ export function Logs({ port }: { port: Pick<AgentPort, "studioLogs"> }) {
   }, [port]);
 
   if (failed) return <p className="acct-note">{failed}</p>;
-  if (!logs) return <p className="acct-note">{t("正在读取…")}</p>;
+  if (!logs) return <p className="acct-note">{t("common.loading")}</p>;
   return (
     <div className="vers">
       <p className="acct-note">
         <code>{logs.dir}</code>{" "}
-        <CopyButton text={logs.dir} iconOnly showFeedback label={t("复制日志目录")} />
+        <CopyButton text={logs.dir} iconOnly showFeedback label={t("logs.copyTheLogFolder")} />
       </p>
       {logs.crashes.length === 0 ? (
-        <p className="acct-note">{t("没有留下异常退出的记录。")}</p>
+        <p className="acct-note">{t("logs.noAbnormalExitRecordHas")}</p>
       ) : (
         <>
-          <p className="acct-note">{t("内核异常退出时留下的记录，位于上面目录里的 crash 文件夹：")}</p>
+          <p className="acct-note">{t("logs.recordsLeftWhenTheKernel")}</p>
           {logs.crashes.map((c) => (
             <p className="acct-note" key={c.name}>
               <code>{c.name}</code>{" · "}{new Date(c.at).toLocaleString()}{" · "}{Math.max(1, Math.round(c.bytes / 1024))} KB
             </p>
           ))}
-          {logs.truncated && <p className="acct-note">{t("还有更早的记录没有列出，请在上面的文件夹里查看。")}</p>}
+          {logs.truncated && <p className="acct-note">{t("logs.olderRecordsAreNotListed")}</p>}
         </>
       )}
     </div>

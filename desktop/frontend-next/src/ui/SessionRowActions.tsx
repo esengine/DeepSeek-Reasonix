@@ -12,13 +12,13 @@ export function SessionPinAction({ target, title, pinned, enabled, disabled, onP
   enabled: boolean;
   onPin: () => void;
 }) {
-  if (!enabled) return pinned ? <StudioIcon name="pin" className="sesspin-marker" aria-label={t("已置顶")} /> : null;
+  if (!enabled) return pinned ? <StudioIcon name="pin" className="sesspin-marker" aria-label={t("sessionRowActions.pinned")} /> : null;
   return <button className="sesspin-action" data-action="session.pin" data-target={target}
     aria-pressed={pinned} disabled={disabled}
-    title={t(pinned ? "取消置顶" : "置顶会话")}
-    aria-label={t(pinned ? "取消置顶：{title}" : "置顶会话：{title}", { title })}
+    title={t(pinned ? "common.unpin" : "common.pinSession")}
+    aria-label={t(pinned ? "sessionRowActions.unpinSession" : "sessionRowActions.pinSession", { title })}
     onClick={(event) => { event.stopPropagation(); onPin(); }}>
-    <StudioIcon name="pin" aria-label={pinned ? t("已置顶") : undefined} />
+    <StudioIcon name="pin" aria-label={pinned ? t("sessionRowActions.pinned") : undefined} />
   </button>;
 }
 
@@ -28,8 +28,8 @@ export function SessionArchiveAction({ target, title, archived, disabled, onArch
 }) {
   return <span className="sessquick"><button data-action="session.archive" data-target={target}
     data-value={archived ? "restore" : "archive"} disabled={disabled}
-    title={t(archived ? "取消归档" : "归档会话")}
-    aria-label={t(archived ? "取消归档：{title}" : "归档会话：{title}", { title })}
+    title={t(archived ? "common.unarchive" : "common.archiveSession")}
+    aria-label={t(archived ? "sessionRowActions.unarchive" : "sessionRowActions.archiveSession", { title })}
     onClick={(event) => { event.stopPropagation(); onArchive(); }}>
     <StudioIcon name="archive" />
   </button></span>;

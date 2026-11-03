@@ -32,13 +32,13 @@ export function Packages({ port, packages, onChanged, onReloadError, onReloaded,
       {packages.length > 0 && (
         <div className="msearch">
           <input ref={search} type="search" value={q} spellCheck={false}
-            aria-label={t("搜索已安装包")} placeholder={t("搜索包名、技能、命令或服务")}
+            aria-label={t("packages.searchInstalledPackages")} placeholder={t("packages.searchPackageNamesSkillsCommands")}
             data-action="extensions.search" onChange={(e) => setQ(e.target.value)} />
-          {q && <button className="act ghost" data-action="extensions.clear-search" onClick={() => { setQ(""); search.current?.focus({ preventScroll: true }); }}>{t("清除搜索")}</button>}
-          <span className="cnt" aria-live="polite" aria-atomic="true">{t("插件包：{shown} / {total}", { shown, total: packages.length })}</span>
+          {q && <button className="act ghost" data-action="extensions.clear-search" onClick={() => { setQ(""); search.current?.focus({ preventScroll: true }); }}>{t("common.clearSearch")}</button>}
+          <span className="cnt" aria-live="polite" aria-atomic="true">{t("packages.packages", { shown, total: packages.length })}</span>
         </div>
       )}
-      {packages.length > 0 && query && shown === 0 && <div className="empty">{t("没有匹配的已安装包。")}</div>}
+      {packages.length > 0 && query && shown === 0 && <div className="empty">{t("packages.noMatchingInstalledPackages")}</div>}
       {rows.map(({ p, shown }) => (
         <Package
           key={`${connection.generation}:${p.name}`}
@@ -86,14 +86,14 @@ function summary(p: PluginPackage): string {
   const add = (n: number | undefined, unit: string) => {
     if (n) parts.push(t(unit, { n }));
   };
-  add(p.skills?.length, "{n} 个技能");
-  add(p.commands?.length, "{n} 个命令");
-  add(p.agents?.length, "{n} 个子代理");
-  add(p.prompts?.length, "{n} 个提示词");
-  add(p.themes?.length, "{n} 套配色");
-  add(p.hooks?.length, "{n} 条钩子");
-  add(p.mcpServers?.length, "{n} 个服务");
-  if (p.runtime) parts.push(t("常驻进程"));
+  add(p.skills?.length, "common.skills");
+  add(p.commands?.length, "common.commands");
+  add(p.agents?.length, "common.subagents");
+  add(p.prompts?.length, "common.prompts");
+  add(p.themes?.length, "common.palettes");
+  add(p.hooks?.length, "common.hooks");
+  add(p.mcpServers?.length, "common.services");
+  if (p.runtime) parts.push(t("common.longRunningProcess"));
   return parts.join(" · ");
 }
 
@@ -131,7 +131,7 @@ function Package({
           one installed from a folder that has since moved cannot. */}
       {p.source && (
         <button className="act ghost" data-action="extensions.update" disabled={locked || !!updating} onClick={onUpdate}>
-          {t("更新")}
+          {t("common.update")}
         </button>
       )}
       {/* Export and install are one door seen from both sides, so this button
@@ -147,17 +147,17 @@ function Package({
           })
         }
       >
-        {t(busy === "export" ? "打包中…" : "导出")}
+        {t(busy === "export" ? "packages.packing" : "common.export")}
       </button>
-      <button className="act ghost" aria-label={t("移除 {name}", { name: p.name })} disabled={locked} onClick={() => setConfirming(true)}>
-        {t("移除")}
+      <button className="act ghost" aria-label={t("common.remove2", { name: p.name })} disabled={locked} onClick={() => setConfirming(true)}>
+        {t("common.remove")}
       </button>
       <Switch
         data-action="extensions.enabled"
         data-target={p.name}
         on={p.enabled}
         busy={locked}
-        label={`${t(p.enabled ? "关闭" : "启用")} ${p.name}`}
+        label={`${t(p.enabled ? "common.close" : "packages.enable")} ${p.name}`}
         onClick={() => void run("toggle", async () => {
           const out = await port.setPluginEnabled(p.name, !p.enabled);
           if (out.reloadError) onReloadError(out.reloadError);
@@ -170,10 +170,10 @@ function Package({
   const confirm = confirming && (
     <div className="confirm">
       <span className="q">
-        {t("删除 {name}？其提供的技能、命令与服务将一并移除。若只是暂时停用，关闭开关即可。", { name: p.name })}
+        {t("packages.deleteTheSkillsCommandsAnd", { name: p.name })}
       </span>
       <button className="act" disabled={locked} onClick={() => setConfirming(false)}>
-        {t("取消")}
+        {t("common.cancel")}
       </button>
       <button
         className="act danger"
@@ -188,11 +188,11 @@ function Package({
               if (out.reloadError) onReloadError(out.reloadError);
               else onReloaded();
             }
-            if (!out.ok) setFailed(out.error || out.next || t("没能删掉"));
+            if (!out.ok) setFailed(out.error || out.next || t("packages.itCouldNotBeRemoved"));
           })
         }
       >
-        {t(busy === "remove" ? "移除中…" : "删除")}
+        {t(busy === "remove" ? "common.removing" : "common.delete")}
       </button>
     </div>
   );
@@ -201,7 +201,7 @@ function Package({
     <>
       <i className="pip" />
       <span className="nm" title={p.name}>{p.name}</span>
-      <span className="fold" title={summary(p) || undefined}>{summary(p) || t("没有可用的贡献")}</span>
+      <span className="fold" title={summary(p) || undefined}>{summary(p) || t("packages.nothingUsableInside")}</span>
       <span className="meta" title={meta || undefined}>{meta}</span>
       {actions}
     </>
@@ -212,7 +212,7 @@ function Package({
       {p.error && <div className="why">{p.error}</div>}
       {failed && <div className="why" role="alert">{failed}</div>}
       {p.status === "disabled_incompatible" && (
-        <div className="why">{p.statusReason || t("这个包和当前版本不兼容，已经被停用。")}</div>
+        <div className="why">{p.statusReason || t("packages.thisPackageDoesNotWork")}</div>
       )}
       {p.warnings?.map((w) => (
         <div className="why" key={w}>
@@ -221,16 +221,16 @@ function Package({
       ))}
       {exported && (
         <div className="why" role="status">
-          {exported.savedTo ? t("已保存至 {path}。", { path: exported.savedTo }) : t("导出完成。")}
+          {exported.savedTo ? t("packages.savedTo", { path: exported.savedTo }) : t("packages.exported")}
           {" "}
           {exported.required.length
-            ? t("里面的密钥值已经去掉，装它的人要自己提供：{names}", { names: exported.required.join("、") })
-            : t("该包不需要填写任何密钥。")}
+            ? t("packages.theKeyValuesWereStripped", { names: exported.required.join("、") })
+            : t("packages.thisPackageAsksForNo")}
         </div>
       )}
       {exported?.savedTo && (
         <div className="acts">
-          <CopyButton text={exported.savedTo} label={t("复制路径")} />
+          <CopyButton text={exported.savedTo} label={t("common.copyPath")} />
         </div>
       )}
     </>
@@ -247,14 +247,14 @@ function Package({
         {p.runtime && (
           <div className="row" data-run>
             <span className="d">▸</span>
-            <span>{t("常驻进程")}</span>
+            <span>{t("common.longRunningProcess")}</span>
             <span className="sc">{[p.runtime.command, ...(p.runtime.args ?? [])].join(" ")}</span>
           </div>
         )}
         {p.runtime?.tools?.map((name) => (
           <div className="row" data-run key={"tool:" + name}>
             <span className="d">▸</span>
-            <span>{t("工具")}</span>
+            <span>{t("common.tool")}</span>
             <span className="sc">{name}</span>
           </div>
         ))}
@@ -272,16 +272,16 @@ function Package({
             <span className="sc">{s.description || s.command || s.url || s.transport}</span>
           </div>
         ))}
-        <Contributions label={t("技能贡献")} items={p.skills} />
-        <Contributions label={t("命令贡献")} items={p.commands} />
-        <Contributions label={t("子代理贡献")} items={p.agents} />
-        <Contributions label={t("提示词贡献")} items={p.prompts} />
-        <Contributions label={t("主题贡献")} items={p.themes} />
+        <Contributions label={t("packages.skills")} items={p.skills} />
+        <Contributions label={t("packages.commands")} items={p.commands} />
+        <Contributions label={t("packages.subagents")} items={p.agents} />
+        <Contributions label={t("packages.prompts")} items={p.prompts} />
+        <Contributions label={t("packages.themes")} items={p.themes} />
         {p.skipped?.map((s, index) => (
           <div className="row" key={index}>
             <span className="d">·</span>
             <span>{s.capability}</span>
-            <span className="sc">{t("用不了：{why}", { why: s.reason })}</span>
+            <span className="sc">{t("packages.unusable", { why: s.reason })}</span>
           </div>
         ))}
       </div>
@@ -299,7 +299,7 @@ function Contributions({ label, items }: { label: string; items?: PluginItem[] }
           <span className="d">·</span>
           <span>{it.invocation || it.name}</span>
           <span className="sc">{it.description}</span>
-          {it.invocation && <CopyButton key={it.invocation} text={it.invocation} iconOnly label={t("复制调用命令 {command}", { command: it.invocation })} />}
+          {it.invocation && <CopyButton key={it.invocation} text={it.invocation} iconOnly label={t("common.copyInvocation", { command: it.invocation })} />}
         </div>
       ))}
     </div>

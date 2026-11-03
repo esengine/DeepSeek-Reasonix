@@ -20,9 +20,9 @@ export function WaitNote({ args }: { args?: string }) {
   const limit = ownTimeout(args);
   return (
     <div className="activity-call-wait" role="status">
-      {t("还没有输出，命令仍在运行")}
-      {watched >= 1000 && <> · {t("已运行 {time}", { time: seconds(watched, 0) })}</>}
-      {limit > 0 && <> · {t("这条命令自带的超时上限 {n} 秒", { n: limit })}</>}
+      {t("waitNote.noOutputYetTheCommand")}
+      {watched >= 1000 && <> · {t("waitNote.runningFor", { time: seconds(watched, 0) })}</>}
+      {limit > 0 && <> · {t("waitNote.thisCommandSOwnTimeout", { n: limit })}</>}
     </div>
   );
 }

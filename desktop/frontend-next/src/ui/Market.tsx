@@ -11,10 +11,10 @@ import { MyPackages, PublishForm } from "./MarketPublish";
 import { MarketVote, approvalLabel } from "./MarketVote";
 import { arrowRadios, arrowTabs } from "./tablist";
 
-const KINDS: [MarketKind | "", string][] = [["", "全部"], ["skill", "技能"], ["plugin", "插件"], ["mcp", "MCP 服务"], ["theme", "主题"]];
+const KINDS: [MarketKind | "", string][] = [["", "common.all"], ["skill", "common.skills2"], ["plugin", "common.plugins"], ["mcp", "common.mCPServers"], ["theme", "common.theme"]];
 type Sort = "recommended" | "trending" | "installs" | "new";
-const SORTS: [Sort, string][] = [["recommended", "推荐"], ["trending", "近期热门"], ["installs", "安装最多"], ["new", "最新"]];
-const KIND_NAME: Record<string, string> = { skill: "技能", plugin: "插件", mcp: "MCP 服务", theme: "主题" };
+const SORTS: [Sort, string][] = [["recommended", "common.recommended"], ["trending", "market.trending"], ["installs", "market.mostInstalled"], ["new", "market.newest"]];
+const KIND_NAME: Record<string, string> = { skill: "common.skills2", plugin: "common.plugins", mcp: "common.mCPServers", theme: "common.theme" };
 
 interface Props {
   port: AgentPort;
@@ -118,25 +118,25 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
   }
 
   return (
-    <div className="mkt" ref={panel} role="region" aria-label={t("社区市场")} tabIndex={-1}>
+    <div className="mkt" ref={panel} role="region" aria-label={t("common.communityMarket")} tabIndex={-1}>
       <div className="mkt-bar">
         <input
           className="mkt-q"
           type="search"
           data-action="market.search"
           value={q}
-          placeholder={t("搜索技能、插件、MCP 服务与主题")}
-          aria-label={t("搜索社区市场")}
+          placeholder={t("market.searchSkillsPluginsMCPServers")}
+          aria-label={t("market.searchTheCommunityMarket")}
           onChange={(e) => setQ(e.target.value)}
         />
-        <div className="seg" data-text role="radiogroup" aria-label={t("类型")} data-action-keydown="market.kind" onKeyDown={arrowRadios}>
+        <div className="seg" data-text role="radiogroup" aria-label={t("common.type")} data-action-keydown="market.kind" onKeyDown={arrowRadios}>
           {KINDS.map(([id, name]) => (
             <button key={id || "all"} role="radio" aria-checked={kind === id} tabIndex={kind === id ? 0 : -1} data-action="market.kind" data-value={id || "all"} onClick={() => setKind(id)}>
               {t(name)}
             </button>
           ))}
         </div>
-        <div className="seg" data-text role="radiogroup" aria-label={t("排序")} data-action-keydown="market.sort" onKeyDown={arrowRadios}>
+        <div className="seg" data-text role="radiogroup" aria-label={t("common.sort")} data-action-keydown="market.sort" onKeyDown={arrowRadios}>
           {SORTS.map(([id, name]) => (
             <button key={id} role="radio" aria-checked={sort === id} tabIndex={sort === id ? 0 : -1} data-action="market.sort" data-value={id} onClick={() => setSort(id)}>
               {t(name)}
@@ -145,22 +145,22 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
         </div>
         <label className="mkt-pin">
           <input type="checkbox" data-action="market.pinned" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />
-          {t("只看已固定")}
+          {t("market.pinnedOnly")}
         </label>
       </div>
       {error && (
         <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("无法读取社区市场")}</span>
+          <span className="t">{t("market.couldNotReadTheCommunity")}</span>
           <span className="why">{error}</span>
           {(filterUnsupported || rows?.length === 0) && <div className="acts">
-            {filterUnsupported && <button className="act" data-action="market.show-all" onClick={() => { panel.current?.focus(); setPinned(false); }}>{t("查看全部包")}</button>}
-            {!filterUnsupported && <button className="act" data-action="market.retry" onClick={() => { panel.current?.focus(); setRows(null); load(0, true); }}>{t("重试")}</button>}
+            {filterUnsupported && <button className="act" data-action="market.show-all" onClick={() => { panel.current?.focus(); setPinned(false); }}>{t("market.seeAllPackages")}</button>}
+            {!filterUnsupported && <button className="act" data-action="market.retry" onClick={() => { panel.current?.focus(); setRows(null); load(0, true); }}>{t("common.retry")}</button>}
           </div>}
         </div>
       )}
       {cached && !error && <CacheNotice cache={cached} action="market.retry" onRetry={() => { panel.current?.focus(); load(0, true); }} />}
-      {rows === null && !error && <div className="empty" role="status">{t("正在读取…")}</div>}
-      {rows?.length === 0 && !error && <div className="empty">{t(pinned ? "没有找到已固定内容的包。可关闭筛选查看全部包。" : "没有找到匹配的包。")}</div>}
+      {rows === null && !error && <div className="empty" role="status">{t("common.loading")}</div>}
+      {rows?.length === 0 && !error && <div className="empty">{t(pinned ? "market.noPinnedPackagesFoundTurn" : "market.noMatchingPackages")}</div>}
       <ul className="mkt-list">
         {rows?.map((p) => (
           <li key={p.slug}>
@@ -168,21 +168,21 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
               <span className="mkt-line">
                 <span className="nm">{p.name}</span>
                 <span className="mkt-kind">{t(KIND_NAME[p.kind] ?? p.kind)}</span>
-                {p.verified && <span className="mkt-badge" data-tone="ok">{t("管理员标记可信")}</span>}
+                {p.verified && <span className="mkt-badge" data-tone="ok">{t("market.adminMarkedTrusted")}</span>}
                 {p.installed && (
                   <span className="mkt-badge">
-                    {p.installed.version === p.latestVersion ? t("已安装") : t("可更新")}
+                    {p.installed.version === p.latestVersion ? t("common.installed") : t("common.updateAvailable")}
                   </span>
                 )}
-                <span className="mkt-n">{t("{n} 次安装", { n: p.installCount })}</span>
+                <span className="mkt-n">{t("common.installs", { n: p.installCount })}</span>
                 <span className="mkt-n mkt-rate">{approvalLabel(p)}</span>
               </span>
               <span className="mkt-line">
                 <span className="mkt-sum">{p.summary}</span>
                 <span className="mkt-meta mkt-id">{`@${p.handle} · v${p.latestVersion}`}</span>
                 {/* Outside the truncating meta so a narrow row loses the handle, never this. */}
-                <span className="mkt-pinned" data-on={p.pinned ? "" : undefined} title={p.pinned === false ? t("审核时没有记录内容摘要，需要信任发布者后安装") : undefined}>
-                  {t(p.pinned === undefined ? "固定状态未知" : p.pinned ? "已固定" : "未固定")}
+                <span className="mkt-pinned" data-on={p.pinned ? "" : undefined} title={p.pinned === false ? t("market.noContentDigestWasRecorded") : undefined}>
+                  {t(p.pinned === undefined ? "market.pinStatusUnknown" : p.pinned ? "common.pinned" : "market.notPinned")}
                 </span>
               </span>
             </button>
@@ -191,7 +191,7 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
       </ul>
       {more && (
         <button className="act" data-action="market.more" aria-live="polite" disabled={loadingMore} onClick={() => { panel.current?.focus({ preventScroll: true }); load(nextOffset.current); }}>
-          {t(loadingMore ? "正在读取…" : error && !filterUnsupported ? "重试" : "加载更多")}
+          {t(loadingMore ? "common.loading" : error && !filterUnsupported ? "common.retry" : "market.loadMore")}
         </button>
       )}
     </div>
@@ -225,7 +225,7 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
     setError("");
     try {
       const p = await port.planMarket({ slug, replace: update, ...(trust ? { trust } : {}) });
-      if (!p.ok) setError(p.error || p.next || t("该来源中没有可安装的内容"));
+      if (!p.ok) setError(p.error || p.next || t("common.thereIsNothingInstallableAt"));
       else setPlan(p);
     } catch (e) {
       setError(reason(e));
@@ -251,7 +251,7 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
 
   const back = (
     <button className="act" data-action="market.back" onClick={onBack}>
-      {t("返回列表")}
+      {t("market.backToList")}
     </button>
   );
 
@@ -266,9 +266,9 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
         {installed.length > 0 && <ul className="mkt-installed">{installed.map((action, i) => <li key={`${action.kind}:${action.name}:${i}`}>{action.name}</li>)}</ul>}
         <div className="acts">
           {back}
-          {!done.ok && <button className="act" data-action="market.detail-retry" onClick={() => { panel.current?.focus(); setResult(done.applied ? { plan: done, stage: "retry" } : null); setPlan(null); setD(null); setAttempt((n) => n + 1); }}>{t("重试")}</button>}
+          {!done.ok && <button className="act" data-action="market.detail-retry" onClick={() => { panel.current?.focus(); setResult(done.applied ? { plan: done, stage: "retry" } : null); setPlan(null); setD(null); setAttempt((n) => n + 1); }}>{t("common.retry")}</button>}
           {location && onViewInstalled && (
-            <button className="act" data-action="market.view-installed" onClick={() => onViewInstalled(location.kind, location.name!)}>{t("查看已安装能力")}</button>
+            <button className="act" data-action="market.view-installed" onClick={() => onViewInstalled(location.kind, location.name!)}>{t("common.viewInstalledCapabilities")}</button>
           )}
         </div>
       </div>
@@ -284,15 +284,15 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
       <div className="mkt" ref={panel} role="region" aria-label={slug} tabIndex={-1}>
         {error ? (
           <div className="find" data-lvl="err" role="alert">
-            <span className="t">{t("无法读取 {name}", { name: slug })}</span>
+            <span className="t">{t("market.couldNotRead", { name: slug })}</span>
             <span className="why">{error}</span>
           </div>
         ) : (
-          <div className="empty" role="status">{t("正在读取…")}</div>
+          <div className="empty" role="status">{t("common.loading")}</div>
         )}
         <div className="acts">
           {back}
-          {error && <button className="act" data-action="market.detail-retry" onClick={() => { panel.current?.focus(); setAttempt((n) => n + 1); }}>{t("重试")}</button>}
+          {error && <button className="act" data-action="market.detail-retry" onClick={() => { panel.current?.focus(); setAttempt((n) => n + 1); }}>{t("common.retry")}</button>}
         </div>
       </div>
     );
@@ -309,35 +309,35 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
       <div className="mkt-hd">
         <span className="nm">{p.name}</span>
         <span className="mkt-kind">{t(KIND_NAME[p.kind] ?? p.kind)}</span>
-        {p.verified && <span className="mkt-badge" data-tone="ok">{t("管理员标记可信")}</span>}
+        {p.verified && <span className="mkt-badge" data-tone="ok">{t("market.adminMarkedTrusted")}</span>}
       </div>
       {d.cache && <CacheNotice cache={d.cache} action="market.detail-retry" onRetry={() => { panel.current?.focus(); setAttempt((n) => n + 1); }} />}
       {p.summary && <p className="mkt-sum">{p.summary}</p>}
       {p.description && <p className="mkt-desc">{p.description}</p>}
       {!d.pinned && !current && (
         <div className="find" data-lvl="warn" data-unpinned="">
-          <span className="t">{t("内容未经审核固定")}</span>
-          <span className="why">{t("审核时没有记录内容摘要，无法确认来源现在提供的仍是审核过的内容。只在你信任发布者 @{handle} 时安装。", { handle: p.handle })}</span>
+          <span className="t">{t("market.contentNotPinnedByReview")}</span>
+          <span className="why">{t("market.noContentDigestWasRecorded2", { handle: p.handle })}</span>
         </div>
       )}
       <dl className="mkt-facts">
-        <dt>{t("发布者")}</dt>
+        <dt>{t("market.publisher")}</dt>
         <dd>@{p.handle}</dd>
-        <dt>{t("审核版本")}</dt>
+        <dt>{t("market.reviewedVersion")}</dt>
         <dd>{v?.version || p.latestVersion}</dd>
-        <dt>{t("来源")}</dt>
+        <dt>{t("common.source")}</dt>
         <dd className="mono">{v?.source || "—"}</dd>
-        <dt>{t("固定内容")}</dt>
-        <dd className={d.pinned ? "mono" : undefined} data-missing={d.pinned ? undefined : ""}>{d.pinned ? v?.contentHash : t("未固定——审核时没有记录内容摘要")}</dd>
+        <dt>{t("market.pinnedContent")}</dt>
+        <dd className={d.pinned ? "mono" : undefined} data-missing={d.pinned ? undefined : ""}>{d.pinned ? v?.contentHash : t("market.notPinnedNoContentDigest")}</dd>
         {p.repoUrl && (
           <>
-            <dt>{t("仓库")}</dt>
+            <dt>{t("common.repository")}</dt>
             <dd className="mono">{p.repoUrl}</dd>
           </>
         )}
         {p.tags.length > 0 && (
           <>
-            <dt>{t("标签")}</dt>
+            <dt>{t("common.tags")}</dt>
             <dd>{p.tags.join(" · ")}</dd>
           </>
         )}
@@ -347,22 +347,22 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
       <div className="acts">
         <span className="note">
           {d.cache
-            ? t("当前显示的是缓存数据，安装需要连接市场")
+            ? t("market.showingCachedDataInstallingNeeds")
             : current
-            ? t("已安装 {version}", { version: d.installed!.version })
+            ? t("market.installed", { version: d.installed!.version })
             : stuck
-              ? t("技能不会被原地覆盖：先在「已安装」里移除旧版本，再回来安装")
-              : t("先列出将安装的全部内容，确认后才会写入")}
+              ? t("common.aSkillIsNotOverwritten")
+              : t("market.everythingItWouldInstallIs")}
         </span>
         {back}
         {!current && !stuck && d.pinned && (
           <button className="act" data-action="market.inspect" data-primary disabled={busy || !!d.cache} onClick={() => void look()}>
-            {t(busy ? "读取中…" : update ? "查看更新内容" : "查看将安装的内容")}
+            {t(busy ? "common.reading" : update ? "common.seeWhatTheUpdateInstalls" : "market.seeWhatItInstalls")}
           </button>
         )}
         {!current && !stuck && !d.pinned && (
           <button className="act" data-action="market.trust" data-primary disabled={busy || !!d.cache} onClick={() => void look(true)}>
-            {t(busy ? "读取中…" : "信任并安装")}
+            {t(busy ? "common.reading" : "market.trustAndInstall")}
           </button>
         )}
       </div>
@@ -372,7 +372,7 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
 }
 
 type View = "browse" | "mine" | "publish";
-const VIEWS: [View, string][] = [["browse", "浏览"], ["mine", "我的发布"], ["publish", "发布"]];
+const VIEWS: [View, string][] = [["browse", "market.browse"], ["mine", "market.myPackages"], ["publish", "common.publish"]];
 
 // Installed and discover are two views of one subject, so they are tabs of one
 // page rather than two sections: what the market adds shows up on the other tab.
@@ -389,10 +389,10 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
   if (draft && (draft.port !== port || draft.handle !== handle)) setDraft(null);
   const at = handle ? view : "browse";
   return (
-    <Group id="market" title={t("社区市场")}
-      hint={t("社区发布、经过审核的技能、插件、MCP 服务与主题。固定了审核内容的版本按审核时的内容安装，未固定的需要你信任发布者；安装前都会列出将写入的全部内容，与粘贴地址安装走同一套确认。")}>
+    <Group id="market" title={t("common.communityMarket")}
+      hint={t("market.skillsPluginsMCPServersAnd")}>
       {handle ? (
-        <div className="seg mkt-views" data-text role="radiogroup" aria-label={t("社区市场")} data-action-keydown="market.view" onKeyDown={arrowRadios}>
+        <div className="seg mkt-views" data-text role="radiogroup" aria-label={t("common.communityMarket")} data-action-keydown="market.view" onKeyDown={arrowRadios}>
           {VIEWS.map(([id, name]) => (
             <button key={id} role="radio" aria-checked={at === id} tabIndex={at === id ? 0 : -1} disabled={applying} data-action="market.view" data-value={id} onClick={() => { if (id === "publish" && at !== "publish") setDraft(null); setView(id); }}>
               {t(name)}
@@ -402,9 +402,9 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
       ) : (
         account !== null && (
           <div className="mkt-signin">
-            <span>{t("登录后可以在这里发布技能、插件、MCP 服务和主题，并查看审核进度。")}</span>
+            <span>{t("market.signInToPublishSkills")}</span>
             <button className="act" data-action="market.signin" onClick={onSignIn}>
-              {t("去登录")}
+              {t("market.signIn")}
             </button>
           </div>
         )
@@ -422,9 +422,9 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
 }
 
 export function ExtTabs({ at, onPick, disabled }: { at: "installed" | "market"; onPick: (at: "installed" | "market") => void; disabled?: boolean }) {
-  const tabs: ["installed" | "market", string][] = [["installed", "已安装"], ["market", "发现"]];
+  const tabs: ["installed" | "market", string][] = [["installed", "common.installed"], ["market", "common.discover"]];
   return (
-    <div className="seg mkt-tabs" data-text role="tablist" aria-label={t("扩展")} onKeyDown={arrowTabs}>
+    <div className="seg mkt-tabs" data-text role="tablist" aria-label={t("common.extension")} onKeyDown={arrowTabs}>
       {tabs.map(([id, name]) => (
         <button key={id} role="tab" aria-selected={at === id} tabIndex={at === id ? 0 : -1} disabled={disabled} data-action="extensions.tab" data-value={id} onClick={() => onPick(id)}>
           {t(name)}

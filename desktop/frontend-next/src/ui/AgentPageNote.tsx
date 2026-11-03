@@ -13,10 +13,10 @@ function plain(text: string): string {
 export function AgentPageNote({ tab }: { tab: BrowserTab }) {
   const url = plain(tab.url);
   return (
-    <div className="bpage" role="region" aria-label={t("智能体正在查看的页面")}>
-      <b data-page-title dir="auto">{plain(tab.title) || t("空白页")}</b>
+    <div className="bpage" role="region" aria-label={t("agentPageNote.pageTheAgentIsViewing")}>
+      <b data-page-title dir="auto">{plain(tab.title) || t("common.blankPage")}</b>
       {url && <code data-page-url dir="ltr">{url}</code>}
-      <p>{t("只读：页面显示在运行智能体的电脑上")}</p>
+      <p>{t("agentPageNote.readOnlyThePageItself")}</p>
     </div>
   );
 }

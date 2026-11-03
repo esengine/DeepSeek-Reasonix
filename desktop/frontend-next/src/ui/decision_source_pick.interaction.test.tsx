@@ -61,13 +61,13 @@ it("the settings table reads every source, then gives each job only what it can 
       account={null} accountUnread="" reloadAccount={() => {}}
     />,
   );
-  const main = (await screen.findByRole("combobox", { name: t("默认模型") })) as HTMLSelectElement;
+  const main = (await screen.findByRole("combobox", { name: t("common.defaultModel") })) as HTMLSelectElement;
   expect(models).toHaveBeenCalledWith("all");
   for (const name of ["默认模型", "计划", "子代理", "看图", "复核"]) {
     const options = within(screen.getByRole("combobox", { name: t(name) })).queryAllByRole("option").map((o) => o.textContent);
     expect(options.some((o) => o?.includes("typed-decisions")), name).toBe(false);
   }
-  const decisionOptions = within(screen.getByRole("combobox", { name: t("决策") })).queryAllByRole("option").map((o) => o.textContent);
+  const decisionOptions = within(screen.getByRole("combobox", { name: t("common.decision") })).queryAllByRole("option").map((o) => o.textContent);
   expect(decisionOptions.filter((o) => o?.includes("deepseek"))).toHaveLength(0);
   expect(decisionOptions.some((o) => o?.includes("typed-decisions"))).toBe(true);
   expect(main.value).toBe(chat[0].ref);

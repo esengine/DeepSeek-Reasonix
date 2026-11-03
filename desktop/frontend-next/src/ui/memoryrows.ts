@@ -3,11 +3,11 @@ import { bytes } from "../i18n/format";
 import type { FeedbackProcessMemory, FeedbackProcessType } from "../port/feedback";
 
 const NAME: Record<FeedbackProcessType, string> = {
-  browser: "主进程",
-  renderer: "界面进程",
-  gpu: "图形进程",
-  utility: "辅助进程",
-  kernel: "内核",
+  browser: "memoryrows.mainProcess",
+  renderer: "memoryrows.interfaceProcess",
+  gpu: "memoryrows.graphicsProcess",
+  utility: "memoryrows.helperProcess",
+  kernel: "memoryrows.kernel",
 };
 
 const ORDER: FeedbackProcessType[] = ["renderer", "browser", "gpu", "utility", "kernel"];
@@ -17,5 +17,5 @@ const ORDER: FeedbackProcessType[] = ["renderer", "browser", "gpu", "utility", "
 export function memoryLines(rows: FeedbackProcessMemory[]): string[] {
   return [...rows]
     .sort((a, b) => ORDER.indexOf(a.process) - ORDER.indexOf(b.process) || b.workingSetKB - a.workingSetKB)
-    .map((r) => t("{name}：{set}（私有 {own}）", { name: t(NAME[r.process]), set: bytes(r.workingSetKB * 1024), own: bytes(r.privateKB * 1024) }));
+    .map((r) => t("memoryrows.private", { name: t(NAME[r.process]), set: bytes(r.workingSetKB * 1024), own: bytes(r.privateKB * 1024) }));
 }

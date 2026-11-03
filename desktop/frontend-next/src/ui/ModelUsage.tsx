@@ -11,12 +11,12 @@ type Answers = "chat" | "decision" | "search" | "vision";
 // set, which a chat model has no answer for, so its row offers the decision
 // sources and says so when there are none.
 const ROLES: [RoleKey, string, string, Answers][] = [
-  ["planner", "计划", "仅生成计划，不写入", "chat"],
-  ["subagent", "子代理", "派发的子任务", "chat"],
-  ["vision", "看图", "处理主模型无法识别的图片", "chat"],
-  ["guardian", "复核", "独立复核本轮", "chat"],
-  ["title", "自动命名", "为会话生成简短标题", "chat"],
-  ["decision", "决策", "system_one 询问的后端", "decision"],
+  ["planner", "common.plan", "common.draftsAPlanReadOnly", "chat"],
+  ["subagent", "common.subagents2", "modelUsage.workSentOut", "chat"],
+  ["vision", "common.vision", "modelUsage.readsImagesTheMainModel", "chat"],
+  ["guardian", "common.review", "modelUsage.auditsThisTurnIndependently", "chat"],
+  ["title", "common.autoName", "modelUsage.generateShortConversationTitles", "chat"],
+  ["decision", "common.decision", "modelUsage.theBackendSystemOneAsks", "decision"],
 ];
 
 const shown = (m: ModelEntry) => m.modelAlias?.trim() || m.modelShort || m.model;
@@ -29,7 +29,7 @@ const answersMatch = (m: ModelEntry, answers: Answers) =>
 function traits(m?: ModelEntry): string {
   if (!m) return "";
   const ctx = contextLabel(m.contextWindow);
-  return [m.vision ? t("读图") : "", m.efforts && m.efforts.length > 1 ? t("可调推理") : "", ctx ? t("上下文 {size}", { size: ctx }) : ""]
+  return [m.vision ? t("common.readsImages") : "", m.efforts && m.efforts.length > 1 ? t("modelUsage.adjustableReasoning") : "", ctx ? t("modelUsage.context", { size: ctx }) : ""]
     .filter(Boolean)
     .join(" · ");
 }
@@ -58,7 +58,7 @@ export function ModelUsage({ models, roles, main, busy, protocol, effort = "auto
   const serviceOf = (ref?: string) => vendors.find((v) => Object.values(v.byKind).some((list) => list.some((m) => m.ref === ref)))?.label ?? "";
   const byRef = (ref?: string) => models.find((m) => m.ref === ref);
 
-  if (models.length === 0) return <div className="empty">{t("无法读取模型列表。")}</div>;
+  if (models.length === 0) return <div className="empty">{t("modelUsage.couldNotReadTheModel")}</div>;
 
   const current = byRef(main);
   const shown = models.find((m) => m.default)?.ref || main;
@@ -71,20 +71,20 @@ export function ModelUsage({ models, roles, main, busy, protocol, effort = "auto
 
   return (
     <>
-      <div className="usage" role="table" aria-label={t("模型用途")}>
+      <div className="usage" role="table" aria-label={t("modelUsage.modelUses")}>
         <div className="usage-row usage-hd" role="row">
-          <span role="columnheader">{t("用途")}</span>
-          <span role="columnheader">{t("使用模型")}</span>
-          <span role="columnheader">{t("思考强度")}</span>
-          <span role="columnheader">{t("连接")}</span>
+          <span role="columnheader">{t("modelUsage.use")}</span>
+          <span role="columnheader">{t("modelUsage.model")}</span>
+          <span role="columnheader">{t("common.effort")}</span>
+          <span role="columnheader">{t("common.connections")}</span>
         </div>
         <div className="usage-row" role="row">
-          <span className="usage-job" role="rowheader"><b>{t("默认模型")}</b><small>{t("当前对话和大多数任务")}</small></span>
+          <span className="usage-job" role="rowheader"><b>{t("common.defaultModel")}</b><small>{t("modelUsage.thisConversationAndMostTasks")}</small></span>
           <span role="cell">
             <Choices vendors={vendors} protocol={protocol} main={main} value={shown ?? ""} answers="chat"
-              label={t("默认模型")} disabled={busy !== ""} onPick={onMain} />
+              label={t("common.defaultModel")} disabled={busy !== ""} onPick={onMain} />
           </span>
-          <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("思考强度")}</span><Efforts model={current} value={effort} label={t("默认模型的思考强度")}
+          <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("common.effort")}</span><Efforts model={current} value={effort} label={t("modelUsage.defaultModelReasoningEffort")}
             action="reasoning.effort" disabled={busy !== "" || !onEffort} onPick={(level) => onEffort?.(level)} /></span>
           <span className="usage-conn" role="cell">{serviceOf(shown)}<small>{traits(shownModel)}</small></span>
         </div>
@@ -100,37 +100,37 @@ export function ModelUsage({ models, roles, main, busy, protocol, effort = "auto
               <span role="cell">
                 <Choices vendors={vendors} protocol={protocol} main={main} value={set} answers={key === "vision" ? "vision" : answers}
                   label={t(name)} role disabled={busy !== "" || none}
-                  empty={t(key === "title" ? "不使用" : answers === "chat" ? "跟随主模型" : none ? "尚无可用来源" : "不使用")}
+                  empty={t(key === "title" ? "modelUsage.doNotUse" : answers === "chat" ? "modelUsage.followTheMainModel" : none ? "modelUsage.noSourceYet" : "modelUsage.doNotUse")}
                   onPick={(ref) => onRole(key, ref, "auto")} />
                 {(overrides?.[key] ?? []).map((o) => (
                   <span className="usage-override" key={o.key} data-scope={o.scope}>
-                    <span>{t("「{key}」已被配置固定为 {model}，这里的选择对它不起作用。", { key: o.key, model: o.model })}</span>
+                    <span>{t("modelUsage.isPinnedToByConfiguration", { key: o.key, model: o.model })}</span>
                     {o.scope === "user" ? (
                       <button type="button" data-action="roles.override.clear" disabled={busy !== ""} onClick={() => onClearOverride?.(key, o.key)}>
-                        {t("改回跟随这里")}
+                        {t("modelUsage.followThisChoice")}
                       </button>
                     ) : (
-                      <small>{t("来自项目配置，需在项目里修改")}</small>
+                      <small>{t("modelUsage.setByTheProjectConfig")}</small>
                     )}
                   </span>
                 ))}
               </span>
-              <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("思考强度")}</span><Efforts model={roleModel} value={roleEffort} label={t("{name}的思考强度", { name: t(name) })}
+              <span className="usage-effort" role="cell"><span className="usage-effort-label">{t("common.effort")}</span><Efforts model={roleModel} value={roleEffort} label={t("modelUsage.reasoningEffort", { name: t(name) })}
                 action="roles.effort" fixedOff={key === "title"} disabled={busy !== "" || answers === "decision"}
                 onPick={(level) => onRole(key, set || main || "", level)} /></span>
               <span className="usage-conn" role="cell" data-follow={!set && answers === "chat" && key !== "title" ? "" : undefined}>
-                {set ? serviceOf(set) : key === "title" ? t("使用消息预览") : answers === "chat" ? t("随主模型") : none ? t("在「模型服务」添加决策来源") : ""}
+                {set ? serviceOf(set) : key === "title" ? t("modelUsage.useMessagePreview") : answers === "chat" ? t("modelUsage.followsTheDefault") : none ? t("modelUsage.addADecisionSourceUnder") : ""}
               </span>
             </div>
           );
         })}
         {roles && <SearchUsage models={models} vendors={vendors} protocol={protocol} main={main} roles={roles} busy={busy} onRole={onRole} />}
       </div>
-      {!roles && <div className="empty">{t("无法读取角色分工。")}</div>}
+      {!roles && <div className="empty">{t("modelUsage.couldNotReadTheRole")}</div>}
       <p className="note">
         {visionModel?.vision
-          ? t("主模型看不了的图会交给 {model}，它读图，所以附件真的会被看到。", { model: visionModel.model })
-          : t("主模型无法识别的图片当前无人处理 —— 会在发送前被丢弃。为「看图」指定一个带「读图」标签的模型即可接管。")}
+          ? t("modelUsage.imagesTheMainModelCannot", { model: visionModel.model })
+          : t("modelUsage.imagesTheMainModelCannot2")}
       </p>
     </>
   );
@@ -138,11 +138,11 @@ export function ModelUsage({ models, roles, main, busy, protocol, effort = "auto
 
 function searchReason(reason?: string) {
   switch (reason) {
-    case "bad_ref": return t("搜索模型的格式应为 服务/模型");
-    case "not_added": return t("搜索模型所在的连接已被移出");
-    case "model_removed": return t("搜索模型已不在配置里");
-    case "unsupported": return t("搜索模型的协议不支持原生搜索，或已关闭搜索");
-    case "no_credentials": return t("搜索模型所在的连接没有凭据");
+    case "bad_ref": return t("modelUsage.theSearchModelMustBe");
+    case "not_added": return t("modelUsage.theSearchModelSConnection");
+    case "model_removed": return t("modelUsage.theSearchModelIsNo");
+    case "unsupported": return t("modelUsage.theSearchModelSProtocol");
+    case "no_credentials": return t("modelUsage.theSearchModelSConnection2");
     default: return "";
   }
 }
@@ -157,23 +157,23 @@ function SearchUsage({ models, vendors, protocol, main, roles, busy, onRole }: {
   const serviceOf = (r: string) => vendors.find((v) => Object.values(v.byKind).flat().some((m) => m.ref === r))?.label ?? r;
   const reason = searchReason(roles.web_search_reason);
   const used = ref ? (reason || serviceOf(ref)) : effective
-    ? t("自动：使用对话模型自带的搜索（{model}）", { model: serviceOf(effective) })
-    : t("对话模型没有内置搜索；需要联网搜索时请选择一个搜索模型");
+    ? t("modelUsage.automaticTheConversationModelS", { model: serviceOf(effective) })
+    : t("modelUsage.theConversationModelHasNo");
   return (
     <div className="usage-row" role="row">
-      <span className="usage-job" role="rowheader"><b>{t("网页搜索")}</b><small>{t("独立搜索请求使用的模型")}</small></span>
+      <span className="usage-job" role="rowheader"><b>{t("common.webSearch2")}</b><small>{t("modelUsage.modelForIndependentSearchRequests")}</small></span>
       <span role="cell">
         <Choices vendors={vendors} protocol={protocol} main={main} value={ref} answers="search"
-          label={t("网页搜索")} role disabled={busy !== ""} empty={t("自动选择")}
+          label={t("common.webSearch2")} role disabled={busy !== ""} empty={t("common.pickOneAutomatically")}
           onPick={(next) => onRole("web_search", next)} />
       </span>
-      <span className="usage-effort" role="cell">{t("不适用")}</span>
+      <span className="usage-effort" role="cell">{t("modelUsage.notApplicable")}</span>
       <span className="usage-conn" role="cell">
         {used}
-        {none && <small>{t("尚无可用搜索模型")}</small>}
+        {none && <small>{t("modelUsage.noSearchModelsAvailable")}</small>}
         {roles.web_search_source === "project" && <small>{effective
-          ? t("项目配置覆盖：实际使用 {model}；此处保存的是全局设置。", { model: serviceOf(effective) })
-          : t("项目配置覆盖了这一项；此处保存的是全局设置。")}</small>}
+          ? t("modelUsage.projectOverrideIsUsedThis", { model: serviceOf(effective) })
+          : t("modelUsage.theProjectConfigOverridesThis")}</small>}
       </span>
     </div>
   );
@@ -186,14 +186,14 @@ function Efforts({ model, value, label, action, fixedOff = false, disabled, onPi
   const supported = !!model?.efforts?.some((level) => level !== "auto");
   if (fixedOff) {
     return <select className="usage-pick" aria-label={label} data-action={action === "roles.effort" ? "roles.effort" : "reasoning.effort"} value="auto" disabled>
-      <option value="auto">{t("不适用")}</option>
+      <option value="auto">{t("modelUsage.notApplicable")}</option>
     </select>;
   }
   return (
     <select className="usage-pick" aria-label={label} data-action={action === "roles.effort" ? "roles.effort" : "reasoning.effort"} value={levels.includes(value) ? value : "auto"}
       disabled={disabled || !supported} onChange={(e) => onPick(e.target.value)}>
-      {!supported ? <option value="auto">{t("不适用")}</option>
-        : levels.map((level) => <option key={level} value={level}>{level === "auto" ? t("自动") : level}</option>)}
+      {!supported ? <option value="auto">{t("modelUsage.notApplicable")}</option>
+        : levels.map((level) => <option key={level} value={level}>{level === "auto" ? t("common.auto") : level}</option>)}
     </select>
   );
 }
@@ -218,12 +218,12 @@ function Choices({
     <select className="usage-pick" aria-label={label} data-action={role ? "roles.model" : "model.select"} value={value} disabled={disabled}
       onChange={(e) => onPick(e.target.value)}>
       {empty !== undefined && <option value="">{empty}</option>}
-      {answers === "search" && value && !groups.some((g) => g.rows.some((m) => m.ref === value)) && <option value={value}>{t("{model}（不可用）", { model: value })}</option>}
-      {answers === "vision" && value && !groups.some((g) => g.rows.some((m) => m.ref === value)) && <option value={value}>{t("{model}（未声明读图）", { model: value })}</option>}
+      {answers === "search" && value && !groups.some((g) => g.rows.some((m) => m.ref === value)) && <option value={value}>{t("modelUsage.unavailable", { model: value })}</option>}
+      {answers === "vision" && value && !groups.some((g) => g.rows.some((m) => m.ref === value)) && <option value={value}>{t("modelUsage.notDeclaredToReadImages", { model: value })}</option>}
       {groups.map(({ v, rows }) => (
         <optgroup key={v.key} label={v.label}>
           {rows.map((m) => (
-            <option key={m.ref} value={m.ref}>{m.vision ? `${shown(m)} · ${t("读图")}` : shown(m)}</option>
+            <option key={m.ref} value={m.ref}>{m.vision ? `${shown(m)} · ${t("common.readsImages")}` : shown(m)}</option>
           ))}
         </optgroup>
       ))}

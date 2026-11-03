@@ -69,8 +69,8 @@ export function PhonePop({ hub }: { hub: HubPort }) {
         data-live={shareOpen ? "" : undefined}
         data-online={online > 0 ? "" : undefined}
         aria-expanded={open}
-        aria-label={t("设备访问")}
-        title={online > 0 ? t("设备访问 · {n} 台在线", { n: online }) : t("设备访问")}
+        aria-label={t("phonePop.deviceAccess")}
+        title={online > 0 ? t("phonePop.deviceAccessOnline", { n: online }) : t("phonePop.deviceAccess")}
         onClick={() => setOpen((v) => !v)}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -94,33 +94,33 @@ export function presenceNote(prev: PairedDevice[], next: PairedDevice[]): string
   let said = "";
   next.forEach((d, i) => {
     const was = prev.find((p) => p.id === d.id);
-    if (d.online && !was?.online) said = t("设备 {n} 已连接", { n: i + 1 });
-    else if (!d.online && was?.online) said = t("设备 {n} 已断开", { n: i + 1 });
+    if (d.online && !was?.online) said = t("phonePop.deviceConnected", { n: i + 1 });
+    else if (!d.online && was?.online) said = t("phonePop.deviceDisconnected", { n: i + 1 });
   });
   prev.forEach((p, i) => {
-    if (!next.some((d) => d.id === p.id)) said = t("设备 {n} 已断开", { n: i + 1 });
+    if (!next.some((d) => d.id === p.id)) said = t("phonePop.deviceDisconnected", { n: i + 1 });
   });
   return said;
 }
 
 export function cloudPresenceNote(prev: CloudDevice[], next: CloudDevice[]): string {
   const connected = next.find((device) => !prev.some((was) => was.id === device.id));
-  if (connected) return t("Web Studio 已连接");
+  if (connected) return t("phonePop.webStudioConnected");
   const disconnected = prev.find((device) => !next.some((now) => now.id === device.id));
-  return disconnected ? t("Web Studio 已断开") : "";
+  return disconnected ? t("phonePop.webStudioDisconnected") : "";
 }
 
 function cloudRemoteNote(status: CloudRemoteStatus | undefined): string {
   if (status?.online) {
-    return t("互联网连接需要登录同一账号，内容端到端加密；局域网直连只在可信网络中开启。");
+    return t("phonePop.internetAccessRequiresTheSame");
   }
   switch (status?.reason) {
     case "relay_unreachable":
-      return t("中转服务暂时无法连接，请检查网络或代理设置后重试。");
+      return t("phonePop.theRelayCannotBeReached");
     case "relay_refused":
-      return t("中转服务拒绝了这台设备的连接，请稍后重试。");
+      return t("phonePop.theRelayRefusedThisDevice");
     default:
-      return t("登录 Reasonix 账号后，可生成在外网也能使用的连接二维码。");
+      return t("phonePop.signInToReasonixTo");
   }
 }
 
@@ -198,11 +198,11 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
   };
 
   return (
-    <div className="phonecard" role="dialog" aria-label={t("设备访问")}>
+    <div className="phonecard" role="dialog" aria-label={t("phonePop.deviceAccess")}>
       <header>
         <span>
-          <b>{t("设备访问")}</b>
-          <small>{t("手机扫码即可进入这台电脑的 Studio")}</small>
+          <b>{t("phonePop.deviceAccess")}</b>
+          <small>{t("phonePop.scanWithYourPhoneTo")}</small>
         </span>
       </header>
 
@@ -212,17 +212,17 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
         <div className="pc-code" data-cloud="">
           {cloudOffer ? (
             <>
-              <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(cloudOffer.qr)}`} alt={t("互联网连接二维码")} width={148} height={148} />
-              <span className="pc-when">{t("手机扫码 · 不在同一网络也能连接")}</span>
+              <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(cloudOffer.qr)}`} alt={t("phonePop.internetConnectionQRCode")} width={148} height={148} />
+              <span className="pc-when">{t("phonePop.scanWithYourPhoneWorks")}</span>
               <span className="pc-acts">
-                <button data-action="share.cloud-copy" onClick={() => void copy(cloudOffer.url)}>{copied ? t("已复制") : t("复制链接")}</button>
+                <button data-action="share.cloud-copy" onClick={() => void copy(cloudOffer.url)}>{copied ? t("common.copied") : t("phonePop.copyLink")}</button>
                 <i aria-hidden="true" />
-                <button data-action="share.cloud-offer" disabled={busy} onClick={() => void newCloudCode()}>{t("刷新二维码")}</button>
+                <button data-action="share.cloud-offer" disabled={busy} onClick={() => void newCloudCode()}>{t("phonePop.refreshQRCode")}</button>
               </span>
             </>
           ) : (
             <button className="pc-mint" data-action="share.cloud-offer" disabled={busy} onClick={() => void newCloudCode()}>
-              {busy ? t("正在生成二维码…") : t("显示互联网连接二维码")}
+              {busy ? t("phonePop.creatingQRCode") : t("phonePop.showInternetConnectionQRCode")}
             </button>
           )}
         </div>
@@ -231,27 +231,27 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
       <section>
         <div className="pc-hd">
           <span>
-            <b>{t("同一网络直连")}</b>
-            <small>{t("速度更快，不经过中转")}</small>
+            <b>{t("phonePop.directConnectionOnTheSame")}</b>
+            <small>{t("phonePop.fasterWithoutTheRelay")}</small>
           </span>
-          <Switch data-action="share.toggle" on={st.open} busy={busy || noNetwork} label={t("允许局域网访问")} onClick={() => void toggle()} />
+          <Switch data-action="share.toggle" on={st.open} busy={busy || noNetwork} label={t("phonePop.allowLocalNetworkAccess")} onClick={() => void toggle()} />
         </div>
 
         {st.open && (
           <div className="pc-code">
             {offer ? (
               <>
-                <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(offer.qr)}`} alt={t("配对二维码")} width={148} height={148} />
-                <span className="pc-when">{t("局域网配对 · {time} 前有效", { time: clock(offer.expires) })}</span>
+                <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(offer.qr)}`} alt={t("common.pairingQRCode")} width={148} height={148} />
+                <span className="pc-when">{t("phonePop.localPairingValidUntil", { time: clock(offer.expires) })}</span>
                 <span className="pc-acts">
-                  <button data-action="share.copy" onClick={() => void copy(offer.url)}>{copied ? t("已复制") : t("复制链接")}</button>
+                  <button data-action="share.copy" onClick={() => void copy(offer.url)}>{copied ? t("common.copied") : t("phonePop.copyLink")}</button>
                   <i aria-hidden="true" />
-                  <button data-action="share.offer" disabled={busy} onClick={() => void newCode()}>{t("换一个")}</button>
+                  <button data-action="share.offer" disabled={busy} onClick={() => void newCode()}>{t("common.newCode")}</button>
                 </span>
               </>
             ) : (
               <button className="pc-mint" data-action="share.offer" disabled={busy} onClick={() => void newCode()}>
-                {t("显示局域网二维码")}
+                {t("phonePop.showLocalNetworkQRCode")}
               </button>
             )}
           </div>
@@ -261,21 +261,21 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
       {st.cloudDevices.length > 0 && (
         <section>
           <div className="pc-hd">
-            <b>{t("互联网远程")}</b>
+            <b>{t("phonePop.internetRemoteAccess")}</b>
             <small>{st.cloudDevices.length}</small>
           </div>
           {st.cloudDevices.map((device) => (
             <div className="pc-dev" key={device.id} data-online="">
               <i aria-hidden="true" />
-              <span>{t("设备 {n}", { n: device.ordinal })}</span>
-              <small>{device.name} · {t("在线")}</small>
+              <span>{t("common.device", { n: device.ordinal })}</span>
+              <small>{device.name} · {t("phonePop.online")}</small>
               <button
                 data-action={arming === device.id ? "share.revoke" : "share.ask-revoke"}
                 data-target={device.id}
                 data-armed={arming === device.id ? "" : undefined}
                 onClick={() => disconnect(device.id)}
               >
-                {arming === device.id ? t("确认断开") : t("断开")}
+                {arming === device.id ? t("common.disconnect") : t("common.disconnect2")}
               </button>
             </div>
           ))}
@@ -284,11 +284,11 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
 
       {st.addresses.length > 1 && (
         <label className="pc-row">
-          <span>{t("网络")}</span>
+          <span>{t("common.network")}</span>
           <select data-action="share.address" value={chosen} disabled={busy} onChange={(e) => pick(e.target.value)}>
             {st.addresses.map((a) => (
               <option key={a.ip} value={a.ip}>
-                {a.kind === "tailnet" ? `${a.ip} · Tailscale` : a.kind === "virtual" ? `${a.ip} · ${t("虚拟网卡")}` : `${a.ip} · ${a.interface}`}
+                {a.kind === "tailnet" ? `${a.ip} · Tailscale` : a.kind === "virtual" ? `${a.ip} · ${t("common.virtualAdapter")}` : `${a.ip} · ${a.interface}`}
               </option>
             ))}
           </select>
@@ -298,25 +298,25 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
       {st.open && (
         <section>
           <div className="pc-hd">
-            <b>{t("已连接")}</b>
+            <b>{t("common.connected2")}</b>
             <small>{st.devices.length}</small>
           </div>
           {st.devices.map((d, i) => (
             <div className="pc-dev" key={d.id} data-online={d.online ? "" : undefined}>
               <i aria-hidden="true" />
               <span title={d.name}>{deviceLabel(i)}</span>
-              <small>{d.online ? t("在线") : t("最近 {time}", { time: clock(d.lastSeen) })}</small>
+              <small>{d.online ? t("phonePop.online") : t("phonePop.lastSeen", { time: clock(d.lastSeen) })}</small>
               <button
                 data-action={arming === d.id ? "share.revoke" : "share.ask-revoke"}
                 data-target={d.id}
                 data-armed={arming === d.id ? "" : undefined}
                 onClick={() => disconnect(d.id)}
               >
-                {arming === d.id ? t("确认断开") : t("断开")}
+                {arming === d.id ? t("common.disconnect") : t("common.disconnect2")}
               </button>
             </div>
           ))}
-          {st.devices.length === 0 && <p>{t("还没有手机连上来")}</p>}
+          {st.devices.length === 0 && <p>{t("phonePop.noPhoneConnectedYet")}</p>}
         </section>
       )}
 

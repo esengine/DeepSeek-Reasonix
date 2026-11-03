@@ -43,7 +43,7 @@ describe("a notice card", () => {
   });
   it("says its severity to a screen reader and draws it as a glyph, not a header strip", () => {
     const box = draw();
-    expect(box.querySelector(".sr-only")?.textContent).toBe(`${t("警告")}：`);
+    expect(box.querySelector(".sr-only")?.textContent).toBe(`${t("common.warning")}：`);
     expect(box.querySelector(".nb-ic")).not.toBeNull();
     expect(box.querySelector(".hl, .tag, .find")).toBeNull();
     expect(draw({ level: "info" }).querySelector(".nb-dot")).not.toBeNull();
@@ -60,7 +60,7 @@ describe("a notice card", () => {
   // sentence for is the one the reader gets; only an unknown code falls back.
   it("shows this build's sentence for a code it knows", () => {
     const said = draw().querySelector(".notice-bar .t")?.textContent ?? "";
-    expect(said).toContain(t("同一个检查连着几轮都报同样的结果，是否继续由你定"));
+    expect(said).toContain(t("notices.theSameCheckHasReported"));
     expect(said).not.toContain("The same check has failed");
   });
 
@@ -93,7 +93,7 @@ describe("a hand-back notice", () => {
     await waitFor(() => expect(box.querySelector(".nmd strong")).not.toBeNull(), LOADED);
     expect(box.querySelectorAll(".nmd ol li")).toHaveLength(2);
     expect(box.querySelector(".notice-bar .nwhy")).toBeNull();
-    expect(box.querySelector(".notice-bar .t")?.textContent).toContain(t("等待你的输入"));
+    expect(box.querySelector(".notice-bar .t")?.textContent).toContain(t("notices.waitingForYou"));
   });
 
   it("keeps it to the sanitized subset a reply gets", async () => {
@@ -109,15 +109,15 @@ describe("a hand-back notice", () => {
 describe("a coded notice with a payload", () => {
   it("words the currency change from the stored value and draws no second line for it", () => {
     const box = draw({ code: "display_currency", text: "fee display currency set to USD (resolved: USD)", detail: "USD" });
-    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("费用显示币种已设为 {mode}", { mode: "USD" }));
+    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("notices.costDisplayCurrencySetTo", { mode: "USD" }));
     expect(box.querySelector(".notice-bar .nwhy")).toBeNull();
     const auto = draw({ code: "display_currency", text: "kernel", detail: "" });
-    expect(auto.querySelector(".notice-bar .t")?.textContent).toBe(t("费用显示币种已设为 {mode}", { mode: "auto" }));
+    expect(auto.querySelector(".notice-bar .t")?.textContent).toBe(t("notices.costDisplayCurrencySetTo", { mode: "auto" }));
   });
 
   it("words the recovered inbox from its count and draws no raw payload line", () => {
     const box = draw({ level: "warn", code: "inbox_recovered", text: "Recovered 1 pending instruction(s). Inbox is paused — review with /queue before resuming.", detail: '{"count":1}' });
-    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("已恢复 {n} 条未完成的指令。待发送已暂停，请先在输入框上方的队列里查看，再点“继续派发”", { n: 1 }));
+    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("notices.recoveredUnfinishedInstructionSSendi", { n: 1 }));
     expect(box.querySelector(".notice-bar .t")?.textContent).not.toContain("Recovered");
     expect(box.querySelector(".notice-bar .nwhy")).toBeNull();
   });
@@ -130,7 +130,7 @@ describe("a coded notice with a payload", () => {
   it("words the dormant permission rules from their payload and draws no raw payload line", () => {
     const detail = '{"rules":[{"list":"ask","rule":"rm","tool":"rm"},{"list":"deny","rule":"git reset","tool":"git reset"}]}';
     const box = draw({ level: "warn", code: "permission_rules_dormant", text: "Permission rules that name no tool match nothing", detail });
-    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("有 {n} 条权限规则没有对应的工具，匹配不到任何调用，因此起不到限制作用（如「{list}」里的 {rule}）；到「设置 → 权限」里删除或改写，命令要写成 Bash(命令:*)", { n: 2, list: t("询问"), rule: "rm" }));
+    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("notices.permissionRuleSNameNo", { n: 2, list: t("common.ask"), rule: "rm" }));
     expect(box.querySelector(".notice-bar .nwhy")).toBeNull();
     const garbled = draw({ level: "warn", code: "permission_rules_dormant", text: "Permission rules that name no tool match nothing", detail: "garbled" });
     expect(garbled.querySelector(".notice-bar .t")?.textContent).toContain("match nothing");
@@ -143,7 +143,7 @@ describe("a coded notice with a payload", () => {
       detail: "同步最新的个人开发管理",
     });
     const said = box.querySelector(".notice-bar .t")?.textContent ?? "";
-    expect(said).toContain(t("引导没有生效：这一轮在处理它之前就结束了。如果仍然需要，请再发送一次："));
+    expect(said).toContain(t("notices.guidanceWasNotAppliedBecause"));
     expect(said).not.toContain("Guidance was not applied");
     expect(box.querySelector(".notice-bar .nwhy")?.textContent).toBe("同步最新的个人开发管理");
   });
@@ -153,7 +153,7 @@ describe("a refused-input notice", () => {
   it("says the message is queued rather than asking to resend it", () => {
     const box = draw({ level: "warn", code: "input_refused", detail: undefined, text: "input was not accepted: the session is being switched — please resend" });
     const said = box.querySelector(".notice-bar .t")?.textContent ?? "";
-    expect(said).toBe(t("会话、工作区或运行时正在切换，这条消息没能立刻发出；它已排入队列，切换结束后会自动发送，不需要重发"));
+    expect(said).toBe(t("notices.theSessionWorkspaceOrRuntime"));
     expect(said).not.toContain("resend");
     expect(box.querySelector(".notice-bar .nwhy")).toBeNull();
   });
@@ -217,7 +217,7 @@ describe("a finished-fold notice", () => {
 
   it("is worded from its typed payload, not as a line of key=value text", () => {
     const said = text({ code: "compaction_telemetry", text: "Context compacted (summarized): about 122525 -> 61192 tokens.", detail: payload });
-    expect(said).toContain(t("摘要压缩"));
+    expect(said).toContain(t("compactionNotice.summarized"));
     expect(said).not.toContain("=");
     expect(said).not.toContain("user_dropped");
     expect(said).not.toContain("Context compacted");
@@ -226,8 +226,8 @@ describe("a finished-fold notice", () => {
   it("leaves out the usage sentence for a fold that asked for no summary", () => {
     const quiet = JSON.stringify({ mode: "snip", source_tokens: 9000, projection_tokens: 6000, request_count: 0 });
     const said = text({ code: "compaction_telemetry", text: "x", detail: quiet });
-    expect(said).toContain(t("裁剪旧工具输出"));
-    expect(said).not.toContain(t("摘要请求用了 {in} 输入、{out} 输出 token，缓存命中 {hit}。", { in: "0", out: "0", hit: "0" }));
+    expect(said).toContain(t("compactionNotice.oldToolOutputTrimmed"));
+    expect(said).not.toContain(t("compactionNotice.theSummaryRequestUsedInput", { in: "0", out: "0", hit: "0" }));
   });
 });
 
@@ -237,25 +237,25 @@ describe("a background job notice", () => {
 
   it("is worded from its typed payload, not the kernel's English", () => {
     const said = text({ code: "job_finished", text: "background bash finished: bash-126", detail: payload });
-    expect(said).toBe(t("后台任务已结束：{name}", { name: "make build" }));
+    expect(said).toBe(t("notices.backgroundJobFinished", { name: "make build" }));
     expect(said).not.toContain("background bash");
   });
 
   it("words a started job from its payload too, so the start is not the one English line among its siblings", () => {
     const said = text({ code: "job_started", text: "background bash started: bash-126 (make build)", detail: payload });
-    expect(said).toBe(t("后台任务已开始：{name}", { name: "make build" }));
+    expect(said).toBe(t("notices.backgroundJobStarted", { name: "make build" }));
     expect(said).not.toContain("background bash");
   });
 
   it("words a stalled job from its payload: the name, the span, and what it had reported", () => {
     const said = text({ level: "warn", code: "job_stalled", text: "background bash bash-16 has been inactive for 15m0s", detail: JSON.stringify({ kind: "bash", id: "bash-16", label: "make build", quietSeconds: 900, steps: 12 }) });
-    expect(said).toBe(t("后台任务 {name} 已有 {quiet} 没有活动（{work}）：可能在等某个东西，也可能卡住了；可以用 wait 或 bash_output 查看，或用 kill_shell 结束它", { name: "make build", quiet: "15m", work: t("{n} 步在静默前完成", { n: 12 }) }));
+    expect(said).toBe(t("notices.backgroundJobHasBeenInactive", { name: "make build", quiet: "15m", work: t("jobNotice.stepSCompletedBeforeGoing", { n: 12 }) }));
     expect(said).not.toContain("has been inactive");
   });
 
   it("says a stalled job reported no progress when it reported no steps", () => {
     const said = text({ level: "warn", code: "job_stalled", text: "x", detail: JSON.stringify({ kind: "bash", id: "bash-16", quietSeconds: 900 }) });
-    expect(said).toContain(t("静默前没有任何进展"));
+    expect(said).toContain(t("jobNotice.noProgressReported"));
   });
 
   it("keeps the kernel's text for a stalled job whose payload does not say how long", () => {
@@ -265,13 +265,13 @@ describe("a background job notice", () => {
 
   it("names the job by id when it carries no label", () => {
     expect(text({ code: "job_killed", text: "x", detail: JSON.stringify({ kind: "task", id: "task-3" }) }))
-      .toBe(t("后台任务已终止：{name}", { name: "task-3" }));
+      .toBe(t("notices.backgroundJobKilled", { name: "task-3" }));
   });
 
   it("names the failed job and keeps its own error underneath", () => {
     const box = draw({ code: "job_failed", text: "background bash failed: bash-1 — boom",
       detail: JSON.stringify({ kind: "bash", id: "bash-1", label: "make build", error: "exit status 2" }) });
-    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("后台任务 {name} 失败，需要处理", { name: "make build" }));
+    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("notices.backgroundJobFailedNeedsAttention", { name: "make build" }));
     expect(box.querySelector(".nwhy")?.textContent).toBe("exit status 2");
   });
 
@@ -289,11 +289,11 @@ describe("a background job notice", () => {
   it("words a failed job from its typed exit, not from the raw error text", () => {
     const detail = (extra: object) => JSON.stringify({ kind: "bash", id: "bash-9", label: "make", error: "exit status 2", ...extra });
     const exit = draw({ code: "job_failed", text: "english", detail: detail({ exitCode: 2 }) });
-    expect(exit.querySelector(".nwhy")?.textContent).toBe(t("退出码 {code}", { code: 2 }));
+    expect(exit.querySelector(".nwhy")?.textContent).toBe(t("jobNotice.exitCode", { code: 2 }));
     expect(exit.textContent).not.toContain("exit status");
     cleanup();
     const signaled = draw({ code: "job_failed", text: "english", detail: detail({ exitCode: -1, signal: 9 }) });
-    expect(signaled.querySelector(".nwhy")?.textContent).toBe(t("被信号 {signal} 终止", { signal: 9 }));
+    expect(signaled.querySelector(".nwhy")?.textContent).toBe(t("jobNotice.endedBySignal", { signal: 9 }));
     cleanup();
     const untyped = draw({ code: "job_failed", text: "english", detail: detail({}) });
     expect(untyped.querySelector(".nwhy")?.textContent).toBe("exit status 2");

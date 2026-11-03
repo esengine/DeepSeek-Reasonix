@@ -31,7 +31,7 @@ it.each(["zh", "en"].flatMap((lang) => ["public", "private"].map((visibility) =>
     const publish = vi.spyOn(port, "publishMarket").mockImplementation((submission) => new Promise<MarketPublished>((resolve) => {
       finish = async () => resolve(await original(submission));
     }));
-    await user.click(screen.getByRole("radio", { name: t("主题") }));
+    await user.click(screen.getByRole("radio", { name: t("common.theme") }));
     await user.type(field("name"), "enter-kit");
     await user.type(field("version"), "0.2.0");
     await user.type(field("summary"), "Keyboard release");
@@ -44,13 +44,13 @@ it.each(["zh", "en"].flatMap((lang) => ["public", "private"].map((visibility) =>
       kind: "theme", name: "enter-kit", source, version: "0.2.0", summary: "Keyboard release",
       description: "", repoUrl: "", tags: ["theme", "keyboard"], visibility,
     });
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: t("提交中…") }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: t("marketPublish.submitting") }).disabled).toBe(true);
     expect(field("source").disabled).toBe(true);
     await user.keyboard("{Enter}{Enter}");
     expect(publish).toHaveBeenCalledTimes(1);
     await act(async () => finish());
-    expect(await screen.findByText(t(visibility === "private" ? "已保存 {slug} {version}，仅自己可见" : "已提交 {slug} {version}", { slug: "demo/enter-kit", version: "0.2.0" }))).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: t("查看我的发布") }));
+    expect(await screen.findByText(t(visibility === "private" ? "marketPublish.savedVisibleOnlyToYou" : "marketPublish.submitted", { slug: "demo/enter-kit", version: "0.2.0" }))).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: t("marketPublish.seeMyPackages") }));
     expect(onMine).toHaveBeenCalledTimes(1);
   },
 );
@@ -97,7 +97,7 @@ it.each(["zh", "en"].flatMap((lang) => ["public", "private"].flatMap((visibility
       expect(publish).not.toHaveBeenCalled();
       expect(field(name).value).toBe(value);
     }
-    await user.click(screen.getByRole("button", { name: t(visibility === "private" ? "保存为私有" : "提交审核") }));
+    await user.click(screen.getByRole("button", { name: t(visibility === "private" ? "marketPublish.saveAsPrivate" : "marketPublish.submitForReview") }));
     expect(publish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       name: "enter-kit", source, visibility, version: "0.2.0", summary: "Keyboard release", repoUrl: "https://example.test/repo",
       tags: [...(reuse ? ["existing-edited"] : []), "new-one", "new-two"],
@@ -110,9 +110,9 @@ it.each(["zh", "en"])("keeps kind activation and description Enter out of submis
   const publish = vi.spyOn(port, "publishMarket");
   await user.type(field("name"), "enter-kit");
   await user.type(field("source"), source);
-  screen.getByRole("radio", { name: t("主题") }).focus();
+  screen.getByRole("radio", { name: t("common.theme") }).focus();
   await user.keyboard("{Enter}");
-  expect(screen.getByRole("radio", { name: t("主题") }).getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByRole("radio", { name: t("common.theme") }).getAttribute("aria-checked")).toBe("true");
   const description = document.querySelector<HTMLTextAreaElement>("textarea")!;
   await user.type(description, "line one{Enter}line two");
   expect(description.value).toBe("line one\nline two");
@@ -131,6 +131,6 @@ it.each(["zh", "en"])("preserves the draft and retries with Enter after a failed
   expect(field("source").value).toBe(source);
   expect(field("source").disabled).toBe(false);
   await user.keyboard("{Enter}");
-  expect(await screen.findByText(t("已提交 {slug} {version}", { slug: "demo/enter-kit", version: "0.1.0" }))).toBeTruthy();
+  expect(await screen.findByText(t("marketPublish.submitted", { slug: "demo/enter-kit", version: "0.1.0" }))).toBeTruthy();
   expect(publish).toHaveBeenCalledTimes(2);
 });

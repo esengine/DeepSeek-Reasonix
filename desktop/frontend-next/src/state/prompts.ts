@@ -131,7 +131,7 @@ export function askFromCall(id: string, args: string | undefined): Ask | null {
 export function askAnnounced(s: SessionState, ask: Ask): SessionState {
   const skipAt = ask.skipInMs ? Date.now() + ask.skipInMs : undefined;
   const shown = s.items.findIndex((i) => i.t === "ask" && i.ask.id === ask.id && !i.surfaceExpired);
-  if (shown < 0) return prompted(s, "等待你回答", { t: "ask", id: nextId(), ask, skipAt });
+  if (shown < 0) return prompted(s, "prompts.waitingForYourAnswer", { t: "ask", id: nextId(), ask, skipAt });
   const was = s.items[shown] as Extract<Item, { t: "ask" }>;
   if (was.skipAt === skipAt || was.answered !== undefined) return s;
   const items = s.items.slice();

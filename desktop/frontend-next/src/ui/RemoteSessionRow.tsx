@@ -59,29 +59,29 @@ export function RemoteSessionRow({ host, target, session, held, active, busy, pe
     }}>
     <i className="pip" />
     <SessionPinAction target={target} title={title} pinned={!!session.pinned} enabled={quick} disabled={!!pending || busy} onPin={() => write("pin")} />
-    <span className="sesstitle" title={title}><span>{title}</span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("隔离")}</em>}{session.archived && <em className="sessarch">{t("已归档")}</em>}</span>
+    <span className="sesstitle" title={title}><span>{title}</span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("common.isolated")}</em>}{session.archived && <em className="sessarch">{t("common.archived2")}</em>}</span>
     <SessionAge at={session.lastActiveAt} unread={session.unread} />
-    {session.legacy && <span className="sesslegacy" title={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")}
-      aria-label={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")}>{t("旧")}</span>}
+    {session.legacy && <span className="sesslegacy" title={t("common.keptByReasonix1X")}
+      aria-label={t("common.keptByReasonix1X")}>{t("common.old")}</span>}
     {quick && <SessionArchiveAction target={target} title={title} archived={!!session.archived} disabled={!!pending || busy || live} onArchive={() => write("archive")} />}
-    {at && createPortal(<div ref={menu} className="session-pop" role="menu" aria-label={t("会话操作")}
+    {at && createPortal(<div ref={menu} className="session-pop" role="menu" aria-label={t("common.sessionActions")}
       data-action-keydown="session.menu" onKeyDown={workspaceMenuKeys} onClick={(event) => event.stopPropagation()}>
       <div className="session-pop-head"><b>{title}</b><small>{host}</small></div>
       <div className="session-pop-group">
         <button role="menuitem" data-action="session.pin" data-target={target} disabled={!!pending || busy} onClick={() => { close(); write("pin"); }}>
-          <StudioIcon name="pin" /><span>{t(session.pinned ? "取消置顶" : "置顶会话")}</span>
+          <StudioIcon name="pin" /><span>{t(session.pinned ? "common.unpin" : "common.pinSession")}</span>
         </button>
         {session.unread && (
           <button role="menuitem" data-action="session.mark-read" data-target={target} disabled={!!pending || busy} onClick={() => { close(); write("read"); }}>
-            <StudioIcon name="check" /><span>{t("标为已读")}</span>
+            <StudioIcon name="check" /><span>{t("common.markAsRead")}</span>
           </button>
         )}
         <button role="menuitem" data-action="session.archive" data-target={target} data-value={session.archived ? "restore" : "archive"}
           disabled={!!pending || busy || live} onClick={() => { close(); write("archive"); }}>
-          <StudioIcon name="archive" /><span>{t(session.archived ? "取消归档" : "归档会话")}</span>
+          <StudioIcon name="archive" /><span>{t(session.archived ? "common.unarchive" : "common.archiveSession")}</span>
         </button>
         <button role="menuitem" className="danger" data-action="session.delete" data-target={target} disabled={!!pending || busy} onClick={() => { close(); onDelete(row.current); }}>
-          <StudioIcon name="trash" /><span>{t("删除会话")}</span>
+          <StudioIcon name="trash" /><span>{t("common.deleteSession")}</span>
         </button>
       </div>
     </div>, document.body)}

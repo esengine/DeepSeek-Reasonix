@@ -36,12 +36,12 @@ const SHORTCUTS: { label: string; url: string; console?: string; protocolUrls?: 
       anthropic: "https://api.deepseek.com/anthropic",
     },
   },
-  { label: "硅基流动", url: "https://api.siliconflow.cn/v1", console: "https://cloud.siliconflow.cn" },
-  { label: "月之暗面", url: "https://api.moonshot.cn/v1", console: "https://platform.moonshot.cn" },
-  { label: "智谱", url: "https://open.bigmodel.cn/api/paas/v4", console: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys" },
+  { label: "onboarding.siliconFlow", url: "https://api.siliconflow.cn/v1", console: "https://cloud.siliconflow.cn" },
+  { label: "onboarding.moonshot", url: "https://api.moonshot.cn/v1", console: "https://platform.moonshot.cn" },
+  { label: "onboarding.zhipu", url: "https://open.bigmodel.cn/api/paas/v4", console: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys" },
   { label: "MiMo", url: "https://api.xiaomimimo.com/v1", console: "https://platform.xiaomimimo.com" },
   { label: "LongCat", url: "https://api.longcat.chat/openai", console: "https://longcat.chat/platform" },
-  { label: "中转站 / 自建", url: "" },
+  { label: "onboarding.relaySelfHosted", url: "" },
 ];
 
 // The two failures nobody fixes in this window: the key is refused, or the
@@ -92,7 +92,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
   // there rather than here — where this particular failure sends the reader.
   const vendor = SHORTCUTS.find((s) => s.label === pick);
   const fixAt = err?.code && FIX_AT_VENDOR.has(err.code) ? vendor?.console : undefined;
-  const open = (at: string) => void port.openExternal(at).catch(() => setErr({ text: t("无法打开浏览器，请手动访问 {at}", { at }) }));
+  const open = (at: string) => void port.openExternal(at).catch(() => setErr({ text: t("common.couldNotOpenABrowser", { at }) }));
 
   const choose = (label: string, next: string) => {
     setPick(label);
@@ -164,8 +164,8 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
   };
   const modelItems = found?.models.map((name) => {
     const detail = [
-      name === found.default ? t("默认") : "",
-      found.vision.includes(name) ? t("读图") : "",
+      name === found.default ? t("common.default") : "",
+      found.vision.includes(name) ? t("common.readsImages") : "",
     ].filter(Boolean).join(" · ");
     return { value: name, label: name, desc: detail || undefined };
   }) ?? [];
@@ -180,24 +180,24 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
         <WindowControls />
       </header>
       <div className="onb-shell">
-        <aside className="onb-progress" aria-label={t("开始设置")}>
-          <span className="onb-progress-kicker">{t("开始设置")}</span>
+        <aside className="onb-progress" aria-label={t("onboarding.setUpReasonix")}>
+          <span className="onb-progress-kicker">{t("onboarding.setUpReasonix")}</span>
           <ol>
-            <li data-active=""><i>1</i><span><b>{t("连接模型服务")}</b><small>{t("地址、协议与凭据")}</small></span></li>
-            <li data-active={found ? "" : undefined}><i>2</i><span><b>{t("选择默认模型")}</b><small>{t("确认模型与能力")}</small></span></li>
-            <li><i>3</i><span><b>{t("打开工作区")}</b><small>{t("开始第一个任务")}</small></span></li>
+            <li data-active=""><i>1</i><span><b>{t("onboarding.connectAModelService")}</b><small>{t("onboarding.addressProtocolAndCredentials")}</small></span></li>
+            <li data-active={found ? "" : undefined}><i>2</i><span><b>{t("onboarding.chooseTheDefaultModel")}</b><small>{t("onboarding.confirmTheModelAndIts")}</small></span></li>
+            <li><i>3</i><span><b>{t("onboarding.openAWorkspace")}</b><small>{t("onboarding.startYourFirstTask")}</small></span></li>
           </ol>
-          <p>{t("之后可以在设置中随时修改，不会锁定当前选择。")}</p>
+          <p>{t("onboarding.youCanChangeAnyOf")}</p>
         </aside>
         <main className="onb">
           <div className="onb-card">
             <span className="onb-eyebrow">MODEL CONNECTION</span>
-        <h1 className="onb-t">{t("首先连接模型服务")}</h1>
+        <h1 className="onb-t">{t("onboarding.connectAModelServiceFirst")}</h1>
         <p className="onb-s">
-          {t("填写地址与 key，系统会探测可用协议、模型清单与读图能力；无法自动区分的协议由你确认。")}
+          {t("onboarding.giveItAnAddressAnd")}
         </p>
 
-        <div className="onb-chips" role="group" aria-label={t("常用服务")}>
+        <div className="onb-chips" role="group" aria-label={t("onboarding.commonServices")}>
           {SHORTCUTS.map((s) => (
             <button
               key={s.label}
@@ -213,14 +213,14 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
         </div>
 
         <div className="onb-field">
-          <label htmlFor="onb-url">{t("服务地址")}</label>
+          <label htmlFor="onb-url">{t("onboarding.serviceAddress")}</label>
           <input
             id="onb-url"
             ref={first}
             value={url}
             spellCheck={false}
             autoComplete="off"
-            placeholder={t("https://你的地址/v1")}
+            placeholder={t("onboarding.httpsYourHostV1")}
             disabled={busy}
             onChange={(e) => { setUrl(e.target.value); setFound(null); setKind(""); }}
           />
@@ -234,7 +234,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
                 没有 key 的人就卡死在这个框上，而界面什么都没说。 */}
             {vendor?.console && (
               <button type="button" className="onb-getkey" data-action="external.open" onClick={() => open(vendor.console!)}>
-                {t("尚无 key？前往获取")}
+                {t("onboarding.noKeyYetGetOne")}
               </button>
             )}
           </label>
@@ -255,7 +255,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
               {err.text}
               {fixAt && (
                 <button type="button" className="onb-fix" data-action="external.open" onClick={() => open(fixAt)}>
-                  {t("打开 {name} 控制台", { name: t(pick) })}
+                  {t("onboarding.openTheConsole", { name: t(pick) })}
                 </button>
               )}
             </div>
@@ -266,15 +266,15 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
           <div className="onb-found">
             <div className="onb-found-hd">
               <span className="tick">✓</span>
-              <span>{t("连上了")}</span>
-              <span className="k">{t("{n} 个模型 · key 保存在本机", { n: found.models.length })}</span>
+              <span>{t("common.connected")}</span>
+              <span className="k">{t("onboarding.modelsKeyStaysOnThis", { n: found.models.length })}</span>
             </div>
             {completed !== "" && completed === url.trim() && (
-              <p className="probe-ok" role="status">{t("接口地址已补全为 {url}", { url: completed })}</p>
+              <p className="probe-ok" role="status">{t("common.addressCompletedTo", { url: completed })}</p>
             )}
             <div className="onb-field">
-              <span className="lb">{t("接入方式")}</span>
-              <div className="onb-protocols" role="radiogroup" aria-label={t("接入方式")}>
+              <span className="lb">{t("common.protocol")}</span>
+              <div className="onb-protocols" role="radiogroup" aria-label={t("common.protocol")}>
                 {protocols.map((value) => (
                   <button
                     key={value}
@@ -295,16 +295,16 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
                 ))}
               </div>
               <p className="onb-protocol-note">
-                {t("模型目录只能确认账号与模型，不能排除其他聊天协议。请选择服务商实际支持的协议；已知服务的专用地址会自动切换。")}
+                {t("onboarding.aModelCatalogConfirmsThe")}
               </p>
             </div>
             {(found.ambiguous || (found.kinds?.length ?? 0) > 1) && (
               <p className="onb-why">
-                {t("两种接入方式都能返回模型列表，仅凭列表无法区分；两者的聊天入口路径通常不同，选错会导致聊天报错。如需同时使用，请再添加一次并选择另一种。")}
+                {t("common.bothAccessMethodsAnswerWith")}
               </p>
             )}
             <div className="onb-field">
-              <span className="lb">{t("选择默认模型")}</span>
+              <span className="lb">{t("onboarding.chooseTheDefaultModel")}</span>
               {/* The app's own picker rather than a <select>: a gateway can
                   publish a hundred models, and this one grows a filter past
                   ten. A native dropdown would also paint its list in the
@@ -315,7 +315,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
                     <span className="onb-model-trigger">
                       <i aria-hidden="true">M</i>
                       <span>
-                        <b>{model || t("请选择一项")}</b>
+                        <b>{model || t("common.pickOne")}</b>
                         <small>{t(KIND_LABEL[kind] || kind)}</small>
                       </span>
                     </span>
@@ -325,7 +325,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
                   onPick={setModel}
                   place="bottom"
                   menuClassName="onb-model-menu"
-                  title={t("选择默认模型")}
+                  title={t("onboarding.chooseTheDefaultModel")}
                 />
               </div>
             </div>
@@ -338,21 +338,21 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
           disabled={busy || !url.trim() || !key.trim() || (!!found && (!kind || !model))}
           onClick={found ? start : connect}
         >
-          {t(busy ? (found ? "正在保存…" : "正在连接…") : found ? "开始" : "连接并继续")}
+          {t(busy ? (found ? "common.saving" : "onboarding.connecting") : found ? "common.start" : "onboarding.connect")}
         </button>
         {onSkip && (
           <button type="button" className="onb-skip" data-action="onboarding.skip" disabled={busy} onClick={onSkip}>
-            {t("稍后再说")}
+            {t("onboarding.notNow")}
           </button>
         )}
 
         <div className="onb-note">
-          {t("key 保存在本机配置中，不会上传至任何第三方。模型、推理强度与执行设定均有默认值，可随时在输入框上方调整。")}
+          {t("onboarding.theKeyGoesIntoThis")}
         </div>
           </div>
         </main>
       </div>
-      <footer className="onb-foot">{t("本地优先 · 凭据由系统安全存储 · 连接前不会发送请求")}</footer>
+      <footer className="onb-foot">{t("onboarding.localFirstCredentialsStayIn")}</footer>
     </div>
   );
 }

@@ -69,21 +69,21 @@ export function RenameSession({ session, hub, onClose, onSaved }: Props) {
       <form data-action-submit="session.rename" data-target={session.path}
         onSubmit={(ev) => { ev.preventDefault(); void submit("save"); }}>
         <header>
-          <h2 id="session-rename-title">{t("重命名聊天")}</h2>
+          <h2 id="session-rename-title">{t("renameSession.renameChat")}</h2>
           <button type="button" className="session-rename-close" data-action="layer.dismiss"
-            aria-label={t("关闭")} disabled={!!busy} onClick={onClose}><StudioIcon name="close" /></button>
+            aria-label={t("common.close")} disabled={!!busy} onClick={onClose}><StudioIcon name="close" /></button>
         </header>
-        <p id="session-rename-hint">{t("保持简短且易于识别")}</p>
-        <input ref={input} data-action="session.rename.title" aria-label={t("聊天标题")} placeholder={t("聊天标题")} value={title} disabled={!!busy}
+        <p id="session-rename-hint">{t("renameSession.keepItShortAndRecognizable")}</p>
+        <input ref={input} data-action="session.rename.title" aria-label={t("common.chatTitle")} placeholder={t("common.chatTitle")} value={title} disabled={!!busy}
           onChange={(ev) => setTitle(ev.target.value)} autoFocus />
         {error && <p className="session-rename-error" role="alert">{error}</p>}
         <footer>
           <button type="button" className="session-rename-auto" data-action="session.auto-name" data-target={session.path}
-            disabled={!!busy} title={t("根据全部用户消息拼接后的最后 300 个字符生成标题")}
-            onClick={() => void submit("auto")}>{busy === "auto" ? t("命名中…") : t("自动命名")}</button>
-          <button type="button" data-action="layer.dismiss" disabled={!!busy} onClick={onClose}>{t("取消")}</button>
+            disabled={!!busy} title={t("renameSession.generateATitleFromThe")}
+            onClick={() => void submit("auto")}>{busy === "auto" ? t("common.naming") : t("common.autoName")}</button>
+          <button type="button" data-action="layer.dismiss" disabled={!!busy} onClick={onClose}>{t("common.cancel")}</button>
           <button type="submit" className="session-rename-save" data-action="session.rename" data-target={session.path}
-            disabled={!!busy}>{busy === "save" ? t("保存中…") : t("保存")}</button>
+            disabled={!!busy}>{busy === "save" ? t("common.saving2") : t("common.save")}</button>
         </footer>
       </form>
     </dialog>, document.body,

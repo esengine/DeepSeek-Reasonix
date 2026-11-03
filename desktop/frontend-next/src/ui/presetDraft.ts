@@ -8,7 +8,7 @@ export function newPreset(base: AgentComposition, catalog: AgentPresetCatalog, c
   while (ids.has(id)) id = `user:custom-${n++}`;
   return {
     ...structuredClone(base), id,
-    name: copy ? `${base.id.startsWith("builtin:") ? t(base.name) : base.name} ${t("副本")}` : "",
+    name: copy ? `${base.id.startsWith("builtin:") ? t(base.name) : base.name} ${t("presetDraft.copy")}` : "",
     description: copy ? base.id.startsWith("builtin:") ? t(base.description) : base.description : "",
   };
 }

@@ -11,14 +11,14 @@ export function CacheNotice({ cache, action, onRetry }: { cache: MarketCache; ac
   const when = savedAt(cache.cachedAt);
   return (
     <div className="find" data-cached="" role="status">
-      <span className="t">{t("显示的是缓存数据")}</span>
+      <span className="t">{t("marketCache.showingCachedData")}</span>
       <span className="why">
         {cache.cause === "unreachable"
-          ? t("无法连接社区市场，以下是 {when} 保存的内容，可能已过期。", { when })
-          : t("社区市场暂时无法正常回应，以下是 {when} 保存的内容，可能已过期。", { when })}
+          ? t("marketCache.theCommunityMarketCouldNot", { when })
+          : t("marketCache.theCommunityMarketIsNot", { when })}
       </span>
       <div className="acts">
-        <button className="act" data-action={action} onClick={onRetry}>{t("重试")}</button>
+        <button className="act" data-action={action} onClick={onRetry}>{t("common.retry")}</button>
       </div>
     </div>
   );

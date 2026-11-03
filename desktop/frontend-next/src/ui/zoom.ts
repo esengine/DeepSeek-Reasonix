@@ -1,10 +1,10 @@
 import type { ZoomRange } from "../port/port";
 
 export const ZOOM_PRESETS: [number, string][] = [
-  [0.9, "紧凑"],
-  [1, "标准"],
-  [1.15, "宽松"],
-  [1.3, "更大"],
+  [0.9, "zoom.compact"],
+  [1, "common.standard"],
+  [1.15, "zoom.comfortable"],
+  [1.3, "common.larger"],
 ];
 
 const EPS = 1e-9;

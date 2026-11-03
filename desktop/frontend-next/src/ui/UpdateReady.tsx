@@ -20,15 +20,15 @@ export function UpdateReady({ port, idle }: { port: Pick<AgentPort, "restartToVe
       await port.restartToVersion(version, false);
     } catch (e) {
       setSays(e instanceof HttpError && e.reason?.code === RESTART_BUSY
-        ? t("有 {n} 个会话还在运行，等它们结束后再重启。", { n: Number(e.reason.params?.n) || 1 })
+        ? t("updateReady.sessionsAreStillRunningRestart", { n: Number(e.reason.params?.n) || 1 })
         : reason(e));
     }
   };
   return (
     <div className="toast update-ready" role="status">
-      <span>{says || t("新版本 {v} 已下载。重启后使用，不会自动重启。", { v: version })}</span>
-      <button data-action="update.restart" onClick={() => void restart()}>{t("重启并更新")}</button>
-      <button data-action="update.later" onClick={() => setPutOff(version)}>{t("稍后")}</button>
+      <span>{says || t("updateReady.versionIsDownloadedRestartTo", { v: version })}</span>
+      <button data-action="update.restart" onClick={() => void restart()}>{t("updateReady.restartAndUpdate")}</button>
+      <button data-action="update.later" onClick={() => setPutOff(version)}>{t("common.later")}</button>
     </div>
   );
 }

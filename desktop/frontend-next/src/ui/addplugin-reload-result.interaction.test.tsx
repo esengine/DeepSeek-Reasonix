@@ -36,16 +36,16 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].flatMap((updating) =>
   const onInstalled = vi.fn();
   const onClose = vi.fn();
   render(<AddPlugin port={port} source={source} updating={updating ? current : undefined} onInstalled={onInstalled} onClose={onClose} />);
-  if (!updating) await userEvent.click(screen.getByRole("button", { name: t("查看内容") }));
-  await userEvent.click(await screen.findByRole("button", { name: t(updating ? "更新" : "安装") }));
+  if (!updating) await userEvent.click(screen.getByRole("button", { name: t("common.seeWhatItIs") }));
+  await userEvent.click(await screen.findByRole("button", { name: t(updating ? "common.update" : "common.install") }));
 
   const message = screen.getByText(t(warning, { reason: reloadError }));
   expect(message.closest(".outcome")?.getAttribute("data-state")).toBe("action_required");
-  expect(screen.queryByText(t("装好了，下一轮就能用"))).toBeNull();
+  expect(screen.queryByText(t("addPlugin.installedTheNextTurnCan"))).toBeNull();
   expect(screen.queryByText(t("装好了，但这一轮还在跑：等它结束或新建会话后生效"))).toBeNull();
   expect(onInstalled).toHaveBeenCalledTimes(1);
   expect(install).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source, replace: updating, planId: expect.any(String) }));
-  await userEvent.click(screen.getByRole("button", { name: t("完成") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.done2") }));
   expect(onClose).toHaveBeenCalledOnce();
   expect(install).toHaveBeenCalledOnce();
 });

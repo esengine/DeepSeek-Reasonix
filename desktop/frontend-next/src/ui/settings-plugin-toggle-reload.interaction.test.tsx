@@ -75,8 +75,8 @@ it.each([true, false].flatMap((enabled) => ["zh", "en"].map((lang) => ({ enabled
       method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin",
       body: JSON.stringify({ name: "notes-kit", enabled: !enabled }),
     }]]);
-    await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
-    expect(await screen.findByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: t("runtimeReload.reloadRuntime") }));
+    expect(await screen.findByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
     expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
     expect(changed).toHaveBeenCalledTimes(2);
     expect(calls.mock.calls.filter(([url]) => url.endsWith("/plugins/enabled"))).toHaveLength(1);
@@ -133,7 +133,7 @@ it("clears the earlier warning when a later saved toggle reloads successfully", 
   allowReload();
   await userEvent.click(within(row()).getByRole("switch"));
   expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
   expect(within(row()).getByRole("switch").getAttribute("aria-checked")).toBe("true");
   expect(changed).toHaveBeenCalledTimes(2);
   expect(calls.mock.calls.filter(([url]) => url.endsWith("/plugins/enabled"))).toHaveLength(2);
@@ -154,20 +154,20 @@ async function timedSettings() {
 
 it.each(["package", "manual"])("gives a later package application its own confirmation window after %s success", async (first) => {
   const { click, toggle, advance, changed, calls } = await timedSettings();
-  if (first === "manual") await click(screen.getByRole("button", { name: t("重载运行时") }));
+  if (first === "manual") await click(screen.getByRole("button", { name: t("runtimeReload.reloadRuntime") }));
   else await toggle();
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
   await advance(3500);
   await toggle();
   expect(changed).toHaveBeenCalledTimes(2);
   await advance(500);
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("已生效") }).disabled).toBe(false);
+  expect(screen.getByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("runtimeReload.live") }).disabled).toBe(false);
   await advance(3499);
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
   await advance(1);
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载运行时") }).disabled).toBe(false);
+  expect(screen.queryByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeNull();
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("runtimeReload.reloadRuntime") }).disabled).toBe(false);
   expect(calls.mock.calls.filter(([url]) => url.endsWith("/plugins/enabled"))).toHaveLength(first === "manual" ? 1 : 2);
   expect(calls.mock.calls.filter(([url]) => url.endsWith("/extensions/reload"))).toHaveLength(first === "manual" ? 1 : 0);
 });
@@ -178,9 +178,9 @@ it("expires a single confirmation without extending it on a Settings rerender", 
   await advance(3500);
   view.rerender(draw(port, changed));
   await advance(499);
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
   await advance(1);
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(screen.queryByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeNull();
   expect(changed).toHaveBeenCalledTimes(1);
 });
 
@@ -192,7 +192,7 @@ it("retains a later saved-but-not-reloaded warning past the old success expiry",
   await toggle();
   await advance(10000);
   expect(screen.getByText(t(warning, { reason: refusal }))).toBeTruthy();
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载运行时") }).disabled).toBe(false);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("runtimeReload.reloadRuntime") }).disabled).toBe(false);
 });
 
 it("keeps a later manual reload pending past the old success expiry", async () => {
@@ -201,14 +201,14 @@ it("keeps a later manual reload pending past the old success expiry", async () =
   await advance(3500);
   let finish!: () => void;
   vi.spyOn(port, "reloadExtensions").mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
-  await click(screen.getByRole("button", { name: t("已生效") }));
+  await click(screen.getByRole("button", { name: t("runtimeReload.live") }));
   await advance(10000);
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载中") }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("runtimeReload.reloading") }).disabled).toBe(true);
   await act(async () => finish());
   await advance(3999);
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
   await advance(1);
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(screen.queryByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeNull();
   expect(changed).toHaveBeenCalledTimes(2);
 });
 
@@ -219,11 +219,11 @@ it("does not let a previous connection's confirmation expire the new connection'
   const next = new MockPort() as unknown as AgentPort;
   vi.spyOn(next, "reloadExtensions").mockResolvedValue();
   await act(async () => view.rerender(draw(next, changed)));
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
-  await click(screen.getByRole("button", { name: t("重载运行时") }));
+  expect(screen.queryByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeNull();
+  await click(screen.getByRole("button", { name: t("runtimeReload.reloadRuntime") }));
   await advance(3999);
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeTruthy();
   await advance(1);
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(screen.queryByText(t("runtimeReload.liveTheNextTurnRuns"))).toBeNull();
   expect(changed).toHaveBeenCalledTimes(2);
 });

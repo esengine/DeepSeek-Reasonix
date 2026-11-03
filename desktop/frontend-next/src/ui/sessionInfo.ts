@@ -12,9 +12,9 @@ function parentPath(path: string): string {
 
 export function sessionInfoText(session: SessionInfo, taskPath: string): string {
   return [
-    `${t("会话 ID")}: ${session.name}`,
-    `${t("会话上下文路径")}: ${parentPath(session.path)}`,
-    `${t("任务路径")}: ${taskPath}`,
-    `${t("任务日志")}: ${session.path}`,
+    `${t("sessionInfo.sessionID")}: ${session.name}`,
+    `${t("sessionInfo.sessionContextPath")}: ${parentPath(session.path)}`,
+    `${t("sessionInfo.taskPath")}: ${taskPath}`,
+    `${t("sessionInfo.taskLog")}: ${session.path}`,
   ].join("\n");
 }

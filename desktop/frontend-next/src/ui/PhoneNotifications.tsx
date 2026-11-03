@@ -83,48 +83,48 @@ export function PhoneNotifications({ hub, port, onError }: { hub: HubPort; port:
     </div>
   );
   return (
-    <Group id="phone-notify" title={t("手机通知")}
-      hint={t("有事等你时，电脑可以提醒登录了同一个账号的手机。发出去的只有“哪一类”和数量，不含会话名称、命令或任何对话内容；手机要在它自己的页面里选择接收。默认全部关闭。")}>
+    <Group id="phone-notify" title={t("common.phoneNotifications")}
+      hint={t("phoneNotifications.whenSomethingIsWaitingFor")}>
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("提醒我的手机")}</span>
-          <span className="ds">{t("关闭时电脑不会向账号服务报告任何事。立即生效")}</span>
+          <span className="lb">{t("phoneNotifications.remindMyPhones")}</span>
+          <span className="ds">{t("phoneNotifications.whenOffThisComputerReports")}</span>
         </span>
-        <Switch data-action="phone-notify.enabled" on={on} label={t("提醒我的手机")} onClick={() => flip({ enabled: !on })} />
+        <Switch data-action="phone-notify.enabled" on={on} label={t("phoneNotifications.remindMyPhones")} onClick={() => flip({ enabled: !on })} />
       </div>
-      {row(t("有操作等待批准时"), t("模型要动的东西超出了已经给出的授权，正停在那里等你"),
-        <Switch data-action="phone-notify.approval" on={prefs.phone.approval} busy={!on} label={t("有操作等待批准时")} onClick={() => flip({ approval: !prefs.phone.approval })} />)}
-      {row(t("模型提问时"), t("模型停下来问你一个问题，没有答案它就不会往下走"),
-        <Switch data-action="phone-notify.input" on={prefs.phone.input} busy={!on} label={t("模型提问时")} onClick={() => flip({ input: !prefs.phone.input })} />)}
-      {row(t("一轮失败时"), t("这一轮因为出错而结束；你自己取消的不算"),
-        <Switch data-action="phone-notify.error" on={prefs.phone.error} busy={!on} label={t("一轮失败时")} onClick={() => flip({ error: !prefs.phone.error })} />)}
+      {row(t("common.whenSomethingWaitsForApproval"), t("common.theModelWantsToTouch"),
+        <Switch data-action="phone-notify.approval" on={prefs.phone.approval} busy={!on} label={t("common.whenSomethingWaitsForApproval")} onClick={() => flip({ approval: !prefs.phone.approval })} />)}
+      {row(t("common.whenTheModelAsksYou"), t("common.theModelStoppedToAsk"),
+        <Switch data-action="phone-notify.input" on={prefs.phone.input} busy={!on} label={t("common.whenTheModelAsksYou")} onClick={() => flip({ input: !prefs.phone.input })} />)}
+      {row(t("phoneNotifications.whenATurnFails"), t("common.theTurnEndedInAn"),
+        <Switch data-action="phone-notify.error" on={prefs.phone.error} busy={!on} label={t("phoneNotifications.whenATurnFails")} onClick={() => flip({ error: !prefs.phone.error })} />)}
 
       {phones && (
         <>
-          <div className="peernote"><b>{t("已登记的手机")}</b></div>
-          {phones.length === 0 && <div className="peernote">{t("还没有手机登记。在手机上打开这台电脑的远程页面，并选择接收提醒。")}</div>}
-          <ul className="wa-list" aria-label={t("已登记的手机")}>
+          <div className="peernote"><b>{t("phoneNotifications.enrolledPhones")}</b></div>
+          {phones.length === 0 && <div className="peernote">{t("phoneNotifications.noPhoneIsEnrolledYet")}</div>}
+          <ul className="wa-list" aria-label={t("phoneNotifications.enrolledPhones")}>
             {phones.map((p) => (
               <li key={p.id}>
                 <span className="tx">
-                  <span className="lb">{p.name}{p.ordinal ? ` · ${t("设备 {n}", { n: p.ordinal })}` : ""}</span>
+                  <span className="lb">{p.name}{p.ordinal ? ` · ${t("common.device", { n: p.ordinal })}` : ""}</span>
                   <span className="ds">
-                    {p.state === "pending" ? t("等你批准 · 标识 {id}", { id: p.keyThumbprint }) : t("最近使用 {at}", { at: when(p.lastSeenAt) })}
+                    {p.state === "pending" ? t("phoneNotifications.waitingForYouFingerprint", { id: p.keyThumbprint }) : t("phoneNotifications.lastUsed", { at: when(p.lastSeenAt) })}
                   </span>
                 </span>
                 <span className="acts">
                   {p.state === "pending" ? (
                     <>
-                      <button className="act" data-action="phone.add" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.resolvePhone(p.id, "add"))}>{t("添加")}</button>
+                      <button className="act" data-action="phone.add" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.resolvePhone(p.id, "add"))}>{t("common.add")}</button>
                       {p.replaceCandidate && (
-                        <button className="act" data-action="phone.replace" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.resolvePhone(p.id, "replace", p.replaceCandidate))}>{t("替换旧设备")}</button>
+                        <button className="act" data-action="phone.replace" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.resolvePhone(p.id, "replace", p.replaceCandidate))}>{t("phoneNotifications.replaceTheOldDevice")}</button>
                       )}
-                      <button className="act ghost" data-action="phone.reject" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.resolvePhone(p.id, "reject"))}>{t("拒绝")}</button>
+                      <button className="act ghost" data-action="phone.reject" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.resolvePhone(p.id, "reject"))}>{t("common.refuse")}</button>
                     </>
                   ) : confirm === p.id ? (
-                    <button className="act danger" data-action="phone.revoke" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.revokePhone(p.id))}>{t("确认移除")}</button>
+                    <button className="act danger" data-action="phone.revoke" data-target={p.id} disabled={busy === p.id} onClick={() => void act(p.id, () => hub.revokePhone(p.id))}>{t("phoneNotifications.confirmRemoval")}</button>
                   ) : (
-                    <button className="act ghost" data-action="phone.revoke-ask" data-target={p.id} onClick={() => setConfirm(p.id)}>{t("移除")}</button>
+                    <button className="act ghost" data-action="phone.revoke-ask" data-target={p.id} onClick={() => setConfirm(p.id)}>{t("common.remove")}</button>
                   )}
                 </span>
               </li>

@@ -41,7 +41,7 @@ function startPage(scheme: "light" | "dark"): string {
     main{width:min(520px,100%);text-align:center}.mark{width:42px;height:42px;margin:0 auto 18px;display:grid;place-items:center;border:1px solid ${border};border-radius:12px;background:${surface};color:#7188c4;font-size:22px}
     h1{margin:0 0 8px;font-size:18px;font-weight:620;letter-spacing:-.02em}p{margin:0;color:${muted};font-size:13px;line-height:1.7}
     .hint{margin-top:22px;padding:11px 14px;border:1px solid ${border};border-radius:9px;background:${surface};color:${muted};font-size:12px;text-align:left}
-  </style></head><body><main><div class="mark">◎</div><h1>Reasonix Browser</h1><p>${t("在上方地址栏输入网址，即可在当前任务旁浏览资料。")}</p><div class="hint">${t("浏览内容不会替换或中断当前会话。部分网站禁止嵌入时，可使用右上角的外部打开。")}</div></main></body></html>`;
+  </style></head><body><main><div class="mark">◎</div><h1>Reasonix Browser</h1><p>${t("browserPanel.enterAnAddressAboveTo")}</p><div class="hint">${t("browserPanel.browsingWillNotReplaceOr")}</div></main></body></html>`;
 }
 
 interface ManualProps {
@@ -110,28 +110,28 @@ export function ManualBrowserPanel({ id, hidden, onAddress, onExternal, scheme }
   };
 
   return (
-    <section className="studio-browser" hidden={hidden} aria-label={t("内置 Browser")}>
+    <section className="studio-browser" hidden={hidden} aria-label={t("browserPanel.builtInBrowser")}>
       <form className="studio-browser-toolbar" onSubmit={submit} data-action-submit="browser.navigate">
-        <button type="button" data-action="browser.back" onClick={() => move(index - 1)} disabled={index === 0} aria-label={t("后退")} title={t("后退")}>
+        <button type="button" data-action="browser.back" onClick={() => move(index - 1)} disabled={index === 0} aria-label={t("browserPanel.back")} title={t("browserPanel.back")}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.5 3-5 5 5 5M5 8h7" /></svg>
         </button>
-        <button type="button" data-action="browser.reload" onClick={() => setReload((value) => value + 1)} aria-label={t("刷新")} title={t("刷新")}>
+        <button type="button" data-action="browser.reload" onClick={() => setReload((value) => value + 1)} aria-label={t("common.reFreeze")} title={t("common.reFreeze")}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.7 6A5 5 0 1 0 13 9.5M12.7 6V2.8M12.7 6H9.5" /></svg>
         </button>
         <label className="studio-browser-address" data-invalid={invalid ? "" : undefined}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.3" /><path d="M2.8 8h10.4M8 2.7c1.5 1.5 2.2 3.2 2.2 5.3S9.5 11.8 8 13.3C6.5 11.8 5.8 10.1 5.8 8S6.5 4.2 8 2.7Z" /></svg>
-          <input data-action-change="browser.address" data-action-keydown="browser.navigate" value={input} onKeyDown={commitAddress} onChange={(event) => { setInput(event.target.value); setInvalid(false); }} aria-label={t("网页地址")} spellCheck={false} autoCapitalize="off" />
+          <input data-action-change="browser.address" data-action-keydown="browser.navigate" value={input} onKeyDown={commitAddress} onChange={(event) => { setInput(event.target.value); setInvalid(false); }} aria-label={t("browserPanel.webAddress")} spellCheck={false} autoCapitalize="off" />
         </label>
-        <button type="submit" className="studio-browser-go" aria-label={t("打开网页")}>{t("打开")}</button>
-        <button type="button" data-action="browser.external" onClick={() => !internal && onExternal(current)} disabled={internal} aria-label={t("在外部浏览器打开")} title={t("在外部浏览器打开")}>
+        <button type="submit" className="studio-browser-go" aria-label={t("browserPanel.openPage")}>{t("common.open")}</button>
+        <button type="button" data-action="browser.external" onClick={() => !internal && onExternal(current)} disabled={internal} aria-label={t("common.openInExternalBrowser")} title={t("common.openInExternalBrowser")}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5" /><path d="M7 4H3v9h9V9" /></svg>
         </button>
       </form>
-      {invalid && <p className="studio-browser-error" role="alert">{t("请输入有效的 http 或 https 地址")}</p>}
+      {invalid && <p className="studio-browser-error" role="alert">{t("browserPanel.enterAValidHttpOr")}</p>}
       <iframe
         key={`${current}:${reload}`}
         className="studio-browser-frame"
-        title={t("Reasonix 内置 Browser")}
+        title={t("browserPanel.reasonixBuiltInBrowser")}
         src={internal ? undefined : current}
         srcDoc={internal ? srcDoc : undefined}
         sandbox="allow-scripts allow-forms allow-popups"
@@ -144,10 +144,10 @@ export function ManualBrowserPanel({ id, hidden, onAddress, onExternal, scheme }
           beside it. */}
       {(loading || !internal) && (
         <footer className="studio-browser-note" data-loading={loading ? "" : undefined}>
-          {loading && <span>{t("正在打开网页…")}</span>}
+          {loading && <span>{t("browserPanel.openingPage")}</span>}
           {!internal && (
             <button type="button" data-action="browser.external" onClick={() => onExternal(current)}>
-              {t("在外部浏览器打开")}
+              {t("common.openInExternalBrowser")}
             </button>
           )}
         </footer>
@@ -307,25 +307,25 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
         {showTabs && <div className="vtabs" role="tablist">
           {tabs.map((tab) => (
             <button key={tab.target} className="tab btab" role="tab" data-action="browser.tab" data-target={tab.id} aria-selected={tab.target === target} title={tab.url} onClick={() => setPicked(tab.target)}>
-              {tab.title || tab.url || t("空白页")}
+              {tab.title || tab.url || t("common.blankPage")}
             </button>
           ))}
         </div>}
         <div className="bnav">
-          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="back" aria-label={t("后退")} onClick={() => control("back")}>←</button>
-          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="forward" aria-label={t("前进")} onClick={() => control("forward")}>→</button>
-          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="reload" aria-label={t("重新加载")} onClick={() => control("reload")}>↻</button>
-          <button className="bbtn" data-action="browser.external" disabled={!documentPath && !/^https?:\/\//i.test(current?.url ?? "")} aria-label={documentPath ? t("用系统默认程序打开这个文件") : t("用默认浏览器打开此页")} title={documentPath ? t("用系统默认程序打开这个文件") : t("用默认浏览器打开此页")} onClick={() => (documentPath ? openDocument() : current && void host().openExternal(current.url))}>↗</button>
+          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="back" aria-label={t("browserPanel.back")} onClick={() => control("back")}>←</button>
+          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="forward" aria-label={t("browserPanel.forward")} onClick={() => control("forward")}>→</button>
+          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="reload" aria-label={t("common.reload")} onClick={() => control("reload")}>↻</button>
+          <button className="bbtn" data-action="browser.external" disabled={!documentPath && !/^https?:\/\//i.test(current?.url ?? "")} aria-label={documentPath ? t("browserPanel.openThisFileWithThe") : t("browserPanel.openThisPageInThe")} title={documentPath ? t("browserPanel.openThisFileWithThe") : t("browserPanel.openThisPageInThe")} onClick={() => (documentPath ? openDocument() : current && void host().openExternal(current.url))}>↗</button>
           <form className="baddr" data-action="browser.navigate" data-target={current?.id} onSubmit={go}>
-            <input data-action="browser.navigate" data-target={current?.id} value={address} spellCheck={false} aria-label={t("网址")} onChange={(event) => { setAddress(event.target.value); setRefused(""); }} />
+            <input data-action="browser.navigate" data-target={current?.id} value={address} spellCheck={false} aria-label={t("browserPanel.address")} onChange={(event) => { setAddress(event.target.value); setRefused(""); }} />
           </form>
         </div>
       </div>
-      {documentPath && <p className="studio-browser-note" data-action="browser.document-hint">{t("用系统默认程序打开这个文件，网页里的脚本会照常运行")}</p>}
+      {documentPath && <p className="studio-browser-note" data-action="browser.document-hint">{t("browserPanel.opensThisFileWithThe")}</p>}
       {docFailed && <p className="studio-browser-error" role="alert">{docFailed}</p>}
       {refused && (
         <p className="studio-browser-error" role="alert">
-          {refused === "network_file" ? t("不能直接打开网络共享路径。请先把文件放到本机，再输入它的本机路径。") : t("请输入有效的 http 或 https 地址")}
+          {refused === "network_file" ? t("browserPanel.aNetworkShareCannotBe") : t("browserPanel.enterAValidHttpOr")}
         </p>
       )}
       <div className="bview" ref={slot}>

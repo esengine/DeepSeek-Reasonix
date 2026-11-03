@@ -50,8 +50,8 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             type="button"
             className="studio-deckchip"
             data-action="deck.agents"
-            aria-label={t("子代理")}
-            title={t("子代理")}
+            aria-label={t("common.subagents2")}
+            title={t("common.subagents2")}
             data-live={liveAgents ? "" : undefined}
             aria-expanded={open === "agents"}
             aria-haspopup="dialog"
@@ -59,9 +59,9 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
           >
             <StudioIcon name="branch" />
             <b>{liveAgents}</b>
-            <span>{t("子代理")}</span>
+            <span>{t("common.subagents2")}</span>
           </button>
-          <div className="studio-deck-pop" role="dialog" aria-label={t("子代理")}>
+          <div className="studio-deck-pop" role="dialog" aria-label={t("common.subagents2")}>
             <Agents tasks={tasks} onOpen={(id) => { shut(); void openTask(id); }} />
           </div>
         </div>
@@ -76,8 +76,8 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             type="button"
             className="studio-deckchip"
             data-action="deck.jobs"
-            aria-label={t("后台任务")}
-            title={t("后台任务")}
+            aria-label={t("common.backgroundJobs")}
+            title={t("common.backgroundJobs")}
             data-live={liveJobs ? "" : undefined}
             aria-expanded={open === "jobs"}
             aria-haspopup="dialog"
@@ -85,9 +85,9 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
           >
             <StudioIcon name="play" />
             <b>{liveJobs}</b>
-            <span>{t("后台任务")}</span>
+            <span>{t("common.backgroundJobs")}</span>
           </button>
-          <div className="studio-deck-pop" role="dialog" aria-label={t("后台任务")}>
+          <div className="studio-deck-pop" role="dialog" aria-label={t("common.backgroundJobs")}>
             <Jobs jobs={jobs} onCancel={onCancelJob} onView={onReadJob ? (id) => { shut(); setViewingJob(id); } : undefined} />
           </div>
         </div>

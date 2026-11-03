@@ -10,7 +10,7 @@ export function StopCall({ onStop }: { onStop: () => void }) {
   if (watched < AFTER_MS) return null;
   return (
     <button type="button" className="stop-call" data-action="tool.stop" onClick={onStop}>
-      {t("只停止这一条调用")}
+      {t("stopCall.stopOnlyThisCall")}
     </button>
   );
 }

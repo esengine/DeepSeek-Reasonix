@@ -43,9 +43,9 @@ function when(iso: string): string {
   const at = Date.parse(iso);
   if (Number.isNaN(at)) return "";
   const days = Math.floor((Date.now() - at) / 86400000);
-  if (days <= 0) return t("今天");
-  if (days === 1) return t("昨天");
-  if (days < 30) return t("{n} 天前", { n: days });
+  if (days <= 0) return t("versions.today");
+  if (days === 1) return t("versions.yesterday");
+  if (days < 30) return t("common.daysAgo", { n: days });
   return new Date(at).toLocaleDateString();
 }
 
@@ -54,31 +54,31 @@ function when(iso: string): string {
 function say(p: UpdateProgress): string {
   switch (p.phase) {
     case "downloading":
-      if (p.stalls) return t("下载暂停了：连接长时间没有数据，已重连 {n} 次…", { n: p.stalls });
+      if (p.stalls) return t("versions.downloadPausedTheConnectionDelivered", { n: p.stalls });
       if (p.delta_skipped) {
-        return p.total > 0 ? t("下载完整安装包 {got} / {all}", { got: bytes(p.received), all: bytes(p.total) }) : t("下载完整安装包 {got}", { got: bytes(p.received) });
+        return p.total > 0 ? t("versions.downloadingTheFullPackage", { got: bytes(p.received), all: bytes(p.total) }) : t("versions.downloadingTheFullPackage2", { got: bytes(p.received) });
       }
-      return p.total > 0 ? t("下载中 {got} / {all}", { got: bytes(p.received), all: bytes(p.total) }) : t("下载中 {got}", { got: bytes(p.received) });
+      return p.total > 0 ? t("versions.downloading", { got: bytes(p.received), all: bytes(p.total) }) : t("versions.downloading2", { got: bytes(p.received) });
     case "verifying":
-      return t("校验签名…");
+      return t("versions.verifyingTheSignature");
     case "downloaded":
-      return t("准备安装…");
+      return t("versions.preparingToInstall");
     case "applying":
-      return t("正在安装…");
+      return t("versions.installing");
     case "authorizing":
-      return t("等待系统授权…");
+      return t("versions.waitingForPermission");
     case "idle":
       // Only reachable in the gap between the click and the first read that
       // sees the move: the panel is already showing this row as going.
-      return t("准备中…");
+      return t("versions.starting");
     case "relaunching":
-      return t("正在重启到新版本…");
+      return t("versions.restartingIntoTheNewVersion");
     case "ready":
-      return t("已下载，待重启");
+      return t("versions.downloadedWaitingForARestart");
     case "error":
-      return t("安装失败");
+      return t("versions.installFailed");
     case "cancelled":
-      return t("已取消下载");
+      return t("versions.downloadCancelled");
   }
 }
 
@@ -237,17 +237,17 @@ export function Versions({ port }: { port: Port }) {
   };
 
   if (uninstalled) {
-    return <p className="acct-note">{t("当前是从源码启动的开发版，没有可以查看或切换的版本。安装版 Studio 会在这里列出可用的更新。")}</p>;
+    return <p className="acct-note">{t("versions.thisIsADevelopmentBuild")}</p>;
   }
 
   if (unread) {
     return (
       <div className="find" data-lvl="warn" role="alert">
-        <span className="t">{t("无法读取版本信息")}</span>
+        <span className="t">{t("versions.versionInformationCouldNotBe")}</span>
         <span className="why">
           {unread}
           <button className="lnk" data-action="versions.reload" onClick={reload}>
-            {t("重试")}
+            {t("common.retry")}
           </button>
         </span>
       </div>
@@ -255,7 +255,7 @@ export function Versions({ port }: { port: Port }) {
   }
 
   if (hub === null) {
-    return <p className="acct-note">{t("正在读取版本…")}</p>;
+    return <p className="acct-note">{t("versions.loadingVersions")}</p>;
   }
 
   // A shell that answers null (or an older one that omits the field) must not
@@ -275,78 +275,78 @@ export function Versions({ port }: { port: Port }) {
     <div className="vers">
       <div className="vnow">
         <span className="cur">{hub.current || "dev"}</span>
-        <span className="lb">{t(dev ? "本地构建" : "当前版本")}</span>
-        {hub.pinned && !hub.stalePin && <span className="pin">{t("已固定")}</span>}
+        <span className="lb">{t(dev ? "versions.localBuild" : "versions.currentVersion")}</span>
+        {hub.pinned && !hub.stalePin && <span className="pin">{t("common.pinned")}</span>}
       </div>
 
       {/* Severity language is the transcript's: a coloured left rule, no icons.
           Pinned is not a problem, so it is ok-coloured; a stale pin is. */}
       {hub.withdrawn && (
         <div className="find" data-lvl="warn" role="alert">
-          <span className="t">{t("当前版本 {v} 已被撤回", { v: hub.withdrawn.version })}</span>
+          <span className="t">{t("versions.wasWithdrawn", { v: hub.withdrawn.version })}</span>
           <span className="why">
-            {hub.withdrawn.reason && t("撤回原因：{reason}。", { reason: hub.withdrawn.reason })}
-            {hub.newer ? t("请更新到 {v}，可在下方对应行安装。", { v: hub.latest }) : t("请在下方选择一个版本。")}
+            {hub.withdrawn.reason && t("versions.reason", { reason: hub.withdrawn.reason })}
+            {hub.newer ? t("versions.updateToFromItsRow", { v: hub.latest }) : t("versions.pickAVersionBelow")}
           </span>
         </div>
       )}
       {hub.err && (
         <div className="find" data-lvl="warn">
-          <span className="t">{t("无法连接版本目录")}</span>
-          <span className="why">{t("{err}　—— 本地功能不受影响，请稍后重试。", { err: hub.err })}</span>
+          <span className="t">{t("versions.cannotReachTheVersionIndex")}</span>
+          <span className="why">{t("versions.nothingLocalIsAffectedTry", { err: hub.err })}</span>
         </div>
       )}
       {failed && (
         <div className="find" data-lvl="warn" role="alert">
-          <span className="t">{t("操作未完成")}</span>
+          <span className="t">{t("common.thatDidNotGoThrough")}</span>
           <span className="why">{failed}</span>
         </div>
       )}
       {hub.pinned && !hub.stalePin && (
         <div className="find" data-lvl="ok">
-          <span className="t">{t("已固定在 {v}，不再提示新版本", { v: hub.pinned })}</span>
+          <span className="t">{t("versions.pinnedToNewerVersionsAre", { v: hub.pinned })}</span>
           <span className="why">
-            {t("回退时会固定在所选版本，免得新版本提示把你带回刚离开的版本。")}
+            {t("versions.aRollbackPinsTheVersion")}
             <button className="lnk" data-action="versions.pin" onClick={() => pin("")} disabled={locked}>
-              {t("取消固定")}
+              {t("versions.unpin")}
             </button>
           </span>
         </div>
       )}
       {hub.stalePin && (
         <div className="find" data-lvl="warn">
-          <span className="t">{t("固定版本为 {pinned}，当前运行的是 {current}", { pinned: hub.pinned, current: hub.current })}</span>
+          <span className="t">{t("versions.pinnedToWhatIsRunning", { pinned: hub.pinned, current: hub.current })}</span>
           <span className="why">
-            {t("这个固定没有作用，下次启动时会自动清除。")}
+            {t("versions.thisPinHoldsNothingAnd")}
             <button className="lnk" data-action="versions.pin" onClick={() => pin("")} disabled={busy}>
-              {t("现在清除")}
+              {t("versions.clearItNow")}
             </button>
           </span>
         </div>
       )}
       {!hub.err && hub.newer && !hub.pinned && !hub.withdrawn && !ready && !moving && !failure && (
         <div className="find" data-lvl="ok">
-          <span className="t">{t("有新版本 {v}", { v: hub.latest })}</span>
-          <span className="why">{t("可在下方对应行安装。下载完成后会先问你，再重启。")}</span>
+          <span className="t">{t("versions.isOut", { v: hub.latest })}</span>
+          <span className="why">{t("versions.installItFromTheRow")}</span>
         </div>
       )}
       {ready && later !== ready && (
         <div className="find" data-lvl={running > 0 ? "warn" : "ok"} role="status">
           <span className="t">
-            {running > 0 ? t("有 {n} 项任务正在运行", { n: running }) : t("{v} 已下载并通过签名校验", { v: ready })}
+            {running > 0 ? t("versions.tasksAreRunning", { n: running }) : t("versions.isDownloadedAndItsSignature", { v: ready })}
           </span>
           <span className="why">
             {running > 0
-              ? t("现在重启会中断它们。可以等任务结束后再重启。")
-              : t("重启 Studio 后生效。重启会关闭当前窗口，稍后重启也可以。")}
-            {readyOlder && t("较新版本写入的会话在旧版本中暂时无法打开，升级回去后即可恢复。")}
+              ? t("versions.restartingNowWouldStopThem")
+              : t("versions.itTakesEffectWhenStudio")}
+            {readyOlder && t("versions.aSessionWrittenByA")}
           </span>
           <span className="acts">
             <button className="btn sm" data-primary="" data-action="versions.restart" onClick={() => restart(ready, running > 0)}>
-              {running > 0 ? t("仍然重启") : t("立即重启")}
+              {running > 0 ? t("versions.restartAnyway") : t("versions.restartNow")}
             </button>
             <button className="btn sm" data-action="versions.later" onClick={() => { setLater(ready); setRunning(0); }}>
-              {t("稍后")}
+              {t("common.later")}
             </button>
           </span>
         </div>
@@ -358,7 +358,7 @@ export function Versions({ port }: { port: Port }) {
             {failure.why}
             {failure.manual && (
               <a className="lnk" href={releasePage(progress.version)} target="_blank" rel="noreferrer noopener" data-action="versions.full-installer" onClick={(e) => openInstallerPage(e, port, progress.version)}>
-                {t("下载完整安装包")}
+                {t("versions.downloadTheFullInstaller")}
               </a>
             )}
           </span>
@@ -381,10 +381,10 @@ export function Versions({ port }: { port: Port }) {
             onKeyDown={v.hasNotes ? (e) => closeNotes(e, v.version) : undefined}
           >
             <span className="nm">{v.version}</span>
-            <span className="ds">{t(v.current ? "正在运行" : v.older ? "更早的版本" : "更新的版本")}</span>
+            <span className="ds">{t(v.current ? "versions.runningNow" : v.older ? "versions.anEarlierVersion" : "versions.aNewerVersion")}</span>
             {/* A row the catalog does not carry has no date. Saying so beats an
                 empty column: it is why this version has no download page. */}
-            <span className="sc">{v.publishedAt ? when(v.publishedAt) : v.current ? t("未发布") : ""}</span>
+            <span className="sc">{v.publishedAt ? when(v.publishedAt) : v.current ? t("versions.notPublished") : ""}</span>
             {moving === v.version && progress ? (
               <>
                 <span className="sa" data-keep="">
@@ -402,7 +402,7 @@ export function Versions({ port }: { port: Port }) {
                       onClick={() => void cancel(v.version)}
                       disabled={cancelling !== ""}
                     >
-                      {cancelling === v.version ? t("取消中…") : t("取消下载")}
+                      {cancelling === v.version ? t("common.stopping") : t("versions.cancelDownload")}
                     </button>
                   )}
                 </span>
@@ -413,21 +413,21 @@ export function Versions({ port }: { port: Port }) {
                 )}
               </>
             ) : starting === v.version ? (
-              <span className="sa" data-keep="">{t("准备中…")}</span>
+              <span className="sa" data-keep="">{t("versions.starting")}</span>
             ) : ready === v.version ? (
               <button className="sa lnk" data-keep="" data-action="versions.restart" onClick={() => { setLater(""); void restart(v.version, false); }}>
-                {t("重启以完成安装")}
+                {t("versions.restartToFinish")}
               </button>
             ) : (
               !v.current && (
                 <button className="sa lnk" data-action="versions.activate" onClick={() => goTo(v.version)} disabled={locked}>
-                  {t(v.older ? "回退到这个版本" : "安装这个版本")}
+                  {t(v.older ? "versions.rollBackToThisVersion" : "versions.installThisVersion")}
                 </button>
               )
             )}
             {v.current && !hub.pinned && (
               <button className="sa lnk" data-action="versions.pin" onClick={() => pin(v.version)} disabled={locked}>
-                {t("固定在这里")}
+                {t("versions.pinHere")}
               </button>
             )}
             {v.hasNotes && port.versionNotes && (
@@ -438,7 +438,7 @@ export function Versions({ port }: { port: Port }) {
                 aria-controls={`vnotes-${v.version}`}
                 onClick={() => toggleNotes(v.version)}
               >
-                {t(openNotes === v.version ? "收起更新内容" : "更新内容")}
+                {t(openNotes === v.version ? "versions.hideWhatSNew" : "versions.whatSNew")}
               </button>
             )}
           </div>
@@ -449,7 +449,7 @@ export function Versions({ port }: { port: Port }) {
         ))}
         {hidden > 0 && (
           <button className="lnk vmore" data-action="versions.more" onClick={() => setAllPast(true)}>
-            {t("显示更早的 {n} 个版本", { n: hidden })}
+            {t("versions.showEarlierVersions", { n: hidden })}
           </button>
         )}
       </div>
@@ -465,7 +465,7 @@ function NotesBody({ markdown }: { markdown: string }) {
   if (english === null) return <LazyMarkdown text={first} images={false} />;
   return (
     <>
-      <div className="vnotes-lang seg" role="group" aria-label={t("更新内容的语言")}>
+      <div className="vnotes-lang seg" role="group" aria-label={t("versions.languageOfTheNotes")}>
         <button data-action="versions.notes-lang" data-value="first" aria-pressed={shown === "first"} onClick={() => setShown("first")}>{NOTES_LANGUAGE_NAMES.first}</button>
         <button data-action="versions.notes-lang" data-value="english" aria-pressed={shown === "english"} onClick={() => setShown("english")}>{NOTES_LANGUAGE_NAMES.english}</button>
       </div>
@@ -477,21 +477,21 @@ function NotesBody({ markdown }: { markdown: string }) {
 function NotesPanel({ id, version, state, retry, onKeyDown }: { id: string; version: string; state: NotesState | undefined; retry: () => void; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void }) {
   const loading = !state || state.phase === "loading";
   return (
-    <section id={id} className="vnotes" data-action="versions.notes-close" onKeyDown={onKeyDown} aria-label={t("{v} 的更新内容", { v: version })} aria-busy={loading}>
-      {loading && <p className="acct-note">{t("正在读取更新内容…")}</p>}
+    <section id={id} className="vnotes" data-action="versions.notes-close" onKeyDown={onKeyDown} aria-label={t("versions.whatSNewIn", { v: version })} aria-busy={loading}>
+      {loading && <p className="acct-note">{t("common.loadingWhatSNew")}</p>}
       {state?.phase === "ok" && <NotesBody markdown={state.markdown} />}
       {state?.phase === "err" && (
         <div className="find" data-lvl="warn" role="alert">
-          <span className="t">{t("更新内容读取失败")}</span>
+          <span className="t">{t("versions.whatSNewCouldNot")}</span>
           <span className="why">
             {state.why}
             {!state.absent && (
               <button className="lnk" data-action="versions.notes-retry" onClick={retry}>
-                {t("重试")}
+                {t("common.retry")}
               </button>
             )}
             <a className="lnk" href={releasePage(version)} target="_blank" rel="noreferrer noopener">
-              {t("在 GitHub 查看")}
+              {t("versions.viewOnGitHub")}
             </a>
           </span>
         </div>

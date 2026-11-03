@@ -15,16 +15,16 @@ import { FeedbackReplyBox, FeedbackReviewNote, FeedbackThread, foldedUnread } fr
 import { StudioIcon, type StudioIconName } from "./StudioIcon";
 
 export const STATUS_LABEL: Record<FeedbackStatus, string> = {
-  received: "已收到",
-  needs_info: "需要补充信息",
-  answered: "维护者已回复",
-  closed: "已关闭此反馈",
-  withdrawn: "已撤回",
-  recorded: "已登记",
-  in_progress: "处理中",
-  fixed: "已修复",
-  wontfix: "不予修复",
-  duplicate: "重复",
+  received: "feedbackMine.received",
+  needs_info: "feedbackMine.needsMoreInfo",
+  answered: "feedbackMine.answeredByUs",
+  closed: "feedbackMine.closed",
+  withdrawn: "common.withdrawn",
+  recorded: "feedbackMine.recorded",
+  in_progress: "feedbackMine.inProgress",
+  fixed: "feedbackMine.fixed",
+  wontfix: "feedbackMine.wonTFix",
+  duplicate: "feedbackMine.duplicate",
 };
 
 const STATUS_ICON: Record<FeedbackStatus, StudioIconName> = {
@@ -40,13 +40,13 @@ const STATUS_ICON: Record<FeedbackStatus, StudioIconName> = {
   duplicate: "copy",
 };
 
-export const REVIEW_LABEL = "审核中";
+export const REVIEW_LABEL = "common.inReview";
 
-const CATEGORY_LABEL = { bug: "问题", idea: "建议", question: "疑问", other: "其他" } as const;
+const CATEGORY_LABEL = { bug: "common.bug", idea: "common.idea", question: "common.question", other: "common.other" } as const;
 
 type StepState = "done" | "current" | "todo";
 
-const STEP_STATE: Record<StepState, string> = { done: "已完成：", current: "当前：", todo: "尚未开始：" };
+const STEP_STATE: Record<StepState, string> = { done: "feedbackMine.done", current: "feedbackMine.current", todo: "feedbackMine.notYet" };
 
 // What this window last read, per port, so opening the page again draws the list
 // it already has and refreshes behind it instead of showing one waiting line.
@@ -74,7 +74,7 @@ function plainSteps(item: FeedbackItem): Step[] | null {
   const received: Step = { id: "received", label: t(STATUS_LABEL.received), state: "done" };
   switch (item.status) {
     case "needs_info":
-      return [received, { id: "needs_info", label: t(item.needsInput ? "等你补充信息" : STATUS_LABEL.needs_info), state: "current" }];
+      return [received, { id: "needs_info", label: t(item.needsInput ? "feedbackMine.waitingForYourInformation" : STATUS_LABEL.needs_info), state: "current" }];
     case "answered":
     case "closed":
     case "withdrawn":
@@ -90,19 +90,19 @@ function steps(item: FeedbackItem, issue: (n: number) => ReactNode): Step[] {
   const at = ORDER[item.status];
   const terminal = at === 3;
   const state = (i: number): StepState => (i < at || (terminal && i === at) ? "done" : i === at ? "current" : "todo");
-  const recorded = item.issueNumber ? tx("已登记为 {issue}", { issue: issue(item.issueNumber) }) : t(STATUS_LABEL.recorded);
+  const recorded = item.issueNumber ? tx("feedbackMine.recordedAs", { issue: issue(item.issueNumber) }) : t(STATUS_LABEL.recorded);
   const end: ReactNode =
     item.status === "fixed"
       ? item.resolvedVersion && item.resolvedVersion !== FEEDBACK_NEXT_VERSION
-        ? t("已在 {version} 修复", { version: item.resolvedVersion })
-        : t("已修复，将随下个版本发布")
+        ? t("feedbackMine.fixedIn", { version: item.resolvedVersion })
+        : t("feedbackMine.fixedShipsInTheNext")
       : item.status === "wontfix"
         ? t(STATUS_LABEL.wontfix)
         : item.status === "duplicate"
           ? item.duplicateOf
-            ? tx("与 {issue} 重复", { issue: issue(item.duplicateOf) })
+            ? tx("feedbackMine.duplicateOf", { issue: issue(item.duplicateOf) })
             : t(STATUS_LABEL.duplicate)
-          : t("已解决");
+          : t("feedbackMine.resolved");
   const out: Step[] = [
     { id: "received", label: t(isUnderReview(item) ? REVIEW_LABEL : STATUS_LABEL.received), state: state(0) },
     { id: "recorded", label: recorded, state: state(1) },
@@ -174,7 +174,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
         await Promise.allSettled(shown.map(markSeen));
         tell();
         const fresher = m.items.filter((i) => i.unreadReplies > 0).length;
-        if (fresher > 0) setSaid(t("有 {n} 份反馈收到了新回复。", { n: fresher }));
+        if (fresher > 0) setSaid(t("feedbackMine.ofYourReportsHaveNew", { n: fresher }));
       })
       .catch((e) => setFailure(feedbackFailure(e)))
       .finally(() => setLoading(false));
@@ -196,7 +196,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
   };
 
   const sent = (receipt: string) => {
-    setSaid(t("回复已发送。"));
+    setSaid(t("feedbackMine.replySent"));
     load();
     requestAnimationFrame(() => list.current?.querySelector<HTMLElement>(`[data-receipt="${receipt}"]`)?.focus());
   };
@@ -215,10 +215,10 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
     <div className="fbk-mine" aria-busy={loading}>
       <p className="sr-only" role="status" aria-live="polite">{said}</p>
       <div className="fbk-mine-bar">
-        <span className="fbk-hint">{t("每次打开这一页时刷新。状态和回复来自维护者，已登记的反馈会跟随对应的 GitHub 议题。")}</span>
+        <span className="fbk-hint">{t("feedbackMine.refreshedEachTimeYouOpen")}</span>
         <button type="button" className="btn sm" data-action="feedback.refresh" disabled={loading} onClick={load}>
           <StudioIcon name="refresh" />
-          {t("刷新列表")}
+          {t("feedbackMine.refreshList")}
         </button>
       </div>
 
@@ -227,14 +227,14 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
       {mine && (
         <section className="fbk-account">
           <button type="button" className="btn sm" data-action="feedback.account-section" aria-expanded={account} onClick={() => setAccount((open) => !open)}>
-            {t("等级、账号与贡献榜")}
+            {t("feedbackMine.levelAccountAndLeaderboard")}
           </button>
           {account && (
             <>
               {mine.profile ? (
                 <FeedbackLevel profile={mine.profile} offline={mine.offline} />
               ) : (
-                mine.items.length > 0 && <p className="fbk-hint fbk-level-gone">{t("等级暂时无法显示。")}</p>
+                mine.items.length > 0 && <p className="fbk-hint fbk-level-gone">{t("feedbackMine.yourLevelCannotBeShown")}</p>
               )}
               <FeedbackLink port={port} hasReport={mine.items.length > 0} onBoardChanged={() => setBoardTick((n) => n + 1)} />
               <FeedbackBoard port={port} reload={boardTick} />
@@ -246,16 +246,16 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
       {mine?.offline && (
         <div className="fbk-note" role="status" data-tone="info">
           <StudioIcon name="warning" />
-          <span>{t("暂时连不上反馈服务。下面是保存在本机的记录，状态可能不是最新的。")}</span>
+          <span>{t("feedbackMine.cannotReachTheFeedbackService")}</span>
         </div>
       )}
 
-      {mine?.items.some((i) => i.otherInstall) && <p className="fbk-hint">{t("已读标记只记在这台电脑上，其他设备上的反馈在这里仍可能显示为新回复。")}</p>}
+      {mine?.items.some((i) => i.otherInstall) && <p className="fbk-hint">{t("feedbackMine.readMarksAreKeptOn")}</p>}
 
       {mine?.items.some((i) => i.statusUnavailable) && (
         <div className="fbk-note" role="status" data-tone="info">
           <StudioIcon name="warning" />
-          <span>{t("有些反馈是用这台电脑以前的身份发出的，已经查不到它们的最新状态。")}</span>
+          <span>{t("feedbackMine.someReportsWereSentUnder")}</span>
         </div>
       )}
 
@@ -263,18 +263,18 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
         <div className="fbk-note" role="alert" data-tone="error">
           <StudioIcon name="warning" />
           <span>{failure.message}</span>
-          <button type="button" className="btn sm" data-action="feedback.retry-mine" onClick={load}>{t("重试")}</button>
+          <button type="button" className="btn sm" data-action="feedback.retry-mine" onClick={load}>{t("common.retry")}</button>
         </div>
       )}
 
-      {!mine && !failure && <p className="fbk-empty" role="status">{t("正在读取你的反馈…")}</p>}
+      {!mine && !failure && <p className="fbk-empty" role="status">{t("feedbackMine.loadingYourFeedback")}</p>}
 
       {mine && mine.items.length === 0 && (
-        <p className="fbk-empty">{t("还没有提交过反馈。发出第一条之后，它的进展会出现在这里。")}</p>
+        <p className="fbk-empty">{t("feedbackMine.noFeedbackSentYetOnce")}</p>
       )}
 
       {mine && mine.items.length > 1 && !mine.items.some((i) => inGroup(i, group, fresh[i.receipt] ?? 0)) && (
-        <p className="fbk-empty">{t("这一组里没有反馈。")}</p>
+        <p className="fbk-empty">{t("feedbackMine.noReportsInThisGroup")}</p>
       )}
 
       {mine && mine.items.length > 0 && (
@@ -283,15 +283,15 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
             <li key={item.receipt} className="fbk-item" hidden={!inGroup(item, group, fresh[item.receipt] ?? 0)} tabIndex={-1} aria-label={`${item.receipt} ${snippet(item.titleSnippet)}`} data-receipt={item.receipt} data-status={item.status} data-stale={item.statusUnavailable ? "" : undefined}>
               <div className="fbk-item-hd">
                 <code className="fbk-code">{item.receipt}</code>
-                <CopyButton iconOnly text={item.receipt} label={t("复制回执号")} />
+                <CopyButton iconOnly text={item.receipt} label={t("common.copyReceiptNumber")} />
                 <span className="fbk-meta">{t(CATEGORY_LABEL[item.category])} · {day(item.createdAt)}</span>
-                {item.otherInstall && <span className="fbk-chip" data-device="other">{t("来自其他设备")}</span>}
+                {item.otherInstall && <span className="fbk-chip" data-device="other">{t("feedbackMine.fromAnotherDevice")}</span>}
                 {item.statusUnavailable ? (
-                  <span className="fbk-chip" data-status="unavailable">{t("状态已无法追踪")}</span>
+                  <span className="fbk-chip" data-status="unavailable">{t("feedbackMine.statusNoLongerTrackable")}</span>
                 ) : item.needsInput ? (
                   <span className="fbk-chip" data-status="needs_info" data-input="">
                     <StudioIcon name={STATUS_ICON.needs_info} />
-                    {t("需要你回复")}
+                    {t("common.needsYourReply")}
                   </span>
                 ) : isUnderReview(item) ? (
                   <span className="fbk-chip" data-status="received" data-review="">
@@ -306,7 +306,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
                 )}
               </div>
               <p className="fbk-snippet">{snippet(item.titleSnippet)}</p>
-              {!item.statusUnavailable && <ol className="fbk-tl" aria-label={t("处理进展")}>
+              {!item.statusUnavailable && <ol className="fbk-tl" aria-label={t("feedbackMine.progress")}>
                 {steps(item, issue).map((s) => (
                   <li key={s.id} data-state={s.state} data-tone={s.neutral ? "neutral" : undefined} aria-current={s.state === "current" ? "step" : undefined}>
                     <i aria-hidden="true" />
@@ -317,7 +317,7 @@ export function FeedbackMine({ port, onFile, onUnread }: Props) {
               </ol>}
               <FeedbackReviewNote item={item} />
               <FeedbackThread item={item} level={mine.profile?.level ?? null} fresh={fresh[item.receipt] ?? 0} onView={view} />
-              <FeedbackWithdraw port={port} item={item} onDone={() => { setSaid(t("已撤回这条反馈。")); load(); }} onStale={load} />
+              <FeedbackWithdraw port={port} item={item} onDone={() => { setSaid(t("feedbackMine.theReportWasWithdrawn")); load(); }} onStale={load} />
               <FeedbackReplyBox port={port} item={item} limit={limits?.replyBytes ?? null} limits={limits} offline={mine.offline} onSent={sent} onFile={onFile} onStale={load} />
             </li>
           ))}

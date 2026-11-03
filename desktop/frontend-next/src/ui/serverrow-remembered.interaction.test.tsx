@@ -23,7 +23,7 @@ const cached: McpEntry = {
     { name: "rewrite_file", error: "unsupported input schema", destructive: true },
   ],
 };
-const note = (stale: boolean) => t(stale ? "上次连上时的记录 · 声明改过，可能对不上了" : "上次连接时的记录");
+const note = (stale: boolean) => t(stale ? "serverRow.fromTheLastTimeIt2" : "serverRow.fromTheLastTimeIt");
 
 function draw(m: McpEntry, port: AgentPort, onDone = () => {}) {
   return <ServerRow m={m} port={port} onDone={onDone} root="/workspace" live />;
@@ -45,13 +45,13 @@ describe("a remembered MCP inventory", () => {
     const view = render(draw({ ...cached, state, stale, enabled: state !== "disabled" }, port));
     await userEvent.click(view.container.querySelector("summary")!);
     const badge = screen.getByText(note(stale));
-    expect(badge.getAttribute("title")).toBe(t("当前未连接，以下是上次连接时它返回的内容。"));
+    expect(badge.getAttribute("title")).toBe(t("serverRow.nothingIsConnectedRightNow"));
     expect(screen.getByText("find_symbol")).toBeTruthy();
     expect(screen.getByText("rewrite_file")).toBeTruthy();
     expect(screen.getByText("unsupported input schema")).toBeTruthy();
-    expect(screen.getByText(t("只读"))).toBeTruthy();
-    expect(screen.getByText(t("会修改数据"))).toBeTruthy();
-    expect(screen.getByText(t("{n} 个工具", { n: 2 }))).toBeTruthy();
+    expect(screen.getByText(t("common.readOnly"))).toBeTruthy();
+    expect(screen.getByText(t("serverRow.modifiesData"))).toBeTruthy();
+    expect(screen.getByText(t("serverRow.tools", { n: 2 }))).toBeTruthy();
     expect(reconnect).not.toHaveBeenCalled();
   });
 

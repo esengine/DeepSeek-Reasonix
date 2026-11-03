@@ -30,7 +30,7 @@ export function ProgressWatch({ port }: { port: AgentPort }) {
 
   const commit = (text: string, apply: (n: number) => void) => {
     const n = Number(text);
-    if (!Number.isInteger(n) || n < 1 || n > LIMIT) return setError(t("请输入 1 到 {n} 之间的整数。", { n: LIMIT }));
+    if (!Number.isInteger(n) || n < 1 || n > LIMIT) return setError(t("common.enterAWholeNumberFrom", { n: LIMIT }));
     apply(n);
   };
 
@@ -47,51 +47,51 @@ export function ProgressWatch({ port }: { port: AgentPort }) {
   };
 
   const body = !state ? (
-    <div className="empty">{t("无法读取无进展设置。")}</div>
+    <div className="empty">{t("progressWatch.couldNotReadTheProgress")}</div>
   ) : (
     <div className="box">
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("长时间无进展时暂停任务")}</span>
-          <span className="ds">{t("默认关闭：只在输入框上方提示，由你决定是否停止。开启后达到下面的条件会暂停任务，已完成的工作都会保留，发一条消息即可继续。")}</span>
+          <span className="lb">{t("progressWatch.pauseATaskThatStops")}</span>
+          <span className="ds">{t("progressWatch.offByDefaultANotice")}</span>
         </span>
         <Switch
           data-action="progress-watch.pause"
           on={state.pause}
           busy={busy}
-          label={t("长时间无进展时暂停任务")}
+          label={t("progressWatch.pauseATaskThatStops")}
           onClick={() => void save({ ...pick(state), pause: !state.pause })}
         />
       </div>
       <div className="lrow threshold-row">
         <span className="tx">
-          <span className="lb">{t("连续无进展轮数")}</span>
-          <span className="ds">{t("没有改动文件、没有检查或任务步骤变化、没有读到新内容、也没有子代理返回的工具轮次。默认 {n}。", { n: state.defaultRounds })}</span>
+          <span className="lb">{t("progressWatch.roundsWithoutProgress")}</span>
+          <span className="ds">{t("progressWatch.toolRoundsInARow", { n: state.defaultRounds })}</span>
         </span>
         <div className="threshold-control">
           <span className="unit-field">
-            <input type="text" inputMode="numeric" aria-label={t("连续无进展轮数")} data-action-keydown="progress-watch.rounds" data-action-change="progress-watch.rounds"
+            <input type="text" inputMode="numeric" aria-label={t("progressWatch.roundsWithoutProgress")} data-action-keydown="progress-watch.rounds" data-action-change="progress-watch.rounds"
               value={draft.rounds} disabled={busy}
               onChange={(e) => setDraft({ ...draft, rounds: digits(e.target.value) })}
               onBlur={() => commit(draft.rounds, (n) => n !== state.rounds && void save({ ...pick(state), rounds: n }))}
               onKeyDown={blurOnEnter} />
-            <i>{t("轮")}</i>
+            <i>{t("progressWatch.rounds")}</i>
           </span>
         </div>
       </div>
       <div className="lrow threshold-row">
         <span className="tx">
-          <span className="lb">{t("输入 token 上限")}</span>
-          <span className="ds">{t("与模型无关的后备：自上次有进展以来的累计输入达到上下文窗口的这个倍数时同样提示。默认 {n} 倍。", { n: state.defaultTokenMultiple })}</span>
+          <span className="lb">{t("progressWatch.inputTokenBackstop")}</span>
+          <span className="ds">{t("progressWatch.aModelIndependentBackstopThe", { n: state.defaultTokenMultiple })}</span>
         </span>
         <div className="threshold-control">
           <span className="unit-field">
-            <input type="text" inputMode="numeric" aria-label={t("输入 token 上限")} data-action-keydown="progress-watch.token-multiple" data-action-change="progress-watch.token-multiple"
+            <input type="text" inputMode="numeric" aria-label={t("progressWatch.inputTokenBackstop")} data-action-keydown="progress-watch.token-multiple" data-action-change="progress-watch.token-multiple"
               value={draft.tokenMultiple} disabled={busy}
               onChange={(e) => setDraft({ ...draft, tokenMultiple: digits(e.target.value) })}
               onBlur={() => commit(draft.tokenMultiple, (n) => n !== state.tokenMultiple && void save({ ...pick(state), tokenMultiple: n }))}
               onKeyDown={blurOnEnter} />
-            <i>{t("倍窗口")}</i>
+            <i>{t("progressWatch.window")}</i>
           </span>
         </div>
       </div>
@@ -100,8 +100,8 @@ export function ProgressWatch({ port }: { port: AgentPort }) {
   );
 
   return (
-    <Group id="progress-watch" title={t("长时间无进展")}
-      hint={t("判断只看宿主能观察到的效果，不看命令内容；提示和暂停都不会向模型发送任何内容，也不会拒绝任何调用。")}>
+    <Group id="progress-watch" title={t("common.longStretchesWithoutProgress")}
+      hint={t("progressWatch.judgedOnlyFromEffectsThe")}>
       {body}
     </Group>
   );

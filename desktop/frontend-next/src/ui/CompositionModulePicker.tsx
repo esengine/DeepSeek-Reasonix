@@ -66,33 +66,33 @@ export function CompositionModulePicker({ kind, label, choices, members, disable
     event.preventDefault();
     rows[at < 0 ? event.key === "ArrowDown" ? 0 : rows.length - 1 : (at + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length]?.focus();
   };
-  const name = `${label} ${t("添加模块")}`;
+  const name = `${label} ${t("compositionModulePicker.addModule")}`;
   return <>
     <button ref={trigger} type="button" className="composition-module-trigger" data-action="agent-preset.module-choose" data-target={kind}
       aria-label={name} aria-haspopup="dialog" aria-expanded={visible} aria-controls={visible ? id : undefined} disabled={disabled}
       onClick={() => { if (visible) close(); else { setQuery(""); setOpen(true); } }}>
-      <span>{t("添加模块")} · {t("已选 {n} 项", { n: members.length })}</span><StudioIcon name="down" />
+      <span>{t("compositionModulePicker.addModule")} · {t("compositionModulePicker.selected", { n: members.length })}</span><StudioIcon name="down" />
     </button>
     {visible && createPortal(<div id={id} ref={panel} className="composition-module-picker" role="dialog" aria-label={name} aria-modal="true"
       data-action-keydown="agent-preset.module-navigate" onKeyDown={navigate}>
       <div className="composition-picker-tools">
         <label className="composition-select-all"><input ref={all} type="checkbox" checked={shown.length > 0 && count === shown.length} disabled={!shown.length}
           data-action-change="agent-preset.module-select-all" data-target={kind} onChange={event => toggle(shown, event.target.checked)} />
-          {t(needle ? "全选搜索结果（{n} 项）" : "全选（{n} 项）", { n: shown.length })}</label>
-        <button type="button" className="composition-picker-action" disabled={!members.length} data-action="agent-preset.module-clear" data-target={kind} onClick={() => onChange([])}>{t("清空")}</button>
+          {t(needle ? "compositionModulePicker.selectAllResults" : "compositionModulePicker.selectAll", { n: shown.length })}</label>
+        <button type="button" className="composition-picker-action" disabled={!members.length} data-action="agent-preset.module-clear" data-target={kind} onClick={() => onChange([])}>{t("common.clear2")}</button>
       </div>
-      <div className="composition-picker-search"><StudioIcon name="search" /><input ref={search} type="search" aria-label={t("搜索模块")} placeholder={t("搜索模块名称或说明…")}
+      <div className="composition-picker-search"><StudioIcon name="search" /><input ref={search} type="search" aria-label={t("compositionModulePicker.searchModules")} placeholder={t("compositionModulePicker.searchModuleNamesOrDescriptions")}
         data-action-change="agent-preset.module-search" data-target={kind} value={query} onChange={event => setQuery(event.target.value)} /></div>
       <div className="composition-picker-list">
         {(["builtin", "custom", "unknown"] as const).map(source => {
           const items = shown.filter(choice => (choice.source === "builtin" || choice.source === "custom" ? choice.source : "unknown") === source);
           if (!items.length) return null;
           const chosen = items.filter(item => selected.has(item.id)).length;
-          const group = t(source === "builtin" ? "内置" : source === "custom" ? "自定义" : "未分类");
+          const group = t(source === "builtin" ? "common.builtIn" : source === "custom" ? "common.custom" : "compositionModulePicker.unclassified");
           return <div role="group" aria-label={group} className="composition-picker-group" key={source}>
-            <div className="composition-picker-group-heading"><strong>{group}</strong><small>{t("已选 {selected}/{total}", { selected: chosen, total: items.length })}</small>
+            <div className="composition-picker-group-heading"><strong>{group}</strong><small>{t("compositionModulePicker.selected2", { selected: chosen, total: items.length })}</small>
               <button type="button" className="composition-picker-action" data-action="agent-preset.module-select-group" data-target={`${kind}:${source}`}
-                onClick={() => toggle(items, chosen !== items.length)}>{t(chosen === items.length ? "取消本组全选" : "全选本组")}</button></div>
+                onClick={() => toggle(items, chosen !== items.length)}>{t(chosen === items.length ? "compositionModulePicker.deselectGroup" : "compositionModulePicker.selectGroup")}</button></div>
             {items.map((item, index) => <label key={item.id} className="composition-choice">
               <input type="checkbox" aria-label={item.id} aria-describedby={item.description ? `${id}-${source}-${index}` : undefined} checked={selected.has(item.id)}
                 data-action-change="agent-preset.module-toggle" data-target={`${kind}:${item.id}`} onChange={event => toggle([item], event.target.checked)} />
@@ -101,11 +101,11 @@ export function CompositionModulePicker({ kind, label, choices, members, disable
             </label>)}
           </div>;
         })}
-        {!shown.length && <p className="composition-picker-empty">{t(unique.length ? "没有匹配的模块" : "暂无可选模块")}</p>}
+        {!shown.length && <p className="composition-picker-empty">{t(unique.length ? "compositionModulePicker.noMatchingModules" : "compositionModulePicker.noModulesAvailable")}</p>}
       </div>
-      <div className="composition-picker-footer"><span aria-live="polite">{t("已选 {n} 项", { n: members.length })}</span>
-        <button type="button" className="btn" data-primary="" data-action="agent-preset.module-done" onClick={close}>{t("完成")}</button></div>
-      <p className="composition-picker-note">{t("全选仅包含当前列表；新增模块不会自动选中。")}</p>
+      <div className="composition-picker-footer"><span aria-live="polite">{t("compositionModulePicker.selected", { n: members.length })}</span>
+        <button type="button" className="btn" data-primary="" data-action="agent-preset.module-done" onClick={close}>{t("common.done2")}</button></div>
+      <p className="composition-picker-note">{t("compositionModulePicker.selectAllIncludesCurrentResults")}</p>
     </div>, document.body)}
   </>;
 }

@@ -56,7 +56,7 @@ export function AgentRunView({ port, run, shown }: { port: AgentPort; run: Pick<
         {status && <span className="rt">{status}</span>}
       </div>
       {failed && <div className="workbench-error" role="alert">{failed}</div>}
-      {!failed && !info && <div className="workbench-empty">{t("正在读取…")}</div>}
+      {!failed && !info && <div className="workbench-empty">{t("common.loading")}</div>}
       {info && (
         <Transcript items={items} {...none} scroll={scroll} revision={messages.length} hidden={false} focus={null} onApprove={noop} onFullAccess={noop} onPlan={noop} onAnswer={noop} onForget={noop}
           onExtSubmit={noop} onPrepareRewind={noop} onCommitRewind={noop} onPrepareFileRevert={noop} onCommitFileRevert={noop} port={port} turnRunning={info.state === "running"} />

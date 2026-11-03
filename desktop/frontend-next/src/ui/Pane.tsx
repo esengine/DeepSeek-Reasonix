@@ -433,7 +433,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       ? old : { port, scope: previewScope, path });
   }, [port, previewScope]);
   const activeFile = visible && workbench && previewFile?.port === port && previewFile.scope === previewScope ? previewFile.path : undefined;
-  const { quote, reply, onResend } = useReplyActions({ port, items: s.items, checkpoints, running, model: status?.label, submit: (line) => submit(line).then((r) => r === true), reloadSession, onSettings, onRunDetail, onError: fail, branchName: `${title} · ${t("分支")}`, onBranched: onOpenSession });
+  const { quote, reply, onResend } = useReplyActions({ port, items: s.items, checkpoints, running, model: status?.label, submit: (line) => submit(line).then((r) => r === true), reloadSession, onSettings, onRunDetail, onError: fail, branchName: `${title} · ${t("common.branch")}`, onBranched: onOpenSession });
   const fileReply = useMemo(() => ({
     ...reply, files: conversationFiles.refs, activeFile,
     onAddFile: (reference: string) => setInserted((was) => ({ n: was.n + 1, text: reference })),
@@ -562,7 +562,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       {/* The workbench keeps pages and open files mounted across view changes;
           the divider remains reachable when the split column is closed. */}
       {tab === "flow" && browserSize.size === "split" && (
-        <Gutter edge="r" span={DOCK} width={dockW} max={dockMax} label={t("调整浏览器宽度")} open={docked}
+        <Gutter edge="r" span={DOCK} width={dockW} max={dockMax} label={t("pane.resizeTheBrowser")} open={docked}
           onWidth={onDockW} onOpen={(on) => onManualBrowser?.(on)} />
       )}
       <div className="scroll" data-pane="browser" hidden={tab === "analysis"} inert={!workbench}>
@@ -600,7 +600,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         {/* Everything stacked above the input box shares one ceiling, so no
             child of this region may grow without bound. */}
         <PlanFold plan={s.plan} goal={status?.goal} goalStatus={status?.goalStatus} goalRuntime={status?.goalRuntime} shown={tab === "flow"} paused={blocked} />
-        {tab === "flow" && <RunLine label={worktreePhase ? t(["failed", "cleanup_failed"].includes(worktreePhase) ? "创建失败" : worktreePhase === "cancelled" ? "创建已取消" : "准备工作目录") : chipLabel(s, running)} running={running} blocked={blocked} since={s.running ? s.runSince : undefined} sent={sent} received={received} estimated={s.outLive > 0}>
+        {tab === "flow" && <RunLine label={worktreePhase ? t(["failed", "cleanup_failed"].includes(worktreePhase) ? "pane.creationFailed" : worktreePhase === "cancelled" ? "pane.creationCancelled" : "pane.preparingWorkspace") : chipLabel(s, running)} running={running} blocked={blocked} since={s.running ? s.runSince : undefined} sent={sent} received={received} estimated={s.outLive > 0}>
           <AgentCompositionPicker port={port} binding={status?.agentComposition} locked={status?.agentCompositionLocked} running={running} onChanged={refreshStatus} onSettings={() => onSettings("persona")} onError={notify} />
         </RunLine>}
         <div className="composeaux">
@@ -656,7 +656,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           {s.error && (
             <ErrorBar text={s.error} onDismiss={() => dispatch({ kind: "__error", text: "" } as never)} onReport={onFeedback} />
           )}
-          <RuntimeBar notices={s.runtime} onSettings={onSettings} onSeen={(id) => dispatch({ kind: "__runtime_seen", id } as never)} watch={s} onStall={(a) => a === "stop" ? void port.cancel().catch(fail) : a === "continue" ? void submit(t("继续")) : dispatch({ kind: a === "mute" ? "__stall_mute" : "__stall_dismiss" } as never)} />
+          <RuntimeBar notices={s.runtime} onSettings={onSettings} onSeen={(id) => dispatch({ kind: "__runtime_seen", id } as never)} watch={s} onStall={(a) => a === "stop" ? void port.cancel().catch(fail) : a === "continue" ? void submit(t("common.continue")) : dispatch({ kind: a === "mute" ? "__stall_mute" : "__stall_dismiss" } as never)} />
         </div>
       </div>
 

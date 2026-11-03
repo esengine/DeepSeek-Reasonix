@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { MODS_SHOWN } from "./modsgate";
-import { t } from "../i18n";
+import { t, zh } from "../i18n";
 
 /** The settings table of contents: which sections exist, what each is called,
  *  what mark it carries and which question it answers. Kept out of Settings
@@ -104,40 +104,40 @@ export const ICON: Record<Section, ReactNode> = {
 // aim at.
 export const NAV: [string, [Section, string][]][] = [
   [
-    "本轮执行",
+    "common.thisTurn",
     [
-      ["session", "会话"],
-      ["persona", "人设"],
-      ["model", "模型偏好"],
-      ["providers", "模型服务"],
-      ["tools", "工具与权限"],
-      ["peers", "会话间消息"],
-      ["hooks", "自动化"],
-      ["ext", "扩展"],
+      ["session", "common.session"],
+      ["persona", "prefsnav.persona"],
+      ["model", "prefsnav.modelPreferences"],
+      ["providers", "common.modelServices"],
+      ["tools", "common.toolsAndPermissions"],
+      ["peers", "prefsnav.sessionMessages"],
+      ["hooks", "common.automation"],
+      ["ext", "common.extension"],
     ],
   ],
   [
-    "运行环境",
+    "common.whereItRuns",
     [
-      ["network", "网络"],
-      ["remote", "远程"],
-      ["storage", "存储"],
+      ["network", "common.network"],
+      ["remote", "common.remote"],
+      ["storage", "common.storage"],
     ],
   ],
   [
-    "记录与用量",
+    "prefsnav.whatItRemembers",
     [
-      ["memory", "记忆"],
-      ["usage", "用量"],
+      ["memory", "common.memory2"],
+      ["usage", "common.usage"],
     ],
   ],
   [
-    "这台机器",
+    "prefsnav.thisMachine",
     [
-      ["account", "账号"],
-      ["versions", "版本"],
-      ["appearance", "外观"],
-      ["advanced", "高级"],
+      ["account", "common.account"],
+      ["versions", "common.version"],
+      ["appearance", "prefsnav.appearance"],
+      ["advanced", "prefsnav.advanced"],
     ],
   ],
 ];
@@ -217,132 +217,132 @@ export const SETTINGS: SettingEntry[] = [
   // sessions, but Studio presents one adaptive completion standard. Asking
   // people to predict the amount of verification before writing the task made
   // an internal policy look like a required work mode.
-  { section: "session", anchor: "preset", title: "完成标准", scope: "session", apply: "immediate", keywords: ["自动", "验证", "复核", "完成判定"] },
-  { section: "session", anchor: "plan-mode", title: "计划模式", scope: "session", apply: "immediate", keywords: ["只读", "先规划"] },
-  { section: "session", anchor: "default-mode", title: "新对话的起始模式", scope: "machine", apply: "on-open", keywords: ["plan", "默认模式", "协作方式", "default_mode", "新会话"] },
-  { section: "session", anchor: "receipt", title: "交付验收卡片", scope: "machine", apply: "immediate", keywords: ["回执", "验收", "验证", "未验证", "receipt"] },
+  { section: "session", anchor: "preset", title: "common.completionStandard", scope: "session", apply: "immediate", keywords: ["common.auto", "common.verify", "common.review", "完成判定"] },
+  { section: "session", anchor: "plan-mode", title: "common.planMode", scope: "session", apply: "immediate", keywords: ["common.readOnly", "先规划"] },
+  { section: "session", anchor: "default-mode", title: "common.howNewConversationsStart", scope: "machine", apply: "on-open", keywords: ["plan", "默认模式", "协作方式", "default_mode", "common.newSession"] },
+  { section: "session", anchor: "receipt", title: "common.deliveryReceiptCard", scope: "machine", apply: "immediate", keywords: ["回执", "验收", "common.verify", "prefsnav.notVerified", "receipt"] },
   // Written to the user file only, and read by the running turn at its next round.
-  { section: "session", anchor: "ask-timeout", title: "提问等待超时", scope: "machine", apply: "immediate", keywords: ["ask", "跳过", "无人回答", "长任务", "超时", "自动继续"] },
-  { section: "session", anchor: "session-ref", title: "引用历史会话的长度", scope: "machine", apply: "immediate", keywords: ["引用", "历史会话", "过往会话", "上下文", "长度", "token", "session"] },
-  { section: "ext", anchor: "mods", title: "Claude Code mod", scope: "machine", apply: "on-open", hidden: !MODS_SHOWN, keywords: ["mod", "钩子", "hook", "Claude Code", "完全信任", "插件", "扩展"] },
-  { section: "session", anchor: "progress-watch", title: "长时间无进展", scope: "machine", apply: "immediate", keywords: ["暂停", "无进展", "空转", "卡住", "循环", "轮次", "token"] },
-  { section: "session", anchor: "changed-files", title: "文件改动", scope: "machine", apply: "immediate", keywords: ["改动", "变更", "文件", "已更改", "药丸", "输入框"] },
-  { section: "session", anchor: "feedback-level-notices", title: "等级提示", scope: "machine", apply: "immediate", keywords: ["等级", "晋级", "升级", "反馈", "提示"] },
-  { section: "session", anchor: "turn-narration", title: "回合间叙述", scope: "machine", apply: "immediate", keywords: ["叙述", "总结", "小轮", "工具之间", "详细", "简短", "思路", "监控", "narration"] },
-  { section: "session", anchor: "fold-work", title: "折叠中间过程", scope: "machine", apply: "immediate", keywords: ["折叠", "中间过程", "工具调用", "思考", "最后一句", "收起", "摘要"] },
+  { section: "session", anchor: "ask-timeout", title: "common.questionWaitTime", scope: "machine", apply: "immediate", keywords: ["ask", "common.skipped", "无人回答", "长任务", "超时", "自动继续"] },
+  { section: "session", anchor: "session-ref", title: "common.sizeOfAReferencedConversation", scope: "machine", apply: "immediate", keywords: ["引用", "历史会话", "过往会话", "common.context", "长度", "token", "session"] },
+  { section: "ext", anchor: "mods", title: "Claude Code mod", scope: "machine", apply: "on-open", hidden: !MODS_SHOWN, keywords: ["mod", "钩子", "hook", "Claude Code", "完全信任", "common.plugins", "common.extension"] },
+  { section: "session", anchor: "progress-watch", title: "common.longStretchesWithoutProgress", scope: "machine", apply: "immediate", keywords: ["common.pause", "无进展", "空转", "卡住", "循环", "轮次", "token"] },
+  { section: "session", anchor: "changed-files", title: "common.fileChanges", scope: "machine", apply: "immediate", keywords: ["common.changes", "变更", "common.files2", "已更改", "药丸", "输入框"] },
+  { section: "session", anchor: "feedback-level-notices", title: "common.levelNotices", scope: "machine", apply: "immediate", keywords: ["等级", "晋级", "升级", "common.feedback", "common.notice"] },
+  { section: "session", anchor: "turn-narration", title: "common.narrationBetweenToolCalls", scope: "machine", apply: "immediate", keywords: ["叙述", "总结", "小轮", "工具之间", "common.detailed", "common.brief", "思路", "监控", "narration"] },
+  { section: "session", anchor: "fold-work", title: "common.foldTheWorkInBetween", scope: "machine", apply: "immediate", keywords: ["折叠", "common.workInBetween", "工具调用", "思考", "最后一句", "common.collapse", "common.summary"] },
   // Written to the user file only; the kernel's background sweep reads it on each pass.
-  { section: "session", anchor: "auto-archive", title: "自动归档不活跃的对话", scope: "machine", apply: "immediate", keywords: ["归档", "过期", "清理", "闲置", "天数"] },
-  { section: "persona", anchor: "composition-picker", title: "显示模式选择器", scope: "machine", apply: "immediate", keywords: ["预设", "模式", "picker", "Agent"] },
+  { section: "session", anchor: "auto-archive", title: "common.autoArchiveInactiveConversations", scope: "machine", apply: "immediate", keywords: ["common.archived", "过期", "清理", "闲置", "天数"] },
+  { section: "persona", anchor: "composition-picker", title: "common.showModePicker", scope: "machine", apply: "immediate", keywords: ["common.presets", "模式", "picker", "Agent"] },
   // Explicit selections bind immutable versions; catalog saves do not rebuild.
-  { section: "persona", anchor: "agent-presets", title: "Agent 预设", scope: "machine", apply: "on-open", keywords: ["预设", "组合", "Agent"] },
-  { section: "persona", anchor: "persona", title: "系统人设", scope: "machine", apply: "next-rebuild", keywords: ["人设", "persona", "身份", "提示词", "系统提示词", "前缀", "后缀"] },
-  { section: "session", anchor: "session-dir", title: "会话写入位置", scope: "workspace", apply: "none", keywords: ["工作目录", "路径"] },
+  { section: "persona", anchor: "agent-presets", title: "common.agentPresets", scope: "machine", apply: "on-open", keywords: ["common.presets", "组合", "Agent"] },
+  { section: "persona", anchor: "persona", title: "common.systemPersona", scope: "machine", apply: "next-rebuild", keywords: ["prefsnav.persona", "persona", "身份", "提示词", "系统提示词", "前缀", "后缀"] },
+  { section: "session", anchor: "session-dir", title: "common.whereThisSessionWrites", scope: "workspace", apply: "none", keywords: ["common.workingDirectory", "路径"] },
 
-  { section: "model", anchor: "model", title: "按用途选择模型", scope: "machine", apply: "runtime-rebuild", keywords: ["主模型", "默认模型", "模型", "切换", "端点", "按任务指定模型", "角色分工", "子代理", "规划", "看图", "复核", "决策", "网页搜索", "web search", "system one", "typesafe", "laya", "自动命名", "思考强度", "推理", "reasoning", "档位"] },
+  { section: "model", anchor: "model", title: "common.modelsByUse", scope: "machine", apply: "runtime-rebuild", keywords: ["prefsnav.primaryModel", "common.defaultModel", "common.models", "切换", "端点", "prefsnav.modelsByTask", "prefsnav.roles", "common.subagents2", "common.planning", "common.vision", "common.review", "common.decision", "common.webSearch2", "web search", "system one", "typesafe", "laya", "common.autoName", "common.effort", "prefsnav.reasoning", "reasoning", "档位"] },
   // Machine-wide despite sitting on the model page, and the clearest case for
   // not reading scope off a section: the economic threshold is one
   // [agent] key in the user config that every session on this computer reads.
-  { section: "model", anchor: "context", title: "上下文维护", scope: "machine", apply: "runtime-rebuild", keywords: ["上下文窗口", "压缩", "compaction"] },
+  { section: "model", anchor: "context", title: "common.contextMaintenance", scope: "machine", apply: "runtime-rebuild", keywords: ["common.contextWindow", "common.compaction", "compaction"] },
   // Adding a source does not rebuild; changing which protocol a source is
   // reached through switches the model, and that does. The stronger of the two
   // is what the row promises, because the weaker one would be a promise this
   // block cannot keep.
-  { section: "providers", anchor: "providers", title: "模型服务", scope: "machine", apply: "runtime-rebuild", keywords: ["模型来源", "连接", "提供商", "供应商", "api key", "密钥", "协议", "地址"] },
-  { section: "providers", anchor: "provider-health", title: "自动检测连接与余额", scope: "machine", apply: "immediate", keywords: ["检测", "余额", "连接", "health", "balance"] },
+  { section: "providers", anchor: "providers", title: "common.modelServices", scope: "machine", apply: "runtime-rebuild", keywords: ["模型来源", "common.connections", "提供商", "供应商", "api key", "密钥", "common.protocol2", "common.address"] },
+  { section: "providers", anchor: "provider-health", title: "common.automaticallyCheckConnectionsAndBala", scope: "machine", apply: "immediate", keywords: ["检测", "余额", "common.connections", "health", "balance"] },
 
   // Takes effect on this session at once and is also persisted as the default
   // every later session starts from. Machine is the wider of the two answers
   // and the one a reader cannot see from the screen.
-  { section: "tools", anchor: "approval", title: "工具批准", scope: "machine", apply: "immediate", keywords: ["权限", "yolo", "询问", "放行"] },
-  { section: "tools", anchor: "present-files", title: "AI 文件交付卡片", scope: "machine", apply: "on-open", keywords: ["文件交付", "交付卡片", "文件预览", "present_files", "tools.present_files", "PDF", "CSV", "HTML", "file delivery", "preview"] },
-  { section: "tools", anchor: "external-origin", title: "外部文字", scope: "machine", apply: "runtime-rebuild", keywords: ["外部", "网页", "来源", "注入", "提示注入", "origin", "yolo", "auto", "询问"] },
-  { section: "tools", anchor: "plan-approval", title: "计划批准", scope: "machine", apply: "immediate", keywords: ["plan", "自动批准", "长任务", "无人值守", "plan_approval", "放行", "询问"] },
-  { section: "tools", anchor: "tool-list", title: "模型可用的工具", scope: "machine", apply: "on-open", keywords: ["禁用", "关闭工具", "tools.disabled", "省 token", "提示词开销", "web_fetch", "denylist"] },
-  { section: "tools", anchor: "rules", title: "明确的规则", scope: "machine", apply: "runtime-rebuild", keywords: ["permissions", "允许", "拒绝", "配方"] },
-  { section: "tools", anchor: "sandbox", title: "沙箱", scope: "machine", apply: "runtime-rebuild", keywords: ["隔离", "联网", "写权限", "ssh-agent"] },
-  { section: "tools", anchor: "shell", title: "命令执行程序", scope: "machine", apply: "runtime-rebuild", keywords: ["bash", "powershell", "解释器"] },
+  { section: "tools", anchor: "approval", title: "common.toolApprovals", scope: "machine", apply: "immediate", keywords: ["prefsnav.grant", "yolo", "common.ask", "common.allow"] },
+  { section: "tools", anchor: "present-files", title: "common.aIFileDeliveryCards", scope: "machine", apply: "on-open", keywords: ["文件交付", "交付卡片", "文件预览", "present_files", "tools.present_files", "PDF", "CSV", "HTML", "file delivery", "preview"] },
+  { section: "tools", anchor: "external-origin", title: "common.outsideText", scope: "machine", apply: "runtime-rebuild", keywords: ["外部", "网页", "common.source", "注入", "提示注入", "origin", "yolo", "auto", "common.ask"] },
+  { section: "tools", anchor: "plan-approval", title: "common.planApproval", scope: "machine", apply: "immediate", keywords: ["plan", "common.autoApprove", "长任务", "无人值守", "plan_approval", "common.allow", "common.ask"] },
+  { section: "tools", anchor: "tool-list", title: "common.toolsTheModelCanUse", scope: "machine", apply: "on-open", keywords: ["禁用", "关闭工具", "tools.disabled", "省 token", "提示词开销", "web_fetch", "denylist"] },
+  { section: "tools", anchor: "rules", title: "common.rulesYouSpellOut", scope: "machine", apply: "runtime-rebuild", keywords: ["permissions", "允许", "common.refuse", "配方"] },
+  { section: "tools", anchor: "sandbox", title: "common.sandbox", scope: "machine", apply: "runtime-rebuild", keywords: ["common.isolated", "联网", "写权限", "ssh-agent"] },
+  { section: "tools", anchor: "shell", title: "common.whichProgramRunsCommands", scope: "machine", apply: "runtime-rebuild", keywords: ["bash", "powershell", "解释器"] },
   // The tools are bound while a runtime is assembled, and the save rebuilds this
   // one. The shared [browser] enabled key belongs to the 1.x command line.
   // The lease is built with the session and a rebuild adopts the one it holds, so
   // the save reaches only sessions opened afterwards; the handler rebuilds nothing.
-  { section: "peers", anchor: "peers", title: "会话间消息（实验）", scope: "machine", apply: "next-turn", keywords: ["peer", "会话间", "消息", "发送", "批准", "挂起", "另一个会话"] },
-  { section: "peers", anchor: "peer-projects", title: "放行的项目", scope: "machine", apply: "next-turn", keywords: ["放行", "项目", "不再询问", "长期", "撤销", "peer", "release", "会话间"] },
-  { section: "tools", anchor: "write-lease", title: "多个会话同时写一个项目", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "等待"] },
-  { section: "tools", anchor: "subagent-claims", title: "子代理的写入范围", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "子代理", "并发", "write_paths", "乐观", "optimistic", "写锁"] },
-  { section: "network", anchor: "trace-export", title: "追踪导出", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
-  { section: "tools", anchor: "web-access", title: "联网：搜索与抓取", scope: "machine", apply: "on-open", keywords: ["搜索", "searxng", "deepseek", "抓取", "计费", "付费", "web search", "fetch"] },
-  { section: "tools", anchor: "browser-tools", title: "内置浏览器", scope: "machine", apply: "runtime-rebuild", keywords: ["browser", "网页", "chrome", "浏览器工具"] },
+  { section: "peers", anchor: "peers", title: "common.messagesBetweenSessionsExperimental", scope: "machine", apply: "next-turn", keywords: ["peer", "会话间", "消息", "common.send", "批准", "挂起", "另一个会话"] },
+  { section: "peers", anchor: "peer-projects", title: "common.projectsAllowedThrough", scope: "machine", apply: "next-turn", keywords: ["common.allow", "common.project", "不再询问", "长期", "common.revoke", "peer", "release", "会话间"] },
+  { section: "tools", anchor: "write-lease", title: "common.severalSessionsWritingOneProject", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "prefsnav.waitingOn"] },
+  { section: "tools", anchor: "subagent-claims", title: "common.subAgentWriteScope", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "common.subagents2", "并发", "write_paths", "乐观", "optimistic", "写锁"] },
+  { section: "network", anchor: "trace-export", title: "common.traceExport", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
+  { section: "tools", anchor: "web-access", title: "common.webSearchAndFetch", scope: "machine", apply: "on-open", keywords: ["common.search", "searxng", "deepseek", "抓取", "计费", "付费", "web search", "fetch"] },
+  { section: "tools", anchor: "browser-tools", title: "common.builtInBrowser", scope: "machine", apply: "runtime-rebuild", keywords: ["browser", "网页", "chrome", "浏览器工具"] },
   // The four blocks below carry a scope control of their own, and the kernel
   // takes that choice as a parameter — hook.Scope, McpInstallScope, the skill
   // activation scope, a memory's project/global flag. Naming one authority here
   // would be wrong whenever the reader picks the other.
-  { section: "hooks", anchor: "scheduled-runs", title: "定时运行", scope: "machine", apply: "immediate", keywords: ["定时", "计划", "任务", "每天", "schedule", "cron", "unattended", "无人值守"] },
-  { section: "hooks", anchor: "hooks", title: "自动化", scope: "chosen", apply: "immediate", keywords: ["钩子", "hook", "触发"] },
+  { section: "hooks", anchor: "scheduled-runs", title: "common.scheduledRuns", scope: "machine", apply: "immediate", keywords: ["common.scheduled", "common.plan", "prefsnav.task", "common.everyDay", "schedule", "cron", "unattended", "无人值守"] },
+  { section: "hooks", anchor: "hooks", title: "common.automation", scope: "chosen", apply: "immediate", keywords: ["钩子", "hook", "触发"] },
 
-  { section: "ext", anchor: "ext-runtime", title: "运行时", scope: "session", apply: "immediate", keywords: ["扩展", "沙盒"] },
-  { section: "ext", anchor: "market", title: "社区市场", scope: "machine", apply: "immediate", keywords: ["市场", "market", "社区", "发现", "下载", "发布", "publish", "主题"] },
-  { section: "ext", anchor: "plugins", title: "插件包", scope: "machine", apply: "immediate", keywords: ["安装"] },
-  { section: "ext", anchor: "mcp", title: "外部工具", scope: "chosen", apply: "immediate", keywords: ["mcp", "服务器", "连接外部"] },
-  { section: "ext", anchor: "skills", title: "技能", scope: "chosen", apply: "immediate", keywords: ["skill", "技能包"] },
+  { section: "ext", anchor: "ext-runtime", title: "common.runtime", scope: "session", apply: "immediate", keywords: ["common.extension", "prefsnav.sandbox"] },
+  { section: "ext", anchor: "market", title: "common.communityMarket", scope: "machine", apply: "immediate", keywords: ["市场", "market", "社区", "common.discover", "common.download", "common.publish", "publish", "common.theme"] },
+  { section: "ext", anchor: "plugins", title: "common.pluginPackages", scope: "machine", apply: "immediate", keywords: ["common.install"] },
+  { section: "ext", anchor: "mcp", title: "common.externalTools", scope: "chosen", apply: "immediate", keywords: ["mcp", "common.server", "连接外部"] },
+  { section: "ext", anchor: "skills", title: "common.skills2", scope: "chosen", apply: "immediate", keywords: ["skill", "技能包"] },
 
-  { section: "network", anchor: "network", title: "网络", scope: "machine", apply: "immediate", keywords: ["代理", "proxy", "抓取", "超时"] },
-  { section: "remote", anchor: "remote", title: "远程", scope: "machine", apply: "immediate", keywords: ["ssh", "机器", "远端工作区"] },
+  { section: "network", anchor: "network", title: "common.network", scope: "machine", apply: "immediate", keywords: ["common.proxy", "proxy", "抓取", "超时"] },
+  { section: "remote", anchor: "remote", title: "common.remote", scope: "machine", apply: "immediate", keywords: ["ssh", "common.machine", "远端工作区"] },
   // Machine rather than session: the door is this window's, and a phone that
   // walks through it reaches every pane. Nothing is written, so nothing outlives
   // the window either.
-  { section: "remote", anchor: "phone", title: "手机访问", scope: "machine", apply: "immediate", keywords: ["手机", "扫码", "二维码", "局域网", "配对", "phone", "mobile", "qr"] },
-  { section: "remote", anchor: "phone-notify", title: "手机通知", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "批准", "push", "notification", "phone"] },
-  { section: "remote", anchor: "phone-device", title: "这台手机的提醒", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "push", "notification"] },
-  { section: "account", anchor: "account", title: "账号", scope: "account", apply: "immediate", keywords: ["登录", "社区"] },
+  { section: "remote", anchor: "phone", title: "common.phoneAccess", scope: "machine", apply: "immediate", keywords: ["手机", "扫码", "二维码", "局域网", "配对", "phone", "mobile", "qr"] },
+  { section: "remote", anchor: "phone-notify", title: "common.phoneNotifications", scope: "machine", apply: "immediate", keywords: ["common.push", "common.notify", "手机", "批准", "push", "notification", "phone"] },
+  { section: "remote", anchor: "phone-device", title: "common.thisPhoneSReminders", scope: "machine", apply: "immediate", keywords: ["common.push", "common.notify", "手机", "push", "notification"] },
+  { section: "account", anchor: "account", title: "common.account", scope: "account", apply: "immediate", keywords: ["common.signIn", "社区"] },
   // Shown only while signed in; restoring writes through the ordinary config paths and reloads the runtime.
-  { section: "account", anchor: "backup-file", title: "导出与导入配置", scope: "machine", apply: "immediate", keywords: ["备份", "导出", "导入", "换机", "迁移", "文件"] },
-  { section: "account", anchor: "backup", title: "云备份", scope: "account", apply: "immediate", keywords: ["备份", "恢复", "换机", "同步", "导出"] },
-  { section: "versions", anchor: "versions", title: "版本", scope: "machine", apply: "immediate", keywords: ["更新", "升级"] },
-  { section: "versions", anchor: "update-mode", title: "更新方式", scope: "machine", apply: "immediate", keywords: ["自动更新", "检查更新", "更新提醒", "后台", "update", "auto update", "notify", "自动下载", "download"] },
-  { section: "versions", anchor: "logs", title: "日志与异常退出记录", scope: "machine", apply: "none", keywords: ["日志", "崩溃", "闪退", "异常退出", "log", "logs", "crash", "路径"] },
-  { section: "versions", anchor: "community", title: "社区与贡献者", scope: "machine", apply: "none", keywords: ["社区", "交流群", "QQ", "加群", "二维码", "discord", "贡献者", "contributors", "community"] },
-  { section: "versions", anchor: "sponsor", title: "赞助", scope: "machine", apply: "none", keywords: ["捐助", "支付宝", "微信支付", "收款码", "paypal", "donate", "sponsor", "support", "alipay", "wechat"] },
-  { section: "memory", anchor: "memory", title: "记忆", scope: "chosen", apply: "immediate", keywords: ["记住", "忘记", "事实"] },
-  { section: "usage", anchor: "currency", title: "费用显示币种", scope: "machine", apply: "immediate", keywords: ["币种", "货币", "人民币", "美元", "currency", "CNY", "USD", "汇率"] },
-  { section: "usage", anchor: "upload-usage", title: "上传量", scope: "machine", apply: "none", keywords: ["流量", "上传", "带宽", "请求", "upload", "traffic", "bandwidth"] },
-  { section: "usage", anchor: "usage", title: "用量与成本", scope: "machine", apply: "none", keywords: ["token", "花费", "缓存命中"] },
-  { section: "storage", anchor: "storage", title: "存储", scope: "machine", apply: "restart", keywords: ["搬家", "迁移", "磁盘", "位置"] },
-  { section: "advanced", anchor: "elsewhere", title: "本版本尚未提供", scope: "machine", apply: "none", keywords: ["配置文件"] },
+  { section: "account", anchor: "backup-file", title: "common.exportAndImportConfig", scope: "machine", apply: "immediate", keywords: ["备份", "common.export", "导入", "换机", "common.migrate", "common.files2"] },
+  { section: "account", anchor: "backup", title: "common.cloudBackup", scope: "account", apply: "immediate", keywords: ["备份", "common.resume", "换机", "同步", "common.export"] },
+  { section: "versions", anchor: "versions", title: "common.version", scope: "machine", apply: "immediate", keywords: ["common.update", "升级"] },
+  { section: "versions", anchor: "update-mode", title: "common.updateMode", scope: "machine", apply: "immediate", keywords: ["自动更新", "检查更新", "更新提醒", "后台", "update", "auto update", "notify", "common.download2", "download"] },
+  { section: "versions", anchor: "logs", title: "common.logsAndAbnormalExitRecords", scope: "machine", apply: "none", keywords: ["日志", "崩溃", "闪退", "异常退出", "log", "logs", "crash", "路径"] },
+  { section: "versions", anchor: "community", title: "common.communityAndContributors", scope: "machine", apply: "none", keywords: ["社区", "交流群", "QQ", "加群", "二维码", "discord", "common.contributors", "contributors", "community"] },
+  { section: "versions", anchor: "sponsor", title: "common.supportTheProject", scope: "machine", apply: "none", keywords: ["捐助", "common.alipay", "common.weChatPay", "收款码", "paypal", "donate", "sponsor", "support", "alipay", "wechat"] },
+  { section: "memory", anchor: "memory", title: "common.memory2", scope: "chosen", apply: "immediate", keywords: ["记住", "common.forget", "事实"] },
+  { section: "usage", anchor: "currency", title: "common.costDisplayCurrency", scope: "machine", apply: "immediate", keywords: ["币种", "货币", "人民币", "美元", "currency", "CNY", "USD", "汇率"] },
+  { section: "usage", anchor: "upload-usage", title: "common.uploadVolume", scope: "machine", apply: "none", keywords: ["流量", "common.upload", "带宽", "common.requests", "upload", "traffic", "bandwidth"] },
+  { section: "usage", anchor: "usage", title: "common.usageCost", scope: "machine", apply: "none", keywords: ["token", "common.spend", "common.cacheHit"] },
+  { section: "storage", anchor: "storage", title: "common.storage", scope: "machine", apply: "restart", keywords: ["搬家", "common.migrate", "磁盘", "common.locations"] },
+  { section: "advanced", anchor: "elsewhere", title: "common.notInThisVersionYet", scope: "machine", apply: "none", keywords: ["配置文件"] },
 
-  { section: "appearance", anchor: "language", title: "语言", scope: "machine", apply: "restart", keywords: ["中文", "english", "界面语言"] },
-  { section: "appearance", anchor: "graphics", title: "图形渲染", scope: "machine", apply: "restart", keywords: ["硬件加速", "显卡", "gpu", "软件渲染", "占用", "卡顿"] },
-  { section: "appearance", anchor: "navrail", title: "图标栏", scope: "machine", apply: "immediate", keywords: ["侧边栏", "导航", "图标", "sidebar", "nav"] },
-  { section: "appearance", anchor: "naventries", title: "导航入口", scope: "machine", apply: "immediate", keywords: ["侧边栏", "导航", "隐藏", "排序", "自定义", "入口", "sidebar", "nav", "hide", "reorder", "customize"] },
-  { section: "appearance", anchor: "session-quick-actions", title: "会话行快捷按钮", scope: "machine", apply: "immediate", keywords: ["会话", "归档", "删除", "快捷", "按钮", "hover", "archive", "delete", "session", "row", "sidebar"] },
-  { section: "appearance", anchor: "new-answer-marker", title: "新回答分隔线", scope: "machine", apply: "immediate", keywords: ["未读", "新回答", "分隔线", "分割线", "unread", "new", "divider", "marker", "transcript"] },
-  { section: "appearance", anchor: "open-session-limit", title: "同时保留的会话标签数", scope: "machine", apply: "immediate", keywords: ["标签", "窗格", "收起", "保留", "tabs", "panes", "warm", "内存", "memory"] },
-  { section: "appearance", anchor: "live-stream-budget", title: "保持实时连接的会话标签数", scope: "machine", apply: "immediate", keywords: ["连接", "实时", "标签", "窗格", "卡死", "停止", "connection", "stream", "tabs", "stuck", "busy"] },
-  { section: "appearance", anchor: "legacy-sessions", title: "1.x 旧会话", scope: "machine", apply: "immediate", keywords: ["1.x", "旧会话", "迁移", "隐藏", "legacy", "sessions", "sidebar"] },
-  { section: "appearance", anchor: "live-grace", title: "进行中列表保留已完成会话", scope: "machine", apply: "immediate", keywords: ["进行中", "完成", "保留", "过滤", "running", "grace", "sidebar"] },
-  { section: "appearance", anchor: "send-shortcut", title: "发送快捷键", scope: "machine", apply: "immediate", keywords: ["发送", "回车", "换行", "enter", "ctrl", "cmd"] },
-  { section: "appearance", anchor: "running-message-intent", title: "运行中发送消息", scope: "machine", apply: "immediate", keywords: ["插话", "排队", "下一轮", "steer", "queue", "followup", "running"] },
-  { section: "appearance", anchor: "global-shortcut", title: "全局显示 / 隐藏快捷键", scope: "machine", apply: "immediate", keywords: ["global", "show", "hide", "shortcut", "keyboard", "全局", "显示", "隐藏"] },
-  { section: "appearance", anchor: "keys", title: "快捷键", scope: "machine", apply: "immediate", keywords: ["shortcut", "keyboard", "ctrl", "cmd", "esc", "home", "查找", "搜索", "运行分析", "工作台"] },
-  { section: "appearance", anchor: "esc-stop", title: "Esc 停止任务", scope: "machine", apply: "immediate", keywords: ["esc", "停止", "中断", "确认", "误触", "stop"] },
-  { section: "appearance", anchor: "page-sleep", title: "空闲网页休眠", scope: "machine", apply: "immediate", keywords: ["休眠", "睡眠", "空闲", "内存", "收起", "browser", "page", "sleep", "memory"] },
-  { section: "appearance", anchor: "session-tabs", title: "会话标签栏", scope: "machine", apply: "immediate", keywords: ["标签", "会话切换", "tabs", "session"] },
-  { section: "appearance", anchor: "folding", title: "会话折叠", scope: "machine", apply: "immediate", keywords: ["展开", "收起", "思考", "执行过程", "步骤", "输出", "简报", "fold"] },
-  { section: "appearance", anchor: "plan-progress", title: "收起时显示计划进度", scope: "machine", apply: "immediate", keywords: ["计划", "进度条", "待办", "收起", "todo", "plan", "progress", "collapsed"] },
-  { section: "appearance", anchor: "composer-hint", title: "输入框提示", scope: "machine", apply: "immediate", keywords: ["占位", "任务", "提示", "输入框", "placeholder", "composer", "hint"] },
-  { section: "appearance", anchor: "office-preview", title: "Office 文档预览", scope: "machine", apply: "immediate", keywords: ["office", "word", "excel", "docx", "xlsx", "工作台", "预览", "文档", "表格"] },
-  { section: "appearance", anchor: "window", title: "窗口", scope: "machine", apply: "immediate", keywords: ["托盘", "关闭行为", "休眠", "睡眠"] },
+  { section: "appearance", anchor: "language", title: "common.language", scope: "machine", apply: "restart", keywords: ["common.text", "english", "界面语言"] },
+  { section: "appearance", anchor: "graphics", title: "common.graphics", scope: "machine", apply: "restart", keywords: ["硬件加速", "显卡", "gpu", "common.softwareRendering", "common.spaceUsed", "卡顿"] },
+  { section: "appearance", anchor: "navrail", title: "common.iconRail", scope: "machine", apply: "immediate", keywords: ["侧边栏", "导航", "图标", "sidebar", "nav"] },
+  { section: "appearance", anchor: "naventries", title: "common.navigationEntries", scope: "machine", apply: "immediate", keywords: ["侧边栏", "导航", "common.hide", "common.sort", "common.custom", "common.surface", "sidebar", "nav", "hide", "reorder", "customize"] },
+  { section: "appearance", anchor: "session-quick-actions", title: "common.sessionRowButtons", scope: "machine", apply: "immediate", keywords: ["common.session", "common.archived", "common.delete", "快捷", "按钮", "hover", "archive", "delete", "session", "row", "sidebar"] },
+  { section: "appearance", anchor: "new-answer-marker", title: "common.newAnswerDivider", scope: "machine", apply: "immediate", keywords: ["common.unread", "新回答", "分隔线", "分割线", "unread", "new", "divider", "marker", "transcript"] },
+  { section: "appearance", anchor: "open-session-limit", title: "common.sessionTabsKeptOpen", scope: "machine", apply: "immediate", keywords: ["common.tags", "窗格", "common.collapse", "保留", "tabs", "panes", "warm", "common.memory", "memory"] },
+  { section: "appearance", anchor: "live-stream-budget", title: "common.sessionTabsKeptLive", scope: "machine", apply: "immediate", keywords: ["common.connections", "实时", "common.tags", "窗格", "卡死", "common.stop", "connection", "stream", "tabs", "stuck", "busy"] },
+  { section: "appearance", anchor: "legacy-sessions", title: "common.sessionsFrom1X", scope: "machine", apply: "immediate", keywords: ["1.x", "旧会话", "common.migrate", "common.hide", "legacy", "sessions", "sidebar"] },
+  { section: "appearance", anchor: "live-grace", title: "common.keepFinishedSessionsInRunning", scope: "machine", apply: "immediate", keywords: ["common.running2", "common.done2", "保留", "过滤", "running", "grace", "sidebar"] },
+  { section: "appearance", anchor: "send-shortcut", title: "common.sendShortcut", scope: "machine", apply: "immediate", keywords: ["common.send", "回车", "换行", "enter", "ctrl", "cmd"] },
+  { section: "appearance", anchor: "running-message-intent", title: "common.messagesSentWhileRunning", scope: "machine", apply: "immediate", keywords: ["common.steer", "common.queued", "下一轮", "steer", "queue", "followup", "running"] },
+  { section: "appearance", anchor: "global-shortcut", title: "common.globalShowHideShortcut", scope: "machine", apply: "immediate", keywords: ["global", "show", "hide", "shortcut", "keyboard", "全局", "common.show", "common.hide"] },
+  { section: "appearance", anchor: "keys", title: "common.keyboardShortcuts", scope: "machine", apply: "immediate", keywords: ["shortcut", "keyboard", "ctrl", "cmd", "esc", "home", "common.find", "common.search", "common.runAnalysis", "common.workbench"] },
+  { section: "appearance", anchor: "esc-stop", title: "common.escStopsATask", scope: "machine", apply: "immediate", keywords: ["esc", "common.stop", "中断", "common.confirm", "误触", "stop"] },
+  { section: "appearance", anchor: "page-sleep", title: "common.idlePageSleep", scope: "machine", apply: "immediate", keywords: ["休眠", "睡眠", "common.idle", "common.memory", "common.collapse", "browser", "page", "sleep", "memory"] },
+  { section: "appearance", anchor: "session-tabs", title: "common.sessionTabs", scope: "machine", apply: "immediate", keywords: ["common.tags", "会话切换", "tabs", "session"] },
+  { section: "appearance", anchor: "folding", title: "common.transcriptFolding", scope: "machine", apply: "immediate", keywords: ["common.expand", "common.collapse", "思考", "common.activity", "步骤", "common.output", "简报", "fold"] },
+  { section: "appearance", anchor: "plan-progress", title: "common.showCollapsedPlanProgress", scope: "machine", apply: "immediate", keywords: ["common.plan", "进度条", "待办", "common.collapse", "todo", "plan", "progress", "collapsed"] },
+  { section: "appearance", anchor: "composer-hint", title: "common.composerHint", scope: "machine", apply: "immediate", keywords: ["占位", "prefsnav.task", "common.notice", "输入框", "placeholder", "composer", "hint"] },
+  { section: "appearance", anchor: "office-preview", title: "common.officeDocumentPreview", scope: "machine", apply: "immediate", keywords: ["office", "word", "excel", "docx", "xlsx", "common.workbench", "common.preview", "文档", "表格"] },
+  { section: "appearance", anchor: "window", title: "common.window", scope: "machine", apply: "immediate", keywords: ["托盘", "关闭行为", "休眠", "睡眠"] },
   // Immediate because the endpoint hands the holder every running sink reads,
   // not because the file was written: writing it is what a restart would need.
-  { section: "appearance", anchor: "notify", title: "通知", scope: "machine", apply: "immediate", keywords: ["提醒", "notification", "系统通知", "结束", "批准", "提问"] },
-  { section: "appearance", anchor: "size", title: "大小", scope: "machine", apply: "immediate", keywords: ["缩放", "字号", "行宽", "对话区域宽度", "比例", "width", "percentage"] },
-  { section: "appearance", anchor: "font", title: "字体", scope: "machine", apply: "immediate", keywords: ["等宽", "mono"] },
-  { section: "appearance", anchor: "wallpaper", title: "壁纸", scope: "machine", apply: "immediate", keywords: ["背景", "图片"] },
-  { section: "appearance", anchor: "advanced-appearance", title: "高级外观", scope: "machine", apply: "immediate", keywords: ["高级", "advanced"] },
-  { section: "appearance", anchor: "weight", title: "文字粗细", scope: "machine", apply: "immediate", keywords: ["加粗", "字重"] },
-  { section: "appearance", anchor: "contrast", title: "文字对比度", scope: "machine", apply: "immediate", keywords: ["柔和", "对比"] },
-  { section: "appearance", anchor: "effects", title: "视觉效果", scope: "machine", apply: "immediate", keywords: ["磨砂", "模糊", "动画", "显卡", "gpu", "性能", "省电", "blur"] },
-  { section: "appearance", anchor: "mode", title: "明暗", scope: "machine", apply: "immediate", keywords: ["深色", "浅色", "跟随系统", "定时", "时间段", "schedule", "dark", "light"] },
-  { section: "appearance", anchor: "scheme", title: "配色", scope: "machine", apply: "immediate", keywords: ["主题", "theme", "色板"] },
+  { section: "appearance", anchor: "notify", title: "common.notifications", scope: "machine", apply: "immediate", keywords: ["common.notify", "notification", "系统通知", "结束", "批准", "提问"] },
+  { section: "appearance", anchor: "size", title: "common.size", scope: "machine", apply: "immediate", keywords: ["common.zoom", "字号", "common.lineWidth", "common.conversationWidth", "比例", "width", "percentage"] },
+  { section: "appearance", anchor: "font", title: "common.typeface", scope: "machine", apply: "immediate", keywords: ["prefsnav.monospace", "mono"] },
+  { section: "appearance", anchor: "wallpaper", title: "common.wallpaper", scope: "machine", apply: "immediate", keywords: ["背景", "common.image"] },
+  { section: "appearance", anchor: "advanced-appearance", title: "common.advancedAppearance", scope: "machine", apply: "immediate", keywords: ["prefsnav.advanced", "advanced"] },
+  { section: "appearance", anchor: "weight", title: "common.textWeight", scope: "machine", apply: "immediate", keywords: ["common.bolder", "字重"] },
+  { section: "appearance", anchor: "contrast", title: "common.textContrast", scope: "machine", apply: "immediate", keywords: ["common.soft", "对比"] },
+  { section: "appearance", anchor: "effects", title: "common.visualEffects", scope: "machine", apply: "immediate", keywords: ["磨砂", "模糊", "动画", "显卡", "gpu", "性能", "省电", "blur"] },
+  { section: "appearance", anchor: "mode", title: "common.lightAndDark", scope: "machine", apply: "immediate", keywords: ["common.dark", "common.light", "common.followTheSystem", "common.scheduled", "时间段", "schedule", "dark", "light"] },
+  { section: "appearance", anchor: "scheme", title: "prefsnav.palette", scope: "machine", apply: "immediate", keywords: ["common.theme", "theme", "色板"] },
 ];
 
 export const SETTING_AT = (anchor: string) => SETTINGS.find((s) => s.anchor === anchor);
@@ -354,8 +354,7 @@ export const SECTION_NAME: Partial<Record<Section, string>> = Object.fromEntries
 // Title, aliases, and the page it is on. An alias is a way in and nothing
 // more: it never becomes the setting's name and no judgement reads it.
 export function settingMatches(e: SettingEntry, q: string): boolean {
-  if ([e.title, SECTION_NAME[e.section] ?? ""].some((name) =>
-    name.toLowerCase().includes(q) || t(name).toLowerCase().includes(q),
-  )) return true;
-  return (e.keywords ?? []).some((k) => k.toLowerCase().includes(q));
+  const reads = (name: string) => [t(name), zh(name)].some((text) => text.toLowerCase().includes(q));
+  if ([e.title, SECTION_NAME[e.section] ?? ""].some(reads)) return true;
+  return (e.keywords ?? []).some(reads);
 }

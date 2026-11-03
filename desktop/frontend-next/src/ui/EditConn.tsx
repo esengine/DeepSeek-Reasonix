@@ -310,18 +310,18 @@ export function EditConn({
       <div className="fields">
         {kinds.length > 1 && (
           <label className="grow full">
-            <span>{t("接口协议")}</span>
-            <select aria-label={t("接口协议")} data-action="provider.draft" data-value="protocol" value={kind} onChange={(e) => {
+            <span>{t("common.aPIProtocol")}</span>
+            <select aria-label={t("common.aPIProtocol")} data-action="provider.draft" data-value="protocol" value={kind} onChange={(e) => {
               setKind(e.target.value);
               setFacts(clearModelCheckFacts);
             }} disabled={busy !== "" || checkingModel !== ""}>
               {kinds.map((k) => <option key={k} value={k}>{t(KIND_LABEL[k] ?? k)}</option>)}
             </select>
-            <i className="tip">{t("以服务商文档为准；模型列表无法可靠判断聊天协议。")}</i>
+            <i className="tip">{t("common.followTheProviderDocumentationA")}</i>
           </label>
         )}
         <label className="grow full">
-          <span>{t("接口地址")}</span>
+          <span>{t("common.endpointAddress")}</span>
           <input value={baseUrl} onChange={(e) => {
             setBaseUrl(e.target.value);
             setFacts(clearModelCheckFacts);
@@ -330,7 +330,7 @@ export function EditConn({
           }} disabled={busy !== "" || checkingModel !== ""} spellCheck={false} />
         </label>
         <label className="grow full">
-          <span>{t("API Key（留空就不动它）")}</span>
+          <span>{t("editConn.aPIKeyLeaveBlankTo")}</span>
           <input type="password" value={apiKey} placeholder="········"
             onChange={(e) => {
               setApiKey(e.target.value);
@@ -343,18 +343,18 @@ export function EditConn({
 
       <div className="addp-section compact">
         <div className="addp-section-head">
-          <div><strong>{t("模型限制")}</strong><span>{t("不要依赖接口猜测，请按模型文档填写")}</span></div>
+          <div><strong>{t("common.modelLimits")}</strong><span>{t("editConn.useTheModelDocumentationInstead")}</span></div>
         </div>
         <div className="fields token-limits">
           <label className="grow">
-            <span>{t("上下文窗口")}</span>
-            <span className="unit-field"><input aria-label={t("上下文窗口")} inputMode="numeric" value={win} placeholder={t("未声明")} onChange={(e) => setWin(e.target.value.replace(/\D/g, ""))} /><i>tokens</i></span>
-            <i className="tip">{t("模型可承载的输入、工具结果与输出总量。")}</i>
+            <span>{t("common.contextWindow")}</span>
+            <span className="unit-field"><input aria-label={t("common.contextWindow")} inputMode="numeric" value={win} placeholder={t("common.notDeclared")} onChange={(e) => setWin(e.target.value.replace(/\D/g, ""))} /><i>tokens</i></span>
+            <i className="tip">{t("editConn.theTotalInputToolResults")}</i>
           </label>
           <label className="grow">
-            <span>{t("最大输出")}</span>
-            <span className="unit-field"><input aria-label={t("最大输出")} inputMode="numeric" value={maxOut} placeholder={t("自动")} onChange={(e) => setMaxOut(e.target.value.replace(/\D/g, ""))} /><i>tokens</i></span>
-            <i className="tip">{t("单轮生成上限；留空使用内核的模型默认值。")}</i>
+            <span>{t("common.maximumOutput")}</span>
+            <span className="unit-field"><input aria-label={t("common.maximumOutput")} inputMode="numeric" value={maxOut} placeholder={t("common.auto")} onChange={(e) => setMaxOut(e.target.value.replace(/\D/g, ""))} /><i>tokens</i></span>
+            <i className="tip">{t("editConn.thePerTurnGenerationLimit")}</i>
           </label>
         </div>
         {(picked.length > 1 || picked.some((m) => entry.modelLimits?.[m])) && (
@@ -366,47 +366,47 @@ export function EditConn({
       </div>
 
       <div className="vway" data-field="hide-model-prefix">
-        <span className="lb">{t("隐藏共同前缀")}</span>
-        <div className="seg" role="group" aria-label={t("{name} 的模型名前缀", { name: entry.displayName?.trim() || entry.name })}>
+        <span className="lb">{t("editConn.hideTheSharedPrefix")}</span>
+        <div className="seg" role="group" aria-label={t("editConn.modelNamePrefixOf", { name: entry.displayName?.trim() || entry.name })}>
           {[true, false].map((on) => (
             <button key={String(on)} type="button" data-action="provider.draft" data-value={`hide-model-prefix:${on}`}
               aria-pressed={hidePrefix === on} disabled={busy !== ""} onClick={() => setHidePrefix(on)}>
-              {t(on ? "开" : "关")}
+              {t(on ? "common.on" : "common.off")}
             </button>
           ))}
         </div>
-        <span className="why">{t("路由类服务给每个模型加的同一段前缀（如 group/）在显示时省略，只改显示；模型 ID 不变，自己填的别名优先，保存后生效。")}</span>
+        <span className="why">{t("editConn.theSamePrefixARouting")}</span>
       </div>
 
       <div className="mlist">
         <div className="mlhead">
-          <span className="ttl">{t("模型")}</span>
-          <span className="count">{t("已启用 {on}/{all}", { on: picked.length, all: models.length })}</span>
+          <span className="ttl">{t("common.models")}</span>
+          <span className="count">{t("common.ofEnabled", { on: picked.length, all: models.length })}</span>
           {listable && (
             <button className="mrefresh" data-action="provider.probe" onClick={refetch} disabled={busy !== "" || testing}
-              title={t("用已保存或刚填的密钥向服务商读取模型列表，可直接勾选；服务商新增或下架模型后也一样")}>
-              {t(refreshing ? "正在从服务商读取…" : "从服务商读取可用模型")}
+              title={t("editConn.readTheModelListFrom")}>
+              {t(refreshing ? "common.readingFromProvider" : "editConn.readAvailableModelsFromProvider")}
             </button>
           )}
           <button className="mrefresh" data-action="provider.model-check-all" onClick={testAll}
             disabled={busy !== "" || testing || picked.length === 0} aria-busy={batch === "running" || undefined}>
-            {t("测试已启用模型（{n}）", { n: picked.length })}
+            {t("common.testEnabledModels", { n: picked.length })}
           </button>
         </div>
         <p className="mguide">
-          {t("目录只用于发现，不是白名单。未列出的模型会按原始 ID 保存；「测试已启用模型」会给每个已勾选的模型各发送一次小请求，可能产生少量 Token 费用。")}
+          {t("common.theCatalogIsForDiscovery")}
         </p>
         {completed !== "" && completed === baseUrl.trim() && (
-          <p className="mdiff" role="status">{t("接口地址已补全为 {url}", { url: completed })}</p>
+          <p className="mdiff" role="status">{t("common.addressCompletedTo", { url: completed })}</p>
         )}
-        {batch === "stopped" && <p className="mdiff" role="status">{t("已停止启动新的验证：草稿已改动")}</p>}
+        {batch === "stopped" && <p className="mdiff" role="status">{t("common.noFurtherChecksStartedThe")}</p>}
         {diff && diff.fresh && diff.added === 0 && diff.missing === 0 && (
-          <p className="mdiff" role="status">{t("没有发现新模型")}</p>
+          <p className="mdiff" role="status">{t("editConn.noNewModelsFound")}</p>
         )}
         {diff && (diff.added > 0 || diff.missing > 0) && (
           <p className="mdiff" role="status">
-            {diff.added > 0 && t("发现 {n} 个新模型。", { n: diff.added })}
-            {diff.missing > 0 && t("有 {n} 个已配置模型本次未返回，已为你保留。", { n: diff.missing })}
+            {diff.added > 0 && t("editConn.foundNewModels", { n: diff.added })}
+            {diff.missing > 0 && t("editConn.configuredModelsWereNotReturned", { n: diff.missing })}
           </p>
         )}
         <ModelChoice
@@ -446,17 +446,17 @@ export function EditConn({
       <details className="addp-options" open={more} onToggle={(e) => setMore(e.currentTarget.open)}>
         <summary data-action="provider.draft" data-value="compat">
           <span className="tx">
-            <strong>{t("思考参数与推理档位")}</strong>
-            <small>{t("以及额外请求头、请求体。中转站的推理强度在这里声明")}</small>
+            <strong>{t("editConn.thinkingAndReasoningLevels")}</strong>
+            <small>{t("editConn.plusExtraHeadersAndBody")}</small>
           </span>
           <span className="summary-value">
-            {compatSummary(think, heads, extra, levels.length, picked.filter((m) => ownEfforts[m]?.supportedEfforts.length).length, idle.ok ? idle.secs : 0) || t("可选")}
+            {compatSummary(think, heads, extra, levels.length, picked.filter((m) => ownEfforts[m]?.supportedEfforts.length).length, idle.ok ? idle.secs : 0) || t("common.optional")}
           </span>
         </summary>
         {more && (
           <div className="fields compat addp-options-body">
             <label className="grow full">
-              <span>{t("思考参数")}</span>
+              <span>{t("common.thinkingParameter")}</span>
               <select ref={reasoning} value={think} onChange={(e) => setThink(e.target.value)}>
                 {THINKING.map(([value, label]) => (
                   <option key={value} value={value}>
@@ -465,12 +465,12 @@ export function EditConn({
                 ))}
               </select>
               <i className="tip">
-                {t("端点控制思考深度的方式。此项无法自动探测：中转站转发的是第三方模型，只有你知道其后端。选择后才能调整推理强度，选择错误会导致请求被端点拒绝。")}
+                {t("editConn.howThisEndpointExpressesThinking")}
               </i>
               {!(wireSwitches && entry.canSetThinking) && thinkingShape("tip")}
             </label>
             <label className="grow">
-              <span>{t("推理档位")}</span>
+              <span>{t("editConn.reasoningLevels")}</span>
               <input
                 data-action="provider.draft"
                 data-value="effort-levels"
@@ -482,20 +482,20 @@ export function EditConn({
               />
               <i className="tip">
                 {levelsDormant
-                  ? t("当前思考参数不使用自定义档位；已填写的档位会保留，切换协议后生效。")
+                  ? t("editConn.thisThinkingParameterDoesNot")
                   : effortField
-                    ? t("端点接受的取值，逗号分隔，按原样作为 {field} 的值发送。填写后会替代思考参数自带的档位；型号没有内置档位时需要在这里手填才能选。", { field: effortField })
-                    : t("端点接受的取值，逗号分隔，按原样发送。填写后会替代思考参数自带的档位；型号没有内置档位时需要在这里手填才能选。")}
+                    ? t("editConn.theValuesThisEndpointAccepts", { field: effortField })
+                    : t("editConn.theValuesThisEndpointAccepts2")}
               </i>
             </label>
             <label className="grow">
-              <span>{t("默认档位")}</span>
+              <span>{t("common.defaultLevel")}</span>
               <select data-action="provider.draft" data-value="default-effort" value={levels.includes(defEffort) ? defEffort : ""} disabled={levelsDormant || levels.length === 0}
                 onChange={(e) => setDefEffort(e.target.value)}>
-                <option value="">{t("第一个档位")}</option>
+                <option value="">{t("common.theFirstLevel")}</option>
                 {levels.map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
-              <i className="tip">{t("推理强度选「自动」时使用的档位。")}</i>
+              <i className="tip">{t("editConn.theLevelUsedWhenReasoning")}</i>
             </label>
             {(picked.length > 1 || picked.some((m) => ownEfforts[m])) && (
               <ModelEfforts
@@ -508,28 +508,28 @@ export function EditConn({
               />
             )}
             <label className="grow">
-              <span>{t("无响应超时")}</span>
+              <span>{t("editConn.noAnswerTimeout")}</span>
               <span className="unit-field">
                 <input
-                  aria-label={t("无响应超时")}
+                  aria-label={t("editConn.noAnswerTimeout")}
                   data-action="provider.draft"
                   data-value="idle-timeout"
                   inputMode="numeric"
                   value={idleText}
-                  placeholder={entry.idleTimeoutDefault ? t("默认 {n}", { n: entry.idleTimeoutDefault }) : t("默认")}
+                  placeholder={entry.idleTimeoutDefault ? t("editConn.default", { n: entry.idleTimeoutDefault }) : t("common.default")}
                   aria-invalid={!idle.ok || undefined}
                   onChange={(e) => setIdleText(e.target.value)}
                 />
-                <i>{t("秒")}</i>
+                <i>{t("common.s")}</i>
               </span>
               <i className="tip">
-                {t("等待响应头、以及回包过程中无新内容超过这个时间，就按连接中断处理并重试。本地模型处理长上下文时可能需要调大。")}
+                {t("editConn.ifTheServerSendsNothing")}
               </i>
             </label>
             <BalanceFields entry={entry} url={balUrl} format={balFormat} onUrl={setBalUrl} onFormat={setBalFormat} />
-            {!idle.ok && <div className="why">{t("须是 {min} 到 {max} 之间的整数秒；留空使用默认值。", { min: IDLE_TIMEOUT_MIN, max: IDLE_TIMEOUT_MAX })}</div>}
+            {!idle.ok && <div className="why">{t("editConn.enterAWholeNumberOf", { min: IDLE_TIMEOUT_MIN, max: IDLE_TIMEOUT_MAX })}</div>}
             <label className="grow full">
-              <span>{t("额外请求头")}</span>
+              <span>{t("common.extraRequestHeaders")}</span>
               <textarea
                 rows={3}
                 value={heads}
@@ -537,10 +537,10 @@ export function EditConn({
                 placeholder={"HTTP-Referer: https://example.com\nX-Title: Reasonix"}
                 onChange={(e) => setHeads(e.target.value)}
               />
-              <i className="tip">{t("每行一个「名称: 值」。中转站通常用它识别站点；密钥仍填写在上方。")}</i>
+              <i className="tip">{t("editConn.oneNameValuePerLine")}</i>
             </label>
             <label className="grow full">
-              <span>{t("额外请求体")}</span>
+              <span>{t("common.extraRequestBody")}</span>
               <textarea
                 rows={4}
                 value={extra}
@@ -550,10 +550,10 @@ export function EditConn({
                 aria-invalid={extraBad || undefined}
               />
               <i className="tip">
-                {t("将合并到请求体的顶层。model、messages、tools、stream 由内核控制，在此填写不会生效。")}
+                {t("editConn.mergedIntoTheTopLevel")}
               </i>
             </label>
-            {extraBad && <div className="why">{t("这段不是合法的 JSON 对象，保存会被拒绝。")}</div>}
+            {extraBad && <div className="why">{t("editConn.thisIsNotAValid")}</div>}
           </div>
         )}
       </details>
@@ -561,15 +561,15 @@ export function EditConn({
       <div className="acts-bar">
         {err && (
           <div className="find" data-lvl={err.kind === "unapplied" ? "warn" : "err"} role={err.kind === "unapplied" ? "status" : "alert"}>
-            {err.kind === "save" && <span className="t">{t("保存失败")}</span>}
+            {err.kind === "save" && <span className="t">{t("editConn.saveFailed")}</span>}
             <span className="why">{err.text}</span>
           </div>
         )}
         <div className="acts">
           <button className="act" data-action="provider.save" data-primary onClick={save} disabled={!canSave}>
-            {t(saving ? "保存中…" : "保存")}
+            {t(saving ? "common.saving2" : "common.save")}
           </button>
-          <button className="act" data-action="provider.revert" onClick={onRevert} disabled={!dirty || busy !== "" || testing}>{t("还原")}</button>
+          <button className="act" data-action="provider.revert" onClick={onRevert} disabled={!dirty || busy !== "" || testing}>{t("common.revert")}</button>
           <span className="acts-state" role="status" data-state={phase}>
             <i className="acts-dot" aria-hidden="true" />
             {t(PHASE_TEXT[phase])}
@@ -615,18 +615,18 @@ function compatSummary(think: string, heads: string, extra: string, levels: numb
   const parts: string[] = [];
   const protocol = THINKING.find(([value]) => value === think);
   if (think && protocol) parts.push(t(protocol[1]));
-  if (levels) parts.push(t("{n} 个档位", { n: levels }));
-  if (ownModels) parts.push(t("{n} 个模型单独设置", { n: ownModels }));
-  if (idleSecs) parts.push(t("{n} 秒无响应超时", { n: idleSecs }));
+  if (levels) parts.push(t("editConn.levels", { n: levels }));
+  if (ownModels) parts.push(t("editConn.modelsWithTheirOwnLevels", { n: ownModels }));
+  if (idleSecs) parts.push(t("editConn.sNoAnswerTimeout", { n: idleSecs }));
   const headCount = Object.keys(parseHeaders(heads)).length;
-  if (headCount) parts.push(t("{n} 个头", { n: headCount }));
+  if (headCount) parts.push(t("editConn.headers", { n: headCount }));
   const body = parseExtraBody(extra);
-  if (body && Object.keys(body).length) parts.push(t("有请求体"));
+  if (body && Object.keys(body).length) parts.push(t("editConn.extraBody"));
   return parts.join(" · ");
 }
 
 type Phase = "clean" | "dirty" | "saving" | "saved" | "unapplied" | "failed";
 const PHASE_TEXT: Record<Phase, string> = {
-  clean: "没有更改", dirty: "有未保存的更改", failed: "有未保存的更改", saving: "正在保存…",
-  saved: "已保存", unapplied: "已保存，尚未生效",
+  clean: "editConn.noChanges", dirty: "editConn.unsavedChanges", failed: "editConn.unsavedChanges", saving: "common.saving",
+  saved: "editConn.saved", unapplied: "common.savedNotAppliedYet",
 };

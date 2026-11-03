@@ -6,29 +6,29 @@ import { ApplyNote } from "./Group";
 import { Switch } from "./Switch";
 
 const PARTS: [Fold, string, string][] = [
-  ["thinking", "思考过程", "模型作答前的推理"],
-  ["activity", "执行过程", "一轮中连续的工具调用，收起后只剩一行摘要"],
-  ["steps", "步骤详情", "每一步的参数、输出与文件差异"],
-  ["output", "长输出", "超出一屏的命令输出与文件内容"],
-  ["compaction", "压缩简报", "上下文压缩后，模型接下来依据的那份简报"],
+  ["thinking", "folding.thinking", "folding.theModelSReasoningBefore"],
+  ["activity", "common.activity", "folding.aRunOfToolCalls"],
+  ["steps", "folding.stepDetails", "folding.eachStepSArgumentsOutput"],
+  ["output", "folding.longOutput", "folding.commandOutputAndFileContents"],
+  ["compaction", "folding.compactionBrief", "folding.theBriefTheModelWorks"],
 ];
 
 const MODE: Record<FoldMode, string> = {
-  folded: "收起",
-  live: "进行中展开",
-  failed: "失败时展开",
-  changed: "改动时展开",
-  open: "展开",
+  folded: "common.collapse",
+  live: "folding.openWhileRunning",
+  failed: "folding.openOnFailure",
+  changed: "folding.openOnFileChange",
+  open: "common.expand",
 };
 
 // Long output is clipped rather than folded, so its two answers say so.
-const OUTPUT_MODE: Partial<Record<FoldMode, string>> = { folded: "截断", open: "完整" };
+const OUTPUT_MODE: Partial<Record<FoldMode, string>> = { folded: "folding.clipped", open: "common.full" };
 
 const PRESETS: [string, string, FoldModes][] = [
-  ["compact", "精简", { thinking: "folded", activity: "folded", steps: "failed", output: "folded", compaction: "folded" }],
-  ["standard", "标准", FOLD_DEFAULTS],
-  ["changes", "只看改动", { thinking: "folded", activity: "changed", steps: "changed", output: "folded", compaction: "folded" }],
-  ["full", "详尽", { thinking: "open", activity: "open", steps: "open", output: "open", compaction: "open" }],
+  ["compact", "folding.compact", { thinking: "folded", activity: "folded", steps: "failed", output: "folded", compaction: "folded" }],
+  ["standard", "common.standard", FOLD_DEFAULTS],
+  ["changes", "folding.changesOnly", { thinking: "folded", activity: "changed", steps: "changed", output: "folded", compaction: "folded" }],
+  ["full", "folding.detailed", { thinking: "open", activity: "open", steps: "open", output: "open", compaction: "open" }],
 ];
 
 const same = (a: FoldModes, b: FoldModes) => PARTS.every(([k]) => a[k] === b[k]);
@@ -45,12 +45,12 @@ export function Folding() {
   return (
     <section className="grp" id="set-folding" data-setting="folding">
       <div className="grp-hd">
-        <h3>{t("会话折叠")}</h3>
-        {!preset && <span className="now">{t("自定义")}</span>}
+        <h3>{t("common.transcriptFolding")}</h3>
+        {!preset && <span className="now">{t("common.custom")}</span>}
       </div>
-      <p className="hint">{t("会话中各部分默认展开还是收起。失败的步骤与正在运行的操作可以单独处理；已手动展开或收起的块保持原样。")}</p>
+      <p className="hint">{t("folding.whetherEachPartOfA")}</p>
 
-      <div className="seg" data-text role="radiogroup" aria-label={t("折叠预设")}>
+      <div className="seg" data-text role="radiogroup" aria-label={t("folding.foldingPreset")}>
         {PRESETS.map(([id, name, p]) => (
           <button key={id} role="radio" data-action="transcript.fold-preset" data-value={id} aria-checked={preset === id} onClick={() => setFoldModes(p)}>
             {t(name)}
@@ -81,10 +81,10 @@ export function Folding() {
             {kind === "thinking" && (
               <div className="lrow" onMouseEnter={() => setHot(kind)} onFocus={() => setHot(kind)}>
                 <span className="tx">
-                  <span className="lb">{t("收起时预览思考开头")}</span>
-                  <span className="ds">{t("在思考标题下方显示一行开头文字；思考进行中也显示，展开后隐藏。")}</span>
+                  <span className="lb">{t("folding.previewTheBeginningWhenCollapsed")}</span>
+                  <span className="ds">{t("folding.showOneLineOfOpening")}</span>
                 </span>
-                <Switch data-action="transcript.thinking-preview" on={thinkingPreview} label={t("收起时预览思考开头")}
+                <Switch data-action="transcript.thinking-preview" on={thinkingPreview} label={t("folding.previewTheBeginningWhenCollapsed")}
                   onClick={() => setShowsThinkingPreview(!thinkingPreview)} />
               </div>
             )}
@@ -106,24 +106,24 @@ function FoldPreview({ modes, thinkingPreview, hot, live, onLive }: { modes: Fol
   return (
     <figure className="fold-prev" aria-hidden="true">
       <figcaption>
-        <span>{t("预览")}</span>
+        <span>{t("common.preview")}</span>
         <div className="seg" data-text role="group">
-          <button tabIndex={-1} data-action="transcript.fold-preview" data-value="live" aria-pressed={live} onClick={() => onLive(true)}>{t("运行中")}</button>
-          <button tabIndex={-1} data-action="transcript.fold-preview" data-value="done" aria-pressed={!live} onClick={() => onLive(false)}>{t("已完成")}</button>
+          <button tabIndex={-1} data-action="transcript.fold-preview" data-value="live" aria-pressed={live} onClick={() => onLive(true)}>{t("common.running")}</button>
+          <button tabIndex={-1} data-action="transcript.fold-preview" data-value="done" aria-pressed={!live} onClick={() => onLive(false)}>{t("common.done")}</button>
         </div>
       </figcaption>
       <div className="fp-turn">
         <div className="fp-who">reasonix</div>
         <div className="fp-block" {...part("thinking")} data-open={think ? "" : undefined}>
-          <span className="fp-sum">{live ? t("思考中…") : t("思考了 6 秒")}</span>
+          <span className="fp-sum">{live ? t("common.thinking") : t("folding.thoughtFor6s")}</span>
           {think && <Lines n={2} dim />}
-          {!think && thinkingPreview && <span className="thinking-preview">{t("先检查配置，再决定改哪里。")}</span>}
+          {!think && thinkingPreview && <span className="thinking-preview">{t("folding.checkTheConfigurationFirstThen")}</span>}
         </div>
         {!live && <Lines n={2} />}
         <div className="fp-block fp-work" {...part("activity")} data-open={work ? "" : undefined}>
           <span className="fp-sum">
-            {t("执行过程")}
-            <i>{live ? t("运行中") : t("3 项操作 · 1 项失败")}</i>
+            {t("common.activity")}
+            <i>{live ? t("common.running") : t("folding.3Actions1Failed")}</i>
           </span>
           {work && (
             <div className="fp-steps">
@@ -134,7 +134,7 @@ function FoldPreview({ modes, thinkingPreview, hot, live, onLive }: { modes: Fol
           )}
         </div>
         <div className="fp-block" {...part("compaction")} data-open={startsOpen(modes.compaction) ? "" : undefined}>
-          <span className="fp-sum">{t("查看其后续使用的简报")}</span>
+          <span className="fp-sum">{t("common.seeTheDigestItCarries")}</span>
           {startsOpen(modes.compaction) && <Lines n={2} dim />}
         </div>
       </div>
@@ -152,7 +152,7 @@ function Step({ name, arg, open, failed, long, output, hot }: {
       {open && (
         <div className="fp-out" data-part="output" data-hot={hot === "output" ? "" : undefined} data-clip={long && !output ? "" : undefined}>
           <Lines n={long ? (output ? 6 : 3) : 1} mono />
-          {long && <span className="fp-more">{output ? t("收起") : t("展开全部")}</span>}
+          {long && <span className="fp-more">{output ? t("common.collapse") : t("common.showAll")}</span>}
         </div>
       )}
     </div>

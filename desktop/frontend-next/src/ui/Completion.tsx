@@ -8,22 +8,22 @@ const EMPTY: Completion = { kind: "", from: 0, to: 0, items: [] };
 // What the right-hand column says a row is. A file and a command look nothing
 // alike in what they do, and the menu is the only place that difference shows.
 const KIND: Record<string, string> = {
-  builtin: "内置",
-  command: "命令",
-  skill: "技能",
-  subagent: "子代理",
+  builtin: "common.builtIn",
+  command: "common.commands2",
+  skill: "common.skills2",
+  subagent: "common.subagents2",
   prompt: "MCP",
-  file: "文件",
-  dir: "目录",
-  resource: "资源",
-  session: "会话",
+  file: "common.files2",
+  dir: "completion.folder",
+  resource: "completion.resource",
+  session: "common.session",
 };
 
 const HINT: Record<string, string> = {
-  ref: "↑↓ 选择 · 回车引用 · Tab 补全或进入目录 · Esc 关闭",
-  session: "↑↓ 选择 · 回车添加到这条消息 · Esc 关闭",
-  slash: "↑↓ 选择 · Tab 或回车补全 · Esc 关闭",
-  "slash-arg": "↑↓ 选择 · Tab 或回车补全 · Esc 关闭",
+  ref: "completion.selectsEnterReferencesTabCompletes",
+  session: "completion.chooseEnterAddsItTo",
+  slash: "completion.selectsTabOrEnterCompletes",
+  "slash-arg": "completion.selectsTabOrEnterCompletes",
 };
 
 // Asking the kernel costs one local round trip, so the gate is only about not
@@ -262,7 +262,7 @@ export function CompletionMenu({ id, items, active, kind, query, kb, onPick, onH
         className="mlist"
         id={id}
         role="listbox"
-        aria-label={t("补全")}
+        aria-label={t("common.completions")}
         data-kb={kb ? "" : undefined}
       >
         {items.map((it, i) => {
@@ -295,11 +295,11 @@ export function CompletionMenu({ id, items, active, kind, query, kb, onPick, onH
                 {it.hint && <span className="ds">{it.hint}</span>}
                 {it.args?.map((a) => (
                   <span className="ds" key={a.name}>
-                    {a.name} {t(a.required ? "必填" : "可选")}
+                    {a.name} {t(a.required ? "completion.required" : "common.optional")}
                     {a.description ? ` · ${a.description}` : ""}
                   </span>
                 ))}
-                {it.moreArgs ? <span className="ds">{t("还有 {n} 项", { n: it.moreArgs })}</span> : null}
+                {it.moreArgs ? <span className="ds">{t("completion.more", { n: it.moreArgs })}</span> : null}
               </span>
               {it.kind && <span className="rt">{t(KIND[it.kind] ?? it.kind)}</span>}
             </button>

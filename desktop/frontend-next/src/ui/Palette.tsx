@@ -76,8 +76,8 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
       }
     }
     return [
-      { label: t("快捷操作"), hits: matched.map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("操作"), alert: c.status !== undefined, run: c.run })) },
-      { label: t("会话"), hits: sessions },
+      { label: t("palette.quickActions"), hits: matched.map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("palette.action"), alert: c.status !== undefined, run: c.run })) },
+      { label: t("common.session"), hits: sessions },
     ].filter((g) => g.hits.length > 0);
   }, [commands, tree, query, onOpenSession]);
 
@@ -104,14 +104,14 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
 
   return (
     <div className="palette-veil" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={sheet} className="palette" role="dialog" aria-modal="true" aria-label={t("搜索与快捷操作")}>
+      <div ref={sheet} className="palette" role="dialog" aria-modal="true" aria-label={t("common.searchAndCommands")}>
         <label className="palette-input">
           <StudioIcon name="search" />
           <input
             ref={box}
             data-action-keydown="palette.search"
-            aria-label={t("搜索会话或操作")}
-            placeholder={t("搜索会话、工具、设置…")}
+            aria-label={t("palette.searchConversationsOrActions")}
+            placeholder={t("palette.searchConversationsToolsSettings")}
             autoComplete="off"
             value={query}
             onChange={(e) => {
@@ -153,9 +153,9 @@ export function Palette({ open, onClose, commands, tree, onOpenSession }: Props)
               ))}
             </div>
           ))}
-          {flat.length === 0 && <div className="palette-empty">{t("没有匹配的会话或操作")}</div>}
+          {flat.length === 0 && <div className="palette-empty">{t("palette.nothingMatches")}</div>}
         </div>
-        <div className="palette-help">{t("↑ ↓ 选择 · Enter 打开 · Esc 关闭")}</div>
+        <div className="palette-help">{t("palette.toMoveEnterToOpen")}</div>
       </div>
     </div>
   );

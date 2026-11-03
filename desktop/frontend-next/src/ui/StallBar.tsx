@@ -10,28 +10,28 @@ export type StallAction = "stop" | "mute" | "continue" | "dismiss";
 // zeroes the count — or to leave it stopped.
 export function StallBar({ stall, onAct }: { stall: Stall; onAct: (a: StallAction) => void }) {
   const said = stall.cause === "tokens"
-    ? t("自上次有进展以来已用约 {n} 倍上下文的输入 token", { n: stall.tokenMultiple })
+    ? t("stallBar.aboutTheContextWindowIn", { n: stall.tokenMultiple })
     : stall.cause === "perseveration"
-      ? t("模型在重复输出同一段文字")
-      : t("已连续 {n} 轮没有可观察的进展", { n: stall.idleRounds });
+      ? t("stallBar.theModelIsRepeatingThe")
+      : t("stallBar.noObservableProgressForRounds", { n: stall.idleRounds });
   const why = stall.cause === "tokens"
-    ? t("共 {n} tokens", { n: stall.promptTokens.toLocaleString() })
+    ? t("stallBar.tokensInAll", { n: stall.promptTokens.toLocaleString() })
     : stall.cause === "perseveration"
-      ? t("同一段内容被逐字重复")
-      : t("没有文件改动、检查变化或新读取");
+      ? t("stallBar.theSameBlockIsBeing")
+      : t("stallBar.noFileChangedNoCheck");
   return (
     <div className="rtbar stallbar" data-lvl="warn" role="status" data-paused={stall.paused ? "" : undefined}>
-      <span className="t">{stall.paused ? t("任务已暂停：{s}", { s: said }) : said}</span>
+      <span className="t">{stall.paused ? t("stallBar.taskPaused", { s: said }) : said}</span>
       <span className="why" title={why}>{why}</span>
       {stall.paused ? (
         <>
-          <button data-action="stall.continue" onClick={() => onAct("continue")}>{t("继续（计数清零）")}</button>
-          <button data-action="stall.dismiss" onClick={() => onAct("dismiss")}>{t("停止")}</button>
+          <button data-action="stall.continue" onClick={() => onAct("continue")}>{t("stallBar.continueResetsTheCount")}</button>
+          <button data-action="stall.dismiss" onClick={() => onAct("dismiss")}>{t("common.stop")}</button>
         </>
       ) : (
         <>
-          <button data-action="stall.stop" onClick={() => onAct("stop")}>{t("停止")}</button>
-          <button data-action="stall.mute" onClick={() => onAct("mute")}>{t("不再提示（本会话）")}</button>
+          <button data-action="stall.stop" onClick={() => onAct("stop")}>{t("common.stop")}</button>
+          <button data-action="stall.mute" onClick={() => onAct("mute")}>{t("stallBar.donTShowAgainThis")}</button>
         </>
       )}
     </div>

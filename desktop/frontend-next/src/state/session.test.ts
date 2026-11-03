@@ -245,7 +245,7 @@ describe("a turn the user cancelled", () => {
     const s = run([partial("c1"), { kind: "turn_done", cancelled: true, err: "context canceled" } as SessionEvent]);
     expect(s.items.filter((i) => i.t === "notice" && i.level === "error")).toHaveLength(0);
     expect(s.terminal).toEqual({ kind: "cancelled" });
-    expect(s.doing).toBe("已取消");
+    expect(s.doing).toBe("common.cancelled");
   });
 
   it("still draws a genuine failure", () => {
@@ -522,9 +522,9 @@ describe("waiting for another session to finish writing", () => {
   // is stopped on — the same place 等你批准 goes.
   it("says what the turn is waiting on, and stops saying it when it is not", () => {
     const waiting = run([lease("workspace_lease", "warn", "Another session is writing to this workspace.")]);
-    expect(waiting.doing).toBe("等待工作区");
+    expect(waiting.doing).toBe("session.waitingForTheWorkspace");
     const gaveUp = reduce(waiting, lease("workspace_lease_abandoned", "info", "The wait ended."));
-    expect(gaveUp.doing).toBe("运行中");
+    expect(gaveUp.doing).toBe("common.running");
     expect(cards(gaveUp)).toHaveLength(1);
   });
 });
@@ -675,7 +675,7 @@ describe("a question the run is still blocked on", () => {
 
   it("survives the rebuild that follows a reconnect", () => {
     const s = run([asking("ask-1"), rebuild([said("有一个技术决策需要确认：")])]);
-    expect(s.doing, "the header says the run is waiting on you").toBe("等待你回答");
+    expect(s.doing, "the header says the run is waiting on you").toBe("prompts.waitingForYourAnswer");
     expect(asks(s), "so the question has to still be answerable").toHaveLength(1);
     expect(asks(s)[0].ask.id).toBe("ask-1");
   });
@@ -863,9 +863,9 @@ describe("a receipt that arrives after the delivery it is for", () => {
 
 describe("chipLabel", () => {
   it("says the turn is running for a client that joined after turn_started", () => {
-    expect(chipLabel(initialState, true)).toBe("运行中");
+    expect(chipLabel(initialState, true)).toBe("common.running");
     const done = run([{ kind: "turn_started" } as SessionEvent, { kind: "turn_done" } as SessionEvent]);
-    expect(chipLabel(done, true)).toBe("运行中");
+    expect(chipLabel(done, true)).toBe("common.running");
   });
 
   it("keeps what the stream says once it has said something", () => {
@@ -874,7 +874,7 @@ describe("chipLabel", () => {
   });
 
   it("leaves a settled turn and a live one alone", () => {
-    expect(chipLabel(initialState, false)).toBe("空闲");
+    expect(chipLabel(initialState, false)).toBe("common.idle");
     const live = run([{ kind: "turn_started" } as SessionEvent]);
     expect(chipLabel(live, true)).toBe(live.doing);
   });

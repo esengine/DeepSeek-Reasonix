@@ -36,11 +36,11 @@ export { quoteAmount };
 // doing is what the status chip prints. These two values are also read back by
 // the reducer, so they get a name: a comparison against a sentence is one copy
 // pass away from never matching again, and nothing fails when it stops.
-const WAITING_WORKSPACE = "等待工作区";
+const WAITING_WORKSPACE = "session.waitingForTheWorkspace";
 // What the turn is doing between a tool finishing and the model's next packet.
 // The chip used to keep printing the tool that had already returned, so the
 // one stretch nothing is on screen for looked like the one stretch it hung.
-const WAITING_MODEL = "等待模型回复";
+const WAITING_MODEL = "common.waitingForTheModel";
 
 export const initialState: SessionState = {
   interactionIDs: { asked: [], answered: [] },
@@ -86,7 +86,7 @@ export const localId = nextId;
 //
 // A backgrounded command is not caught by this: it answers with a result the
 // moment it is launched, so its card is already settled when the turn ends.
-const NO_REPORT = "这一步没有回报结果就随本轮结束了";
+const NO_REPORT = "session.thisStepEndedWithThe";
 
 // A call still on its streaming placeholder is the other case, and the opposite
 // claim: no arguments ever reached it, so it never ran and nothing on disk
@@ -113,8 +113,8 @@ function sealTurn(items: Item[], err?: string): Item[] {
   if (stillborn > 0) {
     const text = plural(
       stillborn,
-      "另有 1 个调用尚未开始，未修改任何文件",
-      "另有 {n} 个调用尚未开始，均未修改任何文件",
+      "session.1CallNeverGotStarted",
+      "session.callsNeverGotStartedThey",
     );
     sealed.push({ t: "notice", id: nextId(), level: "info", text });
   }
@@ -374,12 +374,12 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       // twice: no seal — calls still run, a prompt is still owed — but naming
       // still runs, because the row may have been sent between the two.
       if (s.running && ev.msgIndex !== undefined && ev.msgIndex === s.turnMsgIndex) return nameTurnStart(s, ev);
-      return nameTurnStart({ ...s, metrics: { ...s.metrics, turn: [] }, running: true, runSince: Date.now(), doing: "运行中", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() }, turnMsgIndex: ev.msgIndex ?? s.turnMsgIndex, items: sealTurn(sealSay(s.items, true)) }, ev);
+      return nameTurnStart({ ...s, metrics: { ...s.metrics, turn: [] }, running: true, runSince: Date.now(), doing: "common.running", terminal: null, outLive: 0, turnModel: ev.modelRef || s.turnModel, waiting: { ttftSince: Date.now() }, turnMsgIndex: ev.msgIndex ?? s.turnMsgIndex, items: sealTurn(sealSay(s.items, true)) }, ev);
 
     case "reasoning":
       return {
         ...s,
-        doing: "思考中",
+        doing: "common.thinking2",
         outWindow: sample(s.outWindow, estimateTokens(ev.text ?? ""), Date.now()),
         outLive: s.outLive + estimateTokens(ev.text ?? ""),
         items: appendText(s.items, ev.text ?? "", "reasoning", ev.source, ev.modelRef || s.turnModel),
@@ -388,7 +388,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "text":
       return {
         ...s,
-        doing: "正在回答",
+        doing: "common.answering",
         outWindow: sample(s.outWindow, estimateTokens(ev.text ?? ""), Date.now()),
         outLive: s.outLive + estimateTokens(ev.text ?? ""),
         items: appendText(s.items, ev.text ?? "", "text", ev.source, ev.modelRef || s.turnModel),
@@ -459,7 +459,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
     }
 
     case "approval_request":
-      return ev.approval ? prompted(s, "等待批准", { t: "approval", id: nextId(), a: ev.approval }) : s;
+      return ev.approval ? prompted(s, "session.waitingForApproval", { t: "approval", id: nextId(), a: ev.approval }) : s;
 
     case "ask_request":
       return ev.ask ? askAnnounced(s, ev.ask) : s;
@@ -616,7 +616,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         ...s,
         running: false,
         terminal: turnTerminal(ev),
-        doing: ev.outcome === "no_progress" ? "已暂停" : ev.cancelled ? "已取消" : ev.err ? "已中断" : "已完成",
+        doing: ev.outcome === "no_progress" ? "common.held" : ev.cancelled ? "common.cancelled" : ev.err ? "common.interrupted" : "common.done",
         waiting: {},
         plan: livePlan(s.plan),
         items: withReceipt([...sealTurn(sealSay(s.items, true), ev.outcome === "no_progress" || ev.cancelled ? undefined : ev.err), ...worked(ev.workDurationMs, ev.workStartedAt)], ev.receipt),

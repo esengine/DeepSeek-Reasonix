@@ -61,7 +61,7 @@ export function SessionBatch({ hub, selection, selected, displayed, onSelect, on
     let removed = false;
     for (const row of selected) {
       try {
-        if (row.runtimeId && liveIds([row.runtimeId]).length > 0) throw new Error(t("所选会话正在运行，停止后才能操作"));
+        if (row.runtimeId && liveIds([row.runtimeId]).length > 0) throw new Error(t("sessionBatch.selectedSessionsAreRunningStop"));
         if (action === "delete") {
           if (row.runtimeId) await onClose([row.runtimeId]);
           await hub.removeSession(row.path);
@@ -89,35 +89,35 @@ export function SessionBatch({ hub, selection, selected, displayed, onSelect, on
   return (
     <div className="session-batch" aria-busy={pending}>
       <div className="session-batch-head">
-        <span role="status">{t("已选 {n} 个会话", { n: selected.length })}</span>
-        <button ref={doneButton} data-action="session.selection" data-value="end" disabled={pending} onClick={() => { cancel(); onSelect(null); }}>{t("完成选择")}</button>
+        <span role="status">{t("sessionBatch.sessionsSelected", { n: selected.length })}</span>
+        <button ref={doneButton} data-action="session.selection" data-value="end" disabled={pending} onClick={() => { cancel(); onSelect(null); }}>{t("sessionBatch.doneSelecting")}</button>
       </div>
       <div className="session-batch-actions">
         <button data-action="session.selection" data-value={all ? "clear" : "all"} disabled={phase !== "idle" || displayed.length === 0}
-          aria-label={t(all ? "取消当前显示会话的选择" : "全选当前显示的会话")}
+          aria-label={t(all ? "sessionBatch.deselectDisplayedSessions" : "sessionBatch.selectAllDisplayedSessions")}
           onClick={() => {
             const next = new Set(selection);
             for (const row of displayed) { if (all) next.delete(row.path); else next.add(row.path); }
             onSelect(next);
-          }}>{t(all ? "取消全选" : "全选可见")}</button>
+          }}>{t(all ? "sessionBatch.deselectAll" : "sessionBatch.selectVisible")}</button>
         <button data-action="session.batch-archive" data-value={restore ? "restore" : "archive"} disabled={blocked || phase === "confirm"}
-          aria-label={t(restore ? "取消所选会话归档" : "归档所选会话")} onClick={() => void run(restore ? "restore" : "archive")}>{t(restore ? "取消归档" : "归档")}</button>
-        <button ref={deleteButton} data-action="session.batch-delete" disabled={blocked || phase === "confirm"} aria-label={t("删除所选会话")}
-          onClick={() => { setPhase("confirm"); onBusy(true); }}>{t("删除")}</button>
+          aria-label={t(restore ? "sessionBatch.unarchiveSelectedSessions" : "sessionBatch.archiveSelectedSessions")} onClick={() => void run(restore ? "restore" : "archive")}>{t(restore ? "common.unarchive" : "common.archived")}</button>
+        <button ref={deleteButton} data-action="session.batch-delete" disabled={blocked || phase === "confirm"} aria-label={t("sessionBatch.deleteSelectedSessions")}
+          onClick={() => { setPhase("confirm"); onBusy(true); }}>{t("common.delete")}</button>
       </div>
-      {running && <p>{t("所选会话正在运行，停止后才能操作")}</p>}
-      {pending && <p role="status">{t("正在处理所选会话…")}</p>}
+      {running && <p>{t("sessionBatch.selectedSessionsAreRunningStop")}</p>}
+      {pending && <p role="status">{t("sessionBatch.processingSelectedSessions")}</p>}
       {phase === "confirm" && (
-        <div className="wsconfirm" role="alertdialog" aria-label={t("删除 {n} 个会话？", { n: selected.length })}
+        <div className="wsconfirm" role="alertdialog" aria-label={t("sessionBatch.deleteSessions", { n: selected.length })}
           data-action-keydown="layer.dismiss" onKeyDown={(ev) => { if (ev.key === "Escape") { ev.stopPropagation(); cancel(); } }}>
           <div className="wsconfirm-t">
-            <span className="q">{t("删除 {n} 个会话？", { n: selected.length })}</span>
+            <span className="q">{t("sessionBatch.deleteSessions", { n: selected.length })}</span>
             <span className="session-batch-names">{selected.map((row) => row.title || row.name).join(current() === "zh" ? "、" : ", ")}</span>
-            <span className="h">{t("连同其记录一并删除")}</span>
+            <span className="h">{t("common.deletesItTogetherWithIts")}</span>
           </div>
           <div className="wsconfirm-a">
-            <button autoFocus data-action="layer.dismiss" onClick={cancel}>{t("取消")}</button>
-            <button data-action="session.batch-delete" data-danger="" disabled={blocked} onClick={() => void run("delete")}>{t("删除")}</button>
+            <button autoFocus data-action="layer.dismiss" onClick={cancel}>{t("common.cancel")}</button>
+            <button data-action="session.batch-delete" data-danger="" disabled={blocked} onClick={() => void run("delete")}>{t("common.delete")}</button>
           </div>
         </div>
       )}

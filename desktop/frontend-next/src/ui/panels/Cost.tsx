@@ -12,19 +12,19 @@ import { Grp, Row } from "./kit";
 // them tells a user who has simply not sent anything yet to go and fix a price
 // table that is fine — three of these four are not about pricing at all.
 const REASON: Record<string, string> = {
-  no_usage: "尚未产生用量",
-  no_price: "价目未上报",
-  mixed_original_currencies: "多币种未合并",
-  display_unavailable: "显示币种不可用",
+  no_usage: "cost.noUsageYet",
+  no_price: "cost.noPricingReported",
+  mixed_original_currencies: "cost.currenciesNotCombined",
+  display_unavailable: "cost.displayCurrencyUnavailable",
 };
 
 const SRC: Record<string, string> = {
-  executor: "主循环",
-  subagent: "子代理",
-  compaction: "压缩",
-  planner: "规划",
-  classifier: "分类",
-  title: "标题",
+  executor: "cost.mainLoop",
+  subagent: "common.subagents2",
+  compaction: "common.compaction",
+  planner: "common.planning",
+  classifier: "common.classifying",
+  title: "common.titling",
 };
 
 interface Props {
@@ -50,7 +50,7 @@ export function Cost({ metrics, wallet, account, onRefreshWallet }: Props) {
   const peak = metrics.rounds.length ? Math.max(...metrics.rounds) : 0;
   const avg = metrics.rounds.length ? Math.round(metrics.rounds.reduce((a, b) => a + b, 0) / metrics.rounds.length) : 0;
   return (
-    <Grp id="cost" name={t("成本")} aside={t("本会话")}>
+    <Grp id="cost" name={t("cost.cost")} aside={t("common.thisSession")}>
       <div className="mtop">
         {hidden
           ? <span className="amt">{MASK}</span>
@@ -58,29 +58,29 @@ export function Cost({ metrics, wallet, account, onRefreshWallet }: Props) {
         {/* 一个按公布价计出来的数和一个拿兑底表估的数是两种断言。 */}
         {sources.length > 0 && (
           <span className="pill" data-tone={metrics.estimated ? "warn" : "ok"}>
-            {metrics.estimated ? t("按兜底价估算") : t("已结算")}
+            {metrics.estimated ? t("cost.fallbackPrice") : t("cost.settled")}
           </span>
         )}
-        {metrics.turn.some((m) => m.amount > 0) && <span className="delta">{t("本回合")}+{amounts(metrics.turn)}</span>}
+        {metrics.turn.some((m) => m.amount > 0) && <span className="delta">{t("cost.thisTurn")}+{amounts(metrics.turn)}</span>}
         {sources.length === 0 && (
-          <span className="msub">{t(REASON[metrics.incompleteReason] ?? "价目未上报")}</span>
+          <span className="msub">{t(REASON[metrics.incompleteReason] ?? "cost.noPricingReported")}</span>
         )}
       </div>
       {metrics.alt && (
         <div className="mtop" data-alt="">
           <span className="amt">{shown(metrics.alt.amount, metrics.alt.currency)}</span>
-          <span className="msub">{t("原币种")}</span>
+          <span className="msub">{t("cost.asQuoted")}</span>
         </div>
       )}
-      {metrics.alt && <p className="mnote">{t("两种结算币种不予合并 —— 合成单一总额需要虚构一个汇率。")}</p>}
+      {metrics.alt && <p className="mnote">{t("cost.twoSettlementCurrenciesDoNot")}</p>}
       {sources.map(([k, list]) => <Row key={k} k={t(SRC[k] ?? k)} v={amounts(list)} />)}
       <WalletRows wallet={wallet} account={account} onRefresh={onRefreshWallet} />
       {metrics.rounds.length > 1 && (
         <div className="sparkbox">
           <div className="sphd">
-            <span>{t("每回合用量")}</span>
+            <span>{t("cost.tokensPerRound")}</span>
             <span className="m">
-              {t("峰值 {peak} · 均 {avg}", { peak: tokens(peak), avg: tokens(avg) })}
+              {t("cost.peakAvg", { peak: tokens(peak), avg: tokens(avg) })}
             </span>
           </div>
           <Spark points={metrics.rounds} h={30} />
@@ -98,8 +98,8 @@ export function Cost({ metrics, wallet, account, onRefreshWallet }: Props) {
 function WalletRows({ wallet, account, onRefresh }: { wallet: Wallet; account: string; onRefresh: () => void }) {
   if (wallet.kind === "absent") return null;
   const name = (
-    <button type="button" className="walletk" onClick={onRefresh} title={t("重新读取余额")}>
-      {account ? t("钱包 · {name}", { name: account }) : t("钱包")}
+    <button type="button" className="walletk" onClick={onRefresh} title={t("cost.readTheBalanceAgain")}>
+      {account ? t("cost.wallet2", { name: account }) : t("cost.wallet")}
     </button>
   );
   return (
@@ -124,7 +124,7 @@ function WalletRead({ reading, name }: { reading: WalletReading; name: ReactNode
     <>
       {name}
       {/* 供应商说这个账户已经不能发请求了 —— 比余额数字本身重要。 */}
-      {!reading.available && <span className="pill" data-tone="warn">{t("已停用")}</span>}
+      {!reading.available && <span className="pill" data-tone="warn">{t("common.suspended")}</span>}
       {reading.stale && <span className="msub">{since(reading.fetchedAt, Date.now())}</span>}
     </>
   );
@@ -132,7 +132,7 @@ function WalletRead({ reading, name }: { reading: WalletReading; name: ReactNode
   if (lines.length > 1) {
     return (
       <>
-        <Row k={k} v={<span className="msub">{t("两种币种不合计")}</span>} />
+        <Row k={k} v={<span className="msub">{t("cost.twoCurrenciesNotSummed")}</span>} />
         {lines.map((l) => <Row key={l.currency} k={l.currency} v={<Amount line={l} />} />)}
       </>
     );
@@ -145,7 +145,7 @@ function Amount({ line }: { line: WalletLine }) {
     <>
       {line.total}
       {/* 赠金会过期,所以它不是余额的一部分那么简单。 */}
-      {line.granted && <span className="msub">{t("含赠金 {amount}", { amount: line.granted })}</span>}
+      {line.granted && <span className="msub">{t("cost.inclCredit", { amount: line.granted })}</span>}
     </>
   );
 }

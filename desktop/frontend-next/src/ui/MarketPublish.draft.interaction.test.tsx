@@ -53,14 +53,14 @@ it.each(["zh", "en"].flatMap((lang) => ["public", "private"].flatMap((visibility
   for (const [name, value] of Object.entries(values)) fireEvent.change(field(name), { target: { value } });
   if (visibility === "private") await userEvent.click(screen.getByRole("checkbox"));
   expect(screen.getByText(visibility === "private" ? privateSummary : publicSummary)).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: t(visibility === "private" ? "保存为私有" : "提交审核") }));
+  await userEvent.click(screen.getByRole("button", { name: t(visibility === "private" ? "marketPublish.saveAsPrivate" : "marketPublish.submitForReview") }));
 
   for (const name of Object.keys(values)) await userEvent.type(field(name), "edited");
-  await userEvent.click(screen.getByRole("radio", { name: t("主题") }));
+  await userEvent.click(screen.getByRole("radio", { name: t("common.theme") }));
   await userEvent.click(screen.getByRole("checkbox"));
-  await userEvent.click(screen.getByRole("button", { name: t("提交中…") }));
+  await userEvent.click(screen.getByRole("button", { name: t("marketPublish.submitting") }));
   const draft = Object.fromEntries(Object.keys(values).map((name) => [name, field(name).value]));
-  const kind = screen.getByRole("radio", { name: t("技能") }).getAttribute("aria-checked");
+  const kind = screen.getByRole("radio", { name: t("common.skills2") }).getAttribute("aria-checked");
   const privateDraft = screen.getByRole<HTMLInputElement>("checkbox").checked;
   const busy = document.querySelector(".mkt-pub")!.getAttribute("aria-busy");
   expect(screen.getByText(visibility === "private" ? privateSummary : publicSummary)).toBeTruthy();
@@ -80,10 +80,10 @@ it.each(["zh", "en"].flatMap((lang) => ["public", "private"].flatMap((visibility
     expect(document.querySelector(".mkt-pub")!.getAttribute("aria-busy")).toBe("false");
     await userEvent.clear(field("来源地址"));
     await userEvent.type(field("来源地址"), "https://github.com/demo/fixed-kit");
-    await userEvent.click(screen.getByRole("radio", { name: t("主题") }));
+    await userEvent.click(screen.getByRole("radio", { name: t("common.theme") }));
     await userEvent.click(screen.getByRole("checkbox"));
     expect(screen.getByText(visibility === "private" ? publicSummary : privateSummary)).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: t(visibility === "private" ? "提交审核" : "保存为私有") }));
+    await userEvent.click(screen.getByRole("button", { name: t(visibility === "private" ? "marketPublish.submitForReview" : "marketPublish.saveAsPrivate") }));
     expect(publish).toHaveBeenCalledTimes(2);
     expect(publish).toHaveBeenLastCalledWith({
       ...sent, kind: "theme", source: "https://github.com/demo/fixed-kit", visibility: visibility === "private" ? "public" : "private",
@@ -91,14 +91,14 @@ it.each(["zh", "en"].flatMap((lang) => ["public", "private"].flatMap((visibility
     expect((await screen.findByRole("status")).textContent).toContain(receipt.package.slug);
     expect(screen.queryByRole("alert")).toBeNull();
   } else {
-    expect(screen.getByRole("status").textContent).toContain(t(visibility === "private" ? "已保存 {slug} {version}，仅自己可见" : "已提交 {slug} {version}", {
+    expect(screen.getByRole("status").textContent).toContain(t(visibility === "private" ? "marketPublish.savedVisibleOnlyToYou" : "marketPublish.submitted", {
       slug: receipt.package.slug, version: receipt.version,
     }));
     expect(screen.queryByRole("alert")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: t("再发布一个") }));
+    await userEvent.click(screen.getByRole("button", { name: t("marketPublish.publishAnother") }));
     for (const name of Object.keys(values)) expect(field(name).value).toBe("");
     expect(screen.getByRole<HTMLInputElement>("checkbox").checked).toBe(false);
-    expect(screen.getByRole("radio", { name: t("技能") }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: t("common.skills2") }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText(publicSummary)).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();

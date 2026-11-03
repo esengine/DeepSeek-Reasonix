@@ -32,21 +32,21 @@ export function spanOf(node: GraphNode, calls: Map<string, number | undefined>):
 export function stateWord(state: string): string {
   switch (state) {
     case "queued":
-      return t("排队中");
+      return t("gnode.queued");
     case "running":
-      return t("运行中");
+      return t("common.running");
     case "completed":
-      return t("完成");
+      return t("common.done2");
     case "adopted":
-      return t("复用");
+      return t("gnode.reused");
     case "failed":
-      return t("失败");
+      return t("common.failed");
     case "cancelled":
-      return t("已取消");
+      return t("common.cancelled");
     case "skipped":
-      return t("跳过");
+      return t("common.skipped");
     default:
-      return t("待运行");
+      return t("gnode.notStarted");
   }
 }
 
@@ -56,11 +56,11 @@ export function stateWord(state: string): string {
 export function waitWord(cause?: string): string | undefined {
   switch (cause) {
     case "slots":
-      return t("没有空位");
+      return t("gnode.noFreeSlot");
     case "writers":
-      return t("同时写的名额满了");
+      return t("gnode.concurrentWritersFull");
     case "claim":
-      return t("要写的路径被占着");
+      return t("gnode.thePathItWritesWas");
     default:
       return undefined;
   }

@@ -101,19 +101,19 @@ const theme = (dark: boolean) =>
 // The search and go-to-line panels speak the window's language.
 const phrases = () =>
   EditorState.phrases.of({
-    Find: t("查找"),
-    Replace: t("替换"),
-    next: t("下一个"),
-    previous: t("上一个"),
-    all: t("全部"),
-    "match case": t("区分大小写"),
-    regexp: t("正则"),
-    "by word": t("全词匹配"),
-    replace: t("替换"),
-    "replace all": t("全部替换"),
-    close: t("关闭"),
-    "Go to line": t("跳到行"),
-    go: t("跳转"),
+    Find: t("common.find"),
+    Replace: t("codeEditor.replace"),
+    next: t("codeEditor.next"),
+    previous: t("codeEditor.previous"),
+    all: t("common.all"),
+    "match case": t("common.matchCase"),
+    regexp: t("codeEditor.regexp"),
+    "by word": t("codeEditor.wholeWord"),
+    replace: t("codeEditor.replace"),
+    "replace all": t("codeEditor.replaceAll"),
+    close: t("common.close"),
+    "Go to line": t("codeEditor.goToLine"),
+    go: t("codeEditor.go"),
   });
 
 interface Props {
@@ -221,5 +221,5 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
     editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value } });
   }, [value]);
 
-  return <div className="workbench-editor" ref={host} aria-label={t("文件内容")} />;
+  return <div className="workbench-editor" ref={host} aria-label={t("codeEditor.fileContents")} />;
 }

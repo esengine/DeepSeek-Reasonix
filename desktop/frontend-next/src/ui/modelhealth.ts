@@ -51,41 +51,41 @@ export function useModelHealth(port: AgentPort, pulse: number) {
 
 export function modelHealthNote(health: ProviderHealth | "checking" | undefined): string | undefined {
   if (!health || health !== "checking" && health.connection === "disabled") return undefined;
-  if (health === "checking") return t("正在检测连接与余额…");
+  if (health === "checking") return t("modelhealth.checkingConnectionAndBalance");
   const connection: Record<string, string> = {
-    reachable: "连接正常，模型调用未验证",
-    auth: "连接鉴权失败，请检查密钥或权限",
-    missing_key: "未配置 API 密钥",
-    payment_required: "服务商要求付费，请检查账户",
-    quota_exhausted: "可用配额已耗尽",
-    rate_limited: "请求暂时被限流，请稍后重试",
-    timeout: "连接检测超时，请稍后重试",
-    unreachable: "连接异常，请检查网络或服务商",
-    redirect_refused: "连接跳转被拒绝，请检查地址",
+    reachable: "modelhealth.connectionReachableModelCallsUnverif",
+    auth: "modelhealth.authenticationFailedCheckKeyOr",
+    missing_key: "modelhealth.aPIKeyNotConfigured",
+    payment_required: "modelhealth.paymentRequiredCheckYourAccount",
+    quota_exhausted: "modelhealth.availableQuotaExhausted",
+    rate_limited: "modelhealth.temporarilyRateLimitedRetryLater",
+    timeout: "modelhealth.connectionCheckTimedOutRetry",
+    unreachable: "modelhealth.connectionFailedCheckNetworkOr",
+    redirect_refused: "modelhealth.redirectRefusedCheckTheAddress",
   };
   const wallet: Record<string, string> = {
-    insufficient: "余额不足，请充值后重试",
-    auth: "余额查询鉴权失败",
-    unsupported: "余额未知（未配置查询接口）",
-    unknown: "余额暂时无法确认",
+    insufficient: "modelhealth.insufficientBalanceTopUpAnd",
+    auth: "modelhealth.balanceQueryAuthenticationFailed",
+    unsupported: "modelhealth.balanceUnknownNoQueryEndpoint",
+    unknown: "modelhealth.balanceCouldNotBeConfirmed",
   };
   const issue = wallet[health.wallet];
-  const status = t(connection[health.connection] ?? "连接状态尚未确认");
+  const status = t(connection[health.connection] ?? "modelhealth.connectionStatusUnconfirmed");
   return issue ? `${t(issue)} · ${status}` : status;
 }
 
 export function modelHealthStatus(health: ProviderHealth | "checking" | undefined): MenuStatus | undefined {
   if (!health || health !== "checking" && health.connection === "disabled") return undefined;
   const detail = modelHealthNote(health);
-  if (health === "checking") return { label: t("检测中"), tone: "checking", detail };
-  if (health.wallet === "insufficient") return { label: t("余额不足"), tone: "warning", detail };
+  if (health === "checking") return { label: t("modelhealth.checking"), tone: "checking", detail };
+  if (health.wallet === "insufficient") return { label: t("common.insufficientBalance"), tone: "warning", detail };
   const failures: Record<string, string> = {
-    auth: "鉴权失败", missing_key: "缺少密钥", payment_required: "需要付费",
-    quota_exhausted: "配额耗尽", rate_limited: "暂时限流", timeout: "连接超时",
-    unreachable: "连接异常", redirect_refused: "跳转被拒",
+    auth: "modelhealth.authFailed", missing_key: "modelhealth.missingKey", payment_required: "modelhealth.paymentRequired",
+    quota_exhausted: "modelhealth.quotaExhausted", rate_limited: "modelhealth.rateLimited", timeout: "modelhealth.timedOut",
+    unreachable: "modelhealth.connectionFailed", redirect_refused: "modelhealth.redirectRefused",
   };
   if (failures[health.connection]) return { label: t(failures[health.connection]), tone: "warning", detail };
-  if (health.wallet === "auth") return { label: t("余额查询失败"), tone: "warning", detail };
-  if (health.connection === "reachable") return { label: t("连接正常"), tone: "positive", detail };
-  return { label: t("连接待确认"), tone: "neutral", detail };
+  if (health.wallet === "auth") return { label: t("modelhealth.balanceCheckFailed"), tone: "warning", detail };
+  if (health.connection === "reachable") return { label: t("modelhealth.connected"), tone: "positive", detail };
+  return { label: t("modelhealth.unconfirmed"), tone: "neutral", detail };
 }

@@ -52,21 +52,21 @@ export function ApplyNote({ id }: { id: string }) {
  *  ownership is not a warning, and thirty of them down a page must not read as
  *  thirty alarms. */
 export const SCOPE_SAID: Record<SettingScope, string> = {
-  session: "当前会话",
-  model: "当前模型",
-  workspace: "当前工作区",
-  machine: "本机",
-  account: "账号",
-  chosen: "写入位置由你选择",
+  session: "common.thisSession2",
+  model: "group.thisModel",
+  workspace: "group.thisWorkspace",
+  machine: "common.thisMachine",
+  account: "common.account",
+  chosen: "group.youChooseWhere",
 };
 
 // 「已保存」和「生效」是两件事，重启那一档必须把它们分开说 —— 否则关掉设置的人
 // 不知道刚填的东西还在不在。
 const APPLY_SAID: Record<"immediate" | "runtime-rebuild" | "restart" | "on-open" | "next-turn" | "next-rebuild", string> = {
-  immediate: "立即生效",
-  "runtime-rebuild": "重建运行时",
-  restart: "已保存 · 重启后生效",
-  "on-open": "已保存 · 新开的会话生效",
-  "next-turn": "已保存 · 下个回合起生效",
-  "next-rebuild": "已保存 · 下次会话构建时生效",
+  immediate: "common.inEffectNow",
+  "runtime-rebuild": "common.rebuildsTheRuntime",
+  restart: "group.savedTakesEffectAfterA",
+  "on-open": "group.savedAppliesToSessionsOpened",
+  "next-turn": "group.savedAppliesFromTheNext",
+  "next-rebuild": "group.savedAppliesAtTheNext",
 };

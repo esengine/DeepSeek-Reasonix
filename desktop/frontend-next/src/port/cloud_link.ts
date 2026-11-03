@@ -120,7 +120,7 @@ async function requestBytes(request: Request): Promise<Uint8Array> {
       size += value.byteLength;
       if (size > MAX_UPLOAD) {
         await reader.cancel();
-        throw new Error(t("这次发送的内容太大：远程控制最多只能传 {mb} MB。请换一个更小的文件。", { mb: MAX_UPLOAD / (1024 * 1024) }));
+        throw new Error(t("cloudLink.thatIsTooLargeTo2", { mb: MAX_UPLOAD / (1024 * 1024) }));
       }
       chunks.push(value);
     }
@@ -189,7 +189,7 @@ export class RemoteLink {
   }
 
   async fetch(request: Request): Promise<Response> {
-    if (this.ended) throw new Error(t("远程连接已断开，请重新连接。"));
+    if (this.ended) throw new Error(t("common.theRemoteConnectionEndedReconnect"));
     const id = crypto.randomUUID();
     const body = await requestBytes(request);
     const path = request.url.slice(location.origin.length);
@@ -199,10 +199,10 @@ export class RemoteLink {
     let command: Pending["command"] = () => ({ v: 1, type: "desktop.request", id, method, path, body: bytesToBase64(body) });
     if (body.length > room) {
       if (!this.current?.features.includes("upload")) {
-        throw new Error(t("这次发送的内容太大：远程控制每次最多约 {kb} KB（上传文件时约为其四分之三）。请改在电脑上添加，或换一个更小的文件。", { kb: Math.floor(room / 1024) }));
+        throw new Error(t("cloudLink.thatIsTooLargeTo", { kb: Math.floor(room / 1024) }));
       }
       if (body.length > MAX_UPLOAD) {
-        throw new Error(t("这次发送的内容太大：远程控制最多只能传 {mb} MB。请换一个更小的文件。", { mb: MAX_UPLOAD / (1024 * 1024) }));
+        throw new Error(t("cloudLink.thatIsTooLargeTo2", { mb: MAX_UPLOAD / (1024 * 1024) }));
       }
       const parts = Math.ceil(body.length / UPLOAD_PART);
       count = parts;
@@ -281,7 +281,7 @@ export class RemoteLink {
       return;
     }
     this.pending.delete(entry.id);
-    entry.reject(new Error(t("远程 Studio 暂无响应，请检查电脑是否在线后重试。")));
+    entry.reject(new Error(t("common.remoteStudioDidNotRespond")));
   }
 
   private lost(code: number, reason: string) {
@@ -329,7 +329,7 @@ export class RemoteLink {
       failure ??= this.lastCloseCode === CLOSE_IDLE ? { code: "idle" satisfies RelayFailure } : undefined;
       this.finish({
         kind: "ended",
-        reason: t("远程 Studio 暂无响应，请检查电脑是否在线后重试。"),
+        reason: t("common.remoteStudioDidNotRespond"),
         ...(failure ? { failure } : {}),
       });
     } finally {
@@ -344,7 +344,7 @@ export class RemoteLink {
       const idempotent = entry.method === "GET" || entry.method === "HEAD";
       if (entry.sentTo && !idempotent && !canResend(entry.sentTo)) {
         this.pending.delete(entry.id);
-        entry.reject(new Error(t("连接中断，这次操作可能没有完成，请刷新后确认。")));
+        entry.reject(new Error(t("cloudLink.theConnectionDroppedThisAction")));
       }
     }
   }
@@ -353,8 +353,8 @@ export class RemoteLink {
     if (this.ended) return;
     this.ended = true;
     const error = new Error(end.kind === "reauth"
-      ? t("远程控制需要重新登录。")
-      : t("远程连接已断开，请重新连接。"));
+      ? t("common.remoteControlNeedsYouTo")
+      : t("common.theRemoteConnectionEndedReconnect"));
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer);
       entry.reject(error);
@@ -376,7 +376,7 @@ export class RemoteLink {
     if (message.type === "error") {
       clearTimeout(pending.timer);
       this.pending.delete(id);
-      pending.reject(new Error(typeof message.error === "string" ? message.error : t("远程 Studio 拒绝了这次请求。")));
+      pending.reject(new Error(typeof message.error === "string" ? message.error : t("cloudLink.remoteStudioRefusedThisRequest")));
       return;
     }
     if (message.type !== "desktop.response" || typeof message.index !== "number" || typeof message.body !== "string") return;

@@ -36,7 +36,7 @@ export function PresetPage({ entry, catalog, port, onClose, onSaved, onDeleted, 
   const changed = !samePreset(draft, entry.definition);
   const dirty = !immutable && (changed || !valid);
   const leave = usePresetLeave(dirty, busy);
-  const title = t(immutable ? "预设详情" : entry.version ? "编辑预设" : "新建预设");
+  const title = t(immutable ? "presetPage.presetDetails" : entry.version ? "presetPage.editPreset" : "common.newPreset");
   const canSave = !immutable && !busy && valid && !!draft.name.trim() &&
     /^(user|project):[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(draft.id) && (!entry.version || changed);
   useEffect(() => {
@@ -56,13 +56,13 @@ export function PresetPage({ entry, catalog, port, onClose, onSaved, onDeleted, 
         e.preventDefault(); e.stopPropagation(); leave.request(onClose);
       }}>
       <header className="preset-page-heading">
-        <button type="button" className="preset-back" data-action="agent-preset.leave" disabled={busy} onClick={() => leave.request(onClose)}><StudioIcon name="chevron" />{t("返回预设列表")}</button>
+        <button type="button" className="preset-back" data-action="agent-preset.leave" disabled={busy} onClick={() => leave.request(onClose)}><StudioIcon name="chevron" />{t("common.backToPresets")}</button>
         <h2 id={titleId}>{title}</h2>
-        <p>{immutable || entry.version ? entry.source : t("基于{name}创建", { name: entry.source })}</p>
-        {entry.version && <small className="preset-revision">{t("预设版本")}: {entry.version.revision.slice(0, 12)}</small>}
+        <p>{immutable || entry.version ? entry.source : t("presetPage.basedOn", { name: entry.source })}</p>
+        {entry.version && <small className="preset-revision">{t("presetPage.presetVersion")}: {entry.version.revision.slice(0, 12)}</small>}
       </header>
       <div className="preset-page-content">
-        {immutable && <p className="ds">{t("内置预设只读，复制后即可编辑。")}</p>}
+        {immutable && <p className="ds">{t("presetPage.builtInPresetsAreRead")}</p>}
         <CompositionEditor draft={draft} modules={catalog.modules} disabled={busy || immutable} creating={!entry.version}
           onValidityChange={setValid} onChange={(next) => { setDraft(next); setError(""); }} />
         {entry.version && !changed && valid && <PresetActions port={port} version={entry.version} busy={busy} run={run}
@@ -71,11 +71,11 @@ export function PresetPage({ entry, catalog, port, onClose, onSaved, onDeleted, 
         {error && <p className="find" data-lvl="err" role="alert">{error}</p>}
       </div>
       <footer className="preset-page-footer">
-        <p>{t("保存后供新会话选择，已有会话保持原配置。")}</p>
+        <p>{t("presetPage.availableToNewConversationsAfter")}</p>
         <div>
-          <button type="button" className="btn" data-action="agent-preset.leave" disabled={busy} onClick={() => leave.request(onClose)}>{t(immutable ? "返回" : "取消")}</button>
-          {immutable ? <button type="button" className="btn" data-primary="" data-action="agent-preset.copy" disabled={busy} onClick={() => onCopy(draft)}>{t("复制为自定义预设")}</button>
-            : <button type="submit" className="btn" data-primary="" data-action="agent-preset.save" disabled={!canSave}>{t(busy ? "保存中…" : "保存预设")}</button>}
+          <button type="button" className="btn" data-action="agent-preset.leave" disabled={busy} onClick={() => leave.request(onClose)}>{t(immutable ? "common.back" : "common.cancel")}</button>
+          {immutable ? <button type="button" className="btn" data-primary="" data-action="agent-preset.copy" disabled={busy} onClick={() => onCopy(draft)}>{t("common.duplicateAsCustomPreset")}</button>
+            : <button type="submit" className="btn" data-primary="" data-action="agent-preset.save" disabled={!canSave}>{t(busy ? "common.saving2" : "presetPage.savePreset")}</button>}
         </div>
       </footer>
     </form>

@@ -63,23 +63,23 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].flatMap((privateDraft) =>
   const publish = vi.spyOn(port, "publishMarket").mockImplementationOnce(() => pending.promise).mockResolvedValue(out);
   const onClose = vi.fn();
   render(draw(port, onClose));
-  await userEvent.click(screen.getByRole("radio", { name: t("发布") }));
+  await userEvent.click(screen.getByRole("radio", { name: t("common.publish") }));
   fill();
   if (privateDraft) await userEvent.click(screen.getByRole("checkbox"));
-  await userEvent.click(screen.getByRole("button", { name: t(privateDraft ? "保存为私有" : "提交审核") }));
+  await userEvent.click(screen.getByRole("button", { name: t(privateDraft ? "marketPublish.saveAsPrivate" : "marketPublish.submitForReview") }));
   const form = document.querySelector<HTMLFormElement>("form.mkt-pub")!;
   const controls = [
     document.querySelector<HTMLButtonElement>('[data-action="settings.close"]')!,
     document.querySelector<HTMLButtonElement>('[data-action="settings.section"][data-value="session"]')!,
-    screen.getByRole<HTMLButtonElement>("tab", { name: t("已安装") }),
-    screen.getByRole<HTMLButtonElement>("radio", { name: t("浏览") }),
-    screen.getByRole<HTMLButtonElement>("radio", { name: t("我的发布") }),
+    screen.getByRole<HTMLButtonElement>("tab", { name: t("common.installed") }),
+    screen.getByRole<HTMLButtonElement>("radio", { name: t("market.browse") }),
+    screen.getByRole<HTMLButtonElement>("radio", { name: t("market.myPackages") }),
   ];
   for (const button of controls) {
     expect(button.disabled).toBe(true);
     await userEvent.click(button);
   }
-  await userEvent.type(screen.getByRole("textbox", { name: t("搜索设置") }), "模型");
+  await userEvent.type(screen.getByRole("textbox", { name: t("settings.searchSettings2") }), "模型");
   const found = screen.getAllByRole<HTMLButtonElement>("option");
   for (const button of found) {
     expect(button.disabled).toBe(true);
@@ -103,14 +103,14 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].flatMap((privateDraft) =>
   if (outcome === "success") {
     expect(published()?.textContent).toContain(out.package.slug);
     expect(screen.queryByRole("alert")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: t("再发布一个") }));
+    await userEvent.click(screen.getByRole("button", { name: t("marketPublish.publishAnother") }));
     expect(field("名称").value).toBe("");
     expect(field("来源地址").value).toBe("");
   } else {
     expect(screen.getByRole("alert").textContent).toContain("registry temporarily unavailable");
     expect(field("名称").value).toBe("notes-kit");
     expect(field("来源地址").value).toBe("https://example.com/notes-kit/SKILL.md");
-    await userEvent.click(screen.getByRole("button", { name: t(privateDraft ? "保存为私有" : "提交审核") }));
+    await userEvent.click(screen.getByRole("button", { name: t(privateDraft ? "marketPublish.saveAsPrivate" : "marketPublish.submitForReview") }));
     expect(published()?.textContent).toContain(out.package.slug);
     expect(publish).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert")).toBeNull();

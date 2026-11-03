@@ -5,11 +5,11 @@ import type { AgentPort, BackupCatalog, BackupCategory, BackupEntry } from "../p
 import { accountBackupSource, BackupRestore, CATEGORY_LABEL } from "./BackupRestore";
 
 export const CATEGORY_NOTE: Record<BackupCategory, string> = {
-  settings: "供应商、默认模型、预设与界面外观；不含审批模式、权限和沙箱",
-  extensions: "插件只记录来源与版本，恢复时仍走插件安装确认",
-  memory: "用户级指令文件与全局记忆",
-  automation: "会在本机运行的命令，恢复时逐项确认",
-  secrets: "默认不备份。勾选后密钥会随备份一起加密上传",
+  settings: "backup.providersDefaultModelPresetsAnd",
+  extensions: "backup.pluginsAreRecordedBySource",
+  memory: "backup.userLevelInstructionFilesAnd",
+  automation: "backup.commandsThatRunOnThis",
+  secrets: "backup.offByDefaultWhenTicked",
 };
 
 // Shown only to a signed-in account: a backup lives in the account, so there
@@ -60,11 +60,11 @@ function BackupInput({ port }: { port: AgentPort }) {
   const ready = (chosen?.size ?? 0) > 0 && pass.length >= min && pass === again && !busy;
   const wait =
     !chosen?.size
-      ? t("至少选择一项备份内容")
+      ? t("common.tickAtLeastOneThing")
       : pass.length < min
-        ? t("口令还差 {n} 个字符", { n: min - pass.length })
+        ? t("common.passphraseTooShortMoreNeeded", { n: min - pass.length })
         : again === ""
-          ? t("请再输一次口令")
+          ? t("common.repeatThePassphraseToConfirm")
           : "";
 
   const create = async () => {
@@ -78,7 +78,7 @@ function BackupInput({ port }: { port: AgentPort }) {
       setAgain("");
       setLabel("");
       const skipped = out.omitted?.length ?? 0;
-      setNote(skipped ? t("已备份。{n} 个文件过大或无法读取，未包含在内。", { n: skipped }) : t("已备份。"));
+      setNote(skipped ? t("backup.backedUpFilesWereToo", { n: skipped }) : t("backup.backedUp"));
       await load();
     } catch (e) {
       setError(reason(e));
@@ -108,16 +108,16 @@ function BackupInput({ port }: { port: AgentPort }) {
   };
 
   if (!catalog) {
-    return error ? <p className="acct-note" data-err="">{error}</p> : <p className="acct-note">{t("正在读取备份…")}</p>;
+    return error ? <p className="acct-note" data-err="">{error}</p> : <p className="acct-note">{t("backup.loadingBackups")}</p>;
   }
 
   return (
     <div className="bk">
       <p className="acct-note">
-        {t("备份在本机用你设置的口令加密后才上传，服务端看不到其中内容。忘记口令就无法恢复。")}
+        {t("backup.aBackupIsEncryptedHere")}
       </p>
 
-      <div className="bk-cats" role="group" aria-label={t("备份内容")}>
+      <div className="bk-cats" role="group" aria-label={t("backup.whatToBackUp")}>
         {catalog.categories.map((c) => (
           <label key={c.id} className="bk-cat" data-warn={c.id === "secrets" && chosen?.has(c.id) ? "" : undefined}>
             <input type="checkbox" checked={chosen?.has(c.id) ?? false} disabled={busy} onChange={() => toggle(c.id)} data-action="backup.category" data-target={c.id} />
@@ -129,23 +129,23 @@ function BackupInput({ port }: { port: AgentPort }) {
 
       <div className="bk-fields">
         <label className="grow full">
-          <span>{t("备注（可选）")}</span>
-          <input data-action="backup.label" value={label} disabled={busy} maxLength={80} placeholder={t("例如：公司笔记本")} onChange={(e) => setLabel(e.target.value)} />
+          <span>{t("backup.labelOptional")}</span>
+          <input data-action="backup.label" value={label} disabled={busy} maxLength={80} placeholder={t("backup.eGWorkLaptop")} onChange={(e) => setLabel(e.target.value)} />
         </label>
         <label className="grow">
-          <span>{t("加密口令（至少 {n} 个字符）", { n: min })}</span>
+          <span>{t("common.passphraseAtLeastCharacters", { n: min })}</span>
           <input data-action="backup.passphrase" data-target="new" type="password" autoComplete="new-password" value={pass} disabled={busy} onChange={(e) => setPass(e.target.value)} />
         </label>
         <label className="grow">
-          <span>{t("再输一次")}</span>
+          <span>{t("common.repeatIt")}</span>
           <input data-action="backup.passphrase" data-target="again" type="password" autoComplete="new-password" value={again} disabled={busy} onChange={(e) => setAgain(e.target.value)} />
         </label>
       </div>
-      {mismatch && <p className="acct-note" data-err="">{t("两次输入的口令不一致")}</p>}
+      {mismatch && <p className="acct-note" data-err="">{t("common.theTwoPassphrasesDiffer")}</p>}
 
       <div className="bk-acts">
         <button className="act" data-primary data-action="backup.create" disabled={!ready} aria-describedby={!ready && wait ? "bk-wait" : undefined} onClick={() => void create()}>
-          {t(busy ? "正在加密上传…" : "备份到账号")}
+          {t(busy ? "backup.encryptingAndUploading" : "backup.backUpToAccount")}
         </button>
         {!ready && !busy && wait && (
           <span id="bk-wait" className="acct-note" aria-live="polite" data-action="backup.wait">
@@ -153,30 +153,30 @@ function BackupInput({ port }: { port: AgentPort }) {
           </span>
         )}
         <span className="acct-note">
-          {t("已用 {n}/{max} 份", { n: catalog.backups.length, max: catalog.limits.maxCount })}
+          {t("backup.ofUsed", { n: catalog.backups.length, max: catalog.limits.maxCount })}
         </span>
       </div>
       {note && <p className="acct-note">{note}</p>}
       {error && <p className="acct-note" data-err="">{error}</p>}
 
       {catalog.backups.length === 0 ? (
-        <p className="acct-note">{t("账号里还没有备份。")}</p>
+        <p className="acct-note">{t("backup.noBackupsInThisAccount")}</p>
       ) : (
         <ul className="bk-list">
           {catalog.backups.map((b) => (
             <li key={b.id} className="bk-row">
               <div className="who">
-                <span className="nm">{b.label || t("未命名备份")}</span>
+                <span className="nm">{b.label || t("common.untitledBackup")}</span>
                 <span className="meta">
                   {new Date(b.createdAt).toLocaleString()} · {b.platform} · {b.appVersion || "—"} · {Math.max(1, Math.round(b.ciphertextBytes / 1024))} KB
                 </span>
                 <span className="meta">{b.categories.map((c) => t(CATEGORY_LABEL[c] ?? c)).join("、")}</span>
               </div>
               <button className="btn sm" data-action="backup.restore" data-target={b.id} onClick={() => setRestoring(b)}>
-                {t("恢复…")}
+                {t("backup.restore")}
               </button>
               <button className="btn sm" data-action="backup.delete" data-target={b.id} disabled={dropping.get(b.id) === "pending"} aria-busy={dropping.get(b.id) === "pending" || undefined} onClick={() => void drop(b.id)} onMouseLeave={() => setDropping((current) => current.get(b.id) === "confirm" ? new Map([...current].filter(([id]) => id !== b.id)) : current)}>
-                {t(dropping.get(b.id) === "confirm" ? "确认删除" : "删除")}
+                {t(dropping.get(b.id) === "confirm" ? "common.confirmDelete" : "common.delete")}
               </button>
             </li>
           ))}

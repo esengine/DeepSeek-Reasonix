@@ -72,7 +72,7 @@ describe("importing a Wallpaper Engine folder", () => {
     fireEvent.change(input, { target: { files: [new File([new Uint8Array([1])], "scene.pkg")] } });
 
     expect(uploadScene).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith(t("文件夹里需要 project.json 和 scene.pkg"));
+    expect(onError).toHaveBeenCalledWith(t("wallpaperSceneImport.theFolderNeedsProjectJson"));
   });
 
   it("mutes a scene's soundtrack", () => {
@@ -86,7 +86,7 @@ describe("importing a Wallpaper Engine folder", () => {
         onError={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: t("关闭声音") }));
+    fireEvent.click(screen.getByRole("button", { name: t("common.muteSound") }));
     expect(setPaper).toHaveBeenCalledWith({ muted: true });
   });
 });

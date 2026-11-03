@@ -101,8 +101,8 @@ export function ModelChoice({
           type="search"
           value={q}
           spellCheck={false}
-          placeholder={t("搜索或输入完整模型 ID…")}
-          aria-label={t("搜索或添加模型")}
+          placeholder={t("modelChoice.searchOrEnterAnExact")}
+          aria-label={t("modelChoice.searchOrAddAModel")}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter" || !naming) return;
@@ -113,15 +113,15 @@ export function ModelChoice({
         {query && <span className="cnt">{hits.length} / {models.length}</span>}
         {onFetch && (
           <button className="mfetch" data-action="provider.probe" onClick={onFetch} disabled={fetchDisabled}>
-            {t(fetching ? "正在从服务商读取…" : "没找到？从服务商读取可用模型")}
+            {t(fetching ? "common.readingFromProvider" : "modelChoice.notListedReadAvailableModels")}
           </button>
         )}
       </div>
       {fetchFail && (
         <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("读取模型列表失败")}</span>
+          <span className="t">{t("modelChoice.couldNotReadTheModel")}</span>
           <span className="why">{fetchFail}</span>
-          <span className="why">{t("可以直接输入完整模型 ID 添加。")}</span>
+          <span className="why">{t("modelChoice.youCanAlsoTypeThe")}</span>
         </div>
       )}
 
@@ -130,16 +130,16 @@ export function ModelChoice({
           <div className="mline" key={m} data-off={on.has(m) ? undefined : ""}
             aria-busy={facts?.[m]?.checking || undefined}>
             <button className="tick" role="checkbox" aria-checked={on.has(m)}
-              aria-label={t("选用 {name}", { name: m })} onClick={() => onToggle(m)}>
+              aria-label={t("modelChoice.enable", { name: m })} onClick={() => onToggle(m)}>
               <i />
             </button>
             <span className="mid">
               <span className="nm" title={labels?.[m] ? m : undefined}>{labels?.[m] ?? m}</span>
               {onAlias && <input className="malias" value={aliasFor(m)} spellCheck={false}
                 data-action="provider.draft" data-value="model-alias" data-target={m}
-                aria-label={t("{name} 的显示别名", { name: m })}
-                placeholder={t("显示别名（留空使用模型 ID）")}
-                title={t("仅用于显示，不改变请求中的模型 ID")}
+                aria-label={t("modelChoice.displayAliasFor", { name: m })}
+                placeholder={t("modelChoice.displayAliasEmptyUsesModel")}
+                title={t("modelChoice.displayOnlyTheModelID")}
                 disabled={!on.has(m)} onChange={(e) => onAlias(m, e.target.value)} />}
               {facts?.[m] && <ModelEvidence fact={facts[m]} />}
             </span>
@@ -147,26 +147,26 @@ export function ModelChoice({
               {onCheck && (
                 <button className="mverify" data-action="provider.model-check" data-target={m}
                   disabled={!on.has(m) || checkDisabled || facts?.[m]?.checking}
-                  aria-label={t("验证模型 {name}", { name: m })} onClick={() => onCheck(m)}>
-                  {t(facts?.[m]?.checking ? "验证中…" : facts?.[m]?.status ? "重新验证" : "验证")}
+                  aria-label={t("modelChoice.verifyModel", { name: m })} onClick={() => onCheck(m)}>
+                  {t(facts?.[m]?.checking ? "common.verifying" : facts?.[m]?.status ? "modelChoice.verifyAgain" : "common.verify")}
                 </button>
               )}
               {onVision ? (
                 <button className="vtag" aria-pressed={vision.includes(m)}
-                  aria-label={t("{name} 的图片输入", { name: m })}
+                  aria-label={t("modelChoice.imageInputFor", { name: m })}
                   disabled={!on.has(m) || visionLocked?.(m)}
-                  title={visionLocked?.(m) ? t("当前连接不会向这个模型发送图片") : t(vision.includes(m) ? "已启用图片输入" : "图片能力未确认；点击后按手动声明启用")}
+                  title={visionLocked?.(m) ? t("modelChoice.thisConnectionWillNotSend") : t(vision.includes(m) ? "modelChoice.imageInputEnabled" : "modelChoice.imageCapabilityIsUnverifiedClick")}
                   onClick={() => onVision(m)}>
-                  {t(vision.includes(m) ? "读图" : visionLocked?.(m) ? "不发送图片" : "读图？")}
+                  {t(vision.includes(m) ? "common.readsImages" : visionLocked?.(m) ? "modelChoice.noImages" : "modelChoice.images")}
                 </button>
               ) : (
-                vision.includes(m) && <span className="vtag" data-flat>{t("读图")}</span>
+                vision.includes(m) && <span className="vtag" data-flat>{t("common.readsImages")}</span>
               )}
               {onDefault && (
                 <button className="dtag" aria-pressed={def === m} disabled={!on.has(m)}
-                  aria-label={t("将 {name} 设为默认模型", { name: m })}
+                  aria-label={t("modelChoice.makeTheDefaultModel", { name: m })}
                   onClick={() => onDefault(m)}>
-                  {t("默认")}
+                  {t("common.default")}
                 </button>
               )}
             </span>
@@ -174,8 +174,8 @@ export function ModelChoice({
         ))}
       </div>
 
-      {hidden > 0 && <span className="mmore">{t("另有 {n} 个未列出，可通过搜索找到", { n: hidden })}</span>}
-      {shown.length === 0 && !naming && <div className="empty">{t("没有匹配的模型。")}</div>}
+      {hidden > 0 && <span className="mmore">{t("modelChoice.moreNotListedSearchTo", { n: hidden })}</span>}
+      {shown.length === 0 && !naming && <div className="empty">{t("modelChoice.noModelsMatch")}</div>}
 
       {/* Under the list, never over it: a "create" offer sitting above seven
           real matches is how you add a model when you meant to pick one. */}
@@ -183,8 +183,8 @@ export function ModelChoice({
         <button className="mnew" onClick={add}>
           <span className="k">+</span>
           <span className="tx">
-            <span className="lb">{t("添加未列出的模型「{name}」", { name: q.trim() })}</span>
-            <span className="ds">{t("按原始模型 ID 保存；添加后可以验证，不会替换成相似名称")}</span>
+            <span className="lb">{t("modelChoice.addUnlistedModel", { name: q.trim() })}</span>
+            <span className="ds">{t("modelChoice.savesTheExactModelID")}</span>
           </span>
         </button>
       )}
@@ -194,20 +194,20 @@ export function ModelChoice({
 
 function ModelEvidence({ fact }: { fact: ModelFact }) {
   const origin = {
-    configured: "已配置",
-    endpoint: "现场探测",
-    manual: "用户添加",
-    missing: "本次未返回",
+    configured: "modelChoice.configured",
+    endpoint: "modelChoice.endpointCatalog",
+    manual: "modelChoice.addedManually",
+    missing: "modelChoice.notReturnedThisTime",
   }[fact.origin];
   const state = fact.checking
-    ? "验证中…"
+    ? "common.verifying"
     : fact.status === "available"
-      ? "已验证可用"
+      ? "modelChoice.verifiedAvailable"
       : fact.status === "unavailable"
         ? unavailableReason(fact.reason)
         : fact.status === "unknown"
           ? checkReason(fact.reason)
-          : "待验证";
+          : "modelChoice.notVerified";
   return (
     <span className="mevidence" role={fact.status === "unavailable" && !fact.checking ? "alert" : undefined}>
       <span>{t(origin)}</span>
@@ -220,23 +220,23 @@ function ModelEvidence({ fact }: { fact: ModelFact }) {
 
 function unavailableReason(reason?: ProviderModelCheckReason): string {
   switch (reason) {
-    case "not_found": return "模型不存在或账号未开放";
-    case "rejected": return "端点不接受这个模型";
-    case "tools": return "能对话但不接受工具调用，用不了";
-    default: return "当前不可用";
+    case "not_found": return "modelChoice.theModelDoesNotExist";
+    case "rejected": return "modelChoice.theEndpointDoesNotAccept";
+    case "tools": return "modelChoice.answersChatButRefusesTool";
+    default: return "modelChoice.currentlyUnavailable";
   }
 }
 
 function checkReason(reason?: ProviderModelCheckReason): string {
   switch (reason) {
-    case "auth": return "凭据未通过，尚未确认";
-    case "rate_limited": return "遇到限流，尚未确认";
-    case "network": return "网络异常，尚未确认";
-    case "timeout": return "验证超时，尚未确认";
-    case "local_timeout": return "本机服务没有在时限内回答，尚未确认；模型若刚启动可能还在加载，稍后再验证一次";
-    case "redirect_refused": return "地址跳转到了另一个主机，已拒绝，尚未确认";
-    case "rejected": return "请求被拒绝，尚未确认";
-    default: return "尚未确认";
+    case "auth": return "modelChoice.credentialsWereRejectedAvailabilityI";
+    case "rate_limited": return "modelChoice.rateLimitedAvailabilityIsStill";
+    case "network": return "modelChoice.networkErrorAvailabilityIsStill";
+    case "timeout": return "modelChoice.verificationTimedOutAvailabilityIs";
+    case "local_timeout": return "modelChoice.theLocalServiceDidNot";
+    case "redirect_refused": return "modelChoice.theAddressRedirectedToAnother";
+    case "rejected": return "modelChoice.requestRejectedAvailabilityIsStill";
+    default: return "modelChoice.availabilityIsStillUnknown";
   }
 }
 
@@ -252,10 +252,10 @@ function checkTally(picked: string[], facts?: Record<string, ModelFact>): string
   const count = { available: 0, unavailable: 0, unknown: 0, checking: 0, todo: 0 };
   for (const m of picked) count[facts[m]?.checking ? "checking" : facts[m]?.status ?? "todo"]++;
   return [
-    count.available && t("{n} 个可用", { n: count.available }),
-    count.unavailable && t("{n} 个不可用", { n: count.unavailable }),
-    count.unknown && t("{n} 个无法确定", { n: count.unknown }),
-    count.checking && t("{n} 个验证中", { n: count.checking }),
-    count.todo && t("{n} 个未验证", { n: count.todo }),
+    count.available && t("modelChoice.available", { n: count.available }),
+    count.unavailable && t("modelChoice.unavailable", { n: count.unavailable }),
+    count.unknown && t("modelChoice.undetermined", { n: count.unknown }),
+    count.checking && t("modelChoice.verifying", { n: count.checking }),
+    count.todo && t("modelChoice.notVerified2", { n: count.todo }),
   ].filter(Boolean).join(" · ");
 }

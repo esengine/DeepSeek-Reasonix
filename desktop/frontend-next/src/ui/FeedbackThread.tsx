@@ -21,7 +21,7 @@ const encoder = new TextEncoder();
 // Used only when the limit could not be read; the kernel still refuses an oversized reply.
 const REPLY_BYTES_FALLBACK = 4096;
 
-const AUTHOR_LABEL = { maintainer: "维护者", user: "你" } as const;
+const AUTHOR_LABEL = { maintainer: "feedbackThread.maintainers", user: "common.you" } as const;
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString(current() === "zh" ? "zh-CN" : "en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -49,21 +49,21 @@ export function FeedbackThread({ item, level = null, fresh, onView }: ThreadProp
   const isNew = (r: FeedbackReply) => newIds.has(r.id);
   if (replies.length === 0) return null;
   return (
-    <section className="fbk-thread" aria-label={t("对话")}>
+    <section className="fbk-thread" aria-label={t("feedbackThread.conversation")}>
       <button type="button" className="btn sm fbk-thread-toggle" data-action="feedback.thread.toggle" data-target={item.receipt} aria-expanded={expanded} aria-controls={id} onClick={() => {
         const next = !expanded;
         setExpanded(next);
         onView?.(item.receipt, next ? all : null);
       }}>
         <StudioIcon name={expanded ? "down" : "chevron"} />
-        <span>{t(expanded ? "收起对话" : "展开对话")}</span>
-        <span className="fbk-meta">{t("{n} 条回复", { n: replies.length })}</span>
-        {fresh > 0 && <span className="fbk-thread-new">{t("{n} 条新回复", { n: fresh })}</span>}
+        <span>{t(expanded ? "feedbackThread.collapseConversation" : "feedbackThread.expandConversation")}</span>
+        <span className="fbk-meta">{t("feedbackThread.replies", { n: replies.length })}</span>
+        {fresh > 0 && <span className="fbk-thread-new">{t("feedbackThread.newReplies", { n: fresh })}</span>}
       </button>
       <div id={id} className="fbk-thread-body" hidden={!expanded}>
         {hidden > 0 && (
           <button type="button" className="btn sm" data-action="feedback.thread.more" onClick={() => { setAll(true); onView?.(item.receipt, true); }}>
-            {t("显示更早的 {n} 条", { n: hidden })}
+            {t("feedbackThread.showEarlierMessages", { n: hidden })}
           </button>
         )}
         <ol>
@@ -74,10 +74,10 @@ export function FeedbackThread({ item, level = null, fresh, onView }: ThreadProp
                 {r.author === "user" && level !== null && (
                   <>
                     <LevelBadge level={level} decorative size={14} />
-                    <span className="sr-only">{t("等级 {n}", { n: level })}</span>
+                    <span className="sr-only">{t("feedbackThread.level", { n: level })}</span>
                   </>
                 )}
-                {isNew(r) && <span className="fbk-new">{t("新")}</span>}
+                {isNew(r) && <span className="fbk-new">{t("common.new")}</span>}
                 <time dateTime={r.createdAt}>{when(r.createdAt)}</time>
               </div>
               <p className="fbk-msg" dir="auto">{r.body}</p>
@@ -93,7 +93,7 @@ export function FeedbackReviewNote({ item }: { item: FeedbackItem }) {
   if (!isUnderReview(item)) return null;
   return (
     <p className="fbk-hint fbk-review" data-review="" role="status">
-      {t("维护者正在查看这份反馈，可能会回复你。现在还不能回复；维护者回复后，这里会出现回复框。")}
+      {t("feedbackThread.aMaintainerIsReadingThis")}
     </p>
   );
 }
@@ -135,7 +135,7 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
   const replyable = canReplyTo(item);
   if (!replyable) return null;
   const reopens = item.status === "fixed";
-  if (offline) return <p className="fbk-hint">{t("离线时暂时不能回复。")}</p>;
+  if (offline) return <p className="fbk-hint">{t("feedbackThread.youCannotReplyWhileOffline")}</p>;
 
   const expanded = open || item.needsInput;
   const bytes = encoder.encode(text).length;
@@ -167,7 +167,7 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
     return (
       <button type="button" className="btn sm fbk-reply-open" ref={opener} data-action="feedback.reply.open" onClick={() => { setOpen(true); requestAnimationFrame(() => field.current?.focus()); }}>
         <StudioIcon name="edit" />
-        {t(reopens ? "仍未解决，回复" : "回复")}
+        {t(reopens ? "feedbackThread.stillNotFixedReply" : "feedbackThread.reply")}
       </button>
     );
   }
@@ -188,7 +188,7 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
       data-action-submit="feedback.reply.send"
       onSubmit={(e) => { e.preventDefault(); void send(); }}
     >
-      <label htmlFor={id} className="fbk-label">{item.needsInput ? t("你的回复") : t(reopens ? "说明还有什么问题" : "回复维护者")}</label>
+      <label htmlFor={id} className="fbk-label">{item.needsInput ? t("feedbackThread.yourReply") : t(reopens ? "feedbackThread.tellUsWhatIsStill" : "feedbackThread.replyToTheMaintainers")}</label>
       <textarea
         id={id}
         ref={field}
@@ -202,13 +202,13 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
       />
       <div className="fbk-reply-foot">
         <span id={`${id}-hint`} className="fbk-hint">
-          {reopens && t("发送后这份反馈会重新打开，维护者会再次处理。")}{" "}
+          {reopens && t("feedbackThread.sendingThisReopensTheReport")}{" "}
           {item.issueNumber
-            ? t("这份反馈已有公开议题 #{n}：你的回复会被公开转发到那个议题里。请不要写入密钥、密码或私有内容。", { n: item.issueNumber })
-            : t("只发给维护者，不会公开。请不要写入密钥、密码或私有代码。")}
+            ? t("feedbackThread.thisReportAlreadyHasA", { n: item.issueNumber })
+            : t("feedbackThread.sentToTheMaintainersOnly")}
         </span>
         <span id={`${id}-count`} className="fbk-count" data-over={over ? "" : undefined}>
-          {t("{n} / {max} 字节", { n: bytes.toLocaleString(), max: max.toLocaleString() })}
+          {t("common.bytes", { n: bytes.toLocaleString(), max: max.toLocaleString() })}
         </span>
       </div>
       {limits && (
@@ -223,14 +223,14 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
           <div className="fbk-drop-line">
             <button type="button" className="btn sm" data-action="feedback.shot.pick" disabled={sending || shots.length >= limits.images} onClick={() => picker.current?.click()}>
               <StudioIcon name="plus" />
-              {t("添加截图…")}
+              {t("common.addScreenshots")}
             </button>
             <span className="fbk-hint">
-              {t("也可以直接粘贴。PNG 或 JPEG，最多 {n} 张，每张不超过 {size} MB。", { n: limits.images, size: megabytes(limits.uploadBytes) })}{" "}
-              {t("截图先只发给维护者，由维护者决定是否公开。")}
+              {t("feedbackThread.youCanAlsoPastePNG", { n: limits.images, size: megabytes(limits.uploadBytes) })}{" "}
+              {t("feedbackThread.screenshotsGoToTheMaintainers")}
             </span>
           </div>
-          <input ref={picker} className="sr-only" type="file" accept="image/png,image/jpeg" multiple tabIndex={-1} aria-label={t("选择截图文件")} data-action="feedback.shot.pick" onChange={(e) => { void add([...(e.target.files ?? [])]); e.target.value = ""; }} />
+          <input ref={picker} className="sr-only" type="file" accept="image/png,image/jpeg" multiple tabIndex={-1} aria-label={t("common.chooseScreenshotFiles")} data-action="feedback.shot.pick" onChange={(e) => { void add([...(e.target.files ?? [])]); e.target.value = ""; }} />
           {refused.length > 0 && (
             <ul className="fbk-refused" role="status">
               {refused.map((r, i) => (
@@ -246,16 +246,16 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
           <span>{failure.message}</span>
           {failure.code === FEEDBACK_CODE.unavailable && (
             <button type="button" className="btn sm" data-action="feedback.link" onClick={() => onFile(FEEDBACK_REPO_ISSUES + "new/choose")}>
-              {t("去 GitHub")}
+              {t("common.goToGitHub")}
             </button>
           )}
         </div>
       )}
       <div className="fbk-acts">
-        <button className="act" type="submit" data-primary disabled={blocked}>{t(sending ? "正在发送…" : "发送回复")}</button>
+        <button className="act" type="submit" data-primary disabled={blocked}>{t(sending ? "common.sending" : "feedbackThread.sendReply")}</button>
         {!item.needsInput && (
           <button className="act" type="button" data-action="feedback.reply.cancel" disabled={sending} onClick={() => { setOpen(false); setFailure(null); requestAnimationFrame(() => opener.current?.focus()); }}>
-            {t("取消")}
+            {t("common.cancel")}
           </button>
         )}
       </div>

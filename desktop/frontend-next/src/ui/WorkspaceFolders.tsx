@@ -24,10 +24,10 @@ export function WorkspaceFolders({ port, onChanged }: { port: AgentPort; onChang
   if (loadFailed) {
     return (
       <div className="sec" id="set-workspace-folders">
-        <h3>{t("此项目的额外文件夹")}</h3>
+        <h3>{t("workspaceFolders.extraFoldersForThisProject")}</h3>
         <div className="find" data-lvl="warn" role="status">
-          <span className="t">{t("无法读取这个项目的额外文件夹")}</span>
-          <button className="act" data-action="folders.retry" onClick={() => setAttempt((n) => n + 1)}>{t("重试")}</button>
+          <span className="t">{t("workspaceFolders.couldNotReadThisProject")}</span>
+          <button className="act" data-action="folders.retry" onClick={() => setAttempt((n) => n + 1)}>{t("common.retry")}</button>
         </div>
       </div>
     );
@@ -60,20 +60,20 @@ export function WorkspaceFolders({ port, onChanged }: { port: AgentPort; onChang
 
   return (
     <div className="sec" id="set-workspace-folders">
-      <h3>{t("此项目的额外文件夹")}</h3>
+      <h3>{t("workspaceFolders.extraFoldersForThisProject")}</h3>
       <p className="note">
-        {t("agent 默认只能修改当前项目的文件夹。在这里添加的文件夹也允许写入，只对本项目生效，记在你的用户目录里，不会写进仓库；上面的「额外可写目录」则对所有项目生效。")}
+        {t("workspaceFolders.theAgentCanOnlyModify")}
       </p>
       <p className="note">
-        {t("添加后，agent 将能修改并删除该文件夹里的任何文件。")}
+        {t("workspaceFolders.onceAddedTheAgentCan")}
       </p>
       <p className="note">
-        {t("「完全放行」只决定是否询问，不会扩大可写范围；要让 agent 修改另一个文件夹，请在这里添加。")}
+        {t("workspaceFolders.allowEverythingOnlyDecidesWhether")}
       </p>
       <div className="extra">
-        <div className="sublb">{t("项目文件夹")}</div>
+        <div className="sublb">{t("workspaceFolders.projectFolders")}</div>
         <div className="kv">
-          <span className="k">{t("当前项目")}</span>
+          <span className="k">{t("common.thisProject")}</span>
           <span className="v"><code>{roots.primary || "—"}</code></span>
         </div>
         {roots.extra.map((p) => (
@@ -84,10 +84,10 @@ export function WorkspaceFolders({ port, onChanged }: { port: AgentPort; onChang
               data-action="folders.remove"
               data-target={p}
               disabled={busy}
-              aria-label={t("移除文件夹 {path}", { path: p })}
+              aria-label={t("workspaceFolders.removeFolder", { path: p })}
               onClick={() => void change(() => port.removeWorkspaceRoot(p))}
             >
-              {t("移除")}
+              {t("common.remove")}
             </button>
           </div>
         ))}
@@ -95,25 +95,25 @@ export function WorkspaceFolders({ port, onChanged }: { port: AgentPort; onChang
           <input
             value={draft}
             data-action-keydown="folders.add"
-            aria-label={t("要添加的文件夹路径")}
-            placeholder={t("绝对路径，例如 /Users/you/code/shared-lib")}
+            aria-label={t("workspaceFolders.folderPathToAdd")}
+            placeholder={t("workspaceFolders.absolutePathForExampleUsers")}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void add(draft)}
           />
           <button className="act" data-action="folders.pick" disabled={busy} onClick={() => void pick()}>
-            {t("选文件夹")}
+            {t("common.chooseAFolder")}
           </button>
           <button className="act" data-action="folders.add" disabled={busy || !draft.trim()} onClick={() => void add(draft)}>
-            {t("添加")}
+            {t("common.add")}
           </button>
         </div>
       </div>
       {roots.extra.length > 0 && (
-        <p className="note">{t("移除后，已经打开的窗格要等重建后才会收窄可写范围。")}</p>
+        <p className="note">{t("workspaceFolders.afterARemovalPanesThat")}</p>
       )}
       {(roots.pending ?? 0) > 0 && (
         <p className="note" role="status">
-          {t("还有 {n} 个窗格正在运行，它们会在下次重建时采用这个改动。", { n: roots.pending ?? 0 })}
+          {t("workspaceFolders.panesAreStillRunningAnd", { n: roots.pending ?? 0 })}
         </p>
       )}
       {error && (

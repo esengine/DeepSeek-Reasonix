@@ -21,12 +21,12 @@ export function DefaultMode({ port }: { port: AgentPort }) {
   }, [port]);
 
   const group = (body: ReactNode) => (
-    <Group id="default-mode" title={t("新对话的起始模式")} hint={t("新建对话时先进入哪种模式。只影响起点，不会改动已有的对话。")}>
+    <Group id="default-mode" title={t("common.howNewConversationsStart")} hint={t("defaultMode.whichModeANewConversation")}>
       {body}
     </Group>
   );
 
-  if (!state) return group(<div className="empty">{t("无法读取新对话的起始模式设置。")}</div>);
+  if (!state) return group(<div className="empty">{t("defaultMode.couldNotReadTheSetting")}</div>);
 
   const flip = async () => {
     setBusy(true);
@@ -44,14 +44,14 @@ export function DefaultMode({ port }: { port: AgentPort }) {
     <div className="box">
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("新对话默认进入计划模式")}</span>
-          <span className="ds">{t("新建的对话先做计划，你批准后才动手。输入框里的模式按钮仍可随时切换；已有的对话保持它自己的模式。默认关闭，只写在你自己的用户配置里，项目配置不能替你改。")}</span>
+          <span className="lb">{t("defaultMode.startNewConversationsInPlan")}</span>
+          <span className="ds">{t("defaultMode.aNewConversationPlansFirst")}</span>
         </span>
         <Switch
           data-action="default-mode.plan"
           on={state.plan}
           busy={busy}
-          label={t("新对话默认进入计划模式")}
+          label={t("defaultMode.startNewConversationsInPlan")}
           onClick={() => void flip()}
         />
       </div>

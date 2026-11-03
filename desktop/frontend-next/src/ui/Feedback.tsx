@@ -11,7 +11,7 @@ import { StudioIcon } from "./StudioIcon";
 export type FeedbackTab = "send" | "mine";
 
 const TABS: readonly FeedbackTab[] = ["send", "mine"];
-const TAB_LABEL: Record<FeedbackTab, string> = { send: "发送反馈", mine: "我的反馈" };
+const TAB_LABEL: Record<FeedbackTab, string> = { send: "common.sendFeedback", mine: "common.myFeedback" };
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 interface Props {
@@ -75,26 +75,26 @@ export function Feedback({ port, tab: first = "send", onClose, onError, onUnread
     <div className="fbk-veil" hidden={concealed}>
       <div className="fbk" ref={card} role="dialog" aria-modal="true" aria-labelledby="fbk-title" data-wide={wide || undefined}>
         <header className="fbk-hd">
-          <h2 id="fbk-title">{t("反馈")}</h2>
+          <h2 id="fbk-title">{t("common.feedback")}</h2>
           <div className="fbk-hd-acts">
             <button
               className="btn sm"
               type="button"
               data-action="feedback.expand"
               aria-pressed={wide}
-              aria-label={t("铺满窗口")}
-              title={t("铺满窗口")}
+              aria-label={t("common.fullWidth")}
+              title={t("common.fullWidth")}
               onClick={() => setWide((w) => !w)}
             >
               <StudioIcon name="expand" />
             </button>
-            <button className="btn sm" data-action="feedback.close" onClick={onClose} aria-label={t("关闭")}>
+            <button className="btn sm" data-action="feedback.close" onClick={onClose} aria-label={t("common.close")}>
               <StudioIcon name="close" />
               <span className="esc">Esc</span>
             </button>
           </div>
         </header>
-        <div className="fbk-tabs" role="tablist" aria-label={t("反馈")}>
+        <div className="fbk-tabs" role="tablist" aria-label={t("common.feedback")}>
           {TABS.map((id) => (
             <button
               key={id}

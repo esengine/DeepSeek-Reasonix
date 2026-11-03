@@ -53,24 +53,24 @@ export function PostureNote({ port, status, onChanged }: {
 
   if (kind === "trust") {
     return (
-      <div className="rtbar posturenote" data-kind="trust" role="group" aria-label={t("是否信任此文件夹")}>
-        <span className="t">{t("是否信任此文件夹？")}</span>
+      <div className="rtbar posturenote" data-kind="trust" role="group" aria-label={t("postureNote.trustThisFolder")}>
+        <span className="t">{t("postureNote.trustThisFolder2")}</span>
         <span className="why">
-          {refused || t("信任后，在此文件夹里的编辑和命令不再逐条询问（桌面端和终端都是）。系统沙盒把命令的写入限制在此文件夹、你额外允许写入的目录、临时目录和工具链缓存内；网络与拒绝规则照常生效。")}
+          {refused || t("postureNote.onceTrustedEditsAndCommands")}
         </span>
-        <button data-action="workspace.trust" data-value="trusted" disabled={busy} onClick={() => act(() => port.decideWorkspaceTrust("trusted"))}>{t("信任此文件夹")}</button>
-        <button data-action="workspace.trust" data-value="declined" disabled={busy} onClick={() => act(() => port.decideWorkspaceTrust("declined"))}>{t("暂不信任")}</button>
+        <button data-action="workspace.trust" data-value="trusted" disabled={busy} onClick={() => act(() => port.decideWorkspaceTrust("trusted"))}>{t("common.trustThisFolder")}</button>
+        <button data-action="workspace.trust" data-value="declined" disabled={busy} onClick={() => act(() => port.decideWorkspaceTrust("declined"))}>{t("postureNote.notNow")}</button>
       </div>
     );
   }
   return (
     <div className="rtbar posturenote" data-kind="unconfined" data-lvl="warn" role="status">
-      <span className="t">{t("新会话默认每次询问")}</span>
+      <span className="t">{t("postureNote.newSessionsAskFirst")}</span>
       <span className="why">
-        {refused || t("当前没有生效的系统沙盒（Windows 暂不支持，或已在设置中关闭），命令的写入不受限制，所以编辑和命令执行前都会先问你。切换到自动批准后，之后所有文件夹的新会话都会使用它。")}
+        {refused || t("postureNote.noOSSandboxIsIn")}
       </span>
-      <button data-action="tool-approval.mode" data-value="auto" disabled={busy} onClick={() => act(() => port.setApprovalMode("auto"))}>{t("切换到自动批准")}</button>
-      <button data-action="posture-note.dismiss" onClick={() => { markUnconfinedSeen(); setHidden(true); }}>{t("知道了")}</button>
+      <button data-action="tool-approval.mode" data-value="auto" disabled={busy} onClick={() => act(() => port.setApprovalMode("auto"))}>{t("postureNote.switchToAutoApprove")}</button>
+      <button data-action="posture-note.dismiss" onClick={() => { markUnconfinedSeen(); setHidden(true); }}>{t("common.gotIt")}</button>
     </div>
   );
 }

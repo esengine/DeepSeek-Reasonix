@@ -58,23 +58,23 @@ export function RewindNotice({ readUndo, onUndo, refreshKey, moved = 0, busy = f
   const dismiss = () => {
     if (!offer || pending || busy) return;
     try { dismissRewindNotice(offer.transactionId); }
-    catch (e) { setError(t("无法保存关闭状态：{error}", { error: reason(e) })); }
+    catch (e) { setError(t("rewindNotice.couldNotSaveDismissal", { error: reason(e) })); }
   };
 
   if (!shown || running || !offer || dismissed) return null;
   return (
     <div className="rewind-notice" role="status" aria-live="polite" aria-busy={pending || busy}>
-      <button type="button" className="rewind-notice-close" data-action="rewind.notice-dismiss" data-target={offer.transactionId} aria-label={t("关闭回退提示")} title={t("关闭回退提示")} disabled={pending || busy} onClick={dismiss}>
+      <button type="button" className="rewind-notice-close" data-action="rewind.notice-dismiss" data-target={offer.transactionId} aria-label={t("rewindNotice.dismissRewindNotice")} title={t("rewindNotice.dismissRewindNotice")} disabled={pending || busy} onClick={dismiss}>
         <StudioIcon name="close" />
       </button>
       <StudioIcon name="rewind" />
       <div className="rewind-notice-copy">
-        <span>{t("回退已完成")}</span>
-        <span className="rewind-notice-count">{t("已还原 {n} 个文件", { n: offer.files })}</span>
+        <span>{t("rewindNotice.rewindCompleted")}</span>
+        <span className="rewind-notice-count">{t("common.filesRestored", { n: offer.files })}</span>
         {error && <span className="rewind-notice-error" role="alert">{error}</span>}
       </div>
       <button type="button" className="btn" data-action="rewind.undo" data-target={offer.transactionId} disabled={pending || busy} onClick={() => void undo()}>
-        {t(pending ? "正在撤销…" : "撤销这次回退")}
+        {t(pending ? "rewindNotice.undoing" : "rewindNotice.undoThisRewind")}
       </button>
     </div>
   );

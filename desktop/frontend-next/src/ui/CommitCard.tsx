@@ -14,10 +14,10 @@ type Phase =
 // Why there is no drafted message. The staged set is still shown, so the person
 // writes it themselves; each reason says what to expect from drafting again.
 const DRAFT_NOTE: Record<CommitDraftFailure, string> = {
-  no_model: "当前会话没有可用的模型，不能起草。请手动填写提交说明。",
-  timeout: "起草超时了。请手动填写提交说明，或重新起草。",
-  no_answer: "模型没有给出提交说明。请手动填写，或重新起草。",
-  model_failed: "模型起草失败。请手动填写提交说明，或重新起草。",
+  no_model: "commitCard.thisSessionHasNoModel",
+  timeout: "commitCard.draftingTimedOutWriteThe",
+  no_answer: "commitCard.theModelGaveNoCommit",
+  model_failed: "commitCard.theModelFailedToDraft",
 };
 
 // A proposal, not an action: the model drafts for what is staged, the person
@@ -47,7 +47,7 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
 
   const button = (
     <button type="button" className="btn sm commit-open" data-action="commit.draft" disabled={state.phase !== "idle"} onClick={draft}>
-      {t("提交…")}
+      {t("commitCard.commit")}
     </button>
   );
   if (state.phase === "idle") return { button, card: null };
@@ -56,10 +56,10 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
     return {
       button,
       card: (
-      <section className="commit-card" data-phase="drafting" aria-label={t("提交说明")}>
-        <p className="refine-wait" role="status">{t("读取暂存区，起草提交说明…")}</p>
+      <section className="commit-card" data-phase="drafting" aria-label={t("commitCard.commitMessage")}>
+        <p className="refine-wait" role="status">{t("commitCard.readingTheStagedChangesAnd")}</p>
         <footer>
-          <button type="button" className="btn sm" data-weak="" data-action="commit.close" onClick={close}>{t("取消")}</button>
+          <button type="button" className="btn sm" data-weak="" data-action="commit.close" onClick={close}>{t("common.cancel")}</button>
         </footer>
       </section>
       ),
@@ -70,11 +70,11 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
     return {
       button,
       card: (
-      <section className="commit-card" data-phase="failed" aria-label={t("提交说明")}>
+      <section className="commit-card" data-phase="failed" aria-label={t("commitCard.commitMessage")}>
         <p className="refine-error" role="alert">{state.error}</p>
         <footer>
-          <button type="button" className="btn sm" data-action="commit.draft" onClick={draft}>{t("起草提交说明")}</button>
-          <button type="button" className="btn sm" data-weak="" data-action="commit.close" onClick={close}>{t("取消")}</button>
+          <button type="button" className="btn sm" data-action="commit.draft" onClick={draft}>{t("commitCard.draftCommitMessage")}</button>
+          <button type="button" className="btn sm" data-weak="" data-action="commit.close" onClick={close}>{t("common.cancel")}</button>
         </footer>
       </section>
       ),
@@ -85,13 +85,13 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
     return {
       button,
       card: (
-      <section className="commit-card" data-phase="done" aria-label={t("提交说明")}>
+      <section className="commit-card" data-phase="done" aria-label={t("commitCard.commitMessage")}>
         <p className="commit-done" role="status">
-          {t("已提交 {hash}：{subject}", { hash: state.result.hash.slice(0, 7), subject: state.result.subject })}
+          {t("commitCard.committed", { hash: state.result.hash.slice(0, 7), subject: state.result.subject })}
         </p>
-        <small>{t("只在本地提交，不会推送")}</small>
+        <small>{t("commitCard.recordedLocallyOnlyNothingIs")}</small>
         <footer>
-          <button type="button" className="btn sm" data-weak="" data-action="commit.close" onClick={close}>{t("收起")}</button>
+          <button type="button" className="btn sm" data-weak="" data-action="commit.close" onClick={close}>{t("common.collapse")}</button>
         </footer>
       </section>
       ),
@@ -118,10 +118,10 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
   return {
     button,
     card: (
-    <section className="commit-card" data-phase="ready" aria-label={t("提交说明")}>
+    <section className="commit-card" data-phase="ready" aria-label={t("commitCard.commitMessage")}>
       <header>
-        <b>{t("暂存的文件")}</b>
-        <small>{t("{n} 个文件已暂存", { n: proposal.files.length })}</small>
+        <b>{t("commitCard.stagedFiles")}</b>
+        <small>{t("commitCard.filesStaged", { n: proposal.files.length })}</small>
       </header>
       <ul className="commit-files">
         {proposal.files.map((f) => (
@@ -133,14 +133,14 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
           </li>
         ))}
       </ul>
-      {proposal.truncated && <small>{t("暂存区内容过长，只按前面一部分起草")}</small>}
+      {proposal.truncated && <small>{t("commitCard.theStagedDiffIsLong")}</small>}
       {warned && (
         <div className="commit-warn" role="alert">
-          {sensitive.length > 0 && <p>{t("可能含有密钥：{files}", { files: sensitive.join(", ") })}</p>}
-          {proposal.contentSecrets && <p>{t("新增的内容里有形似密钥的值")}</p>}
+          {sensitive.length > 0 && <p>{t("commitCard.mayContainSecrets", { files: sensitive.join(", ") })}</p>}
+          {proposal.contentSecrets && <p>{t("commitCard.addedLinesContainValuesShaped")}</p>}
           <label>
             <input type="checkbox" data-action="commit.acknowledge" checked={ack} disabled={committing} onChange={(e) => set({ ack: e.target.checked })} />
-            {t("我确认这些内容可以提交")}
+            {t("commitCard.iConfirmTheseCanBe")}
           </label>
         </div>
       )}
@@ -149,7 +149,7 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
         className="commit-message"
         autoFocus={!!proposal.draftFailure}
         data-action="commit.edit"
-        aria-label={t("提交说明")}
+        aria-label={t("commitCard.commitMessage")}
         value={message}
         rows={6}
         spellCheck={false}
@@ -157,7 +157,7 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
         onChange={(e) => set({ message: e.target.value })}
       />
       {error && <p className="refine-error" role="alert">{error}</p>}
-      <small>{t("只在本地提交，不会推送")}</small>
+      <small>{t("commitCard.recordedLocallyOnlyNothingIs")}</small>
       <footer>
         <button
           type="button"
@@ -167,13 +167,13 @@ export function useCommitCard(port: AgentPort, onCommitted: () => void, repo?: s
           disabled={committing || !message.trim() || (warned && !ack)}
           onClick={confirm}
         >
-          {committing ? t("正在提交…") : t("提交到本地")}
+          {committing ? t("common.submitting") : t("commitCard.commitLocally")}
         </button>
         <button type="button" className="btn sm" data-action="commit.draft" disabled={committing} onClick={draft}>
-          {t("重新起草")}
+          {t("commitCard.redraft")}
         </button>
         <button type="button" className="btn sm" data-weak="" data-action="commit.close" disabled={committing} onClick={close}>
-          {t("取消")}
+          {t("common.cancel")}
         </button>
       </footer>
     </section>

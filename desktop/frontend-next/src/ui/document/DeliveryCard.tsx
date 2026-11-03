@@ -18,7 +18,7 @@ export function DeliveryCard({ files, reply }: { files: DeliveredFile[]; reply?:
     const name = file.path.split("/").at(-1)!;
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
-  return <div className="delivery-files" aria-label={t("交付文件")}>
+  return <div className="delivery-files" aria-label={t("deliveryCard.deliveredFiles")}>
     <div className="delivery-grid" data-single={files.length === 1 ? "" : undefined}>
       {files.map((file) => <DeliveryEntry key={JSON.stringify([file.root, file.path])}
         file={file} reply={reply} showLocation={(counts.get(file.path.split("/").at(-1)!) ?? 0) > 1} />)}
@@ -37,7 +37,7 @@ function DeliveryEntry({ file, reply, showLocation }: { file: DeliveredFile; rep
   const stem = dot > 0 ? name.slice(0, dot) : name, extension = dot > 0 ? name.slice(dot) : "";
   const current = reply?.activeFile === (file.root ? grantedFilePath(file.root, file.path) : file.path);
   const location = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : file.root;
-  const description = file.description?.trim() || extension.slice(1).toUpperCase() || t("文件");
+  const description = file.description?.trim() || extension.slice(1).toUpperCase() || t("common.files2");
   const [menu, setMenu] = useState(false);
   const close = useCallback(() => setMenu(false), []);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -49,7 +49,7 @@ function DeliveryEntry({ file, reply, showLocation }: { file: DeliveredFile; rep
   const run = async (action: () => void | Promise<void>, success: string) => {
     if (feedback?.kind === "busy") return;
     clearTimeout(timer.current);
-    setFeedback({ kind: "busy", text: t("正在处理…") });
+    setFeedback({ kind: "busy", text: t("common.working") });
     try {
       await action();
       if (!live.current) return;
@@ -60,32 +60,32 @@ function DeliveryEntry({ file, reply, showLocation }: { file: DeliveredFile; rep
     }
   };
   const actions: DeliveryAction[] = [];
-  if (reply?.onAddFile) actions.push({ kind: "add", label: t("添加到对话"), icon: "plus", disabled: !reference,
-    title: reference ? undefined : t("此名称不能表示为 @ 引用"),
-    run: () => void run(() => reply.onAddFile!(reference), t("已添加到输入框")) });
+  if (reply?.onAddFile) actions.push({ kind: "add", label: t("deliveryCard.addToChat"), icon: "plus", disabled: !reference,
+    title: reference ? undefined : t("common.thisNameCannotBeRepresented"),
+    run: () => void run(() => reply.onAddFile!(reference), t("deliveryCard.addedToTheComposer")) });
   if (reply?.openDeliveredFile && /\.(md|markdown|txt|csv|tsv|pdf|html?|svg|docx?|xlsx?|pptx?)$/i.test(path))
-    actions.push({ kind: "open", label: t("用系统应用打开"), icon: "external", run: () => void run(() => reply.openDeliveredFile!(absolute), t("已请求系统应用打开")) });
+    actions.push({ kind: "open", label: t("common.openInSystemApplication"), icon: "external", run: () => void run(() => reply.openDeliveredFile!(absolute), t("deliveryCard.requestedOpeningInTheSystem")) });
   if (!file.root && reply?.revealDeliveredFile)
-    actions.push({ kind: "reveal", label: t("在文件夹中显示"), icon: "folder", run: () => void run(() => reply.revealDeliveredFile!(file.path), t("已请求显示文件位置")) });
-  actions.push({ kind: "copy", label: t("复制路径"), icon: "copy", run: () => void run(() => copyText(absolute), t("已复制路径")) });
+    actions.push({ kind: "reveal", label: t("deliveryCard.showInFolder"), icon: "folder", run: () => void run(() => reply.revealDeliveredFile!(file.path), t("deliveryCard.requestedShowingTheFileLocation")) });
+  actions.push({ kind: "copy", label: t("common.copyPath"), icon: "copy", run: () => void run(() => copyText(absolute), t("deliveryCard.pathCopied")) });
   return <div className="delivery-file" data-current={current ? "" : undefined}>
     <button type="button" className="delivery-open" data-action="delivery.preview" data-target={path} disabled={!open} title={`${absolute}\n${description}`}
-      aria-label={t("预览 {name}", { name })} aria-describedby={detailID} aria-current={current ? "true" : undefined} onClick={() => open?.()}>
+      aria-label={t("deliveryCard.preview", { name })} aria-describedby={detailID} aria-current={current ? "true" : undefined} onClick={() => open?.()}>
       <FileTypeIcon path={file.path} />
       <span className="delivery-details">
         <span className="delivery-heading">
           <strong className="delivery-name"><span>{stem}</span><span className="delivery-extension">{extension}</span></strong>
-          {current && <span className="delivery-current">{t("查看中")}</span>}
+          {current && <span className="delivery-current">{t("deliveryCard.viewing")}</span>}
         </span>
-        {showLocation && <small className="delivery-location" title={absolute}>{location || t("项目根目录")}</small>}
+        {showLocation && <small className="delivery-location" title={absolute}>{location || t("deliveryCard.projectRoot")}</small>}
         <small id={detailID} className="delivery-description">{description}</small>
       </span>
     </button>
-    <TooltipButton ref={trigger} className="delivery-more" data-action="delivery.more" data-target={path} title={t("更多操作")} aria-label={t("更多操作：{name}", { name })}
+    <TooltipButton ref={trigger} className="delivery-more" data-action="delivery.more" data-target={path} title={t("common.moreActions")} aria-label={t("deliveryCard.moreActionsFor", { name })}
       aria-haspopup="menu" aria-expanded={menu} disabled={feedback?.kind === "busy"} onClick={() => setMenu((value) => !value)}>
-      <span>{t("更多")}</span><StudioIcon name="down" />
+      <span>{t("common.more")}</span><StudioIcon name="down" />
     </TooltipButton>
-    {menu && <DeliveryMenu anchor={trigger} label={t("文件操作：{name}", { name })} target={path} actions={actions} onClose={close} />}
+    {menu && <DeliveryMenu anchor={trigger} label={t("deliveryCard.fileActionsFor", { name })} target={path} actions={actions} onClose={close} />}
     {feedback && <div className="delivery-feedback" role={feedback.kind === "error" ? "alert" : "status"} data-kind={feedback.kind}>{feedback.text}</div>}
   </div>;
 }

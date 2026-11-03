@@ -8,8 +8,8 @@ export function FeedbackBadge({ unread }: { unread: number }) {
   if (unread <= 0) return null;
   return (
     <>
-      <i className="fbk-badge" aria-hidden="true" title={t("{n} 项待查看", { n: unread })}>{unread > 9 ? "9+" : unread}</i>
-      <span className="sr-only">{t("{n} 项待查看", { n: unread })}</span>
+      <i className="fbk-badge" aria-hidden="true" title={t("common.toReview", { n: unread })}>{unread > 9 ? "9+" : unread}</i>
+      <span className="sr-only">{t("common.toReview", { n: unread })}</span>
     </>
   );
 }

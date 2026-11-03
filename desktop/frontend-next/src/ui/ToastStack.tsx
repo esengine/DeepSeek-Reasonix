@@ -17,20 +17,20 @@ export function ToastStack({ onFeedback, port, idle = false, look = {}, onLook =
   const at = useAboveComposer(toasts.length > 0 || update || ask.open);
   if (toasts.length === 0 && !update && !ask.open) return null;
   return (
-    <div className="toasts" role="region" aria-label={t("通知")} style={at ? { bottom: at.bottom, right: at.right } : undefined}>
+    <div className="toasts" role="region" aria-label={t("common.notifications")} style={at ? { bottom: at.bottom, right: at.right } : undefined}>
       {ask.node}
       {port && <UpdateReady port={port} idle={idle} />}
       {toasts.map((toast) => toast.tone === "note" ? (
         <div className="toast note" role="status" key={toast.id}>
           <span>{toast.text}</span>
           {toast.action && <button data-action="toast.act" data-target={String(toast.id)} onClick={() => { dismissToast(toast.id); toast.action?.run(); }}>{toast.action.label}</button>}
-          <button data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
+          <button data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("common.gotIt")}</button>
         </div>
       ) : (
         <div className="toast" role="alert" key={toast.id}>
           <span>{toast.text}</span>
-          <button data-action="toast.report" onClick={() => { reportProblem(toast.text); onFeedback(); dismissToast(toast.id); }}>{t("报告此问题")}</button>
-          <button data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
+          <button data-action="toast.report" onClick={() => { reportProblem(toast.text); onFeedback(); dismissToast(toast.id); }}>{t("common.reportThisProblem")}</button>
+          <button data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("common.gotIt")}</button>
         </div>
       ))}
     </div>

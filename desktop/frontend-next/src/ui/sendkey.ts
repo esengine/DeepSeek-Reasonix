@@ -21,11 +21,11 @@ export function runningSendIntent(preferred: RunningMessageIntent, hasChips: boo
 
 export function sendHint(mode: SendShortcut, running: boolean, touch: boolean, intent: RunningMessageIntent = "steer"): string {
   if (running && intent === "followup") {
-    if (touch) return t("点按排队 · 回车换行");
-    if (mode === "modifier_enter") return t("{key} 排队 · Enter 换行", { key: chord("Enter") });
-    return t("Enter 排队 · Shift+Enter 换行");
+    if (touch) return t("sendkey.tapQueueEnterForA");
+    if (mode === "modifier_enter") return t("sendkey.toQueueEnterForA", { key: chord("Enter") });
+    return t("sendkey.enterToQueueShiftEnter");
   }
-  if (touch) return t(running ? "点按插话 · 回车换行" : "点按发送 · 回车换行");
-  if (mode === "modifier_enter") return t(running ? "{key} 插话 · Enter 换行" : "{key} 发送 · Enter 换行", { key: chord("Enter") });
-  return t(running ? "Enter 插话 · Shift+Enter 换行" : "Enter 发送 · Shift+Enter 换行");
+  if (touch) return t(running ? "sendkey.tapSteerEnterForA" : "sendkey.tapSendEnterForA");
+  if (mode === "modifier_enter") return t(running ? "sendkey.toSteerEnterForA" : "sendkey.toSendEnterForA", { key: chord("Enter") });
+  return t(running ? "sendkey.enterToSteerShiftEnter" : "sendkey.enterToSendShiftEnter");
 }

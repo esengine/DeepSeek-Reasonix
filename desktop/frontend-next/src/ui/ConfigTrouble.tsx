@@ -46,12 +46,12 @@ export function ConfigTrouble({ port, onRepaired }: { port: AgentPort; onRepaire
   return (
     <div className="find cfgbad" data-lvl="warn" role="status">
       <span className="t">
-        {problem.line ? t("配置文件第 {line} 行无法解析", { line: problem.line }) : t("配置文件无法解析")}
+        {problem.line ? t("configTrouble.lineOfTheConfigFile", { line: problem.line }) : t("configTrouble.theConfigFileDoesNot")}
       </span>
       <span className="why">
         {problem.recovered === "last-known-good"
-          ? t("下方显示的是上一次成功解析的配置。该文件不会被覆盖，因此当前无法保存任何更改。")
-          : t("下方显示的是内置默认值，而非你的配置。该文件不会被覆盖，因此当前无法保存任何更改。")}
+          ? t("configTrouble.whatIsShownBelowIs")
+          : t("configTrouble.whatIsShownBelowIs2")}
       </span>
       <div className="term">
         <div className="term-l dim">{problem.path}</div>
@@ -65,17 +65,17 @@ export function ConfigTrouble({ port, onRepaired }: { port: AgentPort; onRepaire
             afterwards. */}
         {problem.repair && (
           <div className="term-l ok">
-            {t("改成")} | {problem.repair}
+            {t("configTrouble.becomes")} | {problem.repair}
           </div>
         )}
       </div>
       <div className="acts">
         {problem.repair && (
           <button className="act" data-action="config.repair" disabled={busy} onClick={() => void repair()}>
-            {busy ? t("正在修复…") : t("备份原文件并修复")}
+            {busy ? t("configTrouble.repairing") : t("configTrouble.keepACopyAndRepair")}
           </button>
         )}
-        <CopyButton text={problem.path} label={t("复制路径")} />
+        <CopyButton text={problem.path} label={t("common.copyPath")} />
       </div>
       {failed && <span className="why nwhy">{failed}</span>}
     </div>

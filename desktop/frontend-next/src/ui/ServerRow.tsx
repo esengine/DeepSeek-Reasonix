@@ -14,35 +14,35 @@ import "../styles/mcpheld.css";
 // connected: its tools are in the catalog and the process starts on the first
 // call. Calling that "not connected" beside a Reconnect button reads as broken.
 const MCP_STATE: Record<string, string> = {
-  ready: "已连接",
-  connecting: "连接中",
-  failed: "无法连接",
-  disabled: "已关闭",
-  standby: "待命 · 首次调用时启动",
-  idle: "未连接",
+  ready: "common.connected2",
+  connecting: "common.connecting",
+  failed: "common.unreachable",
+  disabled: "serverRow.disabled",
+  standby: "serverRow.standbyStartsOnFirstCall",
+  idle: "common.notConnected",
   // Project declarations require approval before the server can launch.
-  pending: "待授权 · 来自项目声明",
+  pending: "serverRow.awaitingApprovalDeclaredByThe",
 };
 
 // Why a pending server waits, keyed by the kernel's code. The state label
 // already says a project declared it; a code with no entry adds nothing.
 const PENDING_WHY: Record<string, string> = {
-  changed_since_enabled: "启用之后它要启动的内容变了，或是由旧版本启用的。确认下面的命令后重新启用。",
+  changed_since_enabled: "serverRow.whatItLaunchesChangedSince",
 };
 
 // How a withheld tool differs from what the user approved, keyed by the kernel's
 // class. A class with no entry is shown as the kernel wrote it.
 const HELD_CLASS: Record<string, string> = {
-  added: "新增",
-  changed: "定义有改动",
-  unverifiable: "无法核对",
+  added: "common.added",
+  changed: "serverRow.definitionChanged",
+  unverifiable: "serverRow.cannotBeChecked",
 };
 
 // A tag only when the schema carries the server's tools or config asks it to:
 // deferred is the default, and a badge on every row is a badge on none.
 function loadTag(m: McpEntry): { text: string; pending: boolean } | null {
-  if (m.alwaysLoad) return { text: m.inSchema ? t("常驻") : t("常驻 · 尚未生效"), pending: !m.inSchema };
-  if (m.inSchema) return { text: t("常驻 · 待撤下"), pending: true };
+  if (m.alwaysLoad) return { text: m.inSchema ? t("serverRow.alwaysLoaded") : t("serverRow.alwaysLoadedNotYetIn"), pending: !m.inSchema };
+  if (m.inSchema) return { text: t("serverRow.alwaysLoadedBeingRemoved"), pending: true };
   return null;
 }
 
@@ -93,21 +93,21 @@ export function ServerRow({
     <span className="acts">
       {live && m.enabled && m.state !== "ready" && m.state !== "pending" && (
         <button className="act" data-action="mcp.retry" data-target={m.name} disabled={!!busy} onClick={() => void run("retry", () => port.reconnectMcp(m.name))}>
-          {t(busy === "retry" ? "连接中…" : m.state === "standby" ? "立即连接" : "重连")}
+          {t(busy === "retry" ? "common.connecting3" : m.state === "standby" ? "serverRow.connectNow" : "serverRow.reconnect")}
         </button>
       )}
       {/* The server answered 401: the status is a fact the host drew, and signing in
           is the one thing that answers it, so it sits beside the retry. */}
       {live && m.enabled && m.state === "failed" && m.httpStatus === 401 && (
         <button className="act" data-action="mcp.signin" data-target={m.name} disabled={!!busy} onClick={() => void run("signin", () => port.signinMcp(m.name))}>
-          {t(busy === "signin" ? "等待浏览器登录…" : "登录")}
+          {t(busy === "signin" ? "serverRow.waitingForTheBrowserSign" : "common.signIn")}
         </button>
       )}
       {/* Removal is the one action here that cannot be undone by clicking again,
           so it asks — and the question names the file it is about to edit. */}
       {live && (
-        <button className="act ghost" data-action="mcp.remove" data-target={m.name} aria-label={t("移除 {name}", { name: m.name })} disabled={!!busy} onClick={() => setConfirming(true)}>
-          {t("移除")}
+        <button className="act ghost" data-action="mcp.remove" data-target={m.name} aria-label={t("common.remove2", { name: m.name })} disabled={!!busy} onClick={() => setConfirming(true)}>
+          {t("common.remove")}
         </button>
       )}
       <Switch
@@ -115,7 +115,7 @@ export function ServerRow({
         data-target={m.name}
         on={m.enabled}
         busy={!!busy}
-        label={t(m.enabled ? "关闭 {name}" : "启用 {name}", { name: m.name })}
+        label={t(m.enabled ? "common.disable" : "common.enable", { name: m.name })}
         onClick={() => void run("toggle", () => port.setMcpEnabled(m.name, !m.enabled, "project", root || undefined))}
       />
     </span>
@@ -124,10 +124,10 @@ export function ServerRow({
   const confirm = confirming && (
     <div className="confirm">
       <span className="q">
-        {t("从 {where} 中删除 {name}？若只是暂时停用，关闭开关即可。", { name: m.name, where: m.source || t("配置") })}
+        {t("serverRow.deleteFromIfYouOnly", { name: m.name, where: m.source || t("serverRow.theConfig") })}
       </span>
       <button className="act" data-action="mcp.remove" data-target={m.name} data-value="cancel" disabled={!!busy} onClick={() => setConfirming(false)}>
-        {t("取消")}
+        {t("common.cancel")}
       </button>
       <button
         className="act danger"
@@ -142,11 +142,11 @@ export function ServerRow({
             setConfirming(false);
             // A lower-precedence declaration with the same name may have taken
             // over; saying so beats a list that looks like the delete failed.
-            if (r.stillConfigured) setFailed(t("同名的另一处声明已生效，该行不会消失。"));
+            if (r.stillConfigured) setFailed(t("serverRow.anotherDeclarationOfTheSame"));
           })
         }
       >
-        {t(busy === "remove" ? "移除中…" : "移除")}
+        {t(busy === "remove" ? "common.removing" : "common.remove")}
       </button>
     </div>
   );
@@ -155,9 +155,9 @@ export function ServerRow({
   // The approval is for the exact set the kernel withheld; the digest it sent is
   // handed back, and a set that changed meanwhile is refused rather than waved through.
   const held = heldTools.length > 0 && !!m.heldDigest && (
-    <div className="srv-held" role="group" aria-label={t("等待你批准的工具")}>
+    <div className="srv-held" role="group" aria-label={t("serverRow.toolsWaitingForYourApproval")}>
       <span className="ds">
-        {t("这个服务有 {n} 个工具的定义与你批准过的不一致，已暂时不交给模型：", { n: heldTools.length + (m.heldMore ?? 0) })}
+        {t("serverRow.ofThisServiceSTools", { n: heldTools.length + (m.heldMore ?? 0) })}
       </span>
       <ul>
         {heldTools.map((h) => (
@@ -167,11 +167,11 @@ export function ServerRow({
           </li>
         ))}
       </ul>
-      {!!m.heldMore && <span className="hn">{t("还有 {n} 个没有列出，批准时会一并生效。", { n: m.heldMore })}</span>}
+      {!!m.heldMore && <span className="hn">{t("serverRow.moreAreNotListedApproving", { n: m.heldMore })}</span>}
       {live && (
         <span className="acts">
           <button className="act" data-action="mcp.trust" data-target={m.name} disabled={!!busy} onClick={() => void run("trust", () => port.trustMcp(m.name, m.heldDigest!))}>
-            {t(busy === "trust" ? "批准中…" : "批准并重新连接")}
+            {t(busy === "trust" ? "serverRow.approving" : "serverRow.approveAndReconnect")}
           </button>
           {/* Following is asked for after an approval, never instead of one: the
               kernel owes the approval first, and a refused approval stops here. */}
@@ -181,7 +181,7 @@ export function ServerRow({
               if (approved.error) return approved;
               await port.followMcp(m.name, true);
             })}>
-            {t(busy === "follow" ? "批准中…" : "接受并以后都自动接受这个服务器的改动")}
+            {t(busy === "follow" ? "serverRow.approving" : "serverRow.acceptAndAcceptThisServer")}
           </button>
         </span>
       )}
@@ -190,22 +190,22 @@ export function ServerRow({
   const asked = m.scopeUpgrade ?? [];
   // The scope names are the server's words: shown as written, never read for meaning.
   const upgrade = asked.length > 0 && (
-    <div className="srv-held" role="group" aria-label={t("这个服务器要求更多权限")}>
-      <span className="ds">{t("这个服务器拒绝了一次调用，并要求更多权限（以下是它自己写的名称）：")}</span>
+    <div className="srv-held" role="group" aria-label={t("serverRow.thisServerAsksForMore")}>
+      <span className="ds">{t("serverRow.thisServerRefusedACall")}</span>
       <code>{asked.join(" ")}</code>
       {live && (
         <button className="act" data-action="mcp.upgrade" data-target={m.name} disabled={!!busy} onClick={() => void run("upgrade", () => port.upgradeMcp(m.name))}>
-          {t(busy === "upgrade" ? "等待浏览器授权…" : "授权更多权限")}
+          {t(busy === "upgrade" ? "serverRow.waitingForTheBrowserAuthorization" : "serverRow.grantMoreAccess")}
         </button>
       )}
     </div>
   );
   const following = m.followsChanges && (
-    <div className="srv-held" role="group" aria-label={t("自动接受这个服务器的改动")}>
-      <span className="ds">{t("这个服务器的改动会自动接受，并在通知里告诉你。")}</span>
+    <div className="srv-held" role="group" aria-label={t("serverRow.changesFromThisServerAre")}>
+      <span className="ds">{t("serverRow.thisServerSChangesAre")}</span>
       {live && (
         <button className="act" data-action="mcp.unfollow" data-target={m.name} disabled={!!busy} onClick={() => void run("unfollow", () => port.followMcp(m.name, false))}>
-          {t(busy === "unfollow" ? "取消中…" : "取消跟随")}
+          {t(busy === "unfollow" ? "common.stopping" : "serverRow.stopFollowing")}
         </button>
       )}
     </div>
@@ -219,22 +219,22 @@ export function ServerRow({
   // whose tools are not known yet has nothing to load either way.
   const load = live && m.enabled && tools.length > 0 && (
     <div className="load">
-      <span className="lb">{t("加载方式")}</span>
-      <div className="seg" data-text role="group" aria-label={t("加载方式")}>
+      <span className="lb">{t("serverRow.loading")}</span>
+      <div className="seg" data-text role="group" aria-label={t("serverRow.loading")}>
         {(["deferred", "always"] as const).map((mode) => (
           <button key={mode} data-action="mcp.load" data-target={m.name} data-value={mode}
             aria-pressed={(mode === "always") === !!m.alwaysLoad} disabled={!!busy}
             onClick={() => {
               if ((mode === "always") !== !!m.alwaysLoad) void run("load", () => port.setMcpLoad(m.name, mode));
             }}>
-            {t(mode === "always" ? "常驻" : "按需")}
+            {t(mode === "always" ? "serverRow.alwaysLoaded" : "serverRow.onDemand")}
           </button>
         ))}
       </div>
       <span className="hn">
         {t(m.alwaysLoad
-          ? "启动时预先连接，工具每轮随请求发送，模型直接调用，省去搜索往返，但占用上下文。"
-          : "用到时再搜索加载，不占上下文，调用前多一轮往返。")}
+          ? "serverRow.connectedAtStartupTheTools"
+          : "serverRow.searchedForAndLoadedWhen")}
       </span>
     </div>
   );
@@ -242,7 +242,7 @@ export function ServerRow({
     <>
       <i className="pip" />
       <Clip className="nm">{m.name}</Clip>
-      {tools.length ? <Clip className="fold">{t("{n} 个工具", { n: m.tools })}</Clip> : null}
+      {tools.length ? <Clip className="fold">{t("serverRow.tools", { n: m.tools })}</Clip> : null}
       {tag && <i className="ld" data-pending={tag.pending ? "" : undefined}>{tag.text}</i>}
       <Clip className="meta">{meta}</Clip>
       {m.localOverride && <Exception onClear={() => void run("clear", () => port.clearMcpOverride(m.name, root || undefined))} busy={!!busy} />}
@@ -253,10 +253,10 @@ export function ServerRow({
   // 没有 —— 拿名字或配置凑一句出来，等于替它编。
   const about = (!!m.description || m.remembered || (!tools.length && m.state !== "connecting")) && (
     <div className="srv-ab">
-      <span className="ds">{m.description || t("该服务未提供自我说明。")}</span>
+      <span className="ds">{m.description || t("serverRow.thisServiceDoesNotDescribe")}</span>
       {m.remembered && (
-        <i className="w" title={t("当前未连接，以下是上次连接时它返回的内容。")}>
-          {t(m.stale ? "上次连上时的记录 · 声明改过，可能对不上了" : "上次连接时的记录")}
+        <i className="w" title={t("serverRow.nothingIsConnectedRightNow")}>
+          {t(m.stale ? "serverRow.fromTheLastTimeIt2" : "serverRow.fromTheLastTimeIt")}
         </i>
       )}
     </div>
@@ -265,7 +265,7 @@ export function ServerRow({
   // launches sits beside the switch that approves it.
   const launch = m.state === "pending" && !!m.launch && (
     <div className="srv-ab" data-launch>
-      <span className="ds">{t("将启动")} · <code>{m.launch}</code></span>
+      <span className="ds">{t("common.willStart")} · <code>{m.launch}</code></span>
     </div>
   );
   const pendingWhy = m.state === "pending" && m.pendingReason ? PENDING_WHY[m.pendingReason] : undefined;
@@ -296,20 +296,20 @@ export function ServerRow({
       <div className="peek">
         {searchable && <div className="msearch">
           <input ref={search} type="search" data-action="mcp.tool-search" data-target={m.name}
-            value={q} spellCheck={false} aria-label={t("搜索 {name} 的工具", { name: m.name })}
-            placeholder={t("搜索 {name} 的工具", { name: m.name })} onChange={(e) => setQ(e.target.value)} />
+            value={q} spellCheck={false} aria-label={t("serverRow.searchToolsIn", { name: m.name })}
+            placeholder={t("serverRow.searchToolsIn", { name: m.name })} onChange={(e) => setQ(e.target.value)} />
           {q && <button className="act" data-action="mcp.tool-search-clear" data-target={m.name}
-            onClick={() => { setQ(""); search.current?.focus(); }}>{t("清除")}</button>}
+            onClick={() => { setQ(""); search.current?.focus(); }}>{t("common.clear")}</button>}
         </div>}
-        {tools.length > 0 && shown.length === 0 && <div className="empty" role="status">{t("没有匹配的工具。")}</div>}
+        {tools.length > 0 && shown.length === 0 && <div className="empty" role="status">{t("serverRow.noMatchingTool")}</div>}
         {shown.map((tool) => (
           // 一行一个工具：它叫什么、它自己说它干什么、以及这一刀下去会不会动
           // 你的东西。schema 被拒的那些照列，但写明为什么调不了。
           <div className="trow" key={tool.name} data-bad={tool.error ? "" : undefined}>
             <span className="nm">{tool.name}</span>
-            <Clip className="ds">{tool.error || tool.description || t("未提供说明")}</Clip>
+            <Clip className="ds">{tool.error || tool.description || t("common.noDescriptionWritten")}</Clip>
             <span className="face">
-              {tool.destructive ? <i className="dg">{t("会修改数据")}</i> : tool.readOnly ? <i className="ro">{t("只读")}</i> : null}
+              {tool.destructive ? <i className="dg">{t("serverRow.modifiesData")}</i> : tool.readOnly ? <i className="ro">{t("common.readOnly")}</i> : null}
             </span>
           </div>
         ))}

@@ -19,7 +19,7 @@ export function BrowserTools({ port, onChanged }: { port: AgentPort; onChanged: 
       .catch(() => setState(null));
   }, [port]);
 
-  if (!state) return <div className="empty">{t("无法读取内置浏览器设置。")}</div>;
+  if (!state) return <div className="empty">{t("browserTools.couldNotReadTheBuilt")}</div>;
 
   const flip = async () => {
     setBusy(true);
@@ -38,22 +38,22 @@ export function BrowserTools({ port, onChanged }: { port: AgentPort; onChanged: 
     <div className="box">
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("启用内置浏览器")}</span>
-          <span className="ds">{t("agent 可以打开网页、读取内容并操作页面；浏览器在第一次使用时才启动。关闭后这些工具不会出现在工具列表中")}</span>
+          <span className="lb">{t("browserTools.enableTheBuiltInBrowser")}</span>
+          <span className="ds">{t("browserTools.theAgentCanOpenWeb")}</span>
         </span>
         <Switch
           data-action="browser-tools.enabled"
           on={state.enabled}
           busy={busy}
-          label={t("启用内置浏览器")}
+          label={t("browserTools.enableTheBuiltInBrowser")}
           onClick={() => void flip()}
         />
       </div>
       {state.effective !== state.enabled && (
         <div className="kv">
-          <span className="k">{t("实际生效")}</span>
+          <span className="k">{t("common.actuallyInForce")}</span>
           <span className="v">
-            {t(state.effective ? "当前项目的配置文件开启了它，此工作区仍会提供内置浏览器。" : "当前项目的配置文件关闭了它，此工作区不会提供内置浏览器。")}
+            {t(state.effective ? "browserTools.thisProjectSConfigFile" : "browserTools.thisProjectSConfigFile2")}
           </span>
         </div>
       )}

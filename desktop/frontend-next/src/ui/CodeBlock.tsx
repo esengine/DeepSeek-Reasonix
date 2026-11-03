@@ -44,15 +44,15 @@ export function CodeBlock({ lang, source, live, children }: { lang: string; sour
   return (
     <div className="code-wrap" data-lang={lang || undefined} data-folded={folded ? "" : undefined}>
       <div className="code-hd">
-        <span className="code-lang">{lang || t("代码")}</span>
-        <span className="code-lines">{t("{n} 行", { n: lines })}</span>
+        <span className="code-lang">{lang || t("codeBlock.code")}</span>
+        <span className="code-lines">{t("codeBlock.lines", { n: lines })}</span>
         <span className="code-acts">
           {!live && (
-            <button type="button" className="code-act" data-action="code.download" title={t("下载为文件")} aria-label={t("下载为文件")} onClick={() => download(source, lang)}>
+            <button type="button" className="code-act" data-action="code.download" title={t("codeBlock.downloadAsFile")} aria-label={t("codeBlock.downloadAsFile")} onClick={() => download(source, lang)}>
               <StudioIcon name="download" />
             </button>
           )}
-          {!live && <CopyButton text={source} iconOnly className="code-act" label={t("复制这段代码")} />}
+          {!live && <CopyButton text={source} iconOnly className="code-act" label={t("codeBlock.copyThisCode")} />}
         </span>
       </div>
       <div className="code-body">
@@ -64,7 +64,7 @@ export function CodeBlock({ lang, source, live, children }: { lang: string; sour
       {foldable && (
         <button type="button" className="code-more" data-action="code.fold" aria-expanded={open} onClick={() => setOpen(!open)}>
           <StudioIcon name="chevron" />
-          <span>{open ? t("收起") : t("展开全部 {n} 行", { n: lines })}</span>
+          <span>{open ? t("common.collapse") : t("codeBlock.showAllLines", { n: lines })}</span>
         </button>
       )}
     </div>

@@ -30,9 +30,9 @@ export function RuntimeBar({ notices, onSeen, watch, onStall, onSettings }: {
             <span className="t">{wording ? t(wording.text, wording.vars) : n.text}</span>
             {why && <span className="why">{why}</span>}
             {n.code === EXTENSION_SKIPPED && wording?.vars && onSettings && (
-              <button data-action="settings.section" data-value="ext" onClick={() => onSettings("ext")}>{t("打开「工具与集成」")}</button>
+              <button data-action="settings.section" data-value="ext" onClick={() => onSettings("ext")}>{t("runtimeBar.openToolsAndIntegrations")}</button>
             )}
-            <button onClick={() => onSeen(n.id)}>{t("知道了")}</button>
+            <button onClick={() => onSeen(n.id)}>{t("common.gotIt")}</button>
           </div>
         );
       })}

@@ -33,7 +33,7 @@ export function RemoteNotice({ title, body, action, onAction, waitS = 0, retryWh
         <p>{body}</p>
       </div>
       <button disabled={left > 0} onClick={onAction}>
-        {left > 0 ? t("{action}（{n}）", { action, n: left }) : action}
+        {left > 0 ? t("remote.text", { action, n: left }) : action}
       </button>
     </div>
   );

@@ -36,13 +36,13 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }:
         onClick={() => setOpen((on) => !on)}
       >
         <StudioIcon name="list" />
-        <b>{t(plan.length ? "计划" : "目标")}</b>
+        <b>{t(plan.length ? "common.plan" : "planFold.goal")}</b>
         <span>{plan.length ? stepLabel(plan[currentStep(plan)] ?? plan[0]) : goal}</span>
         {plan.length > 0 && <small>{done}/{plan.length}</small>}
         <StudioIcon name="down" className="studio-todo-fold" />
       </button>
       {!open && progress && plan.length > 0 && (
-        <div className="prog2 studio-todo-progress" role="progressbar" aria-label={t("计划进度")}
+        <div className="prog2 studio-todo-progress" role="progressbar" aria-label={t("planFold.planProgress")}
           aria-valuemin={0} aria-valuemax={plan.length} aria-valuenow={done}>
           <span className="track"><i style={{ width: `${Math.round((done / plan.length) * 100)}%` }} /></span>
         </div>
@@ -50,19 +50,19 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }:
       {open && (
         <div className="studio-todo-body">
           <div className="studio-todo-head">
-            <b>{t(plan.length ? "计划" : "目标")}</b>
-            {plan.length > 0 && <span>{t("{n} 进行中", { n: running })} · {t("{n} 待处理", { n: waiting })}</span>}
-            <button type="button" className="studio-todo-close" data-action="plan.collapse" aria-label={t("收起计划")} title={t("收起计划")}
+            <b>{t(plan.length ? "common.plan" : "planFold.goal")}</b>
+            {plan.length > 0 && <span>{t("planFold.inProgress", { n: running })} · {t("planFold.pending", { n: waiting })}</span>}
+            <button type="button" className="studio-todo-close" data-action="plan.collapse" aria-label={t("planFold.collapseThePlan")} title={t("planFold.collapseThePlan")}
               onClick={put}>
               <StudioIcon name="down" />
             </button>
           </div>
           {goal && <p className="studio-todo-goal">{goal}</p>}
           {goal && goalRuntime && (
-            <div className="studio-todo-usage" role="group" aria-label={t("目标用量")}>
+            <div className="studio-todo-usage" role="group" aria-label={t("planFold.goalUsage")}>
               <p>{goalStatus && <b>{goalStatusText(goalStatus)}</b>}{goalStatus && " · "}{goalUsageText(goalRuntime)}</p>
-              {goalRuntime.stopCause && goalStatus !== "running" && <p>{t("停下的原因：{cause}", { cause: goalStopText(goalRuntime.stopCause) })}</p>}
-              {goalRuntime.lastReason && <p>{t("最近一次判断：{reason}", { reason: goalRuntime.lastReason })}</p>}
+              {goalRuntime.stopCause && goalStatus !== "running" && <p>{t("planFold.whyItStopped", { cause: goalStopText(goalRuntime.stopCause) })}</p>}
+              {goalRuntime.lastReason && <p>{t("planFold.latestAssessment", { reason: goalRuntime.lastReason })}</p>}
             </div>
           )}
           {plan.length > 0 && <Plan steps={plan} paused={paused} />}

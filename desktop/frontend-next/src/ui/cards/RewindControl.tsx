@@ -16,13 +16,13 @@ const GAP = 7;
 // plan until it has been shown — so the gaps are what the second stage displays,
 // read from the plan rather than written here as a standing caveat.
 const SCOPES: { value: RewindScope; label: string; files: boolean }[] = [
-  { value: "both", label: "代码和对话", files: true },
-  { value: "code", label: "只还原代码", files: true },
-  { value: "conversation", label: "只回退对话", files: false },
+  { value: "both", label: "rewindControl.codeAndConversation", files: true },
+  { value: "code", label: "rewindControl.codeOnly", files: true },
+  { value: "conversation", label: "rewindControl.conversationOnly", files: false },
 ];
 
 const GAP_REASONS: Record<string, string> = {
-  bash_side_effect: "bash 命令所作的修改没有快照",
+  bash_side_effect: "rewindControl.changesMadeByBashCommands",
 };
 
 type Stage =
@@ -97,11 +97,11 @@ export function RewindControl({
           ref={btn}
           aria-haspopup="menu"
           aria-expanded={open}
-          title={t("将工作区与对话回退至该消息之前")}
-          aria-label={compact ? t("回到这里") : undefined}
+          title={t("rewindControl.takeTheWorkspaceAndThe")}
+          aria-label={compact ? t("rewindControl.backToHere") : undefined}
           onClick={() => stage.at === "closed" ? setStage({ at: "menu" }) : close()}
         >
-          <StudioIcon name="rewind" />{!compact && t("回到这里")}
+          <StudioIcon name="rewind" />{!compact && t("rewindControl.backToHere")}
         </button>
         {open &&
           createPortal(
@@ -119,14 +119,14 @@ export function RewindControl({
                     <span className="tx">
                       <span className="lb">{t(s.label)}</span>
                     </span>
-                    {s.files && <span className="rt">{t("{n} 个文件", { n: cp.files })}</span>}
+                    {s.files && <span className="rt">{t("common.files", { n: cp.files })}</span>}
                   </button>
                 ))}
               {stage.at === "menu" && cp.files === 0 && (
                 <div className="mi plain">
                   <span className="dot" />
                   <span className="tx">
-                    <span className="lb">{t(cp.forkCopied ? "此检查点不包含文件快照" : "回退范围内未修改任何文件")}</span>
+                    <span className="lb">{t(cp.forkCopied ? "rewindControl.thisCheckpointContainsNoFile" : "rewindControl.noFilesChangedInThis")}</span>
                   </span>
                 </div>
               )}
@@ -134,7 +134,7 @@ export function RewindControl({
                 <div className="mi plain">
                   <span className="dot" />
                   <span className="tx">
-                    <span className="lb">{t("正在还原…")}</span>
+                    <span className="lb">{t("common.restoring")}</span>
                   </span>
                 </div>
               )}
@@ -143,11 +143,11 @@ export function RewindControl({
                   <div className="mi plain">
                     <span className="dot" />
                     <span className="tx">
-                      <span className="lb">{t("本轮有改动无法还原")}</span>
+                      <span className="lb">{t("rewindControl.someOfThisTurnS")}</span>
                       <span className="ds">
                         {(stage.plan.coverageGaps ?? [])
                           .map((g) => t(GAP_REASONS[g.reason] ?? g.detail))
-                          .join("；") || t("部分改动不在快照内")}
+                          .join("；") || t("rewindControl.someOfTheChangesAre")}
                       </span>
                     </span>
                   </div>
@@ -155,14 +155,14 @@ export function RewindControl({
                   <button className="mi" role="menuitem" data-action="rewind.commit" onClick={() => commit(stage.plan)}>
                     <span className="dot" />
                     <span className="tx">
-                      <span className="lb">{t("仍还原其余部分")}</span>
+                      <span className="lb">{t("rewindControl.restoreTheRestAnyway")}</span>
                     </span>
-                    <span className="rt">{t("{n} 个文件", { n: stage.plan.fileCount })}</span>
+                    <span className="rt">{t("common.files", { n: stage.plan.fileCount })}</span>
                   </button>
                   <button className="mi plain" role="menuitem" onClick={close}>
                     <span className="dot" />
                     <span className="tx">
-                      <span className="lb">{t("取消")}</span>
+                      <span className="lb">{t("common.cancel")}</span>
                     </span>
                   </button>
                 </>
@@ -171,7 +171,7 @@ export function RewindControl({
                 <div className="mi plain">
                   <span className="dot" />
                   <span className="tx">
-                    <span className="lb">{t("还原失败")}</span>
+                    <span className="lb">{t("rewindControl.couldNotRestore")}</span>
                     <span className="ds">{stage.why}</span>
                   </span>
                 </div>

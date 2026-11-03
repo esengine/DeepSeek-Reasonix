@@ -25,7 +25,7 @@ export function BrowserTabMenu({ menu, others, right, onDismiss, onClose }: Prop
     };
   }, [menu, onDismiss]);
   return createPortal(
-    <div className="tabmenu" data-action-keydown="layer.dismiss" role="menu" aria-label={t("浏览器标签")} ref={(el) => { box.current = el; if (el) pinToViewport(el, menu.x, menu.y); }} onKeyDown={(e) => {
+    <div className="tabmenu" data-action-keydown="layer.dismiss" role="menu" aria-label={t("browserTabMenu.browserTabs")} ref={(el) => { box.current = el; if (el) pinToViewport(el, menu.x, menu.y); }} onKeyDown={(e) => {
       if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); onDismiss(); }
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
       e.preventDefault();
@@ -34,10 +34,10 @@ export function BrowserTabMenu({ menu, others, right, onDismiss, onClose }: Prop
       const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + (e.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
       items[next]?.focus();
     }}>
-      <button role="menuitem" data-action="workbench.close" data-target={keyOf(menu.surface)} onClick={() => onClose("one")}>{t("关闭")}</button>
-      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="others" disabled={!others} onClick={() => onClose("others")}>{t("关闭其他浏览器标签")}</button>
-      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="right" disabled={!right} onClick={() => onClose("right")}>{t("关闭右侧浏览器标签")}</button>
-      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="all" onClick={() => onClose("all")}>{t("关闭全部浏览器标签")}</button>
+      <button role="menuitem" data-action="workbench.close" data-target={keyOf(menu.surface)} onClick={() => onClose("one")}>{t("common.close")}</button>
+      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="others" disabled={!others} onClick={() => onClose("others")}>{t("browserTabMenu.closeOtherBrowserTabs")}</button>
+      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="right" disabled={!right} onClick={() => onClose("right")}>{t("browserTabMenu.closeBrowserTabsToThe")}</button>
+      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="all" onClick={() => onClose("all")}>{t("browserTabMenu.closeAllBrowserTabs")}</button>
     </div>, document.body,
   );
 }

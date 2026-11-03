@@ -353,15 +353,15 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           type="button"
           className="srail-earlier"
           style={{ top: Math.max(6, (view[0]?.top ?? PAD) - 14) }}
-          aria-label={t("更早还有 {n} 条消息，点击加载", { n: earlier })}
-          title={t("更早还有 {n} 条消息，点击加载", { n: earlier })}
+          aria-label={t("rail.moreMessagesBeforeTheseClick", { n: earlier })}
+          title={t("rail.moreMessagesBeforeTheseClick", { n: earlier })}
           data-action="history.more"
           onClick={onLoadEarlier}
         />
       )}
       <nav
         className="srail"
-        aria-label={t("你说过的话")}
+        aria-label={t("rail.whatYouSaid")}
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           aim(railLocalY(e.clientY, rect.top, rect.height, geom.current.rail));
@@ -395,11 +395,11 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
               data-folded={folded ? "" : undefined}
               data-starred={starred ? "" : undefined}
               aria-label={folded
-                ? t("定位到第 {a} 至 {b} 条", { a: v.from + 1, b: v.to + 1 })
-                : t("定位到你说的：{text}", { text: m.text.slice(0, 40) })}
+                ? t("rail.jumpToQuestionsTo", { a: v.from + 1, b: v.to + 1 })
+                : t("rail.jumpToWhatYouSaid", { text: m.text.slice(0, 40) })}
               data-action-contextmenu="rail.star"
               data-action-keydown="rail.star"
-              title={m.msgIndex === undefined ? undefined : starred ? t("右键取消这处星标") : t("右键给这处加星标")}
+              title={m.msgIndex === undefined ? undefined : starred ? t("rail.rightClickToRemoveThe") : t("rail.rightClickToStarThis")}
               onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) setAt(i); }}
               onBlur={() => setAt(-1)}
               onClick={() => {
@@ -436,7 +436,7 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           onMouseEnter={hold}
           onMouseLeave={release}
         >
-          <div className="srail-subhd">{t("第 {a} 至 {b} 条", { a: view[opened].from + 1, b: view[opened].to + 1 })}</div>
+          <div className="srail-subhd">{t("rail.questionsTo", { a: view[opened].from + 1, b: view[opened].to + 1 })}</div>
           {Array.from({ length: view[opened].to - view[opened].from + 1 }, (_, k) => {
             const mk = marks[view[opened]!.from + k];
             if (!mk) return null;
@@ -464,10 +464,10 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           <div className="hd">
             <span className="n">
               {shown.single
-                ? t("你的第 {n} 条消息", { n: shown.from + 1 })
-                : t("第 {a} 至 {b} 条", { a: shown.from + 1, b: shown.to + 1 })}
+                ? t("rail.yourMessage", { n: shown.from + 1 })
+                : t("rail.questionsTo", { a: shown.from + 1, b: shown.to + 1 })}
             </span>
-            {head && head.files > 0 && <span>{t("{n} 个文件", { n: head.files })}</span>}
+            {head && head.files > 0 && <span>{t("common.files", { n: head.files })}</span>}
           </div>
           <div className="tx">{head?.text}</div>
         </div>

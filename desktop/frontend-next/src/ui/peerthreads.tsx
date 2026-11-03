@@ -43,10 +43,10 @@ const ICON: Record<PeerThreadState, StudioIconName> = {
 function wording(th: PeerThread): string {
   const p = { title: th.title, project: th.project };
   switch (th.state) {
-    case "waiting": return t("已发给「{title}」（{project}），等对方的用户批准", p);
-    case "working": return t("「{title}」（{project}）已放行，正在处理你的消息", p);
-    case "replied": return t("「{title}」（{project}）回复了你", p);
-    case "declined": return t("「{title}」（{project}）的用户拒绝了你的消息", p);
+    case "waiting": return t("peerthreads.sentToWaitingForTheir", p);
+    case "working": return t("peerthreads.acceptedItAndIsWorking", p);
+    case "replied": return t("peerthreads.repliedToYou", p);
+    case "declined": return t("peerthreads.theUserOfDeclinedYour", p);
   }
 }
 

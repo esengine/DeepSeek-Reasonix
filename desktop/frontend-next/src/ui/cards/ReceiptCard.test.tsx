@@ -17,14 +17,14 @@ describe("a delivery receipt", () => {
   it("settles into one line when there is nothing to report", () => {
     const box = draw({ changes: [{ path: "a.ts", reviewed: true }] });
     expect(box.querySelector(".call")).toBeNull();
-    expect(box.querySelector(".rc-ok .rc-t")?.textContent).toBe(t("没有未经验证的部分"));
+    expect(box.querySelector(".rc-ok .rc-t")?.textContent).toBe(t("receiptCard.nothingLeftUnverified"));
   });
 
   it("is one of the host's cards once it has a gap, and names its speaker", () => {
     const box = draw({ gaps: [{ kind: "unverified_change", detail: "src/a.ts" }] });
     expect(box.querySelector(".call")?.getAttribute("data-k")).toBe("host");
-    expect(box.querySelector(".hl .nm")?.textContent).toBe(t("交付验收"));
-    expect(box.querySelector(".hl .tag")?.textContent).toBe(t("主机"));
+    expect(box.querySelector(".hl .nm")?.textContent).toBe(t("receiptCard.deliveryReceipt"));
+    expect(box.querySelector(".hl .tag")?.textContent).toBe(t("common.host"));
   });
 
   it("wears its severity where the gutter can follow it", () => {
@@ -39,7 +39,7 @@ describe("a delivery receipt", () => {
     const box = draw({ gaps: [{ kind: "stale_verification", detail: "go test ./..." }], unverified: ["没跑 Windows"] });
     const finds = [...box.querySelectorAll(".find")];
     expect(finds.map((f) => f.getAttribute("data-lvl"))).toEqual(["warn", null]);
-    expect(finds[0].querySelector(".t")?.textContent).toBe(t("验证早于最后一次改动"));
+    expect(finds[0].querySelector(".t")?.textContent).toBe(t("receiptCard.theVerificationPredatesTheLast"));
     expect(finds[0].querySelector("code.gapd")?.textContent).toBe("go test ./...");
     expect(finds[1].querySelector(".t")?.textContent).toBe("没跑 Windows");
   });
@@ -65,6 +65,6 @@ describe("a delivery receipt", () => {
     const gaps = Array.from({ length: 8 }, (_, i) => ({ kind: "missing_check", detail: `c${i}` }));
     const box = draw({ gaps });
     expect(box.querySelectorAll(".find").length).toBe(5);
-    expect(box.querySelector(".rc-more")?.textContent).toBe(t("另有 {n} 项", { n: 3 }));
+    expect(box.querySelector(".rc-more")?.textContent).toBe(t("receiptCard.andMore", { n: 3 }));
   });
 });

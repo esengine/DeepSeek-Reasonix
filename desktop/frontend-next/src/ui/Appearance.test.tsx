@@ -34,7 +34,7 @@ it("exposes the wallpaper section and its single selected preview without openin
   const { container } = draw();
   const section = container.querySelector('#set-wallpaper[data-setting="wallpaper"]')!;
   expect(section.closest("details")).toBeNull();
-  const preview = screen.getByRole("img", { name: t("壁纸") });
+  const preview = screen.getByRole("img", { name: t("common.wallpaper") });
   expect(section.contains(preview)).toBe(true);
   expect(container.querySelectorAll(".paperview")).toHaveLength(1);
   expect(preview.style.backgroundImage).toContain("/selected.jpg");
@@ -51,7 +51,7 @@ it("keeps upload, replacement, adjustment and removal on the same appearance sta
   expect(container.querySelector(".paperview")).toBeNull();
   fireEvent.change(input, { target: { files: [first] } });
   await waitFor(() => expect(upload).toHaveBeenCalledWith(first));
-  await screen.findByRole("img", { name: t("壁纸") });
+  await screen.findByRole("img", { name: t("common.wallpaper") });
   expect(input.value).toBe("");
   const second = new File(["replacement"], "replacement.jpg", { type: "image/jpeg" });
   fireEvent.change(input, { target: { files: [second] } });
@@ -60,10 +60,10 @@ it("keeps upload, replacement, adjustment and removal on the same appearance sta
     fireEvent.change(screen.getByRole("slider", { name: new RegExp(t(name)) }), { target: { value } });
     expect(save.mock.lastCall?.[0].wallpaper[field]).toBe(Number(value));
   }
-  expect(screen.getByRole("img", { name: t("壁纸") }).style.backgroundPosition).toBe("60% 40%");
+  expect(screen.getByRole("img", { name: t("common.wallpaper") }).style.backgroundPosition).toBe("60% 40%");
   fireEvent.click(container.querySelector('[data-action="wallpaper.remove"]')!);
   await waitFor(() => expect(clear).toHaveBeenCalledOnce());
   await waitFor(() => expect(container.querySelector(".paperview")).toBeNull());
   expect(save.mock.lastCall?.[0].wallpaper).toBeUndefined();
-  expect(screen.getByRole("button", { name: t("选择图片或视频…") })).toBeTruthy();
+  expect(screen.getByRole("button", { name: t("appearance.chooseAnImageOrVideo") })).toBeTruthy();
 });

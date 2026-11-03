@@ -8,11 +8,11 @@ export function until(iso: string, now: number): string {
   const ms = Date.parse(iso) - now;
   if (!Number.isFinite(ms) || ms <= 0) return "";
   const minutes = Math.max(1, Math.ceil(ms / 60000));
-  if (minutes < 60) return t("{n} 分钟", { n: minutes });
+  if (minutes < 60) return t("tariffChip.min", { n: minutes });
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  if (hours >= 24) return t("{n} 天", { n: Math.floor(hours / 24) });
-  return rest ? t("{h} 小时 {m} 分钟", { h: hours, m: rest }) : t("{n} 小时", { n: hours });
+  if (hours >= 24) return t("tariffChip.d", { n: Math.floor(hours / 24) });
+  return rest ? t("tariffChip.hMin", { h: hours, m: rest }) : t("tariffChip.h", { n: hours });
 }
 
 /** Which of the vendor's two rates this model is billed at right now. The kernel
@@ -34,10 +34,10 @@ export function TariffChip({ tariff, onFlip }: { tariff: Tariff; onFlip: () => v
   }, [due, tariff.changesAt, onFlip]);
   if (due) return null;
   const left = tariff.changesAt ? until(tariff.changesAt, now) : "";
-  const label = tariff.peak ? t("高峰") : t("平峰");
+  const label = tariff.peak ? t("tariffChip.peak") : t("tariffChip.offPeak");
   const title = tariff.peak
-    ? left ? t("现在按供应商公布的高峰价计费，约 {left} 后恢复平峰价", { left }) : t("现在按供应商公布的高峰价计费")
-    : left ? t("现在按供应商公布的平峰价计费，约 {left} 后进入高峰", { left }) : t("现在按供应商公布的平峰价计费");
+    ? left ? t("tariffChip.billedAtTheVendorS3", { left }) : t("tariffChip.billedAtTheVendorS")
+    : left ? t("tariffChip.billedAtTheVendorS4", { left }) : t("tariffChip.billedAtTheVendorS2");
   return (
     <span className="studio-meter-tariff" data-peak={tariff.peak ? "" : undefined} title={title}>
       <span>{label}</span>

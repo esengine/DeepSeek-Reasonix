@@ -73,8 +73,8 @@ describe("the approval card's footer", () => {
     expect(both.querySelector('[data-value="session"]')).not.toBeNull();
     expect(both.querySelector('[data-value="always"]')).not.toBeNull();
     const note = both.querySelector(".apv-note")?.textContent ?? "";
-    expect(note).toContain(t("“本会话允许”只对这个对话有效，随对话保存，恢复这个对话后仍然有效。"));
-    expect(note).toContain(t("“始终允许”写入用户配置的权限规则，可在设置 → 工具与权限里撤销。"));
+    expect(note).toContain(t("rememberChoice.allowForThisSessionLasts"));
+    expect(note).toContain(t("rememberChoice.alwaysAllowIsSavedAs"));
   });
 
   it("answers with the remembered verdict", () => {

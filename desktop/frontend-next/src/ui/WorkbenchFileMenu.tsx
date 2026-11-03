@@ -72,7 +72,7 @@ export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, 
       {revealable && (
         <button role="menuitem" autoFocus data-action="workbench.reveal" data-target={menu.path}
           onClick={() => { close(); onReveal(menu.path); }}>
-          {platform === "darwin" ? t("在访达中显示") : platform === "windows" ? t("在文件资源管理器中显示") : t("在系统文件管理器中显示")}
+          {platform === "darwin" ? t("workbenchFileMenu.revealInFinder") : platform === "windows" ? t("workbenchFileMenu.revealInFileExplorer") : t("workbenchFileMenu.showInFileManager")}
         </button>
       )}
       <button
@@ -82,31 +82,31 @@ export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, 
         data-action="workbench.copy-path"
         data-target={menu.path}
         onClick={() => void copy(absolute)}
-      >{t("复制路径")}</button>
+      >{t("common.copyPath")}</button>
       <button
         role="menuitem"
         autoFocus={!revealable && !absolute}
         disabled={!reference || state === "copying"}
-        title={reference ? undefined : ambiguous ? t("此名称可能被识别为 MCP 资源") : t("此名称不能表示为 @ 引用")}
+        title={reference ? undefined : ambiguous ? t("workbenchFileMenu.thisNameCouldResolveTo") : t("common.thisNameCannotBeRepresented")}
         data-action="workbench.copy-ref"
         data-target={menu.path}
         onClick={() => void copy(reference)}
-      >{t("复制引用")}</button>
+      >{t("workbenchFileMenu.copyReference")}</button>
       {onAddToChat && (
         <button
           role="menuitem"
           disabled={!reference}
-          title={reference ? undefined : ambiguous ? t("此名称可能被识别为 MCP 资源") : t("此名称不能表示为 @ 引用")}
+          title={reference ? undefined : ambiguous ? t("workbenchFileMenu.thisNameCouldResolveTo") : t("common.thisNameCannotBeRepresented")}
           data-action="workbench.add-to-chat"
           data-target={menu.path}
           onClick={() => { close(); onAddToChat(reference); }}
-        >{t("加入对话")}</button>
+        >{t("common.addToConversation")}</button>
       )}
       {onOpen && !menu.folder && (
         <button role="menuitem" data-action="workbench.open-file" data-target={menu.path}
-          onClick={() => { close(); onOpen(menu.path); }}>{t("使用系统默认应用打开")}</button>
+          onClick={() => { close(); onOpen(menu.path); }}>{t("workbenchFileMenu.openWithDefaultApplication")}</button>
       )}
-      {state === "failed" && <div role="alert">{t("复制失败，请重试")}</div>}
+      {state === "failed" && <div role="alert">{t("common.copyFailedTryAgain")}</div>}
     </div>, document.body,
   );
 }

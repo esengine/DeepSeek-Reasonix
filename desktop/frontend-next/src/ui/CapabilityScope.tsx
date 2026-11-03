@@ -8,8 +8,8 @@ import type { CapabilityScope } from "../port/port";
 // read identically in a project that simply inherited everything.
 export function Exception({ onClear, busy }: { onClear: () => void; busy: boolean }) {
   return (
-    <button className="exc" data-action="capability.scope" disabled={busy} title={t("恢复为跟随全局")} onClick={onClear}>
-      {t("仅本项目")}
+    <button className="exc" data-action="capability.scope" disabled={busy} title={t("capabilityScope.goBackToFollowingThe")} onClick={onClear}>
+      {t("capabilityScope.thisProjectOnly")}
     </button>
   );
 }
@@ -36,12 +36,12 @@ export function ScopeBar({
       </button>
       <span className="pt" title={scope.root}>{scope.root}</span>
       {scope.branch && <span className="br">{scope.branch}</span>}
-      {shared && <span className="sh">{t("{n} 个工作树共用这份设置", { n: scope.trees ?? 1 })}</span>}
-      {!scope.repo && <span className="sh">{t("不是 git 仓库，按目录单独记")}</span>}
+      {shared && <span className="sh">{t("capabilityScope.worktreesShareThisSetting", { n: scope.trees ?? 1 })}</span>}
+      {!scope.repo && <span className="sh">{t("capabilityScope.notAGitRepositoryKept")}</span>}
       <span className="ov">
-        {scope.overrides ? t("{n} 项只在这里生效", { n: scope.overrides }) : t("没有本项目的例外")}
+        {scope.overrides ? t("capabilityScope.settingsApplyOnlyHere", { n: scope.overrides }) : t("capabilityScope.noExceptionsForThisProject")}
       </span>
-      {elsewhere && <span className="away">{t("不是当前会话所在的项目 —— 只能改开关")}</span>}
+      {elsewhere && <span className="away">{t("capabilityScope.notTheProjectThisSession")}</span>}
       {open && (
         <ScopePicker
           scopes={scopes}
@@ -79,7 +79,7 @@ function ScopePicker({
           className="q"
           autoFocus
           value={q}
-          placeholder={t("搜索项目…")}
+          placeholder={t("capabilityScope.searchProjects")}
           onChange={(e) => setQ(e.target.value)}
         />
       )}
@@ -88,7 +88,7 @@ function ScopePicker({
         aria-pressed={onlyChanged}
         onClick={() => setOnlyChanged(!onlyChanged)}
       >
-        {t("只看有例外的")}
+        {t("capabilityScope.onlyThoseWithExceptions")}
       </button>
       {shown.map((sc) => (
         <button
@@ -100,17 +100,17 @@ function ScopePicker({
         >
           <span className="nm">
             {sc.label || sc.name}
-            {sc.current && <i className="cur">{t("当前会话")}</i>}
+            {sc.current && <i className="cur">{t("common.thisSession2")}</i>}
           </span>
           <span className="pt">
             {sc.root}
-            {sc.repo && (sc.trees ?? 1) > 1 && ` · ${t("{n} 个工作树", { n: sc.trees ?? 1 })}`}
-            {!sc.repo && ` · ${t("非 git")}`}
+            {sc.repo && (sc.trees ?? 1) > 1 && ` · ${t("capabilityScope.worktrees", { n: sc.trees ?? 1 })}`}
+            {!sc.repo && ` · ${t("capabilityScope.notGit")}`}
           </span>
-          {sc.overrides > 0 && <i className="ct">{t("{n} 项例外", { n: sc.overrides })}</i>}
+          {sc.overrides > 0 && <i className="ct">{t("capabilityScope.exceptions", { n: sc.overrides })}</i>}
         </button>
       ))}
-      {shown.length === 0 && <div className="empty">{t("没有匹配的项目。")}</div>}
+      {shown.length === 0 && <div className="empty">{t("capabilityScope.noProjectMatches")}</div>}
     </div>
   );
 }

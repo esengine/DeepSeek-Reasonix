@@ -15,7 +15,7 @@ export function Community({ port, logins = contributors }: { port: Pick<AgentPor
   const [douyinQr, setDouyinQr] = useState(false);
 
   const open = (url: string) =>
-    void port.openExternal(url).then(() => setFailed(""), () => setFailed(t("无法打开浏览器，请手动访问 {at}", { at: url })));
+    void port.openExternal(url).then(() => setFailed(""), () => setFailed(t("common.couldNotOpenABrowser", { at: url })));
 
   const people = useMemo(
     () => logins.flatMap((login) => { const url = profileUrl(login); return url ? [{ login, url }] : []; }),
@@ -26,17 +26,17 @@ export function Community({ port, logins = contributors }: { port: Pick<AgentPor
   return (
     <div className="comm">
       <div className="comm-join">
-        <img className="comm-qr" src={qrSrc} alt={t("QQ 群二维码")} width={185} height={185} />
+        <img className="comm-qr" src={qrSrc} alt={t("community.qQGroupQRCode")} width={185} height={185} />
         <div className="comm-qq">
           <span className="comm-name">{COMMUNITY.qqName}</span>
           <span className="comm-num">
-            <span className="comm-k">{t("群号")}</span>
+            <span className="comm-k">{t("community.groupNumber")}</span>
             <code>{COMMUNITY.qqNumber}</code>
-            <CopyButton text={COMMUNITY.qqNumber} iconOnly showFeedback label={t("复制群号")} />
+            <CopyButton text={COMMUNITY.qqNumber} iconOnly showFeedback label={t("community.copyGroupNumber")} />
           </span>
-          <span className="comm-how">{t("用 QQ 扫描二维码，或点击下方按钮加入。")}</span>
+          <span className="comm-how">{t("community.scanTheQRCodeWith")}</span>
           <span className="comm-acts">
-            <button type="button" className="btn" data-primary data-action="community.join" onClick={() => open(COMMUNITY.qqJoin)}>{t("加入 QQ 群")}</button>
+            <button type="button" className="btn" data-primary data-action="community.join" onClick={() => open(COMMUNITY.qqJoin)}>{t("community.joinTheQQGroup")}</button>
             <button type="button" className="btn" data-action="community.discord" onClick={() => open(COMMUNITY.discord)}>Discord</button>
             <button type="button" className="btn" data-action="community.issues" onClick={() => open(COMMUNITY.issues)}>GitHub issues</button>
           </span>
@@ -44,28 +44,28 @@ export function Community({ port, logins = contributors }: { port: Pick<AgentPor
       </div>
 
       <div className="comm-dy">
-        <span className="comm-k">{t("抖音")}</span>
+        <span className="comm-k">{t("community.douyin")}</span>
         <span className="comm-dy-name">{COMMUNITY.douyinName}</span>
-        <span className="comm-k">{t("抖音号")}</span>
+        <span className="comm-k">{t("community.douyinID")}</span>
         <code>{COMMUNITY.douyinId}</code>
-        <CopyButton text={COMMUNITY.douyinId} iconOnly showFeedback label={t("复制抖音号")} />
+        <CopyButton text={COMMUNITY.douyinId} iconOnly showFeedback label={t("community.copyDouyinID")} />
         <button type="button" className="btn sm" data-action="community.douyin-qr" aria-expanded={douyinQr} aria-controls="comm-dy-qr" onClick={() => setDouyinQr((v) => !v)}>
-          {douyinQr ? t("收起二维码") : t("显示二维码")}
+          {douyinQr ? t("community.hideQRCode") : t("community.showQRCode")}
         </button>
       </div>
       {douyinQr && (
-        <img id="comm-dy-qr" className="comm-dy-qr" src={douyinSrc} alt={t("抖音二维码")} width={180} height={269} />
+        <img id="comm-dy-qr" className="comm-dy-qr" src={douyinSrc} alt={t("community.douyinQRCode")} width={180} height={269} />
       )}
 
       {failed && <p className="comm-fail" role="alert">{failed}</p>}
 
       <div className="comm-who">
         <div className="comm-who-hd">
-          <h4>{t("贡献者")}</h4>
-          <span className="comm-k">{t("按提交数排序，名单随版本更新")}</span>
-          <button type="button" className="btn sm" data-action="community.contributors" onClick={() => open(COMMUNITY.contributors)}>{t("查看全部贡献者")}</button>
+          <h4>{t("common.contributors")}</h4>
+          <span className="comm-k">{t("community.sortedByCommitsTheList")}</span>
+          <button type="button" className="btn sm" data-action="community.contributors" onClick={() => open(COMMUNITY.contributors)}>{t("community.viewAllContributors")}</button>
         </div>
-        <ul className="comm-list" aria-label={t("贡献者")}>
+        <ul className="comm-list" aria-label={t("common.contributors")}>
           {shown.map(({ login, url }) => (
             <li key={login}>
               <a href={url} data-action="community.profile" data-target={login} onClick={(e) => { e.preventDefault(); open(url); }}>{login}</a>
@@ -74,7 +74,7 @@ export function Community({ port, logins = contributors }: { port: Pick<AgentPor
         </ul>
         {people.length > COLLAPSED && (
           <button type="button" className="btn sm comm-more" data-action="community.more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
-            {all ? t("收起") : t("显示全部 {n} 位", { n: people.length })}
+            {all ? t("common.collapse") : t("community.showAll", { n: people.length })}
           </button>
         )}
       </div>

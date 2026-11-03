@@ -6,10 +6,10 @@ import { Group } from "./Group";
 export function SessionQuickSection() {
   const on = useSyncExternalStore(onSessionQuickActionsChange, showsSessionQuickActions, showsSessionQuickActions);
   return (
-    <Group id="session-quick-actions" title={t("会话行快捷按钮")} hint={t("悬停或键盘聚焦会话时，左侧显示置顶按钮，右侧显示归档按钮。默认关闭；关闭时可通过会话菜单操作。")}>
-      <div className="seg" data-text role="group" aria-label={t("会话行快捷按钮")}>
-        <button data-action="appearance.session-quick-actions" data-value="off" aria-pressed={!on} onClick={() => setShowsSessionQuickActions(false)}>{t("关闭")}</button>
-        <button data-action="appearance.session-quick-actions" data-value="on" aria-pressed={on} onClick={() => setShowsSessionQuickActions(true)}>{t("显示")}</button>
+    <Group id="session-quick-actions" title={t("common.sessionRowButtons")} hint={t("sessionQuickSection.showPinOnTheLeft")}>
+      <div className="seg" data-text role="group" aria-label={t("common.sessionRowButtons")}>
+        <button data-action="appearance.session-quick-actions" data-value="off" aria-pressed={!on} onClick={() => setShowsSessionQuickActions(false)}>{t("common.close")}</button>
+        <button data-action="appearance.session-quick-actions" data-value="on" aria-pressed={on} onClick={() => setShowsSessionQuickActions(true)}>{t("common.show")}</button>
       </div>
     </Group>
   );

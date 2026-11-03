@@ -25,12 +25,12 @@ const ORIGIN_TOOL = "origin_check";
 // the sentence it gave the model; a reader gets that class in their own
 // language, and an unknown one falls back to what the model was told.
 const EXPLICIT_APPROVAL: Record<string, string> = {
-  dynamic_bash: "这条命令里嵌套或间接地执行了别的命令。自动放行和宽泛的允许规则都无法确认真正会跑的是什么；要么批准这一条，要么切到全部放行。",
-  browser_credential: "这一步会把密码、一次性验证码或银行卡信息输入网站。自动放行、该站点已有的授权和宽泛规则都不能代你回答；要么批准，要么切到全部放行。",
-  computer_use: "这会读取或操作电脑上的另一个应用，拿到的是那个应用本身的权限。自动放行和宽泛规则都不能代你回答；要么为这个应用批准，要么切到全部放行。",
-  computer_front: "这会操作电脑上的另一个应用，拿到的是那个应用本身的权限。Windows 只把按键送给最前面的窗口，所以输入文字、按键和粘贴会先把这个应用切到前台。自动放行和宽泛规则都不能代你回答；要么为这个应用批准，要么切到全部放行。",
-  origin_text: "这条调用里的文字，和本次任务从外部读到的内容（网页或工具结果）逐字相同。自动放行、全部放行和记住的答案都不能代你回答；请只批准这一次调用，或拒绝。",
-  computer_pointer: "这一步会接管你正在用的鼠标指针——移动它、用它点击，并把那个应用切到前台，而不是让界面元素自己动作。自动放行、该应用已有的授权和宽泛规则都不能代你回答；要么批准，要么切到全部放行。用完指针会回到原处。",
+  dynamic_bash: "approvalCard.thisCommandRunsAnotherCommand",
+  browser_credential: "approvalCard.thisStepTypesAPassword",
+  computer_use: "approvalCard.thisReadsOrOperatesAnother",
+  computer_front: "approvalCard.thisOperatesAnotherApplicationOn",
+  origin_text: "approvalCard.textInThisCallIs",
+  computer_pointer: "approvalCard.thisStepTakesThePointer",
 };
 
 const TASK_PREVIEW = 280;
@@ -44,15 +44,15 @@ function ApprovalScope({ scope, input }: { scope: string; input?: Record<string,
     return (
       <>
         <div className="apv-dt" data-scope={scope}>
-          <span className="apv-dt-label">{t("批准后还会发生")}</span>
+          <span className="apv-dt-label">{t("approvalCard.approvingAlso")}</span>
           <span>
-            {n ? t("并行启动 {n} 个候选", { n }) : t("并行启动多个候选")}
-            {t("，各自在独立的 git 工作副本里无人值守地运行：它们的工具调用按「自动审核」处理，不再逐个询问（拒绝规则仍然生效；会话为「不询问」时候选也不询问）。最后由评审选出一个写回工作区。")}
+            {n ? t("approvalCard.startsAttemptsInParallel", { n }) : t("approvalCard.startsSeveralAttemptsInParallel")}
+            {t("approvalCard.eachRunningUnattendedInIts")}
           </span>
         </div>
         {task && (
           <div className="apv-dt">
-            <span className="apv-dt-label">{t("候选要做的任务")}</span>
+            <span className="apv-dt-label">{t("approvalCard.theAttemptsTask")}</span>
             <span title={task}>{task.length > TASK_PREVIEW ? task.slice(0, TASK_PREVIEW) + "…" : task}</span>
           </div>
         )}
@@ -63,9 +63,9 @@ function ApprovalScope({ scope, input }: { scope: string; input?: Record<string,
     const paths = Array.isArray(input?.paths) ? input.paths.filter((p): p is string => typeof p === "string") : [];
     return (
       <div className="apv-dt" data-scope={scope}>
-        <span className="apv-dt-label">{t("批准后还会发生")}</span>
+        <span className="apv-dt-label">{t("approvalCard.approvingAlso")}</span>
         <span>
-          {t("把下面 {n} 个文件夹加入你的项目列表并标记为可信；加入后，会话才能把任务派发到这些项目。没有出现在这里的文件夹不会被加入。", { n: paths.length })}
+          {t("approvalCard.addsTheseFoldersToYour", { n: paths.length })}
           <ul className="apv-paths">{paths.map((p) => <li key={p}><code title={p}>{p}</code></li>)}</ul>
         </span>
       </div>
@@ -73,8 +73,8 @@ function ApprovalScope({ scope, input }: { scope: string; input?: Record<string,
   }
   return (
     <div className="apv-dt" data-scope={scope}>
-      <span className="apv-dt-label">{t("批准后还会发生")}</span>
-      <span>{t("这次批准的效力超出这一次调用本身。")}</span>
+      <span className="apv-dt-label">{t("approvalCard.approvingAlso")}</span>
+      <span>{t("approvalCard.thisApprovalCoversMoreThan")}</span>
     </div>
   );
 }
@@ -139,33 +139,33 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">{item.a.tool === FENCE_TOOL ? t("要求扩大可改范围") : isSetting ? t("请求修改设置") : t("请求执行权限")}</span>
-          <span className="tag">{sealed ? t("已处理") : t("等待确认")}</span>
+          <span className="nm">{item.a.tool === FENCE_TOOL ? t("approvalCard.askingToWidenWhatIt") : isSetting ? t("approvalCard.asksToChangeASetting") : t("approvalCard.permissionToRun")}</span>
+          <span className="tag">{sealed ? t("approvalCard.handled") : t("approvalCard.waitingOnYou")}</span>
         </div>
         <div className="out">
           <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>
             <div className="apv-hd" data-whole={item.a.tool === ORIGIN_TOOL ? "" : undefined}>
-              <span className="tool">{item.a.tool === FENCE_TOOL ? t("这个子任务声明之外的文件") : isSetting ? t("设置") : item.a.tool === ORIGIN_TOOL ? t("来自外部的文字") : item.a.tool}</span>
+              <span className="tool">{item.a.tool === FENCE_TOOL ? t("approvalCard.aFileOutsideThisSubtask") : isSetting ? t("common.settings") : item.a.tool === ORIGIN_TOOL ? t("approvalCard.textFromOutside") : item.a.tool}</span>
               <span className="sub" title={item.a.subject}>{item.a.subject}</span>
             </div>
             {item.a.scope && <ApprovalScope scope={item.a.scope} input={item.a.input} />}
             {approvalReason(item.a) && (
               <div className="apv-dt">
-                <span className="apv-dt-label">{t("需要确认的原因")}</span>
+                <span className="apv-dt-label">{t("approvalCard.whyConfirmationIsNeeded")}</span>
                 <span style={isSetting ? { whiteSpace: "pre-line" } : undefined}>{approvalReason(item.a)}</span>
               </div>
             )}
             {item.a.tool === SETTING_ELEVATED_TOOL && (
               <div className="apv-dt" data-setting="elevated">
-                <span className="apv-dt-label">{t("每次都会询问")}</span>
-                <span>{t("这项设置会放宽模型的权限，所以没有「本会话内不再问」，每次都要你亲自确认。")}</span>
+                <span className="apv-dt-label">{t("approvalCard.askedEveryTime")}</span>
+                <span>{t("approvalCard.thisSettingLoosensWhatThe")}</span>
               </div>
             )}
             {!sealed && (
               <div className="apv-ft">
                 <button className="btn" data-primary data-action="decision.tool" data-target={item.a.id} data-value="once"
                   disabled={!!submitting} onClick={() => void decide("once")}>
-                  {submitting === "once" ? t("正在提交…") : t("允许这一次")}
+                  {submitting === "once" ? t("common.submitting") : t("approvalCard.allowOnce")}
                 </button>
                 {/* 后两颗比「这一次」安静一档：三颗同样大小挨在一起时，读者分不出
                     哪颗只管这一次、哪颗管到会话结束、哪颗写进配置。内核会说这次
@@ -174,24 +174,24 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
                   disabled={!!submitting} onChoose={(choice) => void decide(choice)} />
                 <button className="btn" data-deny="" data-action="decision.tool" data-target={item.a.id} data-value="deny"
                   disabled={!!submitting} onClick={() => void decide("deny")}>
-                  {t("拒绝")}
+                  {t("common.refuse")}
                 </button>
                 {explicit && (
                   <button className="btn" data-weak="" data-yolo="" data-action="decision.full-access"
                     disabled={!!submitting} onClick={() => setConfirmFullAccess(true)}>
-                    {t("切换全部放行…")}
+                    {t("approvalCard.switchToFullAccess")}
                   </button>
                 )}
               </div>
             )}
             {!sealed && <RememberWhere options={remembering} target={item.a.id} tool={item.a.tool} />}
             {!sealed && confirmFullAccess && (
-              <div className="apv-yolo-confirm" role="alertdialog" aria-label={t("确认切换全部放行")}>
-                <div><b>{t("全部放行会跳过后续工具确认")}</b><span>{t("拒绝规则与沙盒边界仍然生效。仅在完全信任当前工作区时使用。")}</span></div>
+              <div className="apv-yolo-confirm" role="alertdialog" aria-label={t("approvalCard.confirmFullAccess")}>
+                <div><b>{t("approvalCard.fullAccessSkipsFutureTool")}</b><span>{t("approvalCard.denyRulesAndSandboxBoundaries")}</span></div>
                 <div>
-                  <button className="btn" disabled={switchingFullAccess} onClick={() => setConfirmFullAccess(false)}>{t("返回")}</button>
+                  <button className="btn" disabled={switchingFullAccess} onClick={() => setConfirmFullAccess(false)}>{t("common.back")}</button>
                   <button className="btn" data-yolo-confirm="" disabled={switchingFullAccess} onClick={() => void useFullAccess()}>
-                    {switchingFullAccess ? t("正在切换…") : t("确认全部放行")}
+                    {switchingFullAccess ? t("approvalCard.switching") : t("approvalCard.confirmFullAccess2")}
                   </button>
                 </div>
               </div>
@@ -199,17 +199,17 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
             {sealed && (
               <div className="apv-done">
                 {item.verdict === "session" ? (
-                  <><b>{t("已允许：本会话内此类操作不再询问。")}</b>{t("内核已记入这个对话的授权，随对话保存；恢复对话后仍然有效。")}</>
+                  <><b>{t("approvalCard.allowedThisKindWillNot")}</b>{t("approvalCard.theKernelRecordsItFor")}</>
                 ) : item.verdict === "always" ? (
-                  <><b>{t("已允许：已保存为规则。")}</b>{t("已写入配置，后续会话中此类操作也始终允许，不再询问。")}</>
+                  <><b>{t("approvalCard.allowedRecordedAsARule")}</b>{t("approvalCard.writtenToTheConfigLater")}</>
                 ) : item.verdict === "yolo" ? (
-                  <><b>{t("已切换全部放行。")}</b>{t("后续工具不再请求确认；拒绝规则与沙盒边界仍然生效。")}</>
+                  <><b>{t("approvalCard.fullAccessEnabled")}</b>{t("approvalCard.futureToolsWillNotAsk")}</>
                 ) : item.verdict === "deny" ? (
-                  <><b>{t("已拒绝。")}</b>{t("agent 已收到拒绝，将改用其他方式或终止。")}</>
+                  <><b>{t("approvalCard.denied")}</b>{t("approvalCard.theAgentTakesTheRefusal")}</>
                 ) : item.verdict === "unknown" ? (
-                  <><b>{t("已在其他窗口处理。")}</b>{t("请以最新运行状态为准。")}</>
+                  <><b>{t("approvalCard.handledInAnotherWindow")}</b>{t("approvalCard.referToTheLatestRun")}</>
                 ) : (
-                  <><b>{t("允许这一次。")}</b>{t("下次同样的操作仍会请求确认。")}</>
+                  <><b>{t("approvalCard.allowedOnce")}</b>{t("approvalCard.theSameOperationWillAsk")}</>
                 )}
                 {settledBy && <span className="apv-by">{settledBy}</span>}
               </div>
@@ -242,12 +242,12 @@ function PlanGate({ item, onPlan }: { item: Props["item"]; onPlan: Props["onPlan
   };
   const said =
     item.verdict === "start"
-      ? [t("已开始执行。"), t("计划模式已关闭，进入执行阶段。")]
+      ? [t("approvalCard.executing"), t("approvalCard.planModeIsOffWhat")]
       : item.verdict === "exit"
-        ? [t("暂不执行。"), t("已退出计划模式，计划保留在上方，可随时重新下达。")]
+        ? [t("approvalCard.notNow2"), t("approvalCard.planModeIsOffThe")]
         : item.verdict === "revise" || item.verdict === "deny"
-          ? [t("继续规划。"), t("在下方说明需要修改的内容，规划者将据此重写该计划。")]
-          : [t("已在其他窗口处理。"), t("请以最新运行状态为准。")];
+          ? [t("approvalCard.stillPlanning"), t("approvalCard.sayWhatToChangeBelow")]
+          : [t("approvalCard.handledInAnotherWindow"), t("approvalCard.referToTheLatestRun")];
   return (
     <div className="call" data-k="ask" data-prompt={sealed ? "settled" : "pending"}>
       <div className="g">
@@ -255,31 +255,31 @@ function PlanGate({ item, onPlan }: { item: Props["item"]; onPlan: Props["onPlan
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">{t("计划待确认")}</span>
+          <span className="nm">{t("approvalCard.thePlanIsYoursTo")}</span>
           <span className="tag">{item.a.tool}</span>
         </div>
         <div className="out">
           <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>
-            <div className="apv-dt">{item.a.reason || t("计划已生成，如何执行由你决定。")}</div>
+            <div className="apv-dt">{item.a.reason || t("approvalCard.thePlanIsWrittenWhat")}</div>
             {!sealed && (
               <>
                 <div className="apv-ft">
                   <button className="btn" data-primary data-action="decision.plan" data-target={item.a.id} data-value="start"
                     disabled={!!submitting} onClick={() => void decide("start")}>
-                    {submitting === "start" ? t("正在提交…") : t("开始执行")}
+                    {submitting === "start" ? t("common.submitting") : t("approvalCard.startExecution")}
                   </button>
                   <button className="btn" data-action="decision.plan" data-target={item.a.id} data-value="revise"
                     disabled={!!submitting} onClick={() => void decide("revise")}>
-                    {t("修改计划")}
+                    {t("approvalCard.reviseThePlan")}
                   </button>
                   <button className="btn" data-action="decision.plan" data-target={item.a.id} data-value="exit"
                     disabled={!!submitting} onClick={() => void decide("exit")}>
-                    {t("暂不执行")}
+                    {t("approvalCard.notNow")}
                   </button>
                 </div>
                 {/* 这一句就是这张卡存在的理由：过去只有「拒绝」，而它其实是
                     「继续规划」—— 想改计划的人以为自己把计划扔了。 */}
-                <div className="apv-note">{t("「修改计划」将保持在计划模式中，请在下方说明需要修改之处。")}</div>
+                <div className="apv-note">{t("approvalCard.reviseThePlanStaysIn")}</div>
               </>
             )}
             {sealed && (

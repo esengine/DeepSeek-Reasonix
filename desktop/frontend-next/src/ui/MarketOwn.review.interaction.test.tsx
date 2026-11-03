@@ -41,8 +41,8 @@ it.each(["zh", "en"].flatMap((lang) => ["success", "failure"].map((outcome) => (
       .mockImplementationOnce(async (slug) => { await next.promise; return real(slug); });
     render(<MyPackages port={port} onInstalled={() => {}} />);
     const rowOf = async (name: string) => (await screen.findByText(name)).closest("li")!;
-    const review = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("提交审核") });
-    const sending = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("提交中…") });
+    const review = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("marketPublish.submitForReview") });
+    const sending = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("marketPublish.submitting") });
 
     await userEvent.click(review(await rowOf(first.name)));
     await userEvent.click(review(await rowOf(second.name)));
@@ -50,7 +50,7 @@ it.each(["zh", "en"].flatMap((lang) => ["success", "failure"].map((outcome) => (
     expect(submit.mock.calls).toEqual([[first.slug]]);
     expect(sending(await rowOf(first.name)).disabled).toBe(true);
     expect(review(await rowOf(second.name)).disabled).toBe(true);
-    expect(within(await rowOf(second.name)).getByRole<HTMLButtonElement>("button", { name: t("安装") }).disabled).toBe(false);
+    expect(within(await rowOf(second.name)).getByRole<HTMLButtonElement>("button", { name: t("common.install") }).disabled).toBe(false);
 
     await act(async () => {
       if (outcome === "success") pending.resolve();
@@ -58,7 +58,7 @@ it.each(["zh", "en"].flatMap((lang) => ["success", "failure"].map((outcome) => (
     });
     if (outcome === "success") {
       const firstRow = await rowOf(first.name);
-      await waitFor(() => expect(within(firstRow).getByText(t("审核中"))).toBeTruthy());
+      await waitFor(() => expect(within(firstRow).getByText(t("common.inReview"))).toBeTruthy());
       expect(firstRow.querySelector('[data-action="market.submit"]')).toBeNull();
     } else {
       const firstRow = await rowOf(first.name);
@@ -73,12 +73,12 @@ it.each(["zh", "en"].flatMap((lang) => ["success", "failure"].map((outcome) => (
     expect(submit.mock.calls).toEqual([[first.slug], [second.slug]]);
     expect(sending(await rowOf(second.name)).disabled).toBe(true);
     await act(async () => next.resolve());
-    await waitFor(async () => expect(within(await rowOf(second.name)).getByText(t("审核中"))).toBeTruthy());
+    await waitFor(async () => expect(within(await rowOf(second.name)).getByText(t("common.inReview"))).toBeTruthy());
     if (outcome === "failure") {
       await userEvent.click(review(await rowOf(first.name)));
       expect(submit.mock.calls).toEqual([[first.slug], [second.slug], [first.slug]]);
-      await waitFor(async () => expect(within(await rowOf(first.name)).getByText(t("审核中"))).toBeTruthy());
-      expect(within(await rowOf(second.name)).getByText(t("审核中"))).toBeTruthy();
+      await waitFor(async () => expect(within(await rowOf(first.name)).getByText(t("common.inReview"))).toBeTruthy());
+      expect(within(await rowOf(second.name)).getByText(t("common.inReview"))).toBeTruthy();
       expect(screen.queryByText("review temporarily unavailable")).toBeNull();
     }
   },

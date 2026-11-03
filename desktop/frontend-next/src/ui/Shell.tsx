@@ -16,8 +16,8 @@ const LABEL: Record<string, string> = {
 // What changes for the person reading it. Only the 5.1 line is a warning: it is
 // the one interpreter that refuses syntax the model writes by habit.
 const NOTE: Record<string, string> = {
-  pwsh: "支持 && 和 ||，但语法仍为 PowerShell，而非 bash",
-  powershell: "不支持 && 和 ||，链式命令需拆分为两条",
+  pwsh: "shell.understandsAndButTheSyntax",
+  powershell: "shell.doesNotAcceptOrChained",
 };
 
 const label = (o: ShellOption) => LABEL[o.name] ?? o.name;
@@ -47,7 +47,7 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
 
   useEffect(load, [load]);
 
-  if (!s) return <div className="empty">{t("无法读取 shell 配置。")}</div>;
+  if (!s) return <div className="empty">{t("shell.couldNotReadTheShell")}</div>;
 
   const options = s.options ?? [];
   // Two bashes on one machine are two different programs, so picking one has to
@@ -82,7 +82,7 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
   return (
     <div className="shell">
       <div className="kv">
-        <span className="k">{t("当前生效")}</span>
+        <span className="k">{t("common.inEffect")}</span>
         <span className="v">
           {label(s.effective)}
           {s.effective.version ? ` ${s.effective.version}` : ""} · {s.effective.path || "—"}
@@ -91,19 +91,19 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
 
       {s.argv && (
         <div className="kv">
-          <span className="k">{t("启动命令")}</span>
+          <span className="k">{t("shell.launchCommand")}</span>
           <span className="v"><code>{s.argv.join(" ")} -c …</code></span>
         </div>
       )}
-      {fellBack && <p className="note" data-tone="warn">{t("保存的启动参数现在无法运行，已回退到自动检测。")}</p>}
+      {fellBack && <p className="note" data-tone="warn">{t("shell.theSavedLauncherArgumentsNo")}</p>}
 
       {/* One shape for "pick one of a few", the same as every other such choice
           in this pane. The executable's path is too long for a segment, and it
           is not what you pick by anyway — it rides the 当前生效 row above and
           the note below, where it can be read rather than scanned. */}
-      <div className="seg" data-text role="radiogroup" aria-label={t("命令执行程序")}>
+      <div className="seg" data-text role="radiogroup" aria-label={t("common.whichProgramRunsCommands")}>
         <button role="radio" data-action="shell.executor" aria-checked={auto} disabled={!!busy} onClick={() => void save("auto", "auto", "")}>
-          {t("自动")}
+          {t("common.auto")}
         </button>
         {options.map((o) => (
           <button key={o.path} role="radio" data-action="shell.executor" aria-checked={picked(o)} disabled={!!busy}
@@ -116,7 +116,7 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
       <p className="note">
         {auto ? (
           <>
-            {t("自动查找，优先选择原生 bash。本机将选用")} {label(s.auto)}
+            {t("shell.findsOneItselfPreferringA")} {label(s.auto)}
           </>
         ) : (
           <>
@@ -128,20 +128,20 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
 
       {noBash && (
         <p className="note">
-          {t("本机没有 bash，因此命令只能按 PowerShell 语法编写。安装 Git for Windows 后会增加 Git Bash 选项。要用 WSL，请在下方指定 wsl.exe 并填写启动参数；其中的路径是 Linux 写法。")}
+          {t("shell.thereIsNoBashOn")}
         </p>
       )}
 
       <details className="pinpath">
         <summary>
-          <span className="fold">{t("指定一个可执行文件")}</span>
+          <span className="fold">{t("shell.pointAtAnExecutable")}</span>
         </summary>
         <p className="note">
-          {t("自行编译的 bash、MSYS2，或安装在其他位置的 pwsh 均可填写于此。保存前会实际执行一条命令进行验证，无法运行则不会写入配置。")}
+          {t("shell.aBashYouBuiltYourself")}
         </p>
         <div className="fields">
           <label className="grow full">
-            <span>{t("可执行文件路径")}</span>
+            <span>{t("shell.pathToTheExecutable")}</span>
             <input
               value={custom}
               placeholder={s.auto.path}
@@ -152,7 +152,7 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
         {s.platform === "windows" && (
           <div className="fields">
             <label className="grow full">
-              <span>{t("启动参数（可选，每行一项）")}</span>
+              <span>{t("shell.launcherArgumentsOptionalOnePer")}</span>
               <textarea
                 data-action="shell.custom-args"
                 rows={4}
@@ -160,19 +160,19 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
                 placeholder={"-d\nUbuntu\n--\n/bin/bash"}
                 onChange={(e) => setLauncher(e.target.value)}
               />
-              <small className="note">{t("例如 wsl.exe 需要 -d <发行版> -- /bin/bash 才会进入 shell。参数按原样传给程序，不经过任何 shell；保存前会带着它们运行一次来验证。")}</small>
+              <small className="note">{t("shell.forExampleWslExeNeeds")}</small>
             </label>
           </div>
         )}
         <div className="acts">
           {s.path && (
             <button className="act" data-action="shell.custom-path" disabled={!!busy} onClick={() => void save("clear", s.prefer, "")}>
-              {t("取消指定")}
+              {t("shell.clearIt")}
             </button>
           )}
           <button className="act" data-action="shell.custom-path" data-primary disabled={!!busy || !custom.trim()}
             onClick={() => void save("custom", launcherArgs.length > 0 ? "bash" : kindOf(custom), custom.trim(), launcherArgs)}>
-            {t(busy === "custom" ? "验证中…" : "保存该路径")}
+            {t(busy === "custom" ? "common.verifying" : "shell.saveThisPath")}
           </button>
         </div>
       </details>

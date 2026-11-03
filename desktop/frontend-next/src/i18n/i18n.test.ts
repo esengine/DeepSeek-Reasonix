@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { EN } from "./en";
+import { ZH } from "./zh";
 import { codes } from "./kernel";
 
-// The catalogue degrades instead of breaking: a key it does not carry renders as
-// Chinese. That is the right failure at runtime and the wrong one to ship, so
-// this is what stops an English window from quietly filling with Chinese.
+// A key it does not carry renders as the key itself. That is the right failure
+// at runtime and the wrong one to ship, so this is what stops a window from
+// quietly filling with ids.
 //
 // Vite reads the sources, not the filesystem — the frontend carries no Node
 // types, and a gate that needed them would only typecheck by accident.
@@ -14,11 +15,12 @@ const SOURCES = import.meta.glob(["../**/*.{ts,tsx}", "!../i18n/**", "!../**/*.t
   eager: true,
 }) as Record<string, string>;
 
-// Every Chinese literal inside a t()/tx()/plural() argument list is a key,
+// Every string literal inside a t()/tx()/plural() argument list is a key,
 // including the arms of `t(cond ? "A" : "B")`. Matching only a literal that
 // follows the paren immediately left those arms unchecked, which is how three
 // of them reached the screen untranslated.
 const HAN = /[一-鿿]/;
+const ID = /^[a-z][A-Za-z0-9]*\.[A-Za-z0-9]+$/;
 
 // The catalogue's own sources, read as text: after they are imported the
 // duplicates are already gone.
@@ -32,6 +34,7 @@ function keysIn(src: string): string[] {
   while ((m = call.exec(src)) !== null) {
     let i = m.index + m[0].length - 1;
     let depth = 0;
+    let first = true;
     while (i < src.length) {
       const c = src[i];
       if (c === "(" || c === "[" || c === "{") depth++;
@@ -47,7 +50,8 @@ function keysIn(src: string): string[] {
           text += src[j];
           j++;
         }
-        if (HAN.test(text)) keys.push(text);
+        if (HAN.test(text) || (ID.test(text) && first)) keys.push(text);
+        first = false;
         i = j;
       }
       i++;
@@ -57,7 +61,23 @@ function keysIn(src: string): string[] {
 }
 
 describe("English catalogue", () => {
-  it("carries every Chinese key the interface asks for", () => {
+  it("names every message by a dotted id, never by its wording", () => {
+    const sentences: string[] = [];
+    for (const [file, body] of Object.entries(SOURCES)) {
+      for (const key of keysIn(body)) if (!ID.test(key)) sentences.push(`${JSON.stringify(key)} — ${file}`);
+    }
+    expect([...new Set(sentences)], "keys spelled as text").toEqual([]);
+    expect(Object.keys(EN).filter((id) => !ID.test(id)), "catalogue ids").toEqual([]);
+  });
+
+  it("carries the same ids in Chinese and in English", () => {
+    const en = Object.keys(EN).sort();
+    const zh = Object.keys(ZH).sort();
+    expect(zh.filter((id) => !(id in EN)), "ids with no English").toEqual([]);
+    expect(en.filter((id) => !(id in ZH)), "ids with no Chinese").toEqual([]);
+  });
+
+  it("carries every key the interface asks for", () => {
     const missing: string[] = [];
     for (const [file, body] of Object.entries(SOURCES)) {
       for (const key of keysIn(body)) {

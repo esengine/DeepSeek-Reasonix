@@ -12,7 +12,7 @@ import { StudioIcon } from "../StudioIcon";
 
 const POLL_MS = 2000;
 const GONE = "job.not_running";
-const ENDED: Record<string, string> = { done: "已完成", failed: "失败", killed: "已停止", interrupted: "已中断" };
+const ENDED: Record<string, string> = { done: "common.done", failed: "common.failed", killed: "common.stopped", interrupted: "common.interrupted" };
 
 /** What a background job has printed, for the person looking at it. It reads
  *  again every couple of seconds while the job runs and stops when it ends or
@@ -61,24 +61,24 @@ export function JobOutputView({ job, read, onClose, onCancel }: { job: JobEntry;
   const ended = out && out.status !== "running" ? ENDED[out.status] ?? out.status : "";
   const body = (
     <div className="agent-tx-scrim" data-action="job.close" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={sheet} className="agent-tx" role="dialog" aria-modal="true" aria-label={t("后台任务输出：{name}", { name: job.label || job.id })}>
+      <div ref={sheet} className="agent-tx" role="dialog" aria-modal="true" aria-label={t("jobOutputView.backgroundTaskOutput", { name: job.label || job.id })}>
         <div className="agent-tx-hd">
           <span className="who">{job.label || job.id}</span>
-          <span className="rt">{ended ? t(ended) : t("运行中")}</span>
-          {out && out.text && <CopyButton text={out.text} iconOnly label={t("复制输出")} />}
+          <span className="rt">{ended ? t(ended) : t("common.running")}</span>
+          {out && out.text && <CopyButton text={out.text} iconOnly label={t("jobOutputView.copyOutput")} />}
           {onCancel && !gone && !ended && (
-            <button type="button" className="agent-tx-x" data-action="job.cancel" data-target={job.id} aria-label={t("停止此任务")} title={t("停止此任务")} onClick={() => void onCancel(job.id)}>
+            <button type="button" className="agent-tx-x" data-action="job.cancel" data-target={job.id} aria-label={t("jobOutputView.stopThisTask")} title={t("jobOutputView.stopThisTask")} onClick={() => void onCancel(job.id)}>
               <StudioIcon name="stop" />
             </button>
           )}
-          <button type="button" className="agent-tx-x" data-action="job.close" aria-label={t("关闭")} onClick={onClose}>
+          <button type="button" className="agent-tx-x" data-action="job.close" aria-label={t("common.close")} onClick={onClose}>
             <StudioIcon name="close" />
           </button>
         </div>
-        {gone && <p className="mnote">{t("这个任务已经结束，没有可显示的输出了。")}</p>}
+        {gone && <p className="mnote">{t("jobOutputView.thisTaskHasEndedThere")}</p>}
         {failed && <p className="mnote">{failed}</p>}
-        {out && out.truncated && <p className="mnote">{t("只显示最后一部分（共 {total}）。", { total: bytes(out.bytes) })}</p>}
-        {out && !gone && <pre className="nest-ret job-out" ref={box} tabIndex={0}>{out.text || t("还没有输出")}</pre>}
+        {out && out.truncated && <p className="mnote">{t("jobOutputView.showingOnlyTheLastPart", { total: bytes(out.bytes) })}</p>}
+        {out && !gone && <pre className="nest-ret job-out" ref={box} tabIndex={0}>{out.text || t("jobOutputView.noOutputYet")}</pre>}
       </div>
     </div>
   );

@@ -236,8 +236,8 @@ export function Picker({
               ref={find}
               className="mfind"
               value={query}
-              placeholder={searchPlaceholder ?? t("筛选 {n} 项", { n: choosable })}
-              aria-label={t("筛选")}
+              placeholder={searchPlaceholder ?? t("menu.filterEntries", { n: choosable })}
+              aria-label={t("menu.filter")}
               spellCheck={false}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -248,7 +248,7 @@ export function Picker({
             />
           )}
           {head}
-          {none && <div className="mnone">{t("没有匹配的项")}</div>}
+          {none && <div className="mnone">{t("menu.nothingMatches")}</div>}
           {shown.map((it, i) => (
             <Fragment key={it.value}>
               {it.divide && i > 0 && <div className="div" />}

@@ -4,19 +4,19 @@ import { Group } from "./Group";
 
 /** One row: the chord as this platform writes it, and what it does. */
 const KEYS: Array<[string, string]> = [
-  [chord("F"), "在对话里查找"],
-  [chord("K"), "搜索会话"],
-  [chord("1"), "显示对话"],
-  [chord("2"), "显示运行分析"],
-  [chord("3"), "显示工作台"],
-  [`${chord("↑")} / ${chord("↓")}`, "在提问之间移动"],
-  [chord("Shift+E"), "优化提示词"],
-  [chord("Shift+F"), "工作台全屏"],
-  [`${chord("-")} / ${chord("+")} / ${chord("0")}`, "缩小 / 放大 / 复原界面"],
-  [chord("Enter"), "发送（发送键设为修饰键 + Enter 时）"],
-  ["Enter / Shift+Enter", "发送，或用 Shift 换行"],
-  ["Esc", "关闭当前弹层"],
-  ["← / → · Home", "聚焦分隔条后调宽或用 Home 复位"],
+  [chord("F"), "keysSheet.findInTheConversation"],
+  [chord("K"), "keysSheet.searchConversations"],
+  [chord("1"), "common.showConversation"],
+  [chord("2"), "common.showRunAnalysis"],
+  [chord("3"), "common.showWorkbench"],
+  [`${chord("↑")} / ${chord("↓")}`, "keysSheet.moveBetweenYourQuestions"],
+  [chord("Shift+E"), "common.refinePrompt"],
+  [chord("Shift+F"), "keysSheet.workbenchFullScreen"],
+  [`${chord("-")} / ${chord("+")} / ${chord("0")}`, "keysSheet.makeTheInterfaceSmallerLarger"],
+  [chord("Enter"), "keysSheet.sendWhenTheSendKey"],
+  ["Enter / Shift+Enter", "keysSheet.sendOrANewLine"],
+  ["Esc", "keysSheet.closeTheOpenPanel"],
+  ["← / → · Home", "keysSheet.widenADividerOnceFocused"],
 ];
 
 /** Every chord the window answers to, on one screen.
@@ -28,8 +28,8 @@ export function KeysSheet() {
   return (
     <Group
       id="keys"
-      title={t("快捷键")}
-      hint={t("下列按键在窗口中生效；标着 ⌘ 的地方，Windows 与 Linux 上是 Ctrl。全局显示 / 隐藏快捷键在上方单独配置，仅桌面 shell 支持。")}
+      title={t("common.keyboardShortcuts")}
+      hint={t("keysSheet.theseKeysWorkInsideThe")}
     >
       {KEYS.map(([keys, what]) => (
         <div className="lrow keys-row" key={keys + what}>

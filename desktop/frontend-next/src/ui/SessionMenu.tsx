@@ -40,35 +40,35 @@ export const SessionMenu = forwardRef<HTMLDivElement, SessionMenuProps>(function
 ) {
   const target = session.path;
   return createPortal(
-    <div ref={ref} className="session-pop" role="menu" aria-label={t("会话操作")} style={{ maxHeight: "calc(100vh / var(--zoom, 1) - 24px)", overflowY: "auto" }} onClick={(ev) => ev.stopPropagation()}>
+    <div ref={ref} className="session-pop" role="menu" aria-label={t("common.sessionActions")} style={{ maxHeight: "calc(100vh / var(--zoom, 1) - 24px)", overflowY: "auto" }} onClick={(ev) => ev.stopPropagation()}>
       <div className="session-pop-head">
         <b>{label}</b>
-        <small>{live ? t("执行中") : t("已完成")} · {t("本地工作区")}</small>
+        <small>{live ? t("sessionMenu.running") : t("common.done")} · {t("sessionMenu.localWorkspace")}</small>
       </div>
       <div className="session-pop-group">
         <button role="menuitem" data-action="session.pin" data-target={target} onClick={onPin}>
-          <StudioIcon name="pin" /><span>{pinned ? t("取消置顶") : t("置顶会话")}</span>
+          <StudioIcon name="pin" /><span>{pinned ? t("common.unpin") : t("common.pinSession")}</span>
         </button>
         {onMarkRead && (
           <button role="menuitem" data-action="session.mark-read" data-target={target} onClick={onMarkRead}>
-            <StudioIcon name="check" /><span>{t("标为已读")}</span>
+            <StudioIcon name="check" /><span>{t("common.markAsRead")}</span>
           </button>
         )}
         {onMove && canMove && ([-1, 1] as const).map((direction) => (
           <button key={direction} role="menuitem" data-action="session.move" data-target={target} data-value={direction}
             disabled={direction === -1 ? !canMove.up : !canMove.down} onClick={() => onMove(direction)}>
-            <StudioIcon name="arrow" data-flip={direction === 1 ? "" : undefined} /><span>{t(direction === -1 ? "上移" : "下移")}</span>
+            <StudioIcon name="arrow" data-flip={direction === 1 ? "" : undefined} /><span>{t(direction === -1 ? "common.moveUp" : "common.moveDown")}</span>
           </button>
         ))}
         <button role="menuitem" data-action="session.rename-start" data-target={target} onClick={onRename}>
-          <StudioIcon name="edit" /><span>{t("重命名")}</span>
+          <StudioIcon name="edit" /><span>{t("common.renamed")}</span>
         </button>
         <button role="menuitem" data-action="session.auto-name" data-target={target} disabled={autoNaming} onClick={onAutoName}>
-          <StudioIcon name="spark" /><span>{autoNaming ? t("命名中…") : t("自动命名")}</span>
+          <StudioIcon name="spark" /><span>{autoNaming ? t("common.naming") : t("common.autoName")}</span>
         </button>
         {session.runtimeId && live && (
           <button role="menuitem" data-action="session.pause" data-target={target} onClick={onPause}>
-            <StudioIcon name="pause" /><span>{t("暂停执行")}</span>
+            <StudioIcon name="pause" /><span>{t("sessionMenu.pauseRun")}</span>
           </button>
         )}
         {session.runtimeId && (
@@ -77,15 +77,15 @@ export const SessionMenu = forwardRef<HTMLDivElement, SessionMenuProps>(function
             data-action="session.close"
             data-target={target}
             disabled={live}
-            title={live ? t("正在运行，暂停后才能关闭") : undefined}
+            title={live ? t("sessionMenu.runningPauseItBeforeClosing") : undefined}
             onClick={onClose}
           >
-            <StudioIcon name="close" /><span>{t("关闭会话")}</span>
+            <StudioIcon name="close" /><span>{t("sessionMenu.closeConversation")}</span>
           </button>
         )}
         {session.runtimeId && onBranch && (
           <button role="menuitem" data-action="session.branch" data-target={target} onClick={onBranch}>
-            <StudioIcon name="branch" /><span>{t("从最近回复分叉")}</span>
+            <StudioIcon name="branch" /><span>{t("sessionMenu.branchFromTheLatestReply")}</span>
           </button>
         )}
         <button
@@ -96,30 +96,30 @@ export const SessionMenu = forwardRef<HTMLDivElement, SessionMenuProps>(function
           disabled={!!session.runtimeId && live}
           onClick={onArchive}
         >
-          <StudioIcon name="archive" /><span>{t(session.archived ? "取消归档" : "归档会话")}</span>
+          <StudioIcon name="archive" /><span>{t(session.archived ? "common.unarchive" : "common.archiveSession")}</span>
         </button>
       </div>
       <div className="session-pop-divider" />
       <div className="session-pop-group">
         <button role="menuitem" data-action="session.copy-info" data-target={target} onClick={onCopyInfo}>
-          <StudioIcon name="copy" /><span>{t("复制会话信息")}</span>
+          <StudioIcon name="copy" /><span>{t("sessionMenu.copySessionInformation")}</span>
         </button>
         {onMoveTo && (
-          <button role="menuitem" data-action="session.move-to-start" data-target={target} disabled={!!session.runtimeId} title={session.runtimeId ? t("先关闭这个会话，再移动它") : undefined} onClick={onMoveTo}>
-            <StudioIcon name="folder" /><span>{t("移动到项目…")}</span>
+          <button role="menuitem" data-action="session.move-to-start" data-target={target} disabled={!!session.runtimeId} title={session.runtimeId ? t("sessionMenu.closeThisConversationFirstThen") : undefined} onClick={onMoveTo}>
+            <StudioIcon name="folder" /><span>{t("sessionMenu.moveToAProject")}</span>
           </button>
         )}
         <button role="menuitem" data-action="session.export" data-target={target} disabled={exporting} onClick={() => onExport("json")}>
-          <StudioIcon name="download" /><span>{t("导出会话")}</span><small>JSON</small>
+          <StudioIcon name="download" /><span>{t("sessionMenu.exportSession")}</span><small>JSON</small>
         </button>
         <button role="menuitem" data-action="session.export" data-value="md" data-target={target} disabled={exporting} onClick={() => onExport("md")}>
-          <StudioIcon name="file" /><span>{t("导出会话")}</span><small>MD</small>
+          <StudioIcon name="file" /><span>{t("sessionMenu.exportSession")}</span><small>MD</small>
         </button>
       </div>
       <div className="session-pop-divider" />
       <div className="session-pop-group">
         <button className="danger" role="menuitem" data-action="session.delete" data-target={target} onClick={onDelete}>
-          <StudioIcon name="trash" /><span>{t("删除会话")}</span>
+          <StudioIcon name="trash" /><span>{t("common.deleteSession")}</span>
         </button>
       </div>
     </div>,

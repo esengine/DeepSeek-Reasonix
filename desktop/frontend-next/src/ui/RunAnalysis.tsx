@@ -18,7 +18,7 @@ const bucketOf = (row: TrajRow): Bucket =>
   row.kind === "model_round" ? "model" : isRecovery(row) ? "recovery" : row.tool ? "tool" : "system";
 
 const labelOf = (row: TrajRow) => {
-  if (row.kind === "model_round") return t("模型回合");
+  if (row.kind === "model_round") return t("runAnalysis.modelRound");
   if (row.tool) return row.tool;
   return spanText(row.payload) || row.kind;
 };
@@ -41,9 +41,9 @@ function Inspect({ row, index }: { row: TrajRow; index: number }) {
     <section className="run-inspect" data-c={bucketOf(row)} data-inspect>
       <header><b>{index >= 0 ? `R${index + 1} · ` : ""}{labelOf(row)}</b><span>+{decimals(row.at, 2)}s</span></header>
       <div className="run-inspect-facts">
-        <span><small>{t("类型")}</small><b>{row.kind}</b></span>
-        <span><small>{t("耗时")}</small><b>{seconds((row.dur ?? 0) * 1000, 2)}</b></span>
-        {row.tool && <span><small>{t("工具")}</small><b>{row.tool}</b></span>}
+        <span><small>{t("common.type")}</small><b>{row.kind}</b></span>
+        <span><small>{t("runAnalysis.took")}</small><b>{seconds((row.dur ?? 0) * 1000, 2)}</b></span>
+        {row.tool && <span><small>{t("common.tool")}</small><b>{row.tool}</b></span>}
       </div>
       <p>{spanText(row.payload)}</p>
       {row.subs.map((s, i) => <p key={i}>{spanText(s)}</p>)}
@@ -129,29 +129,29 @@ export function RunAnalysis({ rows, availability, onSave, onBack }: {
   if (rows.length === 0) {
     return (
       <div className="run-empty">
-        <strong>{t("还没有可分析的运行")}</strong>
-        <span>{t("发送任务后，这里会按真实运行记录显示模型、工具、重试与并行耗时。")}</span>
+        <strong>{t("runAnalysis.thereIsNoRunTo")}</strong>
+        <span>{t("runAnalysis.afterYouSendATask")}</span>
       </div>
     );
   }
 
   const buckets: Array<[Bucket, string]> = [
-    ["model", t("模型")], ["tool", t("工具")], ["recovery", t("重试")], ["system", t("系统")],
+    ["model", t("common.models")], ["tool", t("common.tool")], ["recovery", t("common.retry")], ["system", t("common.system")],
   ];
 
   return (
     <div className="run-analysis" ref={root}>
       <header className="run-analysis-head">
         <span>
-          <button className="run-export run-back" type="button" data-action="pane.view" data-value="flow" aria-label={t("返回正文")} title={t("返回正文")} onClick={onBack}>
+          <button className="run-export run-back" type="button" data-action="pane.view" data-value="flow" aria-label={t("runAnalysis.backToTheConversation")} title={t("runAnalysis.backToTheConversation")} onClick={onBack}>
             <StudioIcon name="chevron" />
           </button>
-          <b>{t("运行分析")}</b>
-          <small>{t("本轮 · 基于真实记录")}</small>
+          <b>{t("common.runAnalysis")}</b>
+          <small>{t("runAnalysis.thisTurnFromRecordedEvents")}</small>
         </span>
         <span className="run-analysis-actions">
-          {saved && <small title={saved}>{t("已导出")}</small>}
-          <span className="run-live"><i />{t("{n} 条记录", { n: rows.length })}</span>
+          {saved && <small title={saved}>{t("runAnalysis.exported")}</small>}
+          <span className="run-live"><i />{t("runAnalysis.records", { n: rows.length })}</span>
           <button
             className="run-export"
             onClick={() => {
@@ -159,23 +159,23 @@ export function RunAnalysis({ rows, availability, onSave, onBack }: {
               void onSave(name, serialiseTrajectory(rows, availability)).then((to) => setSaved(to ?? name));
             }}
           >
-            {t("导出运行记录")}
+            {t("runAnalysis.exportRunRecord")}
           </button>
         </span>
       </header>
 
-      <section className="run-kpis" aria-label={t("运行摘要")}>
-        <div><small>{t("总时长")}</small><strong>{seconds(span * 1000, span < 10 ? 1 : 0)}</strong><em>span</em></div>
-        <div><small>{t("模型 P95")}</small><strong>{rounds.length ? seconds(percentile(rounds.map((r) => r.dur ?? 0), .95) * 1000, 1) : "—"}</strong><em>{t("{n} 个回合", { n: rounds.length })}</em></div>
-        <div><small>{t("工具耗时")}</small><strong>{seconds(totals.tool * 1000, totals.tool < 10 ? 1 : 0)}</strong><em>{t("{n} 次调用", { n: tools.length })}</em></div>
-        <div><small>{t("并行节省")}</small><strong>{seconds(parallel * 1000, parallel < 10 ? 1 : 0)}</strong><em>{t("累计活动减墙钟")}</em></div>
-        <div><small>{t("重试")}</small><strong>{recoveries.length}</strong><em>{recoveries.length ? t("需要关注") : t("无异常")}</em></div>
-        <div><small>{t("首项活动")}</small><strong>{seconds(first * 1000, 1)}</strong><em>{t("相对本轮开始")}</em></div>
+      <section className="run-kpis" aria-label={t("runAnalysis.runSummary")}>
+        <div><small>{t("runAnalysis.totalTime")}</small><strong>{seconds(span * 1000, span < 10 ? 1 : 0)}</strong><em>span</em></div>
+        <div><small>{t("runAnalysis.modelP95")}</small><strong>{rounds.length ? seconds(percentile(rounds.map((r) => r.dur ?? 0), .95) * 1000, 1) : "—"}</strong><em>{t("runAnalysis.rounds", { n: rounds.length })}</em></div>
+        <div><small>{t("runAnalysis.toolTime")}</small><strong>{seconds(totals.tool * 1000, totals.tool < 10 ? 1 : 0)}</strong><em>{t("common.calls", { n: tools.length })}</em></div>
+        <div><small>{t("runAnalysis.parallelSaving")}</small><strong>{seconds(parallel * 1000, parallel < 10 ? 1 : 0)}</strong><em>{t("runAnalysis.activityTimeMinusWallTime")}</em></div>
+        <div><small>{t("common.retry")}</small><strong>{recoveries.length}</strong><em>{recoveries.length ? t("runAnalysis.needsAttention") : t("runAnalysis.noAnomaly")}</em></div>
+        <div><small>{t("runAnalysis.firstActivity")}</small><strong>{seconds(first * 1000, 1)}</strong><em>{t("runAnalysis.fromTurnStart")}</em></div>
       </section>
 
       <section className="run-budget">
-        <div className="run-section-head"><b>{t("时间分布")}</b><span>{t("累计活动 {time}", { time: seconds(activityTotal * 1000, 1) })}</span></div>
-        <div className="run-budget-bar" aria-label={t("各类活动耗时占比")}>
+        <div className="run-section-head"><b>{t("runAnalysis.timeDistribution")}</b><span>{t("runAnalysis.cumulativeActivity", { time: seconds(activityTotal * 1000, 1) })}</span></div>
+        <div className="run-budget-bar" aria-label={t("runAnalysis.shareOfActivityTime")}>
           {buckets.map(([key, label]) => totals[key] > 0 && (
             <i key={key} data-c={key} style={{ width: `${(totals[key] / Math.max(activityTotal, .001)) * 100}%` }} title={`${label} ${seconds(totals[key] * 1000, 1)}`}>
               <span>{label} {seconds(totals[key] * 1000, 1)}</span>
@@ -188,25 +188,25 @@ export function RunAnalysis({ rows, availability, onSave, onBack }: {
       </section>
 
       <div className="run-timeline-controls">
-        <label>{t("时间轴缩放")}<input type="range" min="1" max="16" step="1" value={zoom}
-          aria-label={t("时间轴缩放")} aria-valuetext={`${zoom}×`} onChange={(e) => setZoom(Number(e.target.value))} /></label>
+        <label>{t("runAnalysis.timelineZoom")}<input type="range" min="1" max="16" step="1" value={zoom}
+          aria-label={t("runAnalysis.timelineZoom")} aria-valuetext={`${zoom}×`} onChange={(e) => setZoom(Number(e.target.value))} /></label>
         <output>{zoom}×</output>
-        <button className="run-export" onClick={() => { setZoom(1); if (timeline.current) timeline.current.scrollLeft = 0; }}>{t("重置缩放")}</button>
+        <button className="run-export" onClick={() => { setZoom(1); if (timeline.current) timeline.current.scrollLeft = 0; }}>{t("runAnalysis.resetZoom")}</button>
       </div>
-      <div className="run-timeline-scroll" ref={timeline} role="region" aria-label={t("时间轴")} tabIndex={0}>
+      <div className="run-timeline-scroll" ref={timeline} role="region" aria-label={t("runAnalysis.timeline")} tabIndex={0}>
         <div className="run-timeline-canvas" style={{ width: `${zoom * 100}%` }}>
       {signals.length > 0 && (
         <section className="run-signals">
-          <div className="run-section-head"><b>{t("信号轨")}</b><span>{t("与下方共用时间轴")}</span></div>
-          <p className="run-section-note">{t("没有时长、也不是工具调用的运行记录，位置就是时间，无法拖动；缩放后可横向滚动，挨得太近的信号合并成一个带数量的标记。点一个看它的记录。")}</p>
+          <div className="run-section-head"><b>{t("runAnalysis.signalRail")}</b><span>{t("runAnalysis.sharesTheTimelineBelow")}</span></div>
+          <p className="run-section-note">{t("runAnalysis.recordsWithNoDurationThat")}</p>
           <div className="run-signal-track"><div className="run-signal-line" ref={signalLine}>
             {clusters.map(({ rows: group, left }) => {
               const row = group[0];
               const open = pick?.from === "signal" && pick.seq === row.seq;
               return (
                 <button data-action="analysis.signal" data-target={String(row.seq)} key={row.seq} style={{ left: `${left * 100}%` }} onClick={(e) => toggle(row.seq, "signal", e.currentTarget)}
-                  title={group.length > 1 ? t("{n} 个信号", { n: group.length }) : spanText(row.payload)}
-                  aria-label={group.length > 1 ? `${t("{n} 个信号", { n: group.length })} · +${decimals(row.at, 2)}s` : `${labelOf(row)} · +${decimals(row.at, 2)}s`} aria-expanded={open}>
+                  title={group.length > 1 ? t("runAnalysis.signals", { n: group.length }) : spanText(row.payload)}
+                  aria-label={group.length > 1 ? `${t("runAnalysis.signals", { n: group.length })} · +${decimals(row.at, 2)}s` : `${labelOf(row)} · +${decimals(row.at, 2)}s`} aria-expanded={open}>
                   {group.length > 1 ? <b data-c={bucketOf(row)}>{group.length}</b> : <i data-c={bucketOf(row)} />}
                 </button>
               );
@@ -235,7 +235,7 @@ export function RunAnalysis({ rows, availability, onSave, onBack }: {
       )}
 
       <section className="run-rounds">
-        <div className="run-section-head"><b>{t("活动回合")}</b><span>{t("点击一行查看记录")}</span></div>
+        <div className="run-section-head"><b>{t("runAnalysis.activityRounds")}</b><span>{t("runAnalysis.selectARowToInspect")}</span></div>
         <ol>
           {activities.map((row, index) => {
             const start = (row.at / Math.max(span, 1)) * 100;

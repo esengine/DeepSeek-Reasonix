@@ -42,7 +42,7 @@ export function WorkbenchGit({ port, workspaceRoot, changes, repos, failure = ""
       <>
         <p className="refine-error workbench-stage-error" role="alert">
           {failure}
-          {onRetry && <button type="button" className="btn sm" data-action="workbench.repos-reload" onClick={onRetry}>{t("重新读取")}</button>}
+          {onRetry && <button type="button" className="btn sm" data-action="workbench.repos-reload" onClick={onRetry}>{t("common.readAgain")}</button>}
         </p>
         <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onChanged={onChanged} remote={remote} />
       </>

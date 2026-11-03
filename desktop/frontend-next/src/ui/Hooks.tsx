@@ -19,46 +19,46 @@ interface Recipe {
 const RECIPES: Recipe[] = [
   {
     id: "format",
-    title: "文件修改后自动格式化",
-    desc: "每次写入后执行一次格式化命令；失败时仅提醒，不中断",
+    title: "hooks.formatFilesAfterTheyAre",
+    desc: "hooks.runsAFormatterAfterEvery",
     event: "PostToolUse",
     match: "edit_file|write_file|multi_edit",
     command: "gofmt -w . 2>/dev/null || true",
   },
   {
     id: "guard-secrets",
-    title: "写入密钥文件前请求确认",
-    desc: "访问 .env 一类路径时拦截，由你决定是否放行",
+    title: "hooks.askMeBeforeWritingA",
+    desc: "hooks.stopsOnPathsLikeEnv",
     event: "PreToolUse",
     match: "edit_file|write_file",
     command: `grep -q '"\\.env' <<< "$REASONIX_HOOK_PAYLOAD" && exit 2 || exit 0`,
   },
   {
     id: "test-before-stop",
-    title: "结束前执行一次测试",
-    desc: "每轮结束时运行测试，失败时以提醒形式显示",
+    title: "hooks.runTheTestsBeforeWrapping",
+    desc: "hooks.runsTheTestsAtThe",
     event: "Stop",
     command: "go test ./... 2>&1 | tail -5",
   },
 ];
 
-const SCOPE_LABEL = { user: "我的", project: "这个项目" } as const;
+const SCOPE_LABEL = { user: "common.mine", project: "hooks.thisProject" } as const;
 
 const EVENT_LABELS = new Map<string, () => string>([
-  ["PreToolUse", () => t("工具执行前")],
-  ["PostToolUse", () => t("工具执行后")],
-  ["PostToolUseFailure", () => t("工具执行失败后")],
-  ["PermissionRequest", () => t("请求权限时")],
-  ["UserPromptSubmit", () => t("提交消息时")],
-  ["Stop", () => t("本轮结束时")],
-  ["StopFailure", () => t("本轮失败时")],
-  ["PostLLMCall", () => t("模型响应完成后")],
-  ["SessionStart", () => t("会话开始时")],
-  ["SessionEnd", () => t("会话结束时")],
-  ["SubagentStart", () => t("子代理开始时")],
-  ["SubagentStop", () => t("子代理结束时")],
-  ["Notification", () => t("需要你关注时")],
-  ["PreCompact", () => t("压缩上下文前")],
+  ["PreToolUse", () => t("hooks.beforeAToolRuns")],
+  ["PostToolUse", () => t("hooks.afterAToolRuns")],
+  ["PostToolUseFailure", () => t("hooks.afterAToolFails")],
+  ["PermissionRequest", () => t("hooks.whenPermissionIsRequested")],
+  ["UserPromptSubmit", () => t("hooks.whenAMessageIsSubmitted")],
+  ["Stop", () => t("hooks.whenTheTurnEnds")],
+  ["StopFailure", () => t("hooks.whenTheTurnFails")],
+  ["PostLLMCall", () => t("hooks.afterAModelResponseCompletes")],
+  ["SessionStart", () => t("hooks.whenASessionStarts")],
+  ["SessionEnd", () => t("hooks.whenASessionEnds")],
+  ["SubagentStart", () => t("hooks.whenASubagentStarts")],
+  ["SubagentStop", () => t("hooks.whenASubagentEnds")],
+  ["Notification", () => t("hooks.whenYourAttentionIsNeeded")],
+  ["PreCompact", () => t("hooks.beforeContextIsCompacted")],
 ]);
 
 function eventLabel(event: string): string {
@@ -98,7 +98,7 @@ export function Hooks({ port, onChanged }: Props) {
   };
   useEffect(reload, [port]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!cat) return <div className="empty">{t("无法读取 hooks 配置。")}</div>;
+  if (!cat) return <div className="empty">{t("hooks.couldNotReadTheHooks")}</div>;
 
   const plugin = cat.hooks.filter((h) => h.scope === "plugin");
   const broken = cat.sources.filter((s) => s.status === "malformed" || s.status === "unreadable");
@@ -144,7 +144,7 @@ export function Hooks({ port, onChanged }: Props) {
 
   return (
     <div className="hooks">
-      <div className="scope" role="radiogroup" aria-label={t("规则写入位置")}>
+      <div className="scope" role="radiogroup" aria-label={t("hooks.whereTheseRulesLive")}>
         {(["user", "project"] as const).map((s) => (
           <button
             key={s}
@@ -154,15 +154,15 @@ export function Hooks({ port, onChanged }: Props) {
             onClick={() => setScope(s)}
           >
             {t(SCOPE_LABEL[s])}
-            <i>{t(s === "user" ? "只在这台机器上" : "写入仓库，clone 仓库的人也会获得")}</i>
+            <i>{t(s === "user" ? "hooks.thisMachineOnly" : "hooks.writtenIntoTheRepositorySo")}</i>
           </button>
         ))}
       </div>
-      <p className="path">{scope === "user" ? cat.globalPath : cat.projectPath || t("没有打开项目")}</p>
+      <p className="path">{scope === "user" ? cat.globalPath : cat.projectPath || t("hooks.noProjectOpen")}</p>
 
       {broken.map((s) => (
         <div className="why" key={s.path}>
-          {s.path} {t("无法读取：")}{s.parseError || s.status}
+          {s.path} {t("hooks.couldNotBeRead")}{s.parseError || s.status}
         </div>
       ))}
 
@@ -190,8 +190,8 @@ export function Hooks({ port, onChanged }: Props) {
       </div>
 
       <button className="more" aria-expanded={expert} onClick={() => setExpert((v) => !v)}>
-        {t(expert ? "收起" : "手动添加")}
-        <span className="c">{t("{n} 条规则", { n: mine.length })}</span>
+        {t(expert ? "common.collapse" : "hooks.writeOneManually")}
+        <span className="c">{t("common.rules", { n: mine.length })}</span>
       </button>
 
       {expert && (
@@ -250,19 +250,19 @@ function Expert({
                 <input
                   className="match"
                   value={h.match ?? ""}
-                  placeholder={t("匹配哪些工具（正则，留空=全部）")}
+                  placeholder={t("hooks.whichToolsToMatchRegex")}
                   onChange={(e) => patch(i, { match: e.target.value })}
                 />
               )}
-              {meta?.blocking && <i className="warn">{t("可拦截 agent")}</i>}
+              {meta?.blocking && <i className="warn">{t("hooks.canStopTheAgent")}</i>}
                 <button className="act ghost" data-action="hooks.remove" onClick={() => onSave(draft.filter((_, k) => k !== i))}>
-                {t("删除")}
+                {t("common.delete")}
               </button>
             </div>
             <input
               className="cmd"
               value={h.command}
-              placeholder={t("要运行的命令")}
+              placeholder={t("hooks.theCommandToRun")}
               onChange={(e) => patch(i, { command: e.target.value })}
             />
             {h.issues?.map((msg) => (
@@ -272,11 +272,11 @@ function Expert({
             ))}
             <div className="line">
                 <button className="act" data-action="hooks.run-once" disabled={busy === key} onClick={() => onTry(h, key)}>
-                {t(busy === key ? "运行中…" : "试运行")}
+                {t(busy === key ? "hooks.running" : "hooks.dryRunOnce")}
               </button>
               {/* The command really runs. Saying so is the difference between a
                   button that checks syntax and one that might delete a file. */}
-              <span className="note">{t("将实际执行该命令")}</span>
+              <span className="note">{t("hooks.reallyRunsThisCommand")}</span>
             </div>
             {trial?.result && <DryRun res={trial.result} blocking={!!meta?.blocking} />}
             {trial?.error && <div className="why">{trial.error}</div>}
@@ -289,21 +289,21 @@ function Expert({
           className="act"
           onClick={() => setDraft((d) => [...d, { event: "PostToolUse", command: "", scope }])}
         >
-          {t("添加规则")}
+          {t("common.addARule")}
         </button>
             <button className="act" data-action="hooks.save" data-primary disabled={busy === "save"} onClick={() => onSave(draft)}>
-          {t(busy === "save" ? "保存中…" : "保存")}
+          {t(busy === "save" ? "common.saving2" : "common.save")}
         </button>
       </div>
 
       {plugin.length > 0 && (
         <div className="fromplugin">
-          <span className="lb">{t("插件带来的 {n} 条", { n: plugin.length })}</span>
+          <span className="lb">{t("hooks.fromPlugins", { n: plugin.length })}</span>
           {plugin.map((h, i) => (
             <div className="hookrow" key={i}>
               <span className="ev" title={eventLabel(h.event)}>{eventLabel(h.event)}</span>
               <span className="cm">{h.command}</span>
-              <span className="sc">{t("只读")}</span>
+              <span className="sc">{t("common.readOnly")}</span>
             </div>
           ))}
         </div>
@@ -316,7 +316,7 @@ function Expert({
 // only printed "exit 2" would leave the user exactly as unsure as before.
 function DryRun({ res, blocking }: { res: HookDryRun; blocking: boolean }) {
   const verdict = res.timedOut
-    ? "超时了，这一步会被当成失败"
+    ? "hooks.timedOutThisStepCounts"
     : res.blocks
       ? "这一次它会挡住这一步"
       : res.decision === "block" && !blocking

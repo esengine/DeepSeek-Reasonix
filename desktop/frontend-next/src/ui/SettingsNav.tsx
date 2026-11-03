@@ -18,7 +18,7 @@ interface Props {
 
 export function SettingsNav({ at, values, shown, danger, disabled, onSelect, page, onPage }: Props) {
   return (
-    <nav className="prefs-nav" role="tablist" aria-label={t("设置分类")} onKeyDown={arrowTabs}>
+    <nav className="prefs-nav" role="tablist" aria-label={t("settingsNav.settingsSections")} onKeyDown={arrowTabs}>
       {NAV.map(([group, items]) => {
         const rows = items.filter(([id]) => shown(id));
         if (rows.length === 0) return null;

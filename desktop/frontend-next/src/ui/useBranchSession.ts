@@ -22,7 +22,7 @@ export function useBranchSession({ panePorts, runtimes, runsRef, openPane }: Inp
       const turns = (await port.checkpoints()).map((c) => c.turn).sort((a, b) => a - b);
       const closed = runsRef.current[runtimeId]?.live ? turns.slice(0, -1) : turns;
       const turn = closed[closed.length - 1];
-      if (turn === undefined) throw new Error(t("还没有已完成的回复可以分叉"));
+      if (turn === undefined) throw new Error(t("useBranchSession.thereIsNoFinishedReply"));
       await openPane({ root: rt.root, sessionPath: await port.branchAt(turn, name) });
     },
     [panePorts, runtimes, runsRef, openPane],

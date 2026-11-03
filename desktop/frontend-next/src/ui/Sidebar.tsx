@@ -162,7 +162,7 @@ export function Sidebar({
   const drop = useFileDrop((d) => {
     if (collapsed || adder.busy || d.text) return;
     if (d.paths.length !== 1) {
-      onError(new Error(d.paths.length ? t("请一次拖入一个文件夹") : t("无法取得本机路径，请使用添加文件夹")));
+      onError(new Error(d.paths.length ? t("sidebar.dropOneFolderAtA") : t("sidebar.theLocalPathIsUnavailable")));
       return;
     }
     adder.addPath(d.paths[0]);
@@ -184,31 +184,31 @@ export function Sidebar({
   // the two cannot drift into two different lists of the same thing.
   const commands = useMemo<Command[]>(
     () => [
-      { id: "new", label: t("新建会话"), icon: "plus", keywords: "new session chat 新建",
+      { id: "new", label: t("common.startANewSession"), icon: "plus", keywords: "new session chat 新建",
         run: () => void startConversation().catch(onError) },
-      { id: "find", label: t("在这段对话里查找"), icon: "search", keywords: "find search conversation 查找 搜索 对话",
+      { id: "find", label: t("common.findInThisConversation"), icon: "search", keywords: "find search conversation 查找 搜索 对话",
         keys: chord("F"), run: onFind },
-      { id: "view-flow", label: t("显示对话"), icon: "menu", keywords: "conversation chat flow 对话 会话", keys: chord("1"), run: () => onView("flow") },
-      { id: "view-analysis", label: t("显示运行分析"), icon: "list", keywords: "run analysis trace 运行 分析", keys: chord("2"), run: () => onView("analysis") },
-      { id: "view-browser", label: t("显示工作台"), icon: "panel", keywords: "workbench browser files 工作台 浏览器", keys: chord("3"), run: () => onView("browser") },
-      { id: "files", label: t("文件"), icon: "file", keywords: "files workspace explorer 文件 工作区", run: onFiles },
-      { id: "storage", label: t("存储"), icon: "file", keywords: "storage disk data 存储 磁盘 数据",
+      { id: "view-flow", label: t("common.showConversation"), icon: "menu", keywords: "conversation chat flow 对话 会话", keys: chord("1"), run: () => onView("flow") },
+      { id: "view-analysis", label: t("common.showRunAnalysis"), icon: "list", keywords: "run analysis trace 运行 分析", keys: chord("2"), run: () => onView("analysis") },
+      { id: "view-browser", label: t("common.showWorkbench"), icon: "panel", keywords: "workbench browser files 工作台 浏览器", keys: chord("3"), run: () => onView("browser") },
+      { id: "files", label: t("common.files2"), icon: "file", keywords: "files workspace explorer 文件 工作区", run: onFiles },
+      { id: "storage", label: t("common.storage"), icon: "file", keywords: "storage disk data 存储 磁盘 数据",
         run: () => onSettings("storage") },
-      { id: "ext", label: t("工具与集成"), icon: "plug", keywords: "tools mcp skills 工具 集成",
+      { id: "ext", label: t("sidebar.toolsAndIntegrations"), icon: "plug", keywords: "tools mcp skills 工具 集成",
         run: () => onSettings("ext") },
-      { id: "remote", label: t("运行环境"), icon: "server", keywords: "ssh local remote 运行环境",
+      { id: "remote", label: t("common.whereItRuns"), icon: "server", keywords: "ssh local remote 运行环境",
         run: () => onSettings("remote") },
-      { id: "providers", label: t("模型服务"), icon: "layers", keywords: "model provider 模型 来源 服务",
+      { id: "providers", label: t("common.modelServices"), icon: "layers", keywords: "model provider 模型 来源 服务",
         run: () => onSettings("providers") },
-      { id: "usage", label: t("钱包与用量"), icon: "wallet", keywords: "usage cost token 用量 费用",
+      { id: "usage", label: t("sidebar.walletAndUsage"), icon: "wallet", keywords: "usage cost token 用量 费用",
         run: () => onSettings("usage") },
-      { id: "feedback", label: t("发送反馈"), icon: "feedback", keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
+      { id: "feedback", label: t("common.sendFeedback"), icon: "feedback", keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
         run: () => onFeedback("send") },
-      { id: "feedback-mine", label: t("我的反馈"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
-        status: feedbackUnread > 0 ? t("{n} 项待查看", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
-      { id: "community", label: t("社区与贡献者"), icon: "globe", keywords: "community discord qq group contributors 社区 交流群 加群 贡献者",
+      { id: "feedback-mine", label: t("common.myFeedback"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
+        status: feedbackUnread > 0 ? t("common.toReview", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
+      { id: "community", label: t("common.communityAndContributors"), icon: "globe", keywords: "community discord qq group contributors 社区 交流群 加群 贡献者",
         run: () => onSettings("versions:community") },
-      { id: "settings", label: t("设置"), icon: "settings", keywords: "settings preferences 设置 偏好",
+      { id: "settings", label: t("common.settings"), icon: "settings", keywords: "settings preferences 设置 偏好",
         run: () => onSettings() },
     ],
     [newSessionRoot, onNew, onOpen, onOpenRemote, runtimes, active, onFiles, onView, onSettings, onFeedback, feedbackUnread, onFind, onError],
@@ -271,9 +271,9 @@ export function Sidebar({
     {/* 收起而不是卸载：卸掉就丢了侧栏的滚动位置、Inspector 的展开、当前选
         中的面板。inert 是「看不见就够不着」那一半 —— 只做视觉隐藏的话，
         屏幕上没有的栏还能被 Tab 走进去。 */}
-    <button className="railveil" data-action="chrome.rail" tabIndex={-1} aria-label={t("收起工作区栏")} onClick={() => onCollapse()} />
+    <button className="railveil" data-action="chrome.rail" tabIndex={-1} aria-label={t("common.collapseTheWorkspaceRail")} onClick={() => onCollapse()} />
     <div className="rail" inert={collapsed} ref={drop}>
-      {over && !collapsed && !adder.busy && <div className="rail-drop" role="status"><StudioIcon name="folder" /><span>{t("松开以添加项目文件夹")}</span></div>}
+      {over && !collapsed && !adder.busy && <div className="rail-drop" role="status"><StudioIcon name="folder" /><span>{t("sidebar.dropToAddAProject")}</span></div>}
       <div className="railscroll">
       <div className="studio-rail-head">
         <div className="studio-brand" aria-label="Reasonix Studio">
@@ -288,10 +288,10 @@ export function Sidebar({
           title="Alt N"
           onClick={() => void startConversation().catch(onError)}
         >
-          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("新建会话")}</b>
+          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("common.startANewSession")}</b>
         </button>
         <button className="studio-search" data-action="workspace.search" title="Ctrl K" onClick={() => setPalette(true)}>
-          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索与快捷操作")}</b>
+          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("common.searchAndCommands")}</b>
         </button>
         {!navShown && (
           <div className="studio-quicknav">
@@ -306,12 +306,12 @@ export function Sidebar({
             ))}
           </div>
         )}
-        <div className="studio-session-filters" role="group" aria-label={t("会话范围")}>
+        <div className="studio-session-filters" role="group" aria-label={t("sidebar.sessionScope")}>
           <div className="studio-session-segments">
-            <button data-action="session.filter" data-value="all" aria-pressed={railScope === "all"} onClick={() => setRailScope("all")}><span>{t("全部")}</span></button>
-            <button data-action="session.filter" data-value="live" aria-pressed={railScope === "live"} onClick={() => setRailScope("live")}><span>{t("进行中")}</span></button>
-            <button data-action="session.filter" data-value="pinned" aria-pressed={railScope === "pinned"} onClick={() => setRailScope("pinned")}><span>{t("置顶")}</span></button>
-            <button data-action="session.filter" data-value="archived" aria-pressed={railScope === "archived"} onClick={() => setRailScope("archived")}><span>{t("归档")}</span></button>
+            <button data-action="session.filter" data-value="all" aria-pressed={railScope === "all"} onClick={() => setRailScope("all")}><span>{t("common.all")}</span></button>
+            <button data-action="session.filter" data-value="live" aria-pressed={railScope === "live"} onClick={() => setRailScope("live")}><span>{t("common.running2")}</span></button>
+            <button data-action="session.filter" data-value="pinned" aria-pressed={railScope === "pinned"} onClick={() => setRailScope("pinned")}><span>{t("sidebar.pinned")}</span></button>
+            <button data-action="session.filter" data-value="archived" aria-pressed={railScope === "archived"} onClick={() => setRailScope("archived")}><span>{t("common.archived")}</span></button>
           </div>
         </div>
       </div>
@@ -379,16 +379,16 @@ export function Sidebar({
       </RailSearch>
       </div>
       {!navShown && <div className="railfoot">
-        {destinations.some(([mark]) => mark === "usage") && <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("钱包与用量")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>}
+        {destinations.some(([mark]) => mark === "usage") && <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("sidebar.walletAndUsage")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>}
         <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
           <span aria-hidden="true"><StudioIcon name="feedback" /></span>
-          <b>{t("发送反馈")}</b>
+          <b>{t("common.sendFeedback")}</b>
           <FeedbackBadge unread={feedbackUnread} />
         </button>
         <div className="studio-user-foot">
           <AccountRow account={account} unread={accountUnread} onOpen={() => onSettings("account")} />
-          <span className="studio-workspace-kind">{t(account?.signedIn ? "个人工作空间" : "本地工作空间")}</span>
-          <button className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("设置")}><StudioIcon name="settings" /><UpdateDot /></button>
+          <span className="studio-workspace-kind">{t(account?.signedIn ? "sidebar.personalWorkspace" : "sidebar.localWorkspace")}</span>
+          <button className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("common.settings")}><StudioIcon name="settings" /><UpdateDot /></button>
         </div>
       </div>}
     </div>

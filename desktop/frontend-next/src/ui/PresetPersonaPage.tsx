@@ -15,13 +15,13 @@ export function PresetPersonaPage({ port, onClose }: { port: AgentPort; onClose:
       e.preventDefault(); e.stopPropagation(); leave.request(onClose);
     }}>
       <header className="preset-page-heading">
-        <button type="button" className="preset-back" data-action="agent-preset.leave" onClick={() => leave.request(onClose)}><StudioIcon name="chevron" />{t("返回预设列表")}</button>
-        <h2>{t("日常搭档人设")}</h2>
-        <p>{t("修改用户配置，与自定义预设独立保存。")}</p>
+        <button type="button" className="preset-back" data-action="agent-preset.leave" onClick={() => leave.request(onClose)}><StudioIcon name="chevron" />{t("common.backToPresets")}</button>
+        <h2>{t("presetPersonaPage.everydayPartnerPersona")}</h2>
+        <p>{t("presetPersonaPage.editUserConfigurationSavedSeparately")}</p>
       </header>
       <div className="preset-page-content"><Persona port={port} onDirtyChange={setDirty} onBusyChange={setBusy} onSaved={onClose} /></div>
-      <footer className="preset-page-footer"><p>{t("新会话及现有会话下一次构建时生效。")}</p>
-        <button type="button" className="btn" data-action="agent-preset.leave" onClick={() => leave.request(onClose)}>{t("返回")}</button></footer>
+      <footer className="preset-page-footer"><p>{t("presetPersonaPage.appliesToNewConversationsAnd")}</p>
+        <button type="button" className="btn" data-action="agent-preset.leave" onClick={() => leave.request(onClose)}>{t("common.back")}</button></footer>
     </div>
     {leave.confirmation}
   </>;

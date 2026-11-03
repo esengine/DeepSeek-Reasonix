@@ -30,11 +30,11 @@ export function useRuntimeReload(port: AgentPort, onDone: () => void) {
 
   const go = useCallback(async () => {
     const attempt = ++attempts.current;
-    setFeedback({ state: "run", note: t("正在重启常驻进程，重新扫描技能、命令和钩子…") });
+    setFeedback({ state: "run", note: t("runtimeReload.restartingResidentProcessesAndRescan") });
     try {
       await port.reloadExtensions();
       if (currentConnection.current !== connection || attempts.current !== attempt) return;
-      setFeedback({ state: "ok", note: t("已生效，下一轮开始用新的扩展") });
+      setFeedback({ state: "ok", note: t("runtimeReload.liveTheNextTurnRuns") });
       onDone();
     } catch (e) {
       if (currentConnection.current !== connection || attempts.current !== attempt) return;
@@ -55,16 +55,16 @@ export function useRuntimeReload(port: AgentPort, onDone: () => void) {
   return {
     applied: () => {
       attempts.current++;
-      setFeedback({ state: "ok", note: t("已生效，下一轮开始用新的扩展") });
+      setFeedback({ state: "ok", note: t("runtimeReload.liveTheNextTurnRuns") });
     },
     report: (message: string) => {
       attempts.current++;
-      setFeedback({ state: "bad", note: t("更改已保存，运行时未重载：{reason}。请用「重载运行时」重试。", { reason: message }) });
+      setFeedback({ state: "bad", note: t("runtimeReload.changesSavedButTheRuntime", { reason: message }) });
     },
     action: (
       <button className="act reload" data-action="extensions.reload" data-s={state || undefined} disabled={state === "run"} onClick={go}>
         <i className="rdot" />
-        {state === "run" ? t("重载中") : state === "ok" ? t("已生效") : t("重载运行时")}
+        {state === "run" ? t("runtimeReload.reloading") : state === "ok" ? t("runtimeReload.live") : t("runtimeReload.reloadRuntime")}
       </button>
     ),
     note: note ? (

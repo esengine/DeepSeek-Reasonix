@@ -33,10 +33,10 @@ export function PasteKeep({ chip, onKeep }: { chip: PasteChip; onKeep: (chip: Pa
   return (
     <>
       {chip.saved ? (
-        <span className="sz" title={chip.saved.path}>{t("已存为文件 · 模型按需读取")}</span>
+        <span className="sz" title={chip.saved.path}>{t("pastekeep.savedAsAFileThe")}</span>
       ) : (
         <button className="save" data-action="paste.save" disabled={chip.saving} onClick={() => onKeep(chip)}>
-          {chip.saving ? t("正在保存…") : t("存为文件")}
+          {chip.saving ? t("common.saving") : t("pastekeep.saveAsFile")}
         </button>
       )}
       {chip.error && <span className="why" role="alert" title={chip.error}>{chip.error}</span>}

@@ -60,12 +60,12 @@ export function BranchChip({ port, git, changeCount, countElsewhere = false, onC
   // A branch another worktree holds is listed but closed: git would refuse
   // the switch, so the row says where the branch lives instead of failing.
   const branchItems: MenuItem[] = [
-    { value: "__branches", label: t("本地分支"), right: String(locals.length), header: true },
+    { value: "__branches", label: t("common.localBranches"), right: String(locals.length), header: true },
     ...locals.map((b) => ({
       value: b.name,
       label: b.name,
       disabled: !!b.worktree,
-      desc: b.worktree ? t("已由其他工作树检出") : undefined,
+      desc: b.worktree ? t("branchChip.checkedOutInAnotherWorktree") : undefined,
     })),
   ];
 
@@ -73,13 +73,13 @@ export function BranchChip({ port, git, changeCount, countElsewhere = false, onC
     const refused = git.absent === "refused";
     return (
       <div className="studio-branch-pop" onMouseEnter={(e) => fitCard(e.currentTarget)} onFocusCapture={(e) => fitCard(e.currentTarget)}>
-        <div className="mode plain studio-branch" data-norepo="" data-absent={git.absent} role="img" aria-label={refused ? t("Git 拒绝打开") : t("Git 未响应")} tabIndex={0} aria-describedby={branchTipId}>
+        <div className="mode plain studio-branch" data-norepo="" data-absent={git.absent} role="img" aria-label={refused ? t("branchChip.gitRefusedToOpenIt") : t("branchChip.gitDidNotRespond")} tabIndex={0} aria-describedby={branchTipId}>
           <span className="ic" aria-hidden="true"><StudioIcon name="branch" /></span>
-          <span className="lb">{refused ? t("Git 拒绝打开") : t("Git 未响应")}</span>
+          <span className="lb">{refused ? t("branchChip.gitRefusedToOpenIt") : t("branchChip.gitDidNotRespond")}</span>
         </div>
         <div className="studio-branch-card" style={cardStyle} id={branchTipId} role="tooltip">
-          <b>{refused ? t("这个文件夹有 Git 仓库，但 Git 拒绝打开它") : t("这个文件夹有 Git 仓库，但 Git 没有及时响应")}</b>
-          <span>{refused ? (git.detail ? t("Git 说：{detail}", { detail: git.detail }) : t("请在终端里运行 git status 查看原因")) : t("分支暂时无法显示。重新打开这个文件夹，或重启 Studio 后再试")}</span>
+          <b>{refused ? t("branchChip.thisFolderHasAGit") : t("branchChip.thisFolderHasAGit2")}</b>
+          <span>{refused ? (git.detail ? t("branchChip.gitSaid", { detail: git.detail }) : t("branchChip.runGitStatusInA")) : t("branchChip.branchesCannotBeShownFor")}</span>
         </div>
       </div>
     );
@@ -87,13 +87,13 @@ export function BranchChip({ port, git, changeCount, countElsewhere = false, onC
   if (git && !git.repo) {
     return (
       <div className="studio-branch-pop" onMouseEnter={(e) => fitCard(e.currentTarget)} onFocusCapture={(e) => fitCard(e.currentTarget)}>
-        <div className="mode plain studio-branch" data-norepo="" role="img" aria-label={t("非 Git 仓库")} tabIndex={0} aria-describedby={branchTipId}>
+        <div className="mode plain studio-branch" data-norepo="" role="img" aria-label={t("branchChip.noGitRepository")} tabIndex={0} aria-describedby={branchTipId}>
           <span className="ic" aria-hidden="true"><StudioIcon name="branch" /></span>
-          <span className="lb">{t("非 Git 仓库")}</span>
+          <span className="lb">{t("branchChip.noGitRepository")}</span>
         </div>
         <div className="studio-branch-card" style={cardStyle} id={branchTipId} role="tooltip">
-          <b>{t("此工作区未受版本控制")}</b>
-          <span>{t("这里没有 Git 仓库，因此没有分支可显示或切换")}</span>
+          <b>{t("branchChip.thisWorkspaceIsNotVersion")}</b>
+          <span>{t("branchChip.thereIsNoGitRepository")}</span>
         </div>
       </div>
     );
@@ -104,7 +104,7 @@ export function BranchChip({ port, git, changeCount, countElsewhere = false, onC
       <Picker
         className="mode plain studio-branch"
         data-action="git.branch"
-        ariaLabel={t("当前 Git 分支：{branch}", { branch: git.branch })}
+        ariaLabel={t("branchChip.currentGitBranch", { branch: git.branch })}
         ariaDescribedBy={branchTipId}
         place="bottom"
         current={git.detached ? "" : git.branch}
@@ -114,15 +114,15 @@ export function BranchChip({ port, git, changeCount, countElsewhere = false, onC
         onPick={switchTo}
         label={<>
           <span className="ic" aria-hidden="true"><StudioIcon name="branch" /></span>
-          <span className="lb">{moving === null ? git.branch : t("正在切换到 {branch}…", { branch: moving })}</span>
-          {changeCount > 0 && !countElsewhere && !busy && <small>{t("{n} 个变更", { n: changeCount })}</small>}
+          <span className="lb">{moving === null ? git.branch : t("common.switchingTo", { branch: moving })}</span>
+          {changeCount > 0 && !countElsewhere && !busy && <small>{t("common.changes2", { n: changeCount })}</small>}
           <StudioIcon name="down" />
         </>}
       />
       <div className="studio-branch-card" style={cardStyle} id={branchTipId} role="tooltip">
-        <b>{git.detached ? t("HEAD 分离 · {sha}", { sha: git.branch }) : t("当前分支 · {branch}", { branch: git.branch })}</b>
-        <span>{changeCount > 0 ? t("当前工作区 · {n} 个本地变更", { n: changeCount }) : t("当前工作区 · 后续任务继续使用此分支")}</span>
-        <small>{t("随回合与写入刷新 · 非实时 · 点击可切换")}</small>
+        <b>{git.detached ? t("branchChip.detachedHEAD", { sha: git.branch }) : t("branchChip.currentBranch", { branch: git.branch })}</b>
+        <span>{changeCount > 0 ? t("branchChip.currentWorkspaceLocalChanges", { n: changeCount }) : t("branchChip.currentWorkspaceFutureTasksContinue")}</span>
+        <small>{t("branchChip.refreshesOnTurnsAndWrites")}</small>
       </div>
     </div>
   );

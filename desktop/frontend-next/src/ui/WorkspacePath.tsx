@@ -24,9 +24,9 @@ export function WorkspacePath({ path, onResize }: { path: string; onResize?: () 
   const short = parts.length > 2 ? "…/" + parts.slice(-2).join("/") : path;
   return <div className="workspace-path">
     <details data-action="workspace.configure" onToggle={onResize}>
-      <summary aria-label={t("查看完整路径")} title={path}><StudioIcon name="folder"/><span>{short}</span><StudioIcon name="down"/></summary>
+      <summary aria-label={t("workspacePath.showFullPath")} title={path}><StudioIcon name="folder"/><span>{short}</span><StudioIcon name="down"/></summary>
       <code>{path}</code>
     </details>
-    <CopyButton text={path} iconOnly className="workspace-path-copy" label={t("复制完整路径")}/>
+    <CopyButton text={path} iconOnly className="workspace-path-copy" label={t("workspacePath.copyFullPath")}/>
   </div>;
 }

@@ -13,7 +13,7 @@ function elide(dir: string): string {
 
 // The badge is the porcelain letter itself, coloured by what it means; the
 // word is kept for the row's title, where there is room to spell it.
-const MARK: Record<string, string> = { M: "改过", A: "新增", "??": "新增", D: "已删除", R: "重命名" };
+const MARK: Record<string, string> = { M: "files.modified", A: "common.added", "??": "common.added", D: "files.deleted", R: "common.renamed" };
 
 // "??" is two characters wide and every other code is one, so the badge takes
 // the first letter and untracked gets the single question mark it reads as.
@@ -68,21 +68,21 @@ export function Files({ changes, yolo, tree, open, onOpen }: Props) {
   return (
     <div className="block" data-b="files">
       <div className="lbl">
-        <span>{t("工作树改动")}</span>
+        <span>{t("files.worktreeChanges")}</span>
         <span className="c">
           {files.length}
-          {files.length > 0 && ` · ${t(yolo ? "已放行" : "待审")}`}
+          {files.length > 0 && ` · ${t(yolo ? "files.autoApproved" : "files.forReview")}`}
         </span>
       </div>
       <div className="files">
         {shown.length < files.length && (
-          <span className="empty">{t("更早的 {n} 个未列出", { n: files.length - shown.length })}</span>
+          <span className="empty">{t("files.earlierFilesNotListed", { n: files.length - shown.length })}</span>
         )}
         {shown.map((f) => {
           const [dir, name] = splitPath(f.path);
           const mk = badge(f.status);
           const word = MARK[f.status] ?? "";
-          const title = [f.path, word && t(word), f.edits > 1 ? t("改了 {n} 次", { n: f.edits }) : ""]
+          const title = [f.path, word && t(word), f.edits > 1 ? t("files.editedTimes", { n: f.edits }) : ""]
             .filter(Boolean)
             .join(" · ");
           const body = (

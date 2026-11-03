@@ -21,7 +21,7 @@ export function useSessionMoveTo(hub: HubPort, tree: TreeWorkspace[], reload: ()
       const moved = await hub.moveSessionTo(moving.session.path, target);
       await reload();
       if (moved.originalRemoved) close();
-      else setNote(t("对话已经移过去了，但原来的那份没能删除，请手动删除。"));
+      else setNote(t("useSessionMoveTo.theConversationWasMovedBut"));
     } catch (e) {
       setError(reason(e));
     } finally {

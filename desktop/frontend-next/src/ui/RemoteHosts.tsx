@@ -56,11 +56,11 @@ interface Props {
 function note(host: RemoteHost): string {
   switch (host.status) {
     case "reconnecting":
-      return host.attempt ? t("连接已断开，第 {n} 次重连", { n: host.attempt }) : t("连接已断开，正在重连");
+      return host.attempt ? t("remoteHosts.droppedReconnectingAttempt", { n: host.attempt }) : t("remoteHosts.droppedReconnecting");
     case "degraded":
-      return host.error || t("已连接，但部分转发未建立");
+      return host.error || t("remoteHosts.connectedButAForwardDid");
     case "stopped":
-      return host.error || t("已断开");
+      return host.error || t("common.disconnected");
     default:
       return "";
   }
@@ -190,7 +190,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                 <StudioIcon name="folder" className="wsfolder" />
                 <span className="wsname" title={host.name + " · " + ws.root} dir="ltr">{ws.name}</span>
                 <span className="project-source" title={host.target}>{host.name}</span>
-                {currentPane && <span className="bound-workspace" title={currentPane.root} dir="ltr">{t("连接目录：{path}", { path: currentPane.root })}</span>}
+                {currentPane && <span className="bound-workspace" title={currentPane.root} dir="ltr">{t("remoteHosts.connectedDirectory", { path: currentPane.root })}</span>}
                 <span className="wsacts">
                   {folded && <UnreadCount n={ws.sessions.filter((session) => session.unread).length} />}
                   {tree && ws.sessions.length > 0 && <RowCount c={scope === "all" && older > 0
@@ -198,8 +198,8 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                   <span className="rowbtns">
                     <button className="wsadd" data-action="session.new" data-target={key}
                       data-busy={busy === host.name + ws.root ? "" : undefined} disabled={!!busy}
-                      title={t("在 {name} 下新建会话", { name: ws.name + " · " + host.name })}
-                      aria-label={t("在 {name} 下新建会话", { name: ws.name + " · " + host.name })}
+                      title={t("common.startANewSessionIn", { name: ws.name + " · " + host.name })}
+                      aria-label={t("common.startANewSessionIn", { name: ws.name + " · " + host.name })}
                       onClick={(event) => { event.stopPropagation(); void open(host, ws.root); }}>
                       <StudioIcon name="chat" />
                     </button>
@@ -211,16 +211,16 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
               </div>
               {host.status !== "connected" && <div className="project-connection" role="status">
                 <StudioIcon name={working ? "refresh" : "warning"} />
-                <span>{working ? [t("正在建立连接…"), host.step ? t(REMOTE_STEP_LABEL[host.step] ?? host.step) : ""].filter(Boolean).join(" · ") : hint || t("未连接")}</span>
+                <span>{working ? [t("common.connecting2"), host.step ? t(REMOTE_STEP_LABEL[host.step] ?? host.step) : ""].filter(Boolean).join(" · ") : hint || t("common.notConnected")}</span>
               </div>}
               {!folded && hasChildren && <div className="kids">
                 {visible.map((session) => {
                   const held = panes.find((rt) => rt.sessionPath === session.path);
                   const name = session.title || session.name;
                   if (confirm === host.name + session.path) return (
-                    <Confirm key={session.path} what={t("删除「{name}」？", { name })}
-                      hint={t(!held ? "连同其记录一并删除" : liveIds([held.id]).length ? "正在运行，停止后才能删除" : "它的面板会先关掉") + " · " + host.name}
-                      go={t("删除")} danger onGo={() => void dropSession(host, session.path, held)}
+                    <Confirm key={session.path} what={t("common.delete2", { name })}
+                      hint={t(!held ? "common.deletesItTogetherWithIts" : liveIds([held.id]).length ? "common.runningStopItBeforeDeleting" : "common.itsPanelClosesFirst") + " · " + host.name}
+                      go={t("common.delete")} danger onGo={() => void dropSession(host, session.path, held)}
                       onCancel={() => setConfirm("")} />
                   );
                   return (
@@ -242,11 +242,11 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                   );
                 })}
                 {!tree && !working && <button className="sessmore" data-action="remote.read" data-target={host.name} disabled={!!busy}
-                  onClick={() => void readBook(host.name)}>{t("读取 {name} 上的会话", { name: host.name })}</button>}
+                  onClick={() => void readBook(host.name)}>{t("remoteHosts.readTheSessionsOn", { name: host.name })}</button>}
                 {visible.length < ws.sessions.length && <button className="sessmore" data-action="session.more"
-                  onClick={() => setExpanded((value) => new Set(value).add(key))}>{t("显示更多（还有 {n} 个）", { n: ws.sessions.length - visible.length })}</button>}
+                  onClick={() => setExpanded((value) => new Set(value).add(key))}>{t("common.showMoreLeft", { n: ws.sessions.length - visible.length })}</button>}
                 {older > 0 && scope === "all" && (
-                  <small className="rmtolder">{t("还有 {n} 个较早的会话，在那台机器上查看", { n: older })}</small>
+                  <small className="rmtolder">{t("remoteHosts.olderConversationsSeeThemOn", { n: older })}</small>
                 )}
                 {loose.map((rt) => <div key={rt.id} className="sessrow" role="treeitem" aria-level={2}
                     data-action="pane.activate" aria-selected={rt.id === active} data-on={rt.id === active ? "" : undefined}

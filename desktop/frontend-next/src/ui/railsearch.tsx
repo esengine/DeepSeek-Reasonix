@@ -39,11 +39,11 @@ export function RailSearch({ children, resetKey }: { children: ReactNode; resetK
           value={q}
           onChange={(ev) => setQ(ev.target.value)}
           onKeyDown={(ev) => ev.key === "Escape" && setQ("")}
-          placeholder={t("搜索会话 / 项目")}
-          aria-label={t("搜索会话 / 项目")}
+          placeholder={t("railsearch.searchSessionsOrProjects")}
+          aria-label={t("railsearch.searchSessionsOrProjects")}
         />
         <kbd hidden={!!q}>{chord("K")}</kbd>
-        <button className="clr" hidden={!q} onClick={() => setQ("")} aria-label={t("清空")}>
+        <button className="clr" hidden={!q} onClick={() => setQ("")} aria-label={t("common.clear2")}>
           ×
         </button>
       </div>

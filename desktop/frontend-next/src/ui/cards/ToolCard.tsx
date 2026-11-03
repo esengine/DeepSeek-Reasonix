@@ -165,12 +165,12 @@ export function ToolCard({
       {/* 名字是给人读的，id 是给人查的。标签只在它说了名字没说的事时才占地方
           （见 tagFor），所以精确的那个字符串挂在这里，一直够得着。 */}
       <span className={running ? "nm shim" : "nm"} title={shown}>{head}</span>
-      {who && <span className="who" title={t("按技能 {name} 的设定运行的子代理", { name: who })}>{who}</span>}
-      {from && <span className="src" title={t("外部服务 {name} 提供的工具", { name: from.server })}>{from.server}</span>}
+      {who && <span className="who" title={t("toolCard.aSubagentRunningUnderThe", { name: who })}>{who}</span>}
+      {from && <span className="src" title={t("toolCard.aToolProvidedByThe", { name: from.server })}>{from.server}</span>}
       {tag && <span className="tag" title={tagHint(tool)}>{tag}</span>}
       {arg && <span className={streaming ? "arg shim" : "arg"} title={streaming ? undefined : prettyArgs(tool.args)}>{arg}</span>}
       {changes && (
-        <span className="tool-delta" aria-label={t("新增 {added} 行，删除 {removed} 行", changes)}>
+        <span className="tool-delta" aria-label={t("toolCard.linesAddedRemoved", changes)}>
           <b>+{changes.added}</b><i>−{changes.removed}</i>
         </span>
       )}
@@ -179,8 +179,8 @@ export function ToolCard({
       <span
         className="tool-state"
         data-state={running ? "running" : bad ? "failed" : "done"}
-        aria-label={t(running ? "运行中" : bad ? "失败" : "已完成")}
-        title={t(running ? "运行中" : bad ? "失败" : "已完成")}
+        aria-label={t(running ? "common.running" : bad ? "common.failed" : "common.done")}
+        title={t(running ? "common.running" : bad ? "common.failed" : "common.done")}
       >
         <StudioIcon name={running ? "clock" : bad ? "warning" : "check"} />
       </span>
@@ -192,9 +192,9 @@ export function ToolCard({
     <div className="out">
       {tool.argumentNormalization && (
         <section className="activity-call-input">
-          <p>{t("参数格式已自动兼容")}</p>
+          <p>{t("toolCard.argumentFormatAutomaticallyNormalize")}</p>
           <details>
-            <summary>{t("兼容前的原始输入")}</summary>
+            <summary>{t("toolCard.originalInputBeforeNormalization")}</summary>
             <pre>{prettyArgs(tool.argumentNormalization.original)}</pre>
           </details>
         </section>
@@ -202,25 +202,25 @@ export function ToolCard({
       {activity && (
         <>
           <div className="activity-call-meta">
-            <span>{t("调用 {id}", { id: shortCallId(tool.id) })}</span>
-            <span>{t(running ? "运行中" : bad ? "失败" : "已完成")}</span>
+            <span>{t("toolCard.call", { id: shortCallId(tool.id) })}</span>
+            <span>{t(running ? "common.running" : bad ? "common.failed" : "common.done")}</span>
           </div>
           {activityArgs && (
             <section className="activity-call-input">
-              <header><b>{t("输入")}</b><span>JSON</span></header>
+              <header><b>{t("common.input")}</b><span>JSON</span></header>
               <pre><JsonText text={activityArgs} /></pre>
             </section>
           )}
           {running && !tool.output && !tool.err && children.length === 0 && <WaitNote args={tool.args} />}
           {activityResult && (
             <div className="activity-call-result">
-              <b>{t("结果")}</b>
+              <b>{t("toolCard.result")}</b>
               {tool.output && (
                 <button
                   type="button"
                   data-action="tool.copy-output"
                   onClick={() => void navigator.clipboard.writeText(tool.output ?? "").catch(() => {})}
-                >{t("复制")}</button>
+                >{t("common.copy")}</button>
               )}
             </div>
           )}
@@ -233,7 +233,7 @@ export function ToolCard({
       {takeover ? (
         <>
           <ExtensionView body={takeover.view?.body ?? []} onAction={(id) => onExtInvoke?.(id)} />
-          <div className="drawnby">{t("由 {name} 渲染", { name: takeover.pluginId })}</div>
+          <div className="drawnby">{t("toolCard.drawnBy", { name: takeover.pluginId })}</div>
         </>
       ) : (
         <>
@@ -260,7 +260,7 @@ export function ToolCard({
           )}
           {!tool.diff && !tool.outputDiff && !goal && tool.name !== "todo_write" && tool.output && !echoed && children.length === 0 && (
             <>
-              {omitted > 0 && <div className="bound">{t("此前省略了 {n} 个字符，这里只显示最近的输出", { n: count(omitted) })}</div>}
+              {omitted > 0 && <div className="bound">{t("toolCard.charactersBeforeThisAreLeft", { n: count(omitted) })}</div>}
               {full.note}
               <ToolOutput name={shown} text={full.text ?? ""} bound={tool.bound} id={tool.id} />
             </>
@@ -278,7 +278,7 @@ export function ToolCard({
           <div className="nest-hd">
             <i className="pip" />
             <span className="who">{nestLabel(who, tool.profile?.count, children.length)}</span>
-            <span className="prof">{t("独立上下文 · 不进主轨迹")}</span>
+            <span className="prof">{t("toolCard.itsOwnContextStaysOut")}</span>
             {ranLabel(tool.profile) && <span className="ran" title={ranLabel(tool.profile)}>{ranLabel(tool.profile)}</span>}
             {/* 委派出去那部分的账：耗时是父调用的，token 是子步骤各自留下的 */}
             <span className="rt">
@@ -340,7 +340,7 @@ function ToolVideos({ videos }: { videos?: NonNullable<Tool["videos"]> }) {
     <div className="tvideos">
       {videos.map((v, i) => (
         <div key={v.name + i} className="tvideo">
-          {t("视频 {name}（{detail}）已原生发送给 {model}", {
+          {t("toolCard.videoSentToAsA", {
             name: v.name,
             detail: [bytes(v.size), v.durationMs ? seconds(v.durationMs) : ""].filter(Boolean).join(" · "),
             model: v.model,
@@ -356,8 +356,8 @@ function ToolShots({ images }: { images?: string[] }) {
   return (
     <div className="tshots">
       {images.map((src, i) => (
-        <ImagePreview key={src + i} src={src} name={t("工具截图 {n}", { n: i + 1 })} className="tshot">
-          <img src={src} alt={t("工具截图 {n}", { n: i + 1 })} loading="lazy" />
+        <ImagePreview key={src + i} src={src} name={t("toolCard.toolScreenshot", { n: i + 1 })} className="tshot">
+          <img src={src} alt={t("toolCard.toolScreenshot", { n: i + 1 })} loading="lazy" />
         </ImagePreview>
       ))}
     </div>
@@ -403,12 +403,12 @@ export function NestedCall({ tool, whole = false, read }: { tool: StateTool; who
           <div className="out">
             {full.note}
             <Term text={clipped && !all ? body.slice(0, NESTED_PREVIEW) : body.slice(0, NESTED_WHOLE_CAP)} />
-            {(whole || all) && body.length > NESTED_WHOLE_CAP && <div className="bound bad">{t("输出过长，仅显示前 200000 个字符")}</div>}
+            {(whole || all) && body.length > NESTED_WHOLE_CAP && <div className="bound bad">{t("toolCard.outputTooLongShowingThe")}</div>}
             {clipped && (
               <div className="bound">
-                {all ? null : t("仅显示前 400 个字符")}
+                {all ? null : t("toolCard.showingOnlyTheFirst400")}
                 <button type="button" className="out-more" data-action="tool.show-all" aria-expanded={all} onClick={() => setAll(!all)}>
-                  {all ? t("收起") : t("显示全部")}
+                  {all ? t("common.collapse") : t("toolCard.showAll")}
                 </button>
               </div>
             )}
@@ -429,7 +429,7 @@ export function NestedCall({ tool, whole = false, read }: { tool: StateTool; who
 // it for the rest of the turn, the card records what it was when it was written.
 function Steps({ tool }: { tool: Tool }) {
   const steps = parsePlan(tool);
-  if (!steps?.length) return <span className="fold">{t("计划已移入右栏")}</span>;
+  if (!steps?.length) return <span className="fold">{t("toolCard.thePlanIsInThe")}</span>;
   const now = currentStep(steps);
   return (
     <div className="steps">

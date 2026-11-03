@@ -41,11 +41,11 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].map((reload) => ({ lang, re
     const onInstalled = vi.fn();
     const onClose = vi.fn();
     render(<AddPlugin port={port} source={source} onInstalled={onInstalled} onClose={onClose} />);
-    await userEvent.click(screen.getByRole("button", { name: t("查看内容") }));
-    await userEvent.click(screen.getByRole("button", { name: t("安装") }));
+    await userEvent.click(screen.getByRole("button", { name: t("common.seeWhatItIs") }));
+    await userEvent.click(screen.getByRole("button", { name: t("common.install") }));
 
     expect(document.querySelector(".outcome")?.getAttribute("data-state")).toBe("issue");
-    expect(screen.getByText(t("有项目未安装成功，原因见下方。"))).toBeTruthy();
+    expect(screen.getByText(t("addPlugin.notAllItemsWereInstalled"))).toBeTruthy();
     expect(screen.queryByText(summary)).toBeNull();
     const failed = screen.getByRole("alert");
     expect(failed.textContent).toContain("demo");
@@ -54,11 +54,11 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].map((reload) => ({ lang, re
     const warning = t(reloadWarning, { reason: reloadError });
     if (reload) expect(screen.getByRole("status").textContent).toBe(warning);
     else expect(screen.queryByText(warning)).toBeNull();
-    expect(screen.queryByText(t("装好了，下一轮就能用"))).toBeNull();
+    expect(screen.queryByText(t("addPlugin.installedTheNextTurnCan"))).toBeNull();
     expect(screen.queryByText(t("装好了，但这一轮还在跑：等它结束或新建会话后生效"))).toBeNull();
     expect(onInstalled).toHaveBeenCalledOnce();
     expect(install).toHaveBeenCalledExactlyOnceWith({ source, name: undefined, replace: false, planId: planned.planId });
-    await userEvent.click(screen.getByRole("button", { name: t("完成") }));
+    await userEvent.click(screen.getByRole("button", { name: t("common.done2") }));
     expect(onClose).toHaveBeenCalledOnce();
     expect(install).toHaveBeenCalledOnce();
   },

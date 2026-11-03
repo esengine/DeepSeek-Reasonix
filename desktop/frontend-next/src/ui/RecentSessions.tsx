@@ -45,7 +45,7 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
     const read = view.host ? hub.remoteTree(view.host, window) : hub.tree(window);
     void read.then((next) => {
       if (stale) return;
-      if (next?.some((ws) => ws.recentOffset !== view.offset)) throw new Error(t("此运行环境不支持最近会话，请更新 Reasonix"));
+      if (next?.some((ws) => ws.recentOffset !== view.offset)) throw new Error(t("recentSessions.thisEnvironmentDoesNotSupport"));
       setTree(next ?? []);
     }).catch((e: unknown) => { if (!stale) setError(reason(e)); })
       .finally(() => { if (!stale) setBusy(false); });
@@ -67,20 +67,20 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
     }
   };
   return createPortal(
-    <div className="pickveil" role="dialog" aria-modal="true" aria-label={t("最近的会话")} ref={sheet}>
+    <div className="pickveil" role="dialog" aria-modal="true" aria-label={t("common.recentSessions")} ref={sheet}>
       <div className="pickcard recent-sessions">
-        <h2>{t("最近的会话")}</h2>
-        <p className="recent-description">{t("按最近活动排列，包含已完成的会话。选择后定位到所属项目。")}</p>
-        {hosts.some((host) => !host.disabled) && <label className="recent-machine">{t("运行环境")}
-          <select data-action="session.recent-environment" aria-label={t("运行环境")} value={view.host} disabled={opening} onChange={(event) => setView({ host: event.target.value, q: view.q, offset: 0 })}>
-            <option value="">{t("本机")}</option>
+        <h2>{t("common.recentSessions")}</h2>
+        <p className="recent-description">{t("recentSessions.orderedByLastActivityIncluding")}</p>
+        {hosts.some((host) => !host.disabled) && <label className="recent-machine">{t("common.whereItRuns")}
+          <select data-action="session.recent-environment" aria-label={t("common.whereItRuns")} value={view.host} disabled={opening} onChange={(event) => setView({ host: event.target.value, q: view.q, offset: 0 })}>
+            <option value="">{t("common.thisMachine")}</option>
             {hosts.filter((host) => !host.disabled).map((host) => <option key={host.name} value={host.name}>{host.name}</option>)}
           </select>
         </label>}
-        <div className="pickpath"><input data-action="workspace.search" type="search" aria-label={t("搜索最近会话 / 项目")} placeholder={t("搜索最近会话 / 项目")} value={draft} disabled={opening} onChange={(event) => setDraft(event.target.value)} /></div>
+        <div className="pickpath"><input data-action="workspace.search" type="search" aria-label={t("recentSessions.searchRecentSessionsOrProjects")} placeholder={t("recentSessions.searchRecentSessionsOrProjects")} value={draft} disabled={opening} onChange={(event) => setDraft(event.target.value)} /></div>
         <div className="picklist" aria-busy={busy} data-busy={busy ? "" : undefined}>
-          {!busy && !error && !rows.length && <p className="pickempty">{t("没有匹配的会话")}</p>}
-          {busy && <p className="picknote" role="status">{t("正在读取会话…")}</p>}
+          {!busy && !error && !rows.length && <p className="pickempty">{t("common.nothingMatches")}</p>}
+          {busy && <p className="picknote" role="status">{t("recentSessions.readingSessions")}</p>}
           {!busy && !error && rows.map(({ ws, session }) => <button key={session.path} className="pickrow recent-session" disabled={opening}
             data-action="session.open" data-target={session.path} aria-label={`${session.title || session.name} · ${ws.name}`}
             title={`${session.workspaceRoot || ws.root}\n${session.path}`} onClick={() => void pick(ws, session)}>
@@ -88,13 +88,13 @@ export function RecentSessions({ hub, hosts, onPick, onClose }: {
             <span className="recent-session-text"><b>{session.title || session.name}</b><small>{ws.name} · {session.workspaceRoot || ws.root}</small></span>
             <SessionAge at={session.lastActiveAt} />
           </button>)}
-          {error && <><p className="picknote" role="alert">{error}</p><button className="pickgo" data-action="session.recent-retry" onClick={() => setRetry((n) => n + 1)}>{t("重试")}</button></>}
+          {error && <><p className="picknote" role="alert">{error}</p><button className="pickgo" data-action="session.recent-retry" onClick={() => setRetry((n) => n + 1)}>{t("common.retry")}</button></>}
         </div>
         <div className="pickact">
-          <button data-action="session.recent-page" data-value="previous" disabled={busy || opening || view.offset === 0} onClick={() => setView({ ...view, offset: Math.max(0, view.offset - TREE_PAGE) })}>{t("上一页")}</button>
-          <span className="recent-page">{t("第 {n} 页", { n: view.offset / TREE_PAGE + 1 })}</span>
-          <button data-action="session.recent-page" data-value="next" disabled={busy || opening || !!error || remaining === 0} onClick={() => setView({ ...view, offset: view.offset + TREE_PAGE })}>{t("下一页")}</button>
-          <button data-action="layer.dismiss" disabled={opening} onClick={onClose}>{t("关闭")}</button>
+          <button data-action="session.recent-page" data-value="previous" disabled={busy || opening || view.offset === 0} onClick={() => setView({ ...view, offset: Math.max(0, view.offset - TREE_PAGE) })}>{t("common.previousPage")}</button>
+          <span className="recent-page">{t("recentSessions.page", { n: view.offset / TREE_PAGE + 1 })}</span>
+          <button data-action="session.recent-page" data-value="next" disabled={busy || opening || !!error || remaining === 0} onClick={() => setView({ ...view, offset: view.offset + TREE_PAGE })}>{t("common.nextPage")}</button>
+          <button data-action="layer.dismiss" disabled={opening} onClick={onClose}>{t("common.close")}</button>
         </div>
       </div>
     </div>, document.body,

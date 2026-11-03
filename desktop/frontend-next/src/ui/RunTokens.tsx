@@ -12,7 +12,7 @@ export function RunTokens({ sent, received, estimated }: { sent: number; receive
   const down = useLanded(received);
   if (sent + received <= 0) return null;
   return (
-    <span className="studio-runtokens" title={estimated ? t("本轮已发送 / 正在接收（估算）的 token") : t("本轮已发送 / 已接收的 token")}>
+    <span className="studio-runtokens" title={estimated ? t("runTokens.tokensSentThisTurnArriving") : t("runTokens.tokensSentAndReceivedThis")}>
       <span data-io="up" data-landed={up ? "" : undefined}>
         <StudioIcon name="arrow" />
         <b>{tokenCount(sent)}</b>
@@ -21,7 +21,7 @@ export function RunTokens({ sent, received, estimated }: { sent: number; receive
         <StudioIcon name="arrow" />
         <b>{tokenCount(received)}</b>
       </span>
-      <small>{estimated ? t("tokens ≈") : "tokens"}</small>
+      <small>{estimated ? t("misc.tokens2") : "tokens"}</small>
     </span>
   );
 }

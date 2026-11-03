@@ -2,78 +2,78 @@
 // it. Split out of en.ts because that file is one screen's worth of catalogue
 // per section and had grown past its ceiling — the grouping is the same.
 export const EN_STORAGE: Record<string, string> = {
-  "找回旧版会话": "Recover older sessions",
-  "从旧版 Reasonix 导入": "Import from an older Reasonix installation",
-  "选择旧版的数据文件夹。扫描只会复制会话，不会移动或删除原文件；找不到原工作区的会话会归入当前工作区。":
+  "storage.recoverOlderSessions": "Recover older sessions",
+  "storage.importFromAnOlderReasonix": "Import from an older Reasonix installation",
+  "storage.chooseTheOlderDataFolder":
     "Choose the older data folder. The scan only copies sessions and never moves or deletes the originals; sessions whose workspace no longer exists are placed in the current workspace.",
-  "选择旧版数据目录…": "Choose older data folder…",
-  "无法打开文件夹选择器。请输入旧版数据文件夹的路径（里面有 sessions、projects 或 desktop-sessions-v5）。":
+  "storage.chooseOlderDataFolder": "Choose older data folder…",
+  "storage.theFolderPanelCouldNot":
     "The folder panel could not be opened. Type the path of the older data folder (the one holding sessions, projects or desktop-sessions-v5).",
-  "旧版数据目录路径": "Older data folder path",
-  "导入此文件夹": "Import this folder",
-  "正在扫描…": "Scanning…",
-  "已找回 {n} 个会话。": "Recovered {n} sessions.",
-  "没有发现尚未导入的旧会话。": "Nothing new to import.",
-  "这个文件夹里没有找到旧版会话。请选择 Reasonix 的数据文件夹（里面有 sessions、projects 或 desktop-sessions-v5）。":
+  "storage.olderDataFolderPath": "Older data folder path",
+  "storage.importThisFolder": "Import this folder",
+  "storage.scanning": "Scanning…",
+  "storage.recoveredSessions": "Recovered {n} sessions.",
+  "storage.nothingNewToImport": "Nothing new to import.",
+  "storage.noOlderSessionsWereFound":
     "No older sessions were found in this folder. Pick the Reasonix data folder (the one holding sessions, projects or desktop-sessions-v5).",
-  "有 {n} 项无法读取。": "{n} items could not be read.",
-  "复制路径：{name}": "Copy path: {name}",
-  "有 {n} 个会话没有导入": "{n} sessions were not imported",
-  "这些文件仍在原位置，没有被移动或删除。可复制路径自行处理，或修复后重新导入。":
+  "storage.itemsCouldNotBeRead": "{n} items could not be read.",
+  "legacySkips.copyPath": "Copy path: {name}",
+  "legacySkips.sessionsWereNotImported": "{n} sessions were not imported",
+  "legacySkips.theseFilesAreStillWhere":
     "These files are still where they were; nothing was moved or deleted. Copy a path to deal with it yourself, or fix it and import again.",
-  体积超过读取上限: "Larger than the size limit for reading",
-  "不是本版本能读取的会话格式": "Not a session format this version can read",
-  "没有记录它属于哪个项目，所以没有导入": "It records no project it belongs to, so it was not imported",
-  "来自本版本尚不支持的存储版本": "Written by a storage version this version does not support yet",
-  没有读取权限: "No permission to read it",
-  文件已损坏: "The file is damaged",
-  复制到新位置时失败: "Copying it to the new location failed",
-  "未能扫描这个文件夹。请确认它是旧版 Reasonix 的数据目录。": "This folder could not be scanned. Make sure it is an older Reasonix data folder.",
-  存储: "Storage",
-  "数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。":
+  "legacySkips.largerThanTheSizeLimit": "Larger than the size limit for reading",
+  "legacySkips.notASessionFormatThis": "Not a session format this version can read",
+  "legacySkips.itRecordsNoProjectIt": "It records no project it belongs to, so it was not imported",
+  "legacySkips.writtenByAStorageVersion": "Written by a storage version this version does not support yet",
+  "legacySkips.noPermissionToReadIt": "No permission to read it",
+  "legacySkips.theFileIsDamaged": "The file is damaged",
+  "legacySkips.copyingItToTheNew": "Copying it to the new location failed",
+  "storage.thisFolderCouldNotBe": "This folder could not be scanned. Make sure it is an older Reasonix data folder.",
+  "common.storage": "Storage",
+  "settings.whereTheDataIsWritten":
     "Where the data is written and how much space it uses. Sessions and indexes keep growing while configuration and credentials do not, so only the former can be moved. A move takes effect after a restart.",
-  "无法读取存储占用。": "Cannot read what is on disk.",
-  "正在统计…": "Measuring…",
-  "统计超时": "Measuring timed out",
-  "目录过大，已统计到时间上限，实际占用不小于此数": "This folder is too large to finish measuring in time; the real size is at least this much.",
-  占用: "Space used",
-  原位置仍有残留数据: "Data remains in the previous location",
-  "以下内容仍位于 {dir}：{names}。迁移存储位置时未一并迁移，因此项目列表、全局指令与记忆、计划任务、壁纸、主题包或更新回滚备份可能显示为缺失。下次启动会自动并入当前位置；若仍显示，请退出后把这些文件或目录复制到当前位置，已有的文件不要覆盖。":
+  "storage.cannotReadWhatIsOn": "Cannot read what is on disk.",
+  "storage.measuring": "Measuring…",
+  "storage.measuringTimedOut": "Measuring timed out",
+  "storage.thisFolderIsTooLarge": "This folder is too large to finish measuring in time; the real size is at least this much.",
+  "common.spaceUsed": "Space used",
+  "storage.dataRemainsInThePrevious": "Data remains in the previous location",
+  "storage.theseAreStillInA":
     "These are still in {dir}: {names}. A move left them behind, so the project list, global instructions and memory, scheduled runs, a wallpaper, a theme pack or the backups an update rolls back to can look gone on this machine. The next launch merges them into the current location; if they are still listed, quit and copy them there without overwriting files that already exist.",
-  位置: "Locations",
-  迁移: "Migrate",
-  "迁移未能启动。": "The move could not be started.",
-  "{drive} 剩余 {free} / {total}": "{drive} — {free} free of {total}",
-  "由 {env} 指定": "set by {env}",
-  不可移动: "cannot be moved",
-  "移动…": "Move…",
-  开始迁移: "Start the migration",
-  指向这里: "Point it here",
-  "目标文件夹的完整路径：空文件夹，或已存有该数据的文件夹":
+  "common.locations": "Locations",
+  "common.migrate": "Migrate",
+  "storage.theMoveCouldNotBe": "The move could not be started.",
+  "storage.freeOf": "{drive} — {free} free of {total}",
+  "storage.setBy": "set by {env}",
+  "storage.cannotBeMoved": "cannot be moved",
+  "storage.move": "Move…",
+  "storage.startTheMigration": "Start the migration",
+  "storage.pointItHere": "Point it here",
+  "storage.fullPathToTheDestination":
     "Full path to the destination folder — an empty one, or the one that already holds this data",
-  "将迁移 {size}（{n} 个文件），目标磁盘剩余 {free}。完成后需重启生效。":
+  "storage.movesInFilesTheDestination":
     "Moves {size} in {n} files; the destination has {free} free. Takes effect after a restart.",
-  "该文件夹中已存有此数据（{size}，{n} 个文件）。将直接指向该位置，不复制也不删除。重启后生效。":
+  "storage.thisFolderAlreadyHoldsThat":
     "This folder already holds that data ({size} in {n} files). It will simply be pointed at — nothing is copied and nothing is deleted. Takes effect after a restart.",
-  "当前位置仍有 {size}，不会一并迁移。":
+  "storage.theCurrentLocationStillHolds":
     "The current location still holds {size}, which is not carried across.",
-  "迁移完成。重启后生效。": "Moved. It takes effect after a restart.",
-  正在指向新位置: "Pointing at the new location",
-  正在复制: "Copying",
-  正在校验: "Verifying",
-  "已提交，正在清理原位置": "Committed; clearing the old location",
-  会话与归档: "Sessions and archives",
-  "转录、压缩归档、用量统计、回溯快照":
+  "storage.movedItTakesEffectAfter": "Moved. It takes effect after a restart.",
+  "storage.pointingAtTheNewLocation": "Pointing at the new location",
+  "storage.copying": "Copying",
+  "storage.verifying": "Verifying",
+  "storage.committedClearingTheOldLocation": "Committed; clearing the old location",
+  "storage.sessionsAndArchives": "Sessions and archives",
+  "storage.transcriptsCompactionArchivesUsageSt":
     "Transcripts, compaction archives, usage stats, rewind snapshots",
-  索引与缓存: "Indexes and caches",
-  "搜索索引与派生数据，删除后会自动重建":
+  "storage.indexesAndCaches": "Indexes and caches",
+  "storage.searchIndexesAndDerivedData":
     "Search indexes and derived data; deleting them rebuilds them",
-  隔离工作区: "Isolated worktrees",
-  交付模式检出的独立副本: "The separate checkouts Delivery works in",
-  配置与凭据: "Configuration and credentials",
-  "设置与 API key，始终随用户配置文件保存":
+  "storage.isolatedWorktrees": "Isolated worktrees",
+  "storage.theSeparateCheckoutsDeliveryWorks": "The separate checkouts Delivery works in",
+  "storage.configurationAndCredentials": "Configuration and credentials",
+  "storage.settingsAndAPIKeysThese":
     "Settings and API keys; these always stay with your user profile",
-  进程锁: "Process locks",
-  "用于多实例互斥，必须保留在本机固定位置。每个均为空文件；删除会破坏互斥，因此只保留不清理":
+  "storage.processLocks": "Process locks",
+  "storage.howInstancesExcludeEachOther":
     "How instances exclude each other; these must stay in one place on this machine. Each is an empty file and removing one would break the exclusion, so they are kept rather than cleaned",
 };

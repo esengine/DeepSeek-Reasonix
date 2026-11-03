@@ -15,7 +15,7 @@ https://mcp.example.com/sse`;
 
 const KIND_LABEL: Record<string, string> = {
   shell: "将在本机运行",
-  "unknown-host": "将连接至",
+  "unknown-host": "common.willConnectTo",
   secret: "密钥",
 };
 
@@ -83,7 +83,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
         ))}
         <div className="acts">
           <button className="act" onClick={onClose}>
-            {t("完成")}
+            {t("common.done2")}
           </button>
         </div>
       </div>
@@ -112,12 +112,12 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
             }}
           />
           <div className="acts">
-            <span className="note" id={sourceLabel}>{t("一段 JSON、一行命令，或一个 https 地址")}</span>
+            <span className="note" id={sourceLabel}>{t("addServer.aBlockOfJSONA")}</span>
             <button className="act" onClick={onClose}>
-              {t("取消")}
+              {t("common.cancel")}
             </button>
             <button className="act" data-action="mcp.inspect" data-primary disabled={!text.trim() || busy} onClick={() => void parse()}>
-              {t(busy ? "读取中…" : "查看内容")}
+              {t(busy ? "common.reading" : "common.seeWhatItIs")}
             </button>
           </div>
         </>
@@ -146,7 +146,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
           {/* Installing is a global act; how far it reaches is a separate
               question. Only the third option edits a tracked file, so it is the
               one that has to say so out loud — and it is never the default. */}
-          <div className="scope" role="radiogroup" aria-label={t("安装位置")} data-action-keydown="mcp.scope"
+          <div className="scope" role="radiogroup" aria-label={t("addServer.whereToInstallIt")} data-action-keydown="mcp.scope"
             onKeyDown={(e) => {
               if (busy || hasSaved || e.altKey || e.ctrlKey || e.metaKey) return;
               const radios = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')].filter((radio) => !radio.disabled);
@@ -163,7 +163,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
             }}>
             <button role="radio" aria-checked={scope === "user"} tabIndex={scope === "user" ? 0 : -1}
               data-action="mcp.scope" disabled={busy || hasSaved} onClick={() => setScope("user")}>
-              {t("我的")}<i>{t("所有项目均可使用")}</i>
+              {t("common.mine")}<i>{t("addServer.availableInEveryProject")}</i>
             </button>
             <button
               role="radio"
@@ -173,7 +173,7 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
               disabled={busy || hasSaved || !canProject}
               onClick={() => setScope("local")}
             >
-              {t("仅当前项目")}<i>{t("不写入仓库，他人不会获得")}</i>
+              {t("common.thisProjectOnly")}<i>{t("addServer.staysOutOfTheRepository")}</i>
             </button>
             <button
               role="radio"
@@ -183,18 +183,18 @@ function ServerInput({ port, canProject, onClose, onInstalled }: Props) {
               disabled={busy || hasSaved || !canProject}
               onClick={() => setScope("project")}
             >
-              {t("写进仓库")}<i>{t("clone 仓库的人也会获得")}</i>
+              {t("addServer.commitToTheRepo")}<i>{t("addServer.whoeverClonesItGetsIt")}</i>
             </button>
           </div>
           {scope === "project" && (
-            <div className="warn">{t("这会修改仓库中的配置文件，属于一处待提交的改动。")}</div>
+            <div className="warn">{t("addServer.thisEditsAConfigFile")}</div>
           )}
           <div className="acts">
             <button className="act" disabled={busy} onClick={() => { setDraft(null); setResults([]); setError(""); }}>
-              {t("返回")}
+              {t("common.back")}
             </button>
             <button className="act" data-action="mcp.add" data-primary disabled={busy} onClick={() => void install()}>
-              {t(busy ? "连接中…" : "接入")}
+              {t(busy ? "common.connecting3" : "addServer.connect")}
             </button>
           </div>
         </>
@@ -215,9 +215,9 @@ function Outcome({ r }: { r: McpInstallResult }) {
       <i className="pip" />
       <span className="nm">{r.name}</span>
       <span className="dt">
-        {done && t("已就位 · {n} 个工具，下一轮就能用", { n: r.toolCount })}
-        {auth && t("配置留下了，去授权后在列表里点重连")}
-        {!done && !auth && (r.message || t("没装上，什么都没留下"))}
+        {done && t("addServer.inPlaceToolsReadyNext", { n: r.toolCount })}
+        {auth && t("addServer.theConfigurationWasKeptAuthorise")}
+        {!done && !auth && (r.message || t("addServer.notAddedNothingWasLeft"))}
       </span>
     </div>
   );

@@ -351,7 +351,7 @@ export function App({ hub }: { hub: HubPort }) {
 
   const openFiles = useCallback(() => {
     if (!panePorts.has(active)) {
-      setError(t("请先打开一个会话，再查看它的文件。"));
+      setError(t("app.openASessionFirstTo"));
       return;
     }
     hidePrefs();
@@ -452,7 +452,7 @@ export function App({ hub }: { hub: HubPort }) {
           if (held && (session.title || session.turns)) return session.title || session.name;
         }
       }
-      return at === 0 ? t("新会话") : t("新会话 {n}", { n: at + 1 });
+      return at === 0 ? t("common.newSession") : t("app.newSession", { n: at + 1 });
     },
     [tree, viewed.remote],
   );
@@ -645,7 +645,7 @@ export function App({ hub }: { hub: HubPort }) {
             edge="l"
             span={RAIL}
             width={railW}
-            label={t("调整工作区栏宽度")}
+            label={t("app.resizeTheWorkspaceRail")}
             open={rail}
             onWidth={onRailW}
             onOpen={setRail}
@@ -673,7 +673,7 @@ export function App({ hub }: { hub: HubPort }) {
                   rt={rt}
                   port={port}
                   hub={hub}
-                  title={tabs.find((tab) => tab.rt.id === rt.id)?.title ?? t("新会话")}
+                  title={tabs.find((tab) => tab.rt.id === rt.id)?.title ?? t("common.newSession")}
                   active={rt.id === active}
                   sideHost={null}
                   side={false}
@@ -713,17 +713,17 @@ export function App({ hub }: { hub: HubPort }) {
                 <span className="mk" aria-hidden="true">
                   ⌘
                 </span>
-                <p className="t">{t("没有打开的会话")}</p>
+                <p className="t">{t("app.noSessionOpen")}</p>
                 {!treeRead ? null : tree.length === 0 ? (
                   <>
-                    <p className="h">{t("没有文件夹也能开始：会话会在应用自己的目录里打开")}</p>
-                    <button data-action="session.new" onClick={() => void startConversation().catch(fail)}>{t("新建会话")}</button>
-                    <button data-action="workspace.add" disabled={adder.busy} onClick={() => adder.add()}>{t("添加文件夹")}</button>
+                    <p className="h">{t("app.youCanStartWithoutA")}</p>
+                    <button data-action="session.new" onClick={() => void startConversation().catch(fail)}>{t("common.startANewSession")}</button>
+                    <button data-action="workspace.add" disabled={adder.busy} onClick={() => adder.add()}>{t("app.addFolder")}</button>
                   </>
                 ) : (
                   <>
-                    <p className="h">{t("从左栏选择，或在当前文件夹新建")}</p>
-                    <button data-action="session.new" onClick={() => void startConversation().catch(fail)}>{t("新建会话")}</button>
+                    <p className="h">{t("app.pickOneOnTheLeft")}</p>
+                    <button data-action="session.new" onClick={() => void startConversation().catch(fail)}>{t("common.startANewSession")}</button>
                   </>
                 )}
               </div>

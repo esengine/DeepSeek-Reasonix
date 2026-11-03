@@ -20,14 +20,14 @@ export function ThemeRemove({ name, onRemove }: { name: string; onRemove: () => 
       type="button"
       className="btn sm pal-rm"
       data-action="theme.remove"
-      aria-label={t("删除主题「{name}」", { name })}
+      aria-label={t("themeRemove.deleteTheme", { name })}
       disabled={phase === "pending"}
       aria-busy={phase === "pending" || undefined}
       onClick={() => void press()}
       onMouseLeave={() => setPhase((p) => (p === "confirm" ? "idle" : p))}
       onBlur={() => setPhase((p) => (p === "confirm" ? "idle" : p))}
     >
-      {t(phase === "confirm" ? "确认删除" : "删除")}
+      {t(phase === "confirm" ? "common.confirmDelete" : "common.delete")}
     </button>
   );
 }

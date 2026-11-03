@@ -5,12 +5,12 @@
 // so they have to agree on what counts as the same host and what to call it.
 
 export const KIND_LABEL: Record<string, string> = {
-  openai: "OpenAI 兼容",
-  anthropic: "Anthropic 兼容",
+  openai: "vendors.openAICompatible",
+  anthropic: "vendors.anthropicCompatible",
   responses: "Responses",
-  gemini: "Gemini 原生（实验）",
-  typesafe: "决策 · System One",
-  extension: "扩展",
+  gemini: "vendors.geminiNativeExperimental",
+  typesafe: "vendors.decisionSystemOne",
+  extension: "common.extension",
 };
 
 // The account a route belongs to. Host alone is not enough: a relay reached

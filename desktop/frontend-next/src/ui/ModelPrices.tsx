@@ -102,10 +102,10 @@ export function ModelPrices({
   const set = (model: string, patch: Partial<PriceText>) =>
     onChange({ ...value, [model]: { ...(value[model] ?? blank()), ...patch } });
   return (
-    <div className="ml-group mp-group" role="group" aria-label={t("按模型设置价格")}>
+    <div className="ml-group mp-group" role="group" aria-label={t("modelPrices.priceByModel")}>
       <div className="ml-head">
-        <strong>{t("按模型设置价格")}</strong>
-        <span>{t("每百万 token 的单价。留空表示未知，用量页会如实显示「未知」，而不是 0；填 0 表示免费。缓存命中价留空时按输入价计算。")}</span>
+        <strong>{t("modelPrices.priceByModel")}</strong>
+        <span>{t("modelPrices.pricePerMillionTokensLeft")}</span>
       </div>
       <ul className="me-list ml-list">
         {models.map((model) => {
@@ -117,60 +117,60 @@ export function ModelPrices({
             <li key={model} className="ml-row mp-row" data-model={model} data-own={own || undefined}>
               <span className="me-name" title={model}>{labels?.[model] ?? shortId(model)}</span>
               <span className="unit-field">
-                <input data-action="provider.draft" data-value="model-price-input" aria-label={t("{model} 的输入单价", { model })}
-                  aria-invalid={incomplete(cur) && cur.inp === "" ? true : undefined} inputMode="decimal" value={cur.inp} placeholder={t("未知")}
-                  onChange={(e) => set(model, { inp: decimal(e.target.value) })} /><i>{t("输入")}</i>
+                <input data-action="provider.draft" data-value="model-price-input" aria-label={t("modelPrices.inputPrice", { model })}
+                  aria-invalid={incomplete(cur) && cur.inp === "" ? true : undefined} inputMode="decimal" value={cur.inp} placeholder={t("modelPrices.unknown")}
+                  onChange={(e) => set(model, { inp: decimal(e.target.value) })} /><i>{t("common.input")}</i>
               </span>
               <span className="unit-field">
-                <input data-action="provider.draft" data-value="model-price-output" aria-label={t("{model} 的输出单价", { model })}
-                  aria-invalid={incomplete(cur) && cur.out === "" ? true : undefined} inputMode="decimal" value={cur.out} placeholder={t("未知")}
-                  onChange={(e) => set(model, { out: decimal(e.target.value) })} /><i>{t("输出")}</i>
+                <input data-action="provider.draft" data-value="model-price-output" aria-label={t("modelPrices.outputPrice", { model })}
+                  aria-invalid={incomplete(cur) && cur.out === "" ? true : undefined} inputMode="decimal" value={cur.out} placeholder={t("modelPrices.unknown")}
+                  onChange={(e) => set(model, { out: decimal(e.target.value) })} /><i>{t("common.output")}</i>
               </span>
               <span className="unit-field">
-                <input data-action="provider.draft" data-value="model-price-cache" aria-label={t("{model} 的缓存命中单价", { model })}
-                  inputMode="decimal" value={cur.hit} placeholder={t("同输入价")}
-                  onChange={(e) => set(model, { hit: decimal(e.target.value) })} /><i>{t("缓存命中")}</i>
+                <input data-action="provider.draft" data-value="model-price-cache" aria-label={t("modelPrices.cacheHitPrice", { model })}
+                  inputMode="decimal" value={cur.hit} placeholder={t("modelPrices.sameAsInput")}
+                  onChange={(e) => set(model, { hit: decimal(e.target.value) })} /><i>{t("common.cacheHit")}</i>
               </span>
-              <select data-action="provider.draft" data-value="model-price-currency" aria-label={t("{model} 的货币", { model })} value={cur.cur}
+              <select data-action="provider.draft" data-value="model-price-currency" aria-label={t("modelPrices.currency", { model })} value={cur.cur}
                 onChange={(e) => set(model, { cur: e.target.value })}>
                 {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
               {own && (
                 <details className="mp-source" data-model={model}>
-                  <summary>{t("来源与核对日期")}</summary>
+                  <summary>{t("modelPrices.sourceAndCheckDate")}</summary>
                   <span className="mp-source-fields">
                     <span className="unit-field mp-src">
-                      <input type="text" data-action="provider.draft" data-value="model-price-source" aria-label={t("{model} 的价格来源", { model })}
+                      <input type="text" data-action="provider.draft" data-value="model-price-source" aria-label={t("modelPrices.sourceOfThePriceFor", { model })}
                         aria-invalid={sourceProblem(cur.src) ? true : undefined} inputMode="url" autoComplete="off" spellCheck={false} value={cur.src}
-                        placeholder="https://" onChange={(e) => set(model, { src: e.target.value.trim() })} /><i>{t("来源")}</i>
+                        placeholder="https://" onChange={(e) => set(model, { src: e.target.value.trim() })} /><i>{t("common.source")}</i>
                     </span>
                     <span className="unit-field mp-chk">
-                      <input type="text" data-action="provider.draft" data-value="model-price-checked" aria-label={t("{model} 的核对日期", { model })}
+                      <input type="text" data-action="provider.draft" data-value="model-price-checked" aria-label={t("modelPrices.checkDateOfThePrice", { model })}
                         aria-invalid={checkedProblem(cur.chk) ? true : undefined} inputMode="numeric" autoComplete="off" value={cur.chk}
-                        placeholder="YYYY-MM-DD" onChange={(e) => set(model, { chk: e.target.value.trim() })} /><i>{t("核对日期")}</i>
+                        placeholder="YYYY-MM-DD" onChange={(e) => set(model, { chk: e.target.value.trim() })} /><i>{t("modelPrices.checkedOn")}</i>
                     </span>
                   </span>
-                  {sourceProblem(cur.src) && <span className="why">{t("来源必须是 http 或 https 链接，不能带用户名密码。")}</span>}
-                  {checkedProblem(cur.chk) && <span className="why">{t("核对日期不能晚于今天（按 UTC）。")}</span>}
+                  {sourceProblem(cur.src) && <span className="why">{t("modelPrices.theSourceMustBeAn")}</span>}
+                  {checkedProblem(cur.chk) && <span className="why">{t("modelPrices.theCheckDateCannotBe")}</span>}
                 </details>
               )}
               {own && cur.src !== "" && !sourceProblem(cur.src) && (
                 <span className="mp-source-line">
                   <span className="mp-host" title={cur.src}>{hostOf(cur.src)}</span>
-                  {cur.chk !== "" && !checkedProblem(cur.chk) && <span className="mp-checked">{t("核对于 {date}（UTC）", { date: cur.chk })}</span>}
+                  {cur.chk !== "" && !checkedProblem(cur.chk) && <span className="mp-checked">{t("modelPrices.checkedOnUTC", { date: cur.chk })}</span>}
                   {onOpenSource && (
-                    <button type="button" className="act" data-action="provider.price-source" data-target={model} aria-label={t("{model} 打开价格来源", { model })}
-                      onClick={() => onOpenSource(cur.src)}>{t("打开")}</button>
+                    <button type="button" className="act" data-action="provider.price-source" data-target={model} aria-label={t("modelPrices.openThePriceSourceOf", { model })}
+                      onClick={() => onOpenSource(cur.src)}>{t("common.open")}</button>
                   )}
                 </span>
               )}
-              {incomplete(cur) && <span className="why">{t("输入价和输出价需要都填写，才会保存这一行。")}</span>}
+              {incomplete(cur) && <span className="why">{t("modelPrices.fillInBothInputAnd")}</span>}
               {foreign && (
                 <span className="why mp-foreign">
-                  <span>{t("这个价格不在官方价目表里，选了人民币或美元显示时无法换算。")}</span>
-                  {freeCached && <span>{t("缓存命中价是 0：命中的 token 会按免费计，费用会偏低。")}</span>}
-                  <button type="button" className="act" data-action="provider.draft" data-value="model-price-restore" aria-label={t("{model} 恢复官方价", { model })}
-                    onClick={() => set(model, { inp: "", out: "", hit: "" })}>{t("恢复官方价")}</button>
+                  <span>{t("modelPrices.thisPriceIsNotIn")}</span>
+                  {freeCached && <span>{t("modelPrices.theCacheHitPriceIs")}</span>}
+                  <button type="button" className="act" data-action="provider.draft" data-value="model-price-restore" aria-label={t("modelPrices.restoreOfficialPrice", { model })}
+                    onClick={() => set(model, { inp: "", out: "", hit: "" })}>{t("modelPrices.restoreOfficialPrice2")}</button>
                 </span>
               )}
             </li>

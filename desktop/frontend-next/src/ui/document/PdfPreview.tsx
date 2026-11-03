@@ -71,16 +71,16 @@ export default function PdfPreview({ data, view }: { data: ArrayBuffer; view: Do
   }, [doc, page, zoom, width]);
   return <div className="document-pdf">
     <div className="document-controls">
-      <button data-action="document.page" disabled={page <= 1 || !doc} onClick={() => setPage((n) => n - 1)}>{t("上一页")}</button>
+      <button data-action="document.page" disabled={page <= 1 || !doc} onClick={() => setPage((n) => n - 1)}>{t("common.previousPage")}</button>
       <span>{page} / {doc?.numPages ?? "—"}</span>
-      <button data-action="document.page" disabled={!doc || page >= doc.numPages} onClick={() => setPage((n) => n + 1)}>{t("下一页")}</button>
-      <select data-action="document.zoom" aria-label={t("缩放")} value={zoom} onChange={(e) => setZoom(Number(e.target.value))}>
-        <option value={0}>{t("适应宽度")}</option>
+      <button data-action="document.page" disabled={!doc || page >= doc.numPages} onClick={() => setPage((n) => n + 1)}>{t("common.nextPage")}</button>
+      <select data-action="document.zoom" aria-label={t("common.zoom")} value={zoom} onChange={(e) => setZoom(Number(e.target.value))}>
+        <option value={0}>{t("common.fitWidth")}</option>
         {[0.5, 1, 1.5, 2].map((n) => <option key={n} value={n}>{n * 100}%</option>)}
       </select>
     </div>
-    {error && <p role="alert">{t("PDF 无法显示，文件可能损坏或需要密码")}</p>}
-    {!doc && !error && <p role="status">{t("正在读取…")}</p>}
+    {error && <p role="alert">{t("pdfPreview.cannotDisplayThisPDFIt")}</p>}
+    {!doc && !error && <p role="status">{t("common.loading")}</p>}
     <div className="document-pdf-scroll" ref={frame}>
       <div className="document-pdf-page" hidden={!doc || error}>
         <canvas ref={canvas} /><div ref={text} className="textLayer" />

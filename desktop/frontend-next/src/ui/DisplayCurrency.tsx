@@ -6,9 +6,9 @@ import type { DisplayCurrencyMode, DisplayCurrencySettings } from "../port/bound
 import { Group } from "./Group";
 
 const MODES: [DisplayCurrencyMode, string][] = [
-  ["auto", "自动"],
-  ["CNY", "人民币 CNY"],
-  ["USD", "美元 USD"],
+  ["auto", "common.auto"],
+  ["CNY", "displayCurrency.chineseYuanCNY"],
+  ["USD", "displayCurrency.uSDollarUSD"],
 ];
 
 export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {
@@ -35,18 +35,18 @@ export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChange
   };
 
   return (
-    <Group id="currency" title={t("费用显示币种")}
-      hint={t("只决定费用以哪种货币显示，不改动各来源的价目表。「自动」跟随账户余额的币种，没有余额信息时按价目表的币种显示。")}>
+    <Group id="currency" title={t("common.costDisplayCurrency")}
+      hint={t("displayCurrency.onlyDecidesWhichCurrencyCosts")}>
       {!state ? (
-        <div className="empty">{t("无法读取币种设置。")}</div>
+        <div className="empty">{t("displayCurrency.couldNotReadTheCurrency")}</div>
       ) : (
         <div className="box">
           <div className="lrow">
             <span className="tx">
-              <span className="lb">{t("显示币种")}</span>
-              <span className="ds">{t("当前会话的费用、余额与用量页立即按所选币种显示，无需重启。")}</span>
+              <span className="lb">{t("displayCurrency.displayCurrency")}</span>
+              <span className="ds">{t("displayCurrency.theSessionSCostThe")}</span>
             </span>
-            <div className="seg" data-text role="group" aria-label={t("显示币种")}>
+            <div className="seg" data-text role="group" aria-label={t("displayCurrency.displayCurrency")}>
               {MODES.map(([m, label]) => (
                 <button key={m} data-action="currency.mode" data-value={m} aria-pressed={state.mode === m} disabled={busy} onClick={() => void pick(m)}>
                   {t(label)}
@@ -56,8 +56,8 @@ export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChange
           </div>
           {state.mode !== "auto" && state.unconverted.length > 0 && (
             <div className="why">
-              {t("这些模型的价格不在官方价目表里，无法换算成所选币种，费用只能按原币种显示：{models}。到「服务商」编辑该模型，点「恢复官方价」即可。", {
-                models: state.unconverted.map((u) => t("{model}（{currency}）", { model: u.model, currency: u.currency })).join(t("、")),
+              {t("displayCurrency.theseModelsPricesAreNot", {
+                models: state.unconverted.map((u) => t("settings.text", { model: u.model, currency: u.currency })).join(t("settings.text2")),
               })}
             </div>
           )}

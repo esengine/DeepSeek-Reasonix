@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 
 const countLabel = (c: { shown: number; of?: number }) =>
-  c.of === undefined ? t("{n} 会话", { n: c.shown }) : t("{n} / {total} 会话", { n: c.shown, total: c.of });
+  c.of === undefined ? t("rowCount.sessions2", { n: c.shown }) : t("rowCount.sessions", { n: c.shown, total: c.of });
 
 export function RowCount({ c }: { c: { shown: number; of?: number } }) {
   if (c.shown === 0 && !c.of) return null;

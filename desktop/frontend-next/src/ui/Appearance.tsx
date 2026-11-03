@@ -42,17 +42,17 @@ import { ThemeScheduleFields } from "./ThemeScheduleFields";
 // "" follows the machine; the rest are explicit, the same shape the light/dark
 // control uses.
 const LANGS: [string, string][] = [
-  ["", "跟随系统"],
-  ["zh", "中文"],
-  ["en", "英文"],
+  ["", "common.followTheSystem"],
+  ["zh", "common.text"],
+  ["en", "appearance.english"],
 ];
 
 // Exported because the nav rail names the current one next to the tab.
 export const SCHEMES: [string, string][] = [
-  ["auto", "跟随系统"],
-  ["light", "浅色"],
-  ["dark", "深色"],
-  ["scheduled", "定时"],
+  ["auto", "common.followTheSystem"],
+  ["light", "common.light"],
+  ["dark", "common.dark"],
+  ["scheduled", "common.scheduled"],
 ];
 
 interface Props {
@@ -75,28 +75,28 @@ interface Props {
 // 笔画粗细是另一条轴：颜色调得再亮，400 的汉字在 11px 上仍然是细的。默认跟着
 // 语言走 —— 汉字笔画密，同字号下比拉丁更早糊。
 const WEIGHTS: [string, string, string][] = [
-  ["", "跟随语言", "中文界面使用中等字重，西文使用常规字重"],
-  ["light", "常规", "笔画更细，字距更宽松"],
-  ["heavy", "加粗", "小字号下更扎实，屏幕距离较远或有反光时更易读"],
+  ["", "appearance.matchTheLanguage", "appearance.mediumForChineseRegularFor"],
+  ["light", "appearance.regular", "appearance.thinnerStrokesLooserTexture"],
+  ["heavy", "common.bolder", "appearance.firmerAtSmallSizesAnd"],
 ];
 
 const MEASURES: [string, string, string][] = [
-  ["standard", "适宜阅读", "每行长度控制在一眼能回到行首的范围"],
-  ["full", "铺满窗口", "正文跟随窗口宽度，宽屏上不留两侧空白"],
-  ["full-all", "连输入框一起铺满", "正文和输入框都跟随窗口宽度；输入框很宽时一行不易回到行首"],
-  ["custom", "自定义比例", "按比例调整对话和输入框占用的区域"],
+  ["standard", "appearance.reading", "appearance.keepsALineShortEnough"],
+  ["full", "common.fullWidth", "appearance.proseFollowsTheWindowWith"],
+  ["full-all", "appearance.fullWidthComposerToo", "appearance.proseAndTheComposerBoth"],
+  ["custom", "appearance.customPercentage", "appearance.setTheConversationAndComposer"],
 ];
 
 const EFFECTS: [EffectsMode, string, string][] = [
-  ["full", "完整", "背景模糊、动态天空与颗粒质感全部开启"],
-  ["reduced", "节能", "关闭背景模糊、动态天空与颗粒质感，集成显卡或老旧电脑上更省电"],
+  ["full", "common.full", "appearance.backgroundBlurTheAnimatedSky"],
+  ["reduced", "appearance.reduced", "appearance.turnsOffBackgroundBlurThe"],
 ];
 
 const CONTRASTS: [string, string, string][] = [
-  ["", "跟随系统", "系统已开启「增强对比度」时使用最强档"],
-  ["soft", "柔和", "正文不易刺眼，长时间阅读更省力"],
-  ["normal", "标准", "介于两者之间"],
-  ["strong", "更强", "环境光较强，或需要更清晰的边界"],
+  ["", "common.followTheSystem", "appearance.usesTheStrongestStepWhen"],
+  ["soft", "common.soft", "appearance.softerBodyTextEasierOver"],
+  ["normal", "common.standard", "appearance.betweenTheTwo"],
+  ["strong", "appearance.stronger", "appearance.brightSurroundingsOrWhenEdges"],
 ];
 
 // WebKit 的滑块轨道不知道当前值，填充比例得由调用方喂进来。
@@ -221,10 +221,10 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
   // Read here rather than inside the summary: these are the same three values
   // the folded blocks render, and a second reading of them is a second answer.
   const changed = [
-    look.fontUi ? t("字体") : "",
-    weight ? t("文字粗细") : "",
-    contrast ? t("文字对比度") : "",
-    effects === "reduced" ? t("视觉效果") : "",
+    look.fontUi ? t("common.typeface") : "",
+    weight ? t("common.textWeight") : "",
+    contrast ? t("common.textContrast") : "",
+    effects === "reduced" ? t("common.visualEffects") : "",
   ].filter(Boolean);
 
   return (
@@ -236,11 +236,11 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
       )}
       <section className="grp" id="set-mode" data-setting="mode">
         <div className="grp-hd">
-          <h3>{t("明暗")}</h3>
+          <h3>{t("common.lightAndDark")}</h3>
         </div>
-        <p className="hint">{t("跟随系统时会随系统主题切换；浅色和深色保持固定；定时按本机时间每天切换。")}</p>
+        <p className="hint">{t("appearance.followTheSystemSwitchesWith")}</p>
         <div className="grp-items">
-          <div className="seg" data-text role="group" aria-label={t("明暗")}>
+          <div className="seg" data-text role="group" aria-label={t("common.lightAndDark")}>
             {SCHEMES.map(([id, name]) => (
               <button key={id} data-action="appearance.scheme" data-value={id} aria-pressed={theme === id} onClick={() => onTheme(id)}>
                 {t(name)}
@@ -254,25 +254,25 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
       <section className="grp" id="set-scheme" data-setting="scheme">
         <div className="grp-hd">
-          <h3>{t("界面主题")}</h3>
-          <span className="now">{t("立即生效")}</span>
+          <h3>{t("appearance.interfaceTheme")}</h3>
+          <span className="now">{t("common.inEffectNow")}</span>
         </div>
-        <p className="hint">{t("选择工作台的表面色与强调色。成功、警告和失败等状态色保持一致，代码字体在下方单独设置。")}</p>
+        <p className="hint">{t("appearance.chooseTheWorkbenchSurfacesAnd")}</p>
         <div className="grp-items">
-          <div className="palettes" role="group" aria-label={t("界面主题")}>
-            <Swatch name={t("默认")} on={!custom} onPick={() => pick("")} />
+          <div className="palettes" role="group" aria-label={t("appearance.interfaceTheme")}>
+            <Swatch name={t("common.default")} on={!custom} onPick={() => pick("")} />
             {featured.map(cell)}
           </div>
           {illustrated.length > 0 && (
             <details className="theme-more">
               <summary>
                 <span>
-                  <b>{t("更多已安装主题")}</b>
-                  <em>{t("插画与背景主题，可随时切回基础主题")}</em>
+                  <b>{t("appearance.moreInstalledThemes")}</b>
+                  <em>{t("appearance.illustratedAndBackgroundThemesYou")}</em>
                 </span>
-                <span className="now">{t("{n} 个", { n: illustrated.length })}</span>
+                <span className="now">{t("common.text2", { n: illustrated.length })}</span>
               </summary>
-              <div className="palettes" role="group" aria-label={t("更多已安装主题")}>
+              <div className="palettes" role="group" aria-label={t("appearance.moreInstalledThemes")}>
                 {illustrated.map(cell)}
               </div>
             </details>
@@ -282,7 +282,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
               log — so it is here, next to the thing that looks wrong. */}
           {packs.filter((p) => p.warnings?.length).map((p) => (
             <div className="find" data-lvl="warn" key={p.id}>
-              <span className="t">{t("{name} 有几项没生效", { name: p.name })}</span>
+              <span className="t">{t("appearance.aFewOfSEntries", { name: p.name })}</span>
               {p.warnings?.map((w) => (
                 <span className="why" key={w}>
                   {w}
@@ -297,13 +297,13 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
       <section className="grp" id="set-code-appearance" data-setting="font">
         <div className="grp-hd">
-          <h3>{t("代码外观")}</h3>
+          <h3>{t("appearance.codeAppearance")}</h3>
         </div>
-        <p className="hint">{t("代码块、命令、差异与工具输出共用这一等宽字体，不跟随界面主题改变。")}</p>
+        <p className="hint">{t("appearance.codeBlocksCommandsDiffsAnd")}</p>
         <div className="grp-items">
           <FontPick
             slot="mono"
-            label={t("等宽字体")}
+            label={t("appearance.monospaceFont")}
             value={look.fontMono ?? ""}
             options={monoFonts}
             sample="func main() { fmt.Println(0O1lI) }"
@@ -315,14 +315,14 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
       <section className="grp" id="set-size" data-setting="size">
         <div className="grp-hd">
-          <h3>{t("大小")}</h3>
+          <h3>{t("common.size")}</h3>
         </div>
-        <p className="hint">{t("「界面」会同时缩放边距与控件，「界面文字」只放大侧栏、设置等处的文字，「正文」仅调整对话中的文字大小，三者独立设置。")}</p>
-        {host().inShell() && <p className="hint">{t("键盘：{up} 放大，{down} 缩小，{reset} 恢复标准，同样调整「界面」大小。", { up: chord("+"), down: chord("-"), reset: chord("0") })}</p>}
+        <p className="hint">{t("appearance.interfaceScalesSpacingAndControls")}</p>
+        {host().inShell() && <p className="hint">{t("appearance.keyboardLargerSmallerBackTo", { up: chord("+"), down: chord("-"), reset: chord("0") })}</p>}
         <div className="grp-items">
           <div className="prow">
-            <span className="tx">{t("界面")}</span>
-            <div className="seg" data-text role="group" aria-label={t("界面大小")}>
+            <span className="tx">{t("appearance.interface")}</span>
+            <div className="seg" data-text role="group" aria-label={t("appearance.interfaceSize")}>
               {ZOOM_PRESETS.map(([v, name]) => (
                 <button key={v} data-action="appearance.zoom" aria-pressed={(look.zoom || 1) === v} onClick={() => set({ zoom: v })}>
                   {t(name)}
@@ -331,7 +331,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             </div>
           </div>
           <div className="prow">
-            <span className="tx">{t("微调")}</span>
+            <span className="tx">{t("appearance.fineTune")}</span>
             <input
               className="slider"
               style={at(look.zoom || 1, zoomRange.min, zoomRange.max)}
@@ -341,15 +341,15 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
               step={zoomRange.step}
               disabled={!look.zoomRange}
               value={look.zoom || 1}
-              aria-label={t("界面大小微调")}
+              aria-label={t("appearance.fineTuneInterfaceSize")}
               data-action="appearance.zoom"
               onChange={(e) => set({ zoom: Number(e.target.value) })}
             />
             <span className="now">{pct(look.zoom || 1)}</span>
           </div>
           <div className="prow">
-            <span className="tx">{t("界面文字")}</span>
-            <div className="seg" data-text role="group" aria-label={t("界面文字大小")}>
+            <span className="tx">{t("appearance.interfaceText")}</span>
+            <div className="seg" data-text role="group" aria-label={t("appearance.interfaceTextSize")}>
               {TEXT_STEPS.map(([v, name]) => (
                 <button key={v} data-action="appearance.text-size" aria-pressed={(look.textSize || 1) === v} onClick={() => set({ textSize: v === 1 ? 0 : v })}>
                   {t(name)}
@@ -358,8 +358,8 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             </div>
           </div>
           <div className="prow">
-            <span className="tx">{t("正文")}</span>
-            <div className="seg" data-text role="group" aria-label={t("正文字号")}>
+            <span className="tx">{t("common.bodyText")}</span>
+            <div className="seg" data-text role="group" aria-label={t("appearance.bodyTextSize")}>
               {readSteps().map(([v, name]) => (
                 <button key={v} data-action="appearance.reading-size" aria-pressed={readSizeOf(look.readSize) === v} onClick={() => set({ readSize: v })}>
                   {t(name)}
@@ -368,8 +368,8 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             </div>
           </div>
           <div className="prow">
-            <span className="tx">{t("行宽")}</span>
-            <div className="seg" data-text role="group" aria-label={t("正文行宽")}>
+            <span className="tx">{t("common.lineWidth")}</span>
+            <div className="seg" data-text role="group" aria-label={t("appearance.bodyLineWidth")}>
               {MEASURES.map(([id, name, why]) => (
                 <button key={id} data-action="appearance.measure" data-value={id}
                   aria-pressed={(look.width || "standard") === id} title={t(why)}
@@ -381,12 +381,12 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           </div>
           {look.width === "custom" && (
             <div className="prow">
-              <span className="tx">{t("对话区域宽度")}</span>
+              <span className="tx">{t("common.conversationWidth")}</span>
               <input className="slider" type="range"
                 style={at(look.widthPercent ?? 1, widthRange.min, widthRange.max)}
                 min={widthRange.min} max={widthRange.max} step={widthRange.step}
                 disabled={!look.widthRange} value={look.widthPercent ?? 1}
-                aria-label={t("对话区域宽度")} aria-valuetext={pct((look.widthPercent ?? 1) / 100)}
+                aria-label={t("common.conversationWidth")} aria-valuetext={pct((look.widthPercent ?? 1) / 100)}
                 data-action="appearance.measure" data-value="custom"
                 onChange={(e) => set({ widthPercent: Number(e.target.value) })} />
               <span className="now">{pct((look.widthPercent ?? 1) / 100)}</span>
@@ -394,21 +394,21 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           )}
         </div>
         <p className="hint">{t(look.width === "custom"
-          ? "自定义比例同时调整对话和输入框；窄窗口会优先保证可用空间。"
-          : "行宽只管正文：代码、命令与工具输出始终占满可用宽度。")}</p>
+          ? "appearance.customPercentageResizesBothThe"
+          : "appearance.lineWidthAppliesToProse")}</p>
         <ApplyNote id="size" />
       </section>
 
       <section className="grp" id="set-wallpaper" data-setting="wallpaper">
         <div className="grp-hd">
-          <h3>{t("壁纸")}</h3>
+          <h3>{t("common.wallpaper")}</h3>
           {look.wallpaper && (
               <button className="now nowbtn" data-action="wallpaper.remove" onClick={dropPaper}>
-              {t("移除")}
+              {t("common.remove")}
             </button>
           )}
         </div>
-        <p className="hint">{t("壁纸只显示在窗口的空白区域，卡片和输入框保持不透明以确保文字清晰。任务运行时壁纸会自动降低透明度。")}</p>
+        <p className="hint">{t("appearance.theImageFillsOnlyThe")}</p>
         <div className="grp-items">
           <input
             ref={file}
@@ -427,7 +427,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 <path d="M8 3.7v8.6M3.7 8h8.6" />
               </svg>
             </span>
-            {t(look.wallpaper ? "换一张…" : "选择图片或视频…")}
+            {t(look.wallpaper ? "appearance.chooseAnother" : "appearance.chooseAnImageOrVideo")}
           </button>
           <WallpaperSceneImport port={port} look={look} onLook={onLook} setPaper={setPaper} onError={setFailed} />
           {/* Composited the way the window is: the picture, then page colour
@@ -437,7 +437,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             <div
               className="paperview"
               role="img"
-              aria-label={t("壁纸")}
+              aria-label={t("common.wallpaper")}
               ref={setView}
               style={{
                 backgroundImage: look.wallpaper.kind === "video" ? undefined : `url("${look.wallpaper.url}")`,
@@ -461,7 +461,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           {look.wallpaper && (
             <>
               <label className="prow">
-                <span className="tx">{t("浓度")}</span>
+                <span className="tx">{t("appearance.strength")}</span>
                 <input
                   className="slider"
                   style={at(look.wallpaper.opacity, 0.05, 1)}
@@ -477,7 +477,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 <span className="now">{pct(look.wallpaper.opacity)}</span>
               </label>
               <label className="prow">
-                <span className="tx">{t("压暗")}</span>
+                <span className="tx">{t("appearance.dim")}</span>
                 <input
                   className="slider"
                   style={at(look.wallpaper.dim, 0, 1)}
@@ -493,7 +493,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 <span className="now">{pct(look.wallpaper.dim)}</span>
               </label>
               <label className="prow" data-idle={crop.x ? undefined : ""}>
-                <span className="tx">{t("横向焦点")}</span>
+                <span className="tx">{t("appearance.horizontalFocus")}</span>
                 <input
                   className="slider"
                   style={at(look.wallpaper.focusX, 0, 1)}
@@ -510,7 +510,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 <span className="now">{pct(look.wallpaper.focusX)}</span>
               </label>
               <label className="prow" data-idle={crop.y ? undefined : ""}>
-                <span className="tx">{t("纵向焦点")}</span>
+                <span className="tx">{t("appearance.verticalFocus")}</span>
                 <input
                   className="slider"
                   style={at(look.wallpaper.focusY, 0, 1)}
@@ -532,10 +532,10 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
               {crop.known && !(crop.x && crop.y) && (
                 <p className="note">
                   {crop.x
-                    ? t("当前窗口尺寸下，此壁纸只有左右会被裁剪，上下正好填满，因此纵向焦点无法调整。")
+                    ? t("appearance.atTheCurrentWindowSize")
                     : crop.y
-                      ? t("当前窗口尺寸下，此壁纸只有上下会被裁剪，左右正好填满，因此横向焦点无法调整。")
-                      : t("此壁纸与窗口宽高比一致，四边均未裁剪；改变窗口尺寸后才可调整焦点。")}
+                      ? t("appearance.atTheCurrentWindowSize2")
+                      : t("appearance.thisWallpaperMatchesTheWindow")}
                 </p>
               )}
             </>
@@ -546,20 +546,20 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
       <section className="grp" id="set-language" data-setting="language">
         <div className="grp-hd">
-          <h3>{t("语言")}</h3>
+          <h3>{t("common.language")}</h3>
         </div>
         <p className="hint">
-          {t("界面显示语言。模型回复所用的语言与此设置无关，将跟随你发送消息时使用的语言。")}
+          {t("appearance.theLanguageOfTheInterface")}
         </p>
         <div className="grp-items">
-          <div className="seg" data-text role="group" aria-label={t("语言")}>
+          <div className="seg" data-text role="group" aria-label={t("common.language")}>
             {LANGS.map(([id, name]) => (
               <button key={id} data-action="appearance.language" data-value={id} aria-pressed={langNow === id} onClick={() => setLang(id)}>
                 {t(name)}
               </button>
             ))}
           </div>
-          <p className="note">{t("语言更改需重启窗口后生效")}</p>
+          <p className="note">{t("appearance.changingTheLanguageReloadsThe")}</p>
         </div>
         <ApplyNote id="language" />
       </section>
@@ -594,21 +594,21 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           somebody set is a screen disagreeing with the window itself. */}
       <details className="advset appearance-advanced">
         <summary className="grp" id="set-advanced-appearance" data-setting="advanced-appearance">
-          <h3 className="grp-hd"><span>{t("高级外观")}</span></h3>
-          <span className="hint">{changed.length ? t("已修改：{list}", { list: changed.join(" · ") }) : t("字体、文字粗细、文字对比度、视觉效果")}</span>
+          <h3 className="grp-hd"><span>{t("common.advancedAppearance")}</span></h3>
+          <span className="hint">{changed.length ? t("appearance.changed", { list: changed.join(" · ") }) : t("appearance.fontsTextWeightTextContrast")}</span>
         </summary>
         <section className="grp" id="set-font" data-setting="font">
           <div className="grp-hd">
-            <h3>{t("字体")}</h3>
+            <h3>{t("common.typeface")}</h3>
           </div>
-          <p className="hint">{t("可直接输入字体名称，或选择本机已安装的字体。下方文本会实时预览所选字体；若字体不可用，将自动使用默认字体。")}</p>
+          <p className="hint">{t("appearance.enterATypefaceNameOr")}</p>
           <div className="grp-items">
             <FontPick
               slot="ui"
-              label={t("界面")}
+              label={t("appearance.interface")}
               value={look.fontUi ?? ""}
               options={uiFonts}
-              sample={t("字体预览 · 中文 Aa Bb 0123")}
+              sample={t("appearance.typefacePreviewAaBb0123")}
               onPick={(v) => set({ fontUi: v })}
             />
           </div>
@@ -617,11 +617,11 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
         <section className="grp" id="set-weight" data-setting="weight">
           <div className="grp-hd">
-            <h3>{t("文字粗细")}</h3>
+            <h3>{t("common.textWeight")}</h3>
           </div>
-          <p className="hint">{t("调整文字的笔画粗细。中文笔画密集，在小字号下加粗有助于提升清晰度。")}</p>
+          <p className="hint">{t("appearance.adjustsStrokeWeightDenseChinese")}</p>
           <div className="grp-items">
-            <div className="seg" data-text role="group" aria-label={t("文字粗细")}>
+            <div className="seg" data-text role="group" aria-label={t("common.textWeight")}>
               {WEIGHTS.map(([id, name, why]) => (
                 <button key={id || "auto"} data-action="appearance.weight" data-value={id || "auto"} aria-pressed={weight === id} title={t(why)} onClick={() => onWeight(id)}>
                   {t(name)}
@@ -634,11 +634,11 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
         <section className="grp" id="set-effects" data-setting="effects">
           <div className="grp-hd">
-            <h3>{t("视觉效果")}</h3>
+            <h3>{t("common.visualEffects")}</h3>
           </div>
-          <p className="hint">{t("窗口持续占用显卡时，改为「节能」：界面不变，只去掉磨砂玻璃、动态天空、颗粒和运行中的循环动画。")}</p>
+          <p className="hint">{t("appearance.ifTheWindowKeepsYour")}</p>
           <div className="grp-items">
-            <div className="seg" data-text role="group" aria-label={t("视觉效果")}>
+            <div className="seg" data-text role="group" aria-label={t("common.visualEffects")}>
               {EFFECTS.map(([id, name, why]) => (
                 <button key={id} data-action="appearance.effects" data-value={id} aria-pressed={effects === id} title={t(why)} onClick={() => setEffectsMode(id)}>
                   {t(name)}
@@ -651,11 +651,11 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
         <section className="grp" id="set-contrast" data-setting="contrast">
           <div className="grp-hd">
-            <h3>{t("文字对比度")}</h3>
+            <h3>{t("common.textContrast")}</h3>
           </div>
-          <p className="hint">{t("同时调整正文与次要文字的对比度。深色主题下若觉得刺眼，可调向「柔和」。")}</p>
+          <p className="hint">{t("appearance.adjustsTheContrastOfBody")}</p>
           <div className="grp-items">
-            <div className="seg" data-text role="group" aria-label={t("文字对比度")}>
+            <div className="seg" data-text role="group" aria-label={t("common.textContrast")}>
               {CONTRASTS.map(([id, name, why]) => (
                 <button key={id || "auto"} data-action="appearance.contrast" data-value={id || "auto"} aria-pressed={contrast === id} title={t(why)} onClick={() => onContrast(id)}>
                   {t(name)}
@@ -696,7 +696,7 @@ function FontPick({
           className="fontown"
           list={list}
           value={value}
-          placeholder={options.length ? t("默认 · 本机有 {n} 个可选", { n: options.length }) : t("默认")}
+          placeholder={options.length ? t("appearance.defaultAvailableOnThisMachine", { n: options.length }) : t("common.default")}
           spellCheck={false}
           autoComplete="off"
           data-action="appearance.font"
@@ -709,8 +709,8 @@ function FontPick({
           ))}
         </datalist>
         {value && (
-          <button className="nowbtn" data-action="appearance.font" data-target={slot} data-value="default" onClick={() => onPick("")} title={t("恢复默认字体")}>
-            {t("清除")}
+          <button className="nowbtn" data-action="appearance.font" data-target={slot} data-value="default" onClick={() => onPick("")} title={t("appearance.backToTheDefaultTypeface")}>
+            {t("common.clear")}
           </button>
         )}
       </div>
@@ -772,7 +772,7 @@ function Swatch({
       </span>
       <span className="pal-nm">
         <b>{name}</b>
-        <em>{pack ? pack.author || t("第三方") : t("内置")}</em>
+        <em>{pack ? pack.author || t("appearance.thirdParty") : t("common.builtIn")}</em>
       </span>
     </button>
   );

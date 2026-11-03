@@ -8,17 +8,17 @@ export interface SettingPage {
 
 export const PAGES: Partial<Record<Section, readonly SettingPage[]>> = {
   tools: [
-    { id: "approval", label: "批准与规则", anchors: ["approval", "plan-approval", "external-origin", "rules", "tool-list", "present-files"] },
-    { id: "sandbox", label: "沙箱与执行", anchors: ["sandbox", "shell"] },
-    { id: "web", label: "联网与浏览器", anchors: ["web-access", "browser-tools"] },
-    { id: "subagents", label: "子代理与协作", anchors: ["subagent-claims", "write-lease"] },
+    { id: "approval", label: "settingPages.approvalAndRules", anchors: ["approval", "plan-approval", "external-origin", "rules", "tool-list", "present-files"] },
+    { id: "sandbox", label: "settingPages.sandboxAndExecution", anchors: ["sandbox", "shell"] },
+    { id: "web", label: "settingPages.webAndBrowser", anchors: ["web-access", "browser-tools"] },
+    { id: "subagents", label: "settingPages.subAgentsAndCollaboration", anchors: ["subagent-claims", "write-lease"] },
   ],
   appearance: [
-    { id: "look", label: "外观与主题", anchors: ["mode", "scheme", "font", "size", "weight", "contrast", "effects", "wallpaper", "language", "advanced-appearance"] },
-    { id: "navigation", label: "导航与侧栏", anchors: ["navrail", "naventries", "session-quick-actions", "legacy-sessions", "live-grace", "open-session-limit", "live-stream-budget", "session-tabs"] },
-    { id: "conversation", label: "会话显示", anchors: ["new-answer-marker", "composer-hint", "folding", "plan-progress", "office-preview"] },
-    { id: "shortcuts", label: "快捷键", anchors: ["send-shortcut", "running-message-intent", "esc-stop", "global-shortcut", "keys"] },
-    { id: "window", label: "窗口与性能", anchors: ["window", "notify", "page-sleep", "graphics"] },
+    { id: "look", label: "settingPages.appearanceAndTheme", anchors: ["mode", "scheme", "font", "size", "weight", "contrast", "effects", "wallpaper", "language", "advanced-appearance"] },
+    { id: "navigation", label: "settingPages.navigationAndSidebar", anchors: ["navrail", "naventries", "session-quick-actions", "legacy-sessions", "live-grace", "open-session-limit", "live-stream-budget", "session-tabs"] },
+    { id: "conversation", label: "settingPages.conversationDisplay", anchors: ["new-answer-marker", "composer-hint", "folding", "plan-progress", "office-preview"] },
+    { id: "shortcuts", label: "common.keyboardShortcuts", anchors: ["send-shortcut", "running-message-intent", "esc-stop", "global-shortcut", "keys"] },
+    { id: "window", label: "settingPages.windowAndPerformance", anchors: ["window", "notify", "page-sleep", "graphics"] },
   ],
 };
 

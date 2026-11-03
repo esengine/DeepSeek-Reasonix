@@ -79,7 +79,7 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
             <div className="workbench-change workbench-change-folder" data-staged={stagedState(node.files) === true ? "" : undefined}>
               {onChanged && (
                 <button type="button" role="checkbox" className="workbench-stage" data-action="workbench.stage-folder" data-target={node.path}
-                  aria-checked={stagedState(node.files)} aria-label={t("暂存 {path}", { path: node.path + "/" })} disabled={busy}
+                  aria-checked={stagedState(node.files)} aria-label={t("workbenchChanges.stage", { path: node.path + "/" })} disabled={busy}
                   onClick={() => void stage({ paths: node.files.map((f) => f.path), unstage: stagedState(node.files) === true })}>
                   <StudioIcon name="check" aria-hidden="true" />
                 </button>
@@ -105,7 +105,7 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
           <div className="workbench-change" data-staged={item.staged ? "" : undefined}>
             {onChanged && (
               <button type="button" role="checkbox" className="workbench-stage" data-action="workbench.stage" data-target={item.path}
-                aria-checked={stagedState([item])} aria-label={t("暂存 {path}", { path: item.path })} disabled={busy}
+                aria-checked={stagedState([item])} aria-label={t("workbenchChanges.stage", { path: item.path })} disabled={busy}
                 onClick={() => void stage({ paths: [item.path], unstage: item.staged === true && !item.unstaged })}>
                 <StudioIcon name="check" aria-hidden="true" />
               </button>
@@ -122,18 +122,18 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
             </button>
             {onChanged && discardable(item) && (
               <button type="button" className="workbench-discard" data-action="workbench.discard" data-target={item.path}
-                aria-label={t("丢弃 {path} 的改动", { path: item.path })} title={t("丢弃这个文件的改动")} disabled={busy} onClick={() => setAsking(item.path)}>
+                aria-label={t("workbenchChanges.discardTheChangeTo", { path: item.path })} title={t("workbenchChanges.discardThisFileSChange")} disabled={busy} onClick={() => setAsking(item.path)}>
                 <StudioIcon name="rewind" aria-hidden="true" />
               </button>
             )}
           </div>
           {asking === item.path && (
-            <div className="workbench-discard-ask" role="group" aria-label={t("确认丢弃")}>
-              <p>{t("丢弃 {path} 的改动？这个文件会回到上次提交的样子，改动无法恢复。", { path: item.path })}</p>
-              {item.staged && item.unstaged && <p>{t("它已暂存的部分和还没暂存的部分都会丢弃。")}</p>}
+            <div className="workbench-discard-ask" role="group" aria-label={t("workbenchChanges.confirmDiscard")}>
+              <p>{t("workbenchChanges.discardTheChangeToThe", { path: item.path })}</p>
+              {item.staged && item.unstaged && <p>{t("workbenchChanges.bothItsStagedPartAnd")}</p>}
               <div>
-                <button type="button" className="btn sm" data-danger="" data-action="workbench.discard-confirm" data-target={item.path} disabled={busy} onClick={() => void discard(item.path)}>{t("丢弃")}</button>
-                <button type="button" className="btn sm" data-weak="" data-action="workbench.discard-cancel" disabled={busy} onClick={() => setAsking("")}>{t("取消")}</button>
+                <button type="button" className="btn sm" data-danger="" data-action="workbench.discard-confirm" data-target={item.path} disabled={busy} onClick={() => void discard(item.path)}>{t("workbenchChanges.discard")}</button>
+                <button type="button" className="btn sm" data-weak="" data-action="workbench.discard-cancel" disabled={busy} onClick={() => setAsking("")}>{t("common.cancel")}</button>
               </div>
             </div>
           )}
@@ -144,12 +144,12 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
   return (
     <div className="workbench-changes">
       <div className="workbench-explorer-head">
-        <span>{t("改动")}</span>
+        <span>{t("common.changes")}</span>
         <small>{changes.length}</small>
         {onChanged && (
           <button type="button" className="btn sm workbench-stage-all" data-action="workbench.stage-all" disabled={busy}
             onClick={() => void stage({ all: true, unstage: settled })}>
-            {t(settled ? "取消全部暂存" : "暂存全部")}
+            {t(settled ? "workbenchChanges.unstageAll" : "workbenchChanges.stageAll")}
           </button>
         )}
         {onChanged && commit.button}
@@ -161,9 +161,9 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
       {rows(tree, 0)}
       {drawn.left <= 0 && changes.length > drawn.files && (
         <div className="workbench-change-more">
-          <span>{t("还有 {n} 项没有显示", { n: changes.length - drawn.files })}</span>
+          <span>{t("workbenchChanges.moreNotShown", { n: changes.length - drawn.files })}</span>
           <button type="button" className="btn sm" data-weak="" data-action="workbench.more-changes" onClick={() => setLimit((n) => n + ROW_PAGE)}>
-            {t("再显示 {n} 项", { n: ROW_PAGE })}
+            {t("workbenchChanges.showMore", { n: ROW_PAGE })}
           </button>
         </div>
       )}

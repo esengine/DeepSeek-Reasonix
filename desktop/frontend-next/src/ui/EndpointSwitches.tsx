@@ -6,15 +6,15 @@ import type { ProviderEntry } from "../port/port";
 // the only honest answer for an endpoint nobody has characterised; the other two
 // are what a reader picks when the endpoint has already contradicted it.
 const CONTINUATIONS: ReadonlyArray<readonly [string, string]> = [
-  ["", "自动"],
-  ["stateful", "引用上一轮"],
-  ["stateless", "每轮完整发送"],
+  ["", "common.auto"],
+  ["stateful", "endpointSwitches.byReference"],
+  ["stateless", "endpointSwitches.replayEachTurn"],
 ];
 
 const CONTINUATION_WHY: Record<string, string> = {
-  "": "按端点厂商判断。中转站若回报 previous_response_id 不受支持，改为「每轮完整发送」。",
-  stateful: "只发送新的一轮，历史由端点自己保存 —— 前缀缓存命中率最高，但要求端点真的存了。",
-  stateless: "每轮重发完整历史。中转站只转发、不保存状态时用这一档。",
+  "": "endpointSwitches.decidedByTheEndpointS",
+  stateful: "endpointSwitches.sendsOnlyTheNewTurn",
+  stateless: "endpointSwitches.replaysTheWholeHistoryEvery",
 };
 
 export function hasEndpointSwitches(entry: ProviderEntry): boolean {
@@ -34,39 +34,39 @@ export function EndpointSwitches({
     <div className="pdetail-options">
       {entry.canWebSearch && (
         <div className="vway">
-          <span className="lb">{t("联网搜索")}</span>
-          <div className="seg" role="group" aria-label={t("{name} 的联网搜索", { name: label })}>
+          <span className="lb">{t("common.webSearch")}</span>
+          <div className="seg" role="group" aria-label={t("endpointSwitches.webSearchFor", { name: label })}>
             {[true, false].map((on) => (
               <button key={String(on)} type="button" data-action="provider.draft" data-value={`web-search:${on}`}
                 aria-pressed={search === on} disabled={disabled} onClick={() => onSearch(on)}>
-                {t(on ? "开" : "关")}
+                {t(on ? "common.on" : "common.off")}
               </button>
             ))}
           </div>
-          <span className="why">{t("端点自己执行的搜索，不占本地工具。")}</span>
+          <span className="why">{t("endpointSwitches.theEndpointRunsTheSearch")}</span>
         </div>
       )}
       {entry.canSetThinking && (
         <div className="vway">
-          <span className="lb">{t("思考参数")}</span>
-          <div className="seg" role="group" aria-label={t("{name} 的思考参数", { name: label })}>
+          <span className="lb">{t("common.thinkingParameter")}</span>
+          <div className="seg" role="group" aria-label={t("endpointSwitches.thinkingParameterFor", { name: label })}>
             {[true, false].map((on) => (
               <button key={String(on)} type="button" data-action="provider.draft" data-value={`thinking:${on}`}
                 aria-pressed={sendsThinking === on} disabled={disabled} onClick={() => onThinking(on)}>
-                {t(on ? "自动" : "不发送")}
+                {t(on ? "common.auto" : "endpointSwitches.doNotSend")}
               </button>
             ))}
           </div>
           <span className="why">
-            {t(sendsThinking ? "部分中转站不支持思考控制字段，会拒绝整个请求。遇到这种情况请切换为「不发送」。" : "只发送常规聊天参数，不再指定思考深度；模型自身的推理行为不受影响。")}
+            {t(sendsThinking ? "endpointSwitches.someRelaysDoNotAccept" : "endpointSwitches.sendsOnlyTheOrdinaryChat")}
           </span>
           {sendsThinking && shape}
         </div>
       )}
       {entry.canSetContinuation && (
         <div className="vway">
-          <span className="lb">{t("上下文续接")}</span>
-          <div className="seg" role="group" aria-label={t("{name} 的上下文续接方式", { name: label })}>
+          <span className="lb">{t("endpointSwitches.carryingContext")}</span>
+          <div className="seg" role="group" aria-label={t("endpointSwitches.howCarriesContextBetweenTurns", { name: label })}>
             {CONTINUATIONS.map(([mode, text]) => (
               <button key={mode} type="button" data-action="provider.draft" data-value={`continuation:${mode || "auto"}`}
                 aria-pressed={continuation === mode} disabled={disabled} onClick={() => onContinuation(mode)}>

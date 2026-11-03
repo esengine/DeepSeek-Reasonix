@@ -15,12 +15,12 @@ import { tx } from "../../i18n/rich";
 // The literals live inside t() rather than in a table, which a module body
 // would freeze in the source language and a catalogue scanner would never see.
 function why(c: Compaction): string {
-  if (c.trigger === "manual") return t("手动触发");
+  if (c.trigger === "manual") return t("compactionCard.triggeredByHand");
   if (c.trigger !== "auto") return c.trigger ?? "";
-  if (!c.triggerTokens) return t("上下文达到阈值，自动触发");
+  if (!c.triggerTokens) return t("compactionCard.automaticAContextThresholdWas");
   const n = tokens(c.triggerTokens);
-  if (c.boundary === "capacity") return t("自动触发 · 输入到达窗口容量线 {n}", { n });
-  return t("自动触发 · 输入到达 {n}", { n });
+  if (c.boundary === "capacity") return t("compactionCard.automaticInputReachedTheWindow", { n });
+  return t("compactionCard.automaticInputReached", { n });
 }
 
 // A digest reads as complete whatever it dropped, so the count of the fold's
@@ -38,18 +38,18 @@ function Coverage({ c }: { c: Compaction }) {
         <span className="k">✓</span>
         <span>
           {missing === 0 ? (
-            <>{tx("本段的 {n} 处改动均已写入简报", { n: <b>{required}</b> })}</>
+            <>{tx("compactionCard.allChangesMadeHereAre", { n: <b>{required}</b> })}</>
           ) : (
-            <>{tx("{kept}/{required} 处改动写进了简报", { kept: <b>{kept}</b>, required })}</>
+            <>{tx("compactionCard.changesAreInTheDigest", { kept: <b>{kept}</b>, required })}</>
           )}
-          {c.coverageBackstopped && t("（缺失部分由主机补全）")}
+          {c.coverageBackstopped && t("compactionCard.gapsKeptByTheHost")}
         </span>
       </div>
       {missing > 0 && (
         <div className="row">
           <span className="x">×</span>
           <span>
-            {tx("另有 {n} 处仅保留索引地址，需通过 recall 取回原文", { n: <b>{missing}</b> })}
+            {tx("compactionCard.moreAreIndexEntriesOnly", { n: <b>{missing}</b> })}
           </span>
         </div>
       )}
@@ -58,12 +58,12 @@ function Coverage({ c }: { c: Compaction }) {
 }
 
 const PART: Record<string, string> = {
-  system: "系统提示",
-  tools: "工具定义",
-  digest: "摘要",
-  user: "用户消息",
-  reply: "模型回复",
-  tool_output: "工具输出",
+  system: "common.systemPrompt",
+  tools: "common.toolDefinitions",
+  digest: "common.summary",
+  user: "common.userMessages",
+  reply: "common.modelReplies",
+  tool_output: "common.toolOutput",
 };
 
 // What a fold left behind, when that is still a large share of the window. The
@@ -79,14 +79,14 @@ function Remains({ c }: { c: Compaction }) {
       <div className="row">
         <span className="k">·</span>
         <span>
-          {tx("折叠后仍有 {n}：{top}", { n: <b>{tokens(r.total)}</b>, top })}
-          {big && big.tokens > 0 && <>{" · "}{big.tool ? t("最大的一条是 {tool} 的结果 {n}", { tool: big.tool, n: tokens(big.tokens) }) : t("最大的一条是 {role} 消息 {n}", { role: t(PART[big.role === "assistant" ? "reply" : big.role === "tool" ? "tool_output" : "user"] ?? big.role), n: tokens(big.tokens) })}</>}
+          {tx("compactionCard.stillHeldAfterTheFold", { n: <b>{tokens(r.total)}</b>, top })}
+          {big && big.tokens > 0 && <>{" · "}{big.tool ? t("compactionCard.theLargestIsAResult", { tool: big.tool, n: tokens(big.tokens) }) : t("compactionCard.theLargestIsAMessage", { role: t(PART[big.role === "assistant" ? "reply" : big.role === "tool" ? "tool_output" : "user"] ?? big.role), n: tokens(big.tokens) })}</>}
         </span>
       </div>
       {r.active > 0 && (
         <div className="row">
           <span className="k">·</span>
-          <span>{t("正在进行的这一轮占 {n}，折叠动不了它。", { n: tokens(r.active) })}</span>
+          <span>{t("common.theTurnInProgressHolds", { n: tokens(r.active) })}</span>
         </div>
       )}
     </div>
@@ -114,8 +114,8 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className={done ? "nm" : "nm shim"}>{t(!done ? "正在压缩…" : aborted ? "压缩未完成" : "压缩完成")}</span>
-          <span className="tag">{t("主机")}</span>
+          <span className={done ? "nm" : "nm shim"}>{t(!done ? "common.compacting" : aborted ? "compactionCard.compactionDidNotComplete" : "compactionCard.compactionDone")}</span>
+          <span className="tag">{t("common.host")}</span>
           {c.trigger && <span className="arg" title={why(c)}>{why(c)}</span>}
         </div>
         {/* While it runs, the digest's own last line is the progress bar: a
@@ -130,9 +130,9 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
               {(c.messages || before > 0) && (
                 <div className="comp-n">
                   {c.messages ? (
-                    <>{tx("正在将 {n} 条消息折叠为简报", { n: <b>{c.messages}</b> })}</>
+                    <>{tx("compactionCard.foldingMessagesIntoADigest", { n: <b>{c.messages}</b> })}</>
                   ) : (
-                    t("正在折叠为简报")
+                    t("compactionCard.foldingIntoADigest")
                   )}
                   {before > 0 && (
                     <>
@@ -159,9 +159,9 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
               )}
               <div className="comp-n">
                 {c.messages ? (
-                  <>{tx("折叠了 {n} 条消息", { n: <b>{c.messages}</b> })}</>
+                  <>{tx("compactionCard.foldedMessages", { n: <b>{c.messages}</b> })}</>
                 ) : (
-                  t("本次未折叠任何内容")
+                  t("compactionCard.thisPassFoldedNothing")
                 )}
                 {cause && <>{" · "}{t(cause)}</>}
                 {shrank && (
@@ -189,7 +189,7 @@ function Brief({ text }: { text: string }) {
   return (
     <details open={open} onToggle={(e) => e.currentTarget.open !== open && setOpen(e.currentTarget.open)}>
       <summary>
-        <span className="fold">{t("查看其后续使用的简报")}</span>
+        <span className="fold">{t("common.seeTheDigestItCarries")}</span>
       </summary>
       <div className="txt">{text}</div>
     </details>

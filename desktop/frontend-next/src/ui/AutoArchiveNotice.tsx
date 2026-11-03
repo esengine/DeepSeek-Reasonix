@@ -29,8 +29,8 @@ export function AutoArchiveNotice({ tree }: { tree: TreeWorkspace[] }) {
   };
   return (
     <div className="errbar" data-kind="note" role="status">
-      <span>{t("已自动归档 {n} 个会话，可在“已归档”中恢复。", { n: fresh.length })}</span>
-      <button data-action="auto-archive.notice-dismiss" onClick={dismiss}>{t("知道了")}</button>
+      <span>{t("autoArchiveNotice.conversationsWereArchivedAutomatical", { n: fresh.length })}</span>
+      <button data-action="auto-archive.notice-dismiss" onClick={dismiss}>{t("common.gotIt")}</button>
     </div>
   );
 }

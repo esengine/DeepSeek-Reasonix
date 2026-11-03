@@ -22,7 +22,7 @@ function rows(items: QueueItem[]) {
 }
 
 describe("why a queued line has not been delivered", () => {
-  const reason = t("含图片，本轮结束后发送");
+  const reason = t("queue.hasAnImageSentWhen");
 
   it("says so on a line that carries a picture", () => {
     rows([item({ images: true })]);
@@ -33,12 +33,12 @@ describe("why a queued line has not been delivered", () => {
     rows([item({ id: "a", images: true }), item({ id: "b", preview: "words only" })]);
     const text = document.querySelector(".queue")?.textContent ?? "";
     expect(text.split(reason).length - 1).toBe(1);
-    expect(text).toContain(t("插话排队"));
+    expect(text).toContain(t("queue.steerQueued"));
   });
 
   it("does not claim a picture wait for a steer the turn already took", () => {
     rows([item({ images: true, state: "steer_accepted" })]);
     expect(document.querySelector(".queue")?.textContent).not.toContain(reason);
-    expect(document.querySelector(".queue")?.textContent).toContain(t("插话已收"));
+    expect(document.querySelector(".queue")?.textContent).toContain(t("queue.steerAccepted"));
   });
 });

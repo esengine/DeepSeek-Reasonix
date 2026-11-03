@@ -14,7 +14,7 @@ const ACTIVATION: Record<string, string> = {
   relevant: "后续相关时会被检索",
 };
 
-const SCOPE: Record<string, string> = { project: "仅当前项目", global: "在所有项目里" };
+const SCOPE: Record<string, string> = { project: "common.thisProjectOnly", global: "在所有项目里" };
 
 export const RememberCard = memo(function RememberCard({
   m, forgotten, onForget,
@@ -32,13 +32,13 @@ export const RememberCard = memo(function RememberCard({
     <LineRow
       glyph="◇"
       gone={forgotten}
-      title={t(forgotten ? "已经忘掉" : "记住了")}
+      title={t(forgotten ? "rememberCard.forgotten" : "rememberCard.remembered")}
       subject={m.title}
       subjectTitle={m.title}
       meta={`${t(SCOPE[m.scope] ?? m.scope)} · ${t(ACTIVATION[m.activation] ?? m.activation)}`}
       action={!forgotten && (
         <button className="act" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={forget}>
-          {t(busy ? "忘掉中…" : "忘记")}
+          {t(busy ? "rememberCard.forgetting" : "common.forget")}
         </button>
       )}
       detail={m.description || undefined}

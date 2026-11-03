@@ -658,16 +658,16 @@ const ActivityGroup = memo(function ActivityGroup({
     <details className="activity-group" data-failed={failures ? "" : undefined} data-running={running ? "" : undefined} open={open} onToggle={(event) => event.currentTarget.open !== open && setOpen(event.currentTarget.open)}>
       <summary>
         <StudioIcon name={running ? "clock" : failures ? "warning" : "check"} className="activity-status-icon" />
-        <span className="activity-title">{t("执行过程")}</span>
-        {running && <span className="activity-running">{t("{n} 项运行中", { n: runs })}</span>}
-        {failures > 0 && <span className="activity-errors">{t("{n} 项失败", { n: failures })}</span>}
-        <span className="activity-count">{t("{count} 项操作", { count: calls })}</span>
+        <span className="activity-title">{t("common.activity")}</span>
+        {running && <span className="activity-running">{t("transcript.running", { n: runs })}</span>}
+        {failures > 0 && <span className="activity-errors">{t("common.failed2", { n: failures })}</span>}
+        <span className="activity-count">{t("common.actions", { count: calls })}</span>
         <StudioIcon name="down" className="activity-fold-icon" />
       </summary>
       <div className="activity-body">
         {items.map((item) => <Row key={item.id} it={item} activity {...rowProps} cp={checkpoints.get(item.id)} />)}
       </div>
-      <p className="activity-note">{t("点击步骤可原位查看详情、结果或文件差异")}</p>
+      <p className="activity-note">{t("transcript.selectAStepToInspect")}</p>
     </details>
   );
 });

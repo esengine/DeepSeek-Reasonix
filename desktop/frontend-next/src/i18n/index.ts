@@ -1,17 +1,19 @@
 import { EN } from "./en";
+import { ZH } from "./zh";
 
 // The interface's language. It is not the language the model answers in —
 // that follows what you wrote, per message, and is decided in the kernel.
 // Conflating the two would mean picking English here silenced Chinese replies.
 export type Lang = "zh" | "en";
 
-const DICTS: Record<Lang, Record<string, string>> = { zh: {}, en: EN };
+const DICTS: Record<Lang, Record<string, string>> = { zh: ZH, en: EN };
 
-// Chinese source text is the key. Inventing names for 3800 fragments would cost
-// more than it returns, and this way the call site still reads as the sentence
-// it renders — a translation that is missing falls back to the original rather
-// than to a blank or a key. The catalogue's completeness is a test's job, the
-// same way internal/base/i18n does it for the CLI.
+// Keys are stable dotted ids ("addPlugin.installing"), never the sentence they
+// render. Both catalogues carry every id (i18n.test.ts holds them equal), so a
+// sentence can be reworded in one place without orphaning its translation.
+// The kernel and mock hosts still send some names as Chinese text (theme and
+// agent-preset names, saved warnings); BY_ZH resolves those to their id.
+const BY_ZH: Record<string, string> = Object.fromEntries(Object.entries(ZH).map(([id, zh]) => [zh, id]));
 let lang: Lang = "zh";
 let dict = DICTS.zh;
 
@@ -83,10 +85,16 @@ export function adopt(configured: string | null | undefined): boolean {
 }
 
 /** t translates, with {name} placeholders filled from vars. */
-export function t(zh: string, vars?: Record<string, string | number>): string {
-  const out = dict[zh] ?? zh;
+export function t(key: string, vars?: Record<string, string | number>): string {
+  const out = dict[key] ?? dict[BY_ZH[key]] ?? key;
   if (!vars) return out;
   return out.replace(/\{(\w+)\}/g, (whole, key: string) => (key in vars ? String(vars[key]) : whole));
+}
+
+/** zh is a key's Chinese wording whatever language the window draws in, for
+ *  matching a query typed in Chinese against text shown in English. */
+export function zh(key: string): string {
+  return ZH[key] ?? key;
 }
 
 /** plural picks between two forms. English needs it and Chinese does not, so

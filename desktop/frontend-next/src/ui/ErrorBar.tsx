@@ -7,8 +7,8 @@ export function ErrorBar({ text, onDismiss, onReport }: { text: string; onDismis
   return (
     <div className="errbar" role="alert">
       <span>{text}</span>
-      {onReport && <button data-action="errbar.report" onClick={() => { reportProblem(text); onReport(); onDismiss(); }}>{t("报告此问题")}</button>}
-      <button onClick={onDismiss}>{t("知道了")}</button>
+      {onReport && <button data-action="errbar.report" onClick={() => { reportProblem(text); onReport(); onDismiss(); }}>{t("common.reportThisProblem")}</button>}
+      <button onClick={onDismiss}>{t("common.gotIt")}</button>
     </div>
   );
 }
