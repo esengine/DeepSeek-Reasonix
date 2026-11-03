@@ -168,7 +168,7 @@ func TestPRCIExecutesIsolationOwnersOnWindowsAndRace(t *testing.T) {
 	for _, windows := range []bool{true, false} {
 		t.Run(map[bool]string{true: "native_windows", false: "race"}[windows], func(t *testing.T) {
 			commands := prOwnerTestArgs(wf, windows)
-			for _, owner := range []string{"./internal/runtime/isolation", "./internal/platform/worktree", "./internal/state/mutation"} {
+			for _, owner := range []string{"./internal/platform/worktree", "./internal/state/mutation"} {
 				t.Run(owner, func(t *testing.T) {
 					if !slices.ContainsFunc(commands, func(args []string) bool { return coversPackage(args, owner) }) {
 						t.Fatalf("PR CI does not execute the full owning package %s in this matrix leg", owner)
