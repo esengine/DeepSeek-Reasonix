@@ -1094,8 +1094,8 @@ body { background: var(--page) !important; }
 .compose:focus-within::after { border-color: #4a4e47; }
 .compose .prompt { display: none; }
 .compose .fmain { display: block; }
-.compose textarea { display: block; min-height: 48px; color: var(--text); font-size: var(--read); line-height: 1.65; }
-@media (pointer: coarse) { .compose textarea { font-size: max(calc(16px * var(--fs-scale, 1)), var(--read)); } }
+.compose textarea { display: block; min-height: 48px; color: var(--text); font-size: var(--fs-lead); line-height: 1.65; }
+@media (pointer: coarse) { .compose textarea { font-size: calc(16px * var(--fs-scale, 1)); } }
 .compose textarea::placeholder { color: var(--ghost); }
 .compose .fmain { position: relative; timeline-scope: --draft; }
 :root .compose .fmain textarea[data-chips] { color: transparent; caret-color: var(--text); scroll-timeline: --draft block; }
@@ -3083,7 +3083,7 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 .compose[hidden] { display: none; }
 .compose textarea {
   color: var(--text);
-  font: var(--w-reg) var(--read)/1.65 var(--ui);
+  font: var(--w-reg) var(--fs-lead)/1.65 var(--ui);
   letter-spacing: -.005em;
   -webkit-font-smoothing: antialiased;
 }

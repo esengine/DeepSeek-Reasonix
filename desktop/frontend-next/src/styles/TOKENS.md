@@ -81,6 +81,8 @@ and at every contrast step, so nothing paints differently until a pack sets one.
 
 ## Faces
 
+Weights are 500 / 600 / 700 on every language (`--w-reg` / `--w-med` / `--w-semi`); the light setting steps down to 400 / 500 / 600 and the heavy one up to 600 / 700 / 700. The input box text is `--fs-lead`, not the transcript reading dial.
+
 The interface ships its own faces. On Windows it otherwise resolved to Segoe UI
 and Microsoft YaHei, neither of which carries a 500 or a 600: CSS then rounds
 `--w-reg` (500) down to 400 and `--w-med` (600) up to 700, collapsing three

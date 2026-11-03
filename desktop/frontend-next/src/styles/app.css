@@ -1650,7 +1650,7 @@
 
   .compose textarea {
     width: 100%; border: 0; background: transparent; color: var(--text);
-    font-family: var(--ui); font-size: var(--read, var(--fs-lead)); font-weight: var(--w-reg); line-height: 1.6;
+    font-family: var(--ui); font-size: var(--fs-lead); font-weight: var(--w-reg); line-height: 1.6;
     resize: none; outline: none; padding: 0;
     max-height: min(calc(var(--read, 15px) * 14.4), calc(32vh / var(--zoom, 1)));
     overflow-x: hidden; overflow-y: auto;
