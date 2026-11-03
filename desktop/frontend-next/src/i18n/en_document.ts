@@ -27,6 +27,7 @@ export const EN_DOCUMENT: Record<string, string> = {
   "交付文件": "Delivered files",
   "添加到对话": "Add to chat",
   "在文件夹中显示": "Show in folder",
+  "在文件树中显示": "Show in file tree",
   "交互运行": "Run interactively",
   "上一页": "Previous page",
   "下一页": "Next page",

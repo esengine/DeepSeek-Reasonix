@@ -74,11 +74,22 @@ Open records read the source file's current content, without version snapshots.
 不能以显示名称去重。历史交付记录读取源文件当前内容，不保存版本快照。
 
 Cards use two columns at a container width of 720 CSS pixels, otherwise one.
-The More menu contains copy, attachment and supported native actions. The current
+The More menu also opens with right-click or Context Menu / Shift+F10.
+
+Workspace files offer Show in file tree: it clears search, expands parents and scrolls the
+selected row into the Explorer's labelled Files section, below Git history.
+
+Copy, attachment and supported native actions remain available. The current
 marker follows the actual visible workbench file. Type icons do not imply support.
 
-卡片容器达到 720 CSS 像素时显示两列，否则显示一列。“更多”菜单提供复制路径、
-添加到对话及宿主支持的原生操作。“查看中”跟随实际可见文件；图标不代表预览能力。
+卡片容器达到 720 CSS 像素时显示两列，否则显示一列。
+
+右键或 Context Menu / Shift+F10 也可打开“更多”菜单。
+工作区文件提供“在文件树中显示”：清空搜索、展开父目录，
+并将选中行滚动到资源管理器中 Git 历史下方有独立标题的“文件”区域。
+
+复制路径、添加到对话及宿主支持的原生操作仍可使用。
+“查看中”跟随实际可见文件；图标不代表预览能力。
 
 ## Boundaries / 边界
 

@@ -160,6 +160,7 @@ function textOf(node: ReactNode): string {
 /** File navigation for a workspace document or a conversation. */
 export interface LocalRefs {
   file?(ref: import("../port/workspace").FileRef): () => void;
+  locate?(href: string): (() => void) | null;
   /** An action for href, or null when it is not a file in the workspace. */
   link(href: string): (() => void) | null;
   /** Where to load src from, or null to leave it as written. */

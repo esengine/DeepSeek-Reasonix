@@ -103,7 +103,7 @@ export function WorkbenchPanel({
   // Text selected in an open file, with the file it came from, on its way to the composer.
   onQuoteSelection?: (text: string, path: string) => void;
   fullMode?: { full: boolean; onToggle: () => void };
-  fileRequest?: { path: string; consumed?: () => void };
+  fileRequest?: { path: string; view?: "file" | "tree"; consumed?: () => void };
   agentRequest?: AgentRequest;
 }) {
   const preview = useHtmlPreview(port, allTabs, remote);
@@ -186,6 +186,7 @@ export function WorkbenchPanel({
   // tells nobody here; looking back at the window is when it can have happened.
   const glance = useGlance();
   const gitRepos = useGitRepos(port, glance);
+  const treePath = showFiles && selected.startsWith("file:") ? selected.slice(5) : "";
   useEffect(() => {
     if (!shown) return;
     folderRequests.clear();
@@ -201,7 +202,9 @@ export function WorkbenchPanel({
         const open = new Set<string>();
         if (!query) {
           const depth = (path: string) => path.split("/").length;
-          for (const path of [...openFolders.current].sort((a, b) => depth(a) - depth(b))) {
+          const folders = new Set(openFolders.current);
+          for (let at = treePath.lastIndexOf("/"); at > 0; at = treePath.lastIndexOf("/", at - 1)) folders.add(treePath.slice(0, at));
+          for (const path of [...folders].sort((a, b) => depth(a) - depth(b))) {
             if (!dirs.includes(path)) continue;
             try {
               const inner = await port.workspaceFiles(path, "", hidden);
@@ -226,7 +229,7 @@ export function WorkbenchPanel({
     return () => {
       live = false;
     };
-  }, [port, scope, folderRequests, shown, changeKey, query, hidden, glance, running, wrote]);
+  }, [port, scope, folderRequests, shown, changeKey, query, hidden, glance, running, wrote, treePath]);
   // Closing the column preserves its tabs; only each tab’s close button removes it.
   const agentPage = tabs.find((tab) => tab.active) ?? tabs[0];
   const agentTarget = agentPage?.target ?? "";
@@ -343,6 +346,9 @@ export function WorkbenchPanel({
   useEffect(() => {
     strip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [activeKey, surfaces.length]);
+  useEffect(() => {
+    if (treePath) strip.current?.closest(".workbench")?.querySelector('.workbench-tree-row[aria-current="page"]')?.scrollIntoView?.({ block: "nearest" });
+  }, [treePath, rows, fileRequest]);
   // Picking a file is asking to read it. Docked, the list and the file share one
   // column, so the list steps aside; side by side it stays where it is.
   const openFile = useCallback((path: string) => {
@@ -357,7 +363,17 @@ export function WorkbenchPanel({
     fromExplorer.current = showFiles ? path : "";
     pick(`file:${path}`);
   }, [pick, showFiles]);
-  useEffect(() => { if (fileRequest) { openFile(fileRequest.path); fileRequest.consumed?.(); } }, [fileRequest, openFile]);
+  useEffect(() => {
+    if (!fileRequest) return;
+    openFile(fileRequest.path);
+    if (fileRequest.view === "tree") {
+      setQuery("");
+      setCollapsed((folders) => new Set([...folders].filter((folder) => !fileRequest.path.startsWith(`${folder}/`))));
+      if (fileRequest.path.split("/").some((part) => part.startsWith("."))) setHidden(true);
+      setShowFiles(true);
+    }
+    fileRequest.consumed?.();
+  }, [fileRequest, openFile]);
   // A rendered document's own links open beside it and its images load from the
   // tree. Held stable per document, so typing re-renders the text alone.
   const openRef = useRef(openFile);
@@ -693,7 +709,8 @@ export function WorkbenchPanel({
             onChanged={onTreeChanged}
             remote={remote}
           />
-          <div className="workbench-filelist">
+          <section className="workbench-filelist" aria-label={t("文件")}>
+            <div className="workbench-explorer-head" role="heading" aria-level={3}>{t("文件")}</div>
             {rows.map((row) =>
               row.kind === "folder" ? (
                 <button
@@ -747,7 +764,7 @@ export function WorkbenchPanel({
             {!rows.length && (
               <p className="workbench-no-files">{t("没有匹配的文件")}</p>
             )}
-          </div>
+          </section>
           {menu?.scope === scope && shown && (
             <WorkbenchFileMenu key={menu.id} menu={menu} root={workspaceRoot}
               revealable={revealable} platform={platform} onReveal={reveal} onAddToChat={onAddToChat} onClose={closeMenu} />

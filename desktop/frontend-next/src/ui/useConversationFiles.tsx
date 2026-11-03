@@ -7,13 +7,13 @@ import { GRANTED_FILE, grantedFileKey, grantedFilePath } from "./grantedfiles";
 import { WorkbenchFileMenu, absoluteWorkspacePath, type FileMenu } from "./WorkbenchFileMenu";
 
 export function useConversationFiles(port: AgentPort, root: string, remote: boolean, shown: boolean, reveal: () => void, fail: (e: unknown) => void) {
-  const [request, setRequest] = useState<{ path: string; port: AgentPort; root: string; consumed: () => void }>();
+  const [request, setRequest] = useState<{ path: string; view: "file" | "tree"; port: AgentPort; root: string; consumed: () => void }>();
   const [menu, setMenu] = useState<(FileMenu & { id: number; port: AgentPort; root: string }) | null>(null);
   const menuID = useRef(0);
   // A link opens its file once: the workbench reports it taken, so a later press
   // on Files, or anything else that re-renders it, finds nothing to replay.
-  const ask = useCallback((path: string) => {
-    const req = { path, port, root, consumed: () => setRequest((now) => (now === req ? undefined : now)) };
+  const ask = useCallback((path: string, view: "file" | "tree" = "file") => {
+    const req = { path, view, port, root, consumed: () => setRequest((now) => (now === req ? undefined : now)) };
     setRequest(req);
     reveal();
   }, [port, root, reveal]);
@@ -66,6 +66,7 @@ export function useConversationFiles(port: AgentPort, root: string, remote: bool
     const linkable = (href: string) => path(href) ?? (isLocalPathShape(href) ? grantedFileKey(granted, href) : null);
     return {
       file: (ref) => () => ask(ref.root ? grantedFilePath(ref.root, ref.path) : ref.path),
+      locate: (href) => { const file = path(href); return file ? () => ask(file, "tree") : null; },
       path,
       linkable,
       title: (href) => { const file = path(href); return file ? absoluteWorkspacePath(root, file) : ""; },
@@ -84,6 +85,7 @@ export function useConversationFiles(port: AgentPort, root: string, remote: bool
   }, [port, root, ask, granted]);
   const menuView = shown && menu?.port === port && menu.root === root && <WorkbenchFileMenu key={menu.id} menu={menu} root={root} platform={platform}
     revealable={!remote && port.revealsFiles()} onClose={close}
+    onLocate={(path) => ask(path, "tree")}
     onOpen={!remote && port.opensFiles() ? (path) => { void port.openFile(path).catch(fail); } : undefined}
     onReveal={(path) => { void port.revealInFileManager(path).catch(fail); }} />;
   return { refs, request: request?.port === port && request.root === root ? request : undefined, menuView };
