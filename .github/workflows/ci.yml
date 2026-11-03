@@ -467,9 +467,7 @@ jobs:
                "TestBudgetCountsKnownReportedTokens/negative_split",
                "TestBudgetCountsKnownReportedTokens/zero",
                "TestBudgetCountsKnownReportedTokens/negative",
-               "TestReportedTokenCountersSaturate"],
-             "reasonix/internal/assembly/boot": [
-               ]} |
+               "TestReportedTokenCountersSaturate"]} |
             to_entries | all(.[]; . as $package |
               ([ $events[] | select(.Package == $package.key and .Test == null and
                  (.Action == "pass" or .Action == "fail" or .Action == "skip")) ] |
