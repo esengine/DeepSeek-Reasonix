@@ -545,10 +545,13 @@ class BenchHub extends MockHub {
   // ?search=1 answers every query with two conversations that say it.
   async searchHistory(q: string) {
     if (!query.has("search")) return super.searchHistory(q);
-    return [
-      { path: "/sessions/mock.jsonl", id: "mock", snippet: `…上周讨论过要不要把 ${q} 的轮换放进发布流程，结论是每月一次…`, role: "assistant", messageIndex: 4, score: 2 },
-      { path: "/sessions/older.jsonl", id: "older", snippet: `怎么把 ${q} 配到预发环境里？`, role: "user", messageIndex: 0, score: 1 },
-    ];
+    return {
+      hits: [
+        { path: "/sessions/mock.jsonl", id: "mock", snippet: `…上周讨论过要不要把 ${q} 的轮换放进发布流程，结论是每月一次…`, role: "assistant", messageIndex: 4, score: 2 },
+        { path: "/sessions/older.jsonl", id: "older", snippet: `怎么把 ${q} 配到预发环境里？`, role: "user", messageIndex: 0, score: 1 },
+      ],
+      index: { state: "ready", indexed: 2, total: 2, failed: 0, partial: false },
+    };
   }
 
   private readonly settingsPort = new BenchPort();

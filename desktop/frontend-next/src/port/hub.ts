@@ -182,13 +182,30 @@ export interface HistoryHit {
   score: number;
 }
 
+/** What the projection could answer for, in the counters the kernel already
+ *  keeps. A source it could not read is left out of the hits, so this is the
+ *  only thing that tells that answer apart from a genuinely empty one. */
+export interface HistoryIndex {
+  state: string;
+  indexed: number;
+  total: number;
+  failed: number;
+  partial: boolean;
+  reason?: "failed" | "building";
+}
+
+export interface HistorySearch {
+  hits: HistoryHit[];
+  index: HistoryIndex;
+}
+
 export interface HubPort extends SharePort {
   runtimes(): Promise<RuntimeView[]>;
   open(req: { root?: string; sessionPath?: string; agentComposition?: string }): Promise<RuntimeView>;
   close(id: string): Promise<void>;
   tree(window?: TreeWindow): Promise<TreeWorkspace[]>;
   /** Conversations, in every workspace, that say these words. */
-  searchHistory(query: string): Promise<HistoryHit[]>;
+  searchHistory(query: string): Promise<HistorySearch>;
   onTreeChanged(listener: () => void): () => void;
   addWorkspace(path: string): Promise<TreeWorkspace>;
   removeWorkspace(path: string): Promise<void>;
@@ -369,7 +386,7 @@ export class SseHub implements HubPort {
   }
 
   searchHistory(query: string) {
-    return this.get<HistoryHit[]>("/history/search?q=" + encodeURIComponent(query));
+    return this.get<HistorySearch>("/history/search?q=" + encodeURIComponent(query));
   }
 
   addWorkspace(path: string) {
