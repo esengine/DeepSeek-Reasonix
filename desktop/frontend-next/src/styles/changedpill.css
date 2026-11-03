@@ -1,9 +1,9 @@
 .changedpill-row { display: flex; justify-content: flex-end; min-width: 0; margin: -30px 0 4px; }
 .changedpill {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0;
-  padding: 3px 12px; border-radius: 999px; cursor: pointer;
+  height: 24px; padding: 0 12px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface); color: var(--muted);
-  font: var(--w-med) var(--fs-meta)/1.5 var(--ui); white-space: nowrap;
+  font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap;
 }
 .changedpill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .changedpill i { font-style: normal; font-variant-numeric: tabular-nums; flex: none; }

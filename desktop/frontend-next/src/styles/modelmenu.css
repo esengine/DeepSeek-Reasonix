@@ -5,7 +5,7 @@
 .studio-model-menu.portmenu .mi.head .mi-mono { width: 20px; height: 20px; font-size: calc(11px * var(--fs-scale, 1)); }
 .studio-model-menu.portmenu button.mi { padding-left: 24px; }
 .mchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px -2px 6px; padding: 4px 2px; }
-.mchip { border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font: var(--w-med) calc(11.5px * var(--fs-scale, 1))/1 var(--ui); padding: 5px 10px; cursor: pointer; }
+.mchip { border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui); height: 24px; padding: 0 10px; cursor: pointer; }
 .mchip:hover { color: var(--text); background: var(--overlay); }
 .mchip[aria-pressed="true"] { color: var(--text); background: var(--overlay); border-color: var(--text); }
 .mchip.clear { border-style: dashed; }

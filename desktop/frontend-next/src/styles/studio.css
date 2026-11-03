@@ -3974,7 +3974,7 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 .refine-card footer { display: flex; justify-content: flex-end; gap: 6px; }
 .commit-card { display: grid; gap: 8px; margin: 8px 0 0; }
 .commit-open { margin-left: auto; }
-.workbench-explorer-head .commit-open { height: 20px; padding: 0 8px; font-size: calc(11px * var(--fs-scale, 1)); }
+.workbench-explorer-head .commit-open { height: 24px; padding: 0 10px; font-size: var(--fs-meta); }
 .commit-files li i { font-style: normal; }
 .commit-files li i[data-io="up"] { color: var(--ok); }
 .commit-files li i[data-io="down"] { color: var(--err); }
