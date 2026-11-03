@@ -2060,12 +2060,12 @@ button, input, textarea { font-size: calc(13.3333px * var(--fs-scale, 1)); }
 
 .palette-veil {
   position: fixed; inset: 0; z-index: 80; display: grid; place-items: start center;
-  padding-top: 14vh; background: color-mix(in srgb, var(--page) 62%, transparent);
-  backdrop-filter: blur(2px); animation: palette-in var(--m-card) both;
+  padding-top: 12vh; background: rgb(0 0 0 / .16);
+  animation: palette-in var(--m-panel) both;
 }
 .palette {
-  width: min(560px, calc(100vw - 32px)); max-height: 68vh; display: flex; flex-direction: column;
-  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float);
+  width: min(600px, calc(100vw - 32px)); max-height: 68vh; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--float);
   box-shadow: var(--shadow-float); overflow: hidden;
 }
 @keyframes palette-in { from { opacity: 0; transform: translateY(-6px) } to { opacity: 1; transform: none } }
