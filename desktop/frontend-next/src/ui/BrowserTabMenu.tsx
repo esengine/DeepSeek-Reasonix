@@ -7,10 +7,11 @@ import { pinToViewport } from "./place";
 
 interface Props {
   menu: { surface: Surface; x: number; y: number; anchor: HTMLElement };
-  others: boolean; right: boolean; onDismiss: () => void; onClose: (mode: "one" | "others" | "right" | "all") => void;
+  // How many tabs each choice closes, said beside it; label names the tab the menu is for.
+  others: number; right: number; all: number; label: string; onDismiss: () => void; onClose: (mode: "one" | "others" | "right" | "all") => void;
 }
 
-export function BrowserTabMenu({ menu, others, right, onDismiss, onClose }: Props) {
+export function BrowserTabMenu({ menu, others, right, all, label, onDismiss, onClose }: Props) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const dismiss = (event: Event) => { if (!box.current?.contains(event.target as Node)) onDismiss(); };
@@ -34,10 +35,17 @@ export function BrowserTabMenu({ menu, others, right, onDismiss, onClose }: Prop
       const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + (e.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
       items[next]?.focus();
     }}>
-      <button role="menuitem" data-action="workbench.close" data-target={keyOf(menu.surface)} onClick={() => onClose("one")}>{t("common.close")}</button>
-      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="others" disabled={!others} onClick={() => onClose("others")}>{t("workbench.close_other_browser_tabs")}</button>
-      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="right" disabled={!right} onClick={() => onClose("right")}>{t("workbench.close_browser_tabs_to_the")}</button>
-      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="all" onClick={() => onClose("all")}>{t("workbench.close_all_browser_tabs")}</button>
+      <div className="tabmenu-head"><span>{t("workbench.browser_tab_named", { name: label })}</span></div>
+      <button role="menuitem" data-action="workbench.close" data-target={keyOf(menu.surface)} onClick={() => onClose("one")}><span>{t("common.close")}</span></button>
+      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="others" aria-label={t("workbench.close_other_browser_tabs")} disabled={!others} onClick={() => onClose("others")}>
+        <span>{t("workbench.close_other_browser_tabs")}</span>{others > 0 && <kbd>{others}</kbd>}
+      </button>
+      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="right" aria-label={t("workbench.close_browser_tabs_to_the")} disabled={!right} onClick={() => onClose("right")}>
+        <span>{t("workbench.close_browser_tabs_to_the")}</span>{right > 0 && <kbd>{right}</kbd>}
+      </button>
+      <button role="menuitem" data-action="workbench.browser-close" data-target={keyOf(menu.surface)} data-value="all" aria-label={t("workbench.close_all_browser_tabs")} onClick={() => onClose("all")}>
+        <span>{t("workbench.close_all_browser_tabs")}</span>{all > 0 && <kbd>{all}</kbd>}
+      </button>
     </div>, document.body,
   );
 }

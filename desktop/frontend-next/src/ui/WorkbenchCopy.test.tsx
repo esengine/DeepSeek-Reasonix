@@ -79,8 +79,10 @@ it("navigates the menu by arrows, activates with Space, and cancels with Escape"
   render(<WorkbenchPanel {...props()} />);
   const row = await screen.findByRole("button", { name: "README.md" });
   fireEvent.contextMenu(row);
-  await user.keyboard("{ArrowDown}{ArrowDown}");
-  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "复制引用" }));
+  const target = screen.getByRole("menuitem", { name: "复制引用" });
+  const items = screen.getAllByRole("menuitem").filter((x) => !(x as HTMLButtonElement).disabled);
+  for (let i = 0; i < items.length && document.activeElement !== target; i++) await user.keyboard("{ArrowDown}");
+  expect(document.activeElement).toBe(target);
   await user.keyboard(" ");
   expect(write).toHaveBeenCalledWith("@README.md");
   fireEvent.contextMenu(row);

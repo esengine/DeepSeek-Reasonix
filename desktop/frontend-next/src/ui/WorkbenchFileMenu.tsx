@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
+import { pushNote } from "../state/toasts";
+import { StudioIcon } from "./StudioIcon";
 import { copyText } from "./CopyButton";
 import { pinToViewport } from "./place";
 import { fileReference } from "./fileReference";
@@ -41,10 +43,11 @@ export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, 
       removeEventListener("blur", shut);
     };
   }, [menu, onClose]);
-  const copy = async (text: string) => {
+  const copy = async (text: string, said: string) => {
     setState("copying");
     try {
       await copyText(text);
+      pushNote(t("workbench.copied_text", { text: said }));
       if (live.current) close();
     } catch {
       if (live.current) setState("failed");
@@ -69,42 +72,39 @@ export function WorkbenchFileMenu({ menu, root, revealable, platform, onReveal, 
         const at = items.indexOf(document.activeElement as HTMLButtonElement);
         items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
       }}>
-      {revealable && (
-        <button role="menuitem" autoFocus data-action="workbench.reveal" data-target={menu.path}
-          onClick={() => { close(); onReveal(menu.path); }}>
-          {platform === "darwin" ? t("workbench.reveal_in_finder") : platform === "windows" ? t("workbench.reveal_in_file_explorer") : t("workbench.show_in_file_manager")}
+      <div className="tabmenu-head">
+        <b>{menu.path.split("/").at(-1) + (menu.folder ? "/" : "")}</b>
+        <span>{menu.path.includes("/") ? menu.path.slice(0, menu.path.lastIndexOf("/")) : t("workbench.root_folder")}</span>
+      </div>
+      {onAddToChat && (
+        <button role="menuitem" autoFocus={!!reference} disabled={!reference} data-action="workbench.add-to-chat" data-target={menu.path}
+          title={reference ? undefined : ambiguous ? t("workbench.this_name_could_resolve_to") : t("common.this_name_cannot_be_represented")}
+          onClick={() => { close(); onAddToChat(reference); }}>
+          <StudioIcon name="chat" /><span>{t("workbench.add_to_conversation")}</span>
         </button>
       )}
-      <button
-        role="menuitem"
-        autoFocus={!revealable && !!absolute}
-        disabled={!absolute || state === "copying"}
-        data-action="workbench.copy-path"
-        data-target={menu.path}
-        onClick={() => void copy(absolute)}
-      >{t("common.copy_path")}</button>
-      <button
-        role="menuitem"
-        autoFocus={!revealable && !absolute}
-        disabled={!reference || state === "copying"}
-        title={reference ? undefined : ambiguous ? t("workbench.this_name_could_resolve_to") : t("common.this_name_cannot_be_represented")}
-        data-action="workbench.copy-ref"
-        data-target={menu.path}
-        onClick={() => void copy(reference)}
-      >{t("workbench.copy_reference")}</button>
-      {onAddToChat && (
-        <button
-          role="menuitem"
-          disabled={!reference}
-          title={reference ? undefined : ambiguous ? t("workbench.this_name_could_resolve_to") : t("common.this_name_cannot_be_represented")}
-          data-action="workbench.add-to-chat"
-          data-target={menu.path}
-          onClick={() => { close(); onAddToChat(reference); }}
-        >{t("workbench.add_to_conversation")}</button>
+      <button role="menuitem" autoFocus={!onAddToChat && !!reference} disabled={!reference || state === "copying"} data-action="workbench.copy-ref" data-target={menu.path}
+        aria-label={t("workbench.copy_reference")} title={reference ? undefined : ambiguous ? t("workbench.this_name_could_resolve_to") : t("common.this_name_cannot_be_represented")}
+        onClick={() => void copy(reference, reference)}>
+        <StudioIcon name="quote" />
+        <span>{t("workbench.copy_reference")}{!reference && <small>{ambiguous ? t("workbench.this_name_could_resolve_to") : t("common.this_name_cannot_be_represented")}</small>}</span>
+        {reference && <kbd>{reference}</kbd>}
+      </button>
+      <button role="menuitem" autoFocus={!reference} disabled={!absolute || state === "copying"} data-action="workbench.copy-path" data-target={menu.path}
+        onClick={() => void copy(absolute, menu.path)}>
+        <StudioIcon name="copy" /><span>{t("common.copy_path")}</span>
+      </button>
+      {(revealable || (onOpen && !menu.folder)) && <hr />}
+      {revealable && (
+        <button role="menuitem" data-action="workbench.reveal" data-target={menu.path} onClick={() => { close(); onReveal(menu.path); }}>
+          <StudioIcon name="reveal" />
+          <span>{platform === "darwin" ? t("workbench.reveal_in_finder") : platform === "windows" ? t("workbench.reveal_in_file_explorer") : t("workbench.show_in_file_manager")}</span>
+        </button>
       )}
       {onOpen && !menu.folder && (
-        <button role="menuitem" data-action="workbench.open-file" data-target={menu.path}
-          onClick={() => { close(); onOpen(menu.path); }}>{t("workbench.open_with_default_application")}</button>
+        <button role="menuitem" data-action="workbench.open-file" data-target={menu.path} onClick={() => { close(); onOpen(menu.path); }}>
+          <StudioIcon name="external" /><span>{t("workbench.open_with_default_application")}</span>
+        </button>
       )}
       {state === "failed" && <div role="alert">{t("common.copy_failed_try_again")}</div>}
     </div>, document.body,

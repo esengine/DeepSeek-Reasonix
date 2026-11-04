@@ -189,4 +189,7 @@ export const WORKBENCH: Messages = {
   "workbench.file_too_large_to_preview": { zh: "文件太大，无法预览", en: "Too large to preview" },
   "workbench.size_preview_limit": { zh: "{size}，预览上限 {limit}", en: "{size}; the preview limit is {limit}" },
   "workbench.changes_and_history_need_git": { zh: "改动和提交历史需要 git", en: "Changes and history need git" },
+  "workbench.root_folder": { zh: "根目录", en: "Project root" },
+  "workbench.copied_text": { zh: "已复制 {text}", en: "Copied {text}" },
+  "workbench.browser_tab_named": { zh: "浏览器标签 · {name}", en: "Browser tab · {name}" },
 };

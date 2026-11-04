@@ -238,3 +238,16 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
 }
 .workbench-state-acts > button[data-weak]:hover, .bfail .bfail-acts > button:not(:first-child):hover { color: var(--text); }
 .bfail code { color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--mono); overflow-wrap: anywhere; }
+
+.tabmenu { min-width: 220px; padding: 4px; }
+.tabmenu-head { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 8px; margin-bottom: 2px; border-bottom: 1px solid var(--hair); }
+.tabmenu-head b { color: var(--text); font: var(--w-semi) var(--fs-meta)/1.3 var(--mono); }
+.tabmenu-head span { color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui); }
+.tabmenu > button[role="menuitem"] { display: flex; align-items: center; gap: 8px; }
+.tabmenu > button[role="menuitem"] > .studio-icon { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.tabmenu > button[role="menuitem"] > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: start; }
+.tabmenu > button[role="menuitem"] small { color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui); }
+.tabmenu > button[role="menuitem"] kbd { flex: none; margin-left: 12px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1 var(--mono); }
+.tabmenu > button[role="menuitem"]:disabled { opacity: 1; color: var(--ghost); }
+.tabmenu > button[role="menuitem"]:disabled > .studio-icon { color: var(--ghost); }
+.tabmenu > hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--hair); }

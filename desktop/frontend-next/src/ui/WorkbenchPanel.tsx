@@ -780,7 +780,7 @@ export function WorkbenchPanel({
           onSave={async () => { const ok = await saveAt(asking.path); if (ok) { setAsking(null); void close([{ kind: "file", path: asking.path }]); } return ok; }}
           onDrop={() => { dropAt(asking.path); setAsking(null); void close([{ kind: "file", path: asking.path }]); }} />
       )}
-      {tabMenu && <BrowserTabMenu menu={tabMenu} others={tabOthers.length > 0} right={tabRight.length > 0} onDismiss={dismissTabMenu} onClose={(mode) => {
+      {tabMenu && <BrowserTabMenu menu={tabMenu} others={tabOthers.length} right={tabRight.length} all={pages.length} label={labelFor(tabMenu.surface)} onDismiss={dismissTabMenu} onClose={(mode) => {
         const target = tabMenu.surface;
         returning.current = keyOf(target);
         setTabMenu(null);
