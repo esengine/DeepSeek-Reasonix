@@ -4,7 +4,6 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { HubPort } from "../port/hub";
 import { StudioIcon } from "./StudioIcon";
-import "../styles/session-rename.css";
 
 interface Props {
   session: { path: string; title: string };

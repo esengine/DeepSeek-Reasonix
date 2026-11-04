@@ -3,7 +3,6 @@ import { t } from "../i18n";
 import type { AgentPort } from "../port/port";
 import type { WireEvent } from "../port/wire";
 import { useDismiss } from "./dismiss";
-import "../styles/compact-now.css";
 
 export interface CompactAction {
   busy: boolean;

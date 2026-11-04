@@ -9,7 +9,6 @@ import { workspaceDirectoryDescription } from "./workspaceDirectory";
 import { WorkspacePath, WorkspaceBranchName, compactWorkspaceValue, workspaceName } from "./WorkspacePath";
 import { listenAction } from "./listen";
 import { beside, pinToViewport, useFollow, zoom } from "./place";
-import "../styles/worktree.css";
 
 interface Props {
   port: AgentPort;

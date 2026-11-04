@@ -1,7 +1,6 @@
 import { t } from "../i18n";
 import { CopyButton } from "./CopyButton";
 import { StudioIcon } from "./StudioIcon";
-import "../styles/workspace-path.css";
 
 export function compactWorkspaceValue(value: string, length = 38): string {
   const chars = Array.from(value);

@@ -5,7 +5,6 @@ import { StudioIcon } from "./StudioIcon";
 import { BuiltinPresetCard } from "./BuiltinPresetCard";
 import { CompositionPickerSetting } from "./CompositionPickerSetting";
 import { setNewTaskPreset, useNewTaskPreset } from "../state/newTaskPreset";
-import "../styles/composition-presets.css";
 
 export function CompositionCatalog({ catalog, onSelect, onCreate, onCopy }: {
   catalog: AgentPresetCatalog;

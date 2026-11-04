@@ -4,7 +4,6 @@ import { reason } from "../i18n/kernel";
 import type { RewindUndo } from "../port/port";
 import { StudioIcon } from "./StudioIcon";
 import { dismissRewindNotice, useRewindNoticeDismissed } from "../state/rewind_notice";
-import "../styles/rewind-notice.css";
 
 export function RewindNotice({ readUndo, onUndo, refreshKey, moved = 0, busy = false, running, shown }: {
   readUndo: () => Promise<RewindUndo | null>;

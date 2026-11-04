@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { current, t } from "../i18n";
 import type { HubPort, TreeSession } from "../port/hub";
 import { clearDraftForSession } from "./drafts";
-import "../styles/session-batch.css";
 
 /** The selected rows that are still on screen; a row that leaves the displayed set leaves the selection. */
 export function useSelectedRows(displayed: TreeSession[], selection: Set<string> | null, setSelection: Dispatch<SetStateAction<Set<string> | null>>): TreeSession[] {

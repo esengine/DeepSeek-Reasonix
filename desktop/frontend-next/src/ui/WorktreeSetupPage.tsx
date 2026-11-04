@@ -6,7 +6,6 @@ import type { WorktreePreparation } from "../port/workspace";
 import { StudioIcon } from "./StudioIcon";
 import { CopyButton } from "./CopyButton";
 import { WorkspacePath, compactWorkspaceValue, workspaceName } from "./WorkspacePath";
-import "../styles/worktree-setup.css";
 
 const phases: Record<string, string> = {
   starting: "正在提交创建请求", validating: "正在检查起始分支", creating: "正在创建工作目录",

@@ -6,7 +6,6 @@ import { Clip } from "./Clip";
 import { Switch } from "./Switch";
 import { reason } from "../i18n/kernel";
 import { listMatcher } from "./listsearch";
-import "../styles/mcpheld.css";
 
 // One external service: whether it is answering, what it brought, and the two
 // acts that change that — switching it off and letting it try again.

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { pressedChord } from "./keys";
 import { listenAction } from "./listen";
-import "../styles/browserfull.css";
 
 type BrowserSize = "split" | "full";
 

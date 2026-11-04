@@ -61,7 +61,7 @@
 .prefs-sheet::after { content: ""; position: absolute; left: 239px; top: 0; bottom: 0; width: 1px; background: var(--hair); pointer-events: none; }
 .prefs-nav { border-right: 0; }
 .prefs-nav button::before { display: none; }
-:root[data-theme] .prefs-sheet .prefs-nav button[aria-selected="true"] { background: var(--overlay); }
+.prefs-sheet .prefs-nav button[aria-selected="true"] { background: var(--overlay); }
 .srow-name { line-height: normal; }
 .srow-meta > .apply { line-height: normal; }
 .prefs-hd h1 { padding-bottom: 12px; line-height: normal; }

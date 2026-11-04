@@ -5,7 +5,6 @@ import type { CompositionChoice, CompositionKind, CompositionModule } from "../p
 import { StudioIcon } from "./StudioIcon";
 import { useDismiss } from "./dismiss";
 import { beside, pinToViewport, useFollow, zoom } from "./place";
-import "../styles/composition-modules.css";
 
 interface Props {
   kind: CompositionKind;

@@ -1,4 +1,3 @@
-import "../../styles/compaction-live.css";
 import { useState } from "react";
 import type { Compaction } from "../../port/wire";
 import { useStartsOpen } from "../../state/foldpref";

@@ -5,7 +5,6 @@ import { reason } from "../i18n/kernel";
 import type { AgentPort, MemoryEdit, MemoryEntry, UnreadableMemory } from "../port/port";
 import { History, MemoryDetail, TYPES, typeOf } from "./MemoryDetail";
 import { Icon, StateIcon } from "./memicons";
-import "../styles/memory.css";
 
 const PAGE = 30;
 

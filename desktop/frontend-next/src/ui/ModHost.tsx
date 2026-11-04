@@ -6,7 +6,6 @@ import { HttpError } from "../port/port";
 import { Group } from "./Group";
 import { Switch } from "./Switch";
 import { MODS_SHOWN } from "./modsgate";
-import "../styles/mods.css";
 
 const BUDGET_MAX = 55000;
 
