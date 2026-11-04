@@ -13,6 +13,7 @@
 - 计划只是一张卡：待确认时列出每一步和「开始执行 / 修改计划 / 暂不执行」，开始后同一张卡原地显示第几步、正在做什么，做完变成「做完了」；执行记录挂在卡片下面。卡片滚出视野时，输入框上方才出现一个小页签，写着第几步并用小格子显示进度，展开后可「跳到卡片 ↑」（11b2e23b4）。
 - 执行过程里连续读取的文件不再合成「读取了 N 个文件」一行，每次读取单独一行（977c7c6b8）。
 - 同时派出的几个子代理在对话里是一张卡：标题写几个并行、几个在跑、几个失败，每个子代理一行，带固定颜色的头像、名字、任务和进度；失败的直接写出原因，可以单独停止或全部停止，点一行在工作台打开；全部交付后收成一行汇总（b1b42c3d8）。
+- 底部的子代理读数：有子代理在跑时是带呼吸点的蓝色「N 个子代理在跑」，都结束后变回灰字「N 个子代理 · 都结束了」；悬停弹出的列表和对话里的组卡一样带颜色头像、任务和状态，可以全部停止（68e703888）。
 
 ---
 <!-- lang:en -->
@@ -32,3 +33,4 @@
 - A plan is one card: before it starts it lists every step with Start, Revise and Not now; once started the same card shows which step it is on and what it is doing, and becomes Done at the end, with the execution filed under it. Only while the card is out of view does a tab above the composer show the step and one segment per step, and opened it offers Back to the card (11b2e23b4).
 - Consecutive reads in the execution group are no longer one "read N files" line; each read is its own row (977c7c6b8).
 - Subagents sent out together are one card in the conversation: how many run in parallel, how many are running or failed, then one row per subagent with a fixed-colour avatar, its name, task and progress; a failure states its reason, each can be stopped alone or all at once, a row opens in the workbench, and once all have delivered the card folds to one summary line (b1b42c3d8).
+- The run rail's subagent reading is a blue "N subagents running" with a breathing dot while one runs and grey "N subagents · all finished" after; its list carries the same avatars, tasks and states as the conversation's group and can stop them all (68e703888).
