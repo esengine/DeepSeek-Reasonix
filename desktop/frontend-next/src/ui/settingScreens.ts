@@ -31,7 +31,7 @@ export const SETTING_SCREEN: Record<string, string> = {
   "tools.web_search_backends": "tools:web-access",
   "tools.web_fetch_backends": "tools:web-access",
   "tools.searxng_url": "tools:web-access",
-  "observability.otlp.enabled": "network:trace-export",
+  "observability.otlp.enabled": "account:trace-export",
   "observability.otlp.endpoint": "network:trace-export",
   "observability.otlp.header_name": "network:trace-export",
   "observability.otlp.header_env": "network:trace-export",

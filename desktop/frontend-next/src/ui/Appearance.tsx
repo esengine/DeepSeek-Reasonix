@@ -13,7 +13,6 @@ import { useCrop } from "./useCrop";
 import { Folding } from "./Folding";
 import { WindowSection } from "./WindowSection";
 import { LiveGraceSection } from "./LiveGraceSection";
-import { LegacySessionsSection } from "./LegacySessionsSection";
 import { OpenSessionLimitSection } from "./OpenSessionLimitSection";
 import { LiveStreamBudgetSection } from "./LiveStreamBudgetSection";
 import { NewAnswerSection } from "./NewAnswerSection";
@@ -509,7 +508,6 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
       <NavRailSection />
       <NavEntriesSection />
       <LiveGraceSection />
-      <LegacySessionsSection />
       <OpenSessionLimitSection />
       <LiveStreamBudgetSection />
       <SessionQuickSection />

@@ -56,6 +56,7 @@ import { WebAccess } from "./WebAccess";
 import { ProgressWatch } from "./ProgressWatch";
 import { DisplaySettings } from "./DisplaySettings";
 import { AutoArchive } from "./AutoArchive";
+import { LegacySessionsSection } from "./LegacySessionsSection";
 import { AgentPresets } from "./AgentPresets";
 import { Account } from "./Account";
 import { Backup } from "./Backup";
@@ -90,7 +91,7 @@ const NET_MODE: Record<string, string> = { auto: "跟随系统", env: "环境变
 
 const homeFor = (section: Section, anchor: string): Section => {
   const entry = SETTING_AT(anchor);
-  return entry && LOOK_FAMILY.includes(entry.section) && LOOK_FAMILY.includes(pageHome(section)) ? entry.section : pageHome(section);
+  return pageHome(entry ? entry.section : section);
 };
 
 export function Settings({ hub, onError, port, networkPort, localWorkspacePort, networkHost, status, theme, onTheme, contrast, onContrast, weight, onWeight, look, onLook, onClose, onChanged, onSessionsRecovered, reloadThemes, at: opened, account: acct, accountUnread, reloadAccount, workspaceRoot }: Props) {
@@ -481,28 +482,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <AskTimeout port={port} />
               <SessionRef port={port} />
               <ProgressWatch port={port} />
-              <AutoArchive port={port} />
-              <Group id="session-dir" title={t("会话写入位置")}>
-                <div className="kv">
-                  <span className="k">{t("工作目录")}</span>
-                  <span className="v"><Path of={status?.cwd ?? "—"} /></span>
-                </div>
-                <p className="note">
-                  {t("在左栏管理文件夹：底部添加，展开后可新建会话。会话归属于创建它的文件夹，不会移动到其他位置。")}
-                </p>
-                {/* A thing that happens once, not a state to sit in — so it is
-                    a button. As an option row it carried a selected look it can
-                    never have. */}
-                <div className="lrow">
-                  <span className="tx">
-                    <span className="lb">{t("创建隔离副本")}</span>
-                    <span className="ds">{t("在 Git worktree 中创建独立副本，修改不会影响当前分支")}</span>
-                  </span>
-                  <button className="act" data-action="workspace.isolate" disabled={!!busy} onClick={() => run("isolate", () => port.isolateWorkspace())}>
-                    {t(busy === "isolate" ? "启用中…" : "创建")}
-                  </button>
-                </div>
-              </Group>
             </>
           )}
 
@@ -723,7 +702,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <Network port={networkPort ?? port} host={networkHost ?? ""} />
             </Group>
           )}
-          {at === "network" && <TraceExport port={port} />}
+          {at === "account" && <TraceExport port={port} />}
 
           {at === "network" && shown("remote") && (
             <Group id="remote"
@@ -745,8 +724,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <Account port={port} state={acct} unread={accountUnread} reload={reloadAccount} />
             </Group>
           )}
-          {at === "account" && <Group id="backup-file" title={t("导出与导入配置")} hint={t("不用账号：把本机的模型、扩展、记忆等配置加密导出成一个文件，换机器时再导入。")}><BackupFile port={port} /></Group>}
-          {at === "account" && acct?.signedIn && acct.user && (
+          {at === "storage" && <Group id="backup-file" title={t("导出与导入配置")} hint={t("不用账号：把本机的模型、扩展、记忆等配置加密导出成一个文件，换机器时再导入。")}><BackupFile port={port} /></Group>}
+          {at === "storage" && acct?.signedIn && acct.user && (
             <Group id="backup" title={t("云备份")} hint={t("把本机的模型、扩展、记忆等配置加密保存到账号，换机器或重装后按项恢复。")}>
               <Backup port={port} />
             </Group>
@@ -762,6 +741,29 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             </Group>
               <UsageSettings port={homePort} onChanged={onChanged} />
               <Group id="storage" title={t("存储")} hint={t("数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。")}><Storage port={homePort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} /></Group>
+              <AutoArchive port={port} />
+              <Group id="session-dir" title={t("会话写入位置")}>
+                <div className="kv">
+                  <span className="k">{t("工作目录")}</span>
+                  <span className="v"><Path of={status?.cwd ?? "—"} /></span>
+                </div>
+                <p className="note">
+                  {t("在左栏管理文件夹：底部添加，展开后可新建会话。会话归属于创建它的文件夹，不会移动到其他位置。")}
+                </p>
+                {/* A thing that happens once, not a state to sit in — so it is
+                    a button. As an option row it carried a selected look it can
+                    never have. */}
+                <div className="lrow">
+                  <span className="tx">
+                    <span className="lb">{t("创建隔离副本")}</span>
+                    <span className="ds">{t("在 Git worktree 中创建独立副本，修改不会影响当前分支")}</span>
+                  </span>
+                  <button className="act" data-action="workspace.isolate" disabled={!!busy} onClick={() => run("isolate", () => port.isolateWorkspace())}>
+                    {t(busy === "isolate" ? "启用中…" : "创建")}
+                  </button>
+                </div>
+              </Group>
+              <LegacySessionsSection />
             </>
           )}
 

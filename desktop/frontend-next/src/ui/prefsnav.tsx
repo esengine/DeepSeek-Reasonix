@@ -233,12 +233,12 @@ export const SETTINGS: SettingEntry[] = [
   { section: "session", anchor: "turn-narration", title: "回合间叙述", scope: "machine", apply: "immediate", keywords: ["叙述", "总结", "小轮", "工具之间", "详细", "简短", "思路", "监控", "narration"] },
   { section: "session", anchor: "fold-work", title: "折叠中间过程", scope: "machine", apply: "immediate", keywords: ["折叠", "中间过程", "工具调用", "思考", "最后一句", "收起", "摘要"] },
   // Written to the user file only; the kernel's background sweep reads it on each pass.
-  { section: "session", anchor: "auto-archive", title: "自动归档不活跃的对话", scope: "machine", apply: "immediate", keywords: ["归档", "过期", "清理", "闲置", "天数"] },
+  { section: "storage", anchor: "auto-archive", title: "自动归档不活跃的对话", scope: "machine", apply: "immediate", keywords: ["归档", "过期", "清理", "闲置", "天数"] },
   { section: "persona", anchor: "composition-picker", title: "显示模式选择器", scope: "machine", apply: "immediate", keywords: ["预设", "模式", "picker", "Agent"] },
   // Explicit selections bind immutable versions; catalog saves do not rebuild.
   { section: "persona", anchor: "agent-presets", title: "Agent 预设", scope: "machine", apply: "on-open", keywords: ["预设", "组合", "Agent"] },
   { section: "persona", anchor: "persona", title: "系统人设", scope: "machine", apply: "next-rebuild", keywords: ["人设", "persona", "身份", "提示词", "系统提示词", "前缀", "后缀"] },
-  { section: "session", anchor: "session-dir", title: "会话写入位置", scope: "workspace", apply: "none", keywords: ["工作目录", "路径"] },
+  { section: "storage", anchor: "session-dir", title: "会话写入位置", scope: "workspace", apply: "none", keywords: ["工作目录", "路径"] },
 
   { section: "model", anchor: "model", title: "按用途选择模型", scope: "machine", apply: "runtime-rebuild", keywords: ["主模型", "默认模型", "模型", "切换", "端点", "按任务指定模型", "角色分工", "子代理", "规划", "看图", "复核", "决策", "网页搜索", "web search", "system one", "typesafe", "laya", "自动命名", "思考强度", "推理", "reasoning", "档位"] },
   // Machine-wide despite sitting on the model page, and the clearest case for
@@ -271,7 +271,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "peers", anchor: "peer-projects", title: "放行的项目", scope: "machine", apply: "next-turn", keywords: ["放行", "项目", "不再询问", "长期", "撤销", "peer", "release", "会话间"] },
   { section: "tools", anchor: "write-lease", title: "多个会话同时写一个项目", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "等待"] },
   { section: "tools", anchor: "subagent-claims", title: "子代理的写入范围", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "子代理", "并发", "write_paths", "乐观", "optimistic", "写锁"] },
-  { section: "network", anchor: "trace-export", title: "追踪导出", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
+  { section: "account", anchor: "trace-export", title: "追踪导出", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
   { section: "tools", anchor: "web-access", title: "联网：搜索与抓取", scope: "machine", apply: "on-open", keywords: ["搜索", "searxng", "deepseek", "抓取", "计费", "付费", "web search", "fetch"] },
   { section: "tools", anchor: "browser-tools", title: "内置浏览器", scope: "machine", apply: "runtime-rebuild", keywords: ["browser", "网页", "chrome", "浏览器工具"] },
   // The four blocks below carry a scope control of their own, and the kernel
@@ -297,8 +297,8 @@ export const SETTINGS: SettingEntry[] = [
   { section: "remote", anchor: "phone-device", title: "这台手机的提醒", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "push", "notification"] },
   { section: "account", anchor: "account", title: "账号", scope: "account", apply: "immediate", keywords: ["登录", "社区"] },
   // Shown only while signed in; restoring writes through the ordinary config paths and reloads the runtime.
-  { section: "account", anchor: "backup-file", title: "导出与导入配置", scope: "machine", apply: "immediate", keywords: ["备份", "导出", "导入", "换机", "迁移", "文件"] },
-  { section: "account", anchor: "backup", title: "云备份", scope: "account", apply: "immediate", keywords: ["备份", "恢复", "换机", "同步", "导出"] },
+  { section: "storage", anchor: "backup-file", title: "导出与导入配置", scope: "machine", apply: "immediate", keywords: ["备份", "导出", "导入", "换机", "迁移", "文件"] },
+  { section: "storage", anchor: "backup", title: "云备份", scope: "account", apply: "immediate", keywords: ["备份", "恢复", "换机", "同步", "导出"] },
   { section: "versions", anchor: "versions", title: "版本", scope: "machine", apply: "immediate", keywords: ["更新", "升级"] },
   { section: "common", anchor: "update-mode", title: "更新方式", scope: "machine", apply: "immediate", keywords: ["自动更新", "检查更新", "更新提醒", "后台", "update", "auto update", "notify", "自动下载", "download"] },
   { section: "versions", anchor: "logs", title: "日志与异常退出记录", scope: "machine", apply: "none", keywords: ["日志", "崩溃", "闪退", "异常退出", "log", "logs", "crash", "路径"] },
@@ -319,7 +319,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "display", anchor: "new-answer-marker", title: "新回答分隔线", scope: "machine", apply: "immediate", keywords: ["未读", "新回答", "分隔线", "分割线", "unread", "new", "divider", "marker", "transcript"] },
   { section: "controls", anchor: "open-session-limit", title: "同时保留的会话标签数", scope: "machine", apply: "immediate", keywords: ["标签", "窗格", "收起", "保留", "tabs", "panes", "warm", "内存", "memory"] },
   { section: "controls", anchor: "live-stream-budget", title: "保持实时连接的会话标签数", scope: "machine", apply: "immediate", keywords: ["连接", "实时", "标签", "窗格", "卡死", "停止", "connection", "stream", "tabs", "stuck", "busy"] },
-  { section: "appearance", anchor: "legacy-sessions", title: "1.x 旧会话", scope: "machine", apply: "immediate", keywords: ["1.x", "旧会话", "迁移", "隐藏", "legacy", "sessions", "sidebar"] },
+  { section: "storage", anchor: "legacy-sessions", title: "1.x 旧会话", scope: "machine", apply: "immediate", keywords: ["1.x", "旧会话", "迁移", "隐藏", "legacy", "sessions", "sidebar"] },
   { section: "controls", anchor: "live-grace", title: "进行中列表保留已完成会话", scope: "machine", apply: "immediate", keywords: ["进行中", "完成", "保留", "过滤", "running", "grace", "sidebar"] },
   { section: "common", anchor: "send-shortcut", title: "发送快捷键", scope: "machine", apply: "immediate", keywords: ["发送", "回车", "换行", "enter", "ctrl", "cmd"] },
   { section: "controls", anchor: "running-message-intent", title: "运行中发送消息", scope: "machine", apply: "immediate", keywords: ["插话", "排队", "下一轮", "steer", "queue", "followup", "running"] },

@@ -94,7 +94,7 @@ it("waits for a delayed setting before starting the landing feedback lifetime", 
   vi.spyOn(port, "observabilitySettings").mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   vi.useFakeTimers();
   const scroll = anchorScrolling();
-  draw("network:trace-export", port);
+  draw("account:trace-export", port);
   await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
   expect(document.querySelector('[data-setting="trace-export"]')).toBeNull();
   await act(async () => { finish(saved); });
@@ -123,7 +123,7 @@ it("cancels a pending landing when the user chooses another category", async () 
   const saved = await port.observabilitySettings();
   let finish!: (value: typeof saved) => void;
   vi.spyOn(port, "observabilitySettings").mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-  draw("network:trace-export", port);
+  draw("account:trace-export", port);
   await userEvent.click(screen.getByRole("tab", { name: /^版本/ }));
   await act(async () => { finish(saved); });
   await userEvent.click(screen.getByRole("tab", { name: /^网络/ }));
