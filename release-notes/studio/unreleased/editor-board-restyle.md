@@ -6,6 +6,8 @@
 - 对话里你的消息是圆角 15 的浅底气泡；执行过程收成一张卡，每行是图标、动作（读取、编辑、运行命令…）、对象、读数，状态勾在最右，工具原名悬停可见（c62573956）。
 - 生成的文件改成单列卡片：小图标、文件名、说明、「打开」和「···」；空会话的背景不再画网格和光晕（7e75a4adf）。
 - 工作台照设计稿重画：页签栏 42px、文件树在最前、当前页签像文件夹标签；路径栏最后一段加粗，阅读/编辑/Diff 是分段按钮，保存是主按钮；默认宽 520，可拖到 360–900。命令面板也换成设计稿的样子（2daa590e5）。
+- 记忆页按设计稿复核：「没错」「编辑」移到详情标题右侧，详情分「内容」「使用」两组，列表只在快淡忘或已淡忘时写一个词（e1ab56d58）。
+- 新样式的字号、字重会跟随设置里的字号和字重；macOS 浏览器里的文字也按设计稿的方式平滑，不再显得偏粗（e9ae8f1f8）。
 
 ---
 <!-- lang:en -->
@@ -18,3 +20,5 @@
 - Your messages are 15px-radius tinted bubbles; the execution process is one card whose rows read glyph, verb (Read, Edit, Run command…), target and reading, with the status mark at the right end and the raw tool id on hover (c62573956).
 - Delivered files are single-column cards with a small icon, the name, its description, Open and a more button; the empty conversation no longer paints a grid and glow behind it (7e75a4adf).
 - The workbench is redrawn to its board: a 42px tab strip with the file tree first and the current tab as a folder tab, a path bar with the file name in bold, read/edit/diff as a segmented control and Save as the primary button; it opens at 520px and drags from 360 to 900. The command palette takes its board look too (2daa590e5).
+- The memory page follows its review board: Confirm and Edit sit beside the title, the facts read as content and use, and a list row names its state only when it is fading or forgotten (e1ab56d58).
+- Type in the redesigned surfaces follows the text-size and weight settings, and text in a macOS browser is smoothed as the design canvas draws it instead of looking heavier (e9ae8f1f8).
