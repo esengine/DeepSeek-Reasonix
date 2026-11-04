@@ -342,6 +342,7 @@ type ShellExecution struct {
 	MutationRisk   string `json:"mutationRisk,omitempty"`
 	Verification   string `json:"verification,omitempty"`
 	DurationMs     int64  `json:"durationMs,omitempty"`
+	JobID          string `json:"jobId,omitempty"`
 }
 
 // FileDiff is a previewed change carried on a writer tool's full ToolDispatch

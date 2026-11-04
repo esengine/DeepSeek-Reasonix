@@ -514,6 +514,7 @@ type ShellExecution struct {
 	MutationRisk   string `json:"mutationRisk,omitempty"`
 	Verification   string `json:"verification,omitempty"`
 	DurationMs     int64  `json:"durationMs,omitempty"`
+	JobID          string `json:"jobId,omitempty"`
 }
 
 func toWireShellExecution(in *event.ShellExecution) *ShellExecution {
@@ -525,7 +526,7 @@ func toWireShellExecution(in *event.ShellExecution) *ShellExecution {
 		Platform: in.Platform, SupportsAndAnd: in.SupportsAndAnd,
 		State: in.State, FailurePhase: in.FailurePhase,
 		OutputTail: in.OutputTail, Subject: in.Subject, MutationRisk: in.MutationRisk,
-		Verification: in.Verification, DurationMs: in.DurationMs,
+		Verification: in.Verification, DurationMs: in.DurationMs, JobID: in.JobID,
 	}
 	if in.ExitCode != nil {
 		code := *in.ExitCode

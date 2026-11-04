@@ -40,6 +40,8 @@ type ShellExecution struct {
 	// not survive the run — a pipeline's own ExitCode is only its last stage.
 	PipeStatus []int `json:"pipeStatus,omitempty"`
 	DurationMs int64 `json:"durationMs,omitempty"`
+	// JobID is the background job a background_started run became.
+	JobID string `json:"jobId,omitempty"`
 }
 
 // Shell execution state values.

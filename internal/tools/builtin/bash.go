@@ -258,7 +258,7 @@ func (b bash) ExecuteDetailed(ctx context.Context, args json.RawMessage) (tool.D
 		msg += resumeNote(ctx, jm)
 		// Background start is not a completed execution: completion is reported
 		// later by bash_output/wait. Do not masquerade as success with exit 0.
-		ex.State = tool.ShellStateBackgroundStarted
+		ex.State, ex.JobID = tool.ShellStateBackgroundStarted, job.ID
 		ex.MutationRisk = tool.ShellMutationUnknown
 		ex.DurationMs = time.Since(start).Milliseconds()
 		return tool.DetailedResult{

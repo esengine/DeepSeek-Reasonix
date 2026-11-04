@@ -148,6 +148,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   const statusRead = useCallback(() => dispatch({ kind: "__error_clear", from: "status" } as never), []);
   const agentRuns = useAgentRequest(port, revealBrowser);
   const openRun = agentRuns.open;
+  const openJob = agentRuns.openJob;
   const conversationFiles = useConversationFiles(port, status?.workspaceRoot ?? rt.root, !!rt.host, visible && tab === "flow", revealBrowser, notify);
   const compact = useCompactNow(port, running || s.items.some((item) => item.t === "compaction" && !item.done), notify);
   // Elapsed is a clock reading and belongs on the tick. Throughput is not: it
@@ -331,7 +332,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     const all = [...(status?.jobs ?? NO_JOBS), ...(status?.endedJobs ?? NO_JOBS)];
     return clearedJobs.size ? all.filter((j) => !clearedJobs.has(j.id)) : all.length ? all : NO_JOBS;
   }, [status?.jobs, status?.endedJobs, clearedJobs]);
-  const jobsLive = useMemo(() => ({ jobs, cancel: (id: string) => cancelJob(port, id, notify, refreshStatus).then(() => {}) }), [jobs, port, notify, refreshStatus]);
+  const jobsLive = useMemo(() => ({ jobs, cancel: (id: string) => cancelJob(port, id, notify, refreshStatus).then(() => {}), open: (job: JobEntry) => openJob({ id: job.id, name: jobName(job) }) }), [jobs, port, notify, refreshStatus, openJob]);
   const counts = useMemo(() => {
     let steps = 0;
     let wrote = 0;
@@ -520,7 +521,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
-      <PlanLiveContext.Provider value={planLive}><AgentRunOpener.Provider value={openRun}>
+      <PlanLiveContext.Provider value={planLive}><AgentRunOpener.Provider value={openRun}><JobsLiveContext.Provider value={jobsLive}>
       <Transcript port={port} historyPaging={historyPaging}
         scope={rt.sessionPath}
         onSettings={onSettings}
@@ -556,7 +557,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         onOpenProject={onOpenProject}
         onKeepHere={onKeepHere}
       />
-      </AgentRunOpener.Provider></PlanLiveContext.Provider>
+      </JobsLiveContext.Provider></AgentRunOpener.Provider></PlanLiveContext.Provider>
       </NewAnswerAnchor.Provider>
       </LiveWork.Provider>
       </PaneShown.Provider>
@@ -667,7 +668,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           onReadJob={readJob}
           onOpenRun={openRun} onStopCall={(id) => void port.stopToolCall(id).catch(notify)}
           onClearJobs={(ids) => setClearedJobs((was) => new Set([...was, ...ids]))}
-          onOpenJob={(job) => agentRuns.openJob({ id: job.id, name: jobName(job) })}
+          onOpenJob={jobsLive.open}
           usage={status?.sessionUsage} quote={status?.sessionCostQuote} tariff={status?.tariff} onTariffFlip={refreshStatus}
         />
         {reloadFailure && <ReloadNotice failure={reloadFailure} onReload={onReloadSession} />}

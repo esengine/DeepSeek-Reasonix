@@ -113,6 +113,9 @@ func TestBackgroundStartReportsStateWithoutErrorOrExitCode(t *testing.T) {
 	if res.Execution.ExitCode != nil {
 		t.Errorf("exit code = %d, want none before the job finishes", *res.Execution.ExitCode)
 	}
+	if running := m.Running(); len(running) != 1 || res.Execution.JobID != running[0].ID {
+		t.Errorf("job id = %q, want the background job it started (%+v)", res.Execution.JobID, running)
+	}
 }
 
 // A job that ended as failed makes the read that reports it a failed call, so

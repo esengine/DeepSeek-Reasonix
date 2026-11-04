@@ -57,7 +57,8 @@ describe("opening a job's output", () => {
 
   it("opens one tab per job however often it is asked", () => {
     const pick = vi.fn();
-    const { result, rerender } = renderHook(({ req }) => useAgentTabs(req, pick, vi.fn()), { initialProps: { req: { jobs: [{ id: "bash-1", name: "x" }] } } });
+    const dismiss = vi.fn();
+    const { result, rerender } = renderHook(({ req }) => useAgentTabs(req, pick, dismiss), { initialProps: { req: { jobs: [{ id: "bash-1", name: "x" }] } } });
     act(() => rerender({ req: { jobs: [{ id: "bash-1", name: "x" }] } }));
     expect(result.current.agents).toEqual([{ kind: "job", id: "bash-1", name: "x" }]);
     expect(pick).toHaveBeenLastCalledWith("job:bash-1");

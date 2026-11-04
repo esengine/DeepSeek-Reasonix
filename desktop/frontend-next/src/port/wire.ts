@@ -59,9 +59,9 @@ export interface Profile {
   effort?: string; label?: string; // label: the task's own short description, one sub-agent only
 }
 
-// Present on shell tools. A non-zero exit was invisible before: the card only
-// ever rendered stdout, so a command that failed looked like one that ran.
+// Present on shell tools: how the command ran, which its output alone cannot say.
 export interface Execution {
+  jobId?: string;
   kind?: string;
   shell?: string;
   /** PowerShell 5.1 and 7 are different languages; the shell name alone cannot say which answered. */

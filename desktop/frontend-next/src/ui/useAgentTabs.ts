@@ -18,7 +18,10 @@ export function useAgentTabs(request: AgentRequest | undefined, pick: (key: stri
       ...(request?.jobs ?? []).map((job) => ({ kind: "job" as const, ...job })),
     ];
     if (!request || asked.length === 0) return;
-    setAgents((now) => [...now, ...asked.filter((tab) => !now.some((open) => keyOf(open) === keyOf(tab)))]);
+    setAgents((now) => {
+      const fresh = asked.filter((tab) => !now.some((open) => keyOf(open) === keyOf(tab)));
+      return fresh.length ? [...now, ...fresh] : now;
+    });
     setDismissed((now) => {
       const next = new Set(now);
       for (const tab of asked) next.delete(keyOf(tab));

@@ -7,7 +7,7 @@ import { jobElapsed } from "./panels/jobElapsed";
 import { StudioIcon } from "./StudioIcon";
 
 /** The pane's background jobs and how to stop one, for a job's workbench tab. */
-export interface JobsLive { jobs: JobEntry[]; cancel?: (id: string) => Promise<void> }
+export interface JobsLive { jobs: JobEntry[]; cancel?: (id: string) => Promise<void>; open?: (job: JobEntry) => void }
 export const JobsLiveContext = createContext<JobsLive>({ jobs: [] });
 
 const POLL_MS = 2000;

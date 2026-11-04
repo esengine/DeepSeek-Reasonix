@@ -44,3 +44,11 @@
 .jobrun-note { margin: 8px 14px 0; color: var(--err-ink); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .jobrun-foot { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 8px 0 14px; border-top: 1px solid var(--hair); color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
 .jobrun-foot > span { flex: 1; }
+
+.activity-body .tool-bg { order: -6; margin-left: auto; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1 var(--ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.activity-body .tool-bg[data-status="running"] { color: var(--net-ink); }
+.activity-body .tool-bg[data-status="failed"] { color: var(--err-ink); }
+.activity-body .hl .tool-bg ~ .tool-state { margin-left: 0; }
+.tool-bg-note { margin: 0 10px 4px 33px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); }
+.tool-bg-note > button { padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: var(--w-med); cursor: pointer; }
+.tool-bg-note > button:hover { text-decoration: underline; }

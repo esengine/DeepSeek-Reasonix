@@ -573,6 +573,14 @@ func TestToWireSubagentStatusCarriesItsRate(t *testing.T) {
 	}
 }
 
+// A run sent to the background names its job, so a window can tie the call to it.
+func TestShellExecutionWireNamesItsBackgroundJob(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "c1", Name: "bash", Execution: &event.ShellExecution{State: "background_started", JobID: "bash-3"}}})
+	if w.Tool == nil || w.Tool.Execution == nil || w.Tool.Execution.JobID != "bash-3" {
+		t.Fatalf("wire execution = %+v, want job bash-3", w.Tool)
+	}
+}
+
 // A plan card's input is the list approving starts, so it rides with the card
 // although a plan declares no scope; a plain tool's arguments still do not.
 func TestApprovalWireCarriesAPlansSteps(t *testing.T) {

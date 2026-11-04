@@ -15,6 +15,7 @@ import { currentStep, parsePlan, stepDone } from "../../state/session";
 import { DiffView } from "./DiffView";
 import { BringCall } from "./BringCall";
 import { StopCall } from "./StopCall";
+import { BackgroundNote, BackgroundReading } from "./BackgroundJob";
 import { WaitNote } from "./WaitNote";
 import { Term, ToolOutput, BoundNote } from "./ToolOutput";
 import { ExtensionView } from "./ExtensionView";
@@ -99,7 +100,8 @@ export function ToolCard({
   // Running and settled are two different lines: the category says what it is
   // doing now, the label says what it was once it is done.
   const verb = activityVerb(shown);
-  const head = activity ? (from?.tool || (verb ? t(verb) : labelFor(shown))) : running ? runLabelFor(shown) : labelFor(shown);
+  const bgJob = tool.execution?.state === "background_started" ? tool.execution.jobId : undefined;
+  const head = activity && bgJob ? t("chat.sent_to_background") : activity ? (from?.tool || (verb ? t(verb) : labelFor(shown))) : running ? runLabelFor(shown) : labelFor(shown);
   // A write's payload streams as arguments, and the provider only reports how
   // many characters have landed — the JSON is unparseable until the last one.
   // Showing that count is the difference between a card that is visibly filling
@@ -178,6 +180,7 @@ export function ToolCard({
         </span>
       )}
       {bad && <span className="fail">{badLabel}</span>}
+      {bgJob && <BackgroundReading id={bgJob} />}
       <Cost tools={[tool]} running={running} />
       <span
         className="tool-state"
@@ -332,6 +335,7 @@ export function ToolCard({
           <div className="hl" data-swap={settling.swap ? "" : undefined}>{heading}</div>
         )}
         {running && onStop && tool.id && <StopCall onStop={onStop} />}
+        {bgJob && <BackgroundNote id={bgJob} />}
       </div>
     </div>
   );

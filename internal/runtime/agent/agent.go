@@ -1414,7 +1414,7 @@ func toEventShellExecution(in *tool.ShellExecution, durationMs int64) *event.She
 		SupportsAndAnd: in.SupportsAndAnd,
 		State:          in.State,
 		FailurePhase:   in.FailurePhase,
-		OutputTail:     in.OutputTail, Subject: in.Subject,
+		OutputTail:     in.OutputTail, Subject: in.Subject, JobID: in.JobID,
 		MutationRisk: in.MutationRisk,
 		Verification: in.Verification,
 		DurationMs:   in.DurationMs,
