@@ -66,6 +66,8 @@ import { PeerHeldBar } from "./PeerHeldBar";
 import { PostureNote, postureNote } from "./PostureNote";
 import { SidePanel } from "./SidePanel";
 import { cancelJob } from "./jobcancel";
+import { JobsLiveContext } from "./JobRunView";
+import { jobName } from "./panels/JobName";
 import { ConnectNote } from "./ConnectNote";
 import { useStatusPoll } from "./useStatusPoll";
 import { useStatusRefresh } from "./useStatusRefresh";
@@ -329,6 +331,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     const all = [...(status?.jobs ?? NO_JOBS), ...(status?.endedJobs ?? NO_JOBS)];
     return clearedJobs.size ? all.filter((j) => !clearedJobs.has(j.id)) : all.length ? all : NO_JOBS;
   }, [status?.jobs, status?.endedJobs, clearedJobs]);
+  const jobsLive = useMemo(() => ({ jobs, cancel: (id: string) => cancelJob(port, id, notify, refreshStatus).then(() => {}) }), [jobs, port, notify, refreshStatus]);
   const counts = useMemo(() => {
     let steps = 0;
     let wrote = 0;
@@ -579,6 +582,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           onWidth={onDockW} onOpen={(on) => onManualBrowser?.(on)} />
       )}
       <div className="scroll" data-pane="browser" hidden={tab === "analysis"} inert={!workbench}>
+          <JobsLiveContext.Provider value={jobsLive}>
           <WorkbenchPanel
             port={port}
             hub={hub}
@@ -602,6 +606,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             onQuoteSelection={reply.onQuoteFile}
             onShowCall={(call) => setLandAt((was) => ({ call, n: (was?.n ?? 0) + 1 }))}
           />
+          </JobsLiveContext.Provider>
       </div>
 
       {/* Keep the composer mounted so a half-written prompt survives a visit to
@@ -662,6 +667,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           onReadJob={readJob}
           onOpenRun={openRun} onStopCall={(id) => void port.stopToolCall(id).catch(notify)}
           onClearJobs={(ids) => setClearedJobs((was) => new Set([...was, ...ids]))}
+          onOpenJob={(job) => agentRuns.openJob({ id: job.id, name: jobName(job) })}
           usage={status?.sessionUsage} quote={status?.sessionCostQuote} tariff={status?.tariff} onTariffFlip={refreshStatus}
         />
         {reloadFailure && <ReloadNotice failure={reloadFailure} onReload={onReloadSession} />}

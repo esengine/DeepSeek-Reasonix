@@ -25,5 +25,10 @@ export function useAgentRequest(port: AgentPort, reveal: () => void) {
     reveal();
     return true;
   }, [port, reveal]);
-  return { request, open };
+  const openJob = useCallback((job: { id: string; name: string }) => {
+    const req: AgentRequest = { jobs: [job], consumed: () => setRequest((now) => (now === req ? undefined : now)) };
+    setRequest(req);
+    reveal();
+  }, [reveal]);
+  return { request, open, openJob };
 }

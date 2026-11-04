@@ -17,7 +17,7 @@ export type Deck = "" | "agents" | "jobs";
  *  readings sit at the right end of the run rail, beside the other numbers
  *  about this turn, and each opens on hover the way the context reading does —
  *  one gesture for every summary on this row. */
-export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, onOpenRun, onStopCall, onClearJobs }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput>; onOpenRun?: (call: string) => Promise<boolean>; onStopCall?: (callId: string) => void; onClearJobs?: (ids: string[]) => void }) {
+export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, onOpenRun, onStopCall, onClearJobs, onOpenJob }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput>; onOpenRun?: (call: string) => Promise<boolean>; onStopCall?: (callId: string) => void; onClearJobs?: (ids: string[]) => void; onOpenJob?: (job: JobEntry) => void }) {
   const agentsBox = useRef<HTMLDivElement>(null);
   const jobsBox = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState("");
@@ -99,7 +99,7 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             <span>{liveJobs ? t("subagent.background_jobs_running") : failedJobs ? t("subagent.background_jobs_failed") : t("subagent.background_jobs_done")}</span>
           </button>
           <div className="studio-deck-pop" role="dialog" aria-label={t("common.background_jobs")}>
-            <JobDeck jobs={jobs} onCancel={onCancelJob} onClear={onClearJobs} onView={onReadJob ? (id) => { shut(); setViewingJob(id); } : undefined} />
+            <JobDeck jobs={jobs} onCancel={onCancelJob} onClear={onClearJobs} onView={onOpenJob || onReadJob ? (id) => { shut(); const job = jobs.find((j) => j.id === id); if (onOpenJob && job) onOpenJob(job); else setViewingJob(id); } : undefined} />
           </div>
         </div>
       )}

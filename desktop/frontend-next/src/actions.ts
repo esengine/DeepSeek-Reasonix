@@ -213,6 +213,8 @@ export const ACTIONS: UIAction[] = [
   { id: "job.cancel", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "job.cancel-all", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "job.clear", kind: "view", target: "none", proof: "interaction" },
+  { id: "job.follow", kind: "view", target: "none", proof: "interaction" },
+  { id: "job.scroll", kind: "view", target: "none", proof: "interaction" },
   { id: "job.tip", kind: "view", target: "entity", proof: "interaction" },
   { id: "job.view", kind: "view", target: "entity", proof: "interaction" },
   { id: "job.close", kind: "view", target: "none", proof: "interaction" },

@@ -27,3 +27,20 @@
 @media (prefers-reduced-motion: reduce) { .job-deck-confirm { animation: none; } }
 :root[data-effects="reduced"] .job-deck-confirm { animation: none; }
 .job-deck-note { margin: 4px 8px 2px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); }
+
+.jobrun { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.jobrun-hd { flex: none; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 8px 0 12px; box-sizing: border-box; border-bottom: 1px solid var(--hair); }
+.jobrun-mark { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.jobrun[data-status="running"] .jobrun-mark { color: var(--net); }
+.jobrun-hd > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-med) var(--fs-ui)/1.3 var(--ui); }
+.jobrun-state { flex: 1; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.jobrun[data-status="running"] .jobrun-state { color: var(--net-ink); }
+.jobrun[data-status="failed"] .jobrun-state { color: var(--err-ink); }
+.jobrun-out {
+  flex: 1; min-height: 0; margin: 0; padding: 12px 14px; overflow: auto; overscroll-behavior: contain;
+  background: var(--face-code, var(--page)); color: var(--text); font: var(--w-reg) var(--fs-meta)/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.jobrun-cmd { color: var(--muted); }
+.jobrun-note { margin: 8px 14px 0; color: var(--err-ink); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.jobrun-foot { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 8px 0 14px; border-top: 1px solid var(--hair); color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
+.jobrun-foot > span { flex: 1; }

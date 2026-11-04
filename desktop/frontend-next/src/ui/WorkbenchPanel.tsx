@@ -46,6 +46,7 @@ const CodeEditor = lazy(() => import("./CodeEditor"));
 
 import { treeRows } from "./workbench_tree";
 import { AgentRunView } from "./AgentRunView";
+import { JobRunView } from "./JobRunView";
 import { AgentAvatar } from "./cards/SubagentGroup";
 import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
 import { fileKind } from "./fileKind";
@@ -285,7 +286,7 @@ export function WorkbenchPanel({
         ...browsers.map((id) => ({ kind: "manual", id }) as const),
         ...tabs.map((tab) => ({ kind: "browser", tab }) as const),
         ...openFiles.map((path) => ({ kind: "file", path }) as const),
-        ...agents.map((run) => ({ kind: "agent", ...run }) as const),
+        ...agents,
       ].filter((s) => !dismissed.has(keyOf(s))),
     [browsers, tabs, openFiles, agents, dismissed],
   );
@@ -504,7 +505,7 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />}
+              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "job" ? "play" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />}
               <span>{labelFor(surface)}</span>
             </button>
             )}
@@ -582,6 +583,7 @@ export function WorkbenchPanel({
               onOpenDocument={(path) => port.openDocument(path)}
             />
           )}
+          {active?.kind === "job" && <JobRunView key={active.id} port={port} id={active.id} name={active.name} shown={shown && !launcher && !showFiles} />}
           {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} onShowCall={onShowCall} />}
           {active?.kind === "file" && (
             <>

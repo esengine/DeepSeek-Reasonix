@@ -3,12 +3,12 @@ import type { AgentPort } from "../port/port";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import { keyOf, labelOf, type Surface } from "./workbench_tabs";
-import type { AgentTab } from "./useAgentTabs";
+import type { RunTab } from "./useAgentTabs";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 interface Props {
   port: AgentPort; surfaces: Surface[]; selected: string; showFiles: boolean;
-  setBrowsers: Setter<string[]>; setOpenFiles: Setter<string[]>; setAgents: Setter<AgentTab[]>; setDismissed: Setter<Set<string>>;
+  setBrowsers: Setter<string[]>; setOpenFiles: Setter<string[]>; setAgents: Setter<RunTab[]>; setDismissed: Setter<Set<string>>;
   setSelected: Setter<string>; onCloseManual: () => void; onCloseSelected: () => void;
   fromExplorer?: { current: string }; setShowFiles?: Setter<boolean>; setLauncher?: Setter<boolean>;
 }
@@ -36,7 +36,7 @@ export function useTabClose({ port, surfaces, selected, showFiles, setBrowsers, 
       }
       setBrowsers((v) => v.filter((id) => !closed.has(`manual:${id}`)));
       setOpenFiles((v) => v.filter((path) => !closed.has(`file:${path}`)));
-      setAgents((v) => v.filter((run) => !closed.has(`agent:${run.ref}`)));
+      setAgents((v) => v.filter((run) => !closed.has(keyOf(run))));
       setDismissed((v) => new Set([...v, ...closed]));
       if (closed.has(current.current.selected)) onCloseSelected();
       setSelected((v) => closed.has(v) ? "" : v);

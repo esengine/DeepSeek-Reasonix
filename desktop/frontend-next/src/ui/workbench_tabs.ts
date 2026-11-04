@@ -5,16 +5,17 @@ export type Surface =
   | { kind: "manual"; id: string }
   | { kind: "browser"; tab: BrowserTab }
   | { kind: "file"; path: string }
-  | { kind: "agent"; ref: string; name: string };
+  | { kind: "agent"; ref: string; name: string }
+  | { kind: "job"; id: string; name: string };
 export function keyOf(s: Surface) {
-  return `${s.kind}:${s.kind === "manual" ? s.id : s.kind === "browser" ? s.tab.target : s.kind === "agent" ? s.ref : s.path}`;
+  return `${s.kind}:${s.kind === "manual" || s.kind === "job" ? s.id : s.kind === "browser" ? s.tab.target : s.kind === "agent" ? s.ref : s.path}`;
 }
 export function labelOf(s: Surface, hosts: Record<string, string>) {
   return s.kind === "manual"
     ? hosts[s.id] || t("workbench.browser")
     : s.kind === "browser"
       ? s.tab.title || s.tab.url || t("common.blank_page")
-      : s.kind === "agent"
+      : s.kind === "agent" || s.kind === "job"
         ? s.name
         : s.path.split("/").at(-1) || s.path;
 }

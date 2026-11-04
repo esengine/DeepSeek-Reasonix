@@ -660,7 +660,7 @@ export class MockPort extends MockWorkspace implements AgentPort {
   }
 
   async jobOutput(jobId: string): Promise<JobOutput> {
-    const job = this.state.jobs?.find((j) => j.id === jobId);
+    const job = [...(this.state.jobs ?? []), ...(location.search.includes("jobs") ? benchJobs().jobs ?? [] : [])].find((j) => j.id === jobId);
     if (!job || job.status !== "running") throw new HttpError(409, "no running background job with this id", { code: "job.not_running" });
     return { text: "> dev\n> vite\n\n  VITE ready in 312 ms\n  Local: http://localhost:5173/\n", status: job.status, bytes: 66, truncated: false };
   }
