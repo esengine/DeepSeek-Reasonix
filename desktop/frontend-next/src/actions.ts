@@ -619,6 +619,7 @@ export const ACTIONS: UIAction[] = [
   { id: "reasoning.effort", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "workbench.new", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.launch-files", kind: "view", target: "none", proof: "interaction" },
+  { id: "workbench.launch-recent", kind: "view", target: "entity", proof: "interaction" },
   { id: "workbench.launch-changes", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.launch-browser", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.history-reload", kind: "repeatable", target: "none", proof: "interaction" },

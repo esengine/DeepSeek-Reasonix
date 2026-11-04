@@ -48,6 +48,7 @@ import { treeRows } from "./workbench_tree";
 import { AgentRunView } from "./AgentRunView";
 import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
 import { fileKind } from "./fileKind";
+import { readRecentFiles, rememberFile } from "./recentFiles";
 
 export function WorkbenchPanel({
   port,
@@ -346,7 +347,9 @@ export function WorkbenchPanel({
   }, [activeKey, surfaces.length]);
   // Picking a file is asking to read it. Docked, the list and the file share one
   // column, so the list steps aside; side by side it stays where it is.
+  const [recentFiles, setRecentFiles] = useState(() => readRecentFiles(workspaceRoot ?? ""));
   const openFile = useCallback((path: string) => {
+    setRecentFiles(rememberFile(workspaceRoot ?? "", path));
     setOpenFiles((v) => (v.includes(path) ? v : [...v, path]));
     setDismissed((v) => {
       const n = new Set(v);
@@ -357,7 +360,7 @@ export function WorkbenchPanel({
     // rather than closed, so closing this file comes back to the list.
     fromExplorer.current = showFiles ? path : "";
     pick(`file:${path}`);
-  }, [pick, showFiles]);
+  }, [pick, showFiles, workspaceRoot]);
   useEffect(() => { if (fileRequest) { openFile(fileRequest.path); fileRequest.consumed?.(); } }, [fileRequest, openFile]);
   // A rendered document's own links open beside it and its images load from the
   // tree. Held stable per document, so typing re-renders the text alone.
@@ -554,6 +557,7 @@ export function WorkbenchPanel({
               onFiles={chooseFiles}
               onChanges={() => changes[0] && openFile(changes[0].path)}
               onBrowser={() => void addBrowser()}
+              recent={recentFiles} onOpenFile={openFile}
             />
           )}
           <div className="workbench-content" hidden={launcher || !active} data-action-contextmenu="workbench.quote-selection" {...textMenu.readerProps}>

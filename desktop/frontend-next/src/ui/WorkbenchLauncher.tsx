@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import { StudioIcon } from "./StudioIcon";
 
-export function WorkbenchLauncher({ changes, focus = false, onFiles, onChanges, onBrowser }: { changes: number; focus?: boolean; onFiles: () => void; onChanges: () => void; onBrowser: () => void }) {
+export function WorkbenchLauncher({ changes, focus = false, onFiles, onChanges, onBrowser, recent = [], onOpenFile }: { changes: number; focus?: boolean; onFiles: () => void; onChanges: () => void; onBrowser: () => void; recent?: string[]; onOpenFile?: (path: string) => void }) {
   return (
     <div className="workbench-launcher" role="group" aria-label={t("开始")}>
       <StudioIcon name="spark" />
@@ -19,6 +19,18 @@ export function WorkbenchLauncher({ changes, focus = false, onFiles, onChanges, 
         <StudioIcon name="globe" />
         <span><b>{t("浏览器")}</b><i>{t("和对话并排看网页")}</i></span>
       </button>
+      {recent.length > 0 && onOpenFile && (
+        <div className="workbench-launcher-recent" role="group" aria-label={t("最近打开")}>
+          <p>{t("最近打开")}</p>
+          {recent.map((path) => (
+            <button key={path} data-action="workbench.launch-recent" data-target={path} title={path} onClick={() => onOpenFile(path)}>
+              <StudioIcon name="file" />
+              <span>{path.slice(path.lastIndexOf("/") + 1)}</span>
+              <i>{path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}</i>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
