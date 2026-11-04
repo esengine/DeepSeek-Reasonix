@@ -7,7 +7,8 @@ export const KEEP_RECENT = 6;
 
 const SEARCH = /grep|search|glob|find/;
 
-function verbOf(name: string): string {
+/** The verb an activity row leads with: what the call did, in the words the board uses. */
+export function verbOf(name: string): string {
   const category = categoryOf(name);
   if (category === "read") return SEARCH.test(name) ? "搜索" : "读取";
   if (category === "write") return "编辑";

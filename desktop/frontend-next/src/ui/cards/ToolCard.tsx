@@ -7,6 +7,7 @@ import type { ExtensionSurface, Tool } from "../../port/wire";
 import type { RewindPlan, RewindResult } from "../../port/port";
 import { categoryOf, labelFor, mcpOrigin, runLabelFor } from "../icons";
 import { Sym, glyphFor } from "../Sym";
+import { verbOf } from "../activityEarlier";
 import { GOAL_STATUS, argOf, goalUpdate, shortArgs } from "../args";
 import { Cost } from "../Cost";
 import { bytes, count, seconds, tokens } from "../../i18n/format";
@@ -97,7 +98,7 @@ export function ToolCard({
   const from = mcpOrigin(shown);
   // Running and settled are two different lines: the category says what it is
   // doing now, the label says what it was once it is done.
-  const head = activity ? (from?.tool || shown) : running ? runLabelFor(shown) : labelFor(shown);
+  const head = activity ? (from?.tool || t(verbOf(shown))) : running ? runLabelFor(shown) : labelFor(shown);
   // A write's payload streams as arguments, and the provider only reports how
   // many characters have landed — the JSON is unparseable until the last one.
   // Showing that count is the difference between a card that is visibly filling
@@ -164,6 +165,7 @@ export function ToolCard({
     <>
       {/* 名字是给人读的，id 是给人查的。标签只在它说了名字没说的事时才占地方
           （见 tagFor），所以精确的那个字符串挂在这里，一直够得着。 */}
+      {activity && <span className="kind" aria-hidden="true"><Sym glyph={glyphFor(shown)} /></span>}
       <span className={running ? "nm shim" : "nm"} title={shown}>{head}</span>
       {who && <span className="who" title={t("按技能 {name} 的设定运行的子代理", { name: who })}>{who}</span>}
       {from && <span className="src" title={t("外部服务 {name} 提供的工具", { name: from.server })}>{from.server}</span>}

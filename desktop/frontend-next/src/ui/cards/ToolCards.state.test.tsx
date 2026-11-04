@@ -128,7 +128,8 @@ describe("tool outcome cards", () => {
         running={false}
       />,
     );
-    expect(screen.getByText("read_file")).toBeTruthy();
+    expect(screen.getByText("读取").getAttribute("title")).toBe("read_file");
+    expect(container.querySelector(".hl > .kind .sym svg")).not.toBeNull();
     const disclosure = container.querySelector("details.tool-disclosure") as HTMLDetailsElement;
     openCards(container);
     expect(disclosure.open).toBe(true);

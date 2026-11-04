@@ -787,17 +787,6 @@ body { background: var(--page) !important; }
 .activity-body .call:not([data-k="me"]):not([data-k="say"]) > .c {
   padding: 4px 0 5px; border-bottom-color: var(--hair);
 }
-.activity-body .call:last-child > .c { border-bottom-color: transparent !important; }
-.activity-body .hl {
-  min-height: 28px !important; padding-inline: 3px; align-items: center; gap: 9px; flex-wrap: nowrap !important;
-}
-.activity-body .hl .nm {
-  order: -9; flex: 0 1 auto; min-width: 3em; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: #d1d3cd; font: var(--w-med) var(--fs-meta)/1.3 var(--mono) !important;
-}
-.activity-body .hl .arg {
-  order: -8; flex: 1 8 auto; color: var(--faint); font: var(--w-read, var(--w-reg)) var(--fs-meta)/1.3 var(--mono) !important;
-}
 .activity-body .hl :is(.src, .who, .tag) { order: -7; flex: 0 3 auto; min-width: 0; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); }
 .activity-body .cost { order: -6; margin-left: auto; gap: 5px; color: var(--ghost); font-size: var(--fs-micro); }
 .activity-body .cost .took { display: none; }
@@ -848,10 +837,6 @@ body { background: var(--page) !important; }
 }
 .activity-body .tool-fold { order: 10; margin-left: 0; }
 .activity-body .tool-disclosure[open] > summary.hl { background: var(--raised); }
-.activity-body .tool-disclosure > .out {
-  margin: 4px 0 6px 18px !important; padding: 6px 10px 8px !important;
-  border: 1px solid var(--hair) !important; border-radius: var(--r-sm);
-}
 .activity-call-meta,
 .activity-call-input > header,
 .activity-call-result { display: flex; align-items: center; gap: 8px; }
@@ -2308,15 +2293,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 
 /* Transcript widgets use one quiet shell: identity and state stay visible,
    while arguments and results remain one disclosure away. */
-.flow .call[data-call] > .c {
-  margin-bottom: 7px;
-  padding: 7px 9px 8px !important;
-  border: 1px solid var(--hair) !important;
-  border-radius: var(--r-md) !important;
-  background: var(--surface) !important;
-}
 .flow .call[data-call] > .c:hover { border-color: var(--border) !important; background: var(--surface) !important; }
-.flow .call[data-call][data-running] > .c { border-color: var(--border) !important; }
 .flow .call[data-call] .tool-disclosure > summary.hl { margin-left: 0; padding-inline: 3px; }
 .flow .call[data-call] .tool-disclosure > summary.hl:hover { background: var(--float); }
 .flow .call[data-call] .tool-disclosure > .out { margin-top: 5px !important; }
@@ -2324,11 +2301,6 @@ button, input, textarea { font-size: var(--fs-ui); }
   margin-top: 6px; padding: 8px 10px; border: 1px solid var(--hair);
   border-radius: var(--r-sm); background: var(--surface); color: #d39a93;
 }
-.flow .activity-body .call[data-call] > .c {
-  margin-bottom: 0; padding: 4px 0 5px !important; border: 0 !important;
-  border-bottom: 1px solid var(--hair) !important; border-radius: 0 !important; background: transparent !important;
-}
-.flow .activity-body .call[data-call]:last-child > .c { border-bottom-color: transparent !important; }
 
 /* A decision stays inside the transcript, but reads as a small choice surface
    rather than a full-page form. Each row carries its own hit area and state. */
@@ -2494,15 +2466,9 @@ button, input, textarea { font-size: var(--fs-ui); }
 .btn.send:not(:disabled):focus-visible { outline: none; box-shadow: 0 0 0 3px rgb(120 139 188 / .22); }
 .btn.send:disabled { opacity: 1; }
 
-:root[data-theme="light"] .flow .call[data-call] > .c {
-  border-color: var(--border) !important; background: var(--surface) !important;
-}
 :root[data-theme="light"] .flow .call[data-call] > .c:hover { border-color: var(--border) !important; background: var(--surface) !important; }
-:root[data-theme="light"] .flow .call[data-call][data-running] > .c { border-color: var(--border) !important; }
 :root[data-theme="light"] .flow .call[data-call] .tool-disclosure > summary.hl:hover { background: var(--overlay); }
 :root[data-theme="light"] .flow .call[data-call] .txt.bad { background: var(--page); color: #8b4e47; border-color: var(--border); }
-:root[data-theme="light"] .activity-body .call[data-call] > .c { border: 0 !important; border-bottom: 1px solid var(--hair) !important; background: transparent !important; }
-:root[data-theme="light"] .activity-body .call[data-call]:last-child > .c { border-bottom-color: transparent !important; }
 
 :root[data-theme="light"] .flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"]) > .g .sym, :root[data-theme="light"] .flow .call[data-prompt]:not([data-k="me"]):not([data-k="say"]) > .g .sym { background: none; box-shadow: none; color: var(--faint); }
 :root[data-theme="light"] .flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"])[data-lvl="ok"] > .g .sym { color: var(--ok); }
@@ -2684,12 +2650,10 @@ button, input, textarea { font-size: var(--fs-ui); }
 .flow .call[data-k="say"] > .g .sym { background: var(--text); }
 .flow .call[data-k="say"] > .g .sym::after { color: var(--page); }
 
-.flow .call[data-call] > .c,
 .flow .ask { background: var(--raised) !important; border-color: var(--border) !important; }
 .tool-disclosure > summary.hl:hover,
 .activity-body .tool-disclosure[open] > summary.hl,
 .reads-disclosure .peek button.row[data-on] { background: var(--overlay); }
-.activity-body .call[data-call] > .c,
 .activity-call-input,
 .activity-call-result,
 .flow .tool-disclosure .dif { border-color: var(--hair) !important; }

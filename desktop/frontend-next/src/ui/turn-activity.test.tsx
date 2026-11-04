@@ -63,8 +63,10 @@ describe("the work under a turn's sentences", () => {
 
     const groups = [...chunk.querySelectorAll(".activity-group")];
     expect(groups).toHaveLength(2);
-    expect(groups[0].textContent).toContain("bash");
-    expect(groups[1].textContent).toContain("edit_file");
+    expect(groups[0].textContent).toContain("运行命令");
+    expect(groups[0].querySelector('.nm[title="bash"]')).not.toBeNull();
+    expect(groups[1].textContent).toContain("编辑");
+    expect(groups[1].querySelector('.nm[title="edit_file"]')).not.toBeNull();
   });
 
   it("keeps each sentence above the work that followed it", () => {
