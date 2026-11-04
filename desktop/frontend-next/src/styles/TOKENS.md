@@ -48,7 +48,7 @@ and at every contrast step, so nothing paints differently until a pack sets one.
 | Pack key | Variable | Default | Job |
 | --- | --- | --- | --- |
 | `link` | `--link` | `--net` | Hyperlinks and URLs: `.md a`, `.fbk a`, `.lk`, `.hit-row .u` |
-| `brand` | `--brand` | `--net` | The product's own tint: wallet and toolbar icons, info notes, feedback status chips, skill chips, the selected option and the open workspace's bar |
+| `brand` | `--brand` | `--net` | The product's own tint: toolbar icons, info notes, feedback status chips and the current step of their timeline, skill chips, the selected option and the open workspace's bar |
 | `halo` | `--halo` | `--net` | Hover and drag-over emphasis: card hover, screenshot hover, the reference-drop ring |
 | `labelAgent` | `--label-agent` | `--deleg` | An agent's name: `.who` labels and sub-agent chips |
 | derived | `--brand-wash` | `--net-wash` | Tint behind `brand`; a pack that sets `brand` derives it at 12% over its ground, as `--accent-wash` follows `accent` |
