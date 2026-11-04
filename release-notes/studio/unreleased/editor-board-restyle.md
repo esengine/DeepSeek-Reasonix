@@ -9,7 +9,8 @@
 - 记忆页按设计稿复核：「没错」「编辑」移到详情标题右侧，详情分「内容」「使用」两组，列表只在快淡忘或已淡忘时写一个词（e1ab56d58）。
 - 新样式的字号、字重会跟随设置里的字号和字重；macOS 浏览器里的文字也按设计稿的方式平滑，不再显得偏粗（e9ae8f1f8）。
 - 反馈中心的标签、筛选和状态改成设计稿的分段按钮与彩色药丸（c0870f92b）。
-- 思考块和计划条按设计稿重排：计划条成为输入框的顶行，进度用每步一格表示（852a19594）。
+- 思考块按设计稿重排（852a19594）。
+- 计划只是一张卡：待确认时列出每一步和「开始执行 / 修改计划 / 暂不执行」，开始后同一张卡原地显示第几步、正在做什么，做完变成「做完了」；执行记录挂在卡片下面。卡片滚出视野时，输入框上方才出现一个小页签，写着第几步并用小格子显示进度，展开后可「跳到卡片 ↑」（11b2e23b4）。
 
 ---
 <!-- lang:en -->
@@ -25,4 +26,5 @@
 - The memory page follows its review board: Confirm and Edit sit beside the title, the facts read as content and use, and a list row names its state only when it is fading or forgotten (e1ab56d58).
 - Type in the redesigned surfaces follows the text-size and weight settings, and text in a macOS browser is smoothed as the design canvas draws it instead of looking heavier (e9ae8f1f8).
 - The feedback center's tabs, filters and statuses take the board's segmented control and filled pills (c0870f92b).
-- Reasoning and the plan strip follow their boards: the plan strip becomes the composer's top row with one segment per step (852a19594).
+- Reasoning follows its board (852a19594).
+- A plan is one card: before it starts it lists every step with Start, Revise and Not now; once started the same card shows which step it is on and what it is doing, and becomes Done at the end, with the execution filed under it. Only while the card is out of view does a tab above the composer show the step and one segment per step, and opened it offers Back to the card (11b2e23b4).
