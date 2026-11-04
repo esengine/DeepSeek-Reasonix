@@ -29,6 +29,7 @@
 - 资源管理器的「改动 / 提交历史 / 文件」三段都能折叠；点「改动」标题进改动页；提交历史默认展开，右边写分支，每条显示短哈希、说明和时间，只有历史分叉时才画分支线（02f5a4432）。
 - 文件页工具栏最右边改为「…」，打开和文件树右键同一份菜单（在系统文件管理器中显示、复制路径、复制引用、加入对话）；文件页的 Diff 改为新旧两列行号、保留 @@ 段落标题，和改动页一致（f7252b773）。
 - 工作台页签：未保存的文件在关闭按钮的位置显示圆点，悬停才出现关闭；模型正在操作的网页在名字后面有蓝点；Go、Python、表格文件图标分色；放不下的页签折成「+n」列表。新开的页签展开进来、关闭时收窄消失、切换时内容淡入（d988b81a4）。
+- 关闭有未保存内容的文件页签时会先问「保存 / 不保存 / 取消」；工作台打开时从右边滑入，用右上角关闭时滑出（89a079158）。
 
 ---
 <!-- lang:en -->
@@ -64,3 +65,4 @@
 - The explorer's Changes / History / Files sections each fold; the Changes title opens the changes page; History is open from the start with the branch on the right and each commit as its short hash, subject and age, drawing lanes only when history forks (02f5a4432).
 - The file toolbar ends in "…", opening the same menu as the tree's right-click (reveal, copy path, copy reference, add to conversation); the file page's Diff numbers each line before and after and keeps the @@ headers, as the changes page does (f7252b773).
 - Workbench tabs: an unsaved file shows a dot in place of its close button until hovered; the page the model works on keeps a blue dot after its name; Go, Python and sheet icons are coloured apart; tabs that do not fit fold into "+n". New tabs grow in, closing ones narrow away, and switching fades the page in (d988b81a4).
+- Closing a file tab with unsaved text asks first: Save / Don't save / Cancel; the workbench slides in from the right when opened and out when closed from its own button (89a079158).
