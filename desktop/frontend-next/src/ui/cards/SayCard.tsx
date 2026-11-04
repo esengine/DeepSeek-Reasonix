@@ -17,6 +17,8 @@ import { useShown } from "../shown";
 import { ReplyMenu } from "./ReplyMenu";
 import { useDismiss } from "../dismiss";
 import { pinToViewport } from "../place";
+import { copySelection, SelectionBar } from "../SelectionBar";
+import { useSelectionBar } from "../useSelectionBar";
 import type { LocalRefs } from "../Markdown";
 
 // Folded, the only thing left of a thought is how much of the turn it was. The
@@ -136,6 +138,7 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
     setSelection(null);
   }, []);
   useDismiss(!!selection, selectionMenu, closeSelection);
+  const bar = useSelectionBar(answer, selectedIn);
   const offerSelection = (x: number, y: number) => {
     if (!item.done || !reply) return false;
     const text = selectedIn(answer.current);
@@ -146,6 +149,7 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
       y = rect.bottom;
     }
     setMenu("");
+    bar.clear();
     setSelection({ text, x, y });
     return true;
   };
@@ -200,7 +204,8 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
           )}
           {item.text && (
             <div className="txt" ref={answer} tabIndex={item.done && reply ? 0 : undefined}
-              data-action-contextmenu="reply.selection.menu" data-action-keydown="reply.selection.menu" data-target={item.id}
+              data-action-contextmenu="reply.selection.menu" data-action-keydown="reply.selection.menu" data-action-mouseup="reply.selection.bar" data-target={item.id}
+              onMouseUp={() => { if (item.done && reply) bar.settle(); }}
               onContextMenu={(e) => {
                 if (!offerSelection(e.clientX, e.clientY)) return;
                 e.preventDefault();
@@ -281,6 +286,18 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
           )}
         </div>
       </div>
+      {bar.at && reply && !selection && (
+        <SelectionBar at={bar.at}>
+          <button type="button" data-action-click="reply.quote" data-action-mousedown="reply.quote" data-target={item.id}
+            onMouseDown={(e) => e.preventDefault()} onClick={() => { reply.onQuote(bar.at!.text, item.id); bar.clear(); }}>
+            <StudioIcon name="quote" /><span>{t("common.quote_selected_text")}</span>
+          </button>
+          <button type="button" data-action-click="reply.selection.copy" data-action-mousedown="reply.selection.copy" data-target={item.id}
+            onMouseDown={(e) => e.preventDefault()} onClick={() => { copySelection(bar.at!.text); bar.clear(); }}>
+            <StudioIcon name="copy" /><span>{t("chat.copy_selected_text")}</span>
+          </button>
+        </SelectionBar>
+      )}
       {selection && reply && createPortal(
         <div className="acts-pop" role="menu" aria-label={t("chat.selected_text")} data-action-keydown="reply.selection.menu" data-target={item.id} ref={(el) => {
           selectionMenu.current = el;

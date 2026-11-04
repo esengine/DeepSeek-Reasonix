@@ -633,6 +633,8 @@ export const ACTIONS: UIAction[] = [
   { id: "reply.quote", kind: "view", target: "entity", proof: "interaction" },
   { id: "reply.branch", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "reply.selection.menu", kind: "view", target: "entity", proof: "interaction" },
+  { id: "reply.selection.bar", kind: "view", target: "entity", proof: "interaction" },
+  { id: "reply.selection.copy", kind: "shell-native", target: "entity", proof: "interaction" },
   { id: "reply.retry", kind: "view", target: "entity", proof: "interaction" },
   { id: "reply.retry-now", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "reply.configure", kind: "view", target: "none", proof: "interaction" },

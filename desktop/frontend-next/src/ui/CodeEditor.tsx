@@ -22,7 +22,8 @@ import { tags } from "@lezer/highlight";
 import { t } from "../i18n";
 import { editorTextSession } from "./workbench_editor_menu";
 import { textMenuKey, type OfferTextMenu } from "./workbench_text_menu";
-import { EditorSelectionTools, type SelectionTools } from "./EditorSelectionTools";
+import { copySelection, SelectionBar, type SelectionAt } from "./SelectionBar";
+import { StudioIcon } from "./StudioIcon";
 
 // Loaded per file, so opening a Go file does not pay for every other grammar.
 const LANGUAGE: Record<string, () => Promise<Extension>> = {
@@ -138,7 +139,7 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
   const view = useRef<EditorView | null>(null);
   const handlers = useRef({ onChange, onSave, onTextContextMenu, onLine, onQuote });
   handlers.current = { onChange, onSave, onTextContextMenu, onLine, onQuote };
-  const [tools, setTools] = useState<SelectionTools | null>(null);
+  const [tools, setTools] = useState<SelectionAt & { from: number; to: number } | null>(null);
   const toolTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(toolTimer.current), []);
   const language = useRef(new Compartment());
@@ -195,12 +196,12 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
             // Once the selection settles: a drag moves it every frame.
             toolTimer.current = setTimeout(() => {
               try {
-                const at = update.view.coordsAtPos(sel.to);
+                const at = update.view.coordsAtPos(sel.from);
                 if (!at) return;
                 const doc = update.state.doc;
                 // A selection ending at a line's first column covers none of that line.
                 const last = doc.lineAt(sel.to).from === sel.to ? sel.to - 1 : sel.to;
-                setTools({ x: at.left, y: at.bottom + 6, from: doc.lineAt(sel.from).number, to: doc.lineAt(last).number, text: update.state.sliceDoc(sel.from, sel.to) });
+                setTools({ x: at.left, top: at.top, bottom: at.bottom, floor: update.view.scrollDOM.getBoundingClientRect().top, from: doc.lineAt(sel.from).number, to: doc.lineAt(last).number, text: update.state.sliceDoc(sel.from, sel.to) });
               } catch {
                 setTools(null);
               }
@@ -251,7 +252,18 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
   return (
     <>
       <div className="workbench-editor" ref={host} aria-label={t("workbench.file_contents")} />
-      {tools && onQuote && <EditorSelectionTools tools={tools} onQuote={onQuote} onDone={() => setTools(null)} />}
+      {tools && onQuote && (
+        <SelectionBar at={tools} note={tools.from === tools.to ? t("workbench.line_n", { n: tools.from }) : t("workbench.lines_a_b", { a: tools.from, b: tools.to })}>
+          <button type="button" data-action-click="workbench.quote-selection" data-action-mousedown="workbench.quote-selection"
+            onMouseDown={(e) => e.preventDefault()} onClick={() => { onQuote(tools.text); setTools(null); }}>
+            <StudioIcon name="quote" /><span>{t("workbench.add_to_conversation")}</span>
+          </button>
+          <button type="button" data-action-click="workbench.text-copy" data-action-mousedown="workbench.text-copy"
+            onMouseDown={(e) => e.preventDefault()} onClick={() => { copySelection(tools.text); setTools(null); }}>
+            <StudioIcon name="copy" /><span>{t("common.copy")}</span>
+          </button>
+        </SelectionBar>
+      )}
     </>
   );
 }

@@ -1,0 +1,17 @@
+.sel-tools {
+  position: fixed; z-index: 60; display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
+  transform: translateY(-100%); animation: sel-tools-in var(--t-line) ease-out;
+}
+.sel-tools[data-below] { transform: none; animation-name: sel-tools-under; }
+.sel-tools > button {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; box-sizing: border-box;
+  border: 1px solid transparent; border-radius: var(--r-pill); background: transparent; color: var(--muted);
+  font: var(--w-med) var(--fs-meta) var(--ui); white-space: nowrap; cursor: pointer;
+}
+.sel-tools > button:hover { background: var(--overlay); color: var(--text); }
+.sel-tools > button .studio-icon { width: 13px; height: 13px; }
+.sel-tools > small { padding: 0 6px 0 4px; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); white-space: nowrap; }
+@keyframes sel-tools-in { from { opacity: 0; transform: translateY(calc(-100% + 3px)); } }
+@keyframes sel-tools-under { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .sel-tools { animation: none; } }

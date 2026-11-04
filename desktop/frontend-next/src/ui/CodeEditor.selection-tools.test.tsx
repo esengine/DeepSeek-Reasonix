@@ -30,7 +30,7 @@ it("offers the selected lines to the conversation once the selection settles", (
   expect(screen.queryByRole("toolbar")).toBeNull();
   settle();
   const add = screen.getByRole("button", { name: /加入对话/ });
-  expect(add.textContent).toContain("第 2–3 行");
+  expect(screen.getByRole("toolbar").textContent).toContain("第 2–3 行");
   fireEvent.click(add);
   expect(onQuote).toHaveBeenCalledWith("two\nthree");
   expect(screen.queryByRole("toolbar")).toBeNull();
@@ -63,4 +63,17 @@ it("shows nothing where no conversation takes a quote", () => {
   select(0, 3);
   settle();
   expect(screen.queryByRole("toolbar")).toBeNull();
+});
+
+it("sits above the selection, and drops below only where the top has no room", () => {
+  mount();
+  select(0, 3);
+  settle();
+  expect(screen.getByRole("toolbar").hasAttribute("data-below")).toBe(true);
+  vi.spyOn(EditorView.prototype, "coordsAtPos").mockReturnValue({ left: 40, right: 41, top: 200, bottom: 214 });
+  select(4, 7);
+  settle();
+  const bar = screen.getByRole("toolbar");
+  expect(bar.hasAttribute("data-below")).toBe(false);
+  expect(bar.style.top).toBe("194px");
 });

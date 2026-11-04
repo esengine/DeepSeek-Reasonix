@@ -252,17 +252,3 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
 .tabmenu > button[role="menuitem"]:disabled > .studio-icon { color: var(--ghost); }
 .tabmenu > hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--hair); }
 
-.editor-tools {
-  position: fixed; z-index: 60; display: flex; gap: 2px; padding: 3px;
-  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
-  animation: editor-tools-in var(--t-line) ease-out;
-}
-.editor-tools > button {
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 0; border-radius: var(--r-sm);
-  background: none; color: var(--text); font: var(--w-reg) var(--fs-ui)/1.3 var(--ui); white-space: nowrap; cursor: pointer;
-}
-.editor-tools > button:hover { background: var(--float-hi); }
-.editor-tools > button + button { box-shadow: -1px 0 0 var(--hair); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
-.editor-tools small { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--mono); }
-@keyframes editor-tools-in { from { opacity: 0; transform: translateY(-3px); } }
-@media (prefers-reduced-motion: reduce) { .editor-tools { animation: none; } }
