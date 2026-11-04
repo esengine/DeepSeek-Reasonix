@@ -36,8 +36,20 @@ describe("the deck readings", () => {
   it("count only what is live, and read 0 when everything has ended", () => {
     expect(draw([], [job()]).querySelector('[data-action="deck.jobs"] b')?.textContent).toBe("1");
     const settled = draw([], [job({ status: "exited" })]);
-    expect(settled.querySelector('[data-action="deck.jobs"] b')?.textContent).toBe("0");
+    expect(settled.querySelector('[data-action="deck.jobs"] b')?.textContent).toBe("1");
+    expect(settled.querySelector('[data-action="deck.jobs"] span')?.textContent).toBe("个后台任务已结束");
     expect(settled.querySelector('[data-action="deck.jobs"]')?.hasAttribute("data-live")).toBe(false);
+  });
+
+  it("reads how many jobs are running, then how many failed once none is", () => {
+    const running = draw([], [job(), job({ id: "j2", status: "failed" })]);
+    expect(running.querySelector('[data-action="deck.jobs"] span')?.textContent).toBe("个后台任务在跑");
+    cleanup();
+    const failed = draw([], [job({ status: "failed" }), job({ id: "j2", status: "failed" }), job({ id: "j3", status: "done" })]);
+    const chip = failed.querySelector('[data-action="deck.jobs"]')!;
+    expect(chip.querySelector("b")?.textContent).toBe("2");
+    expect(chip.querySelector("span")?.textContent).toBe("个后台任务失败了");
+    expect(chip.getAttribute("data-failed")).toBe("");
   });
 
   it("count sub-agents the same way: running ones on the chip, all of them in the popover", () => {

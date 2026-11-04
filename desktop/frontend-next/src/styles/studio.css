@@ -2006,6 +2006,9 @@ button, input, textarea { font-size: var(--fs-ui); }
 .job-stop:disabled { opacity: .45; cursor: default; }
 @media (pointer: coarse) { .job-stop { width: 32px; height: 32px; margin: -8px -8px -8px 0; } }
 .studio-deckchip b { font: var(--w-med) var(--fs-micro)/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.studio-deckchip[data-failed] { color: var(--err-ink); }
+.studio-deckchip[data-failed] b,
+.studio-deckchip[data-failed] .studio-icon { color: var(--err-ink); }
 .studio-deckchip:hover,
 .studio-deckchip[aria-expanded="true"] { color: var(--text); background: var(--overlay); border-color: var(--hair); }
 /* Live is the one thing here worth a moving mark: work is happening that this

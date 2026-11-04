@@ -40,6 +40,7 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
   useDismiss(open === "jobs", jobsBox, shut);
   const liveAgents = useMemo(() => agentsIn(tasks.filter((x) => x.running)), [tasks]);
   const liveJobs = useMemo(() => jobs.filter((j) => j.status === "running").length, [jobs]);
+  const failedJobs = useMemo(() => jobs.filter((j) => j.status === "failed").length, [jobs]);
   if (tasks.length === 0 && jobs.length === 0) return null;
 
   return (
@@ -79,13 +80,14 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             aria-label={t("后台任务")}
             title={t("后台任务")}
             data-live={liveJobs ? "" : undefined}
+            data-failed={!liveJobs && failedJobs ? "" : undefined}
             aria-expanded={open === "jobs"}
             aria-haspopup="dialog"
             onClick={() => onOpen((was) => (was === "jobs" ? "" : "jobs"))}
           >
             <StudioIcon name="play" />
-            <b>{liveJobs}</b>
-            <span>{t("后台任务")}</span>
+            <b>{liveJobs || failedJobs || jobs.length}</b>
+            <span>{liveJobs ? t("个后台任务在跑") : failedJobs ? t("个后台任务失败了") : t("个后台任务已结束")}</span>
           </button>
           <div className="studio-deck-pop" role="dialog" aria-label={t("后台任务")}>
             <Jobs jobs={jobs} onCancel={onCancelJob} onView={onReadJob ? (id) => { shut(); setViewingJob(id); } : undefined} />
