@@ -321,6 +321,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // 决定，和它有没有被渲染过无关。
   const found = useSettingsSearch(query, shown, remoteBook);
   // 落点：跳过去之后短暂标一下「就是这里」。这是导航反馈，不是状态变化。
+  const pathOf = (section: Section) => {
+    const home = pageHome(section);
+    const page = t(SECTION_NAME[home] ?? home);
+    return home === section ? page : `${page} › ${t(SECTION_NAME[section] ?? section)}`;
+  };
   const go = (requested: Section, anchor: string) => {
     const section = pageHome(requested);
     navigation.leave(() => {
@@ -392,7 +397,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                   data-target={e.anchor}
                   onClick={() => go(e.section, e.anchor)}
                 >
-                  <span className="where">{t(SECTION_NAME[e.section] ?? e.section)}</span>
+                  <span className="where">{pathOf(e.section)}</span>
                   <span className="what">{t(e.title)}</span>
                   {/* Search is where a setting is met with no page around it,
                       so it is where ownership is worth most: "代理" turning up

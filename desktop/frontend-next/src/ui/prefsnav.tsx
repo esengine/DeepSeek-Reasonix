@@ -353,7 +353,7 @@ export const SECTION_NAME: Partial<Record<Section, string>> = {
 // Title, aliases, and the page it is on. An alias is a way in and nothing
 // more: it never becomes the setting's name and no judgement reads it.
 export function settingMatches(e: SettingEntry, q: string): boolean {
-  if ([e.title, SECTION_NAME[e.section] ?? ""].some((name) =>
+  if ([e.title, SECTION_NAME[e.section] ?? "", SECTION_NAME[pageHome(e.section)] ?? ""].some((name) =>
     name.toLowerCase().includes(q) || t(name).toLowerCase().includes(q),
   )) return true;
   return (e.keywords ?? []).some((k) => k.toLowerCase().includes(q));
