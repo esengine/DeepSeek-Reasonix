@@ -173,6 +173,6 @@ export function History({ list, current, busy, onRestore }: {
 
 function clipBody(s: string | undefined): string {
   const body = (s ?? "").trim();
-  if (!body) return "memory.no_body";
+  if (!body) return t("memory.no_body");
   return body.length > 200 ? body.slice(0, 200) + "…" : body;
 }

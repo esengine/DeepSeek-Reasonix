@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Queue } from "./Queue";
 import { BLOCK_WHY } from "../i18n/queue_why";
-import { EN } from "../i18n/en";
+import { EN as LEGACY } from "../i18n/en";
+import { catalogue } from "../i18n/msg";
+
+const EN: Record<string, string> = { ...LEGACY, ...catalogue("en") };
+const ZH = catalogue("zh");
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 
 const item = (over: Partial<QueueItem> = {}): QueueItem => ({
@@ -88,7 +92,7 @@ describe("why a held entry stopped", () => {
 
   it.each(Object.entries(BLOCK_WHY))("%s reads in Chinese and has an English sentence", (code, zh) => {
     const html = held({ blockCode: code, blockReason: "kernel diagnostic" });
-    expect(html).toContain(zh);
+    expect(html).toContain(ZH[zh] ?? zh);
     expect(html).not.toContain("kernel diagnostic");
     expect(EN[zh], `no English for ${code}`).toBeTruthy();
     expect(EN[zh]).not.toBe(zh);

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useCallback, useMemo, useState } from "react";
 import type { HostCapabilities, HubPort, TreeWorkspace } from "../port/hub";
 
@@ -33,7 +34,7 @@ export function useAddWorkspace(
         .catch(() => LEGACY_CAPABILITIES)
         .then(async (capabilities) => {
           if (!capabilities.addWorkspace) {
-            throw new Error("app.this_kernel_does_not_support");
+            throw new Error(t("app.this_kernel_does_not_support"));
           }
           if (!capabilities.pickFolder) {
             setPathOpen(true);

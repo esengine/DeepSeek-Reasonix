@@ -20,10 +20,10 @@ for (const route of ["local", "receipt"] as const) {
   describe(`${route} question answer`, () => {
     it.each(["fresh", "settled"] as const)("returns an idle %s session to idle without inventing a running turn", (prior) => {
       const waiting = reduce(prior === "fresh" ? initialState : settled(), request);
-      expect(chipLabel(waiting, false)).toBe("等待你回答");
+      expect(chipLabel(waiting, false)).toBe("app.waiting_for_your_answer");
       const done = answer(waiting, route);
       expect(done.running).toBe(false);
-      expect(chipLabel(done, false)).toBe("空闲");
+      expect(chipLabel(done, false)).toBe("app.idle");
       expect(done.items.find((i) => i.t === "ask")).toMatchObject({ answered: route === "local" ? [["Native SDK"]] : [] });
     });
 
@@ -31,13 +31,13 @@ for (const route of ["local", "receipt"] as const) {
       const waiting = reduce(reduce(initialState, { kind: "turn_started" }), request);
       const resumed = answer(waiting, route);
       expect(resumed.running).toBe(true);
-      expect(chipLabel(resumed, true)).toBe("运行中");
+      expect(chipLabel(resumed, true)).toBe("common.running");
     });
 
     it("lets the current status identify a paired turn that missed turn_started", () => {
       const resumed = answer(reduce(settled(), request), route);
       expect(resumed.running).toBe(false);
-      expect(chipLabel(resumed, true)).toBe("运行中");
+      expect(chipLabel(resumed, true)).toBe("common.running");
     });
   });
 }
@@ -45,13 +45,13 @@ for (const route of ["local", "receipt"] as const) {
 it("keeps a local answer when its receipt arrives afterward", () => {
   const answered = answer(reduce(settled(), request), "local");
   const replayed = reduce(answered, receipt);
-  expect(chipLabel(replayed, false)).toBe("空闲");
+  expect(chipLabel(replayed, false)).toBe("app.idle");
   expect(replayed.items.find((i) => i.t === "ask")).toMatchObject({ answered: [["Native SDK"]], answeredElsewhere: false });
 });
 
 it("ignores a receipt that belongs to another question", () => {
   const waiting = reduce(settled(), request);
   const unrelated = reduce(waiting, { kind: "notice", decisionReceipt: { id: "other", kind: "ask", subject: "other", outcome: "answered" } });
-  expect(chipLabel(unrelated, false)).toBe("等待你回答");
+  expect(chipLabel(unrelated, false)).toBe("app.waiting_for_your_answer");
   expect(unrelated.items.find((i) => i.t === "ask")).not.toHaveProperty("answered");
 });

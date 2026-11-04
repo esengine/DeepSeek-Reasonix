@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { EN } from "../i18n/en";
+import { EN as LEGACY } from "../i18n/en";
+import { catalogue } from "../i18n/msg";
+
+const EN: Record<string, string> = { ...LEGACY, ...catalogue("en") };
 
 // MCP_STATE is a lookup table rather than a t() call, so the catalogue test
 // beside this one never sees it: that test reads the arguments of t()/tx()/

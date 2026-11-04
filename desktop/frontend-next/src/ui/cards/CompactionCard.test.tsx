@@ -3,7 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CompactionCard } from "./CompactionCard";
 import type { Compaction } from "../../port/wire";
 import { FOLD_WHY, NO_CODE_WHY } from "../../i18n/compaction_why";
-import { EN } from "../../i18n/en";
+import { EN as LEGACY } from "../../i18n/en";
+import { catalogue } from "../../i18n/msg";
+
+const EN: Record<string, string> = { ...LEGACY, ...catalogue("en") };
 
 const draw = (c: Compaction) => renderToStaticMarkup(<CompactionCard c={c} done />);
 
