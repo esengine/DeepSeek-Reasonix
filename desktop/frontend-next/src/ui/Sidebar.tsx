@@ -10,7 +10,7 @@ import type { Adder } from "./addws";
 import { AccountRow } from "./AccountRow";
 import { ContentMatches } from "./ContentMatches";
 import { useDestinations } from "./navdest";
-import { ICON, NAV, SETTINGS, type Section } from "./prefsnav";
+import { ICON, SECTION_NAME, SETTINGS, type Section } from "./prefsnav";
 import { RailSearch } from "./railsearch";
 import { RemoteHosts, remoteProjectKey, remoteWorkspaces } from "./RemoteHosts";
 import { remoteProjects } from "./remoteProjects";
@@ -158,8 +158,7 @@ export function Sidebar({
     return runtime?.host ? onOpenRemote(runtime.host, runtime.root) : onOpen({ root: newSessionRoot });
   };
   const paletteSettings = useMemo(() => {
-    const names = new Map(NAV.flatMap(([, items]) => items));
-    return SETTINGS.filter((x) => !x.hidden).map((x) => ({ id: `${x.section}:${x.anchor}`, label: t(x.title), path: t(names.get(x.section) ?? x.section), keywords: (x.keywords ?? []).join(" ") }));
+    return SETTINGS.filter((x) => !x.hidden).map((x) => ({ id: `${x.section}:${x.anchor}`, label: t(x.title), path: t(SECTION_NAME[x.section] ?? x.section), keywords: (x.keywords ?? []).join(" ") }));
   }, []);
   const scopeCounts = useMemo(() => {
     const open = tree.flatMap((ws) => ws.sessions).filter((x) => !x.archived);

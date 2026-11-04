@@ -711,7 +711,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
           {at === "network" && <TraceExport port={port} />}
 
-          {at === "remote" && (
+          {at === "network" && shown("remote") && (
             <Group id="remote"
               title={t("远程")}
               hint={t("接入另一台机器上的工作区：内核在远程运行，界面仍在本机。远程面板与本地面板并排显示，每处都会标明所在的机器。")}
@@ -719,9 +719,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <Remotes hub={hub} onError={onError} />
             </Group>
           )}
-          {at === "remote" && <PhoneAccess hub={hub} onError={onError} />}
-          {at === "remote" && <PhoneNotifications hub={hub} port={port} onError={onError} />}
-          {at === "remote" && remoteDeviceId() && <PhoneReminders host={remoteDeviceId()!} />}
+          {at === "network" && shown("remote") && <PhoneAccess hub={hub} onError={onError} />}
+          {at === "network" && shown("remote") && <PhoneNotifications hub={hub} port={port} onError={onError} />}
+          {at === "network" && shown("remote") && remoteDeviceId() && <PhoneReminders host={remoteDeviceId()!} />}
 
           {at === "account" && (
             <Group id="account"
