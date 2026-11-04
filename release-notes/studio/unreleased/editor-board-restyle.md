@@ -31,6 +31,7 @@
 - 工作台页签：未保存的文件在关闭按钮的位置显示圆点，悬停才出现关闭；模型正在操作的网页在名字后面有蓝点；Go、Python、表格文件图标分色；放不下的页签折成「+n」列表。新开的页签展开进来、关闭时收窄消失、切换时内容淡入（d988b81a4）。
 - 关闭有未保存内容的文件页签时会先问「保存 / 不保存 / 取消」；工作台打开时从右边滑入，用右上角关闭时滑出（89a079158）。
 - 工作台的空状态和出错页统一为卡片：文件已不在原处（可重新读取或关闭页签）、文件太大无法预览（写明大小和上限，可用系统应用打开）、不是 git 仓库、网页打不开（756ea1428）。
+- 文件右键菜单顶部写明文件和所在目录，「加入对话」放第一，「复制引用」右边显示会复制的 @引用，每项带图标；复制成功后底部提示「已复制 …」。浏览器标签菜单写明是哪个标签，每个关闭选项右边写会关掉几个（a928ebda4）。
 
 ---
 <!-- lang:en -->
@@ -68,3 +69,4 @@
 - Workbench tabs: an unsaved file shows a dot in place of its close button until hovered; the page the model works on keeps a blue dot after its name; Go, Python and sheet icons are coloured apart; tabs that do not fit fold into "+n". New tabs grow in, closing ones narrow away, and switching fades the page in (d988b81a4).
 - Closing a file tab with unsaved text asks first: Save / Don't save / Cancel; the workbench slides in from the right when opened and out when closed from its own button (89a079158).
 - The workbench's empty and failed states are one card: a file that is gone (read again or close the tab), a file too large to preview (its size and the limit, open in the system app), a folder without git, a page that would not load (756ea1428).
+- The file menu names the file and its folder, leads with Add to conversation, shows the @reference Copy reference will copy, and gives each item an icon; a copy confirms itself at the bottom. The browser tab menu names its tab and shows how many tabs each close choice closes (a928ebda4).
