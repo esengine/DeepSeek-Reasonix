@@ -66,8 +66,12 @@ export function SettingsTitle({ at }: { at: Section }) {
     <div className="prefs-pagetitle">
       {group?.[0] && <span className="group">{t(group[0])}</span>}
       <h2>{t(name)}</h2>
-      {count > 0 && <span className="count">{t("{n} 项", { n: count })}</span>}
-      {desc && <p className="desc">{t(desc)}</p>}
+      {(desc || count > 0) && (
+        <span className="desc">
+          {desc && <span className="what">{t(desc)}</span>}
+          {count > 0 && <span className="count">{t("{n} 项", { n: count })}</span>}
+        </span>
+      )}
     </div>
   );
 }

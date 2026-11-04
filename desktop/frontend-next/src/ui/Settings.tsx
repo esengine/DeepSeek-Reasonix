@@ -451,9 +451,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
           {at === "session" && (
             <>
-              <Group id="preset" title={t("完成标准")} now={preset} hint={t("系统根据任务风险自动决定需要的验证程度，不再要求手动选择均衡或交付。")}>
-                <p className="note">{t("日常问答保持轻量；涉及文件修改、代码执行或明确交付物时自动增加验证与复核。")}</p>
-              </Group>
+              <AgentPresets port={port} focusPersona={landed === "persona"} />
+              <SectionCard title={t("计划与提问")} hint={t("计划怎么批、提问等多久、什么算完成")}>
               {/* An on/off that reverses by clicking again is a switch, not two
                   options — the same control the recipes and the sandbox's
                   network egress use. */}
@@ -474,14 +473,25 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                   />
                 </div>
               </Group>
-              <DisplaySettings port={port} />
-              <AskTimeout port={port} />
-              <SessionRef port={port} />
-              <ProgressWatch port={port} />
+              <Group id="plan-approval"
+                title={t("计划批准")}
+                hint={t("计划模式提交计划后，默认等你点批准才开始执行。长时间无人值守的任务可以改成自动批准。")}
+              >
+                <PlanApproval port={port} />
+              </Group>
+                <DisplaySettings port={port} />
+                <AskTimeout port={port} />
+              <Group id="preset" title={t("完成标准")} now={preset} hint={t("系统根据任务风险自动决定需要的验证程度，不再要求手动选择均衡或交付。")}>
+                <p className="note">{t("日常问答保持轻量；涉及文件修改、代码执行或明确交付物时自动增加验证与复核。")}</p>
+              </Group>
+                <ProgressWatch port={port} />
+              </SectionCard>
+              <SectionCard title={t("协作")} hint={t("引用历史会话、会话间消息")}>
+                <SessionRef port={port} />
+                <PeersSection port={port} hub={hub} />
+              </SectionCard>
             </>
           )}
-
-          {at === "session" && <AgentPresets port={port} focusPersona={landed === "persona"} />}
 
           {at === "model" && (
             <>
@@ -574,17 +584,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             </>
           )}
 
-          {at === "session" && <PeersSection port={port} hub={hub} />}
-          {at === "session" && (
-            <>
-              <Group id="plan-approval"
-                title={t("计划批准")}
-                hint={t("计划模式提交计划后，默认等你点批准才开始执行。长时间无人值守的任务可以改成自动批准。")}
-              >
-                <PlanApproval port={port} />
-              </Group>
-            </>
-          )}
           {at === "display" && (
             <>
               <Group id="present-files"
