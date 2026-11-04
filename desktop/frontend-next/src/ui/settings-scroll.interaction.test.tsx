@@ -20,26 +20,26 @@ function draw(at: string, port = new MockPort()) {
 }
 
 it.each([
-  ["appearance", "版本"],
-  ["tools", "会话"],
+  ["appearance", "账号与关于"],
+  ["tools", "Agent 行为"],
 ])("starts the next category at the top after scrolling %s", async (from, to) => {
   draw(from);
   const panel = screen.getByRole("tabpanel");
   panel.scrollTop = 1800;
   panel.scrollLeft = 120;
-  await userEvent.click(screen.getByRole("tab", { name: new RegExp(`^${to}(?!间消息)`) }));
-  expect(screen.getByRole("tab", { name: new RegExp(`^${to}(?!间消息)`), selected: true })).toBeTruthy();
+  await userEvent.click(screen.getByRole("tab", { name: new RegExp(`^${to}`) }));
+  expect(screen.getByRole("tab", { name: new RegExp(`^${to}`), selected: true })).toBeTruthy();
   expect(screen.getByRole("tabpanel").scrollTop).toBe(0);
   expect(screen.getByRole("tabpanel").scrollLeft).toBe(0);
 });
 
 it("starts a keyboard-selected category at the top and keeps focus on its tab", async () => {
   draw("tools");
-  const current = screen.getByRole("tab", { name: /子代理与协作/ });
+  const current = screen.getByRole("tab", { name: /^权限与安全/ });
   current.focus();
   screen.getByRole("tabpanel").scrollTop = 1600;
   await userEvent.keyboard("{ArrowDown}");
-  const next = screen.getByRole("tab", { name: "会话间消息" });
+  const next = screen.getByRole("tab", { name: /^扩展/ });
   expect(next.getAttribute("aria-selected")).toBe("true");
   expect(document.activeElement).toBe(next);
   expect(screen.getByRole("tabpanel").scrollTop).toBe(0);
@@ -52,7 +52,7 @@ it("keeps the current category's scroll and unsaved input when it is selected ag
   await userEvent.type(prefix, "Unsaved draft");
   const panel = screen.getByRole("tabpanel");
   panel.scrollTop = 650;
-  await userEvent.click(screen.getByRole("tab", { name: "人设" }));
+  await userEvent.click(screen.getByRole("tab", { name: /^Agent 行为/ }));
   await userEvent.type(screen.getByRole("textbox", { name: "搜索设置" }), "字体");
   expect(screen.getByRole("tabpanel").scrollTop).toBe(650);
   expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "系统提示词开头" }).value).toBe("Unsaved draft");

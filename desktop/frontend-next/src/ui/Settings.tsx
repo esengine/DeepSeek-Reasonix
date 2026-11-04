@@ -57,6 +57,7 @@ import { ProgressWatch } from "./ProgressWatch";
 import { DisplaySettings } from "./DisplaySettings";
 import { AutoArchive } from "./AutoArchive";
 import { LegacySessionsSection } from "./LegacySessionsSection";
+import { SubHead } from "./SubHead";
 import { AgentPresets } from "./AgentPresets";
 import { Account } from "./Account";
 import { Backup } from "./Backup";
@@ -520,6 +521,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "tools" && (
             <>
+              <SubHead title={t("批准")} />
               <Group id="approval" title={t("工具批准")} now={approval} hint={t("这是 agent 访问文件前的唯一审批入口，被拦截的操作没有其他途径可以绕过。")}>
                 {/* Four rows of label-and-description was 190px for one choice,
                     and it was the only choice in this pane shaped that way. The
@@ -537,23 +539,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                 </div>
                 <p className="note">{approvalNote(status?.toolApprovalMode)}</p>
               </Group>
-              <Group id="present-files"
-                title={t("AI 文件交付卡片")}
-                hint={t("关闭时仍可从文件树、消息链接和历史卡片预览文件。")}
-              >
-                <PresentFiles port={port} />
-              </Group>
               <Group id="external-origin"
                 title={t("外部文字")}
                 hint={t("网页和工具结果里的文字可能是别人写给 agent 的指令。开启后，照抄这些文字的调用先问你。")}
               >
                 <ExternalOrigin port={port} onChanged={onChanged} />
-              </Group>
-              <Group id="plan-approval"
-                title={t("计划批准")}
-                hint={t("计划模式提交计划后，默认等你点批准才开始执行。长时间无人值守的任务可以改成自动批准。")}
-              >
-                <PlanApproval port={port} />
               </Group>
               <Group id="rules"
                 title={t("明确的规则")}
@@ -561,6 +551,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               >
                 <Rules port={port} onChanged={onChanged} />
               </Group><ToolList port={port} />
+              <SubHead title={t("沙箱与执行")} />
               <Group id="sandbox"
                 title={t("沙箱")}
                 hint={t("批准之后可以操作的范围。该限制不依赖 agent 自觉：写入范围由工具实施，命令隔离由操作系统实施。")}
@@ -573,6 +564,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               >
                 <ShellPicker port={port} onChanged={onChanged} />
               </Group>
+              <SubHead title={t("联网与浏览器")} />
               <Group id="browser-tools"
                 title={t("内置浏览器")}
                 hint={t("agent 用来打开和操作网页的工具。该开关单独保存，不受命令行版本浏览器设置的影响。修改会重建运行时，任务运行期间无法变更。")}
@@ -585,6 +577,26 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
 
           {at === "session" && <PeersSection port={port} hub={hub} />}
+          {at === "session" && (
+            <>
+              <Group id="plan-approval"
+                title={t("计划批准")}
+                hint={t("计划模式提交计划后，默认等你点批准才开始执行。长时间无人值守的任务可以改成自动批准。")}
+              >
+                <PlanApproval port={port} />
+              </Group>
+            </>
+          )}
+          {at === "display" && (
+            <>
+              <Group id="present-files"
+                title={t("AI 文件交付卡片")}
+                hint={t("关闭时仍可从文件树、消息链接和历史卡片预览文件。")}
+              >
+                <PresentFiles port={port} />
+              </Group>
+            </>
+          )}
 
           {at === "ext" && (
             <>

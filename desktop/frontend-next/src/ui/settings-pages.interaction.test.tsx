@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import "./testkit";
 import { Settings } from "./Settings";
 import type { SessionStatus } from "../port/port";
@@ -30,54 +29,25 @@ const shown = (id: string) => {
   return !!el && getComputedStyle(el).display !== "none";
 };
 
-describe("pages inside the tools section", () => {
-  it("opens on its first page and shows only what is filed there", async () => {
+describe("the permissions page", () => {
+  it("is one page with sub-headings, and every block is on it", async () => {
     draw("tools");
-    await screen.findByRole("tab", { name: /批准与规则/ });
-    expect(shown("approval")).toBe(true);
-    expect(shown("sandbox")).toBe(false);
-    expect(shown("web-access")).toBe(false);
-  });
-
-  it("moves to another page from the navigation and back", async () => {
-    draw("tools");
-    await userEvent.click(await screen.findByRole("tab", { name: /沙箱与执行/ }));
-    await waitFor(() => expect(shown("sandbox")).toBe(true));
-    expect(shown("approval")).toBe(false);
-    await userEvent.click(screen.getByRole("tab", { name: /批准与规则/ }));
     await waitFor(() => expect(shown("approval")).toBe(true));
-    expect(shown("sandbox")).toBe(false);
+    expect(shown("sandbox")).toBe(true);
+    expect(shown("browser-tools")).toBe(true);
+    expect([...document.querySelectorAll(".prefs-subhead")].map((h) => h.textContent)).toEqual(["批准", "沙箱与执行", "联网与浏览器"]);
+    expect(document.querySelectorAll(".prefs-page")).toHaveLength(0);
   });
 
-  it("starts a newly chosen page at the top", async () => {
-    draw("tools");
-    await screen.findByRole("tab", { name: /沙箱与执行/ });
-    screen.getByRole("tabpanel").scrollTop = 900;
-    await userEvent.click(screen.getByRole("tab", { name: /沙箱与执行/ }));
-    await waitFor(() => expect(shown("sandbox")).toBe(true));
-    expect(screen.getByRole("tabpanel").scrollTop).toBe(0);
-  });
-
-  it("lands on the page a deep link names", async () => {
+  it("lands on a block a deep link names", async () => {
     draw("tools:sandbox");
     await waitFor(() => expect(shown("sandbox")).toBe(true));
-    expect(shown("approval")).toBe(false);
-    expect(screen.getByRole("tab", { name: /沙箱与执行/ }).getAttribute("aria-selected")).toBe("true");
-  });
-
-  it("lands on the page a search result is on", async () => {
-    draw("tools");
-    await userEvent.type(screen.getByRole("textbox", { name: "搜索设置" }), "内置浏览器");
-    await userEvent.click(await screen.findByRole("option", { name: /内置浏览器/ }));
-    await waitFor(() => expect(shown("browser-tools")).toBe(true));
-    expect(shown("approval")).toBe(false);
   });
 
   it("gives a short section no pages", async () => {
     draw("session");
     await waitFor(() => expect(shown("preset")).toBe(true));
     expect(document.querySelectorAll(".prefs-page")).toHaveLength(0);
-    expect(shown("preset")).toBe(true);
   });
 });
 

@@ -7,12 +7,6 @@ export interface SettingPage {
 }
 
 export const PAGES: Partial<Record<Section, readonly SettingPage[]>> = {
-  tools: [
-    { id: "approval", label: "批准与规则", anchors: ["approval", "plan-approval", "external-origin", "rules", "tool-list", "present-files"] },
-    { id: "sandbox", label: "沙箱与执行", anchors: ["sandbox", "shell"] },
-    { id: "web", label: "联网与浏览器", anchors: ["web-access", "browser-tools"] },
-    { id: "subagents", label: "子代理与协作", anchors: ["subagent-claims", "write-lease"] },
-  ],
 };
 
 export const pagesOf = (section: Section): readonly SettingPage[] => PAGES[section] ?? [];

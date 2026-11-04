@@ -866,6 +866,7 @@ export const EN: Record<string, string> = {
   "模型 · 已启用 {on}/{all}": "Models · {on} of {all} enabled",
   "模型": "Models",
   "数据": "Data",
+  "批准": "Approval",
   "对话显示": "Conversation display",
   "操作与性能": "Controls and performance",
   "对话里显示什么、怎么折叠": "What the conversation shows and how it folds",
