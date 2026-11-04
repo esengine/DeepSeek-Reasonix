@@ -17,7 +17,8 @@ import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
-import { PlanApproval, DefaultMode } from "./PlanApproval";
+import { PlanApproval } from "./PlanApproval";
+import { CommonSettings } from "./CommonSettings";
 import { PeersSection } from "./PeersSection";
 import { SessionCoordination } from "./SessionCoordination";
 import type { Section } from "./prefsnav";
@@ -292,6 +293,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // The table of contents is also the status board: the value that matters for
   // each section rides on its own row, so the risky one is legible from here.
   const nav: Record<Section, string> = {
+    common: "",
     session: status?.plan ? t("计划模式") : preset,
     persona: "",
     model: status?.modelRef?.split("/").pop() ?? "—",
@@ -467,7 +469,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                     onClick={() => run("plan", () => port.setPlanMode(!status?.plan))}
                   />
                 </div>
-              </Group><DefaultMode port={port} />
+              </Group>
               <DisplaySettings port={port} />
               <AskTimeout port={port} />
               <SessionRef port={port} />
@@ -755,6 +757,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <Group id="storage" title={t("存储")} hint={t("数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。")}><Storage port={homePort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} /></Group>
             </>
           )}
+
+          {at === "common" && <CommonSettings port={port} homePort={homePort} theme={theme} onTheme={onTheme} look={look} onLook={onLook} />}
 
           {at === "appearance" && (
             <Appearance port={homePort} theme={theme} onTheme={onTheme} contrast={contrast} onContrast={onContrast} weight={weight} onWeight={onWeight} reloadThemes={reloadThemes} look={look} onLook={onLook} />

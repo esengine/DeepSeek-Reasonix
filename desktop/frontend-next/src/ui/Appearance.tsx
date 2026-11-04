@@ -6,11 +6,10 @@ import { ZOOM_PRESETS } from "./zoom";
 import { chord } from "./keys";
 import { host } from "../port/host";
 import { MONO_FAMILIES, TEXT_STEPS, UI_FAMILIES, installed, readSizeOf, readSteps } from "./look";
-import { STORAGE as LANG_KEY, t } from "../i18n";
+import { t } from "../i18n";
 import { pct } from "../i18n/format";
 import { reason } from "../i18n/kernel";
 import { useCrop } from "./useCrop";
-import { Notifications } from "./Notifications";
 import { Folding } from "./Folding";
 import { WindowSection } from "./WindowSection";
 import { LiveGraceSection } from "./LiveGraceSection";
@@ -26,7 +25,6 @@ import { NavEntriesSection } from "./NavEntriesSection";
 import { NavRailSection } from "./NavRailSection";
 import { GraphicsSection } from "./GraphicsSection";
 import { GlobalShortcutSection } from "./GlobalShortcutSection";
-import { SendShortcut } from "./SendShortcut";
 import { RunningMessageSetting } from "./RunningMessageSetting";
 import { KeysSheet } from "./KeysSheet";
 import { SessionTabsSetting } from "./SessionTabsSetting";
@@ -37,15 +35,6 @@ import { ThemeRemove } from "./ThemeRemove";
 import { WallpaperSceneImport } from "./WallpaperSceneImport";
 import { WallpaperVolumeSlider } from "./WallpaperVolumeSlider";
 import { useThemeInventory } from "./useThemeInventory";
-import { ThemeScheduleFields } from "./ThemeScheduleFields";
-
-// "" follows the machine; the rest are explicit, the same shape the light/dark
-// control uses.
-const LANGS: [string, string][] = [
-  ["", "跟随系统"],
-  ["zh", "中文"],
-  ["en", "英文"],
-];
 
 // Exported because the nav rail names the current one next to the tab.
 export const SCHEMES: [string, string][] = [
@@ -106,7 +95,7 @@ const at = (v: number, min: number, max: number) =>
 /** What the picker offers: the kernel's list of wallpaper types. */
 export const WALLPAPER_ACCEPT = "image/png,image/jpeg,image/webp,image/avif,image/gif,video/mp4,video/webm";
 
-export function Appearance({ port, theme, onTheme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
+export function Appearance({ port, theme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
   const { packs, unread, load } = useThemeInventory(port);
   const effects = useSyncExternalStore(onEffectsChange, effectsMode);
 
@@ -206,18 +195,6 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
   const uiFonts = useMemo(() => installed(UI_FAMILIES), []);
   const monoFonts = useMemo(() => installed(MONO_FAMILIES), []);
 
-  // Applying a language under a running tree would mean every memoised
-  // component subscribing to one, for a setting that changes once in a window's
-  // life. Storing it and reloading is the honest trade.
-  const setLang = useCallback(
-    (next: string) => {
-      localStorage.setItem(LANG_KEY, next);
-      onLook({ ...look, language: next });
-      setTimeout(() => location.reload(), 120);
-    },
-    [look, onLook],
-  );
-  const langNow = localStorage.getItem(LANG_KEY) ?? look.language ?? "";
   // Read here rather than inside the summary: these are the same three values
   // the folded blocks render, and a second reading of them is a second answer.
   const changed = [
@@ -234,24 +211,6 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           <span className="t">{failed || unread}</span>
         </div>
       )}
-      <section className="grp" id="set-mode" data-setting="mode">
-        <div className="grp-hd">
-          <h3>{t("明暗")}</h3>
-        </div>
-        <p className="hint">{t("跟随系统时会随系统主题切换；浅色和深色保持固定；定时按本机时间每天切换。")}</p>
-        <div className="grp-items">
-          <div className="seg" data-text role="group" aria-label={t("明暗")}>
-            {SCHEMES.map(([id, name]) => (
-              <button key={id} data-action="appearance.scheme" data-value={id} aria-pressed={theme === id} onClick={() => onTheme(id)}>
-                {t(name)}
-              </button>
-            ))}
-          </div>
-          {theme === "scheduled" && <ThemeScheduleFields />}
-        </div>
-        <ApplyNote id="mode" />
-      </section>
-
       <section className="grp" id="set-scheme" data-setting="scheme">
         <div className="grp-hd">
           <h3>{t("界面主题")}</h3>
@@ -544,25 +503,6 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
         <ApplyNote id="wallpaper" />
       </section>
 
-      <section className="grp" id="set-language" data-setting="language">
-        <div className="grp-hd">
-          <h3>{t("语言")}</h3>
-        </div>
-        <p className="hint">
-          {t("界面显示语言。模型回复所用的语言与此设置无关，将跟随你发送消息时使用的语言。")}
-        </p>
-        <div className="grp-items">
-          <div className="seg" data-text role="group" aria-label={t("语言")}>
-            {LANGS.map(([id, name]) => (
-              <button key={id} data-action="appearance.language" data-value={id} aria-pressed={langNow === id} onClick={() => setLang(id)}>
-                {t(name)}
-              </button>
-            ))}
-          </div>
-          <p className="note">{t("语言更改需重启窗口后生效")}</p>
-        </div>
-        <ApplyNote id="language" />
-      </section>
 
 
       <WindowSection port={port} />
@@ -575,7 +515,6 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
       <SessionQuickSection />
       <NewAnswerSection />
       <GraphicsSection />
-      <SendShortcut />
       <ComposerHintSection />
       <OfficePreviewSection />
       <RunningMessageSetting />
@@ -586,7 +525,6 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
       <SessionTabsSetting />
       <Folding />
       <PlanProgressSection />
-      <Notifications port={port} />
 
       {/* What makes this page read as a console is that all of it arrives at
           once, not that any one control is obscure. The summary says what is

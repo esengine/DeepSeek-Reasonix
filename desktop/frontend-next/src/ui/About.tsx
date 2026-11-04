@@ -5,7 +5,6 @@ import { Community } from "./Community";
 import { Group } from "./Group";
 import { Logs } from "./Logs";
 import { Sponsor } from "./Sponsor";
-import { UpdateMode } from "./UpdateMode";
 import { Versions } from "./Versions";
 
 export function About({ port }: { port: AgentPort }) {
@@ -16,12 +15,6 @@ export function About({ port }: { port: AgentPort }) {
         hint={t("当前安装的版本、可用更新，以及出现问题时如何回退。更新下载好后由你决定何时重启；回退后会固定在所选版本，不再提示新版本。")}
       >
         <Versions port={port} />
-      </Group>
-      <Group id="update-mode"
-        title={t("更新方式")}
-        hint={t("决定窗口自己做不做事：两种方式都不会替你安装新版本，重启始终由你决定。")}
-      >
-        <UpdateMode port={port} />
       </Group>
       <Group id="logs"
         title={t("日志与异常退出记录")}

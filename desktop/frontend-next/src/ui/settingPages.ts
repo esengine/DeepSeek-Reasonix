@@ -14,11 +14,11 @@ export const PAGES: Partial<Record<Section, readonly SettingPage[]>> = {
     { id: "subagents", label: "子代理与协作", anchors: ["subagent-claims", "write-lease"] },
   ],
   appearance: [
-    { id: "look", label: "外观与主题", anchors: ["mode", "scheme", "font", "size", "weight", "contrast", "effects", "wallpaper", "language", "advanced-appearance"] },
+    { id: "look", label: "外观与主题", anchors: ["scheme", "font", "size", "weight", "contrast", "effects", "wallpaper", "advanced-appearance"] },
     { id: "navigation", label: "导航与侧栏", anchors: ["navrail", "naventries", "session-quick-actions", "legacy-sessions", "live-grace", "open-session-limit", "live-stream-budget", "session-tabs"] },
     { id: "conversation", label: "会话显示", anchors: ["new-answer-marker", "composer-hint", "folding", "plan-progress", "office-preview"] },
-    { id: "shortcuts", label: "快捷键", anchors: ["send-shortcut", "running-message-intent", "esc-stop", "global-shortcut", "keys"] },
-    { id: "window", label: "窗口与性能", anchors: ["window", "notify", "page-sleep", "graphics"] },
+    { id: "shortcuts", label: "快捷键", anchors: ["running-message-intent", "esc-stop", "global-shortcut", "keys"] },
+    { id: "window", label: "窗口与性能", anchors: ["window", "page-sleep", "graphics"] },
   ],
 };
 
