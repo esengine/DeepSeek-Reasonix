@@ -6,11 +6,14 @@ export type Surface =
   | { kind: "browser"; tab: BrowserTab }
   | { kind: "file"; path: string }
   | { kind: "agent"; ref: string; name: string }
-  | { kind: "job"; id: string; name: string };
+  | { kind: "job"; id: string; name: string }
+  | { kind: "changes" };
 export function keyOf(s: Surface) {
+  if (s.kind === "changes") return "changes:";
   return `${s.kind}:${s.kind === "manual" || s.kind === "job" ? s.id : s.kind === "browser" ? s.tab.target : s.kind === "agent" ? s.ref : s.path}`;
 }
 export function labelOf(s: Surface, hosts: Record<string, string>) {
+  if (s.kind === "changes") return t("common.changes");
   return s.kind === "manual"
     ? hosts[s.id] || t("workbench.browser")
     : s.kind === "browser"

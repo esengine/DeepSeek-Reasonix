@@ -360,13 +360,17 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     setRevealChanges((n) => n + 1);
     showView("browser");
   }, [showView]);
+  const [revealFiles, setRevealFiles] = useState(0);
   const [toggleFiles, setToggleFiles] = useState(0);
   // The workbench knows whether its explorer is the open one, so a press on
   // Files is handed to it to decide; a column that is not showing is opened.
   const pressFiles = useCallback(() => {
     if (visible && workbench) setToggleFiles((n) => n + 1);
-    else openChanges();
-  }, [visible, workbench, openChanges]);
+    else {
+      setRevealFiles((n) => n + 1);
+      showView("browser");
+    }
+  }, [visible, workbench, showView]);
   useOnBump(filesPulse, pressFiles);
   useOnBump(sessionRef?.n ?? 0, () => sessionRef && setInserted((was) => ({ n: was.n + 1, text: "", session: { id: sessionRef.id, title: sessionRef.title } })));
   useOnBump(viewRequest?.n ?? 0, () => {
@@ -598,7 +602,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             onSurfaces={setSurfaces}
             onActiveFile={onActiveFile}
             scheme={theme === "light" ? "light" : "dark"}
-            changes={tree?.changes ?? []} onTreeChanged={refreshTree} revealChanges={revealChanges} toggleFiles={toggleFiles}
+            changes={tree?.changes ?? []} onTreeChanged={refreshTree} revealChanges={revealChanges} revealFiles={revealFiles} toggleFiles={toggleFiles}
             running={running}
             wrote={counts.wrote}
             remote={!!rt.host}

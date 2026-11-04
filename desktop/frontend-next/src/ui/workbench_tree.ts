@@ -1,4 +1,4 @@
-type TreeRow = {
+export type TreeRow = {
   kind: "folder" | "file";
   path: string;
   name: string;

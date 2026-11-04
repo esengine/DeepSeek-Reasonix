@@ -9,6 +9,8 @@ import { openPage, unseenPageOpenings } from './browser_open';
 const page = { id: 'b1', target: 't1', url: 'https://example.com', title: 'Existing page', active: true };
 const props = { scheme: 'dark' as const, shown: false, changes: [], onSurfaces: vi.fn(), onCloseManual: vi.fn(), onExternal: vi.fn() };
 const filesShown = () => document.querySelector('.workbench-body')!.hasAttribute('data-files');
+// The changed-files pill opens the changes page, which a late browser must not take over.
+const changesShown = () => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.startsWith("改动") ?? false;
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 it('keeps Files visible when late browser tab list announces older followed link', async () => {
   const port = new MockPort();
@@ -17,11 +19,11 @@ it('keeps Files visible when late browser tab list announces older followed link
   const pending = openPage(port, page.url);
   const { rerender } = render(<WorkbenchPanel {...props} port={port} tabs={[]} manual />);
   rerender(<WorkbenchPanel {...props} port={port} tabs={[]} manual revealChanges={1} />);
-  expect(filesShown()).toBe(true);
+  expect(changesShown()).toBe(true);
   await act(async () => { resolve(page); await pending; });
-  expect(filesShown()).toBe(true);
+  expect(changesShown()).toBe(true);
   rerender(<WorkbenchPanel {...props} port={port} tabs={[page]} manual revealChanges={1} />);
-  expect(filesShown()).toBe(true);
+  expect(changesShown()).toBe(true);
 });
 it.each([['workbench.launch-browser'], ['workbench.new', 'workbench.launch-browser']])('keeps Files visible when the browser opened by %j finishes', async (...actions) => {
   vi.spyOn(host(), 'drawsBrowserViews').mockReturnValue(true);
@@ -33,9 +35,9 @@ it.each([['workbench.launch-browser'], ['workbench.new', 'workbench.launch-brows
   for (const action of actions) fireEvent.click(document.querySelector(`[data-action="${action}"]`)!);
   expect(port.browserOpen).toHaveBeenCalledOnce();
   rerender(<WorkbenchPanel {...props} port={port} tabs={[]} manual revealChanges={1} />);
-  expect(filesShown()).toBe(true);
+  expect(changesShown()).toBe(true);
   await act(async () => { resolve(page); await pending; });
-  expect(filesShown()).toBe(true);
+  expect(changesShown()).toBe(true);
 });
 
 import { useState } from 'react';
@@ -85,10 +87,10 @@ it.each([false, true])('ignores superseded user opens while following a new agen
   if (!together) {
     rerender(<WorkbenchPanel {...props} port={port} tabs={[page, later]} manual revealChanges={1} />);
     await act(async () => {});
-    expect(filesShown()).toBe(true);
+    expect(changesShown()).toBe(true);
   }
   rerender(<WorkbenchPanel {...props} port={port} tabs={[agent, page, later]} manual revealChanges={1} />);
-  await waitFor(() => expect(filesShown()).toBe(false));
+  await waitFor(() => expect(changesShown()).toBe(false));
   expect(document.querySelector('[data-target="browser:t3"]')?.closest('[role="tab"]')?.getAttribute('aria-selected')).toBe('true');
 });
 

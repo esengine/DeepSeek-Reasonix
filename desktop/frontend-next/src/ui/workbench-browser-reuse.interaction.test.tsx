@@ -9,7 +9,8 @@ import { openPage } from "./browser_open";
 const page = { id: "b1", target: "t1", url: "https://example.com", title: "User page", active: false };
 const other = { ...page, id: "b2", target: "t2", title: "Agent page", active: true };
 const props = { scheme: "dark" as const, shown: false, changes: [], onSurfaces: vi.fn(), onCloseManual: vi.fn(), onExternal: vi.fn() };
-const filesShown = () => document.querySelector(".workbench-body")!.hasAttribute("data-files");
+// The changed-files pill opens the changes page, which a late browser must not take over.
+const changesShown = () => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.startsWith("改动") ?? false;
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it.each([
@@ -28,9 +29,9 @@ it.each([
   rerender(<WorkbenchPanel {...props} port={port} tabs={[agent, first]} manual revealChanges={1} />);
   if (order === "before") await act(async () => { resolve(first); await pending; });
   await act(async () => {});
-  expect(filesShown()).toBe(true);
+  expect(changesShown()).toBe(true);
   const reused = { ...first, active: true, url: reuse === "navigation" ? "https://example.com/next" : first.url };
   rerender(<WorkbenchPanel {...props} port={port} tabs={[{ ...other, active: false }, reused]} manual revealChanges={1} />);
-  await waitFor(() => expect(filesShown()).toBe(false));
+  await waitFor(() => expect(changesShown()).toBe(false));
   expect(document.querySelector('[data-target="browser:t1"]')?.closest('[role="tab"]')?.getAttribute("aria-selected")).toBe("true");
 });

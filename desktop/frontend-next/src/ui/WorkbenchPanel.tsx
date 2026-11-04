@@ -12,6 +12,8 @@ import { useBrowserSelection } from "./useBrowserSelection";
 import { useColumnOpening } from "./useColumnOpening";
 import { WorkbenchLauncher } from "./WorkbenchLauncher";
 import { WorkbenchStatus } from "./WorkbenchStatus";
+import { WorkbenchFileTree } from "./WorkbenchFileTree";
+import { WorkbenchChangesPage } from "./WorkbenchChangesPage";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
 import { DiffView } from "./cards/DiffView";
 import { useOnBump } from "./useOnBump";
@@ -28,7 +30,6 @@ import { BrowserTabMenu } from "./BrowserTabMenu";
 import { WorkbenchFileMenu, type FileMenu } from "./WorkbenchFileMenu";
 import { useWorkbenchTextMenu } from "./useWorkbenchTextMenu";
 import { WorkbenchGit } from "./WorkbenchGit";
-import { workspaceDrag } from "./filedrag";
 import { useGitRepos } from "./useGitRepos";
 import { WorkbenchExplorerHead } from "./WorkbenchExplorerHead";
 import { WorkbenchFileBar, type FileMode } from "./WorkbenchFileBar";
@@ -67,6 +68,7 @@ export function WorkbenchPanel({
   workspaceRoot = "",
   hub,
   revealChanges = 0,
+  revealFiles = 0,
   toggleFiles = 0,
   onCloseManual,
   onDismiss,
@@ -100,6 +102,8 @@ export function WorkbenchPanel({
   workspaceRoot?: string;
   hub?: Pick<HubPort, "openWith" | "openWithTargets">;
   revealChanges?: number;
+  // Bumped to show the explorer, where revealChanges brings the changes page forward.
+  revealFiles?: number;
   /** A press on the Files button: opens the explorer, or folds it when it is the open one. */
   toggleFiles?: number;
   onCloseManual: () => void;
@@ -131,7 +135,13 @@ export function WorkbenchPanel({
   const [cursor, setCursor] = useState<[string, number]>(["", 1]);
   const chooseFiles = () => { supersede(); setLauncher(false); setShowFiles(true); };
   const toggleExplorer = () => { supersede(); setLauncher(false); setShowFiles((on) => launcher || !on); };
-  useOnBump(revealChanges, chooseFiles);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const openChanges = () => {
+    supersede(); setLauncher(false); setShowFiles(false); setChangesOpen(true);
+    setDismissed((v) => (v.has("changes:") ? new Set([...v].filter((k) => k !== "changes:")) : v)); setSelected("changes:");
+  };
+  useOnBump(revealChanges, openChanges);
+  useOnBump(revealFiles, chooseFiles);
   useOnBump(toggleFiles, toggleExplorer);
   const [query, setQuery] = useState(""),
     [selected, setSelected] = useState("");
@@ -247,7 +257,7 @@ export function WorkbenchPanel({
   const dropBlankStart = useCallback(() => setBrowsers((open) => open.filter((id) => !!visited.current[id])), []);
   const agentNow = useRef(agentTarget);
   agentNow.current = agentTarget;
-  const filesAsk = useMemo(() => ({ revealChanges, fileRequest }), [revealChanges, fileRequest]);
+  const filesAsk = useMemo(() => ({ revealChanges, revealFiles, fileRequest }), [revealChanges, revealFiles, fileRequest]);
   useColumnOpening({ manual, filesAsk, port, agentNow, dropBlankStart, follow, current, setFailed });
   // A page that has just appeared is the one somebody wants to see, whoever
   // opened it: the agent's popup, or a link the person followed, which opens
@@ -288,12 +298,13 @@ export function WorkbenchPanel({
   const surfaces = useMemo<Surface[]>(
     () =>
       [
+        ...(changesOpen ? [{ kind: "changes" } as const] : []),
         ...browsers.map((id) => ({ kind: "manual", id }) as const),
         ...tabs.map((tab) => ({ kind: "browser", tab }) as const),
         ...openFiles.map((path) => ({ kind: "file", path }) as const),
         ...agents,
       ].filter((s) => !dismissed.has(keyOf(s))),
-    [browsers, tabs, openFiles, agents, dismissed],
+    [changesOpen, browsers, tabs, openFiles, agents, dismissed],
   );
   const active =
     surfaces.find((s) => keyOf(s) === selected) ??
@@ -521,8 +532,9 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "job" ? "play" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />}
+              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "job" ? "play" : surface.kind === "changes" ? "branch" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />}
               <span>{labelFor(surface)}</span>
+              {surface.kind === "changes" && changes.length > 0 && <small className="workbench-tab-count">{changes.length}</small>}
             </button>
             )}
             <button
@@ -598,6 +610,10 @@ export function WorkbenchPanel({
               showTabs={false}
               onOpenDocument={(path) => port.openDocument(path)}
             />
+          )}
+          {active?.kind === "changes" && (
+            <WorkbenchChangesPage port={port} changes={changes} branch={gitRepos.repos.find((r) => r.dir === "")?.branch} shown={shown && !launcher && !showFiles}
+              remote={remote} onOpen={(path) => { openFile(path); setMode("diff"); }} onChanged={onTreeChanged} />
           )}
           {active?.kind === "job" && <JobRunView key={active.id} port={port} id={active.id} name={active.name} shown={shown && !launcher && !showFiles} />}
           {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} onShowCall={onShowCall} />}
@@ -721,61 +737,8 @@ export function WorkbenchPanel({
             onChanged={onTreeChanged}
             remote={remote}
           />
-          <div className="workbench-filelist">
-            {rows.map((row) =>
-              row.kind === "folder" ? (
-                <button
-                  className="workbench-tree-row"
-                  data-action-click="workbench.folder"
-                  {...workspaceDrag(workspaceRoot, row.path)}
-                  data-target={row.path}
-                  key={`d:${row.path}`}
-                  style={{ paddingInlineStart: 8 + row.depth * 14 }}
-                  aria-expanded={!collapsed.has(row.path)}
-                  onClick={() => void toggleFolder(row.path)}
-                  data-action-contextmenu="workbench.menu"
-                  onContextMenu={(e) => offerMenu(e, row.path, true)}
-                >
-                  <StudioIcon
-                    name={collapsed.has(row.path) ? "chevron" : "down"}
-                  />
-                  <StudioIcon name="folder" />
-                  <span>{row.name}</span>
-                </button>
-              ) : (
-                <button
-                  className="workbench-tree-row"
-                  data-action-click="workbench.file"
-                  {...workspaceDrag(workspaceRoot, row.path)}
-                  data-target={row.path}
-                  key={row.path}
-                  style={{ paddingInlineStart: 8 + row.depth * 14 }}
-                  title={row.path}
-                  aria-current={
-                    active?.kind === "file" && active.path === row.path
-                      ? "page"
-                      : undefined
-                  }
-                  onClick={() => openFile(row.path)}
-                  data-action-contextmenu="workbench.menu"
-                  onContextMenu={(e) => offerMenu(e, row.path, false)}
-                >
-                  <span />
-                  <StudioIcon name="file" data-kind={fileKind(row.path) || undefined} />
-                  <span>{row.name}</span>
-                  {changes.find((item) => item.path === row.path) && (
-                    <em>
-                      {changes.find((item) => item.path === row.path)?.status ||
-                        "M"}
-                    </em>
-                  )}
-                </button>
-              ),
-            )}
-            {!rows.length && (
-              <p className="workbench-no-files">{t("workbench.no_matching_files")}</p>
-            )}
-          </div>
+          <WorkbenchFileTree rows={rows} collapsed={collapsed} workspaceRoot={workspaceRoot} changes={changes}
+            current={active?.kind === "file" ? active.path : ""} onFolder={(path) => void toggleFolder(path)} onFile={openFile} onMenu={offerMenu} />
           {menu?.scope === scope && shown && (
             <WorkbenchFileMenu key={menu.id} menu={menu} root={workspaceRoot}
               revealable={revealable} platform={platform} onReveal={reveal} onAddToChat={onAddToChat} onClose={closeMenu} />
