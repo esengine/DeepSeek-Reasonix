@@ -22,6 +22,7 @@ beforeEach(async () => {
   sessionStorage.clear();
   localStorage.clear();
   localStorage.setItem(STORAGE, "zh");
+  localStorage.setItem(KEY, "on");
   boot();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   HTMLElement.prototype.setPointerCapture = vi.fn();
@@ -73,7 +74,14 @@ it("offers the tools destination only through the navigation entries, not a seco
   expect(within(screen.getByRole("navigation", { name: "主导航" })).getByRole("button", { name: "工具与权限" })).toBeTruthy();
 });
 
-it("always draws the rail by default, with every entry in it", async () => {
+it("draws no rail until one is chosen", async () => {
+  localStorage.removeItem(KEY);
+  await open();
+  expect(nav()).toBeNull();
+  expect(app().dataset.nav).toBe("off");
+});
+
+it("draws the rail when it is chosen, with every entry in it", async () => {
   await open();
   expect(nav()).not.toBeNull();
   expect(app().dataset.nav).toBe("on");

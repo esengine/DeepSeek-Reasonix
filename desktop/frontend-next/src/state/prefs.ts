@@ -127,7 +127,7 @@ export function setEffectsMode(mode: EffectsMode): void {
 // only while the workspace rail is closed, "off" never. A phone-width window
 // never draws it, whatever this says. "on" and "off" are the two values the
 // earlier on/off switch wrote, so a stored choice reads back as itself; anything
-// unreadable or unset is the default, "on".
+// unreadable or unset is the default, "off".
 const NAV_RAIL_KEY = "rx-nav-rail";
 
 export type NavRailMode = "on" | "collapsed" | "off";
@@ -138,9 +138,9 @@ const navRailListeners = new Set<() => void>();
 export function navRailMode(): NavRailMode {
   try {
     const raw = localStorage.getItem(NAV_RAIL_KEY);
-    return raw === "collapsed" || raw === "off" ? raw : "on";
+    return raw === "collapsed" || raw === "on" ? raw : "off";
   } catch {
-    return "on";
+    return "off";
   }
 }
 

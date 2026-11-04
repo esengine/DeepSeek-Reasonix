@@ -12,7 +12,7 @@ import { NavEntriesSection } from "./NavEntriesSection";
 
 const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onHome: vi.fn(), onRail: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("rx-nav-rail", "on"); });
 afterEach(cleanup);
 
 const rail = () => [...document.querySelectorAll(".nav .navgrp:not(.foot) button")].map((b) => b.getAttribute("aria-label"));

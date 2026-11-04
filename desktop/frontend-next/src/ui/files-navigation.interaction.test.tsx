@@ -11,6 +11,7 @@ import { refresh } from "./viewport";
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  localStorage.setItem("rx-nav-rail", "on");
   localStorage.setItem(STORAGE, "zh");
   boot();
   vi.spyOn(document.body, "clientWidth", "get").mockReturnValue(1440);
