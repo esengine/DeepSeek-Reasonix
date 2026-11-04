@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { t } from "../i18n";
-import { ICON, NAV, type Section } from "./prefsnav";
+import { ICON, NAV, SECTION_DESC, SETTINGS, pageHome, type Section } from "./prefsnav";
 import { arrowTabs } from "./tablist";
 import { pagesOf } from "./settingPages";
 import { UpdateDot } from "./UpdateDot";
@@ -24,7 +24,7 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
         if (rows.length === 0) return null;
         return (
           <Fragment key={group}>
-            <div className="navsec">{t(group)}</div>
+            {group && <div className="navsec">{t(group)}</div>}
             {rows.map(([id, name]) => (
               <Fragment key={id}>
               <button id={`prefs-${id}`} role="tab" title={t(name)}
@@ -58,10 +58,14 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
 export function SettingsTitle({ at }: { at: Section }) {
   const group = NAV.find(([, items]) => items.some(([id]) => id === at));
   const name = group?.[1].find(([id]) => id === at)?.[1] ?? at;
+  const count = SETTINGS.filter((e) => !e.hidden && pageHome(e.section) === at).length;
+  const desc = SECTION_DESC[at];
   return (
     <div className="prefs-pagetitle">
-      {group && <span className="group">{t(group[0])}</span>}
+      {group?.[0] && <span className="group">{t(group[0])}</span>}
       <h2>{t(name)}</h2>
+      {count > 0 && <span className="count">{t("{n} 项", { n: count })}</span>}
+      {desc && <p className="desc">{t(desc)}</p>}
     </div>
   );
 }

@@ -5475,7 +5475,9 @@
     transition-duration: .01ms !important;
   }
 }
-.prefs-pagetitle { display: flex; align-items: baseline; gap: 8px; margin: 0 auto 14px; max-width: 880px; }
+.prefs-pagetitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 auto 14px; max-width: 880px; }
+.prefs-pagetitle .count { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
+.prefs-pagetitle .desc { flex: 1 0 100%; margin: 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .prefs-pagetitle .group { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
 .prefs-pagetitle .group::after { content: "›"; margin-left: 8px; }
 .prefs-pagetitle h2 { margin: 0; color: var(--text); font: var(--w-semi) var(--fs-title)/1.3 var(--ui); }

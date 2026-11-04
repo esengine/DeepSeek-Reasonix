@@ -105,34 +105,33 @@ export const ICON: Record<Section, ReactNode> = {
 // aim at.
 export const NAV: [string, [Section, string][]][] = [
   [
-    "最常改的",
-    [["common", "常用"]],
-  ],
-  [
-    "本轮执行",
+    "",
     [
-      ["session", "Agent 行为"],
+      ["common", "常用"],
       ["model", "模型"],
-      ["tools", "工具与权限"],
+      ["session", "Agent 行为"],
+      ["tools", "权限与安全"],
       ["ext", "扩展"],
-    ],
-  ],
-  [
-    "运行环境",
-    [
-      ["network", "连接"],
-      ["storage", "数据"],
-    ],
-  ],
-  [
-    "这台机器",
-    [
-      ["account", "账号与关于"],
       ["appearance", "外观"],
+      ["storage", "数据"],
+      ["network", "连接"],
+      ["account", "账号与关于"],
       ["advanced", "高级"],
     ],
   ],
 ];
+
+export const SECTION_DESC: Partial<Record<Section, string>> = {
+  common: "最常改的几项放这里，打开设置先看到它们",
+  model: "接哪个服务、每种用途用哪个模型、上下文怎么维护",
+  session: "它怎么想、怎么问你、怎么协作",
+  tools: "它能碰什么：批准、规则、沙箱、联网",
+  ext: "技能、外部工具、插件、自动化",
+  appearance: "明暗、配色、字体、壁纸",
+  storage: "记忆、用量、存储、备份",
+  network: "网络、远程机器、手机",
+  account: "账号、版本、日志、社区",
+};
 
 /** When a change to this setting is in force.
  *
