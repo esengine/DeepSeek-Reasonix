@@ -9,34 +9,33 @@ import type { AgentPort } from "../port/port";
 
 afterEach(cleanup);
 
-const toggle = () => screen.findByRole("switch", { name: "新对话默认进入计划模式" });
+const choice = (name: string) => screen.findByRole("radio", { name });
 
-describe("the default-mode switch", () => {
-  it("starts off, says what it changes and what it leaves alone, and saves the opposite of what it shows", async () => {
+describe("the starting mode choice", () => {
+  it("starts on Agent and saves the plan flag the choice implies", async () => {
     const p = new MockPort() as unknown as AgentPort;
     const save = vi.spyOn(p, "saveDefaultMode");
     render(<DefaultMode port={p} />);
-    const sw = await toggle();
-    expect(sw.getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText(/已有的对话保持它自己的模式/)).toBeTruthy();
-    expect(screen.getByText(/项目配置不能替你改/)).toBeTruthy();
-    await userEvent.click(sw);
+    const agent = await choice("Agent");
+    const plan = await choice("计划");
+    expect(agent.getAttribute("aria-checked")).toBe("true");
+    expect(plan.getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(plan);
     expect(save).toHaveBeenCalledWith(true);
-    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("true"));
-    await userEvent.click(sw);
+    await waitFor(() => expect(plan.getAttribute("aria-checked")).toBe("true"));
+    await userEvent.click(agent);
     expect(save).toHaveBeenLastCalledWith(false);
   });
 
-  it("keeps the switch where it was when the save is refused", async () => {
+  it("keeps the choice where it was when the save is refused", async () => {
     const p = new MockPort() as unknown as AgentPort;
     p.saveDefaultMode = async () => {
       throw new Error("disk full");
     };
     render(<DefaultMode port={p} />);
-    const sw = await toggle();
-    await userEvent.click(sw);
+    await userEvent.click(await choice("计划"));
     await screen.findByText(/disk full/);
-    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect((await choice("Agent")).getAttribute("aria-checked")).toBe("true");
   });
 
   it("says so when the setting cannot be read", async () => {

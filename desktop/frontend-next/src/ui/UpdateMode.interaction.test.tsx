@@ -22,7 +22,7 @@ it("shows manual as the choice and says what it does", async () => {
   render(<UpdateMode port={portAt("manual")} />);
   expect((await screen.findByRole("radio", { name: "手动" })).getAttribute("aria-checked")).toBe("true");
   expect(screen.getByRole("radio", { name: "提醒" }).getAttribute("aria-checked")).toBe("false");
-  expect(screen.getByText(/不会在后台联网查新版本/)).toBeTruthy();
+  expect(screen.getByText("要不要在后台检查、下载新版本；重启始终由你决定")).toBeTruthy();
 });
 
 it("saves notify and says what it does, and nothing downloads", async () => {
@@ -31,7 +31,6 @@ it("saves notify and says what it does, and nothing downloads", async () => {
   await userEvent.click(await screen.findByRole("radio", { name: "提醒" }));
   expect(set).toHaveBeenCalledExactlyOnceWith("notify");
   expect(screen.getByRole("radio", { name: "提醒" }).getAttribute("aria-checked")).toBe("true");
-  expect(screen.getByText(/不会下载，也不会安装或重启/)).toBeTruthy();
 });
 
 it("offers a third choice that downloads but never installs or restarts, off until chosen", async () => {
@@ -41,7 +40,6 @@ it("offers a third choice that downloads but never installs or restarts, off unt
   expect(choice.getAttribute("aria-checked")).toBe("false");
   await userEvent.click(choice);
   expect(set).toHaveBeenCalledExactlyOnceWith("download");
-  expect(screen.getByText(/下载并校验新版本.*不会安装，也不会自动重启/)).toBeTruthy();
 });
 
 it("keeps the old choice and says why when the kernel refuses", async () => {

@@ -539,6 +539,7 @@ export const ACTIONS: UIAction[] = [
   { id: "tray.icon", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "tray.close-to-tray", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.enabled", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "notify.more", kind: "view", target: "none", proof: "interaction" },
   { id: "notify.turn-done", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.approval", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.ask", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

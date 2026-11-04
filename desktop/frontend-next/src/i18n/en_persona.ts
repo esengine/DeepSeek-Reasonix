@@ -1,7 +1,6 @@
 export const EN_PERSONA: Record<string, string> = {
   "人设": "Persona",
   "系统人设": "System persona",
-  "已保存 · 下次会话构建时生效": "Saved · applies at the next session build",
   "下次会话构建时生效": "Applies at the next session build",
   "系统人设决定 agent 的身份：前缀写在系统提示词最前面，后缀写在内置指令之后。保存不会立即重建会话；新会话及现有会话下一次重建（例如切换模型）时生效。":
     "The system persona shapes the agent's identity: the prefix leads the system prompt and the suffix follows the built-in guidance. Saving does not rebuild a session immediately. Changes apply to new sessions and the next rebuild of an existing session, such as a model switch.",

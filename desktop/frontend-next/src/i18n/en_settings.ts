@@ -198,11 +198,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "写入位置由你选择": "You choose where",
   "重建运行时": "Rebuilds the runtime",
   "重启后生效": "Takes effect after a restart",
-  "已保存 · 重启后生效": "Saved · takes effect after a restart",
-  "已保存 · 新开的会话生效": "Saved · applies to sessions opened from now on",
   "新开的会话生效": "Applies to new sessions",
   "下个回合起生效": "Applies from the next turn",
-  "已保存 · 下个回合起生效": "Saved · applies from the next turn",
 
   // ── 设置：分区与导航 ─────────────────────────────────────────────
   "设置分类": "Settings sections",

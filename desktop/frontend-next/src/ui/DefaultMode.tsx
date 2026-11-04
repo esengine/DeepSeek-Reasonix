@@ -1,13 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, DefaultModeSettings } from "../port/port";
-import { Group } from "./Group";
-import { Switch } from "./Switch";
+import { SegChoice, SettingRow } from "./SettingRow";
 
-// One switch over how a new conversation starts: in plan mode, or as usual. Off
-// is the default. It changes only the starting mode; the mode picker still
-// switches it, and a conversation that already exists keeps its own.
+type Start = "agent" | "plan";
+
 export function DefaultMode({ port }: { port: AgentPort }) {
   const [state, setState] = useState<DefaultModeSettings | null>(null);
   const [busy, setBusy] = useState(false);
@@ -20,19 +18,20 @@ export function DefaultMode({ port }: { port: AgentPort }) {
       .catch(() => setState(null));
   }, [port]);
 
-  const group = (body: ReactNode) => (
-    <Group id="default-mode" title={t("新对话的起始模式")} hint={t("新建对话时先进入哪种模式。只影响起点，不会改动已有的对话。")}>
+  const row = (body: React.ReactNode) => (
+    <SettingRow id="default-mode" title={t("新对话的起始模式")} desc={t("新对话一开始用哪种模式")}>
       {body}
-    </Group>
+    </SettingRow>
   );
 
-  if (!state) return group(<div className="empty">{t("无法读取新对话的起始模式设置。")}</div>);
+  if (!state) return row(<span className="srow-desc">{t("无法读取新对话的起始模式设置。")}</span>);
 
-  const flip = async () => {
+  const pick = async (next: Start) => {
+    if ((next === "plan") === state.plan) return;
     setBusy(true);
     setError("");
     try {
-      setState(await port.saveDefaultMode(!state.plan));
+      setState(await port.saveDefaultMode(next === "plan"));
     } catch (e) {
       setError(reason(e));
     } finally {
@@ -40,22 +39,11 @@ export function DefaultMode({ port }: { port: AgentPort }) {
     }
   };
 
-  return group(
-    <div className="box">
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("新对话默认进入计划模式")}</span>
-          <span className="ds">{t("新建的对话先做计划，你批准后才动手。输入框里的模式按钮仍可随时切换；已有的对话保持它自己的模式。默认关闭，只写在你自己的用户配置里，项目配置不能替你改。")}</span>
-        </span>
-        <Switch
-          data-action="default-mode.plan"
-          on={state.plan}
-          busy={busy}
-          label={t("新对话默认进入计划模式")}
-          onClick={() => void flip()}
-        />
-      </div>
-      {error && <div className="why">{error}</div>}
-    </div>,
+  return row(
+    <>
+      <SegChoice<Start> label={t("新对话的起始模式")} value={state.plan ? "plan" : "agent"} disabled={busy} action="default-mode.plan" onPick={(next) => void pick(next)}
+        options={[["agent", t("Agent")], ["plan", t("计划")]]} />
+      {error && <span className="why">{error}</span>}
+    </>,
   );
 }

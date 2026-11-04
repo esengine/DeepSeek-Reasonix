@@ -146,7 +146,7 @@ describe("the settings catalogue", () => {
     const now = renderToStaticMarkup(<Group id="preset" title="X" />);
     const later = renderToStaticMarkup(<Group id="storage" title="X" />);
     expect(now).toContain("立即生效");
-    expect(later).toContain("已保存 · 重启后生效");
+    expect(later).toContain("重启后生效");
     expect(now).not.toContain("重启");
   });
 

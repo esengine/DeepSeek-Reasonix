@@ -18,6 +18,11 @@ function fakePort(answer: NotifyPrefs | null) {
   return { port: { notifyPrefs: async () => held, setNotifyPrefs: set } as unknown as AgentPort, set };
 }
 
+const expand = async (view: ReturnType<typeof render>) => {
+  await waitFor(() => expect(view.container.querySelector('[data-action="notify.more"]')).not.toBeNull());
+  (view.container.querySelector('[data-action="notify.more"]') as HTMLElement).click();
+};
+
 const box = async (answer: NotifyPrefs | null) => {
   const { port, set } = fakePort(answer);
   const view = render(<Notifications port={port} />);
@@ -28,12 +33,13 @@ const box = async (answer: NotifyPrefs | null) => {
 describe("the notifications block", () => {
   it("draws nothing where the kernel has no window to notify from", async () => {
     const { view } = await box(null);
-    await waitFor(() => expect(view.container.querySelector("#set-notify")).toBeNull());
+    await waitFor(() => expect(view.container.querySelector('[data-setting="notify"]')).toBeNull());
   });
 
   it("keeps the five occasions as branches of the one switch", async () => {
     const { view } = await box(OWED);
-    await waitFor(() => expect(view.container.querySelector("#set-notify")).not.toBeNull());
+    await expand(view);
+    await waitFor(() => expect(view.container.querySelector('[data-setting="notify"]')).not.toBeNull());
     const branches = [...view.container.querySelectorAll(".lrow.subrow")];
     expect(branches.length).toBe(5);
     // Off, so the branches are drawn as not currently doing anything rather
@@ -43,6 +49,7 @@ describe("the notifications block", () => {
 
   it("writes what the person asked for and keeps what the host answered", async () => {
     const { view, set } = await box(OWED);
+    await expand(view);
     await waitFor(() => expect(view.container.querySelector('[data-action="notify.enabled"]')).not.toBeNull());
     (view.container.querySelector('[data-action="notify.enabled"]') as HTMLElement).click();
     await waitFor(() => expect(set).toHaveBeenCalledWith({ ...OWED, enabled: true }));
@@ -51,6 +58,7 @@ describe("the notifications block", () => {
 
   it("writes the feedback switch without touching the others", async () => {
     const { view, set } = await box({ ...OWED, enabled: true });
+    await expand(view);
     await waitFor(() => expect(view.container.querySelector('[data-action="notify.feedback-reply"]')).not.toBeNull());
     (view.container.querySelector('[data-action="notify.feedback-reply"]') as HTMLElement).click();
     await waitFor(() => expect(set).toHaveBeenCalledWith({ ...OWED, enabled: true, feedbackReply: false }));
@@ -58,6 +66,7 @@ describe("the notifications block", () => {
 
   it("writes the disk-space switch without touching the others", async () => {
     const { view, set } = await box({ ...OWED, enabled: true });
+    await expand(view);
     await waitFor(() => expect(view.container.querySelector('[data-action="notify.disk-low"]')).not.toBeNull());
     expect(view.container.querySelector('[data-action="notify.disk-low"]')?.getAttribute("aria-checked")).toBe("true");
     (view.container.querySelector('[data-action="notify.disk-low"]') as HTMLElement).click();
@@ -66,6 +75,7 @@ describe("the notifications block", () => {
 
   it("offers the chime as a switch of its own, off by default, that wakes the branches without the toast", async () => {
     const { view, set } = await box(OWED);
+    await expand(view);
     await waitFor(() => expect(view.container.querySelector('[data-action="notify.sound"]')).not.toBeNull());
     expect(view.container.querySelector('[data-action="notify.sound"]')?.getAttribute("aria-checked")).toBe("false");
     (view.container.querySelector('[data-action="notify.sound"]') as HTMLElement).click();

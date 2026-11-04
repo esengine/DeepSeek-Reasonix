@@ -65,8 +65,8 @@ export const SCOPE_SAID: Record<SettingScope, string> = {
 const APPLY_SAID: Record<"immediate" | "runtime-rebuild" | "restart" | "on-open" | "next-turn" | "next-rebuild", string> = {
   immediate: "立即生效",
   "runtime-rebuild": "重建运行时",
-  restart: "已保存 · 重启后生效",
-  "on-open": "已保存 · 新开的会话生效",
-  "next-turn": "已保存 · 下个回合起生效",
-  "next-rebuild": "已保存 · 下次会话构建时生效",
+  restart: "重启后生效",
+  "on-open": "新开的会话生效",
+  "next-turn": "下个回合起生效",
+  "next-rebuild": "下次会话构建时生效",
 };
