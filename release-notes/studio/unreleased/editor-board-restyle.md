@@ -37,6 +37,7 @@
 - 工作台「用其他程序打开」改为分体按钮：左边一下用上次选的程序打开，箭头展开全部；菜单带标题、每个程序一个首字母色块（内核不提供真实图标），「在访达中显示」单独放在分隔线下，底部写明项目路径；什么都没找到时也写明（4f58cfdca）。
 - 内置浏览器里网页或代理要求登录时，对话框按设计稿排版：标题写明站点（代理则写「代理 主机:端口」），右上角关闭，站点提示原样显示，用户名和密码各带标签，锁形图标下说明密码只交给这个网页，底部是「取消 / 登录」（02a930375）。
 - PDF 预览工具条按设计稿：上一页 / 下一页图标按钮，中间页码可直接输入（自动限制在页数内）；缩小 / 放大按固定档位、从适应宽度当下的比例起步，中间显示实际比例；「适应宽度」可切换。PDF 打不开（损坏或需要密码）时显示一条提示和「用系统应用打开」（6e2dd77f7）。
+- Excel / Word 预览按设计稿：顶部常驻「只读」标签和说明，两种都能缩放，Word 另有「适应宽度」；工作表在底部切换，超出行列时在右侧写明。没开启 Office 预览时写明文件名，并给出「用系统应用打开」和「去设置开启预览」两个出路（69e4e002a）。
 
 
 ---
@@ -81,3 +82,4 @@
 - Open-with is a split button: its left half opens the project in the last program chosen, the arrow lists them all. The menu is titled, gives each program an initial tile (the kernel ships no icons), sets Reveal in Finder apart and ends with the project path; an empty list says so (4f58cfdca).
 - The built-in browser's sign-in dialog follows the board: the site (or "proxy host:port") in the title with a close button, the site's prompt as sent, labelled fields, a lock note on where the password goes, and Cancel / Sign in in the footer (02a930375).
 - The PDF toolbar follows the board: icon page buttons around a page box you can type into (held to the page count); zoom steps from whatever fit-width drew, showing the real scale; Fit width toggles. A PDF that cannot be shown (damaged or password-protected) says so with Open in system application (6e2dd77f7).
+- Excel and Word previews follow the board: a read-only tag and note at the top, zoom on both and fit width for Word; sheets switch from a strip at the bottom that says when rows or columns were cut. With Office preview off it names the file and offers Open in system application or Turn preview on in Settings (69e4e002a).
