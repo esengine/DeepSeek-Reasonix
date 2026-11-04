@@ -2738,9 +2738,10 @@ button, input, textarea { font-size: var(--fs-ui); }
   justify-content: flex-end;
   gap: 7px;
   padding: 10px 12px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  border-top: 0;
+  background: transparent;
 }
+.flow .call[data-approval="pending"] .apv { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
 .flow .call[data-approval] .apv-ft .btn {
   min-height: 31px;
   padding-inline: 11px;
@@ -2852,7 +2853,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 :root[data-theme="light"] .flow .call[data-approval] .apv-yolo-confirm b { color: var(--warn-ink); }
 :root[data-theme="light"] .flow .call[data-approval] .apv-yolo-confirm span { color: var(--faint); }
 :root[data-theme="light"] .flow .call[data-approval] .apv-yolo-confirm .btn[data-yolo-confirm] { color: var(--accent-fg); border-color: #9a5e40; background: #8b5135; }
-:root[data-theme="light"] .flow .call[data-approval] .apv-ft,
 :root[data-theme="light"] .flow .call[data-approval] .apv-done {
   border-top-color: var(--hair); background: var(--page);
 }
