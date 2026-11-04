@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { t } from "../i18n";
 import type { AgentPort, WorkspaceChange } from "../port/port";
 import type { GitRepoRow } from "../port/workspace";
@@ -24,6 +24,7 @@ interface Props {
   // The workspace-relative path whose diff is on screen, "" when none is.
   current: string;
   onOpen: (path: string) => void;
+  onMenu?: (e: MouseEvent<HTMLElement>, path: string, folder: boolean) => void;
   onChanged?: () => void;
   remote: boolean;
 }
@@ -34,7 +35,7 @@ const join = (repo: string, path: string) => (repo ? `${repo}/${path}` : path);
 // stage, discard and commit, the push of the branch, and its history. A workspace
 // that is one repository shows just that; a folder of projects shows one section per
 // repository, each acting on its own.
-export function WorkbenchGit({ port, workspaceRoot, changes, repos, failure = "", onRetry, wrote, current, onOpen, onChanged, remote }: Props) {
+export function WorkbenchGit({ port, workspaceRoot, changes, repos, failure = "", onRetry, wrote, current, onOpen, onMenu, onChanged, remote }: Props) {
   // A list that could not be read says so, and the workspace is shown as the one
   // repository it was before there was a list: the changes the pane holds are real.
   if (failure) {
@@ -44,25 +45,25 @@ export function WorkbenchGit({ port, workspaceRoot, changes, repos, failure = ""
           {failure}
           {onRetry && <button type="button" className="btn sm" data-action="workbench.repos-reload" onClick={onRetry}>{t("重新读取")}</button>}
         </p>
-        <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onChanged={onChanged} remote={remote} />
+        <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onMenu={onMenu} onChanged={onChanged} remote={remote} />
       </>
     );
   }
   if (repos.length === 0) return null;
   const several = repos.length > 1 || repos[0].dir !== "";
   if (!several) {
-    return <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onChanged={onChanged} remote={remote} />;
+    return <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onMenu={onMenu} onChanged={onChanged} remote={remote} />;
   }
   return (
     <div className="workbench-git" data-repos={repos.length}>
       {repos.map((row) => (
-        <Folder key={row.dir} port={port} workspaceRoot={workspaceRoot} row={row} wrote={wrote} current={current} onOpen={onOpen} remote={remote} />
+        <Folder key={row.dir} port={port} workspaceRoot={workspaceRoot} row={row} wrote={wrote} current={current} onOpen={onOpen} onMenu={onMenu} remote={remote} />
       ))}
     </div>
   );
 }
 
-function Folder({ port, workspaceRoot, row, wrote, current, onOpen, remote }: { port: AgentPort; workspaceRoot?: string; row: GitRepoRow; wrote: number; current: string; onOpen: (path: string) => void; remote: boolean }) {
+function Folder({ port, workspaceRoot, row, wrote, current, onOpen, onMenu, remote }: { port: AgentPort; workspaceRoot?: string; row: GitRepoRow; wrote: number; current: string; onOpen: (path: string) => void; onMenu?: Props["onMenu"]; remote: boolean }) {
   const [open, setOpen] = useState(true);
   const { changes, reload } = useRepoChanges(port, row.dir, open, wrote);
   return (
@@ -74,13 +75,13 @@ function Folder({ port, workspaceRoot, row, wrote, current, onOpen, remote }: { 
         <span>{row.branch}</span>
         <small>{changes.length}</small>
       </button>
-      {open && <RepoSection port={port} workspaceRoot={workspaceRoot} repo={row.dir} changes={changes} current={current} onOpen={onOpen} onChanged={reload} remote={remote} />}
+      {open && <RepoSection port={port} workspaceRoot={workspaceRoot} repo={row.dir} changes={changes} current={current} onOpen={onOpen} onMenu={onMenu} onChanged={reload} remote={remote} />}
     </section>
   );
 }
 
-function RepoSection({ port, workspaceRoot, repo, changes, current, onOpen, onChanged, remote }: {
-  port: AgentPort; workspaceRoot?: string; repo: string; changes: WorkspaceChange[]; current: string; onOpen: (path: string) => void; onChanged?: () => void; remote: boolean;
+function RepoSection({ port, workspaceRoot, repo, changes, current, onOpen, onMenu, onChanged, remote }: {
+  port: AgentPort; workspaceRoot?: string; repo: string; changes: WorkspaceChange[]; current: string; onOpen: (path: string) => void; onMenu?: Props["onMenu"]; onChanged?: () => void; remote: boolean;
 }) {
   const refresh = () => onChanged?.();
   const commit = useCommitCard(port, refresh, repo || undefined);
@@ -95,6 +96,7 @@ function RepoSection({ port, workspaceRoot, repo, changes, current, onOpen, onCh
         changes={changes}
         current={inside}
         onOpen={(path) => onOpen(join(repo, path))}
+        onMenu={onMenu}
         onChanged={onChanged}
         commit={commit}
         actions={remote ? null : push.button}

@@ -1,0 +1,2 @@
+- 修复：工作台「改动」列表里的文件和文件夹现在也能右键，菜单与文件树一致，可在系统文件管理器中显示、复制路径或引用、加入对话。修复 #14758。
+- Fixed: files and folders in the workbench changes list now have the same right-click menu as the file tree: reveal in the file manager, copy path or reference, add to chat. Fixes #14758.

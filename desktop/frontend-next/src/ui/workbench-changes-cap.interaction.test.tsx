@@ -46,6 +46,6 @@ describe("a workspace with very many changes", () => {
   it("draws a short list whole, with nothing left out", () => {
     const { container } = draw(many(30));
     expect(screen.queryByRole("button", { name: /再显示/ })).toBeNull();
-    expect(container.querySelectorAll('[data-action="workbench.diff"]').length).toBe(30);
+    expect(container.querySelectorAll('[data-action-click="workbench.diff"]').length).toBe(30);
   });
 });

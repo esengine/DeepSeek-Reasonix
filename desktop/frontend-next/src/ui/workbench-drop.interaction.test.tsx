@@ -84,7 +84,7 @@ it("references search results and changed files through the same intake", async 
     return found!;
   });
   drag(row, box);
-  drag(document.querySelector<HTMLElement>('[data-action="workbench.diff"]')!, box);
+  drag(document.querySelector<HTMLElement>('[data-action-click="workbench.diff"]')!, box);
   await waitFor(() => expect(screen.getAllByRole("button", { name: "移除 retry.go" })).toHaveLength(2));
   expect(dropRefs.mock.calls).toEqual([[["/workspace/internal/provider/retry.go"]], [["/workspace/internal/provider/retry.go"]]]);
 });
@@ -95,7 +95,7 @@ it("keeps the nested repository prefix when dragging changed files", async () =>
     port.repoChanges = { "apps/site": [{ path: "README.md", status: "M" }] };
   });
   const row = await waitFor(() => {
-    const found = document.querySelector<HTMLElement>('[data-repo="apps/site"] [data-action="workbench.diff"]');
+    const found = document.querySelector<HTMLElement>('[data-repo="apps/site"] [data-action-click="workbench.diff"]');
     expect(found).toBeTruthy();
     return found!;
   });

@@ -37,7 +37,7 @@ try {
       const one = await open("");
       const tree = await one.evaluate(() => ({
         folders: [...document.querySelectorAll(".workbench-change-folder")].length,
-        rows: [...document.querySelectorAll('.workbench-change-row[data-action="workbench.diff"]')].length,
+        rows: [...document.querySelectorAll('.workbench-change-row[data-action-click="workbench.diff"]')].length,
         overflow: document.querySelector(".workbench-explorer").scrollWidth > document.querySelector(".workbench-explorer").clientWidth + 1,
       }));
       check(`${tag}: the changes are a folder tree`, tree.folders >= 2 && tree.rows === 4, JSON.stringify(tree));
