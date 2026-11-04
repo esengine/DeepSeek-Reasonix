@@ -7,6 +7,7 @@ import { count, decimals } from "../../i18n/format";
 import { Sym } from "../Sym";
 import type { Item } from "../../state/session";
 import { thoughtStartedAt } from "../../state/say";
+import { useThoughtFold } from "../thoughtfold";
 import { LazyMarkdown } from "../LazyMarkdown";
 import { Boundary } from "../Boundary";
 import { CopyButton } from "../CopyButton";
@@ -114,7 +115,8 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
     if (watchedThinking.current && !thinking) setSettledHere(true);
     watchedThinking.current = thinking;
   }, [thinking]);
-  const [touched, setOpen] = useState<boolean | null>(null);
+  const folds = useThoughtFold();
+  const [touched, setOpen] = useState<boolean | null>(() => folds.get(item.id) ?? null);
   const open = touched ?? start;
   const peeks = useThinkingPreview() && !open;
   const peek = peeks ? item.reasoning?.trimStart() : "";
@@ -162,7 +164,12 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
         <div className="out">
           {item.reasoning?.trim() && (
             <details className="think" open={open} data-live={thinking ? "" : undefined} data-cut={item.cut}
-              data-settled={settledHere ? "" : undefined} onToggle={(e) => e.currentTarget.open !== open && setOpen(e.currentTarget.open)}>
+              data-settled={settledHere ? "" : undefined} onToggle={(e) => {
+                const next = e.currentTarget.open;
+                if (next === open) return;
+                setOpen(next);
+                folds.set(item.id, next);
+              }}>
               <summary>
                 <span className="fold">
                   <span className={thinking ? "think-label think-sweep" : "think-label"} key={thinking ? "live" : "done"}>

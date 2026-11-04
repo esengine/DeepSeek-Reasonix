@@ -75,3 +75,16 @@
   .think[data-settled] .think-label { animation: none; }
   .think::details-content { transition: none; }
 }
+
+.caret { animation: caret-blink 1s steps(1, end) infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+.md[data-live] > :is(p, h1, h2, h3, h4, h5, h6):nth-last-child(2)::after,
+.md[data-live] > :is(ul, ol):nth-last-child(2) > li:last-child:not(:has(> p))::after,
+.md[data-live] > :is(ul, ol):nth-last-child(2) > li:last-child > p:last-child::after {
+  content: ""; display: inline-block; width: 6px; height: 13px; margin-left: 2px; vertical-align: -2px;
+  background: var(--net); animation: caret-blink 1s steps(1, end) infinite;
+}
+.md[data-live] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol):nth-last-child(2) ~ .caret { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .caret, .md[data-live] > * ::after, .md[data-live] > ::after { animation: none; }
+}

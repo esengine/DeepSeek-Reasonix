@@ -67,6 +67,7 @@ import { PostureNote, postureNote } from "./PostureNote";
 import { SidePanel } from "./SidePanel";
 import { cancelJob } from "./jobcancel";
 import { JobsLiveContext } from "./JobRunView";
+import { ThoughtFolds, useThoughtFolds } from "./thoughtfold";
 import { jobName } from "./panels/JobName";
 import { ConnectNote } from "./ConnectNote";
 import { useStatusPoll } from "./useStatusPoll";
@@ -155,6 +156,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   // follows the deltas themselves, and expires rather than being re-derived.
   const tps = useRate(s.outWindow, running);
   const live = useLiveWork(s.items, running);
+  const thoughtFolds = useThoughtFolds(s.items, rt.sessionPath ?? "");
   // The shape of the last minute, kept while a turn runs. A number alone says
   // how fast it is now; the line says whether it is climbing, stalling or
   // arriving in bursts, which is the question someone watching a run has.
@@ -521,7 +523,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
-      <PlanLiveContext.Provider value={planLive}><AgentRunOpener.Provider value={openRun}><JobsLiveContext.Provider value={jobsLive}>
+      <PlanLiveContext.Provider value={planLive}><AgentRunOpener.Provider value={openRun}><JobsLiveContext.Provider value={jobsLive}><ThoughtFolds.Provider value={thoughtFolds}>
       <Transcript port={port} historyPaging={historyPaging}
         scope={rt.sessionPath}
         onSettings={onSettings}
@@ -557,7 +559,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         onOpenProject={onOpenProject}
         onKeepHere={onKeepHere}
       />
-      </JobsLiveContext.Provider></AgentRunOpener.Provider></PlanLiveContext.Provider>
+      </ThoughtFolds.Provider></JobsLiveContext.Provider></AgentRunOpener.Provider></PlanLiveContext.Provider>
       </NewAnswerAnchor.Provider>
       </LiveWork.Provider>
       </PaneShown.Provider>
