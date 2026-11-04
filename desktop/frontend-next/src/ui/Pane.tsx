@@ -453,7 +453,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   const blocked = hasPendingDecision(status);
   const planGate = useMemo(() => latestPlanGate(s.items), [s.items]);
   const [planSeen, setPlanSeen] = useState(false);
-  const [planFocus, setPlanFocus] = useState<{ item: string; n: number } | null>(null);
+  const [landAt, setLandAt] = useState<{ item: string; n: number } | { call: string; n: number } | null>(null);
   const planLive = useMemo<PlanLive>(() => ({ plan: s.plan, running, blocked, latest: planGate?.id, onSeen: setPlanSeen }), [s.plan, running, blocked, planGate?.id]);
   const planStarted = planGate?.verdict === "start" ? planGate.id : undefined;
   const browserSize = useBrowserFull(docked, active && visible, blocked);
@@ -530,7 +530,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         waiting={s.waiting}
         scroll={flow}
         hidden={tab !== "flow" || !!worktreePhase}
-        focus={planFocus}
+        focus={landAt}
         find={find.at}
         query={find.query}
         onApprove={onApprove}
@@ -596,6 +596,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             onExternal={(url) => void port.openExternal(url).catch(notify)}
             onAddToChat={(reference) => setInserted((was) => ({ n: was.n + 1, text: reference }))}
             onQuoteSelection={reply.onQuoteFile}
+            onShowCall={(call) => setLandAt((was) => ({ call, n: (was?.n ?? 0) + 1 }))}
           />
       </div>
 
@@ -609,7 +610,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         {/* Everything stacked above the input box shares one ceiling, so no
             child of this region may grow without bound. */}
         <PlanFold plan={s.plan} goal={status?.goal} goalStatus={status?.goalStatus} goalRuntime={status?.goalRuntime} shown={tab === "flow"} running={running} paused={blocked}
-          cardInView={!!planStarted && planSeen} onJump={planStarted ? () => setPlanFocus((was) => ({ item: planStarted, n: (was?.n ?? 0) + 1 })) : undefined} />
+          cardInView={!!planStarted && planSeen} onJump={planStarted ? () => setLandAt((was) => ({ item: planStarted, n: (was?.n ?? 0) + 1 })) : undefined} />
         {tab === "flow" && <RunLine label={worktreePhase ? t(["failed", "cleanup_failed"].includes(worktreePhase) ? "创建失败" : worktreePhase === "cancelled" ? "创建已取消" : "准备工作目录") : chipLabel(s, running)} running={running} blocked={blocked} since={s.running ? s.runSince : undefined} sent={sent} received={received} estimated={s.outLive > 0}>
           <AgentCompositionPicker port={port} binding={status?.agentComposition} locked={status?.agentCompositionLocked} running={running} onChanged={refreshStatus} onSettings={() => onSettings("persona")} onError={notify} />
         </RunLine>}

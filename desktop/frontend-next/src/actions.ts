@@ -196,6 +196,8 @@ export const ACTIONS: UIAction[] = [
   { id: "agent.open", kind: "view", target: "entity", proof: "interaction" },
   { id: "agent.stop-all", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "agent.group-fold", kind: "view", target: "none", proof: "interaction" },
+  { id: "agent.stop", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "agent.show-call", kind: "navigation", target: "none", proof: "interaction" },
   { id: "agent.focus-trap", kind: "navigation", target: "none", proof: "interaction" },
   { id: "agent.close", kind: "view", target: "none", proof: "interaction" },
 

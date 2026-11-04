@@ -112,3 +112,37 @@ describe("opening a sub-agent from the deck", () => {
     await waitFor(() => expect(document.querySelector(".agent-tx")).not.toBeNull());
   });
 });
+
+describe("the sub-agent tab's frame", () => {
+  const asked = (content: string): HistoryMessage => ({ role: "user", content, msgIndex: 0 });
+
+  it("puts the task the main session handed over above the run, once", async () => {
+    const { port } = reader([page([asked("给 export 补测试，只改 tests/"), say("reading the schema", 1)], 0, { live: false, run: run({ state: "completed" }) })]);
+    render(<AgentRunView port={port} run={{ ref: "sa_1", name: "audit" }} shown />);
+    await screen.findByText(/reading the schema/);
+    expect(document.querySelector(".agentrun-task")?.textContent).toContain("给 export 补测试，只改 tests/");
+    expect(screen.getAllByText(/给 export 补测试/)).toHaveLength(1);
+  });
+
+  it("stops the run through the call that spawned it while it runs, and only then", async () => {
+    const { port } = reader([page([say("working", 1)], 0, { live: false, run: run({ parentCall: "call-9" }) })]);
+    const stopToolCall = vi.fn(async () => {});
+    Object.assign(port, { stopToolCall });
+    const view = render(<AgentRunView port={port} run={{ ref: "sa_1", name: "audit" }} shown />);
+    fireEvent.click(await screen.findByRole("button", { name: "停止子代理" }));
+    expect(stopToolCall).toHaveBeenCalledWith("call-9");
+    view.unmount();
+    const done = reader([page([say("done", 1)], 0, { live: false, run: run({ parentCall: "call-9", state: "completed" }) })]);
+    render(<AgentRunView port={done.port} run={{ ref: "sa_1", name: "audit" }} shown />);
+    await screen.findByText(/done/);
+    expect(screen.queryByRole("button", { name: "停止子代理" })).toBeNull();
+  });
+
+  it("goes back to the group in the conversation by the spawning call", async () => {
+    const { port } = reader([page([say("working", 1)], 0, { live: false, run: run({ parentCall: "call-9", state: "completed" }) })]);
+    const onShowCall = vi.fn();
+    render(<AgentRunView port={port} run={{ ref: "sa_1", name: "audit" }} shown onShowCall={onShowCall} />);
+    fireEvent.click(await screen.findByRole("button", { name: "回到对话里那一组" }));
+    expect(onShowCall).toHaveBeenCalledWith("call-9");
+  });
+});

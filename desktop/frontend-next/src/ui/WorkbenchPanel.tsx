@@ -46,6 +46,7 @@ const CodeEditor = lazy(() => import("./CodeEditor"));
 
 import { treeRows } from "./workbench_tree";
 import { AgentRunView } from "./AgentRunView";
+import { AgentAvatar } from "./cards/SubagentGroup";
 import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
 import { fileKind } from "./fileKind";
 import { readRecentFiles, rememberFile } from "./recentFiles";
@@ -74,7 +75,9 @@ export function WorkbenchPanel({
   fullMode,
   fileRequest,
   agentRequest,
+  onShowCall,
 }: {
+  onShowCall?: (callId: string) => void;
   port: AgentPort;
   tabs: BrowserTab[];
   manual: boolean;
@@ -501,7 +504,7 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "agent" ? "branch" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />
+              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />}
               <span>{labelFor(surface)}</span>
             </button>
             )}
@@ -579,7 +582,7 @@ export function WorkbenchPanel({
               onOpenDocument={(path) => port.openDocument(path)}
             />
           )}
-          {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} />}
+          {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} onShowCall={onShowCall} />}
           {active?.kind === "file" && (
             <>
               <WorkbenchFileBar

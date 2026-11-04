@@ -116,7 +116,7 @@ function AgentRow({ task, status, onStop }: { task: Task; status: DelegateStatus
     : status === "done" ? [t("已交付"), steps ? t("{n} 步", { n: steps }) : "", took]
       : [status === "refused" ? t("未执行") : t("失败"), took];
   return (
-    <div className="agent-row" data-status={status}>
+    <div className="agent-row" data-status={status} data-call={task.tool.id || undefined}>
       <div className="agent-row-line">
         <AgentAvatar name={name} />
         <span className="agent-who">

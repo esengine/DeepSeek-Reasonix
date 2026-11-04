@@ -70,3 +70,23 @@
 .agent-deck-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 8px 8px 4px; border-top: 1px solid var(--hair); color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
 .agent-deck-foot > span { flex: 1; }
 .agent-deck-foot .agent-quiet { color: var(--text); font-weight: var(--w-med); }
+
+.agentrun-hd { min-height: 40px; gap: 6px; padding: 0 8px 0 12px; box-sizing: border-box; }
+.agentrun-hd .who { color: var(--text); font: var(--w-med) var(--fs-ui)/1.3 var(--mono); }
+.agentrun-hd .model { font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); color: var(--faint); }
+.agentrun-hd .rt { font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); color: var(--muted); }
+.agentrun-stop {
+  margin-left: auto; height: 32px; padding: 0 14px; flex: none; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--err-ink);
+  font: var(--w-reg) var(--fs-ui)/1 var(--ui); white-space: nowrap; cursor: pointer;
+}
+.agentrun-stop:hover { background: color-mix(in srgb, var(--err) 9%, var(--raised)); }
+.agentrun-stop:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.agentrun-task { flex: none; margin: 12px 14px 0; padding: 10px 12px; border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--page); }
+.agentrun-task > b { display: block; margin-bottom: 4px; color: var(--faint); font: var(--w-med) var(--fs-meta)/1.3 var(--ui); }
+.agentrun-task > p { margin: 0; color: var(--text); font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.agentrun-note { flex: none; margin: 0 14px 14px; padding: 8px 12px; border-radius: var(--r-sm); background: var(--page); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); }
+.agentrun-note > button { margin-left: 4px; padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: var(--w-med); cursor: pointer; }
+.agentrun-note > button:hover { text-decoration: underline; }
+.workbench-tab .workbench-tab-pick .agent-avatar { width: 16px; height: 16px; }
+.workbench-tab .workbench-tab-pick .agent-avatar svg { width: 11px; height: 11px; }
