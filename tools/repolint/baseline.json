@@ -7,7 +7,7 @@
     "commented-code": 0,
     "complexity": 666,
     "css-important": 128,
-    "css-size": 9119,
+    "css-size": 9093,
     "doc-language": 0,
     "doc-owner": 27,
     "doc-prose": 1434,
@@ -78,11 +78,11 @@
     },
     "desktop/frontend-next/src/styles/app.css": {
       "css-important": 25,
-      "css-size": 5420
+      "css-size": 5400
     },
     "desktop/frontend-next/src/styles/studio.css": {
       "css-important": 103,
-      "css-size": 3699
+      "css-size": 3693
     },
     "desktop/internal/winuninstall/registry_windows.go": {
       "essay": 1
