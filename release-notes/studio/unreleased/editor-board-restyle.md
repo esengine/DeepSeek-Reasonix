@@ -38,6 +38,7 @@
 
 ---
 <!-- lang:en -->
+
 ## Changed
 
 - The window bar is the board's 48px: a 13px breadcrumb and four 28px icon buttons — find, device access, theme, workbench; the empty session's mark sits in a 44px accent tile (8b93d8e57).
