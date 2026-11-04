@@ -65,5 +65,4 @@
 .srow-name { line-height: normal; }
 .srow-meta > .apply { line-height: normal; }
 .prefs-hd h1 { padding-bottom: 12px; line-height: normal; }
-.prefs-sheet { --ui: Inter, "PingFang SC", "Microsoft YaHei UI", "Inter Studio", "Noto Studio", sans-serif; }
 .prefs-sheet > .prefs-hd > .prefs-find { height: 32px; min-height: 32px; }
