@@ -28,7 +28,6 @@
 .rail .wsacts { grid-area: 1 / 3; }
 .wsrow:not([aria-expanded]) { cursor: default; }
 .rail .wsname { font-size: var(--fs-ui); }
-.rail .sesstitle { font-size: var(--fs-meta); }
 .rail .wsnode[data-current] > .wsrow .wsfolder { color: var(--muted); }
 .rail .wsrow .wsname, .rail .wsnode[data-current] > .wsrow .wsname { font-weight: var(--w-med); color: var(--muted); }
 .rowswap { display: flex; align-items: center; gap: 4px; }
@@ -43,17 +42,9 @@
 .rail .rmtwsrow .wsacts { grid-area: 1 / 4; }
 .project-source { grid-area: 1 / 3; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--mono); }
 .rail .kids { margin: 0 15px 0 22px; padding-left: 10px; border-left: 0; }
-.rail .sessrow { min-height: 34px; margin: 1px 0 1px 3px; padding-inline-end: 8px; }
-.rail .sessrow > .pip { display: none; }
 .rail .rmtws-node .sessdel { opacity: 0; }
-.rail .rmtws-node .sessrow:is(:hover, :focus-within) .sessdel { opacity: 1; }
-.rail .sessage { margin-left: auto; margin-right: 0; font-size: var(--fs-micro); }
 .rail :is(.sessage, .unread-dot) + .sesscopies { margin-inline-start: 6px; }
 .rail .sessmore { width: calc(100% - 12px); margin: 2px 0 5px 3px; padding-left: 9px; text-align: left; }
-.rail .sessrow:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
-.rail .sessrow[aria-selected="true"] { background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--text); font-weight: var(--w-reg); box-shadow: none; }
-.rail .sessrow[aria-selected="true"]:not(:focus-visible) { outline: 1px solid color-mix(in srgb, var(--text) 22%, transparent); outline-offset: -1px; }
-.rail .sessrow:not([data-unread]) .sesstitle { font-weight: var(--w-reg); }
 .project-connection { display: flex; align-items: center; gap: 5px; margin: 0 22px 4px 48px; color: var(--warn-ink); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); }
 .project-connection .studio-icon { width: 12px; height: 12px; flex: none; }
 .project-connection > span { overflow-wrap: anywhere; }
@@ -79,7 +70,4 @@
 .recent-session .sessage { flex: none; margin-left: auto; color: var(--muted); }
 .recent-sessions .pickact { flex-wrap: wrap; }
 .recent-page { order: -1; flex-basis: 100%; text-align: center; white-space: nowrap; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
-.sessword { flex: none; margin-left: auto; font: var(--w-reg) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
-.sessword[data-run="running"] { color: var(--net-ink); }
-.sessword[data-run="halt"] { color: var(--warn-ink); }
 .recent-keys { margin: 8px 0 0; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }

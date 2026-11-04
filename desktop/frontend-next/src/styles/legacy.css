@@ -37,7 +37,6 @@
 @import "./sessionnotes.css" layer(legacy);
 @import "./providerpresets.css" layer(legacy);
 @import "./sidebardrop.css" layer(legacy);
-@import "./sessionquick.css" layer(legacy);
 @import "./sessionpin.css" layer(legacy);
 @import "./treerows.css" layer(legacy);
 @import "./workbench-changes.css" layer(legacy);

@@ -248,10 +248,10 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                 {older > 0 && scope === "all" && (
                   <small className="rmtolder">{t("还有 {n} 个较早的会话，在那台机器上查看", { n: older })}</small>
                 )}
-                {loose.map((rt) => <div key={rt.id} className="sessrow" role="treeitem" aria-level={2}
-                    data-action="pane.activate" aria-selected={rt.id === active} data-on={rt.id === active ? "" : undefined}
+                {loose.map((rt) => <div key={rt.id} className="sessrow ds-row" role="treeitem" aria-level={2}
+                    data-action="pane.activate" data-run="running" aria-selected={rt.id === active} data-on={rt.id === active ? "" : undefined}
                     data-live="" onClick={() => onFocus(rt.id)}>
-                    <i className="pip" /><span className="sesstitle" title={rt.name}><span>{rt.name}</span></span>
+                    <span className="ds-lead"><i className="pip ds-dot" /></span><span className="sesstitle ds-title" title={rt.name}><span>{rt.name}</span></span>
                   </div>)}
               </div>}
             </div>

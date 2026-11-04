@@ -1,5 +1,3 @@
-.rail .sessrow { min-height: 30px; height: 30px; margin: 1px 0; border-radius: 7px; }
-.rail .sesstitle { font-size: var(--fs-ui); }
 .rail .wsrow { min-height: 30px; height: 30px; padding: 0 4px 0 6px; gap: 0 6px; border-radius: 7px; }
 .rail .wsrow:not(.rmtwsrow) { grid-template-columns: auto auto minmax(0, 1fr) auto; }
 .rail .wsrow > .wschev { width: 12px; height: 12px; color: var(--faint); transform: rotate(-90deg); transition: transform var(--m-line); }
@@ -43,29 +41,7 @@
 .rail .projects-add:disabled { opacity: .4; cursor: default; }
 .rail .scroll { padding-inline: 10px; }
 .rail .wsrow { margin-inline: 0; }
-.rail .sessrow { margin: 1px 0; padding-inline-end: 8px; }
-.rail .sessrow-context .unread-dot, .rail .sessrow-context .pip { position: absolute; left: 17.5px; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0; border-radius: 50%; }
-.rail .sessrow-context .unread-dot { background: var(--text); }
-.rail .sessrow-context .pip { background: transparent; opacity: 1; }
-.rail .sessrow-context[data-run="running"] .pip { background: var(--net); }
-.rail .sessrow-context[data-run="halt"] .pip { background: var(--warn); }
-.rail .sessrow-context .sessword { font: var(--w-reg) var(--fs-micro) var(--ui); white-space: nowrap; }
-.rail .sessrow-context .sessword[data-run="running"] { color: var(--net); }
-.rail .sessrow-context .sessword[data-run="halt"] { color: var(--warn-ink); }
-.rail .sessrow[data-on] { background: var(--overlay); color: var(--text); }
-.rail .sessrow[data-on] .sesstitle, .rail .sessrow[data-unread] .sesstitle { font-weight: var(--w-med); color: var(--text); }
-.rail .sessrow[data-run]::before, .rail .sessrow[data-run]::after { display: none; }
-.rail .sessrow, .rail .sessrow[data-run], .rail .sessrow[data-just-done] { animation: none; }
-.rail .sessrow[data-run], .rail .sessrow[data-unread]:not(:hover):not([aria-selected="true"]) { background: transparent; box-shadow: none; }
-.rail .sessrow:hover { background: color-mix(in srgb, var(--overlay) 60%, transparent); color: var(--muted); }
-.rail .sessrow[data-on], .rail .sessrow[data-on]:hover { background: var(--overlay); box-shadow: none; color: var(--text); }
-.rail .sessrow:is(.sessrow-context, .sessrow-remote) { margin-inline-start: 0; }
-.rail :is(.sessrow-context, .sessrow-remote) > .sesstitle { padding-inline-start: 36px; }
-.rail .sessrow > .pip { display: block; }
 .rail .kids { margin: 0; padding-left: 0; border-left: 0; }
-.rail .sessrow { border-left-width: 0; }
-.rail .sessrow.sesscopy { min-height: 28px; height: 28px; }
-.rail .sessrow.sesscopy .sesstitle { padding-inline-start: 36px; font-size: var(--fs-meta); font-style: normal; color: var(--muted); }
 .rail .studio-rail-head { padding-top: 12px; }
 .rail .studio-brand { height: 32px; }
 [data-titlebar="app"][data-platform="darwin"] .rail .studio-rail-head { padding-top: 0; }

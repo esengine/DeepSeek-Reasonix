@@ -68,7 +68,10 @@ it("converges two App trees and counts after another client's changes and page r
     expect(ids(i)).toEqual(["/sessions/beta.jsonl"]);
   }));
   await act(async () => {
-    views[1].container.querySelector<HTMLButtonElement>('[data-value="archived"][data-action="session.filter"]')!.click();
+    views[1].container.querySelector<HTMLButtonElement>('button[aria-label="会话范围"]')!.click();
+  });
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>('.session-filter-menu:not([hidden]) button.mi[data-value="archived"]')!.click();
   });
   await waitFor(() => {
     expect(ids(0)).toEqual(["/sessions/beta.jsonl"]);

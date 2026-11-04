@@ -8,21 +8,6 @@ const rule = (selector: string) => {
 };
 
 describe("the unread mark in the rail", () => {
-  it("uses a green mark in the date slot without overlaying the title or quick actions", () => {
-    const dot = rule(".rail .sessrow > .unread-dot");
-    expect(dot).toMatch(/margin-inline-start:\s*auto/);
-    expect(dot).toMatch(/flex:\s*none/);
-    expect(dot).toMatch(/background:\s*var\(--ok\)/);
-    expect(dot).not.toMatch(/position:\s*absolute|inset-inline-end/);
-    expect(rule(".rail .sessrow[data-unread] .sesstitle")).not.toMatch(/padding-inline-start|margin/);
-  });
-
-  it("tints an unread row only in dark, and never in a way that reads as hover or selection", () => {
-    expect(css.split("\n").some((l) => l.startsWith(".rail .sessrow[data-unread]:not("))).toBe(false);
-    const dark = css.match(/:root\[data-theme="dark"\] \.rail \.sessrow\[data-unread\]:not\(:hover\):not\(\[aria-selected="true"\]\)\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(dark).toMatch(/background:\s*color-mix\(in srgb, var\(--text\) 4%, transparent\)/);
-  });
-
   it("draws the folded count unlike the feedback badge", () => {
     const pill = rule(".rail .wsacts > .unread-count");
     expect(pill).toMatch(/border:\s*1px solid/);

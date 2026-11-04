@@ -14,15 +14,15 @@ export function ageWord(at: number, now: number): string {
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function SessionAge({ at, unread }: { at?: number; unread?: boolean }) {
+export function SessionAge({ at, unread, dot = true }: { at?: number; unread?: boolean; dot?: boolean }) {
   const date = at ? new Date(at) : null;
   const time = date && Number.isFinite(date.valueOf())
-    ? <time className="sessmeta sessage" dateTime={date.toISOString()} title={date.toLocaleString()}>{ageWord(at!, Date.now())}</time>
+    ? <time className="sessage ds-meta" dateTime={date.toISOString()} title={date.toLocaleString()}>{ageWord(at!, Date.now())}</time>
     : null;
-  return <>{unread && <UnreadDot />}{time}</>;
+  return <>{unread && dot && <UnreadDot />}{time}</>;
 }
 
-export function SessionTail({ run, at, unread }: { run?: string; at?: number; unread?: boolean }) {
-  if (run === "running" || run === "halt") return <span className="sessword" data-run={run}>{t(run === "running" ? "运行中" : "等你确认")}</span>;
-  return <SessionAge at={at} unread={unread} />;
+export function SessionTail({ run, at, unread, dot }: { run?: string; at?: number; unread?: boolean; dot?: boolean }) {
+  if (run === "running" || run === "halt") return <span className="sessword ds-meta" data-run={run}>{t(run === "running" ? "运行中" : "等你确认")}</span>;
+  return <SessionAge at={at} unread={unread} dot={dot} />;
 }

@@ -12,7 +12,7 @@ export function SessionPinAction({ target, title, pinned, enabled, disabled, onP
   enabled: boolean;
   onPin: () => void;
 }) {
-  if (!enabled) return pinned ? <StudioIcon name="pin" className="sesspin-marker" aria-label={t("已置顶")} /> : null;
+  if (!enabled) return pinned ? <StudioIcon name="pin" className="sesspin-marker ds-pin" aria-label={t("已置顶")} /> : null;
   return <button className="sesspin-action" data-action="session.pin" data-target={target}
     aria-pressed={pinned} disabled={disabled}
     title={t(pinned ? "取消置顶" : "置顶会话")}
@@ -33,4 +33,12 @@ export function SessionArchiveAction({ target, title, archived, disabled, onArch
     onClick={(event) => { event.stopPropagation(); onArchive(); }}>
     <StudioIcon name="archive" />
   </button></span>;
+}
+
+export function SessionMoreAction({ target, disabled, onOpen }: { target: string; disabled?: boolean; onOpen: (trigger: HTMLElement) => void }) {
+  return <button className="ds-more" data-action="session.menu" data-target={target} aria-haspopup="menu" disabled={disabled}
+    title={t("会话操作")} aria-label={t("会话操作")}
+    onClick={(event) => { event.stopPropagation(); onOpen(event.currentTarget.closest<HTMLElement>(".sessrow") ?? event.currentTarget); }}>
+    <StudioIcon name="more" />
+  </button>;
 }

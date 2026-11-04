@@ -2186,9 +2186,7 @@
     .reload, .reload .rdot, .rnote { animation: none !important }
     .pane[data-run="done"] .rmark { animation: none !important; filter: none !important }
     .bar .c::after { display: none }
-    .mode .vl, .mode.danger::before,
-    .compose .row > *, .call[data-running] > .g .sym,
-    .app[data-run="running"] .sessrow[data-on][data-live] .pip { animation: none !important }
+    .mode .vl, .mode.danger::before, .compose .row > *, .call[data-running] > .g .sym { animation: none !important }
 
     .gutter[data-edge]::after { animation: edgeflash var(--t-card) var(--ease) }
     @keyframes edgeflash { 0%, 100% { opacity: .9 } 50% { opacity: .25 } }
@@ -4362,38 +4360,6 @@
   .wsdel:hover { background: var(--overlay); color: var(--err) }
 
   .kids { margin: 1px 0 3px 15px; padding-left: 9px; border-left: 1px solid var(--border) }
-
-  .sessrow {
-    position: relative; display: flex; align-items: center; gap: 7px;
-    padding: 5px 8px; cursor: pointer; border-radius: var(--r-sm);
-    border-left: 2px solid transparent;
-    font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint);
-  }
-  .sessrow:hover { background: var(--overlay); color: var(--muted) }
-  .sessrow[data-live] { color: var(--muted) }
-
-  .sessrow[data-on] { background: var(--raised); color: var(--text); font-weight: var(--w-med); box-shadow: inset 0 0 0 1px var(--hair), 0 3px 10px -8px rgb(0 0 0 / .5) }
-  .sessrow[data-on] .sesstitle { font-weight: var(--w-med) }
-  .sessrow[data-busy] { opacity: .55 }
-  .sessrow[data-on][data-busy] { opacity: .8 }
-  .sessrow .pip { flex: none; opacity: .35 }
-  .sessrow[data-live] .pip { opacity: 1; background: var(--net) }
-
-  .app[data-run="running"] .sessrow[data-on][data-live] .pip { box-shadow: 0 0 0 2px color-mix(in srgb, var(--net) 14%, transparent) }
-  .app[data-run="halt"] .sessrow[data-on] .pip { background: var(--accent-ink); opacity: 1 }
-  .sesstitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-  .sessmeta {
-    flex: none; margin-right: 44px;
-    font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost);
-    font-variant-numeric: tabular-nums;
-  }
-.sessrow .wsdel {
-    position: absolute; top: 50%; transform: translateY(-50%);
-  }
-  .sessrow .wsdel { right: 3px }
-
-  .sessrow:hover .sessmeta, .sessrow[data-on] .sessmeta { color: var(--faint) }
-
   .sessarch { flex: none; margin-left: 6px; font: var(--w-med) var(--fs-micro) var(--ui); font-style: normal; color: var(--ghost) }
   .errbar[data-kind="note"] { border-color: var(--border); background: var(--surface); color: var(--text) }
   .errbar[data-kind="note"] button { color: var(--text) }
@@ -4408,11 +4374,6 @@
   }
   .sesscopies:hover { border-color: var(--warn); color: var(--warn-ink) }
   .sesscopies[aria-expanded="true"] { border-color: var(--warn); color: var(--warn-ink) }
-  .sessrow.sesscopy { padding-left: 34px }
-  .sessrow.sesscopy .sesstitle { color: var(--ghost); font-style: italic }
-.sessrow .wsdel { opacity: .45 }
-  .sessrow:hover .wsdel,
-  .sessrow .wsdel:focus-visible { opacity: 1 }
   .sessedit {
     flex: 1; min-width: 0; padding: 1px 5px; border-radius: var(--r-xs);
     border: 1px solid var(--accent); background: var(--page); color: var(--text);
@@ -5071,13 +5032,12 @@
     position: static; top: auto; right: auto; flex: none;
     background: transparent;
   }
-  .sessrow .wsdel { flex: none; background: transparent }
 
   .wsrow .wsdel, .wsrow .wsmore { opacity: .45 }
   .wsrow:hover .wsdel, .wsrow .wsdel:focus-visible, .wsrow:hover .wsmore, .wsrow .wsmore:focus-visible, .wsmore[aria-expanded="true"] { opacity: 1 }
   .wsmore:hover, .wsmore[aria-expanded="true"] { background: var(--overlay); color: var(--text) }
   .wsmore .studio-icon { width: 14px; height: 14px; stroke-width: 2.4 }
-  .sessrow .wsdel:hover, .wsrow .wsdel:hover { background: var(--border); color: var(--err) }
+  .wsrow .wsdel:hover { background: var(--border); color: var(--err) }
 
   .ptab { user-select: none }
   .ptab-in { user-select: text }

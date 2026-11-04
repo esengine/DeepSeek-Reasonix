@@ -35,7 +35,7 @@ import { SessionBatch, useSelectedRows } from "./SessionBatch";
 import { ProjectsHeader } from "./ProjectsHeader";
 import { useWorkspaceDrag } from "./useWorkspaceDrag";
 import { SessionTail } from "./SessionAge";
-import { SessionArchiveAction, SessionPinAction } from "./SessionRowActions";
+import { SessionArchiveAction, SessionMoreAction, SessionPinAction } from "./SessionRowActions";
 import { useSessionMutation, type SessionMutation } from "./useSessionMutation";
 
 const parentOf = (root: string) => root.replace(/[/\\]+$/, "").split(/[/\\]/).slice(-2, -1)[0] ?? "";
@@ -532,7 +532,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         aria-haspopup="menu"
                         data-action-keydown={selection ? ["session.selection"] : ["session.open", "session.delete", "session.menu", "session.move"]}
                         data-target={session.path}
-                        className="sessrow sessrow-context"
+                        className="sessrow sessrow-context ds-row"
                         role="treeitem"
                         aria-level={2}
                         aria-label={rowLabel(session)}
@@ -584,9 +584,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         {selection && <input type="checkbox" className="session-select" tabIndex={-1} aria-label={t("选择会话：{name}", { name: rowLabel(session) })}
                           data-action-click="session.selection" data-action-change="session.selection" data-target={session.path} checked={selection.has(session.path)}
                           onClick={(ev) => ev.stopPropagation()} onChange={() => toggleSelection(session.path)} />}
-                        <i className="pip" />
-                        {!selection && <SessionPinAction target={session.path} title={rowLabel(session)}
-                          pinned={pinned.has(session.path)} enabled={quickActions} disabled={mutations.pending.has(session.path)} onPin={() => mutate(session, "pin")} />}
+                        <span className="ds-lead"><i className="pip ds-dot" /></span>
                         {editing === session.path ? (
                           <input className="sessedit" aria-label={t("重命名该会话")} placeholder={t("聊天标题")} autoFocus
                             defaultValue={session.title || session.name}
@@ -609,14 +607,18 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                               }
                             }} />
                         ) : (
-                          <span className="sesstitle" title={rowLabel(session)}>
+                          <span className="sesstitle ds-title" title={rowLabel(session)}>
                             <span><Hit text={rowLabel(session)} needle={needle} /></span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("隔离")}</em>}{session.archived && <em className="sessarch">{t("已归档")}</em>}
                             {session.metadataState === "pending" && <em className="sessarch">{t("正在读取摘要")}</em>}
                             {session.metadataState === "error" && <em className="sessarch">{t("摘要暂不可用")}</em>}
                           </span>
                         )}
+                        {!selection && <SessionPinAction target={session.path} title={rowLabel(session)}
+                          pinned={pinned.has(session.path)} enabled={quickActions} disabled={mutations.pending.has(session.path)} onPin={() => mutate(session, "pin")} />}
                         <PeerThreadMark path={session.path} />
-                        <SessionTail run={run} at={session.lastActiveAt} unread={session.unread} />
+                        <SessionTail run={run} at={session.lastActiveAt} unread={session.unread} dot={false} />
+                        {!selection && <SessionMoreAction target={session.path} disabled={mutations.pending.has(session.path)}
+                          onOpen={(trigger) => openRowMenu(session.path, trigger)} />}
                         {quickActions && !selection && <SessionArchiveAction target={session.path} title={rowLabel(session)} archived={!!session.archived}
                           disabled={mutations.pending.has(session.path) || !!session.runtimeId && liveIds([session.runtimeId]).length > 0} onArchive={() => archive(session)} />}
                         {sessionMenu === session.path && (
@@ -668,7 +670,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                               data-action-keydown={["session.open", "session.delete"]}
                               data-target={copy.path}
                               key={copy.path}
-                              className="sessrow sesscopy"
+                              className="sessrow sesscopy ds-row"
                               role="treeitem"
                               aria-level={3}
                               aria-selected={opening === copy.path}
@@ -687,8 +689,8 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                                 }
                               }}
                             >
-                              <i className="pip" />
-                              <span className="sesstitle" title={rowLabel(copy)}>
+                              <span className="ds-lead" />
+                              <span className="sesstitle ds-title" title={rowLabel(copy)}>
                                 <span>{version ? t("早先版本 · {n} 轮", { n: copy.turns ?? 0 }) : t("恢复副本")}</span>
                               </span>
                               <button

@@ -6,7 +6,7 @@ import { onSessionQuickActionsChange, showsSessionQuickActions } from "../state/
 import { useDismiss } from "./dismiss";
 import { pinToViewport } from "./place";
 import { SessionAge } from "./SessionAge";
-import { SessionArchiveAction, SessionPinAction } from "./SessionRowActions";
+import { SessionArchiveAction, SessionMoreAction, SessionPinAction } from "./SessionRowActions";
 import { StudioIcon } from "./StudioIcon";
 import { workspaceMenuKeys } from "./WorkspaceOrder";
 import { asksDelete } from "./keys";
@@ -40,7 +40,7 @@ export function RemoteSessionRow({ host, target, session, held, active, busy, pe
     setAt(null);
     onWrite(kind, row.current);
   };
-  return <div ref={row} className="sessrow sessrow-remote" role="treeitem" aria-level={2} aria-label={title} tabIndex={0}
+  return <div ref={row} className="sessrow sessrow-remote ds-row" role="treeitem" aria-level={2} aria-label={title} tabIndex={0}
     aria-selected={held?.id === active} data-on={held?.id === active ? "" : undefined}
     data-live={held ? "" : undefined} data-unread={session.unread ? "" : undefined}
     data-busy={pending || busy ? "" : undefined} data-target={target}
@@ -57,10 +57,11 @@ export function RemoteSessionRow({ host, target, session, held, active, busy, pe
       }
       if (asksDelete(event)) { event.preventDefault(); onDelete(row.current); }
     }}>
-    <i className="pip" />
+    <span className="ds-lead"><i className="pip ds-dot" /></span>
+    <span className="sesstitle ds-title" title={title}><span>{title}</span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("隔离")}</em>}{session.archived && <em className="sessarch">{t("已归档")}</em>}</span>
     <SessionPinAction target={target} title={title} pinned={!!session.pinned} enabled={quick} disabled={!!pending || busy} onPin={() => write("pin")} />
-    <span className="sesstitle" title={title}><span>{title}</span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("隔离")}</em>}{session.archived && <em className="sessarch">{t("已归档")}</em>}</span>
-    <SessionAge at={session.lastActiveAt} unread={session.unread} />
+    <SessionAge at={session.lastActiveAt} unread={session.unread} dot={false} />
+    <SessionMoreAction target={target} disabled={!!pending || busy} onOpen={(trigger) => { const rect = trigger.getBoundingClientRect(); setAt({ x: rect.right, y: rect.top }); }} />
     {quick && <SessionArchiveAction target={target} title={title} archived={!!session.archived} disabled={!!pending || busy || live} onArchive={() => write("archive")} />}
     {at && createPortal(<div ref={menu} className="session-pop" role="menu" aria-label={t("会话操作")}
       data-action-keydown="session.menu" onKeyDown={workspaceMenuKeys} onClick={(event) => event.stopPropagation()}>

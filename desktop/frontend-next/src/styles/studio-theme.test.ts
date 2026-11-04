@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 const CSS = import.meta.glob("./studio.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-const ROWS = import.meta.glob("./treerows.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const MARKER = "Theme token closure";
 
 describe("the Studio shell closes over the active theme", () => {
@@ -40,15 +39,6 @@ describe("the Studio shell closes over the active theme", () => {
     for (const token of ["--page", "--surface", "--raised", "--overlay", "--border", "--text", "--muted", "--accent"]) {
       expect(closure, `${token} is not consumed by the closure`).toContain(`var(${token})`);
     }
-  });
-
-  it("gives selection a stronger neutral fill than hover and no extra bar", () => {
-    const rows = Object.values(ROWS)[0];
-    expect(rows).toMatch(/\.sessrow\[aria-selected="true"\][^{]*\{[^}]*var\(--text\) 13%/);
-    expect(rows).toMatch(/\.sessrow\[aria-selected="true"\]:not\(:focus-visible\)[^{]*\{[^}]*outline: 1px solid/);
-    expect(rows).toMatch(/\.sessrow:hover[^{]*\{[^}]*var\(--text\) 4%/);
-    expect(rows).not.toContain("inset 2px");
-    expect(Object.values(CSS)[0]).not.toMatch(/\.sessrow\[aria-selected="true"\]::before/);
   });
 
   // The scale is the reader's size and weight, not a literal: a pack states

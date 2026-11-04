@@ -7,7 +7,7 @@ const GLYPHS = [
   /\.steps \.s\[data-done\] \.b$/, /\.comp-l \.row \.k$/,
   /\.shot \.x:hover$/, /\.ptab-x:hover$/, /\.wsdel:hover$/,
   /\.copy\[data-state="done"\](:hover)?$/, /\.code-act\[data-state="done"\]$/,
-  /\.commit-files li i\[/,
+  /\.commit-files li i\[/, /^svg\.studio-icon\[data-kind=/,
 ];
 
 const BARE = /(?:^|[;\s])color\s*:[^;]*var\(--(warn|ok|err)\)/;
