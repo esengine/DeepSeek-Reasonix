@@ -11,6 +11,7 @@ import { openPage, observePageTabs } from "./browser_open";
 import { useBrowserSelection } from "./useBrowserSelection";
 import { useColumnOpening } from "./useColumnOpening";
 import { WorkbenchLauncher } from "./WorkbenchLauncher";
+import { WorkbenchStatus } from "./WorkbenchStatus";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
 import { DiffView } from "./cards/DiffView";
 import { useOnBump } from "./useOnBump";
@@ -68,6 +69,7 @@ export function WorkbenchPanel({
   revealChanges = 0,
   toggleFiles = 0,
   onCloseManual,
+  onDismiss,
   onSurfaces,
   onActiveFile,
   onExternal,
@@ -101,6 +103,8 @@ export function WorkbenchPanel({
   /** A press on the Files button: opens the explorer, or folds it when it is the open one. */
   toggleFiles?: number;
   onCloseManual: () => void;
+  // Closes the workbench itself, whichever way it was opened.
+  onDismiss?: () => void;
   // How many surfaces the strip holds, for the pane's own tab to count.
   onSurfaces: (n: number) => void;
   onActiveFile?: (path: string | undefined) => void;
@@ -124,6 +128,7 @@ export function WorkbenchPanel({
   const [launcher, setLauncher] = useState(false);
   const newTab = useRef<HTMLButtonElement>(null);
   const toggleLauncher = () => { supersede(); setLauncher((open) => !open); };
+  const [cursor, setCursor] = useState<[string, number]>(["", 1]);
   const chooseFiles = () => { supersede(); setLauncher(false); setShowFiles(true); };
   const toggleExplorer = () => { supersede(); setLauncher(false); setShowFiles((on) => launcher || !on); };
   useOnBump(revealChanges, chooseFiles);
@@ -448,6 +453,17 @@ export function WorkbenchPanel({
       if (launcher && e.key === "Escape") { e.stopPropagation(); toggleLauncher(); newTab.current?.focus(); }
     }}>
       <header className="workbench-tabs">
+        <TooltipButton
+          className="workbench-files"
+          data-action="workbench.files"
+          aria-pressed={showFiles && !launcher}
+          aria-label={t("common.files")}
+          title={showFiles && !launcher ? t("workbench.hide_file_tree") : t("workbench.show_file_tree")}
+          onClick={toggleExplorer}
+        >
+          <StudioIcon name="folder" />
+          {changes.length > 0 && <small className="workbench-files-count">{changes.length}</small>}
+        </TooltipButton>
         <div
           className="workbench-tablist"
           role="tablist"
@@ -522,17 +538,12 @@ export function WorkbenchPanel({
             </button>
           </div>
         ))}
+        {launcher && (
+          <div className="workbench-tab" role="tab" aria-selected="true" data-new="">
+            <span className="workbench-tab-pick"><StudioIcon name="plus" /><span>{t("workbench.new_tab_label")}</span></span>
+          </div>
+        )}
         </div>
-        <TooltipButton
-          className="workbench-files"
-          data-action="workbench.files"
-          aria-pressed={showFiles && !launcher}
-          aria-label={t("common.files")}
-          title={showFiles && !launcher ? t("workbench.hide_file_tree") : t("workbench.show_file_tree")}
-          onClick={toggleExplorer}
-        >
-          <StudioIcon name="folder" />
-        </TooltipButton>
         <TooltipButton
           className="workbench-new"
           data-action="workbench.new"
@@ -545,6 +556,11 @@ export function WorkbenchPanel({
           <StudioIcon name="plus" />
         </TooltipButton>
         {fullMode && <BrowserFullToggle {...fullMode} />}
+        {onDismiss && (
+          <TooltipButton className="workbench-dismiss" data-action="workbench.dismiss" aria-label={t("app.close_workbench")} title={t("app.close_workbench")} onClick={onDismiss}>
+            <StudioIcon name="close" />
+          </TooltipButton>
+        )}
       </header>
       {closeFailure && <div className="workbench-error workbench-close-error" role="alert">{closeFailure}</div>}
       <div className="workbench-body" data-files={showFiles && !launcher ? "" : undefined}>
@@ -559,7 +575,7 @@ export function WorkbenchPanel({
               key={String(launcher)} focus={launcher}
               changes={changes.length}
               onFiles={chooseFiles}
-              onChanges={() => changes[0] && openFile(changes[0].path)}
+              onFind={() => { chooseFiles(); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".workbench-search input")?.focus()); }}
               onBrowser={() => void addBrowser()}
               recent={recentFiles} onOpenFile={openFile}
             />
@@ -644,7 +660,9 @@ export function WorkbenchPanel({
                     onSave={() => void save()}
                     readOnly={!!grantedFile || !!file.readOnly}
                     onTextContextMenu={textMenu.offer}
+                    onLine={(n) => setCursor([active.path, n])}
                   />
+                  <WorkbenchStatus path={active.path} line={cursor[0] === active.path ? cursor[1] : 1} dirty={draft !== file.content} />
                 </Suspense>
               ) : null}
             </>

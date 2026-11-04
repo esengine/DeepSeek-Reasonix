@@ -604,6 +604,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             remote={!!rt.host}
             workspaceRoot={status?.workspaceRoot ?? rt.root}
             onCloseManual={() => onManualBrowser?.(false)}
+            onDismiss={() => showView("flow")}
             onExternal={(url) => void port.openExternal(url).catch(notify)}
             onAddToChat={(reference) => setInserted((was) => ({ n: was.n + 1, text: reference }))}
             onQuoteSelection={reply.onQuoteFile}

@@ -35,7 +35,7 @@ function Harness({ port }: { port: Port }) {
   );
 }
 
-const tabs = () => [...document.querySelectorAll("[role=tab]")].map((e) => e.textContent?.trim());
+const tabs = () => [...document.querySelectorAll("[role=tab]:not([data-new])")].map((e) => e.textContent?.trim());
 const selected = () => document.querySelector("[role=tab][aria-selected=true]")?.textContent?.trim();
 afterEach(cleanup);
 

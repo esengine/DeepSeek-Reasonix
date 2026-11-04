@@ -1,19 +1,18 @@
 import { t } from "../i18n";
 import { StudioIcon } from "./StudioIcon";
 
-export function WorkbenchLauncher({ changes, focus = false, onFiles, onChanges, onBrowser, recent = [], onOpenFile }: { changes: number; focus?: boolean; onFiles: () => void; onChanges: () => void; onBrowser: () => void; recent?: string[]; onOpenFile?: (path: string) => void }) {
+/** A new tab: the three things the workbench opens, then what was opened lately. */
+export function WorkbenchLauncher({ changes, focus = false, onFiles, onFind, onBrowser, recent = [], onOpenFile }: { changes: number; focus?: boolean; onFiles: () => void; onFind: () => void; onBrowser: () => void; recent?: string[]; onOpenFile?: (path: string) => void }) {
   return (
     <div className="workbench-launcher" role="group" aria-label={t("common.start")}>
-      <StudioIcon name="spark" />
       <p className="workbench-launcher-title">{t("workbench.open_in_the_workbench")}</p>
-      <button autoFocus={focus} aria-label={t("common.files")} data-action="workbench.launch-files" onClick={onFiles}>
+      <button autoFocus={focus} aria-label={t("workbench.explorer")} data-action="workbench.launch-files" onClick={onFiles}>
         <StudioIcon name="folder" />
-        <span><b>{t("common.files")}</b><i>{t("workbench.explorer_changes_history_and_files")}</i></span>
+        <span><b>{t("workbench.explorer")}{changes > 0 && <small>{changes}</small>}</b><i>{t("workbench.changes_history_and_files")}</i></span>
       </button>
-      <button aria-label={t("common.changes")} data-action="workbench.launch-changes" disabled={changes === 0} onClick={onChanges}>
-        <StudioIcon name="branch" />
-        <span><b>{t("common.changes")}</b><i>{t("workbench.which_files_this_session_changed")}</i></span>
-        {changes > 0 && <small>{changes}</small>}
+      <button aria-label={t("workbench.find_a_file")} data-action="workbench.launch-find" onClick={onFind}>
+        <StudioIcon name="file" />
+        <span><b>{t("workbench.find_a_file")}</b><i>{t("workbench.find_a_file_by_name")}</i></span>
       </button>
       <button aria-label={t("workbench.browser")} data-action="workbench.launch-browser" onClick={onBrowser}>
         <StudioIcon name="globe" />
@@ -26,7 +25,7 @@ export function WorkbenchLauncher({ changes, focus = false, onFiles, onChanges, 
             <button key={path} data-action="workbench.launch-recent" data-target={path} title={path} onClick={() => onOpenFile(path)}>
               <StudioIcon name="file" />
               <span>{path.slice(path.lastIndexOf("/") + 1)}</span>
-              <i>{path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}</i>
+              <i>{path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : ""}</i>
             </button>
           ))}
         </div>

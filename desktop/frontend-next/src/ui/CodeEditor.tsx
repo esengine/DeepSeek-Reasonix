@@ -124,15 +124,17 @@ interface Props {
   onSave: () => void;
   readOnly?: boolean;
   onTextContextMenu?: OfferTextMenu;
+  // The line the cursor is on, one-based, whenever it moves.
+  onLine?: (line: number) => void;
 }
 
 /** A file, read and edited in one place: highlighted as it is typed, with the
  *  editor's own find (Ctrl+F), go to line (Ctrl+G) and save (Ctrl+S). */
-export default function CodeEditor({ path, value, dark, onChange, onSave, readOnly = false, onTextContextMenu }: Props) {
+export default function CodeEditor({ path, value, dark, onChange, onSave, readOnly = false, onTextContextMenu, onLine }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  const handlers = useRef({ onChange, onSave, onTextContextMenu });
-  handlers.current = { onChange, onSave, onTextContextMenu };
+  const handlers = useRef({ onChange, onSave, onTextContextMenu, onLine });
+  handlers.current = { onChange, onSave, onTextContextMenu, onLine };
   const language = useRef(new Compartment());
   const look = useRef(new Compartment());
   const editability = useRef(new Compartment());
@@ -178,6 +180,7 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
           ]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) handlers.current.onChange(update.state.doc.toString());
+            if (update.docChanged || update.selectionSet) handlers.current.onLine?.(update.state.doc.lineAt(update.state.selection.main.head).number);
           }),
           language.current.of([]),
           look.current.of(theme(dark)),
