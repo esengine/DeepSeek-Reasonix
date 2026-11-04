@@ -11,6 +11,7 @@
 - 反馈中心的标签、筛选和状态改成设计稿的分段按钮与彩色药丸（c0870f92b）。
 - 思考块按设计稿重排（852a19594）。
 - 计划只是一张卡：待确认时列出每一步和「开始执行 / 修改计划 / 暂不执行」，开始后同一张卡原地显示第几步、正在做什么，做完变成「做完了」；执行记录挂在卡片下面。卡片滚出视野时，输入框上方才出现一个小页签，写着第几步并用小格子显示进度，展开后可「跳到卡片 ↑」（11b2e23b4）。
+- 执行过程里连续读取的文件不再合成「读取了 N 个文件」一行，每次读取单独一行（977c7c6b8）。
 
 ---
 <!-- lang:en -->
@@ -28,3 +29,4 @@
 - The feedback center's tabs, filters and statuses take the board's segmented control and filled pills (c0870f92b).
 - Reasoning follows its board (852a19594).
 - A plan is one card: before it starts it lists every step with Start, Revise and Not now; once started the same card shows which step it is on and what it is doing, and becomes Done at the end, with the execution filed under it. Only while the card is out of view does a tab above the composer show the step and one segment per step, and opened it offers Back to the card (11b2e23b4).
+- Consecutive reads in the execution group are no longer one "read N files" line; each read is its own row (977c7c6b8).
