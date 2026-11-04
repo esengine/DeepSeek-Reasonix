@@ -64,7 +64,8 @@ it("never sends the previous connection's preview ticket to the new connection",
   const old = portFor("old-preview");
   const current = portFor("current-preview");
   const view = render(settings(old.port));
-  await userEvent.click(await screen.findByRole("button", { name: "添加" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
   await inspect(source);
   view.rerender(settings(current.port));
   const staleConfirm = pane().queryByRole("button", { name: "安装" });
@@ -85,7 +86,8 @@ it.each(["success", "failure"])("isolates a pending preview's %s while the repla
   old.preview.mockReturnValueOnce(original.promise);
   current.preview.mockReturnValueOnce(replacement.promise);
   const view = render(settings(old.port));
-  await userEvent.click(await screen.findByRole("button", { name: "添加" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
   await inspect(source);
   view.rerender(settings(current.port));
   expect(pane().getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
@@ -142,7 +144,8 @@ it.each(["success", "failure", "refusal"])("keeps the replacement installation b
   current.install.mockReturnValueOnce(replacement.promise);
   const changed = vi.fn();
   const view = render(settings(old.port, changed));
-  await userEvent.click(await screen.findByRole("button", { name: "添加" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
   await inspect(source);
   await userEvent.click(pane().getByRole("button", { name: "安装" }));
   view.rerender(settings(current.port, changed));
@@ -170,7 +173,8 @@ it("retains canonical completion after returning to the original port without re
   old.install.mockReturnValueOnce(pending.promise);
   const changed = vi.fn();
   const view = render(settings(old.port, changed));
-  await userEvent.click(await screen.findByRole("button", { name: "添加" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
   await inspect(source);
   await userEvent.click(pane().getByRole("button", { name: "安装" }));
   view.rerender(settings(current.port, changed));
@@ -188,7 +192,8 @@ it("preserves a same-connection pending apply across ordinary rerenders", async 
   current.install.mockReturnValueOnce(pending.promise);
   const changed = vi.fn();
   const view = render(settings(current.port, changed));
-  await userEvent.click(await screen.findByRole("button", { name: "添加" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
   await inspect(nextSource);
   await userEvent.click(pane().getByRole("button", { name: "安装" }));
   view.rerender(settings(current.port, changed));

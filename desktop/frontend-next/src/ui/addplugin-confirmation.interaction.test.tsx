@@ -41,7 +41,8 @@ function draw(port: AgentPort) {
 }
 
 async function confirm() {
-  await userEvent.click(await screen.findByRole("button", { name: "添加" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
   const pane = within(document.querySelector<HTMLElement>(".addpkg")!);
   await userEvent.type(pane.getByRole("textbox"), source);
   await userEvent.click(pane.getByRole("button", { name: "查看内容" }));

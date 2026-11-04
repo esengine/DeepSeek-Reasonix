@@ -31,6 +31,7 @@ import { Remotes } from "./Remotes";
 import type { RemoteHost } from "../port/remote";
 import { AddPlugin } from "./AddPlugin";
 import { Packages } from "./Packages";
+import { ExtAddMenu, type ExtAddWay } from "./ExtAddMenu";
 import { ExtTabs, MarketGroup } from "./Market";
 import { InstalledLocation } from "./InstalledLocation";
 import { Switch } from "./Switch";
@@ -129,7 +130,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const [adding, setAdding] = useState(false);
   const [remoteBook, setRemoteBook] = useState<RemoteHost[] | null>(null);
   const [packages, setPackages] = useState<PluginPackage[]>([]);
-  const [addingPkg, setAddingPkg] = useState(false);
+  const [addingPkg, setAddingPkg] = useState<false | "source" | "folder">(false);
   const [extTab, setExtTab] = useState<"installed" | "market">(openedAnchor === "market" ? "market" : "installed");
   const [installedTarget, setInstalledTarget] = useState<{ kind: string; name: string } | null>(null);
   const [extRefreshing, setExtRefreshing] = useState(false);
@@ -599,36 +600,24 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "ext" && (
             <>
-              <ExtTabs at={extTab} disabled={updatingPkg.applying} onPick={(tab) => { setInstalledTarget(null); setExtTab(tab); }} />
+              <div className="ext-bar">
+                <ExtTabs at={extTab} disabled={updatingPkg.applying} onPick={(tab) => { setInstalledTarget(null); setExtTab(tab); }} />
+                <ExtAddMenu disabled={updatingPkg.applying} offer={new Set<ExtAddWay>(["market", ...(updatingPkg.name ? [] : ["source", "folder"] as const), ...(live ? ["service"] as const : [])])}
+                  onPick={(way) => { setInstalledTarget(null); setExtTab(way === "market" ? "market" : "installed"); if (way === "service") setAdding(true); else if (way !== "market") setAddingPkg(way); }} />
+              </div>
               {extTab === "installed" && <InstalledLocation root={root} target={installedTarget} packages={packages} skills={skills} mcp={mcp} refreshing={extRefreshing} onFound={setInstalledTarget} />}
               {extTab === "market" && <MarketGroup port={port} onApplying={applyingChanged} onInstalled={afterExtChange} onViewInstalled={(kind, name) => { setInstalledTarget({ kind, name }); setExtTab("installed"); }} account={acct} onSignIn={() => go("account", "account")} />}
               {extTab === "installed" && (
               <>
                 {scope && <ScopeBar scope={scope} scopes={scopes} onPick={setScopeAt} />}
-                {/* 装完、改完、删完都要过这一步才算数——把它放在包列表上面，
-                    因为它管的是整个运行时，不是某一个包。 */}
-                <Group id="ext-runtime"
-                  title={t("settings.runtime")}
-                  hint={t("settings.use_this_after_editing_extension")}
-                  action={reload.action}
-                >
-                  {reload.note}
-                </Group>
                 <ModHost port={port} />
                 <Group id="plugins"
                   title={t("settings.plugin_packages")}
                   now={packages.length ? t("common.n", { n: packages.length }) : undefined}
                   hint={t("settings.one_package_can_bring_skills")}
-                  action={
-                    addingPkg ? undefined : (
-                      <button className="act" data-action="extensions.add" disabled={!!updatingPkg.name} onClick={() => setAddingPkg(true)}>
-                        {t("common.add")}
-                      </button>
-                    )
-                  }
                 >
                   {addingPkg && (
-                    <AddPlugin port={port} onClose={() => setAddingPkg(false)} onInstalled={afterExtChange} />
+                    <AddPlugin port={port} pickFirst={addingPkg === "folder"} onClose={() => setAddingPkg(false)} onInstalled={afterExtChange} />
                   )}
                   {updatingPkg.name && (
                     <AddPlugin
@@ -655,13 +644,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                   title={t("settings.external_tools")}
                   now={looseMcp.length ? t("settings.n_services", { n: looseMcp.length }) : undefined}
                   hint={t("settings.mcp_services_you_connected_yourself")}
-                  action={
-                    adding || !live ? undefined : (
-                      <button className="act" onClick={() => setAdding(true)}>
-                        {t("settings.connect_a_service")}
-                      </button>
-                    )
-                  }
                 >
                   {adding && live && (
                     <AddServer
@@ -689,6 +671,13 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                   <SkillGroups skills={looseSkills} implicit={implicit} port={port} onDone={afterExtChange} root={scopeAt} onFailed={setFailed} />
                   {extErrors.skills && <div className="rnote" data-s="bad" role="alert">{extErrors.skills} <button className="act" data-action="extensions.refresh" disabled={extRefreshing} onClick={reloadExt}>{t("common.retry")}</button></div>}
                   {looseSkills.length === 0 && !extRefreshing && !extErrors.skills && <div className="empty">{t("settings.no_skills_in_this_working")}</div>}
+                </Group>
+                <Group id="ext-runtime"
+                  title={t("settings.runtime")}
+                  hint={t("settings.changes_apply_from_the_next_turn")}
+                  action={reload.action}
+                >
+                  {reload.note}
                 </Group>
               </>
               )}

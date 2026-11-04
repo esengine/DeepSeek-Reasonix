@@ -53,7 +53,8 @@ it.each(["ready", "action_required"])("refreshes real Settings inventory after a
     .mockRejectedValueOnce(new Error(failure));
   const onChanged = vi.fn();
   render(settings(port, onChanged));
-  await userEvent.click(await screen.findByRole("button", { name: "接入服务" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /接入外部服务/ }));
   const count = reads.mock.calls.length;
   await preview();
   expect(screen.getByText(failure)).toBeTruthy();
@@ -102,7 +103,8 @@ it("refreshes the current managed project after an unmounted batch partially fin
   const skills = vi.spyOn(port, "skills");
   const onChanged = vi.fn();
   render(settings(port, onChanged));
-  await userEvent.click(await screen.findByRole("button", { name: "接入服务" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /接入外部服务/ }));
   await preview();
   await userEvent.click(within(document.querySelector<HTMLElement>(".scopebar")!).getByRole("button", { name: "main" }));
   await userEvent.click(screen.getByRole("option", { name: /other/ }));

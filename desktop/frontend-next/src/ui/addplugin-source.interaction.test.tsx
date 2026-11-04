@@ -44,7 +44,8 @@ async function openSettings(port: AgentPort) {
     onClose={() => {}} onChanged={() => {}} onError={() => {}} at="ext:installed"
     account={null} accountUnread="" reloadAccount={() => {}}
   />);
-  await userEvent.click(await screen.findByRole("button", { name: "添加" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
   const pane = within(document.querySelector<HTMLElement>(".addpkg")!);
   await userEvent.type(pane.getByRole("textbox"), source);
   return pane;

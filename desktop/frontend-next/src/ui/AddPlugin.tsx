@@ -32,6 +32,8 @@ interface Props {
   // A source someone already chose, such as a plugin named in a restored backup.
   source?: string;
   onApplying?: (applying: boolean) => void;
+  // Opened to import a folder: the picker comes up at once.
+  pickFirst?: boolean;
 }
 
 export function AddPlugin(props: Props) {
@@ -40,7 +42,7 @@ export function AddPlugin(props: Props) {
   return <PluginInput key={connection.generation} {...props} />;
 }
 
-function PluginInput({ port, onClose, onInstalled, updating, source, onApplying }: Props) {
+function PluginInput({ port, onClose, onInstalled, updating, source, onApplying, pickFirst }: Props) {
   const sourceLabel = useId();
   const [text, setText] = useState(updating?.source ?? source ?? "");
   const [plan, setPlan] = useState<PluginPlan | null>(null);
@@ -113,6 +115,12 @@ function PluginInput({ port, onClose, onInstalled, updating, source, onApplying 
       setBusy(false);
     }
   };
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!pickFirst || picked.current) return;
+    picked.current = true;
+    void pick();
+  });
 
   // An update has nothing to type: its source was recorded at install. Going
   // straight to the plan is what makes the button say "update" and not "fill

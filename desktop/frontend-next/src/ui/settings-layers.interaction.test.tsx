@@ -79,9 +79,9 @@ describe("a package's inline update", () => {
     await userEvent.click(controls.getByRole("button", { name: "更新" }));
     await waitFor(() => expect(preview).toHaveBeenCalledTimes(1));
     expect(row.getAttribute("aria-busy")).toBe("true");
-    const add = screen.getByRole<HTMLButtonElement>("button", { name: "添加" });
-    expect(add.disabled).toBe(true);
-    await userEvent.click(add);
+    await userEvent.click(screen.getByRole("button", { name: "添加…" }));
+    expect(screen.queryByRole("menuitem", { name: /从仓库地址安装/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "添加…" }));
     expect(document.querySelectorAll(".addpkg")).toHaveLength(1);
 
     expect(controls.getByRole<HTMLButtonElement>("switch", { name: "关闭 review-kit" }).disabled).toBe(true);
@@ -107,7 +107,9 @@ describe("a package's inline update", () => {
     expect(controls.getByRole<HTMLButtonElement>("button", { name: "删除" }).disabled).toBe(false);
     expect(otherUpdate.disabled).toBe(false);
     expect(row.getAttribute("aria-busy")).toBe("false");
-    expect(add.disabled).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "添加…" }));
+    expect(screen.getByRole("menuitem", { name: /从仓库地址安装/ })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "添加…" }));
     await act(async () => finish({ ok: true, applied: false, status: "planned", actions: [] }));
   });
 
@@ -172,7 +174,9 @@ describe("a package's inline update", () => {
     expect(section.disabled).toBe(false);
     expect(market.disabled).toBe(false);
     expect(within(row).getByRole<HTMLButtonElement>("switch", { name: "关闭 review-kit" }).disabled).toBe(true);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "添加" }).disabled).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "添加…" }));
+    expect(screen.queryByRole("menuitem", { name: /从仓库地址安装/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "添加…" }));
     await userEvent.click(dismiss);
     expect(document.querySelector(".addpkg")).toBeNull();
     expect(within(row).getByRole<HTMLButtonElement>("switch", { name: "关闭 review-kit" }).disabled).toBe(false);
@@ -189,13 +193,13 @@ describe("what Escape takes back", () => {
   it("closes the form it was pressed in, not the sheet around it", async () => {
     const { onClose } = draw();
     await userEvent.click(screen.getByRole("tab", { name: /扩展/ }));
-    const add = await screen.findByRole("button", { name: "添加" });
-    await userEvent.click(add);
+    await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /从仓库地址安装/ }));
     await screen.findByRole("textbox", { name: /仓库地址/ });
 
     await userEvent.keyboard("{Escape}");
     expect(onClose).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole("button", { name: "添加" })).not.toBeNull());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: /仓库地址/ })).toBeNull());
 
     // With nothing open above it, the same key does close the sheet.
     await userEvent.keyboard("{Escape}");

@@ -53,7 +53,8 @@ it.each(["success", "failure"])("isolates an old parse response after replacing 
   const install = vi.spyOn(next, "installMcp").mockResolvedValue(result("new-docs"));
   const onChanged = vi.fn();
   const view = render(settings(port, onChanged));
-  await userEvent.click(await screen.findByRole("button", { name: "接入服务" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /接入外部服务/ }));
   await inspect("https://example.test/old");
   view.rerender(settings(next, onChanged));
   const input = pane().getByRole<HTMLTextAreaElement>("textbox");
@@ -111,7 +112,8 @@ it.each(["success", "failure"])("keeps the replacement Settings installation bus
   const reads = vi.spyOn(next, "skills");
   const onChanged = vi.fn();
   const view = render(settings(port, onChanged));
-  await userEvent.click(await screen.findByRole("button", { name: "接入服务" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /接入外部服务/ }));
   await inspect("https://example.test/old");
   await userEvent.click(screen.getByRole("button", { name: "接入" }));
   view.rerender(settings(next, onChanged));
@@ -143,7 +145,8 @@ it("retains completion notification after returning to the original Settings por
   const reads = vi.spyOn(port, "skills");
   const onChanged = vi.fn();
   const view = render(settings(port, onChanged));
-  await userEvent.click(await screen.findByRole("button", { name: "接入服务" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /接入外部服务/ }));
   await inspect("https://example.test/old");
   await userEvent.click(screen.getByRole("button", { name: "接入" }));
   view.rerender(settings(next, onChanged));
@@ -167,7 +170,8 @@ it("finishes an already confirmed batch on its original port after switching Set
   const replacement = vi.spyOn(next, "installMcp");
   const onChanged = vi.fn();
   const view = render(settings(port, onChanged));
-  await userEvent.click(await screen.findByRole("button", { name: "接入服务" }));
+  await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /接入外部服务/ }));
   await inspect("https://example.test/old");
   await userEvent.click(screen.getByRole("button", { name: "接入" }));
   view.rerender(settings(next, onChanged));

@@ -66,3 +66,33 @@
 .srow-meta > .apply { line-height: normal; }
 .prefs-hd h1 { padding-bottom: 12px; line-height: normal; }
 .prefs-sheet > .prefs-hd > .prefs-find { height: 32px; min-height: 32px; }
+
+.ext-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.ext-bar .mkt-tabs { margin-bottom: 0; }
+.ext-add { position: relative; margin-inline-start: auto; }
+.ext-add-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); color: var(--text);
+  font: var(--w-med) var(--fs-ui) var(--ui); white-space: nowrap; cursor: pointer;
+}
+.ext-add-btn .studio-icon { width: 14px; height: 14px; }
+.ext-add-btn:disabled { opacity: .5; cursor: default; }
+.ext-add-menu {
+  position: absolute; inset-inline-end: 0; top: calc(100% + 4px); z-index: 40; width: 260px; padding: 4px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
+}
+.ext-add-menu > button {
+  display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 6px 10px; box-sizing: border-box;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); text-align: start; cursor: pointer;
+}
+.ext-add-menu > button:hover, .ext-add-menu > button:focus-visible { background: var(--overlay); }
+.ext-add-menu > button > .studio-icon { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--faint); }
+.ext-add-menu > button > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ext-add-menu b { font: var(--w-med) var(--fs-ui) var(--ui); }
+.ext-add-menu small { color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }
+.grp[data-setting="ext-runtime"] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 2px; border: 0; background: none; box-shadow: none; }
+.grp[data-setting="ext-runtime"] .grp-hd { order: 2; margin: 0; }
+.grp[data-setting="ext-runtime"] .grp-hd h3 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.grp[data-setting="ext-runtime"] .hint { order: 1; flex: 1; min-width: 240px; margin: 0; color: var(--faint); font: var(--w-med) var(--fs-meta)/1.6 var(--ui); }
+.grp[data-setting="ext-runtime"] .grp-items { order: 3; flex-basis: 100%; }
+.grp[data-setting="ext-runtime"] .apply { display: none; }

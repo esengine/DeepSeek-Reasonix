@@ -72,6 +72,7 @@ it.each(["zh", "en"])("refreshes a newly installed provider into the still-open 
   const setDefault = vi.spyOn(port, "setDefaultModel");
   await extensions();
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"]')!);
+  await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"][data-value="source"]')!);
   await userEvent.type(document.querySelector<HTMLTextAreaElement>(".addpkg textarea")!, "https://example.invalid/echo-provider");
   await userEvent.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
   await userEvent.click(await screen.findByRole("button", { name: t("ext.install") }));
@@ -164,6 +165,7 @@ it("does not refresh models when installation writes nothing", async () => {
   await extensions();
   const before = models.mock.calls.length;
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"]')!);
+  await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"][data-value="source"]')!);
   await userEvent.type(document.querySelector<HTMLTextAreaElement>(".addpkg textarea")!, "https://example.invalid/echo-provider");
   await userEvent.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
   await userEvent.click(await screen.findByRole("button", { name: t("ext.install") }));
@@ -188,6 +190,7 @@ it("reads the live catalog after a saved installation whose reload was refused, 
   vi.spyOn(port, "reloadExtensions").mockImplementation(async () => { publish([echo]); });
   await extensions();
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"]')!);
+  await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"][data-value="source"]')!);
   await userEvent.type(document.querySelector<HTMLTextAreaElement>(".addpkg textarea")!, "https://example.invalid/echo-provider");
   await userEvent.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
   await userEvent.click(await screen.findByRole("button", { name: t("ext.install") }));
