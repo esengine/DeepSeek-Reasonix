@@ -116,7 +116,6 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
           </button>
         )}
         <div className="r-fold" id="chrome-fold" data-open={more ? "" : undefined}>
-        {hub && onError && <PhonePop hub={hub} />}
         {port && (
           <TooltipButton
             className="thbtn find-action"
@@ -130,6 +129,7 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.2 3.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2M10.3 10.3 13 13" /></svg>
           </TooltipButton>
         )}
+        {hub && onError && <PhonePop hub={hub} />}
         <TooltipButton
           className="thbtn theme-toggle"
           data-action="appearance.theme"

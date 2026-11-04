@@ -6,14 +6,14 @@
     "codeowners": 0,
     "commented-code": 0,
     "complexity": 666,
-    "css-important": 204,
-    "css-size": 9804,
+    "css-important": 197,
+    "css-size": 9283,
     "doc-language": 0,
     "doc-owner": 27,
-    "doc-prose": 2128,
+    "doc-prose": 1434,
     "error-text": 9,
     "essay": 2538,
-    "file-size": 18157,
+    "file-size": 18151,
     "flat-view": 0,
     "frontend-parity": 13,
     "function-size": 2392,
@@ -77,12 +77,12 @@
       "doc-prose": 13
     },
     "desktop/frontend-next/src/styles/app.css": {
-      "css-important": 28,
-      "css-size": 5579
+      "css-important": 25,
+      "css-size": 5420
     },
     "desktop/frontend-next/src/styles/studio.css": {
-      "css-important": 176,
-      "css-size": 4225
+      "css-important": 172,
+      "css-size": 3863
     },
     "desktop/internal/winuninstall/registry_windows.go": {
       "essay": 1
@@ -116,7 +116,7 @@
     },
     "docs/GUIDE.md": {
       "doc-owner": 1,
-      "doc-prose": 362
+      "doc-prose": 360
     },
     "docs/GUIDE.zh-CN.md": {
       "doc-owner": 1,
@@ -143,7 +143,7 @@
     },
     "docs/SPEC.md": {
       "doc-owner": 1,
-      "doc-prose": 333
+      "doc-prose": 332
     },
     "docs/THEME_ASSETS.md": {
       "doc-owner": 1,
@@ -265,7 +265,7 @@
     },
     "internal/contract/config/config.go": {
       "essay": 30,
-      "file-size": 813,
+      "file-size": 807,
       "process-input": 3
     },
     "internal/contract/config/credentials.go": {
@@ -1506,74 +1506,65 @@
       "release-note": 29
     },
     "release-notes/studio/2.1.0.md": {
-      "doc-prose": 1,
       "release-note": 25
     },
     "release-notes/studio/2.10.0.md": {
-      "doc-prose": 28,
       "release-note": 46
     },
     "release-notes/studio/2.11.0.md": {
-      "doc-prose": 206,
+      "doc-prose": 1,
       "release-note": 75
     },
     "release-notes/studio/2.12.0.md": {
-      "doc-prose": 16,
+      "doc-prose": 3,
       "release-note": 35
     },
     "release-notes/studio/2.13.0.md": {
       "release-note": 23
     },
     "release-notes/studio/2.14.0.md": {
-      "doc-prose": 28,
+      "doc-prose": 3,
       "release-note": 53
     },
     "release-notes/studio/2.14.1.md": {
-      "doc-prose": 16,
       "release-note": 7
     },
     "release-notes/studio/2.15.0.md": {
-      "doc-prose": 110,
+      "doc-prose": 4,
       "release-note": 43
     },
     "release-notes/studio/2.16.0.md": {
-      "doc-prose": 107,
+      "doc-prose": 3,
       "release-note": 47
     },
     "release-notes/studio/2.17.0.md": {
-      "doc-prose": 43,
+      "doc-prose": 4,
       "release-note": 26
     },
     "release-notes/studio/2.2.0.md": {
-      "doc-prose": 1,
       "release-note": 26
     },
     "release-notes/studio/2.3.0.md": {
-      "doc-prose": 2,
       "release-note": 30
     },
     "release-notes/studio/2.4.0.md": {
-      "doc-prose": 1,
       "release-note": 45
     },
     "release-notes/studio/2.5.0.md": {
-      "doc-prose": 10,
       "release-note": 29
     },
     "release-notes/studio/2.6.0.md": {
-      "doc-prose": 8,
       "release-note": 31
     },
     "release-notes/studio/2.7.0.md": {
-      "doc-prose": 44,
       "release-note": 26
     },
     "release-notes/studio/2.8.0.md": {
-      "doc-prose": 58,
+      "doc-prose": 1,
       "release-note": 37
     },
     "release-notes/studio/2.9.0.md": {
-      "doc-prose": 32,
+      "doc-prose": 1,
       "release-note": 28
     },
     "sdk/go/README.md": {

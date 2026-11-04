@@ -123,12 +123,7 @@
     :root[data-boot] .chrome::after { display: none }
   }
 
-  .chrome {
-    position: relative;
-    display: flex; align-items: center; gap: 14px; height: var(--chrome-h); padding: 0 12px;
-    flex: none; background: color-mix(in srgb, var(--surface) 72%, var(--page)); border-bottom: 1px solid var(--border); box-shadow: 0 1px 0 rgb(0 0 0 / .025);
-  }
-
+  
   [data-titlebar="app"] .chrome { -webkit-app-region: drag }
   [data-titlebar="app"] .chrome
     *:not(:is(button, a[href], input, select, textarea, summary, .picker,
@@ -186,8 +181,7 @@
     font-weight: var(--w-med); color: var(--muted);
     flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .chrome .r { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-
+  
   .picker { position: relative; flex: none }
   .isolab { flex: none; white-space: nowrap; font: var(--w-med) var(--fs-micro) var(--ui); letter-spacing: var(--track-cap); color: var(--muted); padding: 1.5px 6px; border-radius: var(--r-pill); background: var(--overlay) }
   .isolab[hidden] { display: none }
@@ -492,15 +486,7 @@
 
   @keyframes bumpup { 0% { transform: translateY(2px); opacity: .5 } 100% { transform: none; opacity: 1 } }
 
-  .chrome .crumb > .picker, .chrome .crumb > .crumbsep { flex: none }
-  .chrome .crumb > b {
-    flex: 0 1 auto; min-width: 4em; max-width: 48%;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .chrome .badge { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--accent-ink); padding: 2.5px 8px; border-radius: var(--r-pill); background: var(--accent-wash); white-space: nowrap; flex: none }
-  .chrome .badge[hidden] { display: none }
-  .chrome .badge[data-err] { color: var(--err-ink); background: color-mix(in srgb, var(--err) 13%, transparent); white-space: normal; max-width: 24ch }
-  .call[data-pending] > .c { opacity: .7 }
+            .call[data-pending] > .c { opacity: .7 }
 
   .app {
     --nav-w: 0px; --rail-w: var(--rail-open); --side-w: 0px;
@@ -602,8 +588,7 @@
   .rail { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0 }
 
   .railscroll { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden }
-  .railfoot { flex: none; border-top: 1px solid var(--border); padding: 6px 7px }
-  .ws {
+    .ws {
     display: block; width: 100%; text-align: left; background: none; border: 0;
     border-left: 2px solid transparent; padding: 8px 12px 9px 11px; cursor: pointer;
     font: inherit; color: inherit; transition: background var(--m-line);
@@ -655,8 +640,7 @@
   .ws .where .tag { flex: none; color: var(--accent-ink) }
   .ws[data-iso="on"] .where .tag { color: var(--ok-ink) }
 
-  .railfoot { flex: none; display: flex; gap: 14px; padding: 9px 12px 11px; border-top: 1px solid var(--hair) }
-
+  
   .main { position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--surface) }
 
   .vtabs { display: flex; align-items: center; gap: 2px; min-width: 0 }
@@ -751,17 +735,7 @@
 
   [data-pane="flow"]:has(.hero) { justify-content: center }
   [data-pane="flow"]:has(.hero) .flow { margin-top: 0 }
-  .hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 20px 24px 34px }
-  .hero .sym-mark {
-    width: 78px; height: 78px; display: block;
-    color: var(--faint); opacity: .92;
-  }
-  .hero .t {
-    margin-top: 26px; font: var(--w-reg) calc(25px * var(--fs-scale, 1))/1.25 var(--ui);
-    letter-spacing: var(--track-display); color: var(--text);
-  }
-  .hero .s { margin-top: 12px; max-width: 48ch; font-size: var(--fs-ui); line-height: 1.75; color: var(--faint) }
-  .herogo { display: flex; flex-direction: column; align-items: center; gap: 9px; margin-top: 19px }
+          .herogo { display: flex; flex-direction: column; align-items: center; gap: 9px; margin-top: 19px }
   .pick {
     padding: 8px 20px; border: 1px solid var(--accent); border-radius: var(--r-sm);
     background: var(--accent); color: var(--accent-fg); box-shadow: var(--lit);
@@ -1097,7 +1071,6 @@
   .copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px }
   .copy[data-state="done"] { color: var(--ok) }
   .copy[data-state="failed"] { color: var(--warn-ink) }
-
 
   .out .txt.bad { padding-left: 10px; border-left: 2px solid var(--warn) }
 
@@ -1755,7 +1728,6 @@
   .btn.stop .ic { display: grid; width: 13px; height: 13px; flex: none }
   .btn.stop .ic > svg { fill: currentColor; stroke: none }
   .btn.stop:hover { border-color: var(--err); color: var(--err-ink) }
-
 
   .pill {
     margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none;
@@ -3517,7 +3489,6 @@
   .probe .ms { flex: none; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--ghost); font-variant-numeric: tabular-nums }
 
   .probe .adv { flex-basis: 100%; margin-left: 91px; margin-top: 4px; font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); color: var(--muted) }
-
 
   .memhist { margin: 7px 0 0 12px; padding-left: 10px; border-left: 1px solid var(--hair);
     display: flex; flex-direction: column; gap: 8px }

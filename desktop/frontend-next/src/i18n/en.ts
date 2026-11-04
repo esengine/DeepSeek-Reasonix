@@ -320,6 +320,7 @@ export const EN: Record<string, string> = {
   "切换工作区": "Switch workspace",
   "工具与集成": "Tools and integrations",
   "钱包与用量": "Wallet and usage",
+  "侧栏入口": "Sidebar shortcuts",
   "收起工作区栏": "Collapse the workspace rail",
   "展开工作区栏": "Show the workspace rail",
   "打开执行中心": "Open execution center",

@@ -20,7 +20,7 @@ function draw(navShown: boolean, onSettings = vi.fn(), remotes: unknown = null) 
       activeWorkspace={tree[0]} liveIds={() => []} pinned={new Set()} onPin={noop} remotes={remotes as never} remoteTrees={{}}
       reloadRemotes={async () => {}} reloadRemoteTrees={async () => {}} readRemoteTree={async () => {}} reloadTree={async () => {}}
       adder={{ busy: false, add: noop, addPath: noop } as never} onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop} onClosePanes={async () => {}}
-      onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} account={null} accountUnread="" wallet=""
+      onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} wallet=""
       onSettings={onSettings} onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop}
     />,
   );
@@ -52,8 +52,10 @@ it("shows the shortcut of new session and search beside their label", () => {
 
 it("says how many remote machines are online beside the remote entry, and nothing when none is", () => {
   draw(false, vi.fn(), [{ name: "gpu", status: "connected" }, { name: "dev", status: "idle" }]);
-  expect(remoteEntries()[0].querySelector(".qv")?.textContent).toBe("1 台在线");
+  expect(remoteEntries()[0].getAttribute("aria-label")).toBe("远程 · 1 台在线");
+  expect(remoteEntries()[0].querySelector('.qdot[data-tone="ok"]')).not.toBeNull();
   cleanup();
   draw(false, vi.fn(), [{ name: "dev", status: "idle" }]);
-  expect(remoteEntries()[0].querySelector(".qv")).toBeNull();
+  expect(remoteEntries()[0].getAttribute("aria-label")).toBe("远程");
+  expect(remoteEntries()[0].querySelector(".qdot")).toBeNull();
 });

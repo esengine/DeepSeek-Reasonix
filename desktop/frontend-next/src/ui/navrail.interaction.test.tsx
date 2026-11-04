@@ -158,7 +158,7 @@ it("still reaches settings with the rail off", async () => {
   await open();
   const footer = document.querySelector<HTMLElement>(".railfoot")!;
   expect(footer).not.toBeNull();
-  for (const name of ["钱包与用量", "发送反馈", "账号", "设置"]) {
+  for (const name of ["用量", "发送反馈", "设置"]) {
     expect(within(footer).getByRole("button", { name: new RegExp(`^${name}`) }), name).toBeTruthy();
   }
   await openAppearance();
@@ -169,7 +169,9 @@ it.each(["on", "off"])("reaches usage, account, and settings with the rail %s", 
   localStorage.setItem(KEY, mode);
   await open();
   const entries = mode === "on" ? navEl()! : document.querySelector<HTMLElement>(".railfoot")!;
-  for (const [label, section, action] of [[mode === "on" ? "用量" : "钱包与用量", "usage"], ["账号", "account", "chrome.account"], ["设置", "session", "chrome.settings"]]) {
+  const account = mode === "on" ? [["账号", "account", "chrome.account"]] : [];
+  if (mode === "off") expect(entries.querySelector('[data-action="chrome.account"]')).toBeNull();
+  for (const [label, section, action] of [["用量", "usage"], ...account, ["设置", "session", "chrome.settings"]]) {
     const button = within(entries).getByRole("button", { name: new RegExp(`^${label}`) });
     if (action) expect(entries.querySelector(`[data-action="${action}"]`)).toBe(button);
     await userEvent.click(button);

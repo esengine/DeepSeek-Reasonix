@@ -24,7 +24,7 @@ function draw(remote = false) {
     reloadTree={async () => {}} paging={NO_PAGING} adder={{ busy: false, add: noop, addPath: noop } as never}
     onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop} onClosePanes={async () => {}}
     onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop}
-    account={null} accountUnread="" wallet="" onSettings={noop} onFiles={noop} onView={noop}
+    wallet="" onSettings={noop} onFiles={noop} onView={noop}
     onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop} />);
 }
 

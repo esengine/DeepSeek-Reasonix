@@ -20,7 +20,7 @@ function sidebar(onSettings = vi.fn()) {
       activeWorkspace={tree[0]} liveIds={() => []} pinned={new Set()} onPin={noop} remotes={null} remoteTrees={{}}
       reloadRemotes={async () => {}} reloadRemoteTrees={async () => {}} readRemoteTree={async () => {}} reloadTree={async () => {}}
       adder={{ busy: false, add: noop, addPath: noop } as never} onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop} onClosePanes={async () => {}}
-      onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} account={null} accountUnread="" wallet=""
+      onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} wallet=""
       onSettings={onSettings} onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop}
     />,
   );

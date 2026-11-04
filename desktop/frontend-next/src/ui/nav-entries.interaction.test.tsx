@@ -71,22 +71,22 @@ function sidebar() {
       activeWorkspace={tree[0]} liveIds={() => []} pinned={new Set()} onPin={noop} remotes={null} remoteTrees={{}}
       reloadRemotes={async () => {}} reloadRemoteTrees={async () => {}} readRemoteTree={async () => {}} reloadTree={async () => {}}
       adder={{ busy: false, add: noop, addPath: noop } as never} onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop} onClosePanes={async () => {}}
-      onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} account={null} accountUnread="" wallet=""
+      onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} wallet=""
       onSettings={noop} onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop}
     />,
   );
 }
 
-const shortcuts = () => [...document.querySelectorAll(".studio-quicknav > button")].map((b) => b.textContent);
+const shortcuts = () => [...document.querySelectorAll(".studio-quicknav > button:not(.studio-settings)")].map((b) => b.getAttribute("aria-label"));
 
 it("gives the sidebar the same order and the same hidden entries as the rail", async () => {
   render(<NavEntriesSection />);
   sidebar();
-  expect(shortcuts()).toEqual(["文件", "工具与权限", "扩展", "记忆", "远程"]);
+  expect(shortcuts()).toEqual(["用量", "文件", "工具与权限", "扩展", "记忆", "远程"]);
   await userEvent.click(screen.getByRole("button", { name: "上移：远程" }));
   await userEvent.click(screen.getByRole("button", { name: "上移：远程" }));
   await userEvent.click(screen.getByRole("switch", { name: "显示：记忆" }));
-  expect(shortcuts()).toEqual(["文件", "工具与权限", "远程", "扩展"]);
+  expect(shortcuts()).toEqual(["用量", "文件", "工具与权限", "远程", "扩展"]);
 });
 
 it("takes the wallet row out of the sidebar when Usage is hidden", async () => {
@@ -95,4 +95,21 @@ it("takes the wallet row out of the sidebar when Usage is hidden", async () => {
   expect(document.querySelector(".studio-wallet:not(.studio-feedback)")).not.toBeNull();
   await userEvent.click(screen.getByRole("switch", { name: "显示：用量" }));
   expect(document.querySelector(".studio-wallet:not(.studio-feedback)")).toBeNull();
+});
+
+it("walks the foot's icon row with the arrow keys and names each entry with its reading", async () => {
+  render(<NavEntriesSection />);
+  sidebar();
+  const bar = screen.getByRole("toolbar", { name: "侧栏入口" });
+  const buttons = [...bar.querySelectorAll<HTMLButtonElement>(":scope > button")];
+  expect(buttons.at(-1)!.getAttribute("aria-label")).toBe("设置");
+  buttons[0].focus();
+  await userEvent.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(buttons[1]);
+  await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
+  expect(document.activeElement).toBe(buttons.at(-1));
+  await userEvent.keyboard("{Home}");
+  expect(document.activeElement).toBe(buttons[0]);
+  await userEvent.keyboard("{End}");
+  expect(document.activeElement).toBe(buttons.at(-1));
 });

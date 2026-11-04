@@ -627,8 +627,6 @@ export function App({ hub }: { hub: HubPort }) {
           onArchive={archiveSession}
           onRename={renameSession}
           onCollapse={() => setRail(false)}
-          account={account}
-          accountUnread={accountUnread}
           wallet={report.wallet}
           onSettings={showPrefs}
           onFiles={openFiles}

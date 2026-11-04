@@ -1,13 +1,12 @@
 import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { t } from "../i18n";
 import logoWordmark from "../assets/logo-wordmark.svg";
-import type { AccountState } from "../port/port";
 import type { HubPort, RuntimeView, TreeSession, TreeWorkspace } from "../port/hub";
 import { workspaceContains } from "../port/hub";
 import type { RemoteHost } from "../port/remote";
 import type { Adder } from "./addws";
-import { AccountRow } from "./AccountRow";
+import { TooltipButton } from "./TooltipButton";
 import { ContentMatches } from "./ContentMatches";
 import { useDestinations } from "./navdest";
 import { ICON, SECTION_NAME, SETTINGS, type Section } from "./prefsnav";
@@ -72,8 +71,6 @@ interface Props {
   onArchive: (path: string, archived: boolean, runtimeId?: string) => Promise<void>;
   onRename: (path: string, title: string, mode?: "inline" | "dialog") => void;
   onCollapse: () => void;
-  account: AccountState | null;
-  accountUnread: string;
   wallet: string;
   onSettings: (section?: string) => void;
   onFiles: () => void;
@@ -90,6 +87,18 @@ interface Props {
  *  is signed in. It owns only what nothing outside it reads — which scope the
  *  session filter is on, whether the switcher is open, and which workspaces are
  *  folded. Everything else belongs to the window and arrives as a prop. */
+/** The foot's icon row is one toolbar: the arrow keys walk its buttons, Home and End jump to either end. */
+function moveAlongToolbar(event: ReactKeyboardEvent<HTMLDivElement>) {
+  const step = { ArrowRight: 1, ArrowLeft: -1, Home: -Infinity, End: Infinity }[event.key];
+  if (step === undefined) return;
+  const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(":scope > button:not(:disabled)")];
+  const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  if (at < 0) return;
+  event.preventDefault();
+  const to = step === Infinity ? buttons.length - 1 : step === -Infinity ? 0 : (at + step + buttons.length) % buttons.length;
+  buttons[to].focus();
+}
+
 export function Sidebar({
   hub,
   collapsed,
@@ -125,8 +134,6 @@ export function Sidebar({
   onArchive,
   onRename,
   onCollapse,
-  account,
-  accountUnread,
   wallet,
   onSettings,
   onFiles,
@@ -382,29 +389,40 @@ export function Sidebar({
       </RailFilterContext.Provider>
       </div>
       {!navShown && <div className="railfoot">
-      <div className="studio-quicknav">
-          {destinations.filter(([mark]) => mark !== "usage").map(([mark, label, section]) => mark === "files" ? (
-            <button key={mark} data-action="files.open" onClick={onFiles}>
-              <span aria-hidden="true"><StudioIcon name="file" /></span><b>{t(label)}</b>
-            </button>
-          ) : (
-            <button key={mark} data-action="settings.section" data-value={section} onClick={() => onSettings(section)}>
-              <span aria-hidden="true"><svg viewBox="0 0 16 16" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">{ICON[mark as Section]}</svg></span><b>{t(label)}</b>
-              {section === "remote" && online > 0 && <em className="qv">{t("{n} 台在线", { n: online })}</em>}
-            </button>
-          ))}
-      </div>
-        {destinations.some(([mark]) => mark === "usage") && <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("钱包与用量")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>}
-        <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
+        <div className="studio-quicknav" role="toolbar" aria-label={t("侧栏入口")} onKeyDown={moveAlongToolbar}>
+          {destinations.map(([mark, label, section]) => {
+            const reading = mark === "usage" ? (wallet ? (hideAmounts ? MASK : wallet) : "")
+              : mark === "remote" && online > 0 ? t("{n} 台在线", { n: online }) : "";
+            const name = reading ? `${t(label)} · ${reading}` : t(label);
+            return (
+              <TooltipButton
+                key={mark}
+                className={mark === "usage" ? "studio-wallet" : undefined}
+                data-action={mark === "files" ? "files.open" : "settings.section"}
+                data-value={mark === "files" ? undefined : section}
+                aria-label={name}
+                title={name}
+                onClick={() => (mark === "files" ? onFiles() : onSettings(section))}
+              >
+                {mark === "files" ? <StudioIcon name="file" aria-hidden="true" />
+                  : <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICON[mark as Section]}</svg>}
+                {mark === "remote" && online > 0 && <i className="qdot" data-tone="ok" aria-hidden="true" />}
+              </TooltipButton>
+            );
+          })}
+          <span className="qspace" aria-hidden="true" />
+          <TooltipButton className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("设置")} title={t("设置")} shortcut={chord(",")}>
+            <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4" />
+            </svg>
+            <UpdateDot />
+          </TooltipButton>
+        </div>
+        <button className="studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
           <span aria-hidden="true"><StudioIcon name="feedback" /></span>
           <b>{t("发送反馈")}</b>
           <FeedbackBadge unread={feedbackUnread} />
         </button>
-        <div className="studio-user-foot">
-          <AccountRow account={account} unread={accountUnread} onOpen={() => onSettings("account")} />
-          <span className="studio-workspace-kind">{t(account?.signedIn ? "个人工作空间" : "本地工作空间")}</span>
-          <button className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("设置")}><StudioIcon name="settings" /><UpdateDot /></button>
-        </div>
       </div>}
     </div>
     </>

@@ -11,7 +11,6 @@ const rule = (selector: string) => {
 
 describe("the sidebar's destination labels", () => {
   it("sit lower in their box so a CJK label centres on its icon", () => {
-    expect(rule(".studio-quicknav b")).toMatch(/padding-top:\s*2px/);
     expect(rule(".studio-search > .studio-label")).toMatch(/padding-top:\s*3px/);
   });
 });
