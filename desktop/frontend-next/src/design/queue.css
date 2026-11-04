@@ -1,0 +1,2 @@
+.qacts button.qnow { height: 24px; margin-left: 3px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-micro) var(--ui); white-space: nowrap; }
+.qacts button.qnow:hover:not(:disabled) { background: var(--overlay); color: var(--text); }

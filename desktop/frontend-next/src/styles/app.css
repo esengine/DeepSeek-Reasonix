@@ -478,11 +478,6 @@
     transition: color var(--m-line) , background var(--m-line) ;
   }
   .qacts .studio-icon { width: 12px; height: 12px; stroke-width: 1.9 }
-  .qacts button.qnow {
-    margin-left: 3px; padding: 0 8px; color: var(--accent-ink);
-    font: var(--w-med) var(--fs-micro) var(--ui);
-  }
-  .qacts button.qnow:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-ink) }
   .qacts button:hover:not(:disabled) { background: var(--overlay); color: var(--text) }
   .qacts button:disabled { opacity: .3; cursor: default }
   .qacts .qmove { opacity: 0; width: 0; min-width: 0; padding: 0; overflow: hidden }
