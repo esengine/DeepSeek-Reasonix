@@ -83,6 +83,8 @@ const ELSEWHERE: string[] = [];
 // label. A failed server keeps its error on the row that names it.
 const NET_MODE: Record<string, string> = { auto: "跟随系统", env: "环境变量", custom: "手动", off: "直连" };
 
+const TWO_COLUMN: readonly Section[] = ["session", "tools", "ext", "display", "controls", "appearance", "storage"];
+
 const homeFor = (section: Section, anchor: string): Section => {
   const entry = SETTING_AT(anchor);
   return pageHome(entry ? entry.section : section);
@@ -437,7 +439,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           >
           {/* Keyed on the section: replacing this column is the navigation,
               and it is the one thing here whose mount really is the cause. */}
-          <div className="prefs-col" key={at}>
+          <div className="prefs-col" key={at} data-cols={TWO_COLUMN.includes(at) ? 2 : undefined}>
           <SettingsPageStyle section={at} page={pageNow} />
           {/* Every refused write on every page lands in one state, so it is
               said in one place. Copied onto the pages somebody remembered, it
