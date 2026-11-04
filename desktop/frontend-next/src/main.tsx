@@ -53,6 +53,7 @@ import "./styles/runsignals.css";
 import "./styles/toasts.css";
 import "./styles/overview.css";
 import "./styles/settings-spec.css";
+import "./styles/sessions-spec.css";
 import { App } from "./ui/App";
 import { SseHub } from "./port/hub";
 import { HttpError } from "./port/http_error";

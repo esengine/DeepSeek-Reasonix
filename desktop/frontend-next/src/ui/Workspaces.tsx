@@ -26,7 +26,7 @@ import { WorkspaceReveal } from "./WorkspaceReveal";
 import { SessionMenu } from "./SessionMenu";
 import { useSessionMove } from "./useSessionMove";
 import { useSessionMoveTo } from "./useSessionMoveTo";
-import { pinnedFirst } from "./pinorder"; import { Hit } from "./Hit";
+import { pinnedFirst } from "./pinorder"; import { Hit } from "./Hit"; import { WsMark } from "./WsMark";
 import { Confirm, removeHint, sessionDeleteHint } from "./WorkspaceConfirm";
 import { UnreadCount } from "./UnreadMark";
 import { PeerThreadMark } from "./peerthreads";
@@ -431,7 +431,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                       openRowMenu(ws.root, ev.currentTarget);
                     }}
                   >
-                    <StudioIcon name="folder" className="wsfolder" />
+                    <WsMark open={hasChildren ? !shut : undefined} />
                     <span className="wsname" title={ws.root}>
                       {ws.name}
                     </span>

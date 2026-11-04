@@ -54,6 +54,7 @@ import "../src/styles/runsignals.css";
 import "../src/styles/overview.css";
 import "../src/styles/themes.css";
 import "../src/styles/settings-spec.css";
+import "../src/styles/sessions-spec.css";
 import { App } from "../src/ui/App";
 import { MockHub } from "../src/port/mock_hub";
 import { MockPort } from "../src/port/mock";
