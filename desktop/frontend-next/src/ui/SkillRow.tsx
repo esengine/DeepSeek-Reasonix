@@ -101,16 +101,20 @@ export function SkillRow({
   return (
     <>
     <div className="skrow" data-off={sk.enabled ? undefined : ""} data-local={local ? "" : undefined}>
-      <span className="nm">
-        {command || sk.name}
-        {command && <CopyButton key={command} text={command} iconOnly label={t("ext.copy_invocation_command", { command })} />}
+      <span className="sk-main">
+        <span className="sk-line">
+          <span className="nm">
+            {command || sk.name}
+            {command && <CopyButton key={command} text={command} iconOnly label={t("ext.copy_invocation_command", { command })} />}
+          </span>
+          {drift && <i className="w" data-drift={sk.source?.state} title={drift.says} aria-label={`${drift.text}. ${drift.says}`}>{drift.text}</i>}
+          {sk.subagent && <i className="sa">{t("common.subagents")}</i>}
+          {sk.readOnly && <i className="ro">{t("common.read_only")}</i>}
+          <span className="how">{note.text && <i className={note.reachable ? "w" : "w none"}>{t(note.text)}</i>}</span>
+        </span>
+        <span className="ds" title={sk.description || undefined}>{sk.description || t("ext.no_description_written")}</span>
       </span>
-      <span className="ds" title={sk.description || undefined}>{sk.description || t("ext.no_description_written")}</span>
-      <span className="how">{note.text && <i className={note.reachable ? "w" : "w none"}>{t(note.text)}</i>}</span>
       <span className="face">
-        {sk.subagent && <i className="sa">{t("common.subagents")}</i>}
-        {sk.readOnly && <i className="ro">{t("common.read_only")}</i>}
-        {drift && <i className="w" data-drift={sk.source?.state} title={drift.says} aria-label={`${drift.text}. ${drift.says}`}>{drift.text}</i>}
         {updatable && !updating && <button className="act sm" data-action="skills.update-open" data-target={sk.name} onClick={() => setUpdating(true)}>{t("ext.update_from_source_folder")}</button>}
         {removable && !removing && <button className="act sm" data-action="skills.remove-open" data-target={sk.name} onClick={() => setRemoving(true)}>{t("ext.remove_2")}</button>}
       </span>

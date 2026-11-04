@@ -106,3 +106,13 @@
 .srv .srv-sub > .fold + .meta::before, .srv .srv-sub > .ld + .meta::before { content: "· "; }
 .srv > summary > .sw, .srv > .srv-hd > .sw { flex: none; margin-inline-start: auto; }
 .srv > .acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px 15px; }
+.skrow { align-items: center; }
+.skrow .sk-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.skrow .sk-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.skrow .sk-line > .nm { min-width: 0; font: var(--w-semi) var(--fs-ui) var(--ui); overflow-wrap: anywhere; }
+.skrow .sk-main > .ds { color: var(--faint); font: var(--w-med) var(--fs-micro)/1.5 var(--ui); }
+.skrow .sc { align-self: center; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-med) var(--fs-micro)/1.8 var(--ui); min-width: 0; text-align: center; }
+.skrow .sc:empty { display: none; }
+.skrow[data-local] { box-shadow: none; }
+.skrow .w[data-drift] { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn-ink); }
+.skrow .w[data-drift="source_missing"] { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err-ink); }

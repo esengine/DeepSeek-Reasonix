@@ -2529,7 +2529,7 @@
 
   .srv { border-top: 1px solid var(--hair); padding: 10px 12px }
   .srv:last-of-type { border-bottom: 1px solid var(--hair) }
-  .srv[data-st="failed"] { box-shadow: inset 2px 0 var(--err) }
+
   .srv > summary { display: flex; align-items: baseline; gap: 9px; cursor: pointer; list-style: none }
   .srv > summary::-webkit-details-marker { display: none }
   .srv-hd { display: flex; align-items: baseline; gap: 9px }
