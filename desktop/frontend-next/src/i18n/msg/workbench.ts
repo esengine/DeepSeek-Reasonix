@@ -139,7 +139,7 @@ export const WORKBENCH: Messages = {
   "workbench.the_proxy_host_asks_you": { zh: "代理 {host} 需要登录", en: "The proxy {host} asks you to sign in" },
   "workbench.the_remote_already_has_every": { zh: "远端已经有这个分支的全部提交，没有可推送的内容。", en: "The remote already has every commit of this branch; there is nothing to push." },
   "workbench.the_remote_has_n_commits": { zh: "远端比这个分支多 {n} 个提交（以上次获取为准），推送可能被拒绝。", en: "The remote has {n} commits this branch does not (as of the last fetch); the push may be rejected." },
-  "workbench.the_site_says_realm": { zh: "站点提示：{realm}。", en: "The site says: {realm}. " },
+  "workbench.the_site_says_realm": { zh: "站点提示：{realm}。", en: "The site says: {realm}." },
   "workbench.the_sites_certificate_is_not": { zh: "这个网站的证书不受信任，常见于内网的自签名证书或公司私有证书。", en: "The site's certificate is not trusted. This is common for self-signed or company-issued certificates on an intranet." },
   "workbench.the_staged_diff_is_long": { zh: "暂存区内容过长，只按前面一部分起草", en: "The staged diff is long; the draft reads only its first part" },
   "workbench.the_system_proxy_could_not": { zh: "连不上系统代理。内置浏览器使用系统的代理设置，而不是 Reasonix 设置里的网络代理。", en: "The system proxy could not be reached. The built-in browser uses the operating system's proxy settings, not the network proxy in Reasonix settings." },
