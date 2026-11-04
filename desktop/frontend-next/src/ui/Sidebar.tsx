@@ -299,6 +299,9 @@ export function Sidebar({
             <img className="studio-brand-logo" src={logoWordmark} alt="" draggable={false} />
             <small className="studio-brand-sub">studio</small>
           </span>
+          <button type="button" className="studio-collapse" data-action="chrome.rail" title={t("收起侧栏")} aria-label={t("收起侧栏")} onClick={() => onCollapse()}>
+            <StudioIcon name="panel" />
+          </button>
         </div>
         <button
           className="studio-new-task"

@@ -20,3 +20,12 @@
 :root[data-theme] .rail .studio-new-task .studio-icon { color: var(--text); }
 :root[data-theme] .rail .studio-search .studio-icon { color: var(--faint); }
 :root[data-theme] .rail .studio-search { margin-inline: 0; }
+.rail .studio-rail-head { padding: 0 10px 4px; }
+.rail .studio-brand { height: var(--chrome-h); padding: 0 4px 0 8px; gap: 8px; margin: 0; }
+.rail .studio-brand-lockup { gap: 8px; }
+.rail .studio-brand-logo { margin-left: -9px; }
+.rail .studio-brand-sub { margin-top: 6px; }
+.rail .studio-collapse { margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); display: inline-grid; place-items: center; flex: none; cursor: pointer; }
+.rail .studio-collapse:hover { background: var(--overlay); color: var(--text); }
+.rail .studio-collapse .studio-icon { width: 16px; height: 16px; }
+:root[data-theme] .rail .studio-new-task, :root[data-theme] .rail .studio-search { margin-inline: 0; }
