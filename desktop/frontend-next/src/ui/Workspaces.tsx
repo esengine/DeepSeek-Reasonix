@@ -26,7 +26,7 @@ import { WorkspaceReveal } from "./WorkspaceReveal";
 import { SessionMenu } from "./SessionMenu";
 import { useSessionMove } from "./useSessionMove";
 import { useSessionMoveTo } from "./useSessionMoveTo";
-import { pinnedFirst } from "./pinorder"; import { Hit } from "./Hit"; import { WsMark } from "./WsMark";
+import { pinnedFirst } from "./pinorder"; import { Hit } from "./Hit"; import { WsMark } from "./WsMark"; import { ProjectMenuExtras } from "./ProjectMenuExtras";
 import { Confirm, removeHint, sessionDeleteHint } from "./WorkspaceConfirm";
 import { UnreadCount } from "./UnreadMark";
 import { PeerThreadMark } from "./peerthreads";
@@ -365,10 +365,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
         onExit={() => treeKeys.ref.current?.parentElement?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
         onBusy={(pending) => { setBusy(pending ? "batch" : ""); if (pending) { setSessionMenu(""); setEditing(""); setConfirm(""); } }}
         onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} />
-      <ProjectsHeader adder={adder} onRecent={onRecent}
-        onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle}
-        canSelect={displayed.length > 0} selecting={selection !== null}
-        onSelect={() => setSelection(new Set())} />
+      <ProjectsHeader adder={adder} onRecent={onRecent} />
       <div className="scroll">
         <div role="tree" aria-label={t("项目与会话")} aria-multiselectable={selection !== null} inert={busy === "batch"} data-action-keydown="tree.navigate" ref={treeKeys.ref} onKeyDown={treeKeys.onKeyDown}>
           {shownTree.map((ws) => {
@@ -489,6 +486,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         <WorkspaceReveal ws={ws} hub={hub} dismiss={dismissMenu} onError={onError} />
                         {ws.remembered && <WorkspaceOrder root={ws.root} position={tree.filter((w) => w.remembered).findIndex((w) => w.root === ws.root)} total={tree.filter((w) => w.remembered).length}
                           hub={hub} reload={reload} dismiss={dismissMenu} onError={onError} />}
+                        <ProjectMenuExtras canSelect={displayed.length > 0} selecting={selection !== null} onSelect={() => setSelection(new Set())} onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle} dismiss={dismissMenu} />
                         <div className="session-pop-group">
                           <button className="danger" role="menuitem" data-action="workspace.remove" onClick={() => { setConfirm(ws.root); dismissMenu(); }}>
                             <StudioIcon name="close" /><span>{t("从列表移除")}</span><small>{t("不删除文件")}</small>
