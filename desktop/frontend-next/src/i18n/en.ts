@@ -866,6 +866,7 @@ export const EN: Record<string, string> = {
   "模型 · 已启用 {on}/{all}": "Models · {on} of {all} enabled",
   "模型": "Models",
   "数据": "Data",
+  "输入与提醒": "Input and reminders",
   "人设与预设": "Persona and presets",
   "系统人设和 Agent 预设": "The system persona and agent presets",
   "计划与提问": "Plans and questions",
