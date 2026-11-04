@@ -252,3 +252,30 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
 .tabmenu > button[role="menuitem"]:disabled > .studio-icon { color: var(--ghost); }
 .tabmenu > hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--hair); }
 
+
+.openwith { gap: 0; }
+.openwith-btn { min-height: 28px; border-color: var(--border); background: var(--surface); }
+.openwith-main { padding: 0 4px 0 8px; border-inline-end: 0; border-start-end-radius: 0; border-end-end-radius: 0; }
+.openwith-main + .openwith-btn { padding: 0 6px 0 2px; border-inline-start: 0; border-start-start-radius: 0; border-end-start-radius: 0; color: var(--faint); }
+.openwith-tile {
+  display: grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: var(--r-xs);
+  background: var(--accent); color: #fff; font: var(--w-semi) var(--fs-micro)/1 var(--ui);
+}
+.openwith-tile[data-program="vscode"] { background: #2f80ed; }
+.openwith-tile[data-program="cursor"] { background: #6b57d6; }
+.openwith-tile[data-program="idea"] { background: #d9822b; }
+.openwith-tile[data-program="terminal"] { background: #3b3b3b; box-shadow: inset 0 0 0 1px var(--hair); }
+.openwith-menu { width: 260px; min-width: 0; padding: 0; gap: 0; border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float); overflow: hidden; }
+.openwith-head { padding: 10px 14px 6px; color: var(--faint); font: var(--w-semi) var(--fs-micro) var(--ui); }
+.openwith-none { margin: 0; padding: 6px 14px 12px; color: var(--muted); font: var(--w-med) var(--fs-ui) var(--ui); }
+.openwith-menu > button { display: flex; align-items: center; gap: 9px; min-height: 30px; margin: 0 4px; padding: 4px 10px; border-radius: var(--r-sm); font: var(--w-med) var(--fs-ui)/1.3 var(--ui); }
+.openwith-menu > button:hover:not(:disabled) { background: var(--overlay); }
+.openwith-menu > button:disabled { color: var(--faint); }
+.openwith-menu > button > span:not(.openwith-tile) { flex: 1; min-width: 0; text-align: start; }
+.openwith-menu > button > small { padding: 0; color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--ui); }
+.openwith-menu > button > .studio-icon { width: 16px; height: 16px; color: var(--faint); }
+.openwith-menu > hr { margin: 4px 0; border: 0; border-top: 1px solid var(--hair); }
+.openwith-path {
+  padding: 6px 14px 10px; color: var(--faint); font: var(--w-med) var(--fs-micro) var(--mono);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: start;
+}

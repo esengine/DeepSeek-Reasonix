@@ -8,7 +8,7 @@ import { OpenWithMenu } from "./OpenWithMenu";
 const shell = vi.hoisted(() => ({ reveals: true }));
 vi.mock("../port/host", () => ({ host: () => ({ revealsFiles: () => shell.reveals }) }));
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 const targets = [
   { id: "vscode", name: "VS Code", available: true },
@@ -69,4 +69,36 @@ it("says why an installed program is not offered, and also when nothing is", asy
   expect(screen.queryByText("没有找到可用的程序")).toBeNull();
   await userEvent.click(item);
   expect(openWith).not.toHaveBeenCalled();
+});
+
+it("names the project it opens, sets the file manager apart, and remembers the program for the main button", async () => {
+  localStorage.clear();
+  shell.reveals = true;
+  const openWith = vi.fn().mockResolvedValue(undefined);
+  const openWithTargets = vi.fn().mockResolvedValue([{ id: "file-manager", name: "File manager", available: true }, ...targets]);
+  render(<OpenWithMenu hub={{ openWith, openWithTargets }} root="/home/u/proj" platform="darwin" onError={vi.fn()} />);
+  expect(screen.queryByRole("button", { name: "用 VS Code 打开" })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "用其他程序打开项目" }));
+  const menu = await screen.findByRole("menu");
+  await waitFor(() => expect(screen.getByRole("menuitem", { name: "在访达中显示" })).toBeTruthy());
+  expect(menu.textContent).toContain("/home/u/proj");
+  const items = screen.getAllByRole("menuitem").map((b) => b.textContent);
+  expect(items.at(-1)).toContain("在访达中显示");
+  await userEvent.click(screen.getByRole("menuitem", { name: "用 VS Code 打开" }));
+  const main = screen.getByRole("button", { name: "用 VS Code 打开" });
+  await userEvent.click(main);
+  expect(openWith).toHaveBeenLastCalledWith("/home/u/proj", "vscode");
+  expect(openWith).toHaveBeenCalledTimes(2);
+});
+
+it("says nothing was found and still offers the file manager", async () => {
+  shell.reveals = true;
+  const openWith = vi.fn().mockResolvedValue(undefined);
+  const openWithTargets = vi.fn().mockResolvedValue([{ id: "file-manager", name: "File manager", available: true }]);
+  render(<OpenWithMenu hub={{ openWith, openWithTargets }} root="/w" platform="windows" onError={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "用其他程序打开项目" }));
+  expect(await screen.findByText("没有找到可用的程序")).toBeTruthy();
+  await userEvent.click(screen.getByRole("menuitem", { name: "在文件资源管理器中显示" }));
+  expect(openWith).toHaveBeenCalledWith("/w", "file-manager");
+  expect(screen.queryByRole("button", { name: "用 文件管理器 打开" })).toBeNull();
 });

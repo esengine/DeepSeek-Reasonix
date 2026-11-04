@@ -652,7 +652,7 @@ export function WorkbenchPanel({
                 canSave={!busy && !file?.readOnly && file?.path === (grantedFile?.rel ?? active.path) && draft !== file.content}
                 readOnlyIn={grantedFile?.root ?? file?.root}
                 onSave={() => void save()}
-                openWith={hub && !remote ? <OpenWithMenu hub={hub} root={workspaceRoot} onError={(e) => setFailed(reason(e))} /> : undefined}
+                openWith={hub && !remote ? <OpenWithMenu hub={hub} root={workspaceRoot} platform={platform} onError={(e) => setFailed(reason(e))} /> : undefined}
                 onMore={grantedFile ? undefined : (anchor) => {
                   const r = anchor.getBoundingClientRect();
                   setMenu({ path: active.path, folder: false, scope, id: ++menuId.current, anchor, x: r.right - 220, y: r.bottom + 4, fromBar: true });
@@ -725,7 +725,7 @@ export function WorkbenchPanel({
               setHidden(on);
             }}
             onReveal={() => reveal("")}
-            openWith={hub && !remote ? <OpenWithMenu hub={hub} root={workspaceRoot} onError={(e) => setListFailed(reason(e))} /> : undefined}
+            openWith={hub && !remote ? <OpenWithMenu hub={hub} root={workspaceRoot} platform={platform} onError={(e) => setListFailed(reason(e))} /> : undefined}
           />
           <label className="workbench-search">
             <StudioIcon name="search" />
