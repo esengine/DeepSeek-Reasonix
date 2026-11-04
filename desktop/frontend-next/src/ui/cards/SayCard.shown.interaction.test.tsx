@@ -37,9 +37,9 @@ function draw(item: Say, shown: boolean) {
 describe("the thinking clock", () => {
   it("runs on a card being looked at", () => {
     const card = draw(thinking(), true);
-    expect(card.text()).toBe("思考中 0.0 秒");
+    expect(card.text()).toBe("思考中 · 0.0 秒");
     act(() => void vi.advanceTimersByTime(1500));
-    expect(card.text()).toBe("思考中 1.5 秒");
+    expect(card.text()).toBe("思考中 · 1.5 秒");
   });
 
   it("sets no timer for a card in a pane nobody is looking at", () => {
@@ -47,16 +47,16 @@ describe("the thinking clock", () => {
     const card = draw(thinking(), false);
     act(() => void vi.advanceTimersByTime(3000));
     expect(tick).not.toHaveBeenCalled();
-    expect(card.text()).toBe("思考中 0.0 秒");
+    expect(card.text()).toBe("思考中 · 0.0 秒");
   });
 
   it("reads the true elapsed time the moment the pane is brought forward", () => {
     const card = draw(thinking(), false);
     act(() => void vi.advanceTimersByTime(3000));
     act(() => card.show(true));
-    expect(card.text()).toBe("思考中 3.0 秒");
+    expect(card.text()).toBe("思考中 · 3.0 秒");
     act(() => void vi.advanceTimersByTime(500));
-    expect(card.text()).toBe("思考中 3.5 秒");
+    expect(card.text()).toBe("思考中 · 3.5 秒");
   });
 
   it("stops again when the pane goes behind another", () => {
@@ -64,7 +64,7 @@ describe("the thinking clock", () => {
     act(() => void vi.advanceTimersByTime(1000));
     act(() => card.show(false));
     act(() => void vi.advanceTimersByTime(4000));
-    expect(card.text()).toBe("思考中 1.0 秒");
+    expect(card.text()).toBe("思考中 · 1.0 秒");
   });
 });
 
@@ -73,7 +73,7 @@ describe("the folded thought's length", () => {
 
   it("reads in graphemes and keeps the elapsed time", () => {
     const card = draw(done("答", "想🙂想"), true);
-    expect(card.text()).toBe("思考 3 字 · 2 秒");
+    expect(card.text()).toBe("思考 2.3 秒 · 3 字");
   });
 
   it("is not counted again while the answer beneath it streams", () => {
@@ -91,6 +91,6 @@ describe("the folded thought's length", () => {
       card.view.rerender(<PaneShown.Provider value={true}><SayCard item={done(text, reasoning)} /></PaneShown.Provider>);
     }
     expect(expanded.mock.calls.length).toBe(first);
-    expect(card.text()).toBe("思考 80 字 · 2 秒");
+    expect(card.text()).toBe("思考 2.3 秒 · 80 字");
   });
 });

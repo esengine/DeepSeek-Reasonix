@@ -50,10 +50,28 @@
 .activity-body .tool-disclosure > .out { margin: 2px 10px 6px 32px; padding: 6px 10px 8px; border: 1px solid var(--hair); border-radius: var(--r-sm); }
 
 .think { margin-top: 6px; }
-.think > summary .fold { gap: 6px; color: var(--muted); font: var(--w-med) var(--fs-ui)/1.4 var(--ui); }
+.think > summary .fold { gap: 6px; color: var(--muted); font: var(--w-semi) var(--fs-ui)/1.4 var(--ui); }
 .think[open] > summary .fold { color: var(--muted); }
 .think > summary .fold::before { width: 10px; height: 10px; color: var(--faint); }
 .think > summary:hover .fold { color: var(--text); }
 .think .thinking-preview { margin: 4px 0 0 16px; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .think .tk { margin-top: 8px; padding-left: 18px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.75 var(--ui); }
 .think[open] { margin-bottom: 8px; }
+.think::details-content { transition: block-size 240ms var(--ease-out), content-visibility 240ms allow-discrete; }
+.think-sweep {
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 40%, var(--text) 50%, var(--muted) 60%, var(--muted) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: think-sweep 1.6s linear infinite;
+}
+@keyframes think-sweep { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+.think[data-settled] .think-label { animation: think-swap 200ms var(--ease-out); }
+@keyframes think-swap { from { opacity: 0; } }
+.think[data-live] .tk { max-height: calc(1.75em * 6); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.think[data-live] .tk-in { flex: none; }
+.think[data-cut] > summary .fold, .think[data-cut] > summary:hover .fold { color: var(--warn-ink); }
+.think-note { margin: 4px 0 0 16px; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+@media (prefers-reduced-motion: reduce) {
+  .think-sweep { background: none; color: var(--muted); animation: none; }
+  .think[data-settled] .think-label { animation: none; }
+  .think::details-content { transition: none; }
+}

@@ -1,5 +1,5 @@
 import type { WireEvent } from "../port/wire";
-import type { Item } from "./session_types";
+import type { Item, ThoughtCut } from "./session_types";
 import { nextId } from "./ids";
 
 // Keyed by item id rather than carried on the item: a start time is not part of
@@ -41,7 +41,8 @@ export function appendText(items: Item[], text: string, field: "text" | "reasoni
 // a tool call between two answers leaves the earlier card unsealed forever, and
 // an unsealed card keeps a caret blinking and its reveal clock running on text
 // nothing will add to. Returning the same array keeps every card's memo intact.
-export function sealSay(items: Item[], all = false): Item[] {
+// cut is why the turn ended early; it marks only a thought still arriving.
+export function sealSay(items: Item[], all = false, cut?: ThoughtCut): Item[] {
   let next: Item[] | null = null;
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
@@ -49,7 +50,8 @@ export function sealSay(items: Item[], all = false): Item[] {
     next ??= items.slice();
     const ran = it.thoughtMs ?? (it.reasoning ? Date.now() - (thoughtSince.get(it.id) ?? Date.now()) : undefined);
     thoughtSince.delete(it.id);
-    next[i] = { ...it, done: true, thoughtMs: ran };
+    const midThought = cut && it.reasoning && it.thoughtMs === undefined && !it.text;
+    next[i] = { ...it, done: true, thoughtMs: ran, ...(midThought ? { cut } : null) };
     if (!all) break;
   }
   return next ?? items;

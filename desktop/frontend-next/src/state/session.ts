@@ -620,7 +620,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         doing: ev.outcome === "no_progress" ? "app.held" : ev.cancelled ? "common.cancelled" : ev.err ? "common.interrupted" : "common.done_2",
         waiting: {},
         plan: livePlan(s.plan),
-        items: withReceipt([...sealTurn(sealSay(s.items, true), ev.outcome === "no_progress" || ev.cancelled ? undefined : ev.err), ...worked(ev.workDurationMs, ev.workStartedAt)], ev.receipt),
+        items: withReceipt([...sealTurn(sealSay(s.items, true, ev.cancelled ? "stopped" : ev.err && ev.outcome !== "no_progress" ? "failed" : undefined), ev.outcome === "no_progress" || ev.cancelled ? undefined : ev.err), ...worked(ev.workDurationMs, ev.workStartedAt)], ev.receipt),
       };
 
     default:

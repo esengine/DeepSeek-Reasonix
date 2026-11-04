@@ -127,3 +127,25 @@ describe("a line typed while the model is writing", () => {
     expect(says(s.items)).toHaveLength(2);
   });
 });
+
+describe("where a thought ends", () => {
+  const run = (...events: SessionEvent[]) => events.reduce(reduce, initialState);
+  const say = (s: ReturnType<typeof run>) => s.items.find((i) => i.t === "say") as Extract<Item, { t: "say" }>;
+
+  it("stops the clock when the model turns to a call, so only the call moves", () => {
+    const s = run(ev("turn_started", { authoredTurn: 1, msgIndex: 1 }), ev("reasoning", { text: "look first" }), ev("message", { text: "", reasoning: "look first" }), ev("tool_dispatch", { tool: tool("t1") }));
+    expect(say(s).done).toBe(true);
+    expect(say(s).thoughtMs).toBeTypeOf("number");
+  });
+
+  it("says a thought was cut short when the turn is stopped or fails while it is still arriving", () => {
+    const thinking = [ev("turn_started", { authoredTurn: 1, msgIndex: 1 }), ev("reasoning", { text: "half a thought" })];
+    expect(say(run(...thinking, ev("turn_done", { cancelled: true }))).cut).toBe("stopped");
+    expect(say(run(...thinking, ev("turn_done", { err: "provider down" }))).cut).toBe("failed");
+  });
+
+  it("does not call a finished thought cut short when the turn stops later", () => {
+    const s = run(ev("turn_started", { authoredTurn: 1, msgIndex: 1 }), ev("reasoning", { text: "done thinking" }), ev("text", { text: "answer" }), ev("turn_done", { cancelled: true }));
+    expect(say(s).cut).toBeUndefined();
+  });
+});

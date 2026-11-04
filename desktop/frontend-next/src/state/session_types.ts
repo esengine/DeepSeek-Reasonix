@@ -5,6 +5,8 @@ import type { Ask, Approval, Compaction, CostCoverage, ExtensionSurface, Guardia
 import type { Sample } from "../port/tokens";
 import type { Executions } from "./executions";
 
+export type ThoughtCut = "stopped" | "failed";
+
 export type Item =
   // itemId names the durable queue entry while pending, which is what a
   // cancel asks the kernel to drop. queued says which wait it is in: guidance
@@ -34,7 +36,8 @@ export type Item =
     }
   // source names which model wrote it — a turn can carry two, and the card is
   // where the answer has to survive.
-  | { t: "say"; id: string; text: string; reasoning?: string; done: boolean; thoughtMs?: number; source?: string; model?: string }
+  // cut says a thought still arriving when the turn was stopped or failed.
+  | { t: "say"; id: string; text: string; reasoning?: string; done: boolean; thoughtMs?: number; source?: string; model?: string; cut?: ThoughtCut }
   // omitted counts the characters of a running call's output that the page let go of from the front.
   | { t: "tool"; id: string; tool: StateTool; running: boolean; children: StateTool[]; omitted?: number }
   | { t: "reads"; id: string; tools: StateTool[] }

@@ -26,7 +26,9 @@ function ThoughtLabel({ item }: { item: Extract<Item, { t: "say" }> }) {
   // the reader and two to the string.
   const graphemes = useMemo(() => [...(item.reasoning ?? "")].length, [item.reasoning]);
   const chars = t("chat.n_chars", { n: count(graphemes) });
-  return <>{item.thoughtMs ? t("chat.thought_chars_secs_s", { secs: Math.max(Math.round(item.thoughtMs / 1000), 1), chars }) : t("chat.thought_chars", { chars })}</>;
+  const secs = decimals((item.thoughtMs ?? 0) / 1000, 1);
+  if (item.cut) return <>{t(item.cut === "stopped" ? "chat.thought_stopped_s" : "chat.thought_failed_s", { secs })}</>;
+  return <>{item.thoughtMs ? t("chat.thought_chars_secs_s", { secs, chars }) : t("chat.thought_chars", { chars })}</>;
 }
 
 const LIVE_TICK_MS = 100;
@@ -102,7 +104,16 @@ function download(text: string) {
 
 export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { item: Extract<Item, { t: "say" }>; afterAnswer?: ReactNode; settled?: boolean; reply?: ReplyActions; quiet?: boolean }) {
   const [branching, setBranching] = useState(false);
-  const start = useStartsOpen("thinking", !item.done && !item.text);
+  const thinking = !item.done && item.thoughtMs === undefined;
+  const start = useStartsOpen("thinking", thinking && !item.text);
+  // The title changes once, when a thought this card watched finishes; a
+  // thought drawn already finished is not that change happening.
+  const watchedThinking = useRef(thinking);
+  const [settledHere, setSettledHere] = useState(false);
+  useEffect(() => {
+    if (watchedThinking.current && !thinking) setSettledHere(true);
+    watchedThinking.current = thinking;
+  }, [thinking]);
   const [touched, setOpen] = useState<boolean | null>(null);
   const open = touched ?? start;
   const peeks = useThinkingPreview() && !open;
@@ -150,14 +161,22 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
         </div>
         <div className="out">
           {item.reasoning?.trim() && (
-            <details className="think" open={open} onToggle={(e) => e.currentTarget.open !== open && setOpen(e.currentTarget.open)}>
+            <details className="think" open={open} data-live={thinking ? "" : undefined} data-cut={item.cut}
+              data-settled={settledHere ? "" : undefined} onToggle={(e) => e.currentTarget.open !== open && setOpen(e.currentTarget.open)}>
               <summary>
-                <span className="fold">{item.done || item.thoughtMs !== undefined ? <ThoughtLabel item={item} /> : <LiveThought id={item.id} />}</span>
-                {peek && <span className="thinking-preview">{peek}</span>}
+                <span className="fold">
+                  <span className={thinking ? "think-label think-sweep" : "think-label"} key={thinking ? "live" : "done"}>
+                    {thinking ? <LiveThought id={item.id} /> : <ThoughtLabel item={item} />}
+                  </span>
+                </span>
+                {item.cut && !open && <span className="think-note">{t(item.cut === "stopped" ? "chat.thought_stopped_note" : "chat.thought_failed_note")}</span>}
+                {peek && !item.cut && <span className="thinking-preview">{peek}</span>}
               </summary>
               <div className="tk">
-                {thought}
-                {!item.done && <span className="caret" />}
+                <div className="tk-in">
+                  {thought}
+                  {thinking && <span className="caret" />}
+                </div>
               </div>
             </details>
           )}
