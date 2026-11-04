@@ -18,6 +18,7 @@ import { UnifiedDiff } from "./UnifiedDiff";
 import { leave, slideAway, useEnteringTabs, useOpenSlide, useOverflowTabs, useSwitchFade } from "./workbench_motion";
 import { WorkbenchTabOverflow } from "./WorkbenchTabOverflow";
 import { WorkbenchCloseAsk } from "./WorkbenchCloseAsk";
+import { WorkbenchState } from "./WorkbenchState";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
 import { useOnBump } from "./useOnBump";
 import { StudioIcon } from "./StudioIcon";
@@ -136,6 +137,7 @@ export function WorkbenchPanel({
   const newTab = useRef<HTMLButtonElement>(null);
   const toggleLauncher = () => { supersede(); setLauncher((open) => !open); };
   const [cursor, setCursor] = useState<[string, number]>(["", 1]);
+  const [reread, setReread] = useState(0);
   const chooseFiles = () => { supersede(); setLauncher(false); setShowFiles(true); };
   const toggleExplorer = () => { supersede(); setLauncher(false); setShowFiles((on) => launcher || !on); };
   const [changesOpen, setChangesOpen] = useState(false);
@@ -339,7 +341,7 @@ export function WorkbenchPanel({
   const previewTab = previewable ? preview.tabFor(filePath) : undefined;
   const { open: openPreview, sync: syncPreview } = preview;
   const { file, draft, diff, busy, error: fileFailed, errorCode, missing, setDraft, save, saveAt, dropAt, unsaved } = useWorkbenchFiles({
-    port, workspaceRoot, repos: gitRepos.repos, path: !source || (hasDocument && mode === "document") ? "" : filePath, openPaths: openFiles, shown, refresh: JSON.stringify([changeKey, glance, running, wrote]),
+    port, workspaceRoot, repos: gitRepos.repos, path: !source || (hasDocument && mode === "document") ? "" : filePath, openPaths: openFiles, shown, refresh: JSON.stringify([changeKey, glance, running, wrote, reread]),
     poll: (readable && mode === "read") || (previewable && mode === "preview"),
   });
   const unpreviewableText = !hasDocument && errorCode === "workspace.file_unreadable";
@@ -656,10 +658,13 @@ export function WorkbenchPanel({
                   setMenu({ path: active.path, folder: false, scope, id: ++menuId.current, anchor, x: r.right - 220, y: r.bottom + 4, fromBar: true });
                 }}
               />
-              {(fileFailed || failed) && mode !== "document" && !unpreviewableText && !(mode === "preview" && previewTab) && (
-                <div className="workbench-error" role="alert">
-                  {fileFailed || failed}
-                </div>
+              {missing && mode !== "document" ? (
+                <WorkbenchState icon="file" title={t("workbench.file_is_gone")} detail={t("workbench.it_may_have_been_moved")} alert>
+                  <button type="button" data-action="workbench.reread" onClick={() => setReread((n) => n + 1)}>{t("workbench.read_again")}</button>
+                  <button type="button" data-weak="" data-action="workbench.close" data-target={keyOf(active)} onClick={() => void close([active])}>{t("workbench.close_tab")}</button>
+                </WorkbenchState>
+              ) : (fileFailed || failed) && mode !== "document" && !unpreviewableText && !(mode === "preview" && previewTab) && (
+                <div className="workbench-error" role="alert">{fileFailed || failed}</div>
               )}
               {mode === "document" || unpreviewableText ? (
                 <Suspense fallback={<div className="workbench-empty">{t("common.loading")}</div>}>

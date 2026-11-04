@@ -1,6 +1,7 @@
 import type { UIAction } from "./actions";
 
 export const WORKBENCH_ACTIONS: UIAction[] = [
+  { id: "workbench.reread", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.close-save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "workbench.close-drop", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.close-cancel", kind: "view", target: "none", proof: "interaction" },

@@ -7,6 +7,7 @@ import { layoutGraph, type GraphRow } from "../state/gitgraph";
 import { since } from "./wallet";
 import { GitCommitDetail } from "./GitCommitDetail";
 import { StudioIcon } from "./StudioIcon";
+import { WorkbenchState } from "./WorkbenchState";
 
 const ROW = 28;
 const COL = 12;
@@ -55,7 +56,7 @@ export function WorkbenchHistory({ port, repo, branch }: { port: AgentPort; repo
           <button type="button" className="btn sm" data-action="workbench.history-reload" onClick={() => void load()}>{t("common.read_again")}</button>
         </p>
       )}
-      {history && !history.repo && <p className="gh-note">{t("workbench.this_folder_is_not_a")}</p>}
+      {history && !history.repo && <WorkbenchState icon="branch" title={t("workbench.this_folder_is_not_a")} detail={t("workbench.changes_and_history_need_git")} />}
       {graph && graph.rows.length === 0 && <p className="gh-note">{t("workbench.no_commits_yet")}</p>}
       {graph && graph.rows.length > 0 && (
         <ol className="gh-list">

@@ -182,4 +182,11 @@ export const WORKBENCH: Messages = {
   "workbench.collapse_section": { zh: "收起{name}", en: "Collapse {name}" },
   "workbench.name_is_not_saved": { zh: "{name} 还没保存", en: "{name} is not saved" },
   "workbench.dont_save": { zh: "不保存", en: "Don't save" },
+  "workbench.file_is_gone": { zh: "文件已不在原处", en: "The file is no longer there" },
+  "workbench.it_may_have_been_moved": { zh: "可能被删除或移动了", en: "It may have been deleted or moved" },
+  "workbench.read_again": { zh: "重新读取", en: "Read again" },
+  "workbench.close_tab": { zh: "关闭页签", en: "Close tab" },
+  "workbench.file_too_large_to_preview": { zh: "文件太大，无法预览", en: "Too large to preview" },
+  "workbench.size_preview_limit": { zh: "{size}，预览上限 {limit}", en: "{size}; the preview limit is {limit}" },
+  "workbench.changes_and_history_need_git": { zh: "改动和提交历史需要 git", en: "Changes and history need git" },
 };

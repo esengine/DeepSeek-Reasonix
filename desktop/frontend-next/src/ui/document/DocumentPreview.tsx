@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react
 import { onOfficePreviewChange, previewsOffice } from "../../state/prefs";
 import type { AgentPort } from "../../port/port";
 import { t } from "../../i18n";
+import { bytes } from "../../i18n/format";
+import { WorkbenchState } from "../WorkbenchState";
 import { useDocument } from "./useDocument";
 import { Boundary } from "../Boundary";
 import "./document.css";
@@ -49,7 +51,13 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
   if (error) body = <p role="alert">{error}</p>;
   else if (info?.kind === "unsupported") body = fallback;
   else if (info?.kind === "office" && !officeOn) body = <p role="status">{t("chat.office_document_preview_is_turned")}</p>;
-  else if (info && info.size > info.limit) body = <p role="alert">{t("chat.this_file_exceeds_the_preview")}</p>;
+  else if (info && info.size > info.limit) {
+    body = (
+      <WorkbenchState icon="layers" title={t("workbench.file_too_large_to_preview")} detail={t("workbench.size_preview_limit", { size: bytes(info.size), limit: bytes(info.limit) })} alert>
+        {onOpenExternal && <button type="button" data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("chat.open_in_system_application")}</button>}
+      </WorkbenchState>
+    );
+  }
   else if (data && info) {
     const text = () => new TextDecoder("utf-8", { fatal: true }).decode(data);
     switch (info.kind) {
@@ -65,7 +73,7 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
     <div className="document-controls">
       {info && <span>{info.size.toLocaleString()} B</span>}
       <button data-action="document.refresh" data-target={path} onClick={reload}>{t("common.re_freeze")}</button>
-      {onOpenExternal && <button data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("chat.open_in_system_application")}</button>}
+      {onOpenExternal && !(info && info.size > info.limit) && <button data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("chat.open_in_system_application")}</button>}
     </div>
     <Boundary fallback={fallback} retryKey={info?.version}>
       <Suspense fallback={<p role="status">{t("common.loading")}</p>}>{body}</Suspense>

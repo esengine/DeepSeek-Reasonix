@@ -219,3 +219,22 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
 }
 .workbench-close-ask button:first-child { border-color: var(--text); background: var(--text); color: var(--surface); }
 .workbench-close-ask button:last-child { margin-left: auto; border-color: transparent; background: none; color: var(--muted); }
+
+.workbench-state, .bfail {
+  align-self: center; justify-self: center; margin: 24px auto; width: min(100% - 32px, 320px); box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px 18px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); text-align: center;
+}
+.workbench-state > .studio-icon, .bfail > .studio-icon { width: 18px; height: 18px; color: var(--muted); }
+.workbench-state > b, .bfail > b { color: var(--text); font: var(--w-semi) var(--fs-ui)/1.4 var(--ui); }
+.workbench-state > p, .bfail > p { margin: 0; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.workbench-state-acts, .bfail .bfail-acts { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; margin-top: 8px; }
+.workbench-state-acts > button, .bfail .bfail-acts > button:first-child {
+  height: 30px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised);
+  color: var(--text); font: var(--w-med) var(--fs-ui)/1 var(--ui); cursor: pointer;
+}
+.workbench-state-acts > button[data-weak], .bfail .bfail-acts > button:not(:first-child) {
+  height: auto; padding: 0; border: 0; background: none; color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui); cursor: pointer;
+}
+.workbench-state-acts > button[data-weak]:hover, .bfail .bfail-acts > button:not(:first-child):hover { color: var(--text); }
+.bfail code { color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--mono); overflow-wrap: anywhere; }

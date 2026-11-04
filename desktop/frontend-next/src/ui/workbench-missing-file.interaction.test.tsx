@@ -19,8 +19,23 @@ it("says a requested file cannot be found instead of leaving the panel blank", a
   const view = render(<WorkbenchPanel {...props(port)} />);
   view.rerender(<WorkbenchPanel {...props(port)} fileRequest={{ path: "docs/missing.md" }} />);
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("找不到该文件");
+  expect(alert.textContent).toContain("文件已不在原处");
+  expect(alert.textContent).toContain("可能被删除或移动了");
   await waitFor(() => expect(document.querySelector(".workbench-read, .cm-content")).toBeNull());
+});
+
+it("reads a vanished file again on request, and closes its tab from the same card", async () => {
+  const port = new MockPort();
+  vi.spyOn(port, "workspaceFiles").mockResolvedValue({ files: ["real.md"], directories: [] });
+  const read = vi.spyOn(port, "workspaceFile").mockRejectedValue(gone());
+  const view = render(<WorkbenchPanel {...props(port)} />);
+  view.rerender(<WorkbenchPanel {...props(port)} fileRequest={{ path: "docs/missing.md" }} />);
+  await screen.findByRole("button", { name: "重新读取" });
+  const before = read.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+  await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(before));
+  fireEvent.click(screen.getByRole("button", { name: "关闭页签" }));
+  await waitFor(() => expect(screen.queryByRole("tab", { name: "missing.md" })).toBeNull());
 });
 
 it("does not open a preview page for an HTML file that cannot be read", async () => {

@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { StudioIcon } from "./StudioIcon";
 import type { BrowserLoadFailure } from "../port/host";
 
 // What a Chromium net error means for someone who can act on it, read from the
@@ -57,6 +58,7 @@ export function BrowserFailure({ failure, onRetry, onExternal, onTrust }: Props)
   const cert = failure.certificate;
   return (
     <div className="bfail" role="alert">
+      <StudioIcon name="globe" />
       <b>{t("workbench.this_page_could_not_be")}</b>
       <p>{explain(failure.reason)}</p>
       <code>
