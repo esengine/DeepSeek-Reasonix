@@ -16,6 +16,7 @@
 - 底部的子代理读数：有子代理在跑时是带呼吸点的蓝色「N 个子代理在跑」，都结束后变回灰字「N 个子代理 · 都结束了」；悬停弹出的列表和对话里的组卡一样带颜色头像、任务和状态，可以全部停止（68e703888）。
 - 工作台里的子代理页签带它的颜色头像；顶部能「停止子代理」，主会话交给它的任务单独放在最上面，底部可以「回到对话里那一组」（95ec30ace）。
 - 后台任务结束后不再消失：浮层分「在跑」和「已结束」两段，每行写用时、命令和最后一行输出，结束的还写退出码；停止要再点一次确定，结束的可以「清除」。底部读数在跑时是蓝色，有失败时变红，直到你打开看过（b4b7abd35）。
+- 后台任务的「看输出」改为在工作台里开一个页签，不再用弹窗盖住对话：顶部写用时或「跑完了，退出 N」，在跑时可以停止；默认跟着最新输出，往上翻就停住，点箭头回到最新（bd9839a59）。
 
 ---
 <!-- lang:en -->
@@ -38,3 +39,4 @@
 - The run rail's subagent reading is a blue "N subagents running" with a breathing dot while one runs and grey "N subagents · all finished" after; its list carries the same avatars, tasks and states as the conversation's group and can stop them all (68e703888).
 - A subagent's workbench tab carries its avatar, can stop the run from its head, shows the task the main session handed it at the top, and goes back to its group in the conversation from its foot (95ec30ace).
 - Background jobs no longer vanish when they end: the list shows running jobs above ended ones, each with its duration, command and last line of output, an ended one with its exit status; stopping asks again, and ended jobs can be cleared. The rail reading is blue while one runs and stays red after a failure until you open it (b4b7abd35).
+- A background job's output opens as a workbench tab instead of a dialog over the conversation: its head reads the run time or "Finished, exit N", a running job can be stopped there, and the output follows the newest line until you scroll up (bd9839a59).
