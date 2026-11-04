@@ -68,12 +68,12 @@ const highlight = HighlightStyle.define([
 const theme = (dark: boolean) =>
   EditorView.theme(
     {
-      "&": { height: "100%", color: "var(--text)", backgroundColor: "var(--face-code)", fontSize: "calc(12px * var(--fs-scale, 1))" },
+      "&": { height: "100%", color: "var(--text)", backgroundColor: "var(--raised)", fontSize: "calc(12px * var(--fs-scale, 1))" },
       "&.cm-focused": { outline: "none" },
       ".cm-scroller": { fontFamily: "var(--mono)", lineHeight: "1.65" },
       ".cm-content": { caretColor: "var(--text)", paddingBottom: "80px" },
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text)" },
-      ".cm-gutters": { backgroundColor: "var(--face-code)", color: "var(--ghost)", border: "none" },
+      ".cm-gutters": { backgroundColor: "var(--raised)", color: "var(--ghost)", border: "none" },
       ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--muted)" },
       ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--overlay) 55%, transparent)" },
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {

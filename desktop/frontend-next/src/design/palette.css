@@ -1,0 +1,46 @@
+.palette-veil {
+  position: fixed; inset: 0; z-index: 80; display: grid; place-items: start center;
+  padding-top: 12vh; background: rgb(0 0 0 / .16);
+  animation: palette-in var(--m-panel) both;
+}
+@media (prefers-reduced-motion: reduce) { .palette-veil { animation: none; } }
+.palette {
+  width: min(600px, calc(100vw - 32px)); max-height: 68vh; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--float);
+  box-shadow: var(--shadow-float); overflow: hidden;
+}
+.palette-input {
+  flex: none; display: flex; align-items: center; gap: 10px; height: 52px; min-height: 52px; box-sizing: border-box;
+  padding: 0 16px; border-bottom: 1px solid var(--hair); color: var(--muted);
+}
+.palette-input .studio-icon { width: 16px; height: 16px; flex: none; }
+.palette-input input {
+  flex: 1; min-width: 0; padding: 0; border: 0; background: none; outline: none;
+  color: var(--text); font: var(--w-reg) 15px/1.4 var(--ui);
+}
+.palette-input input::placeholder { color: var(--faint); }
+.palette-esc {
+  flex: none; display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--raised); color: var(--muted);
+  font: var(--w-med) 10.5px/1 var(--ui);
+}
+.palette-scope {
+  flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--r-xs);
+  background: var(--overlay); color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui);
+}
+.palette-results { flex: 1; min-height: 0; overflow: auto; padding: 0 0 6px; overscroll-behavior: contain; }
+.palette-label { padding: 10px 16px 4px; color: var(--muted); font: var(--w-med) 11.5px/1.3 var(--ui); letter-spacing: 0; text-transform: none; }
+.palette-hit {
+  width: calc(100% - 12px); height: 36px; min-height: 36px; margin: 0 6px; display: flex; align-items: center; gap: 10px;
+  padding: 0 10px; box-sizing: border-box; border: 0; border-radius: 8px; background: none; color: var(--text);
+  font: var(--w-reg) var(--fs-ui)/1.35 var(--ui); text-align: start; cursor: pointer;
+}
+.palette-hit .studio-icon { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.palette-hit > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-hit > small { flex: none; color: var(--faint); font: var(--w-reg) 11.5px/1 var(--ui); }
+.palette-hit:hover, .palette-hit[aria-selected="true"] { background: var(--float-hi); color: var(--text); }
+.palette-empty { padding: 22px 16px; text-align: center; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.palette-help {
+  flex: none; display: flex; align-items: center; height: 36px; box-sizing: border-box; padding: 0 14px;
+  border-top: 1px solid var(--hair); background: var(--page); color: var(--faint); font: var(--w-reg) 11.5px/1 var(--ui); white-space: nowrap; overflow: hidden;
+}

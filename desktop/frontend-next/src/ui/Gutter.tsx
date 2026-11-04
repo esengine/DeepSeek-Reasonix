@@ -22,9 +22,9 @@ export const RAIL: Span = { min: 232, max: 440, def: 264, key: "rx-rail-w", css:
 export const SIDE: Span = { min: 244, max: 540, def: 316, key: "rx-side-w", css: "--side-open", col: "--side-w" };
 // The workbench beside the conversation. Wider than the rail because what sits
 // in it is a page someone is reading, not a list of names.
-export const DOCK: Span = { min: 320, max: 1600, def: 560, key: "rx-dock-w", css: "--dock-open", col: "--dock-w", owner: ".pane" };
+export const DOCK: Span = { min: 360, max: 1600, def: 520, key: "rx-dock-w", css: "--dock-open", col: "--dock-w", owner: ".pane" };
 
-const STANDARD_DOCK_MAX = 880;
+const STANDARD_DOCK_MAX = 900;
 export const dockMax = (room: number) => Math.min(DOCK.max, Math.max(STANDARD_DOCK_MAX, room / 2));
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

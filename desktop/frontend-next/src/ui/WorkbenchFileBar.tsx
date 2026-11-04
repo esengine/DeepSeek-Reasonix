@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { StudioIcon } from "./StudioIcon";
@@ -43,7 +44,10 @@ export function WorkbenchFileBar({
   );
   return (
     <div className="workbench-filebar">
-      <strong>{path}</strong>
+      <strong title={path}>
+        {path.split("/").slice(0, -1).map((part, i) => <Fragment key={i}><span>{part}</span><i aria-hidden="true">/</i></Fragment>)}
+        <b>{path.split("/").at(-1)}</b>
+      </strong>
       {onReveal && (
         <button className="workbench-reveal" data-action="workbench.reveal" data-target={path} aria-label={t("在系统文件管理器中显示此文件")} title={t("在系统文件管理器中显示此文件")} onClick={onReveal}>
           <StudioIcon name="reveal" />

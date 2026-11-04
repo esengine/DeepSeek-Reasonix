@@ -211,6 +211,7 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
               setAt((n) => (Math.min(n, flat.length - 1) + step + flat.length) % flat.length);
             }}
           />
+          <kbd className="palette-esc" aria-hidden="true">Esc</kbd>
         </label>
         <div className="palette-results" ref={list}>
           {groups.map((group) => (

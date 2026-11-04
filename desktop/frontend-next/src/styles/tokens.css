@@ -42,7 +42,7 @@
 @property --nav-w { syntax: "<length>"; inherits: true; initial-value: 0px }
 @property --rail-w { syntax: "<length>"; inherits: true; initial-value: 264px }
 @property --side-w { syntax: "<length>"; inherits: true; initial-value: 316px }
-@property --dock-w { syntax: "<length>"; inherits: false; initial-value: 560px }
+@property --dock-w { syntax: "<length>"; inherits: false; initial-value: 520px }
 
 @property --win-ar { syntax: "<number>"; inherits: true; initial-value: 1.6 }
 
@@ -51,7 +51,7 @@
     --nav-open: 48px;
 
     --call-sym: calc(28px * var(--d-scale, 1)); --call-gap: calc(14px * var(--d-scale, 1));
-    --rail-open: 264px; --side-open: 316px; --dock-open: 560px; --dock-left-min: 236px; --pane-gutter: calc(12px * var(--d-scale, 1));
+    --rail-open: 264px; --side-open: 316px; --dock-open: 520px; --dock-left-min: 236px; --pane-gutter: calc(12px * var(--d-scale, 1));
     --page: oklch(95.8% .0092 85); --surface: oklch(98.9% .0046 85);
     --raised: oklch(100% 0 85); --overlay: oklch(93.1% .0138 85);
     --border: oklch(87.6% .0184 85); --hair: oklch(91.7% .0126 85);

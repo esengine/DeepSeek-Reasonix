@@ -6,3 +6,5 @@
 @import "./shell.css" layer(design);
 @import "./composer.css" layer(design);
 @import "./turn.css" layer(design);
+@import "./workbench.css" layer(design);
+@import "./palette.css" layer(design);
