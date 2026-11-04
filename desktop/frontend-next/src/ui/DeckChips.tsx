@@ -3,7 +3,7 @@ import type { JobEntry, JobOutput } from "../port/port";
 import { t } from "../i18n";
 import { StudioIcon } from "./StudioIcon";
 import { agentsIn } from "./panels/derive";
-import { Agents } from "./panels/Agents";
+import { AgentDeck } from "./AgentDeck";
 import { AgentTranscript } from "./panels/AgentTranscript";
 import { Jobs } from "./panels/Jobs";
 import { JobOutputView } from "./panels/JobOutputView";
@@ -17,7 +17,7 @@ export type Deck = "" | "agents" | "jobs";
  *  readings sit at the right end of the run rail, beside the other numbers
  *  about this turn, and each opens on hover the way the context reading does —
  *  one gesture for every summary on this row. */
-export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, onOpenRun }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput>; onOpenRun?: (call: string) => Promise<boolean> }) {
+export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, onOpenRun, onStopCall }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput>; onOpenRun?: (call: string) => Promise<boolean>; onStopCall?: (callId: string) => void }) {
   const agentsBox = useRef<HTMLDivElement>(null);
   const jobsBox = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState("");
@@ -59,11 +59,12 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             onClick={() => onOpen((was) => (was === "agents" ? "" : "agents"))}
           >
             <StudioIcon name="branch" />
-            <b>{liveAgents || tasks.length}</b>
-            <span>{liveAgents ? t("个子代理在跑") : t("个子代理已结束")}</span>
+            {liveAgents > 0 && <i className="agent-live" aria-hidden="true" />}
+            <b>{liveAgents || agentsIn(tasks)}</b>
+            <span>{liveAgents ? t("个子代理在跑") : t("个子代理 · 都结束了")}</span>
           </button>
           <div className="studio-deck-pop" role="dialog" aria-label={t("子代理")}>
-            <Agents tasks={tasks} onOpen={(id) => { shut(); void openTask(id); }} />
+            <AgentDeck tasks={tasks} onStop={onStopCall} onOpen={(id) => { shut(); void openTask(id); }} />
           </div>
         </div>
       )}

@@ -20,7 +20,7 @@ import { MASK, type Wallet } from "./wallet";
 import type { SpeedSummary } from "./speed";
 
 /** The numbers about this turn, in one row under the composer. */
-export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compact, cost, turnCost = [], wallet, hideAmounts, tasks, jobs, onSettings, onCancelJob, onReadJob, onOpenRun, usage, quote, tariff, onTariffFlip }: {
+export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compact, cost, turnCost = [], wallet, hideAmounts, tasks, jobs, onSettings, onCancelJob, onReadJob, onOpenRun, onStopCall, usage, quote, tariff, onTariffFlip }: {
   tps: number;
   trail: number[];
   running: boolean;
@@ -41,6 +41,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
   onCancelJob: (id: string) => Promise<void>;
   onReadJob?: (id: string) => Promise<JobOutput>;
   onOpenRun?: (call: string) => Promise<boolean>;
+  onStopCall?: (callId: string) => void;
   usage?: SessionUsage;
   quote?: CostQuote;
   tariff?: Tariff;
@@ -112,7 +113,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
       {cost.length > 0 && turnCost.some((m) => m.amount > 0) && <span className="studio-meter-cost"><span>{t("本轮")}</span>{hideAmounts ? <b>{MASK}</b> : turnCost.map((m) => <b key={m.currency}>{money(m.amount, m.currency)}</b>)}</span>}
       <button className="studio-meter-mask" type="button" data-action="metrics.hide-amounts" aria-pressed={hideAmounts} aria-label={hideAmounts ? t("显示金额") : t("隐藏金额")} title={hideAmounts ? t("显示金额") : t("隐藏金额")} onClick={() => setHidesAmounts(!hideAmounts)}><StudioIcon name={hideAmounts ? "eyeoff" : "eye"} /></button>
       {wallet.kind === "read" && <button className="studio-meter-wallet" data-short={wallet.reading.available ? undefined : "true"} title={wallet.reading.available ? undefined : t("余额不足")} data-action="settings.section" data-value="usage" aria-label={wallet.reading.available ? t("查看钱包余额") : `${t("查看钱包余额")}, ${t("余额不足")}`} onClick={() => onSettings("usage")}><StudioIcon name="wallet" /><b>{hideAmounts ? MASK : wallet.reading.display}</b></button>}
-      <DeckChips tasks={tasks} jobs={jobs} open={deck} onOpen={setDeck} onCancelJob={onCancelJob} onReadJob={onReadJob} onOpenRun={onOpenRun} />
+      <DeckChips tasks={tasks} jobs={jobs} open={deck} onOpen={setDeck} onCancelJob={onCancelJob} onReadJob={onReadJob} onOpenRun={onOpenRun} onStopCall={onStopCall} />
     </div>
   );
 }

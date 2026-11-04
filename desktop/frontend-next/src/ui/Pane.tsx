@@ -655,7 +655,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}
           onCancelJob={(id) => cancelJob(port, id, notify, refreshStatus).then(() => {})}
           onReadJob={readJob}
-          onOpenRun={openRun}
+          onOpenRun={openRun} onStopCall={(id) => void port.stopToolCall(id).catch(notify)}
           usage={status?.sessionUsage} quote={status?.sessionCostQuote} tariff={status?.tariff} onTariffFlip={refreshStatus}
         />
         {reloadFailure && <ReloadNotice failure={reloadFailure} onReload={onReloadSession} />}

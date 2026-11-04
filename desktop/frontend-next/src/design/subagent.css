@@ -38,3 +38,35 @@
 .agent-row-note { margin: 2px 0 0 30px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); overflow-wrap: anywhere; }
 .agent-row-note code { font: var(--w-reg) var(--fs-meta)/1.6 var(--mono); }
 .agent-row-note[data-tone="err"] { color: var(--err-ink); }
+
+.studio-deckchip[data-action="deck.agents"] { font: var(--w-reg) var(--fs-meta)/1 var(--ui); color: var(--faint); }
+.studio-deckchip[data-action="deck.agents"] b { font: inherit; color: inherit; }
+.studio-deckchip[data-action="deck.agents"][data-live] { background: var(--net-wash); color: var(--net-ink); font-weight: var(--w-med); }
+.studio-deckchip[data-action="deck.agents"][data-live] .studio-icon { color: currentColor; animation: none; }
+.studio-deckchip .agent-live { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--net); animation: agent-live 1.6s ease-out infinite; }
+@keyframes agent-live { 0% { box-shadow: 0 0 0 0 var(--net-wash); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .studio-deckchip .agent-live { animation: none; } }
+:root[data-effects="reduced"] .studio-deckchip .agent-live { animation: none; }
+
+.studio-deck-anchor:has(.agent-deck) { --deck-w: min(340px, calc(100vw - 32px)); }
+.studio-deck-pop:has(> .agent-deck) { padding: 6px; border-radius: var(--r-md); }
+.agent-deck-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px; }
+.agent-deck-head > b { flex: 1; color: var(--text); font: var(--w-semi) var(--fs-ui)/1.3 var(--ui); }
+.agent-deck-head > span { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); white-space: nowrap; }
+.agent-deck-row {
+  width: 100%; display: flex; align-items: center; gap: 9px; padding: 7px 8px; box-sizing: border-box;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); text-align: left; cursor: pointer;
+}
+.agent-deck-row:hover { background: var(--float-hi); }
+.agent-deck-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.agent-deck-row .agent-avatar { width: 18px; height: 18px; }
+.agent-deck-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.agent-deck-who > b { font: var(--w-med) var(--fs-meta)/1.4 var(--mono); }
+.agent-deck-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
+.agent-deck-state { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.agent-deck-row[data-status="running"] .agent-deck-state { color: var(--net-ink); }
+.agent-deck-row:is([data-status="failed"], [data-status="refused"]) .agent-deck-state { color: var(--err-ink); }
+.agent-deck-go { width: 14px; height: 14px; flex: none; color: var(--faint); }
+.agent-deck-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 8px 8px 4px; border-top: 1px solid var(--hair); color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
+.agent-deck-foot > span { flex: 1; }
+.agent-deck-foot .agent-quiet { color: var(--text); font-weight: var(--w-med); }

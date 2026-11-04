@@ -63,7 +63,7 @@ describe("the deck readings", () => {
   it("keeps the history in the popover when every sub-agent has finished", () => {
     const box = draw([task(false, "a"), task(false, "b")], []);
     expect(box.querySelector('[data-action="deck.agents"] b')?.textContent).toBe("2");
-    expect(box.querySelector('[data-action="deck.agents"] span')?.textContent).toBe("个子代理已结束");
+    expect(box.querySelector('[data-action="deck.agents"] span')?.textContent).toBe("个子代理 · 都结束了");
     expect(box.querySelector('[data-action="deck.agents"]')?.hasAttribute("data-live")).toBe(false);
     expect(box.querySelector(".studio-deck-pop")?.textContent).toContain("共 2");
   });
@@ -91,5 +91,24 @@ describe("the deck readings", () => {
     const done = draw([task(false)], []).querySelector('[data-action="deck.agents"]');
     expect(done).not.toBeNull();
     expect(done?.hasAttribute("data-live")).toBe(false);
+  });
+});
+
+describe("the sub-agent popover", () => {
+  const named = (id: string, running: boolean, name: string, over: object = {}): Task =>
+    ({ t: "tool", id, running, children: [], tool: { id: `call-${id}`, name: "task", profile: { name, label: `${name} task` }, ...over } }) as unknown as Task;
+
+  it("titles the list, reads each delegate's state, and stops every running one", () => {
+    const onStopCall = vi.fn();
+    const box = render(<DeckChips tasks={[named("a", true, "test-writer"), named("b", false, "security-review", { durationMs: 8000 }), named("c", true, "doc-check")]} jobs={[]} open="agents" onOpen={vi.fn()} onStopCall={onStopCall} />).container;
+    expect(box.querySelector(".agent-deck-head")?.textContent).toBe("本会话的子代理2 运行中 · 共 3");
+    expect([...box.querySelectorAll(".agent-deck-state")].map((s) => s.textContent)).toEqual(["第 1 步", "已交付 · 8s", "第 1 步"]);
+    (box.querySelector('[data-action="agent.stop-all"]') as HTMLButtonElement).click();
+    expect(onStopCall.mock.calls.map((c) => c[0])).toEqual(["call-a", "call-c"]);
+  });
+
+  it("offers no stop once nothing is running", () => {
+    const box = render(<DeckChips tasks={[named("b", false, "security-review")]} jobs={[]} open="agents" onOpen={vi.fn()} onStopCall={vi.fn()} />).container;
+    expect(box.querySelector('[data-action="agent.stop-all"]')).toBeNull();
   });
 });

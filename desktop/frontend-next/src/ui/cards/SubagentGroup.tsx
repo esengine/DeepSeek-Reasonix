@@ -55,7 +55,13 @@ export function agentHue(name: string): number {
   return h % HUES;
 }
 
-const nameOf = (x: Task) => x.tool.profile?.name || "task";
+export const nameOf = (x: Task) => x.tool.profile?.name || "task";
+
+export const AgentAvatar = ({ name }: { name: string }) => (
+  <span className="agent-avatar" data-hue={agentHue(name)} aria-hidden="true">
+    <svg viewBox="0 0 16 16"><path d="M3.5 12.5l6-6M9.5 3l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2L6.5 6l2.2-.8z" /></svg>
+  </span>
+);
 
 export function SubagentGroup({ tasks, port }: { tasks: Task[]; port?: Stopper }) {
   const status = tasks.map((x) => delegateStatus(x.running, x.tool));
@@ -112,9 +118,7 @@ function AgentRow({ task, status, onStop }: { task: Task; status: DelegateStatus
   return (
     <div className="agent-row" data-status={status}>
       <div className="agent-row-line">
-        <span className="agent-avatar" data-hue={agentHue(name)} aria-hidden="true">
-          <svg viewBox="0 0 16 16"><path d="M3.5 12.5l6-6M9.5 3l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2L6.5 6l2.2-.8z" /></svg>
-        </span>
+        <AgentAvatar name={name} />
         <span className="agent-who">
           <b>{name}</b>
           {task.tool.profile?.label && <span title={task.tool.profile.label}>{task.tool.profile.label}</span>}
