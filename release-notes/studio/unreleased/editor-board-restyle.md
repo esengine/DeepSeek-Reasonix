@@ -19,6 +19,7 @@
 - 后台任务的「看输出」改为在工作台里开一个页签，不再用弹窗盖住对话：顶部写用时或「跑完了，退出 N」，在跑时可以停止；默认跟着最新输出，往上翻就停住，点箭头回到最新（bd9839a59）。
 - 执行过程里，放到后台跑的命令写成「放到后台运行」，同一行跟着任务实时更新：在跑时写已跑多久，并说明不用等它、可以「看输出」；跑完后原地变成用时和退出码（8db18c129）。
 - 对话右边的消息导航条按设计稿重做：横线按每条消息在整段对话里的位置铺满整列，不再挤在中间；灰底竖条标出现在看到的那一段；改过文件的消息横线长一点，星标是橙色。悬停时指着的那条和邻居像程序坞一样变长，左边的卡片写「你的第n条 · 改了n个文件」和两行内容；挤不下的连成一段，悬停展开带编号和星标的列表；还有更早没加载的消息时，顶上显示条数，点击加载；Ctrl ↑↓ 逐条走时当前那条有焦点框。点一条会平滑滚过去，那条消息闪一下。至少 3 条你的消息才显示（c91a653e9）。
+- 「我的反馈」改成左右两栏：左边列表只看标题、类别、日期和一个词的状态（已收到 / 已登记 #n / 处理中 / 已在 vX 修复 / 下个版本修复 / 暂不做 / 重复），在等你回复的标橙排最前，有新回复的加粗带黑点；右边是这条反馈的一页：进度、完整往来和一直打开的回复框。标题栏放标签、「反馈等级 n · 已采纳 n 条」（点开看等级、账号与贡献榜）和关闭；说明文字挪到列表最下面一行小字（f2ddee747）。
 
 ---
 <!-- lang:en -->
@@ -44,3 +45,4 @@
 - A background job's output opens as a workbench tab instead of a dialog over the conversation: its head reads the run time or "Finished, exit N", a running job can be stopped there, and the output follows the newest line until you scroll up (bd9839a59).
 - In the execution group a command sent to the background reads "Sent to the background", and its row follows the job live: how long it has run, with a note that the turn goes on and a way to its output, then how long it took and its exit status once it ends (8db18c129).
 - The message rail beside the conversation follows the Msg-Rail board: marks sit at each message's place in the whole conversation and fill the column instead of bunching in the middle; a grey band shows the stretch on screen; a message that changed files draws longer and stars are orange. Hovering grows the pointed line and its neighbours and opens a card with "Your message n · changed n files" and two lines of the message; crowded marks join into segments that list their messages with numbers and stars; unloaded earlier messages show as a count at the top that loads them; Ctrl+Up/Down rings the mark it is on. A press glides to the message and flashes it. The rail appears from three of your messages (c91a653e9).
+- My feedback is two columns: the list shows each report's title, category, day and where it stands in a word, with a question waiting on you in orange and first, and new replies in bold with a dot; the right is that report's page with its progress, the whole exchange and a reply box that is always open. The title bar carries the tabs, "Feedback level n · n adopted" (opening level, account and leaderboard) and close; the explanations moved to small print under the list (f2ddee747).
