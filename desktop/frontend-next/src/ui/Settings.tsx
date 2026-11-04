@@ -57,7 +57,8 @@ import { ProgressWatch } from "./ProgressWatch";
 import { DisplaySettings } from "./DisplaySettings";
 import { AutoArchive } from "./AutoArchive";
 import { LegacySessionsSection } from "./LegacySessionsSection";
-import { SubHead } from "./SubHead";
+import { SectionCard } from "./SectionCard";
+import { SessionDirSettings } from "./SessionDirSettings";
 import { AgentPresets } from "./AgentPresets";
 import { Account } from "./Account";
 import { Backup } from "./Backup";
@@ -70,7 +71,6 @@ import { useRoles } from "./useRoles";
 import { KIND_LABEL } from "./vendors";
 import { planProtocolSwitch } from "./protocolswitch";
 import { Boundary } from "./Boundary";
-import { Path } from "./Path";
 import { About } from "./About";
 import { Memory } from "./Memory";
 import { DEFAULT_DAYS } from "./Usage";
@@ -521,7 +521,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "tools" && (
             <>
-              <SubHead title={t("批准")} />
+              <SectionCard title={t("批准")} hint={t("什么时候停下来问你")}>
               <Group id="approval" title={t("工具批准")} now={approval} hint={t("这是 agent 访问文件前的唯一审批入口，被拦截的操作没有其他途径可以绕过。")}>
                 {/* Four rows of label-and-description was 190px for one choice,
                     and it was the only choice in this pane shaped that way. The
@@ -551,7 +551,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               >
                 <Rules port={port} onChanged={onChanged} />
               </Group><ToolList port={port} />
-              <SubHead title={t("沙箱与执行")} />
+              </SectionCard>
+              <SectionCard title={t("沙箱与执行")} hint={t("它的命令能写到哪里、能不能联网")}>
               <Group id="sandbox"
                 title={t("沙箱")}
                 hint={t("批准之后可以操作的范围。该限制不依赖 agent 自觉：写入范围由工具实施，命令隔离由操作系统实施。")}
@@ -564,7 +565,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               >
                 <ShellPicker port={port} onChanged={onChanged} />
               </Group>
-              <SubHead title={t("联网与浏览器")} />
+              </SectionCard>
+              <SectionCard title={t("联网与浏览器")} hint={t("搜索、抓网页、内置浏览器")}>
               <Group id="browser-tools"
                 title={t("内置浏览器")}
                 hint={t("agent 用来打开和操作网页的工具。该开关单独保存，不受命令行版本浏览器设置的影响。修改会重建运行时，任务运行期间无法变更。")}
@@ -573,6 +575,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               </Group>
               <WebAccess port={port} />
               <SessionCoordination port={port} onChanged={onChanged} />
+              </SectionCard>
             </>
           )}
 
@@ -754,27 +757,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <UsageSettings port={homePort} onChanged={onChanged} />
               <Group id="storage" title={t("存储")} hint={t("数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。")}><Storage port={homePort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} /></Group>
               <AutoArchive port={port} />
-              <Group id="session-dir" title={t("会话写入位置")}>
-                <div className="kv">
-                  <span className="k">{t("工作目录")}</span>
-                  <span className="v"><Path of={status?.cwd ?? "—"} /></span>
-                </div>
-                <p className="note">
-                  {t("在左栏管理文件夹：底部添加，展开后可新建会话。会话归属于创建它的文件夹，不会移动到其他位置。")}
-                </p>
-                {/* A thing that happens once, not a state to sit in — so it is
-                    a button. As an option row it carried a selected look it can
-                    never have. */}
-                <div className="lrow">
-                  <span className="tx">
-                    <span className="lb">{t("创建隔离副本")}</span>
-                    <span className="ds">{t("在 Git worktree 中创建独立副本，修改不会影响当前分支")}</span>
-                  </span>
-                  <button className="act" data-action="workspace.isolate" disabled={!!busy} onClick={() => run("isolate", () => port.isolateWorkspace())}>
-                    {t(busy === "isolate" ? "启用中…" : "创建")}
-                  </button>
-                </div>
-              </Group>
+              <SessionDirSettings cwd={status?.cwd} busy={busy} onIsolate={() => run("isolate", () => port.isolateWorkspace())} />
               <LegacySessionsSection />
             </>
           )}
