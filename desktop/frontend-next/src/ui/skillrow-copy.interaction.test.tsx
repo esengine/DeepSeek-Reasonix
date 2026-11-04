@@ -28,7 +28,7 @@ function draw(over: Partial<SkillEntry> = {}, lang = "zh") {
   return { user, write, setSkillEnabled, clearSkillOverride, props, view };
 }
 
-const copy = (command = "/review-kit:review") => screen.getByRole("button", { name: t("复制调用命令 {command}", { command }) });
+const copy = (command = "/review-kit:review") => screen.getByRole("button", { name: t("ext.copy_invocation_command", { command }) });
 
 it.each(["zh", "en"])("copies the canonical namespaced invocation with keyboard feedback (%s)", async (lang) => {
   const { user, write, setSkillEnabled, props } = draw({}, lang);
@@ -36,8 +36,8 @@ it.each(["zh", "en"])("copies the canonical namespaced invocation with keyboard 
   expect(document.activeElement).toBe(copy());
   await user.keyboard("{Enter}");
   expect(write).toHaveBeenCalledWith("/review-kit:review");
-  expect(await screen.findByText(t("已复制"))).toBeTruthy();
-  expect(copy().querySelector('[aria-live="polite"]')?.textContent).toBe(t("已复制"));
+  expect(await screen.findByText(t("common.copied"))).toBeTruthy();
+  expect(copy().querySelector('[aria-live="polite"]')?.textContent).toBe(t("common.copied"));
   expect(setSkillEnabled).not.toHaveBeenCalled();
   expect(props.onDone).not.toHaveBeenCalled();
   expect(props.onFailed).not.toHaveBeenCalled();
@@ -49,11 +49,11 @@ it("reports a denied clipboard locally and allows a retry without changing the s
   const { user, write, props, setSkillEnabled } = draw();
   write.mockRejectedValueOnce(new Error("clipboard denied"));
   await user.click(copy());
-  expect(await screen.findByText(t("复制失败，请重试"))).toBeTruthy();
+  expect(await screen.findByText(t("common.copy_failed_try_again"))).toBeTruthy();
   expect(props.onFailed).not.toHaveBeenCalled();
   expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
   await user.click(copy());
-  expect(await screen.findByText(t("已复制"))).toBeTruthy();
+  expect(await screen.findByText(t("common.copied"))).toBeTruthy();
   expect(write).toHaveBeenCalledTimes(2);
   expect(setSkillEnabled).not.toHaveBeenCalled();
 });
@@ -63,7 +63,7 @@ it("lets a disabled read-only skill's invocation be copied without enabling it o
   await user.click(copy());
   expect(write).toHaveBeenCalledWith("/review-kit:review");
   expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
-  expect(screen.getByText(t("只读"))).toBeTruthy();
+  expect(screen.getByText(t("common.read_only"))).toBeTruthy();
   expect(setSkillEnabled).not.toHaveBeenCalled();
   expect(clearSkillOverride).not.toHaveBeenCalled();
 });
@@ -96,8 +96,8 @@ it("does not carry a previous invocation's pending copy feedback into refreshed 
   await user.click(copy());
   view.rerender(<SkillRow {...props} sk={{ ...props.sk, slashName: "review-kit:audit" }} />);
   await act(async () => finish());
-  expect(screen.queryByText(t("已复制"))).toBeNull();
-  expect(copy("/review-kit:audit").querySelector('[aria-live="polite"]')?.textContent).toBe(t("复制调用命令 {command}", { command: "/review-kit:audit" }));
+  expect(screen.queryByText(t("common.copied"))).toBeNull();
+  expect(copy("/review-kit:audit").querySelector('[aria-live="polite"]')?.textContent).toBe(t("ext.copy_invocation_command", { command: "/review-kit:audit" }));
   await user.click(copy("/review-kit:audit"));
   expect(write).toHaveBeenLastCalledWith("/review-kit:audit");
 });

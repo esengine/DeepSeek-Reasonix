@@ -41,9 +41,9 @@ async function fixture(flow: string) {
     vi.spyOn(port, "planMarket").mockResolvedValue(shown);
     render(<Market port={port} onInstalled={onInstalled} />);
     await userEvent.click(await screen.findByRole("button", { name: /review-kit/ }));
-    await userEvent.click(await screen.findByRole("button", { name: t("查看将安装的内容") }));
+    await userEvent.click(await screen.findByRole("button", { name: t("ext.see_what_it_installs") }));
   }
-  const consent = await screen.findByRole<HTMLInputElement>("checkbox", { name: t("我已看过这 {n} 个技能，全部安装", { n: 2 }) });
+  const consent = await screen.findByRole<HTMLInputElement>("checkbox", { name: t("ext.i_have_read_these_n", { n: 2 }) });
   const panel = consent.closest('[data-stage="confirm"]')!;
   const success: MarketPlan = { ...shown, applied: true, status: "done", actions: shown.actions!.map((a) => ({ ...a, status: "done" })) };
   return { consent, panel, shown, success, pending, install, onBack, onInstalled };
@@ -54,9 +54,9 @@ it.each(cases)("exposes the confirmation's pending lifetime ($lang, $flow)", asy
   const f = await fixture(flow);
   expect(f.panel.getAttribute("aria-busy")).toBe("false");
   await userEvent.click(f.consent);
-  await userEvent.click(screen.getByRole("button", { name: t("安装") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.install") }));
   expect(f.panel.getAttribute("aria-busy")).toBe("true");
-  await userEvent.click(screen.getByRole("button", { name: t("返回") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.back") }));
   expect(f.onBack).not.toHaveBeenCalled();
   expect(document.querySelector('[data-stage="confirm"]')).toBe(f.panel);
   expect(f.install).toHaveBeenCalledOnce();
@@ -69,13 +69,13 @@ it.each(cases)("locks the acknowledged skill set during a deferred installation 
   localStorage.setItem(STORAGE, lang); boot();
   const f = await fixture(flow);
   expect(f.consent.disabled).toBe(false);
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("安装") }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("ext.install") }).disabled).toBe(true);
   await userEvent.click(f.consent);
-  await userEvent.click(screen.getByRole("button", { name: t("安装") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.install") }));
   expect(f.consent.disabled).toBe(true);
   await userEvent.click(f.consent);
   expect(f.consent.checked).toBe(true);
-  await userEvent.click(screen.getByRole("button", { name: t("安装中…") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.installing") }));
   expect(f.install).toHaveBeenCalledOnce();
   await act(async () => f.pending.resolve(f.success));
   expect(f.onInstalled).toHaveBeenCalledOnce();
@@ -85,7 +85,7 @@ it.each(cases)("announces a thrown install failure and clears it for retry ($lan
   localStorage.setItem(STORAGE, lang); boot();
   const f = await fixture(flow);
   await userEvent.click(f.consent);
-  await userEvent.click(screen.getByRole("button", { name: t("安装") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.install") }));
   await act(async () => f.pending.reject(new Error("installation unavailable")));
   expect(screen.getByRole("alert").textContent).toBe("installation unavailable");
   expect(f.panel.getAttribute("aria-busy")).toBe("false");
@@ -93,7 +93,7 @@ it.each(cases)("announces a thrown install failure and clears it for retry ($lan
   expect(f.onInstalled).not.toHaveBeenCalled();
   const retry = deferred<MarketPlan>();
   f.install.mockImplementationOnce(() => retry.promise);
-  await userEvent.click(screen.getByRole("button", { name: t("安装") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.install") }));
   expect(screen.queryByRole("alert")).toBeNull();
   expect(f.panel.getAttribute("aria-busy")).toBe("true");
   expect(f.install).toHaveBeenCalledTimes(2);

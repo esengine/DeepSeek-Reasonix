@@ -21,13 +21,13 @@ describe("an approval that covers more than its call", () => {
     const box = draw({ id: "a1", tool: "best_of_n", subject: "", scope: "unattended_attempts", input: { prompt: "add Median to calc.go", n: 2 } });
     const text = box.querySelector(".apv")?.textContent ?? "";
     expect(box.querySelector('[data-scope="unattended_attempts"]')).not.toBeNull();
-    expect(text).toContain(t("并行启动 {n} 个候选", { n: 2 }));
+    expect(text).toContain(t("chat.starts_n_attempts_in_parallel", { n: 2 }));
     expect(text).toContain("add Median to calc.go");
   });
 
   it("still admits to a scope it cannot describe", () => {
     const box = draw({ id: "a2", tool: "x", subject: "", scope: "something_new" });
-    expect(box.querySelector('[data-scope="something_new"]')?.textContent).toContain(t("这次批准的效力超出这一次调用本身。"));
+    expect(box.querySelector('[data-scope="something_new"]')?.textContent).toContain(t("chat.this_approval_covers_more_than"));
   });
 
   it("adds nothing to an ordinary approval", () => {
@@ -69,7 +69,7 @@ describe("a call that repeats text from outside", () => {
   it("names the class in the reader's words, not the tool id, and shows the call", () => {
     const box = draw(origin);
     const text = box.querySelector(".apv")?.textContent ?? "";
-    expect(text).toContain(t("来自外部的文字"));
+    expect(text).toContain(t("chat.text_from_outside"));
     expect(text).not.toContain("origin_check");
     expect(text).toContain("web:evil.example");
     expect(text).toContain(t("这条调用里的文字，和本次任务从外部读到的内容（网页或工具结果）逐字相同。自动放行、全部放行和记住的答案都不能代你回答；请只批准这一次调用，或拒绝。"));
@@ -94,7 +94,7 @@ describe("an approval that opens folders as projects", () => {
     const box = card();
     const scope = box.querySelector('[data-scope="open_projects"]');
     expect([...(scope?.querySelectorAll("li code") ?? [])].map((c) => c.textContent)).toEqual(paths);
-    expect(scope?.textContent).toContain(t("把下面 {n} 个文件夹加入你的项目列表并标记为可信；加入后，会话才能把任务派发到这些项目。没有出现在这里的文件夹不会被加入。", { n: 2 }));
+    expect(scope?.textContent).toContain(t("chat.adds_these_n_folders_to", { n: 2 }));
   });
 
   it("offers no session or always grant, so every batch is its own click", () => {

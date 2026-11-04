@@ -51,7 +51,7 @@ describe("a model that cannot switch thinking off", () => {
   const forced = effortMenu(ladder, "glm-5.3", "__declare", [], true);
 
   it("says so on its cheapest level, which is where a saved off lands", () => {
-    expect(desc(forced, "low")).toContain(t("思考仍开启并计费，该模型无法关闭思考"));
+    expect(desc(forced, "low")).toContain(t("composer.thinking_stays_on_and_is"));
     expect(desc(forced, "low")).not.toBe(desc(plain, "low"));
   });
 

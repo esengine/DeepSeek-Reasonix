@@ -18,8 +18,8 @@ function deferred<T>() {
 }
 
 const source = "https://github.com/demo/releases/tree/" + "b".repeat(40) + "/release-kit";
-const field = (key: string) => screen.getByLabelText<HTMLInputElement | HTMLTextAreaElement>(new RegExp(`^${t(key === "标签" && screen.queryByText(t("新增标签")) ? "新增标签" : key)}`));
-const existingTags = () => screen.getAllByRole<HTMLInputElement>("textbox", { name: new RegExp(`^${t("已有标签 {n}", { n: "" })}`) });
+const field = (key: string) => screen.getByLabelText<HTMLInputElement | HTMLTextAreaElement>(new RegExp(`^${t(key === "ext.tags" && screen.queryByText(t("ext.add_ta"ext.add_tags"? "新增标签" : key)}`));
+const existingTags = () => screen.getAllByRole<HTMLInputElement>("textbox", { name: new RegExp(`^${t("ext.existing_tag_n", { n: "" })}`) });
 const draw = (port: AgentPort, handle = "demo") => <MarketGroup port={port} account={{ signedIn: true, user: { handle, email: `${handle}@example.com`, label: handle } }} onInstalled={() => {}} onSignIn={() => {}} />;
 
 async function fixture(kind: MarketKind = "plugin", status = "private", latestVersion = "1.4.9") {
@@ -42,7 +42,7 @@ async function fixture(kind: MarketKind = "plugin", status = "private", latestVe
   return { port, pkg, read, receipt, publish, preview, install, review, row, view };
 }
 
-const openDraft = async (row: HTMLElement) => userEvent.click(within(row).getByRole("button", { name: t("发布新版本") }));
+const openDraft = async (row: HTMLElement) => userEvent.click(within(row).getByRole("button", { name: t("ext.publish_new_version") }));
 const fillSource = () => fireEvent.change(field("来源地址"), { target: { value: source } });
 
 const nameHint = {
@@ -62,11 +62,11 @@ it.each(["zh", "en"].flatMap((lang) => ["1.4.9-rc.1", "release-2026"].map((lates
       : "Blank starts a new package at 0.1.0. Updates auto-increment only a numeric three-part version; enter other versions explicitly.");
     expect(version.value).toBe("");
     fillSource();
-    await userEvent.click(screen.getByRole("button", { name: t("提交审核") }));
+    await userEvent.click(screen.getByRole("button", { name: t("ext.submit_for_review") }));
     await screen.findByText("That version is already published");
     expect(f.publish).toHaveBeenLastCalledWith(expect.objectContaining({ version: "", source }));
     fireEvent.change(version, { target: { value: `${latest}.next` } });
-    await userEvent.click(screen.getByRole("button", { name: t("提交审核") }));
+    await userEvent.click(screen.getByRole("button", { name: t("ext.submit_for_review") }));
     expect(f.publish).toHaveBeenLastCalledWith({
       kind: f.pkg.kind, name: f.pkg.name, source, summary: f.pkg.summary, description: f.pkg.description,
       repoUrl: f.pkg.repoUrl, version: `${latest}.next`, tags: f.pkg.tags, visibility: "public",
@@ -86,7 +86,7 @@ it.each(["zh", "en"] as const)("explains the name choice and submits the author'
   await userEvent.type(name, "another-kit");
   fillSource();
   expect(within(name.closest("label")!).getByText(nameHint[lang])).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: t("保存为私有") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.save_as_private") }));
   expect(f.publish).toHaveBeenCalledWith(expect.objectContaining({ name: "another-kit", version: "", source, visibility: "private" }));
 });
 
@@ -96,7 +96,7 @@ it.each([
 ] as const)("opens an editable %s/%s release draft in %s without publishing or installing", async (kind, status, lang) => {
   localStorage.setItem(STORAGE, lang); boot();
   const f = await fixture(kind, status);
-  const action = within(f.row).getByRole("button", { name: t("发布新版本") });
+  const action = within(f.row).getByRole("button", { name: t("ext.publish_new_version") });
   action.focus();
   await userEvent.keyboard("{Enter}");
   expect(screen.getByRole("radio", { name: t("发布") }).getAttribute("aria-checked")).toBe("true");
@@ -110,13 +110,13 @@ it.each([
   expect(field("来源地址").value).toBe("");
   expect(document.activeElement).toBe(field("来源地址"));
   expect(screen.getByRole<HTMLInputElement>("checkbox").checked).toBe(status === "private");
-  expect(screen.getByText(t("从 {slug} 复用发布资料；请填写本次发布的来源地址。", { slug: f.pkg.slug }))).toBeTruthy();
+  expect(screen.getByText(t("ext.reuse_details_from_slug_enter", { slug: f.pkg.slug }))).toBeTruthy();
   expect(screen.getByText(t(status === "private"
-    ? "以 @{handle} 的名义保存，仅自己可见，不提交审核。只收来源地址，不上传文件。"
-    : "以 @{handle} 的名义提交，审核通过后公开。只收来源地址，不上传文件。", { handle: "demo" }))).toBeTruthy();
+    ? "ext.saved_as_handle_visible_only"
+    : "ext.submitted_as_handle_and_made", { handle: "demo" }))).toBeTruthy();
   const names = { skill: "技能", plugin: "插件", mcp: "MCP 服务", theme: "主题" };
   expect(screen.getByRole("radio", { name: t(names[kind]) }).getAttribute("aria-checked")).toBe("true");
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t(status === "private" ? "保存为私有" : "提交审核") }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t(status === "private" ? "ext.save_as_private" : "ext.submit_for_review") }).disabled).toBe(true);
   expect(f.publish).not.toHaveBeenCalled();
   expect(f.preview).not.toHaveBeenCalled();
   expect(f.install).not.toHaveBeenCalled();
@@ -225,7 +225,7 @@ it.each(["success", "failure"])("reads the replacement account's release list wh
   expect(screen.queryByText("old list unavailable")).toBeNull();
   await openDraft(screen.getByText("other-kit").closest("li")!);
   expect(field("名称").value).toBe("other-kit");
-  expect(screen.getByText(t("以 @{handle} 的名义保存，仅自己可见，不提交审核。只收来源地址，不上传文件。", { handle: "other" }))).toBeTruthy();
+  expect(screen.getByText(t("ext.saved_as_handle_visible_only", { handle: "other" }))).toBeTruthy();
 });
 
 it.each(["zh", "en"])("keeps prefilled comma-containing tags when adding a tag in %s", async (lang) => {
@@ -234,7 +234,7 @@ it.each(["zh", "en"])("keeps prefilled comma-containing tags when adding a tag i
   await openDraft(f.row);
   fillSource();
   await userEvent.type(field("标签"), ", release");
-  await userEvent.click(screen.getByRole("button", { name: t("保存为私有") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.save_as_private") }));
   expect(f.publish).toHaveBeenCalledWith(expect.objectContaining({ tags: [...f.pkg.tags, "release"] }));
 });
 
@@ -249,11 +249,11 @@ it.each(["zh", "en"])("edits an existing tag as one item and retains it through 
   await userEvent.keyboard("{End},docs");
   await userEvent.type(field("标签"), "new， extra");
   const tags = ["ui,ux,docs", "文档，示例", "tools", "new", "extra"];
-  await userEvent.click(screen.getByRole("button", { name: t("保存为私有") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.save_as_private") }));
   await screen.findByText("registry unavailable");
   expect(existingTags().map((tag) => tag.value)).toEqual(tags.slice(0, 3));
   expect(field("标签").value).toBe("new， extra");
-  await userEvent.click(screen.getByRole("button", { name: t("保存为私有") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.save_as_private") }));
   expect(f.publish).toHaveBeenNthCalledWith(1, expect.objectContaining({ tags }));
   expect(f.publish).toHaveBeenNthCalledWith(2, expect.objectContaining({ tags }));
 });

@@ -42,7 +42,7 @@ async function fixture(enabled = true) {
     { ...packages[0], name: "echo-provider", enabled, runtime: { command: "bin/echo-provider.exe", capabilities: ["providers"] } },
   ]);
   render(draw(port));
-  await screen.findByRole("combobox", { name: t("默认模型") });
+  await screen.findByRole("combobox", { name: t("common.default_model") });
   return { port, models, publish: (next: ModelEntry[]) => { catalog = [...base, ...next]; } };
 }
 
@@ -53,7 +53,7 @@ async function extensions() {
 
 async function choices() {
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="settings.section"][data-value="model"]')!);
-  return screen.findByRole<HTMLSelectElement>("combobox", { name: t("默认模型") });
+  return screen.findByRole<HTMLSelectElement>("combobox", { name: t("common.default_model") });
 }
 
 const refs = (select: HTMLSelectElement) => Array.from(select.options, (option) => option.value);
@@ -73,12 +73,12 @@ it.each(["zh", "en"])("refreshes a newly installed provider into the still-open 
   await extensions();
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"]')!);
   await userEvent.type(document.querySelector<HTMLTextAreaElement>(".addpkg textarea")!, "https://example.invalid/echo-provider");
-  await userEvent.click(screen.getByRole("button", { name: t("查看内容") }));
-  await userEvent.click(await screen.findByRole("button", { name: t("安装") }));
-  await screen.findByRole("button", { name: t("完成") });
+  await userEvent.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
+  await userEvent.click(await screen.findByRole("button", { name: t("ext.install") }));
+  await screen.findByRole("button", { name: t("common.done") });
   const select = await choices();
   await waitFor(() => expect(refs(select)).toContain(echo.ref));
-  expect(refs(screen.getByRole<HTMLSelectElement>("combobox", { name: t("子代理") }))).toContain(echo.ref);
+  expect(refs(screen.getByRole<HTMLSelectElement>("combobox", { name: t("common.subagents") }))).toContain(echo.ref);
   await userEvent.selectOptions(select, echo.ref);
   expect(set).toHaveBeenCalledWith(echo.ref);
   expect(setDefault).toHaveBeenCalledWith(echo.ref);
@@ -99,19 +99,19 @@ it.each(["disable", "enable", "remove", "update"])("re-reads provider models aft
   await extensions();
   const row = within(document.querySelector<HTMLElement>('[data-extension-name="echo-provider"]')!);
   if (operation === "remove") {
-    await userEvent.click(row.getByRole("button", { name: t("移除 {name}", { name: "echo-provider" }) }));
-    await userEvent.click(row.getByRole("button", { name: t("删除") }));
+    await userEvent.click(row.getByRole("button", { name: t("common.remove_name", { name: "echo-provider" }) }));
+    await userEvent.click(row.getByRole("button", { name: t("common.delete") }));
   } else if (operation === "update") {
-    await userEvent.click(row.getByRole("button", { name: t("更新") }));
+    await userEvent.click(row.getByRole("button", { name: t("ext.update") }));
     const panel = await waitFor(() => {
       const found = document.querySelector<HTMLElement>('.addpkg[data-stage="confirm"]');
       expect(found).toBeTruthy();
       return found!;
     });
-    await userEvent.click(within(panel).getByRole("button", { name: t("更新") }));
-    await screen.findByRole("button", { name: t("完成") });
+    await userEvent.click(within(panel).getByRole("button", { name: t("ext.update") }));
+    await screen.findByRole("button", { name: t("common.done") });
   } else {
-    await userEvent.click(row.getByRole("switch", { name: t(operation === "disable" ? "关闭" : "启用") + " echo-provider" }));
+    await userEvent.click(row.getByRole("switch", { name: t(operation === "disable" ? "common.close" : "ext.enable") + " echo-provider" }));
   }
   const select = await choices();
   await waitFor(() => {
@@ -124,8 +124,8 @@ it("refreshes models after a manual runtime reload", async () => {
   const { port, publish } = await fixture(false);
   vi.spyOn(port, "reloadExtensions").mockImplementation(async () => { publish([echo]); });
   await extensions();
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
-  await screen.findByText(t("已生效，下一轮开始用新的扩展"));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
+  await screen.findByText(t("app.live_the_next_turn_runs"));
   const select = await choices();
   await waitFor(() => expect(refs(select)).toContain(echo.ref));
 });
@@ -135,13 +135,13 @@ it("keeps the old live catalog after a refused reload and refreshes only after r
   vi.spyOn(port, "reloadExtensions").mockRejectedValueOnce(new Error("reload refused")).mockImplementation(async () => { publish([echo]); });
   await extensions();
   const before = models.mock.calls.length;
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
   await screen.findByText("reload refused");
   expect(models).toHaveBeenCalledTimes(before);
   expect(refs(await choices())).not.toContain(echo.ref);
   await extensions();
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
-  await screen.findByText(t("已生效，下一轮开始用新的扩展"));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
+  await screen.findByText(t("app.live_the_next_turn_runs"));
   const select = await choices();
   await waitFor(() => expect(refs(select)).toContain(echo.ref));
 });
@@ -151,11 +151,11 @@ it("shows the existing unavailable state when the refreshed catalog fails", asyn
   vi.spyOn(port, "reloadExtensions").mockResolvedValue();
   await extensions();
   models.mockRejectedValue(new Error("model catalog unavailable"));
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
-  await screen.findByText(t("已生效，下一轮开始用新的扩展"));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
+  await screen.findByText(t("app.live_the_next_turn_runs"));
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="settings.section"][data-value="model"]')!);
-  expect(await screen.findByText(t("无法读取模型列表。"))).toBeTruthy();
-  expect(screen.queryByRole("combobox", { name: t("默认模型") })).toBeNull();
+  expect(await screen.findByText(t("usage.could_not_read_the_model"))).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: t("common.default_model") })).toBeNull();
 });
 
 it("does not refresh models when installation writes nothing", async () => {
@@ -165,8 +165,8 @@ it("does not refresh models when installation writes nothing", async () => {
   const before = models.mock.calls.length;
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"]')!);
   await userEvent.type(document.querySelector<HTMLTextAreaElement>(".addpkg textarea")!, "https://example.invalid/echo-provider");
-  await userEvent.click(screen.getByRole("button", { name: t("查看内容") }));
-  await userEvent.click(await screen.findByRole("button", { name: t("安装") }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
+  await userEvent.click(await screen.findByRole("button", { name: t("ext.install") }));
   await screen.findByText("install refused");
   expect(models).toHaveBeenCalledTimes(before);
   expect(refs(await choices())).not.toContain(echo.ref);
@@ -176,7 +176,7 @@ it("leaves the live model catalog unchanged when a toggle fails", async () => {
   const { port, models } = await fixture();
   vi.spyOn(port, "setPluginEnabled").mockRejectedValue(new Error("toggle refused"));
   await extensions();
-  await userEvent.click(screen.getByRole("switch", { name: t("关闭") + " echo-provider" }));
+  await userEvent.click(screen.getByRole("switch", { name: t("common.close") + " echo-provider" }));
   await screen.findByText("toggle refused");
   expect(refs(await choices())).toContain(echo.ref);
   expect(models).toHaveBeenCalled();
@@ -189,13 +189,13 @@ it("reads the live catalog after a saved installation whose reload was refused, 
   await extensions();
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.add"]')!);
   await userEvent.type(document.querySelector<HTMLTextAreaElement>(".addpkg textarea")!, "https://example.invalid/echo-provider");
-  await userEvent.click(screen.getByRole("button", { name: t("查看内容") }));
-  await userEvent.click(await screen.findByRole("button", { name: t("安装") }));
-  await screen.findByRole("button", { name: t("完成") });
+  await userEvent.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
+  await userEvent.click(await screen.findByRole("button", { name: t("ext.install") }));
+  await screen.findByRole("button", { name: t("common.done") });
   expect(refs(await choices())).not.toContain(echo.ref);
   await extensions();
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
-  await screen.findByText(t("已生效，下一轮开始用新的扩展"));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
+  await screen.findByText(t("app.live_the_next_turn_runs"));
   const select = await choices();
   await waitFor(() => expect(refs(select)).toContain(echo.ref));
 });

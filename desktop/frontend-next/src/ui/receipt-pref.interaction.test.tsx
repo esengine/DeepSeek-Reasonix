@@ -53,8 +53,8 @@ describe("the delivery receipt card is a display choice", () => {
     render(transcript(items));
     expect(card()).toBeNull();
     expect(hint()?.getAttribute("data-severity")).toBe("warn");
-    expect(hint()?.textContent).toBe("!" + t("有未验证的改动"));
-    expect(screen.getByRole("button", { name: t("警告") + "：" + t("有未验证的改动") })).toBeTruthy();
+    expect(hint()?.textContent).toBe("!" + t("chat.unverified_changes"));
+    expect(screen.getByRole("button", { name: t("chat.warning") + "：" + t("chat.unverified_changes") })).toBeTruthy();
     expect(screen.getByText("surveyed")).toBeTruthy();
   });
 
@@ -67,14 +67,14 @@ describe("the delivery receipt card is a display choice", () => {
   it("does not call declared caveats unverified changes, even when files changed and passed", () => {
     render(transcript([user("u1", "survey"), say("s1", "surveyed"), receipt("r1", { severity: "notice", gaps: [], risks: ["one-way migration"] })]));
     expect(hint()?.getAttribute("data-severity")).toBe("notice");
-    expect(hint()?.textContent).toContain(t("这一轮自己说明了风险或未验证项"));
-    expect(hint()?.textContent).not.toContain(t("有未验证的改动"));
+    expect(hint()?.textContent).toContain(t("chat.this_turn_declared_risks_or"));
+    expect(hint()?.textContent).not.toContain(t("chat.unverified_changes"));
   });
 
   it("opens the card on click and closes it again, saying what the click does", async () => {
     render(transcript(items));
     const line = screen.getByRole("button", { name: /未验证|unverified/i });
-    expect(line.getAttribute("title")).toBe(t("点击查看交付验收：改了什么、哪些没有验证"));
+    expect(line.getAttribute("title")).toBe(t("chat.click_to_see_the_delivery"));
     expect(line.getAttribute("aria-expanded")).toBe("false");
     await userEvent.click(line);
     expect(card()).not.toBeNull();
@@ -131,7 +131,7 @@ describe("the setting", () => {
       onClose={() => {}} onChanged={() => {}} onError={() => {}} at="session"
       account={null} accountUnread="" reloadAccount={() => {}}
     /> <ReceiptPrefContext.Provider value={receiptPrefOf(port)}>{transcript(items)}</ReceiptPrefContext.Provider></>);
-    const sw = await screen.findByRole("switch", { name: t("显示交付验收卡片") });
+    const sw = await screen.findByRole("switch", { name: t("settings.show_the_delivery_receipt_card") });
     expect(sw.getAttribute("aria-checked")).toBe("false");
     expect(card()).toBeNull();
     await userEvent.click(sw);
@@ -156,7 +156,7 @@ describe("the setting", () => {
       onClose={() => {}} onChanged={() => {}} onError={() => {}} at="session"
       account={null} accountUnread="" reloadAccount={() => {}}
     />);
-    const sw = await screen.findByRole("switch", { name: t("显示交付验收卡片") });
+    const sw = await screen.findByRole("switch", { name: t("settings.show_the_delivery_receipt_card") });
     await userEvent.click(sw);
     expect(await screen.findByText(/disk full/)).toBeTruthy();
     expect(sw.getAttribute("aria-checked")).toBe("false");

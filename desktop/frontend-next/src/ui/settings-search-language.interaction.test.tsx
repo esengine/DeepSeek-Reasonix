@@ -41,7 +41,7 @@ async function draw() {
     onClose={onClose} onChanged={() => {}} onError={() => {}}
     account={null} accountUnread="" reloadAccount={() => {}}
   />);
-  return { calls, onClose, find: () => screen.getByRole<HTMLInputElement>("textbox", { name: t("搜索设置") }) };
+  return { calls, onClose, find: () => screen.getByRole<HTMLInputElement>("textbox", { name: t("settings.search_settings") }) };
 }
 
 it.each(["market", "plugins", "mcp", "skills", "ext-runtime", "hooks", "composition-picker"])(
@@ -67,7 +67,7 @@ it.each(["market", "plugins", "mcp", "skills", "ext-runtime", "hooks", "composit
     await waitFor(() => expect(block(anchor)).not.toBeNull());
     expect(find().value).toBe("");
     if (entry.section === "ext") {
-      expect(screen.getByRole("tab", { name: t(anchor === "market" ? "发现" : "已安装") }).getAttribute("aria-selected")).toBe("true");
+      expect(screen.getByRole("tab", { name: t(anchor === "market" ? "发现" : "ext.installed") }).getAttribute("aria-selected")).toBe("true");
     }
   },
 );
@@ -89,7 +89,7 @@ it("finds extension blocks by the displayed section name without mounting them",
   expect(onClose).not.toHaveBeenCalled();
   await userEvent.type(find(), "not-a-setting");
   expect(screen.queryByRole("option")).toBeNull();
-  expect(screen.getByText(t("没有匹配的设置"))).toBeTruthy();
+  expect(screen.getByText(t("settings.no_matching_setting"))).toBeTruthy();
   await userEvent.clear(find());
   expect(screen.queryByRole("listbox")).toBeNull();
 });

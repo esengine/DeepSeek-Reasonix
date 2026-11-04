@@ -27,8 +27,8 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 async function confirm() {
-  await userEvent.click(await screen.findByRole("checkbox", { name: t("我已看过这 {n} 个技能，全部安装", { n: 2 }) }));
-  await userEvent.click(screen.getByRole("button", { name: t("安装") }));
+  await userEvent.click(await screen.findByRole("checkbox", { name: t("ext.i_have_read_these_n", { n: 2 }) }));
+  await userEvent.click(screen.getByRole("button", { name: t("ext.install") }));
 }
 async function fixture(unreviewed = false, applied = false, partial = false) {
   const port = new MockPort() as unknown as AgentPort;
@@ -47,7 +47,7 @@ async function fixture(unreviewed = false, applied = false, partial = false) {
   const onInstalled = vi.fn();
   const view = render(<Market port={port} onInstalled={onInstalled} />);
   await userEvent.click(await screen.findByRole("button", { name: /notes-kit/ }));
-  await userEvent.click(await screen.findByRole("button", { name: t(unreviewed ? "信任并安装" : "查看将安装的内容") }));
+  await userEvent.click(await screen.findByRole("button", { name: t(unreviewed ? "ext.trust_and_install" : "ext.see_what_it_installs") }));
   await confirm();
   await screen.findAllByRole("alert");
   return { port, original, fresh, detail, read, preview, install, onInstalled, view };
@@ -58,29 +58,29 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].map((unreviewed) => ({ lang
   const f = await fixture(unreviewed);
   const read = deferred<MarketDetail>();
   f.read.mockImplementationOnce(() => read.promise);
-  const retry = screen.getByRole("button", { name: t("重试") });
+  const retry = screen.getByRole("button", { name: t("common.retry") });
   retry.focus();
   await userEvent.keyboard("{Enter}");
   expect(f.read).toHaveBeenCalledTimes(2);
   expect(f.read).toHaveBeenLastCalledWith(pkg.slug, { refresh: true });
   expect(f.preview).toHaveBeenCalledTimes(1);
   expect(f.install).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole("button", { name: t("重试") })).toBeNull();
-  expect(screen.queryByRole("button", { name: t("安装") })).toBeNull();
-  expect(screen.queryByRole("checkbox", { name: t("我已看过这 {n} 个技能，全部安装", { n: 2 }) })).toBeNull();
-  expect(screen.getByRole("status").textContent).toBe(t("正在读取…"));
+  expect(screen.queryByRole("button", { name: t("common.retry") })).toBeNull();
+  expect(screen.queryByRole("button", { name: t("ext.install") })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: t("ext.i_have_read_these_n", { n: 2 }) })).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe(t("common.loading"));
   expect(document.activeElement).toBe(screen.getByRole("region", { name: pkg.slug }));
   await act(async () => read.resolve({ ...f.detail, package: { ...pkg, latestVersion: "2.0.0" } }));
-  await userEvent.click(screen.getByRole("button", { name: t(unreviewed ? "信任并安装" : "查看将安装的内容") }));
+  await userEvent.click(screen.getByRole("button", { name: t(unreviewed ? "ext.trust_and_install" : "ext.see_what_it_installs") }));
   expect(f.preview).toHaveBeenLastCalledWith({ slug: pkg.slug, replace: false, ...(unreviewed ? { trust: true } : {}) });
-  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: t("我已看过这 {n} 个技能，全部安装", { n: 2 }) }).checked).toBe(false);
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("安装") }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: t("ext.i_have_read_these_n", { n: 2 }) }).checked).toBe(false);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("ext.install") }).disabled).toBe(true);
   await confirm();
   expect(f.install).toHaveBeenLastCalledWith({ slug: pkg.slug, version: "2.0.0", planId: "fresh", replace: false,
     ...(unreviewed ? { trust: true, digest: f.fresh.contentDigest } : {}),
   });
-  await screen.findByRole("button", { name: t("返回列表") });
-  expect(screen.queryByRole("button", { name: t("重试") })).toBeNull();
+  await screen.findByRole("button", { name: t("ext.back_to_list") });
+  expect(screen.queryByRole("button", { name: t("common.retry") })).toBeNull();
   expect(f.onInstalled).toHaveBeenCalledOnce();
 });
 
@@ -90,8 +90,8 @@ it("retains a partial result until retry and uses the refreshed installed state 
   expect(screen.getAllByRole("alert").filter((alert) => alert.textContent?.includes("Target unavailable"))).toHaveLength(2);
   expect(f.read).toHaveBeenCalledOnce();
   f.read.mockResolvedValueOnce({ ...f.detail, installed: { version: "1.0.0", contentHash: f.original.contentDigest! }, package: { ...pkg, latestVersion: "2.0.0" } });
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
-  await userEvent.click(await screen.findByRole("button", { name: t("查看更新内容") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
+  await userEvent.click(await screen.findByRole("button", { name: t("ext.see_what_the_update_installs") }));
   expect(f.preview).toHaveBeenLastCalledWith({ slug: pkg.slug, replace: true });
   await confirm();
   expect(f.install).toHaveBeenLastCalledWith({ slug: pkg.slug, version: "2.0.0", planId: "fresh", replace: true });
@@ -101,12 +101,12 @@ it("retains a partial result until retry and uses the refreshed installed state 
 it("recovers a failed detail refresh without replaying the consumed installation", async () => {
   const f = await fixture();
   f.read.mockRejectedValueOnce(new Error("current details unavailable"));
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
   expect((await screen.findByRole("alert")).textContent).toContain("current details unavailable");
   expect(f.install).toHaveBeenCalledOnce();
   expect(f.preview).toHaveBeenCalledOnce();
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
-  await screen.findByRole("button", { name: t("查看将安装的内容") });
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
+  await screen.findByRole("button", { name: t("ext.see_what_it_installs") });
   expect(f.read).toHaveBeenCalledTimes(3);
   expect(f.install).toHaveBeenCalledOnce();
 });
@@ -118,18 +118,18 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].map((unreviewed) => ({ lang
   f.install.mockResolvedValueOnce({ ...f.fresh, ok: false, applied: true, status: "partial",
     actions: f.fresh.actions!.map((a, i) => i === 0 ? { ...a, status: "failed", error: "Already installed", next: "Keep the existing skill" } : { ...a, status: "done" }),
   });
-  screen.getByRole("button", { name: t("重试") }).focus();
+  screen.getByRole("button", { name: t("common.retry") }).focus();
   await userEvent.keyboard("{Enter}");
-  const preview = await screen.findByRole("button", { name: t(unreviewed ? "信任并安装" : "查看将安装的内容") });
+  const preview = await screen.findByRole("button", { name: t(unreviewed ? "ext.trust_and_install" : "ext.see_what_it_installs") });
   expect(screen.getByRole("alert").textContent).toContain("Target unavailable");
   expect(screen.getByRole("alert").textContent).toContain("checks");
   expect(screen.getByRole("alert").textContent).toContain("Correct the target");
-  expect(screen.queryByText(t("已安装 {version}", { version: "1.0.0" }))).toBeNull();
+  expect(screen.queryByText(t("ext.installed_version", { version: "1.0.0" }))).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole("region", { name: pkg.slug }));
   expect(f.install).toHaveBeenCalledOnce();
   await userEvent.click(preview);
   expect(f.preview).toHaveBeenLastCalledWith({ slug: pkg.slug, replace: false, ...(unreviewed ? { trust: true } : {}) });
-  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: t("我已看过这 {n} 个技能，全部安装", { n: 2 }) }).checked).toBe(false);
+  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: t("ext.i_have_read_these_n", { n: 2 }) }).checked).toBe(false);
   await confirm();
   expect(f.install).toHaveBeenLastCalledWith({ slug: pkg.slug, version: "1.0.0", planId: "fresh", replace: false,
     ...(unreviewed ? { trust: true, digest: f.fresh.contentDigest } : {}),
@@ -137,37 +137,37 @@ it.each(["zh", "en"].flatMap((lang) => [false, true].map((unreviewed) => ({ lang
   await waitFor(() => expect(f.onInstalled).toHaveBeenCalledTimes(2));
   expect(screen.getByRole("alert").textContent).toContain("Already installed");
   expect(screen.queryByText("Target unavailable")).toBeNull();
-  expect(screen.getByRole("button", { name: t("重试") })).toBeTruthy();
+  expect(screen.getByRole("button", { name: t("common.retry") })).toBeTruthy();
 });
 
 it("keeps a partial result through a failed refresh and a cancelled new preview", async () => {
   const f = await fixture(false, true, true);
   f.read.mockRejectedValueOnce(new Error("offline after partial"));
   f.read.mockResolvedValueOnce({ ...f.detail, installed: { version: "1.0.0", contentHash: f.original.contentDigest! } });
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
   expect((await screen.findByRole("alert")).textContent).toContain("offline after partial");
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
-  await userEvent.click(await screen.findByRole("button", { name: t("查看将安装的内容") }));
-  await userEvent.click(screen.getByRole("button", { name: t("返回") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
+  await userEvent.click(await screen.findByRole("button", { name: t("ext.see_what_it_installs") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.back") }));
   expect(screen.getByRole("alert").textContent).toContain("Target unavailable");
-  await userEvent.click(screen.getByRole("button", { name: t("查看将安装的内容") }));
-  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: t("我已看过这 {n} 个技能，全部安装", { n: 2 }) }).checked).toBe(false);
+  await userEvent.click(screen.getByRole("button", { name: t("ext.see_what_it_installs") }));
+  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: t("ext.i_have_read_these_n", { n: 2 }) }).checked).toBe(false);
   expect(f.install).toHaveBeenCalledOnce();
 });
 
 it("does not carry a partial retry to a new host's complete installation", async () => {
   const f = await fixture(false, true, true);
   f.read.mockResolvedValueOnce({ ...f.detail, installed: { version: "1.0.0", contentHash: f.original.contentDigest! } });
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
-  await screen.findByRole("button", { name: t("查看将安装的内容") });
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
+  await screen.findByRole("button", { name: t("ext.see_what_it_installs") });
   const next = new MockPort() as unknown as AgentPort;
   next.marketDetail = vi.fn().mockResolvedValue({ ...f.detail, installed: { version: "1.0.0", contentHash: f.original.contentDigest! } });
   next.marketMyVote = vi.fn().mockResolvedValue({ signedIn: false, value: 0 });
   next.planMarket = vi.fn();
   f.view.rerender(<Market port={next} onInstalled={f.onInstalled} />);
-  await screen.findByText(t("已安装 {version}", { version: "1.0.0" }));
+  await screen.findByText(t("ext.installed_version", { version: "1.0.0" }));
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: t("查看将安装的内容") })).toBeNull();
+  expect(screen.queryByRole("button", { name: t("ext.see_what_it_installs") })).toBeNull();
   expect(next.planMarket).not.toHaveBeenCalled();
   expect(f.install).toHaveBeenCalledOnce();
 });

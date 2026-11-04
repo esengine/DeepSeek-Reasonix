@@ -39,21 +39,21 @@ describe("the scene's main-window volume control", () => {
   it("mutes from the icon without losing the level", () => {
     const onLook = vi.fn((_next: Appearance) => {});
     render(<WallpaperVolume look={look(unit())} onLook={onLook} />);
-    fireEvent.click(screen.getByRole("button", { name: t("关闭声音") }));
+    fireEvent.click(screen.getByRole("button", { name: t("look.mute_sound") }));
     expect(onLook.mock.calls[0][0].wallpaper).toMatchObject({ muted: true, volume: 0.6 });
   });
 
   it("restores a level when unmuting from silence", () => {
     const onLook = vi.fn((_next: Appearance) => {});
     render(<WallpaperVolume look={look(unit({ muted: true, volume: 0 }))} onLook={onLook} />);
-    fireEvent.click(screen.getByRole("button", { name: t("打开声音") }));
+    fireEvent.click(screen.getByRole("button", { name: t("look.unmute_sound") }));
     expect(onLook.mock.calls[0][0].wallpaper).toMatchObject({ muted: false, volume: 1 });
   });
 
   it("sets the level from the vertical slider", () => {
     const onLook = vi.fn((_next: Appearance) => {});
     render(<WallpaperVolume look={look(unit())} onLook={onLook} />);
-    fireEvent.change(screen.getByRole("slider", { name: t("音量") }), { target: { value: "0.25" } });
+    fireEvent.change(screen.getByRole("slider", { name: t("look.volume") }), { target: { value: "0.25" } });
     expect(onLook.mock.calls[0][0].wallpaper).toMatchObject({ volume: 0.25, muted: false });
   });
 });

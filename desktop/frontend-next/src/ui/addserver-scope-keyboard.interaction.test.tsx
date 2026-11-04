@@ -22,8 +22,8 @@ async function setup(lang: string, canProject = true) {
   render(<AddServer port={port} canProject={canProject} onClose={close} onInstalled={installed} />);
   const user = userEvent.setup();
   await user.type(screen.getByRole("textbox"), "https://example.test/mcp");
-  await user.click(screen.getByRole("button", { name: t("查看内容") }));
-  const radios = within(screen.getByRole("radiogroup", { name: t("安装位置") })).getAllByRole<HTMLButtonElement>("radio");
+  await user.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
+  const radios = within(screen.getByRole("radiogroup", { name: t("ext.where_to_install_it") })).getAllByRole<HTMLButtonElement>("radio");
   return { port, installed, close, user, radios };
 }
 
@@ -41,8 +41,8 @@ it.each(["zh", "en"])("moves focus and selection with arrows before installing i
   }
   expect(install).not.toHaveBeenCalled();
   await user.tab();
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("返回") }));
-  await user.click(screen.getByRole("button", { name: t("接入") }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("common.back") }));
+  await user.click(screen.getByRole("button", { name: t("ext.connect") }));
   expect(install).toHaveBeenCalledExactlyOnceWith(draft.servers[0], "local");
   expect(radios.every((radio) => radio.disabled)).toBe(true);
   await user.keyboard("{ArrowRight}{ArrowDown}");
@@ -50,7 +50,7 @@ it.each(["zh", "en"])("moves focus and selection with arrows before installing i
   await act(async () => finish(ready));
   expect(installed).toHaveBeenCalledTimes(1);
   expect(close).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: t("完成") })).toBeTruthy();
+  expect(screen.getByRole("button", { name: t("common.done") })).toBeTruthy();
 });
 
 it.each(["zh", "en"])("skips unavailable project scopes and retains ordinary activation (%s)", async (lang) => {
@@ -63,7 +63,7 @@ it.each(["zh", "en"])("skips unavailable project scopes and retains ordinary act
   expect(radios[0].getAttribute("aria-checked")).toBe("true");
   await user.keyboard("{Enter} ");
   expect(install).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: t("接入") }));
+  await user.click(screen.getByRole("button", { name: t("ext.connect") }));
   expect(install).toHaveBeenCalledExactlyOnceWith(draft.servers[0], "user");
 });
 
@@ -83,8 +83,8 @@ it.each(["zh", "en"])("selects the enabled scope boundaries with Home and End wi
   }
   expect(install).not.toHaveBeenCalled();
   await user.tab();
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("返回") }));
-  await user.click(screen.getByRole("button", { name: t("接入") }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("common.back") }));
+  await user.click(screen.getByRole("button", { name: t("ext.connect") }));
   expect(install).toHaveBeenCalledExactlyOnceWith(draft.servers[0], "project");
 });
 
@@ -96,27 +96,27 @@ it.each(["zh", "en"])("leaves modified arrows alone and keeps scope choice avail
   expect(document.activeElement).toBe(radios[0]);
   expect(radios[0].getAttribute("aria-checked")).toBe("true");
   await user.keyboard("{ArrowLeft}");
-  await user.click(screen.getByRole("button", { name: t("接入") }));
+  await user.click(screen.getByRole("button", { name: t("ext.connect") }));
   expect(await screen.findByText("offline")).toBeTruthy();
   expect(install).toHaveBeenNthCalledWith(1, draft.servers[0], "project");
   expect(radios.every((radio) => !radio.disabled)).toBe(true);
   radios[2].focus();
   await user.keyboard("{ArrowRight}");
   expect(document.activeElement).toBe(radios[0]);
-  await user.click(screen.getByRole("button", { name: t("接入") }));
+  await user.click(screen.getByRole("button", { name: t("ext.connect") }));
   expect(install).toHaveBeenNthCalledWith(2, draft.servers[0], "user");
 });
 
 it.each(["zh", "en"])("keeps all scopes locked after a partial save (%s)", async (lang) => {
   const { port, user } = await setup(lang);
   vi.spyOn(port, "parseMcp").mockResolvedValue({ servers: [...draft.servers, { ...draft.servers[0], name: "other" }], risks: [] });
-  await user.click(screen.getByRole("button", { name: t("返回") }));
-  await user.click(screen.getByRole("button", { name: t("查看内容") }));
+  await user.click(screen.getByRole("button", { name: t("common.back") }));
+  await user.click(screen.getByRole("button", { name: t("ext.see_what_it_is") }));
   const current = screen.getAllByRole<HTMLButtonElement>("radio");
   const install = vi.spyOn(port, "installMcp").mockResolvedValueOnce(ready).mockRejectedValueOnce(new Error("offline"));
   current[0].focus();
   await user.keyboard("{ArrowRight}");
-  await user.click(screen.getByRole("button", { name: t("接入") }));
+  await user.click(screen.getByRole("button", { name: t("ext.connect") }));
   expect(await screen.findByText("offline")).toBeTruthy();
   expect(current.every((radio) => radio.disabled)).toBe(true);
   await user.keyboard("{ArrowLeft}{ArrowUp}{End}{Home}");

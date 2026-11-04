@@ -62,7 +62,7 @@ it.each(["zh", "en"])("gives each filter group one Tab stop after pointer select
   expect(document.activeElement).toBe(radio("类型", "插件"));
   await userEvent.click(radio("排序", "最新"));
   await userEvent.tab();
-  expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: t("只看已固定") }));
+  expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: t("ext.pinned_only") }));
   await userEvent.tab({ shift: true });
   expect(document.activeElement).toBe(radio("排序", "最新"));
 });
@@ -80,7 +80,7 @@ it("filters and opens a package using only the keyboard without installing it", 
   expect(document.activeElement).toBe(radio("排序", "推荐"));
   await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
   await userEvent.tab();
-  expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: t("只看已固定") }));
+  expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: t("ext.pinned_only") }));
   await userEvent.keyboard(" ");
   await waitFor(() => expect(read).toHaveBeenLastCalledWith({ kind: "plugin", sort: "new", q: "review", offset: 0, pinned: false }));
   await screen.findByRole("button", { name: /review-kit/ });
@@ -88,7 +88,7 @@ it("filters and opens a package using only the keyboard without installing it", 
   expect(document.activeElement).toBe(screen.getByRole("button", { name: /review-kit/ }));
   await userEvent.keyboard("{Enter}");
   await waitFor(() => expect(detail).toHaveBeenCalledExactlyOnceWith("acme/review-kit"));
-  await screen.findByRole("button", { name: t("查看将安装的内容") });
+  await screen.findByRole("button", { name: t("ext.see_what_it_installs") });
   expect(install).not.toHaveBeenCalled();
 });
 

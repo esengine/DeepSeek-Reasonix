@@ -26,7 +26,7 @@ async function open() {
     <Appearance port={port} theme="light" onTheme={() => {}} contrast="" onContrast={() => {}}
       weight="" onWeight={() => {}} look={{}} onLook={() => {}} reloadThemes={() => {}} />,
   );
-  return screen.findByRole("switch", { name: t("任务运行时阻止系统休眠") });
+  return screen.findByRole("switch", { name: t("settings.keep_the_computer_awake_while") });
 }
 
 it("keeps the computer awake by default and says so", async () => {
@@ -53,5 +53,5 @@ it("reads a saved off back as off after a reload", async () => {
 
 it("leaves the tray switches where they were", async () => {
   await open();
-  expect(screen.getByRole("switch", { name: t("在托盘显示图标") })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: t("settings.show_a_status_icon_in") })).toBeTruthy();
 });

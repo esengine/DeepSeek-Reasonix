@@ -32,11 +32,11 @@ it("applies immediately through the shell, then disables without localStorage st
   render(<GlobalShortcutSection />);
   await screen.findByText(t("全局快捷键已关闭"));
   await userEvent.type(screen.getByRole("textbox"), "Control+Shift+Space");
-  await userEvent.click(screen.getByRole("button", { name: t("应用快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.apply_shortcut") }));
   expect(fixture.apply).toHaveBeenLastCalledWith("Control+Shift+Space");
   expect((await screen.findByRole("status")).textContent).toContain(acceleratorLabel("Control+Shift+Space"));
   expect(localStorage.length).toBe(1);
-  await userEvent.click(screen.getByRole("button", { name: t("清除快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.clear_shortcut") }));
   expect(fixture.apply).toHaveBeenLastCalledWith("");
   expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("");
   expect(screen.getByRole("status").textContent).toBe(t("全局快捷键已关闭"));
@@ -49,7 +49,7 @@ it.each(["invalid", "unavailable", "save"] as const)("shows %s rebind failure be
   await screen.findByText(t("已注册：{value}", { value: acceleratorLabel("Control+Space") }));
   await userEvent.clear(screen.getByRole("textbox"));
   await userEvent.type(screen.getByRole("textbox"), "occupied");
-  await userEvent.click(screen.getByRole("button", { name: t("应用快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.apply_shortcut") }));
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(screen.getByRole("status").textContent).toContain(acceleratorLabel("Control+Space"));
   expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("occupied");
@@ -60,7 +60,7 @@ it("reports startup failure and lets the person retry the saved binding", async 
   fixture.apply.mockResolvedValue({ binding: "Control+Space", status: "registered" });
   render(<GlobalShortcutSection />);
   await screen.findByText(t("系统未能注册此快捷键：可能已被占用、未获授权，或当前桌面不支持。"));
-  await userEvent.click(screen.getByRole("button", { name: t("应用快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.apply_shortcut") }));
   expect(fixture.apply).toHaveBeenCalledWith("Control+Space");
   expect(screen.getByRole("status").textContent).toContain(acceleratorLabel("Control+Space"));
 });
@@ -69,7 +69,7 @@ it("does not call an IPC transport failure a successful registration", async () 
   fixture.apply.mockRejectedValue(new Error("shell unavailable"));
   render(<GlobalShortcutSection />);
   await screen.findByText(t("全局快捷键已关闭"));
-  await userEvent.click(screen.getByRole("button", { name: t("应用快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.apply_shortcut") }));
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(screen.getByRole("status").textContent).toBe(t("全局快捷键已关闭"));
 });
@@ -78,7 +78,7 @@ it("records a modifier chord without submitting it, presents it, and clears it",
   fixture.apply.mockImplementation(async (binding: string) => ({ binding, status: binding ? "registered" : "disabled" }));
   render(<GlobalShortcutSection />);
   await screen.findByText(t("全局快捷键已关闭"));
-  await userEvent.click(screen.getByRole("button", { name: t("录制快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.record_shortcut") }));
   const input = screen.getByRole("textbox") as HTMLInputElement;
   expect(document.activeElement).toBe(input);
   expect(input.readOnly).toBe(true);
@@ -94,9 +94,9 @@ it("records a modifier chord without submitting it, presents it, and clears it",
   expect(input.readOnly).toBe(false);
   expect(screen.getByText(acceleratorLabel("Control+Shift+Space")).tagName).toBe("KBD");
   expect(fixture.apply).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: t("应用快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.apply_shortcut") }));
   expect(fixture.apply).toHaveBeenLastCalledWith("Control+Shift+Space");
-  await userEvent.click(screen.getByRole("button", { name: t("清除快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.clear_shortcut") }));
   expect(fixture.apply).toHaveBeenLastCalledWith("");
   expect(input.value).toBe("");
 });
@@ -107,7 +107,7 @@ it("can cancel capture with Escape or Tab without changing the existing choice",
   await screen.findByRole("status");
   const input = screen.getByRole("textbox") as HTMLInputElement;
   for (const key of ["Escape", "Tab"]) {
-    await userEvent.click(screen.getByRole("button", { name: t("录制快捷键") }));
+    await userEvent.click(screen.getByRole("button", { name: t("settings.record_shortcut") }));
     await userEvent.keyboard(`{${key}}`);
     expect(input.readOnly).toBe(false);
     expect(input.value).toBe("Control+Space");
@@ -120,7 +120,7 @@ it("records Command, Option, navigation and plus keys without Electron grammar",
   await screen.findByRole("status");
   const input = screen.getByRole("textbox") as HTMLInputElement;
   for (const [key, binding] of [["ArrowUp", "Alt+Super+Up"], ["+", "Alt+Super+Plus"]]) {
-    await userEvent.click(screen.getByRole("button", { name: t("录制快捷键") }));
+    await userEvent.click(screen.getByRole("button", { name: t("settings.record_shortcut") }));
     fireEvent.keyDown(input, { key, altKey: true, metaKey: true });
     expect(input.value).toBe(binding);
   }
@@ -134,7 +134,7 @@ it.each([
 ])("records a chord when the layout produces $key", async (event, binding) => {
   render(<GlobalShortcutSection />);
   await screen.findByRole("status");
-  await userEvent.click(screen.getByRole("button", { name: t("录制快捷键") }));
+  await userEvent.click(screen.getByRole("button", { name: t("settings.record_shortcut") }));
   const input = screen.getByRole("textbox") as HTMLInputElement;
   fireEvent.keyDown(input, event);
   expect(input.value).toBe(binding);

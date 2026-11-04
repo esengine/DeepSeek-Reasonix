@@ -25,7 +25,7 @@ async function draw(lang = "zh") {
   return { props, view };
 }
 
-const search = () => screen.getByRole<HTMLInputElement>("searchbox", { name: t("搜索已安装包") });
+const search = () => screen.getByRole<HTMLInputElement>("searchbox", { name: t("ext.search_installed_packages") });
 const row = (name = "review-kit") => document.querySelector<HTMLDetailsElement>(`[data-extension-name="${name}"]`)!;
 
 it.each(["zh", "en"])("finds a package by capability, clears with the keyboard and keeps focus (%s)", async (lang) => {
@@ -37,13 +37,13 @@ it.each(["zh", "en"])("finds a package by capability, clears with the keyboard a
   await userEvent.type(search(), "  /REVIEW-KIT:PR  ");
   expect(row().hidden).toBe(false);
   expect(row("notion-bridge").hidden).toBe(true);
-  expect(screen.getByText(t("插件包：{shown} / {total}", { shown: 1, total: 2 }))).toBeTruthy();
+  expect(screen.getByText(t("ext.packages_shown_total", { shown: 1, total: 2 }))).toBeTruthy();
   await userEvent.clear(search());
   await userEvent.type(search(), "nothing-here");
-  expect(screen.getByText(t("没有匹配的已安装包。"))).toBeTruthy();
+  expect(screen.getByText(t("ext.no_matching_installed_packages"))).toBeTruthy();
   expect(screen.queryByRole("switch")).toBeNull();
   await userEvent.tab();
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("清除搜索") }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("common.clear_search") }));
   await userEvent.keyboard("{Enter}");
   expect(search().value).toBe("");
   expect(document.activeElement).toBe(search());
@@ -71,7 +71,7 @@ it.each([
   view.rerender(<Packages {...props} packages={packages} />);
   await userEvent.type(search(), query);
   const owner = packages.find((p) => p.name === ownerName)!;
-  expect(screen.getByRole("switch", { name: `${t(owner.enabled ? "关闭" : "启用")} ${owner.name}` })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: `${t(owner.enabled ? "common.close" : "ext.enable")} ${owner.name}` })).toBeTruthy();
   expect(screen.getAllByRole("switch")).toHaveLength(1);
 });
 

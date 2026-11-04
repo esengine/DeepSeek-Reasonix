@@ -40,15 +40,15 @@ describe("copying an exported package's saved path", () => {
   ])("copies the literal native save result with the %s keyboard action", async (lang, savedTo) => {
     const { user, row, write, exportPlugin, onChanged } = await setup(lang);
     exportPlugin.mockResolvedValueOnce({ savedTo, required: ["REVIEW_TOKEN"] });
-    await user.click(row.getByRole("button", { name: t("导出") }));
-    const copy = await row.findByRole("button", { name: t("复制路径") });
-    expect(copy.textContent).toBe(t("复制路径"));
-    expect(copy.getAttribute("title")).toBe(t("复制路径"));
+    await user.click(row.getByRole("button", { name: t("ext.export") }));
+    const copy = await row.findByRole("button", { name: t("common.copy_path") });
+    expect(copy.textContent).toBe(t("common.copy_path"));
+    expect(copy.getAttribute("title")).toBe(t("common.copy_path"));
     copy.focus();
     await user.keyboard("{Enter}");
     expect(write).toHaveBeenCalledExactlyOnceWith(savedTo);
     expect(document.activeElement).toBe(copy);
-    expect(copy.textContent).toBe(t("已复制"));
+    expect(copy.textContent).toBe(t("common.copied"));
     expect(row.getByRole("status").textContent).toContain(savedTo);
     expect(row.getByRole("status").textContent).toContain("REVIEW_TOKEN");
     expect(exportPlugin).toHaveBeenCalledExactlyOnceWith("review-kit");

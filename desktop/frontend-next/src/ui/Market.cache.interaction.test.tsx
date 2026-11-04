@@ -30,11 +30,11 @@ it.each(["zh", "en"])("labels a listing served from the last good copy and leave
   const port = fixture();
   (port.marketList as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ packages: [pkg], limit: 24, offset: 0, cache });
   render(<Market port={port} onInstalled={() => {}} />);
-  expect(await screen.findByText(t("显示的是缓存数据"))).toBeTruthy();
+  expect(await screen.findByText(t("ext.showing_cached_data"))).toBeTruthy();
   expect(screen.getByRole("button", { name: /notes-kit/ })).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
   expect(await screen.findByRole("button", { name: /notes-kit/ })).toBeTruthy();
-  expect(screen.queryByText(t("显示的是缓存数据"))).toBeNull();
+  expect(screen.queryByText(t("ext.showing_cached_data"))).toBeNull();
   expect(port.marketList).toHaveBeenCalledTimes(2);
 });
 
@@ -50,18 +50,18 @@ it("drops the label when a filter change reaches the live registry", async () =>
   const port = fixture();
   (port.marketList as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ packages: [pkg], limit: 24, offset: 0, cache });
   render(<Market port={port} onInstalled={() => {}} />);
-  await screen.findByText(t("显示的是缓存数据"));
-  await userEvent.click(screen.getByRole("radio", { name: t("技能") }));
+  await screen.findByText(t("ext.showing_cached_data"));
+  await userEvent.click(screen.getByRole("radio", { name: t("settings.skills") }));
   await screen.findByRole("button", { name: /notes-kit/ });
-  expect(screen.queryByText(t("显示的是缓存数据"))).toBeNull();
+  expect(screen.queryByText(t("ext.showing_cached_data"))).toBeNull();
 });
 
 it("a failed listing with no copy still shows the error, not a cache label", async () => {
   const port = fixture();
   port.marketList = vi.fn().mockRejectedValue(new Error("boom"));
   render(<Market port={port} onInstalled={() => {}} />);
-  expect(await screen.findByText(t("无法读取社区市场"))).toBeTruthy();
-  expect(screen.queryByText(t("显示的是缓存数据"))).toBeNull();
+  expect(await screen.findByText(t("ext.could_not_read_the_community"))).toBeTruthy();
+  expect(screen.queryByText(t("ext.showing_cached_data"))).toBeNull();
 });
 
 it("labels a cached detail and retry re-reads it", async () => {
@@ -69,10 +69,10 @@ it("labels a cached detail and retry re-reads it", async () => {
   (port.marketDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ package: pkg, pinned: true, cache });
   render(<Market port={port} onInstalled={() => {}} />);
   await userEvent.click(await screen.findByRole("button", { name: /notes-kit/ }));
-  expect(await screen.findByText(t("显示的是缓存数据"))).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
-  await screen.findByRole("button", { name: t("查看将安装的内容") });
-  expect(screen.queryByText(t("显示的是缓存数据"))).toBeNull();
+  expect(await screen.findByText(t("ext.showing_cached_data"))).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
+  await screen.findByRole("button", { name: t("ext.see_what_it_installs") });
+  expect(screen.queryByText(t("ext.showing_cached_data"))).toBeNull();
   expect(port.marketDetail).toHaveBeenCalledTimes(2);
 });
 
@@ -81,12 +81,12 @@ it("a cached entry cannot start an install and says why; a live one can", async 
   (port.marketDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ package: pkg, pinned: true, cache });
   render(<Market port={port} onInstalled={() => {}} />);
   await userEvent.click(await screen.findByRole("button", { name: /notes-kit/ }));
-  expect(await screen.findByText(t("当前显示的是缓存数据，安装需要连接市场"))).toBeTruthy();
-  expect((screen.getByRole("button", { name: t("查看将安装的内容") }) as HTMLButtonElement).disabled).toBe(true);
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
-  const live = await screen.findByRole("button", { name: t("查看将安装的内容") });
+  expect(await screen.findByText(t("ext.showing_cached_data_installing_needs"))).toBeTruthy();
+  expect((screen.getByRole("button", { name: t("ext.see_what_it_installs") }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
+  const live = await screen.findByRole("button", { name: t("ext.see_what_it_installs") });
   expect((live as HTMLButtonElement).disabled).toBe(false);
-  expect(screen.queryByText(t("当前显示的是缓存数据，安装需要连接市场"))).toBeNull();
+  expect(screen.queryByText(t("ext.showing_cached_data_installing_needs"))).toBeNull();
 });
 
 it("an unpinned cached entry cannot be trusted-installed either", async () => {
@@ -94,16 +94,16 @@ it("an unpinned cached entry cannot be trusted-installed either", async () => {
   (port.marketDetail as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ package: pkg, pinned: false, cache });
   render(<Market port={port} onInstalled={() => {}} />);
   await userEvent.click(await screen.findByRole("button", { name: /notes-kit/ }));
-  expect((await screen.findByRole("button", { name: t("信任并安装") }) as HTMLButtonElement).disabled).toBe(true);
+  expect((await screen.findByRole("button", { name: t("ext.trust_and_install") }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("retry asks for a refresh and the first read does not", async () => {
   const port = fixture();
   (port.marketList as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ packages: [pkg], limit: 24, offset: 0, cache });
   render(<Market port={port} onInstalled={() => {}} />);
-  await screen.findByText(t("显示的是缓存数据"));
+  await screen.findByText(t("ext.showing_cached_data"));
   expect(port.marketList).toHaveBeenLastCalledWith(expect.not.objectContaining({ refresh: true }));
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
   await screen.findByRole("button", { name: /notes-kit/ });
   expect(port.marketList).toHaveBeenLastCalledWith(expect.objectContaining({ refresh: true }));
 });

@@ -33,7 +33,7 @@ async function search(q: string, anchor = "graphics") {
     account={null} accountUnread="" reloadAccount={() => {}}
   />);
   await act(async () => {});
-  await userEvent.type(screen.getByRole("textbox", { name: t("搜索设置") }), q);
+  await userEvent.type(screen.getByRole("textbox", { name: t("settings.search_settings") }), q);
   return screen.queryAllByRole("option").some((o) => (o as HTMLElement).dataset.target === anchor);
 }
 

@@ -30,7 +30,7 @@ it("keeps account headings, visible hosts and row metadata with checks off and o
   await port.saveProviderHealthSettings(true);
   view.rerender(<Composer {...props} pulse={1} />);
   fireEvent.click(screen.getByRole("button", { name: "current" }));
-  await within(screen.getByRole("menu")).findAllByText(t("连接正常"));
+  await within(screen.getByRole("menu")).findAllByText(t("models.connected"));
   expect(screen.getByRole("menu").querySelectorAll(".mi.head .rt")).toHaveLength(2);
   expect(screen.getByRole("menuitem", { name: /second/ }).textContent).toContain(t("OpenAI 兼容"));
   expect(screen.getByRole("menuitem", { name: /second/ }).textContent).not.toContain("Gateway");

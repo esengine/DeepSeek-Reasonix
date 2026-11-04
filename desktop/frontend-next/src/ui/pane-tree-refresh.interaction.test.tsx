@@ -61,7 +61,7 @@ describe("the explorer during a turn", () => {
   // not live.
   it("updates the composer's branch chip after a turn ends", async () => {
     const pane = open();
-    const chip = await screen.findByRole("button", { name: t("配置工作目录") });
+    const chip = await screen.findByRole("button", { name: t("composer.configure_workspace") });
     expect(chip.textContent).toContain("main");
 
     pane.send({ kind: "turn_started" });
@@ -77,7 +77,7 @@ describe("branch switch results in the pane", () => {
   for (const changesFail of [false, true]) {
     it(`uses the switch response while the change list ${changesFail ? "fails" : "is pending"}`, async () => {
       const pane = open();
-      const chip = await screen.findByRole("button", { name: t("配置工作目录") });
+      const chip = await screen.findByRole("button", { name: t("composer.configure_workspace") });
       const reading = vi.spyOn(pane.port, "workspaceGit").mockImplementation(() => new Promise(() => {}));
       pane.changes.mockClear();
       pane.changes.mockImplementation(() => changesFail
@@ -104,7 +104,7 @@ describe("branch switch results in the pane", () => {
 describe("branch switch in flight", () => {
   it("says which branch it is moving to until the switch answers, then names the branch", async () => {
     const pane = open();
-    const chip = await screen.findByRole("button", { name: t("配置工作目录") });
+    const chip = await screen.findByRole("button", { name: t("composer.configure_workspace") });
     let land: (git: Awaited<ReturnType<typeof pane.port.switchBranch>>) => void = () => {};
     const done = new Promise<Awaited<ReturnType<typeof pane.port.switchBranch>>>((resolve) => { land = resolve; });
     vi.spyOn(pane.port, "switchBranch").mockImplementation(() => done);
@@ -123,7 +123,7 @@ describe("branch switch in flight", () => {
 
   it("goes back to the current branch when the switch is refused", async () => {
     const pane = open();
-    const chip = await screen.findByRole("button", { name: t("配置工作目录") });
+    const chip = await screen.findByRole("button", { name: t("composer.configure_workspace") });
     vi.spyOn(pane.port, "switchBranch").mockRejectedValue(new HttpError(409, "busy", { code: "branch.turn_running", error: "busy" }));
     fireEvent.click(chip);
     fireEvent.click(await screen.findByRole("option", { name: "studio" }));
@@ -143,7 +143,7 @@ describe("branch switch refusals in the pane", () => {
         const refusal = reason(error);
         expect(refusal).not.toBe("fixture fallback");
         const change = vi.spyOn(pane.port, "switchBranch").mockRejectedValue(error);
-        const chip = await screen.findByRole("button", { name: t("配置工作目录") });
+        const chip = await screen.findByRole("button", { name: t("composer.configure_workspace") });
         fireEvent.click(chip);
         fireEvent.click(await screen.findByRole("option", { name: "studio" }));
         expect(await screen.findByText(refusal)).toBeTruthy();

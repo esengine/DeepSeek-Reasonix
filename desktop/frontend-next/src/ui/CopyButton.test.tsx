@@ -14,22 +14,22 @@ afterEach(cleanup);
 describe("a copy button", () => {
   it("on a code block, offers to copy the code rather than the response", () => {
     render(<CodeBlock lang="go" source={"x := 1\n"}><code>x := 1</code></CodeBlock>);
-    const button = screen.getByRole("button", { name: t("复制这段代码") });
+    const button = screen.getByRole("button", { name: t("chat.copy_this_code") });
     fireEvent.focus(button);
-    expect(screen.getByRole("tooltip").textContent).toBe(t("复制这段代码"));
+    expect(screen.getByRole("tooltip").textContent).toBe(t("chat.copy_this_code"));
   });
 
   it("with a label and visible text, says that label instead of the response's", () => {
-    render(<CopyButton text="/home/me/.reasonix/config.toml" label={t("复制路径")} />);
-    const button = screen.getByRole("button", { name: t("复制路径") });
-    expect(button.textContent).toBe(t("复制路径"));
-    expect(button.getAttribute("title")).toBe(t("复制路径"));
+    render(<CopyButton text="/home/me/.reasonix/config.toml" label={t("common.copy_path")} />);
+    const button = screen.getByRole("button", { name: t("common.copy_path") });
+    expect(button.textContent).toBe(t("common.copy_path"));
+    expect(button.getAttribute("title")).toBe(t("common.copy_path"));
   });
 
   it("without a label, still offers to copy the response", () => {
     render(<CopyButton text="an answer" iconOnly />);
     fireEvent.focus(screen.getByRole("button"));
-    expect(screen.getByRole("tooltip").textContent).toBe(t("复制回复"));
+    expect(screen.getByRole("tooltip").textContent).toBe(t("app.copy_response"));
   });
 });
 
@@ -117,12 +117,12 @@ describe("copying without the Clipboard API", () => {
     const copy = screen.getByRole("button", { name: "Copy invocation" });
     await user.keyboard("{Enter}");
     await waitFor(() => expect(copy.getAttribute("data-state")).toBe("failed"));
-    expect(copy.title).toBe(t("复制失败，请重试"));
+    expect(copy.title).toBe(t("common.copy_failed_try_again"));
     expect(document.activeElement).toBe(copy);
     exec.mockReturnValue(true);
     await user.keyboard("{Enter}");
     await waitFor(() => expect(copy.getAttribute("data-state")).toBe("done"));
-    expect(copy.title).toBe(t("已复制"));
+    expect(copy.title).toBe(t("common.copied"));
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next action" }));
     expect(exec).toHaveBeenCalledTimes(2);

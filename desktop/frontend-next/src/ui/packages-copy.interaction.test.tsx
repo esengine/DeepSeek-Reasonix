@@ -48,7 +48,7 @@ async function setup(lang = "zh") {
 }
 
 function label(command: string) {
-  return t("复制调用命令 {command}", { command });
+  return t("ext.copy_invocation_command", { command });
 }
 
 describe("installed package invocation copy", () => {
@@ -64,9 +64,9 @@ describe("installed package invocation copy", () => {
     button.focus();
     await user.keyboard("{Enter}");
     expect(copy).toHaveBeenCalledExactlyOnceWith(command);
-    expect(button.querySelector('[aria-live="polite"]')?.textContent).toBe(t("已复制"));
+    expect(button.querySelector('[aria-live="polite"]')?.textContent).toBe(t("common.copied"));
     fireEvent.focus(button);
-    expect(screen.getByRole("tooltip").textContent).toBe(t("已复制"));
+    expect(screen.getByRole("tooltip").textContent).toBe(t("common.copied"));
     expect(details.open).toBe(true);
     expect(toggle).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
@@ -102,12 +102,12 @@ describe("installed package invocation copy", () => {
     copy.mockRejectedValueOnce(new Error("clipboard denied"));
     const button = row.getByRole("button", { name: label(entries[0][1]) });
     await user.click(button);
-    expect(button.querySelector('[aria-live="polite"]')?.textContent).toBe(t("复制失败，请重试"));
+    expect(button.querySelector('[aria-live="polite"]')?.textContent).toBe(t("common.copy_failed_try_again"));
     fireEvent.focus(button);
-    expect(screen.getByRole("tooltip").textContent).toBe(t("复制失败，请重试"));
-    expect(row.getByRole<HTMLButtonElement>("switch", { name: t("关闭") + " review-kit" }).disabled).toBe(false);
+    expect(screen.getByRole("tooltip").textContent).toBe(t("common.copy_failed_try_again"));
+    expect(row.getByRole<HTMLButtonElement>("switch", { name: t("common.close") + " review-kit" }).disabled).toBe(false);
     await user.click(button);
-    expect(button.querySelector('[aria-live="polite"]')?.textContent).toBe(t("已复制"));
+    expect(button.querySelector('[aria-live="polite"]')?.textContent).toBe(t("common.copied"));
     expect(copy).toHaveBeenCalledTimes(2);
     expect(details.open).toBe(true);
   });
@@ -128,7 +128,7 @@ describe("installed package invocation copy", () => {
     expect(current.querySelector('[aria-live="polite"]')?.textContent).toBe(label(command));
     await user.click(current);
     expect(copy).toHaveBeenLastCalledWith(command);
-    expect(current.querySelector('[aria-live="polite"]')?.textContent).toBe(t("已复制"));
+    expect(current.querySelector('[aria-live="polite"]')?.textContent).toBe(t("common.copied"));
   });
 
   it("keeps copy feedback local while package management remains available", async () => {
@@ -162,6 +162,6 @@ describe("installed package invocation copy", () => {
     expect(props.onChanged).not.toHaveBeenCalled();
     await user.click(current);
     expect(copy).toHaveBeenCalledTimes(2);
-    expect(current.querySelector('[aria-live="polite"]')?.textContent).toBe(t("已复制"));
+    expect(current.querySelector('[aria-live="polite"]')?.textContent).toBe(t("common.copied"));
   });
 });

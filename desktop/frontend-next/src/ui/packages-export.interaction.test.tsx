@@ -38,17 +38,17 @@ describe("package export feedback", () => {
     exportPlugin.mockResolvedValueOnce(result);
     expect(details.open).toBe(false);
     const user = userEvent.setup();
-    const button = row.getByRole("button", { name: t("导出") });
+    const button = row.getByRole("button", { name: t("ext.export") });
     button.focus();
     await user.keyboard("{Enter}");
     await row.findByText(/REVIEW_TOKEN/);
     expect(details.open).toBe(true);
     const status = row.getByRole("status");
-    expect(status.textContent).toContain(destination === "saved" ? t("已保存至 {path}。", { path: result.savedTo! }) : t("导出完成。"));
-    expect(status.textContent).toContain(t("里面的密钥值已经去掉，装它的人要自己提供：{names}", { names: "REVIEW_TOKEN、NOTES_TOKEN" }));
+    expect(status.textContent).toContain(destination === "saved" ? t("ext.saved_to_path", { path: result.savedTo! }) : t("ext.exported"));
+    expect(status.textContent).toContain(t("ext.the_key_values_were_stripped", { names: "REVIEW_TOKEN、NOTES_TOKEN" }));
     if (lang === "en") expect(status.textContent).toBe(`${destination === "saved" ? "Saved to /tmp/review-kit.zip." : "Exported."} The key values were stripped out; whoever installs it supplies their own: REVIEW_TOKEN、NOTES_TOKEN`);
     expect(exportPlugin).toHaveBeenCalledExactlyOnceWith("review-kit");
-    expect(row.getByRole<HTMLButtonElement>("button", { name: t("导出") }).disabled).toBe(false);
+    expect(row.getByRole<HTMLButtonElement>("button", { name: t("ext.export") }).disabled).toBe(false);
   });
 
   it.each(["success", "failure"])("retires a previous result while a retry is pending and after %s", async (outcome) => {

@@ -47,7 +47,7 @@ describe("the controls below a message", () => {
     const write = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
     try {
       row("好");
-      const copy = screen.getByRole("button", { name: t("复制") });
+      const copy = screen.getByRole("button", { name: t("common.copy") });
       await user.click(copy);
       expect(copy.querySelector("[aria-live]")?.className).not.toBe("sr-only");
       expect(copy.textContent).toBe(lang === "zh" ? "复制失败，请重试" : "Copy failed. Try again.");

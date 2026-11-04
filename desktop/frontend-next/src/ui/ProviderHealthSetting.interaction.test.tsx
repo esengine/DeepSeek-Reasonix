@@ -15,7 +15,7 @@ it.each([404, 405, 501])("explains an older server refusing health settings with
   vi.spyOn(port, "providerHealthSettings").mockRejectedValue(new HttpError(status, "unsupported"));
   const save = vi.spyOn(port, "saveProviderHealthSettings");
   render(<ProviderHealthSetting port={port} onChanged={vi.fn()} onFailed={vi.fn()} />);
-  await screen.findByText(t("当前服务器不支持自动检测，请升级服务器后重试。"));
+  await screen.findByText(t("models.this_server_does_not_support"));
   expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
   expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(true);
   expect(save).not.toHaveBeenCalled();
@@ -24,12 +24,12 @@ it.each([404, 405, 501])("explains an older server refusing health settings with
 it("explains a missing save capability and distinguishes a settings read failure", async () => {
   const port = new MockPort();
   const view = render(<ProviderHealthSetting port={{ providerHealthSettings: () => port.providerHealthSettings() }} onChanged={vi.fn()} onFailed={vi.fn()} />);
-  await screen.findByText(t("当前服务器不支持自动检测，请升级服务器后重试。"));
+  await screen.findByText(t("models.this_server_does_not_support"));
   vi.spyOn(port, "providerHealthSettings").mockRejectedValue(new HttpError(403, "forbidden"));
   view.rerender(<ProviderHealthSetting port={port} onChanged={vi.fn()} onFailed={vi.fn()} />);
-  await screen.findByText(t("无法读取检测设置，请检查连接或权限后重试。"));
+  await screen.findByText(t("models.cannot_read_check_settings_check"));
   expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(true);
-  expect(screen.queryByText(t("当前服务器不支持自动检测，请升级服务器后重试。"))).toBeNull();
+  expect(screen.queryByText(t("models.this_server_does_not_support"))).toBeNull();
 });
 
 it("requires opt-in, persists both switch directions and stops probes after disabling", async () => {

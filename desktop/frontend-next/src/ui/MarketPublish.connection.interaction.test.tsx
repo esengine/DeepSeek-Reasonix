@@ -25,12 +25,12 @@ describe("my packages connection lifetime", () => {
     const view = render(<MyPackages port={port} onInstalled={() => {}} />);
     const row = (await screen.findByText(first.name)).closest("li")!;
     const other = screen.getByText(second.name).closest("li")!;
-    await userEvent.click(within(row).getByRole("button", { name: t("提交审核") }));
+    await userEvent.click(within(row).getByRole("button", { name: t("ext.submit_for_review") }));
     expect((await within(row).findByRole("alert")).textContent).toBe("review unavailable");
     expect(within(other).queryByRole("alert")).toBeNull();
-    await userEvent.click(within(row).getByRole("button", { name: t("提交审核") }));
+    await userEvent.click(within(row).getByRole("button", { name: t("ext.submit_for_review") }));
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(within(row).getByRole<HTMLButtonElement>("button", { name: t("提交中…") }).disabled).toBe(true);
+    expect(within(row).getByRole<HTMLButtonElement>("button", { name: t("ext.submitting") }).disabled).toBe(true);
     await act(async () => fail(new Error("retry unavailable")));
     expect(within(row).getByRole("alert").textContent).toBe("retry unavailable");
     view.rerender(<MyPackages port={next} onInstalled={() => {}} />);

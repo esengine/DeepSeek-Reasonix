@@ -34,8 +34,8 @@ function draw(port: AgentPort, onChanged = vi.fn()) {
 async function removePackage() {
   await screen.findByText("review-kit");
   const pane = within(row() as HTMLElement);
-  await userEvent.click(pane.getByRole("button", { name: t("移除 {name}", { name: "review-kit" }) }));
-  await userEvent.click(pane.getByRole("button", { name: t("删除") }));
+  await userEvent.click(pane.getByRole("button", { name: t("common.remove_name", { name: "review-kit" }) }));
+  await userEvent.click(pane.getByRole("button", { name: t("common.delete") }));
 }
 
 function deferReload(port: AgentPort) {
@@ -62,8 +62,8 @@ it.each(["zh", "en"])("retains an applied removal's reload warning after its row
   expect(note.getAttribute("role")).toBe("status");
   expect(note.getAttribute("data-s")).toBe("bad");
   expect(onChanged).toHaveBeenCalledTimes(1);
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
-  expect(await screen.findByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
+  expect(await screen.findByText(t("app.live_the_next_turn_runs"))).toBeTruthy();
   expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
   expect(onChanged).toHaveBeenCalledTimes(2);
 });
@@ -75,18 +75,18 @@ it.each(["success", "failure"])("does not let an older manual reload %s overwrit
   const old = deferReload(port);
   const onChanged = vi.fn();
   render(draw(port, onChanged));
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
   await removePackage();
   expect(screen.getByText(t(warning, { reason: refusal }))).toBeTruthy();
   const current = deferReload(port);
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
   await act(async () => old.settle(outcome));
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重载中") }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("app.reloading") }).disabled).toBe(true);
   expect(screen.queryByText("older reload failed")).toBeNull();
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(screen.queryByText(t("app.live_the_next_turn_runs"))).toBeNull();
   expect(onChanged).toHaveBeenCalledTimes(1);
   await act(async () => current.finish());
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("app.live_the_next_turn_runs"))).toBeTruthy();
   expect(onChanged).toHaveBeenCalledTimes(2);
 });
 
@@ -103,7 +103,7 @@ it.each([undefined, refusal])("does not report a previous connection's applied r
   await act(async () => finish({ ok: true, status: "done", applied: true, reloadError }));
   expect(row()).not.toBeNull();
   expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(screen.queryByText(t("app.live_the_next_turn_runs"))).toBeNull();
   expect(onChanged).not.toHaveBeenCalled();
 });
 
@@ -113,7 +113,7 @@ it.each(["success", "denied"])("does not report a reload warning for a removal w
   render(draw(port));
   await removePackage();
   expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t(outcome === "denied" ? "重载运行时" : "已生效") }).disabled).toBe(false);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t(outcome === "denied" ? "app.reload_runtime" : "app.live") }).disabled).toBe(false);
   if (outcome === "denied") expect(screen.getByRole("alert").textContent).toBe("removal denied");
   else expect(row()).toBeNull();
 });
@@ -134,7 +134,7 @@ it.each(["zh", "en"])("replaces a previous reload warning when removal applies s
   await removePackage();
   expect(row()).toBeNull();
   expect(screen.queryByText(t(warning, { reason: refusal }))).toBeNull();
-  const note = screen.getByText(t("已生效，下一轮开始用新的扩展"));
+  const note = screen.getByText(t("app.live_the_next_turn_runs"));
   expect(note.getAttribute("role")).toBe("status");
   expect(note.getAttribute("data-s")).toBe("ok");
   expect(changed).toHaveBeenCalledTimes(2);
@@ -145,13 +145,13 @@ it.each(["success", "failure"])("ignores an older manual reload's %s after remov
   const old = deferReload(port);
   const changed = vi.fn();
   render(draw(port, changed));
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
   await removePackage();
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
-  expect(screen.queryByRole("button", { name: t("重载中") })).toBeNull();
+  expect(screen.getByText(t("app.live_the_next_turn_runs"))).toBeTruthy();
+  expect(screen.queryByRole("button", { name: t("app.reloading") })).toBeNull();
   await act(async () => old.settle(outcome));
   expect(screen.queryByText("older reload failed")).toBeNull();
-  expect(screen.getByText(t("已生效，下一轮开始用新的扩展"))).toBeTruthy();
+  expect(screen.getByText(t("app.live_the_next_turn_runs"))).toBeTruthy();
   expect(changed).toHaveBeenCalledTimes(1);
 });
 
@@ -162,14 +162,14 @@ it.each(["denied", "no-op", "rejected", "export"])("keeps a previous reload fail
   if (operation === "no-op") vi.spyOn(port, "removePlugin").mockResolvedValue({ ok: true, status: "done", applied: false });
   if (operation === "rejected") vi.spyOn(port, "removePlugin").mockRejectedValue(new Error("removal failed"));
   render(draw(port));
-  await userEvent.click(screen.getByRole("button", { name: t("重载运行时") }));
+  await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
   expect(await screen.findByText("previous reload failed")).toBeTruthy();
   if (operation === "export") {
     await screen.findByText("review-kit");
-    await userEvent.click(within(row() as HTMLElement).getByRole("button", { name: t("导出") }));
+    await userEvent.click(within(row() as HTMLElement).getByRole("button", { name: t("ext.export") }));
   } else await removePackage();
   expect(screen.getByText("previous reload failed").getAttribute("data-s")).toBe("bad");
-  expect(screen.queryByText(t("已生效，下一轮开始用新的扩展"))).toBeNull();
+  expect(screen.queryByText(t("app.live_the_next_turn_runs"))).toBeNull();
   expect(row()).not.toBeNull();
   if (operation === "denied") expect(screen.getByRole("alert").textContent).toBe("removal denied");
   if (operation === "rejected") expect(screen.getByRole("alert").textContent).toBe("removal failed");

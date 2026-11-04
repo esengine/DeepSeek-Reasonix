@@ -12,9 +12,9 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.setItem("rx-lang
 
 const account = { signedIn: true, user: { handle: "demo", email: "demo@example.com", label: "demo" } };
 const port = () => new MockPort() as unknown as AgentPort;
-const views = () => within(screen.getByRole("radiogroup", { name: t("社区市场") }));
+const views = () => within(screen.getByRole("radiogroup", { name: t("ext.community_market") }));
 const radio = (name: string) => views().getByRole<HTMLButtonElement>("radio", { name: t(name) });
-const nameInput = () => screen.getByRole("textbox", { name: new RegExp("^" + t("名称")) });
+const nameInput = () => screen.getByRole("textbox", { name: new RegExp("^" + t("common.name")) });
 
 describe("market author navigation keys", () => {
   it.each(["zh", "en"])("keeps one navigation Tab stop and enters the selected view in %s", async (language) => {
@@ -29,7 +29,7 @@ describe("market author navigation keys", () => {
     await userEvent.keyboard("{ArrowLeft}");
     expect(views().getAllByRole<HTMLButtonElement>("radio").filter((button) => button.tabIndex === 0)).toEqual([radio("发布")]);
     await userEvent.tab();
-    expect(document.activeElement).toBe(screen.getByRole("radio", { name: t("技能") }));
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: t("settings.skills") }));
     await userEvent.tab({ shift: true });
     expect(document.activeElement).toBe(radio("发布"));
   });

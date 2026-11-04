@@ -69,19 +69,19 @@ describe("usage is exact on every device", () => {
   it("lists each day's full count instead of leaving it to a hover", async () => {
     render(<Usage port={makePort()} />);
 
-    const table = await screen.findByRole("table", { name: t("每日明细") });
+    const table = await screen.findByRole("table", { name: t("usage.daily_details") });
     const row = table.querySelector<HTMLElement>('[data-day="2026-08-15"]');
     expect(row).toBeTruthy();
     expect(within(row!).getByText("2026-08-15")).toBeTruthy();
     expect(within(row!).getByText("1,234")).toBeTruthy();
     expect(within(row!).getByText("6")).toBeTruthy();
-    expect(screen.getByText(t("左右滚动查看"))).toBeTruthy();
+    expect(screen.getByText(t("usage.scroll_sideways_for_all_columns"))).toBeTruthy();
   });
 
   it("lists the newest day first, so the latest figures are in view without scrolling", async () => {
     render(<Usage port={makePort()} />);
 
-    const table = await screen.findByRole("table", { name: t("每日明细") });
+    const table = await screen.findByRole("table", { name: t("usage.daily_details") });
     const days = [...table.querySelectorAll<HTMLElement>("tbody tr")].map((row) => row.dataset.day);
     expect(days).toEqual(["2026-08-16", "2026-08-15"]);
   });
@@ -174,7 +174,7 @@ describe("a one-day window reads in hours", () => {
     render(<Usage port={port} />);
     await screen.findByText("2026-08-01 → 2026-08-31");
 
-    fireEvent.click(screen.getByRole("button", { name: t("今日") }));
+    fireEvent.click(screen.getByRole("button", { name: t("usage.today") }));
 
     const today = localToday();
     await waitFor(() => expect(port.usage).toHaveBeenLastCalledWith({ from: today, to: today }));
@@ -183,10 +183,10 @@ describe("a one-day window reads in hours", () => {
   it("draws the day's hours instead of a single point", async () => {
     const port = oneDayPort();
     render(<Usage port={port} />);
-    fireEvent.click(await screen.findByRole("button", { name: t("今日") }));
+    fireEvent.click(await screen.findByRole("button", { name: t("usage.today") }));
 
-    expect(await screen.findByRole("img", { name: t("每小时 tokens") })).toBeTruthy();
-    const table = await screen.findByRole("table", { name: t("每小时明细") });
+    expect(await screen.findByRole("img", { name: t("usage.hourly_tokens") })).toBeTruthy();
+    const table = await screen.findByRole("table", { name: t("usage.hourly_details") });
     const row = table.querySelector<HTMLElement>('[data-hour="09:00"]');
     expect(row).toBeTruthy();
     expect(within(row!).getByText("1,234")).toBeTruthy();
@@ -209,7 +209,7 @@ describe("a one-day window reads in hours", () => {
     };
     render(<Usage port={makePort({ usage: vi.fn().mockResolvedValue(empty) })} />);
 
-    const chart = await screen.findByRole("img", { name: t("每小时 tokens") });
+    const chart = await screen.findByRole("img", { name: t("usage.hourly_tokens") });
     const ticks = [...chart.querySelectorAll("text")]
       .map((node) => node.textContent)
       .filter((value) => value === "0" || value === "1" || value === "2");
@@ -221,12 +221,12 @@ describe("a one-day window reads in hours", () => {
     render(<Usage port={port} />);
     await screen.findByText("2026-08-01 → 2026-08-31");
 
-    fireEvent.click(screen.getByRole("button", { name: t("自定义") }));
-    fireEvent.change(screen.getByLabelText(t("开始日期")), { target: { value: "2026-08-16" } });
-    fireEvent.change(screen.getByLabelText(t("结束日期")), { target: { value: "2026-08-16" } });
-    fireEvent.click(screen.getByRole("button", { name: t("应用") }));
+    fireEvent.click(screen.getByRole("button", { name: t("common.custom") }));
+    fireEvent.change(screen.getByLabelText(t("usage.start_date")), { target: { value: "2026-08-16" } });
+    fireEvent.change(screen.getByLabelText(t("usage.end_date")), { target: { value: "2026-08-16" } });
+    fireEvent.click(screen.getByRole("button", { name: t("usage.apply") }));
 
-    expect(await screen.findByRole("table", { name: t("每小时明细") })).toBeTruthy();
+    expect(await screen.findByRole("table", { name: t("usage.hourly_details") })).toBeTruthy();
   });
 });
 
@@ -236,10 +236,10 @@ describe("usage can be asked for another window", () => {
     render(<Usage port={port} />);
     await screen.findByText("2026-08-01 → 2026-08-31");
 
-    fireEvent.click(screen.getByRole("button", { name: t("自定义") }));
-    fireEvent.change(screen.getByLabelText(t("开始日期")), { target: { value: "2026-08-05" } });
-    fireEvent.change(screen.getByLabelText(t("结束日期")), { target: { value: "2026-08-20" } });
-    fireEvent.click(screen.getByRole("button", { name: t("应用") }));
+    fireEvent.click(screen.getByRole("button", { name: t("common.custom") }));
+    fireEvent.change(screen.getByLabelText(t("usage.start_date")), { target: { value: "2026-08-05" } });
+    fireEvent.change(screen.getByLabelText(t("usage.end_date")), { target: { value: "2026-08-20" } });
+    fireEvent.click(screen.getByRole("button", { name: t("usage.apply") }));
 
     await waitFor(() => expect(port.usage).toHaveBeenLastCalledWith({ from: "2026-08-05", to: "2026-08-20" }));
   });
@@ -249,8 +249,8 @@ describe("usage can be asked for another window", () => {
     render(<Usage port={port} />);
     await screen.findByText("2026-08-01 → 2026-08-31");
 
-    fireEvent.click(screen.getByRole("button", { name: t("自然月") }));
-    fireEvent.change(screen.getByLabelText(t("选择月份")), { target: { value: "2026-08" } });
+    fireEvent.click(screen.getByRole("button", { name: t("usage.calendar_month") }));
+    fireEvent.change(screen.getByLabelText(t("usage.choose_month")), { target: { value: "2026-08" } });
 
     await waitFor(() => expect(port.usage).toHaveBeenLastCalledWith({ from: "2026-08-01", to: "2026-08-31" }));
   });
@@ -264,13 +264,13 @@ describe("usage can be asked for another window", () => {
     render(<Usage port={port} />);
     await screen.findByText("2026-08-01 → 2026-08-31");
 
-    fireEvent.click(screen.getByRole("button", { name: t("自定义") }));
-    fireEvent.change(screen.getByLabelText(t("开始日期")), { target: { value: "2024-01-01" } });
-    fireEvent.change(screen.getByLabelText(t("结束日期")), { target: { value: "2025-12-31" } });
-    fireEvent.click(screen.getByRole("button", { name: t("应用") }));
+    fireEvent.click(screen.getByRole("button", { name: t("common.custom") }));
+    fireEvent.change(screen.getByLabelText(t("usage.start_date")), { target: { value: "2024-01-01" } });
+    fireEvent.change(screen.getByLabelText(t("usage.end_date")), { target: { value: "2025-12-31" } });
+    fireEvent.click(screen.getByRole("button", { name: t("usage.apply") }));
 
     expect((await screen.findByRole("alert")).textContent).toContain("range must be between 1 and 365 days");
-    expect(screen.getByRole("button", { name: t("自定义") })).toBeTruthy();
-    expect(screen.getByLabelText(t("开始日期"))).toBeTruthy();
+    expect(screen.getByRole("button", { name: t("common.custom") })).toBeTruthy();
+    expect(screen.getByLabelText(t("usage.start_date"))).toBeTruthy();
   });
 });

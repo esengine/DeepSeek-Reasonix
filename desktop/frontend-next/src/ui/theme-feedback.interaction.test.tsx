@@ -10,8 +10,8 @@ import type { AgentPort, ThemeImport as ImportResult } from "../port/port";
 const result: ImportResult = {
   pack: { id: "returned-id", name: "Dusk", tokens: {} }, ignored: ["unused.png"],
 };
-const imported = () => t("已导入「{name}」。", { name: "Dusk" }) + " " + t("未读取：{names}", { names: "unused.png" });
-const folderNote = (path: string) => t("主题目录：{path}", { path });
+const imported = () => t("look.imported_name", { name: "Dusk" }) + " " + t("look.not_read_names", { names: "unused.png" });
+const folderNote = (path: string) => t("look.themes_folder_path", { path });
 
 afterEach(() => {
   cleanup();
@@ -53,7 +53,7 @@ it.each(["success", "failure"].flatMap((importOutcome) => [
   vi.spyOn(port, "openThemeFolder").mockReturnValue(folder.promise);
   vi.spyOn(port, "importTheme").mockReturnValue(upload.promise);
   const { onImported, onUse } = draw(port);
-  await userEvent.click(screen.getByRole("button", { name: t("打开主题目录") }));
+  await userEvent.click(screen.getByRole("button", { name: t("look.open_themes_folder") }));
   choose();
   if (timing === "pending") {
     await act(async () => settleFolder(folder, outcome));
@@ -68,11 +68,11 @@ it.each(["success", "failure"].flatMap((importOutcome) => [
     expect(screen.getByText(imported())).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(onImported).toHaveBeenCalledTimes(1);
-    await userEvent.click(screen.getByRole("button", { name: t("立即使用") }));
+    await userEvent.click(screen.getByRole("button", { name: t("look.use_now") }));
     expect(onUse).toHaveBeenCalledExactlyOnceWith("returned-id");
   } else {
     expect(screen.getByRole("alert").textContent).toBe("current import failed");
-    expect(screen.queryByRole("button", { name: t("立即使用") })).toBeNull();
+    expect(screen.queryByRole("button", { name: t("look.use_now") })).toBeNull();
     expect(onImported).not.toHaveBeenCalled();
     expect(onUse).not.toHaveBeenCalled();
   }
@@ -85,7 +85,7 @@ it.each(["success", "failure"])("holds the folder action during an import and re
   const open = vi.spyOn(port, "openThemeFolder").mockResolvedValue("/current/themes");
   draw(port);
   choose();
-  const folder = screen.getByRole<HTMLButtonElement>("button", { name: t("打开主题目录") });
+  const folder = screen.getByRole<HTMLButtonElement>("button", { name: t("look.open_themes_folder") });
   expect(folder.disabled).toBe(true);
   await userEvent.click(folder);
   expect(open).not.toHaveBeenCalled();
@@ -103,7 +103,7 @@ it.each(["success", "failure"])("retains the latest folder result when an older 
   const current = pending<string>();
   vi.spyOn(port, "openThemeFolder").mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
   draw(port);
-  const button = screen.getByRole("button", { name: t("打开主题目录") });
+  const button = screen.getByRole("button", { name: t("look.open_themes_folder") });
   await userEvent.click(button);
   await userEvent.click(button);
   await act(async () => current.resolve("/current/themes"));
@@ -121,7 +121,7 @@ it("exposes the complete import result and folder result as status updates", asy
   await screen.findByText(imported());
   expect(screen.getByRole("status").getAttribute("aria-atomic")).toBe("true");
   expect(screen.getByRole("status").textContent).toBe(imported());
-  await userEvent.click(screen.getByRole("button", { name: t("打开主题目录") }));
+  await userEvent.click(screen.getByRole("button", { name: t("look.open_themes_folder") }));
   expect(screen.getByRole("status").textContent).toBe(folderNote("/current/themes"));
 });
 
@@ -129,7 +129,7 @@ it("reports a current folder failure through the existing alert", async () => {
   const port = new MockPort() as unknown as AgentPort;
   vi.spyOn(port, "openThemeFolder").mockRejectedValue(new Error("current folder request failed"));
   draw(port);
-  await userEvent.click(screen.getByRole("button", { name: t("打开主题目录") }));
+  await userEvent.click(screen.getByRole("button", { name: t("look.open_themes_folder") }));
   expect(screen.getByRole("alert").textContent).toBe("current folder request failed");
 });
 
@@ -139,7 +139,7 @@ it("blocks same-turn duplicate selections and folder reveal before the busy rend
   const take = vi.spyOn(port, "importTheme").mockReturnValue(upload.promise);
   const reveal = vi.spyOn(port, "openThemeFolder").mockResolvedValue("/current/themes");
   draw(port);
-  const folder = screen.getByRole("button", { name: t("打开主题目录") });
+  const folder = screen.getByRole("button", { name: t("look.open_themes_folder") });
   act(() => {
     choose();
     choose();

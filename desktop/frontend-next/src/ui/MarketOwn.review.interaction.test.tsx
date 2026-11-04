@@ -41,8 +41,8 @@ it.each(["zh", "en"].flatMap((lang) => ["success", "failure"].map((outcome) => (
       .mockImplementationOnce(async (slug) => { await next.promise; return real(slug); });
     render(<MyPackages port={port} onInstalled={() => {}} />);
     const rowOf = async (name: string) => (await screen.findByText(name)).closest("li")!;
-    const review = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("提交审核") });
-    const sending = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("提交中…") });
+    const review = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("ext.submit_for_review") });
+    const sending = (row: HTMLElement) => within(row).getByRole<HTMLButtonElement>("button", { name: t("ext.submitting") });
 
     await userEvent.click(review(await rowOf(first.name)));
     await userEvent.click(review(await rowOf(second.name)));
@@ -50,7 +50,7 @@ it.each(["zh", "en"].flatMap((lang) => ["success", "failure"].map((outcome) => (
     expect(submit.mock.calls).toEqual([[first.slug]]);
     expect(sending(await rowOf(first.name)).disabled).toBe(true);
     expect(review(await rowOf(second.name)).disabled).toBe(true);
-    expect(within(await rowOf(second.name)).getByRole<HTMLButtonElement>("button", { name: t("安装") }).disabled).toBe(false);
+    expect(within(await rowOf(second.name)).getByRole<HTMLButtonElement>("button", { name: t("ext.install") }).disabled).toBe(false);
 
     await act(async () => {
       if (outcome === "success") pending.resolve();

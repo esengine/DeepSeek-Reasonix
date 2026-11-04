@@ -8,5 +8,5 @@ it("never promotes a listing into a verified model or an unknown wallet into zer
     expect(modelHealthNote({ connection: "unknown", wallet, checkedAt: 1 })).not.toContain(t("余额不足，请充值后重试"));
   }
   expect(modelHealthNote({ connection: "rate_limited", wallet: "unsupported", checkedAt: 1 })).toContain(t("请求暂时被限流，请稍后重试"));
-  expect(modelHealthNote({ connection: "future_state", wallet: "future_state", checkedAt: 1 })).toBe(t("连接状态尚未确认"));
+  expect(modelHealthNote({ connection: "future_state", wallet: "future_state", checkedAt: 1 })).toBe(t("models.connection_status_unconfirmed"));
 });

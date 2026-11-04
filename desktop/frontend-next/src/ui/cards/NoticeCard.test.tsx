@@ -43,7 +43,7 @@ describe("a notice card", () => {
   });
   it("says its severity to a screen reader and draws it as a glyph, not a header strip", () => {
     const box = draw();
-    expect(box.querySelector(".sr-only")?.textContent).toBe(`${t("警告")}：`);
+    expect(box.querySelector(".sr-only")?.textContent).toBe(`${t("chat.warning")}：`);
     expect(box.querySelector(".nb-ic")).not.toBeNull();
     expect(box.querySelector(".hl, .tag, .find")).toBeNull();
     expect(draw({ level: "info" }).querySelector(".nb-dot")).not.toBeNull();
@@ -130,7 +130,7 @@ describe("a coded notice with a payload", () => {
   it("words the dormant permission rules from their payload and draws no raw payload line", () => {
     const detail = '{"rules":[{"list":"ask","rule":"rm","tool":"rm"},{"list":"deny","rule":"git reset","tool":"git reset"}]}';
     const box = draw({ level: "warn", code: "permission_rules_dormant", text: "Permission rules that name no tool match nothing", detail });
-    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("有 {n} 条权限规则没有对应的工具，匹配不到任何调用，因此起不到限制作用（如「{list}」里的 {rule}）；到「设置 → 权限」里删除或改写，命令要写成 Bash(命令:*)", { n: 2, list: t("询问"), rule: "rm" }));
+    expect(box.querySelector(".notice-bar .t")?.textContent).toBe(t("有 {n} 条权限规则没有对应的工具，匹配不到任何调用，因此起不到限制作用（如「{list}」里的 {rule}）；到「设置 → 权限」里删除或改写，命令要写成 Bash(命令:*)", { n: 2, list: t("safety.ask"), rule: "rm" }));
     expect(box.querySelector(".notice-bar .nwhy")).toBeNull();
     const garbled = draw({ level: "warn", code: "permission_rules_dormant", text: "Permission rules that name no tool match nothing", detail: "garbled" });
     expect(garbled.querySelector(".notice-bar .t")?.textContent).toContain("match nothing");

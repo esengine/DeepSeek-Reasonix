@@ -40,7 +40,7 @@ it("keeps installed choices when their refresh cannot be read and recovers on th
   await userEvent.click(screen.getByRole("button", { name: /Dusk/ }));
   expect(screen.getByRole("button", { name: /Dusk/ })).toBeTruthy();
   expect((await screen.findByRole("alert")).textContent).toBe(unread.message);
-  expect(screen.queryByText(t("尚未安装主题。选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。"))).toBeNull();
+  expect(screen.queryByText(t("look.no_themes_installed_choose_a"))).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: /默认/ }));
   await waitFor(() => expect(themes).toHaveBeenCalledTimes(3));
   await waitFor(() => expect(screen.queryByRole("button", { name: /Dusk/ })).toBeNull());

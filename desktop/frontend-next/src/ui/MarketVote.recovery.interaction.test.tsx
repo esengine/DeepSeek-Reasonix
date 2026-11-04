@@ -20,7 +20,7 @@ function deferred<T>() {
 }
 
 const known: Vote = { signedIn: true, value: 1, upCount: 8, downCount: 2, approvalRate: 0.8, canVote: true };
-const up = () => screen.getByRole<HTMLButtonElement>("button", { name: new RegExp(t("赞")) });
+const up = () => screen.getByRole<HTMLButtonElement>("button", { name: new RegExp(t("ext.upvote")) });
 
 async function fixture(failure: Error = new Error("registry unavailable")) {
   const port = new MockPort() as unknown as AgentPort;
@@ -41,11 +41,11 @@ async function fixture(failure: Error = new Error("registry unavailable")) {
 it.each(["zh", "en"])("keeps a failed vote lookup unknown and retryable in %s", async (lang) => {
   localStorage.setItem(STORAGE, lang); boot();
   const f = await fixture();
-  expect(screen.queryByRole("button", { name: t("登录后评价") })).toBeNull();
+  expect(screen.queryByRole("button", { name: t("ext.sign_in_to_vote") })).toBeNull();
   expect(screen.getByRole("alert").textContent).toBe("registry unavailable");
-  expect(screen.getByText(t("好评 {pct}%（{n} 票）", { pct: 75, n: 4 }))).toBeTruthy();
+  expect(screen.getByText(t("ext.pct_positive_n_votes", { pct: 75, n: 4 }))).toBeTruthy();
   expect(up().disabled).toBe(true);
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("重试") }).disabled).toBe(false);
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: t("common.retry") }).disabled).toBe(false);
   expect(f.cast).not.toHaveBeenCalled();
   expect(f.onSignIn).not.toHaveBeenCalled();
 });
@@ -149,24 +149,24 @@ it.each(["zh", "en"])("offers sign-in after a typed signed-out vote write in %s"
   localStorage.setItem(STORAGE, lang); boot();
   const f = await fixture();
   f.read.mockResolvedValueOnce(known);
-  await userEvent.click(screen.getByRole("button", { name: t("重试") }));
+  await userEvent.click(screen.getByRole("button", { name: t("common.retry") }));
   await waitFor(() => expect(up().disabled).toBe(false));
   const write = deferred<Vote>();
   f.cast.mockImplementationOnce(() => write.promise);
   await userEvent.click(up());
   expect(up().disabled).toBe(true);
-  expect(screen.queryByRole("button", { name: t("登录后评价") })).toBeNull();
+  expect(screen.queryByRole("button", { name: t("ext.sign_in_to_vote") })).toBeNull();
   const failure = new HttpError(401, "expired session", { code: "market.signed_out" });
   await act(async () => write.reject(failure));
   expect(screen.getByRole("alert").textContent).toBe(reason(failure));
   expect(up().disabled).toBe(true);
   expect(up().getAttribute("aria-pressed")).toBe("false");
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: new RegExp(t("踩")) }).disabled).toBe(true);
-  expect(screen.getByText(t("好评 {pct}%（{n} 票）", { pct: 80, n: 10 }))).toBeTruthy();
-  expect(screen.queryByRole("button", { name: t("重试") })).toBeNull();
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: new RegExp(t("ext.downvote")) }).disabled).toBe(true);
+  expect(screen.getByText(t("ext.pct_positive_n_votes", { pct: 80, n: 10 }))).toBeTruthy();
+  expect(screen.queryByRole("button", { name: t("common.retry") })).toBeNull();
   await userEvent.click(up());
   expect(f.cast).toHaveBeenCalledTimes(1);
-  const signIn = screen.getByRole("button", { name: t("登录后评价") });
+  const signIn = screen.getByRole("button", { name: t("ext.sign_in_to_vote") });
   signIn.focus();
   await userEvent.keyboard("{Enter}");
   expect(f.onSignIn).toHaveBeenCalledTimes(1);

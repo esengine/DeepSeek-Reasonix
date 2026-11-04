@@ -68,16 +68,16 @@ it.each(["context", "command"].flatMap((kind) =>
     expect(pane.getAllByText("Persistent skill")).toHaveLength(1);
   };
   expectRows([`First ${kind}`, `Second ${kind}`, "Tail hook"]);
-  await userEvent.click(pane.getByRole("button", { name: t("移除 {name}", { name: pkg.name }) }));
-  expect(pane.getByRole("button", { name: t("取消") })).toBeTruthy();
+  await userEvent.click(pane.getByRole("button", { name: t("common.remove_name", { name: pkg.name }) }));
+  expect(pane.getByRole("button", { name: t("common.cancel") })).toBeTruthy();
 
   const refresh = async (next: PluginHook[], expected: string[]) => {
     hooks = next;
     await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="extensions.reload"]')!);
     await waitFor(() => expectRows(expected));
     expect(document.querySelector('[data-extension-name="hook-kit"]')).toBe(element);
-    expect(pane.getByRole("button", { name: t("取消") })).toBeTruthy();
-    expect(pane.getByRole<HTMLButtonElement>("button", { name: t("导出") }).disabled).toBe(false);
+    expect(pane.getByRole("button", { name: t("common.cancel") })).toBeTruthy();
+    expect(pane.getByRole<HTMLButtonElement>("button", { name: t("ext.export") }).disabled).toBe(false);
     expect(pane.getByRole<HTMLButtonElement>("switch").disabled).toBe(false);
   };
   if (change === "remove") await refresh([tail], ["Tail hook"]);

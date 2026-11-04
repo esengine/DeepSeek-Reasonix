@@ -15,9 +15,9 @@ afterEach(() => {
   boot();
 });
 
-const nameField = () => screen.getByLabelText<HTMLInputElement>(new RegExp("^" + t("名称")));
-const sourceField = () => screen.getByLabelText<HTMLInputElement>(new RegExp("^" + t("来源地址")));
-const types = () => within(screen.getByRole("radiogroup", { name: t("类型") }));
+const nameField = () => screen.getByLabelText<HTMLInputElement>(new RegExp("^" + t("common.name")));
+const sourceField = () => screen.getByLabelText<HTMLInputElement>(new RegExp("^" + t("ext.source_address")));
+const types = () => within(screen.getByRole("radiogroup", { name: t("common.type") }));
 const radio = (name: string) => types().getByRole<HTMLButtonElement>("radio", { name: t(name) });
 
 function draw(lang = "zh") {
@@ -52,7 +52,7 @@ it("publishes the kind chosen entirely with the keyboard", async () => {
   const source = "https://github.com/demo/notes-kit/tree/" + "a".repeat(40) + "/theme";
   await userEvent.keyboard(source);
   for (let i = 0; i < 6; i++) await userEvent.tab();
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("提交审核") }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: t("ext.submit_for_review") }));
   await userEvent.keyboard("{Enter}");
   expect(publish).toHaveBeenCalledExactlyOnceWith({
     kind: "theme", name: "notes-kit", source, summary: "", description: "", repoUrl: "", version: "", tags: [], visibility: "public",

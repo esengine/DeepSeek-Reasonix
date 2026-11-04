@@ -28,7 +28,7 @@ async function run(lang: "zh" | "en") {
     diagnoseNetwork: async () => probes,
   } as unknown as AgentPort;
   render(<Network port={port} />);
-  await userEvent.click(await screen.findByRole("button", { name: t("测试已保存配置") }));
+  await userEvent.click(await screen.findByRole("button", { name: t("models.test_saved_settings") }));
 }
 
 it("words each probe step in English from its code, with the pieces filled in", async () => {
