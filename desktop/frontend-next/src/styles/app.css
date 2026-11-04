@@ -10,7 +10,7 @@
     height: calc(100dvh / var(--zoom, 1)); overflow: hidden;
   }
 
-  [data-platform="darwin"] body { -webkit-font-smoothing: antialiased }
+  body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale }
   body { font-synthesis-weight: none }
 
   :lang(zh) :is(.lbl, .dgrp-h, .side .lbl) {

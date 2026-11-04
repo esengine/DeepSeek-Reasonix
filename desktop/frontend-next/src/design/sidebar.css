@@ -1,7 +1,7 @@
-.rail .studio-new-task { margin-top: 8px; height: 32px; padding: 0 12px; gap: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); }
+.rail .studio-new-task { margin-top: 8px; height: 32px; padding: 0 12px; gap: 8px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); }
 .rail .studio-new-task kbd, .rail .studio-search kbd { margin-left: auto; color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--ui); }
 .rail .studio-new-task > span { color: var(--text); font-size: inherit; }
-.rail .studio-search { margin: 6px 0 4px; height: 30px; padding: 0 10px; gap: 8px; border: 1px solid var(--hair); border-radius: 7px; background: var(--surface); color: var(--faint); font: var(--w-reg) var(--fs-ui) var(--ui); }
+.rail .studio-search { margin: 6px 0 4px; height: 30px; padding: 0 10px; gap: 8px; border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--surface); color: var(--faint); font: var(--w-reg) var(--fs-ui) var(--ui); }
 .rail .studio-label { flex: 1; text-align: left; font-weight: var(--w-reg); }
 .rail .studio-new-task { border: 1px solid var(--border); box-shadow: none; box-sizing: border-box; width: 100%; }
 .rail .studio-search { box-sizing: border-box; width: 100%; border: 1px solid var(--hair); }
@@ -13,18 +13,18 @@
 .rail .studio-brand-lockup { gap: 8px; }
 .rail .studio-brand-logo { margin-left: -9px; }
 .rail .studio-brand-sub { margin-top: 6px; }
-.rail .studio-collapse { margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); display: inline-grid; place-items: center; flex: none; cursor: pointer; }
+.rail .studio-collapse { margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: inline-grid; place-items: center; flex: none; cursor: pointer; }
 .rail .studio-collapse:hover { background: var(--overlay); color: var(--text); }
 .rail .studio-collapse .studio-icon { width: 16px; height: 16px; }
 .rail .studio-new-task, .rail .studio-search { margin-inline: 0; }
 .rail .projects-header { height: 30px; min-height: 30px; padding: 0 2px 0 4px; margin: 4px 0 0; display: flex; align-items: center; }
 .rail .projects-tabs { display: flex; align-items: center; gap: 2px; width: 100%; }
-.rail .vtabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--overlay); }
-.rail .vtab { height: 22px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer; }
+.rail .vtabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-sm); background: var(--overlay); }
+.rail .vtab { height: 22px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer; }
 .rail .vtab[aria-pressed="true"] { background: var(--raised); color: var(--text); font-weight: var(--w-med); }
 .rail .projects-spacer { flex: 1; }
-.rail .session-filter-trigger { height: 24px; padding: 0 8px; gap: 3px; border-radius: 7px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--muted); background: transparent; }
-.rail .projects-add { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); display: inline-grid; place-items: center; flex: none; }
+.rail .session-filter-trigger { height: 24px; padding: 0 8px; gap: 3px; border-radius: var(--r-sm); font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--muted); background: transparent; }
+.rail .projects-add { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: inline-grid; place-items: center; flex: none; }
 .rail .projects-add:hover { background: var(--overlay); color: var(--text); }
 .rail .vtabs { flex: none; width: auto; }
 .rail .vtab { flex: none; width: auto; }

@@ -37,7 +37,7 @@
 .activity-body .hl .nm { order: -9; flex: none; min-width: 0; max-width: none; overflow: visible; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.3 var(--ui); white-space: nowrap; }
 .activity-body .hl .arg { order: -8; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-reg) var(--fs-meta)/1.3 var(--mono); }
 .activity-body .hl :is(.src, .who, .tag) { order: -7; flex: none; }
-.activity-body .hl .tag { padding: 0 5px; border-radius: var(--r-xs); background: var(--overlay); color: var(--faint); font: var(--w-reg) var(--fs-micro)/16px var(--mono); letter-spacing: 0; text-transform: none; }
+.activity-body .hl .tag { padding: 0 5px; border-radius: var(--r-xs); background: var(--overlay); color: var(--faint); font: var(--w-reg) var(--fs-micro)/calc(16px * var(--fs-scale, 1)) var(--mono); letter-spacing: 0; text-transform: none; }
 .activity-body .cost { order: -6; margin-left: auto; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1 var(--ui); }
 .activity-body .tool-delta { order: -6; margin-left: auto; font: var(--w-reg) var(--fs-micro)/1 var(--ui); }
 .activity-body .tool-delta b { color: var(--add); font-weight: inherit; }

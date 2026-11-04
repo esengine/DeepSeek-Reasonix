@@ -1,29 +1,29 @@
 .ds-row, .ds-proj { --ds-ui: var(--ui, 'Inter Studio', 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif); --ds-mono: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace); }
-.ds-row { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 14px; border-radius: 7px; background: transparent; color: var(--muted); font: 500 13px var(--ds-ui); min-width: 0; box-sizing: border-box; }
+.ds-row { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 14px; border-radius: var(--r-sm); background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-ui) var(--ds-ui); min-width: 0; box-sizing: border-box; }
 .ds-row[data-chk] { padding-left: 12px; }
 .ds-row[data-hover] { background: color-mix(in srgb, var(--overlay) 60%, transparent); }
 .ds-row[data-on] { background: var(--overlay); }
-.ds-row[data-on], .ds-row[data-unread] { color: var(--text); font-weight: 600; }
+.ds-row[data-on], .ds-row[data-unread] { color: var(--text); font-weight: var(--w-med); }
 .ds-lead { width: 14px; display: flex; justify-content: center; flex: none; }
 .ds-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text); flex: none; }
 .ds-row[data-run="running"] .ds-dot { background: var(--net); }
 .ds-row[data-run="halt"] .ds-dot { background: var(--warn); }
 .ds-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ds-title mark { background: color-mix(in srgb, var(--warn) 22%, transparent); color: inherit; border-radius: 5px; padding: 0 1px; }
-.ds-row .ds-meta, .ds-meta { font: 500 11px var(--ds-ui); font-variant-numeric: tabular-nums; color: var(--faint); white-space: nowrap; }
+.ds-title mark { background: color-mix(in srgb, var(--warn) 22%, transparent); color: inherit; border-radius: var(--r-xs); padding: 0 1px; }
+.ds-row .ds-meta, .ds-meta { font: var(--w-reg) var(--fs-micro) var(--ds-ui); font-variant-numeric: tabular-nums; color: var(--faint); white-space: nowrap; }
 .ds-row[data-run="running"] .ds-meta { color: var(--net); }
 .ds-row[data-run="halt"] .ds-meta { color: var(--warn-ink); }
 .ds-pin { display: flex; color: var(--faint); }
-.ds-tree { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px; border-radius: 99px; border: 1px solid var(--border); font: 500 11px var(--ds-mono); color: var(--faint); }
+.ds-tree { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px; border-radius: var(--r-pill); border: 1px solid var(--border); font: var(--w-reg) var(--fs-micro) var(--ds-mono); color: var(--faint); }
 .ds-acts { display: flex; margin-right: -6px; }
-.ds-chk { width: 15px; height: 15px; flex: none; border-radius: 5px; border: 1px solid var(--border); background: var(--raised); color: var(--accent-fg); display: grid; place-items: center; }
+.ds-chk { width: 15px; height: 15px; flex: none; border-radius: var(--r-xs); border: 1px solid var(--border); background: var(--raised); color: var(--accent-fg); display: grid; place-items: center; }
 .ds-chk[data-on] { border-color: var(--accent); background: var(--accent); }
-.ds-proj { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 6px; border-radius: 7px; font: 600 13px var(--ds-ui); color: var(--text); box-sizing: border-box; }
+.ds-proj { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 6px; border-radius: var(--r-sm); font: var(--w-med) var(--fs-ui) var(--ds-ui); color: var(--text); box-sizing: border-box; }
 .ds-proj[data-hover] { background: color-mix(in srgb, var(--overlay) 60%, transparent); }
 .ds-chev { display: flex; color: var(--faint); }
 .ds-folder { display: flex; color: var(--muted); }
-.ds-host { font: 500 11px var(--ds-mono); color: var(--faint); }
-.ds-status { font: 500 11px var(--ds-ui); color: var(--faint); }
+.ds-host { font: var(--w-reg) var(--fs-micro) var(--ds-mono); color: var(--faint); }
+.ds-status { font: var(--w-reg) var(--fs-micro) var(--ds-ui); color: var(--faint); }
 .ds-status[data-kind="connecting"] { color: var(--warn-ink); }
 .ds-status[data-kind="offline"] { color: var(--err-ink); }
 .ds-pacts { display: flex; }
@@ -37,7 +37,7 @@
 .ds-row:has(> .session-select) > .ds-lead { display: none; }
 .ds-row > .session-select { margin: 0; flex: none; }
 .ds-row > .sessedit { flex: 1; min-width: 0; }
-.ds-row .ds-more { display: none; width: 28px; height: 28px; margin-right: -6px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); place-items: center; flex: none; cursor: pointer; }
+.ds-row .ds-more { display: none; width: 28px; height: 28px; margin-right: -6px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); place-items: center; flex: none; cursor: pointer; }
 .ds-row .ds-more:hover { background: var(--overlay); color: var(--text); }
 .ds-row .ds-more .studio-icon { width: 16px; height: 16px; }
 .ds-row:is(:hover, :focus-within) .ds-more { display: grid; }
@@ -46,17 +46,17 @@
 .ds-row .ds-pin { width: 12px; height: 12px; flex: none; }
 .ds-row .sessquick, .ds-row .sesspin-action { flex: none; display: none; }
 .ds-row:is(:hover, :focus-within) .sessquick, .ds-row:is(:hover, :focus-within) .sesspin-action { display: flex; }
-.ds-row .sessquick > button, .ds-row .sesspin-action { width: 24px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer; }
+.ds-row .sessquick > button, .ds-row .sesspin-action { width: 24px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); cursor: pointer; }
 .ds-row .sessquick > button:hover, .ds-row .sesspin-action:hover { background: var(--raised); color: var(--text); }
 .ds-row .sessquick > button:disabled, .ds-row .sesspin-action:disabled { opacity: .35; cursor: default; }
 .ds-row .sessquick .studio-icon, .ds-row .sesspin-action .studio-icon { width: 14px; height: 14px; }
-.ds-row .wsdel { flex: none; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--faint); opacity: 0; cursor: pointer; }
+.ds-row .wsdel { flex: none; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); opacity: 0; cursor: pointer; }
 .ds-row:is(:hover, :focus-within) .wsdel, .ds-row .wsdel:focus-visible { opacity: 1; }
 .ds-row .wsdel:hover { background: var(--overlay); color: var(--err-ink); }
-.ds-row.sesscopy { height: 28px; font-size: var(--fs-meta); font-weight: 500; }
+.ds-row.sesscopy { height: 28px; font-size: var(--fs-meta); font-weight: var(--w-reg); }
 .ds-row.sesscopy .ds-title { font-style: normal; color: var(--muted); }
 .ds-title em.sessarch { margin-left: 6px; font-style: normal; font-size: var(--fs-micro); color: var(--faint); }
-.ds-title mark.hit { background: color-mix(in srgb, var(--warn) 22%, transparent); color: inherit; border-radius: 5px; padding: 0 1px; }
+.ds-title mark.hit { background: color-mix(in srgb, var(--warn) 22%, transparent); color: inherit; border-radius: var(--r-xs); padding: 0 1px; }
 .ds-proj { position: relative; cursor: pointer; margin: 1px 0; }
 .ds-proj:hover { background: color-mix(in srgb, var(--overlay) 60%, transparent); }
 .ds-proj:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
@@ -64,14 +64,14 @@
 .ds-proj .ds-chev[data-open] { transform: none; }
 .ds-proj .ds-chev[data-leaf] { visibility: hidden; }
 .ds-proj .ds-folder { width: 14px; height: 14px; flex: none; color: var(--muted); }
-.ds-proj .wsmeta, .ds-proj .project-source { flex: none; font: 500 11px var(--ds-ui); color: var(--faint); }
+.ds-proj .wsmeta, .ds-proj .project-source { flex: none; font: var(--w-reg) var(--fs-micro) var(--ds-ui); color: var(--faint); }
 .ds-proj .wsacts { flex: none; display: flex; align-items: center; margin-left: auto; }
 .ds-proj .rowswap { display: flex; align-items: center; }
-.ds-proj .rowcount { font: 500 11px var(--ds-ui); color: var(--faint); font-variant-numeric: tabular-nums; }
+.ds-proj .rowcount { font: var(--w-reg) var(--fs-micro) var(--ds-ui); color: var(--faint); font-variant-numeric: tabular-nums; }
 .ds-proj .rowbtns { display: none; align-items: center; }
 .ds-proj:is(:hover, :focus-within) .rowbtns, .ds-proj:has([aria-expanded="true"]) .rowbtns { display: flex; }
 .ds-proj:is(:hover, :focus-within) .rowcount, .ds-proj:has([aria-expanded="true"]) .rowcount { display: none; }
-.ds-proj :is(.wsadd, .wsmore) { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; cursor: pointer; }
+.ds-proj :is(.wsadd, .wsmore) { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; cursor: pointer; }
 .ds-proj :is(.wsadd, .wsmore):hover { background: var(--overlay); color: var(--text); }
 .ds-proj :is(.wsadd, .wsmore) .studio-icon { width: 16px; height: 16px; }
 .ds-proj :is(.wsadd, .wsmore):disabled { opacity: .4; cursor: default; }

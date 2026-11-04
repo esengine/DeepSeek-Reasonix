@@ -12,7 +12,7 @@ describe("session and project rows follow the board", () => {
     expect(row).toMatch(/height:\s*30px/);
     expect(row).toMatch(/gap:\s*8px/);
     expect(row).toMatch(/padding:\s*0 8px 0 14px/);
-    expect(row).toMatch(/border-radius:\s*7px/);
+    expect(row).toMatch(/border-radius:\s*var\(--r-sm\)/);
     expect(rule(".ds-lead")).toMatch(/width:\s*14px/);
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-const SHEETS = import.meta.glob("./*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const SHEETS = import.meta.glob(["./*.css", "../design/*.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const line = (css: string, at: number) => css.slice(0, at).split("\n").length;
 
 describe("a stylesheet outside the token file", () => {

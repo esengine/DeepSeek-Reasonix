@@ -34,7 +34,7 @@
 .chrome :is(.thbtn, .top-action):active { transform: scale(.94); }
 .chrome :is(.thbtn, .top-action):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .chrome .top-action .view-label { display: none; }
-.chrome .view-count { position: absolute; top: 1px; right: 1px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-fg); font: var(--w-med) 9px/14px var(--ui); text-align: center; }
+.chrome .view-count { position: absolute; top: 1px; right: 1px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-fg); font: var(--w-med) var(--fs-micro) var(--ui); line-height: 14px; text-align: center; }
 .chrome .account-presence { display: none; }
 
 .railfoot { flex: none; display: flex; flex-direction: column; gap: 0; padding: 0 10px 10px; border: 0; background: transparent; }
@@ -66,7 +66,7 @@
 .studio-feedback > span:first-child { display: flex; flex: none; color: inherit; }
 .studio-feedback .studio-icon { width: 16px; height: 16px; }
 .studio-feedback b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; }
-.studio-feedback .fbk-badge { position: static; flex: none; min-width: 16px; height: 16px; padding: 0 5px; box-sizing: border-box; border: 0; border-radius: var(--r-pill); background: var(--text); color: var(--page); font: var(--w-semi) var(--fs-micro)/16px var(--ui); font-style: normal; text-align: center; box-shadow: none; }
+.studio-feedback .fbk-badge { position: static; flex: none; min-width: 16px; height: 16px; padding: 0 5px; box-sizing: border-box; border: 0; border-radius: var(--r-pill); background: var(--text); color: var(--page); font: var(--w-semi) var(--fs-micro)/calc(16px * var(--fs-scale, 1)) var(--ui); font-style: normal; text-align: center; box-shadow: none; }
 
 .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 420px; padding: 20px 24px 40px; text-align: center; }
 .hero .sym-mark { width: 44px; height: 44px; padding: 8px; box-sizing: border-box; display: block; border-radius: var(--r-md); background: var(--accent); color: var(--accent-fg); opacity: 1; filter: none; }

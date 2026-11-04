@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-const SHEETS = import.meta.glob("./*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const SHEETS = import.meta.glob(["./*.css", "../design/*.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
 const STEP = /\bcalc\([0-9.]+px \* var\(--fs-scale, 1\)\)/g;
 const LENGTH = /(?<![\w.-])-?[0-9]*\.?[0-9]+(px|pt)\b/;
