@@ -206,3 +206,16 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
   .workbench-tab[data-enter] { animation: none; }
 }
 .workbench-tabs .workbench-tab { flex: 0 0 auto; }
+
+.workbench-close-ask {
+  position: fixed; z-index: 70; width: 240px; box-sizing: border-box; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
+}
+.workbench-close-ask p { margin: 0 0 10px; color: var(--text); font: var(--w-semi) var(--fs-ui)/1.4 var(--ui); }
+.workbench-close-ask div { display: flex; gap: 6px; }
+.workbench-close-ask button {
+  height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised);
+  color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui); cursor: pointer;
+}
+.workbench-close-ask button:first-child { border-color: var(--text); background: var(--text); color: var(--surface); }
+.workbench-close-ask button:last-child { margin-left: auto; border-color: transparent; background: none; color: var(--muted); }

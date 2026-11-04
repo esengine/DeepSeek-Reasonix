@@ -15,8 +15,9 @@ import { WorkbenchStatus } from "./WorkbenchStatus";
 import { WorkbenchFileTree } from "./WorkbenchFileTree";
 import { WorkbenchChangesPage } from "./WorkbenchChangesPage";
 import { UnifiedDiff } from "./UnifiedDiff";
-import { leave, useEnteringTabs, useOverflowTabs, useSwitchFade } from "./workbench_motion";
+import { leave, slideAway, useEnteringTabs, useOpenSlide, useOverflowTabs, useSwitchFade } from "./workbench_motion";
 import { WorkbenchTabOverflow } from "./WorkbenchTabOverflow";
+import { WorkbenchCloseAsk } from "./WorkbenchCloseAsk";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
 import { useOnBump } from "./useOnBump";
 import { StudioIcon } from "./StudioIcon";
@@ -337,7 +338,7 @@ export function WorkbenchPanel({
   }, [filePath, readable, hasDocument, source]);
   const previewTab = previewable ? preview.tabFor(filePath) : undefined;
   const { open: openPreview, sync: syncPreview } = preview;
-  const { file, draft, diff, busy, error: fileFailed, errorCode, missing, setDraft, save, unsaved } = useWorkbenchFiles({
+  const { file, draft, diff, busy, error: fileFailed, errorCode, missing, setDraft, save, saveAt, dropAt, unsaved } = useWorkbenchFiles({
     port, workspaceRoot, repos: gitRepos.repos, path: !source || (hasDocument && mode === "document") ? "" : filePath, openPaths: openFiles, shown, refresh: JSON.stringify([changeKey, glance, running, wrote]),
     poll: (readable && mode === "read") || (previewable && mode === "preview"),
   });
@@ -365,6 +366,9 @@ export function WorkbenchPanel({
   // A strip wider than the column scrolls, and the tab being shown is always
   // brought into it: a selected tab nobody can see reads as a tab that closed.
   const canvas = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLElement>(null);
+  useOpenSlide(frame, shown);
+  const [asking, setAsking] = useState<{ path: string; anchor: HTMLElement } | null>(null);
   const tabKeys = surfaces.map(keyOf);
   const entering = useEnteringTabs(tabKeys);
   const [strip, overflow] = useOverflowTabs(tabKeys);
@@ -468,7 +472,7 @@ export function WorkbenchPanel({
     setTabMenu({ surface, x: pointed ? e.clientX : rect.left, y: pointed ? e.clientY : rect.bottom, anchor });
   };
   return (
-    <section className="workbench" aria-label={t("common.workbench")} data-action-keydown="layer.dismiss" onKeyDown={(e) => {
+    <section className="workbench" ref={frame} aria-label={t("common.workbench")} data-action-keydown="layer.dismiss" onKeyDown={(e) => {
       if (launcher && e.key === "Escape") { e.stopPropagation(); toggleLauncher(); newTab.current?.focus(); }
     }}>
       <header className="workbench-tabs">
@@ -554,7 +558,11 @@ export function WorkbenchPanel({
               aria-label={t("common.disable_name", { name: labelFor(surface) })}
               title={t("common.close")}
               disabled={closing}
-              onClick={(e) => leave(e.currentTarget.closest(".workbench-tab"), () => void close([surface]))}
+              onClick={(e) => {
+                const tab = e.currentTarget.closest(".workbench-tab");
+                if (surface.kind === "file" && unsaved.includes(surface.path)) setAsking({ path: surface.path, anchor: e.currentTarget });
+                else leave(tab, () => void close([surface]));
+              }}
             >
               <StudioIcon name="close" />
             </button>
@@ -581,7 +589,7 @@ export function WorkbenchPanel({
         </TooltipButton>
         {fullMode && <BrowserFullToggle {...fullMode} />}
         {onDismiss && (
-          <TooltipButton className="workbench-dismiss" data-action="workbench.dismiss" aria-label={t("app.close_workbench")} title={t("app.close_workbench")} onClick={onDismiss}>
+          <TooltipButton className="workbench-dismiss" data-action="workbench.dismiss" aria-label={t("app.close_workbench")} title={t("app.close_workbench")} onClick={() => slideAway(frame.current, onDismiss)}>
             <StudioIcon name="close" />
           </TooltipButton>
         )}
@@ -762,6 +770,11 @@ export function WorkbenchPanel({
         </aside>
       </div>
       {textMenu.menu}
+      {asking && (
+        <WorkbenchCloseAsk name={asking.path.split("/").at(-1) || asking.path} anchor={asking.anchor} onCancel={() => setAsking(null)}
+          onSave={async () => { const ok = await saveAt(asking.path); if (ok) { setAsking(null); void close([{ kind: "file", path: asking.path }]); } return ok; }}
+          onDrop={() => { dropAt(asking.path); setAsking(null); void close([{ kind: "file", path: asking.path }]); }} />
+      )}
       {tabMenu && <BrowserTabMenu menu={tabMenu} others={tabOthers.length > 0} right={tabRight.length > 0} onDismiss={dismissTabMenu} onClose={(mode) => {
         const target = tabMenu.surface;
         returning.current = keyOf(target);

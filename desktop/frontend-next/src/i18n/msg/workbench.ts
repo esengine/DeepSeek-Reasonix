@@ -180,4 +180,6 @@ export const WORKBENCH: Messages = {
   "workbench.diff_cut_short": { zh: "差异太长，只显示了前一部分。", en: "The diff is long; only its first part is shown." },
   "workbench.expand_section": { zh: "展开{name}", en: "Expand {name}" },
   "workbench.collapse_section": { zh: "收起{name}", en: "Collapse {name}" },
+  "workbench.name_is_not_saved": { zh: "{name} 还没保存", en: "{name} is not saved" },
+  "workbench.dont_save": { zh: "不保存", en: "Don't save" },
 };
