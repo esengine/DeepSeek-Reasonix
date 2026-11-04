@@ -81,6 +81,7 @@ export function WorkbenchPanel({
   onExternal,
   onAddToChat,
   onQuoteSelection,
+  onSettings,
   fullMode,
   fileRequest,
   agentRequest,
@@ -120,6 +121,7 @@ export function WorkbenchPanel({
   onAddToChat?: (reference: string) => void;
   // Text selected in an open file, with the file it came from, on its way to the composer.
   onQuoteSelection?: (text: string, path: string) => void;
+  onSettings?: (at?: string) => void;
   fullMode?: { full: boolean; onToggle: () => void };
   fileRequest?: { path: string; consumed?: () => void };
   agentRequest?: AgentRequest;
@@ -674,7 +676,7 @@ export function WorkbenchPanel({
                     onOpenExternal={!remote && port.opensFiles() && /\.(pdf|html?|svg|docx?|xlsx?|pptx?)$/i.test(filePath) ? () => {
                       const path = grantedFile ? `${grantedFile.root}/${grantedFile.rel}` : filePath;
                       void port.openDocument(path).catch((e) => setFailed(reason(e)));
-                    } : undefined} />
+                    } : undefined} onSettings={onSettings} />
                   {failed && <div className="workbench-error" role="alert">{failed}</div>}
                 </Suspense>
               ) : mode === "preview" ? (

@@ -23,15 +23,6 @@
 .document-notice, .document-preview > p {
   padding: 8px 12px;
 }
-.document-office-view > .document-notice {
-  margin: 0;
-  font-size: 12px;
-  font-weight: normal;
-  color: var(--muted);
-}
-.document-controls [role="tab"][aria-selected="true"] {
-  border-color: var(--text);
-}
 .document-html {
   flex: 1;
   width: 100%;
@@ -120,3 +111,37 @@
   flex: none; height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--raised); color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); white-space: nowrap; cursor: pointer;
 }
+.office-head {
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px;
+  border-bottom: 1px solid var(--hair); background: var(--page);
+}
+.office-ro {
+  display: inline-grid; place-items: center; flex: none; height: 20px; padding: 0 7px; border-radius: var(--r-pill);
+  background: var(--overlay); color: var(--muted); font: var(--w-med) var(--fs-micro) var(--ui); white-space: nowrap;
+}
+.office-note { min-width: 0; overflow: hidden; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); white-space: nowrap; text-overflow: ellipsis; }
+.office-fill { flex: 1; }
+.office-sheets {
+  display: flex; align-items: center; gap: 2px; min-width: 0; padding: 0 8px;
+  border-top: 1px solid var(--hair); background: var(--page);
+}
+.office-sheets [role="tablist"] { display: flex; gap: 2px; min-width: 0; overflow-x: auto; }
+.office-sheets [role="tab"] {
+  flex: none; padding: 6px 12px; border: 0; border-top: 2px solid transparent; background: transparent;
+  color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); white-space: nowrap; cursor: pointer;
+}
+.office-sheets [role="tab"][aria-selected="true"] { border-top-color: var(--accent); color: var(--text); font-weight: var(--w-semi); }
+.office-sheets small { flex: none; color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); white-space: nowrap; }
+.office-off { margin: 12px; padding: 14px; border-radius: var(--r-md); background: var(--page); color: var(--muted); font: var(--w-med) var(--fs-ui)/1.7 var(--ui); }
+.office-off p { margin: 0; }
+.office-off b { color: var(--text); }
+.office-off > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.office-off-open {
+  height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--raised); color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); white-space: nowrap; cursor: pointer;
+}
+.office-off-go {
+  height: 24px; align-self: center; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-pill);
+  background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); white-space: nowrap; cursor: pointer;
+}
+.office-off-go:hover { background: var(--overlay); color: var(--text); }

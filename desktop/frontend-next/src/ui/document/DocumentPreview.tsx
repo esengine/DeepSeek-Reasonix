@@ -37,8 +37,8 @@ function Picture({ data, path, view }: { data: ArrayBuffer; path: string; view: 
   </>;
 }
 
-export default function DocumentPreview({ port, path, shown, refresh, onOpenExternal, view }: {
-  port: AgentPort; path: string; shown: boolean; refresh: string; onOpenExternal?: () => void;
+export default function DocumentPreview({ port, path, shown, refresh, onOpenExternal, onSettings, view }: {
+  port: AgentPort; path: string; shown: boolean; refresh: string; onOpenExternal?: () => void; onSettings?: (at?: string) => void;
   view: DocumentViewState;
 }) {
   const { value, reload } = useDocument(port, path, shown, refresh);
@@ -50,7 +50,17 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
   let body = <p role="status">{t("common.loading")}</p>;
   if (error) body = <p role="alert">{error}</p>;
   else if (info?.kind === "unsupported") body = fallback;
-  else if (info?.kind === "office" && !officeOn) body = <p role="status">{t("chat.office_document_preview_is_turned")}</p>;
+  else if (info?.kind === "office" && !officeOn) {
+    body = (
+      <div className="office-off" role="status">
+        <p><b>{path.split("/").pop()}</b> · {t("chat.office_preview_is_off")}</p>
+        {(onOpenExternal || onSettings) && <div>
+          {onOpenExternal && <button type="button" className="office-off-open" data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("chat.open_in_system_application")}</button>}
+          {onSettings && <button type="button" className="office-off-go" data-action="settings.section" data-value="appearance" onClick={() => onSettings("appearance")}>{t("chat.turn_preview_on_in_settings")}</button>}
+        </div>}
+      </div>
+    );
+  }
   else if (info && info.size > info.limit) {
     body = (
       <WorkbenchState icon="layers" title={t("workbench.file_too_large_to_preview")} detail={t("workbench.size_preview_limit", { size: bytes(info.size), limit: bytes(info.limit) })} alert>
@@ -73,7 +83,7 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
     <div className="document-controls">
       {info && <span>{info.size.toLocaleString()} B</span>}
       <button data-action="document.refresh" data-target={path} onClick={reload}>{t("common.re_freeze")}</button>
-      {onOpenExternal && !(info && info.size > info.limit) && <button data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("chat.open_in_system_application")}</button>}
+      {onOpenExternal && !(info && info.size > info.limit) && !(info?.kind === "office" && !officeOn) && <button data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("chat.open_in_system_application")}</button>}
     </div>
     <Boundary fallback={fallback} retryKey={info?.version}>
       <Suspense fallback={<p role="status">{t("common.loading")}</p>}>{body}</Suspense>
