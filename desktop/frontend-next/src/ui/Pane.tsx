@@ -43,6 +43,7 @@ import { MeterRail } from "./MeterRail";
 import { useAgentRequest } from "./useAgentRequest";
 import { PlanFold } from "./PlanFold";
 import { latestPlanGate, PlanLiveContext, type PlanLive } from "./planLive";
+import { AgentRunOpener } from "./cards/SubagentGroup";
 import { useBroughtResults } from "./useBroughtResults";
 import { RunLine } from "./RunLine";
 import { AgentCompositionPicker } from "./AgentCompositionPicker";
@@ -512,7 +513,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
-      <PlanLiveContext.Provider value={planLive}>
+      <PlanLiveContext.Provider value={planLive}><AgentRunOpener.Provider value={openRun}>
       <Transcript port={port} historyPaging={historyPaging}
         scope={rt.sessionPath}
         onSettings={onSettings}
@@ -548,7 +549,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         onOpenProject={onOpenProject}
         onKeepHere={onKeepHere}
       />
-      </PlanLiveContext.Provider>
+      </AgentRunOpener.Provider></PlanLiveContext.Provider>
       </NewAnswerAnchor.Provider>
       </LiveWork.Provider>
       </PaneShown.Provider>

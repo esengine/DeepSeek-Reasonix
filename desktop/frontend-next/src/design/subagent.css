@@ -1,0 +1,40 @@
+.agent-group { margin: 8px 0 0; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); overflow: hidden; }
+.agent-group-head { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 14px; box-sizing: border-box; }
+.agent-group:has(.agent-group-body) .agent-group-head { border-bottom: 1px solid var(--hair); }
+.agent-group-head .agent-group-icon { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.agent-group-head > b { flex: none; color: var(--text); font: var(--w-med) var(--fs-ui)/1.3 var(--ui); white-space: nowrap; }
+.agent-group-fill { flex: 1; }
+.agent-group-sum, .agent-group-done { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); white-space: nowrap; }
+.agent-group-sum { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.agent-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; box-sizing: border-box; flex: none; border-radius: var(--r-pill); font: var(--w-med) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
+.agent-pill[data-tone="run"] { background: var(--net-wash); color: var(--net-ink); }
+.agent-pill[data-tone="err"] { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err-ink); }
+.agent-quiet {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 10px; box-sizing: border-box; flex: none;
+  border: 1px solid transparent; border-radius: var(--r-pill); background: transparent; color: var(--muted);
+  font: var(--w-reg) var(--fs-meta)/1 var(--ui); white-space: nowrap; cursor: pointer;
+}
+.agent-quiet:hover { background: var(--overlay); color: var(--text); }
+.agent-quiet:focus-visible, .agent-open:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.agent-group-body { padding: 4px; }
+.agent-row { padding: 8px 10px; border-radius: var(--r-md); }
+.agent-row-line { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.agent-avatar { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: var(--r-sm); color: var(--agent-1); background: color-mix(in srgb, var(--agent-1) 16%, transparent); }
+.agent-avatar[data-hue="1"] { color: var(--agent-2); background: color-mix(in srgb, var(--agent-2) 16%, transparent); }
+.agent-avatar[data-hue="2"] { color: var(--agent-3); background: color-mix(in srgb, var(--agent-3) 16%, transparent); }
+.agent-avatar svg, .agent-open svg { fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; }
+.agent-avatar svg { width: 13px; height: 13px; }
+.agent-who { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.agent-who > b { flex: none; color: var(--text); font: var(--w-med) var(--fs-ui)/1.4 var(--mono); white-space: nowrap; }
+.agent-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.4 var(--ui); }
+.agent-reading { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.agent-reading .studio-icon { width: 14px; height: 14px; }
+.agent-row[data-status="running"] .agent-reading { color: var(--net-ink); }
+.agent-row[data-status="done"] .agent-reading .studio-icon { color: var(--ok-ink); }
+.agent-row:is([data-status="failed"], [data-status="refused"]) .agent-reading { color: var(--err-ink); }
+.agent-open { width: 28px; height: 28px; padding: 0; flex: none; display: inline-grid; place-items: center; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.agent-open:hover { background: var(--overlay); color: var(--text); }
+.agent-open svg { width: 16px; height: 16px; }
+.agent-row-note { margin: 2px 0 0 30px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); overflow-wrap: anywhere; }
+.agent-row-note code { font: var(--w-reg) var(--fs-meta)/1.6 var(--mono); }
+.agent-row-note[data-tone="err"] { color: var(--err-ink); }

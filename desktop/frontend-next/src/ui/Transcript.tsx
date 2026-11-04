@@ -28,6 +28,7 @@ import { ExtensionCard } from "./cards/ExtensionCard";
 import { toolChangedFile, toolFailed } from "./cards/outcome";
 import { foldEarlier } from "./activityEarlier";
 import { NewAnswerLine, useNewAnswerAnchor } from "./NewAnswerLine";
+import { WorkLanes } from "./cards/SubagentGroup";
 import { drawn, eachCall, foldStats, repeatedSpeakers, sameMembers, transcriptRows, type Shown } from "./turnrows";
 import { BroughtResults } from "./BroughtResults";
 import { ReceiptSlot } from "./ReceiptSlot";
@@ -580,13 +581,13 @@ const Block = memo(function Block({
           {...rowProps}
           cp={checkpoints.get(row.item.id)}
           settled={!row.activity?.some((item) => item.t === "tool" && item.running)}
-          afterAnswer={row.activity || deliveries.has(row.item.id) ? <>{delivery(row.item.id)}{row.activity && <ActivityGroup items={row.activity} checkpoints={checkpoints} opened={opened} onOpened={setOpened} {...rowProps} />}</> : undefined}
+          afterAnswer={row.activity || deliveries.has(row.item.id) ? <>{delivery(row.item.id)}{row.activity && <WorkLanes items={row.activity} port={rowProps.port} draw={(work) => <ActivityGroup items={work} checkpoints={checkpoints} opened={opened} onOpened={setOpened} {...rowProps} />} />}</> : undefined}
         />
       </Fragment>
     ) : (
       <Fragment key={`activity:${row.activity[0].id}`}>
         {row.activity.map((item) => <Fragment key={item.id}>{delivery(item.id)}</Fragment>)}
-        <ActivityGroup items={row.activity} checkpoints={checkpoints} opened={opened} onOpened={setOpened} {...rowProps} />
+        <WorkLanes items={row.activity} port={rowProps.port} draw={(work) => <ActivityGroup items={work} checkpoints={checkpoints} opened={opened} onOpened={setOpened} {...rowProps} />} />
       </Fragment>
     );
   });
