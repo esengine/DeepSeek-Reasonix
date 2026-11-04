@@ -593,17 +593,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "session" && <PeersSection port={port} hub={hub} />}
 
-          {at === "hooks" && (
-            <>
-              <Group id="hooks"
-                title={t("自动化")}
-                hint={t("在 agent 执行任务前后运行自定义命令。这些命令在本机以当前用户权限运行；可拦截 agent 的两个事件已在下方标出。")}
-              >
-                <Hooks port={port} onChanged={afterExtChange} />
-              </Group>
-              <ScheduledRuns port={port} />
-            </>
-          )}
           {at === "ext" && (
             <>
               <ExtTabs at={extTab} disabled={updatingPkg.applying} onPick={(tab) => { setInstalledTarget(null); setExtTab(tab); }} />
@@ -699,6 +688,17 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                 </Group>
               </>
               )}
+            </>
+          )}
+          {at === "ext" && extTab === "installed" && (
+            <>
+              <Group id="hooks"
+                title={t("自动化")}
+                hint={t("在 agent 执行任务前后运行自定义命令。这些命令在本机以当前用户权限运行；可拦截 agent 的两个事件已在下方标出。")}
+              >
+                <Hooks port={port} onChanged={afterExtChange} />
+              </Group>
+              <ScheduledRuns port={port} />
             </>
           )}
           {at === "network" && (

@@ -109,7 +109,6 @@ export const NAV: [string, [Section, string][]][] = [
       ["session", "Agent 行为"],
       ["model", "模型"],
       ["tools", "工具与权限"],
-      ["hooks", "自动化"],
       ["ext", "扩展"],
     ],
   ],
@@ -335,7 +334,7 @@ export const SETTINGS: SettingEntry[] = [
 
 export const SETTING_AT = (anchor: string) => SETTINGS.find((s) => s.anchor === anchor);
 
-export const FOLDS_INTO: Partial<Record<Section, Section>> = { providers: "model", remote: "network", memory: "storage", persona: "session", peers: "session", usage: "storage", versions: "account" };
+export const FOLDS_INTO: Partial<Record<Section, Section>> = { providers: "model", remote: "network", memory: "storage", persona: "session", hooks: "ext", peers: "session", usage: "storage", versions: "account" };
 
 export const pageHome = (section: Section): Section => FOLDS_INTO[section] ?? section;
 
@@ -343,6 +342,7 @@ export const SECTION_NAME: Partial<Record<Section, string>> = {
   ...(Object.fromEntries(NAV.flatMap(([, items]) => items)) as Partial<Record<Section, string>>),
   providers: "模型服务",
   remote: "远程",
+  hooks: "自动化",
   persona: "人设",
   peers: "会话间消息",
   memory: "记忆",
