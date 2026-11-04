@@ -66,3 +66,8 @@
 :root[data-theme] .rail .sessrow { border-left-width: 0; }
 :root[data-theme] .rail .sessrow.sesscopy { min-height: 28px; height: 28px; }
 :root[data-theme] .rail .sessrow.sesscopy .sesstitle { padding-inline-start: 36px; font-size: var(--fs-meta); font-style: normal; color: var(--muted); }
+:root[data-theme] .rail .studio-rail-head { padding-top: 12px; }
+:root[data-theme] .rail .studio-brand { height: 32px; }
+:root[data-theme] [data-titlebar="app"][data-platform="darwin"] .rail .studio-rail-head { padding-top: 0; }
+:root[data-theme] [data-titlebar="app"][data-platform="darwin"] .rail .studio-brand { height: var(--chrome-h); }
+:root[data-theme] .rail .wsnode { padding: 0; }
