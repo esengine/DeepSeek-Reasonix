@@ -369,7 +369,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           // box, both operating the same one thing.
           data-action-change="settings.search"
           data-action-keydown="settings.search"
-          placeholder={t("搜索设置…")}
+          placeholder={t("搜索设置")}
           aria-label={t("搜索设置")}
           spellCheck={false}
           onChange={(e) => setQuery(e.target.value)}

@@ -1,4 +1,4 @@
-.prefs-sheet { grid-template-columns: 220px minmax(0, 1fr); border-radius: var(--r-lg); background: var(--surface); }
+.prefs-sheet { grid-template-columns: 240px minmax(0, 1fr); border-radius: var(--r-lg); background: var(--surface); }
 .prefs-hd h1 { padding: 14px 18px 10px; background: var(--page); font: var(--w-semi) var(--fs-lead)/1.3 var(--ui); letter-spacing: 0; }
 .prefs-sheet > .prefs-hd > .prefs-find {
   height: 30px; min-height: 30px; margin: 0; width: 100%; padding: 0 10px 0 32px; box-sizing: border-box;
@@ -27,7 +27,6 @@
 .prefs-card .seg button { height: 26px; min-height: 26px; padding: 0 10px; border-radius: 5px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--muted); }
 .prefs-card .seg button[aria-pressed="true"], .prefs-card .seg button[aria-checked="true"] { background: var(--raised); color: var(--text); font-weight: var(--w-med); box-shadow: 0 1px 2px rgb(0 0 0 / .07); }
 .prefs-card select { width: 140px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background-color: var(--surface); font: var(--w-reg) var(--fs-ui) var(--ui); }
-.prefs-col .prefs-card { --fs-micro: 11px; --w-med: 600; --faint: var(--muted); }
 .prefs-col .prefs-card > .grp .grp-hd h3 { font-size: var(--fs-ui); font-weight: var(--w-med); }
 .prefs-main { container: prefsmain / inline-size; }
 @container prefsmain (min-width: 860px) {
@@ -50,3 +49,21 @@
 .prefs-main { grid-row: 1 / span 3; }
 .prefs-actions { grid-row: 1; position: absolute; top: 10px; right: 14px; z-index: 6; padding: 0; }
 .prefs-pagetitle { padding-right: 150px; }
+.prefs-hd h1 { padding: 14px 18px 10px; }
+.prefs-sheet > .prefs-hd > .prefs-find { margin: 0 10px 8px; width: calc(100% - 20px); }
+.prefs-nav { padding: 0 10px 14px; gap: 2px; }
+.prefs-nav button { gap: 9px; font: var(--w-reg) var(--fs-ui) var(--ui); }
+.prefs-nav button svg { width: 16px; height: 16px; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; }
+.prefs-nav button[aria-selected="true"] { font-weight: var(--w-reg); }
+.prefs-nav button .nv { margin-left: auto; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); }
+.prefs-sheet { isolation: isolate; }
+.prefs-sheet::before { content: ""; position: absolute; z-index: -1; left: 0; top: 0; bottom: 0; width: 240px; background: var(--page); }
+.prefs-sheet::after { content: ""; position: absolute; left: 239px; top: 0; bottom: 0; width: 1px; background: var(--hair); pointer-events: none; }
+.prefs-nav { border-right: 0; }
+.prefs-nav button::before { display: none; }
+:root[data-theme] .prefs-sheet .prefs-nav button[aria-selected="true"] { background: var(--overlay); }
+.srow-name { line-height: normal; }
+.srow-meta > .apply { line-height: normal; }
+.prefs-hd h1 { padding-bottom: 12px; line-height: normal; }
+.prefs-sheet { --ui: Inter, "PingFang SC", "Microsoft YaHei UI", "Inter Studio", "Noto Studio", sans-serif; }
+.prefs-sheet > .prefs-hd > .prefs-find { height: 32px; min-height: 32px; }

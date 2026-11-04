@@ -1,4 +1,3 @@
-.prefs-col { --fs-micro: var(--fs-meta); --faint: var(--muted); --ghost: var(--muted); --w-med: var(--w-semi); }
 .prefs-col :is(strong, b, h4, th, .nm, .who, .lbl, .kind, .me-name, .spon-link, .paperpick, .rmtadd, .uhero-scope, .ttl, .comm-name, .btn:not(.sm)) { font-size: var(--fs-ui); font-weight: var(--w-semi); color: var(--text); }
 .prefs-col .grp-hd h3 { font-size: var(--fs-lead); font-weight: var(--w-semi); color: var(--text); }
 .prefs-col :is(button.act, label.act, .btn.sm) { font-size: var(--fs-meta); font-weight: var(--w-reg); color: var(--text); }

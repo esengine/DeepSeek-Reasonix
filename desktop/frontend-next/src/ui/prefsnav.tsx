@@ -11,16 +11,10 @@ export type Section = "common" | "display" | "controls" | "session" | "persona" 
 // marks. The rail in Nav.tsx draws a section's entry from this table, so one
 // destination carries one mark wherever it is shown.
 export const ICON: Record<Section, ReactNode> = {
-  display: (
-    <>
-      <rect x="2.4" y="2.8" width="11.2" height="10.4" rx="1.4" />
-      <path d="M2.4 6h11.2M6.2 6v7.2" />
-    </>
-  ),
-  controls: <path d="M3 5h5.2M11.2 5H13M3 11h2.2M8.2 11H13M9.4 3.4v3.2M6.4 9.4v3.2" />,
-  common: <path d="M8 2.2 9.7 6l4.1.4-3.1 2.7.9 4-3.6-2.1-3.6 2.1.9-4L2.2 6.4 6.3 6Z" />,
-  session: <path d="M2.6 8h10.8M8 2.6v10.8" />,
-  // An identity card: the section is about who the agent is, not what it does.
+  display: <><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6 3v10"/></>,
+  controls: <><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M10 3v10"/></>,
+  common: <><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"/></>,
+  session: <><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></>,
   persona: (
     <>
       <rect x="2.2" y="3.4" width="11.6" height="9.2" rx="1.4" />
@@ -28,12 +22,7 @@ export const ICON: Record<Section, ReactNode> = {
       <path d="M8.6 6.2h3.2M8.6 8.4h3.2M3.9 11.4c.5-1.1 1.5-1.7 2.7-1.7s2.2.6 2.7 1.7" />
     </>
   ),
-  model: (
-    <>
-      <circle cx="8" cy="8" r="2.4" />
-      <path d="M8 1.8v2.2M8 12v2.2M1.8 8h2.2M12 8h2.2" />
-    </>
-  ),
+  model: <><path d="M3.5 12.5l6-6M9.5 3l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2L6.5 6l2.2-.8z"/></>,
   providers: (
     <>
       <rect x="2.4" y="2.6" width="11.2" height="4.2" rx="1.2" />
@@ -49,31 +38,15 @@ export const ICON: Record<Section, ReactNode> = {
       <path d="M5.2 7.4v1.6a1 1 0 0 0 1 1h1.6" />
     </>
   ),
-  tools: (
-    <>
-      <path d="M8 1.9 13.8 4.4v4.2c0 3-2.4 5.1-5.8 5.7-3.4-.6-5.8-2.7-5.8-5.7V4.4Z" />
-      <path d="M6.4 8.1 7.6 9.3l2.4-2.4" />
-    </>
-  ),
+  tools: <><path d="M8 2l5 2v4c0 3-2.3 5-5 6-2.7-1-5-3-5-6V4z"/></>,
   hooks: (
     <>
       <path d="M4.4 2.6v6.2a3.2 3.2 0 0 0 6.4 0V6.2" />
       <circle cx="10.8" cy="4.4" r="1.6" />
     </>
   ),
-  ext: (
-    <>
-      <rect x="2.4" y="2.4" width="5" height="5" rx="1.2" />
-      <rect x="8.6" y="8.6" width="5" height="5" rx="1.2" />
-      <path d="M7.4 5h6.2M5 7.4v6.2" />
-    </>
-  ),
-  network: (
-    <>
-      <circle cx="8" cy="8" r="5.8" />
-      <path d="M2.4 8h11.2M8 2.2c1.6 1.7 2.4 3.6 2.4 5.8S9.6 12.1 8 13.8C6.4 12.1 5.6 10.2 5.6 8s.8-4.1 2.4-5.8Z" />
-    </>
-  ),
+  ext: <><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2a3.5 3.5 0 01-7 0zM8 11v2.5"/></>,
+  network: <><rect x="2.5" y="2.5" width="4" height="4"/><rect x="9.5" y="2.5" width="4" height="4"/><rect x="2.5" y="9.5" width="4" height="4"/><path d="M9.5 9.5h1.5v1.5M13.5 13.5H12M9.5 13.5v-1"/></>,
   remote: (
     <>
       <rect x="2.2" y="2.6" width="11.6" height="4.4" rx="1.3" />
@@ -81,28 +54,12 @@ export const ICON: Record<Section, ReactNode> = {
       <path d="M4.8 4.8h.01M4.8 11.2h.01" />
     </>
   ),
-  storage: (
-    <>
-      <ellipse cx="8" cy="4" rx="5.4" ry="2.1" />
-      <path d="M2.6 4v8c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1V4" />
-      <path d="M2.6 8c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1" />
-    </>
-  ),
+  storage: <><rect x="2.5" y="3" width="11" height="4" rx="1"/><rect x="2.5" y="9" width="11" height="4" rx="1"/></>,
   memory: <path d="M8 4.4c-1.4-1.3-4.6-1-4.6 1.9 0 2.4 2.6 4.4 4.6 6 2-1.6 4.6-3.6 4.6-6 0-2.9-3.2-3.2-4.6-1.9Z" />,
   usage: <path d="M2.6 12.4V9M6.2 12.4V5.4M9.8 12.4V7.2M13.4 12.4V3.4" />,
-  account: (
-    <>
-      <circle cx="8" cy="5.6" r="2.6" />
-      <path d="M2.9 13.4c.8-2.4 2.7-3.6 5.1-3.6s4.3 1.2 5.1 3.6" />
-    </>
-  ),
+  account: <><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5c.7-2.6 2.6-3.8 5-3.8s4.3 1.2 5 3.8"/></>,
   versions: <path d="M8 2.4v7.4M5.2 7.2 8 10l2.8-2.8M3 12.8h10" />,
-  appearance: (
-    <>
-      <circle cx="8" cy="8" r="3.1" />
-      <path d="M8 1.4v1.8M8 12.8v1.8M1.4 8h1.8M12.8 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3" />
-    </>
-  ),
+  appearance: <><circle cx="8" cy="8" r="2.6"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></>,
   advanced: <path d="M3 5h5.2M11.2 5H13M3 11h2.2M8.2 11H13M9.4 3.4v3.2M6.4 9.4v3.2" />,
 };
 

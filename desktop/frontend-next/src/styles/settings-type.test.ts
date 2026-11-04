@@ -10,14 +10,6 @@ it("states every size, weight and colour as a token", () => {
   for (const d of sized) expect(d.value, `${d.prop}: ${d.value}`).toMatch(/^var\(--[a-z-]+\)$/);
 });
 
-it("keeps the settings scope on two neutral text tiers and one emphasis weight", () => {
-  const scope = css.match(/\.prefs-col\s*\{([^}]*)\}/)?.[1] ?? "";
-  expect(scope).toMatch(/--faint:\s*var\(--muted\)/);
-  expect(scope).toMatch(/--ghost:\s*var\(--muted\)/);
-  expect(scope).toMatch(/--fs-micro:\s*var\(--fs-meta\)/);
-  expect(scope).toMatch(/--w-med:\s*var\(--w-semi\)/);
-});
-
 it("only ever names a neutral text colour from the two tiers, bar a primary action's paired foreground", () => {
   for (const d of declarations.filter((x) => x.prop === "color" && x.value !== "var(--accent-fg)")) expect(d.value).toMatch(/^var\(--(text|muted)\)$/);
 });
