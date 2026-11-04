@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
+import { listed } from "./feedbacktestkit";
 import { Feedback } from "./Feedback";
 import { FeedbackMine } from "./FeedbackMine";
 import { MockPort } from "../port/mock";
@@ -43,15 +44,17 @@ function portWith(answer: () => Mine | Error) {
 async function shown(p: FeedbackProfile | null, over: Partial<Mine> = {}) {
   render(<FeedbackMine port={portWith(() => mine(p, over))} onFile={() => {}} />);
   await screen.findByText("FB-AAAA-0001");
-  await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜|Level, account and leaderboard/ }));
+  await userEvent.click(standing());
 }
 
 const level = () => document.querySelector(".fbk-level");
+const standing = () => document.querySelector<HTMLButtonElement>('[data-action="feedback.account-section"]')!;
 const text = (sel: string) => document.querySelector(sel)?.textContent;
 
 describe("the level row", () => {
   it("states the level, what shipped, what is left and the limits in force", async () => {
     await shown(MID);
+    expect(standing().textContent).toBe("反馈等级 2 · 已采纳 4 条");
     expect(level()?.getAttribute("data-level")).toBe("2");
     expect(text(".fbk-level-name")).toBe("L2 · 幼苗");
     expect(text(".fbk-level-progress")).toBe("已落地 4 条，再 2 条升到「小树」");
@@ -172,7 +175,7 @@ describe("when the standing cannot be confirmed", () => {
     const port = portWith(() => (fail ? new HttpError(502, "x", { code: FEEDBACK_CODE.unavailable, error: "x" }) : mine(MID)));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜/ }));
+    await userEvent.click(standing());
     fail = true;
     await userEvent.click(screen.getByRole("button", { name: "刷新列表" }));
     await screen.findByRole("alert");
@@ -187,7 +190,7 @@ describe("the row beside the rest of the panel", () => {
     port.replyFeedback = vi.fn(async () => ({ replyId: 6, createdAt: "2026-10-07T08:00:00Z" }));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜/ }));
+    await userEvent.click(standing());
     expect(text(".fbk-level-name")).toBe("L2 · 幼苗");
 
     now = profile({ level: 3, adoptedCount: 6, currentThreshold: 6, nextLevel: 4, nextThreshold: 12, remaining: 6 });
@@ -196,7 +199,7 @@ describe("the row beside the rest of the panel", () => {
 
     now = profile({ level: 4, adoptedCount: 12, currentThreshold: 12, nextLevel: 5, nextThreshold: 24, remaining: 12 });
     await userEvent.type(screen.getByRole("textbox"), "macOS 15");
-    await userEvent.click(screen.getByRole("button", { name: "发送回复" }));
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(text(".fbk-level-name")).toBe("L4 · 繁花"));
   });
 
@@ -207,14 +210,14 @@ describe("the row beside the rest of the panel", () => {
     await screen.findByText("FB-AAAA-0002");
     expect(unread.at(-1)).toBe(1);
     expect(screen.getAllByRole("status").some((n) => /连不上反馈服务/.test(n.textContent ?? ""))).toBe(true);
-    expect(within(document.querySelector(".fbk-item")!).getByText("需要你回复")).toBeTruthy();
+    expect(within(document.querySelector(".fbk-item")!).getByText("等你回复")).toBeTruthy();
   });
 
   it("draws once the panel opens on My feedback and not while the form tab shows", async () => {
     const port = new MockPort() as unknown as AgentPort;
     render(<Feedback port={port} tab="mine" onClose={() => {}} onError={() => {}} />);
-    await screen.findByText("FB-7K3M-9QX2");
-    await userEvent.click(screen.getByRole("button", { name: /等级、账号与贡献榜/ }));
+    await listed("FB-7K3M-9QX2");
+    await userEvent.click(standing());
     expect(document.querySelectorAll(".fbk-level")).toHaveLength(1);
     cleanup();
     render(<Feedback port={port} tab="send" onClose={() => {}} onError={() => {}} />);

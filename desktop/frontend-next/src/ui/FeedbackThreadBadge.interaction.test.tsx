@@ -28,7 +28,7 @@ async function drawn(items: FeedbackItem[], profile: FeedbackProfile | null) {
   await screen.findAllByText("FB-AAAA-0001");
 }
 
-const row = (author: string) => document.querySelector(`.fbk-thread-body li[data-author="${author}"]`) as HTMLElement;
+const row = (author: string) => document.querySelector(`.fbk-thread li[data-author="${author}"]`) as HTMLElement;
 
 describe("the level badge in a thread", () => {
   it("sits beside the reporter's own label and never on a maintainer reply", async () => {

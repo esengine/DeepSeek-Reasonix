@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import "./testkit";
+import { listed, pick } from "./feedbacktestkit";
 import { FeedbackMine } from "./FeedbackMine";
 import { MockPort } from "../port/mock";
 import type { AgentPort } from "../port/port";
@@ -25,11 +26,9 @@ function draw(items: FeedbackItem[]) {
 describe("reports from another linked device", () => {
   it("marks them in words, and only them", async () => {
     draw([item({ receipt: "FB-AAAA-0001" }), item({ receipt: "FB-BBBB-0002", otherInstall: true, titleSnippet: "from the laptop" })]);
-    await waitFor(() => expect(screen.getAllByText("FB-BBBB-0002").length).toBeGreaterThan(0));
-    const other = document.querySelector('[data-receipt="FB-BBBB-0002"]') as HTMLElement;
-    const own = document.querySelector('[data-receipt="FB-AAAA-0001"]') as HTMLElement;
-    expect(within(other).getByText("来自其他设备")).toBeTruthy();
-    expect(within(own).queryByText("来自其他设备")).toBeNull();
+    await listed("FB-BBBB-0002");
+    expect(within(pick("FB-BBBB-0002")).getByText("来自其他设备")).toBeTruthy();
+    expect(within(pick("FB-AAAA-0001")).queryByText("来自其他设备")).toBeNull();
   });
 
   it("says read marks are kept on this computer only", async () => {

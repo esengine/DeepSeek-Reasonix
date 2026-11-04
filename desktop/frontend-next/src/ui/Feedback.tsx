@@ -11,7 +11,7 @@ import { StudioIcon } from "./StudioIcon";
 export type FeedbackTab = "send" | "mine";
 
 const TABS: readonly FeedbackTab[] = ["send", "mine"];
-const TAB_LABEL: Record<FeedbackTab, string> = { send: "common.send_feedback", mine: "session.my_feedback" };
+const TAB_LABEL: Record<FeedbackTab, string> = { send: "feedback.write_new", mine: "session.my_feedback" };
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 interface Props {
@@ -20,11 +20,13 @@ interface Props {
   onClose: () => void;
   onError: (message: string) => void;
   onUnread?: (n: number) => void;
+  // Reports waiting on the reader, counted on the My feedback tab.
+  unread?: number;
 }
 
-export function Feedback({ port, tab: first = "send", onClose, onError, onUnread }: Props) {
+export function Feedback({ port, tab: first = "send", onClose, onError, onUnread, unread = 0 }: Props) {
   const [tab, setTab] = useState<FeedbackTab>(first);
-  const [wide, setWide] = useState(false);
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const [concealed, setConcealed] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(document.activeElement);
@@ -73,54 +75,42 @@ export function Feedback({ port, tab: first = "send", onClose, onError, onUnread
 
   return (
     <div className="fbk-veil" hidden={concealed}>
-      <div className="fbk" ref={card} role="dialog" aria-modal="true" aria-labelledby="fbk-title" data-wide={wide || undefined}>
+      <div className="fbk" ref={card} role="dialog" aria-modal="true" aria-labelledby="fbk-title" data-tab={tab}>
         <header className="fbk-hd">
           <h2 id="fbk-title">{t("feedback.feedback")}</h2>
-          <div className="fbk-hd-acts">
-            <button
-              className="btn sm"
-              type="button"
-              data-action="feedback.expand"
-              aria-pressed={wide}
-              aria-label={t("feedback.full_width")}
-              title={t("feedback.full_width")}
-              onClick={() => setWide((w) => !w)}
-            >
-              <StudioIcon name="expand" />
-            </button>
-            <button className="btn sm" data-action="feedback.close" onClick={onClose} aria-label={t("common.close")}>
-              <StudioIcon name="close" />
-              <span className="esc">Esc</span>
-            </button>
+          <div className="fbk-tabs" role="tablist" aria-label={t("feedback.feedback")}>
+            {TABS.map((id) => (
+              <button
+                key={id}
+                id={`fbk-tab-${id}`}
+                role="tab"
+                type="button"
+                aria-selected={tab === id}
+                aria-controls={`fbk-panel-${id}`}
+                tabIndex={tab === id ? 0 : -1}
+                data-action-click="feedback.tab"
+                data-action-keydown="feedback.tab"
+                data-value={id}
+                onClick={() => setTab(id)}
+                onKeyDown={(e) => walk(e, id)}
+              >
+                {t(TAB_LABEL[id])}
+                {id === "mine" && unread > 0 && <span className="fbk-tab-count" aria-hidden="true">{unread}</span>}
+              </button>
+            ))}
           </div>
+          <div className="fbk-hd-slot" ref={setSlot} hidden={tab !== "mine"} />
+          <button className="fbk-icon" type="button" data-action="feedback.close" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}>
+            <StudioIcon name="close" />
+          </button>
         </header>
-        <div className="fbk-tabs" role="tablist" aria-label={t("feedback.feedback")}>
-          {TABS.map((id) => (
-            <button
-              key={id}
-              id={`fbk-tab-${id}`}
-              role="tab"
-              type="button"
-              aria-selected={tab === id}
-              aria-controls={`fbk-panel-${id}`}
-              tabIndex={tab === id ? 0 : -1}
-              data-action-click="feedback.tab"
-              data-action-keydown="feedback.tab"
-              data-value={id}
-              onClick={() => setTab(id)}
-              onKeyDown={(e) => walk(e, id)}
-            >
-              {t(TAB_LABEL[id])}
-            </button>
-          ))}
-        </div>
         <div className="fbk-body">
           <div id="fbk-panel-send" role="tabpanel" aria-labelledby="fbk-tab-send" hidden={tab !== "send"}>
             <FeedbackForm port={port} pasteRoot={card} active={tab === "send" && !concealed} onMine={() => setTab("mine")} onClose={onClose} onFile={openLink} onConceal={setConcealed} />
           </div>
           {tab === "mine" && (
             <div id="fbk-panel-mine" role="tabpanel" aria-labelledby="fbk-tab-mine">
-              <FeedbackMine port={port} onFile={openLink} onUnread={onUnread} />
+              <FeedbackMine port={port} onFile={openLink} onUnread={onUnread} slot={slot} />
             </div>
           )}
         </div>

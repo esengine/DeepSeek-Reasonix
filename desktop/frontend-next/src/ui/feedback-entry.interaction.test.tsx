@@ -38,7 +38,7 @@ describe("reaching feedback", () => {
     const entry = await screen.findByRole("button", { name: "发送反馈" });
     await userEvent.click(entry);
     expect(await screen.findByRole("dialog", { name: "反馈" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "发送反馈", selected: true })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "写新反馈", selected: true })).toBeTruthy();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "反馈" })).toBeNull();
     expect(document.activeElement).toBe(entry);
@@ -83,7 +83,7 @@ describe("the unread badge", () => {
     render(<App hub={h} />);
     await userEvent.click(await screen.findByRole("button", { name: /3 项待查看/ }));
     await screen.findByText("FB-1C5W-7NB2");
-    for (const open of screen.getAllByRole("button", { name: /展开对话/ })) await userEvent.click(open);
+    for (const open of document.querySelectorAll<HTMLElement>('.fbk-item[data-fresh] [data-action="feedback.pick"]')) await userEvent.click(open);
     await waitFor(() => expect(screen.getByRole("button", { name: /发送反馈.*1 项待查看/ })).toBeTruthy());
     expect(document.querySelector(".studio-feedback .fbk-badge")!.textContent).toBe("1");
   });
@@ -93,7 +93,7 @@ describe("the unread badge", () => {
     const entry = await screen.findByRole("button", { name: "发送反馈" });
     await waitFor(() => expect(document.querySelector(".fbk-badge")).toBeNull());
     await userEvent.click(entry);
-    expect(await screen.findByRole("tab", { name: "发送反馈", selected: true })).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: "写新反馈", selected: true })).toBeTruthy();
   });
 
   it("shows on the palette item too", async () => {

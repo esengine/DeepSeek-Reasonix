@@ -1,21 +1,14 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent } from "react";
-import { current, t } from "../i18n";
+import { useCallback, useMemo, useRef, useState, type ClipboardEvent } from "react";
+import { t } from "../i18n";
 import { FEEDBACK_CODE, FEEDBACK_REPO_ISSUES, canReplyTo, isUnderReview, type FeedbackItem, type FeedbackLimits, type FeedbackReply } from "../port/feedback";
 import type { AgentPort } from "../port/port";
 import { replyFailure, type FeedbackFailure } from "./feedbackfailure";
 import { FeedbackShot } from "./FeedbackShot";
 import { admit, megabytes, payload, readShot, REFUSED_LABEL, type Refused, type Shot } from "./feedbackshots";
 import { LevelBadge } from "./LevelBadge";
+import { stamp } from "./feedbackstatus";
 import { StudioIcon } from "./StudioIcon";
 
-const SHOWN = 4;
-
-// Unread replies sit at the end of the thread; any that fall before the folded
-// boundary have not been shown yet.
-export function foldedUnread(item: FeedbackItem): boolean {
-  const firstUnread = item.replies.filter((r) => r.author === "maintainer").slice(-item.unreadReplies)[0];
-  return firstUnread !== undefined && item.replies.indexOf(firstUnread) < item.replies.length - SHOWN;
-}
 const encoder = new TextEncoder();
 
 // Used only when the limit could not be read; the kernel still refuses an oversized reply.
@@ -23,69 +16,40 @@ const REPLY_BYTES_FALLBACK = 4096;
 
 const AUTHOR_LABEL = { maintainer: "feedback.maintainers", user: "chat.you" } as const;
 
-function when(iso: string): string {
-  return new Date(iso).toLocaleString(current() === "zh" ? "zh-CN" : "en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
 interface ThreadProps {
   item: FeedbackItem;
   // The reporter's own level, shown beside their label; null or absent shows none.
   level?: number | null;
   fresh: number;
-  onView?: (receipt: string, all: boolean | null) => void;
 }
 
 // Replies are plain text by contract: they render as text nodes, never linked,
 // formatted or interpreted, whoever wrote them.
-export function FeedbackThread({ item, level = null, fresh, onView }: ThreadProps) {
-  const [all, setAll] = useState(false);
-  const [expanded, setExpanded] = useState(item.needsInput);
-  const id = useId();
-  useEffect(() => { if (item.needsInput) onView?.(item.receipt, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+export function FeedbackThread({ item, level = null, fresh }: ThreadProps) {
   const replies = item.replies;
-  const hidden = all ? 0 : Math.max(0, replies.length - SHOWN);
-  const shown = replies.slice(hidden);
   const newIds = useMemo(() => new Set(fresh > 0 ? replies.filter((r) => r.author === "maintainer").slice(-fresh).map((r) => r.id) : []), [replies, fresh]);
   const isNew = (r: FeedbackReply) => newIds.has(r.id);
   if (replies.length === 0) return null;
   return (
-    <section className="fbk-thread" aria-label={t("feedback.conversation")}>
-      <button type="button" className="btn sm fbk-thread-toggle" data-action="feedback.thread.toggle" data-target={item.receipt} aria-expanded={expanded} aria-controls={id} onClick={() => {
-        const next = !expanded;
-        setExpanded(next);
-        onView?.(item.receipt, next ? all : null);
-      }}>
-        <StudioIcon name={expanded ? "down" : "chevron"} />
-        <span>{t(expanded ? "feedback.collapse_conversation" : "feedback.expand_conversation")}</span>
-        <span className="fbk-meta">{t("feedback.n_replies", { n: replies.length })}</span>
-        {fresh > 0 && <span className="fbk-thread-new">{t("feedback.n_new_replies", { n: fresh })}</span>}
-      </button>
-      <div id={id} className="fbk-thread-body" hidden={!expanded}>
-        {hidden > 0 && (
-          <button type="button" className="btn sm" data-action="feedback.thread.more" onClick={() => { setAll(true); onView?.(item.receipt, true); }}>
-            {t("feedback.show_n_earlier_messages", { n: hidden })}
-          </button>
-        )}
-        <ol>
-          {shown.map((r) => (
-            <li key={r.id} data-author={r.author} data-new={isNew(r) ? "" : undefined}>
-              <div className="fbk-msg-hd">
-                <b>{t(AUTHOR_LABEL[r.author])}</b>
-                {r.author === "user" && level !== null && (
-                  <>
-                    <LevelBadge level={level} decorative size={14} />
-                    <span className="sr-only">{t("feedback.level_n", { n: level })}</span>
-                  </>
-                )}
-                {isNew(r) && <span className="fbk-new">{t("common.new")}</span>}
-                <time dateTime={r.createdAt}>{when(r.createdAt)}</time>
-              </div>
-              <p className="fbk-msg" dir="auto">{r.body}</p>
-            </li>
-          ))}
-        </ol>
-      </div>
-    </section>
+    <ol className="fbk-thread" aria-label={t("feedback.conversation")}>
+      {replies.map((r) => (
+        <li key={r.id} data-author={r.author} data-new={isNew(r) ? "" : undefined}>
+          <div className="fbk-msg-hd">
+            <b>{t(AUTHOR_LABEL[r.author])}</b>
+            {r.author === "user" && level !== null && (
+              <>
+                <LevelBadge level={level} decorative size={14} />
+                <span className="sr-only">{t("feedback.level_n", { n: level })}</span>
+              </>
+            )}
+            <span aria-hidden="true">·</span>
+            <time dateTime={r.createdAt}>{stamp(r.createdAt)}</time>
+            {isNew(r) && <span className="fbk-new">{t("common.new")}</span>}
+          </div>
+          <p className="fbk-msg" dir="auto">{r.body}</p>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -107,14 +71,19 @@ interface ReplyProps {
   onSent: (receipt: string) => void;
   onFile: (url: string) => void;
   onStale: () => void;
+  // Unsent text per report, so moving to another report and back keeps it.
+  drafts?: Map<string, string>;
 }
 
-export function FeedbackReplyBox({ port, item, limit, limits = null, offline, onSent, onFile, onStale }: ReplyProps) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
+export function FeedbackReplyBox({ port, item, limit, limits = null, offline, onSent, onFile, onStale, drafts }: ReplyProps) {
+  const [text, setTyped] = useState(() => drafts?.get(item.receipt) ?? "");
+  const setText = (next: string) => {
+    setTyped(next);
+    if (next) drafts?.set(item.receipt, next);
+    else drafts?.delete(item.receipt);
+  };
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<FeedbackFailure | null>(null);
-  const opener = useRef<HTMLButtonElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -137,7 +106,6 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
   const reopens = item.status === "fixed";
   if (offline) return <p className="fbk-hint">{t("feedback.you_cannot_reply_while_offline")}</p>;
 
-  const expanded = open || item.needsInput;
   const bytes = encoder.encode(text).length;
   const max = limit ?? REPLY_BYTES_FALLBACK;
   const over = bytes > max;
@@ -152,7 +120,6 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
       setText("");
       setShots([]);
       setRefused([]);
-      setOpen(false);
       onSent(item.receipt);
     } catch (e) {
       const f = replyFailure(e);
@@ -162,15 +129,6 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
       setSending(false);
     }
   };
-
-  if (!expanded) {
-    return (
-      <button type="button" className="btn sm fbk-reply-open" ref={opener} data-action="feedback.reply.open" onClick={() => { setOpen(true); requestAnimationFrame(() => field.current?.focus()); }}>
-        <StudioIcon name="edit" />
-        {t(reopens ? "feedback.still_not_fixed_reply" : "feedback.reply")}
-      </button>
-    );
-  }
 
   const id = `fbk-reply-${item.receipt}`;
   return (
@@ -188,57 +146,41 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
       data-action-submit="feedback.reply.send"
       onSubmit={(e) => { e.preventDefault(); void send(); }}
     >
-      <label htmlFor={id} className="fbk-label">{item.needsInput ? t("feedback.your_reply") : t(reopens ? "feedback.tell_us_what_is_still" : "feedback.reply_to_the_maintainers")}</label>
-      <textarea
-        id={id}
-        ref={field}
-        data-action="feedback.reply.body"
-        value={text}
-        rows={3}
-        disabled={sending}
-        aria-invalid={over ? true : undefined}
-        aria-describedby={`${id}-hint ${id}-count`}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <div className="fbk-reply-foot">
-        <span id={`${id}-hint`} className="fbk-hint">
-          {reopens && t("feedback.sending_this_reopens_the_report")}{" "}
-          {item.issueNumber
-            ? t("feedback.this_report_already_has_a", { n: item.issueNumber })
-            : t("feedback.sent_to_the_maintainers_only")}
-        </span>
-        <span id={`${id}-count`} className="fbk-count" data-over={over ? "" : undefined}>
-          {t("feedback.n_max_bytes", { n: bytes.toLocaleString(), max: max.toLocaleString() })}
-        </span>
+      <label htmlFor={id} className="sr-only">{item.needsInput ? t("feedback.your_reply") : t(reopens ? "feedback.tell_us_what_is_still" : "feedback.reply_to_the_maintainers")}</label>
+      <div className="fbk-reply-box">
+        <textarea
+          id={id}
+          ref={field}
+          data-action="feedback.reply.body"
+          value={text}
+          rows={2}
+          disabled={sending}
+          placeholder={t(reopens ? "feedback.tell_us_what_is_still" : "feedback.reply_placeholder")}
+          aria-invalid={over ? true : undefined}
+          aria-describedby={`${id}-hint ${id}-count`}
+          onChange={(e) => setText(e.target.value)}
+        />
+        {limits && shots.length > 0 && (
+          <ul className="fbk-shots">
+            {shots.map((s) => (
+              <FeedbackShot key={s.id} shot={s} disabled={sending} onRemove={() => setShots((prev) => prev.filter((x) => x.id !== s.id))} />
+            ))}
+          </ul>
+        )}
       </div>
-      {limits && (
-        <div className="fbk-reply-shots">
-          {shots.length > 0 && (
-            <ul className="fbk-shots">
-              {shots.map((s) => (
-                <FeedbackShot key={s.id} shot={s} disabled={sending} onRemove={() => setShots((prev) => prev.filter((x) => x.id !== s.id))} />
-              ))}
-            </ul>
-          )}
-          <div className="fbk-drop-line">
-            <button type="button" className="btn sm" data-action="feedback.shot.pick" disabled={sending || shots.length >= limits.images} onClick={() => picker.current?.click()}>
-              <StudioIcon name="plus" />
-              {t("feedback.add_screenshots")}
-            </button>
-            <span className="fbk-hint">
-              {t("feedback.you_can_also_paste_png", { n: limits.images, size: megabytes(limits.uploadBytes) })}{" "}
-              {t("feedback.screenshots_go_to_the_maintainers")}
-            </span>
-          </div>
-          <input ref={picker} className="sr-only" type="file" accept="image/png,image/jpeg" multiple tabIndex={-1} aria-label={t("feedback.choose_screenshot_files")} data-action="feedback.shot.pick" onChange={(e) => { void add([...(e.target.files ?? [])]); e.target.value = ""; }} />
-          {refused.length > 0 && (
-            <ul className="fbk-refused" role="status">
-              {refused.map((r, i) => (
-                <li key={i}>{t(REFUSED_LABEL[r.why], { name: r.name, size: megabytes(limits.uploadBytes), n: limits.images })}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+      <p id={`${id}-hint`} className="fbk-hint fbk-reply-hint">
+        {reopens && t("feedback.sending_this_reopens_the_report")}{" "}
+        {item.issueNumber
+          ? t("feedback.this_report_already_has_a", { n: item.issueNumber })
+          : t("feedback.sent_to_the_maintainers_only")}
+        {limits && <>{" "}{t("feedback.screenshots_go_to_the_maintainers")}</>}
+      </p>
+      {limits && refused.length > 0 && (
+        <ul className="fbk-refused" role="status">
+          {refused.map((r, i) => (
+            <li key={i}>{t(REFUSED_LABEL[r.why], { name: r.name, size: megabytes(limits.uploadBytes), n: limits.images })}</li>
+          ))}
+        </ul>
       )}
       {failure && (
         <div className="fbk-note" role="alert" data-tone="error" data-code={failure.code}>
@@ -251,13 +193,24 @@ export function FeedbackReplyBox({ port, item, limit, limits = null, offline, on
           )}
         </div>
       )}
-      <div className="fbk-acts">
-        <button className="act" type="submit" data-primary disabled={blocked}>{t(sending ? "common.sending" : "feedback.send_reply")}</button>
-        {!item.needsInput && (
-          <button className="act" type="button" data-action="feedback.reply.cancel" disabled={sending} onClick={() => { setOpen(false); setFailure(null); requestAnimationFrame(() => opener.current?.focus()); }}>
-            {t("common.cancel")}
-          </button>
+      <div className="fbk-reply-foot">
+        {limits && (
+          <>
+            <button type="button" className="fbk-attach" data-action="feedback.shot.pick" disabled={sending || shots.length >= limits.images}
+              title={t("feedback.you_can_also_paste_png", { n: limits.images, size: megabytes(limits.uploadBytes) })} onClick={() => picker.current?.click()}>
+              <StudioIcon name="image" />
+              {t("feedback.attach_image")}
+            </button>
+            <input ref={picker} className="sr-only" type="file" accept="image/png,image/jpeg" multiple tabIndex={-1} aria-label={t("feedback.choose_screenshot_files")} data-action="feedback.shot.pick" onChange={(e) => { void add([...(e.target.files ?? [])]); e.target.value = ""; }} />
+          </>
         )}
+        <span id={`${id}-count`} className="fbk-count" data-over={over ? "" : undefined}>
+          {t("feedback.n_max_bytes", { n: bytes.toLocaleString(), max: max.toLocaleString() })}
+        </span>
+        <button className="fbk-send" type="submit" disabled={blocked}>
+          <StudioIcon name="send" />
+          {t(sending ? "common.sending" : "common.send")}
+        </button>
       </div>
     </form>
   );

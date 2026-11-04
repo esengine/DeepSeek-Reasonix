@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
+import { listed, pick } from "./feedbacktestkit";
 import { FeedbackMine } from "./FeedbackMine";
 import { MockPort } from "../port/mock";
 import type { AgentPort } from "../port/port";
@@ -39,23 +40,23 @@ const chip = (name: RegExp) => screen.getByRole("button", { name });
 describe("filtering my feedback", () => {
   it("counts each group on its chip and starts on all of them", async () => {
     mount();
-    await screen.findByText("FB-NEW-0001");
+    await listed("FB-NEW-0001");
     expect(chip(/^全部/).getAttribute("aria-pressed")).toBe("true");
     expect(chip(/^全部/).textContent).toContain("5");
-    expect(chip(/^新回复/).textContent).toContain("1");
-    expect(chip(/^需要你回复/).textContent).toContain("1");
-    expect(chip(/^未结束/).textContent).toContain("3");
+    expect(chip(/^有新回复/).textContent).toContain("1");
+    expect(chip(/^等你回复/).textContent).toContain("1");
+    expect(chip(/^进行中/).textContent).toContain("3");
     expect(chip(/^已结束/).textContent).toContain("2");
     expect(shown()).toHaveLength(5);
   });
 
   it("narrows the list to one group and back", async () => {
     mount();
-    await screen.findByText("FB-NEW-0001");
-    await userEvent.click(chip(/^新回复/));
+    await listed("FB-NEW-0001");
+    await userEvent.click(chip(/^有新回复/));
     expect(shown()).toEqual(["FB-NEW-0001"]);
-    expect(chip(/^新回复/).getAttribute("aria-pressed")).toBe("true");
-    await userEvent.click(chip(/^需要你回复/));
+    expect(chip(/^有新回复/).getAttribute("aria-pressed")).toBe("true");
+    await userEvent.click(chip(/^等你回复/));
     expect(shown()).toEqual(["FB-ASK-0002"]);
     await userEvent.click(chip(/^已结束/));
     expect(shown()).toEqual(["FB-DONE-0004", "FB-DUP-0005"]);
@@ -65,19 +66,18 @@ describe("filtering my feedback", () => {
 
   it("keeps a reply visible under the new-replies filter after it has been read this visit", async () => {
     const port = mount();
-    await screen.findByText("FB-NEW-0001");
-    await userEvent.click(chip(/^新回复/));
+    await listed("FB-NEW-0001");
     const seen = vi.spyOn(port, "feedbackSeen");
-    await userEvent.click(document.querySelector('[data-receipt="FB-NEW-0001"] [aria-expanded]')!);
-    await waitFor(() => expect(seen).toHaveBeenCalled());
+    await userEvent.click(chip(/^有新回复/));
+    await waitFor(() => expect(seen).toHaveBeenCalledWith("FB-NEW-0001", 1));
     expect(shown()).toEqual(["FB-NEW-0001"]);
   });
 
   it("keeps a half-written reply when the filter moves away and back", async () => {
     mount();
-    await screen.findByText("FB-OPEN-0003");
-    const box = () => document.querySelector<HTMLTextAreaElement>('[data-receipt="FB-OPEN-0003"] [data-action="feedback.reply.body"]')!;
-    await userEvent.click(document.querySelector('[data-receipt="FB-OPEN-0003"] [data-action="feedback.reply.open"]')!);
+    await listed("FB-OPEN-0003");
+    const box = () => document.querySelector<HTMLTextAreaElement>('.fbk-detail[data-receipt="FB-OPEN-0003"] [data-action="feedback.reply.body"]')!;
+    pick("FB-OPEN-0003");
     await userEvent.type(box(), "still typing");
     await userEvent.click(chip(/^已结束/));
     expect(shown()).not.toContain("FB-OPEN-0003");
@@ -87,15 +87,15 @@ describe("filtering my feedback", () => {
 
   it("says so when a group is empty instead of drawing a blank page", async () => {
     mount({ ...MINE, items: MINE.items.filter((i) => !i.unreadReplies) });
-    await screen.findByText("FB-ASK-0002");
-    await userEvent.click(chip(/^新回复/));
+    await listed("FB-ASK-0002");
+    await userEvent.click(chip(/^有新回复/));
     expect(shown()).toEqual([]);
     expect(screen.getByText("这一组里没有反馈。")).toBeTruthy();
   });
 
   it("draws no chips for a single report", async () => {
     mount({ ...MINE, items: [MINE.items[0]] });
-    await screen.findByText("FB-NEW-0001");
+    await listed("FB-NEW-0001");
     expect(screen.queryByRole("button", { name: /^全部/ })).toBeNull();
   });
 });

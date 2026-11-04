@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
+import { listed, pick } from "./feedbacktestkit";
 import { FeedbackMine } from "./FeedbackMine";
 import { MockPort } from "../port/mock";
 import { HttpError, type AgentPort } from "../port/port";
@@ -28,9 +29,9 @@ function portWith(answer: () => Mine) {
   return port;
 }
 
-const row = (receipt: string) => screen.getByText(receipt).closest("li")!;
+const row = pick;
 const box = () => screen.getByRole<HTMLTextAreaElement>("textbox", { name: /回复/ });
-const sendButton = () => screen.getByRole<HTMLButtonElement>("button", { name: "发送回复" });
+const sendButton = () => screen.getByRole<HTMLButtonElement>("button", { name: "发送" });
 
 describe("the thread under a report", () => {
   it("draws maintainer and user messages in order, as text and nothing else", async () => {
@@ -38,7 +39,6 @@ describe("the thread under a report", () => {
     const port = portWith(() => mine([item({ status: "answered", replies: [reply(1, "maintainer", hostile), reply(2, "user", "thanks\nsecond line")] })]));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    await userEvent.click(screen.getByRole("button", { name: /展开对话/ }));
     const msgs = [...row("FB-AAAA-0001").querySelectorAll(".fbk-thread li")];
     expect(msgs.map((li) => li.getAttribute("data-author"))).toEqual(["maintainer", "user"]);
     expect(msgs[0]!.querySelector(".fbk-msg")!.textContent).toBe(hostile);
@@ -50,16 +50,11 @@ describe("the thread under a report", () => {
     expect(within(msgs[1] as HTMLElement).getByText("你")).toBeTruthy();
   });
 
-  it("shows the last four messages and reveals the rest on request", async () => {
+  it("shows the whole exchange on the report's own page", async () => {
     const replies = Array.from({ length: 7 }, (_, i) => reply(i + 1, i % 2 ? "user" : "maintainer", `message ${i + 1}`));
     render(<FeedbackMine port={portWith(() => mine([item({ status: "answered", replies })]))} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(screen.queryByText("message 3")).toBeNull();
-    expect(screen.getByText("message 4")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: /展开对话/ }));
-    await userEvent.click(screen.getByRole("button", { name: "显示更早的 3 条" }));
-    expect(screen.getByText("message 1")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /显示更早/ })).toBeNull();
+    expect([...document.querySelectorAll(".fbk-msg")].map((m) => m.textContent)).toEqual(replies.map((x) => x.body));
   });
 });
 
@@ -69,11 +64,10 @@ describe("a question waiting for the reporter", () => {
   it("carries a needs-your-input chip and an open reply box, without any click", async () => {
     render(<FeedbackMine port={portWith(asking)} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(row("FB-AAAA-0001").querySelector(".fbk-chip")!.textContent).toBe("需要你回复");
+    expect(row("FB-AAAA-0001").querySelector(".fbk-chip")!.textContent).toBe("等你回复");
     expect(box()).toBeTruthy();
     expect(sendButton().disabled).toBe(true);
     expect(screen.getByText("0 / 4,096 字节")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
   });
 
   it("sends the trimmed reply once, clears the box and reads the list again", async () => {
@@ -90,7 +84,7 @@ describe("a question waiting for the reporter", () => {
     await waitFor(() => expect(port.replyFeedback).toHaveBeenCalledTimes(1));
     expect(port.replyFeedback).toHaveBeenCalledWith("FB-AAAA-0001", "macOS 15");
     expect(await screen.findByText("macOS 15")).toBeTruthy();
-    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    await waitFor(() => expect(box().value).toBe(""));
     expect(row("FB-AAAA-0001").querySelector(".fbk-chip")!.textContent).toBe("已收到");
     expect(port.myFeedback).toHaveBeenCalledTimes(2);
   });
@@ -169,16 +163,16 @@ describe("a question waiting for the reporter", () => {
 });
 
 describe("the box after a reply", () => {
-  it("starts empty the next time it is opened", async () => {
-    const port = portWith(() => mine([item({ status: "answered", replies: [reply(1, "maintainer", "done")] })]));
+  it("is empty again once the reply is sent, and stays empty after moving to another report and back", async () => {
+    const port = portWith(() => mine([item({ status: "answered", replies: [reply(1, "maintainer", "done")] }), item({ receipt: "FB-AAAA-0002", status: "answered" })]));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    await userEvent.click(screen.getByRole("button", { name: "回复" }));
     await userEvent.type(box(), "thanks");
     await userEvent.click(sendButton());
     await waitFor(() => expect(port.replyFeedback).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
-    await userEvent.click(screen.getByRole("button", { name: "回复" }));
+    await waitFor(() => expect(box().value).toBe(""));
+    pick("FB-AAAA-0002");
+    pick("FB-AAAA-0001");
     expect(box().value).toBe("");
   });
 });
@@ -191,34 +185,28 @@ describe("the timeline of a report that never reaches GitHub", () => {
       item({ receipt: "FB-AAAA-0003", status: "needs_info", needsInput: true, replies: [reply(2, "maintainer", "q")] }),
     ];
     render(<FeedbackMine port={portWith(() => mine(items))} onFile={() => {}} />);
-    await screen.findByText("FB-AAAA-0001");
+    await listed("FB-AAAA-0001");
     const steps = (receipt: string) => [...row(receipt).querySelectorAll(".fbk-tl li")].map((li) => [li.getAttribute("data-state"), li.textContent!.replace(/^[^：]*：/, "")]);
-    expect(steps("FB-AAAA-0001")).toEqual([["done", "已收到"], ["done", "已关闭此反馈"]]);
-    expect(steps("FB-AAAA-0002")).toEqual([["done", "已收到"], ["done", "维护者已回复"]]);
-    expect(steps("FB-AAAA-0003")).toEqual([["done", "已收到"], ["current", "等你补充信息"]]);
+    expect(steps("FB-AAAA-0001")).toEqual([["done", "已收到 09-20"], ["done", "已关闭此反馈"]]);
+    expect(steps("FB-AAAA-0002")).toEqual([["done", "已收到 09-20"], ["done", "维护者已回复"]]);
+    expect(steps("FB-AAAA-0003")).toEqual([["done", "已收到 09-20"], ["current", "等你补充信息"]]);
   });
 });
 
 describe("who may reply", () => {
-  it("offers a Reply button on answered, recorded and in-progress reports, and opens the box from it", async () => {
+  it("keeps a reply box open on answered, recorded and in-progress reports", async () => {
     const items = (["answered", "recorded", "in_progress"] as const).map((status, i) => item({ receipt: `FB-AAAA-000${i + 1}`, status, replies: status === "answered" ? [reply(1, "maintainer", "done")] : [] }));
     render(<FeedbackMine port={portWith(() => mine(items))} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(screen.getAllByRole("button", { name: "回复" })).toHaveLength(3);
-    expect(screen.queryByRole("textbox")).toBeNull();
-    await userEvent.click(within(row("FB-AAAA-0002")).getByRole("button", { name: "回复" }));
-    expect(within(row("FB-AAAA-0002")).getByRole("textbox")).toBeTruthy();
-    await userEvent.click(within(row("FB-AAAA-0002")).getByRole("button", { name: "取消" }));
-    expect(screen.queryByRole("textbox")).toBeNull();
+    for (const receipt of ["FB-AAAA-0001", "FB-AAAA-0002", "FB-AAAA-0003"]) expect(within(row(receipt)).getByRole("textbox")).toBeTruthy();
   });
 
   it("offers nothing on wont-fix, duplicate, closed and unreadable reports", async () => {
     const items = (["wontfix", "duplicate", "closed"] as const).map((status, i) => item({ receipt: `FB-AAAA-000${i + 1}`, status }));
     items.push(item({ receipt: "FB-AAAA-0009", status: "needs_info", needsInput: true, statusUnavailable: true }));
     render(<FeedbackMine port={portWith(() => mine(items))} onFile={() => {}} />);
-    await screen.findByText("FB-AAAA-0001");
-    expect(screen.queryByRole("button", { name: "回复" })).toBeNull();
-    expect(screen.queryByRole("textbox")).toBeNull();
+    await listed("FB-AAAA-0001");
+    for (const receipt of ["FB-AAAA-0001", "FB-AAAA-0002", "FB-AAAA-0003", "FB-AAAA-0009"]) expect(within(row(receipt)).queryByRole("textbox")).toBeNull();
   });
 
   it("takes a reply on a released received report, and none while it is under review", async () => {
@@ -229,8 +217,8 @@ describe("who may reply", () => {
     const port = portWith(() => mine(items));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(within(row("FB-AAAA-0002")).queryByRole("button", { name: "回复" })).toBeNull();
-    await userEvent.click(within(row("FB-AAAA-0001")).getByRole("button", { name: "回复" }));
+    expect(within(row("FB-AAAA-0002")).queryByRole("textbox")).toBeNull();
+    row("FB-AAAA-0001");
     await userEvent.type(box(), "macOS 15");
     await userEvent.click(sendButton());
     await waitFor(() => expect(port.replyFeedback).toHaveBeenCalledWith("FB-AAAA-0001", "macOS 15"));
@@ -239,9 +227,7 @@ describe("who may reply", () => {
   it("lets the reporter say a fix did not hold, and says that reopens the report", async () => {
     render(<FeedbackMine port={portWith(() => mine([item({ status: "fixed", issueNumber: 11350 })]))} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(screen.queryByRole("button", { name: "回复" })).toBeNull();
-    await userEvent.click(within(row("FB-AAAA-0001")).getByRole("button", { name: "仍未解决，回复" }));
-    expect(within(row("FB-AAAA-0001")).getByRole("textbox")).toBeTruthy();
+    expect(within(row("FB-AAAA-0001")).getByRole("textbox").getAttribute("placeholder")).toBe("说明还有什么问题");
     expect(screen.getByText(/重新打开/)).toBeTruthy();
   });
 
@@ -256,8 +242,6 @@ describe("who may reply", () => {
     const items = [item({ status: "recorded", issueNumber: 11350 }), item({ receipt: "FB-AAAA-0002", status: "answered" })];
     render(<FeedbackMine port={portWith(() => mine(items))} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    await userEvent.click(within(row("FB-AAAA-0001")).getByRole("button", { name: "回复" }));
-    await userEvent.click(within(row("FB-AAAA-0002")).getByRole("button", { name: "回复" }));
     expect(within(row("FB-AAAA-0001")).getByText(/公开议题 #11350.*公开转发/)).toBeTruthy();
     expect(within(row("FB-AAAA-0002")).getByText(/只发给维护者，不会公开/)).toBeTruthy();
     expect(within(row("FB-AAAA-0002")).queryByText(/公开转发/)).toBeNull();
@@ -274,9 +258,9 @@ describe("reading the replies", () => {
     const port = portWith(() => mine(items));
     const onUnread = vi.fn();
     render(<FeedbackMine port={port} onFile={() => {}} onUnread={onUnread} />);
-    await screen.findByText("FB-AAAA-0001");
+    await screen.findByText("FB-AAAA-0002");
     expect(port.feedbackSeen).not.toHaveBeenCalled();
-    await userEvent.click(within(row("FB-AAAA-0001")).getByRole("button", { name: /展开对话/ }));
+    row("FB-AAAA-0001");
     await waitFor(() => expect(onUnread).toHaveBeenCalledWith(1));
     expect(port.feedbackSeen).toHaveBeenCalledTimes(1);
     expect(port.feedbackSeen).toHaveBeenCalledWith("FB-AAAA-0001", 3);
@@ -293,7 +277,6 @@ describe("reading the replies", () => {
     });
     const onUnread = vi.fn();
     render(<FeedbackMine port={port} onFile={() => {}} onUnread={onUnread} />);
-    await userEvent.click(await screen.findByRole("button", { name: /展开对话/ }));
     await waitFor(() => expect(port.feedbackSeen).toHaveBeenCalledWith("FB-AAAA-0001", 1));
     await waitFor(() => expect(onUnread).toHaveBeenCalledWith(1));
   });
@@ -350,7 +333,7 @@ describe("review fixes", () => {
     const port = portWith(() => mine([item({ status: "needs_info", needsInput: true })]));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(row("FB-AAAA-0001").getAttribute("aria-label")).toBe("FB-AAAA-0001 snippet");
+    expect(document.querySelector('[data-action="feedback.pick"]')!.getAttribute("aria-label")).toBe("FB-AAAA-0001 snippet");
     await userEvent.type(box(), "hi");
     await userEvent.click(sendButton());
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("回复已发送。"));
@@ -362,19 +345,17 @@ describe("review fixes", () => {
     expect(document.querySelector(".fbk-msg")!.getAttribute("dir")).toBe("auto");
   });
 
-  it("marks folded unread replies seen only when they are expanded", async () => {
+  it("marks a report's replies seen once it is the one on the right, and not before", async () => {
     const replies = Array.from({ length: 6 }, (_, i) => reply(i + 1, "maintainer", `m${i + 1}`));
-    const port = portWith(() => mine([item({ status: "answered", unreadReplies: 6, replies })]));
+    const port = portWith(() => mine([item({ receipt: "FB-AAAA-0002", status: "needs_info", needsInput: true }), item({ status: "answered", unreadReplies: 6, replies })]));
     const onUnread = vi.fn();
     render(<FeedbackMine port={port} onFile={() => {}} onUnread={onUnread} />);
-    await screen.findByText("FB-AAAA-0001");
-    await waitFor(() => expect(onUnread).toHaveBeenCalledWith(1));
+    await screen.findByText("FB-AAAA-0002");
+    await waitFor(() => expect(onUnread).toHaveBeenCalledWith(2));
     expect(port.feedbackSeen).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: /展开对话/ }));
-    expect(port.feedbackSeen).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: /显示更早/ }));
+    row("FB-AAAA-0001");
     await waitFor(() => expect(port.feedbackSeen).toHaveBeenCalledWith("FB-AAAA-0001", 6));
-    await waitFor(() => expect(onUnread).toHaveBeenLastCalledWith(0));
+    await waitFor(() => expect(onUnread).toHaveBeenLastCalledWith(1));
   });
 
   it("refreshes once after a not-replyable refusal and keeps the draft", async () => {
@@ -382,7 +363,6 @@ describe("review fixes", () => {
     port.replyFeedback = vi.fn(async () => { throw new HttpError(409, "n", { code: FEEDBACK_CODE.notReplyable, error: "n" }); });
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    await userEvent.click(screen.getByRole("button", { name: "回复" }));
     await userEvent.type(box(), "draft");
     await userEvent.click(sendButton());
     await waitFor(() => expect(port.myFeedback).toHaveBeenCalledTimes(2));
@@ -399,9 +379,8 @@ describe("review fixes", () => {
     const held = row("FB-AAAA-0001");
     expect(within(held).getByText("审核中", { selector: ".fbk-chip" })).toBeTruthy();
     expect(within(held).getByText(/维护者正在查看这份反馈/)).toBeTruthy();
-    expect(within(held).queryByText("已收到")).toBeNull();
+    expect(within(held).queryByText(/^已收到/)).toBeNull();
     expect(within(held).queryByRole("textbox")).toBeNull();
-    expect(within(held).queryByRole("button", { name: "回复" })).toBeNull();
     const plain = row("FB-AAAA-0002");
     expect(within(plain).getByText("已收到", { selector: ".fbk-chip" })).toBeTruthy();
     expect(within(plain).queryByText(/维护者正在查看这份反馈/)).toBeNull();
@@ -438,7 +417,7 @@ describe("replying with screenshots", () => {
     const port = portWith(() => mine([item({ status: "needs_info", needsInput: true, replies: [reply(1, "maintainer", "can you show it?")], ...over })]));
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    await screen.findByRole("button", { name: "添加截图…" });
+    await screen.findByRole("button", { name: "附图" });
     return port;
   };
   const attach = (...files: File[]) => userEvent.upload(screen.getByLabelText("选择截图文件"), files);

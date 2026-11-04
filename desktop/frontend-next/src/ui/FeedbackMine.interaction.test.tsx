@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
+import { listed, pick } from "./feedbacktestkit";
 import { Feedback } from "./Feedback";
 import { FeedbackMine } from "./FeedbackMine";
 import { MockPort } from "../port/mock";
@@ -28,38 +29,46 @@ function portWith(answer: Mine | Error) {
   return port;
 }
 
-const row = (receipt: string) => screen.getByText(receipt).closest("li")!;
 
 describe("my feedback", () => {
-  it("draws one row per status, each with its own chip and timeline", async () => {
+  it("draws one row per status in the list, and each report's chip and timeline on its own page", async () => {
     const port = new MockPort() as unknown as AgentPort;
     render(<FeedbackMine port={port} onFile={() => {}} />);
-    await screen.findByText("FB-7K3M-9QX2");
+    await listed("FB-7K3M-9QX2");
     const shown = new Set([...document.querySelectorAll(".fbk-item:not([data-stale])")].map((li) => li.getAttribute("data-status")));
     expect([...shown].sort()).toEqual([...FEEDBACK_STATUSES].sort());
 
-    const fixed = row("FB-7K3M-9QX2");
-    expect(within(fixed).getByText("已修复")).toBeTruthy();
-    expect(within(fixed).getByText("已在 v2.21.0 修复")).toBeTruthy();
+    const fixed = pick("FB-7K3M-9QX2");
+    expect(fixed.querySelector(".fbk-chip")!.textContent).toBe("已在 v2.21.0 修复");
     expect(within(fixed).getByRole("link", { name: "#11350" })).toBeTruthy();
 
-    expect(within(row("FB-3F6G-2KV9")).getByText("已修复，将随下个版本发布")).toBeTruthy();
-    expect(within(row("FB-8Q2J-6PW4")).getByText("不予修复", { selector: "span:not(.fbk-chip)" })).toBeTruthy();
-    expect(within(row("FB-4T7V-3ZH1")).getByRole("link", { name: "#11299" })).toBeTruthy();
-    expect(row("FB-4T7V-3ZH1").textContent).toContain("与 #11299 重复");
+    expect(pick("FB-3F6G-2KV9").querySelector(".fbk-chip")!.textContent).toBe("下个版本修复");
+    expect(pick("FB-8Q2J-6PW4").querySelector(".fbk-chip")!.textContent).toBe("暂不做");
+    const duplicate = pick("FB-4T7V-3ZH1");
+    expect(within(duplicate).getByRole("link", { name: "#11299" })).toBeTruthy();
+    expect(duplicate.querySelector(".fbk-tl")!.textContent).toContain("和 #11299 重复");
 
-    const inProgress = row("FB-5N1C-8RT3").querySelector(".fbk-tl")!;
+    const inProgress = pick("FB-5N1C-8RT3").querySelector(".fbk-tl")!;
     expect(inProgress.querySelector('[aria-current="step"]')!.textContent).toBe("当前：处理中");
-    const received = row("FB-9B4D-1XM6").querySelector(".fbk-tl")!;
-    expect(received.querySelector('[aria-current="step"]')!.textContent).toBe("当前：已收到");
+    const received = pick("FB-9B4D-1XM6").querySelector(".fbk-tl")!;
+    expect(received.querySelector('[aria-current="step"]')!.textContent).toMatch(/^当前：已收到 /);
     expect(received.querySelectorAll('[data-state="todo"]')).toHaveLength(3);
+  });
+
+  it("puts a question waiting on the reporter first, and opens on it", async () => {
+    const port = portWith({ offline: false, unread: 1, hasNew: true, items: [item({}), item({ receipt: "FB-AAAA-0002", status: "needs_info", needsInput: true })] });
+    render(<FeedbackMine port={port} onFile={() => {}} />);
+    await listed("FB-AAAA-0002");
+    expect([...document.querySelectorAll(".fbk-item")].map((li) => li.getAttribute("data-receipt"))).toEqual(["FB-AAAA-0002", "FB-AAAA-0001"]);
+    expect(document.querySelector(".fbk-detail")!.getAttribute("data-receipt")).toBe("FB-AAAA-0002");
+    expect([...document.querySelectorAll(".fbk-item")[0].querySelectorAll(".fbk-chip")].map((c) => c.textContent)).toEqual(["等你回复", "已收到"]);
   });
 
   it("names every status through its label, not through colour alone", async () => {
     const port = portWith({ offline: false, unread: 0, hasNew: false, items: FEEDBACK_STATUSES.map((status, i) => item({ receipt: `FB-AAAA-000${i}`, status })) });
     render(<FeedbackMine port={port} onFile={() => {}} />);
-    await screen.findByText("FB-AAAA-0000");
-    for (const [status, label] of [["received", "已收到"], ["needs_info", "需要补充信息"], ["answered", "维护者已回复"], ["closed", "已关闭此反馈"], ["recorded", "已登记"], ["in_progress", "处理中"], ["fixed", "已修复"], ["wontfix", "不予修复"], ["duplicate", "重复"], ["withdrawn", "已撤回"]]) {
+    await listed("FB-AAAA-0000");
+    for (const [status, label] of [["received", "已收到"], ["needs_info", "需要补充信息"], ["answered", "维护者已回复"], ["closed", "已关闭此反馈"], ["recorded", "已登记"], ["in_progress", "处理中"], ["fixed", "下个版本修复"], ["wontfix", "暂不做"], ["duplicate", "重复"], ["withdrawn", "已撤回"]]) {
       expect(document.querySelector(`.fbk-list .fbk-chip[data-status="${status}"]`)!.textContent).toBe(label);
     }
   });
@@ -69,7 +78,9 @@ describe("my feedback", () => {
     port.openExternal = vi.fn(async () => {});
     const onFile = vi.fn();
     render(<FeedbackMine port={port} onFile={onFile} />);
-    await userEvent.click(await screen.findByRole("link", { name: "#11302" }));
+    await listed("FB-2H8P-4WD7");
+    pick("FB-2H8P-4WD7");
+    await userEvent.click(screen.getByRole("link", { name: "#11302" }));
     expect(onFile).toHaveBeenCalledWith("https://github.com/esengine/DeepSeek-Reasonix/issues/11302");
   });
 
@@ -108,7 +119,7 @@ describe("my feedback", () => {
     expect(screen.getByText("FB-AAAA-0001")).toBeTruthy();
     expect(screen.queryByText("正在读取你的反馈…")).toBeNull();
     answer({ ...first, items: [item({}), item({ receipt: "FB-AAAA-0002" })] });
-    expect(await screen.findByText("FB-AAAA-0002")).toBeTruthy();
+    expect(await listed("FB-AAAA-0002")).toBeTruthy();
   });
 
   it("keeps the level, account and board behind one collapsed row and asks for them only when it is opened", async () => {
@@ -139,9 +150,9 @@ describe("my feedback", () => {
     render(<FeedbackMine port={portWith({ items: [item({ statusUnavailable: true }), item({ receipt: "FB-AAAA-0002", statusUnavailable: true })], offline: false, unread: 0, hasNew: false })} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
     expect(screen.getAllByText(/已经查不到它们的最新状态/)).toHaveLength(1);
-    expect(screen.getAllByText("状态已无法追踪")).toHaveLength(2);
+    expect(document.querySelectorAll('.fbk-list .fbk-chip[data-status="unavailable"]')).toHaveLength(2);
     expect(document.querySelector(".fbk-tl")).toBeNull();
-    expect(row("FB-AAAA-0001").getAttribute("data-stale")).toBe("");
+    expect(document.querySelector('.fbk-item[data-receipt="FB-AAAA-0001"]')!.getAttribute("data-stale")).toBe("");
   });
 });
 
@@ -151,7 +162,7 @@ describe("refreshing", () => {
     const spy = vi.spyOn(port, "myFeedback");
     render(<Feedback port={port} tab="mine" onClose={() => {}} onError={() => {}} />);
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    await screen.findByText("FB-7K3M-9QX2");
+    await listed("FB-7K3M-9QX2");
     vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
     await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(spy).toHaveBeenCalledTimes(1);
@@ -159,7 +170,7 @@ describe("refreshing", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "刷新列表" }));
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
-    await userEvent.click(screen.getByRole("tab", { name: "发送反馈" }));
+    await userEvent.click(screen.getByRole("tab", { name: "写新反馈" }));
     await userEvent.click(screen.getByRole("tab", { name: "我的反馈" }));
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(3));
   });
@@ -177,15 +188,17 @@ describe("refreshing", () => {
     const port = portWith({ offline: false, unread: 0, hasNew: false, items: [item({ status: "recorded", issueNumber: 11350, issueUrl: "https://evil.example/phish?x=1" }), item({ receipt: "FB-AAAA-0002", status: "duplicate", issueNumber: 1, duplicateOf: 11302, issueUrl: "javascript:alert(1)" })] });
     render(<FeedbackMine port={port} onFile={onFile} />);
     await screen.findByText("FB-AAAA-0001");
-    const links = [...document.querySelectorAll<HTMLAnchorElement>("a[data-action='feedback.link']")];
-    expect(links.map((a) => a.href)).toEqual([
+    const read = (receipt: string) => [...pick(receipt).querySelectorAll<HTMLAnchorElement>("a[data-action='feedback.link']")].map((a) => [a.href, a.rel]);
+    const links = [...read("FB-AAAA-0001"), ...read("FB-AAAA-0002")];
+    expect(links.map(([href]) => href)).toEqual([
       "https://github.com/esengine/DeepSeek-Reasonix/issues/11350",
       "https://github.com/esengine/DeepSeek-Reasonix/issues/1",
       "https://github.com/esengine/DeepSeek-Reasonix/issues/11302",
     ]);
-    for (const a of links) expect(a.rel).toBe("noopener noreferrer");
+    for (const [, rel] of links) expect(rel).toBe("noopener noreferrer");
     expect(document.body.innerHTML).not.toContain("evil.example");
-    await userEvent.click(links[0]!);
+    pick("FB-AAAA-0001");
+    await userEvent.click(document.querySelector<HTMLAnchorElement>("a[data-action='feedback.link']")!);
     expect(onFile).toHaveBeenCalledWith("https://github.com/esengine/DeepSeek-Reasonix/issues/11350");
   });
 
@@ -193,7 +206,8 @@ describe("refreshing", () => {
     const port = portWith({ offline: false, unread: 0, hasNew: false, items: [item({ status: "recorded", issueNumber: -3 }), item({ receipt: "FB-AAAA-0002", status: "recorded", issueNumber: 1.5 })] });
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(document.querySelectorAll("a[data-action='feedback.link']")).toHaveLength(0);
+    expect(pick("FB-AAAA-0001").querySelectorAll("a[data-action='feedback.link']")).toHaveLength(0);
+    expect(pick("FB-AAAA-0002").querySelectorAll("a[data-action='feedback.link']")).toHaveLength(0);
   });
 
   it("says each timeline step's state in words as well as by its dot", async () => {
@@ -209,7 +223,8 @@ describe("refreshing", () => {
     const port = portWith({ offline: false, unread: 0, hasNew: false, items: [item({ titleSnippet: cut }), item({ receipt: "FB-AAAA-0002", titleSnippet: "short" })] });
     render(<FeedbackMine port={port} onFile={() => {}} />);
     await screen.findByText("FB-AAAA-0001");
-    expect(row("FB-AAAA-0001").querySelector(".fbk-snippet")!.textContent).toBe(cut + "…");
-    expect(row("FB-AAAA-0002").querySelector(".fbk-snippet")!.textContent).toBe("short");
+    expect(document.querySelector('.fbk-item[data-receipt="FB-AAAA-0001"] .fbk-row-title')!.textContent).toBe(cut + "…");
+    expect(pick("FB-AAAA-0001").querySelector(".fbk-detail-title")!.textContent).toBe(cut + "…");
+    expect(document.querySelector('.fbk-item[data-receipt="FB-AAAA-0002"] .fbk-row-title')!.textContent).toBe("short");
   });
 });

@@ -292,7 +292,7 @@ describe("screenshots", () => {
     setup();
     await ready();
     await userEvent.click(screen.getByRole("tab", { name: "我的反馈" }));
-    await userEvent.click(screen.getByRole("tab", { name: "发送反馈" }));
+    await userEvent.click(screen.getByRole("tab", { name: "写新反馈" }));
     const node = target === "heading" ? document.querySelector("#fbk-title")! : document.activeElement!;
     fireEvent.paste(node, { clipboardData: { files: [png("dialog.png")] } });
     expect(await screen.findByAltText("dialog.png")).toBeTruthy();
@@ -305,7 +305,7 @@ describe("screenshots", () => {
     await ready();
     await userEvent.click(screen.getByRole("tab", { name: "我的反馈" }));
     fireEvent.paste(document.activeElement!, { clipboardData: { files: [png("hidden.png")] } });
-    await userEvent.click(screen.getByRole("tab", { name: "发送反馈" }));
+    await userEvent.click(screen.getByRole("tab", { name: "写新反馈" }));
     expect(heldDraft().shots).toEqual([]);
     expect(screen.queryByAltText("hidden.png")).toBeNull();
   });
@@ -617,7 +617,7 @@ describe("dialog", () => {
     setup();
     await ready();
     await waitFor(() => expect(document.activeElement).toBe(body()));
-    const send = screen.getByRole("tab", { name: "发送反馈" });
+    const send = screen.getByRole("tab", { name: "写新反馈" });
     send.focus();
     await userEvent.keyboard("{ArrowRight}");
     expect(screen.getByRole("tab", { name: "我的反馈", selected: true })).toBeTruthy();
@@ -717,21 +717,18 @@ describe("dialog", () => {
 });
 
 describe("feedback dialog size", () => {
-  it("fills the window on request and returns to the reading column", async () => {
+  it("opens wide for the two columns of My feedback and narrows again for the form", async () => {
     setup({}, "mine");
     const dialog = screen.getByRole("dialog");
-    const toggle = screen.getByRole("button", { name: "铺满窗口" });
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    expect(dialog.hasAttribute("data-wide")).toBe(false);
+    expect(dialog.getAttribute("data-tab")).toBe("mine");
+    await userEvent.click(screen.getByRole("tab", { name: "写新反馈" }));
+    expect(dialog.getAttribute("data-tab")).toBe("send");
+  });
 
-    await userEvent.click(toggle);
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    expect(dialog.hasAttribute("data-wide")).toBe(true);
-    expect(screen.getByRole("tab", { name: "我的反馈" }).getAttribute("aria-selected")).toBe("true");
-
-    await userEvent.click(toggle);
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    expect(dialog.hasAttribute("data-wide")).toBe(false);
+  it("counts what waits on the reader on the My feedback tab, without renaming the tab", () => {
+    render(<Feedback port={new MockPort() as unknown as AgentPort} unread={3} onClose={() => {}} onError={() => {}} />);
+    const tab = screen.getByRole("tab", { name: "我的反馈" });
+    expect(tab.querySelector(".fbk-tab-count")!.textContent).toBe("3");
   });
 });
 
