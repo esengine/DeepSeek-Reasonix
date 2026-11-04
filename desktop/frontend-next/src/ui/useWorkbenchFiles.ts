@@ -103,7 +103,7 @@ export function useWorkbenchFiles({ port, workspaceRoot, repos = [], path, openP
         const held = parseGrantedFile(path);
         const info = await port.workspacePreviewInfo({ path: held?.rel ?? path, root: held?.root }, controller.signal);
         if (!controller.signal.aborted && info.version !== entry.file?.observedVersion) {
-          const error = t("磁盘内容已变化，未保存的编辑已保留");
+          const error = t("workbench.the_file_changed_on_disk");
           if (entry.error !== error) { entry.error = error; notify(); }
         }
       } catch (e) {

@@ -30,19 +30,19 @@ export function WorkbenchExplorerHead({
   const openEditor = useCallback(() => {
     void port
       .openInEditor()
-      .then(({ editor }) => setEditorNote(t("已在 {app} 中打开", { app: editor })))
+      .then(({ editor }) => setEditorNote(t("workbench.opened_in_app", { app: editor })))
       .catch((e) => setEditorNote(reason(e)));
   }, [port]);
   return (
     <div className="workbench-explorer-head">
-      <span>{t("资源管理器")}</span>
+      <span>{t("workbench.explorer")}</span>
       <small>{count}</small>
       <button
         className="workbench-open-editor"
         data-action="workbench.hidden"
         aria-pressed={hidden}
-        title={t("显示隐藏文件")}
-        aria-label={t("显示隐藏文件")}
+        title={t("workbench.show_hidden_files")}
+        aria-label={t("workbench.show_hidden_files")}
         onClick={() => onHidden(!hidden)}
       >
         <StudioIcon name={hidden ? "eye" : "eyeoff"} />
@@ -50,8 +50,8 @@ export function WorkbenchExplorerHead({
       <button
         className="workbench-open-editor"
         data-action="workspace.editor"
-        title={editorNote || t("在代码编辑器中打开工作区")}
-        aria-label={t("在代码编辑器中打开工作区")}
+        title={editorNote || t("workbench.open_the_workspace_in_a")}
+        aria-label={t("workbench.open_the_workspace_in_a")}
         onClick={openEditor}
       >
         <StudioIcon name="code" />
@@ -60,8 +60,8 @@ export function WorkbenchExplorerHead({
         <button
           className="workbench-open-editor"
           data-action="workbench.reveal"
-          title={t("在系统文件管理器中显示工作区")}
-          aria-label={t("在系统文件管理器中显示工作区")}
+          title={t("workbench.show_the_workspace_in_the")}
+          aria-label={t("workbench.show_the_workspace_in_the")}
           onClick={onReveal}
         >
           <StudioIcon name="reveal" />

@@ -164,7 +164,7 @@ export function Remotes({ hub, onError }: Props) {
                   .finally(() => setProbing(""));
               }}
             >
-              {t(probing === host.name ? "询问中…" : "测试连接")}
+              {t(probing === host.name ? "remote.asking" : "common.test_it")}
             </button>
             <button
               className="rmtlnk"
@@ -173,61 +173,61 @@ export function Remotes({ hub, onError }: Props) {
                 setDraft(draftOf(host));
               }}
             >
-              {t("编辑")}
+              {t("common.edit")}
             </button>
             <button className="rmtlnk" data-action="remote.hide" data-target={host.name} onClick={() => toggleHiddenHost(host.name)}>
-              {t(hidden.includes(host.name) ? "在侧栏显示" : "在侧栏隐藏")}
+              {t(hidden.includes(host.name) ? "remote.show_in_the_rail" : "remote.hide_from_the_rail")}
             </button>
-            {host.disabled ? <span className="st">{t("已停用")}</span> : null}
+            {host.disabled ? <span className="st">{t("common.suspended")}</span> : null}
             <Switch
               data-action="remote.enable"
               data-target={host.name}
               on={!host.disabled}
               busy={busy === host.name}
-              label={t(host.disabled ? "启用这台主机" : "停用这台主机")}
+              label={t(host.disabled ? "remote.turn_this_machine_on" : "remote.turn_this_machine_off")}
               onClick={() => void save({ ...draftOf(host), disabled: !host.disabled })}
             />
             <button className="rmtlnk" data-danger="" disabled={!!busy} onClick={() => setConfirm(host.name)}>
-              {t("移除")}
+              {t("common.remove")}
             </button>
           </div>
           <div className="sub">
-            {host.workspace ? <span dir="ltr">{host.workspace}</span> : <span className="dim">{t("未设置默认工作区")}</span>}
+            {host.workspace ? <span dir="ltr">{host.workspace}</span> : <span className="dim">{t("remote.no_default_workspace")}</span>}
             {workspacesOf(host).length > 1 ? (
-              <span className="tag">{t("还有 {n} 个项目", { n: workspacesOf(host).length - 1 })}</span>
+              <span className="tag">{t("remote.n_more_projects", { n: workspacesOf(host).length - 1 })}</span>
             ) : null}
-            {host.kind === "wsl" ? <span className="tag">{t("WSL 发行版")}</span> : null}
-            {host.useSSHConfig ? <span className="tag">{t("跟随 ssh_config")}</span> : null}
-            {host.forwards ? <span className="tag">{t("{n} 条转发", { n: host.forwards })}</span> : null}
-            {host.panes ? <span className="tag">{t("{n} 个面板", { n: host.panes })}</span> : null}
+            {host.kind === "wsl" ? <span className="tag">{t("remote.wsl_distribution")}</span> : null}
+            {host.useSSHConfig ? <span className="tag">{t("remote.follows_ssh_config")}</span> : null}
+            {host.forwards ? <span className="tag">{t("remote.n_forwards", { n: host.forwards })}</span> : null}
+            {host.panes ? <span className="tag">{t("remote.n_panes", { n: host.panes })}</span> : null}
           </div>
           {probes[host.name] ? <ProbeCard probe={probes[host.name]} host={host.name} /> : null}
           {confirm === host.name && (
             <div className="rmtconfirm" role="alertdialog">
-              <span>{t("从列表中移除「{name}」？远端数据不会被删除。", { name: host.name })}</span>
-              <button onClick={() => setConfirm("")}>{t("取消")}</button>
+              <span>{t("remote.remove_name_from_the_list", { name: host.name })}</span>
+              <button onClick={() => setConfirm("")}>{t("common.cancel")}</button>
               <button data-danger="" data-action="remotes.remove" data-target={host.name} autoFocus onClick={() => void drop(host.name)}>
-                {t("移除")}
+                {t("common.remove")}
               </button>
             </div>
           )}
         </div>
       ))}
 
-      {!hosts.length && !draft && <p className="rmtempty">{t("尚未添加远程机器。添加后，其工作区将与本地工作区并列显示在左栏。")}</p>}
+      {!hosts.length && !draft && <p className="rmtempty">{t("remote.no_remote_machines_yet_add")}</p>}
 
       {/* Importing beats typing: on a machine that already uses ssh, the
           addresses are written down next door and this only borrows the name. */}
       {candidates.length > 0 && (
         <div className="rmtcands">
-          <span className="cap">{t("~/.ssh/config 中还有")}</span>
+          <span className="cap">{t("remote.also_in_ssh_config")}</span>
           {candidates.map((alias) => (
             <button
               key={alias}
               data-action="remotes.add"
               className="rmtcand"
               disabled={!!busy}
-              title={t("按 ssh_config 中的配置添加")}
+              title={t("remote.add_it_with_the_settings")}
               onClick={() => void save({ name: alias, useSSHConfig: true })}
             >
               + {alias}
@@ -251,12 +251,12 @@ export function Remotes({ hub, onError }: Props) {
 
       {draft ? (
         <div className="rmtform">
-          {field("name", t("名称"), "gpu-box")}
+          {field("name", t("common.name"), "gpu-box")}
           {/* A saved machine keeps the way it is reached: the two kinds share no
               field, so turning one into the other is a new machine, not an edit. */}
           {wsl && !editing ? (
-            <div className="rmtf" role="radiogroup" aria-label={t("连接类型")}>
-              <span>{t("连接类型")}</span>
+            <div className="rmtf" role="radiogroup" aria-label={t("remote.connection_type")}>
+              <span>{t("remote.connection_type")}</span>
               <div className="rmtkinds">
                 {(["", "wsl"] as const).map((k) => (
                   <button
@@ -267,7 +267,7 @@ export function Remotes({ hub, onError }: Props) {
                     data-value={k || "ssh"}
                     onClick={() => setDraft((d) => (d ? { ...d, kind: k, distro: k ? d.distro || wsl.distros.find((x) => x.version === 2)?.name || "" : "" } : d))}
                   >
-                    {k ? t("WSL 发行版") : t("SSH 主机")}
+                    {k ? t("remote.wsl_distribution") : t("remote.ssh_host")}
                   </button>
                 ))}
               </div>
@@ -275,22 +275,22 @@ export function Remotes({ hub, onError }: Props) {
           ) : null}
           {isWSL ? (
             <label className="rmtf">
-              <span>{t("发行版")}</span>
+              <span>{t("remote.distribution")}</span>
               <select data-action-change="remotes.distro" value={draft.distro ?? ""} disabled={!!editing} onChange={(ev) => setDraft((d) => (d ? { ...d, distro: ev.target.value } : d))}>
                 {editing && !(wsl?.distros ?? []).some((x) => x.name === draft.distro) ? <option value={draft.distro}>{draft.distro}</option> : null}
                 {(wsl?.distros ?? []).map((x) => (
                   <option key={x.name} value={x.name} disabled={x.version !== 2}>
-                    {x.version === 2 ? x.name : t("{name}（WSL 1，不支持）", { name: x.name })}
+                    {x.version === 2 ? x.name : t("remote.name_wsl_1_not_supported", { name: x.name })}
                   </option>
                 ))}
               </select>
             </label>
           ) : null}
-          {!isWSL && field("host", t("地址"), "10.0.0.4")}
-          {!isWSL && field("user", t("用户"), "ada")}
+          {!isWSL && field("host", t("remote.address"), "10.0.0.4")}
+          {!isWSL && field("user", t("remote.user"), "ada")}
           {!isWSL && (
               <label className="rmtf">
-                <span>{t("端口")}</span>
+                <span>{t("common.port")}</span>
                 <input
                   value={draft.port ? String(draft.port) : ""}
                   placeholder="22"
@@ -299,81 +299,81 @@ export function Remotes({ hub, onError }: Props) {
                 />
               </label>
           )}
-          {!isWSL && field("proxyJump", t("跳板机"), "bastion.example.com")}
+          {!isWSL && field("proxyJump", t("remote.jump_host"), "bastion.example.com")}
           {isWSL ? (
             <p className="rmthint">
-              {t("内核运行在 Studio 保持的一个会话里：关闭 Studio 后它会随发行版一起停止，对话保存在磁盘上，下次连接时继续。模型凭据使用发行版自己的配置。")}
+              {t("remote.the_kernel_runs_in_a")}
             </p>
           ) : null}
           {/* Same shape the sandbox's writable list uses: one row per thing,
               then what you can do to it. The head carries the default badge
               rather than a separate field, because it is the same folder. */}
           <div className="rmtdirs">
-            <div className="sublb">{t("这台机器上的项目")}</div>
+            <div className="sublb">{t("remote.projects_on_this_machine")}</div>
             {(draft.workspaces ?? []).map((path, i) => (
               <div className="prule" key={path}>
                 <code dir="ltr">{path}</code>
                 {i === 0 ? (
-                  <span className="tag">{t("默认")}</span>
+                  <span className="tag">{t("common.default")}</span>
                 ) : (
                   <button
                     className="act ghost"
-                    aria-label={t("将 {path} 设为默认", { path })}
+                    aria-label={t("remote.make_path_the_default", { path })}
                     onClick={() => setDirs([path, ...(draft.workspaces ?? []).filter((x) => x !== path)])}
                   >
-                    {t("设为默认")}
+                    {t("common.make_default")}
                   </button>
                 )}
                 <button
                   className="act ghost"
-                  aria-label={t("不再列出 {path}", { path })}
+                  aria-label={t("remote.stop_listing_path", { path })}
                   onClick={() => setDirs((draft.workspaces ?? []).filter((x) => x !== path))}
                 >
-                  {t("删除")}
+                  {t("common.delete")}
                 </button>
               </div>
             ))}
             <div className="prule" data-add="">
               <input
                 value={dir}
-                placeholder={t("远端的项目目录，例如 /srv/training")}
+                placeholder={t("remote.a_project_directory_over_there")}
                 onChange={(ev) => setDir(ev.target.value)}
                 onKeyDown={(ev) => ev.key === "Enter" && addDir()}
               />
               <button className="act" disabled={!dir.trim()} onClick={addDir}>
-                {t("添加")}
+                {t("common.add")}
               </button>
               {editing ? (
                 <button className="act ghost" onClick={() => setPicking(true)}>
-                  {t("浏览…")}
+                  {t("remote.browse")}
                 </button>
               ) : null}
             </div>
           </div>
-          {!isWSL && field("identityFile", t("私钥文件"), "~/.ssh/id_ed25519")}
+          {!isWSL && field("identityFile", t("remote.private_key_file"), "~/.ssh/id_ed25519")}
           {/* What an empty form actually does is the kernel's to say. Leaving
               these blank is not "no authentication", and a reader who has to
               guess between agent, default keys and a password prompt is one
               who finds out on the first connect. */}
-          {!isWSL && <p className="rmthint">{t("留空时按这个顺序尝试：先 ssh-agent 持有的密钥，再 ~/.ssh 下的默认密钥；只有填了下面的环境变量或该机器要求交互时，才会走密码。")}</p>}
+          {!isWSL && <p className="rmthint">{t("remote.left_blank_it_tries_in")}</p>}
           {/* Named, not carried: this is the variable to read, never the secret
               itself, so nothing typed here is a password on its way anywhere. */}
-          {!isWSL && field("passphraseEnv", t("私钥口令的环境变量名"), "GPU_BOX_PASSPHRASE")}
-          {!isWSL && field("passwordEnv", t("登录密码的环境变量名"), "GPU_BOX_PASSWORD")}
+          {!isWSL && field("passphraseEnv", t("remote.env_var_holding_the_key"), "GPU_BOX_PASSPHRASE")}
+          {!isWSL && field("passwordEnv", t("remote.env_var_with_the_password"), "GPU_BOX_PASSWORD")}
           {/* The kernel names this setting when an install fails, so it has to
               be here: an error saying "install it with npm instead" beside a
               setting nobody can reach says nothing. */}
           <label className="rmtf">
-            <span>{t("安装方式")}</span>
+            <span>{t("remote.installing")}</span>
             <select
               value={draft.serveInstall || "auto"}
-              title={t("首次连接需在该机器上安装 reasonix")}
+              title={t("remote.a_first_connect_installs_a")}
               onChange={(ev) => setDraft((d) => (d ? { ...d, serveInstall: ev.target.value } : d))}
             >
-              <option value="auto">{t("自动选择")}</option>
-              <option value="npm">{t("使用远端的 npm")}</option>
-              <option value="upload">{t("上传本机的副本")}</option>
-              <option value="never">{t("不安装，已自行安装")}</option>
+              <option value="auto">{t("common.pick_one_automatically")}</option>
+              <option value="npm">{t("remote.use_the_remotes_npm")}</option>
+              <option value="upload">{t("remote.upload_this_machines")}</option>
+              <option value="never">{t("remote.do_not_install_there_is")}</option>
             </select>
           </label>
           {/* Which machine's key the far-side kernel answers to. This one's by
@@ -381,14 +381,14 @@ export function Remotes({ hub, onError }: Props) {
               own and no route to the model API. */}
           {!isWSL && (
             <label className="rmtf">
-              <span>{t("模型凭据")}</span>
+              <span>{t("remote.model_credentials")}</span>
               <select
                 value={draft.provider || "local"}
-                title={t("远端会话使用哪台机器上配置的 Provider 与 Key")}
+                title={t("remote.which_machines_providers_and_keys")}
                 onChange={(ev) => setDraft((d) => (d ? { ...d, provider: ev.target.value } : d))}
               >
-                <option value="local">{t("使用本机配置，经隧道转发")}</option>
-                <option value="remote">{t("使用该机器自身的配置")}</option>
+                <option value="local">{t("remote.this_machines_over_the_tunnel")}</option>
+                <option value="remote">{t("remote.that_machines_own")}</option>
               </select>
             </label>
           )}
@@ -399,7 +399,7 @@ export function Remotes({ hub, onError }: Props) {
                 checked={!!draft.useSSHConfig}
                 onChange={(ev) => setDraft((d) => (d ? { ...d, useSSHConfig: ev.target.checked } : d))}
               />
-              <span>{t("留空的项将从 ~/.ssh/config 读取")}</span>
+              <span>{t("remote.take_anything_left_blank_from")}</span>
             </label>
           )}
           <div className="rmtact">
@@ -410,16 +410,16 @@ export function Remotes({ hub, onError }: Props) {
                 setDir("");
               }}
             >
-              {t("取消")}
+              {t("common.cancel")}
             </button>
             <button data-go="" data-action={editing ? "remotes.save" : "remotes.add"} disabled={!draft.name.trim() || !!busy || (isWSL && !draft.distro)} onClick={() => void save(draft)}>
-              {editing ? t("保存") : t("添加")}
+              {editing ? t("common.save") : t("common.add")}
             </button>
           </div>
         </div>
       ) : (
         <button className="rmtadd" onClick={() => setDraft(draftOf(null))}>
-          + {t("添加机器")}
+          + {t("remote.add_a_machine")}
         </button>
       )}
     </div>
@@ -437,7 +437,7 @@ function ProbeCard({ probe, host }: { probe: RemoteProbe; host: string }) {
   return (
     <div className="rmtprobe" data-ok={probe.ready ? "" : undefined}>
       <div className="rmtprobe-r">
-        <span className="k">{t("机器")}</span>
+        <span className="k">{t("remote.machine")}</span>
         <span className="v">{probe.os}/{probe.arch} · {probe.home}</span>
       </div>
       <div className="rmtprobe-r">
@@ -446,21 +446,21 @@ function ProbeCard({ probe, host }: { probe: RemoteProbe; host: string }) {
           {probe.kernel
             ? `${probe.kernel}${probe.version ? " " + probe.version : ""}`
             : probe.outdated
-              ? t("远端为 {v}，版本过旧，连接时将被替换", { v: probe.outdated })
-              : t("尚未安装")}
+              ? t("remote.it_has_v_there_too", { v: probe.outdated })
+              : t("remote.none_yet")}
         </span>
       </div>
       <div className="rmtprobe-r">
         <span className="k">npm</span>
-        <span className="v">{probe.npm || t("无法运行")}</span>
+        <span className="v">{probe.npm || t("remote.will_not_run")}</span>
       </div>
       {closed.map((r) => (
         <p className="rmtprobe-why" key={r.name}>
-          {say({ code: r.code, params: { host } }, t("{name} 无法连通", { name: t(ROUTE_LABEL[r.name] ?? r.name) }))}
+          {say({ code: r.code, params: { host } }, t("remote.the_name_route_is_closed", { name: t(ROUTE_LABEL[r.name] ?? r.name) }))}
         </p>
       ))}
       <div className="rmtprobe-end">
-        {probe.ready ? t("可以连接 —— 远端已有内核，或可安装一个") : t("无法连接 —— 解决上述任意一项即可")}
+        {probe.ready ? t("remote.ready_there_is_a_kernel") : t("remote.not_ready_clearing_any_one")}
       </div>
     </div>
   );

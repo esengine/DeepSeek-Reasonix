@@ -46,40 +46,40 @@ export function PeerProjects({ port, hub, settings }: { port: AgentPort; hub: Pi
   return (
     <div className="box">
       {state.release_projects.length > 0 ? (
-        <ul className="peerreleased" aria-label={t("已长期放行的项目")}>
+        <ul className="peerreleased" aria-label={t("remote.projects_released_for_good")}>
           {state.release_projects.map((p) => (
             <li key={p.path}>
               <span className="tx"><span className="lb">{p.name}</span><span className="ds">{p.path}</span></span>
               <button className="act" data-action="peers.release-revoke" data-target={p.path} disabled={off}
-                aria-label={t("撤销放行：{name}", { name: p.name })}
+                aria-label={t("remote.revoke_release_name", { name: p.name })}
                 onClick={() => void write((now) => now.filter((path) => path !== p.path))}>
-                {t("撤销")}
+                {t("remote.revoke")}
               </button>
             </li>
           ))}
         </ul>
       ) : (
-        <div className="peernote">{t("还没有放行任何项目：每条收到的消息都会先问你。")}</div>
+        <div className="peernote">{t("remote.no_project_is_allowed_through")}</div>
       )}
       <div className="peerform">
         {!state.enabled ? (
-          <div className="peernote">{t("先启用会话间消息，再放行项目。")}</div>
+          <div className="peernote">{t("remote.turn_on_session_messages_first")}</div>
         ) : choices.length === 0 ? (
-          <div className="peernote">{t("没有可以放行的项目。只能从你已经添加过的项目里选。")}</div>
+          <div className="peernote">{t("remote.there_is_no_project_to")}</div>
         ) : (
           <>
-            <label className="peerhead" htmlFor="peer-release-pick">{t("放行这个项目")}</label>
-            <select id="peer-release-pick" className="peerfield" data-action-change="peers.release-pick" aria-label={t("放行这个项目")} value={target} disabled={off} onChange={(e) => setPick(e.target.value)}>
+            <label className="peerhead" htmlFor="peer-release-pick">{t("remote.allow_this_project_through")}</label>
+            <select id="peer-release-pick" className="peerfield" data-action-change="peers.release-pick" aria-label={t("remote.allow_this_project_through")} value={target} disabled={off} onChange={(e) => setPick(e.target.value)}>
               {choices.map((w) => <option key={w.root} value={w.root}>{`${w.name} — ${w.root}`}</option>)}
             </select>
             <div className="acts">
-              <button className="act" data-action="peers.release-add" data-primary disabled={off || !target} onClick={() => void write((now) => [...now, target])}>{t("放行")}</button>
+              <button className="act" data-action="peers.release-add" data-primary disabled={off || !target} onClick={() => void write((now) => [...now, target])}>{t("common.allow")}</button>
             </div>
           </>
         )}
       </div>
-      {!state.available && <div className="peernote" role="status">{t("此会话不支持：没有可打开的收件夹，消息无处挂起。")}</div>}
-      {state.pending && <div className="peernote" role="status">{t("已保存，下个回合起生效。")}</div>}
+      {!state.available && <div className="peernote" role="status">{t("remote.not_supported_in_this_session")}</div>}
+      {state.pending && <div className="peernote" role="status">{t("remote.saved_takes_effect_from_the")}</div>}
       {error && <div className="why" role="alert">{error}</div>}
     </div>
   );

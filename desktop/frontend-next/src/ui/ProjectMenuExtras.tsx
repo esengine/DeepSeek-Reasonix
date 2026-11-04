@@ -5,7 +5,7 @@ export function ProjectMenuExtras({ canSelect, selecting, onSelect, dismiss }: {
   return (
     <div className="session-pop-group">
       <button role="menuitem" data-action="session.selection" data-value="start" disabled={!canSelect || selecting} onClick={() => { dismiss(); onSelect(); }}>
-        <StudioIcon name="check" /><span>{t("选择本机会话")}</span>
+        <StudioIcon name="check" /><span>{t("session.select_local_sessions")}</span>
       </button>
     </div>
   );

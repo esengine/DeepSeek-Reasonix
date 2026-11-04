@@ -28,7 +28,7 @@ export function WorkspaceOrder({ root, position, total, hub, reload, dismiss, on
           disabled={position < 0 || position + direction < 0 || position + direction >= total}
           onClick={() => void move(direction)}>
           <StudioIcon name="arrow" data-flip={direction === 1 ? "" : undefined} />
-          <span>{t(direction === -1 ? "上移" : "下移")}</span>
+          <span>{t(direction === -1 ? "common.move_up" : "common.move_down")}</span>
         </button>
       ))}
     </div>

@@ -29,27 +29,27 @@ export function usePushCard(port: AgentPort, repo: string | undefined, onPushed:
 
   const button = (
     <button type="button" className="btn sm push-open" data-action="push.preview" disabled={state.phase !== "idle"} onClick={preview}>
-      {t("推送…")}
+      {t("workbench.push_2")}
     </button>
   );
   if (state.phase === "idle") return { button, card: null };
 
   if (state.phase === "reading") {
     return { button, card: (
-      <section className="push-card" data-phase="reading" aria-label={t("推送")}>
-        <p className="refine-wait" role="status">{t("读取要推送的内容…")}</p>
-        <footer><button type="button" className="btn sm" data-weak="" data-action="push.close" onClick={close}>{t("取消")}</button></footer>
+      <section className="push-card" data-phase="reading" aria-label={t("workbench.push")}>
+        <p className="refine-wait" role="status">{t("workbench.reading_what_would_be_pushed")}</p>
+        <footer><button type="button" className="btn sm" data-weak="" data-action="push.close" onClick={close}>{t("common.cancel")}</button></footer>
       </section>
     ) };
   }
 
   if (state.phase === "failed") {
     return { button, card: (
-      <section className="push-card" data-phase="failed" aria-label={t("推送")}>
+      <section className="push-card" data-phase="failed" aria-label={t("workbench.push")}>
         <p className="refine-error" role="alert">{state.error}</p>
         <footer>
-          <button type="button" className="btn sm" data-action="push.preview" onClick={preview}>{t("重新读取")}</button>
-          <button type="button" className="btn sm" data-weak="" data-action="push.close" onClick={close}>{t("关闭")}</button>
+          <button type="button" className="btn sm" data-action="push.preview" onClick={preview}>{t("common.read_again")}</button>
+          <button type="button" className="btn sm" data-weak="" data-action="push.close" onClick={close}>{t("common.close")}</button>
         </footer>
       </section>
     ) };
@@ -58,11 +58,11 @@ export function usePushCard(port: AgentPort, repo: string | undefined, onPushed:
   if (state.phase === "done") {
     const { plan } = state.result;
     return { button, card: (
-      <section className="push-card" data-phase="done" aria-label={t("推送")}>
+      <section className="push-card" data-phase="done" aria-label={t("workbench.push")}>
         <p className="commit-done" role="status">
-          {t(state.result.new ? "已把 {branch} 推送到 {host}，远端新建了这个分支" : "已把 {n} 个提交推送到 {host}", { branch: plan.upstreamBranch, host: plan.host, n: String(plan.ahead) })}
+          {t(state.result.new ? "workbench.pushed_branch_to_host_the" : "workbench.pushed_n_commits_to_host", { branch: plan.upstreamBranch, host: plan.host, n: String(plan.ahead) })}
         </p>
-        <footer><button type="button" className="btn sm" data-weak="" data-action="push.close" onClick={close}>{t("收起")}</button></footer>
+        <footer><button type="button" className="btn sm" data-weak="" data-action="push.close" onClick={close}>{t("common.collapse")}</button></footer>
       </section>
     ) };
   }
@@ -80,28 +80,28 @@ export function usePushCard(port: AgentPort, repo: string | undefined, onPushed:
     );
   };
   return { button, card: (
-    <section className="push-card" data-phase="ready" aria-label={t("推送")}>
+    <section className="push-card" data-phase="ready" aria-label={t("workbench.push")}>
       <header>
-        <b>{t("推送到 {host}", { host: plan.host })}</b>
+        <b>{t("workbench.push_to_host", { host: plan.host })}</b>
         <small data-scheme={plan.scheme}>{plan.scheme}</small>
       </header>
       <dl>
-        <dt>{t("分支")}</dt>
+        <dt>{t("common.branch")}</dt>
         <dd>{plan.branch} → {plan.remote}/{plan.upstreamBranch}</dd>
-        <dt>{t("远端")}</dt>
+        <dt>{t("workbench.remote")}</dt>
         <dd className="push-url" title={plan.url}>{plan.url}</dd>
-        <dt>{t("将发送")}</dt>
-        <dd>{t("{n} 个提交", { n: String(plan.ahead) })}{plan.head ? ` · ${plan.head.slice(0, 7)}` : ""}</dd>
+        <dt>{t("workbench.will_send")}</dt>
+        <dd>{t("workbench.n_commits", { n: String(plan.ahead) })}{plan.head ? ` · ${plan.head.slice(0, 7)}` : ""}</dd>
       </dl>
-      {plan.behind > 0 && <p className="push-behind" role="status">{t("远端比这个分支多 {n} 个提交（以上次获取为准），推送可能被拒绝。", { n: String(plan.behind) })}</p>}
-      {plan.ahead === 0 && <p className="push-behind" role="status">{t("远端已经有这个分支的全部提交，没有可推送的内容。")}</p>}
+      {plan.behind > 0 && <p className="push-behind" role="status">{t("workbench.the_remote_has_n_commits", { n: String(plan.behind) })}</p>}
+      {plan.ahead === 0 && <p className="push-behind" role="status">{t("workbench.the_remote_already_has_every")}</p>}
       {error && <p className="refine-error" role="alert">{error}</p>}
-      <small>{t("只推送这一个分支，从不强制推送；仓库里的钩子（包括 pre-push）不会运行。")}</small>
+      <small>{t("workbench.pushes_this_one_branch_and")}</small>
       <footer>
         <button type="button" className="btn sm" data-primary data-action="push.confirm" disabled={pushing || plan.ahead === 0} onClick={confirm}>
-          {pushing ? t("正在推送…") : t("推送到 {host}", { host: plan.host })}
+          {pushing ? t("workbench.pushing") : t("workbench.push_to_host", { host: plan.host })}
         </button>
-        <button type="button" className="btn sm" data-weak="" data-action="push.close" disabled={pushing} onClick={close}>{t("取消")}</button>
+        <button type="button" className="btn sm" data-weak="" data-action="push.close" disabled={pushing} onClick={close}>{t("common.cancel")}</button>
       </footer>
     </section>
   ) };

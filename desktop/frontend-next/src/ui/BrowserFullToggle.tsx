@@ -4,7 +4,7 @@ import { ariaChord, chord } from "./keys";
 import { TooltipButton } from "./TooltipButton";
 
 export function BrowserFullToggle({ full, onToggle }: { full: boolean; onToggle: () => void }) {
-  const label = full ? t("退出工作台全屏") : t("全屏工作台");
+  const label = full ? t("workbench.exit_expanded_workbench") : t("workbench.expand_workbench");
   return (
     <TooltipButton className="workbench-files" data-action="browser.full" aria-pressed={full}
       aria-label={label} aria-keyshortcuts={`${ariaChord("F")}+Shift`}

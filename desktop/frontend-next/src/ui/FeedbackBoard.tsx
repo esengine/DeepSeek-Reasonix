@@ -88,27 +88,27 @@ export function FeedbackBoard({ port, reload = 0 }: { port: AgentPort; reload?: 
   const typed = draft.trim();
 
   return (
-    <section className="fbk-board" aria-label={t("贡献榜")}>
+    <section className="fbk-board" aria-label={t("feedback.contribution_board")}>
       <div className="fbk-link-hd">
-        <span className="fbk-link-name">{t("贡献榜")}</span>
-        <span className="fbk-hint">{t("给反馈被采纳并发布的人。按版本看有名次，全部版本只按名字排序，不比高低。只有自己选择加入的人才会出现。")}</span>
+        <span className="fbk-link-name">{t("feedback.contribution_board")}</span>
+        <span className="fbk-hint">{t("feedback.for_people_whose_feedback_was")}</span>
       </div>
       <label className="fbk-board-pick">
-        <span className="fbk-hint">{t("版本")}</span>
-        <select aria-label={t("版本")} data-action-change="feedback.board-release" value={release} onChange={(e) => void pick(e.target.value)}>
-          <option value="">{t("全部版本")}</option>
+        <span className="fbk-hint">{t("common.version")}</span>
+        <select aria-label={t("common.version")} data-action-change="feedback.board-release" value={release} onChange={(e) => void pick(e.target.value)}>
+          <option value="">{t("feedback.all_releases")}</option>
           {versions.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
       </label>
       {board.entries.length === 0 ? (
-        <p className="fbk-hint">{t("这个版本还没有人上榜。")}</p>
+        <p className="fbk-hint">{t("feedback.nobody_is_listed_for_this")}</p>
       ) : (
         <ol className="fbk-board-list" data-ranked={ranked ? "" : undefined}>
           {board.entries.map((e) => (
             <li key={e.displayName}>
-              {ranked && <span className="fbk-board-rank" aria-label={t("名次 {n}", { n: e.rank ?? 0 })}>{e.rank}</span>}
+              {ranked && <span className="fbk-board-rank" aria-label={t("feedback.place_n", { n: e.rank ?? 0 })}>{e.rank}</span>}
               <span className="fbk-board-name">{e.displayName}</span>
-              <span className="fbk-board-credits">{t("{n} 条被采纳", { n: e.credits })}</span>
+              <span className="fbk-board-credits">{t("feedback.n_adopted", { n: e.credits })}</span>
               {!ranked && (
                 <span className="fbk-board-where">
                   {e.releases.slice(0, 3).map((r) => <span key={r.version} className="fbk-chip" data-status="recorded">{r.version}{r.count > 1 ? ` ×${r.count}` : ""}</span>)}
@@ -119,38 +119,38 @@ export function FeedbackBoard({ port, reload = 0 }: { port: AgentPort; reload?: 
           ))}
         </ol>
       )}
-      <p className="fbk-hint">{t("名次取决于维护者选择发布的内容：被婉拒的好反馈不计入。")}</p>
+      <p className="fbk-hint">{t("feedback.a_ranking_depends_on_what")}</p>
 
       {signedIn && linked && offered && !me?.listed && !me?.delisted && (
-        <div className="fbk-board-offer" role="group" aria-label={t("要不要加入贡献榜")}>
-          <span className="fbk-link-name">{t("要不要加入贡献榜？")}</span>
-          <p className="fbk-hint">{t("这台电脑已关联账号。加入后榜上公开显示你选的名字和被采纳的条数，不显示邮箱、安装 ID 或路径；这个提示只出现一次，随时可以退出。")}</p>
+        <div className="fbk-board-offer" role="group" aria-label={t("feedback.join_the_contribution_board")}>
+          <span className="fbk-link-name">{t("feedback.join_the_contribution_board_2")}</span>
+          <p className="fbk-hint">{t("feedback.this_computer_is_linked_to")}</p>
           <div className="fbk-link-row">
-            <input className="fbk-board-name-field" data-action-change="feedback.board-name" aria-label={t("榜上显示的名字")} value={offerName} maxLength={40} placeholder={t("榜上显示的名字")} onChange={(e) => setOfferName(e.target.value)} />
-            <button type="button" className="btn sm" data-primary data-action="feedback.board-join" disabled={busy || boardNameProblem(offerName) !== null} onClick={() => { markBoardOfferSeen(); setOffered(false); void run(() => port.joinFeedbackBoard(offerName.trim())); }}>{t("加入贡献榜")}</button>
-            <button type="button" className="btn sm" data-action="feedback.board-offer-dismiss" disabled={busy} onClick={() => { markBoardOfferSeen(); setOffered(false); }}>{t("不用了")}</button>
+            <input className="fbk-board-name-field" data-action-change="feedback.board-name" aria-label={t("feedback.name_shown_on_the_board")} value={offerName} maxLength={40} placeholder={t("feedback.name_shown_on_the_board")} onChange={(e) => setOfferName(e.target.value)} />
+            <button type="button" className="btn sm" data-primary data-action="feedback.board-join" disabled={busy || boardNameProblem(offerName) !== null} onClick={() => { markBoardOfferSeen(); setOffered(false); void run(() => port.joinFeedbackBoard(offerName.trim())); }}>{t("feedback.join_the_board")}</button>
+            <button type="button" className="btn sm" data-action="feedback.board-offer-dismiss" disabled={busy} onClick={() => { markBoardOfferSeen(); setOffered(false); }}>{t("common.no_thanks")}</button>
           </div>
         </div>
       )}
       <div className="fbk-board-me">
-        <span className="fbk-link-name">{t("我在榜上")}</span>
+        <span className="fbk-link-name">{t("feedback.my_place_on_the_board")}</span>
         {!signedIn ? (
-          <p className="fbk-hint">{t("先在设置里登录账号，才能决定是否上榜。")}</p>
+          <p className="fbk-hint">{t("feedback.sign_in_from_settings_first")}</p>
         ) : me?.delisted ? (
-          <p className="fbk-hint" data-tone="warn">{t("这个账号已被维护者从榜单移除，暂时不能再加入。")}</p>
+          <p className="fbk-hint" data-tone="warn">{t("feedback.a_maintainer_removed_this_account")}</p>
         ) : me?.listed ? (
           <div className="fbk-link-row">
-            <span className="fbk-chip" data-status="recorded">{t("榜上显示为")} · {me.displayName}</span>
-            <button type="button" className="btn sm" data-action="feedback.board-leave" disabled={busy} onClick={() => void run(() => port.leaveFeedbackBoard())}>{t("退出榜单")}</button>
+            <span className="fbk-chip" data-status="recorded">{t("feedback.shown_on_the_board_as")} · {me.displayName}</span>
+            <button type="button" className="btn sm" data-action="feedback.board-leave" disabled={busy} onClick={() => void run(() => port.leaveFeedbackBoard())}>{t("feedback.leave_the_board")}</button>
           </div>
         ) : (
           <>
-            <p className="fbk-hint">{t("加入后榜上只显示下面这个名字和采纳数，不显示邮箱、安装 ID 或路径；随时可以退出，退出后下一次刷新就不再出现。")}</p>
+            <p className="fbk-hint">{t("feedback.once_you_join_the_board")}</p>
             <div className="fbk-link-row">
-              <input className="fbk-board-name-field" data-action-change="feedback.board-name" aria-label={t("榜上显示的名字")} value={draft} maxLength={30} placeholder={t("榜上显示的名字")} onChange={(e) => setDraft(e.target.value)} />
-              <button type="button" className="btn sm" data-primary data-action="feedback.board-join" disabled={busy || typed.length < 2} onClick={() => void run(() => port.joinFeedbackBoard(typed))}>{t("加入贡献榜")}</button>
+              <input className="fbk-board-name-field" data-action-change="feedback.board-name" aria-label={t("feedback.name_shown_on_the_board")} value={draft} maxLength={30} placeholder={t("feedback.name_shown_on_the_board")} onChange={(e) => setDraft(e.target.value)} />
+              <button type="button" className="btn sm" data-primary data-action="feedback.board-join" disabled={busy || typed.length < 2} onClick={() => void run(() => port.joinFeedbackBoard(typed))}>{t("feedback.join_the_board")}</button>
             </div>
-            {typed.length >= 2 && <p className="fbk-hint" aria-live="polite">{t("榜上将显示为：{name}", { name: typed })}</p>}
+            {typed.length >= 2 && <p className="fbk-hint" aria-live="polite">{t("feedback.it_will_be_shown_on", { name: typed })}</p>}
           </>
         )}
       </div>

@@ -32,7 +32,7 @@ export function WorkbenchSelectionMenu({ menu, onAction, onClose }: {
     <div
       className="tabmenu"
       role="menu"
-      aria-label={t("文本操作")}
+      aria-label={t("workbench.text_actions")}
       data-action-keydown="layer.dismiss"
       ref={(el) => { box.current = el; if (el) pinToViewport(el, menu.x, menu.y); }}
       onKeyDown={(e) => {
@@ -44,14 +44,14 @@ export function WorkbenchSelectionMenu({ menu, onAction, onClose }: {
       }}
     >
       {menu.editable && <>
-        <button role="menuitem" disabled={!menu.canUndo} data-action="workbench.text-undo" onClick={() => void onAction("undo")}>{t("撤销编辑")}</button>
-        <button role="menuitem" disabled={!menu.canRedo} data-action="workbench.text-redo" onClick={() => void onAction("redo")}>{t("重做")}</button>
-        <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-cut" onClick={() => void onAction("cut")}>{t("剪切")}</button>
+        <button role="menuitem" disabled={!menu.canUndo} data-action="workbench.text-undo" onClick={() => void onAction("undo")}>{t("workbench.undo")}</button>
+        <button role="menuitem" disabled={!menu.canRedo} data-action="workbench.text-redo" onClick={() => void onAction("redo")}>{t("workbench.redo")}</button>
+        <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-cut" onClick={() => void onAction("cut")}>{t("workbench.cut")}</button>
       </>}
-      <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-copy" onClick={() => void onAction("copy")}>{t("复制")}</button>
-      {menu.editable && <button role="menuitem" data-action="workbench.text-paste" onClick={() => void onAction("paste")}>{t("粘贴")}</button>}
-      <button role="menuitem" data-action="workbench.text-select-all" onClick={() => void onAction("selectAll")}>{t("全选")}</button>
-      {menu.quote && menu.selected && <button role="menuitem" data-action="workbench.quote-selection" onClick={() => void onAction("quote")}>{t("加入对话")}</button>}
+      <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-copy" onClick={() => void onAction("copy")}>{t("common.copy")}</button>
+      {menu.editable && <button role="menuitem" data-action="workbench.text-paste" onClick={() => void onAction("paste")}>{t("workbench.paste")}</button>}
+      <button role="menuitem" data-action="workbench.text-select-all" onClick={() => void onAction("selectAll")}>{t("workbench.select_all")}</button>
+      {menu.quote && menu.selected && <button role="menuitem" data-action="workbench.quote-selection" onClick={() => void onAction("quote")}>{t("workbench.add_to_conversation")}</button>}
     </div>, document.body,
   );
 }

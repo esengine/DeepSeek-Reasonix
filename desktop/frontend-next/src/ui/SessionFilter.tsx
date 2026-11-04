@@ -24,12 +24,12 @@ export function SessionFilter({ scope, counts, onScope }: { scope: SessionScope;
         current={scope}
         items={items}
         menuClassName="session-filter-menu"
-        ariaLabel={t("会话范围")}
+        ariaLabel={t("session.session_scope")}
         label={<><span>{t(NAME[scope])}</span><StudioIcon name="down" /></>}
         onPick={(value) => onScope(value as SessionScope)}
       />
       {scope !== "all" && (
-        <button type="button" className="session-filter-clear" data-action="session.filter-clear" aria-label={t("清除筛选")} onClick={() => onScope("all")}>
+        <button type="button" className="session-filter-clear" data-action="session.filter-clear" aria-label={t("session.clear_filter")} onClick={() => onScope("all")}>
           <StudioIcon name="close" />
         </button>
       )}

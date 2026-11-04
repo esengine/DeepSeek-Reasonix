@@ -11,7 +11,7 @@ export function FeedbackShot({ shot, disabled, onRemove }: { shot: Shot; disable
       </ImagePreview>
       <span className="fbk-shot-name">{shot.name}</span>
       <button type="button" className="fbk-shot-x" data-action="feedback.shot.remove" data-target={shot.id} disabled={disabled}
-        aria-label={t("移除截图 {name}", { name: shot.name })} onClick={onRemove}>
+        aria-label={t("feedback.remove_screenshot_name", { name: shot.name })} onClick={onRemove}>
         <StudioIcon name="close" />
       </button>
     </li>

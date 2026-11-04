@@ -29,7 +29,7 @@ export function FeedbackWithdraw({ port, item, onDone, onStale }: { port: AgentP
   if (!asking) {
     return (
       <div className="fbk-withdraw">
-        <button type="button" className="btn sm" data-action="feedback.withdraw-open" data-target={item.receipt} onClick={() => setAsking(true)}>{t("撤回这条反馈…")}</button>
+        <button type="button" className="btn sm" data-action="feedback.withdraw-open" data-target={item.receipt} onClick={() => setAsking(true)}>{t("feedback.withdraw_this_report")}</button>
         {error && <p className="fbk-hint" role="alert">{error}</p>}
       </div>
     );
@@ -38,12 +38,12 @@ export function FeedbackWithdraw({ port, item, onDone, onStale }: { port: AgentP
     <div className="fbk-withdraw" data-stage="confirm" aria-busy={busy}>
       <p className="fbk-hint">
         {item.issueNumber
-          ? t("撤回后维护者不再处理它，对应的 #{n} 议题会被关闭，你上传的图片会被删除；GitHub 上已经公开的文字会保留。", { n: item.issueNumber })
-          : t("撤回后维护者不再处理它，你上传的图片会被删除。")}
+          ? t("feedback.once_withdrawn_the_maintainers_stop_2", { n: item.issueNumber })
+          : t("feedback.once_withdrawn_the_maintainers_stop")}
       </p>
       <div className="fbk-withdraw-acts">
-        <button type="button" className="btn sm" data-action="feedback.withdraw-cancel" data-target={item.receipt} disabled={busy} onClick={() => setAsking(false)}>{t("取消")}</button>
-        <button type="button" className="btn sm danger" data-action="feedback.withdraw-confirm" data-target={item.receipt} disabled={busy} onClick={() => void withdraw()}>{t("确认撤回")}</button>
+        <button type="button" className="btn sm" data-action="feedback.withdraw-cancel" data-target={item.receipt} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</button>
+        <button type="button" className="btn sm danger" data-action="feedback.withdraw-confirm" data-target={item.receipt} disabled={busy} onClick={() => void withdraw()}>{t("feedback.withdraw")}</button>
       </div>
       {error && <p className="fbk-hint" role="alert">{error}</p>}
     </div>

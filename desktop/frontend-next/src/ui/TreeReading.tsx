@@ -21,12 +21,12 @@ export function TreeReading({ onRetry }: { onRetry?: () => void }) {
   return (
     <div className="ws-empty ws-reading" role="status" aria-busy="true">
       <StudioIcon name="clock" />
-      <span>{slow ? t("仍在读取（会话很多时首次较慢）") : t("正在读取文件夹…")}</span>
+      <span>{slow ? t("workbench.still_reading_the_first_read") : t("workbench.reading_folders")}</span>
       {/* Outside the live region's speech: a status that re-announces itself every second is noise. */}
       {ms >= 1000 && <span className="ws-reading-t" aria-hidden="true">{seconds(ms, 0)}</span>}
       {slow && onRetry && (
         <button type="button" className="ws-reading-retry" data-action="tree.retry" onClick={() => { setSince(Date.now()); setNow(Date.now()); onRetry(); }}>
-          {t("重试")}
+          {t("common.retry")}
         </button>
       )}
     </div>
@@ -36,5 +36,5 @@ export function TreeReading({ onRetry }: { onRetry?: () => void }) {
 /** What a list with no rows in hand says: still reading while the rows belong to
  *  another view, and "no match" only once the kernel has answered for this one. */
 export function TreeEmpty({ settled, onRetry }: { settled: boolean; onRetry?: () => void }) {
-  return settled ? <div className="ws-empty">{t("没有匹配的会话")}</div> : <TreeReading onRetry={onRetry} />;
+  return settled ? <div className="ws-empty">{t("common.nothing_matches")}</div> : <TreeReading onRetry={onRetry} />;
 }

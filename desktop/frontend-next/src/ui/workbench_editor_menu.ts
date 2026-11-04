@@ -32,7 +32,7 @@ export function editorTextSession(editor: EditorView, live: () => boolean): Text
       }
       if (action === "paste") {
         if (!editable) return;
-        if (!navigator.clipboard?.readText) throw new Error(t("此浏览器不允许读取剪贴板，请使用键盘粘贴"));
+        if (!navigator.clipboard?.readText) throw new Error(t("workbench.this_browser_cannot_read_the"));
         const text = await navigator.clipboard.readText();
         if (!current()) return;
         focus();

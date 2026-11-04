@@ -19,7 +19,7 @@ export function PeerMessages({ port, settings }: { port: AgentPort; settings: Pe
   const [sent, setSent] = useState("");
 
   const switches = <PeerSettings port={port} settings={settings} onSaved={() => void refresh()} />;
-  if (failed && !state.enabled) return <>{switches}<div className="empty">{t("无法读取会话间消息的状态。")}</div></>;
+  if (failed && !state.enabled) return <>{switches}<div className="empty">{t("remote.could_not_read_the_state")}</div></>;
   if (!state.enabled) return switches;
   const target = to || state.peers[0]?.key || "";
   const send = async () => {
@@ -28,7 +28,7 @@ export function PeerMessages({ port, settings }: { port: AgentPort; settings: Pe
     setSent("");
     try {
       const receipt = await port.sendPeerMessage(target, text);
-      setSent(t("已送到「{to}」，对方的用户批准后才会读到。", { to: peerLabel(receipt.to) }));
+      setSent(t("remote.delivered_to_to_it_is", { to: peerLabel(receipt.to) }));
       setText("");
     } catch (e) {
       setError(reason(e));
@@ -44,11 +44,11 @@ export function PeerMessages({ port, settings }: { port: AgentPort; settings: Pe
         <HeldPeerMessage key={h.id} port={port} held={h} onDone={() => void refresh()} />
       ))}
       {state.peers.length === 0 ? (
-        <div className="peerhead">{t("本机没有别的会话在监听。")}</div>
+        <div className="peerhead">{t("remote.no_other_session_on_this")}</div>
       ) : (
         <div className="peerform">
-          <label className="peerhead" htmlFor="peer-to">{t("发给")}</label>
-          <select id="peer-to" className="peerfield" data-action-change="peers.target" aria-label={t("发给")} value={target} onChange={(e) => setTo(e.target.value)}>
+          <label className="peerhead" htmlFor="peer-to">{t("remote.send_to")}</label>
+          <select id="peer-to" className="peerfield" data-action-change="peers.target" aria-label={t("remote.send_to")} value={target} onChange={(e) => setTo(e.target.value)}>
             {state.peers.map((p) => (
               <option key={p.key} value={p.key}>{peerLabel(p)}</option>
             ))}
@@ -56,18 +56,18 @@ export function PeerMessages({ port, settings }: { port: AgentPort; settings: Pe
           <textarea
             className="peerfield"
             data-action-change="peers.text"
-            aria-label={t("要发的内容")}
+            aria-label={t("remote.message")}
             rows={3}
             value={text}
             disabled={busy}
-            placeholder={t("写下要告诉另一个会话的话。对方的用户批准后，它才会交给那边的模型。")}
+            placeholder={t("remote.write_what_to_tell_the")}
             onChange={(e) => setText(e.target.value)}
           />
           {error && <div className="why">{error}</div>}
           {sent && <div className="peerhead">{sent}</div>}
           <div className="acts">
             <button className="act" data-action="peers.send" data-primary disabled={busy || !text.trim() || !target} onClick={() => void send()}>
-              {t(busy ? "发送中…" : "发送")}
+              {t(busy ? "remote.sending" : "common.send")}
             </button>
           </div>
         </div>

@@ -43,18 +43,18 @@ export function WorkbenchHistory({ port, repo }: { port: AgentPort; repo?: strin
   return (
     <details className="workbench-history" open={shown} onToggle={(e) => setShown(e.currentTarget.open)}>
       <summary>
-        <span>{t("提交历史")}</span>
+        <span>{t("workbench.commit_history")}</span>
         {graph && <small>{graph.rows.length}</small>}
       </summary>
-      {read.k === "loading" && <p className="gh-note" role="status">{t("正在读取…")}</p>}
+      {read.k === "loading" && <p className="gh-note" role="status">{t("common.loading")}</p>}
       {read.k === "failed" && (
         <p className="gh-note refine-error" role="alert">
           {read.why}
-          <button type="button" className="btn sm" data-action="workbench.history-reload" onClick={() => void load()}>{t("重新读取")}</button>
+          <button type="button" className="btn sm" data-action="workbench.history-reload" onClick={() => void load()}>{t("common.read_again")}</button>
         </p>
       )}
-      {history && !history.repo && <p className="gh-note">{t("这个文件夹不是 git 仓库")}</p>}
-      {graph && graph.rows.length === 0 && <p className="gh-note">{t("还没有提交")}</p>}
+      {history && !history.repo && <p className="gh-note">{t("workbench.this_folder_is_not_a")}</p>}
+      {graph && graph.rows.length === 0 && <p className="gh-note">{t("workbench.no_commits_yet")}</p>}
       {graph && graph.rows.length > 0 && (
         <ol className="gh-list">
           {graph.rows.map((row) => (
@@ -71,7 +71,7 @@ export function WorkbenchHistory({ port, repo }: { port: AgentPort; repo?: strin
               {openId === row.commit.id && <GitCommitDetail port={port} id={row.commit.id} repo={repo} />}
             </li>
           ))}
-          {history?.truncated && <li className="gh-more">{t("只显示最近的提交")}</li>}
+          {history?.truncated && <li className="gh-more">{t("workbench.only_the_most_recent_commits")}</li>}
         </ol>
       )}
     </details>

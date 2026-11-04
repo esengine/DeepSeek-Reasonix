@@ -75,26 +75,26 @@ export function Feedback({ port, tab: first = "send", onClose, onError, onUnread
     <div className="fbk-veil" hidden={concealed}>
       <div className="fbk" ref={card} role="dialog" aria-modal="true" aria-labelledby="fbk-title" data-wide={wide || undefined}>
         <header className="fbk-hd">
-          <h2 id="fbk-title">{t("反馈")}</h2>
+          <h2 id="fbk-title">{t("feedback.feedback")}</h2>
           <div className="fbk-hd-acts">
             <button
               className="btn sm"
               type="button"
               data-action="feedback.expand"
               aria-pressed={wide}
-              aria-label={t("铺满窗口")}
-              title={t("铺满窗口")}
+              aria-label={t("feedback.full_width")}
+              title={t("feedback.full_width")}
               onClick={() => setWide((w) => !w)}
             >
               <StudioIcon name="expand" />
             </button>
-            <button className="btn sm" data-action="feedback.close" onClick={onClose} aria-label={t("关闭")}>
+            <button className="btn sm" data-action="feedback.close" onClick={onClose} aria-label={t("common.close")}>
               <StudioIcon name="close" />
               <span className="esc">Esc</span>
             </button>
           </div>
         </header>
-        <div className="fbk-tabs" role="tablist" aria-label={t("反馈")}>
+        <div className="fbk-tabs" role="tablist" aria-label={t("feedback.feedback")}>
           {TABS.map((id) => (
             <button
               key={id}

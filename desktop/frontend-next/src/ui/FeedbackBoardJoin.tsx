@@ -26,26 +26,26 @@ export function FeedbackBoardJoin({ checked, name, disabled, onChecked, onName }
     <div className="fbk-board-join">
       <label className="fbk-board-join-pick">
         <input type="checkbox" data-action-change="feedback.board-join-choice" checked={checked} disabled={disabled} onChange={(e) => onChecked(e.target.checked)} />
-        <span>{t("加入贡献榜")}</span>
+        <span>{t("feedback.join_the_board")}</span>
       </label>
-      <p className="fbk-hint">{t("榜是公开的：任何人都能看到下面这个名字和被采纳的条数，看不到邮箱、安装 ID 或路径。随时可以在贡献榜里退出。")}</p>
+      <p className="fbk-hint">{t("feedback.the_board_is_public_anyone")}</p>
       {checked && (
         <>
           <input
             id={id}
             className="fbk-board-name-field"
             data-action-change="feedback.board-name"
-            aria-label={t("榜上显示的名字")}
+            aria-label={t("feedback.name_shown_on_the_board")}
             aria-invalid={problem ? true : undefined}
             value={name}
             maxLength={40}
             disabled={disabled}
-            placeholder={t("榜上显示的名字")}
+            placeholder={t("feedback.name_shown_on_the_board")}
             onChange={(e) => onName(e.target.value)}
           />
           {problem ? <p className="fbk-hint" role="alert" data-tone="error">{t(WORDS[problem])}</p>
-            : typed ? <p className="fbk-hint" aria-live="polite">{t("榜上将显示为：{name}", { name: typed })}</p>
-            : <p className="fbk-hint">{t("请填写一个名字，或取消勾选就不加入。")}</p>}
+            : typed ? <p className="fbk-hint" aria-live="polite">{t("feedback.it_will_be_shown_on", { name: typed })}</p>
+            : <p className="fbk-hint">{t("feedback.enter_a_name_or_untick")}</p>}
         </>
       )}
     </div>

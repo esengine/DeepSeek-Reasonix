@@ -31,7 +31,7 @@ export function DirRows({
 }) {
   return (
     <>
-      <div className="picklist" aria-label={t("子目录")} data-busy={busy ? "" : undefined}>
+      <div className="picklist" aria-label={t("remote.subfolders")} data-busy={busy ? "" : undefined}>
         {(listing?.folders ?? []).map((folder) => (
           <button key={folder.path} className="pickrow" onClick={() => onGo(folder.path)}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -42,18 +42,18 @@ export function DirRows({
         ))}
         {/* The first answer may be a cold dial, and it may stop to ask for a
             host key on the way. A dimmed empty box says none of that. */}
-        {!listing && busy ? <p className="pickempty">{t("正在建立连接…")}</p> : null}
+        {!listing && busy ? <p className="pickempty">{t("remote.connecting")}</p> : null}
         {listing && !listing.folders.length && !listing.unlisted && !busy ? (
-          <p className="pickempty">{t("该目录下没有子目录 —— 它本身即可作为工作区")}</p>
+          <p className="pickempty">{t("remote.nothing_below_this_folder_it")}</p>
         ) : null}
       </div>
       {/* Empty rows under a folder that has contents would read as "nothing here". */}
       {listing?.unlisted ? (
-        <p className="picknote">{t("这台机器不让列出该目录里的内容，但目录存在，可以直接使用它。")}</p>
+        <p className="picknote">{t("remote.this_machine_will_not_list")}</p>
       ) : null}
       {/* A cap that says nothing reads as "that folder is not there". */}
       {listing?.truncated ? (
-        <p className="picknote">{t("该目录内容过多，仅列出前一部分。如需查找靠后的项，请直接输入路径。")}</p>
+        <p className="picknote">{t("remote.this_folder_is_too_big")}</p>
       ) : null}
     </>
   );
@@ -131,7 +131,7 @@ export function RemoteDirs({ hub, host, start, onPick, onClose }: Props) {
       }}
     >
       <div className="pickcard">
-        <h2 id="pick-t">{t("在 {host} 上选择目录", { host })}</h2>
+        <h2 id="pick-t">{t("remote.pick_a_folder_on_host", { host })}</h2>
 
         <form
           className="pickpath"
@@ -144,8 +144,8 @@ export function RemoteDirs({ hub, host, start, onPick, onClose }: Props) {
             type="button"
             className="pickup"
             disabled={!listing?.parent || busy}
-            title={t("上一级")}
-            aria-label={t("上一级")}
+            title={t("remote.up_one_level")}
+            aria-label={t("remote.up_one_level")}
             onClick={() => void go(listing?.parent ?? "")}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -157,12 +157,12 @@ export function RemoteDirs({ hub, host, start, onPick, onClose }: Props) {
             value={draft}
             spellCheck={false}
             dir="ltr"
-            placeholder={t("该机器上的路径")}
-            aria-label={t("该机器上的路径")}
+            placeholder={t("remote.a_path_on_that_machine")}
+            aria-label={t("remote.a_path_on_that_machine")}
             onChange={(ev) => setDraft(ev.target.value)}
           />
           <button type="submit" className="pickgo" disabled={busy || !draft.trim()}>
-            {t("转到")}
+            {t("remote.go")}
           </button>
         </form>
 
@@ -171,9 +171,9 @@ export function RemoteDirs({ hub, host, start, onPick, onClose }: Props) {
         <DirRows listing={listing} busy={busy} onGo={(dir) => void go(dir)} />
 
         <div className="pickact">
-          <button onClick={onClose}>{t("取消")}</button>
+          <button onClick={onClose}>{t("common.cancel")}</button>
           <button data-go="" disabled={!here || busy} data-action="remote.open" onClick={() => onPick(here)}>
-            {t("使用此目录")}
+            {t("remote.use_this_folder")}
           </button>
         </div>
       </div>

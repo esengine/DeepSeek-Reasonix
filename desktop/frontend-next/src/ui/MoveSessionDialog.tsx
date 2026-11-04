@@ -31,16 +31,16 @@ export function MoveSessionDialog({ session, label, projects, busy, error, note,
   return createPortal(
     <div ref={sheet} className="pickveil" role="dialog" aria-modal="true" aria-labelledby="movess-t">
       <form className="pickcard movess" data-action="session.move-to" data-target={session.path} onSubmit={(ev) => { ev.preventDefault(); if (target) onMove(target); }}>
-        <h2 id="movess-t">{t("把「{name}」移到另一个项目", { name: label })}</h2>
+        <h2 id="movess-t">{t("session.move_name_to_another_project", { name: label })}</h2>
         {projects.length === 0 ? (
           <div className="movess-empty">
-            <p className="picknote">{t("没有别的项目可以移到。先添加一个项目。")}</p>
-            {onAddProject && <button type="button" className="act" data-action="session.move-to-add" onClick={() => { onClose(); onAddProject(); }}>{t("添加项目")}</button>}
+            <p className="picknote">{t("session.there_is_no_other_project")}</p>
+            {onAddProject && <button type="button" className="act" data-action="session.move-to-add" onClick={() => { onClose(); onAddProject(); }}>{t("session.add_a_project")}</button>}
           </div>
         ) : (
           <>
-            <div className="movess-label">{t("目标项目")}</div>
-            <div className="movess-list" role="radiogroup" aria-label={t("目标项目")}>
+            <div className="movess-label">{t("session.target_project")}</div>
+            <div className="movess-list" role="radiogroup" aria-label={t("session.target_project")}>
               {projects.map((p) => (
                 <label key={p.root} className="movess-row" data-on={p.root === target || undefined}>
                   <input type="radio" name="movess-target" value={p.root} checked={p.root === target} disabled={busy} data-action-change="session.move-to-target" onChange={() => setTarget(p.root)} />
@@ -52,30 +52,30 @@ export function MoveSessionDialog({ session, label, projects, busy, error, note,
             </div>
             <div className="movess-cols">
               <section data-part="travels">
-                <h3>{t("会带走")}</h3>
+                <h3>{t("session.travels")}</h3>
                 <ul>
-                  <li>{t("对话本身")}</li>
-                  <li>{t("你设的标题、置顶、归档")}</li>
-                  <li>{t("对话里记录的路径保持原样")}</li>
+                  <li>{t("session.the_conversation_itself")}</li>
+                  <li>{t("session.the_title_pin_and_archive")}</li>
+                  <li>{t("session.paths_recorded_in_the_conversation")}</li>
                 </ul>
               </section>
               <section data-part="stays">
-                <h3>{t("不会带走")}</h3>
+                <h3>{t("session.stays_behind")}</h3>
                 <ul>
-                  <li>{t("检查点（回退快照）")}</li>
-                  <li>{t("后台任务日志")}</li>
-                  <li>{t("排队中的消息")}</li>
+                  <li>{t("session.checkpoints_rewind_snapshots")}</li>
+                  <li>{t("session.background_task_logs")}</li>
+                  <li>{t("session.queued_messages")}</li>
                 </ul>
               </section>
             </div>
-            <p className="picknote">{t("原项目的权限与目标设置不会跟着走，新项目按它自己的规则重新判断。不随会话移动的内容会从原项目移除。")}</p>
+            <p className="picknote">{t("session.what_the_old_project_allowed")}</p>
           </>
         )}
         {error && <p className="why" role="alert">{error}</p>}
         {note && <p className="picknote" role="status">{note}</p>}
         <div className="movess-act">
-          <button ref={cancel} type="button" className="kbtn" data-size="md" data-variant="ghost" data-action="session.move-to-cancel" disabled={busy} onClick={onClose}>{note ? t("关闭") : t("取消")}</button>
-          {!note && <button type="submit" className="kbtn" data-size="md" data-variant="primary" data-action="session.move-to" data-target={session.path} disabled={busy || !target}>{t("移动")}</button>}
+          <button ref={cancel} type="button" className="kbtn" data-size="md" data-variant="ghost" data-action="session.move-to-cancel" disabled={busy} onClick={onClose}>{note ? t("common.close") : t("common.cancel")}</button>
+          {!note && <button type="submit" className="kbtn" data-size="md" data-variant="primary" data-action="session.move-to" data-target={session.path} disabled={busy || !target}>{t("session.move")}</button>}
         </div>
       </form>
     </div>,

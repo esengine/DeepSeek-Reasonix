@@ -34,8 +34,8 @@ export function WorkspaceReveal({ ws, hub, dismiss, onError }: {
           hub.revealWorkspace(ws.root).catch(onError);
         }}
       >
-        <StudioIcon name="reveal" /><span>{t("在文件管理器中显示")}</span>
-        {ws.missing && <small>{t("文件夹已不在磁盘上")}</small>}
+        <StudioIcon name="reveal" /><span>{t("session.show_in_file_manager")}</span>
+        {ws.missing && <small>{t("session.folder_is_gone")}</small>}
       </button>
       {targets.map((target) => (
         <button
@@ -51,8 +51,8 @@ export function WorkspaceReveal({ ws, hub, dismiss, onError }: {
             hub.openWith(ws.root, target.id).catch(onError);
           }}
         >
-          <StudioIcon name="external" /><span>{t("用 {name} 打开", { name: openWithName(target) })}</span>
-          {!target.available && <small>{t("位于项目文件夹内")}</small>}
+          <StudioIcon name="external" /><span>{t("common.open_with_name", { name: openWithName(target) })}</span>
+          {!target.available && <small>{t("common.inside_a_project_folder")}</small>}
         </button>
       ))}
     </div>

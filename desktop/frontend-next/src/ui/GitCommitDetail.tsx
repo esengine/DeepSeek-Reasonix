@@ -40,12 +40,12 @@ export function GitCommitDetail({ port, id, repo }: { port: AgentPort; id: strin
     );
   };
 
-  if (read.k === "loading") return <p className="gh-note" role="status">{t("正在读取…")}</p>;
+  if (read.k === "loading") return <p className="gh-note" role="status">{t("common.loading")}</p>;
   if (read.k === "failed") return <p className="gh-note refine-error" role="alert">{read.why}</p>;
   const { files, truncated } = read.read;
   return (
     <div className="gh-detail">
-      {files.length === 0 && <p className="gh-note">{t("这个提交没有改动文件")}</p>}
+      {files.length === 0 && <p className="gh-note">{t("workbench.this_commit_changed_no_files")}</p>}
       <ul className="gh-files">
         {files.map((f) => (
           <li key={f.path}>
@@ -58,15 +58,15 @@ export function GitCommitDetail({ port, id, repo }: { port: AgentPort; id: strin
             {shown?.path === f.path && (
               <div className="gh-diff">
                 {shown.why && <p className="refine-error" role="alert">{shown.why}</p>}
-                {shown.diff === undefined && !shown.why && <p className="gh-note" role="status">{t("正在读取…")}</p>}
-                {shown.diff !== undefined && (shown.diff.trim() === "" ? <p className="gh-note">{t("没有可显示的文本改动")}</p> : <DiffView diff={fromFirstHunk(shown.diff)} path={f.path} />)}
-                {shown.truncated && <p className="gh-note">{t("改动太长，只显示了前面一段")}</p>}
+                {shown.diff === undefined && !shown.why && <p className="gh-note" role="status">{t("common.loading")}</p>}
+                {shown.diff !== undefined && (shown.diff.trim() === "" ? <p className="gh-note">{t("workbench.there_is_no_text_change")}</p> : <DiffView diff={fromFirstHunk(shown.diff)} path={f.path} />)}
+                {shown.truncated && <p className="gh-note">{t("workbench.too_long_to_show_in")}</p>}
               </div>
             )}
           </li>
         ))}
       </ul>
-      {truncated && <p className="gh-more">{t("只显示前面的文件")}</p>}
+      {truncated && <p className="gh-more">{t("workbench.only_the_first_files_are")}</p>}
     </div>
   );
 }

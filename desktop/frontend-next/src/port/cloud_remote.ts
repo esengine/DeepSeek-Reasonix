@@ -94,7 +94,7 @@ async function agreement(devicePublic: Bytes): Promise<{ secret: Bytes; publicKe
 
 async function softwareAgreement(devicePublic: Bytes): Promise<{ secret: Bytes; publicKey: Bytes }> {
   const { x25519 } = await import("@noble/curves/ed25519.js").catch(() => {
-    throw new RemoteLinkError("transient", t("无法加载这个浏览器需要的加密组件，请检查网络后重试。"));
+    throw new RemoteLinkError("transient", t("remote.could_not_load_the_encryption"));
   });
   const keys = x25519.keygen();
   return { secret: new Uint8Array(x25519.getSharedSecret(keys.secretKey, devicePublic)), publicKey: new Uint8Array(keys.publicKey) };
@@ -150,7 +150,7 @@ function nextMessage(socket: WebSocket, timeout = HANDSHAKE_TIMEOUT_MS): Promise
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(t("远程 Studio 暂无响应，请检查电脑是否在线后重试。")));
+      reject(new Error(t("remote.remote_studio_did_not_respond")));
     }, timeout);
     const cleanup = () => {
       clearTimeout(timer);
@@ -158,7 +158,7 @@ function nextMessage(socket: WebSocket, timeout = HANDSHAKE_TIMEOUT_MS): Promise
       socket.removeEventListener("close", closed);
     };
     const receive = (event: MessageEvent) => { cleanup(); resolve(String(event.data)); };
-    const closed = () => { cleanup(); reject(new Error(t("远程连接已断开，请重新连接。"))); };
+    const closed = () => { cleanup(); reject(new Error(t("remote.the_remote_connection_ended_reconnect"))); };
     socket.addEventListener("message", receive);
     socket.addEventListener("close", closed);
   });
@@ -179,7 +179,7 @@ function waitForSocketOpen(socket: WebSocket, timeout = HANDSHAKE_TIMEOUT_MS): P
     const timer = setTimeout(() => {
       cleanup();
       try { socket.close(); } catch { /* The browser may reject closing a socket that never left CONNECTING. */ }
-      reject(new Error(t("连接远程 Studio 超时，请检查电脑是否在线。")));
+      reject(new Error(t("remote.connecting_to_remote_studio_timed")));
     }, timeout);
     socket.addEventListener("open", opened);
     socket.addEventListener("error", failed);
@@ -263,16 +263,16 @@ async function grantFailure(issued: Response): Promise<RemoteLinkError> {
   const body = await issued.json().catch(() => null) as { error?: { code?: string } } | null;
   const code = body?.error?.code;
   if (issued.status === 401 || code === "remote_reauth_required") {
-    return new RemoteLinkError("reauth", t("远程控制需要重新登录。"));
+    return new RemoteLinkError("reauth", t("remote.remote_control_needs_you_to"));
   }
   if (issued.status === 404 || code === "device_not_found") {
-    return new RemoteLinkError("ended", t("这台电脑已从账号中移除。"));
+    return new RemoteLinkError("ended", t("remote.this_computer_was_removed_from"));
   }
   if (issued.status === 429) {
     const detail = { code: "rate_limited" as const, retryAfterS: retryAfterSeconds(issued.headers.get("retry-after")) };
     return new RemoteLinkError("transient", failureView(detail).body, detail);
   }
-  return new RemoteLinkError("transient", t("无法授权 Web Studio，请重新登录后再试。"));
+  return new RemoteLinkError("transient", t("remote.web_studio_could_not_be"));
 }
 
 async function connect(deviceId: string, nativeFetch: typeof fetch, useBootstrap: boolean): Promise<RemoteConnection> {
@@ -293,9 +293,9 @@ async function connect(deviceId: string, nativeFetch: typeof fetch, useBootstrap
   if (!issued.ok) throw await grantFailure(issued);
   const { grant, device: target, relay: named } = await issued.json() as { grant: { ticket: string }; device?: RemoteDevice; relay?: unknown };
   const relay = relayFor(named);
-  if (!relay) throw new RemoteLinkError("ended", t("这台电脑使用的中继地址无法识别，请更新 Web Studio 后再试。"));
+  if (!relay) throw new RemoteLinkError("ended", t("remote.the_relay_address_this_computer"));
   if (!target || target.id !== deviceId || target.revokedAt || !target.capabilities.includes("desktop")) {
-    throw new RemoteLinkError("ended", t("请先更新这台电脑上的 Studio，再连接。"));
+    throw new RemoteLinkError("ended", t("remote.update_studio_on_this_computer"));
   }
   performance.mark("reasonix:remote:authorized");
   const socket = new WebSocket(`${relay}/v1/sessions/connect`, ["reasonix.remote.v1", `reasonix.auth.${grant.ticket}`]);
@@ -305,7 +305,7 @@ async function connect(deviceId: string, nativeFetch: typeof fetch, useBootstrap
     const channel = await encryptedChannel(target, socket);
     const ready = await channel.open(await readyWire);
     if (ready.type !== "ready" || ready.deviceId !== target.id) {
-      throw new RemoteLinkError("ended", t("远程 Studio 身份校验失败，请停止连接并检查设备。"));
+      throw new RemoteLinkError("ended", t("remote.remote_studio_identity_verification_failed"));
     }
     performance.mark("reasonix:remote:ready");
     performance.measure("reasonix:remote:authorize", "reasonix:remote:start", "reasonix:remote:authorized");

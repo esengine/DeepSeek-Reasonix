@@ -31,8 +31,8 @@ export function AddWorkspacePrompt({ busy, onSubmit, onClose }: Props) {
           onSubmit(path);
         }}
       >
-        <h2 id="addws-t">{t("添加工作区")}</h2>
-        <p className="picknote">{t("无法打开文件夹选择器。请输入内核所在机器上的路径。")}</p>
+        <h2 id="addws-t">{t("session.add_a_workspace")}</h2>
+        <p className="picknote">{t("session.the_folder_picker_cannot_open")}</p>
         <div className="pickpath">
           <input
             ref={input}
@@ -40,16 +40,16 @@ export function AddWorkspacePrompt({ busy, onSubmit, onClose }: Props) {
             spellCheck={false}
             dir="ltr"
             placeholder="/srv/project"
-            aria-label={t("工作区路径")}
+            aria-label={t("session.workspace_path")}
             data-action="workspace.add"
             onChange={(ev) => setPath(ev.target.value)}
           />
           <button type="submit" className="pickgo" data-action="workspace.add" disabled={busy || !path.trim()}>
-            {t("添加")}
+            {t("common.add")}
           </button>
         </div>
         <div className="pickact">
-          <button type="button" data-action="workspace.add-cancel" disabled={busy} onClick={onClose}>{t("取消")}</button>
+          <button type="button" data-action="workspace.add-cancel" disabled={busy} onClick={onClose}>{t("common.cancel")}</button>
         </div>
       </form>
     </div>,

@@ -10,26 +10,26 @@ export function Sponsor({ port }: { port: Pick<AgentPort, "openExternal"> }) {
   const [failed, setFailed] = useState("");
 
   const open = (url: string) =>
-    void port.openExternal(url).then(() => setFailed(""), () => setFailed(t("无法打开浏览器，请手动访问 {at}", { at: url })));
+    void port.openExternal(url).then(() => setFailed(""), () => setFailed(t("common.could_not_open_a_browser", { at: url })));
 
   return (
     <div className="spon">
-      <p className="spon-note">{t("如果 Reasonix 帮你省了时间或 token，欢迎请杯咖啡。这是一杯咖啡，不是合同：捐助不会换来功能优先级，也不会改变问题的处理顺序。")}</p>
+      <p className="spon-note">{t("feedback.if_reasonix_has_saved_you")}</p>
       <div className="spon-acts">
         <a className="spon-link" href={COMMUNITY.paypal} data-action="sponsor.paypal" onClick={(e) => { e.preventDefault(); open(COMMUNITY.paypal); }}>PayPal</a>
         <button type="button" className="btn sm" data-action="sponsor.qr" aria-expanded={qr} aria-controls={qr ? "spon-qr" : undefined} onClick={() => setQr((v) => !v)}>
-          {qr ? t("收起收款码") : t("显示收款码")}
+          {qr ? t("feedback.hide_payment_qr_codes") : t("feedback.show_payment_qr_codes")}
         </button>
       </div>
       {qr && (
         <div id="spon-qr" className="spon-qr">
           <figure>
-            <img src={wechatSrc} alt={t("微信支付收款码")} width={180} />
-            <figcaption>{t("微信支付")}</figcaption>
+            <img src={wechatSrc} alt={t("feedback.wechat_pay_qr_code")} width={180} />
+            <figcaption>{t("feedback.wechat_pay")}</figcaption>
           </figure>
           <figure>
-            <img src={alipaySrc} alt={t("支付宝收款码")} width={180} />
-            <figcaption>{t("支付宝")}</figcaption>
+            <img src={alipaySrc} alt={t("feedback.alipay_qr_code")} width={180} />
+            <figcaption>{t("feedback.alipay")}</figcaption>
           </figure>
         </div>
       )}

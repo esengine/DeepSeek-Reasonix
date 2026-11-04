@@ -191,7 +191,7 @@ export function Sidebar({
   const drop = useFileDrop((d) => {
     if (collapsed || adder.busy || d.text) return;
     if (d.paths.length !== 1) {
-      onError(new Error(d.paths.length ? t("请一次拖入一个文件夹") : t("无法取得本机路径，请使用添加文件夹")));
+      onError(new Error(d.paths.length ? t("session.drop_one_folder_at_a") : t("session.the_local_path_is_unavailable")));
       return;
     }
     adder.addPath(d.paths[0]);
@@ -213,31 +213,31 @@ export function Sidebar({
   // the two cannot drift into two different lists of the same thing.
   const commands = useMemo<Command[]>(
     () => [
-      { id: "new", label: t("新建会话"), icon: "plus", keywords: "new session chat 新建",
+      { id: "new", label: t("common.start_a_new_session"), icon: "plus", keywords: "new session chat 新建",
         run: () => void startConversation().catch(onError) },
-      { id: "find", label: t("在这段对话里查找"), icon: "search", keywords: "find search conversation 查找 搜索 对话",
+      { id: "find", label: t("common.find_in_this_conversation"), icon: "search", keywords: "find search conversation 查找 搜索 对话",
         keys: chord("F"), run: onFind },
-      { id: "view-flow", label: t("显示对话"), icon: "menu", keywords: "conversation chat flow 对话 会话", keys: chord("1"), run: () => onView("flow") },
-      { id: "view-analysis", label: t("显示运行分析"), icon: "list", keywords: "run analysis trace 运行 分析", keys: chord("2"), run: () => onView("analysis") },
-      { id: "view-browser", label: t("显示工作台"), icon: "panel", keywords: "workbench browser files 工作台 浏览器", keys: chord("3"), run: () => onView("browser") },
-      { id: "files", label: t("文件"), icon: "file", keywords: "files workspace explorer 文件 工作区", run: onFiles },
-      { id: "storage", label: t("存储"), icon: "file", keywords: "storage disk data 存储 磁盘 数据",
+      { id: "view-flow", label: t("session.show_conversation"), icon: "menu", keywords: "conversation chat flow 对话 会话", keys: chord("1"), run: () => onView("flow") },
+      { id: "view-analysis", label: t("session.show_run_analysis"), icon: "list", keywords: "run analysis trace 运行 分析", keys: chord("2"), run: () => onView("analysis") },
+      { id: "view-browser", label: t("session.show_workbench"), icon: "panel", keywords: "workbench browser files 工作台 浏览器", keys: chord("3"), run: () => onView("browser") },
+      { id: "files", label: t("common.files"), icon: "file", keywords: "files workspace explorer 文件 工作区", run: onFiles },
+      { id: "storage", label: t("common.storage"), icon: "file", keywords: "storage disk data 存储 磁盘 数据",
         run: () => onSettings("storage") },
-      { id: "ext", label: t("工具与集成"), icon: "plug", keywords: "tools mcp skills 工具 集成",
+      { id: "ext", label: t("session.tools_and_integrations"), icon: "plug", keywords: "tools mcp skills 工具 集成",
         run: () => onSettings("ext") },
-      { id: "remote", label: t("运行环境"), icon: "server", keywords: "ssh local remote 运行环境",
+      { id: "remote", label: t("session.where_it_runs"), icon: "server", keywords: "ssh local remote 运行环境",
         run: () => onSettings("remote") },
-      { id: "providers", label: t("模型服务"), icon: "layers", keywords: "model provider 模型 来源 服务",
+      { id: "providers", label: t("common.model_services"), icon: "layers", keywords: "model provider 模型 来源 服务",
         run: () => onSettings("providers") },
-      { id: "usage", label: t("钱包与用量"), icon: "wallet", keywords: "usage cost token 用量 费用",
+      { id: "usage", label: t("session.wallet_and_usage"), icon: "wallet", keywords: "usage cost token 用量 费用",
         run: () => onSettings("usage") },
-      { id: "feedback", label: t("发送反馈"), icon: "feedback", keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
+      { id: "feedback", label: t("common.send_feedback"), icon: "feedback", keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
         run: () => onFeedback("send") },
-      { id: "feedback-mine", label: t("我的反馈"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
-        status: feedbackUnread > 0 ? t("{n} 项待查看", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
-      { id: "community", label: t("社区与贡献者"), icon: "globe", keywords: "community discord qq group contributors 社区 交流群 加群 贡献者",
+      { id: "feedback-mine", label: t("session.my_feedback"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
+        status: feedbackUnread > 0 ? t("common.n_to_review", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
+      { id: "community", label: t("common.community_and_contributors"), icon: "globe", keywords: "community discord qq group contributors 社区 交流群 加群 贡献者",
         run: () => onSettings("versions:community") },
-      { id: "settings", label: t("设置"), icon: "settings", keywords: "settings preferences 设置 偏好",
+      { id: "settings", label: t("common.settings"), icon: "settings", keywords: "settings preferences 设置 偏好",
         run: () => onSettings() },
     ],
     [newSessionRoot, onNew, onOpen, onOpenRemote, runtimes, active, onFiles, onView, onSettings, onFeedback, feedbackUnread, onFind, onError],
@@ -302,9 +302,9 @@ export function Sidebar({
     {/* 收起而不是卸载：卸掉就丢了侧栏的滚动位置、Inspector 的展开、当前选
         中的面板。inert 是「看不见就够不着」那一半 —— 只做视觉隐藏的话，
         屏幕上没有的栏还能被 Tab 走进去。 */}
-    <button className="railveil" data-action="chrome.rail" tabIndex={-1} aria-label={t("收起工作区栏")} onClick={() => onCollapse()} />
+    <button className="railveil" data-action="chrome.rail" tabIndex={-1} aria-label={t("common.collapse_the_workspace_rail")} onClick={() => onCollapse()} />
     <div className="rail" inert={collapsed} ref={drop}>
-      {over && !collapsed && !adder.busy && <div className="rail-drop" role="status"><StudioIcon name="folder" /><span>{t("松开以添加项目文件夹")}</span></div>}
+      {over && !collapsed && !adder.busy && <div className="rail-drop" role="status"><StudioIcon name="folder" /><span>{t("session.drop_to_add_a_project")}</span></div>}
       <div className="railscroll">
       <div className="studio-rail-head">
         <div className="studio-brand" aria-label="Reasonix Studio">
@@ -312,7 +312,7 @@ export function Sidebar({
             <img className="studio-brand-logo" src={logoWordmark} alt="" draggable={false} />
             <small className="studio-brand-sub">studio</small>
           </span>
-          <button type="button" className="studio-collapse" data-action="chrome.rail" title={t("收起侧栏")} aria-label={t("收起侧栏")} onClick={() => onCollapse()}>
+          <button type="button" className="studio-collapse" data-action="chrome.rail" title={t("session.collapse_sidebar")} aria-label={t("session.collapse_sidebar")} onClick={() => onCollapse()}>
             <StudioIcon name="panel" />
           </button>
         </div>
@@ -322,10 +322,10 @@ export function Sidebar({
           title="Alt N"
           onClick={() => void startConversation().catch(onError)}
         >
-          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("新建会话")}</b><kbd>Alt N</kbd>
+          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("common.start_a_new_session")}</b><kbd>Alt N</kbd>
         </button>
         <button className="studio-search" data-action="workspace.search" title="Ctrl K" onClick={() => setPalette(true)}>
-          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索会话与操作")}</b><kbd>Ctrl K</kbd>
+          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("session.search_sessions_and_actions")}</b><kbd>Ctrl K</kbd>
         </button>
       </div>
       <RailFilterContext.Provider value={<SessionFilter scope={railScope} counts={scopeCounts} onScope={setRailScope} />}>
@@ -394,10 +394,10 @@ export function Sidebar({
       </RailFilterContext.Provider>
       </div>
       {!navShown && <div className="railfoot">
-        <div className="studio-quicknav" role="toolbar" aria-label={t("侧栏入口")} onKeyDown={moveAlongToolbar}>
+        <div className="studio-quicknav" role="toolbar" aria-label={t("session.sidebar_shortcuts")} onKeyDown={moveAlongToolbar}>
           {destinations.map(([mark, label, section]) => {
             const reading = mark === "usage" ? (wallet ? (hideAmounts ? MASK : wallet) : "")
-              : mark === "remote" && online > 0 ? t("{n} 台在线", { n: online })
+              : mark === "remote" && online > 0 ? t("common.n_online", { n: online })
               : mark === "tools" && approval ? approvalName(approval) : "";
             const name = reading ? `${t(label)} · ${reading}` : t(label);
             const opensFiles = mark === "files";
@@ -418,7 +418,7 @@ export function Sidebar({
             );
           })}
           <span className="qspace" aria-hidden="true" />
-          <TooltipButton className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("设置")} title={t("设置")} shortcut={chord(",")}>
+          <TooltipButton className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("common.settings")} title={t("common.settings")} shortcut={chord(",")}>
             <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4" />
             </svg>
@@ -427,7 +427,7 @@ export function Sidebar({
         </div>
         <button className="studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
           <span aria-hidden="true"><StudioIcon name="feedback" /></span>
-          <b>{t("发送反馈")}</b>
+          <b>{t("common.send_feedback")}</b>
           <FeedbackBadge unread={feedbackUnread} />
         </button>
       </div>}

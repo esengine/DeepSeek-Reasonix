@@ -11,9 +11,9 @@ export function keyOf(s: Surface) {
 }
 export function labelOf(s: Surface, hosts: Record<string, string>) {
   return s.kind === "manual"
-    ? hosts[s.id] || t("浏览器")
+    ? hosts[s.id] || t("workbench.browser")
     : s.kind === "browser"
-      ? s.tab.title || s.tab.url || t("空白页")
+      ? s.tab.title || s.tab.url || t("common.blank_page")
       : s.kind === "agent"
         ? s.name
         : s.path.split("/").at(-1) || s.path;

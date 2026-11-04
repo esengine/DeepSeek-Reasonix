@@ -5,7 +5,7 @@ export function ListingProgress({ workspace, searching, onRetry }: { workspace: 
   if (workspace.countsComplete !== false) return null;
   const failed = workspace.listingState === "degraded";
   return <small className="sessnote" role="status" aria-busy={!failed}>
-    {failed ? t("部分历史摘要暂不可用，可继续打开会话") : searching ? t("仍在搜索部分历史会话…") : t("正在读取历史摘要…")}
-    {failed && onRetry && <>{" "}<button type="button" className="ws-reading-retry" data-action="tree.retry" onClick={onRetry}>{t("重试")}</button></>}
+    {failed ? t("workbench.some_history_summaries_are_unavailable") : searching ? t("workbench.still_searching_some_historical_conversations") : t("workbench.reading_history_summaries")}
+    {failed && onRetry && <>{" "}<button type="button" className="ws-reading-retry" data-action="tree.retry" onClick={onRetry}>{t("common.retry")}</button></>}
   </small>;
 }

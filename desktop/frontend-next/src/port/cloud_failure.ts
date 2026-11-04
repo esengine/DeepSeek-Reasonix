@@ -31,19 +31,19 @@ export function failureView({ code, retryAfterS }: FailureDetail): FailureView {
   const reconnect = { action: "reconnect" as const, waitS: 0, retryWhenOnline: false };
   switch (code) {
     case "offline":
-      return { ...reconnect, retryWhenOnline: true, title: t("网络已断开"), body: t("当前设备没有网络。请检查网络连接后重新连接。") };
+      return { ...reconnect, retryWhenOnline: true, title: t("remote.youre_offline"), body: t("remote.this_device_has_no_network") };
     case "unreachable":
       return {
         ...reconnect,
-        title: t("无法连接远程服务"),
-        body: t("当前网络访问不到 Reasonix 远程服务，可能是网络受限或服务暂时中断。请切换网络后重新连接。"),
+        title: t("remote.cant_reach_the_remote_service"),
+        body: t("remote.this_network_cant_reach_the"),
       };
     case "origin_rejected":
       return {
         ...reconnect,
         action: "home",
-        title: t("此网址不能使用远程中转"),
-        body: t("远程中转拒绝了当前网页的来源。请从 reasonix.io 打开 Web Studio 后再连接。"),
+        title: t("remote.this_address_cant_use_the"),
+        body: t("remote.the_relay_rejected_this_pages"),
       };
     case "rate_limited": {
       const waitS = retryAfterS && retryAfterS > 0 ? Math.min(Math.ceil(retryAfterS), 600) : 0;
@@ -51,24 +51,24 @@ export function failureView({ code, retryAfterS }: FailureDetail): FailureView {
         action: "reconnect",
         retryWhenOnline: false,
         waitS,
-        title: t("尝试次数过多"),
-        body: waitS > 0 ? t("请求过于频繁。请等待 {n} 秒后重新连接。", { n: waitS }) : t("请求过于频繁。请稍等片刻后重新连接。"),
+        title: t("remote.too_many_attempts"),
+        body: waitS > 0 ? t("remote.too_many_requests_wait_n", { n: waitS }) : t("remote.too_many_requests_wait_a"),
       };
     }
     case "refused":
       return {
         ...reconnect,
-        title: t("中转拒绝了这次连接"),
-        body: t("连接凭证可能已过期，或这台电脑上同时连接的设备已满。请重新连接；仍然失败请等一分钟再试。"),
+        title: t("remote.the_relay_refused_this_connection"),
+        body: t("remote.the_connection_ticket_may_have"),
       };
     case "idle":
       return {
         ...reconnect,
-        title: t("长时间没有操作"),
-        body: t("为节省资源，中转已回收这条空闲连接。点击重新连接即可继续。"),
+        title: t("remote.inactive_for_a_while"),
+        body: t("remote.the_relay_released_this_idle"),
       };
     case "unknown":
-      return { ...reconnect, title: t("远程连接失败"), body: t("远程中转服务暂时不可用，请稍后重试。") };
+      return { ...reconnect, title: t("remote.remote_connection_failed"), body: t("remote.the_remote_relay_is_temporarily") };
   }
 }
 

@@ -88,7 +88,7 @@ export function FeedbackLink({ port, hasReport, onBoardChanged }: Props) {
       setLinks(await port.feedbackLinks());
       if (join && boardNameProblem(name) === null) await port.joinFeedbackBoard(name.trim());
     } catch (e) {
-      setProblem(join ? t("已关联，但没能加入贡献榜：{why}。可以在下面的贡献榜里改个名字再加入。", { why: reason(e) }) : linkFailure(e).message);
+      setProblem(join ? t("feedback.linked_but_joining_the_board", { why: reason(e) }) : linkFailure(e).message);
     } finally {
       setBusy(false);
       onBoardChanged?.();
@@ -101,48 +101,48 @@ export function FeedbackLink({ port, hasReport, onBoardChanged }: Props) {
   const canLink = signedIn && hasReport && !busy;
 
   return (
-    <section className="fbk-link" aria-label={t("账号关联")}>
+    <section className="fbk-link" aria-label={t("feedback.account_link")}>
       <div className="fbk-link-hd">
-        <span className="fbk-link-name">{t("账号关联")}</span>
-        <span className="fbk-hint">{t("关联后，这台电脑的反馈等级会显示在网页账号页上。关联不会改变额度，随时可以解除。")}</span>
+        <span className="fbk-link-name">{t("feedback.account_link")}</span>
+        <span className="fbk-hint">{t("feedback.once_linked_this_computers_feedback")}</span>
       </div>
-      {!signedIn && <p className="fbk-hint">{t("先在设置里登录账号，才能关联。")}</p>}
-      {signedIn && !hasReport && !here && <p className="fbk-hint">{t("发出第一条反馈之后才能关联这台电脑。")}</p>}
+      {!signedIn && <p className="fbk-hint">{t("feedback.sign_in_to_your_account")}</p>}
+      {signedIn && !hasReport && !here && <p className="fbk-hint">{t("feedback.you_can_link_this_computer")}</p>}
       <div className="fbk-link-row">
         {here ? (
           <>
-            <span className="fbk-chip" data-status="recorded">{t("这台电脑已关联")} · {day(here.linkedAt)}</span>
+            <span className="fbk-chip" data-status="recorded">{t("feedback.this_computer_is_linked")} · {day(here.linkedAt)}</span>
             <button type="button" className="btn sm" data-action="feedback.account-unlink" disabled={busy} onClick={() => void run(() => port.unlinkFeedbackAccount())}>
-              {t("解除关联")}
+              {t("feedback.unlink_2")}
             </button>
           </>
         ) : (
           <button type="button" className="btn sm" data-action="feedback.account-link" disabled={!canLink || asking} onClick={ask}>
-            {t("把这台电脑关联到我的账号")}
+            {t("feedback.link_this_computer_to_my")}
           </button>
         )}
       </div>
       {asking && !here && (
-        <div className="fbk-link-confirm" role="group" aria-label={t("确认关联")}>
+        <div className="fbk-link-confirm" role="group" aria-label={t("feedback.confirm_linking")}>
           <FeedbackBoardJoin checked={join} name={name} disabled={busy} onChecked={setJoin} onName={setName} />
           <div className="fbk-link-row">
             <button type="button" className="btn sm" data-primary data-action="feedback.account-link-confirm" disabled={busy || (join && boardNameProblem(name) !== null)} onClick={() => void confirm()}>
-              {t("确认")}
+              {t("common.confirm")}
             </button>
             <button type="button" className="btn sm" data-action="feedback.account-link-cancel" disabled={busy} onClick={() => setAsking(false)}>
-              {t("取消")}
+              {t("common.cancel")}
             </button>
           </div>
         </div>
       )}
       {others.length > 0 && (
-        <ul className="fbk-link-list" aria-label={t("账号下的其他电脑")}>
+        <ul className="fbk-link-list" aria-label={t("feedback.other_computers_on_this_account")}>
           {others.map((l) => (
             <li key={l.id}>
               <code className="fbk-code">{l.id}</code>
               <span className="fbk-meta">{day(l.linkedAt)}</span>
               <button type="button" className="btn sm" data-action="feedback.account-unlink-other" data-target={l.id} disabled={busy} onClick={() => void run(() => port.unlinkFeedbackInstall(l.id))}>
-                {t("解除")}
+                {t("feedback.unlink")}
               </button>
             </li>
           ))}

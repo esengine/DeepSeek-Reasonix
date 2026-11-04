@@ -12,13 +12,13 @@ export function SessionPinAction({ target, title, pinned, enabled, disabled, onP
   enabled: boolean;
   onPin: () => void;
 }) {
-  if (!enabled) return pinned ? <StudioIcon name="pin" className="sesspin-marker ds-pin" aria-label={t("已置顶")} /> : null;
+  if (!enabled) return pinned ? <StudioIcon name="pin" className="sesspin-marker ds-pin" aria-label={t("session.pinned")} /> : null;
   return <button className="sesspin-action" data-action="session.pin" data-target={target}
     aria-pressed={pinned} disabled={disabled}
-    title={t(pinned ? "取消置顶" : "置顶会话")}
-    aria-label={t(pinned ? "取消置顶：{title}" : "置顶会话：{title}", { title })}
+    title={t(pinned ? "common.unpin" : "common.pin_session")}
+    aria-label={t(pinned ? "session.unpin_session_title" : "session.pin_session_title", { title })}
     onClick={(event) => { event.stopPropagation(); onPin(); }}>
-    <StudioIcon name="pin" aria-label={pinned ? t("已置顶") : undefined} />
+    <StudioIcon name="pin" aria-label={pinned ? t("session.pinned") : undefined} />
   </button>;
 }
 
@@ -28,8 +28,8 @@ export function SessionArchiveAction({ target, title, archived, disabled, onArch
 }) {
   return <span className="sessquick"><button data-action="session.archive" data-target={target}
     data-value={archived ? "restore" : "archive"} disabled={disabled}
-    title={t(archived ? "取消归档" : "归档会话")}
-    aria-label={t(archived ? "取消归档：{title}" : "归档会话：{title}", { title })}
+    title={t(archived ? "common.unarchive" : "common.archive_session")}
+    aria-label={t(archived ? "session.unarchive_title" : "session.archive_session_title", { title })}
     onClick={(event) => { event.stopPropagation(); onArchive(); }}>
     <StudioIcon name="archive" />
   </button></span>;
@@ -37,7 +37,7 @@ export function SessionArchiveAction({ target, title, archived, disabled, onArch
 
 export function SessionMoreAction({ target, disabled, onOpen }: { target: string; disabled?: boolean; onOpen: (trigger: HTMLElement) => void }) {
   return <button className="ds-more" data-action="session.menu" data-target={target} aria-haspopup="menu" disabled={disabled}
-    title={t("会话操作")} aria-label={t("会话操作")}
+    title={t("common.session_actions")} aria-label={t("common.session_actions")}
     onClick={(event) => { event.stopPropagation(); onOpen(event.currentTarget.closest<HTMLElement>(".sessrow") ?? event.currentTarget); }}>
     <StudioIcon name="more" />
   </button>;

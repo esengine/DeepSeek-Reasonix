@@ -22,7 +22,7 @@ export function clock(iso: string): string {
 
 // A device is named by when it paired. Its user agent is kept, as the title,
 // but read as a name it is a hundred characters and every one starts the same.
-export const deviceLabel = (i: number) => t("设备 {n}", { n: i + 1 });
+export const deviceLabel = (i: number) => t("remote.device_n", { n: i + 1 });
 
 export type Share = ReturnType<typeof useShare>;
 
@@ -174,29 +174,29 @@ export function ShareBody({ share }: { share: Share }) {
     <>
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("允许手机访问")}</span>
+          <span className="lb">{t("remote.allow_phones_to_connect")}</span>
           <span className="ds">
             {noNetwork
-              ? t("这台电脑现在没有局域网地址，连上 Wi-Fi 或网线后再试。")
-              : t("手机和这台电脑在同一个网络里，扫码后就能看会话、发消息、批准操作。关闭或退出 Studio 会断开所有手机。")}
+              ? t("remote.this_computer_has_no_private")
+              : t("remote.a_phone_on_the_same")}
           </span>
         </span>
-        <Switch data-action="share.toggle" on={st.open} busy={busy || noNetwork} label={t("允许手机访问")} onClick={() => void toggle()} />
+        <Switch data-action="share.toggle" on={st.open} busy={busy || noNetwork} label={t("remote.allow_phones_to_connect")} onClick={() => void toggle()} />
       </div>
 
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("记住配对的手机")}</span>
+          <span className="lb">{t("remote.remember_paired_phones")}</span>
           <span className="ds">
-            {t("开启后，重启 Studio 会重新打开手机访问，已配对的手机不必重新扫码。主动关闭手机访问仍会清空配对。")}
+            {t("remote.when_on_a_restart_reopens")}
           </span>
         </span>
-        <Switch data-action="share.remember" on={remember ?? false} busy={busy || remember === null} label={t("记住配对的手机")} onClick={() => void saveRemember(!(remember ?? false))} />
+        <Switch data-action="share.remember" on={remember ?? false} busy={busy || remember === null} label={t("remote.remember_paired_phones")} onClick={() => void saveRemember(!(remember ?? false))} />
       </div>
 
       {st.addresses.length > 1 && (
         <label className="rmtf">
-          <span>{t("网络")}</span>
+          <span>{t("common.network")}</span>
           <select
             data-action="share.address"
             value={chosen}
@@ -205,51 +205,51 @@ export function ShareBody({ share }: { share: Share }) {
           >
             {st.addresses.map((a) => (
               <option key={a.ip} value={a.ip}>
-                {a.kind === "tailnet" ? `${a.ip} · Tailscale` : a.kind === "virtual" ? `${a.ip} · ${a.interface} · ${t("虚拟网卡")}` : `${a.ip} · ${a.interface}`}
+                {a.kind === "tailnet" ? `${a.ip} · Tailscale` : a.kind === "virtual" ? `${a.ip} · ${a.interface} · ${t("remote.virtual_adapter")}` : `${a.ip} · ${a.interface}`}
               </option>
             ))}
           </select>
         </label>
       )}
       {st.addresses.length > 1 && st.open && st.devices.length > 0 && (
-        <p className="rmthint">{t("换网络会断开已连接的手机，它们需要扫新的二维码。")}</p>
+        <p className="rmthint">{t("remote.switching_networks_disconnects_the_connected")}</p>
       )}
 
       <label className="rmtf">
-        <span>{t("端口")}</span>
+        <span>{t("common.port")}</span>
         <input
           data-action="share.port"
           inputMode="numeric"
           maxLength={5}
           value={portDraft ?? (st.port ? String(st.port) : "")}
-          placeholder={t("自动")}
+          placeholder={t("common.auto")}
           disabled={busy}
           onChange={(e) => setPortDraft(e.target.value.replace(/\D/g, ""))}
           onBlur={commitPort}
         />
       </label>
       <p className="rmthint">
-        {t("留空则每次开启时由系统随机选择，范围 1024–65535。更改端口后，手机需要重新扫码配对。")}
+        {t("remote.leave_empty_to_let_the")}
       </p>
-      {st.open && st.devices.length > 0 && <p className="rmthint">{t("改端口会断开已连接的手机，它们需要扫新的二维码。")}</p>}
+      {st.open && st.devices.length > 0 && <p className="rmthint">{t("remote.changing_the_port_disconnects_the")}</p>}
 
       {st.open && (
         <div className="shareopen">
           {offer ? (
             <div className="shareqr">
-              <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(offer.qr)}`} alt={t("配对二维码")} width={184} height={184} />
+              <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(offer.qr)}`} alt={t("remote.pairing_qr_code")} width={184} height={184} />
               <div className="sharehow">
-                <span className="lb">{t("用手机相机扫码")}</span>
-                <span className="ds">{t("二维码只能配对一台手机，{time} 前有效。别把它发到群里或截图外传。", { time: clock(offer.expires) })}</span>
+                <span className="lb">{t("remote.scan_with_your_phones_camera")}</span>
+                <span className="ds">{t("remote.the_code_pairs_one_phone", { time: clock(offer.expires) })}</span>
                 <code dir="ltr">{st.origin}</code>
                 <button className="rmtlnk sharecopy" data-action="share.copy" onClick={() => void copyLink(offer.url)}>
-                  {copied === "done" ? t("已复制") : copied === "failed" ? t("复制不了") : t("复制配对链接")}
+                  {copied === "done" ? t("common.copied") : copied === "failed" ? t("remote.copy_blocked") : t("remote.copy_pairing_link")}
                 </button>
               </div>
             </div>
           ) : (
             <button className="rmtadd" data-action="share.offer" disabled={busy} onClick={() => void newCode()}>
-              {t("显示配对二维码")}
+              {t("remote.show_a_pairing_code")}
             </button>
           )}
 
@@ -257,11 +257,11 @@ export function ShareBody({ share }: { share: Share }) {
             {st.devices.map((d, i) => (
               <div className="sharedev" key={d.id}>
                 <span className="nm" title={d.name}>{deviceLabel(i)}</span>
-                <span className="st">{d.online ? t("{time} 配对 · 在线", { time: clock(d.pairedAt) }) : t("{time} 配对 · 最近 {seen}", { time: clock(d.pairedAt), seen: clock(d.lastSeen) })}</span>
+                <span className="st">{d.online ? t("remote.paired_time_online", { time: clock(d.pairedAt) }) : t("remote.paired_time_last_seen_seen", { time: clock(d.pairedAt), seen: clock(d.lastSeen) })}</span>
                 {confirm === d.id ? (
                   <span className="rmtconfirm" role="alertdialog">
-                    <span>{t("断开这台手机？它需要重新扫码才能再连上。")}</span>
-                    <button data-action="share.keep" data-target={d.id} onClick={() => setConfirm("")}>{t("取消")}</button>
+                    <span>{t("remote.disconnect_this_phone_it_will")}</span>
+                    <button data-action="share.keep" data-target={d.id} onClick={() => setConfirm("")}>{t("common.cancel")}</button>
                     <button
                       data-danger=""
                       data-action="share.revoke"
@@ -272,21 +272,21 @@ export function ShareBody({ share }: { share: Share }) {
                         void revoke(d.id);
                       }}
                     >
-                      {t("断开")}
+                      {t("remote.disconnect")}
                     </button>
                   </span>
                 ) : (
                   <button className="rmtlnk" data-danger="" data-action="share.ask-revoke" data-target={d.id} onClick={() => setConfirm(d.id)}>
-                    {t("断开")}
+                    {t("remote.disconnect")}
                   </button>
                 )}
               </div>
             ))}
-            {st.devices.length === 0 && <p className="rmtempty">{t("还没有手机连上来。")}</p>}
+            {st.devices.length === 0 && <p className="rmtempty">{t("remote.no_phone_is_connected_yet")}</p>}
           </div>
 
           <p className="sharewarn">
-            {t("连接走的是局域网里的明文 HTTP：同一个网络里的其他人能看到传输内容。在自己家里可以用，咖啡馆、机场这类公共网络不要开。Tailscale 地址的流量本身是加密的。")}
+            {t("remote.the_connection_is_plain_http")}
           </p>
         </div>
       )}
@@ -303,7 +303,7 @@ export function PhoneAccess({ hub, onError }: Props) {
   return (
     <section className="grp" id="set-phone" data-setting="phone">
       <div className="grp-hd">
-        <h3>{t("手机访问")}</h3>
+        <h3>{t("remote.phone_access")}</h3>
       </div>
       <div className="grp-items share">
         <ShareBody share={share} />

@@ -9,20 +9,20 @@ export function ProjectsHeader({ adder, onRecent, onToggleAll, allFolded, canFol
   return (
     <div className="projects-header">
       <div className="projects-tabs">
-        <div className="vtabs" role="group" aria-label={t("会话视图")}>
-          <button type="button" className="vtab" data-action="session.view" data-value="projects" aria-pressed="true">{t("项目")}</button>
-          {onRecent && <button type="button" className="vtab" data-action="session.recent" title={t("最近的会话")} aria-label={t("最近的会话")} onClick={onRecent}>{t("最近")}</button>}
+        <div className="vtabs" role="group" aria-label={t("session.session_view")}>
+          <button type="button" className="vtab" data-action="session.view" data-value="projects" aria-pressed="true">{t("common.project")}</button>
+          {onRecent && <button type="button" className="vtab" data-action="session.recent" title={t("session.recent_sessions")} aria-label={t("session.recent_sessions")} onClick={onRecent}>{t("session.recent")}</button>}
         </div>
         <span className="projects-spacer" />
         {onToggleAll && (
           <button className="projects-add projects-fold" data-action="workspace.fold-all" disabled={!canFold || searching} aria-expanded={!allFolded}
-            title={t(searching ? "搜索时自动展开项目" : allFolded ? "展开所有项目" : "收起所有项目")} aria-label={t(allFolded ? "展开所有项目" : "收起所有项目")} onClick={onToggleAll}>
+            title={t(searching ? "session.projects_expand_automatically_while_searching" : allFolded ? "session.expand_all_projects" : "session.collapse_all_projects")} aria-label={t(allFolded ? "session.expand_all_projects" : "session.collapse_all_projects")} onClick={onToggleAll}>
             <StudioIcon name={allFolded ? "expandAll" : "collapseAll"} />
           </button>
         )}
         {filter}
         <button className="projects-add" data-busy={adder.busy ? "" : undefined} disabled={adder.busy}
-          title={t("打开项目")} aria-label={t("打开项目")} data-action="workspace.add" onClick={() => adder.add()}>
+          title={t("session.open_project")} aria-label={t("session.open_project")} data-action="workspace.add" onClick={() => adder.add()}>
           <StudioIcon name="plus" />
         </button>
       </div>

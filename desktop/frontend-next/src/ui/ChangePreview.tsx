@@ -73,7 +73,7 @@ export function ChangePreview({ port, path, onClose }: Props) {
         <div className="cpv-hd">
           <span className="p">{path}</span>
           <button className="btn sm" onClick={onClose}>
-            {t("关闭")} <span className="esc">Esc</span>
+            {t("common.close")} <span className="esc">Esc</span>
           </button>
         </div>
         <div className="cpv-body">
@@ -82,10 +82,10 @@ export function ChangePreview({ port, path, onClose }: Props) {
               <span className="t">{failed}</span>
             </div>
           )}
-          {!failed && diff === null && <span className="empty">{t("正在读这个文件的改动…")}</span>}
-          {!failed && empty && <span className="empty">{t("这个文件现在和上一次提交一样")}</span>}
+          {!failed && diff === null && <span className="empty">{t("workbench.reading_this_files_changes")}</span>}
+          {!failed && empty && <span className="empty">{t("workbench.this_file_now_matches_the")}</span>}
           {!failed && diff !== null && !empty && <DiffView diff={fromFirstHunk(diff)} path={path} />}
-          {truncated && <p className="mnote">{t("改动太长，只显示了前面一段")}</p>}
+          {truncated && <p className="mnote">{t("workbench.too_long_to_show_in")}</p>}
         </div>
       </div>
     </div>,

@@ -50,13 +50,13 @@ function when(params: Params): string {
   const time = at === null ? NaN : Date.parse(at);
   if (!Number.isNaN(time) && time > Date.now()) {
     const loc = current() === "zh" ? "zh-CN" : "en";
-    return t("将在 {time} 重置。", { time: new Date(time).toLocaleString(loc, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) });
+    return t("feedback.it_resets_at_time", { time: new Date(time).toLocaleString(loc, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) });
   }
   const secs = Number(params?.retryAfterSeconds);
   if (!(secs > 0)) return "";
-  if (secs < 60) return t("约 {n} 秒后重置。", { n: Math.ceil(secs) });
-  if (secs < 3600) return t("约 {n} 分钟后重置。", { n: Math.ceil(secs / 60) });
-  return t("约 {n} 小时后重置。", { n: Math.ceil(secs / 3600) });
+  if (secs < 60) return t("feedback.it_resets_in_about_n_3", { n: Math.ceil(secs) });
+  if (secs < 3600) return t("feedback.it_resets_in_about_n", { n: Math.ceil(secs / 60) });
+  return t("feedback.it_resets_in_about_n_2", { n: Math.ceil(secs / 3600) });
 }
 
 // A refusal that names its window; null from a service that sends none, which
@@ -65,19 +65,19 @@ function windowed(params: Params): string | null {
   const limit = text(params?.limit);
   if (limit === null) return null;
   const said = WINDOW_SAID[limit];
-  const head = said ? t(said) : t("已达到一项提交上限。");
+  const head = said ? t(said) : t("feedback.a_submission_limit_was_reached");
   const tail = when(params);
   return tail === "" ? head : `${head}${current() === "zh" ? "" : " "}${tail}`;
 }
 
 function invalid(params: Params): string {
   const said = INVALID[`${params?.field}.${params?.reason}`];
-  return t(said ?? "内容不符合要求，请检查后重试。");
+  return t(said ?? "feedback.something_in_the_form_was");
 }
 
 export function feedbackFailure(e: unknown): FeedbackFailure {
   if (!(e instanceof HttpError)) {
-    return { code: FEEDBACK_CODE.offline, retry: "same", message: t("没能连上反馈服务。已填的内容都还在，网络恢复后可以直接重试，不会重复提交。") };
+    return { code: FEEDBACK_CODE.offline, retry: "same", message: t("feedback.could_not_reach_the_feedback_3") };
   }
   const code = e.reason?.code ?? "";
   const params = e.reason?.params;
@@ -85,31 +85,31 @@ export function feedbackFailure(e: unknown): FeedbackFailure {
     case FEEDBACK_CODE.invalid:
       return { code, retry: "edit", message: invalid(params) };
     case FEEDBACK_CODE.badBody:
-      return { code, retry: "edit", message: t("这次的内容没能被解析，请检查后重试。") };
+      return { code, retry: "edit", message: t("feedback.the_request_could_not_be") };
     case FEEDBACK_CODE.tooLarge:
-      return { code, retry: "edit", message: t("内容太大，服务端没有接收。请缩短文字，或去掉一张截图后再发。") };
+      return { code, retry: "edit", message: t("feedback.the_report_was_too_large") };
     case FEEDBACK_CODE.rateLimited:
       return { code, retry: "later", message: windowed(params) ?? plainWait(params) };
     case FEEDBACK_CODE.busy:
-      return { code, retry: "later", message: windowed(params) ?? t("反馈通道今天的接收量已满，不是你发得太多。内容都还在，请明天再试。") };
+      return { code, retry: "later", message: windowed(params) ?? t("feedback.the_feedback_channel_has_reached") };
     case FEEDBACK_CODE.challengeRequired:
-      return { code, retry: "later", message: t("服务暂时要求额外验证，当前版本还不能显示验证步骤。请稍后再试，或直接到 GitHub 提交问题。") };
+      return { code, retry: "later", message: t("feedback.the_service_temporarily_asks_for") };
     case FEEDBACK_CODE.imageMetadata:
-      return { code, retry: "edit", message: t("有一张截图没能清除其中的隐藏信息。请换一张，或重新导出后再添加。") };
+      return { code, retry: "edit", message: t("feedback.a_screenshot_could_not_be") };
     case FEEDBACK_CODE.duplicate:
-      return { code, retry: "none", message: t("相同内容刚刚已经提交过，不需要再发一次。可以在「我的反馈」里查看它。") };
+      return { code, retry: "none", message: t("feedback.the_same_text_was_just") };
     case FEEDBACK_CODE.disabled:
-      return { code, retry: "none", message: t("反馈通道暂时关闭。你可以直接到 GitHub 提交问题。") };
+      return { code, retry: "none", message: t("feedback.the_feedback_channel_is_switched_2") };
     case FEEDBACK_CODE.badToken:
-      return { code, retry: "later", message: t("反馈服务没有认出这台电脑，请稍后重试。") };
+      return { code, retry: "later", message: t("feedback.the_feedback_service_did_not") };
     case FEEDBACK_CODE.offline:
-      return { code, retry: "same", message: t("没能连上反馈服务。已填的内容都还在，网络恢复后可以直接重试，不会重复提交。") };
+      return { code, retry: "same", message: t("feedback.could_not_reach_the_feedback_3") };
     case FEEDBACK_CODE.unavailable:
-      return { code, retry: "later", message: t("反馈服务暂时出了问题。已填的内容都还在，请稍等片刻再试，也可以直接到 GitHub 提交问题。") };
+      return { code, retry: "later", message: t("feedback.the_feedback_service_is_having_2") };
     case FEEDBACK_CODE.internal:
-      return { code, retry: "later", message: t("本机保存反馈记录时出错，请重试。") };
+      return { code, retry: "later", message: t("feedback.saving_the_feedback_record_on") };
     default:
-      return { code, retry: "later", message: t("反馈没有发出去，请稍后重试。") };
+      return { code, retry: "later", message: t("feedback.the_feedback_was_not_sent") };
   }
 }
 
@@ -122,65 +122,65 @@ export function replyFailure(e: unknown): FeedbackFailure {
   switch (code) {
     case FEEDBACK_CODE.invalid: {
       const said = REPLY_INVALID[`${params?.field}.${params?.reason}`] ?? INVALID[`${params?.field}.${params?.reason}`];
-      return { code, retry: "edit", message: t(said ?? "回复不符合要求，请检查后重试。") };
+      return { code, retry: "edit", message: t(said ?? "feedback.the_reply_was_not_accepted") };
     }
     case FEEDBACK_CODE.badBody:
-      return { code, retry: "edit", message: t("这次的内容没能被解析，请检查后重试。") };
+      return { code, retry: "edit", message: t("feedback.the_request_could_not_be") };
     case FEEDBACK_CODE.replyLimit:
       if (text(params?.limit) === FEEDBACK_LIMIT.replyItem) {
-        return { code, retry: "none", message: t("这份反馈的回复次数已到上限，不会自动重置。如有新的情况，可以另外提交一条反馈。") };
+        return { code, retry: "none", message: t("feedback.this_report_has_reached_its") };
       }
-      return { code, retry: "later", message: t("这份反馈的回复次数已到上限，或你回复得太频繁了。请稍后再试，必要时另外提交一条新反馈。") };
+      return { code, retry: "later", message: t("feedback.this_report_has_reached_its_2") };
     case FEEDBACK_CODE.notReplyable:
-      return { code, retry: "none", message: t("这份反馈现在不接收回复，它可能已经处理完毕或被关闭。请刷新列表查看最新状态。") };
+      return { code, retry: "none", message: t("feedback.this_report_takes_no_reply") };
     case FEEDBACK_CODE.rateLimited:
       return { code, retry: "later", message: windowed(params) ?? plainWait(params) };
     case FEEDBACK_CODE.badToken:
-      return { code, retry: "none", message: t("这台电脑的反馈身份已经变了，这份反馈不能再从这里回复。可以另外提交一条新反馈。") };
+      return { code, retry: "none", message: t("feedback.this_computers_feedback_identity_has") };
     case FEEDBACK_CODE.disabled:
-      return { code, retry: "none", message: t("反馈通道暂时关闭，暂时不能回复。") };
+      return { code, retry: "none", message: t("feedback.the_feedback_channel_is_switched") };
     case FEEDBACK_CODE.offline:
       return replyOffline(code);
     case FEEDBACK_CODE.internal:
-      return { code, retry: "later", message: t("本机保存反馈记录时出错，请重试。") };
+      return { code, retry: "later", message: t("feedback.saving_the_feedback_record_on") };
     case FEEDBACK_CODE.unavailable:
-      return { code, retry: "later", message: t("反馈服务暂时出了问题。你写的回复还在，请稍等片刻；重发前先刷新列表确认是否送达，也可以直接到 GitHub 提交问题。") };
+      return { code, retry: "later", message: t("feedback.the_feedback_service_is_having") };
     default:
-      return { code, retry: "later", message: t("回复没有发出去，请稍后重试。") };
+      return { code, retry: "later", message: t("feedback.the_reply_was_not_sent") };
   }
 }
 
 function plainWait(params: Params): string {
   const secs = Number(params?.retryAfterSeconds);
-  return secs > 0 ? t("提交得太频繁了，请等 {secs} 秒后再试。", { secs }) : t("提交得太频繁了，请稍等一会儿再试。");
+  return secs > 0 ? t("feedback.you_are_sending_too_fast_2", { secs }) : t("feedback.you_are_sending_too_fast");
 }
 
 function replyOffline(code: string): FeedbackFailure {
-  return { code, retry: "same", message: t("没能连上反馈服务。你写的回复还在；如果不确定它有没有送达，请先刷新列表看看，再决定要不要重发。") };
+  return { code, retry: "same", message: t("feedback.could_not_reach_the_feedback_2") };
 }
 
 // Linking an install to the account has its own refusals; the rest read like
 // any other feedback refusal.
 export function linkFailure(e: unknown): FeedbackFailure {
-  if (!(e instanceof HttpError)) return { code: FEEDBACK_CODE.offline, retry: "same", message: t("没能连上反馈服务，请稍后重试。") };
+  if (!(e instanceof HttpError)) return { code: FEEDBACK_CODE.offline, retry: "same", message: t("feedback.could_not_reach_the_feedback") };
   const code = e.reason?.code ?? "";
   switch (code) {
     case FEEDBACK_CODE.accountRequired:
-      return { code, retry: "none", message: t("需要先登录账号。登录状态可能已过期，请在设置里重新登录。") };
+      return { code, retry: "none", message: t("feedback.sign_in_to_your_account_2") };
     case FEEDBACK_CODE.linkConflict:
-      return { code, retry: "none", message: t("这台电脑已经关联到另一个账号。请先用那个账号解除关联。") };
+      return { code, retry: "none", message: t("feedback.this_computer_is_already_linked") };
     case FEEDBACK_CODE.linkLimit:
-      return { code, retry: "none", message: t("这个账号关联的电脑已达上限。请先解除一台不用的电脑。") };
+      return { code, retry: "none", message: t("feedback.this_account_has_reached_its") };
     case FEEDBACK_CODE.noInstall:
-      return { code, retry: "none", message: t("这台电脑还没有发过反馈，发出第一条之后才能关联账号。") };
+      return { code, retry: "none", message: t("feedback.this_computer_has_not_sent") };
     case FEEDBACK_CODE.rateLimited:
       return { code, retry: "later", message: windowed(e.reason?.params) ?? plainWait(e.reason?.params) };
     case FEEDBACK_CODE.disabled:
     case FEEDBACK_CODE.unavailable:
-      return { code, retry: "later", message: t("账号关联暂时不可用，请稍后再试。") };
+      return { code, retry: "later", message: t("feedback.account_linking_is_unavailable_right") };
     case FEEDBACK_CODE.offline:
-      return { code, retry: "same", message: t("没能连上反馈服务，请稍后重试。") };
+      return { code, retry: "same", message: t("feedback.could_not_reach_the_feedback") };
     default:
-      return { code, retry: "later", message: t("操作没有完成，请稍后重试。") };
+      return { code, retry: "later", message: t("feedback.that_did_not_finish_please") };
   }
 }

@@ -34,19 +34,19 @@ export function OpenProject({ hub, adder, hosts, onOpen, onClose, onError }: {
     }} />;
 
   return createPortal(
-    <div className="pickveil" role="dialog" aria-modal="true" aria-label={t("打开项目")} ref={sheet}>
+    <div className="pickveil" role="dialog" aria-modal="true" aria-label={t("session.open_project")} ref={sheet}>
       <div className="pickcard">
-        <h2>{t("打开项目")}</h2>
+        <h2>{t("session.open_project")}</h2>
         <div className="picklist project-locations">
           <button className="pickrow" data-action="workspace.add" onClick={() => { onClose(); adder.add(); }}>
-            <StudioIcon name="folder" /><span>{t("选择本机文件夹")}</span>
+            <StudioIcon name="folder" /><span>{t("session.choose_a_local_folder")}</span>
           </button>
           {hosts.map((host) => <button key={host.name} className="pickrow" data-action="remote.open"
             data-target={host.name} aria-label={host.name + " · SSH"} onClick={() => setRemote(host)}>
             <StudioIcon name="server" /><span>{host.name}</span><small>SSH</small>
           </button>)}
         </div>
-        <div className="pickact"><button data-action="layer.dismiss" onClick={onClose}>{t("取消")}</button></div>
+        <div className="pickact"><button data-action="layer.dismiss" onClick={onClose}>{t("common.cancel")}</button></div>
       </div>
     </div>, document.body,
   );

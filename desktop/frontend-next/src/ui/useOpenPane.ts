@@ -77,7 +77,7 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
       // tab bar. A pane with no conversation in it has nothing to say about.
       const folded = (rt: RuntimeView) => {
         if (!rt.sessionPath && !reportsRef.current[rt.id]?.status?.sessionPath) return;
-        pushNote(t("标签数已到上限 {n}，已把「{title}」从标签栏收起，对话仍在列表里。", { n: limit, title: reportsRef.current[rt.id]?.title?.trim() || t("新会话") }));
+        pushNote(t("session.the_open_session_limit_n", { n: limit, title: reportsRef.current[rt.id]?.title?.trim() || t("common.new_session") }));
       };
       if (reusable && req.sessionPath) {
         folded(reusable);
@@ -120,13 +120,13 @@ export function useOpenPane({ hub, runtimes, panePorts, active, reportsRef, runs
     const port = source && panePorts.get(source.id);
     const path = req.sessionPath;
     if (!port || !path) return false;
-    pushOffer(t("这个会话的历史超过了安全读取上限，没有打开（文件完好，未改动）。可以只取最近的内容，另存为新会话继续。"), {
-      label: t("从最近的内容继续"),
+    pushOffer(t("session.this_sessions_history_is_over"), {
+      label: t("session.continue_from_the_most_recent"),
       run: () => void (async () => {
         try {
           const tail = await port.continueFromTail(path);
           await openPane({ root: req.root, sessionPath: tail.path });
-          pushNote(t("已从最近的内容另存为新会话，较早的 {n} 条没有带入；原会话文件保持不变。", { n: tail.dropped }));
+          pushNote(t("session.saved_the_most_recent_part", { n: tail.dropped }));
         } catch (e) {
           pushToast(reason(e));
         }

@@ -21,19 +21,19 @@ export function HeldPeerMessage({ port, held, project, onDone, compact }: { port
     }
   };
   return (
-    <div className="peerheld" role="group" aria-label={t("来自 {from} 的消息", { from: heldLabel(held) })}>
+    <div className="peerheld" role="group" aria-label={t("remote.message_from_from", { from: heldLabel(held) })}>
       <div className="peerrow">
-        <span className="peerhead" title={t("来自另一个会话「{from}」的文字，不是你写的。批准后才会交给这个会话的模型。", { from: heldLabel(held) })}>
-          {compact ? t("「{from}」发来一条消息，等你批准", { from: heldLabel(held) }) : t("来自另一个会话「{from}」的文字，不是你写的。批准后才会交给这个会话的模型。", { from: heldLabel(held) })}
+        <span className="peerhead" title={t("remote.text_from_another_session_from", { from: heldLabel(held) })}>
+          {compact ? t("remote.from_sent_a_message_and", { from: heldLabel(held) }) : t("remote.text_from_another_session_from", { from: heldLabel(held) })}
         </span>
         <span className="acts">
-          {compact && <button className="act" data-action="peers.expand" aria-expanded={open} onClick={() => setOpen(!open)}>{t(open ? "收起" : "展开")}</button>}
-          <button className="act" data-action="peers.deny" disabled={busy} onClick={() => void decide(false)}>{t("拒绝")}</button>
-          {project && <button className="act" data-action="peers.approve-project" disabled={busy} aria-describedby={`peer-remember-${held.id}`} onClick={() => void decide(true, "project")}>{t("批准并记住项目「{name}」", { name: project.name })}</button>}
-          <button className="act" data-action="peers.approve" data-primary disabled={busy} onClick={() => void decide(true)}>{t("批准并交给模型")}</button>
+          {compact && <button className="act" data-action="peers.expand" aria-expanded={open} onClick={() => setOpen(!open)}>{t(open ? "common.collapse" : "common.expand")}</button>}
+          <button className="act" data-action="peers.deny" disabled={busy} onClick={() => void decide(false)}>{t("common.refuse")}</button>
+          {project && <button className="act" data-action="peers.approve-project" disabled={busy} aria-describedby={`peer-remember-${held.id}`} onClick={() => void decide(true, "project")}>{t("remote.approve_and_remember_project_name", { name: project.name })}</button>}
+          <button className="act" data-action="peers.approve" data-primary disabled={busy} onClick={() => void decide(true)}>{t("remote.approve_and_give_it_to")}</button>
         </span>
       </div>
-      {project && <div className="apv-note" id={`peer-remember-${held.id}`}>{t("“记住项目”记的是收到消息的项目「{name}」（{path}）：以后发到这个项目的消息不再询问。可在 设置 → 会话间消息 撤销。", { name: project.name, path: project.path })}</div>}
+      {project && <div className="apv-note" id={`peer-remember-${held.id}`}>{t("remote.remember_project_remembers_the_project", { name: project.name, path: project.path })}</div>}
       <pre className="peerbody" data-clamped={open ? undefined : ""}>{held.body}</pre>
       {error && <div className="why">{error}</div>}
     </div>

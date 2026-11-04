@@ -40,17 +40,17 @@ export function RemoteAsk({ ask, onAnswer }: Props) {
         <h2 id="ask-t">
           {secret
             ? ask.kind === "password"
-              ? t("{host} 需要密码", { host: ask.host })
-              : t("私钥已被口令锁定")
-            : t("首次连接 {host}", { host: ask.host })}
+              ? t("remote.host_wants_a_password", { host: ask.host })
+              : t("remote.the_private_key_is_passphrase")
+            : t("remote.first_connection_to_host", { host: ask.host })}
         </h2>
 
         {secret ? (
           <>
             <p className="h">
               {ask.identityFile
-                ? t("解锁 {file}。该口令仅存在于本次连接的内存中，不会写入任何文件。", { file: ask.identityFile })
-                : t("仅存在于本次连接的内存中，不会写入任何文件。如需保存，请在设置中填写环境变量名。")}
+                ? t("remote.to_unlock_file_it_lives", { file: ask.identityFile })
+                : t("remote.it_lives_in_memory_for")}
             </p>
             <input
               ref={box}
@@ -67,14 +67,14 @@ export function RemoteAsk({ ask, onAnswer }: Props) {
         ) : (
           <>
             <p className="h">
-              {t("该机器尚未记录。以下是它出示的指纹 —— 请与从其他渠道获取的指纹核对，一致后再接受。")}
+              {t("remote.this_machine_has_not_been")}
             </p>
             <dl className="askfacts">
-              <dt>{t("地址")}</dt>
+              <dt>{t("remote.address")}</dt>
               <dd>{ask.address || ask.host}</dd>
-              <dt>{t("算法")}</dt>
+              <dt>{t("remote.algorithm")}</dt>
               <dd>{ask.keyType}</dd>
-              <dt>{t("指纹")}</dt>
+              <dt>{t("common.fingerprint")}</dt>
               {/* Wrapped, not truncated: a fingerprint with its middle cut out
                   is a fingerprint nobody can compare. */}
               <dd className="fp">{ask.fingerprint}</dd>
@@ -91,10 +91,10 @@ export function RemoteAsk({ ask, onAnswer }: Props) {
             autoFocus={!secret}
             onClick={() => onAnswer(ask.askId, false, "")}
           >
-            {t("取消")}
+            {t("common.cancel")}
           </button>
           <button data-action="remote-ask.answer" data-value="accept" data-go="" onClick={() => onAnswer(ask.askId, true, text)}>
-            {secret ? t("继续") : t("指纹一致，记住该机器")}
+            {secret ? t("common.continue") : t("remote.they_match_remember_it")}
           </button>
         </div>
       </div>

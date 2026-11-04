@@ -13,13 +13,13 @@ export function FeedbackLevelNoticeSetting({ port }: { port: AgentPort }) {
     void loadLevelNoticePref(port);
   }, [port]);
   return (
-    <Group id="feedback-level-notices" title={t("等级提示")} hint={t("你的反馈被采纳、等级提高时，在窗口顶部提示一次，由你点“知道了”关掉。默认关闭；关着时不会提示，也不会补报之前的升级。")}>
+    <Group id="feedback-level-notices" title={t("feedback.level_notices")} hint={t("feedback.when_your_feedback_ships_and")}>
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("等级提升时通知我")}</span>
-          <span className="ds">{t("不弹窗、不发系统通知，只在窗口顶部的提示条里说一次")}</span>
+          <span className="lb">{t("feedback.tell_me_when_my_level")}</span>
+          <span className="ds">{t("feedback.no_pop_up_and_no")}</span>
         </span>
-        <Switch data-action="chrome.feedback-level-notices" on={on} label={t("等级提升时通知我")} onClick={() => {
+        <Switch data-action="chrome.feedback-level-notices" on={on} label={t("feedback.tell_me_when_my_level")} onClick={() => {
           setError("");
           saveLevelNoticePref(port, !on).catch((e) => setError(reason(e)));
         }} />

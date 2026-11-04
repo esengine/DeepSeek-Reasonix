@@ -3,25 +3,25 @@ import { StudioIcon } from "./StudioIcon";
 
 export function WorkbenchLauncher({ changes, focus = false, onFiles, onChanges, onBrowser, recent = [], onOpenFile }: { changes: number; focus?: boolean; onFiles: () => void; onChanges: () => void; onBrowser: () => void; recent?: string[]; onOpenFile?: (path: string) => void }) {
   return (
-    <div className="workbench-launcher" role="group" aria-label={t("开始")}>
+    <div className="workbench-launcher" role="group" aria-label={t("common.start")}>
       <StudioIcon name="spark" />
-      <p className="workbench-launcher-title">{t("在工作台打开")}</p>
-      <button autoFocus={focus} aria-label={t("文件")} data-action="workbench.launch-files" onClick={onFiles}>
+      <p className="workbench-launcher-title">{t("workbench.open_in_the_workbench")}</p>
+      <button autoFocus={focus} aria-label={t("common.files")} data-action="workbench.launch-files" onClick={onFiles}>
         <StudioIcon name="folder" />
-        <span><b>{t("文件")}</b><i>{t("资源管理器：改动、提交历史和文件")}</i></span>
+        <span><b>{t("common.files")}</b><i>{t("workbench.explorer_changes_history_and_files")}</i></span>
       </button>
-      <button aria-label={t("改动")} data-action="workbench.launch-changes" disabled={changes === 0} onClick={onChanges}>
+      <button aria-label={t("common.changes")} data-action="workbench.launch-changes" disabled={changes === 0} onClick={onChanges}>
         <StudioIcon name="branch" />
-        <span><b>{t("改动")}</b><i>{t("这次会话改了哪些文件")}</i></span>
+        <span><b>{t("common.changes")}</b><i>{t("workbench.which_files_this_session_changed")}</i></span>
         {changes > 0 && <small>{changes}</small>}
       </button>
-      <button aria-label={t("浏览器")} data-action="workbench.launch-browser" onClick={onBrowser}>
+      <button aria-label={t("workbench.browser")} data-action="workbench.launch-browser" onClick={onBrowser}>
         <StudioIcon name="globe" />
-        <span><b>{t("浏览器")}</b><i>{t("和对话并排看网页")}</i></span>
+        <span><b>{t("workbench.browser")}</b><i>{t("workbench.view_web_pages_beside_the")}</i></span>
       </button>
       {recent.length > 0 && onOpenFile && (
-        <div className="workbench-launcher-recent" role="group" aria-label={t("最近打开")}>
-          <p>{t("最近打开")}</p>
+        <div className="workbench-launcher-recent" role="group" aria-label={t("workbench.recently_opened")}>
+          <p>{t("workbench.recently_opened")}</p>
           {recent.map((path) => (
             <button key={path} data-action="workbench.launch-recent" data-target={path} title={path} onClick={() => onOpenFile(path)}>
               <StudioIcon name="file" />

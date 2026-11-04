@@ -31,7 +31,7 @@ export function useTabClose({ port, surfaces, selected, showFiles, setBrowsers, 
           if (surface.kind === "browser") await port.browserClose(surface.tab.id);
           closed.add(keyOf(surface));
         } catch (e) {
-          failures.push(t("无法关闭 {name}：{why}", { name: labelOf(surface, {}), why: reason(e) }));
+          failures.push(t("workbench.could_not_close_name_why", { name: labelOf(surface, {}), why: reason(e) }));
         }
       }
       setBrowsers((v) => v.filter((id) => !closed.has(`manual:${id}`)));

@@ -49,24 +49,24 @@ export function WorkbenchFileBar({
         <b>{path.split("/").at(-1)}</b>
       </strong>
       {onReveal && (
-        <button className="workbench-reveal" data-action="workbench.reveal" data-target={path} aria-label={t("在系统文件管理器中显示此文件")} title={t("在系统文件管理器中显示此文件")} onClick={onReveal}>
+        <button className="workbench-reveal" data-action="workbench.reveal" data-target={path} aria-label={t("workbench.show_this_file_in_the")} title={t("workbench.show_this_file_in_the")} onClick={onReveal}>
           <StudioIcon name="reveal" />
         </button>
       )}
       <div role="group">
-        {readable && view("read", t("阅读"))}
-        {document && view("document", t("预览"))}
-        {previewable && view("preview", t("交互运行"))}
-        {source && view("file", !readOnlyIn && (readable || previewable || document) ? t("编辑") : t("文件"))}
+        {readable && view("read", t("workbench.read"))}
+        {document && view("document", t("common.preview"))}
+        {previewable && view("preview", t("workbench.run_interactively"))}
+        {source && view("file", !readOnlyIn && (readable || previewable || document) ? t("common.edit") : t("common.files"))}
         {source && !readOnlyIn && view("diff", "Diff")}
       </div>
       {openWith}
       {readOnlyIn ? (
-        <span className="workbench-readonly" title={readOnlyIn}>{t("只读 · 来自你授权的文件夹")}</span>
+        <span className="workbench-readonly" title={readOnlyIn}>{t("workbench.read_only_from_a_folder")}</span>
       ) : source ? (
         <button className="workbench-save" data-action="workbench.save" data-target={path} disabled={!canSave} onClick={onSave}>
           <StudioIcon name="check" />
-          {t("保存")}
+          {t("common.save")}
         </button>
       ) : null}
     </div>

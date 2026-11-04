@@ -14,7 +14,7 @@ export function FeedbackFilter({ items, fresh, group, onPick }: {
   onPick: (to: FeedbackGroup) => void;
 }) {
   return (
-    <div className="fbk-filter" role="group" aria-label={t("按进展筛选")}>
+    <div className="fbk-filter" role="group" aria-label={t("feedback.filter_by_progress")}>
       {FEEDBACK_GROUPS.map((g) => {
         const n = items.filter((i) => inGroup(i, g, fresh[i.receipt] ?? 0)).length;
         return (

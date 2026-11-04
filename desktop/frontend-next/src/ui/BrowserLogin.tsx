@@ -46,18 +46,18 @@ function LoginCard({ ask, onAnswer }: { ask: Ask; onAnswer: (username: string, p
   return (
     <div ref={sheet} className="askveil" role="dialog" aria-modal="true" aria-labelledby="blogin-t">
       <div className="askcard">
-        <h2 id="blogin-t">{ask.proxy ? t("代理 {host} 需要登录", { host: where }) : t("{host} 需要登录", { host: where })}</h2>
+        <h2 id="blogin-t">{ask.proxy ? t("workbench.the_proxy_host_asks_you", { host: where }) : t("workbench.host_asks_you_to_sign", { host: where })}</h2>
         <p className="h">
-          {ask.realm ? t("站点提示：{realm}。", { realm: ask.realm }) : ""}
-          {t("用户名和密码只交给这个网页，不会保存，也不会发给 Reasonix 或模型。")}
+          {ask.realm ? t("workbench.the_site_says_realm", { realm: ask.realm }) : ""}
+          {t("workbench.the_username_and_password_go")}
         </p>
         <input
           ref={first}
           data-action-keydown="browser.login"
           value={username}
           autoComplete="username"
-          placeholder={t("用户名")}
-          aria-label={t("用户名")}
+          placeholder={t("workbench.username")}
+          aria-label={t("workbench.username")}
           onChange={(e) => setUsername(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
         />
@@ -66,17 +66,17 @@ function LoginCard({ ask, onAnswer }: { ask: Ask; onAnswer: (username: string, p
           type="password"
           value={password}
           autoComplete="current-password"
-          placeholder={t("密码")}
-          aria-label={t("密码")}
+          placeholder={t("workbench.password")}
+          aria-label={t("workbench.password")}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
         />
         <div className="askact">
           <button data-action="browser.login" data-value="cancel" onClick={() => onAnswer("", "")}>
-            {t("取消")}
+            {t("common.cancel")}
           </button>
           <button data-action="browser.login" data-value="submit" data-go="" disabled={!username} onClick={submit}>
-            {t("登录")}
+            {t("common.sign_in")}
           </button>
         </div>
       </div>

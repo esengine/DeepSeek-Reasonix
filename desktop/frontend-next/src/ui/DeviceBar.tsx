@@ -64,11 +64,11 @@ export function DeviceBar({ hub }: { hub: HubPort }) {
     <div className="devicebar" data-down={reachable ? undefined : ""} role="status">
       <i aria-hidden="true" />
       <span className="db-what">
-        {reachable ? t("正在控制 {machine}", { machine: self.machine }) : t("与 {machine} 的连接已中断", { machine: self.machine })}
+        {reachable ? t("remote.controlling_machine", { machine: self.machine }) : t("remote.lost_the_connection_to_machine", { machine: self.machine })}
       </span>
-      <small>{t("本机是 设备 {n}", { n: self.ordinal })}</small>
+      <small>{t("remote.this_is_device_n", { n: self.ordinal })}</small>
       <button data-action={arming ? "device.leave" : "device.ask-leave"} data-armed={arming ? "" : undefined} onClick={leave}>
-        {arming ? t("确认断开") : t("断开")}
+        {arming ? t("remote.disconnect_2") : t("remote.disconnect")}
       </button>
     </div>
   );

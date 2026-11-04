@@ -26,9 +26,6 @@ export const EN_METRICS: Record<string, string> = {
   "{n} 会话": "{n} sessions",
   "每回合用量": "Tokens per round",
   "峰值 {peak} · 均 {avg}": "peak {peak} · avg {avg}",
-  "正在读这个文件的改动…": "Reading this file's changes…",
-  "这个文件现在和上一次提交一样": "This file now matches the last commit",
-  "改动太长，只显示了前面一段": "Too long to show in full — this is the start of it",
   "改了 {n} 次": "edited {n} times",
   "改过": "Modified",
 };

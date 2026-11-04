@@ -29,27 +29,27 @@ export function RemoteProjectMenu({ name, root, host, defaultRoot, busy, onRefre
   useEffect(() => { if (open) menu.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus(); }, [open]);
   return <>
     <button ref={trigger} className="wsmore" data-action="workspace.menu" data-target={host + ":" + root}
-      title={t("更多操作")} aria-label={t("项目操作：{name}", { name: name + " · " + host })}
+      title={t("common.more_actions")} aria-label={t("common.project_actions_name", { name: name + " · " + host })}
       aria-haspopup="menu" aria-expanded={open} onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
       <StudioIcon name="more" />
     </button>
-    {open && createPortal(<div ref={menu} className="session-pop" role="menu" aria-label={t("项目操作")}
+    {open && createPortal(<div ref={menu} className="session-pop" role="menu" aria-label={t("common.project_actions")}
       data-action-keydown="workspace.menu" onKeyDown={workspaceMenuKeys} onClick={(event) => event.stopPropagation()}>
       <div className="session-pop-head"><b>{name}</b><small className="session-pop-path">{host} · {root}</small>
-        <small className="session-pop-path">{defaultRoot ? t("默认连接目录：{path}", { path: defaultRoot }) : t("未设置默认工作区")}</small></div>
+        <small className="session-pop-path">{defaultRoot ? t("remote.default_connection_directory_path", { path: defaultRoot }) : t("remote.no_default_workspace")}</small></div>
       <div className="session-pop-group">
         <button role="menuitem" data-action="remote.read" data-target={host} disabled={busy} onClick={() => { close(); onRefresh(); }}>
-          <StudioIcon name="refresh" /><span>{t("刷新 {name} 上的会话", { name: host })}</span>
+          <StudioIcon name="refresh" /><span>{t("remote.refresh_the_sessions_on_name", { name: host })}</span>
         </button>
         {onMove && ([-1, 1] as const).map((direction) => (
           <button key={direction} role="menuitem" data-action="remote-host.move" data-target={host} data-value={direction}
             disabled={busy || !onMove[direction]} onClick={() => { close(); onMove[direction]?.(); }}>
             <StudioIcon name="arrow" data-flip={direction === 1 ? "" : undefined} />
-            <span>{t(direction === -1 ? "上移 {name}" : "下移 {name}", { name: host })}</span>
+            <span>{t(direction === -1 ? "common.move_name_up" : "common.move_name_down", { name: host })}</span>
           </button>
         ))}
         {onRemove && <button role="menuitem" data-action="remote-host.remove" disabled={busy}
-          onClick={() => { close(); onRemove(); }}><StudioIcon name="close" /><span>{t("从列表移除")}</span><small>{t("不删除文件")}</small></button>}
+          onClick={() => { close(); onRemove(); }}><StudioIcon name="close" /><span>{t("common.remove_from_the_list")}</span><small>{t("common.keeps_files")}</small></button>}
       </div>
     </div>, document.body)}
   </>;
