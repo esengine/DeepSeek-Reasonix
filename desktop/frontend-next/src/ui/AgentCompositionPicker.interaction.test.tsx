@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {cleanup,render,screen,waitFor} from "@testing-library/react";
+import {act,cleanup,render,screen,waitFor} from "@testing-library/react";
 import "./testkit";
 import userEvent from "@testing-library/user-event";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
@@ -10,6 +10,51 @@ import {CompositionNewContext} from "./CompositionNewContext";
 import {RunLine} from "./RunLine";
 beforeEach(() => { localStorage.setItem("rx-show-agent-composition", "on"); });
 afterEach(() => { cleanup(); localStorage.removeItem("rx-show-agent-composition"); });
+
+it("shows the restored persona before the module catalog finishes", () => {
+  const port = new MockPort();
+  vi.spyOn(port, "agentPresets").mockImplementation(() => new Promise(() => {}));
+  vi.spyOn(port, "agentComposition").mockImplementation(() => new Promise(() => {}));
+  const binding = { id: "project:reviewer", name: "Saved reviewer", revision: "saved", digest: "saved", started: true };
+  render(<AgentCompositionPicker port={port} binding={binding} locked running={false} onChanged={()=>{}} onSettings={()=>{}} onError={()=>{}}/>);
+  expect(screen.getByRole("button", { name: /^Agent 组合.*Saved reviewer/ }).textContent).toBe("Saved reviewer");
+});
+
+it("keeps a known persona visible and management reachable when the catalog fails", async () => {
+  const port = new MockPort();
+  vi.spyOn(port, "agentPresets").mockRejectedValue(new Error("catalog unavailable"));
+  const settings = vi.fn();
+  const binding = { id: "project:reviewer", name: "Saved reviewer", revision: "saved", digest: "saved", started: true };
+  render(<AgentCompositionPicker port={port} binding={binding} locked running={false} onChanged={()=>{}} onSettings={settings} onError={()=>{}}/>);
+  await userEvent.click(screen.getByRole("button", { name: /^Agent 组合.*Saved reviewer/ }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "管理 Agent 预设…" }));
+  expect(settings).toHaveBeenCalledOnce();
+});
+
+it("uses an explicit unbound status instead of another binding read", async () => {
+  const port = new MockPort();
+  const read = vi.spyOn(port, "agentComposition");
+  const binding = { id: "project:reviewer", name: "Saved reviewer", revision: "saved", digest: "saved", started: true };
+  const draw = (value: typeof binding | null) => <AgentCompositionPicker port={port} binding={value} running={false} onChanged={()=>{}} onSettings={()=>{}} onError={()=>{}}/>;
+  const view = render(draw(binding));
+  view.rerender(draw(null));
+  expect(screen.getByRole("button", { name: /^Agent 组合.*日常搭档/ }).textContent).toBe("日常搭档");
+  expect(read).not.toHaveBeenCalled();
+});
+
+it("does not replace an authoritative restored binding with a stale default read", async () => {
+  const port = new MockPort();
+  let finish!: (value: null) => void;
+  const read = vi.spyOn(port, "agentComposition").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const binding = { id: "user:reviewer", name: "Saved reviewer", revision: "saved", digest: "saved", started: true };
+  const draw = (value?: typeof binding) => <AgentCompositionPicker port={port} binding={value} locked running={false} onChanged={()=>{}} onSettings={()=>{}} onError={()=>{}}/>;
+  const view = render(draw());
+  await waitFor(() => expect(read).toHaveBeenCalledOnce());
+  view.rerender(draw(binding));
+  await act(async () => finish(null));
+  expect(screen.getByRole("button", { name: /^Agent 组合.*Saved reviewer/ }).textContent).toBe("Saved reviewer");
+  expect(read).toHaveBeenCalledOnce();
+});
 
 it.each([false, true])("labels saved snapshots without labeling live bindings: live=%s", async (live) => {
   const port = new MockPort();
