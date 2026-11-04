@@ -737,20 +737,18 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <Backup port={port} />
             </Group>
           )}
-          {at === "versions" && <About port={homePort} />}
-          {at === "memory" && (
-            <Group id="memory"
+          {at === "account" && <About port={homePort} />}
+          {at === "storage" && (
+            <>
+              <Group id="memory"
               title={t("记忆")}
               hint={t("agent 自动记录的内容：未经配置，但会据此执行。可以按类型和星系查找，刚记住的在「新的」里等你确认。")}
             >
               <Memory port={localPort} />
             </Group>
-          )}
-
-          {at === "usage" && <UsageSettings port={homePort} onChanged={onChanged} />}
-
-          {at === "storage" && (
-            <Group id="storage" title={t("存储")} hint={t("数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。")}><Storage port={homePort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} /></Group>
+              <UsageSettings port={homePort} onChanged={onChanged} />
+              <Group id="storage" title={t("存储")} hint={t("数据的存储位置与占用空间。会话和索引会持续增长，配置和凭据不会，因此只有前者可以迁移。迁移在重启后生效。")}><Storage port={homePort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} /></Group>
+            </>
           )}
 
           {at === "appearance" && (

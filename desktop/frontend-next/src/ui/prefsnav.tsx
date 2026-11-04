@@ -119,21 +119,13 @@ export const NAV: [string, [Section, string][]][] = [
     "运行环境",
     [
       ["network", "连接"],
-      ["storage", "存储"],
-    ],
-  ],
-  [
-    "记录与用量",
-    [
-      ["memory", "记忆"],
-      ["usage", "用量"],
+      ["storage", "数据"],
     ],
   ],
   [
     "这台机器",
     [
-      ["account", "账号"],
-      ["versions", "版本"],
+      ["account", "账号与关于"],
       ["appearance", "外观"],
       ["advanced", "高级"],
     ],
@@ -345,7 +337,7 @@ export const SETTINGS: SettingEntry[] = [
 
 export const SETTING_AT = (anchor: string) => SETTINGS.find((s) => s.anchor === anchor);
 
-export const FOLDS_INTO: Partial<Record<Section, Section>> = { providers: "model", remote: "network" };
+export const FOLDS_INTO: Partial<Record<Section, Section>> = { providers: "model", remote: "network", memory: "storage", usage: "storage", versions: "account" };
 
 export const pageHome = (section: Section): Section => FOLDS_INTO[section] ?? section;
 
@@ -353,6 +345,9 @@ export const SECTION_NAME: Partial<Record<Section, string>> = {
   ...(Object.fromEntries(NAV.flatMap(([, items]) => items)) as Partial<Record<Section, string>>),
   providers: "模型服务",
   remote: "远程",
+  memory: "记忆",
+  usage: "用量",
+  versions: "版本",
 };
 
 // Title, aliases, and the page it is on. An alias is a way in and nothing

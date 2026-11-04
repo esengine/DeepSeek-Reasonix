@@ -32,7 +32,7 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
                 tabIndex={at === id && pagesOf(id).length === 0 ? 0 : -1} data-open={at === id && pagesOf(id).length > 0 ? "" : undefined}
                 aria-selected={at === id && pagesOf(id).length === 0} disabled={disabled} onClick={() => onSelect(id)}>
                 <svg viewBox="0 0 16 16" aria-hidden="true">{ICON[id]}</svg>
-                {id === "versions" && <UpdateDot />}
+                {id === "account" && <UpdateDot />}
                 <span className="nm">{t(name)}</span>
                 <span className="nv" title={values[id] || undefined} data-danger={danger(id) ? "" : undefined}>
                   {values[id]}
