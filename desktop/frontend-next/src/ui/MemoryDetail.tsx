@@ -94,8 +94,8 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
     ["生效", t(m.activation === "pinned" ? "每轮常驻" : "相关时才会检索")],
   ];
   const group = (title: string, rows: [string, React.ReactNode][]) => (
-    <section aria-label={t(title)}>
-      <h4>{t(title)}</h4>
+    <section aria-label={title}>
+      <h4>{title}</h4>
       <dl>
         {rows.map(([label, value]) => (
           <div key={label}><dt>{t(label)}</dt><dd>{value}</dd></div>
@@ -128,8 +128,8 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
       {m.expired && <p className="stale">{t("已过期")}</p>}
       <pre>{m.body?.trim() || t("（无正文）")}</pre>
       <div className="facts">
-        {group("内容", content)}
-        {group("使用", use)}
+        {group(t("内容"), content)}
+        {group(t("使用"), use)}
       </div>
       <div className="row sub">
         {(m.revision ?? 1) > 1 && (

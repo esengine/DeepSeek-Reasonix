@@ -12,8 +12,8 @@ const CHAT = "M3.2 4.4a1.2 1.2 0 0 1 1.2-1.2h7.2a1.2 1.2 0 0 1 1.2 1.2v5a1.2 1.2
 // the cheapest thing to draw and the most expensive thing to keep.
 const HOME: [Mark, string, string | null] = ["chat", "会话", null];
 
-const FOOT: [Mark, string, string, string][] = [
-  ["account", "账号", "account", "chrome.account"],
+const FOOT: [Mark, string, string, string?][] = [
+  ["account", "账号", "account"],
   ["advanced", "设置", "", "chrome.settings"],
 ];
 
@@ -35,11 +35,13 @@ interface Props {
 
 export function Nav({ at, onGo, onFiles, onHome, onRail, onFeedback, onNew, feedbackUnread, shown }: Props) {
   const destinations = useDestinations();
-  const btn = ([key, label, sec, action]: [Mark, string, string | null, string?]) => (
+  const btn = ([key, label, sec, action]: [Mark, string, string | null, string?]) => {
+    const account = key === "account";
+    return (
     <button
       key={key}
       className="navbtn"
-      data-action={action}
+      data-action={account ? "chrome.account" : action}
       aria-label={t(label)}
       aria-current={(sec ?? null) === at ? "page" : undefined}
       onClick={() => (key === "files" ? onFiles() : sec === null ? (at === null ? onRail() : onHome()) : onGo(sec || undefined))}
@@ -50,7 +52,8 @@ export function Nav({ at, onGo, onFiles, onHome, onRail, onFeedback, onNew, feed
       {key === "advanced" && <UpdateDot />}
       <span className="navhint" role="tooltip">{t(label)}</span>
     </button>
-  );
+    );
+  };
   return (
     <nav className="nav" aria-label={t("主导航")} aria-hidden={shown ? undefined : true} inert={!shown}>
       <div className="navgrp">

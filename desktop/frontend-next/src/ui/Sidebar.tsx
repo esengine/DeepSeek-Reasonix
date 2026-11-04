@@ -400,15 +400,16 @@ export function Sidebar({
               : mark === "remote" && online > 0 ? t("{n} 台在线", { n: online })
               : mark === "tools" && approval ? approvalName(approval) : "";
             const name = reading ? `${t(label)} · ${reading}` : t(label);
+            const opensFiles = mark === "files";
             return (
               <TooltipButton
                 key={mark}
                 className={mark === "usage" ? "studio-wallet" : undefined}
-                data-action={mark === "files" ? "files.open" : "settings.section"}
-                data-value={mark === "files" ? undefined : section}
+                data-action={opensFiles ? "files.open" : "settings.section"}
+                data-value={opensFiles ? undefined : section}
                 aria-label={name}
                 title={name}
-                onClick={() => (mark === "files" ? onFiles() : onSettings(section))}
+                onClick={() => (opensFiles ? onFiles() : onSettings(section))}
               >
                 {mark === "files" ? <StudioIcon name="file" aria-hidden="true" />
                   : <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICON[mark as Section]}</svg>}

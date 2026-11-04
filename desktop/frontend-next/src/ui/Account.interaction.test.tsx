@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Account } from "./Account";
-import { AccountRow } from "./AccountRow";
 import { MockPort } from "../port/mock";
 import { HttpError, type AccountState, type AgentPort, type DeviceGrant } from "../port/port";
 import { boot, STORAGE } from "../i18n";
@@ -72,37 +71,22 @@ describe("account sign-in failures", () => {
 describe("signed-in account with unreachable identity", () => {
   const state: AccountState = JSON.parse('{"signedIn":true,"user":null,"error":"Identity service unavailable"}');
 
-  it("keeps the row and panel signed in and retries the canonical account read", async () => {
+  it("keeps the panel signed in and retries the canonical account read", async () => {
     const port = new MockPort() as unknown as AgentPort;
     port.accountLogin = vi.fn();
     const reload = vi.fn();
-    const onOpen = vi.fn();
-    const { container, rerender } = render(<>
-      <AccountRow account={state} onOpen={onOpen} />
-      <Account port={port} state={state} reload={reload} />
-    </>);
+    const { container, rerender } = render(<Account port={port} state={state} reload={reload} />);
 
-    const row = screen.getByRole("button", { name: "账号" });
-    expect(within(row).getByText("已登录")).toBeTruthy();
-    expect(row.textContent).toContain("无法连接身份服务");
-    expect(row.textContent).toContain(state.error);
-    expect(row.title).toContain(state.error);
-    expect(row.textContent).not.toContain("?");
     expect(container.querySelector(".acct-who")?.textContent).toBe("已登录");
     expect(screen.getByRole("alert").textContent).toContain(state.error);
     expect(screen.queryByRole("button", { name: "登录" })).toBeNull();
-    await userEvent.click(row);
-    expect(onOpen).toHaveBeenCalledOnce();
     await userEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(reload).toHaveBeenCalledOnce();
     expect(port.accountLogin).not.toHaveBeenCalled();
 
     const recovered = { signedIn: true, user: { label: "Sample User", handle: "sample", email: "sample@example.test" } };
-    rerender(<>
-      <AccountRow account={recovered} onOpen={onOpen} />
-      <Account port={port} state={recovered} reload={reload} />
-    </>);
-    expect(screen.getAllByText("Sample User")).toHaveLength(2);
+    rerender(<Account port={port} state={recovered} reload={reload} />);
+    expect(screen.getAllByText("Sample User").length).toBeGreaterThan(0);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
   });

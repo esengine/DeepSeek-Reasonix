@@ -1834,26 +1834,6 @@
   ::highlight(rx-find) { background-color: color-mix(in srgb, var(--warn) 26%, transparent); color: var(--text) }
   ::highlight(rx-find-now) { background-color: var(--accent); color: var(--accent-fg) }
 
-  .acctrow {
-    display: flex; align-items: center; gap: 9px; width: 100%; flex: none; text-align: left;
-    margin-top: auto; padding: 9px 11px; border: 0; border-top: 1px solid var(--hair);
-    background: none; cursor: pointer; transition: background var(--t-line) var(--ease);
-  }
-  .acctrow:hover { background: var(--overlay) }
-  .acctrow:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px }
-  .acctrow .ini {
-    width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--r-pill);
-    background: var(--accent-wash); color: var(--accent-ink); font: var(--w-semi) var(--fs-ui) var(--ui);
-  }
-  .acctrow .ini[data-off] { background: var(--overlay); color: var(--faint) }
-  .acctrow .who { display: flex; flex-direction: column; gap: 1px; min-width: 0 }
-  .acctrow .who .n { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-
-  .acctrow .who .d {
-    font: var(--w-reg) var(--fs-meta)/1.45 var(--ui); color: var(--ghost);
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
-  }
-
   .nav {
     display: flex; flex-direction: column; align-items: center; gap: 2px;
     padding: 10px 0 12px; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--page) 82%, var(--surface));
@@ -5341,7 +5321,7 @@
   transition-duration: var(--t-press);
 }
 
-:is([role="treeitem"], .acctrow, .srvrow, .memrow) { --press: translateY(1px) }
+:is([role="treeitem"], .srvrow, .memrow) { --press: translateY(1px) }
 .dif-ask {
   display: flex; flex-direction: column; gap: 7px;
   padding: 9px 11px; border-bottom: 1px solid var(--hair); background: var(--overlay);

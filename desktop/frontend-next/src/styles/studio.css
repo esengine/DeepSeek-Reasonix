@@ -154,7 +154,6 @@ body { background: var(--page); }
 .wsfind:hover,
 .wsfind:focus-within { border-color: var(--hair); background: var(--raised); }
 .machrow { margin-inline: 7px; border-radius: var(--r-sm); }
-.acctrow { border-radius: var(--r-md); }
 
 /* Conversation surface */
 .main,
