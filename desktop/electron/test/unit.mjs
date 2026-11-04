@@ -718,7 +718,7 @@ test("a kernel that never answers is started once and not retried", { skip: proc
 test("each failure cause gets its own explanation in both languages", () => {
   const { startupFailure } = require("../src/shelllog.js");
   const seen = new Set();
-  for (const code of ["timeout", "exited", "spawn"]) {
+  for (const code of ["timeout", "exited", "spawn", "unreachable"]) {
     for (const locale of ["en", "zh-CN"]) {
       const { detail } = startupFailure(locale, "r", "/logs", code);
       assert.ok(!seen.has(detail), `${code}/${locale} repeated another cause's text`);
@@ -726,6 +726,17 @@ test("each failure cause gets its own explanation in both languages", () => {
     }
   }
   assert.equal(startupFailure("en", "r", "/logs", "overflow").detail, "r\n\nLogs are in:\n/logs");
+});
+
+test("the shell finds out at once that the host it started cannot be reached", async () => {
+  const net = require("node:net");
+  const { probeHost } = require("../src/hostprobe.js");
+  const server = net.createServer((socket) => socket.end());
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await probeHost(`http://127.0.0.1:${port}`, 2000);
+  await new Promise((resolve) => server.close(resolve));
+  await assert.rejects(probeHost(`http://127.0.0.1:${port}`, 2000), (err) => err.code === "unreachable");
 });
 
 // A fake child: only the stdout half readActs touches, and a way to push bytes

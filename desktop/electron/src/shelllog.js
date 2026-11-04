@@ -172,6 +172,10 @@ const HINTS = {
     "The kernel program could not be run. Security software blocking or locking it is a common cause.",
     "无法运行内核程序。安全软件拦截或占用它是常见原因。",
   ],
+  unreachable: [
+    "The kernel is running, but this program cannot connect to it. A firewall or security product that blocks inbound connections for programs without an allow rule is the usual cause on Windows: allow Reasonix Studio and its reasonix-studio-host program, then start again.",
+    "内核已在运行，但本程序连不上它。在 Windows 上，通常是防火墙或安全软件对没有放行规则的程序拦截了入站连接：请放行 Reasonix Studio 和它的 reasonix-studio-host 程序，然后重新启动。",
+  ],
 };
 
 function startupFailure(locale, reason, logDir, code) {

@@ -39,6 +39,7 @@ const { processMemoryHandler } = require("./procmem");
 const { captureHandler } = require("./capture");
 const { createPowerGuard, keepsAwake } = require("./powerguard");
 const { openLogs, redactArgv, failStartup } = require("./shelllog");
+const { probeHost } = require("./hostprobe");
 const { raise } = require("./raise");
 const { keepCredential, restoreIfStale } = require("./credential");
 const { actHandler } = require("./acts");
@@ -223,6 +224,7 @@ cua = await startEmbedded(computerDriver, contract, text => logs.host.raw(text))
   tray = installTray(client, { onOpen: showWindow, onQuit: () => app.quit() });
   win.on("close", onWindowClose);
   hostAgentBrowser();
+  await probeHost(origin);
   await win.loadURL(origin + PAGE_PATH);
   await tray?.refresh();
   // After the window, deliberately. This asks about an install left behind by
