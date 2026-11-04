@@ -38,6 +38,7 @@
 - 内置浏览器里网页或代理要求登录时，对话框按设计稿排版：标题写明站点（代理则写「代理 主机:端口」），右上角关闭，站点提示原样显示，用户名和密码各带标签，锁形图标下说明密码只交给这个网页，底部是「取消 / 登录」（02a930375）。
 - PDF 预览工具条按设计稿：上一页 / 下一页图标按钮，中间页码可直接输入（自动限制在页数内）；缩小 / 放大按固定档位、从适应宽度当下的比例起步，中间显示实际比例；「适应宽度」可切换。PDF 打不开（损坏或需要密码）时显示一条提示和「用系统应用打开」（6e2dd77f7）。
 - Excel / Word 预览按设计稿：顶部常驻「只读」标签和说明，两种都能缩放，Word 另有「适应宽度」；工作表在底部切换，超出行列时在右侧写明。没开启 Office 预览时写明文件名，并给出「用系统应用打开」和「去设置开启预览」两个出路（69e4e002a）。
+- 写新反馈按设计稿：类别做成带说明的卡片；正文保留预览和字数，下方写明「只有登记为议题才公开」；截图、「截取当前窗口」「添加图片」排成一行，截图隐私提醒放在下面；昵称和联系方式保留；随附信息收成一行，点开看完整环境和日志文件夹；「按安全策略私下报告」移到底部发送旁。发出后显示对勾、「收到了，谢谢」、带复制图标的回执号、后续说明，以及「查看我的反馈 / 再写一条」（d0bf9e9a4）。
 
 
 ---
@@ -83,3 +84,4 @@
 - The built-in browser's sign-in dialog follows the board: the site (or "proxy host:port") in the title with a close button, the site's prompt as sent, labelled fields, a lock note on where the password goes, and Cancel / Sign in in the footer (02a930375).
 - The PDF toolbar follows the board: icon page buttons around a page box you can type into (held to the page count); zoom steps from whatever fit-width drew, showing the real scale; Fit width toggles. A PDF that cannot be shown (damaged or password-protected) says so with Open in system application (6e2dd77f7).
 - Excel and Word previews follow the board: a read-only tag and note at the top, zoom on both and fit width for Word; sheets switch from a strip at the bottom that says when rows or columns were cut. With Office preview off it names the file and offers Open in system application or Turn preview on in Settings (69e4e002a).
+- The feedback form follows the board: category cards with a line each, the body with preview and byte count and the public-if-filed note, screenshots in one row with Capture this window and Add images and the privacy note under them, nickname and contact kept, what is sent along as one line that opens to the full environment, and the security link in the footer by Send. The receipt shows a check, a thanks, the receipt number with an icon copy button, what happens next, and View my feedback / Write another (d0bf9e9a4).
