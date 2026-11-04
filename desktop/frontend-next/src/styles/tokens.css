@@ -208,7 +208,7 @@
 
   @media (prefers-reduced-motion: reduce) { :root { --press: none } }
 
-  :root { --w-reg: 500; --w-med: 600; --w-semi: 700 }
+  :root { --w-reg: 500; --w-med: 600; --w-semi: 700; --shade: #000 }
   :root:lang(zh) { --track-display: -.006em }
   :root[data-weight="light"], :root[data-weight="light"]:lang(zh) {
   --w-reg: 400; --w-med: 500; --w-semi: 600;

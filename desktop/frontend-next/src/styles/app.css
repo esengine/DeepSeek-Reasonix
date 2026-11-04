@@ -4676,7 +4676,7 @@
   .pc-note-pop {
     position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; white-space: nowrap;
     padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
-    background: var(--raised); box-shadow: 0 12px 30px -16px #000;
+    background: var(--raised); box-shadow: 0 12px 30px -16px var(--shade);
     color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui);
     animation: pcin var(--t-card, .14s) var(--ease-out, ease-out) both;
   }
@@ -4710,7 +4710,7 @@
     width: min(318px, calc(100vw - 24px)); max-height: calc(100dvh - var(--chrome-h, 45px) - 24px); overflow: auto;
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 11px; padding: 13px;
     border: 1px solid var(--border); border-radius: var(--r-md);
-    background: var(--raised); box-shadow: 0 20px 50px -20px #000;
+    background: var(--raised); box-shadow: 0 20px 50px -20px var(--shade);
     color: var(--faint); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); cursor: default; text-align: left;
     animation: pcin var(--t-card, .14s) var(--ease-out, ease-out) both;
   }

@@ -523,7 +523,7 @@ body { background: var(--page) !important; }
 .chrome-context-card {
   position: absolute; z-index: 80; top: calc(100% + 8px); right: 0; width: 326px;
   display: grid; gap: 10px; padding: 13px; border: 1px solid var(--border); border-radius: var(--r-md);
-  background: var(--raised); box-shadow: 0 20px 50px -20px #000; color: var(--faint);
+  background: var(--raised); box-shadow: 0 20px 50px -20px var(--shade); color: var(--faint);
   font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); cursor: default;
   opacity: 0; visibility: hidden; pointer-events: none;
   transform: translateY(-4px) scale(.985); transform-origin: top right;
@@ -1075,14 +1075,14 @@ body { background: var(--page) !important; }
   padding: 15px 16px 10px;
   border-radius: var(--r-lg);
   background: var(--surface) !important;
-  box-shadow: 0 18px 48px -34px #000;
+  box-shadow: 0 18px 48px -34px var(--shade);
 }
 .compose::after { border-color: var(--border); }
 .compose:hover::after { border-color: var(--border); }
 .compose { --aux-budget: min(calc(28vh / var(--zoom, 1)), 280px); }
 .compose:has(.queue):not(:has(.composenotes > *)) { --aux-budget: min(calc(44vh / var(--zoom, 1)), 420px); }
 [data-fold~="short"] .compose { --aux-budget: min(calc(19vh / var(--zoom, 1)), 150px); } [data-fold~="short"] .compose:has(.queue):not(:has(.composenotes > *)) { --aux-budget: min(calc(28vh / var(--zoom, 1)), 260px); }
-.compose:focus-within { box-shadow: 0 0 0 3px rgb(197 201 192 / .055), 0 20px 48px -32px #000; }
+.compose:focus-within { box-shadow: 0 0 0 3px rgb(197 201 192 / .055), 0 20px 48px -32px var(--shade); }
 .compose:focus-within::after { border-color: #4a4e47; }
 .compose .prompt { display: none; }
 .compose .fmain { display: block; }
@@ -1479,7 +1479,7 @@ body { background: var(--page) !important; }
 @media (max-width: 680px) {
   .app { --rail-open: min(84vw, 300px) !important; }
   .chrome { margin-left: var(--nav-w); }
-  .rail { box-shadow: 18px 0 50px -28px #000; }
+  .rail { box-shadow: 18px 0 50px -28px var(--shade); }
   .app[data-rail="off"] .rail { pointer-events: none; }
   .flow,
   .compose,
@@ -2421,7 +2421,7 @@ button, input, textarea { font-size: var(--fs-ui); }
   border-color: var(--border);
   border-radius: var(--r-md);
   background: var(--raised);
-  box-shadow: 0 20px 48px -20px #000;
+  box-shadow: 0 20px 48px -20px var(--shade);
 }
 .studio-model-menu,
 .studio-effort-menu { width: 310px; max-width: calc(100vw - 24px); }
