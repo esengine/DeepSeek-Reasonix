@@ -11,6 +11,7 @@ const PATHS = {
   search: "M15 15l6 6M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0",
   chevron: "m9 5 7 7-7 7",
   down: "m6 9 6 6 6-6",
+  minus: "M5 12h14",
   plus: "M12 5v14M5 12h14",
   arrow: "M12 20V4m-6 6 6-6 6 6",
   close: "m6 6 12 12M6 18 18 6",

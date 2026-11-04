@@ -61,7 +61,7 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
   else if (data && info) {
     const text = () => new TextDecoder("utf-8", { fatal: true }).decode(data);
     switch (info.kind) {
-      case "pdf": body = <PdfPreview data={data} view={view} />; break;
+      case "pdf": body = <PdfPreview data={data} view={view} onOpenExternal={onOpenExternal} />; break;
       case "table": body = <DelimitedPreview path={path} text={text()} view={view} />; break;
       case "html": body = <StaticHtmlPreview text={text()} />; break;
       case "image": body = <Picture data={data} path={path} view={view} />; break;

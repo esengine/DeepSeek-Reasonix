@@ -533,7 +533,7 @@ export const CHAT: Messages = {
   "chat.written_to_the_config_later": { zh: "已写入配置，后续会话中此类操作也始终允许，不再询问。", en: "Written to the config; later sessions will also always allow this kind without asking." },
   "chat.you": { zh: "你", en: "You" },
   "chat.your_message_n": { zh: "你的第{n}条", en: "Your message {n}" },
-  "chat.zoom": { zh: "缩放", en: "Zoom" },
+  "chat.page_number": { zh: "页码", en: "Page number" },
   "chat.zoom_in": { zh: "放大", en: "Zoom in" },
   "chat.zoom_out": { zh: "缩小", en: "Zoom out" },
 };
