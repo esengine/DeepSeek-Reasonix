@@ -26,7 +26,7 @@ function ThoughtLabel({ item }: { item: Extract<Item, { t: "say" }> }) {
   // the reader and two to the string.
   const graphemes = useMemo(() => [...(item.reasoning ?? "")].length, [item.reasoning]);
   const chars = t("{n} 字", { n: count(graphemes) });
-  return <>{item.thoughtMs ? t("思考 {secs} 秒 · {chars}", { secs: decimals(item.thoughtMs / 1000, 1), chars }) : t("思考 {chars}", { chars })}</>;
+  return <>{item.thoughtMs ? t("思考 {chars} · {secs} 秒", { secs: Math.max(Math.round(item.thoughtMs / 1000), 1), chars }) : t("思考 {chars}", { chars })}</>;
 }
 
 const LIVE_TICK_MS = 100;

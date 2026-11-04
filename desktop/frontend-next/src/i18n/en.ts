@@ -237,7 +237,7 @@ export const EN: Record<string, string> = {
   "还没有提交": "No commits yet",
   "只显示最近的提交": "Only the most recent commits are shown",
   "{at} 开始 · 耗时 {t}": "Started {at} · worked for {t}",
-  "思考 {secs} 秒 · {chars}": "Thought for {secs}s · {chars}",
+  "思考 {chars} · {secs} 秒": "Thought · {chars} · {secs}s",
   "{n} 字": "{n} chars",
   "{n} 张图片": "{n} images",
   "这一步没有回报结果就随本轮结束了": "This step ended with the turn without reporting a result",

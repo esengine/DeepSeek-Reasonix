@@ -73,7 +73,7 @@ describe("the folded thought's length", () => {
 
   it("reads in graphemes and keeps the elapsed time", () => {
     const card = draw(done("答", "想🙂想"), true);
-    expect(card.text()).toBe("思考 2.3 秒 · 3 字");
+    expect(card.text()).toBe("思考 3 字 · 2 秒");
   });
 
   it("is not counted again while the answer beneath it streams", () => {
@@ -91,6 +91,6 @@ describe("the folded thought's length", () => {
       card.view.rerender(<PaneShown.Provider value={true}><SayCard item={done(text, reasoning)} /></PaneShown.Provider>);
     }
     expect(expanded.mock.calls.length).toBe(first);
-    expect(card.text()).toBe("思考 2.3 秒 · 80 字");
+    expect(card.text()).toBe("思考 80 字 · 2 秒");
   });
 });
