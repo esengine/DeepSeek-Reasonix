@@ -628,6 +628,7 @@ export function App({ hub }: { hub: HubPort }) {
           onRename={renameSession}
           onCollapse={() => setRail(false)}
           wallet={report.wallet}
+          approval={report.status?.toolApprovalMode}
           onSettings={showPrefs}
           onFiles={openFiles}
           onView={showView}

@@ -2,11 +2,13 @@ import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { t } from "../i18n";
 import logoWordmark from "../assets/logo-wordmark.svg";
+import type { ApprovalMode } from "../port/port";
 import type { HubPort, RuntimeView, TreeSession, TreeWorkspace } from "../port/hub";
 import { workspaceContains } from "../port/hub";
 import type { RemoteHost } from "../port/remote";
 import type { Adder } from "./addws";
 import { TooltipButton } from "./TooltipButton";
+import { approvalName } from "./approvals";
 import { ContentMatches } from "./ContentMatches";
 import { useDestinations } from "./navdest";
 import { ICON, SECTION_NAME, SETTINGS, type Section } from "./prefsnav";
@@ -72,6 +74,8 @@ interface Props {
   onRename: (path: string, title: string, mode?: "inline" | "dialog") => void;
   onCollapse: () => void;
   wallet: string;
+  /** The focused session's approval mode, named on the tools entry. */
+  approval?: ApprovalMode;
   onSettings: (section?: string) => void;
   onFiles: () => void;
   onView: (to: PaneView) => void;
@@ -135,6 +139,7 @@ export function Sidebar({
   onRename,
   onCollapse,
   wallet,
+  approval,
   onSettings,
   onFiles,
   onView,
@@ -392,7 +397,8 @@ export function Sidebar({
         <div className="studio-quicknav" role="toolbar" aria-label={t("侧栏入口")} onKeyDown={moveAlongToolbar}>
           {destinations.map(([mark, label, section]) => {
             const reading = mark === "usage" ? (wallet ? (hideAmounts ? MASK : wallet) : "")
-              : mark === "remote" && online > 0 ? t("{n} 台在线", { n: online }) : "";
+              : mark === "remote" && online > 0 ? t("{n} 台在线", { n: online })
+              : mark === "tools" && approval ? approvalName(approval) : "";
             const name = reading ? `${t(label)} · ${reading}` : t(label);
             return (
               <TooltipButton

@@ -113,3 +113,23 @@ it("walks the foot's icon row with the arrow keys and names each entry with its 
   await userEvent.keyboard("{End}");
   expect(document.activeElement).toBe(buttons.at(-1));
 });
+
+it("names the approval mode on the tools entry once the session reports one", () => {
+  sidebar();
+  const tools = () => document.querySelector('.studio-quicknav [data-value="tools"]')!.getAttribute("aria-label");
+  expect(tools()).toBe("工具与权限");
+  cleanup();
+  const noop = vi.fn();
+  render(
+    <Sidebar
+      onFiles={noop} onView={noop} hub={new MockHub()} collapsed={false} navShown={false} paging={NO_PAGING} tree={tree} treeRead runtimes={[]} runs={{}} active=""
+      activeWorkspace={tree[0]} liveIds={() => []} pinned={new Set()} onPin={noop} remotes={null} remoteTrees={{}}
+      reloadRemotes={async () => {}} reloadRemoteTrees={async () => {}} readRemoteTree={async () => {}} reloadTree={async () => {}}
+      adder={{ busy: false, add: noop, addPath: noop } as never} onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop} onClosePanes={async () => {}}
+      onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} wallet="¥110.00" approval="ask"
+      onSettings={noop} onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop}
+    />,
+  );
+  expect(tools()).toBe("工具与权限 · 询问");
+  expect(document.querySelector(".studio-quicknav .studio-wallet")!.getAttribute("aria-label")).toBe("用量 · ¥110.00");
+});
