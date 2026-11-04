@@ -8,6 +8,8 @@
 - 工作台照设计稿重画：页签栏 42px、文件树在最前、当前页签像文件夹标签；路径栏最后一段加粗，阅读/编辑/Diff 是分段按钮，保存是主按钮；默认宽 520，可拖到 360–900。命令面板也换成设计稿的样子（2daa590e5）。
 - 记忆页按设计稿复核：「没错」「编辑」移到详情标题右侧，详情分「内容」「使用」两组，列表只在快淡忘或已淡忘时写一个词（e1ab56d58）。
 - 新样式的字号、字重会跟随设置里的字号和字重；macOS 浏览器里的文字也按设计稿的方式平滑，不再显得偏粗（e9ae8f1f8）。
+- 反馈中心的标签、筛选和状态改成设计稿的分段按钮与彩色药丸（c0870f92b）。
+- 思考块和计划条按设计稿重排：计划条成为输入框的顶行，进度用每步一格表示（852a19594）。
 
 ---
 <!-- lang:en -->
@@ -22,3 +24,5 @@
 - The workbench is redrawn to its board: a 42px tab strip with the file tree first and the current tab as a folder tab, a path bar with the file name in bold, read/edit/diff as a segmented control and Save as the primary button; it opens at 520px and drags from 360 to 900. The command palette takes its board look too (2daa590e5).
 - The memory page follows its review board: Confirm and Edit sit beside the title, the facts read as content and use, and a list row names its state only when it is fading or forgotten (e1ab56d58).
 - Type in the redesigned surfaces follows the text-size and weight settings, and text in a macOS browser is smoothed as the design canvas draws it instead of looking heavier (e9ae8f1f8).
+- The feedback center's tabs, filters and statuses take the board's segmented control and filled pills (c0870f92b).
+- Reasoning and the plan strip follow their boards: the plan strip becomes the composer's top row with one segment per step (852a19594).
