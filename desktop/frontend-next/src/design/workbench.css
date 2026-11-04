@@ -171,3 +171,38 @@
 .workbench-explorer .commit-open { border-color: var(--text); background: var(--text); color: var(--surface); }
 .workbench-files-head { position: static; }
 .workbench-diff:has(> .wb-diff) { padding: 0; }
+
+.workbench-tab { transition: background-color var(--t-line) ease, border-color var(--t-line) ease, color var(--t-line) ease; }
+.workbench-tab[data-enter] { animation: workbench-tab-in 180ms var(--ease-out) both; }
+@keyframes workbench-tab-in { from { max-width: 0; opacity: 0; } }
+.workbench-tab[data-live] .workbench-tab-pick::before { order: 2; background: var(--net); animation-duration: 1.6s; }
+.workbench-tab[data-dirty] .workbench-tab-close { opacity: 1; }
+.workbench-tab[data-dirty] .workbench-tab-close .studio-icon { display: none; }
+.workbench-tab[data-dirty] .workbench-tab-close::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text); }
+.workbench-tab[data-dirty]:hover .workbench-tab-close .studio-icon, .workbench-tab[data-dirty] .workbench-tab-close:focus-visible .studio-icon { display: block; }
+.workbench-tab[data-dirty]:hover .workbench-tab-close::before, .workbench-tab[data-dirty] .workbench-tab-close:focus-visible::before { display: none; }
+svg.studio-icon[data-lang="go"] { color: var(--net); }
+svg.studio-icon[data-lang="python"] { color: var(--warn); }
+svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
+
+.workbench-overflow { position: relative; flex: none; align-self: center; }
+.workbench-overflow-btn {
+  display: inline-flex; align-items: center; gap: 3px; height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui); cursor: pointer;
+}
+.workbench-overflow-btn:hover, .workbench-overflow-btn[aria-expanded="true"] { background: var(--overlay); color: var(--text); }
+.workbench-overflow-btn .studio-icon { width: 12px; height: 12px; }
+.workbench-overflow-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 6; min-width: 200px; max-height: 320px; overflow: auto; padding: 4px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
+}
+.workbench-overflow-menu > button {
+  display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text);
+  font: var(--w-reg) var(--fs-ui)/1.3 var(--ui); text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.workbench-overflow-menu > button:hover { background: var(--float-hi); }
+@media (prefers-reduced-motion: reduce) {
+  .workbench-tab { transition: none; }
+  .workbench-tab[data-enter] { animation: none; }
+}
+.workbench-tabs .workbench-tab { flex: 0 0 auto; }

@@ -12,3 +12,12 @@ export function fileKind(path: string): string {
   const dot = name.lastIndexOf(".");
   return dot < 0 ? "" : (BY_EXT.get(name.slice(dot + 1).toLowerCase()) ?? "");
 }
+
+const LANG: Record<string, string> = { go: "go", py: "python", xlsx: "sheet", xls: "sheet", csv: "sheet", tsv: "sheet" };
+
+/** The few languages the workbench's tabs colour apart — Go, Python, sheets — else none. */
+export function langOf(path: string): string | undefined {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? undefined : LANG[name.slice(dot + 1).toLowerCase()];
+}

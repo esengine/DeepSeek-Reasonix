@@ -183,6 +183,7 @@ describe("WorkbenchPanel", () => {
       return EditorView.findFromDOM(element as HTMLElement)!;
     });
     act(() => editor.dispatch({ changes: { from: editor.state.doc.length, insert: "local draft" } }));
+    expect(screen.getByRole("tab", { name: "README.md" }).hasAttribute("data-dirty")).toBe(true);
     const plus = container.querySelector<HTMLButtonElement>(".workbench-new")!;
     await user.click(plus);
     expect(screen.getByRole("group", { name: "开始" })).toBeTruthy();

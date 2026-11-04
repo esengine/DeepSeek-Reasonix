@@ -15,6 +15,8 @@ import { WorkbenchStatus } from "./WorkbenchStatus";
 import { WorkbenchFileTree } from "./WorkbenchFileTree";
 import { WorkbenchChangesPage } from "./WorkbenchChangesPage";
 import { UnifiedDiff } from "./UnifiedDiff";
+import { leave, useEnteringTabs, useOverflowTabs, useSwitchFade } from "./workbench_motion";
+import { WorkbenchTabOverflow } from "./WorkbenchTabOverflow";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
 import { useOnBump } from "./useOnBump";
 import { StudioIcon } from "./StudioIcon";
@@ -51,7 +53,7 @@ import { AgentRunView } from "./AgentRunView";
 import { JobRunView } from "./JobRunView";
 import { AgentAvatar } from "./cards/SubagentGroup";
 import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
-import { fileKind } from "./fileKind";
+import { fileKind, langOf } from "./fileKind";
 import { readRecentFiles, rememberFile } from "./recentFiles";
 
 export function WorkbenchPanel({
@@ -335,7 +337,7 @@ export function WorkbenchPanel({
   }, [filePath, readable, hasDocument, source]);
   const previewTab = previewable ? preview.tabFor(filePath) : undefined;
   const { open: openPreview, sync: syncPreview } = preview;
-  const { file, draft, diff, busy, error: fileFailed, errorCode, missing, setDraft, save } = useWorkbenchFiles({
+  const { file, draft, diff, busy, error: fileFailed, errorCode, missing, setDraft, save, unsaved } = useWorkbenchFiles({
     port, workspaceRoot, repos: gitRepos.repos, path: !source || (hasDocument && mode === "document") ? "" : filePath, openPaths: openFiles, shown, refresh: JSON.stringify([changeKey, glance, running, wrote]),
     poll: (readable && mode === "read") || (previewable && mode === "preview"),
   });
@@ -362,7 +364,11 @@ export function WorkbenchPanel({
   useEffect(() => onSurfaces(surfaces.length), [onSurfaces, surfaces.length]);
   // A strip wider than the column scrolls, and the tab being shown is always
   // brought into it: a selected tab nobody can see reads as a tab that closed.
-  const strip = useRef<HTMLDivElement>(null);
+  const canvas = useRef<HTMLDivElement>(null);
+  const tabKeys = surfaces.map(keyOf);
+  const entering = useEnteringTabs(tabKeys);
+  const [strip, overflow] = useOverflowTabs(tabKeys);
+  useSwitchFade(canvas, launcher ? "launcher" : active ? keyOf(active) : "");
   const activeKey = active ? keyOf(active) : "";
   useEffect(() => {
     strip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
@@ -492,6 +498,8 @@ export function WorkbenchPanel({
             role="tab"
             aria-selected={!launcher && surface === active}
             data-live={surface.kind === "browser" && surface.tab.active ? "" : undefined}
+            data-dirty={surface.kind === "file" && unsaved.includes(surface.path) ? "" : undefined}
+            data-key={keyOf(surface)} data-enter={entering.has(keyOf(surface)) ? "" : undefined}
             data-action-contextmenu="workbench.browser-menu" data-target={keyOf(surface)}
             onContextMenu={(e) => offerTabMenu(e, surface)}
           >
@@ -534,7 +542,7 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "job" ? "play" : surface.kind === "changes" ? "branch" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />}
+              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "job" ? "play" : surface.kind === "changes" ? "branch" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} data-lang={surface.kind === "file" ? langOf(surface.path) : undefined} />}
               <span>{labelFor(surface)}</span>
               {surface.kind === "changes" && changes.length > 0 && <small className="workbench-tab-count">{changes.length}</small>}
             </button>
@@ -546,7 +554,7 @@ export function WorkbenchPanel({
               aria-label={t("common.disable_name", { name: labelFor(surface) })}
               title={t("common.close")}
               disabled={closing}
-              onClick={() => void close([surface])}
+              onClick={(e) => leave(e.currentTarget.closest(".workbench-tab"), () => void close([surface]))}
             >
               <StudioIcon name="close" />
             </button>
@@ -558,6 +566,8 @@ export function WorkbenchPanel({
           </div>
         )}
         </div>
+        <WorkbenchTabOverflow tabs={overflow.flatMap((k) => { const s = surfaces.find((x) => keyOf(x) === k); return s ? [{ key: k, label: labelFor(s) }] : []; })}
+          onPick={(k) => { pick(k); strip.current?.querySelector(`[data-key="${CSS.escape(k)}"]`)?.scrollIntoView({ inline: "nearest" }); }} />
         <TooltipButton
           className="workbench-new"
           data-action="workbench.new"
@@ -594,7 +604,7 @@ export function WorkbenchPanel({
               recent={recentFiles} onOpenFile={openFile}
             />
           )}
-          <div className="workbench-content" hidden={launcher || !active} data-action-contextmenu="workbench.quote-selection" {...textMenu.readerProps}>
+          <div className="workbench-content" ref={canvas} hidden={launcher || !active} data-action-contextmenu="workbench.quote-selection" {...textMenu.readerProps}>
           {browsers.map((id) => (
             <ManualBrowserPanel
               key={id}

@@ -141,7 +141,9 @@ export function useWorkbenchFiles({ port, workspaceRoot, repos = [], path, openP
       if (current.current === entries && ticket === entry.issued) { entry.pending = ""; notify(); }
     }
   };
-  return { ...entry, busy: entry.pending === "save" || (!entry.file && entry.pending === "read"), setDraft, save };
+  // Every open file whose draft differs from what was read, for the tabs to mark.
+  const unsaved = [...entries].flatMap(([key, e]) => (dirty(e) ? [key] : []));
+  return { ...entry, busy: entry.pending === "save" || (!entry.file && entry.pending === "read"), setDraft, save, unsaved };
 }
 
 // The diff of a workspace-relative path, read from the repository that holds it.
