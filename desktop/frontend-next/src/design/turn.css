@@ -64,8 +64,12 @@
   animation: think-sweep 1.6s linear infinite;
 }
 @keyframes think-sweep { from { background-position: 150% 0; } to { background-position: -50% 0; } }
-.think[data-settled] .think-label { animation: think-swap 200ms var(--ease-out); }
-@keyframes think-swap { from { opacity: 0; } }
+.think-swap { display: inline-grid; }
+.think-swap > .think-label { grid-area: 1 / 1; }
+.think[data-settled] .think-label:not(.think-out) { animation: think-in 200ms var(--ease-out) both; }
+.think-out { animation: think-out 200ms var(--ease-out) both; pointer-events: none; }
+@keyframes think-in { from { opacity: 0; } }
+@keyframes think-out { to { opacity: 0; } }
 .think[data-live] .tk { max-height: calc(1.75em * 6); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
 .think[data-live] .tk-in { flex: none; }
 .think[data-cut] > summary .fold, .think[data-cut] > summary:hover .fold { color: var(--warn-ink); }
@@ -73,6 +77,7 @@
 @media (prefers-reduced-motion: reduce) {
   .think-sweep { background: none; color: var(--muted); animation: none; }
   .think[data-settled] .think-label { animation: none; }
+  .think-out { display: none; }
   .think::details-content { transition: none; }
 }
 

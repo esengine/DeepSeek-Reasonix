@@ -9,7 +9,7 @@ import { categoryOf, labelFor, mcpOrigin, runLabelFor } from "../icons";
 import { Sym, glyphFor } from "../Sym";
 import { activityVerb } from "../activityEarlier";
 import { GOAL_STATUS, argOf, goalUpdate, shortArgs } from "../args";
-import { Cost, useWatched } from "../Cost";
+import { Cost } from "../Cost";
 import { bytes, count, seconds, tokens } from "../../i18n/format";
 import { currentStep, parsePlan, stepDone } from "../../state/session";
 import { DiffView } from "./DiffView";
@@ -48,9 +48,18 @@ const shortCallId = (id?: string) => id ? id.replace(/^call_/, "").slice(-8) : "
 const lastLine = (text?: string) => text?.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
 
 // How long an activity step has run or took, in whole seconds; nothing under one.
+// A running step counts from when the kernel says it started, so a row drawn
+// late does not restart the clock; a call with no start counts from its row.
 function StepTime({ tool, running }: { tool: StateTool; running: boolean }) {
-  const watched = useWatched(running);
-  const ms = running ? watched : tool.durationMs ?? 0;
+  const drawnAt = useRef(Date.now()).current;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+  const ms = running ? Math.max(0, now - (tool.startedAt || drawnAt)) : tool.durationMs ?? 0;
   if (ms < 1000) return null;
   return <span className="step-sum">{t("common.n_s", { n: Math.round(ms / 1000) })}</span>;
 }

@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render } from "@testing-library/react";
 import "../testkit";
 import { SayCard } from "./SayCard";
 import { appendText } from "../../state/say";
 import type { Item } from "../../state/session";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 type Say = Extract<Item, { t: "say" }>;
 const think = () => document.querySelector<HTMLDetailsElement>("details.think")!;
-const label = () => think().querySelector(".think-label")!;
+const label = () => think().querySelector(".think-label:not(.think-out)")!;
 
 describe("the thinking block, as the Think-Exec board draws it", () => {
   it("sweeps its title only while the model is still thinking", () => {
@@ -51,5 +51,15 @@ describe("the thinking block, as the Think-Exec board draws it", () => {
     const view = render(<SayCard item={appendText([], "想", "reasoning")[0] as Say} />);
     view.rerender(<SayCard item={{ t: "say", id: "a", text: "答", reasoning: "想", done: true, thoughtMs: 1000 }} />);
     expect(think().hasAttribute("data-settled")).toBe(true);
+  });
+
+  it("crossfades the running title out and the settled one in, then keeps only the settled one", () => {
+    vi.useFakeTimers();
+    const view = render(<SayCard item={appendText([], "想", "reasoning")[0] as Say} />);
+    view.rerender(<SayCard item={{ t: "say", id: "a", text: "答", reasoning: "想", done: true, thoughtMs: 6200 }} />);
+    const labels = () => [...think().querySelectorAll(".think-label")].map((l) => [l.classList.contains("think-out"), l.textContent]);
+    expect(labels()).toEqual([[true, "思考中 · 6.2 秒"], [false, "思考 6.2 秒 · 1 字"]]);
+    act(() => void vi.advanceTimersByTime(300));
+    expect(labels()).toEqual([[false, "思考 6.2 秒 · 1 字"]]);
   });
 });

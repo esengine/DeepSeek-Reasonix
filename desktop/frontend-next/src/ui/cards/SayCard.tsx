@@ -112,8 +112,12 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
   const watchedThinking = useRef(thinking);
   const [settledHere, setSettledHere] = useState(false);
   useEffect(() => {
-    if (watchedThinking.current && !thinking) setSettledHere(true);
+    const fell = watchedThinking.current && !thinking;
     watchedThinking.current = thinking;
+    if (!fell) return;
+    setSettledHere(true);
+    const id = setTimeout(() => setSettledHere(false), 240);
+    return () => clearTimeout(id);
   }, [thinking]);
   const folds = useThoughtFold();
   const [touched, setOpen] = useState<boolean | null>(() => folds.get(item.id) ?? null);
@@ -172,8 +176,15 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
               }}>
               <summary>
                 <span className="fold">
-                  <span className={thinking ? "think-label think-sweep" : "think-label"} key={thinking ? "live" : "done"}>
-                    {thinking ? <LiveThought id={item.id} /> : <ThoughtLabel item={item} />}
+                  <span className="think-swap">
+                    {settledHere && (
+                      <span className="think-label think-out" aria-hidden="true">
+                        {t("chat.thinking_secs_s", { secs: decimals((item.thoughtMs ?? 0) / 1000, 1) })}
+                      </span>
+                    )}
+                    <span className={thinking ? "think-label think-sweep" : "think-label"} key={thinking ? "live" : "done"}>
+                      {thinking ? <LiveThought id={item.id} /> : <ThoughtLabel item={item} />}
+                    </span>
                   </span>
                 </span>
                 {item.cut && !open && <span className="think-note">{t(item.cut === "stopped" ? "chat.thought_stopped_note" : "chat.thought_failed_note")}</span>}

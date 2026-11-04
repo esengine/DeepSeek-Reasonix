@@ -52,4 +52,13 @@ describe("a step in the activity group", () => {
     act(() => screen.getByRole("button", { name: "停止这一条" }).click());
     expect(onStop).toHaveBeenCalled();
   });
+
+  it("counts a running step from when the kernel says it started, not from when its row was drawn", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    render(<ToolCard activity tool={bash({ startedAt: 88_000 })} running />);
+    expect(document.querySelector(".step-sum")!.textContent).toBe("12 秒");
+    act(() => void vi.advanceTimersByTime(1_000));
+    expect(document.querySelector(".step-sum")!.textContent).toBe("13 秒");
+  });
 });
