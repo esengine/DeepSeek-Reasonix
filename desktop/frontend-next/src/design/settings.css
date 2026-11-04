@@ -133,3 +133,18 @@
 .mkc .find[data-lvl="warn"] { border-radius: var(--r-md); background: color-mix(in srgb, var(--warn) 10%, transparent); }
 .mkc .rgrp[data-lvl="high"] { padding-inline-start: 0; box-shadow: none; }
 .mkc .rgrp[data-lvl="high"] > h3 { color: var(--err-ink); }
+.mkt-entry { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float); }
+.mkt-entry .mkt-hd { align-items: center; }
+.mkt-entry .mkt-hd .nm { font: var(--w-semi) var(--fs-lead) var(--ui); }
+.mkt-entry .mkt-kind, .mkt-row .mkt-kind { padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-med) var(--fs-micro)/1.8 var(--ui); }
+.mkt-entry .mkt-badge[data-tone="ok"], .mkt-row .mkt-badge[data-tone="ok"] { padding: 0 7px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok-ink); font: var(--w-med) var(--fs-micro)/1.8 var(--ui); }
+.mkt-entry .mkt-sum { margin: 8px 0 0; color: var(--text); font: var(--w-med) var(--fs-ui)/1.6 var(--ui); }
+.mkt-entry .mkt-facts { margin-top: 10px; padding: 10px 12px; border-radius: var(--r-md); background: var(--page); }
+.mkt-entry .find, .mkt .find[data-cached] { border-left: 0; padding: 8px 12px; border-radius: var(--r-md); }
+.mkt-entry .find[data-lvl="warn"] { background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.mkt .find[data-cached] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; background: var(--page); }
+.mkt .find[data-cached] .t { flex-basis: 100%; }
+.mkt .find[data-cached] .why { flex: 1; min-width: 0; }
+.mkt .find[data-cached] .acts { margin: 0; }
+.mkt-entry > .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px -16px -14px; padding: 10px 16px; border-top: 1px solid var(--hair); }
+.mkt-entry > .acts .note { flex: 1; min-width: 0; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
