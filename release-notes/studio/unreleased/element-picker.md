@@ -1,0 +1,2 @@
+- 新增：内置浏览器可拾取页面元素（工具栏按钮或 Ctrl+Shift+C），生成含选择器、文本、样式与截图的引用加入聊天；Shift 可多选，改完可用「重新定位」确认。关联 #14580。
+- New: the browser picks an element (toolbar button or Ctrl+Shift+C) and sends a reference with its selector, text and screenshot; Shift-click picks a set, and "Find it again" confirms it. Refs #14580.

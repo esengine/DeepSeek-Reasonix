@@ -1,8 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, BrowserTab } from "../port/port";
-import { host, type BrowserControl, type BrowserLoadFailure, type BrowserRefusal } from "../port/host";
+import { host, type BrowserControl, type BrowserLoadFailure, type BrowserRefusal, type PickedDetail, type PickedElement } from "../port/host";
+import type { PickedSnapshot } from "./composerChips";
+import { PickIcon } from "./pickicon";
+import { elementBlock } from "./composerChips";
+import { pressedChord, typingElsewhere } from "./keys";
+import { listenAction } from "./listen";
 import { SWAP_MARK } from "./swap";
 import { occluded, visibleBox } from "./occlusion";
 import { BrowserFailure } from "./BrowserFailure";
@@ -188,15 +193,72 @@ export function localFilePath(url: string): string {
 
 type OpenDocument = (path: string) => Promise<void>;
 
-export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument }) {
+type Picked = NonNullable<PickedElement["element"]>;
+
+// What the chat is handed when the person picks an element: the page it came
+// from, how to find it again, and enough of it to see what they pointed at.
+// The selector is the part that makes the element actionable, so a model can
+// reach it again with browser_act's eval step.
+// The page's fields under the names a chip carries: the reference text keeps
+// the long names, the chip is data and does not need them.
+function snapshotOf(element: PickedDetail): PickedSnapshot {
+  return {
+    url: element.pageUrl,
+    title: element.pageTitle,
+    tag: element.tagName,
+    selector: element.selector,
+    ...(element.selectorBasis ? { selectorBasis: element.selectorBasis } : {}),
+    xpath: element.xpath,
+    ...(element.role ? { role: element.role } : {}),
+    ...(element.accessibleName ? { name: element.accessibleName } : {}),
+    ...(element.text ? { text: element.text } : {}),
+    ...(element.nearbyText ? { nearby: element.nearbyText } : {}),
+    html: element.htmlExcerpt,
+    attributes: element.attributes,
+    rect: element.rect,
+    style: element.style,
+  };
+}
+
+// A data URL from the shell, as a file the composer's own attachment path can
+// take: the bytes are already in hand, so no path round-trip is needed.
+function dataUrlFile(dataUrl: string, name: string): File {
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
+  return new File([bytes], name, { type: "image/png" });
+}
+
+export function elementReference(element: Picked, workspaceRoot?: string): string {
+  return elementBlock(snapshotOf(element), workspaceRoot);
+}
+
+// What the panel says when a pick ends without an element. "Nothing happened"
+// is not an answer: the ends a person can meet are different, and only the
+// ones this window caused need saying aloud.
+export function pickNoticeFor(reason: PickedElement["reason"]): string {
+  if (reason === "timeout") return t("拾取超时，未选中元素");
+  if (reason === "hidden") return t("页面被遮挡，拾取已取消");
+  if (reason === "navigation" || reason === "gone") return t("页面已变化，拾取已取消");
+  return "";
+}
+
+export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   if (host().drawsBrowserViews()) return <AgentBrowserView {...props} />;
   const current = props.tabs.find((tab) => tab.active) ?? props.tabs[0];
   return <div className="bpanel">{current && <AgentPageNote tab={current} />}</div>;
 }
 
-function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument }) {
+function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, onAddToChat, onAddFiles, onAddPick, workspaceRoot }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   const slot = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState("");
+  const [picking, setPicking] = useState(false);
+  // What the last pick left behind: the line the panel shows, and the selector
+  // its copy button hands over.
+  const [pickedNote, setPickedNote] = useState<{ line: string; selector: string } | null>(null);
+  const [verifyNote, setVerifyNote] = useState("");
+  const [copied, setCopied] = useState(false);
+  // Why the last pick ended without an element, when this window caused it.
+  const [pickEnded, setPickEnded] = useState("");
   const current = tabs.find((tab) => tab.target === picked) ?? tabs.find((tab) => tab.active) ?? tabs[0];
   const [address, setAddress] = useState(current?.url ?? "");
   const [failures, setFailures] = useState<Record<string, BrowserLoadFailure>>({});
@@ -301,6 +363,110 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
     event.preventDefault();
     open(address);
   };
+  // A pick is the person's: it answers when they choose or give up, and a
+  // newer pick, a tab change or a closed panel settles the older one.
+  const pickTurn = useRef(0);
+  const pickingRef = useRef(false);
+  useEffect(() => {
+    pickingRef.current = picking;
+  }, [picking]);
+  const stopPick = useCallback(() => {
+    pickTurn.current++;
+    setPicking(false);
+    if (target) host().cancelBrowserPick(target);
+  }, [target]);
+  const startPick = useCallback(async () => {
+    if (!target) return;
+    const mine = ++pickTurn.current;
+    setPicking(true);
+    setPickedNote(null);
+    setPickEnded("");
+    const labels = {
+      color: t("颜色"),
+      background: t("背景"),
+      font: t("字体"),
+      frame: t("元素在嵌入框架内，暂不支持拾取"),
+      shadow: t("元素在 Shadow DOM 内，暂不支持拾取"),
+    };
+    const answer = await host().pickBrowserElement(target, labels).catch(() => ({ cancelled: true, reason: "gone" }) as PickedElement);
+    if (mine !== pickTurn.current) return;
+    setPicking(false);
+    const picked = answer.elements?.length ? answer.elements : answer.element ? [answer.element] : [];
+    if (answer.cancelled || picked.length === 0) {
+      setPickEnded(pickNoticeFor(answer.reason));
+      return;
+    }
+    const first = picked[0];
+    setPickedNote({
+      line: `${first.tagName} ${Math.round(first.rect.width)}×${Math.round(first.rect.height)}${picked.length > 1 ? ` +${picked.length - 1}` : ""}`,
+      selector: first.selector,
+    });
+    setVerifyNote("");
+    setCopied(false);
+    // The chat gets the whole element as a chip; the clipboard gets the one
+    // field worth pasting somewhere else.
+    const shot = answer.shot ? [dataUrlFile(answer.shot, `${first.tagName.toLowerCase()}.png`)] : [];
+    // One injection carries the elements and their picture, so a later turn
+    // cannot replay this pick's fields. The fallbacks below are older callers
+    // and deliberately do not send the picture separately: two updates would
+    // overwrite each other.
+    if (onAddPick) onAddPick(picked.map(snapshotOf), shot);
+    else if (picked.length > 1) onAddToChat?.(picked.map((one) => elementReference(one, workspaceRoot)).join("\n\n"));
+    else onAddToChat?.(elementReference(first, workspaceRoot));
+    void navigator.clipboard?.writeText(first.selector).then(
+      () => setCopied(true),
+      () => setCopied(false),
+    );
+  }, [target, onAddToChat, onAddPick, onAddFiles, workspaceRoot]);
+  // The page may have changed since the pick: re-finding the selector is how a
+  // person checks that an edit landed where they pointed.
+  const verify = useCallback(async () => {
+    if (!target || !pickedNote) return;
+    const answer = await host().verifyBrowserElement(target, pickedNote.selector).catch(() => ({ found: false, shot: "" }));
+    setVerifyNote(answer.found ? t("元素仍在页面上") : t("页面上找不到这个元素了"));
+    if (answer.shot && onAddFiles) onAddFiles([dataUrlFile(answer.shot, "element-again.png")]);
+  }, [target, pickedNote, onAddFiles]);
+  // The note belongs to the page it came from: another tab starts clean.
+  useEffect(() => {
+    setPickedNote(null);
+    setVerifyNote("");
+  }, [target]);
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && pickingRef.current) {
+        event.preventDefault();
+        stopPick();
+        return;
+      }
+      if (!shown || event.repeat || typingElsewhere(event.target)) return;
+      if (!pressedChord(event, "c", true)) return;
+      event.preventDefault();
+      if (pickingRef.current) stopPick();
+      else void startPick();
+    };
+    return listenAction(window, "keydown", { action: "browser.pick-shortcut", listener: onKey as EventListener });
+  }, [stopPick, startPick]);
+  // The page holds the keyboard while the person is looking at it, so the key
+  // arrives from the shell instead of from this page.
+  useEffect(
+    () =>
+      host().onBrowserPickShortcut((id) => {
+        if (id !== target) return;
+        if (pickingRef.current) stopPick();
+        else void startPick();
+      }),
+    [target, stopPick, startPick],
+  );
+  // A tab that goes away, or a panel closed under a waiting pick, leaves the
+  // page armed no longer.
+  useEffect(
+    () => () => {
+      if (!pickingRef.current) return;
+      pickTurn.current++;
+      host().cancelBrowserPick(target);
+    },
+    [target],
+  );
   return (
     <div className="bpanel">
       <div className="bbar">
@@ -315,12 +481,22 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="back" aria-label={t("后退")} onClick={() => control("back")}>←</button>
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="forward" aria-label={t("前进")} onClick={() => control("forward")}>→</button>
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="reload" aria-label={t("重新加载")} onClick={() => control("reload")}>↻</button>
+          <button className="bbtn" data-action="browser.pick" data-target={current?.id} aria-label={picking ? t("取消选择元素") : t("选择网页元素")} aria-pressed={picking} title={picking ? t("取消选择元素") : t("选择网页元素")} onClick={() => (picking ? stopPick() : void startPick())}><PickIcon /></button>
           <button className="bbtn" data-action="browser.external" disabled={!documentPath && !/^https?:\/\//i.test(current?.url ?? "")} aria-label={documentPath ? t("用系统默认程序打开这个文件") : t("用默认浏览器打开此页")} title={documentPath ? t("用系统默认程序打开这个文件") : t("用默认浏览器打开此页")} onClick={() => (documentPath ? openDocument() : current && void host().openExternal(current.url))}>↗</button>
           <form className="baddr" data-action="browser.navigate" data-target={current?.id} onSubmit={go}>
             <input data-action="browser.navigate" data-target={current?.id} value={address} spellCheck={false} aria-label={t("网址")} onChange={(event) => { setAddress(event.target.value); setRefused(""); }} />
           </form>
         </div>
       </div>
+      {pickEnded && <p className="studio-browser-note" data-action="browser.pick-ended"><span>{pickEnded}</span></p>}
+      {pickedNote && (
+        <p className="studio-browser-note" data-action="browser.picked">
+          <span title={pickedNote.selector}>{t(copied ? "已拾取元素，选择器已复制" : "已拾取元素，选择器未能复制")} · {pickedNote.line}</span>
+          <button type="button" data-action="browser.copy-selector" onClick={() => void navigator.clipboard?.writeText(pickedNote.selector).catch(() => {})}>{t("复制选择器")}</button>
+          <button type="button" data-action="browser.verify" onClick={() => void verify()}>{t("重新定位")}</button>
+          {verifyNote && <span data-action="browser.verify-result">{verifyNote}</span>}
+        </p>
+      )}
       {documentPath && <p className="studio-browser-note" data-action="browser.document-hint">{t("用系统默认程序打开这个文件，网页里的脚本会照常运行")}</p>}
       {docFailed && <p className="studio-browser-error" role="alert">{docFailed}</p>}
       {refused && (
@@ -344,6 +520,6 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
   );
 }
 
-export function BrowserPanel(props: ManualProps | { tabs: BrowserTab[]; shown: boolean; onOpenDocument?: OpenDocument }) {
+export function BrowserPanel(props: ManualProps | { tabs: BrowserTab[]; shown: boolean; onOpenDocument?: OpenDocument; onAddToChat?: (reference: string) => void; onAddFiles?: (files: File[]) => void; onAddPick?: (elements: PickedSnapshot[], files: File[]) => void; workspaceRoot?: string }) {
   return "tabs" in props ? <AgentBrowserPanel {...props} /> : <ManualBrowserPanel {...props} />;
 }
