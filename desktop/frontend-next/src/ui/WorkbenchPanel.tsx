@@ -603,7 +603,7 @@ export function WorkbenchPanel({
               )}
               {mode === "document" || unpreviewableText ? (
                 <Suspense fallback={<div className="workbench-empty">{t("正在读取…")}</div>}>
-                  <DocumentPreview key={filePath} port={port} path={filePath} shown={shown && !showFiles && !launcher}
+                  <DocumentPreview key={filePath} port={port} path={filePath} shown={shown && !showFiles && !launcher} onQuote={onQuoteSelection}
                     view={documentState(documentStates, filePath)}
                     refresh={JSON.stringify([changeKey, glance, running, wrote])}
                     onOpenExternal={!remote && port.opensFiles() && /\.(pdf|html?|svg|docx?|xlsx?|pptx?)$/i.test(filePath) ? () => {

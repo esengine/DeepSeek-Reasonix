@@ -327,6 +327,7 @@ function analysisContext(sources: Map<string, string | Node>, opts: Options) {
       const prop = (node.property as Node)?.name as string | undefined;
       if (/^(window|document|globalThis)$/.test(flat(node))) return "Window";
       if (prop === "currentTarget" || prop === "target") return "EventTarget";
+      if (prop === "contentDocument" && targetTypeOf(node.object as Node, path, depth + 1, stack) === "HTMLIFrameElement") return "Document";
       if (prop !== "current" || (node.object as Node)?.type !== "Identifier") return null;
       return refArgs.get(path + "#" + ((node.object as Node).name as string)) ?? null;
     }

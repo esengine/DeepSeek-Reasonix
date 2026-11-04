@@ -46,4 +46,10 @@ export const EN_DOCUMENT: Record<string, string> = {
   "这个工作簿没有可见的工作表": "This workbook has no visible sheets.",
   "Office 文档预览": "Office document preview",
   "Office 文档预览已在设置中关闭": "Office document preview is turned off in Settings.",
+  "加入对话 · {where}": "Add to chat · {where}",
+  "选中文字后可加入对话": "Select text to add it to the chat",
+  "点选或拖选单元格后可加入对话": "Click or drag across cells to add them to the chat",
+  "{sheet} 工作表 {range}": "sheet {sheet}, {range}",
+  "正文第 {n} 块": "body block {n}",
+  "正文第 {a}–{b} 块": "body blocks {a}–{b}",
 };

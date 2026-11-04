@@ -104,7 +104,9 @@ const SHEET_CSS = "body{margin:0;font:13px system-ui,sans-serif;color:#1f1f1f;ba
   + "table{border-collapse:collapse;table-layout:fixed}"
   + "td,th{border:1px solid #d9d9d9;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
   + "th{background:#f3f3f3;color:#666;font-weight:normal;position:sticky;top:0}"
-  + "tbody th{position:sticky;left:0}";
+  + "tbody th{position:sticky;left:0}"
+  + "td{cursor:cell;user-select:none}"
+  + ".sel{outline:2px solid #2f6fdf;outline-offset:-2px;background-image:linear-gradient(rgba(47,111,223,.16),rgba(47,111,223,.16))}";
 
 export async function readWorkbook(data: ArrayBuffer): Promise<SheetView[]> {
   const { default: ExcelJS } = await import("exceljs");

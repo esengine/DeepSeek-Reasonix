@@ -1,0 +1,2 @@
+- 新增：Office 预览里可以选中 Word 文字或拖选 Excel 单元格，一键加入对话，引用会带上所在位置（如「Q3 工作表 B2:D4」「正文第 5 块」）。关联 #14622。
+- New: in the Office preview, select Word text or drag across Excel cells and add it to the chat with its position, such as sheet Q3 B2:D4 or body block 5. Refs #14622.
