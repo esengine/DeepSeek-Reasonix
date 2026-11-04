@@ -126,6 +126,7 @@ export const ACTIONS: UIAction[] = [
   { id: "workspace.source-open", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.worktree-toggle", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.search", kind: "view", target: "none", proof: "interaction" },
+  { id: "session.view", kind: "view", target: "none", proof: "interaction" },
   { id: "session.filter", kind: "view", target: "none", proof: "interaction" },
   { id: "session.recent", kind: "view", target: "none", proof: "interaction" },
   { id: "session.recent-environment", kind: "view", target: "none", proof: "interaction" },

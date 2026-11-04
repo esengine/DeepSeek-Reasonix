@@ -28,6 +28,7 @@ import { useFileDrop } from "./filedrop";
 import type { PaneView } from "../state/paneview";
 import { RecentSessions } from "./RecentSessions";
 import { sessionRuntime, type SessionScope } from "./sessionScope";
+import { RailFilterContext } from "./railfilter";
 import { SessionFilter } from "./SessionFilter";
 
 interface Props {
@@ -314,10 +315,8 @@ export function Sidebar({
         <button className="studio-search" data-action="workspace.search" title="Ctrl K" onClick={() => setPalette(true)}>
           <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索会话与操作")}</b><kbd>Ctrl K</kbd>
         </button>
-        <div className="studio-session-filters" role="group" aria-label={t("会话范围")}>
-          <SessionFilter scope={railScope} counts={scopeCounts} onScope={setRailScope} />
-        </div>
       </div>
+      <RailFilterContext.Provider value={<SessionFilter scope={railScope} counts={scopeCounts} onScope={setRailScope} />}>
       <RailSearch resetKey={located}>
       <ContentMatches hub={hub} tree={tree} onOpen={onOpen} onError={onError} onReference={onReferenceSession} />
       <Workspaces
@@ -380,6 +379,7 @@ export function Sidebar({
         ) : null}
       </Workspaces>
       </RailSearch>
+      </RailFilterContext.Provider>
       </div>
       {!navShown && <div className="railfoot">
       <div className="studio-quicknav">
