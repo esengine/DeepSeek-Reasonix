@@ -14,12 +14,12 @@ import { StudioIcon } from "./StudioIcon";
 import { CompositionModulePicker } from "./CompositionModulePicker";
 
 const labels: Record<CompositionKind, string> = {
-  tools: "工具",
-  skills: "技能",
-  mcp: "MCP 服务",
-  extensions: "扩展",
-  hooks: "自动化 Hook",
-  commands: "斜杠命令",
+  tools: "common.tool",
+  skills: "settings.skills",
+  mcp: "persona.mcp_servers",
+  extensions: "ext.extension",
+  hooks: "persona.automation_hooks",
+  commands: "persona.slash_commands",
 };
 
 export function CompositionEditor({

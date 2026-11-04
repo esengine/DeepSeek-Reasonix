@@ -9,12 +9,12 @@ export type Destination = [mark: Mark, label: string, section: string, action?: 
 // with its name on the sidebar. Names are the settings table's own (prefsnav
 // NAV), so a destination is called the same thing wherever it is offered.
 export const DESTINATIONS: Destination[] = [
-  ["usage", "用量", "usage"],
-  ["files", "文件", "files", "files.open"],
-  ["tools", "工具与权限", "tools"],
-  ["ext", "扩展", "ext"],
-  ["memory", "记忆", "memory"],
-  ["remote", "远程", "remote"],
+  ["usage", "app.usage", "usage"],
+  ["files", "common.files", "files", "files.open"],
+  ["tools", "app.tools_and_permissions", "tools"],
+  ["ext", "ext.extension", "ext"],
+  ["memory", "data.memory", "memory"],
+  ["remote", "settings.remote", "remote"],
 ];
 
 const KEYS = DESTINATIONS.map(([mark]) => mark);

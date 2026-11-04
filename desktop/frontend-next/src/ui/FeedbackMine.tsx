@@ -15,16 +15,16 @@ import { FeedbackReplyBox, FeedbackReviewNote, FeedbackThread, foldedUnread } fr
 import { StudioIcon, type StudioIconName } from "./StudioIcon";
 
 export const STATUS_LABEL: Record<FeedbackStatus, string> = {
-  received: "已收到",
-  needs_info: "需要补充信息",
-  answered: "维护者已回复",
-  closed: "已关闭此反馈",
-  withdrawn: "已撤回",
-  recorded: "已登记",
-  in_progress: "处理中",
-  fixed: "已修复",
-  wontfix: "不予修复",
-  duplicate: "重复",
+  received: "feedback.received",
+  needs_info: "feedback.needs_more_info",
+  answered: "feedback.answered_by_us",
+  closed: "feedback.closed_2",
+  withdrawn: "chat.withdrawn",
+  recorded: "feedback.recorded",
+  in_progress: "feedback.in_progress",
+  fixed: "feedback.fixed",
+  wontfix: "feedback.wont_fix",
+  duplicate: "feedback.duplicate",
 };
 
 const STATUS_ICON: Record<FeedbackStatus, StudioIconName> = {
@@ -40,13 +40,13 @@ const STATUS_ICON: Record<FeedbackStatus, StudioIconName> = {
   duplicate: "copy",
 };
 
-export const REVIEW_LABEL = "审核中";
+export const REVIEW_LABEL = "feedback.in_review";
 
-const CATEGORY_LABEL = { bug: "问题", idea: "建议", question: "疑问", other: "其他" } as const;
+const CATEGORY_LABEL = { bug: "feedback.bug", idea: "feedback.idea", question: "feedback.question", other: "ext.other" } as const;
 
 type StepState = "done" | "current" | "todo";
 
-const STEP_STATE: Record<StepState, string> = { done: "已完成：", current: "当前：", todo: "尚未开始：" };
+const STEP_STATE: Record<StepState, string> = { done: "feedback.done", current: "feedback.current", todo: "feedback.not_yet" };
 
 // What this window last read, per port, so opening the page again draws the list
 // it already has and refreshes behind it instead of showing one waiting line.

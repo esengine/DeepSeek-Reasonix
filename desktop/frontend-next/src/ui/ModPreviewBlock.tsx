@@ -4,21 +4,21 @@ import type { ModPreview } from "../port/plugin";
 // Keyed by the kernel's reason and kind. A key with no entry shows the key itself
 // rather than nothing: an unlisted module must never read as a clean one.
 const NOT_LISTED: Record<string, string> = {
-  typescript: "它是 TypeScript，本应用不读",
-  too_large: "文件太大",
-  unparseable: "语法解析失败",
-  timeout: "解析超时",
-  unsupported_module: "不是本宿主支持的模块形式",
+  typescript: "ext.it_is_typescript_which_this",
+  too_large: "ext.the_file_is_too_large",
+  unparseable: "ext.it_could_not_be_parsed",
+  timeout: "ext.parsing_timed_out",
+  unsupported_module: "ext.it_is_not_a_module",
 };
 
 const FINDING: Record<string, string> = {
-  eval: "用了 eval",
-  function_ctor: "用了 new Function",
-  computed_member: "用计算出来的名字访问接口",
-  api_escapes: "把接口对象交给了别处",
-  on_escapes: "把注册函数交给了别处",
-  destructured_api: "把接口对象解构了出来",
-  no_register: "没有找到导出的 register",
+  eval: "ext.uses_eval",
+  function_ctor: "ext.uses_new_function",
+  computed_member: "ext.reaches_the_api_by_a",
+  api_escapes: "ext.hands_the_api_object_elsewhere",
+  on_escapes: "ext.hands_the_registering_function_elsewhere",
+  destructured_api: "ext.destructures_the_api_object",
+  no_register: "ext.no_exported_register_was_found",
 };
 
 // What a literal session call takes from the session (read) or puts in front of

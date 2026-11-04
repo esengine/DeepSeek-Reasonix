@@ -3,13 +3,13 @@ import type { LegacySkip, LegacySkipReason } from "../port/hub";
 import { CopyButton } from "./CopyButton";
 
 const REASON: Record<LegacySkipReason, string> = {
-  too_large: "体积超过读取上限",
-  unreadable_format: "不是本版本能读取的会话格式",
-  schema_unsupported: "来自本版本尚不支持的存储版本",
-  permission: "没有读取权限",
-  corrupt: "文件已损坏",
-  copy_failed: "复制到新位置时失败",
-  no_project: "没有记录它属于哪个项目，所以没有导入",
+  too_large: "ext.larger_than_the_size_limit",
+  unreadable_format: "ext.not_a_session_format_this",
+  schema_unsupported: "ext.written_by_a_storage_version",
+  permission: "ext.no_permission_to_read_it",
+  corrupt: "ext.the_file_is_damaged",
+  copy_failed: "ext.copying_it_to_the_new",
+  no_project: "ext.it_records_no_project_it",
 };
 
 export function LegacySkips({ skipped }: { skipped: LegacySkip[] }) {

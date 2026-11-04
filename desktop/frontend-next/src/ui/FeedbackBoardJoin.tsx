@@ -11,9 +11,9 @@ interface Props {
 }
 
 const WORDS = {
-  short: "名字至少 2 个字符。",
-  long: "名字最多 30 个字符。",
-  chars: "名字只能用字母、数字、空格、下划线或连字符，不能含 @ 或句点。",
+  short: "feedback.the_name_needs_at_least",
+  long: "feedback.the_name_can_have_at",
+  chars: "feedback.the_name_may_use_letters",
 } as const;
 
 // The choice that rides with linking: a public name on the contribution board,

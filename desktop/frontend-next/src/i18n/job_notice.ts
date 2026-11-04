@@ -35,7 +35,7 @@ export function jobStalledVars(detail: string | undefined): { name: string; quie
     return {
       ...named,
       quiet: elapsed(p.quietSeconds * 1000),
-      work: steps > 0 ? t("{n} 步在静默前完成", { n: steps }) : t("静默前没有任何进展"),
+      work: steps > 0 ? t("kernel.n_step_s_completed_before", { n: steps }) : t("kernel.no_progress_reported"),
     };
   } catch {
     return undefined;
@@ -49,8 +49,8 @@ export function jobErrorText(detail: string | undefined): string | undefined {
   if (!detail) return undefined;
   try {
     const p = JSON.parse(detail) as { error?: unknown; exitCode?: unknown; signal?: unknown };
-    if (typeof p.signal === "number" && p.signal > 0) return t("被信号 {signal} 终止", { signal: p.signal });
-    if (typeof p.exitCode === "number") return t("退出码 {code}", { code: p.exitCode });
+    if (typeof p.signal === "number" && p.signal > 0) return t("kernel.ended_by_signal_signal", { signal: p.signal });
+    if (typeof p.exitCode === "number") return t("kernel.exit_code_code", { code: p.exitCode });
     return typeof p.error === "string" && p.error !== "" ? p.error : undefined;
   } catch {
     return undefined;

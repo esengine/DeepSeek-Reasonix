@@ -12,19 +12,19 @@ import { Grp, Row } from "./kit";
 // them tells a user who has simply not sent anything yet to go and fix a price
 // table that is fine — three of these four are not about pricing at all.
 const REASON: Record<string, string> = {
-  no_usage: "尚未产生用量",
-  no_price: "价目未上报",
-  mixed_original_currencies: "多币种未合并",
-  display_unavailable: "显示币种不可用",
+  no_usage: "usage.no_usage_yet",
+  no_price: "usage.no_pricing_reported",
+  mixed_original_currencies: "usage.currencies_not_combined",
+  display_unavailable: "usage.display_currency_unavailable",
 };
 
 const SRC: Record<string, string> = {
-  executor: "主循环",
-  subagent: "子代理",
-  compaction: "压缩",
-  planner: "规划",
-  classifier: "分类",
-  title: "标题",
+  executor: "usage.main_loop",
+  subagent: "common.subagents",
+  compaction: "session.compaction",
+  planner: "session.planning",
+  classifier: "chat.classifying",
+  title: "memory.titling",
 };
 
 interface Props {

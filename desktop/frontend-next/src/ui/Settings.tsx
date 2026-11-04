@@ -81,7 +81,7 @@ const ELSEWHERE: string[] = [];
 
 // The user's question is "is it there and does it work", so the state is the
 // label. A failed server keeps its error on the row that names it.
-const NET_MODE: Record<string, string> = { auto: "跟随系统", env: "环境变量", custom: "手动", off: "直连" };
+const NET_MODE: Record<string, string> = { auto: "look.follow_the_system", env: "settings.environment_variables", custom: "about.manual", off: "models.direct" };
 
 const TWO_COLUMN: readonly Section[] = ["session", "tools", "ext", "display", "controls", "appearance", "storage"];
 

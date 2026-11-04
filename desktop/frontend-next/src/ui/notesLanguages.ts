@@ -18,4 +18,4 @@ export function splitNotes(markdown: string): NotesLanguages {
 }
 
 // Language names are written in their own language and are not translated.
-export const NOTES_LANGUAGE_NAMES = { first: "中文", english: "English" } as const;
+export const NOTES_LANGUAGE_NAMES = { first: "settings.text", english: "English" } as const;

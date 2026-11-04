@@ -6,29 +6,29 @@ import { ApplyNote } from "./Group";
 import { Switch } from "./Switch";
 
 const PARTS: [Fold, string, string][] = [
-  ["thinking", "思考过程", "模型作答前的推理"],
-  ["activity", "执行过程", "一轮中连续的工具调用，收起后只剩一行摘要"],
-  ["steps", "步骤详情", "每一步的参数、输出与文件差异"],
-  ["output", "长输出", "超出一屏的命令输出与文件内容"],
-  ["compaction", "压缩简报", "上下文压缩后，模型接下来依据的那份简报"],
+  ["thinking", "chat.thinking_2", "chat.the_models_reasoning_before_it"],
+  ["activity", "chat.activity", "chat.a_run_of_tool_calls"],
+  ["steps", "chat.step_details", "chat.each_steps_arguments_output_and"],
+  ["output", "chat.long_output", "chat.command_output_and_file_contents"],
+  ["compaction", "chat.compaction_brief", "chat.the_brief_the_model_works"],
 ];
 
 const MODE: Record<FoldMode, string> = {
-  folded: "收起",
-  live: "进行中展开",
-  failed: "失败时展开",
-  changed: "改动时展开",
-  open: "展开",
+  folded: "common.collapse",
+  live: "chat.open_while_running",
+  failed: "chat.open_on_failure",
+  changed: "chat.open_on_file_change",
+  open: "common.expand",
 };
 
 // Long output is clipped rather than folded, so its two answers say so.
-const OUTPUT_MODE: Partial<Record<FoldMode, string>> = { folded: "截断", open: "完整" };
+const OUTPUT_MODE: Partial<Record<FoldMode, string>> = { folded: "chat.clipped", open: "look.full" };
 
 const PRESETS: [string, string, FoldModes][] = [
-  ["compact", "精简", { thinking: "folded", activity: "folded", steps: "failed", output: "folded", compaction: "folded" }],
-  ["standard", "标准", FOLD_DEFAULTS],
-  ["changes", "只看改动", { thinking: "folded", activity: "changed", steps: "changed", output: "folded", compaction: "folded" }],
-  ["full", "详尽", { thinking: "open", activity: "open", steps: "open", output: "open", compaction: "open" }],
+  ["compact", "chat.compact", { thinking: "folded", activity: "folded", steps: "failed", output: "folded", compaction: "folded" }],
+  ["standard", "look.standard", FOLD_DEFAULTS],
+  ["changes", "chat.changes_only", { thinking: "folded", activity: "changed", steps: "changed", output: "folded", compaction: "folded" }],
+  ["full", "chat.detailed", { thinking: "open", activity: "open", steps: "open", output: "open", compaction: "open" }],
 ];
 
 const same = (a: FoldModes, b: FoldModes) => PARTS.every(([k]) => a[k] === b[k]);

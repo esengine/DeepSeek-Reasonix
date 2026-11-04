@@ -6,8 +6,8 @@ import { Switch } from "./Switch";
 import { WorkspaceFolders } from "./WorkspaceFolders";
 
 const MODES: [string, string][] = [
-  ["enforce", "关进沙箱"],
-  ["off", "不受限"],
+  ["enforce", "safety.jailed"],
+  ["off", "safety.unconfined"],
 ];
 
 // Two questions, in the order they matter: how far a write reaches, and whether

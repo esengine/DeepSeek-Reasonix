@@ -8,10 +8,10 @@ import { jobElapsed } from "./jobElapsed";
 // How an ended job finished, by the kernel's status: only "done" is a success,
 // and a job someone stopped is neither a success nor a fault.
 const ENDED: Record<string, { label: string; tone: string }> = {
-  done: { label: "已完成", tone: "var(--ok)" },
-  failed: { label: "失败", tone: "var(--err)" },
-  killed: { label: "已停止", tone: "var(--faint)" },
-  interrupted: { label: "已中断", tone: "var(--faint)" },
+  done: { label: "common.done_2", tone: "var(--ok)" },
+  failed: { label: "common.failed", tone: "var(--err)" },
+  killed: { label: "plan.stopped", tone: "var(--faint)" },
+  interrupted: { label: "common.interrupted", tone: "var(--faint)" },
 };
 
 export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: (id: string) => Promise<void>; onView?: (id: string) => void }) {

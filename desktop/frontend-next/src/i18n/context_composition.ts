@@ -4,12 +4,12 @@ import { t } from "./index";
 export const CONTEXT_COMPOSITION = "context_composition";
 
 const PART: Record<string, string> = {
-  system: "系统提示",
-  tools: "工具定义",
-  digest: "摘要",
-  user: "用户消息",
-  reply: "模型回复",
-  tool_output: "工具输出",
+  system: "common.system_prompt",
+  tools: "common.tool_definitions",
+  digest: "ext.summary",
+  user: "kernel.user_messages",
+  reply: "common.model_replies",
+  tool_output: "common.tool_output",
 };
 
 interface Composition {
@@ -35,6 +35,6 @@ export function contextCompositionVars(detail: string | undefined): Record<strin
     .slice(0, 3)
     .map((x) => `${t(PART[x.name] ?? x.name)} ${tokens(x.tokens)}`)
     .join("、");
-  const active = typeof p.active === "number" && p.active > 0 ? t("正在进行的这一轮占 {n}，折叠动不了它。", { n: tokens(p.active) }) : "";
+  const active = typeof p.active === "number" && p.active > 0 ? t("chat.the_turn_in_progress_holds", { n: tokens(p.active) }) : "";
   return { total: tokens(p.total), at: tokens(p.at), top, active };
 }

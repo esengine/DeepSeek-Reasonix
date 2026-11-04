@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { LIVE_GRACE_CHOICES, liveGraceMinutes, onLiveGraceChange, setLiveGraceMinutes } from "../state/prefs";
 import { Group } from "./Group";
 
-const LABEL: Record<number, string> = { 0: "不保留", 10: "10 分钟", 30: "30 分钟", 60: "1 小时", 240: "4 小时" };
+const LABEL: Record<number, string> = { 0: "settings.off", 10: "settings.n_10_minutes", 30: "settings.n_30_minutes", 60: "settings.n_1_hour", 240: "settings.n_4_hours" };
 
 export function LiveGraceSection() {
   const minutes = useSyncExternalStore(onLiveGraceChange, liveGraceMinutes, liveGraceMinutes);

@@ -14,10 +14,10 @@ type Phase =
 // Why there is no drafted message. The staged set is still shown, so the person
 // writes it themselves; each reason says what to expect from drafting again.
 const DRAFT_NOTE: Record<CommitDraftFailure, string> = {
-  no_model: "当前会话没有可用的模型，不能起草。请手动填写提交说明。",
-  timeout: "起草超时了。请手动填写提交说明，或重新起草。",
-  no_answer: "模型没有给出提交说明。请手动填写，或重新起草。",
-  model_failed: "模型起草失败。请手动填写提交说明，或重新起草。",
+  no_model: "workbench.this_session_has_no_model",
+  timeout: "workbench.drafting_timed_out_write_the",
+  no_answer: "workbench.the_model_gave_no_commit",
+  model_failed: "workbench.the_model_failed_to_draft",
 };
 
 // A proposal, not an action: the model drafts for what is staged, the person

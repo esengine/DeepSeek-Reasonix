@@ -12,22 +12,22 @@ export interface FeedbackFailure {
 }
 
 const INVALID: Record<string, string> = {
-  "body.empty": "正文不能为空，请写下你遇到的情况。",
-  "body.too_long": "正文太长了，请缩短后再发。",
-  "displayName.empty": "请填写昵称。",
-  "displayName.too_long": "昵称太长了，请缩短后再发。",
-  "contact.too_long": "联系方式太长了，请缩短后再发。",
-  "category.bad_value": "请重新选择反馈类别。",
-  "images.too_many": "截图数量超出上限，请去掉几张后再发。",
-  "images.format": "截图只支持 PNG 或 JPEG。",
-  "images.too_large": "有截图太大了，请换小一点的图。",
-  "images.undecodable": "有截图无法读取，请换一张图。",
-  "receipt.bad_value": "找不到这条反馈，请刷新列表后再试。",
+  "body.empty": "feedback.the_text_is_empty_please",
+  "body.too_long": "feedback.the_text_is_too_long",
+  "displayName.empty": "feedback.please_enter_a_nickname",
+  "displayName.too_long": "feedback.the_nickname_is_too_long",
+  "contact.too_long": "feedback.the_contact_is_too_long",
+  "category.bad_value": "feedback.please_pick_a_category_again",
+  "images.too_many": "feedback.too_many_screenshots_remove_a",
+  "images.format": "feedback.screenshots_must_be_png_or",
+  "images.too_large": "feedback.a_screenshot_is_too_large",
+  "images.undecodable": "feedback.a_screenshot_could_not_be_2",
+  "receipt.bad_value": "feedback.that_report_could_not_be",
 };
 
 const REPLY_INVALID: Record<string, string> = {
-  "body.empty": "回复不能为空。",
-  "body.too_long": "回复太长了，请缩短后再发。",
+  "body.empty": "feedback.the_reply_is_empty",
+  "body.too_long": "feedback.the_reply_is_too_long",
 };
 
 type Params = Record<string, string | number | null> | undefined;
@@ -35,12 +35,12 @@ type Params = Record<string, string | number | null> | undefined;
 // What a window says it ran out of, by the identifier the service named. The
 // words live here; the service's sentence is never read.
 const WINDOW_SAID: Record<string, string> = {
-  [FEEDBACK_LIMIT.installHourly]: "这一小时的反馈次数已用完。",
-  [FEEDBACK_LIMIT.installDaily]: "今天的反馈次数已用完。",
-  [FEEDBACK_LIMIT.ipHourly]: "这个网络这一小时的提交次数已用完。",
-  [FEEDBACK_LIMIT.replyHourly]: "这一小时的回复次数已用完。",
-  [FEEDBACK_LIMIT.globalDaily]: "反馈通道今天的接收量已满，不是你发得太多。内容都还在。",
-  [FEEDBACK_LIMIT.globalBurst]: "反馈通道此刻很忙，不是你发得太多。内容都还在。",
+  [FEEDBACK_LIMIT.installHourly]: "feedback.you_have_used_this_hours_2",
+  [FEEDBACK_LIMIT.installDaily]: "feedback.you_have_used_todays_feedback",
+  [FEEDBACK_LIMIT.ipHourly]: "feedback.this_network_has_used_this",
+  [FEEDBACK_LIMIT.replyHourly]: "feedback.you_have_used_this_hours",
+  [FEEDBACK_LIMIT.globalDaily]: "feedback.the_feedback_channel_is_full",
+  [FEEDBACK_LIMIT.globalBurst]: "feedback.the_feedback_channel_is_busy",
 };
 
 const text = (v: string | number | null | undefined): string | null => (typeof v === "string" && v !== "" ? v : null);

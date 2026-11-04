@@ -6,9 +6,9 @@ import type { DisplayCurrencyMode, DisplayCurrencySettings } from "../port/bound
 import { Group } from "./Group";
 
 const MODES: [DisplayCurrencyMode, string][] = [
-  ["auto", "自动"],
-  ["CNY", "人民币 CNY"],
-  ["USD", "美元 USD"],
+  ["auto", "common.auto"],
+  ["CNY", "usage.chinese_yuan_cny"],
+  ["USD", "usage.us_dollar_usd"],
 ];
 
 export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {

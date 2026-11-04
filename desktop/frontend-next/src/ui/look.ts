@@ -22,25 +22,25 @@ export function readSizeOf(stored?: number): number {
 export const readSteps = (): [number, string][] =>
   current() === "zh"
     ? [
-        [12, "小"],
-        [14, "标准"],
-        [16.5, "大"],
-        [19, "更大"],
+        [12, "app.small"],
+        [14, "look.standard"],
+        [16.5, "app.large"],
+        [19, "app.larger"],
       ]
     : [
-        [12, "小"],
-        [14, "标准"],
-        [16, "大"],
-        [18, "更大"],
+        [12, "app.small"],
+        [14, "look.standard"],
+        [16, "app.large"],
+        [18, "app.larger"],
       ];
 
 /** Interface text steps: a scale over every size the stylesheet writes, with
  *  spacing and controls left where they are. Standard is stored as unset. */
 export const TEXT_STEPS: [number, string][] = [
-  [0.9, "小"],
-  [1, "标准"],
-  [1.15, "大"],
-  [1.3, "更大"],
+  [0.9, "app.small"],
+  [1, "look.standard"],
+  [1.15, "app.large"],
+  [1.3, "app.larger"],
 ];
 
 // The user's own settings, applied after a pack so they win: a pack is a

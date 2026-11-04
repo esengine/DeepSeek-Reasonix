@@ -2,7 +2,7 @@ import { t } from "./index";
 
 export const PERMISSION_RULES_DORMANT = "permission_rules_dormant";
 
-const LIST_LABEL: Record<string, string> = { deny: "拒绝", ask: "询问", allow: "放行" };
+const LIST_LABEL: Record<string, string> = { deny: "common.refuse", ask: "safety.ask", allow: "common.allow" };
 
 export const listLabel = (list: string): string => t(LIST_LABEL[list] ?? list);
 

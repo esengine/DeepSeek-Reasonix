@@ -3,11 +3,11 @@ import { bytes } from "../i18n/format";
 import type { FeedbackProcessMemory, FeedbackProcessType } from "../port/feedback";
 
 const NAME: Record<FeedbackProcessType, string> = {
-  browser: "主进程",
-  renderer: "界面进程",
-  gpu: "图形进程",
-  utility: "辅助进程",
-  kernel: "内核",
+  browser: "memory.main_process",
+  renderer: "memory.interface_process",
+  gpu: "memory.graphics_process",
+  utility: "memory.helper_process",
+  kernel: "memory.kernel",
 };
 
 const ORDER: FeedbackProcessType[] = ["renderer", "browser", "gpu", "utility", "kernel"];

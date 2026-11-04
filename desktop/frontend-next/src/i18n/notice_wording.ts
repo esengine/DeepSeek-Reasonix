@@ -1,3 +1,4 @@
+import { MESSAGES } from "./msg";
 import { t } from "./index";
 import { FOLD_WHY, NO_CODE_WHY } from "./compaction_why";
 import { COMPACTION_TELEMETRY, compactionNoticeVars } from "./compaction_notice";
@@ -48,7 +49,7 @@ export function noticeWording(code: string | undefined, detail: string | undefin
   const text = code ? NOTICE_TEXT[code] : undefined;
   if (!code || !text) return undefined;
   const read = VARS[code];
-  if (!read) return /\{\w+\}/.test(text) ? undefined : { text };
+  if (!read) return /\{\w+\}/.test(MESSAGES[text]?.zh ?? text) ? undefined : { text };
   const vars = read(detail);
   return vars ? { text, vars } : undefined;
 }

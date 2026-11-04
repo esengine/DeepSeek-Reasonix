@@ -5,7 +5,7 @@ import { reason } from "../i18n/kernel";
 import { DEFAULT_USAGE_DAYS, type AgentPort, type Money, type UsageQuery, type UsageReport } from "../port/port";
 import { hostOf } from "./vendors";
 
-const RANGES: [number, string][] = [[7, "7 天"], [30, "30 天"], [365, "全部"]];
+const RANGES: [number, string][] = [[7, "usage.n_7_days"], [30, "usage.n_30_days"], [365, "common.all"]];
 
 type UsageWindow =
   | { kind: "today" }

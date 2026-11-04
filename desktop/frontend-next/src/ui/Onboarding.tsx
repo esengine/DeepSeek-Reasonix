@@ -36,12 +36,12 @@ const SHORTCUTS: { label: string; url: string; console?: string; protocolUrls?: 
       anthropic: "https://api.deepseek.com/anthropic",
     },
   },
-  { label: "硅基流动", url: "https://api.siliconflow.cn/v1", console: "https://cloud.siliconflow.cn" },
-  { label: "月之暗面", url: "https://api.moonshot.cn/v1", console: "https://platform.moonshot.cn" },
-  { label: "智谱", url: "https://open.bigmodel.cn/api/paas/v4", console: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys" },
+  { label: "onboarding.siliconflow", url: "https://api.siliconflow.cn/v1", console: "https://cloud.siliconflow.cn" },
+  { label: "onboarding.moonshot", url: "https://api.moonshot.cn/v1", console: "https://platform.moonshot.cn" },
+  { label: "onboarding.zhipu", url: "https://open.bigmodel.cn/api/paas/v4", console: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys" },
   { label: "MiMo", url: "https://api.xiaomimimo.com/v1", console: "https://platform.xiaomimimo.com" },
   { label: "LongCat", url: "https://api.longcat.chat/openai", console: "https://longcat.chat/platform" },
-  { label: "中转站 / 自建", url: "" },
+  { label: "onboarding.relay_self_hosted", url: "" },
 ];
 
 // The two failures nobody fixes in this window: the key is refused, or the

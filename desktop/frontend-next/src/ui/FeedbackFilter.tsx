@@ -3,7 +3,7 @@ import type { FeedbackItem } from "../port/feedback";
 import { FEEDBACK_GROUPS, inGroup, type FeedbackGroup } from "./feedbackgroups";
 
 const LABEL: Record<FeedbackGroup, string> = {
-  all: "全部", fresh: "新回复", input: "需要你回复", open: "未结束", done: "已结束",
+  all: "common.all", fresh: "feedback.new_replies", input: "feedback.needs_your_reply", open: "feedback.open", done: "feedback.closed",
 };
 
 /** One chip per group, each carrying how many reports it holds. */

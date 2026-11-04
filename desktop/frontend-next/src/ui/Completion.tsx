@@ -8,22 +8,22 @@ const EMPTY: Completion = { kind: "", from: 0, to: 0, items: [] };
 // What the right-hand column says a row is. A file and a command look nothing
 // alike in what they do, and the menu is the only place that difference shows.
 const KIND: Record<string, string> = {
-  builtin: "内置",
-  command: "命令",
-  skill: "技能",
-  subagent: "子代理",
+  builtin: "common.built_in",
+  command: "chat.commands",
+  skill: "settings.skills",
+  subagent: "common.subagents",
   prompt: "MCP",
-  file: "文件",
-  dir: "目录",
-  resource: "资源",
-  session: "会话",
+  file: "common.files",
+  dir: "chat.folder",
+  resource: "chat.resource",
+  session: "common.session",
 };
 
 const HINT: Record<string, string> = {
-  ref: "↑↓ 选择 · 回车引用 · Tab 补全或进入目录 · Esc 关闭",
-  session: "↑↓ 选择 · 回车添加到这条消息 · Esc 关闭",
-  slash: "↑↓ 选择 · Tab 或回车补全 · Esc 关闭",
-  "slash-arg": "↑↓ 选择 · Tab 或回车补全 · Esc 关闭",
+  ref: "chat.selects_enter_references_tab_completes",
+  session: "chat.choose_enter_adds_it_to",
+  slash: "chat.selects_tab_or_enter_completes",
+  "slash-arg": "chat.selects_tab_or_enter_completes",
 };
 
 // Asking the kernel costs one local round trip, so the gate is only about not

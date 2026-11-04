@@ -14,7 +14,7 @@ const ACTIVATION: Record<string, string> = {
   relevant: "后续相关时会被检索",
 };
 
-const SCOPE: Record<string, string> = { project: "仅当前项目", global: "在所有项目里" };
+const SCOPE: Record<string, string> = { project: "ext.this_project_only", global: "在所有项目里" };
 
 export const RememberCard = memo(function RememberCard({
   m, forgotten, onForget,

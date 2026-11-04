@@ -194,20 +194,20 @@ export function ModelChoice({
 
 function ModelEvidence({ fact }: { fact: ModelFact }) {
   const origin = {
-    configured: "已配置",
-    endpoint: "现场探测",
-    manual: "用户添加",
-    missing: "本次未返回",
+    configured: "composer.configured",
+    endpoint: "composer.endpoint_catalog",
+    manual: "composer.added_manually",
+    missing: "composer.not_returned_this_time",
   }[fact.origin];
   const state = fact.checking
-    ? "验证中…"
+    ? "common.verifying"
     : fact.status === "available"
-      ? "已验证可用"
+      ? "composer.verified_available"
       : fact.status === "unavailable"
         ? unavailableReason(fact.reason)
         : fact.status === "unknown"
           ? checkReason(fact.reason)
-          : "待验证";
+          : "composer.not_verified";
   return (
     <span className="mevidence" role={fact.status === "unavailable" && !fact.checking ? "alert" : undefined}>
       <span>{t(origin)}</span>
@@ -220,23 +220,23 @@ function ModelEvidence({ fact }: { fact: ModelFact }) {
 
 function unavailableReason(reason?: ProviderModelCheckReason): string {
   switch (reason) {
-    case "not_found": return "模型不存在或账号未开放";
-    case "rejected": return "端点不接受这个模型";
-    case "tools": return "能对话但不接受工具调用，用不了";
-    default: return "当前不可用";
+    case "not_found": return "composer.the_model_does_not_exist";
+    case "rejected": return "composer.the_endpoint_does_not_accept";
+    case "tools": return "composer.answers_chat_but_refuses_tool";
+    default: return "composer.currently_unavailable";
   }
 }
 
 function checkReason(reason?: ProviderModelCheckReason): string {
   switch (reason) {
-    case "auth": return "凭据未通过，尚未确认";
-    case "rate_limited": return "遇到限流，尚未确认";
-    case "network": return "网络异常，尚未确认";
-    case "timeout": return "验证超时，尚未确认";
-    case "local_timeout": return "本机服务没有在时限内回答，尚未确认；模型若刚启动可能还在加载，稍后再验证一次";
-    case "redirect_refused": return "地址跳转到了另一个主机，已拒绝，尚未确认";
-    case "rejected": return "请求被拒绝，尚未确认";
-    default: return "尚未确认";
+    case "auth": return "composer.credentials_were_rejected_availability_is";
+    case "rate_limited": return "composer.rate_limited_availability_is_still";
+    case "network": return "composer.network_error_availability_is_still";
+    case "timeout": return "composer.verification_timed_out_availability_is";
+    case "local_timeout": return "composer.the_local_service_did_not";
+    case "redirect_refused": return "composer.the_address_redirected_to_another";
+    case "rejected": return "composer.request_rejected_availability_is_still";
+    default: return "composer.availability_is_still_unknown";
   }
 }
 

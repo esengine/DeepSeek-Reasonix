@@ -33,7 +33,7 @@ export function useAddWorkspace(
         .catch(() => LEGACY_CAPABILITIES)
         .then(async (capabilities) => {
           if (!capabilities.addWorkspace) {
-            throw new Error("此内核不支持添加工作区。");
+            throw new Error("app.this_kernel_does_not_support");
           }
           if (!capabilities.pickFolder) {
             setPathOpen(true);

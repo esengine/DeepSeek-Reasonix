@@ -15,11 +15,11 @@ import type { StoragePlan, StorageRoot, StorageState } from "../port/storage";
 // name for still renders, under its own id: showing an unnamed row is better
 // than hiding storage someone is looking for.
 const NAMED: Record<string, [string, string]> = {
-  state: ["会话与归档", "转录、压缩归档、用量统计、回溯快照"],
-  cache: ["索引与缓存", "搜索索引与派生数据，删除后会自动重建"],
-  worktrees: ["隔离工作区", "交付模式检出的独立副本"],
-  home: ["配置与凭据", "设置与 API key，始终随用户配置文件保存"],
-  locks: ["进程锁", "用于多实例互斥，必须保留在本机固定位置。每个均为空文件；删除会破坏互斥，因此只保留不清理"],
+  state: ["data.sessions_and_archives", "data.transcripts_compaction_archives_usage_stats"],
+  cache: ["data.indexes_and_caches", "data.search_indexes_and_derived_data"],
+  worktrees: ["data.isolated_worktrees", "data.the_separate_checkouts_delivery_works"],
+  home: ["data.configuration_and_credentials", "data.settings_and_api_keys_these"],
+  locks: ["data.process_locks", "data.how_instances_exclude_each_other"],
 };
 
 const LAYOUT_LIMIT_MS = 10_000;
@@ -470,11 +470,11 @@ function Verdict({ plan }: { plan: StoragePlan }) {
 }
 
 const PHASES: Record<string, string> = {
-  adopting: "正在指向新位置",
-  copying: "正在复制",
-  verifying: "正在校验",
-  committed: "已提交，正在清理原位置",
-  done: "已完成",
+  adopting: "data.pointing_at_the_new_location",
+  copying: "data.copying",
+  verifying: "data.verifying",
+  committed: "data.committed_clearing_the_old_location",
+  done: "common.done_2",
 };
 
 function Moving({ move }: { move: NonNullable<StorageState["move"]> }) {

@@ -11,12 +11,12 @@ type Answers = "chat" | "decision" | "search" | "vision";
 // set, which a chat model has no answer for, so its row offers the decision
 // sources and says so when there are none.
 const ROLES: [RoleKey, string, string, Answers][] = [
-  ["planner", "计划", "仅生成计划，不写入", "chat"],
-  ["subagent", "子代理", "派发的子任务", "chat"],
-  ["vision", "看图", "处理主模型无法识别的图片", "chat"],
-  ["guardian", "复核", "独立复核本轮", "chat"],
-  ["title", "自动命名", "为会话生成简短标题", "chat"],
-  ["decision", "决策", "system_one 询问的后端", "decision"],
+  ["planner", "common.plan", "settings.drafts_a_plan_read_only", "chat"],
+  ["subagent", "common.subagents", "usage.work_sent_out", "chat"],
+  ["vision", "models.vision", "usage.reads_images_the_main_model", "chat"],
+  ["guardian", "models.review", "usage.audits_this_turn_independently", "chat"],
+  ["title", "session.auto_name", "usage.generate_short_conversation_titles", "chat"],
+  ["decision", "models.decision", "usage.the_backend_system_one_asks", "decision"],
 ];
 
 const shown = (m: ModelEntry) => m.modelAlias?.trim() || m.modelShort || m.model;

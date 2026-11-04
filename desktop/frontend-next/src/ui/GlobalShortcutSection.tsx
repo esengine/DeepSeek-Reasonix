@@ -5,17 +5,17 @@ import { Group } from "./Group";
 import { acceleratorLabel } from "./keys";
 
 const STATUS = {
-  disabled: "全局快捷键已关闭",
-  registered: "已注册：{value}",
-  invalid: "快捷键格式无效，请使用修饰键与按键组合，例如 CommandOrControl+Shift+Space。",
-  unavailable: "系统未能注册此快捷键：可能已被占用、未获授权，或当前桌面不支持。",
-  unsupported: "当前环境不支持全局快捷键。",
+  disabled: "settings.global_shortcut_disabled",
+  registered: "settings.registered_value",
+  invalid: "settings.invalid_accelerator_use_a_modifier",
+  unavailable: "settings.the_os_could_not_register",
+  unsupported: "settings.global_shortcuts_are_not_supported",
 };
 const ERRORS = {
   invalid: STATUS.invalid,
   unavailable: STATUS.unavailable,
-  save: "快捷键未能保存；原设置保持不变。",
-  quitting: "Studio 正在退出，未更改快捷键。",
+  save: "settings.could_not_save_the_shortcut",
+  quitting: "settings.studio_is_quitting_the_shortcut",
 };
 
 function capturedBinding(event: KeyboardEvent<HTMLInputElement>): string {

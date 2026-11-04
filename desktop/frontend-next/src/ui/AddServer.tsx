@@ -15,7 +15,7 @@ https://mcp.example.com/sse`;
 
 const KIND_LABEL: Record<string, string> = {
   shell: "将在本机运行",
-  "unknown-host": "将连接至",
+  "unknown-host": "ext.will_connect_to",
   secret: "密钥",
 };
 

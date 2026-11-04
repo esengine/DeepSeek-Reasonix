@@ -19,30 +19,30 @@ interface Recipe {
 const RECIPES: Recipe[] = [
   {
     id: "format",
-    title: "文件修改后自动格式化",
-    desc: "每次写入后执行一次格式化命令；失败时仅提醒，不中断",
+    title: "ext.format_files_after_they_are",
+    desc: "ext.runs_a_formatter_after_every",
     event: "PostToolUse",
     match: "edit_file|write_file|multi_edit",
     command: "gofmt -w . 2>/dev/null || true",
   },
   {
     id: "guard-secrets",
-    title: "写入密钥文件前请求确认",
-    desc: "访问 .env 一类路径时拦截，由你决定是否放行",
+    title: "ext.ask_me_before_writing_a",
+    desc: "ext.stops_on_paths_like_env",
     event: "PreToolUse",
     match: "edit_file|write_file",
     command: `grep -q '"\\.env' <<< "$REASONIX_HOOK_PAYLOAD" && exit 2 || exit 0`,
   },
   {
     id: "test-before-stop",
-    title: "结束前执行一次测试",
-    desc: "每轮结束时运行测试，失败时以提醒形式显示",
+    title: "ext.run_the_tests_before_wrapping",
+    desc: "ext.runs_the_tests_at_the",
     event: "Stop",
     command: "go test ./... 2>&1 | tail -5",
   },
 ];
 
-const SCOPE_LABEL = { user: "我的", project: "这个项目" } as const;
+const SCOPE_LABEL = { user: "ext.mine", project: "ext.this_project" } as const;
 
 const EVENT_LABELS = new Map<string, () => string>([
   ["PreToolUse", () => t("ext.before_a_tool_runs")],
@@ -316,7 +316,7 @@ function Expert({
 // only printed "exit 2" would leave the user exactly as unsure as before.
 function DryRun({ res, blocking }: { res: HookDryRun; blocking: boolean }) {
   const verdict = res.timedOut
-    ? "超时了，这一步会被当成失败"
+    ? "ext.timed_out_this_step_counts"
     : res.blocks
       ? "这一次它会挡住这一步"
       : res.decision === "block" && !blocking

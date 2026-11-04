@@ -2,9 +2,9 @@ import { t } from "../i18n";
 import type { ProviderEntry } from "../port/port";
 
 const FORMAT_LABEL: Record<string, string> = {
-  deepseek: "DeepSeek 格式",
-  moonshot: "Moonshot 格式",
-  openrouter: "OpenRouter 格式",
+  deepseek: "usage.deepseek_format",
+  moonshot: "usage.moonshot_format",
+  openrouter: "usage.openrouter_format",
 };
 
 // The wallet endpoint and how it answers. The host table that implies a format

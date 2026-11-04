@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EN } from "./en";
 import { codes } from "./kernel";
+import { MESSAGES } from "./msg";
 
 // The catalogue degrades instead of breaking: a key it does not carry renders as
 // Chinese. That is the right failure at runtime and the wrong one to ship, so
@@ -104,7 +105,7 @@ describe("English catalogue", () => {
   // say() puts each through the same t().
   it("carries the wording the kernel's refusals resolve to", () => {
     const missing = Object.entries(codes)
-      .filter(([, zh]) => !(zh in EN))
+      .filter(([, key]) => !(key in MESSAGES) && !(key in EN))
       .map(([code, zh]) => `${code} — ${JSON.stringify(zh)}`);
     expect(missing, "refusal wording with no English").toEqual([]);
   });

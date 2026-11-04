@@ -5,7 +5,7 @@ import { StudioIcon } from "./StudioIcon";
 
 export interface ScopeCounts { all: number; live: number; waiting: number; unread: number; pinned: number }
 
-const NAME: Record<SessionScope, string> = { all: "全部", live: "进行中", waiting: "等你处理", unread: "未读", pinned: "置顶", archived: "已归档" };
+const NAME: Record<SessionScope, string> = { all: "common.all", live: "plan.step.now", waiting: "chat.needs_you", unread: "common.unread", pinned: "session.pinned_2", archived: "common.archived" };
 
 export function SessionFilter({ scope, counts, onScope }: { scope: SessionScope; counts: ScopeCounts; onScope: (next: SessionScope) => void }) {
   const items: MenuItem[] = (["all", "live", "waiting", "unread", "pinned", "archived"] as const).map((value) => ({

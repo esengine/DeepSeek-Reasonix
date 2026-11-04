@@ -7,9 +7,9 @@ import { Candidate, ORDER, PreviewCut } from "./AddPlugin";
 // fears: a high grade here is as often "many skills from one address" as it is
 // "a process starts".
 const GROUP_TITLE: Record<string, string> = {
-  high: "以下项目需要逐项看过再安装",
-  medium: "以下项目会改变可用能力",
-  low: "以下项目仅添加文件",
+  high: "ext.read_each_of_these_before",
+  medium: "ext.these_change_what_is_available",
+  low: "ext.these_only_add_files",
 };
 
 interface Props {

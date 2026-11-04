@@ -11,7 +11,7 @@ import { StudioIcon } from "./StudioIcon";
 export type FeedbackTab = "send" | "mine";
 
 const TABS: readonly FeedbackTab[] = ["send", "mine"];
-const TAB_LABEL: Record<FeedbackTab, string> = { send: "发送反馈", mine: "我的反馈" };
+const TAB_LABEL: Record<FeedbackTab, string> = { send: "common.send_feedback", mine: "session.my_feedback" };
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 interface Props {

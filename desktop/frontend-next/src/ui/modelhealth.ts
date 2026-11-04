@@ -53,21 +53,21 @@ export function modelHealthNote(health: ProviderHealth | "checking" | undefined)
   if (!health || health !== "checking" && health.connection === "disabled") return undefined;
   if (health === "checking") return t("models.checking_connection_and_balance");
   const connection: Record<string, string> = {
-    reachable: "连接正常，模型调用未验证",
-    auth: "连接鉴权失败，请检查密钥或权限",
-    missing_key: "未配置 API 密钥",
-    payment_required: "服务商要求付费，请检查账户",
-    quota_exhausted: "可用配额已耗尽",
-    rate_limited: "请求暂时被限流，请稍后重试",
-    timeout: "连接检测超时，请稍后重试",
-    unreachable: "连接异常，请检查网络或服务商",
-    redirect_refused: "连接跳转被拒绝，请检查地址",
+    reachable: "models.connection_reachable_model_calls_unverified",
+    auth: "models.authentication_failed_check_key_or",
+    missing_key: "models.api_key_not_configured",
+    payment_required: "models.payment_required_check_your_account",
+    quota_exhausted: "models.available_quota_exhausted",
+    rate_limited: "models.temporarily_rate_limited_retry_later",
+    timeout: "models.connection_check_timed_out_retry",
+    unreachable: "models.connection_failed_check_network_or",
+    redirect_refused: "models.redirect_refused_check_the_address",
   };
   const wallet: Record<string, string> = {
-    insufficient: "余额不足，请充值后重试",
-    auth: "余额查询鉴权失败",
-    unsupported: "余额未知（未配置查询接口）",
-    unknown: "余额暂时无法确认",
+    insufficient: "models.insufficient_balance_top_up_and",
+    auth: "models.balance_query_authentication_failed",
+    unsupported: "models.balance_unknown_no_query_endpoint",
+    unknown: "models.balance_could_not_be_confirmed",
   };
   const issue = wallet[health.wallet];
   const status = t(connection[health.connection] ?? "models.connection_status_unconfirmed");
@@ -80,9 +80,9 @@ export function modelHealthStatus(health: ProviderHealth | "checking" | undefine
   if (health === "checking") return { label: t("models.checking"), tone: "checking", detail };
   if (health.wallet === "insufficient") return { label: t("common.insufficient_balance"), tone: "warning", detail };
   const failures: Record<string, string> = {
-    auth: "鉴权失败", missing_key: "缺少密钥", payment_required: "需要付费",
-    quota_exhausted: "配额耗尽", rate_limited: "暂时限流", timeout: "连接超时",
-    unreachable: "连接异常", redirect_refused: "跳转被拒",
+    auth: "models.auth_failed", missing_key: "models.missing_key", payment_required: "models.payment_required",
+    quota_exhausted: "models.quota_exhausted", rate_limited: "models.rate_limited", timeout: "models.timed_out",
+    unreachable: "models.connection_failed", redirect_refused: "models.redirect_refused",
   };
   if (failures[health.connection]) return { label: t(failures[health.connection]), tone: "warning", detail };
   if (health.wallet === "auth") return { label: t("models.balance_check_failed"), tone: "warning", detail };

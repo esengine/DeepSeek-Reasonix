@@ -20,10 +20,10 @@ export const SECURITY_URL = "https://github.com/esengine/DeepSeek-Reasonix/secur
 export const DISCUSSIONS_URL = "https://github.com/esengine/DeepSeek-Reasonix/discussions";
 
 const CATEGORY_LABEL: Record<FeedbackCategory, string> = {
-  bug: "问题",
-  idea: "建议",
-  question: "疑问",
-  other: "其他",
+  bug: "feedback.bug",
+  idea: "feedback.idea",
+  question: "feedback.question",
+  other: "ext.other",
 };
 
 const encoder = new TextEncoder();

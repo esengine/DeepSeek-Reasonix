@@ -8,11 +8,11 @@ import { CopyButton } from "./CopyButton";
 import { WorkspacePath, compactWorkspaceValue, workspaceName } from "./WorkspacePath";
 
 const phases: Record<string, string> = {
-  starting: "正在提交创建请求", validating: "正在检查起始分支", creating: "正在创建工作目录",
-  checking_out: "正在检出已提交文件", copying_attachments: "正在复制任务附件", binding: "正在绑定工作目录",
-  cleaning: "正在清理未完成目录", cancelling: "正在中止并清理", ready: "工作目录已绑定",
-  cleanup_failed: "清理未完成", failed: "创建未完成", cancelled: "创建已中止，目录已清理",
-  retained: "工作目录已绑定", unreachable: "正在等待状态确认",
+  starting: "session.submitting_creation_request", validating: "session.checking_source_branch", creating: "session.creating_workspace",
+  checking_out: "session.checking_out_committed_files", copying_attachments: "session.copying_task_attachments", binding: "session.binding_workspace",
+  cleaning: "session.cleaning_up_incomplete_workspace", cancelling: "session.stopping_and_cleaning_up", ready: "session.workspace_bound",
+  cleanup_failed: "session.cleanup_did_not_finish", failed: "session.creation_did_not_finish", cancelled: "session.creation_stopped_and_workspace_cleaned",
+  retained: "session.workspace_bound", unreachable: "session.waiting_for_confirmation",
 };
 
 interface Props {
@@ -46,8 +46,8 @@ export function WorktreeSetupPage({ stage, task, files, busy, onRetry, onCancel,
   useEffect(() => { setDetails(false); setNow(Date.now()); }, [stage.id]);
   const elapsed = Math.max(0, Math.floor((now - stage.startedAt) / 1000));
   const slow = active && !cancelling && elapsed >= 15;
-  const headline = failed ? "worktree 创建失败" : cancelled ? "已取消创建" : retained || ready ? "工作目录已就绪" : uncertain ? "需要确认创建结果" : cancelling ? "正在取消创建…" : "正在创建 worktree…";
-  const description = failed ? "任务尚未发送，输入和附件已为你保留。" : cancelled ? "任务尚未发送，可以继续编辑。" : retained ? "目录已经创建成功，取消未能撤回目录切换。任务尚未发送。" : ready ? "即将进入对话，自动开始任务。" : uncertain ? "暂不能确认操作或清理结果，请先查看详情并核对。" : cancelling ? "正在中止操作并清理未完成的目录。" : slow ? "创建耗时较长，尚未收到完成确认。" : "准备完成后将自动开始任务。";
+  const headline = failed ? "session.could_not_create_worktree" : cancelled ? "session.creation_cancelled" : retained || ready ? "session.workspace_ready" : uncertain ? "session.confirm_creation_outcome" : cancelling ? "session.cancelling_creation" : "session.creating_worktree";
+  const description = failed ? "session.the_task_has_not_been_2" : cancelled ? "session.the_task_has_not_been" : retained ? "session.the_workspace_was_already_created" : ready ? "session.opening_the_conversation_and_starting" : uncertain ? "session.the_operation_or_cleanup_outcome" : cancelling ? "session.stopping_the_operation_and_cleaning" : slow ? "session.creation_is_taking_longer_completion" : "session.your_task_will_start_automatically";
   const error = stage.code ? reason(new HttpError(409, stage.detail || stage.code, { code: stage.code })) : "";
   const icon = ready || retained ? "check" : failed || uncertain ? "warning" : cancelled ? "close" : "clock";
   const phase = error || t(phases[stage.phase] || "session.waiting_for_confirmation");

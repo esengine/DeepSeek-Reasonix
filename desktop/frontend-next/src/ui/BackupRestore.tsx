@@ -5,25 +5,25 @@ import type { AgentPort, BackupApplyResult, BackupCategory, BackupEntry, BackupP
 import { AddPlugin } from "./AddPlugin";
 
 export const CATEGORY_LABEL: Record<BackupCategory, string> = {
-  settings: "模型与界面设置",
-  extensions: "技能、插件与 MCP",
-  memory: "长期记忆",
-  automation: "Hooks 与状态栏命令",
-  secrets: "API 密钥",
+  settings: "data.models_and_interface",
+  extensions: "data.skills_plugins_and_mcp",
+  memory: "data.long_term_memory",
+  automation: "data.hooks_and_status_line_command",
+  secrets: "data.api_keys",
 };
 
 const STATUS_LABEL: Record<BackupPlanItem["status"], string> = {
-  new: "本机没有",
-  changed: "与本机不同",
-  same: "与本机相同",
-  install: "需安装",
+  new: "data.not_on_this_machine",
+  changed: "data.differs_from_this_machine",
+  same: "data.same_as_this_machine",
+  install: "data.needs_install",
 };
 
 const CONSENT_LABEL: Record<string, string> = {
-  executes: "我已看过这条命令，允许它在本机运行",
-  endpoint: "我确认允许把对话和本机保存的密钥发往这个地址",
-  replaces_secret: "我确认用备份里的密钥替换本机已保存的密钥",
-  imports: "我已读过这份指令文件，允许它引用其中列出的文件",
+  executes: "data.i_have_read_this_command",
+  endpoint: "data.i_allow_conversations_and_the",
+  replaces_secret: "data.i_allow_the_key_in",
+  imports: "data.i_have_read_this_instruction",
 };
 
 // The preview is the kernel's: which rows need consent, and why, is decided

@@ -5,9 +5,9 @@ export const SHOT_TYPES = ["image/png", "image/jpeg"] as const;
 export type ShotRefusal = "format" | "too_large" | "too_many";
 
 export const REFUSED_LABEL = {
-  format: "{name}：只支持 PNG 或 JPEG",
-  too_large: "{name}：超过 {size} MB，没有添加",
-  too_many: "{name}：最多 {n} 张，没有添加",
+  format: "app.name_only_png_or_jpeg",
+  too_large: "app.name_larger_than_size_mb",
+  too_many: "app.name_the_limit_is_n",
 } as const;
 
 export interface Shot extends FeedbackImage {

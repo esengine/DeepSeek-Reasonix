@@ -6,15 +6,15 @@ import type { ProviderEntry } from "../port/port";
 // the only honest answer for an endpoint nobody has characterised; the other two
 // are what a reader picks when the endpoint has already contradicted it.
 const CONTINUATIONS: ReadonlyArray<readonly [string, string]> = [
-  ["", "自动"],
-  ["stateful", "引用上一轮"],
-  ["stateless", "每轮完整发送"],
+  ["", "common.auto"],
+  ["stateful", "models.by_reference"],
+  ["stateless", "models.replay_each_turn"],
 ];
 
 const CONTINUATION_WHY: Record<string, string> = {
-  "": "按端点厂商判断。中转站若回报 previous_response_id 不受支持，改为「每轮完整发送」。",
-  stateful: "只发送新的一轮，历史由端点自己保存 —— 前缀缓存命中率最高，但要求端点真的存了。",
-  stateless: "每轮重发完整历史。中转站只转发、不保存状态时用这一档。",
+  "": "models.decided_by_the_endpoints_vendor",
+  stateful: "models.sends_only_the_new_turn",
+  stateless: "models.replays_the_whole_history_every",
 };
 
 export function hasEndpointSwitches(entry: ProviderEntry): boolean {

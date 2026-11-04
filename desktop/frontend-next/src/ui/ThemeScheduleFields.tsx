@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { onThemeScheduleChange, setThemeSchedule, themeSchedule } from "../state/themeSchedule";
 
-const FIELDS = [["start", "深色开始时间"], ["end", "恢复浅色时间"]] as const;
+const FIELDS = [["start", "look.dark_mode_starts"], ["end", "look.light_mode_resumes"]] as const;
 
 export function ThemeScheduleFields() {
   const schedule = useSyncExternalStore(onThemeScheduleChange, themeSchedule);

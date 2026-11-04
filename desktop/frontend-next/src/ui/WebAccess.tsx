@@ -9,19 +9,19 @@ import { Switch } from "./Switch";
 type Kind = "search" | "fetch";
 
 const NAME: Record<Kind, Record<string, string>> = {
-  search: { searxng: "SearXNG", deepseek_api: "DeepSeek 官方搜索" },
-  fetch: { local: "本机抓取", deepseek_api: "DeepSeek 官方抓取" },
+  search: { searxng: "SearXNG", deepseek_api: "models.deepseek_search" },
+  fetch: { local: "models.local_fetch", deepseek_api: "models.deepseek_fetch" },
 };
 const NOTE: Record<Kind, Record<string, string>> = {
-  search: { searxng: "你自己部署的搜索服务，免费，需要填它的地址。", deepseek_api: "DeepSeek 官方的搜索接口，按次计费。" },
-  fetch: { local: "由本机直接下载网页，免费。", deepseek_api: "DeepSeek 官方的网页抓取接口，按次计费。" },
+  search: { searxng: "models.a_search_service_you_run", deepseek_api: "models.deepseeks_own_search_api_billed" },
+  fetch: { local: "models.this_machine_downloads_the_page", deepseek_api: "models.deepseeks_own_page_fetch_api" },
 };
 const PROBE: Record<string, string> = {
-  "search.searxng_json_disabled": "这个 SearXNG 没有开启 JSON 格式：在它的 settings.yml 的 search.formats 里加上 json，然后重启它。",
-  "search.searxng_unreachable": "连不上这个地址：检查它是否在运行，地址和端口是否写对。",
-  "search.searxng_not_searxng": "这个地址有应答，但不是 SearXNG 的 JSON 搜索结果：确认地址指向 SearXNG 本身，而不是登录页或别的服务。",
-  "search.searxng_redirected": "这个地址把请求转到了别处：请直接填 SearXNG 的最终地址。",
-  "search.searxng_address_refused": "测试不会连接这个地址：它是链路本地、云元数据或未指定地址。自托管实例请用本机或局域网地址。",
+  "search.searxng_json_disabled": "models.this_searxng_does_not_allow",
+  "search.searxng_unreachable": "models.cannot_reach_this_address_check",
+  "search.searxng_not_searxng": "models.this_address_answers_but_not",
+  "search.searxng_redirected": "models.this_address_redirects_elsewhere_enter",
+  "search.searxng_address_refused": "models.the_test_will_not_connect",
 };
 const probeSaid = (r: SearxngProbe) =>
   r.ok ? t("models.connected_this_searxng_returns_json")

@@ -12,7 +12,7 @@ import { SkillRemove } from "./SkillRemove";
 
 // One skill, and the two things a reader wants from it: whether the model can
 // reach it at all, and which of the layers it was switched at.
-const SCOPE: Record<string, string> = { global: "我的", project: "项目", custom: "自定义", builtin: "内置" };
+const SCOPE: Record<string, string> = { global: "ext.mine", project: "common.project", custom: "common.custom", builtin: "common.built_in" };
 
 export function SkillGroups({ skills, ...rowProps }: { skills: SkillEntry[] } & Omit<Parameters<typeof SkillRow>[0], "sk">) {
   const groups = new Map(Object.keys(SCOPE).map((scope) => [scope, [] as SkillEntry[]]));
@@ -37,9 +37,9 @@ function triggerNote(sk: SkillEntry, implicit: boolean): { text: string; reachab
   if (!sk.enabled) return { text: "", reachable: true };
   const auto = !sk.manual && implicit;
   if (sk.slashName && auto) return { text: "", reachable: true };
-  if (sk.slashName) return { text: "只能点名", reachable: true };
-  if (auto) return { text: "只能模型自选", reachable: true };
-  return { text: "调不到", reachable: false };
+  if (sk.slashName) return { text: "ext.by_name_only", reachable: true };
+  if (auto) return { text: "ext.models_choice_only", reachable: true };
+  return { text: "ext.unreachable", reachable: false };
 }
 
 // Only the states worth interrupting a list for: in step and "cannot tell" draw nothing.

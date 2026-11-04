@@ -34,7 +34,7 @@ export function cheapestEffort(efforts: string[]): string {
 // xhigh and max are distinct rungs on the ladders that carry both, so they
 // cannot share a name.
 const EFFORT_LABELS: Record<string, string> = {
-  auto: "自动", disabled: "关闭", none: "不思考", minimal: "最轻量", low: "快速", medium: "平衡", high: "深入", xhigh: "超深入", max: "极致",
+  auto: "common.auto", disabled: "common.close", none: "composer.no_reasoning", minimal: "composer.minimal", low: "composer.fast", medium: "composer.balanced", high: "composer.deep", xhigh: "composer.extra_deep", max: "composer.maximum",
 };
 
 export function effortShort(value?: string, modes?: ModelMode[]): string {
@@ -54,8 +54,8 @@ export function effortReading(value?: string, modes?: ModelMode[]): string {
 // The kernel names a mode's strings by key; the wording is ours. A key this
 // build has no words for shows the mode's id rather than nothing.
 const MODE_TEXT: Record<string, string> = {
-  "model_mode.pro": "Pro 模式",
-  "model_mode.pro.hint": "更慢：模型为同一请求做更多推理，消耗的 token 与费用明显更高。仅对当前会话生效。",
+  "model_mode.pro": "composer.pro_mode",
+  "model_mode.pro.hint": "composer.slower_the_model_does_more",
 };
 
 export function modeLabel(mode: ModelMode): string {

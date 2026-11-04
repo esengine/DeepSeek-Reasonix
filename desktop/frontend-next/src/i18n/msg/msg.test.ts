@@ -7,6 +7,8 @@ const SOURCES = import.meta.glob(["../../**/*.{ts,tsx}", "!../../i18n/**", "!../
   import: "default",
   eager: true,
 }) as Record<string, string>;
+// The i18n directory's own tables of wording (kernel codes, notices) name keys too.
+const WORDING = import.meta.glob(["../*.ts", "!../en*.ts", "!../*.test.ts"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const TABLES = import.meta.glob(["./*.ts", "!./*.test.ts", "!./index.ts", "!./types.ts"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
 const HAN = /[一-鿿]/;
@@ -72,7 +74,7 @@ describe("the message tables", () => {
   // source names it as a string counts as asking for it.
   it("carry nothing the interface no longer asks for", () => {
     const named = new Set<string>();
-    for (const body of Object.values(SOURCES)) for (const m of body.matchAll(/["'`]([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["'`]/g)) named.add(m[1]);
+    for (const body of [...Object.values(SOURCES), ...Object.values(WORDING)]) for (const m of body.matchAll(/["'`]([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["'`]/g)) named.add(m[1]);
     expect(Object.keys(MESSAGES).filter((key) => !asked.has(key) && !named.has(key))).toEqual([]);
   });
 

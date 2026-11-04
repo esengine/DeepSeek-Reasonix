@@ -18,7 +18,7 @@ function deferred<T>() {
 }
 
 const source = "https://github.com/demo/releases/tree/" + "b".repeat(40) + "/release-kit";
-const field = (key: string) => screen.getByLabelText<HTMLInputElement | HTMLTextAreaElement>(new RegExp(`^${t(key === "ext.tags" && screen.queryByText(t("ext.add_ta"ext.add_tags"? "新增标签" : key)}`));
+const field = (key: string) => screen.getByLabelText<HTMLInputElement | HTMLTextAreaElement>(new RegExp(`^${t(key === "标签" && screen.queryByText(t("ext.add_tags")) ? "ext.add_tags" : key)}`));
 const existingTags = () => screen.getAllByRole<HTMLInputElement>("textbox", { name: new RegExp(`^${t("ext.existing_tag_n", { n: "" })}`) });
 const draw = (port: AgentPort, handle = "demo") => <MarketGroup port={port} account={{ signedIn: true, user: { handle, email: `${handle}@example.com`, label: handle } }} onInstalled={() => {}} onSignIn={() => {}} />;
 

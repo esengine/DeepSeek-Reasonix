@@ -5,24 +5,24 @@ import type { AgentPort, MarketKind, MarketPackage, MarketPublished } from "../p
 import { OwnInstall } from "./MarketOwn";
 import { arrowRadios } from "./tablist";
 
-const KINDS: [MarketKind, string][] = [["skill", "技能"], ["plugin", "插件"], ["mcp", "MCP 服务"], ["theme", "主题"]];
+const KINDS: [MarketKind, string][] = [["skill", "settings.skills"], ["plugin", "ext.plugins"], ["mcp", "persona.mcp_servers"], ["theme", "ext.theme"]];
 
 // What a source has to look like for the market to install it once approved;
 // the kernel refuses anything else before it leaves the machine.
-const PINNED_TREE = "固定到提交的 GitHub 目录，形如 https://github.com/owner/repo/tree/（40 位提交号）/子目录";
+const PINNED_TREE = "ext.a_github_directory_pinned_to";
 const SOURCE_TIP: Record<MarketKind, string> = {
-  skill: "SKILL.md 的 https 地址，或 GitHub 仓库里某个技能的目录。",
+  skill: "ext.an_https_address_of_a_2",
   plugin: PINNED_TREE,
-  mcp: ".mcp.json 或仓库的 https 地址，或 npm 包名。",
+  mcp: "ext.an_https_address_of_a",
   theme: PINNED_TREE,
 };
 
 const STATUS: Record<string, [string, string | undefined]> = {
-  pending: ["审核中", undefined],
-  active: ["已公开", "ok"],
-  rejected: ["未通过", "err"],
-  hidden: ["已隐藏", undefined],
-  private: ["私有", undefined],
+  pending: ["feedback.in_review", undefined],
+  active: ["ext.public", "ok"],
+  rejected: ["ext.rejected", "err"],
+  hidden: ["ext.hidden", undefined],
+  private: ["ext.private", undefined],
 };
 
 interface Draft {

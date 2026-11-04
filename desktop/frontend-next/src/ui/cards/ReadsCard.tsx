@@ -32,16 +32,16 @@ function rowOf(t: Tool): Row {
   switch (t.name) {
     case "read_file": {
       const [dir, name] = splitPath(arg);
-      return { ...state, dir, name, n: state.failed ? tr("失败") : tr("读取 · {n} 行", { n: countLines(t.output) }) };
+      return { ...state, dir, name, n: state.failed ? tr("common.failed") : tr("chat.read_n_lines", { n: countLines(t.output) }) };
     }
     case "grep": {
       const where = argOf(t.args, "path", "file_path");
-      return { ...state, dir: "", name: `${tr("搜索")} “${arg}”${where ? ` ${where}` : ""}`, n: state.failed ? tr("失败") : tr("{n} 处", { n: countHits(t.output) }) };
+      return { ...state, dir: "", name: `${tr("搜索")} “${arg}”${where ? ` ${where}` : ""}`, n: state.failed ? tr("common.failed") : tr("chat.n_matches", { n: countHits(t.output) }) };
     }
     case "glob":
-      return { ...state, dir: "", name: `${tr("查找文件")} ${arg}`, n: state.failed ? tr("失败") : tr("{n} 个", { n: countRows(t.output) }) };
+      return { ...state, dir: "", name: `${tr("查找文件")} ${arg}`, n: state.failed ? tr("common.failed") : tr("common.n", { n: countRows(t.output) }) };
     default:
-      return { ...state, dir: "", name: `${tr("列出目录")} ${arg}`, n: state.failed ? tr("失败") : tr("{n} 项", { n: countRows(t.output) }) };
+      return { ...state, dir: "", name: `${tr("列出目录")} ${arg}`, n: state.failed ? tr("common.failed") : tr("settings.n_items", { n: countRows(t.output) }) };
   }
 }
 
@@ -54,10 +54,10 @@ function summarise(tools: Tool[]): string {
   const lists = tools.filter((t) => t.name === "ls").length;
   const hits = greps.reduce((n, t) => n + countHits(t.output), 0);
   return [
-    reads && tr("读取文件 ×{n}", { n: reads }),
-    greps.length && tr("搜索命中 {n} 处", { n: hits }),
-    globs && tr("查找文件 ×{n}", { n: globs }),
-    lists && tr("列出目录 ×{n}", { n: lists }),
+    reads && tr("chat.read_files_n", { n: reads }),
+    greps.length && tr("chat.search_n_matches", { n: hits }),
+    globs && tr("chat.find_files_n", { n: globs }),
+    lists && tr("chat.list_directories_n", { n: lists }),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -90,7 +90,7 @@ function Body({ tool }: { tool: Tool }) {
       {body}
       {refusal && <div className="txt" data-refusal={tool.refusalCode}>{refusal}</div>}
       {errorDetail && <div className="txt bad">{errorDetail}</div>}
-      {tool.bound?.kind === "truncated" && <div className="bound bad">{tr("输出不完整，部分内容未进入上下文")}</div>}
+      {tool.bound?.kind === "truncated" && <div className="bound bad">{tr("chat.the_output_is_incomplete_some")}</div>}
     </>
   );
 }
@@ -107,10 +107,10 @@ export function ReadsCard({ tools }: { tools: Tool[] }) {
   const files = tools.filter((t) => t.name === "read_file").length;
   const searches = tools.filter((t) => t.name === "grep" || t.name === "glob").length;
   const headline = files === tools.length
-    ? tr("读取了 {n} 个文件", { n: files })
+    ? tr("chat.read_n_files", { n: files })
     : searches === tools.length
-      ? tr("完成了 {n} 次搜索", { n: searches })
-      : tr("查阅了 {n} 项内容", { n: tools.length });
+      ? tr("chat.completed_n_searches", { n: searches })
+      : tr("chat.inspected_n_items", { n: tools.length });
   return (
     <div className="call" data-state={failed ? "failed" : "done"}>
       <div className="g">
@@ -121,13 +121,13 @@ export function ReadsCard({ tools }: { tools: Tool[] }) {
           <summary className="hl">
             <span className="nm" title={headline}>{headline}</span>
             <span className="arg" title={summarise(tools)}>{summarise(tools)}</span>
-            {failed > 0 && <span className="fail">{tr("{n} 项失败", { n: failed })}</span>}
+            {failed > 0 && <span className="fail">{tr("chat.n_failed", { n: failed })}</span>}
             <Cost tools={tools} />
             <span
               className="tool-state"
               data-state={failed ? "failed" : "done"}
-              aria-label={tr(failed ? "失败" : "已完成")}
-              title={tr(failed ? "失败" : "已完成")}
+              aria-label={tr(failed ? "common.failed" : "common.done_2")}
+              title={tr(failed ? "common.failed" : "common.done_2")}
             />
             <span className="tool-fold" aria-hidden="true" />
           </summary>

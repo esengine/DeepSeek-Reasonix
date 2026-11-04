@@ -13,12 +13,12 @@ interface Props {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  idle: "未连接",
-  connecting: "连接中",
-  connected: "已连接",
-  reconnecting: "重连中",
-  degraded: "部分转发未建立",
-  stopped: "已断开",
+  idle: "common.not_connected",
+  connecting: "remote.connecting_2",
+  connected: "remote.connected",
+  reconnecting: "remote.reconnecting",
+  degraded: "remote.a_forward_did_not_attach",
+  stopped: "remote.disconnected",
 };
 
 // One machine holds several projects. The kernel folds the two stored fields
@@ -426,7 +426,7 @@ export function Remotes({ hub, onError }: Props) {
   );
 }
 
-const ROUTE_LABEL: Record<string, string> = { npm: "npm", upload: "上传", download: "下载" };
+const ROUTE_LABEL: Record<string, string> = { npm: "npm", upload: "remote.upload", download: "remote.download" };
 
 /** What one machine answered. A connect stops at the first missing piece, so
  *  the value here is seeing all of them together — and each closed route is

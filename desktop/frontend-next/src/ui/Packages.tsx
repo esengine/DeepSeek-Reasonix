@@ -86,13 +86,13 @@ function summary(p: PluginPackage): string {
   const add = (n: number | undefined, unit: string) => {
     if (n) parts.push(t(unit, { n }));
   };
-  add(p.skills?.length, "{n} 个技能");
-  add(p.commands?.length, "{n} 个命令");
-  add(p.agents?.length, "{n} 个子代理");
-  add(p.prompts?.length, "{n} 个提示词");
-  add(p.themes?.length, "{n} 套配色");
-  add(p.hooks?.length, "{n} 条钩子");
-  add(p.mcpServers?.length, "{n} 个服务");
+  add(p.skills?.length, "ext.n_skills");
+  add(p.commands?.length, "ext.n_commands");
+  add(p.agents?.length, "subagent.group.count");
+  add(p.prompts?.length, "ext.n_prompts");
+  add(p.themes?.length, "ext.n_palettes");
+  add(p.hooks?.length, "ext.n_hooks");
+  add(p.mcpServers?.length, "settings.n_services");
   if (p.runtime) parts.push(t("ext.long_running_process"));
   return parts.join(" · ");
 }

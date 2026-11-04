@@ -13,29 +13,29 @@ type List = "deny" | "ask" | "allow";
 // groups by tool and lets the verdict be changed in place. Filing rules into
 // three separate lists made "this one is too strict" a delete-and-retype.
 const LEVELS: [List, string, string][] = [
-  ["deny", "拒绝", "命中即终止：全部放行下同样拦截，不显示审批框"],
-  ["ask", "询问", "命中即暂停并请求确认，即使已开启自动批准"],
-  ["allow", "放行", "命中后不再请求确认"],
+  ["deny", "common.refuse", "safety.a_match_is_final_it"],
+  ["ask", "safety.ask", "safety.a_match_stops_for_you"],
+  ["allow", "common.allow", "safety.a_match_stops_asking"],
 ];
 
 const MODES: [string, string, string][] = [
-  ["ask", "请求确认", "未被任何规则命中的写入操作，执行前请求一次确认"],
-  ["allow", "放行", "未被命中的写入操作直接执行"],
-  ["deny", "拒绝", "未被命中的写入操作一律不执行"],
+  ["ask", "safety.ask_for_confirmation", "safety.a_write_no_rule_matched"],
+  ["allow", "common.allow", "safety.a_write_matched_by_no"],
+  ["deny", "common.refuse", "safety.a_write_no_list_matched"],
 ];
 
 // The tools worth offering by name. `file_mutation` is not a tool but the gate's
 // own alias for every tool that writes a file, and it is the one most people
 // actually want — so it leads, under the name of what it does.
 const TOOLS: [string, string][] = [
-  ["bash", "命令"],
-  ["file_mutation", "写文件（全部写入工具）"],
-  ["read_file", "读文件"],
-  ["write_file", "整份写入"],
-  ["edit_file", "改动文件"],
-  ["web_fetch", "抓取网页"],
-  ["grep", "全文搜索"],
-  ["glob", "查找文件"],
+  ["bash", "chat.commands"],
+  ["file_mutation", "safety.writing_files_every_write_tool"],
+  ["read_file", "safety.reading_files"],
+  ["write_file", "safety.whole_file_writes"],
+  ["edit_file", "safety.file_edits"],
+  ["web_fetch", "safety.fetching_web_pages"],
+  ["grep", "safety.full_text_search"],
+  ["glob", "safety.finding_files"],
 ];
 
 // A grant a person gave an approval card lands here too, under the group the
@@ -59,20 +59,20 @@ interface Recipe {
 const RECIPES: Recipe[] = [
   {
     id: "secrets",
-    title: "禁止访问 .env",
-    desc: "文件工具读写 .env 一律拒绝。bash 中的 cat 属于另一条路径，本规则不覆盖",
+    title: "safety.keep_env_off_limits",
+    desc: "safety.file_tools_are_refused_outright",
     list: "deny",
     rules: ["file_mutation(*.env*)", "read_file(*.env*)"],
   },
-  { id: "push", title: "禁止推送到远端", desc: "本地修改不受限制，推送始终由你执行", list: "deny", rules: ["bash(git push:*)"] },
+  { id: "push", title: "safety.never_push", desc: "safety.change_anything_locally_pushing_stays", list: "deny", rules: ["bash(git push:*)"] },
   {
     id: "history",
-    title: "禁止改写 git 历史",
-    desc: "rebase 与 reset 可能丢弃尚未推送的提交",
+    title: "safety.never_rewrite_git_history",
+    desc: "safety.rebase_and_reset_can_eat",
     list: "deny",
     rules: ["bash(git rebase:*)", "bash(git reset:*)"],
   },
-  { id: "tests", title: "运行测试无需确认", desc: "测试命令直接放行，其余保持不变", list: "allow", rules: ["bash(go test:*)", "bash(npm test:*)", "bash(pytest:*)"] },
+  { id: "tests", title: "safety.tests_without_asking", desc: "safety.test_commands_go_straight_through", list: "allow", rules: ["bash(go test:*)", "bash(npm test:*)", "bash(pytest:*)"] },
 ];
 
 // A rule is "tool" or "tool(subject)". Splitting it is what lets the tool name
@@ -91,14 +91,14 @@ const joinRule = (tool: string, pattern: string) => (pattern.trim() ? `${tool.tr
 // command, the file tools their path, grep and glob their search pattern — so
 // the same glob means different things per tool and the header has to say which.
 const MATCHING: Record<string, string> = {
-  bash: "按命令的词比对",
-  grep: "比对的是搜索式，而非路径",
-  glob: "比对的是搜索式，而非路径",
-  web_fetch: "比对的是网址",
+  bash: "safety.matched_by_command_words",
+  grep: "safety.matched_against_the_search_pattern",
+  glob: "safety.matched_against_the_search_pattern",
+  web_fetch: "safety.matched_against_the_url",
   Computer: "比对应用 id，放行必须写全；通配符只拦不放",
   Browser: "比对页面来源（协议://主机:端口）",
 };
-const pathMatching = "按路径匹配，* 能跨过 /";
+const pathMatching = "safety.matched_by_path_crosses";
 
 // What is unusual about this one rule — and nothing when there is nothing. The
 // common shape is `x:*`, and printing "commands starting with x" on thirteen of

@@ -30,7 +30,7 @@ export interface PaletteSetting {
 
 type Scope = "" | "actions" | "sessions" | "settings";
 const SCOPES: Scope[] = ["", "actions", "sessions", "settings"];
-const SCOPE_LABEL: Record<Exclude<Scope, "">, string> = { actions: "操作", sessions: "会话", settings: "设置" };
+const SCOPE_LABEL: Record<Exclude<Scope, "">, string> = { actions: "app.action", sessions: "common.session", settings: "common.settings" };
 const PREFIX: Record<string, Exclude<Scope, "">> = { ">": "actions", "#": "sessions", ",": "settings" };
 
 interface Props {

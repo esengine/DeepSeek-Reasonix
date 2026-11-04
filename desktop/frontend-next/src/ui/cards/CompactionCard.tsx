@@ -57,12 +57,12 @@ function Coverage({ c }: { c: Compaction }) {
 }
 
 const PART: Record<string, string> = {
-  system: "系统提示",
-  tools: "工具定义",
-  digest: "摘要",
-  user: "用户消息",
-  reply: "模型回复",
-  tool_output: "工具输出",
+  system: "common.system_prompt",
+  tools: "common.tool_definitions",
+  digest: "ext.summary",
+  user: "kernel.user_messages",
+  reply: "common.model_replies",
+  tool_output: "common.tool_output",
 };
 
 // What a fold left behind, when that is still a large share of the window. The

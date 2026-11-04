@@ -6,17 +6,17 @@ import { reason, say } from "../i18n/kernel";
 // Three modes, not six input boxes. Nobody's first question is whether they want
 // http_proxy or https_proxy — it is "use what the system uses" or "here is mine".
 const MODES: [string, string, string][] = [
-  ["auto", "跟随系统", "使用系统或环境变量中已配置的代理"],
-  ["custom", "手动设置", "手动指定代理服务器"],
-  ["off", "直连", "不使用任何代理"],
+  ["auto", "look.follow_the_system", "models.uses_whatever_proxy_the_system"],
+  ["custom", "models.set_manually", "手动指定代理服务器"],
+  ["off", "models.direct", "不使用任何代理"],
 ];
 
 const STEP_LABEL: Record<string, string> = {
-  proxy: "代理",
-  dns: "域名解析",
-  connect: "建立连接",
-  tls: "加密握手",
-  auth: "凭据",
+  proxy: "models.proxy",
+  dns: "models.name_resolution",
+  connect: "models.connection",
+  tls: "models.tls_handshake",
+  auth: "models.credentials",
 };
 
 const TYPES = ["http", "https", "socks5", "socks5h"];

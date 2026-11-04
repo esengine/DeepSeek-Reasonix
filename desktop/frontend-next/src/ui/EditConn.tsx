@@ -627,6 +627,6 @@ function compatSummary(think: string, heads: string, extra: string, levels: numb
 
 type Phase = "clean" | "dirty" | "saving" | "saved" | "unapplied" | "failed";
 const PHASE_TEXT: Record<Phase, string> = {
-  clean: "没有更改", dirty: "有未保存的更改", failed: "有未保存的更改", saving: "正在保存…",
-  saved: "已保存", unapplied: "已保存，尚未生效",
+  clean: "models.no_changes", dirty: "models.unsaved_changes", failed: "models.unsaved_changes", saving: "common.saving_2",
+  saved: "models.saved", unapplied: "common.saved_not_applied_yet",
 };

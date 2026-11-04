@@ -21,7 +21,7 @@ const encoder = new TextEncoder();
 // Used only when the limit could not be read; the kernel still refuses an oversized reply.
 const REPLY_BYTES_FALLBACK = 4096;
 
-const AUTHOR_LABEL = { maintainer: "维护者", user: "你" } as const;
+const AUTHOR_LABEL = { maintainer: "feedback.maintainers", user: "chat.you" } as const;
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString(current() === "zh" ? "zh-CN" : "en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });

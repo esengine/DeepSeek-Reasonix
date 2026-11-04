@@ -2,13 +2,13 @@
 // vocabulary here prevents the two forms from drifting while letting the UI
 // translate the labels independently.
 export const THINKING: [string, string][] = [
-  ["", "自动 · 按模型和地址推断"],
-  ["openai", "OpenAI 风格"],
+  ["", "app.auto_inferred_from_the_model"],
+  ["openai", "app.openai_style"],
   ["anthropic", "Anthropic thinking"],
   ["deepseek", "DeepSeek"],
   ["glm", "GLM enable_thinking"],
   ["kimi-k3", "Kimi K3"],
-  ["none", "不发思考参数"],
+  ["none", "app.send_no_thinking_parameter"],
 ];
 
 export function headerLines(headers?: Record<string, string>): string {

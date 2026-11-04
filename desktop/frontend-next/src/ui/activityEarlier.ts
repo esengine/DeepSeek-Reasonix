@@ -10,17 +10,17 @@ const SEARCH = /grep|search|glob|find/;
 /** The verb an activity row leads with, or null when the call's category has none and its own name says more. */
 export function activityVerb(name: string): string | null {
   const category = categoryOf(name);
-  if (category === "read") return SEARCH.test(name) ? "搜索" : "读取";
-  if (category === "write") return "编辑";
-  if (category === "bash") return "运行命令";
-  if (category === "net") return "联网";
-  if (category === "deleg") return "子任务";
-  if (category === "mcp") return "外部工具";
+  if (category === "read") return SEARCH.test(name) ? "chat.search" : "chat.read";
+  if (category === "write") return "common.edit";
+  if (category === "bash") return "chat.run_command";
+  if (category === "net") return "chat.network";
+  if (category === "deleg") return "chat.subtask";
+  if (category === "mcp") return "settings.external_tools";
   return null;
 }
 
 function verbOf(name: string): string {
-  return activityVerb(name) ?? "其他";
+  return activityVerb(name) ?? "ext.other";
 }
 
 const nameOf = (tool: { name?: string; resolvedName?: string }) => tool.resolvedName || tool.name || "";

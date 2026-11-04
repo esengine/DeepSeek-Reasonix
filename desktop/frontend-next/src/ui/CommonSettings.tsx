@@ -11,9 +11,9 @@ import { SegChoice, SettingRow } from "./SettingRow";
 import { SCHEMES } from "./Appearance";
 
 const LANGS: [string, string][] = [
-  ["", "跟随系统"],
-  ["zh", "中文"],
-  ["en", "英文"],
+  ["", "look.follow_the_system"],
+  ["zh", "settings.text"],
+  ["en", "settings.english"],
 ];
 
 interface Props {

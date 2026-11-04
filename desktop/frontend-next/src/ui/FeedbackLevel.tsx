@@ -3,7 +3,7 @@ import { current, t } from "../i18n";
 import type { FeedbackProfile } from "../port/feedback";
 import { LevelBadge } from "./LevelBadge";
 
-const LEVEL_NAME = ["新种", "萌芽", "幼苗", "小树", "繁花", "成荫", "共林"] as const;
+const LEVEL_NAME = ["feedback.new_seed", "feedback.sprout", "feedback.seedling", "feedback.sapling", "feedback.bloom", "feedback.canopy", "feedback.grove"] as const;
 
 const levelName = (level: number): string | null => (Number.isInteger(level) && level >= 0 && level < LEVEL_NAME.length ? t(LEVEL_NAME[level]!) : null);
 

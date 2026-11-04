@@ -4,11 +4,11 @@ import { Icon } from "./memicons";
 import { Button } from "./kit/Button";
 
 export const TYPES: [string, string][] = [
-  ["user", "用户"], ["feedback", "反馈"], ["project", "项目"], ["reference", "参考"], ["constraint", "约束"],
+  ["user", "remote.user"], ["feedback", "feedback.feedback"], ["project", "common.project"], ["reference", "memory.reference"], ["constraint", "memory.constraints"],
 ];
 export const TYPE_NAME: Record<string, string> = Object.fromEntries(TYPES);
-const IMPORTANCE = ["", "低", "中", "高"];
-const SCOPE: Record<string, string> = { project: "当前项目", global: "所有项目" };
+const IMPORTANCE = ["", "memory.low", "memory.medium", "memory.high"];
+const SCOPE: Record<string, string> = { project: "session.this_project", global: "memory.all_projects" };
 
 export const typeOf = (m: MemoryEntry) => (m.type && TYPE_NAME[m.type] ? m.type : "project");
 
@@ -82,16 +82,16 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
     );
   }
   const content: [string, React.ReactNode][] = [
-    ["类型", t(TYPE_NAME[typeOf(m)])],
-    ["星系", m.galaxy || t("memory.no_galaxy")],
-    ["重要度", t(IMPORTANCE[m.importance ?? 2] || "memory.medium")],
-    ["范围", t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")],
+    ["common.type", t(TYPE_NAME[typeOf(m)])],
+    ["memory.galaxy", m.galaxy || t("memory.no_galaxy")],
+    ["memory.importance", t(IMPORTANCE[m.importance ?? 2] || "memory.medium")],
+    ["memory.scope", t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")],
   ];
   const use: [string, React.ReactNode][] = [
-    ["状态", stateSaid(m)],
-    ["最近", daysAgo(m.lastUsedAt)],
-    ["用过", t("memory.n_times", { n: m.uses ?? 0 })],
-    ["生效", t(m.activation === "pinned" ? "memory.in_every_turn" : "memory.recalled_when_relevant_2")],
+    ["memory.state", stateSaid(m)],
+    ["session.recent", daysAgo(m.lastUsedAt)],
+    ["memory.used", t("memory.n_times", { n: m.uses ?? 0 })],
+    ["memory.applies", t(m.activation === "pinned" ? "memory.in_every_turn" : "memory.recalled_when_relevant_2")],
   ];
   const group = (title: string, rows: [string, React.ReactNode][]) => (
     <section aria-label={title}>
@@ -173,6 +173,6 @@ export function History({ list, current, busy, onRestore }: {
 
 function clipBody(s: string | undefined): string {
   const body = (s ?? "").trim();
-  if (!body) return "（无正文）";
+  if (!body) return "memory.no_body";
   return body.length > 200 ? body.slice(0, 200) + "…" : body;
 }

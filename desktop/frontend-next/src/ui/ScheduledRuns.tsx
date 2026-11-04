@@ -5,7 +5,7 @@ import { HttpError } from "../port/http_error";
 import type { AgentPort, ScheduleBoard, ScheduleDraft, SchedulePreview, ScheduleResultView, ScheduleRunView, ScheduleView } from "../port/port";
 import { Group } from "./Group";
 
-const EVERY: [number, string][] = [[3600, "每小时"], [7200, "每 2 小时"], [21600, "每 6 小时"], [43200, "每 12 小时"], [86400, "每天"], [604800, "每周"]];
+const EVERY: [number, string][] = [[3600, "panels.every_hour"], [7200, "panels.every_2_hours"], [21600, "panels.every_6_hours"], [43200, "panels.every_12_hours"], [86400, "panels.every_day"], [604800, "panels.every_week"]];
 const POLL_MS = 30_000;
 
 const when = (unix: number) => new Date(unix * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -17,12 +17,12 @@ function trigger(s: ScheduleView): string {
   return hit ? t(hit[1]) : t("panels.every_n_minutes", { n: Math.round((s.everySec ?? 0) / 60) });
 }
 
-const STATUS: Record<string, string> = { active: "运行中", paused: "已暂停", expired: "已到期", "circuit-open": "已熔断" };
-const PAUSE: Record<string, string> = { user: "你暂停了它", consecutive_failures: "连续失败后自动暂停", breaker: "额度保护自动暂停", lifetime_budget: "用完了总额度", corrupt: "记录损坏" };
+const STATUS: Record<string, string> = { active: "common.running", paused: "app.held", expired: "panels.expired", "circuit-open": "panels.stopped_by_the_safety_breaker" };
+const PAUSE: Record<string, string> = { user: "panels.you_paused_it", consecutive_failures: "panels.paused_automatically_after_repeated_failures", breaker: "panels.paused_automatically_to_protect_the", lifetime_budget: "panels.the_lifetime_budget_is_used", corrupt: "panels.its_record_is_damaged" };
 const RUN: Record<string, string> = {
-  succeeded: "已完成", failed: "失败", blocked: "等你决定", budget_stopped: "额度用尽", interrupted: "被中断", skipped: "已跳过", claimed: "即将开始", running: "运行中",
+  succeeded: "common.done_2", failed: "common.failed", blocked: "panels.waiting_for_you", budget_stopped: "panels.budget_used_up", interrupted: "panels.interrupted", skipped: "panels.skipped_2", claimed: "panels.about_to_start", running: "common.running",
 };
-const SKIP: Record<string, string> = { missed: "错过了时间", budget_window: "额度窗口已满", lease_held: "有任务在运行", concurrency: "有任务在运行" };
+const SKIP: Record<string, string> = { missed: "panels.missed_its_time", budget_window: "panels.the_budget_window_is_full", lease_held: "panels.another_run_was_in_progress", concurrency: "panels.another_run_was_in_progress" };
 
 /** Read-only tasks a person confirmed, run at a time they chose. A creation is
  *  shown back as a preview with the most it can spend, and only that preview's

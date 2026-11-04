@@ -20,7 +20,7 @@ export function subagentWaitingVars(detail: string | undefined): Record<string, 
     return undefined;
   }
   if (typeof p.task !== "string" || p.task === "") return undefined;
-  const by = typeof p.by === "string" && p.by !== "" ? `「${p.by}」` : t("另一个子代理");
-  const why = p.whole === true ? t("两者都没声明 write_paths，各自按整个工作区处理") : t("它们要写的路径重叠");
+  const by = typeof p.by === "string" && p.by !== "" ? `「${p.by}」` : t("kernel.another_sub_agent");
+  const why = p.whole === true ? t("kernel.neither_declared_write_paths_so") : t("kernel.they_want_to_write_the");
   return { task: p.task, by, why };
 }

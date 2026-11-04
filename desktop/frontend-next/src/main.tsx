@@ -92,7 +92,7 @@ async function pick(): Promise<HubPort> {
   // fixture there would put a scripted session on screen as if it had happened,
   // so only a dev build is allowed to; the import stays dynamic to keep the
   // fixture out of the production bundle.
-  if (!import.meta.env.DEV) throw new Error("连不上内核：/runtimes 没有回应。");
+  if (!import.meta.env.DEV) throw new Error("app.cannot_reach_the_kernel_runtimes");
   const { MockHub } = await import("./port/mock_hub");
   return new MockHub();
 }

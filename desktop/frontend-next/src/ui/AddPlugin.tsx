@@ -14,9 +14,9 @@ const PLACEHOLDER = `https://github.com/acme/review-kit
 ~/projects/my-plugin`;
 
 const RISK_TITLE: Record<string, string> = {
-  high: "以下项目会在本机运行程序",
-  medium: "以下项目会改变可用能力",
-  low: "以下项目仅添加文件",
+  high: "ext.these_run_programs_on_this",
+  medium: "ext.these_change_what_is_available",
+  low: "ext.these_only_add_files",
 };
 
 export const ORDER = ["high", "medium", "low"];
@@ -356,25 +356,25 @@ function executes(a: PluginAction): { label: string; detail: string; why?: strin
   const out: { label: string; detail: string; why?: string }[] = [];
   if (a.runtime) {
     out.push({
-      label: "常驻进程",
+      label: "ext.long_running_process",
       detail: [a.runtime.command, ...(a.runtime.args ?? [])].join(" "),
-      why: "运行于 Reasonix 内部，可读取整个会话、绕过权限并直接操作本机",
+      why: "ext.runs_inside_reasonix_can_read",
     });
   }
   if (a.runtime?.tools?.length) {
-    out.push({ label: "新增工具", detail: a.runtime.tools.join(language() === "zh" ? "、" : ", "), why: "agent 可以调用，每次调用照常经过权限确认" });
+    out.push({ label: "ext.new_tools", detail: a.runtime.tools.join(language() === "zh" ? "、" : ", "), why: "ext.the_agent_can_call_them" });
   }
   if (a.hookCount) {
-    out.push({ label: "自动化钩子", detail: language() === "zh" ? t("common.n_2", { n: a.hookCount }) : plural(a.hookCount, "ext.n_1_hook", "ext.n_hooks"), why: "在会话生命周期内自动执行" });
+    out.push({ label: "ext.automatic_hooks", detail: language() === "zh" ? t("common.n_2", { n: a.hookCount }) : plural(a.hookCount, "ext.n_1_hook", "ext.n_hooks"), why: "ext.run_automatically_during_the_session" });
   }
   if (a.toolCount) {
-    out.push({ label: "外部服务", detail: plural(a.toolCount, "ext.n_1_mcp_service", "ext.n_mcp_services"), why: "为 agent 提供的能力与内置工具等同" });
+    out.push({ label: "ext.external_services", detail: plural(a.toolCount, "ext.n_1_mcp_service", "ext.n_mcp_services"), why: "ext.provides_capabilities_equivalent_to_the" });
   }
   if (a.kind === "mcp" && a.command) {
-    out.push({ label: "将启动", detail: [a.command, ...(a.args ?? [])].join(" ") });
+    out.push({ label: "ext.will_start", detail: [a.command, ...(a.args ?? [])].join(" ") });
   }
   if (a.kind === "mcp" && a.url) {
-    out.push({ label: "将连接至", detail: a.url });
+    out.push({ label: "ext.will_connect_to", detail: a.url });
   }
   return out;
 }
@@ -407,11 +407,11 @@ function contributes(a: PluginAction): string[] {
   const add = (n: number | undefined, one: string, many: string) => {
     if (n) parts.push(plural(n, one, many));
   };
-  add(a.skillCount, "1 个技能", "{n} 个技能");
-  add(a.commandCount, "1 个命令", "{n} 个命令");
-  add(a.agentCount, "1 个子代理", "{n} 个子代理");
-  add(a.promptCount, "1 个提示词", "{n} 个提示词");
-  add(a.themeCount, "1 套配色", "{n} 套配色");
+  add(a.skillCount, "ext.n_1_skill", "ext.n_skills");
+  add(a.commandCount, "ext.n_1_command", "ext.n_commands");
+  add(a.agentCount, "ext.n_1_subagent", "subagent.group.count");
+  add(a.promptCount, "ext.n_1_prompt", "ext.n_prompts");
+  add(a.themeCount, "ext.n_1_palette", "ext.n_palettes");
   return parts;
 }
 

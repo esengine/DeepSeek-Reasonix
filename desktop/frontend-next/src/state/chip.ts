@@ -1,7 +1,7 @@
 import type { SessionState } from "./session_types";
 
-export const IDLE = "空闲";
-export const RUNNING = "运行中";
+export const IDLE = "app.idle";
+export const RUNNING = "common.running";
 
 // A client that attached after turn_started has no running flag of its own and
 // the status snapshot says the turn is live: print that, not the idle or

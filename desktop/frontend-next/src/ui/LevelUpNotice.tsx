@@ -4,7 +4,7 @@ import type { FeedbackMine } from "../port/feedback";
 import type { AgentPort } from "../port/port";
 import { loadLevelNoticePref, useShowsLevelNotice } from "../state/levelnotices";
 
-const LEVEL_NAME = ["新种", "萌芽", "幼苗", "小树", "繁花", "成荫", "共林"] as const;
+const LEVEL_NAME = ["feedback.new_seed", "feedback.sprout", "feedback.seedling", "feedback.sapling", "feedback.bloom", "feedback.canopy", "feedback.grove"] as const;
 const FOCUS_GAP_MS = 30_000;
 
 const levelName = (level: number): string => (Number.isInteger(level) && level >= 0 && level < LEVEL_NAME.length ? t(LEVEL_NAME[level]!) : `L${level}`);

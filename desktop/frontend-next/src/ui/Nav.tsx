@@ -10,11 +10,11 @@ const CHAT = "M3.2 4.4a1.2 1.2 0 0 1 1.2-1.2h7.2a1.2 1.2 0 0 1 1.2 1.2v5a1.2 1.2
 
 // Every entry goes somewhere that exists. A rail of icons that open nothing is
 // the cheapest thing to draw and the most expensive thing to keep.
-const HOME: [Mark, string, string | null] = ["chat", "会话", null];
+const HOME: [Mark, string, string | null] = ["chat", "common.session", null];
 
 const FOOT: [Mark, string, string, string?][] = [
-  ["account", "账号", "account"],
-  ["advanced", "设置", "", "chrome.settings"],
+  ["account", "settings.account", "account"],
+  ["advanced", "common.settings", "", "chrome.settings"],
 ];
 
 interface Props {

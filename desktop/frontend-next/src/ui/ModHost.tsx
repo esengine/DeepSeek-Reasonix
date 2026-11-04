@@ -11,11 +11,11 @@ const BUDGET_MAX = 55000;
 
 // The words and the mark for each state: a state never rests on colour alone.
 const STATE: Record<ModState, { mark: string; word: string }> = {
-  inactive: { mark: "○", word: "未运行" },
-  starting: { mark: "◐", word: "正在启动" },
-  running: { mark: "●", word: "运行中" },
-  restarting: { mark: "↻", word: "正在重启" },
-  disabled: { mark: "⊘", word: "已停用" },
+  inactive: { mark: "○", word: "ext.not_running" },
+  starting: { mark: "◐", word: "ext.starting" },
+  running: { mark: "●", word: "common.running" },
+  restarting: { mark: "↻", word: "ext.restarting" },
+  disabled: { mark: "⊘", word: "common.suspended" },
 };
 
 /** Claude Code mods: modules an installed package ships, run in a process of

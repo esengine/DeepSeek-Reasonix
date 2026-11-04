@@ -11,10 +11,10 @@ import { MyPackages, PublishForm } from "./MarketPublish";
 import { MarketVote, approvalLabel } from "./MarketVote";
 import { arrowRadios, arrowTabs } from "./tablist";
 
-const KINDS: [MarketKind | "", string][] = [["", "全部"], ["skill", "技能"], ["plugin", "插件"], ["mcp", "MCP 服务"], ["theme", "主题"]];
+const KINDS: [MarketKind | "", string][] = [["", "common.all"], ["skill", "settings.skills"], ["plugin", "ext.plugins"], ["mcp", "persona.mcp_servers"], ["theme", "ext.theme"]];
 type Sort = "recommended" | "trending" | "installs" | "new";
-const SORTS: [Sort, string][] = [["recommended", "推荐"], ["trending", "近期热门"], ["installs", "安装最多"], ["new", "最新"]];
-const KIND_NAME: Record<string, string> = { skill: "技能", plugin: "插件", mcp: "MCP 服务", theme: "主题" };
+const SORTS: [Sort, string][] = [["recommended", "composer.recommended"], ["trending", "ext.trending"], ["installs", "ext.most_installed"], ["new", "ext.newest"]];
+const KIND_NAME: Record<string, string> = { skill: "settings.skills", plugin: "ext.plugins", mcp: "persona.mcp_servers", theme: "ext.theme" };
 
 interface Props {
   port: AgentPort;
@@ -372,7 +372,7 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
 }
 
 type View = "browse" | "mine" | "publish";
-const VIEWS: [View, string][] = [["browse", "浏览"], ["mine", "我的发布"], ["publish", "发布"]];
+const VIEWS: [View, string][] = [["browse", "ext.browse"], ["mine", "ext.my_packages"], ["publish", "ext.publish"]];
 
 // Installed and discover are two views of one subject, so they are tabs of one
 // page rather than two sections: what the market adds shows up on the other tab.
@@ -422,7 +422,7 @@ export function MarketGroup({ port, onInstalled, onViewInstalled, account, onSig
 }
 
 export function ExtTabs({ at, onPick, disabled }: { at: "installed" | "market"; onPick: (at: "installed" | "market") => void; disabled?: boolean }) {
-  const tabs: ["installed" | "market", string][] = [["installed", "已安装"], ["market", "发现"]];
+  const tabs: ["installed" | "market", string][] = [["installed", "ext.installed"], ["market", "ext.discover"]];
   return (
     <div className="seg mkt-tabs" data-text role="tablist" aria-label={t("ext.extension")} onKeyDown={arrowTabs}>
       {tabs.map(([id, name]) => (

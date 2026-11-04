@@ -37,10 +37,10 @@ import { useThemeInventory } from "./useThemeInventory";
 
 // Exported because the nav rail names the current one next to the tab.
 export const SCHEMES: [string, string][] = [
-  ["auto", "跟随系统"],
-  ["light", "浅色"],
-  ["dark", "深色"],
-  ["scheduled", "定时"],
+  ["auto", "look.follow_the_system"],
+  ["light", "look.light"],
+  ["dark", "look.dark"],
+  ["scheduled", "look.scheduled"],
 ];
 
 interface Props {
@@ -63,28 +63,28 @@ interface Props {
 // 笔画粗细是另一条轴：颜色调得再亮，400 的汉字在 11px 上仍然是细的。默认跟着
 // 语言走 —— 汉字笔画密，同字号下比拉丁更早糊。
 const WEIGHTS: [string, string, string][] = [
-  ["", "跟随语言", "中文界面使用中等字重，西文使用常规字重"],
-  ["light", "常规", "笔画更细，字距更宽松"],
-  ["heavy", "加粗", "小字号下更扎实，屏幕距离较远或有反光时更易读"],
+  ["", "look.match_the_language", "look.medium_for_chinese_regular_for"],
+  ["light", "look.regular", "look.thinner_strokes_looser_texture"],
+  ["heavy", "look.bolder", "look.firmer_at_small_sizes_and"],
 ];
 
 const MEASURES: [string, string, string][] = [
-  ["standard", "适宜阅读", "每行长度控制在一眼能回到行首的范围"],
-  ["full", "铺满窗口", "正文跟随窗口宽度，宽屏上不留两侧空白"],
-  ["full-all", "连输入框一起铺满", "正文和输入框都跟随窗口宽度；输入框很宽时一行不易回到行首"],
-  ["custom", "自定义比例", "按比例调整对话和输入框占用的区域"],
+  ["standard", "look.reading", "look.keeps_a_line_short_enough"],
+  ["full", "feedback.full_width", "look.prose_follows_the_window_with"],
+  ["full-all", "look.full_width_composer_too", "look.prose_and_the_composer_both"],
+  ["custom", "look.custom_percentage", "look.set_the_conversation_and_composer"],
 ];
 
 const EFFECTS: [EffectsMode, string, string][] = [
-  ["full", "完整", "背景模糊、动态天空与颗粒质感全部开启"],
-  ["reduced", "节能", "关闭背景模糊、动态天空与颗粒质感，集成显卡或老旧电脑上更省电"],
+  ["full", "look.full", "look.background_blur_the_animated_sky"],
+  ["reduced", "look.reduced", "look.turns_off_background_blur_the"],
 ];
 
 const CONTRASTS: [string, string, string][] = [
-  ["", "跟随系统", "系统已开启「增强对比度」时使用最强档"],
-  ["soft", "柔和", "正文不易刺眼，长时间阅读更省力"],
-  ["normal", "标准", "介于两者之间"],
-  ["strong", "更强", "环境光较强，或需要更清晰的边界"],
+  ["", "look.follow_the_system", "look.uses_the_strongest_step_when"],
+  ["soft", "look.soft", "look.softer_body_text_easier_over"],
+  ["normal", "look.standard", "look.between_the_two"],
+  ["strong", "look.stronger", "look.bright_surroundings_or_when_edges"],
 ];
 
 // WebKit 的滑块轨道不知道当前值，填充比例得由调用方喂进来。

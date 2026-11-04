@@ -5,11 +5,11 @@ import type { AgentPort, BackupCatalog, BackupCategory, BackupEntry } from "../p
 import { accountBackupSource, BackupRestore, CATEGORY_LABEL } from "./BackupRestore";
 
 export const CATEGORY_NOTE: Record<BackupCategory, string> = {
-  settings: "供应商、默认模型、预设与界面外观；不含审批模式、权限和沙箱",
-  extensions: "插件只记录来源与版本，恢复时仍走插件安装确认",
-  memory: "用户级指令文件与全局记忆",
-  automation: "会在本机运行的命令，恢复时逐项确认",
-  secrets: "默认不备份。勾选后密钥会随备份一起加密上传",
+  settings: "data.providers_default_model_presets_and",
+  extensions: "data.plugins_are_recorded_by_source",
+  memory: "data.user_level_instruction_files_and",
+  automation: "data.commands_that_run_on_this",
+  secrets: "data.off_by_default_when_ticked",
 };
 
 // Shown only to a signed-in account: a backup lives in the account, so there

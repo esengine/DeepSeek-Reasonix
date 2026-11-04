@@ -24,12 +24,12 @@ const ORIGIN_TOOL = "origin_check";
 // the sentence it gave the model; a reader gets that class in their own
 // language, and an unknown one falls back to what the model was told.
 const EXPLICIT_APPROVAL: Record<string, string> = {
-  dynamic_bash: "这条命令里嵌套或间接地执行了别的命令。自动放行和宽泛的允许规则都无法确认真正会跑的是什么；要么批准这一条，要么切到全部放行。",
-  browser_credential: "这一步会把密码、一次性验证码或银行卡信息输入网站。自动放行、该站点已有的授权和宽泛规则都不能代你回答；要么批准，要么切到全部放行。",
-  computer_use: "这会读取或操作电脑上的另一个应用，拿到的是那个应用本身的权限。自动放行和宽泛规则都不能代你回答；要么为这个应用批准，要么切到全部放行。",
-  computer_front: "这会操作电脑上的另一个应用，拿到的是那个应用本身的权限。Windows 只把按键送给最前面的窗口，所以输入文字、按键和粘贴会先把这个应用切到前台。自动放行和宽泛规则都不能代你回答；要么为这个应用批准，要么切到全部放行。",
-  origin_text: "这条调用里的文字，和本次任务从外部读到的内容（网页或工具结果）逐字相同。自动放行、全部放行和记住的答案都不能代你回答；请只批准这一次调用，或拒绝。",
-  computer_pointer: "这一步会接管你正在用的鼠标指针——移动它、用它点击，并把那个应用切到前台，而不是让界面元素自己动作。自动放行、该应用已有的授权和宽泛规则都不能代你回答；要么批准，要么切到全部放行。用完指针会回到原处。",
+  dynamic_bash: "chat.this_command_runs_another_command",
+  browser_credential: "chat.this_step_types_a_password",
+  computer_use: "chat.this_reads_or_operates_another",
+  computer_front: "chat.this_operates_another_application_on",
+  origin_text: "chat.text_in_this_call_is",
+  computer_pointer: "chat.this_step_takes_the_pointer",
 };
 
 const TASK_PREVIEW = 280;

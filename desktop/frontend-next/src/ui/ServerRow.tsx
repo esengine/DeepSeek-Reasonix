@@ -13,28 +13,28 @@ import { listMatcher } from "./listsearch";
 // connected: its tools are in the catalog and the process starts on the first
 // call. Calling that "not connected" beside a Reconnect button reads as broken.
 const MCP_STATE: Record<string, string> = {
-  ready: "已连接",
-  connecting: "连接中",
-  failed: "无法连接",
-  disabled: "已关闭",
-  standby: "待命 · 首次调用时启动",
-  idle: "未连接",
+  ready: "remote.connected",
+  connecting: "remote.connecting_2",
+  failed: "models.unreachable",
+  disabled: "ext.disabled",
+  standby: "ext.standby_starts_on_first_call",
+  idle: "common.not_connected",
   // Project declarations require approval before the server can launch.
-  pending: "待授权 · 来自项目声明",
+  pending: "ext.awaiting_approval_declared_by_the",
 };
 
 // Why a pending server waits, keyed by the kernel's code. The state label
 // already says a project declared it; a code with no entry adds nothing.
 const PENDING_WHY: Record<string, string> = {
-  changed_since_enabled: "启用之后它要启动的内容变了，或是由旧版本启用的。确认下面的命令后重新启用。",
+  changed_since_enabled: "ext.what_it_launches_changed_since",
 };
 
 // How a withheld tool differs from what the user approved, keyed by the kernel's
 // class. A class with no entry is shown as the kernel wrote it.
 const HELD_CLASS: Record<string, string> = {
-  added: "新增",
-  changed: "定义有改动",
-  unverifiable: "无法核对",
+  added: "ext.added",
+  changed: "ext.definition_changed",
+  unverifiable: "ext.cannot_be_checked",
 };
 
 // A tag only when the schema carries the server's tools or config asks it to:

@@ -16,8 +16,8 @@ const LABEL: Record<string, string> = {
 // What changes for the person reading it. Only the 5.1 line is a warning: it is
 // the one interpreter that refuses syntax the model writes by habit.
 const NOTE: Record<string, string> = {
-  pwsh: "支持 && 和 ||，但语法仍为 PowerShell，而非 bash",
-  powershell: "不支持 && 和 ||，链式命令需拆分为两条",
+  pwsh: "app.understands_and_but_the_syntax",
+  powershell: "app.does_not_accept_or_chained",
 };
 
 const label = (o: ShellOption) => LABEL[o.name] ?? o.name;

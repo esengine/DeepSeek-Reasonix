@@ -29,9 +29,9 @@ export function shortArgs(raw: string) {
 // GOAL_STATUS is the vocabulary update_goal is allowed to report, and each entry
 // says what the model just claimed rather than naming the enum value.
 export const GOAL_STATUS: Record<string, [string, string]> = {
-  complete: ["宣告做完", "ok"],
-  continue: ["还在做", "run"],
-  blocked: ["卡住了，要你介入", "warn"],
+  complete: ["app.claims_it_is_done", "ok"],
+  continue: ["app.still_working", "run"],
+  blocked: ["app.stuck_needs_you", "warn"],
 };
 
 // goalUpdate reads what update_goal was called with. It falls back to a regex

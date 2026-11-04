@@ -16,13 +16,13 @@ const GAP = 7;
 // plan until it has been shown — so the gaps are what the second stage displays,
 // read from the plan rather than written here as a standing caveat.
 const SCOPES: { value: RewindScope; label: string; files: boolean }[] = [
-  { value: "both", label: "代码和对话", files: true },
-  { value: "code", label: "只还原代码", files: true },
-  { value: "conversation", label: "只回退对话", files: false },
+  { value: "both", label: "chat.code_and_conversation", files: true },
+  { value: "code", label: "chat.code_only", files: true },
+  { value: "conversation", label: "chat.conversation_only", files: false },
 ];
 
 const GAP_REASONS: Record<string, string> = {
-  bash_side_effect: "bash 命令所作的修改没有快照",
+  bash_side_effect: "chat.changes_made_by_bash_commands",
 };
 
 type Stage =

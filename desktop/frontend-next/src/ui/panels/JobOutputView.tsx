@@ -12,7 +12,7 @@ import { StudioIcon } from "../StudioIcon";
 
 const POLL_MS = 2000;
 const GONE = "job.not_running";
-const ENDED: Record<string, string> = { done: "已完成", failed: "失败", killed: "已停止", interrupted: "已中断" };
+const ENDED: Record<string, string> = { done: "common.done_2", failed: "common.failed", killed: "plan.stopped", interrupted: "common.interrupted" };
 
 /** What a background job has printed, for the person looking at it. It reads
  *  again every couple of seconds while the job runs and stops when it ends or
