@@ -375,6 +375,13 @@ Remote-SSH 式的体验。它在远端主机上引导一个常驻的 headless `r
 连接。凭据沿用 provider 惯例:主机只记录环境变量名(`passphrase_env`、`password_env`),其值
 存放在 Reasonix 全局 `.env` 中;私钥内容本身从不存储 —— `identity_file` 只是路径。
 
+SSH keyboard-interactive 登录支持 OTP 和密码加 OTP：
+
+- Studio 和 CLI 逐题询问，保留服务器的标题、说明、问题顺序和回显设置。
+- 回答不会从 `password_env` 获取，也不会保存或复用；重新连接（包括跳板机）时需要重新回答。
+- 可取消对话框，或在 CLI 中按 Ctrl-C。认证等待时间受连接的拨号超时限制。
+- 没有交互回调的无界面调用不能完成此认证；密钥、agent 和普通密码登录不受影响。
+
 Studio 的主机级读取与未指定目录的打开，共用该主机显式配置的 `workspace`。
 只有它未设置时，才回退到 `workspaces` 中第一个非空目录；两者均未设置时传入空目录。
 打开操作显式指定的路径优先。调整其他目录的顺序不会覆盖已声明的 `workspace`。

@@ -466,6 +466,17 @@ follow the provider idiom: the host names an env var (`passphrase_env`,
 `password_env`) whose value lives in Reasonix's global `.env`; key material
 itself is never stored — `identity_file` is a path.
 
+SSH keyboard-interactive login supports OTP and password-plus-OTP:
+
+- Studio and CLI ask each server question explicitly, preserving its title,
+  instructions, question order, and echo setting.
+- Answers never come from `password_env` and are never saved or reused.
+  Reconnects ask afresh, including on jump hosts.
+- Cancel the dialog or press Ctrl-C in the CLI to stop answering.
+  Authentication is bounded by the connection's dial timeout.
+- Headless callers without a challenge prompt cannot complete this method.
+  Keys, agent, and normal password login remain available.
+
 Studio uses that host's explicit `workspace` as the default for host-level reads
 and opens that omit a workspace.
 

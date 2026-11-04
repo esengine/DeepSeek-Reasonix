@@ -295,7 +295,7 @@ func (p prompts) build() attach.Prompts {
 	if p.asks == nil {
 		return attach.Prompts{}
 	}
-	return attach.Prompts{Secret: p.secret, HostKey: p.hostKey}
+	return attach.Prompts{Secret: p.secret, HostKey: p.hostKey, Challenge: p.challenge}
 }
 
 func (p prompts) hostKey(ctx context.Context, q remote.HostKeyQuestion) (bool, error) {
@@ -323,6 +323,25 @@ func (p prompts) secret(ctx context.Context, kind remote.SecretKind, host, ident
 	}
 	if !answer.OK {
 		return "", errors.New("remote: cancelled")
+	}
+	return answer.Text, nil
+}
+
+func (p prompts) challenge(ctx context.Context, q remote.Challenge) (string, error) {
+	answer, err := p.asks.Ask(ctx, serve.Ask{
+		Kind:           "keyboard-interactive",
+		Host:           q.Host,
+		Name:           q.Name,
+		Instruction:    q.Instruction,
+		Question:       q.Question,
+		Echo:           q.Echo,
+		AnswerRequired: q.AnswerRequired,
+	})
+	if err != nil {
+		return "", err
+	}
+	if !answer.OK {
+		return "", context.Canceled
 	}
 	return answer.Text, nil
 }

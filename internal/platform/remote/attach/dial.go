@@ -13,8 +13,9 @@ import (
 // only, and no HostKey means a first-seen key is rejected rather than asked
 // about, which is the safe direction for an unattended caller.
 type Prompts struct {
-	Secret  remote.SecretPrompt
-	HostKey remote.HostKeyPrompt
+	Secret    remote.SecretPrompt
+	HostKey   remote.HostKeyPrompt
+	Challenge remote.ChallengePrompt
 }
 
 // Dial resolves a configured host — layering ~/.ssh/config under it where the
@@ -34,7 +35,9 @@ func Dial(cfg *config.Config, nameOrTarget string, prompts Prompts) (*remote.Cli
 	}
 	hops := make([]remote.JumpHostOptions, 0, len(jumps))
 	for _, jump := range jumps {
-		hops = append(hops, remote.JumpHostOptions{Host: jump, Auth: AuthFor(jump, prompts.Secret)})
+		auth := AuthFor(jump, prompts.Secret)
+		auth.ChallengePrompt = prompts.Challenge
+		hops = append(hops, remote.JumpHostOptions{Host: jump, Auth: auth})
 	}
 	// A misconfigured proxy is surfaced, not silently bypassed: a proxy is often
 	// a policy requirement, and quietly dialing direct would route the
@@ -43,9 +46,11 @@ func Dial(cfg *config.Config, nameOrTarget string, prompts Prompts) (*remote.Cli
 	if err != nil {
 		return nil, fmt.Errorf("remote: network proxy is misconfigured: %w", err)
 	}
+	auth := AuthFor(host, prompts.Secret)
+	auth.ChallengePrompt = prompts.Challenge
 	return remote.New(remote.Options{
 		Host:      host,
-		Auth:      AuthFor(host, prompts.Secret),
+		Auth:      auth,
 		JumpHosts: hops,
 		HostKeys:  &remote.HostKeyPolicy{Prompt: prompts.HostKey},
 		Dialer:    dialer,

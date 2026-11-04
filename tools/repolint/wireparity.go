@@ -52,6 +52,7 @@ var mirroredWireTypes = slices.Concat(mirroredWireTypesHead, mirroredWireTypesTa
 // mirroredWireTypesHead is the table's first half; wireparity_table.go holds
 // the rest.
 var mirroredWireTypesHead = []wireMirror{
+	{"internal/frontend/serve/ask.go", "Ask", tsRemoteFile, "RemoteAsk"},
 	{"internal/frontend/serve/workspace_files.go", "workspaceFile", tsWorkspaceFile, "WorkspaceFile"},
 	{"internal/base/workspacefile/file.go", "Ref", tsWorkspaceFile, "FileRef"},
 	{"internal/base/workspacefile/file.go", "Info", tsWorkspaceFile, "PreviewInfo"},

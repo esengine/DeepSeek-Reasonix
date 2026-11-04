@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -54,8 +55,13 @@ type Ask struct {
 	KeyType     string `json:"keyType,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	// Set for a locked key: which file it is.
-	IdentityFile string    `json:"identityFile,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
+	IdentityFile   string    `json:"identityFile,omitempty"`
+	Name           string    `json:"name,omitempty"`
+	Instruction    string    `json:"instruction,omitempty"`
+	Question       string    `json:"question,omitempty"`
+	Echo           bool      `json:"echo,omitempty"`
+	AnswerRequired bool      `json:"answerRequired,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 // AskAnswer is what a person said. Text is the secret where one was asked for,
@@ -69,7 +75,8 @@ type AskAnswer struct {
 // from a second opinion. There are never many, and they last one launch.
 type settled struct {
 	cancelled bool
-	answer    AskAnswer
+	ok        bool
+	digest    [sha256.Size]byte
 }
 
 type live struct {
@@ -179,7 +186,7 @@ func (b *AskBroker) Answer(epoch, operationID, askID string, answer AskAnswer) e
 	}
 	if open {
 		delete(b.open, askID)
-		b.past[askID] = settled{answer: answer}
+		b.past[askID] = settled{ok: answer.OK, digest: sha256.Sum256([]byte(answer.Text))}
 		b.mu.Unlock()
 		held.reply <- answer
 		return nil
@@ -191,7 +198,7 @@ func (b *AskBroker) Answer(epoch, operationID, askID string, answer AskAnswer) e
 		return errAskNotFound
 	case before.cancelled:
 		return errAskCancelled
-	case before.answer != answer:
+	case before.ok != answer.OK || before.digest != sha256.Sum256([]byte(answer.Text)):
 		return errAskAlreadyResolved
 	default:
 		return nil

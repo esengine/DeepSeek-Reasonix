@@ -31,16 +31,30 @@ func (k SecretKind) String() string {
 // stopped or superseded.
 type SecretPrompt func(ctx context.Context, kind SecretKind, host, identityFile string) (string, error)
 
+// Challenge is one server-provided keyboard-interactive question.
+// AnswerRequired is false for an instruction-only round.
+type Challenge struct {
+	Host           string
+	Name           string
+	Instruction    string
+	Question       string
+	Echo           bool
+	AnswerRequired bool
+}
+
+// ChallengePrompt asks the user afresh; answers must never be cached or stored.
+type ChallengePrompt func(context.Context, Challenge) (string, error)
+
 // AuthOptions supplies credential resolution for a dial. Passphrase and
 // Password return already-resolved credential-store values (nil when none is
-// configured). SecretPrompt is the interactive fallback — a terminal prompt in
-// the CLI, a dialog in the desktop — and is only ever called on the first
-// connect; reconnects reuse in-memory-cached secrets and never prompt.
+// configured). SecretPrompt resolves reusable secrets; ChallengePrompt handles
+// fresh server challenges on every connect, including reconnects.
 type AuthOptions struct {
-	Passphrase   func() (string, error)
-	Password     func() (string, error)
-	SecretPrompt SecretPrompt
-	DisableAgent bool
+	Passphrase      func() (string, error)
+	Password        func() (string, error)
+	SecretPrompt    SecretPrompt
+	ChallengePrompt ChallengePrompt
+	DisableAgent    bool
 
 	// cache holds secrets obtained during the first connect so the supervisor
 	// can reconnect silently. Populated by the auth methods.
@@ -107,6 +121,8 @@ func buildAuthMethods(ctx context.Context, h ResolvedHost, opts *AuthOptions) ([
 
 	if opts.Password != nil || opts.SecretPrompt != nil {
 		fallback = append(fallback, passwordAuth(ctx, h, opts))
+	}
+	if opts.ChallengePrompt != nil {
 		fallback = append(fallback, keyboardInteractiveAuth(ctx, h, opts))
 	}
 	return fallback, publicKeyAuthCallback(publicKeys), cleanup, nil
@@ -230,18 +246,40 @@ func passwordAuth(ctx context.Context, h ResolvedHost, opts *AuthOptions) ssh.Au
 }
 
 func keyboardInteractiveAuth(ctx context.Context, h ResolvedHost, opts *AuthOptions) ssh.AuthMethod {
-	return ssh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) ([]string, error) {
-		// Never copy a password into echoed, OTP, or multi-question prompts.
-		// The current callback models only a password secret, so support the
-		// common single hidden-password challenge and fail closed otherwise.
-		if len(questions) != 1 || len(echos) != 1 || echos[0] {
-			return nil, fmt.Errorf("remote: unsupported keyboard-interactive challenge from %s", h.Label())
-		}
-		pw, err := resolvePassword(ctx, h, opts)
-		if err != nil {
+	return ssh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) (answers []string, err error) {
+		defer func() {
+			if err != nil {
+				err = fmt.Errorf("%w: %w", ErrAuthFailed, err)
+			}
+		}()
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		return []string{pw}, nil
+		if opts.ChallengePrompt == nil {
+			return nil, fmt.Errorf("remote: interactive challenge requires a prompt")
+		}
+		if len(questions) != len(echos) {
+			return nil, fmt.Errorf("remote: invalid keyboard-interactive challenge")
+		}
+		q := Challenge{Host: h.Label(), Name: name, Instruction: instruction}
+		answers = make([]string, len(questions))
+		if len(questions) == 0 {
+			_, err := opts.ChallengePrompt(ctx, q)
+			return answers, err
+		}
+		q.AnswerRequired = true
+		for i, question := range questions {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			q.Question, q.Echo = question, echos[i]
+			answer, err := opts.ChallengePrompt(ctx, q)
+			if err != nil {
+				return nil, err
+			}
+			answers[i] = answer
+		}
+		return answers, ctx.Err()
 	})
 }
 

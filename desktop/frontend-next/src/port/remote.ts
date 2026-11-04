@@ -125,7 +125,8 @@ export interface RemoteAsk {
   epoch: string;
   operationId: string;
   askId: string;
-  kind: "hostkey" | "passphrase" | "password";
+  createdAt: string;
+  kind: "hostkey" | "passphrase" | "password" | "keyboard-interactive";
   host: string;
   // hostkey: what the machine presented, to compare against what the person
   // was told it should be. Never pre-answered — accepting a fingerprint
@@ -135,6 +136,11 @@ export interface RemoteAsk {
   fingerprint?: string;
   // passphrase: which key file is locked.
   identityFile?: string;
+  name?: string;
+  instruction?: string;
+  question?: string;
+  echo?: boolean;
+  answerRequired?: boolean;
 }
 
 /** One way a kernel could reach a machine. A closed route carries the same

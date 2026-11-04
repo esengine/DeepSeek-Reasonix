@@ -306,7 +306,6 @@ export class SseHub implements HubPort {
   // kernel will check it against.
   private readonly asked = new Map<string, RemoteAsk>();
   private readonly askSubs = new Set<(ask: RemoteAsk) => void>();
-  private dialing = 0;
   private askTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: { mux?: boolean } = {}) {
@@ -548,13 +547,19 @@ export class SseHub implements HubPort {
     return this.get<WSLDistros>("/remotes/wsl");
   }
 
-  // The question is state the kernel holds, and this is how it is found. No
-  // stream carries it: it exists only while a dial this client started is still
-  // waiting, and that is a thing the client already knows.
+  // Reconnects can ask after the initiating request ends. The subscription owns
+  // discovery for as long as this window can answer.
   onRemoteAsk(cb: (ask: RemoteAsk) => void) {
     this.askSubs.add(cb);
+    void this.sweepAsks();
+    this.askTimer ??= setInterval(() => void this.sweepAsks(), ASK_POLL_MS);
     return () => {
       this.askSubs.delete(cb);
+      if (this.askSubs.size === 0) {
+        clearInterval(this.askTimer ?? undefined);
+        this.askTimer = null;
+        this.asked.clear();
+      }
     };
   }
 
@@ -572,23 +577,9 @@ export class SseHub implements HubPort {
     }).catch(() => {});
   }
 
-  // dial runs a request that may stop to ask something. The question arrives
-  // before this response does, so the operation names itself up front and the
-  // client looks for questions under that name while it waits.
+  // The operation names itself before the response can arrive.
   private async dial<T>(run: (operationId: string) => Promise<T>): Promise<T> {
-    const operationId = crypto.randomUUID();
-    this.dialing++;
-    void this.sweepAsks();
-    this.askTimer ??= setInterval(() => void this.sweepAsks(), ASK_POLL_MS);
-    try {
-      return await run(operationId);
-    } finally {
-      this.dialing--;
-      if (this.dialing === 0 && this.askTimer !== null) {
-        clearInterval(this.askTimer);
-        this.askTimer = null;
-      }
-    }
+    return run(crypto.randomUUID());
   }
 
   // A missed round costs nothing: the snapshot is the record, so the next one
@@ -597,6 +588,7 @@ export class SseHub implements HubPort {
     const res = await fetch("/asks", { credentials: "same-origin" }).catch(() => null);
     if (!res?.ok) return;
     const body = (await res.json().catch(() => null)) as { asks?: RemoteAsk[] } | null;
+    if (this.askSubs.size === 0) return;
     for (const ask of body?.asks ?? []) {
       if (this.asked.has(ask.askId)) continue;
       this.asked.set(ask.askId, ask);

@@ -69,7 +69,7 @@ type Client struct {
 // omits the target's Password/Passphrase closures and gives each jump host its
 // own secret cache, so the target's password_env is never sent to a jump host
 // and one hop's typed secret is never reused for another. The instance persists
-// for the Client's lifetime so reconnects do not re-prompt for jump secrets.
+// for the Client's lifetime; keyboard-interactive answers are never cached.
 func (c *Client) hopAuthFor(hop ResolvedHost) *AuthOptions {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -81,8 +81,9 @@ func (c *Client) hopAuthFor(hop ResolvedHost) *AuthOptions {
 		return a
 	}
 	a := &AuthOptions{
-		SecretPrompt: c.opts.Auth.SecretPrompt,
-		DisableAgent: c.opts.Auth.DisableAgent,
+		SecretPrompt:    c.opts.Auth.SecretPrompt,
+		DisableAgent:    c.opts.Auth.DisableAgent,
+		ChallengePrompt: c.opts.Auth.ChallengePrompt,
 	}
 	c.hopAuths[key] = a
 	return a
