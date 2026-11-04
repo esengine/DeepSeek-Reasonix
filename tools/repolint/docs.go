@@ -32,7 +32,6 @@ const (
 
 const (
 	docProseWidth        = 320
-	releaseNoteItemWidth = 200
 	proseWeightUnit      = 80
 	docMetadataDelimiter = "---"
 )
@@ -321,14 +320,10 @@ func checkReleaseNoteBody(rel string, lines []string, offset int, groups []strin
 		case !changeReference.MatchString(b.text):
 			out = append(out, Finding{rel, offset + b.line, ruleReleaseNote, "a change names its issue, pull request or commit", 1})
 		}
-		limit := docProseWidth
-		if b.item {
-			limit = releaseNoteItemWidth
-		}
-		if b.width > limit {
+		if !b.item && b.width > docProseWidth {
 			out = append(out, Finding{rel, offset + b.line, ruleDocProse,
-				fmt.Sprintf("%s is %d columns, over %d", blockKind(b), b.width, limit),
-				(b.width - limit + proseWeightUnit - 1) / proseWeightUnit})
+				fmt.Sprintf("%s is %d columns, over %d", blockKind(b), b.width, docProseWidth),
+				(b.width - docProseWidth + proseWeightUnit - 1) / proseWeightUnit})
 		}
 	}
 	return out

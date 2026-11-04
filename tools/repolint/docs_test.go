@@ -191,8 +191,8 @@ func TestAReleaseNoteIsGroupedReferencedAndShort(t *testing.T) {
 	for _, f := range got {
 		byRule[f.Rule]++
 	}
-	if byRule[ruleReleaseNote] != 4 || byRule[ruleDocProse] != 1 {
-		t.Fatalf("findings = %+v, want sub-heading, unknown group, unreferenced item, second paragraph, and one long item", got)
+	if byRule[ruleReleaseNote] != 4 || byRule[ruleDocProse] != 0 {
+		t.Fatalf("findings = %+v, want sub-heading, unknown group, unreferenced item and second paragraph, with the long referenced item left alone", got)
 	}
 }
 
