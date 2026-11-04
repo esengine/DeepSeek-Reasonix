@@ -20,19 +20,19 @@ const STEPS: Record<Phase, StepsState> = {
 
 function badgeOf(phase: Phase, n: number, total: number, settled: string): string {
   switch (phase) {
-    case "pending": return t("待确认");
-    case "running": return t("第 {n} / {total} 步", { n, total });
-    case "waiting": return t("等你定");
-    case "stopped": return t("已停下");
-    case "done": return t("做完了");
+    case "pending": return t("plan.badge.pending");
+    case "running": return t("plan.badge.step", { n, total });
+    case "waiting": return t("plan.badge.waiting");
+    case "stopped": return t("plan.badge.stopped");
+    case "done": return t("plan.badge.done");
     case "settled": return settled;
   }
 }
 
 function settledWords(verdict?: string): [string, string] {
-  if (verdict === "exit") return [t("暂不执行"), t("已退出计划模式，可随时重新下达。")];
-  if (verdict === "revise" || verdict === "deny") return [t("继续规划"), t("在下方说明需要修改的内容，规划者将据此重写该计划。")];
-  return [t("已在其他窗口处理"), t("请以最新运行状态为准。")];
+  if (verdict === "exit") return [t("plan.settled.exit"), t("plan.settled.exit_note")];
+  if (verdict === "revise" || verdict === "deny") return [t("plan.settled.revise"), t("plan.settled.revise_note")];
+  return [t("plan.settled.elsewhere"), t("plan.settled.elsewhere_note")];
 }
 
 // One plan, one card: proposed, running, waiting on a person and finished are
@@ -79,17 +79,17 @@ export function PlanCard({ item, onPlan }: { item: Extract<Item, { t: "approval"
   const at = steps[currentStep(steps)] ?? steps[n - 1];
   const settled = settledWords(item.verdict);
   const badge = badgeOf(phase, n, steps.length, settled[0]);
-  const sub = phase === "running" && at ? <><RMark className="plan-spin" />{t("正在做：{step}", { step: stepLabel(at) })}</>
-    : (phase === "waiting" || phase === "stopped") && at ? t("停在第 {n} 步：{step}", { n, step: stepLabel(at) })
-      : phase === "done" ? t("{n} 步全部完成", { n: steps.length })
+  const sub = phase === "running" && at ? <><RMark className="plan-spin" />{t("plan.now", { step: stepLabel(at) })}</>
+    : (phase === "waiting" || phase === "stopped") && at ? t("plan.stopped_at", { n, step: stepLabel(at) })
+      : phase === "done" ? t("plan.all_done", { n: steps.length })
         : phase === "settled" ? settled[1] : null;
 
   return (
     <div className="call" data-k="plan" data-prompt={sealed ? "settled" : "pending"}>
-      <section className="plan-card" data-phase={phase} ref={card} aria-label={t("计划")} aria-busy={!!submitting}>
+      <section className="plan-card" data-phase={phase} ref={card} aria-label={t("plan.title")} aria-busy={!!submitting}>
         <header className="plan-card-head">
           <div className="plan-card-title">
-            <b>{t("计划")}</b>
+            <b>{t("plan.title")}</b>
             <span className="plan-card-badge">{badge}</span>
           </div>
           {sub && <div className="plan-card-sub">{sub}</div>}
@@ -99,18 +99,18 @@ export function PlanCard({ item, onPlan }: { item: Extract<Item, { t: "approval"
           <footer className="plan-card-foot">
             <button type="button" className="plan-card-btn" data-primary data-action="decision.plan" data-target={item.a.id} data-value="start"
               disabled={!!submitting} onClick={() => void decide("start")}>
-              {submitting === "start" ? t("正在提交…") : t("开始执行")}
+              {submitting === "start" ? t("common.submitting") : t("plan.action.start")}
             </button>
             <button type="button" className="plan-card-btn" data-action="decision.plan" data-target={item.a.id} data-value="revise"
               disabled={!!submitting} onClick={() => void decide("revise")}>
-              {t("修改计划")}
+              {t("plan.action.revise")}
             </button>
             <button type="button" className="plan-card-btn" data-quiet data-action="decision.plan" data-target={item.a.id} data-value="exit"
               disabled={!!submitting} onClick={() => void decide("exit")}>
-              {t("暂不执行")}
+              {t("plan.action.exit")}
             </button>
             {/* Revising is not discarding: it keeps planning, which is how a plan gets changed. */}
-            <span className="plan-card-hint">{t("「修改计划」将保持在计划模式中，请在下方说明需要修改之处。")}</span>
+            <span className="plan-card-hint">{t("plan.revise_hint")}</span>
           </footer>
         )}
       </section>

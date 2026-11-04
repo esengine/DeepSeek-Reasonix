@@ -36,7 +36,7 @@ export function PlanSteps({ steps, state }: { steps: PlanStep[]; state: StepsSta
         const mark: Mark = proposed ? "todo" : stepDone(st) ? "done" : i === now ? "now" : "todo";
         return (
           <li key={id[i]} className="plan-step" data-state={mark} style={{ marginInlineStart: stepIndent(st) }}>
-            <span className="plan-step-mark" aria-label={mark === "done" ? t("已完成") : mark === "now" ? t("进行中") : t("未开始")}>
+            <span className="plan-step-mark" aria-label={mark === "done" ? t("plan.step.done") : mark === "now" ? t("plan.step.now") : t("plan.step.todo")}>
               {mark === "done" ? <StudioIcon name="check" /> : mark === "now" && state === "moving" ? <RMark className="plan-spin" />
                 : mark === "now" && state === "waiting" ? null : i + 1}
             </span>

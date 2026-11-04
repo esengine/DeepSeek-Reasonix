@@ -75,25 +75,25 @@ export function SubagentGroup({ tasks, port }: { tasks: Task[]; port?: Stopper }
   const stop = port?.stopToolCall ? (x: Task) => void port.stopToolCall!(x.tool.id!).catch(() => {}) : undefined;
   const closed = settled && !open;
   return (
-    <section className="agent-group" data-settled={settled ? "" : undefined} aria-label={t("{n} 个子代理并行", { n: tasks.length })}>
+    <section className="agent-group" data-settled={settled ? "" : undefined} aria-label={t("subagent.group.parallel", { n: tasks.length })}>
       <header className="agent-group-head">
         <StudioIcon name="branch" className="agent-group-icon" />
-        <b>{closed ? t("{n} 个子代理", { n: tasks.length }) : t("{n} 个子代理并行", { n: tasks.length })}</b>
+        <b>{closed ? t("subagent.group.count", { n: tasks.length }) : t("subagent.group.parallel", { n: tasks.length })}</b>
         {closed ? (
-          <span className="agent-group-sum">{failed === 0 ? t("{n} 个都已交付", { n: done }) : t("{n} 交付", { n: done })}{total > 0 && ` · ${elapsed(total)}`}</span>
+          <span className="agent-group-sum">{failed === 0 ? t("subagent.group.all_delivered", { n: done }) : t("subagent.group.delivered", { n: done })}{total > 0 && ` · ${elapsed(total)}`}</span>
         ) : (
           <>
-            {running > 0 && <span className="agent-pill" data-tone="run">{t("{n} 运行中", { n: running })}</span>}
-            {failed > 0 && <span className="agent-pill" data-tone="err">{t("{n} 失败", { n: failed })}</span>}
-            {done > 0 && <span className="agent-group-done">{t("{n} 交付", { n: done })}</span>}
+            {running > 0 && <span className="agent-pill" data-tone="run">{t("subagent.group.running", { n: running })}</span>}
+            {failed > 0 && <span className="agent-pill" data-tone="err">{t("subagent.group.failed", { n: failed })}</span>}
+            {done > 0 && <span className="agent-group-done">{t("subagent.group.delivered", { n: done })}</span>}
           </>
         )}
         <span className="agent-group-fill" />
         {running > 0 && stop && (
-          <button type="button" className="agent-quiet" data-action="agent.stop-all" onClick={() => tasks.filter((x) => x.running && x.tool.id).forEach(stop)}>{t("全部停止")}</button>
+          <button type="button" className="agent-quiet" data-action="agent.stop-all" onClick={() => tasks.filter((x) => x.running && x.tool.id).forEach(stop)}>{t("common.stop_all")}</button>
         )}
         {settled && (
-          <button type="button" className="agent-quiet" data-action="agent.group-fold" aria-expanded={open} onClick={() => setTouched(!open)}>{open ? t("收起") : t("展开")}</button>
+          <button type="button" className="agent-quiet" data-action="agent.group-fold" aria-expanded={open} onClick={() => setTouched(!open)}>{open ? t("common.collapse") : t("common.expand")}</button>
         )}
       </header>
       {open && (
@@ -112,9 +112,9 @@ function AgentRow({ task, status, onStop }: { task: Task; status: DelegateStatus
   const steps = task.children.length;
   const now = status === "running" ? task.children[task.children.length - 1] : undefined;
   const took = task.tool.durationMs ? elapsed(task.tool.durationMs) : "";
-  const reading = status === "running" ? [t("第 {n} 步", { n: Math.max(steps, 1) }), watched ? elapsed(watched) : ""]
-    : status === "done" ? [t("已交付"), steps ? t("{n} 步", { n: steps }) : "", took]
-      : [status === "refused" ? t("未执行") : t("失败"), took];
+  const reading = status === "running" ? [t("subagent.step", { n: Math.max(steps, 1) }), watched ? elapsed(watched) : ""]
+    : status === "done" ? [t("subagent.state.delivered"), steps ? t("subagent.steps", { n: steps }) : "", took]
+      : [status === "refused" ? t("subagent.state.not_run") : t("subagent.state.failed"), took];
   return (
     <div className="agent-row" data-status={status} data-call={task.tool.id || undefined}>
       <div className="agent-row-line">
@@ -130,10 +130,10 @@ function AgentRow({ task, status, onStop }: { task: Task; status: DelegateStatus
           {(status === "failed" || status === "refused") && <StudioIcon name="close" />}
         </span>
         {status === "running" && onStop && task.tool.id && (
-          <button type="button" className="agent-quiet" data-action="tool.stop" onClick={() => onStop(task)}>{t("停止")}</button>
+          <button type="button" className="agent-quiet" data-action="tool.stop" onClick={() => onStop(task)}>{t("common.stop")}</button>
         )}
         {open && task.tool.id && (
-          <button type="button" className="agent-open" data-action="agent.open" data-target={task.id} aria-label={t("在工作台打开")} title={t("在工作台打开")}
+          <button type="button" className="agent-open" data-action="agent.open" data-target={task.id} aria-label={t("subagent.open")} title={t("subagent.open")}
             onClick={() => void open(task.tool.id!)}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M10 3v10" /></svg>
           </button>
@@ -141,7 +141,7 @@ function AgentRow({ task, status, onStop }: { task: Task; status: DelegateStatus
       </div>
       {now && (
         <p className="agent-row-note">
-          {t("正在{what}", { what: t(activityVerb(now.name) ?? "执行") })} <code>{shortArgs(now.args ?? "")}</code>
+          {t("subagent.doing", { what: t(activityVerb(now.name) ?? "执行") })} <code>{shortArgs(now.args ?? "")}</code>
         </p>
       )}
       {(status === "failed" || status === "refused") && task.tool.err && <p className="agent-row-note" data-tone="err">{task.tool.err}</p>}

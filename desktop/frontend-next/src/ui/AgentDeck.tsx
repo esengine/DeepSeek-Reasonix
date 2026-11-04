@@ -15,14 +15,14 @@ export function AgentDeck({ tasks, onOpen, onStop }: { tasks: Task[]; onOpen: (t
   return (
     <div className="agent-deck">
       <header className="agent-deck-head">
-        <b>{t("本会话的子代理")}</b>
-        <span>{t("{live} 运行中 · 共 {total}", { live: agentsIn(live), total: agentsIn(tasks) })}</span>
+        <b>{t("subagent.deck.title")}</b>
+        <span>{t("subagent.deck.count", { live: agentsIn(live), total: agentsIn(tasks) })}</span>
       </header>
       {tasks.map((x) => <DeckRow key={x.id} task={x} status={delegateStatus(x.running, x.tool)} onOpen={onOpen} />)}
       <footer className="agent-deck-foot">
-        <span>{t("点一行在工作台打开")}</span>
+        <span>{t("subagent.deck.hint")}</span>
         {live.length > 0 && onStop && (
-          <button type="button" className="agent-quiet" data-action="agent.stop-all" onClick={() => live.forEach((x) => x.tool.id && onStop(x.tool.id))}>{t("全部停止")}</button>
+          <button type="button" className="agent-quiet" data-action="agent.stop-all" onClick={() => live.forEach((x) => x.tool.id && onStop(x.tool.id))}>{t("common.stop_all")}</button>
         )}
       </footer>
     </div>
@@ -33,11 +33,11 @@ function DeckRow({ task, status, onOpen }: { task: Task; status: DelegateStatus;
   const watched = useWatched(status === "running");
   const name = nameOf(task);
   const took = task.tool.durationMs ? elapsed(task.tool.durationMs) : "";
-  const reading = status === "running" ? [t("第 {n} 步", { n: Math.max(task.children.length, 1) }), watched ? elapsed(watched) : ""]
+  const reading = status === "running" ? [t("subagent.step", { n: Math.max(task.children.length, 1) }), watched ? elapsed(watched) : ""]
     : [delegateStatusLabel(status), took];
   return (
     <button type="button" className="ag agent-deck-row" data-status={status} data-action="agent.open" data-target={task.id}
-      aria-label={t("查看完整记录：{name}", { name })} title={status === "failed" ? task.tool.err : undefined} onClick={() => onOpen(task.id)}>
+      aria-label={t("subagent.deck.open_full", { name })} title={status === "failed" ? task.tool.err : undefined} onClick={() => onOpen(task.id)}>
       <AgentAvatar name={name} />
       <span className="agent-deck-who">
         <b>{name}</b>

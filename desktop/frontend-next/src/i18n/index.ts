@@ -1,17 +1,17 @@
 import { EN } from "./en";
+import { catalogue } from "./msg";
 
 // The interface's language. It is not the language the model answers in —
 // that follows what you wrote, per message, and is decided in the kernel.
 // Conflating the two would mean picking English here silenced Chinese replies.
 export type Lang = "zh" | "en";
 
-const DICTS: Record<Lang, Record<string, string>> = { zh: {}, en: EN };
-
-// Chinese source text is the key. Inventing names for 3800 fragments would cost
-// more than it returns, and this way the call site still reads as the sentence
-// it renders — a translation that is missing falls back to the original rather
-// than to a blank or a key. The catalogue's completeness is a test's job, the
-// same way internal/base/i18n does it for the CLI.
+// A message is named by a key ("plan.action.start") whose wording in both
+// languages lives in i18n/msg. Call sites not yet moved there still pass the
+// Chinese source text, which English looks up in en*.ts and Chinese renders as
+// written; both forms resolve through t() until the move is finished.
+const ZH = catalogue("zh");
+const DICTS: Record<Lang, Record<string, string>> = { zh: ZH, en: { ...EN, ...catalogue("en") } };
 let lang: Lang = "zh";
 let dict = DICTS.zh;
 
@@ -83,8 +83,8 @@ export function adopt(configured: string | null | undefined): boolean {
 }
 
 /** t translates, with {name} placeholders filled from vars. */
-export function t(zh: string, vars?: Record<string, string | number>): string {
-  const out = dict[zh] ?? zh;
+export function t(key: string, vars?: Record<string, string | number>): string {
+  const out = dict[key] ?? ZH[key] ?? key;
   if (!vars) return out;
   return out.replace(/\{(\w+)\}/g, (whole, key: string) => (key in vars ? String(vars[key]) : whole));
 }

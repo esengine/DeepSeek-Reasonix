@@ -1,0 +1,25 @@
+import type { Messages } from "./types";
+
+export const SUBAGENT: Messages = {
+  "subagent.group.parallel": { zh: "{n} 个子代理并行", en: "{n} subagents in parallel" },
+  "subagent.group.count": { zh: "{n} 个子代理", en: "{n} subagents" },
+  "subagent.group.all_delivered": { zh: "{n} 个都已交付", en: "All {n} delivered" },
+  "subagent.group.delivered": { zh: "{n} 交付", en: "{n} delivered" },
+  "subagent.group.running": { zh: "{n} 运行中", en: "{n} running" },
+  "subagent.group.failed": { zh: "{n} 失败", en: "{n} failed" },
+  "subagent.step": { zh: "第 {n} 步", en: "Step {n}" },
+  "subagent.steps": { zh: "{n} 步", en: "{n} steps" },
+  "subagent.state.delivered": { zh: "已交付", en: "Delivered" },
+  "subagent.state.not_run": { zh: "未执行", en: "Not run" },
+  "subagent.state.failed": { zh: "失败", en: "Failed" },
+  "subagent.doing": { zh: "正在{what}", en: "Now: {what}" },
+  "subagent.open": { zh: "在工作台打开", en: "Open in the workbench" },
+  "subagent.deck.title": { zh: "本会话的子代理", en: "This session's subagents" },
+  "subagent.deck.count": { zh: "{live} 运行中 · 共 {total}", en: "{live} running · {total} in all" },
+  "subagent.deck.hint": { zh: "点一行在工作台打开", en: "Select a row to open it in the workbench" },
+  "subagent.deck.open_full": { zh: "查看完整记录：{name}", en: "Open full transcript: {name}" },
+  "subagent.tab.stop": { zh: "停止子代理", en: "Stop subagent" },
+  "subagent.tab.task": { zh: "主会话交给它的任务", en: "Task from the main session" },
+  "subagent.tab.read_only": { zh: "子代理的对话只读；要补充要求，在主对话里说，主会话会转达。", en: "A subagent's conversation is read-only; say anything more in the main conversation and it will be passed on." },
+  "subagent.tab.back": { zh: "回到对话里那一组", en: "Back to its group in the conversation" },
+};

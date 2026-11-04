@@ -61,25 +61,25 @@ export function AgentRunView({ port, run, shown, onShowCall }: { port: AgentPort
         <span className="who">{run.name}</span>
         {info?.model && <span className="model">{info.model}</span>}
         {info?.state === "running" && call && port.stopToolCall ? (
-          <button type="button" className="agentrun-stop" data-action="agent.stop" onClick={() => void port.stopToolCall(call).catch(() => {})}>{t("停止子代理")}</button>
+          <button type="button" className="agentrun-stop" data-action="agent.stop" onClick={() => void port.stopToolCall(call).catch(() => {})}>{t("subagent.tab.stop")}</button>
         ) : status && <span className="rt">{status}</span>}
       </div>
       {task && (
         <div className="agentrun-task">
-          <b>{t("主会话交给它的任务")}</b>
+          <b>{t("subagent.tab.task")}</b>
           <p>{task}</p>
         </div>
       )}
       {failed && <div className="workbench-error" role="alert">{failed}</div>}
-      {!failed && !info && <div className="workbench-empty">{t("正在读取…")}</div>}
+      {!failed && !info && <div className="workbench-empty">{t("common.loading")}</div>}
       {info && (
         <Transcript items={items} {...none} scroll={scroll} revision={messages.length} hidden={false} focus={null} onApprove={noop} onFullAccess={noop} onPlan={noop} onAnswer={noop} onForget={noop}
           onExtSubmit={noop} onPrepareRewind={noop} onCommitRewind={noop} onPrepareFileRevert={noop} onCommitFileRevert={noop} port={port} turnRunning={info.state === "running"} />
       )}
       {info && (
         <p className="agentrun-note">
-          {t("子代理的对话只读；要补充要求，在主对话里说，主会话会转达。")}
-          {call && onShowCall && <button type="button" data-action="agent.show-call" onClick={() => onShowCall(call)}>{t("回到对话里那一组")}</button>}
+          {t("subagent.tab.read_only")}
+          {call && onShowCall && <button type="button" data-action="agent.show-call" onClick={() => onShowCall(call)}>{t("subagent.tab.back")}</button>}
         </p>
       )}
     </div>
