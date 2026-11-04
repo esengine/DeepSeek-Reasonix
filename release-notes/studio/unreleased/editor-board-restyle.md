@@ -26,6 +26,7 @@
 - 思考结束时，旧标题淡出、新标题在同一位置淡入；执行过程里运行中的那一行从命令真正开始的时间计秒，重新打开也不会从零算起（caa509712）。
 - 工作台页签栏按设计稿调整：资源管理器固定在最左并显示改动数，新开的标签显示为「+ 新标签」，右端可直接关闭工作台；新标签页改为靠左的「资源管理器 / 文件… / 浏览器」三项加「最近打开」列表；文件页底部新增状态栏，显示语言、光标所在行和「未保存」（a7786999c）。
 - 工作台新增「改动」页：所有改动的文件排在一页，顶部写分支、文件数和增删行数，可「暂存全部 / 提交… / 推送…」；每个文件一个头，能勾选暂存、打开文件、丢弃（会再问一次），下面是带新旧行号的差异；新文件和未跟踪的文件默认收起。点输入框上方的「n 个文件已更改」会打开这一页（f04b06e3c）。
+- 资源管理器的「改动 / 提交历史 / 文件」三段都能折叠；点「改动」标题进改动页；提交历史默认展开，右边写分支，每条显示短哈希、说明和时间，只有历史分叉时才画分支线（02f5a4432）。
 
 ---
 <!-- lang:en -->
@@ -58,3 +59,4 @@
 - When a thought finishes, its running title fades out as the settled one fades in; a running step counts its seconds from when it really started, so reopening does not restart the clock (caa509712).
 - The workbench tab strip follows the board: the explorer is the fixed first tab with the change count, a new tab shows as "+ New tab", and the strip ends with a close button; the new tab lists Explorer / Find a file… / Browser and then recently opened files; a status line under the editor shows the language, the cursor line and "Unsaved" (a7786999c).
 - The workbench has a Changes page: every changed file on one page under the branch, the file count and +/− lines, with Stage all / Commit… / Push…; each file has a header to stage it, open it or discard its change (asking once more), and its diff numbered before and after; new and untracked files start folded. The "n files changed" pill above the composer opens it (f04b06e3c).
+- The explorer's Changes / History / Files sections each fold; the Changes title opens the changes page; History is open from the start with the branch on the right and each commit as its short hash, subject and age, drawing lanes only when history forks (02f5a4432).
