@@ -52,9 +52,9 @@ export function useSizeAsk(look: Appearance, onLook: (next: Appearance) => void)
       open: true,
       node: (
         <ToastRow kind="size" role="status" className="size-ask" actions={<>
-          <button className="act ghost" data-action="size.restore" onClick={() => { onLook({ ...look, zoom: was }); close(); }}>{t("恢复 {n}%", { n: Math.round(was * 100) })}</button>
-          <button className="act" data-action="size.keep" onClick={close}>{t("好")}</button>
-        </>}>{t("界面已改为 {n}%。合适吗？", { n: now })}</ToastRow>
+          <button className="act ghost" data-action="size.restore" onClick={() => { onLook({ ...look, zoom: was }); close(); }}>{t("safety.restore_n", { n: Math.round(was * 100) })}</button>
+          <button className="act" data-action="size.keep" onClick={close}>{t("safety.ok")}</button>
+        </>}>{t("safety.the_interface_is_now_n", { n: now })}</ToastRow>
       ),
     };
   }
@@ -64,8 +64,8 @@ export function useSizeAsk(look: Appearance, onLook: (next: Appearance) => void)
       <ToastRow kind="size" role="status" className="size-ask" stacked actions={<>
         <button className="act" data-action="size.set" data-value="1.25" onClick={() => apply(1.25)}>125%</button>
         <button className="act" data-action="size.set" data-value="1.5" onClick={() => apply(1.5)}>150%</button>
-        <button className="act ghost" data-action="size.keep" onClick={close}>{t("不用了")}</button>
-      </>}>{t("界面是不是偏小？可以在这里放大，之后也能在「外观」里调整。")}</ToastRow>
+        <button className="act ghost" data-action="size.keep" onClick={close}>{t("common.no_thanks")}</button>
+      </>}>{t("safety.is_the_interface_too_small")}</ToastRow>
     ),
   };
 }

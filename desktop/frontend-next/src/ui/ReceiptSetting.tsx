@@ -11,13 +11,13 @@ export function ReceiptSetting({ port }: { port: AgentPort }) {
   const on = useShowsReceipt(receiptPrefOf(port));
   const [error, setError] = useState("");
   return (
-    <Group id="receipt" title={t("交付验收卡片")} hint={t("每一轮结束后，主机会在会话末尾列出这一轮改了什么、验证了什么、哪些没有验证。记录始终保存，这里只决定是否显示。")}>
+    <Group id="receipt" title={t("settings.delivery_receipt_card")} hint={t("settings.at_the_end_of_each")}>
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("显示交付验收卡片")}</span>
-          <span className="ds">{t("默认不显示；打开后，当前会话和已有会话里的卡片都会出现。终端界面读同一项设置，下次启动时生效")}</span>
+          <span className="lb">{t("settings.show_the_delivery_receipt_card")}</span>
+          <span className="ds">{t("settings.off_by_default_turning_it")}</span>
         </span>
-        <Switch data-action="chrome.receipt" on={on} label={t("显示交付验收卡片")} onClick={() => {
+        <Switch data-action="chrome.receipt" on={on} label={t("settings.show_the_delivery_receipt_card")} onClick={() => {
           setError("");
           saveReceiptPref(port, !on).catch((e) => setError(reason(e)));
         }} />

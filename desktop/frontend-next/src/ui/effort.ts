@@ -90,15 +90,15 @@ export function effortApi(value: string): string {
 export function effortDescription(value: string, forcedThinking = false, cheapest = ""): string {
   const id = value.toLowerCase();
   const base = t(({
-    auto: "使用模型默认或自适应策略，按任务复杂度调整",
-    disabled: "不发送推理强度参数，使用服务端默认设置",
-    none: "不做推理直接作答，响应最快，适合简单问答",
-    minimal: "比快速档更轻；GLM-5.2 会跳过思考",
-    low: "轻量思考，适合改写、提取和明确的小任务",
-    medium: "兼顾响应速度与可靠性，适合大多数任务",
-    high: "投入更多时间分析复杂上下文与执行方案",
-    xhigh: "比深入投入更多推理，适合困难的多步问题",
-    max: "用于最复杂的问题，等待时间与消耗最高",
+    auto: "composer.effort_desc.auto",
+    disabled: "composer.effort_desc.disabled",
+    none: "composer.effort_desc.none",
+    minimal: "composer.effort_desc.minimal",
+    low: "composer.effort_desc.low",
+    medium: "composer.effort_desc.medium",
+    high: "composer.effort_desc.high",
+    xhigh: "composer.effort_desc.xhigh",
+    max: "composer.effort_desc.max",
   } as Record<string, string>)[id] ?? value);
   // A model that cannot switch thinking off still reasons at its cheapest
   // level, and still bills for it. That is the rung a saved "off" lands on, so

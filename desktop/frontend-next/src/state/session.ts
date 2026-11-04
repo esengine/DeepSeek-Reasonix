@@ -114,8 +114,8 @@ function sealTurn(items: Item[], err?: string): Item[] {
   if (stillborn > 0) {
     const text = plural(
       stillborn,
-      "另有 1 个调用尚未开始，未修改任何文件",
-      "另有 {n} 个调用尚未开始，均未修改任何文件",
+      "app.n_1_call_never_got_started",
+      "app.n_calls_never_got_started",
     );
     sealed.push({ t: "notice", id: nextId(), level: "info", text });
   }

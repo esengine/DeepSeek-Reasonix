@@ -20,7 +20,7 @@ import { useStalePage } from "./ui/stale_page";
 import { onRemoteConnectionEnded, remoteConnectionEnded, openRemoteHome, remoteHub, signInAgain, type RemoteEnd } from "./port/cloud_remote";
 
 const failureAction = (view: FailureView) => (view.action === "home" ? openRemoteHome : () => location.reload());
-const failureLabel = (view: FailureView) => (view.action === "home" ? t("打开 reasonix.io") : t("重新连接"));
+const failureLabel = (view: FailureView) => (view.action === "home" ? t("app.open_reasonix_io") : t("app.reconnect"));
 
 function RemoteAwareApp({ hub, remote }: { hub: HubPort; remote: string | null }) {
   const [ended, setEnded] = useState<RemoteEnd | null>(() => (remote ? remoteConnectionEnded() : null));
@@ -36,20 +36,20 @@ function RemoteAwareApp({ hub, remote }: { hub: HubPort; remote: string | null }
       <App hub={hub} />
       {stale && !ended && (
         <RemoteNotice
-          title={t("这个页面不是最新版")}
-          body={t("它是之前打开的旧版本，继续用可能出现莫名的报错。刷新一下就能换成最新版。")}
-          action={t("刷新页面")}
+          title={t("app.this_page_is_not_the")}
+          body={t("app.it_is_an_older_build")}
+          action={t("app.refresh_page")}
           info
           onAction={() => location.reload()}
         />
       )}
       {ended && remote && (
         <RemoteNotice
-          title={reauth ? t("需要重新登录") : specific?.title ?? t("远程连接已断开")}
+          title={reauth ? t("app.sign_in_again") : specific?.title ?? t("app.remote_connection_ended")}
           body={reauth
-            ? t("为了安全，远程控制在登录满 24 小时或退出登录后需要重新登录。")
-            : specific?.body ?? t("这台电脑已停止网页控制。重新连接需要再次验证设备状态。")}
-          action={reauth ? t("重新登录") : specific ? failureLabel(specific) : t("重新连接")}
+            ? t("app.for_security_remote_control_asks")
+            : specific?.body ?? t("app.this_computer_has_stopped_web")}
+          action={reauth ? t("app.sign_in") : specific ? failureLabel(specific) : t("app.reconnect")}
           waitS={specific?.waitS}
           retryWhenOnline={specific?.retryWhenOnline}
           onAction={reauth ? () => void signInAgain(remote) : specific ? failureAction(specific) : () => location.reload()}

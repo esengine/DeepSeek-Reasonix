@@ -1,8 +1,4 @@
 export const EN_DOCUMENT: Record<string, string> = {
-  "打开运行分析": "Open run analysis",
-  "关闭运行分析": "Close run analysis",
-  "打开工作台": "Open workbench",
-  "关闭工作台": "Close workbench",
   "此文件暂不支持预览": "Preview is not available for this file.",
   "文件超过预览大小限制": "This file exceeds the preview size limit.",
   "缩放": "Zoom",

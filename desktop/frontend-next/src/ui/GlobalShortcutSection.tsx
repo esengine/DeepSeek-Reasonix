@@ -61,11 +61,11 @@ export function GlobalShortcutSection() {
     }
   }
   return (
-    <Group id="global-shortcut" title={t("全局显示 / 隐藏快捷键")} hint={t("默认关闭。仅在 Studio 运行时生效；窗口聚焦时隐藏，否则显示并聚焦。不会启动已退出的应用，也不更改窗口内快捷键。") }>
+    <Group id="global-shortcut" title={t("settings.global_show_hide_shortcut")} hint={t("settings.off_by_default_while_studio") }>
       <form data-action="window.global-shortcut" data-value="apply" onSubmit={event => { event.preventDefault(); void apply(draft); }}>
         <label className="lrow">
-          <span className="tx"><span className="lb">{t("快捷键组合")}</span></span>
-          <input ref={input} className="fontown" data-action-change="window.global-shortcut" data-action-keydown="window.global-shortcut" data-value="binding" aria-label={t("快捷键组合")} maxLength={128} placeholder={recording ? t("请按修饰键与按键组合…") : "CommandOrControl+Shift+Space"} value={draft} readOnly={recording} onChange={event => setDraft(event.target.value)} onBlur={() => setRecording(false)} onKeyDown={event => {
+          <span className="tx"><span className="lb">{t("settings.shortcut_binding")}</span></span>
+          <input ref={input} className="fontown" data-action-change="window.global-shortcut" data-action-keydown="window.global-shortcut" data-value="binding" aria-label={t("settings.shortcut_binding")} maxLength={128} placeholder={recording ? t("settings.press_a_modifier_and_key") : "CommandOrControl+Shift+Space"} value={draft} readOnly={recording} onChange={event => setDraft(event.target.value)} onBlur={() => setRecording(false)} onKeyDown={event => {
             if (!recording || event.key === "Tab") return;
             event.preventDefault(); event.stopPropagation();
             if (event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) { setRecording(false); return; }
@@ -74,16 +74,16 @@ export function GlobalShortcutSection() {
           }} disabled={!now || busy} />
         </label>
         {draft && <p className="note"><kbd>{acceleratorLabel(draft)}</kbd></p>}
-        <p className="note">{t("点击录制后按下修饰键与按键组合，或直接编辑快捷键。Esc 取消录制；清除会立即关闭快捷键。Wayland 或系统保留组合可能不受支持。")}</p>
+        <p className="note">{t("settings.click_record_and_press_a")}</p>
         <div className="seg" data-text>
-          <button type="button" data-action="window.global-shortcut" data-value="record" disabled={!now || busy} onClick={() => { setRecording(true); input.current?.focus(); }}>{t("录制快捷键")}</button>
-          <button type="submit" data-action="window.global-shortcut" data-value="apply" disabled={!now || busy}>{t("应用快捷键")}</button>
-          <button type="button" data-action="window.global-shortcut" data-value="disable" disabled={!now || busy || (!now.binding && !draft)} onClick={() => void apply("")}>{t("清除快捷键")}</button>
+          <button type="button" data-action="window.global-shortcut" data-value="record" disabled={!now || busy} onClick={() => { setRecording(true); input.current?.focus(); }}>{t("settings.record_shortcut")}</button>
+          <button type="submit" data-action="window.global-shortcut" data-value="apply" disabled={!now || busy}>{t("settings.apply_shortcut")}</button>
+          <button type="button" data-action="window.global-shortcut" data-value="disable" disabled={!now || busy || (!now.binding && !draft)} onClick={() => void apply("")}>{t("settings.clear_shortcut")}</button>
         </div>
       </form>
       {now && <p className="note" role="status">{t(STATUS[now.status], { value: acceleratorLabel(now.binding) })}</p>}
       {now?.error && <p className="note" role="alert">{t(ERRORS[now.error])}</p>}
-      {failed && <p className="note" role="alert">{t("无法读取或更改 shell 快捷键状态。请重新打开设置后再试。")}</p>}
+      {failed && <p className="note" role="alert">{t("settings.could_not_read_or_change")}</p>}
     </Group>
   );
 }

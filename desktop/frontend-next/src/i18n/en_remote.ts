@@ -21,19 +21,14 @@ export const EN_REMOTE: Record<string, string> = {
   // ── 远程：挑一个目录 ─────────────────────────────────────────
 
   // ── 远程：设置页 ─────────────────────────────────────────────
-  "接入另一台机器上的工作区：内核在远程运行，界面仍在本机。远程面板与本地面板并排显示，每处都会标明所在的机器。":
-    "Connect a workspace on another machine: the kernel runs there, the window stays here. Remote panes sit alongside local ones, so each place states which machine it belongs to.",
-  "{n} 台在线": "{n} online",
   "手机通知": "Phone notifications",
   "地址": "Address",
   "用户": "User",
-  "默认": "Default",
   "已连接": "Connected",
   "重连中": "Reconnecting",
   "部分转发未建立": "A forward did not attach",
 
   // ── 连接时的两个问题 ─────────────────────────────────────────
-  "继续": "Continue",
   "{host} 上没有 reasonix，且本机已设置为不自动安装。请将安装方式改回「自动」，或自行在该机器上安装": "There is no reasonix on {host}, and this machine is set never to install one. Switch installing back to automatic, or install one over there yourself",
   "{host} 上无法运行 npm —— 通常是该机器未安装 Node.js。请安装 Node.js，或将安装方式改为「上传」": "npm will not run on {host} — most likely it has no Node.js. Install one, or switch installing to upload",
   "npm 安装完成，但安装位置不在登录 shell 的搜索路径中。请在该机器上调整 npm prefix，或将安装方式改为「上传」": "npm installed it somewhere the login shell does not look. Fix the npm prefix over there, or switch installing to upload",
@@ -49,16 +44,6 @@ export const EN_REMOTE: Record<string, string> = {
 
   // ── 手机访问 ─────────────────────────────────────────────────
   "手机访问": "Phone access",
-  "远程连接已断开": "Remote connection ended",
-  "刷新页面": "Refresh page",
-  "这个页面不是最新版": "This page is not the latest version",
-  "它是之前打开的旧版本，继续用可能出现莫名的报错。刷新一下就能换成最新版。": "It is an older build that was opened earlier, and may show confusing errors. Refreshing switches to the latest.",
-  "这台电脑已停止网页控制。重新连接需要再次验证设备状态。": "This computer has stopped web control. Reconnecting will verify the device again.",
-  "重新连接": "Reconnect",
-  "打开 reasonix.io": "Open reasonix.io",
   "{action}（{n}）": "{action} ({n})",
-  "需要重新登录": "Sign in again",
-  "为了安全，远程控制在登录满 24 小时或退出登录后需要重新登录。": "For security, remote control asks you to sign in again 24 hours after signing in, or after you sign out.",
-  "重新登录": "Sign in",
   "这台手机的提醒": "This phone's reminders",
 };

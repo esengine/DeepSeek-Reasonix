@@ -95,7 +95,7 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
     const wants = (kind: Exclude<Scope, "">) => scope === "" || scope === kind;
     const actions: Hit[] = wants("actions")
       ? commands.filter((c) => !q || `${c.label} ${c.keywords}`.toLowerCase().includes(q)).slice(0, LIMIT)
-        .map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("操作"), alert: c.status !== undefined, run: c.run }))
+        .map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("app.action"), alert: c.status !== undefined, run: c.run }))
       : [];
     const sessions: Hit[] = [];
     if (wants("sessions")) {
@@ -125,20 +125,20 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
       if (recent.length > 0) {
         const taken = new Set(recent.map((h) => h.key));
         return [
-          { label: t("最近用过"), hits: recent },
-          { label: t("快捷操作"), hits: actions.filter((h) => !taken.has(h.key)) },
-          { label: t("会话"), hits: sessions.filter((h) => !taken.has(h.key)) },
+          { label: t("app.recently_used"), hits: recent },
+          { label: t("app.quick_actions"), hits: actions.filter((h) => !taken.has(h.key)) },
+          { label: t("common.session"), hits: sessions.filter((h) => !taken.has(h.key)) },
         ].filter((g) => g.hits.length > 0);
       }
     }
     const ordered = q || scope !== ""
-      ? [{ label: t("会话"), hits: sessions }, { label: t("设置"), hits: found }, { label: t("快捷操作"), hits: actions }]
-      : [{ label: t("快捷操作"), hits: actions }, { label: t("会话"), hits: sessions }];
+      ? [{ label: t("common.session"), hits: sessions }, { label: t("common.settings"), hits: found }, { label: t("app.quick_actions"), hits: actions }]
+      : [{ label: t("app.quick_actions"), hits: actions }, { label: t("common.session"), hits: sessions }];
     if (q && scope === "") {
       const lead = ordered.find((g) => g.hits.length > 0);
       if (lead) {
         const best = lead.hits[0];
-        return [{ label: t("最佳匹配"), hits: [best] }, ...ordered.map((g) => (g === lead ? { ...g, hits: g.hits.slice(1) } : g))].filter((g) => g.hits.length > 0);
+        return [{ label: t("app.best_match"), hits: [best] }, ...ordered.map((g) => (g === lead ? { ...g, hits: g.hits.slice(1) } : g))].filter((g) => g.hits.length > 0);
       }
     }
     return ordered.filter((g) => g.hits.length > 0);
@@ -168,15 +168,15 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
 
   return (
     <div className="palette-veil" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={sheet} className="palette" role="dialog" aria-modal="true" aria-label={t("搜索与快捷操作")}>
+      <div ref={sheet} className="palette" role="dialog" aria-modal="true" aria-label={t("app.search_and_commands")}>
         <label className="palette-input">
           <StudioIcon name="search" />
           {scope && <span className="palette-scope">{t(SCOPE_LABEL[scope])}</span>}
           <input
             ref={box}
             data-action-keydown="palette.search"
-            aria-label={t("搜索会话或操作")}
-            placeholder={t("搜索会话、工具、设置…")}
+            aria-label={t("app.search_conversations_or_actions")}
+            placeholder={t("app.search_conversations_tools_settings")}
             autoComplete="off"
             value={query}
             onChange={(e) => {
@@ -234,9 +234,9 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
               ))}
             </div>
           ))}
-          {flat.length === 0 && <div className="palette-empty">{t("没有匹配的会话、设置或操作")}</div>}
+          {flat.length === 0 && <div className="palette-empty">{t("app.nothing_matches")}</div>}
         </div>
-        <div className="palette-help">{t("↑↓ 选择 · Enter 打开 · Tab 切换范围 · > 操作 · # 会话 · , 设置")}</div>
+        <div className="palette-help">{t("app.to_move_enter_to_open")}</div>
       </div>
     </div>
   );

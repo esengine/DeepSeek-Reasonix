@@ -8,15 +8,15 @@ const LABEL: Record<NavRailMode, string> = { on: "始终显示", collapsed: "仅
 export function NavRailSection() {
   const mode = useSyncExternalStore(onNavRailChange, navRailMode, navRailMode);
   return (
-    <Group id="navrail" title={t("图标栏")} hint={t("会话侧栏左边的一列图标，直达会话、用量、文件、工具、扩展、记忆、远程、反馈、账号和设置。窗口窄到手机宽度时不显示。")}>
-      <div className="seg" data-text role="group" aria-label={t("图标栏")}>
+    <Group id="navrail" title={t("settings.icon_rail")} hint={t("settings.a_column_of_icons_left")}>
+      <div className="seg" data-text role="group" aria-label={t("settings.icon_rail")}>
         {NAV_RAIL_MODES.map((m) => (
           <button key={m} data-action="appearance.nav-rail" data-value={m} aria-pressed={mode === m} onClick={() => setNavRailMode(m)}>
             {t(LABEL[m])}
           </button>
         ))}
       </div>
-      <p className="note">{t("关闭或收起时，这些页面仍可从设置和侧栏打开")}</p>
+      <p className="note">{t("settings.with_it_off_or_hidden")}</p>
     </Group>
   );
 }

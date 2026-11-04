@@ -8,8 +8,8 @@ const LABEL: Record<number, string> = { 0: "不保留", 10: "10 分钟", 30: "30
 export function LiveGraceSection() {
   const minutes = useSyncExternalStore(onLiveGraceChange, liveGraceMinutes, liveGraceMinutes);
   return (
-    <Group id="live-grace" title={t("进行中列表保留已完成会话")} hint={t("会话完成一轮后，在侧栏「进行中」里继续保留一段时间，之后再自动离开。默认不保留，完成后立刻离开。")}>
-      <div className="seg" data-text role="group" aria-label={t("进行中列表保留已完成会话")}>
+    <Group id="live-grace" title={t("settings.keep_finished_sessions_in_running")} hint={t("settings.after_a_session_finishes_a")}>
+      <div className="seg" data-text role="group" aria-label={t("settings.keep_finished_sessions_in_running")}>
         {LIVE_GRACE_CHOICES.map((m) => (
           <button key={m} data-action="appearance.live-grace" data-value={String(m)} aria-pressed={minutes === m} onClick={() => setLiveGraceMinutes(m)}>
             {t(LABEL[m])}

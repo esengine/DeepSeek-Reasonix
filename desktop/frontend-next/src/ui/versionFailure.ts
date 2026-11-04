@@ -10,27 +10,27 @@ export function failureCopy(p: UpdateProgress, current: string): FailureCopy {
   const v = p.version;
   switch (p.code) {
     case "update.catalog_unreachable":
-      return { title: t("无法读取 {v} 的发布信息", { v }), why: t("版本目录暂时连不上，可能是网络或代理问题。当前版本未被改动，稍后重试即可。"), manual: false };
+      return { title: t("about.could_not_read_the_release", { v }), why: t("about.the_version_index_cannot_be"), manual: false };
     case "update.download_failed":
-      return { title: t("{v} 下载中断", { v }), why: t("网络中断或超时。当前版本未被改动，可以重试。"), manual: false };
+      return { title: t("about.downloading_v_was_interrupted", { v }), why: t("about.the_connection_dropped_or_timed"), manual: false };
     case "update.download_stalled":
-      return { title: t("{v} 下载卡住了", { v }), why: t("下载连接长时间没有数据，重连几次仍未恢复。当前版本未被改动，可以稍后重试，或下载完整安装包手动安装。"), manual: true };
+      return { title: t("about.downloading_v_got_stuck", { v }), why: t("about.the_download_connection_delivered_nothing"), manual: true };
     case "update.signature_invalid":
-      return { title: t("{v} 未通过签名校验", { v }), why: t("下载到的文件与发布签名不符，已丢弃，没有安装。多为下载损坏或网络被篡改，请重试；反复出现请反馈。"), manual: false };
+      return { title: t("about.v_failed_its_signature_check", { v }), why: t("about.the_downloaded_file_does_not"), manual: false };
     case "update.disk":
-      return { title: t("无法写入更新文件"), why: t("磁盘空间不足，或更新缓存目录不可写。清理空间后重试。"), manual: false };
+      return { title: t("about.the_update_could_not_be"), why: t("about.the_disk_is_full_or"), manual: false };
     case "update.no_package":
-      return { title: t("{v} 没有适用于本机的安装包", { v }), why: t("这个版本没有为本机的系统发布可自动安装的包，请下载安装包手动安装。"), manual: true };
+      return { title: t("about.v_has_no_package_for", { v }), why: t("about.this_version_publishes_no_automatically"), manual: true };
     case "update.installer_failed":
-      return { title: t("{v} 的安装没能开始", { v }), why: t("安装程序被系统或安全软件拦下了。当前版本未被改动，可以重试，或下载完整安装包手动安装。"), manual: true };
+      return { title: t("about.installing_v_did_not_start", { v }), why: t("about.the_system_or_security_software"), manual: true };
     case "update.not_applied":
       return {
-        title: t("上次更新到 {v} 没有生效", { v }),
-        why: t("重启后运行的仍是 {current}：新版本没能替换已安装的文件，已恢复原版本。常见原因是装在 Program Files 或其他磁盘，或文件被安全软件占用。下载完整安装包安装一次即可，之后的更新会恢复正常。", { current }),
+        title: t("about.the_last_update_to_v", { v }),
+        why: t("about.after_the_restart_current_is", { current }),
         manual: true,
       };
   }
-  return { title: t("切换到 {v} 失败", { v }), why: t("当前版本未被改动，可以重试。"), manual: false };
+  return { title: t("about.switching_to_v_failed", { v }), why: t("about.the_running_version_was_not"), manual: false };
 }
 
 // Why this move downloads the whole package instead of only what changed,
@@ -38,19 +38,19 @@ export function failureCopy(p: UpdateProgress, current: string): FailureCopy {
 export function deltaSkippedCopy(code: string): string {
   switch (code) {
     case "update.delta.not_swappable":
-      return t("安装目录无法就地替换文件，本次改为下载完整安装包。");
+      return t("about.the_install_folder_cannot_have");
     case "update.delta.fetch_failed":
-      return t("增量数据下载失败，本次改为下载完整安装包。");
+      return t("about.the_changed_parts_could_not");
     case "update.delta.timed_out":
-      return t("增量数据下载太慢，本次改为下载完整安装包。");
+      return t("about.the_changed_parts_were_downloading");
     case "update.delta.mismatch":
-      return t("增量数据未通过校验，本次改为下载完整安装包。");
+      return t("about.the_changed_parts_failed_verification");
     case "update.delta.too_large":
-      return t("这次版本跨度较大，增量数据比完整安装包还多，本次改为下载完整安装包。");
+      return t("about.this_jump_spans_many_versions");
     case "update.delta.disk":
-      return t("无法写入增量更新文件，本次改为下载完整安装包。");
+      return t("about.the_changed_parts_could_not_2");
   }
-  return t("增量更新不可用，本次改为下载完整安装包。");
+  return t("about.updating_only_the_changed_parts");
 }
 
 // The release page carries every platform's full installer.

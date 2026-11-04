@@ -18,13 +18,13 @@ export function OpenSessionLimitSection() {
   return (
     <Group
       id="open-session-limit"
-      title={t("同时保留的会话标签数")}
-      hint={t("默认 0：不自动收起，打开的会话都保留。设成一个数字后，打开的会话超过它时，会收起最久没动的空闲会话；对话仍在列表里，随时可以重新打开。保留得越多，占用的内存越多。")}
+      title={t("settings.session_tabs_kept_open")}
+      hint={t("settings.default_0_nothing_is_folded")}
     >
       <div className="lrow">
         <span className="tx">
-          <label className="lb" htmlFor="open-session-limit-input">{t("会话标签数上限")}</label>
-          <span className="ds">{t("0 表示不限制")}</span>
+          <label className="lb" htmlFor="open-session-limit-input">{t("settings.limit_on_session_tabs")}</label>
+          <span className="ds">{t("settings.n_0_means_no_limit")}</span>
         </span>
         <span className="unit-field">
           <input
@@ -42,7 +42,7 @@ export function OpenSessionLimitSection() {
               e.currentTarget.blur();
             }}
           />
-          <i>{t("个")}</i>
+          <i>{t("settings.tabs")}</i>
         </span>
       </div>
     </Group>

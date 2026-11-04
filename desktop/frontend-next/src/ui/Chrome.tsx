@@ -19,7 +19,7 @@ const base = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || p;
 // title from /sessions is always present once the turn is on disk: a generated
 // one when it is ready, the first message truncated until then.
 const sessionName = (title?: string, p?: string) =>
-  title?.trim() || (p ? base(p).replace(/\.jsonl$/, "") : t("新会话"));
+  title?.trim() || (p ? base(p).replace(/\.jsonl$/, "") : t("common.new_session"));
 
 interface Props {
   // Set when the focused pane is driven from another machine, naming it.
@@ -84,8 +84,8 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
             type="button"
             className="crumb-folder"
             data-action="chrome.open-project"
-            aria-label={t("打开项目文件夹")}
-            title={t("打开项目文件夹")}
+            aria-label={t("app.open_project_folder")}
+            title={t("app.open_project_folder")}
             disabled={!canOpenProject}
             onClick={openProject}
           >
@@ -95,7 +95,7 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
             {project}
           </span>
           {ws?.isolated && ws.current === root && <span className="isolab" title={`${workspaceDirectoryDescription(true)}\n${root}`}>
-            {t("独立工作树")}
+            {t("common.isolated_worktree")}
           </span>}
           <span className="isolab hostlab" hidden={!host}>
             {host}
@@ -106,12 +106,12 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
       </div>
 
       <span className="badge" hidden={steer === 0}>
-        {t("插话待送达")} <b>{steer}</b>
+        {t("app.queued")} <b>{steer}</b>
       </span>
 
       <div className="r" ref={group}>
         {gathered && (
-          <button ref={trigger} className="thbtn r-more" data-action="chrome.more" aria-haspopup="true" aria-controls="chrome-fold" aria-expanded={more} aria-label={t("更多")} onClick={() => setMore((v) => !v)}>
+          <button ref={trigger} className="thbtn r-more" data-action="chrome.more" aria-haspopup="true" aria-controls="chrome-fold" aria-expanded={more} aria-label={t("common.more")} onClick={() => setMore((v) => !v)}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" /></svg>
           </button>
         )}
@@ -122,9 +122,9 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
             data-action="transcript.find"
             data-value="open"
             onClick={onFind}
-            aria-label={t("在这段对话里查找")}
+            aria-label={t("common.find_in_this_conversation")}
             aria-keyshortcuts={ariaChord("f")}
-            title={t("在这段对话里查找")} shortcut={chord("F")}
+            title={t("common.find_in_this_conversation")} shortcut={chord("F")}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.2 3.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2M10.3 10.3 13 13" /></svg>
           </TooltipButton>
@@ -134,8 +134,8 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
           className="thbtn theme-toggle"
           data-action="appearance.theme"
           onClick={onTheme}
-          aria-label={theme === "dark" ? t("切换浅色主题") : t("切换深色主题")}
-          title={theme === "dark" ? t("切换浅色主题") : t("切换深色主题")}
+          aria-label={theme === "dark" ? t("app.switch_to_light_theme") : t("app.switch_to_dark_theme")}
+          title={theme === "dark" ? t("app.switch_to_light_theme") : t("app.switch_to_dark_theme")}
         >
           {theme === "dark" ? (
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.9 9.7A5.3 5.3 0 0 1 6.3 3.1a5.3 5.3 0 1 0 6.6 6.6Z" /></svg>
@@ -145,7 +145,7 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
         </TooltipButton>
         {port && <ViewSwitch view={view} rows={rows} surfaces={surfaces} onView={onView} />}
         </div>
-        <span className="account-presence" title={account?.signedIn ? account.user?.label : t("未登录")} />
+        <span className="account-presence" title={account?.signedIn ? account.user?.label : t("common.not_signed_in")} />
         <WindowControls />
       </div>
     </div>

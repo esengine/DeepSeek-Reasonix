@@ -25,7 +25,7 @@ export function Cache({ metrics }: { metrics: Metrics }) {
   return (
     <div className="block" data-b="cache">
       <h3 className="lbl">
-        {t("前缀缓存")}
+        {t("panels.prefix_cache")}
         <span className="c">{pct(rate / 100, 1)}</span>
       </h3>
       {/* The prefix moving is the fact worth interrupting for: it is what turns
@@ -34,7 +34,7 @@ export function Cache({ metrics }: { metrics: Metrics }) {
       {(moved || body) && (
         <p className="cachemoved" title={metrics.prefixReasons.join(" · ") || undefined}>
           <i aria-hidden="true"><Warn /></i>
-          {moved ? t("前缀变了") : t("正文变了")}
+          {moved ? t("panels.prefix_changed") : t("panels.body_changed")}
         </p>
       )}
       <div className="bar">
@@ -42,14 +42,14 @@ export function Cache({ metrics }: { metrics: Metrics }) {
         <i className="f" style={{ flexGrow: Math.max(100 - rate, 0.4) }} />
       </div>
       <div className="nums">
-        <span>{t("命中")}<b>{tokens(metrics.hit)}</b></span>
-        <span>{t("未命中")}<b>{tokens(metrics.miss)}</b></span>
-        {!!metrics.toolSchema && <span>{t("工具 schema")}<b>{tokens(metrics.toolSchema)}</b></span>}
+        <span>{t("panels.hit")}<b>{tokens(metrics.hit)}</b></span>
+        <span>{t("panels.missed")}<b>{tokens(metrics.miss)}</b></span>
+        {!!metrics.toolSchema && <span>{t("panels.tool_schema")}<b>{tokens(metrics.toolSchema)}</b></span>}
       </div>
       {!!metrics.prefixHash && (
         <div className="nums" style={{ justifyContent: "space-between" }}>
           <span title={metrics.prefixHash}>
-            {t("前缀哈希")}<b>{metrics.prefixHash.slice(0, 4)}…{metrics.prefixHash.slice(-4)}</b>
+            {t("panels.prefix_hash")}<b>{metrics.prefixHash.slice(0, 4)}…{metrics.prefixHash.slice(-4)}</b>
           </span>
         </div>
       )}

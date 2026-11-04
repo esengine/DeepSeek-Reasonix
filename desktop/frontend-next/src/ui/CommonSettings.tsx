@@ -37,13 +37,13 @@ export function CommonSettings({ port, homePort, theme, onTheme, look, onLook }:
   const langNow = localStorage.getItem(LANG_KEY) ?? look.language ?? "";
   return (
     <>
-      <SectionCard title={t("开始")}>
+      <SectionCard title={t("common.start")}>
         <DefaultMode port={port} />
         <UpdateMode port={homePort} />
       </SectionCard>
-      <SectionCard title={t("输入与提醒")}>
-        <SettingRow id="language" title={t("语言")} desc={t("界面语言")}>
-          <select aria-label={t("语言")} data-action="appearance.language" value={langNow} onChange={(e) => setLang(e.target.value)}>
+      <SectionCard title={t("settings.input_and_reminders")}>
+        <SettingRow id="language" title={t("common.language")} desc={t("settings.interface_language")}>
+          <select aria-label={t("common.language")} data-action="appearance.language" value={langNow} onChange={(e) => setLang(e.target.value)}>
             {LANGS.map(([id, name]) => (
               <option key={id} value={id}>{t(name)}</option>
             ))}
@@ -51,8 +51,8 @@ export function CommonSettings({ port, homePort, theme, onTheme, look, onLook }:
         </SettingRow>
         <SendShortcut />
         <Notifications port={port} />
-        <SettingRow id="mode" title={t("明暗")} desc={t("跟随系统、浅色或深色")}>
-          <SegChoice label={t("明暗")} value={theme} action="appearance.scheme" onPick={onTheme} options={SCHEMES.map(([id, name]) => [id, t(name)] as const)} />
+        <SettingRow id="mode" title={t("settings.light_and_dark")} desc={t("settings.follow_the_system_light_or")}>
+          <SegChoice label={t("settings.light_and_dark")} value={theme} action="appearance.scheme" onPick={onTheme} options={SCHEMES.map(([id, name]) => [id, t(name)] as const)} />
         </SettingRow>
         {theme === "scheduled" && <ThemeScheduleFields />}
       </SectionCard>

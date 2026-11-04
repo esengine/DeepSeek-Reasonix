@@ -27,7 +27,7 @@ const BASELINE_EFFORT = "auto";
 const BASELINE_APPROVAL: ApprovalMode = "ask";
 
 const presetName = (id: string): string =>
-  ({ balanced: t("均衡"), delivery: t("交付") } as Record<string, string>)[id] ?? id;
+  ({ balanced: t("safety.balanced"), delivery: t("safety.delivery") } as Record<string, string>)[id] ?? id;
 
 // The kernel's own spelling, cased for the shelf. A display table would need a
 // row for every rung an endpoint might publish, and the row it turns out to be

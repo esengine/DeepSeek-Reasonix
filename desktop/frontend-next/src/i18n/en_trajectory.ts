@@ -3,40 +3,7 @@
 // file-size ceiling, and a screen's worth of wording is read together.
 export const EN_TRAJECTORY: Record<string, string> = {
   "运行分析": "Run analysis",
-  "本轮 · 基于真实记录": "This turn · from recorded events",
-  "{n} 条记录": "{n} records",
-  "导出运行记录": "Export run record",
-  "已导出": "Exported",
-  "运行摘要": "Run summary",
-  "总时长": "Total time",
-  "模型 P95": "Model P95",
-  "{n} 个回合": "{n} rounds",
-  "工具耗时": "Tool time",
-  "并行节省": "Parallel saving",
-  "累计活动减墙钟": "activity time minus wall time",
-  "需要关注": "needs attention",
-  "无异常": "no anomaly",
-  "首项活动": "First activity",
-  "相对本轮开始": "from turn start",
-  "时间分布": "Time distribution",
-  "累计活动 {time}": "{time} cumulative activity",
-  "各类活动耗时占比": "Share of activity time",
-  "系统": "System",
-  "信号轨": "Signal rail",
-  "与下方共用时间轴": "Shares the timeline below",
-  "时间轴缩放": "Timeline zoom",
-  "重置缩放": "Reset zoom",
-  "没有时长、也不是工具调用的运行记录，位置就是时间，无法拖动；缩放后可横向滚动，挨得太近的信号合并成一个带数量的标记。点一个看它的记录。":
-    "Records with no duration that are not tool calls. Their position is their time, so they cannot be dragged. Zoom and scroll horizontally; signals too close together share one marker with a count. Select one to inspect its record.",
-  "{n} 个信号": "{n} signals",
-  "活动回合": "Activity rounds",
-  "点击一行查看记录": "Select a row to inspect it",
-  "模型回合": "Model round",
   "类型": "Type",
-  "还没有可分析的运行": "There is no run to analyse yet",
-  "发送任务后，这里会按真实运行记录显示模型、工具、重试与并行耗时。":
-    "After you send a task, real events will show model, tool, retry and parallel time here.",
-  "时间轴": "Timeline",
   // What the rows cover. The three the host distinguishes plus the one the page
   // is in until it has been told: absence is not one of them.
 };

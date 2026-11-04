@@ -14,7 +14,4 @@ export const EN_USAGE: Record<string, string> = {
   "30 天": "30 days",
   "全部": "All",
   "花费": "Spend",
-  "尚无 key？前往获取": "No key yet? Get one",
-  "打开 {name} 控制台": "Open the {name} console",
-  "无法打开浏览器，请手动访问 {at}": "Could not open a browser — visit {at} yourself",
 };

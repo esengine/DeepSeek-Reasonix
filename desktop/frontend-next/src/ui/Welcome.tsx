@@ -73,15 +73,15 @@ export function Welcome({ variant, children, replay, onDone }: Props) {
 
         <div className="oobe-lines" aria-live="polite">
           <div className="oobe-line l1">
-            <b>{t("欢迎使用 Reasonix。")}</b>
+            <b>{t("onboarding.welcome_to_reasonix")}</b>
           </div>
           <div className="oobe-line l2">
-            <b>{t("交付一项任务，由它完整执行。")}</b>
-            <span>{t("读取代码、查证、执行、验证 —— 而非仅给出一段建议。")}</span>
+            <b>{t("onboarding.you_hand_it_a_task")}</b>
+            <span>{t("onboarding.reading_code_checking_facts_doing")}</span>
           </div>
           <div className="oobe-line l3">
-            <b>{t("每一步均可追溯。")}</b>
-            <span>{t("修改了哪个文件、运行了哪条命令、消耗了多少 token，均可回溯查看。")}</span>
+            <b>{t("onboarding.every_step_stays_on_the")}</b>
+            <span>{t("onboarding.which_file_changed_which_command")}</span>
           </div>
         </div>
       </div>
@@ -91,7 +91,7 @@ export function Welcome({ variant, children, replay, onDone }: Props) {
       {replay && !holds && (
         <>
           <div className="oobe-prog"><i /></div>
-          <span className="oobe-skip">{t("按任意键跳过")}</span>
+          <span className="oobe-skip">{t("onboarding.press_any_key_to_skip")}</span>
         </>
       )}
     </div>

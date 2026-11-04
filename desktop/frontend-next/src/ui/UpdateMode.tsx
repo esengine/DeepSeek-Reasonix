@@ -32,10 +32,10 @@ export function UpdateMode({ port }: { port: AgentPort }) {
     }
   };
 
-  const modes: [Mode, string][] = [["manual", t("手动")], ["notify", t("提醒")], ["download", t("自动下载")]];
+  const modes: [Mode, string][] = [["manual", t("about.manual")], ["notify", t("about.notify")], ["download", t("about.download")]];
   return (
-    <SettingRow id="update-mode" title={t("更新方式")} desc={t("要不要在后台检查、下载新版本；重启始终由你决定")}>
-      <SegChoice<Mode> label={t("更新方式")} value={mode} disabled={busy} action="update.mode" onPick={(next) => void choose(next)} options={modes} />
+    <SettingRow id="update-mode" title={t("about.update_mode")} desc={t("about.whether_to_check_for_and")}>
+      <SegChoice<Mode> label={t("about.update_mode")} value={mode} disabled={busy} action="update.mode" onPick={(next) => void choose(next)} options={modes} />
       {error && <span className="why">{error}</span>}
     </SettingRow>
   );

@@ -30,7 +30,7 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
       .catch(() => setBox(null));
   }, [port]);
 
-  if (!box) return <div className="empty">{t("无法读取沙箱配置。")}</div>;
+  if (!box) return <div className="empty">{t("safety.cannot_read_the_sandbox_config")}</div>;
 
   const save = async (what: string, next: SandboxSettings) => {
     setBusy(what);
@@ -56,37 +56,37 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
     <div className="box">
       {box.shadowedBy && (
         <div className="find" data-lvl="warn" role="status">
-          <span className="t">{t("当前项目自带沙箱配置")}</span>
+          <span className="t">{t("safety.this_project_ships_its_own_2")}</span>
           <span className="why">
-            {t("{path} 中同样声明了 sandbox，实际生效的是该文件。", { path: box.shadowedBy })}
+            {t("safety.path_declares_a_sandbox_too", { path: box.shadowedBy })}
           </span>
         </div>
       )}
 
       <div className="sec">
-        <h3>{t("可写入范围")}</h3>
+        <h3>{t("safety.where_writes_may_land")}</h3>
         <p className="note">
-          {t("已批准的写入操作也只能作用于这些目录。该限制由文件工具实施，不依赖提示词中的约定。")}
+          {t("safety.even_an_approved_write_can")}
         </p>
         <div className="fields">
           <label className="grow">
-            <span>{t("工作区根目录")}</span>
+            <span>{t("safety.workspace_root")}</span>
             <input
               value={root}
                 data-action-keydown="sandbox.workspace-root"
-              placeholder={t("留空 = 会话所在的目录")}
+              placeholder={t("safety.empty_the_sessions_own_directory")}
               onChange={(e) => setRoot(e.target.value)}
               onBlur={() => root !== box.workspaceRoot && void save("root", { ...box, workspaceRoot: root })}
               onKeyDown={(e) => e.key === "Enter" && void save("root", { ...box, workspaceRoot: root })}
             />
           </label>
           <button className="act" data-action="sandbox.workspace-root" data-value="browse" disabled={!!busy} onClick={() => void pick()}>
-            {t("选文件夹")}
+            {t("common.choose_a_folder")}
           </button>
         </div>
 
         <div className="extra">
-          <div className="sublb">{t("额外可写目录")}</div>
+          <div className="sublb">{t("safety.also_writable")}</div>
           {box.allowWrite.map((p) => (
             <div className="prule" key={p}>
               <code>{p}</code>
@@ -95,10 +95,10 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
                 data-action="sandbox.remove-write-root"
                 data-target={p}
                 disabled={!!busy}
-                aria-label={t("移除 {path} 的写入权限", { path: p })}
+                aria-label={t("safety.stop_allowing_writes_to_path", { path: p })}
                 onClick={() => void save("extra", { ...box, allowWrite: box.allowWrite.filter((x) => x !== p) })}
               >
-                {t("删除")}
+                {t("common.delete")}
               </button>
             </div>
           ))}
@@ -109,7 +109,7 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
             <input
               value={draft}
                 data-action-keydown="sandbox.add-write-root"
-              placeholder={t("添加可写目录，例如 /tmp/scratch")}
+              placeholder={t("safety.open_one_more_writable_directory")}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key !== "Enter" || !draft.trim()) return;
@@ -126,7 +126,7 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
                 setDraft("");
               }}
             >
-              {t("添加")}
+              {t("common.add")}
             </button>
           </div>
         </div>
@@ -135,7 +135,7 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
             directory down here, and ${VAR} in a path is answered rather than
             echoed back. */}
         <div className="kv">
-          <span className="k">{t("实际可写")}</span>
+          <span className="k">{t("safety.actually_writable")}</span>
           <span className="v">
             {box.effectiveWriteRoots.length ? box.effectiveWriteRoots.map((r) => <code key={r}>{r}</code>) : "—"}
           </span>
@@ -143,14 +143,14 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
 
         <div className="lrow">
           <span className="tx">
-            <span className="lb">{t("保护被改动的文件")}</span>
-            <span className="ds">{t("模型读过或写过的文件若之后被你或其他程序改动，它整文件覆盖时会被拒绝，需要先重新读取")}</span>
+            <span className="lb">{t("safety.protect_changed_files")}</span>
+            <span className="ds">{t("safety.if_a_file_the_model")}</span>
           </span>
           <Switch
             data-action="sandbox.protect-changed-files"
             on={box.protectChangedFiles}
             busy={busy === "protect"}
-            label={t("保护被改动的文件")}
+            label={t("safety.protect_changed_files")}
             onClick={() => void save("protect", { ...box, protectChangedFiles: !box.protectChangedFiles })}
           />
         </div>
@@ -193,20 +193,20 @@ export function CommandMode({
 
   return (
     <div className="sec">
-      <h3>{t("命令执行方式")}</h3>
+      <h3>{t("safety.how_commands_run")}</h3>
       {box.available && box.platform === "windows" ? (
         <p className="note">
-          {t("在 Windows 上启用后，命令无法在清单之外创建或改写文件、写注册表；但删除或重命名清单之外的文件、读取文件、联网，以及 ssh-agent、docker 管道和任务计划程序等系统服务不受限制，Everyone 本来就能写的位置和被授权的工具链缓存命令也能写。需要交互式桌面会话，并会在清单里的文件夹上加一条权限项（可用 reasonix sandbox revoke 收回）。")}
+          {t("safety.on_windows_once_on_commands")}
         </p>
       ) : box.available ? (
         <p className="note">
-          {t("启用沙箱后，命令无法写入清单之外的位置。上方的可写目录清单由操作系统实施，不依赖 agent 自觉遵守。")}
+          {t("safety.inside_the_sandbox_a_command")}
         </p>
       ) : (
         <div className="find" data-lvl="warn" role="status" id={whyId}>
-          <span className="t">{t("本机没有可用的操作系统沙箱")}</span>
+          <span className="t">{t("safety.this_machine_has_no_usable")}</span>
           <span className="why">
-            {why || t("命令将不受限制地运行；上方的可写范围仍由工具实施。")}
+            {why || t("safety.commands_run_unconfined_the_writable")}
           </span>
         </div>
       )}
@@ -214,7 +214,7 @@ export function CommandMode({
           only place a reader learns the mode exists and why it is out. The
           reason hangs on the option itself: a card above a live-looking button
           reads as commentary rather than as the cause. */}
-      <div className="seg" data-text role="radiogroup" aria-label={t("命令执行方式")}>
+      <div className="seg" data-text role="radiogroup" aria-label={t("safety.how_commands_run")}>
         {MODES.map(([id, name]) => {
           const locked = id === "enforce" && !box.available;
           return (
@@ -237,19 +237,19 @@ export function CommandMode({
       </div>
       {overruled && (
         <div className="kv">
-          <span className="k">{t("实际生效")}</span>
+          <span className="k">{t("common.actually_in_force")}</span>
           <span className="v">
-            {t("配置中设置为「{want}」，本机实际按「{now}」运行。", { want: label(written), now: label(mode) })}
+            {t("safety.configured_as_want_running_as", { want: label(written), now: label(mode) })}
           </span>
         </div>
       )}
       {mode === "enforce" && (
         <div className="lrow">
           <span className="tx">
-            <span className="lb">{t("沙箱里允许联网")}</span>
-            <span className="ds">{t("关闭后安装依赖、拉取仓库等操作都会失败，这正是该选项的用途")}</span>
+            <span className="lb">{t("safety.allow_network_inside_the_sandbox")}</span>
+            <span className="ds">{t("safety.with_this_off_installing_dependencies")}</span>
           </span>
-          <Switch data-action="sandbox.network" on={box.network} busy={busy === "net"} label={t("沙箱里允许联网")} onClick={onNetwork} />
+          <Switch data-action="sandbox.network" on={box.network} busy={busy === "net"} label={t("safety.allow_network_inside_the_sandbox")} onClick={onNetwork} />
         </div>
       )}
     </div>

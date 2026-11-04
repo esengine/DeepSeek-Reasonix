@@ -20,7 +20,7 @@ export function RootMissingBanner({ items, onPick }: { items: Item[]; onPick: ()
     <div className="cmpalert">
       <div className="errbar" data-kind="note" data-cause="root-missing" role="alert">
         <span>{say({ code: ROOT_MISSING }, "")}</span>
-        <button data-action="root-missing.reselect" onClick={onPick}>{t("重新选择文件夹")}</button>
+        <button data-action="root-missing.reselect" onClick={onPick}>{t("app.choose_the_folder_again")}</button>
       </div>
     </div>
   );

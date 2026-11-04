@@ -10,7 +10,7 @@ export function SaveNote({ note }: { note: SaveNoteState | null }) {
   if (!note) return null;
   return (
     <div className="find" data-lvl={note.unapplied ? "warn" : "err"} role={note.unapplied ? "status" : "alert"}>
-      <span className="t">{t(note.unapplied ? "已保存，尚未生效" : "操作未完成")}</span>
+      <span className="t">{t(note.unapplied ? "common.saved_not_applied_yet" : "common.that_did_not_go_through")}</span>
       <span className="why">{note.text}</span>
     </div>
   );

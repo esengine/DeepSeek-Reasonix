@@ -38,21 +38,21 @@ export function WindowSection({ port }: { port: AgentPort }) {
   return (
     <section className="grp" id="set-window" data-setting="window">
       <div className="grp-hd">
-        <h3>{t("窗口")}</h3>
+        <h3>{t("common.window")}</h3>
       </div>
       <p className="hint">
-        {t("关闭窗口后需通过托盘图标重新打开主界面，下方选项依赖该图标。")}
+        {t("settings.after_the_window_closes_the")}
       </p>
       <div className="grp-items">
         <div className="lrow">
           <span className="tx">
-            <span className="lb">{t("任务运行时阻止系统休眠")}</span>
-            <span className="ds">{t("有会话正在运行时，电脑不会自动进入睡眠（电池供电时也一样）；屏幕仍按系统设置熄灭，全部空闲后恢复。合上笔记本盖子不受此项控制")}</span>
+            <span className="lb">{t("settings.keep_the_computer_awake_while")}</span>
+            <span className="ds">{t("settings.while_a_session_is_running")}</span>
           </span>
           <Switch
             data-action="chrome.keep-awake"
             on={awake}
-            label={t("任务运行时阻止系统休眠")}
+            label={t("settings.keep_the_computer_awake_while")}
             onClick={() => {
               setKeepsAwake(!awake);
               setAwake(!awake);
@@ -61,30 +61,30 @@ export function WindowSection({ port }: { port: AgentPort }) {
         </div>
         <div className="lrow">
           <span className="tx">
-            <span className="lb">{t("在托盘显示图标")}</span>
+            <span className="lb">{t("settings.show_a_status_icon_in")}</span>
             <span className="ds">
               {tray.icon === tray.live
-                ? t("通过图标即可判断正在运行还是等待批准")
+                ? t("settings.running_or_waiting_on_you")
                 : tray.icon
-                  ? t("下次启动时出现")
-                  : t("下次启动时不再显示，本次仍保留")}
+                  ? t("settings.appears_on_the_next_launch")
+                  : t("settings.gone_from_the_next_launch")}
             </span>
           </span>
-          <Switch data-action="tray.icon" on={tray.icon} label={t("在托盘显示图标")} onClick={() => flipTray({ icon: !tray.icon })} />
+          <Switch data-action="tray.icon" on={tray.icon} label={t("settings.show_a_status_icon_in")} onClick={() => flipTray({ icon: !tray.icon })} />
         </div>
         {/* The second switch only means anything while there is an icon,
             so it is drawn as a branch of the first rather than as a rule
             you have to discover by watching it grey out. */}
         <div className="lrow subrow" data-off={tray.icon && tray.live ? undefined : ""}>
           <span className="tx">
-            <span className="lb">{t("关闭窗口后在托盘中继续运行")}</span>
-            <span className="ds">{t("关闭窗口不会中断会话和后台任务；从托盘菜单退出才会完全关闭程序")}</span>
+            <span className="lb">{t("settings.keep_running_in_the_tray")}</span>
+            <span className="ds">{t("settings.closing_the_window_does_not")}</span>
           </span>
           <Switch
             data-action="tray.close-to-tray"
             on={tray.closeToTray}
             busy={!tray.icon || !tray.live}
-            label={t("关闭窗口后在托盘中继续运行")}
+            label={t("settings.keep_running_in_the_tray")}
             onClick={() => flipTray({ closeToTray: !tray.closeToTray })}
           />
         </div>

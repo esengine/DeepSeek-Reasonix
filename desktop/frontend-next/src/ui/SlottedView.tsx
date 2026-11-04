@@ -28,7 +28,7 @@ export function SlottedView({
       <button
         ref={grip}
         className="movegrip"
-        aria-label={t("移动 {id} 的界面", { id: ext.pluginId })}
+        aria-label={t("app.move_id_s_view", { id: ext.pluginId })}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
@@ -52,7 +52,7 @@ export function SlottedView({
         {/* Clearing hands the choice back to the extension rather than
             hiding the surface: it is a different act from moving it. */}
         <button role="menuitem" data-action="panel.delegate-placement" onClick={() => close(() => onMove(""))}>
-          {t("交还给插件")}
+          {t("app.hand_back_to_the_extension")}
         </button>
       </div>
     </div>

@@ -49,8 +49,8 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
       const got = await port.importTheme(files);
       if (currentOwner.current !== owner) return;
       onImported();
-      const skipped = got.ignored?.length ? " " + t("未读取：{names}", { names: got.ignored.join("、") }) : "";
-      setNote(t("已导入「{name}」。", { name: got.pack.name }) + skipped);
+      const skipped = got.ignored?.length ? " " + t("look.not_read_names", { names: got.ignored.join("、") }) : "";
+      setNote(t("look.imported_name", { name: got.pack.name }) + skipped);
       setLanded(got.pack.id);
     } catch (e) {
       if (currentOwner.current === owner) setFailed(reason(e));
@@ -70,7 +70,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
     port
       .openThemeFolder()
       .then((dir) => {
-        if (currentOwner.current === owner && request === folderRequest.current) setNote(t("主题目录：{path}", { path: dir }));
+        if (currentOwner.current === owner && request === folderRequest.current) setNote(t("look.themes_folder_path", { path: dir }));
       })
       .catch((e) => {
         if (currentOwner.current === owner && request === folderRequest.current) setFailed(reason(e));
@@ -98,11 +98,11 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
             <path d="M8 3.7v8.6M3.7 8h8.6" />
           </svg>
         </span>
-        {t(busy ? "正在导入…" : "导入主题…")}
+        {t(busy ? "common.importing" : "look.import_theme")}
       </button>
       <div className="themeacts">
         <p className="note" role="status" aria-atomic="true">
-          {note || t(empty ? "尚未安装主题。选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。" : "选择一个 .zip，或同时选中主题文件夹里的 theme.json 和图片。")}
+          {note || t(empty ? "look.no_themes_installed_choose_a" : "look.choose_a_zip_or_select")}
         </p>
         {landed && (
           <button
@@ -113,11 +113,11 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
               setLanded("");
             }}
           >
-            {t("立即使用")}
+            {t("look.use_now")}
           </button>
         )}
         <button className="btn sm" data-action="theme.folder" disabled={busy} onClick={reveal}>
-          {t("打开主题目录")}
+          {t("look.open_themes_folder")}
         </button>
       </div>
       {failed && (

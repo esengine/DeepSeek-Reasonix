@@ -45,14 +45,14 @@ export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: 
   return (
     <div className="block" data-b="jobs">
       <div className="lbl">
-        {t("后台任务")}
+        {t("common.background_jobs")}
         {onCancel && live.length >= 2 && (armed === "*" ? (
           <span className="job-confirm">
-            <span>{t("全部停止？")}</span>
-            <button type="button" className="job-stop" data-action="job.cancel-all" onClick={stopAll}>{t("确定")}</button>
+            <span>{t("panels.stop_all")}</span>
+            <button type="button" className="job-stop" data-action="job.cancel-all" onClick={stopAll}>{t("panels.ok")}</button>
           </span>
         ) : (
-          <button type="button" className="job-stop-all" data-action="job.arm-all" onClick={() => setArmed("*")}>{t("全部停止")}</button>
+          <button type="button" className="job-stop-all" data-action="job.arm-all" onClick={() => setArmed("*")}>{t("common.stop_all")}</button>
         ))}
         <span className="c">{jobs.length}</span>
       </div>
@@ -68,7 +68,7 @@ export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: 
               />
               <JobName job={j}>
                 {running && onView ? (
-                  <button type="button" className="cmd job-view" data-action="job.view" data-target={j.id} aria-label={t("查看输出：{cmd}", { cmd: jobName(j) })} onClick={() => onView(j.id)}>
+                  <button type="button" className="cmd job-view" data-action="job.view" data-target={j.id} aria-label={t("panels.view_output_cmd", { cmd: jobName(j) })} onClick={() => onView(j.id)}>
                     {jobName(j)}
                   </button>
                 ) : (
@@ -78,14 +78,14 @@ export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: 
               <span className="rt">{running ? jobElapsed(Date.now() - j.startedAt) : ended ? t(ended.label) : j.status}</span>
               {running && onCancel && (armed === j.id ? (
                 <span className="job-confirm">
-                  <span>{t("停止？")}</span>
+                  <span>{t("panels.stop")}</span>
                   <button
                     type="button"
                     className="job-stop"
                     data-action="job.cancel"
                     data-target={j.id}
                     disabled={stopping.has(j.id)}
-                    aria-label={t("确定停止后台任务：{cmd}", { cmd: jobName(j) })}
+                    aria-label={t("panels.confirm_stopping_background_task_cmd", { cmd: jobName(j) })}
                     onClick={() => {
                       setArmed("");
                       setStopping((prev) => new Set(prev).add(j.id));
@@ -96,7 +96,7 @@ export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: 
                       }));
                     }}
                   >
-                    {t("确定")}
+                    {t("panels.ok")}
                   </button>
                 </span>
               ) : (
@@ -106,8 +106,8 @@ export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: 
                   data-action="job.arm"
                   data-target={j.id}
                   disabled={stopping.has(j.id)}
-                  title={t("停止")}
-                  aria-label={t("停止后台任务：{cmd}", { cmd: jobName(j) })}
+                  title={t("common.stop")}
+                  aria-label={t("panels.stop_background_job_cmd", { cmd: jobName(j) })}
                   onClick={() => setArmed(j.id)}
                 >
                   <StudioIcon name="stop" />

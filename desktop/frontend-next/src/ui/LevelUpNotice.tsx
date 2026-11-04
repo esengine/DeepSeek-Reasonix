@@ -63,11 +63,11 @@ export function LevelUpNotice({ port, tick, fallback }: { port: AgentPort | null
   return (
     <div className="errbar" data-kind="note" role="status">
       <span>
-        {t("你的反馈等级升到了 L{n}「{name}」。", { n: up.to, name: levelName(up.to) })}
-        {next != null && mine?.profile?.remaining != null ? " " + t("再落地 {r} 条升到「{next}」。", { r: mine.profile.remaining, next: levelName(next) }) : ""}
-        {error ? " " + t("没能记住这条已读，稍后会再提示。") : ""}
+        {t("about.your_feedback_level_went_up", { n: up.to, name: levelName(up.to) })}
+        {next != null && mine?.profile?.remaining != null ? " " + t("about.r_more_shipped_to_reach", { r: mine.profile.remaining, next: levelName(next) }) : ""}
+        {error ? " " + t("about.that_could_not_be_remembered") : ""}
       </span>
-      <button data-action="level-up.notice-dismiss" onClick={() => void dismiss()}>{t("知道了")}</button>
+      <button data-action="level-up.notice-dismiss" onClick={() => void dismiss()}>{t("common.got_it")}</button>
     </div>
   );
 }

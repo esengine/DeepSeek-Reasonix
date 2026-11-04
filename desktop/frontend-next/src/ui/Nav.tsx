@@ -55,18 +55,18 @@ export function Nav({ at, onGo, onFiles, onHome, onRail, onFeedback, onNew, feed
     );
   };
   return (
-    <nav className="nav" aria-label={t("主导航")} aria-hidden={shown ? undefined : true} inert={!shown}>
+    <nav className="nav" aria-label={t("settings.main_navigation")} aria-hidden={shown ? undefined : true} inert={!shown}>
       <div className="navgrp">
-        <button className="navbtn" data-action="session.new" aria-label={t("新建会话")} onClick={onNew}>
+        <button className="navbtn" data-action="session.new" aria-label={t("common.start_a_new_session")} onClick={onNew}>
           <StudioIcon name="plus" aria-hidden="true" />
-          <span className="navhint" role="tooltip">{t("新建会话")}</span>
+          <span className="navhint" role="tooltip">{t("common.start_a_new_session")}</span>
         </button>
         {[HOME, ...destinations].map(btn)}
       </div>
       <div className="navgrp foot">
         <button className="navbtn" data-action="feedback.open" onClick={onFeedback}>
           <StudioIcon name="feedback" aria-hidden="true" />
-          <span className="navhint" role="tooltip">{t("发送反馈")}</span>
+          <span className="navhint" role="tooltip">{t("common.send_feedback")}</span>
           <FeedbackBadge unread={feedbackUnread} />
         </button>
         {FOOT.map(btn)}

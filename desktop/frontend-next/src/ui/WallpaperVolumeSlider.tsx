@@ -9,7 +9,7 @@ export function WallpaperVolumeSlider({ volume, onChange }: { volume?: number; o
   const value = Math.min(1, Math.max(0, volume ?? 1));
   return (
     <label className="prow">
-      <span className="tx">{t("音量")}</span>
+      <span className="tx">{t("look.volume")}</span>
       <input
         className="slider"
         style={{ "--at": `${Math.round(value * 100)}%` } as CSSProperties}

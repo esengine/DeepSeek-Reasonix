@@ -7,7 +7,7 @@ const FIELDS = [["start", "深色开始时间"], ["end", "恢复浅色时间"]] 
 export function ThemeScheduleFields() {
   const schedule = useSyncExternalStore(onThemeScheduleChange, themeSchedule);
   return <>
-    <p className="hint" id="theme-schedule-hint">{t("每天按本机时间切换，可跨午夜；开始时进入深色，结束时恢复浅色。")}</p>
+    <p className="hint" id="theme-schedule-hint">{t("look.switches_daily_in_local_time")}</p>
     {FIELDS.map(([field, label]) => (
       <label className="prow" key={field}>
         <span className="tx">{t(label)}</span>
@@ -16,6 +16,6 @@ export function ThemeScheduleFields() {
           onChange={(e) => setThemeSchedule({ ...schedule, [field]: e.target.value })} />
       </label>
     ))}
-    {schedule.start === schedule.end && <p className="hint">{t("开始和结束时间相同时全天使用浅色。")}</p>}
+    {schedule.start === schedule.end && <p className="hint">{t("look.equal_start_and_end_times")}</p>}
   </>;
 }

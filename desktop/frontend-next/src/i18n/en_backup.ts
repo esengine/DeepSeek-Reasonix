@@ -14,7 +14,6 @@ export const EN_BACKUP: Record<string, string> = {
   "用户级指令文件与全局记忆": "User-level instruction files and global memory",
   "会在本机运行的命令，恢复时逐项确认": "Commands that run on this machine; each one is confirmed on restore",
   "默认不备份。勾选后密钥会随备份一起加密上传": "Off by default. When ticked, keys are encrypted and uploaded with the backup",
-  "确认删除": "Confirm delete",
   "本机没有": "Not on this machine",
   "与本机不同": "Differs from this machine",
   "与本机相同": "Same as this machine",

@@ -10,13 +10,13 @@ export function ChangedFilesSetting({ port }: { port: AgentPort }) {
   const on = useShowsChangedFiles(port);
   const [error, setError] = useState("");
   return (
-    <Group id="changed-files" title={t("文件改动")} hint={t("在 Git 工作区里，输入框上方显示当前有多少文件已更改，点击查看。关闭后，数量回到分支标签旁。")}>
+    <Group id="changed-files" title={t("settings.file_changes")} hint={t("settings.in_a_git_workspace_show")}>
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("在输入框上方显示文件改动")}</span>
-          <span className="ds">{t("默认开启；数量来自 Git 工作区，与本轮对话是否改过文件无关")}</span>
+          <span className="lb">{t("settings.show_file_changes_above_the")}</span>
+          <span className="ds">{t("settings.on_by_default_the_count")}</span>
         </span>
-        <Switch data-action="chrome.changed-files" on={on} label={t("在输入框上方显示文件改动")} onClick={() => {
+        <Switch data-action="chrome.changed-files" on={on} label={t("settings.show_file_changes_above_the")} onClick={() => {
           setError("");
           saveChangedFilesPref(port, !on).catch((e) => setError(reason(e)));
         }} />

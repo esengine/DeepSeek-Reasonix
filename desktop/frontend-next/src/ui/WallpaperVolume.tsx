@@ -31,7 +31,7 @@ export function WallpaperVolume({ look, onLook }: Props) {
           max={1}
           step={0.05}
           value={volume}
-          aria-label={t("音量")}
+          aria-label={t("look.volume")}
           data-action="wallpaper.volume"
           style={{ writingMode: "vertical-lr", direction: "rtl", width: 18, height: 96, margin: "4px 0", accentColor: "var(--accent)", cursor: "pointer" }}
           onChange={(e) => {
@@ -44,8 +44,8 @@ export function WallpaperVolume({ look, onLook }: Props) {
         type="button"
         className="wvol-btn"
         data-action="wallpaper.sound"
-        aria-label={silent ? t("打开声音") : t("关闭声音")}
-        title={silent ? t("打开声音") : t("关闭声音")}
+        aria-label={silent ? t("look.unmute_sound") : t("look.mute_sound")}
+        title={silent ? t("look.unmute_sound") : t("look.mute_sound")}
         style={{ width: 34, height: 34, display: "grid", placeItems: "center", padding: 0, border: "1px solid var(--hair)", borderRadius: "50%", background: "color-mix(in srgb, var(--raised) 84%, transparent)", color: "var(--text)", cursor: "pointer", backdropFilter: "blur(12px)" }}
         onClick={() => {
           if (silent) update({ muted: false, volume: volume > 0 ? volume : 1 });

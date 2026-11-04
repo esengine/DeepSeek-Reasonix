@@ -17,7 +17,7 @@ export function ExternalOrigin({ port, onChanged }: { port: AgentPort; onChanged
     port.permissions().then((p) => setOn(p.askOnExternalOrigin === true)).catch(() => setOn(null));
   }, [port]);
 
-  if (on === null) return <div className="empty">{t("无法读取这项设置。")}</div>;
+  if (on === null) return <div className="empty">{t("safety.this_setting_could_not_be")}</div>;
 
   const flip = async () => {
     setBusy(true);
@@ -38,10 +38,10 @@ export function ExternalOrigin({ port, onChanged }: { port: AgentPort; onChanged
     <div className="box">
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("询问来自外部的文字")}</span>
-          <span className="ds">{t("调用逐字复制了网页或工具结果里的文字时，Auto 和 YOLO 也先问你。只认用户配置；已授权的 MCP 服务器、改写过或编码过的文字不在其内。无人可问时（无头 YOLO），这类调用会被拒绝而不是执行。修改会重建运行时，任务运行期间无法变更。默认关闭。")}</span>
+          <span className="lb">{t("safety.ask_about_text_from_outside")}</span>
+          <span className="ds">{t("safety.when_a_call_copies_text")}</span>
         </span>
-        <Switch data-action="permissions.ask-on-external-origin" on={on} busy={busy} label={t("询问来自外部的文字")} onClick={() => void flip()} />
+        <Switch data-action="permissions.ask-on-external-origin" on={on} busy={busy} label={t("safety.ask_about_text_from_outside")} onClick={() => void flip()} />
       </div>
       <SaveNote note={note} />
     </div>

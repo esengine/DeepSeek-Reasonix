@@ -44,17 +44,17 @@ export function useRewindActions(port: AgentPort, reloadSession: (current?: () =
     return operation;
   }, [owner, reloadSession]);
   const onPrepareRewind = useCallback(async (turn: number, scope: RewindScope) => {
-    if (!owner.active || owner.commit || owner.undo || owner.reload) throw new Error(t("正在还原…"));
+    if (!owner.active || owner.commit || owner.undo || owner.reload) throw new Error(t("common.restoring"));
     const epoch = owner.epoch;
     const run = owner.run;
     const plan = await port.prepareRewind(turn, scope);
-    if (!owner.active || owner.epoch !== epoch || owner.run !== run) throw new Error(t("会话已切换，请重新选择还原位置"));
+    if (!owner.active || owner.epoch !== epoch || owner.run !== run) throw new Error(t("app.the_conversation_changed_choose_a"));
     return plan;
   }, [port, owner]);
   const onCommitRewind = useCallback((planId: string, text?: string) => {
-    if (!owner.active) return Promise.reject(new Error(t("会话已切换，请重新选择还原位置")));
-    if (owner.commit) return owner.commit.planId === planId ? owner.commit.promise : Promise.reject(new Error(t("正在还原…")));
-    if (owner.undo || owner.reload) return Promise.reject(new Error(t("正在还原…")));
+    if (!owner.active) return Promise.reject(new Error(t("app.the_conversation_changed_choose_a")));
+    if (owner.commit) return owner.commit.planId === planId ? owner.commit.promise : Promise.reject(new Error(t("common.restoring")));
+    if (owner.undo || owner.reload) return Promise.reject(new Error(t("common.restoring")));
     const epoch = owner.epoch;
     const run = owner.run;
     const previous = owner.notice;
@@ -103,8 +103,8 @@ export function useRewindActions(port: AgentPort, reloadSession: (current?: () =
     return operation;
   }, [port, owner, publish, onReloadSession]);
   const onUndoAvailable = useCallback(async (transactionId: string) => {
-    if (!owner.active) throw new Error(t("会话已切换，请重新选择还原位置"));
-    if (owner.commit || owner.reload || (owner.undo && owner.notice?.tx !== transactionId)) throw new Error(t("正在还原…"));
+    if (!owner.active) throw new Error(t("app.the_conversation_changed_choose_a"));
+    if (owner.commit || owner.reload || (owner.undo && owner.notice?.tx !== transactionId)) throw new Error(t("common.restoring"));
     // Backend offers survive reloads that retired the local restore receipt.
     if (owner.notice?.tx !== transactionId) publish({ tx: transactionId, files: 0, working: false, error: "" });
     await onUndoRewind(transactionId);

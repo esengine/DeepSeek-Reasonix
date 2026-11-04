@@ -61,24 +61,24 @@ export function JobOutputView({ job, read, onClose, onCancel }: { job: JobEntry;
   const ended = out && out.status !== "running" ? ENDED[out.status] ?? out.status : "";
   const body = (
     <div className="agent-tx-scrim" data-action="job.close" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={sheet} className="agent-tx" role="dialog" aria-modal="true" aria-label={t("后台任务输出：{name}", { name: job.label || job.id })}>
+      <div ref={sheet} className="agent-tx" role="dialog" aria-modal="true" aria-label={t("panels.background_task_output_name", { name: job.label || job.id })}>
         <div className="agent-tx-hd">
           <span className="who">{job.label || job.id}</span>
-          <span className="rt">{ended ? t(ended) : t("运行中")}</span>
-          {out && out.text && <CopyButton text={out.text} iconOnly label={t("复制输出")} />}
+          <span className="rt">{ended ? t(ended) : t("common.running")}</span>
+          {out && out.text && <CopyButton text={out.text} iconOnly label={t("panels.copy_output")} />}
           {onCancel && !gone && !ended && (
-            <button type="button" className="agent-tx-x" data-action="job.cancel" data-target={job.id} aria-label={t("停止此任务")} title={t("停止此任务")} onClick={() => void onCancel(job.id)}>
+            <button type="button" className="agent-tx-x" data-action="job.cancel" data-target={job.id} aria-label={t("panels.stop_this_task")} title={t("panels.stop_this_task")} onClick={() => void onCancel(job.id)}>
               <StudioIcon name="stop" />
             </button>
           )}
-          <button type="button" className="agent-tx-x" data-action="job.close" aria-label={t("关闭")} onClick={onClose}>
+          <button type="button" className="agent-tx-x" data-action="job.close" aria-label={t("common.close")} onClick={onClose}>
             <StudioIcon name="close" />
           </button>
         </div>
-        {gone && <p className="mnote">{t("这个任务已经结束，没有可显示的输出了。")}</p>}
+        {gone && <p className="mnote">{t("panels.this_task_has_ended_there")}</p>}
         {failed && <p className="mnote">{failed}</p>}
-        {out && out.truncated && <p className="mnote">{t("只显示最后一部分（共 {total}）。", { total: bytes(out.bytes) })}</p>}
-        {out && !gone && <pre className="nest-ret job-out" ref={box} tabIndex={0}>{out.text || t("还没有输出")}</pre>}
+        {out && out.truncated && <p className="mnote">{t("panels.showing_only_the_last_part", { total: bytes(out.bytes) })}</p>}
+        {out && !gone && <pre className="nest-ret job-out" ref={box} tabIndex={0}>{out.text || t("panels.no_output_yet")}</pre>}
       </div>
     </div>
   );

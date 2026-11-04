@@ -21,14 +21,14 @@ export function UpdateReady({ port, idle }: { port: Pick<AgentPort, "restartToVe
       await port.restartToVersion(version, false);
     } catch (e) {
       setSays(e instanceof HttpError && e.reason?.code === RESTART_BUSY
-        ? t("有 {n} 个会话还在运行，等它们结束后再重启。", { n: Number(e.reason.params?.n) || 1 })
+        ? t("about.n_sessions_are_still_running", { n: Number(e.reason.params?.n) || 1 })
         : reason(e));
     }
   };
   return (
     <ToastRow kind="update" role="status" className="update-ready" actions={<>
-      <button className="act ghost" data-action="update.later" onClick={() => setPutOff(version)}>{t("稍后")}</button>
-      <button className="act" data-primary data-action="update.restart" onClick={() => void restart()}>{t("重启并更新")}</button>
-    </>}>{says || t("新版本 {v} 已下载。重启后使用，不会自动重启。", { v: version })}</ToastRow>
+      <button className="act ghost" data-action="update.later" onClick={() => setPutOff(version)}>{t("about.later")}</button>
+      <button className="act" data-primary data-action="update.restart" onClick={() => void restart()}>{t("about.restart_and_update")}</button>
+    </>}>{says || t("about.version_v_is_downloaded_restart", { v: version })}</ToastRow>
   );
 }

@@ -37,12 +37,12 @@ export function useRewind(
   const onResend = useCallback(
     async (turn: number, text: string) => {
       const plan = await port.prepareRewind(turn, "conversation");
-      if (!plan.canConversation) throw new Error(plan.disabledReason || t("这一轮无法回退"));
+      if (!plan.canConversation) throw new Error(plan.disabledReason || t("app.this_turn_cannot_be_rewound"));
       const result = await port.commitRewind(plan.planId);
       reloadSession();
       // The commit can touch files and leave the conversation standing, which
       // would send the message a second time rather than replace it.
-      if (!result.conversationOk) throw new Error(result.error || t("对话没有被回退，原文仍在记录里"));
+      if (!result.conversationOk) throw new Error(result.error || t("app.the_conversation_was_not_rewound"));
       await send.current(text);
     },
     [port, reloadSession, send],

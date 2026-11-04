@@ -18,20 +18,20 @@ export function LiveStreamBudgetSection() {
   return (
     <Group
       id="live-stream-budget"
-      title={t("保持实时连接的会话标签数")}
-      hint={t("默认留空：自动。浏览器对同一个地址只开约 6 个连接，会话列表占一个，所以只让少数标签保持实时连接，其余的标签在显示时从断点接着读，运行中的后台标签每 5 秒读一次状态。调高会让更多后台标签实时更新，但开太多会让停止、发送排不上队。")}
+      title={t("settings.session_tabs_kept_live")}
+      hint={t("settings.empty_means_automatic_a_browser")}
     >
       <div className="lrow">
         <span className="tx">
-          <label className="lb" htmlFor="live-stream-budget-input">{t("实时连接的标签数")}</label>
-          <span className="ds">{t("留空表示自动；可填 1 到 {max}", { max: MAX_LIVE_STREAM_BUDGET })}</span>
+          <label className="lb" htmlFor="live-stream-budget-input">{t("settings.tabs_with_a_live_connection")}</label>
+          <span className="ds">{t("settings.empty_is_automatic_1_to", { max: MAX_LIVE_STREAM_BUDGET })}</span>
         </span>
         <span className="unit-field">
           <input
             id="live-stream-budget-input"
             type="text"
             inputMode="numeric"
-            placeholder={t("自动")}
+            placeholder={t("common.auto")}
             value={draft}
             onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
             onBlur={commit}
@@ -43,7 +43,7 @@ export function LiveStreamBudgetSection() {
               e.currentTarget.blur();
             }}
           />
-          <i>{t("个")}</i>
+          <i>{t("settings.tabs")}</i>
         </span>
       </div>
     </Group>

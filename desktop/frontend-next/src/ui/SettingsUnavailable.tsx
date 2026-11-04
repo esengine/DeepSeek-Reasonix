@@ -13,18 +13,18 @@ export function SettingsUnavailable({ onClose }: { onClose: () => void }) {
     <div className="prefs">
       <div ref={sheet} className="prefs-sheet" role="alertdialog" aria-modal="true" aria-labelledby="prefs-gone">
         <div className="prefs-hd">
-          <h1 id="prefs-gone">{t("设置没能打开")}</h1>
+          <h1 id="prefs-gone">{t("settings.settings_did_not_open")}</h1>
           <button className="btn sm" data-action="chrome.reload" onClick={() => location.reload()}>
-            {t("重新载入")}
+            {t("settings.reload")}
           </button>
           <button className="btn sm" data-action="settings.close" onClick={onClose}>
-            {t("关闭")}
+            {t("common.close")}
           </button>
         </div>
         <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("这一页是单独取的，这次没取到")}</span>
+          <span className="t">{t("settings.this_screen_is_fetched_on")}</span>
           <span className="why">
-            {t("多半是更新换掉了这个窗口正在用的那份文件。重新载入窗口即可，当前会话与正在跑的回合都不受影响。")}
+            {t("settings.an_update_most_likely_replaced")}
           </span>
         </div>
       </div>

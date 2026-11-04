@@ -31,7 +31,7 @@ export function WallpaperSceneImport({ port, look, onLook, setPaper, onError }: 
       const project = files.find((f) => f.name.toLowerCase() === "project.json");
       const scene = files.find((f) => f.name.toLowerCase() === "scene.pkg");
       if (!project || !scene) {
-        onError(t("文件夹里需要 project.json 和 scene.pkg"));
+        onError(t("look.the_folder_needs_project_json"));
         return;
       }
       const preview = files.find((f) => /^preview\.(jpe?g|png|webp|avif)$/i.test(f.name));
@@ -68,20 +68,20 @@ export function WallpaperSceneImport({ port, look, onLook, setPaper, onError }: 
             <path d="M8 3.7v8.6M3.7 8h8.6" />
           </svg>
         </span>
-        {t("导入 Wallpaper Engine…")}
+        {t("look.import_wallpaper_engine")}
       </button>
       {paper?.kind === "scene" && (
         <>
           <div className="prow">
-            <span className="tx">{t("Wallpaper Engine 场景")}</span>
-            <span className="now">{paper.title || t("未命名场景")}</span>
+            <span className="tx">{t("look.wallpaper_engine_scene")}</span>
+            <span className="now">{paper.title || t("look.untitled_scene")}</span>
             {(paper.audioTracks?.length || paper.audios?.length || paper.audio) && (
               <button className="now nowbtn" data-action="wallpaper.sound" onClick={() => setPaper({ muted: !paper.muted })}>
-                {paper.muted ? t("打开声音") : t("关闭声音")}
+                {paper.muted ? t("look.unmute_sound") : t("look.mute_sound")}
               </button>
             )}
           </div>
-          <p className="note">{t("场景以主图和声音播放；粒子和着色器效果暂未再现。")}</p>
+          <p className="note">{t("look.the_scene_plays_its_backdrop")}</p>
         </>
       )}
     </>

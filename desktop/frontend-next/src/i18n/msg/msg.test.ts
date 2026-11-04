@@ -68,8 +68,12 @@ describe("the message tables", () => {
     expect(missing).toEqual([]);
   });
 
+  // A key may sit in a table the call site hands to t() later, so anywhere a
+  // source names it as a string counts as asking for it.
   it("carry nothing the interface no longer asks for", () => {
-    expect(Object.keys(MESSAGES).filter((key) => !asked.has(key))).toEqual([]);
+    const named = new Set<string>();
+    for (const body of Object.values(SOURCES)) for (const m of body.matchAll(/["'`]([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["'`]/g)) named.add(m[1]);
+    expect(Object.keys(MESSAGES).filter((key) => !asked.has(key) && !named.has(key))).toEqual([]);
   });
 
   it("define every key once", () => {

@@ -26,17 +26,17 @@ export function Runtime({ rate, done, stats }: Props) {
   return (
     <Grp
       id="runtime"
-      name={t("运行指标")}
+      name={t("panels.run_metrics")}
       // Demoted from a row: how many calls a turn made is a true cumulative
       // fact and almost never the thing that decides what to do next.
-      aside={stats.tools > 0 ? t("{n} 次调用", { n: stats.tools }) : undefined}
+      aside={stats.tools > 0 ? t("panels.n_calls", { n: stats.tools }) : undefined}
     >
-      {waiting && <Row k={t("待确认")} v={stats.waiting} tone="act" />}
+      {waiting && <Row k={t("panels.awaiting_you")} v={stats.waiting} tone="act" />}
       {/* Throughput is about a turn in flight; once one is over it has nothing
           left to say, and D1 already made it fall silent within a turn. */}
       {!done && (
         <Row
-          k={t("吞吐（输出）")}
+          k={t("panels.throughput_output")}
           v={
             <span className="rate" data-live={rate >= 1 ? "" : undefined}>
               <Spark points={trail} />
@@ -46,8 +46,8 @@ export function Runtime({ rate, done, stats }: Props) {
           }
         />
       )}
-      {stats.failed > 0 && <Row k={t("失败步数")} v={stats.failed} tone="err" />}
-      {stats.external > 0 && <Row k={t("外部请求")} v={stats.external} />}
+      {stats.failed > 0 && <Row k={t("panels.failed")} v={stats.failed} tone="err" />}
+      {stats.external > 0 && <Row k={t("panels.external_requests")} v={stats.external} />}
     </Grp>
   );
 }

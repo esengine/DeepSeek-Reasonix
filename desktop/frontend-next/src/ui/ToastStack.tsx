@@ -18,18 +18,18 @@ export function ToastStack({ onFeedback, port, idle = false, look = {}, onLook =
   const at = useAboveComposer(toasts.length > 0 || update || ask.open);
   if (toasts.length === 0 && !update && !ask.open) return null;
   return (
-    <div className="toasts" role="region" aria-label={t("通知")} style={at ? { bottom: at.bottom, right: at.right } : undefined}>
+    <div className="toasts" role="region" aria-label={t("common.notifications")} style={at ? { bottom: at.bottom, right: at.right } : undefined}>
       {ask.node}
       {port && <UpdateReady port={port} idle={idle} />}
       {toasts.map((toast) => toast.tone === "note" ? (
         <ToastRow kind="note" role="status" className="note" key={toast.id} actions={<>
           {toast.action && <button className="act" data-action="toast.act" data-target={String(toast.id)} onClick={() => { dismissToast(toast.id); toast.action?.run(); }}>{toast.action.label}</button>}
-          <button className="act ghost" data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
+          <button className="act ghost" data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("common.got_it")}</button>
         </>}>{toast.text}</ToastRow>
       ) : (
         <ToastRow kind="error" role="alert" key={toast.id} actions={<>
-          <button className="act ghost" data-action="toast.report" onClick={() => { reportProblem(toast.text); onFeedback(); dismissToast(toast.id); }}>{t("报告此问题")}</button>
-          <button className="act ghost" data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("知道了")}</button>
+          <button className="act ghost" data-action="toast.report" onClick={() => { reportProblem(toast.text); onFeedback(); dismissToast(toast.id); }}>{t("app.report_this_problem")}</button>
+          <button className="act ghost" data-action="toast.dismiss" data-target={String(toast.id)} onClick={() => dismissToast(toast.id)}>{t("common.got_it")}</button>
         </>}>{toast.text}</ToastRow>
       ))}
     </div>

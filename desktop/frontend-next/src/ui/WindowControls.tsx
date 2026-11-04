@@ -40,8 +40,8 @@ export function WindowControls() {
   }, []);
   if (document.documentElement.dataset.platform !== "windows") return null;
   return (
-    <div className="winctl" role="group" aria-label={t("窗口")}>
-      <button className="wc" data-action="window.minimize" onClick={() => host().minimiseWindow()} aria-label={t("最小化")}>
+    <div className="winctl" role="group" aria-label={t("common.window")}>
+      <button className="wc" data-action="window.minimize" onClick={() => host().minimiseWindow()} aria-label={t("app.minimize")}>
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <path d="M2 6h8" />
         </svg>
@@ -50,7 +50,7 @@ export function WindowControls() {
         className="wc"
         data-action="window.maximize"
         onClick={() => host().toggleMaximiseWindow()}
-        aria-label={t(max ? "向下还原" : "最大化")}
+        aria-label={t(max ? "app.restore" : "app.maximize")}
       >
         <svg viewBox="0 0 12 12" aria-hidden="true">
           {max ? (
@@ -63,7 +63,7 @@ export function WindowControls() {
           )}
         </svg>
       </button>
-      <button className="wc close" data-action="window.close" onClick={() => host().closeWindow()} aria-label={t("关闭")}>
+      <button className="wc close" data-action="window.close" onClick={() => host().closeWindow()} aria-label={t("common.close")}>
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" />
         </svg>

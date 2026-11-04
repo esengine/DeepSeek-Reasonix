@@ -203,7 +203,7 @@ function PluginInput({ port, onClose, onInstalled, updating, source, onApplying 
             disabled={busy}
             onClick={() => void install()}
           >
-            {t(busy ? (updating ? "更新中…" : "安装中…") : updating ? "ext.update" : "ext.install")}
+            {t(busy ? (updating ? "ext.updating" : "ext.installing") : updating ? "ext.update" : "ext.install")}
           </button>
         </div>
         {error && <div className="why" role="alert">{error}</div>}

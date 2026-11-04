@@ -5,8 +5,8 @@ import { onSoftwareRenderingChange, setSoftwareRendering, wantsSoftwareRendering
 import { Group } from "./Group";
 
 function modeSaid(g: GraphicsInfo): string {
-  if (g.launchedOff) return t("软件渲染") + " · " + t(g.savedOff === false ? "本次启动已用启动参数关闭硬件加速" : "已按你的设置关闭硬件加速");
-  return g.compositing ? t("图形合成状态：{value}", { value: g.compositing }) : t("尚未报告图形状态");
+  if (g.launchedOff) return t("look.software_rendering") + " · " + t(g.savedOff === false ? "look.hardware_acceleration_was_switched_off" : "look.hardware_acceleration_is_switched_off");
+  return g.compositing ? t("look.graphics_compositing_status_value", { value: g.compositing }) : t("look.no_graphics_status_reported_yet");
 }
 
 /** Which way the window is drawn this launch, and the one switch the shell can
@@ -32,20 +32,20 @@ export function GraphicsSection() {
   return (
     <Group
       id="graphics"
-      title={t("图形渲染")}
-      hint={t("窗口一直占用显卡、或界面花屏时，先试「视觉效果：节能」，不行再改为「仅软件渲染」：改用 CPU 绘制，显卡不再参与。设置保存后，需退出并重新打开 Studio 才会生效。")}
+      title={t("look.graphics")}
+      hint={t("look.if_the_window_keeps_your")}
     >
-      <div className="seg" data-text role="group" aria-label={t("图形渲染")}>
+      <div className="seg" data-text role="group" aria-label={t("look.graphics")}>
         {([false, true] as const).map((off) => (
           <button key={String(off)} data-action="appearance.graphics" data-value={off ? "software" : "auto"} aria-pressed={software === off} onClick={() => setSoftwareRendering(off)}>
-            {t(off ? "仅软件渲染" : "随系统")}
+            {t(off ? "look.software_only" : "look.system_default")}
           </button>
         ))}
       </div>
       <p className="note" data-graphics={now.launchedOff ? "software" : now.compositing ? "reported" : "unreported"}>
-        {t("当前启动使用：{mode}", { mode: modeSaid(now) })}
+        {t("look.this_launch_uses_mode", { mode: modeSaid(now) })}
       </p>
-      {pending && <p className="note" role="status">{t("已保存，退出并重新打开 Studio 后生效")}</p>}
+      {pending && <p className="note" role="status">{t("look.saved_quit_and_reopen_studio")}</p>}
     </Group>
   );
 }

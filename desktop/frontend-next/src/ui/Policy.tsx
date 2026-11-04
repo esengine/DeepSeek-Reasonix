@@ -47,8 +47,8 @@ export function Policy({ port, status, onChanged, onBoundary }: Props) {
         data-action="chrome.policy"
         data-risk={apv === "yolo" ? "" : undefined}
         aria-expanded={open}
-        aria-label={`${t("执行权限")}：${label}`}
-        title={`${t("执行权限")}：${label}`}
+        aria-label={`${t("safety.execution_permissions")}：${label}`}
+        title={`${t("safety.execution_permissions")}：${label}`}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="ic" aria-hidden="true">
@@ -59,12 +59,12 @@ export function Policy({ port, status, onChanged, onBoundary }: Props) {
         <span className={apv === "yolo" ? "lb polrisk" : "lb"} data-display={label}>{label}</span>
         <StudioIcon name="down" className="studio-control-chevron" />
       </button>
-      <div className="menu modemenu polmenu composer-menu" role="group" aria-label={t("执行权限")} hidden={!open}>
-        <div className="studio-policy-head"><b>{t("执行权限")}</b><small>{t("当前任务")}</small></div>
+      <div className="menu modemenu polmenu composer-menu" role="group" aria-label={t("safety.execution_permissions")} hidden={!open}>
+        <div className="studio-policy-head"><b>{t("safety.execution_permissions")}</b><small>{t("common.current_task")}</small></div>
         <div className="studio-policy-primary">
           {APPROVALS.map(([value, name, note]) => (
             <div key={value}>
-              {value === "yolo" && <div className="studio-policy-risk">{t("高风险")}</div>}
+              {value === "yolo" && <div className="studio-policy-risk">{t("common.high_risk")}</div>}
               <button
                 className={`studio-permission-option${value === "yolo" ? " studio-permission-yolo" : ""}`}
                 data-action="tool-approval.mode"
@@ -82,9 +82,9 @@ export function Policy({ port, status, onChanged, onBoundary }: Props) {
           ))}
           {refused && <div className="note bad studio-policy-error" role="alert">{refused}</div>}
         </div>
-        <div className="studio-policy-note">{t("审批决定何时询问；沙盒限定实际访问范围。")}</div>
+        <div className="studio-policy-note">{t("safety.approvals_decide_when_to_ask")}</div>
         <button className="studio-policy-boundary" data-action="settings.section" data-value="tools:sandbox" onClick={onBoundary} disabled={!onBoundary}>
-          <span><b>{t("沙盒与运行边界")}</b><small>{t("在设置中查看当前隔离与网络权限")}</small></span>
+          <span><b>{t("safety.sandbox_and_runtime_boundary")}</b><small>{t("safety.view_current_isolation_and_network")}</small></span>
           <span aria-hidden="true">›</span>
         </button>
       </div>

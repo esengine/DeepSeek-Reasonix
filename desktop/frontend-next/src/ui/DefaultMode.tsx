@@ -19,12 +19,12 @@ export function DefaultMode({ port }: { port: AgentPort }) {
   }, [port]);
 
   const row = (body: React.ReactNode) => (
-    <SettingRow id="default-mode" title={t("新对话的起始模式")} desc={t("新对话一开始用哪种模式")}>
+    <SettingRow id="default-mode" title={t("safety.how_new_conversations_start")} desc={t("safety.which_mode_a_new_chat")}>
       {body}
     </SettingRow>
   );
 
-  if (!state) return row(<span className="srow-desc">{t("无法读取新对话的起始模式设置。")}</span>);
+  if (!state) return row(<span className="srow-desc">{t("safety.could_not_read_the_setting")}</span>);
 
   const pick = async (next: Start) => {
     if ((next === "plan") === state.plan) return;
@@ -41,8 +41,8 @@ export function DefaultMode({ port }: { port: AgentPort }) {
 
   return row(
     <>
-      <SegChoice<Start> label={t("新对话的起始模式")} value={state.plan ? "plan" : "agent"} disabled={busy} action="default-mode.plan" onPick={(next) => void pick(next)}
-        options={[["agent", t("Agent")], ["plan", t("计划")]]} />
+      <SegChoice<Start> label={t("safety.how_new_conversations_start")} value={state.plan ? "plan" : "agent"} disabled={busy} action="default-mode.plan" onPick={(next) => void pick(next)}
+        options={[["agent", t("Agent")], ["plan", t("common.plan")]]} />
       {error && <span className="why">{error}</span>}
     </>,
   );

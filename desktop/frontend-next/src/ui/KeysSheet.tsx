@@ -28,8 +28,8 @@ export function KeysSheet() {
   return (
     <Group
       id="keys"
-      title={t("快捷键")}
-      hint={t("下列按键在窗口中生效；标着 ⌘ 的地方，Windows 与 Linux 上是 Ctrl。全局显示 / 隐藏快捷键在上方单独配置，仅桌面 shell 支持。")}
+      title={t("settings.keyboard_shortcuts")}
+      hint={t("settings.these_keys_work_inside_the")}
     >
       {KEYS.map(([keys, what]) => (
         <div className="lrow keys-row" key={keys + what}>

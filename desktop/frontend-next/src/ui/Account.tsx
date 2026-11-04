@@ -35,7 +35,7 @@ export function Account({ port, state, unread, reload }: { port: AgentPort; stat
         }
         if (res.slowDown) wait += 5000;
       }
-      if (!cancelled.current) setError(t("这次登录请求已过期，再试一次。"));
+      if (!cancelled.current) setError(t("settings.this_sign_in_request_expired"));
     } catch (e) {
       setError(reason(e));
     } finally {
@@ -68,11 +68,11 @@ export function Account({ port, state, unread, reload }: { port: AgentPort; stat
   if (unread) {
     return (
       <div className="find" data-lvl="warn" role="alert">
-        <span className="t">{t("无法读取登录状态")}</span>
+        <span className="t">{t("settings.sign_in_status_could_not")}</span>
         <span className="why">
           {unread}
           <button className="lnk" data-action="account.reload" onClick={reload}>
-            {t("重试")}
+            {t("common.retry")}
           </button>
         </span>
       </div>
@@ -80,29 +80,29 @@ export function Account({ port, state, unread, reload }: { port: AgentPort; stat
   }
 
   if (state === null) {
-    return <p className="acct-note">{t("正在检查登录状态…")}</p>;
+    return <p className="acct-note">{t("settings.checking_sign_in_status")}</p>;
   }
 
   if (state.signedIn) {
     return (
       <div className="acct">
         <div className="acct-who">
-          <span className="nm">{state.user?.label || state.user?.handle || state.user?.email || t("已登录")}</span>
+          <span className="nm">{state.user?.label || state.user?.handle || state.user?.email || t("settings.signed_in")}</span>
           {state.user?.email && <span className="em">{state.user.email}</span>}
         </div>
         {state.error && (
           <p className="acct-note" role="alert">
-            {t("无法连接身份服务")}：{state.error}{" "}
+            {t("settings.cannot_reach_the_identity_service")}：{state.error}{" "}
             <button className="lnk" data-action="account.reload" onClick={reload} disabled={busy}>
-              {t("重试")}
+              {t("common.retry")}
             </button>
           </p>
         )}
         <div className="acct-act">
           <button className="btn" data-action="account.sign-out" onClick={signOut} disabled={busy} onMouseLeave={() => setConfirm(false)}>
-            {t(confirm ? "确认退出" : "退出登录")}
+            {t(confirm ? "settings.confirm_sign_out" : "settings.sign_out")}
           </button>
-          <span className="acct-note">{t("只清除本地登录凭证，不影响会话、记忆和配置")}</span>
+          <span className="acct-note">{t("settings.clears_the_local_credential_only")}</span>
         </div>
         {error && <p className="acct-note" data-err="">{error}</p>}
       </div>
@@ -112,23 +112,23 @@ export function Account({ port, state, unread, reload }: { port: AgentPort; stat
   return (
     <div className="acct">
       <p className="acct-note">
-        {t("用于社区发帖与崩溃问题跟进。与模型 API key 无关 —— 登录不会上传你的对话、代码或密钥。")}
+        {t("settings.used_for_posting_to_the")}
       </p>
-      {state.expired && <p className="acct-note">{t("上次的登录已过期。")}</p>}
+      {state.expired && <p className="acct-note">{t("settings.the_previous_sign_in_has")}</p>}
       {code ? (
         <div className="acct-code">
           <span className="cd">{code.userCode}</span>
           <span className="acct-note">
-            {t("在浏览器里打开的页面输入这串代码。没自动打开就手动访问 {uri}", { uri: code.uri })}
+            {t("settings.type_this_code_into_the", { uri: code.uri })}
           </span>
           <button className="btn" onClick={() => (cancelled.current = true)}>
-            {t("取消")}
+            {t("common.cancel")}
           </button>
         </div>
       ) : (
         <div className="acct-act">
           <button className="btn" data-action="account.sign-in" onClick={signIn} disabled={busy}>
-            {t(busy ? "正在打开…" : "登录")}
+            {t(busy ? "settings.opening" : "common.sign_in")}
           </button>
         </div>
       )}

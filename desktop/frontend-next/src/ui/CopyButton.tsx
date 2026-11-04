@@ -39,7 +39,7 @@ export function CopyButton({ text, iconOnly = false, showFeedback = false, class
 
   // A clipboard the host denied is not the same as nothing happening, and the
   // reader is about to try again — so the failure says so instead of staying idle.
-  const label = state === "done" ? t("已复制") : state === "failed" ? t("复制失败，请重试") : what ?? t("复制回复");
+  const label = state === "done" ? t("common.copied") : state === "failed" ? t("common.copy_failed_try_again") : what ?? t("app.copy_response");
   const Button = iconOnly ? TooltipButton : "button";
 
   return (
@@ -51,7 +51,7 @@ export function CopyButton({ text, iconOnly = false, showFeedback = false, class
       data-state={state}
       data-feedback={showFeedback && state !== "idle" ? "" : undefined}
       onClick={copy}
-      aria-label={ariaLabel ?? what ?? t("复制这段回答")}
+      aria-label={ariaLabel ?? what ?? t("app.copy_this_answer")}
       title={label}
     >
       {iconOnly && <StudioIcon name={state === "done" ? "check" : state === "failed" ? "warning" : "copy"} />}

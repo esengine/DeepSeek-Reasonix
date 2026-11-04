@@ -130,7 +130,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
   const others = (id: string) => tabs.filter((t) => t.rt.id !== id).map((t) => t.rt.id);
 
   return (
-    <div className="panetabs" ref={bar} role="tablist" aria-label={t("会话面板")} onKeyDown={arrowTabs}>
+    <div className="panetabs" ref={bar} role="tablist" aria-label={t("app.session_panes")} onKeyDown={arrowTabs}>
       {tabs.map(({ rt, title, run, unread }) => (
         <div
           key={rt.id}
@@ -155,9 +155,9 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
             setMenu({ id: rt.id, x: ev.clientX, y: ev.clientY });
           }}
         >
-          <i className="pip" data-unread={unread ? "" : undefined} role={unread ? "img" : undefined} aria-label={unread ? t("未读") : undefined} />
+          <i className="pip" data-unread={unread ? "" : undefined} role={unread ? "img" : undefined} aria-label={unread ? t("common.unread") : undefined} />
           {editing === rt.id ? (
-            <input className="ptab-in" aria-label={t("重命名该会话")} placeholder={t("聊天标题")} autoFocus defaultValue={title}
+            <input className="ptab-in" aria-label={t("common.rename_this_session")} placeholder={t("common.chat_title")} autoFocus defaultValue={title}
               onClick={(ev) => ev.stopPropagation()}
               data-action-blur="session.rename" data-action-keydown="session.rename" data-target={rt.id}
               onBlur={(ev) => {
@@ -188,8 +188,8 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
             className="ptab-x"
             data-action="pane.close"
             data-value="one"
-            title={t("关闭这个面板")}
-            aria-label={t("关闭这个面板")}
+            title={t("app.close_this_pane")}
+            aria-label={t("app.close_this_pane")}
             onClick={(ev) => {
               ev.stopPropagation();
               close([rt.id], "one", rt.id);
@@ -224,20 +224,20 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
           }}
         >
           <span className="q" id="tabconfirm-q">
-            {present.length > 1 ? t("关闭 {n} 个面板？", { n: present.length }) : t("关闭这个面板？")}
+            {present.length > 1 ? t("app.close_n_panes", { n: present.length }) : t("app.close_this_pane_2")}
           </span>
           <span className="h">
             {liveNow.length === 0
-              ? t("均已停止")
+              ? t("app.they_have_all_stopped")
               : (liveNow.length === 1
-                  ? t("{names} 仍在运行", { names: nameOf(liveNow[0]) })
-                  : t("其中 {n} 个仍在运行：{names}", { n: liveNow.length, names: liveNow.slice(0, 3).map(nameOf).join("、") })) +
-                t("，关闭将使其停止")}
+                  ? t("app.names_is_still_running", { names: nameOf(liveNow[0]) })
+                  : t("app.n_of_them_are_still", { n: liveNow.length, names: liveNow.slice(0, 3).map(nameOf).join("、") })) +
+                t("app.closing_stops_it")}
           </span>
           <div className="a">
-            <button onClick={cancel}>{t("取消")}</button>
+            <button onClick={cancel}>{t("common.cancel")}</button>
             <button data-danger="" data-action="pane.close" data-value={confirm.kind} autoFocus onClick={commit}>
-              {t("关闭")}
+              {t("common.close")}
             </button>
           </div>
         </div>
@@ -264,10 +264,10 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
               setMenu(null);
               if (tab) onRename(tab.rt, tab.title);
             }}>
-            {t("重命名")}
+            {t("common.renamed")}
           </button>
           <button role="menuitem" data-action="pane.close" data-value="one" onClick={() => { const id = menu.id; setMenu(null); close([id], "one", id); }}>
-            {t("关闭")}
+            {t("common.close")}
           </button>
           <button
             data-action="pane.close"
@@ -276,10 +276,10 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
             disabled={tabs.length < 2}
             onClick={() => { const id = menu.id; setMenu(null); close(others(id), "others", id); }}
           >
-            {t("关闭其他（{n}）", { n: Math.max(tabs.length - 1, 0) })}
+            {t("app.close_the_others_n", { n: Math.max(tabs.length - 1, 0) })}
           </button>
           <button role="menuitem" data-action="pane.close" data-value="all" onClick={() => { const id = menu.id; setMenu(null); close(tabs.map((t) => t.rt.id), "all", id); }}>
-            {t("全部关闭（{n}）", { n: tabs.length })}
+            {t("app.close_all_n", { n: tabs.length })}
           </button>
         </div>
       )}

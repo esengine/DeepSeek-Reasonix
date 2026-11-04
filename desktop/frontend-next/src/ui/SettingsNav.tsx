@@ -20,7 +20,7 @@ const countOf = (id: Section) => SETTINGS.filter((e) => !e.hidden && pageHome(e.
 
 export function SettingsNav({ at, values, shown, danger, disabled, onSelect, page, onPage }: Props) {
   return (
-    <nav className="prefs-nav" role="tablist" aria-label={t("设置分类")} onKeyDown={arrowTabs}>
+    <nav className="prefs-nav" role="tablist" aria-label={t("settings.settings_sections")} onKeyDown={arrowTabs}>
       {NAV.map(([group, items]) => {
         const rows = items.filter(([id]) => shown(id));
         if (rows.length === 0) return null;
@@ -69,7 +69,7 @@ export function SettingsTitle({ at }: { at: Section }) {
       {(desc || count > 0) && (
         <span className="desc">
           {desc && <span className="what">{t(desc)}</span>}
-          {count > 0 && <span className="count">{t("{n} 项", { n: count })}</span>}
+          {count > 0 && <span className="count">{t("settings.n_items", { n: count })}</span>}
         </span>
       )}
     </div>

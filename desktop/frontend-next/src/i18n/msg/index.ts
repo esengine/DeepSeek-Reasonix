@@ -1,15 +1,22 @@
+import { ABOUT } from "./about";
+import { APP } from "./app";
 import { CHAT } from "./chat";
 import { COMMON } from "./common";
 import { COMPOSER } from "./composer";
 import { DATA } from "./data";
 import { EXT } from "./ext";
 import { FEEDBACK } from "./feedback";
+import { LOOK } from "./look";
 import { MEMORY } from "./memory";
 import { MODELS } from "./models";
+import { ONBOARDING } from "./onboarding";
+import { PANELS } from "./panels";
 import { PERSONA } from "./persona";
 import { PLAN } from "./plan";
 import { REMOTE } from "./remote";
+import { SAFETY } from "./safety";
 import { SESSION } from "./session";
+import { SETTINGS } from "./settings";
 import { SUBAGENT } from "./subagent";
 import { USAGE } from "./usage";
 import { WORKBENCH } from "./workbench";
@@ -19,7 +26,7 @@ export type { Message, Messages } from "./types";
 
 /** Every message by its key. Each area's table is one file; a key's first
  *  segment names the file it lives in. */
-export const AREAS: Record<string, Messages> = { chat: CHAT, common: COMMON, composer: COMPOSER, data: DATA, ext: EXT, feedback: FEEDBACK, memory: MEMORY, models: MODELS, persona: PERSONA, plan: PLAN, remote: REMOTE, session: SESSION, subagent: SUBAGENT, usage: USAGE, workbench: WORKBENCH };
+export const AREAS: Record<string, Messages> = { about: ABOUT, app: APP, chat: CHAT, common: COMMON, composer: COMPOSER, data: DATA, ext: EXT, feedback: FEEDBACK, look: LOOK, memory: MEMORY, models: MODELS, onboarding: ONBOARDING, panels: PANELS, persona: PERSONA, plan: PLAN, remote: REMOTE, safety: SAFETY, session: SESSION, settings: SETTINGS, subagent: SUBAGENT, usage: USAGE, workbench: WORKBENCH };
 
 export const MESSAGES: Messages = Object.assign({}, ...Object.values(AREAS));
 

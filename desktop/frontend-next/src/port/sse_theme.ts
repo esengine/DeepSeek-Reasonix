@@ -28,8 +28,8 @@ export class SseTheme extends SseNetwork {
   // JSON, not multipart: csrfGuard admits nothing else.
   async importTheme(files: File[]) {
     const zip = files.find((f) => f.name.toLowerCase().endsWith(".zip"));
-    if (zip && files.length > 1) throw new Error(t("请单独选择一个 .zip，或选择不含压缩包的 theme.json 和图片。"));
-    guardUpload(themeBodyBytes(files), UPLOAD_LIMIT_MB.theme, (limit) => new Error(t("主题包过大，请控制在 {limit} MB 以内", { limit })));
+    if (zip && files.length > 1) throw new Error(t("look.choose_a_single_zip_on"));
+    guardUpload(themeBodyBytes(files), UPLOAD_LIMIT_MB.theme, (limit) => new Error(t("look.the_theme_pack_is_too", { limit })));
     if (zip) return this.post0<ThemeImport>("/themes/import", { name: zip.name, zip: await base64Of(zip) });
     const bodies: Record<string, string> = {};
     for (const f of files) bodies[f.name] = await base64Of(f);
