@@ -31,7 +31,7 @@ it.each(["close", "navigation", "search"])("protects a draft on settings %s", as
     else {
       const search = screen.getByRole("textbox", { name: "搜索设置" });
       await user.clear(search);
-      await user.type(search, "模型偏好");
+      await user.type(search, "模型");
       await user.click(screen.getAllByRole<HTMLButtonElement>("option").find(el => el.dataset.target === "model")!);
     }
   };

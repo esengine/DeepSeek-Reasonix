@@ -14,7 +14,7 @@ it("names the page and the group it sits in, so a long page keeps its place", ()
 });
 
 it("is one heading, so the page has a single labelled landmark", () => {
-  const { container } = render(<SettingsTitle at="providers" />);
+  const { container } = render(<SettingsTitle at="model" />);
   expect(container.querySelectorAll("h2")).toHaveLength(1);
-  expect(container.querySelector("h2")?.textContent).toBe("模型服务");
+  expect(container.querySelector("h2")?.textContent).toBe("模型");
 });

@@ -12,7 +12,7 @@ import { useSettingsSearch } from "./useSettingsSearch";
 import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
-import { SECTION_NAME } from "./prefsnav";
+import { SECTION_NAME, pageHome } from "./prefsnav";
 import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
@@ -94,10 +94,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const homePort = networkPort ?? port;
   const localPort = localWorkspacePort ?? homePort;
   const [openedSection, openedAnchor = ""] = (opened ?? "").split(":", 2);
-  const [at, setAt] = useState<Section>((openedSection as Section) || "session");
+  const [at, setAt] = useState<Section>(pageHome((openedSection as Section) || "session"));
   const [pages, setPages] = useState<Partial<Record<Section, string>>>(() => {
-    const first = pageOf((openedSection as Section) || "session", openedAnchor);
-    return first ? { [(openedSection as Section) || "session"]: first } : {};
+    const home = pageHome((openedSection as Section) || "session");
+    const first = pageOf(home, openedAnchor);
+    return first ? { [home]: first } : {};
   });
   const pageNow = pages[at] ?? firstPage(at);
   // 搜索的语料是这张表，不是屏幕上的 DOM：分区是按需挂载的，读 DOM 就只搜得到
@@ -320,7 +321,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // 决定，和它有没有被渲染过无关。
   const found = useSettingsSearch(query, shown, remoteBook);
   // 落点：跳过去之后短暂标一下「就是这里」。这是导航反馈，不是状态变化。
-  const go = (section: Section, anchor: string) => {
+  const go = (requested: Section, anchor: string) => {
+    const section = pageHome(requested);
     navigation.leave(() => {
       setAt(section);
       const target = pageOf(section, anchor);
@@ -492,19 +494,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "persona" && <AgentPresets port={port} focusPersona={landed === "persona"} />}
 
-          {at === "providers" && (
-            <>
-            <ProviderHealthSetting port={port} onChanged={onChanged} onFailed={setFailed} />
-            <Group id="providers" title={t("模型服务")}
-              hint={t("选择一个服务查看和修改；地址、密钥与模型列表保存后生效。自定义中转站的协议与模型会在连接后自动探测。")}>
-              <Providers port={port} onChanged={() => { loadModels(); onChanged(); }} onFailed={setFailed} protocol={protocol}
-                activeKindFor={(a) => kindFor(a.key)}
-                declare={declare}
-                onProtocol={(a, kind) => switchProtocol(a.key, kind)} />
-            </Group>
-            </>
-          )}
-
           {at === "model" && (
             <>
               <Group id="model" title={t("按用途选择模型")} now={nav.model}
@@ -525,6 +514,14 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                 hint={t("默认按模型容量自动整理。自定义中转站若无法提供最大上下文，先按 160k 计算；你可以在这里填写实际容量。")}>
                 <Compaction port={port} />
               </Group>
+            <ProviderHealthSetting port={port} onChanged={onChanged} onFailed={setFailed} />
+            <Group id="providers" title={t("模型服务")}
+              hint={t("选择一个服务查看和修改；地址、密钥与模型列表保存后生效。自定义中转站的协议与模型会在连接后自动探测。")}>
+              <Providers port={port} onChanged={() => { loadModels(); onChanged(); }} onFailed={setFailed} protocol={protocol}
+                activeKindFor={(a) => kindFor(a.key)}
+                declare={declare}
+                onProtocol={(a, kind) => switchProtocol(a.key, kind)} />
+            </Group>
             </>
           )}
 

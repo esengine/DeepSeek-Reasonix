@@ -75,7 +75,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
   await screen.findAllByText(`${expected} fact`);
   await userEvent.click(document.querySelector<HTMLButtonElement>('.memdetail [data-action="memory.forget"]')!);
   expect(forgot).toHaveBeenCalledWith(expected);
-  await userEvent.click(screen.getByRole("tab", { name: /模型偏好/ }));
+  await userEvent.click(screen.getByRole("tab", { name: /^模型/ }));
   await waitFor(() => expect((screen.getByRole("combobox", { name: "默认模型" }) as HTMLSelectElement).value).toBe(expected));
   await userEvent.click(screen.getByRole("tab", { name: /存储/ }));
   await userEvent.click(await screen.findByRole("button", { name: "选择旧版数据目录…" }));
@@ -119,7 +119,7 @@ it("saves a second-local-only default through the owner that offered it", async 
   rememberActivePane("second");
   render(<App hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
-  await userEvent.click(await screen.findByRole("tab", { name: /模型偏好/ }));
+  await userEvent.click(await screen.findByRole("tab", { name: /^模型/ }));
   const select = await screen.findByRole("combobox", { name: "默认模型" }) as HTMLSelectElement;
   await userEvent.selectOptions(select, extension);
   await waitFor(() => expect(localWrite).toHaveBeenCalledWith(extension));

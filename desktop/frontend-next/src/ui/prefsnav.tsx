@@ -108,8 +108,7 @@ export const NAV: [string, [Section, string][]][] = [
     [
       ["session", "会话"],
       ["persona", "人设"],
-      ["model", "模型偏好"],
-      ["providers", "模型服务"],
+      ["model", "模型"],
       ["tools", "工具与权限"],
       ["peers", "会话间消息"],
       ["hooks", "自动化"],
@@ -347,9 +346,14 @@ export const SETTINGS: SettingEntry[] = [
 
 export const SETTING_AT = (anchor: string) => SETTINGS.find((s) => s.anchor === anchor);
 
-export const SECTION_NAME: Partial<Record<Section, string>> = Object.fromEntries(
-  NAV.flatMap(([, items]) => items),
-) as Partial<Record<Section, string>>;
+export const FOLDS_INTO: Partial<Record<Section, Section>> = { providers: "model" };
+
+export const pageHome = (section: Section): Section => FOLDS_INTO[section] ?? section;
+
+export const SECTION_NAME: Partial<Record<Section, string>> = {
+  ...(Object.fromEntries(NAV.flatMap(([, items]) => items)) as Partial<Record<Section, string>>),
+  providers: "模型服务",
+};
 
 // Title, aliases, and the page it is on. An alias is a way in and nothing
 // more: it never becomes the setting's name and no judgement reads it.
