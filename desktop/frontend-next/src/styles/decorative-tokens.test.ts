@@ -28,7 +28,7 @@ const DECORATIVE: [string, string, string[]][] = [
   ["feedback", '.fbk-note[data-tone="info"] > .studio-icon', ["--brand"]],
   ["feedback", '.fbk-chip:is([data-status="in_progress"], [data-status="answered"])', ["--brand", "--brand-wash"]],
   ["feedback", '.fbk-tl li[data-state="current"] i', ["--brand"]],
-  ["feedback", ".fbk-form[data-over] .fbk-drop", ["--halo", "--brand-wash"]],
+  ["feedback", ".fbs-form[data-over] .fbs-shots", ["--halo", "--brand-wash"]],
   ["app", ".ws[aria-selected=\"true\"]", ["--brand"]],
   ["app", ".tshot:hover", ["--halo"]],
   ["app", '.pane[data-intake="ref"] .compose', ["--halo"]],

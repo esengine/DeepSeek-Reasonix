@@ -45,7 +45,7 @@ async function sendOne(port: AgentPort) {
   await userEvent.clear(screen.getByRole("textbox", { name: /昵称/ }));
   await userEvent.type(screen.getByRole("textbox", { name: /昵称/ }), "ada");
   await userEvent.type(screen.getByRole("textbox", { name: /发生了什么/ }), "占用很高");
-  await userEvent.click(screen.getByRole("button", { name: /发送反馈/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^发送$/ }));
   await vi.waitFor(() => expect(port.sendFeedback).toHaveBeenCalled());
 }
 
@@ -53,7 +53,7 @@ describe("the memory a report carries", () => {
   it("is shown to the person with its numbers before anything is sent, the interface first and the kernel last", async () => {
     setup(SHELL);
     expect(await (await envBlock()).findByText(/界面进程：3\.8 GB/)).toBeTruthy();
-    const lines = [...document.querySelectorAll(".fbk-env dd div")].map((n) => n.textContent ?? "");
+    const lines = [...document.querySelectorAll(".fbs-env dd div")].map((n) => n.textContent ?? "");
     expect(lines.map((l) => l.split("：")[0])).toEqual(["界面进程", "主进程", "图形进程", "内核"]);
     expect(lines[3]).toContain("192.0 MB");
     expect(screen.getByText(/内存一项只有进程类型和上面这些数字/)).toBeTruthy();
@@ -71,7 +71,7 @@ describe("the memory a report carries", () => {
   it("is only the kernel's row in a tab, where there is no shell to ask, and sends no memory of its own", async () => {
     const port = setup([]);
     expect(await (await envBlock()).findByText(/内核：192\.0 MB/)).toBeTruthy();
-    expect(document.querySelectorAll(".fbk-env dd div")).toHaveLength(1);
+    expect(document.querySelectorAll(".fbs-env dd div")).toHaveLength(1);
     await sendOne(port);
     const req = (port.sendFeedback as unknown as { mock: { calls: [Record<string, unknown>][] } }).mock.calls[0][0];
     expect("memory" in req).toBe(false);
@@ -80,6 +80,6 @@ describe("the memory a report carries", () => {
   it("shows no path, process id or command line anywhere in the block", async () => {
     setup(SHELL);
     await (await envBlock()).findByText(/界面进程/);
-    expect(document.querySelector(".fbk-env")?.textContent ?? "").not.toMatch(/\\|\/Users|pid|--/i);
+    expect(document.querySelector(".fbs-env")?.textContent ?? "").not.toMatch(/\\|\/Users|pid|--/i);
   });
 });

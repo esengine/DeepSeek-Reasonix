@@ -49,7 +49,7 @@ function setup(over: Partial<FeedbackEnv> = {}, tab: "send" | "mine" = "send") {
 
 const body = () => screen.getByRole<HTMLTextAreaElement>("textbox", { name: /发生了什么/ });
 const name = () => screen.getByRole<HTMLInputElement>("textbox", { name: /昵称/ });
-const send = () => screen.getByRole<HTMLButtonElement>("button", { name: /发送反馈|重试发送/, hidden: false });
+const send = () => screen.getByRole<HTMLButtonElement>("button", { name: /^发送$|重试发送/, hidden: false });
 const ready = async () => {
   await screen.findByText("随反馈一起发送的环境信息");
 };
@@ -68,7 +68,7 @@ describe("feedback form", () => {
     await fill();
     await userEvent.type(contact(), "ada@example.com");
     await userEvent.click(send());
-    await screen.findByText("已收到你的反馈");
+    await screen.findByText("收到了，谢谢");
     cleanup();
     dropDraft();
     setup();
@@ -76,7 +76,7 @@ describe("feedback form", () => {
     expect(contact().value).toBe("ada@example.com");
     await userEvent.clear(contact());
     await userEvent.click(send());
-    await screen.findByText("已收到你的反馈");
+    await screen.findByText("收到了，谢谢");
     cleanup();
     dropDraft();
     setup();
@@ -90,7 +90,7 @@ describe("feedback form", () => {
     await fill();
     await userEvent.type(contact(), "saved@example.com");
     await userEvent.click(send());
-    await screen.findByText("已收到你的反馈");
+    await screen.findByText("收到了，谢谢");
     await userEvent.click(screen.getByRole("button", { name: "再写一条" }));
     await userEvent.type(body(), "another report");
     await userEvent.clear(contact());
@@ -147,7 +147,7 @@ describe("feedback form", () => {
     await ready();
     expect(name().value).toBe("老王");
     const env = screen.getByText("随反馈一起发送的环境信息").closest("section")!;
-    expect(within(env).getByText(/v2\.24\.0/)).toBeTruthy();
+    expect(within(env).getAllByText(/v2\.24\.0/).length).toBeGreaterThan(0);
     expect(env.querySelector("input, textarea")).toBeNull();
   });
 
@@ -157,16 +157,6 @@ describe("feedback form", () => {
     expect(screen.getByText("只有被我们登记为议题的反馈才会公开")).toBeTruthy();
     await userEvent.click(screen.getByRole("link", { name: "按安全策略私下报告" }));
     expect(port.openExternal).toHaveBeenCalledWith(expect.stringContaining("/security/policy"));
-  });
-
-  it("sends ideas and questions to the discussions board through the shell's external opener, and says bugs go through Send", async () => {
-    const { port } = setup();
-    await ready();
-    expect(screen.getByText(/建议、想法和提问放在讨论区/)).toBeTruthy();
-    expect(screen.getByText(/bug 和错误请用下面的发送/)).toBeTruthy();
-    await userEvent.click(screen.getByRole("link", { name: "想法与讨论" }));
-    expect(port.openExternal).toHaveBeenCalledWith("https://github.com/esengine/DeepSeek-Reasonix/discussions");
-    expect(port.openExternal).toHaveBeenCalledTimes(1);
   });
 
   it("offers no window-capture control", async () => {
@@ -190,7 +180,7 @@ describe("screenshots", () => {
       await userEvent.type(body(), "另一件事");
       await act(reads.pending[0]!);
       await userEvent.click(send());
-      await screen.findByText("已收到你的反馈");
+      await screen.findByText("收到了，谢谢");
       expect(spy.mock.calls[1]![0].images).toEqual([]);
     } finally {
       reads.restore();
@@ -209,7 +199,7 @@ describe("screenshots", () => {
       await act(reads.pending[0]!);
       expect(screen.getByAltText("retry.png")).toBeTruthy();
       await userEvent.click(send());
-      await screen.findByText("已收到你的反馈");
+      await screen.findByText("收到了，谢谢");
       expect(spy.mock.calls[1]![0].images.map((image) => image.name)).toEqual(["retry.png"]);
     } finally {
       reads.restore();
@@ -233,7 +223,7 @@ describe("screenshots", () => {
       expect(screen.queryByAltText("previous.png")).toBeNull();
       expect(screen.getByAltText("current.png")).toBeTruthy();
       await userEvent.click(send());
-      await screen.findByText("已收到你的反馈");
+      await screen.findByText("收到了，谢谢");
       expect(spy.mock.calls[1]![0].images.map((image) => image.name)).toEqual(["current.png"]);
     } finally {
       reads.restore();
@@ -324,7 +314,7 @@ describe("screenshots", () => {
     paste("retry.png");
     expect(await screen.findByAltText("retry.png")).toBeTruthy();
     await userEvent.click(send());
-    await screen.findByText("已收到你的反馈");
+    await screen.findByText("收到了，谢谢");
     expect(paste("sent.png")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "再写一条" }));
     expect(heldDraft().shots).toEqual([]);
@@ -373,7 +363,7 @@ describe("screenshots", () => {
     expect(await screen.findByText(/huge\.png：超过/)).toBeTruthy();
     expect(screen.getByText(/c\.png：最多 2 张/)).toBeTruthy();
     await waitFor(() => expect(document.querySelectorAll(".fbk-shots li")).toHaveLength(2));
-    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: /添加截图/ }).disabled).toBe(true));
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: /添加图片/ }).disabled).toBe(true));
   });
 });
 
@@ -383,7 +373,7 @@ describe("sending", () => {
     port.sendFeedback = vi.fn(async () => ({ receipt: "FB-AAAA-0001", status: "received", createdAt: "2026-10-01T00:00:00Z", redacted: false, underReview: true })) as AgentPort["sendFeedback"];
     await fill();
     await userEvent.click(send());
-    expect(await screen.findByText("已收到你的反馈")).toBeTruthy();
+    expect(await screen.findByText("收到了，谢谢")).toBeTruthy();
     expect(screen.getByText(/正在审核中/)).toBeTruthy();
   });
 
@@ -397,7 +387,7 @@ describe("sending", () => {
     await screen.findByAltText("s.png");
     await userEvent.click(send());
 
-    expect(await screen.findByText("已收到你的反馈")).toBeTruthy();
+    expect(await screen.findByText("收到了，谢谢")).toBeTruthy();
     const req = spy.mock.calls[0]![0];
     expect(req).toMatchObject({ category: "idea", displayName: "ada", contact: "ada@example.com", body: "侧栏在缩放窗口后丢失选中项" });
     expect(req.idempotencyKey).toMatch(/\S{8,}/);
@@ -438,7 +428,7 @@ describe("sending", () => {
     expect(body().value).toBe("");
     await userEvent.type(body(), "另一件事");
     await userEvent.click(send());
-    await screen.findByText("已收到你的反馈");
+    await screen.findByText("收到了，谢谢");
     expect(spy.mock.calls[1]![0].idempotencyKey).not.toBe(spy.mock.calls[0]![0].idempotencyKey);
   });
 });
@@ -536,7 +526,7 @@ describe("refusals", () => {
     await screen.findByRole("alert");
     sessionStorage.clear();
     await userEvent.click(screen.getByRole("button", { name: "重试发送" }));
-    await screen.findByText("已收到你的反馈");
+    await screen.findByText("收到了，谢谢");
     expect(spy).toHaveBeenCalledTimes(2);
     expect(spy.mock.calls[1]![0].idempotencyKey).toBe(spy.mock.calls[0]![0].idempotencyKey);
   });
@@ -551,7 +541,7 @@ describe("refusals", () => {
     sessionStorage.clear();
     await userEvent.type(body(), "，补充一句");
     await userEvent.click(send());
-    await screen.findByText("已收到你的反馈");
+    await screen.findByText("收到了，谢谢");
     expect(spy.mock.calls[1]![0].idempotencyKey).not.toBe(spy.mock.calls[0]![0].idempotencyKey);
   });
 
@@ -673,7 +663,7 @@ describe("dialog", () => {
     const spy = vi.spyOn(again.port, "sendFeedback");
     await userEvent.type(name(), "ada");
     await userEvent.click(send());
-    expect(await screen.findByText("已收到你的反馈")).toBeTruthy();
+    expect(await screen.findByText("收到了，谢谢")).toBeTruthy();
     expect(spy.mock.calls[0]![0].images).toHaveLength(1);
     expect(spy.mock.calls[0]![0].images[0]).toMatchObject({ name: "two.png" });
     cleanup();
@@ -769,7 +759,7 @@ describe("capturing the window", () => {
     capture(null);
     setup();
     await ready();
-    expect(screen.getByText(/会包含窗口里看到的内容/)).toBeTruthy();
+    expect(screen.getByText(/截图会带上窗口里看到的东西/)).toBeTruthy();
     await userEvent.click(button());
     await screen.findByText(/没能截取窗口/);
     expect(document.querySelector<HTMLElement>(".fbk-veil")?.hidden).toBe(false);
