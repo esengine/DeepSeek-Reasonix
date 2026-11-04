@@ -1,3 +1,4 @@
+import type { SessionStatus } from "./session";
 import type { Completion, CompletionItem } from "./port";
 
 const PAST = [
@@ -25,4 +26,19 @@ export function sessionCompletion(line: string, cursor: number): Completion | nu
   if (!word) return null;
   const rest = line.slice(cursor).search(/\s/);
   return { kind: "session", from: before.length - word[1].length - 1, to: rest < 0 ? line.length : cursor + rest, query: word[1], items: pastSessionItems(word[1]) };
+}
+
+// ?jobs puts two running and two finished background jobs on the bench.
+export function benchJobs(): Pick<SessionStatus, "jobs" | "endedJobs"> {
+  const now = Date.now();
+  return {
+    jobs: [
+      { id: "bash-1", kind: "bash", label: "npm run test", description: "跑桌面端测试", detail: "npm run test 2>&1 | tail -40", status: "running", startedAt: now - 741_000, tail: "compiling module 192 … ok" },
+      { id: "bash-2", kind: "bash", label: "go test", description: "跑第 1 组内核测试", detail: "go test ./internal/... -run Kernel1", status: "running", startedAt: now - 741_000, tail: "ok  reasonix/internal/agent  41.2s" },
+    ],
+    endedJobs: [
+      { id: "bash-3", kind: "bash", label: "go test", description: "跑第 2 组内核测试", detail: "go test ./internal/... -run Kernel2", status: "failed", startedAt: now - 300_000, endedAt: now - 58_000, exitCode: 1, tail: "FAIL TestCompactKeepsPins (0.31s)" },
+      { id: "bash-4", kind: "bash", label: "npm run build", description: "构建前端", detail: "npm run build", status: "done", startedAt: now - 260_000, endedAt: now - 192_000, exitCode: 0 },
+    ],
+  };
 }
