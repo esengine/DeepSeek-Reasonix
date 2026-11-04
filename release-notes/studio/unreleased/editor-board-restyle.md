@@ -34,6 +34,7 @@
 - 文件右键菜单顶部写明文件和所在目录，「加入对话」放第一，「复制引用」右边显示会复制的 @引用，每项带图标；复制成功后底部提示「已复制 …」。浏览器标签菜单写明是哪个标签，每个关闭选项右边写会关掉几个（a928ebda4）。
 - 工作台编辑器里选中代码后，选区下方会浮出小工具条：「加入对话 第 n–m 行」和「复制」；页面内的文字右键菜单按设计稿重排，并标出快捷键（536e0ef93）。
 - 对话里选中回复的文字后，上方浮出「引用选中内容 / 复制选中内容」小工具条，和编辑器里的工具条同一样式；两者都浮在选区上方，顶部没空间时才放到下方（38051d8f8）。
+- 工作台「用其他程序打开」改为分体按钮：左边一下用上次选的程序打开，箭头展开全部；菜单带标题、每个程序一个首字母色块（内核不提供真实图标），「在访达中显示」单独放在分隔线下，底部写明项目路径；什么都没找到时也写明（4f58cfdca）。
 
 
 ---
@@ -75,3 +76,4 @@
 - The file menu names the file and its folder, leads with Add to conversation, shows the @reference Copy reference will copy, and gives each item an icon; a copy confirms itself at the bottom. The browser tab menu names its tab and shows how many tabs each close choice closes (a928ebda4).
 - Selecting code in the workbench editor raises a small bar under it with "Add to conversation" (with the line range) and "Copy"; the in-page text menu follows the board's order and shows shortcuts (536e0ef93).
 - Selecting text in a reply raises a small "Quote selected text / Copy selected text" bar, the same one the editor uses; both sit above the selection and drop below only when there is no room (38051d8f8).
+- Open-with is a split button: its left half opens the project in the last program chosen, the arrow lists them all. The menu is titled, gives each program an initial tile (the kernel ships no icons), sets Reveal in Finder apart and ends with the project path; an empty list says so (4f58cfdca).
