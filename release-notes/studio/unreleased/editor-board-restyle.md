@@ -24,6 +24,7 @@
 - 手动展开或收起的「思考」会按会话记住，刷新后保持原样；回答流式输出时光标贴在最后一个字后面，每秒硬切闪一次（85f2679a2）。
 - 「执行过程」按设计稿补齐动效：收起时标题写正在做的那一步和秒数，带转圈和淡扫光；操作数变化时往上滚；做完后标题写「✓ 4 项操作 · 38 秒」并收起。每一行右侧写结果（48 行、2 处、+12 −3、退出 1）；运行中转圈，完成时同一位置弹出勾；失败时抖一下，原因放在行下的红框里，可点「看完整输出」；跑了一会儿还没输出时显示「还没有输出 · 停止这一条」；新步骤依次淡入上浮（37981d0ff）。
 - 思考结束时，旧标题淡出、新标题在同一位置淡入；执行过程里运行中的那一行从命令真正开始的时间计秒，重新打开也不会从零算起（caa509712）。
+- 工作台页签栏按设计稿调整：资源管理器固定在最左并显示改动数，新开的标签显示为「+ 新标签」，右端可直接关闭工作台；新标签页改为靠左的「资源管理器 / 文件… / 浏览器」三项加「最近打开」列表；文件页底部新增状态栏，显示语言、光标所在行和「未保存」（a7786999c）。
 
 ---
 <!-- lang:en -->
@@ -54,3 +55,4 @@
 - A thought you opened or closed stays that way after a reload, per conversation; while an answer streams its caret sits right after the last word and blinks once a second (85f2679a2).
 - The activity group moves as the board draws it: folded while running, the title names the step under way and its seconds, with a spinner and a faint sweep; the action count rolls up as it grows; when done it reads "✓ 4 actions · 38s" and folds. Each row says what it came to on the right (48 lines, 2 matches, +12 −3, exit 1); a running step spins where its tick then pops; a failure shakes once and shows its reason in a red box with "See full output"; a step with no output for a while offers "Stop this one"; new rows fade up one after another (37981d0ff).
 - When a thought finishes, its running title fades out as the settled one fades in; a running step counts its seconds from when it really started, so reopening does not restart the clock (caa509712).
+- The workbench tab strip follows the board: the explorer is the fixed first tab with the change count, a new tab shows as "+ New tab", and the strip ends with a close button; the new tab lists Explorer / Find a file… / Browser and then recently opened files; a status line under the editor shows the language, the cursor line and "Unsaved" (a7786999c).
