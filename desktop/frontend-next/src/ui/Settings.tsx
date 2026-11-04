@@ -386,6 +386,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             }
           }}
         />
+        <div className="prefs-actions">
         <button className="btn sm" type="button" data-action="settings.expand" aria-pressed={wide} aria-label={t("放大设置窗口")} title={t(wide ? "缩小设置窗口" : "放大设置窗口")} onClick={() => setSettingsWide(!wide)}>
           <StudioIcon name={wide ? "collapseAll" : "expand"} />
         </button>
@@ -393,6 +394,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {t("关闭")} <span className="esc">Esc</span>
         </button>
         {wide && <WindowControls />}
+        </div>
         {found !== null && (
           <div className="prefs-found" role="listbox" aria-label={t("搜索设置")}>
             {found.length === 0 ? (

@@ -16,6 +16,8 @@ interface Props {
   onPage?: (section: Section, page: string) => void;
 }
 
+const countOf = (id: Section) => SETTINGS.filter((e) => !e.hidden && pageHome(e.section) === id).length;
+
 export function SettingsNav({ at, values, shown, danger, disabled, onSelect, page, onPage }: Props) {
   return (
     <nav className="prefs-nav" role="tablist" aria-label={t("设置分类")} onKeyDown={arrowTabs}>
@@ -35,7 +37,7 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
                 {id === "account" && <UpdateDot />}
                 <span className="nm">{t(name)}</span>
                 <span className="nv" title={values[id] || undefined} data-danger={danger(id) ? "" : undefined}>
-                  {values[id]}
+                  {countOf(id) || ""}
                 </span>
               </button>
               {at === id && pagesOf(id).map((p) => (

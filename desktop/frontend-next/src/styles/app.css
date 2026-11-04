@@ -5497,3 +5497,16 @@
 .prefs-card > .grp .grp-hd h3 { font: var(--w-semi) var(--fs-ui)/1.4 var(--ui); letter-spacing: 0; }
 .prefs-card > .grp .hint { margin: 2px 0 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .prefs-card > .grp .apply { margin: 4px 0 0; padding: 0; border: 0; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
+.prefs-sheet { position: relative; display: grid; grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
+.prefs-hd, .prefs-body { display: contents; }
+.prefs-hd::after { display: none; }
+.prefs-hd h1 { grid-column: 1; grid-row: 1; padding: 18px 18px 0; background: var(--surface); }
+.prefs-find { grid-column: 1; grid-row: 2; max-width: none; margin: 0; border-radius: var(--r-md); border-width: 0 0 0 0; box-shadow: inset 0 0 0 1px var(--border); background: var(--raised); }
+.prefs-sheet > .prefs-hd > .prefs-find { margin: 0; align-self: start; }
+.prefs-actions { grid-column: 2; grid-row: 1; justify-self: end; display: flex; align-items: center; gap: 8px; padding: 12px 14px; }
+.prefs-nav { grid-column: 1; grid-row: 3; }
+.prefs-main { grid-column: 2; grid-row: 2 / span 2; }
+.prefs-found { top: 96px; left: 12px; right: auto; width: min(460px, calc(100% - 24px)); border-top: 1px solid var(--border); border-radius: var(--r-md); }
+.prefs-sheet > .prefs-hd > .prefs-find { margin: 0 12px; width: calc(100% - 24px); }
+.prefs-hd h1 { padding: 18px 22px 12px; }
+.prefs-nav { padding-top: 12px; }
