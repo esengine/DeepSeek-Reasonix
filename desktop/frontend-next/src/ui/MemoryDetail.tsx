@@ -1,12 +1,12 @@
 import { t } from "../i18n";
 import type { MemoryEdit, MemoryEntry } from "../port/port";
-import { Icon, StateIcon } from "./memicons";
+import { Icon } from "./memicons";
 import { Button } from "./kit/Button";
 
 export const TYPES: [string, string][] = [
   ["user", "用户"], ["feedback", "反馈"], ["project", "项目"], ["reference", "参考"], ["constraint", "约束"],
 ];
-const TYPE_NAME = Object.fromEntries(TYPES);
+export const TYPE_NAME: Record<string, string> = Object.fromEntries(TYPES);
 const IMPORTANCE = ["", "低", "中", "高"];
 const SCOPE: Record<string, string> = { project: "当前项目", global: "所有项目" };
 
@@ -81,44 +81,55 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
       </div>
     );
   }
-  const facts: [string, string, React.ReactNode][] = [
-    [typeOf(m), "类型", t(TYPE_NAME[typeOf(m)])],
-    ["galaxy", "星系", m.galaxy || t("未归类")],
-    ["importance", "重要度", t(IMPORTANCE[m.importance ?? 2] || "中")],
-    ["", "状态", stateSaid(m)],
-    ["clock", "最近", daysAgo(m.lastUsedAt)],
-    ["uses", "用过", t("{n} 次", { n: m.uses ?? 0 })],
-    ["pin", "生效", t(m.activation === "pinned" ? "每轮常驻" : "相关时才会检索")],
-    ["project", "范围", t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")],
+  const content: [string, React.ReactNode][] = [
+    ["类型", t(TYPE_NAME[typeOf(m)])],
+    ["星系", m.galaxy || t("未归类")],
+    ["重要度", t(IMPORTANCE[m.importance ?? 2] || "中")],
+    ["范围", t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")],
   ];
-  return (
-    <div className="memdetail" data-target={m.name}>
-      <div className="ti"><Icon name={typeOf(m)} size={18} /><span>{m.title || m.name}</span></div>
-      {m.description && <p className="ds">{m.description}</p>}
-      {m.usedLastTurn && m.why && <p className="why-used">{t("上一轮因「{why}」被检索到", { why: m.why })}</p>}
-      {m.expired && <p className="stale">{t("已过期")}</p>}
-      <dl className="facts">
-        {facts.map(([icon, label, value]) => (
-          <div key={label}>
-            <dt>{icon ? <Icon name={icon} size={15} /> : <StateIcon state={m.noDecay ? "clear" : m.state} size={15} />}{t(label)}</dt>
-            <dd>{value}</dd>
-          </div>
+  const use: [string, React.ReactNode][] = [
+    ["状态", stateSaid(m)],
+    ["最近", daysAgo(m.lastUsedAt)],
+    ["用过", t("{n} 次", { n: m.uses ?? 0 })],
+    ["生效", t(m.activation === "pinned" ? "每轮常驻" : "相关时才会检索")],
+  ];
+  const group = (title: string, rows: [string, React.ReactNode][]) => (
+    <section aria-label={t(title)}>
+      <h4>{t(title)}</h4>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}><dt>{t(label)}</dt><dd>{value}</dd></div>
         ))}
       </dl>
-      <pre>{m.body?.trim() || t("（无正文）")}</pre>
-      <div className="row">
+    </section>
+  );
+  return (
+    <div className="memdetail" data-target={m.name}>
+      <div className="memhead">
+        <div className="memhead-tx">
+          <div className="ti">{m.title || m.name}</div>
+          {m.description && <p className="ds">{m.description}</p>}
+        </div>
         <Button variant="primary" data-action="memory.confirm" data-target={m.name} disabled={busy} onClick={onConfirm}>
-          <Icon name="check" size={14} />{t("没错")}
+          <Icon name="check" size={13} />{t("没错")}
         </Button>
-        <Button variant="ghost" data-action="memory.edit" data-target={m.name} onClick={() => setEdit({
+        <Button data-action="memory.edit" data-target={m.name} onClick={() => setEdit({
           name: m.name, title: m.title ?? "", description: m.description ?? "", body: m.body ?? "",
           activation: m.activation, type: typeOf(m), galaxy: m.galaxy ?? "", importance: m.importance ?? 2,
         })}>
-          <Icon name="edit" size={14} />{t("编辑")}
+          <Icon name="edit" size={13} />{t("编辑")}
         </Button>
-        <Button variant="ghost" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}>
-          <Icon name="archive" size={14} />{t(busy ? "…" : "归档")}
+        <Button variant="ghost" iconOnly data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}
+          aria-label={t(busy ? "…" : "归档")} title={t("归档")}>
+          <Icon name="archive" size={15} />
         </Button>
+      </div>
+      {m.usedLastTurn && m.why && <p className="why-used">{t("上一轮因「{why}」被检索到", { why: m.why })}</p>}
+      {m.expired && <p className="stale">{t("已过期")}</p>}
+      <pre>{m.body?.trim() || t("（无正文）")}</pre>
+      <div className="facts">
+        {group("内容", content)}
+        {group("使用", use)}
       </div>
       <div className="row sub">
         {(m.revision ?? 1) > 1 && (

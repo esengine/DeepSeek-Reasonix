@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { tx } from "../i18n/rich";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, MemoryEdit, MemoryEntry, UnreadableMemory } from "../port/port";
-import { History, MemoryDetail, TYPES, typeOf } from "./MemoryDetail";
+import { History, MemoryDetail, TYPES, TYPE_NAME, typeOf } from "./MemoryDetail";
 import { Icon, StateIcon } from "./memicons";
 
 const PAGE = 30;
@@ -214,12 +214,15 @@ function MemoryPanel({ port }: { port: AgentPort }) {
             <div className="memrow" key={m.name} data-target={m.name} data-used={m.usedLastTurn ? "" : undefined}
               aria-current={selected?.name === m.name || undefined} data-dim={m.state === "faded" && !m.noDecay ? "" : undefined}>
               <button className="nm" data-action="memory.open" data-target={m.name} onClick={() => setOpen(m.name)}>
-                <Icon name={typeOf(m)} size={17} />
                 <span className="txt">
-                  <span className="ti">{m.title || m.name}</span>
-                  {m.new && <span className="badge">{t("新")}</span>}
+                  <span className="line">
+                    <span className="ti">{m.title || m.name}</span>
+                    {m.new && <span className="badge">{t("新")}</span>}
+                    {!m.noDecay && m.state === "fuzzy" && <span className="fade">{t("快淡忘了")}</span>}
+                    {!m.noDecay && m.state === "faded" && <span className="fade">{t("已淡忘")}</span>}
+                  </span>
                   <span className="gx">
-                    {m.galaxy || t("未归类")}
+                    {t(TYPE_NAME[typeOf(m)])} · {m.galaxy || t("未归类")}
                     {filter.kind === "new" && m.createdAt ? t(" · 来自 {d} 的对话", { d: m.createdAt.slice(5) }) : ""}
                   </span>
                 </span>
@@ -234,9 +237,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
                     <Icon name="cross" size={13} />{t("忘掉")}
                   </button>
                 </span>
-              ) : (
-                <span className="st" title={m.state}><StateIcon state={m.noDecay ? "clear" : m.state} /></span>
-              )}
+              ) : null}
             </div>
           ))}
           {list.length > shown && (
