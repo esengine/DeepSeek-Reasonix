@@ -1,0 +1,12 @@
+## 变更
+
+- 窗口顶栏改成设计稿的 48px：面包屑 13px，右侧四个 28px 图标按钮依次是查找、设备访问、主题、工作台；空会话的标志放进 44px 的强调色方块（8b93d8e57）。
+- 侧栏底部收成一行图标：用量、文件、工具与权限、扩展、记忆、远程，设置在最右，悬停和读屏都带当前读数；「发送反馈」单独一行带未读数，账号入口移进设置（8b93d8e57）。
+
+---
+<!-- lang:en -->
+
+## Changed
+
+- The window bar is the board's 48px: a 13px breadcrumb and four 28px icon buttons — find, device access, theme, workbench; the empty session's mark sits in a 44px accent tile (8b93d8e57).
+- The sidebar foot is one row of icons — usage, files, tools, extensions, memory, remote — with settings at the far end, each naming its current reading on hover and to screen readers; Send feedback keeps its own row with the unread count, and the account entry moves into settings (8b93d8e57).
