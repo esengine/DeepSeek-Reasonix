@@ -349,7 +349,7 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
         }
         if (tries > 0) requestAnimationFrame(() => settle(tries - 1));
       };
-      if (ready) glide(root, topOf(renderedBox(ready)) - clear, () => mine === landing.current, () => settle(20));
+      if (ready) glide(root, topOf(renderedBox(ready)) - clear, () => mine === landing.current && inner.isConnected, () => settle(20));
       else requestAnimationFrame(() => settle(20));
     },
     [scroll, flow],
