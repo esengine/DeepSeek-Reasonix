@@ -2,6 +2,7 @@ import { useState } from "react";
 import { t } from "../i18n";
 import type { MarketPlan } from "../port/port";
 import { Candidate, ORDER, PreviewCut } from "./AddPlugin";
+import { StudioIcon } from "./StudioIcon";
 
 // Titled for what a person has to do with each group, not for what the kernel
 // fears: a high grade here is as often "many skills from one address" as it is
@@ -37,7 +38,13 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
     (g) => g.actions.length > 0,
   );
   return (
-    <div className="mkt addpkg" data-stage="confirm" aria-busy={busy}>
+    <div className="mkt addpkg mkc" data-stage="confirm" aria-busy={busy}>
+      <div className="mkc-head">
+        <b>{t("ext.name_version_will_install_the", { name: slug, version: plan.version })}</b>
+        <button type="button" className="mkc-x" data-action="market.cancel" aria-label={t("common.close")} title={t("common.close")} disabled={busy} onClick={onCancel}>
+          <StudioIcon name="close" />
+        </button>
+      </div>
       {plan.unreviewed && (own ? (
         <div className="find" data-lvl="warn" data-unreviewed="">
           <span className="t">{t("ext.unreviewed_visible_only_to_you")}</span>
@@ -49,11 +56,10 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
           <span className="why">{t("ext.this_is_what_the_source")}</span>
         </div>
       ))}
-      <div className="find">
-        <span className="t">{t("ext.name_version_will_install_the", { name: slug, version: plan.version })}</span>
-        <span className="why">
-          {plan.unreviewed ? t("ext.content_digest_digest", { digest: plan.contentDigest ?? "" }) : t("ext.checked_by_content_digest_identical")}
-        </span>
+      <div className="find mkc-check" data-pinned={plan.unreviewed ? undefined : ""}>
+        {!plan.unreviewed && <span className="t"><StudioIcon name="check" />{t("ext.checked_by_content_digest_identical")}</span>}
+        {plan.unreviewed && <span className="why">{t("ext.content_digest_digest", { digest: plan.contentDigest ?? "" })}</span>}
+        {!plan.unreviewed && plan.contentDigest && <code className="mkc-digest">{plan.contentDigest}</code>}
         {/* An MCP entry pins how a server is started, not what it fetches
             or answers with once running; saying otherwise would be believed. */}
         {actions.some((a) => a.kind === "mcp") && (
