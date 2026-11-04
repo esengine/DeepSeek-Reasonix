@@ -866,6 +866,8 @@ export const EN: Record<string, string> = {
   "模型 · 已启用 {on}/{all}": "Models · {on} of {all} enabled",
   "模型": "Models",
   "数据": "Data",
+  "常用": "Common",
+  "最常改的": "Most changed",
   "最近打开": "Recently opened",
   "账号与关于": "Account and About",
   "Agent 行为": "Agent behaviour",

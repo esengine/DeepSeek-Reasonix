@@ -7,4 +7,4 @@
 
 ## Changed
 
-- Settings has a first Common page with the six most-changed items together: starting mode for new chats, update mode, language, send shortcut, notifications and light or dark; they no longer sit on other pages (862f8865c).
+- Settings has a first Common page holding the six most-changed items, which no longer sit on other pages (862f8865c).
