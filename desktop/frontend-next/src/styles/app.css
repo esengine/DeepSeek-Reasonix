@@ -772,49 +772,6 @@
   [data-pane="flow"] { overflow-x: hidden; scrollbar-width: none }
   [data-pane="flow"]::-webkit-scrollbar { display: none }
 
-  .srail {
-    position: absolute; top: 0; right: 0; width: var(--srail-w); pointer-events: auto;
-    height: var(--rail-h, 0px);
-  }
-
-  .srail-m {
-    position: absolute; right: 15px; width: 39px; height: 18px; margin-top: -9px;
-    display: flex; align-items: center; justify-content: flex-end;
-    border: 0; padding: 0; background: none; cursor: pointer;
-    z-index: calc(1 + var(--lit, 0) * 10);
-  }
-
-  .srail-m > i {
-    --lit: 0;
-    width: calc(11px + 15px * var(--lit)); height: 2px; flex: none;
-    margin-right: 3px; border-radius: var(--r-pill); background: var(--ghost);
-    opacity: calc(.3 + .55 * var(--lit));
-    transition: width var(--m-line), opacity var(--m-line), background-color var(--m-line);
-  }
-  .srail-m[data-folded] > i { height: 3px }
-  .srail-m[data-edits] > i { width: calc(18px + 15px * var(--lit)) }
-  .srail-m[data-starred]::after { content: ""; position: absolute; right: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-ink) }
-  .srail-m:focus-visible > i { outline: 2px solid var(--focus); outline-offset: 3px }
-  .srail-m[data-on] > i { background: var(--accent-ink) }
-
-  .pane:hover .srail-m > i { opacity: calc(.46 + .54 * var(--lit)) }
-  .srail:hover ~ .srail-peek { opacity: 1 }
-
-  .srail-peek {
-    position: absolute; right: 48px; z-index: 5; width: 300px; padding: 9px 11px;
-    border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float);
-    box-shadow: var(--shadow-float); pointer-events: none; transform: translateY(-50%);
-    animation: peekin var(--m-line) both;
-  }
-  @keyframes peekin { from { opacity: 0; transform: translate(8px, -50%) } to { opacity: 1; transform: translateY(-50%) } }
-  .srail-peek .hd { display: flex; align-items: baseline; gap: 8px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
-  .srail-peek .hd .n { color: var(--accent-ink) }
-  .srail-peek .keys { margin-top: 6px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui) }
-  .srail-peek .tx {
-    margin-top: 5px; font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--text);
-    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-  }
-
   .call[data-hit] > .c > .hl > :is(.nm, .arg),
   .call[data-hit] > .c > .tool-disclosure > .hl > :is(.nm, .arg) { animation: hitmark 1.1s var(--ease-out) }
   .call[data-hit]:not([data-running]) > .g .sym { animation: hitglyph 1.1s var(--ease-out) }
@@ -2156,11 +2113,6 @@
   [data-fold~="side"] .compose { width: calc(100% - 28px) }
 
   [data-fold~="rail"][data-fold~="side"] .pane { --srail-w: 24px }
-  [data-fold~="rail"][data-fold~="side"] .srail-m { right: 9px; width: 15px }
-  [data-fold~="rail"][data-fold~="side"] .srail-m > i { max-width: 14px !important }
-  [data-fold~="rail"][data-fold~="side"] .srail-peek {
-    right: 26px; width: min(280px, calc(100vw - 54px));
-  }
   [data-fold~="side"] .chrome .goal,
   [data-fold~="side"] .chrome .crumb .sep:last-of-type { display: none }
   [data-fold~="side"] .side { border-left: 0; border-top: 1px solid var(--border); max-height: calc(40vh / var(--zoom, 1)) }

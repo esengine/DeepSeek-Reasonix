@@ -41,7 +41,7 @@ import { Rail, type RailMark } from "./Rail";
 import { railMarks } from "./railmarks";
 import { StudioIcon } from "./StudioIcon";
 import { LiveWork, useStartsOpen } from "../state/foldpref";
-import { landingBox, renderedBox, useFindLanding, useFindPaint } from "./findland";
+import { glide, landingBox, renderedBox, useFindLanding, useFindPaint } from "./findland";
 import { ScrollJump } from "./ScrollJump";
 import { landing as landingOf, type Direction } from "./jumpreach";
 import { chunkText, heldBlocks, type Held } from "./chunk_text";
@@ -329,8 +329,7 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
       const ready = inner.querySelector<HTMLElement>(selector);
       if (ready && then?.(ready, root)) return;
       const chunk = inner.querySelectorAll<HTMLElement>(".chunk")[block];
-      if (ready) root.scrollTop = topOf(renderedBox(ready)) - clear;
-      else if (chunk) root.scrollTop = topOf(chunk) + into * chunk.offsetHeight - clear;
+      if (!ready && chunk) root.scrollTop = topOf(chunk) + into * chunk.offsetHeight - clear;
       const settle = (tries: number, last = NaN) => {
         if (mine !== landing.current || !inner.isConnected) return;
         const found = inner.querySelector<HTMLElement>(selector);
@@ -350,7 +349,8 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
         }
         if (tries > 0) requestAnimationFrame(() => settle(tries - 1));
       };
-      requestAnimationFrame(() => settle(20));
+      if (ready) glide(root, topOf(renderedBox(ready)) - clear, () => mine === landing.current, () => settle(20));
+      else requestAnimationFrame(() => settle(20));
     },
     [scroll, flow],
   );

@@ -15,6 +15,8 @@ port.history = async () => [
   { role: "assistant", content: "第一段回答", msgIndex: 1 },
   { role: "user", content: "第二个问题", msgIndex: 2 },
   { role: "assistant", content: "第二段回答", msgIndex: 3 },
+  { role: "user", content: "第三个问题", msgIndex: 4 },
+  { role: "assistant", content: "第三段回答", msgIndex: 5 },
 ];
 
 const pane = (rt: RuntimeView, port: AgentPort) => (
@@ -30,7 +32,7 @@ it.each(["full", "paged"])("a question starred before the first save stays with 
   localStorage.clear();
   const reading: AgentPort = Object.assign(new MockPort(), { history: port.history });
   if (mode === "paged") reading.historyPage = async () => ({
-    messages: await port.history(), toolContext: [], snapshot: "stars", start: 0, end: 4, total: 4, hasMoreBefore: false,
+    messages: await port.history(), toolContext: [], snapshot: "stars", start: 0, end: 6, total: 6, hasMoreBefore: false,
   });
   const unsaved = { id: "r1", root: "/w", name: "w" } as RuntimeView;
   const view = render(pane(unsaved, reading));

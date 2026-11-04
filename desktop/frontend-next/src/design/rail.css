@@ -1,0 +1,77 @@
+.railhost { position: sticky; top: 0; height: 0; z-index: 4; pointer-events: none; }
+[data-fold~="rail"][data-fold~="side"] .railhost { display: none; }
+
+.srail { position: absolute; top: 0; right: 8px; width: 30px; height: var(--rail-h, 0px); pointer-events: auto; }
+.srail-band {
+  position: absolute; right: 2px; width: 26px; border-radius: var(--r-sm); background: var(--overlay); pointer-events: none;
+  transition: top 300ms cubic-bezier(.2, 0, 0, 1), height 300ms cubic-bezier(.2, 0, 0, 1);
+}
+
+.srail-m {
+  position: absolute; right: 2px; width: 26px; height: 12px; margin-top: -6px; z-index: 1;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 4px 0 0; border: 0; border-radius: var(--r-xs); background: none; cursor: pointer;
+}
+.srail-m > i {
+  width: var(--w, 10px); height: 2px; flex: none; border-radius: 1px; background: var(--border);
+  transition: width var(--t-line) cubic-bezier(.2, 0, 0, 1), background-color var(--t-line);
+}
+.srail-m[data-folded] > i { height: var(--h, 4px); border-radius: var(--r-xs); opacity: .9; }
+.srail-m[data-seen] > i { background: var(--muted); }
+.srail-m[data-starred] > i { background: var(--warn); }
+.srail-m[data-on] > i { background: var(--text); }
+.srail-m:focus-visible, .srail-m[data-keyed] { outline: none; box-shadow: 0 0 0 2px var(--focus); }
+
+.srail-peek, .srail-sub {
+  position: absolute; right: 46px; z-index: 5; width: 250px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
+  transform: translateY(-50%);
+}
+.srail-peek { padding: 9px 11px; pointer-events: none; animation: srail-peek var(--t-line) cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes srail-peek { from { opacity: 0; transform: translate(6px, -50%); } }
+.srail-peek .hd { display: flex; align-items: center; gap: 6px; color: var(--muted); font: var(--w-semi) var(--fs-meta)/1.4 var(--ui); }
+.srail-peek .hd .dot { color: var(--faint); }
+.srail-peek .tx {
+  margin-top: 3px; color: var(--text); font: var(--w-med) var(--fs-ui)/1.55 var(--ui);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.srail-peek .keys { margin-top: 6px; color: var(--faint); font: var(--w-med) var(--fs-micro)/1.4 var(--ui); }
+
+.srail-sub { z-index: 6; max-height: 300px; overflow-y: auto; padding: 5px; pointer-events: auto; }
+.srail-subhd { padding: 4px 8px 6px; color: var(--muted); font: var(--w-semi) var(--fs-meta)/1.4 var(--ui); }
+.srail-subrow {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px;
+  border: 0; border-radius: var(--r-sm); background: none; color: var(--text);
+  font: var(--w-med) var(--fs-meta)/1 var(--ui); text-align: start; cursor: pointer;
+}
+.srail-subrow:hover, .srail-subrow:focus-visible { outline: none; background: var(--float-hi); }
+.srail-subrow .n { width: 22px; flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.srail-subrow .tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srail-star { width: 12px; height: 12px; flex: none; fill: var(--warn); }
+
+.srail-earlier {
+  position: absolute; top: 8px; right: 12px; display: inline-flex; align-items: center; gap: 3px;
+  height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: var(--raised); color: var(--muted); font: var(--w-semi) var(--fs-micro)/1 var(--ui);
+  cursor: pointer; pointer-events: auto;
+}
+.srail-earlier .studio-icon { width: 10px; height: 10px; }
+.srail-earlier:hover { color: var(--text); }
+.srail-tip {
+  position: absolute; top: 50%; right: calc(100% + 8px); transform: translateY(-50%);
+  padding: 6px 9px; border-radius: var(--r-sm); background: var(--text); color: var(--surface);
+  font: var(--w-med) var(--fs-meta)/1.3 var(--ui); white-space: nowrap; opacity: 0; pointer-events: none;
+  transition: opacity var(--t-line);
+}
+.srail-earlier:hover .srail-tip, .srail-earlier:focus-visible .srail-tip { opacity: 1; }
+
+.flow .call[data-k="me"][data-hit] .out .txt { animation: srail-flash 900ms ease; }
+@keyframes srail-flash {
+  30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--net) 45%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .srail-band, .srail-m > i, .srail-tip { transition: none; }
+  .srail-peek { animation: none; }
+}

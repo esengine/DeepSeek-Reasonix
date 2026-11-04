@@ -5,7 +5,8 @@ import userEvent from "@testing-library/user-event";
 import "../testkit";
 import { ToolCard } from "./ToolCard";
 import { JobsLiveContext } from "../JobRunView";
-import type { JobEntry, Tool } from "../../port/port";
+import type { JobEntry } from "../../port/port";
+import type { Tool } from "../../port/wire";
 
 afterEach(cleanup);
 

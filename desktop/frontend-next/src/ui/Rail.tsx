@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { t } from "../i18n";
+import { renderedBox } from "./findland";
+import { StudioIcon } from "./StudioIcon";
+import { fold, grow, HEAD, nearest, place, viewBand, within, type RailView } from "./railgeom";
 
 export interface RailMark {
   id: string;
   text: string;
-  // Which block holds it and where inside that block, because the block is what
-  // survives virtualisation: an unmounted one is a placeholder with the right
-  // height, so its position is known even when the message itself has no node.
-  // Position in the transcript, in entries. The rail no longer places by it
-  // (see layout), but a jump still lands by block and offset.
+  // Position in the transcript, in entries: where the mark is drawn while the
+  // blocks have no measured geometry to place it by.
   at: number;
   // The message's index in the session log, which survives a reload: `at` is an
   // index into the rendered list, and that list drops host chrome, notices and
@@ -44,27 +44,6 @@ interface Props {
   onLoadEarlier?: () => void;
 }
 
-// The native scrollbar owns continuous position. The semantic rail is a compact
-// fisheye index, like Codex: questions stay together in reading order and only
-// the neighbourhood under the pointer expands. Spreading sparse turns across
-// the full height makes two messages look like unrelated controls.
-const STEP = 9;
-const PAD = 26;
-
-// Marks closer than this are not told apart by eye or by pointer, so only one of
-// them is drawn; the rest stay addressable through their positions.
-const MIN_GAP = 2;
-
-// Below this spacing a mark stops being a mark and becomes part of a crowd: the
-// lines blur into one another and no pointer can pick out the fourth of nine.
-const CLUSTER_AT = 5;
-
-// Length and weight fall away from whichever mark the pointer has picked out,
-// and every mark is the same until one is picked. A cosine rather than a line:
-// a linear falloff has a corner at the focus, which reads as the neighbours
-// being a different kind of thing rather than the same thing further away.
-const REACH = 5;
-
 // A star belongs to one question in one conversation. It is stored by the
 // question's position in the transcript, not by the row's id: `nextId` is a
 // per-load counter, so "i7" names a different message after a reload — and the
@@ -96,53 +75,6 @@ function saveBookmarks(scope: string, marks: Set<string>) {
   }
 }
 
-function layout(count: number, rail: number) {
-  if (count <= 0) return [] as number[];
-  const room = Math.max(0, rail - PAD * 2);
-  const step = count > 1 ? Math.min(STEP, room / (count - 1)) : STEP;
-  const span = (count - 1) * step;
-  const start = rail / 2 - span / 2;
-  return Array.from({ length: count }, (_, i) => start + i * step);
-}
-
-/** One drawn thing: a single mark, or a run of them folded together.
- *
- *  Folding only starts where reading them apart has already failed: while the
- *  spacing is at least CLUSTER_AT every question keeps its own line, so a
- *  conversation of ordinary length looks exactly as it did before. */
-export interface RailView {
-  top: number;
-  from: number;
-  to: number;
-  single: boolean;
-}
-
-export function cluster(count: number, rail: number): RailView[] | null {
-  if (count <= 0) return null;
-  const room = Math.max(0, rail - PAD * 2);
-  const step = count > 1 ? Math.min(STEP, room / (count - 1)) : STEP;
-  if (step >= CLUSTER_AT) return null;
-  const slots = Math.max(2, Math.floor(room / STEP) + 1);
-  const per = Math.ceil(count / slots);
-  const n = Math.ceil(count / per);
-  const gap = n > 1 ? Math.min(STEP, room / (n - 1)) : STEP;
-  const span = (n - 1) * gap;
-  const start = rail / 2 - span / 2;
-  return Array.from({ length: n }, (_, i) => ({
-    top: start + i * gap,
-    from: i * per,
-    to: Math.min(count - 1, (i + 1) * per - 1),
-    single: per === 1,
-  }));
-}
-
-/** How strongly a mark answers the focus: 1 at it, 0 beyond REACH. */
-function pull(i: number, focus: number): number {
-  if (focus < 0) return 0;
-  const d = Math.abs(i - focus);
-  return d > REACH ? 0 : (Math.cos((Math.PI * d) / REACH) + 1) / 2;
-}
-
 /** Convert a pointer position from the screen-sized rectangle into the rail's
  * layout coordinate system. CSS zoom changes the former but clientHeight and
  * the mark tops stay in the latter, so subtracting the two directly drifts in
@@ -152,15 +84,39 @@ export function railLocalY(clientY: number, rectTop: number, rectHeight: number,
   return (clientY - rectTop) * (railHeight / rectHeight);
 }
 
+
+// Where each mark sits in the scrolled content, as a fraction of its height: a
+// mounted message by its own box, an unmounted one by its offset inside its
+// block, which is mounted or a placeholder holding the block's real height.
+function fractions(marks: RailMark[], total: number, root: HTMLElement, inner: HTMLElement): number[] {
+  const height = root.scrollHeight;
+  const chunks = inner.querySelectorAll<HTMLElement>(".chunk");
+  const base = root.getBoundingClientRect().top - root.scrollTop;
+  const boxes = [...chunks].map((c) => c.getBoundingClientRect());
+  const measured = height > 0 && marks.every((m) => (boxes[m.block]?.height ?? 0) > 0);
+  if (!measured) return marks.map((m) => m.at / Math.max(1, total - 1));
+  return marks.map((m) => {
+    const own = inner.querySelector(`[data-item="${CSS.escape(m.id)}"]`);
+    const box = own ? renderedBox(own as HTMLElement).getBoundingClientRect() : null;
+    if (box && box.height > 0) return (box.top - base) / height;
+    const block = boxes[m.block];
+    return (block.top - base + (m.of > 1 ? m.within / m.of : 0) * block.height) / height;
+  });
+}
+
+const StarGlyph = () => (
+  <svg className="srail-star" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.8 3.9L8 11l-3.5 1.9.8-3.9-2.9-2.7 3.9-.5z" /></svg>
+);
+
 export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier = 0, onLoadEarlier }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [tops, setTops] = useState<number[]>([]);
-  // Null while every question keeps its own line; a list once they have to
-  // share, because reading them apart has stopped working.
-  const [groups, setGroups] = useState<RailView[] | null>(null);
+  const [band, setBand] = useState<{ top: number; height: number } | null>(null);
+  // The drawn thing the pointer or the keys picked out; `keyed` when the keys did.
   const [at, setAt] = useState(-1);
-  // Which folded run has been opened into its own questions. A run is one line
-  // standing for many; opening it lets the reader pick the question they meant.
+  const [keyed, setKeyed] = useState(false);
+  // Which run has been opened into its own messages. A run is one segment
+  // standing for many; opening it lets the reader pick the one they meant.
   const [opened, setOpened] = useState<number | null>(null);
   // The pointer crosses a gap between a run and the list beside it, so closing
   // waits briefly instead of dropping the list the moment the line is left.
@@ -176,8 +132,6 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
   // Which mark the keys last walked to. Kept apart from `at`, which the pointer
   // owns: hovering somewhere else must not move where the keys resume from.
   const here = useRef(-1);
-  // Which questions the reader starred. Kept by message id so folding the rail
-  // around them cannot lose one.
   const [stars, setStars] = useState<Set<string>>(() => loadBookmarks(scope));
   const starScope = useRef(scope);
   useEffect(() => {
@@ -203,26 +157,30 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
       return next;
     });
   }, [scope]);
-  // Rail height is read when the surface changes rather than on every streamed
-  // frame.
+  const starred = (m: RailMark | undefined) => m?.msgIndex !== undefined && stars.has(String(m.msgIndex));
+  const head = earlier > 0 && onLoadEarlier ? HEAD : 0;
   const geom = useRef({ rail: 1 });
+
+  const follow = useCallback(() => {
+    const root = scroll.current;
+    if (root) setBand(viewBand(root.scrollTop, root.clientHeight, root.scrollHeight, geom.current.rail, head));
+  }, [scroll, head]);
 
   const measure = useCallback(() => {
     const root = scroll.current;
     const inner = flow.current;
     const box = host.current;
-    if (!root || !inner || !box) return;
-    const rail = root.clientHeight;
+    const rail = root?.clientHeight ?? 0;
+    // A rail with no height is one not laid out yet, not one every mark shares.
+    if (!root || !inner || !box || rail <= 0) return;
     box.style.setProperty("--rail-h", rail + "px");
     geom.current = { rail };
-    setTops(layout(marks.length, rail));
-    setGroups(cluster(marks.length, rail));
-  }, [marks, total, scroll, flow]);
+    setTops(place(fractions(marks, total, root, inner), rail, head));
+    follow();
+  }, [marks, total, scroll, flow, head, follow]);
 
-  // Deferred for the same reason the size observer below is: measure() reads
-  // clientHeight and scrollHeight, and running that inside the commit that just
-  // mounted a transcript forces a whole-document layout. One frame later the
-  // browser has done it anyway.
+  // A frame late: measure() reads layout, and inside the commit that mounted a
+  // transcript that read would force a whole-document layout of its own.
   useEffect(() => {
     const raf = requestAnimationFrame(measure);
     return () => cancelAnimationFrame(raf);
@@ -232,10 +190,7 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
     const root = scroll.current;
     const inner = flow.current;
     if (!root || !inner) return;
-    // One measurement per frame, not one per mutation. Mounting a long
-    // transcript resizes the content once per block, and measure() reads
-    // clientHeight and scrollHeight — a forced layout apiece, then a state
-    // update that renders the rail again.
+    // One measurement per frame, not one per block that resized while mounting.
     let raf = 0;
     const ro = new ResizeObserver(() => {
       if (raf) return;
@@ -246,17 +201,31 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
     });
     ro.observe(inner);
     ro.observe(root);
+    let moved = 0;
+    const onScroll = () => {
+      if (!moved) moved = requestAnimationFrame(() => { moved = 0; follow(); });
+    };
+    root.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      if (moved) cancelAnimationFrame(moved);
       ro.disconnect();
+      root.removeEventListener("scroll", onScroll);
     };
-  }, [scroll, flow, measure]);
+  }, [scroll, flow, measure, follow]);
 
-  // Ctrl/⌘ + ↑/↓ walks the marks. Which one you are "at" is decided by the viewport,
-  // not by a cursor the rail would have to keep: the nearest mark above the top
-  // of the view is where you are, so the keys agree with what you can see.
+  // Until the first measurement every mark is drawn on its own, unplaced, so
+  // the marks exist to be named and focused from the first frame.
+  const view: RailView[] = useMemo(
+    () => (tops.length === marks.length ? fold(tops) : marks.map((_m, i) => ({ top: 0, bottom: 0, from: i, to: i, single: true }))),
+    [tops, marks],
+  );
+
+  // Ctrl/⌘ + ↑/↓ walks the marks. Until the keys have walked anywhere, where
+  // you are is the viewport: the mark nearest the top of what you can see.
   useEffect(() => {
     if (!bound) return;
+    let fade: ReturnType<typeof setTimeout> | undefined;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
       const el = e.target as HTMLElement | null;
@@ -264,19 +233,12 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
       const root = scroll.current;
       if (!root || tops.length === 0) return;
       const up = e.key === "ArrowUp";
-      // Walk the marks themselves. The nearest starting point is derived from
-      // the same transcript fraction used by the overview ruler.
       let pick: number;
       if (here.current >= 0) {
         pick = here.current + (up ? -1 : 1);
       } else {
-        // Nothing walked yet: start from whichever mark the viewport is nearest,
-        // which is the one fraction of the transcript it is showing. Measured
-        // against where each message sits in the transcript, not against the
-        // overview track rather than any currently mounted card geometry.
-        const seen = Math.min(1, root.scrollTop / Math.max(1, root.scrollHeight - root.clientHeight));
-        const place = (i: number) => marks[i].at / Math.max(1, total);
-        const near = marks.reduce((best, _m, i) => (Math.abs(place(i) - seen) < Math.abs(place(best) - seen) ? i : best), 0);
+        const [seen] = place([root.scrollTop / Math.max(1, root.scrollHeight)], geom.current.rail, head);
+        const near = tops.reduce((best, top, i) => (Math.abs(top - seen) < Math.abs(tops[best] - seen) ? i : best), 0);
         pick = up ? near : Math.min(near + 1, tops.length - 1);
       }
       if (pick < 0 || pick >= marks.length) return;
@@ -284,123 +246,88 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
       e.preventDefault();
       onJump(marks[pick]);
       const slot = view.findIndex((v) => pick >= v.from && pick <= v.to);
-      if (slot >= 0) {
-        setAt(slot);
-        setTimeout(() => setAt((v) => (v === slot ? -1 : v)), 1400);
-      }
+      if (slot < 0) return;
+      setAt(slot);
+      setKeyed(true);
+      clearTimeout(fade);
+      fade = setTimeout(() => { setAt((v) => (v === slot ? -1 : v)); setKeyed(false); }, 1400);
     };
     addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, [bound, tops, marks, total, scroll, onJump]);
+    return () => { clearTimeout(fade); removeEventListener("keydown", onKey); };
+  }, [bound, tops, marks, view, head, scroll, onJump]);
 
-  const drawn = useMemo(() => {
-    if (tops.length !== marks.length) return marks.map((_m, i) => i);
-    const out: number[] = [];
-    let last = -Infinity;
-    tops.forEach((top, i) => {
-      if (top - last >= MIN_GAP || i === tops.length - 1) {
-        out.push(i);
-        last = top;
-      }
-    });
-    return out;
-  }, [tops, marks]);
-
-  // What is drawn: one line per question while the spacing holds, a folded run
-  // per line once it does not. `at` indexes this list either way. `groups` is a
-  // state slice, so after a rewind drops questions it can still name an index
-  // the shorter `marks` no longer has; the fold is filtered to what exists.
-  const view: RailView[] = useMemo(
-    () => (groups ?? drawn.map((i) => ({ top: tops[i] ?? 0, from: i, to: i, single: true })))
-      .filter((v) => v.from < marks.length),
-    [groups, drawn, tops, marks.length],
-  );
-
-  // The pointer's y decides which mark it means. Hitting a three-pixel line is
-  // not a thing anyone should have to do, and a mark that moved under the
-  // pointer to acknowledge the hover would take itself out from under it.
+  // The pointer's y decides which mark it means, so nobody has to hit a 2px
+  // line, and a line growing under the pointer cannot take itself out from under it.
   const aim = (y: number) => {
-    let best = -1;
-    let dist = Infinity;
-    (groups ? groups.map((g) => g.top) : tops).forEach((top, i) => {
-      const d = Math.abs(top - y);
-      if (d < dist) {
-        dist = d;
-        best = i;
-      }
-    });
-    const next = dist <= 40 ? best : -1;
+    const next = nearest(view, y);
     setAt(next);
-    // A folded run stands for several questions and cannot say which one the
-    // pointer means, so reaching it opens the run itself. Reaching a single
-    // question closes it again; passing over bare track leaves both alone.
+    setKeyed(false);
     const hit = next >= 0 ? view[next] : null;
     if (!hit) return;
     hold();
     setOpened(hit.single ? null : next);
   };
 
-  if (marks.length === 0) return null;
-  const shown = opened === null && at >= 0 && at < view.length ? view[at] : null;
-  const head = shown ? marks[shown.from] : null;
+  if (marks.length < 3) return null;
+  const shown = opened === null && at >= 0 && at < view.length && view[at].single ? view[at] : null;
+  const peek = shown ? marks[shown.from] : null;
+  const run = opened !== null ? view[opened] : undefined;
+  const clamp = (y: number, edge: number) => Math.min(Math.max(y, edge), Math.max(edge, geom.current.rail - edge));
 
   return (
-    <div className="railhost" ref={host} aria-hidden={undefined}>
-      {/* A paged conversation mounts only its tail. Without this the rail ends
-          where the loaded window begins and reads as a short conversation. */}
-      {earlier > 0 && onLoadEarlier && (
-        <button
-          type="button"
-          className="srail-earlier"
-          style={{ top: Math.max(6, (view[0]?.top ?? PAD) - 14) }}
-          aria-label={t("chat.n_more_messages_before_these", { n: earlier })}
-          title={t("chat.n_more_messages_before_these", { n: earlier })}
-          data-action="history.more"
-          onClick={onLoadEarlier}
-        />
+    <div className="railhost" ref={host}>
+      {/* A paged conversation mounts only its tail; without this the rail
+          would read as the whole of a conversation that is mostly on disk. */}
+      {head > 0 && (
+        <button type="button" className="srail-earlier" data-action="history.more" onClick={onLoadEarlier}
+          aria-label={t("chat.n_more_messages_before_these", { n: earlier })}>
+          <StudioIcon name="arrow" />
+          {earlier}
+          <span className="srail-tip" aria-hidden="true">{t("chat.n_more_messages_before_these", { n: earlier })}</span>
+        </button>
       )}
       <nav
         className="srail"
         aria-label={t("chat.what_you_said")}
+        data-action-click="rail.jump"
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           aim(railLocalY(e.clientY, rect.top, rect.height, geom.current.rail));
         }}
         onMouseLeave={() => { setAt(-1); release(); }}
         onClick={(e) => {
-          if (e.target !== e.currentTarget) return;
-          // `at` rather than `shown`: a folded run opens on hover now, which
-          // suppresses the peek, but a press on bare track must still land.
-          if (at >= 0 && at < view.length) onJump(marks[view[at].from]);
+          if (e.target !== e.currentTarget || at < 0 || at >= view.length) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          onJump(marks[within(tops, view[at], railLocalY(e.clientY, rect.top, rect.height, geom.current.rail))]);
         }}
       >
+        {band && <div className="srail-band" style={{ top: band.top, height: band.height }} />}
         {view.map((v, i) => {
           const m = marks[v.from];
-          const lit = pull(i, at);
           const folded = !v.single;
-          // A folded run counts as starred when any question inside it is.
-          let starred = m.msgIndex !== undefined && stars.has(String(m.msgIndex));
-          if (!starred && folded) {
-            for (let k = v.from; k <= v.to; k++) {
-              const inner = marks[k].msgIndex;
-              if (inner !== undefined && stars.has(String(inner))) { starred = true; break; }
-            }
-          }
+          let lit = starred(m);
+          for (let k = v.from + 1; !lit && k <= v.to; k++) lit = starred(marks[k]);
+          const seen = band !== null && v.bottom >= band.top && v.top <= band.top + band.height;
+          const base = folded ? 12 : m.files > 0 ? 14 : 10;
+          const tall = Math.max(4, v.bottom - v.top);
           return (
             <button
               key={folded ? `fold-${v.from}` : m.id}
+              type="button"
               className="srail-m"
-              style={{ top: v.top }}
+              style={{ top: (v.top + v.bottom) / 2, ...(folded ? { height: tall + 8, marginTop: -(tall + 8) / 2 } : {}) }}
               data-on={i === at ? "" : undefined}
+              data-keyed={i === at && keyed ? "" : undefined}
               data-folded={folded ? "" : undefined}
-              data-starred={starred ? "" : undefined}
+              data-starred={lit ? "" : undefined}
+              data-seen={seen ? "" : undefined}
               data-edits={!folded && m.files > 0 ? "" : undefined}
               aria-label={folded
                 ? t("chat.jump_to_questions_a_to", { a: v.from + 1, b: v.to + 1 })
                 : t("chat.jump_to_what_you_said", { text: m.text.slice(0, 40) })}
+              data-action-click="rail.jump"
               data-action-contextmenu="rail.star"
               data-action-keydown="rail.star"
-              title={m.msgIndex === undefined ? undefined : starred ? t("chat.right_click_to_remove_the") : t("chat.right_click_to_star_this")}
               onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) setAt(i); }}
               onBlur={() => setAt(-1)}
               onClick={() => {
@@ -418,59 +345,30 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
                 star(m.msgIndex);
               }}
             >
-              {/* 会动的是这条线，按钮本身不动 —— 它一动就会从指针底下跑掉。
-                  长度和浓淡都是到焦点的距离的函数，静止时人人相等：尺寸原来
-                  跟着这一轮碰过的文件数走，那让一列本该等价的入口长短不一，
-                  而「碰了几个文件」这句话悬停时就在旁边说得清楚。 */}
-              <i style={{ "--lit": lit.toFixed(3) } as CSSProperties} />
+              <i style={{ "--w": `${base + (at >= 0 && !folded ? grow(Math.abs(i - at)) : 0)}px`, ...(folded ? { "--h": `${tall}px` } : {}) } as CSSProperties} />
             </button>
           );
         })}
       </nav>
-      {/* A folded run is one line standing for many, so a press on it can only
-          guess. Opening it first lets the reader pick the question they meant;
-          every row is one mark, and the run closes on the way out. */}
-      {opened !== null && view[opened] && !view[opened].single && (
-        <div
-          className="srail-sub"
-          style={{ top: Math.min(Math.max(view[opened].top, 60), Math.max(60, geom.current.rail - 60)) }}
-          onMouseEnter={hold}
-          onMouseLeave={release}
-        >
-          <div className="srail-subhd">{t("chat.questions_a_to_b", { a: view[opened].from + 1, b: view[opened].to + 1 })}</div>
-          {Array.from({ length: view[opened].to - view[opened].from + 1 }, (_, k) => {
-            const mk = marks[view[opened]!.from + k];
-            if (!mk) return null;
-            return (
-              <button
-                key={mk.id}
-                type="button"
-                className="srail-subrow"
-                data-action="rail.pick"
-                onClick={() => { setOpened(null); onJump(mk); }}
-              >
-                {mk.text.slice(0, 60)}
-              </button>
-            );
-          })}
+      {run && !run.single && (
+        <div className="srail-sub" style={{ top: clamp((run.top + run.bottom) / 2, 150) }} onMouseEnter={hold} onMouseLeave={release}>
+          <div className="srail-subhd">{t("chat.questions_a_to_b", { a: run.from + 1, b: run.to + 1 })}</div>
+          {marks.slice(run.from, run.to + 1).map((mk, k) => (
+            <button key={mk.id} type="button" className="srail-subrow" data-action="rail.pick" onClick={() => { setOpened(null); onJump(mk); }}>
+              <span className="n">{run.from + k + 1}</span>
+              <span className="tx">{mk.text.slice(0, 60)}</span>
+              {starred(mk) && <StarGlyph />}
+            </button>
+          ))}
         </div>
       )}
-      {/* 贴着轨道两端的那几条，预览要收进容器里 —— 否则它会被裁掉一半 */}
-      {shown && (
-        <div
-          className="srail-peek"
-          style={{ top: Math.min(Math.max(shown.top, 44), Math.max(44, geom.current.rail - 44)) }}
-          role="tooltip"
-        >
+      {shown && peek && (
+        <div className="srail-peek" style={{ top: clamp(shown.top, 44) }} role="tooltip">
           <div className="hd">
-            <span className="n">
-              {shown.single
-                ? t("chat.your_message_n", { n: shown.from + 1 })
-                : t("chat.messages_a_to_b", { a: shown.from + 1, b: shown.to + 1 })}
-            </span>
-            {head && head.files > 0 && <span>· {t("chat.changed_n_files", { n: head.files })}</span>}
+            <span>{t("chat.your_message_n", { n: shown.from + 1 })}</span>
+            {peek.files > 0 && <><span className="dot">·</span><span>{t("chat.changed_n_files", { n: peek.files })}</span></>}
           </div>
-          <div className="tx">{head?.text}</div>
+          <div className="tx">{peek.text}</div>
           <div className="keys">{t("chat.click_to_jump_right_click")}</div>
         </div>
       )}

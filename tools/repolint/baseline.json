@@ -6,8 +6,8 @@
     "codeowners": 0,
     "commented-code": 0,
     "complexity": 666,
-    "css-important": 128,
-    "css-size": 9093,
+    "css-important": 127,
+    "css-size": 9037,
     "doc-language": 0,
     "doc-owner": 27,
     "doc-prose": 1434,
@@ -77,12 +77,12 @@
       "doc-prose": 13
     },
     "desktop/frontend-next/src/styles/app.css": {
-      "css-important": 25,
-      "css-size": 5400
+      "css-important": 24,
+      "css-size": 5352
     },
     "desktop/frontend-next/src/styles/studio.css": {
       "css-important": 103,
-      "css-size": 3693
+      "css-size": 3685
     },
     "desktop/internal/winuninstall/registry_windows.go": {
       "essay": 1

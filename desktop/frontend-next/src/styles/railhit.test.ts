@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 // pointer events off and every child that a person can press has to turn them
 // back on. Forgetting that is invisible to jsdom — it does no hit testing — and
 // shows up only as "the rows cannot be clicked" in a real browser.
-const SHEETS = import.meta.glob("./{app,studio}.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const SHEETS = import.meta.glob(["./{app,studio}.css", "../design/rail.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
 interface Rule {
   selector: string;

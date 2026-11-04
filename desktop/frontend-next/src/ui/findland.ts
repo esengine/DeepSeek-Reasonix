@@ -83,6 +83,28 @@ function reveal(row: HTMLElement, root: HTMLElement, finder: Finder, nth: number
   return true;
 }
 
+const GLIDE_MS = 300;
+
+/** Scrolls to `to` over GLIDE_MS, or at once when motion is reduced or there is
+ *  nothing to cover. It stops when `live` turns false: a newer landing owns the scroll. */
+export function glide(root: HTMLElement, to: number, live: () => boolean, done: () => void) {
+  const from = root.scrollTop;
+  if (Math.abs(to - from) < 1 || typeof matchMedia !== "function" || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    root.scrollTop = to;
+    done();
+    return;
+  }
+  const start = performance.now();
+  const step = (now: number) => {
+    if (!live()) return;
+    const k = Math.min(1, Math.max(0, now - start) / GLIDE_MS);
+    root.scrollTop = from + (to - from) * (1 - (1 - k) ** 3);
+    if (k < 1) requestAnimationFrame(step);
+    else done();
+  };
+  requestAnimationFrame(step);
+}
+
 /** What a landing scrolls to: the element with a box, and every fold around it
  *  opened, since a hit inside a folded group is one nobody can see. */
 export function landingBox(el: HTMLElement): HTMLElement {
