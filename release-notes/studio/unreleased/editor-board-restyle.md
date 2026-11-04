@@ -5,6 +5,7 @@
 - 输入框改成设计稿的样子：圆角 15、唯一的阴影；只有运行中或有文件改动时才出现顶部那一行；工具栏是 28px 无边框胶囊，模型名 13px 加粗，发送和停止是 32px 圆形，窄窗口只留图标（cfcdecaec）。
 - 对话里你的消息是圆角 15 的浅底气泡；执行过程收成一张卡，每行是图标、动作（读取、编辑、运行命令…）、对象、读数，状态勾在最右，工具原名悬停可见（c62573956）。
 - 生成的文件改成单列卡片：小图标、文件名、说明、「打开」和「···」；空会话的背景不再画网格和光晕（7e75a4adf）。
+- 工作台照设计稿重画：页签栏 42px、文件树在最前、当前页签像文件夹标签；路径栏最后一段加粗，阅读/编辑/Diff 是分段按钮，保存是主按钮；默认宽 520，可拖到 360–900。命令面板也换成设计稿的样子（2daa590e5）。
 
 ---
 <!-- lang:en -->
@@ -16,3 +17,4 @@
 - The composer follows the board: a 15px box with the only composer shadow; the top row appears only while a turn runs or files have changed; the toolbar is 28px borderless pills, the model name is 13px semibold, send and stop are 32px circles, and narrow windows keep icons only (cfcdecaec).
 - Your messages are 15px-radius tinted bubbles; the execution process is one card whose rows read glyph, verb (Read, Edit, Run command…), target and reading, with the status mark at the right end and the raw tool id on hover (c62573956).
 - Delivered files are single-column cards with a small icon, the name, its description, Open and a more button; the empty conversation no longer paints a grid and glow behind it (7e75a4adf).
+- The workbench is redrawn to its board: a 42px tab strip with the file tree first and the current tab as a folder tab, a path bar with the file name in bold, read/edit/diff as a segmented control and Save as the primary button; it opens at 520px and drags from 360 to 900. The command palette takes its board look too (2daa590e5).
