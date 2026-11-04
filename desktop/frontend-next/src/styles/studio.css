@@ -4190,3 +4190,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 .job-confirm .job-stop { height: 24px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid color-mix(in srgb, var(--err) 45%, var(--border)); color: var(--err-ink); }
 .hl .tag[data-pending] { height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border)); border-radius: var(--r-pill); color: var(--accent-ink); font: var(--w-med) var(--fs-micro)/1 var(--ui); }
 .sesstitle mark.hit { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: var(--r-xs); }
+svg.studio-icon[data-kind="code"] { color: var(--net); }
+svg.studio-icon[data-kind="data"] { color: var(--warn); }
+svg.studio-icon[data-kind="image"] { color: var(--ok); }

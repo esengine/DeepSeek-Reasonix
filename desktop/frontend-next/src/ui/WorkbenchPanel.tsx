@@ -47,6 +47,7 @@ const CodeEditor = lazy(() => import("./CodeEditor"));
 import { treeRows } from "./workbench_tree";
 import { AgentRunView } from "./AgentRunView";
 import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
+import { fileKind } from "./fileKind";
 
 export function WorkbenchPanel({
   port,
@@ -497,7 +498,7 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "agent" ? "branch" : "globe"} />
+              <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "agent" ? "branch" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} />
               <span>{labelFor(surface)}</span>
             </button>
             )}
@@ -733,7 +734,7 @@ export function WorkbenchPanel({
                   onContextMenu={(e) => offerMenu(e, row.path, false)}
                 >
                   <span />
-                  <StudioIcon name="file" />
+                  <StudioIcon name="file" data-kind={fileKind(row.path) || undefined} />
                   <span>{row.name}</span>
                   {changes.find((item) => item.path === row.path) && (
                     <em>
