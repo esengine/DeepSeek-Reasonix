@@ -1642,21 +1642,8 @@ body { background: var(--page) !important; }
    its scroll region. Painting it on the pane keeps the grid and soft light
    continuous behind the anchored composer and the meter rail instead of
    ending in a hard horizontal seam above them. */
-.pane:has([data-pane="flow"] .flow[data-empty]) {
-  background-color: var(--page);
-  background-image:
-    radial-gradient(ellipse 58% 48% at 72% 18%, var(--studio-light-primary), transparent 72%),
-    radial-gradient(ellipse 46% 42% at 24% 82%, var(--studio-light-secondary), transparent 75%),
-    linear-gradient(var(--studio-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--studio-grid) 1px, transparent 1px);
-  background-size: auto, auto, 48px 48px, 48px 48px;
-}
 
 [data-pane="flow"]:has(.flow[data-empty]) { background: transparent; }
-
-:root[data-theme="light"] .pane:has([data-pane="flow"] .flow[data-empty]) {
-  background-color: var(--surface);
-}
 
 /* Illustrated packs deliberately expose the backdrop through the shell. The
    Studio layer used to repaint these surfaces after app.css had made them

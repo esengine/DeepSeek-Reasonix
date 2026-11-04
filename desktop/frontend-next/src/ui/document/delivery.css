@@ -8,36 +8,31 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
-@container (min-width: 720px) {
-  .delivery-grid:not([data-single]) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 .delivery-file {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  gap: 0 4px;
   min-width: 0;
-  min-height: 72px;
+  padding-right: 8px;
   border: 1px solid var(--border);
-  border-radius: var(--r-md, 8px);
+  border-radius: var(--r-md);
   background: var(--raised);
   color: var(--text);
 }
 .delivery-file:hover {
-  background: var(--float-hi);
+  background: var(--raised);
 }
 .delivery-file[data-current] {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 5%, var(--raised));
+  border-color: var(--accent);
 }
 .delivery-open {
   display: flex;
   align-items: center;
   align-self: stretch;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  padding: 12px;
+  padding: 10px 4px 10px 12px;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -46,32 +41,45 @@
   font: inherit;
   cursor: pointer;
 }
+.delivery-cta {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--text);
+  font: var(--w-reg) var(--fs-meta)/1 var(--ui);
+  white-space: nowrap;
+}
+.delivery-open:hover .delivery-cta { background: var(--overlay); }
 .delivery-open:focus-visible, .delivery-more:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -3px;
 }
 .delivery-icon {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 0 0 32px;
-  width: 32px;
-  height: 36px;
+  flex: none;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
 }
 .delivery-icon-badge {
-  font: 600 8px/1.2 var(--mono);
-  letter-spacing: .2px;
+  display: none;
 }
 .delivery-icon svg {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.45;
 }
 .delivery-details {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
   flex: 1;
 }
@@ -84,9 +92,7 @@
   gap: 8px;
 }
 .delivery-name {
-  font-size: var(--fs-ui);
-  font-weight: var(--w-med);
-  line-height: 1.45;
+  font: var(--w-med) var(--fs-ui)/1.4 var(--ui);
 }
 .delivery-name > span:first-child, .delivery-description, .delivery-location {
   overflow: hidden;
@@ -95,43 +101,39 @@
 }
 .delivery-extension {
   flex: none;
-  color: var(--muted);
 }
 .delivery-description, .delivery-location {
   display: block;
-  font-size: var(--fs-meta);
-  line-height: 1.5;
-  color: var(--muted);
+  font: var(--w-reg) var(--fs-meta)/1.5 var(--ui);
+  color: var(--faint);
 }
 .delivery-current {
   flex: none;
-  color: var(--accent-ink);
-  font-size: var(--fs-micro);
+  color: var(--faint);
+  font: var(--w-reg) var(--fs-micro)/1 var(--ui);
   white-space: nowrap;
 }
 .delivery-more {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 60px;
-  height: 32px;
-  margin: 0 8px 0 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  font: var(--w-med) var(--fs-meta) var(--ui);
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
 }
 .delivery-more:hover, .delivery-more[aria-expanded="true"] {
-  background: var(--float-hi);
+  background: var(--overlay);
   color: var(--text);
 }
 .delivery-more svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 .delivery-menu {
   position: fixed;
@@ -172,7 +174,7 @@
 }
 .delivery-feedback {
   grid-column: 1 / -1;
-  padding: 0 12px 10px 54px;
+  padding: 0 12px 10px 40px;
   font-size: var(--fs-meta);
   color: var(--muted);
   overflow-wrap: anywhere;

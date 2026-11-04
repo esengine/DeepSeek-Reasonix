@@ -80,10 +80,11 @@ function DeliveryEntry({ file, reply, showLocation }: { file: DeliveredFile; rep
         {showLocation && <small className="delivery-location" title={absolute}>{location || t("项目根目录")}</small>}
         <small id={detailID} className="delivery-description">{description}</small>
       </span>
+      {open && <span className="delivery-cta" aria-hidden="true">{t("打开")}</span>}
     </button>
     <TooltipButton ref={trigger} className="delivery-more" data-action="delivery.more" data-target={path} title={t("更多操作")} aria-label={t("更多操作：{name}", { name })}
       aria-haspopup="menu" aria-expanded={menu} disabled={feedback?.kind === "busy"} onClick={() => setMenu((value) => !value)}>
-      <span>{t("更多")}</span><StudioIcon name="down" />
+      <StudioIcon name="more" />
     </TooltipButton>
     {menu && <DeliveryMenu anchor={trigger} label={t("文件操作：{name}", { name })} target={path} actions={actions} onClose={close} />}
     {feedback && <div className="delivery-feedback" role={feedback.kind === "error" ? "alert" : "status"} data-kind={feedback.kind}>{feedback.text}</div>}
