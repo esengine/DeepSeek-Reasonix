@@ -32,6 +32,8 @@
 - 关闭有未保存内容的文件页签时会先问「保存 / 不保存 / 取消」；工作台打开时从右边滑入，用右上角关闭时滑出（89a079158）。
 - 工作台的空状态和出错页统一为卡片：文件已不在原处（可重新读取或关闭页签）、文件太大无法预览（写明大小和上限，可用系统应用打开）、不是 git 仓库、网页打不开（756ea1428）。
 - 文件右键菜单顶部写明文件和所在目录，「加入对话」放第一，「复制引用」右边显示会复制的 @引用，每项带图标；复制成功后底部提示「已复制 …」。浏览器标签菜单写明是哪个标签，每个关闭选项右边写会关掉几个（a928ebda4）。
+- 工作台编辑器里选中代码后，选区下方会浮出小工具条：「加入对话 第 n–m 行」和「复制」；页面内的文字右键菜单按设计稿重排，并标出快捷键（536e0ef93）。
+
 
 ---
 <!-- lang:en -->
@@ -70,3 +72,4 @@
 - Closing a file tab with unsaved text asks first: Save / Don't save / Cancel; the workbench slides in from the right when opened and out when closed from its own button (89a079158).
 - The workbench's empty and failed states are one card: a file that is gone (read again or close the tab), a file too large to preview (its size and the limit, open in the system app), a folder without git, a page that would not load (756ea1428).
 - The file menu names the file and its folder, leads with Add to conversation, shows the @reference Copy reference will copy, and gives each item an icon; a copy confirms itself at the bottom. The browser tab menu names its tab and shows how many tabs each close choice closes (a928ebda4).
+- Selecting code in the workbench editor raises a small bar under it with "Add to conversation" (with the line range) and "Copy"; the in-page text menu follows the board's order and shows shortcuts (536e0ef93).
