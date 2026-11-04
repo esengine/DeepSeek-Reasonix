@@ -2796,7 +2796,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 .flow .ask-hint { margin-bottom: 10px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
 .flow .opts { gap: 6px; }
 .flow .opt {
-  min-height: 42px; align-items: flex-start; padding: 9px 10px;
+  min-height: 32px; align-items: flex-start; padding: 6px 10px;
   border: 1px solid var(--border) !important; border-radius: var(--r-sm); background: var(--surface);
 }
 .flow .opt:hover { border-color: var(--border) !important; background: var(--raised); }

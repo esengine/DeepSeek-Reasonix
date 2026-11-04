@@ -11,7 +11,7 @@ afterEach(cleanup);
 const job = (id: string, status: string): JobEntry => ({ id, label: `cmd ${id}`, status, startedAt: Date.now() }) as JobEntry;
 
 it("offers stopping all only when two or more are running, and asks once", async () => {
-  const cancel = vi.fn(() => Promise.resolve());
+  const cancel = vi.fn((_id: string) => Promise.resolve());
   const { rerender } = render(<Jobs jobs={[job("a", "running")]} onCancel={cancel} />);
   expect(document.querySelector('[data-action="job.arm-all"]')).toBeNull();
   rerender(<Jobs jobs={[job("a", "running"), job("b", "running"), job("c", "done")]} onCancel={cancel} />);
@@ -23,7 +23,7 @@ it("offers stopping all only when two or more are running, and asks once", async
 
 it("does not stop anything when the confirmation times out", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  const cancel = vi.fn(() => Promise.resolve());
+  const cancel = vi.fn((_id: string) => Promise.resolve());
   render(<Jobs jobs={[job("a", "running"), job("b", "running")]} onCancel={cancel} />);
   await userEvent.click(document.querySelector('[data-action="job.arm-all"]')!);
   vi.advanceTimersByTime(3100);
