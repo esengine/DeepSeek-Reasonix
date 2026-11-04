@@ -26,7 +26,7 @@ import { WorkspaceReveal } from "./WorkspaceReveal";
 import { SessionMenu } from "./SessionMenu";
 import { useSessionMove } from "./useSessionMove";
 import { useSessionMoveTo } from "./useSessionMoveTo";
-import { pinnedFirst } from "./pinorder";
+import { pinnedFirst } from "./pinorder"; import { Hit } from "./Hit";
 import { Confirm, removeHint, sessionDeleteHint } from "./WorkspaceConfirm";
 import { UnreadCount } from "./UnreadMark";
 import { PeerThreadMark } from "./peerthreads";
@@ -612,7 +612,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                             }} />
                         ) : (
                           <span className="sesstitle" title={rowLabel(session)}>
-                            <span>{rowLabel(session)}</span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("隔离")}</em>}{session.archived && <em className="sessarch">{t("已归档")}</em>}
+                            <span><Hit text={rowLabel(session)} needle={needle} /></span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("隔离")}</em>}{session.archived && <em className="sessarch">{t("已归档")}</em>}
                             {session.metadataState === "pending" && <em className="sessarch">{t("正在读取摘要")}</em>}
                             {session.metadataState === "error" && <em className="sessarch">{t("摘要暂不可用")}</em>}
                           </span>
