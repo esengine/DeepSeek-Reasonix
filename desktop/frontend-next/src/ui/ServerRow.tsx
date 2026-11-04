@@ -109,6 +109,9 @@ export function ServerRow({
           {t("common.remove")}
         </button>
       )}
+    </span>
+  );
+  const toggle = (
       <Switch
         data-action="mcp.enabled"
         data-target={m.name}
@@ -117,7 +120,6 @@ export function ServerRow({
         label={t(m.enabled ? "common.disable_name" : "common.enable_name", { name: m.name })}
         onClick={() => void run("toggle", () => port.setMcpEnabled(m.name, !m.enabled, "project", root || undefined))}
       />
-    </span>
   );
 
   const confirm = confirming && (
@@ -240,12 +242,16 @@ export function ServerRow({
   const head = (
     <>
       <i className="pip" />
-      <Clip className="nm">{m.name}</Clip>
-      {tools.length ? <Clip className="fold">{t("ext.n_tools", { n: m.tools })}</Clip> : null}
-      {tag && <i className="ld" data-pending={tag.pending ? "" : undefined}>{tag.text}</i>}
-      <Clip className="meta">{meta}</Clip>
+      <span className="srv-main">
+        <span className="nm">{m.name}</span>
+        <span className="srv-sub">
+          {tools.length ? <Clip className="fold">{t("ext.n_tools", { n: m.tools })}</Clip> : null}
+          {tag && <i className="ld" data-pending={tag.pending ? "" : undefined}>{tag.text}</i>}
+          <Clip className="meta">{meta}</Clip>
+        </span>
+      </span>
       {m.localOverride && <Exception onClear={() => void run("clear", () => port.clearMcpOverride(m.name, root || undefined))} busy={!!busy} />}
-      {actions}
+      {toggle}
     </>
   );
   // 服务是干什么的，只有服务自己说了算：MCP 握手里的那段自述。它没写，这里就
@@ -277,6 +283,7 @@ export function ServerRow({
         {launch}
         {held}{upgrade}{following}
         {why && <div className="why" role={failed ? "alert" : undefined}>{why}</div>}
+        {actions}
         {confirm}
       </div>
     );
@@ -284,12 +291,13 @@ export function ServerRow({
   return (
     // Asking to remove has to open the row: the confirmation lives inside the
     // fold. A row with withheld tools opens too, so the approval is not behind a click.
-    <details className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} open={confirming || heldTools.length > 0 || undefined}>
+    <details className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} open={confirming || heldTools.length > 0 || !!why || undefined}>
       <summary>{head}</summary>
       {about}
       {launch}
       {held}{upgrade}{following}
       {why && <div className="why" role={failed ? "alert" : undefined}>{why}</div>}
+      {actions}
       {confirm}
       {load}
       <div className="peek">

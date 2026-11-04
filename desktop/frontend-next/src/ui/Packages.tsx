@@ -152,6 +152,9 @@ function Package({
       <button className="act ghost" aria-label={t("common.remove_name", { name: p.name })} disabled={locked} onClick={() => setConfirming(true)}>
         {t("common.remove")}
       </button>
+    </span>
+  );
+  const toggle = (
       <Switch
         data-action="extensions.enabled"
         data-target={p.name}
@@ -164,7 +167,6 @@ function Package({
           else onReloaded();
         })}
       />
-    </span>
   );
 
   const confirm = confirming && (
@@ -200,10 +202,14 @@ function Package({
   const head = (
     <>
       <i className="pip" />
-      <span className="nm" title={p.name}>{p.name}</span>
-      <span className="fold" title={summary(p) || undefined}>{summary(p) || t("ext.nothing_usable_inside")}</span>
-      <span className="meta" title={meta || undefined}>{meta}</span>
-      {actions}
+      <span className="srv-main">
+        <span className="nm">{p.name}</span>
+        <span className="srv-sub">
+          <span className="fold" title={summary(p) || undefined}>{summary(p) || t("ext.nothing_usable_inside")}</span>
+          {meta && <span className="meta" title={meta}>{meta}</span>}
+        </span>
+      </span>
+      {toggle}
     </>
   );
 
@@ -237,10 +243,11 @@ function Package({
   );
 
   return (
-    <details className="srv" hidden={hidden} data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || !!exported || undefined}>
+    <details className="srv" hidden={hidden} data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || !!exported || !!p.error || undefined}>
       <summary>{head}</summary>
       {confirm}
       {notes}
+      {actions}
       <div className="peek">
         {/* What executes comes first: it is the part of a package a user has to
             know about, and it is also the part they cannot see from a name. */}

@@ -91,10 +91,10 @@ it("opens a healthy package row to expose an export failure", async () => {
   expect(within(row()).getByRole("alert").textContent).toBe(failure);
 });
 
-it("leaves the package diagnostic available before any operation", () => {
+it("shows the package diagnostic open in its row before any operation", () => {
   draw(new MockPort() as unknown as AgentPort);
   expect(within(row()).getByText(diagnostic)).toBeTruthy();
   expect(within(row()).queryByRole("alert")).toBeNull();
-  expect(row().open).toBe(false);
+  expect(row().open).toBe(true);
   expect(within(row()).getByRole<HTMLButtonElement>("button", { name: "导出" }).disabled).toBe(false);
 });
